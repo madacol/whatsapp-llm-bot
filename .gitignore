@@ -1,0 +1,4 @@
+.wwebjs_cache
+.wwebjs_auth
+node_modules
+chats.db

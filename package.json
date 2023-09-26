@@ -1,0 +1,15 @@
+{
+  "name": "whatsapp-llm-bot",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "dev": "node index.js"
+  },
+  "keywords": [],
+  "author": "madacol",
+  "dependencies": {
+    "sqlite3": "^5.1.6",
+    "whatsapp-web.js": "^1.22.1"
+  }
+}
