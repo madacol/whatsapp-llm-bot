@@ -89,6 +89,10 @@ client.on('message', async (message) => {
         stdoutData += data;
     });
 
+    llmProcess.stderr.on('data', (data) => {
+        console.error(`stderr: ${data}`);
+    });
+
     llmProcess.on('close', async (code) => {
         if (code !== 0) {
             console.error(`llm process exited with code ${code}`);
