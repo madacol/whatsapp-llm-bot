@@ -4,6 +4,11 @@ const { exec, spawn } = require('child_process');
 
 const db = new sqlite3.Database('./chats.db');
 
+// get the system prompt from environment variable
+const SYSTEM_PROMPT = process.env.SYSTEM_PROMPT || `You are an autoregressive language model that has been fine-tuned with instruction-tuning and RLHF. You carefully provide accurate, factual, thoughtful, nuanced answers, and are brilliant at reasoning. If you think there might not be a correct answer, you say so. Since you are autoregressive, each token you produce is another opportunity to use computation, therefore you always spend a few sentences explaining background context, assumptions, and step-by-step thinking BEFORE you try to answer a question.
+
+Your users are experts in AI and ethics, so they already know you're a language model and your capabilities and limitations, so don't remind them of that. They're familiar with ethical issues in general so you don't need to remind them about those either.`
+
 // Initialize the database table
 db.run(/*sql*/`
     CREATE TABLE IF NOT EXISTS chats (
@@ -52,14 +57,16 @@ client.on('message', async (message) => {
     if (!message.body) return;
 
     const contact = await message.getContact();
-    const name = contact.pushname || contact.name || contact.id.user;
+    const senderName = contact.pushname || contact.name || contact.id.user;
     const sender = contact.id.user;
 
-    const chat = await message.getChat();
     const selfId = client.info.wid.user;
+    const selfName = client.info.pushname || client.info.name || selfId;
+
+    const chat = await message.getChat();
     const chatId = message.from;
 
-    let prompt;
+    let prompt, systemPrompt;
     if (chat.isGroup) {
         // Call shouldRespond to determine if the bot should process this message
         if (!await shouldRespond(message, selfId)) {
@@ -68,19 +75,21 @@ client.on('message', async (message) => {
 
         const modifiedMessage = await replaceMentionsWithNames(message);
 
-        // prepend name of sender to message
-        prompt = `${name}: ${modifiedMessage}`;
+        // prepend name of sender to prompt
+        prompt = `${senderName}: ${modifiedMessage}`;
+        systemPrompt = SYSTEM_PROMPT + `You are a brilliant AI assistant called ${selfName}.\nYou are in a group chat called "${chat.name}"`;
     } else {
-        prompt = await replaceMentionsWithNames(message);;
+        prompt = await replaceMentionsWithNames(message);
+        systemPrompt = SYSTEM_PROMPT + `You are a brilliant AI assistant called ${selfName}`;
     }
-    
+
     // Fetch existing conversation_id if available
     let [conversation] = await sql`SELECT conversation_id FROM chats WHERE chat_id = ${chatId}`;
     
     // Determine the arguments for llm
     const args = conversation
         ? ['--conversation', conversation.conversation_id, prompt]
-        : [prompt];
+        : ["--system", systemPrompt, prompt];
 
     const llmProcess = spawn('llm', args);
     let stdoutData = '';
