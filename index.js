@@ -81,9 +81,6 @@ client.on('message', async (message) => {
     const args = conversation
         ? ['--conversation', conversation.conversation_id, prompt]
         : [prompt];
-    
-    console.log(message, chat, contact)
-    console.log(chatId, sender , args);
 
     const llmProcess = spawn('llm', args);
     let stdoutData = '';
