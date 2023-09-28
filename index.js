@@ -1,6 +1,7 @@
 const sqlite3 = require('sqlite3').verbose();
-const { Client, LocalAuth } = require('whatsapp-web.js');
+const { Client, LocalAuth, MessageMedia } = require('whatsapp-web.js');
 const { exec, spawn } = require('child_process');
+const fs = require('fs');
 
 const db = new sqlite3.Database('./chats.db');
 
@@ -30,6 +31,7 @@ const client = new Client({
     authStrategy: new LocalAuth(),
     puppeteer: {
         headless: false,
+        executablePath: '/opt/google/chrome/chrome',
     },
 });
 
@@ -66,6 +68,87 @@ client.on('message', async (message) => {
 
                 await sql`INSERT INTO chats(chat_id, conversation_id) VALUES (${chatId}, NULL)`;
                 message.reply('New conversation started.');
+                return;
+            }
+            case 'video': {
+                const [url] = args;
+
+                const ytdlProcess = spawn('yt-dlp', ['-o', "/dev/shm/%(title)s.%(ext)s", url]);
+
+                ytdlProcess.on('error', (error) => {
+                    console.error(`Error spawning yt-dlp: ${error}`);
+                    message.reply('Failed to start the download.');
+                });
+
+                let stdoutData = '';
+                ytdlProcess.stdout.on('data', (data) => {
+                    const stdoutString = data.toString();
+                    stdoutData += stdoutString;
+                    console.log(`yt-dlp stdout: ${stdoutString}`);
+                });
+
+                ytdlProcess.stderr.on('data', (data) => {
+                    console.error(`yt-dlp stderr: ${data}`);
+                });
+
+                ytdlProcess.on('close', async (code) => {
+                    if (code !== 0) {
+                        message.reply('Download failed.');
+                        return;
+                    }
+
+                    // Extract filename from stdout data
+                    const downloadedFilepath =
+                        stdoutData.match(/Merging formats into "([^"]+)"/)?.at(1)
+                        || stdoutData.match(/\[download\] (.+?) has already been downloaded/)?.at(1)
+                        || stdoutData.match(/\[download\] Destination: (.+?)\n/)?.at(1)
+                        || null;
+
+                    const convertedFilepath = `${downloadedFilepath}.mp4`;
+
+                    // Start FFmpeg to convert video to mp4
+                    const ffmpegProcess = spawn('ffmpeg', ['-i', downloadedFilepath,
+                        "-vf", "scale='bitand(oh*dar,65534)':'min(720,ih)'",
+                        "-vf", "pad=ceil(iw/2)*2:ceil(ih/2)*2",
+                        "-c:v", "libx264",
+                        "-pix_fmt", "yuv420p",
+                        "-profile:v", "baseline",
+                        "-level", "3.0",
+                        "-y",
+                        convertedFilepath
+                    ]);
+
+                    ffmpegProcess.on('error', (error) => {
+                        console.error(`Error spawning FFmpeg: ${error}`);
+                        message.reply('Failed to convert the video.');
+                    });
+
+                    ffmpegProcess.stdout.on('data', (data) => {
+                        console.log(`FFmpeg stdout: ${data}`);
+                    });
+
+                    ffmpegProcess.stderr.on('data', (data) => {
+                        console.error(`FFmpeg stderr: ${data}`);
+                    });
+
+                    ffmpegProcess.on('close', async (code) => {
+                        if (code !== 0) {
+                            message.reply('Conversion failed.');
+                            return;
+                        }
+
+                        try {
+                            const media = MessageMedia.fromFilePath(convertedFilepath);
+                            await message.reply(media);
+                            fs.unlinkSync(convertedFilepath);
+                            setTimeout(() => fs.unlink(downloadedFilepath), 1000*60*20);
+                        } catch (error) {
+                            console.error(error);
+                            message.reply('An error occurred while processing the video.');
+                        }
+                    });
+                });
+
                 return;
             }
         }
