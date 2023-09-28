@@ -58,7 +58,6 @@ client.on('message', async (message) => {
 
     const contact = await message.getContact();
     const senderName = contact.pushname || contact.name || contact.id.user;
-    const sender = contact.id.user;
 
     const selfId = client.info.wid.user;
     const selfName = client.info.pushname || client.info.name || selfId;
@@ -72,6 +71,10 @@ client.on('message', async (message) => {
         if (!await shouldRespond(message, selfId)) {
             return;
         }
+
+        // Remove mention of self from start of message
+        const mentionPattern = new RegExp(`^@${selfId} *`, 'g');
+        message.body = message.body.replace(mentionPattern, '');
 
         const modifiedMessage = await replaceMentionsWithNames(message);
 
@@ -127,14 +130,12 @@ const execAsync = util.promisify(exec);
 async function fetchLatestConversationId () {
     const { stdout } = await execAsync('llm logs');
     const logs = JSON.parse(stdout);
-    return logs.at(-1)?.conversation_id;
+    const conversation_id = logs[0].conversation_id;
+    return conversation_id;
 };
 
 async function shouldRespond (message, selfId) {
     if (message.mentionedIds.some(contactId => contactId.startsWith(selfId))) {
-        // Remove mention of self from start of message
-        const mentionPattern = new RegExp(`^@${selfId} *`, 'g');
-        message.body = message.body.replace(mentionPattern, '');
         return true;
     }
 
@@ -162,3 +163,4 @@ async function replaceMentionsWithNames (message) {
 
     return modifiedMessage;
 };
+
