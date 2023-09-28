@@ -12,8 +12,9 @@ Your users are experts in AI and ethics, so they already know you're a language 
 // Initialize the database table
 db.run(/*sql*/`
     CREATE TABLE IF NOT EXISTS chats (
-        chat_id TEXT PRIMARY KEY,
-        conversation_id TEXT
+        chat_id TEXT,
+        conversation_id TEXT,
+        timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
     );
 `);
 
@@ -56,6 +57,20 @@ client.on('authenticated', (session) => {
 client.on('message', async (message) => {
     if (!message.body) return;
 
+    if (message.body.startsWith('!')) {
+        const [command, ...args] = message.body.slice(1).split(' ');
+
+        switch (command.toLowerCase()) {
+            case 'new': {
+                const chatId = message.from;
+
+                await sql`INSERT INTO chats(chat_id, conversation_id) VALUES (${chatId}, NULL)`;
+                message.reply('New conversation started.');
+                return;
+            }
+        }
+    }
+
     const contact = await message.getContact();
     const senderName = contact.pushname || contact.name || contact.id.user;
 
@@ -87,10 +102,10 @@ client.on('message', async (message) => {
     }
 
     // Fetch existing conversation_id if available
-    let [conversation] = await sql`SELECT conversation_id FROM chats WHERE chat_id = ${chatId}`;
+    let [conversation] = await sql`SELECT conversation_id FROM chats WHERE chat_id = ${chatId} ORDER BY timestamp DESC LIMIT 1`;
     
     // Determine the arguments for llm
-    const args = conversation
+    const args = conversation?.conversation_id
         ? ['--conversation', conversation.conversation_id, prompt]
         : ["--system", systemPrompt, prompt];
 
@@ -116,9 +131,10 @@ client.on('message', async (message) => {
         console.log(reply);
 
         // If no existing conversation, fetch the latest conversation_id and store it
-        if (!conversation) {
+        if (!conversation?.conversation_id) {
             const newConversationId = await fetchLatestConversationId();
-            await sql`INSERT INTO chats(chat_id, conversation_id) VALUES (${chatId}, ${newConversationId})`;
+            await sql`DELETE FROM chats WHERE chat_id = ${chatId} AND conversation_id IS NULL;`;
+            await sql`INSERT INTO chats(chat_id, conversation_id) VALUES (${chatId}, ${newConversationId});`;
         }
     });
 });
