@@ -151,6 +151,58 @@ client.on('message', async (message) => {
 
                 return;
             }
+            case 'audio': {
+                const [url] = args;
+
+                const ytdlProcess = spawn('yt-dlp', ['-x', '-o', "/dev/shm/%(title)s.%(ext)s",  url]);
+
+                ytdlProcess.on('error', (error) => {
+                  console.error(`Error spawning yt-dlp: ${error}`);
+                  message.reply('Failed to start the download.');
+                });
+
+                let stdoutData = '';
+                ytdlProcess.stdout.on('data', (data) => {
+                    const stdoutString = data.toString();
+                    stdoutData += stdoutString;
+                    console.log(`yt-dlp stdout: ${stdoutString}`);
+                });
+
+                ytdlProcess.stderr.on('data', (data) => {
+                  console.error(`yt-dlp stderr: ${data}`);
+                });
+
+                ytdlProcess.on('close', async (code) => {
+                    if (code !== 0) {
+                        message.reply('Download failed.');
+                        return;
+                    }
+
+                    // Extract filename from stdout data
+                    const downloadedFilepath =
+                        stdoutData.match(/\[ExtractAudio\] Destination: (.+?)\n/)?.at(1)
+                        || stdoutData.match(/Destination: (.+?)\n/)?.at(1)
+                        || null;
+
+                    console.log({ downloadedFilepath, stdoutData });
+
+                    try {
+                        const media = MessageMedia.fromFilePath(downloadedFilepath);
+                        await message.reply(media);
+                        setTimeout(() => fs.unlink(downloadedFilepath), 1000*60*20);
+                    } catch (error) {
+                        console.error(error);
+                        message.reply('An error occurred while processing the audio.');
+                    }
+
+                });
+
+                return;
+            };
+            default: {
+                message.reply(`Unknown command: ${command}`);
+                return;
+            }
         }
     }
 
