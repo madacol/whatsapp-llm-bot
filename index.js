@@ -249,6 +249,7 @@ client.on('message', async (message) => {
 
     llmProcess.stdout.on('data', (data) => {
         stdoutData += data;
+        chat.sendStateTyping();
     });
 
     llmProcess.stderr.on('data', (data) => {
