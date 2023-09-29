@@ -141,7 +141,7 @@ client.on('message', async (message) => {
                             const media = MessageMedia.fromFilePath(convertedFilepath);
                             await message.reply(media);
                             fs.unlinkSync(convertedFilepath);
-                            setTimeout(() => fs.unlink(downloadedFilepath), 1000*60*20);
+                            setTimeout(() => fs.unlinkSync(downloadedFilepath), 1000*60*20);
                         } catch (error) {
                             console.error(error);
                             message.reply('An error occurred while processing the video.');
@@ -189,7 +189,7 @@ client.on('message', async (message) => {
                     try {
                         const media = MessageMedia.fromFilePath(downloadedFilepath);
                         await message.reply(media);
-                        setTimeout(() => fs.unlink(downloadedFilepath), 1000*60*20);
+                        setTimeout(() => fs.unlinkSync(downloadedFilepath), 1000*60*20);
                     } catch (error) {
                         console.error(error);
                         message.reply('An error occurred while processing the audio.');
