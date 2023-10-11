@@ -231,10 +231,10 @@ client.on('message', async (message) => {
 
         // prepend name of sender to prompt
         prompt = `${senderName}: ${modifiedMessage}`;
-        systemPrompt = SYSTEM_PROMPT + `You are a brilliant AI assistant called ${selfName}.\nYou are in a group chat called "${chat.name}"`;
+        systemPrompt = SYSTEM_PROMPT + `\n\nYou are a brilliant AI assistant called ${selfName}.\nYou are in a group chat called "${chat.name}"`;
     } else {
         prompt = await replaceMentionsWithNames(message);
-        systemPrompt = SYSTEM_PROMPT + `You are a brilliant AI assistant called ${selfName}`;
+        systemPrompt = SYSTEM_PROMPT + `\n\nYou are a brilliant AI assistant called ${selfName}`;
     }
 
     // Fetch existing conversation_id if available
