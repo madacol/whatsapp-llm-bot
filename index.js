@@ -39,7 +39,8 @@ const client = new Client({
 client.on('qr', (qr) => {
     exec(`echo "${qr}" | qrencode -t ansiutf8`, (error, stdout, stderr) => {
         if (error) {
-            console.error(`Error executing qrencode: ${error}`);
+            console.error(error);
+            console.error(stderr);
             return;
         }
 
