@@ -20,6 +20,7 @@ If no command is given, the bot will respond using `llm`.
 2. Clone this repo and run `index.js`
 
     ```bash
+    export OPENAI_API_KEY=<your-openai-api-key>
     node index.js
     ```
 
@@ -28,13 +29,6 @@ If no command is given, the bot will respond using `llm`.
     ```bash
     pip3 install pipx
     pipx install yt-dlp
-    pipx install llm
     ```
 
 4. Restart `index.js`
-
-5. Setup `llm`
-
-    ```bash
-    llm keys set openai # Set OpenAI API key
-    ```

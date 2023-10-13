@@ -9,6 +9,7 @@
   "keywords": [],
   "author": "madacol",
   "dependencies": {
+    "openai": "^4.12.1",
     "sqlite3": "^5.1.6",
     "whatsapp-web.js": "^1.22.1"
   }
