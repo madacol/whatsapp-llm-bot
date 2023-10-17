@@ -1,13 +1,13 @@
 # Whatsapp LLM Bot
 
-A whatsapp bot that uses `llm` to generate messages, and `yt-dlp` to download videos/audios and re-upload them into the chat.
+A whatsapp bot that uses LLMs to generate messages, and `yt-dlp` to download videos/audios and re-upload them into the chat.
 
 Available commands:
 - `!video <link>`: downloads the video and re-uploads it into the chat
 - `!audio <link>`: downloads the audio and re-uploads it into the chat
 - `!new`: starts a new conversation with the bot
 
-If no command is given, the bot will respond using `llm`.
+If no command is given, the AI will handle the response.
 
 ## Getting Started
 
@@ -20,6 +20,7 @@ If no command is given, the bot will respond using `llm`.
 2. Clone this repo and run `index.js`
 
     ```bash
+    npm install
     export OPENAI_API_KEY=<your-openai-api-key>
     node index.js
     ```
