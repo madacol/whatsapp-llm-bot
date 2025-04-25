@@ -202,6 +202,30 @@ async function replaceMentionsWithNames (message) {
 
 const ACTIONS = [
     {
+        name: "new_conversation",
+        command: "new",
+        description: "Start a new conversation by clearing message history for the current chat",
+        parameters: {
+            type: "object",
+            properties: {},
+            required: [],
+        },
+        fn: async function (args, message) {
+            const chatId = message.from;
+            
+            try {
+                // Delete all messages for this chat
+                await sql`DELETE FROM messages WHERE chat_id = ${chatId}`;
+                
+                // Confirm message was successful
+                return "Conversation history cleared. Starting a new conversation!";
+            } catch (error) {
+                console.error("Error clearing conversation:", error);
+                return "Failed to clear conversation history. Please try again.";
+            }
+        }
+    },
+    {
         name: "download_video",
         command: "video",
         description: "Download video from URL, and send it to chat",
