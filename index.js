@@ -2,6 +2,9 @@ const { Client, LocalAuth, MessageMedia } = require('whatsapp-web.js');
 const { exec, spawn } = require('child_process');
 const fs = require('fs');
 
+const dotenv = require('dotenv');
+dotenv.config();
+
 const sqlite3 = require('sqlite3').verbose();
 const db = new sqlite3.Database('./chats.db');
 
