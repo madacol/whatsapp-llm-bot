@@ -9,8 +9,9 @@
   "keywords": [],
   "author": "madacol",
   "dependencies": {
-    "openai": "^4.12.1",
-    "sqlite3": "^5.1.6",
-    "whatsapp-web.js": "^1.22.1"
+    "dotenv": "^16.5.0",
+    "openai": "^4.96.0",
+    "sqlite3": "^5.1.7",
+    "whatsapp-web.js": "^1.27.0"
   }
 }
