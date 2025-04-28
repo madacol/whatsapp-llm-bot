@@ -103,11 +103,6 @@ client.on('message', async (message) => {
 
     let messageBody_formatted, systemPrompt;
     if (chat.isGroup) {
-        // Call shouldRespond to determine if the bot should process this message
-        if (!await shouldRespond(message, selfId)) {
-            return;
-        }
-
         // Remove mention of self from start of message
         const mentionPattern = new RegExp(`^@${selfId} *`, 'g');
         message.body = message.body.replace(mentionPattern, '');
@@ -124,6 +119,11 @@ client.on('message', async (message) => {
 
     // insert message into DB
     await sql`INSERT INTO messages(chat_id, message, sender_id) VALUES (${chatId}, ${messageBody_formatted}, ${contact.id.user});`;
+
+    // Call shouldRespond to determine if the bot should process this message
+    if (!await shouldRespond(message, selfId)) {
+        return;
+    }
 
     // obtain latest messages from DB
     const chatMessages = await sql`SELECT message, sender_id FROM messages WHERE chat_id = ${chatId} ORDER BY timestamp DESC LIMIT 20;`;
