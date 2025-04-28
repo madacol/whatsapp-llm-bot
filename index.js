@@ -138,7 +138,7 @@ client.on('message', async (message) => {
 
     // call OpenAI
     const response = await openai.chat.completions.create({
-        model: "gpt-3.5-turbo",
+        model: "o4-mini",
         messages: [{role: "system", content: systemPrompt}, ...chatMessages_formatted],
         functions: actions_openAI_formatted,
         function_call: "auto",
