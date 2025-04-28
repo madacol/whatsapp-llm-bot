@@ -44,8 +44,8 @@ const sql = (strings, ...values) => new Promise((resolve, reject) => {
 const client = new Client({
     authStrategy: new LocalAuth(),
     puppeteer: {
-        headless: false,
-        executablePath: '/opt/google/chrome/chrome',
+        headless: true,
+        executablePath: 'chromium',
     },
 });
 
