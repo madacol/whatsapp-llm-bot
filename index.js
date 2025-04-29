@@ -232,10 +232,10 @@ const ACTIONS = [
                 await sql`DELETE FROM messages WHERE chat_id = ${chatId}`;
                 
                 // Confirm message was successful
-                return "Conversation history cleared. Starting a new conversation!";
+                message.reply("Conversation history cleared. Starting a new conversation!");
             } catch (error) {
                 console.error("Error clearing conversation:", error);
-                return "Failed to clear conversation history. Please try again.";
+                message.reply("Failed to clear conversation history.\n\n" + error.message);
             }
         }
     },
