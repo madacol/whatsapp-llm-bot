@@ -105,7 +105,7 @@ client.on('message', async (message) => {
     await sql`INSERT OR IGNORE INTO chats(chat_id) VALUES (${chatId});`;
 
     let messageBody_formatted;
-    let systemPrompt = config.system_prompt + `\n\nYou are a brilliant AI assistant called ${selfName}`;
+    let systemPrompt = config.system_prompt + `\n\nYou are an AI assistant called ${selfName}`;
     if (chat.isGroup) {
         // Remove mention of self from start of message
         const mentionPattern = new RegExp(`^@${selfId} *`, 'g');

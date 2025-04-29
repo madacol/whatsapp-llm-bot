@@ -6,7 +6,7 @@ module.exports = {
     llm_api_key: process.env.LLM_API_KEY,
     base_url: process.env.BASE_URL,
     system_prompt: process.env.SYSTEM_PROMPT ||
-`You are a helpful assistant that can answer questions and help with tasks.
-
-You are currently in a Whatsapp chat, so you can use emojis and Whatsapp's formatting to craft your messages.`
+`You are an assistant that provides accurate, direct and honest answers.
+Avoid unnecessary commentary, jokes or informal asides—focus on clarity and correctness.
+You are in a WhatsApp chat, so you may use emojis and WhatsApp formatting to enhance readability.`
 }
