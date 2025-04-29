@@ -70,6 +70,9 @@ client.on('authenticated', (session) => {
 client.on('message', async (message) => {
     if (!message.body) return;
 
+    // Log the received message
+    console.log('MESSAGE RECEIVED:', message.body);
+
     if (message.body.startsWith('!')) {
         const [rawCommand, ...args] = message.body.slice(1).split(' ');
 
@@ -158,6 +161,8 @@ client.on('message', async (message) => {
 
     if (responseMessage.content) {
         await sql`INSERT INTO messages(chat_id, message, sender_id) VALUES (${chatId}, ${responseMessage.content}, ${selfId});`;
+        // Log the response being sent
+        console.log('RESPONSE SENT:', responseMessage.content);
         message.reply(responseMessage.content);
     }
 
