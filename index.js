@@ -118,7 +118,7 @@ client.on('message', async (message) => {
     await sql`INSERT INTO messages(chat_id, message, sender_id) VALUES (${chatId}, ${messageBody_formatted}, ${contact.id.user});`;
 
     // Call shouldRespond to determine if the bot should process this message
-    if (!await shouldRespond(message, selfId)) {
+    if (chat.isGroup && !await shouldRespond(message, selfId)) {
         return;
     }
 
