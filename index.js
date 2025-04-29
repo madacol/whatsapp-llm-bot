@@ -94,9 +94,16 @@ client.on('message', async (message) => {
 
     const chat = await message.getChat();
     const chatId = message.from;
+    const time = new Date(message.timestamp*1000).toLocaleString('en-US', {
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+    });
+
     // insert chatId into DB if not already present
     await sql`INSERT OR IGNORE INTO chats(chat_id) VALUES (${chatId});`;
-
 
     let messageBody_formatted;
     let systemPrompt = config.system_prompt + `\n\nYou are a brilliant AI assistant called ${selfName}`;
@@ -108,10 +115,10 @@ client.on('message', async (message) => {
         const modifiedMessage = await replaceMentionsWithNames(message);
 
         // prepend name of sender to prompt
-        messageBody_formatted = `${senderName}: ${modifiedMessage}`;
+        messageBody_formatted = `[${time}] ${senderName}: ${modifiedMessage}`;
         systemPrompt += `and you are in a group chat called "${chat.name}"`;
     } else {
-        messageBody_formatted = await replaceMentionsWithNames(message);
+        messageBody_formatted = `[${time}] ${await replaceMentionsWithNames(message)}`;
     }
 
     // insert message into DB
