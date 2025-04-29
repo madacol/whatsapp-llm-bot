@@ -1,7 +1,6 @@
 const { Client, LocalAuth, MessageMedia } = require('whatsapp-web.js');
 const { exec, spawn } = require('child_process');
 const fs = require('fs');
-
 const config = require('./config');
 
 const sqlite3 = require('sqlite3').verbose();
@@ -140,13 +139,20 @@ client.on('message', async (message) => {
         }
     }).reverse();
 
-    // call OpenAI
-    const response = await openai.chat.completions.create({
-        model: "o4-mini",
-        messages: [{role: "system", content: systemPrompt}, ...chatMessages_formatted],
-        functions: actions_openAI_formatted,
-        function_call: "auto",
-    });
+    let response;
+    try {
+        response = await llmClient.chat.completions.create({
+            model: config.model,
+            messages: [{role: "system", content: systemPrompt}, ...chatMessages_formatted],
+            tools: actions_openAI_formatted,
+            tool_choice: "auto",
+        });
+    } catch (error) {
+        console.error(error);
+        message.reply('An error occurred while processing the message.\n\n' + error.message);
+        return;
+    }
+
     const responseMessage = response.choices[0].message;
 
     if (responseMessage.content) {
@@ -419,8 +425,11 @@ ACTIONS.forEach(action => {
 
 const actions_openAI_formatted = ACTIONS.map(({name, description, parameters}) => {
     return {
-        name,
-        description,
-        parameters,
+        type: "function",
+        function: {
+            name,
+            description,
+            parameters,
+        }
     }
 })
