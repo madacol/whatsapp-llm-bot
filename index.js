@@ -82,7 +82,8 @@ client.on('message', async (message) => {
             return;
         }
 
-        return action.fn(args, message);
+        console.log("executing", action.name, args);
+        return await action.fn(args, message);
     }
 
     const contact = await message.getContact();
