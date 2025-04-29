@@ -2,19 +2,16 @@ const { Client, LocalAuth, MessageMedia } = require('whatsapp-web.js');
 const { exec, spawn } = require('child_process');
 const fs = require('fs');
 
-const dotenv = require('dotenv');
-dotenv.config();
+const config = require('./config');
 
 const sqlite3 = require('sqlite3').verbose();
 const db = new sqlite3.Database('./chats.db');
 
 const OpenAI = require('openai');
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-
-// get the system prompt from environment variable
-const SYSTEM_PROMPT = process.env.SYSTEM_PROMPT || `You are an autoregressive language model that has been fine-tuned with instruction-tuning and RLHF. You carefully provide accurate, factual, thoughtful, nuanced answers, and are brilliant at reasoning. If you think there might not be a correct answer, you say so. Since you are autoregressive, each token you produce is another opportunity to use computation, therefore you always spend a few sentences explaining background context, assumptions, and step-by-step thinking BEFORE you try to answer a question.
-
-Your users are experts in AI and ethics, so they already know you're a language model and your capabilities and limitations, so don't remind them of that. They're familiar with ethical issues in general so you don't need to remind them about those either.`
+const llmClient = new OpenAI({
+    apiKey: config.llm_api_key,
+    baseURL: config.base_url
+});
 
 // Initialize the database tables
 db.run(/*sql*/`
@@ -101,7 +98,8 @@ client.on('message', async (message) => {
     await sql`INSERT OR IGNORE INTO chats(chat_id) VALUES (${chatId});`;
 
 
-    let messageBody_formatted, systemPrompt;
+    let messageBody_formatted;
+    let systemPrompt = config.system_prompt + `\n\nYou are a brilliant AI assistant called ${selfName}`;
     if (chat.isGroup) {
         // Remove mention of self from start of message
         const mentionPattern = new RegExp(`^@${selfId} *`, 'g');
@@ -111,10 +109,9 @@ client.on('message', async (message) => {
 
         // prepend name of sender to prompt
         messageBody_formatted = `${senderName}: ${modifiedMessage}`;
-        systemPrompt = SYSTEM_PROMPT + `\n\nYou are a brilliant AI assistant called ${selfName}.\nYou are in a group chat called "${chat.name}"`;
+        systemPrompt += `and you are in a group chat called "${chat.name}"`;
     } else {
         messageBody_formatted = await replaceMentionsWithNames(message);
-        systemPrompt = SYSTEM_PROMPT + `\n\nYou are a brilliant AI assistant called ${selfName}`;
     }
 
     // insert message into DB
