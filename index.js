@@ -166,22 +166,21 @@ client.on('message', async (message) => {
         message.reply(responseMessage.content);
     }
 
-    if (responseMessage.function_call) {
+    if (responseMessage.tool_calls) {
+        for (const toolCall of responseMessage.tool_calls) {
+            const toolName = toolCall.function.name;
+            const toolArgs = JSON.parse(toolCall.function.arguments);
+            console.log("executing", toolName, toolArgs);
+            const functionResponse = await FUNCTIONS_INDEXED_BY_NAME[toolName](toolArgs, message);
+            console.log("response", functionResponse);
 
-        const functionName = responseMessage.function_call.name;
-        const functionToCall = FUNCTIONS_INDEXED_BY_NAME[functionName];
-        const functionArgs = JSON.parse(responseMessage.function_call.arguments);
-        console.log("executing", functionName, functionArgs);
-        const functionResponse = await functionToCall(functionArgs, message);
-        console.log("response", functionResponse);
-
-        if (functionResponse) {
-            // insert into DB
-            await sql`INSERT INTO messages(chat_id, message, sender_id) VALUES (${chatId}, ${functionResponse}, ${selfId});`;
-            chat.sendMessage(functionResponse);
+            if (functionResponse) {
+                // insert into DB
+                await sql`INSERT INTO messages(chat_id, message, sender_id) VALUES (${chatId}, ${functionResponse}, ${selfId});`;
+                chat.sendMessage(functionResponse);
+            }
         }
     }
-
 });
 
 client.initialize();
