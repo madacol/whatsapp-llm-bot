@@ -193,13 +193,13 @@ async function shouldRespond (message, selfId) {
     }
 
     // Respond if I have been quoted
-    if (message.hasQuotedMsg) {
-        const quotedMsg = await message.getQuotedMessage();
-        const quotedContact = await quotedMsg.getContact();
-        if (quotedContact.id.user === selfId) {
-            return true;
-        }
-    }
+    // if (message.hasQuotedMsg) {
+    //     const quotedMsg = await message.getQuotedMessage();
+    //     const quotedContact = await quotedMsg.getContact();
+    //     if (quotedContact.id.user === selfId) {
+    //         return true;
+    //     }
+    // }
 
     return false;
 };
