@@ -97,7 +97,7 @@ client.on('message', async (message) => {
 
     const chat = await message.getChat();
     const chatId = message.from;
-    const time = new Date(message.timestamp*1000).toLocaleString('en-US', {
+    const time = new Date(message.timestamp*1000).toLocaleString('en-EN', {
         year: 'numeric',
         month: '2-digit',
         day: '2-digit',
