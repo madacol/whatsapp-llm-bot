@@ -111,6 +111,23 @@ client.on('message', async (message) => {
     let messageBody_formatted;
     let systemPrompt = config.system_prompt + `\n\nYou are an AI assistant called ${selfName}`;
     if (chat.isGroup) {
+        // concatenate quoted message, if any
+        if (message.hasQuotedMsg) {
+            const quotedMsg = await message.getQuotedMessage();
+            const quotedContact = await quotedMsg.getContact();
+            const quotedSenderName = quotedContact.pushname || quotedContact.name || quotedContact.id.user;
+            const quotedTime = new Date(quotedMsg.timestamp*1000).toLocaleString('en-EN', {
+                year: 'numeric',
+                month: '2-digit',
+                day: '2-digit',
+                hour: '2-digit',
+                minute: '2-digit',
+            });
+            messageBody_formatted = `> [${quotedTime}] ${quotedSenderName}: ${quotedMsg.body.trim().replace("\n", "\n>")}\n`;
+        } else {
+            messageBody_formatted = '';
+        }
+
         // Remove mention of self from start of message
         const mentionPattern = new RegExp(`^@${selfId} *`, 'g');
         message.body = message.body.replace(mentionPattern, '');
@@ -118,7 +135,7 @@ client.on('message', async (message) => {
         const modifiedMessage = await replaceMentionsWithNames(message);
 
         // prepend name of sender to prompt
-        messageBody_formatted = `[${time}] ${senderName}: ${modifiedMessage}`;
+        messageBody_formatted += `[${time}] ${senderName}: ${modifiedMessage}`;
         systemPrompt += `and you are in a group chat called "${chat.name}"`;
     } else {
         messageBody_formatted = `[${time}] ${await replaceMentionsWithNames(message)}`;
