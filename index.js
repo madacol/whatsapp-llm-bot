@@ -16,6 +16,7 @@ const llmClient = new OpenAI({
 db.run(/*sql*/`
     CREATE TABLE IF NOT EXISTS chats (
         chat_id varchar(20) PRIMARY KEY,
+        is_enabled INTEGER DEFAULT FALSE,
         timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
     );
 `);
@@ -145,7 +146,7 @@ client.on('message', async (message) => {
     await sql`INSERT INTO messages(chat_id, message, sender_id) VALUES (${chatId}, ${messageBody_formatted}, ${contact.id.user});`;
 
     // Call shouldRespond to determine if the bot should process this message
-    if (chat.isGroup && !await shouldRespond(message, selfId)) {
+    if (!await shouldRespond(message, selfId, chat.isGroup)) {
         return;
     }
 
@@ -202,7 +203,26 @@ client.on('message', async (message) => {
 
 client.initialize();
 
-async function shouldRespond (message, selfId) {
+/**
+ * 
+ * @param {import("whatsapp-web.js").Message} message 
+ * @param {string} selfId
+ * @param {boolean} isGroup 
+ * @returns 
+ */
+async function shouldRespond(message, selfId, isGroup) {
+    const chatId = message.from;
+
+    // Check if chat is enabled
+    const [chatInfo] = await sql`SELECT is_enabled FROM chats WHERE chat_id = ${chatId}`;
+    if (!chatInfo?.is_enabled) {
+        return false;
+    }
+
+    // Respond to all messages in private chats
+    if (!isGroup) {
+        return true;
+    }
 
     // Respond if I have been mentioned
     if (message.mentionedIds.some(contactId => contactId.startsWith(selfId))) {
@@ -219,7 +239,7 @@ async function shouldRespond (message, selfId) {
     // }
 
     return false;
-};
+}
 
 async function replaceMentionsWithNames (message) {
     let modifiedMessage = message.body;
@@ -434,6 +454,118 @@ const ACTIONS = [
                     resolve()
                 });
             });
+        }
+    },
+    {
+        name: "show_info",
+        command: "info",
+        description: "Show information about the current chat",
+        parameters: {
+            type: "object",
+            properties: {},
+            required: [],
+        },
+        fn: async function (args, message) {
+            const chatId = message.from;
+            
+            // Get chat enabled status
+            const [chatInfo] = await sql`SELECT is_enabled FROM chats WHERE chat_id = ${chatId}`;
+            const isEnabled = chatInfo?.is_enabled ? 'enabled' : 'disabled';
+            
+            let info = `Chat Information:\n`;
+            info += `- Chat ID: ${chatId}\n`;
+            // info += `- Chat Name: ${chat.name || 'Private Chat'}\n`;
+            // info += `- Type: ${chat.isGroup ? 'Group' : 'Private'}\n`;
+            info += `- enabled: ${isEnabled}`;
+            
+            message.reply(info);
+        }
+    },{
+        name: "enable_chat",
+        command: "enable",
+        description: "Enable LLM answers for a specific chat (admin only)",
+        parameters: {
+            type: "object",
+            properties: {
+                chatId: {
+                    type: "string",
+                    description: "Chat ID to enable (defaults to current chat if not provided)",
+                }
+            },
+            required: [],
+        },
+        fn: async function (args, message) {
+            const contact = await message.getContact();
+            const senderId = contact.id.user;
+            
+            // Check if sender is admin
+            if (senderId !== config.admin_id) {
+                return message.reply("Sorry, only the admin can use this command.");
+            }
+            
+            let chatId;
+            if (Array.isArray(args)) {
+                chatId = args[0] || message.from;
+            } else {
+                chatId = args.chatId || message.from;
+            }
+            
+            try {
+                await sql`
+                    UPDATE chats 
+                    SET is_enabled = 1
+                    WHERE chat_id = ${chatId}
+                `;
+                
+                message.reply(`LLM answers enabled for chat ${chatId}`);
+            } catch (error) {
+                console.error("Error enabling chat:", error);
+                message.reply("Failed to enable chat.\n\n" + error.message);
+            }
+        }
+    },
+    {
+        name: "disable_chat",
+        command: "disable",
+        description: "Disable LLM answers for a specific chat (admin only)", 
+        parameters: {
+            type: "object",
+            properties: {
+                chatId: {
+                    type: "string",
+                    description: "Chat ID to disable (defaults to current chat if not provided)",
+                }
+            },
+            required: [],
+        },
+        fn: async function (args, message) {
+            const contact = await message.getContact();
+            const senderId = contact.id.user;
+            
+            // Check if sender is admin
+            if (senderId !== config.admin_id) {
+                return message.reply("Sorry, only the admin can use this command.");
+            }
+            
+            let chatId;
+            if (Array.isArray(args)) {
+                chatId = args[0] || message.from;
+            } else {
+                chatId = args.chatId || message.from;
+            }
+            
+            try {
+                await sql`
+                    UPDATE chats 
+                    SET is_enabled = 0
+                    WHERE chat_id = ${chatId}
+                `;
+                
+                message.reply(`LLM answers disabled for chat ${chatId}`);
+            } catch (error) {
+                console.error("Error disabling chat:", error);
+                message.reply("Failed to disable chat.\n\n" + error.message);
+            }
         }
     }
 ]

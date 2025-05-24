@@ -2,6 +2,7 @@ const dotenv = require('dotenv');
 dotenv.config();
 
 module.exports = {
+    admin_id: process.env.ADMIN_ID,
     model: process.env.MODEL,
     llm_api_key: process.env.LLM_API_KEY,
     base_url: process.env.BASE_URL,
