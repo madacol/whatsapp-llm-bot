@@ -510,6 +510,13 @@ const ACTIONS = [
                 chatId = args.chatId || message.from;
             }
             
+            // First check if chat exists
+            const [chatExists] = await sql`SELECT chat_id FROM chats WHERE chat_id = ${chatId}`;
+
+            if (!chatExists) {
+                return message.reply(`Chat ${chatId} does not exist.`);
+            }
+            // If chat exists, update its is_enabled status
             try {
                 await sql`
                     UPDATE chats 
@@ -554,6 +561,13 @@ const ACTIONS = [
                 chatId = args.chatId || message.from;
             }
             
+            // First check if chat exists
+            const [chatExists] = await sql`SELECT chat_id FROM chats WHERE chat_id = ${chatId}`;
+
+            if (!chatExists) {
+                return message.reply(`Chat ${chatId} does not exist.`);
+            }
+            // If chat exists, update its is_enabled status
             try {
                 await sql`
                     UPDATE chats 
