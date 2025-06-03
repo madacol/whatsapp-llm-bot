@@ -2,16 +2,22 @@
   "name": "whatsapp-llm-bot",
   "version": "1.0.0",
   "description": "",
+  "type": "module",
   "main": "index.js",
   "scripts": {
-    "dev": "node index.js"
+    "dev": "node index.js",
+    "type-check": "npx tsc --noEmit --project jsconfig.json"
   },
   "keywords": [],
   "author": "madacol",
   "dependencies": {
+    "@electric-sql/pglite": "^0.3.2",
     "dotenv": "^16.5.0",
     "openai": "^4.96.0",
-    "sqlite3": "^5.1.7",
     "whatsapp-web.js": "^1.27.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "typescript": "^5.0.0"
   }
 }

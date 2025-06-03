@@ -1,43 +1,56 @@
-const { Client, LocalAuth, MessageMedia } = require('whatsapp-web.js');
-const { exec, spawn } = require('child_process');
-const fs = require('fs');
-const config = require('./config');
+/**
+ * WhatsApp LLM Bot with JavaScript execution capabilities
+ */
 
-const sqlite3 = require('sqlite3').verbose();
-const db = new sqlite3.Database('./chats.db');
+import { Client, LocalAuth } from 'whatsapp-web.js';
+import { exec } from 'child_process';
+import { PGlite } from '@electric-sql/pglite';
+import OpenAI from 'openai';
+import { getActions, executeAction } from './actions.js';
+import config from './config.js';
 
-const OpenAI = require('openai');
+// Initialize database
+const db = new PGlite('./pgdata');
+
+// Initialize LLM client
 const llmClient = new OpenAI({
     apiKey: config.llm_api_key,
     baseURL: config.base_url
 });
 
-// Initialize the database tables
-db.run(/*sql*/`
-    CREATE TABLE IF NOT EXISTS chats (
-        chat_id varchar(20) PRIMARY KEY,
-        is_enabled INTEGER DEFAULT FALSE,
-        timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
-    );
-`);
-db.run(/*sql*/`
-    CREATE TABLE IF NOT EXISTS messages (
-        message_id INTEGER PRIMARY KEY,
-        chat_id varchar(20) REFERENCES chats(chat_id),
-        sender_id varchar(20),
-        message TEXT,
-        timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
-    );
-`);
+// Initialize database tables
+async function initDatabase() {
+    await db.sql`
+        CREATE TABLE IF NOT EXISTS chats (
+            chat_id VARCHAR(50) PRIMARY KEY,
+            is_enabled BOOLEAN DEFAULT FALSE,
+            timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+    `;
 
-const sql = (strings, ...values) => new Promise((resolve, reject) => {
-    const query = String.raw(strings, ...values.map(_ => '?')); // Use '?' as placeholder
-    db.all(query, values, (err, rows) => {
-        if (err) return reject(err);
-        resolve(rows);
-    });
-});
+    await db.sql`
+        CREATE TABLE IF NOT EXISTS messages (
+            message_id SERIAL PRIMARY KEY,
+            chat_id VARCHAR(50) REFERENCES chats(chat_id),
+            sender_id VARCHAR(50),
+            message TEXT,
+            timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+    `;
+}
 
+/**
+ * SQL template literal function (using PGlite)
+ * @param {TemplateStringsArray} strings
+ * @param {...any} values
+ * @returns {Promise<any[]>}
+ */
+const sql = async (strings, ...values) => {
+    const result = await db.sql(strings, ...values);
+    return result.rows;
+};
+
+// Initialize WhatsApp client
 const client = new Client({
     authStrategy: new LocalAuth(),
     puppeteer: {
@@ -46,7 +59,7 @@ const client = new Client({
     },
 });
 
-// Event listener for when the QR code is received for scanning
+// Event listener for QR code
 client.on('qr', (qr) => {
     exec(`echo "${qr}" | qrencode -t ansiutf8`, (error, stdout, stderr) => {
         if (error) {
@@ -54,8 +67,6 @@ client.on('qr', (qr) => {
             console.error(stderr);
             return;
         }
-
-        // Print the QR code in the terminal
         console.log(stdout);
     })
 });
@@ -68,147 +79,47 @@ client.on('authenticated', (session) => {
     console.log('Client is authenticated');
 });
 
-client.on('message', async (message) => {
-    if (!message.body) return;
+// Load actions
+/** @type {Action[]} */
+let actions = [];
+/** @type {Map<string, Action>} */
+let actionsByCommand = new Map();
 
-    // Log the received message
-    console.log('MESSAGE RECEIVED:', message.body);
-
-    if (message.body.startsWith('!')) {
-        const [rawCommand, ...args] = message.body.slice(1).split(' ');
-
-        const command = rawCommand.toLowerCase();
-
-        const action = ACTIONS_INDEXED_BY_COMMAND[command];
-
-        if (!action) {
-            message.reply(`Unknown command: ${command}`);
-            return;
+getActions().then(loadedActions => {
+    actions = loadedActions;
+    
+    // Index actions by command
+    actions.forEach(action => {
+        if (action.command) {
+            actionsByCommand.set(action.command, action);
         }
-
-        console.log("executing", action.name, args);
-        return await action.fn(args, message);
-    }
-
-    const contact = await message.getContact();
-    const senderName = contact.pushname || contact.name || contact.id.user;
-
-    const selfId = client.info.wid.user;
-    const selfName = client.info.pushname || client.info.name || selfId;
-
-    const chat = await message.getChat();
-    const chatId = message.from;
-    const time = new Date(message.timestamp*1000).toLocaleString('en-EN', {
-        year: 'numeric',
-        month: '2-digit',
-        day: '2-digit',
-        hour: '2-digit',
-        minute: '2-digit',
     });
-
-    // insert chatId into DB if not already present
-    await sql`INSERT OR IGNORE INTO chats(chat_id) VALUES (${chatId});`;
-
-    let messageBody_formatted;
-    let systemPrompt = config.system_prompt + `\n\nYou are an AI assistant called ${selfName}`;
-    if (chat.isGroup) {
-        // concatenate quoted message, if any
-        if (message.hasQuotedMsg) {
-            const quotedMsg = await message.getQuotedMessage();
-            const quotedContact = await quotedMsg.getContact();
-            const quotedSenderName = quotedContact.pushname || quotedContact.name || quotedContact.id.user;
-            const quotedTime = new Date(quotedMsg.timestamp*1000).toLocaleString('en-EN', {
-                year: 'numeric',
-                month: '2-digit',
-                day: '2-digit',
-                hour: '2-digit',
-                minute: '2-digit',
-            });
-            messageBody_formatted = `> [${quotedTime}] ${quotedSenderName}: ${quotedMsg.body.trim().replace("\n", "\n>")}\n`;
-        } else {
-            messageBody_formatted = '';
-        }
-
-        // Remove mention of self from start of message
-        const mentionPattern = new RegExp(`^@${selfId} *`, 'g');
-        message.body = message.body.replace(mentionPattern, '');
-
-        const modifiedMessage = await replaceMentionsWithNames(message);
-
-        // prepend name of sender to prompt
-        messageBody_formatted += `[${time}] ${senderName}: ${modifiedMessage}`;
-        systemPrompt += `and you are in a group chat called "${chat.name}"`;
-    } else {
-        messageBody_formatted = `[${time}] ${await replaceMentionsWithNames(message)}`;
-    }
-
-    // insert message into DB
-    await sql`INSERT INTO messages(chat_id, message, sender_id) VALUES (${chatId}, ${messageBody_formatted}, ${contact.id.user});`;
-
-    // Call shouldRespond to determine if the bot should process this message
-    if (!await shouldRespond(message, selfId, chat.isGroup)) {
-        return;
-    }
-
-    // obtain latest messages from DB
-    const chatMessages = await sql`SELECT message, sender_id FROM messages WHERE chat_id = ${chatId} ORDER BY timestamp DESC LIMIT 20;`;
-
-    // prepare messages for OpenAI
-    const chatMessages_formatted = chatMessages.filter(x=>x.message).map(({message, sender_id}) => {
-        return {
-            role: sender_id === selfId ? 'assistant' : 'user',
-            content: message,
-        }
-    }).reverse();
-
-    let response;
-    try {
-        response = await llmClient.chat.completions.create({
-            model: config.model,
-            messages: [{role: "system", content: systemPrompt}, ...chatMessages_formatted],
-            tools: actions_openAI_formatted,
-            tool_choice: "auto",
-        });
-    } catch (error) {
-        console.error(error);
-        message.reply('An error occurred while processing the message.\n\n' + error.message);
-        return;
-    }
-
-    const responseMessage = response.choices[0].message;
-
-    if (responseMessage.content) {
-        await sql`INSERT INTO messages(chat_id, message, sender_id) VALUES (${chatId}, ${responseMessage.content}, ${selfId});`;
-        // Log the response being sent
-        console.log('RESPONSE SENT:', responseMessage.content);
-        message.reply(responseMessage.content);
-    }
-
-    if (responseMessage.tool_calls) {
-        for (const toolCall of responseMessage.tool_calls) {
-            const toolName = toolCall.function.name;
-            const toolArgs = JSON.parse(toolCall.function.arguments);
-            console.log("executing", toolName, toolArgs);
-            const functionResponse = await FUNCTIONS_INDEXED_BY_NAME[toolName](toolArgs, message);
-            console.log("response", functionResponse);
-
-            if (functionResponse) {
-                // insert into DB
-                await sql`INSERT INTO messages(chat_id, message, sender_id) VALUES (${chatId}, ${functionResponse}, ${selfId});`;
-                chat.sendMessage(functionResponse);
-            }
-        }
-    }
+    
+    console.log(`Loaded ${actions.length} actions`);
 });
 
-client.initialize();
+/**
+ * Convert actions to OpenAI tools format
+ * @param {Action[]} actions
+ * @returns {any[]}
+ */
+function actionsToOpenAIFormat(actions) {
+    return actions.map(action => ({
+        type: "function",
+        function: {
+            name: action.name,
+            description: action.description,
+            parameters: action.parameters
+        }
+    }));
+}
 
 /**
- * 
- * @param {import("whatsapp-web.js").Message} message 
+ * Check if the bot should respond to a message
+ * @param {WhatsAppMessage} message
  * @param {string} selfId
- * @param {boolean} isGroup 
- * @returns 
+ * @param {boolean} isGroup
+ * @returns {Promise<boolean>}
  */
 async function shouldRespond(message, selfId, isGroup) {
     const chatId = message.from;
@@ -225,23 +136,19 @@ async function shouldRespond(message, selfId, isGroup) {
     }
 
     // Respond if I have been mentioned
-    if (message.mentionedIds.some(contactId => contactId.startsWith(selfId))) {
+    if (message.mentionedIds.some(contactId => String(contactId).startsWith(selfId))) {
         return true;
     }
-
-    // Respond if I have been quoted
-    // if (message.hasQuotedMsg) {
-    //     const quotedMsg = await message.getQuotedMessage();
-    //     const quotedContact = await quotedMsg.getContact();
-    //     if (quotedContact.id.user === selfId) {
-    //         return true;
-    //     }
-    // }
 
     return false;
 }
 
-async function replaceMentionsWithNames (message) {
+/**
+ * Replace mentions with names in message
+ * @param {WhatsAppMessage} message
+ * @returns {Promise<string>}
+ */
+async function replaceMentionsWithNames(message) {
     let modifiedMessage = message.body;
     const mentionedContacts = await message.getMentions();
 
@@ -253,351 +160,231 @@ async function replaceMentionsWithNames (message) {
     }
 
     return modifiedMessage;
-};
+}
 
-const ACTIONS = [
-    {
-        name: "new_conversation",
-        command: "new",
-        description: "Start a new conversation by clearing message history for the current chat",
-        parameters: {
-            type: "object",
-            properties: {},
-            required: [],
+/**
+ * Build action context for execution
+ * @param {WhatsAppMessage} message
+ * @param {string} chatId
+ * @returns {any}
+ */
+function buildActionContext(message, chatId) {
+    return {
+        log: (...args) => {
+            const logMessage = args.map(arg => 
+                typeof arg === 'object' ? JSON.stringify(arg, null, 2) : String(arg)
+            ).join(' ');
+            console.log('Action Log:', logMessage);
+            return logMessage;
         },
-        fn: async function (args, message) {
-            const chatId = message.from;
-            
-            try {
-                // Delete all messages for this chat
-                await sql`DELETE FROM messages WHERE chat_id = ${chatId}`;
-                
-                // Confirm message was successful
-                message.reply("Conversation history cleared. Starting a new conversation!");
-            } catch (error) {
-                console.error("Error clearing conversation:", error);
-                message.reply("Failed to clear conversation history.\n\n" + error.message);
-            }
+        chatId,
+        message,
+        sql
+    };
+}
+
+// Main message handler
+client.on('message', async (message) => {
+    if (!message.body) return;
+
+    console.log('MESSAGE RECEIVED:', message.body);
+
+    if (message.body.startsWith('!')) {
+        const [rawCommand, ...args] = message.body.slice(1).split(' ');
+        const command = rawCommand.toLowerCase();
+        
+        const action = actionsByCommand.get(command);
+        
+        if (!action) {
+            message.reply(`Unknown command: ${command}`);
+            return;
         }
-    },
-    {
-        name: "download_video",
-        command: "video",
-        description: "Download video from URL, and send it to chat",
-        parameters: {
-            type: "object",
-            properties: {
-                url: {
-                    type: "string",
-                    description: "URL of the video to download",
-                },
-            },
-            required: ["url"],
-        },
-        fn: function (args, message) {
-            // check if args is an array
-            let url;
-            if (Array.isArray(args)) {
-                ([url] = args);
-            } else {
-                // asume is an object
-                ({url} = args);
+
+        console.log("executing", action.name, args);
+        
+        try {
+            const context = buildActionContext(message, message.from);
+            const result = await executeAction(action.name, context, { args });
+            
+            if (result && result.result && typeof result.result === 'string') {
+                await message.reply(result.result);
             }
-            return new Promise((resolve, reject) => {
-                const ytdlProcess = spawn('yt-dlp', ['-o', "/dev/shm/%(title)s.%(ext)s", url]);
+        } catch (error) {
+            console.error("Error executing command:", error);
+            const errorMessage = error instanceof Error ? error.message : String(error);
+            await message.reply(`Error: ${errorMessage}`);
+        }
+        
+        return;
+    }
 
-                ytdlProcess.on('error', (error) => {
-                    console.error(`Error spawning yt-dlp: ${error}`);
-                    message.reply('Failed to start the download.');
-                });
+    const contact = await message.getContact();
+    const senderName = contact.pushname || contact.name || contact.id.user;
 
-                let stdoutData = '';
-                ytdlProcess.stdout.on('data', (data) => {
-                    const stdoutString = data.toString();
-                    stdoutData += stdoutString;
-                    console.log(`yt-dlp stdout: ${stdoutString}`);
-                });
+    const selfId = client.info.wid.user;
+    const selfName = client.info?.pushname || /** @type {any} */ (client.info)?.name || selfId;
 
-                ytdlProcess.stderr.on('data', (data) => {
-                    console.error(`yt-dlp stderr: ${data}`);
-                });
+    const chat = await message.getChat();
+    const chatId = message.from;
+    const time = new Date(message.timestamp * 1000).toLocaleString('en-EN', {
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+    });
 
-                ytdlProcess.on('close', async (code) => {
-                    if (code !== 0) {
-                        message.reply('Download failed.');
-                        return;
-                    }
+    // Insert chatId into DB if not already present
+    await sql`INSERT INTO chats(chat_id) VALUES (${chatId}) ON CONFLICT (chat_id) DO NOTHING;`;
 
-                    // Extract filename from stdout data
-                    const downloadedFilepath =
-                        stdoutData.match(/Merging formats into "([^"]+)"/)?.at(1)
-                        || stdoutData.match(/\[download\] (.+?) has already been downloaded/)?.at(1)
-                        || stdoutData.match(/\[download\] Destination: (.+?)\n/)?.at(1)
-                        || null;
+    let messageBody_formatted;
+    let systemPrompt = `You are ${selfName}, a helpful AI assistant that can execute JavaScript code in a WhatsApp chat environment.
+Use the \`run_javascript\` action for computational tasks, data analysis, and dynamic responses.
+All JavaScript code runs on the server and has access to the chat database and context.
 
-                    const convertedFilepath = `${downloadedFilepath}.mp4`;
+When asked to perform calculations, data analysis, or generate dynamic content:
+1. Use \`run_javascript\` to implement and execute the solution
+2. Show your work through logging and return meaningful results
+3. Make responses engaging and conversational for WhatsApp
 
-                    // Start FFmpeg to convert video to mp4
-                    const ffmpegProcess = spawn('ffmpeg', ['-i', downloadedFilepath,
-                        "-vf", "scale='bitand(oh*dar,65534)':'min(720,ih)'",
-                        "-vf", "pad=ceil(iw/2)*2:ceil(ih/2)*2",
-                        "-c:v", "libx264",
-                        "-pix_fmt", "yuv420p",
-                        "-profile:v", "baseline",
-                        "-level", "3.0",
-                        "-y",
-                        convertedFilepath
-                    ]);
+IMPORTANT JavaScript Code Requirements:
+When writing JavaScript code, you MUST always use arrow functions that receive a context parameter with these properties:
+- context.log: Function to add messages visible to the user
+- context.db: Database access with \`db.sql("SELECT ...")\` for read-only queries  
+- context.chatId: Current WhatsApp chat ID
+- context.sendMessage: Function to send additional messages to the chat
+- context.getMessages: Get recent conversation history
+- Standard utilities: Math, Date, JSON, String, Number, Array, Object
 
-                    ffmpegProcess.on('error', (error) => {
-                        console.error(`Error spawning FFmpeg: ${error}`);
-                        message.reply('Failed to convert the video.');
-                    });
+Example of correct code:
+\`\`\`javascript
+async ({log, db, chatId, sendMessage}) => {
+  log('Analyzing chat activity...');
+  const messages = await db.sql("SELECT COUNT(*) as count FROM messages WHERE chat_id = $1", chatId);
+  const result = \`This chat has \${messages[0].count} messages\`;
+  log('Analysis complete');
+  return result;
+}
+\`\`\`
 
-                    ffmpegProcess.stdout.on('data', (data) => {
-                        console.log(`FFmpeg stdout: ${data}`);
-                    });
+This format is strictly required for all JavaScript code execution.
 
-                    ffmpegProcess.stderr.on('data', (data) => {
-                        console.error(`FFmpeg stderr: ${data}`);
-                    });
+Additional context: ${config.system_prompt}
 
-                    ffmpegProcess.on('close', async (code) => {
-                        if (code !== 0) {
-                            message.reply('Conversion failed.');
-                            return;
-                        }
-
-                        try {
-                            const media = MessageMedia.fromFilePath(convertedFilepath);
-                            await message.reply(media);
-                            fs.unlinkSync(convertedFilepath);
-                            // fs.unlinkSync(downloadedFilepath)
-                        } catch (error) {
-                            console.error(error);
-                            message.reply('An error occurred while processing the video.');
-                            return;
-                        }
-
-                        resolve()
-                    });
-                });
+You are in a WhatsApp chat, so use emojis and WhatsApp formatting to enhance readability.`;
+    
+    if (chat.isGroup) {
+        // Handle quoted messages
+        if (message.hasQuotedMsg) {
+            const quotedMsg = await message.getQuotedMessage();
+            const quotedContact = await quotedMsg.getContact();
+            const quotedSenderName = quotedContact.pushname || quotedContact.name || quotedContact.id.user;
+            const quotedTime = new Date(quotedMsg.timestamp * 1000).toLocaleString('en-EN', {
+                year: 'numeric',
+                month: '2-digit',
+                day: '2-digit',
+                hour: '2-digit',
+                minute: '2-digit',
             });
+            messageBody_formatted = `> [${quotedTime}] ${quotedSenderName}: ${quotedMsg.body.trim().replace("\n", "\n>")}\n`;
+        } else {
+            messageBody_formatted = '';
         }
-    },{
-        name: "download_audio",
-        command: "audio",
-        description: "Download audio from URL, and send it to chat",
-        parameters: {
-            type: "object",
-            properties: {
-                url: {
-                    type: "string",
-                    description: "URL of the audio to download",
-                },
-            },
-            required: ["url"],
-        },
-        fn: function (args, message) {
-            // check if args is an array
-            let url;
-            if (Array.isArray(args)) {
-                ([url] = args);
-            } else {
-                // asume is an object
-                ({url} = args);
-            }
-            return new Promise((resolve, reject) => {
 
-                const ytdlProcess = spawn('yt-dlp', ['-x', '-o', "/dev/shm/%(title)s.%(ext)s",  url]);
+        // Remove mention of self from start of message
+        const mentionPattern = new RegExp(`^@${selfId} *`, 'g');
+        message.body = message.body.replace(mentionPattern, '');
 
-                ytdlProcess.on('error', (error) => {
-                    console.error(`Error spawning yt-dlp: ${error}`);
-                    message.reply('Failed to start the download.');
-                });
+        const modifiedMessage = await replaceMentionsWithNames(message);
+        messageBody_formatted += `[${time}] ${senderName}: ${modifiedMessage}`;
+        systemPrompt += ` and you are in a group chat called "${chat.name}"`;
+    } else {
+        messageBody_formatted = `[${time}] ${await replaceMentionsWithNames(message)}`;
+    }
 
-                let stdoutData = '';
-                ytdlProcess.stdout.on('data', (data) => {
-                    const stdoutString = data.toString();
-                    stdoutData += stdoutString;
-                    console.log(`yt-dlp stdout: ${stdoutString}`);
-                });
+    console.log({ messageBody_formatted });
 
-                ytdlProcess.stderr.on('data', (data) => {
-                    console.error(`yt-dlp stderr: ${data}`);
-                });
+    // Insert message into DB
+    await sql`INSERT INTO messages(chat_id, message, sender_id) VALUES (${chatId}, ${messageBody_formatted}, ${contact.id.user});`;
 
-                ytdlProcess.on('close', async (code) => {
-                    if (code !== 0) {
-                        message.reply('Download failed.');
-                        return;
-                    }
+    // Check if should respond
+    if (!await shouldRespond(message, selfId, chat.isGroup)) {
+        return;
+    }
 
-                    // Extract filename from stdout data
-                    const downloadedFilepath =
-                        stdoutData.match(/\[ExtractAudio\] Destination: (.+?)\n/)?.at(1)
-                        || stdoutData.match(/Destination: (.+?)\n/)?.at(1)
-                        || null;
+    // Get latest messages from DB
+    const chatMessages = await sql`SELECT message, sender_id FROM messages WHERE chat_id = ${chatId} ORDER BY timestamp DESC LIMIT 20;`;
 
-                    console.log({ downloadedFilepath, stdoutData });
+    // Prepare messages for OpenAI
+    const chatMessages_formatted = chatMessages.filter(x => x.message).map(({ message, sender_id }) => {
+        return /** @type {any} */ ({
+            role: sender_id === selfId ? 'assistant' : 'user',
+            content: message,
+        })
+    }).reverse();
 
-                    try {
-                        const media = MessageMedia.fromFilePath(downloadedFilepath);
-                        await message.reply(media);
-                        // fs.unlinkSync(downloadedFilepath);
-                    } catch (error) {
-                        console.error(error);
-                        message.reply('An error occurred while processing the audio.');
-                        return;
-                    }
+    console.log(chatMessages_formatted);
 
-                    resolve()
-                });
-            });
-        }
-    },
-    {
-        name: "show_info",
-        command: "info",
-        description: "Show information about the current chat",
-        parameters: {
-            type: "object",
-            properties: {},
-            required: [],
-        },
-        fn: async function (args, message) {
-            const chatId = message.from;
+    let response;
+    try {
+        response = await llmClient.chat.completions.create({
+            model: /** @type {string} */ (config.model || 'gpt-3.5-turbo'),
+            messages: [{ role: "system", content: systemPrompt }, ...chatMessages_formatted],
+            tools: actionsToOpenAIFormat(actions),
+            tool_choice: "auto",
+        });
+    } catch (error) {
+        console.error(error);
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        message.reply('An error occurred while processing the message.\n\n' + errorMessage);
+        return;
+    }
+
+    console.log("response", JSON.stringify(response, null, 2));
+
+    const responseMessage = response.choices[0].message;
+
+    if (responseMessage.content) {
+        await sql`INSERT INTO messages(chat_id, message, sender_id) VALUES (${chatId}, ${responseMessage.content}, ${selfId});`;
+        console.log('RESPONSE SENT:', responseMessage.content);
+        message.reply(responseMessage.content);
+    }
+
+    if (responseMessage.tool_calls) {
+        for (const toolCall of responseMessage.tool_calls) {
+            const toolName = toolCall.function.name;
+            const toolArgs = JSON.parse(toolCall.function.arguments);
+            console.log("executing", toolName, toolArgs);
             
-            // Get chat enabled status
-            const [chatInfo] = await sql`SELECT is_enabled FROM chats WHERE chat_id = ${chatId}`;
-            const isEnabled = chatInfo?.is_enabled ? 'enabled' : 'disabled';
-            
-            let info = `Chat Information:\n`;
-            info += `- Chat ID: ${chatId}\n`;
-            // info += `- Chat Name: ${chat.name || 'Private Chat'}\n`;
-            // info += `- Type: ${chat.isGroup ? 'Group' : 'Private'}\n`;
-            info += `- enabled: ${isEnabled}`;
-            
-            message.reply(info);
-        }
-    },{
-        name: "enable_chat",
-        command: "enable",
-        description: "Enable LLM answers for a specific chat (admin only)",
-        parameters: {
-            type: "object",
-            properties: {
-                chatId: {
-                    type: "string",
-                    description: "Chat ID to enable (defaults to current chat if not provided)",
-                }
-            },
-            required: [],
-        },
-        fn: async function (args, message) {
-            const contact = await message.getContact();
-            const senderId = contact.id.user;
-            
-            // Check if sender is admin
-            if (senderId !== config.admin_id) {
-                return message.reply("Sorry, only the admin can use this command.");
-            }
-            
-            let chatId;
-            if (Array.isArray(args)) {
-                chatId = args[0] || message.from;
-            } else {
-                chatId = args.chatId || message.from;
-            }
-            
-            // First check if chat exists
-            const [chatExists] = await sql`SELECT chat_id FROM chats WHERE chat_id = ${chatId}`;
-
-            if (!chatExists) {
-                return message.reply(`Chat ${chatId} does not exist.`);
-            }
-            // If chat exists, update its is_enabled status
             try {
-                await sql`
-                    UPDATE chats 
-                    SET is_enabled = 1
-                    WHERE chat_id = ${chatId}
-                `;
-                
-                message.reply(`LLM answers enabled for chat ${chatId}`);
-            } catch (error) {
-                console.error("Error enabling chat:", error);
-                message.reply("Failed to enable chat.\n\n" + error.message);
-            }
-        }
-    },
-    {
-        name: "disable_chat",
-        command: "disable",
-        description: "Disable LLM answers for a specific chat (admin only)", 
-        parameters: {
-            type: "object",
-            properties: {
-                chatId: {
-                    type: "string",
-                    description: "Chat ID to disable (defaults to current chat if not provided)",
-                }
-            },
-            required: [],
-        },
-        fn: async function (args, message) {
-            const contact = await message.getContact();
-            const senderId = contact.id.user;
-            
-            // Check if sender is admin
-            if (senderId !== config.admin_id) {
-                return message.reply("Sorry, only the admin can use this command.");
-            }
-            
-            let chatId;
-            if (Array.isArray(args)) {
-                chatId = args[0] || message.from;
-            } else {
-                chatId = args.chatId || message.from;
-            }
-            
-            // First check if chat exists
-            const [chatExists] = await sql`SELECT chat_id FROM chats WHERE chat_id = ${chatId}`;
+                const context = buildActionContext(message, chatId);
+                const functionResponse = await executeAction(toolName, context, toolArgs);
+                console.log("response", functionResponse);
 
-            if (!chatExists) {
-                return message.reply(`Chat ${chatId} does not exist.`);
-            }
-            // If chat exists, update its is_enabled status
-            try {
-                await sql`
-                    UPDATE chats 
-                    SET is_enabled = 0
-                    WHERE chat_id = ${chatId}
-                `;
-                
-                message.reply(`LLM answers disabled for chat ${chatId}`);
+                if (functionResponse && typeof functionResponse === 'string') {
+                    await sql`INSERT INTO messages(chat_id, message, sender_id) VALUES (${chatId}, ${functionResponse}, ${selfId});`;
+                    chat.sendMessage(functionResponse);
+                }
             } catch (error) {
-                console.error("Error disabling chat:", error);
-                message.reply("Failed to disable chat.\n\n" + error.message);
+                console.error("Error executing tool:", error);
+                const errorMessage = `Error executing ${toolName}: ${error instanceof Error ? error.message : String(error)}`;
+                await sql`INSERT INTO messages(chat_id, message, sender_id) VALUES (${chatId}, ${errorMessage}, ${selfId});`;
+                chat.sendMessage(errorMessage);
             }
         }
     }
-]
-
-const FUNCTIONS_INDEXED_BY_NAME = {}
-const ACTIONS_INDEXED_BY_COMMAND = {}
-ACTIONS.forEach(action => {
-    FUNCTIONS_INDEXED_BY_NAME[action.name] = action.fn;
-    ACTIONS_INDEXED_BY_COMMAND[action.command] = action;
 });
 
-const actions_openAI_formatted = ACTIONS.map(({name, description, parameters}) => {
-    return {
-        type: "function",
-        function: {
-            name,
-            description,
-            parameters,
-        }
+// Initialize everything
+async function init() {
+    try {
+        await initDatabase();
+        console.log('Database initialized');
+        client.initialize();
+    } catch (error) {
+        console.error('Initialization error:', error);
+        process.exit(1);
     }
-})
+}
+
+init();

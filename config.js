@@ -1,13 +1,13 @@
-const dotenv = require('dotenv');
+import dotenv from 'dotenv';
 dotenv.config();
 
-module.exports = {
+export default {
     admin_id: process.env.ADMIN_ID,
     model: process.env.MODEL,
-    llm_api_key: process.env.LLM_API_KEY,
+    llm_api_key: process.env.LLM_API_KEY, 
     base_url: process.env.BASE_URL,
     system_prompt: process.env.SYSTEM_PROMPT ||
 `You are an assistant that provides accurate, direct and honest answers.
 Avoid unnecessary commentary, jokes or informal asides—focus on clarity and correctness.
 You are in a WhatsApp chat, so you may use emojis and WhatsApp formatting to enhance readability.`
-}
+};
