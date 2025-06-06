@@ -2,7 +2,8 @@
  * WhatsApp LLM Bot with JavaScript execution capabilities
  */
 
-import { Client, LocalAuth } from 'whatsapp-web.js';
+import whatsapp from 'whatsapp-web.js';
+const { Client, LocalAuth } = whatsapp;
 import { exec } from 'child_process';
 import { PGlite } from '@electric-sql/pglite';
 import OpenAI from 'openai';
@@ -164,21 +165,19 @@ async function replaceMentionsWithNames(message) {
 
 /**
  * Build action context for execution
- * @param {WhatsAppMessage} message
+ * @param {import('whatsapp-web.js').Chat} chat
  * @param {string} chatId
- * @returns {any}
  */
-function buildActionContext(message, chatId) {
+async function buildActionContext(chat, chatId) {
     return {
-        log: (...args) => {
-            const logMessage = args.map(arg => 
-                typeof arg === 'object' ? JSON.stringify(arg, null, 2) : String(arg)
-            ).join(' ');
-            console.log('Action Log:', logMessage);
+        log: async (...args) => {
+            const logMessage = 'Action Log:' + args.map(arg => typeof arg === 'object' ? JSON.stringify(arg, null, 2) : String(arg)).join('');
+            console.log(logMessage);
+            await chat.sendMessage(logMessage);
             return logMessage;
         },
         chatId,
-        message,
+        sendMessage: chat.sendMessage.bind(chat),
         sql
     };
 }
@@ -188,6 +187,7 @@ client.on('message', async (message) => {
     if (!message.body) return;
 
     console.log('MESSAGE RECEIVED:', message.body);
+    const chat = await message.getChat();
 
     if (message.body.startsWith('!')) {
         const [rawCommand, ...args] = message.body.slice(1).split(' ');
@@ -203,7 +203,7 @@ client.on('message', async (message) => {
         console.log("executing", action.name, args);
         
         try {
-            const context = buildActionContext(message, message.from);
+            const context = await buildActionContext(chat, message.from);
             const result = await executeAction(action.name, context, { args });
             
             if (result && result.result && typeof result.result === 'string') {
@@ -224,7 +224,6 @@ client.on('message', async (message) => {
     const selfId = client.info.wid.user;
     const selfName = client.info?.pushname || /** @type {any} */ (client.info)?.name || selfId;
 
-    const chat = await message.getChat();
     const chatId = message.from;
     const time = new Date(message.timestamp * 1000).toLocaleString('en-EN', {
         year: 'numeric',
@@ -249,18 +248,16 @@ When asked to perform calculations, data analysis, or generate dynamic content:
 
 IMPORTANT JavaScript Code Requirements:
 When writing JavaScript code, you MUST always use arrow functions that receive a context parameter with these properties:
-- context.log: Function to add messages visible to the user
-- context.db: Database access with \`db.sql("SELECT ...")\` for read-only queries  
+- context.log: Async function to add messages visible to the user
+- context.sql: Database access with \`sql("SELECT ...")\` for read-only queries  
 - context.chatId: Current WhatsApp chat ID
 - context.sendMessage: Function to send additional messages to the chat
-- context.getMessages: Get recent conversation history
-- Standard utilities: Math, Date, JSON, String, Number, Array, Object
 
 Example of correct code:
 \`\`\`javascript
-async ({log, db, chatId, sendMessage}) => {
-  log('Analyzing chat activity...');
-  const messages = await db.sql("SELECT COUNT(*) as count FROM messages WHERE chat_id = $1", chatId);
+async ({log, sql, chatId, sendMessage}) => {
+  await log('Analyzing chat activity...');
+  const messages = await sql("SELECT COUNT(*) as count FROM messages WHERE chat_id = $1", chatId);
   const result = \`This chat has \${messages[0].count} messages\`;
   log('Analysis complete');
   return result;
@@ -313,12 +310,13 @@ You are in a WhatsApp chat, so use emojis and WhatsApp formatting to enhance rea
     }
 
     // Get latest messages from DB
-    const chatMessages = await sql`SELECT message, sender_id FROM messages WHERE chat_id = ${chatId} ORDER BY timestamp DESC LIMIT 20;`;
+    const chatMessages = /** @type {Array<{ message: string, sender_id: string }>} */ (await sql`SELECT message, sender_id FROM messages WHERE chat_id = ${chatId} ORDER BY timestamp DESC LIMIT 20;`);
 
     // Prepare messages for OpenAI
     const chatMessages_formatted = chatMessages.filter(x => x.message).map(({ message, sender_id }) => {
-        return /** @type {any} */ ({
+        return /** @type {import('openai/resources/index.js').ChatCompletionMessageParam} */ ({
             role: sender_id === selfId ? 'assistant' : 'user',
+            name: sender_id,
             content: message,
         })
     }).reverse();
@@ -328,14 +326,14 @@ You are in a WhatsApp chat, so use emojis and WhatsApp formatting to enhance rea
     let response;
     try {
         response = await llmClient.chat.completions.create({
-            model: /** @type {string} */ (config.model || 'gpt-3.5-turbo'),
+            model: config.model || 'gpt-3.5-turbo',
             messages: [{ role: "system", content: systemPrompt }, ...chatMessages_formatted],
             tools: actionsToOpenAIFormat(actions),
             tool_choice: "auto",
         });
     } catch (error) {
         console.error(error);
-        const errorMessage = error instanceof Error ? error.message : String(error);
+        const errorMessage = JSON.stringify(error, null, 2);
         message.reply('An error occurred while processing the message.\n\n' + errorMessage);
         return;
     }
@@ -357,14 +355,12 @@ You are in a WhatsApp chat, so use emojis and WhatsApp formatting to enhance rea
             console.log("executing", toolName, toolArgs);
             
             try {
-                const context = buildActionContext(message, chatId);
+                const context = await buildActionContext(chat, chatId);
                 const functionResponse = await executeAction(toolName, context, toolArgs);
                 console.log("response", functionResponse);
 
-                if (functionResponse && typeof functionResponse === 'string') {
-                    await sql`INSERT INTO messages(chat_id, message, sender_id) VALUES (${chatId}, ${functionResponse}, ${selfId});`;
-                    chat.sendMessage(functionResponse);
-                }
+                await sql`INSERT INTO messages(chat_id, message, sender_id) VALUES (${chatId}, ${JSON.stringify(functionResponse.result)}, ${selfId});`;
+                chat.sendMessage(JSON.stringify(functionResponse.result));
             } catch (error) {
                 console.error("Error executing tool:", error);
                 const errorMessage = `Error executing ${toolName}: ${error instanceof Error ? error.message : String(error)}`;
@@ -375,16 +371,36 @@ You are in a WhatsApp chat, so use emojis and WhatsApp formatting to enhance rea
     }
 });
 
-// Initialize everything
-async function init() {
-    try {
-        await initDatabase();
-        console.log('Database initialized');
-        client.initialize();
-    } catch (error) {
-        console.error('Initialization error:', error);
-        process.exit(1);
-    }
+async function cleanup() {
+    console.log('Cleaning up resources...');
+    await client.destroy();
+    console.log('Client closed. Closing database...');
+    await db.close();
+    console.log('Client and database closed');
 }
 
-init();
+// Initialize everything
+try {
+    await initDatabase();
+    console.log('Database initialized');
+    client.initialize();
+} catch (error) {
+    console.error('Initialization error:', error);
+    await cleanup();
+    process.exit(1);
+}
+
+process.on('SIGINT', async function() {
+    await cleanup();
+    process.exit(0);
+});
+
+process.on('SIGTERM', async function() {
+    await cleanup();
+    process.exit(0);
+});
+process.on('uncaughtException', async (error) => {
+    console.error('Uncaught Exception:', error);
+    await cleanup();
+    process.exit(1);
+});
