@@ -26,13 +26,6 @@ export async function executeAction(actionName, context, input) {
   }
 }
 
-// Log function for tools to use
-function log(...args) {
-  const message = args.join(' ');
-  console.log(...args);
-  return message;
-}
-
 /**
  * Retrieves all available actions from the actions directory
  * @returns {Promise<AppAction[]>} Array of action objects with name derived from filename

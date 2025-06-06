@@ -46,7 +46,7 @@ export default /** @type {defineAction} */ (x=>x)({
       throw new Error('Code must evaluate to a function');
     }
     try {
-      return fn(context);
+      return await fn(context);
     } catch (error) {
       console.error('Error executing function:', {code, fn, error});
       throw error;

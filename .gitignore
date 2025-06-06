@@ -2,5 +2,9 @@
 .wwebjs_auth
 node_modules
 *.db
+pgdata
 *.bck
+*.bck.js
 .env
+
+tts.mjs

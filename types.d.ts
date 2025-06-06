@@ -3,10 +3,10 @@
 /* Actions */
 
 type BaseContext = {
-    log: (...args: any[]) => string;
+    log: (...args: any[]) => void;
     sql: (strings: TemplateStringsArray, ...values: any[]) => Promise<any[]>;
     chatId: string;
-    message: any; // WhatsApp message object
+    sendMessage: import("whatsapp-web.js").Chat['sendMessage'];
 }
 
 // Define permission flags
@@ -25,7 +25,7 @@ type Context<P extends PermissionFlags = PermissionFlags> =
     & (P['usePersistentDb'] extends true ? {db: import('@electric-sql/pglite').PGlite} : {})
     & (P['useFileSystem'] extends true ? {directoryHandle: FileSystemDirectoryHandle} : {});
 
-type ActionResult = string | {} | HTMLElement
+type ActionResult = string | {}
 
 type Action<P extends PermissionFlags = PermissionFlags> = {
     name: string; // The name of the action
