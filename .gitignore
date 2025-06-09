@@ -6,5 +6,3 @@ pgdata
 *.bck
 *.bck.js
 .env
-
-tts.mjs
