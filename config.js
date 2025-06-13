@@ -2,7 +2,7 @@ import dotenv from 'dotenv';
 dotenv.config();
 
 export default {
-    admin_id: process.env.ADMIN_ID,
+    MASTER_ID: process.env.MASTER_ID,
     model: process.env.MODEL,
     llm_api_key: process.env.LLM_API_KEY, 
     base_url: process.env.BASE_URL,
