@@ -23,7 +23,7 @@ This is a WhatsApp bot that integrates with LLMs to provide conversational AI an
 - **Database**: PGlite (PostgreSQL in WebAssembly) for modern SQL support with persistence
 - **JavaScript Execution**: Secure VM-based sandboxing for running user-provided JavaScript code
 - **Media Processing**: Spawns `yt-dlp` and `ffmpeg` processes for video/audio downloading and conversion
-- **Permission System**: Admin-only commands controlled by `ADMIN_ID` environment variable
+- **Permission System**: Admin-only commands controlled by `MASTER_ID` environment variable
 - **Chat Management**: Per-chat enable/disable system to control bot responses
 
 ### Command System
@@ -52,7 +52,7 @@ node index.js
 Required environment variables (create `.env` file):
 ```bash
 LLM_API_KEY=your-openai-api-key
-ADMIN_ID=your-whatsapp-user-id
+MASTER_ID=your-whatsapp-user-id
 MODEL=gpt-4  # or other model
 BASE_URL=https://api.openai.com/v1  # optional, for custom endpoints
 SYSTEM_PROMPT="custom prompt"  # optional

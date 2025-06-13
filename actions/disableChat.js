@@ -8,31 +8,20 @@ export default /** @type {defineAction} */ (x=>x)({
       chatId: {
         type: "string",
         description: "Chat ID to disable (defaults to current chat if not provided)",
-      },
-      args: {
-        type: "array",
-        description: "Command line arguments (for !disable command)",
-        items: { type: "string" }
       }
     },
     required: [],
   },
   permissions: {
     autoExecute: true,
-    requireAdmin: true
+    requireRoot: true,
+    useRootDb: true,
   },
-  /**
-   * Disable chat for bot responses
-   * @param {Context} context - The context object
-   * @param {{chatId?: string, args?: string[]}} params - Parameters
-   * @returns {Promise<string>} Success message
-   */
-  action_fn: async function (context, params) {
-    const { message, sql } = context;
-    const chatId = params.chatId || (params.args && params.args[0]) || message.from;
-    
+  action_fn: async function ({ chat, rootDb }, params) {
+    const chatId = params.chatId || chat.chatId;
+
     // First check if chat exists
-    const [chatExists] = await sql`SELECT chat_id FROM chats WHERE chat_id = ${chatId}`;
+    const { rows: [chatExists] } = await rootDb.sql`SELECT chat_id FROM chats WHERE chat_id = ${chatId}`;
 
     if (!chatExists) {
       throw new Error(`Chat ${chatId} does not exist.`);
@@ -40,8 +29,8 @@ export default /** @type {defineAction} */ (x=>x)({
     
     // If chat exists, update its is_enabled status
     try {
-      await sql`
-        UPDATE chats 
+      await rootDb.sql`
+        UPDATE chats
         SET is_enabled = FALSE
         WHERE chat_id = ${chatId}
       `;

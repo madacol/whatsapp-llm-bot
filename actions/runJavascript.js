@@ -1,5 +1,3 @@
-
-
 export default /** @type {defineAction} */ (x=>x)({
   name: "run_javascript",
   command: "js",
@@ -10,28 +8,16 @@ export default /** @type {defineAction} */ (x=>x)({
       code: {
         type: "string",
         description: "JavaScript code to execute (must be an arrow function that accepts a context parameter). Example: '({log, db, chatId}) => { log(\"Processing\"); return \"result\"; }'",
-      },
-      args: {
-        type: "array",
-        description: "Command line arguments (for !js command)",
-        items: { type: "string" }
       }
     },
-    required: [],
+    required: ['code'],
   },
   permissions: {
     autoExecute: true
   },
-  /**
-   * Execute JavaScript code
-   * @param {Context} context - The context object
-   * @param {{code?: string, args?: string[]}} params - code to execute as an arrow function
-   * @returns {Promise<any>} The result of execution
-   */
-  action_fn: async function (context, params) {
+  action_fn: async function (context, {code}) {
     // Handle both command args and LLM function call formats
-    const code = params.code || (params.args && params.args.join(' '));
-    console.log('Executing JavaScript code:', code);
+    console.log('Executing JavaScript code:', JSON.stringify(code, null, 2));
   
     let fn;
     try {

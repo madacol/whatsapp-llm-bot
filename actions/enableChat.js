@@ -1,5 +1,3 @@
-
-
 export default /** @type {defineAction} */ (x=>x)({
   name: "enable_chat",
   command: "enable",
@@ -10,31 +8,23 @@ export default /** @type {defineAction} */ (x=>x)({
       chatId: {
         type: "string",
         description: "Chat ID to enable (defaults to current chat if not provided)",
-      },
-      args: {
-        type: "array",
-        description: "Command line arguments (for !enable command)",
-        items: { type: "string" }
       }
     },
     required: [],
   },
   permissions: {
     autoExecute: true,
-    requireAdmin: true
+    requireRoot: true,
+    usePersistentDb: true,
+    useRootDb: true,
   },
-  /**
-   * Enable chat for bot responses
-   * @param {Context} context - The context object
-   * @param {{chatId?: string, args?: string[]}} params - Parameters
-   * @returns {Promise<string>} Success message
-   */
-  action_fn: async function (context, params) {
-    const { message, sql } = context;
-    const chatId = params.chatId || (params.args && params.args[0]) || message.from;
-    
+  action_fn: async function ({ chat, rootDb }, {chatId: paramsChatId}) {
+    const chatId = paramsChatId || chat.chatId;
+    if (!chatId) {
+      throw new Error("Chat ID must be provided or inferred from the message context.");
+    }
     // First check if chat exists
-    const [chatExists] = await sql`SELECT chat_id FROM chats WHERE chat_id = ${chatId}`;
+    const {rows: [chatExists]} = await rootDb.sql`SELECT chat_id FROM chats WHERE chat_id = ${chatId}`;
 
     if (!chatExists) {
       throw new Error(`Chat ${chatId} does not exist.`);
@@ -42,13 +32,13 @@ export default /** @type {defineAction} */ (x=>x)({
     
     // If chat exists, update its is_enabled status
     try {
-      await sql`
-        UPDATE chats 
+      await rootDb.sql`
+        UPDATE chats
         SET is_enabled = TRUE
         WHERE chat_id = ${chatId}
       `;
-      
-      return `LLM answers enabled for chat ${chatId}`;
+
+      chat.sendMessage(`LLM answers enabled for chat ${chatId}`);
     } catch (error) {
       console.error("Error enabling chat:", error);
       const errorMessage = error instanceof Error ? error.message : String(error);
