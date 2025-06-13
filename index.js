@@ -234,17 +234,24 @@ When asked to perform calculations, data analysis, or generate dynamic content:
 IMPORTANT JavaScript Code Requirements:
 When writing JavaScript code, you MUST always use arrow functions that receive a context parameter with these properties:
 - context.log: Async function to add messages visible to the user
-- context.sql: Database access with \`sql("SELECT ...")\` for read-only queries  
-- context.chatId: Current WhatsApp chat ID
-- context.sendMessage: Function to send additional messages to the chat
+- context.sessionDb.sql: queries a postgres database for current conversation, call it with template literals like context.sessionDb.sql\`SELECT * FROM table WHERE id = \${id}\`
+- context.chat.sendMessage: Function to send additional messages to the chat
 
-Example of correct code:
+Example code:
 \`\`\`javascript
-async ({log, sql, chatId, sendMessage}) => {
+async ({log, sessionDb, chat}) => {
   await log('Analyzing chat activity...');
-  const messages = await sql("SELECT COUNT(*) as count FROM messages WHERE chat_id = $1", chatId);
-  const result = \`This chat has \${messages[0].count} messages\`;
+  const {rows: messages} = await sessionDb.sql\`SELECT * FROM messages WHERE chat_id = \${chat.chatId}\`;
+  const result = \`This chat has \${messages.length} messages\`;
   log('Analysis complete');
+
+  // Send result to chat
+  // chat.sendMessage(result);
+
+  // Reply with the result
+  // message.reply(result);
+
+  // Or just return the result, which replies it by default
   return result;
 }
 \`\`\`
@@ -252,8 +259,7 @@ async ({log, sql, chatId, sendMessage}) => {
 This format is strictly required for all JavaScript code execution.
 
 Additional context: ${config.system_prompt}
-
-You are in a WhatsApp chat, so use emojis and WhatsApp formatting to enhance readability.`;
+`;
     
     if (chat.isGroup) {
         // Handle quoted messages
