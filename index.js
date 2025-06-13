@@ -9,6 +9,7 @@ import OpenAI from 'openai';
 import { getActions, executeAction } from './actions.js';
 import config from './config.js';
 import { getDb } from './db.js';
+import { readFile } from 'fs/promises';
 
 // Initialize database
 const db = getDb('./pgdata/root');
@@ -222,6 +223,7 @@ client.on('message', async (message) => {
     await db.sql`INSERT INTO chats(chat_id) VALUES (${chatId}) ON CONFLICT (chat_id) DO NOTHING;`;
 
     let messageBody_formatted;
+    const typesFileContent = await readFile('./types.d.ts', {encoding: 'utf-8', flag: 'r'});
     let systemPrompt = `You are ${selfName}, a helpful AI assistant that can execute JavaScript code in a WhatsApp chat environment.
 Use the \`run_javascript\` action for computational tasks, data analysis, and dynamic responses.
 All JavaScript code runs on the server and has access to the chat database and context.
@@ -254,6 +256,12 @@ async ({log, sessionDb, chat}) => {
   // Or just return the result, which replies it by default
   return result;
 }
+\`\`\`
+
+This is the currently used TypeScript type definitions for the context parameter:
+
+\`\`\`typescript
+${typesFileContent}
 \`\`\`
 
 This format is strictly required for all JavaScript code execution.
