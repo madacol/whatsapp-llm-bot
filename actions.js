@@ -1,6 +1,7 @@
 import fs from 'fs/promises';
 import path from 'path';
 import { getDb } from './db.js';
+import config from './config.js';
 
 const currentSessionDb = getDb("memory://");
 
@@ -16,6 +17,14 @@ export async function executeAction(actionName, chatContext, messageContext, inp
   const action = await getAction(actionName);
   if (!action) {
     throw new Error(`Action "${actionName}" not found`);
+  }
+
+  if (action.permissions?.requireAdmin && !messageContext.isAdmin) {
+    throw new Error(`Action "${actionName}" requires admin permissions`);
+  }
+
+  if (action.permissions?.requireRoot && (messageContext.senderId !== config.MASTER_ID) ) {
+    throw new Error(`Action "${actionName}" requires master permissions`);
   }
 
   const context = {
@@ -41,7 +50,7 @@ export async function executeAction(actionName, chatContext, messageContext, inp
       throw error;
     }
   }
-  
+
   throw new Error(`Action "${actionName}" requires confirmation, which is not yet implemented in this environment.`);
 // Log function for tools to use
 function log(...args) {
