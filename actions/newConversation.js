@@ -1,5 +1,3 @@
-
-
 export default /** @type {defineAction} */ (x=>x)({
   name: "new_conversation",
   command: "new",
@@ -10,19 +8,14 @@ export default /** @type {defineAction} */ (x=>x)({
     required: [],
   },
   permissions: {
-    autoExecute: true
+    requireAdmin: true,
+    autoExecute: true,
+    useChatDb: true,
   },
-  /**
-   * Clear conversation history
-   * @param {Context} context - The context object
-   * @param {{}} params - No parameters needed
-   * @returns {Promise<string>} Success message
-   */
-  action_fn: async function (context, params) {
-    const { chatId, sql } = context;
-    
+  action_fn: async function ({ chat, chatDb }) {
+
     try {
-      await sql`DELETE FROM messages WHERE chat_id = ${chatId}`;
+      await chatDb.sql`DELETE FROM messages WHERE chat_id = ${chat.chatId}`;
       return "🗑️ Conversation history cleared!";
     } catch (error) {
       console.error("Error clearing conversation:", error);

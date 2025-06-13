@@ -5,13 +5,13 @@
 import whatsapp from 'whatsapp-web.js';
 const { Client, LocalAuth } = whatsapp;
 import { exec } from 'child_process';
-import { PGlite } from '@electric-sql/pglite';
 import OpenAI from 'openai';
 import { getActions, executeAction } from './actions.js';
 import config from './config.js';
+import { getDb } from './db.js';
 
 // Initialize database
-const db = new PGlite('./pgdata');
+const db = getDb('./pgdata/root');
 
 // Initialize LLM client
 const llmClient = new OpenAI({
@@ -39,17 +39,6 @@ async function initDatabase() {
         );
     `;
 }
-
-/**
- * SQL template literal function (using PGlite)
- * @param {TemplateStringsArray} strings
- * @param {...any} values
- * @returns {Promise<any[]>}
- */
-const sql = async (strings, ...values) => {
-    const result = await db.sql(strings, ...values);
-    return result.rows;
-};
 
 // Initialize WhatsApp client
 const client = new Client({
@@ -126,7 +115,7 @@ async function shouldRespond(message, selfId, isGroup) {
     const chatId = message.from;
 
     // Check if chat is enabled
-    const [chatInfo] = await sql`SELECT is_enabled FROM chats WHERE chat_id = ${chatId}`;
+    const {rows: [chatInfo]} = await db.sql`SELECT is_enabled FROM chats WHERE chat_id = ${chatId}`;
     if (!chatInfo?.is_enabled) {
         return false;
     }
@@ -163,31 +152,28 @@ async function replaceMentionsWithNames(message) {
     return modifiedMessage;
 }
 
-/**
- * Build action context for execution
- * @param {import('whatsapp-web.js').Chat} chat
- * @param {string} chatId
- */
-async function buildActionContext(chat, chatId) {
-    return {
-        log: async (...args) => {
-            const logMessage = 'Action Log:' + args.map(arg => typeof arg === 'object' ? JSON.stringify(arg, null, 2) : String(arg)).join('');
-            console.log(logMessage);
-            await chat.sendMessage(logMessage);
-            return logMessage;
-        },
-        chatId,
-        sendMessage: chat.sendMessage.bind(chat),
-        sql
-    };
-}
-
 // Main message handler
 client.on('message', async (message) => {
     if (!message.body) return;
 
     console.log('MESSAGE RECEIVED:', message.body);
     const chat = await message.getChat();
+
+    /** @type {ChatContext} */
+    const chatContext = {
+        chatId: message.from,
+        sendMessage: (msg) => chat.sendMessage(msg),
+    }
+
+    /** @type {MessageContext} */
+    const messageContext = {
+        senderId: (await message.getContact()).id.user,
+        content: message.body,
+        isAdmin: chat.isGroup
+            ? false //(await chat. getContact()). .some(p => p.id.user === ((await message.getContact()).id.user) && p.isAdmin)
+            : true,
+        reply: (msg) => message.reply(msg),
+    }
 
     if (message.body.startsWith('!')) {
         const [rawCommand, ...args] = message.body.slice(1).split(' ');
@@ -196,23 +182,22 @@ client.on('message', async (message) => {
         const action = actionsByCommand.get(command);
         
         if (!action) {
-            message.reply(`Unknown command: ${command}`);
+            messageContext.reply(`Unknown command: ${command}`);
             return;
         }
 
         console.log("executing", action.name, args);
         
         try {
-            const context = await buildActionContext(chat, message.from);
-            const result = await executeAction(action.name, context, { args });
+            const result = await executeAction(action.name, chatContext, messageContext, { args });
             
             if (result && result.result && typeof result.result === 'string') {
-                await message.reply(result.result);
+                await messageContext.reply(result.result);
             }
         } catch (error) {
             console.error("Error executing command:", error);
             const errorMessage = error instanceof Error ? error.message : String(error);
-            await message.reply(`Error: ${errorMessage}`);
+            await messageContext.reply(`Error: ${errorMessage}`);
         }
         
         return;
@@ -234,7 +219,7 @@ client.on('message', async (message) => {
     });
 
     // Insert chatId into DB if not already present
-    await sql`INSERT INTO chats(chat_id) VALUES (${chatId}) ON CONFLICT (chat_id) DO NOTHING;`;
+    await db.sql`INSERT INTO chats(chat_id) VALUES (${chatId}) ON CONFLICT (chat_id) DO NOTHING;`;
 
     let messageBody_formatted;
     let systemPrompt = `You are ${selfName}, a helpful AI assistant that can execute JavaScript code in a WhatsApp chat environment.
@@ -302,7 +287,7 @@ You are in a WhatsApp chat, so use emojis and WhatsApp formatting to enhance rea
     console.log({ messageBody_formatted });
 
     // Insert message into DB
-    await sql`INSERT INTO messages(chat_id, message, sender_id) VALUES (${chatId}, ${messageBody_formatted}, ${contact.id.user});`;
+    await db.sql`INSERT INTO messages(chat_id, message, sender_id) VALUES (${chatId}, ${messageBody_formatted}, ${contact.id.user});`;
 
     // Check if should respond
     if (!await shouldRespond(message, selfId, chat.isGroup)) {
@@ -310,7 +295,7 @@ You are in a WhatsApp chat, so use emojis and WhatsApp formatting to enhance rea
     }
 
     // Get latest messages from DB
-    const chatMessages = /** @type {Array<{ message: string, sender_id: string }>} */ (await sql`SELECT message, sender_id FROM messages WHERE chat_id = ${chatId} ORDER BY timestamp DESC LIMIT 20;`);
+    const {rows: chatMessages} = /** @type {{rows: Array<{ message: string, sender_id: string }>}} */ (await db.sql`SELECT message, sender_id FROM messages WHERE chat_id = ${chatId} ORDER BY timestamp DESC LIMIT 20;`);
 
     // Prepare messages for OpenAI
     const chatMessages_formatted = chatMessages.filter(x => x.message).map(({ message, sender_id }) => {
@@ -334,7 +319,7 @@ You are in a WhatsApp chat, so use emojis and WhatsApp formatting to enhance rea
     } catch (error) {
         console.error(error);
         const errorMessage = JSON.stringify(error, null, 2);
-        message.reply('An error occurred while processing the message.\n\n' + errorMessage);
+        messageContext.reply('An error occurred while processing the message.\n\n' + errorMessage);
         return;
     }
 
@@ -343,9 +328,9 @@ You are in a WhatsApp chat, so use emojis and WhatsApp formatting to enhance rea
     const responseMessage = response.choices[0].message;
 
     if (responseMessage.content) {
-        await sql`INSERT INTO messages(chat_id, message, sender_id) VALUES (${chatId}, ${responseMessage.content}, ${selfId});`;
+        await db.sql`INSERT INTO messages(chat_id, message, sender_id) VALUES (${chatId}, ${responseMessage.content}, ${selfId});`;
         console.log('RESPONSE SENT:', responseMessage.content);
-        message.reply(responseMessage.content);
+        messageContext.reply(responseMessage.content);
     }
 
     if (responseMessage.tool_calls) {
@@ -355,17 +340,16 @@ You are in a WhatsApp chat, so use emojis and WhatsApp formatting to enhance rea
             console.log("executing", toolName, toolArgs);
             
             try {
-                const context = await buildActionContext(chat, chatId);
-                const functionResponse = await executeAction(toolName, context, toolArgs);
+                const functionResponse = await executeAction(toolName, chatContext, messageContext, toolArgs);
                 console.log("response", functionResponse);
 
-                await sql`INSERT INTO messages(chat_id, message, sender_id) VALUES (${chatId}, ${JSON.stringify(functionResponse.result)}, ${selfId});`;
-                chat.sendMessage(JSON.stringify(functionResponse.result));
+                await db.sql`INSERT INTO messages(chat_id, message, sender_id) VALUES (${chatId}, ${JSON.stringify(functionResponse.result)}, ${selfId});`;
+                chatContext.sendMessage(JSON.stringify(functionResponse.result));
             } catch (error) {
                 console.error("Error executing tool:", error);
                 const errorMessage = `Error executing ${toolName}: ${error instanceof Error ? error.message : String(error)}`;
-                await sql`INSERT INTO messages(chat_id, message, sender_id) VALUES (${chatId}, ${errorMessage}, ${selfId});`;
-                chat.sendMessage(errorMessage);
+                await db.sql`INSERT INTO messages(chat_id, message, sender_id) VALUES (${chatId}, ${errorMessage}, ${selfId});`;
+                chatContext.sendMessage(errorMessage);
             }
         }
     }
