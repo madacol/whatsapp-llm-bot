@@ -2,8 +2,7 @@
  * WhatsApp LLM Bot with JavaScript execution capabilities
  */
 
-import whatsapp from 'whatsapp-web.js';
-const { Client, LocalAuth } = whatsapp;
+import { makeWASocket, useMultiFileAuthState } from '@whiskeysockets/baileys';
 import { exec } from 'child_process';
 import OpenAI from 'openai';
 import { getActions, executeAction } from './actions.js';
@@ -42,33 +41,61 @@ async function initDatabase() {
 }
 
 // Initialize WhatsApp client
-const client = new Client({
-    authStrategy: new LocalAuth(),
-    puppeteer: {
-        headless: true,
-        executablePath: 'chromium',
-    },
-});
+let sock;
+let selfId;
 
-// Event listener for QR code
-client.on('qr', (qr) => {
-    exec(`echo "${qr}" | qrencode -t ansiutf8`, (error, stdout, stderr) => {
-        if (error) {
-            console.error(error);
-            console.error(stderr);
-            return;
+async function connectToWhatsApp() {
+    const { state, saveCreds } = await useMultiFileAuthState('./auth_info_baileys');
+    
+    sock = makeWASocket({
+        auth: state,
+        browser: ['WhatsApp LLM Bot', 'Chrome', '1.0.0']
+    });
+    
+    sock.ev.process(
+        async (events) => {
+            if (events['connection.update']) {
+                const update = events['connection.update'];
+                const { connection, lastDisconnect, qr } = update;
+                
+                if (qr) {
+                    exec(`echo "${qr}" | qrencode -t ansiutf8`, (error, stdout, stderr) => {
+                        if (error) {
+                            console.error(error);
+                            console.error(stderr);
+                            return;
+                        }
+                        console.log(stdout);
+                    });
+                }
+                
+                if (connection === 'close') {
+                    const shouldReconnect = lastDisconnect?.error?.message !== 'logged out';
+                    console.log('Connection closed due to ', lastDisconnect?.error, ', reconnecting ', shouldReconnect);
+                    if (shouldReconnect) {
+                        await connectToWhatsApp();
+                    }
+                } else if (connection === 'open') {
+                    console.log('WhatsApp connection opened');
+                    selfId = sock.user?.id?.split(':')[0] || sock.user?.id;
+                    console.log('Self ID:', selfId);
+                }
+            }
+            
+            if (events['creds.update']) {
+                await saveCreds();
+            }
+            
+            if (events['messages.upsert']) {
+                const { messages } = events['messages.upsert'];
+                for (const message of messages) {
+                    if (message.key.fromMe || !message.message) continue;
+                    await handleMessage(message);
+                }
+            }
         }
-        console.log(stdout);
-    })
-});
-
-client.on('ready', () => {
-    console.log('Client is ready');
-});
-
-client.on('authenticated', (session) => {
-    console.log('Client is authenticated');
-});
+    );
+}
 
 // Load actions
 /** @type {Action[]} */
@@ -107,13 +134,13 @@ function actionsToOpenAIFormat(actions) {
 
 /**
  * Check if the bot should respond to a message
- * @param {WhatsAppMessage} message
+ * @param {BaileysMessage} message
  * @param {string} selfId
  * @param {boolean} isGroup
  * @returns {Promise<boolean>}
  */
 async function shouldRespond(message, selfId, isGroup) {
-    const chatId = message.from;
+    const chatId = message.key.remoteJid;
 
     // Check if chat is enabled
     const {rows: [chatInfo]} = await db.sql`SELECT is_enabled FROM chats WHERE chat_id = ${chatId}`;
@@ -126,8 +153,9 @@ async function shouldRespond(message, selfId, isGroup) {
         return true;
     }
 
-    // Respond if I have been mentioned
-    if (message.mentionedIds.some(contactId => String(contactId).startsWith(selfId))) {
+    // Respond if I have been mentioned (check for mentions in Baileys format)
+    const mentions = message.message?.extendedTextMessage?.contextInfo?.mentionedJid || [];
+    if (mentions.some(contactId => String(contactId).startsWith(selfId))) {
         return true;
     }
 
@@ -136,48 +164,69 @@ async function shouldRespond(message, selfId, isGroup) {
 
 /**
  * Replace mentions with names in message
- * @param {WhatsAppMessage} message
+ * @param {BaileysMessage} message
  * @returns {Promise<string>}
  */
 async function replaceMentionsWithNames(message) {
-    let modifiedMessage = message.body;
-    const mentionedContacts = await message.getMentions();
-
-    for (const contact of mentionedContacts) {
-        const contactId = contact.id.user;
-        const contactName = contact.pushname || contact.name || contactId;
+    // Get message content from Baileys format
+    const messageContent = message.message?.conversation || 
+                          message.message?.extendedTextMessage?.text || '';
+    
+    // Get mentions from Baileys format
+    const mentions = message.message?.extendedTextMessage?.contextInfo?.mentionedJid || [];
+    
+    let modifiedMessage = messageContent;
+    
+    for (const mentionedJid of mentions) {
+        const contactId = mentionedJid.split('@')[0];
+        // For now, just use the contact ID as the name since we don't have contact info
         const mentionPattern = new RegExp(`@${contactId}`, 'g');
-        modifiedMessage = modifiedMessage.replace(mentionPattern, `@${contactName}`);
+        modifiedMessage = modifiedMessage.replace(mentionPattern, `@${contactId}`);
     }
 
     return modifiedMessage;
 }
 
-// Main message handler
-client.on('message', async (message) => {
-    if (!message.body) return;
+/**
+ * 
+ * @param {BaileysMessage} message 
+ * @returns 
+ */
+async function handleMessage(message) {
+    // Extract message content from Baileys format
+    const messageContent = message.message?.conversation || 
+                          message.message?.extendedTextMessage?.text || 
+                          message.message?.imageMessage?.caption ||
+                          message.message?.videoMessage?.caption || '';
+    
+    if (!messageContent) return;
 
-    console.log('MESSAGE RECEIVED:', message.body);
-    const chat = await message.getChat();
+    console.log('MESSAGE RECEIVED:', messageContent);
+    
+    const chatId = message.key.remoteJid;
+    const senderId = message.key.participant || message.key.remoteJid;
+    const isGroup = chatId.endsWith('@g.us');
 
     /** @type {ChatContext} */
     const chatContext = {
-        chatId: message.from,
-        sendMessage: (msg) => chat.sendMessage(msg),
+        chatId: chatId,
+        sendMessage: async (msg) => {
+            await sock.sendMessage(chatId, { text: msg });
+        },
     }
 
     /** @type {MessageContext} */
     const messageContext = {
-        senderId: (await message.getContact()).id.user,
-        content: message.body,
-        isAdmin: chat.isGroup
-            ? false //(await chat. getContact()). .some(p => p.id.user === ((await message.getContact()).id.user) && p.isAdmin)
-            : true,
-        reply: (msg) => message.reply(msg),
+        senderId: senderId.split('@')[0],
+        content: messageContent,
+        isAdmin: !isGroup, // Simplified for now
+        reply: async (msg) => {
+            await sock.sendMessage(chatId, { text: msg }, { quoted: message });
+        },
     }
 
-    if (message.body.startsWith('!')) {
-        const [rawCommand, ...args] = message.body.slice(1).split(' ');
+    if (messageContent.startsWith('!')) {
+        const [rawCommand, ...args] = messageContent.slice(1).split(' ');
         const command = rawCommand.toLowerCase();
         
         const action = actionsByCommand.get(command);
@@ -204,14 +253,19 @@ client.on('message', async (message) => {
         return;
     }
 
-    const contact = await message.getContact();
-    const senderName = contact.pushname || contact.name || contact.id.user;
+    // Extract sender info from Baileys message
+    const senderName = message.pushName || senderId.split('@')[0];
 
-    const selfId = client.info.wid.user;
-    const selfName = client.info?.pushname || /** @type {any} */ (client.info)?.name || selfId;
-
-    const chatId = message.from;
-    const time = new Date(message.timestamp * 1000).toLocaleString('en-EN', {
+    // Use the global selfId
+    const selfName = sock.user?.name || selfId;
+    /** @type {number} */
+    let unixTime_ms;
+    if (typeof message.messageTimestamp === 'number') {
+        unixTime_ms = message.messageTimestamp * 1000
+    } else {
+        unixTime_ms = message.messageTimestamp.toNumber() * 1000
+    }
+    const time = new Date(unixTime_ms).toLocaleString('en-EN', {
         year: 'numeric',
         month: '2-digit',
         day: '2-digit',
@@ -269,42 +323,47 @@ This format is strictly required for all JavaScript code execution.
 Additional context: ${config.system_prompt}
 `;
     
-    if (chat.isGroup) {
-        // Handle quoted messages
-        if (message.hasQuotedMsg) {
-            const quotedMsg = await message.getQuotedMessage();
-            const quotedContact = await quotedMsg.getContact();
-            const quotedSenderName = quotedContact.pushname || quotedContact.name || quotedContact.id.user;
-            const quotedTime = new Date(quotedMsg.timestamp * 1000).toLocaleString('en-EN', {
+    if (isGroup) {
+        // Handle quoted messages (Baileys format)
+        const quotedMessage = message.message?.extendedTextMessage?.contextInfo?.quotedMessage;
+        if (quotedMessage) {
+            const quotedContent = quotedMessage.conversation || 
+                                quotedMessage.extendedTextMessage?.text || 
+                                quotedMessage.imageMessage?.caption || '';
+            const quotedSender = message.message?.extendedTextMessage?.contextInfo?.participant?.split('@')[0] || 'Unknown';
+            const quotedTime = new Date((typeof message.messageTimestamp === 'number' ? message.messageTimestamp : message.messageTimestamp.toNumber()) * 1000).toLocaleString('en-EN', {
                 year: 'numeric',
                 month: '2-digit',
                 day: '2-digit',
                 hour: '2-digit',
                 minute: '2-digit',
             });
-            messageBody_formatted = `> [${quotedTime}] ${quotedSenderName}: ${quotedMsg.body.trim().replace("\n", "\n>")}\n`;
+            messageBody_formatted = `> [${quotedTime}] ${quotedSender}: ${quotedContent.trim().replace("\n", "\n>")}\n`;
         } else {
             messageBody_formatted = '';
         }
 
         // Remove mention of self from start of message
         const mentionPattern = new RegExp(`^@${selfId} *`, 'g');
-        message.body = message.body.replace(mentionPattern, '');
+        const cleanedContent = messageContent.replace(mentionPattern, '');
 
-        const modifiedMessage = await replaceMentionsWithNames(message);
-        messageBody_formatted += `[${time}] ${senderName}: ${modifiedMessage}`;
-        systemPrompt += ` and you are in a group chat called "${chat.name}"`;
+        // TODO: Implement mention replacement for Baileys
+        // const modifiedMessage = await replaceMentionsWithNames(message);
+        messageBody_formatted += `[${time}] ${senderName}: ${cleanedContent}`;
+        // TODO: Get group chat name from Baileys
+        systemPrompt += ` and you are in a group chat`;
     } else {
-        messageBody_formatted = `[${time}] ${await replaceMentionsWithNames(message)}`;
+        // TODO: Implement mention replacement for Baileys
+        messageBody_formatted = `[${time}] ${messageContent}`;
     }
 
     console.log({ messageBody_formatted });
 
     // Insert message into DB
-    await db.sql`INSERT INTO messages(chat_id, message, sender_id) VALUES (${chatId}, ${messageBody_formatted}, ${contact.id.user});`;
+    await db.sql`INSERT INTO messages(chat_id, message, sender_id) VALUES (${chatId}, ${messageBody_formatted}, ${senderId.split('@')[0]});`;
 
     // Check if should respond
-    if (!await shouldRespond(message, selfId, chat.isGroup)) {
+    if (!await shouldRespond(message, selfId, isGroup)) {
         return;
     }
 
@@ -367,21 +426,25 @@ Additional context: ${config.system_prompt}
             }
         }
     }
-});
+}
 
 async function cleanup() {
     console.log('Cleaning up resources...');
-    await client.destroy();
-    console.log('Client closed. Closing database...');
+    try { 
+        if (sock) {
+            sock.end();
+        }
+    } catch (error) {}
+    console.log('Socket closed. Closing database...');
     await db.close();
-    console.log('Client and database closed');
+    console.log('Socket and database closed');
 }
 
 // Initialize everything
 try {
     await initDatabase();
     console.log('Database initialized');
-    client.initialize();
+    await connectToWhatsApp();
 } catch (error) {
     console.error('Initialization error:', error);
     await cleanup();
