@@ -10,12 +10,12 @@ export default /** @type {defineAction} */ (x=>x)({
   permissions: {
     requireAdmin: true,
     autoExecute: true,
-    useChatDb: true,
+    useRootDb: true,
   },
-  action_fn: async function ({ chat, chatDb }) {
+  action_fn: async function ({ chat, rootDb }) {
 
     try {
-      await chatDb.sql`DELETE FROM messages WHERE chat_id = ${chat.chatId}`;
+      await rootDb.sql`DELETE FROM messages WHERE chat_id = ${chat.chatId}`;
       return "🗑️ Conversation history cleared!";
     } catch (error) {
       console.error("Error clearing conversation:", error);
