@@ -219,7 +219,17 @@ async function handleMessage(message) {
     const messageContext = {
         senderId: senderId.split('@')[0],
         content: messageContent,
-        isAdmin: !isGroup, // Simplified for now
+        isAdmin: await (async () => {
+            if (!isGroup) return true;
+            try {
+                const groupMetadata = await sock.groupMetadata(chatId);
+                const participant = groupMetadata.participants.find(p => p.id === senderId);
+                return participant?.admin === 'admin' || participant?.admin === 'superadmin';
+            } catch (error) {
+                console.error('Error checking group admin status:', error);
+                return false;
+            }
+        })(),
         reply: async (msg) => {
             await sock.sendMessage(chatId, { text: msg }, { quoted: message });
         },
