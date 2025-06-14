@@ -6,3 +6,4 @@ pgdata
 *.bck
 *.bck.js
 .env
+auth_info_baileys
