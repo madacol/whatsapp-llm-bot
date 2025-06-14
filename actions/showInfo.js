@@ -21,13 +21,13 @@ export default /** @type {defineAction} */ (x => x)({
       throw new Error(`Chat ${chatId} does not exist.`);
     }
 
-    const isEnabled = chatInfo.is_enabled ? 'enabled' : 'disabled';
+    const status = chatInfo.is_enabled ? 'enabled' : 'disabled';
 
     let info = `Chat Information:\n`;
     info += `- Chat ID: ${chatId}\n`;
     // info += `- Chat Name: ${chat.name || 'Private Chat'}\n`;
     // info += `- Type: ${chat.isGroup ? 'Group' : 'Private'}\n`;
-    info += `- enabled: ${isEnabled}`;
+    info += `- status: ${status}`;
 
     return info;
   }
