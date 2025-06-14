@@ -12,8 +12,7 @@ export default /** @type {defineAction} */ (x => x)({
     requireRoot: true,
     useRootDb: true,
   },
-  action_fn: async function ({ chat, message, rootDb }) {
-    const chatId = chat.chatId;
+  action_fn: async function ({ chatId, rootDb }) {
 
     // Get chat enabled status
     const { rows: [chatInfo] } = await rootDb.sql`SELECT is_enabled FROM chats WHERE chat_id = ${chatId}`;

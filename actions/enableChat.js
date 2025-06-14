@@ -15,19 +15,16 @@ export default /** @type {defineAction} */ (x=>x)({
   permissions: {
     autoExecute: true,
     requireRoot: true,
-    usePersistentDb: true,
     useRootDb: true,
   },
-  action_fn: async function ({ chat, rootDb }, {chatId: paramsChatId}) {
-    const chatId = paramsChatId || chat.chatId;
-    if (!chatId) {
-      throw new Error("Chat ID must be provided or inferred from the message context.");
-    }
+  action_fn: async function ({ chatId, rootDb }, params) {
+    const targetChatId = params.chatId || chatId;
+
     // First check if chat exists
-    const {rows: [chatExists]} = await rootDb.sql`SELECT chat_id FROM chats WHERE chat_id = ${chatId}`;
+    const {rows: [chatExists]} = await rootDb.sql`SELECT chat_id FROM chats WHERE chat_id = ${targetChatId}`;
 
     if (!chatExists) {
-      throw new Error(`Chat ${chatId} does not exist.`);
+      throw new Error(`Chat ${targetChatId} does not exist.`);
     }
     
     // If chat exists, update its is_enabled status
@@ -35,10 +32,10 @@ export default /** @type {defineAction} */ (x=>x)({
       await rootDb.sql`
         UPDATE chats
         SET is_enabled = TRUE
-        WHERE chat_id = ${chatId}
+        WHERE chat_id = ${targetChatId}
       `;
 
-      chat.sendMessage(`LLM answers enabled for chat ${chatId}`);
+      return `LLM answers enabled for chat ${targetChatId}`;
     } catch (error) {
       console.error("Error enabling chat:", error);
       const errorMessage = error instanceof Error ? error.message : String(error);

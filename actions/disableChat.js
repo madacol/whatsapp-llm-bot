@@ -17,14 +17,14 @@ export default /** @type {defineAction} */ (x=>x)({
     requireRoot: true,
     useRootDb: true,
   },
-  action_fn: async function ({ chat, rootDb }, params) {
-    const chatId = params.chatId || chat.chatId;
+  action_fn: async function ({ chatId, rootDb }, params) {
+    const targetChatId = params.chatId || chatId;
 
     // First check if chat exists
-    const { rows: [chatExists] } = await rootDb.sql`SELECT chat_id FROM chats WHERE chat_id = ${chatId}`;
+    const {rows: [chatExists]} = await rootDb.sql`SELECT chat_id FROM chats WHERE chat_id = ${targetChatId}`;
 
     if (!chatExists) {
-      throw new Error(`Chat ${chatId} does not exist.`);
+      throw new Error(`Chat ${targetChatId} does not exist.`);
     }
     
     // If chat exists, update its is_enabled status
@@ -32,10 +32,10 @@ export default /** @type {defineAction} */ (x=>x)({
       await rootDb.sql`
         UPDATE chats
         SET is_enabled = FALSE
-        WHERE chat_id = ${chatId}
+        WHERE chat_id = ${targetChatId}
       `;
       
-      return `LLM answers disabled for chat ${chatId}`;
+      return `LLM answers disabled for chat ${targetChatId}`;
     } catch (error) {
       console.error("Error disabling chat:", error);
       const errorMessage = error instanceof Error ? error.message : String(error);
