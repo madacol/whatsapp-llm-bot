@@ -12,9 +12,9 @@
   "author": "madacol",
   "dependencies": {
     "@electric-sql/pglite": "^0.3.3",
+    "@whiskeysockets/baileys": "^6.7.18",
     "dotenv": "^16.5.0",
-    "openai": "^4.104.0",
-    "whatsapp-web.js": "^1.30.0"
+    "openai": "^4.104.0"
   },
   "devDependencies": {
     "@types/node": "^20.19.0",

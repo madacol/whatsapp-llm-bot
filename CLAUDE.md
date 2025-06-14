@@ -18,7 +18,7 @@ This is a WhatsApp bot that integrates with LLMs to provide conversational AI an
   - `enableChat.js` / `disableChat.js` - Admin chat controls
 
 ### Key Architecture Patterns
-- **WhatsApp Integration**: Uses `whatsapp-web.js` library with LocalAuth strategy and Chromium browser
+- **WhatsApp Integration**: Uses `@whiskeysockets/baileys` library with multi-file auth state storage
 - **LLM Integration**: OpenAI-compatible API client (supports custom base URLs) with function calling
 - **Database**: PGlite (PostgreSQL in WebAssembly) for modern SQL support with persistence
 - **JavaScript Execution**: Secure VM-based sandboxing for running user-provided JavaScript code
@@ -66,7 +66,10 @@ pipx install yt-dlp
 ```
 
 ### Database Management
-The PGlite database is automatically created on first run in the `./pgdata` directory. This provides full PostgreSQL compatibility in a lightweight package.
+The PGlite database is automatically created on first run in the `./pgdata/root` directory. This provides full PostgreSQL compatibility in a lightweight package.
+
+### Authentication Storage
+Baileys stores authentication state in the `./auth_info_baileys` directory using multi-file auth state for better reliability and session persistence.
 
 ## Bot Commands (for testing)
 - `!js <code>` - Execute JavaScript code with database access and context

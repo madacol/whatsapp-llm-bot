@@ -1,6 +1,8 @@
 type PGlite = import('@electric-sql/pglite').PGlite;
-type WhatsAppMessage = import("whatsapp-web.js").Message
-type WhatsAppChat = import("whatsapp-web.js").Chat;
+
+// Baileys types
+type BaileysMessage = import('@whiskeysockets/baileys').proto.IWebMessageInfo;
+type BaileysSocket = import('@whiskeysockets/baileys').WASocket;
 
 type TextContentBlock = { type: 'text', text: string, element?: HTMLDivElement }
 type ToolContentBlock = { type: 'tool', id: string, name: string, input_string: string, input?: {}, element: HTMLDivElement }
