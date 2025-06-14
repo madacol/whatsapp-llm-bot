@@ -14,24 +14,27 @@ type Message = {role: string, content: ContentBlock[]}
 
 /* Actions */
 
-type MessageContext = {
+// Unified context for message handling
+type Context = {
+    chatId: string;
     senderId: string;
     content: ContentBlock[] | string;
     isAdmin: boolean;
-    reply: (message: string) => any;
+    sendMessage: (header: string, message: string) => Promise<void>;
+    reply: (header: string, message: string) => Promise<void>;
 }
 
-type ChatContext = {
+// Context passed to actions (pre-built functions with headers baked in)
+type ActionContext = {
     chatId: string;
-    sendMessage: (message: string) => any;
-}
-
-type BaseContext = {
-    log: (...args: any[]) => void;
+    senderId: string;
+    content: ContentBlock[] | string;
+    isAdmin: boolean;
     sessionDb: PGlite;
     getActions: () => Promise<Action[]>;
-    chat: ChatContext;
-    message: MessageContext;
+    log: (...args: any[]) => Promise<string>;
+    sendMessage: (message: string) => Promise<void>; // Header already baked in
+    reply: (message: string) => Promise<void>; // Header already baked in
 };
 
 // Define permission flags
@@ -45,9 +48,9 @@ type PermissionFlags = {
     useFileSystem?: boolean;
 };
 
-// Build context types dynamically based on permissions
-type Context<P extends PermissionFlags> =
-    BaseContext
+// Build action context types dynamically based on permissions
+type ExtendedActionContext<P extends PermissionFlags> =
+    ActionContext
     & (P['useRootDb'] extends true ? {rootDb: PGlite} : {})
     & (P['useChatDb'] extends true ? {chatDb: PGlite} : {})
     // & (P['useFileSystem'] extends true ? {directoryHandle: FileSystemDirectoryHandle} : {});
@@ -60,8 +63,8 @@ type Action<P extends PermissionFlags = PermissionFlags> = {
     description: string;
     parameters: {type: 'object', properties: Record<string, any>, required?: string[]}; // a JSON-Schema for the action_fn's parameters
     permissions?: P;
-    action_fn: (context: Context<P>, params: any) => Promise<ActionResult> | ActionResult;
-    test_functions?: Array<(context: Context<P>,params: any) => Promise<boolean> | boolean>;
+    action_fn: (context: ExtendedActionContext<P>, params: any) => Promise<ActionResult> | ActionResult;
+    test_functions?: Array<(context: ExtendedActionContext<P>,params: any) => Promise<boolean> | boolean>;
 };
 
 type AppAction = Action & {

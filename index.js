@@ -9,6 +9,7 @@ import { getActions, executeAction } from './actions.js';
 import config from './config.js';
 import { getDb } from './db.js';
 import { readFile } from 'fs/promises';
+import { shortenToolId } from './utils.js';
 
 // Initialize database
 const db = getDb('./pgdata/root');
@@ -222,16 +223,9 @@ async function handleMessage(message) {
     const senderId = message.key.participant || message.key.remoteJid;
     const isGroup = chatId.endsWith('@g.us');
 
-    /** @type {ChatContext} */
-    const chatContext = {
+    /** @type {Context} */
+    const context = {
         chatId: chatId,
-        sendMessage: async (msg) => {
-            await sock.sendMessage(chatId, { text: msg });
-        },
-    }
-
-    /** @type {MessageContext} */
-    const messageContext = {
         senderId: senderId.split('@')[0],
         content: messageContent,
         isAdmin: await (async () => {
@@ -245,8 +239,19 @@ async function handleMessage(message) {
                 return false;
             }
         })(),
-        reply: async (msg) => {
-            await sock.sendMessage(chatId, { text: msg }, { quoted: message });
+        sendMessage: async (header, message) => {
+            if (header.length < 10) {
+                throw new Error('Header must be at least 10 characters long');
+            }
+            const fullMessage = `${header}\n\n${message}`;
+            await sock.sendMessage(chatId, { text: fullMessage });
+        },
+        reply: async (header, messageText) => {
+            if (header.length < 10) {
+                throw new Error('Header must be at least 10 characters long');
+            }
+            const fullMessage = `${header}\n\n${messageText}`;
+            await sock.sendMessage(chatId, { text: fullMessage }, { quoted: message });
         },
     }
 
@@ -257,22 +262,22 @@ async function handleMessage(message) {
         const action = actionsByCommand.get(command);
         
         if (!action) {
-            messageContext.reply(`Unknown command: ${command}`);
+            await context.reply("❌ *Error*", `Unknown command: ${command}`);
             return;
         }
 
         console.log("executing", action.name, args);
         
         try {
-            const result = await executeAction(action.name, chatContext, messageContext, { args });
+            const result = await executeAction(action.name, context, { args });
             
             if (result && result.result && typeof result.result === 'string') {
-                await messageContext.reply(result.result);
+                await context.reply(`⚡ *Command* !${command}`, result.result);
             }
         } catch (error) {
             console.error("Error executing command:", error);
             const errorMessage = error instanceof Error ? error.message : String(error);
-            await messageContext.reply(`Error: ${errorMessage}`);
+            await context.reply("❌ *Error*", `Error: ${errorMessage}`);
         }
         
         return;
@@ -464,7 +469,7 @@ Additional context: ${config.system_prompt}
     } catch (error) {
         console.error(error);
         const errorMessage = JSON.stringify(error, null, 2);
-        messageContext.reply('An error occurred while processing the message.\n\n' + errorMessage);
+        await context.reply("❌ *Error*", 'An error occurred while processing the message.\n\n' + errorMessage);
         return;
     }
 
@@ -475,33 +480,45 @@ Additional context: ${config.system_prompt}
     if (responseMessage.content) {
         await db.sql`INSERT INTO messages(chat_id, message, sender_id, message_type) VALUES (${chatId}, ${responseMessage.content}, ${selfId}, 'assistant');`;
         console.log('RESPONSE SENT:', responseMessage.content);
-        messageContext.reply(responseMessage.content);
+        await context.reply("🤖 *AI Assistant*", responseMessage.content);
     }
 
     if (responseMessage.tool_calls) {
         // Store tool calls in database
         for (const toolCall of responseMessage.tool_calls) {
             await db.sql`INSERT INTO messages(chat_id, message, sender_id, message_type, tool_call_id, tool_name, tool_args) VALUES (${chatId}, ${''}, ${selfId}, 'tool_call', ${toolCall.id}, ${toolCall.function.name}, ${toolCall.function.arguments});`;
+
+            // Show tool call to user
+            const shortId = shortenToolId(toolCall.id);
+            await context.sendMessage(`🔧 *Executing* ${toolCall.function.name}    [${shortId}]`, `parameters:\n\`\`\`\n${JSON.stringify(JSON.parse(toolCall.function.arguments), null, 2)}\n\`\`\``);
         }
 
         for (const toolCall of responseMessage.tool_calls) {
             const toolName = toolCall.function.name;
             const toolArgs = JSON.parse(toolCall.function.arguments);
+            const shortId = shortenToolId(toolCall.id);
             console.log("executing", toolName, toolArgs);
             
             try {
-                const functionResponse = await executeAction(toolName, chatContext, messageContext, toolArgs);
+                const functionResponse = await executeAction(toolName, context, toolArgs, toolCall.id);
                 console.log("response", functionResponse);
 
-                // Store tool result in database
-                await db.sql`INSERT INTO messages(chat_id, message, sender_id, message_type, tool_call_id) VALUES (${chatId}, ${JSON.stringify(functionResponse.result)}, ${selfId}, 'tool_result', ${toolCall.id});`;
-                chatContext.sendMessage(JSON.stringify(functionResponse.result));
+                if (toolName !== 'new_conversation') {
+                    // Store tool result in database
+                    await db.sql`INSERT INTO messages(chat_id, message, sender_id, message_type, tool_call_id) VALUES (${chatId}, ${JSON.stringify(functionResponse.result)}, ${selfId}, 'tool_result', ${toolCall.id});`;
+                }
+
+                const resultMessage = typeof functionResponse.result === 'string' ? functionResponse.result : JSON.stringify(functionResponse.result, null, 2);
+                // Show tool result to user
+                await context.sendMessage(`✅ *Result*    [${shortId}]`, resultMessage);
             } catch (error) {
                 console.error("Error executing tool:", error);
                 const errorMessage = `Error executing ${toolName}: ${error instanceof Error ? error.message : String(error)}`;
                 // Store error as tool result
                 await db.sql`INSERT INTO messages(chat_id, message, sender_id, message_type, tool_call_id) VALUES (${chatId}, ${errorMessage}, ${selfId}, 'tool_result', ${toolCall.id});`;
-                chatContext.sendMessage(errorMessage);
+
+                // Show tool error to user
+                await context.sendMessage(`❌ *Tool Error*    [${shortId}]`, errorMessage);
             }
         }
     }

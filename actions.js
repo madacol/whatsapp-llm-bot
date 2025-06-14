@@ -2,47 +2,67 @@ import fs from 'fs/promises';
 import path from 'path';
 import { getDb } from './db.js';
 import config from './config.js';
+import { shortenToolId } from './utils.js';
 
 const currentSessionDb = getDb("memory://");
+
+// Note: Action-specific messaging functions are now created inline in executeAction()
 
 /**
  * Execute a custom action
  * @param {string} actionName - The name of the action to execute
- * @param {ChatContext} chatContext - The chat context to pass to the action
- * @param {MessageContext} messageContext - The message context to pass to the action
+ * @param {Context} context - The unified context to pass to the action
  * @param {{}} input - The input to pass to the action
+ * @param {string|null} toolCallId - The tool call ID for messaging headers
  * @returns {Promise<{result: ActionResult, permissions: Action['permissions']}>} Result of the action execution
  */
-export async function executeAction(actionName, chatContext, messageContext, input) {
+export async function executeAction(actionName, context, input, toolCallId = null) {
   const action = await getAction(actionName);
   if (!action) {
     throw new Error(`Action "${actionName}" not found`);
   }
 
-  if (action.permissions?.requireAdmin && !messageContext.isAdmin) {
+  if (action.permissions?.requireAdmin && !context.isAdmin) {
     throw new Error(`Action "${actionName}" requires admin permissions`);
   }
 
-  if (action.permissions?.requireRoot && (messageContext.senderId !== config.MASTER_ID) ) {
+  if (action.permissions?.requireRoot && (context.senderId !== config.MASTER_ID) ) {
     throw new Error(`Action "${actionName}" requires master permissions`);
   }
 
-  const context = {
+  // Create action-specific messaging functions with headers baked in
+  const shortId = shortenToolId(toolCallId || "command");
+  
+  const actionContext = {
+    chatId: context.chatId,
+    senderId: context.senderId,
+    content: context.content,
+    isAdmin: context.isAdmin,
     sessionDb: currentSessionDb,
-    log,
     getActions,
-    chat: chatContext,
-    message: messageContext,
+    log: async (...args) => {
+      const message = args.join(' ');
+      console.log(...args);
+      await context.sendMessage(`📝 *Log*    [${shortId}]`, message);
+      return message;
+    },
+    sendMessage: async (message) => {
+      await context.sendMessage(`🔧 *Action*    [${shortId}]`, message);
+    },
+    reply: async (message) => {
+      await context.reply(`🔧 *Action*    [${shortId}]`, message);
+    }
   }
-  if (action.permissions?.useChatDb) { context.db = getDb(`./pgdata/${actionName}`); }
-  if (action.permissions?.useRootDb) { context.rootDb = getDb('./pgdata/root'); }
-  // if (action.permissions?.useFileSystem) { context.directoryHandle = directoryHandle; }
+  
+  if (action.permissions?.useChatDb) { actionContext.chatDb = getDb(`./pgdata/${actionName}`); }
+  if (action.permissions?.useRootDb) { actionContext.rootDb = getDb('./pgdata/root'); }
+  // if (action.permissions?.useFileSystem) { actionContext.directoryHandle = directoryHandle; }
 
   // If the action doesn't require confirmation, execute it immediately
   if (action.permissions?.autoExecute) {
     try {
       return {
-        result: await action.action_fn(context, input),
+        result: await action.action_fn(actionContext, input),
         permissions: action.permissions
       };
     } catch (error) {
@@ -52,13 +72,9 @@ export async function executeAction(actionName, chatContext, messageContext, inp
   }
 
   throw new Error(`Action "${actionName}" requires confirmation, which is not yet implemented in this environment.`);
-// Log function for tools to use
-function log(...args) {
-  const message = args.join(' ');
-  console.log(...args);
-  
-  return message;
 }
+
+// Note: log function is now created per-action in createActionLog()
 
 let directoryHandle;
 
