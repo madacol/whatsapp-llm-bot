@@ -35,9 +35,24 @@ async function initDatabase() {
             chat_id VARCHAR(50) REFERENCES chats(chat_id),
             sender_id VARCHAR(50),
             message TEXT,
+            message_type VARCHAR(20) DEFAULT 'user',
+            tool_call_id VARCHAR(100),
+            tool_name VARCHAR(100),
+            tool_args TEXT,
             timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
     `;
+
+    // Add new columns if they don't exist (for existing databases)
+    try {
+        await db.sql`ALTER TABLE messages ADD COLUMN IF NOT EXISTS message_type VARCHAR(20) DEFAULT 'user'`;
+        await db.sql`ALTER TABLE messages ADD COLUMN IF NOT EXISTS tool_call_id VARCHAR(100)`;
+        await db.sql`ALTER TABLE messages ADD COLUMN IF NOT EXISTS tool_name VARCHAR(100)`;
+        await db.sql`ALTER TABLE messages ADD COLUMN IF NOT EXISTS tool_args TEXT`;
+    } catch (error) {
+        // Ignore errors if columns already exist
+        console.log('Database schema already up to date');
+    }
 }
 
 // Initialize WhatsApp client
@@ -370,7 +385,7 @@ Additional context: ${config.system_prompt}
     console.log({ messageBody_formatted });
 
     // Insert message into DB
-    await db.sql`INSERT INTO messages(chat_id, message, sender_id) VALUES (${chatId}, ${messageBody_formatted}, ${senderId.split('@')[0]});`;
+    await db.sql`INSERT INTO messages(chat_id, message, sender_id, message_type) VALUES (${chatId}, ${messageBody_formatted}, ${senderId.split('@')[0]}, 'user');`;
 
     // Check if should respond
     if (!await shouldRespond(message, selfId, isGroup)) {
@@ -378,16 +393,63 @@ Additional context: ${config.system_prompt}
     }
 
     // Get latest messages from DB
-    const {rows: chatMessages} = /** @type {{rows: Array<{ message: string, sender_id: string }>}} */ (await db.sql`SELECT message, sender_id FROM messages WHERE chat_id = ${chatId} ORDER BY timestamp DESC LIMIT 20;`);
+    const {rows: chatMessages} = /** @type {{rows: Array<{ message: string, sender_id: string, message_type: string, tool_call_id: string, tool_name: string, tool_args: string }>}} */ (await db.sql`SELECT message, sender_id, message_type, tool_call_id, tool_name, tool_args FROM messages WHERE chat_id = ${chatId} ORDER BY timestamp DESC LIMIT 50;`);
 
-    // Prepare messages for OpenAI
-    const chatMessages_formatted = chatMessages.filter(x => x.message).map(({ message, sender_id }) => {
-        return /** @type {import('openai/resources/index.js').ChatCompletionMessageParam} */ ({
-            role: sender_id === selfId ? 'assistant' : 'user',
-            name: sender_id,
-            content: message,
-        })
-    }).reverse();
+    // Prepare messages for OpenAI (reconstruct proper format with tool calls)
+    /** @type {Array<import('openai/resources/index.js').ChatCompletionMessageParam>} */
+    const chatMessages_formatted = [];
+    const reversedMessages = chatMessages.reverse();
+    
+    for (const msg of reversedMessages) {
+        if (msg.message_type === 'user') {
+            chatMessages_formatted.push(({
+                role: 'user',
+                name: msg.sender_id,
+                content: msg.message,
+            }));
+        } else if (msg.message_type === 'assistant') {
+            chatMessages_formatted.push(({
+                role: 'assistant',
+                content: msg.message,
+            }));
+        } else if (msg.message_type === 'tool_call') {
+            // Find the corresponding assistant message and add tool_calls to it
+            const lastMessage = chatMessages_formatted[chatMessages_formatted.length - 1];
+            if (lastMessage && lastMessage.role === 'assistant') {
+                if (!lastMessage.tool_calls) {
+                    lastMessage.tool_calls = [];
+                }
+                lastMessage.tool_calls.push({
+                    id: msg.tool_call_id,
+                    type: 'function',
+                    function: {
+                        name: msg.tool_name,
+                        arguments: msg.tool_args,
+                    },
+                });
+            } else {
+                // If no assistant message exists, create one with just tool calls
+                chatMessages_formatted.push(({
+                    role: 'assistant',
+                    content: null,
+                    tool_calls: [{
+                        id: msg.tool_call_id,
+                        type: 'function',
+                        function: {
+                            name: msg.tool_name,
+                            arguments: msg.tool_args,
+                        },
+                    }],
+                }));
+            }
+        } else if (msg.message_type === 'tool_result') {
+            chatMessages_formatted.push(({
+                role: 'tool',
+                tool_call_id: msg.tool_call_id,
+                content: msg.message,
+            }));
+        }
+    }
 
     console.log(chatMessages_formatted);
 
@@ -411,12 +473,17 @@ Additional context: ${config.system_prompt}
     const responseMessage = response.choices[0].message;
 
     if (responseMessage.content) {
-        await db.sql`INSERT INTO messages(chat_id, message, sender_id) VALUES (${chatId}, ${responseMessage.content}, ${selfId});`;
+        await db.sql`INSERT INTO messages(chat_id, message, sender_id, message_type) VALUES (${chatId}, ${responseMessage.content}, ${selfId}, 'assistant');`;
         console.log('RESPONSE SENT:', responseMessage.content);
         messageContext.reply(responseMessage.content);
     }
 
     if (responseMessage.tool_calls) {
+        // Store tool calls in database
+        for (const toolCall of responseMessage.tool_calls) {
+            await db.sql`INSERT INTO messages(chat_id, message, sender_id, message_type, tool_call_id, tool_name, tool_args) VALUES (${chatId}, ${''}, ${selfId}, 'tool_call', ${toolCall.id}, ${toolCall.function.name}, ${toolCall.function.arguments});`;
+        }
+
         for (const toolCall of responseMessage.tool_calls) {
             const toolName = toolCall.function.name;
             const toolArgs = JSON.parse(toolCall.function.arguments);
@@ -426,12 +493,14 @@ Additional context: ${config.system_prompt}
                 const functionResponse = await executeAction(toolName, chatContext, messageContext, toolArgs);
                 console.log("response", functionResponse);
 
-                await db.sql`INSERT INTO messages(chat_id, message, sender_id) VALUES (${chatId}, ${JSON.stringify(functionResponse.result)}, ${selfId});`;
+                // Store tool result in database
+                await db.sql`INSERT INTO messages(chat_id, message, sender_id, message_type, tool_call_id) VALUES (${chatId}, ${JSON.stringify(functionResponse.result)}, ${selfId}, 'tool_result', ${toolCall.id});`;
                 chatContext.sendMessage(JSON.stringify(functionResponse.result));
             } catch (error) {
                 console.error("Error executing tool:", error);
                 const errorMessage = `Error executing ${toolName}: ${error instanceof Error ? error.message : String(error)}`;
-                await db.sql`INSERT INTO messages(chat_id, message, sender_id) VALUES (${chatId}, ${errorMessage}, ${selfId});`;
+                // Store error as tool result
+                await db.sql`INSERT INTO messages(chat_id, message, sender_id, message_type, tool_call_id) VALUES (${chatId}, ${errorMessage}, ${selfId}, 'tool_result', ${toolCall.id});`;
                 chatContext.sendMessage(errorMessage);
             }
         }
