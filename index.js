@@ -323,53 +323,63 @@ Additional context: ${config.system_prompt}
     const reversedMessages = chatMessages.reverse();
     
     for (const msg of reversedMessages) {
-        if (msg.message_type === 'user') {
-            chatMessages_formatted.push(({
-                role: 'user',
-                name: msg.sender_id,
-                content: msg.message,
-            }));
-        } else if (msg.message_type === 'assistant') {
-            chatMessages_formatted.push(({
-                role: 'assistant',
-                content: msg.message,
-            }));
-        } else if (msg.message_type === 'tool_call') {
-            // Find the corresponding assistant message and add tool_calls to it
-            const lastMessage = chatMessages_formatted[chatMessages_formatted.length - 1];
-            if (lastMessage && lastMessage.role === 'assistant') {
-                if (!lastMessage.tool_calls) {
-                    lastMessage.tool_calls = [];
-                }
-                lastMessage.tool_calls.push({
-                    id: msg.tool_call_id,
-                    type: 'function',
-                    function: {
-                        name: msg.tool_name,
-                        arguments: msg.tool_args,
-                    },
+        switch (msg.message_type) {
+            case 'user':
+                chatMessages_formatted.push({
+                    role: 'user',
+                    name: msg.sender_id,
+                    content: msg.message,
                 });
-            } else {
-                // If no assistant message exists, create one with just tool calls
-                chatMessages_formatted.push(({
+                break;
+            case 'assistant':
+                chatMessages_formatted.push({
                     role: 'assistant',
-                    content: null,
-                    tool_calls: [{
+                    content: msg.message,
+                });
+                break;
+            case 'tool_call': {
+                // Find the corresponding assistant message and add tool_calls to it
+                const lastMessage = chatMessages_formatted.at(-1);
+                if (lastMessage?.role === 'assistant') {
+                    if (!lastMessage.tool_calls) {
+                        lastMessage.tool_calls = [];
+                    }
+                    lastMessage.tool_calls.push({
                         id: msg.tool_call_id,
                         type: 'function',
                         function: {
                             name: msg.tool_name,
                             arguments: msg.tool_args,
                         },
-                    }],
-                }));
+                    });
+                } else {
+                    // If no assistant message exists, create one with just tool calls
+                    chatMessages_formatted.push({
+                        role: 'assistant',
+                        content: null,
+                        tool_calls: [{
+                            id: msg.tool_call_id,
+                            type: 'function',
+                            function: {
+                                name: msg.tool_name,
+                                arguments: msg.tool_args,
+                            },
+                        }],
+                    });
+                }
+                break;
             }
-        } else if (msg.message_type === 'tool_result') {
-            chatMessages_formatted.push(({
-                role: 'tool',
-                tool_call_id: msg.tool_call_id,
-                content: msg.message,
-            }));
+            case 'tool_result':
+                chatMessages_formatted.push({
+                    role: 'tool',
+                    tool_call_id: msg.tool_call_id,
+                    content: msg.message,
+                });
+                break;
+            // Optionally handle unknown types
+            default:
+                // Ignore or log unknown message types
+                break;
         }
     }
 
