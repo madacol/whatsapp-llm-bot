@@ -173,16 +173,10 @@ async function handleMessage (messageContext) {
             return adminStatus === 'admin' || adminStatus === 'superadmin';
         })(),
         sendMessage: async (header, text) => {
-            if (header.length < 10) {
-                throw new Error('Header must be at least 10 characters long');
-            }
             const fullMessage = `${header}\n\n${text}`;
             await messageContext.sendMessage(fullMessage);
         },
         reply: async (header, text) => {
-            if (header.length < 10) {
-                throw new Error('Header must be at least 10 characters long');
-            }
             const fullMessage = `${header}\n\n${text}`;
             await messageContext.replyToMessage(fullMessage);
         },
