@@ -245,6 +245,7 @@ When writing JavaScript code, you MUST always use arrow functions that receive a
 - context.log: Async function to add messages visible to the user
 - context.sessionDb.sql: queries a postgres database for current conversation, call it with template literals like context.sessionDb.sql\`SELECT * FROM table WHERE id = \${id}\`
 - context.sendMessage: Function to send additional messages to the chat
+- Anything returned from the function will be sent as a reply to the user
 
 Example code:
 \`\`\`javascript

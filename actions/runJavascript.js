@@ -7,7 +7,7 @@ export default /** @type {defineAction} */ (x=>x)({
     properties: {
       code: {
         type: "string",
-        description: "JavaScript code to execute (must be an arrow function that accepts a context parameter). Example: '({log, db, chatId}) => { log(\"Processing\"); return \"result\"; }'",
+        description: "JavaScript code to execute (must be an arrow function that accepts a context parameter). Example: '({log, db}) => { log(\"Processing\"); return (await db.sql`SELECT * FROM table`).rows; }'",
       }
     },
     required: ['code'],
