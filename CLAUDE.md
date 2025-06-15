@@ -44,8 +44,11 @@ Functions are defined in the `ACTIONS` array and automatically indexed for both 
 ### Running the Bot
 ```bash
 npm run dev
-# or
-node index.js
+```
+
+### Type checking
+```bash
+npm run type-check
 ```
 
 ### Environment Setup
@@ -87,7 +90,7 @@ Baileys stores authentication state in the `./auth_info_baileys` directory using
 
 // Database query
 !js async ({db}) => {
-  const messages = await db.sql("SELECT COUNT(*) as count FROM messages");
+  const {rows: messages} = await db.sql("SELECT COUNT(*) as count FROM messages");
   return `Total messages: ${messages[0].count}`;
 }
 
@@ -100,3 +103,6 @@ Baileys stores authentication state in the `./auth_info_baileys` directory using
 
 ## Additional Files
 - `tts.mjs` - Experimental Google Cloud Speech-to-Text integration (not integrated with main bot)
+
+## Memories
+- do not run the app
