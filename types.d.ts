@@ -14,6 +14,33 @@ type Message = {role: string, content: ContentBlock[]}
 
 /* Actions */
 
+// WhatsApp Service Types
+type WhatsAppMessageContext = {
+    // Message data
+    chatId: string;
+    senderId: string;
+    senderName: string;
+    content: string;
+    isGroup: boolean;
+    timestamp: Date;
+
+    // High-level actions scoped to this message
+    getAdminStatus: () => Promise<'admin' | 'superadmin' | null>;
+    sendMessage: (text: string) => Promise<void>;
+    replyToMessage: (text: string) => Promise<void>;
+
+    // Bot info
+    selfId: string;
+    selfName: string;
+
+    // Raw quoted message data
+    quotedMessage: any | null;
+    quotedSender: string | null;
+
+    // Raw mention data
+    mentions: string[];
+};
+
 // Unified context for message handling
 type Context = {
     chatId: string;

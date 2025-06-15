@@ -2,14 +2,13 @@
  * WhatsApp LLM Bot with JavaScript execution capabilities
  */
 
-import { makeWASocket, useMultiFileAuthState } from '@whiskeysockets/baileys';
-import { exec } from 'child_process';
 import OpenAI from 'openai';
 import { getActions, executeAction } from './actions.js';
 import config from './config.js';
 import { getDb } from './db.js';
 import { readFile } from 'fs/promises';
 import { shortenToolId } from './utils.js';
+import { connectToWhatsApp, closeWhatsapp } from './whatsapp-service.js';
 
 // Initialize database
 const db = getDb('./pgdata/root');
@@ -56,62 +55,7 @@ async function initDatabase() {
     }
 }
 
-// Initialize WhatsApp client
-let sock;
-let selfId;
-
-async function connectToWhatsApp() {
-    const { state, saveCreds } = await useMultiFileAuthState('./auth_info_baileys');
-    
-    sock = makeWASocket({
-        auth: state,
-        browser: ['WhatsApp LLM Bot', 'Chrome', '1.0.0']
-    });
-    
-    sock.ev.process(
-        async (events) => {
-            if (events['connection.update']) {
-                const update = events['connection.update'];
-                const { connection, lastDisconnect, qr } = update;
-                
-                if (qr) {
-                    exec(`echo "${qr}" | qrencode -t ansiutf8`, (error, stdout, stderr) => {
-                        if (error) {
-                            console.error(error);
-                            console.error(stderr);
-                            return;
-                        }
-                        console.log(stdout);
-                    });
-                }
-                
-                if (connection === 'close') {
-                    const shouldReconnect = lastDisconnect?.error?.message !== 'logged out';
-                    console.log('Connection closed due to ', lastDisconnect?.error, ', reconnecting ', shouldReconnect);
-                    if (shouldReconnect) {
-                        await connectToWhatsApp();
-                    }
-                } else if (connection === 'open') {
-                    console.log('WhatsApp connection opened');
-                    selfId = sock.user?.id?.split(':')[0] || sock.user?.id;
-                    console.log('Self ID:', selfId);
-                }
-            }
-            
-            if (events['creds.update']) {
-                await saveCreds();
-            }
-            
-            if (events['messages.upsert']) {
-                const { messages } = events['messages.upsert'];
-                for (const message of messages) {
-                    if (message.key.fromMe || !message.message) continue;
-                    await handleMessage(message);
-                }
-            }
-        }
-    );
-}
+// WhatsApp service will be initialized via function call
 
 // Load actions
 /** @type {Action[]} */
@@ -150,13 +94,11 @@ function actionsToOpenAIFormat(actions) {
 
 /**
  * Check if the bot should respond to a message
- * @param {BaileysMessage} message
- * @param {string} selfId
- * @param {boolean} isGroup
+ * @param {WhatsAppMessageContext} messageContext
  * @returns {Promise<boolean>}
  */
-async function shouldRespond(message, selfId, isGroup) {
-    const chatId = message.key.remoteJid;
+async function shouldRespond(messageContext) {
+    const { chatId, isGroup, selfId, mentions } = messageContext;
 
     // Check if chat is enabled
     const {rows: [chatInfo]} = await db.sql`SELECT is_enabled FROM chats WHERE chat_id = ${chatId}`;
@@ -169,9 +111,9 @@ async function shouldRespond(message, selfId, isGroup) {
         return true;
     }
 
-    // Respond if I have been mentioned (check for mentions in Baileys format)
-    const mentions = message.message?.extendedTextMessage?.contextInfo?.mentionedJid || [];
-    if (mentions.some(contactId => String(contactId).startsWith(selfId))) {
+    // Respond if I have been mentioned
+    const isMentioned = mentions.some(contactId => String(contactId).startsWith(selfId));
+    if (isMentioned) {
         return true;
     }
 
@@ -180,18 +122,13 @@ async function shouldRespond(message, selfId, isGroup) {
 
 /**
  * Replace mentions with names in message
- * @param {BaileysMessage} message
+ * @param {WhatsAppMessageContext} messageContext
  * @returns {Promise<string>}
  */
-async function replaceMentionsWithNames(message) {
-    // Get message content from Baileys format
-    const messageContent = message.message?.conversation || 
-                          message.message?.extendedTextMessage?.text || '';
+async function replaceMentionsWithNames(messageContext) {
+    const { content, mentions } = messageContext;
     
-    // Get mentions from Baileys format
-    const mentions = message.message?.extendedTextMessage?.contextInfo?.mentionedJid || [];
-    
-    let modifiedMessage = messageContent;
+    let modifiedMessage = content;
     
     for (const mentionedJid of mentions) {
         const contactId = mentionedJid.split('@')[0];
@@ -203,60 +140,56 @@ async function replaceMentionsWithNames(message) {
     return modifiedMessage;
 }
 
+async function cleanup() {
+    console.log('Cleaning up resources...');
+    try {
+        await closeWhatsapp();
+    } catch (error) {
+        console.error('Error during WhatsApp cleanup:', error);
+    }
+    console.log('WhatsApp service closed. Closing database...');
+    await db.close();
+    console.log('WhatsApp service and database closed');
+}
+
 /**
- * 
- * @param {BaileysMessage} message 
- * @returns 
+ * Handle incoming WhatsApp messages
+ * @param {WhatsAppMessageContext} messageContext
+ * @returns {Promise<void>}
  */
-async function handleMessage(message) {
-    // Extract message content from Baileys format
-    const messageContent = message.message?.conversation || 
-                          message.message?.extendedTextMessage?.text || 
-                          message.message?.imageMessage?.caption ||
-                          message.message?.videoMessage?.caption || '';
+async function handleMessage (messageContext) {
+    const { chatId, senderId, content, isGroup, senderName } = messageContext;
     
-    if (!messageContent) return;
+    console.log('MESSAGE RECEIVED:', content);
 
-    console.log('MESSAGE RECEIVED:', messageContent);
-    
-    const chatId = message.key.remoteJid;
-    const senderId = message.key.participant || message.key.remoteJid;
-    const isGroup = chatId.endsWith('@g.us');
-
+    // Create legacy context for actions (maintains backward compatibility)
     /** @type {Context} */
     const context = {
         chatId: chatId,
-        senderId: senderId.split('@')[0],
-        content: messageContent,
+        senderId: senderId,
+        content: content,
         isAdmin: await (async () => {
-            if (!isGroup) return true;
-            try {
-                const groupMetadata = await sock.groupMetadata(chatId);
-                const participant = groupMetadata.participants.find(p => p.id === senderId);
-                return participant?.admin === 'admin' || participant?.admin === 'superadmin';
-            } catch (error) {
-                console.error('Error checking group admin status:', error);
-                return false;
-            }
+            const adminStatus = await messageContext.getAdminStatus();
+            return adminStatus === 'admin' || adminStatus === 'superadmin';
         })(),
-        sendMessage: async (header, message) => {
+        sendMessage: async (header, text) => {
             if (header.length < 10) {
                 throw new Error('Header must be at least 10 characters long');
             }
-            const fullMessage = `${header}\n\n${message}`;
-            await sock.sendMessage(chatId, { text: fullMessage });
+            const fullMessage = `${header}\n\n${text}`;
+            await messageContext.sendMessage(fullMessage);
         },
-        reply: async (header, messageText) => {
+        reply: async (header, text) => {
             if (header.length < 10) {
                 throw new Error('Header must be at least 10 characters long');
             }
-            const fullMessage = `${header}\n\n${messageText}`;
-            await sock.sendMessage(chatId, { text: fullMessage }, { quoted: message });
+            const fullMessage = `${header}\n\n${text}`;
+            await messageContext.replyToMessage(fullMessage);
         },
-    }
+    };
 
-    if (messageContent.startsWith('!')) {
-        const [rawCommand, ...args] = messageContent.slice(1).split(' ');
+    if (content.startsWith('!')) {
+        const [rawCommand, ...args] = content.slice(1).split(' ');
         const command = rawCommand.toLowerCase();
         
         const action = actionsByCommand.get(command);
@@ -283,19 +216,9 @@ async function handleMessage(message) {
         return;
     }
 
-    // Extract sender info from Baileys message
-    const senderName = message.pushName || senderId.split('@')[0];
-
-    // Use the global selfId
-    const selfName = sock.user?.name || selfId;
-    /** @type {number} */
-    let unixTime_ms;
-    if (typeof message.messageTimestamp === 'number') {
-        unixTime_ms = message.messageTimestamp * 1000
-    } else {
-        unixTime_ms = message.messageTimestamp.toNumber() * 1000
-    }
-    const time = new Date(unixTime_ms).toLocaleString('en-EN', {
+    // Use data from message context
+    const selfName = messageContext.selfName;
+    const time = messageContext.timestamp.toLocaleString('en-EN', {
         year: 'numeric',
         month: '2-digit',
         day: '2-digit',
@@ -321,7 +244,7 @@ IMPORTANT JavaScript Code Requirements:
 When writing JavaScript code, you MUST always use arrow functions that receive a context parameter with these properties:
 - context.log: Async function to add messages visible to the user
 - context.sessionDb.sql: queries a postgres database for current conversation, call it with template literals like context.sessionDb.sql\`SELECT * FROM table WHERE id = \${id}\`
-- context.chat.sendMessage: Function to send additional messages to the chat
+- context.sendMessage: Function to send additional messages to the chat
 
 Example code:
 \`\`\`javascript
@@ -354,14 +277,13 @@ Additional context: ${config.system_prompt}
 `;
     
     if (isGroup) {
-        // Handle quoted messages (Baileys format)
-        const quotedMessage = message.message?.extendedTextMessage?.contextInfo?.quotedMessage;
-        if (quotedMessage) {
-            const quotedContent = quotedMessage.conversation || 
-                                quotedMessage.extendedTextMessage?.text || 
-                                quotedMessage.imageMessage?.caption || '';
-            const quotedSender = message.message?.extendedTextMessage?.contextInfo?.participant?.split('@')[0] || 'Unknown';
-            const quotedTime = new Date((typeof message.messageTimestamp === 'number' ? message.messageTimestamp : message.messageTimestamp.toNumber()) * 1000).toLocaleString('en-EN', {
+        // Handle quoted messages with business logic
+        if (messageContext.quotedMessage) {
+            const quotedContent = messageContext.quotedMessage.conversation || 
+                                messageContext.quotedMessage.extendedTextMessage?.text || 
+                                messageContext.quotedMessage.imageMessage?.caption || '';
+            const quotedSender = messageContext.quotedSender?.split('@')[0] || 'Unknown';
+            const quotedTime = new Date((typeof messageContext.timestamp === 'object' ? messageContext.timestamp.getTime() : messageContext.timestamp) - 1000).toLocaleString('en-EN', {
                 year: 'numeric',
                 month: '2-digit',
                 day: '2-digit',
@@ -374,26 +296,26 @@ Additional context: ${config.system_prompt}
         }
 
         // Remove mention of self from start of message
-        const mentionPattern = new RegExp(`^@${selfId} *`, 'g');
-        const cleanedContent = messageContent.replace(mentionPattern, '');
+        const mentionPattern = new RegExp(`^@${messageContext.selfId} *`, 'g');
+        const cleanedContent = content.replace(mentionPattern, '');
 
-        // TODO: Implement mention replacement for Baileys
-        // const modifiedMessage = await replaceMentionsWithNames(message);
+        // TODO: Implement mention replacement using mentions
+        // const mentions = messageContext.mentions;
         messageBody_formatted += `[${time}] ${senderName}: ${cleanedContent}`;
-        // TODO: Get group chat name from Baileys
+        // TODO: Get group chat name from high-level API
         systemPrompt += ` and you are in a group chat`;
     } else {
-        // TODO: Implement mention replacement for Baileys
-        messageBody_formatted = `[${time}] ${messageContent}`;
+        // TODO: Implement mention replacement using mentions
+        messageBody_formatted = `[${time}] ${content}`;
     }
 
     console.log({ messageBody_formatted });
 
     // Insert message into DB
-    await db.sql`INSERT INTO messages(chat_id, message, sender_id, message_type) VALUES (${chatId}, ${messageBody_formatted}, ${senderId.split('@')[0]}, 'user');`;
+    await db.sql`INSERT INTO messages(chat_id, message, sender_id, message_type) VALUES (${chatId}, ${messageBody_formatted}, ${senderId}, 'user');`;
 
     // Check if should respond
-    if (!await shouldRespond(message, selfId, isGroup)) {
+    if (!await shouldRespond(messageContext)) {
         return;
     }
 
@@ -478,7 +400,7 @@ Additional context: ${config.system_prompt}
     const responseMessage = response.choices[0].message;
 
     if (responseMessage.content) {
-        await db.sql`INSERT INTO messages(chat_id, message, sender_id, message_type) VALUES (${chatId}, ${responseMessage.content}, ${selfId}, 'assistant');`;
+        await db.sql`INSERT INTO messages(chat_id, message, sender_id, message_type) VALUES (${chatId}, ${responseMessage.content}, ${messageContext.selfId}, 'assistant')`;
         console.log('RESPONSE SENT:', responseMessage.content);
         await context.reply("🤖 *AI Assistant*", responseMessage.content);
     }
@@ -486,7 +408,7 @@ Additional context: ${config.system_prompt}
     if (responseMessage.tool_calls) {
         // Store tool calls in database
         for (const toolCall of responseMessage.tool_calls) {
-            await db.sql`INSERT INTO messages(chat_id, message, sender_id, message_type, tool_call_id, tool_name, tool_args) VALUES (${chatId}, ${''}, ${selfId}, 'tool_call', ${toolCall.id}, ${toolCall.function.name}, ${toolCall.function.arguments});`;
+            await db.sql`INSERT INTO messages(chat_id, message, sender_id, message_type, tool_call_id, tool_name, tool_args) VALUES (${chatId}, ${''}, ${messageContext.selfId}, 'tool_call', ${toolCall.id}, ${toolCall.function.name}, ${toolCall.function.arguments})`;
 
             // Show tool call to user
             const shortId = shortenToolId(toolCall.id);
@@ -505,7 +427,7 @@ Additional context: ${config.system_prompt}
 
                 if (toolName !== 'new_conversation') {
                     // Store tool result in database
-                    await db.sql`INSERT INTO messages(chat_id, message, sender_id, message_type, tool_call_id) VALUES (${chatId}, ${JSON.stringify(functionResponse.result)}, ${selfId}, 'tool_result', ${toolCall.id});`;
+                    await db.sql`INSERT INTO messages(chat_id, message, sender_id, message_type, tool_call_id) VALUES (${chatId}, ${JSON.stringify(functionResponse.result)}, ${messageContext.selfId}, 'tool_result', ${toolCall.id})`;
                 }
 
                 const resultMessage = typeof functionResponse.result === 'string' ? functionResponse.result : JSON.stringify(functionResponse.result, null, 2);
@@ -515,7 +437,7 @@ Additional context: ${config.system_prompt}
                 console.error("Error executing tool:", error);
                 const errorMessage = `Error executing ${toolName}: ${error instanceof Error ? error.message : String(error)}`;
                 // Store error as tool result
-                await db.sql`INSERT INTO messages(chat_id, message, sender_id, message_type, tool_call_id) VALUES (${chatId}, ${errorMessage}, ${selfId}, 'tool_result', ${toolCall.id});`;
+                await db.sql`INSERT INTO messages(chat_id, message, sender_id, message_type, tool_call_id) VALUES (${chatId}, ${errorMessage}, ${messageContext.selfId}, 'tool_result', ${toolCall.id})`;
 
                 // Show tool error to user
                 await context.sendMessage(`❌ *Tool Error*    [${shortId}]`, errorMessage);
@@ -524,23 +446,11 @@ Additional context: ${config.system_prompt}
     }
 }
 
-async function cleanup() {
-    console.log('Cleaning up resources...');
-    try { 
-        if (sock) {
-            sock.end();
-        }
-    } catch (error) {}
-    console.log('Socket closed. Closing database...');
-    await db.close();
-    console.log('Socket and database closed');
-}
-
 // Initialize everything
 try {
     await initDatabase();
     console.log('Database initialized');
-    await connectToWhatsApp();
+    await connectToWhatsApp(handleMessage);
 } catch (error) {
     console.error('Initialization error:', error);
     await cleanup();
