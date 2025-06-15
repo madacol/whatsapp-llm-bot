@@ -321,6 +321,11 @@ Additional context: ${config.system_prompt}
     /** @type {Array<import('openai/resources/index.js').ChatCompletionMessageParam>} */
     const chatMessages_formatted = [];
     const reversedMessages = chatMessages.reverse();
+
+    // remove starting tool results from the messages
+    while (reversedMessages[0]?.message_type === 'tool_result') {
+        reversedMessages.shift();
+    }
     
     for (const msg of reversedMessages) {
         switch (msg.message_type) {
