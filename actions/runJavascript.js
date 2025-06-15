@@ -13,7 +13,8 @@ export default /** @type {defineAction} */ (x=>x)({
     required: ['code'],
   },
   permissions: {
-    autoExecute: true
+    autoExecute: true,
+    autoContinue: true,
   },
   action_fn: async function (context, {code}) {
     // Handle both command args and LLM function call formats
