@@ -388,72 +388,125 @@ Additional context: ${config.system_prompt}
         }
     }
 
-    console.log(chatMessages_formatted);
+    async function processLlmResponse() {
+        console.log(chatMessages_formatted);
 
-    let response;
-    try {
-        response = await llmClient.chat.completions.create({
-            model: config.model || 'gpt-3.5-turbo',
-            messages: [{ role: "system", content: systemPrompt }, ...chatMessages_formatted],
-            tools: actionsToOpenAIFormat(actions),
-            tool_choice: "auto",
-        });
-    } catch (error) {
-        console.error(error);
-        const errorMessage = JSON.stringify(error, null, 2);
-        await context.reply("❌ *Error*", 'An error occurred while processing the message.\n\n' + errorMessage);
-        return;
-    }
-
-    console.log("response", JSON.stringify(response, null, 2));
-
-    const responseMessage = response.choices[0].message;
-
-    if (responseMessage.content) {
-        await db.sql`INSERT INTO messages(chat_id, message, sender_id, message_type) VALUES (${chatId}, ${responseMessage.content}, ${messageContext.selfId}, 'assistant')`;
-        console.log('RESPONSE SENT:', responseMessage.content);
-        await context.reply("🤖 *AI Assistant*", responseMessage.content);
-    }
-
-    if (responseMessage.tool_calls) {
-        // Store tool calls in database
-        for (const toolCall of responseMessage.tool_calls) {
-            await db.sql`INSERT INTO messages(chat_id, message, sender_id, message_type, tool_call_id, tool_name, tool_args) VALUES (${chatId}, ${''}, ${messageContext.selfId}, 'tool_call', ${toolCall.id}, ${toolCall.function.name}, ${toolCall.function.arguments})`;
-
-            // Show tool call to user
-            const shortId = shortenToolId(toolCall.id);
-            await context.sendMessage(`🔧 *Executing* ${toolCall.function.name}    [${shortId}]`, `parameters:\n\`\`\`\n${JSON.stringify(JSON.parse(toolCall.function.arguments), null, 2)}\n\`\`\``);
+        let response;
+        try {
+            response = await llmClient.chat.completions.create({
+                model: config.model,
+                messages: [{ role: "system", content: systemPrompt }, ...chatMessages_formatted],
+                tools: actionsToOpenAIFormat(actions),
+                tool_choice: "auto",
+            });
+        } catch (error) {
+            console.error(error);
+            const errorMessage = JSON.stringify(error, null, 2);
+            await context.reply("❌ *Error*", 'An error occurred while processing the message.\n\n' + errorMessage);
+            return;
         }
 
-        for (const toolCall of responseMessage.tool_calls) {
-            const toolName = toolCall.function.name;
-            const toolArgs = JSON.parse(toolCall.function.arguments);
-            const shortId = shortenToolId(toolCall.id);
-            console.log("executing", toolName, toolArgs);
-            
-            try {
-                const functionResponse = await executeAction(toolName, context, toolArgs, toolCall.id);
-                console.log("response", functionResponse);
+        console.log("response", JSON.stringify(response, null, 2));
 
-                if (toolName !== 'new_conversation') {
-                    // Store tool result in database
-                    await db.sql`INSERT INTO messages(chat_id, message, sender_id, message_type, tool_call_id) VALUES (${chatId}, ${JSON.stringify(functionResponse.result)}, ${messageContext.selfId}, 'tool_result', ${toolCall.id})`;
+        const responseMessage = response.choices[0].message;
+
+        // Add assistant message to conversation context
+        /** @type {import('openai/resources/index.js').ChatCompletionMessageParam} */
+        const assistantMessage = {
+            role: 'assistant',
+            content: responseMessage.content
+        };
+
+        if (responseMessage.content) {
+            await db.sql`INSERT INTO messages(chat_id, message, sender_id, message_type) VALUES (${chatId}, ${responseMessage.content}, ${messageContext.selfId}, 'assistant')`;
+            console.log('RESPONSE SENT:', responseMessage.content);
+            await context.reply("🤖 *AI Assistant*", responseMessage.content);
+        }
+
+        if (responseMessage.tool_calls) {
+            // Add tool calls to assistant message
+            assistantMessage.tool_calls = responseMessage.tool_calls;
+
+            // Store tool calls in database
+            for (const toolCall of responseMessage.tool_calls) {
+                await db.sql`INSERT INTO messages(chat_id, message, sender_id, message_type, tool_call_id, tool_name, tool_args) VALUES (${chatId}, ${''}, ${messageContext.selfId}, 'tool_call', ${toolCall.id}, ${toolCall.function.name}, ${toolCall.function.arguments})`;
+
+                // Show tool call to user
+                const shortId = shortenToolId(toolCall.id);
+                await context.sendMessage(`🔧 *Executing* ${toolCall.function.name}    [${shortId}]`, `parameters:\n\`\`\`\n${JSON.stringify(JSON.parse(toolCall.function.arguments), null, 2)}\n\`\`\``);
+            }
+
+            // Add assistant message with tool calls to conversation context
+            chatMessages_formatted.push(assistantMessage);
+
+            let continueProcessing = false;
+
+            for (const toolCall of responseMessage.tool_calls) {
+                const toolName = toolCall.function.name;
+                const toolArgs = JSON.parse(toolCall.function.arguments);
+                const shortId = shortenToolId(toolCall.id);
+                console.log("executing", toolName, toolArgs);
+
+                /** @type {import('openai/resources/index.js').ChatCompletionMessageParam} */
+                let toolResultMessage;
+                try {
+                    const functionResponse = await executeAction(toolName, context, toolArgs, toolCall.id);
+                    console.log("response", functionResponse);
+
+                    if (toolName !== 'new_conversation') {
+                        // Store tool result in database
+                        await db.sql`INSERT INTO messages(chat_id, message, sender_id, message_type, tool_call_id) VALUES (${chatId}, ${JSON.stringify(functionResponse.result)}, ${messageContext.selfId}, 'tool_result', ${toolCall.id})`;
+                    }
+
+                    const resultMessage = typeof functionResponse.result === 'string' ? functionResponse.result : JSON.stringify(functionResponse.result, null, 2);
+                    // Show tool result to user
+                    await context.sendMessage(`✅ *Result*    [${shortId}]`, resultMessage);
+
+                    if (functionResponse.permissions.autoContinue) {
+                        // If the tool result indicates to continue processing, set flag
+                        continueProcessing = true;
+                    }
+
+                    // Add tool result to conversation context
+                    toolResultMessage = {
+                        role: 'tool',
+                        tool_call_id: toolCall.id,
+                        content: resultMessage
+                    };
+                } catch (error) {
+                    console.error("Error executing tool:", error);
+                    const errorMessage = `Error executing ${toolName}: ${error instanceof Error ? error.message : String(error)}`;
+                    // Store error as tool result
+                    await db.sql`INSERT INTO messages(chat_id, message, sender_id, message_type, tool_call_id) VALUES (${chatId}, ${errorMessage}, ${messageContext.selfId}, 'tool_result', ${toolCall.id})`;
+
+                    // Show tool error to user
+                    await context.sendMessage(`❌ *Tool Error*    [${shortId}]`, errorMessage);
+
+                    // Continue processing to selffix the error
+                    continueProcessing = true;
+
+                    // Add tool error to conversation context
+                    toolResultMessage = {
+                        role: 'tool',
+                        tool_call_id: toolCall.id,
+                        content: errorMessage
+                    };
                 }
 
-                const resultMessage = typeof functionResponse.result === 'string' ? functionResponse.result : JSON.stringify(functionResponse.result, null, 2);
-                // Show tool result to user
-                await context.sendMessage(`✅ *Result*    [${shortId}]`, resultMessage);
-            } catch (error) {
-                console.error("Error executing tool:", error);
-                const errorMessage = `Error executing ${toolName}: ${error instanceof Error ? error.message : String(error)}`;
-                // Store error as tool result
-                await db.sql`INSERT INTO messages(chat_id, message, sender_id, message_type, tool_call_id) VALUES (${chatId}, ${errorMessage}, ${messageContext.selfId}, 'tool_result', ${toolCall.id})`;
-
-                // Show tool error to user
-                await context.sendMessage(`❌ *Tool Error*    [${shortId}]`, errorMessage);
+                chatMessages_formatted.push(toolResultMessage);
             }
+
+            // Recursively process LLM response after tool execution
+            if (continueProcessing) {
+                await processLlmResponse();
+            }
+        } else {
+            // Only add assistant message if no tool calls (to avoid duplicates)
+            chatMessages_formatted.push(assistantMessage);
         }
     }
+
+    await processLlmResponse();
 }
 
 // Initialize everything
