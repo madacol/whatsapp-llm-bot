@@ -202,10 +202,10 @@ async function handleMessage (messageContext) {
         console.log("executing", action.name, params);
 
         try {
-            const result = await executeAction(action.name, context, params);
-            
-            if (result && result.result && typeof result.result === 'string') {
-                await context.reply(`⚡ *Command* !${command}`, result.result);
+            const {result} = await executeAction(action.name, context, params);
+
+            if (typeof result === 'string') {
+                await context.reply(`⚡ *Command* !${command}`, result);
             }
         } catch (error) {
             console.error("Error executing command:", error);
