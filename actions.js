@@ -12,11 +12,11 @@ const currentSessionDb = getDb("memory://");
  * Execute a custom action
  * @param {string} actionName - The name of the action to execute
  * @param {Context} context - The unified context to pass to the action
- * @param {{}} input - The input to pass to the action
+ * @param {{}} params - The parameters to pass to the action
  * @param {string|null} toolCallId - The tool call ID for messaging headers
  * @returns {Promise<{result: ActionResult, permissions: Action['permissions']}>} Result of the action execution
  */
-export async function executeAction(actionName, context, input, toolCallId = null) {
+export async function executeAction(actionName, context, params, toolCallId = null) {
   const action = await getAction(actionName);
   if (!action) {
     throw new Error(`Action "${actionName}" not found`);
@@ -62,7 +62,7 @@ export async function executeAction(actionName, context, input, toolCallId = nul
   if (action.permissions?.autoExecute) {
     try {
       return {
-        result: await action.action_fn(actionContext, input),
+        result: await action.action_fn(actionContext, params),
         permissions: action.permissions
       };
     } catch (error) {
