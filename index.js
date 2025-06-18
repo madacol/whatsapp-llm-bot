@@ -193,10 +193,16 @@ async function handleMessage (messageContext) {
             return;
         }
 
-        console.log("executing", action.name, args);
-        
+        // Map command arguments to action parameters
+        const params = {}
+        Object.entries(action.parameters.properties).forEach(([paramName, param], i) => {
+            params[paramName] = args[i] || param.default;
+        });
+
+        console.log("executing", action.name, params);
+
         try {
-            const result = await executeAction(action.name, context, { args });
+            const result = await executeAction(action.name, context, params);
             
             if (result && result.result && typeof result.result === 'string') {
                 await context.reply(`⚡ *Command* !${command}`, result.result);
