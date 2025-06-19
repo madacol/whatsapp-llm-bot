@@ -45,10 +45,14 @@ async function initDatabase() {
 
     // Add new columns if they don't exist (for existing databases)
     try {
-        await db.sql`ALTER TABLE messages ADD COLUMN IF NOT EXISTS message_type VARCHAR(20) DEFAULT 'user'`;
-        await db.sql`ALTER TABLE messages ADD COLUMN IF NOT EXISTS tool_call_id VARCHAR(100)`;
-        await db.sql`ALTER TABLE messages ADD COLUMN IF NOT EXISTS tool_name VARCHAR(100)`;
-        await db.sql`ALTER TABLE messages ADD COLUMN IF NOT EXISTS tool_args TEXT`;
+        await Promise.all([
+            db.sql`ALTER TABLE chats ADD COLUMN IF NOT EXISTS is_enabled BOOLEAN DEFAULT FALSE`,
+            db.sql`ALTER TABLE chats ADD COLUMN IF NOT EXISTS system_prompt TEXT`,
+            db.sql`ALTER TABLE messages ADD COLUMN IF NOT EXISTS message_type VARCHAR(20) DEFAULT 'user'`,
+            db.sql`ALTER TABLE messages ADD COLUMN IF NOT EXISTS tool_call_id VARCHAR(100)`,
+            db.sql`ALTER TABLE messages ADD COLUMN IF NOT EXISTS tool_name VARCHAR(100)`,
+            db.sql`ALTER TABLE messages ADD COLUMN IF NOT EXISTS tool_args TEXT`,
+        ]);
     } catch (error) {
         // Ignore errors if columns already exist
         console.log('Database schema already up to date');
