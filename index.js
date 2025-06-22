@@ -489,11 +489,13 @@ try {
 }
 
 process.on('SIGINT', async function() {
+    console.log('SIGINT received, cleaning up...');
     await cleanup();
     process.exit(0);
 });
 
 process.on('SIGTERM', async function() {
+    console.log('SIGTERM received, cleaning up...');
     await cleanup();
     process.exit(0);
 });
