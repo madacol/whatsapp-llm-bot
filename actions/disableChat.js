@@ -1,4 +1,4 @@
-export default /** @type {defineAction} */ (x=>x)({
+export default /** @type {defineAction} */ ((x) => x)({
   name: "disable_chat",
   command: "disable",
   description: "Disable LLM answers for a specific chat (admin only)",
@@ -7,8 +7,9 @@ export default /** @type {defineAction} */ (x=>x)({
     properties: {
       chatId: {
         type: "string",
-        description: "Chat ID to disable (defaults to current chat if not provided)",
-      }
+        description:
+          "Chat ID to disable (defaults to current chat if not provided)",
+      },
     },
     required: [],
   },
@@ -21,12 +22,15 @@ export default /** @type {defineAction} */ (x=>x)({
     const targetChatId = params.chatId || chatId;
 
     // First check if chat exists
-    const {rows: [chatExists]} = await rootDb.sql`SELECT chat_id FROM chats WHERE chat_id = ${targetChatId}`;
+    const {
+      rows: [chatExists],
+    } =
+      await rootDb.sql`SELECT chat_id FROM chats WHERE chat_id = ${targetChatId}`;
 
     if (!chatExists) {
       throw new Error(`Chat ${targetChatId} does not exist.`);
     }
-    
+
     // If chat exists, update its is_enabled status
     try {
       await rootDb.sql`
@@ -34,12 +38,13 @@ export default /** @type {defineAction} */ (x=>x)({
         SET is_enabled = FALSE
         WHERE chat_id = ${targetChatId}
       `;
-      
+
       return `LLM answers disabled for chat ${targetChatId}`;
     } catch (error) {
       console.error("Error disabling chat:", error);
-      const errorMessage = error instanceof Error ? error.message : String(error);
+      const errorMessage =
+        error instanceof Error ? error.message : String(error);
       throw new Error("Failed to disable chat: " + errorMessage);
     }
-  }
+  },
 });

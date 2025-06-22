@@ -1,8 +1,8 @@
-import fs from 'fs/promises';
-import path from 'path';
-import { getDb } from './db.js';
-import config from './config.js';
-import { shortenToolId } from './utils.js';
+import fs from "fs/promises";
+import path from "path";
+import { getDb } from "./db.js";
+import config from "./config.js";
+import { shortenToolId } from "./utils.js";
 
 const currentSessionDb = getDb("memory://");
 
@@ -16,7 +16,12 @@ const currentSessionDb = getDb("memory://");
  * @param {string|null} toolCallId - The tool call ID for messaging headers
  * @returns {Promise<{result: ActionResult, permissions: Action['permissions']}>} Result of the action execution
  */
-export async function executeAction(actionName, context, params, toolCallId = null) {
+export async function executeAction(
+  actionName,
+  context,
+  params,
+  toolCallId = null,
+) {
   const action = await getAction(actionName);
   if (!action) {
     throw new Error(`Action "${actionName}" not found`);
@@ -26,13 +31,16 @@ export async function executeAction(actionName, context, params, toolCallId = nu
     throw new Error(`Action "${actionName}" requires admin permissions`);
   }
 
-  if (action.permissions?.requireRoot && (context.senderId !== config.MASTER_ID) ) {
+  if (
+    action.permissions?.requireRoot &&
+    context.senderId !== config.MASTER_ID
+  ) {
     throw new Error(`Action "${actionName}" requires master permissions`);
   }
 
   // Create action-specific messaging functions with headers baked in
   const shortId = shortenToolId(toolCallId || "command");
-  
+
   const actionContext = {
     chatId: context.chatId,
     senderId: context.senderId,
@@ -41,7 +49,7 @@ export async function executeAction(actionName, context, params, toolCallId = nu
     sessionDb: currentSessionDb,
     getActions,
     log: async (...args) => {
-      const message = args.join(' ');
+      const message = args.join(" ");
       console.log(...args);
       await context.sendMessage(`📝 *Log*    [${shortId}]`, message);
       return message;
@@ -51,11 +59,15 @@ export async function executeAction(actionName, context, params, toolCallId = nu
     },
     reply: async (message) => {
       await context.reply(`🔧 *Action*    [${shortId}]`, message);
-    }
+    },
+  };
+
+  if (action.permissions?.useChatDb) {
+    actionContext.chatDb = getDb(`./pgdata/${actionName}`);
   }
-  
-  if (action.permissions?.useChatDb) { actionContext.chatDb = getDb(`./pgdata/${actionName}`); }
-  if (action.permissions?.useRootDb) { actionContext.rootDb = getDb('./pgdata/root'); }
+  if (action.permissions?.useRootDb) {
+    actionContext.rootDb = getDb("./pgdata/root");
+  }
   // if (action.permissions?.useFileSystem) { actionContext.directoryHandle = directoryHandle; }
 
   // If the action doesn't require confirmation, execute it immediately
@@ -63,7 +75,7 @@ export async function executeAction(actionName, context, params, toolCallId = nu
     try {
       return {
         result: await action.action_fn(actionContext, params),
-        permissions: action.permissions
+        permissions: action.permissions,
       };
     } catch (error) {
       console.error(`Error executing action ${actionName}:`, error);
@@ -71,7 +83,9 @@ export async function executeAction(actionName, context, params, toolCallId = nu
     }
   }
 
-  throw new Error(`Action "${actionName}" requires confirmation, which is not yet implemented in this environment.`);
+  throw new Error(
+    `Action "${actionName}" requires confirmation, which is not yet implemented in this environment.`,
+  );
 }
 
 // Note: log function is now created per-action in createActionLog()
@@ -84,7 +98,7 @@ let directoryHandle;
  * @returns {Promise<string>} Absolute path to the actions directory
  */
 export async function initializeDirectoryHandle() {
-  const actionsDir = path.resolve(process.cwd(), 'actions');
+  const actionsDir = path.resolve(process.cwd(), "actions");
   try {
     await fs.mkdir(actionsDir, { recursive: true });
   } catch (err) {
@@ -105,28 +119,30 @@ export async function getActions() {
   const actionsDir = directoryHandle;
   const files = await fs.readdir(actionsDir);
   /** @type {AppAction[]} */
-  actions = (await Promise.all(
-    files
-      .filter(file => file.endsWith('.js'))
-      .map(async (file) => {
-        const filePath = path.join(actionsDir, file);
-        try {
-          const module = await import(`file://${filePath}`);
-          if (module.default) {
-            return {
-              ...module.default,
-              fileName: file,
-              app_name: ''
-            };
+  actions = (
+    await Promise.all(
+      files
+        .filter((file) => file.endsWith(".js"))
+        .map(async (file) => {
+          const filePath = path.join(actionsDir, file);
+          try {
+            const module = await import(`file://${filePath}`);
+            if (module.default) {
+              return {
+                ...module.default,
+                fileName: file,
+                app_name: "",
+              };
+            }
+            console.error(`Action ${file} has no default export`);
+            return null;
+          } catch (importError) {
+            console.error(`Error importing action ${file}:`, importError);
+            return null;
           }
-          console.error(`Action ${file} has no default export`);
-          return null;
-        } catch (importError) {
-          console.error(`Error importing action ${file}:`, importError);
-          return null;
-        }
-      })
-  )).filter(action => action !== null);
+        }),
+    )
+  ).filter((action) => action !== null);
 
   return actions;
 }
@@ -145,7 +161,9 @@ export async function getAction(actionName) {
   }
 
   // Find the file with the matching action name
-  const fileName = actions.find(action => action.name === actionName)?.fileName;
+  const fileName = actions.find(
+    (action) => action.name === actionName,
+  )?.fileName;
   if (!fileName) {
     throw new Error(`Action "${actionName}" not found`);
   }
@@ -160,8 +178,8 @@ export async function getAction(actionName) {
     if (action) {
       return {
         ...action,
-        app_name: '',
-        fileName
+        app_name: "",
+        fileName,
       };
     }
 

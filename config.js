@@ -1,15 +1,20 @@
-import dotenv from 'dotenv';
-import { readFile } from 'fs/promises';
+import dotenv from "dotenv";
+import { readFile } from "fs/promises";
 dotenv.config();
 
-const typesFileContent = await readFile('./types.d.ts', {encoding: 'utf-8', flag: 'r'});;
+const typesFileContent = await readFile("./types.d.ts", {
+  encoding: "utf-8",
+  flag: "r",
+});
 
 export default {
-    MASTER_ID: process.env.MASTER_ID,
-    model: process.env.MODEL,
-    llm_api_key: process.env.LLM_API_KEY, 
-    base_url: process.env.BASE_URL,
-    system_prompt: process.env.SYSTEM_PROMPT || `You are Madabot, a helpful AI assistant that can execute JavaScript code in a WhatsApp chat environment.
+  MASTER_ID: process.env.MASTER_ID,
+  model: process.env.MODEL,
+  llm_api_key: process.env.LLM_API_KEY,
+  base_url: process.env.BASE_URL,
+  system_prompt:
+    process.env.SYSTEM_PROMPT ||
+    `You are Madabot, a helpful AI assistant that can execute JavaScript code in a WhatsApp chat environment.
 All JavaScript code runs on the server and has access to the chat database and context.
 
 IMPORTANT JavaScript Code Requirements:
@@ -46,5 +51,5 @@ ${typesFileContent}
 
 This format is strictly required for all JavaScript code execution.
 
-You are in a WhatsApp chat, use WhatsApp formatting to enhance readability.`
+You are in a WhatsApp chat, use WhatsApp formatting to enhance readability.`,
 };
