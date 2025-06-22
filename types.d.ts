@@ -69,7 +69,7 @@ type Context = {
   chatId: string;
   senderId: string;
   content: ContentBlock[] | string;
-  isAdmin: boolean;
+  getIsAdmin: () => Promise<boolean>;
   sendMessage: (header: string, message: string) => Promise<void>;
   reply: (header: string, message: string) => Promise<void>;
 };
@@ -79,7 +79,7 @@ type ActionContext = {
   chatId: string;
   senderId: string;
   content: ContentBlock[] | string;
-  isAdmin: boolean;
+  getIsAdmin: () => Promise<boolean>;
   sessionDb: PGlite;
   getActions: () => Promise<Action[]>;
   log: (...args: any[]) => Promise<string>;
