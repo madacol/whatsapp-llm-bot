@@ -41,6 +41,7 @@ async function _handleIncomingMessage(baileysMessage) {
     const timestamp = new Date(unixTime_ms);
 
     // Create enriched message context
+    /** @type {WhatsAppMessageContext} */
     const messageContext = {
         // Message data
         chatId,
