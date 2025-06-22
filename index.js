@@ -6,7 +6,6 @@ import OpenAI from 'openai';
 import { getActions, executeAction } from './actions.js';
 import config from './config.js';
 import { getDb } from './db.js';
-import { readFile } from 'fs/promises';
 import { shortenToolId } from './utils.js';
 import { connectToWhatsApp, closeWhatsapp } from './whatsapp-service.js';
 
@@ -25,6 +24,7 @@ async function initDatabase() {
         CREATE TABLE IF NOT EXISTS chats (
             chat_id VARCHAR(50) PRIMARY KEY,
             is_enabled BOOLEAN DEFAULT FALSE,
+            system_prompt TEXT,
             timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
     `;
@@ -234,53 +234,11 @@ async function handleMessage (messageContext) {
     await db.sql`INSERT INTO chats(chat_id) VALUES (${chatId}) ON CONFLICT (chat_id) DO NOTHING;`;
 
     let messageBody_formatted;
-    const typesFileContent = await readFile('./types.d.ts', {encoding: 'utf-8', flag: 'r'});
-    let systemPrompt = `You are ${selfName}, a helpful AI assistant that can execute JavaScript code in a WhatsApp chat environment.
-Use the \`run_javascript\` action for computational tasks, data analysis, and dynamic responses.
-All JavaScript code runs on the server and has access to the chat database and context.
 
-When asked to perform calculations, data analysis, or generate dynamic content:
-1. Use \`run_javascript\` to implement and execute the solution
-2. Show your work through logging and return meaningful results
-3. Make responses engaging and conversational for WhatsApp
+    // Get system prompt from current chat or use default
+    const {rows: [chatInfo]} = await db.sql`SELECT system_prompt FROM chats WHERE chat_id = ${chatId}`;
+    let systemPrompt = chatInfo?.system_prompt || config.system_prompt;
 
-IMPORTANT JavaScript Code Requirements:
-When writing JavaScript code, you MUST always use arrow functions that receive a context parameter with these properties:
-- context.log: Async function to add messages visible to the user
-- context.sessionDb.sql: queries a postgres database for current conversation, call it with template literals like context.sessionDb.sql\`SELECT * FROM table WHERE id = \${id}\`
-- context.sendMessage: Function to send additional messages to the chat
-- Anything returned from the function will be sent as a reply to the user
-
-Example code:
-\`\`\`javascript
-async ({log, sessionDb, chat}) => {
-  await log('Analyzing chat activity...');
-  const {rows: messages} = await sessionDb.sql\`SELECT * FROM messages WHERE chat_id = \${chat.chatId}\`;
-  const result = \`This chat has \${messages.length} messages\`;
-  log('Analysis complete');
-
-  // Send result to chat
-  // chat.sendMessage(result);
-
-  // Reply with the result
-  // message.reply(result);
-
-  // Or just return the result, which replies it by default
-  return result;
-}
-\`\`\`
-
-This is the currently used TypeScript type definitions for the context parameter:
-
-\`\`\`typescript
-${typesFileContent}
-\`\`\`
-
-This format is strictly required for all JavaScript code execution.
-
-Additional context: ${config.system_prompt}
-`;
-    
     if (isGroup) {
         // Handle quoted messages with business logic
         if (messageContext.quotedMessage) {
@@ -308,7 +266,7 @@ Additional context: ${config.system_prompt}
         // const mentions = messageContext.mentions;
         messageBody_formatted += `[${time}] ${senderName}: ${cleanedContent}`;
         // TODO: Get group chat name from high-level API
-        systemPrompt += ` and you are in a group chat`;
+        systemPrompt += `\n\nYou are in a group chat`;
     } else {
         // TODO: Implement mention replacement using mentions
         messageBody_formatted = `[${time}] ${content}`;
