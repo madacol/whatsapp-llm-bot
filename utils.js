@@ -4,5 +4,5 @@
  * @returns {string} Shortened tool call ID
  */
 export function shortenToolId(toolCallId) {
-    return toolCallId ? toolCallId.substring(6, 12) : 'unknown';
+  return toolCallId ? toolCallId.substring(6, 12) : "unknown";
 }

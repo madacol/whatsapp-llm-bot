@@ -1,4 +1,4 @@
-export default /** @type {defineAction} */ (x => x)({
+export default /** @type {defineAction} */ ((x) => x)({
   name: "show_info",
   command: "info",
   description: "Show information about the current chat",
@@ -12,15 +12,17 @@ export default /** @type {defineAction} */ (x => x)({
     useRootDb: true,
   },
   action_fn: async function ({ chatId, rootDb }) {
-
     // Get chat enabled status
-    const { rows: [chatInfo] } = await rootDb.sql`SELECT is_enabled FROM chats WHERE chat_id = ${chatId}`;
+    const {
+      rows: [chatInfo],
+    } =
+      await rootDb.sql`SELECT is_enabled FROM chats WHERE chat_id = ${chatId}`;
 
     if (!chatInfo) {
       throw new Error(`Chat ${chatId} does not exist.`);
     }
 
-    const status = chatInfo.is_enabled ? 'enabled' : 'disabled';
+    const status = chatInfo.is_enabled ? "enabled" : "disabled";
 
     let info = `Chat Information:\n`;
     info += `- Chat ID: ${chatId}\n`;
@@ -29,5 +31,5 @@ export default /** @type {defineAction} */ (x => x)({
     info += `- status: ${status}`;
 
     return info;
-  }
+  },
 });

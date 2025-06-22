@@ -1,26 +1,26 @@
 {
-  "name": "whatsapp-llm-bot",
-  "engines": {
-    "node": ">=20.0.0"
-  },
-  "version": "1.0.0",
-  "description": "",
-  "type": "module",
-  "main": "index.js",
-  "scripts": {
-    "dev": "node index.js",
-    "type-check": "npx tsc --noEmit --project jsconfig.json"
-  },
-  "keywords": [],
-  "author": "madacol",
-  "dependencies": {
-    "@electric-sql/pglite": "^0.3.3",
-    "@whiskeysockets/baileys": "^6.7.18",
-    "dotenv": "^16.5.0",
-    "openai": "^4.104.0"
-  },
-  "devDependencies": {
-    "@types/node": "^20.19.0",
-    "typescript": "^5.8.3"
-  }
+    "name": "whatsapp-llm-bot",
+    "engines": {
+        "node": ">=20.0.0"
+    },
+    "version": "1.0.0",
+    "description": "",
+    "type": "module",
+    "main": "index.js",
+    "scripts": {
+        "dev": "node index.js",
+        "type-check": "npx tsc --noEmit --project jsconfig.json"
+    },
+    "keywords": [],
+    "author": "madacol",
+    "dependencies": {
+        "@electric-sql/pglite": "^0.3.3",
+        "@whiskeysockets/baileys": "^6.7.18",
+        "dotenv": "^16.5.0",
+        "openai": "^4.104.0"
+    },
+    "devDependencies": {
+        "@types/node": "^20.19.0",
+        "typescript": "^5.8.3"
+    }
 }
