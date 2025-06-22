@@ -176,10 +176,10 @@ async function handleMessage(messageContext) {
     chatId: chatId,
     senderId: senderId,
     content: content,
-    isAdmin: await (async () => {
+    getIsAdmin: async () => {
       const adminStatus = await messageContext.getAdminStatus();
       return adminStatus === "admin" || adminStatus === "superadmin";
-    })(),
+    },
     sendMessage: async (header, text) => {
       const fullMessage = `${header}\n\n${text}`;
       await messageContext.sendMessage(fullMessage);

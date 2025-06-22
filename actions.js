@@ -27,7 +27,7 @@ export async function executeAction(
     throw new Error(`Action "${actionName}" not found`);
   }
 
-  if (action.permissions?.requireAdmin && !context.isAdmin) {
+  if (action.permissions?.requireAdmin && !context.getIsAdmin()) {
     throw new Error(`Action "${actionName}" requires admin permissions`);
   }
 
@@ -45,7 +45,7 @@ export async function executeAction(
     chatId: context.chatId,
     senderId: context.senderId,
     content: context.content,
-    isAdmin: context.isAdmin,
+    getIsAdmin: context.getIsAdmin,
     sessionDb: currentSessionDb,
     getActions,
     log: async (...args) => {
