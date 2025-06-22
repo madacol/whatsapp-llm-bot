@@ -83,6 +83,11 @@ async function _handleIncomingMessage(baileysMessage) {
         mentions: baileysMessage.message?.extendedTextMessage?.contextInfo?.mentionedJid || []
     };
 
+    {
+      const { chatId, senderName, isGroup } = messageContext
+      console.log({ chatId, senderName, isGroup })
+    }
+
     // Call the user-provided message handler with enriched context
     if (messageHandler) {
         await messageHandler(messageContext);
