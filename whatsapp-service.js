@@ -3,8 +3,13 @@
  * Provides message-scoped APIs for easier migration to other WhatsApp clients
  */
 
-import { makeWASocket, useMultiFileAuthState } from "@whiskeysockets/baileys";
+import {
+  makeWASocket,
+  useMultiFileAuthState,
+  downloadMediaMessage,
+} from "@whiskeysockets/baileys";
 import { exec } from "child_process";
+
 
 // Module state
 /** @type {import('@whiskeysockets/baileys').WASocket | null} */
@@ -15,19 +20,117 @@ let selfId = null;
 let messageHandler = null;
 
 /**
+ *
+ * @param {BaileysMessage} baileysMessage
+ * @returns {Promise<ContentBlock[]>}
+ */
+async function getMessageContent(baileysMessage) {
+  /** @type {ContentBlock[]} */
+  const content = [];
+
+  // Check for quoted message content
+  const quotedMessage =
+    baileysMessage.message?.extendedTextMessage?.contextInfo?.quotedMessage;
+  if (quotedMessage) {
+    const quotedContent =
+      quotedMessage.conversation ||
+      quotedMessage.extendedTextMessage?.text ||
+      quotedMessage.imageMessage?.caption ||
+      quotedMessage.videoMessage?.caption ||
+      "";
+
+    const quotedSender = baileysMessage.message?.extendedTextMessage?.contextInfo?.participant
+      ?.split("@")[1] || "Unknown";
+
+    const quoteText = `> ${quotedSender}: ${quotedContent.trim().replace("\n", "\n> ")}\n`;
+
+    if (quotedContent) {
+      content.push({
+        type: "quote",
+        text: quoteText,
+      });
+    }
+  }
+
+  // Check for image content (including quoted images)
+  const imageMessage = baileysMessage.message?.imageMessage;
+  const videoMessage = baileysMessage.message?.videoMessage;
+
+  if (imageMessage) {
+    // Handle image message
+    const imageBuffer = await downloadMediaMessage(
+      baileysMessage,
+      "buffer",
+      {},
+    );
+    const base64Data = imageBuffer.toString("base64");
+    const mimeType = imageMessage.mimetype || "image/jpeg";
+
+    content.push({
+      type: "image",
+      source: {
+        type: "base64",
+        media_type: mimeType,
+        data: base64Data,
+      },
+    });
+    if (imageMessage.caption) {
+      content.push({
+        type: "text",
+        text: imageMessage.caption,
+      });
+    }
+  } else if (videoMessage) {
+    // Handle video message
+    const videoBuffer = await downloadMediaMessage(
+      baileysMessage,
+      "buffer",
+      {},
+    );
+    const base64Data = videoBuffer.toString("base64");
+    const mimeType = videoMessage.mimetype || "video/mp4";
+
+    content.push({
+      type: "video",
+      source: {
+        type: "base64",
+        media_type: mimeType,
+        data: base64Data,
+      },
+    });
+    if (videoMessage.caption) {
+      content.push({
+        type: "text",
+        text: videoMessage.caption,
+      });
+    }
+  } else {
+    const messageContent =
+      baileysMessage.message?.conversation ||
+      baileysMessage.message?.extendedTextMessage?.text
+
+    // Handle text message
+    content.push({
+      type: "text",
+      text: messageContent,
+    });
+  }
+
+  return content;
+}
+
+/**
  * Internal method to process incoming messages and create enriched context
- * @param {import('@whiskeysockets/baileys').proto.IWebMessageInfo} baileysMessage - Raw Baileys message
+ * @param {BaileysMessage} baileysMessage - Raw Baileys message
  */
 async function _handleIncomingMessage(baileysMessage) {
   // Extract message content from Baileys format
-  const messageContent =
-    baileysMessage.message?.conversation ||
-    baileysMessage.message?.extendedTextMessage?.text ||
-    baileysMessage.message?.imageMessage?.caption ||
-    baileysMessage.message?.videoMessage?.caption ||
-    "";
+  // Ignore status updates
+  if (baileysMessage.key.remoteJid === "status@broadcast") {
+    return;
+  }
 
-  if (!messageContent) return;
+  const content = await getMessageContent(baileysMessage);
 
   const chatId = baileysMessage.key.remoteJid;
   const senderId =
@@ -49,7 +152,7 @@ async function _handleIncomingMessage(baileysMessage) {
     chatId,
     senderId: senderId.split("@")[0],
     senderName: baileysMessage.pushName || senderId.split("@")[0],
-    content: messageContent,
+    content: content,
     isGroup,
     timestamp,
 
@@ -79,14 +182,6 @@ async function _handleIncomingMessage(baileysMessage) {
     // Bot info
     selfId,
     selfName: sock.user?.name || selfId,
-
-    // Raw quoted message data
-    quotedMessage:
-      baileysMessage.message?.extendedTextMessage?.contextInfo?.quotedMessage ||
-      null,
-    quotedSender:
-      baileysMessage.message?.extendedTextMessage?.contextInfo?.participant ||
-      null,
 
     // Raw mention data
     mentions:

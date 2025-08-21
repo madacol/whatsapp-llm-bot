@@ -170,8 +170,10 @@ async function handleMessage(messageContext) {
     },
   };
 
-  if (content.startsWith("!")) {
-    const [rawCommand, ...args] = content.slice(1).split(" ");
+  const firstBlock = content.find(block=>block.type === "text")
+
+  if (firstBlock.text.startsWith("!")) {
+    const [rawCommand, ...args] = firstBlock.text.slice(1).split(" ");
     const command = rawCommand.toLowerCase();
 
     const action = actionsByCommand.get(command);
@@ -229,38 +231,14 @@ async function handleMessage(messageContext) {
   let systemPrompt = chatInfo?.system_prompt || config.system_prompt;
 
   if (isGroup) {
-    // Handle quoted messages with business logic
-    if (messageContext.quotedMessage) {
-      const quotedContent =
-        messageContext.quotedMessage.conversation ||
-        messageContext.quotedMessage.extendedTextMessage?.text ||
-        messageContext.quotedMessage.imageMessage?.caption ||
-        "";
-      const quotedSender =
-        messageContext.quotedSender?.split("@")[0] || "Unknown";
-      const quotedTime = new Date(
-        (typeof messageContext.timestamp === "object"
-          ? messageContext.timestamp.getTime()
-          : messageContext.timestamp) - 1000,
-      ).toLocaleString("en-EN", {
-        year: "numeric",
-        month: "2-digit",
-        day: "2-digit",
-        hour: "2-digit",
-        minute: "2-digit",
-      });
-      messageBody_formatted = `> [${quotedTime}] ${quotedSender}: ${quotedContent.trim().replace("\n", "\n>")}\n`;
-    } else {
-      messageBody_formatted = "";
-    }
 
     // Remove mention of self from start of message
     const mentionPattern = new RegExp(`^@${messageContext.selfId} *`, "g");
-    const cleanedContent = content.replace(mentionPattern, "");
+    const cleanedContent = firstBlock.text.replace(mentionPattern, "");
 
     // TODO: Implement mention replacement using mentions
     // const mentions = messageContext.mentions;
-    messageBody_formatted += `[${time}] ${senderName}: ${cleanedContent}`;
+    messageBody_formatted = `[${time}] ${senderName}: ${cleanedContent}`;
     // TODO: Get group chat name from high-level API
     systemPrompt += `\n\nYou are in a group chat`;
   } else {

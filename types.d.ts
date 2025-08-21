@@ -8,6 +8,10 @@ type TextContentBlock = {
   type: "text";
   text: string;
 };
+type QuoteContentBlock = {
+  type: "quote";
+  text: string;
+};
 type ToolContentBlock = {
   type: "tool";
   id: string;
@@ -18,17 +22,25 @@ type ToolContentBlock = {
 type ImageContentBlock = {
   type: "image";
   source: { type: "base64"; media_type: string; data: string };
+  alt?: string;
+};
+type VideoContentBlock = {
+  type: "video";
+  source: { type: "base64"; media_type: string; data: string };
+  alt?: string;
 };
 type ToolResultContentBlock = {
   type: "tool_result";
   tool_use_id: string;
-  content: string | ContentBlock[];
+  content: ContentBlock[];
   is_error?: boolean;
 };
 type ContentBlock =
   | TextContentBlock
+  | QuoteContentBlock
   | ToolContentBlock
   | ImageContentBlock
+  | VideoContentBlock
   | ToolResultContentBlock;
 
 type Message = { role: string; content: ContentBlock[] };
@@ -41,7 +53,7 @@ type MessageContext = {
   chatId: string;
   senderId: string;
   senderName: string;
-  content: string;
+  content: ContentBlock[];
   isGroup: boolean;
   timestamp: Date;
 
@@ -53,10 +65,6 @@ type MessageContext = {
   // Bot info
   selfId: string;
   selfName: string;
-
-  // Raw quoted message data
-  quotedMessage: any | null;
-  quotedSender: string | null;
 
   // Raw mention data
   mentions: string[];
