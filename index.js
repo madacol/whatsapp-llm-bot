@@ -7,7 +7,7 @@ import { getActions, executeAction } from "./actions.js";
 import config from "./config.js";
 import { getDb } from "./db.js";
 import { shortenToolId } from "./utils.js";
-import { connectToWhatsApp, closeWhatsapp } from "./whatsapp-service.js";
+import { connectToWhatsApp, closeWhatsapp } from "./whatsapp-adapter.js";
 
 // Initialize database
 const db = getDb("./pgdata/root");
