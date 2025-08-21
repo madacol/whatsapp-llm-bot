@@ -7,7 +7,6 @@ type BaileysSocket = import("@whiskeysockets/baileys").WASocket;
 type TextContentBlock = {
   type: "text";
   text: string;
-  element?: HTMLDivElement;
 };
 type ToolContentBlock = {
   type: "tool";
@@ -15,7 +14,6 @@ type ToolContentBlock = {
   name: string;
   input_string: string;
   input?: {};
-  element: HTMLDivElement;
 };
 type ImageContentBlock = {
   type: "image";
