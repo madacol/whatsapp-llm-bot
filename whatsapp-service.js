@@ -43,7 +43,7 @@ async function _handleIncomingMessage(baileysMessage) {
   }
   const timestamp = new Date(unixTime_ms);
 
-  /** @type {WhatsAppMessageContext} */
+  /** @type {MessageContext} */
   const messageContext = {
     // Message data
     chatId,
@@ -107,7 +107,7 @@ async function _handleIncomingMessage(baileysMessage) {
 
 /**
  * Initialize WhatsApp connection and set up message handling
- * @param {(message: WhatsAppMessageContext) => Promise<void>} onMessageHandler - Handler function that receives enriched message context
+ * @param {(message: MessageContext) => Promise<void>} onMessageHandler - Handler function that receives enriched message context
  */
 export async function connectToWhatsApp(onMessageHandler) {
   messageHandler = onMessageHandler;

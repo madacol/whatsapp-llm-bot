@@ -36,7 +36,7 @@ type Message = { role: string; content: ContentBlock[] };
 /* Actions */
 
 // WhatsApp Service Types
-type WhatsAppMessageContext = {
+type MessageContext = {
   // Message data
   chatId: string;
   senderId: string;
