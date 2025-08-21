@@ -128,26 +128,6 @@ async function shouldRespond(messageContext) {
   return false;
 }
 
-/**
- * Replace mentions with names in message
- * @param {WhatsAppMessageContext} messageContext
- * @returns {Promise<string>}
- */
-async function replaceMentionsWithNames(messageContext) {
-  const { content, mentions } = messageContext;
-
-  let modifiedMessage = content;
-
-  for (const mentionedJid of mentions) {
-    const contactId = mentionedJid.split("@")[0];
-    // For now, just use the contact ID as the name since we don't have contact info
-    const mentionPattern = new RegExp(`@${contactId}`, "g");
-    modifiedMessage = modifiedMessage.replace(mentionPattern, `@${contactId}`);
-  }
-
-  return modifiedMessage;
-}
-
 async function cleanup() {
   console.log("Cleaning up resources...");
   try {
