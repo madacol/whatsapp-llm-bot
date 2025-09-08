@@ -148,7 +148,7 @@ async function cleanup() {
 async function handleMessage(messageContext) {
   const { chatId, senderId, content, isGroup, senderName } = messageContext;
 
-  console.log("MESSAGE RECEIVED:", content);
+  console.log("MESSAGE RECEIVED:", messageContext);
 
   // Create legacy context for actions (maintains backward compatibility)
   /** @type {Context} */
