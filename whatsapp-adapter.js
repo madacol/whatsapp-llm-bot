@@ -32,19 +32,16 @@ async function getMessageContent(baileysMessage) {
   const quotedMessage =
     baileysMessage.message?.extendedTextMessage?.contextInfo?.quotedMessage;
   if (quotedMessage) {
-    const quotedContent =
+    const quoteText =
       quotedMessage.conversation ||
       quotedMessage.extendedTextMessage?.text ||
       quotedMessage.imageMessage?.caption ||
       quotedMessage.videoMessage?.caption ||
       "";
 
-    const quotedSender = baileysMessage.message?.extendedTextMessage?.contextInfo?.participant
-      ?.split("@")[1] || "Unknown";
+    // const quotedSenderId = baileysMessage.message?.extendedTextMessage?.contextInfo?.participant;
 
-    const quoteText = `> ${quotedSender}: ${quotedContent.trim().replace("\n", "\n> ")}\n`;
-
-    if (quotedContent) {
+    if (quoteText) {
       content.push({
         type: "quote",
         text: quoteText,
