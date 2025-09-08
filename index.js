@@ -172,7 +172,7 @@ async function handleMessage(messageContext) {
 
   const firstBlock = content.find(block=>block.type === "text")
 
-  if (firstBlock.text.startsWith("!")) {
+  if (firstBlock?.text?.startsWith("!")) {
     const [rawCommand, ...args] = firstBlock.text.slice(1).split(" ");
     const command = rawCommand.toLowerCase();
 
