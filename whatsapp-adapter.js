@@ -52,6 +52,9 @@ async function getMessageContent(baileysMessage) {
   // Check for image content (including quoted images)
   const imageMessage = baileysMessage.message?.imageMessage;
   const videoMessage = baileysMessage.message?.videoMessage;
+  const textMessage =
+    baileysMessage.message?.conversation ||
+    baileysMessage.message?.extendedTextMessage?.text
 
   if (imageMessage) {
     // Handle image message
@@ -77,7 +80,9 @@ async function getMessageContent(baileysMessage) {
         text: imageMessage.caption,
       });
     }
-  } else if (videoMessage) {
+  }
+
+  if (videoMessage) {
     // Handle video message
     const videoBuffer = await downloadMediaMessage(
       baileysMessage,
@@ -101,16 +106,18 @@ async function getMessageContent(baileysMessage) {
         text: videoMessage.caption,
       });
     }
-  } else {
-    const messageContent =
-      baileysMessage.message?.conversation ||
-      baileysMessage.message?.extendedTextMessage?.text
+  }
 
+  if (textMessage) {
     // Handle text message
     content.push({
       type: "text",
-      text: messageContent,
+      text: textMessage,
     });
+  }
+
+  if (content.length === 0) {
+    console.log("Unknown content", JSON.stringify(baileysMessage, null, 2));
   }
 
   return content;
