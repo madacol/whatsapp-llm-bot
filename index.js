@@ -184,6 +184,7 @@ async function handleMessage(messageContext) {
     }
 
     // Map command arguments to action parameters
+    /** @type {Action['parameters']['properties']} */
     const params = {};
     Object.entries(action.parameters.properties).forEach(
       ([paramName, param], i) => {
@@ -210,7 +211,6 @@ async function handleMessage(messageContext) {
   }
 
   // Use data from message context
-  const selfName = messageContext.selfName;
   const time = messageContext.timestamp.toLocaleString("en-EN", {
     year: "numeric",
     month: "2-digit",
