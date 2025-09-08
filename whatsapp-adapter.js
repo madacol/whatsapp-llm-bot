@@ -133,8 +133,7 @@ async function _handleIncomingMessage(baileysMessage) {
   const content = await getMessageContent(baileysMessage);
 
   const chatId = baileysMessage.key.remoteJid;
-  const senderId =
-    baileysMessage.key.participant || baileysMessage.key.remoteJid;
+  const senderId = baileysMessage.key.participant || chatId;
   const isGroup = chatId.endsWith("@g.us");
 
   // Create timestamp
@@ -188,11 +187,6 @@ async function _handleIncomingMessage(baileysMessage) {
       baileysMessage.message?.extendedTextMessage?.contextInfo?.mentionedJid ||
       [],
   };
-
-  {
-    const { chatId, senderName, isGroup } = messageContext;
-    console.log({ chatId, senderName, isGroup });
-  }
 
   // Call the user-provided message handler with enriched context
   if (messageHandler) {
