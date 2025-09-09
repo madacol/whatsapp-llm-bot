@@ -5,59 +5,15 @@
 import OpenAI from "openai";
 import { getActions, executeAction } from "./actions.js";
 import config from "./config.js";
-import { getDb } from "./db.js";
 import { shortenToolId } from "./utils.js";
 import { connectToWhatsApp, closeWhatsapp } from "./whatsapp-adapter.js";
-
-// Initialize database
-const db = getDb("./pgdata/root");
+import { addMessage, closeDb, createChat, getChat, getMessages, initDatabase } from "./store.js";
 
 // Initialize LLM client
 const llmClient = new OpenAI({
   apiKey: config.llm_api_key,
   baseURL: config.base_url,
 });
-
-// Initialize database tables
-async function initDatabase() {
-  await db.sql`
-        CREATE TABLE IF NOT EXISTS chats (
-            chat_id VARCHAR(50) PRIMARY KEY,
-            is_enabled BOOLEAN DEFAULT FALSE,
-            system_prompt TEXT,
-            timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        );
-    `;
-
-  await db.sql`
-        CREATE TABLE IF NOT EXISTS messages (
-            message_id SERIAL PRIMARY KEY,
-            chat_id VARCHAR(50) REFERENCES chats(chat_id),
-            sender_id VARCHAR(50),
-            message TEXT,
-            message_type VARCHAR(20) DEFAULT 'user',
-            tool_call_id VARCHAR(100),
-            tool_name VARCHAR(100),
-            tool_args TEXT,
-            timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        );
-    `;
-
-  // Add new columns if they don't exist (for existing databases)
-  try {
-    await Promise.all([
-      db.sql`ALTER TABLE chats ADD COLUMN IF NOT EXISTS is_enabled BOOLEAN DEFAULT FALSE`,
-      db.sql`ALTER TABLE chats ADD COLUMN IF NOT EXISTS system_prompt TEXT`,
-      db.sql`ALTER TABLE messages ADD COLUMN IF NOT EXISTS message_type VARCHAR(20) DEFAULT 'user'`,
-      db.sql`ALTER TABLE messages ADD COLUMN IF NOT EXISTS tool_call_id VARCHAR(100)`,
-      db.sql`ALTER TABLE messages ADD COLUMN IF NOT EXISTS tool_name VARCHAR(100)`,
-      db.sql`ALTER TABLE messages ADD COLUMN IF NOT EXISTS tool_args TEXT`,
-    ]);
-  } catch (error) {
-    // Ignore errors if columns already exist
-    console.log("Database schema already up to date");
-  }
-}
 
 // WhatsApp service will be initialized via function call
 
@@ -105,9 +61,7 @@ async function shouldRespond(messageContext) {
   const { chatId, isGroup, selfId, mentions } = messageContext;
 
   // Check if chat is enabled
-  const {
-    rows: [chatInfo],
-  } = await db.sql`SELECT is_enabled FROM chats WHERE chat_id = ${chatId}`;
+  const chatInfo = await getChat(chatId);
   if (!chatInfo?.is_enabled) {
     return false;
   }
@@ -136,7 +90,7 @@ async function cleanup() {
     console.error("Error during WhatsApp cleanup:", error);
   }
   console.log("WhatsApp service closed. Closing database...");
-  await db.close();
+  await closeDb();
   console.log("WhatsApp service and database closed");
 }
 
@@ -220,36 +174,38 @@ async function handleMessage(messageContext) {
   });
 
   // Insert chatId into DB if not already present
-  await db.sql`INSERT INTO chats(chat_id) VALUES (${chatId}) ON CONFLICT (chat_id) DO NOTHING;`;
+  await createChat(chatId);
 
-  let messageBody_formatted;
 
   // Get system prompt from current chat or use default
-  const {
-    rows: [chatInfo],
-  } = await db.sql`SELECT system_prompt FROM chats WHERE chat_id = ${chatId}`;
+  const chatInfo = await getChat(chatId);
   let systemPrompt = chatInfo?.system_prompt || config.system_prompt;
 
-  if (isGroup) {
+  if (firstBlock) {
+    let messageBody_formatted;
+    if (isGroup) {
 
-    // Remove mention of self from start of message
-    const mentionPattern = new RegExp(`^@${messageContext.selfId} *`, "g");
-    const cleanedContent = firstBlock.text.replace(mentionPattern, "");
+      // Remove mention of self from start of message
+      const mentionPattern = new RegExp(`^@${messageContext.selfId} *`, "g");
+      const cleanedContent = firstBlock.text.replace(mentionPattern, "");
 
-    // TODO: Implement mention replacement using mentions
-    // const mentions = messageContext.mentions;
-    messageBody_formatted = `[${time}] ${senderName}: ${cleanedContent}`;
-    // TODO: Get group chat name from high-level API
-    systemPrompt += `\n\nYou are in a group chat`;
-  } else {
-    // TODO: Implement mention replacement using mentions
-    messageBody_formatted = `[${time}] ${content}`;
+      // TODO: Implement mention replacement using mentions
+      // const mentions = messageContext.mentions;
+      messageBody_formatted = `[${time}] ${senderName}: ${cleanedContent}`;
+      // TODO: Get group chat name from high-level API
+      systemPrompt += `\n\nYou are in a group chat`;
+    } else {
+      // TODO: Implement mention replacement using mentions
+      messageBody_formatted = `[${time}] ${firstBlock.text}`;
+    }
+    firstBlock.text = messageBody_formatted;
   }
 
-  console.log({ messageBody_formatted });
+  /** @type {UserMessage} */
+  const message = {role: "user", content}
 
   // Insert message into DB
-  await db.sql`INSERT INTO messages(chat_id, message, sender_id, message_type) VALUES (${chatId}, ${messageBody_formatted}, ${senderId}, 'user');`;
+  await addMessage(chatId, message, senderId);
 
   // Check if should respond
   if (!(await shouldRespond(messageContext))) {
@@ -257,76 +213,69 @@ async function handleMessage(messageContext) {
   }
 
   // Get latest messages from DB
-  const { rows: chatMessages } =
-    /** @type {{rows: Array<{ message: string, sender_id: string, message_type: string, tool_call_id: string, tool_name: string, tool_args: string }>}} */ (
-      await db.sql`SELECT message, sender_id, message_type, tool_call_id, tool_name, tool_args FROM messages WHERE chat_id = ${chatId} ORDER BY timestamp DESC LIMIT 50;`
-    );
+  const chatMessages = await getMessages(chatId)
 
   // Prepare messages for OpenAI (reconstruct proper format with tool calls)
-  /** @type {Array<import('openai/resources/index.js').ChatCompletionMessageParam>} */
+  /** @type {Array<OpenAI.ChatCompletionMessageParam>} */
   const chatMessages_formatted = [];
   const reversedMessages = chatMessages.reverse();
 
   // remove starting tool results from the messages
-  while (reversedMessages[0]?.message_type === "tool_result") {
+  while (reversedMessages[0]?.message_data.role === "tool") {
     reversedMessages.shift();
   }
 
   for (const msg of reversedMessages) {
-    switch (msg.message_type) {
+    switch (msg.message_data.role) {
       case "user":
         chatMessages_formatted.push({
           role: "user",
           name: msg.sender_id,
-          content: msg.message,
+          content: msg.message_data.content.map((contentBlock) => {
+            switch (contentBlock.type) {
+              case "quote":
+                return { ...contentBlock, type: "text" };
+              case "text":
+                return contentBlock;
+            }
+          }),
         });
         break;
       case "assistant":
+        /** @type {OpenAI.ChatCompletionMessageToolCall[]} */
+        const toolCalls = [];
         chatMessages_formatted.push({
           role: "assistant",
-          content: msg.message,
+          content: msg.message_data.content.map( contentBlock => {
+            switch (contentBlock.type) {
+              case "text":
+                return contentBlock;
+              case "tool":
+                toolCalls.push({
+                  type: "function",
+                  id: contentBlock.tool_id,
+                  function: {
+                    name: contentBlock.name,
+                    arguments: contentBlock.arguments
+                  }
+                });
+            }
+          }),
+          tool_calls: toolCalls.length > 0 ? toolCalls : undefined,
         });
         break;
-      case "tool_call": {
-        // Find the corresponding assistant message and add tool_calls to it
-        const lastMessage = chatMessages_formatted.at(-1);
-        if (lastMessage?.role === "assistant") {
-          if (!lastMessage.tool_calls) {
-            lastMessage.tool_calls = [];
+      case "tool":
+      for (const contentBlock of msg.message_data.content) {
+          switch (contentBlock.type) {
+            case "text":
+              chatMessages_formatted.push({
+                role: "tool",
+                tool_call_id: msg.message_data.tool_id,
+                content: contentBlock.text,
+              });
+              break;
           }
-          lastMessage.tool_calls.push({
-            id: msg.tool_call_id,
-            type: "function",
-            function: {
-              name: msg.tool_name,
-              arguments: msg.tool_args,
-            },
-          });
-        } else {
-          // If no assistant message exists, create one with just tool calls
-          chatMessages_formatted.push({
-            role: "assistant",
-            content: null,
-            tool_calls: [
-              {
-                id: msg.tool_call_id,
-                type: "function",
-                function: {
-                  name: msg.tool_name,
-                  arguments: msg.tool_args,
-                },
-              },
-            ],
-          });
         }
-        break;
-      }
-      case "tool_result":
-        chatMessages_formatted.push({
-          role: "tool",
-          tool_call_id: msg.tool_call_id,
-          content: msg.message,
-        });
         break;
       // Optionally handle unknown types
       default:
@@ -364,25 +313,32 @@ async function handleMessage(messageContext) {
     const responseMessage = response.choices[0].message;
 
     // Add assistant message to conversation context
-    /** @type {import('openai/resources/index.js').ChatCompletionMessageParam} */
+    /** @type {AssistantMessage} */
     const assistantMessage = {
       role: "assistant",
-      content: responseMessage.content,
+      content: [],
     };
 
     if (responseMessage.content) {
-      await db.sql`INSERT INTO messages(chat_id, message, sender_id, message_type) VALUES (${chatId}, ${responseMessage.content}, ${messageContext.selfId}, 'assistant')`;
+      // await db.sql`INSERT INTO messages(chat_id, message, content, sender_id, message_type) VALUES (${chatId}, ${responseMessage.content}, ${JSON.stringify(responseMessage.content)}, ${messageContext.selfId}, 'assistant')`;
       console.log("RESPONSE SENT:", responseMessage.content);
       await context.reply("🤖 *AI Assistant*", responseMessage.content);
+      assistantMessage.content.push({
+        type: "text",
+        text: responseMessage.content,
+      });
     }
+
 
     if (responseMessage.tool_calls) {
       // Add tool calls to assistant message
-      assistantMessage.tool_calls = responseMessage.tool_calls;
-
-      // Store tool calls in database
       for (const toolCall of responseMessage.tool_calls) {
-        await db.sql`INSERT INTO messages(chat_id, message, sender_id, message_type, tool_call_id, tool_name, tool_args) VALUES (${chatId}, ${""}, ${messageContext.selfId}, 'tool_call', ${toolCall.id}, ${toolCall.function.name}, ${toolCall.function.arguments})`;
+        assistantMessage.content.push({
+          type: "tool",
+          tool_id: toolCall.id,
+          name: toolCall.function.name,
+          arguments: toolCall.function.arguments
+        })
 
         // Show tool call to user
         const shortId = shortenToolId(toolCall.id);
@@ -392,8 +348,11 @@ async function handleMessage(messageContext) {
         );
       }
 
+      // Store tool calls in database
+      await addMessage(chatId, assistantMessage, senderId)
+
       // Add assistant message with tool calls to conversation context
-      chatMessages_formatted.push(assistantMessage);
+      chatMessages_formatted.push(responseMessage);
 
       let continueProcessing = false;
 
@@ -403,8 +362,6 @@ async function handleMessage(messageContext) {
         const shortId = shortenToolId(toolCall.id);
         console.log("executing", toolName, toolArgs);
 
-        /** @type {import('openai/resources/index.js').ChatCompletionMessageParam} */
-        let toolResultMessage;
         try {
           const functionResponse = await executeAction(
             toolName,
@@ -416,7 +373,13 @@ async function handleMessage(messageContext) {
 
           if (toolName !== "new_conversation") {
             // Store tool result in database
-            await db.sql`INSERT INTO messages(chat_id, message, sender_id, message_type, tool_call_id) VALUES (${chatId}, ${JSON.stringify(functionResponse.result)}, ${messageContext.selfId}, 'tool_result', ${toolCall.id})`;
+            /** @type {ToolMessage} */
+            const toolMessage = {
+              role: "tool",
+              tool_id: toolCall.id,
+              content: [{type: "text", text: JSON.stringify(functionResponse.result)}]
+            }
+            await addMessage(chatId, toolMessage, senderId)
           }
 
           const resultMessage =
@@ -435,16 +398,26 @@ async function handleMessage(messageContext) {
           }
 
           // Add tool result to conversation context
-          toolResultMessage = {
+          /** @type {OpenAI.ChatCompletionMessageParam} */
+          const toolResultMessage = {
             role: "tool",
             tool_call_id: toolCall.id,
             content: resultMessage,
           };
+          chatMessages_formatted.push(toolResultMessage);
+
         } catch (error) {
           console.error("Error executing tool:", error);
           const errorMessage = `Error executing ${toolName}: ${error instanceof Error ? error.message : String(error)}`;
           // Store error as tool result
-          await db.sql`INSERT INTO messages(chat_id, message, sender_id, message_type, tool_call_id) VALUES (${chatId}, ${errorMessage}, ${messageContext.selfId}, 'tool_result', ${toolCall.id})`;
+          /** @type {ToolMessage} */
+          const toolError = {
+            role: "tool",
+            tool_id: toolCall.id,
+            content: [{type: "text", text: errorMessage}],
+          }
+          // await db.sql`INSERT INTO messages(chat_id, message, content, sender_id, message_type, tool_call_id) VALUES (${chatId}, ${errorMessage}, ${JSON.stringify(errorMessage)}, ${messageContext.selfId}, 'tool_result', ${toolCall.id})`;
+          await addMessage(chatId, toolError, senderId)
 
           // Show tool error to user
           await context.sendMessage(
@@ -456,14 +429,15 @@ async function handleMessage(messageContext) {
           continueProcessing = true;
 
           // Add tool error to conversation context
-          toolResultMessage = {
+          /** @type {OpenAI.ChatCompletionMessageParam} */
+          const toolResultMessage = {
             role: "tool",
             tool_call_id: toolCall.id,
             content: errorMessage,
           };
+          chatMessages_formatted.push(toolResultMessage);
         }
 
-        chatMessages_formatted.push(toolResultMessage);
       }
 
       // Recursively process LLM response after tool execution
@@ -472,7 +446,8 @@ async function handleMessage(messageContext) {
       }
     } else {
       // Only add assistant message if no tool calls (to avoid duplicates)
-      chatMessages_formatted.push(assistantMessage);
+      chatMessages_formatted.push(responseMessage);
+      await addMessage(chatId, assistantMessage, senderId);
     }
   }
 

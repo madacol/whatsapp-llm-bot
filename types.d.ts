@@ -12,12 +12,11 @@ type QuoteContentBlock = {
   type: "quote";
   text: string;
 };
-type ToolContentBlock = {
+type ToolCallContentBlock = {
   type: "tool";
-  id: string;
+  tool_id: string;
   name: string;
-  input_string: string;
-  input?: {};
+  arguments: string;
 };
 type ImageContentBlock = {
   type: "image";
@@ -29,21 +28,30 @@ type VideoContentBlock = {
   source: { type: "base64"; media_type: string; data: string };
   alt?: string;
 };
-type ToolResultContentBlock = {
-  type: "tool_result";
-  tool_use_id: string;
-  content: ContentBlock[];
-  is_error?: boolean;
-};
 type ContentBlock =
   | TextContentBlock
   | QuoteContentBlock
-  | ToolContentBlock
   | ImageContentBlock
   | VideoContentBlock
-  | ToolResultContentBlock;
+  | ToolCallContentBlock
 
-type Message = { role: string; content: ContentBlock[] };
+  type UserMessage = {
+    role: "user";
+    content: (TextContentBlock | QuoteContentBlock | ImageContentBlock | VideoContentBlock)[];
+  };
+
+  type AssistantMessage = {
+    role: "assistant";
+    content: (TextContentBlock | ToolCallContentBlock)[];
+  };
+
+  type ToolMessage = {
+    role: "tool";
+    tool_id: string;
+    content: (TextContentBlock | ImageContentBlock | VideoContentBlock)[];
+  };
+
+  type Message = UserMessage | AssistantMessage | ToolMessage;
 
 /* Actions */
 
@@ -53,7 +61,7 @@ type MessageContext = {
   chatId: string;
   senderId: string;
   senderName: string;
-  content: ContentBlock[];
+  content: UserMessage['content'];
   isGroup: boolean;
   timestamp: Date;
 
@@ -74,7 +82,7 @@ type MessageContext = {
 type Context = {
   chatId: string;
   senderId: string;
-  content: ContentBlock[] | string;
+  content: UserMessage['content'] | string;
   getIsAdmin: () => Promise<boolean>;
   sendMessage: (header: string, message: string) => Promise<void>;
   reply: (header: string, message: string) => Promise<void>;
@@ -84,7 +92,7 @@ type Context = {
 type ActionContext = {
   chatId: string;
   senderId: string;
-  content: ContentBlock[] | string;
+  content: UserMessage['content'] | string;
   getIsAdmin: () => Promise<boolean>;
   sessionDb: PGlite;
   getActions: () => Promise<Action[]>;
