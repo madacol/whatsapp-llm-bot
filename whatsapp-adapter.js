@@ -29,15 +29,20 @@ async function getMessageContent(baileysMessage) {
   const content = [];
 
   // Check for quoted message content
-  const quotedMessage =
-    baileysMessage.message?.extendedTextMessage?.contextInfo?.quotedMessage;
+  const quotedMessage = baileysMessage.message?.extendedTextMessage?.contextInfo?.quotedMessage
+    || baileysMessage.message?.imageMessage?.contextInfo?.quotedMessage
+    || baileysMessage.message?.videoMessage?.contextInfo?.quotedMessage
+    || baileysMessage.message?.documentMessage?.contextInfo?.quotedMessage
+    || baileysMessage.message?.audioMessage?.contextInfo?.quotedMessage
+    || baileysMessage.message?.stickerMessage?.contextInfo?.quotedMessage;
+
   if (quotedMessage) {
-    const quoteText =
-      quotedMessage.conversation ||
-      quotedMessage.extendedTextMessage?.text ||
-      quotedMessage.imageMessage?.caption ||
-      quotedMessage.videoMessage?.caption ||
-      "";
+    const quoteText = quotedMessage.conversation
+      || quotedMessage.extendedTextMessage?.text
+      || quotedMessage.imageMessage?.caption
+      || quotedMessage.videoMessage?.caption
+      || quotedMessage.documentMessage?.caption
+
 
     // const quotedSenderId = baileysMessage.message?.extendedTextMessage?.contextInfo?.participant;
 
@@ -52,9 +57,9 @@ async function getMessageContent(baileysMessage) {
   // Check for image content (including quoted images)
   const imageMessage = baileysMessage.message?.imageMessage;
   const videoMessage = baileysMessage.message?.videoMessage;
-  const textMessage =
-    baileysMessage.message?.conversation ||
-    baileysMessage.message?.extendedTextMessage?.text
+  const textMessage = baileysMessage.message?.conversation
+    || baileysMessage.message?.extendedTextMessage?.text
+    || baileysMessage.message?.documentMessage?.caption
 
   if (imageMessage) {
     // Handle image message
