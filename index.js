@@ -221,12 +221,12 @@ async function handleMessage(messageContext) {
   const reversedMessages = chatMessages.reverse();
 
   // remove starting tool results from the messages
-  while (reversedMessages[0]?.message_data.role === "tool") {
+  while (reversedMessages[0]?.message_data?.role === "tool") {
     reversedMessages.shift();
   }
 
   for (const msg of reversedMessages) {
-    switch (msg.message_data.role) {
+    switch (msg.message_data?.role) {
       case "user":
         chatMessages_formatted.push({
           role: "user",
