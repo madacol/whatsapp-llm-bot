@@ -234,7 +234,7 @@ async function handleMessage(messageContext) {
           content: msg.message_data.content.map((contentBlock) => {
             switch (contentBlock.type) {
               case "quote":
-                return { ...contentBlock, type: "text" };
+                return { type: "text", text: `> ${contentBlock.text.trim().replace(/\n/g, '\n> ')}` };
               case "text":
                 return contentBlock;
             }
