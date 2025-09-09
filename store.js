@@ -43,15 +43,15 @@ export async function initDatabase(){
 
     // Add new columns if they don't exist (for existing databases)
     try {
-      await Promise.any([
+      await Promise.all([
         db.sql`ALTER TABLE chats ADD COLUMN IF NOT EXISTS is_enabled BOOLEAN DEFAULT FALSE`,
         db.sql`ALTER TABLE chats ADD COLUMN IF NOT EXISTS system_prompt TEXT`,
         db.sql`ALTER TABLE messages ADD COLUMN IF NOT EXISTS message_data JSONB`,
-        db.sql`ALTER TABLE messages DROP COLUMN IF EXISTS message_type VARCHAR(20) DEFAULT 'user'`,
-        db.sql`ALTER TABLE messages DROP COLUMN IF EXISTS tool_call_id VARCHAR(100)`,
-        db.sql`ALTER TABLE messages DROP COLUMN IF EXISTS tool_name VARCHAR(100)`,
-        db.sql`ALTER TABLE messages DROP COLUMN IF EXISTS tool_args TEXT`,
-        db.sql`ALTER TABLE messages DROP COLUMN IF EXISTS content JSONB`,
+        db.sql`ALTER TABLE messages DROP COLUMN IF EXISTS message_type`,
+        db.sql`ALTER TABLE messages DROP COLUMN IF EXISTS tool_call_id`,
+        db.sql`ALTER TABLE messages DROP COLUMN IF EXISTS tool_name`,
+        db.sql`ALTER TABLE messages DROP COLUMN IF EXISTS tool_args`,
+        db.sql`ALTER TABLE messages DROP COLUMN IF EXISTS content`,
       ]);
     } catch (error) {
       // Ignore errors if columns already exist
