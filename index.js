@@ -83,7 +83,7 @@ getActions().then((loadedActions) => {
 /**
  * Convert actions to OpenAI tools format
  * @param {Action[]} actions
- * @returns {any[]}
+ * @returns {OpenAI.Chat.Completions.ChatCompletionTool[]}
  */
 function actionsToOpenAIFormat(actions) {
   return actions.map((action) => ({
@@ -184,7 +184,7 @@ async function handleMessage(messageContext) {
     }
 
     // Map command arguments to action parameters
-    /** @type {Action['parameters']['properties']} */
+    /** @type {{[paramName: string]: string}} */
     const params = {};
     Object.entries(action.parameters.properties).forEach(
       ([paramName, param], i) => {
