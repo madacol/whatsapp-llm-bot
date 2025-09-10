@@ -8,9 +8,23 @@ type TextContentBlock = {
   type: "text";
   text: string;
 };
+type ImageContentBlock = {
+  type: "image";
+  encoding: "base64";
+  mime_type: string;
+  data: string;
+  alt?: string;
+};
+type VideoContentBlock = {
+  type: "video";
+  encoding: "base64";
+  mime_type: string;
+  data: string;
+  alt?: string;
+};
 type QuoteContentBlock = {
   type: "quote";
-  text: string;
+  content: UserContentBlock[];
 };
 type ToolCallContentBlock = {
   type: "tool";
@@ -18,26 +32,18 @@ type ToolCallContentBlock = {
   name: string;
   arguments: string;
 };
-type ImageContentBlock = {
-  type: "image";
-  source: { type: "base64"; mime_type: string; data: string };
-  alt?: string;
-};
-type VideoContentBlock = {
-  type: "video";
-  source: { type: "base64"; media_type: string; data: string };
-  alt?: string;
-};
-type ContentBlock =
-  | TextContentBlock
-  | QuoteContentBlock
+
+type UserContentBlock =
+  TextContentBlock
   | ImageContentBlock
   | VideoContentBlock
-  | ToolCallContentBlock
+  | QuoteContentBlock;
+
+type ContentBlock = UserContentBlock | ToolCallContentBlock;
 
   type UserMessage = {
     role: "user";
-    content: (TextContentBlock | QuoteContentBlock | ImageContentBlock | VideoContentBlock)[];
+    content: UserContentBlock[];
   };
 
   type AssistantMessage = {
