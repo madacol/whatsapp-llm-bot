@@ -20,7 +20,7 @@ type ToolCallContentBlock = {
 };
 type ImageContentBlock = {
   type: "image";
-  source: { type: "base64"; media_type: string; data: string };
+  source: { type: "base64"; mime_type: string; data: string };
   alt?: string;
 };
 type VideoContentBlock = {
