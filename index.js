@@ -228,20 +228,36 @@ async function handleMessage(messageContext) {
   for (const msg of reversedMessages) {
     switch (msg.message_data?.role) {
       case "user":
+        /** @type {Array<OpenAI.ChatCompletionContentPart>} */
+        const messageContent = []
+        for (const contentBlock of msg.message_data.content) {
+          switch (contentBlock.type) {
+            case "quote":
+              for (const quoteBlock of contentBlock.content) {
+                switch (quoteBlock.type) {
+                  case "text":
+                    messageContent.push({ type: "text", text: `> ${quoteBlock.text.trim().replace(/\n/g, '\n> ')}` });
+                    break;
+                  case "image":
+                    const dataUrl = `data:${quoteBlock.mime_type};base64,${quoteBlock.data}`;
+                    messageContent.push({ type: "image_url", image_url: { url: dataUrl } });
+                    break;
+                }
+              }
+              break;
+            case "text":
+              messageContent.push(contentBlock);
+              break;
+            case "image":
+              const dataUrl = `data:${contentBlock.mime_type};base64,${contentBlock.data}`;
+              messageContent.push({ type: "image_url", image_url: { url: dataUrl } });
+              break;
+          }
+        };
         chatMessages_formatted.push({
           role: "user",
           name: msg.sender_id,
-          content: msg.message_data.content.map((contentBlock) => {
-            switch (contentBlock.type) {
-              case "quote":
-                return { type: "text", text: `> ${contentBlock.text.trim().replace(/\n/g, '\n> ')}` };
-              case "text":
-                return contentBlock;
-              case "image":
-                const dataUrl = `data:${contentBlock.source.mime_type};base64,${contentBlock.source.data}`;
-                return { type: "image_url", image_url: {url: dataUrl} };
-            }
-          }),
+          content: messageContent,
         });
         break;
       case "assistant":

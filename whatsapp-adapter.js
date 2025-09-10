@@ -22,10 +22,10 @@ let messageHandler = null;
 /**
  *
  * @param {BaileysMessage} baileysMessage
- * @returns {Promise<ContentBlock[]>}
+ * @returns {Promise<UserContentBlock[]>}
  */
 async function getMessageContent(baileysMessage) {
-  /** @type {ContentBlock[]} */
+  /** @type {UserContentBlock[]} */
   const content = [];
 
   // Check for quoted message content
@@ -46,11 +46,36 @@ async function getMessageContent(baileysMessage) {
 
     // const quotedSenderId = baileysMessage.message?.extendedTextMessage?.contextInfo?.participant;
 
+    /** @type {QuoteContentBlock} */
+    const quote = {
+      type: "quote",
+      content: [],
+    };
+
+    // if (quotedMessage.imageMessage) {
+    //   quote.content.push(
+    //     /** @type {ImageContentBlock} */
+    //     ({
+    //       type: "image",
+    //       encoding: "base64",
+    //       mime_type: quotedMessage.imageMessage.mimetype,
+    //       data: Buffer.from(quotedMessage.imageMessage.jpegThumbnail).toString('base64')
+    //     })
+    //   )
+    // }
+
     if (quoteText) {
-      content.push({
-        type: "quote",
-        text: quoteText,
-      });
+      quote.content.push(
+        /** @type {TextContentBlock} */
+        ({
+          type: "text",
+          text: quoteText,
+        })
+      )
+    }
+
+    if (quote.content.length > 0) {
+      content.push(quote);
     }
   }
 
@@ -73,11 +98,9 @@ async function getMessageContent(baileysMessage) {
 
     content.push({
       type: "image",
-      source: {
-        type: "base64",
-        mime_type: mimeType,
-        data: base64Data,
-      },
+      encoding: "base64",
+      mime_type: mimeType,
+      data: base64Data,
     });
     if (imageMessage.caption) {
       content.push({
@@ -99,11 +122,9 @@ async function getMessageContent(baileysMessage) {
 
     content.push({
       type: "video",
-      source: {
-        type: "base64",
-        media_type: mimeType,
-        data: base64Data,
-      },
+      encoding: "base64",
+      mime_type: mimeType,
+      data: base64Data,
     });
     if (videoMessage.caption) {
       content.push({
