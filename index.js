@@ -238,7 +238,7 @@ async function handleMessage(messageContext) {
               case "text":
                 return contentBlock;
               case "image":
-                const dataUrl = `data:${contentBlock.source.media_type};base64,${contentBlock.source.data}`;
+                const dataUrl = `data:${contentBlock.source.mime_type};base64,${contentBlock.source.data}`;
                 return { type: "image_url", image_url: {url: dataUrl} };
             }
           }),

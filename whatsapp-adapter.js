@@ -75,7 +75,7 @@ async function getMessageContent(baileysMessage) {
       type: "image",
       source: {
         type: "base64",
-        media_type: mimeType,
+        mime_type: mimeType,
         data: base64Data,
       },
     });
