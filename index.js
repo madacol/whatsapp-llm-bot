@@ -237,6 +237,9 @@ async function handleMessage(messageContext) {
                 return { type: "text", text: `> ${contentBlock.text.trim().replace(/\n/g, '\n> ')}` };
               case "text":
                 return contentBlock;
+              case "image":
+                const dataUrl = `data:${contentBlock.source.media_type};base64,${contentBlock.source.data}`;
+                return { type: "image_url", image_url: {url: dataUrl} };
             }
           }),
         });
