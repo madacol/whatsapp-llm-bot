@@ -22,6 +22,12 @@ type VideoContentBlock = {
   data: string;
   alt?: string;
 };
+type AudioContentBlock = {
+  type: "audio";
+  encoding: "base64";
+  mime_type: string;
+  data: string;
+};
 type QuoteContentBlock = {
   type: "quote";
   content: IncomingContentBlock[];
@@ -55,7 +61,7 @@ type ContentBlock = IncomingContentBlock | ToolCallContentBlock;
   type ToolMessage = {
     role: "tool";
     tool_id: string;
-    content: (TextContentBlock | ImageContentBlock | VideoContentBlock)[];
+    content: (TextContentBlock | ImageContentBlock | VideoContentBlock | AudioContentBlock)[];
   };
 
   type Message = UserMessage | AssistantMessage | ToolMessage;
