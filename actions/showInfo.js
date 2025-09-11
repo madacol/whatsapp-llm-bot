@@ -11,7 +11,7 @@ export default /** @type {defineAction} */ ((x) => x)({
     autoExecute: true,
     useRootDb: true,
   },
-  action_fn: async function ({ chatId, rootDb }) {
+  action_fn: async function ({ chatId, rootDb, senderIds, content }) {
     // Get chat enabled status
     const {
       rows: [chatInfo],
@@ -25,10 +25,14 @@ export default /** @type {defineAction} */ ((x) => x)({
     const status = chatInfo.is_enabled ? "enabled" : "disabled";
 
     let info = `Chat Information:\n`;
-    info += `- Chat ID: ${chatId}\n`;
-    // info += `- Chat Name: ${chat.name || 'Private Chat'}\n`;
-    // info += `- Type: ${chat.isGroup ? 'Group' : 'Private'}\n`;
-    info += `- status: ${status}`;
+    info += `- *Chat ID*: ${chatId}\n`;
+    info += `- *Status*: ${status}\n`;
+    info += `- *Sender IDs*: ${senderIds.join(", ")}\n`;
+    info += `- *Your message*:
+    \`\`\`
+    ${JSON.stringify(content, null, 2)}
+    \`\`\`
+    `;
 
     return info;
   },
