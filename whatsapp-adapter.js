@@ -14,8 +14,8 @@ import { exec } from "child_process";
 // Module state
 /** @type {import('@whiskeysockets/baileys').WASocket | null} */
 let sock = null;
-/** @type {string | null} */
-let selfId = null;
+/** @type {string[] | null} */
+let selfIds = null;
 /** @type {Function | null} */
 let messageHandler = null;
 
@@ -193,7 +193,17 @@ async function _handleIncomingMessage(baileysMessage) {
   }
 
   const chatId = baileysMessage.key.remoteJid || "";
-  const senderId = baileysMessage.key.participant || chatId;
+  /** @type {string[]} */
+  const senderIds = []
+  senderIds.push(baileysMessage.key.participant || baileysMessage.key.remoteJid || "unknown")
+  senderIds.push( // @ts-ignore
+    baileysMessage.key.participantLid // @ts-ignore
+    || baileysMessage.key.participantPid // @ts-ignore
+    || baileysMessage.key.senderLid // @ts-ignore
+    || baileysMessage.key.senderPid // @ts-ignore
+    || "unknown"
+  )
+
   const isGroup = !!chatId?.endsWith("@g.us");
 
   // Create timestamp
@@ -208,8 +218,8 @@ async function _handleIncomingMessage(baileysMessage) {
   const messageContext = {
     // Message data
     chatId,
-    senderId: senderId.split("@")[0],
-    senderName: baileysMessage.pushName || senderId.split("@")[0],
+    senderIds: senderIds.map(id => id.split("@")[0]),
+    senderName: baileysMessage.pushName || "",
     content: content,
     isGroup,
     timestamp,
@@ -220,7 +230,7 @@ async function _handleIncomingMessage(baileysMessage) {
       try {
         const groupMetadata = await sock.groupMetadata(chatId);
         const participant = groupMetadata.participants.find(
-          (p) => p.id === senderId,
+          participant => senderIds.includes(participant.id)
         );
         return participant?.admin || null;
       } catch (error) {
@@ -238,8 +248,8 @@ async function _handleIncomingMessage(baileysMessage) {
     },
 
     // Bot info
-    selfId,
-    selfName: sock.user?.name || selfId,
+    selfIds: selfIds || [],
+    selfName: sock.user?.name || "",
 
     // Raw mention data
     mentions:
@@ -298,8 +308,12 @@ export async function connectToWhatsApp(onMessageHandler) {
         }
       } else if (connection === "open") {
         console.log("WhatsApp connection opened");
-        selfId = sock.user?.id?.split(":")[0] || sock.user?.id;
-        console.log("Self ID:", selfId);
+        const lid = sock.user?.lid?.split(":")[0] || sock.user?.lid;
+        const id = sock.user?.id?.split(":")[0] || sock.user?.id;
+        selfIds = [];
+        if (id) selfIds.push(id);
+        if (lid) selfIds.push(lid);
+        console.log("Self IDs:", selfIds, JSON.stringify(sock.user, null, 2));
       }
     }
 
@@ -330,6 +344,6 @@ export async function closeWhatsapp() {
     console.error("Error during WhatsApp cleanup:", error);
   }
   sock = null;
-  selfId = null;
+  selfIds = null;
   messageHandler = null;
 }

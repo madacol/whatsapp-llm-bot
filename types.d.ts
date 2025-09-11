@@ -70,7 +70,7 @@ type ContentBlock = IncomingContentBlock | ToolCallContentBlock;
 type IncomingContext = {
   // Message data
   chatId: string;
-  senderId: string;
+  senderIds: string[];
   senderName: string;
   content: IncomingContentBlock[];
   isGroup: boolean;
@@ -82,7 +82,7 @@ type IncomingContext = {
   replyToMessage: (text: string) => Promise<void>;
 
   // Bot info
-  selfId: string;
+  selfIds: string[];
   selfName: string;
 
   // Raw mention data
@@ -92,7 +92,7 @@ type IncomingContext = {
 // Unified context for message handling
 type Context = {
   chatId: string;
-  senderId: string;
+  senderIds: string[];
   content: IncomingContentBlock[];
   getIsAdmin: () => Promise<boolean>;
   sendMessage: (header: string, message: string) => Promise<void>;
@@ -104,7 +104,7 @@ type Context = {
 // Context passed to actions (pre-built functions with headers baked in)
 type ActionContext = {
   chatId: string;
-  senderId: string;
+  senderIds: string[];
   content: IncomingContentBlock[];
   getIsAdmin: () => Promise<boolean>;
   sessionDb: PGlite;

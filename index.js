@@ -59,7 +59,7 @@ function actionsToOpenAIFormat(actions) {
  * @returns {Promise<boolean>}
  */
 async function shouldRespond(messageContext) {
-  const { chatId, isGroup, selfId, mentions } = messageContext;
+  const { chatId, isGroup, selfIds, mentions } = messageContext;
 
   // Check if chat is enabled
   const chatInfo = await getChat(chatId);
@@ -74,7 +74,7 @@ async function shouldRespond(messageContext) {
 
   // Respond if I have been mentioned
   const isMentioned = mentions.some((contactId) =>
-    String(contactId).startsWith(selfId),
+    selfIds.some(selfId => contactId.startsWith(selfId))
   );
   if (isMentioned) {
     return true;
@@ -101,7 +101,7 @@ async function cleanup() {
  * @returns {Promise<void>}
  */
 async function handleMessage(messageContext) {
-  const { chatId, senderId, content, isGroup, senderName } = messageContext;
+  const { chatId, senderIds, content, isGroup, senderName } = messageContext;
 
   console.log("INCOMING MESSAGE:", JSON.stringify(messageContext, null, 2));
 
@@ -109,7 +109,7 @@ async function handleMessage(messageContext) {
   /** @type {Context} */
   const context = {
     chatId: chatId,
-    senderId: senderId,
+    senderIds,
     content: content,
     getIsAdmin: async () => {
       const adminStatus = await messageContext.getAdminStatus();
@@ -187,7 +187,7 @@ async function handleMessage(messageContext) {
     if (isGroup) {
 
       // Remove mention of self from start of message
-      const mentionPattern = new RegExp(`^@${messageContext.selfId} *`, "g");
+      const mentionPattern = new RegExp(`^@(${messageContext.selfIds.join("|")}) *`, "g");
       const cleanedContent = firstBlock.text.replace(mentionPattern, "");
 
       // TODO: Implement mention replacement using mentions
@@ -206,7 +206,7 @@ async function handleMessage(messageContext) {
   const message = {role: "user", content}
 
   // Insert message into DB
-  await addMessage(chatId, message, senderId);
+  await addMessage(chatId, message, senderIds);
 
   // Check if should respond
   if (!(await shouldRespond(messageContext))) {
@@ -385,7 +385,7 @@ async function handleMessage(messageContext) {
       }
 
       // Store tool calls in database
-      await addMessage(chatId, assistantMessage, senderId)
+      await addMessage(chatId, assistantMessage, senderIds)
 
       // Add assistant message with tool calls to conversation context
       chatMessages_formatted.push(responseMessage);
@@ -415,7 +415,7 @@ async function handleMessage(messageContext) {
               tool_id: toolCall.id,
               content: [{type: "text", text: JSON.stringify(functionResponse.result)}]
             }
-            await addMessage(chatId, toolMessage, senderId)
+            await addMessage(chatId, toolMessage, senderIds)
           }
 
           const resultMessage =
@@ -453,7 +453,7 @@ async function handleMessage(messageContext) {
             content: [{type: "text", text: errorMessage}],
           }
           // await db.sql`INSERT INTO messages(chat_id, message, content, sender_id, message_type, tool_call_id) VALUES (${chatId}, ${errorMessage}, ${JSON.stringify(errorMessage)}, ${messageContext.selfId}, 'tool_result', ${toolCall.id})`;
-          await addMessage(chatId, toolError, senderId)
+          await addMessage(chatId, toolError, senderIds)
 
           // Show tool error to user
           await context.sendMessage(
@@ -483,7 +483,7 @@ async function handleMessage(messageContext) {
     } else {
       // Only add assistant message if no tool calls (to avoid duplicates)
       chatMessages_formatted.push(responseMessage);
-      await addMessage(chatId, assistantMessage, senderId);
+      await addMessage(chatId, assistantMessage, senderIds);
     }
   }
 

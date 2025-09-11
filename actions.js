@@ -33,7 +33,7 @@ export async function executeAction(
 
   if (
     action.permissions?.requireRoot &&
-    context.senderId !== config.MASTER_ID
+    !context.senderIds.some(senderId => config.MASTER_IDs.includes(senderId))
   ) {
     throw new Error(`Action "${actionName}" requires master permissions`);
   }
@@ -44,7 +44,7 @@ export async function executeAction(
   /** @type {ActionContext} */
   const actionContext = {
     chatId: context.chatId,
-    senderId: context.senderId,
+    senderIds: context.senderIds,
     content: context.content,
     getIsAdmin: context.getIsAdmin,
     sessionDb: currentSessionDb,
