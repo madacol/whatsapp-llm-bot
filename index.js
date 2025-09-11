@@ -54,7 +54,7 @@ function actionsToOpenAIFormat(actions) {
 
 /**
  * Check if the bot should respond to a message
- * @param {MessageContext} messageContext
+ * @param {IncomingContext} messageContext
  * @returns {Promise<boolean>}
  */
 async function shouldRespond(messageContext) {
@@ -96,7 +96,7 @@ async function cleanup() {
 
 /**
  * Handle incoming WhatsApp messages
- * @param {MessageContext} messageContext
+ * @param {IncomingContext} messageContext
  * @returns {Promise<void>}
  */
 async function handleMessage(messageContext) {

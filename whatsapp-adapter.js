@@ -22,10 +22,10 @@ let messageHandler = null;
 /**
  *
  * @param {BaileysMessage} baileysMessage
- * @returns {Promise<UserContentBlock[]>}
+ * @returns {Promise<IncomingContentBlock[]>}
  */
 async function getMessageContent(baileysMessage) {
-  /** @type {UserContentBlock[]} */
+  /** @type {IncomingContentBlock[]} */
   const content = [];
 
   // Check for quoted message content
@@ -175,7 +175,7 @@ async function _handleIncomingMessage(baileysMessage) {
   }
   const timestamp = new Date(unixTime_ms);
 
-  /** @type {MessageContext} */
+  /** @type {IncomingContext} */
   const messageContext = {
     // Message data
     chatId,
@@ -226,7 +226,7 @@ async function _handleIncomingMessage(baileysMessage) {
 
 /**
  * Initialize WhatsApp connection and set up message handling
- * @param {(message: MessageContext) => Promise<void>} onMessageHandler - Handler function that receives enriched message context
+ * @param {(message: IncomingContext) => Promise<void>} onMessageHandler - Handler function that receives enriched message context
  */
 export async function connectToWhatsApp(onMessageHandler) {
   messageHandler = onMessageHandler;
