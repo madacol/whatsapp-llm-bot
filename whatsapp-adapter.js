@@ -94,12 +94,12 @@ async function getMessageContent(baileysMessage) {
       {},
     );
     const base64Data = imageBuffer.toString("base64");
-    const mimeType = imageMessage.mimetype || "image/jpeg";
+    const mimetype = imageMessage.mimetype;
 
     content.push({
       type: "image",
       encoding: "base64",
-      mime_type: mimeType,
+      mime_type: mimetype,
       data: base64Data,
     });
     if (imageMessage.caption) {
@@ -118,12 +118,12 @@ async function getMessageContent(baileysMessage) {
       {},
     );
     const base64Data = videoBuffer.toString("base64");
-    const mimeType = videoMessage.mimetype || "video/mp4";
+    const mimetype = videoMessage.mimetype;
 
     content.push({
       type: "video",
       encoding: "base64",
-      mime_type: mimeType,
+      mime_type: mimetype,
       data: base64Data,
     });
     if (videoMessage.caption) {
