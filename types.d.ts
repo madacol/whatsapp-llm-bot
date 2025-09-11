@@ -66,8 +66,6 @@ type ContentBlock = IncomingContentBlock | ToolCallContentBlock;
 
   type Message = UserMessage | AssistantMessage | ToolMessage;
 
-/* Actions */
-
 // WhatsApp Service Types
 type IncomingContext = {
   // Message data
@@ -100,6 +98,8 @@ type Context = {
   sendMessage: (header: string, message: string) => Promise<void>;
   reply: (header: string, message: string) => Promise<void>;
 };
+
+/* Actions */
 
 // Context passed to actions (pre-built functions with headers baked in)
 type ActionContext = {
