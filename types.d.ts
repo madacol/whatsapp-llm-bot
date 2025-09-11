@@ -24,7 +24,7 @@ type VideoContentBlock = {
 };
 type QuoteContentBlock = {
   type: "quote";
-  content: UserContentBlock[];
+  content: IncomingContentBlock[];
 };
 type ToolCallContentBlock = {
   type: "tool";
@@ -33,17 +33,18 @@ type ToolCallContentBlock = {
   arguments: string;
 };
 
-type UserContentBlock =
+type IncomingContentBlock =
   TextContentBlock
   | ImageContentBlock
   | VideoContentBlock
+  | AudioContentBlock
   | QuoteContentBlock;
 
-type ContentBlock = UserContentBlock | ToolCallContentBlock;
+type ContentBlock = IncomingContentBlock | ToolCallContentBlock;
 
   type UserMessage = {
     role: "user";
-    content: UserContentBlock[];
+    content: IncomingContentBlock[];
   };
 
   type AssistantMessage = {
@@ -62,12 +63,12 @@ type ContentBlock = UserContentBlock | ToolCallContentBlock;
 /* Actions */
 
 // WhatsApp Service Types
-type MessageContext = {
+type IncomingContext = {
   // Message data
   chatId: string;
   senderId: string;
   senderName: string;
-  content: UserMessage['content'];
+  content: IncomingContentBlock[];
   isGroup: boolean;
   timestamp: Date;
 
@@ -88,7 +89,7 @@ type MessageContext = {
 type Context = {
   chatId: string;
   senderId: string;
-  content: UserMessage['content'] | string;
+  content: IncomingContentBlock[];
   getIsAdmin: () => Promise<boolean>;
   sendMessage: (header: string, message: string) => Promise<void>;
   reply: (header: string, message: string) => Promise<void>;
@@ -98,7 +99,7 @@ type Context = {
 type ActionContext = {
   chatId: string;
   senderId: string;
-  content: UserMessage['content'] | string;
+  content: IncomingContentBlock[];
   getIsAdmin: () => Promise<boolean>;
   sessionDb: PGlite;
   getActions: () => Promise<Action[]>;
