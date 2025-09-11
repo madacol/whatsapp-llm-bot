@@ -162,7 +162,7 @@ async function getMessageContent(baileysMessage) {
   }
 
   if (content.length === 0) {
-    console.log("Unknown content", JSON.stringify(baileysMessage, null, 2));
+    console.log("Unknown baileysMessage", JSON.stringify(baileysMessage, null, 2));
   }
 
   return content;
