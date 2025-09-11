@@ -103,7 +103,7 @@ async function cleanup() {
 async function handleMessage(messageContext) {
   const { chatId, senderId, content, isGroup, senderName } = messageContext;
 
-  console.log("MESSAGE RECEIVED:", messageContext);
+  console.log("INCOMING MESSAGE:", JSON.stringify(messageContext, null, 2));
 
   // Create legacy context for actions (maintains backward compatibility)
   /** @type {Context} */
@@ -323,7 +323,6 @@ async function handleMessage(messageContext) {
   }
 
   async function processLlmResponse() {
-    console.log(chatMessages_formatted);
 
     let response;
     try {
@@ -345,8 +344,6 @@ async function handleMessage(messageContext) {
       );
       return;
     }
-
-    console.log("response", JSON.stringify(response, null, 2));
 
     const responseMessage = response.choices[0].message;
 
