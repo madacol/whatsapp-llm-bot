@@ -89,7 +89,7 @@ export async function createChat (chatId) {
 /**
  * @param {MessageRow['chat_id']} chatId
  * @param {MessageRow['message_data']} message_data
- * @param {MessageRow['sender_id']} senderId
+ * @param {MessageRow['sender_id']?} senderId
  */
 export async function addMessage (chatId, message_data, senderId = null) {
   const {rows: [message]} = await db.sql`INSERT INTO messages(chat_id, sender_id, message_data)

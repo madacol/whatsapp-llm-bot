@@ -97,12 +97,19 @@ async function getMessageContent(baileysMessage) {
     const base64Data = imageBuffer.toString("base64");
     const mimetype = imageMessage.mimetype;
 
-    content.push({
-      type: "image",
-      encoding: "base64",
-      mime_type: mimetype,
-      data: base64Data,
-    });
+    if (mimetype) {
+      content.push({
+        type: "image",
+        encoding: "base64",
+        mime_type: mimetype,
+        data: base64Data,
+      });
+    } else {
+      content.push({
+        type: "text",
+        text: "Error reading image: No mimetype found",
+      });
+    }
     if (imageMessage.caption) {
       content.push({
         type: "text",
@@ -124,7 +131,7 @@ async function getMessageContent(baileysMessage) {
     content.push({
       type: "video",
       encoding: "base64",
-      mime_type: mimetype,
+      mime_type: mimetype || undefined,
       data: base64Data,
     });
     if (videoMessage.caption) {
@@ -148,7 +155,7 @@ async function getMessageContent(baileysMessage) {
     content.push({
       type: "audio",
       encoding: "base64",
-      mime_type: mimetype,
+      mime_type: mimetype || undefined,
       data: base64Data,
     });
   }
@@ -185,18 +192,17 @@ async function _handleIncomingMessage(baileysMessage) {
     return
   }
 
-  const chatId = baileysMessage.key.remoteJid;
+  const chatId = baileysMessage.key.remoteJid || "";
   const senderId = baileysMessage.key.participant || chatId;
-  const isGroup = chatId.endsWith("@g.us");
+  const isGroup = !!chatId?.endsWith("@g.us");
 
   // Create timestamp
-  let unixTime_ms;
-  if (typeof baileysMessage.messageTimestamp === "number") {
-    unixTime_ms = baileysMessage.messageTimestamp * 1000;
-  } else {
-    unixTime_ms = baileysMessage.messageTimestamp.toNumber() * 1000;
-  }
-  const timestamp = new Date(unixTime_ms);
+  const timestamp =
+    (typeof baileysMessage.messageTimestamp === "number")
+      ? new Date(baileysMessage.messageTimestamp * 1000)
+      : (!baileysMessage.messageTimestamp)
+        ? new Date()
+        : new Date(baileysMessage.messageTimestamp.toNumber() * 1000);
 
   /** @type {IncomingContext} */
   const messageContext = {
