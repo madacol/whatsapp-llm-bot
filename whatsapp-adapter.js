@@ -162,6 +162,10 @@ async function _handleIncomingMessage(baileysMessage) {
 
   const content = await getMessageContent(baileysMessage);
 
+  if (content.length === 0) {
+    return
+  }
+
   const chatId = baileysMessage.key.remoteJid;
   const senderId = baileysMessage.key.participant || chatId;
   const isGroup = chatId.endsWith("@g.us");
