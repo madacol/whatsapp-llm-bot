@@ -126,9 +126,9 @@ type PermissionFlags = {
 };
 
 // Build action context types dynamically based on permissions
-type ExtendedActionContext<P extends PermissionFlags> = ActionContext &
-  (P["useRootDb"] extends true ? { rootDb: PGlite } : {}) &
-  (P["useChatDb"] extends true ? { chatDb: PGlite } : {});
+type ExtendedActionContext<P extends PermissionFlags> = ActionContext
+  & (P["useRootDb"] extends true ? { rootDb: PGlite } : {})
+  & (P["useChatDb"] extends true ? { chatDb: PGlite } : {});
 // & (P['useFileSystem'] extends true ? {directoryHandle: FileSystemDirectoryHandle} : {});
 
 type ActionResult = string | {} | HTMLElement;
