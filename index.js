@@ -8,6 +8,7 @@ import config from "./config.js";
 import { shortenToolId } from "./utils.js";
 import { connectToWhatsApp, closeWhatsapp } from "./whatsapp-adapter.js";
 import { addMessage, closeDb, createChat, getChat, getMessages, initDatabase } from "./store.js";
+import { convertAudioToMp3 as getMp3InBase64 } from "./audio_conversion.js";
 
 // Initialize LLM client
 const llmClient = new OpenAI({
@@ -251,6 +252,24 @@ async function handleMessage(messageContext) {
             case "image":
               const dataUrl = `data:${contentBlock.mime_type};base64,${contentBlock.data}`;
               messageContent.push({ type: "image_url", image_url: { url: dataUrl } });
+              break;
+            case "audio":
+              let format = contentBlock.mime_type.split("audio/")[1].split(";")[0];
+              let data;
+              if (format !== "wav" && format !== "mp3") {
+                console.warn(`Unsupported audio format: ${contentBlock.mime_type}`);
+                data = getMp3InBase64(contentBlock.data);
+                format = "mp3";
+              } else {
+                data = contentBlock.data;
+              }
+              messageContent.push({
+                type: "input_audio",
+                input_audio: {
+                  data: data,
+                  format: format
+                }
+              });
               break;
           }
         };

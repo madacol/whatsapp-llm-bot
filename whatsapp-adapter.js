@@ -82,6 +82,7 @@ async function getMessageContent(baileysMessage) {
   // Check for image content (including quoted images)
   const imageMessage = baileysMessage.message?.imageMessage;
   const videoMessage = baileysMessage.message?.videoMessage;
+  const audioMessage = baileysMessage.message?.audioMessage;
   const textMessage = baileysMessage.message?.conversation
     || baileysMessage.message?.extendedTextMessage?.text
     || baileysMessage.message?.documentMessage?.caption
@@ -132,6 +133,24 @@ async function getMessageContent(baileysMessage) {
         text: videoMessage.caption,
       });
     }
+  }
+
+  if (audioMessage) {
+    // Handle audio message
+    const audioBuffer = await downloadMediaMessage(
+      baileysMessage,
+      "buffer",
+      {},
+    );
+    const base64Data = audioBuffer.toString("base64");
+    const mimetype = audioMessage.mimetype;
+
+    content.push({
+      type: "audio",
+      encoding: "base64",
+      mime_type: mimetype,
+      data: base64Data,
+    });
   }
 
   if (textMessage) {
