@@ -6,8 +6,6 @@
         "allowJs": true,
         "checkJs": true,
         "strict": true,
-        "strictNullChecks": false,
-        "strictFunctionTypes": false,
         "noImplicitReturns": false,
         "noUnusedLocals": true,
         "noUnusedParameters": true,

@@ -18,14 +18,14 @@ type ImageContentBlock = {
 type VideoContentBlock = {
   type: "video";
   encoding: "base64";
-  mime_type: string;
+  mime_type?: string;
   data: string;
   alt?: string;
 };
 type AudioContentBlock = {
   type: "audio";
   encoding: "base64";
-  mime_type: string;
+  mime_type?: string;
   data: string;
 };
 type QuoteContentBlock = {
@@ -142,7 +142,7 @@ type Action<P extends PermissionFlags = PermissionFlags> = {
     properties: Record<string, any>;
     required?: string[];
   }; // a JSON-Schema for the action_fn's parameters
-  permissions?: P;
+  permissions: P;
   action_fn: (
     context: ExtendedActionContext<P>,
     params: any,

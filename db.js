@@ -3,9 +3,15 @@ import { PGlite } from "@electric-sql/pglite";
 /** @type {Map<string, PGlite>} */
 const dbCache = new Map();
 
+/**
+ * @param {string} dataDir
+ * @returns PGlite
+ */
 export function getDb(dataDir) {
-  if (!dbCache.has(dataDir)) {
-    dbCache.set(dataDir, new PGlite(dataDir));
-  }
-  return dbCache.get(dataDir);
+  const db = dbCache.get(dataDir);
+  if (db) return db;
+
+  const createdDb = new PGlite(dataDir);
+  dbCache.set(dataDir, createdDb);
+  return createdDb;
 }

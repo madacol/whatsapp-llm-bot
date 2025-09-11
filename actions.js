@@ -41,6 +41,7 @@ export async function executeAction(
   // Create action-specific messaging functions with headers baked in
   const shortId = shortenToolId(toolCallId || "command");
 
+  /** @type {ActionContext} */
   const actionContext = {
     chatId: context.chatId,
     senderId: context.senderId,

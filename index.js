@@ -254,7 +254,7 @@ async function handleMessage(messageContext) {
               messageContent.push({ type: "image_url", image_url: { url: dataUrl } });
               break;
             case "audio":
-              let format = contentBlock.mime_type.split("audio/")[1].split(";")[0];
+              let format = contentBlock.mime_type?.split("audio/")[1].split(";")[0];
               let data;
               if (format !== "wav" && format !== "mp3") {
                 console.warn(`Unsupported audio format: ${contentBlock.mime_type}`);
@@ -267,6 +267,7 @@ async function handleMessage(messageContext) {
                 type: "input_audio",
                 input_audio: {
                   data: data,
+                  // @ts-ignore
                   format: format
                 }
               });
@@ -298,7 +299,7 @@ async function handleMessage(messageContext) {
                   }
                 });
             }
-          }),
+          }).filter(x=>!!x),
           tool_calls: toolCalls.length > 0 ? toolCalls : undefined,
         });
         break;
