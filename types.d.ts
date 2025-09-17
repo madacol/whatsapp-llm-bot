@@ -84,9 +84,6 @@ type IncomingContext = {
   // Bot info
   selfIds: string[];
   selfName: string;
-
-  // Raw mention data
-  mentions: string[];
 };
 
 // Unified context for message handling
