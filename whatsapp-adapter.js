@@ -256,8 +256,8 @@ async function adaptIncomingMessage(baileysMessage, sock) {
 
     // Raw mention data
     mentions:
-      baileysMessage.message?.extendedTextMessage?.contextInfo?.mentionedJid ||
-      [],
+      baileysMessage.message?.extendedTextMessage?.contextInfo?.mentionedJid
+      || [],
   };
 
   // Call the user-provided message handler with enriched context
