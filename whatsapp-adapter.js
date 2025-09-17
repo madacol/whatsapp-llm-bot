@@ -253,11 +253,6 @@ async function adaptIncomingMessage(baileysMessage, sock) {
     // Bot info
     selfIds: selfIds || [],
     selfName: sock.user?.name || "",
-
-    // Raw mention data
-    mentions:
-      baileysMessage.message?.extendedTextMessage?.contextInfo?.mentionedJid
-      || [],
   };
 
   // Call the user-provided message handler with enriched context

@@ -34,7 +34,7 @@ function actionsToOpenAIFormat(actions) {
  * @returns {Promise<void>}
  */
 export async function handleMessage(messageContext) {
-  const { chatId, senderIds, content, isGroup, senderName, selfIds, mentions } = messageContext;
+  const { chatId, senderIds, content, isGroup, senderName, selfIds } = messageContext;
 
   console.log("INCOMING MESSAGE:", JSON.stringify(messageContext, null, 2));
 
@@ -114,6 +114,35 @@ export async function handleMessage(messageContext) {
   // Insert chatId into DB if not already present
   await createChat(chatId);
 
+  /**
+   * Check if the bot should respond to a message
+   */
+  shouldRespond: {
+    // Skip if chat is not enabled
+    const chatInfo = await getChat(chatId);
+    if (!chatInfo?.is_enabled) {
+      return;
+    }
+
+    // Respond if in a private chat
+    if (!isGroup) {
+      break shouldRespond;
+    }
+
+    // Respond in groups if I have been mentioned
+    const isMentioned = content.some(contentPart =>
+      contentPart.type === "text"
+        && selfIds.some(selfId => contentPart.text.includes('@' + selfId))
+    );
+    console.log({isMentioned, content});
+    if (isMentioned) {
+      break shouldRespond;
+    }
+
+    return;
+  }
+
+  console.log("LLM will respond");
 
   // Get system prompt from current chat or use default
   const chatInfo = await getChat(chatId);
@@ -142,33 +171,6 @@ export async function handleMessage(messageContext) {
 
   // Insert message into DB
   await addMessage(chatId, message, senderIds);
-
-
-  /**
-   * Check if the bot should respond to a message
-   */
-  shouldRespond: {
-    // Skip if chat is not enabled
-    const chatInfo = await getChat(chatId);
-    if (!chatInfo?.is_enabled) {
-      return;
-    }
-
-    // Respond if in a private chat
-    if (!isGroup) {
-      break shouldRespond;
-    }
-
-    // Respond in groups if I have been mentioned
-    const isMentioned = mentions.some((contactId) =>
-      selfIds.some(selfId => contactId.startsWith(selfId))
-    );
-    if (isMentioned) {
-      break shouldRespond;
-    }
-
-    return;
-  }
 
   // Get latest messages from DB
   const chatMessages = await getMessages(chatId)
