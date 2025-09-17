@@ -304,6 +304,7 @@ export async function connectToWhatsApp(onMessageHandler) {
           shouldReconnect,
         );
         if (shouldReconnect) {
+          await new Promise(resolve => setTimeout(resolve, 1000));
           await connectToWhatsApp(onMessageHandler);
         }
       } else if (connection === "open") {
