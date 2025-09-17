@@ -1,8 +1,5 @@
 import { getDb } from "./db.js";
 
-// Initialize database
-const db = getDb("./pgdata/root");
-
 /**
  * @typedef {{
  *   chat_id: string;
@@ -20,7 +17,10 @@ const db = getDb("./pgdata/root");
  * }} MessageRow
  */
 
-export async function initDatabase(){
+export async function initStore(){
+    // Initialize database
+    const db = getDb("./pgdata/root");
+
     // Initialize database tables
     await db.sql`
         CREATE TABLE IF NOT EXISTS chats (
@@ -57,43 +57,48 @@ export async function initDatabase(){
       // Ignore errors if columns already exist
       console.log("Database schema already up to date");
     }
+    return {
+      /**
+      * @param {ChatRow['chat_id']} chatId
+      */
+      async getChat (chatId) {
+        const { rows: [chat] } = await db.sql`SELECT * FROM chats WHERE chat_id = ${chatId}`;
+        return /** @type {ChatRow} */ (chat);
+      },
+
+      closeDb () {
+        console.log("Closing database...");
+        return db.close();
+        console.log("Database closed");
+      },
+
+      /**
+      * @param {ChatRow['chat_id']} chatId
+      * @param {number} limit
+      */
+      async getMessages (chatId, limit = 50) {
+        const {rows: messages} = await db.sql`SELECT * FROM messages WHERE chat_id = ${chatId} ORDER BY timestamp DESC LIMIT ${limit}`;
+        // messages.message_data = JSON.parse(messages.message_data);
+        return /** @type {MessageRow[]} */ (messages);
+      },
+
+      /**
+      * @param {ChatRow['chat_id']} chatId
+      */
+      async createChat (chatId) {
+        await db.sql`INSERT INTO chats(chat_id) VALUES (${chatId}) ON CONFLICT (chat_id) DO NOTHING;`;
+      },
+
+      /**
+      * @param {MessageRow['chat_id']} chatId
+      * @param {MessageRow['message_data']} message_data
+      * @param {MessageRow['sender_id'][]?} senderIds
+      */
+      async addMessage (chatId, message_data, senderIds = null) {
+        const {rows: [message]} = await db.sql`INSERT INTO messages(chat_id, sender_id, message_data)
+          VALUES (${chatId}, ${senderIds?.join(",")}, ${message_data})
+          RETURNING *`;
+        return /** @type {MessageRow} */ (message);
+      },
+    }
 }
-
-/**
- * @param {ChatRow['chat_id']} chatId
- */
-export async function getChat (chatId) {
-  const { rows: [chat] } = await db.sql`SELECT * FROM chats WHERE chat_id = ${chatId}`;
-  return /** @type {ChatRow} */ (chat);
-};
-
-export function closeDb () { return db.close()};
-
-/**
- * @param {ChatRow['chat_id']} chatId
- * @param {number} limit
- */
-export async function getMessages (chatId, limit = 50) {
-  const {rows: messages} = await db.sql`SELECT * FROM messages WHERE chat_id = ${chatId} ORDER BY timestamp DESC LIMIT ${limit}`;
-  // messages.message_data = JSON.parse(messages.message_data);
-  return /** @type {MessageRow[]} */ (messages);
-};
-
-/**
- * @param {ChatRow['chat_id']} chatId
- */
-export async function createChat (chatId) {
-  await db.sql`INSERT INTO chats(chat_id) VALUES (${chatId}) ON CONFLICT (chat_id) DO NOTHING;`;
-};
-
-/**
- * @param {MessageRow['chat_id']} chatId
- * @param {MessageRow['message_data']} message_data
- * @param {MessageRow['sender_id'][]?} senderIds
- */
-export async function addMessage (chatId, message_data, senderIds = null) {
-  const {rows: [message]} = await db.sql`INSERT INTO messages(chat_id, sender_id, message_data)
-    VALUES (${chatId}, ${senderIds?.join(",")}, ${message_data})
-    RETURNING *`;
-  return /** @type {MessageRow} */ (message);
-};
