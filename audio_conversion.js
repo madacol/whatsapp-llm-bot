@@ -9,7 +9,7 @@ import { tmpdir } from 'os';
  * @param {string} base64Data - Base64 encoded audio data
  * @returns {string}
  */
-export function convertAudioToMp3(base64Data) {
+export function convertAudioToMp3Base64 (base64Data) {
   // Create temporary file paths
   const tempDir = tmpdir();
     const inputFile = path.join(tempDir, `input_${Date.now()}.tmp`);
