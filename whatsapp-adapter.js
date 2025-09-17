@@ -9,15 +9,7 @@ import {
   downloadMediaMessage,
 } from "@whiskeysockets/baileys";
 import { exec } from "child_process";
-
-
-// Module state
-/** @type {import('@whiskeysockets/baileys').WASocket | null} */
-let sock = null;
-/** @type {string[] | null} */
-let selfIds = null;
-/** @type {Function | null} */
-let messageHandler = null;
+import { handleMessage } from "./index.js";
 
 /**
  *
@@ -178,8 +170,9 @@ async function getMessageContent(baileysMessage) {
 /**
  * Internal method to process incoming messages and create enriched context
  * @param {BaileysMessage} baileysMessage - Raw Baileys message
+ * @param {import('@whiskeysockets/baileys').WASocket} sock
  */
-async function _handleIncomingMessage(baileysMessage) {
+async function adaptIncomingMessage(baileysMessage, sock) {
   // Extract message content from Baileys format
   // Ignore status updates
   if (baileysMessage.key.remoteJid === "status@broadcast") {
@@ -213,6 +206,16 @@ async function _handleIncomingMessage(baileysMessage) {
       : (!baileysMessage.messageTimestamp)
         ? new Date()
         : new Date(baileysMessage.messageTimestamp.toNumber() * 1000);
+
+
+  /** @type {string[]} */
+  const selfIds = [];
+  {
+    const lid = sock.user?.lid?.split(":")[0] || sock.user?.lid;
+    const id = sock.user?.id?.split(":")[0] || sock.user?.id;
+    if (id) selfIds.push(id);
+    if (lid) selfIds.push(lid);
+  }
 
   /** @type {IncomingContext} */
   const messageContext = {
@@ -258,9 +261,7 @@ async function _handleIncomingMessage(baileysMessage) {
   };
 
   // Call the user-provided message handler with enriched context
-  if (messageHandler) {
-    await messageHandler(messageContext);
-  }
+  await handleMessage(messageContext);
 }
 
 /**
@@ -268,13 +269,12 @@ async function _handleIncomingMessage(baileysMessage) {
  * @param {(message: IncomingContext) => Promise<void>} onMessageHandler - Handler function that receives enriched message context
  */
 export async function connectToWhatsApp(onMessageHandler) {
-  messageHandler = onMessageHandler;
 
   const { state, saveCreds } = await useMultiFileAuthState(
     "./auth_info_baileys",
   );
 
-  sock = makeWASocket({
+  const sock = makeWASocket({
     auth: state,
     browser: ["WhatsApp LLM Bot", "Chrome", "1.0.0"],
   });
@@ -310,7 +310,7 @@ export async function connectToWhatsApp(onMessageHandler) {
         console.log("WhatsApp connection opened");
         const lid = sock.user?.lid?.split(":")[0] || sock.user?.lid;
         const id = sock.user?.id?.split(":")[0] || sock.user?.id;
-        selfIds = [];
+        const selfIds = [];
         if (id) selfIds.push(id);
         if (lid) selfIds.push(lid);
         console.log("Self IDs:", selfIds, JSON.stringify(sock.user, null, 2));
@@ -325,25 +325,21 @@ export async function connectToWhatsApp(onMessageHandler) {
       const { messages } = events["messages.upsert"];
       for (const message of messages) {
         if (message.key.fromMe || !message.message) continue;
-        await _handleIncomingMessage(message);
+        await adaptIncomingMessage(message, sock);
       }
     }
   });
-}
 
-/**
- * Clean disconnect and cleanup
- */
-export async function closeWhatsapp() {
-  console.log("Cleaning up WhatsApp connection...");
-  try {
-    if (sock) {
-      sock.end(undefined);
+  return {
+    async closeWhatsapp() {
+      console.log("Cleaning up WhatsApp connection...");
+      try {
+        if (sock) {
+          sock.end(undefined);
+        }
+      } catch (error) {
+        console.error("Error during WhatsApp cleanup:", error);
+      }
     }
-  } catch (error) {
-    console.error("Error during WhatsApp cleanup:", error);
   }
-  sock = null;
-  selfIds = null;
-  messageHandler = null;
 }

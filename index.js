@@ -6,36 +6,11 @@ import OpenAI from "openai";
 import { getActions, executeAction } from "./actions.js";
 import config from "./config.js";
 import { shortenToolId } from "./utils.js";
-import { connectToWhatsApp, closeWhatsapp } from "./whatsapp-adapter.js";
-import { addMessage, closeDb, createChat, getChat, getMessages, initDatabase } from "./store.js";
-
-// Initialize LLM client
-const llmClient = new OpenAI({
-  apiKey: config.llm_api_key,
-  baseURL: config.base_url,
-});
-
-// WhatsApp service will be initialized via function call
-
-// Load actions
-/** @type {Action[]} */
-let actions = [];
-/** @type {Map<string, Action>} */
-let actionsByCommand = new Map();
-
-getActions().then((loadedActions) => {
-  actions = loadedActions;
-
-  // Index actions by command
-  actions.forEach((action) => {
-    if (action.command) {
-      actionsByCommand.set(action.command, action);
-    }
-  });
+import { connectToWhatsApp } from "./whatsapp-adapter.js";
+import { initStore } from "./store.js";
 import { convertAudioToMp3Base64 } from "./audio_conversion.js";
 
-  console.log(`Loaded ${actions.length} actions`);
-});
+const { addMessage, closeDb, createChat, getChat, getMessages } = await initStore();
 
 /**
  * Convert actions to OpenAI tools format
@@ -54,54 +29,12 @@ function actionsToOpenAIFormat(actions) {
 }
 
 /**
- * Check if the bot should respond to a message
- * @param {IncomingContext} messageContext
- * @returns {Promise<boolean>}
- */
-async function shouldRespond(messageContext) {
-  const { chatId, isGroup, selfIds, mentions } = messageContext;
-
-  // Check if chat is enabled
-  const chatInfo = await getChat(chatId);
-  if (!chatInfo?.is_enabled) {
-    return false;
-  }
-
-  // Respond to all messages in private chats
-  if (!isGroup) {
-    return true;
-  }
-
-  // Respond if I have been mentioned
-  const isMentioned = mentions.some((contactId) =>
-    selfIds.some(selfId => contactId.startsWith(selfId))
-  );
-  if (isMentioned) {
-    return true;
-  }
-
-  return false;
-}
-
-async function cleanup() {
-  console.log("Cleaning up resources...");
-  try {
-    await closeWhatsapp();
-  } catch (error) {
-    console.error("Error during WhatsApp cleanup:", error);
-  }
-  console.log("WhatsApp service closed. Closing database...");
-  await closeDb();
-  console.log("WhatsApp service and database closed");
-}
-
-/**
  * Handle incoming WhatsApp messages
  * @param {IncomingContext} messageContext
  * @returns {Promise<void>}
  */
-async function handleMessage(messageContext) {
-  const { chatId, senderIds, content, isGroup, senderName } = messageContext;
+export async function handleMessage(messageContext) {
+  const { chatId, senderIds, content, isGroup, senderName, selfIds, mentions } = messageContext;
 
   console.log("INCOMING MESSAGE:", JSON.stringify(messageContext, null, 2));
 
@@ -125,13 +58,17 @@ async function handleMessage(messageContext) {
     },
   };
 
+  // Load actions
+  /** @type {Action[]} */
+  const actions = await getActions();
+
   const firstBlock = content.find(block=>block.type === "text")
 
   if (firstBlock?.text?.startsWith("!")) {
     const [rawCommand, ...args] = firstBlock.text.slice(1).trim().split(" ");
     const command = rawCommand.toLowerCase();
 
-    const action = actionsByCommand.get(command);
+    const action = actions.find(action => action.command === command);
 
     if (!action) {
       await context.reply("❌ *Error*", `Unknown command: ${command}`);
@@ -191,12 +128,10 @@ async function handleMessage(messageContext) {
       const cleanedContent = firstBlock.text.replace(mentionPattern, "");
 
       // TODO: Implement mention replacement using mentions
-      // const mentions = messageContext.mentions;
       messageBody_formatted = `[${time}] ${senderName}: ${cleanedContent}`;
       // TODO: Get group chat name from high-level API
       systemPrompt += `\n\nYou are in a group chat`;
     } else {
-      // TODO: Implement mention replacement using mentions
       messageBody_formatted = `[${time}] ${firstBlock.text}`;
     }
     firstBlock.text = messageBody_formatted;
@@ -208,8 +143,30 @@ async function handleMessage(messageContext) {
   // Insert message into DB
   await addMessage(chatId, message, senderIds);
 
-  // Check if should respond
-  if (!(await shouldRespond(messageContext))) {
+
+  /**
+   * Check if the bot should respond to a message
+   */
+  shouldRespond: {
+    // Skip if chat is not enabled
+    const chatInfo = await getChat(chatId);
+    if (!chatInfo?.is_enabled) {
+      return;
+    }
+
+    // Respond if in a private chat
+    if (!isGroup) {
+      break shouldRespond;
+    }
+
+    // Respond in groups if I have been mentioned
+    const isMentioned = mentions.some((contactId) =>
+      selfIds.some(selfId => contactId.startsWith(selfId))
+    );
+    if (isMentioned) {
+      break shouldRespond;
+    }
+
     return;
   }
 
@@ -322,6 +279,12 @@ async function handleMessage(messageContext) {
         break;
     }
   }
+
+  // Initialize LLM client
+  const llmClient = new OpenAI({
+    apiKey: config.llm_api_key,
+    baseURL: config.base_url,
+  });
 
   async function processLlmResponse() {
 
@@ -490,30 +453,41 @@ async function handleMessage(messageContext) {
   await processLlmResponse();
 }
 
-// Initialize everything
-try {
-  await initDatabase();
-  console.log("Database initialized");
-  await connectToWhatsApp(handleMessage);
-} catch (error) {
-  console.error("Initialization error:", error);
-  await cleanup();
-  process.exit(1);
+async function setup () {
+  // Initialize everything
+  const { closeWhatsapp } = await connectToWhatsApp(handleMessage)
+    .catch(async (error) => {
+      console.error("Initialization error:", error);
+      await closeDb();
+      process.exit(1);
+    })
+
+
+  async function cleanup() {
+    try {
+      await closeWhatsapp();
+      await closeDb();
+    } catch (error) {
+      console.error("Error during cleanup:", error);
+    }
+  }
+
+  process.on("SIGINT", async function () {
+    console.log("SIGINT received, cleaning up...");
+    await cleanup();
+    process.exit(0);
+  });
+
+  process.on("SIGTERM", async function () {
+    console.log("SIGTERM received, cleaning up...");
+    await cleanup();
+    process.exit(0);
+  });
+  process.on("uncaughtException", async (error) => {
+    console.error("Uncaught Exception:", error);
+    await cleanup();
+    process.exit(1);
+  });
 }
 
-process.on("SIGINT", async function () {
-  console.log("SIGINT received, cleaning up...");
-  await cleanup();
-  process.exit(0);
-});
-
-process.on("SIGTERM", async function () {
-  console.log("SIGTERM received, cleaning up...");
-  await cleanup();
-  process.exit(0);
-});
-process.on("uncaughtException", async (error) => {
-  console.error("Uncaught Exception:", error);
-  await cleanup();
-  process.exit(1);
-});
+await setup()
