@@ -82,9 +82,6 @@ sudo apt install qrencode
 ### Database Management
 The PGlite database is automatically created on first run in the `./pgdata/root` directory. This provides full PostgreSQL compatibility in a lightweight package.
 
-### Authentication Storage
-Baileys stores authentication state in the `./auth_info_baileys` directory using multi-file auth state for better reliability and session persistence.
-
 ## Bot Commands (for testing)
 - `!js <code>` - Execute JavaScript code with database access and context
 - `!new` - Clear conversation history
@@ -111,9 +108,3 @@ Baileys stores authentication state in the `./auth_info_baileys` directory using
   return `Sent message to ${chatId}`;
 }
 ```
-
-## Additional Files
-- `tts.mjs` - Experimental Google Cloud Speech-to-Text integration (not integrated with main bot)
-
-## Memories
-- do not run the app
