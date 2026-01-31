@@ -1,7 +1,7 @@
 export default /** @type {defineAction} */ ((x) => x)({
   name: "disable_chat",
   command: "disable",
-  description: "Disable LLM answers for a specific chat (admin only)",
+  description: "Disable LLM answers for a specific chat",
   parameters: {
     type: "object",
     properties: {
