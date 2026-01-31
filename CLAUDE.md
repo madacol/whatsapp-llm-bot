@@ -4,26 +4,32 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Architecture Overview
 
-This is a WhatsApp bot that integrates with LLMs to provide conversational AI and media downloading capabilities. The bot is built around a single-file Node.js application with the following key components:
+This is a bot that integrates an LLM into conversational platforms like Whatsapp.
 
 ### Core Structure
-- **Main file**: `index.js` - Contains all bot logic, database operations, and command handling
+- **Main file**: `index.js` - Main bot logic and message handling
+- **WhatsApp adapter**: `whatsapp-adapter.js` - WhatsApp connection and message adaptation layer
+- **Database layer**: `store.js` - Database operations (getChat, addMessage, getMessages, createChat, closeDb)
+- **Database connection**: `db.js` - Database connection management
+- **Actions framework**: `actions.js` - Action loading and execution system
+- **Utilities**: `utils.js` - Utility functions (like shortenToolId)
 - **Configuration**: `config.js` - Loads environment variables for API keys, model settings, and admin configuration
-- **Database**: PGlite database (`./pgdata`) with two tables:
-  - `chats` - Tracks chat IDs and their enabled/disabled status
+- **Database**: PGlite database (`./pgdata/root`) with two tables:
+  - `chats` - Tracks chat IDs, enabled/disabled status, and custom system prompts
   - `messages` - Stores conversation history for context
 - **Actions system**: Modular action files in `actions/` directory:
-  - `runJavascript.js` - JavaScript code execution with sandboxing
+  - `runJavascript.js` - JavaScript code execution
   - `newConversation.js` - Clear chat history
-  - `enableChat.js` / `disableChat.js` - Admin chat controls
+  - `enableChat.js` / `disableChat.js` - Master chat controls
+  - `getSystemPrompt.js` / `setSystemPrompt.js` - System prompt management (admin)
+  - `showInfo.js` - Display chat information
 
 ### Key Architecture Patterns
 - **WhatsApp Integration**: Uses `@whiskeysockets/baileys` library with multi-file auth state storage
 - **LLM Integration**: OpenAI-compatible API client (supports custom base URLs) with function calling
 - **Database**: PGlite (PostgreSQL in WebAssembly) for modern SQL support with persistence
-- **JavaScript Execution**: Secure VM-based sandboxing for running user-provided JavaScript code
-- **Media Processing**: Spawns `yt-dlp` and `ffmpeg` processes for video/audio downloading and conversion
-- **Permission System**: Admin-only commands controlled by `MASTER_ID` environment variable
+- **JavaScript Execution**: Uses `Function()` constructor to execute user code with full access to action context
+- **Permission System**: Two-tier system with master and admin permissions
 - **Chat Management**: Per-chat enable/disable system to control bot responses
 
 ### Command System
@@ -37,7 +43,14 @@ Functions are defined in the `ACTIONS` array and automatically indexed for both 
 - Only responds in enabled chats (tracked in database)
 - In group chats: responds when mentioned or quoted
 - In private chats: responds to all messages
-- Conversation history maintained per chat with 20-message context window
+- Conversation history maintained per chat with 50-message context window
+
+### Permission System
+The bot has two permission levels:
+- **`requireRoot`**: Requires sender ID to be in comma-separated `MASTER_ID` environment variable
+  - Used for: enable/disable chat commands
+- **`requireAdmin`**: Requires user to be admin/superadmin in group chats, or any user in private chats
+  - Used for: get/set system prompt commands
 
 ## Common Development Commands
 
@@ -55,17 +68,15 @@ npm run type-check
 Required environment variables (create `.env` file):
 ```bash
 LLM_API_KEY=your-openai-api-key
-MASTER_ID=your-whatsapp-user-id
-MODEL=gpt-4  # or other model
+MASTER_ID=whatsapp-id-1,whatsapp-id-2  # Comma-separated list of master user IDs
+MODEL=model-name  # Model to use (e.g., gpt-4, claude-3-5-sonnet-20241022)
 BASE_URL=https://api.openai.com/v1  # optional, for custom endpoints
 SYSTEM_PROMPT="custom prompt"  # optional
 ```
 
 ### Prerequisites Installation
 ```bash
-sudo apt install qrencode ffmpeg python3-venv
-pip3 install pipx
-pipx install yt-dlp
+sudo apt install qrencode
 ```
 
 ### Database Management
@@ -76,21 +87,21 @@ Baileys stores authentication state in the `./auth_info_baileys` directory using
 
 ## Bot Commands (for testing)
 - `!js <code>` - Execute JavaScript code with database access and context
-- `!video <url>` - Download and share video
-- `!audio <url>` - Download and share audio  
 - `!new` - Clear conversation history
 - `!info` - Show chat information
-- `!enable [chatId]` - Enable bot in chat (admin only)
-- `!disable [chatId]` - Disable bot in chat (admin only)
+- `!enable [chatId]` - Enable bot in chat (requires MASTER_ID)
+- `!disable [chatId]` - Disable bot in chat (requires MASTER_ID)
+- `!get-prompt` - Get current system prompt for this chat (requires admin)
+- `!set-prompt <prompt>` - Set custom system prompt for this chat (requires admin)
 
 ### JavaScript Execution Examples
 ```javascript
 // Simple calculation
 !js ({log}) => { log("Calculating..."); return 2 + 2; }
 
-// Database query
-!js async ({db}) => {
-  const {rows: messages} = await db.sql("SELECT COUNT(*) as count FROM messages");
+// Database query (using rootDb for access to chats/messages tables)
+!js async ({rootDb}) => {
+  const {rows: messages} = await rootDb.sql`SELECT COUNT(*) as count FROM messages`;
   return `Total messages: ${messages[0].count}`;
 }
 
