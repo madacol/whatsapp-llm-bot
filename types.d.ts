@@ -116,7 +116,7 @@ type PermissionFlags = {
   autoExecute?: boolean;
   autoContinue?: boolean;
   requireAdmin?: boolean;
-  requireRoot?: boolean;
+  requireMaster?: boolean;
   useChatDb?: boolean;
   useRootDb?: boolean;
   useFileSystem?: boolean;

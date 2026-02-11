@@ -38,7 +38,7 @@ export async function executeAction(
   }
 
   if (
-    action.permissions?.requireRoot &&
+    action.permissions?.requireMaster &&
     !context.senderIds.some(senderId => config.MASTER_IDs.includes(senderId))
   ) {
     throw new Error(`Action "${actionName}" requires master permissions`);
