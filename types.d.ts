@@ -1,7 +1,7 @@
 type PGlite = import("@electric-sql/pglite").PGlite;
 
 // Baileys types
-type BaileysMessage = import("@whiskeysockets/baileys").proto.IWebMessageInfo;
+type BaileysMessage = import("@whiskeysockets/baileys").WAMessage;
 type BaileysSocket = import("@whiskeysockets/baileys").WASocket;
 
 type TextContentBlock = {
