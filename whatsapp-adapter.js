@@ -300,7 +300,6 @@ export async function connectToWhatsApp(onMessageHandler) {
         );
         if (shouldReconnect) {
           // Clean up current socket before reconnecting to prevent memory leaks
-          sock.ev.removeAllListeners();
           sock.end(undefined);
 
           await new Promise(resolve => setTimeout(resolve, 1000));
