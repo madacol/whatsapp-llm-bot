@@ -5,6 +5,7 @@ import { getDb } from "./db.js";
  *   chat_id: string;
  *   is_enabled: boolean;
  *   system_prompt: string;
+ *   model: string;
  *   timestamp: string;
  * }} ChatRow
  *
@@ -46,6 +47,7 @@ export async function initStore(){
       await Promise.all([
         db.sql`ALTER TABLE chats ADD COLUMN IF NOT EXISTS is_enabled BOOLEAN DEFAULT FALSE`,
         db.sql`ALTER TABLE chats ADD COLUMN IF NOT EXISTS system_prompt TEXT`,
+        db.sql`ALTER TABLE chats ADD COLUMN IF NOT EXISTS model TEXT`,
         db.sql`ALTER TABLE messages ADD COLUMN IF NOT EXISTS message_data JSONB`,
         db.sql`ALTER TABLE messages DROP COLUMN IF EXISTS message_type`,
         db.sql`ALTER TABLE messages DROP COLUMN IF EXISTS tool_call_id`,

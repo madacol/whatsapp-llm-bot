@@ -144,9 +144,10 @@ export async function handleMessage(messageContext) {
 
   console.log("LLM will respond");
 
-  // Get system prompt from current chat or use default
+  // Get system prompt and model from current chat or use defaults
   const chatInfo = await getChat(chatId);
   let systemPrompt = chatInfo?.system_prompt || config.system_prompt;
+  const chatModel = chatInfo?.model || config.model;
 
   if (firstBlock) {
     let messageBody_formatted;
@@ -293,7 +294,7 @@ export async function handleMessage(messageContext) {
     let response;
     try {
       response = await llmClient.chat.completions.create({
-        model: config.model,
+        model: chatModel,
         messages: [
           { role: "system", content: systemPrompt },
           ...chatMessages_formatted,
