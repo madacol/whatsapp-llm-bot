@@ -1,8 +1,14 @@
 import fs from "fs/promises";
 import path from "path";
+import OpenAI from "openai";
 import { getDb } from "./db.js";
 import config from "./config.js";
 import { shortenToolId } from "./utils.js";
+
+const llmClient = new OpenAI({
+  apiKey: config.llm_api_key,
+  baseURL: config.base_url,
+});
 
 const currentSessionDb = getDb("memory://");
 
@@ -41,7 +47,7 @@ export async function executeAction(
   // Create action-specific messaging functions with headers baked in
   const shortId = shortenToolId(toolCallId || "command");
 
-  /** @type {ActionContext & Partial<{chatDb: PGlite, rootDb: PGlite}>} */
+  /** @type {ActionContext & Partial<{chatDb: PGlite, rootDb: PGlite, callLlm: CallLlm}>} */
   const actionContext = {
     chatId: context.chatId,
     senderIds: context.senderIds,
@@ -70,6 +76,15 @@ export async function executeAction(
     actionContext.rootDb = getDb("./pgdata/root");
   }
   // if (action.permissions?.useFileSystem) { actionContext.directoryHandle = directoryHandle; }
+  if (action.permissions?.useLlm) {
+    actionContext.callLlm = async (prompt, options = {}) => {
+      const response = await llmClient.chat.completions.create({
+        model: options.model || config.model,
+        messages: [{ role: "user", content: prompt }],
+      });
+      return response.choices[0].message.content;
+    };
+  }
 
   // If the action doesn't require confirmation, execute it immediately
   if (action.permissions?.autoExecute) {

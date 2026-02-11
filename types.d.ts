@@ -120,12 +120,17 @@ type PermissionFlags = {
   useChatDb?: boolean;
   useRootDb?: boolean;
   useFileSystem?: boolean;
+  useLlm?: boolean;
 };
+
+type CallLlmOptions = { model?: string };
+type CallLlm = (prompt: string, options?: CallLlmOptions) => Promise<string | null>;
 
 // Build action context types dynamically based on permissions
 type ExtendedActionContext<P extends PermissionFlags> = ActionContext
   & (P["useRootDb"] extends true ? { rootDb: PGlite } : {})
-  & (P["useChatDb"] extends true ? { chatDb: PGlite } : {});
+  & (P["useChatDb"] extends true ? { chatDb: PGlite } : {})
+  & (P["useLlm"] extends true ? { callLlm: CallLlm } : {});
 // & (P['useFileSystem'] extends true ? {directoryHandle: FileSystemDirectoryHandle} : {});
 
 type ActionResult = string | {} | HTMLElement;
