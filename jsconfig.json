@@ -16,5 +16,5 @@
         "declarationMap": true
     },
     "include": ["**/*.js", "**/*.d.ts"],
-    "exclude": ["node_modules", "*.bck.*"]
+    "exclude": ["node_modules", "*.bck.*", "tests"]
 }
