@@ -1,14 +1,11 @@
 import fs from "fs/promises";
 import path from "path";
-import OpenAI from "openai";
 import { getDb } from "./db.js";
 import config from "./config.js";
+import { createLlmClient } from "./llm.js";
 import { shortenToolId } from "./utils.js";
 
-const llmClient = new OpenAI({
-  apiKey: config.llm_api_key,
-  baseURL: config.base_url,
-});
+const llmClient = createLlmClient();
 
 const currentSessionDb = getDb("memory://");
 

@@ -5,6 +5,7 @@
 import OpenAI from "openai";
 import { getActions, executeAction } from "./actions.js";
 import config from "./config.js";
+import { createLlmClient } from "./llm.js";
 import { shortenToolId } from "./utils.js";
 import { connectToWhatsApp } from "./whatsapp-adapter.js";
 import { initStore } from "./store.js";
@@ -284,10 +285,7 @@ export async function handleMessage(messageContext) {
   }
 
   // Initialize LLM client
-  const llmClient = new OpenAI({
-    apiKey: config.llm_api_key,
-    baseURL: config.base_url,
-  });
+  const llmClient = createLlmClient();
 
   async function processLlmResponse() {
 
