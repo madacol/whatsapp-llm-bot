@@ -5,7 +5,15 @@ const dbCache = new Map();
 
 /**
  * @param {string} dataDir
- * @returns PGlite
+ * @param {PGlite} instance
+ */
+export function setDb(dataDir, instance) {
+  dbCache.set(dataDir, instance);
+}
+
+/**
+ * @param {string} dataDir
+ * @returns {PGlite}
  */
 export function getDb(dataDir) {
   const db = dbCache.get(dataDir);

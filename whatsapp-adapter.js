@@ -16,7 +16,7 @@ import { handleMessage } from "./index.js";
  * @param {BaileysMessage} baileysMessage
  * @returns {Promise<IncomingContentBlock[]>}
  */
-async function getMessageContent(baileysMessage) {
+export async function getMessageContent(baileysMessage) {
   /** @type {IncomingContentBlock[]} */
   const content = [];
 

@@ -1,0 +1,156 @@
+=== S1: Enable chat ===
+Time: 2026-02-12T11:55:41.710Z
+Result: PASS
+Responses (1):
+  [0] replyToMessage: ⚡ *Command* !enable
+
+LLM answers enabled for chat s1-chat
+
+=== S1: LLM response ===
+Time: 2026-02-12T11:55:43.166Z
+Result: PASS
+Responses (1):
+  [0] replyToMessage: 🤖 *AI Assistant*
+
+Hello from the LLM!
+
+=== S1: Disable chat ===
+Time: 2026-02-12T11:55:43.178Z
+Result: PASS
+Responses (1):
+  [0] replyToMessage: ⚡ *Command* !disable
+
+LLM answers disabled for chat s1-chat
+
+=== S1: No response when disabled ===
+Time: 2026-02-12T11:55:43.183Z
+Result: PASS
+Responses (0):
+
+=== S2: Non-master enable rejected ===
+Time: 2026-02-12T11:55:43.188Z
+Result: PASS
+Responses (1):
+  [0] replyToMessage: ❌ *Error*
+
+Error: Action "enable_chat" requires master permissions
+
+=== S3: Unknown command ===
+Time: 2026-02-12T11:55:43.191Z
+Result: PASS
+Responses (1):
+  [0] replyToMessage: ❌ *Error*
+
+Unknown command: foobar
+
+=== S4: Set prompt ===
+Time: 2026-02-12T11:55:43.198Z
+Result: PASS
+Responses (1):
+  [0] replyToMessage: ⚡ *Command* !set-prompt
+
+✅ System prompt updated for chat s4-chat
+
+*New prompt:*
+pirate
+
+=== S4: Get prompt ===
+Time: 2026-02-12T11:55:43.202Z
+Result: PASS
+Responses (1):
+  [0] replyToMessage: ⚡ *Command* !get-prompt
+
+*Custom system prompt for chat s4-chat:*
+
+pirate
+
+=== S5: Set model ===
+Time: 2026-02-12T11:55:43.211Z
+Result: PASS
+Responses (1):
+  [0] replyToMessage: ⚡ *Command* !set-model
+
+✅ Model updated for chat s5-chat
+
+*New model:*
+gpt-4.1-mini
+
+=== S5: Get model ===
+Time: 2026-02-12T11:55:43.215Z
+Result: PASS
+Responses (1):
+  [0] replyToMessage: ⚡ *Command* !get-model
+
+*Custom model for chat s5-chat:*
+
+gpt-4.1-mini
+
+=== S6: New conversation ===
+Time: 2026-02-12T11:55:43.248Z
+Result: PASS
+Responses (1):
+  [0] replyToMessage: 🤖 *AI Assistant*
+
+Second response
+
+=== S7: Show info ===
+Time: 2026-02-12T11:55:43.257Z
+Result: PASS
+Responses (1):
+  [0] replyToMessage: ⚡ *Command* !info
+
+Chat Information:
+- *Chat ID*: s7-chat
+- *Status*: enabled
+- *Sender IDs*: master-user
+- *Your message*:
+    ```
+    [
+  {
+    "type": "text",
+    "text": "!info"
+  }
+]
+    ```
+    
+
+=== S8: Run JavaScript tool call ===
+Time: 2026-02-12T11:55:43.281Z
+Result: PASS
+Responses (3):
+  [0] sendMessage: 🔧 *Executing* run_javascript    [ock_js]
+
+parameters:
+```
+{
+  "code": "({chatId}) => chatId"
+}
+```
+  [1] sendMessage: ✅ *Result*    [ock_js]
+
+s8-chat
+  [2] replyToMessage: 🤖 *AI Assistant*
+
+The chat ID is s8-chat
+
+=== S9: Group — no mention ===
+Time: 2026-02-12T11:55:43.288Z
+Result: PASS
+Responses (0):
+
+=== S9: Group — with mention ===
+Time: 2026-02-12T11:55:43.300Z
+Result: PASS
+Responses (1):
+  [0] replyToMessage: 🤖 *AI Assistant*
+
+Hi from the bot!
+
+=== S10: Private chat response ===
+Time: 2026-02-12T11:55:43.316Z
+Result: PASS
+Responses (1):
+  [0] replyToMessage: 🤖 *AI Assistant*
+
+Private chat response
+

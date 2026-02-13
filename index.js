@@ -491,4 +491,4 @@ async function setup () {
   });
 }
 
-await setup()
+if (!process.env.TESTING) await setup()
