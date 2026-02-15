@@ -131,10 +131,6 @@ describe("all actions conform to Action schema", () => {
       if (action.command !== undefined) {
         assert.equal(typeof action.command, "string", `${fileName}: command must be a string`);
         assert.ok(action.command.length > 0, `${fileName}: command must not be empty`);
-        assert.ok(
-          !action.command.includes(" "),
-          `${fileName}: command must not contain spaces`,
-        );
       }
     }
   });

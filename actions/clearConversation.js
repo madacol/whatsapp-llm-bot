@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 
 export default /** @type {defineAction} */ ((x) => x)({
-  name: "new_conversation",
-  command: "new",
+  name: "clear_conversation",
+  command: "clear",
   description: "Clear conversation history for the current chat",
   parameters: {
     type: "object",

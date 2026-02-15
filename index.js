@@ -18,6 +18,15 @@ import {
 } from "./message-formatting.js";
 
 /**
+ * Type guard: checks that an action has a command string.
+ * @param {Action} a
+ * @returns {a is Action & {command: string}}
+ */
+function hasCommand(a) {
+  return typeof a.command === "string";
+}
+
+/**
  * @typedef {{
  *   addMessage: Awaited<ReturnType<typeof initStore>>['addMessage'],
  *   closeDb: Awaited<ReturnType<typeof initStore>>['closeDb'],
@@ -82,15 +91,22 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
     const firstBlock = content.find(block=>block.type === "text")
 
     if (firstBlock?.text?.startsWith("!")) {
-      const [rawCommand, ...args] = firstBlock.text.slice(1).trim().split(" ");
-      const command = rawCommand.toLowerCase();
+      const inputText = firstBlock.text.slice(1).trim();
+      const commandText = inputText.toLowerCase();
 
-      const action = actions.find(action => action.command === command);
+      // Sort commands longest-first so "set model" matches before hypothetical "set"
+      const commandActions = actions.filter(hasCommand);
+      const action = commandActions
+        .sort((a, b) => b.command.length - a.command.length)
+        .find(a => commandText === a.command || commandText.startsWith(a.command + " "));
 
       if (!action) {
-        await context.reply("❌ *Error*", `Unknown command: ${command}`);
+        await context.reply("❌ *Error*", `Unknown command: ${commandText.split(" ")[0]}`);
         return;
       }
+
+      const argsText = inputText.slice(action.command.length).trim();
+      const args = argsText ? argsText.split(" ") : [];
 
       // Map command arguments to action parameters
       const params = parseCommandArgs(args, action.parameters);
@@ -101,7 +117,7 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
         const { result } = await executeActionFn(action.name, context, params);
 
         if (typeof result === "string") {
-          await context.reply(`⚡ *Command* !${command}`, result);
+          await context.reply(`⚡ *Command* !${action.command}`, result);
         }
       } catch (error) {
         console.error("Error executing command:", error);
@@ -265,7 +281,7 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
             );
             console.log("response", functionResponse);
 
-            if (toolName !== "new_conversation") {
+            if (toolName !== "clear_conversation") {
               // Store tool result in database
               /** @type {ToolMessage} */
               const toolMessage = {

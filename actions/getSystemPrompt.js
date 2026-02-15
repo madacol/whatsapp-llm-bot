@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 
 export default /** @type {defineAction} */ ((x) => x)({
   name: "get_system_prompt",
-  command: "get-prompt",
+  command: "get prompt",
   description: "Get the current system prompt for a chat (admin only)",
   parameters: {
     type: "object",

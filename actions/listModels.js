@@ -10,9 +10,9 @@
 import assert from "node:assert/strict";
 
 export default /** @type {defineAction} */ ((x) => x)({
-  name: "compare_models",
-  command: "compare-models",
-  description: "Fetch and compare LLM models from OpenRouter with pricing and context information",
+  name: "list_models",
+  command: "list models",
+  description: "List LLM models from OpenRouter with pricing and context information",
   parameters: {
     type: "object",
     properties: {
