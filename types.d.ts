@@ -80,6 +80,9 @@ type IncomingContext = {
   getAdminStatus: () => Promise<"admin" | "superadmin" | null>;
   sendMessage: (text: string) => Promise<void>;
   replyToMessage: (text: string) => Promise<void>;
+  reactToMessage: (emoji: string) => Promise<void>;
+  sendPoll: (name: string, options: string[], selectableCount?: number) => Promise<void>;
+  confirm: (message: string) => Promise<boolean>;
 
   // Bot info
   selfIds: string[];
@@ -94,6 +97,9 @@ type Context = {
   getIsAdmin: () => Promise<boolean>;
   sendMessage: (header: string, message?: string) => Promise<void>;
   reply: (header: string, message?: string) => Promise<void>;
+  reactToMessage: (emoji: string) => Promise<void>;
+  sendPoll: (name: string, options: string[], selectableCount?: number) => Promise<void>;
+  confirm: (message: string) => Promise<boolean>;
 };
 
 /* Actions */
@@ -109,6 +115,9 @@ type ActionContext = {
   log: (...args: any[]) => Promise<string>;
   sendMessage: (message: string) => Promise<void>; // Header already baked in
   reply: (message: string) => Promise<void>; // Header already baked in
+  reactToMessage: (emoji: string) => Promise<void>;
+  sendPoll: (name: string, options: string[], selectableCount?: number) => Promise<void>;
+  confirm: (message: string) => Promise<boolean>;
 };
 
 // Define permission flags

@@ -55,6 +55,37 @@ after(async () => {
 });
 
 // ═══════════════════════════════════════════════════════════════════
+// Scenario 0: createIncomingContext provides all required capabilities
+// ═══════════════════════════════════════════════════════════════════
+describe("createIncomingContext shape", () => {
+  it("includes reactToMessage, sendPoll, and confirm", () => {
+    const { context } = createIncomingContext();
+    assert.equal(typeof context.reactToMessage, "function", "should have reactToMessage");
+    assert.equal(typeof context.sendPoll, "function", "should have sendPoll");
+    assert.equal(typeof context.confirm, "function", "should have confirm");
+  });
+
+  it("reactToMessage records response", async () => {
+    const { context, responses } = createIncomingContext();
+    await context.reactToMessage("👍");
+    assert.ok(responses.some(r => r.type === "reactToMessage" && r.text === "👍"));
+  });
+
+  it("sendPoll records response", async () => {
+    const { context, responses } = createIncomingContext();
+    await context.sendPoll("Vote", ["A", "B"], 1);
+    assert.ok(responses.some(r => r.type === "sendPoll"));
+  });
+
+  it("confirm records response and returns true by default", async () => {
+    const { context, responses } = createIncomingContext();
+    const result = await context.confirm("Are you sure?");
+    assert.equal(result, true);
+    assert.ok(responses.some(r => r.type === "confirm" && r.text === "Are you sure?"));
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════
 // Scenario 1: Enable / disable chat flow
 // ═══════════════════════════════════════════════════════════════════
 describe("Scenario 1: Enable/disable chat flow", () => {

@@ -66,6 +66,9 @@ export async function executeAction(
     reply: async (message) => {
       await context.reply(`🔧 *Action*    [${shortId}]`, message);
     },
+    reactToMessage: context.reactToMessage,
+    sendPoll: context.sendPoll,
+    confirm: context.confirm,
   };
 
   if (action.permissions?.useChatDb) {
@@ -85,22 +88,29 @@ export async function executeAction(
     };
   }
 
-  // If the action doesn't require confirmation, execute it immediately
-  if (action.permissions?.autoExecute) {
-    try {
+  if (!action.permissions?.autoExecute) {
+    const confirmed = await context.confirm(
+      `⚠️ *Confirm action: ${actionName}*\n\n` +
+      `${action.description}\n\n` +
+      `React 👍 to confirm or 👎 to cancel.`
+    );
+    if (!confirmed) {
       return {
-        result: await action.action_fn(actionContext, params),
+        result: `Action "${actionName}" was cancelled by user.`,
         permissions: action.permissions,
       };
-    } catch (error) {
-      console.error(`Error executing action ${actionName}:`, error);
-      throw error;
     }
   }
 
-  throw new Error(
-    `Action "${actionName}" requires confirmation, which is not yet implemented in this environment.`,
-  );
+  try {
+    return {
+      result: await action.action_fn(actionContext, params),
+      permissions: action.permissions,
+    };
+  } catch (error) {
+    console.error(`Error executing action ${actionName}:`, error);
+    throw error;
+  }
 }
 
 // Note: log function is now created per-action in createActionLog()

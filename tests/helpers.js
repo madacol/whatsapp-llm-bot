@@ -28,6 +28,16 @@ export function createIncomingContext(overrides = {}) {
     replyToMessage: async (text) => {
       responses.push({ type: "replyToMessage", text });
     },
+    reactToMessage: async (emoji) => {
+      responses.push({ type: "reactToMessage", text: emoji });
+    },
+    sendPoll: async (name, options, selectableCount) => {
+      responses.push({ type: "sendPoll", text: JSON.stringify({ name, options, selectableCount }) });
+    },
+    confirm: async (message) => {
+      responses.push({ type: "confirm", text: message });
+      return true;
+    },
     ...overrides,
   };
 
