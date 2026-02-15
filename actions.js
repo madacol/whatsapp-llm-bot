@@ -105,6 +105,7 @@ export async function executeAction(
 
 // Note: log function is now created per-action in createActionLog()
 
+/** @type {Awaited<ReturnType<typeof initializeDirectoryHandle>> | undefined} */
 let directoryHandle;
 
 /**
