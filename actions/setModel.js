@@ -1,3 +1,5 @@
+import assert from "node:assert/strict";
+
 export default /** @type {defineAction} */ ((x) => x)({
   name: "set_model",
   command: "set-model",
@@ -17,6 +19,28 @@ export default /** @type {defineAction} */ ((x) => x)({
     requireAdmin: true,
     useRootDb: true,
   },
+  test_functions: [
+    async function sets_model_for_chat(action_fn, db) {
+      await db.sql`INSERT INTO chats(chat_id) VALUES ('act-smodel-1') ON CONFLICT DO NOTHING`;
+      const result = await action_fn(
+        { chatId: "act-smodel-1", rootDb: db },
+        { model: "gpt-4o" },
+      );
+      assert.ok(result.includes("gpt-4o"));
+      const { rows: [chat] } = await db.sql`SELECT model FROM chats WHERE chat_id = 'act-smodel-1'`;
+      assert.equal(chat.model, "gpt-4o");
+    },
+    async function reverts_to_default_on_empty_model(action_fn, db) {
+      await db.sql`INSERT INTO chats(chat_id, model) VALUES ('act-smodel-2', 'gpt-4o') ON CONFLICT DO NOTHING`;
+      const result = await action_fn(
+        { chatId: "act-smodel-2", rootDb: db },
+        { model: "" },
+      );
+      assert.ok(result.includes("default"));
+      const { rows: [chat] } = await db.sql`SELECT model FROM chats WHERE chat_id = 'act-smodel-2'`;
+      assert.equal(chat.model, null);
+    },
+  ],
   action_fn: async function ({ chatId, rootDb }, { model }) {
     const targetChatId = chatId;
     model = model.trim();

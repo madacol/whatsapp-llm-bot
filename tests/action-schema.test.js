@@ -145,6 +145,26 @@ describe("all actions conform to Action schema", () => {
     assert.equal(names.length, unique.size, `duplicate action names: ${names.filter((n, i) => names.indexOf(n) !== i)}`);
   });
 
+  it("every action has a non-empty test_functions array of functions", () => {
+    for (const { fileName, action } of actions) {
+      assert.ok(
+        Array.isArray(action.test_functions),
+        `${fileName}: test_functions must be an array`,
+      );
+      assert.ok(
+        action.test_functions.length > 0,
+        `${fileName}: test_functions must have at least one test`,
+      );
+      for (const fn of action.test_functions) {
+        assert.equal(
+          typeof fn,
+          "function",
+          `${fileName}: every test_functions entry must be a function`,
+        );
+      }
+    }
+  });
+
   it("commands are unique", () => {
     const commands = actions
       .map((a) => a.action.command)
