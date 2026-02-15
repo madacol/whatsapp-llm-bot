@@ -1,6 +1,7 @@
 # Rules
 - Use JSDoc for all type annotations
 - Run `npm run type-check` after any code change
+- All new features must be developed using red/green TDD: write a failing test first, then implement the code to make it pass
 
 # Key Interfaces (`types.d.ts`)
 
