@@ -70,6 +70,9 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
         const fullMessage = text ? `${header}\n\n${text}` : header;
         await messageContext.replyToMessage(fullMessage);
       },
+      reactToMessage: messageContext.reactToMessage,
+      sendPoll: messageContext.sendPoll,
+      confirm: messageContext.confirm,
     };
 
     // Load actions

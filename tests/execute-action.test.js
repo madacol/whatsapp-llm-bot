@@ -48,6 +48,9 @@ function createMockContext(overrides = {}) {
     getIsAdmin: async () => true,
     sendMessage: async () => {},
     reply: async () => {},
+    reactToMessage: async () => {},
+    sendPoll: async () => {},
+    confirm: async () => true,
     ...overrides,
   };
 }
@@ -93,7 +96,7 @@ describe("executeAction", () => {
     assert.equal(result, "success");
   });
 
-  it("throws when autoExecute is falsy", async () => {
+  it("cancels action when confirm returns false", async () => {
     const resolver = createResolver({
       confirm_action: {
         name: "confirm_action",
@@ -103,10 +106,24 @@ describe("executeAction", () => {
         action_fn: async () => "ok",
       },
     });
-    await assert.rejects(
-      () => executeAction("confirm_action", createMockContext(), {}, null, resolver),
-      { message: /confirmation/ },
-    );
+    const ctx = createMockContext({ confirm: async () => false });
+    const { result } = await executeAction("confirm_action", ctx, {}, null, resolver);
+    assert.match(result, /cancelled/);
+  });
+
+  it("executes action when confirm returns true", async () => {
+    const resolver = createResolver({
+      confirm_action: {
+        name: "confirm_action",
+        description: "needs confirmation",
+        parameters: { type: "object", properties: {} },
+        permissions: { autoExecute: false },
+        action_fn: async () => "confirmed result",
+      },
+    });
+    const ctx = createMockContext({ confirm: async () => true });
+    const { result } = await executeAction("confirm_action", ctx, {}, null, resolver);
+    assert.equal(result, "confirmed result");
   });
 
   it("passes result through correctly", async () => {
