@@ -63,11 +63,11 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
         return adminStatus === "admin" || adminStatus === "superadmin";
       },
       sendMessage: async (header, text) => {
-        const fullMessage = `${header}\n\n${text}`;
+        const fullMessage = text ? `${header}\n\n${text}` : header;
         await messageContext.sendMessage(fullMessage);
       },
       reply: async (header, text) => {
-        const fullMessage = `${header}\n\n${text}`;
+        const fullMessage = text ? `${header}\n\n${text}` : header;
         await messageContext.replyToMessage(fullMessage);
       },
     };
@@ -207,10 +207,24 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
 
           // Show tool call to user
           const shortId = shortenToolId(toolCall.id);
-          await context.sendMessage(
-            `🔧 *Executing* ${toolCall.function.name}    [${shortId}]`,
-            `parameters:\n\`\`\`\n${JSON.stringify(JSON.parse(toolCall.function.arguments), null, 2)}\n\`\`\``,
-          );
+          const args = JSON.parse(toolCall.function.arguments);
+          const argEntries = Object.entries(args);
+          const header = `🔧 *${toolCall.function.name}*    [${shortId}]`;
+
+          if (argEntries.length === 0) {
+            await context.sendMessage(header);
+          } else if (argEntries.length === 1 && typeof argEntries[0][1] === "string" && argEntries[0][1].length <= 60) {
+            await context.sendMessage(header, `*${argEntries[0][0]}*: ${argEntries[0][1]}`);
+          } else {
+            const parts = argEntries.map(([k, v]) => {
+              if (typeof v === "string" && v.includes("\n")) {
+                return `*${k}*:\n\`\`\`\n${v}\n\`\`\``;
+              }
+              const val = typeof v === "string" ? v : JSON.stringify(v, null, 2);
+              return `*${k}*: ${val}`;
+            });
+            await context.sendMessage(header, parts.join("\n\n"));
+          }
         }
 
         // Store tool calls in database
