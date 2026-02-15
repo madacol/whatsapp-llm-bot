@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 
 export default /** @type {defineAction} */ ((x) => x)({
   name: "get_model",
-  command: "get-model",
+  command: "get model",
   description: "Get the current LLM model for a chat (admin only)",
   parameters: {
     type: "object",

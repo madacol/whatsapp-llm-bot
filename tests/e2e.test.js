@@ -205,10 +205,10 @@ describe("Scenario 4: Set and get system prompt", () => {
     await seedChat(chatId, { enabled: true });
   });
 
-  it("sets system prompt with !set-prompt", async () => {
+  it("sets system prompt with !set prompt", async () => {
     const { context, responses } = createIncomingContext({
       chatId,
-      content: [{ type: "text", text: "!set-prompt pirate" }],
+      content: [{ type: "text", text: "!set prompt pirate" }],
     });
     await handleMessage(context);
 
@@ -219,10 +219,10 @@ describe("Scenario 4: Set and get system prompt", () => {
     );
   });
 
-  it("retrieves system prompt with !get-prompt", async () => {
+  it("retrieves system prompt with !get prompt", async () => {
     const { context, responses } = createIncomingContext({
       chatId,
-      content: [{ type: "text", text: "!get-prompt" }],
+      content: [{ type: "text", text: "!get prompt" }],
     });
     await handleMessage(context);
 
@@ -244,10 +244,10 @@ describe("Scenario 5: Set and get model", () => {
     await seedChat(chatId, { enabled: true });
   });
 
-  it("sets model with !set-model", async () => {
+  it("sets model with !set model", async () => {
     const { context, responses } = createIncomingContext({
       chatId,
-      content: [{ type: "text", text: "!set-model gpt-4.1-mini" }],
+      content: [{ type: "text", text: "!set model gpt-4.1-mini" }],
     });
     await handleMessage(context);
 
@@ -258,10 +258,10 @@ describe("Scenario 5: Set and get model", () => {
     );
   });
 
-  it("retrieves model with !get-model", async () => {
+  it("retrieves model with !get model", async () => {
     const { context, responses } = createIncomingContext({
       chatId,
-      content: [{ type: "text", text: "!get-model" }],
+      content: [{ type: "text", text: "!get model" }],
     });
     await handleMessage(context);
 
@@ -283,7 +283,7 @@ describe("Scenario 6: New conversation clears history", () => {
     await seedChat(chatId, { enabled: true });
   });
 
-  it("after !new the next LLM call sees only the new message", async () => {
+  it("after !clear the next LLM call sees only the new message", async () => {
     // Step 1 — send a message so the DB has history
     mockServer.addResponses("First response");
     const { context: ctx1, responses: r1 } = createIncomingContext({
@@ -296,7 +296,7 @@ describe("Scenario 6: New conversation clears history", () => {
     // Step 2 — clear history
     const { context: ctx2, responses: r2 } = createIncomingContext({
       chatId,
-      content: [{ type: "text", text: "!new" }],
+      content: [{ type: "text", text: "!clear" }],
     });
     await handleMessage(ctx2);
     assert.ok(
