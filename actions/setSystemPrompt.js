@@ -1,3 +1,5 @@
+import assert from "node:assert/strict";
+
 export default /** @type {defineAction} */ ((x) => x)({
   name: "set_system_prompt",
   command: "set-prompt",
@@ -17,6 +19,25 @@ export default /** @type {defineAction} */ ((x) => x)({
     requireAdmin: true,
     useRootDb: true,
   },
+  test_functions: [
+    async function sets_system_prompt_for_chat(action_fn, db) {
+      await db.sql`INSERT INTO chats(chat_id) VALUES ('act-prompt-1') ON CONFLICT DO NOTHING`;
+      const result = await action_fn(
+        { chatId: "act-prompt-1", rootDb: db },
+        { prompt: "Be a pirate" },
+      );
+      assert.ok(result.includes("pirate"));
+      const { rows: [chat] } = await db.sql`SELECT system_prompt FROM chats WHERE chat_id = 'act-prompt-1'`;
+      assert.equal(chat.system_prompt, "Be a pirate");
+    },
+    async function throws_on_empty_prompt(action_fn, db) {
+      await db.sql`INSERT INTO chats(chat_id) VALUES ('act-prompt-2') ON CONFLICT DO NOTHING`;
+      await assert.rejects(
+        () => action_fn({ chatId: "act-prompt-2", rootDb: db }, { prompt: "  " }),
+        { message: /empty/ },
+      );
+    },
+  ],
   action_fn: async function ({ chatId, rootDb }, { prompt }) {
     const targetChatId = chatId;
     prompt = prompt.trim();

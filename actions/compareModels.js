@@ -7,6 +7,8 @@
  * }} OpenRouterModel
  */
 
+import assert from "node:assert/strict";
+
 export default /** @type {defineAction} */ ((x) => x)({
   name: "compare_models",
   command: "compare-models",
@@ -28,6 +30,39 @@ export default /** @type {defineAction} */ ((x) => x)({
   permissions: {
     autoExecute: true
   },
+  test_functions: [
+    async function formats_model_comparison_table(action_fn, _db) {
+      const originalFetch = globalThis.fetch;
+      try {
+        globalThis.fetch = /** @type {any} */ (async () => ({
+          json: async () => ({
+            data: [
+              {
+                id: "openai/gpt-4o",
+                name: "GPT-4o",
+                context_length: 128000,
+                pricing: { prompt: "0.000005", completion: "0.000015" },
+              },
+              {
+                id: "anthropic/claude-3.5-sonnet",
+                name: "Claude 3.5 Sonnet",
+                context_length: 200000,
+                pricing: { prompt: "0.000003", completion: "0.000015" },
+              },
+            ],
+          }),
+        }));
+        const result = await action_fn(
+          { log: async () => "" },
+          { providers: "gpt-4o,claude" },
+        );
+        assert.ok(result.includes("GPT-4o"));
+        assert.ok(result.includes("Claude 3.5 Sonnet"));
+      } finally {
+        globalThis.fetch = originalFetch;
+      }
+    },
+  ],
   /**
    * @param {ActionContext} context
    * @param {{ providers: string, sortBy?: string }} params

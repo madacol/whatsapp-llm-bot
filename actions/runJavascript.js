@@ -1,3 +1,5 @@
+import assert from "node:assert/strict";
+
 export default /** @type {defineAction} */ ((x) => x)({
   name: "run_javascript",
   command: "js",
@@ -18,6 +20,26 @@ export default /** @type {defineAction} */ ((x) => x)({
     autoExecute: true,
     autoContinue: true,
   },
+  test_functions: [
+    async function executes_function_and_returns_result(action_fn, _db) {
+      const result = await action_fn(
+        { chatId: "rjs-1" },
+        { code: "({chatId}) => chatId" },
+      );
+      assert.equal(result, "rjs-1");
+    },
+    async function throws_on_non_function_code(action_fn, _db) {
+      await assert.rejects(
+        () => action_fn({}, { code: "42" }),
+        { message: /function/ },
+      );
+    },
+    async function throws_on_syntax_error(action_fn, _db) {
+      await assert.rejects(
+        () => action_fn({}, { code: "{{invalid" }),
+      );
+    },
+  ],
   action_fn: async function (context, { code }) {
     // Handle both command args and LLM function call formats
     console.log("Executing JavaScript code:", JSON.stringify(code, null, 2));

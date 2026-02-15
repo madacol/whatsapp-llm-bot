@@ -1,6 +1,8 @@
 import fs from "fs/promises";
 import path from "path";
 
+import assert from "node:assert/strict";
+
 export default /** @type {defineAction} */ ((x) => x)({
   name: "create_action",
   description: `Create a new action file in the actions/ directory. The code must be a complete ES module that default-exports an action object using the standard boilerplate:
@@ -54,6 +56,14 @@ Only set the permissions you actually need.`,
     autoExecute: true,
     requireMaster: true,
   },
+  test_functions: [
+    async function rejects_invalid_file_name(action_fn, _db) {
+      await assert.rejects(
+        () => action_fn({}, { file_name: "../evil", code: "// code" }),
+        { message: /alphanumeric camelCase/ },
+      );
+    },
+  ],
   action_fn: async function (_context, { file_name, code }) {
     if (!/^[a-zA-Z][a-zA-Z0-9]*$/.test(file_name)) {
       throw new Error(

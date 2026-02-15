@@ -1,3 +1,5 @@
+import assert from "node:assert/strict";
+
 export default /** @type {defineAction} */ ((x) => x)({
   name: "disable_chat",
   command: "disable",
@@ -18,6 +20,18 @@ export default /** @type {defineAction} */ ((x) => x)({
     requireMaster: true,
     useRootDb: true,
   },
+  test_functions: [
+    async function disables_existing_chat(action_fn, db) {
+      await db.sql`INSERT INTO chats(chat_id, is_enabled) VALUES ('act-disable-1', true) ON CONFLICT DO NOTHING`;
+      const result = await action_fn(
+        { chatId: "act-disable-1", rootDb: db },
+        {},
+      );
+      assert.ok(result.includes("disabled"));
+      const { rows: [chat] } = await db.sql`SELECT is_enabled FROM chats WHERE chat_id = 'act-disable-1'`;
+      assert.equal(chat.is_enabled, false);
+    },
+  ],
   action_fn: async function ({ chatId, rootDb }, params) {
     const targetChatId = params.chatId || chatId;
 

@@ -149,11 +149,11 @@ type Action<P extends PermissionFlags = PermissionFlags> = {
     context: ExtendedActionContext<P>,
     params: any,
   ) => Promise<ActionResult> | ActionResult;
-  test_functions?: Array<
+  test_functions: Array<
     (
-      context: ExtendedActionContext<P>,
-      params: any,
-    ) => Promise<boolean> | boolean
+      action_fn: (context: any, params: any) => Promise<any> | any,
+      db: PGlite,
+    ) => Promise<void>
   >;
 };
 
