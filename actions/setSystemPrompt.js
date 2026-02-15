@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 export default /** @type {defineAction} */ ((x) => x)({
   name: "set_system_prompt",
   command: "set-prompt",
-  description: "Set a custom system prompt for a chat (admin only)",
+  description: "Set or clear a custom system prompt for a chat (admin only). Send an empty prompt to reset to default.",
   parameters: {
     type: "object",
     properties: {
@@ -12,7 +12,7 @@ export default /** @type {defineAction} */ ((x) => x)({
         description: "The system prompt to set for the chat",
       },
     },
-    required: ["prompt"],
+    required: [],
   },
   permissions: {
     autoExecute: true,
@@ -30,21 +30,18 @@ export default /** @type {defineAction} */ ((x) => x)({
       const { rows: [chat] } = await db.sql`SELECT system_prompt FROM chats WHERE chat_id = 'act-prompt-1'`;
       assert.equal(chat.system_prompt, "Be a pirate");
     },
-    async function throws_on_empty_prompt(action_fn, db) {
+    async function clears_system_prompt_with_empty_string(action_fn, db) {
       await db.sql`INSERT INTO chats(chat_id) VALUES ('act-prompt-2') ON CONFLICT DO NOTHING`;
-      await assert.rejects(
-        () => action_fn({ chatId: "act-prompt-2", rootDb: db }, { prompt: "  " }),
-        { message: /empty/ },
-      );
+      await db.sql`UPDATE chats SET system_prompt = 'old prompt' WHERE chat_id = 'act-prompt-2'`;
+      const result = await action_fn({ chatId: "act-prompt-2", rootDb: db }, { prompt: "  " });
+      assert.ok(result.toLowerCase().includes("clear") || result.toLowerCase().includes("reset") || result.toLowerCase().includes("default"));
+      const { rows: [chat] } = await db.sql`SELECT system_prompt FROM chats WHERE chat_id = 'act-prompt-2'`;
+      assert.equal(chat.system_prompt, null);
     },
   ],
   action_fn: async function ({ chatId, rootDb }, { prompt }) {
     const targetChatId = chatId;
-    prompt = prompt.trim();
-
-    if (!prompt || prompt.length === 0) {
-      throw new Error("System prompt cannot be empty");
-    }
+    prompt = (prompt || "").trim();
 
     // First check if chat exists
     const {
@@ -56,15 +53,21 @@ export default /** @type {defineAction} */ ((x) => x)({
       throw new Error(`Chat ${targetChatId} does not exist.`);
     }
 
-    // Update the system prompt for the chat
+    // Empty prompt clears/resets to default
+    const newPrompt = prompt.length === 0 ? null : prompt;
+
     try {
       await rootDb.sql`
         UPDATE chats
-        SET system_prompt = ${prompt}
+        SET system_prompt = ${newPrompt}
         WHERE chat_id = ${targetChatId}
       `;
 
-      return `✅ System prompt updated for chat ${targetChatId}\n\n*New prompt:*\n${prompt}`;
+      if (newPrompt === null) {
+        return `System prompt cleared for chat ${targetChatId}. The default prompt will be used.`;
+      }
+
+      return `System prompt updated for chat ${targetChatId}\n\n*New prompt:*\n${prompt}`;
     } catch (error) {
       console.error("Error setting system prompt:", error);
       const errorMessage =
