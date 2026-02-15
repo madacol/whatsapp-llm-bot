@@ -92,8 +92,8 @@ type Context = {
   senderIds: string[];
   content: IncomingContentBlock[];
   getIsAdmin: () => Promise<boolean>;
-  sendMessage: (header: string, message: string) => Promise<void>;
-  reply: (header: string, message: string) => Promise<void>;
+  sendMessage: (header: string, message?: string) => Promise<void>;
+  reply: (header: string, message?: string) => Promise<void>;
 };
 
 /* Actions */
