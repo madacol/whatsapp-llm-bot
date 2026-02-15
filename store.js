@@ -18,9 +18,12 @@ import { getDb } from "./db.js";
  * }} MessageRow
  */
 
-export async function initStore(){
+/**
+ * @param {PGlite} [injectedDb]
+ */
+export async function initStore(injectedDb){
     // Initialize database
-    const db = getDb("./pgdata/root");
+    const db = injectedDb || getDb("./pgdata/root");
 
     // Initialize database tables
     await db.sql`

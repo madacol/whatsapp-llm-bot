@@ -17,6 +17,7 @@ const currentSessionDb = getDb("memory://");
  * @param {Context} context - The unified context to pass to the action
  * @param {{}} params - The parameters to pass to the action
  * @param {string|null} toolCallId - The tool call ID for messaging headers
+ * @param {(name: string) => Promise<AppAction|null>} [actionResolver] - Optional resolver (defaults to getAction)
  * @returns {Promise<{result: ActionResult, permissions: Action['permissions']}>} Result of the action execution
  */
 export async function executeAction(
@@ -24,8 +25,9 @@ export async function executeAction(
   context,
   params,
   toolCallId = null,
+  actionResolver = getAction,
 ) {
-  const action = await getAction(actionName);
+  const action = await actionResolver(actionName);
   if (!action) {
     throw new Error(`Action "${actionName}" not found`);
   }

@@ -11,6 +11,7 @@
         "dev": "node --watch index.js",
         "restart": "touch index.js",
         "test": "node --test tests/*.test.js",
+        "test:watch": "node --test --watch tests/*.test.js",
         "type-check": "npx tsc --noEmit --project jsconfig.json"
     },
     "keywords": [],
