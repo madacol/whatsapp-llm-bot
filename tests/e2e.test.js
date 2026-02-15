@@ -10,7 +10,6 @@ import {
   createIncomingContext,
   createMockLlmServer,
   createTestDb,
-  logResult,
 } from "./helpers.js";
 import { setDb } from "../db.js";
 
@@ -77,7 +76,6 @@ describe("Scenario 1: Enable/disable chat flow", () => {
       responses.some((r) => r.text.toLowerCase().includes("enabled")),
       "Should confirm enabling",
     );
-    await logResult("S1: Enable chat", responses, { pass: true });
   });
 
   it("bot responds via LLM to a text message in an enabled chat", async () => {
@@ -94,7 +92,6 @@ describe("Scenario 1: Enable/disable chat flow", () => {
       responses.some((r) => r.text.includes("Hello from the LLM!")),
       "Response should include LLM output",
     );
-    await logResult("S1: LLM response", responses, { pass: true });
   });
 
   it("master user disables chat with !disable", async () => {
@@ -109,7 +106,6 @@ describe("Scenario 1: Enable/disable chat flow", () => {
       responses.some((r) => r.text.toLowerCase().includes("disabled")),
       "Should confirm disabling",
     );
-    await logResult("S1: Disable chat", responses, { pass: true });
   });
 
   it("bot does NOT respond to messages in a disabled chat", async () => {
@@ -120,9 +116,6 @@ describe("Scenario 1: Enable/disable chat flow", () => {
     await handleMessage(context);
 
     assert.equal(responses.length, 0, "Bot should not respond when disabled");
-    await logResult("S1: No response when disabled", responses, {
-      pass: true,
-    });
   });
 });
 
@@ -149,9 +142,6 @@ describe("Scenario 2: Non-master cannot enable/disable", () => {
       responses.some((r) => r.text.toLowerCase().includes("master")),
       "Should mention master permissions",
     );
-    await logResult("S2: Non-master enable rejected", responses, {
-      pass: true,
-    });
   });
 });
 
@@ -171,7 +161,6 @@ describe("Scenario 3: Unknown command", () => {
       responses.some((r) => r.text.toLowerCase().includes("unknown command")),
       "Should mention unknown command",
     );
-    await logResult("S3: Unknown command", responses, { pass: true });
   });
 });
 
@@ -197,7 +186,6 @@ describe("Scenario 4: Set and get system prompt", () => {
       responses.some((r) => r.text.includes("pirate")),
       "Should confirm prompt containing 'pirate'",
     );
-    await logResult("S4: Set prompt", responses, { pass: true });
   });
 
   it("retrieves system prompt with !get-prompt", async () => {
@@ -212,7 +200,6 @@ describe("Scenario 4: Set and get system prompt", () => {
       responses.some((r) => r.text.includes("pirate")),
       "Should return prompt containing 'pirate'",
     );
-    await logResult("S4: Get prompt", responses, { pass: true });
   });
 });
 
@@ -238,7 +225,6 @@ describe("Scenario 5: Set and get model", () => {
       responses.some((r) => r.text.includes("gpt-4.1-mini")),
       "Should confirm model name",
     );
-    await logResult("S5: Set model", responses, { pass: true });
   });
 
   it("retrieves model with !get-model", async () => {
@@ -253,7 +239,6 @@ describe("Scenario 5: Set and get model", () => {
       responses.some((r) => r.text.includes("gpt-4.1-mini")),
       "Should return model name",
     );
-    await logResult("S5: Get model", responses, { pass: true });
   });
 });
 
@@ -305,7 +290,6 @@ describe("Scenario 6: New conversation clears history", () => {
       1,
       "LLM should see only 1 user message after history clear",
     );
-    await logResult("S6: New conversation", r3, { pass: true });
   });
 });
 
@@ -337,7 +321,6 @@ describe("Scenario 7: Show info", () => {
       allText.toLowerCase().includes("sender"),
       "Should contain sender info",
     );
-    await logResult("S7: Show info", responses, { pass: true });
   });
 });
 
@@ -392,7 +375,6 @@ describe("Scenario 8: Run JavaScript via tool call", () => {
       responses.some((r) => r.text.includes(`The chat ID is ${chatId}`)),
       "Final reply should contain result",
     );
-    await logResult("S8: Run JavaScript tool call", responses, { pass: true });
   });
 });
 
@@ -415,7 +397,6 @@ describe("Scenario 9: Group chat — only responds when mentioned", () => {
     await handleMessage(context);
 
     assert.equal(responses.length, 0, "Should not respond when not mentioned");
-    await logResult("S9: Group — no mention", responses, { pass: true });
   });
 
   it("responds in group when bot is @mentioned", async () => {
@@ -430,7 +411,6 @@ describe("Scenario 9: Group chat — only responds when mentioned", () => {
 
     assert.ok(responses.length > 0, "Should respond when mentioned");
     assert.ok(responses.some((r) => r.text.includes("Hi from the bot!")));
-    await logResult("S9: Group — with mention", responses, { pass: true });
   });
 });
 
@@ -456,7 +436,6 @@ describe("Scenario 10: Private chat — always responds when enabled", () => {
 
     assert.ok(responses.length > 0);
     assert.ok(responses.some((r) => r.text.includes("Private chat response")));
-    await logResult("S10: Private chat response", responses, { pass: true });
   });
 });
 
