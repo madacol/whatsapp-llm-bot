@@ -168,6 +168,37 @@ describe("LLM pipeline via createMessageHandler", () => {
     );
   });
 
+  it("does not crash on malformed tool call arguments", async () => {
+    await seedChat("pipe-malformed", { enabled: true });
+
+    mockServer.addResponses(
+      {
+        tool_calls: [
+          {
+            id: "call_malformed_001",
+            type: "function",
+            function: {
+              name: "run_javascript",
+              arguments: "{bad json",
+            },
+          },
+        ],
+      },
+      "Recovered from bad args",
+    );
+
+    const { context, responses } = createIncomingContext({
+      chatId: "pipe-malformed",
+      content: [{ type: "text", text: "Do something" }],
+    });
+    await handleMessage(context);
+
+    assert.ok(
+      responses.some(r => r.text.includes("Recovered") || r.text.includes("Error")),
+      "Should recover from malformed arguments without crashing",
+    );
+  });
+
   it("uses custom system prompt from chat", async () => {
     await seedChat("pipe-5", { enabled: true, systemPrompt: "You are a pirate" });
     mockServer.addResponses("Arr matey!");
