@@ -1,10 +1,5 @@
 import { createServer } from "node:http";
 import { PGlite } from "@electric-sql/pglite";
-import fs from "node:fs/promises";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 /**
  * Create an IncomingContext for testing.
@@ -160,33 +155,3 @@ export async function createMockLlmServer() {
   };
 }
 
-/**
- * Append a test result entry to tests/results/<date>.log
- * @param {string} testName
- * @param {Array<{type: string, text: string}>} responses
- * @param {{pass: boolean, reasoning?: string}} judgment
- */
-export async function logResult(testName, responses, judgment) {
-  const resultsDir = path.join(__dirname, "results");
-  await fs.mkdir(resultsDir, { recursive: true });
-
-  const date = new Date().toISOString().split("T")[0];
-  const logFile = path.join(resultsDir, `${date}.log`);
-
-  const entry = [
-    `=== ${testName} ===`,
-    `Time: ${new Date().toISOString()}`,
-    `Result: ${judgment.pass ? "PASS" : "FAIL"}`,
-    judgment.reasoning ? `Reasoning: ${judgment.reasoning}` : null,
-    `Responses (${responses.length}):`,
-    ...responses.map(
-      (r, i) => `  [${i}] ${r.type}: ${r.text.substring(0, 300)}`,
-    ),
-    "",
-    "",
-  ]
-    .filter((x) => x !== null)
-    .join("\n");
-
-  await fs.appendFile(logFile, entry);
-}
