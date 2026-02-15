@@ -207,7 +207,13 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
 
           // Show tool call to user
           const shortId = shortenToolId(toolCall.id);
-          const args = JSON.parse(toolCall.function.arguments);
+          let args;
+          try {
+            args = JSON.parse(toolCall.function.arguments || "{}");
+          } catch {
+            console.error("Failed to parse tool call arguments:", toolCall.function.arguments);
+            args = {};
+          }
           const argEntries = Object.entries(args);
           const header = `🔧 *${toolCall.function.name}*    [${shortId}]`;
 
@@ -237,7 +243,13 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
 
         for (const toolCall of responseMessage.tool_calls) {
           const toolName = toolCall.function.name;
-          const toolArgs = JSON.parse(toolCall.function.arguments);
+          let toolArgs;
+          try {
+            toolArgs = JSON.parse(toolCall.function.arguments || "{}");
+          } catch {
+            console.error("Failed to parse tool call arguments:", toolCall.function.arguments);
+            toolArgs = {};
+          }
           const shortId = shortenToolId(toolCall.id);
           console.log("executing", toolName, toolArgs);
 
