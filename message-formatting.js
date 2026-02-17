@@ -123,7 +123,7 @@ export function parseCommandArgs(args, parameters) {
 export function formatMessagesForOpenAI(chatMessages) {
   /** @type {Array<OpenAI.ChatCompletionMessageParam>} */
   const chatMessages_formatted = [];
-  const reversedMessages = chatMessages.reverse();
+  const reversedMessages = [...chatMessages].reverse();
 
   // remove starting tool results from the messages
   while (reversedMessages[0]?.message_data?.role === "tool") {
