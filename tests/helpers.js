@@ -1,5 +1,6 @@
 import { createServer } from "node:http";
 import { PGlite } from "@electric-sql/pglite";
+import { initStore } from "../store.js";
 
 /**
  * Create an IncomingContext for testing.
@@ -50,29 +51,7 @@ export function createIncomingContext(overrides = {}) {
  */
 export async function createTestDb() {
   const db = new PGlite("memory://");
-
-  await db.sql`
-    CREATE TABLE IF NOT EXISTS chats (
-      chat_id VARCHAR(50) PRIMARY KEY,
-      is_enabled BOOLEAN DEFAULT FALSE,
-      system_prompt TEXT,
-      timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    );
-  `;
-  await db.sql`
-    CREATE TABLE IF NOT EXISTS messages (
-      message_id SERIAL PRIMARY KEY,
-      chat_id VARCHAR(50) REFERENCES chats(chat_id),
-      sender_id VARCHAR(50),
-      message_data JSONB,
-      timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    );
-  `;
-  await db.sql`ALTER TABLE chats ADD COLUMN IF NOT EXISTS model TEXT`;
-  await db.sql`ALTER TABLE chats ADD COLUMN IF NOT EXISTS respond_on_any BOOLEAN DEFAULT FALSE`;
-  await db.sql`ALTER TABLE chats ADD COLUMN IF NOT EXISTS respond_on_mention BOOLEAN DEFAULT TRUE`;
-  await db.sql`ALTER TABLE chats ADD COLUMN IF NOT EXISTS respond_on_reply BOOLEAN DEFAULT FALSE`;
-
+  await initStore(db);
   return db;
 }
 
