@@ -77,9 +77,9 @@ export async function initStore(injectedDb){
         return /** @type {ChatRow} */ (chat);
       },
 
-      closeDb () {
+      async closeDb () {
         console.log("Closing database...");
-        return db.close();
+        await db.close();
         console.log("Database closed");
       },
 
