@@ -30,6 +30,7 @@ type AudioContentBlock = {
 };
 type QuoteContentBlock = {
   type: "quote";
+  quotedSenderId?: string;
   content: IncomingContentBlock[];
 };
 type ToolCallContentBlock = {

@@ -23,29 +23,51 @@ export function actionsToOpenAIFormat(actions) {
 
 /**
  * Decide whether the bot should respond to a message.
- * @param {{ is_enabled?: boolean } | undefined} chatInfo
+ * @param {{ is_enabled?: boolean, respond_on_any?: boolean, respond_on_mention?: boolean, respond_on_reply?: boolean } | undefined} chatInfo
  * @param {boolean} isGroup
  * @param {IncomingContentBlock[]} content
  * @param {string[]} selfIds
+ * @param {string | undefined} quotedSenderId
  * @returns {boolean}
  */
-export function shouldRespond(chatInfo, isGroup, content, selfIds) {
+export function shouldRespond(chatInfo, isGroup, content, selfIds, quotedSenderId) {
   if (!chatInfo?.is_enabled) {
     return false;
   }
 
-  // Respond in private chats
   if (!isGroup) {
     return true;
   }
 
-  // Respond in groups only if mentioned
-  const isMentioned = content.some(contentPart =>
-    contentPart.type === "text"
-      && selfIds.some(selfId => contentPart.text.includes('@' + selfId))
-  );
-  console.log({isMentioned, content});
-  return isMentioned;
+  if (chatInfo.respond_on_any === true) {
+    return true;
+  }
+
+  const respondOnMention = chatInfo.respond_on_mention !== false;
+  const respondOnReply = chatInfo.respond_on_reply === true;
+
+  if (!respondOnMention && !respondOnReply) {
+    return false;
+  }
+
+  if (respondOnMention) {
+    const isMentioned = content.some(contentPart =>
+      contentPart.type === "text"
+        && selfIds.some(selfId => contentPart.text.includes('@' + selfId))
+    );
+    if (isMentioned) {
+      return true;
+    }
+  }
+
+  if (respondOnReply && quotedSenderId) {
+    const isReplyToBot = selfIds.includes(quotedSenderId);
+    if (isReplyToBot) {
+      return true;
+    }
+  }
+
+  return false;
 }
 
 /**

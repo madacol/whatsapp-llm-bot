@@ -6,6 +6,9 @@ import { getDb } from "./db.js";
  *   is_enabled: boolean;
  *   system_prompt: string;
  *   model: string;
+ *   respond_on_any: boolean;
+ *   respond_on_mention: boolean;
+ *   respond_on_reply: boolean;
  *   timestamp: string;
  * }} ChatRow
  *
@@ -51,6 +54,9 @@ export async function initStore(injectedDb){
         db.sql`ALTER TABLE chats ADD COLUMN IF NOT EXISTS is_enabled BOOLEAN DEFAULT FALSE`,
         db.sql`ALTER TABLE chats ADD COLUMN IF NOT EXISTS system_prompt TEXT`,
         db.sql`ALTER TABLE chats ADD COLUMN IF NOT EXISTS model TEXT`,
+        db.sql`ALTER TABLE chats ADD COLUMN IF NOT EXISTS respond_on_any BOOLEAN DEFAULT FALSE`,
+        db.sql`ALTER TABLE chats ADD COLUMN IF NOT EXISTS respond_on_mention BOOLEAN DEFAULT TRUE`,
+        db.sql`ALTER TABLE chats ADD COLUMN IF NOT EXISTS respond_on_reply BOOLEAN DEFAULT FALSE`,
         db.sql`ALTER TABLE messages ADD COLUMN IF NOT EXISTS message_data JSONB`,
         db.sql`ALTER TABLE messages DROP COLUMN IF EXISTS message_type`,
         db.sql`ALTER TABLE messages DROP COLUMN IF EXISTS tool_call_id`,
