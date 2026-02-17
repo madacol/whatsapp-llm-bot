@@ -12,6 +12,19 @@ import { exec } from "child_process";
 import { handleMessage } from "./index.js";
 
 /**
+ * Extract contextInfo from any Baileys message type that carries it.
+ * @param {BaileysMessage['message']} msg
+ */
+function getContextInfo(msg) {
+  return msg?.extendedTextMessage?.contextInfo
+    || msg?.imageMessage?.contextInfo
+    || msg?.videoMessage?.contextInfo
+    || msg?.documentMessage?.contextInfo
+    || msg?.audioMessage?.contextInfo
+    || msg?.stickerMessage?.contextInfo;
+}
+
+/**
  *
  * @param {BaileysMessage} baileysMessage
  * @returns {Promise<IncomingContentBlock[]>}
@@ -21,12 +34,8 @@ export async function getMessageContent(baileysMessage) {
   const content = [];
 
   // Check for quoted message content
-  const quotedMessage = baileysMessage.message?.extendedTextMessage?.contextInfo?.quotedMessage
-    || baileysMessage.message?.imageMessage?.contextInfo?.quotedMessage
-    || baileysMessage.message?.videoMessage?.contextInfo?.quotedMessage
-    || baileysMessage.message?.documentMessage?.contextInfo?.quotedMessage
-    || baileysMessage.message?.audioMessage?.contextInfo?.quotedMessage
-    || baileysMessage.message?.stickerMessage?.contextInfo?.quotedMessage;
+  const contextInfo = getContextInfo(baileysMessage.message);
+  const quotedMessage = contextInfo?.quotedMessage;
 
   if (quotedMessage) {
     const quoteText = quotedMessage.conversation
@@ -35,12 +44,7 @@ export async function getMessageContent(baileysMessage) {
       || quotedMessage.videoMessage?.caption
       || quotedMessage.documentMessage?.caption
 
-    const quotedSenderId = baileysMessage.message?.extendedTextMessage?.contextInfo?.participant
-      || baileysMessage.message?.imageMessage?.contextInfo?.participant
-      || baileysMessage.message?.videoMessage?.contextInfo?.participant
-      || baileysMessage.message?.documentMessage?.contextInfo?.participant
-      || baileysMessage.message?.audioMessage?.contextInfo?.participant
-      || baileysMessage.message?.stickerMessage?.contextInfo?.participant;
+    const quotedSenderId = contextInfo?.participant;
 
     /** @type {QuoteContentBlock} */
     const quote = {
