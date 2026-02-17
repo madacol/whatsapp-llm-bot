@@ -158,20 +158,21 @@ export function formatMessagesForOpenAI(chatMessages) {
               messageContent.push({ type: "image_url", image_url: { url: dataUrl } });
               break;
             case "audio":
-              let format = contentBlock.mime_type?.split("audio/")[1].split(";")[0];
+              /** @type {"wav" | "mp3"} */
+              let format = "mp3";
               let data;
-              if (format !== "wav" && format !== "mp3") {
+              const audioParts = contentBlock.mime_type?.split("audio/")[1]?.split(";")[0];
+              if (audioParts === "wav" || audioParts === "mp3") {
+                format = audioParts;
+                data = contentBlock.data;
+              } else {
                 console.warn(`Unsupported audio format: ${contentBlock.mime_type}`);
                 data = convertAudioToMp3Base64(contentBlock.data);
-                format = "mp3";
-              } else {
-                data = contentBlock.data;
               }
               messageContent.push({
                 type: "input_audio",
                 input_audio: {
                   data: data,
-                  // @ts-ignore
                   format: format
                 }
               });

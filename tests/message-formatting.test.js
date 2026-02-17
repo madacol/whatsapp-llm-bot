@@ -444,6 +444,44 @@ describe("formatMessagesForOpenAI", () => {
     assert.equal(messages.length, 2, "input array length should not change");
   });
 
+  it("handles audio message with wav mime_type", () => {
+    const messages = [
+      {
+        message_data: {
+          role: "user",
+          content: [
+            { type: "audio", encoding: "base64", mime_type: "audio/wav", data: "abc123" },
+          ],
+        },
+        sender_id: "user-1",
+      },
+    ];
+    const result = formatMessagesForOpenAI(messages);
+    assert.equal(result.length, 1);
+    const content = /** @type {any[]} */ (result[0].content);
+    assert.equal(content[0].type, "input_audio");
+    assert.equal(content[0].input_audio.format, "wav");
+    assert.equal(content[0].input_audio.data, "abc123");
+  });
+
+  it("handles audio message with mp3 mime_type", () => {
+    const messages = [
+      {
+        message_data: {
+          role: "user",
+          content: [
+            { type: "audio", encoding: "base64", mime_type: "audio/mp3", data: "def456" },
+          ],
+        },
+        sender_id: "user-1",
+      },
+    ];
+    const result = formatMessagesForOpenAI(messages);
+    const content = /** @type {any[]} */ (result[0].content);
+    assert.equal(content[0].input_audio.format, "mp3");
+    assert.equal(content[0].input_audio.data, "def456");
+  });
+
   it("strips leading tool results from message list", () => {
     const messages = [
       // newest first (before reverse)
