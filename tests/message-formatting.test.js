@@ -37,39 +37,41 @@ describe("actionsToOpenAIFormat", () => {
 
 describe("shouldRespond", () => {
   it("returns false when chat is disabled", () => {
-    assert.equal(shouldRespond({ is_enabled: false }, false, [], []), false);
+    assert.equal(shouldRespond({ is_enabled: false }, false, [], [], undefined), false);
   });
 
   it("returns false when chatInfo is undefined", () => {
-    assert.equal(shouldRespond(undefined, false, [], []), false);
+    assert.equal(shouldRespond(undefined, false, [], [], undefined), false);
   });
 
   it("returns true for enabled private chat", () => {
     assert.equal(
-      shouldRespond({ is_enabled: true }, false, [{ type: "text", text: "hi" }], ["bot"]),
+      shouldRespond({ is_enabled: true }, false, [{ type: "text", text: "hi" }], ["bot"], undefined),
       true,
     );
   });
 
-  it("returns true for group when bot is mentioned", () => {
+  it("returns true for group when bot is mentioned (default: respond_on_mention=true)", () => {
     assert.equal(
       shouldRespond(
         { is_enabled: true },
         true,
         [{ type: "text", text: "hey @bot-123 what's up" }],
         ["bot-123"],
+        undefined,
       ),
       true,
     );
   });
 
-  it("returns false for group when bot is not mentioned", () => {
+  it("returns false for group when bot is not mentioned and no reply (default)", () => {
     assert.equal(
       shouldRespond(
         { is_enabled: true },
         true,
         [{ type: "text", text: "hello everyone" }],
         ["bot-123"],
+        undefined,
       ),
       false,
     );
@@ -82,9 +84,150 @@ describe("shouldRespond", () => {
         true,
         [{ type: "text", text: "hey @alt-id" }],
         ["bot-123", "alt-id"],
+        undefined,
       ),
       true,
     );
+  });
+
+  describe("respond_on_any: true", () => {
+    it("responds to any message in group", () => {
+      assert.equal(
+        shouldRespond(
+          { is_enabled: true, respond_on_any: true },
+          true,
+          [{ type: "text", text: "hello everyone" }],
+          ["bot-123"],
+          undefined,
+        ),
+        true,
+      );
+    });
+
+    it("works alongside other options", () => {
+      assert.equal(
+        shouldRespond(
+          { is_enabled: true, respond_on_any: true, respond_on_mention: false, respond_on_reply: false },
+          true,
+          [{ type: "text", text: "hello" }],
+          ["bot-123"],
+          undefined,
+        ),
+        true,
+      );
+    });
+  });
+
+  describe("respond_on_mention: false", () => {
+    it("does not respond to mentions when disabled", () => {
+      assert.equal(
+        shouldRespond(
+          { is_enabled: true, respond_on_mention: false },
+          true,
+          [{ type: "text", text: "@bot-123 hello" }],
+          ["bot-123"],
+          undefined,
+        ),
+        false,
+      );
+    });
+  });
+
+  describe("respond_on_reply: true", () => {
+    it("responds when message is a reply to bot", () => {
+      assert.equal(
+        shouldRespond(
+          { is_enabled: true, respond_on_reply: true },
+          true,
+          [{ type: "text", text: "hello" }],
+          ["bot-123"],
+          "bot-123",
+        ),
+        true,
+      );
+    });
+
+    it("does not respond when reply is to someone else", () => {
+      assert.equal(
+        shouldRespond(
+          { is_enabled: true, respond_on_reply: true },
+          true,
+          [{ type: "text", text: "hello" }],
+          ["bot-123"],
+          "other-user",
+        ),
+        false,
+      );
+    });
+
+    it("does not respond when no reply context", () => {
+      assert.equal(
+        shouldRespond(
+          { is_enabled: true, respond_on_reply: true },
+          true,
+          [{ type: "text", text: "hello" }],
+          ["bot-123"],
+          undefined,
+        ),
+        false,
+      );
+    });
+  });
+
+  describe("both respond_on_mention and respond_on_reply enabled", () => {
+    it("responds to mention", () => {
+      assert.equal(
+        shouldRespond(
+          { is_enabled: true, respond_on_mention: true, respond_on_reply: true },
+          true,
+          [{ type: "text", text: "@bot-123 hello" }],
+          ["bot-123"],
+          undefined,
+        ),
+        true,
+      );
+    });
+
+    it("responds to reply", () => {
+      assert.equal(
+        shouldRespond(
+          { is_enabled: true, respond_on_mention: true, respond_on_reply: true },
+          true,
+          [{ type: "text", text: "hello" }],
+          ["bot-123"],
+          "bot-123",
+        ),
+        true,
+      );
+    });
+  });
+
+  describe("both disabled", () => {
+    it("does not respond even when mentioned", () => {
+      assert.equal(
+        shouldRespond(
+          { is_enabled: true, respond_on_mention: false, respond_on_reply: false },
+          true,
+          [{ type: "text", text: "@bot-123 hello" }],
+          ["bot-123"],
+          undefined,
+        ),
+        false,
+      );
+    });
+
+    it("does not respond even when reply to bot", () => {
+      assert.equal(
+        shouldRespond(
+          { is_enabled: true, respond_on_mention: false, respond_on_reply: false },
+          true,
+          [{ type: "text", text: "hello" }],
+          ["bot-123"],
+          "bot-123",
+        ),
+        false,
+      );
+    });
   });
 });
 

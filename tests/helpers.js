@@ -69,6 +69,9 @@ export async function createTestDb() {
     );
   `;
   await db.sql`ALTER TABLE chats ADD COLUMN IF NOT EXISTS model TEXT`;
+  await db.sql`ALTER TABLE chats ADD COLUMN IF NOT EXISTS respond_on_any BOOLEAN DEFAULT FALSE`;
+  await db.sql`ALTER TABLE chats ADD COLUMN IF NOT EXISTS respond_on_mention BOOLEAN DEFAULT TRUE`;
+  await db.sql`ALTER TABLE chats ADD COLUMN IF NOT EXISTS respond_on_reply BOOLEAN DEFAULT FALSE`;
 
   return db;
 }
