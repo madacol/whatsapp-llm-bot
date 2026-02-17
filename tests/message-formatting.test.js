@@ -426,6 +426,24 @@ describe("formatMessagesForOpenAI", () => {
     assert.equal(msg.content, "result");
   });
 
+  it("does not mutate the input array", () => {
+    const messages = [
+      {
+        message_data: { role: "user", content: [{ type: "text", text: "first" }] },
+        sender_id: "user-1",
+      },
+      {
+        message_data: { role: "user", content: [{ type: "text", text: "second" }] },
+        sender_id: "user-1",
+      },
+    ];
+    const originalFirst = messages[0];
+    formatMessagesForOpenAI(messages);
+
+    assert.strictEqual(messages[0], originalFirst, "input array should not be reversed");
+    assert.equal(messages.length, 2, "input array length should not change");
+  });
+
   it("strips leading tool results from message list", () => {
     const messages = [
       // newest first (before reverse)
