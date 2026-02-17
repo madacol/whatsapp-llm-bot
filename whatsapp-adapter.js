@@ -12,6 +12,21 @@ import { exec } from "child_process";
 import { handleMessage } from "./index.js";
 
 /**
+ * Extract the bot's own IDs (without the @s.whatsapp.net suffix) from the socket user info.
+ * @param {import('@whiskeysockets/baileys').WASocket} sock
+ * @returns {string[]}
+ */
+function getSelfIds(sock) {
+  /** @type {string[]} */
+  const ids = [];
+  const id = sock.user?.id?.split(":")[0] || sock.user?.id;
+  const lid = sock.user?.lid?.split(":")[0] || sock.user?.lid;
+  if (id) ids.push(id);
+  if (lid) ids.push(lid);
+  return ids;
+}
+
+/**
  * Extract contextInfo from any Baileys message type that carries it.
  * @param {BaileysMessage['message']} msg
  */
@@ -220,14 +235,7 @@ async function adaptIncomingMessage(baileysMessage, sock) {
         : new Date(baileysMessage.messageTimestamp.toNumber() * 1000);
 
 
-  /** @type {string[]} */
-  const selfIds = [];
-  {
-    const lid = sock.user?.lid?.split(":")[0] || sock.user?.lid;
-    const id = sock.user?.id?.split(":")[0] || sock.user?.id;
-    if (id) selfIds.push(id);
-    if (lid) selfIds.push(lid);
-  }
+  const selfIds = getSelfIds(sock);
 
   /** @type {IncomingContext} */
   const messageContext = {
@@ -390,11 +398,7 @@ export async function connectToWhatsApp(onMessageHandler) {
         }
       } else if (connection === "open") {
         console.log("WhatsApp connection opened");
-        const lid = sock.user?.lid?.split(":")[0] || sock.user?.lid;
-        const id = sock.user?.id?.split(":")[0] || sock.user?.id;
-        const selfIds = [];
-        if (id) selfIds.push(id);
-        if (lid) selfIds.push(lid);
+        const selfIds = getSelfIds(sock);
         console.log("Self IDs:", selfIds, JSON.stringify(sock.user, null, 2));
       }
     }
