@@ -35,14 +35,22 @@ export async function getMessageContent(baileysMessage) {
       || quotedMessage.videoMessage?.caption
       || quotedMessage.documentMessage?.caption
 
-
-    // const quotedSenderId = baileysMessage.message?.extendedTextMessage?.contextInfo?.participant;
+    const quotedSenderId = baileysMessage.message?.extendedTextMessage?.contextInfo?.participant
+      || baileysMessage.message?.imageMessage?.contextInfo?.participant
+      || baileysMessage.message?.videoMessage?.contextInfo?.participant
+      || baileysMessage.message?.documentMessage?.contextInfo?.participant
+      || baileysMessage.message?.audioMessage?.contextInfo?.participant
+      || baileysMessage.message?.stickerMessage?.contextInfo?.participant;
 
     /** @type {QuoteContentBlock} */
     const quote = {
       type: "quote",
       content: [],
     };
+
+    if (quotedSenderId) {
+      quote.quotedSenderId = quotedSenderId.split("@")[0];
+    }
 
     // if (quotedMessage.imageMessage) {
     //   quote.content.push(

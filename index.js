@@ -90,6 +90,9 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
 
     const firstBlock = content.find(block=>block.type === "text")
 
+    const quoteBlock = content.find(block => block.type === "quote");
+    const quotedSenderId = quoteBlock?.quotedSenderId;
+
     if (firstBlock?.text?.startsWith("!")) {
       const inputText = firstBlock.text.slice(1).trim();
       const commandText = inputText.toLowerCase();
@@ -143,7 +146,7 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
 
     // Check if the bot should respond
     const chatInfoForRespond = await getChat(chatId);
-    if (!shouldRespond(chatInfoForRespond, isGroup, content, selfIds)) {
+    if (!shouldRespond(chatInfoForRespond, isGroup, content, selfIds, quotedSenderId)) {
       return;
     }
 
