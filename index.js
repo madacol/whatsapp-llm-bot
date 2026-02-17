@@ -145,15 +145,14 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
     await createChat(chatId);
 
     // Check if the bot should respond
-    const chatInfoForRespond = await getChat(chatId);
-    if (!shouldRespond(chatInfoForRespond, isGroup, content, selfIds, quotedSenderId)) {
+    const chatInfo = await getChat(chatId);
+    if (!shouldRespond(chatInfo, isGroup, content, selfIds, quotedSenderId)) {
       return;
     }
 
     console.log("LLM will respond");
 
     // Get system prompt and model from current chat or use defaults
-    const chatInfo = await getChat(chatId);
     let systemPrompt = chatInfo?.system_prompt || config.system_prompt;
     const chatModel = chatInfo?.model || config.model;
 
