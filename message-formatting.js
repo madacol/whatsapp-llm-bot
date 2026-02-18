@@ -23,7 +23,7 @@ export function actionsToOpenAIFormat(actions) {
 
 /**
  * Decide whether the bot should respond to a message.
- * @param {{ is_enabled?: boolean, respond_on_any?: boolean, respond_on_mention?: boolean, respond_on_reply?: boolean } | undefined} chatInfo
+ * @param {import("./store.js").ChatRow | undefined} chatInfo
  * @param {boolean} isGroup
  * @param {IncomingContentBlock[]} content
  * @param {string[]} selfIds
