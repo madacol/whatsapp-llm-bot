@@ -170,7 +170,7 @@ type Action<P extends PermissionFlags = PermissionFlags> = {
   >;
   /** Optional prompt tests — run only via `npm run test:prompts`, never in `npm test`. */
   test_prompts?: Array<
-    (callLlm: CallLlm) => Promise<void>
+    (callLlm: CallLlm, readFixture: (name: string) => Promise<Buffer>) => Promise<void>
   >;
 };
 

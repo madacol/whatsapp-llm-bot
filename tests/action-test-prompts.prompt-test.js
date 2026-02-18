@@ -12,6 +12,7 @@
 
 import { describe, it, before } from "node:test";
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import fs from "fs/promises";
 import path from "path";
 import dotenv from "dotenv";
@@ -24,6 +25,17 @@ let actions = [];
 
 /** @type {CallLlm} */
 let callLlm;
+
+const fixturesDir = path.resolve(process.cwd(), "tests", "fixtures");
+
+/**
+ * Read a fixture file from tests/fixtures/ by name.
+ * @param {string} name - Filename relative to tests/fixtures/
+ * @returns {Promise<Buffer>}
+ */
+async function readFixture(name) {
+  return readFile(path.join(fixturesDir, name));
+}
 
 before(async () => {
   assert.ok(process.env.LLM_API_KEY, "LLM_API_KEY env var is required to run prompt tests");
@@ -53,7 +65,7 @@ describe("action test_prompts", () => {
       await t.test(action.name, { timeout: 60_000 }, async (t2) => {
         for (const fn of action.test_prompts || []) {
           await t2.test(fn.name || "anonymous prompt test", { timeout: 60_000 }, async () => {
-            await fn(callLlm);
+            await fn(callLlm, readFixture);
           });
         }
       });
