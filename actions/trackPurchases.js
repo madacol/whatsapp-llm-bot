@@ -1,3 +1,65 @@
+import assert from "node:assert/strict";
+
+const EXTRACT_PROMPT = `Analiza esta imagen de una factura/recibo de compra. Extrae la siguiente informacion en formato JSON estricto (sin markdown, solo JSON puro):
+{
+  "store_name": "nombre de la tienda/comercio",
+  "purchase_date": "fecha de compra (formato YYYY-MM-DD, o null si no se ve)",
+  "items": [
+    {
+      "item_name": "nombre del producto",
+      "quantity": 1,
+      "unit_price": 0.00,
+      "subtotal": 0.00
+    }
+  ],
+  "total": 0.00
+}
+
+IMPORTANTE:
+- Los precios deben ser numeros sin simbolos de moneda
+- Si no puedes leer algun campo, pon null
+- Extrae TODOS los items visibles
+- El total debe ser el monto total de la factura (lo que realmente se pago, despues de descuentos)
+- Responde SOLO con el JSON, nada mas`;
+
+/**
+ * @param {string} raw - Raw LLM response (may contain markdown fences)
+ * @returns {{ store_name: string|null, purchase_date: string|null, items: Array<{item_name: string, quantity: number, unit_price: number, subtotal: number}>, total: number }}
+ */
+function parseExtractResponse(raw) {
+  const cleaned = raw.replace(/```json?\n?/g, "").replace(/```/g, "").trim();
+  return JSON.parse(cleaned);
+}
+
+/**
+ * Ensure the purchases schema exists.
+ * @param {PGlite} db
+ */
+async function ensureSchema(db) {
+  await db.sql`
+    CREATE TABLE IF NOT EXISTS purchases (
+      id SERIAL PRIMARY KEY,
+      store_name TEXT,
+      purchase_date TEXT,
+      total NUMERIC(12,2),
+      notes TEXT,
+      created_at TIMESTAMP DEFAULT NOW()
+    )
+  `;
+  await db.sql`
+    CREATE TABLE IF NOT EXISTS purchase_items (
+      id SERIAL PRIMARY KEY,
+      purchase_id INTEGER REFERENCES purchases(id) ON DELETE CASCADE,
+      item_name TEXT,
+      quantity NUMERIC(10,2) DEFAULT 1,
+      unit_price NUMERIC(12,2),
+      subtotal NUMERIC(12,2)
+    )
+  `;
+}
+
+export { EXTRACT_PROMPT, parseExtractResponse, ensureSchema };
+
 export default /** @type {defineAction} */ ((x) => x)({
   name: "track_purchases",
   command: "compras",
@@ -23,70 +85,125 @@ export default /** @type {defineAction} */ ((x) => x)({
     useChatDb: true,
     useLlm: true
   },
+  test_functions: [
+    async function history_empty(action_fn, db) {
+      await ensureSchema(db);
+      const result = await action_fn(
+        { chatDb: db, callLlm: async () => null, content: [], log: async () => "" },
+        { action: "history" },
+      );
+      assert.ok(typeof result === "string");
+      assert.ok(result.includes("No tienes compras"));
+    },
+    async function history_with_data(action_fn, db) {
+      await ensureSchema(db);
+      await db.sql`INSERT INTO purchases (store_name, purchase_date, total) VALUES ('TestStore', '2025-01-15', 42.50)`;
+      const { rows: [purchase] } = await db.sql`SELECT id FROM purchases WHERE store_name = 'TestStore'`;
+      await db.sql`INSERT INTO purchase_items (purchase_id, item_name, quantity, unit_price, subtotal) VALUES (${purchase.id}, 'Leche', 2, 1.50, 3.00)`;
+      const result = await action_fn(
+        { chatDb: db, callLlm: async () => null, content: [], log: async () => "" },
+        { action: "history" },
+      );
+      assert.ok(typeof result === "string");
+      assert.ok(result.includes("TestStore"));
+      assert.ok(result.includes("Leche"));
+      assert.ok(result.includes("42.50"));
+    },
+    async function summary_empty(action_fn, db) {
+      await ensureSchema(db);
+      const result = await action_fn(
+        { chatDb: db, callLlm: async () => null, content: [], log: async () => "" },
+        { action: "summary" },
+      );
+      assert.ok(typeof result === "string");
+      assert.ok(result.includes("Total compras"));
+    },
+    async function delete_nonexistent(action_fn, db) {
+      await ensureSchema(db);
+      const result = await action_fn(
+        { chatDb: db, callLlm: async () => null, content: [], log: async () => "" },
+        { action: "delete", purchase_id: "9999" },
+      );
+      assert.ok(typeof result === "string");
+      assert.ok(result.includes("No se encontro"));
+    },
+    async function delete_existing(action_fn, db) {
+      await ensureSchema(db);
+      await db.sql`INSERT INTO purchases (store_name, total) VALUES ('ToDelete', 10.00)`;
+      const { rows: [purchase] } = await db.sql`SELECT id FROM purchases WHERE store_name = 'ToDelete'`;
+      const result = await action_fn(
+        { chatDb: db, callLlm: async () => null, content: [], log: async () => "" },
+        { action: "delete", purchase_id: String(purchase.id) },
+      );
+      assert.ok(typeof result === "string");
+      assert.ok(result.includes("eliminada"));
+      const { rows } = await db.sql`SELECT * FROM purchases WHERE id = ${purchase.id}`;
+      assert.equal(rows.length, 0);
+    },
+    async function extract_no_image(action_fn, db) {
+      await ensureSchema(db);
+      const result = await action_fn(
+        { chatDb: db, callLlm: async () => null, content: [], log: async () => "" },
+        { action: "extract" },
+      );
+      assert.ok(typeof result === "string");
+      assert.ok(result.includes("No encontre ninguna foto"));
+    },
+    async function extract_with_mock_llm(action_fn, db) {
+      await ensureSchema(db);
+      const mockResponse = JSON.stringify({
+        store_name: "Supermercado Test",
+        purchase_date: "2025-06-15",
+        items: [
+          { item_name: "Pan", quantity: 1, unit_price: 1.20, subtotal: 1.20 },
+          { item_name: "Agua", quantity: 2, unit_price: 0.50, subtotal: 1.00 },
+        ],
+        total: 2.20,
+      });
+      /** @type {ContentBlock[]} */
+      const contentWithImage = [
+        { type: "image", encoding: "base64", mime_type: "image/jpeg", data: "fakebase64" },
+      ];
+      const result = await action_fn(
+        { chatDb: db, callLlm: async () => mockResponse, content: contentWithImage, log: async () => "" },
+        { action: "extract" },
+      );
+      assert.ok(typeof result === "string");
+      assert.ok(result.includes("Supermercado Test"));
+      assert.ok(result.includes("Pan"));
+      assert.ok(result.includes("2.20"));
+
+      // Verify data was inserted
+      const { rows: purchases } = await db.sql`SELECT * FROM purchases WHERE store_name = 'Supermercado Test'`;
+      assert.equal(purchases.length, 1);
+      const { rows: items } = await db.sql`SELECT * FROM purchase_items WHERE purchase_id = ${purchases[0].id} ORDER BY item_name`;
+      assert.equal(items.length, 2);
+    },
+    async function parse_extract_response_strips_markdown(_action_fn, _db) {
+      const raw = '```json\n{"store_name": "Test", "items": [], "total": 0}\n```';
+      const data = parseExtractResponse(raw);
+      assert.equal(data.store_name, "Test");
+      assert.deepEqual(data.items, []);
+    },
+  ],
   action_fn: async function (context, params) {
     const { chatDb, callLlm, content, log } = context;
 
-    await chatDb.sql`
-      CREATE TABLE IF NOT EXISTS purchases (
-        id SERIAL PRIMARY KEY,
-        store_name TEXT,
-        purchase_date TEXT,
-        total NUMERIC(12,2),
-        notes TEXT,
-        created_at TIMESTAMP DEFAULT NOW()
-      )
-    `;
-    await chatDb.sql`
-      CREATE TABLE IF NOT EXISTS purchase_items (
-        id SERIAL PRIMARY KEY,
-        purchase_id INTEGER REFERENCES purchases(id) ON DELETE CASCADE,
-        item_name TEXT,
-        quantity NUMERIC(10,2) DEFAULT 1,
-        unit_price NUMERIC(12,2),
-        subtotal NUMERIC(12,2)
-      )
-    `;
+    await ensureSchema(chatDb);
 
     if (params.action === "extract") {
-      const image = content.find(c => c.type === "image");
+      /** @type {ImageContentBlock | undefined} */
+      const image = /** @type {ImageContentBlock | undefined} */ (content.find(c => c.type === "image"));
       if (!image) {
         return "No encontre ninguna foto de factura. Por favor envia una imagen de la factura junto con el comando.";
       }
 
       await log("Analizando factura...");
 
-      // Build prompt in OpenAI vision format (array of content parts)
+      /** @type {ContentBlock[]} */
       const prompt = [
-        {
-          type: "image_url",
-          image_url: {
-            url: `data:${image.mime_type || "image/jpeg"};base64,${image.data}`
-          }
-        },
-        {
-          type: "text",
-          text: `Analiza esta imagen de una factura/recibo de compra. Extrae la siguiente informacion en formato JSON estricto (sin markdown, solo JSON puro):
-{
-  "store_name": "nombre de la tienda/comercio",
-  "purchase_date": "fecha de compra (formato YYYY-MM-DD, o null si no se ve)",
-  "items": [
-    {
-      "item_name": "nombre del producto",
-      "quantity": 1,
-      "unit_price": 0.00,
-      "subtotal": 0.00
-    }
-  ],
-  "total": 0.00
-}
-
-IMPORTANTE:
-- Los precios deben ser numeros sin simbolos de moneda
-- Si no puedes leer algun campo, pon null
-- Extrae TODOS los items visibles
-- El total debe ser el monto total de la factura (lo que realmente se pago, despues de descuentos)
-- Responde SOLO con el JSON, nada mas`
-        }
+        image,
+        { type: "text", text: EXTRACT_PROMPT },
       ];
 
       const llmResponse = await callLlm(prompt);
@@ -94,14 +211,10 @@ IMPORTANTE:
         return "No pude analizar la factura. Intenta con una foto mas clara.";
       }
 
-      await log("Respuesta LLM: " + llmResponse.substring(0, 200));
-
       let data;
       try {
-        const cleaned = llmResponse.replace(/```json?\n?/g, "").replace(/```/g, "").trim();
-        data = JSON.parse(cleaned);
-      } catch (e) {
-        await log("Error parsing LLM response: " + llmResponse);
+        data = parseExtractResponse(llmResponse);
+      } catch {
         return "No pude interpretar los datos de la factura. Intenta con una foto mas clara.";
       }
 
@@ -127,10 +240,10 @@ IMPORTANTE:
       result += `*Items:*\n`;
 
       if (data.items && data.items.length > 0) {
-        data.items.forEach((item, i) => {
+        for (const [i, item] of data.items.entries()) {
           const price = item.subtotal || item.unit_price || 0;
           result += `  ${i + 1}. ${item.item_name} — x${item.quantity || 1} — €${Number(price).toFixed(2)}\n`;
-        });
+        }
       }
 
       result += `\n*Total: €${Number(data.total || 0).toFixed(2)}*`;
@@ -151,9 +264,9 @@ IMPORTANTE:
           SELECT * FROM purchase_items WHERE purchase_id = ${p.id}
         `;
         result += `*#${p.id}* — ${p.store_name || "?"} — ${p.purchase_date || "Sin fecha"}\n`;
-        items.forEach(item => {
+        for (const item of items) {
           result += `  • ${item.item_name} x${item.quantity} — €${Number(item.subtotal).toFixed(2)}\n`;
-        });
+        }
         result += `  *Total: €${Number(p.total).toFixed(2)}*\n\n`;
       }
       return result;
@@ -193,17 +306,17 @@ IMPORTANTE:
 
       if (byStore.length > 0) {
         result += `*Por tienda:*\n`;
-        byStore.forEach(store => {
+        for (const store of byStore) {
           result += `  • ${store.store_name || "?"}: ${store.visits} visitas — €${Number(store.spent).toFixed(2)}\n`;
-        });
+        }
         result += "\n";
       }
 
       if (topItems.length > 0) {
         result += `*Top productos (por gasto):*\n`;
-        topItems.forEach((item, i) => {
+        for (const [i, item] of topItems.entries()) {
           result += `  ${i + 1}. ${item.item_name} — x${Number(item.total_qty)} — €${Number(item.total_spent).toFixed(2)}\n`;
-        });
+        }
       }
 
       return result;
