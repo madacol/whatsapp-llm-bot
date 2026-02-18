@@ -186,6 +186,45 @@ export default /** @type {defineAction} */ ((x) => x)({
       assert.deepEqual(data.items, []);
     },
   ],
+  test_prompts: [
+    async function extract_prompt_returns_valid_json(callLlm) {
+      // Send a text description of a receipt to test the extraction prompt
+      // (tests the prompt quality without requiring an actual image fixture)
+      /** @type {ContentBlock[]} */
+      const prompt = [
+        {
+          type: "text",
+          text: `Here is the text content of a receipt:
+
+SUPERMERCADO EL SOL
+Fecha: 15/06/2025
+---
+Leche entera 1L    x2    €1.50    €3.00
+Pan integral       x1    €1.20    €1.20
+Agua mineral 1.5L  x3    €0.60    €1.80
+---
+TOTAL: €6.00
+
+` + EXTRACT_PROMPT,
+        },
+      ];
+      const response = await callLlm(prompt);
+      assert.ok(response, "LLM should return a response");
+
+      const data = parseExtractResponse(/** @type {string} */ (response));
+      assert.ok(data.store_name, "should extract store name");
+      assert.ok(Array.isArray(data.items), "items should be an array");
+      assert.ok(data.items.length >= 3, `should extract at least 3 items, got ${data.items.length}`);
+      assert.equal(typeof data.total, "number", "total should be a number");
+      assert.ok(data.total > 0, "total should be > 0");
+
+      // Verify each item has the required fields
+      for (const item of data.items) {
+        assert.ok(item.item_name, "each item should have a name");
+        assert.equal(typeof item.quantity, "number", "quantity should be a number");
+      }
+    },
+  ],
   action_fn: async function (context, params) {
     const { chatDb, callLlm, content, log } = context;
 
