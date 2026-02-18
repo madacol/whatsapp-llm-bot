@@ -9,7 +9,6 @@ import {
   downloadMediaMessage,
 } from "@whiskeysockets/baileys";
 import { exec } from "child_process";
-import { handleMessage } from "./index.js";
 
 /**
  * Extract the bot's own IDs (without the @s.whatsapp.net suffix) from the socket user info.
@@ -201,8 +200,9 @@ export async function getMessageContent(baileysMessage) {
  * Internal method to process incoming messages and create enriched context
  * @param {BaileysMessage} baileysMessage - Raw Baileys message
  * @param {import('@whiskeysockets/baileys').WASocket} sock
+ * @param {(message: IncomingContext) => Promise<void>} messageHandler
  */
-async function adaptIncomingMessage(baileysMessage, sock) {
+async function adaptIncomingMessage(baileysMessage, sock, messageHandler) {
   // Extract message content from Baileys format
   // Ignore status updates
   if (baileysMessage.key.remoteJid === "status@broadcast") {
@@ -351,7 +351,7 @@ async function adaptIncomingMessage(baileysMessage, sock) {
   };
 
   // Call the user-provided message handler with enriched context
-  await handleMessage(messageContext);
+  await messageHandler(messageContext);
 }
 
 /**
@@ -415,7 +415,7 @@ export async function connectToWhatsApp(onMessageHandler) {
       const { messages } = events["messages.upsert"];
       for (const message of messages) {
         if (message.key.fromMe || !message.message) continue;
-        await adaptIncomingMessage(message, sock);
+        await adaptIncomingMessage(message, sock, onMessageHandler);
       }
     }
   });
