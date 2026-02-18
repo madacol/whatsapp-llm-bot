@@ -58,35 +58,40 @@ export default /** @type {defineAction} */ ((x) => x)({
     },
   ],
   action_fn: async function ({ chatId, rootDb }, params) {
-    const targetChatId = chatId;
-
     const {
       rows: [chatExists],
     } =
-      await rootDb.sql`SELECT chat_id FROM chats WHERE chat_id = ${targetChatId}`;
+      await rootDb.sql`SELECT chat_id FROM chats WHERE chat_id = ${chatId}`;
 
     if (!chatExists) {
-      throw new Error(`Chat ${targetChatId} does not exist.`);
+      throw new Error(`Chat ${chatId} does not exist.`);
     }
 
+    /**
+     * Parse a string-or-boolean param to a boolean.
+     * @param {unknown} raw
+     * @returns {boolean}
+     */
+    const toBool = (raw) => String(raw).toLowerCase() === "true";
+
+    /** @type {Promise<unknown>[]} */
     const updates = [];
+    /** @type {string[]} */
     const messages = [];
 
     if (params.respond_on_any !== undefined) {
-      const value = params.respond_on_any.toLowerCase() === "true";
-      updates.push(rootDb.sql`UPDATE chats SET respond_on_any = ${value} WHERE chat_id = ${targetChatId}`);
+      const value = toBool(params.respond_on_any);
+      updates.push(rootDb.sql`UPDATE chats SET respond_on_any = ${value} WHERE chat_id = ${chatId}`);
       messages.push(`respond_on_any: ${value}`);
     }
-
     if (params.respond_on_mention !== undefined) {
-      const value = params.respond_on_mention.toLowerCase() === "true";
-      updates.push(rootDb.sql`UPDATE chats SET respond_on_mention = ${value} WHERE chat_id = ${targetChatId}`);
+      const value = toBool(params.respond_on_mention);
+      updates.push(rootDb.sql`UPDATE chats SET respond_on_mention = ${value} WHERE chat_id = ${chatId}`);
       messages.push(`respond_on_mention: ${value}`);
     }
-
     if (params.respond_on_reply !== undefined) {
-      const value = params.respond_on_reply.toLowerCase() === "true";
-      updates.push(rootDb.sql`UPDATE chats SET respond_on_reply = ${value} WHERE chat_id = ${targetChatId}`);
+      const value = toBool(params.respond_on_reply);
+      updates.push(rootDb.sql`UPDATE chats SET respond_on_reply = ${value} WHERE chat_id = ${chatId}`);
       messages.push(`respond_on_reply: ${value}`);
     }
 
@@ -96,6 +101,6 @@ export default /** @type {defineAction} */ ((x) => x)({
 
     await Promise.all(updates);
 
-    return `✅ Response mode updated for chat ${targetChatId}\n\n*Settings:*\n${messages.join("\n")}`;
+    return `✅ Response mode updated for chat ${chatId}\n\n*Settings:*\n${messages.join("\n")}`;
   },
 });
