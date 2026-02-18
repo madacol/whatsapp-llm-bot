@@ -168,6 +168,10 @@ type Action<P extends PermissionFlags = PermissionFlags> = {
       db: PGlite,
     ) => Promise<void>
   >;
+  /** Optional prompt tests — run only via `npm run test:prompts`, never in `npm test`. */
+  test_prompts?: Array<
+    (callLlm: CallLlm) => Promise<void>
+  >;
 };
 
 type AppAction = Action & {
