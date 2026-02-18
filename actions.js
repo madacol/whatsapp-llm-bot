@@ -80,9 +80,25 @@ export async function executeAction(
   // if (action.permissions?.useFileSystem) { actionContext.directoryHandle = directoryHandle; }
   if (action.permissions?.useLlm) {
     actionContext.callLlm = async (prompt, options = {}) => {
+      /** @type {string | import("openai/resources/chat/completions/completions").ChatCompletionContentPart[]} */
+      let content;
+      if (typeof prompt === "string") {
+        content = prompt;
+      } else {
+        content = prompt.map(block => {
+          switch (block.type) {
+            case "text":
+              return { type: /** @type {const} */ ("text"), text: block.text };
+            case "image":
+              return { type: /** @type {const} */ ("image_url"), image_url: { url: `data:${block.mime_type};base64,${block.data}` } };
+            default:
+              return { type: /** @type {const} */ ("text"), text: `[Unsupported content type: ${block.type}]` };
+          }
+        });
+      }
       const response = await llmClient.chat.completions.create({
         model: options.model || config.model,
-        messages: [{ role: "user", content: prompt }],
+        messages: [{ role: "user", content }],
       });
       return response.choices[0].message.content;
     };
