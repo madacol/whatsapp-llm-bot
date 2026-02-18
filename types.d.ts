@@ -136,7 +136,8 @@ type PermissionFlags = {
 };
 
 type CallLlmOptions = { model?: string };
-type CallLlm = (prompt: string, options?: CallLlmOptions) => Promise<string | null>;
+type CallLlmPrompt = string | ContentBlock[];
+type CallLlm = (prompt: CallLlmPrompt, options?: CallLlmOptions) => Promise<string | null>;
 
 // Build action context types dynamically based on permissions
 type ExtendedActionContext<P extends PermissionFlags> = ActionContext
