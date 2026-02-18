@@ -52,6 +52,7 @@ export async function executeAction(
     senderIds: context.senderIds,
     content: context.content,
     getIsAdmin: context.getIsAdmin,
+    db: getDb(`./pgdata/${context.chatId}/${actionName}`),
     sessionDb: currentSessionDb,
     getActions,
     log: async (...args) => {
@@ -72,7 +73,7 @@ export async function executeAction(
   };
 
   if (action.permissions?.useChatDb) {
-    actionContext.chatDb = getDb(`./pgdata/${actionName}`);
+    actionContext.chatDb = getDb(`./pgdata/${context.chatId}`);
   }
   if (action.permissions?.useRootDb) {
     actionContext.rootDb = getDb("./pgdata/root");

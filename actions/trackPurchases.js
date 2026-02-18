@@ -33,13 +33,21 @@ function parseExtractResponse(raw) {
 }
 
 /**
- * Ensure the purchases schema exists.
+ * Ensure the purchases schema exists (with ledger support).
  * @param {PGlite} db
  */
 async function ensureSchema(db) {
   await db.sql`
+    CREATE TABLE IF NOT EXISTS ledgers (
+      id SERIAL PRIMARY KEY,
+      name TEXT NOT NULL UNIQUE,
+      created_at TIMESTAMP DEFAULT NOW()
+    )
+  `;
+  await db.sql`
     CREATE TABLE IF NOT EXISTS purchases (
       id SERIAL PRIMARY KEY,
+      ledger_id INTEGER REFERENCES ledgers(id) ON DELETE CASCADE,
       store_name TEXT,
       purchase_date TEXT,
       total NUMERIC(12,2),
@@ -59,23 +67,73 @@ async function ensureSchema(db) {
   `;
 }
 
-export { EXTRACT_PROMPT, parseExtractResponse, ensureSchema };
+/**
+ * Get or create a ledger by name (case-insensitive).
+ * @param {PGlite} db
+ * @param {string} name
+ * @returns {Promise<{id: number, name: string}>}
+ */
+async function getOrCreateLedger(db, name) {
+  const { rows } = await db.sql`
+    SELECT id, name FROM ledgers WHERE LOWER(name) = LOWER(${name})
+  `;
+  if (rows.length > 0) {
+    return /** @type {{id: number, name: string}} */ (rows[0]);
+  }
+  const { rows: inserted } = await db.sql`
+    INSERT INTO ledgers (name) VALUES (${name}) RETURNING id, name
+  `;
+  return /** @type {{id: number, name: string}} */ (inserted[0]);
+}
+
+/**
+ * Format a receipt preview for confirmation.
+ * @param {{ store_name: string|null, purchase_date: string|null, items: Array<{item_name: string, quantity: number, unit_price: number, subtotal: number}>, total: number }} data
+ * @param {string} ledgerName
+ * @returns {string}
+ */
+function formatPreview(data, ledgerName) {
+  let preview = `*Vista previa de factura*\n`;
+  preview += `*Libro:* ${ledgerName}\n`;
+  preview += `*Tienda:* ${data.store_name || "No identificada"}\n`;
+  preview += `*Fecha:* ${data.purchase_date || "No identificada"}\n\n`;
+  preview += `*Items:*\n`;
+  if (data.items && data.items.length > 0) {
+    for (const [i, item] of data.items.entries()) {
+      const price = item.subtotal || item.unit_price || 0;
+      preview += `  ${i + 1}. ${item.item_name} — x${item.quantity || 1} — €${Number(price).toFixed(2)}\n`;
+    }
+  }
+  preview += `\n*Total: €${Number(data.total || 0).toFixed(2)}*\n\n`;
+  preview += `React 👍 para guardar o 👎 para cancelar.`;
+  return preview;
+}
+
+export { EXTRACT_PROMPT, parseExtractResponse, ensureSchema, getOrCreateLedger, formatPreview };
 
 export default /** @type {defineAction} */ ((x) => x)({
   name: "track_purchases",
   command: "compras",
-  description: "Gestiona un registro de compras. Puede: 1) Extraer items de una foto de factura y guardarlos, 2) Mostrar el historial de compras, 3) Mostrar un resumen/total de gastos. Envía una foto de factura para registrarla o pide ver el historial.",
+  description: "Gestiona un registro de compras organizado por libros (ledgers). Puede: 1) Extraer items de una foto de factura y guardarlos, 2) Mostrar el historial de compras, 3) Mostrar un resumen/total de gastos, 4) Gestionar libros de compras (listar, renombrar, eliminar). Envía una foto de factura para registrarla o pide ver el historial.",
   parameters: {
     type: "object",
     properties: {
       action: {
         type: "string",
-        description: "Acción a realizar: 'extract' para extraer de foto, 'history' para ver historial, 'summary' para resumen de gastos, 'delete' para borrar un registro por ID",
-        enum: ["extract", "history", "summary", "delete"]
+        description: "Acción a realizar: 'extract' para extraer de foto, 'history' para ver historial, 'summary' para resumen de gastos, 'delete' para borrar un registro por ID, 'list_ledgers' para listar libros, 'rename_ledger' para renombrar un libro, 'delete_ledger' para eliminar un libro y sus compras",
+        enum: ["extract", "history", "summary", "delete", "list_ledgers", "rename_ledger", "delete_ledger"]
       },
       purchase_id: {
         type: "string",
         description: "ID de la compra a eliminar (solo para action=delete)"
+      },
+      ledger_name: {
+        type: "string",
+        description: "Nombre del libro de compras. Para 'extract': libro donde guardar (default: 'General'). Para 'history'/'summary': filtrar por libro. Para 'rename_ledger'/'delete_ledger': libro a modificar."
+      },
+      new_ledger_name: {
+        type: "string",
+        description: "Nuevo nombre para el libro (solo para action=rename_ledger)"
       }
     },
     required: ["action"]
@@ -83,14 +141,13 @@ export default /** @type {defineAction} */ ((x) => x)({
   permissions: {
     autoExecute: true,
     autoContinue: true,
-    useChatDb: true,
     useLlm: true
   },
   test_functions: [
     async function history_empty(action_fn, db) {
       await ensureSchema(db);
       const result = await action_fn(
-        { chatDb: db, callLlm: async () => null, content: [], log: async () => "" },
+        { db, callLlm: async () => null, content: [], log: async () => "", confirm: async () => true },
         { action: "history" },
       );
       assert.ok(typeof result === "string");
@@ -98,11 +155,12 @@ export default /** @type {defineAction} */ ((x) => x)({
     },
     async function history_with_data(action_fn, db) {
       await ensureSchema(db);
-      await db.sql`INSERT INTO purchases (store_name, purchase_date, total) VALUES ('TestStore', '2025-01-15', 42.50)`;
+      const ledger = await getOrCreateLedger(db, "General");
+      await db.sql`INSERT INTO purchases (ledger_id, store_name, purchase_date, total) VALUES (${ledger.id}, 'TestStore', '2025-01-15', 42.50)`;
       const { rows: [purchase] } = await db.sql`SELECT id FROM purchases WHERE store_name = 'TestStore'`;
       await db.sql`INSERT INTO purchase_items (purchase_id, item_name, quantity, unit_price, subtotal) VALUES (${purchase.id}, 'Leche', 2, 1.50, 3.00)`;
       const result = await action_fn(
-        { chatDb: db, callLlm: async () => null, content: [], log: async () => "" },
+        { db, callLlm: async () => null, content: [], log: async () => "", confirm: async () => true },
         { action: "history" },
       );
       assert.ok(typeof result === "string");
@@ -113,7 +171,7 @@ export default /** @type {defineAction} */ ((x) => x)({
     async function summary_empty(action_fn, db) {
       await ensureSchema(db);
       const result = await action_fn(
-        { chatDb: db, callLlm: async () => null, content: [], log: async () => "" },
+        { db, callLlm: async () => null, content: [], log: async () => "", confirm: async () => true },
         { action: "summary" },
       );
       assert.ok(typeof result === "string");
@@ -122,7 +180,7 @@ export default /** @type {defineAction} */ ((x) => x)({
     async function delete_nonexistent(action_fn, db) {
       await ensureSchema(db);
       const result = await action_fn(
-        { chatDb: db, callLlm: async () => null, content: [], log: async () => "" },
+        { db, callLlm: async () => null, content: [], log: async () => "", confirm: async () => true },
         { action: "delete", purchase_id: "9999" },
       );
       assert.ok(typeof result === "string");
@@ -130,10 +188,11 @@ export default /** @type {defineAction} */ ((x) => x)({
     },
     async function delete_existing(action_fn, db) {
       await ensureSchema(db);
-      await db.sql`INSERT INTO purchases (store_name, total) VALUES ('ToDelete', 10.00)`;
+      const ledger = await getOrCreateLedger(db, "General");
+      await db.sql`INSERT INTO purchases (ledger_id, store_name, total) VALUES (${ledger.id}, 'ToDelete', 10.00)`;
       const { rows: [purchase] } = await db.sql`SELECT id FROM purchases WHERE store_name = 'ToDelete'`;
       const result = await action_fn(
-        { chatDb: db, callLlm: async () => null, content: [], log: async () => "" },
+        { db, callLlm: async () => null, content: [], log: async () => "", confirm: async () => true },
         { action: "delete", purchase_id: String(purchase.id) },
       );
       assert.ok(typeof result === "string");
@@ -144,7 +203,7 @@ export default /** @type {defineAction} */ ((x) => x)({
     async function extract_no_image(action_fn, db) {
       await ensureSchema(db);
       const result = await action_fn(
-        { chatDb: db, callLlm: async () => null, content: [], log: async () => "" },
+        { db, callLlm: async () => null, content: [], log: async () => "", confirm: async () => true },
         { action: "extract" },
       );
       assert.ok(typeof result === "string");
@@ -166,7 +225,7 @@ export default /** @type {defineAction} */ ((x) => x)({
         { type: "image", encoding: "base64", mime_type: "image/jpeg", data: "fakebase64" },
       ];
       const result = await action_fn(
-        { chatDb: db, callLlm: async () => mockResponse, content: contentWithImage, log: async () => "" },
+        { db, callLlm: async () => mockResponse, content: contentWithImage, log: async () => "", confirm: async () => true },
         { action: "extract" },
       );
       assert.ok(typeof result === "string");
@@ -179,6 +238,11 @@ export default /** @type {defineAction} */ ((x) => x)({
       assert.equal(purchases.length, 1);
       const { rows: items } = await db.sql`SELECT * FROM purchase_items WHERE purchase_id = ${purchases[0].id} ORDER BY item_name`;
       assert.equal(items.length, 2);
+
+      // Verify default ledger was created
+      const { rows: ledgers } = await db.sql`SELECT * FROM ledgers WHERE LOWER(name) = 'general'`;
+      assert.equal(ledgers.length, 1);
+      assert.equal(purchases[0].ledger_id, ledgers[0].id);
     },
     async function parse_extract_response_strips_markdown(_action_fn, _db) {
       const raw = '```json\n{"store_name": "Test", "items": [], "total": 0}\n```';
@@ -186,11 +250,178 @@ export default /** @type {defineAction} */ ((x) => x)({
       assert.equal(data.store_name, "Test");
       assert.deepEqual(data.items, []);
     },
+
+    // --- New tests for confirmation flow ---
+    async function extract_cancelled_by_user(action_fn, db) {
+      await ensureSchema(db);
+      const mockResponse = JSON.stringify({
+        store_name: "CancelStore",
+        purchase_date: "2025-06-15",
+        items: [{ item_name: "Item1", quantity: 1, unit_price: 5.00, subtotal: 5.00 }],
+        total: 5.00,
+      });
+      /** @type {ContentBlock[]} */
+      const contentWithImage = [
+        { type: "image", encoding: "base64", mime_type: "image/jpeg", data: "fakebase64" },
+      ];
+      const result = await action_fn(
+        { db, callLlm: async () => mockResponse, content: contentWithImage, log: async () => "", confirm: async () => false },
+        { action: "extract" },
+      );
+      assert.ok(typeof result === "string");
+      assert.ok(result.includes("cancelad"), `Expected cancellation message, got: ${result}`);
+
+      // Verify nothing was inserted
+      const { rows } = await db.sql`SELECT * FROM purchases WHERE store_name = 'CancelStore'`;
+      assert.equal(rows.length, 0, "No purchases should be saved when cancelled");
+    },
+
+    // --- Named ledger tests ---
+    async function extract_with_named_ledger(action_fn, db) {
+      await ensureSchema(db);
+      const mockResponse = JSON.stringify({
+        store_name: "LedgerStore",
+        purchase_date: "2025-07-01",
+        items: [{ item_name: "ItemX", quantity: 1, unit_price: 10.00, subtotal: 10.00 }],
+        total: 10.00,
+      });
+      /** @type {ContentBlock[]} */
+      const contentWithImage = [
+        { type: "image", encoding: "base64", mime_type: "image/jpeg", data: "fakebase64" },
+      ];
+      const result = await action_fn(
+        { db, callLlm: async () => mockResponse, content: contentWithImage, log: async () => "", confirm: async () => true },
+        { action: "extract", ledger_name: "Groceries" },
+      );
+      assert.ok(typeof result === "string");
+      assert.ok(result.includes("LedgerStore"));
+
+      // Verify ledger was created with correct name
+      const { rows: ledgers } = await db.sql`SELECT * FROM ledgers WHERE LOWER(name) = 'groceries'`;
+      assert.equal(ledgers.length, 1);
+      assert.equal(ledgers[0].name, "Groceries");
+
+      // Verify purchase is linked to the ledger
+      const { rows: purchases } = await db.sql`SELECT * FROM purchases WHERE store_name = 'LedgerStore'`;
+      assert.equal(purchases.length, 1);
+      assert.equal(purchases[0].ledger_id, ledgers[0].id);
+    },
+
+    // --- list_ledgers ---
+    async function list_ledgers_shows_counts(action_fn, db) {
+      await ensureSchema(db);
+      const l1 = await getOrCreateLedger(db, "Food");
+      const l2 = await getOrCreateLedger(db, "Office");
+      await db.sql`INSERT INTO purchases (ledger_id, store_name, total) VALUES (${l1.id}, 'Store1', 10.00)`;
+      await db.sql`INSERT INTO purchases (ledger_id, store_name, total) VALUES (${l1.id}, 'Store2', 20.00)`;
+      await db.sql`INSERT INTO purchases (ledger_id, store_name, total) VALUES (${l2.id}, 'Store3', 5.00)`;
+
+      const result = await action_fn(
+        { db, callLlm: async () => null, content: [], log: async () => "", confirm: async () => true },
+        { action: "list_ledgers" },
+      );
+      assert.ok(typeof result === "string");
+      assert.ok(result.includes("Food"), `Should include 'Food', got: ${result}`);
+      assert.ok(result.includes("Office"), `Should include 'Office', got: ${result}`);
+      assert.ok(result.includes("30.00"), `Should show total 30.00 for Food, got: ${result}`);
+      assert.ok(result.includes("5.00"), `Should show total 5.00 for Office, got: ${result}`);
+    },
+
+    // --- rename_ledger ---
+    async function rename_ledger_works(action_fn, db) {
+      await ensureSchema(db);
+      await getOrCreateLedger(db, "OldName");
+
+      const result = await action_fn(
+        { db, callLlm: async () => null, content: [], log: async () => "", confirm: async () => true },
+        { action: "rename_ledger", ledger_name: "OldName", new_ledger_name: "NewName" },
+      );
+      assert.ok(typeof result === "string");
+      assert.ok(result.includes("NewName"), `Should confirm new name, got: ${result}`);
+
+      const { rows } = await db.sql`SELECT * FROM ledgers WHERE name = 'NewName'`;
+      assert.equal(rows.length, 1);
+      const { rows: old } = await db.sql`SELECT * FROM ledgers WHERE name = 'OldName'`;
+      assert.equal(old.length, 0);
+    },
+
+    // --- delete_ledger ---
+    async function delete_ledger_cascades(action_fn, db) {
+      await ensureSchema(db);
+      const ledger = await getOrCreateLedger(db, "ToDeleteLedger");
+      await db.sql`INSERT INTO purchases (ledger_id, store_name, total) VALUES (${ledger.id}, 'CascadeStore', 15.00)`;
+
+      const result = await action_fn(
+        { db, callLlm: async () => null, content: [], log: async () => "", confirm: async () => true },
+        { action: "delete_ledger", ledger_name: "ToDeleteLedger" },
+      );
+      assert.ok(typeof result === "string");
+      assert.ok(result.includes("eliminado") || result.includes("eliminada"), `Should confirm deletion, got: ${result}`);
+
+      // Verify ledger and purchases are gone
+      const { rows: ledgers } = await db.sql`SELECT * FROM ledgers WHERE name = 'ToDeleteLedger'`;
+      assert.equal(ledgers.length, 0);
+      const { rows: purchases } = await db.sql`SELECT * FROM purchases WHERE store_name = 'CascadeStore'`;
+      assert.equal(purchases.length, 0);
+    },
+
+    async function delete_ledger_cancelled(action_fn, db) {
+      await ensureSchema(db);
+      await getOrCreateLedger(db, "KeepLedger");
+
+      const result = await action_fn(
+        { db, callLlm: async () => null, content: [], log: async () => "", confirm: async () => false },
+        { action: "delete_ledger", ledger_name: "KeepLedger" },
+      );
+      assert.ok(typeof result === "string");
+      assert.ok(result.includes("cancelad"), `Should be cancelled, got: ${result}`);
+
+      // Verify ledger still exists
+      const { rows } = await db.sql`SELECT * FROM ledgers WHERE name = 'KeepLedger'`;
+      assert.equal(rows.length, 1);
+    },
+
+    // --- per-ledger isolation ---
+    async function history_filters_by_ledger(action_fn, db) {
+      await ensureSchema(db);
+      const l1 = await getOrCreateLedger(db, "LedgerA");
+      const l2 = await getOrCreateLedger(db, "LedgerB");
+      await db.sql`INSERT INTO purchases (ledger_id, store_name, total) VALUES (${l1.id}, 'StoreA', 10.00)`;
+      await db.sql`INSERT INTO purchases (ledger_id, store_name, total) VALUES (${l2.id}, 'StoreB', 20.00)`;
+
+      const resultA = await action_fn(
+        { db, callLlm: async () => null, content: [], log: async () => "", confirm: async () => true },
+        { action: "history", ledger_name: "LedgerA" },
+      );
+      assert.ok(resultA.includes("StoreA"), `Should include StoreA, got: ${resultA}`);
+      assert.ok(!resultA.includes("StoreB"), `Should NOT include StoreB, got: ${resultA}`);
+
+      const resultB = await action_fn(
+        { db, callLlm: async () => null, content: [], log: async () => "", confirm: async () => true },
+        { action: "history", ledger_name: "LedgerB" },
+      );
+      assert.ok(resultB.includes("StoreB"), `Should include StoreB, got: ${resultB}`);
+      assert.ok(!resultB.includes("StoreA"), `Should NOT include StoreA, got: ${resultB}`);
+    },
+
+    async function summary_filters_by_ledger(action_fn, db) {
+      await ensureSchema(db);
+      const l1 = await getOrCreateLedger(db, "SumLedger1");
+      const l2 = await getOrCreateLedger(db, "SumLedger2");
+      await db.sql`INSERT INTO purchases (ledger_id, store_name, total) VALUES (${l1.id}, 'SumStore1', 100.00)`;
+      await db.sql`INSERT INTO purchases (ledger_id, store_name, total) VALUES (${l2.id}, 'SumStore2', 200.00)`;
+
+      const result = await action_fn(
+        { db, callLlm: async () => null, content: [], log: async () => "", confirm: async () => true },
+        { action: "summary", ledger_name: "SumLedger1" },
+      );
+      assert.ok(typeof result === "string");
+      assert.ok(result.includes("100.00"), `Should show 100.00, got: ${result}`);
+      assert.ok(!result.includes("200.00"), `Should NOT show 200.00, got: ${result}`);
+    },
   ],
   test_prompts: [
     async function extract_prompt_returns_valid_json(callLlm, _readFixture) {
-      // Send a text description of a receipt to test the extraction prompt
-      // (tests the prompt quality without requiring an actual image fixture)
       /** @type {ContentBlock[]} */
       const prompt = [
         {
@@ -219,7 +450,6 @@ TOTAL: €6.00
       assert.equal(typeof data.total, "number", "total should be a number");
       assert.ok(data.total > 0, "total should be > 0");
 
-      // Verify each item has the required fields
       for (const item of data.items) {
         assert.ok(item.item_name, "each item should have a name");
         assert.equal(typeof item.quantity, "number", "quantity should be a number");
@@ -240,7 +470,6 @@ TOTAL: €6.00
 
       const data = parseExtractResponse(/** @type {string} */ (response));
 
-      // Store: Dunnes Stores Clondalkin
       assert.ok(data.store_name, "should extract store name");
       assert.match(
         data.store_name.toLowerCase(),
@@ -248,36 +477,12 @@ TOTAL: €6.00
         `store name should contain 'dunnes', got '${data.store_name}'`,
       );
 
-      // Date: 17/02/26
       assert.equal(data.purchase_date, "2026-02-17", `date should be 2026-02-17, got '${data.purchase_date}'`);
 
-      // Exact 15 items on the receipt:
-      //  1. SB MINCE         €3.74
-      //  2. SB MINCE         €3.74
-      //  3. DS SALMON        €7.19
-      //  4. DS SALMON        €7.19
-      //  5. JUICE PRESS JUIC €3.55
-      //  6. DS WHOLE MILK    €3.39
-      //  7. D/S MILK         €2.35
-      //  8. VINEGAR          €2.49
-      //  9. DS SALMON        €7.19
-      // 10. ORANGE NET       €3.00
-      // 11. DS RICE CAKE     €2.00
-      // 12. DS RICE CAKE     €2.00
-      // 13. DS RICE CAKES    €2.00
-      // 14. DS S RICE CAKES  €0.85
-      // 15. DS S RICE CAKES  €0.85
-      // Items subtotal: €51.53
-      // DISCOUNT VOUCHER: -€10.00
-      // Employee Discount: -€10.31
-      // BAL TO PAY: €31.22
-      // Receipt has 15 line items. LLM may occasionally merge or split,
-      // so allow some tolerance, but it should get at least 13.
       assert.ok(Array.isArray(data.items), "items should be an array");
       assert.ok(data.items.length >= 13, `should extract at least 13 items, got ${data.items.length}`);
       assert.ok(data.items.length <= 17, `should extract at most 17 items, got ${data.items.length}`);
 
-      // Verify every item has required fields and valid numbers
       for (const item of data.items) {
         assert.ok(item.item_name, "each item should have a name");
         assert.equal(typeof item.quantity, "number", `quantity should be a number for '${item.item_name}'`);
@@ -285,29 +490,24 @@ TOTAL: €6.00
         assert.ok(item.subtotal > 0, `subtotal should be > 0 for '${item.item_name}'`);
       }
 
-      // Key items should be present (case-insensitive partial match)
       const allNames = data.items.map(i => i.item_name.toLowerCase()).join(" | ");
       for (const keyword of ["mince", "salmon", "milk", "vinegar", "rice"]) {
         assert.ok(allNames.includes(keyword), `should find '${keyword}' in items, got: ${allNames}`);
       }
 
-      // Item subtotals should sum to ~€51.53 (pre-discount BAL).
-      // OCR on a photo can misread digits, so allow ±€2 tolerance.
       const itemsSum = data.items.reduce((sum, item) => sum + item.subtotal, 0);
       assert.ok(
         Math.abs(itemsSum - 51.53) < 2.0,
         `items should sum to ~51.53, got ${itemsSum.toFixed(2)}`,
       );
 
-      // Total = BAL TO PAY €31.22 (after -€10.00 voucher, -€10.31 employee discount).
-      // This is clearly printed and the LLM should get it right.
       assert.equal(data.total, 31.22, `total should be 31.22, got ${data.total}`);
     },
   ],
   action_fn: async function (context, params) {
-    const { chatDb, callLlm, content, log } = context;
+    const { db, callLlm, content, log, confirm } = context;
 
-    await ensureSchema(chatDb);
+    await ensureSchema(db);
 
     if (params.action === "extract") {
       /** @type {ImageContentBlock | undefined} */
@@ -336,23 +536,33 @@ TOTAL: €6.00
         return "No pude interpretar los datos de la factura. Intenta con una foto mas clara.";
       }
 
-      const { rows } = await chatDb.sql`
-        INSERT INTO purchases (store_name, purchase_date, total, notes)
-        VALUES (${data.store_name || "Desconocido"}, ${data.purchase_date}, ${data.total || 0}, ${""})
+      const ledgerName = params.ledger_name || "General";
+      const ledger = await getOrCreateLedger(db, ledgerName);
+
+      // Show preview and ask for confirmation
+      const preview = formatPreview(data, ledger.name);
+      const confirmed = await confirm(preview);
+      if (!confirmed) {
+        return "Registro cancelado.";
+      }
+
+      const { rows } = await db.sql`
+        INSERT INTO purchases (ledger_id, store_name, purchase_date, total, notes)
+        VALUES (${ledger.id}, ${data.store_name || "Desconocido"}, ${data.purchase_date}, ${data.total || 0}, ${""})
         RETURNING id
       `;
       const purchaseId = rows[0].id;
 
       if (data.items && data.items.length > 0) {
         for (const item of data.items) {
-          await chatDb.sql`
+          await db.sql`
             INSERT INTO purchase_items (purchase_id, item_name, quantity, unit_price, subtotal)
             VALUES (${purchaseId}, ${item.item_name}, ${item.quantity || 1}, ${item.unit_price || 0}, ${item.subtotal || 0})
           `;
         }
       }
 
-      let result = `*Factura registrada* (ID: ${purchaseId})\n\n`;
+      let result = `*Factura registrada* (ID: ${purchaseId}) — Libro: ${ledger.name}\n\n`;
       result += `*Tienda:* ${data.store_name || "No identificada"}\n`;
       result += `*Fecha:* ${data.purchase_date || "No identificada"}\n\n`;
       result += `*Items:*\n`;
@@ -368,8 +578,41 @@ TOTAL: €6.00
       return result;
 
     } else if (params.action === "history") {
-      const { rows: purchases } = await chatDb.sql`
-        SELECT * FROM purchases ORDER BY created_at DESC LIMIT 20
+      if (params.ledger_name) {
+        const { rows: ledgerRows } = await db.sql`
+          SELECT id FROM ledgers WHERE LOWER(name) = LOWER(${params.ledger_name})
+        `;
+        if (ledgerRows.length === 0) {
+          return `No se encontro el libro "${params.ledger_name}".`;
+        }
+        const { rows: purchases } = await db.sql`
+          SELECT p.*, l.name as ledger_name FROM purchases p
+          JOIN ledgers l ON p.ledger_id = l.id
+          WHERE p.ledger_id = ${ledgerRows[0].id}
+          ORDER BY p.created_at DESC LIMIT 20
+        `;
+        if (purchases.length === 0) {
+          return `No tienes compras en el libro "${params.ledger_name}".`;
+        }
+        let result = `*Historial de Compras — ${params.ledger_name}*\n\n`;
+        for (const p of purchases) {
+          const { rows: items } = await db.sql`
+            SELECT * FROM purchase_items WHERE purchase_id = ${p.id}
+          `;
+          result += `*#${p.id}* — ${p.store_name || "?"} — ${p.purchase_date || "Sin fecha"}\n`;
+          for (const item of items) {
+            result += `  • ${item.item_name} x${item.quantity} — €${Number(item.subtotal).toFixed(2)}\n`;
+          }
+          result += `  *Total: €${Number(p.total).toFixed(2)}*\n\n`;
+        }
+        return result;
+      }
+
+      // No ledger filter — show all with ledger names
+      const { rows: purchases } = await db.sql`
+        SELECT p.*, l.name as ledger_name FROM purchases p
+        JOIN ledgers l ON p.ledger_id = l.id
+        ORDER BY p.created_at DESC LIMIT 20
       `;
 
       if (purchases.length === 0) {
@@ -378,10 +621,10 @@ TOTAL: €6.00
 
       let result = "*Historial de Compras*\n\n";
       for (const p of purchases) {
-        const { rows: items } = await chatDb.sql`
+        const { rows: items } = await db.sql`
           SELECT * FROM purchase_items WHERE purchase_id = ${p.id}
         `;
-        result += `*#${p.id}* — ${p.store_name || "?"} — ${p.purchase_date || "Sin fecha"}\n`;
+        result += `*#${p.id}* [${p.ledger_name}] — ${p.store_name || "?"} — ${p.purchase_date || "Sin fecha"}\n`;
         for (const item of items) {
           result += `  • ${item.item_name} x${item.quantity} — €${Number(item.subtotal).toFixed(2)}\n`;
         }
@@ -390,14 +633,72 @@ TOTAL: €6.00
       return result;
 
     } else if (params.action === "summary") {
-      const { rows: summary } = await chatDb.sql`
-        SELECT 
+      if (params.ledger_name) {
+        const { rows: ledgerRows } = await db.sql`
+          SELECT id, name FROM ledgers WHERE LOWER(name) = LOWER(${params.ledger_name})
+        `;
+        if (ledgerRows.length === 0) {
+          return `No se encontro el libro "${params.ledger_name}".`;
+        }
+        const ledgerId = ledgerRows[0].id;
+
+        const { rows: summary } = await db.sql`
+          SELECT
+            COUNT(*) as total_purchases,
+            COALESCE(SUM(total), 0) as total_spent
+          FROM purchases WHERE ledger_id = ${ledgerId}
+        `;
+        const { rows: byStore } = await db.sql`
+          SELECT store_name, COUNT(*) as visits, SUM(total) as spent
+          FROM purchases WHERE ledger_id = ${ledgerId}
+          GROUP BY store_name ORDER BY spent DESC LIMIT 10
+        `;
+        const { rows: topItems } = await db.sql`
+          SELECT pi.item_name, SUM(pi.quantity) as total_qty, SUM(pi.subtotal) as total_spent
+          FROM purchase_items pi
+          JOIN purchases p ON pi.purchase_id = p.id
+          WHERE p.ledger_id = ${ledgerId}
+          GROUP BY pi.item_name ORDER BY total_spent DESC LIMIT 10
+        `;
+
+        const s = summary[0];
+        let result = `*Resumen de Gastos — ${params.ledger_name}*\n\n`;
+        result += `*Total compras:* ${s.total_purchases}\n`;
+        result += `*Total gastado:* €${Number(s.total_spent).toFixed(2)}\n\n`;
+
+        if (byStore.length > 0) {
+          result += `*Por tienda:*\n`;
+          for (const store of byStore) {
+            result += `  • ${store.store_name || "?"}: ${store.visits} visitas — €${Number(store.spent).toFixed(2)}\n`;
+          }
+          result += "\n";
+        }
+
+        if (topItems.length > 0) {
+          result += `*Top productos (por gasto):*\n`;
+          for (const [i, item] of topItems.entries()) {
+            result += `  ${i + 1}. ${item.item_name} — x${Number(item.total_qty)} — €${Number(item.total_spent).toFixed(2)}\n`;
+          }
+        }
+
+        return result;
+      }
+
+      // No ledger filter — show all, grouped by ledger
+      const { rows: summary } = await db.sql`
+        SELECT
           COUNT(*) as total_purchases,
           COALESCE(SUM(total), 0) as total_spent
         FROM purchases
       `;
-      const { rows: byStore } = await chatDb.sql`
-        SELECT 
+      const { rows: byLedger } = await db.sql`
+        SELECT l.name as ledger_name, COUNT(*) as count, SUM(p.total) as spent
+        FROM purchases p
+        JOIN ledgers l ON p.ledger_id = l.id
+        GROUP BY l.name ORDER BY spent DESC
+      `;
+      const { rows: byStore } = await db.sql`
+        SELECT
           store_name,
           COUNT(*) as visits,
           SUM(total) as spent
@@ -406,8 +707,8 @@ TOTAL: €6.00
         ORDER BY spent DESC
         LIMIT 10
       `;
-      const { rows: topItems } = await chatDb.sql`
-        SELECT 
+      const { rows: topItems } = await db.sql`
+        SELECT
           item_name,
           SUM(quantity) as total_qty,
           SUM(subtotal) as total_spent
@@ -421,6 +722,14 @@ TOTAL: €6.00
       let result = "*Resumen de Gastos*\n\n";
       result += `*Total compras:* ${s.total_purchases}\n`;
       result += `*Total gastado:* €${Number(s.total_spent).toFixed(2)}\n\n`;
+
+      if (byLedger.length > 0) {
+        result += `*Por libro:*\n`;
+        for (const l of byLedger) {
+          result += `  • ${l.ledger_name}: ${l.count} compras — €${Number(l.spent).toFixed(2)}\n`;
+        }
+        result += "\n";
+      }
 
       if (byStore.length > 0) {
         result += `*Por tienda:*\n`;
@@ -443,15 +752,81 @@ TOTAL: €6.00
       if (!params.purchase_id) {
         return "Necesito el ID de la compra a eliminar. Usa !compras para ver el historial.";
       }
-      const { rows } = await chatDb.sql`
+      const { rows } = await db.sql`
         DELETE FROM purchases WHERE id = ${params.purchase_id} RETURNING id, store_name
       `;
       if (rows.length === 0) {
         return `No se encontro la compra con ID ${params.purchase_id}`;
       }
       return `Compra #${rows[0].id} (${rows[0].store_name}) eliminada correctamente.`;
+
+    } else if (params.action === "list_ledgers") {
+      const { rows } = await db.sql`
+        SELECT l.id, l.name, COUNT(p.id) as purchase_count, COALESCE(SUM(p.total), 0) as total_spent
+        FROM ledgers l
+        LEFT JOIN purchases p ON p.ledger_id = l.id
+        GROUP BY l.id, l.name
+        ORDER BY l.name
+      `;
+
+      if (rows.length === 0) {
+        return "No hay libros de compras creados aun.";
+      }
+
+      let result = "*Libros de Compras*\n\n";
+      for (const l of rows) {
+        result += `• *${l.name}* — ${l.purchase_count} compras — €${Number(l.total_spent).toFixed(2)}\n`;
+      }
+      return result;
+
+    } else if (params.action === "rename_ledger") {
+      if (!params.ledger_name) {
+        return "Necesito el nombre del libro a renombrar (ledger_name).";
+      }
+      if (!params.new_ledger_name) {
+        return "Necesito el nuevo nombre para el libro (new_ledger_name).";
+      }
+
+      const { rows } = await db.sql`
+        UPDATE ledgers SET name = ${params.new_ledger_name}
+        WHERE LOWER(name) = LOWER(${params.ledger_name})
+        RETURNING id, name
+      `;
+      if (rows.length === 0) {
+        return `No se encontro el libro "${params.ledger_name}".`;
+      }
+      return `Libro renombrado a "${rows[0].name}".`;
+
+    } else if (params.action === "delete_ledger") {
+      if (!params.ledger_name) {
+        return "Necesito el nombre del libro a eliminar (ledger_name).";
+      }
+
+      const { rows: ledgerRows } = await db.sql`
+        SELECT id, name FROM ledgers WHERE LOWER(name) = LOWER(${params.ledger_name})
+      `;
+      if (ledgerRows.length === 0) {
+        return `No se encontro el libro "${params.ledger_name}".`;
+      }
+
+      const { rows: countRows } = await db.sql`
+        SELECT COUNT(*) as count FROM purchases WHERE ledger_id = ${ledgerRows[0].id}
+      `;
+      const count = Number(countRows[0].count);
+
+      const confirmed = await confirm(
+        `⚠️ *Eliminar libro "${ledgerRows[0].name}"*\n\n` +
+        `Se eliminaran ${count} compra(s) asociadas.\n\n` +
+        `React 👍 para confirmar o 👎 para cancelar.`
+      );
+      if (!confirmed) {
+        return "Eliminacion cancelada.";
+      }
+
+      await db.sql`DELETE FROM ledgers WHERE id = ${ledgerRows[0].id}`;
+      return `Libro "${ledgerRows[0].name}" eliminado con ${count} compra(s).`;
     }
 
-    return "Accion no reconocida. Usa: extract, history, summary o delete.";
+    return "Accion no reconocida. Usa: extract, history, summary, delete, list_ledgers, rename_ledger o delete_ledger.";
   }
 });
