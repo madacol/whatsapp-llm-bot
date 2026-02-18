@@ -1,4 +1,5 @@
 import { PGlite } from "@electric-sql/pglite";
+import { mkdirSync } from "node:fs";
 
 /** @type {Map<string, PGlite>} */
 const dbCache = new Map();
@@ -18,6 +19,11 @@ export function setDb(dataDir, instance) {
 export function getDb(dataDir) {
   const db = dbCache.get(dataDir);
   if (db) return db;
+
+  // Ensure parent directories exist for file-based databases
+  if (!dataDir.startsWith("memory://")) {
+    mkdirSync(dataDir, { recursive: true });
+  }
 
   const createdDb = new PGlite(dataDir);
   dbCache.set(dataDir, createdDb);

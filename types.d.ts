@@ -113,6 +113,7 @@ type ActionContext = {
   senderIds: string[];
   content: IncomingContentBlock[];
   getIsAdmin: () => Promise<boolean>;
+  db: PGlite;
   sessionDb: PGlite;
   getActions: () => Promise<Action[]>;
   log: (...args: any[]) => Promise<string>;
