@@ -187,7 +187,7 @@ export default /** @type {defineAction} */ ((x) => x)({
     },
   ],
   test_prompts: [
-    async function extract_prompt_returns_valid_json(callLlm) {
+    async function extract_prompt_returns_valid_json(callLlm, _readFixture) {
       // Send a text description of a receipt to test the extraction prompt
       // (tests the prompt quality without requiring an actual image fixture)
       /** @type {ContentBlock[]} */
@@ -219,6 +219,45 @@ TOTAL: €6.00
       assert.ok(data.total > 0, "total should be > 0");
 
       // Verify each item has the required fields
+      for (const item of data.items) {
+        assert.ok(item.item_name, "each item should have a name");
+        assert.equal(typeof item.quantity, "number", "quantity should be a number");
+      }
+    },
+    async function extract_from_receipt_image(callLlm, readFixture) {
+      const imageBuffer = await readFixture("receipt-1.jpeg");
+      const base64 = imageBuffer.toString("base64");
+
+      /** @type {ContentBlock[]} */
+      const prompt = [
+        { type: "image", encoding: "base64", mime_type: "image/jpeg", data: base64 },
+        { type: "text", text: EXTRACT_PROMPT },
+      ];
+
+      const response = await callLlm(prompt);
+      assert.ok(response, "LLM should return a response");
+
+      const data = parseExtractResponse(/** @type {string} */ (response));
+
+      // Store identification
+      assert.ok(data.store_name, "should extract store name");
+      assert.match(
+        data.store_name.toLowerCase(),
+        /dunnes/,
+        `store name should contain 'dunnes', got '${data.store_name}'`,
+      );
+
+      // Date
+      assert.ok(data.purchase_date, "should extract date");
+
+      // Items — receipt has ~15 items (mince, salmon, juice, milk, vinegar, rice cakes, etc.)
+      assert.ok(Array.isArray(data.items), "items should be an array");
+      assert.ok(data.items.length >= 10, `should extract at least 10 items, got ${data.items.length}`);
+
+      // Total — receipt shows BAL TO PAY €31.22
+      assert.equal(typeof data.total, "number", "total should be a number");
+      assert.ok(data.total > 25 && data.total < 55, `total should be between 25-55, got ${data.total}`);
+
       for (const item of data.items) {
         assert.ok(item.item_name, "each item should have a name");
         assert.equal(typeof item.quantity, "number", "quantity should be a number");
