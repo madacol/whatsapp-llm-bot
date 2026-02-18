@@ -76,6 +76,8 @@ type IncomingContext = {
   content: IncomingContentBlock[];
   isGroup: boolean;
   timestamp: Date;
+  /** The sender ID of a quoted/replied-to message, if present (without @s.whatsapp.net suffix). */
+  quotedSenderId?: string;
 
   // High-level actions scoped to this message
   getAdminStatus: () => Promise<"admin" | "superadmin" | null>;
