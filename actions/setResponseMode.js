@@ -8,16 +8,16 @@ export default /** @type {defineAction} */ ((x) => x)({
     type: "object",
     properties: {
       respond_on_any: {
-        type: "string",
-        description: "Respond to any message (true/false)",
+        type: "boolean",
+        description: "Respond to any message",
       },
       respond_on_mention: {
-        type: "string",
-        description: "Respond when mentioned (true/false)",
+        type: "boolean",
+        description: "Respond when mentioned",
       },
       respond_on_reply: {
-        type: "string",
-        description: "Respond when replying to bot's message (true/false)",
+        type: "boolean",
+        description: "Respond when replying to bot's message",
       },
     },
     required: [],
@@ -55,6 +55,16 @@ export default /** @type {defineAction} */ ((x) => x)({
       );
       const { rows: [chat] } = await db.sql`SELECT respond_on_any FROM chats WHERE chat_id = 'act-srm-3'`;
       assert.equal(chat.respond_on_any, true);
+    },
+    async function accepts_boolean_values(action_fn, db) {
+      await db.sql`INSERT INTO chats(chat_id) VALUES ('act-srm-4') ON CONFLICT DO NOTHING`;
+      await action_fn(
+        { chatId: "act-srm-4", rootDb: db },
+        { respond_on_any: true, respond_on_mention: false },
+      );
+      const { rows: [chat] } = await db.sql`SELECT respond_on_any, respond_on_mention FROM chats WHERE chat_id = 'act-srm-4'`;
+      assert.equal(chat.respond_on_any, true);
+      assert.equal(chat.respond_on_mention, false);
     },
   ],
   action_fn: async function ({ chatId, rootDb }, params) {
