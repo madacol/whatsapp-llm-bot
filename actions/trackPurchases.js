@@ -18,7 +18,8 @@ const EXTRACT_PROMPT = `Analiza esta imagen de una factura/recibo de compra. Ext
 IMPORTANTE:
 - Los precios deben ser numeros sin simbolos de moneda
 - Si no puedes leer algun campo, pon null
-- Extrae TODOS los items visibles
+- Extrae TODOS los items/productos comprados
+- NO incluyas descuentos, vouchers, ni lineas de subtotal/balance como items
 - El total debe ser el monto total de la factura (lo que realmente se pago, despues de descuentos)
 - Responde SOLO con el JSON, nada mas`;
 
@@ -239,7 +240,7 @@ TOTAL: €6.00
 
       const data = parseExtractResponse(/** @type {string} */ (response));
 
-      // Store identification
+      // Store: Dunnes Stores Clondalkin
       assert.ok(data.store_name, "should extract store name");
       assert.match(
         data.store_name.toLowerCase(),
@@ -247,21 +248,60 @@ TOTAL: €6.00
         `store name should contain 'dunnes', got '${data.store_name}'`,
       );
 
-      // Date
-      assert.ok(data.purchase_date, "should extract date");
+      // Date: 17/02/26
+      assert.equal(data.purchase_date, "2026-02-17", `date should be 2026-02-17, got '${data.purchase_date}'`);
 
-      // Items — receipt has ~15 items (mince, salmon, juice, milk, vinegar, rice cakes, etc.)
+      // Exact 15 items on the receipt:
+      //  1. SB MINCE         €3.74
+      //  2. SB MINCE         €3.74
+      //  3. DS SALMON        €7.19
+      //  4. DS SALMON        €7.19
+      //  5. JUICE PRESS JUIC €3.55
+      //  6. DS WHOLE MILK    €3.39
+      //  7. D/S MILK         €2.35
+      //  8. VINEGAR          €2.49
+      //  9. DS SALMON        €7.19
+      // 10. ORANGE NET       €3.00
+      // 11. DS RICE CAKE     €2.00
+      // 12. DS RICE CAKE     €2.00
+      // 13. DS RICE CAKES    €2.00
+      // 14. DS S RICE CAKES  €0.85
+      // 15. DS S RICE CAKES  €0.85
+      // Items subtotal: €51.53
+      // DISCOUNT VOUCHER: -€10.00
+      // Employee Discount: -€10.31
+      // BAL TO PAY: €31.22
+      // Receipt has 15 line items. LLM may occasionally merge or split,
+      // so allow some tolerance, but it should get at least 13.
       assert.ok(Array.isArray(data.items), "items should be an array");
-      assert.ok(data.items.length >= 10, `should extract at least 10 items, got ${data.items.length}`);
+      assert.ok(data.items.length >= 13, `should extract at least 13 items, got ${data.items.length}`);
+      assert.ok(data.items.length <= 17, `should extract at most 17 items, got ${data.items.length}`);
 
-      // Total — receipt shows BAL TO PAY €31.22
-      assert.equal(typeof data.total, "number", "total should be a number");
-      assert.ok(data.total > 25 && data.total < 55, `total should be between 25-55, got ${data.total}`);
-
+      // Verify every item has required fields and valid numbers
       for (const item of data.items) {
         assert.ok(item.item_name, "each item should have a name");
-        assert.equal(typeof item.quantity, "number", "quantity should be a number");
+        assert.equal(typeof item.quantity, "number", `quantity should be a number for '${item.item_name}'`);
+        assert.equal(typeof item.subtotal, "number", `subtotal should be a number for '${item.item_name}'`);
+        assert.ok(item.subtotal > 0, `subtotal should be > 0 for '${item.item_name}'`);
       }
+
+      // Key items should be present (case-insensitive partial match)
+      const allNames = data.items.map(i => i.item_name.toLowerCase()).join(" | ");
+      for (const keyword of ["mince", "salmon", "milk", "vinegar", "rice"]) {
+        assert.ok(allNames.includes(keyword), `should find '${keyword}' in items, got: ${allNames}`);
+      }
+
+      // Item subtotals should sum to ~€51.53 (pre-discount BAL).
+      // OCR on a photo can misread digits, so allow ±€2 tolerance.
+      const itemsSum = data.items.reduce((sum, item) => sum + item.subtotal, 0);
+      assert.ok(
+        Math.abs(itemsSum - 51.53) < 2.0,
+        `items should sum to ~51.53, got ${itemsSum.toFixed(2)}`,
+      );
+
+      // Total = BAL TO PAY €31.22 (after -€10.00 voucher, -€10.31 employee discount).
+      // This is clearly printed and the LLM should get it right.
+      assert.equal(data.total, 31.22, `total should be 31.22, got ${data.total}`);
     },
   ],
   action_fn: async function (context, params) {
