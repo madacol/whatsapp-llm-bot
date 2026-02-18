@@ -57,7 +57,7 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
    * @returns {Promise<void>}
    */
   async function handleMessage(messageContext) {
-    const { chatId, senderIds, content, isGroup, senderName, selfIds } = messageContext;
+    const { chatId, senderIds, content, isGroup, senderName, selfIds, quotedSenderId } = messageContext;
 
     console.log("INCOMING MESSAGE:", JSON.stringify(messageContext, null, 2));
 
@@ -89,9 +89,6 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
     const actions = await getActionsFn();
 
     const firstBlock = content.find(block=>block.type === "text")
-
-    const quoteBlock = content.find(block => block.type === "quote");
-    const quotedSenderId = quoteBlock?.quotedSenderId;
 
     if (firstBlock?.text?.startsWith("!")) {
       const inputText = firstBlock.text.slice(1).trim();

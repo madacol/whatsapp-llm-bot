@@ -40,13 +40,14 @@ function getContextInfo(msg) {
 }
 
 /**
- *
  * @param {BaileysMessage} baileysMessage
- * @returns {Promise<IncomingContentBlock[]>}
+ * @returns {Promise<{ content: IncomingContentBlock[], quotedSenderId: string | undefined }>}
  */
 export async function getMessageContent(baileysMessage) {
   /** @type {IncomingContentBlock[]} */
   const content = [];
+  /** @type {string | undefined} */
+  let quotedSenderId;
 
   // Check for quoted message content
   const contextInfo = getContextInfo(baileysMessage.message);
@@ -59,7 +60,7 @@ export async function getMessageContent(baileysMessage) {
       || quotedMessage.videoMessage?.caption
       || quotedMessage.documentMessage?.caption
 
-    const quotedSenderId = contextInfo?.participant;
+    const rawQuotedSenderId = contextInfo?.participant;
 
     /** @type {QuoteContentBlock} */
     const quote = {
@@ -67,8 +68,10 @@ export async function getMessageContent(baileysMessage) {
       content: [],
     };
 
-    if (quotedSenderId) {
-      quote.quotedSenderId = quotedSenderId.split("@")[0];
+    if (rawQuotedSenderId) {
+      const stripped = rawQuotedSenderId.split("@")[0];
+      quote.quotedSenderId = stripped;
+      quotedSenderId = stripped;
     }
 
     // if (quotedMessage.imageMessage) {
@@ -191,7 +194,7 @@ export async function getMessageContent(baileysMessage) {
     console.log("Unknown baileysMessage", JSON.stringify(baileysMessage, null, 2));
   }
 
-  return content;
+  return { content, quotedSenderId };
 }
 
 /**
@@ -206,7 +209,7 @@ async function adaptIncomingMessage(baileysMessage, sock) {
     return;
   }
 
-  const content = await getMessageContent(baileysMessage);
+  const { content, quotedSenderId } = await getMessageContent(baileysMessage);
 
   if (content.length === 0) {
     return
@@ -246,6 +249,7 @@ async function adaptIncomingMessage(baileysMessage, sock) {
     content: content,
     isGroup,
     timestamp,
+    quotedSenderId,
 
     // High-level actions scoped to this message
     getAdminStatus: async () => {

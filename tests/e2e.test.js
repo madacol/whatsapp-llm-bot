@@ -486,7 +486,7 @@ describe("Scenario 11: getMessageContent extraction", () => {
     const msg = /** @type {any} */ ({
       message: { conversation: "Hello world" },
     });
-    const content = await getMessageContent(msg);
+    const { content } = await getMessageContent(msg);
 
     assert.equal(content.length, 1);
     assert.equal(content[0].type, "text");
@@ -497,7 +497,7 @@ describe("Scenario 11: getMessageContent extraction", () => {
     const msg = /** @type {any} */ ({
       message: { extendedTextMessage: { text: "Extended hello" } },
     });
-    const content = await getMessageContent(msg);
+    const { content } = await getMessageContent(msg);
 
     assert.ok(
       content.some(
@@ -517,7 +517,7 @@ describe("Scenario 11: getMessageContent extraction", () => {
         },
       },
     });
-    const content = await getMessageContent(msg);
+    const { content } = await getMessageContent(msg);
 
     assert.ok(
       content.some((b) => b.type === "quote"),

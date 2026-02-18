@@ -27,7 +27,7 @@ describe("getMessageContent", () => {
     const msg = /** @type {any} */ ({
       message: { conversation: "Hello world" },
     });
-    const content = await getMessageContent(msg);
+    const { content } = await getMessageContent(msg);
 
     assert.equal(content.length, 1);
     assert.equal(content[0].type, "text");
@@ -38,7 +38,7 @@ describe("getMessageContent", () => {
     const msg = /** @type {any} */ ({
       message: { extendedTextMessage: { text: "Extended" } },
     });
-    const content = await getMessageContent(msg);
+    const { content } = await getMessageContent(msg);
 
     assert.ok(content.some(b => b.type === "text" && /** @type {any} */ (b).text === "Extended"));
   });
@@ -54,7 +54,7 @@ describe("getMessageContent", () => {
         },
       },
     });
-    const content = await getMessageContent(msg);
+    const { content } = await getMessageContent(msg);
 
     assert.ok(content.some(b => b.type === "quote"), "Should have quote block");
     assert.ok(
@@ -82,7 +82,7 @@ describe("getMessageContent", () => {
         },
       },
     });
-    const content = await getMessageContent(msg);
+    const { content } = await getMessageContent(msg);
 
     const quote = /** @type {any} */ (content.find(b => b.type === "quote"));
     assert.ok(quote, "Should have quote block");
@@ -104,7 +104,7 @@ describe("getMessageContent", () => {
         },
       },
     });
-    const content = await getMessageContent(msg);
+    const { content } = await getMessageContent(msg);
 
     const quote = /** @type {any} */ (content.find(b => b.type === "quote"));
     assert.ok(quote);
@@ -117,7 +117,7 @@ describe("getMessageContent", () => {
     const msg = /** @type {any} */ ({
       message: { documentMessage: { caption: "See attached" } },
     });
-    const content = await getMessageContent(msg);
+    const { content } = await getMessageContent(msg);
 
     assert.ok(
       content.some(b => b.type === "text" && /** @type {any} */ (b).text === "See attached"),
@@ -128,8 +128,32 @@ describe("getMessageContent", () => {
     const msg = /** @type {any} */ ({
       message: { stickerMessage: {} },
     });
-    const content = await getMessageContent(msg);
+    const { content } = await getMessageContent(msg);
 
     assert.equal(content.length, 0);
+  });
+
+  it("extracts quotedSenderId from contextInfo participant", async () => {
+    const msg = /** @type {any} */ ({
+      message: {
+        extendedTextMessage: {
+          text: "My reply",
+          contextInfo: {
+            quotedMessage: { conversation: "Original" },
+            participant: "12345@s.whatsapp.net",
+          },
+        },
+      },
+    });
+    const { quotedSenderId } = await getMessageContent(msg);
+    assert.equal(quotedSenderId, "12345");
+  });
+
+  it("returns undefined quotedSenderId when no quote", async () => {
+    const msg = /** @type {any} */ ({
+      message: { conversation: "Hello" },
+    });
+    const { quotedSenderId } = await getMessageContent(msg);
+    assert.equal(quotedSenderId, undefined);
   });
 });
