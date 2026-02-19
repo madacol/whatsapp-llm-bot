@@ -430,6 +430,10 @@ export async function connectToWhatsApp(onMessageHandler) {
       } catch (error) {
         console.error("Error during WhatsApp cleanup:", error);
       }
-    }
+    },
+    /** @param {string} chatId @param {string} text */
+    async sendToChat(chatId, text) {
+      await sock.sendMessage(chatId, { text });
+    },
   }
 }
