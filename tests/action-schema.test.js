@@ -6,6 +6,7 @@ import path from "path";
 const VALID_PERMISSION_KEYS = new Set([
   "autoExecute",
   "autoContinue",
+  "silent",
   "requireAdmin",
   "requireMaster",
   "useChatDb",

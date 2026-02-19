@@ -179,6 +179,7 @@ export default /** @type {defineAction} */ ((x) => x)({
       SELECT message_id, sender_id, message_data, timestamp
       FROM messages
       WHERE chat_id = ${chatId}
+        AND cleared_at IS NULL
       ORDER BY message_id DESC
       LIMIT ${limit}
     `;

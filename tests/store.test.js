@@ -122,5 +122,22 @@ describe("store with injected DB", () => {
       assert.equal(messages.length, 1);
       assert.equal(messages[0].message_data.role, "tool");
     });
+
+    it("excludes cleared messages by default", async () => {
+      await store.createChat("msg-test-cleared");
+
+      /** @type {UserMessage} */
+      const msg1 = { role: "user", content: [{ type: "text", text: "before clear" }] };
+      /** @type {UserMessage} */
+      const msg2 = { role: "user", content: [{ type: "text", text: "after clear" }] };
+      await store.addMessage("msg-test-cleared", msg1, ["s1"]);
+      // Mark existing messages as cleared
+      await db.sql`UPDATE messages SET cleared_at = NOW() WHERE chat_id = 'msg-test-cleared'`;
+      await store.addMessage("msg-test-cleared", msg2, ["s1"]);
+
+      const messages = await store.getMessages("msg-test-cleared");
+      assert.equal(messages.length, 1);
+      assert.equal(messages[0].message_data.content[0].text, "after clear");
+    });
   });
 });
