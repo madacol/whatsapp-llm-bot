@@ -217,6 +217,54 @@ describe("LLM pipeline via createMessageHandler", () => {
     );
   });
 
+  it("silent action does not send result to user", async () => {
+    await seedChat("pipe-silent", { enabled: true });
+
+    // Seed a message so recall_history has something to find
+    await db.sql`INSERT INTO messages(chat_id, sender_id, message_data, timestamp)
+      VALUES ('pipe-silent', 'u1', '{"role":"user","content":[{"type":"text","text":"old msg"}]}', '2026-02-01 08:00:00')`;
+
+    mockServer.addResponses(
+      {
+        tool_calls: [
+          {
+            id: "call_silent_001",
+            type: "function",
+            function: {
+              name: "recall_history",
+              arguments: JSON.stringify({ since: "2026-02-01T00:00:00Z" }),
+            },
+          },
+        ],
+      },
+      "Based on the history, here is my answer.",
+    );
+
+    const { context, responses } = createIncomingContext({
+      chatId: "pipe-silent",
+      content: [{ type: "text", text: "What did I say before?" }],
+    });
+    await handleMessage(context);
+
+    // The tool result should NOT be shown to the user
+    assert.ok(
+      !responses.some(r => r.text.includes("Recalled") || r.text.includes("old msg")),
+      `Silent action result should not be sent to user, but got: ${responses.map(r => r.text).join(" | ")}`,
+    );
+    // But the LLM should still get a follow-up and respond
+    assert.ok(
+      responses.some(r => r.text.includes("Based on the history")),
+      "Should have final LLM reply after silent tool",
+    );
+
+    // The tool result should NOT be stored in the DB
+    const { rows: toolRows } = await db.sql`
+      SELECT message_data FROM messages
+      WHERE chat_id = 'pipe-silent'
+        AND message_data::jsonb->>'role' = 'tool'`;
+    assert.equal(toolRows.length, 0, "Silent tool result should not be persisted to DB");
+  });
+
   it("uses custom model from chat", async () => {
     await seedChat("pipe-6", { enabled: true, model: "gpt-4.1-nano" });
     mockServer.addResponses("Model test");
