@@ -128,6 +128,7 @@ type ActionContext = {
 type PermissionFlags = {
   autoExecute?: boolean;
   autoContinue?: boolean;
+  silent?: boolean;
   requireAdmin?: boolean;
   requireMaster?: boolean;
   useChatDb?: boolean;

@@ -281,7 +281,7 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
             );
             console.log("response", functionResponse);
 
-            if (toolName !== "clear_conversation") {
+            if (!functionResponse.permissions.silent) {
               // Store tool result in database
               /** @type {ToolMessage} */
               const toolMessage = {
@@ -296,11 +296,13 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
               typeof functionResponse.result === "string"
                 ? functionResponse.result
                 : JSON.stringify(functionResponse.result, null, 2);
-            // Show tool result to user
-            await context.sendMessage(
-              `✅ *Result*    [${shortId}]`,
-              resultMessage,
-            );
+            // Show tool result to user (unless silent)
+            if (!functionResponse.permissions.silent) {
+              await context.sendMessage(
+                `✅ *Result*    [${shortId}]`,
+                resultMessage,
+              );
+            }
 
             if (functionResponse.permissions.autoContinue) {
               // If the tool result indicates to continue processing, set flag

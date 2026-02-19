@@ -44,7 +44,8 @@ export async function initStore(injectedDb){
             chat_id VARCHAR(50) REFERENCES chats(chat_id),
             sender_id VARCHAR(50),
             message_data JSONB,
-            timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            cleared_at TIMESTAMP
         );
     `;
 
@@ -58,6 +59,7 @@ export async function initStore(injectedDb){
         db.sql`ALTER TABLE chats ADD COLUMN IF NOT EXISTS respond_on_mention BOOLEAN DEFAULT TRUE`,
         db.sql`ALTER TABLE chats ADD COLUMN IF NOT EXISTS respond_on_reply BOOLEAN DEFAULT FALSE`,
         db.sql`ALTER TABLE messages ADD COLUMN IF NOT EXISTS message_data JSONB`,
+        db.sql`ALTER TABLE messages ADD COLUMN IF NOT EXISTS cleared_at TIMESTAMP`,
         db.sql`ALTER TABLE messages DROP COLUMN IF EXISTS message_type`,
         db.sql`ALTER TABLE messages DROP COLUMN IF EXISTS tool_call_id`,
         db.sql`ALTER TABLE messages DROP COLUMN IF EXISTS tool_name`,
@@ -88,8 +90,7 @@ export async function initStore(injectedDb){
       * @param {number} limit
       */
       async getMessages (chatId, limit = 50) {
-        const {rows: messages} = await db.sql`SELECT * FROM messages WHERE chat_id = ${chatId} ORDER BY timestamp DESC LIMIT ${limit}`;
-        // messages.message_data = JSON.parse(messages.message_data);
+        const {rows: messages} = await db.sql`SELECT * FROM messages WHERE chat_id = ${chatId} AND cleared_at IS NULL ORDER BY timestamp DESC LIMIT ${limit}`;
         return /** @type {MessageRow[]} */ (messages);
       },
 
