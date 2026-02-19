@@ -11,7 +11,7 @@ import {
   createMockLlmServer,
   createTestDb,
 } from "./helpers.js";
-import { setDb } from "../db.js";
+import { setDb, closeAllDbs } from "../db.js";
 
 /** @type {Awaited<ReturnType<typeof createMockLlmServer>>} */
 let mockServer;
@@ -52,6 +52,7 @@ before(async () => {
 
 after(async () => {
   await mockServer?.close();
+  await closeAllDbs();
 });
 
 // ═══════════════════════════════════════════════════════════════════
