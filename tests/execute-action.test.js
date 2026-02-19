@@ -1,4 +1,4 @@
-import { describe, it, before } from "node:test";
+import { describe, it, before, after } from "node:test";
 import assert from "node:assert/strict";
 
 // Env vars must be set before dynamic import of actions.js (which loads config.js)
@@ -8,18 +8,33 @@ process.env.LLM_API_KEY = "test-key";
 process.env.MODEL = "mock-model";
 
 import { createTestDb } from "./helpers.js";
-import { setDb } from "../db.js";
+import { setDb, closeAllDbs } from "../db.js";
 
 /** @type {typeof import("../actions.js").executeAction} */
 let executeAction;
 
 before(async () => {
-  // Seed DB cache so getDb("./pgdata/root") returns in-memory DB
+  // Seed DB cache so getDb() calls during executeAction return in-memory DBs
+  // instead of creating on-disk PGlite instances that consume lots of RAM
   const testDb = await createTestDb();
   setDb("./pgdata/root", testDb);
+  setDb("memory://", testDb);
+
+  // Pre-seed per-action DB paths that executeAction will request
+  const actionNames = [
+    "test_action", "confirm_action", "result_action",
+    "db_action", "llm_action",
+  ];
+  for (const name of actionNames) {
+    setDb(`./pgdata/test-chat/${name}`, testDb);
+  }
 
   const mod = await import("../actions.js");
   executeAction = mod.executeAction;
+});
+
+after(async () => {
+  await closeAllDbs();
 });
 
 /**
