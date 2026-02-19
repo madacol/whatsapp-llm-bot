@@ -8,6 +8,7 @@ import config from "./config.js";
 import { createLlmClient } from "./llm.js";
 import { shortenToolId } from "./utils.js";
 import { connectToWhatsApp } from "./whatsapp-adapter.js";
+import { startReminderDaemon } from "./reminder-daemon.js";
 import { initStore } from "./store.js";
 import {
   actionsToOpenAIFormat,
@@ -381,16 +382,19 @@ export { handleMessage };
 
 async function setup () {
   // Initialize everything
-  const { closeWhatsapp } = await connectToWhatsApp(handleMessage)
+  const { closeWhatsapp, sendToChat } = await connectToWhatsApp(handleMessage)
     .catch(async (error) => {
       console.error("Initialization error:", error);
       await store.closeDb();
       process.exit(1);
     })
 
+  const stopReminders = startReminderDaemon(sendToChat);
+
 
   async function cleanup() {
     try {
+      stopReminders();
       await closeWhatsapp();
       await store.closeDb();
     } catch (error) {
