@@ -109,6 +109,120 @@ function formatPreview(data, ledgerName) {
   return preview;
 }
 
+/**
+ * Get purchase history, optionally filtered by ledger name.
+ * @param {PGlite} db
+ * @param {string} [ledgerName]
+ * @returns {Promise<string>}
+ */
+async function getHistory(db, ledgerName) {
+  /** @type {number | undefined} */
+  let ledgerId;
+  if (ledgerName) {
+    const { rows } = await db.sql`SELECT id FROM ledgers WHERE LOWER(name) = LOWER(${ledgerName})`;
+    if (rows.length === 0) return `No se encontro el libro "${ledgerName}".`;
+    ledgerId = /** @type {number} */ (rows[0].id);
+  }
+
+  const { rows: purchases } = ledgerId !== undefined
+    ? await db.sql`
+        SELECT p.*, l.name as ledger_name FROM purchases p
+        JOIN ledgers l ON p.ledger_id = l.id
+        WHERE p.ledger_id = ${ledgerId}
+        ORDER BY p.created_at DESC LIMIT 20`
+    : await db.sql`
+        SELECT p.*, l.name as ledger_name FROM purchases p
+        JOIN ledgers l ON p.ledger_id = l.id
+        ORDER BY p.created_at DESC LIMIT 20`;
+
+  if (purchases.length === 0) {
+    return ledgerName
+      ? `No tienes compras en el libro "${ledgerName}".`
+      : "No tienes compras registradas aun. Enviame una foto de una factura para empezar.";
+  }
+
+  let result = ledgerName
+    ? `*Historial de Compras — ${ledgerName}*\n\n`
+    : "*Historial de Compras*\n\n";
+
+  for (const p of purchases) {
+    const { rows: items } = await db.sql`SELECT * FROM purchase_items WHERE purchase_id = ${p.id}`;
+    const prefix = ledgerName ? `*#${p.id}*` : `*#${p.id}* [${p.ledger_name}]`;
+    result += `${prefix} — ${p.store_name || "?"} — ${p.purchase_date || "Sin fecha"}\n`;
+    for (const item of items) {
+      result += `  • ${item.item_name} x${item.quantity} — €${Number(item.subtotal).toFixed(2)}\n`;
+    }
+    result += `  *Total: €${Number(p.total).toFixed(2)}*\n\n`;
+  }
+  return result;
+}
+
+/**
+ * Get purchase summary, optionally filtered by ledger name.
+ * @param {PGlite} db
+ * @param {string} [ledgerName]
+ * @returns {Promise<string>}
+ */
+async function getSummary(db, ledgerName) {
+  /** @type {number | undefined} */
+  let ledgerId;
+  if (ledgerName) {
+    const { rows } = await db.sql`SELECT id, name FROM ledgers WHERE LOWER(name) = LOWER(${ledgerName})`;
+    if (rows.length === 0) return `No se encontro el libro "${ledgerName}".`;
+    ledgerId = /** @type {number} */ (rows[0].id);
+  }
+
+  const { rows: summary } = ledgerId !== undefined
+    ? await db.sql`SELECT COUNT(*) as total_purchases, COALESCE(SUM(total), 0) as total_spent FROM purchases WHERE ledger_id = ${ledgerId}`
+    : await db.sql`SELECT COUNT(*) as total_purchases, COALESCE(SUM(total), 0) as total_spent FROM purchases`;
+
+  const { rows: byStore } = ledgerId !== undefined
+    ? await db.sql`SELECT store_name, COUNT(*) as visits, SUM(total) as spent FROM purchases WHERE ledger_id = ${ledgerId} GROUP BY store_name ORDER BY spent DESC LIMIT 10`
+    : await db.sql`SELECT store_name, COUNT(*) as visits, SUM(total) as spent FROM purchases GROUP BY store_name ORDER BY spent DESC LIMIT 10`;
+
+  const { rows: topItems } = ledgerId !== undefined
+    ? await db.sql`SELECT pi.item_name, SUM(pi.quantity) as total_qty, SUM(pi.subtotal) as total_spent FROM purchase_items pi JOIN purchases p ON pi.purchase_id = p.id WHERE p.ledger_id = ${ledgerId} GROUP BY pi.item_name ORDER BY total_spent DESC LIMIT 10`
+    : await db.sql`SELECT item_name, SUM(quantity) as total_qty, SUM(subtotal) as total_spent FROM purchase_items GROUP BY item_name ORDER BY total_spent DESC LIMIT 10`;
+
+  const s = summary[0];
+  let result = ledgerName
+    ? `*Resumen de Gastos — ${ledgerName}*\n\n`
+    : "*Resumen de Gastos*\n\n";
+  result += `*Total compras:* ${s.total_purchases}\n`;
+  result += `*Total gastado:* €${Number(s.total_spent).toFixed(2)}\n\n`;
+
+  if (!ledgerName) {
+    const { rows: byLedger } = await db.sql`
+      SELECT l.name as ledger_name, COUNT(*) as count, SUM(p.total) as spent
+      FROM purchases p JOIN ledgers l ON p.ledger_id = l.id
+      GROUP BY l.name ORDER BY spent DESC`;
+    if (byLedger.length > 0) {
+      result += `*Por libro:*\n`;
+      for (const l of byLedger) {
+        result += `  • ${l.ledger_name}: ${l.count} compras — €${Number(l.spent).toFixed(2)}\n`;
+      }
+      result += "\n";
+    }
+  }
+
+  if (byStore.length > 0) {
+    result += `*Por tienda:*\n`;
+    for (const store of byStore) {
+      result += `  • ${store.store_name || "?"}: ${store.visits} visitas — €${Number(store.spent).toFixed(2)}\n`;
+    }
+    result += "\n";
+  }
+
+  if (topItems.length > 0) {
+    result += `*Top productos (por gasto):*\n`;
+    for (const [i, item] of topItems.entries()) {
+      result += `  ${i + 1}. ${item.item_name} — x${Number(item.total_qty)} — €${Number(item.total_spent).toFixed(2)}\n`;
+    }
+  }
+
+  return result;
+}
+
 export { EXTRACT_PROMPT, parseExtractResponse, ensureSchema, getOrCreateLedger, formatPreview };
 
 export default /** @type {defineAction} */ ((x) => x)({
@@ -578,175 +692,10 @@ TOTAL: €6.00
       return result;
 
     } else if (params.action === "history") {
-      if (params.ledger_name) {
-        const { rows: ledgerRows } = await db.sql`
-          SELECT id FROM ledgers WHERE LOWER(name) = LOWER(${params.ledger_name})
-        `;
-        if (ledgerRows.length === 0) {
-          return `No se encontro el libro "${params.ledger_name}".`;
-        }
-        const { rows: purchases } = await db.sql`
-          SELECT p.*, l.name as ledger_name FROM purchases p
-          JOIN ledgers l ON p.ledger_id = l.id
-          WHERE p.ledger_id = ${ledgerRows[0].id}
-          ORDER BY p.created_at DESC LIMIT 20
-        `;
-        if (purchases.length === 0) {
-          return `No tienes compras en el libro "${params.ledger_name}".`;
-        }
-        let result = `*Historial de Compras — ${params.ledger_name}*\n\n`;
-        for (const p of purchases) {
-          const { rows: items } = await db.sql`
-            SELECT * FROM purchase_items WHERE purchase_id = ${p.id}
-          `;
-          result += `*#${p.id}* — ${p.store_name || "?"} — ${p.purchase_date || "Sin fecha"}\n`;
-          for (const item of items) {
-            result += `  • ${item.item_name} x${item.quantity} — €${Number(item.subtotal).toFixed(2)}\n`;
-          }
-          result += `  *Total: €${Number(p.total).toFixed(2)}*\n\n`;
-        }
-        return result;
-      }
-
-      // No ledger filter — show all with ledger names
-      const { rows: purchases } = await db.sql`
-        SELECT p.*, l.name as ledger_name FROM purchases p
-        JOIN ledgers l ON p.ledger_id = l.id
-        ORDER BY p.created_at DESC LIMIT 20
-      `;
-
-      if (purchases.length === 0) {
-        return "No tienes compras registradas aun. Enviame una foto de una factura para empezar.";
-      }
-
-      let result = "*Historial de Compras*\n\n";
-      for (const p of purchases) {
-        const { rows: items } = await db.sql`
-          SELECT * FROM purchase_items WHERE purchase_id = ${p.id}
-        `;
-        result += `*#${p.id}* [${p.ledger_name}] — ${p.store_name || "?"} — ${p.purchase_date || "Sin fecha"}\n`;
-        for (const item of items) {
-          result += `  • ${item.item_name} x${item.quantity} — €${Number(item.subtotal).toFixed(2)}\n`;
-        }
-        result += `  *Total: €${Number(p.total).toFixed(2)}*\n\n`;
-      }
-      return result;
+      return getHistory(db, params.ledger_name);
 
     } else if (params.action === "summary") {
-      if (params.ledger_name) {
-        const { rows: ledgerRows } = await db.sql`
-          SELECT id, name FROM ledgers WHERE LOWER(name) = LOWER(${params.ledger_name})
-        `;
-        if (ledgerRows.length === 0) {
-          return `No se encontro el libro "${params.ledger_name}".`;
-        }
-        const ledgerId = ledgerRows[0].id;
-
-        const { rows: summary } = await db.sql`
-          SELECT
-            COUNT(*) as total_purchases,
-            COALESCE(SUM(total), 0) as total_spent
-          FROM purchases WHERE ledger_id = ${ledgerId}
-        `;
-        const { rows: byStore } = await db.sql`
-          SELECT store_name, COUNT(*) as visits, SUM(total) as spent
-          FROM purchases WHERE ledger_id = ${ledgerId}
-          GROUP BY store_name ORDER BY spent DESC LIMIT 10
-        `;
-        const { rows: topItems } = await db.sql`
-          SELECT pi.item_name, SUM(pi.quantity) as total_qty, SUM(pi.subtotal) as total_spent
-          FROM purchase_items pi
-          JOIN purchases p ON pi.purchase_id = p.id
-          WHERE p.ledger_id = ${ledgerId}
-          GROUP BY pi.item_name ORDER BY total_spent DESC LIMIT 10
-        `;
-
-        const s = summary[0];
-        let result = `*Resumen de Gastos — ${params.ledger_name}*\n\n`;
-        result += `*Total compras:* ${s.total_purchases}\n`;
-        result += `*Total gastado:* €${Number(s.total_spent).toFixed(2)}\n\n`;
-
-        if (byStore.length > 0) {
-          result += `*Por tienda:*\n`;
-          for (const store of byStore) {
-            result += `  • ${store.store_name || "?"}: ${store.visits} visitas — €${Number(store.spent).toFixed(2)}\n`;
-          }
-          result += "\n";
-        }
-
-        if (topItems.length > 0) {
-          result += `*Top productos (por gasto):*\n`;
-          for (const [i, item] of topItems.entries()) {
-            result += `  ${i + 1}. ${item.item_name} — x${Number(item.total_qty)} — €${Number(item.total_spent).toFixed(2)}\n`;
-          }
-        }
-
-        return result;
-      }
-
-      // No ledger filter — show all, grouped by ledger
-      const { rows: summary } = await db.sql`
-        SELECT
-          COUNT(*) as total_purchases,
-          COALESCE(SUM(total), 0) as total_spent
-        FROM purchases
-      `;
-      const { rows: byLedger } = await db.sql`
-        SELECT l.name as ledger_name, COUNT(*) as count, SUM(p.total) as spent
-        FROM purchases p
-        JOIN ledgers l ON p.ledger_id = l.id
-        GROUP BY l.name ORDER BY spent DESC
-      `;
-      const { rows: byStore } = await db.sql`
-        SELECT
-          store_name,
-          COUNT(*) as visits,
-          SUM(total) as spent
-        FROM purchases
-        GROUP BY store_name
-        ORDER BY spent DESC
-        LIMIT 10
-      `;
-      const { rows: topItems } = await db.sql`
-        SELECT
-          item_name,
-          SUM(quantity) as total_qty,
-          SUM(subtotal) as total_spent
-        FROM purchase_items
-        GROUP BY item_name
-        ORDER BY total_spent DESC
-        LIMIT 10
-      `;
-
-      const s = summary[0];
-      let result = "*Resumen de Gastos*\n\n";
-      result += `*Total compras:* ${s.total_purchases}\n`;
-      result += `*Total gastado:* €${Number(s.total_spent).toFixed(2)}\n\n`;
-
-      if (byLedger.length > 0) {
-        result += `*Por libro:*\n`;
-        for (const l of byLedger) {
-          result += `  • ${l.ledger_name}: ${l.count} compras — €${Number(l.spent).toFixed(2)}\n`;
-        }
-        result += "\n";
-      }
-
-      if (byStore.length > 0) {
-        result += `*Por tienda:*\n`;
-        for (const store of byStore) {
-          result += `  • ${store.store_name || "?"}: ${store.visits} visitas — €${Number(store.spent).toFixed(2)}\n`;
-        }
-        result += "\n";
-      }
-
-      if (topItems.length > 0) {
-        result += `*Top productos (por gasto):*\n`;
-        for (const [i, item] of topItems.entries()) {
-          result += `  ${i + 1}. ${item.item_name} — x${Number(item.total_qty)} — €${Number(item.total_spent).toFixed(2)}\n`;
-        }
-      }
-
-      return result;
+      return getSummary(db, params.ledger_name);
 
     } else if (params.action === "delete") {
       if (!params.purchase_id) {
