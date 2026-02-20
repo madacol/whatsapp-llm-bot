@@ -115,6 +115,117 @@ export function parseCommandArgs(args, parameters) {
 }
 
 /**
+ * Format a user message's content blocks into OpenAI content parts.
+ * @param {UserMessage} message
+ * @returns {Promise<Array<OpenAI.ChatCompletionContentPart>>}
+ */
+async function formatUserContent(message) {
+  /** @type {Array<OpenAI.ChatCompletionContentPart>} */
+  const parts = [];
+
+  for (const contentBlock of message.content) {
+    switch (contentBlock.type) {
+      case "quote": {
+        for (const quoteBlock of contentBlock.content) {
+          switch (quoteBlock.type) {
+            case "text":
+              parts.push({ type: "text", text: `> ${quoteBlock.text.trim().replace(/\n/g, '\n> ')}` });
+              break;
+            case "image": {
+              const dataUrl = `data:${quoteBlock.mime_type};base64,${quoteBlock.data}`;
+              parts.push({ type: "image_url", image_url: { url: dataUrl } });
+              break;
+            }
+          }
+        }
+        break;
+      }
+      case "text":
+        parts.push(contentBlock);
+        break;
+      case "image": {
+        const dataUrl = `data:${contentBlock.mime_type};base64,${contentBlock.data}`;
+        parts.push({ type: "image_url", image_url: { url: dataUrl } });
+        break;
+      }
+      case "audio": {
+        /** @type {"wav" | "mp3"} */
+        let format = "mp3";
+        let data;
+        const audioFormat = contentBlock.mime_type?.split("audio/")[1]?.split(";")[0];
+        if (audioFormat === "wav" || audioFormat === "mp3") {
+          format = audioFormat;
+          data = contentBlock.data;
+        } else {
+          console.warn(`Unsupported audio format: ${contentBlock.mime_type}`);
+          data = await convertAudioToMp3Base64(contentBlock.data);
+        }
+        parts.push({
+          type: "input_audio",
+          input_audio: { data, format },
+        });
+        break;
+      }
+    }
+  }
+
+  return parts;
+}
+
+/**
+ * Format an assistant message into an OpenAI ChatCompletionMessageParam.
+ * @param {AssistantMessage} message
+ * @returns {OpenAI.ChatCompletionMessageParam}
+ */
+function formatAssistantContent(message) {
+  /** @type {OpenAI.ChatCompletionMessageToolCall[]} */
+  const toolCalls = [];
+  const content = message.content
+    .map(contentBlock => {
+      switch (contentBlock.type) {
+        case "text":
+          return contentBlock;
+        case "tool":
+          toolCalls.push({
+            type: "function",
+            id: contentBlock.tool_id,
+            function: {
+              name: contentBlock.name,
+              arguments: contentBlock.arguments,
+            },
+          });
+      }
+    })
+    .filter(x => x !== undefined);
+
+  return {
+    role: "assistant",
+    content,
+    tool_calls: toolCalls.length > 0 ? toolCalls : undefined,
+  };
+}
+
+/**
+ * Format a tool message into OpenAI ChatCompletionMessageParam(s).
+ * @param {ToolMessage} message
+ * @returns {Array<OpenAI.ChatCompletionMessageParam>}
+ */
+function formatToolContent(message) {
+  /** @type {Array<OpenAI.ChatCompletionMessageParam>} */
+  const results = [];
+  for (const contentBlock of message.content) {
+    if (contentBlock.type === "text") {
+      results.push({
+        role: "tool",
+        tool_call_id: message.tool_id,
+        content: contentBlock.text,
+      });
+    }
+  }
+  return results;
+}
+
+/**
  * Convert stored Message[] rows from the DB into OpenAI ChatCompletionMessageParam[].
  * Strips leading tool results and handles user/assistant/tool roles.
  * @param {Array<{message_data: Message, sender_id: string}>} chatMessages - Rows from DB (newest first)
@@ -122,7 +233,7 @@ export function parseCommandArgs(args, parameters) {
  */
 export async function formatMessagesForOpenAI(chatMessages) {
   /** @type {Array<OpenAI.ChatCompletionMessageParam>} */
-  const chatMessages_formatted = [];
+  const formatted = [];
   const reversedMessages = [...chatMessages].reverse();
 
   // remove starting tool results from the messages
@@ -133,100 +244,20 @@ export async function formatMessagesForOpenAI(chatMessages) {
   for (const msg of reversedMessages) {
     switch (msg.message_data?.role) {
       case "user":
-        /** @type {Array<OpenAI.ChatCompletionContentPart>} */
-        const messageContent = []
-        for (const contentBlock of msg.message_data.content) {
-          switch (contentBlock.type) {
-            case "quote":
-              for (const quoteBlock of contentBlock.content) {
-                switch (quoteBlock.type) {
-                  case "text":
-                    messageContent.push({ type: "text", text: `> ${quoteBlock.text.trim().replace(/\n/g, '\n> ')}` });
-                    break;
-                  case "image":
-                    const dataUrl = `data:${quoteBlock.mime_type};base64,${quoteBlock.data}`;
-                    messageContent.push({ type: "image_url", image_url: { url: dataUrl } });
-                    break;
-                }
-              }
-              break;
-            case "text":
-              messageContent.push(contentBlock);
-              break;
-            case "image":
-              const dataUrl = `data:${contentBlock.mime_type};base64,${contentBlock.data}`;
-              messageContent.push({ type: "image_url", image_url: { url: dataUrl } });
-              break;
-            case "audio":
-              /** @type {"wav" | "mp3"} */
-              let format = "mp3";
-              let data;
-              const audioParts = contentBlock.mime_type?.split("audio/")[1]?.split(";")[0];
-              if (audioParts === "wav" || audioParts === "mp3") {
-                format = audioParts;
-                data = contentBlock.data;
-              } else {
-                console.warn(`Unsupported audio format: ${contentBlock.mime_type}`);
-                data = await convertAudioToMp3Base64(contentBlock.data);
-              }
-              messageContent.push({
-                type: "input_audio",
-                input_audio: {
-                  data: data,
-                  format: format
-                }
-              });
-              break;
-          }
-        };
-        chatMessages_formatted.push({
+        formatted.push({
           role: "user",
           name: msg.sender_id,
-          content: messageContent,
+          content: await formatUserContent(msg.message_data),
         });
         break;
       case "assistant":
-        /** @type {OpenAI.ChatCompletionMessageToolCall[]} */
-        const toolCalls = [];
-        chatMessages_formatted.push({
-          role: "assistant",
-          content: msg.message_data.content.map( contentBlock => {
-            switch (contentBlock.type) {
-              case "text":
-                return contentBlock;
-              case "tool":
-                toolCalls.push({
-                  type: "function",
-                  id: contentBlock.tool_id,
-                  function: {
-                    name: contentBlock.name,
-                    arguments: contentBlock.arguments
-                  }
-                });
-            }
-          }).filter(x=>!!x),
-          tool_calls: toolCalls.length > 0 ? toolCalls : undefined,
-        });
+        formatted.push(formatAssistantContent(msg.message_data));
         break;
       case "tool":
-      for (const contentBlock of msg.message_data.content) {
-          switch (contentBlock.type) {
-            case "text":
-              chatMessages_formatted.push({
-                role: "tool",
-                tool_call_id: msg.message_data.tool_id,
-                content: contentBlock.text,
-              });
-              break;
-          }
-        }
-        break;
-      // Optionally handle unknown types
-      default:
-        // Ignore or log unknown message types
+        formatted.push(...formatToolContent(msg.message_data));
         break;
     }
   }
 
-  return chatMessages_formatted;
+  return formatted;
 }
