@@ -1,45 +1,39 @@
 
-import { execSync } from 'child_process';
-import fs from 'fs';
+import { execFile } from 'child_process';
+import { writeFile, readFile, unlink, access } from 'fs/promises';
+import { promisify } from 'util';
 import path from 'path';
 import { tmpdir } from 'os';
 
+const execFileAsync = promisify(execFile);
+
 /**
- *
  * @param {string} base64Data - Base64 encoded audio data
- * @returns {string}
+ * @returns {Promise<string>}
  */
-export function convertAudioToMp3Base64 (base64Data) {
-  // Create temporary file paths
+export async function convertAudioToMp3Base64(base64Data) {
   const tempDir = tmpdir();
-    const inputFile = path.join(tempDir, `input_${Date.now()}.tmp`);
-    const outputFile = path.join(tempDir, `output_${Date.now()}.mp3`);
+  const inputFile = path.join(tempDir, `input_${Date.now()}.tmp`);
+  const outputFile = path.join(tempDir, `output_${Date.now()}.mp3`);
 
-    try {
-        // Convert base64 to buffer and write to temporary file
-        const buffer = Buffer.from(base64Data, 'base64');
-        fs.writeFileSync(inputFile, buffer);
+  try {
+    const buffer = Buffer.from(base64Data, 'base64');
+    await writeFile(inputFile, buffer);
 
-        // Execute ffmpeg command to convert to mp3
-        const command = `ffmpeg -i "${inputFile}" -acodec mp3 -ab 128k "${outputFile}"`;
-        execSync(command);
+    await execFileAsync('ffmpeg', ['-i', inputFile, '-acodec', 'mp3', '-ab', '128k', outputFile]);
 
-        // Read the output file and convert to base64
-        const outputBuffer = fs.readFileSync(outputFile);
-        const outputBase64 = outputBuffer.toString('base64');
+    const outputBuffer = await readFile(outputFile);
+    const outputBase64 = outputBuffer.toString('base64');
 
-        // Clean up temporary files
-        fs.unlinkSync(inputFile);
-        fs.unlinkSync(outputFile);
+    await unlink(inputFile);
+    await unlink(outputFile);
 
-        // Return the result
-        return outputBase64
+    return outputBase64;
+  } catch (error) {
+    // Clean up files in case of error
+    await access(inputFile).then(() => unlink(inputFile)).catch(() => {});
+    await access(outputFile).then(() => unlink(outputFile)).catch(() => {});
 
-    } catch (error) {
-        // Clean up files in case of error
-        if (fs.existsSync(inputFile)) fs.unlinkSync(inputFile);
-        if (fs.existsSync(outputFile)) fs.unlinkSync(outputFile);
-
-        throw error;
-    }
+    throw error;
+  }
 }

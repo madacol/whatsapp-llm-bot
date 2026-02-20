@@ -390,7 +390,7 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
     const chatMessages = await getMessages(chatId)
 
     // Prepare messages for OpenAI
-    const formattedMessages = formatMessagesForOpenAI(chatMessages);
+    const formattedMessages = await formatMessagesForOpenAI(chatMessages);
 
     await processLlmResponse({
       llmClient, chatModel, systemPrompt, actions,
