@@ -281,16 +281,16 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
             );
             console.log("response", functionResponse);
 
-            if (!functionResponse.permissions.silent) {
-              // Store tool result in database
-              /** @type {ToolMessage} */
-              const toolMessage = {
-                role: "tool",
-                tool_id: toolCall.id,
-                content: [{type: "text", text: JSON.stringify(functionResponse.result)}]
-              }
-              await addMessage(chatId, toolMessage, senderIds)
+            // Always store tool result (silent tools get a stub to satisfy API pairing)
+            /** @type {ToolMessage} */
+            const toolMessage = {
+              role: "tool",
+              tool_id: toolCall.id,
+              content: [{type: "text", text: functionResponse.permissions.silent
+                ? "[recalled prior messages]"
+                : JSON.stringify(functionResponse.result)}]
             }
+            await addMessage(chatId, toolMessage, senderIds)
 
             const resultMessage =
               typeof functionResponse.result === "string"
