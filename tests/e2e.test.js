@@ -364,6 +364,8 @@ describe("Scenario 8: Run JavaScript via tool call", () => {
 
   before(async () => {
     await seedChat(chatId, { enabled: true });
+    // Enable debug so tool call output is visible in responses
+    await testDb.sql`UPDATE chats SET debug_until = '9999-01-01' WHERE chat_id = ${chatId}`;
   });
 
   it("executes run_javascript tool call and returns final LLM reply", async () => {
@@ -521,6 +523,96 @@ describe("Scenario 10: Private chat — always responds when enabled", () => {
 
     assert.ok(responses.length > 0);
     assert.ok(responses.some((r) => r.text.includes("Private chat response")));
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════
+// Scenario 12: Debug mode — gates tool call verbose output
+// ═══════════════════════════════════════════════════════════════════
+describe("Scenario 12: Debug mode gates tool call output", () => {
+  const chatIdOff = "s12-debug-off";
+  const chatIdOn = "s12-debug-on";
+
+  before(async () => {
+    await seedChat(chatIdOff, { enabled: true });
+    await seedChat(chatIdOn, { enabled: true });
+    // Enable debug mode for the "on" chat
+    await testDb.sql`UPDATE chats SET debug_until = '9999-01-01' WHERE chat_id = ${chatIdOn}`;
+  });
+
+  it("does NOT send tool call args or results when debug is off", async () => {
+    mockServer.addResponses(
+      {
+        tool_calls: [
+          {
+            id: "call_dbg_off_001",
+            type: "function",
+            function: {
+              name: "run_javascript",
+              arguments: JSON.stringify({ code: "() => 'hello'" }),
+            },
+          },
+        ],
+      },
+      "Final answer",
+    );
+
+    const { context, responses } = createIncomingContext({
+      chatId: chatIdOff,
+      content: [{ type: "text", text: "Test debug off" }],
+    });
+    await handleMessage(context);
+
+    // Should have the final LLM reply but NOT tool args or result details
+    assert.ok(
+      responses.some((r) => r.text.includes("Final answer")),
+      "Should have the final LLM reply",
+    );
+    assert.ok(
+      !responses.some((r) => r.text.includes("🔧")),
+      `Tool call args should NOT be shown when debug is off, got: ${responses.map(r=>r.text).join(" | ")}`,
+    );
+    assert.ok(
+      !responses.some((r) => r.text.includes("✅ *Result*")),
+      `Tool results should NOT be shown when debug is off, got: ${responses.map(r=>r.text).join(" | ")}`,
+    );
+  });
+
+  it("DOES send tool call args and results when debug is on", async () => {
+    mockServer.addResponses(
+      {
+        tool_calls: [
+          {
+            id: "call_dbg_on_001",
+            type: "function",
+            function: {
+              name: "run_javascript",
+              arguments: JSON.stringify({ code: "() => 'hello'" }),
+            },
+          },
+        ],
+      },
+      "Final answer debug on",
+    );
+
+    const { context, responses } = createIncomingContext({
+      chatId: chatIdOn,
+      content: [{ type: "text", text: "Test debug on" }],
+    });
+    await handleMessage(context);
+
+    assert.ok(
+      responses.some((r) => r.text.includes("Final answer debug on")),
+      "Should have the final LLM reply",
+    );
+    assert.ok(
+      responses.some((r) => r.text.includes("🔧")),
+      "Tool call args should be shown when debug is on",
+    );
+    assert.ok(
+      responses.some((r) => r.text.includes("✅ *Result*")),
+      "Tool results should be shown when debug is on",
+    );
   });
 });
 

@@ -114,31 +114,33 @@ async function processLlmResponse({
         arguments: toolCall.function.arguments,
       });
 
-      // Show tool call to user
-      const shortId = shortenToolId(toolCall.id);
-      let args;
-      try {
-        args = JSON.parse(toolCall.function.arguments || "{}");
-      } catch {
-        console.error("Failed to parse tool call arguments:", toolCall.function.arguments);
-        args = {};
-      }
-      const argEntries = Object.entries(args);
-      const header = `🔧 *${toolCall.function.name}*    [${shortId}]`;
+      // Show tool call to user (only in debug mode)
+      if (context.isDebug) {
+        const shortId = shortenToolId(toolCall.id);
+        let args;
+        try {
+          args = JSON.parse(toolCall.function.arguments || "{}");
+        } catch {
+          console.error("Failed to parse tool call arguments:", toolCall.function.arguments);
+          args = {};
+        }
+        const argEntries = Object.entries(args);
+        const header = `🔧 *${toolCall.function.name}*    [${shortId}]`;
 
-      if (argEntries.length === 0) {
-        await context.sendMessage(header);
-      } else if (argEntries.length === 1 && typeof argEntries[0][1] === "string" && argEntries[0][1].length <= 60) {
-        await context.sendMessage(header, `*${argEntries[0][0]}*: ${argEntries[0][1]}`);
-      } else {
-        const parts = argEntries.map(([k, v]) => {
-          if (typeof v === "string" && v.includes("\n")) {
-            return `*${k}*:\n\`\`\`\n${v}\n\`\`\``;
-          }
-          const val = typeof v === "string" ? v : JSON.stringify(v, null, 2);
-          return `*${k}*: ${val}`;
-        });
-        await context.sendMessage(header, parts.join("\n\n"));
+        if (argEntries.length === 0) {
+          await context.sendMessage(header);
+        } else if (argEntries.length === 1 && typeof argEntries[0][1] === "string" && argEntries[0][1].length <= 60) {
+          await context.sendMessage(header, `*${argEntries[0][0]}*: ${argEntries[0][1]}`);
+        } else {
+          const parts = argEntries.map(([k, v]) => {
+            if (typeof v === "string" && v.includes("\n")) {
+              return `*${k}*:\n\`\`\`\n${v}\n\`\`\``;
+            }
+            const val = typeof v === "string" ? v : JSON.stringify(v, null, 2);
+            return `*${k}*: ${val}`;
+          });
+          await context.sendMessage(header, parts.join("\n\n"));
+        }
       }
     }
 
@@ -186,8 +188,8 @@ async function processLlmResponse({
           typeof functionResponse.result === "string"
             ? functionResponse.result
             : JSON.stringify(functionResponse.result, null, 2);
-        // Show tool result to user (unless silent)
-        if (!functionResponse.permissions.silent) {
+        // Show tool result to user (only in debug mode, unless silent)
+        if (context.isDebug && !functionResponse.permissions.silent) {
           await context.sendMessage(
             `✅ *Result*    [${shortId}]`,
             resultMessage,
@@ -288,6 +290,7 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
       chatId,
       senderIds,
       content,
+      isDebug: false,
       getIsAdmin: async () => {
         const adminStatus = await messageContext.getAdminStatus();
         return adminStatus === "admin" || adminStatus === "superadmin";
@@ -364,6 +367,8 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
 
     // Check if the bot should respond
     const chatInfo = await getChat(chatId);
+    context.isDebug = !!chatInfo?.debug_until && new Date(chatInfo.debug_until) > new Date();
+
     if (!shouldRespond(chatInfo, isGroup, content, selfIds, quotedSenderId)) {
       return;
     }
