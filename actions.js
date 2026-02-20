@@ -32,7 +32,7 @@ export async function executeAction(
     throw new Error(`Action "${actionName}" not found`);
   }
 
-  if (action.permissions?.requireAdmin && !context.getIsAdmin()) {
+  if (action.permissions?.requireAdmin && !(await context.getIsAdmin())) {
     throw new Error(`Action "${actionName}" requires admin permissions`);
   }
 
