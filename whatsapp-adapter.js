@@ -355,21 +355,14 @@ async function adaptIncomingMessage(baileysMessage, sock, messageHandler) {
 }
 
 /**
- * Initialize WhatsApp connection and set up message handling
- * @param {(message: IncomingContext) => Promise<void>} onMessageHandler - Handler function that receives enriched message context
+ * Register event handlers on a Baileys socket.
+ * @param {{ current: import('@whiskeysockets/baileys').WASocket }} sockRef
+ * @param {() => Promise<void>} saveCreds
+ * @param {(message: IncomingContext) => Promise<void>} onMessageHandler
+ * @param {() => Promise<void>} reconnect
  */
-export async function connectToWhatsApp(onMessageHandler) {
-
-  const { state, saveCreds } = await useMultiFileAuthState(
-    "./auth_info_baileys",
-  );
-
-  const sock = makeWASocket({
-    auth: state,
-    browser: ["WhatsApp LLM Bot", "Chrome", "1.0.0"],
-  });
-
-  sock.ev.process(async (events) => {
+function registerHandlers(sockRef, saveCreds, onMessageHandler, reconnect) {
+  sockRef.current.ev.process(async (events) => {
     if (events["connection.update"]) {
       const update = events["connection.update"];
       const { connection, lastDisconnect, qr } = update;
@@ -394,16 +387,14 @@ export async function connectToWhatsApp(onMessageHandler) {
           shouldReconnect,
         );
         if (shouldReconnect) {
-          // Clean up current socket before reconnecting to prevent memory leaks
-          sock.end(undefined);
-
+          sockRef.current.end(undefined);
           await new Promise(resolve => setTimeout(resolve, 1000));
-          await connectToWhatsApp(onMessageHandler);
+          await reconnect();
         }
       } else if (connection === "open") {
         console.log("WhatsApp connection opened");
-        const selfIds = getSelfIds(sock);
-        console.log("Self IDs:", selfIds, JSON.stringify(sock.user, null, 2));
+        const selfIds = getSelfIds(sockRef.current);
+        console.log("Self IDs:", selfIds, JSON.stringify(sockRef.current.user, null, 2));
       }
     }
 
@@ -415,25 +406,57 @@ export async function connectToWhatsApp(onMessageHandler) {
       const { messages } = events["messages.upsert"];
       for (const message of messages) {
         if (message.key.fromMe || !message.message) continue;
-        await adaptIncomingMessage(message, sock, onMessageHandler);
+        await adaptIncomingMessage(message, sockRef.current, onMessageHandler);
       }
     }
   });
+}
+
+// TODO: add reconnect integration test
+
+/**
+ * Initialize WhatsApp connection and set up message handling
+ * @param {(message: IncomingContext) => Promise<void>} onMessageHandler - Handler function that receives enriched message context
+ */
+export async function connectToWhatsApp(onMessageHandler) {
+
+  const { state, saveCreds } = await useMultiFileAuthState(
+    "./auth_info_baileys",
+  );
+
+  /** @type {{ current: import('@whiskeysockets/baileys').WASocket }} */
+  const sockRef = {
+    current: makeWASocket({
+      auth: state,
+      browser: ["WhatsApp LLM Bot", "Chrome", "1.0.0"],
+    }),
+  };
+
+  async function reconnect() {
+    const { state: newState, saveCreds: newSaveCreds } = await useMultiFileAuthState(
+      "./auth_info_baileys",
+    );
+    sockRef.current = makeWASocket({
+      auth: newState,
+      browser: ["WhatsApp LLM Bot", "Chrome", "1.0.0"],
+    });
+    registerHandlers(sockRef, newSaveCreds, onMessageHandler, reconnect);
+  }
+
+  registerHandlers(sockRef, saveCreds, onMessageHandler, reconnect);
 
   return {
     async closeWhatsapp() {
       console.log("Cleaning up WhatsApp connection...");
       try {
-        if (sock) {
-          sock.end(undefined);
-        }
+        sockRef.current.end(undefined);
       } catch (error) {
         console.error("Error during WhatsApp cleanup:", error);
       }
     },
     /** @param {string} chatId @param {string} text */
     async sendToChat(chatId, text) {
-      await sock.sendMessage(chatId, { text });
+      await sockRef.current.sendMessage(chatId, { text });
     },
   }
 }
