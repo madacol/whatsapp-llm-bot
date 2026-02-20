@@ -103,6 +103,12 @@ async function handles_api_error(action_fn) {
 }
 \`\`\`
 
+## Reading and editing actions
+
+- Use \`mode: "read"\` to inspect an action's source before editing.
+- Use \`mode: "edit"\` to overwrite an existing action (requires confirmation).
+- Use \`mode: "create"\` (default) only for new actions.
+
 ## Confirmation flow
 
 Before the file is written, the user must approve the action. Always provide \`proposed_tests\` — a concise summary with one line per test function (name + what it asserts). The user will review the action name and proposed tests before approving. If rejected, revise the action based on user feedback and retry.
@@ -187,9 +193,15 @@ export default /** @type {defineAction} */ ((x) => x)({
         description:
           "camelCase file name without extension (e.g. 'myAction' creates actions/myAction.js)",
       },
+      mode: {
+        type: "string",
+        enum: ["create", "read", "edit"],
+        description:
+          'Operation mode: "create" (default) for new actions, "read" to inspect source, "edit" to overwrite existing',
+      },
       code: {
         type: "string",
-        description: "Complete file content (ES module with default export)",
+        description: "Complete file content (ES module with default export). Required for create/edit modes.",
       },
       proposed_tests: {
         type: "string",
@@ -197,7 +209,7 @@ export default /** @type {defineAction} */ ((x) => x)({
           "Human-readable summary of test functions (one line per test: name + what it asserts)",
       },
     },
-    required: ["file_name", "code"],
+    required: ["file_name"],
   },
   permissions: {
     autoExecute: true,
@@ -247,6 +259,47 @@ export default /** @type {defineAction} */ ((x) => x)({
         await fs.rm(filePath, { force: true });
       }
     },
+    async function reads_existing_action(action_fn, _db) {
+      const filePath = path.join(process.cwd(), "actions", "testReadTarget.js");
+      try {
+        await fs.writeFile(filePath, "// read target content", "utf-8");
+        const context = { confirm: async () => true };
+        const result = await action_fn(context, {
+          file_name: "testReadTarget",
+          mode: "read",
+        });
+        assert.ok(typeof result === "string");
+        assert.ok(result.includes("// read target content"), `Expected file contents, got: ${result}`);
+      } finally {
+        await fs.rm(filePath, { force: true });
+      }
+    },
+    async function edit_rejects_nonexistent(action_fn, _db) {
+      const result = await action_fn({}, {
+        file_name: "testNonexistentEdit",
+        mode: "edit",
+        code: "// edit code",
+        proposed_tests: "- test: checks something",
+      });
+      assert.ok(typeof result === "string");
+      assert.ok(result.toLowerCase().includes("create"), `Expected suggestion to use create, got: ${result}`);
+    },
+    async function create_rejects_existing(action_fn, _db) {
+      const filePath = path.join(process.cwd(), "actions", "testExistingCreate.js");
+      try {
+        await fs.writeFile(filePath, "// existing", "utf-8");
+        const result = await action_fn({}, {
+          file_name: "testExistingCreate",
+          mode: "create",
+          code: "// new code",
+          proposed_tests: "- test: checks something",
+        });
+        assert.ok(typeof result === "string");
+        assert.ok(result.toLowerCase().includes("edit"), `Expected suggestion to use edit, got: ${result}`);
+      } finally {
+        await fs.rm(filePath, { force: true });
+      }
+    },
     async function writes_file_on_confirmation(action_fn, _db) {
       const context = {
         confirm: async () => true,
@@ -266,15 +319,49 @@ export default /** @type {defineAction} */ ((x) => x)({
       }
     },
   ],
-  /** @param {ActionContext} context  @param {{ file_name: string, code: string, proposed_tests?: string }} params */
-  action_fn: async function (context, { file_name, code, proposed_tests }) {
+  /** @param {ActionContext} context  @param {{ file_name: string, mode?: "create" | "read" | "edit", code?: string, proposed_tests?: string }} params */
+  action_fn: async function (context, { file_name, mode = "create", code, proposed_tests }) {
     if (!/^[a-zA-Z][a-zA-Z0-9]*$/.test(file_name)) {
       throw new Error(
         "file_name must be alphanumeric camelCase (no dots, slashes, or spaces)",
       );
     }
 
-    let preview = `*Create action:* ${file_name}`;
+    const actionsDir = path.resolve(process.cwd(), "actions");
+    const filePath = path.join(actionsDir, `${file_name}.js`);
+
+    if (mode === "read") {
+      try {
+        const content = await fs.readFile(filePath, "utf-8");
+        return content;
+      } catch {
+        return `Action file not found: actions/${file_name}.js`;
+      }
+    }
+
+    if (!code) {
+      throw new Error("code is required for create/edit modes");
+    }
+
+    /** @type {boolean} */
+    let fileExists;
+    try {
+      await fs.access(filePath);
+      fileExists = true;
+    } catch {
+      fileExists = false;
+    }
+
+    if (mode === "edit" && !fileExists) {
+      return `Action file not found: actions/${file_name}.js — use mode "create" to create a new action.`;
+    }
+
+    if (mode === "create" && fileExists) {
+      return `Action file already exists: actions/${file_name}.js — use mode "edit" to modify an existing action.`;
+    }
+
+    const verb = mode === "edit" ? "Edit" : "Create";
+    let preview = `*${verb} action:* ${file_name}`;
     if (proposed_tests) {
       preview += `\n\n*Proposed tests:*\n${proposed_tests}`;
     }
@@ -285,11 +372,9 @@ export default /** @type {defineAction} */ ((x) => x)({
       return "Action rejected. Please revise the action and proposed tests based on user feedback, then retry.";
     }
 
-    const actionsDir = path.resolve(process.cwd(), "actions");
-    const filePath = path.join(actionsDir, `${file_name}.js`);
-
     await fs.writeFile(filePath, code, "utf-8");
 
-    return `Action file created: actions/${file_name}.js`;
+    const pastVerb = mode === "edit" ? "updated" : "created";
+    return `Action file ${pastVerb}: actions/${file_name}.js`;
   },
 });
