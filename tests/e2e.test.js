@@ -411,6 +411,59 @@ describe("Scenario 8: Run JavaScript via tool call", () => {
 });
 
 // ═══════════════════════════════════════════════════════════════════
+// Scenario 8b: Tool call depth guard
+// ═══════════════════════════════════════════════════════════════════
+describe("Scenario 8b: Tool call depth guard", () => {
+  const chatId = "s8b-chat";
+
+  before(async () => {
+    await seedChat(chatId, { enabled: true });
+  });
+
+  it("stops processing after MAX_TOOL_CALL_DEPTH iterations", async () => {
+    // Queue 15 tool-call responses using a non-existent action.
+    // Tool errors always set continueProcessing=true, so without a depth guard
+    // the loop would continue for all 15 + hit the server error.
+    const toolCallResponses = Array.from({ length: 15 }, (_, i) => ({
+      tool_calls: [
+        {
+          id: `call_depth_${String(i).padStart(3, "0")}`,
+          type: "function",
+          function: {
+            name: "nonexistent_action_for_depth_test",
+            arguments: "{}",
+          },
+        },
+      ],
+    }));
+    mockServer.addResponses(...toolCallResponses);
+
+    const requestsBefore = mockServer.getRequests().length;
+    const { context, responses } = createIncomingContext({
+      chatId,
+      content: [{ type: "text", text: "trigger depth test" }],
+    });
+    await handleMessage(context);
+
+    const requestsAfter = mockServer.getRequests().length;
+    const totalRequests = requestsAfter - requestsBefore;
+
+    // With depth guard at 10: 1 initial + 10 continuations = 11 max
+    // Without guard: would attempt all 15+ continuations
+    assert.ok(
+      totalRequests <= 11,
+      `Expected at most 11 LLM requests (depth guard at 10), got ${totalRequests}`,
+    );
+
+    // Should have a depth limit warning in responses
+    assert.ok(
+      responses.some((r) => r.text.toLowerCase().includes("depth") || r.text.toLowerCase().includes("limit")),
+      "Should warn about depth limit being reached",
+    );
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════
 // Scenario 9: Group chat — only responds when mentioned
 // ═══════════════════════════════════════════════════════════════════
 describe("Scenario 9: Group chat — only responds when mentioned", () => {
