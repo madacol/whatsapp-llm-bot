@@ -40,34 +40,31 @@ export default /** @type {defineAction} */ ((x) => x)({
     },
   ],
   action_fn: async function ({ chatId, rootDb }, { prompt }) {
-    const targetChatId = chatId;
     prompt = (prompt || "").trim();
 
-    // First check if chat exists
     const {
       rows: [chatExists],
     } =
-      await rootDb.sql`SELECT chat_id FROM chats WHERE chat_id = ${targetChatId}`;
+      await rootDb.sql`SELECT chat_id FROM chats WHERE chat_id = ${chatId}`;
 
     if (!chatExists) {
-      throw new Error(`Chat ${targetChatId} does not exist.`);
+      throw new Error(`Chat ${chatId} does not exist.`);
     }
 
-    // Empty prompt clears/resets to default
     const newPrompt = prompt.length === 0 ? null : prompt;
 
     try {
       await rootDb.sql`
         UPDATE chats
         SET system_prompt = ${newPrompt}
-        WHERE chat_id = ${targetChatId}
+        WHERE chat_id = ${chatId}
       `;
 
       if (newPrompt === null) {
-        return `System prompt cleared for chat ${targetChatId}. The default prompt will be used.`;
+        return `System prompt cleared for chat ${chatId}. The default prompt will be used.`;
       }
 
-      return `System prompt updated for chat ${targetChatId}\n\n*New prompt:*\n${prompt}`;
+      return `System prompt updated for chat ${chatId}\n\n*New prompt:*\n${prompt}`;
     } catch (error) {
       console.error("Error setting system prompt:", error);
       const errorMessage =

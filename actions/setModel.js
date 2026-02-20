@@ -42,35 +42,31 @@ export default /** @type {defineAction} */ ((x) => x)({
     },
   ],
   action_fn: async function ({ chatId, rootDb }, { model }) {
-    const targetChatId = chatId;
     model = model.trim();
 
-    // First check if chat exists
     const {
       rows: [chatExists],
     } =
-      await rootDb.sql`SELECT chat_id FROM chats WHERE chat_id = ${targetChatId}`;
+      await rootDb.sql`SELECT chat_id FROM chats WHERE chat_id = ${chatId}`;
 
     if (!chatExists) {
-      throw new Error(`Chat ${targetChatId} does not exist.`);
+      throw new Error(`Chat ${chatId} does not exist.`);
     }
 
-    // If empty, set to null to revert to global default
     const modelValue = model.length === 0 ? null : model;
 
-    // Update the model for the chat
     try {
       await rootDb.sql`
         UPDATE chats
         SET model = ${modelValue}
-        WHERE chat_id = ${targetChatId}
+        WHERE chat_id = ${chatId}
       `;
 
       if (modelValue) {
-        return `✅ Model updated for chat ${targetChatId}\n\n*New model:*\n${modelValue}`;
+        return `✅ Model updated for chat ${chatId}\n\n*New model:*\n${modelValue}`;
       } else {
         const defaultModel = (await import("../config.js")).default.model;
-        return `✅ Model reverted to default for chat ${targetChatId}\n\n*Default model:*\n${defaultModel}`;
+        return `✅ Model reverted to default for chat ${chatId}\n\n*Default model:*\n${defaultModel}`;
       }
     } catch (error) {
       console.error("Error setting model:", error);

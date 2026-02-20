@@ -73,18 +73,6 @@ export async function getMessageContent(baileysMessage) {
       quotedSenderId = stripped;
     }
 
-    // if (quotedMessage.imageMessage) {
-    //   quote.content.push(
-    //     /** @type {ImageContentBlock} */
-    //     ({
-    //       type: "image",
-    //       encoding: "base64",
-    //       mime_type: quotedMessage.imageMessage.mimetype,
-    //       data: Buffer.from(quotedMessage.imageMessage.jpegThumbnail).toString('base64')
-    //     })
-    //   )
-    // }
-
     if (quoteText) {
       quote.content.push(
         /** @type {TextContentBlock} */
@@ -216,16 +204,21 @@ async function adaptIncomingMessage(baileysMessage, sock, messageHandler) {
   }
 
   const chatId = baileysMessage.key.remoteJid || "";
+  // Spread to index-accessible object — Baileys key type doesn't declare LID/PID fields
+  /** @type {{ [k: string]: unknown }} */
+  const key = { ...baileysMessage.key };
   /** @type {string[]} */
-  const senderIds = []
-  senderIds.push(baileysMessage.key.participant || baileysMessage.key.remoteJid || "unknown")
-  senderIds.push( // @ts-ignore
-    baileysMessage.key.participantLid // @ts-ignore
-    || baileysMessage.key.participantPid // @ts-ignore
-    || baileysMessage.key.senderLid // @ts-ignore
-    || baileysMessage.key.senderPid // @ts-ignore
-    || "unknown"
-  )
+  const senderIds = [];
+  senderIds.push(String(key.participant || key.remoteJid || "unknown"));
+  senderIds.push(
+    String(
+      key.participantLid
+      || key.participantPid
+      || key.senderLid
+      || key.senderPid
+      || "unknown",
+    ),
+  );
 
   const isGroup = !!chatId?.endsWith("@g.us");
 

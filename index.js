@@ -285,9 +285,9 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
     // Create legacy context for actions (maintains backward compatibility)
     /** @type {Context} */
     const context = {
-      chatId: chatId,
+      chatId,
       senderIds,
-      content: content,
+      content,
       getIsAdmin: async () => {
         const adminStatus = await messageContext.getAdminStatus();
         return adminStatus === "admin" || adminStatus === "superadmin";
