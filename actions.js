@@ -58,7 +58,9 @@ export async function executeAction(
     log: async (...args) => {
       const message = args.join(" ");
       console.log(...args);
-      await context.sendMessage(`📝 *Log*    [${shortId}]`, message);
+      if (context.isDebug) {
+        await context.sendMessage(`📝 *Log*    [${shortId}]`, message);
+      }
       return message;
     },
     sendMessage: async (message) => {

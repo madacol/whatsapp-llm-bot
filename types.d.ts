@@ -97,6 +97,7 @@ type Context = {
   chatId: string;
   senderIds: string[];
   content: IncomingContentBlock[];
+  isDebug: boolean;
   getIsAdmin: () => Promise<boolean>;
   sendMessage: (header: string, message?: string) => Promise<void>;
   reply: (header: string, message?: string) => Promise<void>;
