@@ -118,9 +118,9 @@ export function parseCommandArgs(args, parameters) {
  * Convert stored Message[] rows from the DB into OpenAI ChatCompletionMessageParam[].
  * Strips leading tool results and handles user/assistant/tool roles.
  * @param {Array<{message_data: Message, sender_id: string}>} chatMessages - Rows from DB (newest first)
- * @returns {Array<OpenAI.ChatCompletionMessageParam>}
+ * @returns {Promise<Array<OpenAI.ChatCompletionMessageParam>>}
  */
-export function formatMessagesForOpenAI(chatMessages) {
+export async function formatMessagesForOpenAI(chatMessages) {
   /** @type {Array<OpenAI.ChatCompletionMessageParam>} */
   const chatMessages_formatted = [];
   const reversedMessages = [...chatMessages].reverse();
@@ -167,7 +167,7 @@ export function formatMessagesForOpenAI(chatMessages) {
                 data = contentBlock.data;
               } else {
                 console.warn(`Unsupported audio format: ${contentBlock.mime_type}`);
-                data = convertAudioToMp3Base64(contentBlock.data);
+                data = await convertAudioToMp3Base64(contentBlock.data);
               }
               messageContent.push({
                 type: "input_audio",
