@@ -12,7 +12,7 @@ let db;
 before(async () => {
   db = await createTestDb();
   const actionsDir = path.resolve(process.cwd(), "actions");
-  const files = (await fs.readdir(actionsDir)).filter((f) => f.endsWith(".js"));
+  const files = (await fs.readdir(actionsDir)).filter((f) => f.endsWith(".js") && !f.startsWith("_"));
   for (const file of files) {
     const mod = await import(`file://${path.join(actionsDir, file)}`);
     actions.push({ fileName: file, action: mod.default });

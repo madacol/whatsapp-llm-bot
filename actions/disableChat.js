@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { setChatEnabled } from "./_setChatEnabled.js";
 
 export default /** @type {defineAction} */ ((x) => x)({
   name: "disable_chat",
@@ -33,32 +34,6 @@ export default /** @type {defineAction} */ ((x) => x)({
     },
   ],
   action_fn: async function ({ chatId, rootDb }, params) {
-    const targetChatId = params.chatId || chatId;
-
-    // First check if chat exists
-    const {
-      rows: [chatExists],
-    } =
-      await rootDb.sql`SELECT chat_id FROM chats WHERE chat_id = ${targetChatId}`;
-
-    if (!chatExists) {
-      throw new Error(`Chat ${targetChatId} does not exist.`);
-    }
-
-    // If chat exists, update its is_enabled status
-    try {
-      await rootDb.sql`
-        UPDATE chats
-        SET is_enabled = FALSE
-        WHERE chat_id = ${targetChatId}
-      `;
-
-      return `LLM answers disabled for chat ${targetChatId}`;
-    } catch (error) {
-      console.error("Error disabling chat:", error);
-      const errorMessage =
-        error instanceof Error ? error.message : String(error);
-      throw new Error("Failed to disable chat: " + errorMessage);
-    }
+    return setChatEnabled(rootDb, params.chatId || chatId, false);
   },
 });
