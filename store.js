@@ -15,7 +15,7 @@ import { getDb } from "./db.js";
  * @typedef {{
  *   message_id: number;
  *   chat_id: string;
- *   sender_id: string;
+ *   sender_id: string; // Comma-separated sender IDs (e.g. "phone_id,lid_id")
  *   message_data: Message;
  *   timestamp: Date;
  * }} MessageRow
@@ -67,8 +67,7 @@ export async function initStore(injectedDb){
         db.sql`ALTER TABLE messages DROP COLUMN IF EXISTS content`,
       ]);
     } catch (error) {
-      // Ignore errors if columns already exist
-      console.log("Database schema already up to date");
+      console.error("Schema migration error:", error);
     }
     return {
       /**
@@ -89,6 +88,7 @@ export async function initStore(injectedDb){
       * @param {ChatRow['chat_id']} chatId
       * @param {number} limit
       */
+      // Returns messages in DESC order (newest first); callers reverse for chronological use
       async getMessages (chatId, limit = 50) {
         const {rows: messages} = await db.sql`SELECT * FROM messages WHERE chat_id = ${chatId} AND cleared_at IS NULL ORDER BY timestamp DESC LIMIT ${limit}`;
         return /** @type {MessageRow[]} */ (messages);
