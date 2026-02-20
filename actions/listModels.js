@@ -78,6 +78,8 @@ export default /** @type {defineAction} */ ((x) => x)({
     /** @type {{ data: OpenRouterModel[] }} */
     const { data } = await response.json();
 
+    const TOKENS_PER_MILLION = 1_000_000;
+
     const models = data
       .filter(model =>
         filterPatterns.some(pattern => model.id.toLowerCase().includes(pattern))
@@ -85,9 +87,10 @@ export default /** @type {defineAction} */ ((x) => x)({
       .map(model => ({
         id: model.id,
         name: model.name,
-        contextSize: Math.round(model.context_length / 1024) + 'k',
-        inputPrice: parseFloat(model.pricing.prompt) * 1000000,
-        outputPrice: parseFloat(model.pricing.completion) * 1000000
+        contextLength: model.context_length,
+        contextDisplay: Math.round(model.context_length / 1000) + 'k',
+        inputPrice: parseFloat(model.pricing.prompt) * TOKENS_PER_MILLION,
+        outputPrice: parseFloat(model.pricing.completion) * TOKENS_PER_MILLION,
       }));
 
     const sortBy = params.sortBy || 'input_price';
@@ -96,7 +99,7 @@ export default /** @type {defineAction} */ ((x) => x)({
     } else if (sortBy === "output_price") {
       models.sort((left, right) => left.outputPrice - right.outputPrice);
     } else if (sortBy === "context") {
-      models.sort((left, right) => parseInt(right.contextSize) - parseInt(left.contextSize));
+      models.sort((left, right) => right.contextLength - left.contextLength);
     }
 
     await context.log(`Found ${models.length} models matching criteria`);
@@ -104,7 +107,7 @@ export default /** @type {defineAction} */ ((x) => x)({
     let table = "*IN* | *OUT* | *CTX* | *MODEL* | *ID*\n";
     table += "------------------------------------------------------------\n";
     for (const model of models) {
-      table += `• $${model.inputPrice.toFixed(2)} | $${model.outputPrice.toFixed(2)} | ${model.contextSize} | *${model.name}* | \`${model.id}\`\n`;
+      table += `• $${model.inputPrice.toFixed(2)} | $${model.outputPrice.toFixed(2)} | ${model.contextDisplay} | *${model.name}* | \`${model.id}\`\n`;
     }
 
     await context.log("Model comparison complete");

@@ -1,5 +1,5 @@
 /**
- * Shortens a tool call ID to its first 6 characters
+ * Shortens a tool call ID to characters 6–11 (skipping the common prefix)
  * @param {string} toolCallId
  * @returns {string} Shortened tool call ID
  */
