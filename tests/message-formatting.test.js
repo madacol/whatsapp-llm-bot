@@ -307,7 +307,7 @@ describe("parseCommandArgs", () => {
 // ── formatMessagesForOpenAI ──
 
 describe("formatMessagesForOpenAI", () => {
-  it("converts user text message", () => {
+  it("converts user text message", async () => {
     const messages = [
       {
         message_data: {
@@ -317,14 +317,14 @@ describe("formatMessagesForOpenAI", () => {
         sender_id: "user-1",
       },
     ];
-    const result = formatMessagesForOpenAI(messages);
+    const result = await formatMessagesForOpenAI(messages);
 
     assert.equal(result.length, 1);
     assert.equal(result[0].role, "user");
     assert.deepEqual(result[0].content, [{ type: "text", text: "hello" }]);
   });
 
-  it("converts user image message to image_url", () => {
+  it("converts user image message to image_url", async () => {
     const messages = [
       {
         message_data: {
@@ -336,7 +336,7 @@ describe("formatMessagesForOpenAI", () => {
         sender_id: "user-1",
       },
     ];
-    const result = formatMessagesForOpenAI(messages);
+    const result = await formatMessagesForOpenAI(messages);
 
     assert.equal(result.length, 1);
     const content = /** @type {any[]} */ (result[0].content);
@@ -344,7 +344,7 @@ describe("formatMessagesForOpenAI", () => {
     assert.equal(content[0].image_url.url, "data:image/png;base64,abc123");
   });
 
-  it("converts user quote message with > prefix", () => {
+  it("converts user quote message with > prefix", async () => {
     const messages = [
       {
         message_data: {
@@ -359,14 +359,14 @@ describe("formatMessagesForOpenAI", () => {
         sender_id: "user-1",
       },
     ];
-    const result = formatMessagesForOpenAI(messages);
+    const result = await formatMessagesForOpenAI(messages);
 
     const content = /** @type {any[]} */ (result[0].content);
     assert.equal(content[0].type, "text");
     assert.ok(content[0].text.startsWith("> quoted text"));
   });
 
-  it("converts assistant message with tool calls", () => {
+  it("converts assistant message with tool calls", async () => {
     const messages = [
       {
         message_data: {
@@ -384,7 +384,7 @@ describe("formatMessagesForOpenAI", () => {
         sender_id: "bot",
       },
     ];
-    const result = formatMessagesForOpenAI(messages);
+    const result = await formatMessagesForOpenAI(messages);
 
     assert.equal(result.length, 1);
     assert.equal(result[0].role, "assistant");
@@ -393,7 +393,7 @@ describe("formatMessagesForOpenAI", () => {
     assert.equal(msg.tool_calls[0].function.name, "run_javascript");
   });
 
-  it("converts tool result message (after an assistant with tool_calls)", () => {
+  it("converts tool result message (after an assistant with tool_calls)", async () => {
     // A tool result only appears after an assistant message with tool_calls.
     // A lone tool result at the start would be stripped as a "leading tool result".
     const messages = [
@@ -416,7 +416,7 @@ describe("formatMessagesForOpenAI", () => {
       },
     ];
     // Input is newest-first; after reverse: assistant, then tool
-    const result = formatMessagesForOpenAI(messages);
+    const result = await formatMessagesForOpenAI(messages);
 
     assert.equal(result.length, 2);
     const toolMsg = result.find(m => m.role === "tool");
@@ -426,7 +426,7 @@ describe("formatMessagesForOpenAI", () => {
     assert.equal(msg.content, "result");
   });
 
-  it("does not mutate the input array", () => {
+  it("does not mutate the input array", async () => {
     const messages = [
       {
         message_data: { role: "user", content: [{ type: "text", text: "first" }] },
@@ -438,13 +438,13 @@ describe("formatMessagesForOpenAI", () => {
       },
     ];
     const originalFirst = messages[0];
-    formatMessagesForOpenAI(messages);
+    await formatMessagesForOpenAI(messages);
 
     assert.strictEqual(messages[0], originalFirst, "input array should not be reversed");
     assert.equal(messages.length, 2, "input array length should not change");
   });
 
-  it("handles audio message with wav mime_type", () => {
+  it("handles audio message with wav mime_type", async () => {
     const messages = [
       {
         message_data: {
@@ -456,7 +456,7 @@ describe("formatMessagesForOpenAI", () => {
         sender_id: "user-1",
       },
     ];
-    const result = formatMessagesForOpenAI(messages);
+    const result = await formatMessagesForOpenAI(messages);
     assert.equal(result.length, 1);
     const content = /** @type {any[]} */ (result[0].content);
     assert.equal(content[0].type, "input_audio");
@@ -464,7 +464,7 @@ describe("formatMessagesForOpenAI", () => {
     assert.equal(content[0].input_audio.data, "abc123");
   });
 
-  it("handles audio message with mp3 mime_type", () => {
+  it("handles audio message with mp3 mime_type", async () => {
     const messages = [
       {
         message_data: {
@@ -476,13 +476,13 @@ describe("formatMessagesForOpenAI", () => {
         sender_id: "user-1",
       },
     ];
-    const result = formatMessagesForOpenAI(messages);
+    const result = await formatMessagesForOpenAI(messages);
     const content = /** @type {any[]} */ (result[0].content);
     assert.equal(content[0].input_audio.format, "mp3");
     assert.equal(content[0].input_audio.data, "def456");
   });
 
-  it("strips leading tool results from message list", () => {
+  it("strips leading tool results from message list", async () => {
     const messages = [
       // newest first (before reverse)
       {
@@ -495,7 +495,7 @@ describe("formatMessagesForOpenAI", () => {
       },
     ];
     // After reverse: tool first, then user. Tool should be stripped.
-    const result = formatMessagesForOpenAI(messages);
+    const result = await formatMessagesForOpenAI(messages);
 
     assert.equal(result.length, 1);
     assert.equal(result[0].role, "user");
