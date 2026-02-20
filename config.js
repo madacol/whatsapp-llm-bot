@@ -41,7 +41,7 @@ ${typesFileContent}
 You are in a WhatsApp chat, so you can use WhatsApp formatting to enhance readability (bold, italic, citations, code blocks, etc.).`;
 
 export default {
-  MASTER_IDs: process.env.MASTER_ID?.split(',') || "",
+  MASTER_IDs: process.env.MASTER_ID?.split(',') ?? [],
   model: process.env.MODEL || "gpt-4.1",
   llm_api_key: process.env.LLM_API_KEY,
   base_url: process.env.BASE_URL,
