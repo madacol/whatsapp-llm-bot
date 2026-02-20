@@ -176,6 +176,38 @@ describe("executeAction", () => {
     assert.ok(receivedContext.rootDb, "rootDb should be set");
   });
 
+  it("rejects when requireAdmin and sender is not admin", async () => {
+    const resolver = createResolver({
+      test_action: {
+        name: "test_action",
+        description: "test",
+        parameters: { type: "object", properties: {} },
+        permissions: { autoExecute: true, requireAdmin: true },
+        action_fn: async () => "ok",
+      },
+    });
+    const ctx = createMockContext({ getIsAdmin: async () => false });
+    await assert.rejects(
+      () => executeAction("test_action", ctx, {}, null, resolver),
+      { message: /admin/ },
+    );
+  });
+
+  it("passes when requireAdmin and sender is admin", async () => {
+    const resolver = createResolver({
+      test_action: {
+        name: "test_action",
+        description: "test",
+        parameters: { type: "object", properties: {} },
+        permissions: { autoExecute: true, requireAdmin: true },
+        action_fn: async () => "admin success",
+      },
+    });
+    const ctx = createMockContext({ getIsAdmin: async () => true });
+    const { result } = await executeAction("test_action", ctx, {}, null, resolver);
+    assert.equal(result, "admin success");
+  });
+
   it("provides callLlm when useLlm permission is set", async () => {
     let receivedContext;
     const resolver = createResolver({
