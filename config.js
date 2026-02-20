@@ -5,6 +5,9 @@ dotenv.config();
 const typesFileContent = await readFile("./types.d.ts", {
   encoding: "utf-8",
   flag: "r",
+}).catch((err) => {
+  console.warn("Could not read types.d.ts:", err.message);
+  return "";
 });
 
 const system_prompt = `You are Madabot, a helpful AI assistant in a WhatsApp chat environment, you can answer questions directly as an LLM or if a more structured answer is required, you can run javascript code if really needed.
