@@ -84,6 +84,17 @@ export default /** @type {defineAction} */ ((x) => x)({
       assert.ok(!result.includes("recall-msg4"), "should not include beyond limit");
     },
 
+    async function rejects_invalid_since_timestamp(action_fn, db) {
+      await db.sql`INSERT INTO chats(chat_id) VALUES ('act-recall-6') ON CONFLICT DO NOTHING`;
+      await assert.rejects(
+        () => action_fn({ chatId: "act-recall-6", rootDb: db }, { since: "yesterday" }),
+        (/** @type {Error} */ err) => {
+          assert.ok(err.message.includes("Invalid"), `Expected "Invalid" in error, got: ${err.message}`);
+          return true;
+        },
+      );
+    },
+
     async function formats_messages_with_role_and_text(action_fn, db) {
       await db.sql`INSERT INTO chats(chat_id) VALUES ('act-recall-5') ON CONFLICT DO NOTHING`;
       await db.sql`DELETE FROM messages WHERE chat_id = 'act-recall-5'`;
@@ -103,6 +114,9 @@ export default /** @type {defineAction} */ ((x) => x)({
   ],
   action_fn: async function ({ chatId, rootDb }, params) {
     const since = params.since;
+    if (!since || isNaN(new Date(since).getTime())) {
+      throw new Error("Invalid timestamp for 'since': " + since);
+    }
     const limit = params.limit || 50;
 
     const { rows } = await rootDb.sql`
