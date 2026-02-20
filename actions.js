@@ -143,7 +143,7 @@ export async function getActions() {
   actions = (
     await Promise.all(
       files
-        .filter((file) => file.endsWith(".js"))
+        .filter((file) => file.endsWith(".js") && !file.startsWith("_"))
         .map(async (file) => {
           const filePath = path.join(actionsDir, file);
           try {
