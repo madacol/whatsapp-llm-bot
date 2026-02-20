@@ -257,12 +257,104 @@ describe("LLM pipeline via createMessageHandler", () => {
       "Should have final LLM reply after silent tool",
     );
 
-    // The tool result should NOT be stored in the DB
+    // The tool result should be stored as a stub in the DB
     const { rows: toolRows } = await db.sql`
       SELECT message_data FROM messages
       WHERE chat_id = 'pipe-silent'
         AND message_data::jsonb->>'role' = 'tool'`;
-    assert.equal(toolRows.length, 0, "Silent tool result should not be persisted to DB");
+    assert.equal(toolRows.length, 1, "Silent tool should store a stub in DB");
+    const stubData = toolRows[0].message_data;
+    assert.equal(stubData.content[0].text, "[recalled prior messages]", "Stub should not contain full result");
+  });
+
+  it("clear then continue: LLM only sees post-clear messages", async () => {
+    await seedChat("pipe-clear-cont", { enabled: true });
+
+    // First turn: user sends message, LLM replies
+    mockServer.addResponses("First reply");
+    const { context: ctx1 } = createIncomingContext({
+      chatId: "pipe-clear-cont",
+      content: [{ type: "text", text: "Remember this secret: ALPHA" }],
+    });
+    await handleMessage(ctx1);
+
+    // Clear conversation
+    mockServer.addResponses(
+      {
+        tool_calls: [
+          {
+            id: "call_clear_001",
+            type: "function",
+            function: { name: "clear_conversation", arguments: "{}" },
+          },
+        ],
+      },
+      "Conversation cleared.",
+    );
+    const { context: ctx2 } = createIncomingContext({
+      chatId: "pipe-clear-cont",
+      content: [{ type: "text", text: "!clear" }],
+    });
+    await handleMessage(ctx2);
+
+    // Second turn after clear: new message
+    mockServer.addResponses("Post-clear reply");
+    const { context: ctx3 } = createIncomingContext({
+      chatId: "pipe-clear-cont",
+      content: [{ type: "text", text: "What do you know?" }],
+    });
+    await handleMessage(ctx3);
+
+    // The LLM request for the third turn should NOT contain the pre-clear messages
+    const lastReq = mockServer.getRequests().at(-1);
+    const allContent = JSON.stringify(lastReq.messages);
+    assert.ok(
+      !allContent.includes("ALPHA"),
+      `Post-clear LLM context should not contain pre-clear message "ALPHA", but got: ${allContent}`,
+    );
+    assert.ok(
+      allContent.includes("What do you know?"),
+      "Post-clear LLM context should contain the new message",
+    );
+  });
+
+  it("getMessages DESC + formatMessagesForOpenAI produces chronological order", async () => {
+    await seedChat("pipe-order", { enabled: true });
+
+    // Seed messages with known order
+    await db.sql`INSERT INTO messages(chat_id, sender_id, message_data, timestamp)
+      VALUES ('pipe-order', 'u1', '{"role":"user","content":[{"type":"text","text":"first msg"}]}', '2026-02-19 08:00:00')`;
+    await db.sql`INSERT INTO messages(chat_id, sender_id, message_data, timestamp)
+      VALUES ('pipe-order', 'u1', '{"role":"user","content":[{"type":"text","text":"second msg"}]}', '2026-02-19 09:00:00')`;
+    await db.sql`INSERT INTO messages(chat_id, sender_id, message_data, timestamp)
+      VALUES ('pipe-order', 'u1', '{"role":"user","content":[{"type":"text","text":"third msg"}]}', '2026-02-19 10:00:00')`;
+
+    // Send a new message to trigger the pipeline
+    mockServer.addResponses("Order test reply");
+    const { context } = createIncomingContext({
+      chatId: "pipe-order",
+      content: [{ type: "text", text: "fourth msg" }],
+    });
+    await handleMessage(context);
+
+    // Check the LLM request: messages should be in chronological order
+    const lastReq = mockServer.getRequests().at(-1);
+    const userMsgs = lastReq.messages.filter(m =>
+      m.role === "user" && JSON.stringify(m.content).includes("msg")
+    );
+    const allText = JSON.stringify(userMsgs);
+    // Find position of each marker in the serialized message sequence
+    const pos1 = allText.indexOf("first msg");
+    const pos2 = allText.indexOf("second msg");
+    const pos3 = allText.indexOf("third msg");
+    const pos4 = allText.indexOf("fourth msg");
+    // All should be present
+    assert.ok(pos1 >= 0, "first msg should be in context");
+    assert.ok(pos4 >= 0, "fourth msg should be in context");
+    // Should be oldest first (chronological)
+    assert.ok(pos1 < pos2, "first before second");
+    assert.ok(pos2 < pos3, "second before third");
+    assert.ok(pos3 < pos4, "third before fourth");
   });
 
   it("uses custom model from chat", async () => {
