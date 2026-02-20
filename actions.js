@@ -108,10 +108,11 @@ export async function executeAction(
   }
 }
 
-// Note: log function is now created per-action in createActionLog()
+/** @type {string | undefined} */
+let actionsDir;
 
-/** @type {Awaited<ReturnType<typeof initializeDirectoryHandle>> | undefined} */
-let directoryHandle;
+/** @type {AppAction[]} */
+let actions;
 
 /**
  * Initializes and returns the absolute path to the 'actions' directory.
@@ -119,13 +120,9 @@ let directoryHandle;
  * @returns {Promise<string>} Absolute path to the actions directory
  */
 export async function initializeDirectoryHandle() {
-  const actionsDir = path.resolve(process.cwd(), "actions");
-  try {
-    await fs.mkdir(actionsDir, { recursive: true });
-  } catch (err) {
-    // Directory may already exist, ignore error
-  }
-  return actionsDir;
+  const dir = path.resolve(process.cwd(), "actions");
+  await fs.mkdir(dir, { recursive: true });
+  return dir;
 }
 
 /**
@@ -133,19 +130,19 @@ export async function initializeDirectoryHandle() {
  * @returns {Promise<AppAction[]>} Array of action objects with name derived from filename
  */
 export async function getActions() {
-  if (!directoryHandle) {
-    directoryHandle = await initializeDirectoryHandle();
+  if (!actionsDir) {
+    actionsDir = await initializeDirectoryHandle();
   }
 
-  const actionsDir = directoryHandle;
-  const files = await fs.readdir(actionsDir);
+  const dir = actionsDir;
+  const files = await fs.readdir(dir);
   /** @type {AppAction[]} */
   actions = (
     await Promise.all(
       files
         .filter((file) => file.endsWith(".js") && !file.startsWith("_"))
         .map(async (file) => {
-          const filePath = path.join(actionsDir, file);
+          const filePath = path.join(dir, file);
           try {
             const module = await import(`file://${filePath}`);
             if (module.default) {
@@ -168,20 +165,17 @@ export async function getActions() {
   return actions;
 }
 
-/** @type {AppAction[]} */
-let actions;
-
 /**
- * Get a specific action by name from the file system
+ * Get a specific action by name from the file system.
+ * Re-imports the module each time to support hot-reload during development.
  * @param {string} actionName - The name of the action to retrieve
  * @returns {Promise<AppAction|null>} The action object or null if not found
  */
 export async function getAction(actionName) {
-  if (!directoryHandle) {
-    directoryHandle = await initializeDirectoryHandle();
+  if (!actionsDir) {
+    actionsDir = await initializeDirectoryHandle();
   }
 
-  // Find the file with the matching action name
   const fileName = actions.find(
     (action) => action.name === actionName,
   )?.fileName;
@@ -189,10 +183,9 @@ export async function getAction(actionName) {
     throw new Error(`Action "${actionName}" not found`);
   }
 
-  const filePath = path.join(directoryHandle, fileName);
+  const filePath = path.join(actionsDir, fileName);
 
   try {
-    // Import the module directly from the file path
     const module = await import(`file://${filePath}`);
     const action = module.default;
 
