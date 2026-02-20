@@ -83,6 +83,8 @@ describe("LLM pipeline via createMessageHandler", () => {
 
   it("tool call → action → autoContinue → second LLM call", async () => {
     await seedChat("pipe-2", { enabled: true });
+    // Enable debug so tool call output is visible in responses
+    await db.sql`UPDATE chats SET debug_until = '9999-01-01' WHERE chat_id = 'pipe-2'`;
 
     mockServer.addResponses(
       {

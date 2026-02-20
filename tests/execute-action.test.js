@@ -60,6 +60,7 @@ function createMockContext(overrides = {}) {
     chatId: "test-chat",
     senderIds: ["master-user"],
     content: [],
+    isDebug: false,
     getIsAdmin: async () => true,
     sendMessage: async () => {},
     reply: async () => {},
@@ -213,6 +214,58 @@ describe("executeAction", () => {
     const ctx = createMockContext({ getIsAdmin: async () => true });
     const { result } = await executeAction("test_action", ctx, {}, null, resolver);
     assert.equal(result, "admin success");
+  });
+
+  it("log() does NOT sendMessage when isDebug is false", async () => {
+    /** @type {string[]} */
+    const sent = [];
+    const resolver = createResolver({
+      test_action: {
+        name: "test_action",
+        description: "test",
+        parameters: { type: "object", properties: {} },
+        permissions: { autoExecute: true },
+        action_fn: async (ctx) => {
+          await ctx.log("debug info");
+          return "ok";
+        },
+      },
+    });
+    const ctx = createMockContext({
+      isDebug: false,
+      sendMessage: async (_header, _text) => { sent.push(`${_header} ${_text ?? ""}`); },
+    });
+    await executeAction("test_action", ctx, {}, "call-123", resolver);
+    assert.ok(
+      !sent.some((s) => s.includes("Log")),
+      `log() should NOT send messages when isDebug is false, got: ${JSON.stringify(sent)}`,
+    );
+  });
+
+  it("log() DOES sendMessage when isDebug is true", async () => {
+    /** @type {string[]} */
+    const sent = [];
+    const resolver = createResolver({
+      test_action: {
+        name: "test_action",
+        description: "test",
+        parameters: { type: "object", properties: {} },
+        permissions: { autoExecute: true },
+        action_fn: async (ctx) => {
+          await ctx.log("debug info");
+          return "ok";
+        },
+      },
+    });
+    const ctx = createMockContext({
+      isDebug: true,
+      sendMessage: async (_header, _text) => { sent.push(`${_header} ${_text ?? ""}`); },
+    });
+    await executeAction("test_action", ctx, {}, "call-123", resolver);
+    assert.ok(
+      sent.some((s) => s.includes("Log")),
+      `log() should send messages when isDebug is true, got: ${JSON.stringify(sent)}`,
+    );
   });
 
   it("provides callLlm when useLlm permission is set", async () => {
