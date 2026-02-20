@@ -49,4 +49,5 @@ export default {
   llm_api_key: process.env.LLM_API_KEY,
   base_url: process.env.BASE_URL,
   system_prompt: process.env.SYSTEM_PROMPT || system_prompt,
+  brave_api_key: process.env.BRAVE_API_KEY,
 };
