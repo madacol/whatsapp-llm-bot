@@ -70,6 +70,13 @@ function createMockContext(overrides = {}) {
   };
 }
 
+describe("config", () => {
+  it("MASTER_IDs is always an array", async () => {
+    const config = (await import("../config.js")).default;
+    assert.ok(Array.isArray(config.MASTER_IDs), `Expected array, got ${typeof config.MASTER_IDs}: ${JSON.stringify(config.MASTER_IDs)}`);
+  });
+});
+
 describe("executeAction", () => {
   it("throws for non-existent action", async () => {
     const resolver = createResolver({});
