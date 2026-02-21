@@ -580,6 +580,43 @@ describe("Scenario 12: Debug mode gates tool call output", () => {
     );
   });
 
+  it("truncated result shows remaining char/line count", async () => {
+    // Generate a result longer than 200 chars with multiple lines
+    const longResult = "Line one of the output\\n".repeat(20);
+    mockServer.addResponses(
+      {
+        tool_calls: [
+          {
+            id: "call_dbg_trunc_001",
+            type: "function",
+            function: {
+              name: "run_javascript",
+              arguments: JSON.stringify({ code: `() => "${longResult}"` }),
+            },
+          },
+        ],
+      },
+      "Summary of long result",
+    );
+
+    const { context, responses } = createIncomingContext({
+      chatId: chatIdOff,
+      content: [{ type: "text", text: "Get long output" }],
+    });
+    await handleMessage(context);
+
+    const truncatedResponse = responses.find((r) => r.text.startsWith("✅") && r.text.includes("…"));
+    assert.ok(
+      truncatedResponse,
+      `Should have a truncated result, got: ${responses.map(r=>r.text).join(" | ")}`,
+    );
+    // Should indicate how much more content there is
+    assert.ok(
+      /\d+/.test(truncatedResponse.text.slice(truncatedResponse.text.indexOf("…"))),
+      `Truncated result should show remaining count after '…', got: ${truncatedResponse.text}`,
+    );
+  });
+
   it("shows full result as reply for non-autoContinue actions when debug is off", async () => {
     // show_info does NOT have autoContinue, so result is the final answer
     mockServer.addResponses({
