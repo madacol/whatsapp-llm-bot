@@ -46,8 +46,8 @@ You are in a WhatsApp chat, so you can use WhatsApp formatting to enhance readab
 export default {
   MASTER_IDs: process.env.MASTER_ID?.split(',') ?? [],
   model: process.env.MODEL || "gpt-4.1",
-  llm_api_key: process.env.LLM_API_KEY,
-  base_url: process.env.BASE_URL,
+  get llm_api_key() { return process.env.LLM_API_KEY; },
+  get base_url() { return process.env.BASE_URL; },
   system_prompt: process.env.SYSTEM_PROMPT || system_prompt,
   brave_api_key: process.env.BRAVE_API_KEY,
   content_model: process.env.CONTENT_MODEL || "",

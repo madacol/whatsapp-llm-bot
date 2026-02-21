@@ -1,19 +1,16 @@
-import { describe, it, before, after } from "node:test";
+import { describe, it, before } from "node:test";
 import assert from "node:assert/strict";
 import { PGlite } from "@electric-sql/pglite";
 import { pollReminders } from "../reminder-daemon.js";
 import { ensureSchema } from "../actions/reminders.js";
+import { createTestDb } from "./helpers.js";
 
 /** @type {PGlite} */
 let db;
 
 before(async () => {
-  db = new PGlite("memory://");
+  db = await createTestDb();
   await ensureSchema(db);
-});
-
-after(async () => {
-  await db.close();
 });
 
 describe("reminder daemon", () => {

@@ -8,7 +8,7 @@ process.env.LLM_API_KEY = "test-key";
 process.env.MODEL = "mock-model";
 
 import { createTestDb } from "./helpers.js";
-import { setDb, closeAllDbs } from "../db.js";
+import { setDb } from "../db.js";
 
 /** @type {typeof import("../actions.js").executeAction} */
 let executeAction;
@@ -33,9 +33,8 @@ before(async () => {
   executeAction = mod.executeAction;
 });
 
-after(async () => {
-  await closeAllDbs();
-});
+
+
 
 /**
  * Create a mock action resolver

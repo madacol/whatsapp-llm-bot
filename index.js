@@ -441,27 +441,24 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
 
 // ── Default initialization (production) ──
 
-const store = await initStore();
-await ensureTranslationSchema(getDb("./pgdata/root"));
-const llmClient = createLlmClient();
+if (!process.env.TESTING) {
+  const store = await initStore();
+  await ensureTranslationSchema(getDb("./pgdata/root"));
+  const llmClient = createLlmClient();
 
-const { handleMessage } = createMessageHandler({
-  store,
-  llmClient,
-  getActionsFn: getActions,
-  executeActionFn: executeAction,
-});
+  const { handleMessage } = createMessageHandler({
+    store,
+    llmClient,
+    getActionsFn: getActions,
+    executeActionFn: executeAction,
+  });
 
-export { handleMessage };
-
-async function setup () {
-  // Initialize everything
   const { closeWhatsapp, sendToChat } = await connectToWhatsApp(handleMessage)
     .catch(async (error) => {
       console.error("Initialization error:", error);
       await store.closeDb();
       process.exit(1);
-    })
+    });
 
   const stopReminders = startReminderDaemon(sendToChat);
   const stopModelsCache = startModelsCacheDaemon();
@@ -494,5 +491,3 @@ async function setup () {
     process.exit(1);
   });
 }
-
-if (!process.env.TESTING) await setup()
