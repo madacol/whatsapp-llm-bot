@@ -1,0 +1,19 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm test:*)",
+      "Bash(npm run type-check:*)",
+      "Bash(git -C /home/mada/whatsapp-llm-bot status)",
+      "Bash(git -C /home/mada/whatsapp-llm-bot diff)",
+      "Bash(git -C /home/mada/whatsapp-llm-bot log --oneline -5)",
+      "Bash(git -C:*)",
+      "Bash(TESTING=1 node:*)",
+      "Bash(TESTING=1 npm test:*)",
+      "Bash(node --test:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(node:*)",
+      "Bash(ls:*)"
+    ]
+  }
+}
