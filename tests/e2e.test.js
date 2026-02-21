@@ -580,6 +580,37 @@ describe("Scenario 12: Debug mode gates tool call output", () => {
     );
   });
 
+  it("shows full result as reply for non-autoContinue actions when debug is off", async () => {
+    // show_info does NOT have autoContinue, so result is the final answer
+    mockServer.addResponses({
+      tool_calls: [
+        {
+          id: "call_dbg_nocont_001",
+          type: "function",
+          function: {
+            name: "show_info",
+            arguments: "{}",
+          },
+        },
+      ],
+    });
+
+    const { context, responses } = createIncomingContext({
+      chatId: chatIdOff,
+      content: [{ type: "text", text: "Show info" }],
+    });
+    await handleMessage(context);
+
+    // Non-autoContinue result should be shown as a reply (final answer)
+    const resultReply = responses.find(
+      (r) => r.type === "replyToMessage" && r.text.includes(chatIdOff),
+    );
+    assert.ok(
+      resultReply,
+      `Should reply with full result for non-autoContinue action, got: ${responses.map(r=>`[${r.type}] ${r.text}`).join(" | ")}`,
+    );
+  });
+
   it("DOES send tool call args and results when debug is on", async () => {
     mockServer.addResponses(
       {
