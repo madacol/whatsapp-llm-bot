@@ -201,11 +201,14 @@ async function processLlmResponse({
               `✅ *Result*    [${shortId}]`,
               resultMessage,
             );
-          } else {
+          } else if (functionResponse.permissions.autoContinue) {
             const truncated = resultMessage.length > 200
               ? resultMessage.slice(0, 200) + "…"
               : resultMessage;
             await context.sendMessage(`✅ ${truncated}`);
+          } else {
+            // Non-autoContinue: this is the final answer, show full result as reply
+            await context.reply(resultMessage);
           }
         }
 
