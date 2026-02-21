@@ -202,10 +202,16 @@ async function processLlmResponse({
               resultMessage,
             );
           } else if (functionResponse.permissions.autoContinue) {
-            const truncated = resultMessage.length > 200
-              ? resultMessage.slice(0, 200) + "…"
-              : resultMessage;
-            await context.sendMessage(`✅ ${truncated}`);
+            if (resultMessage.length > 200) {
+              const remaining = resultMessage.length - 200;
+              const remainingLines = resultMessage.slice(200).split("\n").length - 1;
+              const suffix = remainingLines > 0
+                ? `… +${remaining} chars, ${remainingLines} lines`
+                : `… +${remaining} chars`;
+              await context.sendMessage(`✅ ${resultMessage.slice(0, 200)}${suffix}`);
+            } else {
+              await context.sendMessage(`✅ ${resultMessage}`);
+            }
           } else {
             // Non-autoContinue: this is the final answer, show full result as reply
             await context.reply(resultMessage);
