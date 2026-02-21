@@ -114,7 +114,7 @@ async function processLlmResponse({
         arguments: toolCall.function.arguments,
       });
 
-      // Show tool call to user (only in debug mode)
+      // Show tool call to user
       if (context.isDebug) {
         const shortId = shortenToolId(toolCall.id);
         let args;
@@ -141,6 +141,8 @@ async function processLlmResponse({
           });
           await context.sendMessage(header, parts.join("\n\n"));
         }
+      } else {
+        await context.sendMessage(`🔧 ${toolCall.function.name}`);
       }
     }
 
@@ -173,6 +175,10 @@ async function processLlmResponse({
         );
         console.log("response", functionResponse);
 
+        if (functionResponse.permissions.autoContinue) {
+          continueProcessing = true;
+        }
+
         // Always store tool result (silent tools get a stub to satisfy API pairing)
         /** @type {ToolMessage} */
         const toolMessage = {
@@ -188,16 +194,19 @@ async function processLlmResponse({
           typeof functionResponse.result === "string"
             ? functionResponse.result
             : JSON.stringify(functionResponse.result, null, 2);
-        // Show tool result to user (only in debug mode, unless silent)
-        if (context.isDebug && !functionResponse.permissions.silent) {
-          await context.sendMessage(
-            `✅ *Result*    [${shortId}]`,
-            resultMessage,
-          );
-        }
-
-        if (functionResponse.permissions.autoContinue) {
-          continueProcessing = true;
+        // Show tool result to user (compact when debug off, verbose when on)
+        if (!functionResponse.permissions.silent) {
+          if (context.isDebug) {
+            await context.sendMessage(
+              `✅ *Result*    [${shortId}]`,
+              resultMessage,
+            );
+          } else {
+            const truncated = resultMessage.length > 200
+              ? resultMessage.slice(0, 200) + "…"
+              : resultMessage;
+            await context.sendMessage(`✅ ${truncated}`);
+          }
         }
 
         // Add tool result to conversation context
@@ -210,6 +219,9 @@ async function processLlmResponse({
         formattedMessages.push(toolResultMessage);
 
       } catch (error) {
+        // Errors always auto-continue for self-correction
+        continueProcessing = true;
+
         console.error("Error executing tool:", error);
         const errorMessage = `Error executing ${toolName}: ${error instanceof Error ? error.message : String(error)}`;
         // Store error as tool result
@@ -222,13 +234,14 @@ async function processLlmResponse({
         await addMessage(chatId, toolError, senderIds);
 
         // Show tool error to user
-        await context.sendMessage(
-          `❌ *Tool Error*    [${shortId}]`,
-          errorMessage,
-        );
-
-        // Continue processing to self-fix the error
-        continueProcessing = true;
+        if (context.isDebug) {
+          await context.sendMessage(
+            `❌ *Tool Error*    [${shortId}]`,
+            errorMessage,
+          );
+        } else {
+          await context.sendMessage(`❌ [${shortId}] ${errorMessage}`);
+        }
 
         // Add tool error to conversation context
         /** @type {OpenAI.ChatCompletionMessageParam} */
@@ -341,7 +354,7 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
         const { result } = await executeActionFn(action.name, context, params);
 
         if (typeof result === "string") {
-          await context.reply(`⚡ *Command* !${action.command}`, result);
+          await context.reply(result);
         }
       } catch (error) {
         console.error("Error executing command:", error);
