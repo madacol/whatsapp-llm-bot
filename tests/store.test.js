@@ -1,21 +1,17 @@
-import { describe, it, before, after } from "node:test";
+import { describe, it, before } from "node:test";
 import assert from "node:assert/strict";
-import { PGlite } from "@electric-sql/pglite";
 import { initStore } from "../store.js";
+import { createTestDb } from "./helpers.js";
 
 describe("store with injected DB", () => {
-  /** @type {PGlite} */
+  /** @type {import("@electric-sql/pglite").PGlite} */
   let db;
   /** @type {Awaited<ReturnType<typeof initStore>>} */
   let store;
 
   before(async () => {
-    db = new PGlite("memory://");
+    db = await createTestDb();
     store = await initStore(db);
-  });
-
-  after(async () => {
-    await store.closeDb();
   });
 
   describe("createChat / getChat", () => {

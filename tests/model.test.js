@@ -1,38 +1,8 @@
 import { describe, it, before, after, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { PGlite } from "@electric-sql/pglite";
 import fs from "node:fs/promises";
 import path from "node:path";
-
-/**
- * Helper: create an in-memory PGlite and run the same schema as store.js
- */
-async function createTestDb() {
-  const db = new PGlite("memory://");
-
-  await db.sql`
-    CREATE TABLE IF NOT EXISTS chats (
-      chat_id VARCHAR(50) PRIMARY KEY,
-      is_enabled BOOLEAN DEFAULT FALSE,
-      system_prompt TEXT,
-      timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    );
-  `;
-  await db.sql`
-    CREATE TABLE IF NOT EXISTS messages (
-      message_id SERIAL PRIMARY KEY,
-      chat_id VARCHAR(50) REFERENCES chats(chat_id),
-      sender_id VARCHAR(50),
-      message_data JSONB,
-      timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    );
-  `;
-
-  // Migration: add model column (same as store.js)
-  await db.sql`ALTER TABLE chats ADD COLUMN IF NOT EXISTS model TEXT`;
-
-  return db;
-}
+import { createTestDb } from "./helpers.js";
 
 const CACHE_PATH = path.resolve("data/models.json");
 
@@ -58,7 +28,6 @@ describe("per-chat model selection", () => {
   });
 
   after(async () => {
-    await db.close();
     await fs.rm(CACHE_PATH, { force: true });
   });
 
