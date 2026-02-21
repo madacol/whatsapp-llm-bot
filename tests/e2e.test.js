@@ -6,6 +6,8 @@ process.env.MODEL = "mock-model";
 
 import { describe, it, before, after } from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs/promises";
+import path from "node:path";
 import {
   createIncomingContext,
   createMockLlmServer,
@@ -36,7 +38,15 @@ async function seedChat(chatId, options = {}) {
 
 // ── Global setup / teardown ──
 
+const CACHE_PATH = path.resolve("data/models.json");
+
 before(async () => {
+  // 0. Seed models cache so setModel validation passes
+  await fs.mkdir(path.dirname(CACHE_PATH), { recursive: true });
+  await fs.writeFile(CACHE_PATH, JSON.stringify([
+    { id: "gpt-4.1-mini", name: "GPT-4.1 Mini", context_length: 128000, pricing: { prompt: "0.000001", completion: "0.000003" } },
+  ]));
+
   // 1. In-memory DB → seed the cache so initStore() uses it
   testDb = await createTestDb();
   setDb("./pgdata/root", testDb);
@@ -53,6 +63,7 @@ before(async () => {
 after(async () => {
   await mockServer?.close();
   await closeAllDbs();
+  await fs.rm(CACHE_PATH, { force: true });
 });
 
 // ═══════════════════════════════════════════════════════════════════

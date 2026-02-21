@@ -1,18 +1,10 @@
-/**
- * @typedef {{
- *   id: string,
- *   name: string,
- *   context_length: number,
- *   pricing: { prompt: string, completion: string }
- * }} OpenRouterModel
- */
-
 import assert from "node:assert/strict";
+import { getCachedModels } from "../models-cache.js";
 
 export default /** @type {defineAction} */ ((x) => x)({
-  name: "list_models",
-  command: "list models",
-  description: "List LLM models from OpenRouter with pricing and context information",
+  name: "search_models",
+  command: "search models",
+  description: "Search LLM models from the cached OpenRouter model list with pricing and context information",
   parameters: {
     type: "object",
     properties: {
@@ -32,26 +24,30 @@ export default /** @type {defineAction} */ ((x) => x)({
   },
   test_functions: [
     async function formats_model_comparison_table(action_fn, _db) {
-      const originalFetch = globalThis.fetch;
+      const fs = await import("node:fs/promises");
+      const path = await import("node:path");
+      const cachePath = path.resolve("data/models.json");
+
+      // Write a fake cache file for the test
+      /** @type {import("../models-cache.js").OpenRouterModel[]} */
+      const fakeModels = [
+        {
+          id: "openai/gpt-4o",
+          name: "GPT-4o",
+          context_length: 128000,
+          pricing: { prompt: "0.000005", completion: "0.000015" },
+        },
+        {
+          id: "anthropic/claude-3.5-sonnet",
+          name: "Claude 3.5 Sonnet",
+          context_length: 200000,
+          pricing: { prompt: "0.000003", completion: "0.000015" },
+        },
+      ];
+      await fs.mkdir(path.dirname(cachePath), { recursive: true });
+      await fs.writeFile(cachePath, JSON.stringify(fakeModels));
+
       try {
-        globalThis.fetch = /** @type {any} */ (async () => ({
-          json: async () => ({
-            data: [
-              {
-                id: "openai/gpt-4o",
-                name: "GPT-4o",
-                context_length: 128000,
-                pricing: { prompt: "0.000005", completion: "0.000015" },
-              },
-              {
-                id: "anthropic/claude-3.5-sonnet",
-                name: "Claude 3.5 Sonnet",
-                context_length: 200000,
-                pricing: { prompt: "0.000003", completion: "0.000015" },
-              },
-            ],
-          }),
-        }));
         const result = await action_fn(
           { log: async () => "" },
           { providers: "gpt-4o,claude" },
@@ -59,7 +55,7 @@ export default /** @type {defineAction} */ ((x) => x)({
         assert.ok(result.includes("GPT-4o"));
         assert.ok(result.includes("Claude 3.5 Sonnet"));
       } finally {
-        globalThis.fetch = originalFetch;
+        await fs.rm(cachePath, { force: true });
       }
     },
   ],
@@ -74,9 +70,11 @@ export default /** @type {defineAction} */ ((x) => x)({
 
     await context.log(`Starting model comparison for providers: ${filterPatterns.join(", ")}`);
 
-    const response = await fetch('https://openrouter.ai/api/v1/models');
-    /** @type {{ data: OpenRouterModel[] }} */
-    const { data } = await response.json();
+    const data = await getCachedModels();
+
+    if (data.length === 0) {
+      return "No cached models available. The cache may not have been populated yet — try again shortly.";
+    }
 
     const TOKENS_PER_MILLION = 1_000_000;
 

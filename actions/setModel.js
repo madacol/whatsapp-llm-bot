@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { modelExists, findClosestModels } from "../models-cache.js";
 
 export default /** @type {defineAction} */ ((x) => x)({
   name: "set_model",
@@ -21,14 +22,26 @@ export default /** @type {defineAction} */ ((x) => x)({
   },
   test_functions: [
     async function sets_model_for_chat(action_fn, db) {
-      await db.sql`INSERT INTO chats(chat_id) VALUES ('act-smodel-1') ON CONFLICT DO NOTHING`;
-      const result = await action_fn(
-        { chatId: "act-smodel-1", rootDb: db },
-        { model: "gpt-4o" },
-      );
-      assert.ok(result.includes("gpt-4o"));
-      const { rows: [chat] } = await db.sql`SELECT model FROM chats WHERE chat_id = 'act-smodel-1'`;
-      assert.equal(chat.model, "gpt-4o");
+      const fs = await import("node:fs/promises");
+      const path = await import("node:path");
+      const cachePath = path.resolve("data/models.json");
+      await fs.mkdir(path.dirname(cachePath), { recursive: true });
+      await fs.writeFile(cachePath, JSON.stringify([
+        { id: "openai/gpt-4o", name: "GPT-4o", context_length: 128000, pricing: { prompt: "0.000005", completion: "0.000015" } },
+      ]));
+
+      try {
+        await db.sql`INSERT INTO chats(chat_id) VALUES ('act-smodel-1') ON CONFLICT DO NOTHING`;
+        const result = await action_fn(
+          { chatId: "act-smodel-1", rootDb: db },
+          { model: "openai/gpt-4o" },
+        );
+        assert.ok(result.includes("openai/gpt-4o"));
+        const { rows: [chat] } = await db.sql`SELECT model FROM chats WHERE chat_id = 'act-smodel-1'`;
+        assert.equal(chat.model, "openai/gpt-4o");
+      } finally {
+        await fs.rm(cachePath, { force: true });
+      }
     },
     async function reverts_to_default_on_empty_model(action_fn, db) {
       await db.sql`INSERT INTO chats(chat_id, model) VALUES ('act-smodel-2', 'gpt-4o') ON CONFLICT DO NOTHING`;
@@ -54,6 +67,17 @@ export default /** @type {defineAction} */ ((x) => x)({
     }
 
     const modelValue = model.length === 0 ? null : model;
+
+    // Validate model exists in cache (skip for empty/revert)
+    if (modelValue && !(await modelExists(modelValue))) {
+      const suggestions = await findClosestModels(modelValue);
+      let message = `Model \`${modelValue}\` not found in OpenRouter models.`;
+      if (suggestions.length > 0) {
+        message += `\n\nDid you mean:\n${suggestions.map((s) => `• \`${s}\``).join("\n")}`;
+      }
+      message += `\n\nUse *!search models* to browse available models.`;
+      return message;
+    }
 
     try {
       await rootDb.sql`
