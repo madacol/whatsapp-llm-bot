@@ -378,12 +378,14 @@ export default /** @type {defineAction} */ ((x) => x)({
       const contentWithImage = [
         { type: "image", encoding: "base64", mime_type: "image/jpeg", data: "fakebase64" },
       ];
-      const result = await action_fn(
+      const raw = await action_fn(
         { db, callLlm: async () => mockResponse, content: contentWithImage, log: async () => "", confirm: async () => false },
         { action: "extract" },
       );
-      assert.ok(typeof result === "string");
-      assert.ok(result.includes("cancelad"), `Expected cancellation message, got: ${result}`);
+      // Should return ActionSignal with autoContinue: false
+      assert.equal(typeof raw, "object");
+      assert.equal(raw.autoContinue, false, "Should signal autoContinue: false on cancellation");
+      assert.ok(raw.result.includes("cancelad"), `Expected cancellation message, got: ${raw.result}`);
 
       // Verify nothing was inserted
       const { rows } = await db.sql`SELECT * FROM purchases WHERE store_name = 'CancelStore'`;
@@ -483,12 +485,14 @@ export default /** @type {defineAction} */ ((x) => x)({
       await ensureSchema(db);
       await getOrCreateLedger(db, "KeepLedger");
 
-      const result = await action_fn(
+      const raw = await action_fn(
         { db, callLlm: async () => null, content: [], log: async () => "", confirm: async () => false },
         { action: "delete_ledger", ledger_name: "KeepLedger" },
       );
-      assert.ok(typeof result === "string");
-      assert.ok(result.includes("cancelad"), `Should be cancelled, got: ${result}`);
+      // Should return ActionSignal with autoContinue: false
+      assert.equal(typeof raw, "object");
+      assert.equal(raw.autoContinue, false, "Should signal autoContinue: false on cancellation");
+      assert.ok(raw.result.includes("cancelad"), `Should be cancelled, got: ${raw.result}`);
 
       // Verify ledger still exists
       const { rows } = await db.sql`SELECT * FROM ledgers WHERE name = 'KeepLedger'`;
@@ -657,7 +661,7 @@ TOTAL: €6.00
       const preview = formatPreview(data, ledger.name);
       const confirmed = await confirm(preview);
       if (!confirmed) {
-        return "Registro cancelado.";
+        return { result: "Registro cancelado.", autoContinue: false };
       }
 
       const { rows } = await db.sql`
@@ -769,7 +773,7 @@ TOTAL: €6.00
         `React 👍 para confirmar o 👎 para cancelar.`
       );
       if (!confirmed) {
-        return "Eliminacion cancelada.";
+        return { result: "Eliminacion cancelada.", autoContinue: false };
       }
 
       await db.sql`DELETE FROM ledgers WHERE id = ${ledgerRows[0].id}`;
