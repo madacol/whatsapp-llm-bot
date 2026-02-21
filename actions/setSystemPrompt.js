@@ -61,10 +61,10 @@ export default /** @type {defineAction} */ ((x) => x)({
       `;
 
       if (newPrompt === null) {
-        return `System prompt cleared for chat ${chatId}. The default prompt will be used.`;
+        return `Prompt cleared, using default.`;
       }
 
-      return `System prompt updated for chat ${chatId}\n\n*New prompt:*\n${prompt}`;
+      return `Prompt set to: ${prompt}`;
     } catch (error) {
       console.error("Error setting system prompt:", error);
       const errorMessage =

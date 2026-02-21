@@ -202,7 +202,7 @@ export default /** @type {defineAction} */ ((x) => x)({
         RETURNING id
       `;
 
-      return `Reminder set (ID: ${rows[0].id})\n*What:* ${params.reminder_text}\n*When:* ${formatTime(remindAt)}`;
+      return `Reminder #${rows[0].id}: "${params.reminder_text}" at ${formatTime(remindAt)}`;
 
     } else if (params.action === "list") {
       const { rows } = await rootDb.sql`
@@ -216,12 +216,11 @@ export default /** @type {defineAction} */ ((x) => x)({
         return "No pending reminders.";
       }
 
-      let result = "*Pending Reminders*\n\n";
-      for (const r of rows) {
+      const lines = rows.map(r => {
         const remindAt = new Date(/** @type {string} */ (r.remind_at));
-        result += `*#${r.id}* — ${r.reminder_text}\n  ${formatTime(remindAt)}\n\n`;
-      }
-      return result;
+        return `#${r.id}: "${r.reminder_text}" at ${formatTime(remindAt)}`;
+      });
+      return lines.join("\n");
 
     } else if (params.action === "cancel") {
       if (!params.reminder_id) {
