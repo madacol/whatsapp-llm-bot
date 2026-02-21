@@ -18,6 +18,8 @@ import {
   parseCommandArgs,
   formatMessagesForOpenAI,
 } from "./message-formatting.js";
+import { translateUnsupportedContent, ensureTranslationSchema } from "./content-translator.js";
+import { getDb } from "./db.js";
 
 /**
  * Type guard: checks that an action has a command string.
@@ -417,8 +419,15 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
     // Get latest messages from DB
     const chatMessages = await getMessages(chatId)
 
+    // Translate unsupported content types for non-multimodal models
+    const contentModels = chatInfo?.content_models ?? {};
+    const rootDb = getDb("./pgdata/root");
+    const translatedMessages = await translateUnsupportedContent(
+      chatMessages, chatModel, contentModels, llmClient, rootDb,
+    );
+
     // Prepare messages for OpenAI
-    const formattedMessages = await formatMessagesForOpenAI(chatMessages);
+    const formattedMessages = await formatMessagesForOpenAI(translatedMessages);
 
     await processLlmResponse({
       llmClient, chatModel, systemPrompt, actions,
@@ -433,6 +442,7 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
 // ── Default initialization (production) ──
 
 const store = await initStore();
+await ensureTranslationSchema(getDb("./pgdata/root"));
 const llmClient = createLlmClient();
 
 const { handleMessage } = createMessageHandler({
