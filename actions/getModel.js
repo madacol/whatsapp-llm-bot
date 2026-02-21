@@ -42,9 +42,9 @@ export default /** @type {defineAction} */ ((x) => x)({
     }
 
     if (chatInfo.model) {
-      return `*Custom model for chat ${chatId}:*\n\n${chatInfo.model}`;
+      return `Model: ${chatInfo.model}`;
     } else {
-      return `*Chat ${chatId} is using the default model:*\n\n${(await import("../config.js")).default.model}`;
+      return `Model: ${(await import("../config.js")).default.model} (default)`;
     }
   },
 });

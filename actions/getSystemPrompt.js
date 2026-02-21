@@ -42,9 +42,9 @@ export default /** @type {defineAction} */ ((x) => x)({
     }
 
     if (chatInfo.system_prompt) {
-      return `*Custom system prompt for chat ${chatId}:*\n\n${chatInfo.system_prompt}`;
+      return `Prompt: ${chatInfo.system_prompt}`;
     } else {
-      return `*Chat ${chatId} is using the default system prompt:*\n\n${(await import("../config.js")).default.system_prompt}`;
+      return `Prompt (default): ${(await import("../config.js")).default.system_prompt}`;
     }
   },
 });

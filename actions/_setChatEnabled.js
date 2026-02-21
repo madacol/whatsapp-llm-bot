@@ -22,7 +22,7 @@ export async function setChatEnabled(rootDb, chatId, enabled) {
     `;
 
     const status = enabled ? "enabled" : "disabled";
-    return `LLM answers ${status} for chat ${chatId}`;
+    return `Bot ${status}.`;
   } catch (error) {
     const status = enabled ? "enable" : "disable";
     console.error(`Error ${status === "enable" ? "enabling" : "disabling"} chat:`, error);

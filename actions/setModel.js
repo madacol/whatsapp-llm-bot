@@ -63,10 +63,10 @@ export default /** @type {defineAction} */ ((x) => x)({
       `;
 
       if (modelValue) {
-        return `✅ Model updated for chat ${chatId}\n\n*New model:*\n${modelValue}`;
+        return `Model set to ${modelValue}`;
       } else {
         const defaultModel = (await import("../config.js")).default.model;
-        return `✅ Model reverted to default for chat ${chatId}\n\n*Default model:*\n${defaultModel}`;
+        return `Model reverted to default (${defaultModel})`;
       }
     } catch (error) {
       console.error("Error setting model:", error);

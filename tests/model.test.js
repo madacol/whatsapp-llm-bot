@@ -77,7 +77,7 @@ describe("per-chat model selection", () => {
         {},
       );
       assert.ok(result.includes("claude-sonnet-4-5-20250929"));
-      assert.ok(result.includes("Custom model"));
+      assert.ok(result.startsWith("Model:"));
     });
 
     it("indicates default when model is not set", async () => {
@@ -89,7 +89,7 @@ describe("per-chat model selection", () => {
         { chatId: "chat-get-2", rootDb: db },
         {},
       );
-      assert.ok(result.includes("default model"));
+      assert.ok(result.includes("default"));
     });
 
     it("throws if chat does not exist", async () => {
