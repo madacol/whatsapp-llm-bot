@@ -94,7 +94,7 @@ export default /** @type {defineAction} */ ((x) => x)({
         { minutes: "off" },
       );
 
-      assert.ok(result.toLowerCase().includes("disabled"));
+      assert.ok(result.toLowerCase().includes("off"));
 
       const {
         rows: [chat],
@@ -107,7 +107,7 @@ export default /** @type {defineAction} */ ((x) => x)({
 
     if (input === "off") {
       await rootDb.sql`UPDATE chats SET debug_until = NULL WHERE chat_id = ${chatId}`;
-      return "🔇 Debug mode *disabled* for this chat.";
+      return "Debug off.";
     }
 
     const mins = input === "" ? 10 : Number(input);
@@ -117,7 +117,7 @@ export default /** @type {defineAction} */ ((x) => x)({
 
     if (mins === 0) {
       await rootDb.sql`UPDATE chats SET debug_until = '9999-01-01' WHERE chat_id = ${chatId}`;
-      return "🔊 Debug mode enabled *permanently* for this chat.\nUse `!debug off` to disable.";
+      return "Debug on (permanent).";
     }
 
     const until = new Date(Date.now() + mins * 60 * 1000);
@@ -127,6 +127,6 @@ export default /** @type {defineAction} */ ((x) => x)({
       hour: "2-digit",
       minute: "2-digit",
     });
-    return `🔊 Debug mode enabled for *${mins} minutes* (until ${timeStr}).\nUse \`!debug off\` to disable.`;
+    return `Debug on for ${mins}min (until ${timeStr}).`;
   },
 });

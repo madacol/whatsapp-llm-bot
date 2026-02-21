@@ -111,6 +111,6 @@ export default /** @type {defineAction} */ ((x) => x)({
 
     await Promise.all(updates);
 
-    return `✅ Response mode updated for chat ${chatId}\n\n*Settings:*\n${messages.join("\n")}`;
+    return `Response mode: ${messages.join(", ")}`;
   },
 });

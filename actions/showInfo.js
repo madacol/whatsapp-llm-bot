@@ -30,7 +30,7 @@ export default /** @type {defineAction} */ ((x) => x)({
       assert.ok(result.includes("user-1"));
     },
   ],
-  action_fn: async function ({ chatId, rootDb, senderIds, content }) {
+  action_fn: async function ({ chatId, rootDb, senderIds }) {
     // Get chat enabled status
     const {
       rows: [chatInfo],
@@ -43,16 +43,6 @@ export default /** @type {defineAction} */ ((x) => x)({
 
     const status = chatInfo.is_enabled ? "enabled" : "disabled";
 
-    let info = `Chat Information:\n`;
-    info += `- *Chat ID*: ${chatId}\n`;
-    info += `- *Status*: ${status}\n`;
-    info += `- *Sender IDs*: ${senderIds.join(", ")}\n`;
-    info += `- *Your message*:
-    \`\`\`
-    ${JSON.stringify(content, null, 2)}
-    \`\`\`
-    `;
-
-    return info;
+    return `Chat: ${chatId} | Status: ${status} | Sender: ${senderIds.join(", ")}`;
   },
 });
