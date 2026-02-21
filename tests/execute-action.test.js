@@ -285,4 +285,38 @@ describe("executeAction", () => {
     await executeAction("llm_action", createMockContext(), {}, null, resolver);
     assert.equal(typeof receivedContext.callLlm, "function");
   });
+
+  it("overrides autoContinue when action_fn returns ActionSignal", async () => {
+    const resolver = createResolver({
+      test_action: {
+        name: "test_action",
+        description: "test",
+        parameters: { type: "object", properties: {} },
+        permissions: { autoExecute: true, autoContinue: true },
+        action_fn: async () => ({ result: "cancelled", autoContinue: false }),
+      },
+    });
+    const { result, permissions } = await executeAction(
+      "test_action", createMockContext(), {}, null, resolver,
+    );
+    assert.equal(result, "cancelled");
+    assert.equal(permissions.autoContinue, false);
+  });
+
+  it("does not override autoContinue for plain string results", async () => {
+    const resolver = createResolver({
+      test_action: {
+        name: "test_action",
+        description: "test",
+        parameters: { type: "object", properties: {} },
+        permissions: { autoExecute: true, autoContinue: true },
+        action_fn: async () => "plain string",
+      },
+    });
+    const { result, permissions } = await executeAction(
+      "test_action", createMockContext(), {}, null, resolver,
+    );
+    assert.equal(result, "plain string");
+    assert.equal(permissions.autoContinue, true);
+  });
 });

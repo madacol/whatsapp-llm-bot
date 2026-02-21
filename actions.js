@@ -108,8 +108,19 @@ export async function executeAction(
   }
 
   try {
+    const raw = await action.action_fn(actionContext, params);
+
+    // Allow actions to override autoContinue per-invocation via ActionSignal
+    if (raw && typeof raw === "object" && "result" in raw && "autoContinue" in raw) {
+      const signal = /** @type {ActionSignal} */ (raw);
+      return {
+        result: signal.result,
+        permissions: { ...action.permissions, autoContinue: signal.autoContinue },
+      };
+    }
+
     return {
-      result: await action.action_fn(actionContext, params),
+      result: raw,
       permissions: action.permissions,
     };
   } catch (error) {
