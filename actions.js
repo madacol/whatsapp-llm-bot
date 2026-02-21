@@ -59,15 +59,23 @@ export async function executeAction(
       const message = args.join(" ");
       console.log(...args);
       if (context.isDebug) {
-        await context.sendMessage(`📝 *Log*    [${shortId}]`, message);
+        await context.sendMessage(`📝 ${message}`);
       }
       return message;
     },
     sendMessage: async (message) => {
-      await context.sendMessage(`🔧 *Action*    [${shortId}]`, message);
+      if (context.isDebug) {
+        await context.sendMessage(`🔧 *Action*    [${shortId}]`, message);
+      } else {
+        await context.sendMessage(`🔧 ${message}`);
+      }
     },
     reply: async (message) => {
-      await context.reply(`🔧 *Action*    [${shortId}]`, message);
+      if (context.isDebug) {
+        await context.reply(`🔧 *Action*    [${shortId}]`, message);
+      } else {
+        await context.reply(`🔧 ${message}`);
+      }
     },
     reactToMessage: context.reactToMessage,
     sendPoll: context.sendPoll,

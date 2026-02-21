@@ -540,7 +540,7 @@ describe("Scenario 12: Debug mode gates tool call output", () => {
     await testDb.sql`UPDATE chats SET debug_until = '9999-01-01' WHERE chat_id = ${chatIdOn}`;
   });
 
-  it("does NOT send tool call args or results when debug is off", async () => {
+  it("shows compact tool call and result when debug is off", async () => {
     mockServer.addResponses(
       {
         tool_calls: [
@@ -563,18 +563,20 @@ describe("Scenario 12: Debug mode gates tool call output", () => {
     });
     await handleMessage(context);
 
-    // Should have the final LLM reply but NOT tool args or result details
+    // Should have the final LLM reply
     assert.ok(
       responses.some((r) => r.text.includes("Final answer")),
       "Should have the final LLM reply",
     );
+    // Should show compact tool call (just name, no args or ID)
     assert.ok(
-      !responses.some((r) => r.text.includes("🔧")),
-      `Tool call args should NOT be shown when debug is off, got: ${responses.map(r=>r.text).join(" | ")}`,
+      responses.some((r) => r.text === "🔧 run_javascript"),
+      `Should show compact tool call, got: ${responses.map(r=>r.text).join(" | ")}`,
     );
+    // Should show compact result (no bold *Result* header)
     assert.ok(
-      !responses.some((r) => r.text.includes("✅ *Result*")),
-      `Tool results should NOT be shown when debug is off, got: ${responses.map(r=>r.text).join(" | ")}`,
+      responses.some((r) => r.text.startsWith("✅") && !r.text.includes("*Result*")),
+      `Should show compact result without verbose header, got: ${responses.map(r=>r.text).join(" | ")}`,
     );
   });
 
