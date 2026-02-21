@@ -9,6 +9,7 @@ import { createLlmClient } from "./llm.js";
 import { shortenToolId } from "./utils.js";
 import { connectToWhatsApp } from "./whatsapp-adapter.js";
 import { startReminderDaemon } from "./reminder-daemon.js";
+import { startModelsCacheDaemon } from "./models-cache.js";
 import { initStore } from "./store.js";
 import {
   actionsToOpenAIFormat,
@@ -453,11 +454,12 @@ async function setup () {
     })
 
   const stopReminders = startReminderDaemon(sendToChat);
-
+  const stopModelsCache = startModelsCacheDaemon();
 
   async function cleanup() {
     try {
       stopReminders();
+      stopModelsCache();
       await closeWhatsapp();
       await store.closeDb();
     } catch (error) {

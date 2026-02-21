@@ -1,6 +1,8 @@
-import { describe, it, before, after } from "node:test";
+import { describe, it, before, after, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { PGlite } from "@electric-sql/pglite";
+import fs from "node:fs/promises";
+import path from "node:path";
 
 /**
  * Helper: create an in-memory PGlite and run the same schema as store.js
@@ -32,16 +34,32 @@ async function createTestDb() {
   return db;
 }
 
+const CACHE_PATH = path.resolve("data/models.json");
+
+/** @type {import("../models-cache.js").OpenRouterModel[]} */
+const fakeModels = [
+  { id: "openai/gpt-4o", name: "GPT-4o", context_length: 128000, pricing: { prompt: "0.000005", completion: "0.000015" } },
+  { id: "openai/gpt-4.1-mini", name: "GPT-4.1 Mini", context_length: 128000, pricing: { prompt: "0.000001", completion: "0.000003" } },
+  { id: "anthropic/claude-3.5-sonnet", name: "Claude 3.5 Sonnet", context_length: 200000, pricing: { prompt: "0.000003", completion: "0.000015" } },
+];
+
+async function writeFakeCache() {
+  await fs.mkdir(path.dirname(CACHE_PATH), { recursive: true });
+  await fs.writeFile(CACHE_PATH, JSON.stringify(fakeModels));
+}
+
 describe("per-chat model selection", () => {
   /** @type {import("@electric-sql/pglite").PGlite} */
   let db;
 
   before(async () => {
     db = await createTestDb();
+    await writeFakeCache();
   });
 
   after(async () => {
     await db.close();
+    await fs.rm(CACHE_PATH, { force: true });
   });
 
   describe("store layer – model column", () => {
@@ -110,12 +128,12 @@ describe("per-chat model selection", () => {
       const action = setModelModule.default;
       const result = await action.action_fn(
         { chatId: "chat-set-1", rootDb: db },
-        { model: "gpt-4.1-mini" },
+        { model: "openai/gpt-4.1-mini" },
       );
-      assert.ok(result.includes("gpt-4.1-mini"));
+      assert.ok(result.includes("openai/gpt-4.1-mini"));
 
       const { rows: [chat] } = await db.sql`SELECT model FROM chats WHERE chat_id = 'chat-set-1'`;
-      assert.equal(chat.model, "gpt-4.1-mini");
+      assert.equal(chat.model, "openai/gpt-4.1-mini");
     });
 
     it("reverts to default when given empty string", async () => {
@@ -131,6 +149,38 @@ describe("per-chat model selection", () => {
 
       const { rows: [chat] } = await db.sql`SELECT model FROM chats WHERE chat_id = 'chat-set-2'`;
       assert.equal(chat.model, null);
+    });
+
+    it("rejects invalid model with suggestions", async () => {
+      await db.sql`INSERT INTO chats(chat_id) VALUES ('chat-set-3') ON CONFLICT DO NOTHING`;
+
+      const setModelModule = await import("../actions/setModel.js");
+      const action = setModelModule.default;
+      const result = await action.action_fn(
+        { chatId: "chat-set-3", rootDb: db },
+        { model: "nonexistent/fake-model" },
+      );
+      assert.ok(typeof result === "string");
+      assert.ok(result.includes("not found"));
+
+      // Should NOT have updated the DB
+      const { rows: [chat] } = await db.sql`SELECT model FROM chats WHERE chat_id = 'chat-set-3'`;
+      assert.equal(chat.model, null);
+    });
+
+    it("suggests close matches for partial model names", async () => {
+      await db.sql`INSERT INTO chats(chat_id) VALUES ('chat-set-4') ON CONFLICT DO NOTHING`;
+
+      const setModelModule = await import("../actions/setModel.js");
+      const action = setModelModule.default;
+      const result = await action.action_fn(
+        { chatId: "chat-set-4", rootDb: db },
+        { model: "gpt-4" },
+      );
+      assert.ok(typeof result === "string");
+      assert.ok(result.includes("not found"));
+      // Should suggest close matches containing "gpt-4"
+      assert.ok(result.includes("openai/gpt-4"));
     });
 
     it("throws if chat does not exist", async () => {
