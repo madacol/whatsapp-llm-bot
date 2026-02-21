@@ -45,13 +45,18 @@ export function createIncomingContext(overrides = {}) {
   return { context, responses };
 }
 
+/** @type {PGlite | null} */
+let sharedTestDb = null;
+
 /**
- * Create an in-memory PGlite with the full app schema (mirrors store.js)
+ * Create (or return cached) in-memory PGlite with the full app schema.
  * @returns {Promise<PGlite>}
  */
 export async function createTestDb() {
+  if (sharedTestDb) return sharedTestDb;
   const db = new PGlite("memory://");
   await initStore(db);
+  sharedTestDb = db;
   return db;
 }
 

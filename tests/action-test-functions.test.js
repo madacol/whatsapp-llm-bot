@@ -19,9 +19,8 @@ before(async () => {
   }
 });
 
-after(async () => {
-  await db.close();
-});
+
+
 
 describe("action test_functions", () => {
   it("runs all test_functions for every action", async (t) => {

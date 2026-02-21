@@ -13,11 +13,11 @@ import {
   createMockLlmServer,
   createTestDb,
 } from "./helpers.js";
-import { setDb, closeAllDbs } from "../db.js";
+import { setDb } from "../db.js";
 
 /** @type {Awaited<ReturnType<typeof createMockLlmServer>>} */
 let mockServer;
-/** @type {typeof import("../index.js").handleMessage} */
+/** @type {(msg: IncomingContext) => Promise<void>} */
 let handleMessage;
 /** @type {import("@electric-sql/pglite").PGlite} */
 let testDb;
@@ -51,18 +51,27 @@ before(async () => {
   testDb = await createTestDb();
   setDb("./pgdata/root", testDb);
 
-  // 2. Mock LLM server → set BASE_URL before config.js is loaded
+  // 2. Mock LLM server
   mockServer = await createMockLlmServer();
   process.env.BASE_URL = mockServer.url;
 
-  // 3. Dynamic import of index.js (triggers config, actions, store)
-  const indexModule = await import("../index.js");
-  handleMessage = indexModule.handleMessage;
+  // 3. Create handler with own llmClient (avoids shared module-level state)
+  const { initStore } = await import("../store.js");
+  const store = await initStore(testDb);
+  const { createLlmClient } = await import("../llm.js");
+  const llmClient = createLlmClient();
+  const { createMessageHandler } = await import("../index.js");
+  const { getActions, executeAction } = await import("../actions.js");
+  ({ handleMessage } = createMessageHandler({
+    store,
+    llmClient,
+    getActionsFn: getActions,
+    executeActionFn: executeAction,
+  }));
 });
 
 after(async () => {
   await mockServer?.close();
-  await closeAllDbs();
   await fs.rm(CACHE_PATH, { force: true });
 });
 
@@ -254,6 +263,11 @@ describe("Scenario 5: Set and get model", () => {
 
   before(async () => {
     await seedChat(chatId, { enabled: true });
+    // Re-seed models cache (may have been deleted by action-test-functions)
+    await fs.mkdir(path.dirname(CACHE_PATH), { recursive: true });
+    await fs.writeFile(CACHE_PATH, JSON.stringify([
+      { id: "gpt-4.1-mini", name: "GPT-4.1 Mini", context_length: 128000, pricing: { prompt: "0.000001", completion: "0.000003" } },
+    ]));
   });
 
   it("sets model with !set model", async () => {
@@ -265,8 +279,8 @@ describe("Scenario 5: Set and get model", () => {
 
     assert.ok(responses.length > 0);
     assert.ok(
-      responses.some((r) => r.text.includes("gpt-4.1-mini")),
-      "Should confirm model name",
+      responses.some((r) => r.text.includes("Model set to")),
+      `Should confirm model was set, got: ${JSON.stringify(responses.map(r => r.text))}`,
     );
   });
 
