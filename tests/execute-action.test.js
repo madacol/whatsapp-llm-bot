@@ -263,7 +263,7 @@ describe("executeAction", () => {
     });
     await executeAction("test_action", ctx, {}, "call-123", resolver);
     assert.ok(
-      sent.some((s) => s.includes("Log")),
+      sent.some((s) => s.includes("debug info")),
       `log() should send messages when isDebug is true, got: ${JSON.stringify(sent)}`,
     );
   });
