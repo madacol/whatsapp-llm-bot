@@ -7,3 +7,4 @@ pgdata
 *.bck.js
 .env
 auth_info_baileys
+data/
