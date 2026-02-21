@@ -6,7 +6,8 @@ import path from "node:path";
  *   id: string,
  *   name: string,
  *   context_length: number,
- *   pricing: { prompt: string, completion: string }
+ *   pricing: { prompt: string, completion: string },
+ *   architecture?: { input_modalities?: string[] }
  * }} OpenRouterModel
  */
 
@@ -77,6 +78,17 @@ export async function findClosestModels(search, limit = 5) {
     .filter((m) => m.id.toLowerCase().includes(term))
     .slice(0, limit)
     .map((m) => m.id);
+}
+
+/**
+ * Get the input modalities supported by a model.
+ * @param {string} modelId
+ * @returns {Promise<string[]>} Array of supported input modalities (defaults to ["text"])
+ */
+export async function getModelModalities(modelId) {
+  const models = await getCachedModels();
+  const model = models.find((m) => m.id === modelId);
+  return model?.architecture?.input_modalities ?? ["text"];
 }
 
 /**

@@ -10,6 +10,7 @@ import { getDb } from "./db.js";
  *   respond_on_mention: boolean;
  *   respond_on_reply: boolean;
  *   debug_until: string | null;
+ *   content_models: { image?: string, audio?: string, video?: string };
  *   timestamp: string;
  * }} ChatRow
  *
@@ -67,6 +68,7 @@ export async function initStore(injectedDb){
         db.sql`ALTER TABLE messages DROP COLUMN IF EXISTS tool_args`,
         db.sql`ALTER TABLE messages DROP COLUMN IF EXISTS content`,
         db.sql`ALTER TABLE chats ADD COLUMN IF NOT EXISTS debug_until TIMESTAMP`,
+        db.sql`ALTER TABLE chats ADD COLUMN IF NOT EXISTS content_models JSONB DEFAULT '{}'`,
       ]);
     } catch (error) {
       console.error("Schema migration error:", error);
