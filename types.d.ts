@@ -151,6 +151,11 @@ type ExtendedActionContext<P extends PermissionFlags> = ActionContext
 
 type ActionResult = string | {} | HTMLElement;
 
+type ActionSignal = {
+  result: ActionResult;
+  autoContinue: boolean;
+};
+
 type Action<P extends PermissionFlags = PermissionFlags> = {
   name: string;
   command?: string; // Optional command for direct execution
