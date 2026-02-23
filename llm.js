@@ -35,18 +35,46 @@ export function convertPromptToOpenAI(prompt) {
 }
 
 /**
+ * Convert a CallLlmMessage into OpenAI message format.
+ * @param {CallLlmMessage} msg
+ * @returns {OpenAI.ChatCompletionMessageParam}
+ */
+export function convertMessageToOpenAI(msg) {
+  return /** @type {OpenAI.ChatCompletionMessageParam} */ ({
+    role: msg.role,
+    content: msg.content === null ? null
+      : typeof msg.content === "string" ? msg.content
+      : convertPromptToOpenAI(msg.content),
+    ...(msg.tool_calls && { tool_calls: msg.tool_calls }),
+    ...(msg.tool_call_id && { tool_call_id: msg.tool_call_id }),
+  });
+}
+
+/**
  * Create a CallLlm function backed by a real OpenAI client.
  * @param {OpenAI} llmClient
  * @param {string} [defaultModel]
  * @returns {CallLlm}
  */
 export function createCallLlm(llmClient, defaultModel = config.model) {
-  return async (prompt, options = {}) => {
-    const content = convertPromptToOpenAI(prompt);
+  const callLlm = /** @type {CallLlm} */ (async (/** @type {any} */ promptOrOpts, /** @type {CallLlmOptions} */ options = {}) => {
+    if (typeof promptOrOpts === "object" && !Array.isArray(promptOrOpts) && "messages" in promptOrOpts) {
+      // Chat mode
+      const chatOpts = /** @type {CallLlmChatOptions} */ (promptOrOpts);
+      return llmClient.chat.completions.create({
+        model: chatOpts.model || defaultModel,
+        messages: chatOpts.messages.map(convertMessageToOpenAI),
+        ...(chatOpts.tools && { tools: chatOpts.tools }),
+        ...(chatOpts.tool_choice && { tool_choice: chatOpts.tool_choice }),
+      });
+    }
+    // Simple mode (existing)
+    const content = convertPromptToOpenAI(/** @type {CallLlmPrompt} */ (promptOrOpts));
     const response = await llmClient.chat.completions.create({
       model: options.model || defaultModel,
       messages: [{ role: "user", content }],
     });
     return response.choices[0].message.content;
-  };
+  });
+  return callLlm;
 }

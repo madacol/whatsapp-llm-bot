@@ -140,7 +140,24 @@ type PermissionFlags = {
 
 type CallLlmOptions = { model?: string };
 type CallLlmPrompt = string | ContentBlock[];
-type CallLlm = (prompt: CallLlmPrompt, options?: CallLlmOptions) => Promise<string | null>;
+
+type CallLlmMessage = {
+  role: "system" | "user" | "assistant" | "tool";
+  content: string | ContentBlock[] | null;
+  tool_calls?: Array<{id: string, type: "function", function: {name: string, arguments: string}}>;
+  tool_call_id?: string;
+};
+
+type CallLlmChatOptions = CallLlmOptions & {
+  messages: CallLlmMessage[];
+  tools?: import("openai").default.Chat.Completions.ChatCompletionTool[];
+  tool_choice?: "auto" | "none";
+};
+
+type CallLlm = {
+  (prompt: CallLlmPrompt, options?: CallLlmOptions): Promise<string | null>;
+  (options: CallLlmChatOptions): Promise<import("openai").default.Chat.Completions.ChatCompletion>;
+};
 
 // Build action context types dynamically based on permissions
 type ExtendedActionContext<P extends PermissionFlags> = ActionContext
