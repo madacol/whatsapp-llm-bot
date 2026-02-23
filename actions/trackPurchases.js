@@ -221,7 +221,7 @@ export { EXTRACT_PROMPT, parseExtractResponse, ensureSchema, getOrCreateLedger, 
 export default /** @type {defineAction} */ ((x) => x)({
   name: "track_purchases",
   command: "compras",
-  description: "Gestiona un registro de compras organizado por libros (ledgers). Puede: 1) Extraer items de una foto de factura y guardarlos, 2) Mostrar el historial de compras, 3) Mostrar un resumen/total de gastos, 4) Gestionar libros de compras (listar, renombrar, eliminar). Envía una foto de factura para registrarla o pide ver el historial.",
+  description: "When the user sends an image that looks like a receipt or invoice, call this with action='extract' to extract and save the purchase data. Also use for: purchase history ('history'), spending summary ('summary'), deleting a purchase ('delete'), and ledger management ('list_ledgers', 'rename_ledger', 'delete_ledger').",
   parameters: {
     type: "object",
     properties: {
@@ -533,6 +533,138 @@ export default /** @type {defineAction} */ ((x) => x)({
   ],
   prompt: () => EXTRACT_PROMPT,
   test_prompts: [
+    async function tool_selection_scenarios(callLlm, readFixture) {
+      const { actionsToOpenAIFormat } = await import("../message-formatting.js");
+      const config = (await import("../config.js")).default;
+      const fs = await import("fs/promises");
+      const path = await import("path");
+
+      // Load all actions for realistic tool list
+      const actionsDir = path.resolve(process.cwd(), "actions");
+      const files = (await fs.readdir(actionsDir)).filter(f => f.endsWith(".js"));
+      /** @type {Action[]} */
+      const allActions = [];
+      for (const file of files) {
+        const mod = await import(`file://${path.join(actionsDir, file)}`);
+        if (mod.default?.name) allActions.push(mod.default);
+      }
+      const tools = actionsToOpenAIFormat(allActions);
+
+      // Load all fixture images once
+      const [receiptBuffer, pizzaBuffer, riverBuffer, fishBuffer, soccerBuffer] = await Promise.all([
+        readFixture("receipt-1.jpeg"),
+        readFixture("pizza.jpg"),
+        readFixture("river.jpg"),
+        readFixture("fish plate from south america.jpg"),
+        readFixture("Italy soccer fixture league.jpg"),
+      ]);
+
+      /** @type {ImageContentBlock} */
+      const receiptImage = { type: "image", encoding: "base64", mime_type: "image/jpeg", data: receiptBuffer.toString("base64") };
+      /** @type {ImageContentBlock} */
+      const pizzaImage = { type: "image", encoding: "base64", mime_type: "image/jpeg", data: pizzaBuffer.toString("base64") };
+      /** @type {ImageContentBlock} */
+      const riverImage = { type: "image", encoding: "base64", mime_type: "image/jpeg", data: riverBuffer.toString("base64") };
+      /** @type {ImageContentBlock} */
+      const fishImage = { type: "image", encoding: "base64", mime_type: "image/jpeg", data: fishBuffer.toString("base64") };
+      /** @type {ImageContentBlock} */
+      const soccerImage = { type: "image", encoding: "base64", mime_type: "image/jpeg", data: soccerBuffer.toString("base64") };
+
+      /** @type {Array<{name: string, messages: CallLlmMessage[]}>} */
+      const scenarios = [
+        {
+          name: "clean_conversation",
+          messages: [
+            { role: "system", content: config.system_prompt },
+            { role: "user", content: [receiptImage] },
+          ],
+        },
+        {
+          name: "after_casual_chat",
+          messages: [
+            { role: "system", content: config.system_prompt },
+            { role: "user", content: "que tal el tiempo hoy?" },
+            { role: "assistant", content: "Hoy hace buen tiempo, soleado y unos 22 grados." },
+            { role: "user", content: [pizzaImage, { type: "text", text: "mira la pizza que hice!" }] },
+            { role: "assistant", content: "Que buena pinta! Se ve deliciosa." },
+            { role: "user", content: [receiptImage] },
+          ],
+        },
+        {
+          name: "after_code_discussion",
+          messages: [
+            { role: "system", content: config.system_prompt },
+            { role: "user", content: "como hago un fetch en javascript?" },
+            { role: "assistant", content: "Puedes usar `fetch('url').then(r => r.json())` o con async/await." },
+            { role: "user", content: [riverImage, { type: "text", text: "mira esta foto de mis vacaciones" }] },
+            { role: "assistant", content: "Que bonito paisaje! Donde fue?" },
+            { role: "user", content: [receiptImage] },
+          ],
+        },
+        {
+          name: "with_brief_text",
+          messages: [
+            { role: "system", content: config.system_prompt },
+            { role: "user", content: [receiptImage, { type: "text", text: "mira esto" }] },
+          ],
+        },
+        {
+          name: "after_previous_extraction",
+          messages: [
+            { role: "system", content: config.system_prompt },
+            { role: "assistant", content: null, tool_calls: [{ id: "call_prev", type: "function", function: { name: "track_purchases", arguments: '{"action":"extract"}' } }] },
+            { role: "tool", content: "Factura registrada (ID: 1) — Libro: General\nTienda: Mercadona\nTotal: €25.30", tool_call_id: "call_prev" },
+            { role: "assistant", content: "He registrado tu factura de Mercadona por €25.30." },
+            { role: "user", content: "gracias!" },
+            { role: "assistant", content: "De nada!" },
+            { role: "user", content: [receiptImage] },
+          ],
+        },
+        {
+          name: "after_unrelated_images",
+          messages: [
+            { role: "system", content: config.system_prompt },
+            { role: "user", content: [fishImage, { type: "text", text: "probé este plato en Colombia" }] },
+            { role: "assistant", content: "Se ve increíble! La comida sudamericana es muy rica." },
+            { role: "user", content: [soccerImage, { type: "text", text: "viste el partido de ayer?" }] },
+            { role: "assistant", content: "No lo vi, pero parece que fue un buen partido!" },
+            { role: "user", content: [receiptImage] },
+          ],
+        },
+      ];
+
+      const results = await Promise.all(
+        scenarios.map(async (scenario) => {
+          try {
+            const response = await callLlm({ messages: scenario.messages, tools, tool_choice: "auto" });
+            const toolCalls = response.choices[0]?.message?.tool_calls;
+            if (!toolCalls || toolCalls.length === 0) {
+              return { name: scenario.name, error: "LLM should produce tool_calls for a receipt image" };
+            }
+            const call = toolCalls.find(tc => tc.function.name === "track_purchases");
+            if (!call) {
+              return { name: scenario.name, error: `Expected track_purchases call, got: ${toolCalls.map(tc => tc.function.name).join(", ")}` };
+            }
+            const args = JSON.parse(call.function.arguments);
+            if (args.action !== "extract") {
+              return { name: scenario.name, error: `Expected action='extract', got '${args.action}'` };
+            }
+            console.log(`  ✔ ${scenario.name}`);
+            return { name: scenario.name, error: null };
+          } catch (/** @type {any} */ err) {
+            console.log(`  ✖ ${scenario.name}: ${err?.message ?? String(err)}`);
+            return { name: scenario.name, error: err?.message ?? String(err) };
+          }
+        })
+      );
+
+      const failures = results.filter(r => r.error);
+      if (failures.length > 0) {
+        const details = failures.map(f => `  ${f.name}: ${f.error}`).join("\n");
+        assert.fail(`${failures.length}/${results.length} tool selection scenarios failed:\n${details}`);
+      }
+    },
+
     async function extract_prompt_returns_valid_json(callLlm, _readFixture, prompt) {
       /** @type {ContentBlock[]} */
       const content = [
