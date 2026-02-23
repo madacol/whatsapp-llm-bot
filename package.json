@@ -14,7 +14,8 @@
         "test": "node --test --experimental-test-isolation=none tests/*.test.js",
         "test:watch": "node --test --experimental-test-isolation=none --watch tests/*.test.js",
         "test:prompts": "node --test tests/*.prompt-test.js",
-        "type-check": "npx tsc --noEmit --project jsconfig.json"
+        "type-check": "npx tsc --noEmit --project jsconfig.json",
+        "optimize-prompt": "node scripts/optimize-prompt.js"
     },
     "keywords": [],
     "author": "madacol",

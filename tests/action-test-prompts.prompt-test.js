@@ -65,7 +65,7 @@ describe("action test_prompts", () => {
       await t.test(action.name, { timeout: 60_000 }, async (t2) => {
         for (const fn of action.test_prompts || []) {
           await t2.test(fn.name || "anonymous prompt test", { timeout: 60_000 }, async () => {
-            await fn(callLlm, readFixture);
+            await fn(callLlm, readFixture, action.prompt ?? (() => ""));
           });
         }
       });
