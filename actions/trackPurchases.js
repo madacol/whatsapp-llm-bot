@@ -538,10 +538,11 @@ export default /** @type {defineAction} */ ((x) => x)({
       assert.ok(!result.includes("200.00"), `Should NOT show 200.00, got: ${result}`);
     },
   ],
+  prompt: () => EXTRACT_PROMPT,
   test_prompts: [
-    async function extract_prompt_returns_valid_json(callLlm, _readFixture) {
+    async function extract_prompt_returns_valid_json(callLlm, _readFixture, prompt) {
       /** @type {ContentBlock[]} */
-      const prompt = [
+      const content = [
         {
           type: "text",
           text: `Here is the text content of a receipt:
@@ -555,10 +556,10 @@ Agua mineral 1.5L  x3    €0.60    €1.80
 ---
 TOTAL: €6.00
 
-` + EXTRACT_PROMPT,
+` + prompt(),
         },
       ];
-      const response = await callLlm(prompt);
+      const response = await callLlm(content);
       assert.ok(response, "LLM should return a response");
 
       const data = parseExtractResponse(/** @type {string} */ (response));
@@ -573,17 +574,17 @@ TOTAL: €6.00
         assert.equal(typeof item.quantity, "number", "quantity should be a number");
       }
     },
-    async function extract_from_receipt_image(callLlm, readFixture) {
+    async function extract_from_receipt_image(callLlm, readFixture, prompt) {
       const imageBuffer = await readFixture("receipt-1.jpeg");
       const base64 = imageBuffer.toString("base64");
 
       /** @type {ContentBlock[]} */
-      const prompt = [
+      const content = [
         { type: "image", encoding: "base64", mime_type: "image/jpeg", data: base64 },
-        { type: "text", text: EXTRACT_PROMPT },
+        { type: "text", text: prompt() },
       ];
 
-      const response = await callLlm(prompt);
+      const response = await callLlm(content);
       assert.ok(response, "LLM should return a response");
 
       const data = parseExtractResponse(/** @type {string} */ (response));
