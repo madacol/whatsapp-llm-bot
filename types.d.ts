@@ -160,6 +160,7 @@ type Action<P extends PermissionFlags = PermissionFlags> = {
   name: string;
   command?: string; // Optional command for direct execution
   description: string;
+  scope?: "chat" | "global";
   parameters: {
     type: "object";
     properties: Record<string, any>;
@@ -176,9 +177,11 @@ type Action<P extends PermissionFlags = PermissionFlags> = {
       db: PGlite,
     ) => Promise<void>
   >;
+  /** Returns the prompt string used by this action. Swappable for testing/optimization. */
+  prompt?: (...args: any[]) => string;
   /** Optional prompt tests — run only via `npm run test:prompts`, never in `npm test`. */
   test_prompts?: Array<
-    (callLlm: CallLlm, readFixture: (name: string) => Promise<Buffer>) => Promise<void>
+    (callLlm: CallLlm, readFixture: (name: string) => Promise<Buffer>, prompt: (...args: any[]) => string) => Promise<void>
   >;
 };
 
