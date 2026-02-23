@@ -1,27 +1,20 @@
 import assert from "node:assert/strict";
 
-const EXTRACT_PROMPT = `Analiza esta imagen de una factura/recibo de compra. Extrae la siguiente informacion en formato JSON estricto (sin markdown, solo JSON puro):
+const EXTRACT_PROMPT = `Extrae datos de la factura en JSON estricto (solo JSON):
 {
-  "store_name": "nombre de la tienda/comercio",
-  "purchase_date": "fecha de compra (formato YYYY-MM-DD, o null si no se ve)",
-  "items": [
-    {
-      "item_name": "nombre del producto",
-      "quantity": 1,
-      "unit_price": 0.00,
-      "subtotal": 0.00
-    }
-  ],
-  "total": 0.00
+  "store_name": "nombre",
+  "purchase_date": "YYYY-MM-DD o null",
+  "items": [{ "item_name": "nombre", "quantity": 1, "unit_price": 0.0, "subtotal": 0.0 }],
+  "total": 0.0
 }
 
-IMPORTANTE:
-- Los precios deben ser numeros sin simbolos de moneda
-- Si no puedes leer algun campo, pon null
-- Extrae TODOS los items/productos comprados
-- NO incluyas descuentos, vouchers, ni lineas de subtotal/balance como items
-- El total debe ser el monto total de la factura (lo que realmente se pago, despues de descuentos)
-- Responde SOLO con el JSON, nada mas`;
+Reglas:
+- Solo números en precios (sin símbolos).
+- Usa null si el dato es ilegible.
+- Extrae TODOS los productos individuales.
+- Excluye descuentos, cupones o subtotales de la lista de items.
+- "total" es el monto final neto pagado.
+- Sin texto adicional ni markdown.`;
 
 /**
  * @param {string} raw - Raw LLM response (may contain markdown fences)
