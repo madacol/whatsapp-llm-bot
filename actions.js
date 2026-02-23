@@ -1,5 +1,7 @@
 import fs from "fs/promises";
 import path from "path";
+import os from "os";
+import crypto from "crypto";
 import { getDb } from "./db.js";
 import config from "./config.js";
 import { createLlmClient, createCallLlm } from "./llm.js";
@@ -224,4 +226,159 @@ export async function getAction(actionName) {
     console.error(`Error importing action file for ${actionName}:`, error);
     return null;
   }
+}
+
+// ── Chat-scoped actions ──
+
+/** @type {Set<keyof PermissionFlags>} */
+export const ALLOWED_CHAT_PERMISSIONS = new Set([
+  "autoExecute",
+  "autoContinue",
+  "useLlm",
+  "requireAdmin",
+]);
+
+/**
+ * Ensures the chat_actions table exists in the given DB.
+ * @param {PGlite} db
+ */
+export async function ensureChatActionsSchema(db) {
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS chat_actions (
+      name TEXT PRIMARY KEY,
+      code TEXT NOT NULL,
+      created_at TIMESTAMP DEFAULT NOW()
+    )
+  `);
+}
+
+/**
+ * Upsert a chat action into the DB.
+ * @param {PGlite} db
+ * @param {string} name
+ * @param {string} code
+ */
+export async function saveChatAction(db, name, code) {
+  await ensureChatActionsSchema(db);
+  await db.query(
+    `INSERT INTO chat_actions (name, code) VALUES ($1, $2)
+     ON CONFLICT (name) DO UPDATE SET code = $2, created_at = NOW()`,
+    [name, code],
+  );
+}
+
+/**
+ * Read a chat action's code from the DB.
+ * @param {PGlite} db
+ * @param {string} name
+ * @returns {Promise<string | null>}
+ */
+export async function readChatAction(db, name) {
+  await ensureChatActionsSchema(db);
+  const { rows } = await db.query(
+    `SELECT code FROM chat_actions WHERE name = $1`,
+    [name],
+  );
+  return rows.length > 0 ? /** @type {string} */ (rows[0].code) : null;
+}
+
+/**
+ * Delete a chat action from the DB.
+ * @param {PGlite} db
+ * @param {string} name
+ */
+export async function deleteChatAction(db, name) {
+  await ensureChatActionsSchema(db);
+  await db.query(`DELETE FROM chat_actions WHERE name = $1`, [name]);
+}
+
+/** @type {Map<string, AppAction>} */
+const chatActionCache = new Map();
+
+/**
+ * Import a chat action from code string by writing to a temp file.
+ * Caches by (chatId, name, code hash) to avoid re-importing unchanged actions.
+ * @param {string} chatId
+ * @param {string} name
+ * @param {string} code
+ * @returns {Promise<AppAction | null>}
+ */
+async function importChatAction(chatId, name, code) {
+  const codeHash = crypto.createHash("sha256").update(code).digest("hex").slice(0, 16);
+  const cacheKey = `${chatId}:${name}:${codeHash}`;
+
+  const cached = chatActionCache.get(cacheKey);
+  if (cached) return cached;
+
+  const tmpFile = path.join(os.tmpdir(), `chat-action-${codeHash}.mjs`);
+  try {
+    await fs.writeFile(tmpFile, code, "utf-8");
+    const module = await import(`file://${tmpFile}?t=${Date.now()}`);
+    if (!module.default) {
+      console.error(`Chat action "${name}" has no default export`);
+      return null;
+    }
+
+    /** @type {PermissionFlags} */
+    const clampedPermissions = {};
+    if (module.default.permissions) {
+      for (const key of Object.keys(module.default.permissions)) {
+        if (ALLOWED_CHAT_PERMISSIONS.has(/** @type {keyof PermissionFlags} */ (key))) {
+          clampedPermissions[/** @type {keyof PermissionFlags} */ (key)] = module.default.permissions[key];
+        }
+      }
+    }
+
+    /** @type {AppAction} */
+    const action = {
+      ...module.default,
+      permissions: clampedPermissions,
+      scope: "chat",
+      fileName: `chat:${chatId}:${name}`,
+      app_name: "",
+    };
+
+    chatActionCache.set(cacheKey, action);
+    return action;
+  } catch (error) {
+    console.error(`Error importing chat action "${name}":`, error);
+    return null;
+  } finally {
+    await fs.rm(tmpFile, { force: true });
+  }
+}
+
+/**
+ * Load all chat-scoped actions for a given chat.
+ * @param {string} chatId
+ * @returns {Promise<AppAction[]>}
+ */
+export async function getChatActions(chatId) {
+  const db = getDb(`./pgdata/${chatId}/create_action`);
+  try {
+    await ensureChatActionsSchema(db);
+    const { rows } = await db.query(`SELECT name, code FROM chat_actions`);
+    /** @type {AppAction[]} */
+    const results = [];
+    for (const row of rows) {
+      const action = await importChatAction(chatId, /** @type {string} */ (row.name), /** @type {string} */ (row.code));
+      if (action) results.push(action);
+    }
+    return results;
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Load a single chat action by name.
+ * @param {string} chatId
+ * @param {string} actionName
+ * @returns {Promise<AppAction | null>}
+ */
+export async function getChatAction(chatId, actionName) {
+  const db = getDb(`./pgdata/${chatId}/create_action`);
+  const code = await readChatAction(db, actionName);
+  if (!code) return null;
+  return importChatAction(chatId, actionName, code);
 }

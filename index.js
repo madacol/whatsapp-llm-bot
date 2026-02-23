@@ -3,7 +3,7 @@
  */
 
 import OpenAI from "openai";
-import { getActions, executeAction } from "./actions.js";
+import { getActions, executeAction, getChatActions, getChatAction, getAction } from "./actions.js";
 import config from "./config.js";
 import { createLlmClient } from "./llm.js";
 import { shortenToolId } from "./utils.js";
@@ -45,12 +45,13 @@ const MAX_TOOL_CALL_DEPTH = 10;
  *   addMessage: Store['addMessage'],
  *   chatId: string,
  *   senderIds: string[],
+ *   actionResolver?: (name: string) => Promise<AppAction | null>,
  * }} params
  */
 async function processLlmResponse({
   llmClient, chatModel, systemPrompt, actions,
   formattedMessages, context, executeActionFn, addMessage,
-  chatId, senderIds,
+  chatId, senderIds, actionResolver,
 }) {
   let depth = 0;
 
@@ -175,6 +176,7 @@ async function processLlmResponse({
           context,
           toolArgs,
           toolCall.id,
+          actionResolver,
         );
         console.log("response", functionResponse);
 
@@ -333,9 +335,18 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
       confirm: messageContext.confirm,
     };
 
-    // Load actions
+    // Load actions (global + chat-scoped)
+    const globalActions = await getActionsFn();
+    const chatActions = await getChatActions(chatId);
     /** @type {Action[]} */
-    const actions = await getActionsFn();
+    const actions = [...globalActions, ...chatActions];
+
+    /** @param {string} name */
+    const actionResolver = async (name) => {
+      const chatAction = await getChatAction(chatId, name);
+      if (chatAction) return chatAction;
+      return getAction(name);
+    };
 
     const firstBlock = content.find(block=>block.type === "text")
 
@@ -363,7 +374,7 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
       console.log("executing", action.name, params);
 
       try {
-        const { result } = await executeActionFn(action.name, context, params);
+        const { result } = await executeActionFn(action.name, context, params, null, actionResolver);
 
         if (typeof result === "string") {
           await context.reply(result);
@@ -432,7 +443,7 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
     await processLlmResponse({
       llmClient, chatModel, systemPrompt, actions,
       formattedMessages, context, executeActionFn, addMessage,
-      chatId, senderIds,
+      chatId, senderIds, actionResolver,
     });
   }
 
