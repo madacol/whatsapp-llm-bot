@@ -46,6 +46,7 @@ function getContextInfo(msg) {
     || msg?.videoMessage?.contextInfo
     || msg?.documentMessage?.contextInfo
     || msg?.audioMessage?.contextInfo
+    || msg?.ptvMessage?.contextInfo
     || msg?.stickerMessage?.contextInfo;
 }
 
@@ -202,7 +203,8 @@ export async function getMessageContent(baileysMessage) {
 
   // Check for image content (including quoted images)
   const imageMessage = baileysMessage.message?.imageMessage;
-  const videoMessage = baileysMessage.message?.videoMessage;
+  const videoMessage = baileysMessage.message?.videoMessage
+    || baileysMessage.message?.ptvMessage;
   const audioMessage = baileysMessage.message?.audioMessage;
   const textMessage = baileysMessage.message?.conversation
     || baileysMessage.message?.extendedTextMessage?.text
