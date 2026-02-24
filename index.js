@@ -286,13 +286,7 @@ async function processLlmResponse({
 }
 
 /**
- * @typedef {{
- *   addMessage: Awaited<ReturnType<typeof initStore>>['addMessage'],
- *   closeDb: Awaited<ReturnType<typeof initStore>>['closeDb'],
- *   createChat: Awaited<ReturnType<typeof initStore>>['createChat'],
- *   getChat: Awaited<ReturnType<typeof initStore>>['getChat'],
- *   getMessages: Awaited<ReturnType<typeof initStore>>['getMessages'],
- * }} Store
+ * @typedef {import('./store.js').Store} Store
  *
  * @typedef {{
  *   store: Store,

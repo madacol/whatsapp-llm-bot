@@ -131,3 +131,5 @@ export async function initStore(injectedDb){
       },
     }
 }
+
+/** @typedef {Awaited<ReturnType<typeof initStore>>} Store */
