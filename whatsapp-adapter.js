@@ -12,7 +12,7 @@ import {
 } from "@whiskeysockets/baileys";
 import { exec } from "child_process";
 import { rm } from "fs/promises";
-import { isSessionRejected, sendAlertEmail } from "./notifications.js";
+import { needsAuthReset, sendAlertEmail } from "./notifications.js";
 
 const AUTH_DIR = "./auth_info_baileys";
 const QR_TIMEOUT_MS = 5 * 60 * 1000;
@@ -365,20 +365,20 @@ function registerHandlers(sockRef, saveCreds, onMessageHandler, reconnect) {
       }
 
       if (connection === "close") {
-        const shouldReconnect = lastDisconnect?.error?.message !== "logged out";
+        const statusCode = /** @type {{ output?: { statusCode?: number } } | undefined} */ (lastDisconnect?.error)?.output?.statusCode;
         console.log(
           "Connection closed due to ",
           lastDisconnect?.error,
-          ", reconnecting ",
-          shouldReconnect,
+          ", status code:",
+          statusCode,
         );
-        if (isSessionRejected(lastDisconnect) && !sessionResetInProgress) {
+        if (needsAuthReset(lastDisconnect) && !sessionResetInProgress) {
           sessionResetInProgress = true;
-          console.log("Session rejected (405). Clearing auth and requesting re-pair...");
+          console.log(`Auth failure (${statusCode}). Clearing auth and requesting re-pair...`);
           await rm(AUTH_DIR, { recursive: true, force: true });
           sendAlertEmail(
-            "WhatsApp Bot: Session rejected (405)",
-            "The WhatsApp bot session was rejected with a 405 error.\n"
+            `WhatsApp Bot: Auth failure (${statusCode})`,
+            `The WhatsApp bot connection failed with status ${statusCode}.\n`
             + "Auth credentials have been cleared and a QR code is being displayed.\n"
             + "Please scan the QR code within 5 minutes or the process will exit.\n"
             + `Time: ${new Date().toISOString()}`,
@@ -389,10 +389,10 @@ function registerHandlers(sockRef, saveCreds, onMessageHandler, reconnect) {
             console.error("QR code was not scanned within 5 minutes. Exiting.");
             process.exit(1);
           }, QR_TIMEOUT_MS);
-        } else if (isSessionRejected(lastDisconnect) && sessionResetInProgress) {
-          console.error("Session still rejected after auth reset. Exiting.");
+        } else if (needsAuthReset(lastDisconnect) && sessionResetInProgress) {
+          console.error(`Auth still failing (${statusCode}) after reset. Exiting.`);
           process.exit(1);
-        } else if (shouldReconnect) {
+        } else if (statusCode !== 401) {
           sockRef.current.end(undefined);
           await new Promise(resolve => setTimeout(resolve, 1000));
           await reconnect();
