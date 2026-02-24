@@ -6,7 +6,7 @@ import OpenAI from "openai";
 import { getActions, executeAction, getChatActions, getChatAction, getAction } from "./actions.js";
 import config from "./config.js";
 import { createLlmClient } from "./llm.js";
-import { shortenToolId, formatTime } from "./utils.js";
+import { shortenToolId, formatTime, truncateWithSummary } from "./utils.js";
 import { connectToWhatsApp } from "./whatsapp-adapter.js";
 import { startReminderDaemon } from "./reminder-daemon.js";
 import { startModelsCacheDaemon } from "./models-cache.js";
@@ -77,16 +77,7 @@ async function displayToolResult(resultMessage, shortId, permissions, context) {
   if (context.isDebug) {
     await context.sendMessage(`✅ *Result*    [${shortId}]`, resultMessage);
   } else if (permissions.autoContinue) {
-    if (resultMessage.length > 200) {
-      const remaining = resultMessage.length - 200;
-      const remainingLines = resultMessage.slice(200).split("\n").length - 1;
-      const suffix = remainingLines > 0
-        ? `… +${remaining} chars, ${remainingLines} lines`
-        : `… +${remaining} chars`;
-      await context.sendMessage(`✅ ${resultMessage.slice(0, 200)}${suffix}`);
-    } else {
-      await context.sendMessage(`✅ ${resultMessage}`);
-    }
+    await context.sendMessage(`✅ ${truncateWithSummary(resultMessage, 200)}`);
   } else {
     // Non-autoContinue: this is the final answer, show full result as reply
     await context.reply(resultMessage);
