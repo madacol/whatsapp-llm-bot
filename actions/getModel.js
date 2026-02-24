@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import config from "../config.js";
 
 export default /** @type {defineAction} */ ((x) => x)({
   name: "get_model",
@@ -44,7 +45,7 @@ export default /** @type {defineAction} */ ((x) => x)({
     if (chatInfo.model) {
       return `Model: ${chatInfo.model}`;
     } else {
-      return `Model: ${(await import("../config.js")).default.model} (default)`;
+      return `Model: ${config.model} (default)`;
     }
   },
 });
