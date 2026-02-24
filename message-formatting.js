@@ -106,9 +106,16 @@ export function formatUserMessage(firstBlock, isGroup, senderName, time, selfIds
 export function parseCommandArgs(args, parameters) {
   /** @type {{[paramName: string]: string}} */
   const params = {};
-  Object.entries(parameters.properties).forEach(
+  const entries = Object.entries(parameters.properties);
+  entries.forEach(
     ([paramName, param], i) => {
-      params[paramName] = args[i] || param.default;
+      if (i === entries.length - 1) {
+        // Last parameter gets all remaining args joined
+        const remaining = args.slice(i).join(" ");
+        params[paramName] = remaining || param.default;
+      } else {
+        params[paramName] = args[i] || param.default;
+      }
     },
   );
   return params;
