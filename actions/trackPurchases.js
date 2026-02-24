@@ -385,6 +385,36 @@ export default /** @type {defineAction} */ ((x) => x)({
       assert.equal(rows.length, 0, "No purchases should be saved when cancelled");
     },
 
+    // --- Transaction atomicity ---
+    async function extract_rolls_back_on_item_error(action_fn, db) {
+      await ensureSchema(db);
+      const mockResponse = JSON.stringify({
+        store_name: "AtomicStore",
+        purchase_date: "2025-06-15",
+        items: [
+          { item_name: "GoodItem", quantity: 1, unit_price: 5.00, subtotal: 5.00 },
+          { item_name: "BadItem", quantity: 1, unit_price: 1.00, subtotal: "not_a_number" },
+        ],
+        total: 6.00,
+      });
+      /** @type {ContentBlock[]} */
+      const contentWithImage = [
+        { type: "image", encoding: "base64", mime_type: "image/jpeg", data: "fakebase64" },
+      ];
+      try {
+        await action_fn(
+          { db, callLlm: async () => mockResponse, content: contentWithImage, log: async () => "", confirm: async () => true },
+          { action: "extract" },
+        );
+      } catch {
+        // Expected to throw due to invalid NUMERIC value
+      }
+
+      // The purchase should NOT exist if the transaction rolled back
+      const { rows } = await db.sql`SELECT * FROM purchases WHERE store_name = 'AtomicStore'`;
+      assert.equal(rows.length, 0, "Purchase should be rolled back when item insert fails");
+    },
+
     // --- Named ledger tests ---
     async function extract_with_named_ledger(action_fn, db) {
       await ensureSchema(db);
@@ -790,21 +820,25 @@ TOTAL: €6.00
         return { result: "Registro cancelado.", autoContinue: false };
       }
 
-      const { rows } = await db.sql`
-        INSERT INTO purchases (ledger_id, store_name, purchase_date, total, notes)
-        VALUES (${ledger.id}, ${data.store_name || "Desconocido"}, ${data.purchase_date}, ${data.total || 0}, ${""})
-        RETURNING id
-      `;
-      const purchaseId = rows[0].id;
+      const purchaseId = await db.transaction(async (/** @type {import("@electric-sql/pglite").Transaction} */ tx) => {
+        const { rows } = await tx.sql`
+          INSERT INTO purchases (ledger_id, store_name, purchase_date, total, notes)
+          VALUES (${ledger.id}, ${data.store_name || "Desconocido"}, ${data.purchase_date}, ${data.total || 0}, ${""})
+          RETURNING id
+        `;
+        const id = rows[0].id;
 
-      if (data.items && data.items.length > 0) {
-        for (const item of data.items) {
-          await db.sql`
-            INSERT INTO purchase_items (purchase_id, item_name, quantity, unit_price, subtotal)
-            VALUES (${purchaseId}, ${item.item_name}, ${item.quantity || 1}, ${item.unit_price || 0}, ${item.subtotal || 0})
-          `;
+        if (data.items && data.items.length > 0) {
+          for (const item of data.items) {
+            await tx.sql`
+              INSERT INTO purchase_items (purchase_id, item_name, quantity, unit_price, subtotal)
+              VALUES (${id}, ${item.item_name}, ${item.quantity || 1}, ${item.unit_price || 0}, ${item.subtotal || 0})
+            `;
+          }
         }
-      }
+
+        return id;
+      });
 
       let result = `*Factura registrada* (ID: ${purchaseId}) — Libro: ${ledger.name}\n\n`;
       result += `*Tienda:* ${data.store_name || "No identificada"}\n`;
