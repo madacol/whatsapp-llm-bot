@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { assertChatExists } from "../store.js";
+import { getChatOrThrow } from "../store.js";
 
 export default /** @type {defineAction} */ ((x) => x)({
   name: "set_response_mode",
@@ -69,7 +69,7 @@ export default /** @type {defineAction} */ ((x) => x)({
     },
   ],
   action_fn: async function ({ chatId, rootDb }, params) {
-    await assertChatExists(rootDb, chatId);
+    await getChatOrThrow(rootDb, chatId);
 
     /**
      * Parse a string-or-boolean param to a boolean.

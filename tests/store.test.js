@@ -1,7 +1,7 @@
 import { describe, it, before } from "node:test";
 import assert from "node:assert/strict";
 import { PGlite } from "@electric-sql/pglite";
-import { initStore, assertChatExists } from "../store.js";
+import { initStore, getChatOrThrow } from "../store.js";
 import { createTestDb } from "./helpers.js";
 
 describe("store with injected DB", () => {
@@ -53,15 +53,17 @@ describe("store with injected DB", () => {
     });
   });
 
-  describe("assertChatExists", () => {
-    it("resolves for an existing chat", async () => {
+  describe("getChatOrThrow", () => {
+    it("returns the ChatRow for an existing chat", async () => {
       await store.createChat("assert-exists-1");
-      await assertChatExists(db, "assert-exists-1");
+      const chat = await getChatOrThrow(db, "assert-exists-1");
+      assert.equal(chat.chat_id, "assert-exists-1");
+      assert.equal(typeof chat.is_enabled, "boolean");
     });
 
     it("throws for a nonexistent chat", async () => {
       await assert.rejects(
-        () => assertChatExists(db, "no-such-chat"),
+        () => getChatOrThrow(db, "no-such-chat"),
         { message: "Chat no-such-chat does not exist." }
       );
     });

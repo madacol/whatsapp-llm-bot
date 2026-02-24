@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { getChatOrThrow } from "../store.js";
 
 export default /** @type {defineAction} */ ((x) => x)({
   name: "show_info",
@@ -31,15 +32,7 @@ export default /** @type {defineAction} */ ((x) => x)({
     },
   ],
   action_fn: async function ({ chatId, rootDb, senderIds }) {
-    // Get chat enabled status
-    const {
-      rows: [chatInfo],
-    } =
-      await rootDb.sql`SELECT is_enabled FROM chats WHERE chat_id = ${chatId}`;
-
-    if (!chatInfo) {
-      throw new Error(`Chat ${chatId} does not exist.`);
-    }
+    const chatInfo = await getChatOrThrow(rootDb, chatId);
 
     const status = chatInfo.is_enabled ? "enabled" : "disabled";
 

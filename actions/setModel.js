@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import config from "../config.js";
 import { validateModel } from "../models-cache.js";
-import { assertChatExists } from "../store.js";
+import { getChatOrThrow } from "../store.js";
 
 export default /** @type {defineAction} */ ((x) => x)({
   name: "set_model",
@@ -59,7 +59,7 @@ export default /** @type {defineAction} */ ((x) => x)({
   action_fn: async function ({ chatId, rootDb }, { model }) {
     model = model.trim();
 
-    await assertChatExists(rootDb, chatId);
+    await getChatOrThrow(rootDb, chatId);
 
     const modelValue = model.length === 0 ? null : model;
 
