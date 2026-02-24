@@ -108,7 +108,7 @@ describe("models-cache", () => {
       ];
 
       const originalFetch = globalThis.fetch;
-      globalThis.fetch = /** @type {any} */ (async () => ({
+      globalThis.fetch = /** @type {typeof fetch} */ (async () => ({
         ok: true,
         json: async () => ({ data: fakeModels }),
       }));

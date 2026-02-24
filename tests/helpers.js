@@ -107,7 +107,7 @@ export async function createMockLlmServer() {
         return;
       }
 
-      /** @type {any} */
+      /** @type {{ role: string, content: string | null, tool_calls?: any[] }} */
       let responseMessage;
       if (typeof next === "string") {
         responseMessage = { role: "assistant", content: next };
@@ -118,7 +118,7 @@ export async function createMockLlmServer() {
           tool_calls: next.tool_calls,
         };
       } else {
-        responseMessage = next;
+        responseMessage = { role: "assistant", content: null };
       }
 
       const response = {
