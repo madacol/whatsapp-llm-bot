@@ -212,15 +212,7 @@ async function processLlmResponse({
 }) {
   let depth = 0;
 
-  while (depth <= MAX_TOOL_CALL_DEPTH) {
-    if (depth === MAX_TOOL_CALL_DEPTH) {
-      await context.reply(
-        "⚠️ *Depth limit*",
-        `Reached maximum tool call depth (${MAX_TOOL_CALL_DEPTH}). Stopping.`,
-      );
-      return;
-    }
-
+  while (depth < MAX_TOOL_CALL_DEPTH) {
     let response;
     try {
       response = await llmClient.chat.completions.create({
@@ -286,6 +278,11 @@ async function processLlmResponse({
     if (!continueProcessing) return;
     depth++;
   }
+
+  await context.reply(
+    "⚠️ *Depth limit*",
+    `Reached maximum tool call depth (${MAX_TOOL_CALL_DEPTH}). Stopping.`,
+  );
 }
 
 /**
