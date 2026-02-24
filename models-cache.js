@@ -82,6 +82,24 @@ export async function findClosestModels(search, limit = 5) {
 }
 
 /**
+ * Validate that a model ID exists in the cache.
+ * @param {string} modelId
+ * @returns {Promise<string | null>} null if valid, or a user-facing error message if not found
+ */
+export async function validateModel(modelId) {
+  if (await modelExists(modelId)) {
+    return null;
+  }
+  const suggestions = await findClosestModels(modelId);
+  let message = `Model \`${modelId}\` not found in OpenRouter models.`;
+  if (suggestions.length > 0) {
+    message += `\n\nDid you mean:\n${suggestions.map((s) => `• \`${s}\``).join("\n")}`;
+  }
+  message += `\n\nUse *!search models* to browse available models.`;
+  return message;
+}
+
+/**
  * Get the input modalities supported by a model.
  * @param {string} modelId
  * @returns {Promise<string[]>} Array of supported input modalities (defaults to ["text"])

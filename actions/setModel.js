@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { modelExists, findClosestModels } from "../models-cache.js";
+import { validateModel } from "../models-cache.js";
 import { assertChatExists } from "../store.js";
 
 export default /** @type {defineAction} */ ((x) => x)({
@@ -63,14 +63,9 @@ export default /** @type {defineAction} */ ((x) => x)({
     const modelValue = model.length === 0 ? null : model;
 
     // Validate model exists in cache (skip for empty/revert)
-    if (modelValue && !(await modelExists(modelValue))) {
-      const suggestions = await findClosestModels(modelValue);
-      let message = `Model \`${modelValue}\` not found in OpenRouter models.`;
-      if (suggestions.length > 0) {
-        message += `\n\nDid you mean:\n${suggestions.map((s) => `• \`${s}\``).join("\n")}`;
-      }
-      message += `\n\nUse *!search models* to browse available models.`;
-      return message;
+    if (modelValue) {
+      const error = await validateModel(modelValue);
+      if (error) return error;
     }
 
     try {
