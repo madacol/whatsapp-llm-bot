@@ -134,7 +134,6 @@ type PermissionFlags = {
   requireMaster?: boolean;
   useChatDb?: boolean;
   useRootDb?: boolean;
-  useFileSystem?: boolean;
   useLlm?: boolean;
 };
 
@@ -164,7 +163,6 @@ type ExtendedActionContext<P extends PermissionFlags> = ActionContext
   & (P["useRootDb"] extends true ? { rootDb: PGlite } : {})
   & (P["useChatDb"] extends true ? { chatDb: PGlite } : {})
   & (P["useLlm"] extends true ? { callLlm: CallLlm } : {});
-// & (P['useFileSystem'] extends true ? {directoryHandle: FileSystemDirectoryHandle} : {});
 
 type ActionResult = string | {} | HTMLElement;
 
