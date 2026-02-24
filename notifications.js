@@ -1,14 +1,18 @@
 import nodemailer from "nodemailer";
 
+/** Status codes that indicate auth credentials are invalid and must be cleared.
+ *  401 = logged out, 403 = forbidden, 405 = session rejected, 419 = auth expired */
+const AUTH_FAILURE_CODES = new Set([401, 403, 405, 419]);
+
 /**
- * Check if a Baileys disconnect error indicates a rejected session (405).
+ * Check if a Baileys disconnect error requires clearing auth and re-pairing.
  * Baileys wraps errors as Boom objects with an `output.statusCode` field.
  * @param {{ error?: Error | (Error & { output?: { statusCode?: number } }) } | undefined} lastDisconnect
  * @returns {boolean}
  */
-export function isSessionRejected(lastDisconnect) {
+export function needsAuthReset(lastDisconnect) {
   const error = /** @type {{ output?: { statusCode?: number } } | undefined} */ (lastDisconnect?.error);
-  return error?.output?.statusCode === 405;
+  return AUTH_FAILURE_CODES.has(error?.output?.statusCode ?? 0);
 }
 
 /**
