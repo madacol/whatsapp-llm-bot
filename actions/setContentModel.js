@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { modelExists, findClosestModels, getModelModalities } from "../models-cache.js";
+import { validateModel, getModelModalities } from "../models-cache.js";
 import { assertChatExists } from "../store.js";
 
 const CONTENT_TYPES = ["image", "audio", "video"];
@@ -132,15 +132,8 @@ export default /** @type {defineAction} */ ((x) => x)({
       await assertChatExists(rootDb, chatId);
 
       // Validate model exists
-      if (!(await modelExists(model))) {
-        const suggestions = await findClosestModels(model);
-        let message = `Model \`${model}\` not found in OpenRouter models.`;
-        if (suggestions.length > 0) {
-          message += `\n\nDid you mean:\n${suggestions.map((s) => `• \`${s}\``).join("\n")}`;
-        }
-        message += `\n\nUse *!search models* to browse available models.`;
-        return message;
-      }
+      const error = await validateModel(model);
+      if (error) return error;
 
       // Validate model supports the content type
       const modalities = await getModelModalities(model);

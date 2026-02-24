@@ -98,6 +98,41 @@ describe("models-cache", () => {
     });
   });
 
+  describe("validateModel", () => {
+    it("returns null for a valid model", async () => {
+      await writeFakeCache([
+        { id: "openai/gpt-4o", name: "GPT-4o", context_length: 128000, pricing: { prompt: "0.000005", completion: "0.000015" } },
+      ]);
+      const { validateModel } = await import("../models-cache.js");
+      assert.equal(await validateModel("openai/gpt-4o"), null);
+    });
+
+    it("returns error message with suggestions for unknown model", async () => {
+      await writeFakeCache([
+        { id: "openai/gpt-4o", name: "GPT-4o", context_length: 128000, pricing: { prompt: "0.000005", completion: "0.000015" } },
+        { id: "openai/gpt-4o-mini", name: "GPT-4o Mini", context_length: 128000, pricing: { prompt: "0.000001", completion: "0.000003" } },
+      ]);
+      const { validateModel } = await import("../models-cache.js");
+      const result = await validateModel("openai/gpt-4");
+      assert.ok(typeof result === "string");
+      assert.ok(result.includes("not found"));
+      assert.ok(result.includes("Did you mean"));
+      assert.ok(result.includes("openai/gpt-4o"));
+    });
+
+    it("returns error message without suggestions when no close match", async () => {
+      await writeFakeCache([
+        { id: "openai/gpt-4o", name: "GPT-4o", context_length: 128000, pricing: { prompt: "0.000005", completion: "0.000015" } },
+      ]);
+      const { validateModel } = await import("../models-cache.js");
+      const result = await validateModel("totally-unknown-xyz");
+      assert.ok(typeof result === "string");
+      assert.ok(result.includes("not found"));
+      assert.ok(!result.includes("Did you mean"));
+      assert.ok(result.includes("!search models"));
+    });
+  });
+
   describe("startModelsCacheDaemon", () => {
     it("fetches immediately when cache file is missing", async () => {
       await removeCache();
