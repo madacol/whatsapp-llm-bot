@@ -108,6 +108,38 @@ function createConfirm(sock, chatId) {
 }
 
 /**
+ * Download media from a Baileys message and return content blocks.
+ * @param {BaileysMessage} baileysMessage
+ * @param {{ mimetype?: string | null, caption?: string | null }} mediaMessage
+ * @param {"image" | "video" | "audio"} type
+ * @returns {Promise<IncomingContentBlock[]>}
+ */
+async function downloadMediaToBlocks(baileysMessage, mediaMessage, type) {
+  /** @type {IncomingContentBlock[]} */
+  const blocks = [];
+  const buffer = await downloadMediaMessage(baileysMessage, "buffer", {});
+  const base64Data = buffer.toString("base64");
+  const mimetype = mediaMessage.mimetype;
+
+  if (type === "image" && !mimetype) {
+    blocks.push({ type: "text", text: "Error reading image: No mimetype found" });
+  } else {
+    blocks.push(/** @type {IncomingContentBlock} */ ({
+      type,
+      encoding: "base64",
+      mime_type: mimetype || undefined,
+      data: base64Data,
+    }));
+  }
+
+  if (mediaMessage.caption) {
+    blocks.push({ type: "text", text: mediaMessage.caption });
+  }
+
+  return blocks;
+}
+
+/**
  * @param {BaileysMessage} baileysMessage
  * @returns {Promise<{ content: IncomingContentBlock[], quotedSenderId: string | undefined }>}
  */
@@ -166,76 +198,15 @@ export async function getMessageContent(baileysMessage) {
     || baileysMessage.message?.documentMessage?.caption
 
   if (imageMessage) {
-    // Handle image message
-    const imageBuffer = await downloadMediaMessage(
-      baileysMessage,
-      "buffer",
-      {},
-    );
-    const base64Data = imageBuffer.toString("base64");
-    const mimetype = imageMessage.mimetype;
-
-    if (mimetype) {
-      content.push({
-        type: "image",
-        encoding: "base64",
-        mime_type: mimetype,
-        data: base64Data,
-      });
-    } else {
-      content.push({
-        type: "text",
-        text: "Error reading image: No mimetype found",
-      });
-    }
-    if (imageMessage.caption) {
-      content.push({
-        type: "text",
-        text: imageMessage.caption,
-      });
-    }
+    content.push(...await downloadMediaToBlocks(baileysMessage, imageMessage, "image"));
   }
 
   if (videoMessage) {
-    // Handle video message
-    const videoBuffer = await downloadMediaMessage(
-      baileysMessage,
-      "buffer",
-      {},
-    );
-    const base64Data = videoBuffer.toString("base64");
-    const mimetype = videoMessage.mimetype;
-
-    content.push({
-      type: "video",
-      encoding: "base64",
-      mime_type: mimetype || undefined,
-      data: base64Data,
-    });
-    if (videoMessage.caption) {
-      content.push({
-        type: "text",
-        text: videoMessage.caption,
-      });
-    }
+    content.push(...await downloadMediaToBlocks(baileysMessage, videoMessage, "video"));
   }
 
   if (audioMessage) {
-    // Handle audio message
-    const audioBuffer = await downloadMediaMessage(
-      baileysMessage,
-      "buffer",
-      {},
-    );
-    const base64Data = audioBuffer.toString("base64");
-    const mimetype = audioMessage.mimetype;
-
-    content.push({
-      type: "audio",
-      encoding: "base64",
-      mime_type: mimetype || undefined,
-      data: base64Data,
-    });
+    content.push(...await downloadMediaToBlocks(baileysMessage, audioMessage, "audio"));
   }
 
   if (textMessage) {
