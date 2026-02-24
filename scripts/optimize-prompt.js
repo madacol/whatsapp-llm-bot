@@ -53,8 +53,8 @@ async function runTestPrompts(action, callLlm, promptFn) {
       await fn(callLlm, readFixture, promptFn);
       results.push({ name, passed: true });
       passed++;
-    } catch (/** @type {any} */ err) {
-      results.push({ name, passed: false, error: err?.message ?? String(err) });
+    } catch (/** @type {unknown} */ err) {
+      results.push({ name, passed: false, error: err instanceof Error ? err.message : String(err) });
       failed++;
     }
   }
@@ -196,8 +196,8 @@ async function optimize(actionName, opts) {
         console.log(`\nAll tests pass — stopping early.`);
         break;
       }
-    } catch (/** @type {any} */ err) {
-      console.error(`Iteration ${i} error: ${err?.message ?? err}`);
+    } catch (/** @type {unknown} */ err) {
+      console.error(`Iteration ${i} error: ${err instanceof Error ? err.message : err}`);
     }
   }
 
@@ -221,9 +221,11 @@ async function optimize(actionName, opts) {
     // diff exits 1 when files differ, which is expected
     const diff = execFileSync("diff", ["-u", "--color=always", oldTmp, newTmp], { encoding: "utf-8" });
     console.log(diff);
-  } catch (/** @type {any} */ e) {
-    if (e.stdout) console.log(e.stdout);
-    else console.log(e.message);
+  } catch (/** @type {unknown} */ e) {
+    const execErr = /** @type {{ stdout?: string, message?: string }} */ (e);
+    if (execErr.stdout) console.log(execErr.stdout);
+    else if (execErr.message) console.log(execErr.message);
+    else console.log(String(e));
   }
   console.log("=".repeat(60));
 

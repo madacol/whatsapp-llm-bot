@@ -92,7 +92,7 @@ export default /** @type {defineAction} */ ((x) => x)({
     assert.equal(found.scope, "chat");
     assert.equal(found.app_name, "");
     // Verify it actually works
-    const result = await found.action_fn(/** @type {any} */ ({}), {});
+    const result = await found.action_fn(/** @type {ExtendedActionContext<PermissionFlags>} */ ({}), {});
     assert.equal(result, "hello from chat action");
   });
 

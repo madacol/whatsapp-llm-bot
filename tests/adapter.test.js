@@ -24,27 +24,27 @@ before(async () => {
 
 describe("getMessageContent", () => {
   it("extracts plain text (conversation)", async () => {
-    const msg = /** @type {any} */ ({
+    const msg = /** @type {Partial<BaileysMessage>} */ ({
       message: { conversation: "Hello world" },
     });
     const { content } = await getMessageContent(msg);
 
     assert.equal(content.length, 1);
     assert.equal(content[0].type, "text");
-    assert.equal(/** @type {any} */ (content[0]).text, "Hello world");
+    assert.equal(/** @type {Partial<BaileysMessage>} */ (content[0]).text, "Hello world");
   });
 
   it("extracts extendedTextMessage", async () => {
-    const msg = /** @type {any} */ ({
+    const msg = /** @type {Partial<BaileysMessage>} */ ({
       message: { extendedTextMessage: { text: "Extended" } },
     });
     const { content } = await getMessageContent(msg);
 
-    assert.ok(content.some(b => b.type === "text" && /** @type {any} */ (b).text === "Extended"));
+    assert.ok(content.some(b => b.type === "text" && /** @type {Partial<BaileysMessage>} */ (b).text === "Extended"));
   });
 
   it("extracts quoted message with reply text", async () => {
-    const msg = /** @type {any} */ ({
+    const msg = /** @type {Partial<BaileysMessage>} */ ({
       message: {
         extendedTextMessage: {
           text: "My reply",
@@ -58,11 +58,11 @@ describe("getMessageContent", () => {
 
     assert.ok(content.some(b => b.type === "quote"), "Should have quote block");
     assert.ok(
-      content.some(b => b.type === "text" && /** @type {any} */ (b).text === "My reply"),
+      content.some(b => b.type === "text" && /** @type {Partial<BaileysMessage>} */ (b).text === "My reply"),
       "Should have reply text",
     );
 
-    const quote = /** @type {any} */ (content.find(b => b.type === "quote"));
+    const quote = /** @type {Partial<BaileysMessage>} */ (content.find(b => b.type === "quote"));
     assert.ok(
       quote.content.some(b => b.type === "text" && b.text === "Original"),
       "Quote should contain original text",
@@ -70,7 +70,7 @@ describe("getMessageContent", () => {
   });
 
   it("extracts quoted extendedTextMessage", async () => {
-    const msg = /** @type {any} */ ({
+    const msg = /** @type {Partial<BaileysMessage>} */ ({
       message: {
         extendedTextMessage: {
           text: "replying",
@@ -84,7 +84,7 @@ describe("getMessageContent", () => {
     });
     const { content } = await getMessageContent(msg);
 
-    const quote = /** @type {any} */ (content.find(b => b.type === "quote"));
+    const quote = /** @type {Partial<BaileysMessage>} */ (content.find(b => b.type === "quote"));
     assert.ok(quote, "Should have quote block");
     assert.ok(
       quote.content.some(b => b.type === "text" && b.text === "original extended"),
@@ -92,7 +92,7 @@ describe("getMessageContent", () => {
   });
 
   it("extracts image caption from quoted message", async () => {
-    const msg = /** @type {any} */ ({
+    const msg = /** @type {Partial<BaileysMessage>} */ ({
       message: {
         extendedTextMessage: {
           text: "About this image",
@@ -106,7 +106,7 @@ describe("getMessageContent", () => {
     });
     const { content } = await getMessageContent(msg);
 
-    const quote = /** @type {any} */ (content.find(b => b.type === "quote"));
+    const quote = /** @type {Partial<BaileysMessage>} */ (content.find(b => b.type === "quote"));
     assert.ok(quote);
     assert.ok(
       quote.content.some(b => b.type === "text" && b.text === "Image caption"),
@@ -114,18 +114,18 @@ describe("getMessageContent", () => {
   });
 
   it("extracts document caption as text", async () => {
-    const msg = /** @type {any} */ ({
+    const msg = /** @type {Partial<BaileysMessage>} */ ({
       message: { documentMessage: { caption: "See attached" } },
     });
     const { content } = await getMessageContent(msg);
 
     assert.ok(
-      content.some(b => b.type === "text" && /** @type {any} */ (b).text === "See attached"),
+      content.some(b => b.type === "text" && /** @type {Partial<BaileysMessage>} */ (b).text === "See attached"),
     );
   });
 
   it("returns empty array for unknown message type", async () => {
-    const msg = /** @type {any} */ ({
+    const msg = /** @type {Partial<BaileysMessage>} */ ({
       message: { stickerMessage: {} },
     });
     const { content } = await getMessageContent(msg);
@@ -134,7 +134,7 @@ describe("getMessageContent", () => {
   });
 
   it("extracts quotedSenderId from contextInfo participant", async () => {
-    const msg = /** @type {any} */ ({
+    const msg = /** @type {Partial<BaileysMessage>} */ ({
       message: {
         extendedTextMessage: {
           text: "My reply",
@@ -150,7 +150,7 @@ describe("getMessageContent", () => {
   });
 
   it("returns undefined quotedSenderId when no quote", async () => {
-    const msg = /** @type {any} */ ({
+    const msg = /** @type {Partial<BaileysMessage>} */ ({
       message: { conversation: "Hello" },
     });
     const { quotedSenderId } = await getMessageContent(msg);
