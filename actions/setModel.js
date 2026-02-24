@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import config from "../config.js";
 import { validateModel } from "../models-cache.js";
 import { getChatOrThrow } from "../store.js";
+import { withModelsCache } from "../tests/helpers.js";
 
 export default /** @type {defineAction} */ ((x) => x)({
   name: "set_model",
@@ -24,15 +25,9 @@ export default /** @type {defineAction} */ ((x) => x)({
   },
   test_functions: [
     async function sets_model_for_chat(action_fn, db) {
-      const fs = await import("node:fs/promises");
-      const path = await import("node:path");
-      const cachePath = path.resolve("data/models.json");
-      await fs.mkdir(path.dirname(cachePath), { recursive: true });
-      await fs.writeFile(cachePath, JSON.stringify([
+      await withModelsCache([
         { id: "openai/gpt-4o", name: "GPT-4o", context_length: 128000, pricing: { prompt: "0.000005", completion: "0.000015" } },
-      ]));
-
-      try {
+      ], async () => {
         await db.sql`INSERT INTO chats(chat_id) VALUES ('act-smodel-1') ON CONFLICT DO NOTHING`;
         const result = await action_fn(
           { chatId: "act-smodel-1", rootDb: db },
@@ -41,9 +36,7 @@ export default /** @type {defineAction} */ ((x) => x)({
         assert.ok(result.includes("openai/gpt-4o"));
         const { rows: [chat] } = await db.sql`SELECT model FROM chats WHERE chat_id = 'act-smodel-1'`;
         assert.equal(chat.model, "openai/gpt-4o");
-      } finally {
-        await fs.rm(cachePath, { force: true });
-      }
+      });
     },
     async function reverts_to_default_on_empty_model(action_fn, db) {
       await db.sql`INSERT INTO chats(chat_id, model) VALUES ('act-smodel-2', 'gpt-4o') ON CONFLICT DO NOTHING`;

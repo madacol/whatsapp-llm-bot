@@ -1,6 +1,25 @@
+import fs from "node:fs/promises";
+import path from "node:path";
 import { createServer } from "node:http";
 import { PGlite } from "@electric-sql/pglite";
 import { initStore } from "../store.js";
+
+const MODELS_CACHE_PATH = path.resolve("data/models.json");
+
+/**
+ * Write a models cache file, run fn, then clean up.
+ * @param {object[]} models
+ * @param {() => Promise<void>} fn
+ */
+export async function withModelsCache(models, fn) {
+  await fs.mkdir(path.dirname(MODELS_CACHE_PATH), { recursive: true });
+  await fs.writeFile(MODELS_CACHE_PATH, JSON.stringify(models));
+  try {
+    await fn();
+  } finally {
+    await fs.rm(MODELS_CACHE_PATH, { force: true });
+  }
+}
 
 /**
  * Create an IncomingContext for testing.
