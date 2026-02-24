@@ -122,6 +122,57 @@ export function parseCommandArgs(args, parameters) {
 }
 
 /**
+ * @param {ImageContentBlock} block
+ * @returns {OpenAI.ChatCompletionContentPart}
+ */
+function formatImagePart(block) {
+  return { type: "image_url", image_url: { url: `data:${block.mime_type};base64,${block.data}` } };
+}
+
+/**
+ * @param {AudioContentBlock} block
+ * @returns {Promise<OpenAI.ChatCompletionContentPart>}
+ */
+async function formatAudioPart(block) {
+  /** @type {"wav" | "mp3"} */
+  let format = "mp3";
+  let data;
+  const audioFormat = block.mime_type?.split("audio/")[1]?.split(";")[0];
+  if (audioFormat === "wav" || audioFormat === "mp3") {
+    format = audioFormat;
+    data = block.data;
+  } else {
+    console.warn(`Unsupported audio format: ${block.mime_type}`);
+    data = await convertAudioToMp3Base64(block.data);
+  }
+  return { type: "input_audio", input_audio: { data, format } };
+}
+
+/**
+ * @param {QuoteContentBlock} block
+ * @returns {OpenAI.ChatCompletionContentPart[]}
+ */
+function formatQuoteParts(block) {
+  /** @type {Record<string, (b: any) => OpenAI.ChatCompletionContentPart>} */
+  const quoteFormatters = {
+    text: (/** @type {TextContentBlock} */ b) =>
+      ({ type: "text", text: `> ${b.text.trim().replace(/\n/g, '\n> ')}` }),
+    image: formatImagePart,
+  };
+  return block.content
+    .filter(b => b.type in quoteFormatters)
+    .map(b => quoteFormatters[b.type](b));
+}
+
+/** @type {Record<string, (block: any) => OpenAI.ChatCompletionContentPart | Promise<OpenAI.ChatCompletionContentPart> | OpenAI.ChatCompletionContentPart[]>} */
+const contentFormatters = {
+  text: (/** @type {TextContentBlock} */ block) => block,
+  image: formatImagePart,
+  audio: formatAudioPart,
+  quote: formatQuoteParts,
+};
+
+/**
  * Format a user message's content blocks into OpenAI content parts.
  * @param {UserMessage} message
  * @returns {Promise<Array<OpenAI.ChatCompletionContentPart>>}
@@ -130,49 +181,14 @@ async function formatUserContent(message) {
   /** @type {Array<OpenAI.ChatCompletionContentPart>} */
   const parts = [];
 
-  for (const contentBlock of message.content) {
-    switch (contentBlock.type) {
-      case "quote": {
-        for (const quoteBlock of contentBlock.content) {
-          switch (quoteBlock.type) {
-            case "text":
-              parts.push({ type: "text", text: `> ${quoteBlock.text.trim().replace(/\n/g, '\n> ')}` });
-              break;
-            case "image": {
-              const dataUrl = `data:${quoteBlock.mime_type};base64,${quoteBlock.data}`;
-              parts.push({ type: "image_url", image_url: { url: dataUrl } });
-              break;
-            }
-          }
-        }
-        break;
-      }
-      case "text":
-        parts.push(contentBlock);
-        break;
-      case "image": {
-        const dataUrl = `data:${contentBlock.mime_type};base64,${contentBlock.data}`;
-        parts.push({ type: "image_url", image_url: { url: dataUrl } });
-        break;
-      }
-      case "audio": {
-        /** @type {"wav" | "mp3"} */
-        let format = "mp3";
-        let data;
-        const audioFormat = contentBlock.mime_type?.split("audio/")[1]?.split(";")[0];
-        if (audioFormat === "wav" || audioFormat === "mp3") {
-          format = audioFormat;
-          data = contentBlock.data;
-        } else {
-          console.warn(`Unsupported audio format: ${contentBlock.mime_type}`);
-          data = await convertAudioToMp3Base64(contentBlock.data);
-        }
-        parts.push({
-          type: "input_audio",
-          input_audio: { data, format },
-        });
-        break;
-      }
+  for (const block of message.content) {
+    const formatter = contentFormatters[block.type];
+    if (!formatter) continue;
+    const result = await formatter(block);
+    if (Array.isArray(result)) {
+      parts.push(...result);
+    } else {
+      parts.push(result);
     }
   }
 
