@@ -388,7 +388,8 @@ describe("formatMessagesForOpenAI", () => {
 
     assert.equal(result.length, 1);
     assert.equal(result[0].role, "assistant");
-    const msg = /** @type {any} */ (result[0]);
+    const msg = /** @type {import("openai").default.ChatCompletionAssistantMessageParam} */ (result[0]);
+    assert.ok(msg.tool_calls);
     assert.equal(msg.tool_calls.length, 1);
     assert.equal(msg.tool_calls[0].function.name, "run_javascript");
   });
@@ -421,7 +422,7 @@ describe("formatMessagesForOpenAI", () => {
     assert.equal(result.length, 2);
     const toolMsg = result.find(m => m.role === "tool");
     assert.ok(toolMsg);
-    const msg = /** @type {any} */ (toolMsg);
+    const msg = /** @type {import("openai").default.ChatCompletionToolMessageParam} */ (toolMsg);
     assert.equal(msg.tool_call_id, "call_123");
     assert.equal(msg.content, "result");
   });
