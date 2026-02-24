@@ -8,6 +8,7 @@ import {
   useMultiFileAuthState,
   downloadMediaMessage,
   Browsers,
+  fetchLatestWaWebVersion,
 } from "@whiskeysockets/baileys";
 import { exec } from "child_process";
 import { rm } from "fs/promises";
@@ -431,6 +432,9 @@ function registerHandlers(sockRef, saveCreds, onMessageHandler, reconnect) {
  */
 export async function connectToWhatsApp(onMessageHandler) {
 
+  const { version } = await fetchLatestWaWebVersion();
+  console.log("Using WA Web version:", version);
+
   const { state, saveCreds } = await useMultiFileAuthState(
     AUTH_DIR,
   );
@@ -438,6 +442,7 @@ export async function connectToWhatsApp(onMessageHandler) {
   /** @type {{ current: import('@whiskeysockets/baileys').WASocket }} */
   const sockRef = {
     current: makeWASocket({
+      version,
       auth: state,
       browser: Browsers.ubuntu("Chrome"),
     }),
@@ -445,9 +450,10 @@ export async function connectToWhatsApp(onMessageHandler) {
 
   async function reconnect() {
     const { state: newState, saveCreds: newSaveCreds } = await useMultiFileAuthState(
-      "./auth_info_baileys",
+      AUTH_DIR,
     );
     sockRef.current = makeWASocket({
+      version,
       auth: newState,
       browser: Browsers.ubuntu("Chrome"),
     });
