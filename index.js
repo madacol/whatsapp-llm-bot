@@ -18,7 +18,7 @@ import {
   parseCommandArgs,
   formatMessagesForOpenAI,
 } from "./message-formatting.js";
-import { translateUnsupportedContent, ensureTranslationSchema } from "./content-translator.js";
+import { translateUnsupportedContent } from "./content-translator.js";
 import { getDb } from "./db.js";
 
 /**
@@ -471,7 +471,6 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
 
 if (!process.env.TESTING) {
   const store = await initStore();
-  await ensureTranslationSchema(getDb("./pgdata/root"));
   const llmClient = createLlmClient();
 
   const { handleMessage } = createMessageHandler({
