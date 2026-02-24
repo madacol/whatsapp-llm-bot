@@ -11,7 +11,6 @@ const VALID_PERMISSION_KEYS = new Set([
   "requireMaster",
   "useChatDb",
   "useRootDb",
-  "useFileSystem",
   "useLlm",
 ]);
 

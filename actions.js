@@ -76,7 +76,6 @@ export async function executeAction(
   if (action.permissions?.useRootDb) {
     actionContext.rootDb = getDb("./pgdata/root");
   }
-  // if (action.permissions?.useFileSystem) { actionContext.directoryHandle = directoryHandle; }
   if (action.permissions?.useLlm) {
     if (!llmClient) {
       throw new Error(`Action "${actionName}" requires useLlm but no llmClient was provided`);
