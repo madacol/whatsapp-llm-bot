@@ -17,6 +17,7 @@ const QR_TIMEOUT_MS = 5 * 60 * 1000;
 
 /** @type {ReturnType<typeof setTimeout> | null} */
 let qrExitTimer = null;
+let sessionResetInProgress = false;
 
 /**
  * Extract the bot's own IDs (without the @s.whatsapp.net suffix) from the socket user info.
@@ -369,7 +370,8 @@ function registerHandlers(sockRef, saveCreds, onMessageHandler, reconnect) {
           ", reconnecting ",
           shouldReconnect,
         );
-        if (isSessionRejected(lastDisconnect)) {
+        if (isSessionRejected(lastDisconnect) && !sessionResetInProgress) {
+          sessionResetInProgress = true;
           console.log("Session rejected (405). Clearing auth and requesting re-pair...");
           await rm(AUTH_DIR, { recursive: true, force: true });
           sendAlertEmail(
@@ -385,6 +387,9 @@ function registerHandlers(sockRef, saveCreds, onMessageHandler, reconnect) {
             console.error("QR code was not scanned within 5 minutes. Exiting.");
             process.exit(1);
           }, QR_TIMEOUT_MS);
+        } else if (isSessionRejected(lastDisconnect) && sessionResetInProgress) {
+          console.error("Session still rejected after auth reset. Exiting.");
+          process.exit(1);
         } else if (shouldReconnect) {
           sockRef.current.end(undefined);
           await new Promise(resolve => setTimeout(resolve, 1000));
@@ -394,6 +399,7 @@ function registerHandlers(sockRef, saveCreds, onMessageHandler, reconnect) {
         if (qrExitTimer) {
           clearTimeout(qrExitTimer);
           qrExitTimer = null;
+          sessionResetInProgress = false;
           console.log("QR code scanned successfully, exit timer cancelled.");
         }
         console.log("WhatsApp connection opened");
