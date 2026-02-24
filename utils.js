@@ -8,6 +8,22 @@ export function shortenToolId(toolCallId) {
 }
 
 /**
+ * Truncate a string to maxLen, appending a summary of omitted content.
+ * @param {string} str
+ * @param {number} maxLen
+ * @returns {string}
+ */
+export function truncateWithSummary(str, maxLen) {
+  if (str.length <= maxLen) return str;
+  const remaining = str.length - maxLen;
+  const remainingLines = str.slice(maxLen).split("\n").length - 1;
+  const suffix = remainingLines > 0
+    ? `… +${remaining} chars, ${remainingLines} lines`
+    : `… +${remaining} chars`;
+  return str.slice(0, maxLen) + suffix;
+}
+
+/**
  * Format a timestamp for display.
  * @param {Date} date
  * @returns {string}
