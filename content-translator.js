@@ -35,6 +35,24 @@ const DESCRIPTION_LABELS = {
   video: "Video description",
 };
 
+/** @type {Record<string, (block: IncomingContentBlock, data: string) => import("openai").default.ChatCompletionContentPart[]>} */
+const contentBlockBuilders = {
+  image: (block, data) => [
+    {
+      type: /** @type {const} */ ("image_url"),
+      image_url: {
+        url: `data:${/** @type {ImageContentBlock} */ (block).mime_type};base64,${data}`,
+      },
+    },
+  ],
+  audio: (_block, data) => [
+    {
+      type: /** @type {const} */ ("input_audio"),
+      input_audio: { data, format: /** @type {const} */ ("mp3") },
+    },
+  ],
+};
+
 /**
  * Hash content data for cache lookup.
  * @param {string} data
@@ -159,26 +177,7 @@ export async function translateUnsupportedContent(
             role: "user",
             content: [
               { type: "text", text: prompt },
-              ...(contentType === "image"
-                ? [
-                    {
-                      type: /** @type {const} */ ("image_url"),
-                      image_url: {
-                        url: `data:${/** @type {ImageContentBlock} */ (block).mime_type};base64,${contentData}`,
-                      },
-                    },
-                  ]
-                : contentType === "audio"
-                  ? [
-                      {
-                        type: /** @type {const} */ ("input_audio"),
-                        input_audio: {
-                          data: contentData,
-                          format: /** @type {const} */ ("mp3"),
-                        },
-                      },
-                    ]
-                  : []),
+              ...(contentBlockBuilders[contentType]?.(block, contentData) ?? []),
             ],
           },
         ];
