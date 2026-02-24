@@ -17,20 +17,7 @@ export async function ensureSchema(db) {
   `;
 }
 
-/**
- * Format a timestamp for display.
- * @param {Date} date
- * @returns {string}
- */
-function formatTime(date) {
-  return date.toLocaleString("en-EN", {
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-}
+import { formatTime } from "../utils.js";
 
 export default /** @type {defineAction} */ ((x) => x)({
   name: "set_reminder",

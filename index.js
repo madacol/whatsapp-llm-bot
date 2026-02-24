@@ -6,7 +6,7 @@ import OpenAI from "openai";
 import { getActions, executeAction, getChatActions, getChatAction, getAction } from "./actions.js";
 import config from "./config.js";
 import { createLlmClient } from "./llm.js";
-import { shortenToolId } from "./utils.js";
+import { shortenToolId, formatTime } from "./utils.js";
 import { connectToWhatsApp } from "./whatsapp-adapter.js";
 import { startReminderDaemon } from "./reminder-daemon.js";
 import { startModelsCacheDaemon } from "./models-cache.js";
@@ -414,13 +414,7 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
     }
 
     // Use data from message context
-    const time = messageContext.timestamp.toLocaleString("en-EN", {
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-      hour: "2-digit",
-      minute: "2-digit",
-    });
+    const time = formatTime(messageContext.timestamp);
 
     if (!shouldRespond(chatInfo, isGroup, content, selfIds, quotedSenderId)) {
       return;
