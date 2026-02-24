@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { modelExists, findClosestModels, getModelModalities } from "../models-cache.js";
+import { assertChatExists } from "../store.js";
 
 const CONTENT_TYPES = ["image", "audio", "video"];
 
@@ -128,13 +129,7 @@ export default /** @type {defineAction} */ ((x) => x)({
     async function ({ chatId, rootDb }, { model, contentType }) {
       model = model.trim();
 
-      const {
-        rows: [chatExists],
-      } = await rootDb.sql`SELECT chat_id FROM chats WHERE chat_id = ${chatId}`;
-
-      if (!chatExists) {
-        throw new Error(`Chat ${chatId} does not exist.`);
-      }
+      await assertChatExists(rootDb, chatId);
 
       // Validate model exists
       if (!(await modelExists(model))) {

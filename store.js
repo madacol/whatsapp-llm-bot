@@ -24,6 +24,18 @@ import { getRootDb } from "./db.js";
  */
 
 /**
+ * Throws if the given chat does not exist in the database.
+ * @param {PGlite} db
+ * @param {string} chatId
+ */
+export async function assertChatExists(db, chatId) {
+  const { rows: [chat] } = await db.sql`SELECT chat_id FROM chats WHERE chat_id = ${chatId}`;
+  if (!chat) {
+    throw new Error(`Chat ${chatId} does not exist.`);
+  }
+}
+
+/**
  * @param {PGlite} [injectedDb]
  */
 export async function initStore(injectedDb){

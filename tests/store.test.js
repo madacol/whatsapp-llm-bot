@@ -1,7 +1,7 @@
 import { describe, it, before } from "node:test";
 import assert from "node:assert/strict";
 import { PGlite } from "@electric-sql/pglite";
-import { initStore } from "../store.js";
+import { initStore, assertChatExists } from "../store.js";
 import { createTestDb } from "./helpers.js";
 
 describe("store with injected DB", () => {
@@ -50,6 +50,20 @@ describe("store with injected DB", () => {
     it("returns undefined for nonexistent chat", async () => {
       const chat = await store.getChat("nonexistent");
       assert.equal(chat, undefined);
+    });
+  });
+
+  describe("assertChatExists", () => {
+    it("resolves for an existing chat", async () => {
+      await store.createChat("assert-exists-1");
+      await assertChatExists(db, "assert-exists-1");
+    });
+
+    it("throws for a nonexistent chat", async () => {
+      await assert.rejects(
+        () => assertChatExists(db, "no-such-chat"),
+        { message: "Chat no-such-chat does not exist." }
+      );
     });
   });
 
