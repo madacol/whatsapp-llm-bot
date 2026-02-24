@@ -290,6 +290,7 @@ describe("content-translator", () => {
       const { translateUnsupportedContent } = await import(
         "../content-translator.js"
       );
+      const config = (await import("../config.js")).default;
 
       const fs = await import("node:fs/promises");
       const path = await import("node:path");
@@ -307,6 +308,9 @@ describe("content-translator", () => {
           },
         ]),
       );
+
+      const origContentModel = config.content_model;
+      config.content_model = "";
 
       try {
         /** @type {MessageRow[]} */
@@ -349,6 +353,7 @@ describe("content-translator", () => {
         // Should report skipped content types
         assert.deepEqual(result.skippedTypes, new Set(["image"]));
       } finally {
+        config.content_model = origContentModel;
         await fs.rm(cachePath, { force: true });
       }
     });
