@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { modelExists, findClosestModels } from "../models-cache.js";
+import { assertChatExists } from "../store.js";
 
 export default /** @type {defineAction} */ ((x) => x)({
   name: "set_model",
@@ -57,14 +58,7 @@ export default /** @type {defineAction} */ ((x) => x)({
   action_fn: async function ({ chatId, rootDb }, { model }) {
     model = model.trim();
 
-    const {
-      rows: [chatExists],
-    } =
-      await rootDb.sql`SELECT chat_id FROM chats WHERE chat_id = ${chatId}`;
-
-    if (!chatExists) {
-      throw new Error(`Chat ${chatId} does not exist.`);
-    }
+    await assertChatExists(rootDb, chatId);
 
     const modelValue = model.length === 0 ? null : model;
 

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { assertChatExists } from "../store.js";
 
 export default /** @type {defineAction} */ ((x) => x)({
   name: "set_response_mode",
@@ -68,14 +69,7 @@ export default /** @type {defineAction} */ ((x) => x)({
     },
   ],
   action_fn: async function ({ chatId, rootDb }, params) {
-    const {
-      rows: [chatExists],
-    } =
-      await rootDb.sql`SELECT chat_id FROM chats WHERE chat_id = ${chatId}`;
-
-    if (!chatExists) {
-      throw new Error(`Chat ${chatId} does not exist.`);
-    }
+    await assertChatExists(rootDb, chatId);
 
     /**
      * Parse a string-or-boolean param to a boolean.

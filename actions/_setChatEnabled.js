@@ -1,3 +1,5 @@
+import { assertChatExists } from "../store.js";
+
 /**
  * Shared helper for enableChat and disableChat actions.
  * @param {PGlite} rootDb
@@ -6,13 +8,7 @@
  * @returns {Promise<string>}
  */
 export async function setChatEnabled(rootDb, chatId, enabled) {
-  const {
-    rows: [chatExists],
-  } = await rootDb.sql`SELECT chat_id FROM chats WHERE chat_id = ${chatId}`;
-
-  if (!chatExists) {
-    throw new Error(`Chat ${chatId} does not exist.`);
-  }
+  await assertChatExists(rootDb, chatId);
 
   try {
     await rootDb.sql`
