@@ -73,6 +73,29 @@ export async function initStore(injectedDb){
     } catch (error) {
       console.error("Schema migration error:", error);
     }
+
+    // Additional root DB tables (centralized here instead of in individual modules)
+    await db.sql`
+      CREATE TABLE IF NOT EXISTS reminders (
+        id SERIAL PRIMARY KEY,
+        chat_id TEXT NOT NULL,
+        reminder_text TEXT NOT NULL,
+        remind_at TIMESTAMP NOT NULL,
+        created_at TIMESTAMP DEFAULT NOW(),
+        delivered BOOLEAN DEFAULT FALSE
+      )
+    `;
+
+    await db.sql`
+      CREATE TABLE IF NOT EXISTS content_translations (
+        content_hash VARCHAR(16) NOT NULL,
+        model_id TEXT NOT NULL,
+        translation TEXT NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (content_hash, model_id)
+      )
+    `;
+
     return {
       /**
       * @param {ChatRow['chat_id']} chatId
