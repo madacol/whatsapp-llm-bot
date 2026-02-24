@@ -24,15 +24,12 @@ const TRANSLATION_PROMPTS = {
     "Describe this image in detail. Include all visible text, numbers, data, and visual elements.",
   audio:
     "Transcribe and describe this audio content in detail.",
-  video:
-    "Describe this video content in detail. Include all visible text, actions, and visual elements.",
 };
 
 /** @type {Record<string, string>} */
 const DESCRIPTION_LABELS = {
   image: "Image description",
   audio: "Audio description",
-  video: "Video description",
 };
 
 /** @type {Record<string, (block: IncomingContentBlock, data: string) => import("openai").default.ChatCompletionContentPart[]>} */
@@ -151,11 +148,15 @@ export async function translateUnsupportedContent(
       const translationModelId =
         contentModels[contentType] || config.content_model || "";
 
-      if (!translationModelId) {
-        // No translation model configured — replace with placeholder
+      if (!translationModelId || !contentBlockBuilders[contentType]) {
+        // No translation model configured, or no way to send this content
+        // type to an LLM (e.g. video) — replace with placeholder
+        const reason = !contentBlockBuilders[contentType]
+          ? "translation not supported for this content type"
+          : "no translation model configured";
         cloned.message_data.content[i] = /** @type {TextContentBlock} */ ({
           type: "text",
-          text: `[Unsupported ${contentType} content — no translation model configured]`,
+          text: `[Unsupported ${contentType} content — ${reason}]`,
         });
         skippedTypes.add(contentType);
         continue;
