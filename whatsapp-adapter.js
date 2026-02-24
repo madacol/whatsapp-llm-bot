@@ -9,6 +9,14 @@ import {
   downloadMediaMessage,
 } from "@whiskeysockets/baileys";
 import { exec } from "child_process";
+import { rm } from "fs/promises";
+import { isSessionRejected, sendAlertEmail } from "./notifications.js";
+
+const AUTH_DIR = "./auth_info_baileys";
+const QR_TIMEOUT_MS = 5 * 60 * 1000;
+
+/** @type {ReturnType<typeof setTimeout> | null} */
+let qrExitTimer = null;
 
 /**
  * Extract the bot's own IDs (without the @s.whatsapp.net suffix) from the socket user info.
@@ -361,12 +369,33 @@ function registerHandlers(sockRef, saveCreds, onMessageHandler, reconnect) {
           ", reconnecting ",
           shouldReconnect,
         );
-        if (shouldReconnect) {
+        if (isSessionRejected(lastDisconnect)) {
+          console.log("Session rejected (405). Clearing auth and requesting re-pair...");
+          await rm(AUTH_DIR, { recursive: true, force: true });
+          sendAlertEmail(
+            "WhatsApp Bot: Session rejected (405)",
+            "The WhatsApp bot session was rejected with a 405 error.\n"
+            + "Auth credentials have been cleared and a QR code is being displayed.\n"
+            + "Please scan the QR code within 5 minutes or the process will exit.\n"
+            + `Time: ${new Date().toISOString()}`,
+          );
+          sockRef.current.end(undefined);
+          await reconnect();
+          qrExitTimer = setTimeout(() => {
+            console.error("QR code was not scanned within 5 minutes. Exiting.");
+            process.exit(1);
+          }, QR_TIMEOUT_MS);
+        } else if (shouldReconnect) {
           sockRef.current.end(undefined);
           await new Promise(resolve => setTimeout(resolve, 1000));
           await reconnect();
         }
       } else if (connection === "open") {
+        if (qrExitTimer) {
+          clearTimeout(qrExitTimer);
+          qrExitTimer = null;
+          console.log("QR code scanned successfully, exit timer cancelled.");
+        }
         console.log("WhatsApp connection opened");
         const selfIds = getSelfIds(sockRef.current);
         console.log("Self IDs:", selfIds, JSON.stringify(sockRef.current.user, null, 2));
@@ -396,7 +425,7 @@ function registerHandlers(sockRef, saveCreds, onMessageHandler, reconnect) {
 export async function connectToWhatsApp(onMessageHandler) {
 
   const { state, saveCreds } = await useMultiFileAuthState(
-    "./auth_info_baileys",
+    AUTH_DIR,
   );
 
   /** @type {{ current: import('@whiskeysockets/baileys').WASocket }} */
