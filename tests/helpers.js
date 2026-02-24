@@ -159,13 +159,13 @@ export async function createMockLlmServer() {
     });
   });
 
-  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", () => resolve(undefined)));
   const addr = server.address();
   const port = typeof addr === "object" && addr ? addr.port : 0;
 
   return {
     url: `http://127.0.0.1:${port}/v1`,
-    close: () => new Promise((resolve) => server.close(resolve)),
+    close: () => new Promise((resolve) => server.close(() => resolve(undefined))),
     addResponses: (...responses) => queue.push(...responses),
     getRequests: () => requests,
   };
