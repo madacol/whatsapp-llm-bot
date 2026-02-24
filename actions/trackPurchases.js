@@ -651,9 +651,9 @@ export default /** @type {defineAction} */ ((x) => x)({
             }
             console.log(`  ✔ ${scenario.name}`);
             return { name: scenario.name, error: null };
-          } catch (/** @type {any} */ err) {
-            console.log(`  ✖ ${scenario.name}: ${err?.message ?? String(err)}`);
-            return { name: scenario.name, error: err?.message ?? String(err) };
+          } catch (/** @type {unknown} */ err) {
+            console.log(`  ✖ ${scenario.name}: ${err instanceof Error ? err.message : String(err)}`);
+            return { name: scenario.name, error: err instanceof Error ? err.message : String(err) };
           }
         })
       );

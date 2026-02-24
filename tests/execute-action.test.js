@@ -215,7 +215,7 @@ describe("executeAction", () => {
     assert.equal(result, "admin success");
   });
 
-  it("log() does NOT sendMessage when isDebug is false", async () => {
+  it("log() returns joined message without sending to chat", async () => {
     /** @type {string[]} */
     const sent = [];
     const resolver = createResolver({
@@ -225,49 +225,25 @@ describe("executeAction", () => {
         parameters: { type: "object", properties: {} },
         permissions: { autoExecute: true },
         action_fn: async (ctx) => {
-          await ctx.log("debug info");
+          const logged = await ctx.log("hello", "world");
+          assert.equal(logged, "hello world");
           return "ok";
         },
       },
     });
     const ctx = createMockContext({
-      isDebug: false,
       sendMessage: async (_header, _text) => { sent.push(`${_header} ${_text ?? ""}`); },
     });
     await executeAction("test_action", ctx, {}, "call-123", resolver);
     assert.ok(
-      !sent.some((s) => s.includes("Log")),
-      `log() should NOT send messages when isDebug is false, got: ${JSON.stringify(sent)}`,
+      !sent.some((s) => s.includes("hello")),
+      `log() should not send messages to chat, got: ${JSON.stringify(sent)}`,
     );
   });
 
-  it("log() DOES sendMessage when isDebug is true", async () => {
-    /** @type {string[]} */
-    const sent = [];
-    const resolver = createResolver({
-      test_action: {
-        name: "test_action",
-        description: "test",
-        parameters: { type: "object", properties: {} },
-        permissions: { autoExecute: true },
-        action_fn: async (ctx) => {
-          await ctx.log("debug info");
-          return "ok";
-        },
-      },
-    });
-    const ctx = createMockContext({
-      isDebug: true,
-      sendMessage: async (_header, _text) => { sent.push(`${_header} ${_text ?? ""}`); },
-    });
-    await executeAction("test_action", ctx, {}, "call-123", resolver);
-    assert.ok(
-      sent.some((s) => s.includes("debug info")),
-      `log() should send messages when isDebug is true, got: ${JSON.stringify(sent)}`,
-    );
-  });
-
-  it("provides callLlm when useLlm permission is set", async () => {
+  it("provides callLlm when useLlm permission is set and llmClient is provided", async () => {
+    const { createLlmClient } = await import("../llm.js");
+    const injectedClient = createLlmClient();
     let receivedContext;
     const resolver = createResolver({
       llm_action: {
@@ -281,8 +257,24 @@ describe("executeAction", () => {
         },
       },
     });
-    await executeAction("llm_action", createMockContext(), {}, null, resolver);
+    await executeAction("llm_action", createMockContext(), {}, null, resolver, injectedClient);
     assert.equal(typeof receivedContext.callLlm, "function");
+  });
+
+  it("throws when useLlm is set but no llmClient is provided", async () => {
+    const resolver = createResolver({
+      llm_action: {
+        name: "llm_action",
+        description: "uses llm",
+        parameters: { type: "object", properties: {} },
+        permissions: { autoExecute: true, useLlm: true },
+        action_fn: async () => "ok",
+      },
+    });
+    await assert.rejects(
+      () => executeAction("llm_action", createMockContext(), {}, null, resolver),
+      { message: /no llmClient was provided/ },
+    );
   });
 
   it("overrides autoContinue when action_fn returns ActionSignal", async () => {

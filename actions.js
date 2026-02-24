@@ -4,10 +4,8 @@ import os from "os";
 import crypto from "crypto";
 import { getDb } from "./db.js";
 import config from "./config.js";
-import { createLlmClient, createCallLlm } from "./llm.js";
-import { shortenToolId } from "./utils.js";
+import { createCallLlm } from "./llm.js";
 
-const llmClient = createLlmClient();
 
 const currentSessionDb = getDb("memory://");
 
@@ -18,16 +16,18 @@ const currentSessionDb = getDb("memory://");
  * @param {string} actionName - The name of the action to execute
  * @param {Context} context - The unified context to pass to the action
  * @param {{}} params - The parameters to pass to the action
- * @param {string|null} toolCallId - The tool call ID for messaging headers
+ * @param {string|null} [_toolCallId=null] - The tool call ID (unused, kept for API compatibility)
  * @param {(name: string) => Promise<AppAction|null>} [actionResolver] - Optional resolver (defaults to getAction)
+ * @param {import("openai").default} [llmClient] - Optional LLM client for actions with useLlm permission
  * @returns {Promise<{result: ActionResult, permissions: Action['permissions']}>} Result of the action execution
  */
 export async function executeAction(
   actionName,
   context,
   params,
-  toolCallId = null,
+  _toolCallId = null,
   actionResolver = getAction,
+  llmClient,
 ) {
   const action = await actionResolver(actionName);
   if (!action) {
@@ -45,9 +45,6 @@ export async function executeAction(
     throw new Error(`Action "${actionName}" requires master permissions`);
   }
 
-  // Create action-specific messaging functions with headers baked in
-  const shortId = shortenToolId(toolCallId || "command");
-
   /** @type {ActionContext & Partial<{chatDb: PGlite, rootDb: PGlite, callLlm: CallLlm}>} */
   const actionContext = {
     chatId: context.chatId,
@@ -60,24 +57,13 @@ export async function executeAction(
     log: async (...args) => {
       const message = args.join(" ");
       console.log(...args);
-      if (context.isDebug) {
-        await context.sendMessage(`📝 ${message}`);
-      }
       return message;
     },
     sendMessage: async (message) => {
-      if (context.isDebug) {
-        await context.sendMessage(`🔧 *Action*    [${shortId}]`, message);
-      } else {
-        await context.sendMessage(`🔧 ${message}`);
-      }
+      await context.sendMessage(`🔧 ${message}`);
     },
     reply: async (message) => {
-      if (context.isDebug) {
-        await context.reply(`🔧 *Action*    [${shortId}]`, message);
-      } else {
-        await context.reply(`🔧 ${message}`);
-      }
+      await context.reply(`🔧 ${message}`);
     },
     reactToMessage: context.reactToMessage,
     sendPoll: context.sendPoll,
@@ -92,6 +78,9 @@ export async function executeAction(
   }
   // if (action.permissions?.useFileSystem) { actionContext.directoryHandle = directoryHandle; }
   if (action.permissions?.useLlm) {
+    if (!llmClient) {
+      throw new Error(`Action "${actionName}" requires useLlm but no llmClient was provided`);
+    }
     actionContext.callLlm = createCallLlm(llmClient);
   }
 

@@ -33,6 +33,168 @@ function hasCommand(a) {
 const MAX_TOOL_CALL_DEPTH = 10;
 
 /**
+ * Display a tool call to the user (compact or verbose based on debug mode).
+ * @param {OpenAI.Chat.Completions.ChatCompletionMessageToolCall} toolCall
+ * @param {Context} context
+ */
+async function displayToolCall(toolCall, context) {
+  if (!context.isDebug) {
+    await context.sendMessage(`🔧 ${toolCall.function.name}`);
+    return;
+  }
+
+  const shortId = shortenToolId(toolCall.id);
+  let args;
+  try {
+    args = JSON.parse(toolCall.function.arguments || "{}");
+  } catch {
+    console.error("Failed to parse tool call arguments:", toolCall.function.arguments);
+    args = {};
+  }
+  const argEntries = Object.entries(args);
+  const header = `🔧 *${toolCall.function.name}*    [${shortId}]`;
+
+  if (argEntries.length === 0) {
+    await context.sendMessage(header);
+  } else if (argEntries.length === 1 && typeof argEntries[0][1] === "string" && argEntries[0][1].length <= 60) {
+    await context.sendMessage(header, `*${argEntries[0][0]}*: ${argEntries[0][1]}`);
+  } else {
+    const parts = argEntries.map(([k, v]) => {
+      if (typeof v === "string" && v.includes("\n")) {
+        return `*${k}*:\n\`\`\`\n${v}\n\`\`\``;
+      }
+      const val = typeof v === "string" ? v : JSON.stringify(v, null, 2);
+      return `*${k}*: ${val}`;
+    });
+    await context.sendMessage(header, parts.join("\n\n"));
+  }
+}
+
+/**
+ * Display a tool result to the user (compact, verbose, or silent).
+ * @param {string} resultMessage - The stringified result
+ * @param {string} shortId - Shortened tool call ID
+ * @param {Action['permissions']} permissions - Action permission flags
+ * @param {Context} context
+ */
+async function displayToolResult(resultMessage, shortId, permissions, context) {
+  if (permissions.silent) return;
+
+  if (context.isDebug) {
+    await context.sendMessage(`✅ *Result*    [${shortId}]`, resultMessage);
+  } else if (permissions.autoContinue) {
+    if (resultMessage.length > 200) {
+      const remaining = resultMessage.length - 200;
+      const remainingLines = resultMessage.slice(200).split("\n").length - 1;
+      const suffix = remainingLines > 0
+        ? `… +${remaining} chars, ${remainingLines} lines`
+        : `… +${remaining} chars`;
+      await context.sendMessage(`✅ ${resultMessage.slice(0, 200)}${suffix}`);
+    } else {
+      await context.sendMessage(`✅ ${resultMessage}`);
+    }
+  } else {
+    // Non-autoContinue: this is the final answer, show full result as reply
+    await context.reply(resultMessage);
+  }
+}
+
+/**
+ * Parse tool call arguments from JSON string, with error fallback.
+ * @param {string} argsString
+ * @returns {{}}
+ */
+function parseToolArgs(argsString) {
+  try {
+    return JSON.parse(argsString || "{}");
+  } catch {
+    console.error("Failed to parse tool call arguments:", argsString);
+    return {};
+  }
+}
+
+/**
+ * Execute a single tool call: run action, store result, display to user.
+ * Returns whether processing should continue (autoContinue or error).
+ * @param {{
+ *   toolCall: OpenAI.Chat.Completions.ChatCompletionMessageToolCall,
+ *   context: Context,
+ *   executeActionFn: typeof executeAction,
+ *   addMessage: Store['addMessage'],
+ *   chatId: string,
+ *   senderIds: string[],
+ *   formattedMessages: Array<OpenAI.ChatCompletionMessageParam>,
+ *   actionResolver?: (name: string) => Promise<AppAction | null>,
+ *   actionLlmClient?: import("openai").default,
+ * }} params
+ * @returns {Promise<boolean>} Whether to continue processing (loop again)
+ */
+async function executeAndStoreTool({
+  toolCall, context, executeActionFn, addMessage,
+  chatId, senderIds, formattedMessages, actionResolver, actionLlmClient,
+}) {
+  const toolName = toolCall.function.name;
+  const toolArgs = parseToolArgs(toolCall.function.arguments);
+  const shortId = shortenToolId(toolCall.id);
+  console.log("executing", toolName, toolArgs);
+
+  try {
+    const functionResponse = await executeActionFn(
+      toolName, context, toolArgs, toolCall.id, actionResolver, actionLlmClient,
+    );
+    console.log("response", functionResponse);
+
+    // Store tool result (silent tools get a stub to satisfy API pairing)
+    /** @type {ToolMessage} */
+    const toolMessage = {
+      role: "tool",
+      tool_id: toolCall.id,
+      content: [{type: "text", text: functionResponse.permissions.silent
+        ? "[recalled prior messages]"
+        : JSON.stringify(functionResponse.result)}],
+    };
+    await addMessage(chatId, toolMessage, senderIds);
+
+    const resultMessage =
+      typeof functionResponse.result === "string"
+        ? functionResponse.result
+        : JSON.stringify(functionResponse.result, null, 2);
+
+    await displayToolResult(resultMessage, shortId, functionResponse.permissions, context);
+
+    /** @type {OpenAI.ChatCompletionMessageParam} */
+    const toolResultMessage = { role: "tool", tool_call_id: toolCall.id, content: resultMessage };
+    formattedMessages.push(toolResultMessage);
+
+    return !!functionResponse.permissions.autoContinue;
+  } catch (error) {
+    console.error("Error executing tool:", error);
+    const errorMessage = `Error executing ${toolName}: ${error instanceof Error ? error.message : String(error)}`;
+
+    /** @type {ToolMessage} */
+    const toolError = {
+      role: "tool",
+      tool_id: toolCall.id,
+      content: [{type: "text", text: errorMessage}],
+    };
+    await addMessage(chatId, toolError, senderIds);
+
+    if (context.isDebug) {
+      await context.sendMessage(`❌ *Tool Error*    [${shortId}]`, errorMessage);
+    } else {
+      await context.sendMessage(`❌ [${shortId}] ${errorMessage}`);
+    }
+
+    /** @type {OpenAI.ChatCompletionMessageParam} */
+    const toolResultMessage = { role: "tool", tool_call_id: toolCall.id, content: errorMessage };
+    formattedMessages.push(toolResultMessage);
+
+    // Errors always auto-continue for self-correction
+    return true;
+  }
+}
+
+/**
  * Process LLM responses, handling tool calls in a loop with depth guard.
  * @param {{
  *   llmClient: OpenAI,
@@ -46,12 +208,13 @@ const MAX_TOOL_CALL_DEPTH = 10;
  *   chatId: string,
  *   senderIds: string[],
  *   actionResolver?: (name: string) => Promise<AppAction | null>,
+ *   actionLlmClient?: import("openai").default,
  * }} params
  */
 async function processLlmResponse({
   llmClient, chatModel, systemPrompt, actions,
   formattedMessages, context, executeActionFn, addMessage,
-  chatId, senderIds, actionResolver,
+  chatId, senderIds, actionResolver, actionLlmClient,
 }) {
   let depth = 0;
 
@@ -88,28 +251,21 @@ async function processLlmResponse({
     const responseMessage = response.choices[0].message;
 
     /** @type {AssistantMessage} */
-    const assistantMessage = {
-      role: "assistant",
-      content: [],
-    };
+    const assistantMessage = { role: "assistant", content: [] };
 
     if (responseMessage.content) {
       console.log("RESPONSE SENT:", responseMessage.content);
       await context.reply("🤖 *AI Assistant*", responseMessage.content);
-      assistantMessage.content.push({
-        type: "text",
-        text: responseMessage.content,
-      });
+      assistantMessage.content.push({ type: "text", text: responseMessage.content });
     }
 
     if (!responseMessage.tool_calls) {
-      // No tool calls — store and return
       formattedMessages.push(responseMessage);
       await addMessage(chatId, assistantMessage, senderIds);
       return;
     }
 
-    // Process tool calls
+    // Record and display tool calls
     for (const toolCall of responseMessage.tool_calls) {
       assistantMessage.content.push({
         type: "tool",
@@ -117,161 +273,23 @@ async function processLlmResponse({
         name: toolCall.function.name,
         arguments: toolCall.function.arguments,
       });
-
-      // Show tool call to user
-      if (context.isDebug) {
-        const shortId = shortenToolId(toolCall.id);
-        let args;
-        try {
-          args = JSON.parse(toolCall.function.arguments || "{}");
-        } catch {
-          console.error("Failed to parse tool call arguments:", toolCall.function.arguments);
-          args = {};
-        }
-        const argEntries = Object.entries(args);
-        const header = `🔧 *${toolCall.function.name}*    [${shortId}]`;
-
-        if (argEntries.length === 0) {
-          await context.sendMessage(header);
-        } else if (argEntries.length === 1 && typeof argEntries[0][1] === "string" && argEntries[0][1].length <= 60) {
-          await context.sendMessage(header, `*${argEntries[0][0]}*: ${argEntries[0][1]}`);
-        } else {
-          const parts = argEntries.map(([k, v]) => {
-            if (typeof v === "string" && v.includes("\n")) {
-              return `*${k}*:\n\`\`\`\n${v}\n\`\`\``;
-            }
-            const val = typeof v === "string" ? v : JSON.stringify(v, null, 2);
-            return `*${k}*: ${val}`;
-          });
-          await context.sendMessage(header, parts.join("\n\n"));
-        }
-      } else {
-        await context.sendMessage(`🔧 ${toolCall.function.name}`);
-      }
+      await displayToolCall(toolCall, context);
     }
 
-    // Store tool calls in database
     await addMessage(chatId, assistantMessage, senderIds);
-
-    // Add assistant message with tool calls to conversation context
     formattedMessages.push(responseMessage);
 
+    // Execute each tool call
     let continueProcessing = false;
-
     for (const toolCall of responseMessage.tool_calls) {
-      const toolName = toolCall.function.name;
-      let toolArgs;
-      try {
-        toolArgs = JSON.parse(toolCall.function.arguments || "{}");
-      } catch {
-        console.error("Failed to parse tool call arguments:", toolCall.function.arguments);
-        toolArgs = {};
-      }
-      const shortId = shortenToolId(toolCall.id);
-      console.log("executing", toolName, toolArgs);
-
-      try {
-        const functionResponse = await executeActionFn(
-          toolName,
-          context,
-          toolArgs,
-          toolCall.id,
-          actionResolver,
-        );
-        console.log("response", functionResponse);
-
-        if (functionResponse.permissions.autoContinue) {
-          continueProcessing = true;
-        }
-
-        // Always store tool result (silent tools get a stub to satisfy API pairing)
-        /** @type {ToolMessage} */
-        const toolMessage = {
-          role: "tool",
-          tool_id: toolCall.id,
-          content: [{type: "text", text: functionResponse.permissions.silent
-            ? "[recalled prior messages]"
-            : JSON.stringify(functionResponse.result)}],
-        };
-        await addMessage(chatId, toolMessage, senderIds);
-
-        const resultMessage =
-          typeof functionResponse.result === "string"
-            ? functionResponse.result
-            : JSON.stringify(functionResponse.result, null, 2);
-        // Show tool result to user (compact when debug off, verbose when on)
-        if (!functionResponse.permissions.silent) {
-          if (context.isDebug) {
-            await context.sendMessage(
-              `✅ *Result*    [${shortId}]`,
-              resultMessage,
-            );
-          } else if (functionResponse.permissions.autoContinue) {
-            if (resultMessage.length > 200) {
-              const remaining = resultMessage.length - 200;
-              const remainingLines = resultMessage.slice(200).split("\n").length - 1;
-              const suffix = remainingLines > 0
-                ? `… +${remaining} chars, ${remainingLines} lines`
-                : `… +${remaining} chars`;
-              await context.sendMessage(`✅ ${resultMessage.slice(0, 200)}${suffix}`);
-            } else {
-              await context.sendMessage(`✅ ${resultMessage}`);
-            }
-          } else {
-            // Non-autoContinue: this is the final answer, show full result as reply
-            await context.reply(resultMessage);
-          }
-        }
-
-        // Add tool result to conversation context
-        /** @type {OpenAI.ChatCompletionMessageParam} */
-        const toolResultMessage = {
-          role: "tool",
-          tool_call_id: toolCall.id,
-          content: resultMessage,
-        };
-        formattedMessages.push(toolResultMessage);
-
-      } catch (error) {
-        // Errors always auto-continue for self-correction
-        continueProcessing = true;
-
-        console.error("Error executing tool:", error);
-        const errorMessage = `Error executing ${toolName}: ${error instanceof Error ? error.message : String(error)}`;
-        // Store error as tool result
-        /** @type {ToolMessage} */
-        const toolError = {
-          role: "tool",
-          tool_id: toolCall.id,
-          content: [{type: "text", text: errorMessage}],
-        };
-        await addMessage(chatId, toolError, senderIds);
-
-        // Show tool error to user
-        if (context.isDebug) {
-          await context.sendMessage(
-            `❌ *Tool Error*    [${shortId}]`,
-            errorMessage,
-          );
-        } else {
-          await context.sendMessage(`❌ [${shortId}] ${errorMessage}`);
-        }
-
-        // Add tool error to conversation context
-        /** @type {OpenAI.ChatCompletionMessageParam} */
-        const toolResultMessage = {
-          role: "tool",
-          tool_call_id: toolCall.id,
-          content: errorMessage,
-        };
-        formattedMessages.push(toolResultMessage);
-      }
+      const shouldContinue = await executeAndStoreTool({
+        toolCall, context, executeActionFn, addMessage,
+        chatId, senderIds, formattedMessages, actionResolver, actionLlmClient,
+      });
+      if (shouldContinue) continueProcessing = true;
     }
 
-    if (!continueProcessing) {
-      return;
-    }
-
+    if (!continueProcessing) return;
     depth++;
   }
 }
@@ -311,13 +329,19 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
 
     console.log("INCOMING MESSAGE:", JSON.stringify(messageContext, null, 2));
 
-    // Create legacy context for actions (maintains backward compatibility)
+    // Ensure chat exists in DB for both command and message paths
+    await createChat(chatId);
+
+    // Compute debug state before building context so it's immutable
+    const chatInfo = await getChat(chatId);
+    const isDebug = !!chatInfo?.debug_until && new Date(chatInfo.debug_until) > new Date();
+
     /** @type {Context} */
     const context = {
       chatId,
       senderIds,
       content,
-      isDebug: false,
+      isDebug,
       getIsAdmin: async () => {
         const adminStatus = await messageContext.getAdminStatus();
         return adminStatus === "admin" || adminStatus === "superadmin";
@@ -374,7 +398,7 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
       console.log("executing", action.name, params);
 
       try {
-        const { result } = await executeActionFn(action.name, context, params, null, actionResolver);
+        const { result } = await executeActionFn(action.name, context, params, null, actionResolver, llmClient);
 
         if (typeof result === "string") {
           await context.reply(result);
@@ -397,13 +421,6 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
       hour: "2-digit",
       minute: "2-digit",
     });
-
-    // Insert chatId into DB if not already present
-    await createChat(chatId);
-
-    // Check if the bot should respond
-    const chatInfo = await getChat(chatId);
-    context.isDebug = !!chatInfo?.debug_until && new Date(chatInfo.debug_until) > new Date();
 
     if (!shouldRespond(chatInfo, isGroup, content, selfIds, quotedSenderId)) {
       return;
@@ -443,7 +460,7 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
     await processLlmResponse({
       llmClient, chatModel, systemPrompt, actions,
       formattedMessages, context, executeActionFn, addMessage,
-      chatId, senderIds, actionResolver,
+      chatId, senderIds, actionResolver, actionLlmClient: llmClient,
     });
   }
 
