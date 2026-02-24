@@ -49,6 +49,16 @@ function hashContent(data) {
  */
 
 /**
+ * Check if a content block is unsupported by the target model.
+ * @param {IncomingContentBlock} block
+ * @param {string[]} supportedModalities
+ * @returns {boolean}
+ */
+function isUnsupportedBlock(block, supportedModalities) {
+  return block.type !== "text" && block.type !== "quote" && !supportedModalities.includes(block.type);
+}
+
+/**
  * Check if any user message contains content blocks of types unsupported by the target model.
  * @param {MessageRow[]} messages
  * @param {string[]} supportedModalities
@@ -58,9 +68,7 @@ function hasUnsupportedContent(messages, supportedModalities) {
   for (const msg of messages) {
     if (msg.message_data?.role !== "user") continue;
     for (const block of msg.message_data.content) {
-      if (block.type !== "text" && block.type !== "quote" && !supportedModalities.includes(block.type)) {
-        return true;
-      }
+      if (isUnsupportedBlock(block, supportedModalities)) return true;
     }
   }
   return false;
@@ -91,42 +99,29 @@ export async function translateUnsupportedContent(
     return messages;
   }
 
-  // Deep-clone only messages that need translation
+  // Clone messages that have unsupported blocks and translate in a single pass
   /** @type {MessageRow[]} */
-  const result = messages.map((msg) => {
-    if (msg.message_data?.role !== "user") return msg;
+  const result = [];
 
-    const hasUnsupported = msg.message_data.content.some(
-      (block) =>
-        block.type !== "text" &&
-        block.type !== "quote" &&
-        !supportedModalities.includes(block.type),
-    );
+  for (const msg of messages) {
+    if (msg.message_data?.role !== "user" || !msg.message_data.content.some((b) => isUnsupportedBlock(b, supportedModalities))) {
+      result.push(msg);
+      continue;
+    }
 
-    if (!hasUnsupported) return msg;
-
-    return {
+    // Deep-clone message so we can mutate content
+    const cloned = {
       ...msg,
       message_data: {
         ...msg.message_data,
         content: [...msg.message_data.content],
       },
     };
-  });
+    result.push(cloned);
 
-  // Translate unsupported blocks
-  for (const msg of result) {
-    if (msg.message_data?.role !== "user") continue;
-
-    for (let i = 0; i < msg.message_data.content.length; i++) {
-      const block = msg.message_data.content[i];
-      if (
-        block.type === "text" ||
-        block.type === "quote" ||
-        supportedModalities.includes(block.type)
-      ) {
-        continue;
-      }
+    for (let i = 0; i < cloned.message_data.content.length; i++) {
+      const block = cloned.message_data.content[i];
+      if (!isUnsupportedBlock(block, supportedModalities)) continue;
 
       const contentType = /** @type {"image" | "audio" | "video"} */ (block.type);
       const translationModelId =
@@ -134,7 +129,7 @@ export async function translateUnsupportedContent(
 
       if (!translationModelId) {
         // No translation model configured — replace with placeholder
-        msg.message_data.content[i] = /** @type {TextContentBlock} */ ({
+        cloned.message_data.content[i] = /** @type {TextContentBlock} */ ({
           type: "text",
           text: `[Unsupported ${contentType} content — no translation model configured]`,
         });
@@ -202,7 +197,7 @@ export async function translateUnsupportedContent(
       }
 
       const label = DESCRIPTION_LABELS[contentType] || `${contentType} description`;
-      msg.message_data.content[i] = /** @type {TextContentBlock} */ ({
+      cloned.message_data.content[i] = /** @type {TextContentBlock} */ ({
         type: "text",
         text: `[${label}: ${translation}]`,
       });
