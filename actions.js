@@ -281,6 +281,8 @@ export async function deleteChatAction(db, name) {
   await db.query(`DELETE FROM chat_actions WHERE name = $1`, [name]);
 }
 
+const CHAT_ACTION_CACHE_MAX = 100;
+
 /** @type {Map<string, AppAction>} */
 const chatActionCache = new Map();
 
@@ -327,6 +329,11 @@ async function importChatAction(chatId, name, code) {
       app_name: "",
     };
 
+    // Evict oldest entries when cache exceeds max size
+    if (chatActionCache.size >= CHAT_ACTION_CACHE_MAX) {
+      const firstKey = chatActionCache.keys().next().value;
+      if (firstKey !== undefined) chatActionCache.delete(firstKey);
+    }
     chatActionCache.set(cacheKey, action);
     return action;
   } catch (error) {
