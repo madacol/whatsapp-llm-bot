@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import config from "../config.js";
+import { getChatOrThrow } from "../store.js";
 
 export default /** @type {defineAction} */ ((x) => x)({
   name: "get_model",
@@ -33,14 +34,7 @@ export default /** @type {defineAction} */ ((x) => x)({
     },
   ],
   action_fn: async function ({ chatId, rootDb }) {
-    const {
-      rows: [chatInfo],
-    } =
-      await rootDb.sql`SELECT chat_id, model FROM chats WHERE chat_id = ${chatId}`;
-
-    if (!chatInfo) {
-      throw new Error(`Chat ${chatId} does not exist.`);
-    }
+    const chatInfo = await getChatOrThrow(rootDb, chatId);
 
     if (chatInfo.model) {
       return `Model: ${chatInfo.model}`;

@@ -1,4 +1,4 @@
-import { assertChatExists } from "../store.js";
+import { getChatOrThrow } from "../store.js";
 
 /**
  * Shared helper for enableChat and disableChat actions.
@@ -8,7 +8,7 @@ import { assertChatExists } from "../store.js";
  * @returns {Promise<string>}
  */
 export async function setChatEnabled(rootDb, chatId, enabled) {
-  await assertChatExists(rootDb, chatId);
+  await getChatOrThrow(rootDb, chatId);
 
   await rootDb.sql`
     UPDATE chats

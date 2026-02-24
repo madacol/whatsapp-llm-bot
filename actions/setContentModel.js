@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { validateModel, getModelModalities } from "../models-cache.js";
-import { assertChatExists } from "../store.js";
+import { getChatOrThrow } from "../store.js";
 
 const CONTENT_TYPES = ["image", "audio", "video"];
 
@@ -129,7 +129,7 @@ export default /** @type {defineAction} */ ((x) => x)({
     async function ({ chatId, rootDb }, { model, contentType }) {
       model = model.trim();
 
-      await assertChatExists(rootDb, chatId);
+      const chat = await getChatOrThrow(rootDb, chatId);
 
       // Validate model exists
       const error = await validateModel(model);
@@ -141,11 +141,7 @@ export default /** @type {defineAction} */ ((x) => x)({
         return `Model \`${model}\` does not support \`${contentType}\` input. Its supported modalities are: ${modalities.join(", ")}`;
       }
 
-      // Read current content_models
-      const {
-        rows: [chat],
-      } = await rootDb.sql`SELECT content_models FROM chats WHERE chat_id = ${chatId}`;
-      const currentModels = chat?.content_models ?? {};
+      const currentModels = chat.content_models ?? {};
 
       currentModels[contentType] = model;
 
