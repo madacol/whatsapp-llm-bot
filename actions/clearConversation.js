@@ -37,14 +37,7 @@ export default /** @type {defineAction} */ ((x) => x)({
     },
   ],
   action_fn: async function ({ chatId, rootDb }) {
-    try {
-      await rootDb.sql`UPDATE messages SET cleared_at = NOW() WHERE chat_id = ${chatId} AND cleared_at IS NULL`;
-      return "🗑️ Conversation history cleared!";
-    } catch (error) {
-      console.error("Error clearing conversation:", error);
-      const errorMessage =
-        error instanceof Error ? error.message : String(error);
-      throw new Error("Failed to clear conversation: " + errorMessage);
-    }
+    await rootDb.sql`UPDATE messages SET cleared_at = NOW() WHERE chat_id = ${chatId} AND cleared_at IS NULL`;
+    return "🗑️ Conversation history cleared!";
   },
 });

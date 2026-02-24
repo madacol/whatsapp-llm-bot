@@ -47,23 +47,16 @@ export default /** @type {defineAction} */ ((x) => x)({
 
     const newPrompt = prompt.length === 0 ? null : prompt;
 
-    try {
-      await rootDb.sql`
-        UPDATE chats
-        SET system_prompt = ${newPrompt}
-        WHERE chat_id = ${chatId}
-      `;
+    await rootDb.sql`
+      UPDATE chats
+      SET system_prompt = ${newPrompt}
+      WHERE chat_id = ${chatId}
+    `;
 
-      if (newPrompt === null) {
-        return `Prompt cleared, using default.`;
-      }
-
-      return `Prompt set to: ${prompt}`;
-    } catch (error) {
-      console.error("Error setting system prompt:", error);
-      const errorMessage =
-        error instanceof Error ? error.message : String(error);
-      throw new Error("Failed to set system prompt: " + errorMessage);
+    if (newPrompt === null) {
+      return `Prompt cleared, using default.`;
     }
+
+    return `Prompt set to: ${prompt}`;
   },
 });
