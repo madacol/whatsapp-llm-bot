@@ -86,13 +86,9 @@ export default /** @type {defineAction} */ ((x) => x)({
 
     async function rejects_invalid_since_timestamp(action_fn, db) {
       await db.sql`INSERT INTO chats(chat_id) VALUES ('act-recall-6') ON CONFLICT DO NOTHING`;
-      await assert.rejects(
-        () => action_fn({ chatId: "act-recall-6", rootDb: db }, { since: "yesterday" }),
-        (/** @type {Error} */ err) => {
-          assert.ok(err.message.includes("Invalid"), `Expected "Invalid" in error, got: ${err.message}`);
-          return true;
-        },
-      );
+      const result = await action_fn({ chatId: "act-recall-6", rootDb: db }, { since: "yesterday" });
+      assert.ok(typeof result === "string");
+      assert.ok(result.includes("Invalid"), `Expected "Invalid" in result, got: ${result}`);
     },
 
     async function formats_messages_with_role_and_text(action_fn, db) {
@@ -115,7 +111,7 @@ export default /** @type {defineAction} */ ((x) => x)({
   action_fn: async function ({ chatId, rootDb }, params) {
     const since = params.since;
     if (!since || isNaN(new Date(since).getTime())) {
-      throw new Error("Invalid timestamp for 'since': " + since);
+      return "Invalid timestamp for 'since': " + since + ". Please use an ISO 8601 timestamp (e.g. 2025-01-15T10:00:00Z).";
     }
     const limit = params.limit || 50;
 
