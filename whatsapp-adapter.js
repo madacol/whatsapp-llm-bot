@@ -39,6 +39,75 @@ function getContextInfo(msg) {
 }
 
 /**
+ * Create a reaction-based confirmation handler.
+ * Sends a message, starts a 60-second countdown with emoji reactions,
+ * and resolves true (👍) or false (👎 or timeout).
+ * @param {import('@whiskeysockets/baileys').WASocket} sock
+ * @param {string} chatId
+ * @returns {(message: string) => Promise<boolean>}
+ */
+function createConfirm(sock, chatId) {
+  return async (message) => {
+    const sentMsg = await sock.sendMessage(chatId, { text: message });
+    if (!sentMsg) return false;
+
+    const msgKey = sentMsg.key;
+    const countdownEmojis = ["🔟", "9️⃣", "8️⃣", "7️⃣", "6️⃣", "5️⃣", "4️⃣", "3️⃣", "2️⃣", "1️⃣"];
+    const intervalMs = 6_000; // 60s / 10 steps
+
+    return new Promise((resolve) => {
+      let step = 0;
+
+      // Start with first countdown emoji
+      sock.sendMessage(chatId, {
+        react: { text: countdownEmojis[0], key: msgKey },
+      });
+
+      const countdown = setInterval(() => {
+        step++;
+        if (step >= countdownEmojis.length) {
+          clearInterval(countdown);
+          sock.ev.off("messages.reaction", handler);
+          sock.sendMessage(chatId, {
+            react: { text: "❌", key: msgKey },
+          });
+          resolve(false);
+          return;
+        }
+        sock.sendMessage(chatId, {
+          react: { text: countdownEmojis[step], key: msgKey },
+        });
+      }, intervalMs);
+
+      /** @param {any[]} reactions */
+      function handler(reactions) {
+        for (const { key, reaction } of reactions) {
+          if (key.id === msgKey.id && key.remoteJid === chatId) {
+            if (reaction.text?.startsWith("👍")) {
+              clearInterval(countdown);
+              sock.ev.off("messages.reaction", handler);
+              sock.sendMessage(chatId, {
+                react: { text: "✅", key: msgKey },
+              });
+              resolve(true);
+            } else if (reaction.text?.startsWith("👎")) {
+              clearInterval(countdown);
+              sock.ev.off("messages.reaction", handler);
+              sock.sendMessage(chatId, {
+                react: { text: "❌", key: msgKey },
+              });
+              resolve(false);
+            }
+          }
+        }
+      }
+
+      sock.ev.on("messages.reaction", handler);
+    });
+  };
+}
+
+/**
  * @param {BaileysMessage} baileysMessage
  * @returns {Promise<{ content: IncomingContentBlock[], quotedSenderId: string | undefined }>}
  */
@@ -279,64 +348,7 @@ async function adaptIncomingMessage(baileysMessage, sock, messageHandler) {
       });
     },
 
-    confirm: async (message) => {
-      const sentMsg = await sock.sendMessage(chatId, { text: message });
-      if (!sentMsg) return false;
-
-      const msgKey = sentMsg.key;
-      const countdownEmojis = ["🔟", "9️⃣", "8️⃣", "7️⃣", "6️⃣", "5️⃣", "4️⃣", "3️⃣", "2️⃣", "1️⃣"];
-      const intervalMs = 6_000; // 60s / 10 steps
-
-      return new Promise((resolve) => {
-        let step = 0;
-
-        // Start with first countdown emoji
-        sock.sendMessage(chatId, {
-          react: { text: countdownEmojis[0], key: msgKey },
-        });
-
-        const countdown = setInterval(() => {
-          step++;
-          if (step >= countdownEmojis.length) {
-            clearInterval(countdown);
-            sock.ev.off("messages.reaction", handler);
-            sock.sendMessage(chatId, {
-              react: { text: "❌", key: msgKey },
-            });
-            resolve(false);
-            return;
-          }
-          sock.sendMessage(chatId, {
-            react: { text: countdownEmojis[step], key: msgKey },
-          });
-        }, intervalMs);
-
-        /** @param {any[]} reactions */
-        function handler(reactions) {
-          for (const { key, reaction } of reactions) {
-            if (key.id === msgKey.id && key.remoteJid === chatId) {
-              if (reaction.text?.startsWith("👍")) {
-                clearInterval(countdown);
-                sock.ev.off("messages.reaction", handler);
-                sock.sendMessage(chatId, {
-                  react: { text: "✅", key: msgKey },
-                });
-                resolve(true);
-              } else if (reaction.text?.startsWith("👎")) {
-                clearInterval(countdown);
-                sock.ev.off("messages.reaction", handler);
-                sock.sendMessage(chatId, {
-                  react: { text: "❌", key: msgKey },
-                });
-                resolve(false);
-              }
-            }
-          }
-        }
-
-        sock.ev.on("messages.reaction", handler);
-      });
-    },
+    confirm: createConfirm(sock, chatId),
 
     // Bot info
     selfIds: selfIds || [],
