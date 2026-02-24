@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { validateModel, getModelModalities } from "../models-cache.js";
 import { getChatOrThrow } from "../store.js";
+import { withModelsCache } from "../tests/helpers.js";
 
 const CONTENT_TYPES = ["image", "audio", "video"];
 
@@ -32,24 +33,15 @@ export default /** @type {defineAction} */ ((x) => x)({
   },
   test_functions: [
     async function sets_content_model_for_specific_type(action_fn, db) {
-      const fs = await import("node:fs/promises");
-      const path = await import("node:path");
-      const cachePath = path.resolve("data/models.json");
-      await fs.mkdir(path.dirname(cachePath), { recursive: true });
-      await fs.writeFile(
-        cachePath,
-        JSON.stringify([
-          {
-            id: "openai/gpt-4o",
-            name: "GPT-4o",
-            context_length: 128000,
-            pricing: { prompt: "0.000005", completion: "0.000015" },
-            architecture: { input_modalities: ["text", "image"] },
-          },
-        ]),
-      );
-
-      try {
+      await withModelsCache([
+        {
+          id: "openai/gpt-4o",
+          name: "GPT-4o",
+          context_length: 128000,
+          pricing: { prompt: "0.000005", completion: "0.000015" },
+          architecture: { input_modalities: ["text", "image"] },
+        },
+      ], async () => {
         await db.sql`INSERT INTO chats(chat_id) VALUES ('act-scm-2') ON CONFLICT DO NOTHING`;
         const result = await action_fn(
           { chatId: "act-scm-2", rootDb: db },
@@ -65,19 +57,11 @@ export default /** @type {defineAction} */ ((x) => x)({
         assert.equal(models.image, "openai/gpt-4o");
         assert.equal(models.audio, undefined);
         assert.equal(models.video, undefined);
-      } finally {
-        await fs.rm(cachePath, { force: true });
-      }
+      });
     },
 
     async function rejects_invalid_model(action_fn, db) {
-      const fs = await import("node:fs/promises");
-      const path = await import("node:path");
-      const cachePath = path.resolve("data/models.json");
-      await fs.mkdir(path.dirname(cachePath), { recursive: true });
-      await fs.writeFile(cachePath, JSON.stringify([]));
-
-      try {
+      await withModelsCache([], async () => {
         await db.sql`INSERT INTO chats(chat_id) VALUES ('act-scm-3') ON CONFLICT DO NOTHING`;
         const result = await action_fn(
           { chatId: "act-scm-3", rootDb: db },
@@ -85,30 +69,19 @@ export default /** @type {defineAction} */ ((x) => x)({
         );
         assert.ok(typeof result === "string");
         assert.ok(result.includes("not found"));
-      } finally {
-        await fs.rm(cachePath, { force: true });
-      }
+      });
     },
 
     async function validates_model_supports_content_type(action_fn, db) {
-      const fs = await import("node:fs/promises");
-      const path = await import("node:path");
-      const cachePath = path.resolve("data/models.json");
-      await fs.mkdir(path.dirname(cachePath), { recursive: true });
-      await fs.writeFile(
-        cachePath,
-        JSON.stringify([
-          {
-            id: "text-only/model",
-            name: "Text Only",
-            context_length: 4096,
-            pricing: { prompt: "0.000001", completion: "0.000001" },
-            architecture: { input_modalities: ["text"] },
-          },
-        ]),
-      );
-
-      try {
+      await withModelsCache([
+        {
+          id: "text-only/model",
+          name: "Text Only",
+          context_length: 4096,
+          pricing: { prompt: "0.000001", completion: "0.000001" },
+          architecture: { input_modalities: ["text"] },
+        },
+      ], async () => {
         await db.sql`INSERT INTO chats(chat_id) VALUES ('act-scm-4') ON CONFLICT DO NOTHING`;
         const result = await action_fn(
           { chatId: "act-scm-4", rootDb: db },
@@ -116,9 +89,7 @@ export default /** @type {defineAction} */ ((x) => x)({
         );
         assert.ok(typeof result === "string");
         assert.ok(result.includes("does not support"));
-      } finally {
-        await fs.rm(cachePath, { force: true });
-      }
+      });
     },
   ],
   action_fn:
