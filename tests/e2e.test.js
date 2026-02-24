@@ -724,31 +724,31 @@ describe("Scenario 11: getMessageContent extraction", () => {
   });
 
   it("extracts plain text conversation message", async () => {
-    const msg = /** @type {any} */ ({
+    const msg = /** @type {Partial<BaileysMessage>} */ ({
       message: { conversation: "Hello world" },
     });
-    const { content } = await getMessageContent(msg);
+    const { content } = await getMessageContent(/** @type {BaileysMessage} */ (msg));
 
     assert.equal(content.length, 1);
     assert.equal(content[0].type, "text");
-    assert.equal(/** @type {any} */ (content[0]).text, "Hello world");
+    assert.equal(/** @type {TextContentBlock} */ (content[0]).text, "Hello world");
   });
 
   it("extracts extendedTextMessage", async () => {
-    const msg = /** @type {any} */ ({
+    const msg = /** @type {Partial<BaileysMessage>} */ ({
       message: { extendedTextMessage: { text: "Extended hello" } },
     });
-    const { content } = await getMessageContent(msg);
+    const { content } = await getMessageContent(/** @type {BaileysMessage} */ (msg));
 
     assert.ok(
       content.some(
-        (b) => b.type === "text" && /** @type {any} */ (b).text === "Extended hello",
+        (b) => b.type === "text" && /** @type {TextContentBlock} */ (b).text === "Extended hello",
       ),
     );
   });
 
   it("extracts quoted message with reply text", async () => {
-    const msg = /** @type {any} */ ({
+    const msg = /** @type {Partial<BaileysMessage>} */ ({
       message: {
         extendedTextMessage: {
           text: "My reply",
@@ -758,7 +758,7 @@ describe("Scenario 11: getMessageContent extraction", () => {
         },
       },
     });
-    const { content } = await getMessageContent(msg);
+    const { content } = await getMessageContent(/** @type {BaileysMessage} */ (msg));
 
     assert.ok(
       content.some((b) => b.type === "quote"),
@@ -766,15 +766,15 @@ describe("Scenario 11: getMessageContent extraction", () => {
     );
     assert.ok(
       content.some(
-        (b) => b.type === "text" && /** @type {any} */ (b).text === "My reply",
+        (b) => b.type === "text" && /** @type {TextContentBlock} */ (b).text === "My reply",
       ),
       "Should have reply text",
     );
 
-    const quote = /** @type {any} */ (content.find((b) => b.type === "quote"));
+    const quote = /** @type {QuoteContentBlock} */ (content.find((b) => b.type === "quote"));
     assert.ok(
       quote.content.some(
-        (b) => b.type === "text" && b.text === "Original message",
+        (b) => b.type === "text" && /** @type {TextContentBlock} */ (b).text === "Original message",
       ),
       "Quote should contain original text",
     );
