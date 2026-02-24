@@ -68,24 +68,17 @@ export default /** @type {defineAction} */ ((x) => x)({
       if (error) return error;
     }
 
-    try {
-      await rootDb.sql`
-        UPDATE chats
-        SET model = ${modelValue}
-        WHERE chat_id = ${chatId}
-      `;
+    await rootDb.sql`
+      UPDATE chats
+      SET model = ${modelValue}
+      WHERE chat_id = ${chatId}
+    `;
 
-      if (modelValue) {
-        return `Model set to ${modelValue}`;
-      } else {
-        const defaultModel = (await import("../config.js")).default.model;
-        return `Model reverted to default (${defaultModel})`;
-      }
-    } catch (error) {
-      console.error("Error setting model:", error);
-      const errorMessage =
-        error instanceof Error ? error.message : String(error);
-      throw new Error("Failed to set model: " + errorMessage);
+    if (modelValue) {
+      return `Model set to ${modelValue}`;
+    } else {
+      const defaultModel = (await import("../config.js")).default.model;
+      return `Model reverted to default (${defaultModel})`;
     }
   },
 });
