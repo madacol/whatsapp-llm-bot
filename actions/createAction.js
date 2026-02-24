@@ -317,10 +317,9 @@ export default /** @type {defineAction} */ ((x) => x)({
       );
     },
     async function rejects_invalid_file_name(action_fn, _db) {
-      await assert.rejects(
-        () => action_fn({}, { file_name: "../evil", code: "// code" }),
-        { message: /alphanumeric camelCase/ },
-      );
+      const result = await action_fn({}, { file_name: "../evil", code: "// code" });
+      assert.ok(typeof result === "string");
+      assert.ok(result.includes("alphanumeric camelCase"), `Expected validation message, got: ${result}`);
     },
     async function rejects_on_user_denial(action_fn, _db) {
       const saved = config.MASTER_IDs;
@@ -460,9 +459,7 @@ export default /** @type {defineAction} */ ((x) => x)({
   /** @param {ActionContext} context  @param {{ file_name: string, mode?: "create" | "read" | "edit" | "delete", code?: string, proposed_tests?: string, scope?: "global" | "chat" }} params */
   action_fn: async function (context, { file_name, mode = "create", code, proposed_tests, scope = "global" }) {
     if (!/^[a-zA-Z][a-zA-Z0-9]*$/.test(file_name)) {
-      throw new Error(
-        "file_name must be alphanumeric camelCase (no dots, slashes, or spaces)",
-      );
+      return "file_name must be alphanumeric camelCase (no dots, slashes, or spaces)";
     }
 
     // ── Chat-scoped actions ──
@@ -494,7 +491,7 @@ export default /** @type {defineAction} */ ((x) => x)({
       }
 
       if (!code) {
-        throw new Error("code is required for create/edit modes");
+        return "code is required for create/edit modes";
       }
 
       const existing = await readChatAction(context.db, file_name);
