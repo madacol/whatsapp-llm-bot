@@ -17,6 +17,9 @@ importers:
       dotenv:
         specifier: ^16.5.0
         version: 16.5.0
+      nodemailer:
+        specifier: ^8.0.1
+        version: 8.0.1
       openai:
         specifier: ^4.104.0
         version: 4.104.0(encoding@0.1.13)(ws@8.19.0)
@@ -24,6 +27,9 @@ importers:
       '@types/node':
         specifier: ^20.19.0
         version: 20.19.0
+      '@types/nodemailer':
+        specifier: ^7.0.11
+        version: 7.0.11
       typescript:
         specifier: ^5.8.3
         version: 5.8.3
@@ -240,6 +246,9 @@ packages:
 
   '@types/node@20.19.0':
     resolution: {integrity: sha512-hfrc+1tud1xcdVTABC2JiomZJEklMcXYNTVtZLAeqTVWD+qL5jkHKT+1lOtqDdGxt+mB53DTtiz673vfjU8D1Q==}
+
+  '@types/nodemailer@7.0.11':
+    resolution: {integrity: sha512-E+U4RzR2dKrx+u3N4DlsmLaDC6mMZOM/TPROxA0UAPiTgI0y4CEFBmZE+coGWTjakDriRsXG368lNk1u9Q0a2g==}
 
   '@whiskeysockets/baileys@7.0.0-rc.9':
     resolution: {integrity: sha512-YFm5gKXfDP9byCXCW3OPHKXLzrAKzolzgVUlRosHHgwbnf2YOO3XknkMm6J7+F0ns8OA0uuSBhgkRHTDtqkacw==}
@@ -472,6 +481,10 @@ packages:
     peerDependenciesMeta:
       encoding:
         optional: true
+
+  nodemailer@8.0.1:
+    resolution: {integrity: sha512-5kcldIXmaEjZcHR6F28IKGSgpmZHaF1IXLWFTG+Xh3S+Cce4MiakLtWY+PlBU69fLbRa8HlaGIrC/QolUpHkhg==}
+    engines: {node: '>=6.0.0'}
 
   on-exit-leak-free@2.1.2:
     resolution: {integrity: sha512-0eJJY6hXLGf1udHwfNftBqH+g73EU4B504nZeKpz1sYRKafAghwxEJunB2O7rDZkL4PGfsMVnTXZ2EjibbqcsA==}
@@ -792,6 +805,10 @@ snapshots:
     dependencies:
       undici-types: 6.21.0
 
+  '@types/nodemailer@7.0.11':
+    dependencies:
+      '@types/node': 20.19.0
+
   '@whiskeysockets/baileys@7.0.0-rc.9(sharp@0.34.3)':
     dependencies:
       '@cacheable/node-cache': 1.7.6
@@ -1027,6 +1044,8 @@ snapshots:
       whatwg-url: 5.0.0
     optionalDependencies:
       encoding: 0.1.13
+
+  nodemailer@8.0.1: {}
 
   on-exit-leak-free@2.1.2: {}
 
