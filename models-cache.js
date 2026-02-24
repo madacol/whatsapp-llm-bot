@@ -1,5 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
+import { createDaemon } from "./daemon.js";
 
 /**
  * @typedef {{
@@ -96,22 +97,12 @@ export async function getModelModalities(modelId) {
  * @returns {() => void} Stop function to clear the interval
  */
 export function startModelsCacheDaemon() {
-  // Fetch immediately if stale (async, non-blocking)
-  cacheIsStale().then((stale) => {
-    if (stale) {
-      refreshCache().catch((err) =>
-        console.error("Models cache refresh error:", err),
-      );
-    }
+  return createDaemon({
+    init: async () => {
+      if (await cacheIsStale()) await refreshCache();
+    },
+    poll: refreshCache,
+    intervalMs: REFRESH_INTERVAL_MS,
+    label: "Models cache",
   });
-
-  const interval = setInterval(async () => {
-    try {
-      await refreshCache();
-    } catch (error) {
-      console.error("Models cache daemon refresh error:", error);
-    }
-  }, REFRESH_INTERVAL_MS);
-
-  return () => clearInterval(interval);
 }

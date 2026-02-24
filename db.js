@@ -42,6 +42,35 @@ export function getDb(dataDir) {
   return createdDb;
 }
 
+const BASE_DIR = "./pgdata";
+
+/**
+ * Get the root database (shared across all chats).
+ * @returns {PGlite}
+ */
+export function getRootDb() {
+  return getDb(`${BASE_DIR}/root`);
+}
+
+/**
+ * Get a chat-scoped database.
+ * @param {string} chatId
+ * @returns {PGlite}
+ */
+export function getChatDb(chatId) {
+  return getDb(`${BASE_DIR}/${chatId}`);
+}
+
+/**
+ * Get an action-scoped database (per chat, per action).
+ * @param {string} chatId
+ * @param {string} actionName
+ * @returns {PGlite}
+ */
+export function getActionDb(chatId, actionName) {
+  return getDb(`${BASE_DIR}/${chatId}/${actionName}`);
+}
+
 /**
  * Close all cached PGlite instances and clear the cache.
  */

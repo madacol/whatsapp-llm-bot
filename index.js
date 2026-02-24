@@ -19,7 +19,7 @@ import {
   formatMessagesForOpenAI,
 } from "./message-formatting.js";
 import { translateUnsupportedContent } from "./content-translator.js";
-import { getDb } from "./db.js";
+import { getRootDb } from "./db.js";
 
 /**
  * Type guard: checks that an action has a command string.
@@ -449,7 +449,7 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
 
     // Translate unsupported content types for non-multimodal models
     const contentModels = chatInfo?.content_models ?? {};
-    const rootDb = getDb("./pgdata/root");
+    const rootDb = getRootDb();
     const translatedMessages = await translateUnsupportedContent(
       chatMessages, chatModel, contentModels, llmClient, rootDb,
     );
