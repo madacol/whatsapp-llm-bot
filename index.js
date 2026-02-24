@@ -44,13 +44,7 @@ async function displayToolCall(toolCall, context) {
   }
 
   const shortId = shortenToolId(toolCall.id);
-  let args;
-  try {
-    args = JSON.parse(toolCall.function.arguments || "{}");
-  } catch {
-    console.error("Failed to parse tool call arguments:", toolCall.function.arguments);
-    args = {};
-  }
+  const args = parseToolArgs(toolCall.function.arguments);
   const argEntries = Object.entries(args);
   const header = `🔧 *${toolCall.function.name}*    [${shortId}]`;
 
