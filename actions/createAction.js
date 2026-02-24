@@ -78,7 +78,7 @@ async function sets_value(action_fn, db) {
 async function returns_data(action_fn) {
   const originalFetch = globalThis.fetch;
   try {
-    globalThis.fetch = /** @type {any} */ (async () => ({
+    globalThis.fetch = /** @type {typeof fetch} */ (async () => ({
       ok: true,
       json: async () => ({ results: [{ title: "Test" }] }),
     }));
@@ -103,7 +103,7 @@ try { config.some_key = "test-val"; /* ... */ } finally { config.some_key = save
 async function handles_api_error(action_fn) {
   const originalFetch = globalThis.fetch;
   try {
-    globalThis.fetch = /** @type {any} */ (async () => ({ ok: false, status: 500 }));
+    globalThis.fetch = /** @type {typeof fetch} */ (async () => ({ ok: false, status: 500 }));
     const result = await action_fn({ log: async () => "" }, { query: "test" });
     assert.ok(result.includes("500"));
   } finally { globalThis.fetch = originalFetch; }
@@ -145,12 +145,12 @@ export default /** @type {defineAction} */ ((x) => x)({
       const savedKey = config.brave_api_key;
       try {
         config.brave_api_key = "test-key";
-        globalThis.fetch = /** @type {any} */ (async () => ({
+        globalThis.fetch = /** @type {typeof fetch} */ (/** @type {unknown} */ (async () => ({
           ok: true,
           json: async () => ({ web: { results: [
             { title: "Result 1", url: "https://example.com", description: "Desc 1" },
           ]}}),
-        }));
+        })));
         const result = await action_fn({ log: async () => "" }, { query: "test" });
         assert.ok(result.includes("Result 1"));
         assert.ok(result.includes("https://example.com"));

@@ -27,7 +27,7 @@ export default /** @type {defineAction} */ ((x) => x)({
       const savedKey = config.brave_api_key;
       try {
         config.brave_api_key = "test-key";
-        globalThis.fetch = /** @type {any} */ (async () => ({
+        globalThis.fetch = /** @type {typeof fetch} */ (/** @type {unknown} */ (async () => ({
           ok: true,
           json: async () => ({
             web: {
@@ -45,7 +45,7 @@ export default /** @type {defineAction} */ ((x) => x)({
               ],
             },
           }),
-        }));
+        })));
         const result = await action_fn(
           { log: async () => "" },
           { query: "test query" },
@@ -82,10 +82,10 @@ export default /** @type {defineAction} */ ((x) => x)({
       const savedKey = config.brave_api_key;
       try {
         config.brave_api_key = "test-key";
-        globalThis.fetch = /** @type {any} */ (async () => ({
+        globalThis.fetch = /** @type {typeof fetch} */ (/** @type {unknown} */ (async () => ({
           ok: false,
           status: 500,
-        }));
+        })));
         const result = await action_fn(
           { log: async () => "" },
           { query: "test" },
@@ -107,13 +107,13 @@ export default /** @type {defineAction} */ ((x) => x)({
       let capturedUrl;
       try {
         config.brave_api_key = "test-key";
-        globalThis.fetch = /** @type {any} */ (async (/** @type {string} */ url) => {
+        globalThis.fetch = /** @type {typeof fetch} */ (/** @type {unknown} */ (async (/** @type {string} */ url) => {
           capturedUrl = url;
           return {
             ok: true,
             json: async () => ({ web: { results: [] } }),
           };
-        });
+        }));
         await action_fn({ log: async () => "" }, { query: "test", count: 50 });
         assert.ok(capturedUrl, "fetch should have been called");
         const parsedUrl = new URL(capturedUrl);
