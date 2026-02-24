@@ -293,6 +293,28 @@ describe("parseCommandArgs", () => {
     assert.deepEqual(params, { name: "fallback" });
   });
 
+  it("joins remaining args for the last parameter", () => {
+    const params = parseCommandArgs(["You", "are", "a", "helpful", "bot"], {
+      type: "object",
+      properties: {
+        prompt: { type: "string" },
+      },
+    });
+    assert.equal(params.prompt, "You are a helpful bot");
+  });
+
+  it("joins remaining args only for the last param when multiple params exist", () => {
+    const params = parseCommandArgs(["key1", "hello", "world", "!"], {
+      type: "object",
+      properties: {
+        key: { type: "string" },
+        value: { type: "string" },
+      },
+    });
+    assert.equal(params.key, "key1");
+    assert.equal(params.value, "hello world !");
+  });
+
   it("returns undefined for missing args without defaults", () => {
     const params = parseCommandArgs([], {
       type: "object",
