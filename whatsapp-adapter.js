@@ -7,6 +7,7 @@ import {
   makeWASocket,
   useMultiFileAuthState,
   downloadMediaMessage,
+  Browsers,
 } from "@whiskeysockets/baileys";
 import { exec } from "child_process";
 import { rm } from "fs/promises";
@@ -438,7 +439,7 @@ export async function connectToWhatsApp(onMessageHandler) {
   const sockRef = {
     current: makeWASocket({
       auth: state,
-      browser: ["WhatsApp LLM Bot", "Chrome", "1.0.0"],
+      browser: Browsers.ubuntu("Chrome"),
     }),
   };
 
@@ -448,7 +449,7 @@ export async function connectToWhatsApp(onMessageHandler) {
     );
     sockRef.current = makeWASocket({
       auth: newState,
-      browser: ["WhatsApp LLM Bot", "Chrome", "1.0.0"],
+      browser: Browsers.ubuntu("Chrome"),
     });
     registerHandlers(sockRef, newSaveCreds, onMessageHandler, reconnect);
   }
