@@ -93,6 +93,10 @@ function hasUnsupportedContent(messages, supportedModalities) {
 }
 
 /**
+ * @typedef {{ messages: MessageRow[], skippedTypes: Set<string> }} TranslationResult
+ */
+
+/**
  * Translate unsupported content blocks in message history to text descriptions.
  * Returns the original messages if no translation is needed.
  *
@@ -101,7 +105,7 @@ function hasUnsupportedContent(messages, supportedModalities) {
  * @param {{ image?: string, audio?: string, video?: string }} contentModels
  * @param {import("openai").default} llmClient
  * @param {PGlite} db
- * @returns {Promise<MessageRow[]>}
+ * @returns {Promise<TranslationResult>}
  */
 export async function translateUnsupportedContent(
   messages,
@@ -114,12 +118,14 @@ export async function translateUnsupportedContent(
 
   // Fast path: if model supports all content types present, return as-is
   if (!hasUnsupportedContent(messages, supportedModalities)) {
-    return messages;
+    return { messages, skippedTypes: new Set() };
   }
 
   // Clone messages that have unsupported blocks and translate in a single pass
   /** @type {MessageRow[]} */
   const result = [];
+  /** @type {Set<string>} */
+  const skippedTypes = new Set();
 
   for (const msg of messages) {
     if (msg.message_data?.role !== "user" || !msg.message_data.content.some((b) => isUnsupportedBlock(b, supportedModalities))) {
@@ -151,6 +157,7 @@ export async function translateUnsupportedContent(
           type: "text",
           text: `[Unsupported ${contentType} content — no translation model configured]`,
         });
+        skippedTypes.add(contentType);
         continue;
       }
 
@@ -203,5 +210,5 @@ export async function translateUnsupportedContent(
     }
   }
 
-  return result;
+  return { messages: result, skippedTypes };
 }

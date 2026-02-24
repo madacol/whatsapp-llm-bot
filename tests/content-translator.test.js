@@ -119,7 +119,8 @@ describe("content-translator", () => {
         );
 
         // Should be the exact same reference (no cloning needed)
-        assert.equal(result, messages);
+        assert.equal(result.messages, messages);
+        assert.deepEqual(result.skippedTypes, new Set());
       } finally {
         await fs.rm(cachePath, { force: true });
       }
@@ -188,12 +189,14 @@ describe("content-translator", () => {
         );
 
         // Should not be the same reference
-        assert.notEqual(result, messages);
+        assert.notEqual(result.messages, messages);
         // Original should be untouched
         assert.equal(messages[0].message_data.content[1].type, "image");
+        // Translated content has no skipped types
+        assert.deepEqual(result.skippedTypes, new Set());
 
         // Translated message should have text replacement
-        const translated = result[0];
+        const translated = result.messages[0];
         const content = translated.message_data.content;
         assert.equal(content.length, 2);
         assert.equal(content[0].type, "text");
@@ -267,7 +270,7 @@ describe("content-translator", () => {
           llmClient,
           db,
         );
-        assert.ok(result1[0].message_data.content[0].text.includes("Cached image description"));
+        assert.ok(result1.messages[0].message_data.content[0].text.includes("Cached image description"));
 
         // Second call — should use cached value, no new LLM call
         const result2 = await translateUnsupportedContent(
@@ -277,7 +280,7 @@ describe("content-translator", () => {
           llmClient,
           db,
         );
-        assert.ok(result2[0].message_data.content[0].text.includes("Cached image description"));
+        assert.ok(result2.messages[0].message_data.content[0].text.includes("Cached image description"));
       } finally {
         await fs.rm(cachePath, { force: true });
       }
@@ -338,10 +341,13 @@ describe("content-translator", () => {
         );
 
         // Image block should be replaced with a placeholder
-        const content = result[0].message_data.content;
+        const content = result.messages[0].message_data.content;
         assert.equal(content.length, 2);
         assert.equal(content[1].type, "text");
         assert.ok(content[1].text.includes("[Unsupported"));
+
+        // Should report skipped content types
+        assert.deepEqual(result.skippedTypes, new Set(["image"]));
       } finally {
         await fs.rm(cachePath, { force: true });
       }
@@ -392,7 +398,7 @@ describe("content-translator", () => {
           db,
         );
 
-        assert.equal(result, messages);
+        assert.equal(result.messages, messages);
       } finally {
         await fs.rm(cachePath, { force: true });
       }
@@ -465,7 +471,7 @@ describe("content-translator", () => {
           db,
         );
 
-        assert.ok(result[0].message_data.content[0].text.includes("Fallback translation"));
+        assert.ok(result.messages[0].message_data.content[0].text.includes("Fallback translation"));
       } finally {
         config.content_model = origContentModel;
         await fs.rm(cachePath, { force: true });

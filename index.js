@@ -420,9 +420,14 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
     // Translate unsupported content types for non-multimodal models
     const contentModels = chatInfo?.content_models ?? {};
     const rootDb = getRootDb();
-    const translatedMessages = await translateUnsupportedContent(
+    const { messages: translatedMessages, skippedTypes } = await translateUnsupportedContent(
       chatMessages, chatModel, contentModels, llmClient, rootDb,
     );
+
+    if (skippedTypes.size > 0) {
+      const types = [...skippedTypes].join(", ");
+      await context.sendMessage(`⚠️ This model doesn't support ${types} content. The ${types} was not sent to the model. Use !set content-model to configure a translation model.`);
+    }
 
     // Prepare messages for OpenAI
     const formattedMessages = await formatMessagesForOpenAI(translatedMessages);
