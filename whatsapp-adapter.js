@@ -244,9 +244,8 @@ async function adaptIncomingMessage(baileysMessage, sock, messageHandler) {
   }
 
   const chatId = baileysMessage.key.remoteJid || "";
-  // Spread to index-accessible object — Baileys key type doesn't declare LID/PID fields
-  /** @type {{ [k: string]: unknown }} */
-  const key = { ...baileysMessage.key };
+  // Baileys key type doesn't declare LID/PID fields used for sender identification
+  const key = /** @type {typeof baileysMessage.key & { participantLid?: string, participantPid?: string, senderLid?: string, senderPid?: string }} */ (baileysMessage.key);
   /** @type {string[]} */
   const senderIds = [];
   senderIds.push(String(key.participant || key.remoteJid || "unknown"));
