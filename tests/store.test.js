@@ -1,5 +1,6 @@
 import { describe, it, before } from "node:test";
 import assert from "node:assert/strict";
+import { PGlite } from "@electric-sql/pglite";
 import { initStore } from "../store.js";
 import { createTestDb } from "./helpers.js";
 
@@ -12,6 +13,20 @@ describe("store with injected DB", () => {
   before(async () => {
     db = await createTestDb();
     store = await initStore(db);
+  });
+
+  it("does not create module-owned tables (reminders, content_translations)", async () => {
+    // Use a fresh DB to avoid pollution from other test files sharing createTestDb()
+    const freshDb = new PGlite("memory://");
+    await initStore(freshDb);
+    const { rows } = await freshDb.sql`
+      SELECT table_name FROM information_schema.tables
+      WHERE table_schema = 'public'
+      ORDER BY table_name
+    `;
+    const tableNames = rows.map(r => r.table_name);
+    assert.ok(!tableNames.includes("reminders"), `initStore() should not create 'reminders' table, got: ${tableNames}`);
+    assert.ok(!tableNames.includes("content_translations"), `initStore() should not create 'content_translations' table, got: ${tableNames}`);
   });
 
   describe("createChat / getChat", () => {

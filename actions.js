@@ -2,7 +2,7 @@ import fs from "fs/promises";
 import path from "path";
 import os from "os";
 import crypto from "crypto";
-import { getDb } from "./db.js";
+import { getDb, getRootDb, getChatDb, getActionDb } from "./db.js";
 import config from "./config.js";
 import { createCallLlm } from "./llm.js";
 
@@ -51,7 +51,7 @@ export async function executeAction(
     senderIds: context.senderIds,
     content: context.content,
     getIsAdmin: context.getIsAdmin,
-    db: getDb(`./pgdata/${context.chatId}/${actionName}`),
+    db: getActionDb(context.chatId, actionName),
     sessionDb: currentSessionDb,
     getActions,
     log: async (...args) => {
@@ -71,10 +71,10 @@ export async function executeAction(
   };
 
   if (action.permissions?.useChatDb) {
-    actionContext.chatDb = getDb(`./pgdata/${context.chatId}`);
+    actionContext.chatDb = getChatDb(context.chatId);
   }
   if (action.permissions?.useRootDb) {
-    actionContext.rootDb = getDb("./pgdata/root");
+    actionContext.rootDb = getRootDb();
   }
   if (action.permissions?.useLlm) {
     if (!llmClient) {
@@ -349,7 +349,7 @@ async function importChatAction(chatId, name, code) {
  * @returns {Promise<AppAction[]>}
  */
 export async function getChatActions(chatId) {
-  const db = getDb(`./pgdata/${chatId}/create_action`);
+  const db = getActionDb(chatId, "create_action");
   try {
     await ensureChatActionsSchema(db);
     const { rows } = await db.query(`SELECT name, code FROM chat_actions`);
@@ -372,7 +372,7 @@ export async function getChatActions(chatId) {
  * @returns {Promise<AppAction | null>}
  */
 export async function getChatAction(chatId, actionName) {
-  const db = getDb(`./pgdata/${chatId}/create_action`);
+  const db = getActionDb(chatId, "create_action");
   const code = await readChatAction(db, actionName);
   if (!code) return null;
   return importChatAction(chatId, actionName, code);

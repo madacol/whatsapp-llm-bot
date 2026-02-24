@@ -1,5 +1,6 @@
-import { getDb } from "./db.js";
+import { getRootDb } from "./db.js";
 import { ensureSchema } from "./actions/reminders.js";
+import { createDaemon } from "./daemon.js";
 
 /**
  * Poll for due reminders and deliver them.
@@ -33,20 +34,12 @@ const POLL_INTERVAL_MS = 30_000;
  * @returns {() => void} Stop function to clear the interval
  */
 export function startReminderDaemon(sendToChat) {
-  const db = getDb("./pgdata/root");
+  const db = getRootDb();
 
-  // Ensure schema on startup (async, but non-blocking for the interval)
-  ensureSchema(db).catch((err) =>
-    console.error("Failed to ensure reminders schema:", err),
-  );
-
-  const interval = setInterval(async () => {
-    try {
-      await pollReminders(db, sendToChat);
-    } catch (error) {
-      console.error("Reminder daemon poll error:", error);
-    }
-  }, POLL_INTERVAL_MS);
-
-  return () => clearInterval(interval);
+  return createDaemon({
+    init: () => ensureSchema(db),
+    poll: () => pollReminders(db, sendToChat),
+    intervalMs: POLL_INTERVAL_MS,
+    label: "Reminder daemon",
+  });
 }
