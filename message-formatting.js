@@ -129,47 +129,35 @@ function formatImagePart(block) {
   return { type: "image_url", image_url: { url: `data:${block.mime_type};base64,${block.data}` } };
 }
 
-/**
- * @param {AudioContentBlock} block
- * @returns {Promise<OpenAI.ChatCompletionContentPart>}
- */
-async function formatAudioPart(block) {
-  /** @type {"wav" | "mp3"} */
-  let format = "mp3";
-  let data;
-  const audioFormat = block.mime_type?.split("audio/")[1]?.split(";")[0];
-  if (audioFormat === "wav" || audioFormat === "mp3") {
-    format = audioFormat;
-    data = block.data;
-  } else {
-    console.warn(`Unsupported audio format: ${block.mime_type}`);
-    data = await convertAudioToMp3Base64(block.data);
-  }
-  return { type: "input_audio", input_audio: { data, format } };
-}
-
-/**
- * @param {QuoteContentBlock} block
- * @returns {OpenAI.ChatCompletionContentPart[]}
- */
-function formatQuoteParts(block) {
-  /** @type {Record<string, (b: any) => OpenAI.ChatCompletionContentPart>} */
-  const quoteFormatters = {
-    text: (/** @type {TextContentBlock} */ b) =>
-      ({ type: "text", text: `> ${b.text.trim().replace(/\n/g, '\n> ')}` }),
-    image: formatImagePart,
-  };
-  return block.content
-    .filter(b => b.type in quoteFormatters)
-    .map(b => quoteFormatters[b.type](b));
-}
-
 /** @type {Record<string, (block: any) => OpenAI.ChatCompletionContentPart | Promise<OpenAI.ChatCompletionContentPart> | OpenAI.ChatCompletionContentPart[]>} */
 const contentFormatters = {
   text: (/** @type {TextContentBlock} */ block) => block,
   image: formatImagePart,
-  audio: formatAudioPart,
-  quote: formatQuoteParts,
+  audio: async (/** @type {AudioContentBlock} */ block) => {
+    /** @type {"wav" | "mp3"} */
+    let format = "mp3";
+    let data;
+    const audioFormat = block.mime_type?.split("audio/")[1]?.split(";")[0];
+    if (audioFormat === "wav" || audioFormat === "mp3") {
+      format = audioFormat;
+      data = block.data;
+    } else {
+      console.warn(`Unsupported audio format: ${block.mime_type}`);
+      data = await convertAudioToMp3Base64(block.data);
+    }
+    return { type: "input_audio", input_audio: { data, format } };
+  },
+  quote: (/** @type {QuoteContentBlock} */ block) => {
+    /** @type {Record<string, (b: any) => OpenAI.ChatCompletionContentPart>} */
+    const quoteFormatters = {
+      text: (/** @type {TextContentBlock} */ b) =>
+        ({ type: "text", text: `> ${b.text.trim().replace(/\n/g, '\n> ')}` }),
+      image: formatImagePart,
+    };
+    return block.content
+      .filter((/** @type {IncomingContentBlock} */ b) => b.type in quoteFormatters)
+      .map((/** @type {IncomingContentBlock} */ b) => quoteFormatters[b.type](b));
+  },
 };
 
 /**
