@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import config from "../config.js";
 
 export default /** @type {defineAction} */ ((x) => x)({
   name: "get_system_prompt",
@@ -44,7 +45,7 @@ export default /** @type {defineAction} */ ((x) => x)({
     if (chatInfo.system_prompt) {
       return `Prompt: ${chatInfo.system_prompt}`;
     } else {
-      return `Prompt (default): ${(await import("../config.js")).default.system_prompt}`;
+      return `Prompt (default): ${config.system_prompt}`;
     }
   },
 });

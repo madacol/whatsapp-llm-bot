@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import config from "../config.js";
 import { validateModel } from "../models-cache.js";
 import { assertChatExists } from "../store.js";
 
@@ -77,8 +78,7 @@ export default /** @type {defineAction} */ ((x) => x)({
     if (modelValue) {
       return `Model set to ${modelValue}`;
     } else {
-      const defaultModel = (await import("../config.js")).default.model;
-      return `Model reverted to default (${defaultModel})`;
+      return `Model reverted to default (${config.model})`;
     }
   },
 });
