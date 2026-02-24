@@ -10,6 +10,71 @@ import {
   deleteChatAction,
 } from "../actions.js";
 
+/**
+ * @typedef {{
+ *   read: (name: string) => Promise<string | null>,
+ *   write: (name: string, code: string) => Promise<void>,
+ *   remove: (name: string) => Promise<void>,
+ *   label: (name: string) => string,
+ * }} ActionStorage
+ */
+
+/**
+ * Shared CRUD logic for both chat-scoped and global-scoped actions.
+ * @param {ActionStorage} storage
+ * @param {{ mode: string, fileName: string, code?: string, proposedTests?: string, confirm: (msg: string) => Promise<boolean> }} opts
+ * @returns {Promise<string>}
+ */
+async function executeActionCrud(storage, { mode, fileName, code, proposedTests, confirm }) {
+  const label = storage.label(fileName);
+
+  if (mode === "read") {
+    const content = await storage.read(fileName);
+    if (!content) return `${label} not found`;
+    return content;
+  }
+
+  if (mode === "delete") {
+    const content = await storage.read(fileName);
+    if (!content) return `${label} not found`;
+    const confirmed = await confirm(
+      `*Delete:* ${label}\n\nReact 👍 to confirm or 👎 to cancel.`,
+    );
+    if (!confirmed) return "Deletion cancelled.";
+    await storage.remove(fileName);
+    return `${label} deleted`;
+  }
+
+  if (!code) {
+    return "code is required for create/edit modes";
+  }
+
+  const existing = await storage.read(fileName);
+  if (mode === "edit" && !existing) {
+    return `${label} not found — use mode "create" to create a new action.`;
+  }
+  if (mode === "create" && existing) {
+    return `${label} already exists — use mode "edit" to modify it.`;
+  }
+
+  const verb = mode === "edit" ? "Edit" : "Create";
+  let preview = `*${verb}:* ${label}`;
+  if (proposedTests) {
+    preview += `\n\n*Proposed tests:*\n${proposedTests}`;
+  }
+  preview += "\n\nReact 👍 to approve or 👎 to reject.";
+
+  const confirmed = await confirm(preview);
+  if (!confirmed) {
+    return "Action rejected. Please revise the action and proposed tests based on user feedback, then retry.";
+  }
+
+  await storage.write(fileName, code);
+
+  const pastVerb = mode === "edit" ? "updated" : "created";
+  return `${label} ${pastVerb}`;
+}
+
 const description = `Create a new action file in the actions/ directory. The code must be a complete ES module that default-exports an action object.
 
 ## Rules
@@ -462,136 +527,47 @@ export default /** @type {defineAction} */ ((x) => x)({
       return "file_name must be alphanumeric camelCase (no dots, slashes, or spaces)";
     }
 
-    // ── Chat-scoped actions ──
+    /** @type {ActionStorage} */
+    let storage;
+
     if (scope === "chat") {
       const isAdmin = await context.getIsAdmin();
       if (!isAdmin) {
         throw new Error("Chat-scoped actions require admin permissions in group chats");
       }
-
       await ensureChatActionsSchema(context.db);
-
-      if (mode === "read") {
-        const stored = await readChatAction(context.db, file_name);
-        if (!stored) return `Chat action not found: ${file_name}`;
-        return stored;
-      }
-
-      if (mode === "delete") {
-        const stored = await readChatAction(context.db, file_name);
-        if (!stored) return `Chat action not found: ${file_name}`;
-        const confirmed = await context.confirm(
-          `*Delete chat action:* ${file_name}\n\nReact 👍 to confirm or 👎 to cancel.`,
-        );
-        if (!confirmed) {
-          return "Deletion cancelled.";
-        }
-        await deleteChatAction(context.db, file_name);
-        return `Chat action deleted: ${file_name}`;
-      }
-
-      if (!code) {
-        return "code is required for create/edit modes";
-      }
-
-      const existing = await readChatAction(context.db, file_name);
-      if (mode === "edit" && !existing) {
-        return `Chat action not found: ${file_name} — use mode "create" to create a new action.`;
-      }
-      if (mode === "create" && existing) {
-        return `Chat action already exists: ${file_name} — use mode "edit" to modify it.`;
-      }
-
-      const verb = mode === "edit" ? "Edit" : "Create";
-      let preview = `*${verb} chat action:* ${file_name}`;
-      if (proposed_tests) {
-        preview += `\n\n*Proposed tests:*\n${proposed_tests}`;
-      }
-      preview += "\n\nReact 👍 to approve or 👎 to reject.";
-
-      const confirmed = await context.confirm(preview);
-      if (!confirmed) {
-        return "Action rejected. Please revise the action and proposed tests based on user feedback, then retry.";
-      }
-
-      await saveChatAction(context.db, file_name, code);
-
-      const pastVerb = mode === "edit" ? "updated" : "created";
-      return `Chat action ${pastVerb}: ${file_name}`;
-    }
-
-    // ── Global-scoped actions (requires master) ──
-    const isMaster = context.senderIds?.some(
-      (/** @type {string} */ id) => config.MASTER_IDs.includes(id),
-    );
-    if (!isMaster) {
-      throw new Error("Global-scoped actions requires master permissions");
-    }
-
-    const actionsDir = path.resolve(process.cwd(), "actions");
-    const filePath = path.join(actionsDir, `${file_name}.js`);
-
-    if (mode === "read") {
-      try {
-        const content = await fs.readFile(filePath, "utf-8");
-        return content;
-      } catch {
-        return `Action file not found: actions/${file_name}.js`;
-      }
-    }
-
-    if (mode === "delete") {
-      try {
-        await fs.access(filePath);
-      } catch {
-        return `Action file not found: actions/${file_name}.js`;
-      }
-      const confirmed = await context.confirm(
-        `*Delete action:* ${file_name}\n\nReact 👍 to confirm or 👎 to cancel.`,
+      const db = context.db;
+      storage = {
+        read: (name) => readChatAction(db, name),
+        write: (name, c) => saveChatAction(db, name, c),
+        remove: (name) => deleteChatAction(db, name),
+        label: (name) => `Chat action: ${name}`,
+      };
+    } else {
+      const isMaster = context.senderIds?.some(
+        (/** @type {string} */ id) => config.MASTER_IDs.includes(id),
       );
-      if (!confirmed) {
-        return "Deletion cancelled.";
+      if (!isMaster) {
+        throw new Error("Global-scoped actions requires master permissions");
       }
-      await fs.rm(filePath);
-      return `Action file deleted: actions/${file_name}.js`;
+      const actionsDir = path.resolve(process.cwd(), "actions");
+      storage = {
+        read: async (name) => {
+          try { return await fs.readFile(path.join(actionsDir, `${name}.js`), "utf-8"); }
+          catch { return null; }
+        },
+        write: (name, c) => fs.writeFile(path.join(actionsDir, `${name}.js`), c, "utf-8"),
+        remove: (name) => fs.rm(path.join(actionsDir, `${name}.js`)),
+        label: (name) => `Action file: actions/${name}.js`,
+      };
     }
 
-    if (!code) {
-      throw new Error("code is required for create/edit modes");
-    }
-
-    /** @type {boolean} */
-    let fileExists;
-    try {
-      await fs.access(filePath);
-      fileExists = true;
-    } catch {
-      fileExists = false;
-    }
-
-    if (mode === "edit" && !fileExists) {
-      return `Action file not found: actions/${file_name}.js — use mode "create" to create a new action.`;
-    }
-
-    if (mode === "create" && fileExists) {
-      return `Action file already exists: actions/${file_name}.js — use mode "edit" to modify an existing action.`;
-    }
-
-    const verb = mode === "edit" ? "Edit" : "Create";
-    let preview = `*${verb} action:* ${file_name}`;
-    if (proposed_tests) {
-      preview += `\n\n*Proposed tests:*\n${proposed_tests}`;
-    }
-    preview += "\n\nReact 👍 to approve or 👎 to reject.";
-
-    const confirmed = await context.confirm(preview);
-    if (!confirmed) {
-      return "Action rejected. Please revise the action and proposed tests based on user feedback, then retry.";
-    }
-
-    await fs.writeFile(filePath, code, "utf-8");
-
-    const pastVerb = mode === "edit" ? "updated" : "created";
-    return `Action file ${pastVerb}: actions/${file_name}.js`;
+    return executeActionCrud(storage, {
+      mode,
+      fileName: file_name,
+      code,
+      proposedTests: proposed_tests,
+      confirm: (msg) => context.confirm(msg),
+    });
   },
 });
