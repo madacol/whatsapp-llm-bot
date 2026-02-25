@@ -552,6 +552,50 @@ describe("Scenario 10: Private chat — always responds when enabled", () => {
 });
 
 // ═══════════════════════════════════════════════════════════════════
+// Scenario 11: Group — stores messages even when bot doesn't respond
+// ═══════════════════════════════════════════════════════════════════
+describe("Scenario 11: Group stores messages even when not responding", () => {
+  const chatId = "s11-chat@g.us";
+
+  before(async () => {
+    await seedChat(chatId, { enabled: true });
+  });
+
+  it("stores a non-triggering message so it appears in later history", async () => {
+    // Send a message without mentioning the bot — bot should NOT respond
+    const { context: ctx1, responses: r1 } = createIncomingContext({
+      chatId,
+      isGroup: true,
+      content: [{ type: "text", text: "Hey guys, check this out" }],
+      senderName: "Alice",
+    });
+    await handleMessage(ctx1);
+    assert.equal(r1.length, 0, "Bot should not respond when not mentioned");
+
+    // Now mention the bot — it should respond, and the previous message should be in history
+    mockServer.addResponses("I can see Alice said something earlier!");
+
+    const { context: ctx2, responses: r2 } = createIncomingContext({
+      chatId,
+      isGroup: true,
+      content: [{ type: "text", text: "@bot-123 what did Alice say?" }],
+    });
+    await handleMessage(ctx2);
+
+    assert.ok(r2.length > 0, "Bot should respond when mentioned");
+
+    // Verify the first message was stored by checking the LLM request
+    const requests = mockServer.getRequests();
+    const lastRequest = requests[requests.length - 1];
+    const allContent = JSON.stringify(lastRequest.messages);
+    assert.ok(
+      allContent.includes("Hey guys, check this out"),
+      `Previous non-triggered message should be in history, got: ${allContent.slice(0, 500)}`,
+    );
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════
 // Scenario 12: Debug mode — gates tool call verbose output
 // ═══════════════════════════════════════════════════════════════════
 describe("Scenario 12: Debug mode gates tool call output", () => {
