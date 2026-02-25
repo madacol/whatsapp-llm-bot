@@ -9,6 +9,7 @@ import { getRootDb } from "./db.js";
  *   respond_on_any: boolean;
  *   respond_on_mention: boolean;
  *   respond_on_reply: boolean;
+ *   respond_on: "any" | "mention+reply" | "mention";
  *   debug_until: string | null;
  *   content_models: { image?: string, audio?: string, video?: string };
  *   memory: boolean;
@@ -87,6 +88,7 @@ export async function initStore(injectedDb){
         db.sql`ALTER TABLE chats ADD COLUMN IF NOT EXISTS content_models JSONB DEFAULT '{}'`,
         db.sql`ALTER TABLE chats ADD COLUMN IF NOT EXISTS memory BOOLEAN DEFAULT FALSE`,
         db.sql`ALTER TABLE chats ADD COLUMN IF NOT EXISTS memory_threshold REAL`,
+        db.sql`ALTER TABLE chats ADD COLUMN IF NOT EXISTS respond_on TEXT DEFAULT 'mention'`,
         db.sql`ALTER TABLE messages ADD COLUMN IF NOT EXISTS exchange_text TEXT`,
         db.sql`ALTER TABLE messages ADD COLUMN IF NOT EXISTS llm_context JSONB`,
       ]);

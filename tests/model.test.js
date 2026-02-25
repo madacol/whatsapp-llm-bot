@@ -88,15 +88,15 @@ describe("per-chat model selection", () => {
     });
   });
 
-  describe("setModel action", () => {
+  describe("chat_settings model via dispatch", () => {
     it("updates the model in the DB", async () => {
       await db.sql`INSERT INTO chats(chat_id) VALUES ('chat-set-1') ON CONFLICT DO NOTHING`;
 
-      const setModelModule = await import("../actions/setModel.js");
-      const action = setModelModule.default;
+      const mod = await import("../actions/settings/chatSettings.js");
+      const action = mod.default;
       const result = await action.action_fn(
         { chatId: "chat-set-1", rootDb: db },
-        { model: "openai/gpt-4.1-mini" },
+        { setting: "model", value: "openai/gpt-4.1-mini" },
       );
       assert.ok(result.includes("openai/gpt-4.1-mini"));
 
@@ -107,13 +107,13 @@ describe("per-chat model selection", () => {
     it("reverts to default when given empty string", async () => {
       await db.sql`INSERT INTO chats(chat_id, model) VALUES ('chat-set-2', 'some-model') ON CONFLICT DO NOTHING`;
 
-      const setModelModule = await import("../actions/setModel.js");
-      const action = setModelModule.default;
+      const mod = await import("../actions/settings/chatSettings.js");
+      const action = mod.default;
       const result = await action.action_fn(
         { chatId: "chat-set-2", rootDb: db },
-        { model: "" },
+        { setting: "model", value: "" },
       );
-      assert.ok(result.includes("reverted to default"));
+      assert.ok(result.includes("default"));
 
       const { rows: [chat] } = await db.sql`SELECT model FROM chats WHERE chat_id = 'chat-set-2'`;
       assert.equal(chat.model, null);
@@ -122,16 +122,15 @@ describe("per-chat model selection", () => {
     it("rejects invalid model with suggestions", async () => {
       await db.sql`INSERT INTO chats(chat_id) VALUES ('chat-set-3') ON CONFLICT DO NOTHING`;
 
-      const setModelModule = await import("../actions/setModel.js");
-      const action = setModelModule.default;
+      const mod = await import("../actions/settings/chatSettings.js");
+      const action = mod.default;
       const result = await action.action_fn(
         { chatId: "chat-set-3", rootDb: db },
-        { model: "nonexistent/fake-model" },
+        { setting: "model", value: "nonexistent/fake-model" },
       );
       assert.ok(typeof result === "string");
       assert.ok(result.includes("not found"));
 
-      // Should NOT have updated the DB
       const { rows: [chat] } = await db.sql`SELECT model FROM chats WHERE chat_id = 'chat-set-3'`;
       assert.equal(chat.model, null);
     });
@@ -139,23 +138,22 @@ describe("per-chat model selection", () => {
     it("suggests close matches for partial model names", async () => {
       await db.sql`INSERT INTO chats(chat_id) VALUES ('chat-set-4') ON CONFLICT DO NOTHING`;
 
-      const setModelModule = await import("../actions/setModel.js");
-      const action = setModelModule.default;
+      const mod = await import("../actions/settings/chatSettings.js");
+      const action = mod.default;
       const result = await action.action_fn(
         { chatId: "chat-set-4", rootDb: db },
-        { model: "gpt-4" },
+        { setting: "model", value: "gpt-4" },
       );
       assert.ok(typeof result === "string");
       assert.ok(result.includes("not found"));
-      // Should suggest close matches containing "gpt-4"
       assert.ok(result.includes("openai/gpt-4"));
     });
 
     it("throws if chat does not exist", async () => {
-      const setModelModule = await import("../actions/setModel.js");
-      const action = setModelModule.default;
+      const mod = await import("../actions/settings/chatSettings.js");
+      const action = mod.default;
       await assert.rejects(
-        () => action.action_fn({ chatId: "nonexistent", rootDb: db }, { model: "x" }),
+        () => action.action_fn({ chatId: "nonexistent", rootDb: db }, { setting: "model", value: "x" }),
         { message: /does not exist/ },
       );
     });

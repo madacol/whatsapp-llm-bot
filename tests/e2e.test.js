@@ -226,10 +226,10 @@ describe("Scenario 4: Set and get system prompt", () => {
     await seedChat(chatId, { enabled: true });
   });
 
-  it("sets system prompt with !set prompt", async () => {
+  it("sets system prompt with !set system_prompt", async () => {
     const { context, responses } = createIncomingContext({
       chatId,
-      content: [{ type: "text", text: "!set prompt pirate" }],
+      content: [{ type: "text", text: "!set system_prompt pirate" }],
     });
     await handleMessage(context);
 
@@ -240,10 +240,10 @@ describe("Scenario 4: Set and get system prompt", () => {
     );
   });
 
-  it("retrieves system prompt with !get prompt", async () => {
+  it("retrieves system prompt with !set system_prompt (no value)", async () => {
     const { context, responses } = createIncomingContext({
       chatId,
-      content: [{ type: "text", text: "!get prompt" }],
+      content: [{ type: "text", text: "!set system_prompt" }],
     });
     await handleMessage(context);
 
