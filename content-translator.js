@@ -24,15 +24,23 @@ const TRANSLATION_PROMPTS = {
     "Describe this image in detail. Include all visible text, numbers, data, and visual elements.",
   audio:
     "Transcribe and describe this audio content in detail.",
+  video:
+    "Describe this video content in detail. Include all visible text, actions, and visual elements.",
 };
 
 /** @type {Record<string, string>} */
 const DESCRIPTION_LABELS = {
   image: "Image description",
   audio: "Audio description",
+  video: "Video description",
 };
 
-/** @type {Record<string, (block: IncomingContentBlock, data: string) => import("openai").default.ChatCompletionContentPart[]>} */
+/**
+ * @typedef {{ type: "video_url", video_url: { url: string } }} VideoUrlContentPart
+ * @typedef {import("openai").default.ChatCompletionContentPart | VideoUrlContentPart} ContentPart
+ */
+
+/** @type {Record<string, (block: IncomingContentBlock, data: string) => ContentPart[]>} */
 const contentBlockBuilders = {
   image: (block, data) => [
     {
@@ -46,6 +54,14 @@ const contentBlockBuilders = {
     {
       type: /** @type {const} */ ("input_audio"),
       input_audio: { data, format: /** @type {const} */ ("mp3") },
+    },
+  ],
+  video: (block, data) => [
+    {
+      type: /** @type {const} */ ("video_url"),
+      video_url: {
+        url: `data:${/** @type {VideoContentBlock} */ (block).mime_type};base64,${data}`,
+      },
     },
   ],
 };
@@ -179,8 +195,7 @@ export async function translateUnsupportedContent(
         // Call translation model
         const prompt = TRANSLATION_PROMPTS[contentType] || `Describe this ${contentType} content in detail.`;
 
-        /** @type {import("openai").default.ChatCompletionMessageParam[]} */
-        const llmMessages = [
+        const llmMessages = /** @type {import("openai").default.ChatCompletionMessageParam[]} */ ([
           {
             role: "user",
             content: [
@@ -188,7 +203,7 @@ export async function translateUnsupportedContent(
               ...(contentBlockBuilders[contentType]?.(block, contentData) ?? []),
             ],
           },
-        ];
+        ]);
 
         const response = await llmClient.chat.completions.create({
           model: translationModelId,
