@@ -23,7 +23,7 @@ import { getRootDb } from "./db.js";
 import {
   extractTextFromMessage,
   extractExchangeText,
-  maybeEmbed,
+  storeExchangeEmbedding,
   findSimilarMessages,
   formatMemoryContext,
 } from "./memory.js";
@@ -495,7 +495,8 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
       const lastAssistant = recentMessages.find(m => m.message_data.role === "assistant");
       if (lastAssistant) {
         const exchangeText = extractExchangeText(exchangeMessages);
-        maybeEmbed(getRootDb(), llmClient, lastAssistant.message_id, exchangeText, true);
+        storeExchangeEmbedding(getRootDb(), llmClient, lastAssistant.message_id, exchangeText)
+          .catch(err => console.error("Embedding failed:", err));
       }
     }
   }

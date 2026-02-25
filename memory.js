@@ -102,19 +102,6 @@ export async function storeExchangeEmbedding(db, llmClient, messageId, exchangeT
   }
 }
 
-/**
- * Fire-and-forget wrapper: embed an exchange if memory is enabled.
- * @param {PGlite} db
- * @param {import("openai").default | undefined} llmClient
- * @param {number} messageId
- * @param {string} exchangeText
- * @param {boolean} [enabled]
- */
-export function maybeEmbed(db, llmClient, messageId, exchangeText, enabled) {
-  if (!enabled || !llmClient) return;
-  storeExchangeEmbedding(db, llmClient, messageId, exchangeText)
-    .catch(err => console.error("Embedding failed:", err));
-}
 
 /**
  * @typedef {{
