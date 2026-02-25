@@ -213,6 +213,52 @@ export default /** @type {defineAction} */ ((x) => x)({
       }
     },
 
+    async function test_deduplicates_images_from_content_array_and_images_field(action_fn) {
+      const originalFetch = globalThis.fetch;
+      /** @type {Array<{image: Buffer, caption?: string}>} */
+      const sentImages = [];
+      const imageDataUrl = "data:image/png;base64,iVBORw0KGgo=";
+      try {
+        // Simulate API returning the same image in both content array and images field
+        globalThis.fetch = /** @type {typeof fetch} */ (/** @type {unknown} */ (async () => ({
+          ok: true,
+          json: async () => ({
+            choices: [{
+              message: {
+                role: "assistant",
+                content: [
+                  { type: "text", text: "Here is the image" },
+                  { type: "image_url", image_url: { url: imageDataUrl } },
+                ],
+                images: [
+                  { type: "image_url", image_url: { url: imageDataUrl } },
+                ],
+              },
+            }],
+          }),
+        })));
+
+        const result = await action_fn(
+          {
+            content: [{ type: "text", text: "a cat" }],
+            sendImage: async (/** @type {Buffer} */ image, /** @type {string | undefined} */ caption) => {
+              sentImages.push({ image, caption });
+            },
+            log: async () => "",
+          },
+          { prompt: "a cat" },
+        );
+
+        assert.equal(sentImages.length, 1, "Should send exactly 1 image, not duplicates");
+        const blocks = /** @type {ToolContentBlock[]} */ (result.result);
+        const imageBlocks = blocks.filter((b) => b.type === "image");
+        assert.equal(imageBlocks.length, 1, "Should have exactly 1 image content block");
+        assert.ok(blocks.some((b) => b.type === "text" && /** @type {TextContentBlock} */ (b).text === "Here is the image"));
+      } finally {
+        globalThis.fetch = originalFetch;
+      }
+    },
+
     async function test_handles_api_error(action_fn) {
       const originalFetch = globalThis.fetch;
       try {
@@ -311,23 +357,40 @@ export default /** @type {defineAction} */ ((x) => x)({
       return "Error: No response from image model.";
     }
 
-    const images = message.images ?? [];
-    const textContent = typeof message.content === "string"
-      ? message.content
-      : "";
+    // Normalize response: content can be a string or an array of parts,
+    // and images may appear in both message.content and message.images.
+    let textContent = "";
+    /** @type {Set<string>} */
+    const imageUrls = new Set();
 
-    if (images.length === 0) {
+    if (typeof message.content === "string") {
+      textContent = message.content;
+    } else if (Array.isArray(message.content)) {
+      for (const part of message.content) {
+        if (part.type === "text") {
+          textContent += part.text;
+        } else if (part.type === "image_url") {
+          imageUrls.add(part.image_url.url);
+        }
+      }
+    }
+
+    for (const img of message.images ?? []) {
+      imageUrls.add(img.image_url.url);
+    }
+
+    if (imageUrls.size === 0) {
       return textContent || "The model did not generate any images.";
     }
 
     /** @type {ToolContentBlock[]} */
     const contentBlocks = [];
 
-    const summary = `Generated ${images.length} image${images.length > 1 ? "s" : ""}.`;
+    const summary = `Generated ${imageUrls.size} image${imageUrls.size > 1 ? "s" : ""}.`;
     contentBlocks.push({ type: "text", text: textContent || summary });
 
-    for (const img of images) {
-      const { mime_type, buffer } = parseDataUrl(img.image_url.url);
+    for (const dataUrl of imageUrls) {
+      const { mime_type, buffer } = parseDataUrl(dataUrl);
       const base64 = buffer.toString("base64");
       contentBlocks.push({
         type: "image",
