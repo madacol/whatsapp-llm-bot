@@ -392,27 +392,32 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
     // Use data from message context
     const time = formatTime(messageContext.timestamp);
 
-    if (!shouldRespond(chatInfo, isGroup, content, selfIds, quotedSenderId)) {
+    // Check shouldRespond BEFORE formatting (formatting strips @mentions)
+    const willRespond = shouldRespond(chatInfo, isGroup, content, selfIds, quotedSenderId);
+
+    // Format user message text (timestamp, sender name, mention stripping)
+    /** @type {string} */
+    let systemPromptSuffix = "";
+    if (firstBlock) {
+      const formatted = formatUserMessage(firstBlock, isGroup, senderName, time, selfIds);
+      firstBlock.text = formatted.formattedText;
+      systemPromptSuffix = formatted.systemPromptSuffix;
+    }
+
+    // Always store the message so it's available in history for future responses
+    /** @type {UserMessage} */
+    const message = {role: "user", content}
+    await addMessage(chatId, message, senderIds);
+
+    if (!willRespond) {
       return;
     }
 
     console.log("LLM will respond");
 
     // Get system prompt and model from current chat or use defaults
-    let systemPrompt = chatInfo?.system_prompt || config.system_prompt;
+    let systemPrompt = (chatInfo?.system_prompt || config.system_prompt) + systemPromptSuffix;
     const chatModel = chatInfo?.model || config.model;
-
-    if (firstBlock) {
-      const { formattedText, systemPromptSuffix } = formatUserMessage(firstBlock, isGroup, senderName, time, selfIds);
-      firstBlock.text = formattedText;
-      systemPrompt += systemPromptSuffix;
-    }
-
-    /** @type {UserMessage} */
-    const message = {role: "user", content}
-
-    // Insert message into DB
-    await addMessage(chatId, message, senderIds);
 
     // Get latest messages from DB
     const chatMessages = await getMessages(chatId)
