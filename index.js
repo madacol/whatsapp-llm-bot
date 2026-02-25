@@ -349,6 +349,7 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
       },
       reactToMessage: messageContext.reactToMessage,
       sendPoll: messageContext.sendPoll,
+      sendImage: messageContext.sendImage,
       confirm: messageContext.confirm,
     };
 
