@@ -123,7 +123,7 @@ export default /** @type {defineAction} */ ((x) => x)({
 
     const status = chat.is_enabled ? "enabled" : "disabled";
     const model = chat.model || `${config.model} (default)`;
-    const prompt = chat.system_prompt ? "custom (!set system_prompt)" : "default";
+    const prompt = chat.system_prompt ? "custom (!config system_prompt)" : "default";
     const response = chat.respond_on ?? "mention";
 
     const memoryOn = chat.memory ? "on" : "off";

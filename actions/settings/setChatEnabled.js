@@ -3,7 +3,7 @@ import { getChatOrThrow } from "../../store.js";
 
 export default /** @type {defineAction} */ ((x) => x)({
   name: "set_chat_enabled",
-  command: "set enabled",
+  command: "config enabled",
   description: "Enable or disable LLM answers for a chat (master only). Pass true to enable, false to disable.",
   parameters: {
     type: "object",
