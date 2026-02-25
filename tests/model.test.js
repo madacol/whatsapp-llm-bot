@@ -53,37 +53,36 @@ describe("per-chat model selection", () => {
     });
   });
 
-  describe("getModel action", () => {
-    it("returns custom model when set", async () => {
+  describe("show_info includes model", () => {
+    it("shows custom model in info output", async () => {
       await db.sql`INSERT INTO chats(chat_id, model) VALUES ('chat-get-1', 'claude-sonnet-4-5-20250929') ON CONFLICT DO NOTHING`;
 
-      const getModelModule = await import("../actions/getModel.js");
-      const action = getModelModule.default;
+      const infoModule = await import("../actions/showInfo.js");
+      const action = infoModule.default;
       const result = await action.action_fn(
-        { chatId: "chat-get-1", rootDb: db },
+        { chatId: "chat-get-1", rootDb: db, senderIds: ["u1"] },
         {},
       );
       assert.ok(result.includes("claude-sonnet-4-5-20250929"));
-      assert.ok(result.startsWith("Model:"));
     });
 
     it("indicates default when model is not set", async () => {
       await db.sql`INSERT INTO chats(chat_id) VALUES ('chat-get-2') ON CONFLICT DO NOTHING`;
 
-      const getModelModule = await import("../actions/getModel.js");
-      const action = getModelModule.default;
+      const infoModule = await import("../actions/showInfo.js");
+      const action = infoModule.default;
       const result = await action.action_fn(
-        { chatId: "chat-get-2", rootDb: db },
+        { chatId: "chat-get-2", rootDb: db, senderIds: ["u1"] },
         {},
       );
       assert.ok(result.includes("default"));
     });
 
     it("throws if chat does not exist", async () => {
-      const getModelModule = await import("../actions/getModel.js");
-      const action = getModelModule.default;
+      const infoModule = await import("../actions/showInfo.js");
+      const action = infoModule.default;
       await assert.rejects(
-        () => action.action_fn({ chatId: "nonexistent", rootDb: db }, {}),
+        () => action.action_fn({ chatId: "nonexistent", rootDb: db, senderIds: [] }, {}),
         { message: /does not exist/ },
       );
     });
