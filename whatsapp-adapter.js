@@ -196,9 +196,7 @@ export async function getMessageContent(baileysMessage) {
       )
     }
 
-    if (quote.content.length > 0) {
-      content.push(quote);
-    }
+    content.push(quote);
   }
 
   // Check for image content (including quoted images)

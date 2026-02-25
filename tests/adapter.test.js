@@ -149,6 +149,28 @@ describe("getMessageContent", () => {
     assert.equal(quotedSenderId, "12345");
   });
 
+  it("emits quote block for media-only quoted message (no text)", async () => {
+    const msg = /** @type {Partial<BaileysMessage>} */ ({
+      message: {
+        extendedTextMessage: {
+          text: "What's this?",
+          contextInfo: {
+            quotedMessage: {
+              imageMessage: { mimetype: "image/jpeg", url: "https://example.com/img" },
+            },
+            participant: "555@s.whatsapp.net",
+          },
+        },
+      },
+    });
+    const { content, quotedSenderId } = await getMessageContent(msg);
+
+    const quote = content.find(b => b.type === "quote");
+    assert.ok(quote, "Should have quote block even without text");
+    assert.equal(/** @type {QuoteContentBlock} */ (quote).quotedSenderId, "555");
+    assert.equal(quotedSenderId, "555");
+  });
+
   it("returns undefined quotedSenderId when no quote", async () => {
     const msg = /** @type {Partial<BaileysMessage>} */ ({
       message: { conversation: "Hello" },
