@@ -6,7 +6,7 @@
 - After any change follow this:
   1. Make sure it passes type-checking (`npm run type-check`)
   2. test it (`npm test`)
-  3. if both passes, commit
+  3. commit
 + After making a significant change:
   1. Identify anything that is worth refactoring
   2. Go through each refactor (if possible on parallel):
