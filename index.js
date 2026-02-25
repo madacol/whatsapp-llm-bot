@@ -22,6 +22,7 @@ import { translateUnsupportedContent } from "./content-translator.js";
 import { getRootDb } from "./db.js";
 import {
   extractTextFromMessage,
+  extractExchangeText,
   maybeEmbed,
   findSimilarMessages,
   formatMemoryContext,
@@ -109,10 +110,8 @@ function parseToolArgs(argsString) {
  * @typedef {{
  *   chatId: string,
  *   senderIds: string[],
- *   enableMemory: boolean,
  *   context: Context,
  *   addMessage: Store['addMessage'],
- *   db: PGlite,
  * }} Session
  *
  * @typedef {{
@@ -140,7 +139,7 @@ function parseToolArgs(argsString) {
 async function executeAndStoreTool({
   session, llmConfig, toolCall, formattedMessages,
 }) {
-  const { chatId, senderIds, enableMemory, context, addMessage, db } = session;
+  const { chatId, senderIds, context, addMessage } = session;
   const { executeActionFn, actionResolver, actionLlmClient } = llmConfig;
   const toolName = toolCall.function.name;
   const toolArgs = parseToolArgs(toolCall.function.arguments);
@@ -162,8 +161,7 @@ async function executeAndStoreTool({
         ? "[recalled prior messages]"
         : JSON.stringify(functionResponse.result)}],
     };
-    const storedToolMsg = await addMessage(chatId, toolMessage, senderIds);
-    maybeEmbed(db, actionLlmClient, storedToolMsg.message_id, toolMessage, enableMemory);
+    await addMessage(chatId, toolMessage, senderIds);
 
     const resultMessage =
       typeof functionResponse.result === "string"
@@ -187,8 +185,7 @@ async function executeAndStoreTool({
       tool_id: toolCall.id,
       content: [{type: "text", text: errorMessage}],
     };
-    const storedToolError = await addMessage(chatId, toolError, senderIds);
-    maybeEmbed(db, actionLlmClient, storedToolError.message_id, toolError, enableMemory);
+    await addMessage(chatId, toolError, senderIds);
 
     if (context.isDebug) {
       await context.sendMessage(`❌ *Tool Error*    [${shortId}]`, errorMessage);
@@ -214,7 +211,7 @@ async function executeAndStoreTool({
  * }} params
  */
 async function processLlmResponse({ session, llmConfig, formattedMessages }) {
-  const { chatId, senderIds, enableMemory, context, addMessage, db } = session;
+  const { chatId, senderIds, context, addMessage } = session;
   const { llmClient, chatModel, systemPrompt, actions } = llmConfig;
   let depth = 0;
 
@@ -254,9 +251,8 @@ async function processLlmResponse({ session, llmConfig, formattedMessages }) {
     if (!responseMessage.tool_calls) {
       formattedMessages.push(responseMessage);
       const storedAssistant = await addMessage(chatId, assistantMessage, senderIds);
-      maybeEmbed(db, llmClient, storedAssistant.message_id, assistantMessage, enableMemory);
       if (depth === 0) {
-        storeLlmContext(db, storedAssistant.message_id, chatModel, systemPrompt, formattedMessages, actions);
+        storeLlmContext(getRootDb(), storedAssistant.message_id, chatModel, systemPrompt, formattedMessages, actions);
       }
       return;
     }
@@ -273,9 +269,8 @@ async function processLlmResponse({ session, llmConfig, formattedMessages }) {
     }
 
     const storedAssistantWithTools = await addMessage(chatId, assistantMessage, senderIds);
-    maybeEmbed(db, llmClient, storedAssistantWithTools.message_id, assistantMessage, enableMemory);
     if (depth === 0) {
-      storeLlmContext(db, storedAssistantWithTools.message_id, chatModel, systemPrompt, formattedMessages, actions);
+      storeLlmContext(getRootDb(), storedAssistantWithTools.message_id, chatModel, systemPrompt, formattedMessages, actions);
     }
     formattedMessages.push(responseMessage);
 
@@ -431,9 +426,7 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
     const message = {role: "user", content}
     const storedUserMsg = await addMessage(chatId, message, senderIds);
 
-    // Fire-and-forget: embed the message for long-term memory
     const enableMemory = !!chatInfo?.memory;
-    maybeEmbed(getRootDb(), llmClient, storedUserMsg.message_id, message, enableMemory);
 
     if (!willRespond) {
       return;
@@ -465,7 +458,8 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
       const currentText = extractTextFromMessage(message);
       if (currentText.length >= 10) {
         try {
-          const similar = await findSimilarMessages(getRootDb(), llmClient, chatId, currentText);
+          const threshold = chatInfo?.memory_threshold ?? config.memory_threshold;
+          const similar = await findSimilarMessages(getRootDb(), llmClient, chatId, currentText, { minSimilarity: threshold });
           if (similar.length > 0) {
             systemPrompt += "\n\n## Relevant past conversations\n" + formatMemoryContext(similar);
           }
@@ -480,8 +474,7 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
 
     /** @type {Session} */
     const session = {
-      chatId, senderIds, enableMemory, context,
-      addMessage, db: getRootDb(),
+      chatId, senderIds, context, addMessage,
     };
 
     /** @type {LlmConfig} */
@@ -491,6 +484,20 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
     };
 
     await processLlmResponse({ session, llmConfig, formattedMessages });
+
+    // Embed the full exchange for long-term memory
+    if (enableMemory) {
+      const recentMessages = await getMessages(chatId, 50);
+      const exchangeMessages = recentMessages
+        .filter(m => m.message_id >= storedUserMsg.message_id)
+        .sort((a, b) => a.message_id - b.message_id)
+        .map(m => m.message_data);
+      const lastAssistant = recentMessages.find(m => m.message_data.role === "assistant");
+      if (lastAssistant) {
+        const exchangeText = extractExchangeText(exchangeMessages);
+        maybeEmbed(getRootDb(), llmClient, lastAssistant.message_id, exchangeText, true);
+      }
+    }
   }
 
   return { handleMessage };

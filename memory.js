@@ -32,6 +32,22 @@ export function extractTextFromMessage(messageData) {
 }
 
 /**
+ * Build a single text representation of a full exchange (multiple messages).
+ * Works on our own Message[] type from DB message_data JSONB.
+ * @param {Message[]} messages
+ * @returns {string}
+ */
+export function extractExchangeText(messages) {
+  if (messages.length === 0) return "";
+
+  return messages.map(msg => {
+    const text = extractTextFromMessage(msg);
+    if (!text) return null;
+    return `${msg.role}: ${text}`;
+  }).filter(Boolean).join("\n");
+}
+
+/**
  * Generate an embedding vector for the given text.
  * @param {import("openai").default} llmClient
  * @param {string} text
@@ -53,49 +69,50 @@ export async function generateEmbedding(llmClient, text) {
 }
 
 /**
- * Store embedding and search_text for a message. Non-fatal on failure.
+ * Store embedding, search_text, and exchange_text for a message. Non-fatal on failure.
  * @param {PGlite} db
  * @param {import("openai").default} llmClient
  * @param {number} messageId
- * @param {Message} messageData
+ * @param {string} exchangeText
  */
-export async function storeMessageEmbedding(db, llmClient, messageId, messageData) {
+export async function storeExchangeEmbedding(db, llmClient, messageId, exchangeText) {
   try {
-    const text = extractTextFromMessage(messageData);
-    if (!text) return;
+    if (!exchangeText) return;
 
-    const embedding = await generateEmbedding(llmClient, text);
+    const embedding = await generateEmbedding(llmClient, exchangeText);
 
     if (embedding) {
       await db.sql`
         UPDATE messages
         SET embedding = ${JSON.stringify(embedding)}::vector,
-            search_text = to_tsvector('english', ${text})
+            search_text = to_tsvector('english', ${exchangeText}),
+            exchange_text = ${exchangeText}
         WHERE message_id = ${messageId}
       `;
     } else {
       await db.sql`
         UPDATE messages
-        SET search_text = to_tsvector('english', ${text})
+        SET search_text = to_tsvector('english', ${exchangeText}),
+            exchange_text = ${exchangeText}
         WHERE message_id = ${messageId}
       `;
     }
   } catch (err) {
-    console.error("storeMessageEmbedding failed:", err);
+    console.error("storeExchangeEmbedding failed:", err);
   }
 }
 
 /**
- * Fire-and-forget wrapper: embed a message if memory is enabled.
+ * Fire-and-forget wrapper: embed an exchange if memory is enabled.
  * @param {PGlite} db
  * @param {import("openai").default | undefined} llmClient
  * @param {number} messageId
- * @param {Message} messageData
+ * @param {string} exchangeText
  * @param {boolean} [enabled]
  */
-export function maybeEmbed(db, llmClient, messageId, messageData, enabled) {
+export function maybeEmbed(db, llmClient, messageId, exchangeText, enabled) {
   if (!enabled || !llmClient) return;
-  storeMessageEmbedding(db, llmClient, messageId, messageData)
+  storeExchangeEmbedding(db, llmClient, messageId, exchangeText)
     .catch(err => console.error("Embedding failed:", err));
 }
 
@@ -105,6 +122,7 @@ export function maybeEmbed(db, llmClient, messageId, messageData, enabled) {
  *   chat_id: string;
  *   sender_id: string;
  *   message_data: Message;
+ *   exchange_text: string | null;
  *   timestamp: Date;
  *   similarity: number;
  * }} SimilarMessage
@@ -136,7 +154,7 @@ export async function findSimilarMessages(db, llmClient, chatId, queryText, opti
   if (queryEmbedding) {
     const embeddingStr = JSON.stringify(queryEmbedding);
     const { rows } = await db.sql`
-      SELECT message_id, chat_id, sender_id, message_data, timestamp,
+      SELECT message_id, chat_id, sender_id, message_data, exchange_text, timestamp,
         1 - (embedding <=> ${embeddingStr}::vector) AS similarity
       FROM messages
       WHERE chat_id = ${chatId} AND cleared_at IS NULL AND embedding IS NOT NULL
@@ -175,7 +193,7 @@ async function fullTextSearch(db, chatId, queryText, limit, excludeRecent) {
   if (!tsquery) return [];
 
   const { rows } = await db.sql`
-    SELECT message_id, chat_id, sender_id, message_data, timestamp,
+    SELECT message_id, chat_id, sender_id, message_data, exchange_text, timestamp,
       ts_rank(search_text, to_tsquery('english', ${tsquery})) AS similarity
     FROM messages
     WHERE chat_id = ${chatId} AND cleared_at IS NULL AND search_text IS NOT NULL
@@ -192,7 +210,7 @@ async function fullTextSearch(db, chatId, queryText, limit, excludeRecent) {
   return /** @type {SimilarMessage[]} */ (rows);
 }
 
-const MAX_MESSAGE_LENGTH = 500;
+const MAX_EXCHANGE_LENGTH = 2000;
 
 /**
  * Format retrieved similar messages into a readable string for system prompt injection.
@@ -203,13 +221,13 @@ export function formatMemoryContext(results) {
   if (results.length === 0) return "";
 
   return results.map(r => {
-    const text = extractTextFromMessage(r.message_data);
-    const truncated = text.length > MAX_MESSAGE_LENGTH
-      ? text.slice(0, MAX_MESSAGE_LENGTH) + "…"
+    const text = r.exchange_text || extractTextFromMessage(r.message_data);
+    const truncated = text.length > MAX_EXCHANGE_LENGTH
+      ? text.slice(0, MAX_EXCHANGE_LENGTH) + "…"
       : text;
     const time = r.timestamp instanceof Date
       ? r.timestamp.toISOString().slice(0, 16).replace("T", " ")
       : String(r.timestamp).slice(0, 16);
-    return `[${time}] ${r.message_data.role}: ${truncated}`;
-  }).join("\n");
+    return `[${time}]\n${truncated}`;
+  }).join("\n---\n");
 }
