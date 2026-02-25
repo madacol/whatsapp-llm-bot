@@ -331,6 +331,10 @@ async function adaptIncomingMessage(baileysMessage, sock, messageHandler) {
       });
     },
 
+    sendImage: async (image, caption) => {
+      await sock.sendMessage(chatId, { image, ...(caption && { caption }) });
+    },
+
     confirm: createConfirm(sock, chatId),
 
     // Bot info

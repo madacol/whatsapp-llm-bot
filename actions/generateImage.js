@@ -1,0 +1,262 @@
+import assert from "node:assert/strict";
+import config from "../config.js";
+
+/**
+ * Parse a data URL into its mime type and raw Buffer.
+ * @param {string} dataUrl - e.g. "data:image/png;base64,iVBOR..."
+ * @returns {{ mime_type: string, buffer: Buffer }}
+ */
+function parseDataUrl(dataUrl) {
+  const match = dataUrl.match(/^data:([^;]+);base64,(.+)$/);
+  if (!match) throw new Error("Invalid data URL");
+  return { mime_type: match[1], buffer: Buffer.from(match[2], "base64") };
+}
+
+/**
+ * Build the user message parts from prompt text and optional input images.
+ * @param {string} prompt
+ * @param {IncomingContentBlock[]} content
+ * @returns {Array<{type: string, text?: string, image_url?: {url: string}}>}
+ */
+function buildUserParts(prompt, content) {
+  /** @type {Array<{type: string, text?: string, image_url?: {url: string}}>} */
+  const parts = [{ type: "text", text: prompt }];
+
+  for (const block of content) {
+    if (block.type === "image") {
+      parts.push({
+        type: "image_url",
+        image_url: { url: `data:${block.mime_type};base64,${block.data}` },
+      });
+    }
+  }
+
+  return parts;
+}
+
+export default /** @type {defineAction} */ ((x) => x)({
+  name: "generate_image",
+  command: "imagine",
+  description:
+    "Generate or edit images using AI. Provide a text prompt to generate an image, or include an image in the message to edit it.",
+  parameters: {
+    type: "object",
+    properties: {
+      prompt: {
+        type: "string",
+        description: "Text description of the image to generate, or editing instructions if an input image is provided",
+      },
+    },
+    required: ["prompt"],
+  },
+  permissions: {
+    autoExecute: true,
+    autoContinue: false,
+  },
+  test_functions: [
+    async function test_generates_image_from_prompt(action_fn) {
+      const originalFetch = globalThis.fetch;
+      /** @type {Array<{image: Buffer, caption?: string}>} */
+      const sentImages = [];
+      try {
+        globalThis.fetch = /** @type {typeof fetch} */ (/** @type {unknown} */ (async () => ({
+          ok: true,
+          json: async () => ({
+            choices: [{
+              message: {
+                role: "assistant",
+                content: "A beautiful sunset",
+                images: [{
+                  type: "image_url",
+                  image_url: { url: "data:image/png;base64,iVBORw0KGgo=" },
+                }],
+              },
+            }],
+          }),
+        })));
+
+        const result = await action_fn(
+          {
+            content: [{ type: "text", text: "a sunset" }],
+            sendImage: async (/** @type {Buffer} */ image, /** @type {string | undefined} */ caption) => {
+              sentImages.push({ image, caption });
+            },
+            log: async () => "",
+          },
+          { prompt: "a sunset" },
+        );
+
+        assert.equal(sentImages.length, 1);
+        assert.ok(Buffer.isBuffer(sentImages[0].image));
+        assert.equal(sentImages[0].caption, "A beautiful sunset");
+        assert.ok(typeof result === "string");
+        assert.ok(result.includes("1 image"));
+      } finally {
+        globalThis.fetch = originalFetch;
+      }
+    },
+
+    async function test_passes_input_images_for_editing(action_fn) {
+      const originalFetch = globalThis.fetch;
+      /** @type {unknown} */
+      let capturedBody;
+      /** @type {Array<{image: Buffer, caption?: string}>} */
+      const sentImages = [];
+      try {
+        globalThis.fetch = /** @type {typeof fetch} */ (/** @type {unknown} */ (async (/** @type {string} */ _url, /** @type {RequestInit} */ init) => {
+          capturedBody = JSON.parse(/** @type {string} */ (init.body));
+          return {
+            ok: true,
+            json: async () => ({
+              choices: [{
+                message: {
+                  role: "assistant",
+                  content: "Edited image",
+                  images: [{
+                    type: "image_url",
+                    image_url: { url: "data:image/png;base64,AAAA" },
+                  }],
+                },
+              }],
+            }),
+          };
+        }));
+
+        await action_fn(
+          {
+            content: [
+              { type: "text", text: "make it blue" },
+              { type: "image", encoding: "base64", mime_type: "image/jpeg", data: "abc123" },
+            ],
+            sendImage: async (/** @type {Buffer} */ image, /** @type {string | undefined} */ caption) => {
+              sentImages.push({ image, caption });
+            },
+            log: async () => "",
+          },
+          { prompt: "make it blue" },
+        );
+
+        // Check that the input image was included in the request
+        const body = /** @type {{messages: Array<{content: Array<{type: string, image_url?: {url: string}}>}>}} */ (capturedBody);
+        const userContent = body.messages[0].content;
+        const imagepart = userContent.find((/** @type {{type: string}} */ p) => p.type === "image_url");
+        assert.ok(imagepart, "Request should include input image");
+        assert.ok(sentImages.length === 1);
+      } finally {
+        globalThis.fetch = originalFetch;
+      }
+    },
+
+    async function test_handles_api_error(action_fn) {
+      const originalFetch = globalThis.fetch;
+      try {
+        globalThis.fetch = /** @type {typeof fetch} */ (/** @type {unknown} */ (async () => ({
+          ok: false,
+          status: 500,
+          text: async () => "Internal Server Error",
+        })));
+
+        const result = await action_fn(
+          {
+            content: [{ type: "text", text: "test" }],
+            sendImage: async () => {},
+            log: async () => "",
+          },
+          { prompt: "test" },
+        );
+
+        assert.ok(typeof result === "string");
+        assert.ok(result.includes("500"));
+      } finally {
+        globalThis.fetch = originalFetch;
+      }
+    },
+
+    async function test_handles_response_with_no_images(action_fn) {
+      const originalFetch = globalThis.fetch;
+      try {
+        globalThis.fetch = /** @type {typeof fetch} */ (/** @type {unknown} */ (async () => ({
+          ok: true,
+          json: async () => ({
+            choices: [{
+              message: {
+                role: "assistant",
+                content: "I cannot generate that image",
+              },
+            }],
+          }),
+        })));
+
+        const result = await action_fn(
+          {
+            content: [{ type: "text", text: "test" }],
+            sendImage: async () => {},
+            log: async () => "",
+          },
+          { prompt: "test" },
+        );
+
+        assert.ok(typeof result === "string");
+        assert.ok(result.includes("I cannot generate that image"));
+      } finally {
+        globalThis.fetch = originalFetch;
+      }
+    },
+  ],
+  /**
+   * @param {ActionContext} context
+   * @param {{ prompt: string }} params
+   */
+  action_fn: async function (context, params) {
+    const apiKey = config.llm_api_key;
+    const baseUrl = config.base_url;
+    if (!apiKey || !baseUrl) {
+      return "Error: LLM_API_KEY and BASE_URL must be configured.";
+    }
+
+    await context.log(`Generating image: ${params.prompt}`);
+
+    const userParts = buildUserParts(params.prompt, context.content);
+
+    const url = `${baseUrl.replace(/\/$/, "")}/chat/completions`;
+    const response = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: config.image_model,
+        messages: [{ role: "user", content: userParts }],
+        modalities: ["image", "text"],
+      }),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      return `Error: Image API returned status ${response.status}: ${errorText}`;
+    }
+
+    /** @type {{choices: Array<{message: {content?: string, images?: Array<{type: string, image_url: {url: string}}>}}>}} */
+    const data = await response.json();
+    const message = data.choices[0]?.message;
+
+    if (!message) {
+      return "Error: No response from image model.";
+    }
+
+    const images = message.images ?? [];
+    const textContent = message.content || "";
+
+    if (images.length === 0) {
+      return textContent || "The model did not generate any images.";
+    }
+
+    for (const img of images) {
+      const { buffer } = parseDataUrl(img.image_url.url);
+      await context.sendImage(buffer, textContent || undefined);
+    }
+
+    return `Generated ${images.length} image${images.length > 1 ? "s" : ""}.`;
+  },
+});

@@ -85,6 +85,7 @@ type IncomingContext = {
   replyToMessage: (text: string) => Promise<void>;
   reactToMessage: (emoji: string) => Promise<void>;
   sendPoll: (name: string, options: string[], selectableCount?: number) => Promise<void>;
+  sendImage: (image: Buffer, caption?: string) => Promise<void>;
   confirm: (message: string) => Promise<boolean>;
 
   // Bot info
@@ -103,6 +104,7 @@ type Context = {
   reply: (header: string, message?: string) => Promise<void>;
   reactToMessage: (emoji: string) => Promise<void>;
   sendPoll: (name: string, options: string[], selectableCount?: number) => Promise<void>;
+  sendImage: (image: Buffer, caption?: string) => Promise<void>;
   confirm: (message: string) => Promise<boolean>;
 };
 
@@ -122,6 +124,7 @@ type ActionContext = {
   reply: (message: string) => Promise<void>; // Header already baked in
   reactToMessage: (emoji: string) => Promise<void>;
   sendPoll: (name: string, options: string[], selectableCount?: number) => Promise<void>;
+  sendImage: (image: Buffer, caption?: string) => Promise<void>;
   confirm: (message: string) => Promise<boolean>;
 };
 

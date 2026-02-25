@@ -67,6 +67,7 @@ export async function executeAction(
     },
     reactToMessage: context.reactToMessage,
     sendPoll: context.sendPoll,
+    sendImage: context.sendImage,
     confirm: context.confirm,
   };
 

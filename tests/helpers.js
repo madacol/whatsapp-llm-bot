@@ -55,6 +55,9 @@ export function createIncomingContext(overrides = {}) {
     sendPoll: async (name, options, selectableCount) => {
       responses.push({ type: "sendPoll", text: JSON.stringify({ name, options, selectableCount }) });
     },
+    sendImage: async (_image, caption) => {
+      responses.push({ type: "sendImage", text: caption || "" });
+    },
     confirm: async (message) => {
       responses.push({ type: "confirm", text: message });
       return true;
