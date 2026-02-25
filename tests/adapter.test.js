@@ -149,7 +149,9 @@ describe("getMessageContent", () => {
     assert.equal(quotedSenderId, "12345");
   });
 
-  it("emits quote block for media-only quoted message (no text)", async () => {
+  it("downloads quoted image into quote block", async () => {
+    const fakeBuffer = Buffer.from("fake-image-data");
+    const mockDownload = async () => fakeBuffer;
     const msg = /** @type {Partial<BaileysMessage>} */ ({
       message: {
         extendedTextMessage: {
@@ -163,12 +165,91 @@ describe("getMessageContent", () => {
         },
       },
     });
-    const { content, quotedSenderId } = await getMessageContent(msg);
+    const { content, quotedSenderId } = await getMessageContent(msg, mockDownload);
 
-    const quote = content.find(b => b.type === "quote");
-    assert.ok(quote, "Should have quote block even without text");
-    assert.equal(/** @type {QuoteContentBlock} */ (quote).quotedSenderId, "555");
+    const quote = /** @type {QuoteContentBlock} */ (content.find(b => b.type === "quote"));
+    assert.ok(quote, "Should have quote block");
+    assert.equal(quote.quotedSenderId, "555");
     assert.equal(quotedSenderId, "555");
+    assert.ok(
+      quote.content.some(b => b.type === "image"),
+      "Quote content should contain image block",
+    );
+    const imageBlock = /** @type {ImageContentBlock} */ (quote.content.find(b => b.type === "image"));
+    assert.equal(imageBlock.mime_type, "image/jpeg");
+    assert.equal(imageBlock.data, fakeBuffer.toString("base64"));
+  });
+
+  it("downloads quoted video into quote block", async () => {
+    const fakeBuffer = Buffer.from("fake-video-data");
+    const mockDownload = async () => fakeBuffer;
+    const msg = /** @type {Partial<BaileysMessage>} */ ({
+      message: {
+        extendedTextMessage: {
+          text: "nice video",
+          contextInfo: {
+            quotedMessage: {
+              videoMessage: { mimetype: "video/mp4", url: "https://example.com/vid" },
+            },
+          },
+        },
+      },
+    });
+    const { content } = await getMessageContent(msg, mockDownload);
+
+    const quote = /** @type {QuoteContentBlock} */ (content.find(b => b.type === "quote"));
+    assert.ok(quote, "Should have quote block");
+    const videoBlock = /** @type {VideoContentBlock} */ (quote.content.find(b => b.type === "video"));
+    assert.ok(videoBlock, "Quote should contain video block");
+    assert.equal(videoBlock.mime_type, "video/mp4");
+  });
+
+  it("downloads quoted audio into quote block", async () => {
+    const fakeBuffer = Buffer.from("fake-audio-data");
+    const mockDownload = async () => fakeBuffer;
+    const msg = /** @type {Partial<BaileysMessage>} */ ({
+      message: {
+        extendedTextMessage: {
+          text: "what did you say?",
+          contextInfo: {
+            quotedMessage: {
+              audioMessage: { mimetype: "audio/ogg", url: "https://example.com/aud" },
+            },
+          },
+        },
+      },
+    });
+    const { content } = await getMessageContent(msg, mockDownload);
+
+    const quote = /** @type {QuoteContentBlock} */ (content.find(b => b.type === "quote"));
+    assert.ok(quote, "Should have quote block");
+    const audioBlock = /** @type {AudioContentBlock} */ (quote.content.find(b => b.type === "audio"));
+    assert.ok(audioBlock, "Quote should contain audio block");
+    assert.equal(audioBlock.mime_type, "audio/ogg");
+  });
+
+  it("falls back to text placeholder when quoted media download fails", async () => {
+    const mockDownload = async () => { throw new Error("download failed"); };
+    const msg = /** @type {Partial<BaileysMessage>} */ ({
+      message: {
+        extendedTextMessage: {
+          text: "What's this?",
+          contextInfo: {
+            quotedMessage: {
+              imageMessage: { mimetype: "image/jpeg", url: "https://example.com/img" },
+            },
+          },
+        },
+      },
+    });
+    const { content } = await getMessageContent(msg, mockDownload);
+
+    const quote = /** @type {QuoteContentBlock} */ (content.find(b => b.type === "quote"));
+    assert.ok(quote, "Should have quote block");
+    assert.ok(
+      quote.content.some(b => b.type === "text" && /** @type {TextContentBlock} */ (b).text === "[Quoted image]"),
+      "Should fall back to text placeholder",
+    );
   });
 
   it("returns undefined quotedSenderId when no quote", async () => {
