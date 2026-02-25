@@ -120,16 +120,21 @@ function createConfirm(sock, chatId) {
 }
 
 /**
+ * @typedef {(msg: BaileysMessage, type: "buffer", opts: {}) => Promise<Buffer>} DownloadMediaFn
+ */
+
+/**
  * Download media from a Baileys message and return content blocks.
  * @param {BaileysMessage} baileysMessage
  * @param {{ mimetype?: string | null, caption?: string | null }} mediaMessage
  * @param {"image" | "video" | "audio"} type
+ * @param {DownloadMediaFn} downloadFn
  * @returns {Promise<IncomingContentBlock[]>}
  */
-async function downloadMediaToBlocks(baileysMessage, mediaMessage, type) {
+async function downloadMediaToBlocks(baileysMessage, mediaMessage, type, downloadFn) {
   /** @type {IncomingContentBlock[]} */
   const blocks = [];
-  const buffer = await downloadMediaMessage(baileysMessage, "buffer", {});
+  const buffer = await downloadFn(baileysMessage, "buffer", {});
   const base64Data = buffer.toString("base64");
   const mimetype = mediaMessage.mimetype;
 
@@ -153,9 +158,10 @@ async function downloadMediaToBlocks(baileysMessage, mediaMessage, type) {
 
 /**
  * @param {BaileysMessage} baileysMessage
+ * @param {DownloadMediaFn} [downloadFn]
  * @returns {Promise<{ content: IncomingContentBlock[], quotedSenderId: string | undefined }>}
  */
-export async function getMessageContent(baileysMessage) {
+export async function getMessageContent(baileysMessage, downloadFn = downloadMediaMessage) {
   /** @type {IncomingContentBlock[]} */
   const content = [];
   /** @type {string | undefined} */
@@ -196,6 +202,26 @@ export async function getMessageContent(baileysMessage) {
       )
     }
 
+    // Download quoted media (image/video/audio)
+    const quotedImage = quotedMessage.imageMessage;
+    const quotedVideo = quotedMessage.videoMessage || quotedMessage.ptvMessage;
+    const quotedAudio = quotedMessage.audioMessage;
+    const quotedMedia = quotedImage || quotedVideo || quotedAudio;
+
+    if (quotedMedia) {
+      const mediaType = quotedImage ? "image" : quotedAudio ? "audio" : "video";
+      try {
+        const fakeMsg = /** @type {BaileysMessage} */ ({ message: quotedMessage });
+        const mediaBlocks = await downloadMediaToBlocks(fakeMsg, quotedMedia, mediaType, downloadFn);
+        quote.content.push(...mediaBlocks);
+      } catch {
+        quote.content.push(/** @type {TextContentBlock} */ ({
+          type: "text",
+          text: `[Quoted ${mediaType}]`,
+        }));
+      }
+    }
+
     content.push(quote);
   }
 
@@ -209,15 +235,15 @@ export async function getMessageContent(baileysMessage) {
     || baileysMessage.message?.documentMessage?.caption
 
   if (imageMessage) {
-    content.push(...await downloadMediaToBlocks(baileysMessage, imageMessage, "image"));
+    content.push(...await downloadMediaToBlocks(baileysMessage, imageMessage, "image", downloadFn));
   }
 
   if (videoMessage) {
-    content.push(...await downloadMediaToBlocks(baileysMessage, videoMessage, "video"));
+    content.push(...await downloadMediaToBlocks(baileysMessage, videoMessage, "video", downloadFn));
   }
 
   if (audioMessage) {
-    content.push(...await downloadMediaToBlocks(baileysMessage, audioMessage, "audio"));
+    content.push(...await downloadMediaToBlocks(baileysMessage, audioMessage, "audio", downloadFn));
   }
 
   if (textMessage) {
