@@ -187,13 +187,13 @@ export default /** @type {defineAction} */ ((x) => x)({
     await context.log(`Found ${models.length} models matching criteria`);
 
     let table = modality
-      ? "*IN* | *OUT* | *CTX* | *MODALITIES* | *MODEL* | *ID*\n"
+      ? "*IN* | *OUT* | *CTX* | *MODEL* | *ID* | *MODALITIES*\n"
       : "*IN* | *OUT* | *CTX* | *MODEL* | *ID*\n";
     table += "------------------------------------------------------------\n";
     for (const model of models) {
       if (modality) {
         const mods = model.modalities.filter(m => m !== "text").join(", ");
-        table += `• $${model.inputPrice.toFixed(2)} | $${model.outputPrice.toFixed(2)} | ${model.contextDisplay} | ${mods} | *${model.name}* | \`${model.id}\`\n`;
+        table += `• $${model.inputPrice.toFixed(2)} | $${model.outputPrice.toFixed(2)} | ${model.contextDisplay} | *${model.name}* | \`${model.id}\` | ${mods}\n`;
       } else {
         table += `• $${model.inputPrice.toFixed(2)} | $${model.outputPrice.toFixed(2)} | ${model.contextDisplay} | *${model.name}* | \`${model.id}\`\n`;
       }
