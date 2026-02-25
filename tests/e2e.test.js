@@ -116,10 +116,10 @@ describe("Scenario 1: Enable/disable chat flow", () => {
     await seedChat(chatId);
   });
 
-  it("master user enables chat with !set enabled true", async () => {
+  it("master user enables chat with !config enabled true", async () => {
     const { context, responses } = createIncomingContext({
       chatId,
-      content: [{ type: "text", text: "!set enabled true" }],
+      content: [{ type: "text", text: "!config enabled true" }],
     });
     await handleMessage(context);
 
@@ -146,10 +146,10 @@ describe("Scenario 1: Enable/disable chat flow", () => {
     );
   });
 
-  it("master user disables chat with !set enabled false", async () => {
+  it("master user disables chat with !config enabled false", async () => {
     const { context, responses } = createIncomingContext({
       chatId,
-      content: [{ type: "text", text: "!set enabled false" }],
+      content: [{ type: "text", text: "!config enabled false" }],
     });
     await handleMessage(context);
 
@@ -181,11 +181,11 @@ describe("Scenario 2: Non-master cannot enable/disable", () => {
     await seedChat(chatId);
   });
 
-  it("rejects !set enabled from non-master user", async () => {
+  it("rejects !config enabled from non-master user", async () => {
     const { context, responses } = createIncomingContext({
       chatId,
       senderIds: ["non-master-user"],
-      content: [{ type: "text", text: "!set enabled true" }],
+      content: [{ type: "text", text: "!config enabled true" }],
     });
     await handleMessage(context);
 
@@ -226,10 +226,10 @@ describe("Scenario 4: Set and get system prompt", () => {
     await seedChat(chatId, { enabled: true });
   });
 
-  it("sets system prompt with !set system_prompt", async () => {
+  it("sets system prompt with !config system_prompt", async () => {
     const { context, responses } = createIncomingContext({
       chatId,
-      content: [{ type: "text", text: "!set system_prompt pirate" }],
+      content: [{ type: "text", text: "!config system_prompt pirate" }],
     });
     await handleMessage(context);
 
@@ -240,10 +240,10 @@ describe("Scenario 4: Set and get system prompt", () => {
     );
   });
 
-  it("retrieves system prompt with !set system_prompt (no value)", async () => {
+  it("retrieves system prompt with !config system_prompt (no value)", async () => {
     const { context, responses } = createIncomingContext({
       chatId,
-      content: [{ type: "text", text: "!set system_prompt" }],
+      content: [{ type: "text", text: "!config system_prompt" }],
     });
     await handleMessage(context);
 
@@ -270,10 +270,10 @@ describe("Scenario 5: Set and get model", () => {
     ]));
   });
 
-  it("sets model with !set model", async () => {
+  it("sets model with !config model", async () => {
     const { context, responses } = createIncomingContext({
       chatId,
-      content: [{ type: "text", text: "!set model gpt-4.1-mini" }],
+      content: [{ type: "text", text: "!config model gpt-4.1-mini" }],
     });
     await handleMessage(context);
 

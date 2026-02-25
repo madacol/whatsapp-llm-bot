@@ -154,7 +154,7 @@ async function setSetting(rootDb, chatId, setting, value) {
 
 export default /** @type {defineAction} */ ((x) => x)({
   name: "chat_settings",
-  command: "set",
+  command: "config",
   description:
     "Get or set chat settings. Available settings: model, system_prompt, memory, memory_threshold, respond_on, content_model_image, content_model_audio, content_model_video. Omit value to see current setting.",
   parameters: {

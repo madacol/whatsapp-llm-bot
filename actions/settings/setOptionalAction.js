@@ -3,7 +3,7 @@ import { getChatOrThrow } from "../../store.js";
 
 export default /** @type {defineAction} */ ((x) => x)({
   name: "set_optional_action",
-  command: "set action",
+  command: "config action",
   description: "Enable or disable an optional (opt-in) action for this chat.",
   parameters: {
     type: "object",
