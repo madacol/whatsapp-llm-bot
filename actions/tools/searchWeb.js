@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import config from "../config.js";
+import config from "../../config.js";
 
 export default /** @type {defineAction} */ ((x) => x)({
   name: "search_web",

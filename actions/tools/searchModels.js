@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { getCachedModels } from "../models-cache.js";
+import { getCachedModels } from "../../models-cache.js";
 
 export default /** @type {defineAction} */ ((x) => x)({
   name: "search_models",
@@ -32,7 +32,7 @@ export default /** @type {defineAction} */ ((x) => x)({
       const cachePath = path.resolve("data/models.json");
 
       // Write a fake cache file for the test
-      /** @type {import("../models-cache.js").OpenRouterModel[]} */
+      /** @type {import("../../models-cache.js").OpenRouterModel[]} */
       const fakeModels = [
         {
           id: "openai/gpt-4o",
@@ -66,7 +66,7 @@ export default /** @type {defineAction} */ ((x) => x)({
       const path = await import("node:path");
       const cachePath = path.resolve("data/models.json");
 
-      /** @type {import("../models-cache.js").OpenRouterModel[]} */
+      /** @type {import("../../models-cache.js").OpenRouterModel[]} */
       const fakeModels = [
         {
           id: "openai/gpt-4o",

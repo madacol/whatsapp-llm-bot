@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import config from "../config.js";
+import config from "../../config.js";
 
 /**
  * Parse a data URL into its mime type and raw Buffer.

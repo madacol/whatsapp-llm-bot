@@ -17,7 +17,7 @@ export async function ensureSchema(db) {
   `;
 }
 
-import { formatTime } from "../utils.js";
+import { formatTime } from "../../utils.js";
 
 export default /** @type {defineAction} */ ((x) => x)({
   name: "set_reminder",
