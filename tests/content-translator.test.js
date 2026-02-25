@@ -434,6 +434,105 @@ describe("content-translator", () => {
       }
     });
 
+    it("includes conversation context in translation prompt", async () => {
+      const { translateUnsupportedContent } = await import(
+        "../content-translator.js"
+      );
+
+      const fs = await import("node:fs/promises");
+      const path = await import("node:path");
+      const cachePath = path.resolve("data/models.json");
+      await fs.mkdir(path.dirname(cachePath), { recursive: true });
+      await fs.writeFile(
+        cachePath,
+        JSON.stringify([
+          {
+            id: "text-only/model",
+            name: "Text Only",
+            context_length: 4096,
+            pricing: { prompt: "0.000001", completion: "0.000001" },
+            architecture: { input_modalities: ["text"] },
+          },
+          {
+            id: "vision/model",
+            name: "Vision",
+            context_length: 4096,
+            pricing: { prompt: "0.000001", completion: "0.000001" },
+            architecture: { input_modalities: ["text", "image"] },
+          },
+        ]),
+      );
+
+      mockServer.addResponses("The receipt shows milk at €1.50");
+
+      try {
+        /** @type {MessageRow[]} */
+        const messages = [
+          {
+            message_id: 1,
+            chat_id: "test",
+            sender_id: "user1",
+            message_data: {
+              role: "user",
+              content: [{ type: "text", text: "hola que tal" }],
+            },
+            timestamp: new Date(),
+          },
+          {
+            message_id: 2,
+            chat_id: "test",
+            sender_id: "assistant",
+            message_data: {
+              role: "assistant",
+              content: [{ type: "text", text: "Hola! Todo bien, y tu?" }],
+            },
+            timestamp: new Date(),
+          },
+          {
+            message_id: 3,
+            chat_id: "test",
+            sender_id: "user1",
+            message_data: {
+              role: "user",
+              content: [
+                { type: "text", text: "how much did I spend on milk?" },
+                {
+                  type: "image",
+                  encoding: "base64",
+                  mime_type: "image/png",
+                  data: "receiptdata",
+                },
+              ],
+            },
+            timestamp: new Date(),
+          },
+        ];
+
+        const requestsBefore = mockServer.getRequests().length;
+        await translateUnsupportedContent(
+          messages,
+          "text-only/model",
+          { image: "vision/model" },
+          llmClient,
+          db,
+        );
+
+        // Check the LLM request included conversation context
+        const translationRequest = mockServer.getRequests()[requestsBefore];
+        const reqMessages = translationRequest.messages;
+
+        // Should have context messages before the translation prompt
+        assert.ok(reqMessages.length > 1, `Should include context, got ${reqMessages.length} messages`);
+
+        // Prior conversation should appear as context
+        const allText = JSON.stringify(reqMessages);
+        assert.ok(allText.includes("hola que tal"), "Should include prior user message");
+        assert.ok(allText.includes("how much did I spend on milk"), "Should include current user text");
+      } finally {
+        await fs.rm(cachePath, { force: true });
+      }
+    });
+
     it("leaves assistant and tool messages untouched", async () => {
       const { translateUnsupportedContent } = await import(
         "../content-translator.js"
