@@ -28,6 +28,15 @@ function buildUserParts(prompt, content) {
         type: "image_url",
         image_url: { url: `data:${block.mime_type};base64,${block.data}` },
       });
+    } else if (block.type === "quote") {
+      for (const inner of block.content) {
+        if (inner.type === "image") {
+          parts.push({
+            type: "image_url",
+            image_url: { url: `data:${inner.mime_type};base64,${inner.data}` },
+          });
+        }
+      }
     }
   }
 
@@ -145,6 +154,59 @@ export default /** @type {defineAction} */ ((x) => x)({
         const userContent = body.messages[0].content;
         const imagepart = userContent.find((/** @type {{type: string}} */ p) => p.type === "image_url");
         assert.ok(imagepart, "Request should include input image");
+        assert.ok(sentImages.length === 1);
+      } finally {
+        globalThis.fetch = originalFetch;
+      }
+    },
+
+    async function test_passes_quoted_images_for_editing(action_fn) {
+      const originalFetch = globalThis.fetch;
+      /** @type {unknown} */
+      let capturedBody;
+      /** @type {Array<{image: Buffer, caption?: string}>} */
+      const sentImages = [];
+      try {
+        globalThis.fetch = /** @type {typeof fetch} */ (/** @type {unknown} */ (async (/** @type {string} */ _url, /** @type {RequestInit} */ init) => {
+          capturedBody = JSON.parse(/** @type {string} */ (init.body));
+          return {
+            ok: true,
+            json: async () => ({
+              choices: [{
+                message: {
+                  role: "assistant",
+                  content: "Edited image",
+                  images: [{
+                    type: "image_url",
+                    image_url: { url: "data:image/png;base64,AAAA" },
+                  }],
+                },
+              }],
+            }),
+          };
+        }));
+
+        await action_fn(
+          {
+            content: [
+              { type: "text", text: "make it blue" },
+              { type: "quote", content: [
+                { type: "image", encoding: "base64", mime_type: "image/jpeg", data: "quoted-img-data" },
+              ]},
+            ],
+            sendImage: async (/** @type {Buffer} */ image, /** @type {string | undefined} */ caption) => {
+              sentImages.push({ image, caption });
+            },
+            log: async () => "",
+          },
+          { prompt: "make it blue" },
+        );
+
+        const body = /** @type {{messages: Array<{content: Array<{type: string, image_url?: {url: string}}>}>}} */ (capturedBody);
+        const userContent = body.messages[0].content;
+        const imagePart = userContent.find((/** @type {{type: string}} */ p) => p.type === "image_url");
+        assert.ok(imagePart, "Request should include quoted image");
+        assert.ok(/** @type {{image_url: {url: string}}} */ (imagePart).image_url.url.includes("quoted-img-data"));
         assert.ok(sentImages.length === 1);
       } finally {
         globalThis.fetch = originalFetch;
