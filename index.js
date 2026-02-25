@@ -145,7 +145,7 @@ async function executeAndStoreTool({
         : JSON.stringify(functionResponse.result)}],
     };
     const storedToolMsg = await addMessage(chatId, toolMessage, senderIds);
-    if (actionLlmClient) {
+    if (config.enable_memory && actionLlmClient) {
       storeMessageEmbedding(getRootDb(), actionLlmClient, storedToolMsg.message_id, toolMessage)
         .catch(err => console.error("Embedding failed:", err));
     }
@@ -173,7 +173,7 @@ async function executeAndStoreTool({
       content: [{type: "text", text: errorMessage}],
     };
     const storedToolError = await addMessage(chatId, toolError, senderIds);
-    if (actionLlmClient) {
+    if (config.enable_memory && actionLlmClient) {
       storeMessageEmbedding(getRootDb(), actionLlmClient, storedToolError.message_id, toolError)
         .catch(err => console.error("Embedding failed:", err));
     }
@@ -253,8 +253,10 @@ async function processLlmResponse({
     if (!responseMessage.tool_calls) {
       formattedMessages.push(responseMessage);
       const storedAssistant = await addMessage(chatId, assistantMessage, senderIds);
-      storeMessageEmbedding(getRootDb(), llmClient, storedAssistant.message_id, assistantMessage)
-        .catch(err => console.error("Embedding failed:", err));
+      if (config.enable_memory) {
+        storeMessageEmbedding(getRootDb(), llmClient, storedAssistant.message_id, assistantMessage)
+          .catch(err => console.error("Embedding failed:", err));
+      }
       return;
     }
 
@@ -270,8 +272,10 @@ async function processLlmResponse({
     }
 
     const storedAssistantWithTools = await addMessage(chatId, assistantMessage, senderIds);
-    storeMessageEmbedding(getRootDb(), llmClient, storedAssistantWithTools.message_id, assistantMessage)
-      .catch(err => console.error("Embedding failed:", err));
+    if (config.enable_memory) {
+      storeMessageEmbedding(getRootDb(), llmClient, storedAssistantWithTools.message_id, assistantMessage)
+        .catch(err => console.error("Embedding failed:", err));
+    }
     formattedMessages.push(responseMessage);
 
     // Execute each tool call
@@ -428,8 +432,10 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
     const storedUserMsg = await addMessage(chatId, message, senderIds);
 
     // Fire-and-forget: embed the message for long-term memory
-    storeMessageEmbedding(getRootDb(), llmClient, storedUserMsg.message_id, message)
-      .catch(err => console.error("Embedding failed:", err));
+    if (config.enable_memory) {
+      storeMessageEmbedding(getRootDb(), llmClient, storedUserMsg.message_id, message)
+        .catch(err => console.error("Embedding failed:", err));
+    }
 
     if (!willRespond) {
       return;
@@ -457,15 +463,17 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
     }
 
     // Search long-term memory for relevant past conversations
-    const currentText = extractTextFromMessage(message);
-    if (currentText.length >= 10) {
-      try {
-        const similar = await findSimilarMessages(getRootDb(), llmClient, chatId, currentText);
-        if (similar.length > 0) {
-          systemPrompt += "\n\n## Relevant past conversations\n" + formatMemoryContext(similar);
+    if (config.enable_memory) {
+      const currentText = extractTextFromMessage(message);
+      if (currentText.length >= 10) {
+        try {
+          const similar = await findSimilarMessages(getRootDb(), llmClient, chatId, currentText);
+          if (similar.length > 0) {
+            systemPrompt += "\n\n## Relevant past conversations\n" + formatMemoryContext(similar);
+          }
+        } catch (err) {
+          console.error("Memory search failed:", err);
         }
-      } catch (err) {
-        console.error("Memory search failed:", err);
       }
     }
 
