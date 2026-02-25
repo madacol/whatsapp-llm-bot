@@ -22,7 +22,7 @@ import { translateUnsupportedContent } from "./content-translator.js";
 import { getRootDb } from "./db.js";
 import {
   extractTextFromMessage,
-  storeMessageEmbedding,
+  maybeEmbed,
   findSimilarMessages,
   formatMemoryContext,
 } from "./memory.js";
@@ -148,10 +148,7 @@ async function executeAndStoreTool({
         : JSON.stringify(functionResponse.result)}],
     };
     const storedToolMsg = await addMessage(chatId, toolMessage, senderIds);
-    if (enableMemory && actionLlmClient) {
-      storeMessageEmbedding(getRootDb(), actionLlmClient, storedToolMsg.message_id, toolMessage)
-        .catch(err => console.error("Embedding failed:", err));
-    }
+    maybeEmbed(getRootDb(), actionLlmClient, storedToolMsg.message_id, toolMessage, enableMemory);
 
     const resultMessage =
       typeof functionResponse.result === "string"
@@ -176,10 +173,7 @@ async function executeAndStoreTool({
       content: [{type: "text", text: errorMessage}],
     };
     const storedToolError = await addMessage(chatId, toolError, senderIds);
-    if (enableMemory && actionLlmClient) {
-      storeMessageEmbedding(getRootDb(), actionLlmClient, storedToolError.message_id, toolError)
-        .catch(err => console.error("Embedding failed:", err));
-    }
+    maybeEmbed(getRootDb(), actionLlmClient, storedToolError.message_id, toolError, enableMemory);
 
     if (context.isDebug) {
       await context.sendMessage(`❌ *Tool Error*    [${shortId}]`, errorMessage);
@@ -257,10 +251,7 @@ async function processLlmResponse({
     if (!responseMessage.tool_calls) {
       formattedMessages.push(responseMessage);
       const storedAssistant = await addMessage(chatId, assistantMessage, senderIds);
-      if (enableMemory) {
-        storeMessageEmbedding(getRootDb(), llmClient, storedAssistant.message_id, assistantMessage)
-          .catch(err => console.error("Embedding failed:", err));
-      }
+      maybeEmbed(getRootDb(), llmClient, storedAssistant.message_id, assistantMessage, enableMemory);
       if (depth === 0) {
         storeLlmContext(getRootDb(), storedAssistant.message_id, chatModel, systemPrompt, formattedMessages, actions);
       }
@@ -279,10 +270,7 @@ async function processLlmResponse({
     }
 
     const storedAssistantWithTools = await addMessage(chatId, assistantMessage, senderIds);
-    if (enableMemory) {
-      storeMessageEmbedding(getRootDb(), llmClient, storedAssistantWithTools.message_id, assistantMessage)
-        .catch(err => console.error("Embedding failed:", err));
-    }
+    maybeEmbed(getRootDb(), llmClient, storedAssistantWithTools.message_id, assistantMessage, enableMemory);
     if (depth === 0) {
       storeLlmContext(getRootDb(), storedAssistantWithTools.message_id, chatModel, systemPrompt, formattedMessages, actions);
     }
@@ -444,10 +432,7 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
 
     // Fire-and-forget: embed the message for long-term memory
     const enableMemory = !!chatInfo?.memory;
-    if (enableMemory) {
-      storeMessageEmbedding(getRootDb(), llmClient, storedUserMsg.message_id, message)
-        .catch(err => console.error("Embedding failed:", err));
-    }
+    maybeEmbed(getRootDb(), llmClient, storedUserMsg.message_id, message, enableMemory);
 
     if (!willRespond) {
       return;

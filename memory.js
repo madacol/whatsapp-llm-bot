@@ -86,6 +86,20 @@ export async function storeMessageEmbedding(db, llmClient, messageId, messageDat
 }
 
 /**
+ * Fire-and-forget wrapper: embed a message if memory is enabled.
+ * @param {PGlite} db
+ * @param {import("openai").default | undefined} llmClient
+ * @param {number} messageId
+ * @param {Message} messageData
+ * @param {boolean} [enabled]
+ */
+export function maybeEmbed(db, llmClient, messageId, messageData, enabled) {
+  if (!enabled || !llmClient) return;
+  storeMessageEmbedding(db, llmClient, messageId, messageData)
+    .catch(err => console.error("Embedding failed:", err));
+}
+
+/**
  * @typedef {{
  *   message_id: number;
  *   chat_id: string;
