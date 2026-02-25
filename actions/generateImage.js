@@ -237,16 +237,18 @@ export default /** @type {defineAction} */ ((x) => x)({
       return `Error: Image API returned status ${response.status}: ${errorText}`;
     }
 
-    /** @type {{choices: Array<{message: {content?: string, images?: Array<{type: string, image_url: {url: string}}>}}>}} */
     const data = await response.json();
-    const message = data.choices[0]?.message;
+    await context.log("Image API response: " + JSON.stringify(data).slice(0, 500));
+    const message = data.choices?.[0]?.message;
 
     if (!message) {
       return "Error: No response from image model.";
     }
 
     const images = message.images ?? [];
-    const textContent = message.content || "";
+    const textContent = typeof message.content === "string"
+      ? message.content
+      : "";
 
     if (images.length === 0) {
       return textContent || "The model did not generate any images.";
