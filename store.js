@@ -84,9 +84,17 @@ export async function initStore(injectedDb){
         db.sql`ALTER TABLE chats ADD COLUMN IF NOT EXISTS debug_until TIMESTAMP`,
         db.sql`ALTER TABLE chats ADD COLUMN IF NOT EXISTS content_models JSONB DEFAULT '{}'`,
       ]);
+
+      await db.sql`CREATE EXTENSION IF NOT EXISTS vector`;
+      await Promise.all([
+        db.sql`ALTER TABLE messages ADD COLUMN IF NOT EXISTS embedding vector`,
+        db.sql`ALTER TABLE messages ADD COLUMN IF NOT EXISTS search_text tsvector`,
+      ]);
+      await db.sql`CREATE INDEX IF NOT EXISTS idx_messages_search_text ON messages USING gin (search_text)`;
     } catch (error) {
       console.error("Schema migration error:", error);
     }
+
 
     return {
       /**
