@@ -51,10 +51,10 @@ describe("shouldRespond", () => {
     );
   });
 
-  it("returns true for group when bot is mentioned (default: respond_on_mention=true)", () => {
+  it("returns true for group when bot is mentioned (default: respond_on=mention)", () => {
     assert.equal(
       shouldRespond(
-        { is_enabled: true },
+        { is_enabled: true, respond_on: "mention" },
         true,
         [{ type: "text", text: "hey @bot-123 what's up" }],
         ["bot-123"],
@@ -67,7 +67,7 @@ describe("shouldRespond", () => {
   it("returns false for group when bot is not mentioned and no reply (default)", () => {
     assert.equal(
       shouldRespond(
-        { is_enabled: true },
+        { is_enabled: true, respond_on: "mention" },
         true,
         [{ type: "text", text: "hello everyone" }],
         ["bot-123"],
@@ -80,7 +80,7 @@ describe("shouldRespond", () => {
   it("returns true when one of multiple selfIds is mentioned", () => {
     assert.equal(
       shouldRespond(
-        { is_enabled: true },
+        { is_enabled: true, respond_on: "mention" },
         true,
         [{ type: "text", text: "hey @alt-id" }],
         ["bot-123", "alt-id"],
@@ -90,11 +90,11 @@ describe("shouldRespond", () => {
     );
   });
 
-  describe("respond_on_any: true", () => {
+  describe("respond_on: any", () => {
     it("responds to any message in group", () => {
       assert.equal(
         shouldRespond(
-          { is_enabled: true, respond_on_any: true },
+          { is_enabled: true, respond_on: "any" },
           true,
           [{ type: "text", text: "hello everyone" }],
           ["bot-123"],
@@ -103,28 +103,41 @@ describe("shouldRespond", () => {
         true,
       );
     });
+  });
 
-    it("works alongside other options", () => {
+  describe("respond_on: mention", () => {
+    it("responds to mentions", () => {
       assert.equal(
         shouldRespond(
-          { is_enabled: true, respond_on_any: true, respond_on_mention: false, respond_on_reply: false },
+          { is_enabled: true, respond_on: "mention" },
           true,
-          [{ type: "text", text: "hello" }],
+          [{ type: "text", text: "@bot-123 hello" }],
           ["bot-123"],
           undefined,
         ),
         true,
       );
     });
-  });
 
-  describe("respond_on_mention: false", () => {
-    it("does not respond to mentions when disabled", () => {
+    it("does not respond to reply when mode is mention only", () => {
       assert.equal(
         shouldRespond(
-          { is_enabled: true, respond_on_mention: false },
+          { is_enabled: true, respond_on: "mention" },
           true,
-          [{ type: "text", text: "@bot-123 hello" }],
+          [{ type: "text", text: "hello" }],
+          ["bot-123"],
+          "bot-123",
+        ),
+        false,
+      );
+    });
+
+    it("does not respond when not mentioned", () => {
+      assert.equal(
+        shouldRespond(
+          { is_enabled: true, respond_on: "mention" },
+          true,
+          [{ type: "text", text: "hello" }],
           ["bot-123"],
           undefined,
         ),
@@ -133,11 +146,24 @@ describe("shouldRespond", () => {
     });
   });
 
-  describe("respond_on_reply: true", () => {
-    it("responds when message is a reply to bot", () => {
+  describe("respond_on: mention+reply", () => {
+    it("responds to mention", () => {
       assert.equal(
         shouldRespond(
-          { is_enabled: true, respond_on_reply: true },
+          { is_enabled: true, respond_on: "mention+reply" },
+          true,
+          [{ type: "text", text: "@bot-123 hello" }],
+          ["bot-123"],
+          undefined,
+        ),
+        true,
+      );
+    });
+
+    it("responds to reply to bot", () => {
+      assert.equal(
+        shouldRespond(
+          { is_enabled: true, respond_on: "mention+reply" },
           true,
           [{ type: "text", text: "hello" }],
           ["bot-123"],
@@ -150,7 +176,7 @@ describe("shouldRespond", () => {
     it("does not respond when reply is to someone else", () => {
       assert.equal(
         shouldRespond(
-          { is_enabled: true, respond_on_reply: true },
+          { is_enabled: true, respond_on: "mention+reply" },
           true,
           [{ type: "text", text: "hello" }],
           ["bot-123"],
@@ -160,70 +186,14 @@ describe("shouldRespond", () => {
       );
     });
 
-    it("does not respond when no reply context", () => {
+    it("does not respond when no mention and no reply context", () => {
       assert.equal(
         shouldRespond(
-          { is_enabled: true, respond_on_reply: true },
+          { is_enabled: true, respond_on: "mention+reply" },
           true,
           [{ type: "text", text: "hello" }],
           ["bot-123"],
           undefined,
-        ),
-        false,
-      );
-    });
-  });
-
-  describe("both respond_on_mention and respond_on_reply enabled", () => {
-    it("responds to mention", () => {
-      assert.equal(
-        shouldRespond(
-          { is_enabled: true, respond_on_mention: true, respond_on_reply: true },
-          true,
-          [{ type: "text", text: "@bot-123 hello" }],
-          ["bot-123"],
-          undefined,
-        ),
-        true,
-      );
-    });
-
-    it("responds to reply", () => {
-      assert.equal(
-        shouldRespond(
-          { is_enabled: true, respond_on_mention: true, respond_on_reply: true },
-          true,
-          [{ type: "text", text: "hello" }],
-          ["bot-123"],
-          "bot-123",
-        ),
-        true,
-      );
-    });
-  });
-
-  describe("both disabled", () => {
-    it("does not respond even when mentioned", () => {
-      assert.equal(
-        shouldRespond(
-          { is_enabled: true, respond_on_mention: false, respond_on_reply: false },
-          true,
-          [{ type: "text", text: "@bot-123 hello" }],
-          ["bot-123"],
-          undefined,
-        ),
-        false,
-      );
-    });
-
-    it("does not respond even when reply to bot", () => {
-      assert.equal(
-        shouldRespond(
-          { is_enabled: true, respond_on_mention: false, respond_on_reply: false },
-          true,
-          [{ type: "text", text: "hello" }],
-          ["bot-123"],
-          "bot-123",
         ),
         false,
       );

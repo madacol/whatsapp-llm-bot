@@ -39,28 +39,21 @@ export function shouldRespond(chatInfo, isGroup, content, selfIds, quotedSenderI
     return true;
   }
 
-  if (chatInfo.respond_on_any === true) {
+  const mode = chatInfo.respond_on ?? "mention";
+
+  if (mode === "any") {
     return true;
   }
 
-  const respondOnMention = chatInfo.respond_on_mention !== false;
-  const respondOnReply = chatInfo.respond_on_reply === true;
-
-  if (!respondOnMention && !respondOnReply) {
-    return false;
+  const isMentioned = content.some(contentPart =>
+    contentPart.type === "text"
+      && selfIds.some(selfId => contentPart.text.includes('@' + selfId))
+  );
+  if (isMentioned) {
+    return true;
   }
 
-  if (respondOnMention) {
-    const isMentioned = content.some(contentPart =>
-      contentPart.type === "text"
-        && selfIds.some(selfId => contentPart.text.includes('@' + selfId))
-    );
-    if (isMentioned) {
-      return true;
-    }
-  }
-
-  if (respondOnReply && quotedSenderId) {
+  if (mode === "mention+reply" && quotedSenderId) {
     const isReplyToBot = selfIds.includes(quotedSenderId);
     if (isReplyToBot) {
       return true;
