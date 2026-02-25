@@ -116,10 +116,10 @@ describe("Scenario 1: Enable/disable chat flow", () => {
     await seedChat(chatId);
   });
 
-  it("master user enables chat with !enable", async () => {
+  it("master user enables chat with !set enabled true", async () => {
     const { context, responses } = createIncomingContext({
       chatId,
-      content: [{ type: "text", text: "!enable" }],
+      content: [{ type: "text", text: "!set enabled true" }],
     });
     await handleMessage(context);
 
@@ -146,10 +146,10 @@ describe("Scenario 1: Enable/disable chat flow", () => {
     );
   });
 
-  it("master user disables chat with !disable", async () => {
+  it("master user disables chat with !set enabled false", async () => {
     const { context, responses } = createIncomingContext({
       chatId,
-      content: [{ type: "text", text: "!disable" }],
+      content: [{ type: "text", text: "!set enabled false" }],
     });
     await handleMessage(context);
 
@@ -181,11 +181,11 @@ describe("Scenario 2: Non-master cannot enable/disable", () => {
     await seedChat(chatId);
   });
 
-  it("rejects !enable from non-master user", async () => {
+  it("rejects !set enabled from non-master user", async () => {
     const { context, responses } = createIncomingContext({
       chatId,
       senderIds: ["non-master-user"],
-      content: [{ type: "text", text: "!enable" }],
+      content: [{ type: "text", text: "!set enabled true" }],
     });
     await handleMessage(context);
 
