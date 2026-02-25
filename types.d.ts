@@ -181,6 +181,7 @@ type Action<P extends PermissionFlags = PermissionFlags> = {
   command?: string; // Optional command for direct execution
   description: string;
   scope?: "chat" | "global";
+  optIn?: true; // When true, action is only available in chats that explicitly enable it
   parameters: {
     type: "object";
     properties: Record<string, any>;

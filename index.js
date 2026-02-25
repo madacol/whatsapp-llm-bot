@@ -365,11 +365,14 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
       confirm: messageContext.confirm,
     };
 
-    // Load actions (global + chat-scoped)
+    // Load actions (global + chat-scoped), filtering out opt-in actions not enabled for this chat
     const globalActions = await getActionsFn();
     const chatActions = await getChatActions(chatId);
+    const enabledActions = chatInfo?.enabled_actions ?? [];
     /** @type {Action[]} */
-    const actions = [...globalActions, ...chatActions];
+    const actions = [...globalActions, ...chatActions].filter(
+      (a) => !a.optIn || enabledActions.includes(a.name),
+    );
 
     /** @param {string} name */
     const actionResolver = async (name) => {
