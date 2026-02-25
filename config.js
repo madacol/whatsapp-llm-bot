@@ -52,6 +52,6 @@ export default {
   brave_api_key: process.env.BRAVE_API_KEY,
   content_model: process.env.CONTENT_MODEL || "",
   embedding_model: process.env.EMBEDDING_MODEL || "google/gemini-embedding-001",
-  image_model: process.env.IMAGE_MODEL || "google/gemini-2.5-flash-preview-image",
+  image_model: process.env.IMAGE_MODEL || "google/gemini-3-pro-image-preview",
   memory_threshold: parseFloat(process.env.MEMORY_THRESHOLD || "") || 0.3,
 };
