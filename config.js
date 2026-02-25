@@ -53,5 +53,5 @@ export default {
   content_model: process.env.CONTENT_MODEL || "",
   embedding_model: process.env.EMBEDDING_MODEL || "google/gemini-embedding-001",
   image_model: process.env.IMAGE_MODEL || "google/gemini-2.5-flash-preview-image",
-  memory_threshold: parseFloat(process.env.MEMORY_THRESHOLD) || 0.3,
+  memory_threshold: parseFloat(process.env.MEMORY_THRESHOLD || "") || 0.3,
 };
