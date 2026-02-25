@@ -284,17 +284,17 @@ describe("Scenario 5: Set and get model", () => {
     );
   });
 
-  it("retrieves model with !get model", async () => {
+  it("retrieves model with !info", async () => {
     const { context, responses } = createIncomingContext({
       chatId,
-      content: [{ type: "text", text: "!get model" }],
+      content: [{ type: "text", text: "!info" }],
     });
     await handleMessage(context);
 
     assert.ok(responses.length > 0);
     assert.ok(
       responses.some((r) => r.text.includes("gpt-4.1-mini")),
-      "Should return model name",
+      "Should return model name in info output",
     );
   });
 });
