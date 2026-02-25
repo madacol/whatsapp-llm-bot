@@ -95,6 +95,18 @@ export async function initStore(injectedDb){
         db.sql`ALTER TABLE messages ADD COLUMN IF NOT EXISTS llm_context JSONB`,
       ]);
 
+      // One-time migration: old respond_on booleans → respond_on enum.
+      // Only touch rows still at the column default ('mention') whose booleans differ.
+      await db.sql`
+        UPDATE chats SET respond_on = 'any'
+        WHERE respond_on = 'mention' AND respond_on_any = true
+      `;
+      await db.sql`
+        UPDATE chats SET respond_on = 'mention+reply'
+        WHERE respond_on = 'mention' AND respond_on_any IS NOT TRUE
+          AND respond_on_reply = true AND respond_on_mention IS NOT FALSE
+      `;
+
       await db.sql`CREATE EXTENSION IF NOT EXISTS vector`;
       await Promise.all([
         db.sql`ALTER TABLE messages ADD COLUMN IF NOT EXISTS embedding vector`,
