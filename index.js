@@ -106,27 +106,42 @@ function parseToolArgs(argsString) {
 }
 
 /**
+ * @typedef {{
+ *   chatId: string,
+ *   senderIds: string[],
+ *   enableMemory: boolean,
+ *   context: Context,
+ *   addMessage: Store['addMessage'],
+ *   db: PGlite,
+ * }} Session
+ *
+ * @typedef {{
+ *   llmClient: OpenAI,
+ *   chatModel: string,
+ *   systemPrompt: string,
+ *   actions: Action[],
+ *   executeActionFn: typeof executeAction,
+ *   actionResolver: (name: string) => Promise<AppAction | null>,
+ *   actionLlmClient: import("openai").default,
+ * }} LlmConfig
+ */
+
+/**
  * Execute a single tool call: run action, store result, display to user.
  * Returns whether processing should continue (autoContinue or error).
  * @param {{
+ *   session: Session,
+ *   llmConfig: LlmConfig,
  *   toolCall: OpenAI.Chat.Completions.ChatCompletionMessageToolCall,
- *   context: Context,
- *   executeActionFn: typeof executeAction,
- *   addMessage: Store['addMessage'],
- *   chatId: string,
- *   senderIds: string[],
  *   formattedMessages: Array<OpenAI.ChatCompletionMessageParam>,
- *   actionResolver?: (name: string) => Promise<AppAction | null>,
- *   actionLlmClient?: import("openai").default,
- *   enableMemory?: boolean,
  * }} params
  * @returns {Promise<boolean>} Whether to continue processing (loop again)
  */
 async function executeAndStoreTool({
-  toolCall, context, executeActionFn, addMessage,
-  chatId, senderIds, formattedMessages, actionResolver, actionLlmClient,
-  enableMemory,
+  session, llmConfig, toolCall, formattedMessages,
 }) {
+  const { chatId, senderIds, enableMemory, context, addMessage, db } = session;
+  const { executeActionFn, actionResolver, actionLlmClient } = llmConfig;
   const toolName = toolCall.function.name;
   const toolArgs = parseToolArgs(toolCall.function.arguments);
   const shortId = shortenToolId(toolCall.id);
@@ -148,7 +163,7 @@ async function executeAndStoreTool({
         : JSON.stringify(functionResponse.result)}],
     };
     const storedToolMsg = await addMessage(chatId, toolMessage, senderIds);
-    maybeEmbed(getRootDb(), actionLlmClient, storedToolMsg.message_id, toolMessage, enableMemory);
+    maybeEmbed(db, actionLlmClient, storedToolMsg.message_id, toolMessage, enableMemory);
 
     const resultMessage =
       typeof functionResponse.result === "string"
@@ -173,7 +188,7 @@ async function executeAndStoreTool({
       content: [{type: "text", text: errorMessage}],
     };
     const storedToolError = await addMessage(chatId, toolError, senderIds);
-    maybeEmbed(getRootDb(), actionLlmClient, storedToolError.message_id, toolError, enableMemory);
+    maybeEmbed(db, actionLlmClient, storedToolError.message_id, toolError, enableMemory);
 
     if (context.isDebug) {
       await context.sendMessage(`❌ *Tool Error*    [${shortId}]`, errorMessage);
@@ -193,26 +208,14 @@ async function executeAndStoreTool({
 /**
  * Process LLM responses, handling tool calls in a loop with depth guard.
  * @param {{
- *   llmClient: OpenAI,
- *   chatModel: string,
- *   systemPrompt: string,
- *   actions: Action[],
+ *   session: Session,
+ *   llmConfig: LlmConfig,
  *   formattedMessages: Array<OpenAI.ChatCompletionMessageParam>,
- *   context: Context,
- *   executeActionFn: typeof executeAction,
- *   addMessage: Store['addMessage'],
- *   chatId: string,
- *   senderIds: string[],
- *   actionResolver?: (name: string) => Promise<AppAction | null>,
- *   actionLlmClient?: import("openai").default,
- *   enableMemory?: boolean,
  * }} params
  */
-async function processLlmResponse({
-  llmClient, chatModel, systemPrompt, actions,
-  formattedMessages, context, executeActionFn, addMessage,
-  chatId, senderIds, actionResolver, actionLlmClient, enableMemory,
-}) {
+async function processLlmResponse({ session, llmConfig, formattedMessages }) {
+  const { chatId, senderIds, enableMemory, context, addMessage, db } = session;
+  const { llmClient, chatModel, systemPrompt, actions } = llmConfig;
   let depth = 0;
 
   while (depth < MAX_TOOL_CALL_DEPTH) {
@@ -251,9 +254,9 @@ async function processLlmResponse({
     if (!responseMessage.tool_calls) {
       formattedMessages.push(responseMessage);
       const storedAssistant = await addMessage(chatId, assistantMessage, senderIds);
-      maybeEmbed(getRootDb(), llmClient, storedAssistant.message_id, assistantMessage, enableMemory);
+      maybeEmbed(db, llmClient, storedAssistant.message_id, assistantMessage, enableMemory);
       if (depth === 0) {
-        storeLlmContext(getRootDb(), storedAssistant.message_id, chatModel, systemPrompt, formattedMessages, actions);
+        storeLlmContext(db, storedAssistant.message_id, chatModel, systemPrompt, formattedMessages, actions);
       }
       return;
     }
@@ -270,9 +273,9 @@ async function processLlmResponse({
     }
 
     const storedAssistantWithTools = await addMessage(chatId, assistantMessage, senderIds);
-    maybeEmbed(getRootDb(), llmClient, storedAssistantWithTools.message_id, assistantMessage, enableMemory);
+    maybeEmbed(db, llmClient, storedAssistantWithTools.message_id, assistantMessage, enableMemory);
     if (depth === 0) {
-      storeLlmContext(getRootDb(), storedAssistantWithTools.message_id, chatModel, systemPrompt, formattedMessages, actions);
+      storeLlmContext(db, storedAssistantWithTools.message_id, chatModel, systemPrompt, formattedMessages, actions);
     }
     formattedMessages.push(responseMessage);
 
@@ -280,9 +283,7 @@ async function processLlmResponse({
     let continueProcessing = false;
     for (const toolCall of responseMessage.tool_calls) {
       const shouldContinue = await executeAndStoreTool({
-        toolCall, context, executeActionFn, addMessage,
-        chatId, senderIds, formattedMessages, actionResolver, actionLlmClient,
-        enableMemory,
+        session, llmConfig, toolCall, formattedMessages,
       });
       if (shouldContinue) continueProcessing = true;
     }
@@ -477,12 +478,19 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
     // Prepare messages for OpenAI
     const formattedMessages = await formatMessagesForOpenAI(translatedMessages);
 
-    await processLlmResponse({
+    /** @type {Session} */
+    const session = {
+      chatId, senderIds, enableMemory, context,
+      addMessage, db: getRootDb(),
+    };
+
+    /** @type {LlmConfig} */
+    const llmConfig = {
       llmClient, chatModel, systemPrompt, actions,
-      formattedMessages, context, executeActionFn, addMessage,
-      chatId, senderIds, actionResolver, actionLlmClient: llmClient,
-      enableMemory,
-    });
+      executeActionFn, actionResolver, actionLlmClient: llmClient,
+    };
+
+    await processLlmResponse({ session, llmConfig, formattedMessages });
   }
 
   return { handleMessage };
