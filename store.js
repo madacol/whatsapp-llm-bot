@@ -12,6 +12,7 @@ import { getRootDb } from "./db.js";
  *   debug_until: string | null;
  *   content_models: { image?: string, audio?: string, video?: string };
  *   memory: boolean;
+ *   memory_threshold: number | null;
  *   timestamp: string;
  * }} ChatRow
  *
@@ -85,6 +86,8 @@ export async function initStore(injectedDb){
         db.sql`ALTER TABLE chats ADD COLUMN IF NOT EXISTS debug_until TIMESTAMP`,
         db.sql`ALTER TABLE chats ADD COLUMN IF NOT EXISTS content_models JSONB DEFAULT '{}'`,
         db.sql`ALTER TABLE chats ADD COLUMN IF NOT EXISTS memory BOOLEAN DEFAULT FALSE`,
+        db.sql`ALTER TABLE chats ADD COLUMN IF NOT EXISTS memory_threshold REAL`,
+        db.sql`ALTER TABLE messages ADD COLUMN IF NOT EXISTS exchange_text TEXT`,
         db.sql`ALTER TABLE messages ADD COLUMN IF NOT EXISTS llm_context JSONB`,
       ]);
 

@@ -7,8 +7,9 @@ import { vector } from "@electric-sql/pglite/vector";
 import { initStore } from "../store.js";
 import {
   extractTextFromMessage,
+  extractExchangeText,
   generateEmbedding,
-  storeMessageEmbedding,
+  storeExchangeEmbedding,
   findSimilarMessages,
   formatMemoryContext,
 } from "../memory.js";
@@ -106,6 +107,70 @@ describe("extractTextFromMessage", () => {
 });
 
 // ═══════════════════════════════════════════════════════════════════
+// extractExchangeText
+// ═══════════════════════════════════════════════════════════════════
+describe("extractExchangeText", () => {
+  it("formats a simple user+assistant exchange", () => {
+    /** @type {Message[]} */
+    const messages = [
+      { role: "user", content: [{ type: "text", text: "What is Node.js?" }] },
+      { role: "assistant", content: [{ type: "text", text: "Node.js is a JavaScript runtime." }] },
+    ];
+    const text = extractExchangeText(messages);
+    assert.ok(text.includes("user: What is Node.js?"));
+    assert.ok(text.includes("assistant: Node.js is a JavaScript runtime."));
+  });
+
+  it("includes tool calls and tool results", () => {
+    /** @type {Message[]} */
+    const messages = [
+      { role: "user", content: [{ type: "text", text: "Search for cats" }] },
+      { role: "assistant", content: [
+        { type: "text", text: "Let me search." },
+        { type: "tool", tool_id: "c1", name: "web_search", arguments: '{"query":"cats"}' },
+      ]},
+      { role: "tool", tool_id: "c1", content: [{ type: "text", text: "Found 3 results about cats" }] },
+      { role: "assistant", content: [{ type: "text", text: "Here are the results." }] },
+    ];
+    const text = extractExchangeText(messages);
+    assert.ok(text.includes("user: Search for cats"));
+    assert.ok(text.includes("[tool: web_search("));
+    assert.ok(text.includes("tool: Found 3 results about cats"));
+    assert.ok(text.includes("assistant: Here are the results."));
+  });
+
+  it("skips binary content blocks", () => {
+    /** @type {Message[]} */
+    const messages = [
+      { role: "user", content: [
+        { type: "image", encoding: "base64", mime_type: "image/png", data: "abc" },
+        { type: "text", text: "What is this?" },
+      ]},
+      { role: "assistant", content: [{ type: "text", text: "It's a cat." }] },
+    ];
+    const text = extractExchangeText(messages);
+    assert.ok(!text.includes("abc"), "Should not include binary data");
+    assert.ok(text.includes("What is this?"));
+    assert.ok(text.includes("It's a cat."));
+  });
+
+  it("returns empty string for empty messages array", () => {
+    assert.equal(extractExchangeText([]), "");
+  });
+
+  it("handles messages with only binary content", () => {
+    /** @type {Message[]} */
+    const messages = [
+      { role: "user", content: [{ type: "image", encoding: "base64", mime_type: "image/png", data: "abc" }] },
+    ];
+    const text = extractExchangeText(messages);
+    // Should still have a line for the user role, but content may be empty
+    // The key thing is it doesn't crash
+    assert.equal(typeof text, "string");
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════
 // generateEmbedding
 // ═══════════════════════════════════════════════════════════════════
 describe("generateEmbedding", () => {
@@ -150,15 +215,16 @@ describe("generateEmbedding", () => {
 });
 
 // ═══════════════════════════════════════════════════════════════════
-// storeMessageEmbedding
+// storeExchangeEmbedding
 // ═══════════════════════════════════════════════════════════════════
-describe("storeMessageEmbedding", () => {
-  it("stores embedding and search_text for a message", async () => {
+describe("storeExchangeEmbedding", () => {
+  it("stores embedding, search_text, and exchange_text for a message", async () => {
     await store.createChat("mem-embed-1");
     /** @type {UserMessage} */
     const msg = { role: "user", content: [{ type: "text", text: "What is machine learning?" }] };
     const stored = await store.addMessage("mem-embed-1", msg, ["sender-1"]);
 
+    const exchangeText = "user: What is machine learning?\nassistant: It's a field of AI.";
     const mockEmbedding = Array.from({ length: 3 }, (_, i) => i * 0.1);
     const mockClient = /** @type {import("openai").default} */ ({
       embeddings: {
@@ -166,38 +232,40 @@ describe("storeMessageEmbedding", () => {
       },
     });
 
-    await storeMessageEmbedding(db, mockClient, stored.message_id, msg);
+    await storeExchangeEmbedding(db, mockClient, stored.message_id, exchangeText);
 
     const { rows: [row] } = await db.sql`
-      SELECT embedding, search_text
+      SELECT embedding, search_text, exchange_text
       FROM messages WHERE message_id = ${stored.message_id}
     `;
     assert.ok(row.embedding, "embedding should be set");
     assert.ok(row.search_text, "search_text should be set");
+    assert.equal(row.exchange_text, exchangeText, "exchange_text should be stored");
   });
 
-  it("stores search_text even when embedding fails", async () => {
+  it("stores search_text and exchange_text even when embedding fails", async () => {
     await store.createChat("mem-embed-2");
     /** @type {UserMessage} */
     const msg = { role: "user", content: [{ type: "text", text: "Another test message for searching" }] };
     const stored = await store.addMessage("mem-embed-2", msg, ["sender-1"]);
 
+    const exchangeText = "user: Another test message for searching";
     const mockClient = /** @type {import("openai").default} */ ({
       embeddings: { create: async () => { throw new Error("API error"); } },
     });
 
-    // Should not throw
-    await storeMessageEmbedding(db, mockClient, stored.message_id, msg);
+    await storeExchangeEmbedding(db, mockClient, stored.message_id, exchangeText);
 
     const { rows: [row] } = await db.sql`
-      SELECT embedding, search_text
+      SELECT embedding, search_text, exchange_text
       FROM messages WHERE message_id = ${stored.message_id}
     `;
     assert.equal(row.embedding, null, "embedding should be null on failure");
     assert.ok(row.search_text, "search_text should still be set");
+    assert.equal(row.exchange_text, exchangeText, "exchange_text should still be stored");
   });
 
-  it("does not throw for media-only messages", async () => {
+  it("does not throw for empty exchange text", async () => {
     await store.createChat("mem-embed-3");
     /** @type {UserMessage} */
     const msg = {
@@ -211,7 +279,7 @@ describe("storeMessageEmbedding", () => {
     });
 
     // Should not throw
-    await storeMessageEmbedding(db, mockClient, stored.message_id, msg);
+    await storeExchangeEmbedding(db, mockClient, stored.message_id, "");
   });
 });
 
@@ -355,7 +423,7 @@ describe("findSimilarMessages", () => {
 // formatMemoryContext
 // ═══════════════════════════════════════════════════════════════════
 describe("formatMemoryContext", () => {
-  it("formats messages with timestamp, role, and content", () => {
+  it("uses exchange_text when available", () => {
     const results = [
       {
         message_id: 1,
@@ -365,55 +433,75 @@ describe("formatMemoryContext", () => {
           role: "user",
           content: [{ type: "text", text: "What is Node.js?" }],
         }),
+        exchange_text: "user: What is Node.js?\nassistant: Node.js is a JavaScript runtime.",
+        timestamp: new Date("2025-01-15T10:30:00Z"),
+        similarity: 0.85,
+      },
+    ];
+
+    const output = formatMemoryContext(results);
+    assert.ok(output.includes("user: What is Node.js?"), "Should use exchange_text content");
+    assert.ok(output.includes("assistant: Node.js is a JavaScript runtime."), "Should include full exchange");
+  });
+
+  it("falls back to extractTextFromMessage when exchange_text is null", () => {
+    const results = [
+      {
+        message_id: 1,
+        chat_id: "test",
+        sender_id: "user1",
+        message_data: /** @type {UserMessage} */ ({
+          role: "user",
+          content: [{ type: "text", text: "What is Node.js?" }],
+        }),
+        exchange_text: null,
+        timestamp: new Date("2025-01-15T10:30:00Z"),
+        similarity: 0.85,
+      },
+    ];
+
+    const output = formatMemoryContext(results);
+    assert.ok(output.includes("What is Node.js?"), "Should fall back to message text");
+  });
+
+  it("separates results with ---", () => {
+    const results = [
+      {
+        message_id: 1,
+        chat_id: "test",
+        sender_id: "user1",
+        message_data: /** @type {UserMessage} */ ({
+          role: "user",
+          content: [{ type: "text", text: "First question" }],
+        }),
+        exchange_text: "user: First question\nassistant: First answer",
         timestamp: new Date("2025-01-15T10:30:00Z"),
         similarity: 0.85,
       },
       {
         message_id: 2,
         chat_id: "test",
-        sender_id: "bot",
-        message_data: /** @type {AssistantMessage} */ ({
-          role: "assistant",
-          content: [{ type: "text", text: "Node.js is a runtime for JavaScript." }],
+        sender_id: "user1",
+        message_data: /** @type {UserMessage} */ ({
+          role: "user",
+          content: [{ type: "text", text: "Second question" }],
         }),
+        exchange_text: "user: Second question\nassistant: Second answer",
         timestamp: new Date("2025-01-15T10:30:05Z"),
         similarity: 0.82,
       },
     ];
 
     const output = formatMemoryContext(results);
-    assert.ok(output.includes("user"), "Should include role");
-    assert.ok(output.includes("What is Node.js?"), "Should include message text");
-    assert.ok(output.includes("Node.js is a runtime"), "Should include assistant text");
-  });
-
-  it("includes tool call info for assistant messages", () => {
-    const results = [
-      {
-        message_id: 3,
-        chat_id: "test",
-        sender_id: "bot",
-        message_data: /** @type {AssistantMessage} */ ({
-          role: "assistant",
-          content: [
-            { type: "tool", tool_id: "c1", name: "web_search", arguments: '{"query":"node.js"}' },
-          ],
-        }),
-        timestamp: new Date("2025-01-15T10:30:00Z"),
-        similarity: 0.8,
-      },
-    ];
-
-    const output = formatMemoryContext(results);
-    assert.ok(output.includes("web_search"), "Should include tool name");
+    assert.ok(output.includes("---"), "Should separate results with ---");
   });
 
   it("returns empty string for empty results", () => {
     assert.equal(formatMemoryContext([]), "");
   });
 
-  it("truncates very long messages", () => {
-    const longText = "a".repeat(1000);
+  it("truncates very long exchange text", () => {
+    const longText = "a".repeat(3000);
     const results = [
       {
         message_id: 1,
@@ -423,12 +511,13 @@ describe("formatMemoryContext", () => {
           role: "user",
           content: [{ type: "text", text: longText }],
         }),
+        exchange_text: longText,
         timestamp: new Date("2025-01-15T10:30:00Z"),
         similarity: 0.85,
       },
     ];
 
     const output = formatMemoryContext(results);
-    assert.ok(output.length < longText.length, "Should truncate long messages");
+    assert.ok(output.length < longText.length, "Should truncate long exchange text");
   });
 });
