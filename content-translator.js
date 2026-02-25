@@ -140,7 +140,8 @@ export async function translateUnsupportedContent(
   /** @type {Set<string>} */
   const skippedTypes = new Set();
 
-  for (const msg of messages) {
+  for (let msgIdx = 0; msgIdx < messages.length; msgIdx++) {
+    const msg = messages[msgIdx];
     if (msg.message_data?.role !== "user" || !msg.message_data.content.some((b) => isUnsupportedBlock(b, supportedModalities))) {
       result.push(msg);
       continue;
@@ -178,7 +179,6 @@ export async function translateUnsupportedContent(
         continue;
       }
 
-      // Hash the content data for cache lookup
       const contentData = /** @type {{ data: string }} */ (block).data;
       const hash = hashContent(contentData);
 
@@ -192,17 +192,45 @@ export async function translateUnsupportedContent(
       if (rows.length > 0) {
         translation = /** @type {string} */ (rows[0].translation);
       } else {
-        // Call translation model
+        // Build conversation context from preceding messages
+        /** @type {import("openai").default.ChatCompletionMessageParam[]} */
+        const contextMessages = [];
+        for (let j = 0; j < msgIdx; j++) {
+          const prev = messages[j];
+          if (!prev.message_data) continue;
+          const role = prev.message_data.role;
+          if (role === "user" || role === "assistant") {
+            const text = prev.message_data.content
+              .filter(/** @returns {b is TextContentBlock} */ (b) => b.type === "text")
+              .map((b) => b.text)
+              .join("\n");
+            if (text) {
+              contextMessages.push({ role, content: text });
+            }
+          }
+        }
+
+        // Collect text blocks from the current message for context
+        const currentText = cloned.message_data.content
+          .filter(/** @returns {b is TextContentBlock} */ (b) => b.type === "text")
+          .map((b) => b.text)
+          .join("\n");
+
+        // Call translation model with conversation context
         const prompt = TRANSLATION_PROMPTS[contentType] || `Describe this ${contentType} content in detail.`;
 
+        /** @type {ContentPart[]} */
+        const userContent = [];
+        if (currentText) {
+          userContent.push({ type: "text", text: `User's message: ${currentText}\n\n${prompt}` });
+        } else {
+          userContent.push({ type: "text", text: prompt });
+        }
+        userContent.push(...(contentBlockBuilders[contentType]?.(block, contentData) ?? []));
+
         const llmMessages = /** @type {import("openai").default.ChatCompletionMessageParam[]} */ ([
-          {
-            role: "user",
-            content: [
-              { type: "text", text: prompt },
-              ...(contentBlockBuilders[contentType]?.(block, contentData) ?? []),
-            ],
-          },
+          ...contextMessages,
+          { role: "user", content: userContent },
         ]);
 
         const response = await llmClient.chat.completions.create({
