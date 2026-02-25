@@ -571,7 +571,7 @@ export default /** @type {defineAction} */ ((x) => x)({
 
       // Load all actions for realistic tool list
       const actionsDir = path.resolve(process.cwd(), "actions");
-      const files = (await fs.readdir(actionsDir)).filter(f => f.endsWith(".js"));
+      const files = (await fs.readdir(actionsDir, { recursive: true })).filter(f => f.endsWith(".js") && !path.basename(f).startsWith("_"));
       /** @type {Action[]} */
       const allActions = [];
       for (const file of files) {

@@ -147,12 +147,12 @@ export async function getActions() {
   }
 
   const dir = actionsDir;
-  const files = await fs.readdir(dir);
+  const files = await fs.readdir(dir, { recursive: true });
   /** @type {AppAction[]} */
   actions = (
     await Promise.all(
       files
-        .filter((file) => file.endsWith(".js") && !file.startsWith("_"))
+        .filter((file) => file.endsWith(".js") && !path.basename(file).startsWith("_"))
         .map(async (file) => {
           const filePath = path.join(dir, file);
           try {
