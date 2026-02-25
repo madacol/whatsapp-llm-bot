@@ -284,10 +284,10 @@ describe("Scenario 5: Set and get model", () => {
     );
   });
 
-  it("retrieves model with !info", async () => {
+  it("retrieves model with !config", async () => {
     const { context, responses } = createIncomingContext({
       chatId,
-      content: [{ type: "text", text: "!info" }],
+      content: [{ type: "text", text: "!config" }],
     });
     await handleMessage(context);
 
@@ -360,10 +360,10 @@ describe("Scenario 7: Show info", () => {
     await seedChat(chatId, { enabled: true });
   });
 
-  it("!info shows chat ID, enabled status, and sender info", async () => {
+  it("!config shows chat ID, enabled status, and sender info", async () => {
     const { context, responses } = createIncomingContext({
       chatId,
-      content: [{ type: "text", text: "!info" }],
+      content: [{ type: "text", text: "!config" }],
     });
     await handleMessage(context);
 
@@ -687,15 +687,15 @@ describe("Scenario 12: Debug mode gates tool call output", () => {
   });
 
   it("shows full result as reply for non-autoContinue actions when debug is off", async () => {
-    // show_info does NOT have autoContinue, so result is the final answer
+    // chat_settings does NOT have autoContinue, so result is the final answer
     mockServer.addResponses({
       tool_calls: [
         {
           id: "call_dbg_nocont_001",
           type: "function",
           function: {
-            name: "show_info",
-            arguments: "{}",
+            name: "chat_settings",
+            arguments: JSON.stringify({ setting: "" }),
           },
         },
       ],

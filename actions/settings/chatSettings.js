@@ -40,6 +40,54 @@ function isMaster(senderIds) {
 }
 
 /**
+ * Show a full summary of all chat settings.
+ * @param {PGlite} rootDb
+ * @param {string} chatId
+ * @param {{ senderIds?: string[] }} extra
+ * @returns {Promise<string>}
+ */
+async function getInfo(rootDb, chatId, extra) {
+  const chat = await getChatOrThrow(rootDb, chatId);
+
+  const status = chat.is_enabled ? "enabled" : "disabled";
+  const model = chat.model || `${config.model} (default)`;
+  const prompt = chat.system_prompt ? "custom (!config system_prompt)" : "default";
+  const response = chat.respond_on ?? "mention";
+
+  const memoryOn = chat.memory ? "on" : "off";
+  const threshold = chat.memory_threshold ?? config.memory_threshold;
+
+  const debugOn = chat.debug_until && new Date(chat.debug_until) > new Date();
+  const debug = debugOn ? "on" : "off";
+
+  const contentModels = chat.content_models ?? {};
+  const contentModelEntries = Object.entries(contentModels);
+  const contentStr = contentModelEntries.length > 0
+    ? contentModelEntries.map(([type, m]) => `${type}: ${m}`).join(", ")
+    : "default";
+
+  const enabledActions = chat.enabled_actions ?? [];
+  const optInStr = enabledActions.length > 0 ? enabledActions.join(", ") : "none";
+
+  const senderIds = extra.senderIds ?? [];
+
+  const lines = [
+    `*Chat:* ${chatId}`,
+    `*Status:* ${status}`,
+    `*Sender:* ${senderIds.join(", ")}`,
+    `*Model:* ${model}`,
+    `*Prompt:* ${prompt}`,
+    `*Response:* ${response}`,
+    `*Memory:* ${memoryOn} (threshold: ${threshold})`,
+    `*Debug:* ${debug}`,
+    `*Content models:* ${contentStr}`,
+    `*Opt-in actions:* ${optInStr}`,
+  ];
+
+  return lines.join("\n");
+}
+
+/**
  * @param {PGlite} rootDb
  * @param {string} chatId
  * @param {string} setting
@@ -276,7 +324,6 @@ export default /** @type {defineAction} */ ((x) => x)({
   },
   permissions: {
     autoExecute: true,
-    requireAdmin: true,
     useRootDb: true,
   },
   test_functions: [
@@ -460,18 +507,109 @@ export default /** @type {defineAction} */ ((x) => x)({
       });
     },
 
-    // ── shows help when no setting provided ──
-    async function shows_available_settings_list(action_fn, db) {
-      await db.sql`INSERT INTO chats(chat_id) VALUES ('cs-help-1') ON CONFLICT DO NOTHING`;
+    // ── info summary when no setting provided ──
+    async function shows_full_info_when_no_setting(action_fn, db) {
+      await db.sql`INSERT INTO chats(chat_id, is_enabled) VALUES ('cs-info-1', true) ON CONFLICT DO NOTHING`;
       const result = await action_fn(
-        { chatId: "cs-help-1", rootDb: db },
+        {
+          chatId: "cs-info-1",
+          rootDb: db,
+          senderIds: ["user-1"],
+          getIsAdmin: async () => false,
+        },
         { setting: "" },
       );
-      assert.ok(result.includes("model"));
-      assert.ok(result.includes("respond_on"));
-      assert.ok(result.includes("enabled"));
-      assert.ok(result.includes("debug"));
-      assert.ok(result.includes("action"));
+      assert.ok(result.includes("cs-info-1"), "should include chat id");
+      assert.ok(result.includes("enabled"), "should include status");
+      assert.ok(result.includes("user-1"), "should include sender");
+    },
+    async function info_shows_model_and_default_label(action_fn, db) {
+      await db.sql`INSERT INTO chats(chat_id) VALUES ('cs-info-2') ON CONFLICT DO NOTHING`;
+      const result = await action_fn(
+        { chatId: "cs-info-2", rootDb: db, senderIds: ["u1"], getIsAdmin: async () => false },
+        { setting: "" },
+      );
+      assert.ok(result.includes(config.model), "should include default model");
+      assert.ok(result.includes("default"), "should indicate default");
+    },
+    async function info_shows_custom_model(action_fn, db) {
+      await db.sql`INSERT INTO chats(chat_id, model) VALUES ('cs-info-3', 'custom/model') ON CONFLICT DO NOTHING`;
+      const result = await action_fn(
+        { chatId: "cs-info-3", rootDb: db, senderIds: ["u1"], getIsAdmin: async () => false },
+        { setting: "" },
+      );
+      assert.ok(result.includes("custom/model"));
+    },
+    async function info_shows_respond_on(action_fn, db) {
+      await db.sql`INSERT INTO chats(chat_id, respond_on)
+        VALUES ('cs-info-4', 'mention+reply') ON CONFLICT DO NOTHING`;
+      const result = await action_fn(
+        { chatId: "cs-info-4", rootDb: db, senderIds: ["u1"], getIsAdmin: async () => false },
+        { setting: "" },
+      );
+      assert.ok(result.includes("mention+reply"), "should include respond_on value");
+    },
+    async function info_shows_memory_settings(action_fn, db) {
+      await db.sql`INSERT INTO chats(chat_id, memory, memory_threshold) VALUES ('cs-info-5', true, 0.5) ON CONFLICT DO NOTHING`;
+      const result = await action_fn(
+        { chatId: "cs-info-5", rootDb: db, senderIds: ["u1"], getIsAdmin: async () => false },
+        { setting: "" },
+      );
+      assert.ok(result.toLowerCase().includes("memory"), "should include memory");
+      assert.ok(result.includes("0.5"), "should include threshold");
+    },
+    async function info_shows_debug_status(action_fn, db) {
+      await db.sql`INSERT INTO chats(chat_id, debug_until) VALUES ('cs-info-6', '9999-01-01') ON CONFLICT DO NOTHING`;
+      const result = await action_fn(
+        { chatId: "cs-info-6", rootDb: db, senderIds: ["u1"], getIsAdmin: async () => false },
+        { setting: "" },
+      );
+      assert.ok(result.toLowerCase().includes("debug"), "should include debug status");
+      assert.ok(result.toLowerCase().includes("on"), "should show debug is on");
+    },
+    async function info_shows_content_models(action_fn, db) {
+      await db.sql`INSERT INTO chats(chat_id) VALUES ('cs-info-7') ON CONFLICT DO NOTHING`;
+      await db.sql`UPDATE chats SET content_models = '{"image":"openai/gpt-4o"}'::jsonb WHERE chat_id = 'cs-info-7'`;
+      const result = await action_fn(
+        { chatId: "cs-info-7", rootDb: db, senderIds: ["u1"], getIsAdmin: async () => false },
+        { setting: "" },
+      );
+      assert.ok(result.includes("openai/gpt-4o"), "should include content model");
+      assert.ok(result.includes("image"), "should include content type");
+    },
+    async function info_shows_enabled_opt_in_actions(action_fn, db) {
+      await db.sql`INSERT INTO chats(chat_id, enabled_actions) VALUES ('cs-info-8', '["track_purchases"]'::jsonb) ON CONFLICT DO NOTHING`;
+      const result = await action_fn(
+        { chatId: "cs-info-8", rootDb: db, senderIds: ["u1"], getIsAdmin: async () => false },
+        { setting: "" },
+      );
+      assert.ok(result.includes("track_purchases"), "should include enabled opt-in action");
+    },
+    async function info_shows_none_when_no_opt_in_actions(action_fn, db) {
+      await db.sql`INSERT INTO chats(chat_id) VALUES ('cs-info-9') ON CONFLICT DO NOTHING`;
+      const result = await action_fn(
+        { chatId: "cs-info-9", rootDb: db, senderIds: ["u1"], getIsAdmin: async () => false },
+        { setting: "" },
+      );
+      assert.ok(result.includes("none"), "should show none for opt-in actions");
+    },
+
+    // ── admin check for writes ──
+    async function rejects_set_from_non_admin(action_fn, db) {
+      await db.sql`INSERT INTO chats(chat_id) VALUES ('cs-admin-1') ON CONFLICT DO NOTHING`;
+      const result = await action_fn(
+        { chatId: "cs-admin-1", rootDb: db, getIsAdmin: async () => false },
+        { setting: "memory", value: "true" },
+      );
+      assert.ok(result.includes("admin"), "should mention admin requirement");
+    },
+    async function allows_get_from_non_admin(action_fn, db) {
+      await db.sql`INSERT INTO chats(chat_id) VALUES ('cs-admin-2') ON CONFLICT DO NOTHING`;
+      const result = await action_fn(
+        { chatId: "cs-admin-2", rootDb: db, getIsAdmin: async () => false },
+        { setting: "memory" },
+      );
+      assert.ok(result.toLowerCase().includes("memory"), "should return memory setting");
     },
 
     // ── enabled (requires master) ──
@@ -686,13 +824,18 @@ export default /** @type {defineAction} */ ((x) => x)({
       assert.ok(result.includes("track_purchases"));
     },
   ],
-  action_fn: async function ({ chatId, rootDb, senderIds, getActions }, { setting, value }) {
+  action_fn: async function ({ chatId, rootDb, senderIds, getActions, getIsAdmin }, { setting, value }) {
     if (!setting || !SETTINGS.includes(setting)) {
-      return `Available settings: ${SETTINGS.join(", ")}`;
+      return getInfo(rootDb, chatId, { senderIds });
     }
 
     if (value === undefined || value === null) {
       return getSetting(rootDb, chatId, setting);
+    }
+
+    const isAdmin = getIsAdmin ? await getIsAdmin() : true;
+    if (!isAdmin) {
+      return "Only admins can change settings.";
     }
 
     return setSetting(rootDb, chatId, setting, String(value), { senderIds, getActions });
