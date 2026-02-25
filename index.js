@@ -152,21 +152,33 @@ async function executeAndStoreTool({
     );
     console.log("response", functionResponse);
 
+    const result = functionResponse.result;
+    const isContentBlocks = Array.isArray(result)
+      && result.length > 0
+      && typeof result[0] === "object"
+      && "type" in result[0];
+
     // Store tool result (silent tools get a stub to satisfy API pairing)
     /** @type {ToolMessage} */
     const toolMessage = {
       role: "tool",
       tool_id: toolCall.id,
-      content: [{type: "text", text: functionResponse.permissions.silent
-        ? "[recalled prior messages]"
-        : JSON.stringify(functionResponse.result)}],
+      content: functionResponse.permissions.silent
+        ? [{ type: "text", text: "[recalled prior messages]" }]
+        : isContentBlocks
+          ? /** @type {ToolContentBlock[]} */ (result)
+          : [{ type: "text", text: JSON.stringify(result) }],
     };
     await addMessage(chatId, toolMessage, senderIds);
 
-    const resultMessage =
-      typeof functionResponse.result === "string"
-        ? functionResponse.result
-        : JSON.stringify(functionResponse.result, null, 2);
+    const resultMessage = isContentBlocks
+      ? /** @type {ToolContentBlock[]} */ (result)
+          .filter((b) => b.type === "text")
+          .map((b) => /** @type {TextContentBlock} */ (b).text)
+          .join("\n") || "Done."
+      : typeof result === "string"
+        ? result
+        : JSON.stringify(result, null, 2);
 
     await displayToolResult(resultMessage, shortId, functionResponse.permissions, context);
 

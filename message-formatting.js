@@ -226,18 +226,40 @@ function formatAssistantContent(message) {
  * @returns {Array<OpenAI.ChatCompletionMessageParam>}
  */
 function formatToolContent(message) {
-  /** @type {Array<OpenAI.ChatCompletionMessageParam>} */
-  const results = [];
-  for (const contentBlock of message.content) {
-    if (contentBlock.type === "text") {
-      results.push({
-        role: "tool",
-        tool_call_id: message.tool_id,
-        content: contentBlock.text,
+  const hasMedia = message.content.some((b) => b.type === "image" || b.type === "video");
+
+  if (!hasMedia) {
+    /** @type {Array<OpenAI.ChatCompletionMessageParam>} */
+    const results = [];
+    for (const block of message.content) {
+      if (block.type === "text") {
+        results.push({
+          role: /** @type {const} */ ("tool"),
+          tool_call_id: message.tool_id,
+          content: block.text,
+        });
+      }
+    }
+    return results;
+  }
+
+  // Multipart: combine text + images into a single tool message
+  /** @type {Array<OpenAI.ChatCompletionContentPart>} */
+  const parts = [];
+  for (const block of message.content) {
+    if (block.type === "text") {
+      parts.push({ type: /** @type {const} */ ("text"), text: block.text });
+    } else if (block.type === "image") {
+      parts.push({
+        type: /** @type {const} */ ("image_url"),
+        image_url: { url: `data:${block.mime_type};base64,${block.data}` },
       });
     }
   }
-  return results;
+  // OpenAI's types restrict tool content to text-only, but the API accepts image_url parts
+  return [/** @type {OpenAI.ChatCompletionMessageParam} */ (
+    { role: "tool", tool_call_id: message.tool_id, content: parts }
+  )];
 }
 
 /**

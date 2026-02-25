@@ -167,10 +167,12 @@ type ExtendedActionContext<P extends PermissionFlags> = ActionContext
   & (P["useChatDb"] extends true ? { chatDb: PGlite } : {})
   & (P["useLlm"] extends true ? { callLlm: CallLlm } : {});
 
+type ToolContentBlock = TextContentBlock | ImageContentBlock | VideoContentBlock | AudioContentBlock;
+
 type ActionResult = string | {} | HTMLElement;
 
 type ActionSignal = {
-  result: ActionResult;
+  result: ActionResult | ToolContentBlock[];
   autoContinue: boolean;
 };
 

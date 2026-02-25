@@ -526,6 +526,51 @@ describe("formatMessagesForOpenAI", () => {
     assert.equal(content[0].video_url.url, "data:video/mp4;base64,fakevideo");
   });
 
+  it("includes image blocks from tool messages", async () => {
+    // newest-first order (as from DB)
+    const messages = [
+      {
+        message_data: {
+          role: "tool",
+          tool_id: "c1",
+          content: [
+            { type: "text", text: "Generated 1 image." },
+            { type: "image", encoding: "base64", mime_type: "image/png", data: "iVBOR" },
+          ],
+        },
+        sender_id: "bot",
+      },
+      {
+        message_data: {
+          role: "assistant",
+          content: [{ type: "tool", tool_id: "c1", name: "generate_image", arguments: '{"prompt":"a cat"}' }],
+        },
+        sender_id: "bot",
+      },
+      {
+        message_data: {
+          role: "user",
+          content: [{ type: "text", text: "generate an image" }],
+        },
+        sender_id: "user-1",
+      },
+    ];
+    const result = await formatMessagesForOpenAI(messages);
+
+    // Find the tool result messages
+    const toolResults = result.filter((m) => m.role === "tool");
+    assert.ok(toolResults.length >= 1, "Should have at least 1 tool result");
+
+    // One should carry the image
+    const imageResult = toolResults.find((m) => {
+      const content = /** @type {any[]} */ (m.content);
+      return Array.isArray(content) && content.some((c) => c.type === "image_url");
+    });
+    assert.ok(imageResult, "Tool result should include an image_url block");
+    const imageBlock = /** @type {any[]} */ (imageResult.content).find((c) => c.type === "image_url");
+    assert.equal(imageBlock.image_url.url, "data:image/png;base64,iVBOR");
+  });
+
   it("strips leading tool results from message list", async () => {
     const messages = [
       // newest first (before reverse)
