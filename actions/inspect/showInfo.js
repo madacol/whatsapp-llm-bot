@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
-import config from "../config.js";
-import { getChatOrThrow } from "../store.js";
+import config from "../../config.js";
+import { getChatOrThrow } from "../../store.js";
 
 export default /** @type {defineAction} */ ((x) => x)({
   name: "show_info",

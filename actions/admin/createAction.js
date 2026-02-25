@@ -2,13 +2,13 @@ import fs from "fs/promises";
 import path from "path";
 
 import assert from "node:assert/strict";
-import config from "../config.js";
+import config from "../../config.js";
 import {
   ensureChatActionsSchema,
   saveChatAction,
   readChatAction,
   deleteChatAction,
-} from "../actions.js";
+} from "../../actions.js";
 
 /**
  * @typedef {{
