@@ -1,9 +1,19 @@
 # Rules
+
 - Use JSDoc for all type annotations
-- After any code change, always run `npm run type-check` first, then `npm test`
-- After both type-check and tests pass, commit changes
-- Red/green TDD for ALL changes (features and bug fixes): always write a failing test first, verify it fails, then write the fix/implementation to make it pass. Never write the solution before the test
-- **Strong typing**: Strongly avoid weak typing like `@type {any}` casts. Use proper type guards and narrowing instead. Aspire to have strong, precise types everywhere
+- Apply Red/green TDD for ALL changes (features and bug fixes): always write a failing test first, verify it fails, then write the fix/implementation to make it pass. Never write the solution before the test
+- Avoid weak typing like `@type {any}` casts. Use proper type guards and narrowing instead. Aspire to have strong and precise types everywhere
+- After any change follow this:
+  1. Make sure it passes type-checking (`npm run type-check`)
+  2. test it (`npm test`)
+  3. if both passes, commit
++ After making a significant change:
+  1. Identify anything that is worth refactoring
+  2. Go through each refactor (if possible on parallel):
+    1. Explain clearly the context and concern, include code snippets so I can understand and have the full picture
+    2. Then give me options to decide what to do if you are not sure what's the best way to approach this
+
+
 
 # Key Interfaces (`types.d.ts`)
 
