@@ -13,6 +13,9 @@ const SETTINGS = [
   "content_model_image",
   "content_model_audio",
   "content_model_video",
+  "enabled",
+  "debug",
+  "action",
 ];
 
 const RESPOND_ON_VALUES = ["any", "mention+reply", "mention"];
@@ -25,6 +28,15 @@ const RESPOND_ON_VALUES = ["any", "mention+reply", "mention"];
 function toBool(raw) {
   if (typeof raw === "boolean") return raw;
   return String(raw).toLowerCase() === "true";
+}
+
+/**
+ * Check whether any of the sender IDs is a master user.
+ * @param {string[]} senderIds
+ * @returns {boolean}
+ */
+function isMaster(senderIds) {
+  return senderIds.some((id) => config.MASTER_IDs.includes(id));
 }
 
 /**
@@ -61,6 +73,18 @@ async function getSetting(rootDb, chatId, setting) {
         ? `Content model (${type}): \`${model}\``
         : `Content model (${type}): not set`;
     }
+    case "enabled":
+      return `Bot: ${chat.is_enabled ? "enabled" : "disabled"}`;
+    case "debug": {
+      const debugOn = chat.debug_until && new Date(chat.debug_until) > new Date();
+      return `Debug: ${debugOn ? "on" : "off"}`;
+    }
+    case "action": {
+      const enabledActions = chat.enabled_actions ?? [];
+      return enabledActions.length > 0
+        ? `Opt-in actions: ${enabledActions.join(", ")}`
+        : "Opt-in actions: none";
+    }
     default:
       return `Unknown setting: ${setting}`;
   }
@@ -71,9 +95,10 @@ async function getSetting(rootDb, chatId, setting) {
  * @param {string} chatId
  * @param {string} setting
  * @param {string} value
+ * @param {{ senderIds?: string[], getActions?: () => Promise<Action[]> }} extra
  * @returns {Promise<string>}
  */
-async function setSetting(rootDb, chatId, setting, value) {
+async function setSetting(rootDb, chatId, setting, value, extra) {
   const chat = await getChatOrThrow(rootDb, chatId);
 
   switch (setting) {
@@ -147,6 +172,83 @@ async function setSetting(rootDb, chatId, setting, value) {
       return `Content model for *${type}* set to \`${trimmed}\``;
     }
 
+    case "enabled": {
+      const senderIds = extra.senderIds ?? [];
+      if (!isMaster(senderIds)) {
+        return "Only master users can change the enabled setting.";
+      }
+      const enabled = toBool(value);
+      await rootDb.sql`UPDATE chats SET is_enabled = ${enabled} WHERE chat_id = ${chatId}`;
+      return `Bot ${enabled ? "enabled" : "disabled"}.`;
+    }
+
+    case "debug": {
+      const input = value.trim().toLowerCase();
+
+      if (input === "off") {
+        await rootDb.sql`UPDATE chats SET debug_until = NULL WHERE chat_id = ${chatId}`;
+        return "Debug off.";
+      }
+
+      const mins = input === "" ? 10 : Number(input);
+      if (Number.isNaN(mins) || mins < 0) {
+        return `Invalid value: "${value}". Use a number of minutes, 0 for permanent, or "off" to disable.`;
+      }
+
+      if (mins === 0) {
+        await rootDb.sql`UPDATE chats SET debug_until = '9999-01-01' WHERE chat_id = ${chatId}`;
+        return "Debug on (permanent).";
+      }
+
+      const until = new Date(Date.now() + mins * 60 * 1000);
+      const untilIso = until.toISOString();
+      await rootDb.sql`UPDATE chats SET debug_until = ${untilIso} WHERE chat_id = ${chatId}`;
+      const timeStr = until.toLocaleTimeString("en-US", {
+        hour: "2-digit",
+        minute: "2-digit",
+      });
+      return `Debug on for ${mins}min (until ${timeStr}).`;
+    }
+
+    case "action": {
+      // value format: "action_name true" or "action_name false"
+      const parts = value.trim().split(/\s+/);
+      if (parts.length < 2) {
+        return "Usage: !config action <action_name> <true|false>";
+      }
+      const actionName = parts[0];
+      const actionEnabled = toBool(parts[1]);
+
+      const getActions = extra.getActions;
+      if (!getActions) {
+        return "Internal error: getActions not available.";
+      }
+
+      const allActions = await getActions();
+      const targetAction = allActions.find((a) => a.name === actionName);
+      if (!targetAction) {
+        return `Action \`${actionName}\` not found.`;
+      }
+      if (!targetAction.optIn) {
+        return `Action \`${actionName}\` is not an opt-in action.`;
+      }
+
+      const { rows: [current] } = await rootDb.sql`SELECT enabled_actions FROM chats WHERE chat_id = ${chatId}`;
+      /** @type {string[]} */
+      const currentActions = current.enabled_actions ?? [];
+
+      /** @type {string[]} */
+      let updated;
+      if (actionEnabled) {
+        updated = currentActions.includes(actionName) ? currentActions : [...currentActions, actionName];
+      } else {
+        updated = currentActions.filter(/** @param {string} a */ (a) => a !== actionName);
+      }
+
+      await rootDb.sql`UPDATE chats SET enabled_actions = ${JSON.stringify(updated)}::jsonb WHERE chat_id = ${chatId}`;
+      return `Action \`${actionName}\` ${actionEnabled ? "enabled" : "disabled"} for this chat.`;
+    }
+
     default:
       return `Unknown setting: ${setting}`;
   }
@@ -156,7 +258,7 @@ export default /** @type {defineAction} */ ((x) => x)({
   name: "chat_settings",
   command: "config",
   description:
-    "Get or set chat settings. Available settings: model, system_prompt, memory, memory_threshold, respond_on, content_model_image, content_model_audio, content_model_video. Omit value to see current setting.",
+    "Get or set chat settings. Available settings: model, system_prompt, memory, memory_threshold, respond_on, content_model_image, content_model_audio, content_model_video, enabled, debug, action. Omit value to see current setting.",
   parameters: {
     type: "object",
     properties: {
@@ -367,9 +469,224 @@ export default /** @type {defineAction} */ ((x) => x)({
       );
       assert.ok(result.includes("model"));
       assert.ok(result.includes("respond_on"));
+      assert.ok(result.includes("enabled"));
+      assert.ok(result.includes("debug"));
+      assert.ok(result.includes("action"));
+    },
+
+    // ── enabled (requires master) ──
+    async function enables_chat_as_master(action_fn, db) {
+      await db.sql`INSERT INTO chats(chat_id) VALUES ('cs-en-1') ON CONFLICT DO NOTHING`;
+      const originalMaster = config.MASTER_IDs;
+      config.MASTER_IDs = ["master-user"];
+      try {
+        const result = await action_fn(
+          { chatId: "cs-en-1", rootDb: db, senderIds: ["master-user"] },
+          { setting: "enabled", value: "true" },
+        );
+        assert.ok(result.includes("enabled"));
+        const { rows: [chat] } = await db.sql`SELECT is_enabled FROM chats WHERE chat_id = 'cs-en-1'`;
+        assert.equal(chat.is_enabled, true);
+      } finally {
+        config.MASTER_IDs = originalMaster;
+      }
+    },
+    async function disables_chat_as_master(action_fn, db) {
+      await db.sql`INSERT INTO chats(chat_id, is_enabled) VALUES ('cs-en-2', true) ON CONFLICT DO NOTHING`;
+      const originalMaster = config.MASTER_IDs;
+      config.MASTER_IDs = ["master-user"];
+      try {
+        const result = await action_fn(
+          { chatId: "cs-en-2", rootDb: db, senderIds: ["master-user"] },
+          { setting: "enabled", value: "false" },
+        );
+        assert.ok(result.includes("disabled"));
+        const { rows: [chat] } = await db.sql`SELECT is_enabled FROM chats WHERE chat_id = 'cs-en-2'`;
+        assert.equal(chat.is_enabled, false);
+      } finally {
+        config.MASTER_IDs = originalMaster;
+      }
+    },
+    async function rejects_enabled_from_non_master(action_fn, db) {
+      await db.sql`INSERT INTO chats(chat_id) VALUES ('cs-en-3') ON CONFLICT DO NOTHING`;
+      const originalMaster = config.MASTER_IDs;
+      config.MASTER_IDs = ["master-user"];
+      try {
+        const result = await action_fn(
+          { chatId: "cs-en-3", rootDb: db, senderIds: ["regular-user"] },
+          { setting: "enabled", value: "true" },
+        );
+        assert.ok(result.includes("master"), "should mention master requirement");
+      } finally {
+        config.MASTER_IDs = originalMaster;
+      }
+    },
+    async function gets_enabled_status(action_fn, db) {
+      await db.sql`INSERT INTO chats(chat_id, is_enabled) VALUES ('cs-en-4', true) ON CONFLICT DO NOTHING`;
+      const result = await action_fn(
+        { chatId: "cs-en-4", rootDb: db },
+        { setting: "enabled" },
+      );
+      assert.ok(result.includes("enabled"));
+    },
+
+    // ── debug ──
+    async function enables_debug_for_default_10_minutes(action_fn, db) {
+      await db.sql`INSERT INTO chats(chat_id) VALUES ('cs-dbg-1') ON CONFLICT DO NOTHING`;
+      const before = Date.now();
+      const result = await action_fn(
+        { chatId: "cs-dbg-1", rootDb: db },
+        { setting: "debug", value: "" },
+      );
+      const after = Date.now();
+
+      assert.ok(result.includes("10"));
+
+      const { rows: [chat] } = await db.sql`SELECT debug_until FROM chats WHERE chat_id = 'cs-dbg-1'`;
+      const debugUntil = new Date(chat.debug_until).getTime();
+      const tenMinMs = 10 * 60 * 1000;
+      assert.ok(
+        debugUntil >= before + tenMinMs - 1000 &&
+          debugUntil <= after + tenMinMs + 1000,
+        `debug_until should be ~10min in future, got ${chat.debug_until}`,
+      );
+    },
+    async function enables_debug_for_custom_minutes(action_fn, db) {
+      await db.sql`INSERT INTO chats(chat_id) VALUES ('cs-dbg-2') ON CONFLICT DO NOTHING`;
+      const before = Date.now();
+      const result = await action_fn(
+        { chatId: "cs-dbg-2", rootDb: db },
+        { setting: "debug", value: "30" },
+      );
+      const after = Date.now();
+
+      assert.ok(result.includes("30"));
+
+      const { rows: [chat] } = await db.sql`SELECT debug_until FROM chats WHERE chat_id = 'cs-dbg-2'`;
+      const debugUntil = new Date(chat.debug_until).getTime();
+      const thirtyMinMs = 30 * 60 * 1000;
+      assert.ok(
+        debugUntil >= before + thirtyMinMs - 1000 &&
+          debugUntil <= after + thirtyMinMs + 1000,
+        `debug_until should be ~30min in future, got ${chat.debug_until}`,
+      );
+    },
+    async function permanent_debug_with_zero(action_fn, db) {
+      await db.sql`INSERT INTO chats(chat_id) VALUES ('cs-dbg-3') ON CONFLICT DO NOTHING`;
+      const result = await action_fn(
+        { chatId: "cs-dbg-3", rootDb: db },
+        { setting: "debug", value: "0" },
+      );
+
+      assert.ok(result.toLowerCase().includes("permanent"));
+
+      const { rows: [chat] } = await db.sql`SELECT debug_until FROM chats WHERE chat_id = 'cs-dbg-3'`;
+      assert.equal(
+        new Date(chat.debug_until).toISOString().slice(0, 10),
+        "9999-01-01",
+      );
+    },
+    async function disables_debug_with_off(action_fn, db) {
+      await db.sql`INSERT INTO chats(chat_id) VALUES ('cs-dbg-4') ON CONFLICT DO NOTHING`;
+      await db.sql`UPDATE chats SET debug_until = '9999-01-01' WHERE chat_id = 'cs-dbg-4'`;
+      const result = await action_fn(
+        { chatId: "cs-dbg-4", rootDb: db },
+        { setting: "debug", value: "off" },
+      );
+
+      assert.ok(result.toLowerCase().includes("off"));
+
+      const { rows: [chat] } = await db.sql`SELECT debug_until FROM chats WHERE chat_id = 'cs-dbg-4'`;
+      assert.equal(chat.debug_until, null);
+    },
+    async function gets_debug_status(action_fn, db) {
+      await db.sql`INSERT INTO chats(chat_id, debug_until) VALUES ('cs-dbg-5', '9999-01-01') ON CONFLICT DO NOTHING`;
+      const result = await action_fn(
+        { chatId: "cs-dbg-5", rootDb: db },
+        { setting: "debug" },
+      );
+      assert.ok(result.toLowerCase().includes("debug"));
+      assert.ok(result.toLowerCase().includes("on"));
+    },
+
+    // ── action (opt-in) ──
+    async function enables_opt_in_action(action_fn, db) {
+      await db.sql`INSERT INTO chats(chat_id) VALUES ('cs-act-1') ON CONFLICT DO NOTHING`;
+      const mockGetActions = async () => [
+        { name: "test_opt", optIn: true },
+      ];
+      const result = await action_fn(
+        { chatId: "cs-act-1", rootDb: db, getActions: mockGetActions },
+        { setting: "action", value: "test_opt true" },
+      );
+      assert.ok(result.includes("enabled"));
+      const { rows: [chat] } = await db.sql`SELECT enabled_actions FROM chats WHERE chat_id = 'cs-act-1'`;
+      assert.ok(chat.enabled_actions.includes("test_opt"));
+    },
+    async function disables_opt_in_action(action_fn, db) {
+      await db.sql`INSERT INTO chats(chat_id, enabled_actions) VALUES ('cs-act-2', '["test_opt"]'::jsonb) ON CONFLICT DO NOTHING`;
+      const mockGetActions = async () => [
+        { name: "test_opt", optIn: true },
+      ];
+      const result = await action_fn(
+        { chatId: "cs-act-2", rootDb: db, getActions: mockGetActions },
+        { setting: "action", value: "test_opt false" },
+      );
+      assert.ok(result.includes("disabled"));
+      const { rows: [chat] } = await db.sql`SELECT enabled_actions FROM chats WHERE chat_id = 'cs-act-2'`;
+      assert.ok(!chat.enabled_actions.includes("test_opt"));
+    },
+    async function rejects_non_opt_in_action(action_fn, db) {
+      await db.sql`INSERT INTO chats(chat_id) VALUES ('cs-act-3') ON CONFLICT DO NOTHING`;
+      const mockGetActions = async () => [
+        { name: "regular_action" },
+      ];
+      const result = await action_fn(
+        { chatId: "cs-act-3", rootDb: db, getActions: mockGetActions },
+        { setting: "action", value: "regular_action true" },
+      );
+      assert.ok(result.includes("not an opt-in action"));
+    },
+    async function rejects_unknown_action(action_fn, db) {
+      await db.sql`INSERT INTO chats(chat_id) VALUES ('cs-act-4') ON CONFLICT DO NOTHING`;
+      const mockGetActions = async () => /** @type {Action[]} */ ([]);
+      const result = await action_fn(
+        { chatId: "cs-act-4", rootDb: db, getActions: mockGetActions },
+        { setting: "action", value: "nonexistent true" },
+      );
+      assert.ok(result.includes("not found"));
+    },
+    async function does_not_duplicate_on_double_enable(action_fn, db) {
+      await db.sql`INSERT INTO chats(chat_id, enabled_actions) VALUES ('cs-act-5', '["test_opt"]'::jsonb) ON CONFLICT DO NOTHING`;
+      const mockGetActions = async () => [
+        { name: "test_opt", optIn: true },
+      ];
+      await action_fn(
+        { chatId: "cs-act-5", rootDb: db, getActions: mockGetActions },
+        { setting: "action", value: "test_opt true" },
+      );
+      const { rows: [chat] } = await db.sql`SELECT enabled_actions FROM chats WHERE chat_id = 'cs-act-5'`;
+      const count = chat.enabled_actions.filter(/** @param {string} a */ (a) => a === "test_opt").length;
+      assert.equal(count, 1);
+    },
+    async function shows_action_usage_when_missing_args(action_fn, db) {
+      await db.sql`INSERT INTO chats(chat_id) VALUES ('cs-act-6') ON CONFLICT DO NOTHING`;
+      const result = await action_fn(
+        { chatId: "cs-act-6", rootDb: db, getActions: async () => [] },
+        { setting: "action", value: "just_one_arg" },
+      );
+      assert.ok(result.includes("Usage"));
+    },
+    async function gets_enabled_actions_list(action_fn, db) {
+      await db.sql`INSERT INTO chats(chat_id, enabled_actions) VALUES ('cs-act-7', '["track_purchases"]'::jsonb) ON CONFLICT DO NOTHING`;
+      const result = await action_fn(
+        { chatId: "cs-act-7", rootDb: db },
+        { setting: "action" },
+      );
+      assert.ok(result.includes("track_purchases"));
     },
   ],
-  action_fn: async function ({ chatId, rootDb }, { setting, value }) {
+  action_fn: async function ({ chatId, rootDb, senderIds, getActions }, { setting, value }) {
     if (!setting || !SETTINGS.includes(setting)) {
       return `Available settings: ${SETTINGS.join(", ")}`;
     }
@@ -378,6 +695,6 @@ export default /** @type {defineAction} */ ((x) => x)({
       return getSetting(rootDb, chatId, setting);
     }
 
-    return setSetting(rootDb, chatId, setting, String(value));
+    return setSetting(rootDb, chatId, setting, String(value), { senderIds, getActions });
   },
 });
