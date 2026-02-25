@@ -64,15 +64,14 @@ export default /** @type {defineAction} */ ((x) => x)({
       );
       assert.ok(customResult.toLowerCase().includes("custom"), "should say custom prompt");
     },
-    async function shows_response_modes(action_fn, db) {
-      await db.sql`INSERT INTO chats(chat_id, respond_on_any, respond_on_mention, respond_on_reply)
-        VALUES ('act-info-5', true, false, true) ON CONFLICT DO NOTHING`;
+    async function shows_respond_on(action_fn, db) {
+      await db.sql`INSERT INTO chats(chat_id, respond_on)
+        VALUES ('act-info-5', 'mention+reply') ON CONFLICT DO NOTHING`;
       const result = await action_fn(
         { chatId: "act-info-5", rootDb: db, senderIds: ["u1"] },
         {},
       );
-      assert.ok(result.includes("any"), "should include respond_on_any");
-      assert.ok(result.includes("reply"), "should include respond_on_reply");
+      assert.ok(result.includes("mention+reply"), "should include respond_on value");
     },
     async function shows_memory_settings(action_fn, db) {
       await db.sql`INSERT INTO chats(chat_id, memory, memory_threshold) VALUES ('act-info-6', true, 0.5) ON CONFLICT DO NOTHING`;
@@ -108,14 +107,8 @@ export default /** @type {defineAction} */ ((x) => x)({
 
     const status = chat.is_enabled ? "enabled" : "disabled";
     const model = chat.model || `${config.model} (default)`;
-    const prompt = chat.system_prompt ? "custom (!get prompt)" : "default";
-
-    /** @type {string[]} */
-    const respondModes = [];
-    if (chat.respond_on_any) respondModes.push("any");
-    if (chat.respond_on_mention) respondModes.push("mention");
-    if (chat.respond_on_reply) respondModes.push("reply");
-    const response = respondModes.join(", ") || "none";
+    const prompt = chat.system_prompt ? "custom (!set system_prompt)" : "default";
+    const response = chat.respond_on ?? "mention";
 
     const memoryOn = chat.memory ? "on" : "off";
     const threshold = chat.memory_threshold ?? config.memory_threshold;
