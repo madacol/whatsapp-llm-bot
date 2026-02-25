@@ -20,6 +20,12 @@ import {
 } from "./message-formatting.js";
 import { translateUnsupportedContent } from "./content-translator.js";
 import { getRootDb } from "./db.js";
+import {
+  extractTextFromMessage,
+  storeMessageEmbedding,
+  findSimilarMessages,
+  formatMemoryContext,
+} from "./memory.js";
 
 /**
  * Type guard: checks that an action has a command string.
@@ -138,7 +144,11 @@ async function executeAndStoreTool({
         ? "[recalled prior messages]"
         : JSON.stringify(functionResponse.result)}],
     };
-    await addMessage(chatId, toolMessage, senderIds);
+    const storedToolMsg = await addMessage(chatId, toolMessage, senderIds);
+    if (actionLlmClient) {
+      storeMessageEmbedding(getRootDb(), actionLlmClient, storedToolMsg.message_id, toolMessage)
+        .catch(err => console.error("Embedding failed:", err));
+    }
 
     const resultMessage =
       typeof functionResponse.result === "string"
@@ -162,7 +172,11 @@ async function executeAndStoreTool({
       tool_id: toolCall.id,
       content: [{type: "text", text: errorMessage}],
     };
-    await addMessage(chatId, toolError, senderIds);
+    const storedToolError = await addMessage(chatId, toolError, senderIds);
+    if (actionLlmClient) {
+      storeMessageEmbedding(getRootDb(), actionLlmClient, storedToolError.message_id, toolError)
+        .catch(err => console.error("Embedding failed:", err));
+    }
 
     if (context.isDebug) {
       await context.sendMessage(`❌ *Tool Error*    [${shortId}]`, errorMessage);
@@ -238,7 +252,9 @@ async function processLlmResponse({
 
     if (!responseMessage.tool_calls) {
       formattedMessages.push(responseMessage);
-      await addMessage(chatId, assistantMessage, senderIds);
+      const storedAssistant = await addMessage(chatId, assistantMessage, senderIds);
+      storeMessageEmbedding(getRootDb(), llmClient, storedAssistant.message_id, assistantMessage)
+        .catch(err => console.error("Embedding failed:", err));
       return;
     }
 
@@ -253,7 +269,9 @@ async function processLlmResponse({
       await displayToolCall(toolCall, context);
     }
 
-    await addMessage(chatId, assistantMessage, senderIds);
+    const storedAssistantWithTools = await addMessage(chatId, assistantMessage, senderIds);
+    storeMessageEmbedding(getRootDb(), llmClient, storedAssistantWithTools.message_id, assistantMessage)
+      .catch(err => console.error("Embedding failed:", err));
     formattedMessages.push(responseMessage);
 
     // Execute each tool call
@@ -407,7 +425,11 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
     // Always store the message so it's available in history for future responses
     /** @type {UserMessage} */
     const message = {role: "user", content}
-    await addMessage(chatId, message, senderIds);
+    const storedUserMsg = await addMessage(chatId, message, senderIds);
+
+    // Fire-and-forget: embed the message for long-term memory
+    storeMessageEmbedding(getRootDb(), llmClient, storedUserMsg.message_id, message)
+      .catch(err => console.error("Embedding failed:", err));
 
     if (!willRespond) {
       return;
@@ -432,6 +454,19 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
     if (skippedTypes.size > 0) {
       const types = [...skippedTypes].join(", ");
       await context.sendMessage(`⚠️ This model doesn't support ${types} content. The ${types} was not sent to the model. Use !set content-model to configure a translation model.`);
+    }
+
+    // Search long-term memory for relevant past conversations
+    const currentText = extractTextFromMessage(message);
+    if (currentText.length >= 10) {
+      try {
+        const similar = await findSimilarMessages(getRootDb(), llmClient, chatId, currentText);
+        if (similar.length > 0) {
+          systemPrompt += "\n\n## Relevant past conversations\n" + formatMemoryContext(similar);
+        }
+      } catch (err) {
+        console.error("Memory search failed:", err);
+      }
     }
 
     // Prepare messages for OpenAI

@@ -1,4 +1,5 @@
 import { PGlite } from "@electric-sql/pglite";
+import { vector } from "@electric-sql/pglite/vector";
 import { mkdirSync } from "node:fs";
 
 /** @type {Map<string, PGlite>} */
@@ -26,7 +27,7 @@ export function getDb(dataDir) {
   // In test mode, reuse a single shared in-memory PGlite to avoid OOM
   if (process.env.TESTING) {
     if (!sharedTestDb) {
-      sharedTestDb = new PGlite("memory://");
+      sharedTestDb = new PGlite("memory://", { extensions: { vector } });
     }
     dbCache.set(dataDir, sharedTestDb);
     return sharedTestDb;
@@ -37,7 +38,7 @@ export function getDb(dataDir) {
     mkdirSync(dataDir, { recursive: true });
   }
 
-  const createdDb = new PGlite(dataDir);
+  const createdDb = new PGlite(dataDir, { extensions: { vector } });
   dbCache.set(dataDir, createdDb);
   return createdDb;
 }

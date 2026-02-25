@@ -2,6 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { createServer } from "node:http";
 import { PGlite } from "@electric-sql/pglite";
+import { vector } from "@electric-sql/pglite/vector";
 import { initStore } from "../store.js";
 
 const MODELS_CACHE_PATH = path.resolve("data/models.json");
@@ -73,7 +74,7 @@ let sharedTestDb = null;
  */
 export async function createTestDb() {
   if (sharedTestDb) return sharedTestDb;
-  const db = new PGlite("memory://");
+  const db = new PGlite("memory://", { extensions: { vector } });
   await initStore(db);
   sharedTestDb = db;
   return db;
@@ -113,6 +114,19 @@ export async function createMockLlmServer() {
         res.end(JSON.stringify({ error: { message: "Invalid JSON" } }));
         return;
       }
+
+      // Handle embedding requests separately — return a dummy embedding
+      if (req.url?.includes("/embeddings")) {
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({
+          object: "list",
+          data: [{ object: "embedding", index: 0, embedding: Array.from({ length: 3 }, () => Math.random()) }],
+          model: "mock-embedding",
+          usage: { prompt_tokens: 1, total_tokens: 1 },
+        }));
+        return;
+      }
+
       requests.push(parsed);
 
       const next = queue.shift();
