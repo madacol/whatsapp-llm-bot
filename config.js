@@ -52,5 +52,4 @@ export default {
   brave_api_key: process.env.BRAVE_API_KEY,
   content_model: process.env.CONTENT_MODEL || "",
   embedding_model: process.env.EMBEDDING_MODEL || "google/gemini-embedding-001",
-  enable_memory: process.env.ENABLE_MEMORY === "true",
 };
