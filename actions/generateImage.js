@@ -89,8 +89,12 @@ export default /** @type {defineAction} */ ((x) => x)({
         assert.equal(sentImages.length, 1);
         assert.ok(Buffer.isBuffer(sentImages[0].image));
         assert.equal(sentImages[0].caption, "A beautiful sunset");
-        assert.ok(typeof result === "string");
-        assert.ok(result.includes("1 image"));
+        // Returns ActionSignal with content blocks
+        assert.equal(result.autoContinue, false);
+        assert.ok(Array.isArray(result.result));
+        const blocks = /** @type {ToolContentBlock[]} */ (result.result);
+        assert.ok(blocks.some((b) => b.type === "text"));
+        assert.ok(blocks.some((b) => b.type === "image"));
       } finally {
         globalThis.fetch = originalFetch;
       }
@@ -254,11 +258,27 @@ export default /** @type {defineAction} */ ((x) => x)({
       return textContent || "The model did not generate any images.";
     }
 
+    /** @type {ToolContentBlock[]} */
+    const contentBlocks = [];
+
+    const summary = `Generated ${images.length} image${images.length > 1 ? "s" : ""}.`;
+    contentBlocks.push({ type: "text", text: textContent || summary });
+
     for (const img of images) {
-      const { buffer } = parseDataUrl(img.image_url.url);
+      const { mime_type, buffer } = parseDataUrl(img.image_url.url);
+      const base64 = buffer.toString("base64");
+      contentBlocks.push({
+        type: "image",
+        encoding: "base64",
+        mime_type,
+        data: base64,
+      });
       await context.sendImage(buffer, textContent || undefined);
     }
 
-    return `Generated ${images.length} image${images.length > 1 ? "s" : ""}.`;
+    return /** @type {ActionSignal} */ ({
+      result: contentBlocks,
+      autoContinue: false,
+    });
   },
 });
