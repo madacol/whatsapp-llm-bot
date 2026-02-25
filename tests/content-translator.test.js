@@ -358,7 +358,7 @@ describe("content-translator", () => {
       }
     });
 
-    it("skips video with placeholder even when translation model is configured", async () => {
+    it("translates video to text description when content model is configured", async () => {
       const { translateUnsupportedContent } = await import(
         "../content-translator.js"
       );
@@ -378,14 +378,16 @@ describe("content-translator", () => {
             architecture: { input_modalities: ["text"] },
           },
           {
-            id: "vision/model",
-            name: "Vision",
+            id: "video-capable/model",
+            name: "Video Model",
             context_length: 4096,
             pricing: { prompt: "0.000001", completion: "0.000001" },
-            architecture: { input_modalities: ["text", "image"] },
+            architecture: { input_modalities: ["text", "video"] },
           },
         ]),
       );
+
+      mockServer.addResponses("A short video showing a person waving");
 
       try {
         /** @type {MessageRow[]} */
@@ -410,12 +412,10 @@ describe("content-translator", () => {
           },
         ];
 
-        // Even with a translation model configured, video should be skipped
-        // because we can't send video data to LLMs
         const result = await translateUnsupportedContent(
           messages,
           "text-only/model",
-          { video: "vision/model" },
+          { video: "video-capable/model" },
           llmClient,
           db,
         );
@@ -425,10 +425,10 @@ describe("content-translator", () => {
         assert.equal(content[0].text, "check this video");
         assert.equal(content[1].type, "text");
         assert.ok(
-          content[1].text.includes("[Unsupported"),
-          `Should be placeholder, got: ${content[1].text}`,
+          content[1].text.includes("A short video showing a person waving"),
+          `Should contain translation, got: ${content[1].text}`,
         );
-        assert.deepEqual(result.skippedTypes, new Set(["video"]));
+        assert.deepEqual(result.skippedTypes, new Set());
       } finally {
         await fs.rm(cachePath, { force: true });
       }
