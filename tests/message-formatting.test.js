@@ -505,6 +505,27 @@ describe("formatMessagesForOpenAI", () => {
     assert.equal(content[0].input_audio.data, "def456");
   });
 
+  it("converts user video message to video_url", async () => {
+    const messages = [
+      {
+        message_data: {
+          role: "user",
+          content: [
+            { type: "video", mime_type: "video/mp4", data: "fakevideo", encoding: "base64" },
+          ],
+        },
+        sender_id: "user-1",
+      },
+    ];
+    const result = await formatMessagesForOpenAI(messages);
+
+    assert.equal(result.length, 1);
+    const content = /** @type {any[]} */ (result[0].content);
+    assert.equal(content.length, 1);
+    assert.equal(content[0].type, "video_url");
+    assert.equal(content[0].video_url.url, "data:video/mp4;base64,fakevideo");
+  });
+
   it("strips leading tool results from message list", async () => {
     const messages = [
       // newest first (before reverse)

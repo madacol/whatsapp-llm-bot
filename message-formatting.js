@@ -173,6 +173,14 @@ async function formatUserContent(message) {
         });
         break;
       }
+      case "video": {
+        const videoUrl = `data:${contentBlock.mime_type};base64,${contentBlock.data}`;
+        parts.push(/** @type {*} */ ({
+          type: "video_url",
+          video_url: { url: videoUrl },
+        }));
+        break;
+      }
     }
   }
 
