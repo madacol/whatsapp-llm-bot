@@ -101,6 +101,22 @@ export default /** @type {defineAction} */ ((x) => x)({
       assert.ok(result.includes("openai/gpt-4o"), "should include content model");
       assert.ok(result.includes("image"), "should include content type");
     },
+    async function shows_enabled_opt_in_actions(action_fn, db) {
+      await db.sql`INSERT INTO chats(chat_id, enabled_actions) VALUES ('act-info-9', '["track_purchases"]'::jsonb) ON CONFLICT DO NOTHING`;
+      const result = await action_fn(
+        { chatId: "act-info-9", rootDb: db, senderIds: ["u1"] },
+        {},
+      );
+      assert.ok(result.includes("track_purchases"), "should include enabled opt-in action");
+    },
+    async function shows_none_when_no_opt_in_actions(action_fn, db) {
+      await db.sql`INSERT INTO chats(chat_id) VALUES ('act-info-10') ON CONFLICT DO NOTHING`;
+      const result = await action_fn(
+        { chatId: "act-info-10", rootDb: db, senderIds: ["u1"] },
+        {},
+      );
+      assert.ok(result.includes("none"), "should show none for opt-in actions");
+    },
   ],
   action_fn: async function ({ chatId, rootDb, senderIds }) {
     const chat = await getChatOrThrow(rootDb, chatId);
@@ -122,6 +138,9 @@ export default /** @type {defineAction} */ ((x) => x)({
       ? contentModelEntries.map(([type, m]) => `${type}: ${m}`).join(", ")
       : "default";
 
+    const enabledActions = chat.enabled_actions ?? [];
+    const optInStr = enabledActions.length > 0 ? enabledActions.join(", ") : "none";
+
     const lines = [
       `*Chat:* ${chatId}`,
       `*Status:* ${status}`,
@@ -132,6 +151,7 @@ export default /** @type {defineAction} */ ((x) => x)({
       `*Memory:* ${memoryOn} (threshold: ${threshold})`,
       `*Debug:* ${debug}`,
       `*Content models:* ${contentStr}`,
+      `*Opt-in actions:* ${optInStr}`,
     ];
 
     return lines.join("\n");

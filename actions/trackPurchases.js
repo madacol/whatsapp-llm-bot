@@ -221,6 +221,7 @@ export { EXTRACT_PROMPT, parseExtractResponse, ensureSchema, getOrCreateLedger, 
 export default /** @type {defineAction} */ ((x) => x)({
   name: "track_purchases",
   command: "compras",
+  optIn: true,
   description: "When the user sends an image that looks like a receipt or invoice, call this with action='extract' to extract and save the purchase data. Also use for: purchase history ('history'), spending summary ('summary'), deleting a purchase ('delete'), and ledger management ('list_ledgers', 'rename_ledger', 'delete_ledger').",
   parameters: {
     type: "object",

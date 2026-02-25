@@ -824,3 +824,47 @@ describe("Scenario 11: getMessageContent extraction", () => {
     );
   });
 });
+
+// ═══════════════════════════════════════════════════════════════════
+// Scenario: Opt-in actions filtered out unless enabled
+// ═══════════════════════════════════════════════════════════════════
+describe("Opt-in action filtering", () => {
+  const chatId = "opt-in-chat";
+
+  before(async () => {
+    await seedChat(chatId, { enabled: true });
+  });
+
+  it("opt-in action command fails when not enabled for chat", async () => {
+    const { context, responses } = createIncomingContext({
+      chatId,
+      content: [{ type: "text", text: "!compras history" }],
+    });
+    await handleMessage(context);
+
+    assert.ok(responses.length > 0);
+    assert.ok(
+      responses.some((r) => r.text.toLowerCase().includes("unknown command")),
+      `Should reject opt-in command, got: ${JSON.stringify(responses.map(r => r.text))}`,
+    );
+  });
+
+  it("opt-in action works after enabling it", async () => {
+    // Enable the opt-in action
+    await testDb.sql`UPDATE chats SET enabled_actions = '["track_purchases"]'::jsonb WHERE chat_id = ${chatId}`;
+
+    // The command should now be recognized (it'll fail because there's no actual
+    // data, but it should NOT say "unknown command")
+    const { context, responses } = createIncomingContext({
+      chatId,
+      content: [{ type: "text", text: "!compras history" }],
+    });
+    await handleMessage(context);
+
+    assert.ok(responses.length > 0);
+    assert.ok(
+      !responses.some((r) => r.text.toLowerCase().includes("unknown command")),
+      `Should recognize opt-in command after enabling, got: ${JSON.stringify(responses.map(r => r.text))}`,
+    );
+  });
+});
