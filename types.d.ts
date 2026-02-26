@@ -180,6 +180,8 @@ type Action<P extends PermissionFlags = PermissionFlags> = {
   name: string;
   command?: string; // Optional command for direct execution
   description: string;
+  /** Detailed usage instructions injected into the system prompt only after the action is first called in a turn. */
+  instructions?: string;
   scope?: "chat" | "global";
   optIn?: true; // When true, action is only available in chats that explicitly enable it
   parameters: {

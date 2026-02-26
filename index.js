@@ -222,7 +222,9 @@ async function executeAndStoreTool({
  */
 async function processLlmResponse({ session, llmConfig, formattedMessages }) {
   const { chatId, senderIds, context, addMessage } = session;
-  const { llmClient, chatModel, systemPrompt, actions } = llmConfig;
+  const { llmClient, chatModel, actions } = llmConfig;
+  let { systemPrompt } = llmConfig;
+  const injectedActions = new Set();
   let depth = 0;
 
   while (depth < MAX_TOOL_CALL_DEPTH) {
@@ -231,7 +233,7 @@ async function processLlmResponse({ session, llmConfig, formattedMessages }) {
       response = await llmClient.chat.completions.create({
         model: chatModel,
         messages: [
-          { role: "system", content: systemPrompt },
+          { role: "system", content: [{ type: "text", text: systemPrompt, cache_control: { type: "ephemeral" } }] },
           ...formattedMessages,
         ],
         tools: actionsToOpenAIFormat(actions),
@@ -245,6 +247,13 @@ async function processLlmResponse({ session, llmConfig, formattedMessages }) {
         "An error occurred while processing the message.\n\n" + errorMessage,
       );
       return;
+    }
+
+    if (response.usage) {
+      const cached = response.usage.prompt_tokens_details?.cached_tokens ?? 0;
+      const prompt = response.usage.prompt_tokens;
+      const completion = response.usage.completion_tokens;
+      console.log(`[LLM usage] prompt=${prompt} cached=${cached} completion=${completion} model=${chatModel}`);
     }
 
     const responseMessage = response.choices[0].message;
@@ -291,6 +300,17 @@ async function processLlmResponse({ session, llmConfig, formattedMessages }) {
         session, llmConfig, toolCall, formattedMessages,
       });
       if (shouldContinue) continueProcessing = true;
+    }
+
+    // Inject detailed instructions for newly-used actions into the system prompt
+    for (const toolCall of responseMessage.tool_calls) {
+      const name = toolCall.function.name;
+      if (injectedActions.has(name)) continue;
+      const action = actions.find(a => a.name === name);
+      if (action?.instructions) {
+        systemPrompt += `\n\n## ${action.name} instructions\n${action.instructions}`;
+        injectedActions.add(name);
+      }
     }
 
     if (!continueProcessing) return;

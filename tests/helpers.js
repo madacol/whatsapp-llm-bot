@@ -109,7 +109,9 @@ export async function createTestDb() {
  *   url: string,
  *   close: () => Promise<void>,
  *   addResponses: (...responses: Array<string | {tool_calls: any[]}>) => void,
- *   getRequests: () => object[]
+ *   getRequests: () => object[],
+ *   clearRequests: () => void,
+ *   pendingResponses: () => number,
  * }>}
  */
 export async function createMockLlmServer() {
@@ -184,6 +186,12 @@ export async function createMockLlmServer() {
             finish_reason: responseMessage.tool_calls ? "tool_calls" : "stop",
           },
         ],
+        usage: {
+          prompt_tokens: 10,
+          completion_tokens: 5,
+          total_tokens: 15,
+          prompt_tokens_details: { cached_tokens: 8 },
+        },
       };
 
       res.writeHead(200, { "Content-Type": "application/json" });
@@ -200,6 +208,8 @@ export async function createMockLlmServer() {
     close: () => new Promise((resolve) => server.close(() => resolve(undefined))),
     addResponses: (...responses) => queue.push(...responses),
     getRequests: () => requests,
+    clearRequests: () => { requests.length = 0; },
+    pendingResponses: () => queue.length,
   };
 }
 
