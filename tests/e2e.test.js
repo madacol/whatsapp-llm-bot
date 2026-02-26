@@ -15,6 +15,7 @@ import {
   seedChat as seedChat_,
 } from "./helpers.js";
 import { setDb } from "../db.js";
+import { startHtmlServer, stopHtmlServer } from "../html-server.js";
 
 /** @type {Awaited<ReturnType<typeof createMockLlmServer>>} */
 let mockServer;
@@ -855,6 +856,110 @@ describe("Opt-in action filtering", () => {
     assert.ok(
       !responses.some((r) => r.text.toLowerCase().includes("unknown command")),
       `Should recognize opt-in command after enabling, got: ${JSON.stringify(responses.map(r => r.text))}`,
+    );
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════
+// Scenario: HtmlContent from LLM tool call sends link URL
+// ═══════════════════════════════════════════════════════════════════
+describe("HtmlContent via LLM tool call", () => {
+  const chatId = "html-tool-chat";
+  /** @type {number} */
+  let htmlPort;
+
+  before(async () => {
+    await seedChat(chatId, { enabled: true });
+    await testDb.sql`UPDATE chats SET debug_until = '9999-01-01' WHERE chat_id = ${chatId}`;
+    htmlPort = await startHtmlServer(0, testDb);
+    process.env.HTML_SERVER_BASE_URL = `http://127.0.0.1:${htmlPort}`;
+  });
+
+  after(async () => {
+    await stopHtmlServer();
+    delete process.env.HTML_SERVER_BASE_URL;
+  });
+
+  it("sends link URL to user when tool returns HtmlContent", async () => {
+    mockServer.addResponses(
+      {
+        tool_calls: [
+          {
+            id: "call_html_001",
+            type: "function",
+            function: {
+              name: "run_javascript",
+              arguments: JSON.stringify({
+                code: '() => ({ __brand: "html", html: "<h1>Report</h1>", title: "Sales Report" })',
+              }),
+            },
+          },
+        ],
+      },
+      "Here is your report!",
+    );
+
+    const { context, responses } = createIncomingContext({
+      chatId,
+      content: [{ type: "text", text: "Generate a report" }],
+    });
+    await handleMessage(context);
+
+    // Should have a response containing /page/ link
+    const linkResponse = responses.find((r) => r.text.includes("/page/"));
+    assert.ok(
+      linkResponse,
+      `Should send a page link, got: ${responses.map(r => r.text).join(" | ")}`,
+    );
+    assert.ok(
+      linkResponse.text.includes("Sales Report"),
+      `Link text should include the title, got: ${linkResponse.text}`,
+    );
+
+    // Verify the page is actually accessible
+    const urlMatch = linkResponse.text.match(/(http:\/\/[^\s]+)/);
+    assert.ok(urlMatch, "Should contain a URL");
+    const pageRes = await fetch(urlMatch[1]);
+    assert.equal(pageRes.status, 200);
+    const body = await pageRes.text();
+    assert.ok(body.includes("<h1>Report</h1>"));
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════
+// Scenario: HtmlContent from !command sends link URL
+// ═══════════════════════════════════════════════════════════════════
+describe("HtmlContent via !command", () => {
+  const chatId = "html-cmd-chat";
+  /** @type {number} */
+  let htmlPort;
+
+  before(async () => {
+    await seedChat(chatId, { enabled: true });
+    htmlPort = await startHtmlServer(0, testDb);
+    process.env.HTML_SERVER_BASE_URL = `http://127.0.0.1:${htmlPort}`;
+  });
+
+  after(async () => {
+    await stopHtmlServer();
+    delete process.env.HTML_SERVER_BASE_URL;
+  });
+
+  it("sends link URL when !js returns HtmlContent", async () => {
+    const { context, responses } = createIncomingContext({
+      chatId,
+      content: [{ type: "text", text: '!js () => ({ __brand: "html", html: "<p>Hello</p>", title: "Test" })' }],
+    });
+    await handleMessage(context);
+
+    const linkResponse = responses.find((r) => r.text.includes("/page/"));
+    assert.ok(
+      linkResponse,
+      `Should send a page link, got: ${responses.map(r => r.text).join(" | ")}`,
+    );
+    assert.ok(
+      linkResponse.text.includes("Test"),
+      `Link text should include the title, got: ${linkResponse.text}`,
     );
   });
 });

@@ -6,7 +6,7 @@ import OpenAI from "openai";
 import { getActions, executeAction, getChatActions, getChatAction, getAction } from "./actions.js";
 import config from "./config.js";
 import { createLlmClient } from "./llm.js";
-import { shortenToolId, formatTime, truncateWithSummary } from "./utils.js";
+import { shortenToolId, formatTime, truncateWithSummary, isHtmlContent } from "./utils.js";
 import { connectToWhatsApp } from "./whatsapp-adapter.js";
 import { startReminderDaemon } from "./reminder-daemon.js";
 import { startModelsCacheDaemon } from "./models-cache.js";
@@ -26,6 +26,7 @@ import {
   formatMemoriesContext,
 } from "./memory.js";
 import { storeLlmContext } from "./context-log.js";
+import { storePage } from "./html-store.js";
 
 /**
  * Type guard: checks that an action has a command string.
@@ -151,6 +152,30 @@ async function executeAndStoreTool({
     console.log("response", functionResponse);
 
     const result = functionResponse.result;
+
+    // HTML content → store page, send link, treat as text for LLM context
+    if (isHtmlContent(result)) {
+      const pageId = await storePage(getRootDb(), result.html, result.title);
+      const baseUrl = config.html_server_base_url || `http://localhost:${config.html_server_port}`;
+      const pageUrl = `${baseUrl}/page/${pageId}`;
+      const linkText = result.title ? `${result.title}: ${pageUrl}` : pageUrl;
+
+      /** @type {ToolMessage} */
+      const toolMessage = {
+        role: "tool",
+        tool_id: toolCall.id,
+        content: [{ type: "text", text: linkText }],
+      };
+      await addMessage(chatId, toolMessage, senderIds);
+      await displayToolResult(linkText, shortId, functionResponse.permissions, context);
+
+      /** @type {OpenAI.ChatCompletionMessageParam} */
+      const toolResultMessage = { role: "tool", tool_call_id: toolCall.id, content: linkText };
+      formattedMessages.push(toolResultMessage);
+
+      return !!functionResponse.permissions.autoContinue;
+    }
+
     const isContentBlocks = Array.isArray(result)
       && result.length > 0
       && typeof result[0] === "object"
@@ -427,7 +452,13 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
       try {
         const { result } = await executeActionFn(action.name, context, params, null, actionResolver, llmClient);
 
-        if (typeof result === "string") {
+        if (isHtmlContent(result)) {
+          const pageId = await storePage(getRootDb(), result.html, result.title);
+          const baseUrl = config.html_server_base_url || `http://localhost:${config.html_server_port}`;
+          const pageUrl = `${baseUrl}/page/${pageId}`;
+          const linkText = result.title ? `${result.title}: ${pageUrl}` : pageUrl;
+          await context.reply(linkText);
+        } else if (typeof result === "string") {
           await context.reply(result);
         }
       } catch (error) {
