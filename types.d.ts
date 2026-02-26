@@ -169,7 +169,9 @@ type ExtendedActionContext<P extends PermissionFlags> = ActionContext
 
 type ToolContentBlock = TextContentBlock | ImageContentBlock | VideoContentBlock | AudioContentBlock;
 
-type ActionResult = string | {} | HTMLElement;
+type HtmlContent = { __brand: "html"; html: string; title?: string };
+
+type ActionResult = string | {} | HtmlContent;
 
 type ActionSignal = {
   result: ActionResult | ToolContentBlock[];
@@ -224,3 +226,6 @@ type App = {
 function defineAction<P extends PermissionFlags>(action: Action<P>): Action<P> {
   return action;
 }
+
+declare function html(content: string, title?: string): HtmlContent;
+declare function isHtmlContent(value: unknown): value is HtmlContent;
