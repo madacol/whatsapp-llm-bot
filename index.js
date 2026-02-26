@@ -27,6 +27,7 @@ import {
 } from "./memory.js";
 import { storeLlmContext } from "./context-log.js";
 import { storePage } from "./html-store.js";
+import { startHtmlServer, stopHtmlServer } from "./html-server.js";
 
 /**
  * Type guard: checks that an action has a command string.
@@ -570,6 +571,8 @@ if (!process.env.TESTING) {
     executeActionFn: executeAction,
   });
 
+  await startHtmlServer(config.html_server_port, getRootDb());
+
   const { closeWhatsapp, sendToChat } = await connectToWhatsApp(handleMessage)
     .catch(async (error) => {
       console.error("Initialization error:", error);
@@ -584,6 +587,7 @@ if (!process.env.TESTING) {
     try {
       stopReminders();
       stopModelsCache();
+      await stopHtmlServer();
       await closeWhatsapp();
       await store.closeDb();
     } catch (error) {
