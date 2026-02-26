@@ -128,7 +128,18 @@ export async function initStore(injectedDb){
         db.sql`ALTER TABLE messages ADD COLUMN IF NOT EXISTS embedding vector`,
         db.sql`ALTER TABLE messages ADD COLUMN IF NOT EXISTS search_text tsvector`,
       ]);
+      await db.sql`
+        CREATE TABLE IF NOT EXISTS memories (
+            id SERIAL PRIMARY KEY,
+            chat_id VARCHAR(50) REFERENCES chats(chat_id),
+            content TEXT NOT NULL,
+            embedding vector,
+            search_text tsvector,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+      `;
       await db.sql`CREATE INDEX IF NOT EXISTS idx_messages_search_text ON messages USING gin (search_text)`;
+      await db.sql`CREATE INDEX IF NOT EXISTS idx_memories_search_text ON memories USING gin (search_text)`;
     } catch (error) {
       console.error("Schema migration error:", error);
     }

@@ -30,6 +30,16 @@ describe("store with injected DB", () => {
     assert.ok(!tableNames.includes("media_to_text_cache"), `initStore() should not create 'media_to_text_cache' table, got: ${tableNames}`);
   });
 
+  it("memories table is created by initStore", async () => {
+    const freshDb = new PGlite("memory://", { extensions: { vector } });
+    await initStore(freshDb);
+    const { rows } = await freshDb.sql`
+      SELECT table_name FROM information_schema.tables
+      WHERE table_schema = 'public' AND table_name = 'memories'
+    `;
+    assert.equal(rows.length, 1, "memories table should exist");
+  });
+
   describe("createChat / getChat", () => {
     it("creates a chat and retrieves it", async () => {
       await store.createChat("store-test-1");
