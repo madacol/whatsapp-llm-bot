@@ -19,4 +19,6 @@ export default {
   embedding_model: process.env.EMBEDDING_MODEL || "google/gemini-embedding-001",
   image_model: process.env.IMAGE_MODEL || "google/gemini-3-pro-image-preview",
   memory_threshold: parseFloat(process.env.MEMORY_THRESHOLD || "") || 0.3,
+  html_server_port: parseInt(process.env.HTML_SERVER_PORT || "3100", 10),
+  html_server_base_url: process.env.HTML_SERVER_BASE_URL || "",
 };
