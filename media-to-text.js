@@ -116,7 +116,7 @@ function hasUnsupportedContent(messages, supportedModalities) {
  *
  * @param {MessageRow[]} messages
  * @param {string} targetModelId
- * @param {{ image?: string, audio?: string, video?: string }} mediaToTextModels
+ * @param {{ image?: string, audio?: string, video?: string, general?: string }} mediaToTextModels
  * @param {import("openai").default} llmClient
  * @param {PGlite} db
  * @returns {Promise<MediaToTextResult>}
@@ -164,7 +164,7 @@ export async function convertUnsupportedMedia(
 
       const contentType = /** @type {"image" | "audio" | "video"} */ (block.type);
       const toTextModelId =
-        mediaToTextModels[contentType] || config.media_to_text_model || "";
+        mediaToTextModels[contentType] || mediaToTextModels.general || config[`${contentType}_to_text_model`] || config.media_to_text_model || "";
 
       if (!toTextModelId || !contentBlockBuilders[contentType]) {
         // No media-to-text model configured, or no way to send this content

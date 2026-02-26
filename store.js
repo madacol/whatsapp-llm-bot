@@ -11,7 +11,7 @@ import { getRootDb } from "./db.js";
  *   respond_on_reply: boolean;
  *   respond_on: "any" | "mention+reply" | "mention";
  *   debug_until: string | null;
- *   media_to_text_models: { image?: string, audio?: string, video?: string };
+ *   media_to_text_models: { image?: string, audio?: string, video?: string, general?: string };
  *   memory: boolean;
  *   memory_threshold: number | null;
  *   enabled_actions: string[];
