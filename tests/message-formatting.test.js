@@ -559,4 +559,91 @@ describe("formatMessagesForOpenAI", () => {
     assert.equal(result.length, 1);
     assert.equal(result[0].role, "user");
   });
+
+  it("strips mid-array orphaned tool result", async () => {
+    const messages = /** @type {any} */ ([
+      // newest first
+      { message_data: { role: "user", content: [{ type: "text", text: "hello" }] }, sender_id: "user-1" },
+      { message_data: { role: "tool", tool_id: "orphan_id", content: [{ type: "text", text: "res" }] }, sender_id: "bot" },
+      { message_data: { role: "user", content: [{ type: "text", text: "hi" }] }, sender_id: "user-1" },
+    ]);
+    const result = await formatMessagesForOpenAI(messages);
+
+    assert.equal(result.length, 2);
+    assert.ok(result.every(m => m.role === "user"));
+  });
+
+  it("strips multiple orphans from one missing assistant", async () => {
+    const messages = /** @type {any} */ ([
+      // newest first
+      { message_data: { role: "user", content: [{ type: "text", text: "hello" }] }, sender_id: "user-1" },
+      { message_data: { role: "tool", tool_id: "id_B", content: [{ type: "text", text: "res2" }] }, sender_id: "bot" },
+      { message_data: { role: "tool", tool_id: "id_A", content: [{ type: "text", text: "res1" }] }, sender_id: "bot" },
+    ]);
+    const result = await formatMessagesForOpenAI(messages);
+
+    assert.equal(result.length, 1);
+    assert.equal(result[0].role, "user");
+  });
+
+  it("preserves valid tool results while stripping orphans", async () => {
+    const messages = /** @type {any} */ ([
+      // newest first
+      { message_data: { role: "user", content: [{ type: "text", text: "thanks" }] }, sender_id: "user-1" },
+      { message_data: { role: "tool", tool_id: "valid_id", content: [{ type: "text", text: "result" }] }, sender_id: "bot" },
+      {
+        message_data: {
+          role: "assistant",
+          content: [{ type: "tool", tool_id: "valid_id", name: "test_fn", arguments: "{}" }],
+        },
+        sender_id: "bot",
+      },
+      { message_data: { role: "tool", tool_id: "orphan_id", content: [{ type: "text", text: "stale" }] }, sender_id: "bot" },
+    ]);
+    const result = await formatMessagesForOpenAI(messages);
+
+    assert.equal(result.length, 3);
+    assert.ok(!result.some(m => m.role === "tool" && /** @type {any} */ (m).tool_call_id === "orphan_id"));
+  });
+
+  it("preserves all messages when fully paired", async () => {
+    const messages = /** @type {any} */ ([
+      // newest first
+      { message_data: { role: "tool", tool_id: "call_A", content: [{ type: "text", text: "done" }] }, sender_id: "bot" },
+      {
+        message_data: {
+          role: "assistant",
+          content: [{ type: "tool", tool_id: "call_A", name: "fn", arguments: "{}" }],
+        },
+        sender_id: "bot",
+      },
+      { message_data: { role: "user", content: [{ type: "text", text: "go" }] }, sender_id: "user-1" },
+    ]);
+    const result = await formatMessagesForOpenAI(messages);
+
+    assert.equal(result.length, 3);
+  });
+
+  it("strips only orphaned tool result when mixed with valid ones", async () => {
+    const messages = /** @type {any} */ ([
+      // newest first
+      { message_data: { role: "tool", tool_id: "orphan_id", content: [{ type: "text", text: "stale" }] }, sender_id: "bot" },
+      { message_data: { role: "tool", tool_id: "valid_id", content: [{ type: "text", text: "ok" }] }, sender_id: "bot" },
+      {
+        message_data: {
+          role: "assistant",
+          content: [{ type: "tool", tool_id: "valid_id", name: "fn", arguments: "{}" }],
+        },
+        sender_id: "bot",
+      },
+      { message_data: { role: "user", content: [{ type: "text", text: "go" }] }, sender_id: "user-1" },
+    ]);
+    const result = await formatMessagesForOpenAI(messages);
+
+    assert.equal(result.length, 3);
+    assert.ok(result.some(m => m.role === "user"));
+    assert.ok(result.some(m => m.role === "assistant"));
+    assert.ok(result.some(m => m.role === "tool" && /** @type {any} */ (m).tool_call_id === "valid_id"));
+    assert.ok(!result.some(m => m.role === "tool" && /** @type {any} */ (m).tool_call_id === "orphan_id"));
+  });
 });

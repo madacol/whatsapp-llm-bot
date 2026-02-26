@@ -256,8 +256,34 @@ function formatToolContent(message) {
 }
 
 /**
+ * Remove tool result messages whose tool_call_id has no matching tool_calls entry
+ * in any assistant message. This prevents 400 errors from the LLM API when
+ * conversation history contains orphaned tool results (e.g. after truncation).
+ * @param {Array<OpenAI.ChatCompletionMessageParam>} messages
+ * @returns {Array<OpenAI.ChatCompletionMessageParam>}
+ */
+function removeOrphanedToolResults(messages) {
+  /** @type {Set<string>} */
+  const validToolCallIds = new Set();
+
+  for (const msg of messages) {
+    if (msg.role === "assistant" && "tool_calls" in msg && msg.tool_calls) {
+      for (const tc of msg.tool_calls) {
+        validToolCallIds.add(tc.id);
+      }
+    }
+  }
+
+  return messages.filter(msg => {
+    if (msg.role !== "tool") return true;
+    const toolMsg = /** @type {OpenAI.ChatCompletionToolMessageParam} */ (msg);
+    return validToolCallIds.has(toolMsg.tool_call_id);
+  });
+}
+
+/**
  * Convert stored Message[] rows from the DB into OpenAI ChatCompletionMessageParam[].
- * Strips leading tool results and handles user/assistant/tool roles.
+ * Removes orphaned tool results and handles user/assistant/tool roles.
  * @param {Array<{message_data: Message, sender_id: string}>} chatMessages - Rows from DB (newest first)
  * @returns {Promise<Array<OpenAI.ChatCompletionMessageParam>>}
  */
@@ -265,11 +291,6 @@ export async function formatMessagesForOpenAI(chatMessages) {
   /** @type {Array<OpenAI.ChatCompletionMessageParam>} */
   const formatted = [];
   const reversedMessages = [...chatMessages].reverse();
-
-  // remove starting tool results from the messages
-  while (reversedMessages[0]?.message_data?.role === "tool") {
-    reversedMessages.shift();
-  }
 
   for (const msg of reversedMessages) {
     switch (msg.message_data?.role) {
@@ -289,5 +310,5 @@ export async function formatMessagesForOpenAI(chatMessages) {
     }
   }
 
-  return formatted;
+  return removeOrphanedToolResults(formatted);
 }
