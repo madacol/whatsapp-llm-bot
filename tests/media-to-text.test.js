@@ -10,36 +10,36 @@ before(async () => {
   db = await createTestDb();
 });
 
-describe("content-translator", () => {
-  describe("ensureTranslationSchema", () => {
-    it("creates the content_translations table", async () => {
-      const { ensureTranslationSchema } = await import(
-        "../content-translator.js"
+describe("media-to-text", () => {
+  describe("ensureMediaToTextSchema", () => {
+    it("creates the media_to_text_cache table", async () => {
+      const { ensureMediaToTextSchema } = await import(
+        "../media-to-text.js"
       );
-      await ensureTranslationSchema(db);
+      await ensureMediaToTextSchema(db);
 
       // Inserting and querying should work
-      await db.sql`INSERT INTO content_translations (content_hash, model_id, translation)
+      await db.sql`INSERT INTO media_to_text_cache (content_hash, model_id, translation)
         VALUES ('abc123', 'test/model', 'A test translation')`;
       const {
         rows: [row],
-      } = await db.sql`SELECT * FROM content_translations WHERE content_hash = 'abc123'`;
+      } = await db.sql`SELECT * FROM media_to_text_cache WHERE content_hash = 'abc123'`;
       assert.equal(row.content_hash, "abc123");
       assert.equal(row.model_id, "test/model");
       assert.equal(row.translation, "A test translation");
     });
 
     it("is idempotent", async () => {
-      const { ensureTranslationSchema } = await import(
-        "../content-translator.js"
+      const { ensureMediaToTextSchema } = await import(
+        "../media-to-text.js"
       );
-      await ensureTranslationSchema(db);
-      await ensureTranslationSchema(db);
+      await ensureMediaToTextSchema(db);
+      await ensureMediaToTextSchema(db);
       // No error thrown
     });
   });
 
-  describe("translateUnsupportedContent", () => {
+  describe("convertUnsupportedMedia", () => {
     /** @type {Awaited<ReturnType<typeof createMockLlmServer>>} */
     let mockServer;
     /** @type {import("openai").default} */
@@ -51,10 +51,10 @@ describe("content-translator", () => {
         apiKey: "test-key",
         baseURL: mockServer.url,
       });
-      const { ensureTranslationSchema } = await import(
-        "../content-translator.js"
+      const { ensureMediaToTextSchema } = await import(
+        "../media-to-text.js"
       );
-      await ensureTranslationSchema(db);
+      await ensureMediaToTextSchema(db);
     });
 
     after(async () => {
@@ -62,12 +62,12 @@ describe("content-translator", () => {
     });
 
     afterEach(async () => {
-      await db.sql`DELETE FROM content_translations`;
+      await db.sql`DELETE FROM media_to_text_cache`;
     });
 
     it("returns messages unchanged when model supports all modalities", async () => {
-      const { translateUnsupportedContent } = await import(
-        "../content-translator.js"
+      const { convertUnsupportedMedia } = await import(
+        "../media-to-text.js"
       );
 
       await withModelsCache([
@@ -101,7 +101,7 @@ describe("content-translator", () => {
           },
         ];
 
-        const result = await translateUnsupportedContent(
+        const result = await convertUnsupportedMedia(
           messages,
           "openai/gpt-4o",
           {},
@@ -116,8 +116,8 @@ describe("content-translator", () => {
     });
 
     it("translates image content when model only supports text", async () => {
-      const { translateUnsupportedContent } = await import(
-        "../content-translator.js"
+      const { convertUnsupportedMedia } = await import(
+        "../media-to-text.js"
       );
 
       await withModelsCache([
@@ -160,7 +160,7 @@ describe("content-translator", () => {
           },
         ];
 
-        const result = await translateUnsupportedContent(
+        const result = await convertUnsupportedMedia(
           messages,
           "deepseek/deepseek-r1",
           { image: "openai/gpt-4o" },
@@ -188,8 +188,8 @@ describe("content-translator", () => {
     });
 
     it("uses cached translation on second call", async () => {
-      const { translateUnsupportedContent } = await import(
-        "../content-translator.js"
+      const { convertUnsupportedMedia } = await import(
+        "../media-to-text.js"
       );
 
       const models = [
@@ -234,7 +234,7 @@ describe("content-translator", () => {
           },
         ];
 
-        const result1 = await translateUnsupportedContent(
+        const result1 = await convertUnsupportedMedia(
           messages,
           "text-only/model",
           { image: "vision/model" },
@@ -244,7 +244,7 @@ describe("content-translator", () => {
         assert.ok(result1.messages[0].message_data.content[0].text.includes("Cached image description"));
 
         // Second call — should use cached value, no new LLM call
-        const result2 = await translateUnsupportedContent(
+        const result2 = await convertUnsupportedMedia(
           messages,
           "text-only/model",
           { image: "vision/model" },
@@ -255,14 +255,14 @@ describe("content-translator", () => {
       });
     });
 
-    it("skips unsupported content when no translation model is configured", async () => {
-      const { translateUnsupportedContent } = await import(
-        "../content-translator.js"
+    it("skips unsupported content when no media-to-text model is configured", async () => {
+      const { convertUnsupportedMedia } = await import(
+        "../media-to-text.js"
       );
       const config = (await import("../config.js")).default;
 
-      const origContentModel = config.content_model;
-      config.content_model = "";
+      const origContentModel = config.media_to_text_model;
+      config.media_to_text_model = "";
 
       try {
         await withModelsCache([
@@ -296,8 +296,8 @@ describe("content-translator", () => {
             },
           ];
 
-          // No translation model configured, no global fallback
-          const result = await translateUnsupportedContent(
+          // No media-to-text model configured, no global fallback
+          const result = await convertUnsupportedMedia(
             messages,
             "text-only/model",
             {},
@@ -315,13 +315,13 @@ describe("content-translator", () => {
           assert.deepEqual(result.skippedTypes, new Set(["image"]));
         });
       } finally {
-        config.content_model = origContentModel;
+        config.media_to_text_model = origContentModel;
       }
     });
 
-    it("translates video to text description when content model is configured", async () => {
-      const { translateUnsupportedContent } = await import(
-        "../content-translator.js"
+    it("converts video to text description when media-to-text model is configured", async () => {
+      const { convertUnsupportedMedia } = await import(
+        "../media-to-text.js"
       );
 
       await withModelsCache([
@@ -364,7 +364,7 @@ describe("content-translator", () => {
           },
         ];
 
-        const result = await translateUnsupportedContent(
+        const result = await convertUnsupportedMedia(
           messages,
           "text-only/model",
           { video: "video-capable/model" },
@@ -384,9 +384,9 @@ describe("content-translator", () => {
       });
     });
 
-    it("includes conversation context in translation prompt", async () => {
-      const { translateUnsupportedContent } = await import(
-        "../content-translator.js"
+    it("includes conversation context in media-to-text prompt", async () => {
+      const { convertUnsupportedMedia } = await import(
+        "../media-to-text.js"
       );
 
       await withModelsCache([
@@ -450,7 +450,7 @@ describe("content-translator", () => {
         ];
 
         const requestsBefore = mockServer.getRequests().length;
-        await translateUnsupportedContent(
+        await convertUnsupportedMedia(
           messages,
           "text-only/model",
           { image: "vision/model" },
@@ -473,8 +473,8 @@ describe("content-translator", () => {
     });
 
     it("leaves assistant and tool messages untouched", async () => {
-      const { translateUnsupportedContent } = await import(
-        "../content-translator.js"
+      const { convertUnsupportedMedia } = await import(
+        "../media-to-text.js"
       );
 
       await withModelsCache([
@@ -500,7 +500,7 @@ describe("content-translator", () => {
           },
         ];
 
-        const result = await translateUnsupportedContent(
+        const result = await convertUnsupportedMedia(
           messages,
           "text-only/model",
           {},
@@ -512,15 +512,15 @@ describe("content-translator", () => {
       });
     });
 
-    it("uses global config.content_model as fallback", async () => {
-      const { translateUnsupportedContent } = await import(
-        "../content-translator.js"
+    it("uses global config.media_to_text_model as fallback", async () => {
+      const { convertUnsupportedMedia } = await import(
+        "../media-to-text.js"
       );
 
-      // Temporarily set config.content_model
+      // Temporarily set config.media_to_text_model
       const config = (await import("../config.js")).default;
-      const origContentModel = config.content_model;
-      config.content_model = "fallback/model";
+      const origContentModel = config.media_to_text_model;
+      config.media_to_text_model = "fallback/model";
 
       try {
         await withModelsCache([
@@ -562,8 +562,8 @@ describe("content-translator", () => {
             },
           ];
 
-          // No per-chat content_models, but global fallback is set
-          const result = await translateUnsupportedContent(
+          // No per-chat media_to_text_models, but global fallback is set
+          const result = await convertUnsupportedMedia(
             messages,
             "text-only/model",
             {},
@@ -574,7 +574,7 @@ describe("content-translator", () => {
           assert.ok(result.messages[0].message_data.content[0].text.includes("Fallback translation"));
         });
       } finally {
-        config.content_model = origContentModel;
+        config.media_to_text_model = origContentModel;
       }
     });
   });

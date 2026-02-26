@@ -16,7 +16,7 @@ describe("store with injected DB", () => {
     store = await initStore(db);
   });
 
-  it("does not create module-owned tables (reminders, content_translations)", async () => {
+  it("does not create module-owned tables (reminders, media_to_text_cache)", async () => {
     // Use a fresh DB to avoid pollution from other test files sharing createTestDb()
     const freshDb = new PGlite("memory://", { extensions: { vector } });
     await initStore(freshDb);
@@ -27,7 +27,7 @@ describe("store with injected DB", () => {
     `;
     const tableNames = rows.map(r => r.table_name);
     assert.ok(!tableNames.includes("reminders"), `initStore() should not create 'reminders' table, got: ${tableNames}`);
-    assert.ok(!tableNames.includes("content_translations"), `initStore() should not create 'content_translations' table, got: ${tableNames}`);
+    assert.ok(!tableNames.includes("media_to_text_cache"), `initStore() should not create 'media_to_text_cache' table, got: ${tableNames}`);
   });
 
   describe("createChat / getChat", () => {

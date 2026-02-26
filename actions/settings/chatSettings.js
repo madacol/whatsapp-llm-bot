@@ -10,9 +10,9 @@ const SETTINGS = [
   "memory",
   "memory_threshold",
   "respond_on",
-  "content_model_image",
-  "content_model_audio",
-  "content_model_video",
+  "image_to_text_model",
+  "audio_to_text_model",
+  "video_to_text_model",
   "enabled",
   "debug",
   "action",
@@ -60,10 +60,10 @@ async function getInfo(rootDb, chatId, extra) {
   const debugOn = chat.debug_until && new Date(chat.debug_until) > new Date();
   const debug = debugOn ? "on" : "off";
 
-  const contentModels = chat.content_models ?? {};
-  const contentModelEntries = Object.entries(contentModels);
-  const contentStr = contentModelEntries.length > 0
-    ? contentModelEntries.map(([type, m]) => `${type}: ${m}`).join(", ")
+  const mediaToTextModels = chat.media_to_text_models ?? {};
+  const mediaToTextEntries = Object.entries(mediaToTextModels);
+  const mediaToTextStr = mediaToTextEntries.length > 0
+    ? mediaToTextEntries.map(([type, m]) => `${type}: ${m}`).join(", ")
     : "default";
 
   const enabledActions = chat.enabled_actions ?? [];
@@ -80,7 +80,7 @@ async function getInfo(rootDb, chatId, extra) {
     `*Response:* ${response}`,
     `*Memory:* ${memoryOn} (threshold: ${threshold})`,
     `*Debug:* ${debug}`,
-    `*Content models:* ${contentStr}`,
+    `*Media-to-text models:* ${mediaToTextStr}`,
     `*Opt-in actions:* ${optInStr}`,
   ];
 
@@ -111,15 +111,15 @@ async function getSetting(rootDb, chatId, setting) {
       return `Memory threshold: ${chat.memory_threshold ?? config.memory_threshold}`;
     case "respond_on":
       return `Respond on: ${chat.respond_on ?? "mention"}`;
-    case "content_model_image":
-    case "content_model_audio":
-    case "content_model_video": {
-      const type = setting.replace("content_model_", "");
-      const models = chat.content_models ?? {};
+    case "image_to_text_model":
+    case "audio_to_text_model":
+    case "video_to_text_model": {
+      const type = setting.replace("_to_text_model", "");
+      const models = chat.media_to_text_models ?? {};
       const model = models[/** @type {"image"|"audio"|"video"} */ (type)];
       return model
-        ? `Content model (${type}): \`${model}\``
-        : `Content model (${type}): not set`;
+        ? `${type}-to-text model: \`${model}\``
+        : `${type}-to-text model: not set`;
     }
     case "enabled":
       return `Bot: ${chat.is_enabled ? "enabled" : "disabled"}`;
@@ -196,10 +196,10 @@ async function setSetting(rootDb, chatId, setting, value, extra) {
       return `Respond on: ${trimmed}`;
     }
 
-    case "content_model_image":
-    case "content_model_audio":
-    case "content_model_video": {
-      const type = /** @type {"image"|"audio"|"video"} */ (setting.replace("content_model_", ""));
+    case "image_to_text_model":
+    case "audio_to_text_model":
+    case "video_to_text_model": {
+      const type = /** @type {"image"|"audio"|"video"} */ (setting.replace("_to_text_model", ""));
       const trimmed = value.trim();
 
       const error = await validateModel(trimmed);
@@ -210,14 +210,14 @@ async function setSetting(rootDb, chatId, setting, value, extra) {
         return `Model \`${trimmed}\` does not support \`${type}\` input. Its supported modalities are: ${modalities.join(", ")}`;
       }
 
-      const currentModels = chat.content_models ?? {};
+      const currentModels = chat.media_to_text_models ?? {};
       currentModels[type] = trimmed;
       await rootDb.sql`
         UPDATE chats
-        SET content_models = ${JSON.stringify(currentModels)}::jsonb
+        SET media_to_text_models = ${JSON.stringify(currentModels)}::jsonb
         WHERE chat_id = ${chatId}
       `;
-      return `Content model for *${type}* set to \`${trimmed}\``;
+      return `${type}-to-text model set to \`${trimmed}\``;
     }
 
     case "enabled": {
@@ -306,7 +306,7 @@ export default /** @type {defineAction} */ ((x) => x)({
   name: "chat_settings",
   command: "config",
   description:
-    "Get or set chat settings. Available settings: model, system_prompt, memory, memory_threshold, respond_on, content_model_image, content_model_audio, content_model_video, enabled, debug, action. Omit value to see current setting.",
+    "Get or set chat settings. Available settings: model, system_prompt, memory, memory_threshold, respond_on, image_to_text_model, audio_to_text_model, video_to_text_model, enabled, debug, action. Omit value to see current setting.",
   parameters: {
     type: "object",
     properties: {
@@ -467,8 +467,8 @@ export default /** @type {defineAction} */ ((x) => x)({
       assert.ok(result.includes("Invalid"));
     },
 
-    // ── content_model_image ──
-    async function sets_content_model_image(action_fn, db) {
+    // ── image_to_text_model ──
+    async function sets_image_to_text_model(action_fn, db) {
       await withModelsCache([
         {
           id: "openai/gpt-4o",
@@ -481,11 +481,11 @@ export default /** @type {defineAction} */ ((x) => x)({
         await db.sql`INSERT INTO chats(chat_id) VALUES ('cs-cm-1') ON CONFLICT DO NOTHING`;
         const result = await action_fn(
           { chatId: "cs-cm-1", rootDb: db },
-          { setting: "content_model_image", value: "openai/gpt-4o" },
+          { setting: "image_to_text_model", value: "openai/gpt-4o" },
         );
         assert.ok(result.includes("image"));
-        const { rows: [chat] } = await db.sql`SELECT content_models FROM chats WHERE chat_id = 'cs-cm-1'`;
-        assert.equal(chat.content_models.image, "openai/gpt-4o");
+        const { rows: [chat] } = await db.sql`SELECT media_to_text_models FROM chats WHERE chat_id = 'cs-cm-1'`;
+        assert.equal(chat.media_to_text_models.image, "openai/gpt-4o");
       });
     },
     async function rejects_model_without_modality(action_fn, db) {
@@ -501,7 +501,7 @@ export default /** @type {defineAction} */ ((x) => x)({
         await db.sql`INSERT INTO chats(chat_id) VALUES ('cs-cm-2') ON CONFLICT DO NOTHING`;
         const result = await action_fn(
           { chatId: "cs-cm-2", rootDb: db },
-          { setting: "content_model_image", value: "text-only/model" },
+          { setting: "image_to_text_model", value: "text-only/model" },
         );
         assert.ok(result.includes("does not support"));
       });
@@ -567,15 +567,15 @@ export default /** @type {defineAction} */ ((x) => x)({
       assert.ok(result.toLowerCase().includes("debug"), "should include debug status");
       assert.ok(result.toLowerCase().includes("on"), "should show debug is on");
     },
-    async function info_shows_content_models(action_fn, db) {
+    async function info_shows_media_to_text_models(action_fn, db) {
       await db.sql`INSERT INTO chats(chat_id) VALUES ('cs-info-7') ON CONFLICT DO NOTHING`;
-      await db.sql`UPDATE chats SET content_models = '{"image":"openai/gpt-4o"}'::jsonb WHERE chat_id = 'cs-info-7'`;
+      await db.sql`UPDATE chats SET media_to_text_models = '{"image":"openai/gpt-4o"}'::jsonb WHERE chat_id = 'cs-info-7'`;
       const result = await action_fn(
         { chatId: "cs-info-7", rootDb: db, senderIds: ["u1"], getIsAdmin: async () => false },
         { setting: "" },
       );
-      assert.ok(result.includes("openai/gpt-4o"), "should include content model");
-      assert.ok(result.includes("image"), "should include content type");
+      assert.ok(result.includes("openai/gpt-4o"), "should include media-to-text model");
+      assert.ok(result.includes("image"), "should include media type");
     },
     async function info_shows_enabled_opt_in_actions(action_fn, db) {
       await db.sql`INSERT INTO chats(chat_id, enabled_actions) VALUES ('cs-info-8', '["track_purchases"]'::jsonb) ON CONFLICT DO NOTHING`;

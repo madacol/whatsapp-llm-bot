@@ -3,12 +3,13 @@ import { getModelModalities } from "./models-cache.js";
 import config from "./config.js";
 
 /**
- * Create the content_translations cache table.
+ * Create the media_to_text_cache table (and rename from old name if needed).
  * @param {PGlite} db
  */
-export async function ensureTranslationSchema(db) {
+export async function ensureMediaToTextSchema(db) {
+  await db.sql`ALTER TABLE IF EXISTS content_translations RENAME TO media_to_text_cache`;
   await db.sql`
-    CREATE TABLE IF NOT EXISTS content_translations (
+    CREATE TABLE IF NOT EXISTS media_to_text_cache (
       content_hash VARCHAR(16) NOT NULL,
       model_id TEXT NOT NULL,
       translation TEXT NOT NULL,
@@ -19,7 +20,7 @@ export async function ensureTranslationSchema(db) {
 }
 
 /** @type {Record<string, string>} */
-const TRANSLATION_PROMPTS = {
+const MEDIA_TO_TEXT_PROMPTS = {
   image:
     "Describe this image in detail. Include all visible text, numbers, data, and visual elements.",
   audio:
@@ -106,24 +107,24 @@ function hasUnsupportedContent(messages, supportedModalities) {
 }
 
 /**
- * @typedef {{ messages: MessageRow[], skippedTypes: Set<string> }} TranslationResult
+ * @typedef {{ messages: MessageRow[], skippedTypes: Set<string> }} MediaToTextResult
  */
 
 /**
- * Translate unsupported content blocks in message history to text descriptions.
- * Returns the original messages if no translation is needed.
+ * Convert unsupported media blocks in message history to text descriptions.
+ * Returns the original messages if no conversion is needed.
  *
  * @param {MessageRow[]} messages
  * @param {string} targetModelId
- * @param {{ image?: string, audio?: string, video?: string }} contentModels
+ * @param {{ image?: string, audio?: string, video?: string }} mediaToTextModels
  * @param {import("openai").default} llmClient
  * @param {PGlite} db
- * @returns {Promise<TranslationResult>}
+ * @returns {Promise<MediaToTextResult>}
  */
-export async function translateUnsupportedContent(
+export async function convertUnsupportedMedia(
   messages,
   targetModelId,
-  contentModels,
+  mediaToTextModels,
   llmClient,
   db,
 ) {
@@ -162,15 +163,15 @@ export async function translateUnsupportedContent(
       if (!isUnsupportedBlock(block, supportedModalities)) continue;
 
       const contentType = /** @type {"image" | "audio" | "video"} */ (block.type);
-      const translationModelId =
-        contentModels[contentType] || config.content_model || "";
+      const toTextModelId =
+        mediaToTextModels[contentType] || config.media_to_text_model || "";
 
-      if (!translationModelId || !contentBlockBuilders[contentType]) {
-        // No translation model configured, or no way to send this content
+      if (!toTextModelId || !contentBlockBuilders[contentType]) {
+        // No media-to-text model configured, or no way to send this content
         // type to an LLM (e.g. video) — replace with placeholder
         const reason = !contentBlockBuilders[contentType]
-          ? "translation not supported for this content type"
-          : "no translation model configured";
+          ? "media-to-text conversion not supported for this content type"
+          : "no media-to-text model configured";
         cloned.message_data.content[i] = /** @type {TextContentBlock} */ ({
           type: "text",
           text: `[Unsupported ${contentType} content — ${reason}]`,
@@ -184,7 +185,7 @@ export async function translateUnsupportedContent(
 
       // Check cache
       const { rows } =
-        await db.sql`SELECT translation FROM content_translations WHERE content_hash = ${hash} AND model_id = ${translationModelId}`;
+        await db.sql`SELECT translation FROM media_to_text_cache WHERE content_hash = ${hash} AND model_id = ${toTextModelId}`;
 
       /** @type {string} */
       let translation;
@@ -216,8 +217,8 @@ export async function translateUnsupportedContent(
           .map((b) => b.text)
           .join("\n");
 
-        // Call translation model with conversation context
-        const prompt = TRANSLATION_PROMPTS[contentType] || `Describe this ${contentType} content in detail.`;
+        // Call media-to-text model with conversation context
+        const prompt = MEDIA_TO_TEXT_PROMPTS[contentType] || `Describe this ${contentType} content in detail.`;
 
         /** @type {ContentPart[]} */
         const userContent = [];
@@ -234,15 +235,15 @@ export async function translateUnsupportedContent(
         ]);
 
         const response = await llmClient.chat.completions.create({
-          model: translationModelId,
+          model: toTextModelId,
           messages: llmMessages,
         });
 
         translation = response.choices[0].message.content || `[Failed to describe ${contentType}]`;
 
         // Cache the translation
-        await db.sql`INSERT INTO content_translations (content_hash, model_id, translation)
-          VALUES (${hash}, ${translationModelId}, ${translation})
+        await db.sql`INSERT INTO media_to_text_cache (content_hash, model_id, translation)
+          VALUES (${hash}, ${toTextModelId}, ${translation})
           ON CONFLICT (content_hash, model_id) DO NOTHING`;
       }
 

@@ -11,7 +11,7 @@ import { getRootDb } from "./db.js";
  *   respond_on_reply: boolean;
  *   respond_on: "any" | "mention+reply" | "mention";
  *   debug_until: string | null;
- *   content_models: { image?: string, audio?: string, video?: string };
+ *   media_to_text_models: { image?: string, audio?: string, video?: string };
  *   memory: boolean;
  *   memory_threshold: number | null;
  *   enabled_actions: string[];
@@ -94,6 +94,22 @@ export async function initStore(injectedDb){
         db.sql`ALTER TABLE messages ADD COLUMN IF NOT EXISTS exchange_text TEXT`,
         db.sql`ALTER TABLE messages ADD COLUMN IF NOT EXISTS llm_context JSONB`,
       ]);
+
+      // One-time migration: rename content_models → media_to_text_models.
+      // After the rename, drop the stale content_models column if it was re-created.
+      await db.sql`DO $$ BEGIN
+        IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='chats' AND column_name='content_models')
+           AND NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='chats' AND column_name='media_to_text_models')
+        THEN
+          ALTER TABLE chats RENAME COLUMN content_models TO media_to_text_models;
+        ELSIF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='chats' AND column_name='content_models')
+              AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='chats' AND column_name='media_to_text_models')
+        THEN
+          ALTER TABLE chats DROP COLUMN content_models;
+        END IF;
+      END $$`;
+      // Ensure the column exists for fresh installs where the ADD COLUMN above used the old name
+      await db.sql`ALTER TABLE chats ADD COLUMN IF NOT EXISTS media_to_text_models JSONB DEFAULT '{}'`;
 
       // One-time migration: old respond_on booleans → respond_on enum.
       // Only touch rows still at the column default ('mention') whose booleans differ.
