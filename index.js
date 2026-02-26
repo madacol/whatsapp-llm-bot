@@ -475,7 +475,7 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
           const threshold = chatInfo?.memory_threshold ?? config.memory_threshold;
           const similar = await findMemories(getRootDb(), llmClient, chatId, currentText, { minSimilarity: threshold });
           if (similar.length > 0) {
-            systemPrompt += "\n\n## Relevant past conversations\n" + formatMemoriesContext(similar);
+            systemPrompt += "\n\n## Relevant memories\n" + formatMemoriesContext(similar);
           }
         } catch (err) {
           console.error("Memory search failed:", err);
