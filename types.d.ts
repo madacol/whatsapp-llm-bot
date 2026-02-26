@@ -165,7 +165,7 @@ type CallLlm = {
 type ExtendedActionContext<P extends PermissionFlags> = ActionContext
   & (P["useRootDb"] extends true ? { rootDb: PGlite } : {})
   & (P["useChatDb"] extends true ? { chatDb: PGlite } : {})
-  & (P["useLlm"] extends true ? { callLlm: CallLlm } : {});
+  & (P["useLlm"] extends true ? { callLlm: CallLlm; llmClient: import("openai").default } : {});
 
 type ToolContentBlock = TextContentBlock | ImageContentBlock | VideoContentBlock | AudioContentBlock;
 
