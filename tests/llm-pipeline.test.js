@@ -8,7 +8,7 @@ process.env.LLM_API_KEY = "test-key";
 process.env.MODEL = "mock-model";
 
 import { PGlite } from "@electric-sql/pglite";
-import { createMockLlmServer, createIncomingContext, createTestDb } from "./helpers.js";
+import { createMockLlmServer, createIncomingContext, createTestDb, seedChat as seedChat_ } from "./helpers.js";
 import { setDb } from "../db.js";
 
 /** @type {PGlite} */
@@ -50,18 +50,8 @@ after(async () => {
   await mockServer?.close();
 });
 
-/**
- * @param {string} chatId
- * @param {{enabled?: boolean, systemPrompt?: string | null, model?: string | null}} [options]
- */
-async function seedChat(chatId, options = {}) {
-  const enabled = options.enabled ?? false;
-  const systemPrompt = options.systemPrompt ?? null;
-  const model = options.model ?? null;
-  await db.sql`INSERT INTO chats(chat_id, is_enabled, system_prompt, model)
-    VALUES (${chatId}, ${enabled}, ${systemPrompt}, ${model})
-    ON CONFLICT (chat_id) DO NOTHING`;
-}
+/** @param {string} chatId @param {{enabled?: boolean, systemPrompt?: string | null, model?: string | null}} [options] */
+const seedChat = (chatId, options) => seedChat_(db, chatId, options);
 
 describe("LLM pipeline via createMessageHandler", () => {
   it("full pipeline: message → store → LLM → response", async () => {
