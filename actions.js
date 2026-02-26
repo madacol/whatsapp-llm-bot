@@ -45,7 +45,7 @@ export async function executeAction(
     throw new Error(`Action "${actionName}" requires master permissions`);
   }
 
-  /** @type {ActionContext & Partial<{chatDb: PGlite, rootDb: PGlite, callLlm: CallLlm}>} */
+  /** @type {ActionContext & Partial<{chatDb: PGlite, rootDb: PGlite, callLlm: CallLlm, llmClient: import("openai").default}>} */
   const actionContext = {
     chatId: context.chatId,
     senderIds: context.senderIds,
@@ -82,6 +82,7 @@ export async function executeAction(
       throw new Error(`Action "${actionName}" requires useLlm but no llmClient was provided`);
     }
     actionContext.callLlm = createCallLlm(llmClient);
+    actionContext.llmClient = llmClient;
   }
 
   if (!action.permissions?.autoExecute) {
