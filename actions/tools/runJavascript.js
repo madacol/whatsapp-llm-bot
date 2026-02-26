@@ -1,10 +1,47 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
+
+const typesFileContent = await readFile(
+  new URL("../../types.d.ts", import.meta.url),
+  "utf-8",
+).catch((err) => {
+  console.warn("Could not read types.d.ts:", err.message);
+  return "";
+});
 
 export default /** @type {defineAction} */ ((x) => x)({
   name: "run_javascript",
   command: "js",
   description:
     "Execute JavaScript code in a secure environment. The code must be an arrow function that receives a context object.",
+  instructions: `The Db passed in the context is a Postgres DB that should be queried using tagged template literals.
+
+Example code:
+\`\`\`javascript
+async ({log, sessionDb, sendMessage, reply}) => {
+await log('Analyzing chat activity...');
+const {rows: messages} = await sessionDb.sql\`SELECT * FROM messages WHERE chat_id = \${chat.chatId}\`;
+const result = \`This chat has \${messages.length} messages\`;
+log('Analysis complete');
+
+// Send a message to the chat
+// await sendMessage(result);
+
+// Reply with the result
+// await reply(result);
+
+// Or just return the result, which replies it by default
+return result;
+}
+\`\`\`
+
+That function must have this type \`/** @type {(context: ActionContext) => Promise<ActionResult>} */\`
+
+These are all the currently used TypeScript type definitions:
+
+\`\`\`typescript
+${typesFileContent}
+\`\`\``,
   parameters: {
     type: "object",
     properties: {

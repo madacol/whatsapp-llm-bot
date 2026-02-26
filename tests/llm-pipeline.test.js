@@ -1,4 +1,4 @@
-import { describe, it, before, after } from "node:test";
+import { describe, it, before, after, afterEach } from "node:test";
 import assert from "node:assert/strict";
 
 // Env vars MUST be set before any dynamic import that triggers config.js
@@ -54,6 +54,11 @@ after(async () => {
 const seedChat = (chatId, options) => seedChat_(db, chatId, options);
 
 describe("LLM pipeline via createMessageHandler", () => {
+  afterEach(() => {
+    const pending = mockServer.pendingResponses();
+    assert.equal(pending, 0, `Mock response queue should be empty after each test, but has ${pending} unconsumed response(s). This will corrupt subsequent tests.`);
+  });
+
   it("full pipeline: message → store → LLM → response", async () => {
     await seedChat("pipe-1", { enabled: true });
     mockServer.addResponses("Pipeline response!");
@@ -203,8 +208,9 @@ describe("LLM pipeline via createMessageHandler", () => {
 
     const lastReq = mockServer.getRequests().at(-1);
     const systemMsg = lastReq.messages.find(m => m.role === "system");
+    const systemText = Array.isArray(systemMsg.content) ? systemMsg.content[0].text : systemMsg.content;
     assert.ok(
-      systemMsg.content.includes("pirate"),
+      systemText.includes("pirate"),
       "System message should contain custom prompt",
     );
   });
@@ -270,19 +276,7 @@ describe("LLM pipeline via createMessageHandler", () => {
     });
     await handleMessage(ctx1);
 
-    // Clear conversation
-    mockServer.addResponses(
-      {
-        tool_calls: [
-          {
-            id: "call_clear_001",
-            type: "function",
-            function: { name: "clear_conversation", arguments: "{}" },
-          },
-        ],
-      },
-      "Conversation cleared.",
-    );
+    // Clear conversation (command path — bypasses LLM, no mock responses needed)
     const { context: ctx2 } = createIncomingContext({
       chatId: "pipe-clear-cont",
       content: [{ type: "text", text: "!clear" }],
@@ -361,5 +355,120 @@ describe("LLM pipeline via createMessageHandler", () => {
 
     const lastReq = mockServer.getRequests().at(-1);
     assert.equal(lastReq.model, "gpt-4.1-nano");
+  });
+
+  it("system message uses cache_control content array format", async () => {
+    await seedChat("pipe-cache", { enabled: true });
+    mockServer.addResponses("Cache test");
+
+    const { context } = createIncomingContext({
+      chatId: "pipe-cache",
+      content: [{ type: "text", text: "Hello" }],
+    });
+    await handleMessage(context);
+
+    const lastReq = mockServer.getRequests().at(-1);
+    const systemMsg = lastReq.messages.find(m => m.role === "system");
+    assert.ok(Array.isArray(systemMsg.content), "System message content should be an array");
+    assert.equal(systemMsg.content[0].type, "text");
+    assert.ok(systemMsg.content[0].text.length > 0, "System text should be non-empty");
+    assert.deepStrictEqual(
+      systemMsg.content[0].cache_control,
+      { type: "ephemeral" },
+      "System message should have cache_control marker",
+    );
+  });
+
+  it("system prompt does not include action instructions by default", async () => {
+    await seedChat("pipe-no-instr", { enabled: true });
+    mockServer.addResponses("Plain reply");
+
+    const { context } = createIncomingContext({
+      chatId: "pipe-no-instr",
+      content: [{ type: "text", text: "Hello there" }],
+    });
+    await handleMessage(context);
+
+    const lastReq = mockServer.getRequests().at(-1);
+    const systemMsg = lastReq.messages.find(m => m.role === "system");
+    const systemText = Array.isArray(systemMsg.content) ? systemMsg.content[0].text : systemMsg.content;
+    assert.ok(
+      !systemText.includes("ActionContext"),
+      `System prompt should NOT contain action instructions by default, but found "ActionContext"`,
+    );
+  });
+
+  it("action instructions are injected after tool is called", async () => {
+    await seedChat("pipe-instr", { enabled: true });
+    const reqsBefore = mockServer.getRequests().length;
+
+    mockServer.addResponses(
+      {
+        tool_calls: [
+          {
+            id: "call_instr_001",
+            type: "function",
+            function: {
+              name: "run_javascript",
+              arguments: JSON.stringify({ code: "({chatId}) => chatId" }),
+            },
+          },
+        ],
+      },
+      "Got the result!",
+    );
+
+    const { context } = createIncomingContext({
+      chatId: "pipe-instr",
+      content: [{ type: "text", text: "Run some code" }],
+    });
+    await handleMessage(context);
+
+    // Grab only the requests from this test
+    const chatReqs = mockServer.getRequests().slice(reqsBefore);
+    assert.ok(chatReqs.length >= 2, `Expected at least 2 LLM requests, got ${chatReqs.length}`);
+
+    const firstSystem = chatReqs[0].messages.find(m => m.role === "system");
+    const firstText = Array.isArray(firstSystem.content) ? firstSystem.content[0].text : firstSystem.content;
+    assert.ok(
+      !firstText.includes("ActionContext"),
+      "First LLM request should NOT contain action instructions",
+    );
+
+    const secondSystem = chatReqs[1].messages.find(m => m.role === "system");
+    const secondText = Array.isArray(secondSystem.content) ? secondSystem.content[0].text : secondSystem.content;
+    assert.ok(
+      secondText.includes("ActionContext"),
+      "Second LLM request SHOULD contain action instructions after tool was called",
+    );
+  });
+
+  it("logs usage stats after LLM response", async () => {
+    await seedChat("pipe-usage", { enabled: true });
+    mockServer.addResponses("Usage test");
+
+    const logs = [];
+    const origLog = console.log;
+    console.log = (...args) => {
+      logs.push(args.join(" "));
+      origLog.apply(console, args);
+    };
+
+    try {
+      const { context } = createIncomingContext({
+        chatId: "pipe-usage",
+        content: [{ type: "text", text: "Hello" }],
+      });
+      await handleMessage(context);
+    } finally {
+      console.log = origLog;
+    }
+
+    const usageLine = logs.find(l => l.includes("[LLM usage]"));
+    assert.ok(usageLine, `Expected a log line with "[LLM usage]", got: ${logs.join("\n")}`);
+    assert.ok(usageLine.includes("prompt="), "Should log prompt tokens");
+    assert.ok(usageLine.includes("cached="), "Should log cached tokens");
+    assert.ok(usageLine.includes("completion="), "Should log completion tokens");
+    assert.ok(usageLine.includes("model="), "Should log model name");
   });
 });
