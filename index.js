@@ -18,7 +18,7 @@ import {
   parseCommandArgs,
   formatMessagesForOpenAI,
 } from "./message-formatting.js";
-import { translateUnsupportedContent } from "./content-translator.js";
+import { convertUnsupportedMedia } from "./media-to-text.js";
 import { getRootDb } from "./db.js";
 import {
   extractTextFromMessage,
@@ -457,16 +457,16 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
     // Get latest messages from DB
     const chatMessages = await getMessages(chatId)
 
-    // Translate unsupported content types for non-multimodal models
-    const contentModels = chatInfo?.content_models ?? {};
+    // Convert unsupported media types to text for non-multimodal models
+    const mediaToTextModels = chatInfo?.media_to_text_models ?? {};
     const rootDb = getRootDb();
-    const { messages: translatedMessages, skippedTypes } = await translateUnsupportedContent(
-      chatMessages, chatModel, contentModels, llmClient, rootDb,
+    const { messages: translatedMessages, skippedTypes } = await convertUnsupportedMedia(
+      chatMessages, chatModel, mediaToTextModels, llmClient, rootDb,
     );
 
     if (skippedTypes.size > 0) {
       const types = [...skippedTypes].join(", ");
-      await context.sendMessage(`⚠️ This model doesn't support ${types} content. The ${types} was not sent to the model. Use !set content-model to configure a translation model.`);
+      await context.sendMessage(`⚠️ This model doesn't support ${types} content. The ${types} was not sent to the model. Use !config image_to_text_model / audio_to_text_model / video_to_text_model to configure a media-to-text model.`);
     }
 
     // Search long-term memory for relevant past conversations
