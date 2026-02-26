@@ -7,11 +7,12 @@ import { vector } from "@electric-sql/pglite/vector";
 import { initStore } from "../store.js";
 import {
   extractTextFromMessage,
-  extractExchangeText,
   generateEmbedding,
-  storeExchangeEmbedding,
-  findSimilarMessages,
-  formatMemoryContext,
+  saveMemory,
+  findMemories,
+  listMemories,
+  deleteMemory,
+  formatMemoriesContext,
 } from "../memory.js";
 
 /** @type {PGlite} */
@@ -22,6 +23,19 @@ let store;
 before(async () => {
   db = new PGlite("memory://", { extensions: { vector } });
   store = await initStore(db);
+
+  // Create memories table (will be in store.js after Phase 1A merge)
+  await db.sql`
+    CREATE TABLE IF NOT EXISTS memories (
+      id SERIAL PRIMARY KEY,
+      chat_id VARCHAR(50) REFERENCES chats(chat_id),
+      content TEXT NOT NULL,
+      embedding vector,
+      search_text tsvector,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+  `;
+  await db.sql`CREATE INDEX IF NOT EXISTS idx_memories_search_text ON memories USING gin (search_text)`;
 });
 
 // ═══════════════════════════════════════════════════════════════════
@@ -107,70 +121,6 @@ describe("extractTextFromMessage", () => {
 });
 
 // ═══════════════════════════════════════════════════════════════════
-// extractExchangeText
-// ═══════════════════════════════════════════════════════════════════
-describe("extractExchangeText", () => {
-  it("formats a simple user+assistant exchange", () => {
-    /** @type {Message[]} */
-    const messages = [
-      { role: "user", content: [{ type: "text", text: "What is Node.js?" }] },
-      { role: "assistant", content: [{ type: "text", text: "Node.js is a JavaScript runtime." }] },
-    ];
-    const text = extractExchangeText(messages);
-    assert.ok(text.includes("user: What is Node.js?"));
-    assert.ok(text.includes("assistant: Node.js is a JavaScript runtime."));
-  });
-
-  it("includes tool calls and tool results", () => {
-    /** @type {Message[]} */
-    const messages = [
-      { role: "user", content: [{ type: "text", text: "Search for cats" }] },
-      { role: "assistant", content: [
-        { type: "text", text: "Let me search." },
-        { type: "tool", tool_id: "c1", name: "web_search", arguments: '{"query":"cats"}' },
-      ]},
-      { role: "tool", tool_id: "c1", content: [{ type: "text", text: "Found 3 results about cats" }] },
-      { role: "assistant", content: [{ type: "text", text: "Here are the results." }] },
-    ];
-    const text = extractExchangeText(messages);
-    assert.ok(text.includes("user: Search for cats"));
-    assert.ok(text.includes("[tool: web_search("));
-    assert.ok(text.includes("tool: Found 3 results about cats"));
-    assert.ok(text.includes("assistant: Here are the results."));
-  });
-
-  it("skips binary content blocks", () => {
-    /** @type {Message[]} */
-    const messages = [
-      { role: "user", content: [
-        { type: "image", encoding: "base64", mime_type: "image/png", data: "abc" },
-        { type: "text", text: "What is this?" },
-      ]},
-      { role: "assistant", content: [{ type: "text", text: "It's a cat." }] },
-    ];
-    const text = extractExchangeText(messages);
-    assert.ok(!text.includes("abc"), "Should not include binary data");
-    assert.ok(text.includes("What is this?"));
-    assert.ok(text.includes("It's a cat."));
-  });
-
-  it("returns empty string for empty messages array", () => {
-    assert.equal(extractExchangeText([]), "");
-  });
-
-  it("handles messages with only binary content", () => {
-    /** @type {Message[]} */
-    const messages = [
-      { role: "user", content: [{ type: "image", encoding: "base64", mime_type: "image/png", data: "abc" }] },
-    ];
-    const text = extractExchangeText(messages);
-    // Should still have a line for the user role, but content may be empty
-    // The key thing is it doesn't crash
-    assert.equal(typeof text, "string");
-  });
-});
-
-// ═══════════════════════════════════════════════════════════════════
 // generateEmbedding
 // ═══════════════════════════════════════════════════════════════════
 describe("generateEmbedding", () => {
@@ -215,81 +165,54 @@ describe("generateEmbedding", () => {
 });
 
 // ═══════════════════════════════════════════════════════════════════
-// storeExchangeEmbedding
+// saveMemory
 // ═══════════════════════════════════════════════════════════════════
-describe("storeExchangeEmbedding", () => {
-  it("stores embedding, search_text, and exchange_text for a message", async () => {
-    await store.createChat("mem-embed-1");
-    /** @type {UserMessage} */
-    const msg = { role: "user", content: [{ type: "text", text: "What is machine learning?" }] };
-    const stored = await store.addMessage("mem-embed-1", msg, ["sender-1"]);
-
-    const exchangeText = "user: What is machine learning?\nassistant: It's a field of AI.";
-    const mockEmbedding = Array.from({ length: 3 }, (_, i) => i * 0.1);
+describe("saveMemory", () => {
+  it("stores memory with embedding when embedding succeeds", async () => {
+    await store.createChat("mem-save-1");
+    const mockEmbedding = [0.1, 0.2, 0.3];
     const mockClient = /** @type {import("openai").default} */ ({
-      embeddings: {
-        create: async () => ({ data: [{ embedding: mockEmbedding }] }),
-      },
+      embeddings: { create: async () => ({ data: [{ embedding: mockEmbedding }] }) },
     });
 
-    await storeExchangeEmbedding(db, mockClient, stored.message_id, exchangeText);
+    const id = await saveMemory(db, mockClient, "mem-save-1", "User likes cats");
 
-    const { rows: [row] } = await db.sql`
-      SELECT embedding, search_text, exchange_text
-      FROM messages WHERE message_id = ${stored.message_id}
-    `;
+    const { rows: [row] } = await db.sql`SELECT * FROM memories WHERE id = ${id}`;
+    assert.equal(row.content, "User likes cats");
     assert.ok(row.embedding, "embedding should be set");
     assert.ok(row.search_text, "search_text should be set");
-    assert.equal(row.exchange_text, exchangeText, "exchange_text should be stored");
   });
 
-  it("stores search_text and exchange_text even when embedding fails", async () => {
-    await store.createChat("mem-embed-2");
-    /** @type {UserMessage} */
-    const msg = { role: "user", content: [{ type: "text", text: "Another test message for searching" }] };
-    const stored = await store.addMessage("mem-embed-2", msg, ["sender-1"]);
-
-    const exchangeText = "user: Another test message for searching";
+  it("stores memory with search_text only when embedding fails", async () => {
+    await store.createChat("mem-save-2");
     const mockClient = /** @type {import("openai").default} */ ({
       embeddings: { create: async () => { throw new Error("API error"); } },
     });
 
-    await storeExchangeEmbedding(db, mockClient, stored.message_id, exchangeText);
+    const id = await saveMemory(db, mockClient, "mem-save-2", "User prefers dark mode settings");
 
-    const { rows: [row] } = await db.sql`
-      SELECT embedding, search_text, exchange_text
-      FROM messages WHERE message_id = ${stored.message_id}
-    `;
-    assert.equal(row.embedding, null, "embedding should be null on failure");
-    assert.ok(row.search_text, "search_text should still be set");
-    assert.equal(row.exchange_text, exchangeText, "exchange_text should still be stored");
+    const { rows: [row] } = await db.sql`SELECT * FROM memories WHERE id = ${id}`;
+    assert.equal(row.content, "User prefers dark mode settings");
+    assert.equal(row.embedding, null, "embedding should be null");
+    assert.ok(row.search_text, "search_text should be set");
   });
 
-  it("does not throw for empty exchange text", async () => {
-    await store.createChat("mem-embed-3");
-    /** @type {UserMessage} */
-    const msg = {
-      role: "user",
-      content: [{ type: "image", encoding: "base64", mime_type: "image/png", data: "abc" }],
-    };
-    const stored = await store.addMessage("mem-embed-3", msg, ["sender-1"]);
-
+  it("returns the inserted memory id", async () => {
+    await store.createChat("mem-save-3");
     const mockClient = /** @type {import("openai").default} */ ({
-      embeddings: { create: async () => { throw new Error("should not call"); } },
+      embeddings: { create: async () => ({ data: [{ embedding: [0.1, 0.2, 0.3] }] }) },
     });
 
-    // Should not throw
-    await storeExchangeEmbedding(db, mockClient, stored.message_id, "");
+    const id = await saveMemory(db, mockClient, "mem-save-3", "User's birthday is March 5");
+    assert.equal(typeof id, "number");
+    assert.ok(id > 0);
   });
 });
 
 // ═══════════════════════════════════════════════════════════════════
-// findSimilarMessages
+// findMemories
 // ═══════════════════════════════════════════════════════════════════
-describe("findSimilarMessages", () => {
-  /** @type {import("openai").default} */
-  let mockClient;
-
+describe("findMemories", () => {
   /**
    * Helper: generate a deterministic "embedding" vector.
    * @param {number} seed
@@ -301,223 +224,220 @@ describe("findSimilarMessages", () => {
     for (let i = 0; i < dims; i++) {
       vec.push(Math.sin(seed + i));
     }
-    // Normalize
     const mag = Math.sqrt(vec.reduce((s, v) => s + v * v, 0));
     return vec.map(v => v / mag);
   }
 
   before(async () => {
-    const chatId = "mem-search-1";
+    const chatId = "mem-find-1";
     await store.createChat(chatId);
 
-    // Insert several messages with known embeddings
-    const messages = [
-      "I love programming in JavaScript",
-      "The weather is nice today",
-      "Machine learning is fascinating",
-      "Let's go hiking in the mountains",
-      "Python is also a great language",
+    const memories = [
+      "User likes cats and kittens",
+      "User's favorite color is blue",
+      "User works as a software engineer",
     ];
 
-    for (let i = 0; i < messages.length; i++) {
-      /** @type {UserMessage} */
-      const msg = { role: "user", content: [{ type: "text", text: messages[i] }] };
-      const stored = await store.addMessage(chatId, msg, ["sender-1"]);
+    for (let i = 0; i < memories.length; i++) {
       const emb = fakeEmbedding(i);
       await db.sql`
-        UPDATE messages
-        SET embedding = ${JSON.stringify(emb)}::vector,
-            search_text = to_tsvector('english', ${messages[i]})
-        WHERE message_id = ${stored.message_id}
+        INSERT INTO memories (chat_id, content, embedding, search_text)
+        VALUES (${chatId}, ${memories[i]}, ${JSON.stringify(emb)}::vector, to_tsvector('english', ${memories[i]}))
       `;
     }
-
-    // The mock client returns a vector similar to seed=0 (the JavaScript message)
-    const queryEmb = fakeEmbedding(0);
-    mockClient = /** @type {import("openai").default} */ ({
-      embeddings: {
-        create: async () => ({ data: [{ embedding: queryEmb }] }),
-      },
-    });
   });
 
-  it("returns similar messages sorted by similarity", async () => {
-    const results = await findSimilarMessages(db, mockClient, "mem-search-1", "JavaScript programming", {
-      limit: 3,
-      excludeRecent: 0,
-      minSimilarity: 0,
+  it("finds memories by embedding similarity", async () => {
+    function fakeEmbedding2(seed, dims = 3) {
+      const vec = [];
+      for (let i = 0; i < dims; i++) vec.push(Math.sin(seed + i));
+      const mag = Math.sqrt(vec.reduce((s, v) => s + v * v, 0));
+      return vec.map(v => v / mag);
+    }
+    const queryEmb = fakeEmbedding2(0); // similar to first memory
+    const mockClient = /** @type {import("openai").default} */ ({
+      embeddings: { create: async () => ({ data: [{ embedding: queryEmb }] }) },
     });
 
-    assert.ok(results.length > 0, "Should find at least one similar message");
-    assert.ok(results.length <= 3, "Should respect limit");
-    // First result should be the most similar
+    const results = await findMemories(db, mockClient, "mem-find-1", "cats and animals", { minSimilarity: 0 });
+
+    assert.ok(results.length > 0, "Should find at least one memory");
+    // Results should be sorted by descending similarity
     if (results.length > 1) {
-      assert.ok(results[0].similarity >= results[1].similarity, "Results should be sorted by similarity");
+      assert.ok(Number(results[0].similarity) >= Number(results[1].similarity));
     }
   });
 
-  it("scopes search to the specified chatId", async () => {
-    // Create a different chat with different messages
-    await store.createChat("mem-search-other");
-    /** @type {UserMessage} */
-    const msg = { role: "user", content: [{ type: "text", text: "Other chat message" }] };
-    const stored = await store.addMessage("mem-search-other", msg, ["sender-1"]);
-    const emb = fakeEmbedding(0);
+  it("scopes search to chatId", async () => {
+    await store.createChat("mem-find-other");
     await db.sql`
-      UPDATE messages SET embedding = ${JSON.stringify(emb)}::vector
-      WHERE message_id = ${stored.message_id}
+      INSERT INTO memories (chat_id, content, embedding, search_text)
+      VALUES ('mem-find-other', 'Other chat memory', ${JSON.stringify(fakeEmbedding(0))}::vector, to_tsvector('english', 'Other chat memory'))
     `;
 
-    const results = await findSimilarMessages(db, mockClient, "mem-search-1", "test query", {
-      excludeRecent: 0,
-      minSimilarity: 0,
+    const mockClient = /** @type {import("openai").default} */ ({
+      embeddings: { create: async () => ({ data: [{ embedding: fakeEmbedding(0) }] }) },
     });
 
-    // None of the results should be from the other chat
+    const results = await findMemories(db, mockClient, "mem-find-1", "test", { minSimilarity: 0 });
     for (const r of results) {
-      assert.equal(r.chat_id, "mem-search-1", "Results should only be from the queried chat");
+      assert.equal(r.chat_id, "mem-find-1");
     }
   });
 
-  it("excludes recent messages via excludeRecent option", async () => {
-    const results = await findSimilarMessages(db, mockClient, "mem-search-1", "test query", {
-      excludeRecent: 5,
-      minSimilarity: 0,
-    });
-
-    // All 5 messages should be excluded (as "recent")
-    assert.equal(results.length, 0, "Should exclude all recent messages");
-  });
-
-  it("falls back to full-text search when embedding fails", async () => {
+  it("falls back to FTS when embedding fails", async () => {
     const failClient = /** @type {import("openai").default} */ ({
       embeddings: { create: async () => { throw new Error("API error"); } },
     });
 
-    const results = await findSimilarMessages(db, failClient, "mem-search-1", "JavaScript", {
-      excludeRecent: 0,
-      minSimilarity: 0,
-    });
-
-    assert.ok(results.length > 0, "Should fall back to full-text search");
-    // Check that JavaScript-related message is found
-    const texts = results.map(r => extractTextFromMessage(r.message_data));
-    assert.ok(
-      texts.some(t => t.toLowerCase().includes("javascript")),
-      `Should find JavaScript message via full-text search, got: ${texts}`,
-    );
+    const results = await findMemories(db, failClient, "mem-find-1", "cats", { minSimilarity: 0 });
+    assert.ok(results.length > 0, "Should find results via FTS");
+    assert.ok(results.some(r => r.content.includes("cats")));
   });
 
-  it("filters by minSimilarity threshold", async () => {
-    const results = await findSimilarMessages(db, mockClient, "mem-search-1", "test query", {
-      excludeRecent: 0,
-      minSimilarity: 0.99,
+  it("respects limit", async () => {
+    // Insert more memories first
+    await store.createChat("mem-find-limit");
+    for (let i = 0; i < 5; i++) {
+      await db.sql`
+        INSERT INTO memories (chat_id, content, search_text)
+        VALUES ('mem-find-limit', ${'Memory number ' + i + ' about testing limits for real'}, to_tsvector('english', ${'Memory number ' + i + ' about testing limits for real'}))
+      `;
+    }
+
+    const failClient = /** @type {import("openai").default} */ ({
+      embeddings: { create: async () => { throw new Error("fail"); } },
     });
 
-    // Only the exact match (seed=0) should pass a 0.99 threshold
-    assert.ok(results.length <= 1, "Very high threshold should filter most results");
+    const results = await findMemories(db, failClient, "mem-find-limit", "testing limits", { limit: 2, minSimilarity: 0 });
+    assert.ok(results.length <= 2, `Expected at most 2 results, got ${results.length}`);
+  });
+
+  it("filters by minSimilarity", async () => {
+    const mockClient = /** @type {import("openai").default} */ ({
+      embeddings: { create: async () => ({ data: [{ embedding: fakeEmbedding(0) }] }) },
+    });
+
+    const results = await findMemories(db, mockClient, "mem-find-1", "test", { minSimilarity: 0.99 });
+    // Only exact match (seed=0) should pass
+    assert.ok(results.length <= 1);
   });
 });
 
 // ═══════════════════════════════════════════════════════════════════
-// formatMemoryContext
+// listMemories
 // ═══════════════════════════════════════════════════════════════════
-describe("formatMemoryContext", () => {
-  it("uses exchange_text when available", () => {
-    const results = [
-      {
-        message_id: 1,
-        chat_id: "test",
-        sender_id: "user1",
-        message_data: /** @type {UserMessage} */ ({
-          role: "user",
-          content: [{ type: "text", text: "What is Node.js?" }],
-        }),
-        exchange_text: "user: What is Node.js?\nassistant: Node.js is a JavaScript runtime.",
-        timestamp: new Date("2025-01-15T10:30:00Z"),
-        similarity: 0.85,
-      },
-    ];
+describe("listMemories", () => {
+  it("returns all memories for a chat ordered by created_at DESC", async () => {
+    await store.createChat("mem-list-1");
+    // Insert with staggered timestamps
+    await db.sql`INSERT INTO memories (chat_id, content, search_text, created_at) VALUES ('mem-list-1', 'First memory', to_tsvector('english', 'First memory'), '2025-01-01 10:00:00')`;
+    await db.sql`INSERT INTO memories (chat_id, content, search_text, created_at) VALUES ('mem-list-1', 'Second memory', to_tsvector('english', 'Second memory'), '2025-01-02 10:00:00')`;
+    await db.sql`INSERT INTO memories (chat_id, content, search_text, created_at) VALUES ('mem-list-1', 'Third memory', to_tsvector('english', 'Third memory'), '2025-01-03 10:00:00')`;
 
-    const output = formatMemoryContext(results);
-    assert.ok(output.includes("user: What is Node.js?"), "Should use exchange_text content");
-    assert.ok(output.includes("assistant: Node.js is a JavaScript runtime."), "Should include full exchange");
+    const results = await listMemories(db, "mem-list-1");
+    assert.equal(results.length, 3);
+    assert.equal(results[0].content, "Third memory"); // newest first
+    assert.equal(results[2].content, "First memory"); // oldest last
   });
 
-  it("falls back to extractTextFromMessage when exchange_text is null", () => {
-    const results = [
-      {
-        message_id: 1,
-        chat_id: "test",
-        sender_id: "user1",
-        message_data: /** @type {UserMessage} */ ({
-          role: "user",
-          content: [{ type: "text", text: "What is Node.js?" }],
-        }),
-        exchange_text: null,
-        timestamp: new Date("2025-01-15T10:30:00Z"),
-        similarity: 0.85,
-      },
-    ];
-
-    const output = formatMemoryContext(results);
-    assert.ok(output.includes("What is Node.js?"), "Should fall back to message text");
+  it("returns empty array for chat with no memories", async () => {
+    await store.createChat("mem-list-empty");
+    const results = await listMemories(db, "mem-list-empty");
+    assert.deepEqual(results, []);
   });
 
-  it("separates results with ---", () => {
-    const results = [
-      {
-        message_id: 1,
-        chat_id: "test",
-        sender_id: "user1",
-        message_data: /** @type {UserMessage} */ ({
-          role: "user",
-          content: [{ type: "text", text: "First question" }],
-        }),
-        exchange_text: "user: First question\nassistant: First answer",
-        timestamp: new Date("2025-01-15T10:30:00Z"),
-        similarity: 0.85,
-      },
-      {
-        message_id: 2,
-        chat_id: "test",
-        sender_id: "user1",
-        message_data: /** @type {UserMessage} */ ({
-          role: "user",
-          content: [{ type: "text", text: "Second question" }],
-        }),
-        exchange_text: "user: Second question\nassistant: Second answer",
-        timestamp: new Date("2025-01-15T10:30:05Z"),
-        similarity: 0.82,
-      },
-    ];
+  it("does not return memories from other chats", async () => {
+    await store.createChat("mem-list-a");
+    await store.createChat("mem-list-b");
+    await db.sql`INSERT INTO memories (chat_id, content, search_text) VALUES ('mem-list-a', 'Chat A memory', to_tsvector('english', 'Chat A memory'))`;
 
-    const output = formatMemoryContext(results);
-    assert.ok(output.includes("---"), "Should separate results with ---");
+    const results = await listMemories(db, "mem-list-b");
+    assert.deepEqual(results, []);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════
+// deleteMemory
+// ═══════════════════════════════════════════════════════════════════
+describe("deleteMemory", () => {
+  it("deletes a memory by id and chatId", async () => {
+    await store.createChat("mem-del-1");
+    const { rows: [{ id }] } = await db.sql`
+      INSERT INTO memories (chat_id, content, search_text)
+      VALUES ('mem-del-1', 'To be deleted', to_tsvector('english', 'To be deleted'))
+      RETURNING id
+    `;
+
+    const deleted = await deleteMemory(db, "mem-del-1", id);
+    assert.equal(deleted, true);
+
+    const { rows } = await db.sql`SELECT * FROM memories WHERE id = ${id}`;
+    assert.equal(rows.length, 0);
   });
 
-  it("returns empty string for empty results", () => {
-    assert.equal(formatMemoryContext([]), "");
+  it("returns false when memory does not exist", async () => {
+    await store.createChat("mem-del-2");
+    const deleted = await deleteMemory(db, "mem-del-2", 99999);
+    assert.equal(deleted, false);
   });
 
-  it("truncates very long exchange text", () => {
-    const longText = "a".repeat(3000);
-    const results = [
-      {
-        message_id: 1,
-        chat_id: "test",
-        sender_id: "user1",
-        message_data: /** @type {UserMessage} */ ({
-          role: "user",
-          content: [{ type: "text", text: longText }],
-        }),
-        exchange_text: longText,
-        timestamp: new Date("2025-01-15T10:30:00Z"),
-        similarity: 0.85,
-      },
-    ];
+  it("does not delete memory belonging to a different chat", async () => {
+    await store.createChat("mem-del-a");
+    await store.createChat("mem-del-b");
+    const { rows: [{ id }] } = await db.sql`
+      INSERT INTO memories (chat_id, content, search_text)
+      VALUES ('mem-del-a', 'Chat A only', to_tsvector('english', 'Chat A only'))
+      RETURNING id
+    `;
 
-    const output = formatMemoryContext(results);
-    assert.ok(output.length < longText.length, "Should truncate long exchange text");
+    const deleted = await deleteMemory(db, "mem-del-b", id);
+    assert.equal(deleted, false);
+
+    const { rows } = await db.sql`SELECT * FROM memories WHERE id = ${id}`;
+    assert.equal(rows.length, 1, "Memory should still exist in chat A");
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════
+// formatMemoriesContext
+// ═══════════════════════════════════════════════════════════════════
+describe("formatMemoriesContext", () => {
+  it("formats memory rows with timestamp and content", () => {
+    /** @type {import("../memory.js").MemoryRow[]} */
+    const memories = [{
+      id: 1, chat_id: "test", content: "User likes cats",
+      embedding: null, search_text: null,
+      created_at: new Date("2025-01-15T10:30:00Z"),
+    }];
+    const output = formatMemoriesContext(memories);
+    assert.ok(output.includes("User likes cats"));
+    assert.ok(output.includes("2025-01-15 10:30"));
+  });
+
+  it("separates multiple memories with ---", () => {
+    /** @type {import("../memory.js").MemoryRow[]} */
+    const memories = [
+      { id: 1, chat_id: "test", content: "Memory one", embedding: null, search_text: null, created_at: new Date("2025-01-15T10:30:00Z") },
+      { id: 2, chat_id: "test", content: "Memory two", embedding: null, search_text: null, created_at: new Date("2025-01-16T10:30:00Z") },
+    ];
+    const output = formatMemoriesContext(memories);
+    assert.ok(output.includes("---"));
+  });
+
+  it("returns empty string for empty array", () => {
+    assert.equal(formatMemoriesContext([]), "");
+  });
+
+  it("truncates very long content", () => {
+    const longContent = "a".repeat(3000);
+    /** @type {import("../memory.js").MemoryRow[]} */
+    const memories = [{
+      id: 1, chat_id: "test", content: longContent,
+      embedding: null, search_text: null,
+      created_at: new Date("2025-01-15T10:30:00Z"),
+    }];
+    const output = formatMemoriesContext(memories);
+    assert.ok(output.length < 3000);
   });
 });

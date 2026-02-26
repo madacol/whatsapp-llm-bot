@@ -22,10 +22,8 @@ import { convertUnsupportedMedia } from "./media-to-text.js";
 import { getRootDb } from "./db.js";
 import {
   extractTextFromMessage,
-  extractExchangeText,
-  storeExchangeEmbedding,
-  findSimilarMessages,
-  formatMemoryContext,
+  findMemories,
+  formatMemoriesContext,
 } from "./memory.js";
 import { storeLlmContext } from "./context-log.js";
 
@@ -440,7 +438,7 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
     // Always store the message so it's available in history for future responses
     /** @type {UserMessage} */
     const message = {role: "user", content}
-    const storedUserMsg = await addMessage(chatId, message, senderIds);
+    await addMessage(chatId, message, senderIds);
 
     const enableMemory = !!chatInfo?.memory;
 
@@ -475,9 +473,9 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
       if (currentText.length >= 10) {
         try {
           const threshold = chatInfo?.memory_threshold ?? config.memory_threshold;
-          const similar = await findSimilarMessages(getRootDb(), llmClient, chatId, currentText, { minSimilarity: threshold });
+          const similar = await findMemories(getRootDb(), llmClient, chatId, currentText, { minSimilarity: threshold });
           if (similar.length > 0) {
-            systemPrompt += "\n\n## Relevant past conversations\n" + formatMemoryContext(similar);
+            systemPrompt += "\n\n## Relevant past conversations\n" + formatMemoriesContext(similar);
           }
         } catch (err) {
           console.error("Memory search failed:", err);
@@ -501,20 +499,8 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
 
     await processLlmResponse({ session, llmConfig, formattedMessages });
 
-    // Embed the full exchange for long-term memory
-    if (enableMemory) {
-      const recentMessages = await getMessages(chatId, 50);
-      const exchangeMessages = recentMessages
-        .filter(m => m.message_id >= storedUserMsg.message_id)
-        .sort((a, b) => a.message_id - b.message_id)
-        .map(m => m.message_data);
-      const lastAssistant = recentMessages.find(m => m.message_data.role === "assistant");
-      if (lastAssistant) {
-        const exchangeText = extractExchangeText(exchangeMessages);
-        storeExchangeEmbedding(getRootDb(), llmClient, lastAssistant.message_id, exchangeText)
-          .catch(err => console.error("Embedding failed:", err));
-      }
-    }
+    // Note: memory storage is now handled via the saveMemory tool action,
+    // not automatically after each exchange.
   }
 
   return { handleMessage };
