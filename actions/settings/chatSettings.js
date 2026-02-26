@@ -13,6 +13,7 @@ const SETTINGS = [
   "image_to_text_model",
   "audio_to_text_model",
   "video_to_text_model",
+  "media_to_text_model",
   "enabled",
   "debug",
   "action",
@@ -121,6 +122,13 @@ async function getSetting(rootDb, chatId, setting) {
         ? `${type}-to-text model: \`${model}\``
         : `${type}-to-text model: not set`;
     }
+    case "media_to_text_model": {
+      const models = chat.media_to_text_models ?? {};
+      const model = models.general;
+      return model
+        ? `media-to-text model: \`${model}\``
+        : `media-to-text model: not set`;
+    }
     case "enabled":
       return `Bot: ${chat.is_enabled ? "enabled" : "disabled"}`;
     case "debug": {
@@ -220,6 +228,27 @@ async function setSetting(rootDb, chatId, setting, value, extra) {
       return `${type}-to-text model set to \`${trimmed}\``;
     }
 
+    case "media_to_text_model": {
+      const trimmed = value.trim();
+
+      const error = await validateModel(trimmed);
+      if (error) return error;
+
+      const modalities = await getModelModalities(trimmed);
+      if (!modalities.some(m => ["image", "audio", "video"].includes(m))) {
+        return `Model \`${trimmed}\` does not support any media input (image, audio, or video).`;
+      }
+
+      const currentModels = chat.media_to_text_models ?? {};
+      currentModels.general = trimmed;
+      await rootDb.sql`
+        UPDATE chats
+        SET media_to_text_models = ${JSON.stringify(currentModels)}::jsonb
+        WHERE chat_id = ${chatId}
+      `;
+      return `media-to-text model set to \`${trimmed}\``;
+    }
+
     case "enabled": {
       const senderIds = extra.senderIds ?? [];
       if (!isMaster(senderIds)) {
@@ -306,7 +335,7 @@ export default /** @type {defineAction} */ ((x) => x)({
   name: "chat_settings",
   command: "config",
   description:
-    "Get or set chat settings. Available settings: model, system_prompt, memory, memory_threshold, respond_on, image_to_text_model, audio_to_text_model, video_to_text_model, enabled, debug, action. Omit value to see current setting.",
+    "Get or set chat settings. Available settings: model, system_prompt, memory, memory_threshold, respond_on, image_to_text_model, audio_to_text_model, video_to_text_model, media_to_text_model, enabled, debug, action. Omit value to see current setting.",
   parameters: {
     type: "object",
     properties: {
@@ -505,6 +534,55 @@ export default /** @type {defineAction} */ ((x) => x)({
         );
         assert.ok(result.includes("does not support"));
       });
+    },
+
+    // ── media_to_text_model (general) ──
+    async function sets_general_media_to_text_model(action_fn, db) {
+      await withModelsCache([
+        {
+          id: "openai/gpt-4o",
+          name: "GPT-4o",
+          context_length: 128000,
+          pricing: { prompt: "0.000005", completion: "0.000015" },
+          architecture: { input_modalities: ["text", "image"] },
+        },
+      ], async () => {
+        await db.sql`INSERT INTO chats(chat_id) VALUES ('cs-mtt-1') ON CONFLICT DO NOTHING`;
+        const result = await action_fn(
+          { chatId: "cs-mtt-1", rootDb: db },
+          { setting: "media_to_text_model", value: "openai/gpt-4o" },
+        );
+        assert.ok(result.includes("media-to-text model"));
+        const { rows: [chat] } = await db.sql`SELECT media_to_text_models FROM chats WHERE chat_id = 'cs-mtt-1'`;
+        assert.equal(chat.media_to_text_models.general, "openai/gpt-4o");
+      });
+    },
+    async function rejects_text_only_model_for_general_media_to_text(action_fn, db) {
+      await withModelsCache([
+        {
+          id: "text-only/model",
+          name: "Text Only",
+          context_length: 4096,
+          pricing: { prompt: "0.000001", completion: "0.000001" },
+          architecture: { input_modalities: ["text"] },
+        },
+      ], async () => {
+        await db.sql`INSERT INTO chats(chat_id) VALUES ('cs-mtt-2') ON CONFLICT DO NOTHING`;
+        const result = await action_fn(
+          { chatId: "cs-mtt-2", rootDb: db },
+          { setting: "media_to_text_model", value: "text-only/model" },
+        );
+        assert.ok(result.includes("does not support"));
+      });
+    },
+    async function gets_general_media_to_text_model(action_fn, db) {
+      await db.sql`INSERT INTO chats(chat_id) VALUES ('cs-mtt-3') ON CONFLICT DO NOTHING`;
+      await db.sql`UPDATE chats SET media_to_text_models = '{"general":"openai/gpt-4o"}'::jsonb WHERE chat_id = 'cs-mtt-3'`;
+      const result = await action_fn(
+        { chatId: "cs-mtt-3", rootDb: db },
+        { setting: "media_to_text_model" },
+      );
+      assert.ok(result.includes("openai/gpt-4o"));
     },
 
     // ── info summary when no setting provided ──

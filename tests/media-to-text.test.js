@@ -512,6 +512,278 @@ describe("media-to-text", () => {
       });
     });
 
+    it("uses general chat media-to-text model when no per-type model is set", async () => {
+      const { convertUnsupportedMedia } = await import(
+        "../media-to-text.js"
+      );
+
+      await withModelsCache([
+        {
+          id: "text-only/model",
+          name: "Text Only",
+          context_length: 4096,
+          pricing: { prompt: "0.000001", completion: "0.000001" },
+          architecture: { input_modalities: ["text"] },
+        },
+        {
+          id: "vision/model",
+          name: "Vision",
+          context_length: 4096,
+          pricing: { prompt: "0.000001", completion: "0.000001" },
+          architecture: { input_modalities: ["text", "image"] },
+        },
+      ], async () => {
+        mockServer.addResponses("General model translation");
+
+        /** @type {MessageRow[]} */
+        const messages = [
+          {
+            message_id: 1,
+            chat_id: "test",
+            sender_id: "user1",
+            message_data: {
+              role: "user",
+              content: [
+                {
+                  type: "image",
+                  encoding: "base64",
+                  mime_type: "image/png",
+                  data: "generalmodeldata",
+                },
+              ],
+            },
+            timestamp: new Date(),
+          },
+        ];
+
+        // No per-type model, only general
+        const result = await convertUnsupportedMedia(
+          messages,
+          "text-only/model",
+          { general: "vision/model" },
+          llmClient,
+          db,
+        );
+
+        assert.ok(result.messages[0].message_data.content[0].text.includes("General model translation"));
+        assert.deepEqual(result.skippedTypes, new Set());
+      });
+    });
+
+    it("per-type model takes priority over general chat model", async () => {
+      const { convertUnsupportedMedia } = await import(
+        "../media-to-text.js"
+      );
+
+      await withModelsCache([
+        {
+          id: "text-only/model",
+          name: "Text Only",
+          context_length: 4096,
+          pricing: { prompt: "0.000001", completion: "0.000001" },
+          architecture: { input_modalities: ["text"] },
+        },
+        {
+          id: "general/model",
+          name: "General",
+          context_length: 4096,
+          pricing: { prompt: "0.000001", completion: "0.000001" },
+          architecture: { input_modalities: ["text", "image"] },
+        },
+        {
+          id: "specific/model",
+          name: "Specific",
+          context_length: 4096,
+          pricing: { prompt: "0.000001", completion: "0.000001" },
+          architecture: { input_modalities: ["text", "image"] },
+        },
+      ], async () => {
+        mockServer.addResponses("Specific model translation");
+
+        /** @type {MessageRow[]} */
+        const messages = [
+          {
+            message_id: 1,
+            chat_id: "test",
+            sender_id: "user1",
+            message_data: {
+              role: "user",
+              content: [
+                {
+                  type: "image",
+                  encoding: "base64",
+                  mime_type: "image/png",
+                  data: "prioritydata",
+                },
+              ],
+            },
+            timestamp: new Date(),
+          },
+        ];
+
+        const requestsBefore = mockServer.getRequests().length;
+        const result = await convertUnsupportedMedia(
+          messages,
+          "text-only/model",
+          { general: "general/model", image: "specific/model" },
+          llmClient,
+          db,
+        );
+
+        assert.ok(result.messages[0].message_data.content[0].text.includes("Specific model translation"));
+
+        // Verify the LLM request used the specific model
+        const translationRequest = mockServer.getRequests()[requestsBefore];
+        assert.equal(translationRequest.model, "specific/model");
+      });
+    });
+
+    it("uses per-type env var when no chat setting is set", async () => {
+      const { convertUnsupportedMedia } = await import(
+        "../media-to-text.js"
+      );
+      const config = (await import("../config.js")).default;
+
+      const origImageModel = config.image_to_text_model;
+      const origMediaModel = config.media_to_text_model;
+      config.image_to_text_model = "env-image/model";
+      config.media_to_text_model = "";
+
+      try {
+        await withModelsCache([
+          {
+            id: "text-only/model",
+            name: "Text Only",
+            context_length: 4096,
+            pricing: { prompt: "0.000001", completion: "0.000001" },
+            architecture: { input_modalities: ["text"] },
+          },
+          {
+            id: "env-image/model",
+            name: "Env Image",
+            context_length: 4096,
+            pricing: { prompt: "0.000001", completion: "0.000001" },
+            architecture: { input_modalities: ["text", "image"] },
+          },
+        ], async () => {
+          mockServer.addResponses("Env image model translation");
+
+          /** @type {MessageRow[]} */
+          const messages = [
+            {
+              message_id: 1,
+              chat_id: "test",
+              sender_id: "user1",
+              message_data: {
+                role: "user",
+                content: [
+                  {
+                    type: "image",
+                    encoding: "base64",
+                    mime_type: "image/png",
+                    data: "envimagedata",
+                  },
+                ],
+              },
+              timestamp: new Date(),
+            },
+          ];
+
+          const result = await convertUnsupportedMedia(
+            messages,
+            "text-only/model",
+            {},
+            llmClient,
+            db,
+          );
+
+          assert.ok(result.messages[0].message_data.content[0].text.includes("Env image model translation"));
+        });
+      } finally {
+        config.image_to_text_model = origImageModel;
+        config.media_to_text_model = origMediaModel;
+      }
+    });
+
+    it("per-type env var takes priority over general env var", async () => {
+      const { convertUnsupportedMedia } = await import(
+        "../media-to-text.js"
+      );
+      const config = (await import("../config.js")).default;
+
+      const origImageModel = config.image_to_text_model;
+      const origMediaModel = config.media_to_text_model;
+      config.image_to_text_model = "env-image/model";
+      config.media_to_text_model = "general-env/model";
+
+      try {
+        await withModelsCache([
+          {
+            id: "text-only/model",
+            name: "Text Only",
+            context_length: 4096,
+            pricing: { prompt: "0.000001", completion: "0.000001" },
+            architecture: { input_modalities: ["text"] },
+          },
+          {
+            id: "env-image/model",
+            name: "Env Image",
+            context_length: 4096,
+            pricing: { prompt: "0.000001", completion: "0.000001" },
+            architecture: { input_modalities: ["text", "image"] },
+          },
+          {
+            id: "general-env/model",
+            name: "General Env",
+            context_length: 4096,
+            pricing: { prompt: "0.000001", completion: "0.000001" },
+            architecture: { input_modalities: ["text", "image"] },
+          },
+        ], async () => {
+          mockServer.addResponses("Env image specific translation");
+
+          /** @type {MessageRow[]} */
+          const messages = [
+            {
+              message_id: 1,
+              chat_id: "test",
+              sender_id: "user1",
+              message_data: {
+                role: "user",
+                content: [
+                  {
+                    type: "image",
+                    encoding: "base64",
+                    mime_type: "image/png",
+                    data: "envprioritydata",
+                  },
+                ],
+              },
+              timestamp: new Date(),
+            },
+          ];
+
+          const requestsBefore = mockServer.getRequests().length;
+          const result = await convertUnsupportedMedia(
+            messages,
+            "text-only/model",
+            {},
+            llmClient,
+            db,
+          );
+
+          assert.ok(result.messages[0].message_data.content[0].text.includes("Env image specific translation"));
+
+          // Verify the LLM request used the per-type env var model
+          const translationRequest = mockServer.getRequests()[requestsBefore];
+          assert.equal(translationRequest.model, "env-image/model");
+        });
+      } finally {
+        config.image_to_text_model = origImageModel;
+        config.media_to_text_model = origMediaModel;
+      }
+    });
+
     it("uses global config.media_to_text_model as fallback", async () => {
       const { convertUnsupportedMedia } = await import(
         "../media-to-text.js"

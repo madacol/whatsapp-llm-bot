@@ -466,7 +466,7 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
 
     if (skippedTypes.size > 0) {
       const types = [...skippedTypes].join(", ");
-      await context.sendMessage(`⚠️ This model doesn't support ${types} content. The ${types} was not sent to the model. Use !config image_to_text_model / audio_to_text_model / video_to_text_model to configure a media-to-text model.`);
+      await context.sendMessage(`⚠️ This model doesn't support ${types} content. The ${types} was not sent to the model. Use !config media_to_text_model to set a general media-to-text model, or image_to_text_model / audio_to_text_model / video_to_text_model for per-type models.`);
     }
 
     // Search long-term memory for relevant past conversations
