@@ -12,6 +12,7 @@ import {
   createIncomingContext,
   createMockLlmServer,
   createTestDb,
+  seedChat as seedChat_,
 } from "./helpers.js";
 import { setDb } from "../db.js";
 
@@ -22,19 +23,8 @@ let handleMessage;
 /** @type {import("@electric-sql/pglite").PGlite} */
 let testDb;
 
-/**
- * Pre-create a chat row in the test DB
- * @param {string} chatId
- * @param {{enabled?: boolean, systemPrompt?: string | null, model?: string | null}} [options]
- */
-async function seedChat(chatId, options = {}) {
-  const enabled = options.enabled ?? false;
-  const systemPrompt = options.systemPrompt ?? null;
-  const model = options.model ?? null;
-  await testDb.sql`INSERT INTO chats(chat_id, is_enabled, system_prompt, model)
-    VALUES (${chatId}, ${enabled}, ${systemPrompt}, ${model})
-    ON CONFLICT (chat_id) DO NOTHING`;
-}
+/** @param {string} chatId @param {{enabled?: boolean, systemPrompt?: string | null, model?: string | null}} [options] */
+const seedChat = (chatId, options) => seedChat_(testDb, chatId, options);
 
 // ── Global setup / teardown ──
 

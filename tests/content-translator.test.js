@@ -1,6 +1,6 @@
 import { describe, it, before, after, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { createTestDb, createMockLlmServer } from "./helpers.js";
+import { createTestDb, createMockLlmServer, withModelsCache } from "./helpers.js";
 import { createLlmClient } from "../llm.js";
 
 /** @type {PGlite} */
@@ -70,24 +70,15 @@ describe("content-translator", () => {
         "../content-translator.js"
       );
 
-      const fs = await import("node:fs/promises");
-      const path = await import("node:path");
-      const cachePath = path.resolve("data/models.json");
-      await fs.mkdir(path.dirname(cachePath), { recursive: true });
-      await fs.writeFile(
-        cachePath,
-        JSON.stringify([
-          {
-            id: "openai/gpt-4o",
-            name: "GPT-4o",
-            context_length: 128000,
-            pricing: { prompt: "0.000005", completion: "0.000015" },
-            architecture: { input_modalities: ["text", "image", "audio"] },
-          },
-        ]),
-      );
-
-      try {
+      await withModelsCache([
+        {
+          id: "openai/gpt-4o",
+          name: "GPT-4o",
+          context_length: 128000,
+          pricing: { prompt: "0.000005", completion: "0.000015" },
+          architecture: { input_modalities: ["text", "image", "audio"] },
+        },
+      ], async () => {
         /** @type {MessageRow[]} */
         const messages = [
           {
@@ -121,9 +112,7 @@ describe("content-translator", () => {
         // Should be the exact same reference (no cloning needed)
         assert.equal(result.messages, messages);
         assert.deepEqual(result.skippedTypes, new Set());
-      } finally {
-        await fs.rm(cachePath, { force: true });
-      }
+      });
     });
 
     it("translates image content when model only supports text", async () => {
@@ -131,33 +120,24 @@ describe("content-translator", () => {
         "../content-translator.js"
       );
 
-      const fs = await import("node:fs/promises");
-      const path = await import("node:path");
-      const cachePath = path.resolve("data/models.json");
-      await fs.mkdir(path.dirname(cachePath), { recursive: true });
-      await fs.writeFile(
-        cachePath,
-        JSON.stringify([
-          {
-            id: "deepseek/deepseek-r1",
-            name: "DeepSeek R1",
-            context_length: 128000,
-            pricing: { prompt: "0.000005", completion: "0.000015" },
-            architecture: { input_modalities: ["text"] },
-          },
-          {
-            id: "openai/gpt-4o",
-            name: "GPT-4o",
-            context_length: 128000,
-            pricing: { prompt: "0.000005", completion: "0.000015" },
-            architecture: { input_modalities: ["text", "image"] },
-          },
-        ]),
-      );
+      await withModelsCache([
+        {
+          id: "deepseek/deepseek-r1",
+          name: "DeepSeek R1",
+          context_length: 128000,
+          pricing: { prompt: "0.000005", completion: "0.000015" },
+          architecture: { input_modalities: ["text"] },
+        },
+        {
+          id: "openai/gpt-4o",
+          name: "GPT-4o",
+          context_length: 128000,
+          pricing: { prompt: "0.000005", completion: "0.000015" },
+          architecture: { input_modalities: ["text", "image"] },
+        },
+      ], async () => {
+        mockServer.addResponses("A photo of a sunset over mountains.");
 
-      mockServer.addResponses("A photo of a sunset over mountains.");
-
-      try {
         /** @type {MessageRow[]} */
         const messages = [
           {
@@ -204,9 +184,7 @@ describe("content-translator", () => {
         assert.equal(content[1].type, "text");
         assert.ok(content[1].text.includes("A photo of a sunset over mountains."));
         assert.ok(content[1].text.includes("[Image description:"));
-      } finally {
-        await fs.rm(cachePath, { force: true });
-      }
+      });
     });
 
     it("uses cached translation on second call", async () => {
@@ -214,34 +192,27 @@ describe("content-translator", () => {
         "../content-translator.js"
       );
 
-      const fs = await import("node:fs/promises");
-      const path = await import("node:path");
-      const cachePath = path.resolve("data/models.json");
-      await fs.mkdir(path.dirname(cachePath), { recursive: true });
-      await fs.writeFile(
-        cachePath,
-        JSON.stringify([
-          {
-            id: "text-only/model",
-            name: "Text Only",
-            context_length: 4096,
-            pricing: { prompt: "0.000001", completion: "0.000001" },
-            architecture: { input_modalities: ["text"] },
-          },
-          {
-            id: "vision/model",
-            name: "Vision",
-            context_length: 4096,
-            pricing: { prompt: "0.000001", completion: "0.000001" },
-            architecture: { input_modalities: ["text", "image"] },
-          },
-        ]),
-      );
+      const models = [
+        {
+          id: "text-only/model",
+          name: "Text Only",
+          context_length: 4096,
+          pricing: { prompt: "0.000001", completion: "0.000001" },
+          architecture: { input_modalities: ["text"] },
+        },
+        {
+          id: "vision/model",
+          name: "Vision",
+          context_length: 4096,
+          pricing: { prompt: "0.000001", completion: "0.000001" },
+          architecture: { input_modalities: ["text", "image"] },
+        },
+      ];
 
-      // Only one response in queue — second call must use cache
-      mockServer.addResponses("Cached image description");
+      await withModelsCache(models, async () => {
+        // Only one response in queue — second call must use cache
+        mockServer.addResponses("Cached image description");
 
-      try {
         /** @type {MessageRow[]} */
         const messages = [
           {
@@ -281,9 +252,7 @@ describe("content-translator", () => {
           db,
         );
         assert.ok(result2.messages[0].message_data.content[0].text.includes("Cached image description"));
-      } finally {
-        await fs.rm(cachePath, { force: true });
-      }
+      });
     });
 
     it("skips unsupported content when no translation model is configured", async () => {
@@ -292,13 +261,11 @@ describe("content-translator", () => {
       );
       const config = (await import("../config.js")).default;
 
-      const fs = await import("node:fs/promises");
-      const path = await import("node:path");
-      const cachePath = path.resolve("data/models.json");
-      await fs.mkdir(path.dirname(cachePath), { recursive: true });
-      await fs.writeFile(
-        cachePath,
-        JSON.stringify([
+      const origContentModel = config.content_model;
+      config.content_model = "";
+
+      try {
+        await withModelsCache([
           {
             id: "text-only/model",
             name: "Text Only",
@@ -306,55 +273,49 @@ describe("content-translator", () => {
             pricing: { prompt: "0.000001", completion: "0.000001" },
             architecture: { input_modalities: ["text"] },
           },
-        ]),
-      );
-
-      const origContentModel = config.content_model;
-      config.content_model = "";
-
-      try {
-        /** @type {MessageRow[]} */
-        const messages = [
-          {
-            message_id: 1,
-            chat_id: "test",
-            sender_id: "user1",
-            message_data: {
-              role: "user",
-              content: [
-                { type: "text", text: "check this" },
-                {
-                  type: "image",
-                  encoding: "base64",
-                  mime_type: "image/png",
-                  data: "nomodeldata",
-                },
-              ],
+        ], async () => {
+          /** @type {MessageRow[]} */
+          const messages = [
+            {
+              message_id: 1,
+              chat_id: "test",
+              sender_id: "user1",
+              message_data: {
+                role: "user",
+                content: [
+                  { type: "text", text: "check this" },
+                  {
+                    type: "image",
+                    encoding: "base64",
+                    mime_type: "image/png",
+                    data: "nomodeldata",
+                  },
+                ],
+              },
+              timestamp: new Date(),
             },
-            timestamp: new Date(),
-          },
-        ];
+          ];
 
-        // No translation model configured, no global fallback
-        const result = await translateUnsupportedContent(
-          messages,
-          "text-only/model",
-          {},
-          llmClient,
-          db,
-        );
+          // No translation model configured, no global fallback
+          const result = await translateUnsupportedContent(
+            messages,
+            "text-only/model",
+            {},
+            llmClient,
+            db,
+          );
 
-        // Image block should be replaced with a placeholder
-        const content = result.messages[0].message_data.content;
-        assert.equal(content.length, 2);
-        assert.equal(content[1].type, "text");
-        assert.ok(content[1].text.includes("[Unsupported"));
+          // Image block should be replaced with a placeholder
+          const content = result.messages[0].message_data.content;
+          assert.equal(content.length, 2);
+          assert.equal(content[1].type, "text");
+          assert.ok(content[1].text.includes("[Unsupported"));
 
-        // Should report skipped content types
-        assert.deepEqual(result.skippedTypes, new Set(["image"]));
+          // Should report skipped content types
+          assert.deepEqual(result.skippedTypes, new Set(["image"]));
+        });
       } finally {
         config.content_model = origContentModel;
-        await fs.rm(cachePath, { force: true });
       }
     });
 
@@ -363,33 +324,24 @@ describe("content-translator", () => {
         "../content-translator.js"
       );
 
-      const fs = await import("node:fs/promises");
-      const path = await import("node:path");
-      const cachePath = path.resolve("data/models.json");
-      await fs.mkdir(path.dirname(cachePath), { recursive: true });
-      await fs.writeFile(
-        cachePath,
-        JSON.stringify([
-          {
-            id: "text-only/model",
-            name: "Text Only",
-            context_length: 4096,
-            pricing: { prompt: "0.000001", completion: "0.000001" },
-            architecture: { input_modalities: ["text"] },
-          },
-          {
-            id: "video-capable/model",
-            name: "Video Model",
-            context_length: 4096,
-            pricing: { prompt: "0.000001", completion: "0.000001" },
-            architecture: { input_modalities: ["text", "video"] },
-          },
-        ]),
-      );
+      await withModelsCache([
+        {
+          id: "text-only/model",
+          name: "Text Only",
+          context_length: 4096,
+          pricing: { prompt: "0.000001", completion: "0.000001" },
+          architecture: { input_modalities: ["text"] },
+        },
+        {
+          id: "video-capable/model",
+          name: "Video Model",
+          context_length: 4096,
+          pricing: { prompt: "0.000001", completion: "0.000001" },
+          architecture: { input_modalities: ["text", "video"] },
+        },
+      ], async () => {
+        mockServer.addResponses("A short video showing a person waving");
 
-      mockServer.addResponses("A short video showing a person waving");
-
-      try {
         /** @type {MessageRow[]} */
         const messages = [
           {
@@ -429,9 +381,7 @@ describe("content-translator", () => {
           `Should contain translation, got: ${content[1].text}`,
         );
         assert.deepEqual(result.skippedTypes, new Set());
-      } finally {
-        await fs.rm(cachePath, { force: true });
-      }
+      });
     });
 
     it("includes conversation context in translation prompt", async () => {
@@ -439,33 +389,24 @@ describe("content-translator", () => {
         "../content-translator.js"
       );
 
-      const fs = await import("node:fs/promises");
-      const path = await import("node:path");
-      const cachePath = path.resolve("data/models.json");
-      await fs.mkdir(path.dirname(cachePath), { recursive: true });
-      await fs.writeFile(
-        cachePath,
-        JSON.stringify([
-          {
-            id: "text-only/model",
-            name: "Text Only",
-            context_length: 4096,
-            pricing: { prompt: "0.000001", completion: "0.000001" },
-            architecture: { input_modalities: ["text"] },
-          },
-          {
-            id: "vision/model",
-            name: "Vision",
-            context_length: 4096,
-            pricing: { prompt: "0.000001", completion: "0.000001" },
-            architecture: { input_modalities: ["text", "image"] },
-          },
-        ]),
-      );
+      await withModelsCache([
+        {
+          id: "text-only/model",
+          name: "Text Only",
+          context_length: 4096,
+          pricing: { prompt: "0.000001", completion: "0.000001" },
+          architecture: { input_modalities: ["text"] },
+        },
+        {
+          id: "vision/model",
+          name: "Vision",
+          context_length: 4096,
+          pricing: { prompt: "0.000001", completion: "0.000001" },
+          architecture: { input_modalities: ["text", "image"] },
+        },
+      ], async () => {
+        mockServer.addResponses("The receipt shows milk at €1.50");
 
-      mockServer.addResponses("The receipt shows milk at €1.50");
-
-      try {
         /** @type {MessageRow[]} */
         const messages = [
           {
@@ -528,9 +469,7 @@ describe("content-translator", () => {
         const allText = JSON.stringify(reqMessages);
         assert.ok(allText.includes("hola que tal"), "Should include prior user message");
         assert.ok(allText.includes("how much did I spend on milk"), "Should include current user text");
-      } finally {
-        await fs.rm(cachePath, { force: true });
-      }
+      });
     });
 
     it("leaves assistant and tool messages untouched", async () => {
@@ -538,24 +477,15 @@ describe("content-translator", () => {
         "../content-translator.js"
       );
 
-      const fs = await import("node:fs/promises");
-      const path = await import("node:path");
-      const cachePath = path.resolve("data/models.json");
-      await fs.mkdir(path.dirname(cachePath), { recursive: true });
-      await fs.writeFile(
-        cachePath,
-        JSON.stringify([
-          {
-            id: "text-only/model",
-            name: "Text Only",
-            context_length: 4096,
-            pricing: { prompt: "0.000001", completion: "0.000001" },
-            architecture: { input_modalities: ["text"] },
-          },
-        ]),
-      );
-
-      try {
+      await withModelsCache([
+        {
+          id: "text-only/model",
+          name: "Text Only",
+          context_length: 4096,
+          pricing: { prompt: "0.000001", completion: "0.000001" },
+          architecture: { input_modalities: ["text"] },
+        },
+      ], async () => {
         /** @type {MessageRow[]} */
         const messages = [
           {
@@ -579,9 +509,7 @@ describe("content-translator", () => {
         );
 
         assert.equal(result.messages, messages);
-      } finally {
-        await fs.rm(cachePath, { force: true });
-      }
+      });
     });
 
     it("uses global config.content_model as fallback", async () => {
@@ -589,13 +517,13 @@ describe("content-translator", () => {
         "../content-translator.js"
       );
 
-      const fs = await import("node:fs/promises");
-      const path = await import("node:path");
-      const cachePath = path.resolve("data/models.json");
-      await fs.mkdir(path.dirname(cachePath), { recursive: true });
-      await fs.writeFile(
-        cachePath,
-        JSON.stringify([
+      // Temporarily set config.content_model
+      const config = (await import("../config.js")).default;
+      const origContentModel = config.content_model;
+      config.content_model = "fallback/model";
+
+      try {
+        await withModelsCache([
           {
             id: "text-only/model",
             name: "Text Only",
@@ -610,51 +538,43 @@ describe("content-translator", () => {
             pricing: { prompt: "0.000001", completion: "0.000001" },
             architecture: { input_modalities: ["text", "image"] },
           },
-        ]),
-      );
+        ], async () => {
+          mockServer.addResponses("Fallback translation");
 
-      // Temporarily set config.content_model
-      const config = (await import("../config.js")).default;
-      const origContentModel = config.content_model;
-      config.content_model = "fallback/model";
-
-      mockServer.addResponses("Fallback translation");
-
-      try {
-        /** @type {MessageRow[]} */
-        const messages = [
-          {
-            message_id: 1,
-            chat_id: "test",
-            sender_id: "user1",
-            message_data: {
-              role: "user",
-              content: [
-                {
-                  type: "image",
-                  encoding: "base64",
-                  mime_type: "image/png",
-                  data: "fallbackdata",
-                },
-              ],
+          /** @type {MessageRow[]} */
+          const messages = [
+            {
+              message_id: 1,
+              chat_id: "test",
+              sender_id: "user1",
+              message_data: {
+                role: "user",
+                content: [
+                  {
+                    type: "image",
+                    encoding: "base64",
+                    mime_type: "image/png",
+                    data: "fallbackdata",
+                  },
+                ],
+              },
+              timestamp: new Date(),
             },
-            timestamp: new Date(),
-          },
-        ];
+          ];
 
-        // No per-chat content_models, but global fallback is set
-        const result = await translateUnsupportedContent(
-          messages,
-          "text-only/model",
-          {},
-          llmClient,
-          db,
-        );
+          // No per-chat content_models, but global fallback is set
+          const result = await translateUnsupportedContent(
+            messages,
+            "text-only/model",
+            {},
+            llmClient,
+            db,
+          );
 
-        assert.ok(result.messages[0].message_data.content[0].text.includes("Fallback translation"));
+          assert.ok(result.messages[0].message_data.content[0].text.includes("Fallback translation"));
+        });
       } finally {
         config.content_model = origContentModel;
-        await fs.rm(cachePath, { force: true });
       }
     });
   });

@@ -8,6 +8,21 @@ import { initStore } from "../store.js";
 const MODELS_CACHE_PATH = path.resolve("data/models.json");
 
 /**
+ * Pre-create a chat row in the test DB.
+ * @param {PGlite} db
+ * @param {string} chatId
+ * @param {{enabled?: boolean, systemPrompt?: string | null, model?: string | null}} [options]
+ */
+export async function seedChat(db, chatId, options = {}) {
+  const enabled = options.enabled ?? false;
+  const systemPrompt = options.systemPrompt ?? null;
+  const model = options.model ?? null;
+  await db.sql`INSERT INTO chats(chat_id, is_enabled, system_prompt, model)
+    VALUES (${chatId}, ${enabled}, ${systemPrompt}, ${model})
+    ON CONFLICT (chat_id) DO NOTHING`;
+}
+
+/**
  * Write a models cache file, run fn, then clean up.
  * @param {object[]} models
  * @param {() => Promise<void>} fn
