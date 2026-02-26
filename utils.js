@@ -37,3 +37,27 @@ export function formatTime(date) {
     minute: "2-digit",
   });
 }
+
+/**
+ * Create a branded HtmlContent object that signals "serve this as an HTML page".
+ * @param {string} content - The HTML content
+ * @param {string} [title] - Optional page title
+ * @returns {HtmlContent}
+ */
+export function html(content, title) {
+  return { __brand: "html", html: content, title };
+}
+
+/**
+ * Type guard: checks whether a value is a branded HtmlContent object.
+ * @param {unknown} value
+ * @returns {value is HtmlContent}
+ */
+export function isHtmlContent(value) {
+  return (
+    value !== null &&
+    typeof value === "object" &&
+    /** @type {{__brand?: unknown}} */ (value).__brand === "html" &&
+    typeof /** @type {{html?: unknown}} */ (value).html === "string"
+  );
+}
