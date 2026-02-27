@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import config from "../../config.js";
+import { resolveModel } from "../../model-roles.js";
 
 /**
  * Parse a data URL into its mime type and raw Buffer.
@@ -338,7 +339,7 @@ export default /** @type {defineAction} */ ((x) => x)({
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: config.image_model,
+        model: resolveModel("image_generation"),
         messages: [{ role: "user", content: userParts }],
         modalities: ["image", "text"],
       }),
