@@ -6,6 +6,7 @@ import { getDb, getRootDb, getChatDb, getActionDb } from "./db.js";
 import config from "./config.js";
 import { createCallLlm } from "./llm.js";
 import { savePendingConfirmation, deletePendingConfirmation } from "./pending-confirmations.js";
+import { resolveModel } from "./model-roles.js";
 
 
 const currentSessionDb = getDb("memory://");
@@ -93,6 +94,7 @@ export async function executeAction(
     sendImage: context.sendImage,
     sendVideo: context.sendVideo,
     confirm: persistentConfirm,
+    resolveModel: (role) => resolveModel(role),
   };
 
   if (action.permissions?.useChatDb) {

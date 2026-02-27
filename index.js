@@ -19,6 +19,7 @@ import {
   formatMessagesForOpenAI,
 } from "./message-formatting.js";
 import { convertUnsupportedMedia } from "./media-to-text.js";
+import { resolveModel } from "./model-roles.js";
 import { getRootDb } from "./db.js";
 import {
   extractTextFromMessage,
@@ -522,7 +523,7 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
 
     // Get system prompt and model from current chat or use defaults
     let systemPrompt = (chatInfo?.system_prompt || config.system_prompt) + systemPromptSuffix;
-    const chatModel = chatInfo?.model || config.model;
+    const chatModel = resolveModel("chat", chatInfo ?? undefined);
 
     // Get latest messages from DB
     const chatMessages = await getMessages(chatId)

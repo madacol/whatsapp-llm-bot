@@ -82,6 +82,14 @@ ${typesFileContent}
         () => action_fn({}, { code: "{{invalid" }),
       );
     },
+    async function resolveModel_is_available_on_context(action_fn, _db) {
+      const mockResolveModel = (/** @type {string} */ role) => `model-for-${role}`;
+      const result = await action_fn(
+        { resolveModel: mockResolveModel },
+        { code: "({resolveModel}) => resolveModel('coding')" },
+      );
+      assert.equal(result, "model-for-coding");
+    },
   ],
   action_fn: async function (context, { code }) {
     // Handle both command args and LLM function call formats

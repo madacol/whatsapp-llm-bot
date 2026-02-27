@@ -52,6 +52,13 @@ describe("store with injected DB", () => {
       assert.equal(chat.model, null);
     });
 
+    it("new chat has model_roles defaulting to empty object", async () => {
+      await store.createChat("store-model-roles-1");
+      const chat = await store.getChat("store-model-roles-1");
+      assert.ok(chat);
+      assert.deepEqual(chat.model_roles, {});
+    });
+
     it("does not error on duplicate createChat", async () => {
       await store.createChat("store-test-1");
       const chat = await store.getChat("store-test-1");

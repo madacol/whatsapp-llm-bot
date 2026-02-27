@@ -1,4 +1,5 @@
 import config from "./config.js";
+import { resolveModel } from "./model-roles.js";
 
 /**
  * Extract plain text from a Message JSONB object.
@@ -42,7 +43,7 @@ export async function generateEmbedding(llmClient, text) {
 
   try {
     const response = await llmClient.embeddings.create({
-      model: config.embedding_model,
+      model: resolveModel("embedding"),
       input: text,
     });
     return response.data[0].embedding;

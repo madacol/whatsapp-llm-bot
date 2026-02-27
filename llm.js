@@ -1,5 +1,6 @@
 import OpenAI from "openai";
 import config from "./config.js";
+import { resolveModel } from "./model-roles.js";
 
 /**
  * Create a new OpenAI-compatible LLM client
@@ -56,7 +57,7 @@ export function convertMessageToOpenAI(msg) {
  * @param {string} [defaultModel]
  * @returns {CallLlm}
  */
-export function createCallLlm(llmClient, defaultModel = config.model) {
+export function createCallLlm(llmClient, defaultModel = resolveModel("chat")) {
   /** @type {CallLlm} */
   const callLlm = /** @type {CallLlm} */ (async (/** @type {CallLlmPrompt | CallLlmChatOptions} */ promptOrOpts, /** @type {CallLlmOptions} */ options = {}) => {
     if (typeof promptOrOpts === "object" && !Array.isArray(promptOrOpts) && "messages" in promptOrOpts) {
