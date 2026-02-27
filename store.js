@@ -1,4 +1,5 @@
 import { getRootDb } from "./db.js";
+import { initPendingConfirmationsTable } from "./pending-confirmations.js";
 
 /**
  * @typedef {{
@@ -140,6 +141,7 @@ export async function initStore(injectedDb){
       `;
       await db.sql`CREATE INDEX IF NOT EXISTS idx_messages_search_text ON messages USING gin (search_text)`;
       await db.sql`CREATE INDEX IF NOT EXISTS idx_memories_search_text ON memories USING gin (search_text)`;
+      await initPendingConfirmationsTable(db);
     } catch (error) {
       console.error("Schema migration error:", error);
     }

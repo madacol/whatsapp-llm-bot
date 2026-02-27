@@ -69,11 +69,15 @@ export function createConfirm(sock, chatId) {
     const sentMsg = await sock.sendMessage(chatId, { text: message });
     if (!sentMsg) return false;
 
-    const msgKey = sentMsg.key;
+    const rawKey = sentMsg.key;
+    if (!rawKey.id || !rawKey.remoteJid) return false;
+
+    /** @type {{ id: string; remoteJid: string }} */
+    const msgKey = { id: rawKey.id, remoteJid: rawKey.remoteJid };
 
     // React with hourglass to indicate waiting
     sock.sendMessage(chatId, {
-      react: { text: "⏳", key: msgKey },
+      react: { text: "⏳", key: rawKey },
     });
 
     if (hooks?.onSent) {
@@ -88,7 +92,7 @@ export function createConfirm(sock, chatId) {
             if (reaction.text?.startsWith("👍")) {
               sock.ev.off("messages.reaction", handler);
               sock.sendMessage(chatId, {
-                react: { text: "✅", key: msgKey },
+                react: { text: "✅", key: rawKey },
               });
               if (hooks?.onResolved) {
                 hooks.onResolved(msgKey, true);
@@ -97,7 +101,7 @@ export function createConfirm(sock, chatId) {
             } else if (reaction.text?.startsWith("👎")) {
               sock.ev.off("messages.reaction", handler);
               sock.sendMessage(chatId, {
-                react: { text: "❌", key: msgKey },
+                react: { text: "❌", key: rawKey },
               });
               if (hooks?.onResolved) {
                 hooks.onResolved(msgKey, false);
@@ -453,8 +457,13 @@ function registerHandlers(sockRef, saveCreds, onMessageHandler, reconnect, onRea
 
     if (events["messages.reaction"] && onReaction) {
       for (const event of events["messages.reaction"]) {
+        const { key, reaction } = event;
+        if (!key.id || !key.remoteJid || !reaction.text) continue;
         try {
-          await onReaction(event, sockRef.current);
+          await onReaction(
+            { key: { id: key.id, remoteJid: key.remoteJid }, reaction: { text: reaction.text } },
+            sockRef.current,
+          );
         } catch (err) {
           console.error("Error in onReaction handler:", err);
         }
