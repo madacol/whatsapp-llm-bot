@@ -1,5 +1,6 @@
 import { describe, it, before } from "node:test";
 import assert from "node:assert/strict";
+import { EventEmitter } from "node:events";
 
 // Env vars needed because whatsapp-adapter.js imports index.js which loads config.js
 process.env.TESTING = "1";
@@ -13,6 +14,9 @@ import { setDb } from "../db.js";
 /** @type {typeof import("../whatsapp-adapter.js").getMessageContent} */
 let getMessageContent;
 
+/** @type {typeof import("../whatsapp-adapter.js").createConfirm} */
+let createConfirm;
+
 before(async () => {
   // Seed DB cache so initStore() in index.js uses in-memory DB
   const testDb = await createTestDb();
@@ -20,7 +24,46 @@ before(async () => {
 
   const adapter = await import("../whatsapp-adapter.js");
   getMessageContent = adapter.getMessageContent;
+  createConfirm = adapter.createConfirm;
 });
+
+/**
+ * Create a mock Baileys socket for testing createConfirm.
+ * @returns {{ sock: any, sentMessages: any[], reactions: any[], emitReaction: (key: any, reaction: any) => void }}
+ */
+function createMockSock() {
+  const ee = new EventEmitter();
+  /** @type {any[]} */
+  const sentMessages = [];
+  /** @type {any[]} */
+  const reactions = [];
+
+  const sock = {
+    ev: {
+      on: ee.on.bind(ee),
+      off: ee.removeListener.bind(ee),
+      listenerCount: ee.listenerCount.bind(ee),
+    },
+    sendMessage: async (/** @type {string} */ chatId, /** @type {any} */ msg) => {
+      if (msg.react) {
+        reactions.push(msg.react);
+        return null;
+      }
+      const key = { id: `msg-${sentMessages.length}`, remoteJid: chatId };
+      sentMessages.push({ chatId, msg, key });
+      return { key };
+    },
+  };
+
+  return {
+    sock,
+    sentMessages,
+    reactions,
+    emitReaction: (key, reaction) => {
+      ee.emit("messages.reaction", [{ key, reaction }]);
+    },
+  };
+}
 
 describe("getMessageContent", () => {
   it("extracts plain text (conversation)", async () => {
@@ -258,5 +301,128 @@ describe("getMessageContent", () => {
     });
     const { quotedSenderId } = await getMessageContent(msg);
     assert.equal(quotedSenderId, undefined);
+  });
+});
+
+describe("createConfirm", () => {
+  it("resolves true on thumbs-up reaction and shows checkmark", async () => {
+    const { sock, reactions, emitReaction } = createMockSock();
+    const confirm = createConfirm(sock, "test-chat");
+
+    const promise = confirm("Confirm this?");
+    // Allow the async sendMessage to complete
+    await new Promise(r => setTimeout(r, 10));
+
+    // Emit 👍 on the message
+    emitReaction({ id: "msg-0", remoteJid: "test-chat" }, { text: "\uD83D\uDC4D" });
+
+    const result = await promise;
+    assert.equal(result, true);
+    assert.ok(reactions.some(r => r.text === "✅"), "Should react with ✅");
+  });
+
+  it("resolves false on thumbs-down reaction and shows X", async () => {
+    const { sock, reactions, emitReaction } = createMockSock();
+    const confirm = createConfirm(sock, "test-chat");
+
+    const promise = confirm("Confirm this?");
+    await new Promise(r => setTimeout(r, 10));
+
+    emitReaction({ id: "msg-0", remoteJid: "test-chat" }, { text: "\uD83D\uDC4E" });
+
+    const result = await promise;
+    assert.equal(result, false);
+    assert.ok(reactions.some(r => r.text === "❌"), "Should react with ❌");
+  });
+
+  it("shows hourglass reaction immediately (not countdown)", async () => {
+    const { sock, reactions, emitReaction } = createMockSock();
+    const confirm = createConfirm(sock, "test-chat");
+
+    const promise = confirm("Confirm this?");
+    await new Promise(r => setTimeout(r, 10));
+
+    // Should have ⏳ as the first/only reaction
+    assert.ok(reactions.some(r => r.text === "⏳"), "Should react with ⏳");
+    // Should NOT have any countdown emojis
+    assert.ok(!reactions.some(r => r.text === "🔟"), "Should not have countdown emojis");
+
+    // Clean up: resolve the promise
+    emitReaction({ id: "msg-0", remoteJid: "test-chat" }, { text: "\uD83D\uDC4D" });
+    await promise;
+  });
+
+  it("does NOT auto-resolve (no timeout)", async () => {
+    const { sock, reactions, emitReaction } = createMockSock();
+    const confirm = createConfirm(sock, "test-chat");
+
+    const promise = confirm("Confirm this?");
+    await new Promise(r => setTimeout(r, 10));
+
+    // Wait 200ms — promise should still be pending (no timeout)
+    let resolved = false;
+    promise.then(() => { resolved = true; });
+    await new Promise(r => setTimeout(r, 200));
+    assert.equal(resolved, false, "Promise should not auto-resolve");
+
+    // No ❌ from timeout
+    assert.ok(!reactions.some(r => r.text === "❌"), "Should not have auto-cancelled");
+
+    // Clean up
+    emitReaction({ id: "msg-0", remoteJid: "test-chat" }, { text: "\uD83D\uDC4D" });
+    await promise;
+  });
+
+  it("calls onSent hook with message key after sending", async () => {
+    const { sock, emitReaction } = createMockSock();
+    const confirm = createConfirm(sock, "test-chat");
+
+    /** @type {any} */
+    let sentKey = null;
+    const promise = confirm("Confirm?", {
+      onSent: async (key) => { sentKey = key; },
+    });
+    await new Promise(r => setTimeout(r, 10));
+
+    assert.ok(sentKey, "onSent should have been called");
+    assert.equal(sentKey.id, "msg-0");
+    assert.equal(sentKey.remoteJid, "test-chat");
+
+    emitReaction({ id: "msg-0", remoteJid: "test-chat" }, { text: "\uD83D\uDC4D" });
+    await promise;
+  });
+
+  it("calls onResolved hook with (msgKey, confirmed) after reaction", async () => {
+    const { sock, emitReaction } = createMockSock();
+    const confirm = createConfirm(sock, "test-chat");
+
+    /** @type {any[]} */
+    const resolvedCalls = [];
+    const promise = confirm("Confirm?", {
+      onResolved: async (key, confirmed) => { resolvedCalls.push({ key, confirmed }); },
+    });
+    await new Promise(r => setTimeout(r, 10));
+
+    emitReaction({ id: "msg-0", remoteJid: "test-chat" }, { text: "\uD83D\uDC4E" });
+    await promise;
+
+    assert.equal(resolvedCalls.length, 1);
+    assert.equal(resolvedCalls[0].key.id, "msg-0");
+    assert.equal(resolvedCalls[0].confirmed, false);
+  });
+
+  it("cleans up listener after resolution", async () => {
+    const { sock, emitReaction } = createMockSock();
+    const confirm = createConfirm(sock, "test-chat");
+
+    const promise = confirm("Confirm?");
+    await new Promise(r => setTimeout(r, 10));
+
+    const listenersBefore = sock.ev.listenerCount("messages.reaction");
+    emitReaction({ id: "msg-0", remoteJid: "test-chat" }, { text: "\uD83D\uDC4D" });
+    await promise;
+    const listenersAfter = sock.ev.listenerCount("messages.reaction");
+
+    assert.equal(listenersAfter, listenersBefore - 1, "Should have removed the reaction listener");
   });
 });
