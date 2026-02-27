@@ -406,6 +406,7 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
       reactToMessage: messageContext.reactToMessage,
       sendPoll: messageContext.sendPoll,
       sendImage: messageContext.sendImage,
+      sendVideo: messageContext.sendVideo,
       confirm: messageContext.confirm,
     };
 

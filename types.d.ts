@@ -86,6 +86,7 @@ type IncomingContext = {
   reactToMessage: (emoji: string) => Promise<void>;
   sendPoll: (name: string, options: string[], selectableCount?: number) => Promise<void>;
   sendImage: (image: Buffer, caption?: string) => Promise<void>;
+  sendVideo: (video: Buffer, caption?: string) => Promise<void>;
   confirm: (message: string) => Promise<boolean>;
 
   // Bot info
@@ -105,6 +106,7 @@ type Context = {
   reactToMessage: (emoji: string) => Promise<void>;
   sendPoll: (name: string, options: string[], selectableCount?: number) => Promise<void>;
   sendImage: (image: Buffer, caption?: string) => Promise<void>;
+  sendVideo: (video: Buffer, caption?: string) => Promise<void>;
   confirm: (message: string) => Promise<boolean>;
 };
 
@@ -125,6 +127,7 @@ type ActionContext = {
   reactToMessage: (emoji: string) => Promise<void>;
   sendPoll: (name: string, options: string[], selectableCount?: number) => Promise<void>;
   sendImage: (image: Buffer, caption?: string) => Promise<void>;
+  sendVideo: (video: Buffer, caption?: string) => Promise<void>;
   confirm: (message: string) => Promise<boolean>;
 };
 

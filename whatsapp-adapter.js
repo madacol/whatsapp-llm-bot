@@ -359,6 +359,10 @@ async function adaptIncomingMessage(baileysMessage, sock, messageHandler) {
       await sock.sendMessage(chatId, { image, ...(caption && { caption }) });
     },
 
+    sendVideo: async (video, caption) => {
+      await sock.sendMessage(chatId, { video, ...(caption && { caption }) });
+    },
+
     confirm: createConfirm(sock, chatId),
 
     // Bot info
