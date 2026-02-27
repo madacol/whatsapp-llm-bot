@@ -135,6 +135,7 @@ type ActionContext = {
   sendImage: (image: Buffer, caption?: string) => Promise<void>;
   sendVideo: (video: Buffer, caption?: string) => Promise<void>;
   confirm: (message: string) => Promise<boolean>;
+  resolveModel: (role: string) => string;
 };
 
 // Define permission flags

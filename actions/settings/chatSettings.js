@@ -2,7 +2,17 @@ import assert from "node:assert/strict";
 import config from "../../config.js";
 import { validateModel, getModelModalities } from "../../models-cache.js";
 import { getChatOrThrow } from "../../store.js";
+import { ROLE_DEFINITIONS, resolveModel } from "../../model-roles.js";
 import { withModelsCache } from "../../tests/helpers.js";
+
+/**
+ * Role names that use model_roles JSONB for per-chat overrides.
+ * Excludes "chat" (has dedicated `model` column) and *_to_text roles
+ * (use `media_to_text_models` JSONB).
+ */
+const MODEL_ROLE_SETTINGS = Object.keys(ROLE_DEFINITIONS)
+  .filter((r) => r !== "chat" && !r.endsWith("_to_text"))
+  .map((r) => `${r}_model`);
 
 const SETTINGS = [
   "model",
@@ -14,6 +24,7 @@ const SETTINGS = [
   "audio_to_text_model",
   "video_to_text_model",
   "media_to_text_model",
+  ...MODEL_ROLE_SETTINGS,
   "enabled",
   "debug",
   "action",
@@ -51,7 +62,7 @@ async function getInfo(rootDb, chatId, extra) {
   const chat = await getChatOrThrow(rootDb, chatId);
 
   const status = chat.is_enabled ? "enabled" : "disabled";
-  const model = chat.model || `${config.model} (default)`;
+  const model = chat.model || `${resolveModel("chat")} (default)`;
   const prompt = chat.system_prompt ? "custom (!config system_prompt)" : "default";
   const response = chat.respond_on ?? "mention";
 
@@ -70,6 +81,12 @@ async function getInfo(rootDb, chatId, extra) {
   const enabledActions = chat.enabled_actions ?? [];
   const optInStr = enabledActions.length > 0 ? enabledActions.join(", ") : "none";
 
+  const modelRoles = chat.model_roles ?? {};
+  const roleEntries = Object.entries(modelRoles);
+  const roleOverridesStr = roleEntries.length > 0
+    ? roleEntries.map(([role, m]) => `${role}: ${m}`).join(", ")
+    : "none";
+
   const senderIds = extra.senderIds ?? [];
 
   const lines = [
@@ -82,6 +99,7 @@ async function getInfo(rootDb, chatId, extra) {
     `*Memory:* ${memoryOn} (threshold: ${threshold})`,
     `*Debug:* ${debug}`,
     `*Media-to-text models:* ${mediaToTextStr}`,
+    `*Model role overrides:* ${roleOverridesStr}`,
     `*Opt-in actions:* ${optInStr}`,
   ];
 
@@ -101,7 +119,7 @@ async function getSetting(rootDb, chatId, setting) {
     case "model":
       return chat.model
         ? `Model: \`${chat.model}\``
-        : `Model (default): \`${config.model}\``;
+        : `Model (default): \`${resolveModel("chat")}\``;
     case "system_prompt":
       return chat.system_prompt
         ? `Prompt: ${chat.system_prompt}`
@@ -141,8 +159,22 @@ async function getSetting(rootDb, chatId, setting) {
         ? `Opt-in actions: ${enabledActions.join(", ")}`
         : "Opt-in actions: none";
     }
-    default:
+    default: {
+      if (MODEL_ROLE_SETTINGS.includes(setting)) {
+        const roleName = setting.replace(/_model$/, "");
+        const roles = chat.model_roles ?? {};
+        const override = roles[roleName];
+        const def = ROLE_DEFINITIONS[roleName];
+        const defaultVal = /** @type {string} */ (config[def.configKey]);
+        if (override) {
+          return `${roleName} model: \`${override}\``;
+        }
+        return defaultVal
+          ? `${roleName} model (default): \`${defaultVal}\``
+          : `${roleName} model: not set`;
+      }
       return `Unknown setting: ${setting}`;
+    }
   }
 }
 
@@ -168,7 +200,7 @@ async function setSetting(rootDb, chatId, setting, value, extra) {
       await rootDb.sql`UPDATE chats SET model = ${modelValue} WHERE chat_id = ${chatId}`;
       return modelValue
         ? `Model set to \`${modelValue}\``
-        : `Model reverted to default (\`${config.model}\`)`;
+        : `Model reverted to default (\`${resolveModel("chat")}\`)`;
     }
 
     case "system_prompt": {
@@ -326,8 +358,42 @@ async function setSetting(rootDb, chatId, setting, value, extra) {
       return `Action \`${actionName}\` ${actionEnabled ? "enabled" : "disabled"} for this chat.`;
     }
 
-    default:
+    default: {
+      if (MODEL_ROLE_SETTINGS.includes(setting)) {
+        const roleName = setting.replace(/_model$/, "");
+        const trimmed = value.trim();
+
+        // Clear: empty value removes the per-chat override
+        if (trimmed.length === 0) {
+          const currentRoles = chat.model_roles ?? {};
+          delete currentRoles[roleName];
+          await rootDb.sql`
+            UPDATE chats
+            SET model_roles = ${JSON.stringify(currentRoles)}::jsonb
+            WHERE chat_id = ${chatId}
+          `;
+          const def = ROLE_DEFINITIONS[roleName];
+          const defaultVal = /** @type {string} */ (config[def.configKey]);
+          return defaultVal
+            ? `${roleName} model cleared, reverted to default (\`${defaultVal}\`)`
+            : `${roleName} model cleared.`;
+        }
+
+        // Validate model
+        const error = await validateModel(trimmed);
+        if (error) return error;
+
+        const currentRoles = chat.model_roles ?? {};
+        currentRoles[roleName] = trimmed;
+        await rootDb.sql`
+          UPDATE chats
+          SET model_roles = ${JSON.stringify(currentRoles)}::jsonb
+          WHERE chat_id = ${chatId}
+        `;
+        return `${roleName} model set to \`${trimmed}\``;
+      }
       return `Unknown setting: ${setting}`;
+    }
   }
 }
 
@@ -335,7 +401,7 @@ export default /** @type {defineAction} */ ((x) => x)({
   name: "chat_settings",
   command: "config",
   description:
-    "Get or set chat settings. Available settings: model, system_prompt, memory, memory_threshold, respond_on, image_to_text_model, audio_to_text_model, video_to_text_model, media_to_text_model, enabled, debug, action. Omit value to see current setting.",
+    `Get or set chat settings. Available settings: ${SETTINGS.join(", ")}. Omit value to see current setting.`,
   parameters: {
     type: "object",
     properties: {
@@ -900,6 +966,84 @@ export default /** @type {defineAction} */ ((x) => x)({
         { setting: "action" },
       );
       assert.ok(result.includes("track_purchases"));
+    },
+
+    // ── model role settings (coding_model, smart_model, etc.) ──
+    async function sets_coding_model(action_fn, db) {
+      await withModelsCache([
+        { id: "deepseek/coder", name: "Deepseek Coder", context_length: 128000, pricing: { prompt: "0.000005", completion: "0.000015" } },
+      ], async () => {
+        await db.sql`INSERT INTO chats(chat_id) VALUES ('cs-role-1') ON CONFLICT DO NOTHING`;
+        const result = await action_fn(
+          { chatId: "cs-role-1", rootDb: db },
+          { setting: "coding_model", value: "deepseek/coder" },
+        );
+        assert.ok(result.includes("deepseek/coder"));
+        const { rows: [chat] } = await db.sql`SELECT model_roles FROM chats WHERE chat_id = 'cs-role-1'`;
+        assert.equal(chat.model_roles.coding, "deepseek/coder");
+      });
+    },
+    async function gets_coding_model(action_fn, db) {
+      await db.sql`INSERT INTO chats(chat_id) VALUES ('cs-role-2') ON CONFLICT DO NOTHING`;
+      await db.sql`UPDATE chats SET model_roles = '{"coding":"deepseek/coder"}'::jsonb WHERE chat_id = 'cs-role-2'`;
+      const result = await action_fn(
+        { chatId: "cs-role-2", rootDb: db },
+        { setting: "coding_model" },
+      );
+      assert.ok(result.includes("deepseek/coder"));
+    },
+    async function gets_default_coding_model(action_fn, db) {
+      await db.sql`INSERT INTO chats(chat_id) VALUES ('cs-role-3') ON CONFLICT DO NOTHING`;
+      const result = await action_fn(
+        { chatId: "cs-role-3", rootDb: db },
+        { setting: "coding_model" },
+      );
+      assert.ok(result.includes("not set") || result.includes("default"));
+    },
+    async function clears_coding_model(action_fn, db) {
+      await db.sql`INSERT INTO chats(chat_id) VALUES ('cs-role-4') ON CONFLICT DO NOTHING`;
+      await db.sql`UPDATE chats SET model_roles = '{"coding":"deepseek/coder"}'::jsonb WHERE chat_id = 'cs-role-4'`;
+      const result = await action_fn(
+        { chatId: "cs-role-4", rootDb: db },
+        { setting: "coding_model", value: "" },
+      );
+      assert.ok(result.includes("cleared") || result.includes("reverted") || result.includes("default"));
+      const { rows: [chat] } = await db.sql`SELECT model_roles FROM chats WHERE chat_id = 'cs-role-4'`;
+      assert.equal(chat.model_roles.coding, undefined);
+    },
+    async function sets_image_generation_model(action_fn, db) {
+      await withModelsCache([
+        { id: "dalle-3", name: "DALL-E 3", context_length: 4096, pricing: { prompt: "0.000005", completion: "0.000015" } },
+      ], async () => {
+        await db.sql`INSERT INTO chats(chat_id) VALUES ('cs-role-5') ON CONFLICT DO NOTHING`;
+        const result = await action_fn(
+          { chatId: "cs-role-5", rootDb: db },
+          { setting: "image_generation_model", value: "dalle-3" },
+        );
+        assert.ok(result.includes("dalle-3"));
+        const { rows: [chat] } = await db.sql`SELECT model_roles FROM chats WHERE chat_id = 'cs-role-5'`;
+        assert.equal(chat.model_roles.image_generation, "dalle-3");
+      });
+    },
+    async function rejects_invalid_role_model(action_fn, db) {
+      await withModelsCache([], async () => {
+        await db.sql`INSERT INTO chats(chat_id) VALUES ('cs-role-6') ON CONFLICT DO NOTHING`;
+        const result = await action_fn(
+          { chatId: "cs-role-6", rootDb: db },
+          { setting: "coding_model", value: "nonexistent/model" },
+        );
+        assert.ok(result.includes("not found") || result.includes("nvalid") || result.includes("error"), `Expected rejection, got: ${result}`);
+      });
+    },
+    async function info_shows_role_overrides(action_fn, db) {
+      await db.sql`INSERT INTO chats(chat_id) VALUES ('cs-role-7') ON CONFLICT DO NOTHING`;
+      await db.sql`UPDATE chats SET model_roles = '{"coding":"deepseek/coder","fast":"gpt-4o-mini"}'::jsonb WHERE chat_id = 'cs-role-7'`;
+      const result = await action_fn(
+        { chatId: "cs-role-7", rootDb: db, senderIds: ["u1"], getIsAdmin: async () => false },
+        { setting: "" },
+      );
+      assert.ok(result.includes("deepseek/coder"), "should include coding model override");
+      assert.ok(result.includes("gpt-4o-mini"), "should include fast model override");
     },
   ],
   action_fn: async function ({ chatId, rootDb, senderIds, getActions, getIsAdmin }, { setting, value }) {

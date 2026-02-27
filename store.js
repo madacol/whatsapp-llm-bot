@@ -13,6 +13,7 @@ import { initPendingConfirmationsTable } from "./pending-confirmations.js";
  *   respond_on: "any" | "mention+reply" | "mention";
  *   debug_until: string | null;
  *   media_to_text_models: { image?: string, audio?: string, video?: string, general?: string };
+ *   model_roles: Record<string, string>;
  *   memory: boolean;
  *   memory_threshold: number | null;
  *   enabled_actions: string[];
@@ -92,6 +93,7 @@ export async function initStore(injectedDb){
         db.sql`ALTER TABLE chats ADD COLUMN IF NOT EXISTS memory_threshold REAL`,
         db.sql`ALTER TABLE chats ADD COLUMN IF NOT EXISTS respond_on TEXT DEFAULT 'mention'`,
         db.sql`ALTER TABLE chats ADD COLUMN IF NOT EXISTS enabled_actions JSONB DEFAULT '[]'`,
+        db.sql`ALTER TABLE chats ADD COLUMN IF NOT EXISTS model_roles JSONB DEFAULT '{}'`,
         db.sql`ALTER TABLE messages ADD COLUMN IF NOT EXISTS exchange_text TEXT`,
         db.sql`ALTER TABLE messages ADD COLUMN IF NOT EXISTS llm_context JSONB`,
       ]);
