@@ -114,15 +114,15 @@ export async function createTestDb() {
  * @returns {Promise<{
  *   url: string,
  *   close: () => Promise<void>,
- *   addResponses: (...responses: Array<string | {tool_calls: any[]}>) => void,
+ *   addResponses: (...responses: Array<string | {tool_calls: any[]}>) => {clear: () => void},
  *   getRequests: () => object[],
  *   clearRequests: () => void,
  *   pendingResponses: () => number,
  * }>}
  */
 export async function createMockLlmServer() {
-  /** @type {Array<string | {tool_calls: any[]}>} */
-  const queue = [];
+  /** @type {Array<Array<string | {tool_calls: any[]}>>} */
+  const scopes = [];
   /** @type {object[]} */
   const requests = [];
 
@@ -155,7 +155,10 @@ export async function createMockLlmServer() {
 
       requests.push(parsed);
 
-      const next = queue.shift();
+      const scope = scopes.find(s => s.length > 0);
+      const next = scope?.shift();
+      // Auto-remove empty scopes from the front
+      while (scopes.length > 0 && scopes[0].length === 0) scopes.shift();
       if (next === undefined) {
         res.writeHead(500, { "Content-Type": "application/json" });
         res.end(
@@ -213,10 +216,20 @@ export async function createMockLlmServer() {
   return {
     url: `http://127.0.0.1:${port}/v1`,
     close: () => new Promise((resolve) => server.close(() => resolve(undefined))),
-    addResponses: (...responses) => queue.push(...responses),
+    addResponses: (...responses) => {
+      /** @type {Array<string | {tool_calls: any[]}>} */
+      const scope = [...responses];
+      scopes.push(scope);
+      return {
+        clear: () => {
+          const idx = scopes.indexOf(scope);
+          if (idx !== -1) scopes.splice(idx, 1);
+        },
+      };
+    },
     getRequests: () => requests,
     clearRequests: () => { requests.length = 0; },
-    pendingResponses: () => queue.length,
+    pendingResponses: () => scopes.reduce((n, s) => n + s.length, 0),
   };
 }
 

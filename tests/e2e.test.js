@@ -27,7 +27,9 @@ let testDb;
 /** @param {string} chatId @param {{enabled?: boolean, systemPrompt?: string | null, model?: string | null}} [options] */
 const seedChat = (chatId, options) => seedChat_(testDb, chatId, options);
 
-// ── Global setup / teardown ──
+// ── All tests run serially to prevent concurrent mock-server races ──
+
+describe("e2e", { concurrency: 1 }, () => {
 
 const CACHE_PATH = path.resolve("data/models.json");
 
@@ -438,6 +440,14 @@ describe("Scenario 8b: Tool call depth guard", () => {
     await seedChat(chatId, { enabled: true });
   });
 
+  after(() => {
+    assert.equal(
+      mockServer.pendingResponses(),
+      0,
+      `Scenario 8b leaked ${mockServer.pendingResponses()} unconsumed mock responses`,
+    );
+  });
+
   it("offers confirmation at depth limit; stops when user declines", async () => {
     const toolCallResponses = Array.from({ length: 15 }, (_, i) => ({
       tool_calls: [
@@ -451,7 +461,7 @@ describe("Scenario 8b: Tool call depth guard", () => {
         },
       ],
     }));
-    mockServer.addResponses(...toolCallResponses);
+    const scope = mockServer.addResponses(...toolCallResponses);
 
     const requestsBefore = mockServer.getRequests().length;
     // confirm returns false → user declines continuation
@@ -464,6 +474,7 @@ describe("Scenario 8b: Tool call depth guard", () => {
       },
     });
     await handleMessage(context);
+    scope.clear();
 
     const requestsAfter = mockServer.getRequests().length;
     const totalRequests = requestsAfter - requestsBefore;
@@ -503,7 +514,7 @@ describe("Scenario 8b: Tool call depth guard", () => {
     }));
     // Final response: plain text to end the loop
     toolCallResponses.push(/** @type {any} */ ({ content: "Done!" }));
-    mockServer.addResponses(...toolCallResponses);
+    const scope = mockServer.addResponses(...toolCallResponses);
 
     const requestsBefore = mockServer.getRequests().length;
     const { context, responses } = createIncomingContext({
@@ -517,6 +528,7 @@ describe("Scenario 8b: Tool call depth guard", () => {
       },
     });
     await handleMessage(context);
+    scope.clear();
 
     const requestsAfter = mockServer.getRequests().length;
     const totalRequests = requestsAfter - requestsBefore;
@@ -1049,3 +1061,5 @@ describe("HtmlContent via !command", () => {
     );
   });
 });
+
+}); // end describe("e2e")
