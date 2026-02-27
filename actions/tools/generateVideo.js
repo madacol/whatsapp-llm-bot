@@ -560,6 +560,128 @@ export default /** @type {defineAction} */ ((x) => x)({
       }
     },
 
+    async function test_includes_filter_reason_when_no_video(action_fn) {
+      const originalFetch = globalThis.fetch;
+      const savedKey = process.env.GEMINI_API_KEY;
+      process.env.GEMINI_API_KEY = "test-key";
+      try {
+        let fetchCallCount = 0;
+        globalThis.fetch = /** @type {typeof fetch} */ (/** @type {unknown} */ (
+          async () => {
+            fetchCallCount++;
+            if (fetchCallCount === 1) {
+              return {
+                ok: true,
+                json: async () => ({ name: "operations/op-filtered" }),
+              };
+            }
+            return {
+              ok: true,
+              json: async () => ({
+                done: true,
+                response: {
+                  generateVideoResponse: {
+                    generatedSamples: [],
+                    raiMediaFilteredCount: 1,
+                    raiMediaFilteredReasons: ["SAFETY_FILTER_TRIGGERED"],
+                  },
+                },
+              }),
+            };
+          }
+        ));
+
+        const savedPollInterval = pollIntervalMs;
+        pollIntervalMs = 0;
+        try {
+          const result = await action_fn(
+            {
+              content: [{ type: "text", text: "test" }],
+              sendVideo: async () => {},
+              log: async () => "",
+            },
+            { prompt: "test" },
+          );
+
+          assert.ok(typeof result === "string");
+          assert.ok(
+            result.includes("SAFETY_FILTER_TRIGGERED"),
+            `Expected error message to include filter reason, got: ${result}`,
+          );
+        } finally {
+          pollIntervalMs = savedPollInterval;
+        }
+      } finally {
+        globalThis.fetch = originalFetch;
+        if (savedKey !== undefined) process.env.GEMINI_API_KEY = savedKey;
+        else delete process.env.GEMINI_API_KEY;
+      }
+    },
+
+    async function test_logs_response_when_no_video(action_fn) {
+      const originalFetch = globalThis.fetch;
+      const savedKey = process.env.GEMINI_API_KEY;
+      const originalLog = console.log;
+      process.env.GEMINI_API_KEY = "test-key";
+      /** @type {unknown[]} */
+      const loggedArgs = [];
+      try {
+        console.log = /** @type {typeof console.log} */ ((...args) => {
+          loggedArgs.push(...args);
+        });
+        let fetchCallCount = 0;
+        globalThis.fetch = /** @type {typeof fetch} */ (/** @type {unknown} */ (
+          async () => {
+            fetchCallCount++;
+            if (fetchCallCount === 1) {
+              return {
+                ok: true,
+                json: async () => ({ name: "operations/op-log" }),
+              };
+            }
+            return {
+              ok: true,
+              json: async () => ({
+                done: true,
+                response: {
+                  generateVideoResponse: {
+                    generatedSamples: [],
+                    raiMediaFilteredCount: 1,
+                  },
+                },
+              }),
+            };
+          }
+        ));
+
+        const savedPollInterval = pollIntervalMs;
+        pollIntervalMs = 0;
+        try {
+          await action_fn(
+            {
+              content: [{ type: "text", text: "test" }],
+              sendVideo: async () => {},
+              log: async () => "",
+            },
+            { prompt: "test" },
+          );
+
+          const logStr = loggedArgs.map(String).join(" ");
+          assert.ok(
+            logStr.includes("raiMediaFilteredCount") || logStr.includes("generateVideoResponse"),
+            `Expected console.log to include poll response data, got: ${logStr}`,
+          );
+        } finally {
+          pollIntervalMs = savedPollInterval;
+        }
+      } finally {
+        console.log = originalLog;
+        globalThis.fetch = originalFetch;
+        if (savedKey !== undefined) process.env.GEMINI_API_KEY = savedKey;
+        else delete process.env.GEMINI_API_KEY;
+      }
+    },
+
     async function test_returns_error_when_no_gemini_api_key(action_fn) {
       const saved = process.env.GEMINI_API_KEY;
       try {
@@ -667,9 +789,15 @@ export default /** @type {defineAction} */ ((x) => x)({
       const pollData = await pollResponse.json();
 
       if (pollData.done) {
-        const samples = pollData.response?.generateVideoResponse?.generatedSamples;
+        const videoResponse = pollData.response?.generateVideoResponse;
+        const samples = videoResponse?.generatedSamples;
         if (!samples || samples.length === 0) {
-          return "The model did not generate any video.";
+          console.log("Veo returned no video. Full response:", JSON.stringify(pollData, null, 2));
+          const reasons = videoResponse?.raiMediaFilteredReasons;
+          if (reasons && reasons.length > 0) {
+            return `The model did not generate any video. Reason: ${reasons.join(", ")}`;
+          }
+          return "The model did not generate any video. Check logs for details.";
         }
 
         const videoUri = samples[0].video.uri;
