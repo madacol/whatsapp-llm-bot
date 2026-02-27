@@ -357,12 +357,15 @@ async function processLlmResponse({ session, llmConfig, formattedMessages }) {
 
     if (!continueProcessing) return;
     depth++;
-  }
 
-  await context.reply(
-    "⚠️ *Depth limit*",
-    `Reached maximum tool call depth (${MAX_TOOL_CALL_DEPTH}). Stopping.`,
-  );
+    if (depth >= MAX_TOOL_CALL_DEPTH) {
+      const confirmed = await context.confirm(
+        `⚠️ *Depth limit*\n\nReached maximum tool call depth (${MAX_TOOL_CALL_DEPTH}). React 👍 to continue or 👎 to stop.`,
+      );
+      if (!confirmed) return;
+      depth = 0;
+    }
+  }
 }
 
 /**

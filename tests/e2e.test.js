@@ -438,10 +438,7 @@ describe("Scenario 8b: Tool call depth guard", () => {
     await seedChat(chatId, { enabled: true });
   });
 
-  it("stops processing after MAX_TOOL_CALL_DEPTH iterations", async () => {
-    // Queue 15 tool-call responses using a non-existent action.
-    // Tool errors always set continueProcessing=true, so without a depth guard
-    // the loop would continue for all 15 + hit the server error.
+  it("offers confirmation at depth limit; stops when user declines", async () => {
     const toolCallResponses = Array.from({ length: 15 }, (_, i) => ({
       tool_calls: [
         {
@@ -457,9 +454,14 @@ describe("Scenario 8b: Tool call depth guard", () => {
     mockServer.addResponses(...toolCallResponses);
 
     const requestsBefore = mockServer.getRequests().length;
+    // confirm returns false → user declines continuation
     const { context, responses } = createIncomingContext({
       chatId,
       content: [{ type: "text", text: "trigger depth test" }],
+      confirm: async (message) => {
+        responses.push({ type: "confirm", text: message });
+        return false;
+      },
     });
     await handleMessage(context);
 
@@ -467,17 +469,74 @@ describe("Scenario 8b: Tool call depth guard", () => {
     const totalRequests = requestsAfter - requestsBefore;
 
     // With depth guard at 10: 1 initial + 10 continuations = 11 max
-    // Without guard: would attempt all 15+ continuations
     assert.ok(
       totalRequests <= 11,
       `Expected at most 11 LLM requests (depth guard at 10), got ${totalRequests}`,
     );
 
-    // Should have a depth limit warning in responses
+    // Should have asked via confirm (not just a static reply)
+    const confirmMessages = responses.filter((r) => r.type === "confirm");
     assert.ok(
-      responses.some((r) => r.text.toLowerCase().includes("depth") || r.text.toLowerCase().includes("limit")),
-      "Should warn about depth limit being reached",
+      confirmMessages.length > 0,
+      "Should ask user for confirmation at depth limit",
     );
+    assert.ok(
+      confirmMessages[0].text.toLowerCase().includes("depth") || confirmMessages[0].text.toLowerCase().includes("limit"),
+      "Confirm message should mention depth/limit",
+    );
+  });
+
+  it("continues processing when user confirms at depth limit", async () => {
+    let confirmCount = 0;
+    // Queue 25 tool-call responses — enough for 2 depth-limit cycles
+    const toolCallResponses = Array.from({ length: 25 }, (_, i) => ({
+      tool_calls: [
+        {
+          id: `call_cont_${String(i).padStart(3, "0")}`,
+          type: "function",
+          function: {
+            name: "nonexistent_action_for_cont_test",
+            arguments: "{}",
+          },
+        },
+      ],
+    }));
+    // Final response: plain text to end the loop
+    toolCallResponses.push(/** @type {any} */ ({ content: "Done!" }));
+    mockServer.addResponses(...toolCallResponses);
+
+    const requestsBefore = mockServer.getRequests().length;
+    const { context, responses } = createIncomingContext({
+      chatId,
+      content: [{ type: "text", text: "trigger continuation test" }],
+      confirm: async (message) => {
+        confirmCount++;
+        responses.push({ type: "confirm", text: message });
+        // Approve first time, decline second time
+        return confirmCount <= 1;
+      },
+    });
+    await handleMessage(context);
+
+    const requestsAfter = mockServer.getRequests().length;
+    const totalRequests = requestsAfter - requestsBefore;
+
+    // First cycle: 11 requests (1 initial + 10 continuations)
+    // User confirms → second cycle starts, another 10 continuations
+    // User declines at second limit → stops
+    // Total: 11 + 10 = 21
+    assert.ok(
+      totalRequests > 11,
+      `Expected more than 11 requests after user confirmed continuation, got ${totalRequests}`,
+    );
+    assert.ok(
+      totalRequests <= 22,
+      `Expected at most 22 requests (two depth cycles + decline), got ${totalRequests}`,
+    );
+
+    // Should have been asked twice
+    const confirmMessages = responses.filter((r) => r.type === "confirm");
+    assert.equal(confirmMessages.length, 2, "Should ask user twice (confirm once, decline once)");
   });
 });
 
