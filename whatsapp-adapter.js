@@ -365,13 +365,18 @@ async function adaptIncomingMessage(baileysMessage, sock, messageHandler) {
 }
 
 /**
+ * @typedef {{ key: { id: string; remoteJid: string }, reaction: { text: string } }} ReactionEvent
+ */
+
+/**
  * Register event handlers on a Baileys socket.
  * @param {{ current: import('@whiskeysockets/baileys').WASocket }} sockRef
  * @param {() => Promise<void>} saveCreds
  * @param {(message: IncomingContext) => Promise<void>} onMessageHandler
  * @param {() => Promise<void>} reconnect
+ * @param {((event: ReactionEvent, sock: import('@whiskeysockets/baileys').WASocket) => Promise<void>) | null} [onReaction]
  */
-function registerHandlers(sockRef, saveCreds, onMessageHandler, reconnect) {
+function registerHandlers(sockRef, saveCreds, onMessageHandler, reconnect, onReaction = null) {
   sockRef.current.ev.process(async (events) => {
     if (events["connection.update"]) {
       const update = events["connection.update"];
@@ -445,16 +450,37 @@ function registerHandlers(sockRef, saveCreds, onMessageHandler, reconnect) {
         await adaptIncomingMessage(message, sockRef.current, onMessageHandler);
       }
     }
+
+    if (events["messages.reaction"] && onReaction) {
+      for (const event of events["messages.reaction"]) {
+        try {
+          await onReaction(event, sockRef.current);
+        } catch (err) {
+          console.error("Error in onReaction handler:", err);
+        }
+      }
+    }
   });
 }
 
 // TODO: add reconnect integration test
 
 /**
- * Initialize WhatsApp connection and set up message handling
- * @param {(message: IncomingContext) => Promise<void>} onMessageHandler - Handler function that receives enriched message context
+ * @typedef {{
+ *   onMessage: (message: IncomingContext) => Promise<void>;
+ *   onReaction?: (event: ReactionEvent, sock: import('@whiskeysockets/baileys').WASocket) => Promise<void>;
+ * }} ConnectOptions
  */
-export async function connectToWhatsApp(onMessageHandler) {
+
+/**
+ * Initialize WhatsApp connection and set up message handling
+ * @param {((message: IncomingContext) => Promise<void>) | ConnectOptions} handlerOrOptions
+ */
+export async function connectToWhatsApp(handlerOrOptions) {
+  const options = typeof handlerOrOptions === "function"
+    ? { onMessage: handlerOrOptions }
+    : handlerOrOptions;
+  const { onMessage, onReaction } = options;
 
   const { version } = await fetchLatestWaWebVersion();
   console.log("Using WA Web version:", version);
@@ -481,10 +507,10 @@ export async function connectToWhatsApp(onMessageHandler) {
       auth: newState,
       browser: Browsers.ubuntu("Chrome"),
     });
-    registerHandlers(sockRef, newSaveCreds, onMessageHandler, reconnect);
+    registerHandlers(sockRef, newSaveCreds, onMessage, reconnect, onReaction);
   }
 
-  registerHandlers(sockRef, saveCreds, onMessageHandler, reconnect);
+  registerHandlers(sockRef, saveCreds, onMessage, reconnect, onReaction);
 
   return {
     async closeWhatsapp() {
