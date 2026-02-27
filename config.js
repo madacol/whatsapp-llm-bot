@@ -18,6 +18,7 @@ export default {
   video_to_text_model: process.env.VIDEO_TO_TEXT_MODEL || "",
   embedding_model: process.env.EMBEDDING_MODEL || "google/gemini-embedding-001",
   image_model: process.env.IMAGE_MODEL || "google/gemini-3-pro-image-preview",
+  get gemini_api_key() { return process.env.GEMINI_API_KEY; },
   memory_threshold: parseFloat(process.env.MEMORY_THRESHOLD || "") || 0.3,
   html_server_port: parseInt(process.env.HTML_SERVER_PORT || "3100", 10),
   get html_server_base_url() { return process.env.HTML_SERVER_BASE_URL || ""; },

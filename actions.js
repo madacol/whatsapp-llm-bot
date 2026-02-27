@@ -68,6 +68,7 @@ export async function executeAction(
     reactToMessage: context.reactToMessage,
     sendPoll: context.sendPoll,
     sendImage: context.sendImage,
+    sendVideo: context.sendVideo,
     confirm: context.confirm,
   };
 

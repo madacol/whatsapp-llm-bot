@@ -73,6 +73,9 @@ export function createIncomingContext(overrides = {}) {
     sendImage: async (_image, caption) => {
       responses.push({ type: "sendImage", text: caption || "" });
     },
+    sendVideo: async (_video, caption) => {
+      responses.push({ type: "sendVideo", text: caption || "" });
+    },
     confirm: async (message) => {
       responses.push({ type: "confirm", text: message });
       return true;
