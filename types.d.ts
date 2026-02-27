@@ -87,6 +87,7 @@ type IncomingContext = {
   sendPoll: (name: string, options: string[], selectableCount?: number) => Promise<void>;
   sendImage: (image: Buffer, caption?: string) => Promise<void>;
   confirm: (message: string) => Promise<boolean>;
+  sendPresenceUpdate: (presence: "composing" | "paused") => Promise<void>;
 
   // Bot info
   selfIds: string[];
