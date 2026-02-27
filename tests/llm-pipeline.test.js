@@ -307,13 +307,16 @@ describe("LLM pipeline via createMessageHandler", () => {
   it("getMessages DESC + formatMessagesForOpenAI produces chronological order", async () => {
     await seedChat("pipe-order", { enabled: true });
 
-    // Seed messages with known order
+    // Seed messages with known order (within the 8h default window)
+    const threeHoursAgo = new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString();
+    const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString();
+    const oneHourAgo = new Date(Date.now() - 1 * 60 * 60 * 1000).toISOString();
     await db.sql`INSERT INTO messages(chat_id, sender_id, message_data, timestamp)
-      VALUES ('pipe-order', 'u1', '{"role":"user","content":[{"type":"text","text":"first msg"}]}', '2026-02-19 08:00:00')`;
+      VALUES ('pipe-order', 'u1', '{"role":"user","content":[{"type":"text","text":"first msg"}]}', ${threeHoursAgo})`;
     await db.sql`INSERT INTO messages(chat_id, sender_id, message_data, timestamp)
-      VALUES ('pipe-order', 'u1', '{"role":"user","content":[{"type":"text","text":"second msg"}]}', '2026-02-19 09:00:00')`;
+      VALUES ('pipe-order', 'u1', '{"role":"user","content":[{"type":"text","text":"second msg"}]}', ${twoHoursAgo})`;
     await db.sql`INSERT INTO messages(chat_id, sender_id, message_data, timestamp)
-      VALUES ('pipe-order', 'u1', '{"role":"user","content":[{"type":"text","text":"third msg"}]}', '2026-02-19 10:00:00')`;
+      VALUES ('pipe-order', 'u1', '{"role":"user","content":[{"type":"text","text":"third msg"}]}', ${oneHourAgo})`;
 
     // Send a new message to trigger the pipeline
     mockServer.addResponses("Order test reply");

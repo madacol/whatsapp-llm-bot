@@ -122,7 +122,7 @@ describe("store with injected DB", () => {
         await store.addMessage("msg-test-3", msg, ["s1"]);
       }
 
-      const messages = await store.getMessages("msg-test-3", 2);
+      const messages = await store.getMessages("msg-test-3", undefined, 2);
       assert.equal(messages.length, 2);
     });
 
@@ -159,6 +159,60 @@ describe("store with injected DB", () => {
       const messages = await store.getMessages("msg-test-5");
       assert.equal(messages.length, 1);
       assert.equal(messages[0].message_data.role, "tool");
+    });
+
+    it("excludes messages older than 8h by default", async () => {
+      await store.createChat("msg-test-time-1");
+
+      // Insert a message timestamped 10 hours ago
+      const tenHoursAgo = new Date(Date.now() - 10 * 60 * 60 * 1000).toISOString();
+      await db.sql`INSERT INTO messages(chat_id, sender_id, message_data, timestamp)
+        VALUES ('msg-test-time-1', 's1', '{"role":"user","content":[{"type":"text","text":"old msg"}]}', ${tenHoursAgo})`;
+
+      const messages = await store.getMessages("msg-test-time-1");
+      assert.equal(messages.length, 0, "message older than 8h should be excluded");
+    });
+
+    it("includes messages within the 8h default window", async () => {
+      await store.createChat("msg-test-time-2");
+
+      // Insert a message timestamped 2 hours ago
+      const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString();
+      await db.sql`INSERT INTO messages(chat_id, sender_id, message_data, timestamp)
+        VALUES ('msg-test-time-2', 's1', '{"role":"user","content":[{"type":"text","text":"recent msg"}]}', ${twoHoursAgo})`;
+
+      const messages = await store.getMessages("msg-test-time-2");
+      assert.equal(messages.length, 1, "message within 8h should be included");
+      assert.equal(messages[0].message_data.content[0].text, "recent msg");
+    });
+
+    it("caps results at 300 by default", async () => {
+      await store.createChat("msg-test-time-3");
+
+      // Insert 305 messages all within the 8h window
+      const oneHourAgo = new Date(Date.now() - 1 * 60 * 60 * 1000).toISOString();
+      const values = Array.from({ length: 305 }, (_, i) =>
+        `('msg-test-time-3', 's1', '{"role":"user","content":[{"type":"text","text":"m${i}"}]}', '${oneHourAgo}')`
+      ).join(",");
+      await db.exec(`INSERT INTO messages(chat_id, sender_id, message_data, timestamp) VALUES ${values}`);
+
+      const messages = await store.getMessages("msg-test-time-3");
+      assert.equal(messages.length, 300, "should cap at 300 messages");
+    });
+
+    it("allows custom since to override the default 8h window", async () => {
+      await store.createChat("msg-test-time-4");
+
+      // Insert a message 10 hours ago (outside default 8h window)
+      const tenHoursAgo = new Date(Date.now() - 10 * 60 * 60 * 1000).toISOString();
+      await db.sql`INSERT INTO messages(chat_id, sender_id, message_data, timestamp)
+        VALUES ('msg-test-time-4', 's1', '{"role":"user","content":[{"type":"text","text":"old but wanted"}]}', ${tenHoursAgo})`;
+
+      // Use custom since = 12 hours ago to include it
+      const twelveHoursAgo = new Date(Date.now() - 12 * 60 * 60 * 1000);
+      const messages = await store.getMessages("msg-test-time-4", twelveHoursAgo);
+      assert.equal(messages.length, 1, "custom since should override default 8h");
+      assert.equal(messages[0].message_data.content[0].text, "old but wanted");
     });
 
     it("excludes cleared messages by default", async () => {
