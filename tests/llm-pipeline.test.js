@@ -474,4 +474,29 @@ describe("LLM pipeline via createMessageHandler", () => {
     assert.ok(usageLine.includes("completion="), "Should log completion tokens");
     assert.ok(usageLine.includes("model="), "Should log model name");
   });
+
+  it("persists usage row to DB after LLM response", async () => {
+    await seedChat("pipe-usage-db", { enabled: true });
+    mockServer.addResponses("Persist usage test");
+
+    const { context } = createIncomingContext({
+      chatId: "pipe-usage-db",
+      content: [{ type: "text", text: "Hello" }],
+    });
+    await handleMessage(context);
+
+    // Give the fire-and-forget recordUsage a moment to complete
+    await new Promise((resolve) => setTimeout(resolve, 200));
+
+    const { rows } = await db.query(
+      "SELECT * FROM usage_logs WHERE chat_id = $1",
+      ["pipe-usage-db"],
+    );
+    assert.equal(rows.length, 1, "Should persist exactly one usage row");
+    assert.equal(rows[0].prompt_tokens, 10);
+    assert.equal(rows[0].completion_tokens, 5);
+    assert.equal(rows[0].cached_tokens, 8);
+    assert.equal(rows[0].cost, 0.001);
+    assert.equal(rows[0].model, "mock-model");
+  });
 });
