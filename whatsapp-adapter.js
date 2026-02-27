@@ -361,6 +361,10 @@ async function adaptIncomingMessage(baileysMessage, sock, messageHandler) {
 
     confirm: createConfirm(sock, chatId),
 
+    sendPresenceUpdate: async (presence) => {
+      await sock.sendPresenceUpdate(presence, chatId);
+    },
+
     // Bot info
     selfIds: selfIds || [],
     selfName: sock.user?.name || "",

@@ -554,7 +554,12 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
       executeActionFn, actionResolver, actionLlmClient: llmClient,
     };
 
-    await processLlmResponse({ session, llmConfig, formattedMessages });
+    await messageContext.sendPresenceUpdate("composing");
+    try {
+      await processLlmResponse({ session, llmConfig, formattedMessages });
+    } finally {
+      await messageContext.sendPresenceUpdate("paused");
+    }
 
     // Note: memory storage is now handled via the saveMemory tool action,
     // not automatically after each exchange.
