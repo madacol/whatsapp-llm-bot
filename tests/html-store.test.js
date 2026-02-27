@@ -1,6 +1,6 @@
 process.env.TESTING = "1";
 
-import { describe, it, before } from "node:test";
+import { describe, it, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { PGlite } from "@electric-sql/pglite";
 import { storePage, getPage } from "../html-store.js";
@@ -10,6 +10,10 @@ let db;
 
 before(async () => {
   db = new PGlite("memory://");
+});
+
+after(async () => {
+  await db.close();
 });
 
 describe("html-store", () => {
