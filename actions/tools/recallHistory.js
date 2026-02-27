@@ -3,14 +3,19 @@ import assert from "node:assert/strict";
 export default /** @type {defineAction} */ ((x) => x)({
   name: "recall_history",
   description:
-    "Fetch older conversation messages beyond the current context window. Call this when a user asks about something that happened earlier in the chat and you don't have enough context. Pass a timestamp to retrieve messages from that point onward. Messages are returned oldest-first.",
+    "Fetch conversation messages from any time window. The main context already contains the last 8 hours. Call this when a user asks about something older or when you need a specific time range. Messages are returned oldest-first.",
   parameters: {
     type: "object",
     properties: {
       since: {
         type: "string",
         description:
-          "ISO 8601 timestamp to start from (e.g. '2026-02-19T08:00:00Z' or '2026-02-19'). Returns messages from this time up to the oldest message already in your context.",
+          "ISO 8601 timestamp to start from (e.g. '2026-02-19T08:00:00Z' or '2026-02-19'). Returns messages from this time onward.",
+      },
+      until: {
+        type: "string",
+        description:
+          "ISO 8601 timestamp upper bound. If omitted, returns messages up to now.",
       },
       limit: {
         type: "number",
@@ -84,6 +89,39 @@ export default /** @type {defineAction} */ ((x) => x)({
       assert.ok(!result.includes("recall-msg4"), "should not include beyond limit");
     },
 
+    async function returns_only_messages_between_since_and_until(action_fn, db) {
+      await db.sql`INSERT INTO chats(chat_id) VALUES ('act-recall-until-1') ON CONFLICT DO NOTHING`;
+      await db.sql`DELETE FROM messages WHERE chat_id = 'act-recall-until-1'`;
+      await db.sql`INSERT INTO messages(chat_id, sender_id, message_data, timestamp)
+        VALUES ('act-recall-until-1', 'u1', '{"role":"user","content":[{"type":"text","text":"before window"}]}', '2026-02-10 06:00:00')`;
+      await db.sql`INSERT INTO messages(chat_id, sender_id, message_data, timestamp)
+        VALUES ('act-recall-until-1', 'u1', '{"role":"user","content":[{"type":"text","text":"in window"}]}', '2026-02-10 12:00:00')`;
+      await db.sql`INSERT INTO messages(chat_id, sender_id, message_data, timestamp)
+        VALUES ('act-recall-until-1', 'u1', '{"role":"user","content":[{"type":"text","text":"after window"}]}', '2026-02-10 20:00:00')`;
+      const result = await action_fn(
+        { chatId: "act-recall-until-1", rootDb: db },
+        { since: "2026-02-10T08:00:00Z", until: "2026-02-10T15:00:00Z" },
+      );
+      assert.ok(!result.includes("before window"), "should exclude message before since");
+      assert.ok(result.includes("in window"), "should include message in window");
+      assert.ok(!result.includes("after window"), "should exclude message after until");
+    },
+
+    async function without_until_returns_all_from_since(action_fn, db) {
+      await db.sql`INSERT INTO chats(chat_id) VALUES ('act-recall-until-2') ON CONFLICT DO NOTHING`;
+      await db.sql`DELETE FROM messages WHERE chat_id = 'act-recall-until-2'`;
+      await db.sql`INSERT INTO messages(chat_id, sender_id, message_data, timestamp)
+        VALUES ('act-recall-until-2', 'u1', '{"role":"user","content":[{"type":"text","text":"msg early"}]}', '2026-02-10 08:00:00')`;
+      await db.sql`INSERT INTO messages(chat_id, sender_id, message_data, timestamp)
+        VALUES ('act-recall-until-2', 'u1', '{"role":"user","content":[{"type":"text","text":"msg late"}]}', '2026-02-19 20:00:00')`;
+      const result = await action_fn(
+        { chatId: "act-recall-until-2", rootDb: db },
+        { since: "2026-02-10T00:00:00Z" },
+      );
+      assert.ok(result.includes("msg early"), "should include early message");
+      assert.ok(result.includes("msg late"), "should include late message (no until bound)");
+    },
+
     async function rejects_invalid_since_timestamp(action_fn, db) {
       await db.sql`INSERT INTO chats(chat_id) VALUES ('act-recall-6') ON CONFLICT DO NOTHING`;
       const result = await action_fn({ chatId: "act-recall-6", rootDb: db }, { since: "yesterday" });
@@ -113,16 +151,30 @@ export default /** @type {defineAction} */ ((x) => x)({
     if (!since || isNaN(new Date(since).getTime())) {
       return "Invalid timestamp for 'since': " + since + ". Please use an ISO 8601 timestamp (e.g. 2025-01-15T10:00:00Z).";
     }
+    const until = params.until;
+    if (until && isNaN(new Date(until).getTime())) {
+      return "Invalid timestamp for 'until': " + until + ". Please use an ISO 8601 timestamp (e.g. 2025-01-15T10:00:00Z).";
+    }
     const limit = params.limit || 50;
 
-    const { rows } = await rootDb.sql`
-      SELECT sender_id, message_data, timestamp
-      FROM messages
-      WHERE chat_id = ${chatId}
-        AND timestamp >= ${since}
-      ORDER BY timestamp ASC
-      LIMIT ${limit}
-    `;
+    const { rows } = until
+      ? await rootDb.sql`
+          SELECT sender_id, message_data, timestamp
+          FROM messages
+          WHERE chat_id = ${chatId}
+            AND timestamp >= ${since}
+            AND timestamp <= ${until}
+          ORDER BY timestamp ASC
+          LIMIT ${limit}
+        `
+      : await rootDb.sql`
+          SELECT sender_id, message_data, timestamp
+          FROM messages
+          WHERE chat_id = ${chatId}
+            AND timestamp >= ${since}
+          ORDER BY timestamp ASC
+          LIMIT ${limit}
+        `;
 
     if (rows.length === 0) {
       return "No messages found in that time range.";

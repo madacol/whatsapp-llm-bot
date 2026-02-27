@@ -162,11 +162,12 @@ export async function initStore(injectedDb){
 
       /**
       * @param {ChatRow['chat_id']} chatId
-      * @param {number} limit
+      * @param {Date} [since] - Only return messages from this time onward (default: 8 hours ago)
+      * @param {number} [limit] - Maximum number of messages to return (default: 300)
       */
       // Returns messages in DESC order (newest first); callers reverse for chronological use
-      async getMessages (chatId, limit = 50) {
-        const {rows: messages} = await db.sql`SELECT * FROM messages WHERE chat_id = ${chatId} AND cleared_at IS NULL ORDER BY timestamp DESC LIMIT ${limit}`;
+      async getMessages (chatId, since = new Date(Date.now() - 8 * 60 * 60 * 1000), limit = 300) {
+        const {rows: messages} = await db.sql`SELECT * FROM messages WHERE chat_id = ${chatId} AND cleared_at IS NULL AND timestamp >= ${since} ORDER BY timestamp DESC LIMIT ${limit}`;
         return /** @type {MessageRow[]} */ (messages);
       },
 
