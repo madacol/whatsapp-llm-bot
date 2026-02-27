@@ -88,6 +88,7 @@ type IncomingContext = {
   sendImage: (image: Buffer, caption?: string) => Promise<void>;
   sendVideo: (video: Buffer, caption?: string) => Promise<void>;
   confirm: (message: string) => Promise<boolean>;
+  sendPresenceUpdate: (presence: "composing" | "paused") => Promise<void>;
 
   // Bot info
   selfIds: string[];
