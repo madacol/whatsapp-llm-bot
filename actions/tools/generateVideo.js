@@ -320,6 +320,62 @@ export default /** @type {defineAction} */ ((x) => x)({
       }
     },
 
+    async function test_download_includes_api_key(action_fn) {
+      const originalFetch = globalThis.fetch;
+      const savedKey = process.env.GEMINI_API_KEY;
+      process.env.GEMINI_API_KEY = "test-key-download";
+      /** @type {string | undefined} */
+      let downloadApiKey;
+      try {
+        let fetchCallCount = 0;
+        globalThis.fetch = /** @type {typeof fetch} */ (/** @type {unknown} */ (
+          async (/** @type {string} */ _url, /** @type {RequestInit | undefined} */ init) => {
+            fetchCallCount++;
+            if (fetchCallCount === 1) {
+              return { ok: true, json: async () => ({ name: "operations/op-dl" }) };
+            }
+            if (fetchCallCount === 2) {
+              return {
+                ok: true,
+                json: async () => ({
+                  done: true,
+                  response: {
+                    generateVideoResponse: {
+                      generatedSamples: [{ video: { uri: "https://example.com/video.mp4" } }],
+                    },
+                  },
+                }),
+              };
+            }
+            // Call 3: Download — capture the API key header
+            const headers = /** @type {Record<string, string>} */ (init?.headers ?? {});
+            downloadApiKey = headers["x-goog-api-key"];
+            return { ok: true, arrayBuffer: async () => Buffer.from("video").buffer };
+          }
+        ));
+
+        const savedPollInterval = pollIntervalMs;
+        pollIntervalMs = 0;
+        try {
+          await action_fn(
+            {
+              content: [{ type: "text", text: "test" }],
+              sendVideo: async () => {},
+              log: async () => "",
+            },
+            { prompt: "test" },
+          );
+          assert.equal(downloadApiKey, "test-key-download");
+        } finally {
+          pollIntervalMs = savedPollInterval;
+        }
+      } finally {
+        globalThis.fetch = originalFetch;
+        if (savedKey !== undefined) process.env.GEMINI_API_KEY = savedKey;
+        else delete process.env.GEMINI_API_KEY;
+      }
+    },
+
     async function test_returns_error_when_no_gemini_api_key(action_fn) {
       const saved = process.env.GEMINI_API_KEY;
       try {
@@ -413,11 +469,14 @@ export default /** @type {defineAction} */ ((x) => x)({
         }
 
         const videoUri = samples[0].video.uri;
+        console.log("Video URI:", videoUri);
 
         // 3. Download the video
-        const downloadResponse = await fetch(videoUri);
+        const downloadResponse = await fetch(videoUri, {
+          headers: { "x-goog-api-key": apiKey },
+        });
         if (!downloadResponse.ok) {
-          return `Error: Failed to download video (status ${downloadResponse.status}).`;
+          return `Error: Failed to download video (status ${downloadResponse.status}). URL: ${videoUri}`;
         }
 
         const arrayBuffer = await downloadResponse.arrayBuffer();
