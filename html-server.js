@@ -26,8 +26,11 @@ export async function startHtmlServer(port, db) {
       return;
     }
 
-    const title = page.title ? `<title>${page.title}</title>` : "";
-    const html = `<!DOCTYPE html><html><head><meta charset="utf-8">${title}</head><body>${page.html}</body></html>`;
+    const escapedTitle = page.title
+      ? page.title.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+      : "";
+    const titleTag = escapedTitle ? `<title>${escapedTitle}</title>` : "";
+    const html = `<!DOCTYPE html><html><head><meta charset="utf-8">${titleTag}</head><body>${page.html}</body></html>`;
     res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
     res.end(html);
   });
