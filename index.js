@@ -28,6 +28,10 @@ import {
 import { storeLlmContext } from "./context-log.js";
 import { storePage } from "./html-store.js";
 import { startHtmlServer, stopHtmlServer } from "./html-server.js";
+import {
+  loadPendingConfirmations,
+  deletePendingConfirmation,
+} from "./pending-confirmations.js";
 
 /**
  * Type guard: checks that an action has a command string.
@@ -573,8 +577,101 @@ if (!process.env.TESTING) {
 
   await startHtmlServer(config.html_server_port, getRootDb());
 
-  const { closeWhatsapp, sendToChat } = await connectToWhatsApp(handleMessage)
-    .catch(async (error) => {
+  const rootDb = getRootDb();
+
+  // Load pending confirmations from a previous session
+  const pendingConfirmations = await loadPendingConfirmations(rootDb);
+  if (pendingConfirmations.length > 0) {
+    console.log(`Loaded ${pendingConfirmations.length} pending confirmation(s) from previous session`);
+  }
+
+  /** @type {Map<string, import("./pending-confirmations.js").PendingConfirmationRow>} */
+  const pendingByMsgKeyId = new Map(
+    pendingConfirmations.map(row => [row.msg_key_id, row]),
+  );
+
+  /**
+   * Global reaction handler for resuming confirmations after restart.
+   * @param {import("./whatsapp-adapter.js").ReactionEvent} event
+   * @param {import("@whiskeysockets/baileys").WASocket} sock
+   */
+  async function onReaction(event, sock) {
+    const { key, reaction } = event;
+    const pending = pendingByMsgKeyId.get(key.id);
+    if (!pending) return;
+
+    const isApproved = reaction.text?.startsWith("\uD83D\uDC4D");
+    const isRejected = reaction.text?.startsWith("\uD83D\uDC4E");
+    if (!isApproved && !isRejected) return;
+
+    const msgKey = { id: pending.msg_key_id, remoteJid: pending.msg_key_remote_jid };
+
+    // Remove from in-memory map and DB
+    pendingByMsgKeyId.delete(key.id);
+    await deletePendingConfirmation(rootDb, key.id);
+
+    if (isRejected) {
+      await sock.sendMessage(pending.msg_key_remote_jid, {
+        react: { text: "❌", key: msgKey },
+      });
+      console.log(`Pending confirmation for ${pending.action_name} rejected after restart`);
+      return;
+    }
+
+    // Approved — react ✅ and re-execute the action
+    await sock.sendMessage(pending.msg_key_remote_jid, {
+      react: { text: "✅", key: msgKey },
+    });
+
+    console.log(`Resuming action "${pending.action_name}" after restart approval`);
+
+    /** @type {Context} */
+    const resumeContext = {
+      chatId: pending.chat_id,
+      senderIds: pending.sender_ids,
+      content: [],
+      isDebug: false,
+      getIsAdmin: async () => true,
+      sendMessage: async (header, text) => {
+        const fullMessage = text ? `${header}\n\n${text}` : header;
+        await sock.sendMessage(pending.chat_id, { text: fullMessage });
+      },
+      reply: async (header, text) => {
+        const fullMessage = text ? `${header}\n\n${text}` : header;
+        await sock.sendMessage(pending.chat_id, { text: fullMessage });
+      },
+      reactToMessage: async () => {},
+      sendPoll: async (name, options, selectableCount) => {
+        await sock.sendMessage(pending.chat_id, {
+          poll: { name, values: options, selectableCount: selectableCount || 0 },
+        });
+      },
+      sendImage: async (image, caption) => {
+        await sock.sendMessage(pending.chat_id, { image, ...(caption && { caption }) });
+      },
+      confirm: async () => true, // auto-confirm: user already approved
+    };
+
+    try {
+      const { result } = await executeAction(
+        pending.action_name,
+        resumeContext,
+        pending.action_params,
+        pending.tool_call_id,
+      );
+      const resultText = typeof result === "string" ? result : JSON.stringify(result, null, 2);
+      await sock.sendMessage(pending.chat_id, { text: `🔧 ${resultText}` });
+    } catch (error) {
+      console.error(`Error resuming action "${pending.action_name}":`, error);
+      const errorMsg = error instanceof Error ? error.message : String(error);
+      await sock.sendMessage(pending.chat_id, { text: `❌ Error resuming ${pending.action_name}: ${errorMsg}` });
+    }
+  }
+
+  const { closeWhatsapp, sendToChat } = await connectToWhatsApp({
+    onMessage: handleMessage,
+    onReaction,
+  }).catch(async (error) => {
       console.error("Initialization error:", error);
       await store.closeDb();
       process.exit(1);
