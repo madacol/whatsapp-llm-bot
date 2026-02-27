@@ -191,6 +191,7 @@ export async function createMockLlmServer() {
           completion_tokens: 5,
           total_tokens: 15,
           prompt_tokens_details: { cached_tokens: 8 },
+          cost: 0.001,
         },
       };
 

@@ -28,6 +28,7 @@ import {
 import { storeLlmContext } from "./context-log.js";
 import { storePage } from "./html-store.js";
 import { startHtmlServer, stopHtmlServer } from "./html-server.js";
+import { recordUsage, resolveCost } from "./usage-tracker.js";
 
 /**
  * Type guard: checks that an action has a command string.
@@ -276,10 +277,14 @@ async function processLlmResponse({ session, llmConfig, formattedMessages }) {
     }
 
     if (response.usage) {
-      const cached = response.usage.prompt_tokens_details?.cached_tokens ?? 0;
       const prompt = response.usage.prompt_tokens;
       const completion = response.usage.completion_tokens;
-      console.log(`[LLM usage] prompt=${prompt} cached=${cached} completion=${completion} model=${chatModel}`);
+      const cached = response.usage.prompt_tokens_details?.cached_tokens ?? 0;
+      const nativeCost = /** @type {{ cost?: number } & typeof response.usage} */ (response.usage).cost;
+      const cost = await resolveCost(nativeCost, chatModel, prompt, completion);
+      console.log(`[LLM usage] prompt=${prompt} cached=${cached} completion=${completion} cost=${cost} model=${chatModel}`);
+      recordUsage(getRootDb(), { chatId, model: chatModel, promptTokens: prompt, completionTokens: completion, cachedTokens: cached, cost })
+        .catch(err => console.error("[LLM usage] failed to persist:", err));
     }
 
     const responseMessage = response.choices[0].message;
