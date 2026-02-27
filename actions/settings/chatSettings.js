@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import config from "../../config.js";
 import { validateModel, getModelModalities } from "../../models-cache.js";
 import { getChatOrThrow } from "../../store.js";
-import { ROLE_DEFINITIONS } from "../../model-roles.js";
+import { ROLE_DEFINITIONS, resolveModel } from "../../model-roles.js";
 import { withModelsCache } from "../../tests/helpers.js";
 
 /**
@@ -62,7 +62,7 @@ async function getInfo(rootDb, chatId, extra) {
   const chat = await getChatOrThrow(rootDb, chatId);
 
   const status = chat.is_enabled ? "enabled" : "disabled";
-  const model = chat.model || `${config.model} (default)`;
+  const model = chat.model || `${resolveModel("chat")} (default)`;
   const prompt = chat.system_prompt ? "custom (!config system_prompt)" : "default";
   const response = chat.respond_on ?? "mention";
 
@@ -119,7 +119,7 @@ async function getSetting(rootDb, chatId, setting) {
     case "model":
       return chat.model
         ? `Model: \`${chat.model}\``
-        : `Model (default): \`${config.model}\``;
+        : `Model (default): \`${resolveModel("chat")}\``;
     case "system_prompt":
       return chat.system_prompt
         ? `Prompt: ${chat.system_prompt}`
@@ -200,7 +200,7 @@ async function setSetting(rootDb, chatId, setting, value, extra) {
       await rootDb.sql`UPDATE chats SET model = ${modelValue} WHERE chat_id = ${chatId}`;
       return modelValue
         ? `Model set to \`${modelValue}\``
-        : `Model reverted to default (\`${config.model}\`)`;
+        : `Model reverted to default (\`${resolveModel("chat")}\`)`;
     }
 
     case "system_prompt": {
