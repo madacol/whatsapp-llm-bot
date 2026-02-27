@@ -259,7 +259,7 @@ async function processLlmResponse({ session, llmConfig, formattedMessages }) {
       response = await llmClient.chat.completions.create({
         model: chatModel,
         messages: [
-          { role: "system", content: [{ type: "text", text: systemPrompt, cache_control: { type: "ephemeral" } }] },
+          { role: "system", content: /** @type {Array<{type: "text", text: string, cache_control: {type: "ephemeral"}}>} */ ([{ type: "text", text: systemPrompt, cache_control: { type: "ephemeral" } }]) },
           ...formattedMessages,
         ],
         tools: actionsToOpenAIFormat(actions),
