@@ -37,8 +37,8 @@ const RESPOND_ON_VALUES = ["any", "mention+reply", "mention"];
  * @param {unknown} raw
  * @returns {boolean}
  */
-const TRUTHY = new Set(["true", "on", "yes", "1"]);
-const FALSY = new Set(["false", "off", "no", "0"]);
+const TRUTHY = new Set(["true", "on", "yes", "1", "enabled"]);
+const FALSY = new Set(["false", "off", "no", "0", "disabled"]);
 
 function toBool(raw) {
   if (typeof raw === "boolean") return raw;
@@ -46,7 +46,7 @@ function toBool(raw) {
   if (TRUTHY.has(s)) return true;
   if (FALSY.has(s)) return false;
   throw new Error(
-    `Invalid boolean value "${raw}". Must be one of: on, off, true, false, yes, no.`,
+    `Invalid boolean value "${raw}". Must be one of: on, off, true, false, yes, no, enabled, disabled.`,
   );
 }
 
@@ -302,12 +302,12 @@ async function setSetting(rootDb, chatId, setting, value, extra) {
     case "debug": {
       const input = value.trim().toLowerCase();
 
-      if (input === "off") {
+      if (input === "off" || input === "false" || input === "no") {
         await rootDb.sql`UPDATE chats SET debug_until = NULL WHERE chat_id = ${chatId}`;
         return "Debug off.";
       }
 
-      const mins = input === "" ? 10 : Number(input);
+      const mins = input === "" || input === "on" || input === "true" || input === "yes" ? 10 : Number(input);
       if (Number.isNaN(mins) || mins < 0) {
         return `Invalid value: "${value}". Use a number of minutes, 0 for permanent, or "off" to disable.`;
       }

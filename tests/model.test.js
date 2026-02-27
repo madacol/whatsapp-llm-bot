@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { createTestDb } from "./helpers.js";
+import config from "../config.js";
 
 const CACHE_PATH = path.resolve("data/models.json");
 
@@ -214,6 +215,67 @@ describe("per-chat model selection", () => {
         ),
         { message: /must be one of.*on.*off.*true.*false/i },
       );
+    });
+  });
+
+  describe("debug 'on' enables debug", () => {
+    it("'on' enables debug with default duration", async () => {
+      await db.sql`INSERT INTO chats(chat_id) VALUES ('dbg-on-1') ON CONFLICT DO NOTHING`;
+
+      const mod = await import("../actions/settings/chatSettings.js");
+      const action = mod.default;
+      const result = await action.action_fn(
+        { chatId: "dbg-on-1", rootDb: db, senderIds: ["u1"] },
+        { setting: "debug", value: "on" },
+      );
+      assert.ok(result.includes("Debug on"), `expected 'Debug on' in: ${result}`);
+
+      const { rows: [chat] } = await db.sql`SELECT debug_until FROM chats WHERE chat_id = 'dbg-on-1'`;
+      assert.ok(chat.debug_until !== null, "debug_until should be set");
+    });
+  });
+
+  describe("enabled setting accepts 'enabled'/'disabled'", () => {
+    it("'enabled' enables the bot", async () => {
+      await db.sql`INSERT INTO chats(chat_id, is_enabled) VALUES ('en-1', false) ON CONFLICT DO NOTHING`;
+
+      const originalMaster = config.MASTER_IDs;
+      config.MASTER_IDs = ["master-user"];
+      try {
+        const mod = await import("../actions/settings/chatSettings.js");
+        const action = mod.default;
+        const result = await action.action_fn(
+          { chatId: "en-1", rootDb: db, senderIds: ["master-user"] },
+          { setting: "enabled", value: "enabled" },
+        );
+        assert.ok(result.includes("enabled"), `expected 'enabled' in: ${result}`);
+
+        const { rows: [chat] } = await db.sql`SELECT is_enabled FROM chats WHERE chat_id = 'en-1'`;
+        assert.equal(chat.is_enabled, true);
+      } finally {
+        config.MASTER_IDs = originalMaster;
+      }
+    });
+
+    it("'disabled' disables the bot", async () => {
+      await db.sql`INSERT INTO chats(chat_id, is_enabled) VALUES ('en-2', true) ON CONFLICT DO NOTHING`;
+
+      const originalMaster = config.MASTER_IDs;
+      config.MASTER_IDs = ["master-user"];
+      try {
+        const mod = await import("../actions/settings/chatSettings.js");
+        const action = mod.default;
+        const result = await action.action_fn(
+          { chatId: "en-2", rootDb: db, senderIds: ["master-user"] },
+          { setting: "enabled", value: "disabled" },
+        );
+        assert.ok(result.includes("disabled"), `expected 'disabled' in: ${result}`);
+
+        const { rows: [chat] } = await db.sql`SELECT is_enabled FROM chats WHERE chat_id = 'en-2'`;
+        assert.equal(chat.is_enabled, false);
+      } finally {
+        config.MASTER_IDs = originalMaster;
+      }
     });
   });
 
