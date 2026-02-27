@@ -423,12 +423,10 @@ export default /** @type {defineAction} */ ((x) => x)({
             { prompt: "animate this" },
           );
 
-          const body = /** @type {{instances: Array<{prompt: string, referenceImages?: Array<{image: {bytesBase64Encoded: string, mimeType: string}, referenceType: string}>}>}} */ (capturedBody);
-          assert.ok(body.instances[0].referenceImages, "referenceImages should be present");
-          assert.equal(body.instances[0].referenceImages.length, 1);
-          assert.equal(body.instances[0].referenceImages[0].image.bytesBase64Encoded, "aW1hZ2VkYXRh");
-          assert.equal(body.instances[0].referenceImages[0].image.mimeType, "image/jpeg");
-          assert.equal(body.instances[0].referenceImages[0].referenceType, "asset");
+          const body = /** @type {{instances: Array<{prompt: string, image?: {inlineData: {mimeType: string, data: string}}}>}} */ (capturedBody);
+          assert.ok(body.instances[0].image, "image should be present in instance");
+          assert.equal(body.instances[0].image.inlineData.data, "aW1hZ2VkYXRh");
+          assert.equal(body.instances[0].image.inlineData.mimeType, "image/jpeg");
         } finally {
           pollIntervalMs = savedPollInterval;
         }
@@ -483,8 +481,8 @@ export default /** @type {defineAction} */ ((x) => x)({
             { prompt: "a flying car" },
           );
 
-          const body = /** @type {{instances: Array<{prompt: string, referenceImages?: unknown}>}} */ (capturedBody);
-          assert.equal(body.instances[0].referenceImages, undefined, "referenceImages should not be present for text-only");
+          const body = /** @type {{instances: Array<{prompt: string, image?: unknown}>}} */ (capturedBody);
+          assert.equal(body.instances[0].image, undefined, "image should not be present for text-only");
         } finally {
           pollIntervalMs = savedPollInterval;
         }
@@ -542,7 +540,7 @@ export default /** @type {defineAction} */ ((x) => x)({
     if (params.duration_seconds) parameters.durationSeconds = params.duration_seconds;
     if (params.negative_prompt) parameters.negativePrompt = params.negative_prompt;
 
-    /** @type {{prompt: string, referenceImages?: Array<{image: {bytesBase64Encoded: string, mimeType: string}, referenceType: string}>}} */
+    /** @type {{prompt: string, image?: {inlineData: {mimeType: string, data: string}}}} */
     const instance = { prompt: params.prompt };
 
     const image = context.content.find(
@@ -550,10 +548,9 @@ export default /** @type {defineAction} */ ((x) => x)({
       (block) => block.type === "image",
     );
     if (image) {
-      instance.referenceImages = [{
-        image: { bytesBase64Encoded: image.data, mimeType: image.mime_type },
-        referenceType: "asset",
-      }];
+      instance.image = {
+        inlineData: { mimeType: image.mime_type, data: image.data },
+      };
     }
 
     const startResponse = await fetch(startUrl, {
