@@ -51,10 +51,6 @@ describe("media-to-text", () => {
         apiKey: "test-key",
         baseURL: mockServer.url,
       });
-      const { ensureMediaToTextSchema } = await import(
-        "../media-to-text.js"
-      );
-      await ensureMediaToTextSchema(db);
     });
 
     after(async () => {
@@ -62,7 +58,7 @@ describe("media-to-text", () => {
     });
 
     afterEach(async () => {
-      await db.sql`DELETE FROM media_to_text_cache`;
+      await db.sql`DELETE FROM media_to_text_cache`.catch(() => {});
     });
 
     it("returns messages unchanged when model supports all modalities", async () => {

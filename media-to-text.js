@@ -19,6 +19,19 @@ export async function ensureMediaToTextSchema(db) {
   `;
 }
 
+/** @type {WeakSet<PGlite>} */
+const initialized = new WeakSet();
+
+/**
+ * Lazy-init schema (once per db instance).
+ * @param {PGlite} db
+ */
+async function init(db) {
+  if (initialized.has(db)) return;
+  await ensureMediaToTextSchema(db);
+  initialized.add(db);
+}
+
 /** @type {Record<string, string>} */
 const MEDIA_TO_TEXT_PROMPTS = {
   image:
@@ -134,6 +147,8 @@ export async function convertUnsupportedMedia(
   if (!hasUnsupportedContent(messages, supportedModalities)) {
     return { messages, skippedTypes: new Set() };
   }
+
+  await init(db);
 
   // Clone messages that have unsupported blocks and translate in a single pass
   /** @type {MessageRow[]} */
