@@ -32,8 +32,9 @@ export async function startHtmlServer(port, db) {
     res.end(html);
   });
 
-  await new Promise((resolve) => server.listen(port, "0.0.0.0", () => resolve(undefined)));
-  const addr = server.address();
+  const s = server;
+  await new Promise((resolve) => s.listen(port, "0.0.0.0", () => resolve(undefined)));
+  const addr = s.address();
   const assignedPort = typeof addr === "object" && addr ? addr.port : port;
   console.log(`[html-server] listening on port ${assignedPort}`);
   return assignedPort;

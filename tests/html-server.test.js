@@ -19,6 +19,7 @@ before(async () => {
 
 after(async () => {
   await stopHtmlServer();
+  await db.close();
 });
 
 describe("html-server", () => {
