@@ -37,10 +37,17 @@ const RESPOND_ON_VALUES = ["any", "mention+reply", "mention"];
  * @param {unknown} raw
  * @returns {boolean}
  */
+const TRUTHY = new Set(["true", "on", "yes", "1"]);
+const FALSY = new Set(["false", "off", "no", "0"]);
+
 function toBool(raw) {
   if (typeof raw === "boolean") return raw;
   const s = String(raw).toLowerCase();
-  return s === "true" || s === "on" || s === "yes" || s === "1";
+  if (TRUTHY.has(s)) return true;
+  if (FALSY.has(s)) return false;
+  throw new Error(
+    `Invalid boolean value "${raw}". Must be one of: on, off, true, false, yes, no.`,
+  );
 }
 
 /**

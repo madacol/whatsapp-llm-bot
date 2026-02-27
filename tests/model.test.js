@@ -201,6 +201,20 @@ describe("per-chat model selection", () => {
       );
       assert.ok(result.includes("enabled"), `expected 'enabled' in: ${result}`);
     });
+
+    it("throws on unrecognized boolean value", async () => {
+      await db.sql`INSERT INTO chats(chat_id) VALUES ('mem-bad-1') ON CONFLICT DO NOTHING`;
+
+      const mod = await import("../actions/settings/chatSettings.js");
+      const action = mod.default;
+      await assert.rejects(
+        () => action.action_fn(
+          { chatId: "mem-bad-1", rootDb: db, senderIds: ["u1"] },
+          { setting: "memory", value: "banana" },
+        ),
+        { message: /must be one of.*on.*off.*true.*false/i },
+      );
+    });
   });
 
   describe("model resolution logic", () => {
