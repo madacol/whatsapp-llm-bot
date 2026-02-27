@@ -5,18 +5,18 @@ import assert from "node:assert/strict";
 import { PGlite } from "@electric-sql/pglite";
 import { storePage, getPage } from "../html-store.js";
 
-/** @type {PGlite} */
-let db;
-
-before(async () => {
-  db = new PGlite("memory://");
-});
-
-after(async () => {
-  await db.close();
-});
-
 describe("html-store", () => {
+  /** @type {PGlite} */
+  let db;
+
+  before(async () => {
+    db = new PGlite("memory://");
+  });
+
+  after(async () => {
+    await db.close();
+  });
+
   it("storePage returns a UUID and getPage retrieves it", async () => {
     const id = await storePage(db, "<h1>Hello</h1>", "Test Page");
     assert.match(id, /^[0-9a-f-]{36}$/);

@@ -6,23 +6,22 @@ import { PGlite } from "@electric-sql/pglite";
 import { storePage } from "../html-store.js";
 import { startHtmlServer, stopHtmlServer } from "../html-server.js";
 
-/** @type {PGlite} */
-let db;
-const PORT = 0; // let OS pick a free port
-/** @type {number} */
-let assignedPort;
-
-before(async () => {
-  db = new PGlite("memory://");
-  assignedPort = await startHtmlServer(PORT, db);
-});
-
-after(async () => {
-  await stopHtmlServer();
-  await db.close();
-});
-
 describe("html-server", () => {
+  /** @type {PGlite} */
+  let db;
+  /** @type {number} */
+  let assignedPort;
+
+  before(async () => {
+    db = new PGlite("memory://");
+    assignedPort = await startHtmlServer(0, db);
+  });
+
+  after(async () => {
+    await stopHtmlServer();
+    await db.close();
+  });
+
   it("serves stored HTML at GET /page/:id (200)", async () => {
     const id = await storePage(db, "<h1>Test</h1>", "Test Page");
     const res = await fetch(`http://127.0.0.1:${assignedPort}/page/${id}`);
