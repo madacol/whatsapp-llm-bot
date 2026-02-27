@@ -44,10 +44,16 @@ const MAX_TOOL_CALL_DEPTH = 10;
  * Display a tool call to the user (compact or verbose based on debug mode).
  * @param {OpenAI.Chat.Completions.ChatCompletionMessageToolCall} toolCall
  * @param {Context} context
+ * @param {((params: Record<string, any>) => string)} [formatToolCall] - Optional formatter from the action
  */
-async function displayToolCall(toolCall, context) {
+async function displayToolCall(toolCall, context, formatToolCall) {
   if (!context.isDebug) {
-    await context.sendMessage(`🔧 ${toolCall.function.name}`);
+    let compactMsg = `🔧 ${toolCall.function.name}`;
+    if (formatToolCall) {
+      const args = parseToolArgs(toolCall.function.arguments);
+      compactMsg += `: ${formatToolCall(args)}`;
+    }
+    await context.sendMessage(compactMsg);
     return;
   }
 
@@ -310,7 +316,8 @@ async function processLlmResponse({ session, llmConfig, formattedMessages }) {
         name: toolCall.function.name,
         arguments: toolCall.function.arguments,
       });
-      await displayToolCall(toolCall, context);
+      const action = actions.find(a => a.name === toolCall.function.name);
+      await displayToolCall(toolCall, context, action?.formatToolCall);
     }
 
     const storedAssistantWithTools = await addMessage(chatId, assistantMessage, senderIds);

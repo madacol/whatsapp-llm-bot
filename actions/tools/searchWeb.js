@@ -21,6 +21,8 @@ export default /** @type {defineAction} */ ((x) => x)({
     autoExecute: true,
     autoContinue: true,
   },
+  /** @param {{query?: string}} params */
+  formatToolCall: ({ query }) => `Searching "${query}"`,
   test_functions: [
     async function test_search_returns_formatted_results(action_fn) {
       const originalFetch = globalThis.fetch;

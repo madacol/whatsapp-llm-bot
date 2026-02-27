@@ -26,6 +26,8 @@ export default /** @type {defineAction} */ ((x) => x)({
     useRootDb: true,
     useLlm: true,
   },
+  /** @param {{content?: string}} params */
+  formatToolCall: ({ content }) => `Remembering "${content}"`,
   test_functions: [
     async function saves_memory_and_returns_confirmation(action_fn, db) {
       await db.sql`INSERT INTO chats(chat_id) VALUES ('act-savemem-1') ON CONFLICT DO NOTHING`;

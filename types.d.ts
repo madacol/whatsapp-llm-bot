@@ -205,6 +205,8 @@ type Action<P extends PermissionFlags = PermissionFlags> = {
       db: PGlite,
     ) => Promise<void>
   >;
+  /** Returns a short display string appended after the action name in compact mode. */
+  formatToolCall?: (params: Record<string, any>) => string;
   /** Returns the prompt string used by this action. Swappable for testing/optimization. */
   prompt?: (...args: any[]) => string;
   /** Optional prompt tests — run only via `npm run test:prompts`, never in `npm test`. */

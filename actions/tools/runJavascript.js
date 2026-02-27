@@ -57,6 +57,12 @@ ${typesFileContent}
     autoExecute: true,
     autoContinue: true,
   },
+  /** @param {{code?: string}} params */
+  formatToolCall: ({ code }) => {
+    const maxLen = 80;
+    if (!code) return "";
+    return code.length > maxLen ? code.slice(0, maxLen) + "…" : code;
+  },
   test_functions: [
     async function executes_function_and_returns_result(action_fn, _db) {
       const result = await action_fn(
