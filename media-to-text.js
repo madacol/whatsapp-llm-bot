@@ -135,6 +135,8 @@ export async function convertUnsupportedMedia(
     return { messages, skippedTypes: new Set() };
   }
 
+  await ensureMediaToTextSchema(db);
+
   // Clone messages that have unsupported blocks and translate in a single pass
   /** @type {MessageRow[]} */
   const result = [];
