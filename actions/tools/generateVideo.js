@@ -42,13 +42,14 @@ export default /** @type {defineAction} */ ((x) => x)({
   test_functions: [
     async function test_generates_video_from_prompt(action_fn) {
       const originalFetch = globalThis.fetch;
+      const savedKey = process.env.GEMINI_API_KEY;
+      process.env.GEMINI_API_KEY = "test-key";
       /** @type {Array<{video: Buffer, caption?: string}>} */
       const sentVideos = [];
-      const videoBase64 = Buffer.from("fake-video-data").toString("base64");
       try {
         let fetchCallCount = 0;
         globalThis.fetch = /** @type {typeof fetch} */ (/** @type {unknown} */ (
-          async (/** @type {string} */ url) => {
+          async (/** @type {string} */ _url) => {
             fetchCallCount++;
             // Call 1: POST to start generation
             if (fetchCallCount === 1) {
@@ -108,18 +109,21 @@ export default /** @type {defineAction} */ ((x) => x)({
         }
       } finally {
         globalThis.fetch = originalFetch;
+        if (savedKey !== undefined) process.env.GEMINI_API_KEY = savedKey;
+        else delete process.env.GEMINI_API_KEY;
       }
     },
 
     async function test_passes_all_parameters(action_fn) {
       const originalFetch = globalThis.fetch;
+      const savedKey = process.env.GEMINI_API_KEY;
+      process.env.GEMINI_API_KEY = "test-key";
       /** @type {unknown} */
       let capturedBody;
-      const videoBase64 = Buffer.from("fake-video").toString("base64");
       try {
         let fetchCallCount = 0;
         globalThis.fetch = /** @type {typeof fetch} */ (/** @type {unknown} */ (
-          async (/** @type {string} */ url, /** @type {RequestInit | undefined} */ init) => {
+          async (/** @type {string} */ _url, /** @type {RequestInit | undefined} */ init) => {
             fetchCallCount++;
             if (fetchCallCount === 1) {
               capturedBody = JSON.parse(/** @type {string} */ (init?.body));
@@ -177,11 +181,15 @@ export default /** @type {defineAction} */ ((x) => x)({
         }
       } finally {
         globalThis.fetch = originalFetch;
+        if (savedKey !== undefined) process.env.GEMINI_API_KEY = savedKey;
+        else delete process.env.GEMINI_API_KEY;
       }
     },
 
     async function test_handles_api_error(action_fn) {
       const originalFetch = globalThis.fetch;
+      const savedKey = process.env.GEMINI_API_KEY;
+      process.env.GEMINI_API_KEY = "test-key";
       try {
         globalThis.fetch = /** @type {typeof fetch} */ (/** @type {unknown} */ (
           async () => ({
@@ -204,11 +212,15 @@ export default /** @type {defineAction} */ ((x) => x)({
         assert.ok(result.includes("403"));
       } finally {
         globalThis.fetch = originalFetch;
+        if (savedKey !== undefined) process.env.GEMINI_API_KEY = savedKey;
+        else delete process.env.GEMINI_API_KEY;
       }
     },
 
     async function test_handles_polling_timeout(action_fn) {
       const originalFetch = globalThis.fetch;
+      const savedKey = process.env.GEMINI_API_KEY;
+      process.env.GEMINI_API_KEY = "test-key";
       try {
         let fetchCallCount = 0;
         globalThis.fetch = /** @type {typeof fetch} */ (/** @type {unknown} */ (
@@ -250,11 +262,15 @@ export default /** @type {defineAction} */ ((x) => x)({
         }
       } finally {
         globalThis.fetch = originalFetch;
+        if (savedKey !== undefined) process.env.GEMINI_API_KEY = savedKey;
+        else delete process.env.GEMINI_API_KEY;
       }
     },
 
     async function test_handles_no_video_in_response(action_fn) {
       const originalFetch = globalThis.fetch;
+      const savedKey = process.env.GEMINI_API_KEY;
+      process.env.GEMINI_API_KEY = "test-key";
       try {
         let fetchCallCount = 0;
         globalThis.fetch = /** @type {typeof fetch} */ (/** @type {unknown} */ (
@@ -299,6 +315,8 @@ export default /** @type {defineAction} */ ((x) => x)({
         }
       } finally {
         globalThis.fetch = originalFetch;
+        if (savedKey !== undefined) process.env.GEMINI_API_KEY = savedKey;
+        else delete process.env.GEMINI_API_KEY;
       }
     },
 
@@ -332,6 +350,99 @@ export default /** @type {defineAction} */ ((x) => x)({
    * @param {{ prompt: string, aspect_ratio?: string, duration_seconds?: number, negative_prompt?: string }} params
    */
   action_fn: async function (context, params) {
-    return "not implemented";
+    const apiKey = config.gemini_api_key;
+    if (!apiKey) {
+      return "Error: GEMINI_API_KEY must be configured to generate videos.";
+    }
+
+    await context.log(`Generating video: ${params.prompt}`);
+
+    // 1. Start long-running generation
+    const model = "veo-3.1-generate-preview";
+    const startUrl = `${GEMINI_BASE}/models/${model}:predictLongRunning`;
+
+    /** @type {Record<string, unknown>} */
+    const parameters = {};
+    if (params.aspect_ratio) parameters.aspectRatio = params.aspect_ratio;
+    if (params.duration_seconds) parameters.durationSeconds = params.duration_seconds;
+    if (params.negative_prompt) parameters.negativePrompt = params.negative_prompt;
+
+    const startResponse = await fetch(startUrl, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-goog-api-key": apiKey,
+      },
+      body: JSON.stringify({
+        instances: [{ prompt: params.prompt }],
+        parameters,
+      }),
+    });
+
+    if (!startResponse.ok) {
+      const errorText = await startResponse.text();
+      return `Error: Veo API returned status ${startResponse.status}: ${errorText}`;
+    }
+
+    const startData = await startResponse.json();
+    const operationName = startData.name;
+
+    // 2. Poll for completion
+    let attempts = 0;
+    while (attempts < maxPollAttempts) {
+      if (pollIntervalMs > 0) {
+        await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
+      }
+
+      const pollUrl = `${GEMINI_BASE}/${operationName}`;
+      const pollResponse = await fetch(pollUrl, {
+        headers: { "x-goog-api-key": apiKey },
+      });
+
+      if (!pollResponse.ok) {
+        const errorText = await pollResponse.text();
+        return `Error: Polling failed with status ${pollResponse.status}: ${errorText}`;
+      }
+
+      const pollData = await pollResponse.json();
+
+      if (pollData.done) {
+        const samples = pollData.response?.generateVideoResponse?.generatedSamples;
+        if (!samples || samples.length === 0) {
+          return "The model did not generate any video.";
+        }
+
+        const videoUri = samples[0].video.uri;
+
+        // 3. Download the video
+        const downloadResponse = await fetch(videoUri);
+        if (!downloadResponse.ok) {
+          return `Error: Failed to download video (status ${downloadResponse.status}).`;
+        }
+
+        const arrayBuffer = await downloadResponse.arrayBuffer();
+        const buffer = Buffer.from(arrayBuffer);
+
+        const caption = `Generated video: ${params.prompt}`;
+        await context.sendVideo(buffer, caption);
+
+        const base64 = buffer.toString("base64");
+
+        /** @type {ToolContentBlock[]} */
+        const contentBlocks = [
+          { type: "text", text: caption },
+          { type: "video", encoding: "base64", data: base64 },
+        ];
+
+        return /** @type {ActionSignal} */ ({
+          result: contentBlocks,
+          autoContinue: false,
+        });
+      }
+
+      attempts++;
+    }
+
+    return "Error: Video generation timed out after polling.";
   },
 });
