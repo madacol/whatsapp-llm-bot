@@ -51,63 +51,61 @@ function getContextInfo(msg) {
 }
 
 /**
+ * @typedef {{
+ *   onSent?: (msgKey: { id: string; remoteJid: string }) => Promise<void>;
+ *   onResolved?: (msgKey: { id: string; remoteJid: string }, confirmed: boolean) => Promise<void>;
+ * }} ConfirmHooks
+ */
+
+/**
  * Create a reaction-based confirmation handler.
- * Sends a message, starts a 60-second countdown with emoji reactions,
- * and resolves true (👍) or false (👎 or timeout).
+ * Sends a message, reacts with ⏳, and waits indefinitely for 👍/👎.
  * @param {import('@whiskeysockets/baileys').WASocket} sock
  * @param {string} chatId
- * @returns {(message: string) => Promise<boolean>}
+ * @returns {(message: string, hooks?: ConfirmHooks) => Promise<boolean>}
  */
-function createConfirm(sock, chatId) {
-  return async (message) => {
+export function createConfirm(sock, chatId) {
+  return async (message, hooks) => {
     const sentMsg = await sock.sendMessage(chatId, { text: message });
     if (!sentMsg) return false;
 
-    const msgKey = sentMsg.key;
-    const countdownEmojis = ["🔟", "9️⃣", "8️⃣", "7️⃣", "6️⃣", "5️⃣", "4️⃣", "3️⃣", "2️⃣", "1️⃣"];
-    const intervalMs = 6_000; // 60s / 10 steps
+    const rawKey = sentMsg.key;
+    if (!rawKey.id || !rawKey.remoteJid) return false;
+
+    /** @type {{ id: string; remoteJid: string }} */
+    const msgKey = { id: rawKey.id, remoteJid: rawKey.remoteJid };
+
+    // React with hourglass to indicate waiting
+    sock.sendMessage(chatId, {
+      react: { text: "⏳", key: rawKey },
+    });
+
+    if (hooks?.onSent) {
+      await hooks.onSent(msgKey);
+    }
 
     return new Promise((resolve) => {
-      let step = 0;
-
-      // Start with first countdown emoji
-      sock.sendMessage(chatId, {
-        react: { text: countdownEmojis[0], key: msgKey },
-      });
-
-      const countdown = setInterval(() => {
-        step++;
-        if (step >= countdownEmojis.length) {
-          clearInterval(countdown);
-          sock.ev.off("messages.reaction", handler);
-          sock.sendMessage(chatId, {
-            react: { text: "❌", key: msgKey },
-          });
-          resolve(false);
-          return;
-        }
-        sock.sendMessage(chatId, {
-          react: { text: countdownEmojis[step], key: msgKey },
-        });
-      }, intervalMs);
-
       /** @param {any[]} reactions */
       function handler(reactions) {
         for (const { key, reaction } of reactions) {
           if (key.id === msgKey.id && key.remoteJid === chatId) {
             if (reaction.text?.startsWith("👍")) {
-              clearInterval(countdown);
               sock.ev.off("messages.reaction", handler);
               sock.sendMessage(chatId, {
-                react: { text: "✅", key: msgKey },
+                react: { text: "✅", key: rawKey },
               });
+              if (hooks?.onResolved) {
+                hooks.onResolved(msgKey, true);
+              }
               resolve(true);
             } else if (reaction.text?.startsWith("👎")) {
-              clearInterval(countdown);
               sock.ev.off("messages.reaction", handler);
               sock.sendMessage(chatId, {
-                react: { text: "❌", key: msgKey },
+                react: { text: "❌", key: rawKey },
               });
+              if (hooks?.onResolved) {
+                hooks.onResolved(msgKey, false);
+              }
               resolve(false);
             }
           }
@@ -379,13 +377,18 @@ async function adaptIncomingMessage(baileysMessage, sock, messageHandler) {
 }
 
 /**
+ * @typedef {{ key: { id: string; remoteJid: string }, reaction: { text: string } }} ReactionEvent
+ */
+
+/**
  * Register event handlers on a Baileys socket.
  * @param {{ current: import('@whiskeysockets/baileys').WASocket }} sockRef
  * @param {() => Promise<void>} saveCreds
  * @param {(message: IncomingContext) => Promise<void>} onMessageHandler
  * @param {() => Promise<void>} reconnect
+ * @param {((event: ReactionEvent, sock: import('@whiskeysockets/baileys').WASocket) => Promise<void>) | null} [onReaction]
  */
-function registerHandlers(sockRef, saveCreds, onMessageHandler, reconnect) {
+function registerHandlers(sockRef, saveCreds, onMessageHandler, reconnect, onReaction = null) {
   sockRef.current.ev.process(async (events) => {
     if (events["connection.update"]) {
       const update = events["connection.update"];
@@ -459,16 +462,42 @@ function registerHandlers(sockRef, saveCreds, onMessageHandler, reconnect) {
         await adaptIncomingMessage(message, sockRef.current, onMessageHandler);
       }
     }
+
+    if (events["messages.reaction"] && onReaction) {
+      for (const event of events["messages.reaction"]) {
+        const { key, reaction } = event;
+        if (!key.id || !key.remoteJid || !reaction.text) continue;
+        try {
+          await onReaction(
+            { key: { id: key.id, remoteJid: key.remoteJid }, reaction: { text: reaction.text } },
+            sockRef.current,
+          );
+        } catch (err) {
+          console.error("Error in onReaction handler:", err);
+        }
+      }
+    }
   });
 }
 
 // TODO: add reconnect integration test
 
 /**
- * Initialize WhatsApp connection and set up message handling
- * @param {(message: IncomingContext) => Promise<void>} onMessageHandler - Handler function that receives enriched message context
+ * @typedef {{
+ *   onMessage: (message: IncomingContext) => Promise<void>;
+ *   onReaction?: (event: ReactionEvent, sock: import('@whiskeysockets/baileys').WASocket) => Promise<void>;
+ * }} ConnectOptions
  */
-export async function connectToWhatsApp(onMessageHandler) {
+
+/**
+ * Initialize WhatsApp connection and set up message handling
+ * @param {((message: IncomingContext) => Promise<void>) | ConnectOptions} handlerOrOptions
+ */
+export async function connectToWhatsApp(handlerOrOptions) {
+  const options = typeof handlerOrOptions === "function"
+    ? { onMessage: handlerOrOptions }
+    : handlerOrOptions;
+  const { onMessage, onReaction } = options;
 
   const { version } = await fetchLatestWaWebVersion();
   console.log("Using WA Web version:", version);
@@ -495,10 +524,10 @@ export async function connectToWhatsApp(onMessageHandler) {
       auth: newState,
       browser: Browsers.ubuntu("Chrome"),
     });
-    registerHandlers(sockRef, newSaveCreds, onMessageHandler, reconnect);
+    registerHandlers(sockRef, newSaveCreds, onMessage, reconnect, onReaction);
   }
 
-  registerHandlers(sockRef, saveCreds, onMessageHandler, reconnect);
+  registerHandlers(sockRef, saveCreds, onMessage, reconnect, onReaction);
 
   return {
     async closeWhatsapp() {
