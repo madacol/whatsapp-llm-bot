@@ -12,7 +12,7 @@ let maxPollAttempts = 60;
 export default /** @type {defineAction} */ ((x) => x)({
   name: "generate_video",
   description:
-    "Generate a video from a text prompt using AI (Google Veo 3). Supports aspect ratio, duration, resolution, and negative prompt parameters.",
+    "Generate a video from a text prompt using AI (Google Veo 3). Optionally include a reference image for image-to-video generation. Supports aspect ratio, duration, and negative prompt parameters.",
   parameters: {
     type: "object",
     properties: {
@@ -376,6 +376,125 @@ export default /** @type {defineAction} */ ((x) => x)({
       }
     },
 
+    async function test_sends_image_as_reference(action_fn) {
+      const originalFetch = globalThis.fetch;
+      const savedKey = process.env.GEMINI_API_KEY;
+      process.env.GEMINI_API_KEY = "test-key";
+      /** @type {unknown} */
+      let capturedBody;
+      try {
+        let fetchCallCount = 0;
+        globalThis.fetch = /** @type {typeof fetch} */ (/** @type {unknown} */ (
+          async (/** @type {string} */ _url, /** @type {RequestInit | undefined} */ init) => {
+            fetchCallCount++;
+            if (fetchCallCount === 1) {
+              capturedBody = JSON.parse(/** @type {string} */ (init?.body));
+              return { ok: true, json: async () => ({ name: "operations/op-img" }) };
+            }
+            if (fetchCallCount === 2) {
+              return {
+                ok: true,
+                json: async () => ({
+                  done: true,
+                  response: {
+                    generateVideoResponse: {
+                      generatedSamples: [{ video: { uri: "https://example.com/video.mp4" } }],
+                    },
+                  },
+                }),
+              };
+            }
+            return { ok: true, arrayBuffer: async () => Buffer.from("fake-video").buffer };
+          }
+        ));
+
+        const savedPollInterval = pollIntervalMs;
+        pollIntervalMs = 0;
+        try {
+          await action_fn(
+            {
+              content: [
+                { type: "text", text: "animate this" },
+                { type: "image", encoding: "base64", mime_type: "image/jpeg", data: "aW1hZ2VkYXRh" },
+              ],
+              sendVideo: async () => {},
+              log: async () => "",
+            },
+            { prompt: "animate this" },
+          );
+
+          const body = /** @type {{instances: Array<{prompt: string, referenceImages?: Array<{image: {bytesBase64Encoded: string, mimeType: string}, referenceType: string}>}>}} */ (capturedBody);
+          assert.ok(body.instances[0].referenceImages, "referenceImages should be present");
+          assert.equal(body.instances[0].referenceImages.length, 1);
+          assert.equal(body.instances[0].referenceImages[0].image.bytesBase64Encoded, "aW1hZ2VkYXRh");
+          assert.equal(body.instances[0].referenceImages[0].image.mimeType, "image/jpeg");
+          assert.equal(body.instances[0].referenceImages[0].referenceType, "asset");
+        } finally {
+          pollIntervalMs = savedPollInterval;
+        }
+      } finally {
+        globalThis.fetch = originalFetch;
+        if (savedKey !== undefined) process.env.GEMINI_API_KEY = savedKey;
+        else delete process.env.GEMINI_API_KEY;
+      }
+    },
+
+    async function test_text_only_when_no_image(action_fn) {
+      const originalFetch = globalThis.fetch;
+      const savedKey = process.env.GEMINI_API_KEY;
+      process.env.GEMINI_API_KEY = "test-key";
+      /** @type {unknown} */
+      let capturedBody;
+      try {
+        let fetchCallCount = 0;
+        globalThis.fetch = /** @type {typeof fetch} */ (/** @type {unknown} */ (
+          async (/** @type {string} */ _url, /** @type {RequestInit | undefined} */ init) => {
+            fetchCallCount++;
+            if (fetchCallCount === 1) {
+              capturedBody = JSON.parse(/** @type {string} */ (init?.body));
+              return { ok: true, json: async () => ({ name: "operations/op-txt" }) };
+            }
+            if (fetchCallCount === 2) {
+              return {
+                ok: true,
+                json: async () => ({
+                  done: true,
+                  response: {
+                    generateVideoResponse: {
+                      generatedSamples: [{ video: { uri: "https://example.com/video.mp4" } }],
+                    },
+                  },
+                }),
+              };
+            }
+            return { ok: true, arrayBuffer: async () => Buffer.from("fake-video").buffer };
+          }
+        ));
+
+        const savedPollInterval = pollIntervalMs;
+        pollIntervalMs = 0;
+        try {
+          await action_fn(
+            {
+              content: [{ type: "text", text: "a flying car" }],
+              sendVideo: async () => {},
+              log: async () => "",
+            },
+            { prompt: "a flying car" },
+          );
+
+          const body = /** @type {{instances: Array<{prompt: string, referenceImages?: unknown}>}} */ (capturedBody);
+          assert.equal(body.instances[0].referenceImages, undefined, "referenceImages should not be present for text-only");
+        } finally {
+          pollIntervalMs = savedPollInterval;
+        }
+      } finally {
+        globalThis.fetch = originalFetch;
+        if (savedKey !== undefined) process.env.GEMINI_API_KEY = savedKey;
+        else delete process.env.GEMINI_API_KEY;
+      }
+    },
+
     async function test_returns_error_when_no_gemini_api_key(action_fn) {
       const saved = process.env.GEMINI_API_KEY;
       try {
@@ -423,6 +542,20 @@ export default /** @type {defineAction} */ ((x) => x)({
     if (params.duration_seconds) parameters.durationSeconds = params.duration_seconds;
     if (params.negative_prompt) parameters.negativePrompt = params.negative_prompt;
 
+    /** @type {{prompt: string, referenceImages?: Array<{image: {bytesBase64Encoded: string, mimeType: string}, referenceType: string}>}} */
+    const instance = { prompt: params.prompt };
+
+    const image = context.content.find(
+      /** @returns {block is ImageContentBlock} */
+      (block) => block.type === "image",
+    );
+    if (image) {
+      instance.referenceImages = [{
+        image: { bytesBase64Encoded: image.data, mimeType: image.mime_type },
+        referenceType: "asset",
+      }];
+    }
+
     const startResponse = await fetch(startUrl, {
       method: "POST",
       headers: {
@@ -430,7 +563,7 @@ export default /** @type {defineAction} */ ((x) => x)({
         "x-goog-api-key": apiKey,
       },
       body: JSON.stringify({
-        instances: [{ prompt: params.prompt }],
+        instances: [instance],
         parameters,
       }),
     });
