@@ -475,6 +475,57 @@ describe("LLM pipeline via createMessageHandler", () => {
     assert.ok(usageLine.includes("model="), "Should log model name");
   });
 
+  it("sends composing presence before LLM and paused after", async () => {
+    await seedChat("pipe-presence", { enabled: true });
+    mockServer.addResponses("Presence test reply");
+
+    const { context, responses } = createIncomingContext({
+      chatId: "pipe-presence",
+      content: [{ type: "text", text: "Hello" }],
+    });
+    await handleMessage(context);
+
+    const presenceUpdates = responses.filter(r => r.type === "sendPresenceUpdate");
+    assert.ok(
+      presenceUpdates.length >= 2,
+      `Expected at least 2 presence updates (composing + paused), got ${presenceUpdates.length}: ${JSON.stringify(presenceUpdates)}`,
+    );
+    assert.equal(presenceUpdates[0].text, "composing", "First presence update should be composing");
+    assert.equal(presenceUpdates.at(-1).text, "paused", "Last presence update should be paused");
+
+    // composing should happen before the LLM response
+    const composingIdx = responses.indexOf(presenceUpdates[0]);
+    const replyIdx = responses.findIndex(r => r.text.includes("Presence test reply"));
+    assert.ok(composingIdx < replyIdx, "composing should be sent before the LLM reply");
+  });
+
+  it("sends paused presence even when LLM errors", async () => {
+    await seedChat("pipe-presence-err", { enabled: true });
+    // No mock responses → server returns 500
+
+    const { context, responses } = createIncomingContext({
+      chatId: "pipe-presence-err",
+      content: [{ type: "text", text: "Trigger error" }],
+    });
+    await handleMessage(context);
+
+    const presenceUpdates = responses.filter(r => r.type === "sendPresenceUpdate");
+    assert.equal(presenceUpdates.at(-1)?.text, "paused", "Should send paused even on error");
+  });
+
+  it("does not send composing when bot decides not to respond", async () => {
+    await seedChat("pipe-presence-skip", { enabled: false });
+
+    const { context, responses } = createIncomingContext({
+      chatId: "pipe-presence-skip",
+      content: [{ type: "text", text: "Hello" }],
+    });
+    await handleMessage(context);
+
+    const presenceUpdates = responses.filter(r => r.type === "sendPresenceUpdate");
+    assert.equal(presenceUpdates.length, 0, "Should not send presence when not responding");
+  });
+
   it("persists usage row to DB after LLM response", async () => {
     await seedChat("pipe-usage-db", { enabled: true });
     mockServer.addResponses("Persist usage test");

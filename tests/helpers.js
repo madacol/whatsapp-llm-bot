@@ -80,6 +80,9 @@ export function createIncomingContext(overrides = {}) {
       responses.push({ type: "confirm", text: message });
       return true;
     },
+    sendPresenceUpdate: async (presence) => {
+      responses.push({ type: "sendPresenceUpdate", text: presence });
+    },
     ...overrides,
   };
 
