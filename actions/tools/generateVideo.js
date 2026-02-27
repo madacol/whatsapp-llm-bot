@@ -493,6 +493,73 @@ export default /** @type {defineAction} */ ((x) => x)({
       }
     },
 
+    async function test_sends_quoted_image_as_reference(action_fn) {
+      const originalFetch = globalThis.fetch;
+      const savedKey = process.env.GEMINI_API_KEY;
+      process.env.GEMINI_API_KEY = "test-key";
+      /** @type {unknown} */
+      let capturedBody;
+      try {
+        let fetchCallCount = 0;
+        globalThis.fetch = /** @type {typeof fetch} */ (/** @type {unknown} */ (
+          async (/** @type {string} */ _url, /** @type {RequestInit | undefined} */ init) => {
+            fetchCallCount++;
+            if (fetchCallCount === 1) {
+              capturedBody = JSON.parse(/** @type {string} */ (init?.body));
+              return { ok: true, json: async () => ({ name: "operations/op-quote" }) };
+            }
+            if (fetchCallCount === 2) {
+              return {
+                ok: true,
+                json: async () => ({
+                  done: true,
+                  response: {
+                    generateVideoResponse: {
+                      generatedSamples: [{ video: { uri: "https://example.com/video.mp4" } }],
+                    },
+                  },
+                }),
+              };
+            }
+            return { ok: true, arrayBuffer: async () => Buffer.from("fake-video").buffer };
+          }
+        ));
+
+        const savedPollInterval = pollIntervalMs;
+        pollIntervalMs = 0;
+        try {
+          await action_fn(
+            {
+              content: [
+                {
+                  type: "quote",
+                  quotedSenderId: "123",
+                  content: [
+                    { type: "image", encoding: "base64", mime_type: "image/png", data: "cXVvdGVkLWltZw==" },
+                  ],
+                },
+                { type: "text", text: "animate this" },
+              ],
+              sendVideo: async () => {},
+              log: async () => "",
+            },
+            { prompt: "animate this" },
+          );
+
+          const body = /** @type {{instances: Array<{prompt: string, image?: {bytesBase64Encoded: string, mimeType: string}}>}} */ (capturedBody);
+          assert.ok(body.instances[0].image, "image from quote should be present in instance");
+          assert.equal(body.instances[0].image.bytesBase64Encoded, "cXVvdGVkLWltZw==");
+          assert.equal(body.instances[0].image.mimeType, "image/png");
+        } finally {
+          pollIntervalMs = savedPollInterval;
+        }
+      } finally {
+        globalThis.fetch = originalFetch;
+        if (savedKey !== undefined) process.env.GEMINI_API_KEY = savedKey;
+        else delete process.env.GEMINI_API_KEY;
+      }
+    },
+
     async function test_returns_error_when_no_gemini_api_key(action_fn) {
       const saved = process.env.GEMINI_API_KEY;
       try {
@@ -543,10 +610,17 @@ export default /** @type {defineAction} */ ((x) => x)({
     /** @type {{prompt: string, image?: {bytesBase64Encoded: string, mimeType: string}}} */
     const instance = { prompt: params.prompt };
 
-    const image = context.content.find(
-      /** @returns {block is ImageContentBlock} */
-      (block) => block.type === "image",
-    );
+    /** @type {ImageContentBlock | undefined} */
+    let image;
+    for (const block of context.content) {
+      if (block.type === "image") { image = block; break; }
+      if (block.type === "quote") {
+        const inner = block.content.find(
+          /** @returns {b is ImageContentBlock} */ (b) => b.type === "image",
+        );
+        if (inner) { image = inner; break; }
+      }
+    }
     if (image) {
       instance.image = {
         bytesBase64Encoded: image.data, mimeType: image.mime_type,
