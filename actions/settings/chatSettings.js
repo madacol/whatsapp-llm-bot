@@ -39,7 +39,8 @@ const RESPOND_ON_VALUES = ["any", "mention+reply", "mention"];
  */
 function toBool(raw) {
   if (typeof raw === "boolean") return raw;
-  return String(raw).toLowerCase() === "true";
+  const s = String(raw).toLowerCase();
+  return s === "true" || s === "on" || s === "yes" || s === "1";
 }
 
 /**

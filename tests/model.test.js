@@ -159,6 +159,50 @@ describe("per-chat model selection", () => {
     });
   });
 
+  describe("toBool accepts 'on'/'off' for boolean settings", () => {
+    it("'on' enables memory", async () => {
+      await db.sql`INSERT INTO chats(chat_id, memory) VALUES ('mem-on-1', false) ON CONFLICT DO NOTHING`;
+
+      const mod = await import("../actions/settings/chatSettings.js");
+      const action = mod.default;
+      const result = await action.action_fn(
+        { chatId: "mem-on-1", rootDb: db, senderIds: ["u1"] },
+        { setting: "memory", value: "on" },
+      );
+      assert.ok(result.includes("enabled"), `expected 'enabled' in: ${result}`);
+
+      const { rows: [chat] } = await db.sql`SELECT memory FROM chats WHERE chat_id = 'mem-on-1'`;
+      assert.equal(chat.memory, true);
+    });
+
+    it("'off' disables memory", async () => {
+      await db.sql`INSERT INTO chats(chat_id, memory) VALUES ('mem-off-1', true) ON CONFLICT DO NOTHING`;
+
+      const mod = await import("../actions/settings/chatSettings.js");
+      const action = mod.default;
+      const result = await action.action_fn(
+        { chatId: "mem-off-1", rootDb: db, senderIds: ["u1"] },
+        { setting: "memory", value: "off" },
+      );
+      assert.ok(result.includes("disabled"), `expected 'disabled' in: ${result}`);
+
+      const { rows: [chat] } = await db.sql`SELECT memory FROM chats WHERE chat_id = 'mem-off-1'`;
+      assert.equal(chat.memory, false);
+    });
+
+    it("'true' still works", async () => {
+      await db.sql`INSERT INTO chats(chat_id, memory) VALUES ('mem-true-1', false) ON CONFLICT DO NOTHING`;
+
+      const mod = await import("../actions/settings/chatSettings.js");
+      const action = mod.default;
+      const result = await action.action_fn(
+        { chatId: "mem-true-1", rootDb: db, senderIds: ["u1"] },
+        { setting: "memory", value: "true" },
+      );
+      assert.ok(result.includes("enabled"), `expected 'enabled' in: ${result}`);
+    });
+  });
+
   describe("model resolution logic", () => {
     it("uses custom model when present", () => {
       const chatInfo = { model: "custom-model" };
