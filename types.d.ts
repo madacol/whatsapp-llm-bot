@@ -68,6 +68,11 @@ type ContentBlock = IncomingContentBlock | ToolCallContentBlock;
   type Message = UserMessage | AssistantMessage | ToolMessage;
 
 // WhatsApp Service Types
+type ConfirmHooks = {
+  onSent?: (msgKey: { id: string; remoteJid: string }) => Promise<void>;
+  onResolved?: (msgKey: { id: string; remoteJid: string }, confirmed: boolean) => Promise<void>;
+};
+
 type IncomingContext = {
   // Message data
   chatId: string;
@@ -86,7 +91,7 @@ type IncomingContext = {
   reactToMessage: (emoji: string) => Promise<void>;
   sendPoll: (name: string, options: string[], selectableCount?: number) => Promise<void>;
   sendImage: (image: Buffer, caption?: string) => Promise<void>;
-  confirm: (message: string) => Promise<boolean>;
+  confirm: (message: string, hooks?: ConfirmHooks) => Promise<boolean>;
 
   // Bot info
   selfIds: string[];
@@ -105,7 +110,7 @@ type Context = {
   reactToMessage: (emoji: string) => Promise<void>;
   sendPoll: (name: string, options: string[], selectableCount?: number) => Promise<void>;
   sendImage: (image: Buffer, caption?: string) => Promise<void>;
-  confirm: (message: string) => Promise<boolean>;
+  confirm: (message: string, hooks?: ConfirmHooks) => Promise<boolean>;
 };
 
 /* Actions */
