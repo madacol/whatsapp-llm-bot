@@ -65,6 +65,76 @@ describe("media-to-text", () => {
       await db.sql`DELETE FROM media_to_text_cache`;
     });
 
+    it("works on a fresh DB without prior ensureMediaToTextSchema call", async () => {
+      const { convertUnsupportedMedia } = await import(
+        "../media-to-text.js"
+      );
+
+      // Use a completely fresh DB — no ensureMediaToTextSchema called
+      const { PGlite } = await import("@electric-sql/pglite");
+      const freshDb = new PGlite("memory://");
+      const freshMockServer = await createMockLlmServer();
+      const freshLlmClient = createLlmClient({
+        apiKey: "test-key",
+        baseURL: freshMockServer.url,
+      });
+
+      try {
+        await withModelsCache([
+          {
+            id: "text-only/model",
+            name: "Text Only",
+            context_length: 4096,
+            pricing: { prompt: "0.000001", completion: "0.000001" },
+            architecture: { input_modalities: ["text"] },
+          },
+          {
+            id: "vision/model",
+            name: "Vision",
+            context_length: 4096,
+            pricing: { prompt: "0.000001", completion: "0.000001" },
+            architecture: { input_modalities: ["text", "image"] },
+          },
+        ], async () => {
+          freshMockServer.addResponses("Fresh DB translation");
+
+          /** @type {MessageRow[]} */
+          const messages = [
+            {
+              message_id: 1,
+              chat_id: "test",
+              sender_id: "user1",
+              message_data: {
+                role: "user",
+                content: [
+                  {
+                    type: "image",
+                    encoding: "base64",
+                    mime_type: "image/png",
+                    data: "freshdbdata",
+                  },
+                ],
+              },
+              timestamp: new Date(),
+            },
+          ];
+
+          // Should NOT throw "relation media_to_text_cache does not exist"
+          const result = await convertUnsupportedMedia(
+            messages,
+            "text-only/model",
+            { image: "vision/model" },
+            freshLlmClient,
+            freshDb,
+          );
+
+          assert.ok(result.messages[0].message_data.content[0].text.includes("Fresh DB translation"));
+        });
+      } finally {
+        await freshMockServer.close();
+      }
+    });
+
     it("returns messages unchanged when model supports all modalities", async () => {
       const { convertUnsupportedMedia } = await import(
         "../media-to-text.js"
