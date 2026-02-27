@@ -628,10 +628,10 @@ describe("Scenario 12: Debug mode gates tool call output", () => {
       responses.some((r) => r.text.includes("Final answer")),
       "Should have the final LLM reply",
     );
-    // Should show compact tool call (just name, no args or ID)
+    // Should show compact tool call with formatToolCall detail appended
     assert.ok(
-      responses.some((r) => r.text === "🔧 run_javascript"),
-      `Should show compact tool call, got: ${responses.map(r=>r.text).join(" | ")}`,
+      responses.some((r) => r.text.startsWith("🔧 run_javascript: ")),
+      `Should show compact tool call with formatted detail, got: ${responses.map(r=>r.text).join(" | ")}`,
     );
     // Should show compact result (no bold *Result* header)
     assert.ok(
@@ -705,6 +705,33 @@ describe("Scenario 12: Debug mode gates tool call output", () => {
     assert.ok(
       resultReply,
       `Should reply with full result for non-autoContinue action, got: ${responses.map(r=>`[${r.type}] ${r.text}`).join(" | ")}`,
+    );
+  });
+
+  it("shows only action name when action has no formatToolCall", async () => {
+    mockServer.addResponses({
+      tool_calls: [
+        {
+          id: "call_no_fmt_001",
+          type: "function",
+          function: {
+            name: "chat_settings",
+            arguments: JSON.stringify({ setting: "" }),
+          },
+        },
+      ],
+    });
+
+    const { context, responses } = createIncomingContext({
+      chatId: chatIdOff,
+      content: [{ type: "text", text: "Show settings" }],
+    });
+    await handleMessage(context);
+
+    // chat_settings has no formatToolCall, so compact mode should show just the name
+    assert.ok(
+      responses.some((r) => r.text === "🔧 chat_settings"),
+      `Should show only action name without detail, got: ${responses.map(r=>r.text).join(" | ")}`,
     );
   });
 
