@@ -1,5 +1,8 @@
 import config from "./config.js";
 import { resolveModel } from "./model-roles.js";
+import { createLogger } from "./logger.js";
+
+const log = createLogger("memory");
 
 /**
  * Extract plain text from a Message JSONB object.
@@ -48,7 +51,7 @@ export async function generateEmbedding(llmClient, text) {
     });
     return response.data[0].embedding;
   } catch (err) {
-    console.error("Embedding generation failed:", err);
+    log.error("Embedding generation failed:", err);
     return null;
   }
 }

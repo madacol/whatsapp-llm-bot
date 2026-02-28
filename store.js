@@ -1,5 +1,8 @@
 import { getRootDb } from "./db.js";
 import { initPendingConfirmationsTable } from "./pending-confirmations.js";
+import { createLogger } from "./logger.js";
+
+const log = createLogger("store");
 
 /**
  * @typedef {{
@@ -145,7 +148,7 @@ export async function initStore(injectedDb){
       await db.sql`CREATE INDEX IF NOT EXISTS idx_memories_search_text ON memories USING gin (search_text)`;
       await initPendingConfirmationsTable(db);
     } catch (error) {
-      console.error("Schema migration error:", error);
+      log.error("Schema migration error:", error);
     }
 
 
@@ -159,9 +162,9 @@ export async function initStore(injectedDb){
       },
 
       async closeDb () {
-        console.log("Closing database...");
+        log.info("Closing database...");
         await db.close();
-        console.log("Database closed");
+        log.info("Database closed");
       },
 
       /**

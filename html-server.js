@@ -1,5 +1,8 @@
 import { createServer } from "node:http";
 import { getPage } from "./html-store.js";
+import { createLogger } from "./logger.js";
+
+const log = createLogger("html-server");
 
 /** @type {import("node:http").Server | null} */
 let server = null;
@@ -39,7 +42,7 @@ export async function startHtmlServer(port, db) {
   await new Promise((resolve) => s.listen(port, "0.0.0.0", () => resolve(undefined)));
   const addr = s.address();
   const assignedPort = typeof addr === "object" && addr ? addr.port : port;
-  console.log(`[html-server] listening on port ${assignedPort}`);
+  log.info(`listening on port ${assignedPort}`);
   return assignedPort;
 }
 

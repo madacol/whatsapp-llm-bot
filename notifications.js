@@ -1,4 +1,7 @@
 import nodemailer from "nodemailer";
+import { createLogger } from "./logger.js";
+
+const log = createLogger("notifications");
 
 /** Status codes that indicate auth credentials are invalid and must be cleared.
  *  401 = logged out, 403 = forbidden, 405 = session rejected, 419 = auth expired */
@@ -26,7 +29,7 @@ export async function sendAlertEmail(subject, body) {
   const { SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, ALERT_EMAIL } = process.env;
 
   if (!SMTP_HOST || !ALERT_EMAIL) {
-    console.warn("Email alert skipped: SMTP_HOST and ALERT_EMAIL env vars required");
+    log.warn("Email alert skipped: SMTP_HOST and ALERT_EMAIL env vars required");
     return;
   }
 
@@ -44,8 +47,8 @@ export async function sendAlertEmail(subject, body) {
       subject,
       text: body,
     });
-    console.log("Alert email sent to", ALERT_EMAIL);
+    log.info("Alert email sent to", ALERT_EMAIL);
   } catch (err) {
-    console.error("Failed to send alert email:", err);
+    log.error("Failed to send alert email:", err);
   }
 }
