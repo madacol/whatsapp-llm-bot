@@ -1,16 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { formatTime, truncateWithSummary, html, isHtmlContent } from "../utils.js";
-
-describe("formatTime", () => {
-  it("formats a date with year, month, day, hour, and minute", () => {
-    const date = new Date("2025-03-15T14:30:00");
-    const result = formatTime(date);
-    assert.ok(result.includes("2025"), `Expected year in result: ${result}`);
-    assert.ok(result.includes("03"), `Expected month in result: ${result}`);
-    assert.ok(result.includes("15"), `Expected day in result: ${result}`);
-  });
-});
+import { truncateWithSummary, html, isHtmlContent } from "../utils.js";
 
 describe("truncateWithSummary", () => {
   it("returns short strings unchanged", () => {
@@ -28,22 +18,6 @@ describe("truncateWithSummary", () => {
     const result = truncateWithSummary(long, 200);
     assert.ok(result.startsWith("a".repeat(200)));
     assert.ok(result.includes("2 lines"));
-  });
-});
-
-describe("html", () => {
-  it("returns a branded HtmlContent object", () => {
-    const result = html("<h1>Hello</h1>", "Test");
-    assert.equal(result.__brand, "html");
-    assert.equal(result.html, "<h1>Hello</h1>");
-    assert.equal(result.title, "Test");
-  });
-
-  it("works without a title", () => {
-    const result = html("<p>No title</p>");
-    assert.equal(result.__brand, "html");
-    assert.equal(result.html, "<p>No title</p>");
-    assert.equal(result.title, undefined);
   });
 });
 

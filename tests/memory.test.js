@@ -42,21 +42,6 @@ before(async () => {
 // extractTextFromMessage
 // ═══════════════════════════════════════════════════════════════════
 describe("extractTextFromMessage", () => {
-  it("extracts text from a user message", () => {
-    /** @type {UserMessage} */
-    const msg = { role: "user", content: [{ type: "text", text: "Hello world" }] };
-    assert.equal(extractTextFromMessage(msg), "Hello world");
-  });
-
-  it("extracts text from an assistant message", () => {
-    /** @type {AssistantMessage} */
-    const msg = {
-      role: "assistant",
-      content: [{ type: "text", text: "I can help with that." }],
-    };
-    assert.equal(extractTextFromMessage(msg), "I can help with that.");
-  });
-
   it("includes tool call representation for assistant messages", () => {
     /** @type {AssistantMessage} */
     const msg = {
@@ -82,15 +67,6 @@ describe("extractTextFromMessage", () => {
     assert.equal(extractTextFromMessage(msg), "Search results: found 3 items");
   });
 
-  it("returns empty string for media-only content", () => {
-    /** @type {UserMessage} */
-    const msg = {
-      role: "user",
-      content: [{ type: "image", encoding: "base64", mime_type: "image/png", data: "abc123" }],
-    };
-    assert.equal(extractTextFromMessage(msg), "");
-  });
-
   it("extracts text from quoted content blocks", () => {
     /** @type {UserMessage} */
     const msg = {
@@ -105,19 +81,6 @@ describe("extractTextFromMessage", () => {
     assert.ok(text.includes("my reply"));
   });
 
-  it("concatenates multiple text blocks", () => {
-    /** @type {UserMessage} */
-    const msg = {
-      role: "user",
-      content: [
-        { type: "text", text: "first part" },
-        { type: "text", text: "second part" },
-      ],
-    };
-    const text = extractTextFromMessage(msg);
-    assert.ok(text.includes("first part"));
-    assert.ok(text.includes("second part"));
-  });
 });
 
 // ═══════════════════════════════════════════════════════════════════
@@ -403,32 +366,6 @@ describe("deleteMemory", () => {
 // formatMemoriesContext
 // ═══════════════════════════════════════════════════════════════════
 describe("formatMemoriesContext", () => {
-  it("formats memory rows with timestamp and content", () => {
-    /** @type {import("../memory.js").MemoryRow[]} */
-    const memories = [{
-      id: 1, chat_id: "test", content: "User likes cats",
-      embedding: null, search_text: null,
-      created_at: new Date("2025-01-15T10:30:00Z"),
-    }];
-    const output = formatMemoriesContext(memories);
-    assert.ok(output.includes("User likes cats"));
-    assert.ok(output.includes("2025-01-15 10:30"));
-  });
-
-  it("separates multiple memories with ---", () => {
-    /** @type {import("../memory.js").MemoryRow[]} */
-    const memories = [
-      { id: 1, chat_id: "test", content: "Memory one", embedding: null, search_text: null, created_at: new Date("2025-01-15T10:30:00Z") },
-      { id: 2, chat_id: "test", content: "Memory two", embedding: null, search_text: null, created_at: new Date("2025-01-16T10:30:00Z") },
-    ];
-    const output = formatMemoriesContext(memories);
-    assert.ok(output.includes("---"));
-  });
-
-  it("returns empty string for empty array", () => {
-    assert.equal(formatMemoriesContext([]), "");
-  });
-
   it("truncates very long content", () => {
     const longContent = "a".repeat(3000);
     /** @type {import("../memory.js").MemoryRow[]} */

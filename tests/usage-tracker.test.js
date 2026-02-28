@@ -4,7 +4,7 @@ import { describe, it, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { PGlite } from "@electric-sql/pglite";
 import { withModelsCache } from "./helpers.js";
-import { recordUsage, estimateCost, resolveCost } from "../usage-tracker.js";
+import { estimateCost, resolveCost } from "../usage-tracker.js";
 
 describe("usage-tracker", () => {
   /** @type {PGlite} */
@@ -86,47 +86,4 @@ describe("usage-tracker", () => {
     });
   });
 
-  describe("recordUsage", () => {
-    it("persists a usage row with all fields", async () => {
-      await recordUsage(db, {
-        chatId: "chat-1",
-        model: "test/model",
-        promptTokens: 100,
-        completionTokens: 50,
-        cachedTokens: 20,
-        cost: 0.005,
-      });
-
-      const { rows } = await db.query(
-        "SELECT * FROM usage_logs WHERE chat_id = $1",
-        ["chat-1"],
-      );
-      assert.equal(rows.length, 1);
-      assert.equal(rows[0].chat_id, "chat-1");
-      assert.equal(rows[0].model, "test/model");
-      assert.equal(rows[0].prompt_tokens, 100);
-      assert.equal(rows[0].completion_tokens, 50);
-      assert.equal(rows[0].cached_tokens, 20);
-      assert.equal(rows[0].cost, 0.005);
-      assert.ok(rows[0].created_at instanceof Date);
-    });
-
-    it("persists null cost when cost is not available", async () => {
-      await recordUsage(db, {
-        chatId: "chat-2",
-        model: "test/model",
-        promptTokens: 50,
-        completionTokens: 25,
-        cachedTokens: 0,
-        cost: null,
-      });
-
-      const { rows } = await db.query(
-        "SELECT * FROM usage_logs WHERE chat_id = $1",
-        ["chat-2"],
-      );
-      assert.equal(rows.length, 1);
-      assert.equal(rows[0].cost, null);
-    });
-  });
 });

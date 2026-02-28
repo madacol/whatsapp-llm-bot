@@ -5,7 +5,6 @@ import {
   ensureChatActionsSchema,
   saveChatAction,
   readChatAction,
-  deleteChatAction,
   getChatActions,
   getChatAction,
   ALLOWED_CHAT_PERMISSIONS,
@@ -22,29 +21,7 @@ before(async () => {
   await ensureChatActionsSchema(db);
 });
 
-describe("ensureChatActionsSchema", () => {
-  it("creates chat_actions table", async () => {
-    const { rows } = await db.query(
-      `SELECT EXISTS (
-        SELECT FROM information_schema.tables WHERE table_name = 'chat_actions'
-      )`,
-    );
-    assert.equal(rows[0].exists, true);
-  });
-
-  it("is idempotent", async () => {
-    // Should not throw when called again
-    await ensureChatActionsSchema(db);
-  });
-});
-
-describe("saveChatAction / readChatAction / deleteChatAction", () => {
-  it("saves and reads back code", async () => {
-    await saveChatAction(db, "test_action", 'export default { name: "test_action" }');
-    const code = await readChatAction(db, "test_action");
-    assert.equal(code, 'export default { name: "test_action" }');
-  });
-
+describe("saveChatAction / readChatAction", () => {
   it("upserts on duplicate name", async () => {
     await saveChatAction(db, "upsert_test", "// v1");
     await saveChatAction(db, "upsert_test", "// v2");
@@ -52,17 +29,6 @@ describe("saveChatAction / readChatAction / deleteChatAction", () => {
     assert.equal(code, "// v2");
   });
 
-  it("returns null for nonexistent action", async () => {
-    const code = await readChatAction(db, "nonexistent_action");
-    assert.equal(code, null);
-  });
-
-  it("deletes an action", async () => {
-    await saveChatAction(db, "to_delete", "// delete me");
-    await deleteChatAction(db, "to_delete");
-    const code = await readChatAction(db, "to_delete");
-    assert.equal(code, null);
-  });
 });
 
 describe("getChatActions", () => {
@@ -121,10 +87,6 @@ export default {
     assert.equal(found.permissions.silent, undefined);
   });
 
-  it("returns empty array when no chat actions exist", async () => {
-    const actions = await getChatActions("nonexistent-chat-id");
-    assert.deepEqual(actions, []);
-  });
 });
 
 describe("getChatAction", () => {

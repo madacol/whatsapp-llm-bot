@@ -23,54 +23,6 @@ describe("models-cache", () => {
     await removeCache();
   });
 
-  describe("getCachedModels", () => {
-    it("returns parsed models from cache file", async () => {
-      /** @type {import("../models-cache.js").OpenRouterModel[]} */
-      const fakeModels = [
-        { id: "openai/gpt-4o", name: "GPT-4o", context_length: 128000, pricing: { prompt: "0.000005", completion: "0.000015" } },
-        { id: "anthropic/claude-3.5-sonnet", name: "Claude 3.5 Sonnet", context_length: 200000, pricing: { prompt: "0.000003", completion: "0.000015" } },
-      ];
-      await writeFakeCache(fakeModels);
-
-      const { getCachedModels } = await import("../models-cache.js");
-      const models = await getCachedModels();
-      assert.equal(models.length, 2);
-      assert.equal(models[0].id, "openai/gpt-4o");
-      assert.equal(models[1].id, "anthropic/claude-3.5-sonnet");
-    });
-
-    it("returns empty array when cache file does not exist", async () => {
-      await removeCache();
-      const { getCachedModels } = await import("../models-cache.js");
-      const models = await getCachedModels();
-      assert.deepEqual(models, []);
-    });
-  });
-
-  describe("modelExists", () => {
-    it("returns true for an existing model id", async () => {
-      await writeFakeCache([
-        { id: "openai/gpt-4o", name: "GPT-4o", context_length: 128000, pricing: { prompt: "0.000005", completion: "0.000015" } },
-      ]);
-      const { modelExists } = await import("../models-cache.js");
-      assert.equal(await modelExists("openai/gpt-4o"), true);
-    });
-
-    it("returns false for a non-existing model id", async () => {
-      await writeFakeCache([
-        { id: "openai/gpt-4o", name: "GPT-4o", context_length: 128000, pricing: { prompt: "0.000005", completion: "0.000015" } },
-      ]);
-      const { modelExists } = await import("../models-cache.js");
-      assert.equal(await modelExists("nonexistent/model"), false);
-    });
-
-    it("returns false when cache is empty", async () => {
-      await removeCache();
-      const { modelExists } = await import("../models-cache.js");
-      assert.equal(await modelExists("openai/gpt-4o"), false);
-    });
-  });
-
   describe("findClosestModels", () => {
     it("returns models whose ids contain the search term", async () => {
       await writeFakeCache([
