@@ -33,11 +33,8 @@ describe("actionsToOpenAIFormat", () => {
 // ── shouldRespond ──
 
 describe("shouldRespond", () => {
-  it("returns false when chat is disabled", () => {
+  it("returns false for disabled or missing chat", () => {
     assert.equal(shouldRespond({ is_enabled: false }, false, [], [], undefined), false);
-  });
-
-  it("returns false when chatInfo is undefined", () => {
     assert.equal(shouldRespond(undefined, false, [], [], undefined), false);
   });
 
@@ -48,153 +45,36 @@ describe("shouldRespond", () => {
     );
   });
 
-  it("returns true for group when bot is mentioned (default: respond_on=mention)", () => {
+  it("respond_on=any: responds to every group message", () => {
     assert.equal(
-      shouldRespond(
-        { is_enabled: true, respond_on: "mention" },
-        true,
-        [{ type: "text", text: "hey @bot-123 what's up" }],
-        ["bot-123"],
-        undefined,
-      ),
+      shouldRespond({ is_enabled: true, respond_on: "any" }, true, [{ type: "text", text: "hello everyone" }], ["bot-123"], undefined),
       true,
     );
   });
 
-  it("returns false for group when bot is not mentioned and no reply (default)", () => {
-    assert.equal(
-      shouldRespond(
-        { is_enabled: true, respond_on: "mention" },
-        true,
-        [{ type: "text", text: "hello everyone" }],
-        ["bot-123"],
-        undefined,
-      ),
-      false,
-    );
+  it("respond_on=mention: responds only when bot is @-mentioned", () => {
+    const chat = { is_enabled: true, respond_on: "mention" };
+    const selfIds = ["bot-123", "alt-id"];
+    // Mentioned → true
+    assert.equal(shouldRespond(chat, true, [{ type: "text", text: "@bot-123 hello" }], selfIds, undefined), true);
+    assert.equal(shouldRespond(chat, true, [{ type: "text", text: "hey @alt-id" }], selfIds, undefined), true);
+    // Not mentioned → false
+    assert.equal(shouldRespond(chat, true, [{ type: "text", text: "hello everyone" }], selfIds, undefined), false);
+    // Reply to bot but no mention → false (mention-only mode)
+    assert.equal(shouldRespond(chat, true, [{ type: "text", text: "hello" }], selfIds, "bot-123"), false);
   });
 
-  it("returns true when one of multiple selfIds is mentioned", () => {
-    assert.equal(
-      shouldRespond(
-        { is_enabled: true, respond_on: "mention" },
-        true,
-        [{ type: "text", text: "hey @alt-id" }],
-        ["bot-123", "alt-id"],
-        undefined,
-      ),
-      true,
-    );
-  });
-
-  describe("respond_on: any", () => {
-    it("responds to any message in group", () => {
-      assert.equal(
-        shouldRespond(
-          { is_enabled: true, respond_on: "any" },
-          true,
-          [{ type: "text", text: "hello everyone" }],
-          ["bot-123"],
-          undefined,
-        ),
-        true,
-      );
-    });
-  });
-
-  describe("respond_on: mention", () => {
-    it("responds to mentions", () => {
-      assert.equal(
-        shouldRespond(
-          { is_enabled: true, respond_on: "mention" },
-          true,
-          [{ type: "text", text: "@bot-123 hello" }],
-          ["bot-123"],
-          undefined,
-        ),
-        true,
-      );
-    });
-
-    it("does not respond to reply when mode is mention only", () => {
-      assert.equal(
-        shouldRespond(
-          { is_enabled: true, respond_on: "mention" },
-          true,
-          [{ type: "text", text: "hello" }],
-          ["bot-123"],
-          "bot-123",
-        ),
-        false,
-      );
-    });
-
-    it("does not respond when not mentioned", () => {
-      assert.equal(
-        shouldRespond(
-          { is_enabled: true, respond_on: "mention" },
-          true,
-          [{ type: "text", text: "hello" }],
-          ["bot-123"],
-          undefined,
-        ),
-        false,
-      );
-    });
-  });
-
-  describe("respond_on: mention+reply", () => {
-    it("responds to mention", () => {
-      assert.equal(
-        shouldRespond(
-          { is_enabled: true, respond_on: "mention+reply" },
-          true,
-          [{ type: "text", text: "@bot-123 hello" }],
-          ["bot-123"],
-          undefined,
-        ),
-        true,
-      );
-    });
-
-    it("responds to reply to bot", () => {
-      assert.equal(
-        shouldRespond(
-          { is_enabled: true, respond_on: "mention+reply" },
-          true,
-          [{ type: "text", text: "hello" }],
-          ["bot-123"],
-          "bot-123",
-        ),
-        true,
-      );
-    });
-
-    it("does not respond when reply is to someone else", () => {
-      assert.equal(
-        shouldRespond(
-          { is_enabled: true, respond_on: "mention+reply" },
-          true,
-          [{ type: "text", text: "hello" }],
-          ["bot-123"],
-          "other-user",
-        ),
-        false,
-      );
-    });
-
-    it("does not respond when no mention and no reply context", () => {
-      assert.equal(
-        shouldRespond(
-          { is_enabled: true, respond_on: "mention+reply" },
-          true,
-          [{ type: "text", text: "hello" }],
-          ["bot-123"],
-          undefined,
-        ),
-        false,
-      );
-    });
+  it("respond_on=mention+reply: responds to mentions and replies to bot", () => {
+    const chat = { is_enabled: true, respond_on: "mention+reply" };
+    const selfIds = ["bot-123"];
+    // Mentioned → true
+    assert.equal(shouldRespond(chat, true, [{ type: "text", text: "@bot-123 hello" }], selfIds, undefined), true);
+    // Reply to bot → true
+    assert.equal(shouldRespond(chat, true, [{ type: "text", text: "hello" }], selfIds, "bot-123"), true);
+    // Reply to someone else → false
+    assert.equal(shouldRespond(chat, true, [{ type: "text", text: "hello" }], selfIds, "other-user"), false);
+    // No mention, no reply → false
+    assert.equal(shouldRespond(chat, true, [{ type: "text", text: "hello" }], selfIds, undefined), false);
   });
 });
 
