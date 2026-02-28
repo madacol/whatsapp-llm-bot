@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
 import config from "../../config.js";
+import { createLogger } from "../../logger.js";
+
+const log = createLogger("generateVideo");
 
 const GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta";
 
@@ -621,12 +624,14 @@ export default /** @type {defineAction} */ ((x) => x)({
     async function test_logs_response_when_no_video(action_fn) {
       const originalFetch = globalThis.fetch;
       const savedKey = process.env.GEMINI_API_KEY;
-      const originalLog = console.log;
+      const originalWarn = console.warn;
+      const savedLevel = process.env.LOG_LEVEL;
       process.env.GEMINI_API_KEY = "test-key";
+      process.env.LOG_LEVEL = "warn";
       /** @type {unknown[]} */
       const loggedArgs = [];
       try {
-        console.log = /** @type {typeof console.log} */ ((...args) => {
+        console.warn = /** @type {typeof console.warn} */ ((...args) => {
           loggedArgs.push(...args);
         });
         let fetchCallCount = 0;
@@ -669,16 +674,18 @@ export default /** @type {defineAction} */ ((x) => x)({
           const logStr = loggedArgs.map(String).join(" ");
           assert.ok(
             logStr.includes("raiMediaFilteredCount") || logStr.includes("generateVideoResponse"),
-            `Expected console.log to include poll response data, got: ${logStr}`,
+            `Expected console.warn to include poll response data, got: ${logStr}`,
           );
         } finally {
           pollIntervalMs = savedPollInterval;
         }
       } finally {
-        console.log = originalLog;
+        console.warn = originalWarn;
         globalThis.fetch = originalFetch;
         if (savedKey !== undefined) process.env.GEMINI_API_KEY = savedKey;
         else delete process.env.GEMINI_API_KEY;
+        if (savedLevel !== undefined) process.env.LOG_LEVEL = savedLevel;
+        else delete process.env.LOG_LEVEL;
       }
     },
 
@@ -792,7 +799,7 @@ export default /** @type {defineAction} */ ((x) => x)({
         const videoResponse = pollData.response?.generateVideoResponse;
         const samples = videoResponse?.generatedSamples;
         if (!samples || samples.length === 0) {
-          console.log("Veo returned no video. Full response:", JSON.stringify(pollData, null, 2));
+          log.warn("Veo returned no video. Full response:", JSON.stringify(pollData, null, 2));
           const reasons = videoResponse?.raiMediaFilteredReasons;
           if (reasons && reasons.length > 0) {
             return `The model did not generate any video. Reason: ${reasons.join(", ")}`;
@@ -801,7 +808,7 @@ export default /** @type {defineAction} */ ((x) => x)({
         }
 
         const videoUri = samples[0].video.uri;
-        console.log("Video URI:", videoUri);
+        log.debug("Video URI:", videoUri);
 
         // 3. Download the video
         const downloadResponse = await fetch(videoUri, {

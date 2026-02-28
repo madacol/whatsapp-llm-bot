@@ -13,6 +13,9 @@ import {
 import { exec } from "child_process";
 import { rm } from "fs/promises";
 import { needsAuthReset, sendAlertEmail } from "./notifications.js";
+import { createLogger } from "./logger.js";
+
+const log = createLogger("whatsapp");
 
 const AUTH_DIR = "./auth_info_baileys";
 const QR_TIMEOUT_MS = 5 * 60 * 1000;
@@ -253,7 +256,7 @@ export async function getMessageContent(baileysMessage, downloadFn = downloadMed
   }
 
   if (content.length === 0) {
-    console.log("Unknown baileysMessage", JSON.stringify(baileysMessage, null, 2));
+    log.debug("Unknown baileysMessage", JSON.stringify(baileysMessage, null, 2));
   }
 
   return { content, quotedSenderId };
@@ -328,7 +331,7 @@ async function adaptIncomingMessage(baileysMessage, sock, messageHandler) {
         );
         return participant?.admin || null;
       } catch (error) {
-        console.error("Error checking group admin status:", error);
+        log.error("Error checking group admin status:", error);
         return null;
       }
     },
@@ -397,17 +400,17 @@ function registerHandlers(sockRef, saveCreds, onMessageHandler, reconnect, onRea
       if (qr) {
         exec(`echo "${qr}" | qrencode -t ansiutf8`, (error, stdout, stderr) => {
           if (error) {
-            console.error(error);
-            console.error(stderr);
+            log.error(error);
+            log.error(stderr);
             return;
           }
-          console.log(stdout);
+          log.info(stdout);
         });
       }
 
       if (connection === "close") {
         const statusCode = /** @type {{ output?: { statusCode?: number } } | undefined} */ (lastDisconnect?.error)?.output?.statusCode;
-        console.log(
+        log.info(
           "Connection closed due to ",
           lastDisconnect?.error,
           ", status code:",
@@ -415,7 +418,7 @@ function registerHandlers(sockRef, saveCreds, onMessageHandler, reconnect, onRea
         );
         if (needsAuthReset(lastDisconnect) && !sessionResetInProgress) {
           sessionResetInProgress = true;
-          console.log(`Auth failure (${statusCode}). Clearing auth and requesting re-pair...`);
+          log.warn(`Auth failure (${statusCode}). Clearing auth and requesting re-pair...`);
           await rm(AUTH_DIR, { recursive: true, force: true });
           sendAlertEmail(
             `WhatsApp Bot: Auth failure (${statusCode})`,
@@ -427,11 +430,11 @@ function registerHandlers(sockRef, saveCreds, onMessageHandler, reconnect, onRea
           sockRef.current.end(undefined);
           await reconnect();
           qrExitTimer = setTimeout(() => {
-            console.error("QR code was not scanned within 5 minutes. Exiting.");
+            log.error("QR code was not scanned within 5 minutes. Exiting.");
             process.exit(1);
           }, QR_TIMEOUT_MS);
         } else if (needsAuthReset(lastDisconnect) && sessionResetInProgress) {
-          console.error(`Auth still failing (${statusCode}) after reset. Exiting.`);
+          log.error(`Auth still failing (${statusCode}) after reset. Exiting.`);
           process.exit(1);
         } else if (statusCode !== 401) {
           sockRef.current.end(undefined);
@@ -443,11 +446,11 @@ function registerHandlers(sockRef, saveCreds, onMessageHandler, reconnect, onRea
           clearTimeout(qrExitTimer);
           qrExitTimer = null;
           sessionResetInProgress = false;
-          console.log("QR code scanned successfully, exit timer cancelled.");
+          log.info("QR code scanned successfully, exit timer cancelled.");
         }
-        console.log("WhatsApp connection opened");
+        log.info("WhatsApp connection opened");
         const selfIds = getSelfIds(sockRef.current);
-        console.log("Self IDs:", selfIds, JSON.stringify(sockRef.current.user, null, 2));
+        log.debug("Self IDs:", selfIds, JSON.stringify(sockRef.current.user, null, 2));
       }
     }
 
@@ -473,7 +476,7 @@ function registerHandlers(sockRef, saveCreds, onMessageHandler, reconnect, onRea
             sockRef.current,
           );
         } catch (err) {
-          console.error("Error in onReaction handler:", err);
+          log.error("Error in onReaction handler:", err);
         }
       }
     }
@@ -500,7 +503,7 @@ export async function connectToWhatsApp(handlerOrOptions) {
   const { onMessage, onReaction } = options;
 
   const { version } = await fetchLatestWaWebVersion();
-  console.log("Using WA Web version:", version);
+  log.info("Using WA Web version:", version);
 
   const { state, saveCreds } = await useMultiFileAuthState(
     AUTH_DIR,
@@ -531,11 +534,11 @@ export async function connectToWhatsApp(handlerOrOptions) {
 
   return {
     async closeWhatsapp() {
-      console.log("Cleaning up WhatsApp connection...");
+      log.info("Cleaning up WhatsApp connection...");
       try {
         sockRef.current.end(undefined);
       } catch (error) {
-        console.error("Error during WhatsApp cleanup:", error);
+        log.error("Error during WhatsApp cleanup:", error);
       }
     },
     /** @param {string} chatId @param {string} text */

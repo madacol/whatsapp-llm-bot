@@ -34,6 +34,9 @@ import {
   loadPendingConfirmations,
   deletePendingConfirmation,
 } from "./pending-confirmations.js";
+import { createLogger } from "./logger.js";
+
+const log = createLogger("index");
 
 /**
  * Type guard: checks that an action has a command string.
@@ -113,7 +116,7 @@ function parseToolArgs(argsString) {
   try {
     return JSON.parse(argsString || "{}");
   } catch {
-    console.error("Failed to parse tool call arguments:", argsString);
+    log.error("Failed to parse tool call arguments:", argsString);
     return {};
   }
 }
@@ -156,13 +159,13 @@ async function executeAndStoreTool({
   const toolName = toolCall.function.name;
   const toolArgs = parseToolArgs(toolCall.function.arguments);
   const shortId = shortenToolId(toolCall.id);
-  console.log("executing", toolName, toolArgs);
+  log.debug("executing", toolName, toolArgs);
 
   try {
     const functionResponse = await executeActionFn(
       toolName, context, toolArgs, toolCall.id, actionResolver, actionLlmClient,
     );
-    console.log("response", functionResponse);
+    log.debug("response", functionResponse);
 
     const result = functionResponse.result;
 
@@ -224,7 +227,7 @@ async function executeAndStoreTool({
 
     return !!functionResponse.permissions.autoContinue;
   } catch (error) {
-    console.error("Error executing tool:", error);
+    log.error("Error executing tool:", error);
     const errorMessage = `Error executing ${toolName}: ${error instanceof Error ? error.message : String(error)}`;
 
     /** @type {ToolMessage} */
@@ -278,7 +281,7 @@ async function processLlmResponse({ session, llmConfig, formattedMessages }) {
         tool_choice: "auto",
       });
     } catch (error) {
-      console.error(error);
+      log.error(error);
       const errorMessage = JSON.stringify(error, null, 2);
       await context.reply(
         "❌ *Error*",
@@ -293,9 +296,9 @@ async function processLlmResponse({ session, llmConfig, formattedMessages }) {
       const cached = response.usage.prompt_tokens_details?.cached_tokens ?? 0;
       const nativeCost = /** @type {{ cost?: number } & typeof response.usage} */ (response.usage).cost;
       const cost = await resolveCost(nativeCost, chatModel, prompt, completion);
-      console.log(`[LLM usage] prompt=${prompt} cached=${cached} completion=${completion} cost=${cost} model=${chatModel}`);
+      log.info(`[LLM usage] prompt=${prompt} cached=${cached} completion=${completion} cost=${cost} model=${chatModel}`);
       recordUsage(getRootDb(), { chatId, model: chatModel, promptTokens: prompt, completionTokens: completion, cachedTokens: cached, cost })
-        .catch(err => console.error("[LLM usage] failed to persist:", err));
+        .catch(err => log.error("[LLM usage] failed to persist:", err));
     }
 
     const responseMessage = response.choices[0].message;
@@ -304,7 +307,7 @@ async function processLlmResponse({ session, llmConfig, formattedMessages }) {
     const assistantMessage = { role: "assistant", content: [] };
 
     if (responseMessage.content) {
-      console.log("RESPONSE SENT:", responseMessage.content);
+      log.debug("RESPONSE SENT:", responseMessage.content);
       await context.reply("🤖 *AI Assistant*", responseMessage.content);
       assistantMessage.content.push({ type: "text", text: responseMessage.content });
     }
@@ -396,7 +399,7 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
   async function handleMessage(messageContext) {
     const { chatId, senderIds, content, isGroup, senderName, selfIds, quotedSenderId } = messageContext;
 
-    console.log("INCOMING MESSAGE:", JSON.stringify(messageContext, null, 2));
+    log.debug("INCOMING MESSAGE:", JSON.stringify(messageContext, null, 2));
 
     // Ensure chat exists in DB for both command and message paths
     await createChat(chatId);
@@ -469,7 +472,7 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
       // Map command arguments to action parameters
       const params = parseCommandArgs(args, action.parameters);
 
-      console.log("executing", action.name, params);
+      log.debug("executing", action.name, params);
 
       try {
         const { result } = await executeActionFn(action.name, context, params, null, actionResolver, llmClient);
@@ -484,7 +487,7 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
           await context.reply(result);
         }
       } catch (error) {
-        console.error("Error executing command:", error);
+        log.error("Error executing command:", error);
         const errorMessage =
           error instanceof Error ? error.message : String(error);
         await context.reply("❌ *Error*", `Error: ${errorMessage}`);
@@ -519,7 +522,7 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
       return;
     }
 
-    console.log("LLM will respond");
+    log.debug("LLM will respond");
 
     // Get system prompt and model from current chat or use defaults
     let systemPrompt = (chatInfo?.system_prompt || config.system_prompt) + systemPromptSuffix;
@@ -551,7 +554,7 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
             systemPrompt += "\n\n## Relevant memories\n" + formatMemoriesContext(similar);
           }
         } catch (err) {
-          console.error("Memory search failed:", err);
+          log.error("Memory search failed:", err);
         }
       }
     }
@@ -604,7 +607,7 @@ if (!process.env.TESTING) {
   // Load pending confirmations from a previous session
   const pendingConfirmations = await loadPendingConfirmations(rootDb);
   if (pendingConfirmations.length > 0) {
-    console.log(`Loaded ${pendingConfirmations.length} pending confirmation(s) from previous session`);
+    log.info(`Loaded ${pendingConfirmations.length} pending confirmation(s) from previous session`);
   }
 
   /** @type {Map<string, import("./pending-confirmations.js").PendingConfirmationRow>} */
@@ -636,7 +639,7 @@ if (!process.env.TESTING) {
       await sock.sendMessage(pending.msg_key_remote_jid, {
         react: { text: "❌", key: msgKey },
       });
-      console.log(`Pending confirmation for ${pending.action_name} rejected after restart`);
+      log.info(`Pending confirmation for ${pending.action_name} rejected after restart`);
       return;
     }
 
@@ -645,7 +648,7 @@ if (!process.env.TESTING) {
       react: { text: "✅", key: msgKey },
     });
 
-    console.log(`Resuming action "${pending.action_name}" after restart approval`);
+    log.info(`Resuming action "${pending.action_name}" after restart approval`);
 
     /** @type {Context} */
     const resumeContext = {
@@ -684,7 +687,7 @@ if (!process.env.TESTING) {
       const resultText = typeof result === "string" ? result : JSON.stringify(result, null, 2);
       await sock.sendMessage(pending.chat_id, { text: `🔧 ${resultText}` });
     } catch (error) {
-      console.error(`Error resuming action "${pending.action_name}":`, error);
+      log.error(`Error resuming action "${pending.action_name}":`, error);
       const errorMsg = error instanceof Error ? error.message : String(error);
       await sock.sendMessage(pending.chat_id, { text: `❌ Error resuming ${pending.action_name}: ${errorMsg}` });
     }
@@ -694,7 +697,7 @@ if (!process.env.TESTING) {
     onMessage: handleMessage,
     onReaction,
   }).catch(async (error) => {
-      console.error("Initialization error:", error);
+      log.error("Initialization error:", error);
       await store.closeDb();
       process.exit(1);
     });
@@ -710,23 +713,23 @@ if (!process.env.TESTING) {
       await closeWhatsapp();
       await store.closeDb();
     } catch (error) {
-      console.error("Error during cleanup:", error);
+      log.error("Error during cleanup:", error);
     }
   }
 
   process.on("SIGINT", async function () {
-    console.log("SIGINT received, cleaning up...");
+    log.info("SIGINT received, cleaning up...");
     await cleanup();
     process.exit(0);
   });
 
   process.on("SIGTERM", async function () {
-    console.log("SIGTERM received, cleaning up...");
+    log.info("SIGTERM received, cleaning up...");
     await cleanup();
     process.exit(0);
   });
   process.on("uncaughtException", async (error) => {
-    console.error("Uncaught Exception:", error);
+    log.error("Uncaught Exception:", error);
     await cleanup();
     process.exit(1);
   });

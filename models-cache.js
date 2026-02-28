@@ -1,6 +1,9 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { createDaemon } from "./daemon.js";
+import { createLogger } from "./logger.js";
+
+const log = createLogger("models-cache");
 
 /**
  * @typedef {{
@@ -21,7 +24,7 @@ const REFRESH_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24 hours
 async function refreshCache() {
   const response = await fetch("https://openrouter.ai/api/v1/models");
   if (!response.ok) {
-    console.error(`Failed to fetch models: ${response.status} ${response.statusText}`);
+    log.error(`Failed to fetch models: ${response.status} ${response.statusText}`);
     return;
   }
   /** @type {{ data: OpenRouterModel[] }} */

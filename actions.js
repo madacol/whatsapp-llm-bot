@@ -7,6 +7,9 @@ import config from "./config.js";
 import { createCallLlm } from "./llm.js";
 import { savePendingConfirmation, deletePendingConfirmation } from "./pending-confirmations.js";
 import { resolveModel } from "./model-roles.js";
+import { createLogger } from "./logger.js";
+
+const log = createLogger("actions");
 
 
 const currentSessionDb = getDb("memory://");
@@ -142,7 +145,7 @@ export async function executeAction(
       permissions: action.permissions,
     };
   } catch (error) {
-    console.error(`Error executing action ${actionName}:`, error);
+    log.error(`Error executing action ${actionName}:`, error);
     throw error;
   }
 }
@@ -191,10 +194,10 @@ export async function getActions() {
                 app_name: "",
               };
             }
-            console.error(`Action ${file} has no default export`);
+            log.error(`Action ${file} has no default export`);
             return null;
           } catch (importError) {
-            console.error(`Error importing action ${file}:`, importError);
+            log.error(`Error importing action ${file}:`, importError);
             return null;
           }
         }),
@@ -236,10 +239,10 @@ export async function getAction(actionName) {
       };
     }
 
-    console.error(`Action ${fileName} has no default export`);
+    log.error(`Action ${fileName} has no default export`);
     return null;
   } catch (error) {
-    console.error(`Error importing action file for ${actionName}:`, error);
+    log.error(`Error importing action file for ${actionName}:`, error);
     return null;
   }
 }
@@ -333,7 +336,7 @@ async function importChatAction(chatId, name, code) {
     await fs.writeFile(tmpFile, code, "utf-8");
     const module = await import(`file://${tmpFile}?t=${Date.now()}`);
     if (!module.default) {
-      console.error(`Chat action "${name}" has no default export`);
+      log.error(`Chat action "${name}" has no default export`);
       return null;
     }
 
@@ -364,7 +367,7 @@ async function importChatAction(chatId, name, code) {
     chatActionCache.set(cacheKey, action);
     return action;
   } catch (error) {
-    console.error(`Error importing chat action "${name}":`, error);
+    log.error(`Error importing chat action "${name}":`, error);
     return null;
   } finally {
     await fs.rm(tmpFile, { force: true });

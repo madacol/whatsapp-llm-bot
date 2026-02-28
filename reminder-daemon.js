@@ -1,6 +1,9 @@
 import { getRootDb } from "./db.js";
 import { ensureSchema } from "./actions/tools/reminders.js";
 import { createDaemon } from "./daemon.js";
+import { createLogger } from "./logger.js";
+
+const log = createLogger("reminder-daemon");
 
 /**
  * Poll for due reminders and deliver them.
@@ -21,7 +24,7 @@ export async function pollReminders(db, sendToChat) {
       await sendToChat(/** @type {string} */ (reminder.chat_id), text);
       await db.sql`UPDATE reminders SET delivered = TRUE WHERE id = ${reminder.id}`;
     } catch (error) {
-      console.error(`Failed to deliver reminder #${reminder.id}:`, error);
+      log.error(`Failed to deliver reminder #${reminder.id}:`, error);
     }
   }
 }

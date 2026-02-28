@@ -4,6 +4,9 @@
 
 import OpenAI from "openai";
 import { convertAudioToMp3Base64 } from "./audio_conversion.js";
+import { createLogger } from "./logger.js";
+
+const log = createLogger("message-formatting");
 
 /**
  * Convert actions to OpenAI tools format
@@ -157,7 +160,7 @@ async function formatUserContent(message) {
           format = audioFormat;
           data = contentBlock.data;
         } else {
-          console.warn(`Unsupported audio format: ${contentBlock.mime_type}`);
+          log.warn(`Unsupported audio format: ${contentBlock.mime_type}`);
           data = await convertAudioToMp3Base64(contentBlock.data);
         }
         parts.push({

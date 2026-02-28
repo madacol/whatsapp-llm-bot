@@ -452,6 +452,8 @@ describe("LLM pipeline via createMessageHandler", () => {
 
     const logs = [];
     const origLog = console.log;
+    const origLevel = process.env.LOG_LEVEL;
+    process.env.LOG_LEVEL = "info";
     console.log = (...args) => {
       logs.push(args.join(" "));
       origLog.apply(console, args);
@@ -465,6 +467,8 @@ describe("LLM pipeline via createMessageHandler", () => {
       await handleMessage(context);
     } finally {
       console.log = origLog;
+      if (origLevel === undefined) delete process.env.LOG_LEVEL;
+      else process.env.LOG_LEVEL = origLevel;
     }
 
     const usageLine = logs.find(l => l.includes("[LLM usage]"));
