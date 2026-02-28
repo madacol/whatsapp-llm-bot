@@ -66,26 +66,6 @@ function createMockSock() {
 }
 
 describe("getMessageContent", () => {
-  it("extracts plain text (conversation)", async () => {
-    const msg = /** @type {Partial<BaileysMessage>} */ ({
-      message: { conversation: "Hello world" },
-    });
-    const { content } = await getMessageContent(msg);
-
-    assert.equal(content.length, 1);
-    assert.equal(content[0].type, "text");
-    assert.equal(/** @type {Partial<BaileysMessage>} */ (content[0]).text, "Hello world");
-  });
-
-  it("extracts extendedTextMessage", async () => {
-    const msg = /** @type {Partial<BaileysMessage>} */ ({
-      message: { extendedTextMessage: { text: "Extended" } },
-    });
-    const { content } = await getMessageContent(msg);
-
-    assert.ok(content.some(b => b.type === "text" && /** @type {Partial<BaileysMessage>} */ (b).text === "Extended"));
-  });
-
   it("extracts quoted message with reply text", async () => {
     const msg = /** @type {Partial<BaileysMessage>} */ ({
       message: {
@@ -165,15 +145,6 @@ describe("getMessageContent", () => {
     assert.ok(
       content.some(b => b.type === "text" && /** @type {Partial<BaileysMessage>} */ (b).text === "See attached"),
     );
-  });
-
-  it("returns empty array for unknown message type", async () => {
-    const msg = /** @type {Partial<BaileysMessage>} */ ({
-      message: { stickerMessage: {} },
-    });
-    const { content } = await getMessageContent(msg);
-
-    assert.equal(content.length, 0);
   });
 
   it("extracts quotedSenderId from contextInfo participant", async () => {

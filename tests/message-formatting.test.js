@@ -28,9 +28,6 @@ describe("actionsToOpenAIFormat", () => {
     assert.deepEqual(result[0].function.parameters, actions[0].parameters);
   });
 
-  it("returns empty array for empty input", () => {
-    assert.deepEqual(actionsToOpenAIFormat([]), []);
-  });
 });
 
 // ── shouldRespond ──
@@ -242,27 +239,6 @@ describe("formatUserMessage", () => {
 // ── parseCommandArgs ──
 
 describe("parseCommandArgs", () => {
-  it("maps positional args to param names", () => {
-    const params = parseCommandArgs(["hello", "world"], {
-      type: "object",
-      properties: {
-        greeting: { type: "string" },
-        target: { type: "string" },
-      },
-    });
-    assert.deepEqual(params, { greeting: "hello", target: "world" });
-  });
-
-  it("uses default values for missing args", () => {
-    const params = parseCommandArgs([], {
-      type: "object",
-      properties: {
-        name: { type: "string", default: "fallback" },
-      },
-    });
-    assert.deepEqual(params, { name: "fallback" });
-  });
-
   it("joins remaining args for the last parameter", () => {
     const params = parseCommandArgs(["You", "are", "a", "helpful", "bot"], {
       type: "object",

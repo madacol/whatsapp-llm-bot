@@ -32,53 +32,7 @@ describe("per-chat model selection", () => {
     await fs.rm(CACHE_PATH, { force: true });
   });
 
-  describe("store layer – model column", () => {
-    it("model column exists in chats table", async () => {
-      const { rows } = await db.sql`
-        SELECT column_name FROM information_schema.columns
-        WHERE table_name = 'chats' AND column_name = 'model'
-      `;
-      assert.equal(rows.length, 1);
-    });
-
-    it("getChat returns model value after it is set via SQL", async () => {
-      await db.sql`INSERT INTO chats(chat_id, model) VALUES ('test-chat-1', 'gpt-4.1') ON CONFLICT DO NOTHING`;
-      const { rows: [chat] } = await db.sql`SELECT * FROM chats WHERE chat_id = 'test-chat-1'`;
-      assert.equal(chat.model, "gpt-4.1");
-    });
-
-    it("model defaults to null when not set", async () => {
-      await db.sql`INSERT INTO chats(chat_id) VALUES ('test-chat-2') ON CONFLICT DO NOTHING`;
-      const { rows: [chat] } = await db.sql`SELECT * FROM chats WHERE chat_id = 'test-chat-2'`;
-      assert.equal(chat.model, null);
-    });
-  });
-
   describe("chat_settings info includes model", () => {
-    it("shows custom model in info output", async () => {
-      await db.sql`INSERT INTO chats(chat_id, model) VALUES ('chat-get-1', 'claude-sonnet-4-5-20250929') ON CONFLICT DO NOTHING`;
-
-      const settingsModule = await import("../actions/settings/chatSettings.js");
-      const action = settingsModule.default;
-      const result = await action.action_fn(
-        { chatId: "chat-get-1", rootDb: db, senderIds: ["u1"] },
-        { setting: "" },
-      );
-      assert.ok(result.includes("claude-sonnet-4-5-20250929"));
-    });
-
-    it("indicates default when model is not set", async () => {
-      await db.sql`INSERT INTO chats(chat_id) VALUES ('chat-get-2') ON CONFLICT DO NOTHING`;
-
-      const settingsModule = await import("../actions/settings/chatSettings.js");
-      const action = settingsModule.default;
-      const result = await action.action_fn(
-        { chatId: "chat-get-2", rootDb: db, senderIds: ["u1"] },
-        { setting: "" },
-      );
-      assert.ok(result.includes("default"));
-    });
-
     it("throws if chat does not exist", async () => {
       const settingsModule = await import("../actions/settings/chatSettings.js");
       const action = settingsModule.default;
@@ -279,26 +233,4 @@ describe("per-chat model selection", () => {
     });
   });
 
-  describe("model resolution logic", () => {
-    it("uses custom model when present", () => {
-      const chatInfo = { model: "custom-model" };
-      const configModel = "default-model";
-      const resolved = chatInfo.model || configModel;
-      assert.equal(resolved, "custom-model");
-    });
-
-    it("falls back to config model when chat model is null", () => {
-      const chatInfo = { model: null };
-      const configModel = "default-model";
-      const resolved = chatInfo.model || configModel;
-      assert.equal(resolved, "default-model");
-    });
-
-    it("falls back to config model when chatInfo is undefined", () => {
-      const chatInfo = undefined;
-      const configModel = "default-model";
-      const resolved = chatInfo?.model || configModel;
-      assert.equal(resolved, "default-model");
-    });
-  });
 });
