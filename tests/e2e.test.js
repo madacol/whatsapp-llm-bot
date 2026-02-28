@@ -1062,4 +1062,282 @@ describe("HtmlContent via !command", () => {
   });
 });
 
+// ═══════════════════════════════════════════════════════════════════
+// Scenario: Multi-turn conversation accumulates context
+// ═══════════════════════════════════════════════════════════════════
+describe("Multi-turn conversation accumulates context", () => {
+  const chatId = "multi-turn-chat";
+
+  before(async () => {
+    await seedChat(chatId, { enabled: true });
+  });
+
+  it("LLM sees all prior turns in context", async () => {
+    // Turn 1
+    mockServer.addResponses("I'll remember that.");
+    const { context: ctx1 } = createIncomingContext({
+      chatId,
+      content: [{ type: "text", text: "My name is Alice" }],
+    });
+    await handleMessage(ctx1);
+
+    // Turn 2
+    mockServer.addResponses("Got it, you like cats.");
+    const { context: ctx2 } = createIncomingContext({
+      chatId,
+      content: [{ type: "text", text: "I like cats" }],
+    });
+    await handleMessage(ctx2);
+
+    // Turn 3 — verify LLM sees all previous messages
+    const reqsBefore = mockServer.getRequests().length;
+    mockServer.addResponses("Sure, Alice who likes cats!");
+    const { context: ctx3 } = createIncomingContext({
+      chatId,
+      content: [{ type: "text", text: "Summarize what you know about me" }],
+    });
+    await handleMessage(ctx3);
+
+    const lastReq = mockServer.getRequests()[reqsBefore];
+    const allContent = JSON.stringify(lastReq.messages);
+    assert.ok(allContent.includes("My name is Alice"), "Should see turn 1 user message");
+    assert.ok(allContent.includes("I'll remember that"), "Should see turn 1 assistant reply");
+    assert.ok(allContent.includes("I like cats"), "Should see turn 2 user message");
+    assert.ok(allContent.includes("Summarize what you know"), "Should see turn 3 user message");
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════
+// Scenario: User sends image to text-only model with media-to-text configured
+// ═══════════════════════════════════════════════════════════════════
+describe("User sends image to text-only model (media-to-text converts it)", () => {
+  const chatId = "media-convert-chat";
+
+  before(async () => {
+    await seedChat(chatId, { enabled: true });
+  });
+
+  it("converts image to text via media-to-text model, then sends text to main LLM", async () => {
+    const reqsBefore = mockServer.getRequests().length;
+    // First response: media-to-text model describes the image
+    // Second response: main LLM uses the description
+    mockServer.addResponses(
+      "A photo of a sunset over the ocean.",
+      "Based on the image description, I can see a beautiful sunset!",
+    );
+
+    const { context, responses } = createIncomingContext({
+      chatId,
+      content: [
+        { type: "image", encoding: "base64", mime_type: "image/jpeg", data: "aGVsbG8=" },
+        { type: "text", text: "Describe this image" },
+      ],
+    });
+    await handleMessage(context);
+
+    assert.ok(
+      responses.some(r => r.text.includes("beautiful sunset")),
+      `Should get LLM response, got: ${responses.map(r => `[${r.type}] ${r.text.slice(0, 80)}`).join(" | ")}`,
+    );
+
+    // Verify two LLM calls were made: one for media-to-text, one for chat
+    const newReqs = mockServer.getRequests().slice(reqsBefore);
+    assert.ok(newReqs.length >= 2, `Expected at least 2 LLM requests (convert + chat), got ${newReqs.length}`);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════
+// Scenario: LLM returns multiple tool calls in one turn
+// ═══════════════════════════════════════════════════════════════════
+describe("Multiple tool calls in a single LLM response", () => {
+  const chatId = "multi-tool-chat";
+
+  before(async () => {
+    await seedChat(chatId, { enabled: true });
+  });
+
+  it("executes all tool calls and sends results back to LLM", async () => {
+    const reqsBefore = mockServer.getRequests().length;
+    mockServer.addResponses(
+      {
+        tool_calls: [
+          {
+            id: "call_multi_001",
+            type: "function",
+            function: {
+              name: "run_javascript",
+              arguments: JSON.stringify({ code: "() => 'result-A'" }),
+            },
+          },
+          {
+            id: "call_multi_002",
+            type: "function",
+            function: {
+              name: "run_javascript",
+              arguments: JSON.stringify({ code: "() => 'result-B'" }),
+            },
+          },
+        ],
+      },
+      "Both tools returned results A and B.",
+    );
+
+    const { context, responses } = createIncomingContext({
+      chatId,
+      content: [{ type: "text", text: "Run two things at once" }],
+    });
+    await handleMessage(context);
+
+    assert.ok(
+      responses.some(r => r.text.includes("Both tools returned")),
+      "Should get final LLM reply after both tools",
+    );
+
+    // Verify the second LLM request contains both tool results
+    const secondReq = mockServer.getRequests()[reqsBefore + 1];
+    const toolMsgs = secondReq.messages.filter(m => m.role === "tool");
+    assert.equal(toolMsgs.length, 2, `Should have 2 tool result messages, got ${toolMsgs.length}`);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════
+// Scenario: Error recovery across turns
+// ═══════════════════════════════════════════════════════════════════
+describe("Error recovery across turns", () => {
+  const chatId = "error-recovery-chat";
+
+  before(async () => {
+    await seedChat(chatId, { enabled: true });
+  });
+
+  it("bot recovers on next turn after LLM API error", async () => {
+    // Turn 1 — no mock responses queued → server returns 500
+    const { context: ctx1, responses: r1 } = createIncomingContext({
+      chatId,
+      content: [{ type: "text", text: "First message" }],
+    });
+    await handleMessage(ctx1);
+    assert.ok(r1.some(r => r.text.includes("Error")), "Should show error to user");
+
+    // Turn 2 — normal response
+    mockServer.addResponses("Back to normal!");
+    const { context: ctx2, responses: r2 } = createIncomingContext({
+      chatId,
+      content: [{ type: "text", text: "Try again" }],
+    });
+    await handleMessage(ctx2);
+
+    assert.ok(
+      r2.some(r => r.text.includes("Back to normal")),
+      "Should recover and respond normally on next turn",
+    );
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════
+// Scenario: Group respond_on modes
+// ═══════════════════════════════════════════════════════════════════
+describe("Group respond_on modes", () => {
+  it("respond_on=any: responds to every message in group", async () => {
+    const chatId = "respond-any@g.us";
+    await seedChat(chatId, { enabled: true });
+    await testDb.sql`UPDATE chats SET respond_on = 'any' WHERE chat_id = ${chatId}`;
+
+    mockServer.addResponses("Responding to everything!");
+    const { context, responses } = createIncomingContext({
+      chatId,
+      isGroup: true,
+      content: [{ type: "text", text: "Hello everyone" }],
+    });
+    await handleMessage(context);
+
+    assert.ok(responses.some(r => r.text.includes("Responding to everything")),
+      "Should respond even without mention when respond_on=any");
+  });
+
+  it("respond_on=mention+reply: responds to reply-to-bot", async () => {
+    const chatId = "respond-reply@g.us";
+    await seedChat(chatId, { enabled: true });
+    await testDb.sql`UPDATE chats SET respond_on = 'mention+reply' WHERE chat_id = ${chatId}`;
+
+    // Message without mention but quoting the bot
+    mockServer.addResponses("Replying to your reply!");
+    const { context, responses } = createIncomingContext({
+      chatId,
+      isGroup: true,
+      quotedSenderId: "bot-123",
+      content: [{ type: "text", text: "What did you mean?" }],
+    });
+    await handleMessage(context);
+
+    assert.ok(responses.some(r => r.text.includes("Replying to your reply")),
+      "Should respond when user replies to bot's message");
+  });
+
+  it("respond_on=mention+reply: ignores unrelated messages", async () => {
+    const chatId = "respond-reply-ignore@g.us";
+    await seedChat(chatId, { enabled: true });
+    await testDb.sql`UPDATE chats SET respond_on = 'mention+reply' WHERE chat_id = ${chatId}`;
+
+    const { context, responses } = createIncomingContext({
+      chatId,
+      isGroup: true,
+      content: [{ type: "text", text: "Just chatting" }],
+    });
+    await handleMessage(context);
+
+    assert.equal(responses.length, 0, "Should not respond to unrelated message");
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════
+// Scenario: Confirmation declined stops action execution
+// ═══════════════════════════════════════════════════════════════════
+describe("Confirmation declined prevents action execution", () => {
+  const chatId = "confirm-decline-chat";
+
+  before(async () => {
+    await seedChat(chatId, { enabled: true });
+  });
+
+  it("action is skipped when user declines confirmation", async () => {
+    mockServer.addResponses(
+      {
+        tool_calls: [
+          {
+            id: "call_confirm_001",
+            type: "function",
+            function: {
+              name: "run_bash",
+              arguments: JSON.stringify({ command: "echo hello" }),
+            },
+          },
+        ],
+      },
+      "The command was not executed.",
+    );
+
+    const { context, responses } = createIncomingContext({
+      chatId,
+      content: [{ type: "text", text: "Run a shell command" }],
+      confirm: async (message) => {
+        responses.push({ type: "confirm", text: message });
+        return false;  // user declines
+      },
+    });
+    await handleMessage(context);
+
+    // Should have asked for confirmation
+    assert.ok(
+      responses.some(r => r.type === "confirm"),
+      "Should ask for confirmation before running bash",
+    );
+    // The cancelled result should mention cancellation
+    assert.ok(
+      responses.some(r => r.text.toLowerCase().includes("cancel") || r.text.toLowerCase().includes("denied")),
+      `Should indicate action was cancelled, got: ${responses.map(r => r.text).join(" | ")}`,
+    );
+  });
+});
+
 }); // end describe("e2e")
