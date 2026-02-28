@@ -14,64 +14,30 @@ before(async () => {
 });
 
 describe("reminder daemon", () => {
-  it("delivers a due reminder and calls sendToChat", async () => {
-    const chatId = "daemon-chat-1";
-    const pastTime = new Date(Date.now() - 60_000).toISOString();
-    await db.sql`INSERT INTO reminders (chat_id, reminder_text, remind_at) VALUES (${chatId}, 'call mom', ${pastTime})`;
+  it("delivers only due, undelivered reminders", async () => {
+    const past = new Date(Date.now() - 60_000).toISOString();
+    const future = new Date(Date.now() + 3600_000).toISOString();
+
+    // Seed three reminders: due, future, already delivered
+    await db.sql`INSERT INTO reminders (chat_id, reminder_text, remind_at) VALUES ('r-due', 'call mom', ${past})`;
+    await db.sql`INSERT INTO reminders (chat_id, reminder_text, remind_at) VALUES ('r-future', 'future task', ${future})`;
+    await db.sql`INSERT INTO reminders (chat_id, reminder_text, remind_at, delivered) VALUES ('r-done', 'already done', ${past}, TRUE)`;
 
     /** @type {Array<{chatId: string, text: string}>} */
     const sent = [];
-    /** @param {string} chatId @param {string} text */
-    const mockSendToChat = async (chatId, text) => {
-      sent.push({ chatId, text });
-    };
+    await pollReminders(db, async (chatId, text) => sent.push({ chatId, text }));
 
-    await pollReminders(db, mockSendToChat);
-
+    // Only the due reminder should fire
     assert.equal(sent.length, 1);
-    assert.equal(sent[0].chatId, chatId);
-    assert.ok(sent[0].text.includes("call mom"), `Expected 'call mom' in: ${sent[0].text}`);
+    assert.equal(sent[0].chatId, "r-due");
+    assert.ok(sent[0].text.includes("call mom"));
 
-    // Verify marked as delivered
-    const { rows } = await db.sql`SELECT delivered FROM reminders WHERE chat_id = ${chatId} AND reminder_text = 'call mom'`;
-    assert.equal(rows[0].delivered, true);
-  });
+    // Due reminder marked delivered
+    const { rows: dueRows } = await db.sql`SELECT delivered FROM reminders WHERE chat_id = 'r-due'`;
+    assert.equal(dueRows[0].delivered, true);
 
-  it("does NOT deliver a future reminder", async () => {
-    const chatId = "daemon-chat-2";
-    const futureTime = new Date(Date.now() + 3600_000).toISOString();
-    await db.sql`INSERT INTO reminders (chat_id, reminder_text, remind_at) VALUES (${chatId}, 'future task', ${futureTime})`;
-
-    /** @type {Array<{chatId: string, text: string}>} */
-    const sent = [];
-    /** @param {string} chatId @param {string} text */
-    const mockSendToChat = async (chatId, text) => {
-      sent.push({ chatId, text });
-    };
-
-    await pollReminders(db, mockSendToChat);
-
-    assert.equal(sent.length, 0);
-
-    // Verify still not delivered
-    const { rows } = await db.sql`SELECT delivered FROM reminders WHERE chat_id = ${chatId} AND reminder_text = 'future task'`;
-    assert.equal(rows[0].delivered, false);
-  });
-
-  it("does NOT re-send already delivered reminders", async () => {
-    const chatId = "daemon-chat-3";
-    const pastTime = new Date(Date.now() - 60_000).toISOString();
-    await db.sql`INSERT INTO reminders (chat_id, reminder_text, remind_at, delivered) VALUES (${chatId}, 'already done', ${pastTime}, TRUE)`;
-
-    /** @type {Array<{chatId: string, text: string}>} */
-    const sent = [];
-    /** @param {string} chatId @param {string} text */
-    const mockSendToChat = async (chatId, text) => {
-      sent.push({ chatId, text });
-    };
-
-    await pollReminders(db, mockSendToChat);
-
-    assert.equal(sent.length, 0);
+    // Future reminder still pending
+    const { rows: futureRows } = await db.sql`SELECT delivered FROM reminders WHERE chat_id = 'r-future'`;
+    assert.equal(futureRows[0].delivered, false);
   });
 });
