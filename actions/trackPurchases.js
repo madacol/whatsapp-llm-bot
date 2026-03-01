@@ -731,6 +731,7 @@ TOTAL: €6.00
       }
     },
     async function extract_from_receipt_image(callLlm, readFixture, prompt) {
+      const { resolveModel } = await import("../model-roles.js");
       const imageBuffer = await readFixture("receipt-1.jpeg");
       const base64 = imageBuffer.toString("base64");
 
@@ -740,7 +741,7 @@ TOTAL: €6.00
         { type: "text", text: prompt() },
       ];
 
-      const response = await callLlm(content);
+      const response = await callLlm(content, { model: resolveModel("image_to_text") });
       assert.ok(response, "LLM should return a response");
 
       const data = parseExtractResponse(/** @type {string} */ (response));
@@ -780,7 +781,7 @@ TOTAL: €6.00
     },
   ],
   action_fn: async function (context, params) {
-    const { db, callLlm, content, log, confirm } = context;
+    const { db, callLlm, content, log, confirm, resolveModel } = context;
 
     await ensureSchema(db);
 
@@ -799,7 +800,8 @@ TOTAL: €6.00
         { type: "text", text: EXTRACT_PROMPT },
       ];
 
-      const llmResponse = await callLlm(prompt);
+      const model = resolveModel?.("image_to_text");
+      const llmResponse = await callLlm(prompt, model ? { model } : {});
       if (!llmResponse) {
         return "No pude analizar la factura. Intenta con una foto mas clara.";
       }

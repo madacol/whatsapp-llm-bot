@@ -6,8 +6,9 @@
  *   - Cost money (real API calls)
  *   - Are non-deterministic
  *
- * Run via: npm run test:prompts
- * Never included in: npm test
+ * Run via: pnpm test:prompts
+ * Filter: ACTION=track_purchases pnpm test:prompts
+ * Never included in: pnpm test
  */
 
 import { describe, it, before } from "node:test";
@@ -19,6 +20,8 @@ import dotenv from "dotenv";
 import { createLlmClient, createCallLlm } from "../llm.js";
 
 dotenv.config();
+
+const actionFilter = process.env.ACTION;
 
 /** @type {Array<{fileName: string, action: Action}>} */
 let actions = [];
@@ -49,6 +52,7 @@ before(async () => {
   for (const file of files) {
     const mod = await import(`file://${path.join(actionsDir, file)}`);
     if (mod.default?.test_prompts?.length > 0) {
+      if (actionFilter && !mod.default.name.includes(actionFilter)) continue;
       actions.push({ fileName: file, action: mod.default });
     }
   }
