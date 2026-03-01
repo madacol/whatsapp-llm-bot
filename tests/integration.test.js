@@ -29,7 +29,7 @@ const seedChat = (chatId, options) => seedChat_(testDb, chatId, options);
 
 // ── All tests run serially to prevent concurrent mock-server races ──
 
-describe("e2e", { concurrency: 1 }, () => {
+describe("integration", { concurrency: 1 }, () => {
 
 const CACHE_PATH = path.resolve("data/models.json");
 
