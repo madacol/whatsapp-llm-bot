@@ -40,4 +40,42 @@ describe("reminder daemon", () => {
     const { rows: futureRows } = await db.sql`SELECT delivered FROM reminders WHERE chat_id = 'r-future'`;
     assert.equal(futureRows[0].delivered, false);
   });
+
+  it("does not mark reminder as delivered when send fails", async () => {
+    const past = new Date(Date.now() - 60_000).toISOString();
+    await db.sql`INSERT INTO reminders (chat_id, reminder_text, remind_at) VALUES ('r-fail', 'will fail', ${past})`;
+
+    const sendToChat = async () => { throw new Error("network down"); };
+    await pollReminders(db, sendToChat);
+
+    const { rows: [row] } = await db.sql`SELECT delivered FROM reminders WHERE chat_id = 'r-fail'`;
+    assert.equal(row.delivered, false);
+
+    // Clean up so this undelivered reminder doesn't leak into later tests
+    await db.sql`DELETE FROM reminders WHERE chat_id = 'r-fail'`;
+  });
+
+  it("continues delivering remaining reminders after one fails", async () => {
+    const past = new Date(Date.now() - 60_000).toISOString();
+    await db.sql`INSERT INTO reminders (chat_id, reminder_text, remind_at) VALUES ('r-fail-first', 'first fails', ${past})`;
+    await db.sql`INSERT INTO reminders (chat_id, reminder_text, remind_at) VALUES ('r-ok-second', 'second ok', ${past})`;
+
+    /** @type {string[]} */
+    const called = [];
+    /** @param {string} chatId */
+    const sendToChat = async (chatId) => {
+      called.push(chatId);
+      if (chatId === "r-fail-first") throw new Error("boom");
+    };
+    await pollReminders(db, sendToChat);
+
+    assert.ok(called.includes("r-fail-first"), "should attempt the failing reminder");
+    assert.ok(called.includes("r-ok-second"), "should attempt the succeeding reminder");
+
+    const { rows: [fail] } = await db.sql`SELECT delivered FROM reminders WHERE chat_id = 'r-fail-first'`;
+    assert.equal(fail.delivered, false);
+
+    const { rows: [ok] } = await db.sql`SELECT delivered FROM reminders WHERE chat_id = 'r-ok-second'`;
+    assert.equal(ok.delivered, true);
+  });
 });
