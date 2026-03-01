@@ -371,6 +371,40 @@ export default /** @type {defineAction} */ ((x) => x)({
       assert.equal(ledgers.length, 1);
       assert.equal(purchases[0].ledger_id, ledgers[0].id);
     },
+    async function extract_preview_shows_mismatch_warning(action_fn, db) {
+      await ensureSchema(db);
+      const mockResponse = JSON.stringify({
+        store_name: "DiscountStore",
+        purchase_date: "2025-08-01",
+        items: [
+          { item_name: "Jamon", quantity: 1, unit_price: 8.00, subtotal: 8.00 },
+          { item_name: "Queso", quantity: 1, unit_price: 4.50, subtotal: 4.50 },
+        ],
+        total: 10.00,
+      });
+      /** @type {ContentBlock[]} */
+      const contentWithImage = [
+        { type: "image", encoding: "base64", mime_type: "image/jpeg", data: "fakebase64" },
+      ];
+      /** @type {string | undefined} */
+      let capturedPreview;
+      const result = await action_fn(
+        {
+          db,
+          callLlm: async () => mockResponse,
+          content: contentWithImage,
+          log: async () => "",
+          confirm: async (/** @type {string} */ preview) => { capturedPreview = preview; return true; },
+        },
+        { action: "extract" },
+      );
+      assert.ok(typeof result === "string");
+      assert.ok(capturedPreview, "confirm should have been called with a preview");
+      assert.ok(capturedPreview.includes("Suma items: €12.50"), `Preview should show items sum, got:\n${capturedPreview}`);
+      assert.ok(capturedPreview.includes("Total factura: €10.00"), `Preview should show total, got:\n${capturedPreview}`);
+      assert.ok(capturedPreview.includes("⚠️"), `Preview should show warning for mismatch, got:\n${capturedPreview}`);
+      assert.ok(capturedPreview.includes("no coincide"), `Warning should mention mismatch, got:\n${capturedPreview}`);
+    },
     async function computeItemsTotal_sums_subtotals(_action_fn, _db) {
       const items = [
         { item_name: "Pan", quantity: 1, unit_price: 1.20, subtotal: 1.20 },
