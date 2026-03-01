@@ -80,6 +80,16 @@ async function getOrCreateLedger(db, name) {
 }
 
 /**
+ * Sum all item subtotals, rounded to 2 decimals.
+ * @param {Array<{subtotal: number}>} items
+ * @returns {number}
+ */
+function computeItemsTotal(items) {
+  const sum = items.reduce((acc, item) => acc + (item.subtotal || 0), 0);
+  return Math.round(sum * 100) / 100;
+}
+
+/**
  * Format a receipt preview for confirmation.
  * @param {{ store_name: string|null, purchase_date: string|null, items: Array<{item_name: string, quantity: number, unit_price: number, subtotal: number}>, total: number }} data
  * @param {string} ledgerName
@@ -97,8 +107,17 @@ function formatPreview(data, ledgerName) {
       preview += `  ${i + 1}. ${item.item_name} — x${item.quantity || 1} — €${Number(price).toFixed(2)}\n`;
     }
   }
-  preview += `\n*Total: €${Number(data.total || 0).toFixed(2)}*\n\n`;
-  preview += `React 👍 para guardar o 👎 para cancelar.`;
+
+  const itemsSum = computeItemsTotal(data.items || []);
+  const total = Number(data.total || 0);
+  preview += `\n*Suma items: €${itemsSum.toFixed(2)}*\n`;
+  preview += `*Total factura: €${total.toFixed(2)}*\n`;
+
+  if (Math.abs(itemsSum - total) > 0.05) {
+    preview += `⚠️ La suma de items (€${itemsSum.toFixed(2)}) no coincide con el total (€${total.toFixed(2)}). Puede haber descuentos, impuestos u otros ajustes.\n`;
+  }
+
+  preview += `\nReact 👍 para guardar o 👎 para cancelar.`;
   return preview;
 }
 
@@ -216,7 +235,7 @@ async function getSummary(db, ledgerName) {
   return result;
 }
 
-export { EXTRACT_PROMPT, parseExtractResponse, ensureSchema, getOrCreateLedger, formatPreview };
+export { EXTRACT_PROMPT, parseExtractResponse, ensureSchema, getOrCreateLedger, formatPreview, computeItemsTotal };
 
 export default /** @type {defineAction} */ ((x) => x)({
   name: "track_purchases",
@@ -351,6 +370,48 @@ export default /** @type {defineAction} */ ((x) => x)({
       const { rows: ledgers } = await db.sql`SELECT * FROM ledgers WHERE LOWER(name) = 'general'`;
       assert.equal(ledgers.length, 1);
       assert.equal(purchases[0].ledger_id, ledgers[0].id);
+    },
+    async function computeItemsTotal_sums_subtotals(_action_fn, _db) {
+      const items = [
+        { item_name: "Pan", quantity: 1, unit_price: 1.20, subtotal: 1.20 },
+        { item_name: "Agua", quantity: 2, unit_price: 0.50, subtotal: 1.00 },
+        { item_name: "Leche", quantity: 1, unit_price: 1.50, subtotal: 1.50 },
+      ];
+      assert.equal(computeItemsTotal(items), 3.70);
+    },
+    async function computeItemsTotal_handles_empty(_action_fn, _db) {
+      assert.equal(computeItemsTotal([]), 0);
+    },
+    async function formatPreview_shows_matching_totals(_action_fn, _db) {
+      const data = {
+        store_name: "TestStore",
+        purchase_date: "2025-01-01",
+        items: [
+          { item_name: "Item1", quantity: 1, unit_price: 5.00, subtotal: 5.00 },
+          { item_name: "Item2", quantity: 2, unit_price: 1.50, subtotal: 3.00 },
+        ],
+        total: 8.00,
+      };
+      const preview = formatPreview(data, "General");
+      assert.ok(preview.includes("Suma items: €8.00"), `Should show items sum, got:\n${preview}`);
+      assert.ok(preview.includes("Total factura: €8.00"), `Should show invoice total, got:\n${preview}`);
+      assert.ok(!preview.includes("⚠️"), `Should NOT show warning when totals match, got:\n${preview}`);
+    },
+    async function formatPreview_shows_mismatch_warning(_action_fn, _db) {
+      const data = {
+        store_name: "TestStore",
+        purchase_date: "2025-01-01",
+        items: [
+          { item_name: "Item1", quantity: 1, unit_price: 10.00, subtotal: 10.00 },
+          { item_name: "Item2", quantity: 1, unit_price: 5.00, subtotal: 5.00 },
+        ],
+        total: 12.50,
+      };
+      const preview = formatPreview(data, "General");
+      assert.ok(preview.includes("Suma items: €15.00"), `Should show items sum, got:\n${preview}`);
+      assert.ok(preview.includes("Total factura: €12.50"), `Should show invoice total, got:\n${preview}`);
+      assert.ok(preview.includes("⚠️"), `Should show warning when totals mismatch, got:\n${preview}`);
+      assert.ok(preview.includes("no coincide"), `Warning should mention mismatch, got:\n${preview}`);
     },
     async function parse_extract_response_strips_markdown(_action_fn, _db) {
       const raw = '```json\n{"store_name": "Test", "items": [], "total": 0}\n```';
