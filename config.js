@@ -22,6 +22,8 @@ export default {
   smart_model: process.env.SMART_MODEL || "",
   fast_model: process.env.FAST_MODEL || "",
   get gemini_api_key() { return process.env.GEMINI_API_KEY; },
+  get fal_api_key() { return process.env.FAL_KEY; },
+  video_model: process.env.VIDEO_MODEL || "fal-ai/kling-video/v3/standard",
   memory_threshold: parseFloat(process.env.MEMORY_THRESHOLD || "") || 0.3,
   html_server_port: parseInt(process.env.HTML_SERVER_PORT || "3100", 10),
   get html_server_base_url() { return process.env.HTML_SERVER_BASE_URL || ""; },

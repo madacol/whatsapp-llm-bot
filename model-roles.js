@@ -83,6 +83,12 @@ export const ROLE_DEFINITIONS = {
     defaultValue: "",
     description: "Cheap/fast model for simple tasks",
   },
+  video_generation: {
+    envVar: "VIDEO_MODEL",
+    configKey: "video_model",
+    defaultValue: "fal-ai/kling-video/v3/standard",
+    description: "Video generation model (fal.ai endpoint)",
+  },
 };
 
 /** @type {readonly string[]} */
