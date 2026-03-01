@@ -99,12 +99,21 @@ const MEDIA_TO_TEXT_ROLE_KEYS = {
   video_to_text: "video",
 };
 
+/** @type {Record<string, string>} */
+const MEDIA_TO_TEXT_FALLBACK = {
+  image_to_text: "media_to_text",
+  audio_to_text: "media_to_text",
+  video_to_text: "media_to_text",
+  media_to_text: "chat",
+};
+
 /**
  * Resolve a model ID for the given role.
  *
  * Resolution chain:
  *   1. Per-chat override (chatRow)
  *   2. Config/env default
+ *   3. For *_to_text roles: media_to_text → chat fallback
  *
  * Per-chat storage:
  *   - `chat` role → chatRow.model
@@ -141,5 +150,12 @@ export function resolveModel(role, chatRow) {
   }
 
   // 2. Config/env default
-  return /** @type {string} */ (config[definition.configKey]);
+  const resolved = /** @type {string} */ (config[definition.configKey]);
+  if (resolved) return resolved;
+
+  // 3. Fallback chain for *_to_text roles: specific → media_to_text → chat
+  const fallbackRole = MEDIA_TO_TEXT_FALLBACK[role];
+  if (fallbackRole) return resolveModel(fallbackRole, chatRow);
+
+  return resolved;
 }

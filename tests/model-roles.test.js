@@ -41,6 +41,28 @@ describe("resolveModel", () => {
     assert.equal(resolveModel("image_to_text", chatRow), "gpt-4o-vision");
   });
 
+  it("falls back from specific *_to_text to media_to_text to chat", () => {
+    const origImage = config.image_to_text_model;
+    const origMedia = config.media_to_text_model;
+    try {
+      // image_to_text empty, media_to_text set → uses media_to_text
+      config.image_to_text_model = "";
+      config.media_to_text_model = "vision-model";
+      assert.equal(resolveModel("image_to_text"), "vision-model");
+
+      // both empty → falls back to chat
+      config.media_to_text_model = "";
+      assert.equal(resolveModel("image_to_text"), config.model);
+
+      // image_to_text set → uses it directly
+      config.image_to_text_model = "specific-vision";
+      assert.equal(resolveModel("image_to_text"), "specific-vision");
+    } finally {
+      config.image_to_text_model = origImage;
+      config.media_to_text_model = origMedia;
+    }
+  });
+
   it("throws for nonexistent role", () => {
     assert.throws(() => resolveModel("nonexistent"), {
       message: /Unknown model role.*nonexistent/,
