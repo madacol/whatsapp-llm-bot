@@ -17,6 +17,7 @@ import {
   formatUserMessage,
   parseCommandArgs,
   formatMessagesForOpenAI,
+  registerMedia,
 } from "./message-formatting.js";
 import { convertUnsupportedMedia } from "./media-to-text.js";
 import { resolveModel } from "./model-roles.js";
@@ -227,11 +228,12 @@ async function executeAndStoreTool({
     await addMessage(chatId, toolMessage, senderIds);
 
     // Tag media from tool results so subsequent tool calls can reference them
+    /** @type {Map<ToolContentBlock, number>} */
+    const mediaIds = new Map();
     if (isContentBlocks) {
       for (const block of /** @type {ToolContentBlock[]} */ (result)) {
         if (block.type === "image" || block.type === "video" || block.type === "audio") {
-          const id = mediaRegistry.size + 1;
-          mediaRegistry.set(id, block);
+          mediaIds.set(block, registerMedia(mediaRegistry, block));
         }
       }
     }
@@ -248,9 +250,7 @@ async function executeAndStoreTool({
     await displayToolResult(resultMessage, shortId, functionResponse.permissions, context);
 
     // Build formatted result for LLM context, including media tags
-    if (isContentBlocks && /** @type {ToolContentBlock[]} */ (result).some(
-      (b) => b.type === "image" || b.type === "video",
-    )) {
+    if (mediaIds.size > 0) {
       /** @type {Array<OpenAI.ChatCompletionContentPart>} */
       const parts = [];
       for (const block of /** @type {ToolContentBlock[]} */ (result)) {
@@ -261,24 +261,13 @@ async function executeAndStoreTool({
             type: /** @type {const} */ ("image_url"),
             image_url: { url: `data:${block.mime_type};base64,${block.data}` },
           });
-          // Find this block's media ID (assigned above) and add a tag
-          for (const [id, registered] of mediaRegistry) {
-            if (registered === block) {
-              parts.push({ type: /** @type {const} */ ("text"), text: `[media:${id}]` });
-              break;
-            }
-          }
+          parts.push({ type: /** @type {const} */ ("text"), text: `[media:${mediaIds.get(block)}]` });
         } else if (block.type === "video") {
           parts.push(/** @type {*} */ ({
             type: "video_url",
             video_url: { url: `data:${block.mime_type};base64,${block.data}` },
           }));
-          for (const [id, registered] of mediaRegistry) {
-            if (registered === block) {
-              parts.push({ type: /** @type {const} */ ("text"), text: `[media:${id}]` });
-              break;
-            }
-          }
+          parts.push({ type: /** @type {const} */ ("text"), text: `[media:${mediaIds.get(block)}]` });
         }
       }
       formattedMessages.push(/** @type {OpenAI.ChatCompletionMessageParam} */ (
