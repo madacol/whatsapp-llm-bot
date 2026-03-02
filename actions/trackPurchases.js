@@ -1,30 +1,5 @@
 import assert from "node:assert/strict";
 
-const EXTRACT_PROMPT = `Extrae datos de la factura en JSON estricto (solo JSON):
-{
-  "store_name": "nombre",
-  "purchase_date": "YYYY-MM-DD o null",
-  "items": [{ "item_name": "nombre", "quantity": 1, "unit_price": 0.0, "subtotal": 0.0 }],
-  "total": 0.0
-}
-
-Reglas:
-- Solo números en precios (sin símbolos).
-- Usa null si el dato es ilegible.
-- Extrae TODOS los productos individuales.
-- Excluye descuentos, cupones o subtotales de la lista de items.
-- "total" es el monto final neto pagado.
-- Sin texto adicional ni markdown.`;
-
-/**
- * @param {string} raw - Raw LLM response (may contain markdown fences)
- * @returns {{ store_name: string|null, purchase_date: string|null, items: Array<{item_name: string, quantity: number, unit_price: number, subtotal: number}>, total: number }}
- */
-function parseExtractResponse(raw) {
-  const cleaned = raw.replace(/```json?\n?/g, "").replace(/```/g, "").trim();
-  return JSON.parse(cleaned);
-}
-
 /**
  * Ensure the purchases schema exists (with ledger support).
  * @param {PGlite} db
@@ -235,32 +210,48 @@ async function getSummary(db, ledgerName) {
   return result;
 }
 
-export { EXTRACT_PROMPT, parseExtractResponse, ensureSchema, getOrCreateLedger, formatPreview, computeItemsTotal };
+export { ensureSchema, getOrCreateLedger, formatPreview, computeItemsTotal };
 
 export default /** @type {defineAction} */ ((x) => x)({
   name: "track_purchases",
   command: "compras",
   optIn: true,
-  description: "When the user sends an image that looks like a receipt or invoice, call this with action='extract' to extract and save the purchase data. Also use for: purchase history ('history'), spending summary ('summary'), deleting a purchase ('delete'), and ledger management ('list_ledgers', 'rename_ledger', 'delete_ledger').",
+  description: "Register purchase data and manage purchase history. To process a receipt/invoice image: first call extract_from_image to extract the data, then call this with action='register' passing the extracted fields. Also use for: purchase history ('history'), spending summary ('summary'), deleting a purchase ('delete'), and ledger management ('list_ledgers', 'rename_ledger', 'delete_ledger').",
   parameters: {
     type: "object",
     properties: {
       action: {
         type: "string",
-        description: "Acción a realizar: 'extract' para extraer de foto, 'history' para ver historial, 'summary' para resumen de gastos, 'delete' para borrar un registro por ID, 'list_ledgers' para listar libros, 'rename_ledger' para renombrar un libro, 'delete_ledger' para eliminar un libro y sus compras",
-        enum: ["extract", "history", "summary", "delete", "list_ledgers", "rename_ledger", "delete_ledger"]
+        description: "Action to perform: 'register' to save pre-extracted purchase data, 'history' for purchase history, 'summary' for spending summary, 'delete' to delete a record by ID, 'list_ledgers' to list ledgers, 'rename_ledger' to rename a ledger, 'delete_ledger' to delete a ledger and its purchases",
+        enum: ["register", "history", "summary", "delete", "list_ledgers", "rename_ledger", "delete_ledger"]
+      },
+      store_name: {
+        type: "string",
+        description: "Store/vendor name (for action=register)"
+      },
+      purchase_date: {
+        type: "string",
+        description: "Purchase date in YYYY-MM-DD format (for action=register)"
+      },
+      items: {
+        type: "string",
+        description: "JSON array of items, each with {item_name, quantity, unit_price, subtotal} (for action=register)"
+      },
+      total: {
+        type: "number",
+        description: "Total amount paid (for action=register)"
       },
       purchase_id: {
         type: "string",
-        description: "ID de la compra a eliminar (solo para action=delete)"
+        description: "ID of the purchase to delete (for action=delete)"
       },
       ledger_name: {
         type: "string",
-        description: "Nombre del libro de compras. Para 'extract': libro donde guardar (default: 'General'). Para 'history'/'summary': filtrar por libro. Para 'rename_ledger'/'delete_ledger': libro a modificar."
+        description: "Ledger name. For 'register': ledger to save to (default: 'General'). For 'history'/'summary': filter by ledger. For 'rename_ledger'/'delete_ledger': ledger to modify."
       },
       new_ledger_name: {
         type: "string",
-        description: "Nuevo nombre para el libro (solo para action=rename_ledger)"
+        description: "New name for the ledger (for action=rename_ledger)"
       }
     },
     required: ["action"]
@@ -268,7 +259,6 @@ export default /** @type {defineAction} */ ((x) => x)({
   permissions: {
     autoExecute: true,
     autoContinue: true,
-    useLlm: true
   },
   test_functions: [
     async function history_empty(action_fn, db) {
@@ -327,33 +317,15 @@ export default /** @type {defineAction} */ ((x) => x)({
       const { rows } = await db.sql`SELECT * FROM purchases WHERE id = ${purchase.id}`;
       assert.equal(rows.length, 0);
     },
-    async function extract_no_image(action_fn, db) {
+    async function register_saves_purchase(action_fn, db) {
       await ensureSchema(db);
+      const items = JSON.stringify([
+        { item_name: "Pan", quantity: 1, unit_price: 1.20, subtotal: 1.20 },
+        { item_name: "Agua", quantity: 2, unit_price: 0.50, subtotal: 1.00 },
+      ]);
       const result = await action_fn(
-        { db, callLlm: async () => null, content: [], log: async () => "", confirm: async () => true },
-        { action: "extract" },
-      );
-      assert.ok(typeof result === "string");
-      assert.ok(result.includes("No encontre ninguna foto"));
-    },
-    async function extract_with_mock_llm(action_fn, db) {
-      await ensureSchema(db);
-      const mockResponse = JSON.stringify({
-        store_name: "Supermercado Test",
-        purchase_date: "2025-06-15",
-        items: [
-          { item_name: "Pan", quantity: 1, unit_price: 1.20, subtotal: 1.20 },
-          { item_name: "Agua", quantity: 2, unit_price: 0.50, subtotal: 1.00 },
-        ],
-        total: 2.20,
-      });
-      /** @type {ContentBlock[]} */
-      const contentWithImage = [
-        { type: "image", encoding: "base64", mime_type: "image/jpeg", data: "fakebase64" },
-      ];
-      const result = await action_fn(
-        { db, callLlm: async () => mockResponse, content: contentWithImage, log: async () => "", confirm: async () => true },
-        { action: "extract" },
+        { db, content: [], log: async () => "", confirm: async () => true },
+        { action: "register", store_name: "Supermercado Test", purchase_date: "2025-06-15", items, total: 2.20 },
       );
       assert.ok(typeof result === "string");
       assert.ok(result.includes("Supermercado Test"));
@@ -363,40 +335,30 @@ export default /** @type {defineAction} */ ((x) => x)({
       // Verify data was inserted
       const { rows: purchases } = await db.sql`SELECT * FROM purchases WHERE store_name = 'Supermercado Test'`;
       assert.equal(purchases.length, 1);
-      const { rows: items } = await db.sql`SELECT * FROM purchase_items WHERE purchase_id = ${purchases[0].id} ORDER BY item_name`;
-      assert.equal(items.length, 2);
+      const { rows: dbItems } = await db.sql`SELECT * FROM purchase_items WHERE purchase_id = ${purchases[0].id} ORDER BY item_name`;
+      assert.equal(dbItems.length, 2);
 
       // Verify default ledger was created
       const { rows: ledgers } = await db.sql`SELECT * FROM ledgers WHERE LOWER(name) = 'general'`;
       assert.equal(ledgers.length, 1);
       assert.equal(purchases[0].ledger_id, ledgers[0].id);
     },
-    async function extract_preview_shows_mismatch_warning(action_fn, db) {
+    async function register_preview_shows_mismatch_warning(action_fn, db) {
       await ensureSchema(db);
-      const mockResponse = JSON.stringify({
-        store_name: "DiscountStore",
-        purchase_date: "2025-08-01",
-        items: [
-          { item_name: "Jamon", quantity: 1, unit_price: 8.00, subtotal: 8.00 },
-          { item_name: "Queso", quantity: 1, unit_price: 4.50, subtotal: 4.50 },
-        ],
-        total: 10.00,
-      });
-      /** @type {ContentBlock[]} */
-      const contentWithImage = [
-        { type: "image", encoding: "base64", mime_type: "image/jpeg", data: "fakebase64" },
-      ];
+      const items = JSON.stringify([
+        { item_name: "Jamon", quantity: 1, unit_price: 8.00, subtotal: 8.00 },
+        { item_name: "Queso", quantity: 1, unit_price: 4.50, subtotal: 4.50 },
+      ]);
       /** @type {string | undefined} */
       let capturedPreview;
       const result = await action_fn(
         {
           db,
-          callLlm: async () => mockResponse,
-          content: contentWithImage,
+          content: [],
           log: async () => "",
           confirm: async (/** @type {string} */ preview) => { capturedPreview = preview; return true; },
         },
-        { action: "extract" },
+        { action: "register", store_name: "DiscountStore", purchase_date: "2025-08-01", items, total: 10.00 },
       );
       assert.ok(typeof result === "string");
       assert.ok(capturedPreview, "confirm should have been called with a preview");
@@ -404,6 +366,15 @@ export default /** @type {defineAction} */ ((x) => x)({
       assert.ok(capturedPreview.includes("Total factura: €10.00"), `Preview should show total, got:\n${capturedPreview}`);
       assert.ok(capturedPreview.includes("⚠️"), `Preview should show warning for mismatch, got:\n${capturedPreview}`);
       assert.ok(capturedPreview.includes("no coincide"), `Warning should mention mismatch, got:\n${capturedPreview}`);
+    },
+    async function register_missing_items(action_fn, db) {
+      await ensureSchema(db);
+      const result = await action_fn(
+        { db, content: [], log: async () => "", confirm: async () => true },
+        { action: "register", store_name: "Test", total: 10.00 },
+      );
+      assert.ok(typeof result === "string");
+      assert.ok(result.includes("items"), `Should mention missing items, got: ${result}`);
     },
     async function computeItemsTotal_sums_subtotals(_action_fn, _db) {
       const items = [
@@ -447,29 +418,15 @@ export default /** @type {defineAction} */ ((x) => x)({
       assert.ok(preview.includes("⚠️"), `Should show warning when totals mismatch, got:\n${preview}`);
       assert.ok(preview.includes("no coincide"), `Warning should mention mismatch, got:\n${preview}`);
     },
-    async function parse_extract_response_strips_markdown(_action_fn, _db) {
-      const raw = '```json\n{"store_name": "Test", "items": [], "total": 0}\n```';
-      const data = parseExtractResponse(raw);
-      assert.equal(data.store_name, "Test");
-      assert.deepEqual(data.items, []);
-    },
-
-    // --- New tests for confirmation flow ---
-    async function extract_cancelled_by_user(action_fn, db) {
+    // --- Confirmation flow ---
+    async function register_cancelled_by_user(action_fn, db) {
       await ensureSchema(db);
-      const mockResponse = JSON.stringify({
-        store_name: "CancelStore",
-        purchase_date: "2025-06-15",
-        items: [{ item_name: "Item1", quantity: 1, unit_price: 5.00, subtotal: 5.00 }],
-        total: 5.00,
-      });
-      /** @type {ContentBlock[]} */
-      const contentWithImage = [
-        { type: "image", encoding: "base64", mime_type: "image/jpeg", data: "fakebase64" },
-      ];
+      const items = JSON.stringify([
+        { item_name: "Item1", quantity: 1, unit_price: 5.00, subtotal: 5.00 },
+      ]);
       const raw = await action_fn(
-        { db, callLlm: async () => mockResponse, content: contentWithImage, log: async () => "", confirm: async () => false },
-        { action: "extract" },
+        { db, content: [], log: async () => "", confirm: async () => false },
+        { action: "register", store_name: "CancelStore", purchase_date: "2025-06-15", items, total: 5.00 },
       );
       // Should return ActionSignal with autoContinue: false
       assert.equal(typeof raw, "object");
@@ -482,25 +439,16 @@ export default /** @type {defineAction} */ ((x) => x)({
     },
 
     // --- Transaction atomicity ---
-    async function extract_rolls_back_on_item_error(action_fn, db) {
+    async function register_rolls_back_on_item_error(action_fn, db) {
       await ensureSchema(db);
-      const mockResponse = JSON.stringify({
-        store_name: "AtomicStore",
-        purchase_date: "2025-06-15",
-        items: [
-          { item_name: "GoodItem", quantity: 1, unit_price: 5.00, subtotal: 5.00 },
-          { item_name: "BadItem", quantity: 1, unit_price: 1.00, subtotal: "not_a_number" },
-        ],
-        total: 6.00,
-      });
-      /** @type {ContentBlock[]} */
-      const contentWithImage = [
-        { type: "image", encoding: "base64", mime_type: "image/jpeg", data: "fakebase64" },
-      ];
+      const items = JSON.stringify([
+        { item_name: "GoodItem", quantity: 1, unit_price: 5.00, subtotal: 5.00 },
+        { item_name: "BadItem", quantity: 1, unit_price: 1.00, subtotal: "not_a_number" },
+      ]);
       try {
         await action_fn(
-          { db, callLlm: async () => mockResponse, content: contentWithImage, log: async () => "", confirm: async () => true },
-          { action: "extract" },
+          { db, content: [], log: async () => "", confirm: async () => true },
+          { action: "register", store_name: "AtomicStore", purchase_date: "2025-06-15", items, total: 6.00 },
         );
       } catch {
         // Expected to throw due to invalid NUMERIC value
@@ -512,21 +460,14 @@ export default /** @type {defineAction} */ ((x) => x)({
     },
 
     // --- Named ledger tests ---
-    async function extract_with_named_ledger(action_fn, db) {
+    async function register_with_named_ledger(action_fn, db) {
       await ensureSchema(db);
-      const mockResponse = JSON.stringify({
-        store_name: "LedgerStore",
-        purchase_date: "2025-07-01",
-        items: [{ item_name: "ItemX", quantity: 1, unit_price: 10.00, subtotal: 10.00 }],
-        total: 10.00,
-      });
-      /** @type {ContentBlock[]} */
-      const contentWithImage = [
-        { type: "image", encoding: "base64", mime_type: "image/jpeg", data: "fakebase64" },
-      ];
+      const items = JSON.stringify([
+        { item_name: "ItemX", quantity: 1, unit_price: 10.00, subtotal: 10.00 },
+      ]);
       const result = await action_fn(
-        { db, callLlm: async () => mockResponse, content: contentWithImage, log: async () => "", confirm: async () => true },
-        { action: "extract", ledger_name: "Groceries" },
+        { db, content: [], log: async () => "", confirm: async () => true },
+        { action: "register", store_name: "LedgerStore", purchase_date: "2025-07-01", items, total: 10.00, ledger_name: "Groceries" },
       );
       assert.ok(typeof result === "string");
       assert.ok(result.includes("LedgerStore"));
@@ -657,7 +598,6 @@ export default /** @type {defineAction} */ ((x) => x)({
       assert.ok(!result.includes("200.00"), `Should NOT show 200.00, got: ${result}`);
     },
   ],
-  prompt: () => EXTRACT_PROMPT,
   test_prompts: [
     async function tool_selection_scenarios(callLlm, readFixture) {
       const { actionsToOpenAIFormat } = await import("../message-formatting.js");
@@ -738,8 +678,10 @@ export default /** @type {defineAction} */ ((x) => x)({
           name: "after_previous_extraction",
           messages: [
             { role: "system", content: config.system_prompt },
-            { role: "assistant", content: null, tool_calls: [{ id: "call_prev", type: "function", function: { name: "track_purchases", arguments: '{"action":"extract"}' } }] },
-            { role: "tool", content: "Factura registrada (ID: 1) — Libro: General\nTienda: Mercadona\nTotal: €25.30", tool_call_id: "call_prev" },
+            { role: "assistant", content: null, tool_calls: [{ id: "call_prev", type: "function", function: { name: "extract_from_image", arguments: '{"prompt":"extract invoice"}' } }] },
+            { role: "tool", content: '{"store_name":"Mercadona","items":[...],"total":25.30}', tool_call_id: "call_prev" },
+            { role: "assistant", content: null, tool_calls: [{ id: "call_reg", type: "function", function: { name: "track_purchases", arguments: '{"action":"register","store_name":"Mercadona","items":"[...]","total":25.30}' } }] },
+            { role: "tool", content: "Factura registrada (ID: 1) — Libro: General\nTienda: Mercadona\nTotal: €25.30", tool_call_id: "call_reg" },
             { role: "assistant", content: "He registrado tu factura de Mercadona por €25.30." },
             { role: "user", content: "gracias!" },
             { role: "assistant", content: "De nada!" },
@@ -767,13 +709,9 @@ export default /** @type {defineAction} */ ((x) => x)({
             if (!toolCalls || toolCalls.length === 0) {
               return { name: scenario.name, error: "LLM should produce tool_calls for a receipt image" };
             }
-            const call = toolCalls.find(tc => tc.function.name === "track_purchases");
+            const call = toolCalls.find(tc => tc.function.name === "extract_from_image");
             if (!call) {
-              return { name: scenario.name, error: `Expected track_purchases call, got: ${toolCalls.map(tc => tc.function.name).join(", ")}` };
-            }
-            const args = JSON.parse(call.function.arguments);
-            if (args.action !== "extract") {
-              return { name: scenario.name, error: `Expected action='extract', got '${args.action}'` };
+              return { name: scenario.name, error: `Expected extract_from_image call, got: ${toolCalls.map(tc => tc.function.name).join(", ")}` };
             }
             console.log(`  ✔ ${scenario.name}`);
             return { name: scenario.name, error: null };
@@ -790,123 +728,31 @@ export default /** @type {defineAction} */ ((x) => x)({
         assert.fail(`${failures.length}/${results.length} tool selection scenarios failed:\n${details}`);
       }
     },
-
-    async function extract_prompt_returns_valid_json(callLlm, _readFixture, prompt) {
-      /** @type {ContentBlock[]} */
-      const content = [
-        {
-          type: "text",
-          text: `Here is the text content of a receipt:
-
-SUPERMERCADO EL SOL
-Fecha: 15/06/2025
----
-Leche entera 1L    x2    €1.50    €3.00
-Pan integral       x1    €1.20    €1.20
-Agua mineral 1.5L  x3    €0.60    €1.80
----
-TOTAL: €6.00
-
-` + prompt(),
-        },
-      ];
-      const response = await callLlm(content);
-      assert.ok(response, "LLM should return a response");
-
-      const data = parseExtractResponse(/** @type {string} */ (response));
-      assert.ok(data.store_name, "should extract store name");
-      assert.ok(Array.isArray(data.items), "items should be an array");
-      assert.ok(data.items.length >= 3, `should extract at least 3 items, got ${data.items.length}`);
-      assert.equal(typeof data.total, "number", "total should be a number");
-      assert.ok(data.total > 0, "total should be > 0");
-
-      for (const item of data.items) {
-        assert.ok(item.item_name, "each item should have a name");
-        assert.equal(typeof item.quantity, "number", "quantity should be a number");
-      }
-    },
-    async function extract_from_receipt_image(callLlm, readFixture, prompt) {
-      const { resolveModel } = await import("../model-roles.js");
-      const imageBuffer = await readFixture("receipt-1.jpeg");
-      const base64 = imageBuffer.toString("base64");
-
-      /** @type {ContentBlock[]} */
-      const content = [
-        { type: "image", encoding: "base64", mime_type: "image/jpeg", data: base64 },
-        { type: "text", text: prompt() },
-      ];
-
-      const response = await callLlm(content, { model: resolveModel("image_to_text") });
-      assert.ok(response, "LLM should return a response");
-
-      const data = parseExtractResponse(/** @type {string} */ (response));
-
-      assert.ok(data.store_name, "should extract store name");
-      assert.match(
-        data.store_name.toLowerCase(),
-        /dunnes/,
-        `store name should contain 'dunnes', got '${data.store_name}'`,
-      );
-
-      assert.equal(data.purchase_date, "2026-02-17", `date should be 2026-02-17, got '${data.purchase_date}'`);
-
-      assert.ok(Array.isArray(data.items), "items should be an array");
-      assert.ok(data.items.length >= 13, `should extract at least 13 items, got ${data.items.length}`);
-      assert.ok(data.items.length <= 17, `should extract at most 17 items, got ${data.items.length}`);
-
-      for (const item of data.items) {
-        assert.ok(item.item_name, "each item should have a name");
-        assert.equal(typeof item.quantity, "number", `quantity should be a number for '${item.item_name}'`);
-        assert.equal(typeof item.subtotal, "number", `subtotal should be a number for '${item.item_name}'`);
-        assert.ok(item.subtotal > 0, `subtotal should be > 0 for '${item.item_name}'`);
-      }
-
-      const allNames = data.items.map(i => i.item_name.toLowerCase()).join(" | ");
-      for (const keyword of ["mince", "salmon", "milk", "vinegar", "rice"]) {
-        assert.ok(allNames.includes(keyword), `should find '${keyword}' in items, got: ${allNames}`);
-      }
-
-      const itemsSum = data.items.reduce((sum, item) => sum + item.subtotal, 0);
-      assert.ok(
-        Math.abs(itemsSum - 51.53) < 2.0,
-        `items should sum to ~51.53, got ${itemsSum.toFixed(2)}`,
-      );
-
-      assert.equal(data.total, 31.22, `total should be 31.22, got ${data.total}`);
-    },
   ],
   action_fn: async function (context, params) {
-    const { db, callLlm, content, log, confirm, resolveModel } = context;
+    const { db, log, confirm } = context;
 
     await ensureSchema(db);
 
-    if (params.action === "extract") {
-      /** @type {ImageContentBlock | undefined} */
-      const image = /** @type {ImageContentBlock | undefined} */ (content.find(c => c.type === "image"));
-      if (!image) {
-        return "No encontre ninguna foto de factura. Por favor envia una imagen de la factura junto con el comando.";
+    if (params.action === "register") {
+      if (!params.items) {
+        return "Missing items. Provide a JSON array of items with {item_name, quantity, unit_price, subtotal}.";
       }
 
-      await log("Analizando factura...");
-
-      /** @type {ContentBlock[]} */
-      const prompt = [
-        image,
-        { type: "text", text: EXTRACT_PROMPT },
-      ];
-
-      const model = resolveModel?.("image_to_text");
-      const llmResponse = await callLlm(prompt, model ? { model } : {});
-      if (!llmResponse) {
-        return "No pude analizar la factura. Intenta con una foto mas clara.";
-      }
-
-      let data;
+      /** @type {Array<{item_name: string, quantity: number, unit_price: number, subtotal: number}>} */
+      let items;
       try {
-        data = parseExtractResponse(llmResponse);
+        items = JSON.parse(params.items);
       } catch {
-        return "No pude interpretar los datos de la factura. Intenta con una foto mas clara.";
+        return "Could not parse items JSON. Provide a valid JSON array.";
       }
+
+      const data = {
+        store_name: params.store_name || null,
+        purchase_date: params.purchase_date || null,
+        items,
+        total: params.total || 0,
+      };
 
       const ledgerName = params.ledger_name || "General";
       const ledger = await getOrCreateLedger(db, ledgerName);
@@ -1038,6 +884,6 @@ TOTAL: €6.00
       return `Libro "${ledgerRows[0].name}" eliminado con ${count} compra(s).`;
     }
 
-    return "Accion no reconocida. Usa: extract, history, summary, delete, list_ledgers, rename_ledger o delete_ledger.";
+    return "Accion no reconocida. Usa: register, history, summary, delete, list_ledgers, rename_ledger o delete_ledger.";
   }
 });
