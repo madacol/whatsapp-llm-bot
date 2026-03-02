@@ -28,6 +28,50 @@ describe("actionsToOpenAIFormat", () => {
     assert.deepEqual(result[0].function.parameters, actions[0].parameters);
   });
 
+  it("injects _media_refs when hasMedia is true", () => {
+    const actions = /** @type {Action[]} */ ([
+      {
+        name: "edit_image",
+        description: "Edit an image",
+        parameters: { type: "object", properties: { prompt: { type: "string" } } },
+      },
+    ]);
+    const result = actionsToOpenAIFormat(actions, true);
+
+    const params = result[0].function.parameters;
+    assert.ok(params.properties._media_refs, "Should have _media_refs property");
+    assert.equal(params.properties._media_refs.type, "array");
+    assert.equal(params.properties._media_refs.items.type, "integer");
+    // Original prompt property should still be there
+    assert.ok(params.properties.prompt, "Original properties should be preserved");
+  });
+
+  it("does not inject _media_refs when hasMedia is false", () => {
+    const actions = /** @type {Action[]} */ ([
+      {
+        name: "test",
+        description: "Test",
+        parameters: { type: "object", properties: { x: { type: "string" } } },
+      },
+    ]);
+    const result = actionsToOpenAIFormat(actions, false);
+
+    assert.ok(!result[0].function.parameters.properties._media_refs);
+  });
+
+  it("does not mutate original action parameters when injecting _media_refs", () => {
+    const actions = /** @type {Action[]} */ ([
+      {
+        name: "test",
+        description: "Test",
+        parameters: { type: "object", properties: { x: { type: "string" } } },
+      },
+    ]);
+    actionsToOpenAIFormat(actions, true);
+
+    assert.ok(!actions[0].parameters.properties._media_refs, "Original action should not be mutated");
+  });
+
 });
 
 // ── shouldRespond ──
@@ -165,14 +209,14 @@ describe("formatMessagesForOpenAI", () => {
         sender_id: "user-1",
       },
     ];
-    const result = await formatMessagesForOpenAI(messages);
+    const { messages: result } = await formatMessagesForOpenAI(messages);
 
     assert.equal(result.length, 1);
     assert.equal(result[0].role, "user");
     assert.deepEqual(result[0].content, [{ type: "text", text: "hello" }]);
   });
 
-  it("converts user image message to image_url", async () => {
+  it("converts user image message to image_url with media tag", async () => {
     const messages = [
       {
         message_data: {
@@ -184,12 +228,19 @@ describe("formatMessagesForOpenAI", () => {
         sender_id: "user-1",
       },
     ];
-    const result = await formatMessagesForOpenAI(messages);
+    const { messages: result, mediaRegistry } = await formatMessagesForOpenAI(messages);
 
     assert.equal(result.length, 1);
     const content = /** @type {any[]} */ (result[0].content);
     assert.equal(content[0].type, "image_url");
     assert.equal(content[0].image_url.url, "data:image/png;base64,abc123");
+    // Should have a [media:1] tag after the image
+    assert.equal(content[1].type, "text");
+    assert.equal(content[1].text, "[media:1]");
+    // Registry should map ID 1 to the original image block
+    assert.equal(mediaRegistry.size, 1);
+    assert.equal(mediaRegistry.get(1).type, "image");
+    assert.equal(mediaRegistry.get(1).data, "abc123");
   });
 
   it("converts user quote message with > prefix", async () => {
@@ -207,7 +258,7 @@ describe("formatMessagesForOpenAI", () => {
         sender_id: "user-1",
       },
     ];
-    const result = await formatMessagesForOpenAI(messages);
+    const { messages: result } = await formatMessagesForOpenAI(messages);
 
     const content = /** @type {any[]} */ (result[0].content);
     assert.equal(content[0].type, "text");
@@ -232,7 +283,7 @@ describe("formatMessagesForOpenAI", () => {
         sender_id: "bot",
       },
     ];
-    const result = await formatMessagesForOpenAI(messages);
+    const { messages: result } = await formatMessagesForOpenAI(messages);
 
     assert.equal(result.length, 1);
     assert.equal(result[0].role, "assistant");
@@ -265,7 +316,7 @@ describe("formatMessagesForOpenAI", () => {
       },
     ];
     // Input is newest-first; after reverse: assistant, then tool
-    const result = await formatMessagesForOpenAI(messages);
+    const { messages: result } = await formatMessagesForOpenAI(messages);
 
     assert.equal(result.length, 2);
     const toolMsg = result.find(m => m.role === "tool");
@@ -293,6 +344,17 @@ describe("formatMessagesForOpenAI", () => {
     assert.equal(messages.length, 2, "input array length should not change");
   });
 
+  it("does not tag text-only messages in media registry", async () => {
+    const messages = [
+      {
+        message_data: { role: "user", content: [{ type: "text", text: "hello" }] },
+        sender_id: "user-1",
+      },
+    ];
+    const { mediaRegistry } = await formatMessagesForOpenAI(messages);
+    assert.equal(mediaRegistry.size, 0);
+  });
+
   it("handles audio message with wav mime_type", async () => {
     const messages = [
       {
@@ -305,12 +367,17 @@ describe("formatMessagesForOpenAI", () => {
         sender_id: "user-1",
       },
     ];
-    const result = await formatMessagesForOpenAI(messages);
+    const { messages: result, mediaRegistry } = await formatMessagesForOpenAI(messages);
     assert.equal(result.length, 1);
     const content = /** @type {any[]} */ (result[0].content);
     assert.equal(content[0].type, "input_audio");
     assert.equal(content[0].input_audio.format, "wav");
     assert.equal(content[0].input_audio.data, "abc123");
+    // Audio should be tagged
+    assert.equal(content[1].type, "text");
+    assert.equal(content[1].text, "[media:1]");
+    assert.equal(mediaRegistry.size, 1);
+    assert.equal(mediaRegistry.get(1).type, "audio");
   });
 
   it("handles audio message with mp3 mime_type", async () => {
@@ -325,13 +392,13 @@ describe("formatMessagesForOpenAI", () => {
         sender_id: "user-1",
       },
     ];
-    const result = await formatMessagesForOpenAI(messages);
+    const { messages: result } = await formatMessagesForOpenAI(messages);
     const content = /** @type {any[]} */ (result[0].content);
     assert.equal(content[0].input_audio.format, "mp3");
     assert.equal(content[0].input_audio.data, "def456");
   });
 
-  it("converts user video message to video_url", async () => {
+  it("converts user video message to video_url with media tag", async () => {
     const messages = [
       {
         message_data: {
@@ -343,16 +410,20 @@ describe("formatMessagesForOpenAI", () => {
         sender_id: "user-1",
       },
     ];
-    const result = await formatMessagesForOpenAI(messages);
+    const { messages: result, mediaRegistry } = await formatMessagesForOpenAI(messages);
 
     assert.equal(result.length, 1);
     const content = /** @type {any[]} */ (result[0].content);
-    assert.equal(content.length, 1);
+    assert.equal(content.length, 2); // video_url + media tag
     assert.equal(content[0].type, "video_url");
     assert.equal(content[0].video_url.url, "data:video/mp4;base64,fakevideo");
+    assert.equal(content[1].type, "text");
+    assert.equal(content[1].text, "[media:1]");
+    assert.equal(mediaRegistry.size, 1);
+    assert.equal(mediaRegistry.get(1).type, "video");
   });
 
-  it("includes image blocks from tool messages", async () => {
+  it("includes image blocks from tool messages with media tags", async () => {
     // newest-first order (as from DB)
     const messages = [
       {
@@ -381,7 +452,7 @@ describe("formatMessagesForOpenAI", () => {
         sender_id: "user-1",
       },
     ];
-    const result = await formatMessagesForOpenAI(messages);
+    const { messages: result, mediaRegistry } = await formatMessagesForOpenAI(messages);
 
     // Find the tool result messages
     const toolResults = result.filter((m) => m.role === "tool");
@@ -395,6 +466,12 @@ describe("formatMessagesForOpenAI", () => {
     assert.ok(imageResult, "Tool result should include an image_url block");
     const imageBlock = /** @type {any[]} */ (imageResult.content).find((c) => c.type === "image_url");
     assert.equal(imageBlock.image_url.url, "data:image/png;base64,iVBOR");
+
+    // Tool image should be tagged in the registry
+    assert.equal(mediaRegistry.size, 1);
+    const registeredBlock = mediaRegistry.get(1);
+    assert.equal(registeredBlock.type, "image");
+    assert.equal(registeredBlock.data, "iVBOR");
   });
 
   it("strips leading tool results from message list", async () => {
@@ -410,7 +487,7 @@ describe("formatMessagesForOpenAI", () => {
       },
     ];
     // After reverse: tool first, then user. Tool should be stripped.
-    const result = await formatMessagesForOpenAI(messages);
+    const { messages: result } = await formatMessagesForOpenAI(messages);
 
     assert.equal(result.length, 1);
     assert.equal(result[0].role, "user");
@@ -423,7 +500,7 @@ describe("formatMessagesForOpenAI", () => {
       { message_data: { role: "tool", tool_id: "orphan_id", content: [{ type: "text", text: "res" }] }, sender_id: "bot" },
       { message_data: { role: "user", content: [{ type: "text", text: "hi" }] }, sender_id: "user-1" },
     ]);
-    const result = await formatMessagesForOpenAI(messages);
+    const { messages: result } = await formatMessagesForOpenAI(messages);
 
     assert.equal(result.length, 2);
     assert.ok(result.every(m => m.role === "user"));
@@ -436,7 +513,7 @@ describe("formatMessagesForOpenAI", () => {
       { message_data: { role: "tool", tool_id: "id_B", content: [{ type: "text", text: "res2" }] }, sender_id: "bot" },
       { message_data: { role: "tool", tool_id: "id_A", content: [{ type: "text", text: "res1" }] }, sender_id: "bot" },
     ]);
-    const result = await formatMessagesForOpenAI(messages);
+    const { messages: result } = await formatMessagesForOpenAI(messages);
 
     assert.equal(result.length, 1);
     assert.equal(result[0].role, "user");
@@ -456,7 +533,7 @@ describe("formatMessagesForOpenAI", () => {
       },
       { message_data: { role: "tool", tool_id: "orphan_id", content: [{ type: "text", text: "stale" }] }, sender_id: "bot" },
     ]);
-    const result = await formatMessagesForOpenAI(messages);
+    const { messages: result } = await formatMessagesForOpenAI(messages);
 
     assert.equal(result.length, 3);
     assert.ok(!result.some(m => m.role === "tool" && /** @type {any} */ (m).tool_call_id === "orphan_id"));
@@ -475,7 +552,7 @@ describe("formatMessagesForOpenAI", () => {
       },
       { message_data: { role: "user", content: [{ type: "text", text: "go" }] }, sender_id: "user-1" },
     ]);
-    const result = await formatMessagesForOpenAI(messages);
+    const { messages: result } = await formatMessagesForOpenAI(messages);
 
     assert.equal(result.length, 3);
   });
@@ -494,12 +571,73 @@ describe("formatMessagesForOpenAI", () => {
       },
       { message_data: { role: "user", content: [{ type: "text", text: "go" }] }, sender_id: "user-1" },
     ]);
-    const result = await formatMessagesForOpenAI(messages);
+    const { messages: result } = await formatMessagesForOpenAI(messages);
 
     assert.equal(result.length, 3);
     assert.ok(result.some(m => m.role === "user"));
     assert.ok(result.some(m => m.role === "assistant"));
     assert.ok(result.some(m => m.role === "tool" && /** @type {any} */ (m).tool_call_id === "valid_id"));
     assert.ok(!result.some(m => m.role === "tool" && /** @type {any} */ (m).tool_call_id === "orphan_id"));
+  });
+
+  it("increments media IDs across multiple messages", async () => {
+    const messages = /** @type {any} */ ([
+      // newest first → reversed to chronological
+      {
+        message_data: {
+          role: "user",
+          content: [
+            { type: "image", mime_type: "image/jpeg", data: "img2", encoding: "base64" },
+          ],
+        },
+        sender_id: "user-1",
+      },
+      {
+        message_data: {
+          role: "user",
+          content: [
+            { type: "image", mime_type: "image/png", data: "img1", encoding: "base64" },
+            { type: "video", mime_type: "video/mp4", data: "vid1", encoding: "base64" },
+          ],
+        },
+        sender_id: "user-1",
+      },
+    ]);
+    const { mediaRegistry } = await formatMessagesForOpenAI(messages);
+
+    // First message (after reverse) has image + video → IDs 1, 2
+    // Second message has image → ID 3
+    assert.equal(mediaRegistry.size, 3);
+    assert.equal(mediaRegistry.get(1).data, "img1");
+    assert.equal(mediaRegistry.get(2).data, "vid1");
+    assert.equal(mediaRegistry.get(3).data, "img2");
+  });
+
+  it("tags quoted images in media registry", async () => {
+    const messages = [
+      {
+        message_data: {
+          role: "user",
+          content: [
+            {
+              type: "quote",
+              content: [
+                { type: "image", mime_type: "image/png", data: "quotedImg", encoding: "base64" },
+              ],
+            },
+          ],
+        },
+        sender_id: "user-1",
+      },
+    ];
+    const { messages: result, mediaRegistry } = await formatMessagesForOpenAI(messages);
+
+    assert.equal(mediaRegistry.size, 1);
+    assert.equal(mediaRegistry.get(1).data, "quotedImg");
+    const content = /** @type {any[]} */ (result[0].content);
+    // Should have image_url followed by [media:1] tag
+    assert.equal(content[0].type, "image_url");
+    assert.equal(content[1].type, "text");
+    assert.equal(content[1].text, "[media:1]");
   });
 });

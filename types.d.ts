@@ -47,6 +47,8 @@ type IncomingContentBlock =
   | AudioContentBlock
   | QuoteContentBlock;
 
+type MediaRegistry = Map<number, IncomingContentBlock>;
+
 type ContentBlock = IncomingContentBlock | ToolCallContentBlock;
 
   type UserMessage = {
