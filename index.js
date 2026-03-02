@@ -148,11 +148,12 @@ function parseToolArgs(argsString) {
  *   llmConfig: LlmConfig,
  *   toolCall: OpenAI.Chat.Completions.ChatCompletionMessageToolCall,
  *   formattedMessages: Array<OpenAI.ChatCompletionMessageParam>,
+ *   mediaRegistry: MediaRegistry,
  * }} params
  * @returns {Promise<boolean>} Whether to continue processing (loop again)
  */
 async function executeAndStoreTool({
-  session, llmConfig, toolCall, formattedMessages,
+  session, llmConfig, toolCall, formattedMessages, mediaRegistry,
 }) {
   const { chatId, senderIds, context, addMessage } = session;
   const { executeActionFn, actionResolver, actionLlmClient } = llmConfig;
@@ -162,8 +163,23 @@ async function executeAndStoreTool({
   log.debug("executing", toolName, toolArgs);
 
   try {
+    // Resolve _media_refs: pull referenced media from the registry into context.content
+    const { _media_refs, ...cleanArgs } = toolArgs;
+    let actionContext = context;
+    if (Array.isArray(_media_refs) && _media_refs.length > 0) {
+      /** @type {IncomingContentBlock[]} */
+      const resolvedMedia = [];
+      for (const refId of _media_refs) {
+        const block = mediaRegistry.get(refId);
+        if (block) resolvedMedia.push(block);
+      }
+      if (resolvedMedia.length > 0) {
+        actionContext = { ...context, content: [...context.content, ...resolvedMedia] };
+      }
+    }
+
     const functionResponse = await executeActionFn(
-      toolName, context, toolArgs, toolCall.id, actionResolver, actionLlmClient,
+      toolName, actionContext, cleanArgs, toolCall.id, actionResolver, actionLlmClient,
     );
     log.debug("response", functionResponse);
 
@@ -210,6 +226,16 @@ async function executeAndStoreTool({
     };
     await addMessage(chatId, toolMessage, senderIds);
 
+    // Tag media from tool results so subsequent tool calls can reference them
+    if (isContentBlocks) {
+      for (const block of /** @type {ToolContentBlock[]} */ (result)) {
+        if (block.type === "image" || block.type === "video" || block.type === "audio") {
+          const id = mediaRegistry.size + 1;
+          mediaRegistry.set(id, block);
+        }
+      }
+    }
+
     const resultMessage = isContentBlocks
       ? /** @type {ToolContentBlock[]} */ (result)
           .filter((b) => b.type === "text")
@@ -221,9 +247,48 @@ async function executeAndStoreTool({
 
     await displayToolResult(resultMessage, shortId, functionResponse.permissions, context);
 
-    /** @type {OpenAI.ChatCompletionMessageParam} */
-    const toolResultMessage = { role: "tool", tool_call_id: toolCall.id, content: resultMessage };
-    formattedMessages.push(toolResultMessage);
+    // Build formatted result for LLM context, including media tags
+    if (isContentBlocks && /** @type {ToolContentBlock[]} */ (result).some(
+      (b) => b.type === "image" || b.type === "video",
+    )) {
+      /** @type {Array<OpenAI.ChatCompletionContentPart>} */
+      const parts = [];
+      for (const block of /** @type {ToolContentBlock[]} */ (result)) {
+        if (block.type === "text") {
+          parts.push({ type: /** @type {const} */ ("text"), text: block.text });
+        } else if (block.type === "image") {
+          parts.push({
+            type: /** @type {const} */ ("image_url"),
+            image_url: { url: `data:${block.mime_type};base64,${block.data}` },
+          });
+          // Find this block's media ID (assigned above) and add a tag
+          for (const [id, registered] of mediaRegistry) {
+            if (registered === block) {
+              parts.push({ type: /** @type {const} */ ("text"), text: `[media:${id}]` });
+              break;
+            }
+          }
+        } else if (block.type === "video") {
+          parts.push(/** @type {*} */ ({
+            type: "video_url",
+            video_url: { url: `data:${block.mime_type};base64,${block.data}` },
+          }));
+          for (const [id, registered] of mediaRegistry) {
+            if (registered === block) {
+              parts.push({ type: /** @type {const} */ ("text"), text: `[media:${id}]` });
+              break;
+            }
+          }
+        }
+      }
+      formattedMessages.push(/** @type {OpenAI.ChatCompletionMessageParam} */ (
+        { role: "tool", tool_call_id: toolCall.id, content: parts }
+      ));
+    } else {
+      /** @type {OpenAI.ChatCompletionMessageParam} */
+      const toolResultMessage = { role: "tool", tool_call_id: toolCall.id, content: resultMessage };
+      formattedMessages.push(toolResultMessage);
+    }
 
     return !!functionResponse.permissions.autoContinue;
   } catch (error) {
@@ -259,12 +324,16 @@ async function executeAndStoreTool({
  *   session: Session,
  *   llmConfig: LlmConfig,
  *   formattedMessages: Array<OpenAI.ChatCompletionMessageParam>,
+ *   mediaRegistry: MediaRegistry,
  * }} params
  */
-async function processLlmResponse({ session, llmConfig, formattedMessages }) {
+async function processLlmResponse({ session, llmConfig, formattedMessages, mediaRegistry }) {
   const { chatId, senderIds, context, addMessage } = session;
   const { llmClient, chatModel, actions } = llmConfig;
   let { systemPrompt } = llmConfig;
+  if (mediaRegistry.size > 0) {
+    systemPrompt += "\n\nMedia in the conversation is tagged with [media:N]. When calling tools that need media from earlier messages, pass the relevant IDs in the `_media_refs` parameter.";
+  }
   const injectedActions = new Set();
   let depth = 0;
 
@@ -277,7 +346,7 @@ async function processLlmResponse({ session, llmConfig, formattedMessages }) {
           { role: "system", content: /** @type {Array<{type: "text", text: string, cache_control: {type: "ephemeral"}}>} */ ([{ type: "text", text: systemPrompt, cache_control: { type: "ephemeral" } }]) },
           ...formattedMessages,
         ],
-        tools: actionsToOpenAIFormat(actions),
+        tools: actionsToOpenAIFormat(actions, mediaRegistry.size > 0),
         tool_choice: "auto",
       });
     } catch (error) {
@@ -343,7 +412,7 @@ async function processLlmResponse({ session, llmConfig, formattedMessages }) {
     let continueProcessing = false;
     for (const toolCall of responseMessage.tool_calls) {
       const shouldContinue = await executeAndStoreTool({
-        session, llmConfig, toolCall, formattedMessages,
+        session, llmConfig, toolCall, formattedMessages, mediaRegistry,
       });
       if (shouldContinue) continueProcessing = true;
     }
@@ -560,7 +629,7 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
     }
 
     // Prepare messages for OpenAI
-    const formattedMessages = await formatMessagesForOpenAI(translatedMessages);
+    const { messages: formattedMessages, mediaRegistry } = await formatMessagesForOpenAI(translatedMessages);
 
     /** @type {Session} */
     const session = {
@@ -575,7 +644,7 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
 
     await messageContext.sendPresenceUpdate("composing");
     try {
-      await processLlmResponse({ session, llmConfig, formattedMessages });
+      await processLlmResponse({ session, llmConfig, formattedMessages, mediaRegistry });
     } finally {
       await messageContext.sendPresenceUpdate("paused");
     }

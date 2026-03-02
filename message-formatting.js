@@ -9,19 +9,38 @@ import { createLogger } from "./logger.js";
 const log = createLogger("message-formatting");
 
 /**
- * Convert actions to OpenAI tools format
+ * Convert actions to OpenAI tools format.
+ * When `hasMedia` is true, injects an optional `_media_refs` parameter
+ * so the LLM can reference tagged media from the conversation.
  * @param {Action[]} actions
+ * @param {boolean} [hasMedia]
  * @returns {OpenAI.Chat.Completions.ChatCompletionTool[]}
  */
-export function actionsToOpenAIFormat(actions) {
-  return actions.map((action) => ({
-    type: "function",
-    function: {
-      name: action.name,
-      description: action.description,
-      parameters: action.parameters,
-    },
-  }));
+export function actionsToOpenAIFormat(actions, hasMedia) {
+  return actions.map((action) => {
+    const parameters = hasMedia
+      ? {
+          ...action.parameters,
+          properties: {
+            ...action.parameters.properties,
+            _media_refs: {
+              type: "array",
+              items: { type: "integer" },
+              description: "Optional [media:N] IDs from conversation to include as input",
+            },
+          },
+        }
+      : action.parameters;
+
+    return {
+      type: "function",
+      function: {
+        name: action.name,
+        description: action.description,
+        parameters,
+      },
+    };
+  });
 }
 
 /**
@@ -118,11 +137,25 @@ export function parseCommandArgs(args, parameters) {
 }
 
 /**
+ * Tag a media block in the registry and append a `[media:N]` text marker.
+ * @param {Array<OpenAI.ChatCompletionContentPart>} parts
+ * @param {MediaRegistry} registry
+ * @param {IncomingContentBlock} originalBlock
+ */
+function tagMedia(parts, registry, originalBlock) {
+  const id = registry.size + 1;
+  registry.set(id, originalBlock);
+  parts.push({ type: "text", text: `[media:${id}]` });
+}
+
+/**
  * Format a user message's content blocks into OpenAI content parts.
+ * Media blocks are tagged with `[media:N]` and registered in the registry.
  * @param {UserMessage} message
+ * @param {MediaRegistry} registry
  * @returns {Promise<Array<OpenAI.ChatCompletionContentPart>>}
  */
-async function formatUserContent(message) {
+async function formatUserContent(message, registry) {
   /** @type {Array<OpenAI.ChatCompletionContentPart>} */
   const parts = [];
 
@@ -137,6 +170,7 @@ async function formatUserContent(message) {
             case "image": {
               const dataUrl = `data:${quoteBlock.mime_type};base64,${quoteBlock.data}`;
               parts.push({ type: "image_url", image_url: { url: dataUrl } });
+              tagMedia(parts, registry, quoteBlock);
               break;
             }
           }
@@ -149,6 +183,7 @@ async function formatUserContent(message) {
       case "image": {
         const dataUrl = `data:${contentBlock.mime_type};base64,${contentBlock.data}`;
         parts.push({ type: "image_url", image_url: { url: dataUrl } });
+        tagMedia(parts, registry, contentBlock);
         break;
       }
       case "audio": {
@@ -167,6 +202,7 @@ async function formatUserContent(message) {
           type: "input_audio",
           input_audio: { data, format },
         });
+        tagMedia(parts, registry, contentBlock);
         break;
       }
       case "video": {
@@ -175,6 +211,7 @@ async function formatUserContent(message) {
           type: "video_url",
           video_url: { url: videoUrl },
         }));
+        tagMedia(parts, registry, contentBlock);
         break;
       }
     }
@@ -218,10 +255,12 @@ function formatAssistantContent(message) {
 
 /**
  * Format a tool message into OpenAI ChatCompletionMessageParam(s).
+ * Media blocks are tagged with `[media:N]` and registered in the registry.
  * @param {ToolMessage} message
+ * @param {MediaRegistry} registry
  * @returns {Array<OpenAI.ChatCompletionMessageParam>}
  */
-function formatToolContent(message) {
+function formatToolContent(message, registry) {
   const hasMedia = message.content.some((b) => b.type === "image" || b.type === "video");
 
   if (!hasMedia) {
@@ -239,7 +278,7 @@ function formatToolContent(message) {
     return results;
   }
 
-  // Multipart: combine text + images into a single tool message
+  // Multipart: combine text + images/video into a single tool message
   /** @type {Array<OpenAI.ChatCompletionContentPart>} */
   const parts = [];
   for (const block of message.content) {
@@ -250,6 +289,13 @@ function formatToolContent(message) {
         type: /** @type {const} */ ("image_url"),
         image_url: { url: `data:${block.mime_type};base64,${block.data}` },
       });
+      tagMedia(parts, registry, block);
+    } else if (block.type === "video") {
+      parts.push(/** @type {*} */ ({
+        type: "video_url",
+        video_url: { url: `data:${block.mime_type};base64,${block.data}` },
+      }));
+      tagMedia(parts, registry, block);
     }
   }
   // OpenAI's types restrict tool content to text-only, but the API accepts image_url parts
@@ -287,12 +333,15 @@ function removeOrphanedToolResults(messages) {
 /**
  * Convert stored Message[] rows from the DB into OpenAI ChatCompletionMessageParam[].
  * Removes orphaned tool results and handles user/assistant/tool roles.
+ * Media blocks are tagged with `[media:N]` markers and collected in a registry.
  * @param {Array<{message_data: Message, sender_id: string}>} chatMessages - Rows from DB (newest first)
- * @returns {Promise<Array<OpenAI.ChatCompletionMessageParam>>}
+ * @returns {Promise<{messages: Array<OpenAI.ChatCompletionMessageParam>, mediaRegistry: MediaRegistry}>}
  */
 export async function formatMessagesForOpenAI(chatMessages) {
   /** @type {Array<OpenAI.ChatCompletionMessageParam>} */
   const formatted = [];
+  /** @type {MediaRegistry} */
+  const mediaRegistry = new Map();
   const reversedMessages = [...chatMessages].reverse();
 
   for (const msg of reversedMessages) {
@@ -301,17 +350,17 @@ export async function formatMessagesForOpenAI(chatMessages) {
         formatted.push({
           role: "user",
           name: msg.sender_id,
-          content: await formatUserContent(msg.message_data),
+          content: await formatUserContent(msg.message_data, mediaRegistry),
         });
         break;
       case "assistant":
         formatted.push(formatAssistantContent(msg.message_data));
         break;
       case "tool":
-        formatted.push(...formatToolContent(msg.message_data));
+        formatted.push(...formatToolContent(msg.message_data, mediaRegistry));
         break;
     }
   }
 
-  return removeOrphanedToolResults(formatted);
+  return { messages: removeOrphanedToolResults(formatted), mediaRegistry };
 }

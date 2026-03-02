@@ -8,7 +8,7 @@ process.env.LLM_API_KEY = "test-key";
 process.env.MODEL = "mock-model";
 
 import { PGlite } from "@electric-sql/pglite";
-import { createMockLlmServer, createIncomingContext, createTestDb, seedChat as seedChat_ } from "./helpers.js";
+import { createMockLlmServer, createIncomingContext, createTestDb, seedChat as seedChat_, withModelsCache } from "./helpers.js";
 import { setDb } from "../db.js";
 
 /** @type {PGlite} */
@@ -553,5 +553,99 @@ describe("LLM pipeline via createMessageHandler", () => {
     assert.equal(rows[0].cached_tokens, 8);
     assert.equal(rows[0].cost, 0.001);
     assert.equal(rows[0].model, "mock-model");
+  });
+
+  it("appends system prompt hint when conversation contains media", async () => {
+    const modelsCache = [
+      { id: "mock-model", architecture: { input_modalities: ["text", "image", "video", "audio"] } },
+    ];
+    await withModelsCache(modelsCache, async () => {
+      await seedChat("pipe-media-hint", { enabled: true });
+
+      // Seed a message with an image so the media registry is non-empty
+      const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString();
+      await db.sql`INSERT INTO messages(chat_id, sender_id, message_data, timestamp)
+        VALUES ('pipe-media-hint', 'u1', ${JSON.stringify({
+          role: "user",
+          content: [{ type: "image", mime_type: "image/png", data: "abc", encoding: "base64" }],
+        })}, ${twoHoursAgo})`;
+
+      mockServer.addResponses("I see the image!");
+
+      const { context } = createIncomingContext({
+        chatId: "pipe-media-hint",
+        content: [{ type: "text", text: "What is in the image?" }],
+      });
+      await handleMessage(context);
+
+      const lastReq = mockServer.getRequests().at(-1);
+      const systemMsg = lastReq.messages.find(m => m.role === "system");
+      const systemText = Array.isArray(systemMsg.content) ? systemMsg.content[0].text : systemMsg.content;
+      assert.ok(
+        systemText.includes("[media:N]"),
+        "System prompt should contain media reference hint when media is present",
+      );
+      assert.ok(
+        systemText.includes("_media_refs"),
+        "System prompt hint should mention _media_refs parameter",
+      );
+    });
+  });
+
+  it("injects _media_refs into tool schemas when media is present", async () => {
+    const modelsCache = [
+      { id: "mock-model", architecture: { input_modalities: ["text", "image", "video", "audio"] } },
+    ];
+    await withModelsCache(modelsCache, async () => {
+      await seedChat("pipe-media-tools", { enabled: true });
+
+      // Seed a message with an image
+      const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString();
+      await db.sql`INSERT INTO messages(chat_id, sender_id, message_data, timestamp)
+        VALUES ('pipe-media-tools', 'u1', ${JSON.stringify({
+          role: "user",
+          content: [{ type: "image", mime_type: "image/png", data: "abc", encoding: "base64" }],
+        })}, ${twoHoursAgo})`;
+
+      mockServer.addResponses("Got it!");
+
+      const { context } = createIncomingContext({
+        chatId: "pipe-media-tools",
+        content: [{ type: "text", text: "What do you see?" }],
+      });
+      await handleMessage(context);
+
+      const lastReq = mockServer.getRequests().at(-1);
+      // All tools should have _media_refs in their parameters
+      const tools = lastReq.tools;
+      assert.ok(tools.length > 0, "Should have tools");
+      for (const tool of tools) {
+        assert.ok(
+          tool.function.parameters.properties._media_refs,
+          `Tool "${tool.function.name}" should have _media_refs property`,
+        );
+      }
+    });
+  });
+
+  it("does not inject _media_refs when no media is present", async () => {
+    await seedChat("pipe-no-media-tools", { enabled: true });
+    mockServer.addResponses("Text only!");
+
+    const { context } = createIncomingContext({
+      chatId: "pipe-no-media-tools",
+      content: [{ type: "text", text: "Hello" }],
+    });
+    await handleMessage(context);
+
+    const lastReq = mockServer.getRequests().at(-1);
+    const tools = lastReq.tools;
+    assert.ok(tools.length > 0, "Should have tools");
+    for (const tool of tools) {
+      assert.ok(
+        !tool.function.parameters.properties._media_refs,
+        `Tool "${tool.function.name}" should NOT have _media_refs when no media`,
+      );
+    }
   });
 });
