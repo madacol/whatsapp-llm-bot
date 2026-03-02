@@ -141,11 +141,25 @@ export function parseCommandArgs(args, parameters) {
  * @param {Array<OpenAI.ChatCompletionContentPart>} parts
  * @param {MediaRegistry} registry
  * @param {IncomingContentBlock} originalBlock
+ * @returns {number} The assigned media ID
  */
 function tagMedia(parts, registry, originalBlock) {
   const id = registry.size + 1;
   registry.set(id, originalBlock);
   parts.push({ type: "text", text: `[media:${id}]` });
+  return id;
+}
+
+/**
+ * Register a media block in the registry without appending to an OpenAI parts array.
+ * @param {MediaRegistry} registry
+ * @param {IncomingContentBlock} block
+ * @returns {number} The assigned media ID
+ */
+export function registerMedia(registry, block) {
+  const id = registry.size + 1;
+  registry.set(id, block);
+  return id;
 }
 
 /**
