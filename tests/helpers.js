@@ -143,10 +143,15 @@ export async function createMockLlmServer() {
 
       // Handle embedding requests separately — return a dummy embedding
       if (req.url?.includes("/embeddings")) {
+        const floats = Array.from({ length: 3 }, () => Math.random());
+        const useBase64 = parsed.encoding_format === "base64";
+        const embeddingValue = useBase64
+          ? Buffer.from(new Float32Array(floats).buffer).toString("base64")
+          : floats;
         res.writeHead(200, { "Content-Type": "application/json" });
         res.end(JSON.stringify({
           object: "list",
-          data: [{ object: "embedding", index: 0, embedding: Array.from({ length: 3 }, () => Math.random()) }],
+          data: [{ object: "embedding", index: 0, embedding: embeddingValue }],
           model: "mock-embedding",
           usage: { prompt_tokens: 1, total_tokens: 1 },
         }));
