@@ -1340,4 +1340,179 @@ describe("Confirmation declined prevents action execution", () => {
   });
 });
 
+// ═══════════════════════════════════════════════════════════════════
+// Scenario: save_memory tool call stores memory in DB
+// ═══════════════════════════════════════════════════════════════════
+describe("Memory: save_memory tool call stores memory in DB", () => {
+  const chatId = "mem-save-chat";
+
+  before(async () => {
+    await seedChat(chatId, { enabled: true });
+    await testDb.sql`UPDATE chats SET memory = true WHERE chat_id = ${chatId}`;
+  });
+
+  it("saves memory via tool call and delivers final LLM reply silently", async () => {
+    mockServer.addResponses(
+      {
+        tool_calls: [
+          {
+            id: "call_mem_save_001",
+            type: "function",
+            function: {
+              name: "save_memory",
+              arguments: JSON.stringify({ content: "User likes cats" }),
+            },
+          },
+        ],
+      },
+      "Got it, I'll remember that!",
+    );
+
+    const { context, responses } = createIncomingContext({
+      chatId,
+      content: [{ type: "text", text: "I really love cats" }],
+    });
+    await handleMessage(context);
+
+    // Memory row should exist in DB
+    const { rows } = await testDb.sql`SELECT * FROM memories WHERE chat_id = ${chatId}`;
+    assert.ok(rows.length > 0, "Memory should be stored in DB");
+    assert.equal(rows[0].content, "User likes cats");
+
+    // Final LLM text reply should be visible
+    assert.ok(
+      responses.some(r => r.text.includes("Got it, I'll remember that!")),
+      `Should deliver final LLM reply, got: ${responses.map(r => r.text).join(" | ")}`,
+    );
+
+    // silent: true suppresses the result notification (no ✅ message)
+    assert.ok(
+      !responses.some(r => r.text.startsWith("✅")),
+      `Should not show result notification for silent action, got: ${responses.map(r => r.text).join(" | ")}`,
+    );
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════
+// Scenario: Saved memories are injected into the system prompt
+// ═══════════════════════════════════════════════════════════════════
+describe("Memory: injected into system prompt", () => {
+  const chatId = "mem-inject-chat";
+
+  before(async () => {
+    await seedChat(chatId, { enabled: true });
+    await testDb.sql`UPDATE chats SET memory = true, memory_threshold = -2 WHERE chat_id = ${chatId}`;
+    // Pre-insert a memory with embedding so the vector similarity path finds it
+    await testDb.sql`
+      INSERT INTO memories (chat_id, content, embedding, search_text)
+      VALUES (${chatId}, 'User prefers dark mode', ${JSON.stringify([1, 0, 0])}::vector, to_tsvector('english', 'User prefers dark mode'))
+    `;
+  });
+
+  it("system prompt contains relevant memories for matching message", async () => {
+    const reqsBefore = mockServer.getRequests().length;
+    mockServer.addResponses("Sure, I know your preferences!");
+
+    const { context } = createIncomingContext({
+      chatId,
+      content: [{ type: "text", text: "What are my preferences?" }],
+    });
+    await handleMessage(context);
+
+    const llmRequest = mockServer.getRequests()[reqsBefore];
+    const systemMsg = llmRequest.messages.find(m => m.role === "system");
+    assert.ok(systemMsg, "Should have a system message");
+    const systemText = Array.isArray(systemMsg.content)
+      ? systemMsg.content.map(c => c.text).join("")
+      : systemMsg.content;
+    assert.ok(
+      systemText.includes("## Relevant memories"),
+      `System prompt should contain memory section, got: ${systemText.slice(-300)}`,
+    );
+    assert.ok(
+      systemText.includes("User prefers dark mode"),
+      `System prompt should contain the memory content, got: ${systemText.slice(-300)}`,
+    );
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════
+// Scenario: Memories NOT injected when memory is disabled
+// ═══════════════════════════════════════════════════════════════════
+describe("Memory: NOT injected when memory is disabled", () => {
+  const chatId = "mem-disabled-chat";
+
+  before(async () => {
+    await seedChat(chatId, { enabled: true });
+    // memory defaults to false — do NOT set it to true
+    await testDb.sql`UPDATE chats SET memory_threshold = -2 WHERE chat_id = ${chatId}`;
+    await testDb.sql`
+      INSERT INTO memories (chat_id, content, embedding, search_text)
+      VALUES (${chatId}, 'User prefers light mode', ${JSON.stringify([1, 0, 0])}::vector, to_tsvector('english', 'User prefers light mode'))
+    `;
+  });
+
+  it("system prompt does NOT contain memories when memory flag is off", async () => {
+    const reqsBefore = mockServer.getRequests().length;
+    mockServer.addResponses("Hello there!");
+
+    const { context } = createIncomingContext({
+      chatId,
+      content: [{ type: "text", text: "What are my preferences?" }],
+    });
+    await handleMessage(context);
+
+    const llmRequest = mockServer.getRequests()[reqsBefore];
+    const systemMsg = llmRequest.messages.find(m => m.role === "system");
+    assert.ok(systemMsg, "Should have a system message");
+    const systemText = Array.isArray(systemMsg.content)
+      ? systemMsg.content.map(c => c.text).join("")
+      : systemMsg.content;
+    assert.ok(
+      !systemText.includes("## Relevant memories"),
+      "System prompt should NOT contain memory section when memory is disabled",
+    );
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════
+// Scenario: Memories NOT searched for short extracted text
+// ═══════════════════════════════════════════════════════════════════
+describe("Memory: NOT searched when extracted text < 10 chars", () => {
+  const chatId = "mem-short-chat";
+
+  before(async () => {
+    await seedChat(chatId, { enabled: true });
+    await testDb.sql`UPDATE chats SET memory = true, memory_threshold = -2 WHERE chat_id = ${chatId}`;
+    await testDb.sql`
+      INSERT INTO memories (chat_id, content, embedding, search_text)
+      VALUES (${chatId}, 'User likes brevity', ${JSON.stringify([1, 0, 0])}::vector, to_tsvector('english', 'User likes brevity'))
+    `;
+  });
+
+  it("system prompt does NOT contain memories for image-only message (no text to search)", async () => {
+    // Image-only messages have no text content, so extractTextFromMessage returns ""
+    // which is < 10 chars — memory search is skipped
+    const reqsBefore = mockServer.getRequests().length;
+    mockServer.addResponses("I see an image!");
+
+    const { context } = createIncomingContext({
+      chatId,
+      content: [{ type: "image", encoding: "base64", mime_type: "image/jpeg", data: "aGVsbG8=" }],
+    });
+    await handleMessage(context);
+
+    const llmRequest = mockServer.getRequests()[reqsBefore];
+    const systemMsg = llmRequest.messages.find(m => m.role === "system");
+    assert.ok(systemMsg, "Should have a system message");
+    const systemText = Array.isArray(systemMsg.content)
+      ? systemMsg.content.map(c => c.text).join("")
+      : systemMsg.content;
+    assert.ok(
+      !systemText.includes("## Relevant memories"),
+      "System prompt should NOT contain memory section when extracted text is too short",
+    );
+  });
+});
+
 }); // end describe("e2e")
