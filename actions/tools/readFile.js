@@ -28,6 +28,9 @@ export default /** @type {defineAction} */ ((x) => x)({
     },
     required: ["file_path"],
   },
+  instructions: `Use read_file instead of run_bash with cat/head/tail to read files. Always read a file before editing it.
+- For large files, use offset and limit to read specific sections rather than the whole file.
+- Line numbers in the output help you target edit_file replacements accurately.`,
   permissions: {
     requireMaster: true,
     autoExecute: true,
