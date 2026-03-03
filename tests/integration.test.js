@@ -1515,4 +1515,630 @@ describe("Memory: NOT searched when extracted text < 10 chars", () => {
   });
 });
 
+// ═══════════════════════════════════════════════════════════════════
+// Scenario: Tool error → LLM self-correction
+// ═══════════════════════════════════════════════════════════════════
+describe("Tool error → LLM self-correction", () => {
+  const chatId = "tool-error-chat";
+
+  before(async () => {
+    await seedChat(chatId, { enabled: true });
+  });
+
+  it("catches tool error, shows ❌, passes error to LLM, and delivers corrected reply", async () => {
+    const reqsBefore = mockServer.getRequests().length;
+    mockServer.addResponses(
+      {
+        tool_calls: [
+          {
+            id: "call_bad_001",
+            type: "function",
+            function: {
+              name: "nonexistent_action_xyz",
+              arguments: "{}",
+            },
+          },
+        ],
+      },
+      "I apologize, let me try a different approach.",
+    );
+
+    const { context, responses } = createIncomingContext({
+      chatId,
+      content: [{ type: "text", text: "Do something" }],
+    });
+    await handleMessage(context);
+
+    // Should show error indicator to user
+    assert.ok(
+      responses.some(r => r.text.includes("❌")),
+      `Should show ❌ error indicator, got: ${responses.map(r => r.text).join(" | ")}`,
+    );
+
+    // Second LLM request should contain a tool role message with the error
+    const secondReq = mockServer.getRequests()[reqsBefore + 1];
+    assert.ok(secondReq, "Should have a second LLM request for self-correction");
+    const toolMsg = secondReq.messages.find(m => m.role === "tool");
+    assert.ok(toolMsg, "Second request should have a tool message with error");
+    const toolContent = typeof toolMsg.content === "string"
+      ? toolMsg.content
+      : JSON.stringify(toolMsg.content);
+    assert.ok(
+      toolContent.includes("Error") && toolContent.includes("nonexistent_action_xyz"),
+      `Tool error message should mention the action, got: ${toolContent}`,
+    );
+
+    // Final text reply should be delivered
+    assert.ok(
+      responses.some(r => r.text.includes("different approach")),
+      "Should deliver the corrected LLM reply",
+    );
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════
+// Scenario: _media_refs resolution in tool calls
+// ═══════════════════════════════════════════════════════════════════
+describe("_media_refs resolution in tool calls", () => {
+  const chatId = "media-refs-chat";
+
+  before(async () => {
+    // Set model explicitly — config.model may differ from process.env.MODEL
+    // because ESM evaluates imports before top-level code
+    await seedChat(chatId, { enabled: true, model: "mock-model" });
+    // mock-model must support images so they pass through to formatMessagesForOpenAI
+    // (otherwise convertUnsupportedMedia strips them before mediaRegistry is populated)
+    await fs.writeFile(CACHE_PATH, JSON.stringify([
+      { id: "gpt-4.1-mini", name: "GPT-4.1 Mini", context_length: 128000, pricing: { prompt: "0.000001", completion: "0.000003" } },
+      { id: "mock-model", architecture: { input_modalities: ["text", "image"] } },
+    ]));
+  });
+
+  after(async () => {
+    // Restore original models cache
+    await fs.writeFile(CACHE_PATH, JSON.stringify([
+      { id: "gpt-4.1-mini", name: "GPT-4.1 Mini", context_length: 128000, pricing: { prompt: "0.000001", completion: "0.000003" } },
+    ]));
+  });
+
+  it("injects _media_refs schema when media is present and resolves refs in tool calls", async () => {
+    const reqsBefore = mockServer.getRequests().length;
+    mockServer.addResponses(
+      {
+        tool_calls: [
+          {
+            id: "call_mref_001",
+            type: "function",
+            function: {
+              name: "run_javascript",
+              arguments: JSON.stringify({
+                code: "({content}) => `media_count:${content.filter(b => b.type === 'image').length}`",
+                _media_refs: [1],
+              }),
+            },
+          },
+        ],
+      },
+      "The image was processed.",
+    );
+
+    const { context, responses } = createIncomingContext({
+      chatId,
+      content: [
+        { type: "image", encoding: "base64", mime_type: "image/png", data: "iVBOR" },
+        { type: "text", text: "Process this image" },
+      ],
+    });
+    await handleMessage(context);
+
+    // Tool schema should include _media_refs property
+    const firstReq = mockServer.getRequests()[reqsBefore];
+    assert.ok(firstReq, "Should have an LLM request");
+    const tools = firstReq.tools || [];
+    const jsToolSchema = tools.find(t => t.function?.name === "run_javascript");
+    assert.ok(jsToolSchema, "Should have run_javascript in tools");
+    assert.ok(
+      jsToolSchema.function.parameters?.properties?._media_refs,
+      "Tool schema should include _media_refs when media is present",
+    );
+
+    // System prompt should mention media tagging
+    const systemMsg = firstReq.messages.find(m => m.role === "system");
+    const systemText = Array.isArray(systemMsg.content)
+      ? systemMsg.content.map(c => c.text).join("")
+      : systemMsg.content;
+    assert.ok(
+      systemText.includes("Media in the conversation is tagged"),
+      "System prompt should mention media tagging",
+    );
+
+    // Tool result should reflect media was received (the code counts image blocks in context)
+    const toolResultResp = responses.find(r => r.text.includes("media_count:"));
+    assert.ok(
+      toolResultResp,
+      `Tool result should show media_count, got: ${responses.map(r => r.text).join(" | ")}`,
+    );
+
+    // Final reply delivered
+    assert.ok(
+      responses.some(r => r.text.includes("image was processed")),
+      "Should deliver final reply",
+    );
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════
+// Scenario: Group chat system prompt suffix
+// ═══════════════════════════════════════════════════════════════════
+describe("Group chat system prompt suffix", () => {
+  const chatId = "group-prompt-chat@g.us";
+
+  before(async () => {
+    await seedChat(chatId, { enabled: true });
+  });
+
+  it("appends 'You are in a group chat' to system prompt for group messages", async () => {
+    const reqsBefore = mockServer.getRequests().length;
+    mockServer.addResponses("Hello group!");
+
+    const { context } = createIncomingContext({
+      chatId,
+      isGroup: true,
+      content: [{ type: "text", text: "@bot-123 hello" }],
+    });
+    await handleMessage(context);
+
+    const llmRequest = mockServer.getRequests()[reqsBefore];
+    const systemMsg = llmRequest.messages.find(m => m.role === "system");
+    const systemText = Array.isArray(systemMsg.content)
+      ? systemMsg.content.map(c => c.text).join("")
+      : systemMsg.content;
+    assert.ok(
+      systemText.includes("You are in a group chat"),
+      `System prompt should contain group chat suffix, got: ${systemText.slice(-100)}`,
+    );
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════
+// Scenario: Quote blocks in LLM context
+// ═══════════════════════════════════════════════════════════════════
+describe("Quote blocks in LLM context", () => {
+  const chatId = "quote-block-chat";
+
+  before(async () => {
+    await seedChat(chatId, { enabled: true });
+  });
+
+  it("formats quoted text with '> ' prefix in LLM request", async () => {
+    const reqsBefore = mockServer.getRequests().length;
+    mockServer.addResponses("I see the quoted text.");
+
+    const { context } = createIncomingContext({
+      chatId,
+      content: [
+        { type: "quote", content: [{ type: "text", text: "Original quoted message" }] },
+        { type: "text", text: "What about this?" },
+      ],
+    });
+    await handleMessage(context);
+
+    const llmRequest = mockServer.getRequests()[reqsBefore];
+    const userMsg = llmRequest.messages.find(m => m.role === "user");
+    assert.ok(userMsg, "Should have a user message");
+    const userContent = JSON.stringify(userMsg.content);
+    assert.ok(
+      userContent.includes("> Original quoted message"),
+      `User message should contain '> ' prefixed quoted text, got: ${userContent}`,
+    );
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════
+// Scenario: enabled_actions filtering for LLM tool calls
+// ═══════════════════════════════════════════════════════════════════
+describe("enabled_actions filtering for LLM tool calls", () => {
+  const chatWithout = "ea-without-chat";
+  const chatWith = "ea-with-chat";
+
+  before(async () => {
+    await seedChat(chatWithout, { enabled: true });
+    await seedChat(chatWith, { enabled: true });
+    await testDb.sql`UPDATE chats SET enabled_actions = '["track_purchases"]'::jsonb WHERE chat_id = ${chatWith}`;
+  });
+
+  it("LLM tools list excludes opt-in actions unless enabled", async () => {
+    const reqsBefore = mockServer.getRequests().length;
+    mockServer.addResponses("No tracking here.");
+    mockServer.addResponses("Tracking enabled!");
+
+    const { context: ctx1 } = createIncomingContext({
+      chatId: chatWithout,
+      content: [{ type: "text", text: "Hello" }],
+    });
+    await handleMessage(ctx1);
+
+    const { context: ctx2 } = createIncomingContext({
+      chatId: chatWith,
+      content: [{ type: "text", text: "Hello" }],
+    });
+    await handleMessage(ctx2);
+
+    const req1 = mockServer.getRequests()[reqsBefore];
+    const req2 = mockServer.getRequests()[reqsBefore + 1];
+
+    const toolNames1 = (req1.tools || []).map(t => t.function?.name);
+    const toolNames2 = (req2.tools || []).map(t => t.function?.name);
+
+    assert.ok(
+      !toolNames1.includes("track_purchases"),
+      `Chat without enabled_actions should NOT have track_purchases in tools, got: ${toolNames1.join(", ")}`,
+    );
+    assert.ok(
+      toolNames2.includes("track_purchases"),
+      `Chat with enabled_actions should have track_purchases in tools, got: ${toolNames2.join(", ")}`,
+    );
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════
+// Scenario: memory_threshold filters low-relevance memories
+// ═══════════════════════════════════════════════════════════════════
+describe("memory_threshold filters low-relevance memories", () => {
+  const chatId = "mem-threshold-chat";
+
+  before(async () => {
+    await seedChat(chatId, { enabled: true });
+    await testDb.sql`UPDATE chats SET memory = true, memory_threshold = 0.99 WHERE chat_id = ${chatId}`;
+    // Pre-insert a memory with a fixed embedding
+    await testDb.sql`
+      INSERT INTO memories (chat_id, content, embedding, search_text)
+      VALUES (${chatId}, 'User loves hiking', ${JSON.stringify([1, 0, 0])}::vector, to_tsvector('english', 'User loves hiking'))
+    `;
+  });
+
+  it("system prompt does NOT contain memories when similarity is below threshold", async () => {
+    const reqsBefore = mockServer.getRequests().length;
+    mockServer.addResponses("I have no relevant memories.");
+
+    const { context } = createIncomingContext({
+      chatId,
+      content: [{ type: "text", text: "Tell me about my hobbies please" }],
+    });
+    await handleMessage(context);
+
+    const llmRequest = mockServer.getRequests()[reqsBefore];
+    const systemMsg = llmRequest.messages.find(m => m.role === "system");
+    const systemText = Array.isArray(systemMsg.content)
+      ? systemMsg.content.map(c => c.text).join("")
+      : systemMsg.content;
+    assert.ok(
+      !systemText.includes("## Relevant memories"),
+      "System prompt should NOT contain memories when threshold filters them out",
+    );
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════
+// Scenario: Mixed autoContinue tool calls
+// ═══════════════════════════════════════════════════════════════════
+describe("Mixed autoContinue tool calls", () => {
+  const chatId = "mixed-autocont-chat";
+
+  before(async () => {
+    await seedChat(chatId, { enabled: true });
+  });
+
+  it("auto-continues when any tool call has autoContinue, no confirm prompt", async () => {
+    const reqsBefore = mockServer.getRequests().length;
+    // run_javascript has autoContinue:true, chat_settings does not
+    mockServer.addResponses(
+      {
+        tool_calls: [
+          {
+            id: "call_mix_001",
+            type: "function",
+            function: {
+              name: "run_javascript",
+              arguments: JSON.stringify({ code: "() => 'mixed-result'" }),
+            },
+          },
+          {
+            id: "call_mix_002",
+            type: "function",
+            function: {
+              name: "chat_settings",
+              arguments: JSON.stringify({ setting: "" }),
+            },
+          },
+        ],
+      },
+      "Mixed result complete.",
+    );
+
+    const { context, responses } = createIncomingContext({
+      chatId,
+      content: [{ type: "text", text: "Run mixed tools" }],
+    });
+    await handleMessage(context);
+
+    // No confirm prompt should have been shown
+    assert.ok(
+      !responses.some(r => r.type === "confirm"),
+      `Should not ask for confirmation when any tool has autoContinue, got: ${responses.filter(r => r.type === "confirm").map(r => r.text).join(" | ")}`,
+    );
+
+    // Should have exactly 2 LLM requests (initial + continuation)
+    const reqsAfter = mockServer.getRequests().length;
+    assert.equal(
+      reqsAfter - reqsBefore, 2,
+      `Should have 2 LLM requests, got ${reqsAfter - reqsBefore}`,
+    );
+
+    // Final reply delivered
+    assert.ok(
+      responses.some(r => r.text.includes("Mixed result complete")),
+      "Should deliver final LLM reply",
+    );
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════
+// Scenario: Action instructions injection
+// ═══════════════════════════════════════════════════════════════════
+describe("Action instructions injection", () => {
+  const chatId = "action-instr-chat";
+
+  before(async () => {
+    await seedChat(chatId, { enabled: true });
+  });
+
+  it("injects action instructions after first use, includes only once in subsequent calls", async () => {
+    const reqsBefore = mockServer.getRequests().length;
+    // 3 LLM responses: tool call, tool call, text reply
+    mockServer.addResponses(
+      {
+        tool_calls: [
+          {
+            id: "call_instr_001",
+            type: "function",
+            function: {
+              name: "run_javascript",
+              arguments: JSON.stringify({ code: "() => 'step1'" }),
+            },
+          },
+        ],
+      },
+      {
+        tool_calls: [
+          {
+            id: "call_instr_002",
+            type: "function",
+            function: {
+              name: "run_javascript",
+              arguments: JSON.stringify({ code: "() => 'step2'" }),
+            },
+          },
+        ],
+      },
+      "All steps complete.",
+    );
+
+    const { context, responses } = createIncomingContext({
+      chatId,
+      content: [{ type: "text", text: "Run two steps" }],
+    });
+    await handleMessage(context);
+
+    const reqs = mockServer.getRequests().slice(reqsBefore);
+    assert.equal(reqs.length, 3, `Should have 3 LLM requests, got ${reqs.length}`);
+
+    // Extract system prompts
+    const getSystemText = (req) => {
+      const sysMsg = req.messages.find(m => m.role === "system");
+      return Array.isArray(sysMsg.content)
+        ? sysMsg.content.map(c => c.text).join("")
+        : sysMsg.content;
+    };
+
+    const sys1 = getSystemText(reqs[0]);
+    const sys2 = getSystemText(reqs[1]);
+    const sys3 = getSystemText(reqs[2]);
+
+    // First request should NOT have instructions (not yet used)
+    assert.ok(
+      !sys1.includes("## run_javascript instructions"),
+      "First request should not have run_javascript instructions",
+    );
+
+    // Second request should have instructions (injected after first use)
+    assert.ok(
+      sys2.includes("## run_javascript instructions"),
+      "Second request should have run_javascript instructions",
+    );
+
+    // Third request should still have them but only ONE occurrence
+    assert.ok(
+      sys3.includes("## run_javascript instructions"),
+      "Third request should still have run_javascript instructions",
+    );
+    const occurrences = sys3.split("## run_javascript instructions").length - 1;
+    assert.equal(
+      occurrences, 1,
+      `Should have exactly 1 occurrence of instructions, got ${occurrences}`,
+    );
+
+    // Final reply delivered
+    assert.ok(
+      responses.some(r => r.text.includes("All steps complete")),
+      "Should deliver final reply",
+    );
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════
+// Scenario: storeLlmContext only at depth 0
+// ═══════════════════════════════════════════════════════════════════
+describe("storeLlmContext only at depth 0", () => {
+  const chatId = "ctx-depth-chat";
+
+  before(async () => {
+    await seedChat(chatId, { enabled: true });
+  });
+
+  it("stores llm_context for depth-0 assistant message but not for depth-1", async () => {
+    mockServer.addResponses(
+      {
+        tool_calls: [
+          {
+            id: "call_ctx_001",
+            type: "function",
+            function: {
+              name: "run_javascript",
+              arguments: JSON.stringify({ code: "() => 'depth-test'" }),
+            },
+          },
+        ],
+      },
+      "Depth test complete.",
+    );
+
+    const { context } = createIncomingContext({
+      chatId,
+      content: [{ type: "text", text: "Test depth context" }],
+    });
+    await handleMessage(context);
+
+    // storeLlmContext is fire-and-forget, give it time to flush
+    await new Promise(r => setTimeout(r, 50));
+
+    // Query assistant messages for this chat
+    const { rows } = await testDb.sql`
+      SELECT message_data, llm_context
+      FROM messages
+      WHERE chat_id = ${chatId}
+        AND message_data->>'role' = 'assistant'
+      ORDER BY message_id ASC
+    `;
+
+    assert.ok(rows.length >= 2, `Should have at least 2 assistant messages, got ${rows.length}`);
+
+    // First assistant message (depth 0, has tool_calls) should have llm_context
+    assert.ok(
+      rows[0].llm_context !== null,
+      "First assistant message (depth 0) should have llm_context",
+    );
+
+    // Second assistant message (depth 1, text reply) should NOT have llm_context
+    assert.ok(
+      rows[rows.length - 1].llm_context === null,
+      "Last assistant message (depth > 0) should NOT have llm_context",
+    );
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════
+// Scenario: Presence updates (composing / paused)
+// ═══════════════════════════════════════════════════════════════════
+describe("Presence updates", () => {
+  const chatId = "presence-chat";
+
+  before(async () => {
+    await seedChat(chatId, { enabled: true });
+  });
+
+  it("sends composing before LLM and paused after", async () => {
+    mockServer.addResponses("Presence test reply.");
+
+    const { context, responses } = createIncomingContext({
+      chatId,
+      content: [{ type: "text", text: "Check presence" }],
+    });
+    await handleMessage(context);
+
+    const presenceUpdates = responses.filter(r => r.type === "sendPresenceUpdate");
+    assert.ok(
+      presenceUpdates.some(r => r.text === "composing"),
+      `Should send composing presence update, got: ${presenceUpdates.map(r => r.text).join(", ")}`,
+    );
+    assert.ok(
+      presenceUpdates.some(r => r.text === "paused"),
+      `Should send paused presence update, got: ${presenceUpdates.map(r => r.text).join(", ")}`,
+    );
+
+    // composing should come before the reply, paused should come after
+    const composingIdx = responses.findIndex(r => r.type === "sendPresenceUpdate" && r.text === "composing");
+    const replyIdx = responses.findIndex(r => r.text.includes("Presence test reply"));
+    const pausedIdx = responses.findIndex(r => r.type === "sendPresenceUpdate" && r.text === "paused");
+
+    assert.ok(composingIdx < replyIdx, "composing should come before reply");
+    assert.ok(pausedIdx > replyIdx, "paused should come after reply");
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════
+// Scenario: convertUnsupportedMedia warning for video
+// ═══════════════════════════════════════════════════════════════════
+describe("convertUnsupportedMedia warning", () => {
+  const chatId = "unsupported-video-chat";
+  /** @type {typeof import("../config.js").default} */
+  let cfg;
+  /** @type {string} */
+  let savedVideoModel;
+  /** @type {string} */
+  let savedMediaModel;
+
+  before(async () => {
+    await seedChat(chatId, { enabled: true });
+    // Dynamically import config (static import would load before process.env is set)
+    cfg = (await import("../config.js")).default;
+    // Ensure no video_to_text_model / media_to_text_model is configured
+    // (they may be set via .env), so video gets replaced with placeholder
+    savedVideoModel = cfg.video_to_text_model;
+    savedMediaModel = cfg.media_to_text_model;
+    cfg.video_to_text_model = "";
+    cfg.media_to_text_model = "";
+  });
+
+  after(() => {
+    cfg.video_to_text_model = savedVideoModel;
+    cfg.media_to_text_model = savedMediaModel;
+  });
+
+  it("shows ⚠️ warning and replaces video with placeholder text", async () => {
+    const reqsBefore = mockServer.getRequests().length;
+    mockServer.addResponses("I see you tried to send a video.");
+
+    const { context, responses } = createIncomingContext({
+      chatId,
+      content: [
+        { type: "video", encoding: "base64", mime_type: "video/mp4", data: "AAAA" },
+        { type: "text", text: "Check this video" },
+      ],
+    });
+    await handleMessage(context);
+
+    // Should show ⚠️ warning about unsupported video
+    assert.ok(
+      responses.some(r => r.text.includes("⚠️") && r.text.includes("video")),
+      `Should show ⚠️ warning about video, got: ${responses.map(r => r.text).join(" | ")}`,
+    );
+
+    // LLM request should have the placeholder text instead of video
+    const llmRequest = mockServer.getRequests()[reqsBefore];
+    const userMsg = llmRequest.messages.find(m => m.role === "user");
+    const userContent = JSON.stringify(userMsg.content);
+    assert.ok(
+      userContent.includes("[Unsupported video"),
+      `LLM request should contain placeholder text, got: ${userContent.slice(0, 300)}`,
+    );
+
+    // Final reply delivered
+    assert.ok(
+      responses.some(r => r.text.includes("tried to send a video")),
+      "Should deliver final LLM reply",
+    );
+  });
+});
+
 }); // end describe("e2e")
