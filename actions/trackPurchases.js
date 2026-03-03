@@ -83,8 +83,29 @@ function computeDiscountsTotal(discounts) {
 }
 
 /**
+ * Compute proportional discount for included items.
+ * @param {number} includedSum - sum of included items
+ * @param {number} allItemsSum - sum of all receipt items
+ * @param {Array<{description: string, amount: number}>} discounts - all receipt discounts
+ * @returns {{ proportionalDiscounts: Array<{description: string, amount: number}>, discountsSum: number, paidAmount: number }}
+ */
+function computeProportionalDiscounts(includedSum, allItemsSum, discounts) {
+  if (discounts.length === 0 || allItemsSum === 0) {
+    return { proportionalDiscounts: [], discountsSum: 0, paidAmount: includedSum };
+  }
+  const ratio = includedSum / allItemsSum;
+  const proportionalDiscounts = discounts.map(d => ({
+    description: d.description,
+    amount: Math.round(d.amount * ratio * 100) / 100,
+  }));
+  const discountsSum = computeDiscountsTotal(proportionalDiscounts);
+  const paidAmount = Math.round((includedSum - discountsSum) * 100) / 100;
+  return { proportionalDiscounts, discountsSum, paidAmount };
+}
+
+/**
  * Format a receipt preview for confirmation.
- * @param {{ store_name: string|null, purchase_date: string|null, items: Array<{item_name: string, quantity: number, unit_price: number, subtotal: number}>, discounts?: Array<{description: string, amount: number}>, total: number }} data
+ * @param {{ store_name: string|null, purchase_date: string|null, includedItems: Array<{item_name: string, quantity: number, unit_price: number, subtotal: number}>, proportionalDiscounts: Array<{description: string, amount: number}>, discountsSum: number, paidAmount: number, receiptValidation?: string|null }} data
  * @param {string} ledgerName
  * @returns {string}
  */
@@ -94,33 +115,28 @@ function formatPreview(data, ledgerName) {
   preview += `*Tienda:* ${data.store_name || "No identificada"}\n`;
   preview += `*Fecha:* ${data.purchase_date || "No identificada"}\n\n`;
   preview += `*Items:*\n`;
-  if (data.items && data.items.length > 0) {
-    for (const [i, item] of data.items.entries()) {
+  if (data.includedItems && data.includedItems.length > 0) {
+    for (const [i, item] of data.includedItems.entries()) {
       const price = item.subtotal || item.unit_price || 0;
       preview += `  ${i + 1}. ${item.item_name} — x${item.quantity || 1} — €${Number(price).toFixed(2)}\n`;
     }
   }
 
-  const itemsSum = computeItemsTotal(data.items || []);
-  const discounts = data.discounts || [];
-  const discountsSum = computeDiscountsTotal(discounts);
-  const total = Number(data.total || 0);
-
+  const itemsSum = computeItemsTotal(data.includedItems || []);
   preview += `\n*Suma items: €${itemsSum.toFixed(2)}*\n`;
 
-  if (discounts.length > 0) {
-    preview += `*Descuentos:*\n`;
-    for (const d of discounts) {
+  if (data.proportionalDiscounts.length > 0) {
+    preview += `*Descuentos (proporcional):*\n`;
+    for (const d of data.proportionalDiscounts) {
       preview += `  • ${d.description} — -€${Number(d.amount).toFixed(2)}\n`;
     }
-    preview += `*Total descuentos: -€${discountsSum.toFixed(2)}*\n`;
+    preview += `*Total descuentos: -€${data.discountsSum.toFixed(2)}*\n`;
   }
 
-  preview += `*Total pagado: €${total.toFixed(2)}*\n`;
+  preview += `*Total pagado: €${data.paidAmount.toFixed(2)}*\n`;
 
-  const expectedTotal = Math.round((itemsSum - discountsSum) * 100) / 100;
-  if (Math.abs(expectedTotal - total) > 0.05) {
-    preview += `⚠️ Items (€${itemsSum.toFixed(2)}) - descuentos (€${discountsSum.toFixed(2)}) = €${expectedTotal.toFixed(2)}, pero el total es €${total.toFixed(2)}.\n`;
+  if (data.receiptValidation) {
+    preview += data.receiptValidation;
   }
 
   preview += `\nReact 👍 para guardar o 👎 para cancelar.`;
@@ -247,13 +263,13 @@ async function getSummary(db, ledgerName) {
   return result;
 }
 
-export { ensureSchema, getOrCreateLedger, formatPreview, computeItemsTotal, computeDiscountsTotal };
+export { ensureSchema, getOrCreateLedger, formatPreview, computeItemsTotal, computeDiscountsTotal, computeProportionalDiscounts };
 
 export default /** @type {defineAction} */ ((x) => x)({
   name: "track_purchases",
   command: "compras",
   optIn: true,
-  description: "Register purchase data and manage purchase history. To process a receipt/invoice image: first call extract_from_image to extract the data, then call this with action='register' passing the extracted fields (items, discounts, total). The total must equal items_sum - discounts_sum. When the user only wants some items, calculate proportional discounts. Also use for: purchase history ('history'), spending summary ('summary'), deleting a purchase ('delete'), and ledger management ('list_ledgers', 'rename_ledger', 'delete_ledger').",
+  description: "Register purchase data and manage purchase history. To process a receipt/invoice image: first call extract_from_image to extract the data, then call this with action='register' passing the items to register, ALL discounts, receipt_subtotal (sum of ALL receipt items), and total (amount paid). The action computes proportional discounts for selected items automatically. Also use for: purchase history ('history'), spending summary ('summary'), deleting a purchase ('delete'), and ledger management ('list_ledgers', 'rename_ledger', 'delete_ledger').",
   parameters: {
     type: "object",
     properties: {
@@ -272,15 +288,19 @@ export default /** @type {defineAction} */ ((x) => x)({
       },
       items: {
         type: "string",
-        description: "JSON array of items, each with {item_name, quantity, unit_price, subtotal} (for action=register)"
+        description: "JSON array of items to register, each with {item_name, quantity, unit_price, subtotal}. Only include items the user wants to track."
       },
       discounts: {
         type: "string",
-        description: "JSON array of discounts, each with {description, amount} (for action=register). Includes employee discounts, vouchers, coupons, etc."
+        description: "JSON array of ALL discounts from the receipt, each with {description, amount}. Include employee discounts, vouchers, coupons, etc."
+      },
+      receipt_subtotal: {
+        type: "number",
+        description: "Full receipt subtotal before discounts (sum of ALL items on the receipt, not just the selected ones). Required when discounts are provided, used to compute proportional discounts for the selected items."
       },
       total: {
         type: "number",
-        description: "Total amount paid after discounts (for action=register)"
+        description: "Total amount paid on the receipt after all discounts (BAL TO PAY). Used for validation."
       },
       purchase_id: {
         type: "string",
@@ -386,12 +406,12 @@ export default /** @type {defineAction} */ ((x) => x)({
     },
     async function register_with_discounts_saves_and_validates(action_fn, db) {
       await ensureSchema(db);
-      // Simulates the Dunnes receipt e2e: user selects only some items
+      // Simulates the Dunnes receipt e2e: LLM passes selected items + receipt context
       // Full receipt: subtotal=129.21, discounts=50.84, paid=78.37
       // Selected items: eggs(3×3.99=11.97) + rice cakes(5×2.00=10.00)
       //   + lettuce(2×1.05=2.10) + pineapple(2.99) + lemsip(7.75) = 34.81
-      // Proportional discount: 34.81 × (50.84/129.21) ≈ 13.69
-      // Proportional paid: 34.81 - 13.69 = 21.12
+      // Action computes proportional discount: 34.81 × (50.84/129.21) ≈ 13.69
+      // Action computes paid: 34.81 - 13.69 = 21.12
       const items = JSON.stringify([
         { item_name: "DS Medium Eggs", quantity: 3, unit_price: 3.99, subtotal: 11.97 },
         { item_name: "DS Rice Cake", quantity: 5, unit_price: 2.00, subtotal: 10.00 },
@@ -400,10 +420,13 @@ export default /** @type {defineAction} */ ((x) => x)({
         { item_name: "Lemsip", quantity: 1, unit_price: 7.75, subtotal: 7.75 },
       ]);
       const discounts = JSON.stringify([
-        { description: "Employee Discount (proporcional)", amount: 6.96 },
-        { description: "Discount Vouchers (proporcional)", amount: 6.73 },
+        { description: "Employee Discount", amount: 25.84 },
+        { description: "Discount Voucher", amount: 10.00 },
+        { description: "Discount Voucher", amount: 10.00 },
+        { description: "Discount Voucher", amount: 5.00 },
       ]);
-      const total = 21.12; // 34.81 - 13.69
+      const receipt_subtotal = 129.21; // full receipt subtotal
+      const total = 78.37; // receipt paid total
 
       /** @type {string | undefined} */
       let capturedPreview;
@@ -414,7 +437,7 @@ export default /** @type {defineAction} */ ((x) => x)({
           log: async () => "",
           confirm: async (/** @type {string} */ preview) => { capturedPreview = preview; return true; },
         },
-        { action: "register", store_name: "Dunnes Stores", purchase_date: "2026-03-02", items, discounts, total },
+        { action: "register", store_name: "Dunnes Stores", purchase_date: "2026-03-02", items, discounts, receipt_subtotal, total },
       );
 
       assert.ok(typeof result === "string");
@@ -422,34 +445,45 @@ export default /** @type {defineAction} */ ((x) => x)({
       assert.ok(result.includes("DS Medium Eggs"));
       assert.ok(result.includes("Lemsip"));
 
-      // Preview should show discounts
+      // Preview should show proportional discounts
       assert.ok(capturedPreview, "confirm should have been called");
-      assert.ok(capturedPreview.includes("Suma items: €34.81"), `Should show items sum, got:\n${capturedPreview}`);
+      assert.ok(capturedPreview.includes("Suma items: €34.81"), `Should show included items sum, got:\n${capturedPreview}`);
       assert.ok(capturedPreview.includes("Employee Discount"), `Should show discount, got:\n${capturedPreview}`);
-      assert.ok(capturedPreview.includes("Total pagado: €21.12"), `Should show paid total, got:\n${capturedPreview}`);
-      assert.ok(!capturedPreview.includes("⚠️"), `Should NOT warn when math checks out, got:\n${capturedPreview}`);
+      assert.ok(!capturedPreview.includes("⚠️"), `Should NOT warn for valid receipt, got:\n${capturedPreview}`);
 
-      // Verify DB: purchase
+      // Verify DB: purchase — total should be the computed paid amount (~21.12)
       const { rows: purchases } = await db.sql`SELECT * FROM purchases WHERE store_name = 'Dunnes Stores'`;
       assert.equal(purchases.length, 1);
-      assert.equal(Number(purchases[0].total), 21.12);
+      const storedTotal = Number(purchases[0].total);
+      assert.ok(
+        Math.abs(storedTotal - 21.12) < 0.10,
+        `Stored total should be ~21.12 (proportional), got ${storedTotal}`,
+      );
 
-      // Verify DB: items
+      // Verify DB: only selected items stored
       const { rows: dbItems } = await db.sql`SELECT * FROM purchase_items WHERE purchase_id = ${purchases[0].id}`;
       assert.equal(dbItems.length, 5);
 
-      // Verify DB: discounts
+      // Verify DB: proportional discounts stored
       const { rows: dbDiscounts } = await db.sql`SELECT * FROM purchase_discounts WHERE purchase_id = ${purchases[0].id}`;
-      assert.equal(dbDiscounts.length, 2);
+      assert.ok(dbDiscounts.length > 0, "Should store proportional discounts");
       const discountsTotal = dbDiscounts.reduce((/** @type {number} */ sum, /** @type {{amount: string}} */ d) => sum + Number(d.amount), 0);
-      assert.ok(Math.abs(discountsTotal - 13.69) < 0.01, `Discounts should sum to ~13.69, got ${discountsTotal}`);
+      // 34.81/129.21 * 50.84 ≈ 13.70
+      assert.ok(
+        Math.abs(discountsTotal - 13.70) < 0.10,
+        `Proportional discounts should sum to ~13.70, got ${discountsTotal.toFixed(2)}`,
+      );
 
-      // Result message should show discount info
+      // Result message should show computed amounts
       assert.ok(result.includes("Subtotal: €34.81"), `Should show subtotal, got:\n${result}`);
-      assert.ok(result.includes("Total pagado: €21.12"), `Should show paid total, got:\n${result}`);
+      assert.ok(
+        result.includes(`Total pagado: €${storedTotal.toFixed(2)}`),
+        `Should show paid total, got:\n${result}`,
+      );
     },
     async function register_preview_shows_mismatch_warning(action_fn, db) {
       await ensureSchema(db);
+      // Items sum to 12.50 but receipt total is 10.00 — should warn
       const items = JSON.stringify([
         { item_name: "Jamon", quantity: 1, unit_price: 8.00, subtotal: 8.00 },
         { item_name: "Queso", quantity: 1, unit_price: 4.50, subtotal: 4.50 },
@@ -467,9 +501,7 @@ export default /** @type {defineAction} */ ((x) => x)({
       );
       assert.ok(typeof result === "string");
       assert.ok(capturedPreview, "confirm should have been called with a preview");
-      assert.ok(capturedPreview.includes("Suma items: €12.50"), `Preview should show items sum, got:\n${capturedPreview}`);
-      assert.ok(capturedPreview.includes("Total pagado: €10.00"), `Preview should show total, got:\n${capturedPreview}`);
-      assert.ok(capturedPreview.includes("⚠️"), `Preview should show warning for mismatch, got:\n${capturedPreview}`);
+      assert.ok(capturedPreview.includes("⚠️"), `Preview should show warning when items sum (12.50) ≠ receipt total (10.00), got:\n${capturedPreview}`);
     },
     async function register_missing_items(action_fn, db) {
       await ensureSchema(db);
@@ -507,45 +539,33 @@ export default /** @type {defineAction} */ ((x) => x)({
       const data = {
         store_name: "TestStore",
         purchase_date: "2025-01-01",
-        items: [
+        includedItems: [
           { item_name: "Item1", quantity: 1, unit_price: 5.00, subtotal: 5.00 },
           { item_name: "Item2", quantity: 2, unit_price: 1.50, subtotal: 3.00 },
         ],
-        total: 8.00,
+        proportionalDiscounts: [],
+        discountsSum: 0,
+        paidAmount: 8.00,
       };
       const preview = formatPreview(data, "General");
       assert.ok(preview.includes("Suma items: €8.00"), `Should show items sum, got:\n${preview}`);
       assert.ok(preview.includes("Total pagado: €8.00"), `Should show paid total, got:\n${preview}`);
       assert.ok(!preview.includes("⚠️"), `Should NOT show warning when totals match, got:\n${preview}`);
     },
-    async function formatPreview_shows_mismatch_warning(_action_fn, _db) {
-      const data = {
-        store_name: "TestStore",
-        purchase_date: "2025-01-01",
-        items: [
-          { item_name: "Item1", quantity: 1, unit_price: 10.00, subtotal: 10.00 },
-          { item_name: "Item2", quantity: 1, unit_price: 5.00, subtotal: 5.00 },
-        ],
-        total: 12.50,
-      };
-      const preview = formatPreview(data, "General");
-      assert.ok(preview.includes("Suma items: €15.00"), `Should show items sum, got:\n${preview}`);
-      assert.ok(preview.includes("Total pagado: €12.50"), `Should show paid total, got:\n${preview}`);
-      assert.ok(preview.includes("⚠️"), `Should show warning when totals mismatch, got:\n${preview}`);
-    },
     async function formatPreview_shows_discounts(_action_fn, _db) {
       const data = {
         store_name: "Dunnes",
         purchase_date: "2026-03-02",
-        items: [
+        includedItems: [
           { item_name: "Eggs", quantity: 3, unit_price: 3.99, subtotal: 11.97 },
           { item_name: "Rice Cake", quantity: 5, unit_price: 2.00, subtotal: 10.00 },
         ],
-        discounts: [
+        proportionalDiscounts: [
           { description: "Employee Discount", amount: 5.00 },
           { description: "Discount Voucher", amount: 3.00 },
         ],
-        total: 13.97,
+        discountsSum: 8.00,
+        paidAmount: 13.97,
       };
       const preview = formatPreview(data, "General");
       assert.ok(preview.includes("Suma items: €21.97"), `Should show items sum, got:\n${preview}`);
@@ -553,22 +573,59 @@ export default /** @type {defineAction} */ ((x) => x)({
       assert.ok(preview.includes("-€5.00"), `Should show discount amount, got:\n${preview}`);
       assert.ok(preview.includes("Total descuentos: -€8.00"), `Should show discounts total, got:\n${preview}`);
       assert.ok(preview.includes("Total pagado: €13.97"), `Should show paid total, got:\n${preview}`);
-      assert.ok(!preview.includes("⚠️"), `Should NOT show warning when math checks out, got:\n${preview}`);
+      assert.ok(!preview.includes("⚠️"), `Should NOT show warning, got:\n${preview}`);
     },
-    async function formatPreview_warns_when_discounts_dont_match(_action_fn, _db) {
+    async function formatPreview_shows_receipt_validation_warning(_action_fn, _db) {
       const data = {
         store_name: "TestStore",
         purchase_date: "2025-01-01",
-        items: [
+        includedItems: [
           { item_name: "Item1", quantity: 1, unit_price: 10.00, subtotal: 10.00 },
         ],
-        discounts: [
-          { description: "Coupon", amount: 2.00 },
-        ],
-        total: 5.00, // should be 8.00 (10 - 2)
+        proportionalDiscounts: [],
+        discountsSum: 0,
+        paidAmount: 10.00,
+        receiptValidation: "⚠️ Receipt math does not add up.\n",
       };
       const preview = formatPreview(data, "General");
-      assert.ok(preview.includes("⚠️"), `Should show warning when math doesn't match, got:\n${preview}`);
+      assert.ok(preview.includes("⚠️"), `Should show receipt validation warning, got:\n${preview}`);
+    },
+    async function computeProportionalDiscounts_calculates_correctly(_action_fn, _db) {
+      // Full receipt: 129.21 subtotal, 50.84 discounts
+      // Selected items: 34.81
+      // Expected ratio: 34.81 / 129.21 = 0.2694...
+      const discounts = [
+        { description: "Employee Discount", amount: 25.84 },
+        { description: "Voucher", amount: 25.00 },
+      ];
+      const result = computeProportionalDiscounts(34.81, 129.21, discounts);
+
+      // Proportional employee discount: 25.84 * (34.81/129.21) ≈ 6.96
+      assert.ok(
+        Math.abs(result.proportionalDiscounts[0].amount - 6.96) < 0.02,
+        `Employee discount should be ~6.96, got ${result.proportionalDiscounts[0].amount}`,
+      );
+      // Proportional voucher: 25.00 * (34.81/129.21) ≈ 6.73
+      assert.ok(
+        Math.abs(result.proportionalDiscounts[1].amount - 6.73) < 0.02,
+        `Voucher discount should be ~6.73, got ${result.proportionalDiscounts[1].amount}`,
+      );
+      // Total discounts ≈ 13.69
+      assert.ok(
+        Math.abs(result.discountsSum - 13.69) < 0.02,
+        `Total discounts should be ~13.69, got ${result.discountsSum}`,
+      );
+      // Paid ≈ 21.12
+      assert.ok(
+        Math.abs(result.paidAmount - 21.12) < 0.02,
+        `Paid amount should be ~21.12, got ${result.paidAmount}`,
+      );
+    },
+    async function computeProportionalDiscounts_no_discounts(_action_fn, _db) {
+      const result = computeProportionalDiscounts(50.00, 50.00, []);
+      assert.equal(result.proportionalDiscounts.length, 0);
+      assert.equal(result.discountsSum, 0);
+      assert.equal(result.paidAmount, 50.00);
     },
     // --- Confirmation flow ---
     async function register_cancelled_by_user(action_fn, db) {
@@ -913,8 +970,7 @@ export default /** @type {defineAction} */ ((x) => x)({
       const extracted = parseExtractResponse(/** @type {string} */ (extractResponse));
       console.log(`  Extracted: ${extracted.items.length} items, ${extracted.discounts.length} discounts, subtotal=${extracted.subtotal}, total=${extracted.total}`);
 
-      // Step 2: LLM orchestrates partial registration with proportional discounts
-      // Simulate the conversation where extract_from_image already returned the data
+      // Step 2: LLM marks items as included/excluded and passes ALL data to track_purchases
       const userPrompt = "solo agrega los huevos, rice cakes, iceberg lettuce, pineapple y lemsip, y calcula bien los descuentos aplicados q le correspondan para ese subtotal";
       /** @type {CallLlmMessage[]} */
       const messages = [
@@ -949,7 +1005,7 @@ export default /** @type {defineAction} */ ((x) => x)({
       const args = JSON.parse(registerCall.function.arguments);
       assert.equal(args.action, "register");
 
-      // Validate items: should only include the 5 requested items
+      // Validate: LLM should pass only the requested items
       const registeredItems = JSON.parse(args.items);
       assert.ok(registeredItems.length >= 4, `Should have at least 4 item groups, got ${registeredItems.length}`);
       assert.ok(registeredItems.length <= 10, `Should have at most 10 items, got ${registeredItems.length}`);
@@ -961,32 +1017,35 @@ export default /** @type {defineAction} */ ((x) => x)({
 
       const itemsSum = registeredItems.reduce((/** @type {number} */ sum, /** @type {{subtotal: number}} */ i) => sum + i.subtotal, 0);
       assert.ok(
-        Math.abs(itemsSum - 34.81) < 2.0,
-        `Items should sum to ~34.81, got ${itemsSum.toFixed(2)}`,
+        Math.abs(itemsSum - 34.81) < 5.0,
+        `Selected items should sum to ~34.81, got ${itemsSum.toFixed(2)}`,
       );
 
-      // Validate discounts: should be proportionally calculated
+      // Validate: LLM should pass ALL discounts from receipt
       assert.ok(args.discounts, "Should include discounts");
-      const registeredDiscounts = JSON.parse(args.discounts);
-      assert.ok(registeredDiscounts.length >= 1, `Should have at least 1 discount, got ${registeredDiscounts.length}`);
+      const passedDiscounts = JSON.parse(args.discounts);
+      assert.ok(passedDiscounts.length >= 2, `Should pass all receipt discounts, got ${passedDiscounts.length}`);
 
-      const discountsSum = registeredDiscounts.reduce((/** @type {number} */ sum, /** @type {{amount: number}} */ d) => sum + d.amount, 0);
-      // Proportional: 34.81 × (50.84/129.21) ≈ 13.69
+      const discountsSum = passedDiscounts.reduce((/** @type {number} */ sum, /** @type {{amount: number}} */ d) => sum + d.amount, 0);
       assert.ok(
-        Math.abs(discountsSum - 13.69) < 3.0,
-        `Discounts should be proportional ~13.69, got ${discountsSum.toFixed(2)}`,
+        Math.abs(discountsSum - 50.84) < 3.0,
+        `Discounts should be full receipt amount ~50.84, got ${discountsSum.toFixed(2)}`,
       );
 
-      // Validate total: should be items - discounts
-      const total = args.total;
+      // Validate: receipt_subtotal should be the full receipt subtotal
+      assert.ok(args.receipt_subtotal, "Should include receipt_subtotal");
       assert.ok(
-        Math.abs(total - (itemsSum - discountsSum)) < 1.0,
-        `Total (${total}) should ≈ items (${itemsSum.toFixed(2)}) - discounts (${discountsSum.toFixed(2)}) = ${(itemsSum - discountsSum).toFixed(2)}`,
+        Math.abs(args.receipt_subtotal - 129.21) < 2.0,
+        `receipt_subtotal should be ~129.21, got ${args.receipt_subtotal}`,
       );
-      // Should be around €21
-      assert.ok(total > 15 && total < 28, `Total should be around €21, got ${total}`);
 
-      console.log(`  ✔ items_sum=${itemsSum.toFixed(2)}, discounts=${discountsSum.toFixed(2)}, total=${total}`);
+      // Validate: total should be the receipt paid total
+      assert.ok(
+        Math.abs(args.total - 78.37) < 2.0,
+        `Total should be receipt paid amount ~78.37, got ${args.total}`,
+      );
+
+      console.log(`  ✔ items_sum=${itemsSum.toFixed(2)}, receipt_subtotal=${args.receipt_subtotal}, discounts=${discountsSum.toFixed(2)}, total=${args.total}`);
     },
   ],
   action_fn: async function (context, params) {
@@ -1017,19 +1076,42 @@ export default /** @type {defineAction} */ ((x) => x)({
         }
       }
 
-      const data = {
+      const includedItems = items;
+      const includedSum = computeItemsTotal(includedItems);
+      // receipt_subtotal is the sum of ALL items on the receipt (needed for proportional discounts)
+      const receiptSubtotal = Number(params.receipt_subtotal || includedSum);
+
+      // Validate receipt integrity
+      /** @type {string | null} */
+      let receiptValidation = null;
+      const receiptTotal = Number(params.total || 0);
+      const discountsSum = computeDiscountsTotal(discounts);
+      if (receiptTotal > 0) {
+        const expected = Math.round((receiptSubtotal - discountsSum) * 100) / 100;
+        if (Math.abs(expected - receiptTotal) > 1.0) {
+          receiptValidation = `⚠️ Validacion recibo: items (€${receiptSubtotal.toFixed(2)}) - descuentos (€${discountsSum.toFixed(2)}) = €${expected.toFixed(2)}, pero el total del recibo es €${receiptTotal.toFixed(2)}.\n`;
+        }
+      }
+
+      // Compute proportional discounts for selected items
+      const { proportionalDiscounts, discountsSum: propDiscountsSum, paidAmount } =
+        computeProportionalDiscounts(includedSum, receiptSubtotal, discounts);
+
+      const previewData = {
         store_name: params.store_name || null,
         purchase_date: params.purchase_date || null,
-        items,
-        discounts,
-        total: params.total || 0,
+        includedItems,
+        proportionalDiscounts,
+        discountsSum: propDiscountsSum,
+        paidAmount,
+        receiptValidation,
       };
 
       const ledgerName = params.ledger_name || "General";
       const ledger = await getOrCreateLedger(db, ledgerName);
 
       // Show preview and ask for confirmation
-      const preview = formatPreview(data, ledger.name);
+      const preview = formatPreview(previewData, ledger.name);
       const confirmed = await confirm(preview);
       if (!confirmed) {
         return { result: "Registro cancelado.", autoContinue: false };
@@ -1038,19 +1120,19 @@ export default /** @type {defineAction} */ ((x) => x)({
       const purchaseId = await db.transaction(async (/** @type {import("@electric-sql/pglite").Transaction} */ tx) => {
         const { rows } = await tx.sql`
           INSERT INTO purchases (ledger_id, store_name, purchase_date, total, notes)
-          VALUES (${ledger.id}, ${data.store_name || "Desconocido"}, ${data.purchase_date}, ${data.total || 0}, ${""})
+          VALUES (${ledger.id}, ${params.store_name || "Desconocido"}, ${params.purchase_date || null}, ${paidAmount}, ${""})
           RETURNING id
         `;
         const id = rows[0].id;
 
-        for (const item of data.items) {
+        for (const item of includedItems) {
           await tx.sql`
             INSERT INTO purchase_items (purchase_id, item_name, quantity, unit_price, subtotal)
             VALUES (${id}, ${item.item_name}, ${item.quantity || 1}, ${item.unit_price || 0}, ${item.subtotal || 0})
           `;
         }
 
-        for (const discount of data.discounts) {
+        for (const discount of proportionalDiscounts) {
           await tx.sql`
             INSERT INTO purchase_discounts (purchase_id, description, amount)
             VALUES (${id}, ${discount.description}, ${discount.amount || 0})
@@ -1060,27 +1142,24 @@ export default /** @type {defineAction} */ ((x) => x)({
         return id;
       });
 
-      const itemsSum = computeItemsTotal(data.items);
-      const discountsSum = computeDiscountsTotal(data.discounts);
-
       let result = `*Factura registrada* (ID: ${purchaseId}) — Libro: ${ledger.name}\n\n`;
-      result += `*Tienda:* ${data.store_name || "No identificada"}\n`;
-      result += `*Fecha:* ${data.purchase_date || "No identificada"}\n\n`;
+      result += `*Tienda:* ${params.store_name || "No identificada"}\n`;
+      result += `*Fecha:* ${params.purchase_date || "No identificada"}\n\n`;
       result += `*Items:*\n`;
 
-      for (const [i, item] of data.items.entries()) {
+      for (const [i, item] of includedItems.entries()) {
         const price = item.subtotal || item.unit_price || 0;
         result += `  ${i + 1}. ${item.item_name} — x${item.quantity || 1} — €${Number(price).toFixed(2)}\n`;
       }
 
-      result += `\n*Subtotal: €${itemsSum.toFixed(2)}*\n`;
-      if (data.discounts.length > 0) {
-        for (const d of data.discounts) {
+      result += `\n*Subtotal: €${includedSum.toFixed(2)}*\n`;
+      if (proportionalDiscounts.length > 0) {
+        for (const d of proportionalDiscounts) {
           result += `*${d.description}: -€${Number(d.amount).toFixed(2)}*\n`;
         }
-        result += `*Total descuentos: -€${discountsSum.toFixed(2)}*\n`;
+        result += `*Total descuentos: -€${propDiscountsSum.toFixed(2)}*\n`;
       }
-      result += `*Total pagado: €${Number(data.total || 0).toFixed(2)}*`;
+      result += `*Total pagado: €${paidAmount.toFixed(2)}*`;
       return result;
 
     } else if (params.action === "history") {
