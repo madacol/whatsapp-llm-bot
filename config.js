@@ -6,25 +6,37 @@ const system_prompt = `You are Madabot, a helpful AI assistant in a WhatsApp cha
 You are in a WhatsApp chat, so you can use WhatsApp formatting to enhance readability (bold, italic, citations, code blocks, etc.).`;
 
 export default {
-  MASTER_IDs: process.env.MASTER_ID?.split(',') ?? [],
-  model: process.env.MODEL || "gpt-4.1",
+  get MASTER_IDs() { return process.env.MASTER_ID?.split(',') ?? []; },
+  set MASTER_IDs(v) { process.env.MASTER_ID = v.join(','); },
+
+  get model() { return process.env.MODEL || "gpt-4.1"; },
   get llm_api_key() { return process.env.LLM_API_KEY; },
   get base_url() { return process.env.BASE_URL; },
-  system_prompt: process.env.SYSTEM_PROMPT || system_prompt,
-  brave_api_key: process.env.BRAVE_API_KEY,
-  media_to_text_model: process.env.MEDIA_TO_TEXT_MODEL || "",
-  image_to_text_model: process.env.IMAGE_TO_TEXT_MODEL || "",
-  audio_to_text_model: process.env.AUDIO_TO_TEXT_MODEL || "",
-  video_to_text_model: process.env.VIDEO_TO_TEXT_MODEL || "",
-  embedding_model: process.env.EMBEDDING_MODEL || "google/gemini-embedding-001",
-  image_model: process.env.IMAGE_MODEL || "google/gemini-3-pro-image-preview",
-  coding_model: process.env.CODING_MODEL || "",
-  smart_model: process.env.SMART_MODEL || "",
-  fast_model: process.env.FAST_MODEL || "",
+  get system_prompt() { return process.env.SYSTEM_PROMPT || system_prompt; },
+
+  get brave_api_key() { return process.env.BRAVE_API_KEY; },
+  set brave_api_key(v) { if (v) process.env.BRAVE_API_KEY = v; else delete process.env.BRAVE_API_KEY; },
+
+  get media_to_text_model() { return process.env.MEDIA_TO_TEXT_MODEL || ""; },
+  set media_to_text_model(v) { if (v) process.env.MEDIA_TO_TEXT_MODEL = v; else delete process.env.MEDIA_TO_TEXT_MODEL; },
+
+  get image_to_text_model() { return process.env.IMAGE_TO_TEXT_MODEL || ""; },
+  set image_to_text_model(v) { if (v) process.env.IMAGE_TO_TEXT_MODEL = v; else delete process.env.IMAGE_TO_TEXT_MODEL; },
+
+  get audio_to_text_model() { return process.env.AUDIO_TO_TEXT_MODEL || ""; },
+
+  get video_to_text_model() { return process.env.VIDEO_TO_TEXT_MODEL || ""; },
+  set video_to_text_model(v) { if (v) process.env.VIDEO_TO_TEXT_MODEL = v; else delete process.env.VIDEO_TO_TEXT_MODEL; },
+
+  get embedding_model() { return process.env.EMBEDDING_MODEL || "google/gemini-embedding-001"; },
+  get image_model() { return process.env.IMAGE_MODEL || "google/gemini-3-pro-image-preview"; },
+  get coding_model() { return process.env.CODING_MODEL || ""; },
+  get smart_model() { return process.env.SMART_MODEL || ""; },
+  get fast_model() { return process.env.FAST_MODEL || ""; },
   get gemini_api_key() { return process.env.GEMINI_API_KEY; },
   get fal_api_key() { return process.env.FAL_KEY; },
-  video_model: process.env.VIDEO_MODEL || "fal-ai/kling-video/v3/standard",
-  memory_threshold: parseFloat(process.env.MEMORY_THRESHOLD || "") || 0.3,
-  html_server_port: parseInt(process.env.HTML_SERVER_PORT || "3100", 10),
+  get video_model() { return process.env.VIDEO_MODEL || "fal-ai/kling-video/v3/standard"; },
+  get memory_threshold() { return parseFloat(process.env.MEMORY_THRESHOLD || "") || 0.3; },
+  get html_server_port() { return parseInt(process.env.HTML_SERVER_PORT || "3100", 10); },
   get html_server_base_url() { return process.env.HTML_SERVER_BASE_URL || ""; },
 };
