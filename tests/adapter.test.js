@@ -2,7 +2,6 @@ import { describe, it, before } from "node:test";
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
 
-// Env vars needed because whatsapp-adapter.js imports index.js which loads config.js
 process.env.TESTING = "1";
 process.env.MASTER_ID = "master-user";
 process.env.LLM_API_KEY = "test-key";

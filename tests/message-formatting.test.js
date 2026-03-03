@@ -572,7 +572,7 @@ describe("formatMessagesForOpenAI", () => {
       { message_data: { role: "user", content: [{ type: "text", text: "wait nvm" }] }, sender_id: "user-1" },
       { message_data: { role: "assistant", content: [{ type: "tool", tool_id: "call_A", name: "fn", arguments: "{}" }] }, sender_id: "bot" },
     ]);
-    const result = await formatMessagesForOpenAI(messages);
+    const { messages: result } = await formatMessagesForOpenAI(messages);
 
     assert.equal(result.length, 3);
     assert.equal(result[0].role, "assistant");
@@ -599,7 +599,7 @@ describe("formatMessagesForOpenAI", () => {
         sender_id: "bot",
       },
     ]);
-    const result = await formatMessagesForOpenAI(messages);
+    const { messages: result } = await formatMessagesForOpenAI(messages);
 
     assert.equal(result.length, 3);
     assert.equal(result[0].role, "assistant");
@@ -635,7 +635,7 @@ describe("formatMessagesForOpenAI", () => {
       },
       { message_data: { role: "user", content: [{ type: "text", text: "original" }] }, sender_id: "user-1" },
     ]);
-    const result = await formatMessagesForOpenAI(messages);
+    const { messages: result } = await formatMessagesForOpenAI(messages);
 
     assert.equal(result.length, 6);
     assert.equal(result[0].role, "user"); // original

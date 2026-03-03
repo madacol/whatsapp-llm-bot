@@ -2,6 +2,7 @@ import { describe, it, before, after, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { createTestDb, createMockLlmServer, withModelsCache } from "./helpers.js";
 import { createLlmClient } from "../llm.js";
+import config from "../config.js";
 
 /** @type {PGlite} */
 let db;
@@ -255,7 +256,7 @@ describe("media-to-text", () => {
       const { convertUnsupportedMedia } = await import(
         "../media-to-text.js"
       );
-      const config = (await import("../config.js")).default;
+
 
       const origContentModel = config.media_to_text_model;
       config.media_to_text_model = "";
@@ -638,7 +639,7 @@ describe("media-to-text", () => {
       const { convertUnsupportedMedia } = await import(
         "../media-to-text.js"
       );
-      const config = (await import("../config.js")).default;
+
 
       const origImageModel = config.image_to_text_model;
       const origMediaModel = config.media_to_text_model;
@@ -705,7 +706,7 @@ describe("media-to-text", () => {
       const { convertUnsupportedMedia } = await import(
         "../media-to-text.js"
       );
-      const config = (await import("../config.js")).default;
+
 
       const origImageModel = config.image_to_text_model;
       const origMediaModel = config.media_to_text_model;
@@ -786,7 +787,7 @@ describe("media-to-text", () => {
       );
 
       // Temporarily set config.media_to_text_model
-      const config = (await import("../config.js")).default;
+
       const origContentModel = config.media_to_text_model;
       config.media_to_text_model = "fallback/model";
 
