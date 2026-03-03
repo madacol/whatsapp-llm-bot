@@ -378,12 +378,17 @@ describe("formatMessagesForOpenAI", () => {
     ];
     const result = await formatMessagesForOpenAI(messages);
 
-    assert.equal(result.length, 1);
+    // Assistant + placeholder for missing tool result
+    assert.equal(result.length, 2);
     assert.equal(result[0].role, "assistant");
     const msg = /** @type {import("openai").default.ChatCompletionAssistantMessageParam} */ (result[0]);
     assert.ok(msg.tool_calls);
     assert.equal(msg.tool_calls.length, 1);
     assert.equal(msg.tool_calls[0].function.name, "run_javascript");
+    // Placeholder for missing result
+    assert.equal(result[1].role, "tool");
+    assert.equal(/** @type {any} */ (result[1]).tool_call_id, "call_123");
+    assert.equal(/** @type {any} */ (result[1]).content, "[tool result unavailable]");
   });
 
   it("converts tool result message (after an assistant with tool_calls)", async () => {
