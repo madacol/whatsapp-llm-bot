@@ -16,6 +16,7 @@ import {
 } from "./helpers.js";
 import { setDb } from "../db.js";
 import { startHtmlServer, stopHtmlServer } from "../html-server.js";
+import config from "../config.js";
 
 /** @type {Awaited<ReturnType<typeof createMockLlmServer>>} */
 let mockServer;
@@ -1583,9 +1584,7 @@ describe("_media_refs resolution in tool calls", () => {
   const chatId = "media-refs-chat";
 
   before(async () => {
-    // Set model explicitly — config.model may differ from process.env.MODEL
-    // because ESM evaluates imports before top-level code
-    await seedChat(chatId, { enabled: true, model: "mock-model" });
+    await seedChat(chatId, { enabled: true });
     // mock-model must support images so they pass through to formatMessagesForOpenAI
     // (otherwise convertUnsupportedMedia strips them before mediaRegistry is populated)
     await fs.writeFile(CACHE_PATH, JSON.stringify([
@@ -2081,8 +2080,6 @@ describe("Presence updates", () => {
 // ═══════════════════════════════════════════════════════════════════
 describe("convertUnsupportedMedia warning", () => {
   const chatId = "unsupported-video-chat";
-  /** @type {typeof import("../config.js").default} */
-  let cfg;
   /** @type {string} */
   let savedVideoModel;
   /** @type {string} */
@@ -2090,19 +2087,17 @@ describe("convertUnsupportedMedia warning", () => {
 
   before(async () => {
     await seedChat(chatId, { enabled: true });
-    // Dynamically import config (static import would load before process.env is set)
-    cfg = (await import("../config.js")).default;
     // Ensure no video_to_text_model / media_to_text_model is configured
     // (they may be set via .env), so video gets replaced with placeholder
-    savedVideoModel = cfg.video_to_text_model;
-    savedMediaModel = cfg.media_to_text_model;
-    cfg.video_to_text_model = "";
-    cfg.media_to_text_model = "";
+    savedVideoModel = config.video_to_text_model;
+    savedMediaModel = config.media_to_text_model;
+    config.video_to_text_model = "";
+    config.media_to_text_model = "";
   });
 
   after(() => {
-    cfg.video_to_text_model = savedVideoModel;
-    cfg.media_to_text_model = savedMediaModel;
+    config.video_to_text_model = savedVideoModel;
+    config.media_to_text_model = savedMediaModel;
   });
 
   it("shows ⚠️ warning and replaces video with placeholder text", async () => {
