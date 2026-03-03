@@ -285,12 +285,17 @@ describe("formatMessagesForOpenAI", () => {
     ];
     const { messages: result } = await formatMessagesForOpenAI(messages);
 
-    assert.equal(result.length, 1);
+    // Assistant + placeholder for missing tool result
+    assert.equal(result.length, 2);
     assert.equal(result[0].role, "assistant");
     const msg = /** @type {import("openai").default.ChatCompletionAssistantMessageParam} */ (result[0]);
     assert.ok(msg.tool_calls);
     assert.equal(msg.tool_calls.length, 1);
     assert.equal(msg.tool_calls[0].function.name, "run_javascript");
+    // Placeholder for missing result
+    assert.equal(result[1].role, "tool");
+    assert.equal(/** @type {any} */ (result[1]).tool_call_id, "call_123");
+    assert.equal(/** @type {any} */ (result[1]).content, "[tool result unavailable]");
   });
 
   it("converts tool result message (after an assistant with tool_calls)", async () => {
@@ -555,6 +560,92 @@ describe("formatMessagesForOpenAI", () => {
     const { messages: result } = await formatMessagesForOpenAI(messages);
 
     assert.equal(result.length, 3);
+  });
+
+  it("reorders interleaved user message to after tool results", async () => {
+    // Scenario: user sends a message while the bot is executing a tool call
+    // DB order (newest first): tool(A), user, assistant(tool_calls:[A])
+    // After reverse: assistant(tool_calls:[A]), user, tool(A)
+    // Expected: assistant(tool_calls:[A]), tool(A), user
+    const messages = /** @type {any} */ ([
+      { message_data: { role: "tool", tool_id: "call_A", content: [{ type: "text", text: "done" }] }, sender_id: "bot" },
+      { message_data: { role: "user", content: [{ type: "text", text: "wait nvm" }] }, sender_id: "user-1" },
+      { message_data: { role: "assistant", content: [{ type: "tool", tool_id: "call_A", name: "fn", arguments: "{}" }] }, sender_id: "bot" },
+    ]);
+    const result = await formatMessagesForOpenAI(messages);
+
+    assert.equal(result.length, 3);
+    assert.equal(result[0].role, "assistant");
+    assert.equal(result[1].role, "tool");
+    assert.equal(/** @type {any} */ (result[1]).tool_call_id, "call_A");
+    assert.equal(result[2].role, "user");
+  });
+
+  it("adds placeholder for missing tool result", async () => {
+    // Scenario: bot crashed mid-execution, only one of two tool results recorded
+    // DB order (newest first): tool(A), assistant(tool_calls:[A,B])
+    // After reverse: assistant(tool_calls:[A,B]), tool(A)
+    // Expected: assistant(tool_calls:[A,B]), tool(A), tool(B, placeholder)
+    const messages = /** @type {any} */ ([
+      { message_data: { role: "tool", tool_id: "call_A", content: [{ type: "text", text: "result A" }] }, sender_id: "bot" },
+      {
+        message_data: {
+          role: "assistant",
+          content: [
+            { type: "tool", tool_id: "call_A", name: "fn_a", arguments: "{}" },
+            { type: "tool", tool_id: "call_B", name: "fn_b", arguments: "{}" },
+          ],
+        },
+        sender_id: "bot",
+      },
+    ]);
+    const result = await formatMessagesForOpenAI(messages);
+
+    assert.equal(result.length, 3);
+    assert.equal(result[0].role, "assistant");
+    assert.equal(result[1].role, "tool");
+    assert.equal(/** @type {any} */ (result[1]).tool_call_id, "call_A");
+    assert.equal(result[2].role, "tool");
+    assert.equal(/** @type {any} */ (result[2]).tool_call_id, "call_B");
+    assert.equal(/** @type {any} */ (result[2]).content, "[tool result unavailable]");
+  });
+
+  it("handles multiple tool rounds with interleaving", async () => {
+    // Two assistant→tool rounds, user message intrudes in the second
+    // DB order (newest first): tool(C), user_interloper, assistant(tool_calls:[C]), tool(A), assistant(tool_calls:[A]), user_original
+    // After reverse: user_original, assistant(tool_calls:[A]), tool(A), assistant(tool_calls:[C]), user_interloper, tool(C)
+    // Expected: user_original, assistant(tool_calls:[A]), tool(A), assistant(tool_calls:[C]), tool(C), user_interloper
+    const messages = /** @type {any} */ ([
+      { message_data: { role: "tool", tool_id: "call_C", content: [{ type: "text", text: "done C" }] }, sender_id: "bot" },
+      { message_data: { role: "user", content: [{ type: "text", text: "interloper" }] }, sender_id: "user-1" },
+      {
+        message_data: {
+          role: "assistant",
+          content: [{ type: "tool", tool_id: "call_C", name: "fn_c", arguments: "{}" }],
+        },
+        sender_id: "bot",
+      },
+      { message_data: { role: "tool", tool_id: "call_A", content: [{ type: "text", text: "done A" }] }, sender_id: "bot" },
+      {
+        message_data: {
+          role: "assistant",
+          content: [{ type: "tool", tool_id: "call_A", name: "fn_a", arguments: "{}" }],
+        },
+        sender_id: "bot",
+      },
+      { message_data: { role: "user", content: [{ type: "text", text: "original" }] }, sender_id: "user-1" },
+    ]);
+    const result = await formatMessagesForOpenAI(messages);
+
+    assert.equal(result.length, 6);
+    assert.equal(result[0].role, "user"); // original
+    assert.equal(result[1].role, "assistant"); // tool_calls:[A]
+    assert.equal(result[2].role, "tool"); // tool(A)
+    assert.equal(/** @type {any} */ (result[2]).tool_call_id, "call_A");
+    assert.equal(result[3].role, "assistant"); // tool_calls:[C]
+    assert.equal(result[4].role, "tool"); // tool(C)
+    assert.equal(/** @type {any} */ (result[4]).tool_call_id, "call_C");
+    assert.equal(result[5].role, "user"); // interloper
   });
 
   it("strips only orphaned tool result when mixed with valid ones", async () => {
