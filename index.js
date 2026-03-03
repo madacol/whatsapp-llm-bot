@@ -650,36 +650,22 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
   return { handleMessage };
 }
 
-// ── Default initialization (production) ──
+/**
+ * @typedef {{
+ *   store: Pick<Store, "addMessage">;
+ *   executeActionFn: typeof executeAction;
+ *   pendingByMsgKeyId: Map<string, import("./pending-confirmations.js").PendingConfirmationRow>;
+ *   rootDb: import("@electric-sql/pglite").PGlite;
+ * }} ReactionHandlerDeps
+ */
 
-if (!process.env.TESTING) {
-  const store = await initStore();
-  const llmClient = createLlmClient();
-
-  const { handleMessage } = createMessageHandler({
-    store,
-    llmClient,
-    getActionsFn: getActions,
-    executeActionFn: executeAction,
-  });
-
-  await startHtmlServer(config.html_server_port, getRootDb());
-
-  const rootDb = getRootDb();
-
-  // Load pending confirmations from a previous session
-  const pendingConfirmations = await loadPendingConfirmations(rootDb);
-  if (pendingConfirmations.length > 0) {
-    log.info(`Loaded ${pendingConfirmations.length} pending confirmation(s) from previous session`);
-  }
-
-  /** @type {Map<string, import("./pending-confirmations.js").PendingConfirmationRow>} */
-  const pendingByMsgKeyId = new Map(
-    pendingConfirmations.map(row => [row.msg_key_id, row]),
-  );
-
+/**
+ * Create a reaction handler for resuming pending confirmations after restart.
+ * @param {ReactionHandlerDeps} deps
+ * @returns {(event: import("./whatsapp-adapter.js").ReactionEvent, sock: import("@whiskeysockets/baileys").WASocket) => Promise<void>}
+ */
+export function createReactionHandler({ store, executeActionFn, pendingByMsgKeyId, rootDb }) {
   /**
-   * Global reaction handler for resuming confirmations after restart.
    * @param {import("./whatsapp-adapter.js").ReactionEvent} event
    * @param {import("@whiskeysockets/baileys").WASocket} sock
    */
@@ -702,6 +688,18 @@ if (!process.env.TESTING) {
       await sock.sendMessage(pending.msg_key_remote_jid, {
         react: { text: "❌", key: msgKey },
       });
+
+      // Store rejection as tool result so the LLM learns the action was rejected
+      if (pending.tool_call_id) {
+        /** @type {ToolMessage} */
+        const toolMessage = {
+          role: "tool",
+          tool_id: pending.tool_call_id,
+          content: [{ type: "text", text: "[action rejected by user]" }],
+        };
+        await store.addMessage(pending.chat_id, toolMessage, pending.sender_ids);
+      }
+
       log.info(`Pending confirmation for ${pending.action_name} rejected after restart`);
       return;
     }
@@ -741,20 +739,82 @@ if (!process.env.TESTING) {
     };
 
     try {
-      const { result } = await executeAction(
+      const { result } = await executeActionFn(
         pending.action_name,
         resumeContext,
         pending.action_params,
         pending.tool_call_id,
       );
       const resultText = typeof result === "string" ? result : JSON.stringify(result, null, 2);
+
+      // Store tool result so the LLM learns the outcome
+      if (pending.tool_call_id) {
+        /** @type {ToolMessage} */
+        const toolMessage = {
+          role: "tool",
+          tool_id: pending.tool_call_id,
+          content: [{ type: "text", text: resultText }],
+        };
+        await store.addMessage(pending.chat_id, toolMessage, pending.sender_ids);
+      }
+
       await sock.sendMessage(pending.chat_id, { text: `🔧 ${resultText}` });
     } catch (error) {
       log.error(`Error resuming action "${pending.action_name}":`, error);
       const errorMsg = error instanceof Error ? error.message : String(error);
+
+      // Store error as tool result so the LLM learns the failure
+      if (pending.tool_call_id) {
+        /** @type {ToolMessage} */
+        const toolMessage = {
+          role: "tool",
+          tool_id: pending.tool_call_id,
+          content: [{ type: "text", text: `Error executing ${pending.action_name}: ${errorMsg}` }],
+        };
+        await store.addMessage(pending.chat_id, toolMessage, pending.sender_ids);
+      }
+
       await sock.sendMessage(pending.chat_id, { text: `❌ Error resuming ${pending.action_name}: ${errorMsg}` });
     }
   }
+
+  return onReaction;
+}
+
+// ── Default initialization (production) ──
+
+if (!process.env.TESTING) {
+  const store = await initStore();
+  const llmClient = createLlmClient();
+
+  const { handleMessage } = createMessageHandler({
+    store,
+    llmClient,
+    getActionsFn: getActions,
+    executeActionFn: executeAction,
+  });
+
+  await startHtmlServer(config.html_server_port, getRootDb());
+
+  const rootDb = getRootDb();
+
+  // Load pending confirmations from a previous session
+  const pendingConfirmations = await loadPendingConfirmations(rootDb);
+  if (pendingConfirmations.length > 0) {
+    log.info(`Loaded ${pendingConfirmations.length} pending confirmation(s) from previous session`);
+  }
+
+  /** @type {Map<string, import("./pending-confirmations.js").PendingConfirmationRow>} */
+  const pendingByMsgKeyId = new Map(
+    pendingConfirmations.map(row => [row.msg_key_id, row]),
+  );
+
+  const onReaction = createReactionHandler({
+    store,
+    executeActionFn: executeAction,
+    pendingByMsgKeyId,
+    rootDb,
+  });
 
   const { closeWhatsapp, sendToChat } = await connectToWhatsApp({
     onMessage: handleMessage,
