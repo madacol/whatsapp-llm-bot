@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 
-const DEFAULT_TIMEOUT = 30_000;
+const DEFAULT_TIMEOUT = 120_000;
 const MAX_BUFFER = 1024 * 1024;
 
 /**
@@ -58,6 +58,11 @@ export default /** @type {defineAction} */ ((x) => x)({
       command: {
         type: "string",
         description: "The shell command to execute",
+      },
+      timeout: {
+        type: "integer",
+        description:
+          "Timeout in milliseconds (default: 120000). Increase for long-running commands like test suites.",
       },
     },
     required: ["command"],
