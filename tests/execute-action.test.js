@@ -1,12 +1,12 @@
 import { describe, it, before, after } from "node:test";
 import assert from "node:assert/strict";
 
-// Env vars must be set before dynamic import of actions.js (which loads config.js)
 process.env.TESTING = "1";
 process.env.MASTER_ID = "master-user";
 process.env.LLM_API_KEY = "test-key";
 process.env.MODEL = "mock-model";
 
+import config from "../config.js";
 import { createTestDb } from "./helpers.js";
 import { setDb } from "../db.js";
 
@@ -81,7 +81,6 @@ function createMockContext(overrides = {}) {
 
 describe("config", () => {
   it("MASTER_IDs is always an array", async () => {
-    const config = (await import("../config.js")).default;
     assert.ok(Array.isArray(config.MASTER_IDs), `Expected array, got ${typeof config.MASTER_IDs}: ${JSON.stringify(config.MASTER_IDs)}`);
   });
 });

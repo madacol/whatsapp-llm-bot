@@ -1,7 +1,6 @@
 import { describe, it, before, after, afterEach } from "node:test";
 import assert from "node:assert/strict";
 
-// Env vars MUST be set before any dynamic import that triggers config.js
 process.env.TESTING = "1";
 process.env.MASTER_ID = "master-user";
 process.env.LLM_API_KEY = "test-key";

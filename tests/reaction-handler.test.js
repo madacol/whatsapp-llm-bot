@@ -1,4 +1,3 @@
-// ── Env vars MUST be set before any import that triggers config.js ──
 process.env.TESTING = "1";
 process.env.MASTER_ID = "master-user";
 process.env.LLM_API_KEY = "test-key";
