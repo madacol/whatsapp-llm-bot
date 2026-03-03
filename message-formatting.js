@@ -256,29 +256,97 @@ function formatToolContent(message) {
 }
 
 /**
- * Remove tool result messages whose tool_call_id has no matching tool_calls entry
- * in any assistant message. This prevents 400 errors from the LLM API when
- * conversation history contains orphaned tool results (e.g. after truncation).
+ * Normalize tool message ordering so each tool result immediately follows its
+ * assistant message, orphaned tool results are dropped, and missing tool results
+ * get placeholders. This prevents 400 errors from the LLM API which requires
+ * tool_result blocks to follow the assistant message that issued the tool_calls.
  * @param {Array<OpenAI.ChatCompletionMessageParam>} messages
  * @returns {Array<OpenAI.ChatCompletionMessageParam>}
  */
-function removeOrphanedToolResults(messages) {
-  /** @type {Set<string>} */
-  const validToolCallIds = new Set();
+function normalizeToolMessages(messages) {
+  // Map each tool_call_id → index of the assistant message that owns it
+  /** @type {Map<string, number>} */
+  const toolCallOwner = new Map();
 
-  for (const msg of messages) {
+  // Track which tool_call_ids each assistant message expects
+  /** @type {Map<number, string[]>} */
+  const assistantToolCallIds = new Map();
+
+  for (let i = 0; i < messages.length; i++) {
+    const msg = messages[i];
     if (msg.role === "assistant" && "tool_calls" in msg && msg.tool_calls) {
-      for (const tc of msg.tool_calls) {
-        validToolCallIds.add(tc.id);
+      const ids = msg.tool_calls.map(tc => tc.id);
+      assistantToolCallIds.set(i, ids);
+      for (const id of ids) {
+        toolCallOwner.set(id, i);
       }
     }
   }
 
-  return messages.filter(msg => {
-    if (msg.role !== "tool") return true;
-    const toolMsg = /** @type {OpenAI.ChatCompletionToolMessageParam} */ (msg);
-    return validToolCallIds.has(toolMsg.tool_call_id);
-  });
+  // Group tool result messages by their owning assistant index
+  /** @type {Map<number, OpenAI.ChatCompletionMessageParam[]>} */
+  const toolResultsByAssistant = new Map();
+
+  // Collect non-tool messages in order, excluding tool results (we'll re-insert them)
+  /** @type {Array<{ msg: OpenAI.ChatCompletionMessageParam, originalIndex: number }>} */
+  const nonToolMessages = [];
+
+  for (let i = 0; i < messages.length; i++) {
+    const msg = messages[i];
+    if (msg.role === "tool") {
+      const toolMsg = /** @type {OpenAI.ChatCompletionToolMessageParam} */ (msg);
+      const ownerIdx = toolCallOwner.get(toolMsg.tool_call_id);
+      if (ownerIdx !== undefined) {
+        if (!toolResultsByAssistant.has(ownerIdx)) {
+          toolResultsByAssistant.set(ownerIdx, []);
+        }
+        toolResultsByAssistant.get(ownerIdx).push(msg);
+      }
+      // Orphaned tool results (no ownerIdx) are silently dropped
+    } else {
+      nonToolMessages.push({ msg, originalIndex: i });
+    }
+  }
+
+  // Rebuild: for each non-tool message, emit it; after each assistant with
+  // tool_calls, insert its grouped tool results + placeholders for missing ones
+  /** @type {Array<OpenAI.ChatCompletionMessageParam>} */
+  const result = [];
+
+  for (const { msg, originalIndex } of nonToolMessages) {
+    result.push(msg);
+
+    if (assistantToolCallIds.has(originalIndex)) {
+      const expectedIds = assistantToolCallIds.get(originalIndex);
+      const actualResults = toolResultsByAssistant.get(originalIndex) ?? [];
+
+      /** @type {Set<string>} */
+      const receivedIds = new Set(
+        actualResults.map(m =>
+          /** @type {OpenAI.ChatCompletionToolMessageParam} */ (m).tool_call_id
+        )
+      );
+
+      // Emit actual results in their expected order
+      for (const id of expectedIds) {
+        const existing = actualResults.find(
+          m => /** @type {OpenAI.ChatCompletionToolMessageParam} */ (m).tool_call_id === id
+        );
+        if (existing) {
+          result.push(existing);
+        } else {
+          // Placeholder for missing tool result
+          result.push({
+            role: /** @type {const} */ ("tool"),
+            tool_call_id: id,
+            content: "[tool result unavailable]",
+          });
+        }
+      }
+    }
+  }
+
+  return result;
 }
 
 /**
@@ -310,5 +378,5 @@ export async function formatMessagesForOpenAI(chatMessages) {
     }
   }
 
-  return removeOrphanedToolResults(formatted);
+  return normalizeToolMessages(formatted);
 }
