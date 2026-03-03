@@ -417,7 +417,12 @@ async function processLlmResponse({ session, llmConfig, formattedMessages, media
       }
     }
 
-    if (!continueProcessing) return;
+    if (!continueProcessing) {
+      const confirmed = await context.confirm(
+        `React 👍 to continue or 👎 to stop.`,
+      );
+      if (!confirmed) return;
+    }
     depth++;
 
     if (depth >= MAX_TOOL_CALL_DEPTH) {
