@@ -6,6 +6,8 @@ const EXTRACT_PROMPT = `Extrae datos de la factura en JSON estricto (solo JSON):
   "store_name": "nombre",
   "purchase_date": "YYYY-MM-DD o null",
   "items": [{ "item_name": "nombre", "quantity": 1, "unit_price": 0.0, "subtotal": 0.0 }],
+  "discounts": [{ "description": "nombre/tipo del descuento", "amount": 0.0 }],
+  "subtotal": 0.0,
   "total": 0.0
 }
 
@@ -14,12 +16,14 @@ Reglas:
 - Usa null si el dato es ilegible.
 - Extrae TODOS los productos individuales.
 - Excluye descuentos, cupones o subtotales de la lista de items.
-- "total" es el monto final neto pagado.
+- "discounts" son todos los descuentos aplicados (empleado, cupones, vales, etc). Si no hay, usa [].
+- "subtotal" es la suma antes de descuentos (BAL).
+- "total" es el monto final neto pagado (después de descuentos).
 - Sin texto adicional ni markdown.`;
 
 /**
  * @param {string} raw - Raw LLM response (may contain markdown fences)
- * @returns {{ store_name: string|null, purchase_date: string|null, items: Array<{item_name: string, quantity: number, unit_price: number, subtotal: number}>, total: number }}
+ * @returns {{ store_name: string|null, purchase_date: string|null, items: Array<{item_name: string, quantity: number, unit_price: number, subtotal: number}>, discounts: Array<{description: string, amount: number}>, subtotal: number, total: number }}
  */
 function parseExtractResponse(raw) {
   const cleaned = raw.replace(/```json?\n?/g, "").replace(/```/g, "").trim();
@@ -178,6 +182,11 @@ TOTAL: €6.00
         assert.ok(item.item_name, "each item should have a name");
         assert.equal(typeof item.quantity, "number", "quantity should be a number");
       }
+
+      // Discounts: text-only receipt with no discounts
+      assert.ok(Array.isArray(data.discounts), "discounts should be an array");
+      assert.equal(data.discounts.length, 0, `should have no discounts for this receipt, got ${data.discounts.length}`);
+      assert.equal(typeof data.subtotal, "number", "subtotal should be a number");
     },
     async function extract_from_receipt_image(callLlm, readFixture, prompt) {
       const imageBuffer = await readFixture("receipt-1.jpeg");
@@ -226,6 +235,83 @@ TOTAL: €6.00
       );
 
       assert.equal(data.total, 31.22, `total should be 31.22, got ${data.total}`);
+
+      // Discount extraction
+      assert.ok(Array.isArray(data.discounts), "discounts should be an array");
+      assert.ok(data.discounts.length > 0, "receipt-1 has discounts, should extract them");
+      for (const d of data.discounts) {
+        assert.ok(d.description, "each discount should have a description");
+        assert.equal(typeof d.amount, "number", `discount amount should be a number for '${d.description}'`);
+        assert.ok(d.amount > 0, `discount amount should be > 0 for '${d.description}'`);
+      }
+      const discountsSum = data.discounts.reduce((sum, d) => sum + d.amount, 0);
+      assert.ok(discountsSum > 0, `discounts sum should be > 0, got ${discountsSum}`);
+      assert.equal(typeof data.subtotal, "number", "subtotal should be a number");
+      assert.ok(
+        Math.abs(data.subtotal - discountsSum - data.total) < 1.0,
+        `subtotal (${data.subtotal}) - discounts (${discountsSum}) should ≈ total (${data.total})`,
+      );
+    },
+    async function extract_from_receipt_with_discounts(callLlm, readFixture, prompt) {
+      const imageBuffer = await readFixture("receipt-dunnes-discounts.jpeg");
+      const base64 = imageBuffer.toString("base64");
+
+      /** @type {ContentBlock[]} */
+      const content = [
+        { type: "image", encoding: "base64", mime_type: "image/jpeg", data: base64 },
+        { type: "text", text: prompt() },
+      ];
+
+      const response = await callLlm(content, { model: resolveModel("image_to_text") });
+      assert.ok(response, "LLM should return a response");
+
+      const data = parseExtractResponse(/** @type {string} */ (response));
+
+      assert.ok(data.store_name, "should extract store name");
+      assert.match(
+        data.store_name.toLowerCase(),
+        /dunnes/,
+        `store name should contain 'dunnes', got '${data.store_name}'`,
+      );
+
+      assert.equal(data.purchase_date, "2026-03-02", `date should be 2026-03-02, got '${data.purchase_date}'`);
+
+      // Items
+      assert.ok(Array.isArray(data.items), "items should be an array");
+      assert.ok(data.items.length >= 18, `should extract at least 18 items, got ${data.items.length}`);
+      assert.ok(data.items.length <= 24, `should extract at most 24 items, got ${data.items.length}`);
+
+      const allNames = data.items.map(i => i.item_name.toLowerCase()).join(" | ");
+      for (const keyword of ["egg", "rice cake", "lettuce", "pineapple", "lemsip"]) {
+        assert.ok(allNames.includes(keyword), `should find '${keyword}' in items, got: ${allNames}`);
+      }
+
+      // Subtotal (BAL) should be ~129.21
+      assert.ok(
+        Math.abs(data.subtotal - 129.21) < 1.0,
+        `subtotal should be ~129.21, got ${data.subtotal}`,
+      );
+
+      // Discounts: employee (25.84) + vouchers (10 + 10 + 5 = 25) = 50.84
+      assert.ok(Array.isArray(data.discounts), "discounts should be an array");
+      assert.ok(data.discounts.length >= 2, `should have at least 2 discount types, got ${data.discounts.length}`);
+      const discountsSum = data.discounts.reduce((sum, d) => sum + d.amount, 0);
+      assert.ok(
+        Math.abs(discountsSum - 50.84) < 1.0,
+        `discounts should sum to ~50.84, got ${discountsSum.toFixed(2)}`,
+      );
+
+      // Total (BAL TO PAY) should be 78.37
+      assert.ok(
+        Math.abs(data.total - 78.37) < 1.0,
+        `total should be ~78.37, got ${data.total}`,
+      );
+
+      // Validate consistency: subtotal - discounts ≈ total
+      assert.ok(
+        Math.abs(data.subtotal - discountsSum - data.total) < 1.0,
+        `subtotal (${data.subtotal}) - discounts (${discountsSum.toFixed(2)}) should ≈ total (${data.total})`,
+      );
     },
   ],
   action_fn: async function (context, params) {
