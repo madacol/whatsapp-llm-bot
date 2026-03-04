@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 
 /** @type {ActionDbTestFn[]} */
 export default [
-async function formats_model_comparison_table(action_fn, _db) {
+async function searches_across_multiple_columns(action_fn, _db) {
       const fs = await import("node:fs/promises");
       const path = await import("node:path");
       const cachePath = path.resolve("data/models.json");
@@ -13,12 +13,14 @@ async function formats_model_comparison_table(action_fn, _db) {
         {
           id: "openai/gpt-4o",
           name: "GPT-4o",
+          description: "A fast multimodal model",
           context_length: 128000,
           pricing: { prompt: "0.000005", completion: "0.000015" },
         },
         {
           id: "anthropic/claude-3.5-sonnet",
           name: "Claude 3.5 Sonnet",
+          description: "Great for code and reasoning",
           context_length: 200000,
           pricing: { prompt: "0.000003", completion: "0.000015" },
         },
@@ -27,12 +29,30 @@ async function formats_model_comparison_table(action_fn, _db) {
       await fs.writeFile(cachePath, JSON.stringify(fakeModels));
 
       try {
-        const result = await action_fn(
+        // Search by id substring
+        const byId = await action_fn(
           { log: async () => "" },
-          { providers: "gpt-4o,claude" },
+          { query: "gpt-4o" },
         );
-        assert.ok(result.includes("GPT-4o"));
-        assert.ok(result.includes("Claude 3.5 Sonnet"));
+        assert.ok(byId.includes("GPT-4o"));
+        assert.ok(!byId.includes("Claude"));
+
+        // Search by description content
+        const byDesc = await action_fn(
+          { log: async () => "" },
+          { query: "reasoning" },
+        );
+        assert.ok(byDesc.includes("Claude 3.5 Sonnet"));
+        assert.ok(!byDesc.includes("GPT-4o"));
+
+        // Search matching both models
+        const broad = await action_fn(
+          { log: async () => "" },
+          { query: "model" },
+        );
+        // "model" doesn't appear in id/name/description of either, so no results
+        // Actually "multimodal" contains "model" — GPT-4o matches
+        assert.ok(broad.includes("GPT-4o"));
       } finally {
         await fs.rm(cachePath, { force: true });
       }
@@ -47,6 +67,7 @@ async function formats_model_comparison_table(action_fn, _db) {
         {
           id: "openai/gpt-4o",
           name: "GPT-4o",
+          description: "Multimodal model",
           context_length: 128000,
           pricing: { prompt: "0.000005", completion: "0.000015" },
           architecture: { input_modalities: ["text", "image", "audio"] },
@@ -54,6 +75,7 @@ async function formats_model_comparison_table(action_fn, _db) {
         {
           id: "google/gemini-3-flash",
           name: "Gemini 3 Flash",
+          description: "Fast and versatile",
           context_length: 1000000,
           pricing: { prompt: "0.000001", completion: "0.000004" },
           architecture: { input_modalities: ["text", "image", "video", "audio"] },
@@ -61,6 +83,7 @@ async function formats_model_comparison_table(action_fn, _db) {
         {
           id: "anthropic/claude-3.5-sonnet",
           name: "Claude 3.5 Sonnet",
+          description: "Great for code",
           context_length: 200000,
           pricing: { prompt: "0.000003", completion: "0.000015" },
           architecture: { input_modalities: ["text", "image"] },
@@ -88,10 +111,10 @@ async function formats_model_comparison_table(action_fn, _db) {
         assert.ok(audioResult.includes("Gemini 3 Flash"));
         assert.ok(!audioResult.includes("Claude"));
 
-        // Combine modality + providers
+        // Combine query + modality
         const combinedResult = await action_fn(
           { log: async () => "" },
-          { providers: "google", modality: "video" },
+          { query: "google", modality: "video" },
         );
         assert.ok(combinedResult.includes("Gemini 3 Flash"));
         assert.ok(!combinedResult.includes("GPT-4o"));

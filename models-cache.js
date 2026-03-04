@@ -9,9 +9,10 @@ const log = createLogger("models-cache");
  * @typedef {{
  *   id: string,
  *   name: string,
+ *   description: string,
  *   context_length: number,
  *   pricing: { prompt: string, completion: string },
- *   architecture?: { input_modalities?: string[] }
+ *   architecture?: { modality?: string, input_modalities?: string[] }
  * }} OpenRouterModel
  */
 
