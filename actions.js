@@ -172,7 +172,7 @@ let actions;
  * Ensures the directory exists.
  * @returns {Promise<string>} Absolute path to the actions directory
  */
-export async function initializeDirectoryHandle() {
+async function initializeDirectoryHandle() {
   const dir = path.resolve(process.cwd(), "actions");
   await fs.mkdir(dir, { recursive: true });
   return dir;
