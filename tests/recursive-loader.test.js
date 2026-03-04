@@ -17,7 +17,6 @@ before(async () => {
       parameters: { type: "object", properties: {} },
       permissions: { autoExecute: true },
       action_fn: async () => "ok",
-      test_functions: [async () => {}],
     };`,
   );
 });

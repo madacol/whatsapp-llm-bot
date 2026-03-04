@@ -35,19 +35,18 @@ async function readFixture(name) {
 
 /**
  * Run test_prompts for an action with a given prompt function.
- * @param {Action} action
+ * @param {Array<(callLlm: CallLlm, readFixture: (name: string) => Promise<Buffer>, prompt: (...args: any[]) => string) => Promise<void>>} prompts
  * @param {CallLlm} callLlm
  * @param {(...args: any[]) => string} promptFn
  * @returns {Promise<TestRunSummary>}
  */
-async function runTestPrompts(action, callLlm, promptFn) {
-  const testPrompts = action.test_prompts ?? [];
+async function runTestPrompts(prompts, callLlm, promptFn) {
   /** @type {TestResult[]} */
   const results = [];
   let passed = 0;
   let failed = 0;
 
-  for (const fn of testPrompts) {
+  for (const fn of prompts) {
     const name = fn.name || "anonymous";
     try {
       await fn(callLlm, readFixture, promptFn);
@@ -110,14 +109,23 @@ ${testResults.failed > 0
  * @param {{maxIterations: number, model?: string}} opts
  */
 async function optimize(actionName, opts) {
-  // Load the action
+  // Load the action and its test prompts
   const actionsDir = path.resolve(process.cwd(), "actions");
   /** @type {{default: Action}} */
   let mod;
+  /** @type {Array<(callLlm: CallLlm, readFixture: (name: string) => Promise<Buffer>, prompt: (...args: any[]) => string) => Promise<void>>} */
+  let testPrompts;
   try {
-    mod = await import(`file://${path.join(actionsDir, `${actionName}.js`)}`);
+    mod = await import(`file://${path.join(actionsDir, actionName, "index.js")}`);
   } catch {
-    console.error(`Could not load action file: actions/${actionName}.js`);
+    console.error(`Could not load action file: actions/${actionName}/index.js`);
+    process.exit(1);
+  }
+  try {
+    const promptsMod = await import(`file://${path.join(actionsDir, actionName, "_test-prompts.js")}`);
+    testPrompts = promptsMod.default;
+  } catch {
+    console.error(`Could not load test prompts: actions/${actionName}/_test-prompts.js`);
     process.exit(1);
   }
 
@@ -126,7 +134,7 @@ async function optimize(actionName, opts) {
     console.error(`Action "${actionName}" does not have a prompt function.`);
     process.exit(1);
   }
-  if (!action?.test_prompts?.length) {
+  if (!testPrompts?.length) {
     console.error(`Action "${actionName}" does not have test_prompts.`);
     process.exit(1);
   }
@@ -148,7 +156,7 @@ async function optimize(actionName, opts) {
   console.log(`Running baseline tests...\n`);
 
   // Baseline run
-  let bestResult = await runTestPrompts(action, callLlm, currentPromptFn);
+  let bestResult = await runTestPrompts(testPrompts, callLlm, currentPromptFn);
   let bestPromptText = currentPromptText;
   let bestScore = bestResult.passed;
 
@@ -175,7 +183,7 @@ async function optimize(actionName, opts) {
       console.log(`Generated improved prompt (${improvedText.length} chars vs ${currentPromptText.length} chars)`);
 
       const improvedFn = () => improvedText;
-      const result = await runTestPrompts(action, callLlm, improvedFn);
+      const result = await runTestPrompts(testPrompts, callLlm, improvedFn);
 
       console.log(`Result: ${result.passed}/${result.passed + result.failed} passed`);
       for (const r of result.results) {
@@ -240,7 +248,7 @@ async function optimize(actionName, opts) {
   }
 
   // Write the improved prompt back to the source file
-  const actionFilePath = path.join(actionsDir, `${actionName}.js`);
+  const actionFilePath = path.join(actionsDir, actionName, "index.js");
   const source = await readFile(actionFilePath, "utf-8");
 
   const idx = source.indexOf(originalPromptText);

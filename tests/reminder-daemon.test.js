@@ -2,7 +2,7 @@ import { describe, it, before } from "node:test";
 import assert from "node:assert/strict";
 import { PGlite } from "@electric-sql/pglite";
 import { pollReminders } from "../reminder-daemon.js";
-import { ensureSchema } from "../actions/tools/reminders.js";
+import { ensureSchema } from "../actions/tools/reminders/index.js";
 import { createTestDb } from "./helpers.js";
 
 /** @type {PGlite} */
