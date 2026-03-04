@@ -340,7 +340,12 @@ async function importChatAction(chatId, name, code) {
   const cacheKey = `${chatId}:${name}:${codeHash}`;
 
   const cached = chatActionCache.get(cacheKey);
-  if (cached) return cached;
+  if (cached) {
+    // Move to end for LRU ordering
+    chatActionCache.delete(cacheKey);
+    chatActionCache.set(cacheKey, cached);
+    return cached;
+  }
 
   const tmpFile = path.join(os.tmpdir(), `chat-action-${codeHash}.mjs`);
   try {
@@ -370,7 +375,7 @@ async function importChatAction(chatId, name, code) {
       app_name: "",
     };
 
-    // Evict oldest entries when cache exceeds max size
+    // Evict least-recently-used entry when cache exceeds max size
     if (chatActionCache.size >= CHAT_ACTION_CACHE_MAX) {
       const firstKey = chatActionCache.keys().next().value;
       if (firstKey !== undefined) chatActionCache.delete(firstKey);
