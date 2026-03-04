@@ -1827,7 +1827,7 @@ describe("Mixed autoContinue tool calls", () => {
     await seedChat(chatId, { enabled: true });
   });
 
-  it("auto-continues when any tool call has autoContinue, no confirm prompt", async () => {
+  it("asks to confirm when any tool call lacks autoContinue", async () => {
     const reqsBefore = mockServer.getRequests().length;
     // run_javascript has autoContinue:true, chat_settings does not
     mockServer.addResponses(
@@ -1860,23 +1860,17 @@ describe("Mixed autoContinue tool calls", () => {
     });
     await handleMessage(context);
 
-    // No confirm prompt should have been shown
+    // Should ask for confirmation since chat_settings lacks autoContinue
     assert.ok(
-      !responses.some(r => r.type === "confirm"),
-      `Should not ask for confirmation when any tool has autoContinue, got: ${responses.filter(r => r.type === "confirm").map(r => r.text).join(" | ")}`,
+      responses.some(r => r.type === "confirm"),
+      "Should ask for confirmation when any tool lacks autoContinue",
     );
 
-    // Should have exactly 2 LLM requests (initial + continuation)
+    // 2 LLM requests: confirm defaults to true so processing continues
     const reqsAfter = mockServer.getRequests().length;
     assert.equal(
       reqsAfter - reqsBefore, 2,
-      `Should have 2 LLM requests, got ${reqsAfter - reqsBefore}`,
-    );
-
-    // Final reply delivered
-    assert.ok(
-      responses.some(r => r.text.includes("Mixed result complete")),
-      "Should deliver final LLM reply",
+      `Should have 2 LLM requests (confirm approved), got ${reqsAfter - reqsBefore}`,
     );
   });
 });

@@ -36,7 +36,7 @@ export default {
   get gemini_api_key() { return process.env.GEMINI_API_KEY; },
   get fal_api_key() { return process.env.FAL_KEY; },
   get video_model() { return process.env.VIDEO_MODEL || "fal-ai/kling-video/v3/standard"; },
-  get memory_threshold() { return parseFloat(process.env.MEMORY_THRESHOLD || "") || 0.3; },
+  get memory_threshold() { return parseFloat(process.env.MEMORY_THRESHOLD || "") || 0.68; },
   get html_server_port() { return parseInt(process.env.HTML_SERVER_PORT || "3100", 10); },
   get html_server_base_url() { return process.env.HTML_SERVER_BASE_URL || ""; },
 
