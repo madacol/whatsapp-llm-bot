@@ -471,12 +471,17 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
       confirm: messageContext.confirm,
     };
 
-    // Load actions (global + chat-scoped), filtering out opt-in actions not enabled for this chat
+    // Load actions (global + chat-scoped), filtering out opt-in actions not enabled for this chat.
+    // Deduplicate by name — chat-scoped actions override global ones.
     const globalActions = await getActionsFn();
     const chatActions = await getChatActions(chatId);
+    const chatActionNames = new Set(chatActions.map(a => a.name));
     const enabledActions = chatInfo?.enabled_actions ?? [];
     /** @type {Action[]} */
-    const actions = [...globalActions, ...chatActions].filter(
+    const actions = [
+      ...globalActions.filter(a => !chatActionNames.has(a.name)),
+      ...chatActions,
+    ].filter(
       (a) => !a.optIn || enabledActions.includes(a.name),
     );
 
@@ -503,6 +508,11 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
         await context.reply("❌ *Error*", `Unknown command: ${commandText.split(" ")[0]}`);
         return;
       }
+
+      // Store the command message so the LLM has context about recent commands
+      /** @type {UserMessage} */
+      const cmdMessage = { role: "user", content };
+      await addMessage(chatId, cmdMessage, senderIds);
 
       const argsText = inputText.slice(action.command.length).trim();
       const args = argsText ? argsText.split(" ") : [];
