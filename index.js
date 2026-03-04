@@ -17,6 +17,7 @@ import {
   parseCommandArgs,
   prepareMessages,
   registerMedia,
+  isMediaBlock,
 } from "./message-formatting.js";
 import { convertUnsupportedMedia } from "./media-to-text.js";
 import { resolveModel } from "./model-roles.js";
@@ -27,7 +28,7 @@ import {
   formatMemoriesContext,
 } from "./memory.js";
 import { storeLlmContext } from "./context-log.js";
-import { storePage } from "./html-store.js";
+import { storeAndLinkHtml } from "./html-store.js";
 import { startHtmlServer, stopHtmlServer } from "./html-server.js";
 import { recordUsage, resolveCost } from "./usage-tracker.js";
 import {
@@ -198,10 +199,7 @@ async function executeAndStoreTool({
 
     // HTML content → store page, send link, treat as text for LLM context
     if (isHtmlContent(result)) {
-      const pageId = await storePage(getRootDb(), result.html, result.title);
-      const baseUrl = config.html_server_base_url || `http://localhost:${config.html_server_port}`;
-      const pageUrl = `${baseUrl}/page/${pageId}`;
-      const linkText = result.title ? `${result.title}: ${pageUrl}` : pageUrl;
+      const linkText = await storeAndLinkHtml(getRootDb(), result);
 
       /** @type {ToolMessage} */
       const toolMessage = {
@@ -236,7 +234,7 @@ async function executeAndStoreTool({
     // Tag media from tool results so subsequent tool calls can reference them
     if (isContentBlocks) {
       for (const block of /** @type {ToolContentBlock[]} */ (result)) {
-        if (block.type === "image" || block.type === "video" || block.type === "audio") {
+        if (isMediaBlock(block)) {
           registerMedia(mediaRegistry, block);
         }
       }
@@ -517,10 +515,7 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
         const { result } = await executeActionFn(action.name, context, params, null, actionResolver, llmClient);
 
         if (isHtmlContent(result)) {
-          const pageId = await storePage(getRootDb(), result.html, result.title);
-          const baseUrl = config.html_server_base_url || `http://localhost:${config.html_server_port}`;
-          const pageUrl = `${baseUrl}/page/${pageId}`;
-          const linkText = result.title ? `${result.title}: ${pageUrl}` : pageUrl;
+          const linkText = await storeAndLinkHtml(getRootDb(), result);
           await context.reply(linkText);
         } else if (typeof result === "string") {
           await context.reply(result);
