@@ -261,7 +261,10 @@ describe("prepareMessages", () => {
     assert.equal(result[0].content[0].type, "quote");
   });
 
-  it("preserves assistant message with tool calls", () => {
+  it("preserves assistant message with tool calls (stubs expected in DB)", () => {
+    // With stub-based approach, an assistant with tool_calls but no tool result
+    // in the window means the tool result was outside the window — the assistant
+    // is kept, but no placeholder is generated (stubs handle this at write time).
     const messages = [
       {
         message_data: {
@@ -281,18 +284,13 @@ describe("prepareMessages", () => {
     ];
     const { messages: result } = prepareMessages(messages);
 
-    // Assistant + placeholder for missing tool result
-    assert.equal(result.length, 2);
+    // Only the assistant — no placeholder; stubs ensure tool results exist in DB
+    assert.equal(result.length, 1);
     assert.equal(result[0].role, "assistant");
     const msg = /** @type {AssistantMessage} */ (result[0]);
     const toolBlocks = msg.content.filter(b => b.type === "tool");
     assert.equal(toolBlocks.length, 1);
     assert.equal(/** @type {ToolCallContentBlock} */ (toolBlocks[0]).name, "run_javascript");
-    // Placeholder for missing result
-    assert.equal(result[1].role, "tool");
-    assert.equal(/** @type {ToolMessage} */ (result[1]).tool_id, "call_123");
-    assert.equal(/** @type {ToolMessage} */ (result[1]).content[0].type, "text");
-    assert.equal(/** @type {TextContentBlock} */ (/** @type {ToolMessage} */ (result[1]).content[0]).text, "[tool result unavailable]");
   });
 
   it("preserves tool result message (after an assistant with tool_calls)", () => {
@@ -515,79 +513,9 @@ describe("prepareMessages", () => {
     assert.equal(result.length, 3);
   });
 
-  it("reorders interleaved user message to after tool results", () => {
-    const messages = /** @type {any} */ ([
-      { message_data: { role: "tool", tool_id: "call_A", content: [{ type: "text", text: "done" }] }, sender_id: "bot" },
-      { message_data: { role: "user", content: [{ type: "text", text: "wait nvm" }] }, sender_id: "user-1" },
-      { message_data: { role: "assistant", content: [{ type: "tool", tool_id: "call_A", name: "fn", arguments: "{}" }] }, sender_id: "bot" },
-    ]);
-    const { messages: result } = prepareMessages(messages);
-
-    assert.equal(result.length, 3);
-    assert.equal(result[0].role, "assistant");
-    assert.equal(result[1].role, "tool");
-    assert.equal(/** @type {ToolMessage} */ (result[1]).tool_id, "call_A");
-    assert.equal(result[2].role, "user");
-  });
-
-  it("adds placeholder for missing tool result", () => {
-    const messages = /** @type {any} */ ([
-      { message_data: { role: "tool", tool_id: "call_A", content: [{ type: "text", text: "result A" }] }, sender_id: "bot" },
-      {
-        message_data: {
-          role: "assistant",
-          content: [
-            { type: "tool", tool_id: "call_A", name: "fn_a", arguments: "{}" },
-            { type: "tool", tool_id: "call_B", name: "fn_b", arguments: "{}" },
-          ],
-        },
-        sender_id: "bot",
-      },
-    ]);
-    const { messages: result } = prepareMessages(messages);
-
-    assert.equal(result.length, 3);
-    assert.equal(result[0].role, "assistant");
-    assert.equal(result[1].role, "tool");
-    assert.equal(/** @type {ToolMessage} */ (result[1]).tool_id, "call_A");
-    assert.equal(result[2].role, "tool");
-    assert.equal(/** @type {ToolMessage} */ (result[2]).tool_id, "call_B");
-    assert.equal(/** @type {TextContentBlock} */ (/** @type {ToolMessage} */ (result[2]).content[0]).text, "[tool result unavailable]");
-  });
-
-  it("handles multiple tool rounds with interleaving", () => {
-    const messages = /** @type {any} */ ([
-      { message_data: { role: "tool", tool_id: "call_C", content: [{ type: "text", text: "done C" }] }, sender_id: "bot" },
-      { message_data: { role: "user", content: [{ type: "text", text: "interloper" }] }, sender_id: "user-1" },
-      {
-        message_data: {
-          role: "assistant",
-          content: [{ type: "tool", tool_id: "call_C", name: "fn_c", arguments: "{}" }],
-        },
-        sender_id: "bot",
-      },
-      { message_data: { role: "tool", tool_id: "call_A", content: [{ type: "text", text: "done A" }] }, sender_id: "bot" },
-      {
-        message_data: {
-          role: "assistant",
-          content: [{ type: "tool", tool_id: "call_A", name: "fn_a", arguments: "{}" }],
-        },
-        sender_id: "bot",
-      },
-      { message_data: { role: "user", content: [{ type: "text", text: "original" }] }, sender_id: "user-1" },
-    ]);
-    const { messages: result } = prepareMessages(messages);
-
-    assert.equal(result.length, 6);
-    assert.equal(result[0].role, "user"); // original
-    assert.equal(result[1].role, "assistant"); // tool_calls:[A]
-    assert.equal(result[2].role, "tool"); // tool(A)
-    assert.equal(/** @type {ToolMessage} */ (result[2]).tool_id, "call_A");
-    assert.equal(result[3].role, "assistant"); // tool_calls:[C]
-    assert.equal(result[4].role, "tool"); // tool(C)
-    assert.equal(/** @type {ToolMessage} */ (result[4]).tool_id, "call_C");
-    assert.equal(result[5].role, "user"); // interloper
-  });
+  // Tests removed: "reorders interleaved user message", "adds placeholder for
+  // missing tool result", "handles multiple tool rounds with interleaving" —
+  // these scenarios are now solved at the source by stub-based tool results.
 
   it("strips only orphaned tool result when mixed with valid ones", () => {
     const messages = /** @type {any} */ ([

@@ -143,92 +143,29 @@ export function registerMedia(registry, block) {
 }
 
 /**
- * Normalize tool message ordering so each tool result immediately follows its
- * assistant message, orphaned tool results are dropped, and missing tool results
- * get placeholders. Works on internal Message[] types.
+ * Drop tool messages whose assistant message (with the matching tool_call)
+ * is not present in the window. With stub-based tool results, ordering and
+ * missing-result problems are solved at write time — this only handles the
+ * window-boundary case where the assistant falls outside the history window.
  * @param {Message[]} messages
  * @returns {Message[]}
  */
-function removeOrphanedToolResults(messages) {
-  // Map each tool_call id → index of the assistant message that owns it
-  /** @type {Map<string, number>} */
-  const toolCallOwner = new Map();
-
-  // Track which tool_call ids each assistant message expects
-  /** @type {Map<number, string[]>} */
-  const assistantToolCallIds = new Map();
-
-  for (let i = 0; i < messages.length; i++) {
-    const msg = messages[i];
+function dropUnpairedToolMessages(messages) {
+  /** @type {Set<string>} */
+  const pairedToolIds = new Set();
+  for (const msg of messages) {
     if (msg.role === "assistant") {
-      const toolBlocks = msg.content.filter(
-        /** @returns {b is ToolCallContentBlock} */
-        (b) => b.type === "tool"
-      );
-      if (toolBlocks.length > 0) {
-        const ids = toolBlocks.map(b => b.tool_id);
-        assistantToolCallIds.set(i, ids);
-        for (const id of ids) {
-          toolCallOwner.set(id, i);
+      for (const block of msg.content) {
+        if (block.type === "tool") {
+          pairedToolIds.add(block.tool_id);
         }
       }
     }
   }
 
-  // Group tool result messages by their owning assistant index
-  /** @type {Map<number, ToolMessage[]>} */
-  const toolResultsByAssistant = new Map();
-
-  // Collect non-tool messages in order, excluding tool results (we'll re-insert them)
-  /** @type {Array<{ msg: Message, originalIndex: number }>} */
-  const nonToolMessages = [];
-
-  for (let i = 0; i < messages.length; i++) {
-    const msg = messages[i];
-    if (msg.role === "tool") {
-      const ownerIdx = toolCallOwner.get(msg.tool_id);
-      if (ownerIdx !== undefined) {
-        if (!toolResultsByAssistant.has(ownerIdx)) {
-          toolResultsByAssistant.set(ownerIdx, []);
-        }
-        /** @type {ToolMessage[]} */ (toolResultsByAssistant.get(ownerIdx)).push(msg);
-      }
-      // Orphaned tool results (no ownerIdx) are silently dropped
-    } else {
-      nonToolMessages.push({ msg, originalIndex: i });
-    }
-  }
-
-  // Rebuild: for each non-tool message, emit it; after each assistant with
-  // tool_calls, insert its grouped tool results + placeholders for missing ones
-  /** @type {Message[]} */
-  const result = [];
-
-  for (const { msg, originalIndex } of nonToolMessages) {
-    result.push(msg);
-
-    if (assistantToolCallIds.has(originalIndex)) {
-      const expectedIds = /** @type {string[]} */ (assistantToolCallIds.get(originalIndex));
-      const actualResults = toolResultsByAssistant.get(originalIndex) ?? [];
-
-      // Emit actual results in their expected order
-      for (const id of expectedIds) {
-        const existing = actualResults.find(m => m.tool_id === id);
-        if (existing) {
-          result.push(existing);
-        } else {
-          // Placeholder for missing tool result
-          result.push({
-            role: "tool",
-            tool_id: id,
-            content: [{ type: "text", text: "[tool result unavailable]" }],
-          });
-        }
-      }
-    }
-  }
-
-  return result;
+  return messages.filter(
+    msg => msg.role !== "tool" || pairedToolIds.has(msg.tool_id),
+  );
 }
 
 /**
@@ -274,5 +211,5 @@ export function prepareMessages(chatMessages) {
     messages.push(messageData);
   }
 
-  return { messages: removeOrphanedToolResults(messages), mediaRegistry };
+  return { messages: dropUnpairedToolMessages(messages), mediaRegistry };
 }
