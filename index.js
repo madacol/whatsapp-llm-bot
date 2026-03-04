@@ -156,12 +156,21 @@ function parseToolArgs(argsString) {
 async function executeAndStoreTool({
   session, llmConfig, toolCall, messages, mediaRegistry,
 }) {
-  const { chatId, senderIds, context, addMessage } = session;
+  const { chatId, context, updateToolMessage } = session;
   const { executeActionFn, actionResolver, actionLlmClient } = llmConfig;
   const toolName = toolCall.name;
   const toolArgs = parseToolArgs(toolCall.arguments);
   const shortId = shortenToolId(toolCall.id);
   log.debug("executing", toolName, toolArgs);
+
+  /** Replace the stub in the messages array and persist to DB. */
+  const replaceStub = async (/** @type {ToolMessage} */ toolMessage) => {
+    await updateToolMessage(chatId, toolCall.id, toolMessage);
+    const idx = messages.findIndex(
+      m => m.role === "tool" && /** @type {ToolMessage} */ (m).tool_id === toolCall.id,
+    );
+    if (idx !== -1) messages[idx] = toolMessage;
+  };
 
   try {
     // Resolve _media_refs: pull referenced media from the registry into context.content
@@ -200,10 +209,8 @@ async function executeAndStoreTool({
         tool_id: toolCall.id,
         content: [{ type: "text", text: linkText }],
       };
-      await addMessage(chatId, toolMessage, senderIds);
+      await replaceStub(toolMessage);
       await displayToolResult(linkText, shortId, functionResponse.permissions, context);
-
-      messages.push(toolMessage);
 
       return !!functionResponse.permissions.autoContinue;
     }
@@ -224,7 +231,7 @@ async function executeAndStoreTool({
           ? /** @type {ToolContentBlock[]} */ (result)
           : [{ type: "text", text: JSON.stringify(result) }],
     };
-    await addMessage(chatId, toolMessage, senderIds);
+    await replaceStub(toolMessage);
 
     // Tag media from tool results so subsequent tool calls can reference them
     if (isContentBlocks) {
@@ -246,8 +253,6 @@ async function executeAndStoreTool({
 
     await displayToolResult(resultMessage, shortId, functionResponse.permissions, context);
 
-    messages.push(toolMessage);
-
     return !!functionResponse.permissions.autoContinue;
   } catch (error) {
     log.error("Error executing tool:", error);
@@ -259,15 +264,13 @@ async function executeAndStoreTool({
       tool_id: toolCall.id,
       content: [{type: "text", text: errorMessage}],
     };
-    await addMessage(chatId, toolError, senderIds);
+    await replaceStub(toolError);
 
     if (context.isDebug) {
       await context.sendMessage(`❌ *Tool Error*    [${shortId}]`, errorMessage);
     } else {
       await context.sendMessage(`❌ [${shortId}] ${errorMessage}`);
     }
-
-    messages.push(toolError);
 
     // Errors always auto-continue for self-correction
     return true;
