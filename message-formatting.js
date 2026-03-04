@@ -2,10 +2,6 @@
  * Pure functions extracted from index.js for testability.
  */
 
-import { createLogger } from "./logger.js";
-
-const log = createLogger("message-formatting");
-
 /**
  * Convert actions to tool definitions format.
  * When `hasMedia` is true, injects an optional `_media_refs` parameter
@@ -195,7 +191,7 @@ function removeOrphanedToolResults(messages) {
         if (!toolResultsByAssistant.has(ownerIdx)) {
           toolResultsByAssistant.set(ownerIdx, []);
         }
-        toolResultsByAssistant.get(ownerIdx).push(msg);
+        /** @type {ToolMessage[]} */ (toolResultsByAssistant.get(ownerIdx)).push(msg);
       }
       // Orphaned tool results (no ownerIdx) are silently dropped
     } else {
@@ -212,7 +208,7 @@ function removeOrphanedToolResults(messages) {
     result.push(msg);
 
     if (assistantToolCallIds.has(originalIndex)) {
-      const expectedIds = assistantToolCallIds.get(originalIndex);
+      const expectedIds = /** @type {string[]} */ (assistantToolCallIds.get(originalIndex));
       const actualResults = toolResultsByAssistant.get(originalIndex) ?? [];
 
       // Emit actual results in their expected order

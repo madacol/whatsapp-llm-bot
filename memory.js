@@ -1,4 +1,3 @@
-import config from "./config.js";
 import { resolveModel } from "./model-roles.js";
 import { createEmbedding } from "./llm.js";
 import { createLogger } from "./logger.js";
