@@ -628,7 +628,7 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
 
 /**
  * @typedef {{
- *   store: Pick<Store, "addMessage">;
+ *   store: Pick<Store, "addMessage" | "updateToolMessage">;
  *   executeActionFn: typeof executeAction;
  *   pendingByMsgKeyId: Map<string, import("./pending-confirmations.js").PendingConfirmationRow>;
  *   rootDb: import("@electric-sql/pglite").PGlite;
@@ -673,7 +673,8 @@ export function createReactionHandler({ store, executeActionFn, pendingByMsgKeyI
           tool_id: pending.tool_call_id,
           content: [{ type: "text", text: "[action rejected by user]" }],
         };
-        await store.addMessage(pending.chat_id, toolMessage, pending.sender_ids);
+        const updated = await store.updateToolMessage(pending.chat_id, pending.tool_call_id, toolMessage);
+        if (!updated) await store.addMessage(pending.chat_id, toolMessage, pending.sender_ids);
       }
 
       log.info(`Pending confirmation for ${pending.action_name} rejected after restart`);
@@ -734,7 +735,8 @@ export function createReactionHandler({ store, executeActionFn, pendingByMsgKeyI
           tool_id: pending.tool_call_id,
           content: [{ type: "text", text: resultText }],
         };
-        await store.addMessage(pending.chat_id, toolMessage, pending.sender_ids);
+        const updated = await store.updateToolMessage(pending.chat_id, pending.tool_call_id, toolMessage);
+        if (!updated) await store.addMessage(pending.chat_id, toolMessage, pending.sender_ids);
       }
 
       await sock.sendMessage(pending.chat_id, { text: `🔧 ${resultText}` });
@@ -750,7 +752,8 @@ export function createReactionHandler({ store, executeActionFn, pendingByMsgKeyI
           tool_id: pending.tool_call_id,
           content: [{ type: "text", text: `Error executing ${pending.action_name}: ${errorMsg}` }],
         };
-        await store.addMessage(pending.chat_id, toolMessage, pending.sender_ids);
+        const updated = await store.updateToolMessage(pending.chat_id, pending.tool_call_id, toolMessage);
+        if (!updated) await store.addMessage(pending.chat_id, toolMessage, pending.sender_ids);
       }
 
       await sock.sendMessage(pending.chat_id, { text: `❌ Error resuming ${pending.action_name}: ${errorMsg}` });
