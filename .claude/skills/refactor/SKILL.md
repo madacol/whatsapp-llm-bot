@@ -11,12 +11,11 @@ Scan the codebase (or a specific area) for refactoring opportunities, then prese
 ## Behavior
 
 1. Look for any refactor that is worth doing
-2. For each refactor found:
+2. Let's go step by step and for each refactor found:
    1. Explain clearly the context and concern — if needed, include code snippets with file paths and line numbers so the user can understand the full picture
    2. If there are multiple valid approaches, present options and let the user decide
-3. Let the user confirm the design of each test or groups of tests. These should represent a spec
-4. Make a subagent work on them in the background while you keep asking for other refactors
-5. **Parallelize when possible**: If multiple approved changes are independent, work on them in parallel.
+3. Make a subagent work on them in the background while you keep asking for other refactors
+4. **Parallelize when possible**: If multiple approved changes are independent, work on them in parallel.
 
 ## Examples
 
