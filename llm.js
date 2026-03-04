@@ -54,8 +54,12 @@ export function convertPromptToOpenAI(prompt) {
         return { type: /** @type {const} */ ("text"), text: block.text };
       case "image":
         return { type: /** @type {const} */ ("image_url"), image_url: { url: `data:${block.mime_type};base64,${block.data}` } };
+      case "audio":
+        return { type: /** @type {const} */ ("input_audio"), input_audio: { data: block.data, format: /** @type {const} */ ("mp3") } };
+      case "video":
+        return /** @type {*} */ ({ type: "video_url", video_url: { url: `data:${block.mime_type};base64,${block.data}` } });
       default:
-        return { type: /** @type {const} */ ("text"), text: `[Unsupported content type: ${block.type}]` };
+        return { type: /** @type {const} */ ("text"), text: `[Unsupported content type: ${/** @type {{type: string}} */ (block).type}]` };
     }
   });
 }
@@ -342,33 +346,6 @@ export function convertToolResultToOpenAI(blocks, registry) {
   return { parts, mediaIds };
 }
 
-/**
- * Convert IncomingContentBlock[] to OpenAI content parts for media-to-text.
- * @param {IncomingContentBlock} block
- * @param {string} data - base64 data
- * @returns {OpenAI.ChatCompletionContentPart[]}
- */
-export function convertMediaBlockToOpenAI(block, data) {
-  switch (block.type) {
-    case "image":
-      return [{
-        type: /** @type {const} */ ("image_url"),
-        image_url: { url: `data:${/** @type {ImageContentBlock} */ (block).mime_type};base64,${data}` },
-      }];
-    case "audio":
-      return [{
-        type: /** @type {const} */ ("input_audio"),
-        input_audio: { data, format: /** @type {const} */ ("mp3") },
-      }];
-    case "video":
-      return [/** @type {*} */ ({
-        type: "video_url",
-        video_url: { url: `data:${/** @type {VideoContentBlock} */ (block).mime_type};base64,${data}` },
-      })];
-    default:
-      return [];
-  }
-}
 
 /**
  * Send a chat completion using internal Message[], returning normalized LlmChatResponse.
@@ -404,13 +381,13 @@ export async function sendChatCompletion(llmClient, { model, systemPrompt, messa
  * Send a simple chat completion for media-to-text conversion.
  * @param {LlmClient} llmClient
  * @param {string} model
- * @param {unknown[]} messages
+ * @param {CallLlmMessage[]} messages
  * @returns {Promise<string | null>}
  */
 export async function sendSimpleChatCompletion(llmClient, model, messages) {
   const response = await unwrap(llmClient).chat.completions.create({
     model,
-    messages: /** @type {OpenAI.ChatCompletionMessageParam[]} */ (messages),
+    messages: messages.map(convertMessageToOpenAI),
   });
   return response.choices[0].message.content;
 }
