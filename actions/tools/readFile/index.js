@@ -1,7 +1,4 @@
 import { readFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { writeFile, rm } from "node:fs/promises";
 
 const MAX_LINES = 4000;
 

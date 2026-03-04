@@ -2,7 +2,6 @@ import config from "../../../config.js";
 import { validateModel, getModelModalities } from "../../../models-cache.js";
 import { getChatOrThrow } from "../../../store.js";
 import { ROLE_DEFINITIONS, resolveModel } from "../../../model-roles.js";
-import { withModelsCache } from "../../../tests/helpers.js";
 
 /**
  * Role names that use model_roles JSONB for per-chat overrides.
@@ -39,7 +38,7 @@ const RESPOND_ON_VALUES = ["any", "mention+reply", "mention"];
 const TRUTHY = new Set(["true", "on", "yes", "1", "enabled"]);
 const FALSY = new Set(["false", "off", "no", "0", "disabled"]);
 
-function toBool(raw) {
+function toBool(/** @type {unknown} */ raw) {
   if (typeof raw === "boolean") return raw;
   const s = String(raw).toLowerCase();
   if (TRUTHY.has(s)) return true;

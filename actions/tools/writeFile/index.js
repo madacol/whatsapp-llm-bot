@@ -1,6 +1,5 @@
-import { readFile, writeFile, rm, mkdir } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join, dirname } from "node:path";
+import { writeFile, mkdir } from "node:fs/promises";
+import { dirname } from "node:path";
 
 export default /** @type {defineAction} */ ((x) => x)({
   name: "write_file",

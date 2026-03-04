@@ -1,6 +1,4 @@
-import { readFile, writeFile, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { readFile, writeFile } from "node:fs/promises";
 
 export default /** @type {defineAction} */ ((x) => x)({
   name: "edit_file",
