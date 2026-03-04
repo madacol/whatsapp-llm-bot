@@ -2,21 +2,20 @@
  * WhatsApp LLM Bot with JavaScript execution capabilities
  */
 
-import OpenAI from "openai";
 import { getActions, executeAction, getChatActions, getChatAction, getAction } from "./actions.js";
 import config from "./config.js";
-import { createLlmClient } from "./llm.js";
+import { createLlmClient, sendChatCompletion, convertToolResultToOpenAI } from "./llm.js";
 import { shortenToolId, formatTime, truncateWithSummary, isHtmlContent } from "./utils.js";
 import { connectToWhatsApp } from "./whatsapp-adapter.js";
 import { startReminderDaemon } from "./reminder-daemon.js";
 import { startModelsCacheDaemon } from "./models-cache.js";
 import { initStore } from "./store.js";
 import {
-  actionsToOpenAIFormat,
+  actionsToToolDefinitions,
   shouldRespond,
   formatUserMessage,
   parseCommandArgs,
-  formatMessagesForOpenAI,
+  prepareMessages,
   registerMedia,
 } from "./message-formatting.js";
 import { convertUnsupportedMedia } from "./media-to-text.js";
@@ -52,15 +51,15 @@ const MAX_TOOL_CALL_DEPTH = 10;
 
 /**
  * Display a tool call to the user (compact or verbose based on debug mode).
- * @param {OpenAI.Chat.Completions.ChatCompletionMessageToolCall} toolCall
+ * @param {LlmChatResponse['toolCalls'][0]} toolCall
  * @param {Context} context
  * @param {((params: Record<string, any>) => string)} [formatToolCall] - Optional formatter from the action
  */
 async function displayToolCall(toolCall, context, formatToolCall) {
   if (!context.isDebug) {
-    let compactMsg = `🔧 ${toolCall.function.name}`;
+    let compactMsg = `🔧 ${toolCall.name}`;
     if (formatToolCall) {
-      const args = parseToolArgs(toolCall.function.arguments);
+      const args = parseToolArgs(toolCall.arguments);
       compactMsg += `: ${formatToolCall(args)}`;
     }
     await context.sendMessage(compactMsg);
@@ -68,9 +67,9 @@ async function displayToolCall(toolCall, context, formatToolCall) {
   }
 
   const shortId = shortenToolId(toolCall.id);
-  const args = parseToolArgs(toolCall.function.arguments);
+  const args = parseToolArgs(toolCall.arguments);
   const argEntries = Object.entries(args);
-  const header = `🔧 *${toolCall.function.name}*    [${shortId}]`;
+  const header = `🔧 *${toolCall.name}*    [${shortId}]`;
 
   if (argEntries.length === 0) {
     await context.sendMessage(header);
@@ -131,13 +130,13 @@ function parseToolArgs(argsString) {
  * }} Session
  *
  * @typedef {{
- *   llmClient: OpenAI,
+ *   llmClient: LlmClient,
  *   chatModel: string,
  *   systemPrompt: string,
  *   actions: Action[],
  *   executeActionFn: typeof executeAction,
  *   actionResolver: (name: string) => Promise<AppAction | null>,
- *   actionLlmClient: import("openai").default,
+ *   actionLlmClient: LlmClient,
  * }} LlmConfig
  */
 
@@ -147,19 +146,19 @@ function parseToolArgs(argsString) {
  * @param {{
  *   session: Session,
  *   llmConfig: LlmConfig,
- *   toolCall: OpenAI.Chat.Completions.ChatCompletionMessageToolCall,
- *   formattedMessages: Array<OpenAI.ChatCompletionMessageParam>,
+ *   toolCall: LlmChatResponse['toolCalls'][0],
+ *   messages: Message[],
  *   mediaRegistry: MediaRegistry,
  * }} params
  * @returns {Promise<boolean>} Whether to continue processing (loop again)
  */
 async function executeAndStoreTool({
-  session, llmConfig, toolCall, formattedMessages, mediaRegistry,
+  session, llmConfig, toolCall, messages, mediaRegistry,
 }) {
   const { chatId, senderIds, context, addMessage } = session;
   const { executeActionFn, actionResolver, actionLlmClient } = llmConfig;
-  const toolName = toolCall.function.name;
-  const toolArgs = parseToolArgs(toolCall.function.arguments);
+  const toolName = toolCall.name;
+  const toolArgs = parseToolArgs(toolCall.arguments);
   const shortId = shortenToolId(toolCall.id);
   log.debug("executing", toolName, toolArgs);
 
@@ -202,9 +201,7 @@ async function executeAndStoreTool({
       await addMessage(chatId, toolMessage, senderIds);
       await displayToolResult(linkText, shortId, functionResponse.permissions, context);
 
-      /** @type {OpenAI.ChatCompletionMessageParam} */
-      const toolResultMessage = { role: "tool", tool_call_id: toolCall.id, content: linkText };
-      formattedMessages.push(toolResultMessage);
+      messages.push(toolMessage);
 
       return !!functionResponse.permissions.autoContinue;
     }
@@ -228,12 +225,10 @@ async function executeAndStoreTool({
     await addMessage(chatId, toolMessage, senderIds);
 
     // Tag media from tool results so subsequent tool calls can reference them
-    /** @type {Map<ToolContentBlock, number>} */
-    const mediaIds = new Map();
     if (isContentBlocks) {
       for (const block of /** @type {ToolContentBlock[]} */ (result)) {
         if (block.type === "image" || block.type === "video" || block.type === "audio") {
-          mediaIds.set(block, registerMedia(mediaRegistry, block));
+          registerMedia(mediaRegistry, block);
         }
       }
     }
@@ -249,35 +244,7 @@ async function executeAndStoreTool({
 
     await displayToolResult(resultMessage, shortId, functionResponse.permissions, context);
 
-    // Build formatted result for LLM context, including media tags
-    if (mediaIds.size > 0) {
-      /** @type {Array<OpenAI.ChatCompletionContentPart>} */
-      const parts = [];
-      for (const block of /** @type {ToolContentBlock[]} */ (result)) {
-        if (block.type === "text") {
-          parts.push({ type: /** @type {const} */ ("text"), text: block.text });
-        } else if (block.type === "image") {
-          parts.push({
-            type: /** @type {const} */ ("image_url"),
-            image_url: { url: `data:${block.mime_type};base64,${block.data}` },
-          });
-          parts.push({ type: /** @type {const} */ ("text"), text: `[media:${mediaIds.get(block)}]` });
-        } else if (block.type === "video") {
-          parts.push(/** @type {*} */ ({
-            type: "video_url",
-            video_url: { url: `data:${block.mime_type};base64,${block.data}` },
-          }));
-          parts.push({ type: /** @type {const} */ ("text"), text: `[media:${mediaIds.get(block)}]` });
-        }
-      }
-      formattedMessages.push(/** @type {OpenAI.ChatCompletionMessageParam} */ (
-        { role: "tool", tool_call_id: toolCall.id, content: parts }
-      ));
-    } else {
-      /** @type {OpenAI.ChatCompletionMessageParam} */
-      const toolResultMessage = { role: "tool", tool_call_id: toolCall.id, content: resultMessage };
-      formattedMessages.push(toolResultMessage);
-    }
+    messages.push(toolMessage);
 
     return !!functionResponse.permissions.autoContinue;
   } catch (error) {
@@ -298,9 +265,7 @@ async function executeAndStoreTool({
       await context.sendMessage(`❌ [${shortId}] ${errorMessage}`);
     }
 
-    /** @type {OpenAI.ChatCompletionMessageParam} */
-    const toolResultMessage = { role: "tool", tool_call_id: toolCall.id, content: errorMessage };
-    formattedMessages.push(toolResultMessage);
+    messages.push(toolError);
 
     // Errors always auto-continue for self-correction
     return true;
@@ -312,11 +277,11 @@ async function executeAndStoreTool({
  * @param {{
  *   session: Session,
  *   llmConfig: LlmConfig,
- *   formattedMessages: Array<OpenAI.ChatCompletionMessageParam>,
+ *   messages: Message[],
  *   mediaRegistry: MediaRegistry,
  * }} params
  */
-async function processLlmResponse({ session, llmConfig, formattedMessages, mediaRegistry }) {
+async function processLlmResponse({ session, llmConfig, messages, mediaRegistry }) {
   const { chatId, senderIds, context, addMessage } = session;
   const { llmClient, chatModel, actions } = llmConfig;
   let { systemPrompt } = llmConfig;
@@ -327,16 +292,15 @@ async function processLlmResponse({ session, llmConfig, formattedMessages, media
   let depth = 0;
 
   while (depth < MAX_TOOL_CALL_DEPTH) {
+    /** @type {LlmChatResponse} */
     let response;
     try {
-      response = await llmClient.chat.completions.create({
+      response = await sendChatCompletion(llmClient, {
         model: chatModel,
-        messages: [
-          { role: "system", content: /** @type {Array<{type: "text", text: string, cache_control: {type: "ephemeral"}}>} */ ([{ type: "text", text: systemPrompt, cache_control: { type: "ephemeral" } }]) },
-          ...formattedMessages,
-        ],
-        tools: actionsToOpenAIFormat(actions, mediaRegistry.size > 0),
-        tool_choice: "auto",
+        systemPrompt,
+        messages,
+        tools: actionsToToolDefinitions(actions, mediaRegistry.size > 0),
+        mediaRegistry,
       });
     } catch (error) {
       log.error(error);
@@ -349,66 +313,61 @@ async function processLlmResponse({ session, llmConfig, formattedMessages, media
     }
 
     if (response.usage) {
-      const prompt = response.usage.prompt_tokens;
-      const completion = response.usage.completion_tokens;
-      const cached = response.usage.prompt_tokens_details?.cached_tokens ?? 0;
-      const nativeCost = /** @type {{ cost?: number } & typeof response.usage} */ (response.usage).cost;
-      const cost = await resolveCost(nativeCost, chatModel, prompt, completion);
+      const { promptTokens: prompt, completionTokens: completion, cachedTokens: cached } = response.usage;
+      const cost = await resolveCost(response.usage.cost, chatModel, prompt, completion);
       log.info(`[LLM usage] prompt=${prompt} cached=${cached} completion=${completion} cost=${cost} model=${chatModel}`);
       recordUsage(getRootDb(), { chatId, model: chatModel, promptTokens: prompt, completionTokens: completion, cachedTokens: cached, cost })
         .catch(err => log.error("[LLM usage] failed to persist:", err));
     }
 
-    const responseMessage = response.choices[0].message;
-
     /** @type {AssistantMessage} */
     const assistantMessage = { role: "assistant", content: [] };
 
-    if (responseMessage.content) {
-      log.debug("RESPONSE SENT:", responseMessage.content);
-      await context.reply("🤖 *AI Assistant*", responseMessage.content);
-      assistantMessage.content.push({ type: "text", text: responseMessage.content });
+    if (response.content) {
+      log.debug("RESPONSE SENT:", response.content);
+      await context.reply("🤖 *AI Assistant*", response.content);
+      assistantMessage.content.push({ type: "text", text: response.content });
     }
 
-    if (!responseMessage.tool_calls) {
-      formattedMessages.push(responseMessage);
+    if (response.toolCalls.length === 0) {
+      messages.push(assistantMessage);
       const storedAssistant = await addMessage(chatId, assistantMessage, senderIds);
       if (depth === 0) {
-        storeLlmContext(getRootDb(), storedAssistant.message_id, chatModel, systemPrompt, formattedMessages, actions);
+        storeLlmContext(getRootDb(), storedAssistant.message_id, chatModel, systemPrompt, messages, actions);
       }
       return;
     }
 
     // Record and display tool calls
-    for (const toolCall of responseMessage.tool_calls) {
+    for (const toolCall of response.toolCalls) {
       assistantMessage.content.push({
         type: "tool",
         tool_id: toolCall.id,
-        name: toolCall.function.name,
-        arguments: toolCall.function.arguments,
+        name: toolCall.name,
+        arguments: toolCall.arguments,
       });
-      const action = actions.find(a => a.name === toolCall.function.name);
+      const action = actions.find(a => a.name === toolCall.name);
       await displayToolCall(toolCall, context, action?.formatToolCall);
     }
 
     const storedAssistantWithTools = await addMessage(chatId, assistantMessage, senderIds);
     if (depth === 0) {
-      storeLlmContext(getRootDb(), storedAssistantWithTools.message_id, chatModel, systemPrompt, formattedMessages, actions);
+      storeLlmContext(getRootDb(), storedAssistantWithTools.message_id, chatModel, systemPrompt, messages, actions);
     }
-    formattedMessages.push(responseMessage);
+    messages.push(assistantMessage);
 
     // Execute each tool call
     let continueProcessing = false;
-    for (const toolCall of responseMessage.tool_calls) {
+    for (const toolCall of response.toolCalls) {
       const shouldContinue = await executeAndStoreTool({
-        session, llmConfig, toolCall, formattedMessages, mediaRegistry,
+        session, llmConfig, toolCall, messages, mediaRegistry,
       });
       if (shouldContinue) continueProcessing = true;
     }
 
     // Inject detailed instructions for newly-used actions into the system prompt
-    for (const toolCall of responseMessage.tool_calls) {
-      const name = toolCall.function.name;
+    for (const toolCall of response.toolCalls) {
+      const name = toolCall.name;
       if (injectedActions.has(name)) continue;
       const action = actions.find(a => a.name === name);
       if (action?.instructions) {
@@ -440,7 +399,7 @@ async function processLlmResponse({ session, llmConfig, formattedMessages, media
  *
  * @typedef {{
  *   store: Store,
- *   llmClient: OpenAI,
+ *   llmClient: LlmClient,
  *   getActionsFn: typeof getActions,
  *   executeActionFn: typeof executeAction,
  * }} MessageHandlerDeps
@@ -622,8 +581,8 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
       }
     }
 
-    // Prepare messages for OpenAI
-    const { messages: formattedMessages, mediaRegistry } = await formatMessagesForOpenAI(translatedMessages);
+    // Prepare messages (internal Message[] format)
+    const { messages: preparedMessages, mediaRegistry } = prepareMessages(translatedMessages);
 
     /** @type {Session} */
     const session = {
@@ -638,7 +597,7 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
 
     await messageContext.sendPresenceUpdate("composing");
     try {
-      await processLlmResponse({ session, llmConfig, formattedMessages, mediaRegistry });
+      await processLlmResponse({ session, llmConfig, messages: preparedMessages, mediaRegistry });
     } finally {
       await messageContext.sendPresenceUpdate("paused");
     }

@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import { getModelModalities } from "./models-cache.js";
 import config from "./config.js";
+import { convertMediaBlockToOpenAI, sendSimpleChatCompletion } from "./llm.js";
 
 /**
  * Create the media_to_text_cache table (and rename from old name if needed).
@@ -47,37 +48,6 @@ const DESCRIPTION_LABELS = {
   image: "Image description",
   audio: "Audio description",
   video: "Video description",
-};
-
-/**
- * @typedef {{ type: "video_url", video_url: { url: string } }} VideoUrlContentPart
- * @typedef {import("openai").default.ChatCompletionContentPart | VideoUrlContentPart} ContentPart
- */
-
-/** @type {Record<string, (block: IncomingContentBlock, data: string) => ContentPart[]>} */
-const contentBlockBuilders = {
-  image: (block, data) => [
-    {
-      type: /** @type {const} */ ("image_url"),
-      image_url: {
-        url: `data:${/** @type {ImageContentBlock} */ (block).mime_type};base64,${data}`,
-      },
-    },
-  ],
-  audio: (_block, data) => [
-    {
-      type: /** @type {const} */ ("input_audio"),
-      input_audio: { data, format: /** @type {const} */ ("mp3") },
-    },
-  ],
-  video: (block, data) => [
-    {
-      type: /** @type {const} */ ("video_url"),
-      video_url: {
-        url: `data:${/** @type {VideoContentBlock} */ (block).mime_type};base64,${data}`,
-      },
-    },
-  ],
 };
 
 /**
@@ -130,7 +100,7 @@ function hasUnsupportedContent(messages, supportedModalities) {
  * @param {MessageRow[]} messages
  * @param {string} targetModelId
  * @param {{ image?: string, audio?: string, video?: string, general?: string }} mediaToTextModels
- * @param {import("openai").default} llmClient
+ * @param {LlmClient} llmClient
  * @param {PGlite} db
  * @returns {Promise<MediaToTextResult>}
  */
@@ -181,15 +151,11 @@ export async function convertUnsupportedMedia(
       const toTextModelId =
         mediaToTextModels[contentType] || mediaToTextModels.general || config[`${contentType}_to_text_model`] || config.media_to_text_model || "";
 
-      if (!toTextModelId || !contentBlockBuilders[contentType]) {
-        // No media-to-text model configured, or no way to send this content
-        // type to an LLM (e.g. video) — replace with placeholder
-        const reason = !contentBlockBuilders[contentType]
-          ? "media-to-text conversion not supported for this content type"
-          : "no media-to-text model configured";
+      if (!toTextModelId) {
+        // No media-to-text model configured
         cloned.message_data.content[i] = /** @type {TextContentBlock} */ ({
           type: "text",
-          text: `[Unsupported ${contentType} content — ${reason}]`,
+          text: `[Unsupported ${contentType} content — no media-to-text model configured]`,
         });
         skippedTypes.add(contentType);
         continue;
@@ -209,7 +175,7 @@ export async function convertUnsupportedMedia(
         translation = /** @type {string} */ (rows[0].translation);
       } else {
         // Build conversation context from preceding messages
-        /** @type {import("openai").default.ChatCompletionMessageParam[]} */
+        /** @type {Array<{role: string, content: string}>} */
         const contextMessages = [];
         for (let j = 0; j < msgIdx; j++) {
           const prev = messages[j];
@@ -235,26 +201,21 @@ export async function convertUnsupportedMedia(
         // Call media-to-text model with conversation context
         const prompt = MEDIA_TO_TEXT_PROMPTS[contentType] || `Describe this ${contentType} content in detail.`;
 
-        /** @type {ContentPart[]} */
+        /** @type {Array<Record<string, unknown>>} */
         const userContent = [];
         if (currentText) {
           userContent.push({ type: "text", text: `User's message: ${currentText}\n\n${prompt}` });
         } else {
           userContent.push({ type: "text", text: prompt });
         }
-        userContent.push(...(contentBlockBuilders[contentType]?.(block, contentData) ?? []));
+        userContent.push(...convertMediaBlockToOpenAI(block, contentData));
 
-        const llmMessages = /** @type {import("openai").default.ChatCompletionMessageParam[]} */ ([
+        const llmMessages = /** @type {unknown[]} */ ([
           ...contextMessages,
           { role: "user", content: userContent },
         ]);
 
-        const response = await llmClient.chat.completions.create({
-          model: toTextModelId,
-          messages: llmMessages,
-        });
-
-        translation = response.choices[0].message.content || `[Failed to describe ${contentType}]`;
+        translation = await sendSimpleChatCompletion(llmClient, toTextModelId, llmMessages) || `[Failed to describe ${contentType}]`;
 
         // Cache the translation
         await db.sql`INSERT INTO media_to_text_cache (content_hash, model_id, translation)

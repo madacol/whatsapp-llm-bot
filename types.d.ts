@@ -152,6 +152,31 @@ type PermissionFlags = {
   useLlm?: boolean;
 };
 
+// Opaque handle — only llm.js knows the concrete type (OpenAI client)
+type LlmClient = { readonly __brand: "LlmClient" };
+
+// Normalized LLM chat response (replaces OpenAI ChatCompletion)
+type LlmChatResponse = {
+  content: string | null;
+  toolCalls: Array<{
+    id: string;
+    name: string;
+    arguments: string;
+  }>;
+  usage?: {
+    promptTokens: number;
+    completionTokens: number;
+    cachedTokens: number;
+    cost?: number;
+  };
+};
+
+// Replaces OpenAI ChatCompletionTool
+type ToolDefinition = {
+  type: "function";
+  function: { name: string; description: string; parameters: Record<string, unknown> };
+};
+
 type CallLlmOptions = { model?: string };
 type CallLlmPrompt = string | ContentBlock[];
 
@@ -164,20 +189,20 @@ type CallLlmMessage = {
 
 type CallLlmChatOptions = CallLlmOptions & {
   messages: CallLlmMessage[];
-  tools?: import("openai").default.Chat.Completions.ChatCompletionTool[];
+  tools?: ToolDefinition[];
   tool_choice?: "auto" | "none";
 };
 
 type CallLlm = {
   (prompt: CallLlmPrompt, options?: CallLlmOptions): Promise<string | null>;
-  (options: CallLlmChatOptions): Promise<import("openai").default.Chat.Completions.ChatCompletion>;
+  (options: CallLlmChatOptions): Promise<LlmChatResponse>;
 };
 
 // Build action context types dynamically based on permissions
 type ExtendedActionContext<P extends PermissionFlags> = ActionContext
   & (P["useRootDb"] extends true ? { rootDb: PGlite } : {})
   & (P["useChatDb"] extends true ? { chatDb: PGlite } : {})
-  & (P["useLlm"] extends true ? { callLlm: CallLlm; llmClient: import("openai").default } : {});
+  & (P["useLlm"] extends true ? { callLlm: CallLlm; llmClient: LlmClient } : {});
 
 type ToolContentBlock = TextContentBlock | ImageContentBlock | VideoContentBlock | AudioContentBlock;
 

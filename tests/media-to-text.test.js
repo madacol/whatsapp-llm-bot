@@ -43,7 +43,7 @@ describe("media-to-text", () => {
   describe("convertUnsupportedMedia", () => {
     /** @type {Awaited<ReturnType<typeof createMockLlmServer>>} */
     let mockServer;
-    /** @type {import("openai").default} */
+    /** @type {LlmClient} */
     let llmClient;
 
     before(async () => {

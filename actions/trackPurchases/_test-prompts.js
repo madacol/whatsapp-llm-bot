@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 
 export default [
 async function tool_selection_scenarios(callLlm, readFixture) {
-      const { actionsToOpenAIFormat } = await import("../message-formatting.js");
+      const { actionsToToolDefinitions } = await import("../message-formatting.js");
       const config = (await import("../config.js")).default;
       const fs = await import("fs/promises");
       const path = await import("path");
@@ -16,7 +16,7 @@ async function tool_selection_scenarios(callLlm, readFixture) {
         const mod = await import(`file://${path.join(actionsDir, file)}`);
         if (mod.default?.name) allActions.push(mod.default);
       }
-      const tools = actionsToOpenAIFormat(allActions);
+      const tools = actionsToToolDefinitions(allActions);
 
       // Load all fixture images once
       const [receiptBuffer, pizzaBuffer, riverBuffer, fishBuffer, soccerBuffer] = await Promise.all([
@@ -107,13 +107,13 @@ async function tool_selection_scenarios(callLlm, readFixture) {
         scenarios.map(async (scenario) => {
           try {
             const response = await callLlm({ messages: scenario.messages, tools, tool_choice: "auto" });
-            const toolCalls = response.choices[0]?.message?.tool_calls;
+            const toolCalls = response.toolCalls;
             if (!toolCalls || toolCalls.length === 0) {
               return { name: scenario.name, error: "LLM should produce tool_calls for a receipt image" };
             }
-            const call = toolCalls.find(tc => tc.function.name === "extract_from_image");
+            const call = toolCalls.find(tc => tc.name === "extract_from_image");
             if (!call) {
-              return { name: scenario.name, error: `Expected extract_from_image call, got: ${toolCalls.map(tc => tc.function.name).join(", ")}` };
+              return { name: scenario.name, error: `Expected extract_from_image call, got: ${toolCalls.map(tc => tc.name).join(", ")}` };
             }
             console.log(`  ✔ ${scenario.name}`);
             return { name: scenario.name, error: null };
@@ -131,7 +131,7 @@ async function tool_selection_scenarios(callLlm, readFixture) {
       }
     },
     async function e2e_partial_items_with_proportional_discounts(callLlm, readFixture) {
-      const { actionsToOpenAIFormat } = await import("../message-formatting.js");
+      const { actionsToToolDefinitions } = await import("../message-formatting.js");
       const { EXTRACT_PROMPT, parseExtractResponse } = await import(".././tools/extractFromImage.js");
       const { resolveModel } = await import("../model-roles.js");
       const config = (await import("../config.js")).default;
@@ -147,7 +147,7 @@ async function tool_selection_scenarios(callLlm, readFixture) {
         const mod = await import(`file://${path.join(actionsDir, file)}`);
         if (mod.default?.name) allActions.push(mod.default);
       }
-      const tools = actionsToOpenAIFormat(allActions);
+      const tools = actionsToToolDefinitions(allActions);
 
       // Step 1: Extract data from receipt image
       const imageBuffer = await readFixture("receipt-dunnes-discounts.jpeg");
@@ -189,13 +189,13 @@ async function tool_selection_scenarios(callLlm, readFixture) {
         // @ts-expect-error -- messages-style call
         { messages, tools, tool_choice: "auto" },
       );
-      const toolCalls = response.choices?.[0]?.message?.tool_calls;
+      const toolCalls = response.toolCalls;
       assert.ok(toolCalls && toolCalls.length > 0, "LLM should call track_purchases");
 
-      const registerCall = toolCalls.find((/** @type {{function: {name: string}}} */ tc) => tc.function.name === "track_purchases");
-      assert.ok(registerCall, `Expected track_purchases call, got: ${toolCalls.map((/** @type {{function: {name: string}}} */ tc) => tc.function.name).join(", ")}`);
+      const registerCall = toolCalls.find((/** @type {{name: string}} */ tc) => tc.name === "track_purchases");
+      assert.ok(registerCall, `Expected track_purchases call, got: ${toolCalls.map((/** @type {{name: string}} */ tc) => tc.name).join(", ")}`);
 
-      const args = JSON.parse(registerCall.function.arguments);
+      const args = JSON.parse(registerCall.arguments);
       assert.equal(args.action, "register");
 
       // Validate: LLM should pass ALL receipt items with included flags

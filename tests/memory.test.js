@@ -89,38 +89,38 @@ describe("extractTextFromMessage", () => {
 describe("generateEmbedding", () => {
   it("returns embedding array on success", async () => {
     const mockEmbedding = [0.1, 0.2, 0.3];
-    const mockClient = /** @type {import("openai").default} */ ({
+    const mockClient = /** @type {LlmClient} */ (/** @type {unknown} */ ({
       embeddings: {
         create: async () => ({ data: [{ embedding: mockEmbedding }] }),
       },
-    });
+    }));
 
     const result = await generateEmbedding(mockClient, "test text for embedding");
     assert.deepEqual(result, mockEmbedding);
   });
 
   it("returns null for short text (< 10 chars)", async () => {
-    const mockClient = /** @type {import("openai").default} */ ({
+    const mockClient = /** @type {LlmClient} */ (/** @type {unknown} */ ({
       embeddings: { create: async () => { throw new Error("should not be called"); } },
-    });
+    }));
 
     const result = await generateEmbedding(mockClient, "hi");
     assert.equal(result, null);
   });
 
   it("returns null for empty text", async () => {
-    const mockClient = /** @type {import("openai").default} */ ({
+    const mockClient = /** @type {LlmClient} */ (/** @type {unknown} */ ({
       embeddings: { create: async () => { throw new Error("should not be called"); } },
-    });
+    }));
 
     const result = await generateEmbedding(mockClient, "");
     assert.equal(result, null);
   });
 
   it("returns null on API failure", async () => {
-    const mockClient = /** @type {import("openai").default} */ ({
+    const mockClient = /** @type {LlmClient} */ (/** @type {unknown} */ ({
       embeddings: { create: async () => { throw new Error("API error"); } },
-    });
+    }));
 
     const result = await generateEmbedding(mockClient, "valid text for embedding");
     assert.equal(result, null);
@@ -134,9 +134,9 @@ describe("saveMemory", () => {
   it("stores memory with embedding when embedding succeeds", async () => {
     await store.createChat("mem-save-1");
     const mockEmbedding = [0.1, 0.2, 0.3];
-    const mockClient = /** @type {import("openai").default} */ ({
+    const mockClient = /** @type {LlmClient} */ (/** @type {unknown} */ ({
       embeddings: { create: async () => ({ data: [{ embedding: mockEmbedding }] }) },
-    });
+    }));
 
     const id = await saveMemory(db, mockClient, "mem-save-1", "User likes cats");
 
@@ -148,9 +148,9 @@ describe("saveMemory", () => {
 
   it("stores memory with search_text only when embedding fails", async () => {
     await store.createChat("mem-save-2");
-    const mockClient = /** @type {import("openai").default} */ ({
+    const mockClient = /** @type {LlmClient} */ (/** @type {unknown} */ ({
       embeddings: { create: async () => { throw new Error("API error"); } },
-    });
+    }));
 
     const id = await saveMemory(db, mockClient, "mem-save-2", "User prefers dark mode settings");
 
@@ -162,9 +162,9 @@ describe("saveMemory", () => {
 
   it("returns the inserted memory id", async () => {
     await store.createChat("mem-save-3");
-    const mockClient = /** @type {import("openai").default} */ ({
+    const mockClient = /** @type {LlmClient} */ (/** @type {unknown} */ ({
       embeddings: { create: async () => ({ data: [{ embedding: [0.1, 0.2, 0.3] }] }) },
-    });
+    }));
 
     const id = await saveMemory(db, mockClient, "mem-save-3", "User's birthday is March 5");
     assert.equal(typeof id, "number");
@@ -218,9 +218,9 @@ describe("findMemories", () => {
       return vec.map(v => v / mag);
     }
     const queryEmb = fakeEmbedding2(0); // similar to first memory
-    const mockClient = /** @type {import("openai").default} */ ({
+    const mockClient = /** @type {LlmClient} */ (/** @type {unknown} */ ({
       embeddings: { create: async () => ({ data: [{ embedding: queryEmb }] }) },
-    });
+    }));
 
     const results = await findMemories(db, mockClient, "mem-find-1", "cats and animals", { minSimilarity: 0 });
 
@@ -238,9 +238,9 @@ describe("findMemories", () => {
       VALUES ('mem-find-other', 'Other chat memory', ${JSON.stringify(fakeEmbedding(0))}::vector, to_tsvector('english', 'Other chat memory'))
     `;
 
-    const mockClient = /** @type {import("openai").default} */ ({
+    const mockClient = /** @type {LlmClient} */ (/** @type {unknown} */ ({
       embeddings: { create: async () => ({ data: [{ embedding: fakeEmbedding(0) }] }) },
-    });
+    }));
 
     const results = await findMemories(db, mockClient, "mem-find-1", "test", { minSimilarity: 0 });
     for (const r of results) {
@@ -249,9 +249,9 @@ describe("findMemories", () => {
   });
 
   it("falls back to FTS when embedding fails", async () => {
-    const failClient = /** @type {import("openai").default} */ ({
+    const failClient = /** @type {LlmClient} */ (/** @type {unknown} */ ({
       embeddings: { create: async () => { throw new Error("API error"); } },
-    });
+    }));
 
     const results = await findMemories(db, failClient, "mem-find-1", "cats", { minSimilarity: 0 });
     assert.ok(results.length > 0, "Should find results via FTS");
@@ -268,18 +268,18 @@ describe("findMemories", () => {
       `;
     }
 
-    const failClient = /** @type {import("openai").default} */ ({
+    const failClient = /** @type {LlmClient} */ (/** @type {unknown} */ ({
       embeddings: { create: async () => { throw new Error("fail"); } },
-    });
+    }));
 
     const results = await findMemories(db, failClient, "mem-find-limit", "testing limits", { limit: 2, minSimilarity: 0 });
     assert.ok(results.length <= 2, `Expected at most 2 results, got ${results.length}`);
   });
 
   it("filters by minSimilarity", async () => {
-    const mockClient = /** @type {import("openai").default} */ ({
+    const mockClient = /** @type {LlmClient} */ (/** @type {unknown} */ ({
       embeddings: { create: async () => ({ data: [{ embedding: fakeEmbedding(0) }] }) },
-    });
+    }));
 
     const results = await findMemories(db, mockClient, "mem-find-1", "test", { minSimilarity: 0.99 });
     // Only exact match (seed=0) should pass
