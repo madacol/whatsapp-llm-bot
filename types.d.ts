@@ -208,12 +208,12 @@ type ToolContentBlock = TextContentBlock | ImageContentBlock | VideoContentBlock
 
 type HtmlContent = { __brand: "html"; html: string; title?: string };
 
-type ActionResult = string | {} | HtmlContent;
-
 type ActionSignal = {
-  result: ActionResult | ToolContentBlock[];
+  result: string | {} | HtmlContent | ToolContentBlock[];
   autoContinue: boolean;
 };
+
+type ActionResult = string | {} | HtmlContent | ActionSignal;
 
 type Action<P extends PermissionFlags = PermissionFlags> = {
   name: string;
