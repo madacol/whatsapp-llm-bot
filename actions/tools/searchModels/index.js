@@ -3,13 +3,13 @@ import { getCachedModels } from "../../../models-cache.js";
 export default /** @type {defineAction} */ ((x) => x)({
   name: "search_models",
   command: "search models",
-  description: "Search LLM models from the cached OpenRouter model list with pricing and context information. Can filter by provider name and/or supported input modality (image, audio, video, file).",
+  description: "Search LLM models from the cached OpenRouter model list with pricing and context information. Searches across model id, name, description, and modality string. Can also filter by supported input modality (image, audio, video, file).",
   parameters: {
     type: "object",
     properties: {
-      providers: {
+      query: {
         type: "string",
-        description: "Comma-separated list of providers to filter by (e.g., 'glm-4.7,claude,codex,kimi-k2.5')"
+        description: "Search query to match against model id, name, description, and modality (e.g., 'claude', 'code', 'image->text', 'fast')"
       },
       modality: {
         type: "string",
@@ -21,9 +21,9 @@ export default /** @type {defineAction} */ ((x) => x)({
       }
     },
   },
-  formatToolCall: ({ providers, modality }) => {
+  formatToolCall: ({ query, modality }) => {
     const parts = ["Searching models"];
-    if (providers) parts.push(`by ${providers}`);
+    if (query) parts.push(`for "${query}"`);
     if (modality) parts.push(`(${modality})`);
     return parts.join(" ");
   },
@@ -32,20 +32,20 @@ export default /** @type {defineAction} */ ((x) => x)({
   },
   /**
    * @param {ActionContext} context
-   * @param {{ providers?: string, modality?: string, sortBy?: string }} params
+   * @param {{ query?: string, modality?: string, sortBy?: string }} params
    */
   action_fn: async function (context, params) {
-    if (!params.providers && !params.modality) {
-      return "Please provide at least one filter: providers (e.g. 'google,openai') or modality (e.g. 'video', 'image', 'audio').";
+    if (!params.query && !params.modality) {
+      return "Please provide at least one filter: query (e.g. 'claude', 'code generation') or modality (e.g. 'video', 'image', 'audio').";
     }
 
-    const filterPatterns = params.providers
-      ? params.providers.split(',').map(p => p.trim().toLowerCase())
+    const queryTerms = params.query
+      ? params.query.toLowerCase().split(/\s+/)
       : [];
     const modality = params.modality?.trim().toLowerCase();
 
     const filters = [];
-    if (filterPatterns.length > 0) filters.push(`providers: ${filterPatterns.join(", ")}`);
+    if (queryTerms.length > 0) filters.push(`query: "${params.query}"`);
     if (modality) filters.push(`modality: ${modality}`);
     await context.log(`Searching models — ${filters.join(", ")}`);
 
@@ -57,11 +57,23 @@ export default /** @type {defineAction} */ ((x) => x)({
 
     const TOKENS_PER_MILLION = 1_000_000;
 
+    /** @param {import("../../../models-cache.js").OpenRouterModel} model */
+    function matchesQuery(model) {
+      if (queryTerms.length === 0) return true;
+      const searchable = [
+        model.id,
+        model.name,
+        model.description,
+        model.architecture?.modality ?? "",
+      ]
+        .join(" ")
+        .toLowerCase();
+      return queryTerms.every(term => searchable.includes(term));
+    }
+
     const models = data
       .filter(model => {
-        if (filterPatterns.length > 0 && !filterPatterns.some(p => model.id.toLowerCase().includes(p))) {
-          return false;
-        }
+        if (!matchesQuery(model)) return false;
         if (modality && !(model.architecture?.input_modalities || []).includes(modality)) {
           return false;
         }
@@ -74,7 +86,7 @@ export default /** @type {defineAction} */ ((x) => x)({
         contextDisplay: Math.round(model.context_length / 1000) + 'k',
         inputPrice: parseFloat(model.pricing.prompt) * TOKENS_PER_MILLION,
         outputPrice: parseFloat(model.pricing.completion) * TOKENS_PER_MILLION,
-        modalities: model.architecture?.input_modalities || ["text"],
+        modality: model.architecture?.modality || "text->text",
       }));
 
     const sortBy = params.sortBy || 'input_price';
@@ -92,17 +104,10 @@ export default /** @type {defineAction} */ ((x) => x)({
 
     await context.log(`Found ${models.length} models matching criteria`);
 
-    let table = modality
-      ? "*IN* | *OUT* | *CTX* | *MODEL* | *ID* | *MODALITIES*\n"
-      : "*IN* | *OUT* | *CTX* | *MODEL* | *ID*\n";
+    let table = "*IN* | *OUT* | *CTX* | *MODALITY* | *MODEL* | *ID*\n";
     table += "------------------------------------------------------------\n";
     for (const model of models) {
-      if (modality) {
-        const mods = model.modalities.filter(m => m !== "text").join(", ");
-        table += `• $${model.inputPrice.toFixed(2)} | $${model.outputPrice.toFixed(2)} | ${model.contextDisplay} | *${model.name}* | \`${model.id}\` | ${mods}\n`;
-      } else {
-        table += `• $${model.inputPrice.toFixed(2)} | $${model.outputPrice.toFixed(2)} | ${model.contextDisplay} | *${model.name}* | \`${model.id}\`\n`;
-      }
+      table += `• $${model.inputPrice.toFixed(2)} | $${model.outputPrice.toFixed(2)} | ${model.contextDisplay} | ${model.modality} | *${model.name}* | \`${model.id}\`\n`;
     }
 
     await context.log("Model comparison complete");
