@@ -201,7 +201,7 @@ export async function convertUnsupportedMedia(
         // Call media-to-text model with conversation context
         const prompt = MEDIA_TO_TEXT_PROMPTS[contentType] || `Describe this ${contentType} content in detail.`;
 
-        /** @type {Array<Record<string, unknown>>} */
+        /** @type {unknown[]} */
         const userContent = [];
         if (currentText) {
           userContent.push({ type: "text", text: `User's message: ${currentText}\n\n${prompt}` });

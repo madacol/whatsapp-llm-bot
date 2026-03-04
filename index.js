@@ -4,7 +4,7 @@
 
 import { getActions, executeAction, getChatActions, getChatAction, getAction } from "./actions.js";
 import config from "./config.js";
-import { createLlmClient, sendChatCompletion, convertToolResultToOpenAI } from "./llm.js";
+import { createLlmClient, sendChatCompletion } from "./llm.js";
 import { shortenToolId, formatTime, truncateWithSummary, isHtmlContent } from "./utils.js";
 import { connectToWhatsApp } from "./whatsapp-adapter.js";
 import { startReminderDaemon } from "./reminder-daemon.js";
@@ -164,7 +164,7 @@ async function executeAndStoreTool({
 
   try {
     // Resolve _media_refs: pull referenced media from the registry into context.content
-    const { _media_refs, ...cleanArgs } = toolArgs;
+    const { _media_refs, ...cleanArgs } = /** @type {Record<string, unknown>} */ (toolArgs);
     let actionContext = context;
     if (Array.isArray(_media_refs) && _media_refs.length > 0) {
       /** @type {IncomingContentBlock[]} */
@@ -693,6 +693,9 @@ export function createReactionHandler({ store, executeActionFn, pendingByMsgKeyI
       },
       sendImage: async (image, caption) => {
         await sock.sendMessage(pending.chat_id, { image, ...(caption && { caption }) });
+      },
+      sendVideo: async (video, caption) => {
+        await sock.sendMessage(pending.chat_id, { video, ...(caption && { caption }) });
       },
       confirm: async () => true, // auto-confirm: user already approved
     };
