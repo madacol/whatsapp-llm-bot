@@ -7,6 +7,7 @@ import {
   saveChatAction,
   readChatAction,
   deleteChatAction,
+  getChatActions,
 } from "../../../actions.js";
 
 
@@ -336,6 +337,26 @@ export default /** @type {defineAction} */ ((x) => x)({
         remove: (name) => fs.rm(path.join(actionsDir, `${name}.js`)),
         label: (name) => `Action file: actions/${name}.js`,
       };
+    }
+
+    // Guard against duplicate action names across both global and chat-scoped actions.
+    if (code && (mode === "create" || mode === "edit")) {
+      const nameFromCode = code.match(/name:\s*["']([^"']+)["']/)?.[1];
+      if (nameFromCode) {
+        const [globalActions, chatActions] = await Promise.all([
+          context.getActions(),
+          getChatActions(context.chatId),
+        ]);
+        const conflict = [...globalActions, ...chatActions].find(a => a.name === nameFromCode);
+        if (conflict) {
+          // Allow editing the action that already owns this name
+          const ownContent = await storage.read(file_name);
+          const ownName = ownContent?.match(/name:\s*["']([^"']+)["']/)?.[1];
+          if (ownName !== nameFromCode) {
+            return `An action named "${nameFromCode}" already exists. Use mode "edit" on the existing action instead of creating a duplicate.`;
+          }
+        }
+      }
     }
 
     return executeActionCrud(storage, {
