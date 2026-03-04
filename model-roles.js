@@ -163,5 +163,8 @@ export function resolveModel(role, chatRow) {
   const fallbackRole = MEDIA_TO_TEXT_FALLBACK[role];
   if (fallbackRole) return resolveModel(fallbackRole, chatRow);
 
+  // 4. Ultimate fallback: use the chat model rather than returning ""
+  if (role !== "chat") return resolveModel("chat", chatRow);
+
   return resolved;
 }

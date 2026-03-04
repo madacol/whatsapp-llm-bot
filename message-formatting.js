@@ -131,6 +131,15 @@ export function parseCommandArgs(args, parameters) {
 }
 
 /**
+ * Check whether a content block is a media type (image, video, or audio).
+ * @param {IncomingContentBlock | ToolContentBlock} block
+ * @returns {block is ImageContentBlock | VideoContentBlock | AudioContentBlock}
+ */
+export function isMediaBlock(block) {
+  return block.type === "image" || block.type === "video" || block.type === "audio";
+}
+
+/**
  * Register a media block in the registry.
  * @param {MediaRegistry} registry
  * @param {IncomingContentBlock} block
@@ -190,11 +199,11 @@ export function prepareMessages(chatMessages) {
     // Scan for media blocks and register them
     if (messageData.role === "user") {
       for (const block of messageData.content) {
-        if (block.type === "image" || block.type === "video" || block.type === "audio") {
+        if (isMediaBlock(block)) {
           registerMedia(mediaRegistry, block);
         } else if (block.type === "quote") {
           for (const quoteBlock of block.content) {
-            if (quoteBlock.type === "image" || quoteBlock.type === "video" || quoteBlock.type === "audio") {
+            if (isMediaBlock(quoteBlock)) {
               registerMedia(mediaRegistry, quoteBlock);
             }
           }
@@ -202,7 +211,7 @@ export function prepareMessages(chatMessages) {
       }
     } else if (messageData.role === "tool") {
       for (const block of messageData.content) {
-        if (block.type === "image" || block.type === "video" || block.type === "audio") {
+        if (isMediaBlock(block)) {
           registerMedia(mediaRegistry, block);
         }
       }

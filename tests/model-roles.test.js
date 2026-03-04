@@ -8,7 +8,8 @@ describe("resolveModel", () => {
     assert.equal(resolveModel("chat"), config.model);
     assert.equal(resolveModel("image_generation"), config.image_model);
     assert.equal(resolveModel("embedding"), config.embedding_model);
-    assert.equal(resolveModel("coding"), config.coding_model);
+    // coding_model is empty by default → falls back to chat model
+    assert.equal(resolveModel("coding"), config.coding_model || config.model);
   });
 
   it("returns per-chat override and falls back to config when empty", () => {
@@ -67,6 +68,20 @@ describe("resolveModel", () => {
     assert.throws(() => resolveModel("nonexistent"), {
       message: /Unknown model role.*nonexistent/,
     });
+  });
+
+  it("never returns empty string — falls back to chat model", () => {
+    const orig = process.env.CODING_MODEL;
+    try {
+      process.env.CODING_MODEL = "";
+      // "coding" has no fallback chain, but config default is empty.
+      // Should still return a non-empty string (the chat model).
+      const result = resolveModel("coding");
+      assert.ok(result.length > 0, `resolveModel("coding") returned empty string`);
+    } finally {
+      if (orig === undefined) delete process.env.CODING_MODEL;
+      else process.env.CODING_MODEL = orig;
+    }
   });
 });
 

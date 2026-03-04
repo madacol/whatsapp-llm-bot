@@ -2,6 +2,7 @@ import OpenAI from "openai";
 import config from "./config.js";
 import { resolveModel } from "./model-roles.js";
 import { convertAudioToMp3Base64 } from "./audio_conversion.js";
+import { registerMedia, isMediaBlock } from "./message-formatting.js";
 import { createLogger } from "./logger.js";
 
 const log = createLogger("llm");
@@ -111,15 +112,14 @@ function normalizeChatCompletion(completion, nativeCost) {
 // ── Internal Message[] → OpenAI conversion helpers ──
 
 /**
- * Tag a media block in the registry and append a `[media:N]` text marker.
+ * Register a media block in the registry and append a `[media:N]` text marker.
  * @param {Array<OpenAI.ChatCompletionContentPart>} parts
  * @param {MediaRegistry} registry
  * @param {IncomingContentBlock} originalBlock
  * @returns {number} The assigned media ID
  */
 function tagMedia(parts, registry, originalBlock) {
-  const id = registry.size + 1;
-  registry.set(id, originalBlock);
+  const id = registerMedia(registry, originalBlock);
   parts.push({ type: "text", text: `[media:${id}]` });
   return id;
 }
@@ -235,7 +235,7 @@ function formatAssistantContent(message) {
  * @returns {Array<OpenAI.ChatCompletionMessageParam>}
  */
 function formatToolContent(message, registry) {
-  const hasMedia = message.content.some((b) => b.type === "image" || b.type === "video");
+  const hasMedia = message.content.some(isMediaBlock);
 
   if (!hasMedia) {
     /** @type {Array<OpenAI.ChatCompletionMessageParam>} */
@@ -327,19 +327,15 @@ export function convertToolResultToOpenAI(blocks, registry) {
         type: /** @type {const} */ ("image_url"),
         image_url: { url: `data:${block.mime_type};base64,${block.data}` },
       });
-      const id = registry.size + 1;
-      registry.set(id, block);
+      const id = tagMedia(parts, registry, block);
       mediaIds.set(block, id);
-      parts.push({ type: /** @type {const} */ ("text"), text: `[media:${id}]` });
     } else if (block.type === "video") {
       parts.push(/** @type {*} */ ({
         type: "video_url",
         video_url: { url: `data:${block.mime_type};base64,${block.data}` },
       }));
-      const id = registry.size + 1;
-      registry.set(id, block);
+      const id = tagMedia(parts, registry, block);
       mediaIds.set(block, id);
-      parts.push({ type: /** @type {const} */ ("text"), text: `[media:${id}]` });
     }
   }
 

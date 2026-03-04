@@ -6,7 +6,7 @@ const system_prompt = `You are Madabot, a helpful AI assistant in a WhatsApp cha
 You are in a WhatsApp chat, so you can use WhatsApp formatting to enhance readability (bold, italic, citations, code blocks, etc.).`;
 
 export default {
-  get MASTER_IDs() { return process.env.MASTER_ID?.split(',') ?? []; },
+  get MASTER_IDs() { return process.env.MASTER_ID?.split(',').map(s => s.trim()).filter(Boolean) ?? []; },
   set MASTER_IDs(v) { process.env.MASTER_ID = v.join(','); },
 
   get model() { return process.env.MODEL || "gpt-4.1"; },

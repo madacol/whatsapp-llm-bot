@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import { getModelModalities } from "./models-cache.js";
 import config from "./config.js";
 import { sendSimpleChatCompletion } from "./llm.js";
+import { isMediaBlock } from "./message-formatting.js";
 
 /**
  * Create the media_to_text_cache table (and rename from old name if needed).
@@ -70,7 +71,7 @@ function hashContent(data) {
  * @returns {boolean}
  */
 function isUnsupportedBlock(block, supportedModalities) {
-  return block.type !== "text" && block.type !== "quote" && !supportedModalities.includes(block.type);
+  return isMediaBlock(block) && !supportedModalities.includes(block.type);
 }
 
 /**

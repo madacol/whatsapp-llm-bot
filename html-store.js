@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import config from "./config.js";
 
 /**
  * Ensure the html_pages table exists.
@@ -43,6 +44,19 @@ export async function storePage(db, html, title) {
     [id, html, title ?? null],
   );
   return id;
+}
+
+/**
+ * Store an HTML page and return a display link (with optional title prefix).
+ * @param {PGlite} db
+ * @param {HtmlContent} htmlContent
+ * @returns {Promise<string>} Link text like "Title: http://…/page/uuid" or just the URL
+ */
+export async function storeAndLinkHtml(db, htmlContent) {
+  const pageId = await storePage(db, htmlContent.html, htmlContent.title);
+  const baseUrl = config.html_server_base_url || `http://localhost:${config.html_server_port}`;
+  const pageUrl = `${baseUrl}/page/${pageId}`;
+  return htmlContent.title ? `${htmlContent.title}: ${pageUrl}` : pageUrl;
 }
 
 /**
