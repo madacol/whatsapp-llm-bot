@@ -1,6 +1,9 @@
 /**
  * Debug tool: stores and cleans up LLM request context snapshots.
  */
+import { createLogger } from "./logger.js";
+
+const log = createLogger("context-log");
 
 /**
  * Replace binary media data in internal Message[] with short hash stubs.
@@ -48,8 +51,10 @@ export function storeLlmContext(db, messageId, model, systemPrompt, messages, ac
     tools: actions.map(a => a.name),
   };
   db.sql`UPDATE messages SET llm_context = ${JSON.stringify(llmContext)}
-    WHERE message_id = ${messageId}`.catch(() => {});
+    WHERE message_id = ${messageId}`
+    .catch(err => log.warn("Failed to store LLM context:", err));
   db.sql`UPDATE messages SET llm_context = NULL
     WHERE llm_context IS NOT NULL
-    AND timestamp < NOW() - INTERVAL '1 hour'`.catch(() => {});
+    AND timestamp < NOW() - INTERVAL '1 hour'`
+    .catch(err => log.warn("Failed to clean up old LLM contexts:", err));
 }
