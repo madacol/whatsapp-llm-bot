@@ -407,7 +407,8 @@ export async function getChatActions(chatId) {
       if (action) results.push(action);
     }
     return results;
-  } catch {
+  } catch (err) {
+    log.error(`Error loading chat actions for ${chatId}:`, err);
     return [];
   }
 }
