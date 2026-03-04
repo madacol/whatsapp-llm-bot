@@ -34,7 +34,7 @@ const regressionFilter = process.env.REGRESSION;
  *   created_at: string;
  *   model?: string;
  *   system_prompt: string;
- *   messages: CallLlmMessage[];
+ *   messages: ChatMessage[];
  *   tools: string[];
  *   assertions: TestAssertion[];
  * }} RegressionTestCase
@@ -55,11 +55,11 @@ let toolDefsByName = new Map();
 /**
  * Resolve fixture references in message content blocks.
  * Replaces `{type:"image", fixture:"...", mime_type:"..."}` with actual base64 data.
- * @param {CallLlmMessage[]} messages
- * @returns {Promise<CallLlmMessage[]>}
+ * @param {ChatMessage[]} messages
+ * @returns {Promise<ChatMessage[]>}
  */
 async function resolveFixtures(messages) {
-  /** @type {CallLlmMessage[]} */
+  /** @type {ChatMessage[]} */
   const resolved = [];
   for (const msg of messages) {
     if (!Array.isArray(msg.content)) {

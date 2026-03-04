@@ -176,19 +176,27 @@ export async function convertUnsupportedMedia(
         translation = /** @type {string} */ (rows[0].translation);
       } else {
         // Build conversation context from preceding messages
-        /** @type {CallLlmMessage[]} */
+        /** @type {ChatMessage[]} */
         const contextMessages = [];
         for (let j = 0; j < msgIdx; j++) {
           const prev = messages[j];
           if (!prev.message_data) continue;
           const role = prev.message_data.role;
-          if (role === "user" || role === "assistant") {
+          if (role === "user") {
             const text = prev.message_data.content
               .filter(/** @returns {b is TextContentBlock} */ (b) => b.type === "text")
               .map((b) => b.text)
               .join("\n");
             if (text) {
-              contextMessages.push({ role, content: text });
+              contextMessages.push({ role, content: [{ type: "text", text }] });
+            }
+          } else if (role === "assistant") {
+            const text = prev.message_data.content
+              .filter(/** @returns {b is TextContentBlock} */ (b) => b.type === "text")
+              .map((b) => b.text)
+              .join("\n");
+            if (text) {
+              contextMessages.push({ role, content: [{ type: "text", text }] });
             }
           }
         }
@@ -202,7 +210,7 @@ export async function convertUnsupportedMedia(
         // Call media-to-text model with conversation context
         const prompt = MEDIA_TO_TEXT_PROMPTS[contentType] || `Describe this ${contentType} content in detail.`;
 
-        /** @type {ContentBlock[]} */
+        /** @type {IncomingContentBlock[]} */
         const userContent = [];
         if (currentText) {
           userContent.push({ type: "text", text: `User's message: ${currentText}\n\n${prompt}` });
@@ -211,7 +219,7 @@ export async function convertUnsupportedMedia(
         }
         userContent.push(block);
 
-        /** @type {CallLlmMessage[]} */
+        /** @type {ChatMessage[]} */
         const llmMessages = [
           ...contextMessages,
           { role: /** @type {const} */ ("user"), content: userContent },

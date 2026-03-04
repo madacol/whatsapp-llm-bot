@@ -39,67 +39,67 @@ async function tool_selection_scenarios(callLlm, readFixture) {
       /** @type {ImageContentBlock} */
       const soccerImage = { type: "image", encoding: "base64", mime_type: "image/jpeg", data: soccerBuffer.toString("base64") };
 
-      /** @type {Array<{name: string, messages: CallLlmMessage[]}>} */
+      /** @type {Array<{name: string, messages: ChatMessage[]}>} */
       const scenarios = [
         {
           name: "clean_conversation",
           messages: [
-            { role: "system", content: config.system_prompt },
-            { role: "user", content: [receiptImage] },
+            { role: /** @type {const} */ ("system"), content: config.system_prompt },
+            { role: /** @type {const} */ ("user"), content: [receiptImage] },
           ],
         },
         {
           name: "after_casual_chat",
           messages: [
-            { role: "system", content: config.system_prompt },
-            { role: "user", content: "que tal el tiempo hoy?" },
-            { role: "assistant", content: "Hoy hace buen tiempo, soleado y unos 22 grados." },
-            { role: "user", content: [pizzaImage, { type: "text", text: "mira la pizza que hice!" }] },
-            { role: "assistant", content: "Que buena pinta! Se ve deliciosa." },
-            { role: "user", content: [receiptImage] },
+            { role: /** @type {const} */ ("system"), content: config.system_prompt },
+            { role: /** @type {const} */ ("user"), content: [{ type: /** @type {const} */ ("text"), text: "que tal el tiempo hoy?" }] },
+            { role: /** @type {const} */ ("assistant"), content: [{ type: /** @type {const} */ ("text"), text: "Hoy hace buen tiempo, soleado y unos 22 grados." }] },
+            { role: /** @type {const} */ ("user"), content: [pizzaImage, { type: /** @type {const} */ ("text"), text: "mira la pizza que hice!" }] },
+            { role: /** @type {const} */ ("assistant"), content: [{ type: /** @type {const} */ ("text"), text: "Que buena pinta! Se ve deliciosa." }] },
+            { role: /** @type {const} */ ("user"), content: [receiptImage] },
           ],
         },
         {
           name: "after_code_discussion",
           messages: [
-            { role: "system", content: config.system_prompt },
-            { role: "user", content: "como hago un fetch en javascript?" },
-            { role: "assistant", content: "Puedes usar `fetch('url').then(r => r.json())` o con async/await." },
-            { role: "user", content: [riverImage, { type: "text", text: "mira esta foto de mis vacaciones" }] },
-            { role: "assistant", content: "Que bonito paisaje! Donde fue?" },
-            { role: "user", content: [receiptImage] },
+            { role: /** @type {const} */ ("system"), content: config.system_prompt },
+            { role: /** @type {const} */ ("user"), content: [{ type: /** @type {const} */ ("text"), text: "como hago un fetch en javascript?" }] },
+            { role: /** @type {const} */ ("assistant"), content: [{ type: /** @type {const} */ ("text"), text: "Puedes usar `fetch('url').then(r => r.json())` o con async/await." }] },
+            { role: /** @type {const} */ ("user"), content: [riverImage, { type: /** @type {const} */ ("text"), text: "mira esta foto de mis vacaciones" }] },
+            { role: /** @type {const} */ ("assistant"), content: [{ type: /** @type {const} */ ("text"), text: "Que bonito paisaje! Donde fue?" }] },
+            { role: /** @type {const} */ ("user"), content: [receiptImage] },
           ],
         },
         {
           name: "with_brief_text",
           messages: [
-            { role: "system", content: config.system_prompt },
-            { role: "user", content: [receiptImage, { type: "text", text: "mira esto" }] },
+            { role: /** @type {const} */ ("system"), content: config.system_prompt },
+            { role: /** @type {const} */ ("user"), content: [receiptImage, { type: /** @type {const} */ ("text"), text: "mira esto" }] },
           ],
         },
         {
           name: "after_previous_extraction",
           messages: [
-            { role: "system", content: config.system_prompt },
-            { role: "assistant", content: null, tool_calls: [{ id: "call_prev", type: "function", function: { name: "extract_from_image", arguments: '{"prompt":"extract invoice"}' } }] },
-            { role: "tool", content: '{"store_name":"Mercadona","items":[...],"total":25.30}', tool_call_id: "call_prev" },
-            { role: "assistant", content: null, tool_calls: [{ id: "call_reg", type: "function", function: { name: "track_purchases", arguments: '{"action":"register","store_name":"Mercadona","items":"[...]","total":25.30}' } }] },
-            { role: "tool", content: "Factura registrada (ID: 1) — Libro: General\nTienda: Mercadona\nTotal: €25.30", tool_call_id: "call_reg" },
-            { role: "assistant", content: "He registrado tu factura de Mercadona por €25.30." },
-            { role: "user", content: "gracias!" },
-            { role: "assistant", content: "De nada!" },
-            { role: "user", content: [receiptImage] },
+            { role: /** @type {const} */ ("system"), content: config.system_prompt },
+            { role: /** @type {const} */ ("assistant"), content: [{ type: /** @type {const} */ ("tool"), tool_id: "call_prev", name: "extract_from_image", arguments: '{"prompt":"extract invoice"}' }] },
+            { role: /** @type {const} */ ("tool"), tool_id: "call_prev", content: [{ type: /** @type {const} */ ("text"), text: '{"store_name":"Mercadona","items":[...],"total":25.30}' }] },
+            { role: /** @type {const} */ ("assistant"), content: [{ type: /** @type {const} */ ("tool"), tool_id: "call_reg", name: "track_purchases", arguments: '{"action":"register","store_name":"Mercadona","items":"[...]","total":25.30}' }] },
+            { role: /** @type {const} */ ("tool"), tool_id: "call_reg", content: [{ type: /** @type {const} */ ("text"), text: "Factura registrada (ID: 1) — Libro: General\nTienda: Mercadona\nTotal: €25.30" }] },
+            { role: /** @type {const} */ ("assistant"), content: [{ type: /** @type {const} */ ("text"), text: "He registrado tu factura de Mercadona por €25.30." }] },
+            { role: /** @type {const} */ ("user"), content: [{ type: /** @type {const} */ ("text"), text: "gracias!" }] },
+            { role: /** @type {const} */ ("assistant"), content: [{ type: /** @type {const} */ ("text"), text: "De nada!" }] },
+            { role: /** @type {const} */ ("user"), content: [receiptImage] },
           ],
         },
         {
           name: "after_unrelated_images",
           messages: [
-            { role: "system", content: config.system_prompt },
-            { role: "user", content: [fishImage, { type: "text", text: "probé este plato en Colombia" }] },
-            { role: "assistant", content: "Se ve increíble! La comida sudamericana es muy rica." },
-            { role: "user", content: [soccerImage, { type: "text", text: "viste el partido de ayer?" }] },
-            { role: "assistant", content: "No lo vi, pero parece que fue un buen partido!" },
-            { role: "user", content: [receiptImage] },
+            { role: /** @type {const} */ ("system"), content: config.system_prompt },
+            { role: /** @type {const} */ ("user"), content: [fishImage, { type: /** @type {const} */ ("text"), text: "probé este plato en Colombia" }] },
+            { role: /** @type {const} */ ("assistant"), content: [{ type: /** @type {const} */ ("text"), text: "Se ve increíble! La comida sudamericana es muy rica." }] },
+            { role: /** @type {const} */ ("user"), content: [soccerImage, { type: /** @type {const} */ ("text"), text: "viste el partido de ayer?" }] },
+            { role: /** @type {const} */ ("assistant"), content: [{ type: /** @type {const} */ ("text"), text: "No lo vi, pero parece que fue un buen partido!" }] },
+            { role: /** @type {const} */ ("user"), content: [receiptImage] },
           ],
         },
       ];
@@ -166,23 +166,18 @@ async function tool_selection_scenarios(callLlm, readFixture) {
 
       // Step 2: LLM marks items as included/excluded and passes ALL data to track_purchases
       const userPrompt = "solo agrega los huevos, rice cakes, iceberg lettuce, pineapple y lemsip, y calcula bien los descuentos aplicados q le correspondan para ese subtotal";
-      /** @type {CallLlmMessage[]} */
+      /** @type {ChatMessage[]} */
       const messages = [
-        { role: "system", content: config.system_prompt },
-        { role: "user", content: [receiptImage, { type: "text", text: userPrompt }] },
+        { role: /** @type {const} */ ("system"), content: config.system_prompt },
+        { role: /** @type {const} */ ("user"), content: [receiptImage, { type: /** @type {const} */ ("text"), text: userPrompt }] },
         {
-          role: "assistant",
-          content: null,
-          tool_calls: [{
-            id: "call_extract",
-            type: "function",
-            function: { name: "extract_from_image", arguments: JSON.stringify({ prompt: EXTRACT_PROMPT }) },
-          }],
+          role: /** @type {const} */ ("assistant"),
+          content: [{ type: /** @type {const} */ ("tool"), tool_id: "call_extract", name: "extract_from_image", arguments: JSON.stringify({ prompt: EXTRACT_PROMPT }) }],
         },
         {
-          role: "tool",
-          content: JSON.stringify(extracted),
-          tool_call_id: "call_extract",
+          role: /** @type {const} */ ("tool"),
+          tool_id: "call_extract",
+          content: [{ type: /** @type {const} */ ("text"), text: JSON.stringify(extracted) }],
         },
       ];
 

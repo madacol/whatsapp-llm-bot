@@ -69,6 +69,13 @@ type ContentBlock = IncomingContentBlock | ToolCallContentBlock;
 
   type Message = UserMessage | AssistantMessage | ToolMessage;
 
+  type SystemMessage = {
+    role: "system";
+    content: string;
+  };
+
+  type ChatMessage = SystemMessage | Message;
+
 // WhatsApp Service Types
 type ConfirmHooks = {
   onSent?: (msgKey: { id: string; remoteJid: string }) => Promise<void>;
@@ -180,15 +187,8 @@ type ToolDefinition = {
 type CallLlmOptions = { model?: string };
 type CallLlmPrompt = string | ContentBlock[];
 
-type CallLlmMessage = {
-  role: "system" | "user" | "assistant" | "tool";
-  content: string | ContentBlock[] | null;
-  tool_calls?: Array<{id: string, type: "function", function: {name: string, arguments: string}}>;
-  tool_call_id?: string;
-};
-
 type CallLlmChatOptions = CallLlmOptions & {
-  messages: CallLlmMessage[];
+  messages: ChatMessage[];
   tools?: ToolDefinition[];
   tool_choice?: "auto" | "none";
 };
