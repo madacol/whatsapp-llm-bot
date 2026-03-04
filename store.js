@@ -196,6 +196,23 @@ export async function initStore(injectedDb){
           RETURNING *`;
         return /** @type {MessageRow} */ (message);
       },
+
+      /**
+       * Update an existing tool message by (chat_id, tool_call_id) JSONB lookup.
+       * @param {MessageRow['chat_id']} chatId
+       * @param {string} toolCallId
+       * @param {ToolMessage} messageData
+       * @returns {Promise<MessageRow | null>}
+       */
+      async updateToolMessage (chatId, toolCallId, messageData) {
+        const {rows: [row]} = await db.sql`
+          UPDATE messages SET message_data = ${/** @type {*} */ (messageData)}
+          WHERE chat_id = ${chatId}
+            AND message_data->>'role' = 'tool'
+            AND message_data->>'tool_id' = ${toolCallId}
+          RETURNING *`;
+        return row ? /** @type {MessageRow} */ (row) : null;
+      },
     }
 }
 
