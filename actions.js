@@ -18,25 +18,29 @@ const currentSessionDb = getDb("memory://");
 // Note: Action-specific messaging functions are now created inline in executeAction()
 
 /**
+ * @typedef {{
+ *   toolCallId?: string | null,
+ *   actionResolver?: (name: string) => Promise<AppAction|null>,
+ *   llmClient?: LlmClient,
+ *   updateToolMessage?: (chatId: string, toolCallId: string, messageData: ToolMessage) => Promise<import("./store.js").MessageRow | null>,
+ * }} ExecuteActionOptions
+ */
+
+/**
  * Execute a custom action
  * @param {string} actionName - The name of the action to execute
  * @param {Context} context - The unified context to pass to the action
  * @param {{}} params - The parameters to pass to the action
- * @param {string|null} [_toolCallId=null] - The tool call ID for stub updates
- * @param {(name: string) => Promise<AppAction|null>} [actionResolver] - Optional resolver (defaults to getAction)
- * @param {LlmClient} [llmClient] - Optional LLM client for actions with useLlm permission
- * @param {((chatId: string, toolCallId: string, messageData: ToolMessage) => Promise<import("./store.js").MessageRow | null>)} [updateToolMessage] - Optional function to update tool message stubs
+ * @param {ExecuteActionOptions} [options]
  * @returns {Promise<{result: ActionResult, permissions: Action['permissions']}>} Result of the action execution
  */
-export async function executeAction(
-  actionName,
-  context,
-  params,
-  _toolCallId = null,
-  actionResolver = getAction,
-  llmClient,
-  updateToolMessage,
-) {
+export async function executeAction(actionName, context, params, options = {}) {
+  const {
+    toolCallId = null,
+    actionResolver = getAction,
+    llmClient,
+    updateToolMessage,
+  } = options;
   const action = await actionResolver(actionName);
   if (!action) {
     throw new Error(`Action "${actionName}" not found`);
@@ -66,12 +70,12 @@ export async function executeAction(
         msgKeyRemoteJid: msgKey.remoteJid,
         actionName,
         actionParams: params,
-        toolCallId: _toolCallId,
+        toolCallId,
         senderIds: context.senderIds,
       });
-      if (_toolCallId && updateToolMessage) {
-        await updateToolMessage(context.chatId, _toolCallId,
-          createToolMessage(_toolCallId, `[awaiting user confirmation for ${actionName}]`),
+      if (toolCallId && updateToolMessage) {
+        await updateToolMessage(context.chatId, toolCallId,
+          createToolMessage(toolCallId, `[awaiting user confirmation for ${actionName}]`),
         );
       }
     },
