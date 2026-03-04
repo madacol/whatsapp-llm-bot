@@ -5,7 +5,7 @@
 import { getActions, executeAction, getChatActions, getChatAction, getAction } from "./actions.js";
 import config from "./config.js";
 import { createLlmClient, sendChatCompletion } from "./llm.js";
-import { shortenToolId, formatTime, truncateWithSummary, isHtmlContent } from "./utils.js";
+import { shortenToolId, formatTime, truncateWithSummary, isHtmlContent, createToolMessage } from "./utils.js";
 import { connectToWhatsApp } from "./whatsapp-adapter.js";
 import { startReminderDaemon } from "./reminder-daemon.js";
 import { startModelsCacheDaemon } from "./models-cache.js";
@@ -201,12 +201,7 @@ async function executeAndStoreTool({
     if (isHtmlContent(result)) {
       const linkText = await storeAndLinkHtml(getRootDb(), result);
 
-      /** @type {ToolMessage} */
-      const toolMessage = {
-        role: "tool",
-        tool_id: toolCall.id,
-        content: [{ type: "text", text: linkText }],
-      };
+      const toolMessage = createToolMessage(toolCall.id, linkText);
       await replaceStub(toolMessage);
       await displayToolResult(linkText, shortId, functionResponse.permissions, context);
 
@@ -256,12 +251,7 @@ async function executeAndStoreTool({
     log.error("Error executing tool:", error);
     const errorMessage = `Error executing ${toolName}: ${error instanceof Error ? error.message : String(error)}`;
 
-    /** @type {ToolMessage} */
-    const toolError = {
-      role: "tool",
-      tool_id: toolCall.id,
-      content: [{type: "text", text: errorMessage}],
-    };
+    const toolError = createToolMessage(toolCall.id, errorMessage);
     await replaceStub(toolError);
 
     if (context.isDebug) {
@@ -361,12 +351,7 @@ async function processLlmResponse({ session, llmConfig, messages, mediaRegistry 
 
     // Insert stubs for each tool call (timestamps anchored to assistant message)
     for (const toolCall of response.toolCalls) {
-      /** @type {ToolMessage} */
-      const stub = {
-        role: "tool",
-        tool_id: toolCall.id,
-        content: [{ type: "text", text: `[executing ${toolCall.name}...]` }],
-      };
+      const stub = createToolMessage(toolCall.id, `[executing ${toolCall.name}...]`);
       await addMessage(chatId, stub, senderIds);
       messages.push(stub);
     }
@@ -662,12 +647,7 @@ export function createReactionHandler({ store, executeActionFn, pendingByMsgKeyI
 
       // Store rejection as tool result so the LLM learns the action was rejected
       if (pending.tool_call_id) {
-        /** @type {ToolMessage} */
-        const toolMessage = {
-          role: "tool",
-          tool_id: pending.tool_call_id,
-          content: [{ type: "text", text: "[action rejected by user]" }],
-        };
+        const toolMessage = createToolMessage(pending.tool_call_id, "[action rejected by user]");
         const updated = await store.updateToolMessage(pending.chat_id, pending.tool_call_id, toolMessage);
         if (!updated) await store.addMessage(pending.chat_id, toolMessage, pending.sender_ids);
       }
@@ -724,12 +704,7 @@ export function createReactionHandler({ store, executeActionFn, pendingByMsgKeyI
 
       // Store tool result so the LLM learns the outcome
       if (pending.tool_call_id) {
-        /** @type {ToolMessage} */
-        const toolMessage = {
-          role: "tool",
-          tool_id: pending.tool_call_id,
-          content: [{ type: "text", text: resultText }],
-        };
+        const toolMessage = createToolMessage(pending.tool_call_id, resultText);
         const updated = await store.updateToolMessage(pending.chat_id, pending.tool_call_id, toolMessage);
         if (!updated) await store.addMessage(pending.chat_id, toolMessage, pending.sender_ids);
       }
@@ -741,12 +716,7 @@ export function createReactionHandler({ store, executeActionFn, pendingByMsgKeyI
 
       // Store error as tool result so the LLM learns the failure
       if (pending.tool_call_id) {
-        /** @type {ToolMessage} */
-        const toolMessage = {
-          role: "tool",
-          tool_id: pending.tool_call_id,
-          content: [{ type: "text", text: `Error executing ${pending.action_name}: ${errorMsg}` }],
-        };
+        const toolMessage = createToolMessage(pending.tool_call_id, `Error executing ${pending.action_name}: ${errorMsg}`);
         const updated = await store.updateToolMessage(pending.chat_id, pending.tool_call_id, toolMessage);
         if (!updated) await store.addMessage(pending.chat_id, toolMessage, pending.sender_ids);
       }

@@ -7,6 +7,7 @@ import config from "./config.js";
 import { createCallLlm } from "./llm.js";
 import { savePendingConfirmation, deletePendingConfirmation } from "./pending-confirmations.js";
 import { resolveModel } from "./model-roles.js";
+import { createToolMessage } from "./utils.js";
 import { createLogger } from "./logger.js";
 
 const log = createLogger("actions");
@@ -69,11 +70,9 @@ export async function executeAction(
         senderIds: context.senderIds,
       });
       if (_toolCallId && updateToolMessage) {
-        await updateToolMessage(context.chatId, _toolCallId, {
-          role: "tool",
-          tool_id: _toolCallId,
-          content: [{ type: "text", text: `[awaiting user confirmation for ${actionName}]` }],
-        });
+        await updateToolMessage(context.chatId, _toolCallId,
+          createToolMessage(_toolCallId, `[awaiting user confirmation for ${actionName}]`),
+        );
       }
     },
     onResolved: async (msgKey) => {
