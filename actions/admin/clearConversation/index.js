@@ -8,6 +8,7 @@ export default /** @type {defineAction} */ ((x) => x)({
     properties: {},
     required: [],
   },
+  formatToolCall: () => "Clearing conversation",
   permissions: {
     requireAdmin: true,
     autoExecute: true,

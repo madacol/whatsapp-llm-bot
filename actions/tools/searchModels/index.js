@@ -21,6 +21,12 @@ export default /** @type {defineAction} */ ((x) => x)({
       }
     },
   },
+  formatToolCall: ({ providers, modality }) => {
+    const parts = ["Searching models"];
+    if (providers) parts.push(`by ${providers}`);
+    if (modality) parts.push(`(${modality})`);
+    return parts.join(" ");
+  },
   permissions: {
     autoExecute: true
   },

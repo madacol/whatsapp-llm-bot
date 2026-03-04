@@ -289,6 +289,10 @@ export default /** @type {defineAction} */ ((x) => x)({
     },
     required: ["file_name"],
   },
+  formatToolCall: ({ file_name, mode }) => {
+    const op = mode === "delete" ? "Deleting" : mode === "read" ? "Reading" : mode === "edit" ? "Editing" : "Creating";
+    return `${op} action: ${file_name ?? "unknown"}`;
+  },
   permissions: {
     autoExecute: true,
     autoContinue: true,

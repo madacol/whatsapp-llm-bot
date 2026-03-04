@@ -154,6 +154,13 @@ export default /** @type {defineAction} */ ((x) => x)({
     },
     required: ["prompt"],
   },
+  formatToolCall: ({ prompt }) => {
+    const maxLen = 60;
+    const label = "Generating video";
+    if (!prompt) return label;
+    const short = prompt.length > maxLen ? prompt.slice(0, maxLen) + "…" : prompt;
+    return `${label}: "${short}"`;
+  },
   permissions: {
     autoExecute: true,
     autoContinue: false,

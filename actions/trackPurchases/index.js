@@ -311,6 +311,16 @@ export default /** @type {defineAction} */ ((x) => x)({
     },
     required: ["action"]
   },
+  formatToolCall: ({ action, store_name, ledger_name }) => {
+    if (action === "register") return `Registering purchase${store_name ? ` from ${store_name}` : ""}`;
+    if (action === "history") return `Showing purchase history${ledger_name ? ` (${ledger_name})` : ""}`;
+    if (action === "summary") return `Showing spending summary${ledger_name ? ` (${ledger_name})` : ""}`;
+    if (action === "delete") return "Deleting purchase";
+    if (action === "list_ledgers") return "Listing ledgers";
+    if (action === "rename_ledger") return `Renaming ledger: ${ledger_name ?? ""}`;
+    if (action === "delete_ledger") return `Deleting ledger: ${ledger_name ?? ""}`;
+    return `Purchases: ${action}`;
+  },
   permissions: {
     autoExecute: true,
     autoContinue: true,

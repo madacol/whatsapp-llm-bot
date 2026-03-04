@@ -47,6 +47,15 @@ export default /** @type {defineAction} */ ((x) => x)({
     },
     required: ["action"],
   },
+  formatToolCall: ({ action, reminder_text }) => {
+    if (action === "list") return "Listing reminders";
+    if (action === "cancel") return "Cancelling reminder";
+    if (action === "set" && reminder_text) {
+      const short = reminder_text.length > 40 ? reminder_text.slice(0, 40) + "…" : reminder_text;
+      return `Setting reminder: "${short}"`;
+    }
+    return "Setting reminder";
+  },
   permissions: {
     autoExecute: true,
     useRootDb: true,

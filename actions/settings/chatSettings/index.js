@@ -423,6 +423,8 @@ export default /** @type {defineAction} */ ((x) => x)({
     },
     required: ["setting"],
   },
+  formatToolCall: ({ setting, value }) =>
+    value != null ? `Setting ${setting} = ${value}` : `Getting ${setting}`,
   permissions: {
     autoExecute: true,
     useRootDb: true,

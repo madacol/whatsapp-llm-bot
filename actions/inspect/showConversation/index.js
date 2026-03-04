@@ -75,6 +75,7 @@ export default /** @type {defineAction} */ ((x) => x)({
     },
     required: [],
   },
+  formatToolCall: ({ limit }) => limit ? `Showing last ${limit} messages` : "Showing conversation",
   permissions: {
     autoExecute: true,
     useRootDb: true,

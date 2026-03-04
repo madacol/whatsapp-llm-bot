@@ -66,6 +66,11 @@ export default /** @type {defineAction} */ ((x) => x)({
     },
     required: ["command"],
   },
+  formatToolCall: ({ command }) => {
+    const maxLen = 80;
+    if (!command) return "";
+    return command.length > maxLen ? command.slice(0, maxLen) + "…" : command;
+  },
   permissions: {
     requireMaster: true,
     autoContinue: true,
