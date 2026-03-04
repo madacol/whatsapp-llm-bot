@@ -21,9 +21,10 @@ const currentSessionDb = getDb("memory://");
  * @param {string} actionName - The name of the action to execute
  * @param {Context} context - The unified context to pass to the action
  * @param {{}} params - The parameters to pass to the action
- * @param {string|null} [_toolCallId=null] - The tool call ID (unused, kept for API compatibility)
+ * @param {string|null} [_toolCallId=null] - The tool call ID for stub updates
  * @param {(name: string) => Promise<AppAction|null>} [actionResolver] - Optional resolver (defaults to getAction)
  * @param {LlmClient} [llmClient] - Optional LLM client for actions with useLlm permission
+ * @param {((chatId: string, toolCallId: string, messageData: ToolMessage) => Promise<import("./store.js").MessageRow | null>)} [updateToolMessage] - Optional function to update tool message stubs
  * @returns {Promise<{result: ActionResult, permissions: Action['permissions']}>} Result of the action execution
  */
 export async function executeAction(
@@ -33,6 +34,7 @@ export async function executeAction(
   _toolCallId = null,
   actionResolver = getAction,
   llmClient,
+  updateToolMessage,
 ) {
   const action = await actionResolver(actionName);
   if (!action) {
@@ -66,6 +68,13 @@ export async function executeAction(
         toolCallId: _toolCallId,
         senderIds: context.senderIds,
       });
+      if (_toolCallId && updateToolMessage) {
+        await updateToolMessage(context.chatId, _toolCallId, {
+          role: "tool",
+          tool_id: _toolCallId,
+          content: [{ type: "text", text: `[awaiting user confirmation for ${actionName}]` }],
+        });
+      }
     },
     onResolved: async (msgKey) => {
       await deletePendingConfirmation(rootDb, msgKey.id);
