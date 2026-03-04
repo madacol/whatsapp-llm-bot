@@ -76,14 +76,20 @@ before(async () => {
   await seedChat(testDb, CHAT_ID, { enabled: true });
 });
 
-it("stores tool result on approval", async () => {
+it("stores tool result on approval via updateToolMessage", async () => {
   const pending = makePending();
   /** @type {Map<string, import("../pending-confirmations.js").PendingConfirmationRow>} */
   const pendingByMsgKeyId = new Map([[pending.msg_key_id, pending]]);
 
   /** @type {string[]} */
+  const updateCalls = [];
+  /** @type {string[]} */
   const addMessageCalls = [];
   const mockStore = {
+    updateToolMessage: async (/** @type {string} */ chatId, /** @type {string} */ toolCallId, /** @type {ToolMessage} */ msg) => {
+      updateCalls.push(JSON.stringify({ chatId, toolCallId, msg }));
+      return { message_id: 1, chat_id: chatId, sender_id: "bot", message_data: msg, timestamp: new Date() };
+    },
     addMessage: async (/** @type {string} */ chatId, /** @type {ToolMessage} */ msg, /** @type {string[] | null} */ senderIds) => {
       addMessageCalls.push(JSON.stringify({ chatId, msg, senderIds }));
     },
@@ -99,25 +105,28 @@ it("stores tool result on approval", async () => {
   const sock = makeSock();
   await onReaction(makeReactionEvent("msg-key-1", "\uD83D\uDC4D"), /** @type {any} */ (sock));
 
-  assert.equal(addMessageCalls.length, 1, "addMessage should be called once");
-  const call = JSON.parse(addMessageCalls[0]);
+  assert.equal(updateCalls.length, 1, "updateToolMessage should be called once");
+  assert.equal(addMessageCalls.length, 0, "addMessage should not be called when update succeeds");
+  const call = JSON.parse(updateCalls[0]);
   assert.equal(call.chatId, CHAT_ID);
+  assert.equal(call.toolCallId, "call_abc123");
   assert.equal(call.msg.role, "tool");
   assert.equal(call.msg.tool_id, "call_abc123");
   assert.deepEqual(call.msg.content, [{ type: "text", text: "action completed successfully" }]);
-  assert.deepEqual(call.senderIds, ["sender-1"]);
 });
 
-it("stores error tool result on execution failure", async () => {
+it("stores error tool result on execution failure via updateToolMessage", async () => {
   const pending = makePending({ msg_key_id: "msg-key-2" });
   const pendingByMsgKeyId = new Map([[pending.msg_key_id, pending]]);
 
   /** @type {string[]} */
-  const addMessageCalls = [];
+  const updateCalls = [];
   const mockStore = {
-    addMessage: async (/** @type {string} */ chatId, /** @type {ToolMessage} */ msg, /** @type {string[] | null} */ senderIds) => {
-      addMessageCalls.push(JSON.stringify({ chatId, msg, senderIds }));
+    updateToolMessage: async (/** @type {string} */ chatId, /** @type {string} */ toolCallId, /** @type {ToolMessage} */ msg) => {
+      updateCalls.push(JSON.stringify({ chatId, toolCallId, msg }));
+      return { message_id: 1, chat_id: chatId, sender_id: "bot", message_data: msg, timestamp: new Date() };
     },
+    addMessage: async () => {},
   };
 
   const onReaction = createReactionHandler({
@@ -130,24 +139,27 @@ it("stores error tool result on execution failure", async () => {
   const sock = makeSock();
   await onReaction(makeReactionEvent("msg-key-2", "\uD83D\uDC4D"), /** @type {any} */ (sock));
 
-  assert.equal(addMessageCalls.length, 1, "addMessage should be called once for error");
-  const call = JSON.parse(addMessageCalls[0]);
+  assert.equal(updateCalls.length, 1, "updateToolMessage should be called once for error");
+  const call = JSON.parse(updateCalls[0]);
   assert.equal(call.chatId, CHAT_ID);
+  assert.equal(call.toolCallId, "call_abc123");
   assert.equal(call.msg.role, "tool");
   assert.equal(call.msg.tool_id, "call_abc123");
   assert.deepEqual(call.msg.content, [{ type: "text", text: "Error executing testAction: something broke" }]);
 });
 
-it("stores rejection tool result", async () => {
+it("stores rejection tool result via updateToolMessage", async () => {
   const pending = makePending({ msg_key_id: "msg-key-3" });
   const pendingByMsgKeyId = new Map([[pending.msg_key_id, pending]]);
 
   /** @type {string[]} */
-  const addMessageCalls = [];
+  const updateCalls = [];
   const mockStore = {
-    addMessage: async (/** @type {string} */ chatId, /** @type {ToolMessage} */ msg, /** @type {string[] | null} */ senderIds) => {
-      addMessageCalls.push(JSON.stringify({ chatId, msg, senderIds }));
+    updateToolMessage: async (/** @type {string} */ chatId, /** @type {string} */ toolCallId, /** @type {ToolMessage} */ msg) => {
+      updateCalls.push(JSON.stringify({ chatId, toolCallId, msg }));
+      return { message_id: 1, chat_id: chatId, sender_id: "bot", message_data: msg, timestamp: new Date() };
     },
+    addMessage: async () => {},
   };
 
   const executeCalled = { value: false };
@@ -162,9 +174,10 @@ it("stores rejection tool result", async () => {
   await onReaction(makeReactionEvent("msg-key-3", "\uD83D\uDC4E"), /** @type {any} */ (sock));
 
   assert.equal(executeCalled.value, false, "executeAction should NOT be called on rejection");
-  assert.equal(addMessageCalls.length, 1, "addMessage should be called once for rejection");
-  const call = JSON.parse(addMessageCalls[0]);
+  assert.equal(updateCalls.length, 1, "updateToolMessage should be called once for rejection");
+  const call = JSON.parse(updateCalls[0]);
   assert.equal(call.chatId, CHAT_ID);
+  assert.equal(call.toolCallId, "call_abc123");
   assert.equal(call.msg.role, "tool");
   assert.equal(call.msg.tool_id, "call_abc123");
   assert.deepEqual(call.msg.content, [{ type: "text", text: "[action rejected by user]" }]);
@@ -175,8 +188,14 @@ it("skips tool storage when tool_call_id is null", async () => {
   const pendingByMsgKeyId = new Map([[pending.msg_key_id, pending]]);
 
   /** @type {string[]} */
+  const updateCalls = [];
+  /** @type {string[]} */
   const addMessageCalls = [];
   const mockStore = {
+    updateToolMessage: async (/** @type {string} */ chatId, /** @type {string} */ toolCallId, /** @type {ToolMessage} */ msg) => {
+      updateCalls.push(JSON.stringify({ chatId, toolCallId, msg }));
+      return null;
+    },
     addMessage: async (/** @type {string} */ chatId, /** @type {ToolMessage} */ msg, /** @type {string[] | null} */ senderIds) => {
       addMessageCalls.push(JSON.stringify({ chatId, msg, senderIds }));
     },
@@ -192,7 +211,44 @@ it("skips tool storage when tool_call_id is null", async () => {
   const sock = makeSock();
   await onReaction(makeReactionEvent("msg-key-4", "\uD83D\uDC4D"), /** @type {any} */ (sock));
 
+  assert.equal(updateCalls.length, 0, "updateToolMessage should NOT be called when tool_call_id is null");
   assert.equal(addMessageCalls.length, 0, "addMessage should NOT be called when tool_call_id is null");
+});
+
+it("falls back to addMessage when updateToolMessage returns null (pre-stub confirmations)", async () => {
+  const pending = makePending({ msg_key_id: "msg-key-5" });
+  const pendingByMsgKeyId = new Map([[pending.msg_key_id, pending]]);
+
+  /** @type {string[]} */
+  const updateCalls = [];
+  /** @type {string[]} */
+  const addMessageCalls = [];
+  const mockStore = {
+    updateToolMessage: async (/** @type {string} */ chatId, /** @type {string} */ toolCallId, /** @type {ToolMessage} */ msg) => {
+      updateCalls.push(JSON.stringify({ chatId, toolCallId, msg }));
+      return null; // No stub found — pre-stub era confirmation
+    },
+    addMessage: async (/** @type {string} */ chatId, /** @type {ToolMessage} */ msg, /** @type {string[] | null} */ senderIds) => {
+      addMessageCalls.push(JSON.stringify({ chatId, msg, senderIds }));
+    },
+  };
+
+  const onReaction = createReactionHandler({
+    store: /** @type {any} */ (mockStore),
+    executeActionFn: async () => ({ result: "completed" }),
+    pendingByMsgKeyId,
+    rootDb: testDb,
+  });
+
+  const sock = makeSock();
+  await onReaction(makeReactionEvent("msg-key-5", "\uD83D\uDC4D"), /** @type {any} */ (sock));
+
+  assert.equal(updateCalls.length, 1, "updateToolMessage should be tried first");
+  assert.equal(addMessageCalls.length, 1, "addMessage should be called as fallback");
+  const call = JSON.parse(addMessageCalls[0]);
+  assert.equal(call.msg.role, "tool");
+  assert.equal(call.msg.tool_id, "call_abc123");
+  assert.deepEqual(call.msg.content, [{ type: "text", text: "completed" }]);
 });
 
 });
