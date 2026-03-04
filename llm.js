@@ -65,21 +65,6 @@ export function convertPromptToOpenAI(prompt) {
   });
 }
 
-/**
- * Convert a CallLlmMessage into OpenAI message format.
- * @param {CallLlmMessage} msg
- * @returns {OpenAI.ChatCompletionMessageParam}
- */
-export function convertMessageToOpenAI(msg) {
-  return /** @type {OpenAI.ChatCompletionMessageParam} */ ({
-    role: msg.role,
-    content: msg.content === null ? null
-      : typeof msg.content === "string" ? msg.content
-      : convertPromptToOpenAI(msg.content),
-    ...(msg.tool_calls && { tool_calls: msg.tool_calls }),
-    ...(msg.tool_call_id && { tool_call_id: msg.tool_call_id }),
-  });
-}
 
 /**
  * Normalize an OpenAI ChatCompletion into LlmChatResponse.
@@ -278,8 +263,8 @@ function formatToolContent(message, registry) {
 }
 
 /**
- * Convert internal Message[] to OpenAI ChatCompletionMessageParam[].
- * @param {Message[]} messages
+ * Convert internal ChatMessage[] to OpenAI ChatCompletionMessageParam[].
+ * @param {ChatMessage[]} messages
  * @param {MediaRegistry} registry
  * @returns {Promise<Array<OpenAI.ChatCompletionMessageParam>>}
  */
@@ -289,6 +274,9 @@ async function convertMessagesToOpenAI(messages, registry) {
 
   for (const msg of messages) {
     switch (msg.role) {
+      case "system":
+        formatted.push({ role: "system", content: msg.content });
+        break;
       case "user":
         formatted.push({
           role: "user",
@@ -377,13 +365,14 @@ export async function sendChatCompletion(llmClient, { model, systemPrompt, messa
  * Send a simple chat completion for media-to-text conversion.
  * @param {LlmClient} llmClient
  * @param {string} model
- * @param {CallLlmMessage[]} messages
+ * @param {ChatMessage[]} messages
  * @returns {Promise<string | null>}
  */
 export async function sendSimpleChatCompletion(llmClient, model, messages) {
+  const openaiMessages = await convertMessagesToOpenAI(messages, new Map());
   const response = await unwrap(llmClient).chat.completions.create({
     model,
-    messages: messages.map(convertMessageToOpenAI),
+    messages: openaiMessages,
   });
   return response.choices[0].message.content;
 }
@@ -400,9 +389,10 @@ export function createCallLlm(llmClient, defaultModel = resolveModel("chat")) {
   const callLlm = /** @type {CallLlm} */ (async (/** @type {CallLlmPrompt | CallLlmChatOptions} */ promptOrOpts, /** @type {CallLlmOptions} */ options = {}) => {
     if (typeof promptOrOpts === "object" && !Array.isArray(promptOrOpts) && "messages" in promptOrOpts) {
       // Chat mode — normalize response to LlmChatResponse
+      const openaiMessages = await convertMessagesToOpenAI(promptOrOpts.messages, new Map());
       const completion = await client.chat.completions.create({
         model: promptOrOpts.model || defaultModel,
-        messages: promptOrOpts.messages.map(convertMessageToOpenAI),
+        messages: openaiMessages,
         ...(promptOrOpts.tools && { tools: /** @type {OpenAI.ChatCompletionTool[]} */ (promptOrOpts.tools) }),
         ...(promptOrOpts.tool_choice && { tool_choice: promptOrOpts.tool_choice }),
       });
