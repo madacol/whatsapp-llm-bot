@@ -63,7 +63,7 @@ function parseAssertion(assertionJson) {
 /**
  * Parse and validate the messages JSON.
  * @param {string} messagesJson
- * @returns {{ messages: CallLlmMessage[] } | { error: string }}
+ * @returns {{ messages: ChatMessage[] } | { error: string }}
  */
 function parseMessages(messagesJson) {
   /** @type {unknown} */
@@ -85,7 +85,7 @@ function parseMessages(messagesJson) {
     }
   }
 
-  return { messages: /** @type {CallLlmMessage[]} */ (parsed) };
+  return { messages: /** @type {ChatMessage[]} */ (parsed) };
 }
 
 /**
@@ -153,9 +153,9 @@ function extFromMime(mimeType) {
 
 /**
  * Build messages for inline LLM verification using base64 data from the media registry.
- * @param {CallLlmMessage[]} originalMessages - Original messages with media_ref markers
+ * @param {ChatMessage[]} originalMessages - Original messages with media_ref markers
  * @param {MediaRegistry} mediaRegistry
- * @returns {CallLlmMessage[]}
+ * @returns {ChatMessage[]}
  */
 function buildVerificationMessages(originalMessages, mediaRegistry) {
   return originalMessages.map((msg) => {
@@ -187,7 +187,7 @@ function buildVerificationMessages(originalMessages, mediaRegistry) {
       return /** @type {ContentBlock} */ (block);
     });
 
-    return /** @type {CallLlmMessage} */ ({ ...msg, content });
+    return /** @type {ChatMessage} */ ({ ...msg, content });
   });
 }
 
@@ -217,7 +217,7 @@ function formatAssertionDesc(assertion) {
 
 /**
  * Build the fixture-ref messages for the JSON file (with fixture references instead of base64 data).
- * @param {CallLlmMessage[]} originalMessages - Messages with media_ref markers
+ * @param {ChatMessage[]} originalMessages - Messages with media_ref markers
  * @param {MediaRegistry} mediaRegistry
  * @param {string} testName
  * @returns {{ messages: Array<Record<string, unknown>>, fixtures: Array<{path: string, data: Buffer}>, warnings: string[] }}
@@ -291,7 +291,7 @@ export default /** @type {defineAction} */ ((x) => x)({
       messages: {
         type: "string",
         description:
-          'JSON array of CallLlmMessage[] — the test scenario paraphrased from conversation. For media, use {"type":"image","media_ref":N} referencing [media:N] tags.',
+          'JSON array of ChatMessage[]. User: {"role":"user","content":[{"type":"text","text":"..."}]}. Assistant text: {"role":"assistant","content":[{"type":"text","text":"..."}]}. Assistant tool call: {"role":"assistant","content":[{"type":"tool","tool_id":"call_1","name":"fn","arguments":"{}"}]}. Tool result: {"role":"tool","tool_id":"call_1","content":[{"type":"text","text":"result"}]}. For media: {"type":"image","media_ref":N}.',
       },
       assertion: {
         type: "string",
@@ -353,7 +353,7 @@ export default /** @type {defineAction} */ ((x) => x)({
     let fixtureFiles = [];
     /** @type {string[]} */
     let mediaWarnings = [];
-    /** @type {CallLlmMessage[]} */
+    /** @type {ChatMessage[]} */
     let messagesForLlm = messages;
     /** @type {Array<Record<string, unknown>>} */
     let testCaseMessages = messages;
