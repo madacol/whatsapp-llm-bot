@@ -39,4 +39,10 @@ export default {
   get memory_threshold() { return parseFloat(process.env.MEMORY_THRESHOLD || "") || 0.3; },
   get html_server_port() { return parseInt(process.env.HTML_SERVER_PORT || "3100", 10); },
   get html_server_base_url() { return process.env.HTML_SERVER_BASE_URL || ""; },
+
+  get smtp_host() { return process.env.SMTP_HOST || ""; },
+  get smtp_port() { return parseInt(process.env.SMTP_PORT || "587", 10); },
+  get smtp_user() { return process.env.SMTP_USER || ""; },
+  get smtp_pass() { return process.env.SMTP_PASS || ""; },
+  get alert_email() { return process.env.ALERT_EMAIL || ""; },
 };

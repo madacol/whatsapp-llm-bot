@@ -1,4 +1,5 @@
 import nodemailer from "nodemailer";
+import config from "./config.js";
 import { createLogger } from "./logger.js";
 
 const log = createLogger("notifications");
@@ -26,28 +27,28 @@ export function needsAuthReset(lastDisconnect) {
  * @param {string} body
  */
 export async function sendAlertEmail(subject, body) {
-  const { SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, ALERT_EMAIL } = process.env;
+  const { smtp_host, smtp_port, smtp_user, smtp_pass, alert_email } = config;
 
-  if (!SMTP_HOST || !ALERT_EMAIL) {
+  if (!smtp_host || !alert_email) {
     log.warn("Email alert skipped: SMTP_HOST and ALERT_EMAIL env vars required");
     return;
   }
 
   const transporter = nodemailer.createTransport({
-    host: SMTP_HOST,
-    port: Number(SMTP_PORT) || 587,
-    secure: (Number(SMTP_PORT) || 587) === 465,
-    auth: SMTP_USER ? { user: SMTP_USER, pass: SMTP_PASS } : undefined,
+    host: smtp_host,
+    port: smtp_port,
+    secure: smtp_port === 465,
+    auth: smtp_user ? { user: smtp_user, pass: smtp_pass } : undefined,
   });
 
   try {
     await transporter.sendMail({
-      from: SMTP_USER || `alert@${SMTP_HOST}`,
-      to: ALERT_EMAIL,
+      from: smtp_user || `alert@${smtp_host}`,
+      to: alert_email,
       subject,
       text: body,
     });
-    log.info("Alert email sent to", ALERT_EMAIL);
+    log.info("Alert email sent to", alert_email);
   } catch (err) {
     log.error("Failed to send alert email:", err);
   }
