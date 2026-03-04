@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 export default [
 async function saves_memory_and_returns_confirmation(action_fn, db) {
       await db.sql`INSERT INTO chats(chat_id) VALUES ('act-savemem-1') ON CONFLICT DO NOTHING`;
-      const mockClient = /** @type {import("openai").default} */ (/** @type {unknown} */ ({
+      const mockClient = /** @type {LlmClient} */ (/** @type {unknown} */ ({
         embeddings: {
           create: async () => ({ data: [{ embedding: [0.1, 0.2, 0.3] }] }),
         },
@@ -25,7 +25,7 @@ async function saves_memory_and_returns_confirmation(action_fn, db) {
 
     async function rejects_empty_content(action_fn, db) {
       await db.sql`INSERT INTO chats(chat_id) VALUES ('act-savemem-2') ON CONFLICT DO NOTHING`;
-      const mockClient = /** @type {import("openai").default} */ (/** @type {unknown} */ ({
+      const mockClient = /** @type {LlmClient} */ (/** @type {unknown} */ ({
         embeddings: {
           create: async () => ({ data: [{ embedding: [0.1, 0.2, 0.3] }] }),
         },
@@ -45,7 +45,7 @@ async function saves_memory_and_returns_confirmation(action_fn, db) {
 
     async function stores_search_text_for_fts(action_fn, db) {
       await db.sql`INSERT INTO chats(chat_id) VALUES ('act-savemem-3') ON CONFLICT DO NOTHING`;
-      const mockClient = /** @type {import("openai").default} */ (/** @type {unknown} */ ({
+      const mockClient = /** @type {LlmClient} */ (/** @type {unknown} */ ({
         embeddings: {
           create: async () => ({ data: [{ embedding: [0.1, 0.2, 0.3] }] }),
         },

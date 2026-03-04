@@ -1,5 +1,6 @@
 import config from "./config.js";
 import { resolveModel } from "./model-roles.js";
+import { createEmbedding } from "./llm.js";
 import { createLogger } from "./logger.js";
 
 const log = createLogger("memory");
@@ -37,7 +38,7 @@ export function extractTextFromMessage(messageData) {
 
 /**
  * Generate an embedding vector for the given text.
- * @param {import("openai").default} llmClient
+ * @param {LlmClient} llmClient
  * @param {string} text
  * @returns {Promise<number[] | null>}
  */
@@ -45,11 +46,7 @@ export async function generateEmbedding(llmClient, text) {
   if (text.length < 10) return null;
 
   try {
-    const response = await llmClient.embeddings.create({
-      model: resolveModel("embedding"),
-      input: text,
-    });
-    return response.data[0].embedding;
+    return await createEmbedding(llmClient, resolveModel("embedding"), text);
   } catch (err) {
     log.error("Embedding generation failed:", err);
     return null;
@@ -71,7 +68,7 @@ export async function generateEmbedding(llmClient, text) {
  * Save a free-text memory note for a chat.
  * Generates an embedding if possible, always stores search_text for FTS fallback.
  * @param {PGlite} db
- * @param {import("openai").default} llmClient
+ * @param {LlmClient} llmClient
  * @param {string} chatId
  * @param {string} content
  * @returns {Promise<number>} The inserted memory id
@@ -106,7 +103,7 @@ export async function saveMemory(db, llmClient, chatId, content) {
 /**
  * Find memories relevant to a query using embedding similarity, falling back to FTS.
  * @param {PGlite} db
- * @param {import("openai").default} llmClient
+ * @param {LlmClient} llmClient
  * @param {string} chatId
  * @param {string} queryText
  * @param {FindMemoriesOptions} [options]

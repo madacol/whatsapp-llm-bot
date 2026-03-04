@@ -2,21 +2,19 @@
  * Pure functions extracted from index.js for testability.
  */
 
-import OpenAI from "openai";
-import { convertAudioToMp3Base64 } from "./audio_conversion.js";
 import { createLogger } from "./logger.js";
 
 const log = createLogger("message-formatting");
 
 /**
- * Convert actions to OpenAI tools format.
+ * Convert actions to tool definitions format.
  * When `hasMedia` is true, injects an optional `_media_refs` parameter
  * so the LLM can reference tagged media from the conversation.
  * @param {Action[]} actions
  * @param {boolean} [hasMedia]
- * @returns {OpenAI.Chat.Completions.ChatCompletionTool[]}
+ * @returns {ToolDefinition[]}
  */
-export function actionsToOpenAIFormat(actions, hasMedia) {
+export function actionsToToolDefinitions(actions, hasMedia) {
   return actions.map((action) => {
     const parameters = hasMedia
       ? {
@@ -33,7 +31,7 @@ export function actionsToOpenAIFormat(actions, hasMedia) {
       : action.parameters;
 
     return {
-      type: "function",
+      type: /** @type {const} */ ("function"),
       function: {
         name: action.name,
         description: action.description,
@@ -137,21 +135,7 @@ export function parseCommandArgs(args, parameters) {
 }
 
 /**
- * Tag a media block in the registry and append a `[media:N]` text marker.
- * @param {Array<OpenAI.ChatCompletionContentPart>} parts
- * @param {MediaRegistry} registry
- * @param {IncomingContentBlock} originalBlock
- * @returns {number} The assigned media ID
- */
-function tagMedia(parts, registry, originalBlock) {
-  const id = registry.size + 1;
-  registry.set(id, originalBlock);
-  parts.push({ type: "text", text: `[media:${id}]` });
-  return id;
-}
-
-/**
- * Register a media block in the registry without appending to an OpenAI parts array.
+ * Register a media block in the registry.
  * @param {MediaRegistry} registry
  * @param {IncomingContentBlock} block
  * @returns {number} The assigned media ID
@@ -163,202 +147,50 @@ export function registerMedia(registry, block) {
 }
 
 /**
- * Format a user message's content blocks into OpenAI content parts.
- * Media blocks are tagged with `[media:N]` and registered in the registry.
- * @param {UserMessage} message
- * @param {MediaRegistry} registry
- * @returns {Promise<Array<OpenAI.ChatCompletionContentPart>>}
- */
-async function formatUserContent(message, registry) {
-  /** @type {Array<OpenAI.ChatCompletionContentPart>} */
-  const parts = [];
-
-  for (const contentBlock of message.content) {
-    switch (contentBlock.type) {
-      case "quote": {
-        for (const quoteBlock of contentBlock.content) {
-          switch (quoteBlock.type) {
-            case "text":
-              parts.push({ type: "text", text: `> ${quoteBlock.text.trim().replace(/\n/g, '\n> ')}` });
-              break;
-            case "image": {
-              const dataUrl = `data:${quoteBlock.mime_type};base64,${quoteBlock.data}`;
-              parts.push({ type: "image_url", image_url: { url: dataUrl } });
-              tagMedia(parts, registry, quoteBlock);
-              break;
-            }
-          }
-        }
-        break;
-      }
-      case "text":
-        parts.push(contentBlock);
-        break;
-      case "image": {
-        const dataUrl = `data:${contentBlock.mime_type};base64,${contentBlock.data}`;
-        parts.push({ type: "image_url", image_url: { url: dataUrl } });
-        tagMedia(parts, registry, contentBlock);
-        break;
-      }
-      case "audio": {
-        /** @type {"wav" | "mp3"} */
-        let format = "mp3";
-        let data;
-        const audioFormat = contentBlock.mime_type?.split("audio/")[1]?.split(";")[0];
-        if (audioFormat === "wav" || audioFormat === "mp3") {
-          format = audioFormat;
-          data = contentBlock.data;
-        } else {
-          log.warn(`Unsupported audio format: ${contentBlock.mime_type}`);
-          data = await convertAudioToMp3Base64(contentBlock.data);
-        }
-        parts.push({
-          type: "input_audio",
-          input_audio: { data, format },
-        });
-        tagMedia(parts, registry, contentBlock);
-        break;
-      }
-      case "video": {
-        const videoUrl = `data:${contentBlock.mime_type};base64,${contentBlock.data}`;
-        parts.push(/** @type {*} */ ({
-          type: "video_url",
-          video_url: { url: videoUrl },
-        }));
-        tagMedia(parts, registry, contentBlock);
-        break;
-      }
-    }
-  }
-
-  return parts;
-}
-
-/**
- * Format an assistant message into an OpenAI ChatCompletionMessageParam.
- * @param {AssistantMessage} message
- * @returns {OpenAI.ChatCompletionMessageParam}
- */
-function formatAssistantContent(message) {
-  /** @type {OpenAI.ChatCompletionMessageToolCall[]} */
-  const toolCalls = [];
-  const content = message.content
-    .map(contentBlock => {
-      switch (contentBlock.type) {
-        case "text":
-          return contentBlock;
-        case "tool":
-          toolCalls.push({
-            type: "function",
-            id: contentBlock.tool_id,
-            function: {
-              name: contentBlock.name,
-              arguments: contentBlock.arguments,
-            },
-          });
-      }
-    })
-    .filter(x => x !== undefined);
-
-  return {
-    role: "assistant",
-    content,
-    tool_calls: toolCalls.length > 0 ? toolCalls : undefined,
-  };
-}
-
-/**
- * Format a tool message into OpenAI ChatCompletionMessageParam(s).
- * Media blocks are tagged with `[media:N]` and registered in the registry.
- * @param {ToolMessage} message
- * @param {MediaRegistry} registry
- * @returns {Array<OpenAI.ChatCompletionMessageParam>}
- */
-function formatToolContent(message, registry) {
-  const hasMedia = message.content.some((b) => b.type === "image" || b.type === "video");
-
-  if (!hasMedia) {
-    /** @type {Array<OpenAI.ChatCompletionMessageParam>} */
-    const results = [];
-    for (const block of message.content) {
-      if (block.type === "text") {
-        results.push({
-          role: /** @type {const} */ ("tool"),
-          tool_call_id: message.tool_id,
-          content: block.text,
-        });
-      }
-    }
-    return results;
-  }
-
-  // Multipart: combine text + images/video into a single tool message
-  /** @type {Array<OpenAI.ChatCompletionContentPart>} */
-  const parts = [];
-  for (const block of message.content) {
-    if (block.type === "text") {
-      parts.push({ type: /** @type {const} */ ("text"), text: block.text });
-    } else if (block.type === "image") {
-      parts.push({
-        type: /** @type {const} */ ("image_url"),
-        image_url: { url: `data:${block.mime_type};base64,${block.data}` },
-      });
-      tagMedia(parts, registry, block);
-    } else if (block.type === "video") {
-      parts.push(/** @type {*} */ ({
-        type: "video_url",
-        video_url: { url: `data:${block.mime_type};base64,${block.data}` },
-      }));
-      tagMedia(parts, registry, block);
-    }
-  }
-  // OpenAI's types restrict tool content to text-only, but the API accepts image_url parts
-  return [/** @type {OpenAI.ChatCompletionMessageParam} */ (
-    { role: "tool", tool_call_id: message.tool_id, content: parts }
-  )];
-}
-
-/**
  * Normalize tool message ordering so each tool result immediately follows its
  * assistant message, orphaned tool results are dropped, and missing tool results
- * get placeholders. This prevents 400 errors from the LLM API which requires
- * tool_result blocks to follow the assistant message that issued the tool_calls.
- * @param {Array<OpenAI.ChatCompletionMessageParam>} messages
- * @returns {Array<OpenAI.ChatCompletionMessageParam>}
+ * get placeholders. Works on internal Message[] types.
+ * @param {Message[]} messages
+ * @returns {Message[]}
  */
 function removeOrphanedToolResults(messages) {
-  // Map each tool_call_id → index of the assistant message that owns it
+  // Map each tool_call id → index of the assistant message that owns it
   /** @type {Map<string, number>} */
   const toolCallOwner = new Map();
 
-  // Track which tool_call_ids each assistant message expects
+  // Track which tool_call ids each assistant message expects
   /** @type {Map<number, string[]>} */
   const assistantToolCallIds = new Map();
 
   for (let i = 0; i < messages.length; i++) {
     const msg = messages[i];
-    if (msg.role === "assistant" && "tool_calls" in msg && msg.tool_calls) {
-      const ids = msg.tool_calls.map(tc => tc.id);
-      assistantToolCallIds.set(i, ids);
-      for (const id of ids) {
-        toolCallOwner.set(id, i);
+    if (msg.role === "assistant") {
+      const toolBlocks = msg.content.filter(
+        /** @returns {b is ToolCallContentBlock} */
+        (b) => b.type === "tool"
+      );
+      if (toolBlocks.length > 0) {
+        const ids = toolBlocks.map(b => b.tool_id);
+        assistantToolCallIds.set(i, ids);
+        for (const id of ids) {
+          toolCallOwner.set(id, i);
+        }
       }
     }
   }
 
   // Group tool result messages by their owning assistant index
-  /** @type {Map<number, OpenAI.ChatCompletionMessageParam[]>} */
+  /** @type {Map<number, ToolMessage[]>} */
   const toolResultsByAssistant = new Map();
 
   // Collect non-tool messages in order, excluding tool results (we'll re-insert them)
-  /** @type {Array<{ msg: OpenAI.ChatCompletionMessageParam, originalIndex: number }>} */
+  /** @type {Array<{ msg: Message, originalIndex: number }>} */
   const nonToolMessages = [];
 
   for (let i = 0; i < messages.length; i++) {
     const msg = messages[i];
     if (msg.role === "tool") {
-      const toolMsg = /** @type {OpenAI.ChatCompletionToolMessageParam} */ (msg);
-      const ownerIdx = toolCallOwner.get(toolMsg.tool_call_id);
+      const ownerIdx = toolCallOwner.get(msg.tool_id);
       if (ownerIdx !== undefined) {
         if (!toolResultsByAssistant.has(ownerIdx)) {
           toolResultsByAssistant.set(ownerIdx, []);
@@ -373,7 +205,7 @@ function removeOrphanedToolResults(messages) {
 
   // Rebuild: for each non-tool message, emit it; after each assistant with
   // tool_calls, insert its grouped tool results + placeholders for missing ones
-  /** @type {Array<OpenAI.ChatCompletionMessageParam>} */
+  /** @type {Message[]} */
   const result = [];
 
   for (const { msg, originalIndex } of nonToolMessages) {
@@ -383,26 +215,17 @@ function removeOrphanedToolResults(messages) {
       const expectedIds = assistantToolCallIds.get(originalIndex);
       const actualResults = toolResultsByAssistant.get(originalIndex) ?? [];
 
-      /** @type {Set<string>} */
-      const receivedIds = new Set(
-        actualResults.map(m =>
-          /** @type {OpenAI.ChatCompletionToolMessageParam} */ (m).tool_call_id
-        )
-      );
-
       // Emit actual results in their expected order
       for (const id of expectedIds) {
-        const existing = actualResults.find(
-          m => /** @type {OpenAI.ChatCompletionToolMessageParam} */ (m).tool_call_id === id
-        );
+        const existing = actualResults.find(m => m.tool_id === id);
         if (existing) {
           result.push(existing);
         } else {
           // Placeholder for missing tool result
           result.push({
-            role: /** @type {const} */ ("tool"),
-            tool_call_id: id,
-            content: "[tool result unavailable]",
+            role: "tool",
+            tool_id: id,
+            content: [{ type: "text", text: "[tool result unavailable]" }],
           });
         }
       }
@@ -413,36 +236,47 @@ function removeOrphanedToolResults(messages) {
 }
 
 /**
- * Convert stored Message[] rows from the DB into OpenAI ChatCompletionMessageParam[].
- * Removes orphaned tool results and handles user/assistant/tool roles.
- * Media blocks are tagged with `[media:N]` markers and collected in a registry.
+ * Prepare stored Message[] rows from the DB for LLM consumption.
+ * Reverses from DB order (newest-first) to chronological,
+ * removes orphaned tool results, and builds a media registry.
+ * Returns internal Message[] — no OpenAI conversion.
  * @param {Array<{message_data: Message, sender_id: string}>} chatMessages - Rows from DB (newest first)
- * @returns {Promise<{messages: Array<OpenAI.ChatCompletionMessageParam>, mediaRegistry: MediaRegistry}>}
+ * @returns {{messages: Message[], mediaRegistry: MediaRegistry}}
  */
-export async function formatMessagesForOpenAI(chatMessages) {
-  /** @type {Array<OpenAI.ChatCompletionMessageParam>} */
-  const formatted = [];
+export function prepareMessages(chatMessages) {
+  /** @type {Message[]} */
+  const messages = [];
   /** @type {MediaRegistry} */
   const mediaRegistry = new Map();
   const reversedMessages = [...chatMessages].reverse();
 
   for (const msg of reversedMessages) {
-    switch (msg.message_data?.role) {
-      case "user":
-        formatted.push({
-          role: "user",
-          name: msg.sender_id,
-          content: await formatUserContent(msg.message_data, mediaRegistry),
-        });
-        break;
-      case "assistant":
-        formatted.push(formatAssistantContent(msg.message_data));
-        break;
-      case "tool":
-        formatted.push(...formatToolContent(msg.message_data, mediaRegistry));
-        break;
+    if (!msg.message_data) continue;
+    const messageData = msg.message_data;
+
+    // Scan for media blocks and register them
+    if (messageData.role === "user") {
+      for (const block of messageData.content) {
+        if (block.type === "image" || block.type === "video" || block.type === "audio") {
+          registerMedia(mediaRegistry, block);
+        } else if (block.type === "quote") {
+          for (const quoteBlock of block.content) {
+            if (quoteBlock.type === "image" || quoteBlock.type === "video" || quoteBlock.type === "audio") {
+              registerMedia(mediaRegistry, quoteBlock);
+            }
+          }
+        }
+      }
+    } else if (messageData.role === "tool") {
+      for (const block of messageData.content) {
+        if (block.type === "image" || block.type === "video" || block.type === "audio") {
+          registerMedia(mediaRegistry, block);
+        }
+      }
     }
+
+    messages.push(messageData);
   }
 
-  return { messages: removeOrphanedToolResults(formatted), mediaRegistry };
+  return { messages: removeOrphanedToolResults(messages), mediaRegistry };
 }

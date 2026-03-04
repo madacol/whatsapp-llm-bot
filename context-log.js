@@ -3,9 +3,9 @@
  */
 
 /**
- * Replace binary media data in OpenAI-formatted messages with short hash stubs.
+ * Replace binary media data in internal Message[] with short hash stubs.
  * Works on a deep-cloned copy to avoid mutating the originals.
- * @param {Array<import("openai").default.ChatCompletionMessageParam>} messages
+ * @param {Message[]} messages
  * @returns {unknown[]}
  */
 export function sanitizeMessagesForLog(messages) {
@@ -19,18 +19,10 @@ export function sanitizeMessagesForLog(messages) {
     for (let i = 0; i < m.content.length; i++) {
       const part = /** @type {Record<string, unknown>} */ (m.content[i]);
 
-      if (part.type === "image_url") {
-        const url = /** @type {{url: string}} */ (part.image_url);
-        const hash = typeof url?.url === "string" ? url.url.slice(-10, -4) : "??????";
-        m.content[i] = { type: "image_url", image_url: { url: `[image:${hash}]` } };
-      } else if (part.type === "video_url") {
-        const url = /** @type {{url: string}} */ (part.video_url);
-        const hash = typeof url?.url === "string" ? url.url.slice(-10, -4) : "??????";
-        m.content[i] = { type: "video_url", video_url: { url: `[video:${hash}]` } };
-      } else if (part.type === "input_audio") {
-        const audio = /** @type {{data: string, format: string}} */ (part.input_audio);
-        const hash = typeof audio?.data === "string" ? audio.data.slice(-10, -4) : "??????";
-        m.content[i] = { type: "input_audio", input_audio: { data: `[audio:${hash}]`, format: audio?.format ?? "mp3" } };
+      if (part.type === "image" || part.type === "video" || part.type === "audio") {
+        const data = /** @type {string | undefined} */ (part.data);
+        const hash = typeof data === "string" ? data.slice(-10, -4) : "??????";
+        m.content[i] = { ...part, data: `[${part.type}:${hash}]` };
       }
     }
   }
@@ -45,7 +37,7 @@ export function sanitizeMessagesForLog(messages) {
  * @param {number} messageId
  * @param {string} model
  * @param {string} systemPrompt
- * @param {Array<import("openai").default.ChatCompletionMessageParam>} messages
+ * @param {Message[]} messages
  * @param {Action[]} actions
  */
 export function storeLlmContext(db, messageId, model, systemPrompt, messages, actions) {

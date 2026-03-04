@@ -23,7 +23,7 @@ const currentSessionDb = getDb("memory://");
  * @param {{}} params - The parameters to pass to the action
  * @param {string|null} [_toolCallId=null] - The tool call ID (unused, kept for API compatibility)
  * @param {(name: string) => Promise<AppAction|null>} [actionResolver] - Optional resolver (defaults to getAction)
- * @param {import("openai").default} [llmClient] - Optional LLM client for actions with useLlm permission
+ * @param {LlmClient} [llmClient] - Optional LLM client for actions with useLlm permission
  * @returns {Promise<{result: ActionResult, permissions: Action['permissions']}>} Result of the action execution
  */
 export async function executeAction(
@@ -72,7 +72,7 @@ export async function executeAction(
     },
   });
 
-  /** @type {ActionContext & Partial<{chatDb: PGlite, rootDb: PGlite, callLlm: CallLlm, llmClient: import("openai").default}>} */
+  /** @type {ActionContext & Partial<{chatDb: PGlite, rootDb: PGlite, callLlm: CallLlm, llmClient: LlmClient}>} */
   const actionContext = {
     chatId: context.chatId,
     senderIds: context.senderIds,
