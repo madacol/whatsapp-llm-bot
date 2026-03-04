@@ -89,7 +89,7 @@ describe("executeAction", () => {
   it("throws for non-existent action", async () => {
     const resolver = createResolver({});
     await assert.rejects(
-      () => executeAction("nonexistent", createMockContext(), {}, null, resolver),
+      () => executeAction("nonexistent", createMockContext(), {}, { actionResolver: resolver }),
       { message: /not found/ },
     );
   });
@@ -106,7 +106,7 @@ describe("executeAction", () => {
     });
     const ctx = createMockContext({ senderIds: ["non-master"] });
     await assert.rejects(
-      () => executeAction("test_action", ctx, {}, null, resolver),
+      () => executeAction("test_action", ctx, {}, { actionResolver: resolver }),
       { message: /master/ },
     );
   });
@@ -122,7 +122,7 @@ describe("executeAction", () => {
       },
     });
     const ctx = createMockContext({ senderIds: ["master-user"] });
-    const { result } = await executeAction("test_action", ctx, {}, null, resolver);
+    const { result } = await executeAction("test_action", ctx, {}, { actionResolver: resolver });
     assert.equal(result, "success");
   });
 
@@ -137,7 +137,7 @@ describe("executeAction", () => {
       },
     });
     const ctx = createMockContext({ confirm: async () => false });
-    const { result } = await executeAction("confirm_action", ctx, {}, null, resolver);
+    const { result } = await executeAction("confirm_action", ctx, {}, { actionResolver: resolver });
     assert.match(result, /cancelled/);
   });
 
@@ -152,7 +152,7 @@ describe("executeAction", () => {
       },
     });
     const ctx = createMockContext({ confirm: async () => true });
-    const { result } = await executeAction("confirm_action", ctx, {}, null, resolver);
+    const { result } = await executeAction("confirm_action", ctx, {}, { actionResolver: resolver });
     assert.equal(result, "confirmed result");
   });
 
@@ -167,7 +167,7 @@ describe("executeAction", () => {
       },
     });
     const { result, permissions } = await executeAction(
-      "result_action", createMockContext(), {}, null, resolver,
+      "result_action", createMockContext(), {}, { actionResolver: resolver },
     );
     assert.deepEqual(result, { key: "value" });
     assert.equal(permissions.autoExecute, true);
@@ -187,7 +187,7 @@ describe("executeAction", () => {
         },
       },
     });
-    await executeAction("db_action", createMockContext(), {}, null, resolver);
+    await executeAction("db_action", createMockContext(), {}, { actionResolver: resolver });
     assert.ok(receivedContext.rootDb, "rootDb should be set");
   });
 
@@ -203,7 +203,7 @@ describe("executeAction", () => {
     });
     const ctx = createMockContext({ getIsAdmin: async () => false });
     await assert.rejects(
-      () => executeAction("test_action", ctx, {}, null, resolver),
+      () => executeAction("test_action", ctx, {}, { actionResolver: resolver }),
       { message: /admin/ },
     );
   });
@@ -219,7 +219,7 @@ describe("executeAction", () => {
       },
     });
     const ctx = createMockContext({ getIsAdmin: async () => true });
-    const { result } = await executeAction("test_action", ctx, {}, null, resolver);
+    const { result } = await executeAction("test_action", ctx, {}, { actionResolver: resolver });
     assert.equal(result, "admin success");
   });
 
@@ -242,7 +242,7 @@ describe("executeAction", () => {
     const ctx = createMockContext({
       sendMessage: async (_header, _text) => { sent.push(`${_header} ${_text ?? ""}`); },
     });
-    await executeAction("test_action", ctx, {}, "call-123", resolver);
+    await executeAction("test_action", ctx, {}, { toolCallId: "call-123", actionResolver: resolver });
     assert.ok(
       !sent.some((s) => s.includes("hello")),
       `log() should not send messages to chat, got: ${JSON.stringify(sent)}`,
@@ -265,7 +265,7 @@ describe("executeAction", () => {
         },
       },
     });
-    await executeAction("llm_action", createMockContext(), {}, null, resolver, injectedClient);
+    await executeAction("llm_action", createMockContext(), {}, { actionResolver: resolver, llmClient: injectedClient });
     assert.equal(typeof receivedContext.callLlm, "function");
   });
 
@@ -280,7 +280,7 @@ describe("executeAction", () => {
       },
     });
     await assert.rejects(
-      () => executeAction("llm_action", createMockContext(), {}, null, resolver),
+      () => executeAction("llm_action", createMockContext(), {}, { actionResolver: resolver }),
       { message: /no llmClient was provided/ },
     );
   });
@@ -296,7 +296,7 @@ describe("executeAction", () => {
       },
     });
     const { result, permissions } = await executeAction(
-      "test_action", createMockContext(), {}, null, resolver,
+      "test_action", createMockContext(), {}, { actionResolver: resolver },
     );
     assert.equal(result, "cancelled");
     assert.equal(permissions.autoContinue, false);
@@ -313,7 +313,7 @@ describe("executeAction", () => {
       },
     });
     const { result, permissions } = await executeAction(
-      "test_action", createMockContext(), {}, null, resolver,
+      "test_action", createMockContext(), {}, { actionResolver: resolver },
     );
     assert.equal(result, "plain string");
     assert.equal(permissions.autoContinue, true);
@@ -355,7 +355,7 @@ describe("executeAction", () => {
       },
     });
 
-    const { result } = await executeAction("confirm_action", ctx, { a: 1 }, "tc-1", resolver);
+    const { result } = await executeAction("confirm_action", ctx, { a: 1 }, { toolCallId: "tc-1", actionResolver: resolver });
     assert.equal(result, "confirmed");
 
     // After resolution, row should be deleted
@@ -388,7 +388,7 @@ describe("executeAction", () => {
       },
     });
 
-    const { result } = await executeAction("confirm_action", ctx, {}, null, resolver);
+    const { result } = await executeAction("confirm_action", ctx, {}, { actionResolver: resolver });
     assert.match(result, /cancelled/);
 
     const rowsAfter = await pendingMod.loadPendingConfirmations(testDb);

@@ -190,9 +190,9 @@ async function executeAndStoreTool({
       }
     }
 
-    const functionResponse = await executeActionFn(
-      toolName, actionContext, cleanArgs, toolCall.id, actionResolver, actionLlmClient, updateToolMessage,
-    );
+    const functionResponse = await executeActionFn(toolName, actionContext, cleanArgs, {
+      toolCallId: toolCall.id, actionResolver, llmClient: actionLlmClient, updateToolMessage,
+    });
     log.debug("response", functionResponse);
 
     const result = functionResponse.result;
@@ -497,7 +497,7 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
       log.debug("executing", action.name, params);
 
       try {
-        const { result } = await executeActionFn(action.name, context, params, null, actionResolver, llmClient);
+        const { result } = await executeActionFn(action.name, context, params, { actionResolver, llmClient });
 
         if (isHtmlContent(result)) {
           const linkText = await storeAndLinkHtml(getRootDb(), result);
@@ -695,10 +695,8 @@ export function createReactionHandler({ store, executeActionFn, pendingByMsgKeyI
 
     try {
       const { result } = await executeActionFn(
-        pending.action_name,
-        resumeContext,
-        pending.action_params,
-        pending.tool_call_id,
+        pending.action_name, resumeContext, pending.action_params,
+        { toolCallId: pending.tool_call_id },
       );
       const resultText = typeof result === "string" ? result : JSON.stringify(result, null, 2);
 
