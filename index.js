@@ -305,11 +305,13 @@ async function processLlmResponse({ session, llmConfig, messages, mediaRegistry 
       return;
     }
 
+    /** @type {number | null} */
+    let resolvedCost = null;
     if (response.usage) {
       const { promptTokens: prompt, completionTokens: completion, cachedTokens: cached } = response.usage;
-      const cost = await resolveCost(response.usage.cost, chatModel, prompt, completion);
-      log.info(`[LLM usage] prompt=${prompt} cached=${cached} completion=${completion} cost=${cost} model=${chatModel}`);
-      recordUsage(getRootDb(), { chatId, model: chatModel, promptTokens: prompt, completionTokens: completion, cachedTokens: cached, cost })
+      resolvedCost = await resolveCost(response.usage.cost, chatModel, prompt, completion);
+      log.info(`[LLM usage] prompt=${prompt} cached=${cached} completion=${completion} cost=${resolvedCost} model=${chatModel}`);
+      recordUsage(getRootDb(), { chatId, model: chatModel, promptTokens: prompt, completionTokens: completion, cachedTokens: cached, cost: resolvedCost })
         .catch(err => log.error("[LLM usage] failed to persist:", err));
     }
 
@@ -323,6 +325,13 @@ async function processLlmResponse({ session, llmConfig, messages, mediaRegistry 
     }
 
     if (response.toolCalls.length === 0) {
+      if (context.isDebug && response.usage) {
+        const { promptTokens, completionTokens, cachedTokens } = response.usage;
+        const costStr = resolvedCost !== null ? `$${resolvedCost.toFixed(4)}` : "unknown";
+        await context.sendMessage(
+          `📊 *Cost*: ${costStr}  |  prompt=${promptTokens} cached=${cachedTokens} completion=${completionTokens}`,
+        );
+      }
       messages.push(assistantMessage);
       const storedAssistant = await addMessage(chatId, assistantMessage, senderIds);
       if (depth === 0) {
