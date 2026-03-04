@@ -779,15 +779,15 @@ describe("Scenario 12: Debug mode gates tool call output", () => {
     );
   });
 
-  it("shows only action name when action has no formatToolCall", async () => {
+  it("shows formatted tool call from formatToolCall in compact mode", async () => {
     mockServer.addResponses({
       tool_calls: [
         {
-          id: "call_no_fmt_001",
+          id: "call_fmt_001",
           type: "function",
           function: {
             name: "chat_settings",
-            arguments: JSON.stringify({ setting: "" }),
+            arguments: JSON.stringify({ setting: "model" }),
           },
         },
       ],
@@ -799,10 +799,10 @@ describe("Scenario 12: Debug mode gates tool call output", () => {
     });
     await handleMessage(context);
 
-    // chat_settings has no formatToolCall, so compact mode should show just the name
+    // chat_settings.formatToolCall should produce "Getting model"
     assert.ok(
-      responses.some((r) => r.text === "🔧 chat_settings"),
-      `Should show only action name without detail, got: ${responses.map(r=>r.text).join(" | ")}`,
+      responses.some((r) => r.text === "🔧 chat_settings: Getting model"),
+      `Should show formatted tool call, got: ${responses.map(r=>r.text).join(" | ")}`,
     );
   });
 

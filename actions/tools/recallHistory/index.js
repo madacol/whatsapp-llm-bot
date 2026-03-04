@@ -23,6 +23,8 @@ export default /** @type {defineAction} */ ((x) => x)({
     },
     required: ["since"],
   },
+  formatToolCall: ({ since, until }) =>
+    until ? `Recalling messages ${since} → ${until}` : `Recalling messages since ${since}`,
   permissions: {
     autoExecute: true,
     autoContinue: true,

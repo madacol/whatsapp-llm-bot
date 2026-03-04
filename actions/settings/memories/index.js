@@ -20,6 +20,11 @@ export default /** @type {defineAction} */ ((x) => x)({
       },
     },
   },
+  formatToolCall: ({ subcommand, args }) => {
+    if (subcommand === "delete") return `Deleting memory #${args ?? ""}`;
+    if (subcommand === "search") return `Searching memories: "${args ?? ""}"`;
+    return "Listing memories";
+  },
   permissions: {
     autoExecute: true,
     useRootDb: true,

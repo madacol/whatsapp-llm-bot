@@ -8,6 +8,7 @@ export default /** @type {defineAction} */ ((x) => x)({
     properties: {},
     required: [],
   },
+  formatToolCall: () => "Showing LLM context",
   permissions: {
     autoExecute: true,
     useRootDb: true,

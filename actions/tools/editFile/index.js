@@ -22,6 +22,7 @@ export default /** @type {defineAction} */ ((x) => x)({
     },
     required: ["file_path", "old_string", "new_string"],
   },
+  formatToolCall: ({ file_path }) => `Editing ${file_path?.split("/").pop() ?? "file"}`,
   instructions: `Use edit_file instead of run_bash with sed/awk for file edits. Always read_file first so you know the exact content.
 - old_string must match exactly (whitespace, indentation, newlines). Copy it from read_file output.
 - If old_string is ambiguous (appears multiple times), include more surrounding context to make it unique.
