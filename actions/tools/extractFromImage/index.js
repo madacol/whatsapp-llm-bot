@@ -1,4 +1,3 @@
-import { resolveModel } from "../../../model-roles.js";
 
 const EXTRACT_PROMPT = `Extrae datos de la factura en JSON estricto (solo JSON):
 {

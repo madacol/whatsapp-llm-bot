@@ -78,7 +78,7 @@ export default /** @type {defineAction} */ ((x) => x)({
     let content;
 
     if (contentType.includes("text/html") || contentType.includes("application/xhtml")) {
-      content = extractHtml(body, params.url);
+      content = extractHtml(body);
     } else if (contentType.includes("application/json") || contentType.includes("+json")) {
       try {
         content = JSON.stringify(JSON.parse(body), null, 2);
@@ -103,20 +103,20 @@ export default /** @type {defineAction} */ ((x) => x)({
 /**
  * Extract readable content from HTML, falling back to body textContent.
  * @param {string} html
- * @param {string} url
  * @returns {string}
  */
-function extractHtml(html, url) {
+function extractHtml(html) {
   const { document } = parseHTML(html);
   const turndown = new TurndownService({ headingStyle: "atx" });
 
   const reader = new Readability(document, { charThreshold: 0 });
   const article = reader.parse();
+  const content = article?.content;
 
-  if (article && article.content.trim()) {
-    const markdown = turndown.turndown(article.content).trim();
+  if (content?.trim()) {
+    const markdown = turndown.turndown(content).trim();
     if (markdown) {
-      return article.title ? `# ${article.title}\n\n${markdown}` : markdown;
+      return article?.title ? `# ${article.title}\n\n${markdown}` : markdown;
     }
   }
 

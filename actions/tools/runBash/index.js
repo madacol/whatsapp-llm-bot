@@ -20,7 +20,7 @@ function runCommand(command, { timeout = DEFAULT_TIMEOUT } = {}) {
           resolve({
             stdout,
             stderr,
-            exitCode: error.code ?? 1,
+            exitCode: typeof error.code === "number" ? error.code : 1,
             killed: error.killed ?? false,
           });
         } else {

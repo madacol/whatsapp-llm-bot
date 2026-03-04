@@ -316,7 +316,7 @@ export default /** @type {defineAction} */ ((x) => x)({
     autoContinue: true,
   },
   action_fn: async function (context, params) {
-    const { db, log, confirm } = context;
+    const { db, confirm } = context;
 
     await ensureSchema(db);
 
