@@ -208,20 +208,10 @@ type Action<P extends PermissionFlags = PermissionFlags> = {
     context: ExtendedActionContext<P>,
     params: any,
   ) => Promise<ActionResult> | ActionResult;
-  test_functions: Array<
-    (
-      action_fn: (context: any, params: any) => Promise<any> | any,
-      db: PGlite,
-    ) => Promise<void>
-  >;
   /** Returns a short display string appended after the action name in compact mode. */
   formatToolCall?: (params: Record<string, any>) => string;
   /** Returns the prompt string used by this action. Swappable for testing/optimization. */
   prompt?: (...args: any[]) => string;
-  /** Optional prompt tests — run only via `npm run test:prompts`, never in `npm test`. */
-  test_prompts?: Array<
-    (callLlm: CallLlm, readFixture: (name: string) => Promise<Buffer>, prompt: (...args: any[]) => string) => Promise<void>
-  >;
 };
 
 type AppAction = Action & {

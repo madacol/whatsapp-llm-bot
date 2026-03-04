@@ -34,7 +34,7 @@ describe("per-chat model selection", () => {
 
   describe("chat_settings info includes model", () => {
     it("throws if chat does not exist", async () => {
-      const settingsModule = await import("../actions/settings/chatSettings.js");
+      const settingsModule = await import("../actions/settings/chatSettings/index.js");
       const action = settingsModule.default;
       await assert.rejects(
         () => action.action_fn({ chatId: "nonexistent", rootDb: db, senderIds: [] }, { setting: "" }),
@@ -47,7 +47,7 @@ describe("per-chat model selection", () => {
     it("updates the model in the DB", async () => {
       await db.sql`INSERT INTO chats(chat_id) VALUES ('chat-set-1') ON CONFLICT DO NOTHING`;
 
-      const mod = await import("../actions/settings/chatSettings.js");
+      const mod = await import("../actions/settings/chatSettings/index.js");
       const action = mod.default;
       const result = await action.action_fn(
         { chatId: "chat-set-1", rootDb: db },
@@ -62,7 +62,7 @@ describe("per-chat model selection", () => {
     it("reverts to default when given empty string", async () => {
       await db.sql`INSERT INTO chats(chat_id, model) VALUES ('chat-set-2', 'some-model') ON CONFLICT DO NOTHING`;
 
-      const mod = await import("../actions/settings/chatSettings.js");
+      const mod = await import("../actions/settings/chatSettings/index.js");
       const action = mod.default;
       const result = await action.action_fn(
         { chatId: "chat-set-2", rootDb: db },
@@ -77,7 +77,7 @@ describe("per-chat model selection", () => {
     it("rejects invalid model with suggestions", async () => {
       await db.sql`INSERT INTO chats(chat_id) VALUES ('chat-set-3') ON CONFLICT DO NOTHING`;
 
-      const mod = await import("../actions/settings/chatSettings.js");
+      const mod = await import("../actions/settings/chatSettings/index.js");
       const action = mod.default;
       const result = await action.action_fn(
         { chatId: "chat-set-3", rootDb: db },
@@ -93,7 +93,7 @@ describe("per-chat model selection", () => {
     it("suggests close matches for partial model names", async () => {
       await db.sql`INSERT INTO chats(chat_id) VALUES ('chat-set-4') ON CONFLICT DO NOTHING`;
 
-      const mod = await import("../actions/settings/chatSettings.js");
+      const mod = await import("../actions/settings/chatSettings/index.js");
       const action = mod.default;
       const result = await action.action_fn(
         { chatId: "chat-set-4", rootDb: db },
@@ -105,7 +105,7 @@ describe("per-chat model selection", () => {
     });
 
     it("throws if chat does not exist", async () => {
-      const mod = await import("../actions/settings/chatSettings.js");
+      const mod = await import("../actions/settings/chatSettings/index.js");
       const action = mod.default;
       await assert.rejects(
         () => action.action_fn({ chatId: "nonexistent", rootDb: db }, { setting: "model", value: "x" }),
@@ -118,7 +118,7 @@ describe("per-chat model selection", () => {
     it("'on' enables memory", async () => {
       await db.sql`INSERT INTO chats(chat_id, memory) VALUES ('mem-on-1', false) ON CONFLICT DO NOTHING`;
 
-      const mod = await import("../actions/settings/chatSettings.js");
+      const mod = await import("../actions/settings/chatSettings/index.js");
       const action = mod.default;
       const result = await action.action_fn(
         { chatId: "mem-on-1", rootDb: db, senderIds: ["u1"] },
@@ -133,7 +133,7 @@ describe("per-chat model selection", () => {
     it("'off' disables memory", async () => {
       await db.sql`INSERT INTO chats(chat_id, memory) VALUES ('mem-off-1', true) ON CONFLICT DO NOTHING`;
 
-      const mod = await import("../actions/settings/chatSettings.js");
+      const mod = await import("../actions/settings/chatSettings/index.js");
       const action = mod.default;
       const result = await action.action_fn(
         { chatId: "mem-off-1", rootDb: db, senderIds: ["u1"] },
@@ -148,7 +148,7 @@ describe("per-chat model selection", () => {
     it("'true' still works", async () => {
       await db.sql`INSERT INTO chats(chat_id, memory) VALUES ('mem-true-1', false) ON CONFLICT DO NOTHING`;
 
-      const mod = await import("../actions/settings/chatSettings.js");
+      const mod = await import("../actions/settings/chatSettings/index.js");
       const action = mod.default;
       const result = await action.action_fn(
         { chatId: "mem-true-1", rootDb: db, senderIds: ["u1"] },
@@ -160,7 +160,7 @@ describe("per-chat model selection", () => {
     it("throws on unrecognized boolean value", async () => {
       await db.sql`INSERT INTO chats(chat_id) VALUES ('mem-bad-1') ON CONFLICT DO NOTHING`;
 
-      const mod = await import("../actions/settings/chatSettings.js");
+      const mod = await import("../actions/settings/chatSettings/index.js");
       const action = mod.default;
       await assert.rejects(
         () => action.action_fn(
@@ -176,7 +176,7 @@ describe("per-chat model selection", () => {
     it("'on' enables debug with default duration", async () => {
       await db.sql`INSERT INTO chats(chat_id) VALUES ('dbg-on-1') ON CONFLICT DO NOTHING`;
 
-      const mod = await import("../actions/settings/chatSettings.js");
+      const mod = await import("../actions/settings/chatSettings/index.js");
       const action = mod.default;
       const result = await action.action_fn(
         { chatId: "dbg-on-1", rootDb: db, senderIds: ["u1"] },
@@ -196,7 +196,7 @@ describe("per-chat model selection", () => {
       const originalMaster = config.MASTER_IDs;
       config.MASTER_IDs = ["master-user"];
       try {
-        const mod = await import("../actions/settings/chatSettings.js");
+        const mod = await import("../actions/settings/chatSettings/index.js");
         const action = mod.default;
         const result = await action.action_fn(
           { chatId: "en-1", rootDb: db, senderIds: ["master-user"] },
@@ -217,7 +217,7 @@ describe("per-chat model selection", () => {
       const originalMaster = config.MASTER_IDs;
       config.MASTER_IDs = ["master-user"];
       try {
-        const mod = await import("../actions/settings/chatSettings.js");
+        const mod = await import("../actions/settings/chatSettings/index.js");
         const action = mod.default;
         const result = await action.action_fn(
           { chatId: "en-2", rootDb: db, senderIds: ["master-user"] },

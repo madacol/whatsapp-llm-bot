@@ -46,15 +46,22 @@ before(async () => {
   const llmClient = createLlmClient();
   callLlm = createCallLlm(llmClient);
 
-  // Discover actions
+  // Discover actions with _test-prompts.js files
   const actionsDir = path.resolve(process.cwd(), "actions");
-  const files = (await fs.readdir(actionsDir)).filter((f) => f.endsWith(".js"));
+  const files = (await fs.readdir(actionsDir, { recursive: true }))
+    .filter((f) => f === "_test-prompts.js" || f.endsWith("/_test-prompts.js"));
   for (const file of files) {
-    const mod = await import(`file://${path.join(actionsDir, file)}`);
-    if (mod.default?.test_prompts?.length > 0) {
-      if (actionFilter && !mod.default.name.includes(actionFilter)) continue;
-      actions.push({ fileName: file, action: mod.default });
-    }
+    const promptsPath = path.join(actionsDir, file);
+    const indexPath = path.join(path.dirname(promptsPath), "index.js");
+    const [promptsMod, actionMod] = await Promise.all([
+      import(`file://${promptsPath}`),
+      import(`file://${indexPath}`),
+    ]);
+    if (actionFilter && !actionMod.default.name.includes(actionFilter)) continue;
+    actions.push({
+      fileName: file,
+      action: { ...actionMod.default, test_prompts: promptsMod.default },
+    });
   }
 });
 

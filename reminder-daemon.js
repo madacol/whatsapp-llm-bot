@@ -1,5 +1,5 @@
 import { getRootDb } from "./db.js";
-import { ensureSchema } from "./actions/tools/reminders.js";
+import { ensureSchema } from "./actions/tools/reminders/index.js";
 import { createDaemon } from "./daemon.js";
 import { createLogger } from "./logger.js";
 
