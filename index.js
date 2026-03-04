@@ -569,8 +569,16 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
         try {
           const threshold = chatInfo?.memory_threshold ?? config.memory_threshold;
           const similar = await findMemories(getRootDb(), llmClient, chatId, currentText, { minSimilarity: threshold });
+          log.debug(`[memory] query="${currentText.slice(0, 80)}" found=${similar.length} threshold=${threshold}`);
           if (similar.length > 0) {
             systemPrompt += "\n\n## Relevant memories\n" + formatMemoriesContext(similar);
+            log.debug("[memory] recalled:", similar.map(m => `#${m.id}(${Number(m.similarity).toFixed(3)})`).join(", "));
+            if (isDebug) {
+              const lines = similar.map(m =>
+                `• [#${m.id}] (score: ${Number(m.similarity).toFixed(3)}) ${m.content.slice(0, 100)}${m.content.length > 100 ? "…" : ""}`
+              );
+              await context.sendMessage(`🧠 *Recalled ${similar.length} memor${similar.length === 1 ? "y" : "ies"}*\n${lines.join("\n")}`);
+            }
           }
         } catch (err) {
           log.error("Memory search failed:", err);
