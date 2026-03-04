@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 
 const typesFileContent = await readFile(
-  new URL("../../types.d.ts", import.meta.url),
+  new URL("../../../types.d.ts", import.meta.url),
   "utf-8",
 ).catch((err) => {
   console.warn("Could not read types.d.ts:", err.message);
