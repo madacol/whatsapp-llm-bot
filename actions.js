@@ -233,7 +233,7 @@ export async function getAction(actionName) {
     (action) => action.name === actionName,
   )?.fileName;
   if (!fileName) {
-    throw new Error(`Action "${actionName}" not found`);
+    return null;
   }
 
   const filePath = path.join(actionsDir, fileName);
