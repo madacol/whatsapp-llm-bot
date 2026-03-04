@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 
+/** @type {ActionDbTestFn[]} */
 export default [
 async function executes_function_and_returns_result(action_fn, _db) {
       const result = await action_fn(
@@ -10,13 +11,13 @@ async function executes_function_and_returns_result(action_fn, _db) {
     },
     async function throws_on_non_function_code(action_fn, _db) {
       await assert.rejects(
-        () => action_fn({}, { code: "42" }),
+        async () => action_fn({}, { code: "42" }),
         { message: /function/ },
       );
     },
     async function throws_on_syntax_error(action_fn, _db) {
       await assert.rejects(
-        () => action_fn({}, { code: "{{invalid" }),
+        async () => action_fn({}, { code: "{{invalid" }),
       );
     },
     async function resolveModel_is_available_on_context(action_fn, _db) {

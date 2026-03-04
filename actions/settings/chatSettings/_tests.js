@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import config from "../../../config.js";
 import { withModelsCache } from "../../../tests/helpers.js";
 
+/** @type {ActionDbTestFn[]} */
 export default [
 // ── model ──
     async function sets_model_for_chat(action_fn, db) {
@@ -475,9 +476,9 @@ export default [
     // ── action (opt-in) ──
     async function enables_opt_in_action(action_fn, db) {
       await db.sql`INSERT INTO chats(chat_id) VALUES ('cs-act-1') ON CONFLICT DO NOTHING`;
-      const mockGetActions = async () => [
+      const mockGetActions = async () => /** @type {Action[]} */ ([
         { name: "test_opt", optIn: true },
-      ];
+      ]);
       const result = await action_fn(
         { chatId: "cs-act-1", rootDb: db, getActions: mockGetActions },
         { setting: "action", value: "test_opt true" },
@@ -488,9 +489,9 @@ export default [
     },
     async function disables_opt_in_action(action_fn, db) {
       await db.sql`INSERT INTO chats(chat_id, enabled_actions) VALUES ('cs-act-2', '["test_opt"]'::jsonb) ON CONFLICT DO NOTHING`;
-      const mockGetActions = async () => [
+      const mockGetActions = async () => /** @type {Action[]} */ ([
         { name: "test_opt", optIn: true },
-      ];
+      ]);
       const result = await action_fn(
         { chatId: "cs-act-2", rootDb: db, getActions: mockGetActions },
         { setting: "action", value: "test_opt false" },
@@ -501,9 +502,9 @@ export default [
     },
     async function rejects_non_opt_in_action(action_fn, db) {
       await db.sql`INSERT INTO chats(chat_id) VALUES ('cs-act-3') ON CONFLICT DO NOTHING`;
-      const mockGetActions = async () => [
+      const mockGetActions = async () => /** @type {Action[]} */ ([
         { name: "regular_action" },
-      ];
+      ]);
       const result = await action_fn(
         { chatId: "cs-act-3", rootDb: db, getActions: mockGetActions },
         { setting: "action", value: "regular_action true" },
@@ -521,9 +522,9 @@ export default [
     },
     async function does_not_duplicate_on_double_enable(action_fn, db) {
       await db.sql`INSERT INTO chats(chat_id, enabled_actions) VALUES ('cs-act-5', '["test_opt"]'::jsonb) ON CONFLICT DO NOTHING`;
-      const mockGetActions = async () => [
+      const mockGetActions = async () => /** @type {Action[]} */ ([
         { name: "test_opt", optIn: true },
-      ];
+      ]);
       await action_fn(
         { chatId: "cs-act-5", rootDb: db, getActions: mockGetActions },
         { setting: "action", value: "test_opt true" },

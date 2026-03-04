@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { falApi } from "./index.js";
 
+/** @type {ActionTestFn[]} */
 export default [
     async function test_generates_video_from_prompt(action_fn) {
       const saved = { ...falApi, key: process.env.FAL_KEY };
@@ -30,9 +31,10 @@ export default [
 
           assert.equal(sentVideos.length, 1);
           assert.ok(Buffer.isBuffer(sentVideos[0].video));
-          assert.equal(result.autoContinue, false);
-          assert.ok(Array.isArray(result.result));
-          const blocks = /** @type {ToolContentBlock[]} */ (result.result);
+          const signal = /** @type {ActionSignal} */ (/** @type {ActionResult} */ (result));
+          assert.equal(signal.autoContinue, false);
+          assert.ok(Array.isArray(signal.result));
+          const blocks = /** @type {ToolContentBlock[]} */ (signal.result);
           assert.ok(blocks.some((b) => b.type === "text"));
           assert.ok(blocks.some((b) => b.type === "video"));
         } finally {
@@ -123,7 +125,7 @@ export default [
       try {
         falApi.submitJob = async () => ({ statusUrl: "s", responseUrl: "r" });
         falApi.pollJob = async () => {};
-        falApi.getResult = async () => /** @type {FalResult} */ (/** @type {unknown} */ ({}));
+        falApi.getResult = async () => /** @type {import("./index.js").FalResult} */ (/** @type {unknown} */ ({}));
 
         const result = await action_fn(
           {

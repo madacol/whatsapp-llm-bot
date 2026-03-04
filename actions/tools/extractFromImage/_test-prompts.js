@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { resolveModel } from "../../../model-roles.js";
 import { parseExtractResponse } from "./index.js";
 
+/** @type {PromptTestFn[]} */
 export default [
 async function extract_prompt_returns_valid_json(callLlm, _readFixture, prompt) {
       /** @type {ContentBlock[]} */

@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 
+/** @type {ActionDbTestFn[]} */
 export default [
 async function saves_memory_and_returns_confirmation(action_fn, db) {
       await db.sql`INSERT INTO chats(chat_id) VALUES ('act-savemem-1') ON CONFLICT DO NOTHING`;

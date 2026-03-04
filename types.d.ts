@@ -258,3 +258,27 @@ function defineAction<P extends PermissionFlags>(action: Action<P>): Action<P> {
 
 declare function html(content: string, title?: string): HtmlContent;
 declare function isHtmlContent(value: unknown): value is HtmlContent;
+
+/* Test callback types — used by _tests.js and _test-prompts.js */
+
+/** Full action context with all permission extensions enabled. */
+type FullActionContext = ActionContext & { rootDb: PGlite; chatDb: PGlite; callLlm: CallLlm; llmClient: LlmClient };
+
+/** action_fn as seen by tests — accepts partial context (duck typing), returns string. */
+type TestActionFn = (
+  context: Partial<FullActionContext>,
+  params: Record<string, string | number | boolean | null>,
+) => Promise<string> | string;
+
+/** Standard _tests.js callback: receives action_fn only. */
+type ActionTestFn = (action_fn: TestActionFn) => Promise<void>;
+
+/** Standard _tests.js callback: receives action_fn + db. */
+type ActionDbTestFn = (action_fn: TestActionFn, db: PGlite) => Promise<void>;
+
+/** Prompt test callback: receives callLlm + readFixture + prompt. */
+type PromptTestFn = (
+  callLlm: CallLlm,
+  readFixture: (name: string) => Promise<Buffer>,
+  prompt: (...args: string[]) => string,
+) => Promise<void>;

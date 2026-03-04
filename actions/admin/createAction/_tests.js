@@ -9,6 +9,7 @@ import {
   deleteChatAction,
 } from "../../../actions.js";
 
+/** @type {ActionDbTestFn[]} */
 export default [
     async function global_scope_rejects_non_master(action_fn, _db) {
       const saved = config.MASTER_IDs;
@@ -19,7 +20,7 @@ export default [
           confirm: async () => true,
         };
         await assert.rejects(
-          () => action_fn(context, { file_name: "testGlobalPerm", code: "// code", scope: "global" }),
+          async () => action_fn(context, { file_name: "testGlobalPerm", code: "// code", scope: "global" }),
           { message: /requires master/ },
         );
       } finally {
@@ -93,7 +94,7 @@ export default [
         confirm: async () => true,
       };
       await assert.rejects(
-        () => action_fn(context, { file_name: "testChatNonAdmin", code: "// code", scope: "chat" }),
+        async () => action_fn(context, { file_name: "testChatNonAdmin", code: "// code", scope: "chat" }),
         { message: /admin/ },
       );
     },

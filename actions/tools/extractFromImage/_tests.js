@@ -1,11 +1,11 @@
 import assert from "node:assert/strict";
-import { resolveModel } from "../../../model-roles.js";
 
+/** @type {ActionTestFn[]} */
 export default [
 async function returns_error_when_no_image(action_fn) {
       const result = await action_fn(
         {
-          callLlm: async () => null,
+          callLlm: /** @type {CallLlm} */ (/** @type {Function} */ (async () => null)),
           content: [],
           log: async () => "",
           resolveModel: () => "test-model",
@@ -22,18 +22,18 @@ async function returns_error_when_no_image(action_fn) {
       /** @type {CallLlmOptions | undefined} */
       let capturedOptions;
 
-      /** @type {ContentBlock[]} */
+      /** @type {IncomingContentBlock[]} */
       const contentWithImage = [
         { type: "image", encoding: "base64", mime_type: "image/jpeg", data: "fakebase64" },
       ];
 
       await action_fn(
         {
-          callLlm: async (/** @type {ContentBlock[]} */ prompt, /** @type {CallLlmOptions} */ opts) => {
+          callLlm: /** @type {CallLlm} */ (/** @type {Function} */ (async (/** @type {ContentBlock[]} */ prompt, /** @type {CallLlmOptions} */ opts) => {
             capturedPrompt = prompt;
             capturedOptions = opts;
             return "extracted text";
-          },
+          })),
           content: contentWithImage,
           log: async () => "",
           resolveModel: () => "vision-model",
@@ -50,15 +50,15 @@ async function returns_error_when_no_image(action_fn) {
     },
 
     async function returns_raw_llm_response(action_fn) {
-      /** @type {ContentBlock[]} */
-      const contentWithImage = [
+      /** @type {IncomingContentBlock[]} */
+      const contentWithImage2 = [
         { type: "image", encoding: "base64", mime_type: "image/jpeg", data: "fakebase64" },
       ];
 
       const result = await action_fn(
         {
-          callLlm: async () => '{"store_name": "Test", "items": [], "total": 42}',
-          content: contentWithImage,
+          callLlm: /** @type {CallLlm} */ (/** @type {Function} */ (async () => '{"store_name": "Test", "items": [], "total": 42}')),
+          content: contentWithImage2,
           log: async () => "",
           resolveModel: () => "test-model",
         },
@@ -71,7 +71,7 @@ async function returns_error_when_no_image(action_fn) {
       /** @type {ContentBlock[] | undefined} */
       let capturedPrompt;
 
-      /** @type {ContentBlock[]} */
+      /** @type {IncomingContentBlock[]} */
       const contentWithImages = [
         { type: "image", encoding: "base64", mime_type: "image/jpeg", data: "img1" },
         { type: "text", text: "some text" },
@@ -80,10 +80,10 @@ async function returns_error_when_no_image(action_fn) {
 
       await action_fn(
         {
-          callLlm: async (/** @type {ContentBlock[]} */ prompt) => {
+          callLlm: /** @type {CallLlm} */ (/** @type {Function} */ (async (/** @type {ContentBlock[]} */ prompt) => {
             capturedPrompt = prompt;
             return "result";
-          },
+          })),
           content: contentWithImages,
           log: async () => "",
           resolveModel: () => "vision-model",

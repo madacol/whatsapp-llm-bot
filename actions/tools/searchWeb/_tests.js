@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import config from "../../../config.js";
 
+/** @type {ActionTestFn[]} */
 export default [
 async function test_search_returns_formatted_results(action_fn) {
       const originalFetch = globalThis.fetch;

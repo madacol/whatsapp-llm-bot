@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 
+/** @type {ActionDbTestFn[]} */
 export default [
 async function returns_empty_when_no_messages(action_fn, db) {
       await db.sql`INSERT INTO chats(chat_id) VALUES ('act-hist-1') ON CONFLICT DO NOTHING`;

@@ -12,9 +12,12 @@
         "esModuleInterop": true,
         "forceConsistentCasingInFileNames": true,
         "skipLibCheck": true,
+        "paths": {
+            "turndown": ["./turndown.d.ts"]
+        },
         "declaration": true,
         "declarationMap": true
     },
     "include": ["**/*.js", "**/*.d.ts"],
-    "exclude": ["node_modules", "*.bck.*", "tests", ".claude", "**/_tests.js", "**/_test-prompts.js"]
+    "exclude": ["node_modules", "*.bck.*", "tests", ".claude"]
 }

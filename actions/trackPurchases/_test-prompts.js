@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
 
+/** @type {PromptTestFn[]} */
 export default [
 async function tool_selection_scenarios(callLlm, readFixture) {
-      const { actionsToToolDefinitions } = await import("../message-formatting.js");
-      const config = (await import("../config.js")).default;
+      const { actionsToToolDefinitions } = await import("../../message-formatting.js");
+      const config = (await import("../../config.js")).default;
       const fs = await import("fs/promises");
       const path = await import("path");
 
@@ -131,10 +132,10 @@ async function tool_selection_scenarios(callLlm, readFixture) {
       }
     },
     async function e2e_partial_items_with_proportional_discounts(callLlm, readFixture) {
-      const { actionsToToolDefinitions } = await import("../message-formatting.js");
-      const { EXTRACT_PROMPT, parseExtractResponse } = await import(".././tools/extractFromImage.js");
-      const { resolveModel } = await import("../model-roles.js");
-      const config = (await import("../config.js")).default;
+      const { actionsToToolDefinitions } = await import("../../message-formatting.js");
+      const { EXTRACT_PROMPT, parseExtractResponse } = await import("../tools/extractFromImage/index.js");
+      const { resolveModel } = await import("../../model-roles.js");
+      const config = (await import("../../config.js")).default;
       const fs = await import("fs/promises");
       const path = await import("path");
 
@@ -186,7 +187,6 @@ async function tool_selection_scenarios(callLlm, readFixture) {
       ];
 
       const response = await callLlm(
-        // @ts-expect-error -- messages-style call
         { messages, tools, tool_choice: "auto" },
       );
       const toolCalls = response.toolCalls;
