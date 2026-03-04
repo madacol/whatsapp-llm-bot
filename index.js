@@ -144,7 +144,9 @@ function parseToolArgs(argsString) {
 
 /**
  * Execute a single tool call: run action, store result, display to user.
- * Returns whether processing should continue (autoContinue or error).
+ * Returns the autoContinue value from the action's permissions.
+ * - `true`: continue automatically
+ * - `false`/`undefined`: ask user before continuing
  * @param {{
  *   session: Session,
  *   llmConfig: LlmConfig,
@@ -152,7 +154,7 @@ function parseToolArgs(argsString) {
  *   messages: Message[],
  *   mediaRegistry: MediaRegistry,
  * }} params
- * @returns {Promise<boolean>} Whether to continue processing (loop again)
+ * @returns {Promise<boolean | undefined>} The autoContinue value
  */
 async function executeAndStoreTool({
   session, llmConfig, toolCall, messages, mediaRegistry,
@@ -246,7 +248,7 @@ async function executeAndStoreTool({
 
     await displayToolResult(resultMessage, shortId, functionResponse.permissions, context);
 
-    return !!functionResponse.permissions.autoContinue;
+    return functionResponse.permissions.autoContinue;
   } catch (error) {
     log.error("Error executing tool:", error);
     const errorMessage = `Error executing ${toolName}: ${error instanceof Error ? error.message : String(error)}`;
@@ -373,12 +375,12 @@ async function processLlmResponse({ session, llmConfig, messages, mediaRegistry 
     }
 
     // Execute each tool call
-    let continueProcessing = false;
+    let continueProcessing = true;
     for (const toolCall of response.toolCalls) {
       const shouldContinue = await executeAndStoreTool({
         session, llmConfig, toolCall, messages, mediaRegistry,
       });
-      if (shouldContinue) continueProcessing = true;
+      if (!shouldContinue) continueProcessing = false;
     }
 
     // Inject detailed instructions for newly-used actions into the system prompt
@@ -398,6 +400,7 @@ async function processLlmResponse({ session, llmConfig, messages, mediaRegistry 
       );
       if (!confirmed) return;
     }
+
     depth++;
 
     if (depth >= MAX_TOOL_CALL_DEPTH) {
