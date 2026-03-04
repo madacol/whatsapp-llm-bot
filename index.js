@@ -190,7 +190,7 @@ async function executeAndStoreTool({
     }
 
     const functionResponse = await executeActionFn(
-      toolName, actionContext, cleanArgs, toolCall.id, actionResolver, actionLlmClient,
+      toolName, actionContext, cleanArgs, toolCall.id, actionResolver, actionLlmClient, updateToolMessage,
     );
     log.debug("response", functionResponse);
 
