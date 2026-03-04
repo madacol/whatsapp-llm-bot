@@ -168,4 +168,76 @@ describe("store with injected DB", () => {
       assert.equal(messages[0].message_data.content[0].text, "after clear");
     });
   });
+
+  describe("updateToolMessage", () => {
+    it("updates the correct tool message by JSONB lookup", async () => {
+      await store.createChat("msg-test-update-tool");
+
+      /** @type {ToolMessage} */
+      const stub = {
+        role: "tool",
+        tool_id: "call_xyz",
+        content: [{ type: "text", text: "[executing searchWeb...]" }],
+      };
+      await store.addMessage("msg-test-update-tool", stub, ["bot"]);
+
+      /** @type {ToolMessage} */
+      const updated = {
+        role: "tool",
+        tool_id: "call_xyz",
+        content: [{ type: "text", text: "real result" }],
+      };
+      const result = await store.updateToolMessage("msg-test-update-tool", "call_xyz", updated);
+
+      assert.ok(result, "should return the updated row");
+      assert.equal(result.message_data.role, "tool");
+      assert.equal(/** @type {ToolMessage} */ (result.message_data).tool_id, "call_xyz");
+      assert.equal(result.message_data.content[0].text, "real result");
+
+      // Verify via getMessages
+      const messages = await store.getMessages("msg-test-update-tool");
+      assert.equal(messages.length, 1);
+      assert.equal(messages[0].message_data.content[0].text, "real result");
+    });
+
+    it("returns null when no matching tool message exists", async () => {
+      await store.createChat("msg-test-update-miss");
+
+      /** @type {ToolMessage} */
+      const updated = {
+        role: "tool",
+        tool_id: "nonexistent",
+        content: [{ type: "text", text: "nope" }],
+      };
+      const result = await store.updateToolMessage("msg-test-update-miss", "nonexistent", updated);
+      assert.equal(result, null);
+    });
+
+    it("does not update tool messages in a different chat", async () => {
+      await store.createChat("msg-test-update-a");
+      await store.createChat("msg-test-update-b");
+
+      /** @type {ToolMessage} */
+      const stub = {
+        role: "tool",
+        tool_id: "call_shared",
+        content: [{ type: "text", text: "[executing...]" }],
+      };
+      await store.addMessage("msg-test-update-a", stub, ["bot"]);
+
+      /** @type {ToolMessage} */
+      const updated = {
+        role: "tool",
+        tool_id: "call_shared",
+        content: [{ type: "text", text: "wrong chat" }],
+      };
+      const result = await store.updateToolMessage("msg-test-update-b", "call_shared", updated);
+      assert.equal(result, null);
+
+      // Original should be unchanged
+      const messages = await store.getMessages("msg-test-update-a");
+      assert.equal(messages.length, 1);
+      assert.equal(messages[0].message_data.content[0].text, "[executing...]");
+    });
+  });
 });
