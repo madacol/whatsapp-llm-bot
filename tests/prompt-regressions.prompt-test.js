@@ -19,11 +19,13 @@ import dotenv from "dotenv";
 import { createLlmClient, createCallLlm } from "../llm.js";
 import { getActions } from "../actions.js";
 import { actionsToToolDefinitions } from "../message-formatting.js";
-import { resolveModel } from "../model-roles.js";
+import { checkAssertion } from "./prompt-regressions/assertions.js";
 
 dotenv.config();
 
 const regressionFilter = process.env.REGRESSION;
+
+/** @typedef {import("./prompt-regressions/assertions.js").TestAssertion} TestAssertion */
 
 /**
  * @typedef {{
@@ -36,14 +38,6 @@ const regressionFilter = process.env.REGRESSION;
  *   tools: string[];
  *   assertions: TestAssertion[];
  * }} RegressionTestCase
- *
- * @typedef {
- *   | { type: "tool_call"; tool_name: string }
- *   | { type: "no_tool_call"; tool_name: string }
- *   | { type: "contains"; value: string }
- *   | { type: "not_contains"; value: string }
- *   | { type: "llm_judge"; criteria: string }
- * } TestAssertion
  */
 
 const regressionsDir = path.resolve(process.cwd(), "tests", "prompt-regressions");
@@ -54,9 +48,6 @@ let testCases = [];
 
 /** @type {CallLlm} */
 let callLlm;
-
-/** @type {ToolDefinition[]} */
-let allToolDefs = [];
 
 /** @type {Map<string, ToolDefinition>} */
 let toolDefsByName = new Map();
@@ -99,77 +90,6 @@ async function resolveFixtures(messages) {
   return resolved;
 }
 
-/**
- * Check a single assertion against an LLM response.
- * @param {TestAssertion} assertion
- * @param {LlmChatResponse} response
- * @returns {Promise<{ passed: boolean; message: string }>}
- */
-async function checkAssertion(assertion, response) {
-  switch (assertion.type) {
-    case "tool_call": {
-      const found = response.toolCalls?.some(
-        (tc) => tc.name === assertion.tool_name,
-      );
-      return {
-        passed: !!found,
-        message: found
-          ? `Called ${assertion.tool_name}`
-          : `Expected tool call to ${assertion.tool_name}, got: ${
-              response.toolCalls?.map((tc) => tc.name).join(", ") || "none"
-            }`,
-      };
-    }
-    case "no_tool_call": {
-      const found = response.toolCalls?.some(
-        (tc) => tc.name === assertion.tool_name,
-      );
-      return {
-        passed: !found,
-        message: found
-          ? `Expected NO call to ${assertion.tool_name}, but it was called`
-          : `Correctly did not call ${assertion.tool_name}`,
-      };
-    }
-    case "contains": {
-      const content = response.content || "";
-      const passed = content.includes(assertion.value);
-      return {
-        passed,
-        message: passed
-          ? `Response contains "${assertion.value}"`
-          : `Response does not contain "${assertion.value}"`,
-      };
-    }
-    case "not_contains": {
-      const content = response.content || "";
-      const passed = !content.includes(assertion.value);
-      return {
-        passed,
-        message: passed
-          ? `Response correctly omits "${assertion.value}"`
-          : `Response unexpectedly contains "${assertion.value}"`,
-      };
-    }
-    case "llm_judge": {
-      const judgeResponse = await callLlm(
-        `Given this LLM response:\n\n${JSON.stringify({ content: response.content, toolCalls: response.toolCalls })}\n\nDoes it satisfy this criteria: ${assertion.criteria}\n\nAnswer only YES or NO.`,
-        { model: resolveModel("fast") },
-      );
-      const answer = typeof judgeResponse === "string" ? judgeResponse : "";
-      const passed = answer.trim().toUpperCase().startsWith("YES");
-      return {
-        passed,
-        message: passed
-          ? `LLM judge: criteria satisfied`
-          : `LLM judge: criteria NOT satisfied — "${answer}"`,
-      };
-    }
-    default:
-      return { passed: false, message: `Unknown assertion type: ${/** @type {{type: string}} */ (assertion).type}` };
-  }
-}
-
 before(async () => {
   assert.ok(
     process.env.LLM_API_KEY,
@@ -181,7 +101,7 @@ before(async () => {
 
   // Load all actions and build tool definitions
   const actions = await getActions();
-  allToolDefs = actionsToToolDefinitions(actions);
+  const allToolDefs = actionsToToolDefinitions(actions);
   for (const td of allToolDefs) {
     toolDefsByName.set(td.function.name, td);
   }
@@ -218,6 +138,9 @@ describe("prompt regressions", () => {
           // Resolve fixture references to actual base64 data
           const messages = await resolveFixtures(testCase.messages);
 
+          // Prepend system prompt
+          messages.unshift({ role: "system", content: testCase.system_prompt });
+
           // Filter tool definitions to only those specified in the test case
           const tools = testCase.tools
             .map((name) => toolDefsByName.get(name))
@@ -233,7 +156,7 @@ describe("prompt regressions", () => {
 
           // Check all assertions
           const results = await Promise.all(
-            testCase.assertions.map((a) => checkAssertion(a, response)),
+            testCase.assertions.map((a) => checkAssertion(a, response, callLlm)),
           );
 
           const failures = results.filter((r) => !r.passed);
