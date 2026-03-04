@@ -174,7 +174,7 @@ type LlmChatResponse = {
 // Replaces OpenAI ChatCompletionTool
 type ToolDefinition = {
   type: "function";
-  function: { name: string; description: string; parameters: Record<string, unknown> };
+  function: { name: string; description: string; parameters: Action['parameters'] };
 };
 
 type CallLlmOptions = { model?: string };

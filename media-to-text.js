@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
 import { getModelModalities } from "./models-cache.js";
 import config from "./config.js";
-import { convertMediaBlockToOpenAI, sendSimpleChatCompletion } from "./llm.js";
+import { sendSimpleChatCompletion } from "./llm.js";
 
 /**
  * Create the media_to_text_cache table (and rename from old name if needed).
@@ -175,7 +175,7 @@ export async function convertUnsupportedMedia(
         translation = /** @type {string} */ (rows[0].translation);
       } else {
         // Build conversation context from preceding messages
-        /** @type {Array<{role: string, content: string}>} */
+        /** @type {CallLlmMessage[]} */
         const contextMessages = [];
         for (let j = 0; j < msgIdx; j++) {
           const prev = messages[j];
@@ -201,19 +201,20 @@ export async function convertUnsupportedMedia(
         // Call media-to-text model with conversation context
         const prompt = MEDIA_TO_TEXT_PROMPTS[contentType] || `Describe this ${contentType} content in detail.`;
 
-        /** @type {unknown[]} */
+        /** @type {ContentBlock[]} */
         const userContent = [];
         if (currentText) {
           userContent.push({ type: "text", text: `User's message: ${currentText}\n\n${prompt}` });
         } else {
           userContent.push({ type: "text", text: prompt });
         }
-        userContent.push(...convertMediaBlockToOpenAI(block, contentData));
+        userContent.push(block);
 
-        const llmMessages = /** @type {unknown[]} */ ([
+        /** @type {CallLlmMessage[]} */
+        const llmMessages = [
           ...contextMessages,
-          { role: "user", content: userContent },
-        ]);
+          { role: /** @type {const} */ ("user"), content: userContent },
+        ];
 
         translation = await sendSimpleChatCompletion(llmClient, toTextModelId, llmMessages) || `[Failed to describe ${contentType}]`;
 

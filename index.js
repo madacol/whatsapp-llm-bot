@@ -110,7 +110,7 @@ async function displayToolResult(resultMessage, shortId, permissions, context) {
 /**
  * Parse tool call arguments from JSON string, with error fallback.
  * @param {string} argsString
- * @returns {{}}
+ * @returns {Record<string, unknown>}
  */
 function parseToolArgs(argsString) {
   try {
@@ -164,12 +164,13 @@ async function executeAndStoreTool({
 
   try {
     // Resolve _media_refs: pull referenced media from the registry into context.content
-    const { _media_refs, ...cleanArgs } = /** @type {Record<string, unknown>} */ (toolArgs);
+    const { _media_refs, ...cleanArgs } = toolArgs;
     let actionContext = context;
     if (Array.isArray(_media_refs) && _media_refs.length > 0) {
       /** @type {IncomingContentBlock[]} */
       const resolvedMedia = [];
       for (const refId of _media_refs) {
+        if (typeof refId !== "number") continue;
         const block = mediaRegistry.get(refId);
         if (block) resolvedMedia.push(block);
       }
