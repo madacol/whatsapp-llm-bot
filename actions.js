@@ -32,7 +32,7 @@ const currentSessionDb = getDb("memory://");
  * @param {Context} context - The unified context to pass to the action
  * @param {{}} params - The parameters to pass to the action
  * @param {ExecuteActionOptions} [options]
- * @returns {Promise<{result: ActionResult, permissions: Action['permissions']}>} Result of the action execution
+ * @returns {Promise<{result: ActionResultValue, permissions: Action['permissions']}>} Result of the action execution
  */
 export async function executeAction(actionName, context, params, options = {}) {
   const {
@@ -143,19 +143,18 @@ export async function executeAction(actionName, context, params, options = {}) {
   try {
     const raw = await action.action_fn(actionContext, params);
 
-    // Allow actions to override autoContinue per-invocation via ActionSignal
-    if (raw && typeof raw === "object" && "result" in raw && "autoContinue" in raw) {
-      const signal = /** @type {ActionSignal} */ (raw);
-      return {
-        result: signal.result,
-        permissions: { ...action.permissions, autoContinue: signal.autoContinue },
-      };
-    }
+    // Normalize bare returns into ActionResult
+    /** @type {ActionResult} */
+    const actionResult = (raw != null && typeof raw === "object" && !Array.isArray(raw) && "result" in raw)
+      ? /** @type {ActionResult} */ (raw)
+      : { result: /** @type {ActionResultValue} */ (raw) };
 
-    return {
-      result: raw,
-      permissions: action.permissions,
-    };
+    // Merge per-invocation autoContinue override into permissions
+    const permissions = actionResult.autoContinue !== undefined
+      ? { ...action.permissions, autoContinue: actionResult.autoContinue }
+      : action.permissions;
+
+    return { result: actionResult.result, permissions };
   } catch (error) {
     log.error(`Error executing action ${actionName}:`, error);
     throw error;

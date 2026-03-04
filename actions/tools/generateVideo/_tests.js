@@ -31,7 +31,7 @@ export default [
 
           assert.equal(sentVideos.length, 1);
           assert.ok(Buffer.isBuffer(sentVideos[0].video));
-          const signal = /** @type {ActionSignal} */ (/** @type {ActionResult} */ (result));
+          const signal = /** @type {ActionResult} */ (/** @type {unknown} */ (result));
           assert.equal(signal.autoContinue, false);
           assert.ok(Array.isArray(signal.result));
           const blocks = /** @type {ToolContentBlock[]} */ (signal.result);

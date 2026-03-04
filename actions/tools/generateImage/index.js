@@ -155,9 +155,9 @@ export default /** @type {defineAction} */ ((x) => x)({
       await context.sendImage(buffer, textContent || undefined);
     }
 
-    return /** @type {ActionSignal} */ ({
+    return {
       result: contentBlocks,
       autoContinue: false,
-    });
+    };
   },
 });

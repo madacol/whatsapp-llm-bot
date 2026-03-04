@@ -208,12 +208,19 @@ type ToolContentBlock = TextContentBlock | ImageContentBlock | VideoContentBlock
 
 type HtmlContent = { __brand: "html"; html: string; title?: string };
 
-type ActionSignal = {
-  result: string | {} | HtmlContent | ToolContentBlock[];
-  autoContinue: boolean;
-};
+/** The payload types that an action can produce. */
+type ActionResultValue = string | {} | HtmlContent | ToolContentBlock[];
 
-type ActionResult = string | {} | HtmlContent | ActionSignal;
+/**
+ * Unified action return type. Actions that need to override autoContinue set the field;
+ * otherwise it inherits from the action's permissions.
+ * For backward compat, action_fn may still return a bare ActionResultValue;
+ * executeAction normalizes it into this shape.
+ */
+type ActionResult = {
+  result: ActionResultValue;
+  autoContinue?: boolean;
+};
 
 type Action<P extends PermissionFlags = PermissionFlags> = {
   name: string;
@@ -232,7 +239,7 @@ type Action<P extends PermissionFlags = PermissionFlags> = {
   action_fn: (
     context: ExtendedActionContext<P>,
     params: any,
-  ) => Promise<ActionResult> | ActionResult;
+  ) => Promise<ActionResult | ActionResultValue> | ActionResult | ActionResultValue;
   /** Returns a short display string appended after the action name in compact mode. */
   formatToolCall?: (params: Record<string, any>) => string;
   /** Returns the prompt string used by this action. Swappable for testing/optimization. */
@@ -264,7 +271,7 @@ declare function isHtmlContent(value: unknown): value is HtmlContent;
 /** Full action context with all permission extensions enabled. */
 type FullActionContext = ActionContext & { rootDb: PGlite; chatDb: PGlite; callLlm: CallLlm; llmClient: LlmClient };
 
-/** action_fn as seen by tests — accepts partial context (duck typing), returns string. */
+/** action_fn as seen by tests — accepts partial context (duck typing). */
 type TestActionFn = (
   context: Partial<FullActionContext>,
   params: Record<string, string | number | boolean | null>,

@@ -332,8 +332,8 @@ async function history_empty(action_fn, db) {
         { db, content: [], log: async () => "", confirm: async () => false },
         { action: "register", store_name: "CancelStore", purchase_date: "2025-06-15", items, total: 5.00 },
       );
-      // Should return ActionSignal with autoContinue: false
-      const signal = /** @type {ActionSignal} */ (/** @type {ActionResult} */ (raw));
+      // Should return { result, autoContinue: false }
+      const signal = /** @type {ActionResult} */ (/** @type {unknown} */ (raw));
       assert.equal(typeof signal, "object");
       assert.equal(signal.autoContinue, false, "Should signal autoContinue: false on cancellation");
       assert.ok(/** @type {string} */ (signal.result).includes("cancelad"), `Expected cancellation message, got: ${signal.result}`);
@@ -454,8 +454,8 @@ async function history_empty(action_fn, db) {
         { db, callLlm: /** @type {CallLlm} */ (/** @type {Function} */ (async () => null)), content: [], log: async () => "", confirm: async () => false },
         { action: "delete_ledger", ledger_name: "KeepLedger" },
       );
-      // Should return ActionSignal with autoContinue: false
-      const signal = /** @type {ActionSignal} */ (/** @type {ActionResult} */ (raw));
+      // Should return { result, autoContinue: false }
+      const signal = /** @type {ActionResult} */ (/** @type {unknown} */ (raw));
       assert.equal(typeof signal, "object");
       assert.equal(signal.autoContinue, false, "Should signal autoContinue: false on cancellation");
       assert.ok(/** @type {string} */ (signal.result).includes("cancelad"), `Should be cancelled, got: ${signal.result}`);
