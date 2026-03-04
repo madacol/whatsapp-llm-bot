@@ -1,15 +1,28 @@
 import assert from "node:assert/strict";
+import fs from "node:fs/promises";
+import path from "node:path";
+
+const CACHE_PATH = path.resolve("data/models.json");
+
+/**
+ * Write fake models to the cache file, run the callback, then clean up.
+ * @param {import("../../../models-cache.js").OpenRouterModel[]} models
+ * @param {() => Promise<void>} fn
+ */
+async function withFakeCache(models, fn) {
+  await fs.mkdir(path.dirname(CACHE_PATH), { recursive: true });
+  await fs.writeFile(CACHE_PATH, JSON.stringify(models));
+  try {
+    await fn();
+  } finally {
+    await fs.rm(CACHE_PATH, { force: true });
+  }
+}
 
 /** @type {ActionDbTestFn[]} */
 export default [
 async function searches_across_multiple_columns(action_fn, _db) {
-      const fs = await import("node:fs/promises");
-      const path = await import("node:path");
-      const cachePath = path.resolve("data/models.json");
-
-      // Write a fake cache file for the test
-      /** @type {import("../../../models-cache.js").OpenRouterModel[]} */
-      const fakeModels = [
+      await withFakeCache([
         {
           id: "openai/gpt-4o",
           name: "GPT-4o",
@@ -24,11 +37,7 @@ async function searches_across_multiple_columns(action_fn, _db) {
           context_length: 200000,
           pricing: { prompt: "0.000003", completion: "0.000015" },
         },
-      ];
-      await fs.mkdir(path.dirname(cachePath), { recursive: true });
-      await fs.writeFile(cachePath, JSON.stringify(fakeModels));
-
-      try {
+      ], async () => {
         // Search by id substring
         const byId = await action_fn(
           { log: async () => "" },
@@ -45,25 +54,16 @@ async function searches_across_multiple_columns(action_fn, _db) {
         assert.ok(byDesc.includes("Claude 3.5 Sonnet"));
         assert.ok(!byDesc.includes("GPT-4o"));
 
-        // Search matching both models
+        // "multimodal" contains "model" — GPT-4o matches via description
         const broad = await action_fn(
           { log: async () => "" },
           { query: "model" },
         );
-        // "model" doesn't appear in id/name/description of either, so no results
-        // Actually "multimodal" contains "model" — GPT-4o matches
         assert.ok(broad.includes("GPT-4o"));
-      } finally {
-        await fs.rm(cachePath, { force: true });
-      }
+      });
     },
     async function filters_by_modality(action_fn, _db) {
-      const fs = await import("node:fs/promises");
-      const path = await import("node:path");
-      const cachePath = path.resolve("data/models.json");
-
-      /** @type {import("../../../models-cache.js").OpenRouterModel[]} */
-      const fakeModels = [
+      await withFakeCache([
         {
           id: "openai/gpt-4o",
           name: "GPT-4o",
@@ -88,11 +88,7 @@ async function searches_across_multiple_columns(action_fn, _db) {
           pricing: { prompt: "0.000003", completion: "0.000015" },
           architecture: { input_modalities: ["text", "image"] },
         },
-      ];
-      await fs.mkdir(path.dirname(cachePath), { recursive: true });
-      await fs.writeFile(cachePath, JSON.stringify(fakeModels));
-
-      try {
+      ], async () => {
         // Filter by video — only Gemini supports it
         const videoResult = await action_fn(
           { log: async () => "" },
@@ -118,8 +114,6 @@ async function searches_across_multiple_columns(action_fn, _db) {
         );
         assert.ok(combinedResult.includes("Gemini 3 Flash"));
         assert.ok(!combinedResult.includes("GPT-4o"));
-      } finally {
-        await fs.rm(cachePath, { force: true });
-      }
+      });
     },
 ];

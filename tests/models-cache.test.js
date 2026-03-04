@@ -26,9 +26,9 @@ describe("models-cache", () => {
   describe("findClosestModels", () => {
     it("returns models whose ids contain the search term", async () => {
       await writeFakeCache([
-        { id: "openai/gpt-4o", name: "GPT-4o", context_length: 128000, pricing: { prompt: "0.000005", completion: "0.000015" } },
-        { id: "openai/gpt-4o-mini", name: "GPT-4o Mini", context_length: 128000, pricing: { prompt: "0.000001", completion: "0.000003" } },
-        { id: "anthropic/claude-3.5-sonnet", name: "Claude 3.5 Sonnet", context_length: 200000, pricing: { prompt: "0.000003", completion: "0.000015" } },
+        { id: "openai/gpt-4o", name: "GPT-4o", description: "", context_length: 128000, pricing: { prompt: "0.000005", completion: "0.000015" } },
+        { id: "openai/gpt-4o-mini", name: "GPT-4o Mini", description: "", context_length: 128000, pricing: { prompt: "0.000001", completion: "0.000003" } },
+        { id: "anthropic/claude-3.5-sonnet", name: "Claude 3.5 Sonnet", description: "", context_length: 200000, pricing: { prompt: "0.000003", completion: "0.000015" } },
       ]);
       const { findClosestModels } = await import("../models-cache.js");
       const matches = await findClosestModels("gpt-4o");
@@ -40,6 +40,7 @@ describe("models-cache", () => {
       const models = Array.from({ length: 10 }, (_, i) => ({
         id: `provider/model-${i}`,
         name: `Model ${i}`,
+        description: "",
         context_length: 4096,
         pricing: { prompt: "0.000001", completion: "0.000001" },
       }));
@@ -53,7 +54,7 @@ describe("models-cache", () => {
   describe("validateModel", () => {
     it("returns null for a valid model", async () => {
       await writeFakeCache([
-        { id: "openai/gpt-4o", name: "GPT-4o", context_length: 128000, pricing: { prompt: "0.000005", completion: "0.000015" } },
+        { id: "openai/gpt-4o", name: "GPT-4o", description: "", context_length: 128000, pricing: { prompt: "0.000005", completion: "0.000015" } },
       ]);
       const { validateModel } = await import("../models-cache.js");
       assert.equal(await validateModel("openai/gpt-4o"), null);
@@ -61,8 +62,8 @@ describe("models-cache", () => {
 
     it("returns error message with suggestions for unknown model", async () => {
       await writeFakeCache([
-        { id: "openai/gpt-4o", name: "GPT-4o", context_length: 128000, pricing: { prompt: "0.000005", completion: "0.000015" } },
-        { id: "openai/gpt-4o-mini", name: "GPT-4o Mini", context_length: 128000, pricing: { prompt: "0.000001", completion: "0.000003" } },
+        { id: "openai/gpt-4o", name: "GPT-4o", description: "", context_length: 128000, pricing: { prompt: "0.000005", completion: "0.000015" } },
+        { id: "openai/gpt-4o-mini", name: "GPT-4o Mini", description: "", context_length: 128000, pricing: { prompt: "0.000001", completion: "0.000003" } },
       ]);
       const { validateModel } = await import("../models-cache.js");
       const result = await validateModel("openai/gpt-4");
@@ -74,7 +75,7 @@ describe("models-cache", () => {
 
     it("returns error message without suggestions when no close match", async () => {
       await writeFakeCache([
-        { id: "openai/gpt-4o", name: "GPT-4o", context_length: 128000, pricing: { prompt: "0.000005", completion: "0.000015" } },
+        { id: "openai/gpt-4o", name: "GPT-4o", description: "", context_length: 128000, pricing: { prompt: "0.000005", completion: "0.000015" } },
       ]);
       const { validateModel } = await import("../models-cache.js");
       const result = await validateModel("totally-unknown-xyz");
@@ -91,7 +92,7 @@ describe("models-cache", () => {
 
       /** @type {import("../models-cache.js").OpenRouterModel[]} */
       const fakeModels = [
-        { id: "test/model-1", name: "Test Model", context_length: 4096, pricing: { prompt: "0.000001", completion: "0.000001" } },
+        { id: "test/model-1", name: "Test Model", description: "", context_length: 4096, pricing: { prompt: "0.000001", completion: "0.000001" } },
       ];
 
       const originalFetch = globalThis.fetch;

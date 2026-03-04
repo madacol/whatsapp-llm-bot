@@ -61,16 +61,6 @@ export async function getCachedModels() {
 }
 
 /**
- * Check if a model ID exists in the cache.
- * @param {string} modelId
- * @returns {Promise<boolean>}
- */
-export async function modelExists(modelId) {
-  const models = await getCachedModels();
-  return models.some((m) => m.id === modelId);
-}
-
-/**
  * Find model IDs that contain the search term (for suggestions).
  * @param {string} search
  * @param {number} [limit=5]
@@ -91,10 +81,15 @@ export async function findClosestModels(search, limit = 5) {
  * @returns {Promise<string | null>} null if valid, or a user-facing error message if not found
  */
 export async function validateModel(modelId) {
-  if (await modelExists(modelId)) {
+  const models = await getCachedModels();
+  if (models.some((m) => m.id === modelId)) {
     return null;
   }
-  const suggestions = await findClosestModels(modelId);
+  const term = modelId.toLowerCase();
+  const suggestions = models
+    .filter((m) => m.id.toLowerCase().includes(term))
+    .slice(0, 5)
+    .map((m) => m.id);
   let message = `Model \`${modelId}\` not found in OpenRouter models.`;
   if (suggestions.length > 0) {
     message += `\n\nDid you mean:\n${suggestions.map((s) => `• \`${s}\``).join("\n")}`;
