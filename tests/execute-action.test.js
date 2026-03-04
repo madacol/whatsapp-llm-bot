@@ -285,7 +285,7 @@ describe("executeAction", () => {
     );
   });
 
-  it("overrides autoContinue when action_fn returns ActionSignal", async () => {
+  it("overrides autoContinue when action_fn returns { result, autoContinue }", async () => {
     const resolver = createResolver({
       test_action: {
         name: "test_action",

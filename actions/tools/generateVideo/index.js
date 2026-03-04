@@ -240,10 +240,10 @@ export default /** @type {defineAction} */ ((x) => x)({
         { type: "video", encoding: "base64", data: base64 },
       ];
 
-      return /** @type {ActionSignal} */ ({
+      return {
         result: contentBlocks,
         autoContinue: false,
-      });
+      };
     } catch (/** @type {unknown} */ err) {
       const message = err instanceof Error ? err.message : String(err);
       log.error("Video generation failed:", message);
