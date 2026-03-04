@@ -1,4 +1,7 @@
 import { readFile } from "node:fs/promises";
+import { createLogger } from "../../../logger.js";
+
+const log = createLogger("runJavascript");
 
 const typesFileContent = await readFile(
   new URL("../../../types.d.ts", import.meta.url),
@@ -64,27 +67,27 @@ ${typesFileContent}
   },
   action_fn: async function (context, { code }) {
     // Handle both command args and LLM function call formats
-    console.log("Executing JavaScript code:", JSON.stringify(code, null, 2));
+    log.debug("Executing JavaScript code:", JSON.stringify(code, null, 2));
 
     let fn;
     try {
       // Evaluate code
       fn = Function(`return ${code}`)();
     } catch (error) {
-      console.error("Invalid JavaScript code: Is it a function?", {
+      log.error("Invalid JavaScript code: Is it a function?", {
         code,
         error,
       });
       throw error;
     }
     if (typeof fn !== "function") {
-      console.error("fn is not a function:", { code, fn });
+      log.error("fn is not a function:", { code, fn });
       throw new Error("Code must evaluate to a function");
     }
     try {
       return await fn(context);
     } catch (error) {
-      console.error("Error executing function:", { code, fn, error });
+      log.error("Error executing function:", { code, fn, error });
       throw error;
     }
   },
