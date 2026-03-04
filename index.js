@@ -127,6 +127,7 @@ function parseToolArgs(argsString) {
  *   senderIds: string[],
  *   context: Context,
  *   addMessage: Store['addMessage'],
+ *   updateToolMessage: Store['updateToolMessage'],
  * }} Session
  *
  * @typedef {{
@@ -357,6 +358,18 @@ async function processLlmResponse({ session, llmConfig, messages, mediaRegistry 
     }
     messages.push(assistantMessage);
 
+    // Insert stubs for each tool call (timestamps anchored to assistant message)
+    for (const toolCall of response.toolCalls) {
+      /** @type {ToolMessage} */
+      const stub = {
+        role: "tool",
+        tool_id: toolCall.id,
+        content: [{ type: "text", text: `[executing ${toolCall.name}...]` }],
+      };
+      await addMessage(chatId, stub, senderIds);
+      messages.push(stub);
+    }
+
     // Execute each tool call
     let continueProcessing = false;
     for (const toolCall of response.toolCalls) {
@@ -412,7 +425,7 @@ async function processLlmResponse({ session, llmConfig, messages, mediaRegistry 
  * @returns {{ handleMessage: (messageContext: IncomingContext) => Promise<void> }}
  */
 export function createMessageHandler({ store, llmClient, getActionsFn, executeActionFn }) {
-  const { addMessage, createChat, getChat, getMessages } = store;
+  const { addMessage, updateToolMessage, createChat, getChat, getMessages } = store;
 
   /**
    * Handle incoming WhatsApp messages
@@ -587,7 +600,7 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
 
     /** @type {Session} */
     const session = {
-      chatId, senderIds, context, addMessage,
+      chatId, senderIds, context, addMessage, updateToolMessage,
     };
 
     /** @type {LlmConfig} */
