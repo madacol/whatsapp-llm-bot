@@ -61,3 +61,13 @@ export function isHtmlContent(value) {
     typeof /** @type {{html?: unknown}} */ (value).html === "string"
   );
 }
+
+/**
+ * Create a ToolMessage with a single text content block.
+ * @param {string} toolId
+ * @param {string} text
+ * @returns {ToolMessage}
+ */
+export function createToolMessage(toolId, text) {
+  return { role: "tool", tool_id: toolId, content: [{ type: "text", text }] };
+}
