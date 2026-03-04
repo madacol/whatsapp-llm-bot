@@ -3,6 +3,7 @@ import { readFile, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+/** @type {ActionTestFn[]} */
 export default [
 async function replaces_unique_match(action_fn) {
       const tmp = join(tmpdir(), `editfile-test-${Date.now()}.txt`);

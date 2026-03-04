@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 
+/** @type {ActionDbTestFn[]} */
 export default [
 async function returns_stored_context(action_fn, db) {
       await db.sql`INSERT INTO chats(chat_id) VALUES ('act-ctx-1') ON CONFLICT DO NOTHING`;

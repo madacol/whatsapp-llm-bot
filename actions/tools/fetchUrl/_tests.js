@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
-import { Readability } from "@mozilla/readability";
 
+/** @type {ActionTestFn[]} */
 export default [
 // 1. HTML with article content → returns markdown with title, no boilerplate
     async function test_html_returns_markdown_with_title(action_fn) {

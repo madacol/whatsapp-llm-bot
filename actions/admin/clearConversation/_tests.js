@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 
+/** @type {ActionDbTestFn[]} */
 export default [
 async function marks_messages_as_cleared(action_fn, db) {
       await db.sql`INSERT INTO chats(chat_id) VALUES ('act-new-1') ON CONFLICT DO NOTHING`;

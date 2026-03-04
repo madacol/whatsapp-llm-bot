@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 
+/** @type {ActionDbTestFn[]} */
 export default [
 async function formats_model_comparison_table(action_fn, _db) {
       const fs = await import("node:fs/promises");
@@ -7,7 +8,7 @@ async function formats_model_comparison_table(action_fn, _db) {
       const cachePath = path.resolve("data/models.json");
 
       // Write a fake cache file for the test
-      /** @type {import("../../models-cache.js").OpenRouterModel[]} */
+      /** @type {import("../../../models-cache.js").OpenRouterModel[]} */
       const fakeModels = [
         {
           id: "openai/gpt-4o",
@@ -41,7 +42,7 @@ async function formats_model_comparison_table(action_fn, _db) {
       const path = await import("node:path");
       const cachePath = path.resolve("data/models.json");
 
-      /** @type {import("../../models-cache.js").OpenRouterModel[]} */
+      /** @type {import("../../../models-cache.js").OpenRouterModel[]} */
       const fakeModels = [
         {
           id: "openai/gpt-4o",

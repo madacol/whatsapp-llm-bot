@@ -8,11 +8,12 @@ import {
   formatPreview,
 } from "./index.js";
 
+/** @type {ActionDbTestFn[]} */
 export default [
 async function history_empty(action_fn, db) {
       await ensureSchema(db);
       const result = await action_fn(
-        { db, callLlm: async () => null, content: [], log: async () => "", confirm: async () => true },
+        { db, callLlm: /** @type {CallLlm} */ (/** @type {Function} */ (async () => null)), content: [], log: async () => "", confirm: async () => true },
         { action: "history" },
       );
       assert.ok(typeof result === "string");
@@ -25,7 +26,7 @@ async function history_empty(action_fn, db) {
       const { rows: [purchase] } = await db.sql`SELECT id FROM purchases WHERE store_name = 'TestStore'`;
       await db.sql`INSERT INTO purchase_items (purchase_id, item_name, quantity, unit_price, subtotal) VALUES (${purchase.id}, 'Leche', 2, 1.50, 3.00)`;
       const result = await action_fn(
-        { db, callLlm: async () => null, content: [], log: async () => "", confirm: async () => true },
+        { db, callLlm: /** @type {CallLlm} */ (/** @type {Function} */ (async () => null)), content: [], log: async () => "", confirm: async () => true },
         { action: "history" },
       );
       assert.ok(typeof result === "string");
@@ -36,7 +37,7 @@ async function history_empty(action_fn, db) {
     async function summary_empty(action_fn, db) {
       await ensureSchema(db);
       const result = await action_fn(
-        { db, callLlm: async () => null, content: [], log: async () => "", confirm: async () => true },
+        { db, callLlm: /** @type {CallLlm} */ (/** @type {Function} */ (async () => null)), content: [], log: async () => "", confirm: async () => true },
         { action: "summary" },
       );
       assert.ok(typeof result === "string");
@@ -45,7 +46,7 @@ async function history_empty(action_fn, db) {
     async function delete_nonexistent(action_fn, db) {
       await ensureSchema(db);
       const result = await action_fn(
-        { db, callLlm: async () => null, content: [], log: async () => "", confirm: async () => true },
+        { db, callLlm: /** @type {CallLlm} */ (/** @type {Function} */ (async () => null)), content: [], log: async () => "", confirm: async () => true },
         { action: "delete", purchase_id: "9999" },
       );
       assert.ok(typeof result === "string");
@@ -57,7 +58,7 @@ async function history_empty(action_fn, db) {
       await db.sql`INSERT INTO purchases (ledger_id, store_name, total) VALUES (${ledger.id}, 'ToDelete', 10.00)`;
       const { rows: [purchase] } = await db.sql`SELECT id FROM purchases WHERE store_name = 'ToDelete'`;
       const result = await action_fn(
-        { db, callLlm: async () => null, content: [], log: async () => "", confirm: async () => true },
+        { db, callLlm: /** @type {CallLlm} */ (/** @type {Function} */ (async () => null)), content: [], log: async () => "", confirm: async () => true },
         { action: "delete", purchase_id: String(purchase.id) },
       );
       assert.ok(typeof result === "string");
@@ -332,9 +333,10 @@ async function history_empty(action_fn, db) {
         { action: "register", store_name: "CancelStore", purchase_date: "2025-06-15", items, total: 5.00 },
       );
       // Should return ActionSignal with autoContinue: false
-      assert.equal(typeof raw, "object");
-      assert.equal(raw.autoContinue, false, "Should signal autoContinue: false on cancellation");
-      assert.ok(raw.result.includes("cancelad"), `Expected cancellation message, got: ${raw.result}`);
+      const signal = /** @type {ActionSignal} */ (/** @type {ActionResult} */ (raw));
+      assert.equal(typeof signal, "object");
+      assert.equal(signal.autoContinue, false, "Should signal autoContinue: false on cancellation");
+      assert.ok(/** @type {string} */ (signal.result).includes("cancelad"), `Expected cancellation message, got: ${signal.result}`);
 
       // Verify nothing was inserted
       const { rows } = await db.sql`SELECT * FROM purchases WHERE store_name = 'CancelStore'`;
@@ -396,7 +398,7 @@ async function history_empty(action_fn, db) {
       await db.sql`INSERT INTO purchases (ledger_id, store_name, total) VALUES (${l2.id}, 'Store3', 5.00)`;
 
       const result = await action_fn(
-        { db, callLlm: async () => null, content: [], log: async () => "", confirm: async () => true },
+        { db, callLlm: /** @type {CallLlm} */ (/** @type {Function} */ (async () => null)), content: [], log: async () => "", confirm: async () => true },
         { action: "list_ledgers" },
       );
       assert.ok(typeof result === "string");
@@ -412,7 +414,7 @@ async function history_empty(action_fn, db) {
       await getOrCreateLedger(db, "OldName");
 
       const result = await action_fn(
-        { db, callLlm: async () => null, content: [], log: async () => "", confirm: async () => true },
+        { db, callLlm: /** @type {CallLlm} */ (/** @type {Function} */ (async () => null)), content: [], log: async () => "", confirm: async () => true },
         { action: "rename_ledger", ledger_name: "OldName", new_ledger_name: "NewName" },
       );
       assert.ok(typeof result === "string");
@@ -431,7 +433,7 @@ async function history_empty(action_fn, db) {
       await db.sql`INSERT INTO purchases (ledger_id, store_name, total) VALUES (${ledger.id}, 'CascadeStore', 15.00)`;
 
       const result = await action_fn(
-        { db, callLlm: async () => null, content: [], log: async () => "", confirm: async () => true },
+        { db, callLlm: /** @type {CallLlm} */ (/** @type {Function} */ (async () => null)), content: [], log: async () => "", confirm: async () => true },
         { action: "delete_ledger", ledger_name: "ToDeleteLedger" },
       );
       assert.ok(typeof result === "string");
@@ -449,13 +451,14 @@ async function history_empty(action_fn, db) {
       await getOrCreateLedger(db, "KeepLedger");
 
       const raw = await action_fn(
-        { db, callLlm: async () => null, content: [], log: async () => "", confirm: async () => false },
+        { db, callLlm: /** @type {CallLlm} */ (/** @type {Function} */ (async () => null)), content: [], log: async () => "", confirm: async () => false },
         { action: "delete_ledger", ledger_name: "KeepLedger" },
       );
       // Should return ActionSignal with autoContinue: false
-      assert.equal(typeof raw, "object");
-      assert.equal(raw.autoContinue, false, "Should signal autoContinue: false on cancellation");
-      assert.ok(raw.result.includes("cancelad"), `Should be cancelled, got: ${raw.result}`);
+      const signal = /** @type {ActionSignal} */ (/** @type {ActionResult} */ (raw));
+      assert.equal(typeof signal, "object");
+      assert.equal(signal.autoContinue, false, "Should signal autoContinue: false on cancellation");
+      assert.ok(/** @type {string} */ (signal.result).includes("cancelad"), `Should be cancelled, got: ${signal.result}`);
 
       // Verify ledger still exists
       const { rows } = await db.sql`SELECT * FROM ledgers WHERE name = 'KeepLedger'`;
@@ -471,14 +474,14 @@ async function history_empty(action_fn, db) {
       await db.sql`INSERT INTO purchases (ledger_id, store_name, total) VALUES (${l2.id}, 'StoreB', 20.00)`;
 
       const resultA = await action_fn(
-        { db, callLlm: async () => null, content: [], log: async () => "", confirm: async () => true },
+        { db, callLlm: /** @type {CallLlm} */ (/** @type {Function} */ (async () => null)), content: [], log: async () => "", confirm: async () => true },
         { action: "history", ledger_name: "LedgerA" },
       );
       assert.ok(resultA.includes("StoreA"), `Should include StoreA, got: ${resultA}`);
       assert.ok(!resultA.includes("StoreB"), `Should NOT include StoreB, got: ${resultA}`);
 
       const resultB = await action_fn(
-        { db, callLlm: async () => null, content: [], log: async () => "", confirm: async () => true },
+        { db, callLlm: /** @type {CallLlm} */ (/** @type {Function} */ (async () => null)), content: [], log: async () => "", confirm: async () => true },
         { action: "history", ledger_name: "LedgerB" },
       );
       assert.ok(resultB.includes("StoreB"), `Should include StoreB, got: ${resultB}`);
@@ -493,7 +496,7 @@ async function history_empty(action_fn, db) {
       await db.sql`INSERT INTO purchases (ledger_id, store_name, total) VALUES (${l2.id}, 'SumStore2', 200.00)`;
 
       const result = await action_fn(
-        { db, callLlm: async () => null, content: [], log: async () => "", confirm: async () => true },
+        { db, callLlm: /** @type {CallLlm} */ (/** @type {Function} */ (async () => null)), content: [], log: async () => "", confirm: async () => true },
         { action: "summary", ledger_name: "SumLedger1" },
       );
       assert.ok(typeof result === "string");

@@ -3,6 +3,7 @@ import { readFile, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+/** @type {ActionTestFn[]} */
 export default [
 async function creates_new_file(action_fn) {
       const tmp = join(tmpdir(), `writefile-test-${Date.now()}.txt`);

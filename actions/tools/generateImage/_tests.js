@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 
+/** @type {ActionTestFn[]} */
 export default [
 async function test_generates_image_from_prompt(action_fn) {
       const originalFetch = globalThis.fetch;
@@ -37,9 +38,10 @@ async function test_generates_image_from_prompt(action_fn) {
         assert.ok(Buffer.isBuffer(sentImages[0].image));
         assert.equal(sentImages[0].caption, "A beautiful sunset");
         // Returns ActionSignal with content blocks
-        assert.equal(result.autoContinue, false);
-        assert.ok(Array.isArray(result.result));
-        const blocks = /** @type {ToolContentBlock[]} */ (result.result);
+        const signal = /** @type {ActionSignal} */ (/** @type {ActionResult} */ (result));
+        assert.equal(signal.autoContinue, false);
+        assert.ok(Array.isArray(signal.result));
+        const blocks = /** @type {ToolContentBlock[]} */ (signal.result);
         assert.ok(blocks.some((b) => b.type === "text"));
         assert.ok(blocks.some((b) => b.type === "image"));
       } finally {
@@ -188,7 +190,7 @@ async function test_generates_image_from_prompt(action_fn) {
         );
 
         assert.equal(sentImages.length, 1, "Should send exactly 1 image, not duplicates");
-        const blocks = /** @type {ToolContentBlock[]} */ (result.result);
+        const blocks = /** @type {ToolContentBlock[]} */ (/** @type {ActionSignal} */ (/** @type {ActionResult} */ (result)).result);
         const imageBlocks = blocks.filter((b) => b.type === "image");
         assert.equal(imageBlocks.length, 1, "Should have exactly 1 image content block");
         assert.ok(blocks.some((b) => b.type === "text" && /** @type {TextContentBlock} */ (b).text === "Here is the image"));

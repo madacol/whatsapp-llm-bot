@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { ensureSchema } from "./index.js";
 
+/** @type {ActionDbTestFn[]} */
 export default [
 async function set_reminder_stores_in_db(action_fn, db) {
       await ensureSchema(db);

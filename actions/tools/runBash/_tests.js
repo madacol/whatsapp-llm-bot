@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 
+/** @type {ActionTestFn[]} */
 export default [
 async function executes_command_and_returns_stdout(action_fn) {
       const result = await action_fn({}, { command: "echo hello" });

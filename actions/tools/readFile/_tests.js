@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { writeFile, rm } from "node:fs/promises";
 
+/** @type {ActionTestFn[]} */
 export default [
 async function reads_file_with_line_numbers(action_fn) {
       const tmp = join(tmpdir(), `readfile-test-${Date.now()}.txt`);
