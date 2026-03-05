@@ -63,7 +63,11 @@ before(async () => {
     getActionsFn: getActions,
     executeActionFn: executeAction,
   }));
+  t = createTestHarness({ mockServer, handleMessage, testDb });
 });
+
+/** @type {ReturnType<typeof createTestHarness>} */
+let t;
 
 after(async () => {
   await mockServer?.close();
@@ -501,56 +505,24 @@ describe("Scenario 8b: Tool call depth guard", () => {
 
   it("continues processing when user confirms at depth limit", async () => {
     let confirmCount = 0;
-    // Queue 25 tool-call responses — enough for 2 depth-limit cycles
-    const toolCallResponses = Array.from({ length: 25 }, (_, i) => ({
-      tool_calls: [
-        {
-          id: `call_cont_${String(i).padStart(3, "0")}`,
-          type: "function",
-          function: {
-            name: "nonexistent_action_for_cont_test",
-            arguments: "{}",
-          },
-        },
-      ],
-    }));
-    // Final response: plain text to end the loop
-    toolCallResponses.push(/** @type {any} */ ({ content: "Done!" }));
-    const scope = mockServer.addResponses(...toolCallResponses);
+    const toolCalls = Array.from({ length: 25 }, (_, i) =>
+      toolCall(`nonexistent_action_for_cont_test_${i}`, {}),
+    );
 
-    const requestsBefore = mockServer.getRequests().length;
-    const { context, responses } = createIncomingContext({
-      chatId,
-      content: [{ type: "text", text: "trigger continuation test" }],
-      confirm: async (message) => {
-        confirmCount++;
-        responses.push({ type: "confirm", text: message });
-        // Approve first time, decline second time
-        return confirmCount <= 1;
-      },
+    const chat = await t.chat(chatId, { enabled: true });
+    const r = await chat.send("trigger continuation test", {
+      llm: [...toolCalls, "Done!"],
+      confirm: () => ++confirmCount <= 1,
     });
-    await handleMessage(context);
-    scope.clear();
-
-    const requestsAfter = mockServer.getRequests().length;
-    const totalRequests = requestsAfter - requestsBefore;
 
     // First cycle: 11 requests (1 initial + 10 continuations)
     // User confirms → second cycle starts, another 10 continuations
     // User declines at second limit → stops
-    // Total: 11 + 10 = 21
-    assert.ok(
-      totalRequests > 11,
-      `Expected more than 11 requests after user confirmed continuation, got ${totalRequests}`,
-    );
-    assert.ok(
-      totalRequests <= 22,
-      `Expected at most 22 requests (two depth cycles + decline), got ${totalRequests}`,
-    );
-
-    // Should have been asked twice
-    const confirmMessages = responses.filter((r) => r.type === "confirm");
-    assert.equal(confirmMessages.length, 2, "Should ask user twice (confirm once, decline once)");
+    assert.ok(r.requests.length > 11,
+      `Expected more than 11 requests after user confirmed continuation, got ${r.requests.length}`);
+    assert.ok(r.requests.length <= 22,
+      `Expected at most 22 requests (two depth cycles + decline), got ${r.requests.length}`);
+    assert.equal(r.confirms.length, 2, "Should ask user twice (confirm once, decline once)");
   });
 });
 
@@ -619,39 +591,25 @@ describe("Scenario 10: Private chat — always responds when enabled", () => {
 // Scenario 11: Group — stores messages even when bot doesn't respond
 // ═══════════════════════════════════════════════════════════════════
 describe("Scenario 11: Group stores messages even when not responding", () => {
-  const chatId = "s11-chat@g.us";
-
-  before(async () => {
-    await seedChat(chatId, { enabled: true });
-  });
-
   it("stores a non-triggering message so it appears in later history", async () => {
+    const chat = await t.chat("s11-chat@g.us", { enabled: true });
+
     // Send a message without mentioning the bot — bot should NOT respond
-    const { context: ctx1, responses: r1 } = createIncomingContext({
-      chatId,
+    const r1 = await chat.send("Hey guys, check this out", {
+      sender: { name: "Alice" },
       isGroup: true,
-      content: [{ type: "text", text: "Hey guys, check this out" }],
-      senderName: "Alice",
     });
-    await handleMessage(ctx1);
-    assert.equal(r1.length, 0, "Bot should not respond when not mentioned");
+    assert.equal(r1.raw.length, 0, "Bot should not respond when not mentioned");
 
     // Now mention the bot — it should respond, and the previous message should be in history
-    mockServer.addResponses("I can see Alice said something earlier!");
-
-    const { context: ctx2, responses: r2 } = createIncomingContext({
-      chatId,
+    const r2 = await chat.send("@bot-123 what did Alice say?", {
       isGroup: true,
-      content: [{ type: "text", text: "@bot-123 what did Alice say?" }],
+      llm: ["I can see Alice said something earlier!"],
     });
-    await handleMessage(ctx2);
-
-    assert.ok(r2.length > 0, "Bot should respond when mentioned");
+    assert.ok(r2.raw.length > 0, "Bot should respond when mentioned");
 
     // Verify the first message was stored by checking the LLM request
-    const requests = mockServer.getRequests();
-    const lastRequest = requests[requests.length - 1];
-    const allContent = JSON.stringify(lastRequest.messages);
+    const allContent = JSON.stringify(r2.requests[0].messages);
     assert.ok(
       allContent.includes("Hey guys, check this out"),
       `Previous non-triggered message should be in history, got: ${allContent.slice(0, 500)}`,
@@ -1037,40 +995,16 @@ describe("HtmlContent via !command", () => {
 // Scenario: Multi-turn conversation accumulates context
 // ═══════════════════════════════════════════════════════════════════
 describe("Multi-turn conversation accumulates context", () => {
-  const chatId = "multi-turn-chat";
-
-  before(async () => {
-    await seedChat(chatId, { enabled: true });
-  });
-
   it("LLM sees all prior turns in context", async () => {
-    // Turn 1
-    mockServer.addResponses("I'll remember that.");
-    const { context: ctx1 } = createIncomingContext({
-      chatId,
-      content: [{ type: "text", text: "My name is Alice" }],
-    });
-    await handleMessage(ctx1);
+    const chat = await t.chat("multi-turn-chat", { enabled: true });
 
-    // Turn 2
-    mockServer.addResponses("Got it, you like cats.");
-    const { context: ctx2 } = createIncomingContext({
-      chatId,
-      content: [{ type: "text", text: "I like cats" }],
+    await chat.send("My name is Alice", { llm: ["I'll remember that."] });
+    await chat.send("I like cats", { llm: ["Got it, you like cats."] });
+    const r = await chat.send("Summarize what you know about me", {
+      llm: ["Sure, Alice who likes cats!"],
     });
-    await handleMessage(ctx2);
 
-    // Turn 3 — verify LLM sees all previous messages
-    const reqsBefore = mockServer.getRequests().length;
-    mockServer.addResponses("Sure, Alice who likes cats!");
-    const { context: ctx3 } = createIncomingContext({
-      chatId,
-      content: [{ type: "text", text: "Summarize what you know about me" }],
-    });
-    await handleMessage(ctx3);
-
-    const lastReq = mockServer.getRequests()[reqsBefore];
-    const allContent = JSON.stringify(lastReq.messages);
+    const allContent = JSON.stringify(r.requests[0].messages);
     assert.ok(allContent.includes("My name is Alice"), "Should see turn 1 user message");
     assert.ok(allContent.includes("I'll remember that"), "Should see turn 1 assistant reply");
     assert.ok(allContent.includes("I like cats"), "Should see turn 2 user message");
@@ -1490,44 +1424,24 @@ describe("Memory: NOT searched when extracted text < 10 chars", () => {
 // Scenario: Tool error → LLM self-correction
 // ═══════════════════════════════════════════════════════════════════
 describe("Tool error → LLM self-correction", () => {
-  const chatId = "tool-error-chat";
-
-  before(async () => {
-    await seedChat(chatId, { enabled: true });
-  });
-
   it("catches tool error, shows ❌, passes error to LLM, and delivers corrected reply", async () => {
-    const reqsBefore = mockServer.getRequests().length;
-    mockServer.addResponses(
-      {
-        tool_calls: [
-          {
-            id: "call_bad_001",
-            type: "function",
-            function: {
-              name: "nonexistent_action_xyz",
-              arguments: "{}",
-            },
-          },
-        ],
-      },
-      "I apologize, let me try a different approach.",
-    );
+    const chat = await t.chat("tool-error-chat", { enabled: true });
 
-    const { context, responses } = createIncomingContext({
-      chatId,
-      content: [{ type: "text", text: "Do something" }],
+    const r = await chat.send("Do something", {
+      llm: [
+        toolCall("nonexistent_action_xyz", {}),
+        "I apologize, let me try a different approach.",
+      ],
     });
-    await handleMessage(context);
 
     // Should show error indicator to user
     assert.ok(
-      responses.some(r => r.text.includes("❌")),
-      `Should show ❌ error indicator, got: ${responses.map(r => r.text).join(" | ")}`,
+      r.raw.some(x => x.text.includes("❌")),
+      `Should show ❌ error indicator, got: ${r.raw.map(x => x.text).join(" | ")}`,
     );
 
     // Second LLM request should contain a tool role message with the error
-    const secondReq = mockServer.getRequests()[reqsBefore + 1];
+    const secondReq = /** @type {any} */ (r.requests[1]);
     assert.ok(secondReq, "Should have a second LLM request for self-correction");
     const toolMsg = secondReq.messages.find(m => m.role === "tool");
     assert.ok(toolMsg, "Second request should have a tool message with error");
@@ -1541,7 +1455,7 @@ describe("Tool error → LLM self-correction", () => {
 
     // Final text reply should be delivered
     assert.ok(
-      responses.some(r => r.text.includes("different approach")),
+      r.raw.some(x => x.text.includes("different approach")),
       "Should deliver the corrected LLM reply",
     );
   });
@@ -2051,103 +1965,6 @@ describe("convertUnsupportedMedia warning", () => {
       responses.some(r => r.text.includes("tried to send a video")),
       "Should deliver final LLM reply",
     );
-  });
-});
-
-// ═══════════════════════════════════════════════════════════════════
-// Harness validation: prove createTestHarness produces same results
-// ═══════════════════════════════════════════════════════════════════
-describe("createTestHarness validation", () => {
-  /** @type {ReturnType<typeof createTestHarness>} */
-  let t;
-
-  before(() => {
-    t = createTestHarness({ mockServer, handleMessage, testDb });
-  });
-
-  it("multi-turn conversation: LLM sees all prior turns", async () => {
-    const chat = await t.chat("harness-multiturn", { enabled: true });
-
-    await chat.send("My name is Alice", { llm: ["I'll remember that."] });
-    await chat.send("I like cats", { llm: ["Got it, you like cats."] });
-    const r = await chat.send("Summarize what you know about me", {
-      llm: ["Sure, Alice who likes cats!"],
-    });
-
-    const allContent = JSON.stringify(r.requests[0].messages);
-    assert.ok(allContent.includes("My name is Alice"), "Should see turn 1 user message");
-    assert.ok(allContent.includes("I'll remember that"), "Should see turn 1 assistant reply");
-    assert.ok(allContent.includes("I like cats"), "Should see turn 2 user message");
-    assert.ok(allContent.includes("Summarize what you know"), "Should see turn 3 user message");
-    assert.ok(r.sends.some(t => t.includes("Alice who likes cats")));
-  });
-
-  it("tool error self-correction: shows error reaction, passes error to LLM", async () => {
-    const chat = await t.chat("harness-toolerr", { enabled: true });
-
-    const r = await chat.send("Do something", {
-      llm: [
-        toolCall("nonexistent_action_xyz", {}),
-        "I apologize, let me try a different approach.",
-      ],
-    });
-
-    assert.ok(r.raw.some(r => r.text.includes("❌")), "Should show error indicator");
-    assert.ok(r.raw.some(r => r.text.includes("different approach")), "Should deliver corrected reply");
-    const secondReq = /** @type {any} */ (r.requests[1]);
-    assert.ok(secondReq, "Should have second LLM request");
-    const toolMsg = secondReq.messages.find(m => m.role === "tool");
-    assert.ok(toolMsg, "Second request should contain a tool message with error");
-    const toolContent = typeof toolMsg.content === "string" ? toolMsg.content : JSON.stringify(toolMsg.content);
-    assert.ok(toolContent.includes("nonexistent_action_xyz"), "Tool error should mention the action");
-  });
-
-  it("depth guard with confirm cycle", async () => {
-    const chat = await t.chat("harness-depth", { enabled: true });
-    let confirmCount = 0;
-    const toolCalls = Array.from({ length: 25 }, (_, i) =>
-      toolCall(`nonexistent_action_${i}`, {}),
-    );
-
-    const r = await chat.send("trigger continuation test", {
-      llm: [...toolCalls, "Done!"],
-      confirm: () => ++confirmCount <= 1,
-    });
-
-    assert.ok(r.requests.length > 11, `Expected >11 requests, got ${r.requests.length}`);
-    assert.equal(r.confirms.length, 2, "Should ask user twice");
-  });
-
-  it("group chat: non-triggering message stored in history", async () => {
-    const chat = await t.chat("harness-group@g.us", { enabled: true });
-
-    const r1 = await chat.send("Hey guys, check this out", {
-      sender: { name: "Alice" },
-      isGroup: true,
-    });
-    assert.equal(r1.raw.length, 0, "Bot should not respond when not mentioned");
-
-    const r2 = await chat.send("@bot-123 what did Alice say?", {
-      isGroup: true,
-      llm: ["I can see Alice said something earlier!"],
-    });
-    assert.ok(r2.sends.length > 0, "Bot should respond when mentioned");
-    const allContent = JSON.stringify(r2.requests[0].messages);
-    assert.ok(allContent.includes("Hey guys, check this out"), "Previous message in history");
-  });
-
-  it("image message passes content blocks to handler", async () => {
-    const chat = await t.chat("harness-media", { enabled: true });
-
-    const r = await chat.send(
-      { image: "aGVsbG8=", mime: "image/jpeg", caption: "Describe this image" },
-      { llm: ["I can see a sunset in the photo!"] },
-    );
-
-    // mock-model is text-only, so the image gets an [Unsupported image] placeholder
-    // but the LLM still responds
-    assert.ok(r.requests.length >= 1, "Should have at least 1 LLM request");
-    assert.ok(r.sends.length > 0, "Should deliver LLM reply");
   });
 });
 
