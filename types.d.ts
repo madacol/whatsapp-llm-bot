@@ -283,6 +283,34 @@ type AgentDefinition = {
 
 type AppAgent = AgentDefinition & { fileName: string };
 
+/* processLlmResponse types */
+
+type ExecuteActionOptions = {
+  toolCallId?: string | null;
+  actionResolver?: (name: string) => Promise<AppAction | null>;
+  llmClient?: LlmClient;
+  updateToolMessage?: (chatId: string, toolCallId: string, messageData: ToolMessage) => Promise<import("./store.js").MessageRow | null>;
+  agentDepth?: number;
+};
+
+type Session = {
+  chatId: string;
+  senderIds: string[];
+  context: Context;
+  addMessage: import("./store.js").Store['addMessage'];
+  updateToolMessage: import("./store.js").Store['updateToolMessage'];
+};
+
+type LlmConfig = {
+  llmClient: LlmClient;
+  chatModel: string;
+  systemPrompt: string;
+  actions: Action[];
+  executeActionFn: (actionName: string, context: Context, params: {}, options?: ExecuteActionOptions) => Promise<{result: ActionResultValue, permissions: Action['permissions']}>;
+  actionResolver: (name: string) => Promise<AppAction | null>;
+  actionLlmClient: LlmClient;
+};
+
 type App = {
   app_name: string;
   name: string;
