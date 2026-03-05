@@ -1,6 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { createServer } from "node:http";
+import { EventEmitter } from "node:events";
 import { PGlite } from "@electric-sql/pglite";
 import { vector } from "@electric-sql/pglite/vector";
 import { initStore } from "../store.js";
@@ -236,5 +237,210 @@ export async function createMockLlmServer() {
     clearRequests: () => { requests.length = 0; },
     pendingResponses: () => scopes.reduce((n, s) => n + s.length, 0),
   };
+}
+
+// ── Mock Baileys socket for e2e adapter tests ──
+
+/**
+ * @typedef {{
+ *   chatId: string;
+ *   msg: Record<string, unknown>;
+ *   options?: Record<string, unknown>;
+ * }} SentSocketMessage
+ */
+
+/**
+ * @typedef {{
+ *   sock: BaileysSocket;
+ *   getSentMessages: () => SentSocketMessage[];
+ *   getTextMessages: () => string[];
+ *   getReactions: () => Array<{ text: string; key: Record<string, unknown> }>;
+ *   getPresenceUpdates: () => Array<{ presence: string; chatId: string }>;
+ *   emitReaction: (key: { id: string; remoteJid: string }, reaction: { text: string }) => void;
+ *   clearCaptures: () => void;
+ * }} MockBaileysSocket
+ */
+
+/**
+ * Create a mock Baileys socket that captures all outgoing calls.
+ *
+ * @param {{
+ *   selfId?: string;
+ *   selfLid?: string;
+ *   selfName?: string;
+ *   isAdmin?: boolean;
+ * }} [options]
+ * @returns {MockBaileysSocket}
+ */
+export function createMockBaileysSocket(options = {}) {
+  const {
+    selfId = "bot-phone-id",
+    selfLid = "bot-lid-id",
+    selfName = "TestBot",
+    isAdmin = false,
+  } = options;
+
+  const ee = new EventEmitter();
+
+  /** @type {SentSocketMessage[]} */
+  let sentMessages = [];
+  /** @type {Array<{ text: string; key: Record<string, unknown> }>} */
+  let reactions = [];
+  /** @type {Array<{ presence: string; chatId: string }>} */
+  let presenceUpdates = [];
+  let msgCounter = 0;
+
+  const sock = /** @type {BaileysSocket} */ (/** @type {unknown} */ ({
+    user: { id: `${selfId}:0@s.whatsapp.net`, lid: `${selfLid}:0@lid`, name: selfName },
+    ev: {
+      on: ee.on.bind(ee),
+      off: ee.removeListener.bind(ee),
+      listenerCount: ee.listenerCount.bind(ee),
+    },
+    /** @param {string} chatId @param {Record<string, unknown>} msg @param {Record<string, unknown>} [opts] */
+    sendMessage: async (chatId, msg, opts) => {
+      if (msg.react) {
+        reactions.push({ text: /** @type {{ text: string }} */ (msg.react).text, key: /** @type {{ key: Record<string, unknown> }} */ (msg.react).key ?? {} });
+        return null;
+      }
+      const key = { id: `sent-msg-${msgCounter++}`, remoteJid: chatId };
+      sentMessages.push({ chatId, msg, options: opts });
+      return { key };
+    },
+    /** @param {string} presence @param {string} chatId */
+    sendPresenceUpdate: async (presence, chatId) => {
+      presenceUpdates.push({ presence, chatId });
+    },
+    /** @param {string} _chatId */
+    groupMetadata: async (_chatId) => ({
+      participants: isAdmin
+        ? [{ id: `${selfId}@s.whatsapp.net`, admin: "admin" }]
+        : [],
+    }),
+  }));
+
+  return {
+    sock,
+    getSentMessages: () => sentMessages,
+    getTextMessages: () => sentMessages
+      .filter(m => typeof m.msg.text === "string")
+      .map(m => /** @type {string} */ (m.msg.text)),
+    getReactions: () => reactions,
+    getPresenceUpdates: () => presenceUpdates,
+    emitReaction: (key, reaction) => {
+      ee.emit("messages.reaction", [{ key, reaction }]);
+    },
+    clearCaptures: () => {
+      sentMessages = [];
+      reactions = [];
+      presenceUpdates = [];
+    },
+  };
+}
+
+// ── WAMessage factory for e2e adapter tests ──
+
+/**
+ * Build a realistic Baileys WAMessage for testing.
+ *
+ * @param {{
+ *   text?: string;
+ *   chatId?: string;
+ *   senderId?: string;
+ *   senderLid?: string;
+ *   senderName?: string;
+ *   isGroup?: boolean;
+ *   timestamp?: number;
+ *   image?: { mimetype: string; caption?: string };
+ *   video?: { mimetype: string; caption?: string };
+ *   audio?: { mimetype: string };
+ *   quotedText?: string;
+ *   quotedSenderId?: string;
+ * }} [options]
+ * @returns {BaileysMessage}
+ */
+export function createWAMessage(options = {}) {
+  const {
+    text,
+    chatId: rawChatId,
+    senderId = "master-user",
+    senderLid = "sender-lid",
+    senderName = "Test User",
+    isGroup = false,
+    timestamp = Math.floor(Date.now() / 1000),
+    image,
+    video,
+    audio,
+    quotedText,
+    quotedSenderId,
+  } = options;
+
+  const chatId = rawChatId ?? (isGroup ? "group-chat@g.us" : `${senderId}@s.whatsapp.net`);
+
+  /** @type {Record<string, unknown>} */
+  const key = {
+    remoteJid: chatId,
+    fromMe: false,
+    id: `msg-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+  };
+
+  if (isGroup) {
+    key.participant = `${senderId}@s.whatsapp.net`;
+    key.participantLid = `${senderLid}@lid`;
+  } else {
+    key.senderLid = `${senderLid}@lid`;
+  }
+
+  /** @type {Record<string, unknown>} */
+  let message = {};
+
+  // Build contextInfo for quotes
+  /** @type {Record<string, unknown> | undefined} */
+  let contextInfo;
+  if (quotedText) {
+    contextInfo = {
+      quotedMessage: { conversation: quotedText },
+    };
+    if (quotedSenderId) {
+      contextInfo.participant = `${quotedSenderId}@s.whatsapp.net`;
+    }
+  }
+
+  if (image) {
+    message.imageMessage = {
+      mimetype: image.mimetype,
+      ...(image.caption && { caption: image.caption }),
+      url: "https://mock/image",
+      ...(contextInfo && { contextInfo }),
+    };
+  } else if (video) {
+    message.videoMessage = {
+      mimetype: video.mimetype,
+      ...(video.caption && { caption: video.caption }),
+      url: "https://mock/video",
+      ...(contextInfo && { contextInfo }),
+    };
+  } else if (audio) {
+    message.audioMessage = {
+      mimetype: audio.mimetype,
+      url: "https://mock/audio",
+      ...(contextInfo && { contextInfo }),
+    };
+  } else if (contextInfo) {
+    // Text with quote → extendedTextMessage
+    message.extendedTextMessage = {
+      text: text ?? "",
+      contextInfo,
+    };
+  } else if (text !== undefined) {
+    message.conversation = text;
+  }
+
+  return /** @type {BaileysMessage} */ (/** @type {unknown} */ ({
+    key,
+    message,
+    messageTimestamp: timestamp,
+    pushName: senderName,
+  }));
 }
 
