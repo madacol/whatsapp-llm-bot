@@ -11,6 +11,8 @@ import {
   createIncomingContext,
   createMockLlmServer,
   createTestDb,
+  createTestHarness,
+  toolCall,
   seedChat as seedChat_,
 } from "./helpers.js";
 import { setDb } from "../db.js";
@@ -2049,6 +2051,103 @@ describe("convertUnsupportedMedia warning", () => {
       responses.some(r => r.text.includes("tried to send a video")),
       "Should deliver final LLM reply",
     );
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════
+// Harness validation: prove createTestHarness produces same results
+// ═══════════════════════════════════════════════════════════════════
+describe("createTestHarness validation", () => {
+  /** @type {ReturnType<typeof createTestHarness>} */
+  let t;
+
+  before(() => {
+    t = createTestHarness({ mockServer, handleMessage, testDb });
+  });
+
+  it("multi-turn conversation: LLM sees all prior turns", async () => {
+    const chat = await t.chat("harness-multiturn", { enabled: true });
+
+    await chat.send("My name is Alice", { llm: ["I'll remember that."] });
+    await chat.send("I like cats", { llm: ["Got it, you like cats."] });
+    const r = await chat.send("Summarize what you know about me", {
+      llm: ["Sure, Alice who likes cats!"],
+    });
+
+    const allContent = JSON.stringify(r.requests[0].messages);
+    assert.ok(allContent.includes("My name is Alice"), "Should see turn 1 user message");
+    assert.ok(allContent.includes("I'll remember that"), "Should see turn 1 assistant reply");
+    assert.ok(allContent.includes("I like cats"), "Should see turn 2 user message");
+    assert.ok(allContent.includes("Summarize what you know"), "Should see turn 3 user message");
+    assert.ok(r.sends.some(t => t.includes("Alice who likes cats")));
+  });
+
+  it("tool error self-correction: shows error reaction, passes error to LLM", async () => {
+    const chat = await t.chat("harness-toolerr", { enabled: true });
+
+    const r = await chat.send("Do something", {
+      llm: [
+        toolCall("nonexistent_action_xyz", {}),
+        "I apologize, let me try a different approach.",
+      ],
+    });
+
+    assert.ok(r.raw.some(r => r.text.includes("❌")), "Should show error indicator");
+    assert.ok(r.raw.some(r => r.text.includes("different approach")), "Should deliver corrected reply");
+    const secondReq = /** @type {any} */ (r.requests[1]);
+    assert.ok(secondReq, "Should have second LLM request");
+    const toolMsg = secondReq.messages.find(m => m.role === "tool");
+    assert.ok(toolMsg, "Second request should contain a tool message with error");
+    const toolContent = typeof toolMsg.content === "string" ? toolMsg.content : JSON.stringify(toolMsg.content);
+    assert.ok(toolContent.includes("nonexistent_action_xyz"), "Tool error should mention the action");
+  });
+
+  it("depth guard with confirm cycle", async () => {
+    const chat = await t.chat("harness-depth", { enabled: true });
+    let confirmCount = 0;
+    const toolCalls = Array.from({ length: 25 }, (_, i) =>
+      toolCall(`nonexistent_action_${i}`, {}),
+    );
+
+    const r = await chat.send("trigger continuation test", {
+      llm: [...toolCalls, "Done!"],
+      confirm: () => ++confirmCount <= 1,
+    });
+
+    assert.ok(r.requests.length > 11, `Expected >11 requests, got ${r.requests.length}`);
+    assert.equal(r.confirms.length, 2, "Should ask user twice");
+  });
+
+  it("group chat: non-triggering message stored in history", async () => {
+    const chat = await t.chat("harness-group@g.us", { enabled: true });
+
+    const r1 = await chat.send("Hey guys, check this out", {
+      sender: { name: "Alice" },
+      isGroup: true,
+    });
+    assert.equal(r1.raw.length, 0, "Bot should not respond when not mentioned");
+
+    const r2 = await chat.send("@bot-123 what did Alice say?", {
+      isGroup: true,
+      llm: ["I can see Alice said something earlier!"],
+    });
+    assert.ok(r2.sends.length > 0, "Bot should respond when mentioned");
+    const allContent = JSON.stringify(r2.requests[0].messages);
+    assert.ok(allContent.includes("Hey guys, check this out"), "Previous message in history");
+  });
+
+  it("image message passes content blocks to handler", async () => {
+    const chat = await t.chat("harness-media", { enabled: true });
+
+    const r = await chat.send(
+      { image: "aGVsbG8=", mime: "image/jpeg", caption: "Describe this image" },
+      { llm: ["I can see a sunset in the photo!"] },
+    );
+
+    // mock-model is text-only, so the image gets an [Unsupported image] placeholder
+    // but the LLM still responds
+    assert.ok(r.requests.length >= 1, "Should have at least 1 LLM request");
+    assert.ok(r.sends.length > 0, "Should deliver LLM reply");
   });
 });
 

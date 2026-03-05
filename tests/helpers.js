@@ -239,6 +239,230 @@ export async function createMockLlmServer() {
   };
 }
 
+// ── Test harness for integration tests ──
+
+/**
+ * Build a verbose tool_calls mock object from a name + args.
+ * @param {string} name
+ * @param {Record<string, unknown>} args
+ * @returns {{ tool_calls: Array<{ id: string; type: "function"; function: { name: string; arguments: string } }> }}
+ */
+export function toolCall(name, args) {
+  return {
+    tool_calls: [{
+      id: `call_${name}_${Math.random().toString(36).slice(2, 6)}`,
+      type: /** @type {const} */ ("function"),
+      function: { name, arguments: JSON.stringify(args) },
+    }],
+  };
+}
+
+/**
+ * @typedef {{
+ *   enabled?: boolean;
+ *   debug?: boolean;
+ *   model?: string | null;
+ *   systemPrompt?: string | null;
+ *   memory?: boolean;
+ *   memoryThreshold?: number | null;
+ *   respondOn?: "any" | "mention+reply" | "mention";
+ *   enabledActions?: string[];
+ *   persona?: string | null;
+ *   modelRoles?: Record<string, string>;
+ *   mediaToTextModels?: { image?: string; audio?: string; video?: string; general?: string };
+ * }} ChatConfig
+ */
+
+/**
+ * @typedef {{
+ *   texts: string[];
+ *   replies: string[];
+ *   sends: string[];
+ *   reactions: string[];
+ *   confirms: string[];
+ *   polls: Array<{name: string, options: string[], selectableCount: number}>;
+ *   images: string[];
+ *   videos: string[];
+ *   presence: string[];
+ *   requests: object[];
+ *   raw: Array<{type: string, text: string}>;
+ * }} SendResult
+ */
+
+/**
+ * @typedef {{ image: string; mime: string; caption?: string }
+ *   | { video: string; mime: string; caption?: string }
+ *   | { audio: string; mime: string }
+ * } MediaInput
+ */
+
+/**
+ * @typedef {{
+ *   llm?: Array<string | {tool_calls: any[]}>;
+ *   sender?: { id?: string; name?: string; lid?: string };
+ *   isGroup?: boolean;
+ *   quote?: { text: string; senderId?: string };
+ *   confirm?: boolean | ((msg: string) => boolean);
+ * }} SendOptions
+ */
+
+/**
+ * @typedef {{
+ *   send: (input: string | MediaInput | {content: IncomingContentBlock[]}, options?: SendOptions) => Promise<SendResult>;
+ * }} TestChat
+ */
+
+/**
+ * Create a test harness that reduces integration test boilerplate.
+ *
+ * @param {{
+ *   mockServer: Awaited<ReturnType<typeof createMockLlmServer>>;
+ *   handleMessage: (msg: IncomingContext) => Promise<void>;
+ *   testDb: import("@electric-sql/pglite").PGlite;
+ * }} deps
+ * @returns {{ chat: (chatId: string, config?: ChatConfig) => Promise<TestChat> }}
+ */
+export function createTestHarness({ mockServer, handleMessage, testDb }) {
+  /**
+   * Create/seed a chat row and return a TestChat with a `send()` method.
+   * @param {string} chatId
+   * @param {ChatConfig} [config]
+   * @returns {Promise<TestChat>}
+   */
+  async function chat(chatId, config = {}) {
+    const { enabled, systemPrompt, model, ...rest } = config;
+    await seedChat(testDb, chatId, { enabled, systemPrompt, model });
+
+    // Build dynamic UPDATE for remaining config fields
+    /** @type {string[]} */
+    const setClauses = [];
+    /** @type {unknown[]} */
+    const values = [chatId];
+
+    /** @param {string} col @param {unknown} val */
+    const addCol = (col, val) => {
+      values.push(val);
+      setClauses.push(`${col} = $${values.length}`);
+    };
+
+    if (rest.debug != null) addCol("debug_until", rest.debug ? "9999-01-01" : null);
+    if (rest.memory != null) addCol("memory", rest.memory);
+    if (rest.memoryThreshold !== undefined) addCol("memory_threshold", rest.memoryThreshold);
+    if (rest.respondOn != null) addCol("respond_on", rest.respondOn);
+    if (rest.enabledActions != null) addCol("enabled_actions", JSON.stringify(rest.enabledActions));
+    if (rest.persona !== undefined) addCol("active_persona", rest.persona);
+    if (rest.modelRoles != null) addCol("model_roles", JSON.stringify(rest.modelRoles));
+    if (rest.mediaToTextModels != null) addCol("media_to_text_models", JSON.stringify(rest.mediaToTextModels));
+
+    if (setClauses.length > 0) {
+      await testDb.query(
+        `UPDATE chats SET ${setClauses.join(", ")} WHERE chat_id = $1`,
+        values,
+      );
+    }
+
+    return { send: makeSend(chatId) };
+  }
+
+  /**
+   * @param {string} chatId
+   * @returns {(input: string | MediaInput | {content: IncomingContentBlock[]}, options?: SendOptions) => Promise<SendResult>}
+   */
+  function makeSend(chatId) {
+    return async (input, options) => {
+      // 1. Parse input into content blocks
+      /** @type {IncomingContentBlock[]} */
+      let content;
+      if (typeof input === "string") {
+        content = [{ type: "text", text: input }];
+      } else if ("content" in input) {
+        content = input.content;
+      } else if ("image" in input) {
+        content = [
+          { type: "image", encoding: "base64", mime_type: input.mime, data: input.image },
+          ...(input.caption ? [/** @type {const} */ ({ type: "text", text: input.caption })] : []),
+        ];
+      } else if ("video" in input) {
+        content = [
+          { type: "video", encoding: "base64", mime_type: input.mime, data: input.video },
+          ...(input.caption ? [/** @type {const} */ ({ type: "text", text: input.caption })] : []),
+        ];
+      } else {
+        // audio
+        content = [{ type: "audio", encoding: "base64", mime_type: input.mime, data: input.audio }];
+      }
+
+      // 2. Handle quote option
+      /** @type {string | undefined} */
+      let quotedSenderId;
+      if (options?.quote) {
+        content = [
+          { type: "quote", content: [{ type: "text", text: options.quote.text }] },
+          ...content,
+        ];
+        quotedSenderId = options.quote.senderId;
+      }
+
+      // 3. Queue LLM responses
+      /** @type {{ clear: () => void } | undefined} */
+      let scope;
+      if (options?.llm) {
+        scope = mockServer.addResponses(...options.llm);
+      }
+
+      // 4. Record request baseline
+      const reqsBefore = mockServer.getRequests().length;
+
+      // 5. Build and call context
+      const sender = options?.sender;
+      /** @type {Partial<IncomingContext>} */
+      const overrides = {
+        chatId,
+        content,
+        isGroup: options?.isGroup,
+        quotedSenderId,
+      };
+      if (sender) {
+        overrides.senderIds = [sender.id ?? "master-user"];
+        if (sender.name) overrides.senderName = sender.name;
+      }
+
+      const { context, responses } = createIncomingContext(overrides);
+
+      if (options?.confirm != null) {
+        const userConfirm = options.confirm;
+        context.confirm = async (msg) => {
+          const result = typeof userConfirm === "function" ? userConfirm(msg) : userConfirm;
+          responses.push({ type: "confirm", text: msg });
+          return result;
+        };
+      }
+
+      await handleMessage(context);
+
+      // 6. Clean up scope
+      scope?.clear();
+
+      // 7. Build and return SendResult
+      return {
+        texts: responses.filter(r => r.type === "sendMessage").map(r => r.text),
+        replies: responses.filter(r => r.type === "replyToMessage").map(r => r.text),
+        sends: responses.filter(r => r.type === "sendMessage" || r.type === "replyToMessage").map(r => r.text),
+        reactions: responses.filter(r => r.type === "reactToMessage").map(r => r.text),
+        confirms: responses.filter(r => r.type === "confirm").map(r => r.text),
+        polls: responses.filter(r => r.type === "sendPoll").map(r => JSON.parse(r.text)),
+        images: responses.filter(r => r.type === "sendImage").map(r => r.text),
+        videos: responses.filter(r => r.type === "sendVideo").map(r => r.text),
+        presence: responses.filter(r => r.type === "sendPresenceUpdate").map(r => r.text),
+        requests: mockServer.getRequests().slice(reqsBefore),
+        raw: responses,
+      };
+    };
+  }
+
+  return { chat };
+}
+
 // ── Mock Baileys socket for e2e adapter tests ──
 
 /**
