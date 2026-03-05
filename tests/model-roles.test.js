@@ -15,27 +15,27 @@ describe("resolveModel", () => {
   it("returns per-chat override and falls back to config when empty", () => {
     // chat role uses chatRow.model
     assert.equal(
-      resolveModel("chat", /** @type {any} */ ({ model: "custom/model" })),
+      resolveModel("chat", /** @type {import("../model-roles.js").ModelChatConfig} */ ({ model: "custom/model" })),
       "custom/model",
     );
     assert.equal(
-      resolveModel("chat", /** @type {any} */ ({ model: null })),
+      resolveModel("chat", /** @type {import("../model-roles.js").ModelChatConfig} */ ({ model: null })),
       config.model,
     );
 
     // other roles use chatRow.model_roles
     assert.equal(
-      resolveModel("image_generation", /** @type {any} */ ({ model_roles: { image_generation: "dalle-3" } })),
+      resolveModel("image_generation", /** @type {import("../model-roles.js").ModelChatConfig} */ ({ model_roles: { image_generation: "dalle-3" } })),
       "dalle-3",
     );
     assert.equal(
-      resolveModel("image_generation", /** @type {any} */ ({ model_roles: {} })),
+      resolveModel("image_generation", /** @type {import("../model-roles.js").ModelChatConfig} */ ({ model_roles: {} })),
       config.image_model,
     );
   });
 
   it("resolves media_to_text roles from chatRow.media_to_text_models", () => {
-    const chatRow = /** @type {any} */ ({
+    const chatRow = /** @type {import("../model-roles.js").ModelChatConfig} */ ({
       media_to_text_models: { general: "gpt-4o", image: "gpt-4o-vision" },
     });
     assert.equal(resolveModel("media_to_text", chatRow), "gpt-4o");

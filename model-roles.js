@@ -114,6 +114,15 @@ const MEDIA_TO_TEXT_FALLBACK = {
 };
 
 /**
+ * The subset of ChatRow that resolveModel actually inspects.
+ * @typedef {{
+ *   model?: string | null;
+ *   media_to_text_models?: { image?: string; audio?: string; video?: string; general?: string } | null;
+ *   model_roles?: Record<string, string> | null;
+ * }} ModelChatConfig
+ */
+
+/**
  * Resolve a model ID for the given role.
  *
  * Resolution chain:
@@ -127,7 +136,7 @@ const MEDIA_TO_TEXT_FALLBACK = {
  *   - All other roles → chatRow.model_roles[role]
  *
  * @param {string} role
- * @param {import("./store.js").ChatRow} [chatRow]
+ * @param {ModelChatConfig} [chatRow]
  * @returns {string}
  */
 export function resolveModel(role, chatRow) {
