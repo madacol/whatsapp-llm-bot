@@ -1,4 +1,4 @@
-import { saveMemory } from "../../../memory.js";
+import { saveMemory, findMemories } from "../../../memory.js";
 
 export default /** @type {defineAction} */ ((x) => x)({
   name: "save_memory",
@@ -11,7 +11,9 @@ export default /** @type {defineAction} */ ((x) => x)({
     '"When user asks about \'the project\' they mean the React dashboard", ' +
     '"User corrected: always use metric units, not imperial"). ' +
     "Skip trivia or small-talk facts unless they clearly help predict what " +
-    "the user will need.",
+    "the user will need. " +
+    "NEVER save a memory that restates or confirms something already present " +
+    "in the recalled memories — only save genuinely new information.",
   parameters: {
     type: "object",
     properties: {
@@ -34,10 +36,26 @@ export default /** @type {defineAction} */ ((x) => x)({
   },
   /** @param {{content?: string}} params */
   formatToolCall: ({ content }) => `Remembering "${content}"`,
-  action_fn: async function ({ chatId, rootDb, llmClient }, params) {
+  action_fn: async function ({ chatId, rootDb, llmClient, confirm }, params) {
     const content = params.content?.trim();
     if (!content) {
       return "Cannot save empty content. Please provide a note to remember.";
+    }
+
+    const existing = await findMemories(rootDb, llmClient, chatId, content, {
+      limit: 1,
+      minSimilarity: 0.85,
+    });
+    if (existing.length > 0) {
+      const match = existing[0];
+      const confirmed = await confirm(
+        `⚠️ *Similar memory exists* (id: ${match.id}, similarity: ${Number(match.similarity).toFixed(3)}):\n` +
+        `"${match.content.slice(0, 200)}"\n\n` +
+        `React 👍 to save anyway or 👎 to skip.`
+      );
+      if (!confirmed) {
+        return `Skipped — user declined to save duplicate memory.`;
+      }
     }
 
     const id = await saveMemory(rootDb, llmClient, chatId, content);
