@@ -1,5 +1,5 @@
 import { processLlmResponse } from "./index.js";
-import { getActions, executeAction } from "./actions.js";
+import { getActions, getAction, getChatAction, executeAction } from "./actions.js";
 import { resolveModel, ROLE_DEFINITIONS } from "./model-roles.js";
 import { getRootDb } from "./db.js";
 import { createLogger } from "./logger.js";
@@ -114,7 +114,8 @@ export async function runAgent(options) {
 
   /** @type {(name: string) => Promise<AppAction | null>} */
   const actionResolver = async (name) => {
-    const { getAction } = await import("./actions.js");
+    const chatAction = await getChatAction(chatId, name);
+    if (chatAction) return chatAction;
     return getAction(name);
   };
 
