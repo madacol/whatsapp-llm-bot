@@ -50,6 +50,17 @@ function hasCommand(a) {
 
 const MAX_TOOL_CALL_DEPTH = 10;
 
+/** @type {Required<AgentIOHooks>} */
+const NO_OP_HOOKS = {
+  onLlmResponse: async () => {},
+  onToolCall: async () => {},
+  onToolResult: async () => {},
+  onToolError: async () => {},
+  onContinuePrompt: async () => true,
+  onDepthLimit: async () => false,
+  onUsage: async () => {},
+};
+
 /**
  * Display a tool call to the user (compact or verbose based on debug mode).
  * @param {LlmChatResponse['toolCalls'][0]} toolCall
@@ -153,11 +164,12 @@ function parseToolArgs(argsString) {
  *   toolCall: LlmChatResponse['toolCalls'][0],
  *   messages: Message[],
  *   mediaRegistry: MediaRegistry,
+ *   hooks: Required<AgentIOHooks>,
  * }} params
  * @returns {Promise<boolean | undefined>} The autoContinue value
  */
 async function executeAndStoreTool({
-  session, llmConfig, toolCall, messages, mediaRegistry,
+  session, llmConfig, toolCall, messages, mediaRegistry, hooks,
 }) {
   const { chatId, context, updateToolMessage } = session;
   const { executeActionFn, actionResolver, actionLlmClient } = llmConfig;
@@ -205,7 +217,7 @@ async function executeAndStoreTool({
 
       const toolMessage = createToolMessage(toolCall.id, linkText);
       await replaceStub(toolMessage);
-      await displayToolResult(linkText, shortId, functionResponse.permissions, context);
+      await hooks.onToolResult(linkText, shortId, functionResponse.permissions);
 
       return !!functionResponse.permissions.autoContinue;
     }
@@ -246,7 +258,7 @@ async function executeAndStoreTool({
         ? result
         : JSON.stringify(result, null, 2);
 
-    await displayToolResult(resultMessage, shortId, functionResponse.permissions, context);
+    await hooks.onToolResult(resultMessage, shortId, functionResponse.permissions);
 
     return functionResponse.permissions.autoContinue;
   } catch (error) {
@@ -256,11 +268,7 @@ async function executeAndStoreTool({
     const toolError = createToolMessage(toolCall.id, errorMessage);
     await replaceStub(toolError);
 
-    if (context.isDebug) {
-      await context.sendMessage(`❌ *Tool Error*    [${shortId}]`, errorMessage);
-    } else {
-      await context.sendMessage(`❌ [${shortId}] ${errorMessage}`);
-    }
+    await hooks.onToolError(errorMessage, shortId);
 
     // Errors always auto-continue for self-correction
     return true;
@@ -274,43 +282,39 @@ async function executeAndStoreTool({
  *   llmConfig: LlmConfig,
  *   messages: Message[],
  *   mediaRegistry: MediaRegistry,
+ *   hooks?: AgentIOHooks,
+ *   maxDepth?: number,
  * }} params
+ * @returns {Promise<AgentResult>}
  */
-async function processLlmResponse({ session, llmConfig, messages, mediaRegistry }) {
-  const { chatId, senderIds, context, addMessage } = session;
+export async function processLlmResponse({ session, llmConfig, messages, mediaRegistry, hooks: userHooks, maxDepth }) {
+  const { chatId, senderIds, addMessage } = session;
   const { llmClient, chatModel, actions } = llmConfig;
+  const maxToolCallDepth = maxDepth ?? MAX_TOOL_CALL_DEPTH;
+  /** @type {Required<AgentIOHooks>} */
+  const hooks = { ...NO_OP_HOOKS, ...userHooks };
   let { systemPrompt } = llmConfig;
   if (mediaRegistry.size > 0) {
     systemPrompt += "\n\nMedia in the conversation is tagged with [media:N]. When calling tools that need media from earlier messages, pass the relevant IDs in the `_media_refs` parameter.";
   }
   const injectedActions = new Set();
   let depth = 0;
-  let totalCost = 0;
-  let totalPromptTokens = 0;
-  let totalCompletionTokens = 0;
-  let totalCachedTokens = 0;
-  let hasCostData = false;
 
-  while (depth < MAX_TOOL_CALL_DEPTH) {
-    /** @type {LlmChatResponse} */
-    let response;
-    try {
-      response = await sendChatCompletion(llmClient, {
-        model: chatModel,
-        systemPrompt,
-        messages,
-        tools: actionsToToolDefinitions(actions, mediaRegistry.size > 0),
-        mediaRegistry,
-      });
-    } catch (error) {
-      log.error(error);
-      const errorMessage = JSON.stringify(error, null, 2);
-      await context.reply(
-        "❌ *Error*",
-        "An error occurred while processing the message.\n\n" + errorMessage,
-      );
-      return;
-    }
+  /** @type {AgentResult} */
+  const result = {
+    response: [],
+    messages,
+    usage: { promptTokens: 0, completionTokens: 0, cachedTokens: 0, cost: 0 },
+  };
+
+  while (depth < maxToolCallDepth) {
+    const response = await sendChatCompletion(llmClient, {
+      model: chatModel,
+      systemPrompt,
+      messages,
+      tools: actionsToToolDefinitions(actions, mediaRegistry.size > 0),
+      mediaRegistry,
+    });
 
     if (response.usage) {
       const { promptTokens: prompt, completionTokens: completion, cachedTokens: cached } = response.usage;
@@ -318,11 +322,10 @@ async function processLlmResponse({ session, llmConfig, messages, mediaRegistry 
       log.info(`[LLM usage] prompt=${prompt} cached=${cached} completion=${completion} cost=${cost} model=${chatModel}`);
       recordUsage(getRootDb(), { chatId, model: chatModel, promptTokens: prompt, completionTokens: completion, cachedTokens: cached, cost })
         .catch(err => log.error("[LLM usage] failed to persist:", err));
-      totalPromptTokens += prompt;
-      totalCompletionTokens += completion;
-      totalCachedTokens += cached;
-      if (cost !== null) totalCost += cost;
-      hasCostData = true;
+      result.usage.promptTokens += prompt;
+      result.usage.completionTokens += completion;
+      result.usage.cachedTokens += cached;
+      if (cost !== null) result.usage.cost += cost;
     }
 
     /** @type {AssistantMessage} */
@@ -330,23 +333,26 @@ async function processLlmResponse({ session, llmConfig, messages, mediaRegistry 
 
     if (response.content) {
       log.debug("RESPONSE SENT:", response.content);
-      await context.reply("🤖 *AI Assistant*", response.content);
+      await hooks.onLlmResponse(response.content);
       assistantMessage.content.push({ type: "text", text: response.content });
+      result.response = [{ type: "text", text: response.content }];
     }
 
     if (response.toolCalls.length === 0) {
-      if (context.isDebug && hasCostData) {
-        const costStr = totalCost > 0 ? `$${totalCost.toFixed(4)}` : "unknown";
-        await context.sendMessage(
-          `📊 *Cost*: ${costStr}  |  prompt=${totalPromptTokens} cached=${totalCachedTokens} completion=${totalCompletionTokens}`,
-        );
+      if (result.usage.promptTokens > 0) {
+        const costStr = result.usage.cost > 0 ? `$${result.usage.cost.toFixed(4)}` : "unknown";
+        await hooks.onUsage(costStr, {
+          prompt: result.usage.promptTokens,
+          completion: result.usage.completionTokens,
+          cached: result.usage.cachedTokens,
+        });
       }
       messages.push(assistantMessage);
       const storedAssistant = await addMessage(chatId, assistantMessage, senderIds);
       if (depth === 0) {
         storeLlmContext(getRootDb(), storedAssistant.message_id, chatModel, systemPrompt, messages, actions);
       }
-      return;
+      return result;
     }
 
     // Record and display tool calls
@@ -358,7 +364,7 @@ async function processLlmResponse({ session, llmConfig, messages, mediaRegistry 
         arguments: toolCall.arguments,
       });
       const action = actions.find(a => a.name === toolCall.name);
-      await displayToolCall(toolCall, context, action?.formatToolCall);
+      await hooks.onToolCall(toolCall, action?.formatToolCall);
     }
 
     const storedAssistantWithTools = await addMessage(chatId, assistantMessage, senderIds);
@@ -378,7 +384,7 @@ async function processLlmResponse({ session, llmConfig, messages, mediaRegistry 
     let continueProcessing = true;
     for (const toolCall of response.toolCalls) {
       const shouldContinue = await executeAndStoreTool({
-        session, llmConfig, toolCall, messages, mediaRegistry,
+        session, llmConfig, toolCall, messages, mediaRegistry, hooks,
       });
       if (!shouldContinue) continueProcessing = false;
     }
@@ -395,22 +401,20 @@ async function processLlmResponse({ session, llmConfig, messages, mediaRegistry 
     }
 
     if (!continueProcessing) {
-      const confirmed = await context.confirm(
-        `React 👍 to continue or 👎 to stop.`,
-      );
-      if (!confirmed) return;
+      const confirmed = await hooks.onContinuePrompt();
+      if (!confirmed) return result;
     }
 
     depth++;
 
-    if (depth >= MAX_TOOL_CALL_DEPTH) {
-      const confirmed = await context.confirm(
-        `⚠️ *Depth limit*\n\nReached maximum tool call depth (${MAX_TOOL_CALL_DEPTH}). React 👍 to continue or 👎 to stop.`,
-      );
-      if (!confirmed) return;
+    if (depth >= maxToolCallDepth) {
+      const confirmed = await hooks.onDepthLimit();
+      if (!confirmed) return result;
       depth = 0;
     }
   }
+
+  return result;
 }
 
 /**
@@ -629,9 +633,35 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
       executeActionFn, actionResolver, actionLlmClient: llmClient,
     };
 
+    /** @type {AgentIOHooks} */
+    const hooks = {
+      onLlmResponse: (text) => context.reply("🤖 *AI Assistant*", text),
+      onToolCall: (toolCall, fmt) => displayToolCall(toolCall, context, fmt),
+      onToolResult: (result, shortId, perms) => displayToolResult(result, shortId, perms, context),
+      onToolError: (msg, shortId) => context.isDebug
+        ? context.sendMessage(`❌ *Tool Error*    [${shortId}]`, msg)
+        : context.sendMessage(`❌ [${shortId}] ${msg}`),
+      onContinuePrompt: () => context.confirm(`React 👍 to continue or 👎 to stop.`),
+      onDepthLimit: () => context.confirm(
+        `⚠️ *Depth limit*\n\nReached maximum tool call depth (${MAX_TOOL_CALL_DEPTH}). React 👍 to continue or 👎 to stop.`,
+      ),
+      onUsage: (cost, tokens) => context.isDebug
+        ? context.sendMessage(
+            `📊 *Cost*: ${cost}  |  prompt=${tokens.prompt} cached=${tokens.cached} completion=${tokens.completion}`,
+          )
+        : Promise.resolve(),
+    };
+
     await messageContext.sendPresenceUpdate("composing");
     try {
-      await processLlmResponse({ session, llmConfig, messages: preparedMessages, mediaRegistry });
+      await processLlmResponse({ session, llmConfig, messages: preparedMessages, mediaRegistry, hooks });
+    } catch (error) {
+      log.error(error);
+      const errorMessage = JSON.stringify(error, null, 2);
+      await context.reply(
+        "❌ *Error*",
+        "An error occurred while processing the message.\n\n" + errorMessage,
+      );
     } finally {
       await messageContext.sendPresenceUpdate("paused");
     }

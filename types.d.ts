@@ -145,6 +145,7 @@ type ActionContext = {
   sendVideo: (video: Buffer, caption?: string) => Promise<void>;
   confirm: (message: string) => Promise<boolean>;
   resolveModel: (role: string) => string;
+  agentDepth?: number;
 };
 
 // Define permission flags
@@ -250,6 +251,36 @@ type AppAction = Action & {
   fileName: string;
   app_name: string;
 };
+
+/* Agent types */
+
+type AgentIOHooks = {
+  onLlmResponse?: (text: string) => Promise<void>;
+  onToolCall?: (toolCall: LlmChatResponse['toolCalls'][0], formatToolCall?: (params: Record<string, any>) => string) => Promise<void>;
+  onToolResult?: (result: string, shortId: string, permissions: PermissionFlags) => Promise<void>;
+  onToolError?: (error: string, shortId: string) => Promise<void>;
+  onContinuePrompt?: () => Promise<boolean>;
+  onDepthLimit?: () => Promise<boolean>;
+  onUsage?: (cost: string, tokens: { prompt: number; completion: number; cached: number }) => Promise<void>;
+};
+
+type AgentResult = {
+  response: ToolContentBlock[];
+  messages: Message[];
+  usage: { promptTokens: number; completionTokens: number; cachedTokens: number; cost: number };
+};
+
+type AgentDefinition = {
+  name: string;
+  description: string;
+  systemPrompt: string;
+  model?: string;
+  allowedActions?: string[];
+  maxDepth?: number;
+  instructions?: string;
+};
+
+type AppAgent = AgentDefinition & { fileName: string };
 
 type App = {
   app_name: string;
