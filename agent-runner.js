@@ -18,8 +18,8 @@ const MAX_AGENT_DEPTH = 3;
  *   senderIds?: string[],
  *   parentToolCallId?: string,
  *   hooks?: AgentIOHooks,
- *   addMessage?: import("./store.js").Store['addMessage'],
- *   updateToolMessage?: import("./store.js").Store['updateToolMessage'],
+ *   addMessage?: Session['addMessage'],
+ *   updateToolMessage?: Session['updateToolMessage'],
  * }} RunAgentOptions
  */
 
@@ -119,10 +119,10 @@ export async function runAgent(options) {
     return getAction(name);
   };
 
-  /** @type {import("./index.js").Session} */
+  /** @type {Session} */
   const session = { chatId, senderIds, context, addMessage, updateToolMessage };
 
-  /** @type {import("./index.js").LlmConfig} */
+  /** @type {LlmConfig} */
   const llmConfig = {
     llmClient,
     chatModel,

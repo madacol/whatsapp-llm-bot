@@ -135,26 +135,6 @@ function parseToolArgs(argsString) {
 }
 
 /**
- * @typedef {{
- *   chatId: string,
- *   senderIds: string[],
- *   context: Context,
- *   addMessage: Store['addMessage'],
- *   updateToolMessage: Store['updateToolMessage'],
- * }} Session
- *
- * @typedef {{
- *   llmClient: LlmClient,
- *   chatModel: string,
- *   systemPrompt: string,
- *   actions: Action[],
- *   executeActionFn: typeof executeAction,
- *   actionResolver: (name: string) => Promise<AppAction | null>,
- *   actionLlmClient: LlmClient,
- * }} LlmConfig
- */
-
-/**
  * Execute a single tool call: run action, store result, display to user.
  * Returns the autoContinue value from the action's permissions.
  * - `true`: continue automatically

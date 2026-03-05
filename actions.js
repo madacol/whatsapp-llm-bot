@@ -18,16 +18,6 @@ const currentSessionDb = getDb("memory://");
 // Note: Action-specific messaging functions are now created inline in executeAction()
 
 /**
- * @typedef {{
- *   toolCallId?: string | null,
- *   actionResolver?: (name: string) => Promise<AppAction|null>,
- *   llmClient?: LlmClient,
- *   updateToolMessage?: (chatId: string, toolCallId: string, messageData: ToolMessage) => Promise<import("./store.js").MessageRow | null>,
- *   agentDepth?: number,
- * }} ExecuteActionOptions
- */
-
-/**
  * Execute a custom action
  * @param {string} actionName - The name of the action to execute
  * @param {Context} context - The unified context to pass to the action
