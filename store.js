@@ -148,6 +148,17 @@ export async function initStore(injectedDb){
       `;
       await db.sql`CREATE INDEX IF NOT EXISTS idx_messages_search_text ON messages USING gin (search_text)`;
       await db.sql`CREATE INDEX IF NOT EXISTS idx_memories_search_text ON memories USING gin (search_text)`;
+      await db.sql`
+        CREATE TABLE IF NOT EXISTS agent_runs (
+          id SERIAL PRIMARY KEY,
+          chat_id VARCHAR(50) REFERENCES chats(chat_id),
+          parent_tool_call_id TEXT,
+          agent_name TEXT NOT NULL,
+          messages JSONB NOT NULL,
+          usage JSONB,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+      `;
       await initPendingConfirmationsTable(db);
     } catch (error) {
       log.error("Schema migration error:", error);

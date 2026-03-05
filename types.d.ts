@@ -146,6 +146,7 @@ type ActionContext = {
   confirm: (message: string) => Promise<boolean>;
   resolveModel: (role: string) => string;
   agentDepth?: number;
+  toolCallId?: string | null;
 };
 
 // Define permission flags
