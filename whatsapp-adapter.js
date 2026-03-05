@@ -268,7 +268,7 @@ export async function getMessageContent(baileysMessage, downloadFn = downloadMed
  * @param {import('@whiskeysockets/baileys').WASocket} sock
  * @param {(message: IncomingContext) => Promise<void>} messageHandler
  */
-async function adaptIncomingMessage(baileysMessage, sock, messageHandler) {
+export async function adaptIncomingMessage(baileysMessage, sock, messageHandler) {
   // Extract message content from Baileys format
   // Ignore status updates
   if (baileysMessage.key.remoteJid === "status@broadcast") {
