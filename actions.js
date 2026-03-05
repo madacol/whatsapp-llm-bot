@@ -23,6 +23,7 @@ const currentSessionDb = getDb("memory://");
  *   actionResolver?: (name: string) => Promise<AppAction|null>,
  *   llmClient?: LlmClient,
  *   updateToolMessage?: (chatId: string, toolCallId: string, messageData: ToolMessage) => Promise<import("./store.js").MessageRow | null>,
+ *   agentDepth?: number,
  * }} ExecuteActionOptions
  */
 
@@ -40,6 +41,7 @@ export async function executeAction(actionName, context, params, options = {}) {
     actionResolver = getAction,
     llmClient,
     updateToolMessage,
+    agentDepth,
   } = options;
   const action = await actionResolver(actionName);
   if (!action) {
@@ -110,6 +112,8 @@ export async function executeAction(actionName, context, params, options = {}) {
     sendVideo: context.sendVideo,
     confirm: persistentConfirm,
     resolveModel: (role) => resolveModel(role),
+    agentDepth,
+    toolCallId,
   };
 
   if (action.permissions?.useChatDb) {

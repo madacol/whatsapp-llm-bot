@@ -166,11 +166,12 @@ function parseToolArgs(argsString) {
  *   messages: Message[],
  *   mediaRegistry: MediaRegistry,
  *   hooks: Required<AgentIOHooks>,
+ *   agentDepth?: number,
  * }} params
  * @returns {Promise<boolean | undefined>} The autoContinue value
  */
 async function executeAndStoreTool({
-  session, llmConfig, toolCall, messages, mediaRegistry, hooks,
+  session, llmConfig, toolCall, messages, mediaRegistry, hooks, agentDepth,
 }) {
   const { chatId, context, updateToolMessage } = session;
   const { executeActionFn, actionResolver, actionLlmClient } = llmConfig;
@@ -206,7 +207,7 @@ async function executeAndStoreTool({
     }
 
     const functionResponse = await executeActionFn(toolName, actionContext, cleanArgs, {
-      toolCallId: toolCall.id, actionResolver, llmClient: actionLlmClient, updateToolMessage,
+      toolCallId: toolCall.id, actionResolver, llmClient: actionLlmClient, updateToolMessage, agentDepth,
     });
     log.debug("response", functionResponse);
 
@@ -285,10 +286,11 @@ async function executeAndStoreTool({
  *   mediaRegistry: MediaRegistry,
  *   hooks?: AgentIOHooks,
  *   maxDepth?: number,
+ *   agentDepth?: number,
  * }} params
  * @returns {Promise<AgentResult>}
  */
-export async function processLlmResponse({ session, llmConfig, messages, mediaRegistry, hooks: userHooks, maxDepth }) {
+export async function processLlmResponse({ session, llmConfig, messages, mediaRegistry, hooks: userHooks, maxDepth, agentDepth }) {
   const { chatId, senderIds, addMessage } = session;
   const { llmClient, chatModel, actions } = llmConfig;
   const maxToolCallDepth = maxDepth ?? MAX_TOOL_CALL_DEPTH;
@@ -385,7 +387,7 @@ export async function processLlmResponse({ session, llmConfig, messages, mediaRe
     let continueProcessing = true;
     for (const toolCall of response.toolCalls) {
       const shouldContinue = await executeAndStoreTool({
-        session, llmConfig, toolCall, messages, mediaRegistry, hooks,
+        session, llmConfig, toolCall, messages, mediaRegistry, hooks, agentDepth,
       });
       if (!shouldContinue) continueProcessing = false;
     }
