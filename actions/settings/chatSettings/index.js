@@ -427,6 +427,7 @@ export default /** @type {defineAction} */ ((x) => x)({
     value != null ? `Setting ${setting} = ${value}` : `Getting ${setting}`,
   permissions: {
     autoExecute: true,
+    autoContinue: true,
     useRootDb: true,
   },
   action_fn: async function ({ chatId, rootDb, senderIds, getActions, getIsAdmin }, { setting, value }) {

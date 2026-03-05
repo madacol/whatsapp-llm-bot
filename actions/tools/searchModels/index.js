@@ -28,7 +28,8 @@ export default /** @type {defineAction} */ ((x) => x)({
     return parts.join(" ");
   },
   permissions: {
-    autoExecute: true
+    autoExecute: true,
+    autoContinue: true,
   },
   /**
    * @param {ActionContext} context

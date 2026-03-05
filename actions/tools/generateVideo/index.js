@@ -163,7 +163,7 @@ export default /** @type {defineAction} */ ((x) => x)({
   },
   permissions: {
     autoExecute: true,
-    autoContinue: false,
+    autoContinue: true,
   },
   /**
    * @param {ActionContext} context
@@ -240,10 +240,7 @@ export default /** @type {defineAction} */ ((x) => x)({
         { type: "video", encoding: "base64", data: base64 },
       ];
 
-      return {
-        result: contentBlocks,
-        autoContinue: false,
-      };
+      return { result: contentBlocks };
     } catch (/** @type {unknown} */ err) {
       const message = err instanceof Error ? err.message : String(err);
       log.error("Video generation failed:", message);

@@ -12,6 +12,7 @@ export default /** @type {defineAction} */ ((x) => x)({
   permissions: {
     requireAdmin: true,
     autoExecute: true,
+    autoContinue: true,
     silent: true,
     useRootDb: true,
   },

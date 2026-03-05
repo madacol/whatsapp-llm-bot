@@ -27,6 +27,7 @@ export default /** @type {defineAction} */ ((x) => x)({
   },
   permissions: {
     autoExecute: true,
+    autoContinue: true,
     useRootDb: true,
     useLlm: true,
   },
