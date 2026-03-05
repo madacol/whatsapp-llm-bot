@@ -28,7 +28,7 @@ export default {
   get video_to_text_model() { return process.env.VIDEO_TO_TEXT_MODEL || ""; },
   set video_to_text_model(v) { if (v) process.env.VIDEO_TO_TEXT_MODEL = v; else delete process.env.VIDEO_TO_TEXT_MODEL; },
 
-  get embedding_model() { return process.env.EMBEDDING_MODEL || "google/gemini-embedding-001"; },
+  get embedding_model() { return process.env.EMBEDDING_MODEL || ""; },
   get image_model() { return process.env.IMAGE_MODEL || "google/gemini-3-pro-image-preview"; },
   get coding_model() { return process.env.CODING_MODEL || ""; },
   get smart_model() { return process.env.SMART_MODEL || ""; },
