@@ -116,57 +116,30 @@ describe("Scenario 1: Enable/disable chat flow", () => {
   });
 
   it("master user enables chat with !config enabled true", async () => {
-    const { context, responses } = createIncomingContext({
-      chatId,
-      content: [{ type: "text", text: "!config enabled true" }],
-    });
-    await handleMessage(context);
-
-    assert.ok(responses.length > 0, "Bot should respond");
-    assert.ok(
-      responses.some((r) => r.text.toLowerCase().includes("enabled")),
-      "Should confirm enabling",
-    );
+    const chat = await t.chat(chatId);
+    const r = await chat.send("!config enabled true");
+    assert.ok(r.raw.length > 0, "Bot should respond");
+    assert.ok(r.raw.some(x => x.text.toLowerCase().includes("enabled")), "Should confirm enabling");
   });
 
   it("bot responds via LLM to a text message in an enabled chat", async () => {
-    mockServer.addResponses("Hello from the LLM!");
-
-    const { context, responses } = createIncomingContext({
-      chatId,
-      content: [{ type: "text", text: "Hey there" }],
-    });
-    await handleMessage(context);
-
-    assert.ok(responses.length > 0, "Bot should respond");
-    assert.ok(
-      responses.some((r) => r.text.includes("Hello from the LLM!")),
-      "Response should include LLM output",
-    );
+    const chat = await t.chat(chatId);
+    const r = await chat.send("Hey there", { llm: ["Hello from the LLM!"] });
+    assert.ok(r.raw.length > 0, "Bot should respond");
+    assert.ok(r.raw.some(x => x.text.includes("Hello from the LLM!")), "Response should include LLM output");
   });
 
   it("master user disables chat with !config enabled false", async () => {
-    const { context, responses } = createIncomingContext({
-      chatId,
-      content: [{ type: "text", text: "!config enabled false" }],
-    });
-    await handleMessage(context);
-
-    assert.ok(responses.length > 0, "Bot should respond");
-    assert.ok(
-      responses.some((r) => r.text.toLowerCase().includes("disabled")),
-      "Should confirm disabling",
-    );
+    const chat = await t.chat(chatId);
+    const r = await chat.send("!config enabled false");
+    assert.ok(r.raw.length > 0, "Bot should respond");
+    assert.ok(r.raw.some(x => x.text.toLowerCase().includes("disabled")), "Should confirm disabling");
   });
 
   it("bot does NOT respond to messages in a disabled chat", async () => {
-    const { context, responses } = createIncomingContext({
-      chatId,
-      content: [{ type: "text", text: "Hello?" }],
-    });
-    await handleMessage(context);
-
-    assert.equal(responses.length, 0, "Bot should not respond when disabled");
+    const chat = await t.chat(chatId);
+    const r = await chat.send("Hello?");
+    assert.equal(r.raw.length, 0, "Bot should not respond when disabled");
   });
 });
 
@@ -174,25 +147,11 @@ describe("Scenario 1: Enable/disable chat flow", () => {
 // Scenario 2: Non-master cannot enable / disable
 // ═══════════════════════════════════════════════════════════════════
 describe("Scenario 2: Non-master cannot enable/disable", () => {
-  const chatId = "s2-chat";
-
-  before(async () => {
-    await seedChat(chatId);
-  });
-
   it("rejects !config enabled from non-master user", async () => {
-    const { context, responses } = createIncomingContext({
-      chatId,
-      senderIds: ["non-master-user"],
-      content: [{ type: "text", text: "!config enabled true" }],
-    });
-    await handleMessage(context);
-
-    assert.ok(responses.length > 0, "Bot should respond with error");
-    assert.ok(
-      responses.some((r) => r.text.toLowerCase().includes("master")),
-      "Should mention master permissions",
-    );
+    const chat = await t.chat("s2-chat");
+    const r = await chat.send("!config enabled true", { sender: { id: "non-master-user" } });
+    assert.ok(r.raw.length > 0, "Bot should respond with error");
+    assert.ok(r.raw.some(x => x.text.toLowerCase().includes("master")), "Should mention master permissions");
   });
 });
 
@@ -201,17 +160,10 @@ describe("Scenario 2: Non-master cannot enable/disable", () => {
 // ═══════════════════════════════════════════════════════════════════
 describe("Scenario 3: Unknown command", () => {
   it("responds with error for unknown command", async () => {
-    const { context, responses } = createIncomingContext({
-      chatId: "s3-chat",
-      content: [{ type: "text", text: "!foobar" }],
-    });
-    await handleMessage(context);
-
-    assert.ok(responses.length > 0, "Bot should respond");
-    assert.ok(
-      responses.some((r) => r.text.toLowerCase().includes("unknown command")),
-      "Should mention unknown command",
-    );
+    const chat = await t.chat("s3-chat");
+    const r = await chat.send("!foobar");
+    assert.ok(r.raw.length > 0, "Bot should respond");
+    assert.ok(r.raw.some(x => x.text.toLowerCase().includes("unknown command")), "Should mention unknown command");
   });
 });
 
@@ -219,38 +171,14 @@ describe("Scenario 3: Unknown command", () => {
 // Scenario 4: Set and get system prompt
 // ═══════════════════════════════════════════════════════════════════
 describe("Scenario 4: Set and get system prompt", () => {
-  const chatId = "s4-chat";
+  it("sets and retrieves system prompt with !config system_prompt", async () => {
+    const chat = await t.chat("s4-chat", { enabled: true });
 
-  before(async () => {
-    await seedChat(chatId, { enabled: true });
-  });
+    const r1 = await chat.send("!config system_prompt pirate");
+    assert.ok(r1.raw.some(x => x.text.includes("pirate")), "Should confirm prompt containing 'pirate'");
 
-  it("sets system prompt with !config system_prompt", async () => {
-    const { context, responses } = createIncomingContext({
-      chatId,
-      content: [{ type: "text", text: "!config system_prompt pirate" }],
-    });
-    await handleMessage(context);
-
-    assert.ok(responses.length > 0);
-    assert.ok(
-      responses.some((r) => r.text.includes("pirate")),
-      "Should confirm prompt containing 'pirate'",
-    );
-  });
-
-  it("retrieves system prompt with !config system_prompt (no value)", async () => {
-    const { context, responses } = createIncomingContext({
-      chatId,
-      content: [{ type: "text", text: "!config system_prompt" }],
-    });
-    await handleMessage(context);
-
-    assert.ok(responses.length > 0);
-    assert.ok(
-      responses.some((r) => r.text.includes("pirate")),
-      "Should return prompt containing 'pirate'",
-    );
+    const r2 = await chat.send("!config system_prompt");
+    assert.ok(r2.raw.some(x => x.text.includes("pirate")), "Should return prompt containing 'pirate'");
   });
 });
 
@@ -258,10 +186,7 @@ describe("Scenario 4: Set and get system prompt", () => {
 // Scenario 5: Set and get model
 // ═══════════════════════════════════════════════════════════════════
 describe("Scenario 5: Set and get model", () => {
-  const chatId = "s5-chat";
-
   before(async () => {
-    await seedChat(chatId, { enabled: true });
     // Re-seed models cache (may have been deleted by action-test-functions)
     await fs.mkdir(path.dirname(CACHE_PATH), { recursive: true });
     await fs.writeFile(CACHE_PATH, JSON.stringify([
@@ -269,32 +194,15 @@ describe("Scenario 5: Set and get model", () => {
     ]));
   });
 
-  it("sets model with !config model", async () => {
-    const { context, responses } = createIncomingContext({
-      chatId,
-      content: [{ type: "text", text: "!config model gpt-4.1-mini" }],
-    });
-    await handleMessage(context);
+  it("sets and retrieves model with !config model", async () => {
+    const chat = await t.chat("s5-chat", { enabled: true });
 
-    assert.ok(responses.length > 0);
-    assert.ok(
-      responses.some((r) => r.text.includes("Model set to")),
-      `Should confirm model was set, got: ${JSON.stringify(responses.map(r => r.text))}`,
-    );
-  });
+    const r1 = await chat.send("!config model gpt-4.1-mini");
+    assert.ok(r1.raw.some(x => x.text.includes("Model set to")),
+      `Should confirm model was set, got: ${JSON.stringify(r1.raw.map(x => x.text))}`);
 
-  it("retrieves model with !config", async () => {
-    const { context, responses } = createIncomingContext({
-      chatId,
-      content: [{ type: "text", text: "!config" }],
-    });
-    await handleMessage(context);
-
-    assert.ok(responses.length > 0);
-    assert.ok(
-      responses.some((r) => r.text.includes("gpt-4.1-mini")),
-      "Should return model name in info output",
-    );
+    const r2 = await chat.send("!config");
+    assert.ok(r2.raw.some(x => x.text.includes("gpt-4.1-mini")), "Should return model name in info output");
   });
 });
 
@@ -302,50 +210,17 @@ describe("Scenario 5: Set and get model", () => {
 // Scenario 6: New conversation clears history
 // ═══════════════════════════════════════════════════════════════════
 describe("Scenario 6: New conversation clears history", () => {
-  const chatId = "s6-chat";
-
-  before(async () => {
-    await seedChat(chatId, { enabled: true });
-  });
-
   it("after !clear the next LLM call sees only the new message", async () => {
-    // Step 1 — send a message so the DB has history
-    mockServer.addResponses("First response");
-    const { context: ctx1, responses: r1 } = createIncomingContext({
-      chatId,
-      content: [{ type: "text", text: "Remember this" }],
-    });
-    await handleMessage(ctx1);
-    assert.ok(r1.some((r) => r.text.includes("First response")));
+    const chat = await t.chat("s6-chat", { enabled: true });
 
-    // Step 2 — clear history
-    const { context: ctx2, responses: r2 } = createIncomingContext({
-      chatId,
-      content: [{ type: "text", text: "!clear" }],
-    });
-    await handleMessage(ctx2);
-    assert.ok(
-      r2.some((r) => r.text.toLowerCase().includes("clear")),
-      "Should confirm clearing",
-    );
+    await chat.send("Remember this", { llm: ["First response"] });
+    const r2 = await chat.send("!clear");
+    assert.ok(r2.raw.some(x => x.text.toLowerCase().includes("clear")), "Should confirm clearing");
 
-    // Step 3 — send another message; LLM should only see 1 user message
-    const requestCountBefore = mockServer.getRequests().length;
-    mockServer.addResponses("Second response");
-    const { context: ctx3, responses: r3 } = createIncomingContext({
-      chatId,
-      content: [{ type: "text", text: "Fresh start" }],
-    });
-    await handleMessage(ctx3);
-    assert.ok(r3.some((r) => r.text.includes("Second response")));
-
-    const lastRequest = mockServer.getRequests()[requestCountBefore];
-    const userMessages = lastRequest.messages.filter((m) => m.role === "user");
-    assert.equal(
-      userMessages.length,
-      1,
-      "LLM should see only 1 user message after history clear",
-    );
+    const r3 = await chat.send("Fresh start", { llm: ["Second response"] });
+    assert.ok(r3.raw.some(x => x.text.includes("Second response")));
+    const userMessages = r3.requests[0].messages.filter(m => m.role === "user");
+    assert.equal(userMessages.length, 1, "LLM should see only 1 user message after history clear");
   });
 });
 
@@ -353,30 +228,14 @@ describe("Scenario 6: New conversation clears history", () => {
 // Scenario 7: Show info
 // ═══════════════════════════════════════════════════════════════════
 describe("Scenario 7: Show info", () => {
-  const chatId = "s7-chat";
-
-  before(async () => {
-    await seedChat(chatId, { enabled: true });
-  });
-
   it("!config shows chat ID, enabled status, and sender info", async () => {
-    const { context, responses } = createIncomingContext({
-      chatId,
-      content: [{ type: "text", text: "!config" }],
-    });
-    await handleMessage(context);
-
-    assert.ok(responses.length > 0);
-    const allText = responses.map((r) => r.text).join(" ");
+    const chatId = "s7-chat";
+    const chat = await t.chat(chatId, { enabled: true });
+    const r = await chat.send("!config");
+    const allText = r.raw.map(x => x.text).join(" ");
     assert.ok(allText.includes(chatId), "Should contain chat ID");
-    assert.ok(
-      allText.toLowerCase().includes("enabled"),
-      "Should contain enabled status",
-    );
-    assert.ok(
-      allText.toLowerCase().includes("sender"),
-      "Should contain sender info",
-    );
+    assert.ok(allText.toLowerCase().includes("enabled"), "Should contain enabled status");
+    assert.ok(allText.toLowerCase().includes("sender"), "Should contain sender info");
   });
 });
 
@@ -384,55 +243,18 @@ describe("Scenario 7: Show info", () => {
 // Scenario 8: Run JavaScript via LLM tool call
 // ═══════════════════════════════════════════════════════════════════
 describe("Scenario 8: Run JavaScript via tool call", () => {
-  const chatId = "s8-chat";
-
-  before(async () => {
-    await seedChat(chatId, { enabled: true });
-    // Enable debug so tool call output is visible in responses
-    await testDb.sql`UPDATE chats SET debug_until = '9999-01-01' WHERE chat_id = ${chatId}`;
-  });
-
   it("executes run_javascript tool call and returns final LLM reply", async () => {
-    // First LLM call → tool_call; second (after execution) → text
-    mockServer.addResponses(
-      {
-        tool_calls: [
-          {
-            id: "call_mock_js_001",
-            type: "function",
-            function: {
-              name: "run_javascript",
-              arguments: JSON.stringify({ code: "({chatId}) => chatId" }),
-            },
-          },
-        ],
-      },
-      `The chat ID is ${chatId}`,
-    );
+    const chatId = "s8-chat";
+    const chat = await t.chat(chatId, { enabled: true, debug: true });
 
-    const { context, responses } = createIncomingContext({
-      chatId,
-      content: [{ type: "text", text: "What is the chat ID?" }],
+    const r = await chat.send("What is the chat ID?", {
+      llm: [toolCall("run_javascript", { code: "({chatId}) => chatId" }), `The chat ID is ${chatId}`],
     });
-    await handleMessage(context);
 
-    // Expect at least: tool executing msg, tool result msg, final LLM reply
-    assert.ok(
-      responses.length >= 3,
-      `Expected >= 3 responses, got ${responses.length}`,
-    );
-    assert.ok(
-      responses.some((r) => r.text.includes("run_javascript")),
-      "Should show tool execution notification",
-    );
-    assert.ok(
-      responses.some((r) => r.text.includes(chatId)),
-      "Tool result should contain the chat ID",
-    );
-    assert.ok(
-      responses.some((r) => r.text.includes(`The chat ID is ${chatId}`)),
-      "Final reply should contain result",
-    );
+    assert.ok(r.raw.length >= 3, `Expected >= 3 responses, got ${r.raw.length}`);
+    assert.ok(r.raw.some(x => x.text.includes("run_javascript")), "Should show tool execution notification");
+    assert.ok(r.raw.some(x => x.text.includes(chatId)), "Tool result should contain the chat ID");
+    assert.ok(r.raw.some(x => x.text.includes(`The chat ID is ${chatId}`)), "Final reply should contain result");
   });
 });
 
@@ -441,10 +263,6 @@ describe("Scenario 8: Run JavaScript via tool call", () => {
 // ═══════════════════════════════════════════════════════════════════
 describe("Scenario 8b: Tool call depth guard", () => {
   const chatId = "s8b-chat";
-
-  before(async () => {
-    await seedChat(chatId, { enabled: true });
-  });
 
   after(() => {
     assert.equal(
@@ -455,50 +273,21 @@ describe("Scenario 8b: Tool call depth guard", () => {
   });
 
   it("offers confirmation at depth limit; stops when user declines", async () => {
-    const toolCallResponses = Array.from({ length: 15 }, (_, i) => ({
-      tool_calls: [
-        {
-          id: `call_depth_${String(i).padStart(3, "0")}`,
-          type: "function",
-          function: {
-            name: "nonexistent_action_for_depth_test",
-            arguments: "{}",
-          },
-        },
-      ],
-    }));
-    const scope = mockServer.addResponses(...toolCallResponses);
+    const toolCalls = Array.from({ length: 15 }, (_, i) =>
+      toolCall(`nonexistent_action_for_depth_test_${i}`, {}),
+    );
 
-    const requestsBefore = mockServer.getRequests().length;
-    // confirm returns false → user declines continuation
-    const { context, responses } = createIncomingContext({
-      chatId,
-      content: [{ type: "text", text: "trigger depth test" }],
-      confirm: async (message) => {
-        responses.push({ type: "confirm", text: message });
-        return false;
-      },
+    const chat = await t.chat(chatId, { enabled: true });
+    const r = await chat.send("trigger depth test", {
+      llm: toolCalls,
+      confirm: false,
     });
-    await handleMessage(context);
-    scope.clear();
 
-    const requestsAfter = mockServer.getRequests().length;
-    const totalRequests = requestsAfter - requestsBefore;
-
-    // With depth guard at 10: 1 initial + 10 continuations = 11 max
+    assert.ok(r.requests.length <= 11,
+      `Expected at most 11 LLM requests (depth guard at 10), got ${r.requests.length}`);
+    assert.ok(r.confirms.length > 0, "Should ask user for confirmation at depth limit");
     assert.ok(
-      totalRequests <= 11,
-      `Expected at most 11 LLM requests (depth guard at 10), got ${totalRequests}`,
-    );
-
-    // Should have asked via confirm (not just a static reply)
-    const confirmMessages = responses.filter((r) => r.type === "confirm");
-    assert.ok(
-      confirmMessages.length > 0,
-      "Should ask user for confirmation at depth limit",
-    );
-    assert.ok(
-      confirmMessages[0].text.toLowerCase().includes("depth") || confirmMessages[0].text.toLowerCase().includes("limit"),
+      r.confirms[0].toLowerCase().includes("depth") || r.confirms[0].toLowerCase().includes("limit"),
       "Confirm message should mention depth/limit",
     );
   });
@@ -530,35 +319,17 @@ describe("Scenario 8b: Tool call depth guard", () => {
 // Scenario 9: Group chat — only responds when mentioned
 // ═══════════════════════════════════════════════════════════════════
 describe("Scenario 9: Group chat — only responds when mentioned", () => {
-  const chatId = "s9-chat@g.us";
-
-  before(async () => {
-    await seedChat(chatId, { enabled: true });
-  });
-
   it("does NOT respond in group when bot is not mentioned", async () => {
-    const { context, responses } = createIncomingContext({
-      chatId,
-      isGroup: true,
-      content: [{ type: "text", text: "Hello everyone" }],
-    });
-    await handleMessage(context);
-
-    assert.equal(responses.length, 0, "Should not respond when not mentioned");
+    const chat = await t.chat("s9-chat@g.us", { enabled: true });
+    const r = await chat.send("Hello everyone", { isGroup: true });
+    assert.equal(r.raw.length, 0, "Should not respond when not mentioned");
   });
 
   it("responds in group when bot is @mentioned", async () => {
-    mockServer.addResponses("Hi from the bot!");
-
-    const { context, responses } = createIncomingContext({
-      chatId,
-      isGroup: true,
-      content: [{ type: "text", text: "@bot-123 what's up?" }],
-    });
-    await handleMessage(context);
-
-    assert.ok(responses.length > 0, "Should respond when mentioned");
-    assert.ok(responses.some((r) => r.text.includes("Hi from the bot!")));
+    const chat = await t.chat("s9-chat@g.us", { enabled: true });
+    const r = await chat.send("@bot-123 what's up?", { isGroup: true, llm: ["Hi from the bot!"] });
+    assert.ok(r.raw.length > 0, "Should respond when mentioned");
+    assert.ok(r.raw.some(x => x.text.includes("Hi from the bot!")));
   });
 });
 
@@ -566,24 +337,11 @@ describe("Scenario 9: Group chat — only responds when mentioned", () => {
 // Scenario 10: Private chat — always responds when enabled
 // ═══════════════════════════════════════════════════════════════════
 describe("Scenario 10: Private chat — always responds when enabled", () => {
-  const chatId = "s10-chat";
-
-  before(async () => {
-    await seedChat(chatId, { enabled: true });
-  });
-
   it("responds to any text in an enabled private chat", async () => {
-    mockServer.addResponses("Private chat response");
-
-    const { context, responses } = createIncomingContext({
-      chatId,
-      isGroup: false,
-      content: [{ type: "text", text: "Hi" }],
-    });
-    await handleMessage(context);
-
-    assert.ok(responses.length > 0);
-    assert.ok(responses.some((r) => r.text.includes("Private chat response")));
+    const chat = await t.chat("s10-chat", { enabled: true });
+    const r = await chat.send("Hi", { llm: ["Private chat response"] });
+    assert.ok(r.raw.length > 0);
+    assert.ok(r.raw.some(x => x.text.includes("Private chat response")));
   });
 });
 
@@ -621,155 +379,51 @@ describe("Scenario 11: Group stores messages even when not responding", () => {
 // Scenario 12: Debug mode — gates tool call verbose output
 // ═══════════════════════════════════════════════════════════════════
 describe("Scenario 12: Debug mode gates tool call output", () => {
-  const chatIdOff = "s12-debug-off";
-  const chatIdOn = "s12-debug-on";
-
-  before(async () => {
-    await seedChat(chatIdOff, { enabled: true });
-    await seedChat(chatIdOn, { enabled: true });
-    // Enable debug mode for the "on" chat
-    await testDb.sql`UPDATE chats SET debug_until = '9999-01-01' WHERE chat_id = ${chatIdOn}`;
-  });
-
   it("shows compact tool call and result when debug is off", async () => {
-    mockServer.addResponses(
-      {
-        tool_calls: [
-          {
-            id: "call_dbg_off_001",
-            type: "function",
-            function: {
-              name: "run_javascript",
-              arguments: JSON.stringify({ code: "() => 'hello'" }),
-            },
-          },
-        ],
-      },
-      "Final answer",
-    );
-
-    const { context, responses } = createIncomingContext({
-      chatId: chatIdOff,
-      content: [{ type: "text", text: "Test debug off" }],
+    const chat = await t.chat("s12-debug-off", { enabled: true });
+    const r = await chat.send("Test debug off", {
+      llm: [toolCall("run_javascript", { code: "() => 'hello'" }), "Final answer"],
     });
-    await handleMessage(context);
 
-    // Should have the final LLM reply
-    assert.ok(
-      responses.some((r) => r.text.includes("Final answer")),
-      "Should have the final LLM reply",
-    );
-    // Should show compact tool call with formatToolCall detail appended
-    assert.ok(
-      responses.some((r) => r.text.startsWith("🔧 run_javascript: ")),
-      `Should show compact tool call with formatted detail, got: ${responses.map(r=>r.text).join(" | ")}`,
-    );
-    // Should show compact result (no bold *Result* header)
-    assert.ok(
-      responses.some((r) => r.text.startsWith("✅") && !r.text.includes("*Result*")),
-      `Should show compact result without verbose header, got: ${responses.map(r=>r.text).join(" | ")}`,
-    );
+    assert.ok(r.raw.some(x => x.text.includes("Final answer")), "Should have the final LLM reply");
+    assert.ok(r.raw.some(x => x.text.startsWith("🔧 run_javascript: ")),
+      `Should show compact tool call, got: ${r.raw.map(x=>x.text).join(" | ")}`);
+    assert.ok(r.raw.some(x => x.text.startsWith("✅") && !x.text.includes("*Result*")),
+      `Should show compact result without verbose header, got: ${r.raw.map(x=>x.text).join(" | ")}`);
   });
 
   it("truncated result shows remaining char/line count", async () => {
-    // Generate a result longer than 200 chars with multiple lines
+    const chat = await t.chat("s12-debug-off", { enabled: true });
     const longResult = "Line one of the output\\n".repeat(20);
-    mockServer.addResponses(
-      {
-        tool_calls: [
-          {
-            id: "call_dbg_trunc_001",
-            type: "function",
-            function: {
-              name: "run_javascript",
-              arguments: JSON.stringify({ code: `() => "${longResult}"` }),
-            },
-          },
-        ],
-      },
-      "Summary of long result",
-    );
-
-    const { context, responses } = createIncomingContext({
-      chatId: chatIdOff,
-      content: [{ type: "text", text: "Get long output" }],
+    const r = await chat.send("Get long output", {
+      llm: [toolCall("run_javascript", { code: `() => "${longResult}"` }), "Summary of long result"],
     });
-    await handleMessage(context);
 
-    const truncatedResponse = responses.find((r) => r.text.startsWith("✅") && r.text.includes("…"));
-    assert.ok(
-      truncatedResponse,
-      `Should have a truncated result, got: ${responses.map(r=>r.text).join(" | ")}`,
-    );
-    // Should indicate how much more content there is
-    assert.ok(
-      /\d+/.test(truncatedResponse.text.slice(truncatedResponse.text.indexOf("…"))),
-      `Truncated result should show remaining count after '…', got: ${truncatedResponse.text}`,
-    );
+    const truncated = r.raw.find(x => x.text.startsWith("✅") && x.text.includes("…"));
+    assert.ok(truncated, `Should have a truncated result, got: ${r.raw.map(x=>x.text).join(" | ")}`);
+    assert.ok(/\d+/.test(truncated.text.slice(truncated.text.indexOf("…"))),
+      `Truncated result should show remaining count after '…', got: ${truncated.text}`);
   });
 
   it("shows formatted tool call from formatToolCall in compact mode", async () => {
-    mockServer.addResponses({
-      tool_calls: [
-        {
-          id: "call_fmt_001",
-          type: "function",
-          function: {
-            name: "chat_settings",
-            arguments: JSON.stringify({ setting: "model" }),
-          },
-        },
-      ],
+    const chat = await t.chat("s12-debug-off", { enabled: true });
+    const r = await chat.send("Show settings", {
+      llm: [toolCall("chat_settings", { setting: "model" })],
     });
 
-    const { context, responses } = createIncomingContext({
-      chatId: chatIdOff,
-      content: [{ type: "text", text: "Show settings" }],
-    });
-    await handleMessage(context);
-
-    // chat_settings.formatToolCall should produce "Getting model"
-    assert.ok(
-      responses.some((r) => r.text === "🔧 chat_settings: Getting model"),
-      `Should show formatted tool call, got: ${responses.map(r=>r.text).join(" | ")}`,
-    );
+    assert.ok(r.raw.some(x => x.text === "🔧 chat_settings: Getting model"),
+      `Should show formatted tool call, got: ${r.raw.map(x=>x.text).join(" | ")}`);
   });
 
   it("DOES send tool call args and results when debug is on", async () => {
-    mockServer.addResponses(
-      {
-        tool_calls: [
-          {
-            id: "call_dbg_on_001",
-            type: "function",
-            function: {
-              name: "run_javascript",
-              arguments: JSON.stringify({ code: "() => 'hello'" }),
-            },
-          },
-        ],
-      },
-      "Final answer debug on",
-    );
-
-    const { context, responses } = createIncomingContext({
-      chatId: chatIdOn,
-      content: [{ type: "text", text: "Test debug on" }],
+    const chat = await t.chat("s12-debug-on", { enabled: true, debug: true });
+    const r = await chat.send("Test debug on", {
+      llm: [toolCall("run_javascript", { code: "() => 'hello'" }), "Final answer debug on"],
     });
-    await handleMessage(context);
 
-    assert.ok(
-      responses.some((r) => r.text.includes("Final answer debug on")),
-      "Should have the final LLM reply",
-    );
-    assert.ok(
-      responses.some((r) => r.text.includes("🔧")),
-      "Tool call args should be shown when debug is on",
-    );
-    assert.ok(
-      responses.some((r) => r.text.includes("✅ *Result*")),
-      "Tool results should be shown when debug is on",
-    );
+    assert.ok(r.raw.some(x => x.text.includes("Final answer debug on")), "Should have the final LLM reply");
+    assert.ok(r.raw.some(x => x.text.includes("🔧")), "Tool call args should be shown when debug is on");
+    assert.ok(r.raw.some(x => x.text.includes("✅ *Result*")), "Tool results should be shown when debug is on");
   });
 });
 
@@ -847,43 +501,18 @@ describe("Scenario 11: getMessageContent extraction", () => {
 // Scenario: Opt-in actions filtered out unless enabled
 // ═══════════════════════════════════════════════════════════════════
 describe("Opt-in action filtering", () => {
-  const chatId = "opt-in-chat";
-
-  before(async () => {
-    await seedChat(chatId, { enabled: true });
-  });
-
   it("opt-in action command fails when not enabled for chat", async () => {
-    const { context, responses } = createIncomingContext({
-      chatId,
-      content: [{ type: "text", text: "!compras history" }],
-    });
-    await handleMessage(context);
-
-    assert.ok(responses.length > 0);
-    assert.ok(
-      responses.some((r) => r.text.toLowerCase().includes("unknown command")),
-      `Should reject opt-in command, got: ${JSON.stringify(responses.map(r => r.text))}`,
-    );
+    const chat = await t.chat("opt-in-chat", { enabled: true });
+    const r = await chat.send("!compras history");
+    assert.ok(r.raw.some(x => x.text.toLowerCase().includes("unknown command")),
+      `Should reject opt-in command, got: ${JSON.stringify(r.raw.map(x => x.text))}`);
   });
 
   it("opt-in action works after enabling it", async () => {
-    // Enable the opt-in action
-    await testDb.sql`UPDATE chats SET enabled_actions = '["track_purchases"]'::jsonb WHERE chat_id = ${chatId}`;
-
-    // The command should now be recognized (it'll fail because there's no actual
-    // data, but it should NOT say "unknown command")
-    const { context, responses } = createIncomingContext({
-      chatId,
-      content: [{ type: "text", text: "!compras history" }],
-    });
-    await handleMessage(context);
-
-    assert.ok(responses.length > 0);
-    assert.ok(
-      !responses.some((r) => r.text.toLowerCase().includes("unknown command")),
-      `Should recognize opt-in command after enabling, got: ${JSON.stringify(responses.map(r => r.text))}`,
-    );
+    const chat = await t.chat("opt-in-chat", { enabled: true, enabledActions: ["track_purchases"] });
+    const r = await chat.send("!compras history");
+    assert.ok(!r.raw.some(x => x.text.toLowerCase().includes("unknown command")),
+      `Should recognize opt-in command after enabling, got: ${JSON.stringify(r.raw.map(x => x.text))}`);
   });
 });
 
@@ -891,13 +520,10 @@ describe("Opt-in action filtering", () => {
 // Scenario: HtmlContent from LLM tool call sends link URL
 // ═══════════════════════════════════════════════════════════════════
 describe("HtmlContent via LLM tool call", () => {
-  const chatId = "html-tool-chat";
   /** @type {number} */
   let htmlPort;
 
   before(async () => {
-    await seedChat(chatId, { enabled: true });
-    await testDb.sql`UPDATE chats SET debug_until = '9999-01-01' WHERE chat_id = ${chatId}`;
     htmlPort = await startHtmlServer(0, testDb);
     process.env.HTML_SERVER_BASE_URL = `http://127.0.0.1:${htmlPort}`;
   });
@@ -908,42 +534,18 @@ describe("HtmlContent via LLM tool call", () => {
   });
 
   it("sends link URL to user when tool returns HtmlContent", async () => {
-    mockServer.addResponses(
-      {
-        tool_calls: [
-          {
-            id: "call_html_001",
-            type: "function",
-            function: {
-              name: "run_javascript",
-              arguments: JSON.stringify({
-                code: '() => ({ __brand: "html", html: "<h1>Report</h1>", title: "Sales Report" })',
-              }),
-            },
-          },
-        ],
-      },
-      "Here is your report!",
-    );
-
-    const { context, responses } = createIncomingContext({
-      chatId,
-      content: [{ type: "text", text: "Generate a report" }],
+    const chat = await t.chat("html-tool-chat", { enabled: true, debug: true });
+    const r = await chat.send("Generate a report", {
+      llm: [
+        toolCall("run_javascript", { code: '() => ({ __brand: "html", html: "<h1>Report</h1>", title: "Sales Report" })' }),
+        "Here is your report!",
+      ],
     });
-    await handleMessage(context);
 
-    // Should have a response containing /page/ link
-    const linkResponse = responses.find((r) => r.text.includes("/page/"));
-    assert.ok(
-      linkResponse,
-      `Should send a page link, got: ${responses.map(r => r.text).join(" | ")}`,
-    );
-    assert.ok(
-      linkResponse.text.includes("Sales Report"),
-      `Link text should include the title, got: ${linkResponse.text}`,
-    );
+    const linkResponse = r.raw.find(x => x.text.includes("/page/"));
+    assert.ok(linkResponse, `Should send a page link, got: ${r.raw.map(x => x.text).join(" | ")}`);
+    assert.ok(linkResponse.text.includes("Sales Report"), `Link text should include the title, got: ${linkResponse.text}`);
 
-    // Verify the page is actually accessible
     const urlMatch = linkResponse.text.match(/(http:\/\/[^\s]+)/);
     assert.ok(urlMatch, "Should contain a URL");
     const pageRes = await fetch(urlMatch[1]);
@@ -957,12 +559,10 @@ describe("HtmlContent via LLM tool call", () => {
 // Scenario: HtmlContent from !command sends link URL
 // ═══════════════════════════════════════════════════════════════════
 describe("HtmlContent via !command", () => {
-  const chatId = "html-cmd-chat";
   /** @type {number} */
   let htmlPort;
 
   before(async () => {
-    await seedChat(chatId, { enabled: true });
     htmlPort = await startHtmlServer(0, testDb);
     process.env.HTML_SERVER_BASE_URL = `http://127.0.0.1:${htmlPort}`;
   });
@@ -973,21 +573,11 @@ describe("HtmlContent via !command", () => {
   });
 
   it("sends link URL when !js returns HtmlContent", async () => {
-    const { context, responses } = createIncomingContext({
-      chatId,
-      content: [{ type: "text", text: '!js () => ({ __brand: "html", html: "<p>Hello</p>", title: "Test" })' }],
-    });
-    await handleMessage(context);
-
-    const linkResponse = responses.find((r) => r.text.includes("/page/"));
-    assert.ok(
-      linkResponse,
-      `Should send a page link, got: ${responses.map(r => r.text).join(" | ")}`,
-    );
-    assert.ok(
-      linkResponse.text.includes("Test"),
-      `Link text should include the title, got: ${linkResponse.text}`,
-    );
+    const chat = await t.chat("html-cmd-chat", { enabled: true });
+    const r = await chat.send('!js () => ({ __brand: "html", html: "<p>Hello</p>", title: "Test" })');
+    const linkResponse = r.raw.find(x => x.text.includes("/page/"));
+    assert.ok(linkResponse, `Should send a page link, got: ${r.raw.map(x => x.text).join(" | ")}`);
+    assert.ok(linkResponse.text.includes("Test"), `Link text should include the title, got: ${linkResponse.text}`);
   });
 });
 
@@ -1016,38 +606,16 @@ describe("Multi-turn conversation accumulates context", () => {
 // Scenario: User sends image to text-only model with media-to-text configured
 // ═══════════════════════════════════════════════════════════════════
 describe("User sends image to text-only model (media-to-text converts it)", () => {
-  const chatId = "media-convert-chat";
-
-  before(async () => {
-    await seedChat(chatId, { enabled: true });
-  });
-
   it("converts image to text via media-to-text model, then sends text to main LLM", async () => {
-    const reqsBefore = mockServer.getRequests().length;
-    // First response: media-to-text model describes the image
-    // Second response: main LLM uses the description
-    mockServer.addResponses(
-      "A photo of a sunset over the ocean.",
-      "Based on the image description, I can see a beautiful sunset!",
+    const chat = await t.chat("media-convert-chat", { enabled: true });
+    const r = await chat.send(
+      { image: "aGVsbG8=", mime: "image/jpeg", caption: "Describe this image" },
+      { llm: ["A photo of a sunset over the ocean.", "Based on the image description, I can see a beautiful sunset!"] },
     );
 
-    const { context, responses } = createIncomingContext({
-      chatId,
-      content: [
-        { type: "image", encoding: "base64", mime_type: "image/jpeg", data: "aGVsbG8=" },
-        { type: "text", text: "Describe this image" },
-      ],
-    });
-    await handleMessage(context);
-
-    assert.ok(
-      responses.some(r => r.text.includes("beautiful sunset")),
-      `Should get LLM response, got: ${responses.map(r => `[${r.type}] ${r.text.slice(0, 80)}`).join(" | ")}`,
-    );
-
-    // Verify two LLM calls were made: one for media-to-text, one for chat
-    const newReqs = mockServer.getRequests().slice(reqsBefore);
-    assert.ok(newReqs.length >= 2, `Expected at least 2 LLM requests (convert + chat), got ${newReqs.length}`);
+    assert.ok(r.raw.some(x => x.text.includes("beautiful sunset")),
+      `Should get LLM response, got: ${r.raw.map(x => `[${x.type}] ${x.text.slice(0, 80)}`).join(" | ")}`);
+    assert.ok(r.requests.length >= 2, `Expected at least 2 LLM requests (convert + chat), got ${r.requests.length}`);
   });
 });
 
@@ -1055,51 +623,20 @@ describe("User sends image to text-only model (media-to-text converts it)", () =
 // Scenario: LLM returns multiple tool calls in one turn
 // ═══════════════════════════════════════════════════════════════════
 describe("Multiple tool calls in a single LLM response", () => {
-  const chatId = "multi-tool-chat";
-
-  before(async () => {
-    await seedChat(chatId, { enabled: true });
-  });
-
   it("executes all tool calls and sends results back to LLM", async () => {
-    const reqsBefore = mockServer.getRequests().length;
-    mockServer.addResponses(
-      {
-        tool_calls: [
-          {
-            id: "call_multi_001",
-            type: "function",
-            function: {
-              name: "run_javascript",
-              arguments: JSON.stringify({ code: "() => 'result-A'" }),
-            },
-          },
-          {
-            id: "call_multi_002",
-            type: "function",
-            function: {
-              name: "run_javascript",
-              arguments: JSON.stringify({ code: "() => 'result-B'" }),
-            },
-          },
-        ],
-      },
-      "Both tools returned results A and B.",
-    );
-
-    const { context, responses } = createIncomingContext({
-      chatId,
-      content: [{ type: "text", text: "Run two things at once" }],
+    const chat = await t.chat("multi-tool-chat", { enabled: true });
+    const r = await chat.send("Run two things at once", {
+      llm: [
+        { tool_calls: [
+          { id: "call_multi_001", type: "function", function: { name: "run_javascript", arguments: JSON.stringify({ code: "() => 'result-A'" }) } },
+          { id: "call_multi_002", type: "function", function: { name: "run_javascript", arguments: JSON.stringify({ code: "() => 'result-B'" }) } },
+        ] },
+        "Both tools returned results A and B.",
+      ],
     });
-    await handleMessage(context);
 
-    assert.ok(
-      responses.some(r => r.text.includes("Both tools returned")),
-      "Should get final LLM reply after both tools",
-    );
-
-    // Verify the second LLM request contains both tool results
-    const secondReq = mockServer.getRequests()[reqsBefore + 1];
+    assert.ok(r.raw.some(x => x.text.includes("Both tools returned")), "Should get final LLM reply after both tools");
+    const secondReq = /** @type {any} */ (r.requests[1]);
     const toolMsgs = secondReq.messages.filter(m => m.role === "tool");
     assert.equal(toolMsgs.length, 2, `Should have 2 tool result messages, got ${toolMsgs.length}`);
   });
@@ -1109,33 +646,16 @@ describe("Multiple tool calls in a single LLM response", () => {
 // Scenario: Error recovery across turns
 // ═══════════════════════════════════════════════════════════════════
 describe("Error recovery across turns", () => {
-  const chatId = "error-recovery-chat";
-
-  before(async () => {
-    await seedChat(chatId, { enabled: true });
-  });
-
   it("bot recovers on next turn after LLM API error", async () => {
+    const chat = await t.chat("error-recovery-chat", { enabled: true });
+
     // Turn 1 — no mock responses queued → server returns 500
-    const { context: ctx1, responses: r1 } = createIncomingContext({
-      chatId,
-      content: [{ type: "text", text: "First message" }],
-    });
-    await handleMessage(ctx1);
-    assert.ok(r1.some(r => r.text.includes("Error")), "Should show error to user");
+    const r1 = await chat.send("First message");
+    assert.ok(r1.raw.some(x => x.text.includes("Error")), "Should show error to user");
 
     // Turn 2 — normal response
-    mockServer.addResponses("Back to normal!");
-    const { context: ctx2, responses: r2 } = createIncomingContext({
-      chatId,
-      content: [{ type: "text", text: "Try again" }],
-    });
-    await handleMessage(ctx2);
-
-    assert.ok(
-      r2.some(r => r.text.includes("Back to normal")),
-      "Should recover and respond normally on next turn",
-    );
+    const r2 = await chat.send("Try again", { llm: ["Back to normal!"] });
+    assert.ok(r2.raw.some(x => x.text.includes("Back to normal")), "Should recover and respond normally on next turn");
   });
 });
 
@@ -1144,54 +664,27 @@ describe("Error recovery across turns", () => {
 // ═══════════════════════════════════════════════════════════════════
 describe("Group respond_on modes", () => {
   it("respond_on=any: responds to every message in group", async () => {
-    const chatId = "respond-any@g.us";
-    await seedChat(chatId, { enabled: true });
-    await testDb.sql`UPDATE chats SET respond_on = 'any' WHERE chat_id = ${chatId}`;
-
-    mockServer.addResponses("Responding to everything!");
-    const { context, responses } = createIncomingContext({
-      chatId,
-      isGroup: true,
-      content: [{ type: "text", text: "Hello everyone" }],
-    });
-    await handleMessage(context);
-
-    assert.ok(responses.some(r => r.text.includes("Responding to everything")),
+    const chat = await t.chat("respond-any@g.us", { enabled: true, respondOn: "any" });
+    const r = await chat.send("Hello everyone", { isGroup: true, llm: ["Responding to everything!"] });
+    assert.ok(r.raw.some(x => x.text.includes("Responding to everything")),
       "Should respond even without mention when respond_on=any");
   });
 
   it("respond_on=mention+reply: responds to reply-to-bot", async () => {
-    const chatId = "respond-reply@g.us";
-    await seedChat(chatId, { enabled: true });
-    await testDb.sql`UPDATE chats SET respond_on = 'mention+reply' WHERE chat_id = ${chatId}`;
-
-    // Message without mention but quoting the bot
-    mockServer.addResponses("Replying to your reply!");
-    const { context, responses } = createIncomingContext({
-      chatId,
+    const chat = await t.chat("respond-reply@g.us", { enabled: true, respondOn: "mention+reply" });
+    const r = await chat.send("What did you mean?", {
       isGroup: true,
-      quotedSenderId: "bot-123",
-      content: [{ type: "text", text: "What did you mean?" }],
+      quote: { text: "something", senderId: "bot-123" },
+      llm: ["Replying to your reply!"],
     });
-    await handleMessage(context);
-
-    assert.ok(responses.some(r => r.text.includes("Replying to your reply")),
+    assert.ok(r.raw.some(x => x.text.includes("Replying to your reply")),
       "Should respond when user replies to bot's message");
   });
 
   it("respond_on=mention+reply: ignores unrelated messages", async () => {
-    const chatId = "respond-reply-ignore@g.us";
-    await seedChat(chatId, { enabled: true });
-    await testDb.sql`UPDATE chats SET respond_on = 'mention+reply' WHERE chat_id = ${chatId}`;
-
-    const { context, responses } = createIncomingContext({
-      chatId,
-      isGroup: true,
-      content: [{ type: "text", text: "Just chatting" }],
-    });
-    await handleMessage(context);
-
-    assert.equal(responses.length, 0, "Should not respond to unrelated message");
+    const chat = await t.chat("respond-reply-ignore@g.us", { enabled: true, respondOn: "mention+reply" });
+    const r = await chat.send("Just chatting", { isGroup: true });
+    assert.equal(r.raw.length, 0, "Should not respond to unrelated message");
   });
 });
 
@@ -1199,49 +692,16 @@ describe("Group respond_on modes", () => {
 // Scenario: Confirmation declined stops action execution
 // ═══════════════════════════════════════════════════════════════════
 describe("Confirmation declined prevents action execution", () => {
-  const chatId = "confirm-decline-chat";
-
-  before(async () => {
-    await seedChat(chatId, { enabled: true });
-  });
-
   it("action is skipped when user declines confirmation", async () => {
-    mockServer.addResponses(
-      {
-        tool_calls: [
-          {
-            id: "call_confirm_001",
-            type: "function",
-            function: {
-              name: "run_bash",
-              arguments: JSON.stringify({ command: "echo hello" }),
-            },
-          },
-        ],
-      },
-      "The command was not executed.",
-    );
-
-    const { context, responses } = createIncomingContext({
-      chatId,
-      content: [{ type: "text", text: "Run a shell command" }],
-      confirm: async (message) => {
-        responses.push({ type: "confirm", text: message });
-        return false;  // user declines
-      },
+    const chat = await t.chat("confirm-decline-chat", { enabled: true });
+    const r = await chat.send("Run a shell command", {
+      llm: [toolCall("run_bash", { command: "echo hello" }), "The command was not executed."],
+      confirm: false,
     });
-    await handleMessage(context);
 
-    // Should have asked for confirmation
-    assert.ok(
-      responses.some(r => r.type === "confirm"),
-      "Should ask for confirmation before running bash",
-    );
-    // The cancelled result should mention cancellation
-    assert.ok(
-      responses.some(r => r.text.toLowerCase().includes("cancel") || r.text.toLowerCase().includes("denied")),
-      `Should indicate action was cancelled, got: ${responses.map(r => r.text).join(" | ")}`,
-    );
+    assert.ok(r.confirms.length > 0, "Should ask for confirmation before running bash");
+    assert.ok(r.raw.some(x => x.text.toLowerCase().includes("cancel") || x.text.toLowerCase().includes("denied")),
+      `Should indicate action was cancelled, got: ${r.raw.map(x => x.text).join(" | ")}`);
   });
 });
 
@@ -1249,52 +709,20 @@ describe("Confirmation declined prevents action execution", () => {
 // Scenario: save_memory tool call stores memory in DB
 // ═══════════════════════════════════════════════════════════════════
 describe("Memory: save_memory tool call stores memory in DB", () => {
-  const chatId = "mem-save-chat";
-
-  before(async () => {
-    await seedChat(chatId, { enabled: true });
-    await testDb.sql`UPDATE chats SET memory = true WHERE chat_id = ${chatId}`;
-  });
-
   it("saves memory via tool call and delivers final LLM reply silently", async () => {
-    mockServer.addResponses(
-      {
-        tool_calls: [
-          {
-            id: "call_mem_save_001",
-            type: "function",
-            function: {
-              name: "save_memory",
-              arguments: JSON.stringify({ content: "User likes cats" }),
-            },
-          },
-        ],
-      },
-      "Got it, I'll remember that!",
-    );
-
-    const { context, responses } = createIncomingContext({
-      chatId,
-      content: [{ type: "text", text: "I really love cats" }],
+    const chatId = "mem-save-chat";
+    const chat = await t.chat(chatId, { enabled: true, memory: true });
+    const r = await chat.send("I really love cats", {
+      llm: [toolCall("save_memory", { content: "User likes cats" }), "Got it, I'll remember that!"],
     });
-    await handleMessage(context);
 
-    // Memory row should exist in DB
     const { rows } = await testDb.sql`SELECT * FROM memories WHERE chat_id = ${chatId}`;
     assert.ok(rows.length > 0, "Memory should be stored in DB");
     assert.equal(rows[0].content, "User likes cats");
-
-    // Final LLM text reply should be visible
-    assert.ok(
-      responses.some(r => r.text.includes("Got it, I'll remember that!")),
-      `Should deliver final LLM reply, got: ${responses.map(r => r.text).join(" | ")}`,
-    );
-
-    // silent: true suppresses the result notification (no ✅ message)
-    assert.ok(
-      !responses.some(r => r.text.startsWith("✅")),
-      `Should not show result notification for silent action, got: ${responses.map(r => r.text).join(" | ")}`,
-    );
+    assert.ok(r.raw.some(x => x.text.includes("Got it, I'll remember that!")),
+      `Should deliver final LLM reply, got: ${r.raw.map(x => x.text).join(" | ")}`);
+    assert.ok(!r.raw.some(x => x.text.startsWith("✅")),
+      `Should not show result notification for silent action, got: ${r.raw.map(x => x.text).join(" | ")}`);
   });
 });
 
@@ -1305,9 +733,9 @@ describe("Memory: injected into system prompt", () => {
   const chatId = "mem-inject-chat";
 
   before(async () => {
+    // Pre-insert a memory with embedding so the vector similarity path finds it
     await seedChat(chatId, { enabled: true });
     await testDb.sql`UPDATE chats SET memory = true, memory_threshold = -2 WHERE chat_id = ${chatId}`;
-    // Pre-insert a memory with embedding so the vector similarity path finds it
     await testDb.sql`
       INSERT INTO memories (chat_id, content, embedding, search_text)
       VALUES (${chatId}, 'User prefers dark mode', ${JSON.stringify([1, 0, 0])}::vector, to_tsvector('english', 'User prefers dark mode'))
@@ -1315,29 +743,18 @@ describe("Memory: injected into system prompt", () => {
   });
 
   it("system prompt contains relevant memories for matching message", async () => {
-    const reqsBefore = mockServer.getRequests().length;
-    mockServer.addResponses("Sure, I know your preferences!");
+    const chat = await t.chat(chatId);
+    const r = await chat.send("What are my preferences?", { llm: ["Sure, I know your preferences!"] });
 
-    const { context } = createIncomingContext({
-      chatId,
-      content: [{ type: "text", text: "What are my preferences?" }],
-    });
-    await handleMessage(context);
-
-    const llmRequest = mockServer.getRequests()[reqsBefore];
-    const systemMsg = llmRequest.messages.find(m => m.role === "system");
+    const systemMsg = /** @type {any} */ (r.requests[0]).messages.find(m => m.role === "system");
     assert.ok(systemMsg, "Should have a system message");
     const systemText = Array.isArray(systemMsg.content)
       ? systemMsg.content.map(c => c.text).join("")
       : systemMsg.content;
-    assert.ok(
-      systemText.includes("## Relevant memories"),
-      `System prompt should contain memory section, got: ${systemText.slice(-300)}`,
-    );
-    assert.ok(
-      systemText.includes("User prefers dark mode"),
-      `System prompt should contain the memory content, got: ${systemText.slice(-300)}`,
-    );
+    assert.ok(systemText.includes("## Relevant memories"),
+      `System prompt should contain memory section, got: ${systemText.slice(-300)}`);
+    assert.ok(systemText.includes("User prefers dark mode"),
+      `System prompt should contain the memory content, got: ${systemText.slice(-300)}`);
   });
 });
 
@@ -1349,7 +766,6 @@ describe("Memory: NOT injected when memory is disabled", () => {
 
   before(async () => {
     await seedChat(chatId, { enabled: true });
-    // memory defaults to false — do NOT set it to true
     await testDb.sql`UPDATE chats SET memory_threshold = -2 WHERE chat_id = ${chatId}`;
     await testDb.sql`
       INSERT INTO memories (chat_id, content, embedding, search_text)
@@ -1358,25 +774,16 @@ describe("Memory: NOT injected when memory is disabled", () => {
   });
 
   it("system prompt does NOT contain memories when memory flag is off", async () => {
-    const reqsBefore = mockServer.getRequests().length;
-    mockServer.addResponses("Hello there!");
+    const chat = await t.chat(chatId);
+    const r = await chat.send("What are my preferences?", { llm: ["Hello there!"] });
 
-    const { context } = createIncomingContext({
-      chatId,
-      content: [{ type: "text", text: "What are my preferences?" }],
-    });
-    await handleMessage(context);
-
-    const llmRequest = mockServer.getRequests()[reqsBefore];
-    const systemMsg = llmRequest.messages.find(m => m.role === "system");
+    const systemMsg = /** @type {any} */ (r.requests[0]).messages.find(m => m.role === "system");
     assert.ok(systemMsg, "Should have a system message");
     const systemText = Array.isArray(systemMsg.content)
       ? systemMsg.content.map(c => c.text).join("")
       : systemMsg.content;
-    assert.ok(
-      !systemText.includes("## Relevant memories"),
-      "System prompt should NOT contain memory section when memory is disabled",
-    );
+    assert.ok(!systemText.includes("## Relevant memories"),
+      "System prompt should NOT contain memory section when memory is disabled");
   });
 });
 
@@ -1396,27 +803,19 @@ describe("Memory: NOT searched when extracted text < 10 chars", () => {
   });
 
   it("system prompt does NOT contain memories for image-only message (no text to search)", async () => {
-    // Image-only messages have no text content, so extractTextFromMessage returns ""
-    // which is < 10 chars — memory search is skipped
-    const reqsBefore = mockServer.getRequests().length;
-    mockServer.addResponses("I see an image!");
+    const chat = await t.chat(chatId);
+    const r = await chat.send(
+      { image: "aGVsbG8=", mime: "image/jpeg" },
+      { llm: ["I see an image!"] },
+    );
 
-    const { context } = createIncomingContext({
-      chatId,
-      content: [{ type: "image", encoding: "base64", mime_type: "image/jpeg", data: "aGVsbG8=" }],
-    });
-    await handleMessage(context);
-
-    const llmRequest = mockServer.getRequests()[reqsBefore];
-    const systemMsg = llmRequest.messages.find(m => m.role === "system");
+    const systemMsg = /** @type {any} */ (r.requests[0]).messages.find(m => m.role === "system");
     assert.ok(systemMsg, "Should have a system message");
     const systemText = Array.isArray(systemMsg.content)
       ? systemMsg.content.map(c => c.text).join("")
       : systemMsg.content;
-    assert.ok(
-      !systemText.includes("## Relevant memories"),
-      "System prompt should NOT contain memory section when extracted text is too short",
-    );
+    assert.ok(!systemText.includes("## Relevant memories"),
+      "System prompt should NOT contain memory section when extracted text is too short");
   });
 });
 
@@ -1465,12 +864,8 @@ describe("Tool error → LLM self-correction", () => {
 // Scenario: _media_refs resolution in tool calls
 // ═══════════════════════════════════════════════════════════════════
 describe("_media_refs resolution in tool calls", () => {
-  const chatId = "media-refs-chat";
-
   before(async () => {
-    await seedChat(chatId, { enabled: true });
     // mock-model must support images so they pass through to formatMessagesForOpenAI
-    // (otherwise convertUnsupportedMedia strips them before mediaRegistry is populated)
     await fs.writeFile(CACHE_PATH, JSON.stringify([
       { id: "gpt-4.1-mini", name: "GPT-4.1 Mini", context_length: 128000, pricing: { prompt: "0.000001", completion: "0.000003" } },
       { id: "mock-model", architecture: { input_modalities: ["text", "image"] } },
@@ -1478,20 +873,19 @@ describe("_media_refs resolution in tool calls", () => {
   });
 
   after(async () => {
-    // Restore original models cache
     await fs.writeFile(CACHE_PATH, JSON.stringify([
       { id: "gpt-4.1-mini", name: "GPT-4.1 Mini", context_length: 128000, pricing: { prompt: "0.000001", completion: "0.000003" } },
     ]));
   });
 
   it("injects _media_refs schema when media is present and resolves refs in tool calls", async () => {
-    const reqsBefore = mockServer.getRequests().length;
-    mockServer.addResponses(
+    const chat = await t.chat("media-refs-chat", { enabled: true });
+    const r = await chat.send(
+      { image: "iVBOR", mime: "image/png", caption: "Process this image" },
       {
-        tool_calls: [
-          {
-            id: "call_mref_001",
-            type: "function",
+        llm: [
+          { tool_calls: [{
+            id: "call_mref_001", type: "function",
             function: {
               name: "run_javascript",
               arguments: JSON.stringify({
@@ -1499,54 +893,30 @@ describe("_media_refs resolution in tool calls", () => {
                 _media_refs: [1],
               }),
             },
-          },
+          }] },
+          "The image was processed.",
         ],
       },
-      "The image was processed.",
     );
 
-    const { context, responses } = createIncomingContext({
-      chatId,
-      content: [
-        { type: "image", encoding: "base64", mime_type: "image/png", data: "iVBOR" },
-        { type: "text", text: "Process this image" },
-      ],
-    });
-    await handleMessage(context);
-
-    // Tool schema should include _media_refs property
-    const firstReq = mockServer.getRequests()[reqsBefore];
+    const firstReq = /** @type {any} */ (r.requests[0]);
     assert.ok(firstReq, "Should have an LLM request");
     const tools = firstReq.tools || [];
-    const jsToolSchema = tools.find(t => t.function?.name === "run_javascript");
+    const jsToolSchema = tools.find(x => x.function?.name === "run_javascript");
     assert.ok(jsToolSchema, "Should have run_javascript in tools");
-    assert.ok(
-      jsToolSchema.function.parameters?.properties?._media_refs,
-      "Tool schema should include _media_refs when media is present",
-    );
+    assert.ok(jsToolSchema.function.parameters?.properties?._media_refs,
+      "Tool schema should include _media_refs when media is present");
 
-    // System prompt should mention media tagging
     const systemMsg = firstReq.messages.find(m => m.role === "system");
     const systemText = Array.isArray(systemMsg.content)
       ? systemMsg.content.map(c => c.text).join("")
       : systemMsg.content;
-    assert.ok(
-      systemText.includes("Media in the conversation is tagged"),
-      "System prompt should mention media tagging",
-    );
+    assert.ok(systemText.includes("Media in the conversation is tagged"),
+      "System prompt should mention media tagging");
 
-    // Tool result should reflect media was received (the code counts image blocks in context)
-    const toolResultResp = responses.find(r => r.text.includes("media_count:"));
-    assert.ok(
-      toolResultResp,
-      `Tool result should show media_count, got: ${responses.map(r => r.text).join(" | ")}`,
-    );
-
-    // Final reply delivered
-    assert.ok(
-      responses.some(r => r.text.includes("image was processed")),
-      "Should deliver final reply",
-    );
+    assert.ok(r.raw.find(x => x.text.includes("media_count:")),
+      `Tool result should show media_count, got: ${r.raw.map(x => x.text).join(" | ")}`);
+    assert.ok(r.raw.some(x => x.text.includes("image was processed")), "Should deliver final reply");
   });
 });
 
@@ -1554,32 +924,16 @@ describe("_media_refs resolution in tool calls", () => {
 // Scenario: Group chat system prompt suffix
 // ═══════════════════════════════════════════════════════════════════
 describe("Group chat system prompt suffix", () => {
-  const chatId = "group-prompt-chat@g.us";
-
-  before(async () => {
-    await seedChat(chatId, { enabled: true });
-  });
-
   it("appends 'You are in a group chat' to system prompt for group messages", async () => {
-    const reqsBefore = mockServer.getRequests().length;
-    mockServer.addResponses("Hello group!");
+    const chat = await t.chat("group-prompt-chat@g.us", { enabled: true });
+    const r = await chat.send("@bot-123 hello", { isGroup: true, llm: ["Hello group!"] });
 
-    const { context } = createIncomingContext({
-      chatId,
-      isGroup: true,
-      content: [{ type: "text", text: "@bot-123 hello" }],
-    });
-    await handleMessage(context);
-
-    const llmRequest = mockServer.getRequests()[reqsBefore];
-    const systemMsg = llmRequest.messages.find(m => m.role === "system");
+    const systemMsg = /** @type {any} */ (r.requests[0]).messages.find(m => m.role === "system");
     const systemText = Array.isArray(systemMsg.content)
       ? systemMsg.content.map(c => c.text).join("")
       : systemMsg.content;
-    assert.ok(
-      systemText.includes("You are in a group chat"),
-      `System prompt should contain group chat suffix, got: ${systemText.slice(-100)}`,
-    );
+    assert.ok(systemText.includes("You are in a group chat"),
+      `System prompt should contain group chat suffix, got: ${systemText.slice(-100)}`);
   });
 });
 
@@ -1587,33 +941,18 @@ describe("Group chat system prompt suffix", () => {
 // Scenario: Quote blocks in LLM context
 // ═══════════════════════════════════════════════════════════════════
 describe("Quote blocks in LLM context", () => {
-  const chatId = "quote-block-chat";
-
-  before(async () => {
-    await seedChat(chatId, { enabled: true });
-  });
-
   it("formats quoted text with '> ' prefix in LLM request", async () => {
-    const reqsBefore = mockServer.getRequests().length;
-    mockServer.addResponses("I see the quoted text.");
-
-    const { context } = createIncomingContext({
-      chatId,
-      content: [
-        { type: "quote", content: [{ type: "text", text: "Original quoted message" }] },
-        { type: "text", text: "What about this?" },
-      ],
+    const chat = await t.chat("quote-block-chat", { enabled: true });
+    const r = await chat.send("What about this?", {
+      quote: { text: "Original quoted message" },
+      llm: ["I see the quoted text."],
     });
-    await handleMessage(context);
 
-    const llmRequest = mockServer.getRequests()[reqsBefore];
-    const userMsg = llmRequest.messages.find(m => m.role === "user");
+    const userMsg = /** @type {any} */ (r.requests[0]).messages.find(m => m.role === "user");
     assert.ok(userMsg, "Should have a user message");
     const userContent = JSON.stringify(userMsg.content);
-    assert.ok(
-      userContent.includes("> Original quoted message"),
-      `User message should contain '> ' prefixed quoted text, got: ${userContent}`,
-    );
+    assert.ok(userContent.includes("> Original quoted message"),
+      `User message should contain '> ' prefixed quoted text, got: ${userContent}`);
   });
 });
 
@@ -1621,46 +960,20 @@ describe("Quote blocks in LLM context", () => {
 // Scenario: enabled_actions filtering for LLM tool calls
 // ═══════════════════════════════════════════════════════════════════
 describe("enabled_actions filtering for LLM tool calls", () => {
-  const chatWithout = "ea-without-chat";
-  const chatWith = "ea-with-chat";
-
-  before(async () => {
-    await seedChat(chatWithout, { enabled: true });
-    await seedChat(chatWith, { enabled: true });
-    await testDb.sql`UPDATE chats SET enabled_actions = '["track_purchases"]'::jsonb WHERE chat_id = ${chatWith}`;
-  });
-
   it("LLM tools list excludes opt-in actions unless enabled", async () => {
-    const reqsBefore = mockServer.getRequests().length;
-    mockServer.addResponses("No tracking here.");
-    mockServer.addResponses("Tracking enabled!");
+    const chatWithout = await t.chat("ea-without-chat", { enabled: true });
+    const chatWith = await t.chat("ea-with-chat", { enabled: true, enabledActions: ["track_purchases"] });
 
-    const { context: ctx1 } = createIncomingContext({
-      chatId: chatWithout,
-      content: [{ type: "text", text: "Hello" }],
-    });
-    await handleMessage(ctx1);
+    const r1 = await chatWithout.send("Hello", { llm: ["No tracking here."] });
+    const r2 = await chatWith.send("Hello", { llm: ["Tracking enabled!"] });
 
-    const { context: ctx2 } = createIncomingContext({
-      chatId: chatWith,
-      content: [{ type: "text", text: "Hello" }],
-    });
-    await handleMessage(ctx2);
+    const toolNames1 = (/** @type {any} */ (r1.requests[0]).tools || []).map(x => x.function?.name);
+    const toolNames2 = (/** @type {any} */ (r2.requests[0]).tools || []).map(x => x.function?.name);
 
-    const req1 = mockServer.getRequests()[reqsBefore];
-    const req2 = mockServer.getRequests()[reqsBefore + 1];
-
-    const toolNames1 = (req1.tools || []).map(t => t.function?.name);
-    const toolNames2 = (req2.tools || []).map(t => t.function?.name);
-
-    assert.ok(
-      !toolNames1.includes("track_purchases"),
-      `Chat without enabled_actions should NOT have track_purchases in tools, got: ${toolNames1.join(", ")}`,
-    );
-    assert.ok(
-      toolNames2.includes("track_purchases"),
-      `Chat with enabled_actions should have track_purchases in tools, got: ${toolNames2.join(", ")}`,
-    );
+    assert.ok(!toolNames1.includes("track_purchases"),
+      `Chat without enabled_actions should NOT have track_purchases, got: ${toolNames1.join(", ")}`);
+    assert.ok(toolNames2.includes("track_purchases"),
+      `Chat with enabled_actions should have track_purchases, got: ${toolNames2.join(", ")}`);
   });
 });
 
@@ -1673,7 +986,6 @@ describe("memory_threshold filters low-relevance memories", () => {
   before(async () => {
     await seedChat(chatId, { enabled: true });
     await testDb.sql`UPDATE chats SET memory = true, memory_threshold = 0.99 WHERE chat_id = ${chatId}`;
-    // Pre-insert a memory with a fixed embedding
     await testDb.sql`
       INSERT INTO memories (chat_id, content, embedding, search_text)
       VALUES (${chatId}, 'User loves hiking', ${JSON.stringify([1, 0, 0])}::vector, to_tsvector('english', 'User loves hiking'))
@@ -1681,24 +993,15 @@ describe("memory_threshold filters low-relevance memories", () => {
   });
 
   it("system prompt does NOT contain memories when similarity is below threshold", async () => {
-    const reqsBefore = mockServer.getRequests().length;
-    mockServer.addResponses("I have no relevant memories.");
+    const chat = await t.chat(chatId);
+    const r = await chat.send("Tell me about my hobbies please", { llm: ["I have no relevant memories."] });
 
-    const { context } = createIncomingContext({
-      chatId,
-      content: [{ type: "text", text: "Tell me about my hobbies please" }],
-    });
-    await handleMessage(context);
-
-    const llmRequest = mockServer.getRequests()[reqsBefore];
-    const systemMsg = llmRequest.messages.find(m => m.role === "system");
+    const systemMsg = /** @type {any} */ (r.requests[0]).messages.find(m => m.role === "system");
     const systemText = Array.isArray(systemMsg.content)
       ? systemMsg.content.map(c => c.text).join("")
       : systemMsg.content;
-    assert.ok(
-      !systemText.includes("## Relevant memories"),
-      "System prompt should NOT contain memories when threshold filters them out",
-    );
+    assert.ok(!systemText.includes("## Relevant memories"),
+      "System prompt should NOT contain memories when threshold filters them out");
   });
 });
 
@@ -1718,92 +1021,33 @@ describe("Mixed autoContinue tool calls", () => {
 // Scenario: Action instructions injection
 // ═══════════════════════════════════════════════════════════════════
 describe("Action instructions injection", () => {
-  const chatId = "action-instr-chat";
-
-  before(async () => {
-    await seedChat(chatId, { enabled: true });
-  });
-
   it("injects action instructions after first use, includes only once in subsequent calls", async () => {
-    const reqsBefore = mockServer.getRequests().length;
-    // 3 LLM responses: tool call, tool call, text reply
-    mockServer.addResponses(
-      {
-        tool_calls: [
-          {
-            id: "call_instr_001",
-            type: "function",
-            function: {
-              name: "run_javascript",
-              arguments: JSON.stringify({ code: "() => 'step1'" }),
-            },
-          },
-        ],
-      },
-      {
-        tool_calls: [
-          {
-            id: "call_instr_002",
-            type: "function",
-            function: {
-              name: "run_javascript",
-              arguments: JSON.stringify({ code: "() => 'step2'" }),
-            },
-          },
-        ],
-      },
-      "All steps complete.",
-    );
-
-    const { context, responses } = createIncomingContext({
-      chatId,
-      content: [{ type: "text", text: "Run two steps" }],
+    const chat = await t.chat("action-instr-chat", { enabled: true });
+    const r = await chat.send("Run two steps", {
+      llm: [
+        toolCall("run_javascript", { code: "() => 'step1'" }),
+        toolCall("run_javascript", { code: "() => 'step2'" }),
+        "All steps complete.",
+      ],
     });
-    await handleMessage(context);
 
-    const reqs = mockServer.getRequests().slice(reqsBefore);
-    assert.equal(reqs.length, 3, `Should have 3 LLM requests, got ${reqs.length}`);
+    assert.equal(r.requests.length, 3, `Should have 3 LLM requests, got ${r.requests.length}`);
 
-    // Extract system prompts
     const getSystemText = (req) => {
-      const sysMsg = req.messages.find(m => m.role === "system");
-      return Array.isArray(sysMsg.content)
-        ? sysMsg.content.map(c => c.text).join("")
-        : sysMsg.content;
+      const sysMsg = /** @type {any} */ (req).messages.find(m => m.role === "system");
+      return Array.isArray(sysMsg.content) ? sysMsg.content.map(c => c.text).join("") : sysMsg.content;
     };
 
-    const sys1 = getSystemText(reqs[0]);
-    const sys2 = getSystemText(reqs[1]);
-    const sys3 = getSystemText(reqs[2]);
+    const sys1 = getSystemText(r.requests[0]);
+    const sys2 = getSystemText(r.requests[1]);
+    const sys3 = getSystemText(r.requests[2]);
 
-    // First request should NOT have instructions (not yet used)
-    assert.ok(
-      !sys1.includes("## run_javascript instructions"),
-      "First request should not have run_javascript instructions",
-    );
-
-    // Second request should have instructions (injected after first use)
-    assert.ok(
-      sys2.includes("## run_javascript instructions"),
-      "Second request should have run_javascript instructions",
-    );
-
-    // Third request should still have them but only ONE occurrence
-    assert.ok(
-      sys3.includes("## run_javascript instructions"),
-      "Third request should still have run_javascript instructions",
-    );
+    assert.ok(!sys1.includes("## run_javascript instructions"), "First request should not have instructions");
+    assert.ok(sys2.includes("## run_javascript instructions"), "Second request should have instructions");
+    assert.ok(sys3.includes("## run_javascript instructions"), "Third request should still have instructions");
     const occurrences = sys3.split("## run_javascript instructions").length - 1;
-    assert.equal(
-      occurrences, 1,
-      `Should have exactly 1 occurrence of instructions, got ${occurrences}`,
-    );
-
-    // Final reply delivered
-    assert.ok(
-      responses.some(r => r.text.includes("All steps complete")),
-      "Should deliver final reply",
-    );
+    assert.equal(occurrences, 1, `Should have exactly 1 occurrence, got ${occurrences}`);
+    assert.ok(r.raw.some(x => x.text.includes("All steps complete")), "Should deliver final reply");
   });
 });
 
@@ -1811,39 +1055,16 @@ describe("Action instructions injection", () => {
 // Scenario: storeLlmContext only at depth 0
 // ═══════════════════════════════════════════════════════════════════
 describe("storeLlmContext only at depth 0", () => {
-  const chatId = "ctx-depth-chat";
-
-  before(async () => {
-    await seedChat(chatId, { enabled: true });
-  });
-
   it("stores llm_context for depth-0 assistant message but not for depth-1", async () => {
-    mockServer.addResponses(
-      {
-        tool_calls: [
-          {
-            id: "call_ctx_001",
-            type: "function",
-            function: {
-              name: "run_javascript",
-              arguments: JSON.stringify({ code: "() => 'depth-test'" }),
-            },
-          },
-        ],
-      },
-      "Depth test complete.",
-    );
-
-    const { context } = createIncomingContext({
-      chatId,
-      content: [{ type: "text", text: "Test depth context" }],
+    const chatId = "ctx-depth-chat";
+    const chat = await t.chat(chatId, { enabled: true });
+    await chat.send("Test depth context", {
+      llm: [toolCall("run_javascript", { code: "() => 'depth-test'" }), "Depth test complete."],
     });
-    await handleMessage(context);
 
     // storeLlmContext is fire-and-forget, give it time to flush
     await new Promise(r => setTimeout(r, 50));
 
-    // Query assistant messages for this chat
     const { rows } = await testDb.sql`
       SELECT message_data, llm_context
       FROM messages
@@ -1853,18 +1074,8 @@ describe("storeLlmContext only at depth 0", () => {
     `;
 
     assert.ok(rows.length >= 2, `Should have at least 2 assistant messages, got ${rows.length}`);
-
-    // First assistant message (depth 0, has tool_calls) should have llm_context
-    assert.ok(
-      rows[0].llm_context !== null,
-      "First assistant message (depth 0) should have llm_context",
-    );
-
-    // Second assistant message (depth 1, text reply) should NOT have llm_context
-    assert.ok(
-      rows[rows.length - 1].llm_context === null,
-      "Last assistant message (depth > 0) should NOT have llm_context",
-    );
+    assert.ok(rows[0].llm_context !== null, "First assistant message (depth 0) should have llm_context");
+    assert.ok(rows[rows.length - 1].llm_context === null, "Last assistant message (depth > 0) should NOT have llm_context");
   });
 });
 
@@ -1872,36 +1083,18 @@ describe("storeLlmContext only at depth 0", () => {
 // Scenario: Presence updates (composing / paused)
 // ═══════════════════════════════════════════════════════════════════
 describe("Presence updates", () => {
-  const chatId = "presence-chat";
-
-  before(async () => {
-    await seedChat(chatId, { enabled: true });
-  });
-
   it("sends composing before LLM and paused after", async () => {
-    mockServer.addResponses("Presence test reply.");
+    const chat = await t.chat("presence-chat", { enabled: true });
+    const r = await chat.send("Check presence", { llm: ["Presence test reply."] });
 
-    const { context, responses } = createIncomingContext({
-      chatId,
-      content: [{ type: "text", text: "Check presence" }],
-    });
-    await handleMessage(context);
+    assert.ok(r.presence.includes("composing"),
+      `Should send composing presence update, got: ${r.presence.join(", ")}`);
+    assert.ok(r.presence.includes("paused"),
+      `Should send paused presence update, got: ${r.presence.join(", ")}`);
 
-    const presenceUpdates = responses.filter(r => r.type === "sendPresenceUpdate");
-    assert.ok(
-      presenceUpdates.some(r => r.text === "composing"),
-      `Should send composing presence update, got: ${presenceUpdates.map(r => r.text).join(", ")}`,
-    );
-    assert.ok(
-      presenceUpdates.some(r => r.text === "paused"),
-      `Should send paused presence update, got: ${presenceUpdates.map(r => r.text).join(", ")}`,
-    );
-
-    // composing should come before the reply, paused should come after
-    const composingIdx = responses.findIndex(r => r.type === "sendPresenceUpdate" && r.text === "composing");
-    const replyIdx = responses.findIndex(r => r.text.includes("Presence test reply"));
-    const pausedIdx = responses.findIndex(r => r.type === "sendPresenceUpdate" && r.text === "paused");
-
+    const composingIdx = r.raw.findIndex(x => x.type === "sendPresenceUpdate" && x.text === "composing");
+    const replyIdx = r.raw.findIndex(x => x.text.includes("Presence test reply"));
+    const pausedIdx = r.raw.findIndex(x => x.type === "sendPresenceUpdate" && x.text === "paused");
     assert.ok(composingIdx < replyIdx, "composing should come before reply");
     assert.ok(pausedIdx > replyIdx, "paused should come after reply");
   });
@@ -1911,16 +1104,12 @@ describe("Presence updates", () => {
 // Scenario: convertUnsupportedMedia warning for video
 // ═══════════════════════════════════════════════════════════════════
 describe("convertUnsupportedMedia warning", () => {
-  const chatId = "unsupported-video-chat";
   /** @type {string} */
   let savedVideoModel;
   /** @type {string} */
   let savedMediaModel;
 
-  before(async () => {
-    await seedChat(chatId, { enabled: true });
-    // Ensure no video_to_text_model / media_to_text_model is configured
-    // (they may be set via .env), so video gets replaced with placeholder
+  before(() => {
     savedVideoModel = config.video_to_text_model;
     savedMediaModel = config.media_to_text_model;
     config.video_to_text_model = "";
@@ -1933,38 +1122,21 @@ describe("convertUnsupportedMedia warning", () => {
   });
 
   it("shows ⚠️ warning and replaces video with placeholder text", async () => {
-    const reqsBefore = mockServer.getRequests().length;
-    mockServer.addResponses("I see you tried to send a video.");
-
-    const { context, responses } = createIncomingContext({
-      chatId,
-      content: [
-        { type: "video", encoding: "base64", mime_type: "video/mp4", data: "AAAA" },
-        { type: "text", text: "Check this video" },
-      ],
-    });
-    await handleMessage(context);
-
-    // Should show ⚠️ warning about unsupported video
-    assert.ok(
-      responses.some(r => r.text.includes("⚠️") && r.text.includes("video")),
-      `Should show ⚠️ warning about video, got: ${responses.map(r => r.text).join(" | ")}`,
+    const chat = await t.chat("unsupported-video-chat", { enabled: true });
+    const r = await chat.send(
+      { video: "AAAA", mime: "video/mp4", caption: "Check this video" },
+      { llm: ["I see you tried to send a video."] },
     );
 
-    // LLM request should have the placeholder text instead of video
-    const llmRequest = mockServer.getRequests()[reqsBefore];
-    const userMsg = llmRequest.messages.find(m => m.role === "user");
+    assert.ok(r.raw.some(x => x.text.includes("⚠️") && x.text.includes("video")),
+      `Should show ⚠️ warning about video, got: ${r.raw.map(x => x.text).join(" | ")}`);
+
+    const userMsg = /** @type {any} */ (r.requests[0]).messages.find(m => m.role === "user");
     const userContent = JSON.stringify(userMsg.content);
-    assert.ok(
-      userContent.includes("[Unsupported video"),
-      `LLM request should contain placeholder text, got: ${userContent.slice(0, 300)}`,
-    );
+    assert.ok(userContent.includes("[Unsupported video"),
+      `LLM request should contain placeholder text, got: ${userContent.slice(0, 300)}`);
 
-    // Final reply delivered
-    assert.ok(
-      responses.some(r => r.text.includes("tried to send a video")),
-      "Should deliver final LLM reply",
-    );
+    assert.ok(r.raw.some(x => x.text.includes("tried to send a video")), "Should deliver final LLM reply");
   });
 });
 
