@@ -370,11 +370,11 @@ export async function processLlmResponse({ session, llmConfig, messages, mediaRe
       await hooks.onToolCall(toolCall, action?.formatToolCall);
     }
 
+    messages.push(assistantMessage);
     const storedAssistantWithTools = await addMessage(chatId, assistantMessage, senderIds);
     if (depth === 0) {
       storeLlmContext(getRootDb(), storedAssistantWithTools.message_id, chatModel, systemPrompt, messages, actions);
     }
-    messages.push(assistantMessage);
 
     // Insert stubs for each tool call (timestamps anchored to assistant message)
     for (const toolCall of response.toolCalls) {
