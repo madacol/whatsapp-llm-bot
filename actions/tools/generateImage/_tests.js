@@ -39,7 +39,6 @@ async function test_generates_image_from_prompt(action_fn) {
         assert.equal(sentImages[0].caption, "A beautiful sunset");
         // TestActionFn is typed as returning string for simplicity; cast through unknown for signal tests
         const signal = /** @type {ActionResult} */ (/** @type {unknown} */ (result));
-        assert.equal(signal.autoContinue, false);
         assert.ok(Array.isArray(signal.result));
         const blocks = /** @type {ToolContentBlock[]} */ (signal.result);
         assert.ok(blocks.some((b) => b.type === "text"));

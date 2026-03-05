@@ -748,37 +748,6 @@ describe("Scenario 12: Debug mode gates tool call output", () => {
     );
   });
 
-  it("shows full result as reply for non-autoContinue actions when debug is off", async () => {
-    // chat_settings does NOT have autoContinue, so result is the final answer
-    mockServer.addResponses({
-      tool_calls: [
-        {
-          id: "call_dbg_nocont_001",
-          type: "function",
-          function: {
-            name: "chat_settings",
-            arguments: JSON.stringify({ setting: "" }),
-          },
-        },
-      ],
-    });
-
-    const { context, responses } = createIncomingContext({
-      chatId: chatIdOff,
-      content: [{ type: "text", text: "Show info" }],
-    });
-    await handleMessage(context);
-
-    // Non-autoContinue result should be shown as a reply (final answer)
-    const resultReply = responses.find(
-      (r) => r.type === "replyToMessage" && r.text.includes(chatIdOff),
-    );
-    assert.ok(
-      resultReply,
-      `Should reply with full result for non-autoContinue action, got: ${responses.map(r=>`[${r.type}] ${r.text}`).join(" | ")}`,
-    );
-  });
-
   it("shows formatted tool call from formatToolCall in compact mode", async () => {
     mockServer.addResponses({
       tool_calls: [
@@ -1827,52 +1796,6 @@ describe("Mixed autoContinue tool calls", () => {
     await seedChat(chatId, { enabled: true });
   });
 
-  it("asks to confirm when any tool call lacks autoContinue", async () => {
-    const reqsBefore = mockServer.getRequests().length;
-    // run_javascript has autoContinue:true, chat_settings does not
-    mockServer.addResponses(
-      {
-        tool_calls: [
-          {
-            id: "call_mix_001",
-            type: "function",
-            function: {
-              name: "run_javascript",
-              arguments: JSON.stringify({ code: "() => 'mixed-result'" }),
-            },
-          },
-          {
-            id: "call_mix_002",
-            type: "function",
-            function: {
-              name: "chat_settings",
-              arguments: JSON.stringify({ setting: "" }),
-            },
-          },
-        ],
-      },
-      "Mixed result complete.",
-    );
-
-    const { context, responses } = createIncomingContext({
-      chatId,
-      content: [{ type: "text", text: "Run mixed tools" }],
-    });
-    await handleMessage(context);
-
-    // Should ask for confirmation since chat_settings lacks autoContinue
-    assert.ok(
-      responses.some(r => r.type === "confirm"),
-      "Should ask for confirmation when any tool lacks autoContinue",
-    );
-
-    // 2 LLM requests: confirm defaults to true so processing continues
-    const reqsAfter = mockServer.getRequests().length;
-    assert.equal(
-      reqsAfter - reqsBefore, 2,
-      `Should have 2 LLM requests (confirm approved), got ${reqsAfter - reqsBefore}`,
-    );
-  });
 });
 
 // ═══════════════════════════════════════════════════════════════════

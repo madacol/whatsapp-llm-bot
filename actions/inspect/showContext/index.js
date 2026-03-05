@@ -11,6 +11,7 @@ export default /** @type {defineAction} */ ((x) => x)({
   formatToolCall: () => "Showing LLM context",
   permissions: {
     autoExecute: true,
+    autoContinue: true,
     useRootDb: true,
   },
   action_fn: async function ({ chatId, rootDb }) {

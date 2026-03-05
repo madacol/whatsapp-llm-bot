@@ -78,6 +78,7 @@ export default /** @type {defineAction} */ ((x) => x)({
   formatToolCall: ({ limit }) => limit ? `Showing last ${limit} messages` : "Showing conversation",
   permissions: {
     autoExecute: true,
+    autoContinue: true,
     useRootDb: true,
   },
   action_fn: async function ({ chatId, rootDb }, params) {

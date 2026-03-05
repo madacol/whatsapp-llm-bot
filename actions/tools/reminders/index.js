@@ -58,10 +58,11 @@ export default /** @type {defineAction} */ ((x) => x)({
   },
   permissions: {
     autoExecute: true,
+    autoContinue: true,
     useRootDb: true,
   },
   /**
-   * @param {ExtendedActionContext<{autoExecute: true, useRootDb: true}>} context
+   * @param {ExtendedActionContext<{autoExecute: true, autoContinue: true, useRootDb: true}>} context
    * @param {{action: "set"|"list"|"cancel", reminder_text?: string, remind_at?: string, reminder_id?: string}} params
    */
   action_fn: async function (context, params) {

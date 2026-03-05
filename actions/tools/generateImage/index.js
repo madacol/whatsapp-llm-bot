@@ -67,7 +67,7 @@ export default /** @type {defineAction} */ ((x) => x)({
   },
   permissions: {
     autoExecute: true,
-    autoContinue: false,
+    autoContinue: true,
   },
   /**
    * @param {ActionContext} context
@@ -155,9 +155,6 @@ export default /** @type {defineAction} */ ((x) => x)({
       await context.sendImage(buffer, textContent || undefined);
     }
 
-    return {
-      result: contentBlocks,
-      autoContinue: false,
-    };
+    return { result: contentBlocks };
   },
 });
