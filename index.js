@@ -20,7 +20,8 @@ import {
   isMediaBlock,
 } from "./message-formatting.js";
 import { convertUnsupportedMedia } from "./media-to-text.js";
-import { resolveModel } from "./model-roles.js";
+import { resolveModel, ROLE_DEFINITIONS } from "./model-roles.js";
+import { getAgent } from "./agents.js";
 import { getRootDb } from "./db.js";
 import {
   extractTextFromMessage,
@@ -576,9 +577,16 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
 
     log.debug("LLM will respond");
 
-    // Get system prompt and model from current chat or use defaults
-    let systemPrompt = (chatInfo?.system_prompt || config.system_prompt) + systemPromptSuffix;
-    const chatModel = resolveModel("chat", chatInfo ?? undefined);
+    // Resolve active persona (if any)
+    const persona = chatInfo?.active_persona ? await getAgent(chatInfo.active_persona) : null;
+
+    // Get system prompt and model from persona, chat, or defaults
+    let systemPrompt = (persona?.systemPrompt ?? chatInfo?.system_prompt ?? config.system_prompt) + systemPromptSuffix;
+    const chatModel = persona?.model && persona.model in ROLE_DEFINITIONS
+      ? resolveModel(persona.model, chatInfo ?? undefined)
+      : persona?.model
+        ? persona.model
+        : resolveModel("chat", chatInfo ?? undefined);
 
     // Get latest messages from DB
     const chatMessages = await getMessages(chatId)
@@ -627,9 +635,14 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
       chatId, senderIds, context, addMessage, updateToolMessage,
     };
 
+    // Filter actions by persona whitelist if active
+    const activeActions = persona?.allowedActions
+      ? actions.filter(a => persona.allowedActions?.includes(a.name))
+      : actions;
+
     /** @type {LlmConfig} */
     const llmConfig = {
-      llmClient, chatModel, systemPrompt, actions,
+      llmClient, chatModel, systemPrompt, actions: activeActions,
       executeActionFn, actionResolver, actionLlmClient: llmClient,
     };
 
