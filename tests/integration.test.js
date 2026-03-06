@@ -410,7 +410,7 @@ describe("Scenario 12: Debug mode gates tool call output", () => {
 
     assert.ok(r.raw.some(x => x.text.includes("Final answer debug on")), "Should have the final LLM reply");
     assert.ok(r.raw.some(x => x.text.includes("🔧")), "Tool call args should be shown when debug is on");
-    assert.ok(r.raw.some(x => x.text.includes("✅ *Result*")), "Tool results should be shown when debug is on");
+    assert.ok(r.raw.some(x => x.text.startsWith("✅ *run_javascript*:")), "Tool results should be shown when debug is on");
   });
 });
 

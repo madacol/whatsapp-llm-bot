@@ -5,7 +5,7 @@
 import { getActions, executeAction, getChatActions, getChatAction, getAction } from "./actions.js";
 import config from "./config.js";
 import { createLlmClient, sendChatCompletion } from "./llm.js";
-import { shortenToolId, formatTime, isHtmlContent, createToolMessage } from "./utils.js";
+import { formatTime, isHtmlContent, createToolMessage } from "./utils.js";
 import { connectToWhatsApp } from "./whatsapp-adapter.js";
 import { startReminderDaemon } from "./reminder-daemon.js";
 import { startModelsCacheDaemon } from "./models-cache.js";
@@ -88,39 +88,40 @@ async function displayToolCall(toolCall, context, formatToolCall) {
     return;
   }
 
-  const shortId = shortenToolId(toolCall.id);
+  // Debug mode: bold name + inline params (same compact style)
   const args = parseToolArgs(toolCall.arguments);
-  const argEntries = Object.entries(args);
-  const header = `🔧 *${toolCall.name}*    [${shortId}]`;
-
-  if (argEntries.length === 0) {
-    await context.sendMessage(header);
-  } else if (argEntries.length === 1 && typeof argEntries[0][1] === "string" && argEntries[0][1].length <= 60) {
-    await context.sendMessage(header, `*${argEntries[0][0]}*: ${argEntries[0][1]}`);
+  let debugMsg = `🔧 *${toolCall.name}*`;
+  if (formatToolCall) {
+    debugMsg += `: ${formatToolCall(args)}`;
   } else {
-    const parts = argEntries.map(([k, v]) => {
-      if (typeof v === "string" && v.includes("\n")) {
-        return `*${k}*:\n\`\`\`\n${v}\n\`\`\``;
+    const entries = Object.entries(args);
+    if (entries.length > 0) {
+      const inline = entries.map(([k, v]) => {
+        const val = typeof v === "string" ? v : JSON.stringify(v);
+        return entries.length === 1 ? val : `${k}: ${val}`;
+      }).join(", ");
+      if (inline.length <= 120) {
+        debugMsg += `: ${inline}`;
+      } else {
+        debugMsg += `\n${inline.slice(0, 200)}${inline.length > 200 ? "…" : ""}`;
       }
-      const val = typeof v === "string" ? v : JSON.stringify(v, null, 2);
-      return `*${k}*: ${val}`;
-    });
-    await context.sendMessage(header, parts.join("\n\n"));
+    }
   }
+  await context.sendMessage(debugMsg);
 }
 
 /**
  * Display a tool result to the user (compact, verbose, or silent).
  * @param {string} resultMessage - The stringified result
- * @param {string} shortId - Shortened tool call ID
+ * @param {string} toolName - Name of the tool that produced the result
  * @param {Action['permissions']} permissions - Action permission flags
  * @param {Context} context
  */
-async function displayToolResult(resultMessage, shortId, permissions, context) {
+async function displayToolResult(resultMessage, toolName, permissions, context) {
   if (permissions.silent) return;
 
   if (context.isDebug) {
-    await context.sendMessage(`✅ *Result*    [${shortId}]`, resultMessage);
+    await context.sendMessage(`✅ *${toolName}*: ${resultMessage}`);
   } else if (permissions.autoContinue) {
     // Silent in non-debug — the LLM's final response incorporates the result
   } else {
@@ -166,7 +167,6 @@ async function executeAndStoreTool({
   const { executeActionFn, actionResolver, actionLlmClient } = llmConfig;
   const toolName = toolCall.name;
   const toolArgs = parseToolArgs(toolCall.arguments);
-  const shortId = shortenToolId(toolCall.id);
   log.debug("executing", toolName, toolArgs);
 
   /** Replace the stub in the messages array and persist to DB. */
@@ -208,7 +208,7 @@ async function executeAndStoreTool({
 
       const toolMessage = createToolMessage(toolCall.id, linkText);
       await replaceStub(toolMessage);
-      await hooks.onToolResult(linkText, shortId, functionResponse.permissions);
+      await hooks.onToolResult(linkText, toolName, functionResponse.permissions);
 
       return !!functionResponse.permissions.autoContinue;
     }
@@ -249,7 +249,7 @@ async function executeAndStoreTool({
         ? result
         : JSON.stringify(result, null, 2);
 
-    await hooks.onToolResult(resultMessage, shortId, functionResponse.permissions);
+    await hooks.onToolResult(resultMessage, toolName, functionResponse.permissions);
 
     return functionResponse.permissions.autoContinue;
   } catch (error) {
@@ -259,7 +259,7 @@ async function executeAndStoreTool({
     const toolError = createToolMessage(toolCall.id, errorMessage);
     await replaceStub(toolError);
 
-    await hooks.onToolError(errorMessage, shortId);
+    await hooks.onToolError(errorMessage);
 
     // Errors always auto-continue for self-correction
     return true;
@@ -639,12 +639,10 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
 
     /** @type {AgentIOHooks} */
     const hooks = {
-      onLlmResponse: (text) => context.reply("🤖 *AI Assistant*", text),
+      onLlmResponse: (text) => context.reply(`🤖 ${text}`),
       onToolCall: (toolCall, fmt) => displayToolCall(toolCall, context, fmt),
-      onToolResult: (result, shortId, perms) => displayToolResult(result, shortId, perms, context),
-      onToolError: (msg, shortId) => context.isDebug
-        ? context.sendMessage(`❌ *Tool Error*    [${shortId}]`, msg)
-        : context.sendMessage(`❌ ${msg}`),
+      onToolResult: (result, name, perms) => displayToolResult(result, name, perms, context),
+      onToolError: (msg) => context.sendMessage(`❌ ${msg}`),
       onContinuePrompt: () => context.confirm(`React 👍 to continue or 👎 to stop.`),
       onDepthLimit: () => context.confirm(
         `⚠️ *Depth limit*\n\nReached maximum tool call depth (${MAX_TOOL_CALL_DEPTH}). React 👍 to continue or 👎 to stop.`,
