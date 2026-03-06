@@ -5,7 +5,7 @@
 import { getActions, executeAction, getChatActions, getChatAction, getAction } from "./actions.js";
 import config from "./config.js";
 import { createLlmClient, sendChatCompletion } from "./llm.js";
-import { shortenToolId, formatTime, truncateWithSummary, isHtmlContent, createToolMessage } from "./utils.js";
+import { shortenToolId, formatTime, isHtmlContent, createToolMessage } from "./utils.js";
 import { connectToWhatsApp } from "./whatsapp-adapter.js";
 import { startReminderDaemon } from "./reminder-daemon.js";
 import { startModelsCacheDaemon } from "./models-cache.js";
@@ -71,9 +71,18 @@ const NO_OP_HOOKS = {
 async function displayToolCall(toolCall, context, formatToolCall) {
   if (!context.isDebug) {
     let compactMsg = `🔧 ${toolCall.name}`;
+    const args = parseToolArgs(toolCall.arguments);
     if (formatToolCall) {
-      const args = parseToolArgs(toolCall.arguments);
       compactMsg += `: ${formatToolCall(args)}`;
+    } else {
+      const entries = Object.entries(args);
+      if (entries.length > 0) {
+        const inline = entries.map(([k, v]) => {
+          const val = typeof v === "string" ? v : JSON.stringify(v);
+          return entries.length === 1 ? val : `${k}: ${val}`;
+        }).join(", ");
+        if (inline.length <= 80) compactMsg += `: ${inline}`;
+      }
     }
     await context.sendMessage(compactMsg);
     return;
@@ -113,7 +122,7 @@ async function displayToolResult(resultMessage, shortId, permissions, context) {
   if (context.isDebug) {
     await context.sendMessage(`✅ *Result*    [${shortId}]`, resultMessage);
   } else if (permissions.autoContinue) {
-    await context.sendMessage(`✅ ${truncateWithSummary(resultMessage, 200)}`);
+    // Silent in non-debug — the LLM's final response incorporates the result
   } else {
     // Non-autoContinue: this is the final answer, show full result as reply
     await context.reply(resultMessage);
@@ -582,7 +591,7 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
 
     if (skippedTypes.size > 0) {
       const types = [...skippedTypes].join(", ");
-      await context.sendMessage(`⚠️ This model doesn't support ${types} content. The ${types} was not sent to the model. Use !config media_to_text_model to set a general media-to-text model, or image_to_text_model / audio_to_text_model / video_to_text_model for per-type models.`);
+      await context.sendMessage(`⚠️ ${types} not supported by this model. Use \`!config media_to_text_model\` to enable.`);
     }
 
     // Search long-term memory for relevant past conversations
@@ -635,7 +644,7 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
       onToolResult: (result, shortId, perms) => displayToolResult(result, shortId, perms, context),
       onToolError: (msg, shortId) => context.isDebug
         ? context.sendMessage(`❌ *Tool Error*    [${shortId}]`, msg)
-        : context.sendMessage(`❌ [${shortId}] ${msg}`),
+        : context.sendMessage(`❌ ${msg}`),
       onContinuePrompt: () => context.confirm(`React 👍 to continue or 👎 to stop.`),
       onDepthLimit: () => context.confirm(
         `⚠️ *Depth limit*\n\nReached maximum tool call depth (${MAX_TOOL_CALL_DEPTH}). React 👍 to continue or 👎 to stop.`,
@@ -652,11 +661,8 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
       await processLlmResponse({ session, llmConfig, messages: preparedMessages, mediaRegistry, hooks });
     } catch (error) {
       log.error(error);
-      const errorMessage = JSON.stringify(error, null, 2);
-      await context.reply(
-        "❌ *Error*",
-        "An error occurred while processing the message.\n\n" + errorMessage,
-      );
+      const errorMessage = error instanceof Error ? error.message : JSON.stringify(error, null, 2);
+      await context.reply("❌ " + errorMessage);
     } finally {
       await messageContext.sendPresenceUpdate("paused");
     }

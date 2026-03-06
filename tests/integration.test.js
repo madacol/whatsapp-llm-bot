@@ -379,7 +379,7 @@ describe("Scenario 11: Group stores messages even when not responding", () => {
 // Scenario 12: Debug mode — gates tool call verbose output
 // ═══════════════════════════════════════════════════════════════════
 describe("Scenario 12: Debug mode gates tool call output", () => {
-  it("shows compact tool call and result when debug is off", async () => {
+  it("shows compact tool call but no result when debug is off", async () => {
     const chat = await t.chat("s12-debug-off", { enabled: true });
     const r = await chat.send("Test debug off", {
       llm: [toolCall("run_javascript", { code: "() => 'hello'" }), "Final answer"],
@@ -388,21 +388,8 @@ describe("Scenario 12: Debug mode gates tool call output", () => {
     assert.ok(r.raw.some(x => x.text.includes("Final answer")), "Should have the final LLM reply");
     assert.ok(r.raw.some(x => x.text.startsWith("🔧 run_javascript: ")),
       `Should show compact tool call, got: ${r.raw.map(x=>x.text).join(" | ")}`);
-    assert.ok(r.raw.some(x => x.text.startsWith("✅") && !x.text.includes("*Result*")),
-      `Should show compact result without verbose header, got: ${r.raw.map(x=>x.text).join(" | ")}`);
-  });
-
-  it("truncated result shows remaining char/line count", async () => {
-    const chat = await t.chat("s12-debug-off", { enabled: true });
-    const longResult = "Line one of the output\\n".repeat(20);
-    const r = await chat.send("Get long output", {
-      llm: [toolCall("run_javascript", { code: `() => "${longResult}"` }), "Summary of long result"],
-    });
-
-    const truncated = r.raw.find(x => x.text.startsWith("✅") && x.text.includes("…"));
-    assert.ok(truncated, `Should have a truncated result, got: ${r.raw.map(x=>x.text).join(" | ")}`);
-    assert.ok(/\d+/.test(truncated.text.slice(truncated.text.indexOf("…"))),
-      `Truncated result should show remaining count after '…', got: ${truncated.text}`);
+    assert.ok(!r.raw.some(x => x.text.startsWith("✅")),
+      `Should NOT show result for autoContinue tool in non-debug, got: ${r.raw.map(x=>x.text).join(" | ")}`);
   });
 
   it("shows formatted tool call from formatToolCall in compact mode", async () => {
@@ -651,7 +638,7 @@ describe("Error recovery across turns", () => {
 
     // Turn 1 — no mock responses queued → server returns 500
     const r1 = await chat.send("First message");
-    assert.ok(r1.raw.some(x => x.text.includes("Error")), "Should show error to user");
+    assert.ok(r1.raw.some(x => x.text.startsWith("❌")), "Should show error to user");
 
     // Turn 2 — normal response
     const r2 = await chat.send("Try again", { llm: ["Back to normal!"] });

@@ -59,15 +59,13 @@ export default /** @type {defineAction} */ ((x) => x)({
   },
   prompt: () => EXTRACT_PROMPT,
   action_fn: async function (context, params) {
-    const { callLlm, content, log, resolveModel: ctxResolveModel } = context;
+    const { callLlm, content, resolveModel: ctxResolveModel } = context;
 
     /** @type {ImageContentBlock[]} */
     const images = /** @type {ImageContentBlock[]} */ (content.filter(c => c.type === "image"));
     if (images.length === 0) {
       return "No image found. Please send an image along with your message.";
     }
-
-    await log("Extracting from image...");
 
     /** @type {ContentBlock[]} */
     const prompt = [

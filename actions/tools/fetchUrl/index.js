@@ -24,10 +24,10 @@ export default /** @type {defineAction} */ ((x) => x)({
   /** @param {{url?: string}} params */
   formatToolCall: ({ url }) => `Fetching "${url}"`,
   /**
-   * @param {ActionContext} context
+   * @param {ActionContext} _context
    * @param {{ url: string, max_length?: number }} params
    */
-  action_fn: async function (context, params) {
+  action_fn: async function (_context, params) {
     const maxLength = Math.max(1000, Math.min(50000, params.max_length ?? 16000));
 
     // Validate URL
@@ -41,8 +41,6 @@ export default /** @type {defineAction} */ ((x) => x)({
     if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
       return `Error: Only http and https URLs are supported, got "${parsed.protocol}"`;
     }
-
-    await context.log(`Fetching ${params.url}`);
 
     // Fetch with timeout and body size limit
     /** @type {Response} */

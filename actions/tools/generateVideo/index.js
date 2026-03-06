@@ -175,8 +175,6 @@ export default /** @type {defineAction} */ ((x) => x)({
       return "Error: FAL_KEY must be configured to generate videos.";
     }
 
-    await context.log(`Generating video: ${params.prompt}`);
-
     const model = config.video_model;
 
     // Find image in content (direct or quoted)

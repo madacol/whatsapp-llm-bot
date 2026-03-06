@@ -32,10 +32,10 @@ export default /** @type {defineAction} */ ((x) => x)({
     autoContinue: true,
   },
   /**
-   * @param {ActionContext} context
+   * @param {ActionContext} _context
    * @param {{ query?: string, modality?: string, sortBy?: string }} params
    */
-  action_fn: async function (context, params) {
+  action_fn: async function (_context, params) {
     if (!params.query && !params.modality) {
       return "Please provide at least one filter: query (e.g. 'claude', 'code generation') or modality (e.g. 'video', 'image', 'audio').";
     }
@@ -48,8 +48,6 @@ export default /** @type {defineAction} */ ((x) => x)({
     const filters = [];
     if (queryTerms.length > 0) filters.push(`query: "${params.query}"`);
     if (modality) filters.push(`modality: ${modality}`);
-    await context.log(`Searching models — ${filters.join(", ")}`);
-
     const data = await getCachedModels();
 
     if (data.length === 0) {
@@ -103,15 +101,12 @@ export default /** @type {defineAction} */ ((x) => x)({
       return `No models found matching the given filters (${filters.join(", ")}).`;
     }
 
-    await context.log(`Found ${models.length} models matching criteria`);
-
     let table = "*IN* | *OUT* | *CTX* | *MODALITY* | *MODEL* | *ID*\n";
     table += "------------------------------------------------------------\n";
     for (const model of models) {
       table += `• $${model.inputPrice.toFixed(2)} | $${model.outputPrice.toFixed(2)} | ${model.contextDisplay} | ${model.modality} | *${model.name}* | \`${model.id}\`\n`;
     }
 
-    await context.log("Model comparison complete");
     return table;
   }
 });
