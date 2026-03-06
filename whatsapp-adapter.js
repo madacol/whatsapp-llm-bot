@@ -93,7 +93,7 @@ export function createConfirm(sock, chatId) {
       /** @param {any[]} reactions */
       function handler(reactions) {
         for (const { key, reaction } of reactions) {
-          if (key.id === msgKey.id && key.remoteJid === chatId) {
+          if (key.id === msgKey.id) {
             if (reaction.text?.startsWith("👍")) {
               sock.ev.off("messages.reaction", handler);
               sock.sendMessage(chatId, {
