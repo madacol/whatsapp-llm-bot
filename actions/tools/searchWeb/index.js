@@ -23,10 +23,10 @@ export default /** @type {defineAction} */ ((x) => x)({
   /** @param {{query?: string}} params */
   formatToolCall: ({ query }) => `Searching "${query}"`,
   /**
-   * @param {ActionContext} context
+   * @param {ActionContext} _context
    * @param {{ query: string, count?: number }} params
    */
-  action_fn: async function (context, params) {
+  action_fn: async function (_context, params) {
     const apiKey = config.brave_api_key;
     if (!apiKey) {
       return "Error: BRAVE_API_KEY is not configured. Set the BRAVE_API_KEY environment variable.";
@@ -35,8 +35,6 @@ export default /** @type {defineAction} */ ((x) => x)({
     const count = Math.max(1, Math.min(10, params.count ?? 5));
 
     const url = `https://api.search.brave.com/res/v1/web/search?q=${encodeURIComponent(params.query)}&count=${count}`;
-    await context.log(`Searching the web for: ${params.query}`);
-
     const response = await fetch(url, {
       headers: { "X-Subscription-Token": apiKey },
     });

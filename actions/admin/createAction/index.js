@@ -239,7 +239,6 @@ export default /** @type {defineAction} */ ((x) => x)({
     const apiKey = config.brave_api_key;
     if (!apiKey) return "Error: BRAVE_API_KEY is not configured.";
     const count = Math.max(1, Math.min(10, params.count ?? 5));
-    await context.log("Searching: " + params.query);
     const url = "https://api.search.brave.com/res/v1/web/search"
       + "?q=" + encodeURIComponent(params.query) + "&count=" + count;
     const response = await fetch(url, {

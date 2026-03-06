@@ -159,7 +159,7 @@ describe("LLM pipeline via createMessageHandler", () => {
     await handleMessage(context);
 
     assert.ok(
-      responses.some(r => r.text.includes("Error")),
+      responses.some(r => r.text.startsWith("❌")),
       "Should show error to user",
     );
   });

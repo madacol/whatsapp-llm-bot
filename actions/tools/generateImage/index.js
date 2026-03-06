@@ -80,8 +80,6 @@ export default /** @type {defineAction} */ ((x) => x)({
       return "Error: LLM_API_KEY and BASE_URL must be configured.";
     }
 
-    await context.log(`Generating image: ${params.prompt}`);
-
     const userParts = buildUserParts(params.prompt, context.content);
 
     const url = `${baseUrl.replace(/\/$/, "")}/chat/completions`;
@@ -104,7 +102,6 @@ export default /** @type {defineAction} */ ((x) => x)({
     }
 
     const data = await response.json();
-    await context.log("Image API response: " + JSON.stringify(data).slice(0, 500));
     const message = data.choices?.[0]?.message;
 
     if (!message) {
