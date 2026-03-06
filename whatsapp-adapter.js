@@ -9,6 +9,8 @@ import {
   downloadMediaMessage,
   Browsers,
   fetchLatestWaWebVersion,
+  isLidUser,
+  jidNormalizedUser,
 } from "@whiskeysockets/baileys";
 import { exec } from "child_process";
 import { rm } from "fs/promises";
@@ -281,7 +283,16 @@ export async function adaptIncomingMessage(baileysMessage, sock, messageHandler)
     return
   }
 
-  const chatId = baileysMessage.key.remoteJid || "";
+  let chatId = baileysMessage.key.remoteJid || "";
+
+  // Baileys sometimes uses LID (@lid) instead of phone number (@s.whatsapp.net)
+  // for the same 1:1 chat. Normalize to PN so settings/messages stay consistent.
+  if (isLidUser(chatId)) {
+    const pn = await sock.signalRepository.lidMapping.getPNForLID(chatId);
+    if (pn) {
+      chatId = jidNormalizedUser(pn);
+    }
+  }
   // Baileys key type doesn't declare LID/PID fields used for sender identification
   const key = /** @type {typeof baileysMessage.key & { participantLid?: string, participantPid?: string, senderLid?: string, senderPid?: string }} */ (baileysMessage.key);
   /** @type {string[]} */
