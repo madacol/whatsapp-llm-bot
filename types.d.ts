@@ -258,8 +258,8 @@ type AppAction = Action & {
 type AgentIOHooks = {
   onLlmResponse?: (text: string) => Promise<void>;
   onToolCall?: (toolCall: LlmChatResponse['toolCalls'][0], formatToolCall?: (params: Record<string, any>) => string) => Promise<void>;
-  onToolResult?: (result: string, shortId: string, permissions: PermissionFlags) => Promise<void>;
-  onToolError?: (error: string, shortId: string) => Promise<void>;
+  onToolResult?: (result: string, toolName: string, permissions: PermissionFlags) => Promise<void>;
+  onToolError?: (error: string) => Promise<void>;
   onContinuePrompt?: () => Promise<boolean>;
   onDepthLimit?: () => Promise<boolean>;
   onUsage?: (cost: string, tokens: { prompt: number; completion: number; cached: number }) => Promise<void>;
