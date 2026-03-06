@@ -121,7 +121,7 @@ async function displayToolResult(resultMessage, toolName, permissions, context) 
   if (permissions.silent) return;
 
   if (context.isDebug) {
-    await context.sendMessage(`✅ *${toolName}*: ${resultMessage}`);
+    await context.sendMessage(`> 🔧 ${toolName}\n✅ ${resultMessage}`);
   } else if (permissions.autoContinue) {
     // Silent in non-debug — the LLM's final response incorporates the result
   } else {
