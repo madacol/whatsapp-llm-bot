@@ -28,6 +28,11 @@ type AudioContentBlock = {
   mime_type?: string;
   data: string;
 };
+type CodeContentBlock = {
+  type: "code";
+  language?: string;
+  code: string;
+};
 type QuoteContentBlock = {
   type: "quote";
   quotedSenderId?: string;
@@ -64,7 +69,7 @@ type ContentBlock = IncomingContentBlock | ToolCallContentBlock;
   type ToolMessage = {
     role: "tool";
     tool_id: string;
-    content: (TextContentBlock | ImageContentBlock | VideoContentBlock | AudioContentBlock)[];
+    content: ToolContentBlock[];
   };
 
   type Message = UserMessage | AssistantMessage | ToolMessage;
@@ -99,8 +104,7 @@ type IncomingContext = {
   replyToMessage: (text: string) => Promise<void>;
   reactToMessage: (emoji: string) => Promise<void>;
   sendPoll: (name: string, options: string[], selectableCount?: number) => Promise<void>;
-  sendImage: (image: Buffer, caption?: string) => Promise<void>;
-  sendVideo: (video: Buffer, caption?: string) => Promise<void>;
+  send: (content: SendContent) => Promise<void>;
   confirm: (message: string, hooks?: ConfirmHooks) => Promise<boolean>;
   sendPresenceUpdate: (presence: "composing" | "paused") => Promise<void>;
 
@@ -120,8 +124,7 @@ type Context = {
   reply: (header: string, message?: string) => Promise<void>;
   reactToMessage: (emoji: string) => Promise<void>;
   sendPoll: (name: string, options: string[], selectableCount?: number) => Promise<void>;
-  sendImage: (image: Buffer, caption?: string) => Promise<void>;
-  sendVideo: (video: Buffer, caption?: string) => Promise<void>;
+  send: (content: SendContent) => Promise<void>;
   confirm: (message: string, hooks?: ConfirmHooks) => Promise<boolean>;
 };
 
@@ -141,8 +144,7 @@ type ActionContext = {
   reply: (message: string) => Promise<void>; // Header already baked in
   reactToMessage: (emoji: string) => Promise<void>;
   sendPoll: (name: string, options: string[], selectableCount?: number) => Promise<void>;
-  sendImage: (image: Buffer, caption?: string) => Promise<void>;
-  sendVideo: (video: Buffer, caption?: string) => Promise<void>;
+  send: (content: SendContent) => Promise<void>;
   confirm: (message: string) => Promise<boolean>;
   resolveModel: (role: string) => string;
   agentDepth?: number;
@@ -206,7 +208,9 @@ type ExtendedActionContext<P extends PermissionFlags> = ActionContext
   & (P["useChatDb"] extends true ? { chatDb: PGlite } : {})
   & (P["useLlm"] extends true ? { callLlm: CallLlm; llmClient: LlmClient } : {});
 
-type ToolContentBlock = TextContentBlock | ImageContentBlock | VideoContentBlock | AudioContentBlock;
+type ToolContentBlock = TextContentBlock | ImageContentBlock | VideoContentBlock | AudioContentBlock | CodeContentBlock;
+
+type SendContent = string | ToolContentBlock | ToolContentBlock[];
 
 type HtmlContent = { __brand: "html"; html: string; title?: string };
 
@@ -258,7 +262,7 @@ type AppAction = Action & {
 type AgentIOHooks = {
   onLlmResponse?: (text: string) => Promise<void>;
   onToolCall?: (toolCall: LlmChatResponse['toolCalls'][0], formatToolCall?: (params: Record<string, any>) => string) => Promise<void>;
-  onToolResult?: (result: string, toolName: string, permissions: PermissionFlags) => Promise<void>;
+  onToolResult?: (blocks: ToolContentBlock[], toolName: string, permissions: PermissionFlags) => Promise<void>;
   onToolError?: (error: string) => Promise<void>;
   onContinuePrompt?: () => Promise<boolean>;
   onDepthLimit?: () => Promise<boolean>;

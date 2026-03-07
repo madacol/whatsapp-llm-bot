@@ -222,7 +222,9 @@ function formatAssistantContent(message) {
 function formatToolContent(message, registry) {
   const hasMedia = message.content.some(isMediaBlock);
 
-  if (!hasMedia) {
+  const hasCode = message.content.some(b => b.type === "code");
+
+  if (!hasMedia && !hasCode) {
     /** @type {Array<OpenAI.ChatCompletionMessageParam>} */
     const results = [];
     for (const block of message.content) {
@@ -237,7 +239,7 @@ function formatToolContent(message, registry) {
     return results;
   }
 
-  // Multipart: combine text + images/video into a single tool message
+  // Multipart: combine text + images/video/code into a single tool message
   /** @type {Array<OpenAI.ChatCompletionContentPart>} */
   const parts = [];
   for (const block of message.content) {
@@ -255,6 +257,9 @@ function formatToolContent(message, registry) {
         video_url: { url: `data:${block.mime_type};base64,${block.data}` },
       }));
       tagMedia(parts, registry, block);
+    } else if (block.type === "code") {
+      const fenced = "```" + (block.language || "") + "\n" + block.code + "\n```";
+      parts.push({ type: /** @type {const} */ ("text"), text: fenced });
     }
   }
   return [/** @type {OpenAI.ChatCompletionMessageParam} */ (
@@ -324,6 +329,9 @@ export function convertToolResultToOpenAI(blocks, registry) {
       }));
       const id = tagMedia(parts, registry, block);
       mediaIds.set(block, id);
+    } else if (block.type === "code") {
+      const fenced = "```" + (block.language || "") + "\n" + block.code + "\n```";
+      parts.push({ type: /** @type {const} */ ("text"), text: fenced });
     }
   }
 

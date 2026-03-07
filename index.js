@@ -55,7 +55,7 @@ const MAX_TOOL_CALL_DEPTH = 10;
 const NO_OP_HOOKS = {
   onLlmResponse: async () => {},
   onToolCall: async () => {},
-  onToolResult: async () => {},
+  onToolResult: async (_blocks, _name, _perms) => {},
   onToolError: async () => {},
   onContinuePrompt: async () => true,
   onDepthLimit: async () => false,
@@ -112,21 +112,26 @@ async function displayToolCall(toolCall, context, formatToolCall) {
 
 /**
  * Display a tool result to the user (compact, verbose, or silent).
- * @param {string} resultMessage - The stringified result
+ * @param {ToolContentBlock[]} blocks - The result content blocks
  * @param {string} toolName - Name of the tool that produced the result
  * @param {Action['permissions']} permissions - Action permission flags
  * @param {Context} context
  */
-async function displayToolResult(resultMessage, toolName, permissions, context) {
+async function displayToolResult(blocks, toolName, permissions, context) {
   if (permissions.silent) return;
 
   if (context.isDebug) {
-    await context.sendMessage(`> 🔧 ${toolName}\n✅ ${resultMessage}`);
+    const textSummary = blocks.filter(b => b.type === "text").map(b => /** @type {TextContentBlock} */ (b).text).join("\n");
+    await context.sendMessage(`> 🔧 ${toolName}\n✅ ${textSummary || "Done."}`);
+    const nonTextBlocks = blocks.filter(b => b.type !== "text");
+    if (nonTextBlocks.length > 0) await context.send(nonTextBlocks);
   } else if (permissions.autoContinue) {
-    // Silent in non-debug — the LLM's final response incorporates the result
+    // autoContinue: suppress text, but still show media/code blocks
+    const visualBlocks = blocks.filter(b => b.type !== "text");
+    if (visualBlocks.length > 0) await context.send(visualBlocks);
   } else {
-    // Non-autoContinue: this is the final answer, show full result as reply
-    await context.reply(resultMessage);
+    // Final answer: render all blocks
+    await context.send(blocks);
   }
 }
 
@@ -208,7 +213,7 @@ async function executeAndStoreTool({
 
       const toolMessage = createToolMessage(toolCall.id, linkText);
       await replaceStub(toolMessage);
-      await hooks.onToolResult(linkText, toolName, functionResponse.permissions);
+      await hooks.onToolResult([{ type: "text", text: linkText }], toolName, functionResponse.permissions);
 
       return !!functionResponse.permissions.autoContinue;
     }
@@ -240,16 +245,12 @@ async function executeAndStoreTool({
       }
     }
 
-    const resultMessage = isContentBlocks
+    /** @type {ToolContentBlock[]} */
+    const displayBlocks = isContentBlocks
       ? /** @type {ToolContentBlock[]} */ (result)
-          .filter((b) => b.type === "text")
-          .map((b) => /** @type {TextContentBlock} */ (b).text)
-          .join("\n") || "Done."
-      : typeof result === "string"
-        ? result
-        : JSON.stringify(result, null, 2);
+      : [{ type: "text", text: typeof result === "string" ? result : JSON.stringify(result, null, 2) }];
 
-    await hooks.onToolResult(resultMessage, toolName, functionResponse.permissions);
+    await hooks.onToolResult(displayBlocks, toolName, functionResponse.permissions);
 
     return functionResponse.permissions.autoContinue;
   } catch (error) {
@@ -465,8 +466,7 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
       },
       reactToMessage: messageContext.reactToMessage,
       sendPoll: messageContext.sendPoll,
-      sendImage: messageContext.sendImage,
-      sendVideo: messageContext.sendVideo,
+      send: messageContext.send,
       confirm: messageContext.confirm,
     };
 
@@ -641,7 +641,7 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
     const hooks = {
       onLlmResponse: (text) => context.reply(`🤖 ${text}`),
       onToolCall: (toolCall, fmt) => displayToolCall(toolCall, context, fmt),
-      onToolResult: (result, name, perms) => displayToolResult(result, name, perms, context),
+      onToolResult: (blocks, name, perms) => displayToolResult(blocks, name, perms, context),
       onToolError: (msg) => context.sendMessage(`❌ ${msg}`),
       onContinuePrompt: () => context.confirm(`React 👍 to continue or 👎 to stop.`),
       onDepthLimit: () => context.confirm(
@@ -750,11 +750,25 @@ export function createReactionHandler({ store, executeActionFn, pendingByMsgKeyI
           poll: { name, values: options, selectableCount: selectableCount || 0 },
         });
       },
-      sendImage: async (image, caption) => {
-        await sock.sendMessage(pending.chat_id, { image, ...(caption && { caption }) });
-      },
-      sendVideo: async (video, caption) => {
-        await sock.sendMessage(pending.chat_id, { video, ...(caption && { caption }) });
+      send: async (content) => {
+        const blocks = typeof content === "string"
+          ? [/** @type {ToolContentBlock} */ ({ type: "text", text: content })]
+          : Array.isArray(content) ? content : [content];
+        for (const block of blocks) {
+          if (block.type === "text") {
+            await sock.sendMessage(pending.chat_id, { text: block.text });
+          } else if (block.type === "image") {
+            await sock.sendMessage(pending.chat_id, {
+              image: Buffer.from(block.data, "base64"),
+              ...(block.alt && { caption: block.alt }),
+            });
+          } else if (block.type === "video") {
+            await sock.sendMessage(pending.chat_id, {
+              video: Buffer.from(block.data, "base64"),
+              ...(block.alt && { caption: block.alt }),
+            });
+          }
+        }
       },
       confirm: async () => true, // auto-confirm: user already approved
     };

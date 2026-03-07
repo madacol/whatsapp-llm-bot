@@ -149,7 +149,6 @@ export default /** @type {defineAction} */ ((x) => x)({
         mime_type,
         data: base64,
       });
-      await context.sendImage(buffer, textContent || undefined);
     }
 
     return { result: contentBlocks };

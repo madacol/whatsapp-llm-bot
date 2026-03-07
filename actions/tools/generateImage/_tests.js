@@ -4,8 +4,6 @@ import assert from "node:assert/strict";
 export default [
 async function test_generates_image_from_prompt(action_fn) {
       const originalFetch = globalThis.fetch;
-      /** @type {Array<{image: Buffer, caption?: string}>} */
-      const sentImages = [];
       try {
         globalThis.fetch = /** @type {typeof fetch} */ (/** @type {unknown} */ (async () => ({
           ok: true,
@@ -26,18 +24,12 @@ async function test_generates_image_from_prompt(action_fn) {
         const result = await action_fn(
           {
             content: [{ type: "text", text: "a sunset" }],
-            sendImage: async (/** @type {Buffer} */ image, /** @type {string | undefined} */ caption) => {
-              sentImages.push({ image, caption });
-            },
+            send: async () => {},
             log: async () => "",
           },
           { prompt: "a sunset" },
         );
 
-        assert.equal(sentImages.length, 1);
-        assert.ok(Buffer.isBuffer(sentImages[0].image));
-        assert.equal(sentImages[0].caption, "A beautiful sunset");
-        // TestActionFn is typed as returning string for simplicity; cast through unknown for signal tests
         const signal = /** @type {ActionResult} */ (/** @type {unknown} */ (result));
         assert.ok(Array.isArray(signal.result));
         const blocks = /** @type {ToolContentBlock[]} */ (signal.result);
@@ -52,8 +44,6 @@ async function test_generates_image_from_prompt(action_fn) {
       const originalFetch = globalThis.fetch;
       /** @type {unknown} */
       let capturedBody;
-      /** @type {Array<{image: Buffer, caption?: string}>} */
-      const sentImages = [];
       try {
         globalThis.fetch = /** @type {typeof fetch} */ (/** @type {unknown} */ (async (/** @type {string} */ _url, /** @type {RequestInit} */ init) => {
           capturedBody = JSON.parse(/** @type {string} */ (init.body));
@@ -80,9 +70,7 @@ async function test_generates_image_from_prompt(action_fn) {
               { type: "text", text: "make it blue" },
               { type: "image", encoding: "base64", mime_type: "image/jpeg", data: "abc123" },
             ],
-            sendImage: async (/** @type {Buffer} */ image, /** @type {string | undefined} */ caption) => {
-              sentImages.push({ image, caption });
-            },
+            send: async () => {},
             log: async () => "",
           },
           { prompt: "make it blue" },
@@ -93,7 +81,6 @@ async function test_generates_image_from_prompt(action_fn) {
         const userContent = body.messages[0].content;
         const imagepart = userContent.find((/** @type {{type: string}} */ p) => p.type === "image_url");
         assert.ok(imagepart, "Request should include input image");
-        assert.ok(sentImages.length === 1);
       } finally {
         globalThis.fetch = originalFetch;
       }
@@ -103,8 +90,6 @@ async function test_generates_image_from_prompt(action_fn) {
       const originalFetch = globalThis.fetch;
       /** @type {unknown} */
       let capturedBody;
-      /** @type {Array<{image: Buffer, caption?: string}>} */
-      const sentImages = [];
       try {
         globalThis.fetch = /** @type {typeof fetch} */ (/** @type {unknown} */ (async (/** @type {string} */ _url, /** @type {RequestInit} */ init) => {
           capturedBody = JSON.parse(/** @type {string} */ (init.body));
@@ -133,9 +118,7 @@ async function test_generates_image_from_prompt(action_fn) {
                 { type: "image", encoding: "base64", mime_type: "image/jpeg", data: "quoted-img-data" },
               ]},
             ],
-            sendImage: async (/** @type {Buffer} */ image, /** @type {string | undefined} */ caption) => {
-              sentImages.push({ image, caption });
-            },
+            send: async () => {},
             log: async () => "",
           },
           { prompt: "make it blue" },
@@ -146,7 +129,6 @@ async function test_generates_image_from_prompt(action_fn) {
         const imagePart = userContent.find((/** @type {{type: string}} */ p) => p.type === "image_url");
         assert.ok(imagePart, "Request should include quoted image");
         assert.ok(/** @type {{image_url: {url: string}}} */ (imagePart).image_url.url.includes("quoted-img-data"));
-        assert.ok(sentImages.length === 1);
       } finally {
         globalThis.fetch = originalFetch;
       }
@@ -154,8 +136,6 @@ async function test_generates_image_from_prompt(action_fn) {
 
     async function test_deduplicates_images_from_content_array_and_images_field(action_fn) {
       const originalFetch = globalThis.fetch;
-      /** @type {Array<{image: Buffer, caption?: string}>} */
-      const sentImages = [];
       const imageDataUrl = "data:image/png;base64,iVBORw0KGgo=";
       try {
         // Simulate API returning the same image in both content array and images field
@@ -180,15 +160,12 @@ async function test_generates_image_from_prompt(action_fn) {
         const result = await action_fn(
           {
             content: [{ type: "text", text: "a cat" }],
-            sendImage: async (/** @type {Buffer} */ image, /** @type {string | undefined} */ caption) => {
-              sentImages.push({ image, caption });
-            },
+            send: async () => {},
             log: async () => "",
           },
           { prompt: "a cat" },
         );
 
-        assert.equal(sentImages.length, 1, "Should send exactly 1 image, not duplicates");
         const blocks = /** @type {ToolContentBlock[]} */ (/** @type {ActionResult} */ (/** @type {unknown} */ (result)).result);
         const imageBlocks = blocks.filter((b) => b.type === "image");
         assert.equal(imageBlocks.length, 1, "Should have exactly 1 image content block");
@@ -210,7 +187,7 @@ async function test_generates_image_from_prompt(action_fn) {
         const result = await action_fn(
           {
             content: [{ type: "text", text: "test" }],
-            sendImage: async () => {},
+            send: async () => {},
             log: async () => "",
           },
           { prompt: "test" },
@@ -241,7 +218,7 @@ async function test_generates_image_from_prompt(action_fn) {
         const result = await action_fn(
           {
             content: [{ type: "text", text: "test" }],
-            sendImage: async () => {},
+            send: async () => {},
             log: async () => "",
           },
           { prompt: "test" },
