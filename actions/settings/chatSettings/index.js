@@ -58,10 +58,31 @@ function isMaster(senderIds) {
 }
 
 /**
+ * Format the opt-in actions line showing enabled/available actions.
+ * @param {string[]} enabledActions
+ * @param {(() => Promise<Action[]>) | undefined} getActions
+ * @returns {Promise<string>}
+ */
+async function formatOptInActions(enabledActions, getActions) {
+  if (!getActions) {
+    return enabledActions.length > 0 ? enabledActions.join(", ") : "none";
+  }
+  const allActions = await getActions();
+  const optInActions = allActions.filter((a) => a.optIn);
+  if (optInActions.length === 0) return "none available";
+  return optInActions
+    .map((a) => {
+      const on = enabledActions.includes(a.name);
+      return `${a.name} (${on ? "on" : "off"})`;
+    })
+    .join(", ");
+}
+
+/**
  * Show a full summary of all chat settings.
  * @param {PGlite} rootDb
  * @param {string} chatId
- * @param {{ senderIds?: string[] }} extra
+ * @param {{ senderIds?: string[], getActions?: () => Promise<Action[]> }} extra
  * @returns {Promise<string>}
  */
 async function getInfo(rootDb, chatId, extra) {
@@ -85,7 +106,7 @@ async function getInfo(rootDb, chatId, extra) {
     : "default";
 
   const enabledActions = chat.enabled_actions ?? [];
-  const optInStr = enabledActions.length > 0 ? enabledActions.join(", ") : "none";
+  const optInStr = await formatOptInActions(enabledActions, extra.getActions);
 
   const modelRoles = chat.model_roles ?? {};
   const roleEntries = Object.entries(modelRoles);
@@ -116,9 +137,10 @@ async function getInfo(rootDb, chatId, extra) {
  * @param {PGlite} rootDb
  * @param {string} chatId
  * @param {string} setting
+ * @param {{ getActions?: () => Promise<Action[]> }} extra
  * @returns {Promise<string>}
  */
-async function getSetting(rootDb, chatId, setting) {
+async function getSetting(rootDb, chatId, setting, extra) {
   const chat = await getChatOrThrow(rootDb, chatId);
 
   switch (setting) {
@@ -161,9 +183,8 @@ async function getSetting(rootDb, chatId, setting) {
     }
     case "action": {
       const enabledActions = chat.enabled_actions ?? [];
-      return enabledActions.length > 0
-        ? `Opt-in actions: ${enabledActions.join(", ")}`
-        : "Opt-in actions: none";
+      const optInStr = await formatOptInActions(enabledActions, extra.getActions);
+      return `Opt-in actions: ${optInStr}`;
     }
     default: {
       if (MODEL_ROLE_SETTINGS.includes(setting)) {
@@ -432,11 +453,11 @@ export default /** @type {defineAction} */ ((x) => x)({
   },
   action_fn: async function ({ chatId, rootDb, senderIds, getActions, getIsAdmin }, { setting, value }) {
     if (!setting || !SETTINGS.includes(setting)) {
-      return getInfo(rootDb, chatId, { senderIds });
+      return getInfo(rootDb, chatId, { senderIds, getActions });
     }
 
     if (value === undefined || value === null) {
-      return getSetting(rootDb, chatId, setting);
+      return getSetting(rootDb, chatId, setting, { getActions });
     }
 
     const isAdmin = getIsAdmin ? await getIsAdmin() : true;
