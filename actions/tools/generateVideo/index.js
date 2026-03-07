@@ -228,7 +228,6 @@ export default /** @type {defineAction} */ ((x) => x)({
       const buffer = Buffer.from(arrayBuffer);
 
       const caption = `Generated video: ${params.prompt}`;
-      await context.sendVideo(buffer, caption);
 
       const base64 = buffer.toString("base64");
 

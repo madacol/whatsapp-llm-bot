@@ -15,6 +15,7 @@ import {
 import { exec } from "child_process";
 import { rm } from "fs/promises";
 import { needsAuthReset, sendAlertEmail } from "./notifications.js";
+import { renderCodeToImages } from "./code-image-renderer.js";
 import { createLogger } from "./logger.js";
 
 const log = createLogger("whatsapp");
@@ -367,12 +368,53 @@ export async function adaptIncomingMessage(baileysMessage, sock, messageHandler)
       });
     },
 
-    sendImage: async (image, caption) => {
-      await sock.sendMessage(chatId, { image, ...(caption && { caption }) });
-    },
+    send: async (content) => {
+      const blocks = typeof content === "string"
+        ? [/** @type {ToolContentBlock} */ ({ type: "text", text: content })]
+        : Array.isArray(content) ? content : [content];
 
-    sendVideo: async (video, caption) => {
-      await sock.sendMessage(chatId, { video, ...(caption && { caption }) });
+      for (const block of blocks) {
+        switch (block.type) {
+          case "text":
+            await sock.sendMessage(chatId, { text: block.text });
+            break;
+          case "code": {
+            try {
+              const images = await renderCodeToImages(block.code, block.language);
+              for (const image of images) {
+                await sock.sendMessage(chatId, {
+                  image,
+                  ...(block.language && { caption: block.language }),
+                });
+              }
+            } catch (err) {
+              log.error("Code image rendering failed, falling back to text:", err);
+              await sock.sendMessage(chatId, {
+                text: "```\n" + block.code + "\n```",
+              });
+            }
+            break;
+          }
+          case "image":
+            await sock.sendMessage(chatId, {
+              image: Buffer.from(block.data, "base64"),
+              ...(block.alt && { caption: block.alt }),
+            });
+            break;
+          case "video":
+            await sock.sendMessage(chatId, {
+              video: Buffer.from(block.data, "base64"),
+              ...(block.alt && { caption: block.alt }),
+            });
+            break;
+          case "audio":
+            await sock.sendMessage(chatId, {
+              audio: Buffer.from(block.data, "base64"),
+              mimetype: block.mime_type || "audio/mp4",
+            });
+            break;
+        }
+      }
     },
 
     confirm: createConfirm(sock, chatId),

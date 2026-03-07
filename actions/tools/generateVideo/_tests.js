@@ -6,8 +6,6 @@ export default [
     async function test_generates_video_from_prompt(action_fn) {
       const saved = { ...falApi, key: process.env.FAL_KEY };
       process.env.FAL_KEY = "test-key";
-      /** @type {Array<{video: Buffer, caption?: string}>} */
-      const sentVideos = [];
       try {
         falApi.submitJob = async () => ({ statusUrl: "s", responseUrl: "r" });
         falApi.pollJob = async () => {};
@@ -21,16 +19,12 @@ export default [
           const result = await action_fn(
             {
               content: [{ type: "text", text: "a flying car" }],
-              sendVideo: async (/** @type {Buffer} */ video, /** @type {string | undefined} */ caption) => {
-                sentVideos.push({ video, caption });
-              },
+              send: async () => {},
               log: async () => "",
             },
             { prompt: "a flying car" },
           );
 
-          assert.equal(sentVideos.length, 1);
-          assert.ok(Buffer.isBuffer(sentVideos[0].video));
           const signal = /** @type {ActionResult} */ (/** @type {unknown} */ (result));
           assert.ok(Array.isArray(signal.result));
           const blocks = /** @type {ToolContentBlock[]} */ (signal.result);
@@ -67,7 +61,7 @@ export default [
           await action_fn(
             {
               content: [{ type: "text", text: "test" }],
-              sendVideo: async () => {},
+              send: async () => {},
               log: async () => "",
             },
             {
@@ -103,7 +97,7 @@ export default [
         const result = await action_fn(
           {
             content: [{ type: "text", text: "test" }],
-            sendVideo: async () => {},
+            send: async () => {},
             log: async () => "",
           },
           { prompt: "test" },
@@ -129,7 +123,7 @@ export default [
         const result = await action_fn(
           {
             content: [{ type: "text", text: "test" }],
-            sendVideo: async () => {},
+            send: async () => {},
             log: async () => "",
           },
           { prompt: "test" },
@@ -170,7 +164,7 @@ export default [
                 { type: "text", text: "animate this" },
                 { type: "image", encoding: "base64", mime_type: "image/jpeg", data: "aW1hZ2VkYXRh" },
               ],
-              sendVideo: async () => {},
+              send: async () => {},
               log: async () => "",
             },
             { prompt: "animate this" },
@@ -222,7 +216,7 @@ export default [
                 },
                 { type: "text", text: "animate this" },
               ],
-              sendVideo: async () => {},
+              send: async () => {},
               log: async () => "",
             },
             { prompt: "animate this" },
@@ -265,7 +259,7 @@ export default [
           await action_fn(
             {
               content: [{ type: "text", text: "a flying car" }],
-              sendVideo: async () => {},
+              send: async () => {},
               log: async () => "",
             },
             { prompt: "a flying car" },
@@ -292,7 +286,7 @@ export default [
         const result = await action_fn(
           {
             content: [{ type: "text", text: "test" }],
-            sendVideo: async () => {},
+            send: async () => {},
             log: async () => "",
           },
           { prompt: "test" },

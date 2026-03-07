@@ -71,11 +71,23 @@ export function createIncomingContext(overrides = {}) {
     sendPoll: async (name, options, selectableCount) => {
       responses.push({ type: "sendPoll", text: JSON.stringify({ name, options, selectableCount }) });
     },
-    sendImage: async (_image, caption) => {
-      responses.push({ type: "sendImage", text: caption || "" });
-    },
-    sendVideo: async (_video, caption) => {
-      responses.push({ type: "sendVideo", text: caption || "" });
+    send: async (content) => {
+      const blocks = typeof content === "string"
+        ? [/** @type {ToolContentBlock} */ ({ type: "text", text: content })]
+        : Array.isArray(content) ? content : [content];
+      for (const block of blocks) {
+        if (block.type === "text") {
+          responses.push({ type: "send", text: block.text });
+        } else if (block.type === "image") {
+          responses.push({ type: "sendImage", text: block.alt || "" });
+        } else if (block.type === "video") {
+          responses.push({ type: "sendVideo", text: block.alt || "" });
+        } else if (block.type === "code") {
+          responses.push({ type: "sendCode", text: block.code });
+        } else if (block.type === "audio") {
+          responses.push({ type: "sendAudio", text: "" });
+        }
+      }
     },
     confirm: async (message) => {
       responses.push({ type: "confirm", text: message });

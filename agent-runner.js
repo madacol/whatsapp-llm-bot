@@ -107,8 +107,7 @@ export async function runAgent(options) {
     reply: async () => {},
     reactToMessage: async () => {},
     sendPoll: async () => {},
-    sendImage: async () => {},
-    sendVideo: async () => {},
+    send: async () => {},
     confirm: async () => true,
   };
 

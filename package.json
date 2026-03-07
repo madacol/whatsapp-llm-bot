@@ -22,11 +22,13 @@
     "dependencies": {
         "@electric-sql/pglite": "^0.3.3",
         "@mozilla/readability": "^0.6.0",
+        "@resvg/resvg-js": "^2.6.2",
         "@whiskeysockets/baileys": "7.0.0-rc.9",
         "dotenv": "^16.5.0",
         "linkedom": "^0.18.12",
         "nodemailer": "^8.0.1",
         "openai": "^4.104.0",
+        "shiki": "^4.0.1",
         "turndown": "^7.2.2"
     },
     "devDependencies": {
