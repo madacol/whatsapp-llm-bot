@@ -69,30 +69,12 @@ const NO_OP_HOOKS = {
  * @param {((params: Record<string, any>) => string)} [formatToolCall] - Optional formatter from the action
  */
 async function displayToolCall(toolCall, context, formatToolCall) {
-  if (!context.isDebug) {
-    let compactMsg = toolCall.name;
-    const args = parseToolArgs(toolCall.arguments);
-    if (formatToolCall) {
-      compactMsg += `: ${formatToolCall(args)}`;
-    } else {
-      const entries = Object.entries(args);
-      if (entries.length > 0) {
-        const inline = entries.map(([k, v]) => {
-          const val = typeof v === "string" ? v : JSON.stringify(v);
-          return entries.length === 1 ? val : `${k}: ${val}`;
-        }).join(", ");
-        if (inline.length <= 80) compactMsg += `: ${inline}`;
-      }
-    }
-    await context.send("tool-call", compactMsg);
-    return;
-  }
-
-  // Debug mode: bold name + inline params (same compact style)
+  const isDebug = context.isDebug;
+  let msg = isDebug ? `*${toolCall.name}*` : toolCall.name;
   const args = parseToolArgs(toolCall.arguments);
-  let debugMsg = `*${toolCall.name}*`;
+
   if (formatToolCall) {
-    debugMsg += `: ${formatToolCall(args)}`;
+    msg += `: ${formatToolCall(args)}`;
   } else {
     const entries = Object.entries(args);
     if (entries.length > 0) {
@@ -100,14 +82,16 @@ async function displayToolCall(toolCall, context, formatToolCall) {
         const val = typeof v === "string" ? v : JSON.stringify(v);
         return entries.length === 1 ? val : `${k}: ${val}`;
       }).join(", ");
-      if (inline.length <= 120) {
-        debugMsg += `: ${inline}`;
-      } else {
-        debugMsg += `\n${inline.slice(0, 200)}${inline.length > 200 ? "…" : ""}`;
+      const maxLen = isDebug ? 120 : 80;
+      if (inline.length <= maxLen) {
+        msg += `: ${inline}`;
+      } else if (isDebug) {
+        msg += `\n${inline.slice(0, 200)}${inline.length > 200 ? "…" : ""}`;
       }
     }
   }
-  await context.send("tool-call", debugMsg);
+
+  await context.send("tool-call", msg);
 }
 
 /**
