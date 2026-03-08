@@ -84,7 +84,7 @@ async function displayToolCall(toolCall, context, formatToolCall) {
         if (inline.length <= 80) compactMsg += `: ${inline}`;
       }
     }
-    await context.send("🔧", compactMsg);
+    await context.send("tool-call", compactMsg);
     return;
   }
 
@@ -107,7 +107,7 @@ async function displayToolCall(toolCall, context, formatToolCall) {
       }
     }
   }
-  await context.send("🔧", debugMsg);
+  await context.send("tool-call", debugMsg);
 }
 
 /**
@@ -122,16 +122,16 @@ async function displayToolResult(blocks, toolName, permissions, context) {
 
   if (context.isDebug) {
     const textSummary = blocks.filter(b => b.type === "text").map(b => /** @type {TextContentBlock} */ (b).text).join("\n");
-    await context.send("✅", `${toolName}: ${textSummary || "Done."}`);
+    await context.send("tool-result", `${toolName}: ${textSummary || "Done."}`);
     const nonTextBlocks = blocks.filter(b => b.type !== "text");
-    if (nonTextBlocks.length > 0) await context.send("🔧", nonTextBlocks);
+    if (nonTextBlocks.length > 0) await context.send("tool-result", nonTextBlocks);
   } else if (permissions.autoContinue) {
     // autoContinue: suppress text, but still show media/code blocks
     const visualBlocks = blocks.filter(b => b.type !== "text");
-    if (visualBlocks.length > 0) await context.send("🔧", visualBlocks);
+    if (visualBlocks.length > 0) await context.send("tool-result", visualBlocks);
   } else {
     // Final answer: render all blocks
-    await context.reply("🔧", blocks);
+    await context.reply("tool-result", blocks);
   }
 }
 
@@ -456,22 +456,8 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
         const adminStatus = await messageContext.getAdminStatus();
         return adminStatus === "admin" || adminStatus === "superadmin";
       },
-      send: async (header, message) => {
-        if (typeof message === "string") {
-          await messageContext.send(`${header} ${message}`);
-        } else {
-          await messageContext.send(header);
-          await messageContext.send(message);
-        }
-      },
-      reply: async (header, message) => {
-        if (typeof message === "string") {
-          await messageContext.reply(`${header} ${message}`);
-        } else {
-          await messageContext.reply(header);
-          await messageContext.reply(message);
-        }
-      },
+      send: messageContext.send,
+      reply: messageContext.reply,
       reactToMessage: messageContext.reactToMessage,
       sendPoll: messageContext.sendPoll,
       confirm: messageContext.confirm,
@@ -511,7 +497,7 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
         .find(a => commandText === a.command || commandText.startsWith(a.command + " "));
 
       if (!action) {
-        await context.reply("❌", `Unknown command: ${commandText.split(" ")[0]}`);
+        await context.reply("error", `Unknown command: ${commandText.split(" ")[0]}`);
         return;
       }
 
@@ -533,15 +519,15 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
 
         if (isHtmlContent(result)) {
           const linkText = await storeAndLinkHtml(getRootDb(), result);
-          await context.reply("🔧", linkText);
+          await context.reply("tool-result", linkText);
         } else if (typeof result === "string") {
-          await context.reply("🔧", result);
+          await context.reply("tool-result", result);
         }
       } catch (error) {
         log.error("Error executing command:", error);
         const errorMessage =
           error instanceof Error ? error.message : String(error);
-        await context.reply("❌", `Error: ${errorMessage}`);
+        await context.reply("error", `Error: ${errorMessage}`);
       }
 
       return;
@@ -598,7 +584,7 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
 
     if (skippedTypes.size > 0) {
       const types = [...skippedTypes].join(", ");
-      await context.send("⚠️", `${types} not supported by this model. Use \`!config media_to_text_model\` to enable.`);
+      await context.send("warning", `${types} not supported by this model. Use \`!config media_to_text_model\` to enable.`);
     }
 
     // Search long-term memory for relevant past conversations
@@ -616,7 +602,7 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
               const lines = similar.map(m =>
                 `• [#${m.id}] (score: ${Number(m.similarity).toFixed(3)}) ${m.content.slice(0, 100)}${m.content.length > 100 ? "…" : ""}`
               );
-              await context.send("🧠", `Recalled ${similar.length} memor${similar.length === 1 ? "y" : "ies"}\n${lines.join("\n")}`);
+              await context.send("memory", `Recalled ${similar.length} memor${similar.length === 1 ? "y" : "ies"}\n${lines.join("\n")}`);
             }
           }
         } catch (err) {
@@ -646,16 +632,16 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
 
     /** @type {AgentIOHooks} */
     const hooks = {
-      onLlmResponse: (text) => context.reply("🤖", text),
+      onLlmResponse: (text) => context.reply("llm", text),
       onToolCall: (toolCall, fmt) => displayToolCall(toolCall, context, fmt),
       onToolResult: (blocks, name, perms) => displayToolResult(blocks, name, perms, context),
-      onToolError: (msg) => context.send("❌", msg),
+      onToolError: (msg) => context.send("error", msg),
       onContinuePrompt: () => context.confirm(`React 👍 to continue or 👎 to stop.`),
       onDepthLimit: () => context.confirm(
         `⚠️ *Depth limit*\n\nReached maximum tool call depth (${MAX_TOOL_CALL_DEPTH}). React 👍 to continue or 👎 to stop.`,
       ),
       onUsage: (cost, tokens) => context.isDebug
-        ? context.send("📊", `Cost: ${cost} | prompt=${tokens.prompt} cached=${tokens.cached} completion=${tokens.completion}`)
+        ? context.send("usage", `Cost: ${cost} | prompt=${tokens.prompt} cached=${tokens.cached} completion=${tokens.completion}`)
         : Promise.resolve(),
     };
 
@@ -665,7 +651,7 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
     } catch (error) {
       log.error(error);
       const errorMessage = error instanceof Error ? error.message : JSON.stringify(error, null, 2);
-      await context.reply("❌", errorMessage);
+      await context.reply("error", errorMessage);
     } finally {
       await messageContext.sendPresenceUpdate("paused");
     }
@@ -763,22 +749,8 @@ export function createReactionHandler({ store, executeActionFn, pendingByMsgKeyI
       content: [],
       isDebug: false,
       getIsAdmin: async () => true,
-      send: async (header, message) => {
-        if (typeof message === "string") {
-          await resumeSend(`${header} ${message}`);
-        } else {
-          await resumeSend(header);
-          await resumeSend(message);
-        }
-      },
-      reply: async (header, message) => {
-        if (typeof message === "string") {
-          await resumeSend(`${header} ${message}`);
-        } else {
-          await resumeSend(header);
-          await resumeSend(message);
-        }
-      },
+      send: async (_source, content) => resumeSend(content),
+      reply: async (_source, content) => resumeSend(content),
       reactToMessage: async () => {},
       sendPoll: async (name, options, selectableCount) => {
         await sock.sendMessage(pending.chat_id, {
@@ -802,7 +774,7 @@ export function createReactionHandler({ store, executeActionFn, pendingByMsgKeyI
         if (!updated) await store.addMessage(pending.chat_id, toolMessage, pending.sender_ids);
       }
 
-      await resumeContext.send("🔧", resultText);
+      await resumeContext.send("tool-result", resultText);
     } catch (error) {
       log.error(`Error resuming action "${pending.action_name}":`, error);
       const errorMsg = error instanceof Error ? error.message : String(error);
@@ -814,7 +786,7 @@ export function createReactionHandler({ store, executeActionFn, pendingByMsgKeyI
         if (!updated) await store.addMessage(pending.chat_id, toolMessage, pending.sender_ids);
       }
 
-      await resumeContext.send("❌", `Error resuming ${pending.action_name}: ${errorMsg}`);
+      await resumeContext.send("error", `Error resuming ${pending.action_name}: ${errorMsg}`);
     }
   }
 

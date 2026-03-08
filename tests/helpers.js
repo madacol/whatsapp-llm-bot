@@ -42,11 +42,29 @@ export async function withModelsCache(models, fn) {
  * Create an IncomingContext for testing.
  * Default sender is "master-user" (matches process.env.MASTER_ID in tests).
  * @param {Partial<IncomingContext>} [overrides]
- * @returns {{ context: IncomingContext, responses: Array<{type: string, text: string}> }}
+ * @returns {{ context: IncomingContext, responses: Array<{type: string, text: string, source?: MessageSource, blockType?: string}> }}
  */
 export function createIncomingContext(overrides = {}) {
-  /** @type {Array<{type: string, text: string}>} */
+  /** @type {Array<{type: string, text: string, source?: MessageSource, blockType?: string}>} */
   const responses = [];
+
+  /**
+   * Record blocks from a send/reply call.
+   * @param {"send" | "reply"} method
+   * @param {MessageSource} source
+   * @param {SendContent} content
+   */
+  const recordBlocks = (method, source, content) => {
+    const blocks = typeof content === "string"
+      ? [/** @type {ToolContentBlock} */ ({ type: "text", text: content })]
+      : Array.isArray(content) ? content : [content];
+    for (const block of blocks) {
+      const text = block.type === "text" ? block.text
+        : block.type === "code" ? block.code
+        : ("alt" in block && block.alt) || "";
+      responses.push({ type: method, text, source, blockType: block.type });
+    }
+  };
 
   /** @type {IncomingContext} */
   const context = {
@@ -65,42 +83,8 @@ export function createIncomingContext(overrides = {}) {
     sendPoll: async (name, options, selectableCount) => {
       responses.push({ type: "sendPoll", text: JSON.stringify({ name, options, selectableCount }) });
     },
-    send: async (content) => {
-      const blocks = typeof content === "string"
-        ? [/** @type {ToolContentBlock} */ ({ type: "text", text: content })]
-        : Array.isArray(content) ? content : [content];
-      for (const block of blocks) {
-        if (block.type === "text") {
-          responses.push({ type: "send", text: block.text });
-        } else if (block.type === "image") {
-          responses.push({ type: "sendImage", text: block.alt || "" });
-        } else if (block.type === "video") {
-          responses.push({ type: "sendVideo", text: block.alt || "" });
-        } else if (block.type === "code") {
-          responses.push({ type: "sendCode", text: block.code });
-        } else if (block.type === "audio") {
-          responses.push({ type: "sendAudio", text: "" });
-        }
-      }
-    },
-    reply: async (content) => {
-      const blocks = typeof content === "string"
-        ? [/** @type {ToolContentBlock} */ ({ type: "text", text: content })]
-        : Array.isArray(content) ? content : [content];
-      for (const block of blocks) {
-        if (block.type === "text") {
-          responses.push({ type: "reply", text: block.text });
-        } else if (block.type === "image") {
-          responses.push({ type: "sendImage", text: block.alt || "" });
-        } else if (block.type === "video") {
-          responses.push({ type: "sendVideo", text: block.alt || "" });
-        } else if (block.type === "code") {
-          responses.push({ type: "sendCode", text: block.code });
-        } else if (block.type === "audio") {
-          responses.push({ type: "sendAudio", text: "" });
-        }
-      }
-    },
+    send: async (source, content) => recordBlocks("send", source, content),
+    reply: async (source, content) => recordBlocks("reply", source, content),
     confirm: async (message) => {
       responses.push({ type: "confirm", text: message });
       return true;
@@ -309,7 +293,7 @@ export function toolCall(name, args) {
  *   videos: string[];
  *   presence: string[];
  *   requests: object[];
- *   raw: Array<{type: string, text: string}>;
+ *   raw: Array<{type: string, text: string, source?: MessageSource, blockType?: string}>;
  * }} SendResult
  */
 
@@ -475,8 +459,8 @@ export function createTestHarness({ mockServer, handleMessage, testDb }) {
         reactions: responses.filter(r => r.type === "reactToMessage").map(r => r.text),
         confirms: responses.filter(r => r.type === "confirm").map(r => r.text),
         polls: responses.filter(r => r.type === "sendPoll").map(r => JSON.parse(r.text)),
-        images: responses.filter(r => r.type === "sendImage").map(r => r.text),
-        videos: responses.filter(r => r.type === "sendVideo").map(r => r.text),
+        images: responses.filter(r => r.blockType === "image").map(r => r.text),
+        videos: responses.filter(r => r.blockType === "video").map(r => r.text),
         presence: responses.filter(r => r.type === "sendPresenceUpdate").map(r => r.text),
         requests: mockServer.getRequests().slice(reqsBefore),
         raw: responses,

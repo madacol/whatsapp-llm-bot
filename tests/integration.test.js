@@ -386,9 +386,9 @@ describe("Scenario 12: Debug mode gates tool call output", () => {
     });
 
     assert.ok(r.raw.some(x => x.text.includes("Final answer")), "Should have the final LLM reply");
-    assert.ok(r.raw.some(x => x.text.startsWith("🔧 run_javascript: ")),
+    assert.ok(r.raw.some(x => x.source === "tool-call" && x.text.startsWith("run_javascript: ")),
       `Should show compact tool call, got: ${r.raw.map(x=>x.text).join(" | ")}`);
-    assert.ok(!r.raw.some(x => x.text.startsWith("✅")),
+    assert.ok(!r.raw.some(x => x.source === "tool-result"),
       `Should NOT show result for autoContinue tool in non-debug, got: ${r.raw.map(x=>x.text).join(" | ")}`);
   });
 
@@ -398,7 +398,7 @@ describe("Scenario 12: Debug mode gates tool call output", () => {
       llm: [toolCall("chat_settings", { setting: "model" })],
     });
 
-    assert.ok(r.raw.some(x => x.text === "🔧 chat_settings: Getting model"),
+    assert.ok(r.raw.some(x => x.source === "tool-call" && x.text === "chat_settings: Getting model"),
       `Should show formatted tool call, got: ${r.raw.map(x=>x.text).join(" | ")}`);
   });
 
@@ -409,8 +409,8 @@ describe("Scenario 12: Debug mode gates tool call output", () => {
     });
 
     assert.ok(r.raw.some(x => x.text.includes("Final answer debug on")), "Should have the final LLM reply");
-    assert.ok(r.raw.some(x => x.text.includes("🔧")), "Tool call args should be shown when debug is on");
-    assert.ok(r.raw.some(x => x.text.includes("✅") && x.text.includes("run_javascript")), "Tool results should be shown when debug is on");
+    assert.ok(r.raw.some(x => x.source === "tool-call"), "Tool call args should be shown when debug is on");
+    assert.ok(r.raw.some(x => x.source === "tool-result" && x.text.includes("run_javascript")), "Tool results should be shown when debug is on");
   });
 });
 
@@ -638,7 +638,7 @@ describe("Error recovery across turns", () => {
 
     // Turn 1 — no mock responses queued → server returns 500
     const r1 = await chat.send("First message");
-    assert.ok(r1.raw.some(x => x.text.startsWith("❌")), "Should show error to user");
+    assert.ok(r1.raw.some(x => x.source === "error"), "Should show error to user");
 
     // Turn 2 — normal response
     const r2 = await chat.send("Try again", { llm: ["Back to normal!"] });
@@ -708,7 +708,7 @@ describe("Memory: save_memory tool call stores memory in DB", () => {
     assert.equal(rows[0].content, "User likes cats");
     assert.ok(r.raw.some(x => x.text.includes("Got it, I'll remember that!")),
       `Should deliver final LLM reply, got: ${r.raw.map(x => x.text).join(" | ")}`);
-    assert.ok(!r.raw.some(x => x.text.startsWith("✅")),
+    assert.ok(!r.raw.some(x => x.source === "tool-result"),
       `Should not show result notification for silent action, got: ${r.raw.map(x => x.text).join(" | ")}`);
   });
 });
@@ -822,8 +822,8 @@ describe("Tool error → LLM self-correction", () => {
 
     // Should show error indicator to user
     assert.ok(
-      r.raw.some(x => x.text.includes("❌")),
-      `Should show ❌ error indicator, got: ${r.raw.map(x => x.text).join(" | ")}`,
+      r.raw.some(x => x.source === "error"),
+      `Should show error indicator, got: ${r.raw.map(x => x.text).join(" | ")}`,
     );
 
     // Second LLM request should contain a tool role message with the error
@@ -1115,8 +1115,8 @@ describe("convertUnsupportedMedia warning", () => {
       { llm: ["I see you tried to send a video."] },
     );
 
-    assert.ok(r.raw.some(x => x.text.includes("⚠️") && x.text.includes("video")),
-      `Should show ⚠️ warning about video, got: ${r.raw.map(x => x.text).join(" | ")}`);
+    assert.ok(r.raw.some(x => x.source === "warning" && x.text.includes("video")),
+      `Should show warning about video, got: ${r.raw.map(x => x.text).join(" | ")}`);
 
     const userMsg = /** @type {any} */ (r.requests[0]).messages.find(m => m.role === "user");
     const userContent = JSON.stringify(userMsg.content);

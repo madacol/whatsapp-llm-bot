@@ -70,8 +70,8 @@ function createMockContext(overrides = {}) {
     content: [],
     isDebug: false,
     getIsAdmin: async () => true,
-    send: async () => {},
-    reply: async () => {},
+    send: async (_source, _content) => {},
+    reply: async (_source, _content) => {},
     reactToMessage: async () => {},
     sendPoll: async () => {},
     confirm: async () => true,
@@ -240,7 +240,7 @@ describe("executeAction", () => {
       },
     });
     const ctx = createMockContext({
-      send: async (_header, _message) => { sent.push(`${_header} ${_message ?? ""}`); },
+      send: async (_source, content) => { sent.push(typeof content === "string" ? content : JSON.stringify(content)); },
     });
     await executeAction("test_action", ctx, {}, { toolCallId: "call-123", actionResolver: resolver });
     assert.ok(

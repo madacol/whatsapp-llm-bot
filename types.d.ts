@@ -81,6 +81,8 @@ type ContentBlock = IncomingContentBlock | ToolCallContentBlock;
 
   type ChatMessage = SystemMessage | Message;
 
+type MessageSource = "llm" | "tool-call" | "tool-result" | "error" | "warning" | "usage" | "memory";
+
 // WhatsApp Service Types
 type ConfirmHooks = {
   onSent?: (msgKey: { id: string; remoteJid: string }) => Promise<void>;
@@ -102,8 +104,8 @@ type IncomingContext = {
   getAdminStatus: () => Promise<"admin" | "superadmin" | null>;
   reactToMessage: (emoji: string) => Promise<void>;
   sendPoll: (name: string, options: string[], selectableCount?: number) => Promise<void>;
-  send: (content: SendContent) => Promise<void>;
-  reply: (content: SendContent) => Promise<void>;
+  send: (source: MessageSource, content: SendContent) => Promise<void>;
+  reply: (source: MessageSource, content: SendContent) => Promise<void>;
   confirm: (message: string, hooks?: ConfirmHooks) => Promise<boolean>;
   sendPresenceUpdate: (presence: "composing" | "paused") => Promise<void>;
 
@@ -119,8 +121,8 @@ type Context = {
   content: IncomingContentBlock[];
   isDebug: boolean;
   getIsAdmin: () => Promise<boolean>;
-  send: (header: string, message: SendContent) => Promise<void>;
-  reply: (header: string, message: SendContent) => Promise<void>;
+  send: (source: MessageSource, content: SendContent) => Promise<void>;
+  reply: (source: MessageSource, content: SendContent) => Promise<void>;
   reactToMessage: (emoji: string) => Promise<void>;
   sendPoll: (name: string, options: string[], selectableCount?: number) => Promise<void>;
   confirm: (message: string, hooks?: ConfirmHooks) => Promise<boolean>;
