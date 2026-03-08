@@ -105,15 +105,16 @@ async function displayToolCall(toolCall, context, isDebug, formatToolCall) {
 async function displayToolResult(blocks, toolName, permissions, context, isDebug) {
   if (permissions.silent) return;
 
+  const textBlocks = blocks.filter(b => b.type === "text");
+  const nonTextBlocks = blocks.filter(b => b.type !== "text");
+
   if (isDebug) {
-    const textSummary = blocks.filter(b => b.type === "text").map(b => /** @type {TextContentBlock} */ (b).text).join("\n");
+    const textSummary = textBlocks.map(b => /** @type {TextContentBlock} */ (b).text).join("\n");
     await context.send("tool-result", `${toolName}: ${textSummary || "Done."}`);
-    const nonTextBlocks = blocks.filter(b => b.type !== "text");
     if (nonTextBlocks.length > 0) await context.send("tool-result", nonTextBlocks);
   } else if (permissions.autoContinue) {
     // autoContinue: suppress text, but still show media/code blocks
-    const visualBlocks = blocks.filter(b => b.type !== "text");
-    if (visualBlocks.length > 0) await context.send("tool-result", visualBlocks);
+    if (nonTextBlocks.length > 0) await context.send("tool-result", nonTextBlocks);
   } else {
     // Final answer: render all blocks
     await context.reply("tool-result", blocks);
@@ -503,6 +504,10 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
           await context.reply("tool-result", linkText);
         } else if (typeof result === "string") {
           await context.reply("tool-result", result);
+        } else if (Array.isArray(result)) {
+          await context.reply("tool-result", /** @type {ToolContentBlock[]} */ (result));
+        } else {
+          await context.reply("tool-result", JSON.stringify(result, null, 2));
         }
       } catch (error) {
         log.error("Error executing command:", error);
