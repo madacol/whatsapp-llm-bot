@@ -138,6 +138,8 @@ export function createClaudeAgentSdkHarness() {
       usage: { promptTokens: 0, completionTokens: 0, cachedTokens: 0, cost: 0 },
     };
 
+    /** @type {string[]} */
+    const stderrLines = [];
     try {
       for await (const event of query({
         prompt: lastUserText,
@@ -149,7 +151,12 @@ export function createClaudeAgentSdkHarness() {
           permissionMode: "bypassPermissions",
           allowDangerouslySkipPermissions: true,
           persistSession: false,
-          model: llmConfig.chatModel,
+          // Don't pass llmConfig.chatModel — it's an OpenRouter model ID.
+          // The SDK uses Claude Code's own model (configurable via its own settings).
+          stderr: (data) => {
+            stderrLines.push(data);
+            log.debug("[sdk stderr]", data.trimEnd());
+          },
         },
       })) {
         switch (event.type) {
@@ -211,6 +218,9 @@ export function createClaudeAgentSdkHarness() {
       }
     } catch (err) {
       log.error("Claude Agent SDK query failed:", err);
+      if (stderrLines.length > 0) {
+        log.error("[sdk stderr output]", stderrLines.join(""));
+      }
       const errorMsg = err instanceof Error ? err.message : String(err);
       await hooks.onToolError(errorMsg);
       result.response = [{ type: "text", text: `SDK error: ${errorMsg}` }];
