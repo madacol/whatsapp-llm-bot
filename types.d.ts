@@ -296,6 +296,7 @@ type AgentHarnessParams = {
   hooks?: AgentIOHooks;
   maxDepth?: number;
   agentDepth?: number;
+  cwd?: string;
 };
 
 type AgentHarness = {

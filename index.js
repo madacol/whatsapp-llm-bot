@@ -345,7 +345,7 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
 
     await messageContext.sendPresenceUpdate("composing");
     try {
-      await harness.processLlmResponse({ session, llmConfig, messages: preparedMessages, mediaRegistry, hooks });
+      await harness.processLlmResponse({ session, llmConfig, messages: preparedMessages, mediaRegistry, hooks, cwd: chatInfo?.harness_cwd ?? undefined });
     } catch (error) {
       log.error(error);
       const errorMessage = error instanceof Error ? error.message : JSON.stringify(error, null, 2);

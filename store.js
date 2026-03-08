@@ -22,6 +22,7 @@ const log = createLogger("store");
  *   enabled_actions: string[];
  *   active_persona: string | null;
  *   harness: string | null;
+ *   harness_cwd: string | null;
  *   timestamp: string;
  * }} ChatRow
  *
@@ -101,6 +102,7 @@ export async function initStore(injectedDb){
         db.sql`ALTER TABLE chats ADD COLUMN IF NOT EXISTS model_roles JSONB DEFAULT '{}'`,
         db.sql`ALTER TABLE chats ADD COLUMN IF NOT EXISTS active_persona TEXT`,
         db.sql`ALTER TABLE chats ADD COLUMN IF NOT EXISTS harness TEXT`,
+        db.sql`ALTER TABLE chats ADD COLUMN IF NOT EXISTS harness_cwd TEXT`,
         db.sql`ALTER TABLE messages ADD COLUMN IF NOT EXISTS exchange_text TEXT`,
         db.sql`ALTER TABLE messages ADD COLUMN IF NOT EXISTS llm_context JSONB`,
       ]);
