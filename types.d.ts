@@ -281,9 +281,26 @@ type AgentDefinition = {
   allowedActions?: string[];
   maxDepth?: number;
   instructions?: string;
+  harness?: string;
 };
 
 type AppAgent = AgentDefinition & { fileName: string };
+
+/* Harness types */
+
+type AgentHarnessParams = {
+  session: Session;
+  llmConfig: LlmConfig;
+  messages: Message[];
+  mediaRegistry: MediaRegistry;
+  hooks?: AgentIOHooks;
+  maxDepth?: number;
+  agentDepth?: number;
+};
+
+type AgentHarness = {
+  processLlmResponse: (params: AgentHarnessParams) => Promise<AgentResult>;
+};
 
 /* processLlmResponse types */
 

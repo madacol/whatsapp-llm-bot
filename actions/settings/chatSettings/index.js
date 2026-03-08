@@ -2,6 +2,7 @@ import config from "../../../config.js";
 import { validateModel, getModelModalities } from "../../../models-cache.js";
 import { getChatOrThrow } from "../../../store.js";
 import { ROLE_DEFINITIONS, resolveModel } from "../../../model-roles.js";
+import { listHarnesses } from "../../../harnesses/index.js";
 
 /**
  * Role names that use model_roles JSONB for per-chat overrides.
@@ -26,6 +27,7 @@ const SETTINGS = [
   "enabled",
   "debug",
   "action",
+  "harness",
 ];
 
 const RESPOND_ON_VALUES = ["any", "mention+reply", "mention"];
@@ -128,6 +130,7 @@ async function getInfo(rootDb, chatId, extra) {
     `*Media-to-text models:* ${mediaToTextStr}`,
     `*Model role overrides:* ${roleOverridesStr}`,
     `*Opt-in actions:* ${optInStr}`,
+    `*Harness:* ${chat.harness ?? "native"}`,
   ];
 
   return lines.join("\n");
@@ -185,6 +188,10 @@ async function getSetting(rootDb, chatId, setting, extra) {
       const enabledActions = chat.enabled_actions ?? [];
       const optInStr = await formatOptInActions(enabledActions, extra.getActions);
       return `Opt-in actions: ${optInStr}`;
+    }
+    case "harness": {
+      const available = listHarnesses();
+      return `Harness: ${chat.harness ?? "native"}\nAvailable: ${available.join(", ")}`;
     }
     default: {
       if (MODEL_ROLE_SETTINGS.includes(setting)) {
@@ -344,6 +351,17 @@ async function setSetting(rootDb, chatId, setting, value, extra) {
         minute: "2-digit",
       });
       return `Debug on for ${mins}min (until ${timeStr}).`;
+    }
+
+    case "harness": {
+      const trimmed = value.trim();
+      const available = listHarnesses();
+      if (!available.includes(trimmed)) {
+        return `Unknown harness \`${trimmed}\`. Available: ${available.join(", ")}`;
+      }
+      const harnessValue = trimmed === "native" ? null : trimmed;
+      await rootDb.sql`UPDATE chats SET harness = ${harnessValue} WHERE chat_id = ${chatId}`;
+      return `Harness set to \`${trimmed}\``;
     }
 
     case "action": {
