@@ -103,11 +103,10 @@ export async function runAgent(options) {
     content: [],
     isDebug: false,
     getIsAdmin: async () => true,
-    sendMessage: async () => {},
+    send: async () => {},
     reply: async () => {},
     reactToMessage: async () => {},
     sendPoll: async () => {},
-    send: async () => {},
     confirm: async () => true,
   };
 

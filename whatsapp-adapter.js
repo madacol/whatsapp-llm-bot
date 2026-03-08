@@ -266,6 +266,62 @@ export async function getMessageContent(baileysMessage, downloadFn = downloadMed
 }
 
 /**
+ * Dispatch SendContent as WhatsApp messages.
+ * @param {import('@whiskeysockets/baileys').WASocket} sock
+ * @param {string} chatId
+ * @param {SendContent} content
+ * @param {{ quoted?: BaileysMessage }} [options]
+ */
+async function sendBlocks(sock, chatId, content, options) {
+  const blocks = typeof content === "string"
+    ? [/** @type {ToolContentBlock} */ ({ type: "text", text: content })]
+    : Array.isArray(content) ? content : [content];
+
+  for (const block of blocks) {
+    switch (block.type) {
+      case "text":
+        await sock.sendMessage(chatId, { text: block.text }, options);
+        break;
+      case "code": {
+        try {
+          const images = await renderCodeToImages(block.code, block.language);
+          for (const image of images) {
+            await sock.sendMessage(chatId, {
+              image,
+              ...(block.language && { caption: block.language }),
+            }, options);
+          }
+        } catch (err) {
+          log.error("Code image rendering failed, falling back to text:", err);
+          await sock.sendMessage(chatId, {
+            text: "```\n" + block.code + "\n```",
+          }, options);
+        }
+        break;
+      }
+      case "image":
+        await sock.sendMessage(chatId, {
+          image: Buffer.from(block.data, "base64"),
+          ...(block.alt && { caption: block.alt }),
+        }, options);
+        break;
+      case "video":
+        await sock.sendMessage(chatId, {
+          video: Buffer.from(block.data, "base64"),
+          ...(block.alt && { caption: block.alt }),
+        }, options);
+        break;
+      case "audio":
+        await sock.sendMessage(chatId, {
+          audio: Buffer.from(block.data, "base64"),
+          mimetype: block.mime_type || "audio/mp4",
+        }, options);
+        break;
+    }
+  }
+}
+
+/**
  * Internal method to process incoming messages and create enriched context
  * @param {BaileysMessage} baileysMessage - Raw Baileys message
  * @param {import('@whiskeysockets/baileys').WASocket} sock
@@ -348,14 +404,6 @@ export async function adaptIncomingMessage(baileysMessage, sock, messageHandler)
       }
     },
 
-    sendMessage: async (text) => {
-      await sock.sendMessage(chatId, { text });
-    },
-
-    replyToMessage: async (text) => {
-      await sock.sendMessage(chatId, { text }, { quoted: baileysMessage });
-    },
-
     reactToMessage: async (emoji) => {
       await sock.sendMessage(chatId, {
         react: { text: emoji, key: baileysMessage.key },
@@ -369,52 +417,11 @@ export async function adaptIncomingMessage(baileysMessage, sock, messageHandler)
     },
 
     send: async (content) => {
-      const blocks = typeof content === "string"
-        ? [/** @type {ToolContentBlock} */ ({ type: "text", text: content })]
-        : Array.isArray(content) ? content : [content];
+      await sendBlocks(sock, chatId, content);
+    },
 
-      for (const block of blocks) {
-        switch (block.type) {
-          case "text":
-            await sock.sendMessage(chatId, { text: block.text });
-            break;
-          case "code": {
-            try {
-              const images = await renderCodeToImages(block.code, block.language);
-              for (const image of images) {
-                await sock.sendMessage(chatId, {
-                  image,
-                  ...(block.language && { caption: block.language }),
-                });
-              }
-            } catch (err) {
-              log.error("Code image rendering failed, falling back to text:", err);
-              await sock.sendMessage(chatId, {
-                text: "```\n" + block.code + "\n```",
-              });
-            }
-            break;
-          }
-          case "image":
-            await sock.sendMessage(chatId, {
-              image: Buffer.from(block.data, "base64"),
-              ...(block.alt && { caption: block.alt }),
-            });
-            break;
-          case "video":
-            await sock.sendMessage(chatId, {
-              video: Buffer.from(block.data, "base64"),
-              ...(block.alt && { caption: block.alt }),
-            });
-            break;
-          case "audio":
-            await sock.sendMessage(chatId, {
-              audio: Buffer.from(block.data, "base64"),
-              mimetype: block.mime_type || "audio/mp4",
-            });
-            break;
-        }
-      }
+    reply: async (content) => {
+      await sendBlocks(sock, chatId, content, { quoted: baileysMessage });
     },
 
     confirm: createConfirm(sock, chatId),

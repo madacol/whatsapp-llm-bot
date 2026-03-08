@@ -90,15 +90,14 @@ export async function executeAction(actionName, context, params, options = {}) {
       console.log(...args);
       return message;
     },
-    sendMessage: async (message) => {
-      await context.sendMessage(`🔧 ${message}`);
+    send: async (message) => {
+      await context.send("🔧", message);
     },
     reply: async (message) => {
-      await context.reply(`🔧 ${message}`);
+      await context.reply("🔧", message);
     },
     reactToMessage: context.reactToMessage,
     sendPoll: context.sendPoll,
-    send: context.send,
     confirm: persistentConfirm,
     resolveModel: (role) => resolveModel(role),
     agentDepth,

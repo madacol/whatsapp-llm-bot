@@ -100,11 +100,10 @@ type IncomingContext = {
 
   // High-level actions scoped to this message
   getAdminStatus: () => Promise<"admin" | "superadmin" | null>;
-  sendMessage: (text: string) => Promise<void>;
-  replyToMessage: (text: string) => Promise<void>;
   reactToMessage: (emoji: string) => Promise<void>;
   sendPoll: (name: string, options: string[], selectableCount?: number) => Promise<void>;
   send: (content: SendContent) => Promise<void>;
+  reply: (content: SendContent) => Promise<void>;
   confirm: (message: string, hooks?: ConfirmHooks) => Promise<boolean>;
   sendPresenceUpdate: (presence: "composing" | "paused") => Promise<void>;
 
@@ -120,11 +119,10 @@ type Context = {
   content: IncomingContentBlock[];
   isDebug: boolean;
   getIsAdmin: () => Promise<boolean>;
-  sendMessage: (header: string, message?: string) => Promise<void>;
-  reply: (header: string, message?: string) => Promise<void>;
+  send: (header: string, message: SendContent) => Promise<void>;
+  reply: (header: string, message: SendContent) => Promise<void>;
   reactToMessage: (emoji: string) => Promise<void>;
   sendPoll: (name: string, options: string[], selectableCount?: number) => Promise<void>;
-  send: (content: SendContent) => Promise<void>;
   confirm: (message: string, hooks?: ConfirmHooks) => Promise<boolean>;
 };
 
@@ -140,11 +138,10 @@ type ActionContext = {
   sessionDb: PGlite;
   getActions: () => Promise<Action[]>;
   log: (...args: any[]) => Promise<string>;
-  sendMessage: (message: string) => Promise<void>; // Header already baked in
-  reply: (message: string) => Promise<void>; // Header already baked in
+  send: (message: SendContent) => Promise<void>; // Header already baked in
+  reply: (message: SendContent) => Promise<void>; // Header already baked in
   reactToMessage: (emoji: string) => Promise<void>;
   sendPoll: (name: string, options: string[], selectableCount?: number) => Promise<void>;
-  send: (content: SendContent) => Promise<void>;
   confirm: (message: string) => Promise<boolean>;
   resolveModel: (role: string) => string;
   agentDepth?: number;
