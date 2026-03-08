@@ -2,6 +2,9 @@
  * WhatsApp LLM Bot with JavaScript execution capabilities
  */
 
+import fs from "node:fs";
+fs.writeFileSync(".bot.pid", process.pid.toString());
+
 import { getActions, executeAction, getChatActions, getChatAction, getAction } from "./actions.js";
 import config from "./config.js";
 import { createLlmClient } from "./llm.js";
