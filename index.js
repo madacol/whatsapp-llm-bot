@@ -125,7 +125,9 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
   const { addMessage, updateToolMessage, createChat, getChat, getMessages } = store;
 
   /**
-   * Handle incoming WhatsApp messages
+   * Handle incoming WhatsApp messages.
+   * If the active harness supports message injection and has a running query,
+   * injects the new message instead of starting a second query.
    * @param {IncomingContext} messageContext
    * @returns {Promise<void>}
    */
@@ -180,6 +182,20 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
     if (firstBlock?.text?.startsWith("!")) {
       const inputText = firstBlock.text.slice(1).trim();
       const commandText = inputText.toLowerCase();
+
+      // Handle !cancel — abort the active harness query for this chat
+      if (commandText === "cancel") {
+        const harnessName = chatInfo?.active_persona
+          ? (await getAgent(chatInfo.active_persona))?.harness ?? chatInfo?.harness ?? "native"
+          : chatInfo?.harness ?? "native";
+        const harness = resolveHarness(harnessName);
+        if (harness.cancel?.(chatId)) {
+          await context.reply("tool-result", "Cancelled.");
+        } else {
+          await context.reply("tool-result", "Nothing to cancel.");
+        }
+        return;
+      }
 
       // Sort commands longest-first so "set model" matches before hypothetical "set"
       const commandActions = actions.filter(hasCommand);
@@ -258,6 +274,16 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
 
     // Resolve active persona (if any)
     const persona = chatInfo?.active_persona ? await getAgent(chatInfo.active_persona) : null;
+
+    // If the harness has an active query for this chat, inject the message instead of starting a new one
+    const harnessName = persona?.harness ?? chatInfo?.harness ?? "native";
+    const harness = resolveHarness(harnessName);
+
+    const userText = firstBlock?.text ?? "";
+    if (userText && harness.injectMessage?.(chatId, userText)) {
+      log.debug("Injected message into active query for chat", chatId);
+      return;
+    }
 
     // Get system prompt and model from persona, chat, or defaults
     let systemPrompt = (persona?.systemPrompt ?? chatInfo?.system_prompt ?? config.system_prompt) + systemPromptSuffix;
@@ -340,10 +366,7 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
         : Promise.resolve(),
     };
 
-    // Resolve harness: persona → chat → native
-    const harnessName = persona?.harness ?? chatInfo?.harness ?? "native";
-    const harness = resolveHarness(harnessName);
-
+    // harness already resolved above (before injection check)
     await messageContext.sendPresenceUpdate("composing");
     try {
       await harness.processLlmResponse({ session, llmConfig, messages: preparedMessages, mediaRegistry, hooks, cwd: chatInfo?.harness_cwd ?? undefined });
