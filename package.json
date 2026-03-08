@@ -9,8 +9,8 @@
     "main": "index.js",
     "scripts": {
         "dev": "node --watch index.js",
-        "start": "node index.js",
-        "restart": "touch index.js",
+        "start": "while node index.js; do sleep 1; done",
+        "restart": "kill $(cat .bot.pid)",
         "test": "node --test --experimental-test-isolation=none tests/*.test.js",
         "test:watch": "node --test --experimental-test-isolation=none --watch tests/*.test.js",
         "test:prompts": "node --test tests/*.prompt-test.js",
