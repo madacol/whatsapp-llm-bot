@@ -305,6 +305,10 @@ type AgentHarnessParams = {
 
 type AgentHarness = {
   processLlmResponse: (params: AgentHarnessParams) => Promise<AgentResult>;
+  /** Inject a follow-up user message into an active query for this chat. Returns true if injected. */
+  injectMessage?: (chatId: string, text: string) => boolean;
+  /** Cancel the active query for this chat. Returns true if cancelled. */
+  cancel?: (chatId: string) => boolean;
 };
 
 /* processLlmResponse types */
