@@ -68,11 +68,10 @@ async function displayToolCall(toolCall, context, isDebug, formatToolCall) {
         const val = typeof v === "string" ? v : JSON.stringify(v);
         return entries.length === 1 ? val : `${k}: ${val}`;
       }).join(", ");
-      const maxLen = isDebug ? 120 : 80;
-      if (inline.length <= maxLen) {
+      if (isDebug) {
+        msg += `\n${inline}`;
+      } else if (inline.length <= 80) {
         msg += `: ${inline}`;
-      } else if (isDebug) {
-        msg += `\n${inline.slice(0, 200)}${inline.length > 200 ? "…" : ""}`;
       }
     }
   }
