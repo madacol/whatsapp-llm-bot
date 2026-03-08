@@ -1,4 +1,4 @@
-import { processLlmResponse } from "./index.js";
+import { resolveHarness } from "./harnesses/index.js";
 import { getActions, getAction, getChatAction, executeAction } from "./actions.js";
 import { resolveModel, ROLE_DEFINITIONS } from "./model-roles.js";
 import { getRootDb } from "./db.js";
@@ -133,7 +133,9 @@ export async function runAgent(options) {
   /** @type {MediaRegistry} */
   const mediaRegistry = new Map();
 
-  const result = await processLlmResponse({
+  const harness = resolveHarness(agent.harness ?? "native");
+
+  const result = await harness.processLlmResponse({
     session,
     llmConfig,
     messages,
