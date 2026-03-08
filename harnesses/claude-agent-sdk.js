@@ -115,7 +115,7 @@ export function createClaudeAgentSdkHarness() {
    * @param {AgentHarnessParams} params
    * @returns {Promise<AgentResult>}
    */
-  async function processLlmResponse({ session, llmConfig, messages, hooks: userHooks, maxDepth }) {
+  async function processLlmResponse({ session, llmConfig, messages, hooks: userHooks, maxDepth, cwd }) {
     /** @type {Required<AgentIOHooks>} */
     const hooks = { ...NO_OP_HOOKS, ...userHooks };
 
@@ -146,7 +146,7 @@ export function createClaudeAgentSdkHarness() {
         options: {
           systemPrompt: fullSystemPrompt,
           maxTurns: maxDepth ?? 10,
-          cwd: process.cwd(),
+          cwd: cwd || process.cwd(),
           settingSources: [],
           permissionMode: "bypassPermissions",
           allowDangerouslySkipPermissions: true,

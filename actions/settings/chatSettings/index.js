@@ -28,6 +28,7 @@ const SETTINGS = [
   "debug",
   "action",
   "harness",
+  "harness_cwd",
 ];
 
 const RESPOND_ON_VALUES = ["any", "mention+reply", "mention"];
@@ -131,6 +132,7 @@ async function getInfo(rootDb, chatId, extra) {
     `*Model role overrides:* ${roleOverridesStr}`,
     `*Opt-in actions:* ${optInStr}`,
     `*Harness:* ${chat.harness ?? "native"}`,
+    ...(chat.harness_cwd ? [`*Harness CWD:* ${chat.harness_cwd}`] : []),
   ];
 
   return lines.join("\n");
@@ -193,6 +195,8 @@ async function getSetting(rootDb, chatId, setting, extra) {
       const available = listHarnesses();
       return `Harness: ${chat.harness ?? "native"}\nAvailable: ${available.join(", ")}`;
     }
+    case "harness_cwd":
+      return `Harness CWD: ${chat.harness_cwd ?? "not set (uses project root)"}`;
     default: {
       if (MODEL_ROLE_SETTINGS.includes(setting)) {
         const roleName = setting.replace(/_model$/, "");
@@ -362,6 +366,15 @@ async function setSetting(rootDb, chatId, setting, value, extra) {
       const harnessValue = trimmed === "native" ? null : trimmed;
       await rootDb.sql`UPDATE chats SET harness = ${harnessValue} WHERE chat_id = ${chatId}`;
       return `Harness set to \`${trimmed}\``;
+    }
+
+    case "harness_cwd": {
+      const trimmed = value.trim();
+      const cwdValue = trimmed.length === 0 ? null : trimmed;
+      await rootDb.sql`UPDATE chats SET harness_cwd = ${cwdValue} WHERE chat_id = ${chatId}`;
+      return cwdValue
+        ? `Harness CWD set to \`${cwdValue}\``
+        : "Harness CWD cleared (will use project root).";
     }
 
     case "action": {
