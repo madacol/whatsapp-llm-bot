@@ -213,7 +213,7 @@ async function processLlmResponse({ session, llmConfig, messages, mediaRegistry,
       log.debug("RESPONSE SENT:", response.content);
       await hooks.onLlmResponse(response.content);
       assistantMessage.content.push({ type: "text", text: response.content });
-      result.response = [{ type: "text", text: response.content }];
+      result.response = [{ type: "markdown", text: response.content }];
     }
 
     if (response.toolCalls.length === 0) {
