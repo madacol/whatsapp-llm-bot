@@ -20,6 +20,44 @@ import { createLogger } from "./logger.js";
 
 const log = createLogger("whatsapp");
 
+/**
+ * Convert standard Markdown to WhatsApp-compatible formatting.
+ * WhatsApp uses: *bold*, _italic_, ~strikethrough~, ```code```, > quote
+ * @param {string} text
+ * @returns {string}
+ */
+function markdownToWhatsApp(text) {
+  let result = text;
+
+  // Headers: # Heading → *Heading* (bold)
+  result = result.replace(/^#{1,6}\s+(.+)$/gm, "*$1*");
+
+  // Bold: **text** or __text__ → *text*
+  result = result.replace(/\*\*(.+?)\*\*/g, "*$1*");
+  result = result.replace(/__(.+?)__/g, "*$1*");
+
+  // Italic: *text* (single) or _text_ → _text_
+  // Must not match already-converted *bold* — only match single * not preceded/followed by *
+  result = result.replace(/(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)/g, "_$1_");
+
+  // Strikethrough: ~~text~~ → ~text~
+  result = result.replace(/~~(.+?)~~/g, "~$1~");
+
+  // Images: ![alt](url) → alt (url) — must be before links
+  result = result.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, "$1 ($2)");
+
+  // Links: [text](url) → text (url)
+  result = result.replace(/\[([^\]]+)\]\(([^)]+)\)/g, "$1 ($2)");
+
+  // Unordered lists: - item or * item → • item
+  result = result.replace(/^[\s]*[-*]\s+/gm, "• ");
+
+  // Horizontal rules: --- or *** or ___ → ———
+  result = result.replace(/^(-{3,}|\*{3,}|_{3,})$/gm, "———");
+
+  return result;
+}
+
 const AUTH_DIR = "./auth_info_baileys";
 const QR_TIMEOUT_MS = 5 * 60 * 1000;
 
@@ -294,6 +332,9 @@ export async function sendBlocks(sock, chatId, source, content, options) {
     switch (block.type) {
       case "text":
         await sock.sendMessage(chatId, { text: `${prefix} ${block.text}` }, options);
+        break;
+      case "markdown":
+        await sock.sendMessage(chatId, { text: `${prefix} ${markdownToWhatsApp(block.text)}` }, options);
         break;
       case "code": {
         try {

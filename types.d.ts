@@ -33,6 +33,10 @@ type CodeContentBlock = {
   language?: string;
   code: string;
 };
+type MarkdownContentBlock = {
+  type: "markdown";
+  text: string;
+};
 type QuoteContentBlock = {
   type: "quote";
   quotedSenderId?: string;
@@ -206,7 +210,7 @@ type ExtendedActionContext<P extends PermissionFlags> = ActionContext
   & (P["useChatDb"] extends true ? { chatDb: PGlite } : {})
   & (P["useLlm"] extends true ? { callLlm: CallLlm; llmClient: LlmClient } : {});
 
-type ToolContentBlock = TextContentBlock | ImageContentBlock | VideoContentBlock | AudioContentBlock | CodeContentBlock;
+type ToolContentBlock = TextContentBlock | ImageContentBlock | VideoContentBlock | AudioContentBlock | CodeContentBlock | MarkdownContentBlock;
 
 type SendContent = string | ToolContentBlock | ToolContentBlock[];
 
