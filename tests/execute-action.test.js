@@ -59,11 +59,11 @@ function createResolver(actionMap) {
 }
 
 /**
- * Create a minimal Context for testing
- * @param {Partial<Context>} [overrides]
- * @returns {Context}
+ * Create a minimal ExecuteActionContext for testing
+ * @param {Partial<ExecuteActionContext>} [overrides]
+ * @returns {ExecuteActionContext}
  */
-function createMockContext(overrides = {}) {
+function createMockExecuteActionContext(overrides = {}) {
   return {
     chatId: "test-chat",
     senderIds: ["master-user"],
@@ -88,7 +88,7 @@ describe("executeAction", () => {
   it("throws for non-existent action", async () => {
     const resolver = createResolver({});
     await assert.rejects(
-      () => executeAction("nonexistent", createMockContext(), {}, { actionResolver: resolver }),
+      () => executeAction("nonexistent", createMockExecuteActionContext(), {}, { actionResolver: resolver }),
       { message: /not found/ },
     );
   });
@@ -103,7 +103,7 @@ describe("executeAction", () => {
         action_fn: async () => "ok",
       },
     });
-    const ctx = createMockContext({ senderIds: ["non-master"] });
+    const ctx = createMockExecuteActionContext({ senderIds: ["non-master"] });
     await assert.rejects(
       () => executeAction("test_action", ctx, {}, { actionResolver: resolver }),
       { message: /master/ },
@@ -120,7 +120,7 @@ describe("executeAction", () => {
         action_fn: async () => "success",
       },
     });
-    const ctx = createMockContext({ senderIds: ["master-user"] });
+    const ctx = createMockExecuteActionContext({ senderIds: ["master-user"] });
     const { result } = await executeAction("test_action", ctx, {}, { actionResolver: resolver });
     assert.equal(result, "success");
   });
@@ -135,7 +135,7 @@ describe("executeAction", () => {
         action_fn: async () => "ok",
       },
     });
-    const ctx = createMockContext({ confirm: async () => false });
+    const ctx = createMockExecuteActionContext({ confirm: async () => false });
     const { result } = await executeAction("confirm_action", ctx, {}, { actionResolver: resolver });
     assert.match(result, /cancelled/);
   });
@@ -150,7 +150,7 @@ describe("executeAction", () => {
         action_fn: async () => "confirmed result",
       },
     });
-    const ctx = createMockContext({ confirm: async () => true });
+    const ctx = createMockExecuteActionContext({ confirm: async () => true });
     const { result } = await executeAction("confirm_action", ctx, {}, { actionResolver: resolver });
     assert.equal(result, "confirmed result");
   });
@@ -166,14 +166,14 @@ describe("executeAction", () => {
       },
     });
     const { result, permissions } = await executeAction(
-      "result_action", createMockContext(), {}, { actionResolver: resolver },
+      "result_action", createMockExecuteActionContext(), {}, { actionResolver: resolver },
     );
     assert.deepEqual(result, { key: "value" });
     assert.equal(permissions.autoExecute, true);
   });
 
   it("provides useRootDb when permission is set", async () => {
-    let receivedContext;
+    let receivedExecuteActionContext;
     const resolver = createResolver({
       db_action: {
         name: "db_action",
@@ -181,13 +181,13 @@ describe("executeAction", () => {
         parameters: { type: "object", properties: {} },
         permissions: { autoExecute: true, useRootDb: true },
         action_fn: async (ctx) => {
-          receivedContext = ctx;
+          receivedExecuteActionContext = ctx;
           return "ok";
         },
       },
     });
-    await executeAction("db_action", createMockContext(), {}, { actionResolver: resolver });
-    assert.ok(receivedContext.rootDb, "rootDb should be set");
+    await executeAction("db_action", createMockExecuteActionContext(), {}, { actionResolver: resolver });
+    assert.ok(receivedExecuteActionContext.rootDb, "rootDb should be set");
   });
 
   it("rejects when requireAdmin and sender is not admin", async () => {
@@ -200,7 +200,7 @@ describe("executeAction", () => {
         action_fn: async () => "ok",
       },
     });
-    const ctx = createMockContext({ getIsAdmin: async () => false });
+    const ctx = createMockExecuteActionContext({ getIsAdmin: async () => false });
     await assert.rejects(
       () => executeAction("test_action", ctx, {}, { actionResolver: resolver }),
       { message: /admin/ },
@@ -217,7 +217,7 @@ describe("executeAction", () => {
         action_fn: async () => "admin success",
       },
     });
-    const ctx = createMockContext({ getIsAdmin: async () => true });
+    const ctx = createMockExecuteActionContext({ getIsAdmin: async () => true });
     const { result } = await executeAction("test_action", ctx, {}, { actionResolver: resolver });
     assert.equal(result, "admin success");
   });
@@ -238,7 +238,7 @@ describe("executeAction", () => {
         },
       },
     });
-    const ctx = createMockContext({
+    const ctx = createMockExecuteActionContext({
       send: async (_source, content) => { sent.push(typeof content === "string" ? content : JSON.stringify(content)); },
     });
     await executeAction("test_action", ctx, {}, { toolCallId: "call-123", actionResolver: resolver });
@@ -251,7 +251,7 @@ describe("executeAction", () => {
   it("provides callLlm when useLlm permission is set and llmClient is provided", async () => {
     const { createLlmClient } = await import("../llm.js");
     const injectedClient = createLlmClient();
-    let receivedContext;
+    let receivedExecuteActionContext;
     const resolver = createResolver({
       llm_action: {
         name: "llm_action",
@@ -259,13 +259,13 @@ describe("executeAction", () => {
         parameters: { type: "object", properties: {} },
         permissions: { autoExecute: true, useLlm: true },
         action_fn: async (ctx) => {
-          receivedContext = ctx;
+          receivedExecuteActionContext = ctx;
           return "ok";
         },
       },
     });
-    await executeAction("llm_action", createMockContext(), {}, { actionResolver: resolver, llmClient: injectedClient });
-    assert.equal(typeof receivedContext.callLlm, "function");
+    await executeAction("llm_action", createMockExecuteActionContext(), {}, { actionResolver: resolver, llmClient: injectedClient });
+    assert.equal(typeof receivedExecuteActionContext.callLlm, "function");
   });
 
   it("throws when useLlm is set but no llmClient is provided", async () => {
@@ -279,7 +279,7 @@ describe("executeAction", () => {
       },
     });
     await assert.rejects(
-      () => executeAction("llm_action", createMockContext(), {}, { actionResolver: resolver }),
+      () => executeAction("llm_action", createMockExecuteActionContext(), {}, { actionResolver: resolver }),
       { message: /no llmClient was provided/ },
     );
   });
@@ -295,7 +295,7 @@ describe("executeAction", () => {
       },
     });
     const { result, permissions } = await executeAction(
-      "test_action", createMockContext(), {}, { actionResolver: resolver },
+      "test_action", createMockExecuteActionContext(), {}, { actionResolver: resolver },
     );
     assert.equal(result, "cancelled");
     assert.equal(permissions.autoContinue, false);
@@ -312,7 +312,7 @@ describe("executeAction", () => {
       },
     });
     const { result, permissions } = await executeAction(
-      "test_action", createMockContext(), {}, { actionResolver: resolver },
+      "test_action", createMockExecuteActionContext(), {}, { actionResolver: resolver },
     );
     assert.equal(result, "plain string");
     assert.equal(permissions.autoContinue, true);
@@ -335,7 +335,7 @@ describe("executeAction", () => {
     });
 
     // Provide a confirm that captures the hooks and simulates the flow
-    const ctx = createMockContext({
+    const ctx = createMockExecuteActionContext({
       confirm: async (message, hooks) => {
         capturedHooks = hooks || {};
         // Simulate: onSent is called after message is sent
@@ -375,7 +375,7 @@ describe("executeAction", () => {
       },
     });
 
-    const ctx = createMockContext({
+    const ctx = createMockExecuteActionContext({
       confirm: async (message, hooks) => {
         if (hooks?.onSent) {
           await hooks.onSent({ id: "reject-msg-key", remoteJid: "test-chat" });

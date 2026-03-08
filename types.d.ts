@@ -101,7 +101,7 @@ type IncomingContext = {
   quotedSenderId?: string;
 
   // High-level actions scoped to this message
-  getAdminStatus: () => Promise<"admin" | "superadmin" | null>;
+  getIsAdmin: () => Promise<boolean>;
   reactToMessage: (emoji: string) => Promise<void>;
   sendPoll: (name: string, options: string[], selectableCount?: number) => Promise<void>;
   send: (source: MessageSource, content: SendContent) => Promise<void>;
@@ -115,7 +115,7 @@ type IncomingContext = {
 };
 
 // Unified context for message handling
-type Context = {
+type ExecuteActionContext = {
   chatId: string;
   senderIds: string[];
   content: IncomingContentBlock[];
@@ -298,7 +298,7 @@ type ExecuteActionOptions = {
 type Session = {
   chatId: string;
   senderIds: string[];
-  context: Context;
+  context: ExecuteActionContext;
   addMessage: import("./store.js").Store['addMessage'];
   updateToolMessage: import("./store.js").Store['updateToolMessage'];
 };
@@ -308,7 +308,7 @@ type LlmConfig = {
   chatModel: string;
   systemPrompt: string;
   actions: Action[];
-  executeActionFn: (actionName: string, context: Context, params: {}, options?: ExecuteActionOptions) => Promise<{result: ActionResultValue, permissions: Action['permissions']}>;
+  executeActionFn: (actionName: string, context: ExecuteActionContext, params: {}, options?: ExecuteActionOptions) => Promise<{result: ActionResultValue, permissions: Action['permissions']}>;
   actionResolver: (name: string) => Promise<AppAction | null>;
   actionLlmClient: LlmClient;
 };

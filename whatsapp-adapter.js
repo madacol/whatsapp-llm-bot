@@ -403,17 +403,17 @@ export async function adaptIncomingMessage(baileysMessage, sock, messageHandler)
     quotedSenderId,
 
     // High-level actions scoped to this message
-    getAdminStatus: async () => {
-      if (!isGroup) return "admin"; // In private chats, treat as admin
+    getIsAdmin: async () => {
+      if (!isGroup) return true;
       try {
         const groupMetadata = await sock.groupMetadata(chatId);
         const participant = groupMetadata.participants.find(
           participant => senderIds.includes(participant.id)
         );
-        return participant?.admin || null;
+        return participant?.admin === "admin" || participant?.admin === "superadmin";
       } catch (error) {
         log.error("Error checking group admin status:", error);
-        return null;
+        return false;
       }
     },
 

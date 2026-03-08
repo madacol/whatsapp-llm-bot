@@ -96,7 +96,7 @@ export async function runAgent(options) {
   });
 
   // Build a minimal context for action execution (sub-agents don't do WhatsApp I/O)
-  /** @type {Context} */
+  /** @type {ExecuteActionContext} */
   const context = {
     chatId,
     senderIds,
