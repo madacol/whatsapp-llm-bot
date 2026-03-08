@@ -4,27 +4,6 @@
 
 import fs from "node:fs";
 
-// Prevent duplicate instances: if old PID is still running, kill it first
-const pidFile = ".bot.pid";
-if (fs.existsSync(pidFile)) {
-  const oldPid = parseInt(fs.readFileSync(pidFile, "utf-8"), 10);
-  try {
-    process.kill(oldPid, 0); // check if alive
-    console.log(`Killing previous instance (PID ${oldPid})...`);
-    process.kill(oldPid, "SIGTERM");
-    // Give it a moment to clean up
-    const start = Date.now();
-    while (Date.now() - start < 3000) {
-      try { process.kill(oldPid, 0); } catch { break; }
-    }
-  } catch { /* not running, ok */ }
-}
-
-fs.writeFileSync(pidFile, process.pid.toString());
-for (const sig of ["exit", "SIGINT", "SIGTERM"]) {
-  process.on(sig, () => { try { fs.unlinkSync(pidFile); } catch {} });
-}
-
 import { getActions, executeAction, getChatActions, getChatAction, getAction } from "./actions.js";
 import config from "./config.js";
 import { createLlmClient } from "./llm.js";
@@ -499,6 +478,25 @@ try {
 } catch { /* SDK not installed, skip */ }
 
 if (!process.env.TESTING) {
+  // Prevent duplicate instances: if old PID is still running, kill it first
+  const pidFile = ".bot.pid";
+  if (fs.existsSync(pidFile)) {
+    const oldPid = parseInt(fs.readFileSync(pidFile, "utf-8"), 10);
+    try {
+      process.kill(oldPid, 0); // check if alive
+      console.log(`Killing previous instance (PID ${oldPid})...`);
+      process.kill(oldPid, "SIGTERM");
+      const start = Date.now();
+      while (Date.now() - start < 3000) {
+        try { process.kill(oldPid, 0); } catch { break; }
+      }
+    } catch { /* not running, ok */ }
+  }
+  fs.writeFileSync(pidFile, process.pid.toString());
+  for (const sig of ["exit", "SIGINT", "SIGTERM"]) {
+    process.on(sig, () => { try { fs.unlinkSync(pidFile); } catch {} });
+  }
+
   const store = await initStore();
   const llmClient = createLlmClient();
 

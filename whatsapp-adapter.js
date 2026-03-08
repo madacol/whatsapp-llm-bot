@@ -333,9 +333,35 @@ export async function sendBlocks(sock, chatId, source, content, options) {
       case "text":
         await sock.sendMessage(chatId, { text: `${prefix} ${block.text}` }, options);
         break;
-      case "markdown":
-        await sock.sendMessage(chatId, { text: `${prefix} ${markdownToWhatsApp(block.text)}` }, options);
+      case "markdown": {
+        // Split markdown into text segments and code blocks
+        const parts = block.text.split(/(```[\s\S]*?```)/g);
+        for (const part of parts) {
+          const codeMatch = part.match(/^```(\w*)\n?([\s\S]*?)```$/);
+          if (codeMatch) {
+            const lang = codeMatch[1] || "";
+            const code = codeMatch[2].trimEnd();
+            try {
+              const images = await renderCodeToImages(code, lang);
+              for (const image of images) {
+                await sock.sendMessage(chatId, {
+                  image,
+                  ...(lang && { caption: lang }),
+                }, options);
+              }
+            } catch (err) {
+              log.error("Markdown code image rendering failed, falling back to text:", err);
+              await sock.sendMessage(chatId, { text: "```\n" + code + "\n```" }, options);
+            }
+          } else {
+            const converted = markdownToWhatsApp(part).trim();
+            if (converted) {
+              await sock.sendMessage(chatId, { text: `${prefix} ${converted}` }, options);
+            }
+          }
+        }
         break;
+      }
       case "code": {
         try {
           const images = await renderCodeToImages(block.code, block.language);
