@@ -171,7 +171,7 @@ export function createClaudeAgentSdkHarness() {
               for (const block of betaMessage.content) {
                 if (block.type === "text") {
                   await hooks.onLlmResponse(block.text);
-                  result.response = [{ type: "text", text: block.text }];
+                  result.response = [{ type: "markdown", text: block.text }];
                 } else if (block.type === "tool_use") {
                   await hooks.onToolCall({
                     id: block.id,
