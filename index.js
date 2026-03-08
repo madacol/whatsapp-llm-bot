@@ -65,11 +65,11 @@ const NO_OP_HOOKS = {
 /**
  * Display a tool call to the user (compact or verbose based on debug mode).
  * @param {LlmChatResponse['toolCalls'][0]} toolCall
- * @param {Context} context
+ * @param {Pick<Context, "send">} context
+ * @param {boolean} isDebug
  * @param {((params: Record<string, any>) => string)} [formatToolCall] - Optional formatter from the action
  */
-async function displayToolCall(toolCall, context, formatToolCall) {
-  const isDebug = context.isDebug;
+async function displayToolCall(toolCall, context, isDebug, formatToolCall) {
   let msg = isDebug ? `*${toolCall.name}*` : toolCall.name;
   const args = parseToolArgs(toolCall.arguments);
 
@@ -99,12 +99,13 @@ async function displayToolCall(toolCall, context, formatToolCall) {
  * @param {ToolContentBlock[]} blocks - The result content blocks
  * @param {string} toolName - Name of the tool that produced the result
  * @param {Action['permissions']} permissions - Action permission flags
- * @param {Context} context
+ * @param {Pick<Context, "send" | "reply">} context
+ * @param {boolean} isDebug
  */
-async function displayToolResult(blocks, toolName, permissions, context) {
+async function displayToolResult(blocks, toolName, permissions, context, isDebug) {
   if (permissions.silent) return;
 
-  if (context.isDebug) {
+  if (isDebug) {
     const textSummary = blocks.filter(b => b.type === "text").map(b => /** @type {TextContentBlock} */ (b).text).join("\n");
     await context.send("tool-result", `${toolName}: ${textSummary || "Done."}`);
     const nonTextBlocks = blocks.filter(b => b.type !== "text");
@@ -435,7 +436,6 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
       chatId,
       senderIds,
       content,
-      isDebug,
       getIsAdmin: async () => {
         const adminStatus = await messageContext.getAdminStatus();
         return adminStatus === "admin" || adminStatus === "superadmin";
@@ -617,14 +617,14 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
     /** @type {AgentIOHooks} */
     const hooks = {
       onLlmResponse: (text) => context.reply("llm", text),
-      onToolCall: (toolCall, fmt) => displayToolCall(toolCall, context, fmt),
-      onToolResult: (blocks, name, perms) => displayToolResult(blocks, name, perms, context),
+      onToolCall: (toolCall, fmt) => displayToolCall(toolCall, context, isDebug, fmt),
+      onToolResult: (blocks, name, perms) => displayToolResult(blocks, name, perms, context, isDebug),
       onToolError: (msg) => context.send("error", msg),
       onContinuePrompt: () => context.confirm(`React 👍 to continue or 👎 to stop.`),
       onDepthLimit: () => context.confirm(
         `⚠️ *Depth limit*\n\nReached maximum tool call depth (${MAX_TOOL_CALL_DEPTH}). React 👍 to continue or 👎 to stop.`,
       ),
-      onUsage: (cost, tokens) => context.isDebug
+      onUsage: (cost, tokens) => isDebug
         ? context.send("usage", `Cost: ${cost} | prompt=${tokens.prompt} cached=${tokens.cached} completion=${tokens.completion}`)
         : Promise.resolve(),
     };
@@ -709,7 +709,6 @@ export function createReactionHandler({ store, executeActionFn, pendingByMsgKeyI
       chatId: pending.chat_id,
       senderIds: pending.sender_ids,
       content: [],
-      isDebug: false,
       getIsAdmin: async () => true,
       send: async (source, content) => sendBlocks(sock, pending.chat_id, source, content),
       reply: async (source, content) => sendBlocks(sock, pending.chat_id, source, content),
