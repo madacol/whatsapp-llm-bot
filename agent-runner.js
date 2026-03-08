@@ -101,7 +101,6 @@ export async function runAgent(options) {
     chatId,
     senderIds,
     content: [],
-    isDebug: false,
     getIsAdmin: async () => true,
     send: async (_source, _content) => {},
     reply: async (_source, _content) => {},

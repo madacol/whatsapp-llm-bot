@@ -68,7 +68,6 @@ function createMockContext(overrides = {}) {
     chatId: "test-chat",
     senderIds: ["master-user"],
     content: [],
-    isDebug: false,
     getIsAdmin: async () => true,
     send: async (_source, _content) => {},
     reply: async (_source, _content) => {},

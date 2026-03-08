@@ -91,10 +91,10 @@ export async function executeAction(actionName, context, params, options = {}) {
       return message;
     },
     send: async (message) => {
-      await context.send("tool-result", message);
+      await context.send("tool-call", message);
     },
     reply: async (message) => {
-      await context.reply("tool-result", message);
+      await context.reply("tool-call", message);
     },
     reactToMessage: context.reactToMessage,
     sendPoll: context.sendPoll,
