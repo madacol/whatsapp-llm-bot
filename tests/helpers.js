@@ -76,7 +76,7 @@ export function createIncomingContext(overrides = {}) {
     timestamp: new Date(),
     selfIds: ["bot-123"],
     selfName: "TestBot",
-    getAdminStatus: async () => "admin",
+    getIsAdmin: async () => true,
     reactToMessage: async (emoji) => {
       responses.push({ type: "reactToMessage", text: emoji });
     },

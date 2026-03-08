@@ -20,7 +20,7 @@ const currentSessionDb = getDb("memory://");
 /**
  * Execute a custom action
  * @param {string} actionName - The name of the action to execute
- * @param {Context} context - The unified context to pass to the action
+ * @param {ExecuteActionContext} context - The context to pass to the action
  * @param {{}} params - The parameters to pass to the action
  * @param {ExecuteActionOptions} [options]
  * @returns {Promise<{result: ActionResultValue, permissions: Action['permissions']}>} Result of the action execution

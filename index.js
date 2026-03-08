@@ -65,7 +65,7 @@ const NO_OP_HOOKS = {
 /**
  * Display a tool call to the user (compact or verbose based on debug mode).
  * @param {LlmChatResponse['toolCalls'][0]} toolCall
- * @param {Pick<Context, "send">} context
+ * @param {Pick<ExecuteActionContext, "send">} context
  * @param {boolean} isDebug
  * @param {((params: Record<string, any>) => string)} [formatToolCall] - Optional formatter from the action
  */
@@ -99,7 +99,7 @@ async function displayToolCall(toolCall, context, isDebug, formatToolCall) {
  * @param {ToolContentBlock[]} blocks - The result content blocks
  * @param {string} toolName - Name of the tool that produced the result
  * @param {Action['permissions']} permissions - Action permission flags
- * @param {Pick<Context, "send" | "reply">} context
+ * @param {Pick<ExecuteActionContext, "send" | "reply">} context
  * @param {boolean} isDebug
  */
 async function displayToolResult(blocks, toolName, permissions, context, isDebug) {
@@ -431,15 +431,12 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
     const chatInfo = await getChat(chatId);
     const isDebug = !!chatInfo?.debug_until && new Date(chatInfo.debug_until) > new Date();
 
-    /** @type {Context} */
+    /** @type {ExecuteActionContext} */
     const context = {
       chatId,
       senderIds,
       content,
-      getIsAdmin: async () => {
-        const adminStatus = await messageContext.getAdminStatus();
-        return adminStatus === "admin" || adminStatus === "superadmin";
-      },
+      getIsAdmin: messageContext.getIsAdmin,
       send: messageContext.send,
       reply: messageContext.reply,
       reactToMessage: messageContext.reactToMessage,
@@ -704,7 +701,7 @@ export function createReactionHandler({ store, executeActionFn, pendingByMsgKeyI
 
     log.info(`Resuming action "${pending.action_name}" after restart approval`);
 
-    /** @type {Context} */
+    /** @type {ExecuteActionContext} */
     const resumeContext = {
       chatId: pending.chat_id,
       senderIds: pending.sender_ids,
