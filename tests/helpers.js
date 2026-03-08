@@ -60,6 +60,7 @@ export function createIncomingContext(overrides = {}) {
       : Array.isArray(content) ? content : [content];
     for (const block of blocks) {
       const text = block.type === "text" ? block.text
+        : block.type === "markdown" ? block.text
         : block.type === "code" ? block.code
         : ("alt" in block && block.alt) || "";
       responses.push({ type: method, text, source, blockType: block.type });

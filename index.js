@@ -327,7 +327,7 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
 
     /** @type {AgentIOHooks} */
     const hooks = {
-      onLlmResponse: (text) => context.reply("llm", text),
+      onLlmResponse: (text) => context.reply("llm", [{ type: "markdown", text }]),
       onToolCall: (toolCall, fmt) => displayToolCall(toolCall, context, isDebug, fmt),
       onToolResult: (blocks, name, perms) => displayToolResult(blocks, name, perms, context, isDebug),
       onToolError: (msg) => context.send("error", msg),

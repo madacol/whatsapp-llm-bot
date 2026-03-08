@@ -105,7 +105,7 @@ export async function renderCodeToImages(code, language) {
 
     for (let lineIdx = 0; lineIdx < chunk.length; lineIdx++) {
       const y = PADDING + (lineIdx + 1) * LINE_HEIGHT - 4;
-      svg += `<text x="${PADDING}" y="${y}" font-family="${FONT_FAMILY}" font-size="${FONT_SIZE}" fill="#e6edf3">`;
+      svg += `<text x="${PADDING}" y="${y}" font-family="${FONT_FAMILY}" font-size="${FONT_SIZE}" fill="#e6edf3" xml:space="preserve">`;
 
       for (const token of chunk[lineIdx]) {
         const color = token.color || "#e6edf3";
