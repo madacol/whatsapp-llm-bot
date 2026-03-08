@@ -6,7 +6,7 @@ import { getActions, executeAction, getChatActions, getChatAction, getAction } f
 import config from "./config.js";
 import { createLlmClient, sendChatCompletion } from "./llm.js";
 import { formatTime, isHtmlContent, createToolMessage } from "./utils.js";
-import { connectToWhatsApp } from "./whatsapp-adapter.js";
+import { connectToWhatsApp, sendBlocks } from "./whatsapp-adapter.js";
 import { startReminderDaemon } from "./reminder-daemon.js";
 import { startModelsCacheDaemon } from "./models-cache.js";
 import { initStore } from "./store.js";
@@ -704,28 +704,6 @@ export function createReactionHandler({ store, executeActionFn, pendingByMsgKeyI
 
     log.info(`Resuming action "${pending.action_name}" after restart approval`);
 
-    /** @param {SendContent} content */
-    const resumeSend = async (content) => {
-      const blocks = typeof content === "string"
-        ? [/** @type {ToolContentBlock} */ ({ type: "text", text: content })]
-        : Array.isArray(content) ? content : [content];
-      for (const block of blocks) {
-        if (block.type === "text") {
-          await sock.sendMessage(pending.chat_id, { text: block.text });
-        } else if (block.type === "image") {
-          await sock.sendMessage(pending.chat_id, {
-            image: Buffer.from(block.data, "base64"),
-            ...(block.alt && { caption: block.alt }),
-          });
-        } else if (block.type === "video") {
-          await sock.sendMessage(pending.chat_id, {
-            video: Buffer.from(block.data, "base64"),
-            ...(block.alt && { caption: block.alt }),
-          });
-        }
-      }
-    };
-
     /** @type {Context} */
     const resumeContext = {
       chatId: pending.chat_id,
@@ -733,8 +711,8 @@ export function createReactionHandler({ store, executeActionFn, pendingByMsgKeyI
       content: [],
       isDebug: false,
       getIsAdmin: async () => true,
-      send: async (_source, content) => resumeSend(content),
-      reply: async (_source, content) => resumeSend(content),
+      send: async (source, content) => sendBlocks(sock, pending.chat_id, source, content),
+      reply: async (source, content) => sendBlocks(sock, pending.chat_id, source, content),
       reactToMessage: async () => {},
       sendPoll: async (name, options, selectableCount) => {
         await sock.sendMessage(pending.chat_id, {
