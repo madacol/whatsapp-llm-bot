@@ -401,4 +401,98 @@ describe("self ID extraction", () => {
   });
 });
 
+// ═══════════════════════════════════════════════════════════════════
+// 11. Markdown with code → socket receives [text, image, text]
+// ═══════════════════════════════════════════════════════════════════
+describe("markdown code renders as image in socket output", () => {
+  const senderId = "e2e-md-code";
+  const chatId = `${senderId}@s.whatsapp.net`;
+
+  before(async () => {
+    await seedChat(testDb, chatId, { enabled: true });
+  });
+
+  it("LLM markdown with code block produces [text, image, text] on socket", async () => {
+    const llmResponse = `Here is a snippet:\n\n\`\`\`javascript\nconsole.log("hello");\n\`\`\`\n\nHope that helps!`;
+    mockServer.addResponses(llmResponse);
+
+    const { sock, getSentMessages } = createMockBaileysSocket();
+
+    await adaptIncomingMessage(
+      createWAMessage({ text: "Show me code", senderId }),
+      sock,
+      handleMessage,
+    );
+
+    const msgs = getSentMessages();
+
+    // Classify each socket message
+    const classified = msgs.map(m => {
+      if (m.msg.image != null) return "image";
+      if (typeof m.msg.text === "string") return "text";
+      return "other";
+    });
+
+    // There should be at least: text (before code), image (code), text (after code)
+    const textMsgs = classified.filter(t => t === "text");
+    const imageMsgs = classified.filter(t => t === "image");
+
+    assert.ok(
+      imageMsgs.length >= 1,
+      `Expected at least 1 image for code block, got ${imageMsgs.length}. Classified: ${JSON.stringify(classified)}`,
+    );
+
+    assert.ok(
+      textMsgs.length >= 2,
+      `Expected at least 2 text messages (before+after code), got ${textMsgs.length}. Classified: ${JSON.stringify(classified)}`,
+    );
+
+    // Image should be a Buffer (PNG)
+    const imageMsg = msgs.find(m => m.msg.image != null);
+    assert.ok(
+      Buffer.isBuffer(imageMsg?.msg.image),
+      "Code block image should be a Buffer",
+    );
+
+    // Verify order: first text before first image, last text after last image
+    const firstImageIdx = classified.indexOf("image");
+    const firstTextIdx = classified.indexOf("text");
+    const lastTextIdx = classified.lastIndexOf("text");
+
+    assert.ok(
+      firstTextIdx < firstImageIdx,
+      `Text should appear before image. Order: ${JSON.stringify(classified)}`,
+    );
+    assert.ok(
+      lastTextIdx > firstImageIdx,
+      `Text should appear after image. Order: ${JSON.stringify(classified)}`,
+    );
+  });
+
+  it("LLM markdown without code block sends only text (no images)", async () => {
+    mockServer.addResponses("Just **bold** and _italic_ text, no code.");
+
+    const { sock, getSentMessages } = createMockBaileysSocket();
+
+    await adaptIncomingMessage(
+      createWAMessage({ text: "Tell me something", senderId }),
+      sock,
+      handleMessage,
+    );
+
+    const msgs = getSentMessages();
+    const imageMsgs = msgs.filter(m => m.msg.image != null);
+    const textMsgs = msgs.filter(m => typeof m.msg.text === "string");
+
+    assert.equal(
+      imageMsgs.length, 0,
+      `Should have 0 images for plain markdown, got ${imageMsgs.length}`,
+    );
+    assert.ok(
+      textMsgs.length >= 1,
+      `Should have at least 1 text message, got ${textMsgs.length}`,
+    );
+  });
+});
+
 }); // end describe("e2e adapter")

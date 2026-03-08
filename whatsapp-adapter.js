@@ -29,16 +29,16 @@ const log = createLogger("whatsapp");
 function markdownToWhatsApp(text) {
   let result = text;
 
+  // Italic first: *text* (single asterisk) → _text_
+  // Must run BEFORE bold conversion so **bold** doesn't get re-matched as italic
+  result = result.replace(/(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)/g, "_$1_");
+
   // Headers: # Heading → *Heading* (bold)
   result = result.replace(/^#{1,6}\s+(.+)$/gm, "*$1*");
 
   // Bold: **text** or __text__ → *text*
   result = result.replace(/\*\*(.+?)\*\*/g, "*$1*");
   result = result.replace(/__(.+?)__/g, "*$1*");
-
-  // Italic: *text* (single) or _text_ → _text_
-  // Must not match already-converted *bold* — only match single * not preceded/followed by *
-  result = result.replace(/(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)/g, "_$1_");
 
   // Strikethrough: ~~text~~ → ~text~
   result = result.replace(/~~(.+?)~~/g, "~$1~");
@@ -49,8 +49,18 @@ function markdownToWhatsApp(text) {
   // Links: [text](url) → text (url)
   result = result.replace(/\[([^\]]+)\]\(([^)]+)\)/g, "$1 ($2)");
 
-  // Unordered lists: - item or * item → • item
-  result = result.replace(/^[\s]*[-*]\s+/gm, "• ");
+  // Unordered lists: - item or * item → • item (preserve indentation)
+  // Use non-breaking spaces (\u00A0) because WhatsApp strips regular leading spaces
+  result = result.replace(/^([\t ]*)[-*]\s+/gm, (_match, indent) => {
+    const depth = indent ? Math.floor(indent.replace(/\t/g, "  ").length / 2) : 0;
+    return "\u00A0\u00A0".repeat(depth) + "• ";
+  });
+
+  // Ordered lists: 1. item → 1. item (preserve indentation)
+  result = result.replace(/^([\t ]*)(\d+)\.\s+/gm, (_match, indent, num) => {
+    const depth = indent ? Math.floor(indent.replace(/\t/g, "  ").length / 2) : 0;
+    return "\u00A0\u00A0".repeat(depth) + num + ". ";
+  });
 
   // Horizontal rules: --- or *** or ___ → ———
   result = result.replace(/^(-{3,}|\*{3,}|_{3,})$/gm, "———");
@@ -334,10 +344,11 @@ export async function sendBlocks(sock, chatId, source, content, options) {
         await sock.sendMessage(chatId, { text: `${prefix} ${block.text}` }, options);
         break;
       case "markdown": {
-        // Split markdown into text segments and code blocks
-        const parts = block.text.split(/(```[\s\S]*?```)/g);
+        // Split markdown into text segments and fenced code blocks (not inline code)
+        // Requires newline after opening ``` to distinguish from inline triple backticks
+        const parts = block.text.split(/(```\w*\n[\s\S]*?```)/g);
         for (const part of parts) {
-          const codeMatch = part.match(/^```(\w*)\n?([\s\S]*?)```$/);
+          const codeMatch = part.match(/^```(\w*)\n([\s\S]*?)```$/);
           if (codeMatch) {
             const lang = codeMatch[1] || "";
             const code = codeMatch[2].trimEnd();
