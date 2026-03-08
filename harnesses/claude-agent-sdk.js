@@ -86,6 +86,10 @@ async function buildSystemPrompt(llmConfig, messages, chatId, senderIds) {
     prompt += `\n\n## Conversation History\n${history}`;
   }
 
+  // Instruction to read CLAUDE.md when programming the bot
+  prompt += `\n\n## Internal Development
+When the user asks you to program, modify, fix, or work on the bot's internal system (this codebase), you MUST first read the file \`CLAUDE.md\` in the project root for coding guidelines and conventions before making any changes.`;
+
   // Inject chat-specific action descriptions
   try {
     const chatActions = await getChatActions(chatId);
