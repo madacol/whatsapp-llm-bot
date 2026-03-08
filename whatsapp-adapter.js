@@ -265,14 +265,27 @@ export async function getMessageContent(baileysMessage, downloadFn = downloadMed
   return { content, quotedSenderId };
 }
 
+/** @type {Record<MessageSource, string>} */
+const SOURCE_PREFIX = {
+  "llm": "🤖",
+  "tool-call": "🔧",
+  "tool-result": "✅",
+  "error": "❌",
+  "warning": "⚠️",
+  "usage": "📊",
+  "memory": "🧠",
+};
+
 /**
- * Dispatch SendContent as WhatsApp messages.
+ * Dispatch SendContent as WhatsApp messages with a source-based prefix.
  * @param {import('@whiskeysockets/baileys').WASocket} sock
  * @param {string} chatId
+ * @param {MessageSource} source
  * @param {SendContent} content
  * @param {{ quoted?: BaileysMessage }} [options]
  */
-async function sendBlocks(sock, chatId, content, options) {
+export async function sendBlocks(sock, chatId, source, content, options) {
+  const prefix = SOURCE_PREFIX[source];
   const blocks = typeof content === "string"
     ? [/** @type {ToolContentBlock} */ ({ type: "text", text: content })]
     : Array.isArray(content) ? content : [content];
@@ -280,7 +293,7 @@ async function sendBlocks(sock, chatId, content, options) {
   for (const block of blocks) {
     switch (block.type) {
       case "text":
-        await sock.sendMessage(chatId, { text: block.text }, options);
+        await sock.sendMessage(chatId, { text: `${prefix} ${block.text}` }, options);
         break;
       case "code": {
         try {
@@ -416,12 +429,12 @@ export async function adaptIncomingMessage(baileysMessage, sock, messageHandler)
       });
     },
 
-    send: async (content) => {
-      await sendBlocks(sock, chatId, content);
+    send: async (source, content) => {
+      await sendBlocks(sock, chatId, source, content);
     },
 
-    reply: async (content) => {
-      await sendBlocks(sock, chatId, content, { quoted: baileysMessage });
+    reply: async (source, content) => {
+      await sendBlocks(sock, chatId, source, content, { quoted: baileysMessage });
     },
 
     confirm: createConfirm(sock, chatId),
