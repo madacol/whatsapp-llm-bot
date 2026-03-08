@@ -31,7 +31,7 @@ import {
   loadPendingConfirmations,
   deletePendingConfirmation,
 } from "./pending-confirmations.js";
-import { resolveHarness, MAX_TOOL_CALL_DEPTH, parseToolArgs } from "./harnesses/index.js";
+import { resolveHarness, registerHarness, MAX_TOOL_CALL_DEPTH, parseToolArgs } from "./harnesses/index.js";
 import { createLogger } from "./logger.js";
 
 const log = createLogger("index");
@@ -469,6 +469,12 @@ export function createReactionHandler({ store, executeActionFn, pendingByMsgKeyI
 }
 
 // ── Default initialization (production) ──
+
+// Register optional harnesses
+try {
+  const { createClaudeAgentSdkHarness } = await import("./harnesses/claude-agent-sdk.js");
+  registerHarness("claude-agent-sdk", createClaudeAgentSdkHarness);
+} catch { /* SDK not installed, skip */ }
 
 if (!process.env.TESTING) {
   const store = await initStore();
