@@ -59,12 +59,6 @@ export function createIncomingContext(overrides = {}) {
     selfIds: ["bot-123"],
     selfName: "TestBot",
     getAdminStatus: async () => "admin",
-    sendMessage: async (text) => {
-      responses.push({ type: "sendMessage", text });
-    },
-    replyToMessage: async (text) => {
-      responses.push({ type: "replyToMessage", text });
-    },
     reactToMessage: async (emoji) => {
       responses.push({ type: "reactToMessage", text: emoji });
     },
@@ -78,6 +72,24 @@ export function createIncomingContext(overrides = {}) {
       for (const block of blocks) {
         if (block.type === "text") {
           responses.push({ type: "send", text: block.text });
+        } else if (block.type === "image") {
+          responses.push({ type: "sendImage", text: block.alt || "" });
+        } else if (block.type === "video") {
+          responses.push({ type: "sendVideo", text: block.alt || "" });
+        } else if (block.type === "code") {
+          responses.push({ type: "sendCode", text: block.code });
+        } else if (block.type === "audio") {
+          responses.push({ type: "sendAudio", text: "" });
+        }
+      }
+    },
+    reply: async (content) => {
+      const blocks = typeof content === "string"
+        ? [/** @type {ToolContentBlock} */ ({ type: "text", text: content })]
+        : Array.isArray(content) ? content : [content];
+      for (const block of blocks) {
+        if (block.type === "text") {
+          responses.push({ type: "reply", text: block.text });
         } else if (block.type === "image") {
           responses.push({ type: "sendImage", text: block.alt || "" });
         } else if (block.type === "video") {
@@ -287,9 +299,9 @@ export function toolCall(name, args) {
 
 /**
  * @typedef {{
- *   texts: string[];
- *   replies: string[];
  *   sends: string[];
+ *   replies: string[];
+ *   all: string[];
  *   reactions: string[];
  *   confirms: string[];
  *   polls: Array<{name: string, options: string[], selectableCount: number}>;
@@ -457,9 +469,9 @@ export function createTestHarness({ mockServer, handleMessage, testDb }) {
 
       // 7. Build and return SendResult
       return {
-        texts: responses.filter(r => r.type === "sendMessage").map(r => r.text),
-        replies: responses.filter(r => r.type === "replyToMessage").map(r => r.text),
-        sends: responses.filter(r => r.type === "sendMessage" || r.type === "replyToMessage").map(r => r.text),
+        sends: responses.filter(r => r.type === "send").map(r => r.text),
+        replies: responses.filter(r => r.type === "reply").map(r => r.text),
+        all: responses.filter(r => r.type === "send" || r.type === "reply").map(r => r.text),
         reactions: responses.filter(r => r.type === "reactToMessage").map(r => r.text),
         confirms: responses.filter(r => r.type === "confirm").map(r => r.text),
         polls: responses.filter(r => r.type === "sendPoll").map(r => JSON.parse(r.text)),

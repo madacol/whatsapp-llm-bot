@@ -119,7 +119,7 @@ export default /** @type {defineAction} */ ((x) => x)({
   /** @param {ActionContext} context  @param {{ paramName: string }} params */
   action_fn: async function (context, params) {
     // context has: chatId, senderIds, content, getIsAdmin, sessionDb, getActions,
-    //   log, sendMessage, reply, reactToMessage, sendPoll, confirm
+    //   log, send, reply, reactToMessage, sendPoll, confirm
     // plus permission-granted extras: rootDb (useRootDb), chatDb (useChatDb), callLlm (useLlm)
     return "result string";
   }

@@ -20,14 +20,14 @@ export default /** @type {defineAction} */ ((x) => x)({
 
 Example code:
 \`\`\`javascript
-async ({log, sessionDb, sendMessage, reply}) => {
+async ({log, sessionDb, send, reply}) => {
 await log('Analyzing chat activity...');
 const {rows: messages} = await sessionDb.sql\`SELECT * FROM messages WHERE chat_id = \${chat.chatId}\`;
 const result = \`This chat has \${messages.length} messages\`;
 log('Analysis complete');
 
 // Send a message to the chat
-// await sendMessage(result);
+// await send(result);
 
 // Reply with the result
 // await reply(result);
