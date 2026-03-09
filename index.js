@@ -33,7 +33,7 @@ import {
   loadPendingConfirmations,
   deletePendingConfirmation,
 } from "./pending-confirmations.js";
-import { resolveHarness, resolveHarnessName, registerHarness, MAX_TOOL_CALL_DEPTH, parseToolArgs } from "./harnesses/index.js";
+import { resolveHarness, resolveHarnessName, registerHarness, waitForAllHarnesses, MAX_TOOL_CALL_DEPTH, parseToolArgs } from "./harnesses/index.js";
 import { createMessageActionContext, createSilentActionContext } from "./execute-action-context.js";
 import { createLogger } from "./logger.js";
 
@@ -896,6 +896,7 @@ if (!process.env.TESTING) {
     try {
       stopReminders();
       stopModelsCache();
+      await waitForAllHarnesses();
       await stopHtmlServer();
       await closeWhatsapp();
       await store.closeDb();

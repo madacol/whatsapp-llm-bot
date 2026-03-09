@@ -333,6 +333,8 @@ type AgentHarness = {
   injectMessage?: (chatId: string, text: string) => boolean;
   /** Cancel the active query for this chat. Returns true if cancelled. */
   cancel?: (chatId: string) => boolean;
+  /** Wait for all active queries to finish. Used for graceful shutdown. */
+  waitForIdle?: () => Promise<void>;
 };
 
 /* processLlmResponse types */

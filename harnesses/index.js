@@ -59,5 +59,16 @@ export function resolveHarnessName(persona, chatInfo) {
   return persona?.harness ?? chatInfo?.harness ?? "native";
 }
 
+/**
+ * Wait for all active harnesses to become idle. Used for graceful shutdown.
+ * @returns {Promise<void>}
+ */
+export async function waitForAllHarnesses() {
+  const waits = [...instances.values()]
+    .filter(h => typeof h.waitForIdle === "function")
+    .map(h => /** @type {() => Promise<void>} */ (h.waitForIdle)());
+  await Promise.all(waits);
+}
+
 // Re-export commonly used constants from native harness
 export { NO_OP_HOOKS, MAX_TOOL_CALL_DEPTH, parseToolArgs } from "./native.js";
