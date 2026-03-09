@@ -263,8 +263,8 @@ type AppAction = Action & {
 
 type AgentIOHooks = {
   onLlmResponse?: (text: string) => Promise<void>;
-  /** Present a structured question to the user. `options` (if provided) are selectable choices. */
-  onAskUser?: (question: string, options: string[], preamble?: string) => Promise<void>;
+  /** Present a structured question to the user and wait for their response. Returns the chosen option text. */
+  onAskUser?: (question: string, options: string[], preamble?: string) => Promise<string>;
   onToolCall?: (toolCall: LlmChatResponse['toolCalls'][0], formatToolCall?: (params: Record<string, any>) => string) => Promise<void>;
   onToolResult?: (blocks: ToolContentBlock[], toolName: string, permissions: PermissionFlags) => Promise<void>;
   onToolError?: (error: string) => Promise<void>;
