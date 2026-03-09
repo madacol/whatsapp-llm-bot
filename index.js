@@ -123,7 +123,7 @@ async function displayToolResult(blocks, toolName, permissions, context, isDebug
  * @returns {{ handleMessage: (messageContext: IncomingContext) => Promise<void> }}
  */
 export function createMessageHandler({ store, llmClient, getActionsFn, executeActionFn }) {
-  const { addMessage, updateToolMessage, createChat, getChat, getMessages } = store;
+  const { addMessage, updateToolMessage, createChat, getChat, getMessages, updateSdkSessionId } = store;
 
   /**
    * Handle a `!command` message: parse, dispatch, and render result.
@@ -305,6 +305,8 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
     /** @type {Session} */
     const session = {
       chatId, senderIds, context, addMessage, updateToolMessage,
+      sdkSessionId: chatInfo?.sdk_session_id,
+      updateSdkSessionId,
     };
 
     // Filter actions by persona whitelist if active
@@ -321,6 +323,9 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
     /** @type {AgentIOHooks} */
     const hooks = {
       onLlmResponse: (text) => context.reply("llm", [{ type: "markdown", text }]),
+      onAskUser: async (question, options, _preamble) => {
+        await context.sendPoll(question || "Choose an option:", options, 1);
+      },
       onToolCall: (toolCall, fmt) => displayToolCall(toolCall, context, isDebug, fmt),
       onToolResult: (blocks, name, perms) => displayToolResult(blocks, name, perms, context, isDebug),
       onToolError: (msg) => context.send("error", msg),

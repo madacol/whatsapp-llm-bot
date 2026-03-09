@@ -22,6 +22,7 @@ export const MAX_TOOL_CALL_DEPTH = 10;
 /** @type {Required<AgentIOHooks>} */
 export const NO_OP_HOOKS = {
   onLlmResponse: async () => {},
+  onAskUser: async () => {},
   onToolCall: async () => {},
   onToolResult: async (_blocks, _name, _perms) => {},
   onToolError: async () => {},
