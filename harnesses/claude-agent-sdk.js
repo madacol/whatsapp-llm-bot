@@ -17,6 +17,38 @@ import { createLogger } from "../logger.js";
 const log = createLogger("harness:claude-agent-sdk");
 
 /**
+ * Render a single content block into a text representation.
+ * Images/videos/audio produce descriptive placeholders; quotes become blockquotes.
+ * @param {*} block
+ * @returns {string}
+ */
+function renderContentBlock(block) {
+  switch (block.type) {
+    case "text":
+      return block.text;
+    case "image":
+      return block.alt ? `[Image: ${block.alt}]` : "[Image]";
+    case "video":
+      return block.alt ? `[Video: ${block.alt}]` : "[Video]";
+    case "audio":
+      return "[Audio message]";
+    case "markdown":
+      return block.text;
+    case "quote": {
+      const quotedParts = block.content
+        .map(/** @param {*} qb */ qb => renderContentBlock(qb))
+        .filter(/** @param {string} s */ s => s.length > 0);
+      if (quotedParts.length === 0) return "";
+      const sender = block.quotedSenderId ? `[Quoted from ${block.quotedSenderId}] ` : "";
+      const quotedText = quotedParts.join(" ").trim().replace(/\n/g, "\n> ");
+      return `${sender}> ${quotedText}`;
+    }
+    default:
+      return "";
+  }
+}
+
+/**
  * Format conversation history from Message[] into a readable string for the system prompt.
  * @param {Message[]} messages
  * @returns {string}
@@ -26,15 +58,15 @@ function formatConversationHistory(messages) {
   const lines = [];
   for (const msg of messages) {
     if (msg.role === "user") {
-      const texts = msg.content
-        .filter(/** @param {*} b */ b => b.type === "text")
-        .map(/** @param {*} b */ b => b.text);
-      if (texts.length > 0) lines.push(`User: ${texts.join(" ")}`);
+      const parts = msg.content
+        .map(/** @param {*} b */ b => renderContentBlock(b))
+        .filter(/** @param {string} s */ s => s.length > 0);
+      if (parts.length > 0) lines.push(`User: ${parts.join("\n")}`);
     } else if (msg.role === "assistant") {
-      const texts = msg.content
-        .filter(/** @param {*} b */ b => b.type === "text")
-        .map(/** @param {*} b */ b => b.text);
-      if (texts.length > 0) lines.push(`Assistant: ${texts.join(" ")}`);
+      const parts = msg.content
+        .map(/** @param {*} b */ b => renderContentBlock(b))
+        .filter(/** @param {string} s */ s => s.length > 0);
+      if (parts.length > 0) lines.push(`Assistant: ${parts.join("\n")}`);
     }
     // Tool messages are implementation details — skip them
   }
@@ -42,7 +74,7 @@ function formatConversationHistory(messages) {
 }
 
 /**
- * Extract the last user text from the messages array.
+ * Extract the last user text from the messages array, including quoted content.
  * @param {Message[]} messages
  * @returns {string}
  */
@@ -50,10 +82,10 @@ function extractLastUserText(messages) {
   for (let i = messages.length - 1; i >= 0; i--) {
     const msg = messages[i];
     if (msg.role === "user") {
-      const texts = msg.content
-        .filter(/** @param {*} b */ b => b.type === "text")
-        .map(/** @param {*} b */ b => b.text);
-      if (texts.length > 0) return texts.join(" ");
+      const parts = msg.content
+        .map(/** @param {*} b */ b => renderContentBlock(b))
+        .filter(/** @param {string} s */ s => s.length > 0);
+      if (parts.length > 0) return parts.join("\n");
     }
   }
   return "";
