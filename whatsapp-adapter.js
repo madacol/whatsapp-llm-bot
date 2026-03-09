@@ -397,15 +397,33 @@ export async function sendBlocks(sock, chatId, source, content, options) {
         break;
       }
       case "markdown": {
-        // Split markdown into text segments and fenced code blocks (not inline code)
-        // Requires newline after opening ``` to distinguish from inline triple backticks
+        // Split markdown into text segments and fenced code blocks (not inline code).
+        // Requires newline after opening ``` to distinguish from inline triple backticks.
+        // Non-image code blocks are kept inline with surrounding text; only image-rendered
+        // code blocks force a message split (since they must be sent as separate images).
         const parts = block.text.split(/(```\w*\n[\s\S]*?```)/g);
+
+        // Accumulate text segments and non-image code blocks into a single message.
+        // Flush the buffer whenever we hit an image-rendered code block.
+        let textBuffer = "";
+
+        const flushText = async () => {
+          const trimmed = textBuffer.trim();
+          if (trimmed) {
+            const sent = await sock.sendMessage(chatId, { text: `${prefix} ${trimmed}` }, options);
+            if (sent?.key) lastTextKey = sent.key;
+          }
+          textBuffer = "";
+        };
+
         for (const part of parts) {
           const codeMatch = part.match(/^```(\w*)\n([\s\S]*?)```$/);
           if (codeMatch) {
             const lang = codeMatch[1] || "";
             const code = codeMatch[2].trimEnd();
             if (lang && shouldRenderAsImage(lang)) {
+              // Flush accumulated text before sending images
+              await flushText();
               try {
                 const images = await renderCodeToImages(code, lang);
                 for (const image of images) {
@@ -416,19 +434,21 @@ export async function sendBlocks(sock, chatId, source, content, options) {
                 }
               } catch (err) {
                 log.error("Markdown code image rendering failed, falling back to text:", err);
-                await sock.sendMessage(chatId, { text: "```\n" + code + "\n```" }, options);
+                textBuffer += "\n```\n" + code + "\n```\n";
               }
             } else {
-              // Non-programming code block — send as formatted text
-              await sock.sendMessage(chatId, { text: "```\n" + code + "\n```" }, options);
+              // Non-programming code block — keep inline as monospace text
+              textBuffer += "\n```\n" + code + "\n```\n";
             }
           } else {
             const converted = markdownToWhatsApp(part).trim();
             if (converted) {
-              await sock.sendMessage(chatId, { text: `${prefix} ${converted}` }, options);
+              textBuffer += (textBuffer ? "\n" : "") + converted;
             }
           }
         }
+        // Flush any remaining text
+        await flushText();
         break;
       }
       case "code": {
