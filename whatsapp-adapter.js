@@ -459,10 +459,13 @@ export async function sendBlocks(sock, chatId, source, content, options) {
         if (block.language && shouldRenderAsImage(block.language, block.code)) {
           try {
             const images = await renderCodeToImages(block.code, block.language);
+            const codeCaption = block.caption
+              ? `${prefix} ${block.caption}`
+              : block.language || undefined;
             for (const image of images) {
               await sock.sendMessage(chatId, {
                 image,
-                ...(block.language && { caption: block.language }),
+                ...(codeCaption && { caption: codeCaption }),
               }, options);
             }
           } catch (err) {
@@ -484,10 +487,13 @@ export async function sendBlocks(sock, chatId, source, content, options) {
         const diffBlock = /** @type {DiffContentBlock} */ (block);
         try {
           const images = await renderDiffToImages(diffBlock.oldStr, diffBlock.newStr, diffBlock.language);
+          const diffCaption = diffBlock.caption
+            ? `${prefix} ${diffBlock.caption}`
+            : diffBlock.language ? `diff · ${diffBlock.language}` : undefined;
           for (const image of images) {
             await sock.sendMessage(chatId, {
               image,
-              ...(diffBlock.language && { caption: `diff · ${diffBlock.language}` }),
+              ...(diffCaption && { caption: diffCaption }),
             }, options);
           }
         } catch (err) {

@@ -144,6 +144,36 @@ Second block:
     assert.ok(text.includes("_italic_"), "Italic should be converted to WhatsApp format");
   });
 
+  it("sends one-line diff as a single image message with caption", async () => {
+    const { sock, sent } = createMockSock();
+
+    await sendBlocks(sock, "test-chat", "tool-call", [
+      { type: "diff", oldStr: "const x = 1;", newStr: "const x = 2;", language: "javascript", caption: "🔧 *Edit*\nfoo.js" },
+    ]);
+
+    // Should send exactly one image message (not a separate text + image)
+    assert.equal(sent.length, 1, `Expected 1 message, got ${sent.length}`);
+    const msg = sent[0].msg;
+    assert.ok(Buffer.isBuffer(msg.image), "Should be an image buffer");
+    assert.ok(
+      typeof msg.caption === "string" && msg.caption.includes("Edit"),
+      "Caption should contain the header text",
+    );
+  });
+
+  it("sends diff without caption using language as caption", async () => {
+    const { sock, sent } = createMockSock();
+
+    await sendBlocks(sock, "test-chat", "tool-call", [
+      { type: "diff", oldStr: "a", newStr: "b", language: "python" },
+    ]);
+
+    assert.equal(sent.length, 1);
+    const msg = sent[0].msg;
+    assert.ok(Buffer.isBuffer(msg.image), "Should be an image buffer");
+    assert.equal(msg.caption, "diff · python");
+  });
+
   it("handles type 'text' without image rendering", async () => {
     const { sock, sent } = createMockSock();
 
