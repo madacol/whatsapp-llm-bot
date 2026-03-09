@@ -270,6 +270,9 @@ export function createClaudeAgentSdkHarness() {
       const sessionId = existingSessionId ?? randomUUID();
       activeQueries.set(session.chatId, { query: q, abortController, sessionId });
 
+      /** @type {Map<string, { editor?: MessageEditor, toolName: string }>} */
+      const activeTools = new Map();
+
       for await (const event of q) {
         // Always capture the latest session_id from events.
         // When resuming, the SDK may return the same or a new session_id.
@@ -292,11 +295,12 @@ export function createClaudeAgentSdkHarness() {
                   await hooks.onLlmResponse(block.text);
                   result.response.push({ type: "text", text: block.text });
                 } else if (block.type === "tool_use") {
-                  await hooks.onToolCall({
+                  const editor = await hooks.onToolCall({
                     id: block.id,
                     name: block.name,
                     arguments: JSON.stringify(block.input),
                   });
+                  activeTools.set(block.id, { editor: editor ?? undefined, toolName: block.name });
                 }
               }
             }
@@ -331,6 +335,17 @@ export function createClaudeAgentSdkHarness() {
               if (errors?.length > 0) {
                 await hooks.onToolError(errors.join("; "));
               }
+            }
+            break;
+          }
+
+          case "tool_progress": {
+            // Long-running tool feedback — edit the tool call message in-place.
+            const progress = /** @type {import("@anthropic-ai/claude-agent-sdk").SDKToolProgressMessage} */ (event);
+            const active = activeTools.get(progress.tool_use_id);
+            if (active?.editor) {
+              const elapsed = Math.round(progress.elapsed_time_seconds);
+              await active.editor(`${active.toolName} (${elapsed}s…)`);
             }
             break;
           }
