@@ -411,7 +411,14 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
     /** @type {AgentIOHooks} */
     const hooks = {
       onLlmResponse: async (text) => { await context.reply("llm", [{ type: "markdown", text }]); },
-      onAskUser: async (question, options, _preamble) => {
+      onAskUser: async (question, options, _preamble, descriptions) => {
+        // Show option descriptions as a message before the poll so users have context
+        if (descriptions && descriptions.some(d => d.length > 0)) {
+          const legend = options
+            .map((label, i) => descriptions[i] ? `*${label}* — ${descriptions[i]}` : `*${label}*`)
+            .join("\n");
+          await context.send("tool-call", legend);
+        }
         await context.sendPoll(question || "Choose an option:", options, 1);
         return new Promise((resolve) => {
           const timer = setTimeout(() => {
