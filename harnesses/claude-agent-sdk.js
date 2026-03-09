@@ -81,7 +81,27 @@ export function createClaudeAgentSdkHarness() {
   /** @type {Map<string, ActiveQuery>} */
   const activeQueries = new Map();
 
-  return { processLlmResponse, injectMessage, cancel };
+  return { processLlmResponse, injectMessage, cancel, waitForIdle };
+
+  /**
+   * Wait for all active queries to finish (drain the activeQueries map).
+   * Resolves immediately if no queries are running.
+   * @returns {Promise<void>}
+   */
+  function waitForIdle() {
+    if (activeQueries.size === 0) return Promise.resolve();
+
+    log.info(`Waiting for ${activeQueries.size} active query(ies) to finish...`);
+    return new Promise((resolve) => {
+      const interval = setInterval(() => {
+        if (activeQueries.size === 0) {
+          clearInterval(interval);
+          log.info("All queries finished, ready to shut down.");
+          resolve();
+        }
+      }, 200);
+    });
+  }
 
   /**
    * Inject a follow-up user message into a running query for the given chat.
