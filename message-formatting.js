@@ -256,31 +256,6 @@ export function renderContentBlock(block) {
 }
 
 /**
- * Format conversation history from Message[] into a readable string.
- * @param {Message[]} messages
- * @returns {string}
- */
-export function formatConversationHistory(messages) {
-  /** @type {string[]} */
-  const lines = [];
-  for (const msg of messages) {
-    if (msg.role === "user") {
-      const parts = msg.content
-        .map((/** @type {IncomingContentBlock | ToolContentBlock} */ b) => renderContentBlock(b))
-        .filter((/** @type {string} */ s) => s.length > 0);
-      if (parts.length > 0) lines.push(`User: ${parts.join("\n")}`);
-    } else if (msg.role === "assistant") {
-      const parts = msg.content
-        .map((/** @type {TextContentBlock | ToolCallContentBlock} */ b) => renderContentBlock(b))
-        .filter((/** @type {string} */ s) => s.length > 0);
-      if (parts.length > 0) lines.push(`Assistant: ${parts.join("\n")}`);
-    }
-    // Tool messages are implementation details — skip them
-  }
-  return lines.join("\n");
-}
-
-/**
  * Result of parsing a structured question from freeform LLM text.
  * @typedef {{
  *   preamble: string;
