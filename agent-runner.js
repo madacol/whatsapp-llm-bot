@@ -1,6 +1,7 @@
-import { resolveHarness } from "./harnesses/index.js";
+import { resolveHarness, resolveHarnessName } from "./harnesses/index.js";
 import { getActions, getAction, getChatAction, executeAction } from "./actions.js";
-import { resolveModel, ROLE_DEFINITIONS } from "./model-roles.js";
+import { createSilentActionContext } from "./execute-action-context.js";
+import { resolveChatModel } from "./model-roles.js";
 import { getRootDb } from "./db.js";
 import { createLogger } from "./logger.js";
 
@@ -51,9 +52,7 @@ export async function runAgent(options) {
   }
 
   // Resolve model: role name or literal model ID
-  const chatModel = agent.model && agent.model in ROLE_DEFINITIONS
-    ? resolveModel(agent.model)
-    : agent.model || resolveModel("chat");
+  const chatModel = resolveChatModel(agent);
 
   // Filter available actions by whitelist
   const allActions = await getActions();
@@ -96,18 +95,7 @@ export async function runAgent(options) {
   });
 
   // Build a minimal context for action execution (sub-agents don't do WhatsApp I/O)
-  /** @type {ExecuteActionContext} */
-  const context = {
-    chatId,
-    senderIds,
-    content: [],
-    getIsAdmin: async () => true,
-    send: async (_source, _content) => {},
-    reply: async (_source, _content) => {},
-    reactToMessage: async () => {},
-    sendPoll: async () => {},
-    confirm: async () => true,
-  };
+  const context = createSilentActionContext(chatId, senderIds);
 
   /** @type {(name: string) => Promise<AppAction | null>} */
   const actionResolver = async (name) => {
@@ -133,7 +121,7 @@ export async function runAgent(options) {
   /** @type {MediaRegistry} */
   const mediaRegistry = new Map();
 
-  const harness = resolveHarness(agent.harness ?? "native");
+  const harness = resolveHarness(resolveHarnessName(agent, null));
 
   const result = await harness.processLlmResponse({
     session,

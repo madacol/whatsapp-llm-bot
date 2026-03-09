@@ -222,3 +222,78 @@ export function prepareMessages(chatMessages) {
 
   return { messages: dropUnpairedToolMessages(messages), mediaRegistry };
 }
+
+/**
+ * Render a single content block into a plain text representation.
+ * Images/videos/audio produce descriptive placeholders; quotes become blockquotes.
+ * @param {IncomingContentBlock | ToolContentBlock | ToolCallContentBlock} block
+ * @returns {string}
+ */
+export function renderContentBlock(block) {
+  switch (block.type) {
+    case "text":
+      return block.text;
+    case "image":
+      return block.alt ? `[Image: ${block.alt}]` : "[Image]";
+    case "video":
+      return block.alt ? `[Video: ${block.alt}]` : "[Video]";
+    case "audio":
+      return "[Audio message]";
+    case "markdown":
+      return block.text;
+    case "quote": {
+      const quotedParts = block.content
+        .map((/** @type {IncomingContentBlock} */ qb) => renderContentBlock(qb))
+        .filter((/** @type {string} */ s) => s.length > 0);
+      if (quotedParts.length === 0) return "";
+      const sender = block.quotedSenderId ? `[Quoted from ${block.quotedSenderId}] ` : "";
+      const quotedText = quotedParts.join(" ").trim().replace(/\n/g, "\n> ");
+      return `${sender}> ${quotedText}`;
+    }
+    default:
+      return "";
+  }
+}
+
+/**
+ * Format conversation history from Message[] into a readable string.
+ * @param {Message[]} messages
+ * @returns {string}
+ */
+export function formatConversationHistory(messages) {
+  /** @type {string[]} */
+  const lines = [];
+  for (const msg of messages) {
+    if (msg.role === "user") {
+      const parts = msg.content
+        .map((/** @type {IncomingContentBlock | ToolContentBlock} */ b) => renderContentBlock(b))
+        .filter((/** @type {string} */ s) => s.length > 0);
+      if (parts.length > 0) lines.push(`User: ${parts.join("\n")}`);
+    } else if (msg.role === "assistant") {
+      const parts = msg.content
+        .map((/** @type {TextContentBlock | ToolCallContentBlock} */ b) => renderContentBlock(b))
+        .filter((/** @type {string} */ s) => s.length > 0);
+      if (parts.length > 0) lines.push(`Assistant: ${parts.join("\n")}`);
+    }
+    // Tool messages are implementation details — skip them
+  }
+  return lines.join("\n");
+}
+
+/**
+ * Extract the last user text from the messages array, including quoted content.
+ * @param {Message[]} messages
+ * @returns {string}
+ */
+export function extractLastUserText(messages) {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const msg = messages[i];
+    if (msg.role === "user") {
+      const parts = msg.content
+        .map((/** @type {IncomingContentBlock | ToolContentBlock} */ b) => renderContentBlock(b))
+        .filter((/** @type {string} */ s) => s.length > 0);
+      if (parts.length > 0) return parts.join("\n");
+    }
+  }
+  return "";
+}

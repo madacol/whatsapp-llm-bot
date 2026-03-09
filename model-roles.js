@@ -177,3 +177,23 @@ export function resolveModel(role, chatRow) {
 
   return resolved;
 }
+
+/**
+ * Resolve the chat model from a persona/agent definition and optional chat config.
+ *
+ * - If persona.model is a role name (exists in ROLE_DEFINITIONS), resolves via role chain
+ * - If persona.model is a literal model ID, uses it directly
+ * - Falls back to resolveModel("chat", chatRow)
+ *
+ * @param {Pick<AgentDefinition, "model"> | null | undefined} persona
+ * @param {ModelChatConfig} [chatRow]
+ * @returns {string}
+ */
+export function resolveChatModel(persona, chatRow) {
+  if (persona?.model) {
+    return persona.model in ROLE_DEFINITIONS
+      ? resolveModel(persona.model, chatRow)
+      : persona.model;
+  }
+  return resolveModel("chat", chatRow);
+}

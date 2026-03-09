@@ -19,7 +19,7 @@ import {
   prepareMessages,
 } from "./message-formatting.js";
 import { convertUnsupportedMedia } from "./media-to-text.js";
-import { resolveModel, ROLE_DEFINITIONS } from "./model-roles.js";
+import { resolveChatModel } from "./model-roles.js";
 import { getAgent } from "./agents.js";
 import { getRootDb } from "./db.js";
 import {
@@ -33,7 +33,8 @@ import {
   loadPendingConfirmations,
   deletePendingConfirmation,
 } from "./pending-confirmations.js";
-import { resolveHarness, registerHarness, MAX_TOOL_CALL_DEPTH, parseToolArgs } from "./harnesses/index.js";
+import { resolveHarness, resolveHarnessName, registerHarness, MAX_TOOL_CALL_DEPTH, parseToolArgs } from "./harnesses/index.js";
+import { createMessageActionContext, createSilentActionContext } from "./execute-action-context.js";
 import { createLogger } from "./logger.js";
 
 const log = createLogger("index");
@@ -125,124 +126,94 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
   const { addMessage, updateToolMessage, createChat, getChat, getMessages } = store;
 
   /**
-   * Handle incoming WhatsApp messages.
-   * If the active harness supports message injection and has a running query,
-   * injects the new message instead of starting a second query.
-   * @param {IncomingContext} messageContext
-   * @returns {Promise<void>}
+   * Handle a `!command` message: parse, dispatch, and render result.
+   * @param {object} opts
+   * @param {string} opts.chatId
+   * @param {string[]} opts.senderIds
+   * @param {IncomingContentBlock[]} opts.content
+   * @param {TextContentBlock} opts.firstBlock
+   * @param {import("./store.js").ChatRow | undefined} opts.chatInfo
+   * @param {ExecuteActionContext} opts.context
+   * @param {Action[]} opts.actions
+   * @param {(name: string) => Promise<AppAction | null>} opts.actionResolver
    */
-  async function handleMessage(messageContext) {
-    const { chatId, senderIds, content, isGroup, senderName, selfIds, quotedSenderId } = messageContext;
+  async function handleCommandMessage({ chatId, senderIds, content, firstBlock, chatInfo, context, actions, actionResolver }) {
+    const inputText = firstBlock.text.slice(1).trim();
+    const commandText = inputText.toLowerCase();
 
-    log.debug("INCOMING MESSAGE:", JSON.stringify(messageContext, null, 2));
-
-    // Ensure chat exists in DB for both command and message paths
-    await createChat(chatId);
-
-    // Compute debug state before building context so it's immutable
-    const chatInfo = await getChat(chatId);
-    const isDebug = !!chatInfo?.debug_until && new Date(chatInfo.debug_until) > new Date();
-
-    /** @type {ExecuteActionContext} */
-    const context = {
-      chatId,
-      senderIds,
-      content,
-      getIsAdmin: messageContext.getIsAdmin,
-      send: messageContext.send,
-      reply: messageContext.reply,
-      reactToMessage: messageContext.reactToMessage,
-      sendPoll: messageContext.sendPoll,
-      confirm: messageContext.confirm,
-    };
-
-    // Load actions (global + chat-scoped), filtering out opt-in actions not enabled for this chat.
-    // Deduplicate by name — chat-scoped actions override global ones.
-    const globalActions = await getActionsFn();
-    const chatActions = await getChatActions(chatId);
-    const chatActionNames = new Set(chatActions.map(a => a.name));
-    const enabledActions = chatInfo?.enabled_actions ?? [];
-    /** @type {Action[]} */
-    const actions = [
-      ...globalActions.filter(a => !chatActionNames.has(a.name)),
-      ...chatActions,
-    ].filter(
-      (a) => !a.optIn || enabledActions.includes(a.name),
-    );
-
-    /** @param {string} name */
-    const actionResolver = async (name) => {
-      const chatAction = await getChatAction(chatId, name);
-      if (chatAction) return chatAction;
-      return getAction(name);
-    };
-
-    const firstBlock = content.find(block=>block.type === "text")
-
-    if (firstBlock?.text?.startsWith("!")) {
-      const inputText = firstBlock.text.slice(1).trim();
-      const commandText = inputText.toLowerCase();
-
-      // Handle !cancel — abort the active harness query for this chat
-      if (commandText === "cancel") {
-        const harnessName = chatInfo?.active_persona
-          ? (await getAgent(chatInfo.active_persona))?.harness ?? chatInfo?.harness ?? "native"
-          : chatInfo?.harness ?? "native";
-        const harness = resolveHarness(harnessName);
-        if (harness.cancel?.(chatId)) {
-          await context.reply("tool-result", "Cancelled.");
-        } else {
-          await context.reply("tool-result", "Nothing to cancel.");
-        }
-        return;
+    // Handle !cancel — abort the active harness query for this chat
+    if (commandText === "cancel") {
+      const persona = chatInfo?.active_persona
+        ? (await getAgent(chatInfo.active_persona))
+        : null;
+      const harnessName = resolveHarnessName(persona, chatInfo);
+      const harness = resolveHarness(harnessName);
+      if (harness.cancel?.(chatId)) {
+        await context.reply("tool-result", "Cancelled.");
+      } else {
+        await context.reply("tool-result", "Nothing to cancel.");
       }
-
-      // Sort commands longest-first so "set model" matches before hypothetical "set"
-      const commandActions = actions.filter(hasCommand);
-      const action = commandActions
-        .sort((a, b) => b.command.length - a.command.length)
-        .find(a => commandText === a.command || commandText.startsWith(a.command + " "));
-
-      if (!action) {
-        await context.reply("error", `Unknown command: ${commandText.split(" ")[0]}`);
-        return;
-      }
-
-      // Store the command message so the LLM has context about recent commands
-      /** @type {UserMessage} */
-      const cmdMessage = { role: "user", content };
-      await addMessage(chatId, cmdMessage, senderIds);
-
-      const argsText = inputText.slice(action.command.length).trim();
-      const args = argsText ? argsText.split(" ") : [];
-
-      // Map command arguments to action parameters
-      const params = parseCommandArgs(args, action.parameters);
-
-      log.debug("executing", action.name, params);
-
-      try {
-        const { result } = await executeActionFn(action.name, context, params, { actionResolver, llmClient });
-
-        if (isHtmlContent(result)) {
-          const linkText = await storeAndLinkHtml(getRootDb(), result);
-          await context.reply("tool-result", linkText);
-        } else if (typeof result === "string") {
-          await context.reply("tool-result", result);
-        } else if (Array.isArray(result)) {
-          await context.reply("tool-result", /** @type {ToolContentBlock[]} */ (result));
-        } else {
-          await context.reply("tool-result", JSON.stringify(result, null, 2));
-        }
-      } catch (error) {
-        log.error("Error executing command:", error);
-        const errorMessage =
-          error instanceof Error ? error.message : String(error);
-        await context.reply("error", `Error: ${errorMessage}`);
-      }
-
       return;
     }
+
+    // Sort commands longest-first so "set model" matches before hypothetical "set"
+    const commandActions = actions.filter(hasCommand);
+    const action = commandActions
+      .sort((a, b) => b.command.length - a.command.length)
+      .find(a => commandText === a.command || commandText.startsWith(a.command + " "));
+
+    if (!action) {
+      await context.reply("error", `Unknown command: ${commandText.split(" ")[0]}`);
+      return;
+    }
+
+    // Store the command message so the LLM has context about recent commands
+    /** @type {UserMessage} */
+    const cmdMessage = { role: "user", content };
+    await addMessage(chatId, cmdMessage, senderIds);
+
+    const argsText = inputText.slice(action.command.length).trim();
+    const args = argsText ? argsText.split(" ") : [];
+
+    // Map command arguments to action parameters
+    const params = parseCommandArgs(args, action.parameters);
+
+    log.debug("executing", action.name, params);
+
+    try {
+      const { result } = await executeActionFn(action.name, context, params, { actionResolver, llmClient });
+
+      if (isHtmlContent(result)) {
+        const linkText = await storeAndLinkHtml(getRootDb(), result);
+        await context.reply("tool-result", linkText);
+      } else if (typeof result === "string") {
+        await context.reply("tool-result", result);
+      } else if (Array.isArray(result)) {
+        await context.reply("tool-result", /** @type {ToolContentBlock[]} */ (result));
+      } else {
+        await context.reply("tool-result", JSON.stringify(result, null, 2));
+      }
+    } catch (error) {
+      log.error("Error executing command:", error);
+      const errorMessage =
+        error instanceof Error ? error.message : String(error);
+      await context.reply("error", `Error: ${errorMessage}`);
+    }
+  }
+
+  /**
+   * Handle a regular (non-command) message: format, store, and run through the LLM harness.
+   * @param {object} opts
+   * @param {IncomingContext} opts.messageContext
+   * @param {import("./store.js").ChatRow | undefined} opts.chatInfo
+   * @param {boolean} opts.isDebug
+   * @param {ExecuteActionContext} opts.context
+   * @param {Action[]} opts.actions
+   * @param {(name: string) => Promise<AppAction | null>} opts.actionResolver
+   * @param {TextContentBlock | undefined} opts.firstBlock
+   */
+  async function handleLlmMessage({ messageContext, chatInfo, isDebug, context, actions, actionResolver, firstBlock }) {
+    const { chatId, senderIds, content, isGroup, senderName, selfIds, quotedSenderId } = messageContext;
 
     // Use data from message context
     const time = formatTime(messageContext.timestamp);
@@ -276,7 +247,7 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
     const persona = chatInfo?.active_persona ? await getAgent(chatInfo.active_persona) : null;
 
     // If the harness has an active query for this chat, inject the message instead of starting a new one
-    const harnessName = persona?.harness ?? chatInfo?.harness ?? "native";
+    const harnessName = resolveHarnessName(persona, chatInfo);
     const harness = resolveHarness(harnessName);
 
     const userText = firstBlock?.text ?? "";
@@ -287,11 +258,7 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
 
     // Get system prompt and model from persona, chat, or defaults
     let systemPrompt = (persona?.systemPrompt ?? chatInfo?.system_prompt ?? config.system_prompt) + systemPromptSuffix;
-    const chatModel = persona?.model && persona.model in ROLE_DEFINITIONS
-      ? resolveModel(persona.model, chatInfo ?? undefined)
-      : persona?.model
-        ? persona.model
-        : resolveModel("chat", chatInfo ?? undefined);
+    const chatModel = resolveChatModel(persona, chatInfo ?? undefined);
 
     // Get latest messages from DB
     const chatMessages = await getMessages(chatId)
@@ -377,9 +344,55 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
     } finally {
       await messageContext.sendPresenceUpdate("paused");
     }
+  }
 
-    // Note: memory storage is now handled via the saveMemory tool action,
-    // not automatically after each exchange.
+  /**
+   * Handle incoming WhatsApp messages — dispatches to command or LLM handler.
+   * @param {IncomingContext} messageContext
+   * @returns {Promise<void>}
+   */
+  async function handleMessage(messageContext) {
+    const { chatId, senderIds, content } = messageContext;
+
+    log.debug("INCOMING MESSAGE:", JSON.stringify(messageContext, null, 2));
+
+    // Ensure chat exists in DB for both command and message paths
+    await createChat(chatId);
+
+    // Compute debug state before building context so it's immutable
+    const chatInfo = await getChat(chatId);
+    const isDebug = !!chatInfo?.debug_until && new Date(chatInfo.debug_until) > new Date();
+
+    const context = createMessageActionContext(messageContext);
+
+    // Load actions (global + chat-scoped), filtering out opt-in actions not enabled for this chat.
+    // Deduplicate by name — chat-scoped actions override global ones.
+    const globalActions = await getActionsFn();
+    const chatActions = await getChatActions(chatId);
+    const chatActionNames = new Set(chatActions.map(a => a.name));
+    const enabledActions = chatInfo?.enabled_actions ?? [];
+    /** @type {Action[]} */
+    const actions = [
+      ...globalActions.filter(a => !chatActionNames.has(a.name)),
+      ...chatActions,
+    ].filter(
+      (a) => !a.optIn || enabledActions.includes(a.name),
+    );
+
+    /** @param {string} name */
+    const actionResolver = async (name) => {
+      const chatAction = await getChatAction(chatId, name);
+      if (chatAction) return chatAction;
+      return getAction(name);
+    };
+
+    const firstBlock = content.find(block=>block.type === "text")
+
+    if (firstBlock?.text?.startsWith("!")) {
+      return handleCommandMessage({ chatId, senderIds, content, firstBlock, chatInfo, context, actions, actionResolver });
+    }
+
+    return handleLlmMessage({ messageContext, chatInfo, isDebug, context, actions, actionResolver, firstBlock });
   }
 
   return { handleMessage };
@@ -444,19 +457,14 @@ export function createReactionHandler({ store, executeActionFn, pendingByMsgKeyI
 
     /** @type {ExecuteActionContext} */
     const resumeContext = {
-      chatId: pending.chat_id,
-      senderIds: pending.sender_ids,
-      content: [],
-      getIsAdmin: async () => true,
+      ...createSilentActionContext(pending.chat_id, pending.sender_ids),
       send: async (source, content) => sendBlocks(sock, pending.chat_id, source, content),
       reply: async (source, content) => sendBlocks(sock, pending.chat_id, source, content),
-      reactToMessage: async () => {},
       sendPoll: async (name, options, selectableCount) => {
         await sock.sendMessage(pending.chat_id, {
           poll: { name, values: options, selectableCount: selectableCount || 0 },
         });
       },
-      confirm: async () => true, // auto-confirm: user already approved
     };
 
     try {
