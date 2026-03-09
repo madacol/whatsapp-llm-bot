@@ -42,7 +42,12 @@ describe("sendBlocks – markdown with code", () => {
     const markdown = `Here is some code:
 
 \`\`\`javascript
-console.log("hello");
+function greet(name) {
+  const msg = "Hello, " + name;
+  console.log(msg);
+  return msg;
+}
+greet("world");
 \`\`\`
 
 And some text after.`;
@@ -83,13 +88,23 @@ And some text after.`;
     const markdown = `First block:
 
 \`\`\`python
-print("hello")
+def greet(name):
+    msg = f"Hello, {name}!"
+    print(msg)
+    return msg
+
+greet("world")
 \`\`\`
 
 Second block:
 
 \`\`\`json
-{"key": "value"}
+{
+  "name": "test",
+  "version": "1.0",
+  "description": "example",
+  "main": "index.js"
+}
 \`\`\``;
 
     await sendBlocks(sock, "test-chat", "llm", [{ type: "markdown", text: markdown }]);

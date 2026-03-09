@@ -2,7 +2,8 @@ import { createHighlighter } from "shiki";
 import { Resvg } from "@resvg/resvg-js";
 import { diffLines } from "diff";
 
-const MAX_LINES_PER_IMAGE = 45;
+const MAX_LINES_PER_IMAGE = 90;
+export const MIN_LINES_FOR_IMAGE = 5;
 const FONT_SIZE = 14;
 const LINE_HEIGHT = 20;
 const PADDING = 16;
