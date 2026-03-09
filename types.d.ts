@@ -33,6 +33,15 @@ type CodeContentBlock = {
   language?: string;
   code: string;
 };
+
+/**
+ * OpenAI SDK doesn't include video_url in ChatCompletionContentPart.
+ * This fills the gap so we avoid `@type {*}` escape hatches.
+ */
+type VideoUrlContentPart = {
+  type: "video_url";
+  video_url: { url: string };
+};
 type MarkdownContentBlock = {
   type: "markdown";
   text: string;
