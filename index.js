@@ -86,6 +86,34 @@ function langFromPath(filePath) {
 }
 
 /**
+ * Reformat a bash command for visual display: break at pipes and connectors
+ * so each stage starts on its own line (with 2-space indent for continuation).
+ * Only reformats single-line commands; multi-line commands are left as-is.
+ * @param {string} command
+ * @returns {string}
+ */
+function formatBashCommand(command) {
+  // Already multi-line — don't reformat
+  if (command.includes("\n")) return command;
+
+  // Split at pipe/connector boundaries, keeping the delimiter at the start of each new line.
+  // Matches: |, ||, &&, ; (but not inside quotes)
+  const parts = command.split(/\s+(\|{1,2}|&&|;)\s+/);
+
+  // If no splits happened, return as-is
+  if (parts.length <= 1) return command;
+
+  // Reassemble: first segment, then each connector + segment on a new indented line
+  let result = parts[0];
+  for (let i = 1; i < parts.length; i += 2) {
+    const connector = parts[i];
+    const segment = parts[i + 1] ?? "";
+    result += `\n  ${connector} ${segment}`;
+  }
+  return result;
+}
+
+/**
  * Display a tool call to the user — renders Edit/Write code as images.
  * @param {LlmChatResponse['toolCalls'][0]} toolCall
  * @param {Pick<ExecuteActionContext, "send">} context
@@ -106,14 +134,15 @@ async function displayToolCall(toolCall, context, isDebug, formatToolCall) {
 
   const name = toolCall.name;
 
-  // Bash tool: show description as label, command as a code block
+  // Bash tool: render command as a syntax-highlighted image with description as caption.
+  // Pipes and connectors (|, &&, ||) are moved to new lines for readability.
   if (name === "Bash" && typeof args.command === "string") {
     const desc = typeof args.description === "string" ? args.description : null;
-    /** @type {ToolContentBlock[]} */
-    const blocks = [];
-    if (desc) blocks.push({ type: "text", text: `*${desc}*` });
-    blocks.push({ type: "code", code: args.command, language: "bash" });
-    return context.send("tool-call", blocks);
+    const formatted = formatBashCommand(args.command);
+    const caption = desc ? `*${desc}*` : null;
+    return context.send("tool-call", [
+      { type: "code", code: formatted, language: "bash", ...(caption && { caption }) },
+    ]);
   }
 
   // For Edit/Write tool calls, render the code content as a syntax-highlighted image
