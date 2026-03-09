@@ -265,13 +265,13 @@ export const ALLOWED_CHAT_PERMISSIONS = new Set([
  * @param {PGlite} db
  */
 export async function ensureChatActionsSchema(db) {
-  await db.query(`
+  await db.sql`
     CREATE TABLE IF NOT EXISTS chat_actions (
       name TEXT PRIMARY KEY,
       code TEXT NOT NULL,
       created_at TIMESTAMP DEFAULT NOW()
     )
-  `);
+  `;
 }
 
 /**
@@ -282,11 +282,8 @@ export async function ensureChatActionsSchema(db) {
  */
 export async function saveChatAction(db, name, code) {
   await ensureChatActionsSchema(db);
-  await db.query(
-    `INSERT INTO chat_actions (name, code) VALUES ($1, $2)
-     ON CONFLICT (name) DO UPDATE SET code = $2, created_at = NOW()`,
-    [name, code],
-  );
+  await db.sql`INSERT INTO chat_actions (name, code) VALUES (${name}, ${code})
+     ON CONFLICT (name) DO UPDATE SET code = ${code}, created_at = NOW()`;
 }
 
 /**
@@ -297,10 +294,7 @@ export async function saveChatAction(db, name, code) {
  */
 export async function readChatAction(db, name) {
   await ensureChatActionsSchema(db);
-  const { rows } = await db.query(
-    `SELECT code FROM chat_actions WHERE name = $1`,
-    [name],
-  );
+  const { rows } = await db.sql`SELECT code FROM chat_actions WHERE name = ${name}`;
   return rows.length > 0 ? /** @type {string} */ (rows[0].code) : null;
 }
 
@@ -311,7 +305,7 @@ export async function readChatAction(db, name) {
  */
 export async function deleteChatAction(db, name) {
   await ensureChatActionsSchema(db);
-  await db.query(`DELETE FROM chat_actions WHERE name = $1`, [name]);
+  await db.sql`DELETE FROM chat_actions WHERE name = ${name}`;
 }
 
 const CHAT_ACTION_CACHE_MAX = 100;
@@ -391,7 +385,7 @@ export async function getChatActions(chatId) {
   const db = getActionDb(chatId, "create_action");
   try {
     await ensureChatActionsSchema(db);
-    const { rows } = await db.query(`SELECT name, code FROM chat_actions`);
+    const { rows } = await db.sql`SELECT name, code FROM chat_actions`;
     /** @type {AppAction[]} */
     const results = [];
     for (const row of rows) {

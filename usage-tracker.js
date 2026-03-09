@@ -41,7 +41,7 @@ const initialized = new WeakSet();
  * @param {PGlite} db
  */
 async function ensureSchema(db) {
-  await db.query(`
+  await db.sql`
     CREATE TABLE IF NOT EXISTS usage_logs (
       id SERIAL PRIMARY KEY,
       chat_id VARCHAR(50) NOT NULL,
@@ -52,7 +52,7 @@ async function ensureSchema(db) {
       cost DOUBLE PRECISION,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
-  `);
+  `;
 }
 
 /**
@@ -83,9 +83,8 @@ async function init(db) {
  */
 export async function recordUsage(db, record) {
   await init(db);
-  await db.query(
-    `INSERT INTO usage_logs (chat_id, model, prompt_tokens, completion_tokens, cached_tokens, cost)
-     VALUES ($1, $2, $3, $4, $5, $6)`,
-    [record.chatId, record.model, record.promptTokens, record.completionTokens, record.cachedTokens, record.cost],
-  );
+  await db.sql`
+    INSERT INTO usage_logs (chat_id, model, prompt_tokens, completion_tokens, cached_tokens, cost)
+    VALUES (${record.chatId}, ${record.model}, ${record.promptTokens}, ${record.completionTokens}, ${record.cachedTokens}, ${record.cost})
+  `;
 }

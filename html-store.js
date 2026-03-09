@@ -6,14 +6,14 @@ import config from "./config.js";
  * @param {PGlite} db
  */
 async function ensureSchema(db) {
-  await db.query(`
+  await db.sql`
     CREATE TABLE IF NOT EXISTS html_pages (
       id UUID PRIMARY KEY,
       html TEXT NOT NULL,
       title TEXT,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
-  `);
+  `;
 }
 
 /** @type {WeakSet<PGlite>} */
@@ -39,10 +39,7 @@ async function init(db) {
 export async function storePage(db, html, title) {
   await init(db);
   const id = crypto.randomUUID();
-  await db.query(
-    `INSERT INTO html_pages (id, html, title) VALUES ($1, $2, $3)`,
-    [id, html, title ?? null],
-  );
+  await db.sql`INSERT INTO html_pages (id, html, title) VALUES (${id}, ${html}, ${title ?? null})`;
   return id;
 }
 
@@ -67,10 +64,7 @@ export async function storeAndLinkHtml(db, htmlContent) {
  */
 export async function getPage(db, id) {
   await init(db);
-  const { rows } = await db.query(
-    `SELECT html, title FROM html_pages WHERE id = $1`,
-    [id],
-  );
+  const { rows } = await db.sql`SELECT html, title FROM html_pages WHERE id = ${id}`;
   if (rows.length === 0) return null;
   const row = rows[0];
   /** @type {{html: string, title?: string}} */
