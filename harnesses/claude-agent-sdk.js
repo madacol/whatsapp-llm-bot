@@ -6,6 +6,7 @@
  * Conversation history and chat-specific actions are embedded in the system prompt.
  *
  * Supports mid-conversation message injection via streamInput() and cancellation via AbortController.
+ * Clarifying questions (AskUserQuestion) are handled via the canUseTool callback.
  */
 
 import { query } from "@anthropic-ai/claude-agent-sdk";
@@ -13,7 +14,7 @@ import { randomUUID } from "node:crypto";
 import { NO_OP_HOOKS } from "./native.js";
 import { getChatActions } from "../actions.js";
 import { createLogger } from "../logger.js";
-import { formatConversationHistory, extractLastUserText, parseStructuredQuestion } from "../message-formatting.js";
+import { formatConversationHistory, extractLastUserText } from "../message-formatting.js";
 
 const log = createLogger("harness:claude-agent-sdk");
 
@@ -207,7 +208,52 @@ export function createClaudeAgentSdkHarness() {
           stderrLines.push(data);
           log.debug("[sdk stderr]", data.trimEnd());
         },
+        /**
+         * Handle tool permission requests and AskUserQuestion.
+         * Regular tools are auto-approved (bypassPermissions handles most).
+         * AskUserQuestion is intercepted to present questions as WhatsApp polls.
+         * @type {import("@anthropic-ai/claude-agent-sdk").CanUseTool}
+         */
+        canUseTool: async (toolName, input, _options) => {
+          if (toolName === "AskUserQuestion") {
+            return handleAskUserQuestion(input);
+          }
+          // Auto-approve all other tools (fallback for any not covered by bypassPermissions)
+          return { behavior: "allow", updatedInput: input };
+        },
       };
+
+      /**
+       * Handle an AskUserQuestion tool call by presenting questions as WhatsApp
+       * polls and returning the user's selections in the SDK's expected format.
+       * @param {Record<string, unknown>} input
+       * @returns {Promise<import("@anthropic-ai/claude-agent-sdk").PermissionResult>}
+       */
+      async function handleAskUserQuestion(input) {
+        const questions = /** @type {Array<{question: string, header?: string, options: Array<{label: string, description?: string}>, multiSelect?: boolean}>} */ (
+          input.questions ?? []
+        );
+
+        if (questions.length === 0) {
+          return { behavior: "allow", updatedInput: input };
+        }
+
+        /** @type {Record<string, string>} */
+        const answers = {};
+
+        for (const q of questions) {
+          const optionLabels = q.options.map(o => o.label);
+          const userChoice = await hooks.onAskUser(q.question, optionLabels, q.header);
+
+          // Use the user's choice, or fall back to the first option on timeout
+          answers[q.question] = userChoice || optionLabels[0];
+        }
+
+        return {
+          behavior: "allow",
+          updatedInput: { questions: input.questions, answers },
+        };
+      }
 
       // Resume the previous session if one exists for this chat
       if (existingSessionId) {
@@ -243,33 +289,7 @@ export function createClaudeAgentSdkHarness() {
             if (betaMessage.content) {
               for (const block of betaMessage.content) {
                 if (block.type === "text") {
-                  // Detect structured questions (numbered/bulleted lists) and
-                  // surface them via onAskUser so adapters can render polls, etc.
-                  const parsed = parseStructuredQuestion(block.text);
-                  if (parsed && parsed.options.length >= 2) {
-                    if (parsed.preamble) {
-                      await hooks.onLlmResponse(parsed.preamble);
-                    }
-                    const userChoice = await hooks.onAskUser(parsed.question, parsed.options, parsed.preamble);
-                    // Inject the user's response into the SDK query so it
-                    // continues with the user's answer
-                    if (userChoice) {
-                      const active = activeQueries.get(session.chatId);
-                      if (active) {
-                        /** @type {import("@anthropic-ai/claude-agent-sdk").SDKUserMessage} */
-                        const sdkMsg = {
-                          type: "user",
-                          message: { role: "user", content: userChoice },
-                          parent_tool_use_id: null,
-                          session_id: resolvedSessionId ?? active.sessionId,
-                        };
-                        active.query.streamInput((async function* () { yield sdkMsg; })())
-                          .catch(err => log.error("Failed to inject user response:", err));
-                      }
-                    }
-                  } else {
-                    await hooks.onLlmResponse(block.text);
-                  }
+                  await hooks.onLlmResponse(block.text);
                   result.response = [{ type: "markdown", text: block.text }];
                 } else if (block.type === "tool_use") {
                   await hooks.onToolCall({
