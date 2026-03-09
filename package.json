@@ -25,6 +25,7 @@
         "@mozilla/readability": "^0.6.0",
         "@resvg/resvg-js": "^2.6.2",
         "@whiskeysockets/baileys": "7.0.0-rc.9",
+        "diff": "^8.0.3",
         "dotenv": "^16.5.0",
         "linkedom": "^0.18.12",
         "nodemailer": "^8.0.1",
