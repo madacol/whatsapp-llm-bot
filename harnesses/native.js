@@ -8,6 +8,7 @@ import {
   actionsToToolDefinitions,
   registerMedia,
   isMediaBlock,
+  parseStructuredQuestion,
 } from "../message-formatting.js";
 import { getRootDb } from "../db.js";
 import { storeLlmContext } from "../context-log.js";
@@ -212,7 +213,15 @@ async function processLlmResponse({ session, llmConfig, messages, mediaRegistry,
 
     if (response.content) {
       log.debug("RESPONSE SENT:", response.content);
-      await hooks.onLlmResponse(response.content);
+      const parsed = parseStructuredQuestion(response.content);
+      if (parsed && parsed.options.length >= 2) {
+        if (parsed.preamble) {
+          await hooks.onLlmResponse(parsed.preamble);
+        }
+        await hooks.onAskUser(parsed.question, parsed.options, parsed.preamble);
+      } else {
+        await hooks.onLlmResponse(response.content);
+      }
       assistantMessage.content.push({ type: "text", text: response.content });
       result.response = [{ type: "markdown", text: response.content }];
     }

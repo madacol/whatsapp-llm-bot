@@ -360,19 +360,25 @@ function parseListQuestion(text) {
   const best = runs.reduce((a, b) => (b.items.length > a.items.length ? b : a));
   if (best.items.length > 10) return null;
 
-  const preamble = lines.slice(0, best.start).join("\n").trim();
-
   let question = "";
+  // Check whether the line immediately before the list is a question/heading
+  let questionLineIdx = -1;
   if (best.start > 0) {
     const candidate = lines[best.start - 1].trim();
     if (candidate.endsWith("?") || candidate.endsWith(":")) {
       question = candidate;
+      questionLineIdx = best.start - 1;
     }
   }
+
+  // Exclude the question line from the preamble to avoid duplication
+  const preambleEnd = questionLineIdx >= 0 ? questionLineIdx : best.start;
+  const preamble = lines.slice(0, preambleEnd).join("\n").trim();
+
+  // Fall back to the last preamble line as the question if none was found
   if (!question && preamble) {
     const preambleLines = preamble.split("\n");
-    const lastLine = preambleLines[preambleLines.length - 1].trim();
-    question = lastLine;
+    question = preambleLines[preambleLines.length - 1].trim();
   }
 
   const trailing = lines.slice(best.end + 1).join("\n").trim();

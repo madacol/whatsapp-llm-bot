@@ -637,11 +637,12 @@ describe("parseStructuredQuestion", () => {
     assert.ok(result.question.includes("Would you like"));
   });
 
-  it("extracts preamble before list", () => {
+  it("extracts preamble before list without duplicating the question line", () => {
     const text = "I found several issues.\n\nWhich should I fix?\n1. Bug A\n2. Bug B";
     const result = parseStructuredQuestion(text);
     assert.ok(result);
-    assert.ok(result.preamble.includes("I found several issues."));
+    assert.equal(result.preamble, "I found several issues.");
+    assert.equal(result.question, "Which should I fix?");
     assert.deepEqual(result.options, ["Bug A", "Bug B"]);
   });
 
