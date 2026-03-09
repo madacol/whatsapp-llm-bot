@@ -407,6 +407,8 @@ export async function sendBlocks(sock, chatId, source, content, options) {
       case "video":
         await sock.sendMessage(chatId, {
           video: Buffer.from(block.data, "base64"),
+          mimetype: block.mime_type || "video/mp4",
+          jpegThumbnail: "",
           ...(block.alt && { caption: block.alt }),
         }, options);
         break;
