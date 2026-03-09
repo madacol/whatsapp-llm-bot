@@ -214,7 +214,7 @@ export function createClaudeAgentSdkHarness() {
         systemPrompt: fullSystemPrompt,
         maxTurns: maxDepth ?? 50,
         cwd: cwd || process.cwd(),
-        settingSources: [],
+        settingSources: ["project"],
         permissionMode: "bypassPermissions",
         allowDangerouslySkipPermissions: true,
         persistSession: true,
