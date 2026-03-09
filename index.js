@@ -104,8 +104,19 @@ async function displayToolCall(toolCall, context, isDebug, formatToolCall) {
     }
   }
 
-  // For Edit/Write tool calls, render the code content as a syntax-highlighted image
   const name = toolCall.name;
+
+  // Bash tool: show description as label, command as a code block
+  if (name === "Bash" && typeof args.command === "string") {
+    const desc = typeof args.description === "string" ? args.description : null;
+    /** @type {ToolContentBlock[]} */
+    const blocks = [];
+    if (desc) blocks.push({ type: "text", text: `*${desc}*` });
+    blocks.push({ type: "code", code: args.command, language: "bash" });
+    return context.send("tool-call", blocks);
+  }
+
+  // For Edit/Write tool calls, render the code content as a syntax-highlighted image
   if ((name === "Edit" || name === "Write") && typeof args.file_path === "string") {
     const lang = langFromPath(args.file_path);
     const header = `*${name}*  \`${args.file_path}\``;
