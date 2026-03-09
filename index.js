@@ -188,7 +188,7 @@ async function displayToolResult(blocks, toolName, permissions, context, isDebug
  * @returns {{ handleMessage: (messageContext: IncomingContext) => Promise<void>, handlePollVote: (event: import("./whatsapp-adapter.js").PollVoteEvent) => Promise<void> }}
  */
 export function createMessageHandler({ store, llmClient, getActionsFn, executeActionFn }) {
-  const { addMessage, updateToolMessage, createChat, getChat, getMessages, updateSdkSessionId } = store;
+  const { addMessage, updateToolMessage, createChat, getChat, getMessages, updateSdkSessionId, archiveSdkSession, getSdkSessionHistory, restoreSdkSession } = store;
 
   /** Timeout for onAskUser responses (5 minutes). */
   const ASK_USER_TIMEOUT_MS = 5 * 60 * 1000;
@@ -297,9 +297,68 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
         const harness = resolveHarness(harnessName);
         // Cancel any active query
         harness.cancel?.(chatId);
-        // Clear the persisted session ID
-        await updateSdkSessionId(chatId, null);
-        await context.reply("tool-result", "Session cleared. Next message starts fresh.");
+        // Archive the current session before clearing so it can be resumed later
+        await archiveSdkSession(chatId);
+        await context.reply("tool-result", "Session cleared. Next message starts fresh.\nUse /resume to restore this session later.");
+        return true;
+      }
+      case "resume": {
+        // Archive the current active session first so it's not lost
+        await archiveSdkSession(chatId);
+        const history = await getSdkSessionHistory(chatId);
+        if (history.length === 0) {
+          await context.reply("tool-result", "No previous sessions to resume.");
+          return true;
+        }
+
+        // Build poll options: most recent first, with relative time labels
+        // WhatsApp polls support up to 12 options
+        const recentFirst = [...history].reverse().slice(0, 11);
+        const cancelLabel = "Cancel";
+        const pollOptions = recentFirst.map((entry, i) => {
+          const agoMs = Date.now() - new Date(entry.cleared_at).getTime();
+          const agoMin = Math.round(agoMs / 60_000);
+          const agoStr = agoMin < 60 ? `${agoMin}m ago` : agoMin < 1440 ? `${Math.round(agoMin / 60)}h ago` : `${Math.round(agoMin / 1440)}d ago`;
+          return `Session ${i + 1} (${agoStr})`;
+        });
+        pollOptions.push(cancelLabel);
+
+        // Send poll and wait for user choice
+        await context.sendPoll("Which session to resume?", pollOptions, 1);
+        const choice = await new Promise((resolve) => {
+          const timer = setTimeout(() => {
+            pendingUserResponses.delete(chatId);
+            resolve("");
+          }, ASK_USER_TIMEOUT_MS);
+          pendingUserResponses.set(chatId, (text) => {
+            clearTimeout(timer);
+            resolve(text);
+          });
+        });
+
+        if (!choice || choice === cancelLabel) {
+          await context.reply("tool-result", "Resume cancelled.");
+          return true;
+        }
+
+        // Parse the chosen index from "Session N (Xm ago)"
+        const match = String(choice).match(/^Session (\d+)/);
+        if (!match) {
+          await context.reply("tool-result", "Could not parse selection.");
+          return true;
+        }
+        const selectedIndex = parseInt(match[1], 10) - 1; // 0-based from most recent
+
+        const restored = await restoreSdkSession(chatId, selectedIndex);
+        if (!restored) {
+          await context.reply("tool-result", "Failed to restore session.");
+          return true;
+        }
+        const clearedAt = new Date(restored.cleared_at);
+        const restoredAgoMs = Date.now() - clearedAt.getTime();
+        const restoredAgoMin = Math.round(restoredAgoMs / 60_000);
+        const restoredAgoStr = restoredAgoMin < 60 ? `${restoredAgoMin}m` : restoredAgoMin < 1440 ? `${Math.round(restoredAgoMin / 60)}h` : `${Math.round(restoredAgoMin / 1440)}d`;
+        await context.reply("tool-result", `Session restored (cleared ${restoredAgoStr} ago). Your next message will continue that conversation.`);
         return true;
       }
       default:

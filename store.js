@@ -24,8 +24,14 @@ const log = createLogger("store");
  *   harness: string | null;
  *   harness_cwd: string | null;
  *   sdk_session_id: string | null;
+ *   sdk_session_history: SdkSessionHistoryEntry[];
  *   timestamp: string;
  * }} ChatRow
+ *
+ * @typedef {{
+ *   id: string;
+ *   cleared_at: string;
+ * }} SdkSessionHistoryEntry
  *
  * @typedef {{
  *   message_id: number;
@@ -105,6 +111,7 @@ export async function initStore(injectedDb){
         db.sql`ALTER TABLE chats ADD COLUMN IF NOT EXISTS harness TEXT`,
         db.sql`ALTER TABLE chats ADD COLUMN IF NOT EXISTS harness_cwd TEXT`,
         db.sql`ALTER TABLE chats ADD COLUMN IF NOT EXISTS sdk_session_id TEXT`,
+        db.sql`ALTER TABLE chats ADD COLUMN IF NOT EXISTS sdk_session_history JSONB DEFAULT '[]'`,
         db.sql`ALTER TABLE messages ADD COLUMN IF NOT EXISTS exchange_text TEXT`,
         db.sql`ALTER TABLE messages ADD COLUMN IF NOT EXISTS llm_context JSONB`,
       ]);
@@ -240,6 +247,79 @@ export async function initStore(injectedDb){
        */
       async updateSdkSessionId (chatId, sessionId) {
         await db.sql`UPDATE chats SET sdk_session_id = ${sessionId} WHERE chat_id = ${chatId}`;
+      },
+
+      /**
+       * Archive the current SDK session ID into the session history.
+       * Does nothing if there is no current session.
+       * Keeps at most `maxEntries` entries (oldest are dropped).
+       * @param {ChatRow['chat_id']} chatId
+       * @param {number} [maxEntries=10]
+       */
+      async archiveSdkSession (chatId, maxEntries = 10) {
+        const { rows: [row] } = await db.sql`SELECT sdk_session_id, sdk_session_history FROM chats WHERE chat_id = ${chatId}`;
+        const chat = /** @type {Pick<ChatRow, 'sdk_session_id' | 'sdk_session_history'>} */ (row);
+        if (!chat?.sdk_session_id) return;
+
+        /** @type {SdkSessionHistoryEntry[]} */
+        const history = Array.isArray(chat.sdk_session_history) ? chat.sdk_session_history : [];
+
+        // Avoid duplicates
+        if (history.some(e => e.id === chat.sdk_session_id)) return;
+
+        /** @type {SdkSessionHistoryEntry} */
+        const entry = { id: chat.sdk_session_id, cleared_at: new Date().toISOString() };
+        const updated = [...history, entry].slice(-maxEntries);
+
+        await db.sql`UPDATE chats SET sdk_session_history = ${JSON.stringify(updated)}, sdk_session_id = NULL WHERE chat_id = ${chatId}`;
+      },
+
+      /**
+       * Get the SDK session history for a chat.
+       * @param {ChatRow['chat_id']} chatId
+       * @returns {Promise<SdkSessionHistoryEntry[]>}
+       */
+      async getSdkSessionHistory (chatId) {
+        const { rows: [row] } = await db.sql`SELECT sdk_session_history FROM chats WHERE chat_id = ${chatId}`;
+        const chat = /** @type {Pick<ChatRow, 'sdk_session_history'> | undefined} */ (row);
+        if (!chat) return [];
+        return Array.isArray(chat.sdk_session_history) ? chat.sdk_session_history : [];
+      },
+
+      /**
+       * Restore a session from history by index (0 = most recent) or session ID.
+       * Removes it from history and sets it as the active session.
+       * Caller should call `archiveSdkSession` first to save any active session.
+       * @param {ChatRow['chat_id']} chatId
+       * @param {number | string} indexOrId - 0-based index from the end (most recent = 0) or a session ID string
+       * @returns {Promise<SdkSessionHistoryEntry | null>} The restored entry, or null if not found
+       */
+      async restoreSdkSession (chatId, indexOrId) {
+        const { rows: [row] } = await db.sql`SELECT sdk_session_history FROM chats WHERE chat_id = ${chatId}`;
+        const chat = /** @type {Pick<ChatRow, 'sdk_session_history'> | undefined} */ (row);
+        if (!chat) return null;
+
+        /** @type {SdkSessionHistoryEntry[]} */
+        const history = Array.isArray(chat.sdk_session_history) ? chat.sdk_session_history : [];
+        if (history.length === 0) return null;
+
+        /** @type {number} */
+        let idx;
+        if (typeof indexOrId === "number") {
+          // 0 = most recent (last entry)
+          idx = history.length - 1 - indexOrId;
+        } else {
+          idx = history.findIndex(e => e.id === indexOrId);
+        }
+
+        if (idx < 0 || idx >= history.length) return null;
+
+        const entry = history[idx];
+        // Remove the restored entry from history
+        history.splice(idx, 1);
+
+        await db.sql`UPDATE chats SET sdk_session_id = ${entry.id}, sdk_session_history = ${JSON.stringify(history)} WHERE chat_id = ${chatId}`;
+        return entry;
       },
     }
 }
