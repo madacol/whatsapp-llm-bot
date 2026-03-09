@@ -141,17 +141,21 @@ function formatSdkToolCall(name, args) {
 /**
  * Reformat a bash command for visual display: break at pipes and connectors
  * so each stage starts on its own line (with 2-space indent for continuation).
- * Only reformats single-line commands; multi-line commands are left as-is.
+ * For multi-line commands (e.g. heredocs), only the first line is split at
+ * connectors; the rest is preserved as-is.
  * @param {string} command
  * @returns {string}
  */
 function formatBashCommand(command) {
-  // Already multi-line — don't reformat
-  if (command.includes("\n")) return command;
+  // For multi-line commands, only reformat the first line (the rest may be
+  // heredoc content, multi-line strings, etc. that shouldn't be touched).
+  const newlineIdx = command.indexOf("\n");
+  const firstLine = newlineIdx === -1 ? command : command.slice(0, newlineIdx);
+  const rest = newlineIdx === -1 ? "" : command.slice(newlineIdx);
 
   // Split at pipe/connector boundaries, keeping the delimiter at the start of each new line.
   // Matches: |, ||, &&, ; (but not inside quotes)
-  const parts = command.split(/\s+(\|{1,2}|&&|;)\s+/);
+  const parts = firstLine.split(/\s+(\|{1,2}|&&|;)\s+/);
 
   // If no splits happened, return as-is
   if (parts.length <= 1) return command;
@@ -163,7 +167,7 @@ function formatBashCommand(command) {
     const segment = parts[i + 1] ?? "";
     result += `\n  ${connector} ${segment}`;
   }
-  return result;
+  return result + rest;
 }
 
 /**
