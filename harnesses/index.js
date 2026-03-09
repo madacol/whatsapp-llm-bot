@@ -61,13 +61,15 @@ export function resolveHarnessName(persona, chatInfo) {
 
 /**
  * Wait for all active harnesses to become idle. Used for graceful shutdown.
- * @returns {Promise<void>}
+ * @returns {Promise<string[]>} chat IDs that were waited on
  */
 export async function waitForAllHarnesses() {
-  const waits = [...instances.values()]
-    .filter(h => typeof h.waitForIdle === "function")
-    .map(h => /** @type {() => Promise<void>} */ (h.waitForIdle)());
-  await Promise.all(waits);
+  const results = await Promise.all(
+    [...instances.values()]
+      .filter(h => typeof h.waitForIdle === "function")
+      .map(h => /** @type {() => Promise<string[]>} */ (h.waitForIdle)())
+  );
+  return results.flat();
 }
 
 // Re-export commonly used constants from native harness
