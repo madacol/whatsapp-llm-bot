@@ -76,10 +76,13 @@ When the user asks you to program, modify, fix, or work on the bot's internal sy
 
 /**
  * State for an active SDK query, used for injection and cancellation.
+ * `query` is null during setup; messages arriving in that window are buffered
+ * in `pendingMessages` and flushed once the query starts.
  * @typedef {{
- *   query: import("@anthropic-ai/claude-agent-sdk").Query;
+ *   query: import("@anthropic-ai/claude-agent-sdk").Query | null;
  *   abortController: AbortController;
  *   sessionId: string;
+ *   pendingMessages: string[];
  * }} ActiveQuery
  */
 
@@ -103,6 +106,13 @@ export function createClaudeAgentSdkHarness() {
   function injectMessage(chatId, text) {
     const active = activeQueries.get(chatId);
     if (!active) return false;
+
+    // If the query hasn't started yet (still in setup), buffer the message
+    if (!active.query) {
+      active.pendingMessages.push(text);
+      log.debug(`Buffered message for pending query on chat ${chatId}: "${text.slice(0, 80)}"`);
+      return true;
+    }
 
     /** @type {import("@anthropic-ai/claude-agent-sdk").SDKUserMessage} */
     const sdkMessage = {
@@ -181,6 +191,13 @@ export function createClaudeAgentSdkHarness() {
     };
 
     const abortController = new AbortController();
+
+    // Register early so messages arriving during setup get buffered
+    // instead of spawning a parallel query (fixes race condition).
+    activeQueries.set(session.chatId, {
+      query: null, abortController, sessionId: "", pendingMessages: [],
+    });
+
     const existingSessionId = session.sdkSessionId ?? null;
     const resuming = !!existingSessionId;
 
@@ -195,7 +212,7 @@ export function createClaudeAgentSdkHarness() {
       /** @type {Record<string, unknown>} */
       const queryOptions = {
         systemPrompt: fullSystemPrompt,
-        maxTurns: maxDepth ?? 10,
+        maxTurns: maxDepth ?? 50,
         cwd: cwd || process.cwd(),
         settingSources: [],
         permissionMode: "bypassPermissions",
@@ -266,9 +283,17 @@ export function createClaudeAgentSdkHarness() {
         options: /** @type {*} */ (queryOptions),
       });
 
-      // Use existing session ID for injection until we get one from the SDK
+      // Promote the placeholder with the real query object and flush buffered messages
       const sessionId = existingSessionId ?? randomUUID();
-      activeQueries.set(session.chatId, { query: q, abortController, sessionId });
+      const pending = activeQueries.get(session.chatId);
+      const buffered = pending?.pendingMessages ?? [];
+      activeQueries.set(session.chatId, { query: q, abortController, sessionId, pendingMessages: [] });
+
+      // Flush any messages that arrived during setup
+      for (const text of buffered) {
+        log.debug(`Flushing buffered message for chat ${session.chatId}: "${text.slice(0, 80)}"`);
+        injectMessage(session.chatId, text);
+      }
 
       /** @type {Map<string, { editor?: MessageEditor, toolName: string }>} */
       const activeTools = new Map();
@@ -285,12 +310,14 @@ export function createClaudeAgentSdkHarness() {
           }
         }
 
+        log.debug(`SDK event: ${event.type}`, event.type === "assistant" ? `blocks=${event.message?.content?.length}` : "");
         switch (event.type) {
           case "assistant": {
             // Extract text content from the BetaMessage
             const betaMessage = event.message;
             if (betaMessage.content) {
               for (const block of betaMessage.content) {
+                log.debug(`  assistant block: ${block.type}`, block.type === "text" ? `len=${block.text.length}` : "");
                 if (block.type === "text") {
                   await hooks.onLlmResponse(block.text);
                   result.response.push({ type: "text", text: block.text });
@@ -314,23 +341,34 @@ export function createClaudeAgentSdkHarness() {
           }
 
           case "result": {
+            const resultEvent = /** @type {import("@anthropic-ai/claude-agent-sdk").SDKResultMessage} */ (event);
+            log.debug(`SDK result: subtype=${resultEvent.subtype}, is_error=${resultEvent.is_error}, has_result=${"result" in resultEvent}, responseBlocks=${result.response.length}`);
+
             // Final result — the SDK's result string is the authoritative final answer.
-            // Replace the accumulated assistant text blocks with it.
-            if ("result" in event && typeof event.result === "string") {
-              result.response = [{ type: "text", text: event.result }];
+            if (!resultEvent.is_error && "result" in resultEvent && typeof resultEvent.result === "string") {
+              const resultText = resultEvent.result;
+              // Check if this final text was already sent via an assistant event.
+              const lastSent = result.response[result.response.length - 1];
+              const alreadySent = lastSent?.type === "text"
+                && lastSent.text.trim() === resultText.trim();
+              log.debug(`SDK result text: len=${resultText.length}, alreadySent=${alreadySent}`);
+              result.response = [{ type: "text", text: resultText }];
+              if (!alreadySent && resultText.trim()) {
+                await hooks.onLlmResponse(resultText);
+              }
             }
-            if (event.usage) {
+            if (resultEvent.usage) {
               // Overwrite with final totals if available
-              result.usage.promptTokens = event.usage.input_tokens ?? result.usage.promptTokens;
-              result.usage.completionTokens = event.usage.output_tokens ?? result.usage.completionTokens;
-              result.usage.cachedTokens = /** @type {*} */ (event.usage).cache_read_input_tokens ?? result.usage.cachedTokens;
+              result.usage.promptTokens = resultEvent.usage.input_tokens ?? result.usage.promptTokens;
+              result.usage.completionTokens = resultEvent.usage.output_tokens ?? result.usage.completionTokens;
+              result.usage.cachedTokens = /** @type {*} */ (resultEvent.usage).cache_read_input_tokens ?? result.usage.cachedTokens;
             }
-            if (typeof event.total_cost_usd === "number") {
-              result.usage.cost = event.total_cost_usd;
+            if (typeof resultEvent.total_cost_usd === "number") {
+              result.usage.cost = resultEvent.total_cost_usd;
             }
 
-            if (event.is_error) {
-              const errors = /** @type {import("@anthropic-ai/claude-agent-sdk").SDKResultError} */ (event).errors;
+            if (resultEvent.is_error) {
+              const errors = /** @type {import("@anthropic-ai/claude-agent-sdk").SDKResultError} */ (resultEvent).errors;
               log.error("SDK query ended with error:", errors);
               if (errors?.length > 0) {
                 await hooks.onToolError(errors.join("; "));
