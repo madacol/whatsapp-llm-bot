@@ -49,5 +49,15 @@ export function listHarnesses() {
   return [...registry.keys()];
 }
 
+/**
+ * Determine the harness name from a persona/agent and chat config.
+ * @param {AgentDefinition | null | undefined} persona
+ * @param {{ harness?: string | null } | null | undefined} chatInfo
+ * @returns {string}
+ */
+export function resolveHarnessName(persona, chatInfo) {
+  return persona?.harness ?? chatInfo?.harness ?? "native";
+}
+
 // Re-export commonly used constants from native harness
 export { NO_OP_HOOKS, MAX_TOOL_CALL_DEPTH, parseToolArgs } from "./native.js";
