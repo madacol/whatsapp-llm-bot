@@ -52,9 +52,7 @@ async function buildSystemPrompt(llmConfig, messages, chatId, senderIds, { resum
     }
   }
 
-  // Instruction to read CLAUDE.md when programming the bot
-  prompt += `\n\n## Internal Development
-When the user asks you to program, modify, fix, or work on the bot's internal system (this codebase), you MUST first read the file \`CLAUDE.md\` in the project root for coding guidelines and conventions before making any changes.`;
+  // CLAUDE.md is loaded automatically by the SDK via settingSources: ["project"]
 
   // Inject chat-specific action descriptions
   try {

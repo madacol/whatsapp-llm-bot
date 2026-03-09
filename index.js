@@ -277,6 +277,34 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
   }
 
   /**
+   * Handle built-in slash commands that operate on the harness level.
+   * Returns true if the command was handled, false if it should fall through to the SDK.
+   * @param {string} command - The slash command text (without leading /)
+   * @param {string} chatId
+   * @param {import("./store.js").ChatRow | undefined} chatInfo
+   * @param {ExecuteActionContext} context
+   * @returns {Promise<boolean>}
+   */
+  async function handleSlashCommand(command, chatId, chatInfo, context) {
+    switch (command) {
+      case "clear": {
+        // Reset the SDK session — next message starts a fresh conversation
+        const persona = chatInfo?.active_persona ? await getAgent(chatInfo.active_persona) : null;
+        const harnessName = resolveHarnessName(persona, chatInfo);
+        const harness = resolveHarness(harnessName);
+        // Cancel any active query
+        harness.cancel?.(chatId);
+        // Clear the persisted session ID
+        await updateSdkSessionId(chatId, null);
+        await context.reply("tool-result", "Session cleared. Next message starts fresh.");
+        return true;
+      }
+      default:
+        return false;
+    }
+  }
+
+  /**
    * Handle a regular (non-command) message: format, store, and run through the LLM harness.
    * @param {object} opts
    * @param {IncomingContext} opts.messageContext
@@ -492,12 +520,18 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
       return handleCommandMessage({ chatId, senderIds, content, firstBlock, chatInfo, context, actions, actionResolver });
     }
 
-    // Slash commands (e.g. /commit, /review-pr) are explicit bot invocations
-    // routed to the SDK harness as skill invocations — bypass shouldRespond
+    // Slash commands: harness-level commands handled at the bot level.
+    // /clear resets the SDK session; other /commands are passed to the SDK as prompts.
     const isSlashCommand = firstBlock?.text?.startsWith("/");
-    if (isSlashCommand && !chatInfo?.is_enabled) {
-      await context.reply("error", "Bot is not enabled in this chat. Use !config enabled true");
-      return;
+    if (isSlashCommand) {
+      if (!chatInfo?.is_enabled) {
+        await context.reply("error", "Bot is not enabled in this chat. Use !config enabled true");
+        return;
+      }
+      const slashCmd = /** @type {TextContentBlock} */ (firstBlock).text.slice(1).trim().toLowerCase();
+      const handled = await handleSlashCommand(slashCmd, chatId, chatInfo, context);
+      if (handled) return;
+      // Not a built-in slash command — fall through to LLM as a skill invocation
     }
 
     return handleLlmMessage({ messageContext, chatInfo, isDebug, context, actions, actionResolver, firstBlock, isSlashCommand: !!isSlashCommand });
