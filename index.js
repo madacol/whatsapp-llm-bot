@@ -417,7 +417,7 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
         const labelMap = new Map();
         const pollOptions = options.map((label, i) => {
           const desc = descriptions?.[i];
-          const enriched = desc ? `${label}\n${desc}` : label;
+          const enriched = desc ? `${label}\n\n${desc}` : label;
           labelMap.set(enriched, label);
           return enriched;
         });
