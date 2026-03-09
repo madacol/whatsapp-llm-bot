@@ -2,7 +2,7 @@
 
 - Use JSDoc for all type annotations
 - Avoid weak typing like `@type {any|unknown}` casts. Use proper type guards and narrowing instead. Aspire to have strong and precise types everywhere
-- After making any change, `pnpm type-check`, commit! Then if there's any refactor worth doing, explain why and how it can be done
+- After making any change, `pnpm type-check`, then test and then commit!. Then if there's any refactor worth doing, explain why and how it can be done
 - Before cutting corners, ask yourself why do you need to do this, and what needs to be done to avoid this. If you still think cutting this corner is still the best course of action, explain thoroughly to the user and let them decide how to continue with the plan
 
 ## Testing

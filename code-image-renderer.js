@@ -5,10 +5,17 @@ const MAX_LINES_PER_IMAGE = 45;
 const FONT_SIZE = 14;
 const LINE_HEIGHT = 20;
 const PADDING = 16;
+const GUTTER_WIDTH = 28; // Width for the +/- prefix gutter in diffs
 const FONT_FAMILY = "DejaVu Sans Mono";
 const FONT_PATH = "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf";
 const THEME = "github-dark";
 const BG_COLOR = "#0d1117";
+
+// Diff line background colors (GitHub-dark style, semi-transparent)
+const DIFF_ADD_BG = "rgba(46, 160, 67, 0.15)";
+const DIFF_DEL_BG = "rgba(248, 81, 73, 0.15)";
+const DIFF_ADD_GUTTER = "#2ea04380";
+const DIFF_DEL_GUTTER = "#f8514980";
 
 /** @type {Awaited<ReturnType<typeof createHighlighter>> | null} */
 let highlighter = null;
@@ -52,17 +59,12 @@ function estimateTextWidth(text) {
 }
 
 /**
- * Render code as syntax-highlighted PNG image(s).
- * Splits long code across multiple images at MAX_LINES_PER_IMAGE.
- * @param {string} code
- * @param {string} [language]
- * @returns {Promise<Buffer[]>}
+ * Load a language into the highlighter if not already loaded.
+ * @param {Awaited<ReturnType<typeof createHighlighter>>} hl
+ * @param {string} lang
+ * @returns {Promise<string>} The effective language (falls back to "text")
  */
-export async function renderCodeToImages(code, language) {
-  const hl = await getHighlighter();
-
-  // Load language if needed
-  const lang = language || "text";
+async function loadLang(hl, lang) {
   const loadedLangs = hl.getLoadedLanguages();
   if (!loadedLangs.includes(lang)) {
     try {
@@ -71,17 +73,29 @@ export async function renderCodeToImages(code, language) {
       // Fall back to plain text if language not supported
     }
   }
+  return hl.getLoadedLanguages().includes(lang) ? lang : "text";
+}
 
-  const effectiveLang = hl.getLoadedLanguages().includes(lang) ? lang : "text";
+/**
+ * @typedef {{ tokens: import("shiki").ThemedToken[]; bg?: string; gutter?: string; prefix?: string }} AnnotatedLine
+ */
 
-  const result = hl.codeToTokens(code, { lang: /** @type {import("shiki").BundledLanguage} */ (effectiveLang), theme: THEME });
-  const tokenLines = result.tokens;
+/**
+ * Render annotated token lines into PNG image buffers.
+ * Each line can have an optional background color, gutter color, and prefix character.
+ * @param {AnnotatedLine[]} lines
+ * @param {{ gutterWidth?: number }} [opts]
+ * @returns {Buffer[]}
+ */
+function renderAnnotatedLines(lines, opts) {
+  const gutterWidth = opts?.gutterWidth ?? 0;
+  const contentX = PADDING + gutterWidth;
 
   // Split into chunks
-  /** @type {(typeof tokenLines)[]} */
+  /** @type {AnnotatedLine[][]} */
   const chunks = [];
-  for (let i = 0; i < tokenLines.length; i += MAX_LINES_PER_IMAGE) {
-    chunks.push(tokenLines.slice(i, i + MAX_LINES_PER_IMAGE));
+  for (let i = 0; i < lines.length; i += MAX_LINES_PER_IMAGE) {
+    chunks.push(lines.slice(i, i + MAX_LINES_PER_IMAGE));
   }
 
   /** @type {Buffer[]} */
@@ -91,12 +105,12 @@ export async function renderCodeToImages(code, language) {
     // Calculate dimensions
     let maxLineWidth = 0;
     for (const line of chunk) {
-      const lineText = line.map(t => t.content).join("");
+      const lineText = (line.prefix || "") + line.tokens.map(t => t.content).join("");
       const width = estimateTextWidth(lineText);
       if (width > maxLineWidth) maxLineWidth = width;
     }
 
-    const svgWidth = Math.max(maxLineWidth + PADDING * 2, 200);
+    const svgWidth = Math.max(maxLineWidth + contentX + PADDING, 200);
     const svgHeight = chunk.length * LINE_HEIGHT + PADDING * 2;
 
     // Build SVG
@@ -104,14 +118,30 @@ export async function renderCodeToImages(code, language) {
     svg += `<rect width="100%" height="100%" fill="${BG_COLOR}" rx="8"/>`;
 
     for (let lineIdx = 0; lineIdx < chunk.length; lineIdx++) {
-      const y = PADDING + (lineIdx + 1) * LINE_HEIGHT - 4;
-      svg += `<text x="${PADDING}" y="${y}" font-family="${FONT_FAMILY}" font-size="${FONT_SIZE}" fill="#e6edf3" xml:space="preserve">`;
+      const line = chunk[lineIdx];
+      const y = PADDING + lineIdx * LINE_HEIGHT;
+      const textY = y + LINE_HEIGHT - 4;
 
-      for (const token of chunk[lineIdx]) {
+      // Line background highlight for diff lines
+      if (line.bg) {
+        svg += `<rect x="0" y="${y}" width="100%" height="${LINE_HEIGHT}" fill="${line.bg}"/>`;
+      }
+
+      // Gutter (prefix column with +/- sign)
+      if (gutterWidth > 0 && line.prefix) {
+        if (line.gutter) {
+          svg += `<rect x="0" y="${y}" width="${PADDING + gutterWidth}" height="${LINE_HEIGHT}" fill="${line.gutter}"/>`;
+        }
+        const prefixColor = line.prefix === "+" ? "#3fb950" : line.prefix === "-" ? "#f85149" : "#8b949e";
+        svg += `<text x="${PADDING}" y="${textY}" font-family="${FONT_FAMILY}" font-size="${FONT_SIZE}" fill="${prefixColor}" xml:space="preserve">${escapeXml(line.prefix)}</text>`;
+      }
+
+      // Code tokens
+      svg += `<text x="${contentX}" y="${textY}" font-family="${FONT_FAMILY}" font-size="${FONT_SIZE}" fill="#e6edf3" xml:space="preserve">`;
+      for (const token of line.tokens) {
         const color = token.color || "#e6edf3";
         svg += `<tspan fill="${color}">${escapeXml(token.content)}</tspan>`;
       }
-
       svg += `</text>`;
     }
 
@@ -128,4 +158,68 @@ export async function renderCodeToImages(code, language) {
   }
 
   return images;
+}
+
+/**
+ * Render code as syntax-highlighted PNG image(s).
+ * Splits long code across multiple images at MAX_LINES_PER_IMAGE.
+ * @param {string} code
+ * @param {string} [language]
+ * @returns {Promise<Buffer[]>}
+ */
+export async function renderCodeToImages(code, language) {
+  const hl = await getHighlighter();
+  const effectiveLang = await loadLang(hl, language || "text");
+
+  const result = hl.codeToTokens(code, { lang: /** @type {import("shiki").BundledLanguage} */ (effectiveLang), theme: THEME });
+
+  /** @type {AnnotatedLine[]} */
+  const lines = result.tokens.map(tokens => ({ tokens }));
+
+  return renderAnnotatedLines(lines);
+}
+
+/**
+ * Render a diff (old_string → new_string) as syntax-highlighted PNG image(s).
+ * Removed lines show with red background, added lines with green background,
+ * each with a +/- gutter prefix. Both sides are highlighted in the target language.
+ * @param {string} oldStr
+ * @param {string} newStr
+ * @param {string} [language]
+ * @returns {Promise<Buffer[]>}
+ */
+export async function renderDiffToImages(oldStr, newStr, language) {
+  const hl = await getHighlighter();
+  const effectiveLang = await loadLang(hl, language || "text");
+
+  const shikiLang = /** @type {import("shiki").BundledLanguage} */ (effectiveLang);
+
+  // Tokenize both old and new independently for proper syntax highlighting
+  const oldTokens = hl.codeToTokens(oldStr, { lang: shikiLang, theme: THEME }).tokens;
+  const newTokens = hl.codeToTokens(newStr, { lang: shikiLang, theme: THEME }).tokens;
+
+  /** @type {AnnotatedLine[]} */
+  const lines = [];
+
+  // Removed lines (old)
+  for (const tokenLine of oldTokens) {
+    lines.push({
+      tokens: tokenLine,
+      bg: DIFF_DEL_BG,
+      gutter: DIFF_DEL_GUTTER,
+      prefix: "-",
+    });
+  }
+
+  // Added lines (new)
+  for (const tokenLine of newTokens) {
+    lines.push({
+      tokens: tokenLine,
+      bg: DIFF_ADD_BG,
+      gutter: DIFF_ADD_GUTTER,
+      prefix: "+",
+    });
+  }
+
+  return renderAnnotatedLines(lines, { gutterWidth: GUTTER_WIDTH });
 }

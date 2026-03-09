@@ -34,6 +34,13 @@ type CodeContentBlock = {
   code: string;
 };
 
+type DiffContentBlock = {
+  type: "diff";
+  language?: string;
+  oldStr: string;
+  newStr: string;
+};
+
 /**
  * OpenAI SDK doesn't include video_url in ChatCompletionContentPart.
  * This fills the gap so we avoid `@type {*}` escape hatches.
@@ -223,7 +230,7 @@ type ExtendedActionContext<P extends PermissionFlags> = ActionContext
   & (P["useChatDb"] extends true ? { chatDb: PGlite } : {})
   & (P["useLlm"] extends true ? { callLlm: CallLlm; llmClient: LlmClient } : {});
 
-type ToolContentBlock = TextContentBlock | ImageContentBlock | VideoContentBlock | AudioContentBlock | CodeContentBlock | MarkdownContentBlock;
+type ToolContentBlock = TextContentBlock | ImageContentBlock | VideoContentBlock | AudioContentBlock | CodeContentBlock | DiffContentBlock | MarkdownContentBlock;
 
 type SendContent = string | ToolContentBlock | ToolContentBlock[];
 
