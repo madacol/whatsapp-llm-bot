@@ -413,7 +413,18 @@ describe("markdown code renders as image in socket output", () => {
   });
 
   it("LLM markdown with code block produces [text, image, text] on socket", async () => {
-    const llmResponse = `Here is a snippet:\n\n\`\`\`javascript\nfunction greet(name) {\n  const msg = "Hello, " + name;\n  console.log(msg);\n  return msg;\n}\ngreet("world");\n\`\`\`\n\nHope that helps!`;
+    const llmResponse = `Here is a snippet:
+
+\`\`\`javascript
+function greet(name) {
+  const msg = "Hello, " + name;
+  console.log(msg);
+  return msg;
+}
+greet("world");
+\`\`\`
+
+Hope that helps!`;
     mockServer.addResponses(llmResponse);
 
     const { sock, getSentMessages } = createMockBaileysSocket();
