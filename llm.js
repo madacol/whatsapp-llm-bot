@@ -8,6 +8,19 @@ import { createLogger } from "./logger.js";
 const log = createLogger("llm");
 
 /**
+ * Create a video_url content part. The OpenAI SDK doesn't include video_url
+ * in ChatCompletionContentPart, but the API accepts it at runtime.
+ * This contains the cast in one place.
+ * @param {string} url
+ * @returns {OpenAI.ChatCompletionContentPart}
+ */
+function videoUrlPart(url) {
+  /** @type {VideoUrlContentPart} */
+  const part = { type: "video_url", video_url: { url } };
+  return /** @type {OpenAI.ChatCompletionContentPart} */ (/** @type {unknown} */ (part));
+}
+
+/**
  * Create a new OpenAI-compatible LLM client.
  * @param {{apiKey?: string, baseURL?: string}} [options]
  * @returns {LlmClient}
@@ -58,7 +71,7 @@ export function convertPromptToOpenAI(prompt) {
       case "audio":
         return { type: /** @type {const} */ ("input_audio"), input_audio: { data: block.data, format: /** @type {const} */ ("mp3") } };
       case "video":
-        return /** @type {*} */ ({ type: "video_url", video_url: { url: `data:${block.mime_type};base64,${block.data}` } });
+        return videoUrlPart(`data:${block.mime_type};base64,${block.data}`);
       default:
         return { type: /** @type {const} */ ("text"), text: `[Unsupported content type: ${/** @type {{type: string}} */ (block).type}]` };
     }
@@ -167,10 +180,7 @@ async function formatUserContent(message, registry) {
       }
       case "video": {
         const videoUrl = `data:${contentBlock.mime_type};base64,${contentBlock.data}`;
-        parts.push(/** @type {*} */ ({
-          type: "video_url",
-          video_url: { url: videoUrl },
-        }));
+        parts.push(videoUrlPart(videoUrl));
         tagMedia(parts, registry, contentBlock);
         break;
       }
@@ -252,10 +262,7 @@ function formatToolContent(message, registry) {
       });
       tagMedia(parts, registry, block);
     } else if (block.type === "video") {
-      parts.push(/** @type {*} */ ({
-        type: "video_url",
-        video_url: { url: `data:${block.mime_type};base64,${block.data}` },
-      }));
+      parts.push(videoUrlPart(`data:${block.mime_type};base64,${block.data}`));
       tagMedia(parts, registry, block);
     } else if (block.type === "code") {
       const fenced = "```" + (block.language || "") + "\n" + block.code + "\n```";
@@ -323,10 +330,7 @@ export function convertToolResultToOpenAI(blocks, registry) {
       const id = tagMedia(parts, registry, block);
       mediaIds.set(block, id);
     } else if (block.type === "video") {
-      parts.push(/** @type {*} */ ({
-        type: "video_url",
-        video_url: { url: `data:${block.mime_type};base64,${block.data}` },
-      }));
+      parts.push(videoUrlPart(`data:${block.mime_type};base64,${block.data}`));
       const id = tagMedia(parts, registry, block);
       mediaIds.set(block, id);
     } else if (block.type === "code") {
@@ -365,7 +369,7 @@ export async function sendChatCompletion(llmClient, { model, systemPrompt, messa
     tool_choice: "auto",
   });
 
-  const nativeCost = /** @type {{ cost?: number } & typeof completion.usage} */ (completion.usage)?.cost;
+  const nativeCost = completion.usage && "cost" in completion.usage ? /** @type {number} */ (completion.usage.cost) : undefined;
   return normalizeChatCompletion(completion, nativeCost);
 }
 
@@ -404,7 +408,7 @@ export function createCallLlm(llmClient, defaultModel = resolveModel("chat")) {
         ...(promptOrOpts.tools && { tools: /** @type {OpenAI.ChatCompletionTool[]} */ (promptOrOpts.tools) }),
         ...(promptOrOpts.tool_choice && { tool_choice: promptOrOpts.tool_choice }),
       });
-      const nativeCost = /** @type {{ cost?: number } & typeof completion.usage} */ (completion.usage)?.cost;
+      const nativeCost = completion.usage && "cost" in completion.usage ? /** @type {number} */ (completion.usage.cost) : undefined;
       return normalizeChatCompletion(completion, nativeCost);
     }
     // Simple mode
