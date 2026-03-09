@@ -17,7 +17,7 @@ import {
 import { exec } from "child_process";
 import { rm } from "fs/promises";
 import { needsAuthReset, sendAlertEmail } from "./notifications.js";
-import { renderCodeToImages, renderDiffToImages } from "./code-image-renderer.js";
+import { renderCodeToImages, renderDiffToImages, MIN_LINES_FOR_IMAGE } from "./code-image-renderer.js";
 import { createLogger } from "./logger.js";
 
 const log = createLogger("whatsapp");
@@ -47,13 +47,17 @@ const CODE_IMAGE_LANGUAGES = new Set([
 ]);
 
 /**
- * Check whether a code fence language identifier should be rendered as
- * a syntax-highlighted image (true) or sent as plain formatted text (false).
+ * Check whether a code block should be rendered as a syntax-highlighted image
+ * (true) or sent as plain formatted text (false).
+ * Requires a recognized programming language and at least MIN_LINES_FOR_IMAGE lines.
  * @param {string} lang
+ * @param {string} code
  * @returns {boolean}
  */
-function shouldRenderAsImage(lang) {
-  return CODE_IMAGE_LANGUAGES.has(lang.toLowerCase());
+function shouldRenderAsImage(lang, code) {
+  if (!CODE_IMAGE_LANGUAGES.has(lang.toLowerCase())) return false;
+  const lineCount = code.split("\n").length;
+  return lineCount >= MIN_LINES_FOR_IMAGE;
 }
 
 /**
@@ -421,7 +425,7 @@ export async function sendBlocks(sock, chatId, source, content, options) {
           if (codeMatch) {
             const lang = codeMatch[1] || "";
             const code = codeMatch[2].trimEnd();
-            if (lang && shouldRenderAsImage(lang)) {
+            if (lang && shouldRenderAsImage(lang, code)) {
               // Flush accumulated text before sending images
               await flushText();
               try {
@@ -452,7 +456,7 @@ export async function sendBlocks(sock, chatId, source, content, options) {
         break;
       }
       case "code": {
-        if (block.language && shouldRenderAsImage(block.language)) {
+        if (block.language && shouldRenderAsImage(block.language, block.code)) {
           try {
             const images = await renderCodeToImages(block.code, block.language);
             for (const image of images) {
