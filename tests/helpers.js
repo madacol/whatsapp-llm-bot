@@ -84,8 +84,8 @@ export function createIncomingContext(overrides = {}) {
     sendPoll: async (name, options, selectableCount) => {
       responses.push({ type: "sendPoll", text: JSON.stringify({ name, options, selectableCount }) });
     },
-    send: async (source, content) => recordBlocks("send", source, content),
-    reply: async (source, content) => recordBlocks("reply", source, content),
+    send: async (source, content) => { recordBlocks("send", source, content); return undefined; },
+    reply: async (source, content) => { recordBlocks("reply", source, content); return undefined; },
     confirm: async (message) => {
       responses.push({ type: "confirm", text: message });
       return true;
