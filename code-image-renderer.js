@@ -1,5 +1,6 @@
 import { createHighlighter } from "shiki";
 import { Resvg } from "@resvg/resvg-js";
+import { diffLines } from "diff";
 
 const MAX_LINES_PER_IMAGE = 45;
 const FONT_SIZE = 14;
@@ -191,34 +192,48 @@ export async function renderCodeToImages(code, language) {
 export async function renderDiffToImages(oldStr, newStr, language) {
   const hl = await getHighlighter();
   const effectiveLang = await loadLang(hl, language || "text");
-
   const shikiLang = /** @type {import("shiki").BundledLanguage} */ (effectiveLang);
 
-  // Tokenize both old and new independently for proper syntax highlighting
-  const oldTokens = hl.codeToTokens(oldStr, { lang: shikiLang, theme: THEME }).tokens;
-  const newTokens = hl.codeToTokens(newStr, { lang: shikiLang, theme: THEME }).tokens;
+  // Compute a proper line-level diff so unchanged lines are shown as context
+  const changes = diffLines(oldStr, newStr);
 
-  /** @type {AnnotatedLine[]} */
-  const lines = [];
-
-  // Removed lines (old)
-  for (const tokenLine of oldTokens) {
-    lines.push({
-      tokens: tokenLine,
-      bg: DIFF_DEL_BG,
-      gutter: DIFF_DEL_GUTTER,
-      prefix: "-",
-    });
+  // Build a single unified string for each "side" so shiki tokenizes with
+  // full context, then slice out the token lines per-change.
+  // We assemble the full text first, track line ranges, then tokenize once.
+  /** @type {{ kind: "add" | "del" | "ctx"; text: string }[]} */
+  const diffParts = [];
+  for (const change of changes) {
+    const text = change.value.endsWith("\n") ? change.value.slice(0, -1) : change.value;
+    if (change.added) {
+      diffParts.push({ kind: "add", text });
+    } else if (change.removed) {
+      diffParts.push({ kind: "del", text });
+    } else {
+      diffParts.push({ kind: "ctx", text });
+    }
   }
 
-  // Added lines (new)
-  for (const tokenLine of newTokens) {
-    lines.push({
-      tokens: tokenLine,
-      bg: DIFF_ADD_BG,
-      gutter: DIFF_ADD_GUTTER,
-      prefix: "+",
-    });
+  // Tokenize the full combined text so syntax highlighting is correct across boundaries
+  const fullText = diffParts.map(p => p.text).join("\n");
+  const allTokens = hl.codeToTokens(fullText, { lang: shikiLang, theme: THEME }).tokens;
+
+  // Map token lines back to diff parts
+  /** @type {AnnotatedLine[]} */
+  const lines = [];
+  let tokenLineIdx = 0;
+
+  for (const part of diffParts) {
+    const partLineCount = part.text.split("\n").length;
+    for (let i = 0; i < partLineCount && tokenLineIdx < allTokens.length; i++, tokenLineIdx++) {
+      const tokens = allTokens[tokenLineIdx];
+      if (part.kind === "del") {
+        lines.push({ tokens, bg: DIFF_DEL_BG, gutter: DIFF_DEL_GUTTER, prefix: "-" });
+      } else if (part.kind === "add") {
+        lines.push({ tokens, bg: DIFF_ADD_BG, gutter: DIFF_ADD_GUTTER, prefix: "+" });
+      } else {
+        lines.push({ tokens, prefix: " " });
+      }
+    }
   }
 
   return renderAnnotatedLines(lines, { gutterWidth: GUTTER_WIDTH });
