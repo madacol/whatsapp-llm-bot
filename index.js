@@ -48,14 +48,49 @@ function hasCommand(a) {
   return typeof a.command === "string";
 }
 
+/** Map file extensions to language identifiers for syntax highlighting. */
+const EXT_TO_LANG = /** @type {Record<string, string>} */ ({
+  js: "javascript", mjs: "javascript", cjs: "javascript", jsx: "jsx",
+  ts: "typescript", mts: "typescript", cts: "typescript", tsx: "tsx",
+  py: "python", rb: "ruby", rs: "rust", go: "go", java: "java",
+  kt: "kotlin", kts: "kotlin", swift: "swift", c: "c", h: "c",
+  cpp: "cpp", cc: "cpp", cxx: "cpp", hpp: "cpp", cs: "csharp",
+  php: "php", lua: "lua", r: "r", jl: "julia", scala: "scala",
+  dart: "dart", zig: "zig", nim: "nim", ex: "elixir", exs: "elixir",
+  erl: "erlang", hs: "haskell", ml: "ocaml", fs: "fsharp",
+  clj: "clojure", groovy: "groovy", pl: "perl", pm: "perl",
+  sh: "bash", bash: "bash", zsh: "zsh", fish: "fish",
+  ps1: "powershell", bat: "bat", cmd: "cmd",
+  html: "html", htm: "html", css: "css", scss: "scss", sass: "sass",
+  less: "less", xml: "xml", svg: "svg", vue: "vue", svelte: "svelte",
+  json: "json", yaml: "yaml", yml: "yaml", toml: "toml", ini: "ini",
+  sql: "sql", graphql: "graphql", proto: "protobuf",
+  dockerfile: "dockerfile", makefile: "makefile",
+  tf: "terraform", hcl: "hcl", tex: "latex",
+  md: "markdown", mdx: "mdx",
+});
+
 /**
- * Display a tool call to the user (compact or verbose based on debug mode).
- * Returns a MessageEditor for the sent message (if any), allowing callers
- * to update it in-place (e.g. for progress updates).
+ * Infer a syntax-highlighting language from a file path's extension.
+ * @param {string} filePath
+ * @returns {string}
+ */
+function langFromPath(filePath) {
+  const base = filePath.split("/").pop() || "";
+  // Handle extensionless known files
+  const lower = base.toLowerCase();
+  if (lower === "dockerfile") return "dockerfile";
+  if (lower === "makefile") return "makefile";
+  const ext = base.includes(".") ? base.split(".").pop()?.toLowerCase() ?? "" : "";
+  return EXT_TO_LANG[ext] || "";
+}
+
+/**
+ * Display a tool call to the user — renders Edit/Write code as images.
  * @param {LlmChatResponse['toolCalls'][0]} toolCall
  * @param {Pick<ExecuteActionContext, "send">} context
  * @param {boolean} isDebug
- * @param {((params: Record<string, any>) => string)} [formatToolCall] - Optional formatter from the action
+ * @param {((params: Record<string, any>) => string)} [formatToolCall]
  * @returns {Promise<MessageEditor | undefined>}
  */
 async function displayToolCall(toolCall, context, isDebug, formatToolCall) {
@@ -67,6 +102,21 @@ async function displayToolCall(toolCall, context, isDebug, formatToolCall) {
     if (description) {
       return context.send("tool-call", description);
     }
+  }
+
+  // For Edit/Write tool calls, render the code content as a syntax-highlighted image
+  const name = toolCall.name;
+  if ((name === "Edit" || name === "Write") && typeof args.file_path === "string") {
+    const lang = langFromPath(args.file_path);
+    /** @type {ToolContentBlock[]} */
+    const blocks = [{ type: "text", text: `🔧 *${name}*\n${args.file_path}` }];
+    if (name === "Edit" && typeof args.old_string === "string" && typeof args.new_string === "string" && lang) {
+      // Render a diff image showing old → new
+      blocks.push({ type: "diff", oldStr: args.old_string, newStr: args.new_string, language: lang });
+    } else if (name === "Write" && typeof args.content === "string" && args.content.trim() && lang) {
+      blocks.push({ type: "code", code: args.content, language: lang });
+    }
+    return context.send("tool-call", blocks);
   }
 
   let msg = isDebug ? `*${toolCall.name}*` : toolCall.name;
@@ -132,7 +182,7 @@ async function displayToolResult(blocks, toolName, permissions, context, isDebug
 /**
  * Create a message handler with injected dependencies.
  * @param {MessageHandlerDeps} deps
- * @returns {{ handleMessage: (messageContext: IncomingContext) => Promise<void> }}
+ * @returns {{ handleMessage: (messageContext: IncomingContext) => Promise<void>, handlePollVote: (event: import("./whatsapp-adapter.js").PollVoteEvent) => Promise<void> }}
  */
 export function createMessageHandler({ store, llmClient, getActionsFn, executeActionFn }) {
   const { addMessage, updateToolMessage, createChat, getChat, getMessages, updateSdkSessionId } = store;
@@ -147,6 +197,8 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
    * @type {Map<string, (text: string) => void>}
    */
   const pendingUserResponses = new Map();
+
+
 
   /**
    * Handle a `!command` message: parse, dispatch, and render result.
@@ -442,7 +494,19 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
     return handleLlmMessage({ messageContext, chatInfo, isDebug, context, actions, actionResolver, firstBlock });
   }
 
-  return { handleMessage };
+  /**
+   * Handle a poll vote by resolving any pending onAskUser promise for that chat.
+   * @param {import("./whatsapp-adapter.js").PollVoteEvent} event
+   */
+  async function handlePollVote(event) {
+    const resolver = pendingUserResponses.get(event.chatId);
+    if (resolver && event.selectedOptions.length > 0) {
+      pendingUserResponses.delete(event.chatId);
+      resolver(event.selectedOptions[0]);
+    }
+  }
+
+  return { handleMessage, handlePollVote };
 }
 
 /**
@@ -578,7 +642,7 @@ if (!process.env.TESTING) {
   const store = await initStore();
   const llmClient = createLlmClient();
 
-  const { handleMessage } = createMessageHandler({
+  const { handleMessage, handlePollVote } = createMessageHandler({
     store,
     llmClient,
     getActionsFn: getActions,
@@ -610,6 +674,7 @@ if (!process.env.TESTING) {
   const { closeWhatsapp, sendToChat } = await connectToWhatsApp({
     onMessage: handleMessage,
     onReaction,
+    onPollVote: handlePollVote,
   }).catch(async (error) => {
       log.error("Initialization error:", error);
       await store.closeDb();
