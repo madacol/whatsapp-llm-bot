@@ -836,9 +836,9 @@ if (!process.env.TESTING) {
       process.kill(oldPid, 0); // check if alive
       console.log(`Killing previous instance (PID ${oldPid})...`);
       process.kill(oldPid, "SIGTERM");
-      // Wait for graceful shutdown (active queries get 30s to finish)
+      // Wait for graceful shutdown (active queries get 2min to finish)
       const start = Date.now();
-      while (Date.now() - start < 35_000) {
+      while (Date.now() - start < 125_000) {
         try { process.kill(oldPid, 0); } catch { break; }
       }
     } catch { /* not running, ok */ }
