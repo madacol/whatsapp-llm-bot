@@ -456,7 +456,7 @@ export async function sendBlocks(sock, chatId, source, content, options) {
         break;
       }
       case "code": {
-        if (block.language && shouldRenderAsImage(block.language, block.code)) {
+        if (block.language && (block.caption || shouldRenderAsImage(block.language, block.code))) {
           try {
             const images = await renderCodeToImages(block.code, block.language);
             const codeCaption = block.caption

@@ -108,7 +108,7 @@ async function displayToolCall(toolCall, context, isDebug, formatToolCall) {
   const name = toolCall.name;
   if ((name === "Edit" || name === "Write") && typeof args.file_path === "string") {
     const lang = langFromPath(args.file_path);
-    const header = `*${name}*\n\`\`\`${args.file_path}\`\`\``;
+    const header = `*${name}*  \`${args.file_path}\``;
     /** @type {ToolContentBlock[]} */
     const blocks = [];
     if (name === "Edit" && typeof args.old_string === "string" && typeof args.new_string === "string" && lang) {
