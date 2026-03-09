@@ -15,7 +15,7 @@ export default [
 
   async function deactivates_persona_with_off(action_fn, db) {
     await db.sql`INSERT INTO chats(chat_id) VALUES ('persona-off') ON CONFLICT DO NOTHING`;
-    await db.query(`UPDATE chats SET active_persona = 'test' WHERE chat_id = 'persona-off'`);
+    await db.sql`UPDATE chats SET active_persona = 'test' WHERE chat_id = 'persona-off'`;
     const result = await action_fn(
       { chatId: "persona-off", rootDb: db },
       { name: "off" },

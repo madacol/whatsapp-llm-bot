@@ -22,7 +22,7 @@
  * @param {PGlite} db
  */
 export async function initPendingConfirmationsTable(db) {
-  await db.query(`
+  await db.sql`
     CREATE TABLE IF NOT EXISTS pending_confirmations (
       id SERIAL PRIMARY KEY,
       chat_id TEXT NOT NULL,
@@ -34,7 +34,7 @@ export async function initPendingConfirmationsTable(db) {
       sender_ids TEXT[] NOT NULL DEFAULT '{}',
       created_at TIMESTAMPTZ DEFAULT NOW()
     )
-  `);
+  `;
 }
 
 /**
@@ -54,18 +54,17 @@ export async function initPendingConfirmationsTable(db) {
 export async function savePendingConfirmation(db, {
   chatId, msgKeyId, msgKeyRemoteJid, actionName, actionParams, toolCallId, senderIds,
 }) {
-  await db.query(
-    `INSERT INTO pending_confirmations
-       (chat_id, msg_key_id, msg_key_remote_jid, action_name, action_params, tool_call_id, sender_ids)
-     VALUES ($1, $2, $3, $4, $5, $6, $7)
-     ON CONFLICT (msg_key_id) DO UPDATE SET
-       action_name = EXCLUDED.action_name,
-       action_params = EXCLUDED.action_params,
-       tool_call_id = EXCLUDED.tool_call_id,
-       sender_ids = EXCLUDED.sender_ids,
-       created_at = NOW()`,
-    [chatId, msgKeyId, msgKeyRemoteJid, actionName, JSON.stringify(actionParams), toolCallId, senderIds],
-  );
+  await db.sql`
+    INSERT INTO pending_confirmations
+      (chat_id, msg_key_id, msg_key_remote_jid, action_name, action_params, tool_call_id, sender_ids)
+    VALUES (${chatId}, ${msgKeyId}, ${msgKeyRemoteJid}, ${actionName}, ${JSON.stringify(actionParams)}::jsonb, ${toolCallId}, ${senderIds})
+    ON CONFLICT (msg_key_id) DO UPDATE SET
+      action_name = EXCLUDED.action_name,
+      action_params = EXCLUDED.action_params,
+      tool_call_id = EXCLUDED.tool_call_id,
+      sender_ids = EXCLUDED.sender_ids,
+      created_at = NOW()
+  `;
 }
 
 /**
@@ -74,10 +73,7 @@ export async function savePendingConfirmation(db, {
  * @param {string} msgKeyId
  */
 export async function deletePendingConfirmation(db, msgKeyId) {
-  await db.query(
-    `DELETE FROM pending_confirmations WHERE msg_key_id = $1`,
-    [msgKeyId],
-  );
+  await db.sql`DELETE FROM pending_confirmations WHERE msg_key_id = ${msgKeyId}`;
 }
 
 /**
@@ -86,6 +82,6 @@ export async function deletePendingConfirmation(db, msgKeyId) {
  * @returns {Promise<PendingConfirmationRow[]>}
  */
 export async function loadPendingConfirmations(db) {
-  const { rows } = await db.query(`SELECT * FROM pending_confirmations ORDER BY created_at ASC`);
+  const { rows } = await db.sql`SELECT * FROM pending_confirmations ORDER BY created_at ASC`;
   return /** @type {PendingConfirmationRow[]} */ (rows);
 }
