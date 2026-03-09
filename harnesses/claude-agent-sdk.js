@@ -247,7 +247,7 @@ export function createClaudeAgentSdkHarness() {
       const queryOptions = {
         systemPrompt: fullSystemPrompt,
         maxTurns: maxDepth ?? 50,
-        cwd: cwd || process.cwd(),
+        cwd: cwd ?? process.cwd(),
         settingSources: ["project"],
         permissionMode: "bypassPermissions",
         allowDangerouslySkipPermissions: true,

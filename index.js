@@ -7,7 +7,7 @@ import fs from "node:fs";
 import { getActions, executeAction, getChatActions, getChatAction, getAction } from "./actions.js";
 import config from "./config.js";
 import { createLlmClient } from "./llm.js";
-import { formatTime, isHtmlContent, createToolMessage } from "./utils.js";
+import { formatTime, isHtmlContent, createToolMessage, formatRelativeTime, getChatWorkDir } from "./utils.js";
 import { connectToWhatsApp, sendBlocks } from "./whatsapp-adapter.js";
 import { startReminderDaemon } from "./reminder-daemon.js";
 import { startModelsCacheDaemon } from "./models-cache.js";
@@ -47,6 +47,15 @@ const log = createLogger("index");
  */
 function hasCommand(a) {
   return typeof a.command === "string";
+}
+
+/**
+ * Type guard: checks that a content block is a text block.
+ * @param {IncomingContentBlock} block
+ * @returns {block is TextContentBlock}
+ */
+function isTextBlock(block) {
+  return block.type === "text";
 }
 
 /**
@@ -113,6 +122,27 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
    * @type {Map<string, (text: string) => void>}
    */
   const pendingUserResponses = new Map();
+
+  /**
+   * Wait for a user response on a given chat, with a timeout.
+   * Registers a resolver in `pendingUserResponses` that will be triggered
+   * by the next incoming message or poll vote for this chat.
+   * @param {string} chatId
+   * @param {(text: string) => string} [transform] - Optional transform applied to the raw response before resolving.
+   * @returns {Promise<string>} The user's response text, or "" on timeout.
+   */
+  function waitForUserResponse(chatId, transform) {
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => {
+        pendingUserResponses.delete(chatId);
+        resolve("");
+      }, ASK_USER_TIMEOUT_MS);
+      pendingUserResponses.set(chatId, (text) => {
+        clearTimeout(timer);
+        resolve(transform ? transform(text) : text);
+      });
+    });
+  }
 
 
 
@@ -229,25 +259,13 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
         const recentFirst = [...history].reverse().slice(0, 11);
         const cancelLabel = "Cancel";
         const pollOptions = recentFirst.map((entry, i) => {
-          const agoMs = Date.now() - new Date(entry.cleared_at).getTime();
-          const agoMin = Math.round(agoMs / 60_000);
-          const agoStr = agoMin < 60 ? `${agoMin}m ago` : agoMin < 1440 ? `${Math.round(agoMin / 60)}h ago` : `${Math.round(agoMin / 1440)}d ago`;
-          return `Session ${i + 1} (${agoStr})`;
+          return `Session ${i + 1} (${formatRelativeTime(Date.now() - new Date(entry.cleared_at).getTime())})`;
         });
         pollOptions.push(cancelLabel);
 
         // Send poll and wait for user choice
         await context.sendPoll("Which session to resume?", pollOptions, 1);
-        const choice = await new Promise((resolve) => {
-          const timer = setTimeout(() => {
-            pendingUserResponses.delete(chatId);
-            resolve("");
-          }, ASK_USER_TIMEOUT_MS);
-          pendingUserResponses.set(chatId, (text) => {
-            clearTimeout(timer);
-            resolve(text);
-          });
-        });
+        const choice = await waitForUserResponse(chatId);
 
         if (!choice || choice === cancelLabel) {
           await context.reply("tool-result", "Resume cancelled.");
@@ -267,11 +285,8 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
           await context.reply("tool-result", "Failed to restore session.");
           return true;
         }
-        const clearedAt = new Date(restored.cleared_at);
-        const restoredAgoMs = Date.now() - clearedAt.getTime();
-        const restoredAgoMin = Math.round(restoredAgoMs / 60_000);
-        const restoredAgoStr = restoredAgoMin < 60 ? `${restoredAgoMin}m` : restoredAgoMin < 1440 ? `${Math.round(restoredAgoMin / 60)}h` : `${Math.round(restoredAgoMin / 1440)}d`;
-        await context.reply("tool-result", `Session restored (cleared ${restoredAgoStr} ago). Your next message will continue that conversation.`);
+        const agoStr = formatRelativeTime(Date.now() - new Date(restored.cleared_at).getTime());
+        await context.reply("tool-result", `Session restored (cleared ${agoStr}). Your next message will continue that conversation.`);
         return true;
       }
       default:
@@ -423,17 +438,8 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
         });
 
         await context.sendPoll(question || "Choose an option:", pollOptions, 1);
-        return new Promise((resolve) => {
-          const timer = setTimeout(() => {
-            pendingUserResponses.delete(chatId);
-            resolve("");
-          }, ASK_USER_TIMEOUT_MS);
-          pendingUserResponses.set(chatId, (text) => {
-            clearTimeout(timer);
-            // Map enriched label back to original label
-            resolve(labelMap.get(text) ?? text);
-          });
-        });
+        // Map enriched label back to original label
+        return waitForUserResponse(chatId, (text) => labelMap.get(text) ?? text);
       },
       onToolCall: (toolCall, fmt) => displayToolCall(toolCall, context, isDebug, fmt),
       onToolResult: (blocks, name, perms) => displayToolResult(blocks, name, perms, context, isDebug),
@@ -450,7 +456,7 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
     // harness already resolved above (before injection check)
     await messageContext.sendPresenceUpdate("composing");
     try {
-      await harness.processLlmResponse({ session, llmConfig, messages: preparedMessages, mediaRegistry, hooks, cwd: chatInfo?.harness_cwd ?? undefined });
+      await harness.processLlmResponse({ session, llmConfig, messages: preparedMessages, mediaRegistry, hooks, cwd: getChatWorkDir(chatId, chatInfo?.harness_cwd) });
     } catch (error) {
       log.error(error);
       const errorMessage = error instanceof Error ? error.message : JSON.stringify(error, null, 2);
@@ -500,7 +506,7 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
       return getAction(name);
     };
 
-    const firstBlock = content.find(block=>block.type === "text")
+    const firstBlock = content.find(isTextBlock)
 
     if (firstBlock?.text?.startsWith("!")) {
       return handleCommandMessage({ chatId, senderIds, content, firstBlock, chatInfo, context, actions, actionResolver });
@@ -509,12 +515,12 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
     // Slash commands: harness-level commands handled at the bot level.
     // /clear resets the SDK session; other /commands are passed to the SDK as prompts.
     const isSlashCommand = firstBlock?.text?.startsWith("/");
-    if (isSlashCommand) {
+    if (isSlashCommand && firstBlock) {
       if (!chatInfo?.is_enabled) {
         await context.reply("error", "Bot is not enabled in this chat. Use !config enabled true");
         return;
       }
-      const slashCmd = /** @type {TextContentBlock} */ (firstBlock).text.slice(1).trim().toLowerCase();
+      const slashCmd = firstBlock.text.slice(1).trim().toLowerCase();
       const handled = await handleSlashCommand(slashCmd, chatId, chatInfo, context);
       if (handled) return;
       // Not a built-in slash command — fall through to LLM as a skill invocation
