@@ -294,7 +294,8 @@ export function createClaudeAgentSdkHarness() {
 
         for (const q of questions) {
           const optionLabels = q.options.map(o => o.label);
-          const userChoice = await hooks.onAskUser(q.question, optionLabels, q.header);
+          const optionDescriptions = q.options.map(o => o.description ?? "");
+          const userChoice = await hooks.onAskUser(q.question, optionLabels, q.header, optionDescriptions);
 
           // Use the user's choice, or fall back to the first option on timeout
           answers[q.question] = userChoice || optionLabels[0];
