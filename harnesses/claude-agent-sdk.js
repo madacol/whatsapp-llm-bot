@@ -3,7 +3,7 @@
  *
  * All SDK built-in tools are enabled (Read, Write, Edit, Bash, Glob, Grep, WebSearch, WebFetch).
  * Custom bot actions are exposed as Skills (SKILL.md files) rather than MCP tools.
- * Conversation history and chat-specific actions are embedded in the system prompt.
+ * Chat-specific actions are embedded in the system prompt.
  *
  * Supports mid-conversation message injection via streamInput() and cancellation via AbortController.
  * Clarifying questions (AskUserQuestion) are handled via the canUseTool callback.
@@ -14,7 +14,7 @@ import { randomUUID } from "node:crypto";
 import { NO_OP_HOOKS } from "./native.js";
 import { getChatActions } from "../actions.js";
 import { createLogger } from "../logger.js";
-import { formatConversationHistory, extractLastUserText } from "../message-formatting.js";
+import { extractLastUserText } from "../message-formatting.js";
 
 const log = createLogger("harness:claude-agent-sdk");
 
@@ -23,17 +23,14 @@ const log = createLogger("harness:claude-agent-sdk");
  * - Base system prompt from llmConfig
  * - Chat ID and runtime context
  * - DB paths
- * - Conversation history (skipped when resuming — the SDK session already has it)
  * - Chat-specific action descriptions
  *
  * @param {LlmConfig} llmConfig
- * @param {Message[]} messages
  * @param {string} chatId
  * @param {string[]} senderIds
- * @param {{ resuming: boolean }} opts
  * @returns {Promise<string>}
  */
-async function buildSystemPrompt(llmConfig, messages, chatId, senderIds, { resuming }) {
+async function buildSystemPrompt(llmConfig, chatId, senderIds) {
   let prompt = llmConfig.systemPrompt;
 
   prompt += `\n\n## Runtime Context
@@ -42,15 +39,6 @@ async function buildSystemPrompt(llmConfig, messages, chatId, senderIds, { resum
 - PGlite root database: ./pgdata/root
 - PGlite chat database: ./pgdata/${chatId}
 - Action databases: ./pgdata/${chatId}/<action_name>/`;
-
-  // When resuming, the SDK session already has the conversation history.
-  // Only embed history for new sessions.
-  if (!resuming) {
-    const history = formatConversationHistory(messages);
-    if (history) {
-      prompt += `\n\n## Conversation History\n${history}`;
-    }
-  }
 
   // CLAUDE.md is loaded automatically by the SDK via settingSources: ["project"]
 
@@ -197,9 +185,8 @@ export function createClaudeAgentSdkHarness() {
     });
 
     const existingSessionId = session.sdkSessionId ?? null;
-    const resuming = !!existingSessionId;
 
-    const fullSystemPrompt = await buildSystemPrompt(llmConfig, messages, session.chatId, session.senderIds, { resuming });
+    const fullSystemPrompt = await buildSystemPrompt(llmConfig, session.chatId, session.senderIds);
 
     /** @type {string | null} */
     let resolvedSessionId = null;
