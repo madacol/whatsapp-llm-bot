@@ -617,6 +617,49 @@ export default [
         assert.ok(result.includes("not found") || result.includes("nvalid") || result.includes("error"), `Expected rejection, got: ${result}`);
       });
     },
+    // ── harness_cwd ──
+    async function rejects_nonexistent_harness_cwd(action_fn, db) {
+      await db.sql`INSERT INTO chats(chat_id) VALUES ('cs-cwd-1') ON CONFLICT DO NOTHING`;
+      const result = await action_fn(
+        { chatId: "cs-cwd-1", rootDb: db },
+        { setting: "harness_cwd", value: "/home/mada/totally_nonexistent_path_xyz" },
+      );
+      assert.ok(result.includes("does not exist"), `Expected rejection, got: ${result}`);
+      // Should not have been saved
+      const { rows: [chat] } = await db.sql`SELECT harness_cwd FROM chats WHERE chat_id = 'cs-cwd-1'`;
+      assert.equal(chat.harness_cwd, null);
+    },
+    async function suggests_similar_paths_for_bad_cwd(action_fn, db) {
+      await db.sql`INSERT INTO chats(chat_id) VALUES ('cs-cwd-2') ON CONFLICT DO NOTHING`;
+      // /home exists and has subdirectories, so suggestions should appear
+      const result = await action_fn(
+        { chatId: "cs-cwd-2", rootDb: db },
+        { setting: "harness_cwd", value: "/home/nonexistent_user_xyz" },
+      );
+      assert.ok(result.includes("does not exist"), `Expected rejection, got: ${result}`);
+      assert.ok(result.includes("Did you mean"), `Expected suggestions, got: ${result}`);
+    },
+    async function accepts_valid_harness_cwd(action_fn, db) {
+      await db.sql`INSERT INTO chats(chat_id) VALUES ('cs-cwd-3') ON CONFLICT DO NOTHING`;
+      const result = await action_fn(
+        { chatId: "cs-cwd-3", rootDb: db },
+        { setting: "harness_cwd", value: "/tmp" },
+      );
+      assert.ok(result.includes("set to"), `Expected success, got: ${result}`);
+      const { rows: [chat] } = await db.sql`SELECT harness_cwd FROM chats WHERE chat_id = 'cs-cwd-3'`;
+      assert.equal(chat.harness_cwd, "/tmp");
+    },
+    async function clears_harness_cwd(action_fn, db) {
+      await db.sql`INSERT INTO chats(chat_id, harness_cwd) VALUES ('cs-cwd-4', '/tmp') ON CONFLICT DO NOTHING`;
+      const result = await action_fn(
+        { chatId: "cs-cwd-4", rootDb: db },
+        { setting: "harness_cwd", value: "" },
+      );
+      assert.ok(result.includes("cleared"), `Expected cleared, got: ${result}`);
+      const { rows: [chat] } = await db.sql`SELECT harness_cwd FROM chats WHERE chat_id = 'cs-cwd-4'`;
+      assert.equal(chat.harness_cwd, null);
+    },
+
     async function info_shows_role_overrides(action_fn, db) {
       await db.sql`INSERT INTO chats(chat_id) VALUES ('cs-role-7') ON CONFLICT DO NOTHING`;
       await db.sql`UPDATE chats SET model_roles = '{"coding":"deepseek/coder","fast":"gpt-4o-mini"}'::jsonb WHERE chat_id = 'cs-role-7'`;

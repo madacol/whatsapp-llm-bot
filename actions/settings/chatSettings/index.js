@@ -1,3 +1,5 @@
+import { existsSync, readdirSync } from "node:fs";
+import { dirname, basename, resolve } from "node:path";
 import config from "../../../config.js";
 import { validateModel, getModelModalities } from "../../../models-cache.js";
 import { getChatOrThrow } from "../../../store.js";
@@ -371,6 +373,39 @@ async function setSetting(rootDb, chatId, setting, value, extra) {
     case "harness_cwd": {
       const trimmed = value.trim();
       const cwdValue = trimmed.length === 0 ? null : trimmed;
+
+      if (cwdValue && !existsSync(cwdValue)) {
+        const parent = dirname(resolve(cwdValue));
+        const target = basename(cwdValue);
+        /** @type {string[]} */
+        let suggestions = [];
+        if (existsSync(parent)) {
+          try {
+            suggestions = readdirSync(parent, { withFileTypes: true })
+              .filter((d) => d.isDirectory())
+              .map((d) => `${parent}/${d.name}`)
+              .filter((p) => p !== cwdValue)
+              .sort((a, b) => {
+                // Rank by similarity to the target name
+                const aName = basename(a).toLowerCase();
+                const bName = basename(b).toLowerCase();
+                const t = target.toLowerCase();
+                const aMatch = aName.includes(t) || t.includes(aName) ? 1 : 0;
+                const bMatch = bName.includes(t) || t.includes(bName) ? 1 : 0;
+                return bMatch - aMatch;
+              })
+              .slice(0, 5);
+          } catch { /* ignore permission errors */ }
+        }
+        let msg = `Path \`${cwdValue}\` does not exist.`;
+        if (suggestions.length > 0) {
+          msg += `\n\nDid you mean one of these?\n${suggestions.map((s) => `• \`${s}\``).join("\n")}`;
+        } else {
+          msg += `\nThe parent directory \`${parent}\` ${existsSync(parent) ? "exists but is empty" : "does not exist either"}.`;
+        }
+        return msg;
+      }
+
       await rootDb.sql`UPDATE chats SET harness_cwd = ${cwdValue} WHERE chat_id = ${chatId}`;
       return cwdValue
         ? `Harness CWD set to \`${cwdValue}\``
