@@ -286,15 +286,16 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
    * @param {Action[]} opts.actions
    * @param {(name: string) => Promise<AppAction | null>} opts.actionResolver
    * @param {TextContentBlock | undefined} opts.firstBlock
+   * @param {boolean} [opts.isSlashCommand]
    */
-  async function handleLlmMessage({ messageContext, chatInfo, isDebug, context, actions, actionResolver, firstBlock }) {
+  async function handleLlmMessage({ messageContext, chatInfo, isDebug, context, actions, actionResolver, firstBlock, isSlashCommand }) {
     const { chatId, senderIds, content, isGroup, senderName, selfIds, quotedSenderId } = messageContext;
 
     // Use data from message context
     const time = formatTime(messageContext.timestamp);
 
-    // Check shouldRespond BEFORE formatting (formatting strips @mentions)
-    const willRespond = shouldRespond(chatInfo, isGroup, content, selfIds, quotedSenderId);
+    // Slash commands always get a response; regular messages check shouldRespond
+    const willRespond = isSlashCommand || shouldRespond(chatInfo, isGroup, content, selfIds, quotedSenderId);
 
     // Format user message text (timestamp, sender name, mention stripping)
     /** @type {string} */
@@ -491,7 +492,15 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
       return handleCommandMessage({ chatId, senderIds, content, firstBlock, chatInfo, context, actions, actionResolver });
     }
 
-    return handleLlmMessage({ messageContext, chatInfo, isDebug, context, actions, actionResolver, firstBlock });
+    // Slash commands (e.g. /commit, /review-pr) are explicit bot invocations
+    // routed to the SDK harness as skill invocations — bypass shouldRespond
+    const isSlashCommand = firstBlock?.text?.startsWith("/");
+    if (isSlashCommand && !chatInfo?.is_enabled) {
+      await context.reply("error", "Bot is not enabled in this chat. Use !config enabled true");
+      return;
+    }
+
+    return handleLlmMessage({ messageContext, chatInfo, isDebug, context, actions, actionResolver, firstBlock, isSlashCommand: !!isSlashCommand });
   }
 
   /**
