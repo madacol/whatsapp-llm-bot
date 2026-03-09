@@ -3,6 +3,7 @@
 node_modules
 *.db
 pgdata
+workspaces
 *.bck
 *.bck.js
 .env

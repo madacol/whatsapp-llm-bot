@@ -4,6 +4,7 @@ import { createSilentActionContext } from "./execute-action-context.js";
 import { resolveChatModel } from "./model-roles.js";
 import { getRootDb } from "./db.js";
 import { createLogger } from "./logger.js";
+import { getChatWorkDir } from "./utils.js";
 
 const log = createLogger("agent-runner");
 
@@ -131,17 +132,17 @@ export async function runAgent(options) {
     hooks: userHooks,
     maxDepth: agent.maxDepth,
     agentDepth: agentDepth + 1,
+    cwd: getChatWorkDir(session.chatId),
   });
 
   // Persist the run to agent_runs table
   if (parentToolCallId) {
     try {
       const rootDb = getRootDb();
-      await rootDb.query(
-        `INSERT INTO agent_runs (chat_id, parent_tool_call_id, agent_name, messages, usage)
-         VALUES ($1, $2, $3, $4, $5)`,
-        [chatId, parentToolCallId, agent.name, JSON.stringify(result.messages), JSON.stringify(result.usage)],
-      );
+      const messagesJson = JSON.stringify(result.messages);
+      const usageJson = JSON.stringify(result.usage);
+      await rootDb.sql`INSERT INTO agent_runs (chat_id, parent_tool_call_id, agent_name, messages, usage)
+         VALUES (${chatId}, ${parentToolCallId}, ${agent.name}, ${messagesJson}, ${usageJson})`;
     } catch (err) {
       log.error("Failed to persist agent run:", err);
     }
