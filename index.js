@@ -86,6 +86,59 @@ function langFromPath(filePath) {
 }
 
 /**
+ * Format SDK built-in tool calls (Read, Grep, Glob, WebSearch, WebFetch, Agent)
+ * into compact, human-friendly strings. Returns null for unknown tools.
+ * @param {string} name
+ * @param {Record<string, unknown>} args
+ * @returns {string | null}
+ */
+function formatSdkToolCall(name, args) {
+  switch (name) {
+    case "Read": {
+      const path = typeof args.file_path === "string" ? args.file_path : null;
+      if (!path) return null;
+      let label = `*Read*  \`${path}\``;
+      if (typeof args.offset === "number" || typeof args.limit === "number") {
+        const parts = [];
+        if (typeof args.offset === "number") parts.push(`from L${args.offset}`);
+        if (typeof args.limit === "number") parts.push(`${args.limit} lines`);
+        label += `  _${parts.join(", ")}_`;
+      }
+      return label;
+    }
+    case "Grep": {
+      const pattern = typeof args.pattern === "string" ? args.pattern : null;
+      if (!pattern) return null;
+      let label = `*Grep*  \`${pattern}\``;
+      if (typeof args.path === "string") label += `  in \`${args.path}\``;
+      if (typeof args.glob === "string") label += `  (${args.glob})`;
+      return label;
+    }
+    case "Glob": {
+      const pattern = typeof args.pattern === "string" ? args.pattern : null;
+      if (!pattern) return null;
+      let label = `*Glob*  \`${pattern}\``;
+      if (typeof args.path === "string") label += `  in \`${args.path}\``;
+      return label;
+    }
+    case "WebSearch": {
+      const q = typeof args.query === "string" ? args.query : null;
+      return q ? `*Search*  _${q}_` : null;
+    }
+    case "WebFetch": {
+      const url = typeof args.url === "string" ? args.url : null;
+      return url ? `*Fetch*  ${url}` : null;
+    }
+    case "Agent": {
+      const desc = typeof args.description === "string" ? args.description : null;
+      return desc ? `*Agent*  _${desc}_` : null;
+    }
+    default:
+      return null;
+  }
+}
+
+/**
  * Reformat a bash command for visual display: break at pipes and connectors
  * so each stage starts on its own line (with 2-space indent for continuation).
  * Only reformats single-line commands; multi-line commands are left as-is.
@@ -143,6 +196,12 @@ async function displayToolCall(toolCall, context, isDebug, formatToolCall) {
     return context.send("tool-call", [
       { type: "code", code: formatted, language: "bash", ...(caption && { caption }) },
     ]);
+  }
+
+  // SDK built-in tools: compact, human-friendly display
+  const sdkDisplay = formatSdkToolCall(name, args);
+  if (sdkDisplay) {
+    return context.send("tool-call", sdkDisplay);
   }
 
   // For Edit/Write tool calls, render the code content as a syntax-highlighted image
