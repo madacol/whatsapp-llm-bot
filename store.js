@@ -23,6 +23,7 @@ const log = createLogger("store");
  *   active_persona: string | null;
  *   harness: string | null;
  *   harness_cwd: string | null;
+ *   sdk_session_id: string | null;
  *   timestamp: string;
  * }} ChatRow
  *
@@ -103,6 +104,7 @@ export async function initStore(injectedDb){
         db.sql`ALTER TABLE chats ADD COLUMN IF NOT EXISTS active_persona TEXT`,
         db.sql`ALTER TABLE chats ADD COLUMN IF NOT EXISTS harness TEXT`,
         db.sql`ALTER TABLE chats ADD COLUMN IF NOT EXISTS harness_cwd TEXT`,
+        db.sql`ALTER TABLE chats ADD COLUMN IF NOT EXISTS sdk_session_id TEXT`,
         db.sql`ALTER TABLE messages ADD COLUMN IF NOT EXISTS exchange_text TEXT`,
         db.sql`ALTER TABLE messages ADD COLUMN IF NOT EXISTS llm_context JSONB`,
       ]);
@@ -229,6 +231,15 @@ export async function initStore(injectedDb){
             AND message_data->>'tool_id' = ${toolCallId}
           RETURNING *`;
         return row ? /** @type {MessageRow} */ (row) : null;
+      },
+
+      /**
+       * Update the SDK session ID for a chat (used by claude-agent-sdk harness for session resumption).
+       * @param {ChatRow['chat_id']} chatId
+       * @param {string | null} sessionId
+       */
+      async updateSdkSessionId (chatId, sessionId) {
+        await db.sql`UPDATE chats SET sdk_session_id = ${sessionId} WHERE chat_id = ${chatId}`;
       },
     }
 }

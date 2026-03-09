@@ -6,6 +6,7 @@ import {
   formatUserMessage,
   parseCommandArgs,
   prepareMessages,
+  parseStructuredQuestion,
 } from "../message-formatting.js";
 
 // ── actionsToToolDefinitions ──
@@ -594,5 +595,76 @@ describe("prepareMessages", () => {
 
     assert.equal(mediaRegistry.size, 1);
     assert.equal(mediaRegistry.get(1).data, "quotedImg");
+  });
+});
+
+// ── parseStructuredQuestion ──
+
+describe("parseStructuredQuestion", () => {
+  it("returns null for plain text without questions", () => {
+    assert.equal(parseStructuredQuestion("Hello, how are you doing today."), null);
+  });
+
+  it("detects numbered list options", () => {
+    const text = "Which do you prefer:\n1. Option A\n2. Option B\n3. Option C";
+    const result = parseStructuredQuestion(text);
+    assert.ok(result);
+    assert.deepEqual(result.options, ["Option A", "Option B", "Option C"]);
+    assert.equal(result.question, "Which do you prefer:");
+  });
+
+  it("detects bulleted list options", () => {
+    const text = "Here are the choices:\n- Alpha\n- Beta\n- Gamma";
+    const result = parseStructuredQuestion(text);
+    assert.ok(result);
+    assert.deepEqual(result.options, ["Alpha", "Beta", "Gamma"]);
+  });
+
+  it("detects inline or-options in a question", () => {
+    const text = "Would you prefer dark mode or light mode?";
+    const result = parseStructuredQuestion(text);
+    assert.ok(result);
+    assert.equal(result.options.length, 2);
+    assert.ok(result.options.some(o => o.includes("dark")));
+    assert.ok(result.options.some(o => o.includes("light")));
+  });
+
+  it("detects yes/no confirmation questions", () => {
+    const text = "I've made the changes. Would you like me to commit them?";
+    const result = parseStructuredQuestion(text);
+    assert.ok(result);
+    assert.deepEqual(result.options, ["Yes", "No"]);
+    assert.ok(result.question.includes("Would you like"));
+  });
+
+  it("extracts preamble before list", () => {
+    const text = "I found several issues.\n\nWhich should I fix?\n1. Bug A\n2. Bug B";
+    const result = parseStructuredQuestion(text);
+    assert.ok(result);
+    assert.ok(result.preamble.includes("I found several issues."));
+    assert.deepEqual(result.options, ["Bug A", "Bug B"]);
+  });
+
+  it("returns null for a single-item list", () => {
+    const text = "Here is the result:\n1. Only one thing";
+    assert.equal(parseStructuredQuestion(text), null);
+  });
+
+  it("returns null for lists with more than 10 items", () => {
+    const items = Array.from({ length: 11 }, (_, i) => `${i + 1}. Item ${i + 1}`).join("\n");
+    const text = `Pick one:\n${items}`;
+    assert.equal(parseStructuredQuestion(text), null);
+  });
+
+  it("detects 'Should I proceed?' as yes/no", () => {
+    const text = "All tests pass. Should I proceed?";
+    const result = parseStructuredQuestion(text);
+    assert.ok(result);
+    assert.deepEqual(result.options, ["Yes", "No"]);
+  });
+
+  it("returns null for rhetorical questions without patterns", () => {
+    const text = "What a great day, isn't it?";
+    assert.equal(parseStructuredQuestion(text), null);
   });
 });

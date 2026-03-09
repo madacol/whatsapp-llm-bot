@@ -13,7 +13,7 @@ import { randomUUID } from "node:crypto";
 import { NO_OP_HOOKS } from "./native.js";
 import { getChatActions } from "../actions.js";
 import { createLogger } from "../logger.js";
-import { formatConversationHistory, extractLastUserText } from "../message-formatting.js";
+import { formatConversationHistory, extractLastUserText, parseStructuredQuestion } from "../message-formatting.js";
 
 const log = createLogger("harness:claude-agent-sdk");
 
@@ -22,16 +22,17 @@ const log = createLogger("harness:claude-agent-sdk");
  * - Base system prompt from llmConfig
  * - Chat ID and runtime context
  * - DB paths
- * - Conversation history
+ * - Conversation history (skipped when resuming — the SDK session already has it)
  * - Chat-specific action descriptions
  *
  * @param {LlmConfig} llmConfig
  * @param {Message[]} messages
  * @param {string} chatId
  * @param {string[]} senderIds
+ * @param {{ resuming: boolean }} opts
  * @returns {Promise<string>}
  */
-async function buildSystemPrompt(llmConfig, messages, chatId, senderIds) {
+async function buildSystemPrompt(llmConfig, messages, chatId, senderIds, { resuming }) {
   let prompt = llmConfig.systemPrompt;
 
   prompt += `\n\n## Runtime Context
@@ -41,10 +42,13 @@ async function buildSystemPrompt(llmConfig, messages, chatId, senderIds) {
 - PGlite chat database: ./pgdata/${chatId}
 - Action databases: ./pgdata/${chatId}/<action_name>/`;
 
-  // Embed conversation history
-  const history = formatConversationHistory(messages);
-  if (history) {
-    prompt += `\n\n## Conversation History\n${history}`;
+  // When resuming, the SDK session already has the conversation history.
+  // Only embed history for new sessions.
+  if (!resuming) {
+    const history = formatConversationHistory(messages);
+    if (history) {
+      prompt += `\n\n## Conversation History\n${history}`;
+    }
   }
 
   // Instruction to read CLAUDE.md when programming the bot
@@ -137,10 +141,26 @@ export function createClaudeAgentSdkHarness() {
    * @returns {Promise<AgentResult>}
    */
   async function processLlmResponse({ session, llmConfig, messages, hooks: userHooks, maxDepth, cwd }) {
-    /** @type {Required<AgentIOHooks>} */
-    const hooks = { ...NO_OP_HOOKS, ...userHooks };
+    const rawHooks = { ...NO_OP_HOOKS, ...userHooks };
 
-    const fullSystemPrompt = await buildSystemPrompt(llmConfig, messages, session.chatId, session.senderIds);
+    // Wrap every hook so that a WhatsApp send failure (e.g. "Connection Closed")
+    // doesn't kill the entire SDK query loop. The SDK query is expensive and should
+    // continue processing even if a hook can't deliver its output right now.
+    /** @type {Required<AgentIOHooks>} */
+    const hooks = /** @type {Required<AgentIOHooks>} */ (Object.fromEntries(
+      Object.entries(rawHooks).map(([key, fn]) => [
+        key,
+        /** @param {any[]} args */
+        async (...args) => {
+          try {
+            return await /** @type {Function} */ (fn)(...args);
+          } catch (err) {
+            log.warn(`Hook "${key}" failed (suppressed):`, err instanceof Error ? err.message : err);
+          }
+        },
+      ]),
+    ));
+
     const lastUserText = extractLastUserText(messages);
 
     if (!lastUserText) {
@@ -160,34 +180,62 @@ export function createClaudeAgentSdkHarness() {
     };
 
     const abortController = new AbortController();
-    const sessionId = randomUUID();
+    const existingSessionId = session.sdkSessionId ?? null;
+    const resuming = !!existingSessionId;
+
+    const fullSystemPrompt = await buildSystemPrompt(llmConfig, messages, session.chatId, session.senderIds, { resuming });
+
+    /** @type {string | null} */
+    let resolvedSessionId = null;
 
     /** @type {string[]} */
     const stderrLines = [];
     try {
+      /** @type {Record<string, unknown>} */
+      const queryOptions = {
+        systemPrompt: fullSystemPrompt,
+        maxTurns: maxDepth ?? 10,
+        cwd: cwd || process.cwd(),
+        settingSources: [],
+        permissionMode: "bypassPermissions",
+        allowDangerouslySkipPermissions: true,
+        persistSession: true,
+        abortController,
+        // Don't pass llmConfig.chatModel — it's an OpenRouter model ID.
+        // The SDK uses Claude Code's own model (configurable via its own settings).
+        stderr: (/** @type {string} */ data) => {
+          stderrLines.push(data);
+          log.debug("[sdk stderr]", data.trimEnd());
+        },
+      };
+
+      // Resume the previous session if one exists for this chat
+      if (existingSessionId) {
+        queryOptions.resume = existingSessionId;
+        log.info(`Resuming SDK session ${existingSessionId} for chat ${session.chatId}`);
+      }
+
       const q = query({
         prompt: lastUserText,
-        options: {
-          systemPrompt: fullSystemPrompt,
-          maxTurns: maxDepth ?? 10,
-          cwd: cwd || process.cwd(),
-          settingSources: [],
-          permissionMode: "bypassPermissions",
-          allowDangerouslySkipPermissions: true,
-          persistSession: false,
-          abortController,
-          // Don't pass llmConfig.chatModel — it's an OpenRouter model ID.
-          // The SDK uses Claude Code's own model (configurable via its own settings).
-          stderr: (data) => {
-            stderrLines.push(data);
-            log.debug("[sdk stderr]", data.trimEnd());
-          },
-        },
+        options: /** @type {*} */ (queryOptions),
       });
 
+      // Use existing session ID for injection until we get one from the SDK
+      const sessionId = existingSessionId ?? randomUUID();
       activeQueries.set(session.chatId, { query: q, abortController, sessionId });
 
       for await (const event of q) {
+        // Always capture the latest session_id from events.
+        // When resuming, the SDK may return the same or a new session_id.
+        if ("session_id" in event && typeof event.session_id === "string") {
+          if (resolvedSessionId !== event.session_id) {
+            resolvedSessionId = event.session_id;
+            // Update the active query's sessionId for injection
+            const active = activeQueries.get(session.chatId);
+            if (active) active.sessionId = resolvedSessionId;
+          }
+        }
+
         switch (event.type) {
           case "assistant": {
             // Extract text content from the BetaMessage
@@ -195,7 +243,17 @@ export function createClaudeAgentSdkHarness() {
             if (betaMessage.content) {
               for (const block of betaMessage.content) {
                 if (block.type === "text") {
-                  await hooks.onLlmResponse(block.text);
+                  // Detect structured questions (numbered/bulleted lists) and
+                  // surface them via onAskUser so adapters can render polls, etc.
+                  const parsed = parseStructuredQuestion(block.text);
+                  if (parsed && parsed.options.length >= 2) {
+                    if (parsed.preamble) {
+                      await hooks.onLlmResponse(parsed.preamble);
+                    }
+                    await hooks.onAskUser(parsed.question, parsed.options, parsed.preamble);
+                  } else {
+                    await hooks.onLlmResponse(block.text);
+                  }
                   result.response = [{ type: "markdown", text: block.text }];
                 } else if (block.type === "tool_use") {
                   await hooks.onToolCall({
@@ -250,19 +308,45 @@ export function createClaudeAgentSdkHarness() {
       if (abortController.signal.aborted) {
         log.debug("SDK query was cancelled for chat", session.chatId);
       } else {
+        const errorMsg = err instanceof Error ? err.message : String(err);
+
+        // If resume failed (session not found / corrupt), clear the stale session ID
+        // so the next message starts fresh instead of hitting the same error.
+        if (existingSessionId && !resolvedSessionId) {
+          log.warn(`Resume failed for session ${existingSessionId}, clearing stale session ID`);
+          if (session.updateSdkSessionId) {
+            try {
+              await session.updateSdkSessionId(session.chatId, null);
+            } catch (clearErr) {
+              log.error("Failed to clear stale SDK session ID:", clearErr);
+            }
+          }
+        }
+
         log.error("Claude Agent SDK query failed:", err);
         if (stderrLines.length > 0) {
           log.error("[sdk stderr output]", stderrLines.join(""));
         }
-        let errorMsg = err instanceof Error ? err.message : String(err);
+        let displayMsg = errorMsg;
         if (errorMsg.includes("executable not found") && cwd) {
-          errorMsg += `\n\nHint: The harness_cwd is set to "${cwd}" — make sure this path exists. Use \`!config harness_cwd <path>\` to fix it.`;
+          displayMsg += `\n\nHint: The harness_cwd is set to "${cwd}" — make sure this path exists. Use \`!config harness_cwd <path>\` to fix it.`;
         }
-        await hooks.onToolError(errorMsg);
-        result.response = [{ type: "text", text: `SDK error: ${errorMsg}` }];
+        await hooks.onToolError(displayMsg);
+        result.response = [{ type: "text", text: `SDK error: ${displayMsg}` }];
       }
     } finally {
       activeQueries.delete(session.chatId);
+
+      // Persist the SDK session ID so the next message can resume the conversation.
+      // Save when: we got a session ID AND it differs from what was stored.
+      if (resolvedSessionId && resolvedSessionId !== existingSessionId && session.updateSdkSessionId) {
+        try {
+          await session.updateSdkSessionId(session.chatId, resolvedSessionId);
+          log.info(`Saved SDK session ${resolvedSessionId} for chat ${session.chatId}`);
+        } catch (err) {
+          log.error("Failed to persist SDK session ID:", err);
+        }
+      }
     }
 
     // Report usage

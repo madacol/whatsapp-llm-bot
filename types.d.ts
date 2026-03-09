@@ -263,6 +263,8 @@ type AppAction = Action & {
 
 type AgentIOHooks = {
   onLlmResponse?: (text: string) => Promise<void>;
+  /** Present a structured question to the user. `options` (if provided) are selectable choices. */
+  onAskUser?: (question: string, options: string[], preamble?: string) => Promise<void>;
   onToolCall?: (toolCall: LlmChatResponse['toolCalls'][0], formatToolCall?: (params: Record<string, any>) => string) => Promise<void>;
   onToolResult?: (blocks: ToolContentBlock[], toolName: string, permissions: PermissionFlags) => Promise<void>;
   onToolError?: (error: string) => Promise<void>;
@@ -327,6 +329,10 @@ type Session = {
   context: ExecuteActionContext;
   addMessage: import("./store.js").Store['addMessage'];
   updateToolMessage: import("./store.js").Store['updateToolMessage'];
+  /** Current SDK session ID for claude-agent-sdk harness session resumption. */
+  sdkSessionId?: string | null;
+  /** Persist the SDK session ID for future resumption. */
+  updateSdkSessionId?: import("./store.js").Store['updateSdkSessionId'];
 };
 
 type LlmConfig = {
