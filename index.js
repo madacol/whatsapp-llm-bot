@@ -33,7 +33,8 @@ import {
   loadPendingConfirmations,
   deletePendingConfirmation,
 } from "./pending-confirmations.js";
-import { resolveHarness, resolveHarnessName, registerHarness, waitForAllHarnesses, MAX_TOOL_CALL_DEPTH, parseToolArgs } from "./harnesses/index.js";
+import { resolveHarness, resolveHarnessName, registerHarness, waitForAllHarnesses, MAX_TOOL_CALL_DEPTH } from "./harnesses/index.js";
+import { formatToolCallDisplay, formatToolResultDisplay } from "./tool-display.js";
 import { createMessageActionContext, createSilentActionContext } from "./execute-action-context.js";
 import { createLogger } from "./logger.js";
 
@@ -48,229 +49,38 @@ function hasCommand(a) {
   return typeof a.command === "string";
 }
 
-/** Map file extensions to language identifiers for syntax highlighting. */
-const EXT_TO_LANG = /** @type {Record<string, string>} */ ({
-  js: "javascript", mjs: "javascript", cjs: "javascript", jsx: "jsx",
-  ts: "typescript", mts: "typescript", cts: "typescript", tsx: "tsx",
-  py: "python", rb: "ruby", rs: "rust", go: "go", java: "java",
-  kt: "kotlin", kts: "kotlin", swift: "swift", c: "c", h: "c",
-  cpp: "cpp", cc: "cpp", cxx: "cpp", hpp: "cpp", cs: "csharp",
-  php: "php", lua: "lua", r: "r", jl: "julia", scala: "scala",
-  dart: "dart", zig: "zig", nim: "nim", ex: "elixir", exs: "elixir",
-  erl: "erlang", hs: "haskell", ml: "ocaml", fs: "fsharp",
-  clj: "clojure", groovy: "groovy", pl: "perl", pm: "perl",
-  sh: "bash", bash: "bash", zsh: "zsh", fish: "fish",
-  ps1: "powershell", bat: "bat", cmd: "cmd",
-  html: "html", htm: "html", css: "css", scss: "scss", sass: "sass",
-  less: "less", xml: "xml", svg: "svg", vue: "vue", svelte: "svelte",
-  json: "json", yaml: "yaml", yml: "yaml", toml: "toml", ini: "ini",
-  sql: "sql", graphql: "graphql", proto: "protobuf",
-  dockerfile: "dockerfile", makefile: "makefile",
-  tf: "terraform", hcl: "hcl", tex: "latex",
-  md: "markdown", mdx: "mdx",
-});
-
 /**
- * Infer a syntax-highlighting language from a file path's extension.
- * @param {string} filePath
- * @returns {string}
- */
-function langFromPath(filePath) {
-  const base = filePath.split("/").pop() || "";
-  // Handle extensionless known files
-  const lower = base.toLowerCase();
-  if (lower === "dockerfile") return "dockerfile";
-  if (lower === "makefile") return "makefile";
-  const ext = base.includes(".") ? base.split(".").pop()?.toLowerCase() ?? "" : "";
-  return EXT_TO_LANG[ext] || "";
-}
-
-/**
- * Format SDK built-in tool calls (Read, Grep, Glob, WebSearch, WebFetch, Agent)
- * into compact, human-friendly strings. Returns null for unknown tools.
- * @param {string} name
- * @param {Record<string, unknown>} args
- * @returns {string | null}
- */
-function formatSdkToolCall(name, args) {
-  switch (name) {
-    case "Read": {
-      const path = typeof args.file_path === "string" ? args.file_path : null;
-      if (!path) return null;
-      let label = `*Read*  \`${path}\``;
-      if (typeof args.offset === "number" || typeof args.limit === "number") {
-        const parts = [];
-        if (typeof args.offset === "number") parts.push(`from L${args.offset}`);
-        if (typeof args.limit === "number") parts.push(`${args.limit} lines`);
-        label += `  _${parts.join(", ")}_`;
-      }
-      return label;
-    }
-    case "Grep": {
-      const pattern = typeof args.pattern === "string" ? args.pattern : null;
-      if (!pattern) return null;
-      let label = `*Grep*  \`${pattern}\``;
-      if (typeof args.path === "string") label += `  in \`${args.path}\``;
-      if (typeof args.glob === "string") label += `  (${args.glob})`;
-      return label;
-    }
-    case "Glob": {
-      const pattern = typeof args.pattern === "string" ? args.pattern : null;
-      if (!pattern) return null;
-      let label = `*Glob*  \`${pattern}\``;
-      if (typeof args.path === "string") label += `  in \`${args.path}\``;
-      return label;
-    }
-    case "WebSearch": {
-      const q = typeof args.query === "string" ? args.query : null;
-      return q ? `*Search*  _${q}_` : null;
-    }
-    case "WebFetch": {
-      const url = typeof args.url === "string" ? args.url : null;
-      return url ? `*Fetch*  ${url}` : null;
-    }
-    case "Agent": {
-      const desc = typeof args.description === "string" ? args.description : null;
-      return desc ? `*Agent*  _${desc}_` : null;
-    }
-    default:
-      return null;
-  }
-}
-
-/**
- * Reformat a bash command for visual display: break at pipes and connectors
- * so each stage starts on its own line (with 2-space indent for continuation).
- * For multi-line commands (e.g. heredocs), only the first line is split at
- * connectors; the rest is preserved as-is.
- * @param {string} command
- * @returns {string}
- */
-function formatBashCommand(command) {
-  // For multi-line commands, only reformat the first line (the rest may be
-  // heredoc content, multi-line strings, etc. that shouldn't be touched).
-  const newlineIdx = command.indexOf("\n");
-  const firstLine = newlineIdx === -1 ? command : command.slice(0, newlineIdx);
-  const rest = newlineIdx === -1 ? "" : command.slice(newlineIdx);
-
-  // Split at pipe/connector boundaries, keeping the delimiter at the start of each new line.
-  // Matches: |, ||, &&, ; (but not inside quotes)
-  const parts = firstLine.split(/\s+(\|{1,2}|&&|;)\s+/);
-
-  // If no splits happened, return as-is
-  if (parts.length <= 1) return command;
-
-  // Reassemble: first segment, then each connector + segment on a new indented line
-  let result = parts[0];
-  for (let i = 1; i < parts.length; i += 2) {
-    const connector = parts[i];
-    const segment = parts[i + 1] ?? "";
-    result += `\n  ${connector} ${segment}`;
-  }
-  return result + rest;
-}
-
-/**
- * Display a tool call to the user — renders Edit/Write code as images.
+ * Display a tool call to the user using the pure formatter.
  * @param {LlmChatResponse['toolCalls'][0]} toolCall
  * @param {Pick<ExecuteActionContext, "send">} context
  * @param {boolean} isDebug
- * @param {((params: Record<string, any>) => string)} [formatToolCall]
+ * @param {((params: Record<string, any>) => string)} [actionFormatter]
  * @returns {Promise<MessageEditor | undefined>}
  */
-async function displayToolCall(toolCall, context, isDebug, formatToolCall) {
-  const args = parseToolArgs(toolCall.arguments);
-
-  // Non-debug: show only the description when available
-  if (!isDebug) {
-    const description = typeof args.description === "string" ? args.description : null;
-    if (description) {
-      return context.send("tool-call", description);
-    }
+async function displayToolCall(toolCall, context, isDebug, actionFormatter) {
+  const content = formatToolCallDisplay(toolCall, isDebug, actionFormatter);
+  if (content != null) {
+    return context.send("tool-call", content);
   }
-
-  const name = toolCall.name;
-
-  // Bash tool: render command as a syntax-highlighted image with description as caption.
-  // Pipes and connectors (|, &&, ||) are moved to new lines for readability.
-  if (name === "Bash" && typeof args.command === "string") {
-    const desc = typeof args.description === "string" ? args.description : null;
-    const formatted = formatBashCommand(args.command);
-    const caption = desc ? `*${desc}*` : null;
-    return context.send("tool-call", [
-      { type: "code", code: formatted, language: "bash", ...(caption && { caption }) },
-    ]);
-  }
-
-  // SDK built-in tools: compact, human-friendly display
-  const sdkDisplay = formatSdkToolCall(name, args);
-  if (sdkDisplay) {
-    return context.send("tool-call", sdkDisplay);
-  }
-
-  // For Edit/Write tool calls, render the code content as a syntax-highlighted image
-  if ((name === "Edit" || name === "Write") && typeof args.file_path === "string") {
-    const lang = langFromPath(args.file_path);
-    const header = `*${name}*  \`${args.file_path}\``;
-    /** @type {ToolContentBlock[]} */
-    const blocks = [];
-    if (name === "Edit" && typeof args.old_string === "string" && typeof args.new_string === "string" && lang) {
-      // Render a diff image with the header as caption (single message)
-      blocks.push({ type: "diff", oldStr: args.old_string, newStr: args.new_string, language: lang, caption: header });
-    } else if (name === "Write" && typeof args.content === "string" && args.content.trim() && lang) {
-      blocks.push({ type: "code", code: args.content, language: lang, caption: header });
-    } else {
-      blocks.push({ type: "text", text: header });
-    }
-    return context.send("tool-call", blocks);
-  }
-
-  let msg = isDebug ? `*${toolCall.name}*` : toolCall.name;
-
-  if (formatToolCall) {
-    msg += `: ${formatToolCall(args)}`;
-  } else {
-    const entries = Object.entries(args);
-    if (entries.length > 0) {
-      const inline = entries.map(([k, v]) => {
-        const val = typeof v === "string" ? v : JSON.stringify(v);
-        return entries.length === 1 ? val : `${k}: ${val}`;
-      }).join(", ");
-      if (isDebug) {
-        msg += `\n${inline}`;
-      } else if (inline.length <= 80) {
-        msg += `: ${inline}`;
-      }
-    }
-  }
-
-  return context.send("tool-call", msg);
 }
 
 /**
- * Display a tool result to the user (compact, verbose, or silent).
- * @param {ToolContentBlock[]} blocks - The result content blocks
- * @param {string} toolName - Name of the tool that produced the result
- * @param {Action['permissions']} permissions - Action permission flags
+ * Display a tool result to the user using the pure formatter.
+ * @param {ToolContentBlock[]} blocks
+ * @param {string} toolName
+ * @param {Action['permissions']} permissions
  * @param {Pick<ExecuteActionContext, "send" | "reply">} context
  * @param {boolean} isDebug
  */
 async function displayToolResult(blocks, toolName, permissions, context, isDebug) {
-  if (permissions.silent) return;
-
-  const textBlocks = blocks.filter(b => b.type === "text");
-  const nonTextBlocks = blocks.filter(b => b.type !== "text");
-
-  if (isDebug) {
-    const textSummary = textBlocks.map(b => /** @type {TextContentBlock} */ (b).text).join("\n");
-    await context.send("tool-result", `${toolName}: ${textSummary || "Done."}`);
-    if (nonTextBlocks.length > 0) await context.send("tool-result", nonTextBlocks);
-  } else if (permissions.autoContinue) {
-    // autoContinue: suppress text, but still show media/code blocks
-    if (nonTextBlocks.length > 0) await context.send("tool-result", nonTextBlocks);
-  } else {
-    // Final answer: render all blocks
-    await context.reply("tool-result", blocks);
+  const items = formatToolResultDisplay(blocks, toolName, permissions, isDebug);
+  if (!items) return;
+  for (const { source, content } of items) {
+    if (source === "reply") {
+      await context.reply("tool-result", content);
+    } else {
+      await context.send("tool-result", content);
+    }
   }
 }
 
