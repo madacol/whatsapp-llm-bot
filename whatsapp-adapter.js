@@ -11,14 +11,59 @@ import {
   fetchLatestWaWebVersion,
   isLidUser,
   jidNormalizedUser,
+  decryptPollVote,
+  getKeyAuthor,
 } from "@whiskeysockets/baileys";
 import { exec } from "child_process";
 import { rm } from "fs/promises";
 import { needsAuthReset, sendAlertEmail } from "./notifications.js";
-import { renderCodeToImages } from "./code-image-renderer.js";
+import { renderCodeToImages, renderDiffToImages } from "./code-image-renderer.js";
 import { createLogger } from "./logger.js";
 
 const log = createLogger("whatsapp");
+
+/**
+ * Languages that should be rendered as syntax-highlighted images.
+ * Code blocks without a language or with non-programming identifiers
+ * (e.g. "text", "log", "output", "plaintext") are sent as formatted text.
+ */
+const CODE_IMAGE_LANGUAGES = new Set([
+  // Systems / compiled
+  "c", "cpp", "csharp", "go", "rust", "java", "kotlin", "swift", "scala",
+  "dart", "zig", "nim", "d", "haskell", "ocaml", "fsharp", "elixir", "erlang",
+  "clojure", "fortran", "pascal", "ada", "assembly", "asm", "wasm",
+  // Web / scripting
+  "javascript", "js", "typescript", "ts", "jsx", "tsx", "python", "py",
+  "ruby", "rb", "php", "perl", "lua", "r", "julia", "groovy",
+  // Shell
+  "bash", "sh", "zsh", "fish", "powershell", "ps1", "bat", "cmd",
+  // Markup / config that benefits from highlighting
+  "html", "css", "scss", "sass", "less", "xml", "svg",
+  "json", "yaml", "yml", "toml", "ini", "graphql", "sql",
+  // Other
+  "dockerfile", "makefile", "cmake", "nginx", "terraform", "hcl",
+  "proto", "protobuf", "latex", "tex", "matlab", "objectivec", "objc",
+  "vue", "svelte", "astro", "mdx",
+]);
+
+/**
+ * Check whether a code fence language identifier should be rendered as
+ * a syntax-highlighted image (true) or sent as plain formatted text (false).
+ * @param {string} lang
+ * @returns {boolean}
+ */
+function shouldRenderAsImage(lang) {
+  return CODE_IMAGE_LANGUAGES.has(lang.toLowerCase());
+}
+
+/**
+ * Stores sent poll creation messages keyed by message ID so we can
+ * decode incoming poll votes via getAggregateVotesInPollMessage().
+ * Entries are cleaned up after 10 minutes.
+ * @type {Map<string, import('@whiskeysockets/baileys').WAMessage>}
+ */
+const sentPolls = new Map();
+const POLL_TTL_MS = 10 * 60 * 1000;
 
 /**
  * Convert standard Markdown to WhatsApp-compatible formatting.
@@ -360,16 +405,21 @@ export async function sendBlocks(sock, chatId, source, content, options) {
           if (codeMatch) {
             const lang = codeMatch[1] || "";
             const code = codeMatch[2].trimEnd();
-            try {
-              const images = await renderCodeToImages(code, lang);
-              for (const image of images) {
-                await sock.sendMessage(chatId, {
-                  image,
-                  ...(lang && { caption: lang }),
-                }, options);
+            if (lang && shouldRenderAsImage(lang)) {
+              try {
+                const images = await renderCodeToImages(code, lang);
+                for (const image of images) {
+                  await sock.sendMessage(chatId, {
+                    image,
+                    ...(lang && { caption: lang }),
+                  }, options);
+                }
+              } catch (err) {
+                log.error("Markdown code image rendering failed, falling back to text:", err);
+                await sock.sendMessage(chatId, { text: "```\n" + code + "\n```" }, options);
               }
-            } catch (err) {
-              log.error("Markdown code image rendering failed, falling back to text:", err);
+            } else {
+              // Non-programming code block — send as formatted text
               await sock.sendMessage(chatId, { text: "```\n" + code + "\n```" }, options);
             }
           } else {
@@ -382,19 +432,47 @@ export async function sendBlocks(sock, chatId, source, content, options) {
         break;
       }
       case "code": {
+        if (block.language && shouldRenderAsImage(block.language)) {
+          try {
+            const images = await renderCodeToImages(block.code, block.language);
+            for (const image of images) {
+              await sock.sendMessage(chatId, {
+                image,
+                ...(block.language && { caption: block.language }),
+              }, options);
+            }
+          } catch (err) {
+            log.error("Code image rendering failed, falling back to text:", err);
+            await sock.sendMessage(chatId, {
+              text: "```\n" + block.code + "\n```",
+            }, options);
+          }
+        } else {
+          // Non-programming code block — send as formatted text
+          const caption = block.language ? `_${block.language}_\n` : "";
+          await sock.sendMessage(chatId, {
+            text: caption + "```\n" + block.code + "\n```",
+          }, options);
+        }
+        break;
+      }
+      case "diff": {
+        const diffBlock = /** @type {DiffContentBlock} */ (block);
         try {
-          const images = await renderCodeToImages(block.code, block.language);
+          const images = await renderDiffToImages(diffBlock.oldStr, diffBlock.newStr, diffBlock.language);
           for (const image of images) {
             await sock.sendMessage(chatId, {
               image,
-              ...(block.language && { caption: block.language }),
+              ...(diffBlock.language && { caption: `diff · ${diffBlock.language}` }),
             }, options);
           }
         } catch (err) {
-          log.error("Code image rendering failed, falling back to text:", err);
-          await sock.sendMessage(chatId, {
-            text: "```\n" + block.code + "\n```",
-          }, options);
+          log.error("Diff image rendering failed, falling back to text:", err);
+          // Fallback: show as text diff
+          const lines = [];
+          for (const line of diffBlock.oldStr.split("\n")) lines.push(`- ${line}`);
+          for (const line of diffBlock.newStr.split("\n")) lines.push(`+ ${line}`);
+          await sock.sendMessage(chatId, { text: "```\n" + lines.join("\n") + "\n```" }, options);
         }
         break;
       }
@@ -520,9 +598,15 @@ export async function adaptIncomingMessage(baileysMessage, sock, messageHandler)
     },
 
     sendPoll: async (name, options, selectableCount = 0) => {
-      await sock.sendMessage(chatId, {
+      const sent = await sock.sendMessage(chatId, {
         poll: { name, values: options, selectableCount },
       });
+      const pollMsgId = sent?.key?.id;
+      log.debug(`sendPoll: msgId=${pollMsgId}, key=${JSON.stringify(sent?.key)}`);
+      if (pollMsgId) {
+        sentPolls.set(pollMsgId, sent);
+        setTimeout(() => sentPolls.delete(pollMsgId), POLL_TTL_MS);
+      }
     },
 
     send: (source, content) => sendBlocks(sock, chatId, source, content),
@@ -549,14 +633,19 @@ export async function adaptIncomingMessage(baileysMessage, sock, messageHandler)
  */
 
 /**
+ * @typedef {{ chatId: string, selectedOptions: string[] }} PollVoteEvent
+ */
+
+/**
  * Register event handlers on a Baileys socket.
  * @param {{ current: import('@whiskeysockets/baileys').WASocket }} sockRef
  * @param {() => Promise<void>} saveCreds
  * @param {(message: IncomingContext) => Promise<void>} onMessageHandler
  * @param {() => Promise<void>} reconnect
  * @param {((event: ReactionEvent, sock: import('@whiskeysockets/baileys').WASocket) => Promise<void>) | null} [onReaction]
+ * @param {((event: PollVoteEvent) => Promise<void>) | null} [onPollVote]
  */
-function registerHandlers(sockRef, saveCreds, onMessageHandler, reconnect, onReaction = null) {
+function registerHandlers(sockRef, saveCreds, onMessageHandler, reconnect, onReaction = null, onPollVote = null) {
   sockRef.current.ev.process(async (events) => {
     if (events["connection.update"]) {
       const update = events["connection.update"];
@@ -627,6 +716,104 @@ function registerHandlers(sockRef, saveCreds, onMessageHandler, reconnect, onRea
       const { messages } = events["messages.upsert"];
       for (const message of messages) {
         if (message.key.fromMe || !message.message) continue;
+
+        // Handle poll vote messages: manually decrypt and resolve via onPollVote.
+        // Baileys' internal poll decryption is commented out, so we do it ourselves.
+        const pollUpdate = message.message?.pollUpdateMessage;
+        if (pollUpdate && onPollVote) {
+          const creationKeyId = pollUpdate.pollCreationMessageKey?.id;
+          log.debug(`Poll vote upsert: creationKeyId=${creationKeyId}`);
+          if (creationKeyId) {
+            const pollCreation = sentPolls.get(creationKeyId);
+            if (pollCreation) {
+              try {
+                const encKey = pollCreation.message?.messageContextInfo?.messageSecret;
+                if (!encKey || !pollUpdate.vote) {
+                  log.debug("Poll vote missing encKey or vote payload, skipping");
+                } else {
+                  // Decrypt the vote using Baileys' decryptPollVote.
+                  // The JIDs must match the addressing mode used for encryption.
+                  // When LID addressing is active, WhatsApp encrypts with LID JIDs,
+                  // so we must decrypt with LID JIDs too (not phone numbers).
+                  // getKeyAuthor() returns the Alt (opposite) format, so we bypass it
+                  // and use the primary JID fields directly.
+                  const voteJid = message.key.participant || message.key.remoteJid || "";
+                  const isLidVote = isLidUser(voteJid);
+
+                  let meId, pollCreatorJid, voterJid;
+                  if (isLidVote) {
+                    // LID addressing: use LID-format JIDs for decryption
+                    meId = sockRef.current.user?.lid
+                      ? jidNormalizedUser(sockRef.current.user.lid)
+                      : jidNormalizedUser(sockRef.current.user?.id ?? "");
+                    // Poll was created by us (fromMe), so creator = meId in LID format
+                    pollCreatorJid = pollCreation.key?.fromMe
+                      ? meId
+                      : (pollCreation.key?.participant || pollCreation.key?.remoteJid || "");
+                    // Voter is the person who voted, use primary (non-Alt) JID
+                    voterJid = message.key.fromMe
+                      ? meId
+                      : (message.key.participant || message.key.remoteJid || "");
+                  } else {
+                    // PN addressing: phone number JIDs
+                    meId = jidNormalizedUser(sockRef.current.user?.id ?? "");
+                    pollCreatorJid = getKeyAuthor(pollCreation.key, meId);
+                    voterJid = getKeyAuthor(message.key, meId);
+                  }
+                  log.debug(`Poll decrypt: isLid=${isLidVote}, meId=${meId}, creator=${pollCreatorJid}, voter=${voterJid}`);
+                  const decrypted = decryptPollVote(pollUpdate.vote, {
+                    pollEncKey: encKey,
+                    pollCreatorJid,
+                    pollMsgId: creationKeyId,
+                    voterJid,
+                  });
+                  log.debug(`Decrypted poll vote: ${JSON.stringify(decrypted)}`);
+
+                  // decrypted.selectedOptions contains SHA256 hashes of option names.
+                  // Match them against the poll creation options.
+                  // Baileys may use pollCreationMessage, V2, V3, etc. depending on version.
+                  const pcMsg = pollCreation.message;
+                  const pollData = pcMsg?.pollCreationMessage
+                    || pcMsg?.pollCreationMessageV2
+                    || pcMsg?.pollCreationMessageV3
+                    || pcMsg?.pollCreationMessageV4
+                    || pcMsg?.pollCreationMessageV5;
+                  const options = /** @type {Array<{optionName?: string}>} */ (/** @type {*} */ (pollData)?.options ?? []);
+                  log.debug(`Poll options lookup: keys=${Object.keys(pcMsg || {}).filter(k => k.includes("poll"))}, optionCount=${options.length}`);
+                  const selectedHashes = (decrypted.selectedOptions ?? []).map(
+                    (/** @type {Uint8Array} */ h) => Buffer.from(h).toString("hex"),
+                  );
+
+                  // Hash each option name and match
+                  const { createHash } = await import("crypto");
+                  const selected = options
+                    .filter(opt => {
+                      if (!opt.optionName) return false;
+                      const hash = createHash("sha256").update(opt.optionName).digest("hex");
+                      return selectedHashes.includes(hash);
+                    })
+                    .map(opt => opt.optionName ?? "");
+
+                  log.debug(`Poll vote decoded: selected=[${selected.join(",")}]`);
+                  if (selected.length > 0) {
+                    let chatId = message.key.remoteJid || pollCreation.key?.remoteJid || "";
+                    if (isLidUser(chatId)) {
+                      const pn = await sockRef.current.signalRepository.lidMapping.getPNForLID(chatId);
+                      if (pn) chatId = jidNormalizedUser(pn);
+                    }
+                    await onPollVote({ chatId, selectedOptions: selected });
+                  }
+                }
+              } catch (err) {
+                log.error("Error processing poll vote from upsert:", err);
+              }
+            } else {
+              log.debug(`Poll creation not found in sentPolls for id=${creationKeyId}`);
+            }
+          }
+          continue; // Don't process poll votes as regular messages
+        }
+
         await adaptIncomingMessage(message, sockRef.current, onMessageHandler);
       }
     }
@@ -654,6 +841,7 @@ function registerHandlers(sockRef, saveCreds, onMessageHandler, reconnect, onRea
  * @typedef {{
  *   onMessage: (message: IncomingContext) => Promise<void>;
  *   onReaction?: (event: ReactionEvent, sock: import('@whiskeysockets/baileys').WASocket) => Promise<void>;
+ *   onPollVote?: (event: PollVoteEvent) => Promise<void>;
  * }} ConnectOptions
  */
 
@@ -665,7 +853,7 @@ export async function connectToWhatsApp(handlerOrOptions) {
   const options = typeof handlerOrOptions === "function"
     ? { onMessage: handlerOrOptions }
     : handlerOrOptions;
-  const { onMessage, onReaction } = options;
+  const { onMessage, onReaction, onPollVote } = options;
 
   const { version } = await fetchLatestWaWebVersion();
   log.info("Using WA Web version:", version);
@@ -692,10 +880,10 @@ export async function connectToWhatsApp(handlerOrOptions) {
       auth: newState,
       browser: Browsers.ubuntu("Chrome"),
     });
-    registerHandlers(sockRef, newSaveCreds, onMessage, reconnect, onReaction);
+    registerHandlers(sockRef, newSaveCreds, onMessage, reconnect, onReaction, onPollVote);
   }
 
-  registerHandlers(sockRef, saveCreds, onMessage, reconnect, onReaction);
+  registerHandlers(sockRef, saveCreds, onMessage, reconnect, onReaction, onPollVote);
 
   return {
     async closeWhatsapp() {
