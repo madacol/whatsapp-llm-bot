@@ -896,7 +896,10 @@ if (!process.env.TESTING) {
     try {
       stopReminders();
       stopModelsCache();
-      await waitForAllHarnesses();
+      const waitedOn = await waitForAllHarnesses();
+      if (waitedOn.length > 0) {
+        log.info(`Shutdown waited on ${waitedOn.length} chat(s): ${waitedOn.join(", ")}`);
+      }
       await stopHtmlServer();
       await closeWhatsapp();
       await store.closeDb();
