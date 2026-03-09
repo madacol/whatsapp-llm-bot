@@ -83,9 +83,16 @@ export function createClaudeAgentSdkHarness() {
 
   return { processLlmResponse, injectMessage, cancel, waitForIdle };
 
+  /** Max time (ms) to wait for active queries before force-cancelling them */
+  const SHUTDOWN_TIMEOUT_MS = 30_000;
+
   /**
    * Wait for all active queries to finish (drain the activeQueries map).
    * Resolves immediately if no queries are running.
+   *
+   * Notifies each active query via message injection that a shutdown is
+   * pending and it should wrap up. If queries don't finish within the
+   * timeout, they are force-cancelled.
    * @returns {Promise<string[]>} chat IDs that were waited on
    */
   function waitForIdle() {
@@ -93,10 +100,31 @@ export function createClaudeAgentSdkHarness() {
 
     const chatIds = [...activeQueries.keys()];
     log.info(`Waiting for ${chatIds.length} active query(ies) to finish: ${chatIds.join(", ")}`);
+
+    // Notify each active query that a restart is pending
+    const shutdownNotice =
+      "⚠️ SERVER RESTART: The server is shutting down and waiting for your query to finish. " +
+      "You are one of the active queries blocking the restart. " +
+      "Finish your current task immediately and end your response — do NOT start new tool calls.";
+    for (const chatId of chatIds) {
+      injectMessage(chatId, shutdownNotice);
+    }
+
     return new Promise((resolve) => {
+      const timeout = setTimeout(() => {
+        clearInterval(interval);
+        const remaining = [...activeQueries.keys()];
+        log.warn(`Shutdown timeout (${SHUTDOWN_TIMEOUT_MS}ms) — force-cancelling ${remaining.length} query(ies): ${remaining.join(", ")}`);
+        for (const chatId of remaining) {
+          cancel(chatId);
+        }
+        resolve(chatIds);
+      }, SHUTDOWN_TIMEOUT_MS);
+
       const interval = setInterval(() => {
         if (activeQueries.size === 0) {
           clearInterval(interval);
+          clearTimeout(timeout);
           log.info("All queries finished, ready to shut down.");
           resolve(chatIds);
         }
