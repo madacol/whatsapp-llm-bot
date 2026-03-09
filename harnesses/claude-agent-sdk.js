@@ -296,7 +296,10 @@ export function createClaudeAgentSdkHarness() {
         if (stderrLines.length > 0) {
           log.error("[sdk stderr output]", stderrLines.join(""));
         }
-        const errorMsg = err instanceof Error ? err.message : String(err);
+        let errorMsg = err instanceof Error ? err.message : String(err);
+        if (errorMsg.includes("executable not found") && cwd) {
+          errorMsg += `\n\nHint: The harness_cwd is set to "${cwd}" — make sure this path exists. Use \`!config harness_cwd <path>\` to fix it.`;
+        }
         await hooks.onToolError(errorMsg);
         result.response = [{ type: "text", text: `SDK error: ${errorMsg}` }];
       }
