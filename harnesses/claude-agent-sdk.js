@@ -335,6 +335,19 @@ export function createClaudeAgentSdkHarness() {
             break;
           }
 
+          case "tool_use_summary": {
+            // Compact summary of what SDK tools did (e.g. "Read 3 files").
+            // Show in debug mode via onToolResult; suppressed in non-debug
+            // (consistent with native harness autoContinue behavior).
+            const summary = /** @type {{ summary: string }} */ (event).summary;
+            if (summary) {
+              /** @type {ToolContentBlock[]} */
+              const summaryBlocks = [{ type: "text", text: summary }];
+              await hooks.onToolResult(summaryBlocks, "tools", { autoContinue: true });
+            }
+            break;
+          }
+
           // Ignore system, stream_event, and other message types
           default:
             break;
