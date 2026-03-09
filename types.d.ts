@@ -32,6 +32,7 @@ type CodeContentBlock = {
   type: "code";
   language?: string;
   code: string;
+  caption?: string;
 };
 
 type DiffContentBlock = {
@@ -39,6 +40,7 @@ type DiffContentBlock = {
   language?: string;
   oldStr: string;
   newStr: string;
+  caption?: string;
 };
 
 /**

@@ -108,13 +108,16 @@ async function displayToolCall(toolCall, context, isDebug, formatToolCall) {
   const name = toolCall.name;
   if ((name === "Edit" || name === "Write") && typeof args.file_path === "string") {
     const lang = langFromPath(args.file_path);
+    const header = `🔧 *${name}*\n${args.file_path}`;
     /** @type {ToolContentBlock[]} */
-    const blocks = [{ type: "text", text: `🔧 *${name}*\n${args.file_path}` }];
+    const blocks = [];
     if (name === "Edit" && typeof args.old_string === "string" && typeof args.new_string === "string" && lang) {
-      // Render a diff image showing old → new
-      blocks.push({ type: "diff", oldStr: args.old_string, newStr: args.new_string, language: lang });
+      // Render a diff image with the header as caption (single message)
+      blocks.push({ type: "diff", oldStr: args.old_string, newStr: args.new_string, language: lang, caption: header });
     } else if (name === "Write" && typeof args.content === "string" && args.content.trim() && lang) {
-      blocks.push({ type: "code", code: args.content, language: lang });
+      blocks.push({ type: "code", code: args.content, language: lang, caption: header });
+    } else {
+      blocks.push({ type: "text", text: header });
     }
     return context.send("tool-call", blocks);
   }
