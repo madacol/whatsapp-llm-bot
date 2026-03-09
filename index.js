@@ -412,14 +412,17 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
     const hooks = {
       onLlmResponse: async (text) => { await context.reply("llm", [{ type: "markdown", text }]); },
       onAskUser: async (question, options, _preamble, descriptions) => {
-        // Show option descriptions as a message before the poll so users have context
-        if (descriptions && descriptions.some(d => d.length > 0)) {
-          const legend = options
-            .map((label, i) => descriptions[i] ? `*${label}* — ${descriptions[i]}` : `*${label}*`)
-            .join("\n");
-          await context.send("tool-call", legend);
-        }
-        await context.sendPoll(question || "Choose an option:", options, 1);
+        // Embed descriptions into poll labels when available
+        /** @type {Map<string, string>} enriched label → original label */
+        const labelMap = new Map();
+        const pollOptions = options.map((label, i) => {
+          const desc = descriptions?.[i];
+          const enriched = desc ? `${label}\n${desc}` : label;
+          labelMap.set(enriched, label);
+          return enriched;
+        });
+
+        await context.sendPoll(question || "Choose an option:", pollOptions, 1);
         return new Promise((resolve) => {
           const timer = setTimeout(() => {
             pendingUserResponses.delete(chatId);
@@ -427,7 +430,8 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
           }, ASK_USER_TIMEOUT_MS);
           pendingUserResponses.set(chatId, (text) => {
             clearTimeout(timer);
-            resolve(text);
+            // Map enriched label back to original label
+            resolve(labelMap.get(text) ?? text);
           });
         });
       },
