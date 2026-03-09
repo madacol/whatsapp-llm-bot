@@ -88,6 +88,10 @@ type ContentBlock = IncomingContentBlock | ToolCallContentBlock;
 type MessageSource = "llm" | "tool-call" | "tool-result" | "error" | "warning" | "usage" | "memory";
 
 // WhatsApp Service Types
+
+/** Edits a previously sent text message in-place. */
+type MessageEditor = (newText: string) => Promise<void>;
+
 type ConfirmHooks = {
   onSent?: (msgKey: { id: string; remoteJid: string }) => Promise<void>;
   onResolved?: (msgKey: { id: string; remoteJid: string }, confirmed: boolean) => Promise<void>;
@@ -108,8 +112,8 @@ type IncomingContext = {
   getIsAdmin: () => Promise<boolean>;
   reactToMessage: (emoji: string) => Promise<void>;
   sendPoll: (name: string, options: string[], selectableCount?: number) => Promise<void>;
-  send: (source: MessageSource, content: SendContent) => Promise<void>;
-  reply: (source: MessageSource, content: SendContent) => Promise<void>;
+  send: (source: MessageSource, content: SendContent) => Promise<MessageEditor | undefined>;
+  reply: (source: MessageSource, content: SendContent) => Promise<MessageEditor | undefined>;
   confirm: (message: string, hooks?: ConfirmHooks) => Promise<boolean>;
   sendPresenceUpdate: (presence: "composing" | "paused") => Promise<void>;
 
@@ -124,8 +128,8 @@ type ExecuteActionContext = {
   senderIds: string[];
   content: IncomingContentBlock[];
   getIsAdmin: () => Promise<boolean>;
-  send: (source: MessageSource, content: SendContent) => Promise<void>;
-  reply: (source: MessageSource, content: SendContent) => Promise<void>;
+  send: (source: MessageSource, content: SendContent) => Promise<MessageEditor | undefined>;
+  reply: (source: MessageSource, content: SendContent) => Promise<MessageEditor | undefined>;
   reactToMessage: (emoji: string) => Promise<void>;
   sendPoll: (name: string, options: string[], selectableCount?: number) => Promise<void>;
   confirm: (message: string, hooks?: ConfirmHooks) => Promise<boolean>;
@@ -265,7 +269,7 @@ type AgentIOHooks = {
   onLlmResponse?: (text: string) => Promise<void>;
   /** Present a structured question to the user and wait for their response. Returns the chosen option text. */
   onAskUser?: (question: string, options: string[], preamble?: string) => Promise<string>;
-  onToolCall?: (toolCall: LlmChatResponse['toolCalls'][0], formatToolCall?: (params: Record<string, any>) => string) => Promise<void>;
+  onToolCall?: (toolCall: LlmChatResponse['toolCalls'][0], formatToolCall?: (params: Record<string, any>) => string) => Promise<MessageEditor | void>;
   onToolResult?: (blocks: ToolContentBlock[], toolName: string, permissions: PermissionFlags) => Promise<void>;
   onToolError?: (error: string) => Promise<void>;
   onContinuePrompt?: () => Promise<boolean>;

@@ -326,11 +326,14 @@ const SOURCE_PREFIX = {
 
 /**
  * Dispatch SendContent as WhatsApp messages with a source-based prefix.
+ * Returns an editor function for the last text message sent (if any),
+ * allowing callers to update the message in-place.
  * @param {import('@whiskeysockets/baileys').WASocket} sock
  * @param {string} chatId
  * @param {MessageSource} source
  * @param {SendContent} content
  * @param {{ quoted?: BaileysMessage }} [options]
+ * @returns {Promise<MessageEditor | undefined>}
  */
 export async function sendBlocks(sock, chatId, source, content, options) {
   const prefix = SOURCE_PREFIX[source];
@@ -338,11 +341,16 @@ export async function sendBlocks(sock, chatId, source, content, options) {
     ? [/** @type {ToolContentBlock} */ ({ type: "text", text: content })]
     : Array.isArray(content) ? content : [content];
 
+  /** @type {import('@whiskeysockets/baileys').WAMessageKey | undefined} */
+  let lastTextKey;
+
   for (const block of blocks) {
     switch (block.type) {
-      case "text":
-        await sock.sendMessage(chatId, { text: `${prefix} ${block.text}` }, options);
+      case "text": {
+        const sent = await sock.sendMessage(chatId, { text: `${prefix} ${block.text}` }, options);
+        if (sent?.key) lastTextKey = sent.key;
         break;
+      }
       case "markdown": {
         // Split markdown into text segments and fenced code blocks (not inline code)
         // Requires newline after opening ``` to distinguish from inline triple backticks
@@ -410,6 +418,14 @@ export async function sendBlocks(sock, chatId, source, content, options) {
         break;
     }
   }
+
+  if (!lastTextKey) return undefined;
+
+  /** @type {MessageEditor} */
+  const editor = async (newText) => {
+    await sock.sendMessage(chatId, { text: `${prefix} ${newText}`, edit: lastTextKey });
+  };
+  return editor;
 }
 
 /**
@@ -507,13 +523,9 @@ export async function adaptIncomingMessage(baileysMessage, sock, messageHandler)
       });
     },
 
-    send: async (source, content) => {
-      await sendBlocks(sock, chatId, source, content);
-    },
+    send: (source, content) => sendBlocks(sock, chatId, source, content),
 
-    reply: async (source, content) => {
-      await sendBlocks(sock, chatId, source, content, { quoted: baileysMessage });
-    },
+    reply: (source, content) => sendBlocks(sock, chatId, source, content, { quoted: baileysMessage }),
 
     confirm: createConfirm(sock, chatId),
 

@@ -50,10 +50,13 @@ function hasCommand(a) {
 
 /**
  * Display a tool call to the user (compact or verbose based on debug mode).
+ * Returns a MessageEditor for the sent message (if any), allowing callers
+ * to update it in-place (e.g. for progress updates).
  * @param {LlmChatResponse['toolCalls'][0]} toolCall
  * @param {Pick<ExecuteActionContext, "send">} context
  * @param {boolean} isDebug
  * @param {((params: Record<string, any>) => string)} [formatToolCall] - Optional formatter from the action
+ * @returns {Promise<MessageEditor | undefined>}
  */
 async function displayToolCall(toolCall, context, isDebug, formatToolCall) {
   const args = parseToolArgs(toolCall.arguments);
@@ -62,8 +65,7 @@ async function displayToolCall(toolCall, context, isDebug, formatToolCall) {
   if (!isDebug) {
     const description = typeof args.description === "string" ? args.description : null;
     if (description) {
-      await context.send("tool-call", description);
-      return;
+      return context.send("tool-call", description);
     }
   }
 
@@ -86,7 +88,7 @@ async function displayToolCall(toolCall, context, isDebug, formatToolCall) {
     }
   }
 
-  await context.send("tool-call", msg);
+  return context.send("tool-call", msg);
 }
 
 /**
@@ -352,7 +354,7 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
 
     /** @type {AgentIOHooks} */
     const hooks = {
-      onLlmResponse: (text) => context.reply("llm", [{ type: "markdown", text }]),
+      onLlmResponse: async (text) => { await context.reply("llm", [{ type: "markdown", text }]); },
       onAskUser: async (question, options, _preamble) => {
         await context.sendPoll(question || "Choose an option:", options, 1);
         return new Promise((resolve) => {
@@ -368,14 +370,14 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
       },
       onToolCall: (toolCall, fmt) => displayToolCall(toolCall, context, isDebug, fmt),
       onToolResult: (blocks, name, perms) => displayToolResult(blocks, name, perms, context, isDebug),
-      onToolError: (msg) => context.send("error", msg),
+      onToolError: async (msg) => { await context.send("error", msg); },
       onContinuePrompt: () => context.confirm(`React 👍 to continue or 👎 to stop.`),
       onDepthLimit: () => context.confirm(
         `⚠️ *Depth limit*\n\nReached maximum tool call depth (${MAX_TOOL_CALL_DEPTH}). React 👍 to continue or 👎 to stop.`,
       ),
-      onUsage: (cost, tokens) => isDebug
-        ? context.send("usage", `Cost: ${cost} | prompt=${tokens.prompt} cached=${tokens.cached} completion=${tokens.completion}`)
-        : Promise.resolve(),
+      onUsage: async (cost, tokens) => {
+        if (isDebug) await context.send("usage", `Cost: ${cost} | prompt=${tokens.prompt} cached=${tokens.cached} completion=${tokens.completion}`);
+      },
     };
 
     // harness already resolved above (before injection check)
