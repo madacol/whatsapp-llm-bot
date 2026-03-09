@@ -148,7 +148,7 @@ Second block:
     const { sock, sent } = createMockSock();
 
     await sendBlocks(sock, "test-chat", "tool-call", [
-      { type: "diff", oldStr: "const x = 1;", newStr: "const x = 2;", language: "javascript", caption: "🔧 *Edit*\nfoo.js" },
+      { type: "diff", oldStr: "const x = 1;", newStr: "const x = 2;", language: "javascript", caption: "*Edit*\n```foo.js```" },
     ]);
 
     // Should send exactly one image message (not a separate text + image)
