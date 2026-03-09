@@ -23,7 +23,7 @@ export const MAX_TOOL_CALL_DEPTH = 10;
 /** @type {Required<AgentIOHooks>} */
 export const NO_OP_HOOKS = {
   onLlmResponse: async () => {},
-  onAskUser: async () => {},
+  onAskUser: async () => "",
   onToolCall: async () => {},
   onToolResult: async (_blocks, _name, _perms) => {},
   onToolError: async () => {},
@@ -218,7 +218,23 @@ async function processLlmResponse({ session, llmConfig, messages, mediaRegistry,
         if (parsed.preamble) {
           await hooks.onLlmResponse(parsed.preamble);
         }
-        await hooks.onAskUser(parsed.question, parsed.options, parsed.preamble);
+        const userChoice = await hooks.onAskUser(parsed.question, parsed.options, parsed.preamble);
+
+        // Store the assistant message (with the question), add the user's
+        // response, then skip tool calls and continue the LLM loop so the
+        // model sees the answer.
+        assistantMessage.content.push({ type: "text", text: response.content });
+        result.response = [{ type: "markdown", text: response.content }];
+        messages.push(assistantMessage);
+        await addMessage(chatId, assistantMessage, senderIds);
+        if (userChoice) {
+          /** @type {UserMessage} */
+          const userMsg = { role: "user", content: [{ type: "text", text: userChoice }] };
+          messages.push(userMsg);
+          // Message already persisted to DB by the interceptor in handleMessage
+        }
+        depth++;
+        continue;
       } else {
         await hooks.onLlmResponse(response.content);
       }

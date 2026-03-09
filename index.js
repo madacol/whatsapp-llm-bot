@@ -125,6 +125,17 @@ async function displayToolResult(blocks, toolName, permissions, context, isDebug
 export function createMessageHandler({ store, llmClient, getActionsFn, executeActionFn }) {
   const { addMessage, updateToolMessage, createChat, getChat, getMessages, updateSdkSessionId } = store;
 
+  /** Timeout for onAskUser responses (5 minutes). */
+  const ASK_USER_TIMEOUT_MS = 5 * 60 * 1000;
+
+  /**
+   * Per-chat pending response resolvers for onAskUser.
+   * When set, the next incoming message for that chat resolves the promise
+   * instead of being processed normally.
+   * @type {Map<string, (text: string) => void>}
+   */
+  const pendingUserResponses = new Map();
+
   /**
    * Handle a `!command` message: parse, dispatch, and render result.
    * @param {object} opts
@@ -241,6 +252,15 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
       return;
     }
 
+    // If a harness is waiting for a user response (onAskUser), resolve it
+    // with this message instead of starting a new query or injecting.
+    const pendingResolve = pendingUserResponses.get(chatId);
+    if (pendingResolve) {
+      pendingUserResponses.delete(chatId);
+      pendingResolve(firstBlock?.text ?? "");
+      return;
+    }
+
     log.debug("LLM will respond");
 
     // Resolve active persona (if any)
@@ -325,6 +345,16 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
       onLlmResponse: (text) => context.reply("llm", [{ type: "markdown", text }]),
       onAskUser: async (question, options, _preamble) => {
         await context.sendPoll(question || "Choose an option:", options, 1);
+        return new Promise((resolve) => {
+          const timer = setTimeout(() => {
+            pendingUserResponses.delete(chatId);
+            resolve("");
+          }, ASK_USER_TIMEOUT_MS);
+          pendingUserResponses.set(chatId, (text) => {
+            clearTimeout(timer);
+            resolve(text);
+          });
+        });
       },
       onToolCall: (toolCall, fmt) => displayToolCall(toolCall, context, isDebug, fmt),
       onToolResult: (blocks, name, perms) => displayToolResult(blocks, name, perms, context, isDebug),

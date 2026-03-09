@@ -250,7 +250,23 @@ export function createClaudeAgentSdkHarness() {
                     if (parsed.preamble) {
                       await hooks.onLlmResponse(parsed.preamble);
                     }
-                    await hooks.onAskUser(parsed.question, parsed.options, parsed.preamble);
+                    const userChoice = await hooks.onAskUser(parsed.question, parsed.options, parsed.preamble);
+                    // Inject the user's response into the SDK query so it
+                    // continues with the user's answer
+                    if (userChoice) {
+                      const active = activeQueries.get(session.chatId);
+                      if (active) {
+                        /** @type {import("@anthropic-ai/claude-agent-sdk").SDKUserMessage} */
+                        const sdkMsg = {
+                          type: "user",
+                          message: { role: "user", content: userChoice },
+                          parent_tool_use_id: null,
+                          session_id: resolvedSessionId ?? active.sessionId,
+                        };
+                        active.query.streamInput((async function* () { yield sdkMsg; })())
+                          .catch(err => log.error("Failed to inject user response:", err));
+                      }
+                    }
                   } else {
                     await hooks.onLlmResponse(block.text);
                   }
