@@ -56,8 +56,18 @@ function hasCommand(a) {
  * @param {((params: Record<string, any>) => string)} [formatToolCall] - Optional formatter from the action
  */
 async function displayToolCall(toolCall, context, isDebug, formatToolCall) {
-  let msg = isDebug ? `*${toolCall.name}*` : toolCall.name;
   const args = parseToolArgs(toolCall.arguments);
+
+  // Non-debug: show only the description when available
+  if (!isDebug) {
+    const description = typeof args.description === "string" ? args.description : null;
+    if (description) {
+      await context.send("tool-call", description);
+      return;
+    }
+  }
+
+  let msg = isDebug ? `*${toolCall.name}*` : toolCall.name;
 
   if (formatToolCall) {
     msg += `: ${formatToolCall(args)}`;
