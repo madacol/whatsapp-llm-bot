@@ -376,7 +376,11 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
     pendingLlmChats.set(chatId, []);
 
     // Send composing signal (first await — safe, guard is already set)
-    try { await messageContext.sendPresenceUpdate("composing"); } catch { /* connection may be closed */ }
+    try {
+      await messageContext.sendPresenceUpdate("composing");
+    } catch (err) {
+      log.debug("Could not send composing signal:", err instanceof Error ? err.message : err);
+    }
 
     try {
 
@@ -499,8 +503,8 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
       pendingLlmChats.delete(chatId); // clean up in case of error before flush
       try {
         await messageContext.sendPresenceUpdate("paused");
-      } catch {
-        // Connection may have closed during the query — suppress to avoid crashing.
+      } catch (err) {
+        log.debug("Could not send paused signal:", err instanceof Error ? err.message : err);
       }
     }
   }
@@ -691,7 +695,14 @@ export function createReactionHandler({ store, executeActionFn, pendingByMsgKeyI
 try {
   const { createClaudeAgentSdkHarness } = await import("./harnesses/claude-agent-sdk.js");
   registerHarness("claude-agent-sdk", createClaudeAgentSdkHarness);
-} catch { /* SDK not installed, skip */ }
+} catch (err) {
+  const msg = err instanceof Error ? err.message : String(err);
+  if (msg.includes("Cannot find") || msg.includes("MODULE_NOT_FOUND")) {
+    log.debug("Claude Agent SDK not installed, skipping harness registration");
+  } else {
+    log.warn("Failed to load Claude Agent SDK harness:", msg);
+  }
+}
 
 if (!process.env.TESTING) {
   // Prevent duplicate instances: if old PID is still running, kill it first
