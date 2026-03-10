@@ -5,6 +5,11 @@ import { mkdirSync } from "node:fs";
 /** @type {Map<string, PGlite>} */
 const dbCache = new Map();
 
+/** Auto-close timers for in-memory DBs (evicted after MEMORY_DB_TTL_MS of inactivity) */
+const MEMORY_DB_TTL_MS = 10_000;
+/** @type {Map<string, ReturnType<typeof setTimeout>>} */
+const memoryDbTimers = new Map();
+
 /** @type {PGlite | null} */
 let sharedTestDb = null;
 
@@ -21,8 +26,14 @@ export function setDb(dataDir, instance) {
  * @returns {PGlite}
  */
 export function getDb(dataDir) {
+  const isMemory = dataDir.startsWith("memory://");
   const db = dbCache.get(dataDir);
-  if (db) return db;
+
+  if (db) {
+    // Reset expiry timer on access for in-memory DBs
+    if (isMemory) resetMemoryDbTimer(dataDir);
+    return db;
+  }
 
   // In test mode, reuse a single shared in-memory PGlite to avoid OOM
   if (process.env.TESTING) {
@@ -34,13 +45,40 @@ export function getDb(dataDir) {
   }
 
   // Ensure parent directories exist for file-based databases
-  if (!dataDir.startsWith("memory://")) {
+  if (!isMemory) {
     mkdirSync(dataDir, { recursive: true });
   }
 
   const createdDb = new PGlite(dataDir, { extensions: { vector } });
   dbCache.set(dataDir, createdDb);
+
+  // Auto-close in-memory DBs after inactivity to free ~20MB each
+  if (isMemory) resetMemoryDbTimer(dataDir);
+
   return createdDb;
+}
+
+/**
+ * Reset (or start) the auto-close timer for an in-memory DB.
+ * After MEMORY_DB_TTL_MS of inactivity, the DB is closed and evicted.
+ * @param {string} dataDir
+ */
+function resetMemoryDbTimer(dataDir) {
+  const existing = memoryDbTimers.get(dataDir);
+  if (existing) clearTimeout(existing);
+
+  const timer = setTimeout(async () => {
+    memoryDbTimers.delete(dataDir);
+    const db = dbCache.get(dataDir);
+    if (db) {
+      dbCache.delete(dataDir);
+      try { await db.close(); } catch { /* already closed */ }
+    }
+  }, MEMORY_DB_TTL_MS);
+
+  // Don't keep the process alive just for DB cleanup
+  timer.unref();
+  memoryDbTimers.set(dataDir, timer);
 }
 
 const BASE_DIR = "./pgdata";
@@ -92,6 +130,10 @@ export function getDbCachePaths() {
  * Close all cached PGlite instances and clear the cache.
  */
 export async function closeAllDbs() {
+  // Cancel all expiry timers
+  for (const timer of memoryDbTimers.values()) clearTimeout(timer);
+  memoryDbTimers.clear();
+
   const entries = [...dbCache.entries()];
   dbCache.clear();
   for (const [, db] of entries) {
