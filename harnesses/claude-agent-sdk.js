@@ -255,9 +255,6 @@ export function createClaudeAgentSdkHarness() {
     // The SDK subprocess runs with --verbose, which produces massive debug output
     // that was previously accumulated unboundedly — causing OOM at ~1.9GB.
     const MAX_STDERR_LINES = 200;
-    /** Tracks whether the final assistant text was already persisted during an "assistant" event. */
-    let lastAssistantTextStored = "";
-
     /** @type {string[]} */
     const stderrLines = [];
     try {
@@ -448,11 +445,6 @@ export function createClaudeAgentSdkHarness() {
                 messages.push(assistantMsg);
                 await session.addMessage(session.chatId, assistantMsg, session.senderIds);
 
-                // Track the last stored text so we can skip duplicate storage at the end
-                for (let i = storedBlocks.length - 1; i >= 0; i--) {
-                  const b = storedBlocks[i];
-                  if (b.type === "text") { lastAssistantTextStored = b.text; break; }
-                }
               }
             }
             // Accumulate usage from each assistant message
@@ -611,13 +603,18 @@ export function createClaudeAgentSdkHarness() {
 
     // Store the final response if it wasn't already stored during an "assistant" event.
     const textBlocks = result.response.filter(b => b.type === "text");
-    const finalText = textBlocks.length === 1 ? /** @type {TextContentBlock} */ (textBlocks[0]).text : "";
-    const alreadyStored = finalText && finalText === lastAssistantTextStored;
-    if (textBlocks.length > 0 && !alreadyStored) {
-      /** @type {AssistantMessage} */
-      const assistantMessage = { role: "assistant", content: /** @type {TextContentBlock[]} */ (textBlocks) };
-      messages.push(assistantMessage);
-      await session.addMessage(session.chatId, assistantMessage, session.senderIds);
+    if (textBlocks.length > 0) {
+      const lastStored = messages[messages.length - 1];
+      const alreadyStored = lastStored?.role === "assistant"
+        && /** @type {AssistantMessage} */ (lastStored).content.some(
+          b => b.type === "text" && textBlocks.some(tb => /** @type {TextContentBlock} */ (tb).text === /** @type {TextContentBlock} */ (b).text),
+        );
+      if (!alreadyStored) {
+        /** @type {AssistantMessage} */
+        const assistantMessage = { role: "assistant", content: /** @type {TextContentBlock[]} */ (textBlocks) };
+        messages.push(assistantMessage);
+        await session.addMessage(session.chatId, assistantMessage, session.senderIds);
+      }
     }
 
     return result;
