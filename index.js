@@ -355,30 +355,28 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
 
     log.debug("LLM will respond");
 
-    // Send composing signal early so the user sees feedback immediately
-    try { await messageContext.sendPresenceUpdate("composing"); } catch { /* connection may be closed */ }
-
     const userText = firstBlock?.text ?? "";
 
-    // If a query is already active or being set up for this chat, inject instead of spawning a parallel one
-    const harnessName = resolveHarnessName(
-      chatInfo?.active_persona ? await getAgent(chatInfo.active_persona) : null,
-      chatInfo,
-    );
-    const harness = resolveHarness(harnessName);
-
-    if (userText && harness.injectMessage?.(chatId, userText)) {
-      log.debug("Injected message into active harness query for chat", chatId);
-      return;
-    }
-    if (pendingLlmChats.has(chatId)) {
+    // --- Concurrency guard (fully synchronous — no awaits between check and set) ---
+    // 1. If setup is in progress for this chat, buffer the message
+    if (userText && pendingLlmChats.has(chatId)) {
       pendingLlmChats.get(chatId)?.push(userText);
       log.debug("Buffered message for pending LLM setup on chat", chatId);
       return;
     }
-
-    // Mark this chat as setting up — any messages arriving during setup will be buffered
+    // 2. If the harness already has an active query, inject into it
+    const harnessName = resolveHarnessName(null, chatInfo); // sync — persona resolved later
+    const harness = resolveHarness(harnessName);
+    if (userText && harness.injectMessage?.(chatId, userText)) {
+      log.debug("Injected message into active harness query for chat", chatId);
+      return;
+    }
+    // 3. Mark as pending synchronously — before any awaits.
+    //    All subsequent messages for this chat hit check #1 above.
     pendingLlmChats.set(chatId, []);
+
+    // Send composing signal (first await — safe, guard is already set)
+    try { await messageContext.sendPresenceUpdate("composing"); } catch { /* connection may be closed */ }
 
     try {
 
