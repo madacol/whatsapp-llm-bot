@@ -458,13 +458,13 @@ export async function sendBlocks(sock, chatId, source, content, options) {
     : Array.isArray(content) ? content : [content];
 
   /** @type {import('@whiskeysockets/baileys').WAMessageKey | undefined} */
-  let lastTextKey;
+  let lastSentKey;
 
   for (const block of blocks) {
     switch (block.type) {
       case "text": {
         const sent = await sock.sendMessage(chatId, { text: `${prefix} ${block.text}` }, options);
-        if (sent?.key) lastTextKey = sent.key;
+        if (sent?.key) lastSentKey = sent.key;
         break;
       }
       case "markdown": {
@@ -482,7 +482,7 @@ export async function sendBlocks(sock, chatId, source, content, options) {
           const trimmed = textBuffer.trim();
           if (trimmed) {
             const sent = await sock.sendMessage(chatId, { text: `${prefix} ${trimmed}` }, options);
-            if (sent?.key) lastTextKey = sent.key;
+            if (sent?.key) lastSentKey = sent.key;
           }
           textBuffer = "";
         };
@@ -530,10 +530,11 @@ export async function sendBlocks(sock, chatId, source, content, options) {
               ? `${prefix} ${block.caption}`
               : block.language || undefined;
             for (const image of images) {
-              await sock.sendMessage(chatId, {
+              const sent = await sock.sendMessage(chatId, {
                 image,
                 ...(codeCaption && { caption: codeCaption }),
               }, options);
+              if (sent?.key) lastSentKey = sent.key;
             }
           } catch (err) {
             log.error("Code image rendering failed, falling back to text:", err);
@@ -596,13 +597,13 @@ export async function sendBlocks(sock, chatId, source, content, options) {
     }
   }
 
-  if (!lastTextKey) return undefined;
+  if (!lastSentKey) return undefined;
 
   /** @type {MessageEditor} */
   const editor = /** @type {MessageEditor} */ (async (newText) => {
-    await sock.sendMessage(chatId, { text: `${prefix} ${newText}`, edit: lastTextKey });
+    await sock.sendMessage(chatId, { text: `${prefix} ${newText}`, edit: lastSentKey });
   });
-  editor.keyId = lastTextKey.id ?? undefined;
+  editor.keyId = lastSentKey.id ?? undefined;
   return editor;
 }
 
