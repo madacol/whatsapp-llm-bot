@@ -29,6 +29,38 @@ describe("formatBashCommand", () => {
     const cmd = "cat <<EOF\nhello\nEOF";
     assert.equal(formatBashCommand(cmd), cmd);
   });
+
+  it("wraps long lines without connectors at the last space under threshold", () => {
+    // 90+ char command with no connectors
+    const cmd = "pnpm exec tsc --noEmit --project jsconfig.json --strict --noUnusedLocals --noUnusedParameters --skipLibCheck";
+    const result = formatBashCommand(cmd);
+    const lines = result.split("\n");
+    assert.ok(lines.length >= 2, `expected wrapping, got: ${result}`);
+    assert.ok(lines[0].length <= 80, `first line too long (${lines[0].length}): ${lines[0]}`);
+    // continuation uses 4-space indent
+    assert.ok(lines[1].startsWith("    "), `continuation should be 4-space indented: ${lines[1]}`);
+  });
+
+  it("wraps long segments after connector splits", () => {
+    // Long segment after a pipe
+    const cmd = "cat file.txt | grep --include='*.js' --exclude-dir=node_modules --recursive --line-number --with-filename pattern";
+    const result = formatBashCommand(cmd);
+    // Should split at pipe AND wrap the long grep segment
+    assert.ok(result.includes("\n  | grep"), "should split at pipe");
+    const lines = result.split("\n");
+    for (const line of lines) {
+      assert.ok(line.length <= 80, `line too long (${line.length}): ${line}`);
+    }
+  });
+
+  it("leaves short commands unchanged", () => {
+    assert.equal(formatBashCommand("ls -la"), "ls -la");
+  });
+
+  it("does not break a line with no spaces within threshold", () => {
+    const longToken = "a".repeat(100);
+    assert.equal(formatBashCommand(longToken), longToken);
+  });
 });
 
 describe("formatSdkToolCall", () => {

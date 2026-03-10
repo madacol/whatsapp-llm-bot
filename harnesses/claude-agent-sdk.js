@@ -249,7 +249,11 @@ export function createClaudeAgentSdkHarness() {
         maxTurns: maxDepth ?? 50,
         cwd: cwd ?? process.cwd(),
         settingSources: ["project"],
-        permissionMode: "bypassPermissions",
+        // Use acceptEdits so the SDK's permission state machine stays active —
+        // this lets plan mode (EnterPlanMode / ExitPlanMode) work properly.
+        // canUseTool auto-approves all other tools, so behavior is effectively
+        // the same as bypassPermissions for non-plan operations.
+        permissionMode: "acceptEdits",
         allowDangerouslySkipPermissions: true,
         persistSession: true,
         abortController,
@@ -261,7 +265,7 @@ export function createClaudeAgentSdkHarness() {
         },
         /**
          * Handle tool permission requests and AskUserQuestion.
-         * Regular tools are auto-approved (bypassPermissions handles most).
+         * All tools are auto-approved via canUseTool (equivalent to bypassPermissions).
          * AskUserQuestion is intercepted to present questions as WhatsApp polls.
          * @type {import("@anthropic-ai/claude-agent-sdk").CanUseTool}
          */
@@ -269,7 +273,11 @@ export function createClaudeAgentSdkHarness() {
           if (toolName === "AskUserQuestion") {
             return handleAskUserQuestion(input);
           }
-          // Auto-approve all other tools (fallback for any not covered by bypassPermissions)
+          if (toolName === "ExitPlanMode") {
+            return handleExitPlanMode(input);
+          }
+          // Auto-approve all tools — this gives us bypassPermissions behavior
+          // while keeping the permission state machine active for plan mode.
           return { behavior: "allow", updatedInput: input };
         },
       };
@@ -305,6 +313,25 @@ export function createClaudeAgentSdkHarness() {
           behavior: "allow",
           updatedInput: { questions: input.questions, answers },
         };
+      }
+
+      /**
+       * Handle an ExitPlanMode tool call by presenting the plan to the user
+       * for approval via a WhatsApp poll before allowing plan mode to exit.
+       * @param {Record<string, unknown>} input
+       * @returns {Promise<import("@anthropic-ai/claude-agent-sdk").PermissionResult>}
+       */
+      async function handleExitPlanMode(input) {
+        const userChoice = await hooks.onAskUser(
+          "Plan ready — approve to start implementation?",
+          ["✅ Approve", "❌ Reject"],
+        );
+
+        if (userChoice === "❌ Reject") {
+          return { behavior: "deny", message: "User rejected the plan. Revise your approach based on their feedback." };
+        }
+
+        return { behavior: "allow", updatedInput: input };
       }
 
       // Resume the previous session if one exists for this chat

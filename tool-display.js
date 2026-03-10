@@ -96,9 +96,44 @@ export function formatSdkToolCall(name, args) {
   }
 }
 
+/** Max characters per line before wrapping at the last parameter separator. */
+const MAX_LINE_WIDTH = 80;
+
 /**
- * Reformat a bash command for visual display: break at pipes and connectors
- * so each stage starts on its own line (with 2-space indent for continuation).
+ * Wrap a single line at the last space that keeps it under `MAX_LINE_WIDTH`.
+ * Continuation lines are indented with `indent`. If no suitable break point
+ * exists (e.g. a single very long token), the line is left as-is.
+ * @param {string} line
+ * @param {string} indent
+ * @returns {string}
+ */
+function wrapLongLine(line, indent) {
+  if (line.length <= MAX_LINE_WIDTH) return line;
+
+  /** @type {string[]} */
+  const wrapped = [];
+  let remaining = line;
+
+  while (remaining.length > MAX_LINE_WIDTH) {
+    // Find the last space within the threshold
+    const breakIdx = remaining.lastIndexOf(" ", MAX_LINE_WIDTH);
+    if (breakIdx <= 0) break; // no good break point — leave as-is
+
+    wrapped.push(remaining.slice(0, breakIdx));
+    remaining = indent + remaining.slice(breakIdx + 1);
+  }
+  wrapped.push(remaining);
+  return wrapped.join("\n");
+}
+
+/**
+ * Reformat a bash command for visual display:
+ * 1. Break at pipes and connectors so each stage starts on its own line
+ *    (with 2-space indent for continuation).
+ * 2. Wrap any resulting line that still exceeds `MAX_LINE_WIDTH` at the last
+ *    parameter separator (space), using 4-space indent to visually distinguish
+ *    parameter continuation from connector continuation.
+ *
  * For multi-line commands (e.g. heredocs), only the first line is split at
  * connectors; the rest is preserved as-is.
  * @param {string} command
@@ -111,13 +146,16 @@ export function formatBashCommand(command) {
 
   const parts = firstLine.split(/\s+(\|{1,2}|&&|;)\s+/);
 
-  if (parts.length <= 1) return command;
+  if (parts.length <= 1) {
+    return wrapLongLine(firstLine, "    ") + rest;
+  }
 
-  let result = parts[0];
+  let result = wrapLongLine(parts[0], "    ");
   for (let i = 1; i < parts.length; i += 2) {
     const connector = parts[i];
     const segment = parts[i + 1] ?? "";
-    result += `\n  ${connector} ${segment}`;
+    const line = `  ${connector} ${segment}`;
+    result += "\n" + wrapLongLine(line, "      ");
   }
   return result + rest;
 }
