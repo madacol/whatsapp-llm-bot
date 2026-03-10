@@ -15,7 +15,9 @@ import {
   seedChat,
 } from "./helpers.js";
 import { setDb } from "../db.js";
-import { adaptIncomingMessage } from "../whatsapp-adapter.js";
+import { adaptIncomingMessage, createConfirmRegistry } from "../whatsapp-adapter.js";
+
+const testConfirmRegistry = createConfirmRegistry();
 
 /** @type {Awaited<ReturnType<typeof createMockLlmServer>>} */
 let mockServer;
@@ -79,7 +81,7 @@ describe("basic text message", () => {
     const { sock, getTextMessages } = createMockBaileysSocket();
     const msg = createWAMessage({ text: "Hey there", senderId });
 
-    await adaptIncomingMessage(msg, sock, handleMessage);
+    await adaptIncomingMessage(msg, sock, handleMessage, testConfirmRegistry);
 
     const texts = getTextMessages();
     assert.ok(
@@ -103,6 +105,7 @@ describe("sender ID extraction", () => {
       createWAMessage({ text: "hi", senderId: "12345", senderLid: "lid-abc" }),
       sock,
       async (ctx) => { capturedSenderIds.push(ctx.senderIds); },
+      testConfirmRegistry,
     );
 
     assert.ok(capturedSenderIds.length > 0, "Should have captured senderIds");
@@ -126,6 +129,7 @@ describe("sender ID extraction", () => {
       }),
       sock,
       async (ctx) => { capturedSenderIds.push(ctx.senderIds); },
+      testConfirmRegistry,
     );
 
     const ids = capturedSenderIds[0];
@@ -145,7 +149,7 @@ describe("message filtering", () => {
 
     await adaptIncomingMessage(msg, sock, async () => {
       handlerCalled = true;
-    });
+    }, testConfirmRegistry);
 
     assert.equal(handlerCalled, false, "Handler should not be called for status broadcasts");
   });
@@ -163,7 +167,7 @@ describe("message filtering", () => {
 
     await adaptIncomingMessage(msg, sock, async () => {
       handlerCalled = true;
-    });
+    }, testConfirmRegistry);
 
     assert.equal(handlerCalled, false, "Handler should not be called for empty messages");
   });
@@ -182,6 +186,7 @@ describe("group detection", () => {
       createWAMessage({ text: "hi", chatId: "e2e-group-detect@g.us", isGroup: true }),
       sock,
       async (ctx) => { capturedIsGroup = ctx.isGroup; },
+      testConfirmRegistry,
     );
 
     assert.equal(capturedIsGroup, true);
@@ -196,6 +201,7 @@ describe("group detection", () => {
       createWAMessage({ text: "hi", chatId: "e2e-private-detect@s.whatsapp.net" }),
       sock,
       async (ctx) => { capturedIsGroup = ctx.isGroup; },
+      testConfirmRegistry,
     );
 
     assert.equal(capturedIsGroup, false);
@@ -220,6 +226,7 @@ describe("quote extraction", () => {
       }),
       sock,
       async (ctx) => { capturedCtx = ctx; },
+      testConfirmRegistry,
     );
 
     assert.ok(capturedCtx, "Handler should have been called");
@@ -254,6 +261,7 @@ describe("command through adapter", () => {
       createWAMessage({ text: "!config enabled true" }),
       sock,
       handleMessage,
+      testConfirmRegistry,
     );
 
     const texts = getTextMessages();
@@ -272,6 +280,7 @@ describe("command through adapter", () => {
       createWAMessage({ text: "Hey" }),
       sock,
       handleMessage,
+      testConfirmRegistry,
     );
 
     const texts = getTextMessages();
@@ -314,6 +323,7 @@ describe("tool call through adapter", () => {
       createWAMessage({ text: "Run some code", senderId }),
       sock,
       handleMessage,
+      testConfirmRegistry,
     );
 
     const texts = getTextMessages();
@@ -342,6 +352,7 @@ describe("presence updates", () => {
       createWAMessage({ text: "hi" }),
       sock,
       handleMessage,
+      testConfirmRegistry,
     );
 
     const updates = getPresenceUpdates();
@@ -371,7 +382,7 @@ describe("timestamp parsing", () => {
 
     await adaptIncomingMessage(msg, sock, async (ctx) => {
       capturedTimestamp = ctx.timestamp;
-    });
+    }, testConfirmRegistry);
 
     assert.ok(capturedTimestamp, "Should have captured timestamp");
     assert.equal(capturedTimestamp.getTime(), unixTime * 1000);
@@ -393,6 +404,7 @@ describe("self ID extraction", () => {
       async (ctx) => {
         capturedSelfIds = ctx.selfIds;
       },
+      testConfirmRegistry,
     );
 
     assert.ok(capturedSelfIds, "Should have captured selfIds");
@@ -433,6 +445,7 @@ Hope that helps!`;
       createWAMessage({ text: "Show me code", senderId }),
       sock,
       handleMessage,
+      testConfirmRegistry,
     );
 
     const msgs = getSentMessages();
@@ -489,6 +502,7 @@ Hope that helps!`;
       createWAMessage({ text: "Tell me something", senderId }),
       sock,
       handleMessage,
+      testConfirmRegistry,
     );
 
     const msgs = getSentMessages();
