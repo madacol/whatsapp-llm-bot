@@ -128,6 +128,12 @@ function renderAnnotatedLines(lines, opts) {
   /** @type {Buffer[]} */
   const images = [];
 
+  // Guard: max pixel budget to prevent OOM from Resvg rendering.
+  // Resvg allocates width × height × 4 bytes for the pixel buffer.
+  // Cap at ~50MB per image (50_000_000 / 4 = 12_500_000 pixels).
+  const MAX_PIXELS = 12_500_000;
+  const MAX_SVG_WIDTH = 4000; // ~475 chars at 8.4px/char — generous but bounded
+
   for (const chunk of chunks) {
     // Calculate dimensions
     let maxLineWidth = 0;
@@ -137,8 +143,16 @@ function renderAnnotatedLines(lines, opts) {
       if (width > maxLineWidth) maxLineWidth = width;
     }
 
-    const svgWidth = Math.max(maxLineWidth + contentX + PADDING, 200);
+    const svgWidth = Math.min(Math.max(maxLineWidth + contentX + PADDING, 200), MAX_SVG_WIDTH);
     const svgHeight = chunk.length * LINE_HEIGHT + PADDING * 2;
+
+    // Bail if the image would exceed the pixel budget
+    if (svgWidth * svgHeight > MAX_PIXELS) {
+      throw new Error(
+        `Image too large to render: ${svgWidth}×${svgHeight} = ${(svgWidth * svgHeight / 1_000_000).toFixed(1)}M pixels (limit ${(MAX_PIXELS / 1_000_000).toFixed(0)}M). ` +
+        `lines=${chunk.length}, maxLineWidth=${maxLineWidth.toFixed(0)}px`
+      );
+    }
 
     // Build SVG
     let svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${svgWidth}" height="${svgHeight}">`;

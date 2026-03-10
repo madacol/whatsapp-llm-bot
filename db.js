@@ -73,6 +73,22 @@ export function getActionDb(chatId, actionName) {
 }
 
 /**
+ * Get the number of open PGlite instances.
+ * @returns {number}
+ */
+export function getDbCacheSize() {
+  return dbCache.size;
+}
+
+/**
+ * Get all cached database paths (for diagnostics).
+ * @returns {string[]}
+ */
+export function getDbCachePaths() {
+  return [...dbCache.keys()];
+}
+
+/**
  * Close all cached PGlite instances and clear the cache.
  */
 export async function closeAllDbs() {
