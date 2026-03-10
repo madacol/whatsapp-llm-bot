@@ -85,6 +85,25 @@ describe("code-image-renderer", () => {
       const result = formatBashCommand("ls -la");
       assert.strictEqual(result, "ls -la");
     });
+
+    it("does not infinite-loop on long commands with semicolons (OOM bug)", () => {
+      // This exact command triggered an infinite loop in wrapLongLine:
+      // The semicolon split produces 2 parts → maxWidth=47, and the
+      // indent spaces caused lastIndexOf to find breaks within the indent,
+      // never making progress.
+      const cmd = "node --test tests/code-image-renderer.test.js 2>&1 > /tmp/renderer-test.txt; tail -30 /tmp/renderer-test.txt";
+      const result = formatBashCommand(cmd);
+      assert.ok(typeof result === "string", "should return a string");
+      assert.ok(result.length < cmd.length * 3, "result should not be absurdly large");
+    });
+
+    it("does not infinite-loop on long tokens without spaces", () => {
+      // A single long token with no spaces after a connector
+      const cmd = "echo hello ; " + "x".repeat(200);
+      const result = formatBashCommand(cmd);
+      assert.ok(typeof result === "string");
+      assert.ok(result.length < 1000, "should not explode");
+    });
   });
 
   describe("maxCharsForLineCount", () => {
