@@ -244,15 +244,14 @@ export async function initStore(injectedDb){
       /**
        * Look up a tool result message by its WhatsApp message key ID.
        * Used by the reaction handler for "react to inspect" tool results.
-       * @param {string} chatId
+       * WA message key IDs are globally unique, so no chat_id filter needed.
        * @param {string} waKeyId
        * @returns {Promise<ToolMessage | null>}
        */
-      async getToolResultByWaKeyId (chatId, waKeyId) {
+      async getToolResultByWaKeyId (waKeyId) {
         const { rows: [row] } = await db.sql`
           SELECT message_data FROM messages
-          WHERE chat_id = ${chatId}
-            AND message_data->>'role' = 'tool'
+          WHERE message_data->>'role' = 'tool'
             AND message_data->>'wa_key_id' = ${waKeyId}
           ORDER BY timestamp DESC LIMIT 1`;
         return row ? /** @type {ToolMessage} */ (/** @type {MessageRow} */ (row).message_data) : null;

@@ -612,7 +612,7 @@ export function createReactionHandler({ store, executeActionFn, pendingByMsgKeyI
     const { key, reaction } = event;
 
     // ── Tool inspect: react to a tool-call message to see its result (DB lookup) ──
-    const toolMsg = await store.getToolResultByWaKeyId(key.remoteJid, key.id);
+    const toolMsg = await store.getToolResultByWaKeyId(key.id);
     if (toolMsg) {
       const msgKey = { id: key.id, remoteJid: key.remoteJid, fromMe: true };
       const toolName = toolMsg.tool_name || "Tool";
