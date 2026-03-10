@@ -28,7 +28,6 @@ import {
   formatMemoriesContext,
 } from "./memory.js";
 import { storeAndLinkHtml } from "./html-store.js";
-import { createToolInspectCache } from "./tool-inspect-cache.js";
 import { startHtmlServer, stopHtmlServer } from "./html-server.js";
 import {
   loadPendingConfirmations,
@@ -108,13 +107,10 @@ async function displayToolResult(blocks, toolName, permissions, context, isDebug
 /**
  * Create a message handler with injected dependencies.
  * @param {MessageHandlerDeps} deps
- * @returns {{ handleMessage: (messageContext: IncomingContext) => Promise<void>, handlePollVote: (event: import("./whatsapp-adapter.js").PollVoteEvent) => Promise<void>, toolInspectCache: import("./tool-inspect-cache.js").ToolInspectCache }}
+ * @returns {{ handleMessage: (messageContext: IncomingContext) => Promise<void>, handlePollVote: (event: import("./whatsapp-adapter.js").PollVoteEvent) => Promise<void> }}
  */
 export function createMessageHandler({ store, llmClient, getActionsFn, executeActionFn }) {
   const { addMessage, updateToolMessage, createChat, getChat, getMessages, updateSdkSessionId, archiveSdkSession, getSdkSessionHistory, restoreSdkSession } = store;
-
-  /** Shared tool inspect cache — maps WA message keys to tool results for "react to inspect". */
-  const toolInspectCache = createToolInspectCache();
 
   /** Timeout for onAskUser responses (5 minutes). */
   const ASK_USER_TIMEOUT_MS = 5 * 60 * 1000;
@@ -474,16 +470,9 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
         return waitForUserResponse(chatId, (text) => labelMap.get(text) ?? text);
       },
       onToolCall: async (toolCall, fmt) => {
-        const editor = await displayToolCall(toolCall, context, isDebug, fmt);
-        if (editor?.keyId) {
-          toolInspectCache.registerToolCall(toolCall.id, editor.keyId, chatId, toolCall.name);
-        }
-        return editor;
+        return displayToolCall(toolCall, context, isDebug, fmt);
       },
       onToolResult: (blocks, name, perms) => displayToolResult(blocks, name, perms, context, isDebug),
-      onToolResultCapture: (toolUseId, resultText) => {
-        toolInspectCache.registerToolResult(toolUseId, resultText);
-      },
       onToolError: async (msg) => { await context.send("error", msg); },
       onContinuePrompt: () => context.confirm(`React 👍 to continue or 👎 to stop.`),
       onDepthLimit: () => context.confirm(
@@ -597,16 +586,15 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
     }
   }
 
-  return { handleMessage, handlePollVote, toolInspectCache };
+  return { handleMessage, handlePollVote };
 }
 
 /**
  * @typedef {{
- *   store: Pick<Store, "addMessage" | "updateToolMessage">;
+ *   store: Pick<Store, "addMessage" | "updateToolMessage" | "getToolResultByWaKeyId">;
  *   executeActionFn: typeof executeAction;
  *   pendingByMsgKeyId: Map<string, import("./pending-confirmations.js").PendingConfirmationRow>;
  *   rootDb: import("@electric-sql/pglite").PGlite;
- *   toolInspectCache: import("./tool-inspect-cache.js").ToolInspectCache;
  * }} ReactionHandlerDeps
  */
 
@@ -615,7 +603,7 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
  * @param {ReactionHandlerDeps} deps
  * @returns {(event: import("./whatsapp-adapter.js").ReactionEvent, sock: import("@whiskeysockets/baileys").WASocket) => Promise<void>}
  */
-export function createReactionHandler({ store, executeActionFn, pendingByMsgKeyId, rootDb, toolInspectCache }) {
+export function createReactionHandler({ store, executeActionFn, pendingByMsgKeyId, rootDb }) {
   /**
    * @param {import("./whatsapp-adapter.js").ReactionEvent} event
    * @param {import("@whiskeysockets/baileys").WASocket} sock
@@ -623,28 +611,25 @@ export function createReactionHandler({ store, executeActionFn, pendingByMsgKeyI
   async function onReaction(event, sock) {
     const { key, reaction } = event;
 
-    // ── Tool inspect: react to a tool-call message to see its result ──
-    const inspectEntry = toolInspectCache.getByWaKeyId(key.id);
-    if (inspectEntry) {
+    // ── Tool inspect: react to a tool-call message to see its result (DB lookup) ──
+    const toolMsg = await store.getToolResultByWaKeyId(key.remoteJid, key.id);
+    if (toolMsg) {
       const msgKey = { id: key.id, remoteJid: key.remoteJid, fromMe: true };
-
-      if (!inspectEntry.result) {
-        await sock.sendMessage(key.remoteJid, {
-          text: `⏳ *${inspectEntry.toolName}* — result not available yet`,
-          edit: msgKey,
-        });
-        return;
-      }
+      const toolName = toolMsg.tool_name || "Tool";
+      const resultText = toolMsg.content
+        .filter(/** @param {ToolContentBlock} b */ (b) => b.type === "text")
+        .map(/** @param {TextContentBlock} b */ (b) => b.text)
+        .join("\n");
 
       // Always edit the same message — truncate if needed
       const MAX_EDIT_LEN = 3000;
-      const resultDisplay = inspectEntry.result.length <= MAX_EDIT_LEN
-        ? inspectEntry.result
-        : inspectEntry.result.slice(0, MAX_EDIT_LEN)
-          + `\n\n_… truncated (${inspectEntry.result.length.toLocaleString()} chars total)_`;
+      const resultDisplay = resultText.length <= MAX_EDIT_LEN
+        ? resultText
+        : resultText.slice(0, MAX_EDIT_LEN)
+          + `\n\n_… truncated (${resultText.length.toLocaleString()} chars total)_`;
 
       await sock.sendMessage(key.remoteJid, {
-        text: `🔧 *${inspectEntry.toolName}* ✅\n\n${resultDisplay}`,
+        text: `🔧 *${toolName}*\n\n${resultDisplay}`,
         edit: msgKey,
       });
       return;
@@ -771,7 +756,7 @@ if (!process.env.TESTING) {
   const store = await initStore();
   const llmClient = createLlmClient();
 
-  const { handleMessage, handlePollVote, toolInspectCache } = createMessageHandler({
+  const { handleMessage, handlePollVote } = createMessageHandler({
     store,
     llmClient,
     getActionsFn: getActions,
@@ -798,7 +783,6 @@ if (!process.env.TESTING) {
     executeActionFn: executeAction,
     pendingByMsgKeyId,
     rootDb,
-    toolInspectCache,
   });
 
   const { closeWhatsapp, sendToChat } = await connectToWhatsApp({

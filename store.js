@@ -242,6 +242,23 @@ export async function initStore(injectedDb){
       },
 
       /**
+       * Look up a tool result message by its WhatsApp message key ID.
+       * Used by the reaction handler for "react to inspect" tool results.
+       * @param {string} chatId
+       * @param {string} waKeyId
+       * @returns {Promise<ToolMessage | null>}
+       */
+      async getToolResultByWaKeyId (chatId, waKeyId) {
+        const { rows: [row] } = await db.sql`
+          SELECT message_data FROM messages
+          WHERE chat_id = ${chatId}
+            AND message_data->>'role' = 'tool'
+            AND message_data->>'wa_key_id' = ${waKeyId}
+          ORDER BY timestamp DESC LIMIT 1`;
+        return row ? /** @type {ToolMessage} */ (/** @type {MessageRow} */ (row).message_data) : null;
+      },
+
+      /**
        * Update the SDK session ID for a chat (used by claude-agent-sdk harness for session resumption).
        * @param {ChatRow['chat_id']} chatId
        * @param {string | null} sessionId
