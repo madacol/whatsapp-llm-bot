@@ -240,6 +240,10 @@ export function createClaudeAgentSdkHarness() {
     /** @type {string | null} */
     let resolvedSessionId = null;
 
+    // Ring buffer: only keep the last N stderr lines for error diagnostics.
+    // The SDK subprocess runs with --verbose, which produces massive debug output
+    // that was previously accumulated unboundedly — causing OOM at ~1.9GB.
+    const MAX_STDERR_LINES = 200;
     /** @type {string[]} */
     const stderrLines = [];
     try {
@@ -260,6 +264,7 @@ export function createClaudeAgentSdkHarness() {
         // Don't pass llmConfig.chatModel — it's an OpenRouter model ID.
         // The SDK uses Claude Code's own model (configurable via its own settings).
         stderr: (/** @type {string} */ data) => {
+          if (stderrLines.length >= MAX_STDERR_LINES) stderrLines.shift();
           stderrLines.push(data);
           log.debug("[sdk stderr]", data.trimEnd());
         },
@@ -490,7 +495,7 @@ export function createClaudeAgentSdkHarness() {
 
         log.error("Claude Agent SDK query failed:", err);
         if (stderrLines.length > 0) {
-          log.error("[sdk stderr output]", stderrLines.join(""));
+          log.error(`[sdk stderr tail (last ${stderrLines.length} chunks)]`, stderrLines.join(""));
         }
         let displayMsg = errorMsg;
         if (errorMsg.includes("executable not found") && cwd) {
