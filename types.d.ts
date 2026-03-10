@@ -96,6 +96,8 @@ type ContentBlock = IncomingContentBlock | ToolCallContentBlock;
     wa_key_id?: string;
     /** Tool name (for display in react-to-inspect). */
     tool_name?: string;
+    /** True when the tool-call WA message was an image (caption edit instead of text edit). */
+    wa_msg_is_image?: boolean;
   };
 
   type Message = UserMessage | AssistantMessage | ToolMessage;
@@ -112,7 +114,7 @@ type MessageSource = "llm" | "tool-call" | "tool-result" | "error" | "warning" |
 // WhatsApp Service Types
 
 /** Edits a previously sent text message in-place. May carry the WA message key ID for reaction tracking. */
-type MessageEditor = ((newText: string) => Promise<void>) & { keyId?: string };
+type MessageEditor = ((newText: string) => Promise<void>) & { keyId?: string; isImage?: boolean };
 
 type ConfirmHooks = {
   onSent?: (msgKey: { id: string; remoteJid: string }) => Promise<void>;
