@@ -612,7 +612,9 @@ export function createReactionHandler({ store, executeActionFn, pendingByMsgKeyI
     const { key, reaction } = event;
 
     // ── Tool inspect: react to a tool-call message to see its result (DB lookup) ──
+    const t0 = Date.now();
     const toolResult = await store.getToolResultByWaKeyId(key.id);
+    const t1 = Date.now();
     if (toolResult) {
       const { toolMsg, chatId } = toolResult;
       // Use chatId (standard JID) for relayMessage — LID JIDs from reactions don't work with relayMessage
@@ -647,6 +649,7 @@ export function createReactionHandler({ store, executeActionFn, pendingByMsgKeyI
       } catch (editErr) {
         log.error("onReaction: edit failed:", editErr);
       }
+      log.info(`onReaction: inspect ${toolMsg.tool_name} — db=${t1 - t0}ms edit=${Date.now() - t1}ms total=${Date.now() - t0}ms`);
       return;
     }
 
