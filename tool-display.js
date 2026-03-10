@@ -144,7 +144,7 @@ function wrapLongLine(line, indent, maxWidth) {
  * @returns {string}
  */
 function formatWithWidth(firstLine, rest, maxWidth) {
-  const parts = firstLine.split(/\s+(\|{1,2}|&&|;)\s+/);
+  const parts = firstLine.split(/\s*(\|{1,2}|&&|;)\s+/);
 
   if (parts.length <= 1) {
     return wrapLongLine(firstLine, "    ", maxWidth) + rest;
@@ -179,7 +179,7 @@ export function formatBashCommand(command) {
   const rest = newlineIdx === -1 ? "" : command.slice(newlineIdx);
 
   // First pass: split at connectors only (no char wrapping) to get base line count.
-  const connectorParts = firstLine.split(/\s+(\|{1,2}|&&|;)\s+/);
+  const connectorParts = firstLine.split(/\s*(\|{1,2}|&&|;)\s+/);
   const baseLineCount = Math.ceil(connectorParts.length / 2);
 
   // Derive max char width from the aspect ratio constraint, capped at 80.
