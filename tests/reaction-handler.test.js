@@ -7,6 +7,7 @@ import { describe, it, before } from "node:test";
 import assert from "node:assert/strict";
 import { createTestDb, seedChat } from "./helpers.js";
 import { setDb } from "../db.js";
+import { createToolInspectCache } from "../tool-inspect-cache.js";
 
 /** @type {import("@electric-sql/pglite").PGlite} */
 let testDb;
@@ -100,6 +101,7 @@ it("stores tool result on approval via updateToolMessage", async () => {
     executeActionFn: async () => ({ result: "action completed successfully" }),
     pendingByMsgKeyId,
     rootDb: testDb,
+    toolInspectCache: createToolInspectCache(),
   });
 
   const sock = makeSock();
@@ -134,6 +136,7 @@ it("stores error tool result on execution failure via updateToolMessage", async 
     executeActionFn: async () => { throw new Error("something broke"); },
     pendingByMsgKeyId,
     rootDb: testDb,
+    toolInspectCache: createToolInspectCache(),
   });
 
   const sock = makeSock();
@@ -168,6 +171,7 @@ it("stores rejection tool result via updateToolMessage", async () => {
     executeActionFn: async () => { executeCalled.value = true; return { result: "nope" }; },
     pendingByMsgKeyId,
     rootDb: testDb,
+    toolInspectCache: createToolInspectCache(),
   });
 
   const sock = makeSock();
@@ -206,6 +210,7 @@ it("skips tool storage when tool_call_id is null", async () => {
     executeActionFn: async () => ({ result: "done via !command" }),
     pendingByMsgKeyId,
     rootDb: testDb,
+    toolInspectCache: createToolInspectCache(),
   });
 
   const sock = makeSock();
@@ -238,6 +243,7 @@ it("falls back to addMessage when updateToolMessage returns null (pre-stub confi
     executeActionFn: async () => ({ result: "completed" }),
     pendingByMsgKeyId,
     rootDb: testDb,
+    toolInspectCache: createToolInspectCache(),
   });
 
   const sock = makeSock();

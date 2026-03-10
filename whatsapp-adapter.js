@@ -599,9 +599,10 @@ export async function sendBlocks(sock, chatId, source, content, options) {
   if (!lastTextKey) return undefined;
 
   /** @type {MessageEditor} */
-  const editor = async (newText) => {
+  const editor = /** @type {MessageEditor} */ (async (newText) => {
     await sock.sendMessage(chatId, { text: `${prefix} ${newText}`, edit: lastTextKey });
-  };
+  });
+  editor.keyId = lastTextKey.id ?? undefined;
   return editor;
 }
 
