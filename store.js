@@ -161,6 +161,7 @@ export async function initStore(injectedDb){
       `;
       await db.sql`CREATE INDEX IF NOT EXISTS idx_messages_search_text ON messages USING gin (search_text)`;
       await db.sql`CREATE INDEX IF NOT EXISTS idx_memories_search_text ON memories USING gin (search_text)`;
+      await db.sql`CREATE INDEX IF NOT EXISTS idx_messages_wa_key_id ON messages ((message_data->>'wa_key_id')) WHERE message_data->>'wa_key_id' IS NOT NULL`;
       await db.sql`
         CREATE TABLE IF NOT EXISTS agent_runs (
           id SERIAL PRIMARY KEY,
