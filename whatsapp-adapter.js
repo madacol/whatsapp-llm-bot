@@ -459,12 +459,13 @@ export async function sendBlocks(sock, chatId, source, content, options) {
 
   /** @type {import('@whiskeysockets/baileys').WAMessageKey | undefined} */
   let lastSentKey;
+  let lastSentIsImage = false;
 
   for (const block of blocks) {
     switch (block.type) {
       case "text": {
         const sent = await sock.sendMessage(chatId, { text: `${prefix} ${block.text}` }, options);
-        if (sent?.key) lastSentKey = sent.key;
+        if (sent?.key) { lastSentKey = sent.key; lastSentIsImage = false; }
         break;
       }
       case "markdown": {
@@ -534,7 +535,7 @@ export async function sendBlocks(sock, chatId, source, content, options) {
                 image,
                 ...(codeCaption && { caption: codeCaption }),
               }, options);
-              if (sent?.key) lastSentKey = sent.key;
+              if (sent?.key) { lastSentKey = sent.key; lastSentIsImage = true; }
             }
           } catch (err) {
             log.error("Code image rendering failed, falling back to text:", err);
@@ -599,11 +600,29 @@ export async function sendBlocks(sock, chatId, source, content, options) {
 
   if (!lastSentKey) return undefined;
 
+  const isImage = lastSentIsImage;
+  const editKey = lastSentKey;
+
   /** @type {MessageEditor} */
   const editor = /** @type {MessageEditor} */ (async (newText) => {
-    await sock.sendMessage(chatId, { text: `${prefix} ${newText}`, edit: lastSentKey });
+    const formatted = `${prefix} ${newText}`;
+    if (isImage) {
+      // Edit image caption via raw protocolMessage (no image re-upload needed).
+      // See: https://github.com/WhiskeySockets/Baileys/discussions/498
+      // The `edit: '1'` additionalAttribute is required by the WA protocol for edits.
+      await sock.relayMessage(chatId, {
+        protocolMessage: {
+          key: editKey,
+          type: /** @type {*} */ (14), // MESSAGE_EDIT
+          editedMessage: { imageMessage: { caption: formatted } },
+        },
+      }, /** @type {*} */ ({ additionalAttributes: { edit: "1" } }));
+    } else {
+      await sock.sendMessage(chatId, { text: formatted, edit: editKey });
+    }
   });
-  editor.keyId = lastSentKey.id ?? undefined;
+  editor.keyId = editKey.id ?? undefined;
+  editor.isImage = isImage;
   return editor;
 }
 

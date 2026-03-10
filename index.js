@@ -612,9 +612,12 @@ export function createReactionHandler({ store, executeActionFn, pendingByMsgKeyI
     const { key, reaction } = event;
 
     // ── Tool inspect: react to a tool-call message to see its result (DB lookup) ──
-    const toolMsg = await store.getToolResultByWaKeyId(key.id);
-    if (toolMsg) {
-      const msgKey = { id: key.id, remoteJid: key.remoteJid, fromMe: true };
+    const toolResult = await store.getToolResultByWaKeyId(key.id);
+    if (toolResult) {
+      const { toolMsg, chatId } = toolResult;
+      // Use chatId (standard JID) for relayMessage — LID JIDs from reactions don't work with relayMessage
+      const editJid = toolMsg.wa_msg_is_image ? chatId : key.remoteJid;
+      const msgKey = { id: key.id, remoteJid: editJid, fromMe: true };
       const toolName = toolMsg.tool_name || "Tool";
       const resultText = toolMsg.content
         .filter(/** @param {ToolContentBlock} b */ (b) => b.type === "text")
@@ -628,10 +631,22 @@ export function createReactionHandler({ store, executeActionFn, pendingByMsgKeyI
         : resultText.slice(0, MAX_EDIT_LEN)
           + `\n\n_… truncated (${resultText.length.toLocaleString()} chars total)_`;
 
-      await sock.sendMessage(key.remoteJid, {
-        text: `🔧 *${toolName}*\n\n${resultDisplay}`,
-        edit: msgKey,
-      });
+      const formatted = `🔧 *${toolName}*\n\n${resultDisplay}`;
+      try {
+        if (toolMsg.wa_msg_is_image) {
+          await sock.relayMessage(editJid, {
+            protocolMessage: {
+              key: msgKey,
+              type: /** @type {*} */ (14), // MESSAGE_EDIT
+              editedMessage: { imageMessage: { caption: formatted } },
+            },
+          }, /** @type {*} */ ({ additionalAttributes: { edit: "1" } }));
+        } else {
+          await sock.sendMessage(editJid, { text: formatted, edit: msgKey });
+        }
+      } catch (editErr) {
+        log.error("onReaction: edit failed:", editErr);
+      }
       return;
     }
 

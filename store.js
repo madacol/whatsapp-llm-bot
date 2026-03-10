@@ -246,15 +246,17 @@ export async function initStore(injectedDb){
        * Used by the reaction handler for "react to inspect" tool results.
        * WA message key IDs are globally unique, so no chat_id filter needed.
        * @param {string} waKeyId
-       * @returns {Promise<ToolMessage | null>}
+       * @returns {Promise<{ toolMsg: ToolMessage; chatId: string } | null>}
        */
       async getToolResultByWaKeyId (waKeyId) {
         const { rows: [row] } = await db.sql`
-          SELECT message_data FROM messages
+          SELECT chat_id, message_data FROM messages
           WHERE message_data->>'role' = 'tool'
             AND message_data->>'wa_key_id' = ${waKeyId}
           ORDER BY timestamp DESC LIMIT 1`;
-        return row ? /** @type {ToolMessage} */ (/** @type {MessageRow} */ (row).message_data) : null;
+        return row
+          ? { toolMsg: /** @type {ToolMessage} */ (/** @type {MessageRow} */ (row).message_data), chatId: /** @type {MessageRow} */ (row).chat_id }
+          : null;
       },
 
       /**

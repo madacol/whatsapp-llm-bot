@@ -236,11 +236,14 @@ it("falls back to addMessage when updateToolMessage returns null (pre-stub confi
 it("edits tool-call message with result on react-to-inspect", async () => {
   const pendingByMsgKeyId = new Map();
   const toolResult = {
-    role: "tool",
-    tool_id: "toolu_123",
-    tool_name: "Bash",
-    wa_key_id: "wa-key-inspect",
-    content: [{ type: "text", text: "hello from bash" }],
+    toolMsg: {
+      role: "tool",
+      tool_id: "toolu_123",
+      tool_name: "Bash",
+      wa_key_id: "wa-key-inspect",
+      content: [{ type: "text", text: "hello from bash" }],
+    },
+    chatId: "test-chat@s.whatsapp.net",
   };
   const mockStore = makeMockStore({ getToolResultReturns: toolResult });
 
