@@ -14,8 +14,8 @@ import {
   decryptPollVote,
   getKeyAuthor,
 } from "@whiskeysockets/baileys";
-import { exec } from "child_process";
-import { rm } from "fs/promises";
+import { exec } from "node:child_process";
+import { rm } from "node:fs/promises";
 import { needsAuthReset, sendAlertEmail } from "./notifications.js";
 import { renderCodeToImages, renderDiffToImages, MIN_LINES_FOR_IMAGE } from "./code-image-renderer.js";
 import { createLogger } from "./logger.js";

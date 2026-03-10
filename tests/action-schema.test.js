@@ -1,7 +1,7 @@
 import { describe, it, before } from "node:test";
 import assert from "node:assert/strict";
-import fs from "fs/promises";
-import path from "path";
+import fs from "node:fs/promises";
+import path from "node:path";
 
 const VALID_JSON_SCHEMA_TYPES = new Set([
   "string", "number", "integer", "boolean", "object", "array", "null",

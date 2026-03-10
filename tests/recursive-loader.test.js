@@ -1,7 +1,7 @@
 import { describe, it, before, after } from "node:test";
 import assert from "node:assert/strict";
-import fs from "fs/promises";
-import path from "path";
+import fs from "node:fs/promises";
+import path from "node:path";
 
 const actionsDir = path.resolve(process.cwd(), "actions");
 const subDir = path.join(actionsDir, "_test_sub");
