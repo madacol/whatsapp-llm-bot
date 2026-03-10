@@ -28,6 +28,7 @@ import {
   formatMemoriesContext,
 } from "./memory.js";
 import { storeAndLinkHtml } from "./html-store.js";
+import { createToolInspectCache } from "./tool-inspect-cache.js";
 import { startHtmlServer, stopHtmlServer } from "./html-server.js";
 import {
   loadPendingConfirmations,
@@ -107,10 +108,13 @@ async function displayToolResult(blocks, toolName, permissions, context, isDebug
 /**
  * Create a message handler with injected dependencies.
  * @param {MessageHandlerDeps} deps
- * @returns {{ handleMessage: (messageContext: IncomingContext) => Promise<void>, handlePollVote: (event: import("./whatsapp-adapter.js").PollVoteEvent) => Promise<void> }}
+ * @returns {{ handleMessage: (messageContext: IncomingContext) => Promise<void>, handlePollVote: (event: import("./whatsapp-adapter.js").PollVoteEvent) => Promise<void>, toolInspectCache: import("./tool-inspect-cache.js").ToolInspectCache }}
  */
 export function createMessageHandler({ store, llmClient, getActionsFn, executeActionFn }) {
   const { addMessage, updateToolMessage, createChat, getChat, getMessages, updateSdkSessionId, archiveSdkSession, getSdkSessionHistory, restoreSdkSession } = store;
+
+  /** Shared tool inspect cache — maps WA message keys to tool results for "react to inspect". */
+  const toolInspectCache = createToolInspectCache();
 
   /** Timeout for onAskUser responses (5 minutes). */
   const ASK_USER_TIMEOUT_MS = 5 * 60 * 1000;
@@ -469,8 +473,17 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
         // Map enriched label back to original label
         return waitForUserResponse(chatId, (text) => labelMap.get(text) ?? text);
       },
-      onToolCall: (toolCall, fmt) => displayToolCall(toolCall, context, isDebug, fmt),
+      onToolCall: async (toolCall, fmt) => {
+        const editor = await displayToolCall(toolCall, context, isDebug, fmt);
+        if (editor?.keyId) {
+          toolInspectCache.registerToolCall(toolCall.id, editor.keyId, chatId, toolCall.name);
+        }
+        return editor;
+      },
       onToolResult: (blocks, name, perms) => displayToolResult(blocks, name, perms, context, isDebug),
+      onToolResultCapture: (toolUseId, resultText) => {
+        toolInspectCache.registerToolResult(toolUseId, resultText);
+      },
       onToolError: async (msg) => { await context.send("error", msg); },
       onContinuePrompt: () => context.confirm(`React 👍 to continue or 👎 to stop.`),
       onDepthLimit: () => context.confirm(
@@ -584,7 +597,7 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
     }
   }
 
-  return { handleMessage, handlePollVote };
+  return { handleMessage, handlePollVote, toolInspectCache };
 }
 
 /**
@@ -593,6 +606,7 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
  *   executeActionFn: typeof executeAction;
  *   pendingByMsgKeyId: Map<string, import("./pending-confirmations.js").PendingConfirmationRow>;
  *   rootDb: import("@electric-sql/pglite").PGlite;
+ *   toolInspectCache: import("./tool-inspect-cache.js").ToolInspectCache;
  * }} ReactionHandlerDeps
  */
 
@@ -601,13 +615,44 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
  * @param {ReactionHandlerDeps} deps
  * @returns {(event: import("./whatsapp-adapter.js").ReactionEvent, sock: import("@whiskeysockets/baileys").WASocket) => Promise<void>}
  */
-export function createReactionHandler({ store, executeActionFn, pendingByMsgKeyId, rootDb }) {
+export function createReactionHandler({ store, executeActionFn, pendingByMsgKeyId, rootDb, toolInspectCache }) {
   /**
    * @param {import("./whatsapp-adapter.js").ReactionEvent} event
    * @param {import("@whiskeysockets/baileys").WASocket} sock
    */
   async function onReaction(event, sock) {
     const { key, reaction } = event;
+
+    // ── Tool inspect: react to a tool-call message to see its result ──
+    const inspectEntry = toolInspectCache.getByWaKeyId(key.id);
+    if (inspectEntry) {
+      if (!inspectEntry.result) {
+        await sock.sendMessage(key.remoteJid, {
+          text: `⏳ Result for *${inspectEntry.toolName}* is not available yet.`,
+        });
+        return;
+      }
+
+      const MAX_EDIT_LEN = 3000;
+      if (inspectEntry.result.length <= MAX_EDIT_LEN) {
+        // Edit the tool-call message in-place to show the result
+        const msgKey = { id: key.id, remoteJid: key.remoteJid, fromMe: true };
+        await sock.sendMessage(key.remoteJid, {
+          text: `🔧 *${inspectEntry.toolName}* ✅\n\n${inspectEntry.result}`,
+          edit: msgKey,
+        });
+      } else {
+        // Too long to edit — reply with truncated result
+        const truncated = inspectEntry.result.slice(0, MAX_EDIT_LEN)
+          + `\n\n_… truncated (${inspectEntry.result.length.toLocaleString()} chars total)_`;
+        await sock.sendMessage(key.remoteJid, {
+          text: `🔧 *${inspectEntry.toolName}*\n\n${truncated}`,
+        });
+      }
+      return;
+    }
+
+    // ── Pending confirmations (restart recovery) ──
     const pending = pendingByMsgKeyId.get(key.id);
     if (!pending) return;
 
@@ -728,7 +773,7 @@ if (!process.env.TESTING) {
   const store = await initStore();
   const llmClient = createLlmClient();
 
-  const { handleMessage, handlePollVote } = createMessageHandler({
+  const { handleMessage, handlePollVote, toolInspectCache } = createMessageHandler({
     store,
     llmClient,
     getActionsFn: getActions,
@@ -755,6 +800,7 @@ if (!process.env.TESTING) {
     executeActionFn: executeAction,
     pendingByMsgKeyId,
     rootDb,
+    toolInspectCache,
   });
 
   const { closeWhatsapp, sendToChat } = await connectToWhatsApp({

@@ -15,6 +15,7 @@ import { NO_OP_HOOKS } from "./native.js";
 import { getChatActions } from "../actions.js";
 import { createLogger } from "../logger.js";
 import { extractLastUserText } from "../message-formatting.js";
+import { createToolMessage } from "../utils.js";
 
 const log = createLogger("harness:claude-agent-sdk");
 
@@ -196,7 +197,7 @@ export function createClaudeAgentSdkHarness() {
     // doesn't kill the entire SDK query loop. The SDK query is expensive and should
     // continue processing even if a hook can't deliver its output right now.
     /** @type {Required<AgentIOHooks>} */
-    const hooks = /** @type {Required<AgentIOHooks>} */ (Object.fromEntries(
+    const hooks = /** @type {Required<AgentIOHooks>} */ (/** @type {unknown} */ (Object.fromEntries(
       Object.entries(rawHooks).map(([key, fn]) => [
         key,
         /** @param {any[]} args */
@@ -215,7 +216,7 @@ export function createClaudeAgentSdkHarness() {
           }
         },
       ]),
-    ));
+    )));
 
     const lastUserText = extractLastUserText(messages);
 
@@ -254,6 +255,9 @@ export function createClaudeAgentSdkHarness() {
     // The SDK subprocess runs with --verbose, which produces massive debug output
     // that was previously accumulated unboundedly — causing OOM at ~1.9GB.
     const MAX_STDERR_LINES = 200;
+    /** Tracks whether the final assistant text was already persisted during an "assistant" event. */
+    let lastAssistantTextStored = "";
+
     /** @type {string[]} */
     const stderrLines = [];
     try {
@@ -411,11 +415,15 @@ export function createClaudeAgentSdkHarness() {
             // Extract text content from the BetaMessage
             const betaMessage = event.message;
             if (betaMessage.content) {
+              /** @type {(TextContentBlock | ToolCallContentBlock)[]} */
+              const storedBlocks = [];
+
               for (const block of betaMessage.content) {
                 if (block.type === "text") {
                   log.debug(`  block: text len=${block.text.length}`);
                   await hooks.onLlmResponse(block.text);
                   result.response.push({ type: "text", text: block.text });
+                  storedBlocks.push({ type: "text", text: block.text });
                 } else if (block.type === "tool_use") {
                   log.debug(`  block: tool_use ${block.name}`);
                   const editor = await hooks.onToolCall({
@@ -424,6 +432,26 @@ export function createClaudeAgentSdkHarness() {
                     arguments: JSON.stringify(block.input),
                   });
                   activeTools.set(block.id, { editor: editor ?? undefined, toolName: block.name });
+                  storedBlocks.push({
+                    type: "tool",
+                    tool_id: block.id,
+                    name: block.name,
+                    arguments: JSON.stringify(block.input),
+                  });
+                }
+              }
+
+              // Persist assistant message (with tool_use blocks) to DB
+              if (storedBlocks.length > 0) {
+                /** @type {AssistantMessage} */
+                const assistantMsg = { role: "assistant", content: storedBlocks };
+                messages.push(assistantMsg);
+                await session.addMessage(session.chatId, assistantMsg, session.senderIds);
+
+                // Track the last stored text so we can skip duplicate storage at the end
+                for (let i = storedBlocks.length - 1; i >= 0; i--) {
+                  const b = storedBlocks[i];
+                  if (b.type === "text") { lastAssistantTextStored = b.text; break; }
                 }
               }
             }
@@ -480,6 +508,28 @@ export function createClaudeAgentSdkHarness() {
             if (active?.editor) {
               const elapsed = Math.round(progress.elapsed_time_seconds);
               await active.editor(`${active.toolName} (${elapsed}s…)`);
+            }
+            break;
+          }
+
+          case "user": {
+            // Tool result — the SDK sends these as "user" events with tool_use_result populated.
+            const userEvent = /** @type {import("@anthropic-ai/claude-agent-sdk").SDKUserMessage} */ (event);
+            if (userEvent.parent_tool_use_id && "tool_use_result" in userEvent && userEvent.tool_use_result != null) {
+              const resultText = extractToolResultText(userEvent.tool_use_result);
+              hooks.onToolResultCapture?.(userEvent.parent_tool_use_id, resultText);
+
+              // Persist tool result to DB
+              const toolMsg = createToolMessage(userEvent.parent_tool_use_id, resultText);
+              messages.push(toolMsg);
+              await session.addMessage(session.chatId, toolMsg, session.senderIds);
+
+              // Update the active tool entry with its final display via the editor
+              const active = activeTools.get(userEvent.parent_tool_use_id);
+              if (active?.editor) {
+                await active.editor(`${active.toolName} ✅`);
+              }
+              activeTools.delete(userEvent.parent_tool_use_id);
             }
             break;
           }
@@ -559,9 +609,11 @@ export function createClaudeAgentSdkHarness() {
       });
     }
 
-    // Store the final response in the session's message store
+    // Store the final response if it wasn't already stored during an "assistant" event.
     const textBlocks = result.response.filter(b => b.type === "text");
-    if (textBlocks.length > 0) {
+    const finalText = textBlocks.length === 1 ? /** @type {TextContentBlock} */ (textBlocks[0]).text : "";
+    const alreadyStored = finalText && finalText === lastAssistantTextStored;
+    if (textBlocks.length > 0 && !alreadyStored) {
       /** @type {AssistantMessage} */
       const assistantMessage = { role: "assistant", content: /** @type {TextContentBlock[]} */ (textBlocks) };
       messages.push(assistantMessage);
@@ -569,5 +621,38 @@ export function createClaudeAgentSdkHarness() {
     }
 
     return result;
+  }
+}
+
+/**
+ * Extract a displayable text string from a tool_use_result value.
+ * The SDK's `tool_use_result` field is typed as `unknown` and may be:
+ * - a string
+ * - an object / array (JSON-serializable)
+ * - content blocks with `type` and `text` fields
+ * @param {unknown} result
+ * @returns {string}
+ */
+function extractToolResultText(result) {
+  if (typeof result === "string") return result;
+
+  // Handle array of content blocks (e.g. [{ type: "text", text: "..." }])
+  if (Array.isArray(result)) {
+    const texts = result
+      .filter(/** @param {*} b */ (b) => b && typeof b === "object" && typeof b.text === "string")
+      .map(/** @param {{ text: string }} b */ (b) => b.text);
+    if (texts.length > 0) return texts.join("\n");
+  }
+
+  // Handle single content block
+  if (result && typeof result === "object" && "text" in result && typeof /** @type {*} */ (result).text === "string") {
+    return /** @type {{ text: string }} */ (result).text;
+  }
+
+  // Fallback: JSON
+  try {
+    return JSON.stringify(result, null, 2);
+  } catch {
+    return String(result);
   }
 }

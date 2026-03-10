@@ -107,8 +107,8 @@ type MessageSource = "llm" | "tool-call" | "tool-result" | "error" | "warning" |
 
 // WhatsApp Service Types
 
-/** Edits a previously sent text message in-place. */
-type MessageEditor = (newText: string) => Promise<void>;
+/** Edits a previously sent text message in-place. May carry the WA message key ID for reaction tracking. */
+type MessageEditor = ((newText: string) => Promise<void>) & { keyId?: string };
 
 type ConfirmHooks = {
   onSent?: (msgKey: { id: string; remoteJid: string }) => Promise<void>;
@@ -289,6 +289,8 @@ type AgentIOHooks = {
   onAskUser?: (question: string, options: string[], preamble?: string, descriptions?: string[]) => Promise<string>;
   onToolCall?: (toolCall: LlmChatResponse['toolCalls'][0], formatToolCall?: (params: Record<string, any>) => string) => Promise<MessageEditor | void>;
   onToolResult?: (blocks: ToolContentBlock[], toolName: string, permissions: PermissionFlags) => Promise<void>;
+  /** Called when the SDK emits a tool result. Used to populate the inspect cache. */
+  onToolResultCapture?: (toolUseId: string, resultText: string) => void;
   onToolError?: (error: string) => Promise<void>;
   onContinuePrompt?: () => Promise<boolean>;
   onDepthLimit?: () => Promise<boolean>;
