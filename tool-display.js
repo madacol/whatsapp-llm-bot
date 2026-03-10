@@ -124,7 +124,9 @@ function wrapLongLine(line, indent, maxWidth) {
     if (breakIdx <= 0) break; // no good break point — leave as-is
 
     wrapped.push(remaining.slice(0, breakIdx) + " \\");
-    remaining = indent + remaining.slice(breakIdx + 1);
+    const next = indent + remaining.slice(breakIdx + 1);
+    if (next.length >= remaining.length) break; // not making progress — avoid infinite loop
+    remaining = next;
   }
   wrapped.push(remaining);
   return wrapped.join("\n");

@@ -201,7 +201,14 @@ export function createClaudeAgentSdkHarness() {
           try {
             return await /** @type {Function} */ (fn)(...args);
           } catch (err) {
-            log.warn(`Hook "${key}" failed (suppressed):`, err instanceof Error ? err.message : err);
+            // Log full stack for unexpected errors (not WhatsApp connection issues)
+            const msg = err instanceof Error ? err.message : String(err);
+            const isConnectionErr = msg.includes("Connection Closed") || msg.includes("Connection was lost");
+            if (isConnectionErr) {
+              log.warn(`Hook "${key}" failed (suppressed):`, msg);
+            } else {
+              log.error(`Hook "${key}" failed (suppressed):`, err);
+            }
           }
         },
       ]),
