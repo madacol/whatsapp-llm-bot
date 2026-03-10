@@ -846,5 +846,87 @@ describe("media-to-text", () => {
         config.media_to_text_model = origContentModel;
       }
     });
+
+    it("translates images nested inside quote blocks", async () => {
+      const { convertUnsupportedMedia } = await import(
+        "../media-to-text.js"
+      );
+
+      await withModelsCache([
+        {
+          id: "deepseek/deepseek-r1",
+          name: "DeepSeek R1",
+          context_length: 128000,
+          pricing: { prompt: "0.000005", completion: "0.000015" },
+          architecture: { input_modalities: ["text"] },
+        },
+        {
+          id: "openai/gpt-4o",
+          name: "GPT-4o",
+          context_length: 128000,
+          pricing: { prompt: "0.000005", completion: "0.000015" },
+          architecture: { input_modalities: ["text", "image"] },
+        },
+      ], async () => {
+        mockServer.addResponses("A screenshot of code showing echo commands.");
+
+        /** @type {MessageRow[]} */
+        const messages = [
+          {
+            message_id: 1,
+            chat_id: "test",
+            sender_id: "user1",
+            message_data: {
+              role: "user",
+              content: [
+                {
+                  type: "quote",
+                  quotedSenderId: "bot123",
+                  content: [
+                    { type: "text", text: "Edit tool-display.js" },
+                    {
+                      type: "image",
+                      encoding: "base64",
+                      mime_type: "image/png",
+                      data: "quotedImageData123",
+                    },
+                  ],
+                },
+                { type: "text", text: "can u see this image?" },
+              ],
+            },
+            timestamp: new Date(),
+          },
+        ];
+
+        const result = await convertUnsupportedMedia(
+          messages,
+          "deepseek/deepseek-r1",
+          { image: "openai/gpt-4o" },
+          llmClient,
+          db,
+        );
+
+        // Should not be the same reference
+        assert.notEqual(result.messages, messages);
+        // Original quote should still have the image block
+        assert.equal(messages[0].message_data.content[0].content[1].type, "image");
+
+        // Translated message should have text replacement inside the quote
+        const translated = result.messages[0];
+        const quoteBlock = translated.message_data.content[0];
+        assert.equal(quoteBlock.type, "quote");
+        assert.equal(quoteBlock.content.length, 2);
+        assert.equal(quoteBlock.content[0].type, "text");
+        assert.equal(quoteBlock.content[0].text, "Edit tool-display.js");
+        assert.equal(quoteBlock.content[1].type, "text");
+        assert.ok(quoteBlock.content[1].text.includes("A screenshot of code showing echo commands."));
+        assert.ok(quoteBlock.content[1].text.includes("[Image description:"));
+
+        // The text after the quote should be untouched
+        assert.equal(translated.message_data.content[1].type, "text");
+        assert.equal(translated.message_data.content[1].text, "can u see this image?");
+      });
+    });
   });
 });
