@@ -197,32 +197,21 @@ export function createClaudeAgentSdkHarness() {
     // Wrap every hook so that a WhatsApp send failure (e.g. "Connection Closed")
     // doesn't kill the entire SDK query loop. The SDK query is expensive and should
     // continue processing even if a hook can't deliver its output right now.
-    // Connection errors are retried (WA auto-reconnects within ~1-2s).
     /** @type {Required<AgentIOHooks>} */
     const hooks = /** @type {Required<AgentIOHooks>} */ (/** @type {unknown} */ (Object.fromEntries(
       Object.entries(rawHooks).map(([key, fn]) => [
         key,
         /** @param {any[]} args */
         async (...args) => {
-          const MAX_RETRIES = 3;
-          const RETRY_DELAY_MS = 2000;
-          for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
-            try {
-              return await /** @type {Function} */ (fn)(...args);
-            } catch (err) {
-              const msg = err instanceof Error ? err.message : String(err);
-              const isConnectionErr = msg.includes("Connection Closed") || msg.includes("Connection was lost");
-              if (isConnectionErr && attempt < MAX_RETRIES) {
-                log.warn(`Hook "${key}" connection error (attempt ${attempt + 1}/${MAX_RETRIES + 1}), retrying in ${RETRY_DELAY_MS}ms…`);
-                await new Promise(r => setTimeout(r, RETRY_DELAY_MS));
-                continue;
-              }
-              // Final attempt or non-connection error — suppress and log
-              if (isConnectionErr) {
-                log.warn(`Hook "${key}" failed after ${MAX_RETRIES + 1} attempts:`, msg);
-              } else {
-                log.error(`Hook "${key}" failed (suppressed):`, err);
-              }
+          try {
+            return await /** @type {Function} */ (fn)(...args);
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            const isConnectionErr = msg.includes("Connection Closed") || msg.includes("Connection was lost");
+            if (isConnectionErr) {
+              log.warn(`Hook "${key}" failed (suppressed):`, msg);
+            } else {
+              log.error(`Hook "${key}" failed (suppressed):`, err);
             }
           }
         },
