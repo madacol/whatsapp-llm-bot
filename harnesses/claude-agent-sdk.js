@@ -86,10 +86,10 @@ export function createClaudeAgentSdkHarness() {
   /** @type {Map<string, ActiveQuery>} */
   const activeQueries = new Map();
 
-  return { processLlmResponse, injectMessage, cancel, waitForIdle };
-
   /** Max time (ms) to wait for active queries before force-cancelling them */
   const SHUTDOWN_TIMEOUT_MS = 120_000;
+
+  return { processLlmResponse, injectMessage, cancel, waitForIdle };
 
   /**
    * Wait for all active queries to finish (drain the activeQueries map).
