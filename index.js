@@ -626,29 +626,27 @@ export function createReactionHandler({ store, executeActionFn, pendingByMsgKeyI
     // ── Tool inspect: react to a tool-call message to see its result ──
     const inspectEntry = toolInspectCache.getByWaKeyId(key.id);
     if (inspectEntry) {
+      const msgKey = { id: key.id, remoteJid: key.remoteJid, fromMe: true };
+
       if (!inspectEntry.result) {
         await sock.sendMessage(key.remoteJid, {
-          text: `⏳ Result for *${inspectEntry.toolName}* is not available yet.`,
+          text: `⏳ *${inspectEntry.toolName}* — result not available yet`,
+          edit: msgKey,
         });
         return;
       }
 
+      // Always edit the same message — truncate if needed
       const MAX_EDIT_LEN = 3000;
-      if (inspectEntry.result.length <= MAX_EDIT_LEN) {
-        // Edit the tool-call message in-place to show the result
-        const msgKey = { id: key.id, remoteJid: key.remoteJid, fromMe: true };
-        await sock.sendMessage(key.remoteJid, {
-          text: `🔧 *${inspectEntry.toolName}* ✅\n\n${inspectEntry.result}`,
-          edit: msgKey,
-        });
-      } else {
-        // Too long to edit — reply with truncated result
-        const truncated = inspectEntry.result.slice(0, MAX_EDIT_LEN)
+      const resultDisplay = inspectEntry.result.length <= MAX_EDIT_LEN
+        ? inspectEntry.result
+        : inspectEntry.result.slice(0, MAX_EDIT_LEN)
           + `\n\n_… truncated (${inspectEntry.result.length.toLocaleString()} chars total)_`;
-        await sock.sendMessage(key.remoteJid, {
-          text: `🔧 *${inspectEntry.toolName}*\n\n${truncated}`,
-        });
-      }
+
+      await sock.sendMessage(key.remoteJid, {
+        text: `🔧 *${inspectEntry.toolName}* ✅\n\n${resultDisplay}`,
+        edit: msgKey,
+      });
       return;
     }
 

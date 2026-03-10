@@ -505,23 +505,30 @@ export function createClaudeAgentSdkHarness() {
           }
 
           case "user": {
-            // Tool result — the SDK sends these as "user" events with tool_use_result populated.
+            // Tool result — the SDK sends these as "user" events.
+            // The result may be in `tool_use_result` (convenience field) OR in `message.content`
+            // as tool_result content blocks (standard Anthropic API format).
+            // NOTE: parent_tool_use_id is often null for built-in tools — fall back to
+            // extracting the tool_use_id from message.content tool_result blocks.
             const userEvent = /** @type {import("@anthropic-ai/claude-agent-sdk").SDKUserMessage} */ (event);
-            if (userEvent.parent_tool_use_id && "tool_use_result" in userEvent && userEvent.tool_use_result != null) {
-              const resultText = extractToolResultText(userEvent.tool_use_result);
-              hooks.onToolResultCapture?.(userEvent.parent_tool_use_id, resultText);
+            const { toolUseId: resolvedToolUseId, resultText } = extractToolResultFromEvent(userEvent);
 
-              // Persist tool result to DB
-              const toolMsg = createToolMessage(userEvent.parent_tool_use_id, resultText);
-              messages.push(toolMsg);
-              await session.addMessage(session.chatId, toolMsg, session.senderIds);
+            if (resolvedToolUseId) {
+              if (resultText != null) {
+                hooks.onToolResultCapture?.(resolvedToolUseId, resultText);
+
+                // Persist tool result to DB
+                const toolMsg = createToolMessage(resolvedToolUseId, resultText);
+                messages.push(toolMsg);
+                await session.addMessage(session.chatId, toolMsg, session.senderIds);
+              }
 
               // Update the active tool entry with its final display via the editor
-              const active = activeTools.get(userEvent.parent_tool_use_id);
+              const active = activeTools.get(resolvedToolUseId);
               if (active?.editor) {
                 await active.editor(`${active.toolName} ✅`);
               }
-              activeTools.delete(userEvent.parent_tool_use_id);
+              activeTools.delete(resolvedToolUseId);
             }
             break;
           }
@@ -621,6 +628,83 @@ export function createClaudeAgentSdkHarness() {
 
     return result;
   }
+}
+
+/**
+ * @typedef {{ toolUseId: string | null, resultText: string | null }} ExtractedToolResult
+ */
+
+/**
+ * Extract tool use ID and result text from an SDKUserMessage.
+ *
+ * The SDK's `parent_tool_use_id` is often null for built-in tools, so we also
+ * look inside `message.content` for `tool_result` blocks which carry the ID.
+ *
+ * Result text is extracted from (in order):
+ * 1. `tool_use_result` — convenience field (may be absent for built-in tools)
+ * 2. `message.content` — standard Anthropic API format with tool_result blocks
+ *
+ * @param {import("@anthropic-ai/claude-agent-sdk").SDKUserMessage} userEvent
+ * @returns {ExtractedToolResult}
+ */
+function extractToolResultFromEvent(userEvent) {
+  /** @type {string | null} */
+  let toolUseId = userEvent.parent_tool_use_id ?? null;
+  /** @type {string | null} */
+  let resultText = null;
+
+  // Source 1: tool_use_result field (preferred when available)
+  if ("tool_use_result" in userEvent && userEvent.tool_use_result != null) {
+    resultText = extractToolResultText(userEvent.tool_use_result);
+  }
+
+  // Source 2: message.content — array of content blocks (tool_result blocks)
+  // Also used to resolve toolUseId when parent_tool_use_id is null.
+  const message = userEvent.message;
+  if (message && typeof message === "object" && "content" in message) {
+    const content = /** @type {unknown} */ (message.content);
+
+    // String content (simple tool result)
+    if (resultText == null && typeof content === "string" && content.length > 0) {
+      resultText = content;
+    }
+
+    // Array of content blocks
+    if (Array.isArray(content)) {
+      /** @type {string[]} */
+      const texts = [];
+      for (const block of content) {
+        if (!block || typeof block !== "object") continue;
+        const b = /** @type {Record<string, unknown>} */ (block);
+        // tool_result block: { type: "tool_result", tool_use_id: "...", content: "..." | [...] }
+        if (b.type === "tool_result") {
+          // Resolve toolUseId from content block when parent_tool_use_id is null
+          if (!toolUseId && typeof b.tool_use_id === "string") {
+            toolUseId = b.tool_use_id;
+          }
+          if (resultText == null) {
+            const inner = b.content;
+            if (typeof inner === "string") {
+              texts.push(inner);
+            } else if (Array.isArray(inner)) {
+              for (const sub of inner) {
+                if (sub && typeof sub === "object" && typeof /** @type {Record<string, unknown>} */ (sub).text === "string") {
+                  texts.push(/** @type {{ text: string }} */ (sub).text);
+                }
+              }
+            }
+          }
+        }
+        // Plain text block (only if we don't already have result from tool_use_result)
+        if (resultText == null && typeof b.text === "string") {
+          texts.push(b.text);
+        }
+      }
+      if (resultText == null && texts.length > 0) resultText = texts.join("\n");
+    }
+  }
+
+  return { toolUseId, resultText };
 }
 
 /**
