@@ -88,6 +88,20 @@ describe("formatToolCallDisplay", () => {
     assert.equal(block.caption, "*Run tests*");
   });
 
+  it("wraps long Bash commands in code block", () => {
+    const longCmd = "pnpm exec tsc --noEmit --project jsconfig.json --strict --noUnusedLocals --noUnusedParameters --skipLibCheck";
+    const result = formatToolCallDisplay(
+      tc("Bash", { command: longCmd, description: "Type check" }), true
+    );
+    assert.ok(Array.isArray(result));
+    const block = /** @type {CodeContentBlock} */ (result[0]);
+    assert.equal(block.type, "code");
+    // Every line in the formatted code should be <= 80 chars
+    for (const line of block.code.split("\n")) {
+      assert.ok(line.length <= 80, `line too long (${line.length}): ${line}`);
+    }
+  });
+
   it("renders Edit as diff block for known languages", () => {
     const result = formatToolCallDisplay(
       tc("Edit", { file_path: "/a.js", old_string: "foo", new_string: "bar" }), true
