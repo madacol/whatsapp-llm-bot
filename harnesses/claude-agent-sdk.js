@@ -38,7 +38,10 @@ async function buildSystemPrompt(llmConfig, chatId, senderIds) {
 - Sender IDs: ${senderIds.join(", ")}
 - PGlite root database: ./pgdata/root
 - PGlite chat database: ./pgdata/${chatId}
-- Action databases: ./pgdata/${chatId}/<action_name>/`;
+- Action databases: ./pgdata/${chatId}/<action_name>/
+
+## User interaction
+If you want to propose something and wait for the user's decision before acting, either use the AskUserQuestion tool (which pauses execution) or finish your response and let the user reply. Do NOT ask a question in plain text and then immediately act on it in the same turn — plain text does not pause execution.`;
 
   // CLAUDE.md is loaded automatically by the SDK via settingSources: ["project"]
 
