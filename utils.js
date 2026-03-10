@@ -6,6 +6,10 @@ const WORKSPACES_DIR = "./workspaces";
 /**
  * Return (and lazily create) a unique working directory for a chat.
  * Falls back to `explicitCwd` when set, otherwise `./workspaces/<chatId>/`.
+ *
+ * The SDK will use this as its cwd for bash commands and file operations.
+ * Note: CLAUDE.md discovery still traverses parent directories (SDK limitation,
+ * see anthropics/claude-agent-sdk-typescript#149).
  * @param {string} chatId
  * @param {string | null | undefined} [explicitCwd]
  * @returns {string} Absolute path to the chat's working directory
