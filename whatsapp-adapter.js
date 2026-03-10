@@ -63,11 +63,13 @@ function shouldRenderAsImage(lang, code) {
 /**
  * Stores sent poll creation messages keyed by message ID so we can
  * decode incoming poll votes via getAggregateVotesInPollMessage().
- * Entries are cleaned up after 10 minutes.
+ * Entries are cleaned up after 10 minutes, with a hard cap to prevent
+ * unbounded growth under heavy poll load.
  * @type {Map<string, import('@whiskeysockets/baileys').WAMessage>}
  */
 const sentPolls = new Map();
 const POLL_TTL_MS = 10 * 60 * 1000;
+const MAX_SENT_POLLS = 200;
 
 /**
  * Convert standard Markdown to WhatsApp-compatible formatting.
@@ -700,6 +702,11 @@ export async function adaptIncomingMessage(baileysMessage, sock, messageHandler,
       const pollMsgId = sent?.key?.id;
       log.debug(`sendPoll: msgId=${pollMsgId}, key=${JSON.stringify(sent?.key)}`);
       if (pollMsgId) {
+        // Evict oldest entry if at capacity (Map iterates in insertion order)
+        if (sentPolls.size >= MAX_SENT_POLLS) {
+          const oldest = sentPolls.keys().next().value;
+          if (oldest) sentPolls.delete(oldest);
+        }
         sentPolls.set(pollMsgId, sent);
         setTimeout(() => sentPolls.delete(pollMsgId), POLL_TTL_MS);
       }

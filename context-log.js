@@ -34,8 +34,12 @@ export function sanitizeMessagesForLog(messages) {
 }
 
 /**
- * Store the full LLM request context on an assistant message row (fire-and-forget).
+ * Store the full LLM request context on an assistant message row.
  * Also cleans up contexts older than 1 hour.
+ *
+ * Callers may fire-and-forget (no await), but internally the queries are
+ * properly awaited so references to `messages` are released promptly
+ * rather than being pinned by unresolved promise chains.
  * @param {PGlite} db
  * @param {number} messageId
  * @param {string} model
@@ -43,18 +47,24 @@ export function sanitizeMessagesForLog(messages) {
  * @param {Message[]} messages
  * @param {Action[]} actions
  */
-export function storeLlmContext(db, messageId, model, systemPrompt, messages, actions) {
+export async function storeLlmContext(db, messageId, model, systemPrompt, messages, actions) {
   const llmContext = {
     model,
     system_prompt: systemPrompt,
     messages: sanitizeMessagesForLog(messages),
     tools: actions.map(a => a.name),
   };
-  db.sql`UPDATE messages SET llm_context = ${JSON.stringify(llmContext)}
-    WHERE message_id = ${messageId}`
-    .catch(err => log.warn("Failed to store LLM context:", err));
-  db.sql`UPDATE messages SET llm_context = NULL
-    WHERE llm_context IS NOT NULL
-    AND timestamp < NOW() - INTERVAL '1 hour'`
-    .catch(err => log.warn("Failed to clean up old LLM contexts:", err));
+  try {
+    await db.sql`UPDATE messages SET llm_context = ${JSON.stringify(llmContext)}
+      WHERE message_id = ${messageId}`;
+  } catch (err) {
+    log.warn("Failed to store LLM context:", err);
+  }
+  try {
+    await db.sql`UPDATE messages SET llm_context = NULL
+      WHERE llm_context IS NOT NULL
+      AND timestamp < NOW() - INTERVAL '1 hour'`;
+  } catch (err) {
+    log.warn("Failed to clean up old LLM contexts:", err);
+  }
 }
