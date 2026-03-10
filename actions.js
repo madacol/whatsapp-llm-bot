@@ -1,7 +1,7 @@
-import fs from "fs/promises";
-import path from "path";
-import os from "os";
-import crypto from "crypto";
+import fs from "node:fs/promises";
+import path from "node:path";
+import os from "node:os";
+import crypto from "node:crypto";
 import { getDb, getRootDb, getChatDb, getActionDb } from "./db.js";
 import config from "./config.js";
 import { createCallLlm } from "./llm.js";

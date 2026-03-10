@@ -1,6 +1,6 @@
 import { describe, it, before } from "node:test";
-import fs from "fs/promises";
-import path from "path";
+import fs from "node:fs/promises";
+import path from "node:path";
 import { createTestDb } from "./helpers.js";
 
 /** @type {Array<{name: string, action_fn: Function, test_functions: Function[]}>} */

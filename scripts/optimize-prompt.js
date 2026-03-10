@@ -10,7 +10,7 @@ import { readFile, writeFile } from "node:fs/promises";
 import { createInterface } from "node:readline/promises";
 import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
-import path from "path";
+import path from "node:path";
 import { parseArgs } from "node:util";
 import dotenv from "dotenv";
 import { createLlmClient, createCallLlm } from "../llm.js";

@@ -14,8 +14,8 @@
 import { describe, it, before } from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
-import fs from "fs/promises";
-import path from "path";
+import fs from "node:fs/promises";
+import path from "node:path";
 import dotenv from "dotenv";
 import { createLlmClient, createCallLlm } from "../llm.js";
 
