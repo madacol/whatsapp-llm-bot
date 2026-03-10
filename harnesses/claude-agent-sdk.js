@@ -365,30 +365,49 @@ export function createClaudeAgentSdkHarness() {
       /** @type {Map<string, { editor?: MessageEditor, toolName: string }>} */
       const activeTools = new Map();
 
+      let eventCount = 0;
+
       for await (const event of q) {
+        eventCount++;
+
+        // Log event with tool context for tracing what the SDK is doing.
+        /** @type {string} */
+        let eventLabel = event.type;
+        if (event.type === "assistant" && event.message?.content) {
+          const toolBlock = event.message.content.find(
+            /** @param {*} b */ (b) => b.type === "tool_use"
+          );
+          if (toolBlock) {
+            const input = /** @type {Record<string, unknown>} */ (toolBlock.input ?? {});
+            const inputSummary = String(
+              input.command ?? input.file_path ?? input.pattern ?? input.query ?? input.prompt ?? input.description ?? ""
+            ).slice(0, 80);
+            eventLabel = `tool_use:${toolBlock.name}(${inputSummary})`;
+          }
+        }
+        log.debug(`SDK event: ${eventLabel}`);
+
         // Always capture the latest session_id from events.
-        // When resuming, the SDK may return the same or a new session_id.
         if ("session_id" in event && typeof event.session_id === "string") {
           if (resolvedSessionId !== event.session_id) {
             resolvedSessionId = event.session_id;
-            // Update the active query's sessionId for injection
             const active = activeQueries.get(session.chatId);
             if (active) active.sessionId = resolvedSessionId;
           }
         }
 
-        log.debug(`SDK event: ${event.type}`, event.type === "assistant" ? `blocks=${event.message?.content?.length}` : "");
         switch (event.type) {
           case "assistant": {
             // Extract text content from the BetaMessage
             const betaMessage = event.message;
             if (betaMessage.content) {
               for (const block of betaMessage.content) {
-                log.debug(`  assistant block: ${block.type}`, block.type === "text" ? `len=${block.text.length}` : "");
                 if (block.type === "text") {
+                  log.debug(`  block: text len=${block.text.length}`);
                   await hooks.onLlmResponse(block.text);
                   result.response.push({ type: "text", text: block.text });
                 } else if (block.type === "tool_use") {
+                  log.debug(`  block: tool_use ${block.name}`);
                   const editor = await hooks.onToolCall({
                     id: block.id,
                     name: block.name,
@@ -473,6 +492,7 @@ export function createClaudeAgentSdkHarness() {
             break;
         }
       }
+      log.debug(`SDK query done: events=${eventCount} activeTools=${activeTools.size}`);
     } catch (err) {
       // Don't log abort as an error — it's expected from !cancel
       if (abortController.signal.aborted) {
