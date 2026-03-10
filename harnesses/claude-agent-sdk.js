@@ -16,6 +16,7 @@ import { getChatActions } from "../actions.js";
 import { createLogger } from "../logger.js";
 import { extractLastUserText } from "../message-formatting.js";
 import { createToolMessage } from "../utils.js";
+import { formatSdkToolCall } from "../tool-display.js";
 
 const log = createLogger("harness:claude-agent-sdk");
 
@@ -425,6 +426,10 @@ export function createClaudeAgentSdkHarness() {
                   log.debug(`  block: tool_use ${block.name}`);
                   const input = /** @type {Record<string, unknown>} */ (block.input ?? {});
                   const description = typeof input.description === "string" ? input.description : null;
+                  // Build a human-readable label for the tool call (used on completion)
+                  const displayLabel = description
+                    || formatSdkToolCall(block.name, input)
+                    || block.name;
                   const editor = await hooks.onToolCall({
                     id: block.id,
                     name: block.name,
@@ -433,7 +438,7 @@ export function createClaudeAgentSdkHarness() {
                   activeTools.set(block.id, {
                     editor: editor ?? undefined,
                     toolName: block.name,
-                    description,
+                    description: displayLabel,
                     waKeyId: editor?.keyId ?? null,
                   });
                   storedBlocks.push({
