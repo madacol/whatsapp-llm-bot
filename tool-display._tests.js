@@ -6,6 +6,7 @@ import {
   formatToolCallDisplay,
   formatToolResultDisplay,
 } from "./tool-display.js";
+import { maxCharsForLineCount } from "./code-image-renderer.js";
 
 /** @param {string} name @param {Record<string, unknown>} args */
 function tc(name, args) {
@@ -30,26 +31,41 @@ describe("formatBashCommand", () => {
     assert.equal(formatBashCommand(cmd), cmd);
   });
 
-  it("wraps long lines without connectors at the last space under threshold", () => {
-    // 90+ char command with no connectors
+  it("wraps single commands to fit aspect ratio", () => {
+    // Single command (1 connector part) — should use maxCharsForLineCount(1)
     const cmd = "pnpm exec tsc --noEmit --project jsconfig.json --strict --noUnusedLocals --noUnusedParameters --skipLibCheck";
+    const maxWidth = maxCharsForLineCount(1);
     const result = formatBashCommand(cmd);
     const lines = result.split("\n");
-    assert.ok(lines.length >= 2, `expected wrapping, got: ${result}`);
-    assert.ok(lines[0].length <= 80, `first line too long (${lines[0].length}): ${lines[0]}`);
+    assert.ok(lines.length >= 2, `expected wrapping at ${maxWidth} chars, got:\n${result}`);
+    for (const line of lines) {
+      assert.ok(line.length <= maxWidth, `line too long (${line.length} > ${maxWidth}): ${line}`);
+    }
     // continuation uses 4-space indent
     assert.ok(lines[1].startsWith("    "), `continuation should be 4-space indented: ${lines[1]}`);
   });
 
-  it("wraps long segments after connector splits", () => {
-    // Long segment after a pipe
-    const cmd = "cat file.txt | grep --include='*.js' --exclude-dir=node_modules --recursive --line-number --with-filename pattern";
+  it("allows wider lines when more connectors produce more lines", () => {
+    // 10 chained commands — maxCharsForLineCount(10) is much wider
+    const parts = Array.from({ length: 10 }, (_, i) => `echo "line ${i} with some extra padding text here"`);
+    const cmd = parts.join(" && ");
+    const maxWidth = maxCharsForLineCount(10);
     const result = formatBashCommand(cmd);
-    // Should split at pipe AND wrap the long grep segment
+    const lines = result.split("\n");
+    assert.ok(lines.length >= 10, `expected many lines, got ${lines.length}`);
+    for (const line of lines) {
+      assert.ok(line.length <= maxWidth, `line too long (${line.length} > ${maxWidth}): ${line}`);
+    }
+  });
+
+  it("wraps long segments after connector splits", () => {
+    const cmd = "cat file.txt | sort | uniq | grep --include='*.js' --exclude-dir=node_modules --recursive --line-number --with-filename pattern";
+    const result = formatBashCommand(cmd);
     assert.ok(result.includes("\n  | grep"), "should split at pipe");
+    const maxWidth = maxCharsForLineCount(4); // 4 connector parts
     const lines = result.split("\n");
     for (const line of lines) {
-      assert.ok(line.length <= 80, `line too long (${line.length}): ${line}`);
+      assert.ok(line.length <= maxWidth, `line too long (${line.length} > ${maxWidth}): ${line}`);
     }
   });
 
@@ -88,7 +104,7 @@ describe("formatToolCallDisplay", () => {
     assert.equal(block.caption, "*Run tests*");
   });
 
-  it("wraps long Bash commands in code block", () => {
+  it("wraps long Bash commands in code block to fit aspect ratio", () => {
     const longCmd = "pnpm exec tsc --noEmit --project jsconfig.json --strict --noUnusedLocals --noUnusedParameters --skipLibCheck";
     const result = formatToolCallDisplay(
       tc("Bash", { command: longCmd, description: "Type check" }), true
@@ -96,9 +112,9 @@ describe("formatToolCallDisplay", () => {
     assert.ok(Array.isArray(result));
     const block = /** @type {CodeContentBlock} */ (result[0]);
     assert.equal(block.type, "code");
-    // Every line in the formatted code should be <= 80 chars
+    const maxWidth = maxCharsForLineCount(1); // single command, no connectors
     for (const line of block.code.split("\n")) {
-      assert.ok(line.length <= 80, `line too long (${line.length}): ${line}`);
+      assert.ok(line.length <= maxWidth, `line too long (${line.length} > ${maxWidth}): ${line}`);
     }
   });
 
