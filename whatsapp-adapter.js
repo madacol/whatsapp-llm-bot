@@ -161,62 +161,127 @@ function getContextInfo(msg) {
  */
 
 /**
- * Create a reaction-based confirmation handler.
- * Sends a message, reacts with ⏳, and waits indefinitely for 👍/👎.
- * @param {import('@whiskeysockets/baileys').WASocket} sock
- * @param {string} chatId
- * @returns {(message: string, hooks?: ConfirmHooks) => Promise<boolean>}
+ * @typedef {{
+ *   resolve: (value: boolean) => void;
+ *   rawKey: import('@whiskeysockets/baileys').WAMessageKey;
+ *   msgKey: { id: string; remoteJid: string };
+ *   chatId: string;
+ *   hooks?: ConfirmHooks;
+ *   timer: ReturnType<typeof setTimeout>;
+ * }} PendingConfirm
  */
-export function createConfirm(sock, chatId) {
-  return async (message, hooks) => {
-    const sentMsg = await sock.sendMessage(chatId, { text: message });
-    if (!sentMsg) return false;
 
-    const rawKey = sentMsg.key;
-    if (!rawKey.id || !rawKey.remoteJid) return false;
+/** Safety-net timeout: auto-reject after 30 minutes of no reaction. */
+const CONFIRM_TIMEOUT_MS = 30 * 60 * 1000;
 
-    /** @type {{ id: string; remoteJid: string }} */
-    const msgKey = { id: rawKey.id, remoteJid: rawKey.remoteJid };
+/**
+ * @typedef {{
+ *   handleReactions: (reactions: Array<{ key: { id: string; remoteJid: string }; reaction: { text: string } }>, sock: import('@whiskeysockets/baileys').WASocket) => void;
+ *   createConfirm: (sock: import('@whiskeysockets/baileys').WASocket, chatId: string) => (message: string, hooks?: ConfirmHooks) => Promise<boolean>;
+ *   readonly size: number;
+ *   clear: () => void;
+ * }} ConfirmRegistry
+ */
 
-    // React with hourglass to indicate waiting
-    sock.sendMessage(chatId, {
-      react: { text: "⏳", key: rawKey },
-    });
+/**
+ * Create a registry that routes reactions to pending confirmations.
+ * Uses a single Map instead of per-confirm event listeners, so there is
+ * exactly zero risk of listener accumulation.
+ *
+ * Lifecycle: create once per connection; on reconnect the same registry
+ * is reused (message IDs are globally unique).
+ * @returns {ConfirmRegistry}
+ */
+export function createConfirmRegistry() {
+  /** @type {Map<string, PendingConfirm>} */
+  const pending = new Map();
 
-    if (hooks?.onSent) {
-      await hooks.onSent(msgKey);
-    }
+  return {
+    /**
+     * Route incoming reactions to any matching pending confirmation.
+     * Called once per batch from the socket-level event handler.
+     * @param {Array<{ key: { id: string; remoteJid: string }; reaction: { text: string } }>} reactions
+     * @param {import('@whiskeysockets/baileys').WASocket} sock
+     */
+    handleReactions(reactions, sock) {
+      for (const { key, reaction } of reactions) {
+        const entry = pending.get(key.id);
+        if (!entry) continue;
 
-    return new Promise((resolve) => {
-      /** @param {any[]} reactions */
-      function handler(reactions) {
-        for (const { key, reaction } of reactions) {
-          if (key.id === msgKey.id) {
-            if (reaction.text?.startsWith("👍")) {
-              sock.ev.off("messages.reaction", handler);
-              sock.sendMessage(chatId, {
-                react: { text: "✅", key: rawKey },
-              });
-              if (hooks?.onResolved) {
-                hooks.onResolved(msgKey, true);
-              }
-              resolve(true);
-            } else if (reaction.text?.startsWith("👎")) {
-              sock.ev.off("messages.reaction", handler);
-              sock.sendMessage(chatId, {
-                react: { text: "❌", key: rawKey },
-              });
-              if (hooks?.onResolved) {
-                hooks.onResolved(msgKey, false);
-              }
-              resolve(false);
-            }
-          }
+        /** @type {boolean | null} */
+        let confirmed = null;
+        /** @type {string} */
+        let emoji = "";
+
+        if (reaction.text?.startsWith("👍")) {
+          confirmed = true;
+          emoji = "✅";
+        } else if (reaction.text?.startsWith("👎")) {
+          confirmed = false;
+          emoji = "❌";
         }
-      }
 
-      sock.ev.on("messages.reaction", handler);
-    });
+        if (confirmed === null) continue;
+
+        clearTimeout(entry.timer);
+        pending.delete(key.id);
+        sock.sendMessage(entry.chatId, { react: { text: emoji, key: entry.rawKey } });
+        entry.hooks?.onResolved?.(entry.msgKey, confirmed);
+        entry.resolve(confirmed);
+      }
+    },
+
+    /**
+     * Create a confirm function scoped to a chat.
+     * @param {import('@whiskeysockets/baileys').WASocket} sock
+     * @param {string} chatId
+     * @returns {(message: string, hooks?: ConfirmHooks) => Promise<boolean>}
+     */
+    createConfirm(sock, chatId) {
+      return async (message, hooks) => {
+        const sentMsg = await sock.sendMessage(chatId, { text: message });
+        if (!sentMsg) return false;
+
+        const rawKey = sentMsg.key;
+        if (!rawKey.id || !rawKey.remoteJid) return false;
+
+        /** @type {{ id: string; remoteJid: string }} */
+        const msgKey = { id: rawKey.id, remoteJid: rawKey.remoteJid };
+
+        // React with hourglass to indicate waiting
+        sock.sendMessage(chatId, {
+          react: { text: "⏳", key: rawKey },
+        });
+
+        if (hooks?.onSent) {
+          await hooks.onSent(msgKey);
+        }
+
+        return new Promise((resolve) => {
+          const timer = setTimeout(() => {
+            pending.delete(msgKey.id);
+            sock.sendMessage(chatId, { react: { text: "⌛", key: rawKey } });
+            resolve(false);
+          }, CONFIRM_TIMEOUT_MS);
+
+          pending.set(msgKey.id, { resolve, rawKey, msgKey, chatId, hooks, timer });
+        });
+      };
+    },
+
+    /** Number of pending confirmations (for testing/monitoring). */
+    get size() {
+      return pending.size;
+    },
+
+    /** Resolve all pending confirmations as false and clear the registry. */
+    clear() {
+      for (const entry of pending.values()) {
+        clearTimeout(entry.timer);
+        entry.resolve(false);
+      }
+      pending.clear();
+    },
   };
 }
 
@@ -543,8 +608,9 @@ export async function sendBlocks(sock, chatId, source, content, options) {
  * @param {BaileysMessage} baileysMessage - Raw Baileys message
  * @param {import('@whiskeysockets/baileys').WASocket} sock
  * @param {(message: IncomingContext) => Promise<void>} messageHandler
+ * @param {ConfirmRegistry} confirmRegistry
  */
-export async function adaptIncomingMessage(baileysMessage, sock, messageHandler) {
+export async function adaptIncomingMessage(baileysMessage, sock, messageHandler, confirmRegistry) {
   // Extract message content from Baileys format
   // Ignore status updates
   if (baileysMessage.key.remoteJid === "status@broadcast") {
@@ -643,7 +709,7 @@ export async function adaptIncomingMessage(baileysMessage, sock, messageHandler)
 
     reply: (source, content) => sendBlocks(sock, chatId, source, content, { quoted: baileysMessage }),
 
-    confirm: createConfirm(sock, chatId),
+    confirm: confirmRegistry.createConfirm(sock, chatId),
 
     sendPresenceUpdate: async (presence) => {
       await sock.sendPresenceUpdate(presence, chatId);
@@ -672,10 +738,11 @@ export async function adaptIncomingMessage(baileysMessage, sock, messageHandler)
  * @param {() => Promise<void>} saveCreds
  * @param {(message: IncomingContext) => Promise<void>} onMessageHandler
  * @param {() => Promise<void>} reconnect
+ * @param {ConfirmRegistry} confirmRegistry
  * @param {((event: ReactionEvent, sock: import('@whiskeysockets/baileys').WASocket) => Promise<void>) | null} [onReaction]
  * @param {((event: PollVoteEvent) => Promise<void>) | null} [onPollVote]
  */
-function registerHandlers(sockRef, saveCreds, onMessageHandler, reconnect, onReaction = null, onPollVote = null) {
+function registerHandlers(sockRef, saveCreds, onMessageHandler, reconnect, confirmRegistry, onReaction = null, onPollVote = null) {
   sockRef.current.ev.process(async (events) => {
     if (events["connection.update"]) {
       const update = events["connection.update"];
@@ -844,21 +911,29 @@ function registerHandlers(sockRef, saveCreds, onMessageHandler, reconnect, onRea
           continue; // Don't process poll votes as regular messages
         }
 
-        await adaptIncomingMessage(message, sockRef.current, onMessageHandler);
+        await adaptIncomingMessage(message, sockRef.current, onMessageHandler, confirmRegistry);
       }
     }
 
-    if (events["messages.reaction"] && onReaction) {
+    if (events["messages.reaction"]) {
+      /** @type {Array<{ key: { id: string; remoteJid: string }; reaction: { text: string } }>} */
+      const normalized = [];
       for (const event of events["messages.reaction"]) {
         const { key, reaction } = event;
         if (!key.id || !key.remoteJid || !reaction.text) continue;
-        try {
-          await onReaction(
-            { key: { id: key.id, remoteJid: key.remoteJid }, reaction: { text: reaction.text } },
-            sockRef.current,
-          );
-        } catch (err) {
-          log.error("Error in onReaction handler:", err);
+        normalized.push({ key: { id: key.id, remoteJid: key.remoteJid }, reaction: { text: reaction.text } });
+      }
+
+      // Route to pending confirmations (single registry, no per-confirm listeners)
+      confirmRegistry.handleReactions(normalized, sockRef.current);
+
+      if (onReaction) {
+        for (const event of normalized) {
+          try {
+            await onReaction(event, sockRef.current);
+          } catch (err) {
+            log.error("Error in onReaction handler:", err);
+          }
         }
       }
     }
@@ -901,6 +976,9 @@ export async function connectToWhatsApp(handlerOrOptions) {
     }),
   };
 
+  // Single registry shared across reconnects (message IDs are globally unique).
+  const confirmRegistry = createConfirmRegistry();
+
   async function reconnect() {
     const { state: newState, saveCreds: newSaveCreds } = await useMultiFileAuthState(
       AUTH_DIR,
@@ -910,10 +988,10 @@ export async function connectToWhatsApp(handlerOrOptions) {
       auth: newState,
       browser: Browsers.ubuntu("Chrome"),
     });
-    registerHandlers(sockRef, newSaveCreds, onMessage, reconnect, onReaction, onPollVote);
+    registerHandlers(sockRef, newSaveCreds, onMessage, reconnect, confirmRegistry, onReaction, onPollVote);
   }
 
-  registerHandlers(sockRef, saveCreds, onMessage, reconnect, onReaction, onPollVote);
+  registerHandlers(sockRef, saveCreds, onMessage, reconnect, confirmRegistry, onReaction, onPollVote);
 
   return {
     async closeWhatsapp() {
