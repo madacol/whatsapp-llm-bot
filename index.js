@@ -124,6 +124,15 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
   const pendingUserResponses = new Map();
 
   /**
+   * Chats currently in LLM processing (between "LLM will respond" and harness completion).
+   * Used to prevent concurrent queries: if a second message arrives during setup,
+   * it gets buffered and injected once the harness is active, instead of spawning
+   * a parallel query.
+   * @type {Map<string, string[]>}
+   */
+  const pendingLlmChats = new Map();
+
+  /**
    * Wait for a user response on a given chat, with a timeout.
    * Registers a resolver in `pendingUserResponses` that will be triggered
    * by the next incoming message or poll vote for this chat.
@@ -346,18 +355,35 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
 
     log.debug("LLM will respond");
 
-    // Resolve active persona (if any)
-    const persona = chatInfo?.active_persona ? await getAgent(chatInfo.active_persona) : null;
-
-    // If the harness has an active query for this chat, inject the message instead of starting a new one
-    const harnessName = resolveHarnessName(persona, chatInfo);
-    const harness = resolveHarness(harnessName);
+    // Send composing signal early so the user sees feedback immediately
+    try { await messageContext.sendPresenceUpdate("composing"); } catch { /* connection may be closed */ }
 
     const userText = firstBlock?.text ?? "";
+
+    // If a query is already active or being set up for this chat, inject instead of spawning a parallel one
+    const harnessName = resolveHarnessName(
+      chatInfo?.active_persona ? await getAgent(chatInfo.active_persona) : null,
+      chatInfo,
+    );
+    const harness = resolveHarness(harnessName);
+
     if (userText && harness.injectMessage?.(chatId, userText)) {
-      log.debug("Injected message into active query for chat", chatId);
+      log.debug("Injected message into active harness query for chat", chatId);
       return;
     }
+    if (pendingLlmChats.has(chatId)) {
+      pendingLlmChats.get(chatId)?.push(userText);
+      log.debug("Buffered message for pending LLM setup on chat", chatId);
+      return;
+    }
+
+    // Mark this chat as setting up — any messages arriving during setup will be buffered
+    pendingLlmChats.set(chatId, []);
+
+    try {
+
+    // Resolve active persona (if any)
+    const persona = chatInfo?.active_persona ? await getAgent(chatInfo.active_persona) : null;
 
     // Get system prompt and model from persona, chat, or defaults
     let systemPrompt = (persona?.systemPrompt ?? chatInfo?.system_prompt ?? config.system_prompt) + systemPromptSuffix;
@@ -453,15 +479,26 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
       },
     };
 
-    // harness already resolved above (before injection check)
-    try { await messageContext.sendPresenceUpdate("composing"); } catch { /* connection may be closed */ }
-    try {
-      await harness.processLlmResponse({ session, llmConfig, messages: preparedMessages, mediaRegistry, hooks, cwd: getChatWorkDir(chatId, chatInfo?.harness_cwd) });
+    // Append any messages that arrived during setup to the conversation
+    const buffered = pendingLlmChats.get(chatId) ?? [];
+    pendingLlmChats.delete(chatId);
+    for (const text of buffered) {
+      if (text) {
+        /** @type {UserMessage} */
+        const bufferedMsg = { role: "user", content: [{ type: "text", text }] };
+        preparedMessages.push(bufferedMsg);
+        log.debug("Appended buffered message to conversation for chat", chatId);
+      }
+    }
+
+    await harness.processLlmResponse({ session, llmConfig, messages: preparedMessages, mediaRegistry, hooks, cwd: getChatWorkDir(chatId, chatInfo?.harness_cwd) });
+
     } catch (error) {
-      log.error(error);
+      log.error("handleLlmMessage failed:", error);
       const errorMessage = error instanceof Error ? error.message : JSON.stringify(error, null, 2);
-      await context.reply("error", errorMessage);
+      try { await context.reply("error", errorMessage); } catch { /* best effort */ }
     } finally {
+      pendingLlmChats.delete(chatId); // clean up in case of error before flush
       try {
         await messageContext.sendPresenceUpdate("paused");
       } catch {

@@ -73,9 +73,56 @@ describe("formatBashCommand", () => {
     assert.equal(formatBashCommand("ls -la"), "ls -la");
   });
 
-  it("does not break a line with no spaces within threshold", () => {
+  it("hard-breaks long tokens with no spaces", () => {
     const longToken = "a".repeat(100);
-    assert.equal(formatBashCommand(longToken), longToken);
+    const result = formatBashCommand(longToken);
+    const lines = result.split("\n");
+    // Should be broken into multiple lines, each within maxWidth
+    assert.ok(lines.length >= 2, `expected hard-break, got single line of ${longToken.length} chars`);
+    // No empty continuation lines (the old double-backslash bug)
+    for (const line of lines) {
+      const trimmed = line.replace(/\\$/, "").trim();
+      assert.ok(trimmed.length > 0, `empty continuation line: ${JSON.stringify(line)}`);
+    }
+  });
+
+  it("does not produce empty continuation lines from indent-space breaks (OOM regression)", () => {
+    // This exact pattern caused the OOM: connectors narrow maxWidth, then
+    // lastIndexOf(" ", wrapWidth) found spaces inside the indent prefix,
+    // producing empty "\" lines and (before the fix) an infinite loop.
+    const cmd = 'pnpm exec jest --testPathPattern="tests/code-image-renderer.test.js" --no-coverage 2>&1 ; echo "Exit code: $?"';
+    const result = formatBashCommand(cmd);
+    const lines = result.split("\n");
+    for (const line of lines) {
+      const content = line.replace(/\\$/, "").trim();
+      assert.ok(content.length > 0, `empty continuation line in: ${JSON.stringify(line)}\nfull output:\n${result}`);
+    }
+  });
+
+  it("hard-breaks use backslash without leading space", () => {
+    // When breaking mid-token (no space), the continuation should be "\"
+    // not " \" — the latter would escape the space in bash
+    const cmd = "echo " + "x".repeat(150);
+    const result = formatBashCommand(cmd);
+    const lines = result.split("\n");
+    for (let i = 0; i < lines.length - 1; i++) {
+      if (!lines[i].includes(" \\")) {
+        // This is a hard-break line — should end with "\" not " \"
+        assert.ok(lines[i].endsWith("\\"), `expected trailing backslash: ${lines[i]}`);
+      }
+    }
+  });
+
+  it("space-breaks use backslash with leading space", () => {
+    // When breaking at a word boundary, the continuation should be " \"
+    const cmd = "ls -la /home/user/some/path /home/user/another/path /home/user/third/path";
+    const result = formatBashCommand(cmd);
+    const lines = result.split("\n");
+    const spaceBreaks = lines.filter(l => l.endsWith(" \\"));
+    // If the command is long enough to wrap, space breaks should use " \"
+    if (lines.length > 1) {
+      assert.ok(spaceBreaks.length > 0, `expected space-break lines with " \\", got:\n${result}`);
+    }
   });
 });
 
