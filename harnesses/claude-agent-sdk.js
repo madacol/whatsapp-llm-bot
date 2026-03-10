@@ -528,13 +528,15 @@ export function createClaudeAgentSdkHarness() {
 
           case "tool_use_summary": {
             // Compact summary of what SDK tools did (e.g. "Read 3 files").
-            // Show in debug mode via onToolResult; suppressed in non-debug
-            // (consistent with native harness autoContinue behavior).
+            // Display via onToolCall so subagent activity is visible to the user
+            // (consistent with how main-agent tool calls are displayed).
             const summary = /** @type {{ summary: string }} */ (event).summary;
             if (summary) {
-              /** @type {ToolContentBlock[]} */
-              const summaryBlocks = [{ type: "text", text: summary }];
-              await hooks.onToolResult(summaryBlocks, "tools", { autoContinue: true });
+              await hooks.onToolCall({
+                id: `summary-${randomUUID()}`,
+                name: "Agent",
+                arguments: JSON.stringify({ description: summary }),
+              });
             }
             break;
           }
