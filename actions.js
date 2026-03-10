@@ -13,7 +13,31 @@ import { createLogger } from "./logger.js";
 const log = createLogger("actions");
 
 
-const currentSessionDb = getDb("memory://");
+/**
+ * Define a lazy DB property on an object — the PGlite instance is only
+ * created when the property is first accessed. Subsequent accesses return
+ * the same instance.
+ * @param {Record<string, any>} obj
+ * @param {string} prop
+ * @param {() => import("@electric-sql/pglite").PGlite} factory
+ */
+function defineLazyDb(obj, prop, factory) {
+  Object.defineProperty(obj, prop, {
+    configurable: true,
+    enumerable: true,
+    get() {
+      const instance = factory();
+      // Replace the getter with the resolved value for subsequent accesses
+      Object.defineProperty(obj, prop, {
+        value: instance,
+        writable: false,
+        configurable: true,
+        enumerable: true,
+      });
+      return instance;
+    },
+  });
+}
 
 // Note: Action-specific messaging functions are now created inline in executeAction()
 
@@ -82,8 +106,9 @@ export async function executeAction(actionName, context, params, options = {}) {
     senderIds: context.senderIds,
     content: context.content,
     getIsAdmin: context.getIsAdmin,
-    db: getActionDb(context.chatId, actionName),
-    sessionDb: currentSessionDb,
+    // db and sessionDb are defined as lazy getters below
+    db: /** @type {PGlite} */ (/** @type {unknown} */ (undefined)),
+    sessionDb: /** @type {PGlite} */ (/** @type {unknown} */ (undefined)),
     getActions,
     log: async (...args) => {
       const message = args.join(" ");
@@ -104,11 +129,14 @@ export async function executeAction(actionName, context, params, options = {}) {
     toolCallId,
   };
 
+  // Lazy DB getters — PGlite instances are only created when first accessed
+  defineLazyDb(actionContext, "db", () => getActionDb(context.chatId, actionName));
+  defineLazyDb(actionContext, "sessionDb", () => getDb("memory://"));
   if (action.permissions?.useChatDb) {
-    actionContext.chatDb = getChatDb(context.chatId);
+    defineLazyDb(actionContext, "chatDb", () => getChatDb(context.chatId));
   }
   if (action.permissions?.useRootDb) {
-    actionContext.rootDb = getRootDb();
+    defineLazyDb(actionContext, "rootDb", () => getRootDb());
   }
   if (action.permissions?.useLlm) {
     if (!llmClient) {
