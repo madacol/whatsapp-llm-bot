@@ -75,6 +75,20 @@ function isUnsupportedBlock(block, supportedModalities) {
 }
 
 /**
+ * Check if a content block (or any nested block inside a quote) is unsupported.
+ * @param {IncomingContentBlock} block
+ * @param {string[]} supportedModalities
+ * @returns {boolean}
+ */
+function hasUnsupportedNestedBlock(block, supportedModalities) {
+  if (isUnsupportedBlock(block, supportedModalities)) return true;
+  if (block.type === "quote") {
+    return block.content.some((b) => isUnsupportedBlock(b, supportedModalities));
+  }
+  return false;
+}
+
+/**
  * Check if any user message contains content blocks of types unsupported by the target model.
  * @param {MessageRow[]} messages
  * @param {string[]} supportedModalities
@@ -84,7 +98,7 @@ function hasUnsupportedContent(messages, supportedModalities) {
   for (const msg of messages) {
     if (msg.message_data?.role !== "user") continue;
     for (const block of msg.message_data.content) {
-      if (isUnsupportedBlock(block, supportedModalities)) return true;
+      if (hasUnsupportedNestedBlock(block, supportedModalities)) return true;
     }
   }
   return false;
@@ -129,7 +143,7 @@ export async function convertUnsupportedMedia(
 
   for (let msgIdx = 0; msgIdx < messages.length; msgIdx++) {
     const msg = messages[msgIdx];
-    if (msg.message_data?.role !== "user" || !msg.message_data.content.some((b) => isUnsupportedBlock(b, supportedModalities))) {
+    if (msg.message_data?.role !== "user" || !msg.message_data.content.some((b) => hasUnsupportedNestedBlock(b, supportedModalities))) {
       result.push(msg);
       continue;
     }
@@ -146,6 +160,52 @@ export async function convertUnsupportedMedia(
 
     for (let i = 0; i < cloned.message_data.content.length; i++) {
       const block = cloned.message_data.content[i];
+
+      // Recurse into quote blocks to convert nested media
+      if (block.type === "quote") {
+        const quoteBlock = /** @type {QuoteContentBlock} */ (block);
+        const clonedQuote = { ...quoteBlock, content: [...quoteBlock.content] };
+        cloned.message_data.content[i] = clonedQuote;
+        for (let qi = 0; qi < clonedQuote.content.length; qi++) {
+          const qb = clonedQuote.content[qi];
+          if (!isUnsupportedBlock(qb, supportedModalities)) continue;
+          const qType = /** @type {"image" | "audio" | "video"} */ (qb.type);
+          const qModelId =
+            mediaToTextModels[qType] || mediaToTextModels.general || config[`${qType}_to_text_model`] || config.media_to_text_model || "";
+          if (!qModelId) {
+            clonedQuote.content[qi] = /** @type {TextContentBlock} */ ({
+              type: "text",
+              text: `[Unsupported ${qType} content — no media-to-text model configured]`,
+            });
+            skippedTypes.add(qType);
+            continue;
+          }
+          const qData = /** @type {{ data: string }} */ (qb).data;
+          const qHash = hashContent(qData);
+          const { rows: qRows } =
+            await db.sql`SELECT translation FROM media_to_text_cache WHERE content_hash = ${qHash} AND model_id = ${qModelId}`;
+          /** @type {string} */
+          let qTranslation;
+          if (qRows.length > 0) {
+            qTranslation = /** @type {string} */ (qRows[0].translation);
+          } else {
+            const qPrompt = MEDIA_TO_TEXT_PROMPTS[qType] || `Describe this ${qType} content in detail.`;
+            qTranslation = await sendSimpleChatCompletion(llmClient, qModelId, [
+              { role: /** @type {const} */ ("user"), content: [{ type: "text", text: qPrompt }, qb] },
+            ]) || `[Failed to describe ${qType}]`;
+            await db.sql`INSERT INTO media_to_text_cache (content_hash, model_id, translation)
+              VALUES (${qHash}, ${qModelId}, ${qTranslation})
+              ON CONFLICT (content_hash, model_id) DO NOTHING`;
+          }
+          const qLabel = DESCRIPTION_LABELS[qType] || `${qType} description`;
+          clonedQuote.content[qi] = /** @type {TextContentBlock} */ ({
+            type: "text",
+            text: `[${qLabel}: ${qTranslation}]`,
+          });
+        }
+        continue;
+      }
+
       if (!isUnsupportedBlock(block, supportedModalities)) continue;
 
       const contentType = /** @type {"image" | "audio" | "video"} */ (block.type);
