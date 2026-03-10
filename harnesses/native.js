@@ -26,7 +26,6 @@ export const NO_OP_HOOKS = {
   onAskUser: async () => "",
   onToolCall: async () => {},
   onToolResult: async (_blocks, _name, _perms) => {},
-  onToolResultCapture: () => {},
   onToolError: async () => {},
   onContinuePrompt: async () => true,
   onDepthLimit: async () => false,

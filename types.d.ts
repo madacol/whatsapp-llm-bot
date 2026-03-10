@@ -92,6 +92,10 @@ type ContentBlock = IncomingContentBlock | ToolCallContentBlock;
     role: "tool";
     tool_id: string;
     content: ToolContentBlock[];
+    /** WhatsApp message key ID of the tool-call display message (for react-to-inspect). */
+    wa_key_id?: string;
+    /** Tool name (for display in react-to-inspect). */
+    tool_name?: string;
   };
 
   type Message = UserMessage | AssistantMessage | ToolMessage;
@@ -289,8 +293,6 @@ type AgentIOHooks = {
   onAskUser?: (question: string, options: string[], preamble?: string, descriptions?: string[]) => Promise<string>;
   onToolCall?: (toolCall: LlmChatResponse['toolCalls'][0], formatToolCall?: (params: Record<string, any>) => string) => Promise<MessageEditor | void>;
   onToolResult?: (blocks: ToolContentBlock[], toolName: string, permissions: PermissionFlags) => Promise<void>;
-  /** Called when the SDK emits a tool result. Used to populate the inspect cache. */
-  onToolResultCapture?: (toolUseId: string, resultText: string) => void;
   onToolError?: (error: string) => Promise<void>;
   onContinuePrompt?: () => Promise<boolean>;
   onDepthLimit?: () => Promise<boolean>;

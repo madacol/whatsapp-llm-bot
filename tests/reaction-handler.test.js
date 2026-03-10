@@ -7,7 +7,6 @@ import { describe, it, before } from "node:test";
 import assert from "node:assert/strict";
 import { createTestDb, seedChat } from "./helpers.js";
 import { setDb } from "../db.js";
-import { createToolInspectCache } from "../tool-inspect-cache.js";
 
 /** @type {import("@electric-sql/pglite").PGlite} */
 let testDb;
@@ -56,13 +55,31 @@ function makeReactionEvent(msgKeyId, emoji) {
  * @returns {{ sendMessage: Function, sent: Array<{jid: string, content: object}> }}
  */
 function makeSock() {
-  /** @type {Array<{jid: string, content: object}>} */
+  /** @type {Array<{jid: string, content: object}> } */
   const sent = [];
   return {
     sent,
     sendMessage: async (/** @type {string} */ jid, /** @type {object} */ content) => {
       sent.push({ jid, content });
     },
+  };
+}
+
+/**
+ * Build a mock store for reaction handler tests.
+ * @param {{ updateCalls?: string[], addMessageCalls?: string[], updateReturns?: any, getToolResultReturns?: any }} [opts]
+ */
+function makeMockStore(opts = {}) {
+  const { updateCalls = [], addMessageCalls = [], updateReturns = { message_id: 1 }, getToolResultReturns = null } = opts;
+  return {
+    updateToolMessage: async (/** @type {string} */ chatId, /** @type {string} */ toolCallId, /** @type {ToolMessage} */ msg) => {
+      updateCalls.push(JSON.stringify({ chatId, toolCallId, msg }));
+      return updateReturns;
+    },
+    addMessage: async (/** @type {string} */ chatId, /** @type {ToolMessage} */ msg, /** @type {string[] | null} */ senderIds) => {
+      addMessageCalls.push(JSON.stringify({ chatId, msg, senderIds }));
+    },
+    getToolResultByWaKeyId: async () => getToolResultReturns,
   };
 }
 
@@ -86,22 +103,13 @@ it("stores tool result on approval via updateToolMessage", async () => {
   const updateCalls = [];
   /** @type {string[]} */
   const addMessageCalls = [];
-  const mockStore = {
-    updateToolMessage: async (/** @type {string} */ chatId, /** @type {string} */ toolCallId, /** @type {ToolMessage} */ msg) => {
-      updateCalls.push(JSON.stringify({ chatId, toolCallId, msg }));
-      return { message_id: 1, chat_id: chatId, sender_id: "bot", message_data: msg, timestamp: new Date() };
-    },
-    addMessage: async (/** @type {string} */ chatId, /** @type {ToolMessage} */ msg, /** @type {string[] | null} */ senderIds) => {
-      addMessageCalls.push(JSON.stringify({ chatId, msg, senderIds }));
-    },
-  };
+  const mockStore = makeMockStore({ updateCalls, addMessageCalls });
 
   const onReaction = createReactionHandler({
     store: /** @type {any} */ (mockStore),
     executeActionFn: async () => ({ result: "action completed successfully" }),
     pendingByMsgKeyId,
     rootDb: testDb,
-    toolInspectCache: createToolInspectCache(),
   });
 
   const sock = makeSock();
@@ -123,20 +131,13 @@ it("stores error tool result on execution failure via updateToolMessage", async 
 
   /** @type {string[]} */
   const updateCalls = [];
-  const mockStore = {
-    updateToolMessage: async (/** @type {string} */ chatId, /** @type {string} */ toolCallId, /** @type {ToolMessage} */ msg) => {
-      updateCalls.push(JSON.stringify({ chatId, toolCallId, msg }));
-      return { message_id: 1, chat_id: chatId, sender_id: "bot", message_data: msg, timestamp: new Date() };
-    },
-    addMessage: async () => {},
-  };
+  const mockStore = makeMockStore({ updateCalls });
 
   const onReaction = createReactionHandler({
     store: /** @type {any} */ (mockStore),
     executeActionFn: async () => { throw new Error("something broke"); },
     pendingByMsgKeyId,
     rootDb: testDb,
-    toolInspectCache: createToolInspectCache(),
   });
 
   const sock = makeSock();
@@ -157,13 +158,7 @@ it("stores rejection tool result via updateToolMessage", async () => {
 
   /** @type {string[]} */
   const updateCalls = [];
-  const mockStore = {
-    updateToolMessage: async (/** @type {string} */ chatId, /** @type {string} */ toolCallId, /** @type {ToolMessage} */ msg) => {
-      updateCalls.push(JSON.stringify({ chatId, toolCallId, msg }));
-      return { message_id: 1, chat_id: chatId, sender_id: "bot", message_data: msg, timestamp: new Date() };
-    },
-    addMessage: async () => {},
-  };
+  const mockStore = makeMockStore({ updateCalls });
 
   const executeCalled = { value: false };
   const onReaction = createReactionHandler({
@@ -171,7 +166,6 @@ it("stores rejection tool result via updateToolMessage", async () => {
     executeActionFn: async () => { executeCalled.value = true; return { result: "nope" }; },
     pendingByMsgKeyId,
     rootDb: testDb,
-    toolInspectCache: createToolInspectCache(),
   });
 
   const sock = makeSock();
@@ -195,22 +189,13 @@ it("skips tool storage when tool_call_id is null", async () => {
   const updateCalls = [];
   /** @type {string[]} */
   const addMessageCalls = [];
-  const mockStore = {
-    updateToolMessage: async (/** @type {string} */ chatId, /** @type {string} */ toolCallId, /** @type {ToolMessage} */ msg) => {
-      updateCalls.push(JSON.stringify({ chatId, toolCallId, msg }));
-      return null;
-    },
-    addMessage: async (/** @type {string} */ chatId, /** @type {ToolMessage} */ msg, /** @type {string[] | null} */ senderIds) => {
-      addMessageCalls.push(JSON.stringify({ chatId, msg, senderIds }));
-    },
-  };
+  const mockStore = makeMockStore({ updateCalls, addMessageCalls });
 
   const onReaction = createReactionHandler({
     store: /** @type {any} */ (mockStore),
     executeActionFn: async () => ({ result: "done via !command" }),
     pendingByMsgKeyId,
     rootDb: testDb,
-    toolInspectCache: createToolInspectCache(),
   });
 
   const sock = makeSock();
@@ -228,22 +213,13 @@ it("falls back to addMessage when updateToolMessage returns null (pre-stub confi
   const updateCalls = [];
   /** @type {string[]} */
   const addMessageCalls = [];
-  const mockStore = {
-    updateToolMessage: async (/** @type {string} */ chatId, /** @type {string} */ toolCallId, /** @type {ToolMessage} */ msg) => {
-      updateCalls.push(JSON.stringify({ chatId, toolCallId, msg }));
-      return null; // No stub found — pre-stub era confirmation
-    },
-    addMessage: async (/** @type {string} */ chatId, /** @type {ToolMessage} */ msg, /** @type {string[] | null} */ senderIds) => {
-      addMessageCalls.push(JSON.stringify({ chatId, msg, senderIds }));
-    },
-  };
+  const mockStore = makeMockStore({ updateCalls, addMessageCalls, updateReturns: null });
 
   const onReaction = createReactionHandler({
     store: /** @type {any} */ (mockStore),
     executeActionFn: async () => ({ result: "completed" }),
     pendingByMsgKeyId,
     rootDb: testDb,
-    toolInspectCache: createToolInspectCache(),
   });
 
   const sock = makeSock();
@@ -255,6 +231,34 @@ it("falls back to addMessage when updateToolMessage returns null (pre-stub confi
   assert.equal(call.msg.role, "tool");
   assert.equal(call.msg.tool_id, "call_abc123");
   assert.deepEqual(call.msg.content, [{ type: "text", text: "completed" }]);
+});
+
+it("edits tool-call message with result on react-to-inspect", async () => {
+  const pendingByMsgKeyId = new Map();
+  const toolResult = {
+    role: "tool",
+    tool_id: "toolu_123",
+    tool_name: "Bash",
+    wa_key_id: "wa-key-inspect",
+    content: [{ type: "text", text: "hello from bash" }],
+  };
+  const mockStore = makeMockStore({ getToolResultReturns: toolResult });
+
+  const onReaction = createReactionHandler({
+    store: /** @type {any} */ (mockStore),
+    executeActionFn: async () => ({ result: "" }),
+    pendingByMsgKeyId,
+    rootDb: testDb,
+  });
+
+  const sock = makeSock();
+  await onReaction(makeReactionEvent("wa-key-inspect", "👁"), /** @type {any} */ (sock));
+
+  assert.equal(sock.sent.length, 1, "should send one edit message");
+  const msg = /** @type {any} */ (sock.sent[0].content);
+  assert.ok(msg.edit, "should be an edit message");
+  assert.ok(msg.text.includes("hello from bash"), "should contain tool result");
+  assert.ok(msg.text.includes("Bash"), "should contain tool name");
 });
 
 });

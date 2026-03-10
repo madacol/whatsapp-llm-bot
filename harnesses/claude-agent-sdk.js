@@ -373,7 +373,7 @@ export function createClaudeAgentSdkHarness() {
         injectMessage(session.chatId, text);
       }
 
-      /** @type {Map<string, { editor?: MessageEditor, toolName: string }>} */
+      /** @type {Map<string, { editor?: MessageEditor, toolName: string, description: string | null, waKeyId: string | null }>} */
       const activeTools = new Map();
 
       let eventCount = 0;
@@ -423,12 +423,19 @@ export function createClaudeAgentSdkHarness() {
                   storedBlocks.push({ type: "text", text: block.text });
                 } else if (block.type === "tool_use") {
                   log.debug(`  block: tool_use ${block.name}`);
+                  const input = /** @type {Record<string, unknown>} */ (block.input ?? {});
+                  const description = typeof input.description === "string" ? input.description : null;
                   const editor = await hooks.onToolCall({
                     id: block.id,
                     name: block.name,
                     arguments: JSON.stringify(block.input),
                   });
-                  activeTools.set(block.id, { editor: editor ?? undefined, toolName: block.name });
+                  activeTools.set(block.id, {
+                    editor: editor ?? undefined,
+                    toolName: block.name,
+                    description,
+                    waKeyId: editor?.keyId ?? null,
+                  });
                   storedBlocks.push({
                     type: "tool",
                     tool_id: block.id,
@@ -514,19 +521,23 @@ export function createClaudeAgentSdkHarness() {
             const { toolUseId: resolvedToolUseId, resultText } = extractToolResultFromEvent(userEvent);
 
             if (resolvedToolUseId) {
-              if (resultText != null) {
-                hooks.onToolResultCapture?.(resolvedToolUseId, resultText);
+              const active = activeTools.get(resolvedToolUseId);
 
-                // Persist tool result to DB
-                const toolMsg = createToolMessage(resolvedToolUseId, resultText);
+              if (resultText != null) {
+                // Persist tool result to DB (with wa_key_id for react-to-inspect)
+                /** @type {ToolMessage} */
+                const toolMsg = {
+                  ...createToolMessage(resolvedToolUseId, resultText),
+                  ...(active?.waKeyId && { wa_key_id: active.waKeyId }),
+                  ...(active?.toolName && { tool_name: active.toolName }),
+                };
                 messages.push(toolMsg);
                 await session.addMessage(session.chatId, toolMsg, session.senderIds);
               }
 
-              // Update the active tool entry with its final display via the editor
-              const active = activeTools.get(resolvedToolUseId);
+              // Restore original description (or tool name) on completion
               if (active?.editor) {
-                await active.editor(`${active.toolName} ✅`);
+                await active.editor(active.description || active.toolName);
               }
               activeTools.delete(resolvedToolUseId);
             }
