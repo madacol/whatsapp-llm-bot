@@ -45,4 +45,6 @@ export default {
   get smtp_user() { return process.env.SMTP_USER || ""; },
   get smtp_pass() { return process.env.SMTP_PASS || ""; },
   get alert_email() { return process.env.ALERT_EMAIL || ""; },
+
+  get workspaces_dir() { return process.env.WORKSPACES_DIR || ""; },
 };

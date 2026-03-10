@@ -1,10 +1,16 @@
 import { mkdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { resolve } from "node:path";
+import config from "./config.js";
 
 /** Workspaces live outside the bot project so the SDK's upward CLAUDE.md
  *  traversal never reaches the bot's own CLAUDE.md / settings. */
-const WORKSPACES_DIR = resolve(homedir(), "chat-workspaces");
+const DEFAULT_WORKSPACES_DIR = resolve(homedir(), "chat-workspaces");
+
+/** @returns {string} */
+function getWorkspacesDir() {
+  return config.workspaces_dir ? resolve(config.workspaces_dir) : DEFAULT_WORKSPACES_DIR;
+}
 
 /**
  * Return (and lazily create) a unique working directory for a chat.
@@ -18,7 +24,7 @@ const WORKSPACES_DIR = resolve(homedir(), "chat-workspaces");
  */
 export function getChatWorkDir(chatId, explicitCwd) {
   if (explicitCwd) return resolve(explicitCwd);
-  const dir = resolve(WORKSPACES_DIR, chatId);
+  const dir = resolve(getWorkspacesDir(), chatId);
   mkdirSync(dir, { recursive: true });
   return dir;
 }
