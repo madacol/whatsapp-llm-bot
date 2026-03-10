@@ -7,6 +7,31 @@ export const MIN_LINES_FOR_IMAGE = 5;
 const FONT_SIZE = 14;
 const LINE_HEIGHT = 20;
 const PADDING = 16;
+const CHAR_WIDTH = FONT_SIZE * 0.6;
+
+/**
+ * Maximum image aspect ratio (width:height) before WhatsApp crops or
+ * renders the image too small. A ratio of ~6:1 keeps code images readable
+ * on mobile without being excessively wide.
+ *
+ * At 6:1: 1 line → 33 chars, 2 → 47, 3 → 61, 5+ → 80 (capped by caller).
+ */
+const MAX_ASPECT_RATIO = 6;
+
+/**
+ * Compute the maximum number of characters per line that keeps the rendered
+ * code image within the target aspect ratio for the given number of lines.
+ * Returns Infinity when the line count is high enough that no wrapping is needed.
+ * @param {number} lineCount
+ * @returns {number}
+ */
+export function maxCharsForLineCount(lineCount) {
+  const height = lineCount * LINE_HEIGHT + PADDING * 2;
+  const maxWidth = MAX_ASPECT_RATIO * height;
+  // svgWidth = chars * CHAR_WIDTH + PADDING + PADDING  (contentX = PADDING for non-diff)
+  const maxChars = Math.floor((maxWidth - PADDING * 2) / CHAR_WIDTH);
+  return Math.max(maxChars, 20); // floor at 20 to avoid absurdly narrow wrapping
+}
 const GUTTER_WIDTH = 28; // Width for the +/- prefix gutter in diffs
 const FONT_FAMILY = "DejaVu Sans Mono";
 const FONT_PATH = "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf";

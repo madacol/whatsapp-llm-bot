@@ -6,6 +6,7 @@
  */
 
 import { parseToolArgs } from "./harnesses/index.js";
+import { maxCharsForLineCount } from "./code-image-renderer.js";
 
 /** Map file extensions to language identifiers for syntax highlighting. */
 const EXT_TO_LANG = /** @type {Record<string, string>} */ ({
@@ -96,30 +97,33 @@ export function formatSdkToolCall(name, args) {
   }
 }
 
-/** Max characters per line before wrapping at the last parameter separator. */
-const MAX_LINE_WIDTH = 80;
-
 /**
- * Wrap a single line at the last space that keeps it under `MAX_LINE_WIDTH`.
- * Continuation lines are indented with `indent`. If no suitable break point
- * exists (e.g. a single very long token), the line is left as-is.
+ * Wrap a single line at the last space that keeps it under `maxWidth`.
+ * Continuation lines are indented with `indent` and the previous line
+ * gets a trailing ` \` (bash line continuation) for proper syntax highlighting.
+ * If no suitable break point exists (e.g. a single very long token), the line
+ * is left as-is.
  * @param {string} line
  * @param {string} indent
+ * @param {number} maxWidth
  * @returns {string}
  */
-function wrapLongLine(line, indent) {
-  if (line.length <= MAX_LINE_WIDTH) return line;
+function wrapLongLine(line, indent, maxWidth) {
+  if (line.length <= maxWidth) return line;
 
   /** @type {string[]} */
   const wrapped = [];
   let remaining = line;
 
-  while (remaining.length > MAX_LINE_WIDTH) {
-    // Find the last space within the threshold
-    const breakIdx = remaining.lastIndexOf(" ", MAX_LINE_WIDTH);
+  // Reserve 2 chars for the trailing " \" on wrapped lines
+  const wrapWidth = maxWidth - 2;
+
+  while (remaining.length > maxWidth) {
+    // Find the last space within the threshold (accounting for " \")
+    const breakIdx = remaining.lastIndexOf(" ", wrapWidth);
     if (breakIdx <= 0) break; // no good break point — leave as-is
 
-    wrapped.push(remaining.slice(0, breakIdx));
+    wrapped.push(remaining.slice(0, breakIdx) + " \\");
     remaining = indent + remaining.slice(breakIdx + 1);
   }
   wrapped.push(remaining);
@@ -127,12 +131,36 @@ function wrapLongLine(line, indent) {
 }
 
 /**
+ * Apply connector splitting and line wrapping at the given width.
+ * @param {string} firstLine
+ * @param {string} rest
+ * @param {number} maxWidth
+ * @returns {string}
+ */
+function formatWithWidth(firstLine, rest, maxWidth) {
+  const parts = firstLine.split(/\s+(\|{1,2}|&&|;)\s+/);
+
+  if (parts.length <= 1) {
+    return wrapLongLine(firstLine, "    ", maxWidth) + rest;
+  }
+
+  let result = wrapLongLine(parts[0], "    ", maxWidth);
+  for (let i = 1; i < parts.length; i += 2) {
+    const connector = parts[i];
+    const segment = parts[i + 1] ?? "";
+    const line = `  ${connector} ${segment}`;
+    result += "\n" + wrapLongLine(line, "      ", maxWidth);
+  }
+  return result + rest;
+}
+
+/**
  * Reformat a bash command for visual display:
  * 1. Break at pipes and connectors so each stage starts on its own line
  *    (with 2-space indent for continuation).
- * 2. Wrap any resulting line that still exceeds `MAX_LINE_WIDTH` at the last
- *    parameter separator (space), using 4-space indent to visually distinguish
- *    parameter continuation from connector continuation.
+ * 2. Wrap lines to keep the rendered code image within WhatsApp's acceptable
+ *    aspect ratio. The max character width is derived from the line count
+ *    using the code image renderer's pixel dimensions.
  *
  * For multi-line commands (e.g. heredocs), only the first line is split at
  * connectors; the rest is preserved as-is.
@@ -144,20 +172,15 @@ export function formatBashCommand(command) {
   const firstLine = newlineIdx === -1 ? command : command.slice(0, newlineIdx);
   const rest = newlineIdx === -1 ? "" : command.slice(newlineIdx);
 
-  const parts = firstLine.split(/\s+(\|{1,2}|&&|;)\s+/);
+  // First pass: split at connectors only (no char wrapping) to get base line count.
+  const connectorParts = firstLine.split(/\s+(\|{1,2}|&&|;)\s+/);
+  const baseLineCount = Math.ceil(connectorParts.length / 2);
 
-  if (parts.length <= 1) {
-    return wrapLongLine(firstLine, "    ") + rest;
-  }
+  // Derive max char width from the aspect ratio constraint, capped at 80.
+  // More lines → wider allowed; fewer lines → narrower to avoid thin images.
+  const maxWidth = Math.min(80, maxCharsForLineCount(baseLineCount));
 
-  let result = wrapLongLine(parts[0], "    ");
-  for (let i = 1; i < parts.length; i += 2) {
-    const connector = parts[i];
-    const segment = parts[i + 1] ?? "";
-    const line = `  ${connector} ${segment}`;
-    result += "\n" + wrapLongLine(line, "      ");
-  }
-  return result + rest;
+  return formatWithWidth(firstLine, rest, maxWidth);
 }
 
 /**
