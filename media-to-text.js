@@ -109,6 +109,100 @@ function hasUnsupportedContent(messages, supportedModalities) {
  */
 
 /**
+ * Resolve the media-to-text model ID for a given content type.
+ * @param {"image" | "audio" | "video"} contentType
+ * @param {{ image?: string, audio?: string, video?: string, general?: string }} mediaToTextModels
+ * @returns {string} Model ID, or empty string if none configured
+ */
+function resolveMediaModel(contentType, mediaToTextModels) {
+  return mediaToTextModels[contentType] || mediaToTextModels.general || config[`${contentType}_to_text_model`] || config.media_to_text_model || "";
+}
+
+/**
+ * Translate a single unsupported media block to a text description, using cache when available.
+ *
+ * @param {IncomingContentBlock} block - The media block to convert
+ * @param {"image" | "audio" | "video"} contentType
+ * @param {string} modelId - The media-to-text model to use
+ * @param {LlmClient} llmClient
+ * @param {PGlite} db
+ * @param {ChatMessage[]} contextMessages - Preceding conversation for richer prompts
+ * @param {string} currentText - Text from the current message for context
+ * @returns {Promise<TextContentBlock>}
+ */
+async function translateMediaBlock(block, contentType, modelId, llmClient, db, contextMessages, currentText) {
+  const data = /** @type {{ data: string }} */ (block).data;
+  const hash = hashContent(data);
+
+  // Check cache
+  const { rows } =
+    await db.sql`SELECT translation FROM media_to_text_cache WHERE content_hash = ${hash} AND model_id = ${modelId}`;
+
+  /** @type {string} */
+  let translation;
+
+  if (rows.length > 0) {
+    translation = /** @type {string} */ (rows[0].translation);
+  } else {
+    const prompt = MEDIA_TO_TEXT_PROMPTS[contentType] || `Describe this ${contentType} content in detail.`;
+
+    /** @type {IncomingContentBlock[]} */
+    const userContent = [];
+    if (currentText) {
+      userContent.push({ type: "text", text: `User's message: ${currentText}\n\n${prompt}` });
+    } else {
+      userContent.push({ type: "text", text: prompt });
+    }
+    userContent.push(block);
+
+    /** @type {ChatMessage[]} */
+    const llmMessages = [
+      ...contextMessages,
+      { role: /** @type {const} */ ("user"), content: userContent },
+    ];
+
+    translation = await sendSimpleChatCompletion(llmClient, modelId, llmMessages) || `[Failed to describe ${contentType}]`;
+
+    // Cache the translation
+    await db.sql`INSERT INTO media_to_text_cache (content_hash, model_id, translation)
+      VALUES (${hash}, ${modelId}, ${translation})
+      ON CONFLICT (content_hash, model_id) DO NOTHING`;
+  }
+
+  const label = DESCRIPTION_LABELS[contentType] || `${contentType} description`;
+  return /** @type {TextContentBlock} */ ({
+    type: "text",
+    text: `[${label}: ${translation}]`,
+  });
+}
+
+/**
+ * Build conversation context from preceding messages (text-only summary).
+ * @param {MessageRow[]} messages
+ * @param {number} upToIndex - Exclusive upper bound (messages before this index)
+ * @returns {ChatMessage[]}
+ */
+function buildContextMessages(messages, upToIndex) {
+  /** @type {ChatMessage[]} */
+  const contextMessages = [];
+  for (let j = 0; j < upToIndex; j++) {
+    const prev = messages[j];
+    if (!prev.message_data) continue;
+    const role = prev.message_data.role;
+    if (role === "user" || role === "assistant") {
+      const text = prev.message_data.content
+        .filter(/** @returns {b is TextContentBlock} */ (b) => b.type === "text")
+        .map((b) => b.text)
+        .join("\n");
+      if (text) {
+        contextMessages.push({ role, content: [{ type: "text", text }] });
+      }
+    }
+  }
+  return contextMessages;
+}
+
+/**
  * Convert unsupported media blocks in message history to text descriptions.
  * Returns the original messages if no conversion is needed.
  *
@@ -158,6 +252,13 @@ export async function convertUnsupportedMedia(
     };
     result.push(cloned);
 
+    // Build context once per message (not per block)
+    const contextMessages = buildContextMessages(messages, msgIdx);
+    const currentText = cloned.message_data.content
+      .filter(/** @returns {b is TextContentBlock} */ (b) => b.type === "text")
+      .map((b) => b.text)
+      .join("\n");
+
     for (let i = 0; i < cloned.message_data.content.length; i++) {
       const block = cloned.message_data.content[i];
 
@@ -169,39 +270,17 @@ export async function convertUnsupportedMedia(
         for (let qi = 0; qi < clonedQuote.content.length; qi++) {
           const qb = clonedQuote.content[qi];
           if (!isUnsupportedBlock(qb, supportedModalities)) continue;
-          const qType = /** @type {"image" | "audio" | "video"} */ (qb.type);
-          const qModelId =
-            mediaToTextModels[qType] || mediaToTextModels.general || config[`${qType}_to_text_model`] || config.media_to_text_model || "";
-          if (!qModelId) {
+          const mediaType = /** @type {"image" | "audio" | "video"} */ (qb.type);
+          const modelId = resolveMediaModel(mediaType, mediaToTextModels);
+          if (!modelId) {
             clonedQuote.content[qi] = /** @type {TextContentBlock} */ ({
               type: "text",
-              text: `[Unsupported ${qType} content — no media-to-text model configured]`,
+              text: `[Unsupported ${mediaType} content — no media-to-text model configured]`,
             });
-            skippedTypes.add(qType);
+            skippedTypes.add(mediaType);
             continue;
           }
-          const qData = /** @type {{ data: string }} */ (qb).data;
-          const qHash = hashContent(qData);
-          const { rows: qRows } =
-            await db.sql`SELECT translation FROM media_to_text_cache WHERE content_hash = ${qHash} AND model_id = ${qModelId}`;
-          /** @type {string} */
-          let qTranslation;
-          if (qRows.length > 0) {
-            qTranslation = /** @type {string} */ (qRows[0].translation);
-          } else {
-            const qPrompt = MEDIA_TO_TEXT_PROMPTS[qType] || `Describe this ${qType} content in detail.`;
-            qTranslation = await sendSimpleChatCompletion(llmClient, qModelId, [
-              { role: /** @type {const} */ ("user"), content: [{ type: "text", text: qPrompt }, qb] },
-            ]) || `[Failed to describe ${qType}]`;
-            await db.sql`INSERT INTO media_to_text_cache (content_hash, model_id, translation)
-              VALUES (${qHash}, ${qModelId}, ${qTranslation})
-              ON CONFLICT (content_hash, model_id) DO NOTHING`;
-          }
-          const qLabel = DESCRIPTION_LABELS[qType] || `${qType} description`;
-          clonedQuote.content[qi] = /** @type {TextContentBlock} */ ({
-            type: "text",
-            text: `[${qLabel}: ${qTranslation}]`,
-          });
+          clonedQuote.content[qi] = await translateMediaBlock(qb, mediaType, modelId, llmClient, db, contextMessages, currentText);
         }
         continue;
       }
@@ -209,11 +288,9 @@ export async function convertUnsupportedMedia(
       if (!isUnsupportedBlock(block, supportedModalities)) continue;
 
       const contentType = /** @type {"image" | "audio" | "video"} */ (block.type);
-      const toTextModelId =
-        mediaToTextModels[contentType] || mediaToTextModels.general || config[`${contentType}_to_text_model`] || config.media_to_text_model || "";
+      const modelId = resolveMediaModel(contentType, mediaToTextModels);
 
-      if (!toTextModelId) {
-        // No media-to-text model configured
+      if (!modelId) {
         cloned.message_data.content[i] = /** @type {TextContentBlock} */ ({
           type: "text",
           text: `[Unsupported ${contentType} content — no media-to-text model configured]`,
@@ -222,82 +299,7 @@ export async function convertUnsupportedMedia(
         continue;
       }
 
-      const contentData = /** @type {{ data: string }} */ (block).data;
-      const hash = hashContent(contentData);
-
-      // Check cache
-      const { rows } =
-        await db.sql`SELECT translation FROM media_to_text_cache WHERE content_hash = ${hash} AND model_id = ${toTextModelId}`;
-
-      /** @type {string} */
-      let translation;
-
-      if (rows.length > 0) {
-        translation = /** @type {string} */ (rows[0].translation);
-      } else {
-        // Build conversation context from preceding messages
-        /** @type {ChatMessage[]} */
-        const contextMessages = [];
-        for (let j = 0; j < msgIdx; j++) {
-          const prev = messages[j];
-          if (!prev.message_data) continue;
-          const role = prev.message_data.role;
-          if (role === "user") {
-            const text = prev.message_data.content
-              .filter(/** @returns {b is TextContentBlock} */ (b) => b.type === "text")
-              .map((b) => b.text)
-              .join("\n");
-            if (text) {
-              contextMessages.push({ role, content: [{ type: "text", text }] });
-            }
-          } else if (role === "assistant") {
-            const text = prev.message_data.content
-              .filter(/** @returns {b is TextContentBlock} */ (b) => b.type === "text")
-              .map((b) => b.text)
-              .join("\n");
-            if (text) {
-              contextMessages.push({ role, content: [{ type: "text", text }] });
-            }
-          }
-        }
-
-        // Collect text blocks from the current message for context
-        const currentText = cloned.message_data.content
-          .filter(/** @returns {b is TextContentBlock} */ (b) => b.type === "text")
-          .map((b) => b.text)
-          .join("\n");
-
-        // Call media-to-text model with conversation context
-        const prompt = MEDIA_TO_TEXT_PROMPTS[contentType] || `Describe this ${contentType} content in detail.`;
-
-        /** @type {IncomingContentBlock[]} */
-        const userContent = [];
-        if (currentText) {
-          userContent.push({ type: "text", text: `User's message: ${currentText}\n\n${prompt}` });
-        } else {
-          userContent.push({ type: "text", text: prompt });
-        }
-        userContent.push(block);
-
-        /** @type {ChatMessage[]} */
-        const llmMessages = [
-          ...contextMessages,
-          { role: /** @type {const} */ ("user"), content: userContent },
-        ];
-
-        translation = await sendSimpleChatCompletion(llmClient, toTextModelId, llmMessages) || `[Failed to describe ${contentType}]`;
-
-        // Cache the translation
-        await db.sql`INSERT INTO media_to_text_cache (content_hash, model_id, translation)
-          VALUES (${hash}, ${toTextModelId}, ${translation})
-          ON CONFLICT (content_hash, model_id) DO NOTHING`;
-      }
-
-      const label = DESCRIPTION_LABELS[contentType] || `${contentType} description`;
-      cloned.message_data.content[i] = /** @type {TextContentBlock} */ ({
-        type: "text",
-        text: `[${label}: ${translation}]`,
-      });
+      cloned.message_data.content[i] = await translateMediaBlock(block, contentType, modelId, llmClient, db, contextMessages, currentText);
     }
   }
 
