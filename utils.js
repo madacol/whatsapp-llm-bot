@@ -1,22 +1,24 @@
 import { mkdirSync } from "node:fs";
+import { homedir } from "node:os";
 import { resolve } from "node:path";
 
-const WORKSPACES_DIR = "./workspaces";
+/** Workspaces live outside the bot project so the SDK's upward CLAUDE.md
+ *  traversal never reaches the bot's own CLAUDE.md / settings. */
+const WORKSPACES_DIR = resolve(homedir(), "chat-workspaces");
 
 /**
  * Return (and lazily create) a unique working directory for a chat.
- * Falls back to `explicitCwd` when set, otherwise `./workspaces/<chatId>/`.
+ * Falls back to `explicitCwd` when set, otherwise `~/chat-workspaces/<chatId>/`.
  *
- * The SDK will use this as its cwd for bash commands and file operations.
- * Note: CLAUDE.md discovery still traverses parent directories (SDK limitation,
- * see anthropics/claude-agent-sdk-typescript#149).
+ * The directory is outside the bot's project tree so the SDK treats each
+ * workspace as an independent project root (no inherited CLAUDE.md).
  * @param {string} chatId
  * @param {string | null | undefined} [explicitCwd]
  * @returns {string} Absolute path to the chat's working directory
  */
 export function getChatWorkDir(chatId, explicitCwd) {
   if (explicitCwd) return resolve(explicitCwd);
-  const dir = resolve(`${WORKSPACES_DIR}/${chatId}`);
+  const dir = resolve(WORKSPACES_DIR, chatId);
   mkdirSync(dir, { recursive: true });
   return dir;
 }
