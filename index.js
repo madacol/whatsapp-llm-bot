@@ -454,7 +454,7 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
     };
 
     // harness already resolved above (before injection check)
-    await messageContext.sendPresenceUpdate("composing");
+    try { await messageContext.sendPresenceUpdate("composing"); } catch { /* connection may be closed */ }
     try {
       await harness.processLlmResponse({ session, llmConfig, messages: preparedMessages, mediaRegistry, hooks, cwd: getChatWorkDir(chatId, chatInfo?.harness_cwd) });
     } catch (error) {
@@ -462,7 +462,11 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
       const errorMessage = error instanceof Error ? error.message : JSON.stringify(error, null, 2);
       await context.reply("error", errorMessage);
     } finally {
-      await messageContext.sendPresenceUpdate("paused");
+      try {
+        await messageContext.sendPresenceUpdate("paused");
+      } catch {
+        // Connection may have closed during the query — suppress to avoid crashing.
+      }
     }
   }
 
