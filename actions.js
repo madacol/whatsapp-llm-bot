@@ -131,7 +131,7 @@ export async function executeAction(actionName, context, params, options = {}) {
 
   // Lazy DB getters — PGlite instances are only created when first accessed
   defineLazyDb(actionContext, "db", () => getActionDb(context.chatId, actionName));
-  defineLazyDb(actionContext, "sessionDb", () => getDb("memory://"));
+  defineLazyDb(actionContext, "sessionDb", () => getDb(`memory://${context.chatId}`));
   if (action.permissions?.useChatDb) {
     defineLazyDb(actionContext, "chatDb", () => getChatDb(context.chatId));
   }
