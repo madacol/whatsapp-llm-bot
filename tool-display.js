@@ -119,14 +119,18 @@ function wrapLongLine(line, indent, maxWidth) {
   const wrapWidth = maxWidth - 2;
 
   while (remaining.length > maxWidth) {
-    // Find the last space within the threshold (accounting for " \")
+    const contentStart = remaining.length - remaining.trimStart().length;
     const breakIdx = remaining.lastIndexOf(" ", wrapWidth);
-    if (breakIdx <= 0) break; // no good break point — leave as-is
 
-    wrapped.push(remaining.slice(0, breakIdx) + " \\");
-    const next = indent + remaining.slice(breakIdx + 1);
-    if (next.length >= remaining.length) break; // not making progress — avoid infinite loop
-    remaining = next;
+    if (breakIdx > contentStart) {
+      // Space break in actual content — wrap with " \" continuation
+      wrapped.push(remaining.slice(0, breakIdx) + " \\");
+      remaining = indent + remaining.slice(breakIdx + 1);
+    } else {
+      // No space in content within width — hard-break with "\"
+      wrapped.push(remaining.slice(0, wrapWidth) + "\\");
+      remaining = indent + remaining.slice(wrapWidth);
+    }
   }
   wrapped.push(remaining);
   return wrapped.join("\n");
