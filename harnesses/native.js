@@ -48,6 +48,34 @@ export function parseToolArgs(argsString) {
 }
 
 /**
+ * Enrich a base tool message with WhatsApp tracking metadata from the editor.
+ * @param {ToolMessage} base
+ * @param {MessageEditor | undefined} editor
+ * @param {string} toolName
+ * @returns {ToolMessage}
+ */
+function withEditorMeta(base, editor, toolName) {
+  return {
+    ...base,
+    ...(editor?.keyId && { wa_key_id: editor.keyId }),
+    ...(toolName && { tool_name: toolName }),
+    ...(editor?.isImage && { wa_msg_is_image: true }),
+  };
+}
+
+/**
+ * Try to edit the tool-call message in-place; swallow errors.
+ * @param {MessageEditor | undefined} editor
+ * @param {string} text
+ * @param {string} toolName
+ */
+async function tryEdit(editor, text, toolName) {
+  if (!editor) return;
+  try { await editor(text); }
+  catch (err) { log.error(`Editor failed for ${toolName}:`, err); }
+}
+
+/**
  * Execute a single tool call: run action, store result, edit message in-place.
  * Returns the autoContinue value from the action's permissions.
  * @param {{
@@ -110,19 +138,8 @@ async function executeAndStoreTool({
     if (isHtmlContent(result)) {
       const linkText = await storeAndLinkHtml(getRootDb(), result);
 
-      /** @type {ToolMessage} */
-      const toolMessage = {
-        ...createToolMessage(toolCall.id, linkText),
-        ...(editor?.keyId && { wa_key_id: editor.keyId }),
-        ...(toolName && { tool_name: toolName }),
-        ...(editor?.isImage && { wa_msg_is_image: true }),
-      };
-      await replaceStub(toolMessage);
-
-      if (editor) {
-        try { await editor(linkText); }
-        catch (err) { log.error(`Editor failed for ${toolName}:`, err); }
-      }
+      await replaceStub(withEditorMeta(createToolMessage(toolCall.id, linkText), editor, toolName));
+      await tryEdit(editor, linkText, toolName);
 
       return !!functionResponse.permissions.autoContinue;
     }
@@ -134,7 +151,7 @@ async function executeAndStoreTool({
 
     // Store tool result (silent tools get a stub to satisfy API pairing)
     /** @type {ToolMessage} */
-    const toolMessage = {
+    const toolMessage = withEditorMeta({
       role: "tool",
       tool_id: toolCall.id,
       content: functionResponse.permissions.silent
@@ -142,10 +159,7 @@ async function executeAndStoreTool({
         : isContentBlocks
           ? /** @type {ToolContentBlock[]} */ (result)
           : [{ type: "text", text: JSON.stringify(result) }],
-      ...(editor?.keyId && { wa_key_id: editor.keyId }),
-      ...(toolName && { tool_name: toolName }),
-      ...(editor?.isImage && { wa_msg_is_image: true }),
-    };
+    }, editor, toolName);
     await replaceStub(toolMessage);
 
     // Tag media from tool results so subsequent tool calls can reference them
@@ -158,22 +172,11 @@ async function executeAndStoreTool({
     }
 
     // Edit tool-call message in-place with summary label
-    if (editor) {
-      try {
-        const summary = getToolCallSummary(toolName, toolArgs, actionFormatToolCall);
-        await editor(summary);
-      } catch (err) {
-        log.error(`Editor failed for ${toolName}:`, err);
-      }
-    }
+    await tryEdit(editor, getToolCallSummary(toolName, toolArgs, actionFormatToolCall), toolName);
 
     // Only display non-text content (images, videos); text results visible via react-to-inspect
-    if (!functionResponse.permissions.silent) {
-      /** @type {ToolContentBlock[]} */
-      const displayBlocks = isContentBlocks
-        ? /** @type {ToolContentBlock[]} */ (result)
-        : [{ type: "text", text: typeof result === "string" ? result : JSON.stringify(result, null, 2) }];
-      const nonTextBlocks = displayBlocks.filter(b => b.type !== "text");
+    if (!functionResponse.permissions.silent && isContentBlocks) {
+      const nonTextBlocks = /** @type {ToolContentBlock[]} */ (result).filter(b => b.type !== "text");
       if (nonTextBlocks.length > 0) {
         await hooks.onToolResult(nonTextBlocks, toolName, functionResponse.permissions);
       }
@@ -184,19 +187,8 @@ async function executeAndStoreTool({
     log.error("Error executing tool:", error);
     const errorMessage = `Error executing ${toolName}: ${error instanceof Error ? error.message : String(error)}`;
 
-    /** @type {ToolMessage} */
-    const toolError = {
-      ...createToolMessage(toolCall.id, errorMessage),
-      ...(editor?.keyId && { wa_key_id: editor.keyId }),
-      ...(toolName && { tool_name: toolName }),
-      ...(editor?.isImage && { wa_msg_is_image: true }),
-    };
-    await replaceStub(toolError);
-
-    if (editor) {
-      try { await editor(`${toolName} — error`); }
-      catch (err) { log.error(`Editor failed for ${toolName}:`, err); }
-    }
+    await replaceStub(withEditorMeta(createToolMessage(toolCall.id, errorMessage), editor, toolName));
+    await tryEdit(editor, `${toolName} — error`, toolName);
     await hooks.onToolError(errorMessage);
 
     // Errors always auto-continue for self-correction
@@ -302,7 +294,7 @@ async function processLlmResponse({ session, llmConfig, messages, mediaRegistry,
     }
 
     // Record and display tool calls, capturing editors for in-place updates
-    /** @type {Map<string, { editor?: MessageEditor, action?: Action }>} */
+    /** @type {Map<string, { editor?: MessageEditor, formatToolCall?: (params: Record<string, any>) => string }>} */
     const toolCallState = new Map();
     for (const toolCall of response.toolCalls) {
       assistantMessage.content.push({
@@ -313,7 +305,7 @@ async function processLlmResponse({ session, llmConfig, messages, mediaRegistry,
       });
       const action = actions.find(a => a.name === toolCall.name);
       const editor = await hooks.onToolCall(toolCall, action?.formatToolCall);
-      toolCallState.set(toolCall.id, { editor: editor ?? undefined, action });
+      toolCallState.set(toolCall.id, { editor: editor ?? undefined, formatToolCall: action?.formatToolCall });
     }
 
     messages.push(assistantMessage);
@@ -336,7 +328,7 @@ async function processLlmResponse({ session, llmConfig, messages, mediaRegistry,
       const shouldContinue = await executeAndStoreTool({
         session, llmConfig, toolCall, messages, mediaRegistry, hooks, agentDepth,
         editor: state?.editor,
-        actionFormatToolCall: state?.action?.formatToolCall,
+        actionFormatToolCall: state?.formatToolCall,
       });
       if (!shouldContinue) continueProcessing = false;
     }
