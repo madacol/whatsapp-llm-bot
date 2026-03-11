@@ -234,7 +234,7 @@ export async function initStore(injectedDb){
        */
       async updateToolMessage (chatId, toolCallId, messageData) {
         const {rows: [row]} = await db.sql`
-          UPDATE messages SET message_data = ${/** @type {*} */ (messageData)}
+          UPDATE messages SET message_data = ${/** @type {Message} */ (messageData)}
           WHERE chat_id = ${chatId}
             AND message_data->>'role' = 'tool'
             AND message_data->>'tool_id' = ${toolCallId}
