@@ -49,10 +49,12 @@ export function createIncomingContext(overrides = {}) {
   const responses = [];
 
   /**
-   * Record blocks from a send/reply call.
+   * Record blocks from a send/reply call and return a MessageEditor
+   * that records subsequent edits.
    * @param {"send" | "reply"} method
    * @param {MessageSource} source
    * @param {SendContent} content
+   * @returns {MessageEditor}
    */
   const recordBlocks = (method, source, content) => {
     const blocks = typeof content === "string"
@@ -65,6 +67,13 @@ export function createIncomingContext(overrides = {}) {
         : ("alt" in block && block.alt) || "";
       responses.push({ type: method, text, source, blockType: block.type });
     }
+    /** @type {MessageEditor} */
+    const editor = async (newText) => {
+      responses.push({ type: "edit", text: newText, source });
+    };
+    editor.keyId = `mock-key-${responses.length}`;
+    editor.isImage = blocks.some(b => b.type === "image" || b.type === "code" || b.type === "diff");
+    return editor;
   };
 
   /** @type {IncomingContext} */
@@ -84,8 +93,8 @@ export function createIncomingContext(overrides = {}) {
     sendPoll: async (name, options, selectableCount) => {
       responses.push({ type: "sendPoll", text: JSON.stringify({ name, options, selectableCount }) });
     },
-    send: async (source, content) => { recordBlocks("send", source, content); return undefined; },
-    reply: async (source, content) => { recordBlocks("reply", source, content); return undefined; },
+    send: async (source, content) => recordBlocks("send", source, content),
+    reply: async (source, content) => recordBlocks("reply", source, content),
     confirm: async (message) => {
       responses.push({ type: "confirm", text: message });
       return true;

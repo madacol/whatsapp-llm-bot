@@ -14,6 +14,7 @@ import { getRootDb } from "../db.js";
 import { storeLlmContext } from "../context-log.js";
 import { storeAndLinkHtml } from "../html-store.js";
 import { recordUsage, resolveCost } from "../usage-tracker.js";
+import { getToolCallSummary } from "../tool-display.js";
 import { createLogger } from "../logger.js";
 
 const log = createLogger("harness:native");
@@ -47,7 +48,7 @@ export function parseToolArgs(argsString) {
 }
 
 /**
- * Execute a single tool call: run action, store result, display to user.
+ * Execute a single tool call: run action, store result, edit message in-place.
  * Returns the autoContinue value from the action's permissions.
  * @param {{
  *   session: Session,
@@ -57,11 +58,14 @@ export function parseToolArgs(argsString) {
  *   mediaRegistry: MediaRegistry,
  *   hooks: Required<AgentIOHooks>,
  *   agentDepth?: number,
+ *   editor?: MessageEditor,
+ *   actionFormatToolCall?: (params: Record<string, any>) => string,
  * }} params
  * @returns {Promise<boolean | undefined>} The autoContinue value
  */
 async function executeAndStoreTool({
   session, llmConfig, toolCall, messages, mediaRegistry, hooks, agentDepth,
+  editor, actionFormatToolCall,
 }) {
   const { chatId, context, updateToolMessage } = session;
   const { executeActionFn, actionResolver, actionLlmClient } = llmConfig;
@@ -102,13 +106,23 @@ async function executeAndStoreTool({
 
     const result = functionResponse.result;
 
-    // HTML content → store page, send link, treat as text for LLM context
+    // HTML content → store page, edit message with link
     if (isHtmlContent(result)) {
       const linkText = await storeAndLinkHtml(getRootDb(), result);
 
-      const toolMessage = createToolMessage(toolCall.id, linkText);
+      /** @type {ToolMessage} */
+      const toolMessage = {
+        ...createToolMessage(toolCall.id, linkText),
+        ...(editor?.keyId && { wa_key_id: editor.keyId }),
+        ...(toolName && { tool_name: toolName }),
+        ...(editor?.isImage && { wa_msg_is_image: true }),
+      };
       await replaceStub(toolMessage);
-      await hooks.onToolResult([{ type: "text", text: linkText }], toolName, functionResponse.permissions);
+
+      if (editor) {
+        try { await editor(linkText); }
+        catch (err) { log.error(`Editor failed for ${toolName}:`, err); }
+      }
 
       return !!functionResponse.permissions.autoContinue;
     }
@@ -128,6 +142,9 @@ async function executeAndStoreTool({
         : isContentBlocks
           ? /** @type {ToolContentBlock[]} */ (result)
           : [{ type: "text", text: JSON.stringify(result) }],
+      ...(editor?.keyId && { wa_key_id: editor.keyId }),
+      ...(toolName && { tool_name: toolName }),
+      ...(editor?.isImage && { wa_msg_is_image: true }),
     };
     await replaceStub(toolMessage);
 
@@ -140,21 +157,46 @@ async function executeAndStoreTool({
       }
     }
 
-    /** @type {ToolContentBlock[]} */
-    const displayBlocks = isContentBlocks
-      ? /** @type {ToolContentBlock[]} */ (result)
-      : [{ type: "text", text: typeof result === "string" ? result : JSON.stringify(result, null, 2) }];
+    // Edit tool-call message in-place with summary label
+    if (editor) {
+      try {
+        const summary = getToolCallSummary(toolName, toolArgs, actionFormatToolCall);
+        await editor(summary);
+      } catch (err) {
+        log.error(`Editor failed for ${toolName}:`, err);
+      }
+    }
 
-    await hooks.onToolResult(displayBlocks, toolName, functionResponse.permissions);
+    // Only display non-text content (images, videos); text results visible via react-to-inspect
+    if (!functionResponse.permissions.silent) {
+      /** @type {ToolContentBlock[]} */
+      const displayBlocks = isContentBlocks
+        ? /** @type {ToolContentBlock[]} */ (result)
+        : [{ type: "text", text: typeof result === "string" ? result : JSON.stringify(result, null, 2) }];
+      const nonTextBlocks = displayBlocks.filter(b => b.type !== "text");
+      if (nonTextBlocks.length > 0) {
+        await hooks.onToolResult(nonTextBlocks, toolName, functionResponse.permissions);
+      }
+    }
 
     return functionResponse.permissions.autoContinue;
   } catch (error) {
     log.error("Error executing tool:", error);
     const errorMessage = `Error executing ${toolName}: ${error instanceof Error ? error.message : String(error)}`;
 
-    const toolError = createToolMessage(toolCall.id, errorMessage);
+    /** @type {ToolMessage} */
+    const toolError = {
+      ...createToolMessage(toolCall.id, errorMessage),
+      ...(editor?.keyId && { wa_key_id: editor.keyId }),
+      ...(toolName && { tool_name: toolName }),
+      ...(editor?.isImage && { wa_msg_is_image: true }),
+    };
     await replaceStub(toolError);
 
+    if (editor) {
+      try { await editor(`${toolName} — error`); }
+      catch (err) { log.error(`Editor failed for ${toolName}:`, err); }
+    }
     await hooks.onToolError(errorMessage);
 
     // Errors always auto-continue for self-correction
@@ -259,7 +301,9 @@ async function processLlmResponse({ session, llmConfig, messages, mediaRegistry,
       return result;
     }
 
-    // Record and display tool calls
+    // Record and display tool calls, capturing editors for in-place updates
+    /** @type {Map<string, { editor?: MessageEditor, action?: Action }>} */
+    const toolCallState = new Map();
     for (const toolCall of response.toolCalls) {
       assistantMessage.content.push({
         type: "tool",
@@ -268,7 +312,8 @@ async function processLlmResponse({ session, llmConfig, messages, mediaRegistry,
         arguments: toolCall.arguments,
       });
       const action = actions.find(a => a.name === toolCall.name);
-      await hooks.onToolCall(toolCall, action?.formatToolCall);
+      const editor = await hooks.onToolCall(toolCall, action?.formatToolCall);
+      toolCallState.set(toolCall.id, { editor: editor ?? undefined, action });
     }
 
     messages.push(assistantMessage);
@@ -287,8 +332,11 @@ async function processLlmResponse({ session, llmConfig, messages, mediaRegistry,
     // Execute each tool call
     let continueProcessing = true;
     for (const toolCall of response.toolCalls) {
+      const state = toolCallState.get(toolCall.id);
       const shouldContinue = await executeAndStoreTool({
         session, llmConfig, toolCall, messages, mediaRegistry, hooks, agentDepth,
+        editor: state?.editor,
+        actionFormatToolCall: state?.action?.formatToolCall,
       });
       if (!shouldContinue) continueProcessing = false;
     }

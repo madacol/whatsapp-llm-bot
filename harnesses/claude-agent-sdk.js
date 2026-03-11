@@ -16,7 +16,7 @@ import { getChatActions } from "../actions.js";
 import { createLogger } from "../logger.js";
 import { extractLastUserText } from "../message-formatting.js";
 import { createToolMessage } from "../utils.js";
-import { formatSdkToolCall } from "../tool-display.js";
+import { getToolCallSummary } from "../tool-display.js";
 
 const log = createLogger("harness:claude-agent-sdk");
 
@@ -649,10 +649,7 @@ async function handleAssistantEvent(event, ctx) {
         const id = /** @type {string} */ (block.id);
         log.debug(`  block: tool_use ${name}`);
         const input = /** @type {Record<string, unknown>} */ (block.input ?? {});
-        const description = typeof input.description === "string" ? input.description : null;
-        const displayLabel = description
-          || formatSdkToolCall(name, input)
-          || name;
+        const displayLabel = getToolCallSummary(name, input);
         const editor = await ctx.hooks.onToolCall({
           id,
           name,
