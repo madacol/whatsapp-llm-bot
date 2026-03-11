@@ -343,6 +343,17 @@ type AgentHarness = {
   waitForIdle?: () => Promise<string[]>;
 };
 
+/**
+ * SDK BetaMessage.usage extended with cache fields from the Anthropic API.
+ * The SDK's type definition doesn't include these, but the API returns them.
+ */
+type SdkUsageWithCache = {
+  input_tokens?: number;
+  output_tokens?: number;
+  cache_read_input_tokens?: number;
+  cache_creation_input_tokens?: number;
+};
+
 /* processLlmResponse types */
 
 type ExecuteActionOptions = {

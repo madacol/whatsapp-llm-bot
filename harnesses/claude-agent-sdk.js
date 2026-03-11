@@ -311,7 +311,7 @@ export function createClaudeAgentSdkHarness() {
     /** @type {string[]} */
     const stderrLines = [];
     try {
-      /** @type {Record<string, unknown>} */
+      /** @type {import("@anthropic-ai/claude-agent-sdk").Options} */
       const queryOptions = {
         systemPrompt: fullSystemPrompt,
         maxTurns: maxDepth ?? 50,
@@ -359,7 +359,7 @@ export function createClaudeAgentSdkHarness() {
 
       const q = query({
         prompt: lastUserText,
-        options: /** @type {*} */ (queryOptions),
+        options: queryOptions,
       });
 
       // Promote the placeholder with the real query object and flush buffered messages
@@ -575,14 +575,14 @@ function extractToolResultText(result) {
   // Handle array of content blocks (e.g. [{ type: "text", text: "..." }])
   if (Array.isArray(result)) {
     const texts = result
-      .filter(/** @param {*} b */ (b) => b && typeof b === "object" && typeof b.text === "string")
-      .map(/** @param {{ text: string }} b */ (b) => b.text);
+      .filter((b) => hasTextField(b))
+      .map((b) => /** @type {{ text: string }} */ (b).text);
     if (texts.length > 0) return texts.join("\n");
   }
 
   // Handle single content block
-  if (result && typeof result === "object" && "text" in result && typeof /** @type {*} */ (result).text === "string") {
-    return /** @type {{ text: string }} */ (result).text;
+  if (hasTextField(result)) {
+    return result.text;
   }
 
   // Fallback: JSON
@@ -672,7 +672,7 @@ async function handleAssistantEvent(event, ctx) {
   if (betaMessage.usage) {
     ctx.result.usage.promptTokens += betaMessage.usage.input_tokens ?? 0;
     ctx.result.usage.completionTokens += betaMessage.usage.output_tokens ?? 0;
-    ctx.result.usage.cachedTokens += /** @type {*} */ (betaMessage.usage).cache_read_input_tokens ?? 0;
+    ctx.result.usage.cachedTokens += /** @type {SdkUsageWithCache} */ (betaMessage.usage).cache_read_input_tokens ?? 0;
   }
 }
 
@@ -698,7 +698,7 @@ async function handleResultEvent(event, ctx) {
   if (event.usage) {
     ctx.result.usage.promptTokens = event.usage.input_tokens ?? ctx.result.usage.promptTokens;
     ctx.result.usage.completionTokens = event.usage.output_tokens ?? ctx.result.usage.completionTokens;
-    ctx.result.usage.cachedTokens = /** @type {*} */ (event.usage).cache_read_input_tokens ?? ctx.result.usage.cachedTokens;
+    ctx.result.usage.cachedTokens = /** @type {SdkUsageWithCache} */ (event.usage).cache_read_input_tokens ?? ctx.result.usage.cachedTokens;
   }
   if (typeof event.total_cost_usd === "number") {
     ctx.result.usage.cost = event.total_cost_usd;
@@ -829,4 +829,19 @@ async function handleExitPlanMode(input, onAskUser) {
   }
 
   return { behavior: "allow", updatedInput: input };
+}
+
+// ── Type guards ─────────────────────────────────────────────────────────
+
+/**
+ * Check if a value is an object with a string `text` field.
+ * Used to safely extract text from SDK content blocks and tool results.
+ * @param {unknown} value
+ * @returns {value is { text: string }}
+ */
+function hasTextField(value) {
+  return value != null
+    && typeof value === "object"
+    && "text" in value
+    && typeof /** @type {{ text: unknown }} */ (value).text === "string";
 }
