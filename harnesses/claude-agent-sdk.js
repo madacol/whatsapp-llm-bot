@@ -500,7 +500,7 @@ export function createClaudeAgentSdkHarness() {
  * @param {import("@anthropic-ai/claude-agent-sdk").SDKUserMessage} userEvent
  * @returns {ExtractedToolResult}
  */
-function extractToolResultFromEvent(userEvent) {
+export function extractToolResultFromEvent(userEvent) {
   /** @type {string | null} */
   let toolUseId = userEvent.parent_tool_use_id ?? null;
   /** @type {string | null} */
@@ -569,7 +569,7 @@ function extractToolResultFromEvent(userEvent) {
  * @param {unknown} result
  * @returns {string}
  */
-function extractToolResultText(result) {
+export function extractToolResultText(result) {
   if (typeof result === "string") return result;
 
   // Handle array of content blocks (e.g. [{ type: "text", text: "..." }])
@@ -839,7 +839,7 @@ async function handleExitPlanMode(input, onAskUser) {
  * @param {unknown} value
  * @returns {value is { text: string }}
  */
-function hasTextField(value) {
+export function hasTextField(value) {
   return value != null
     && typeof value === "object"
     && "text" in value
