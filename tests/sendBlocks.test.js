@@ -11,12 +11,15 @@ import { setDb } from "../db.js";
 
 /** @type {typeof import("../whatsapp-adapter.js").sendBlocks} */
 let sendBlocks;
+/** @type {typeof import("../whatsapp-adapter.js").editWhatsAppMessage} */
+let editWhatsAppMessage;
 
 before(async () => {
   const testDb = await createTestDb();
   setDb("./pgdata/root", testDb);
   const adapter = await import("../whatsapp-adapter.js");
   sendBlocks = adapter.sendBlocks;
+  editWhatsAppMessage = adapter.editWhatsAppMessage;
 });
 
 /**
@@ -184,5 +187,237 @@ Second block:
     const imageMessages = sent.filter(s => s.msg.image != null);
     assert.equal(imageMessages.length, 0, "Text blocks should NOT render images");
     assert.equal(sent.length, 1, "Should send one text message");
+  });
+});
+
+describe("sendBlocks – MessageEditor tracking", () => {
+  it("returns editor for text blocks with correct keyId and isImage=false", async () => {
+    const { sock } = createMockSock();
+
+    const editor = await sendBlocks(sock, "test-chat", "llm", [
+      { type: "text", text: "hello" },
+    ]);
+
+    assert.ok(editor, "Should return an editor");
+    assert.equal(typeof editor, "function", "Editor should be callable");
+    assert.equal(editor.keyId, "msg-1");
+    assert.equal(editor.isImage, false);
+  });
+
+  it("returns editor for code image blocks with isImage=true", async () => {
+    const { sock } = createMockSock();
+
+    // 6-line JS code will trigger image rendering
+    const code = "const a = 1;\nconst b = 2;\nconst c = 3;\nconst d = 4;\nconst e = 5;\nconst f = 6;";
+    const editor = await sendBlocks(sock, "test-chat", "llm", [
+      { type: "code", language: "javascript", code },
+    ]);
+
+    assert.ok(editor, "Should return an editor for code images");
+    assert.equal(editor.isImage, true);
+  });
+
+  it("tracks the last editable message when multiple blocks are sent", async () => {
+    const { sock } = createMockSock();
+
+    const editor = await sendBlocks(sock, "test-chat", "llm", [
+      { type: "text", text: "first" },
+      { type: "text", text: "second" },
+    ]);
+
+    assert.ok(editor, "Should return an editor");
+    // msg-2 because the second text message is the last editable one
+    assert.equal(editor.keyId, "msg-2");
+  });
+
+  it("returns undefined when no editable messages are sent", async () => {
+    const { sock } = createMockSock();
+
+    const editor = await sendBlocks(sock, "test-chat", "llm", [
+      { type: "audio", data: Buffer.from("fake").toString("base64"), mime_type: "audio/mp4" },
+    ]);
+
+    assert.equal(editor, undefined);
+  });
+
+  it("editor calls editWhatsAppMessage when invoked", async () => {
+    /** @type {Array<{ chatId: string; msg: Record<string, unknown>; opts?: Record<string, unknown> }>} */
+    const sent = [];
+    const sock = {
+      sendMessage: async (/** @type {string} */ chatId, /** @type {Record<string, unknown>} */ msg, /** @type {Record<string, unknown>} */ opts) => {
+        sent.push({ chatId, msg, opts });
+        return { key: { id: `msg-${sent.length}`, remoteJid: chatId } };
+      },
+    };
+
+    const editor = await sendBlocks(sock, "test-chat", "llm", [
+      { type: "text", text: "original" },
+    ]);
+
+    assert.ok(editor);
+    await editor("updated");
+
+    // The edit call should be the second sendMessage (first was the original)
+    const editCall = sent[1];
+    assert.ok(editCall, "Editor should have sent an edit");
+    assert.ok(
+      typeof editCall.msg.text === "string" && editCall.msg.text.includes("updated"),
+      "Edit should contain the new text",
+    );
+  });
+});
+
+describe("sendBlocks – options propagation", () => {
+  it("passes quoted option to all sock.sendMessage calls", async () => {
+    /** @type {Array<{ chatId: string; msg: Record<string, unknown>; opts?: Record<string, unknown> }>} */
+    const sent = [];
+    const sock = {
+      sendMessage: async (/** @type {string} */ chatId, /** @type {Record<string, unknown>} */ msg, /** @type {Record<string, unknown> | undefined} */ opts) => {
+        sent.push({ chatId, msg, opts });
+        return { key: { id: `msg-${sent.length}`, remoteJid: chatId } };
+      },
+    };
+
+    const quotedMsg = { key: { id: "original-msg", remoteJid: "test-chat" } };
+    await sendBlocks(sock, "test-chat", "llm", [
+      { type: "text", text: "reply" },
+    ], { quoted: /** @type {BaileysMessage} */ (quotedMsg) });
+
+    assert.ok(sent[0].opts?.quoted === quotedMsg, "Should pass quoted to sock.sendMessage");
+  });
+});
+
+describe("sendBlocks – tool-call → edit pipeline", () => {
+  /**
+   * Create a mock socket that records both sendMessage and relayMessage calls.
+   * @returns {{ sock: any, calls: Array<{ method: string; args: unknown[] }> }}
+   */
+  function createCaptureSock() {
+    /** @type {Array<{ method: string; args: unknown[] }>} */
+    const calls = [];
+    let counter = 0;
+    const sock = {
+      sendMessage: async (/** @type {string} */ chatId, /** @type {Record<string, unknown>} */ msg, /** @type {Record<string, unknown> | undefined} */ opts) => {
+        calls.push({ method: "sendMessage", args: [chatId, msg, opts] });
+        counter++;
+        return { key: { id: `msg-${counter}`, remoteJid: chatId } };
+      },
+      relayMessage: async (/** @type {string} */ jid, /** @type {Record<string, unknown>} */ msg, /** @type {Record<string, unknown>} */ opts) => {
+        calls.push({ method: "relayMessage", args: [jid, msg, opts] });
+      },
+    };
+    return { sock, calls };
+  }
+
+  it("text tool-call: send → progress update → final update uses sendMessage with edit key", async () => {
+    const { sock, calls } = createCaptureSock();
+
+    // Step 1: Send initial tool-call message
+    const editor = await sendBlocks(sock, "chat-1", "tool-call", [
+      { type: "text", text: "Read file.js" },
+    ]);
+
+    assert.ok(editor, "Should return an editor");
+    assert.equal(editor.isImage, false, "Text message editor should not be image");
+    assert.equal(calls.length, 1, "Should have sent 1 message");
+
+    // Step 2: Simulate progress update (tool still running)
+    await editor("Read (3s…)");
+    assert.equal(calls.length, 2, "Should have 2 calls after progress update");
+
+    const progressCall = calls[1];
+    assert.equal(progressCall.method, "sendMessage", "Progress update should use sendMessage");
+    const progressMsg = /** @type {Record<string, unknown>} */ (progressCall.args[1]);
+    assert.ok(typeof progressMsg.text === "string" && progressMsg.text.includes("Read (3s…)"), "Progress text should be in edit");
+    assert.ok(progressMsg.edit != null, "Should include edit key for in-place update");
+
+    // Step 3: Simulate final result
+    await editor("Read · file.js (42 lines)");
+    assert.equal(calls.length, 3, "Should have 3 calls after final update");
+
+    const finalCall = calls[2];
+    const finalMsg = /** @type {Record<string, unknown>} */ (finalCall.args[1]);
+    assert.ok(typeof finalMsg.text === "string" && finalMsg.text.includes("Read · file.js"), "Final text should be in edit");
+    // The edit key should reference the original message
+    const editKey = /** @type {{ id: string }} */ (finalMsg.edit);
+    assert.equal(editKey.id, "msg-1", "Edit key should reference the original message");
+  });
+
+  it("image tool-call: send → edit uses relayMessage for caption update", async () => {
+    const { sock, calls } = createCaptureSock();
+
+    // Send a code block that renders as an image (6+ lines triggers image rendering)
+    const code = "const a = 1;\nconst b = 2;\nconst c = 3;\nconst d = 4;\nconst e = 5;\nconst f = 6;";
+    const editor = await sendBlocks(sock, "chat-1", "tool-call", [
+      { type: "code", language: "javascript", code },
+    ]);
+
+    assert.ok(editor, "Should return an editor for code image");
+    assert.equal(editor.isImage, true, "Code image editor should be marked as image");
+
+    const initialCallCount = calls.length;
+
+    // Edit the image caption
+    await editor("Edit · foo.js");
+
+    // Image edits use relayMessage, not sendMessage
+    const editCall = calls[initialCallCount];
+    assert.equal(editCall.method, "relayMessage", "Image caption edit should use relayMessage");
+    const relayMsg = /** @type {Record<string, unknown>} */ (editCall.args[1]);
+    const protoMsg = /** @type {Record<string, unknown>} */ (relayMsg.protocolMessage);
+    assert.ok(protoMsg, "Should contain protocolMessage");
+    const editedMsg = /** @type {Record<string, unknown>} */ (protoMsg.editedMessage);
+    const imageMsg = /** @type {{ caption: string }} */ (editedMsg.imageMessage);
+    assert.ok(imageMsg.caption.includes("Edit · foo.js"), "Caption should contain the new text");
+  });
+
+  it("editor prepends source prefix on every edit", async () => {
+    const { sock, calls } = createCaptureSock();
+
+    const editor = await sendBlocks(sock, "chat-1", "tool-call", [
+      { type: "text", text: "running" },
+    ]);
+
+    assert.ok(editor);
+    await editor("done");
+
+    const editMsg = /** @type {Record<string, unknown>} */ (calls[1].args[1]);
+    const editText = /** @type {string} */ (editMsg.text);
+    // "tool-call" prefix is "🔧"
+    assert.ok(editText.startsWith("🔧"), `Edit text should start with tool-call prefix, got: ${editText}`);
+    assert.ok(editText.includes("done"), "Edit text should contain new content");
+  });
+
+  it("editWhatsAppMessage directly: text path sends edit key", async () => {
+    const { sock, calls } = createCaptureSock();
+    const key = { id: "msg-abc", remoteJid: "chat-1" };
+
+    await editWhatsAppMessage(sock, "chat-1", key, "updated text", false);
+
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].method, "sendMessage");
+    const msg = /** @type {Record<string, unknown>} */ (calls[0].args[1]);
+    assert.equal(msg.text, "updated text");
+    assert.deepEqual(msg.edit, key);
+  });
+
+  it("editWhatsAppMessage directly: image path uses relayMessage with protocolMessage", async () => {
+    const { sock, calls } = createCaptureSock();
+    const key = { id: "msg-xyz", remoteJid: "chat-1" };
+
+    await editWhatsAppMessage(sock, "chat-1", key, "new caption", true);
+
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].method, "relayMessage");
+    const relayMsg = /** @type {Record<string, unknown>} */ (calls[0].args[1]);
+    const proto = /** @type {Record<string, unknown>} */ (relayMsg.protocolMessage);
+    assert.ok(proto, "Should have protocolMessage");
+    assert.deepEqual(proto.key, key, "Should reference the original message key");
+    const edited = /** @type {Record<string, unknown>} */ (proto.editedMessage);
+    const imgMsg = /** @type {{ caption: string }} */ (edited.imageMessage);
+    assert.equal(imgMsg.caption, "new caption");
+    // Check additionalAttributes
+    const opts = /** @type {{ additionalAttributes: Record<string, string> }} */ (calls[0].args[2]);
+    assert.equal(opts.additionalAttributes.edit, "1", "Should have edit='1' attribute");
   });
 });
