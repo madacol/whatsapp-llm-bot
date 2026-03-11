@@ -78,6 +78,28 @@ If you want to propose something and wait for the user's decision before acting,
  */
 
 /**
+ * Entry in the activeTools map, tracking a tool call's display state.
+ * @typedef {{
+ *   editor?: MessageEditor,
+ *   toolName: string,
+ *   description: string | null,
+ *   waKeyId: string | null,
+ *   isImage: boolean,
+ * }} ActiveToolEntry
+ */
+
+/**
+ * Shared mutable state passed to SDK event handlers.
+ * @typedef {{
+ *   result: AgentResult,
+ *   messages: AgentHarnessParams["messages"],
+ *   activeTools: Map<string, ActiveToolEntry>,
+ *   hooks: Required<AgentIOHooks>,
+ *   session: AgentHarnessParams["session"],
+ * }} SdkEventContext
+ */
+
+/**
  * Create the Claude Agent SDK harness.
  * Maintains per-chat active query state for message injection and cancellation.
  * @returns {AgentHarness}
@@ -287,68 +309,16 @@ export function createClaudeAgentSdkHarness() {
          */
         canUseTool: async (toolName, input, _options) => {
           if (toolName === "AskUserQuestion") {
-            return handleAskUserQuestion(input);
+            return handleAskUserQuestion(input, hooks.onAskUser);
           }
           if (toolName === "ExitPlanMode") {
-            return handleExitPlanMode(input);
+            return handleExitPlanMode(input, hooks.onAskUser);
           }
           // Auto-approve all tools — this gives us bypassPermissions behavior
           // while keeping the permission state machine active for plan mode.
           return { behavior: "allow", updatedInput: input };
         },
       };
-
-      /**
-       * Handle an AskUserQuestion tool call by presenting questions as WhatsApp
-       * polls and returning the user's selections in the SDK's expected format.
-       * @param {Record<string, unknown>} input
-       * @returns {Promise<import("@anthropic-ai/claude-agent-sdk").PermissionResult>}
-       */
-      async function handleAskUserQuestion(input) {
-        const questions = /** @type {Array<{question: string, header?: string, options: Array<{label: string, description?: string}>, multiSelect?: boolean}>} */ (
-          input.questions ?? []
-        );
-
-        if (questions.length === 0) {
-          return { behavior: "allow", updatedInput: input };
-        }
-
-        /** @type {Record<string, string>} */
-        const answers = {};
-
-        for (const q of questions) {
-          const optionLabels = q.options.map(o => o.label);
-          const optionDescriptions = q.options.map(o => o.description ?? "");
-          const userChoice = await hooks.onAskUser(q.question, optionLabels, q.header, optionDescriptions);
-
-          // Use the user's choice, or fall back to the first option on timeout
-          answers[q.question] = userChoice || optionLabels[0];
-        }
-
-        return {
-          behavior: "allow",
-          updatedInput: { questions: input.questions, answers },
-        };
-      }
-
-      /**
-       * Handle an ExitPlanMode tool call by presenting the plan to the user
-       * for approval via a WhatsApp poll before allowing plan mode to exit.
-       * @param {Record<string, unknown>} input
-       * @returns {Promise<import("@anthropic-ai/claude-agent-sdk").PermissionResult>}
-       */
-      async function handleExitPlanMode(input) {
-        const userChoice = await hooks.onAskUser(
-          "Plan ready — approve to start implementation?",
-          ["✅ Approve", "❌ Reject"],
-        );
-
-        if (userChoice === "❌ Reject") {
-          return { behavior: "deny", message: "User rejected the plan. Revise your approach based on their feedback." };
-        }
-
-        return { behavior: "allow", updatedInput: input };
-      }
 
       // Resume the previous session if one exists for this chat
       if (existingSessionId) {
@@ -373,8 +343,11 @@ export function createClaudeAgentSdkHarness() {
         injectMessage(session.chatId, text);
       }
 
-      /** @type {Map<string, { editor?: MessageEditor, toolName: string, description: string | null, waKeyId: string | null, isImage: boolean }>} */
+      /** @type {Map<string, ActiveToolEntry>} */
       const activeTools = new Map();
+
+      /** @type {SdkEventContext} */
+      const ctx = { result, messages, activeTools, hooks, session };
 
       let eventCount = 0;
 
@@ -382,21 +355,7 @@ export function createClaudeAgentSdkHarness() {
         eventCount++;
 
         // Log event with tool context for tracing what the SDK is doing.
-        /** @type {string} */
-        let eventLabel = event.type;
-        if (event.type === "assistant" && event.message?.content) {
-          const toolBlock = event.message.content.find(
-            /** @param {*} b */ (b) => b.type === "tool_use"
-          );
-          if (toolBlock) {
-            const input = /** @type {Record<string, unknown>} */ (toolBlock.input ?? {});
-            const inputSummary = String(
-              input.command ?? input.file_path ?? input.pattern ?? input.query ?? input.prompt ?? input.description ?? ""
-            ).slice(0, 80);
-            eventLabel = `tool_use:${toolBlock.name}(${inputSummary})`;
-          }
-        }
-        log.debug(`SDK event: ${eventLabel}`);
+        log.debug(`SDK event: ${getSdkEventLabel(event)}`);
 
         // Always capture the latest session_id from events.
         if ("session_id" in event && typeof event.session_id === "string") {
@@ -408,170 +367,12 @@ export function createClaudeAgentSdkHarness() {
         }
 
         switch (event.type) {
-          case "assistant": {
-            // Extract text content from the BetaMessage
-            const betaMessage = event.message;
-            if (betaMessage.content) {
-              /** @type {(TextContentBlock | ToolCallContentBlock)[]} */
-              const storedBlocks = [];
-
-              for (const block of betaMessage.content) {
-                if (block.type === "text") {
-                  log.debug(`  block: text len=${block.text.length}`);
-                  await hooks.onLlmResponse(block.text);
-                  result.response.push({ type: "text", text: block.text });
-                  storedBlocks.push({ type: "text", text: block.text });
-                } else if (block.type === "tool_use") {
-                  log.debug(`  block: tool_use ${block.name}`);
-                  const input = /** @type {Record<string, unknown>} */ (block.input ?? {});
-                  const description = typeof input.description === "string" ? input.description : null;
-                  // Build a human-readable label for the tool call (used on completion)
-                  const displayLabel = description
-                    || formatSdkToolCall(block.name, input)
-                    || block.name;
-                  const editor = await hooks.onToolCall({
-                    id: block.id,
-                    name: block.name,
-                    arguments: JSON.stringify(block.input),
-                  });
-                  activeTools.set(block.id, {
-                    editor: editor ?? undefined,
-                    toolName: block.name,
-                    description: displayLabel,
-                    waKeyId: editor?.keyId ?? null,
-                    isImage: editor?.isImage ?? false,
-                  });
-                  storedBlocks.push({
-                    type: "tool",
-                    tool_id: block.id,
-                    name: block.name,
-                    arguments: JSON.stringify(block.input),
-                  });
-                }
-              }
-
-              // Persist assistant message (with tool_use blocks) to DB
-              if (storedBlocks.length > 0) {
-                /** @type {AssistantMessage} */
-                const assistantMsg = { role: "assistant", content: storedBlocks };
-                messages.push(assistantMsg);
-                await session.addMessage(session.chatId, assistantMsg, session.senderIds);
-
-              }
-            }
-            // Accumulate usage from each assistant message
-            if (betaMessage.usage) {
-              result.usage.promptTokens += betaMessage.usage.input_tokens ?? 0;
-              result.usage.completionTokens += betaMessage.usage.output_tokens ?? 0;
-              result.usage.cachedTokens += /** @type {*} */ (betaMessage.usage).cache_read_input_tokens ?? 0;
-            }
-            break;
-          }
-
-          case "result": {
-            const resultEvent = /** @type {import("@anthropic-ai/claude-agent-sdk").SDKResultMessage} */ (event);
-            log.debug(`SDK result: subtype=${resultEvent.subtype}, is_error=${resultEvent.is_error}, has_result=${"result" in resultEvent}, responseBlocks=${result.response.length}`);
-
-            // Final result — the SDK's result string is the authoritative final answer.
-            if (!resultEvent.is_error && "result" in resultEvent && typeof resultEvent.result === "string") {
-              const resultText = resultEvent.result;
-              // Check if this final text was already sent via an assistant event.
-              const lastSent = result.response[result.response.length - 1];
-              const alreadySent = lastSent?.type === "text"
-                && lastSent.text.trim() === resultText.trim();
-              log.debug(`SDK result text: len=${resultText.length}, alreadySent=${alreadySent}`);
-              result.response = [{ type: "text", text: resultText }];
-              if (!alreadySent && resultText.trim()) {
-                await hooks.onLlmResponse(resultText);
-              }
-            }
-            if (resultEvent.usage) {
-              // Overwrite with final totals if available
-              result.usage.promptTokens = resultEvent.usage.input_tokens ?? result.usage.promptTokens;
-              result.usage.completionTokens = resultEvent.usage.output_tokens ?? result.usage.completionTokens;
-              result.usage.cachedTokens = /** @type {*} */ (resultEvent.usage).cache_read_input_tokens ?? result.usage.cachedTokens;
-            }
-            if (typeof resultEvent.total_cost_usd === "number") {
-              result.usage.cost = resultEvent.total_cost_usd;
-            }
-
-            if (resultEvent.is_error) {
-              const errors = /** @type {import("@anthropic-ai/claude-agent-sdk").SDKResultError} */ (resultEvent).errors;
-              log.error("SDK query ended with error:", errors);
-              if (errors?.length > 0) {
-                await hooks.onToolError(errors.join("; "));
-              }
-            }
-            break;
-          }
-
-          case "tool_progress": {
-            // Long-running tool feedback — edit the tool call message in-place.
-            const progress = /** @type {import("@anthropic-ai/claude-agent-sdk").SDKToolProgressMessage} */ (event);
-            const active = activeTools.get(progress.tool_use_id);
-            if (active?.editor) {
-              const elapsed = Math.round(progress.elapsed_time_seconds);
-              await active.editor(`${active.toolName} (${elapsed}s…)`);
-            }
-            break;
-          }
-
-          case "user": {
-            // Tool result — the SDK sends these as "user" events.
-            // The result may be in `tool_use_result` (convenience field) OR in `message.content`
-            // as tool_result content blocks (standard Anthropic API format).
-            // NOTE: parent_tool_use_id is often null for built-in tools — fall back to
-            // extracting the tool_use_id from message.content tool_result blocks.
-            const userEvent = /** @type {import("@anthropic-ai/claude-agent-sdk").SDKUserMessage} */ (event);
-            const { toolUseId: resolvedToolUseId, resultText } = extractToolResultFromEvent(userEvent);
-
-            if (resolvedToolUseId) {
-              const active = activeTools.get(resolvedToolUseId);
-
-              if (resultText != null) {
-                // Persist tool result to DB (with wa_key_id for react-to-inspect)
-                /** @type {ToolMessage} */
-                const toolMsg = {
-                  ...createToolMessage(resolvedToolUseId, resultText),
-                  ...(active?.waKeyId && { wa_key_id: active.waKeyId }),
-                  ...(active?.toolName && { tool_name: active.toolName }),
-                  ...(active?.isImage && { wa_msg_is_image: true }),
-                };
-                messages.push(toolMsg);
-                await session.addMessage(session.chatId, toolMsg, session.senderIds);
-              }
-
-              // Restore original description (or tool name) on completion
-              if (active?.editor) {
-                try {
-                  await active.editor(active.description || active.toolName);
-                } catch (editorErr) {
-                  log.error(`Editor failed for ${active.toolName}:`, editorErr);
-                }
-              }
-              activeTools.delete(resolvedToolUseId);
-            }
-            break;
-          }
-
-          case "tool_use_summary": {
-            // Compact summary of what SDK tools did (e.g. "Read 3 files").
-            // Display via onToolCall so subagent activity is visible to the user
-            // (consistent with how main-agent tool calls are displayed).
-            const summary = /** @type {{ summary: string }} */ (event).summary;
-            if (summary) {
-              await hooks.onToolCall({
-                id: `summary-${randomUUID()}`,
-                name: "Agent",
-                arguments: JSON.stringify({ description: summary }),
-              });
-            }
-            break;
-          }
-
-          // Ignore system, stream_event, and other message types
-          default:
-            break;
+          case "assistant": await handleAssistantEvent(event, ctx); break;
+          case "result": await handleResultEvent(event, ctx); break;
+          case "tool_progress": await handleToolProgressEvent(event, ctx); break;
+          case "user": await handleUserEvent(event, ctx); break;
+          case "tool_use_summary": await handleToolUseSummaryEvent(event, ctx); break;
+          default: break;
         }
       }
       log.debug(`SDK query done: events=${eventCount} activeTools=${activeTools.size}`);
@@ -759,4 +560,242 @@ function extractToolResultText(result) {
   } catch {
     return String(result);
   }
+}
+
+// ── SDK event handlers ──────────────────────────────────────────────────
+
+/**
+ * Build a debug label for an SDK event (used for log.debug tracing).
+ * @param {{ type: string, message?: { content?: Array<Record<string, unknown>> } }} event
+ * @returns {string}
+ */
+function getSdkEventLabel(event) {
+  if (event.type === "assistant" && event.message?.content) {
+    const toolBlock = event.message.content.find(b => b.type === "tool_use");
+    if (toolBlock) {
+      const input = /** @type {Record<string, unknown>} */ (toolBlock.input ?? {});
+      const inputSummary = String(
+        input.command ?? input.file_path ?? input.pattern ?? input.query ?? input.prompt ?? input.description ?? ""
+      ).slice(0, 80);
+      return `tool_use:${toolBlock.name}(${inputSummary})`;
+    }
+  }
+  return event.type;
+}
+
+/**
+ * Handle an SDK "assistant" event: dispatch text/tool blocks to hooks and persist.
+ * @param {{ message: { content?: Array<Record<string, unknown>>, usage?: Record<string, number> } }} event
+ * @param {SdkEventContext} ctx
+ */
+async function handleAssistantEvent(event, ctx) {
+  const betaMessage = event.message;
+  if (betaMessage.content) {
+    /** @type {(TextContentBlock | ToolCallContentBlock)[]} */
+    const storedBlocks = [];
+
+    for (const block of betaMessage.content) {
+      if (block.type === "text") {
+        const text = /** @type {string} */ (block.text);
+        log.debug(`  block: text len=${text.length}`);
+        await ctx.hooks.onLlmResponse(text);
+        ctx.result.response.push({ type: "text", text });
+        storedBlocks.push({ type: "text", text });
+      } else if (block.type === "tool_use") {
+        const name = /** @type {string} */ (block.name);
+        const id = /** @type {string} */ (block.id);
+        log.debug(`  block: tool_use ${name}`);
+        const input = /** @type {Record<string, unknown>} */ (block.input ?? {});
+        const description = typeof input.description === "string" ? input.description : null;
+        const displayLabel = description
+          || formatSdkToolCall(name, input)
+          || name;
+        const editor = await ctx.hooks.onToolCall({
+          id,
+          name,
+          arguments: JSON.stringify(block.input),
+        });
+        ctx.activeTools.set(id, {
+          editor: editor ?? undefined,
+          toolName: name,
+          description: displayLabel,
+          waKeyId: editor?.keyId ?? null,
+          isImage: editor?.isImage ?? false,
+        });
+        storedBlocks.push({
+          type: "tool",
+          tool_id: id,
+          name,
+          arguments: JSON.stringify(block.input),
+        });
+      }
+    }
+
+    if (storedBlocks.length > 0) {
+      /** @type {AssistantMessage} */
+      const assistantMsg = { role: "assistant", content: storedBlocks };
+      ctx.messages.push(assistantMsg);
+      await ctx.session.addMessage(ctx.session.chatId, assistantMsg, ctx.session.senderIds);
+    }
+  }
+  if (betaMessage.usage) {
+    ctx.result.usage.promptTokens += betaMessage.usage.input_tokens ?? 0;
+    ctx.result.usage.completionTokens += betaMessage.usage.output_tokens ?? 0;
+    ctx.result.usage.cachedTokens += /** @type {*} */ (betaMessage.usage).cache_read_input_tokens ?? 0;
+  }
+}
+
+/**
+ * Handle an SDK "result" event: capture final response, usage, and errors.
+ * @param {import("@anthropic-ai/claude-agent-sdk").SDKResultMessage} event
+ * @param {SdkEventContext} ctx
+ */
+async function handleResultEvent(event, ctx) {
+  log.debug(`SDK result: subtype=${event.subtype}, is_error=${event.is_error}, has_result=${"result" in event}, responseBlocks=${ctx.result.response.length}`);
+
+  if (!event.is_error && "result" in event && typeof event.result === "string") {
+    const resultText = event.result;
+    const lastSent = ctx.result.response[ctx.result.response.length - 1];
+    const alreadySent = lastSent?.type === "text"
+      && lastSent.text.trim() === resultText.trim();
+    log.debug(`SDK result text: len=${resultText.length}, alreadySent=${alreadySent}`);
+    ctx.result.response = [{ type: "text", text: resultText }];
+    if (!alreadySent && resultText.trim()) {
+      await ctx.hooks.onLlmResponse(resultText);
+    }
+  }
+  if (event.usage) {
+    ctx.result.usage.promptTokens = event.usage.input_tokens ?? ctx.result.usage.promptTokens;
+    ctx.result.usage.completionTokens = event.usage.output_tokens ?? ctx.result.usage.completionTokens;
+    ctx.result.usage.cachedTokens = /** @type {*} */ (event.usage).cache_read_input_tokens ?? ctx.result.usage.cachedTokens;
+  }
+  if (typeof event.total_cost_usd === "number") {
+    ctx.result.usage.cost = event.total_cost_usd;
+  }
+
+  if (event.is_error) {
+    const errors = /** @type {import("@anthropic-ai/claude-agent-sdk").SDKResultError} */ (event).errors;
+    log.error("SDK query ended with error:", errors);
+    if (errors?.length > 0) {
+      await ctx.hooks.onToolError(errors.join("; "));
+    }
+  }
+}
+
+/**
+ * Handle an SDK "tool_progress" event: update the tool call message in-place.
+ * @param {import("@anthropic-ai/claude-agent-sdk").SDKToolProgressMessage} event
+ * @param {SdkEventContext} ctx
+ */
+async function handleToolProgressEvent(event, ctx) {
+  const active = ctx.activeTools.get(event.tool_use_id);
+  if (active?.editor) {
+    const elapsed = Math.round(event.elapsed_time_seconds);
+    await active.editor(`${active.toolName} (${elapsed}s…)`);
+  }
+}
+
+/**
+ * Handle an SDK "user" event (tool result): persist result and restore tool display.
+ * @param {import("@anthropic-ai/claude-agent-sdk").SDKUserMessage} event
+ * @param {SdkEventContext} ctx
+ */
+async function handleUserEvent(event, ctx) {
+  const { toolUseId: resolvedToolUseId, resultText } = extractToolResultFromEvent(event);
+
+  if (!resolvedToolUseId) return;
+
+  const active = ctx.activeTools.get(resolvedToolUseId);
+
+  if (resultText != null) {
+    /** @type {ToolMessage} */
+    const toolMsg = {
+      ...createToolMessage(resolvedToolUseId, resultText),
+      ...(active?.waKeyId && { wa_key_id: active.waKeyId }),
+      ...(active?.toolName && { tool_name: active.toolName }),
+      ...(active?.isImage && { wa_msg_is_image: true }),
+    };
+    ctx.messages.push(toolMsg);
+    await ctx.session.addMessage(ctx.session.chatId, toolMsg, ctx.session.senderIds);
+  }
+
+  if (active?.editor) {
+    try {
+      await active.editor(active.description || active.toolName);
+    } catch (editorErr) {
+      log.error(`Editor failed for ${active.toolName}:`, editorErr);
+    }
+  }
+  ctx.activeTools.delete(resolvedToolUseId);
+}
+
+/**
+ * Handle an SDK "tool_use_summary" event: display summary as a tool call.
+ * @param {{ summary?: string }} event
+ * @param {SdkEventContext} ctx
+ */
+async function handleToolUseSummaryEvent(event, ctx) {
+  if (event.summary) {
+    await ctx.hooks.onToolCall({
+      id: `summary-${randomUUID()}`,
+      name: "Agent",
+      arguments: JSON.stringify({ description: event.summary }),
+    });
+  }
+}
+
+// ── canUseTool handlers ─────────────────────────────────────────────────
+
+/**
+ * Handle an AskUserQuestion tool call by presenting questions as WhatsApp
+ * polls and returning the user's selections in the SDK's expected format.
+ * @param {Record<string, unknown>} input
+ * @param {Required<AgentIOHooks>["onAskUser"]} onAskUser
+ * @returns {Promise<import("@anthropic-ai/claude-agent-sdk").PermissionResult>}
+ */
+async function handleAskUserQuestion(input, onAskUser) {
+  const questions = /** @type {Array<{question: string, header?: string, options: Array<{label: string, description?: string}>, multiSelect?: boolean}>} */ (
+    input.questions ?? []
+  );
+
+  if (questions.length === 0) {
+    return { behavior: "allow", updatedInput: input };
+  }
+
+  /** @type {Record<string, string>} */
+  const answers = {};
+
+  for (const q of questions) {
+    const optionLabels = q.options.map(o => o.label);
+    const optionDescriptions = q.options.map(o => o.description ?? "");
+    const userChoice = await onAskUser(q.question, optionLabels, q.header, optionDescriptions);
+
+    // Use the user's choice, or fall back to the first option on timeout
+    answers[q.question] = userChoice || optionLabels[0];
+  }
+
+  return {
+    behavior: "allow",
+    updatedInput: { questions: input.questions, answers },
+  };
+}
+
+/**
+ * Handle an ExitPlanMode tool call by presenting the plan to the user
+ * for approval via a WhatsApp poll before allowing plan mode to exit.
+ * @param {Record<string, unknown>} input
+ * @param {Required<AgentIOHooks>["onAskUser"]} onAskUser
+ * @returns {Promise<import("@anthropic-ai/claude-agent-sdk").PermissionResult>}
+ */
+async function handleExitPlanMode(input, onAskUser) {
+  const userChoice = await onAskUser(
+    "Plan ready — approve to start implementation?",
+    ["✅ Approve", "❌ Reject"],
+  );
+
+  if (userChoice === "❌ Reject") {
+    return { behavior: "deny", message: "User rejected the plan. Revise your approach based on their feedback." };
+  }
+
+  return { behavior: "allow", updatedInput: input };
 }
