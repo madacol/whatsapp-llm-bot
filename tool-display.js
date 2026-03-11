@@ -190,6 +190,40 @@ export function formatBashCommand(command) {
 }
 
 /**
+ * Return a compact, text-only summary of a tool call suitable for editor
+ * updates and message labels. Shared by both harnesses so the display
+ * label for a given tool is computed in one place.
+ * @param {string} name
+ * @param {Record<string, unknown>} args
+ * @param {((params: Record<string, any>) => string)} [formatToolCall]
+ * @returns {string}
+ */
+export function getToolCallSummary(name, args, formatToolCall) {
+  // Explicit description (any tool — SDK, native, etc.)
+  if (typeof args.description === "string") return args.description;
+
+  // SDK built-in tools (Read, Grep, Glob, WebSearch, WebFetch, Agent)
+  const sdkLabel = formatSdkToolCall(name, args);
+  if (sdkLabel) return sdkLabel;
+
+  // File-path tools
+  if ((name === "Edit" || name === "Write" || name === "NotebookEdit") && typeof args.file_path === "string") {
+    return `*${name}*  \`${args.file_path}\``;
+  }
+
+  // Bash: show truncated command
+  if (name === "Bash" && typeof args.command === "string") {
+    const cmd = args.command;
+    return cmd.length > 60 ? `\`${cmd.slice(0, 60)}…\`` : `\`${cmd}\``;
+  }
+
+  // Custom actions with formatToolCall
+  if (formatToolCall) return formatToolCall(args);
+
+  return name;
+}
+
+/**
  * Format a tool call for WhatsApp display. Returns the content to send,
  * or null if nothing should be displayed.
  * @param {LlmChatResponse['toolCalls'][0]} toolCall

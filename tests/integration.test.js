@@ -410,7 +410,7 @@ describe("Scenario 12: Debug mode gates tool call output", () => {
 
     assert.ok(r.raw.some(x => x.text.includes("Final answer debug on")), "Should have the final LLM reply");
     assert.ok(r.raw.some(x => x.source === "tool-call"), "Tool call args should be shown when debug is on");
-    assert.ok(r.raw.some(x => x.source === "tool-result" && x.text.includes("run_javascript")), "Tool results should be shown when debug is on");
+    assert.ok(r.raw.some(x => x.type === "edit" && x.source === "tool-call"), "Tool call message should be edited in-place with summary");
   });
 });
 
@@ -529,8 +529,9 @@ describe("HtmlContent via LLM tool call", () => {
       ],
     });
 
+    // Link appears as an edit on the tool-call message (edit-in-place)
     const linkResponse = r.raw.find(x => x.text.includes("/page/"));
-    assert.ok(linkResponse, `Should send a page link, got: ${r.raw.map(x => x.text).join(" | ")}`);
+    assert.ok(linkResponse, `Should have a page link (via edit or send), got: ${r.raw.map(x => x.text).join(" | ")}`);
     assert.ok(linkResponse.text.includes("Sales Report"), `Link text should include the title, got: ${linkResponse.text}`);
 
     const urlMatch = linkResponse.text.match(/(http:\/\/[^\s]+)/);
