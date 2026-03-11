@@ -19,48 +19,10 @@ import { createHash } from "node:crypto";
 import { exec } from "node:child_process";
 import { rm } from "node:fs/promises";
 import { needsAuthReset, sendAlertEmail } from "./notifications.js";
-import { renderCodeToImages, renderDiffToImages, MIN_LINES_FOR_IMAGE } from "./code-image-renderer.js";
+import { renderBlocks } from "./message-renderer.js";
 import { createLogger } from "./logger.js";
 
 const log = createLogger("whatsapp");
-
-/**
- * Languages that should be rendered as syntax-highlighted images.
- * Code blocks without a language or with non-programming identifiers
- * (e.g. "text", "log", "output", "plaintext") are sent as formatted text.
- */
-const CODE_IMAGE_LANGUAGES = new Set([
-  // Systems / compiled
-  "c", "cpp", "csharp", "go", "rust", "java", "kotlin", "swift", "scala",
-  "dart", "zig", "nim", "d", "haskell", "ocaml", "fsharp", "elixir", "erlang",
-  "clojure", "fortran", "pascal", "ada", "assembly", "asm", "wasm",
-  // Web / scripting
-  "javascript", "js", "typescript", "ts", "jsx", "tsx", "python", "py",
-  "ruby", "rb", "php", "perl", "lua", "r", "julia", "groovy",
-  // Shell
-  "bash", "sh", "zsh", "fish", "powershell", "ps1", "bat", "cmd",
-  // Markup / config that benefits from highlighting
-  "html", "css", "scss", "sass", "less", "xml", "svg",
-  "json", "yaml", "yml", "toml", "ini", "graphql", "sql",
-  // Other
-  "dockerfile", "makefile", "cmake", "nginx", "terraform", "hcl",
-  "proto", "protobuf", "latex", "tex", "matlab", "objectivec", "objc",
-  "vue", "svelte", "astro", "mdx",
-]);
-
-/**
- * Check whether a code block should be rendered as a syntax-highlighted image
- * (true) or sent as plain formatted text (false).
- * Requires a recognized programming language and at least MIN_LINES_FOR_IMAGE lines.
- * @param {string} lang
- * @param {string} code
- * @returns {boolean}
- */
-function shouldRenderAsImage(lang, code) {
-  if (!CODE_IMAGE_LANGUAGES.has(lang.toLowerCase())) return false;
-  const lineCount = code.split("\n").length;
-  return lineCount >= MIN_LINES_FOR_IMAGE;
-}
 
 /**
  * Stores sent poll creation messages keyed by message ID so we can
@@ -189,54 +151,6 @@ async function decryptAndResolvePollVote(message, sock) {
   }
 
   return { chatId, selectedOptions: selected };
-}
-
-/**
- * Convert standard Markdown to WhatsApp-compatible formatting.
- * WhatsApp uses: *bold*, _italic_, ~strikethrough~, ```code```, > quote
- * @param {string} text
- * @returns {string}
- */
-function markdownToWhatsApp(text) {
-  let result = text;
-
-  // Italic first: *text* (single asterisk) → _text_
-  // Must run BEFORE bold conversion so **bold** doesn't get re-matched as italic
-  result = result.replace(/(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)/g, "_$1_");
-
-  // Headers: # Heading → *Heading* (bold)
-  result = result.replace(/^#{1,6}\s+(.+)$/gm, "*$1*");
-
-  // Bold: **text** or __text__ → *text*
-  result = result.replace(/\*\*(.+?)\*\*/g, "*$1*");
-  result = result.replace(/__(.+?)__/g, "*$1*");
-
-  // Strikethrough: ~~text~~ → ~text~
-  result = result.replace(/~~(.+?)~~/g, "~$1~");
-
-  // Images: ![alt](url) → alt (url) — must be before links
-  result = result.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, "$1 ($2)");
-
-  // Links: [text](url) → text (url)
-  result = result.replace(/\[([^\]]+)\]\(([^)]+)\)/g, "$1 ($2)");
-
-  // Unordered lists: - item or * item → • item (preserve indentation)
-  // Use non-breaking spaces (\u00A0) because WhatsApp strips regular leading spaces
-  result = result.replace(/^([\t ]*)[-*]\s+/gm, (_match, indent) => {
-    const depth = indent ? Math.floor(indent.replace(/\t/g, "  ").length / 2) : 0;
-    return "\u00A0\u00A0".repeat(depth) + "• ";
-  });
-
-  // Ordered lists: 1. item → 1. item (preserve indentation)
-  result = result.replace(/^([\t ]*)(\d+)\.\s+/gm, (_match, indent, num) => {
-    const depth = indent ? Math.floor(indent.replace(/\t/g, "  ").length / 2) : 0;
-    return "\u00A0\u00A0".repeat(depth) + num + ". ";
-  });
-
-  // Horizontal rules: --- or *** or ___ → ———
-  result = result.replace(/^(-{3,}|\*{3,}|_{3,})$/gm, "———");
-
-  return result;
 }
 
 const AUTH_DIR = "./auth_info_baileys";
@@ -602,142 +516,39 @@ export async function sendBlocks(sock, chatId, source, content, options) {
     ? [/** @type {ToolContentBlock} */ ({ type: "text", text: content })]
     : Array.isArray(content) ? content : [content];
 
+  const instructions = await renderBlocks(blocks, prefix);
+
   /** @type {import('@whiskeysockets/baileys').WAMessageKey | undefined} */
   let lastSentKey;
   let lastSentIsImage = false;
 
-  for (const block of blocks) {
-    switch (block.type) {
-      case "text": {
-        const sent = await sock.sendMessage(chatId, { text: `${prefix} ${block.text}` }, options);
-        if (sent?.key) { lastSentKey = sent.key; lastSentIsImage = false; }
+  for (const instr of instructions) {
+    /** @type {import('@whiskeysockets/baileys').WAMessage | undefined} */
+    let sent;
+    switch (instr.kind) {
+      case "text":
+        sent = await sock.sendMessage(chatId, { text: instr.text }, options);
+        if (instr.editable && sent?.key) { lastSentKey = sent.key; lastSentIsImage = false; }
         break;
-      }
-      case "markdown": {
-        // Split markdown into text segments and fenced code blocks (not inline code).
-        // Requires newline after opening ``` to distinguish from inline triple backticks.
-        // Non-image code blocks are kept inline with surrounding text; only image-rendered
-        // code blocks force a message split (since they must be sent as separate images).
-        const parts = block.text.split(/(```\w*\n[\s\S]*?```)/g);
-
-        // Accumulate text segments and non-image code blocks into a single message.
-        // Flush the buffer whenever we hit an image-rendered code block.
-        let textBuffer = "";
-
-        const flushText = async () => {
-          const trimmed = textBuffer.trim();
-          if (trimmed) {
-            const sent = await sock.sendMessage(chatId, { text: `${prefix} ${trimmed}` }, options);
-            if (sent?.key) lastSentKey = sent.key;
-          }
-          textBuffer = "";
-        };
-
-        for (const part of parts) {
-          const codeMatch = part.match(/^```(\w*)\n([\s\S]*?)```$/);
-          if (codeMatch) {
-            const lang = codeMatch[1] || "";
-            const code = codeMatch[2].trimEnd();
-            if (lang && shouldRenderAsImage(lang, code)) {
-              // Flush accumulated text before sending images
-              await flushText();
-              try {
-                const images = await renderCodeToImages(code, lang);
-                for (const image of images) {
-                  await sock.sendMessage(chatId, {
-                    image,
-                    ...(lang && { caption: lang }),
-                  }, options);
-                }
-              } catch (err) {
-                log.error("Markdown code image rendering failed, falling back to text:", err);
-                textBuffer += "\n```\n" + code + "\n```\n";
-              }
-            } else {
-              // Non-programming code block — keep inline as monospace text
-              textBuffer += "\n```\n" + code + "\n```\n";
-            }
-          } else {
-            const converted = markdownToWhatsApp(part).trim();
-            if (converted) {
-              textBuffer += (textBuffer ? "\n" : "") + converted;
-            }
-          }
-        }
-        // Flush any remaining text
-        await flushText();
-        break;
-      }
-      case "code": {
-        if (block.language && (block.caption || shouldRenderAsImage(block.language, block.code))) {
-          try {
-            const images = await renderCodeToImages(block.code, block.language);
-            const codeCaption = block.caption
-              ? `${prefix} ${block.caption}`
-              : block.language || undefined;
-            for (const image of images) {
-              const sent = await sock.sendMessage(chatId, {
-                image,
-                ...(codeCaption && { caption: codeCaption }),
-              }, options);
-              if (sent?.key) { lastSentKey = sent.key; lastSentIsImage = true; }
-            }
-          } catch (err) {
-            log.error("Code image rendering failed, falling back to text:", err);
-            await sock.sendMessage(chatId, {
-              text: "```\n" + block.code + "\n```",
-            }, options);
-          }
-        } else {
-          // Non-programming code block — send as formatted text
-          const caption = block.language ? `_${block.language}_\n` : "";
-          await sock.sendMessage(chatId, {
-            text: caption + "```\n" + block.code + "\n```",
-          }, options);
-        }
-        break;
-      }
-      case "diff": {
-        const diffBlock = /** @type {DiffContentBlock} */ (block);
-        try {
-          const images = await renderDiffToImages(diffBlock.oldStr, diffBlock.newStr, diffBlock.language);
-          const diffCaption = diffBlock.caption
-            ? `${prefix} ${diffBlock.caption}`
-            : diffBlock.language ? `diff · ${diffBlock.language}` : undefined;
-          for (const image of images) {
-            await sock.sendMessage(chatId, {
-              image,
-              ...(diffCaption && { caption: diffCaption }),
-            }, options);
-          }
-        } catch (err) {
-          log.error("Diff image rendering failed, falling back to text:", err);
-          // Fallback: show as text diff
-          const lines = [];
-          for (const line of diffBlock.oldStr.split("\n")) lines.push(`- ${line}`);
-          for (const line of diffBlock.newStr.split("\n")) lines.push(`+ ${line}`);
-          await sock.sendMessage(chatId, { text: "```\n" + lines.join("\n") + "\n```" }, options);
-        }
-        break;
-      }
       case "image":
-        await sock.sendMessage(chatId, {
-          image: Buffer.from(block.data, "base64"),
-          ...(block.alt && { caption: block.alt }),
+        sent = await sock.sendMessage(chatId, {
+          image: instr.image,
+          ...(instr.caption && { caption: instr.caption }),
         }, options);
+        if (instr.editable && sent?.key) { lastSentKey = sent.key; lastSentIsImage = true; }
         break;
       case "video":
         await sock.sendMessage(chatId, {
-          video: Buffer.from(block.data, "base64"),
-          mimetype: block.mime_type || "video/mp4",
+          video: instr.video,
+          mimetype: instr.mimetype,
           jpegThumbnail: "",
-          ...(block.alt && { caption: block.alt }),
+          ...(instr.caption && { caption: instr.caption }),
         }, options);
         break;
       case "audio":
         await sock.sendMessage(chatId, {
-          audio: Buffer.from(block.data, "base64"),
-          mimetype: block.mime_type || "audio/mp4",
+          audio: instr.audio,
+          mimetype: instr.mimetype,
         }, options);
         break;
     }
