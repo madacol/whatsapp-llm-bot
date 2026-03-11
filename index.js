@@ -8,7 +8,7 @@ import { getActions, executeAction, getChatActions, getChatAction, getAction } f
 import config from "./config.js";
 import { createLlmClient } from "./llm.js";
 import { formatTime, isHtmlContent, createToolMessage, formatRelativeTime, getChatWorkDir } from "./utils.js";
-import { connectToWhatsApp, sendBlocks } from "./whatsapp-adapter.js";
+import { connectToWhatsApp, sendBlocks, editWhatsAppMessage } from "./whatsapp-adapter.js";
 import { startReminderDaemon } from "./reminder-daemon.js";
 import { startModelsCacheDaemon } from "./models-cache.js";
 import { initStore } from "./store.js";
@@ -635,17 +635,7 @@ export function createReactionHandler({ store, executeActionFn, pendingByMsgKeyI
 
       const formatted = `🔧 *${toolName}*\n\n${resultDisplay}`;
       try {
-        if (toolMsg.wa_msg_is_image) {
-          await sock.relayMessage(editJid, {
-            protocolMessage: {
-              key: msgKey,
-              type: /** @type {*} */ (14), // MESSAGE_EDIT
-              editedMessage: { imageMessage: { caption: formatted } },
-            },
-          }, /** @type {*} */ ({ additionalAttributes: { edit: "1" } }));
-        } else {
-          await sock.sendMessage(editJid, { text: formatted, edit: msgKey });
-        }
+        await editWhatsAppMessage(sock, editJid, msgKey, formatted, !!toolMsg.wa_msg_is_image);
       } catch (editErr) {
         log.error("onReaction: edit failed:", editErr);
       }
