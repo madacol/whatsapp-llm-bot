@@ -13,6 +13,7 @@ import {
   jidNormalizedUser,
   decryptPollVote,
   getKeyAuthor,
+  proto,
 } from "@whiskeysockets/baileys";
 import { exec } from "node:child_process";
 import { rm } from "node:fs/promises";
@@ -429,6 +430,31 @@ export async function getMessageContent(baileysMessage, downloadFn = downloadMed
   return { content, quotedSenderId };
 }
 
+/**
+ * Edit a previously sent WhatsApp message (text or image caption).
+ * @param {import('@whiskeysockets/baileys').WASocket} sock
+ * @param {string} jid
+ * @param {import('@whiskeysockets/baileys').WAMessageKey} key
+ * @param {string} newText
+ * @param {boolean} isImage
+ */
+export async function editWhatsAppMessage(sock, jid, key, newText, isImage) {
+  if (isImage) {
+    // Edit image caption via raw protocolMessage (no image re-upload needed).
+    // See: https://github.com/WhiskeySockets/Baileys/discussions/498
+    // The `edit: '1'` additionalAttribute is required by the WA protocol for edits.
+    await sock.relayMessage(jid, {
+      protocolMessage: {
+        key,
+        type: proto.Message.ProtocolMessage.Type.MESSAGE_EDIT,
+        editedMessage: { imageMessage: { caption: newText } },
+      },
+    }, { additionalAttributes: { edit: "1" } });
+  } else {
+    await sock.sendMessage(jid, { text: newText, edit: key });
+  }
+}
+
 /** @type {Record<MessageSource, string>} */
 const SOURCE_PREFIX = {
   "llm": "🤖",
@@ -605,21 +631,7 @@ export async function sendBlocks(sock, chatId, source, content, options) {
 
   /** @type {MessageEditor} */
   const editor = /** @type {MessageEditor} */ (async (newText) => {
-    const formatted = `${prefix} ${newText}`;
-    if (isImage) {
-      // Edit image caption via raw protocolMessage (no image re-upload needed).
-      // See: https://github.com/WhiskeySockets/Baileys/discussions/498
-      // The `edit: '1'` additionalAttribute is required by the WA protocol for edits.
-      await sock.relayMessage(chatId, {
-        protocolMessage: {
-          key: editKey,
-          type: /** @type {*} */ (14), // MESSAGE_EDIT
-          editedMessage: { imageMessage: { caption: formatted } },
-        },
-      }, /** @type {*} */ ({ additionalAttributes: { edit: "1" } }));
-    } else {
-      await sock.sendMessage(chatId, { text: formatted, edit: editKey });
-    }
+    await editWhatsAppMessage(sock, chatId, editKey, `${prefix} ${newText}`, isImage);
   });
   editor.keyId = editKey.id ?? undefined;
   editor.isImage = isImage;
