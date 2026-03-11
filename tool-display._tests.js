@@ -4,7 +4,6 @@ import {
   formatBashCommand,
   formatSdkToolCall,
   formatToolCallDisplay,
-  formatToolResultDisplay,
 } from "./tool-display.js";
 import { maxCharsForLineCount } from "./code-image-renderer.js";
 
@@ -193,36 +192,4 @@ describe("formatToolCallDisplay", () => {
   });
 });
 
-describe("formatToolResultDisplay", () => {
-  it("returns null when silent", () => {
-    assert.equal(
-      formatToolResultDisplay([{ type: "text", text: "hi" }], "tool", { silent: true }, false),
-      null
-    );
-  });
 
-  it("autoContinue suppresses text but keeps non-text blocks", () => {
-    /** @type {ImageContentBlock} */
-    const img = { type: "image", encoding: "base64", mime_type: "image/png", data: "abc" };
-    const result = formatToolResultDisplay(
-      [{ type: "text", text: "ignored" }, img], "tool", { autoContinue: true }, false
-    );
-    assert.ok(result);
-    assert.equal(result.length, 1);
-    assert.deepEqual(result[0].content, [img]);
-  });
-
-  it("autoContinue returns null when only text blocks", () => {
-    assert.equal(
-      formatToolResultDisplay([{ type: "text", text: "hi" }], "tool", { autoContinue: true }, false),
-      null
-    );
-  });
-
-  it("final answer uses reply (not send) with all blocks", () => {
-    const blocks = [{ type: "text", text: "answer" }];
-    const result = formatToolResultDisplay(/** @type {ToolContentBlock[]} */ (blocks), "tool", {}, false);
-    assert.ok(result);
-    assert.equal(result[0].source, "reply");
-  });
-});

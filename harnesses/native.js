@@ -3,7 +3,7 @@
  */
 
 import { sendChatCompletion } from "../llm.js";
-import { createToolMessage, isHtmlContent } from "../utils.js";
+import { createToolMessage, isHtmlContent, withEditorMeta, errorToString } from "../utils.js";
 import {
   actionsToToolDefinitions,
   registerMedia,
@@ -45,22 +45,6 @@ export function parseToolArgs(argsString) {
     log.error("Failed to parse tool call arguments:", argsString);
     return {};
   }
-}
-
-/**
- * Enrich a base tool message with WhatsApp tracking metadata from the editor.
- * @param {ToolMessage} base
- * @param {MessageEditor | undefined} editor
- * @param {string} toolName
- * @returns {ToolMessage}
- */
-function withEditorMeta(base, editor, toolName) {
-  return {
-    ...base,
-    ...(editor?.keyId && { wa_key_id: editor.keyId }),
-    ...(toolName && { tool_name: toolName }),
-    ...(editor?.isImage && { wa_msg_is_image: true }),
-  };
 }
 
 /**
@@ -174,8 +158,8 @@ async function executeAndStoreTool({
     // Edit tool-call message in-place with summary label
     await tryEdit(editor, getToolCallSummary(toolName, toolArgs, actionFormatToolCall), toolName);
 
-    // Only display non-text content (images, videos); text results visible via react-to-inspect
-    if (!functionResponse.permissions.silent && isContentBlocks) {
+    // Display non-text content (images, videos); text results visible via react-to-inspect
+    if (isContentBlocks) {
       const nonTextBlocks = /** @type {ToolContentBlock[]} */ (result).filter(b => b.type !== "text");
       if (nonTextBlocks.length > 0) {
         await hooks.onToolResult(nonTextBlocks, toolName, functionResponse.permissions);
@@ -185,7 +169,7 @@ async function executeAndStoreTool({
     return functionResponse.permissions.autoContinue;
   } catch (error) {
     log.error("Error executing tool:", error);
-    const errorMessage = `Error executing ${toolName}: ${error instanceof Error ? error.message : String(error)}`;
+    const errorMessage = `Error executing ${toolName}: ${errorToString(error)}`;
 
     await replaceStub(withEditorMeta(createToolMessage(toolCall.id, errorMessage), editor, toolName));
     await tryEdit(editor, `${toolName} — error`, toolName);
