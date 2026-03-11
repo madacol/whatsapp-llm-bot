@@ -15,6 +15,7 @@ import {
   getKeyAuthor,
   proto,
 } from "@whiskeysockets/baileys";
+import { createHash } from "node:crypto";
 import { exec } from "node:child_process";
 import { rm } from "node:fs/promises";
 import { needsAuthReset, sendAlertEmail } from "./notifications.js";
@@ -71,6 +72,124 @@ function shouldRenderAsImage(lang, code) {
 const sentPolls = new Map();
 const POLL_TTL_MS = 10 * 60 * 1000;
 const MAX_SENT_POLLS = 200;
+
+/**
+ * Resolve the poll creation data from any Baileys poll message version (V1–V5).
+ * @param {import('@whiskeysockets/baileys').WAMessage["message"]} msg
+ * @returns {{ options: Array<{optionName?: string | null}> } | null}
+ */
+function getPollCreationData(msg) {
+  const data = msg?.pollCreationMessage
+    || msg?.pollCreationMessageV2
+    || msg?.pollCreationMessageV3
+    || msg?.pollCreationMessageV4
+    || msg?.pollCreationMessageV5;
+  if (!data || !("options" in data)) return null;
+  return { options: data.options ?? [] };
+}
+
+/**
+ * Decrypt a poll vote message and resolve the selected option names.
+ * Uses the module-level `sentPolls` map to look up the original poll creation.
+ * @param {import('@whiskeysockets/baileys').WAMessage} message - the incoming poll vote message
+ * @param {import('@whiskeysockets/baileys').WASocket} sock
+ * @returns {Promise<{ chatId: string, selectedOptions: string[] } | null>}
+ */
+async function decryptAndResolvePollVote(message, sock) {
+  const pollUpdate = message.message?.pollUpdateMessage;
+  if (!pollUpdate) return null;
+
+  const creationKeyId = pollUpdate.pollCreationMessageKey?.id;
+  log.debug(`Poll vote upsert: creationKeyId=${creationKeyId}`);
+  if (!creationKeyId) return null;
+
+  const pollCreation = sentPolls.get(creationKeyId);
+  if (!pollCreation) {
+    log.debug(`Poll creation not found in sentPolls for id=${creationKeyId}`);
+    return null;
+  }
+
+  const encKey = pollCreation.message?.messageContextInfo?.messageSecret;
+  if (!encKey || !pollUpdate.vote) {
+    log.debug("Poll vote missing encKey or vote payload, skipping");
+    return null;
+  }
+
+  // Decrypt the vote using Baileys' decryptPollVote.
+  // The JIDs must match the addressing mode used for encryption.
+  // When LID addressing is active, WhatsApp encrypts with LID JIDs,
+  // so we must decrypt with LID JIDs too (not phone numbers).
+  // getKeyAuthor() returns the Alt (opposite) format, so we bypass it
+  // and use the primary JID fields directly.
+  const voteJid = message.key.participant || message.key.remoteJid || "";
+  const isLidVote = isLidUser(voteJid);
+
+  /** @type {string} */
+  let meId;
+  /** @type {string} */
+  let pollCreatorJid;
+  /** @type {string} */
+  let voterJid;
+
+  if (isLidVote) {
+    // LID addressing: use LID-format JIDs for decryption
+    meId = sock.user?.lid
+      ? jidNormalizedUser(sock.user.lid)
+      : jidNormalizedUser(sock.user?.id ?? "");
+    // Poll was created by us (fromMe), so creator = meId in LID format
+    pollCreatorJid = pollCreation.key?.fromMe
+      ? meId
+      : (pollCreation.key?.participant || pollCreation.key?.remoteJid || "");
+    // Voter is the person who voted, use primary (non-Alt) JID
+    voterJid = message.key.fromMe
+      ? meId
+      : (message.key.participant || message.key.remoteJid || "");
+  } else {
+    // PN addressing: phone number JIDs
+    meId = jidNormalizedUser(sock.user?.id ?? "");
+    pollCreatorJid = getKeyAuthor(pollCreation.key, meId);
+    voterJid = getKeyAuthor(message.key, meId);
+  }
+
+  log.debug(`Poll decrypt: isLid=${isLidVote}, meId=${meId}, creator=${pollCreatorJid}, voter=${voterJid}`);
+  const decrypted = decryptPollVote(pollUpdate.vote, {
+    pollEncKey: encKey,
+    pollCreatorJid,
+    pollMsgId: creationKeyId,
+    voterJid,
+  });
+  log.debug(`Decrypted poll vote: ${JSON.stringify(decrypted)}`);
+
+  // decrypted.selectedOptions contains SHA256 hashes of option names.
+  // Match them against the poll creation options.
+  const pollData = getPollCreationData(pollCreation.message);
+  const options = pollData?.options ?? [];
+  log.debug(`Poll options lookup: keys=${Object.keys(pollCreation.message || {}).filter(k => k.includes("poll"))}, optionCount=${options.length}`);
+
+  const selectedHashes = (decrypted.selectedOptions ?? []).map(
+    (/** @type {Uint8Array} */ h) => Buffer.from(h).toString("hex"),
+  );
+
+  // Hash each option name and match
+  const selected = options
+    .filter(opt => {
+      if (!opt.optionName) return false;
+      const hash = createHash("sha256").update(opt.optionName).digest("hex");
+      return selectedHashes.includes(hash);
+    })
+    .map(opt => opt.optionName ?? "");
+
+  log.debug(`Poll vote decoded: selected=[${selected.join(",")}]`);
+  if (selected.length === 0) return null;
+
+  let chatId = message.key.remoteJid || pollCreation.key?.remoteJid || "";
+  if (isLidUser(chatId)) {
+    const pn = await sock.signalRepository.lidMapping.getPNForLID(chatId);
+    if (pn) chatId = jidNormalizedUser(pn);
+  }
+
+  return { chatId, selectedOptions: selected };
+}
 
 /**
  * Convert standard Markdown to WhatsApp-compatible formatting.
@@ -856,97 +975,12 @@ function registerHandlers(sockRef, saveCreds, onMessageHandler, reconnect, confi
 
         // Handle poll vote messages: manually decrypt and resolve via onPollVote.
         // Baileys' internal poll decryption is commented out, so we do it ourselves.
-        const pollUpdate = message.message?.pollUpdateMessage;
-        if (pollUpdate && onPollVote) {
-          const creationKeyId = pollUpdate.pollCreationMessageKey?.id;
-          log.debug(`Poll vote upsert: creationKeyId=${creationKeyId}`);
-          if (creationKeyId) {
-            const pollCreation = sentPolls.get(creationKeyId);
-            if (pollCreation) {
-              try {
-                const encKey = pollCreation.message?.messageContextInfo?.messageSecret;
-                if (!encKey || !pollUpdate.vote) {
-                  log.debug("Poll vote missing encKey or vote payload, skipping");
-                } else {
-                  // Decrypt the vote using Baileys' decryptPollVote.
-                  // The JIDs must match the addressing mode used for encryption.
-                  // When LID addressing is active, WhatsApp encrypts with LID JIDs,
-                  // so we must decrypt with LID JIDs too (not phone numbers).
-                  // getKeyAuthor() returns the Alt (opposite) format, so we bypass it
-                  // and use the primary JID fields directly.
-                  const voteJid = message.key.participant || message.key.remoteJid || "";
-                  const isLidVote = isLidUser(voteJid);
-
-                  let meId, pollCreatorJid, voterJid;
-                  if (isLidVote) {
-                    // LID addressing: use LID-format JIDs for decryption
-                    meId = sockRef.current.user?.lid
-                      ? jidNormalizedUser(sockRef.current.user.lid)
-                      : jidNormalizedUser(sockRef.current.user?.id ?? "");
-                    // Poll was created by us (fromMe), so creator = meId in LID format
-                    pollCreatorJid = pollCreation.key?.fromMe
-                      ? meId
-                      : (pollCreation.key?.participant || pollCreation.key?.remoteJid || "");
-                    // Voter is the person who voted, use primary (non-Alt) JID
-                    voterJid = message.key.fromMe
-                      ? meId
-                      : (message.key.participant || message.key.remoteJid || "");
-                  } else {
-                    // PN addressing: phone number JIDs
-                    meId = jidNormalizedUser(sockRef.current.user?.id ?? "");
-                    pollCreatorJid = getKeyAuthor(pollCreation.key, meId);
-                    voterJid = getKeyAuthor(message.key, meId);
-                  }
-                  log.debug(`Poll decrypt: isLid=${isLidVote}, meId=${meId}, creator=${pollCreatorJid}, voter=${voterJid}`);
-                  const decrypted = decryptPollVote(pollUpdate.vote, {
-                    pollEncKey: encKey,
-                    pollCreatorJid,
-                    pollMsgId: creationKeyId,
-                    voterJid,
-                  });
-                  log.debug(`Decrypted poll vote: ${JSON.stringify(decrypted)}`);
-
-                  // decrypted.selectedOptions contains SHA256 hashes of option names.
-                  // Match them against the poll creation options.
-                  // Baileys may use pollCreationMessage, V2, V3, etc. depending on version.
-                  const pcMsg = pollCreation.message;
-                  const pollData = pcMsg?.pollCreationMessage
-                    || pcMsg?.pollCreationMessageV2
-                    || pcMsg?.pollCreationMessageV3
-                    || pcMsg?.pollCreationMessageV4
-                    || pcMsg?.pollCreationMessageV5;
-                  const options = /** @type {Array<{optionName?: string}>} */ (/** @type {*} */ (pollData)?.options ?? []);
-                  log.debug(`Poll options lookup: keys=${Object.keys(pcMsg || {}).filter(k => k.includes("poll"))}, optionCount=${options.length}`);
-                  const selectedHashes = (decrypted.selectedOptions ?? []).map(
-                    (/** @type {Uint8Array} */ h) => Buffer.from(h).toString("hex"),
-                  );
-
-                  // Hash each option name and match
-                  const { createHash } = await import("crypto");
-                  const selected = options
-                    .filter(opt => {
-                      if (!opt.optionName) return false;
-                      const hash = createHash("sha256").update(opt.optionName).digest("hex");
-                      return selectedHashes.includes(hash);
-                    })
-                    .map(opt => opt.optionName ?? "");
-
-                  log.debug(`Poll vote decoded: selected=[${selected.join(",")}]`);
-                  if (selected.length > 0) {
-                    let chatId = message.key.remoteJid || pollCreation.key?.remoteJid || "";
-                    if (isLidUser(chatId)) {
-                      const pn = await sockRef.current.signalRepository.lidMapping.getPNForLID(chatId);
-                      if (pn) chatId = jidNormalizedUser(pn);
-                    }
-                    await onPollVote({ chatId, selectedOptions: selected });
-                  }
-                }
-              } catch (err) {
-                log.error("Error processing poll vote from upsert:", err);
-              }
-            } else {
-              log.debug(`Poll creation not found in sentPolls for id=${creationKeyId}`);
-            }
+        if (message.message?.pollUpdateMessage && onPollVote) {
+          try {
+            const result = await decryptAndResolvePollVote(message, sockRef.current);
+            if (result) await onPollVote(result);
+          } catch (err) {
+            log.error("Error processing poll vote from upsert:", err);
           }
           continue; // Don't process poll votes as regular messages
         }
