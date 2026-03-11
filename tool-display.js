@@ -293,39 +293,4 @@ export function formatToolCallDisplay(toolCall, isDebug, actionFormatter) {
   return msg;
 }
 
-/**
- * Format a tool result for WhatsApp display. Returns the content to send
- * (as "tool-result"), or null if nothing should be displayed.
- *
- * For debug mode, returns `{ source: "send", content }`.
- * For final answers (non-autoContinue), returns `{ source: "reply", content }`.
- * This lets the caller choose between `send` and `reply`.
- *
- * @param {ToolContentBlock[]} blocks
- * @param {string} toolName
- * @param {Action['permissions']} permissions
- * @param {boolean} isDebug
- * @returns {{ source: "send" | "reply", content: SendContent }[] | null}
- */
-export function formatToolResultDisplay(blocks, toolName, permissions, isDebug) {
-  if (permissions.silent) return null;
 
-  const textBlocks = blocks.filter(b => b.type === "text");
-  const nonTextBlocks = blocks.filter(b => b.type !== "text");
-
-  if (isDebug) {
-    const textSummary = textBlocks.map(b => /** @type {TextContentBlock} */ (b).text).join("\n");
-    /** @type {{ source: "send" | "reply", content: SendContent }[]} */
-    const result = [{ source: "send", content: `${toolName}: ${textSummary || "Done."}` }];
-    if (nonTextBlocks.length > 0) result.push({ source: "send", content: nonTextBlocks });
-    return result;
-  }
-
-  if (permissions.autoContinue) {
-    if (nonTextBlocks.length > 0) return [{ source: "send", content: nonTextBlocks }];
-    return null;
-  }
-
-  // Final answer: render all blocks
-  return [{ source: "reply", content: blocks }];
-}

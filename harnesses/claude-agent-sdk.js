@@ -15,7 +15,7 @@ import { NO_OP_HOOKS } from "./native.js";
 import { getChatActions } from "../actions.js";
 import { createLogger } from "../logger.js";
 import { extractLastUserText } from "../message-formatting.js";
-import { createToolMessage } from "../utils.js";
+import { createToolMessage, withEditorMeta, errorToString } from "../utils.js";
 import { getToolCallSummary } from "../tool-display.js";
 
 const log = createLogger("harness:claude-agent-sdk");
@@ -83,8 +83,6 @@ If you want to propose something and wait for the user's decision before acting,
  *   editor?: MessageEditor,
  *   toolName: string,
  *   description: string | null,
- *   waKeyId: string | null,
- *   isImage: boolean,
  * }} ActiveToolEntry
  */
 
@@ -105,7 +103,7 @@ If you want to propose something and wait for the user's decision before acting,
  * @param {unknown} err
  */
 function logSuppressedHookError(hookName, err) {
-  const msg = err instanceof Error ? err.message : String(err);
+  const msg = errorToString(err);
   const isConnectionErr = msg.includes("Connection Closed") || msg.includes("Connection was lost");
   if (isConnectionErr) {
     log.warn(`Hook "${hookName}" failed (suppressed):`, msg);
@@ -424,7 +422,7 @@ export function createClaudeAgentSdkHarness() {
       if (abortController.signal.aborted) {
         log.debug("SDK query was cancelled for chat", session.chatId);
       } else {
-        const errorMsg = err instanceof Error ? err.message : String(err);
+        const errorMsg = errorToString(err);
 
         // If resume failed (session not found / corrupt), clear the stale session ID
         // so the next message starts fresh instead of hitting the same error.
@@ -659,8 +657,6 @@ async function handleAssistantEvent(event, ctx) {
           editor: editor ?? undefined,
           toolName: name,
           description: displayLabel,
-          waKeyId: editor?.keyId ?? null,
-          isImage: editor?.isImage ?? false,
         });
         storedBlocks.push({
           type: "tool",
@@ -748,13 +744,11 @@ async function handleUserEvent(event, ctx) {
   const active = ctx.activeTools.get(resolvedToolUseId);
 
   if (resultText != null) {
-    /** @type {ToolMessage} */
-    const toolMsg = {
-      ...createToolMessage(resolvedToolUseId, resultText),
-      ...(active?.waKeyId && { wa_key_id: active.waKeyId }),
-      ...(active?.toolName && { tool_name: active.toolName }),
-      ...(active?.isImage && { wa_msg_is_image: true }),
-    };
+    const toolMsg = withEditorMeta(
+      createToolMessage(resolvedToolUseId, resultText),
+      active?.editor,
+      active?.toolName ?? "",
+    );
     ctx.messages.push(toolMsg);
     await ctx.session.addMessage(ctx.session.chatId, toolMsg, ctx.session.senderIds);
   }

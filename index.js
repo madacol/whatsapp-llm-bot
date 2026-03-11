@@ -7,7 +7,7 @@ import fs from "node:fs";
 import { getActions, executeAction, getChatActions, getChatAction, getAction } from "./actions.js";
 import config from "./config.js";
 import { createLlmClient } from "./llm.js";
-import { formatTime, isHtmlContent, createToolMessage, formatRelativeTime, getChatWorkDir } from "./utils.js";
+import { formatTime, isHtmlContent, createToolMessage, formatRelativeTime, getChatWorkDir, errorToString } from "./utils.js";
 import { connectToWhatsApp, sendBlocks, editWhatsAppMessage } from "./whatsapp-adapter.js";
 import { startReminderDaemon } from "./reminder-daemon.js";
 import { startModelsCacheDaemon } from "./models-cache.js";
@@ -34,7 +34,7 @@ import {
   deletePendingConfirmation,
 } from "./pending-confirmations.js";
 import { resolveHarness, resolveHarnessName, registerHarness, waitForAllHarnesses, MAX_TOOL_CALL_DEPTH } from "./harnesses/index.js";
-import { formatToolCallDisplay, formatToolResultDisplay } from "./tool-display.js";
+import { formatToolCallDisplay } from "./tool-display.js";
 import { createMessageActionContext, createSilentActionContext } from "./execute-action-context.js";
 import { createLogger } from "./logger.js";
 
@@ -73,25 +73,6 @@ async function displayToolCall(toolCall, context, isDebug, actionFormatter) {
   }
 }
 
-/**
- * Display a tool result to the user using the pure formatter.
- * @param {ToolContentBlock[]} blocks
- * @param {string} toolName
- * @param {Action['permissions']} permissions
- * @param {Pick<ExecuteActionContext, "send" | "reply">} context
- * @param {boolean} isDebug
- */
-async function displayToolResult(blocks, toolName, permissions, context, isDebug) {
-  const items = formatToolResultDisplay(blocks, toolName, permissions, isDebug);
-  if (!items) return;
-  for (const { source, content } of items) {
-    if (source === "reply") {
-      await context.reply("tool-result", content);
-    } else {
-      await context.send("tool-result", content);
-    }
-  }
-}
 
 /**
  * @typedef {import('./store.js').Store} Store
@@ -225,8 +206,7 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
       }
     } catch (error) {
       log.error("Error executing command:", error);
-      const errorMessage =
-        error instanceof Error ? error.message : String(error);
+      const errorMessage = errorToString(error);
       await context.reply("error", `Error: ${errorMessage}`);
     }
   }
@@ -379,7 +359,7 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
     try {
       await messageContext.sendPresenceUpdate("composing");
     } catch (err) {
-      log.debug("Could not send composing signal:", err instanceof Error ? err.message : err);
+      log.debug("Could not send composing signal:", errorToString(err));
     }
 
     try {
@@ -472,7 +452,7 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
       onToolCall: async (toolCall, fmt) => {
         return displayToolCall(toolCall, context, isDebug, fmt);
       },
-      onToolResult: (blocks, name, perms) => displayToolResult(blocks, name, perms, context, isDebug),
+      onToolResult: async (blocks) => { await context.send("tool-result", blocks); },
       onToolError: async (msg) => { await context.send("error", msg); },
       onContinuePrompt: () => context.confirm(`React 👍 to continue or 👎 to stop.`),
       onDepthLimit: () => context.confirm(
@@ -499,14 +479,14 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
 
     } catch (error) {
       log.error("handleLlmMessage failed:", error);
-      const errorMessage = error instanceof Error ? error.message : JSON.stringify(error, null, 2);
+      const errorMessage = errorToString(error);
       try { await context.reply("error", errorMessage); } catch { /* best effort */ }
     } finally {
       pendingLlmChats.delete(chatId); // clean up in case of error before flush
       try {
         await messageContext.sendPresenceUpdate("paused");
       } catch (err) {
-        log.debug("Could not send paused signal:", err instanceof Error ? err.message : err);
+        log.debug("Could not send paused signal:", errorToString(err));
       }
     }
   }
@@ -709,7 +689,7 @@ export function createReactionHandler({ store, executeActionFn, pendingByMsgKeyI
       await resumeContext.send("tool-result", resultText);
     } catch (error) {
       log.error(`Error resuming action "${pending.action_name}":`, error);
-      const errorMsg = error instanceof Error ? error.message : String(error);
+      const errorMsg = errorToString(error);
 
       // Store error as tool result so the LLM learns the failure
       if (pending.tool_call_id) {
@@ -732,7 +712,7 @@ try {
   const { createClaudeAgentSdkHarness } = await import("./harnesses/claude-agent-sdk.js");
   registerHarness("claude-agent-sdk", createClaudeAgentSdkHarness);
 } catch (err) {
-  const msg = err instanceof Error ? err.message : String(err);
+  const msg = errorToString(err);
   if (msg.includes("Cannot find") || msg.includes("MODULE_NOT_FOUND")) {
     log.debug("Claude Agent SDK not installed, skipping harness registration");
   } else {

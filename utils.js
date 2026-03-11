@@ -30,31 +30,6 @@ export function getChatWorkDir(chatId, explicitCwd) {
 }
 
 /**
- * Shortens a tool call ID to characters 6–11 (skipping the common prefix)
- * @param {string} toolCallId
- * @returns {string} Shortened tool call ID
- */
-export function shortenToolId(toolCallId) {
-  return toolCallId ? toolCallId.substring(6, 12) : "unknown";
-}
-
-/**
- * Truncate a string to maxLen, appending a summary of omitted content.
- * @param {string} str
- * @param {number} maxLen
- * @returns {string}
- */
-export function truncateWithSummary(str, maxLen) {
-  if (str.length <= maxLen) return str;
-  const remaining = str.length - maxLen;
-  const remainingLines = str.slice(maxLen).split("\n").length - 1;
-  const suffix = remainingLines > 0
-    ? `… +${remaining} chars, ${remainingLines} lines`
-    : `… +${remaining} chars`;
-  return str.slice(0, maxLen) + suffix;
-}
-
-/**
  * Format a timestamp for display.
  * @param {Date} date
  * @returns {string}
@@ -114,4 +89,30 @@ export function formatRelativeTime(ms, suffix = "ago") {
  */
 export function createToolMessage(toolId, text) {
   return { role: "tool", tool_id: toolId, content: [{ type: "text", text }] };
+}
+
+/**
+ * Enrich a tool message with WhatsApp tracking metadata from the editor.
+ * Used by both harnesses to attach wa_key_id, tool_name, and wa_msg_is_image.
+ * @param {ToolMessage} base
+ * @param {MessageEditor | undefined} editor
+ * @param {string} toolName
+ * @returns {ToolMessage}
+ */
+export function withEditorMeta(base, editor, toolName) {
+  return {
+    ...base,
+    ...(editor?.keyId && { wa_key_id: editor.keyId }),
+    ...(toolName && { tool_name: toolName }),
+    ...(editor?.isImage && { wa_msg_is_image: true }),
+  };
+}
+
+/**
+ * Extract a human-readable message from an unknown error value.
+ * @param {unknown} err
+ * @returns {string}
+ */
+export function errorToString(err) {
+  return err instanceof Error ? err.message : String(err);
 }
