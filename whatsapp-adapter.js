@@ -40,7 +40,7 @@ const MAX_SENT_POLLS = 200;
  * @param {import('@whiskeysockets/baileys').WAMessage["message"]} msg
  * @returns {{ options: Array<{optionName?: string | null}> } | null}
  */
-function getPollCreationData(msg) {
+export function getPollCreationData(msg) {
   const data = msg?.pollCreationMessage
     || msg?.pollCreationMessageV2
     || msg?.pollCreationMessageV3
