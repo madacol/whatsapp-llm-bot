@@ -309,12 +309,14 @@ export function createClaudeAgentSdkHarness() {
     /** @type {string | null} */
     let resolvedSessionId = null;
 
-    // Ring buffer: only keep the last N stderr lines for error diagnostics.
-    // The SDK subprocess runs with --verbose, which produces massive debug output
-    // that was previously accumulated unboundedly — causing OOM at ~1.9GB.
+    // Ring buffer: only keep the last N stderr lines (up to MAX_STDERR_BYTES total)
+    // for error diagnostics. The SDK subprocess runs with --verbose, producing
+    // massive debug output that was previously accumulated unboundedly (OOM at ~1.9GB).
     const MAX_STDERR_LINES = 200;
+    const MAX_STDERR_BYTES = 50_000;
     /** @type {string[]} */
     const stderrLines = [];
+    let stderrBytes = 0;
     try {
       /** @type {import("@anthropic-ai/claude-agent-sdk").Options} */
       const queryOptions = {
@@ -333,7 +335,12 @@ export function createClaudeAgentSdkHarness() {
         // Don't pass llmConfig.chatModel — it's an OpenRouter model ID.
         // The SDK uses Claude Code's own model (configurable via its own settings).
         stderr: (/** @type {string} */ data) => {
-          if (stderrLines.length >= MAX_STDERR_LINES) stderrLines.shift();
+          stderrBytes += data.length;
+          while (stderrLines.length >= MAX_STDERR_LINES || stderrBytes > MAX_STDERR_BYTES) {
+            const removed = stderrLines.shift();
+            if (!removed) break;
+            stderrBytes -= removed.length;
+          }
           stderrLines.push(data);
           log.debug("[sdk stderr]", data.trimEnd());
         },
