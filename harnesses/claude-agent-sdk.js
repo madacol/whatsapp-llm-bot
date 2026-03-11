@@ -115,6 +115,50 @@ function logSuppressedHookError(hookName, err) {
 }
 
 /**
+ * Wrap every hook so that a WhatsApp send failure (e.g. "Connection Closed")
+ * doesn't kill the entire SDK query loop. Each hook has an explicit fallback
+ * matching its return type contract.
+ * @param {Required<AgentIOHooks>} rawHooks
+ * @returns {Required<AgentIOHooks>}
+ */
+export function wrapHooksWithFallbacks(rawHooks) {
+  return {
+    onLlmResponse: async (/** @type {string} */ text) => {
+      try { await rawHooks.onLlmResponse(text); }
+      catch (err) { logSuppressedHookError("onLlmResponse", err); }
+    },
+    onAskUser: async (/** @type {string} */ question, /** @type {string[]} */ options, /** @type {string | undefined} */ preamble, /** @type {string[] | undefined} */ descriptions) => {
+      try { return await rawHooks.onAskUser(question, options, preamble, descriptions); }
+      catch (err) { logSuppressedHookError("onAskUser", err); return ""; }
+    },
+    onToolCall: async (/** @type {LlmChatResponse['toolCalls'][0]} */ toolCall, /** @type {((params: Record<string, any>) => string) | undefined} */ formatToolCall) => {
+      try { return await rawHooks.onToolCall(toolCall, formatToolCall); }
+      catch (err) { logSuppressedHookError("onToolCall", err); }
+    },
+    onToolResult: async (/** @type {ToolContentBlock[]} */ blocks, /** @type {string} */ toolName, /** @type {PermissionFlags} */ permissions) => {
+      try { await rawHooks.onToolResult(blocks, toolName, permissions); }
+      catch (err) { logSuppressedHookError("onToolResult", err); }
+    },
+    onToolError: async (/** @type {string} */ error) => {
+      try { await rawHooks.onToolError(error); }
+      catch (err) { logSuppressedHookError("onToolError", err); }
+    },
+    onContinuePrompt: async () => {
+      try { return await rawHooks.onContinuePrompt(); }
+      catch (err) { logSuppressedHookError("onContinuePrompt", err); return true; }
+    },
+    onDepthLimit: async () => {
+      try { return await rawHooks.onDepthLimit(); }
+      catch (err) { logSuppressedHookError("onDepthLimit", err); return false; }
+    },
+    onUsage: async (/** @type {string} */ cost, /** @type {{ prompt: number; completion: number; cached: number }} */ tokens) => {
+      try { await rawHooks.onUsage(cost, tokens); }
+      catch (err) { logSuppressedHookError("onUsage", err); }
+    },
+  };
+}
+
+/**
  * Create the Claude Agent SDK harness.
  * Maintains per-chat active query state for message injection and cancellation.
  * @returns {AgentHarness}
@@ -230,46 +274,7 @@ export function createClaudeAgentSdkHarness() {
    */
   async function processLlmResponse({ session, llmConfig, messages, hooks: userHooks, maxDepth, cwd }) {
     const rawHooks = { ...NO_OP_HOOKS, ...userHooks };
-
-    // Wrap every hook so that a WhatsApp send failure (e.g. "Connection Closed")
-    // doesn't kill the entire SDK query loop. The SDK query is expensive and should
-    // continue processing even if a hook can't deliver its output right now.
-    // Each hook has an explicit fallback matching its return type contract.
-    /** @type {Required<AgentIOHooks>} */
-    const hooks = {
-      onLlmResponse: async (/** @type {string} */ text) => {
-        try { await rawHooks.onLlmResponse(text); }
-        catch (err) { logSuppressedHookError("onLlmResponse", err); }
-      },
-      onAskUser: async (/** @type {string} */ question, /** @type {string[]} */ options, /** @type {string | undefined} */ preamble, /** @type {string[] | undefined} */ descriptions) => {
-        try { return await rawHooks.onAskUser(question, options, preamble, descriptions); }
-        catch (err) { logSuppressedHookError("onAskUser", err); return ""; }
-      },
-      onToolCall: async (/** @type {LlmChatResponse['toolCalls'][0]} */ toolCall, /** @type {((params: Record<string, any>) => string) | undefined} */ formatToolCall) => {
-        try { return await rawHooks.onToolCall(toolCall, formatToolCall); }
-        catch (err) { logSuppressedHookError("onToolCall", err); }
-      },
-      onToolResult: async (/** @type {ToolContentBlock[]} */ blocks, /** @type {string} */ toolName, /** @type {PermissionFlags} */ permissions) => {
-        try { await rawHooks.onToolResult(blocks, toolName, permissions); }
-        catch (err) { logSuppressedHookError("onToolResult", err); }
-      },
-      onToolError: async (/** @type {string} */ error) => {
-        try { await rawHooks.onToolError(error); }
-        catch (err) { logSuppressedHookError("onToolError", err); }
-      },
-      onContinuePrompt: async () => {
-        try { return await rawHooks.onContinuePrompt(); }
-        catch (err) { logSuppressedHookError("onContinuePrompt", err); return true; }
-      },
-      onDepthLimit: async () => {
-        try { return await rawHooks.onDepthLimit(); }
-        catch (err) { logSuppressedHookError("onDepthLimit", err); return false; }
-      },
-      onUsage: async (/** @type {string} */ cost, /** @type {{ prompt: number; completion: number; cached: number }} */ tokens) => {
-        try { await rawHooks.onUsage(cost, tokens); }
-        catch (err) { logSuppressedHookError("onUsage", err); }
-      },
-    };
+    const hooks = wrapHooksWithFallbacks(rawHooks);
 
     const lastUserText = extractLastUserText(messages);
 
