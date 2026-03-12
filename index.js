@@ -89,21 +89,10 @@ async function displayToolCall(toolCall, context, isDebug, actionFormatter) {
 /**
  * Create a message handler with injected dependencies.
  * @param {MessageHandlerDeps} deps
- * @returns {{ handleMessage: (messageContext: IncomingContext) => Promise<void>, handlePollVote: (event: import("./whatsapp-adapter.js").PollVoteEvent) => Promise<void> }}
+ * @returns {{ handleMessage: (messageContext: IncomingContext) => Promise<void> }}
  */
 export function createMessageHandler({ store, llmClient, getActionsFn, executeActionFn }) {
   const { addMessage, updateToolMessage, createChat, getChat, getMessages, updateSdkSessionId, archiveSdkSession, getSdkSessionHistory, restoreSdkSession } = store;
-
-  /** Timeout for onAskUser responses (5 minutes). */
-  const ASK_USER_TIMEOUT_MS = 5 * 60 * 1000;
-
-  /**
-   * Per-chat pending response resolvers for onAskUser.
-   * When set, the next incoming message for that chat resolves the promise
-   * instead of being processed normally.
-   * @type {Map<string, (text: string) => void>}
-   */
-  const pendingUserResponses = new Map();
 
   /**
    * Chats currently in LLM processing (between "LLM will respond" and harness completion).
@@ -113,27 +102,6 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
    * @type {Map<string, string[]>}
    */
   const pendingLlmChats = new Map();
-
-  /**
-   * Wait for a user response on a given chat, with a timeout.
-   * Registers a resolver in `pendingUserResponses` that will be triggered
-   * by the next incoming message or poll vote for this chat.
-   * @param {string} chatId
-   * @param {(text: string) => string} [transform] - Optional transform applied to the raw response before resolving.
-   * @returns {Promise<string>} The user's response text, or "" on timeout.
-   */
-  function waitForUserResponse(chatId, transform) {
-    return new Promise((resolve) => {
-      const timer = setTimeout(() => {
-        pendingUserResponses.delete(chatId);
-        resolve("");
-      }, ASK_USER_TIMEOUT_MS);
-      pendingUserResponses.set(chatId, (text) => {
-        clearTimeout(timer);
-        resolve(transform ? transform(text) : text);
-      });
-    });
-  }
 
 
 
@@ -244,32 +212,26 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
           return true;
         }
 
-        // Build poll options: most recent first, with relative time labels
+        // Build options: most recent first, with relative time labels
         // WhatsApp polls support up to 12 options
         const recentFirst = [...history].reverse().slice(0, 11);
-        const cancelLabel = "Cancel";
-        const pollOptions = recentFirst.map((entry, i) => {
-          return `Session ${i + 1} (${formatRelativeTime(Date.now() - new Date(entry.cleared_at).getTime())})`;
-        });
-        pollOptions.push(cancelLabel);
+        /** @type {SelectOption[]} */
+        const selectOptions = [
+          ...recentFirst.map((entry, i) => ({
+            id: String(i),
+            label: `Session ${i + 1} (${formatRelativeTime(Date.now() - new Date(entry.cleared_at).getTime())})`,
+          })),
+          { id: "cancel", label: "Cancel" },
+        ];
 
-        // Send poll and wait for user choice
-        await context.sendPoll("Which session to resume?", pollOptions, 1);
-        const choice = await waitForUserResponse(chatId);
+        const choice = await context.select("Which session to resume?", selectOptions);
 
-        if (!choice || choice === cancelLabel) {
+        if (!choice || choice === "cancel") {
           await context.reply("tool-result", "Resume cancelled.");
           return true;
         }
 
-        // Parse the chosen index from "Session N (Xm ago)"
-        const match = String(choice).match(/^Session (\d+)/);
-        if (!match) {
-          await context.reply("tool-result", "Could not parse selection.");
-          return true;
-        }
-        const selectedIndex = parseInt(match[1], 10) - 1; // 0-based from most recent
-
+        const selectedIndex = parseInt(choice, 10);
         const restored = await restoreSdkSession(chatId, selectedIndex);
         if (!restored) {
           await context.reply("tool-result", "Failed to restore session.");
@@ -303,53 +265,43 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
           const currentModel = /** @type {string | null} */ (rows[0]?.sdk_model ?? null);
           const currentEffort = /** @type {string | null} */ (rows[0]?.sdk_effort ?? null);
 
-          // Model poll
-          const defaultModelLabel = "Default (Sonnet)";
-          const modelOptions = [
+          // Model selection
+          /** @type {SelectOption[]} */
+          const modelSelectOptions = [
             ...models.map((m) => {
               const label = `${m.displayName} — ${m.description}`;
-              return currentModel === m.value ? `${label} ✓` : label;
+              return { id: m.value, label: currentModel === m.value ? `${label} ✓` : label };
             }),
-            defaultModelLabel,
+            { id: "off", label: "Default (Sonnet)" },
           ];
 
-          await context.sendPoll("Choose SDK model", modelOptions, 1);
-          const modelChoice = await waitForUserResponse(chatId);
+          const modelChoice = await context.select("Choose SDK model", modelSelectOptions);
 
           /** @type {string | null} */
           let resolvedModelValue = currentModel;
           if (modelChoice) {
-            if (modelChoice === defaultModelLabel) {
-              await handleModelCommand(chatId, "off");
-              resolvedModelValue = null;
-            } else {
-              const chosenModel = models.find((m) => modelChoice.startsWith(m.displayName));
-              if (chosenModel) {
-                await handleModelCommand(chatId, chosenModel.value);
-                resolvedModelValue = chosenModel.value;
-              }
-            }
+            await handleModelCommand(chatId, modelChoice);
+            resolvedModelValue = modelChoice === "off" ? null : modelChoice;
           }
 
-          // Effort poll — only if the chosen model supports effort levels
+          // Effort selection — only if the chosen model supports effort levels
           const efforts = getSdkEffortLevels(resolvedModelValue);
           if (efforts.length > 0) {
-            const defaultEffortLabel = "Default (high)";
-            const effortOptions = [
-              ...efforts.map((e) => {
-                return currentEffort === e.value ? `${e.label} ✓` : e.label;
-              }),
-              defaultEffortLabel,
+            /** @type {SelectOption[]} */
+            const effortSelectOptions = [
+              ...efforts.map((e) => ({
+                id: e.value,
+                label: currentEffort === e.value ? `${e.label} ✓` : e.label,
+              })),
+              { id: "off", label: "Default (high)" },
             ];
 
-            await context.sendPoll("Choose effort level", effortOptions, 1);
-            const effortChoice = await waitForUserResponse(chatId);
+            const effortChoice = await context.select("Choose effort level", effortSelectOptions);
 
-            if (!effortChoice || effortChoice === defaultEffortLabel) {
+            if (!effortChoice || effortChoice === "off") {
               await handleEffortCommand(chatId, "off");
             } else {
-              const chosenEffort = efforts.find((e) => effortChoice.startsWith(e.label));
-              if (chosenEffort) await handleEffortCommand(chatId, chosenEffort.value);
+              await handleEffortCommand(chatId, effortChoice);
             }
           } else {
             // Clear effort for models that don't support it
@@ -406,15 +358,6 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
     const enableMemory = !!chatInfo?.memory;
 
     if (!willRespond) {
-      return;
-    }
-
-    // If a harness is waiting for a user response (onAskUser), resolve it
-    // with this message instead of starting a new query or injecting.
-    const pendingResolve = pendingUserResponses.get(chatId);
-    if (pendingResolve) {
-      pendingUserResponses.delete(chatId);
-      pendingResolve(firstBlock?.text ?? "");
       return;
     }
 
@@ -530,9 +473,9 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
           return enriched;
         });
 
-        await context.sendPoll(question || "Choose an option:", pollOptions, 1);
+        const choice = await context.select(question || "Choose an option:", pollOptions);
         // Map enriched label back to original label
-        return waitForUserResponse(chatId, (text) => labelMap.get(text) ?? text);
+        return labelMap.get(choice) ?? choice;
       },
       onToolCall: async (toolCall, fmt) => {
         return displayToolCall(toolCall, context, isDebug, fmt);
@@ -639,19 +582,7 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
     return handleLlmMessage({ messageContext, chatInfo, isDebug, context, actions, actionResolver, firstBlock, isSlashCommand: !!isSlashCommand });
   }
 
-  /**
-   * Handle a poll vote by resolving any pending onAskUser promise for that chat.
-   * @param {import("./whatsapp-adapter.js").PollVoteEvent} event
-   */
-  async function handlePollVote(event) {
-    const resolver = pendingUserResponses.get(event.chatId);
-    if (resolver && event.selectedOptions.length > 0) {
-      pendingUserResponses.delete(event.chatId);
-      resolver(event.selectedOptions[0]);
-    }
-  }
-
-  return { handleMessage, handlePollVote };
+  return { handleMessage };
 }
 
 /**
@@ -750,11 +681,6 @@ export function createReactionHandler({ store, executeActionFn, pendingByMsgKeyI
       ...createSilentActionContext(pending.chat_id, pending.sender_ids),
       send: async (source, content) => sendBlocks(sock, pending.chat_id, source, content),
       reply: async (source, content) => sendBlocks(sock, pending.chat_id, source, content),
-      sendPoll: async (name, options, selectableCount) => {
-        await sock.sendMessage(pending.chat_id, {
-          poll: { name, values: options, selectableCount: selectableCount || 0 },
-        });
-      },
     };
 
     try {
@@ -829,7 +755,7 @@ if (!process.env.TESTING) {
   const store = await initStore();
   const llmClient = createLlmClient();
 
-  const { handleMessage, handlePollVote } = createMessageHandler({
+  const { handleMessage } = createMessageHandler({
     store,
     llmClient,
     getActionsFn: getActions,
@@ -861,7 +787,6 @@ if (!process.env.TESTING) {
   const { closeWhatsapp, sendToChat } = await connectToWhatsApp({
     onMessage: handleMessage,
     onReaction,
-    onPollVote: handlePollVote,
   }).catch(async (error) => {
       log.error("Initialization error:", error);
       await store.closeDb();

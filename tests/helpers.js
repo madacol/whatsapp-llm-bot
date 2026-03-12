@@ -90,8 +90,9 @@ export function createIncomingContext(overrides = {}) {
     reactToMessage: async (emoji) => {
       responses.push({ type: "reactToMessage", text: emoji });
     },
-    sendPoll: async (name, options, selectableCount) => {
-      responses.push({ type: "sendPoll", text: JSON.stringify({ name, options, selectableCount }) });
+    select: async (question, options) => {
+      responses.push({ type: "select", text: JSON.stringify({ question, options }) });
+      return "";
     },
     send: async (source, content) => recordBlocks("send", source, content),
     reply: async (source, content) => recordBlocks("reply", source, content),
@@ -468,7 +469,7 @@ export function createTestHarness({ mockServer, handleMessage, testDb }) {
         all: responses.filter(r => r.type === "send" || r.type === "reply").map(r => r.text),
         reactions: responses.filter(r => r.type === "reactToMessage").map(r => r.text),
         confirms: responses.filter(r => r.type === "confirm").map(r => r.text),
-        polls: responses.filter(r => r.type === "sendPoll").map(r => JSON.parse(r.text)),
+        polls: responses.filter(r => r.type === "select").map(r => JSON.parse(r.text)),
         images: responses.filter(r => r.blockType === "image").map(r => r.text),
         videos: responses.filter(r => r.blockType === "video").map(r => r.text),
         presence: responses.filter(r => r.type === "sendPresenceUpdate").map(r => r.text),

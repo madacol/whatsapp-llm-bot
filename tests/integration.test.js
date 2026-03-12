@@ -78,10 +78,10 @@ after(async () => {
 // Scenario 0: createIncomingContext provides all required capabilities
 // ═══════════════════════════════════════════════════════════════════
 describe("createIncomingContext shape", () => {
-  it("includes reactToMessage, sendPoll, and confirm", () => {
+  it("includes reactToMessage, select, and confirm", () => {
     const { context } = createIncomingContext();
     assert.equal(typeof context.reactToMessage, "function", "should have reactToMessage");
-    assert.equal(typeof context.sendPoll, "function", "should have sendPoll");
+    assert.equal(typeof context.select, "function", "should have select");
     assert.equal(typeof context.confirm, "function", "should have confirm");
   });
 
@@ -91,10 +91,11 @@ describe("createIncomingContext shape", () => {
     assert.ok(responses.some(r => r.type === "reactToMessage" && r.text === "👍"));
   });
 
-  it("sendPoll records response", async () => {
+  it("select records response and returns empty string", async () => {
     const { context, responses } = createIncomingContext();
-    await context.sendPoll("Vote", ["A", "B"], 1);
-    assert.ok(responses.some(r => r.type === "sendPoll"));
+    const result = await context.select("Vote", ["A", "B"]);
+    assert.equal(result, "");
+    assert.ok(responses.some(r => r.type === "select"));
   });
 
   it("confirm records response and returns true by default", async () => {

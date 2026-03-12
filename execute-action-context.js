@@ -16,7 +16,7 @@ export function createMessageActionContext(messageContext) {
     send: messageContext.send,
     reply: messageContext.reply,
     reactToMessage: messageContext.reactToMessage,
-    sendPoll: messageContext.sendPoll,
+    select: messageContext.select,
     confirm: messageContext.confirm,
   };
 }
@@ -36,7 +36,7 @@ export function createSilentActionContext(chatId, senderIds) {
     send: async (_source, _content) => undefined,
     reply: async (_source, _content) => undefined,
     reactToMessage: async () => {},
-    sendPoll: async () => {},
+    select: async () => "",
     confirm: async () => true,
   };
 }

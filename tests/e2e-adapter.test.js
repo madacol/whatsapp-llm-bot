@@ -15,9 +15,10 @@ import {
   seedChat,
 } from "./helpers.js";
 import { setDb } from "../db.js";
-import { adaptIncomingMessage, createConfirmRegistry } from "../whatsapp-adapter.js";
+import { adaptIncomingMessage, createConfirmRegistry, createUserResponseRegistry } from "../whatsapp-adapter.js";
 
 const testConfirmRegistry = createConfirmRegistry();
+const testUserResponseRegistry = createUserResponseRegistry();
 
 /** @type {Awaited<ReturnType<typeof createMockLlmServer>>} */
 let mockServer;
@@ -81,7 +82,7 @@ describe("basic text message", () => {
     const { sock, getTextMessages } = createMockBaileysSocket();
     const msg = createWAMessage({ text: "Hey there", senderId });
 
-    await adaptIncomingMessage(msg, sock, handleMessage, testConfirmRegistry);
+    await adaptIncomingMessage(msg, sock, handleMessage, testConfirmRegistry, testUserResponseRegistry);
 
     const texts = getTextMessages();
     assert.ok(
@@ -106,6 +107,7 @@ describe("sender ID extraction", () => {
       sock,
       async (ctx) => { capturedSenderIds.push(ctx.senderIds); },
       testConfirmRegistry,
+      testUserResponseRegistry,
     );
 
     assert.ok(capturedSenderIds.length > 0, "Should have captured senderIds");
@@ -130,6 +132,7 @@ describe("sender ID extraction", () => {
       sock,
       async (ctx) => { capturedSenderIds.push(ctx.senderIds); },
       testConfirmRegistry,
+      testUserResponseRegistry,
     );
 
     const ids = capturedSenderIds[0];
@@ -149,7 +152,7 @@ describe("message filtering", () => {
 
     await adaptIncomingMessage(msg, sock, async () => {
       handlerCalled = true;
-    }, testConfirmRegistry);
+    }, testConfirmRegistry, testUserResponseRegistry);
 
     assert.equal(handlerCalled, false, "Handler should not be called for status broadcasts");
   });
@@ -167,7 +170,7 @@ describe("message filtering", () => {
 
     await adaptIncomingMessage(msg, sock, async () => {
       handlerCalled = true;
-    }, testConfirmRegistry);
+    }, testConfirmRegistry, testUserResponseRegistry);
 
     assert.equal(handlerCalled, false, "Handler should not be called for empty messages");
   });
@@ -187,6 +190,7 @@ describe("group detection", () => {
       sock,
       async (ctx) => { capturedIsGroup = ctx.isGroup; },
       testConfirmRegistry,
+      testUserResponseRegistry,
     );
 
     assert.equal(capturedIsGroup, true);
@@ -202,6 +206,7 @@ describe("group detection", () => {
       sock,
       async (ctx) => { capturedIsGroup = ctx.isGroup; },
       testConfirmRegistry,
+      testUserResponseRegistry,
     );
 
     assert.equal(capturedIsGroup, false);
@@ -227,6 +232,7 @@ describe("quote extraction", () => {
       sock,
       async (ctx) => { capturedCtx = ctx; },
       testConfirmRegistry,
+      testUserResponseRegistry,
     );
 
     assert.ok(capturedCtx, "Handler should have been called");
@@ -262,6 +268,7 @@ describe("command through adapter", () => {
       sock,
       handleMessage,
       testConfirmRegistry,
+      testUserResponseRegistry,
     );
 
     const texts = getTextMessages();
@@ -281,6 +288,7 @@ describe("command through adapter", () => {
       sock,
       handleMessage,
       testConfirmRegistry,
+      testUserResponseRegistry,
     );
 
     const texts = getTextMessages();
@@ -324,6 +332,7 @@ describe("tool call through adapter", () => {
       sock,
       handleMessage,
       testConfirmRegistry,
+      testUserResponseRegistry,
     );
 
     const texts = getTextMessages();
@@ -353,6 +362,7 @@ describe("presence updates", () => {
       sock,
       handleMessage,
       testConfirmRegistry,
+      testUserResponseRegistry,
     );
 
     const updates = getPresenceUpdates();
@@ -382,7 +392,7 @@ describe("timestamp parsing", () => {
 
     await adaptIncomingMessage(msg, sock, async (ctx) => {
       capturedTimestamp = ctx.timestamp;
-    }, testConfirmRegistry);
+    }, testConfirmRegistry, testUserResponseRegistry);
 
     assert.ok(capturedTimestamp, "Should have captured timestamp");
     assert.equal(capturedTimestamp.getTime(), unixTime * 1000);
@@ -405,6 +415,7 @@ describe("self ID extraction", () => {
         capturedSelfIds = ctx.selfIds;
       },
       testConfirmRegistry,
+      testUserResponseRegistry,
     );
 
     assert.ok(capturedSelfIds, "Should have captured selfIds");
@@ -446,6 +457,7 @@ Hope that helps!`;
       sock,
       handleMessage,
       testConfirmRegistry,
+      testUserResponseRegistry,
     );
 
     const msgs = getSentMessages();
@@ -503,6 +515,7 @@ Hope that helps!`;
       sock,
       handleMessage,
       testConfirmRegistry,
+      testUserResponseRegistry,
     );
 
     const msgs = getSentMessages();
