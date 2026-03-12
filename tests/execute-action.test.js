@@ -72,7 +72,7 @@ function createMockExecuteActionContext(overrides = {}) {
     send: async (_source, _content) => {},
     reply: async (_source, _content) => {},
     reactToMessage: async () => {},
-    sendPoll: async () => {},
+    select: async () => "",
     confirm: async () => true,
     ...overrides,
   };

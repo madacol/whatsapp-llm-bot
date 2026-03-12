@@ -122,7 +122,7 @@ export async function executeAction(actionName, context, params, options = {}) {
       await context.reply("tool-call", message);
     },
     reactToMessage: context.reactToMessage,
-    sendPoll: context.sendPoll,
+    select: context.select,
     confirm: persistentConfirm,
     resolveModel: (role) => resolveModel(role),
     agentDepth,

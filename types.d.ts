@@ -116,6 +116,14 @@ type MessageSource = "llm" | "tool-call" | "tool-result" | "error" | "warning" |
 /** Edits a previously sent text message in-place. May carry the WA message key ID for reaction tracking. */
 type MessageEditor = ((newText: string) => Promise<void>) & { keyId?: string; isImage?: boolean };
 
+/** An option for `select()`: either a plain string or an object with id and label. */
+type SelectOption = string | { id: string; label: string };
+
+type SelectConfig = {
+  /** Timeout in ms (default: 5 minutes). */
+  timeout?: number;
+};
+
 type ConfirmHooks = {
   onSent?: (msgKey: { id: string; remoteJid: string }) => Promise<void>;
   onResolved?: (msgKey: { id: string; remoteJid: string }, confirmed: boolean) => Promise<void>;
@@ -135,7 +143,7 @@ type IncomingContext = {
   // High-level actions scoped to this message
   getIsAdmin: () => Promise<boolean>;
   reactToMessage: (emoji: string) => Promise<void>;
-  sendPoll: (name: string, options: string[], selectableCount?: number) => Promise<void>;
+  select: (question: string, options: SelectOption[], config?: SelectConfig) => Promise<string>;
   send: (source: MessageSource, content: SendContent) => Promise<MessageEditor | undefined>;
   reply: (source: MessageSource, content: SendContent) => Promise<MessageEditor | undefined>;
   confirm: (message: string, hooks?: ConfirmHooks) => Promise<boolean>;
@@ -155,7 +163,7 @@ type ExecuteActionContext = {
   send: (source: MessageSource, content: SendContent) => Promise<MessageEditor | undefined>;
   reply: (source: MessageSource, content: SendContent) => Promise<MessageEditor | undefined>;
   reactToMessage: (emoji: string) => Promise<void>;
-  sendPoll: (name: string, options: string[], selectableCount?: number) => Promise<void>;
+  select: (question: string, options: SelectOption[], config?: SelectConfig) => Promise<string>;
   confirm: (message: string, hooks?: ConfirmHooks) => Promise<boolean>;
 };
 
@@ -174,7 +182,7 @@ type ActionContext = {
   send: (message: SendContent) => Promise<void>; // Header already baked in
   reply: (message: SendContent) => Promise<void>; // Header already baked in
   reactToMessage: (emoji: string) => Promise<void>;
-  sendPoll: (name: string, options: string[], selectableCount?: number) => Promise<void>;
+  select: (question: string, options: SelectOption[], config?: SelectConfig) => Promise<string>;
   confirm: (message: string) => Promise<boolean>;
   resolveModel: (role: string) => string;
   agentDepth?: number;

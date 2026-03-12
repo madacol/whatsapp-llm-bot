@@ -55,7 +55,7 @@ export function getPollCreationData(msg) {
  * Uses the module-level `sentPolls` map to look up the original poll creation.
  * @param {import('@whiskeysockets/baileys').WAMessage} message - the incoming poll vote message
  * @param {import('@whiskeysockets/baileys').WASocket} sock
- * @returns {Promise<{ chatId: string, selectedOptions: string[] } | null>}
+ * @returns {Promise<PollVoteEvent | null>}
  */
 async function decryptAndResolvePollVote(message, sock) {
   const pollUpdate = message.message?.pollUpdateMessage;
@@ -150,7 +150,7 @@ async function decryptAndResolvePollVote(message, sock) {
     if (pn) chatId = jidNormalizedUser(pn);
   }
 
-  return { chatId, selectedOptions: selected };
+  return { chatId, pollMsgId: creationKeyId, selectedOptions: selected };
 }
 
 const AUTH_DIR = "./auth_info_baileys";
@@ -315,6 +315,126 @@ export function createConfirmRegistry() {
       for (const entry of pending.values()) {
         clearTimeout(entry.timer);
         entry.resolve(false);
+      }
+      pending.clear();
+    },
+  };
+}
+
+/**
+ * @typedef {{
+ *   resolve: (id: string) => void;
+ *   timer: ReturnType<typeof setTimeout>;
+ *   labelToId: Map<string, string>;
+ * }} PendingSelect
+ */
+
+/** Default timeout for select responses (5 minutes). */
+const SELECT_TIMEOUT_MS = 5 * 60 * 1000;
+
+/**
+ * @typedef {{
+ *   handlePollVote: (event: PollVoteEvent) => boolean;
+ *   createSelect: (sock: import('@whiskeysockets/baileys').WASocket, chatId: string) => (question: string, options: SelectOption[], config?: SelectConfig) => Promise<string>;
+ *   readonly size: number;
+ *   clear: () => void;
+ * }} UserResponseRegistry
+ */
+
+/**
+ * Normalize a SelectOption[] into poll labels and a label→id map.
+ * @param {SelectOption[]} options
+ * @returns {{ labels: string[], labelToId: Map<string, string> }}
+ */
+function normalizeSelectOptions(options) {
+  /** @type {Map<string, string>} */
+  const labelToId = new Map();
+  const labels = options.map((opt) => {
+    if (typeof opt === "string") {
+      labelToId.set(opt, opt);
+      return opt;
+    }
+    labelToId.set(opt.label, opt.id);
+    return opt.label;
+  });
+  return { labels, labelToId };
+}
+
+/**
+ * Create a registry that manages pending select responses.
+ * Poll votes are resolved internally by the adapter.
+ * @returns {UserResponseRegistry}
+ */
+export function createUserResponseRegistry() {
+  /** @type {Map<string, PendingSelect>} pollMsgId → pending response */
+  const pending = new Map();
+
+  return {
+    /**
+     * Resolve a pending select response with a poll vote.
+     * @param {PollVoteEvent} event
+     * @returns {boolean} true if the vote was consumed
+     */
+    handlePollVote(event) {
+      const entry = pending.get(event.pollMsgId);
+      if (!entry || event.selectedOptions.length === 0) return false;
+      clearTimeout(entry.timer);
+      pending.delete(event.pollMsgId);
+      const selectedLabel = event.selectedOptions[0];
+      entry.resolve(entry.labelToId.get(selectedLabel) ?? selectedLabel);
+      return true;
+    },
+
+    /**
+     * Create a select function scoped to a chat.
+     * Sends a single-select poll and returns a promise that resolves
+     * with the selected option's id (or text for plain strings), or "" on timeout.
+     * @param {import('@whiskeysockets/baileys').WASocket} sock
+     * @param {string} chatId
+     * @returns {(question: string, options: SelectOption[], config?: SelectConfig) => Promise<string>}
+     */
+    createSelect(sock, chatId) {
+      return async (question, options, config) => {
+        const { labels, labelToId } = normalizeSelectOptions(options);
+        const sent = await sock.sendMessage(chatId, {
+          poll: { name: question, values: labels, selectableCount: 1 },
+        });
+        const pollMsgId = sent?.key?.id;
+        log.debug(`select: msgId=${pollMsgId}, key=${JSON.stringify(sent?.key)}`);
+        if (pollMsgId) {
+          if (sentPolls.size >= MAX_SENT_POLLS) {
+            const oldest = sentPolls.keys().next().value;
+            if (oldest) sentPolls.delete(oldest);
+          }
+          sentPolls.set(pollMsgId, sent);
+          setTimeout(() => sentPolls.delete(pollMsgId), POLL_TTL_MS);
+        }
+
+        if (!pollMsgId) {
+          return "";
+        }
+
+        const timeout = config?.timeout ?? SELECT_TIMEOUT_MS;
+        return new Promise((resolve) => {
+          const timer = setTimeout(() => {
+            pending.delete(pollMsgId);
+            resolve("");
+          }, timeout);
+          pending.set(pollMsgId, { resolve, timer, labelToId });
+        });
+      };
+    },
+
+    /** Number of pending responses (for testing/monitoring). */
+    get size() {
+      return pending.size;
+    },
+
+    /** Resolve all pending responses as "" and clear the registry. */
+    clear() {
+      for (const entry of pending.values()) {
+        clearTimeout(entry.timer);
+        entry.resolve("");
       }
       pending.clear();
     },
@@ -574,8 +694,9 @@ export async function sendBlocks(sock, chatId, source, content, options) {
  * @param {import('@whiskeysockets/baileys').WASocket} sock
  * @param {(message: IncomingContext) => Promise<void>} messageHandler
  * @param {ConfirmRegistry} confirmRegistry
+ * @param {UserResponseRegistry} userResponseRegistry
  */
-export async function adaptIncomingMessage(baileysMessage, sock, messageHandler, confirmRegistry) {
+export async function adaptIncomingMessage(baileysMessage, sock, messageHandler, confirmRegistry, userResponseRegistry) {
   // Extract message content from Baileys format
   // Ignore status updates
   if (baileysMessage.key.remoteJid === "status@broadcast") {
@@ -598,6 +719,7 @@ export async function adaptIncomingMessage(baileysMessage, sock, messageHandler,
       chatId = jidNormalizedUser(pn);
     }
   }
+
   // Baileys key type doesn't declare LID/PID fields used for sender identification
   const key = /** @type {typeof baileysMessage.key & { participantLid?: string, participantPid?: string, senderLid?: string, senderPid?: string }} */ (baileysMessage.key);
   /** @type {string[]} */
@@ -658,22 +780,7 @@ export async function adaptIncomingMessage(baileysMessage, sock, messageHandler,
       });
     },
 
-    sendPoll: async (name, options, selectableCount = 0) => {
-      const sent = await sock.sendMessage(chatId, {
-        poll: { name, values: options, selectableCount },
-      });
-      const pollMsgId = sent?.key?.id;
-      log.debug(`sendPoll: msgId=${pollMsgId}, key=${JSON.stringify(sent?.key)}`);
-      if (pollMsgId) {
-        // Evict oldest entry if at capacity (Map iterates in insertion order)
-        if (sentPolls.size >= MAX_SENT_POLLS) {
-          const oldest = sentPolls.keys().next().value;
-          if (oldest) sentPolls.delete(oldest);
-        }
-        sentPolls.set(pollMsgId, sent);
-        setTimeout(() => sentPolls.delete(pollMsgId), POLL_TTL_MS);
-      }
-    },
+    select: userResponseRegistry.createSelect(sock, chatId),
 
     send: (source, content) => sendBlocks(sock, chatId, source, content),
 
@@ -699,7 +806,7 @@ export async function adaptIncomingMessage(baileysMessage, sock, messageHandler,
  */
 
 /**
- * @typedef {{ chatId: string, selectedOptions: string[] }} PollVoteEvent
+ * @typedef {{ chatId: string, pollMsgId: string, selectedOptions: string[] }} PollVoteEvent
  */
 
 /**
@@ -709,10 +816,10 @@ export async function adaptIncomingMessage(baileysMessage, sock, messageHandler,
  * @param {(message: IncomingContext) => Promise<void>} onMessageHandler
  * @param {() => Promise<void>} reconnect
  * @param {ConfirmRegistry} confirmRegistry
+ * @param {UserResponseRegistry} userResponseRegistry
  * @param {((event: ReactionEvent, sock: import('@whiskeysockets/baileys').WASocket) => Promise<void>) | null} [onReaction]
- * @param {((event: PollVoteEvent) => Promise<void>) | null} [onPollVote]
  */
-function registerHandlers(sockRef, saveCreds, onMessageHandler, reconnect, confirmRegistry, onReaction = null, onPollVote = null) {
+function registerHandlers(sockRef, saveCreds, onMessageHandler, reconnect, confirmRegistry, userResponseRegistry, onReaction = null) {
   sockRef.current.ev.process(async (events) => {
     if (events["connection.update"]) {
       const update = events["connection.update"];
@@ -784,19 +891,19 @@ function registerHandlers(sockRef, saveCreds, onMessageHandler, reconnect, confi
       for (const message of messages) {
         if (message.key.fromMe || !message.message) continue;
 
-        // Handle poll vote messages: manually decrypt and resolve via onPollVote.
+        // Handle poll vote messages: manually decrypt and resolve via userResponseRegistry.
         // Baileys' internal poll decryption is commented out, so we do it ourselves.
-        if (message.message?.pollUpdateMessage && onPollVote) {
+        if (message.message?.pollUpdateMessage) {
           try {
             const result = await decryptAndResolvePollVote(message, sockRef.current);
-            if (result) await onPollVote(result);
+            if (result) userResponseRegistry.handlePollVote(result);
           } catch (err) {
             log.error("Error processing poll vote from upsert:", err);
           }
           continue; // Don't process poll votes as regular messages
         }
 
-        await adaptIncomingMessage(message, sockRef.current, onMessageHandler, confirmRegistry);
+        await adaptIncomingMessage(message, sockRef.current, onMessageHandler, confirmRegistry, userResponseRegistry);
       }
     }
 
@@ -831,7 +938,6 @@ function registerHandlers(sockRef, saveCreds, onMessageHandler, reconnect, confi
  * @typedef {{
  *   onMessage: (message: IncomingContext) => Promise<void>;
  *   onReaction?: (event: ReactionEvent, sock: import('@whiskeysockets/baileys').WASocket) => Promise<void>;
- *   onPollVote?: (event: PollVoteEvent) => Promise<void>;
  * }} ConnectOptions
  */
 
@@ -843,7 +949,7 @@ export async function connectToWhatsApp(handlerOrOptions) {
   const options = typeof handlerOrOptions === "function"
     ? { onMessage: handlerOrOptions }
     : handlerOrOptions;
-  const { onMessage, onReaction, onPollVote } = options;
+  const { onMessage, onReaction } = options;
 
   const { version } = await fetchLatestWaWebVersion();
   log.info("Using WA Web version:", version);
@@ -861,8 +967,9 @@ export async function connectToWhatsApp(handlerOrOptions) {
     }),
   };
 
-  // Single registry shared across reconnects (message IDs are globally unique).
+  // Single registries shared across reconnects (message IDs are globally unique).
   const confirmRegistry = createConfirmRegistry();
+  const userResponseRegistry = createUserResponseRegistry();
 
   async function reconnect() {
     const { state: newState, saveCreds: newSaveCreds } = await useMultiFileAuthState(
@@ -873,10 +980,10 @@ export async function connectToWhatsApp(handlerOrOptions) {
       auth: newState,
       browser: Browsers.ubuntu("Chrome"),
     });
-    registerHandlers(sockRef, newSaveCreds, onMessage, reconnect, confirmRegistry, onReaction, onPollVote);
+    registerHandlers(sockRef, newSaveCreds, onMessage, reconnect, confirmRegistry, userResponseRegistry, onReaction);
   }
 
-  registerHandlers(sockRef, saveCreds, onMessage, reconnect, confirmRegistry, onReaction, onPollVote);
+  registerHandlers(sockRef, saveCreds, onMessage, reconnect, confirmRegistry, userResponseRegistry, onReaction);
 
   return {
     async closeWhatsapp() {
