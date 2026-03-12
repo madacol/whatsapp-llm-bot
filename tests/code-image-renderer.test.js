@@ -13,11 +13,19 @@ describe("code-image-renderer", () => {
       assert.deepStrictEqual(images[0].subarray(0, 4), Buffer.from([0x89, 0x50, 0x4e, 0x47]));
     });
 
-    it("renders multi-line code across multiple image chunks", async () => {
-      // 100 lines should produce 2 chunks (MAX_LINES_PER_IMAGE = 90)
+    it("renders 100 lines of narrow code as a single image", async () => {
       const code = Array.from({ length: 100 }, (_, i) => `const x${i} = ${i};`).join("\n");
       const images = await renderCodeToImages(code, "javascript");
-      assert.strictEqual(images.length, 2, "100 lines should split into 2 images");
+      assert.strictEqual(images.length, 1, "100 narrow lines should fit in one image");
+    });
+
+    it("splits into multiple images when pixel budget is exceeded", async () => {
+      // Wide lines (500+ chars) get capped to MAX_SVG_WIDTH=4000px.
+      // At 4000px, max ~154 lines fit per image, so 200 lines → 2 chunks.
+      const wideLine = "x".repeat(500);
+      const code = Array.from({ length: 200 }, () => wideLine).join("\n");
+      const images = await renderCodeToImages(code, "text");
+      assert.ok(images.length >= 2, `200 wide lines should split, got ${images.length} image(s)`);
     });
 
     it("throws on extremely long single lines (exceeds pixel budget)", async () => {
@@ -41,12 +49,14 @@ describe("code-image-renderer", () => {
       assert.ok(Buffer.isBuffer(images[0]));
     });
 
-    it("renders a large diff across multiple chunks", async () => {
-      const oldStr = Array.from({ length: 50 }, (_, i) => `old line ${i}`).join("\n");
-      const newStr = Array.from({ length: 50 }, (_, i) => `new line ${i}`).join("\n");
-      // 100 diff lines (50 removed + 50 added) → 2 chunks
+    it("renders a large diff across multiple chunks when pixel budget exceeded", async () => {
+      // Wide lines (500+ chars) hit MAX_SVG_WIDTH=4000px.
+      // Completely different content → 100 removed + 100 added = 200 diff lines.
+      // At 4000px, max ~154 lines fit → splits into 2 chunks.
+      const oldStr = Array.from({ length: 100 }, (_, i) => "old_" + "x".repeat(500) + i).join("\n");
+      const newStr = Array.from({ length: 100 }, (_, i) => "new_" + "y".repeat(500) + i).join("\n");
       const images = await renderDiffToImages(oldStr, newStr, "text");
-      assert.strictEqual(images.length, 2, "100 diff lines should split into 2 images");
+      assert.ok(images.length >= 2, `200 wide diff lines should split, got ${images.length} image(s)`);
     });
   });
 

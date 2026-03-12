@@ -2,7 +2,6 @@ import { createHighlighter } from "shiki";
 import { Resvg } from "@resvg/resvg-js";
 import { diffLines } from "diff";
 
-const MAX_LINES_PER_IMAGE = 90;
 export const MIN_LINES_FOR_IMAGE = 5;
 const FONT_SIZE = 14;
 const LINE_HEIGHT = 20;
@@ -118,41 +117,40 @@ function renderAnnotatedLines(lines, opts) {
   const gutterWidth = opts?.gutterWidth ?? 0;
   const contentX = PADDING + gutterWidth;
 
-  // Split into chunks
-  /** @type {AnnotatedLine[][]} */
-  const chunks = [];
-  for (let i = 0; i < lines.length; i += MAX_LINES_PER_IMAGE) {
-    chunks.push(lines.slice(i, i + MAX_LINES_PER_IMAGE));
-  }
-
-  /** @type {Buffer[]} */
-  const images = [];
-
   // Guard: max pixel budget to prevent OOM from Resvg rendering.
   // Resvg allocates width × height × 4 bytes for the pixel buffer.
   // Cap at ~50MB per image (50_000_000 / 4 = 12_500_000 pixels).
   const MAX_PIXELS = 12_500_000;
   const MAX_SVG_WIDTH = 4000; // ~475 chars at 8.4px/char — generous but bounded
 
+  // Compute image width from the widest line across ALL lines so chunks
+  // share a consistent width and we can derive an adaptive chunk size.
+  let maxLineWidth = 0;
+  for (const line of lines) {
+    const lineText = (line.prefix || "") + line.tokens.map(t => t.content).join("");
+    const width = estimateTextWidth(lineText);
+    if (width > maxLineWidth) maxLineWidth = width;
+  }
+  const svgWidth = Math.min(Math.max(maxLineWidth + contentX + PADDING, 200), MAX_SVG_WIDTH);
+
+  // Adaptive chunk size: fit as many lines as the pixel budget allows
+  // instead of splitting at a fixed line count.
+  const maxLinesPerChunk = Math.max(
+    10,
+    Math.floor((MAX_PIXELS / svgWidth - PADDING * 2) / LINE_HEIGHT),
+  );
+
+  /** @type {AnnotatedLine[][]} */
+  const chunks = [];
+  for (let i = 0; i < lines.length; i += maxLinesPerChunk) {
+    chunks.push(lines.slice(i, i + maxLinesPerChunk));
+  }
+
+  /** @type {Buffer[]} */
+  const images = [];
+
   for (const chunk of chunks) {
-    // Calculate dimensions
-    let maxLineWidth = 0;
-    for (const line of chunk) {
-      const lineText = (line.prefix || "") + line.tokens.map(t => t.content).join("");
-      const width = estimateTextWidth(lineText);
-      if (width > maxLineWidth) maxLineWidth = width;
-    }
-
-    const svgWidth = Math.min(Math.max(maxLineWidth + contentX + PADDING, 200), MAX_SVG_WIDTH);
     const svgHeight = chunk.length * LINE_HEIGHT + PADDING * 2;
-
-    // Bail if the image would exceed the pixel budget
-    if (svgWidth * svgHeight > MAX_PIXELS) {
-      throw new Error(
-        `Image too large to render: ${svgWidth}×${svgHeight} = ${(svgWidth * svgHeight / 1_000_000).toFixed(1)}M pixels (limit ${(MAX_PIXELS / 1_000_000).toFixed(0)}M). ` +
-        `lines=${chunk.length}, maxLineWidth=${maxLineWidth.toFixed(0)}px`
-      );
-    }
 
     // Build SVG
     let svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${svgWidth}" height="${svgHeight}">`;
