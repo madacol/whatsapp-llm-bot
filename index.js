@@ -34,6 +34,7 @@ import {
   deletePendingConfirmation,
 } from "./pending-confirmations.js";
 import { resolveHarness, resolveHarnessName, registerHarness, waitForAllHarnesses, MAX_TOOL_CALL_DEPTH } from "./harnesses/index.js";
+import { handleModelCommand, handleEffortCommand, getModels as getSdkModels, getEffortLevels as getSdkEffortLevels } from "./harnesses/claude-agent-sdk.js";
 import { formatToolCallDisplay } from "./tool-display.js";
 import { createMessageActionContext, createSilentActionContext } from "./execute-action-context.js";
 import { createLogger } from "./logger.js";
@@ -278,8 +279,92 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
         await context.reply("tool-result", `Session restored (cleared ${agoStr}). Your next message will continue that conversation.`);
         return true;
       }
-      default:
+      default: {
+        // /model [arg] — list or set SDK model and effort
+        const modelMatch = command.match(/^model(?:\s+(.*))?$/);
+        if (modelMatch) {
+          const arg = modelMatch[1]?.trim() || null;
+          if (arg) {
+            // Direct set: /model effort <level>, /model opus, /model off, etc.
+            const effortMatch = arg.match(/^effort\s+(.+)$/i);
+            if (effortMatch) {
+              const result = await handleEffortCommand(chatId, effortMatch[1].trim());
+              await context.reply("tool-result", result);
+              return true;
+            }
+            const result = await handleModelCommand(chatId, arg);
+            await context.reply("tool-result", result);
+            return true;
+          }
+          // No arg — model poll, then effort poll if the model supports it
+          const models = getSdkModels();
+          const db = getRootDb();
+          const { rows } = await db.query("SELECT sdk_model, sdk_effort FROM chats WHERE chat_id = $1", [chatId]);
+          const currentModel = /** @type {string | null} */ (rows[0]?.sdk_model ?? null);
+          const currentEffort = /** @type {string | null} */ (rows[0]?.sdk_effort ?? null);
+
+          // Model poll
+          const defaultModelLabel = "Default (Sonnet)";
+          const modelOptions = [
+            ...models.map((m) => {
+              const label = `${m.displayName} — ${m.description}`;
+              return currentModel === m.value ? `${label} ✓` : label;
+            }),
+            defaultModelLabel,
+          ];
+
+          await context.sendPoll("Choose SDK model", modelOptions, 1);
+          const modelChoice = await waitForUserResponse(chatId);
+
+          /** @type {string | null} */
+          let resolvedModelValue = currentModel;
+          if (modelChoice) {
+            if (modelChoice === defaultModelLabel) {
+              await handleModelCommand(chatId, "off");
+              resolvedModelValue = null;
+            } else {
+              const chosenModel = models.find((m) => modelChoice.startsWith(m.displayName));
+              if (chosenModel) {
+                await handleModelCommand(chatId, chosenModel.value);
+                resolvedModelValue = chosenModel.value;
+              }
+            }
+          }
+
+          // Effort poll — only if the chosen model supports effort levels
+          const efforts = getSdkEffortLevels(resolvedModelValue);
+          if (efforts.length > 0) {
+            const defaultEffortLabel = "Default (high)";
+            const effortOptions = [
+              ...efforts.map((e) => {
+                return currentEffort === e.value ? `${e.label} ✓` : e.label;
+              }),
+              defaultEffortLabel,
+            ];
+
+            await context.sendPoll("Choose effort level", effortOptions, 1);
+            const effortChoice = await waitForUserResponse(chatId);
+
+            if (!effortChoice || effortChoice === defaultEffortLabel) {
+              await handleEffortCommand(chatId, "off");
+            } else {
+              const chosenEffort = efforts.find((e) => effortChoice.startsWith(e.label));
+              if (chosenEffort) await handleEffortCommand(chatId, chosenEffort.value);
+            }
+          } else {
+            // Clear effort for models that don't support it
+            await handleEffortCommand(chatId, "off");
+          }
+
+          // Show final state
+          const { rows: updated } = await db.query("SELECT sdk_model, sdk_effort FROM chats WHERE chat_id = $1", [chatId]);
+          const finalModel = updated[0]?.sdk_model ?? "default (Sonnet)";
+          const finalEffort = updated[0]?.sdk_effort ?? "default (high)";
+          await context.reply("tool-result", `*Model:* ${finalModel}\n*Effort:* ${finalEffort}`);
+          return true;
+        }
         return false;
+      }
     }
   }
 
@@ -475,7 +560,7 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
       }
     }
 
-    await harness.processLlmResponse({ session, llmConfig, messages: preparedMessages, mediaRegistry, hooks, cwd: getChatWorkDir(chatId, chatInfo?.harness_cwd) });
+    await harness.processLlmResponse({ session, llmConfig, messages: preparedMessages, mediaRegistry, hooks, cwd: getChatWorkDir(chatId, chatInfo?.harness_cwd), sdkModel: chatInfo?.sdk_model ?? undefined, sdkEffort: /** @type {AgentHarnessParams['sdkEffort']} */ (chatInfo?.sdk_effort ?? undefined) });
 
     } catch (error) {
       log.error("handleLlmMessage failed:", error);

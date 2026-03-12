@@ -23,6 +23,8 @@ const log = createLogger("store");
  *   active_persona: string | null;
  *   harness: string | null;
  *   harness_cwd: string | null;
+ *   sdk_model: string | null;
+ *   sdk_effort: string | null;
  *   sdk_session_id: string | null;
  *   sdk_session_history: SdkSessionHistoryEntry[];
  *   timestamp: string;
@@ -110,6 +112,8 @@ export async function initStore(injectedDb){
         db.sql`ALTER TABLE chats ADD COLUMN IF NOT EXISTS active_persona TEXT`,
         db.sql`ALTER TABLE chats ADD COLUMN IF NOT EXISTS harness TEXT`,
         db.sql`ALTER TABLE chats ADD COLUMN IF NOT EXISTS harness_cwd TEXT`,
+        db.sql`ALTER TABLE chats ADD COLUMN IF NOT EXISTS sdk_model TEXT`,
+        db.sql`ALTER TABLE chats ADD COLUMN IF NOT EXISTS sdk_effort TEXT`,
         db.sql`ALTER TABLE chats ADD COLUMN IF NOT EXISTS sdk_session_id TEXT`,
         db.sql`ALTER TABLE chats ADD COLUMN IF NOT EXISTS sdk_session_history JSONB DEFAULT '[]'`,
         db.sql`ALTER TABLE messages ADD COLUMN IF NOT EXISTS exchange_text TEXT`,
