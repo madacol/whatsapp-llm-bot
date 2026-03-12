@@ -127,7 +127,7 @@ async function getInfo(rootDb, chatId, extra) {
     `*Sender:* ${senderIds.join(", ")}`,
     `*Model:* ${model}`,
     `*Prompt:* ${prompt}`,
-    `*Response:* ${response}`,
+    `*respond_on:* ${response}`,
     `*Memory:* ${memoryOn} (threshold: ${threshold})`,
     `*Debug:* ${debug}`,
     `*Media-to-text models:* ${mediaToTextStr}`,
@@ -138,6 +138,44 @@ async function getInfo(rootDb, chatId, extra) {
   ];
 
   return lines.join("\n");
+}
+
+/** @type {SelectOption[]} */
+const BOOL_OPTIONS = [
+  { id: "on", label: "on" },
+  { id: "off", label: "off" },
+];
+
+/**
+ * Return selectable options and the current value id for settings with fewer
+ * than 5 fixed choices.  Returns `null` if the setting is free-text.
+ *
+ * @param {string} setting
+ * @param {import("../../../store.js").ChatRow} chat
+ * @returns {{ options: SelectOption[], currentId: string } | null}
+ */
+function getSelectableOptions(setting, chat) {
+  switch (setting) {
+    case "respond_on":
+      return {
+        options: RESPOND_ON_VALUES.map((v) => ({ id: v, label: v })),
+        currentId: chat.respond_on ?? "mention",
+      };
+    case "memory":
+      return { options: BOOL_OPTIONS, currentId: chat.memory ? "on" : "off" };
+    case "enabled":
+      return { options: BOOL_OPTIONS, currentId: chat.is_enabled ? "on" : "off" };
+    case "harness": {
+      const available = listHarnesses();
+      if (available.length >= 5) return null;
+      return {
+        options: available.map((h) => ({ id: h, label: h })),
+        currentId: chat.harness ?? "native",
+      };
+    }
+    default:
+      return null;
+  }
 }
 
 /**
@@ -517,12 +555,28 @@ export default /** @type {defineAction} */ ((x) => x)({
     autoContinue: true,
     useRootDb: true,
   },
-  action_fn: async function ({ chatId, rootDb, senderIds, getActions, getIsAdmin }, { setting, value }) {
+  action_fn: async function ({ chatId, rootDb, senderIds, getActions, getIsAdmin, select }, { setting, value }) {
     if (!setting || !SETTINGS.includes(setting)) {
       return getInfo(rootDb, chatId, { senderIds, getActions });
     }
 
     if (value === undefined || value === null) {
+      // For settings with few fixed options, show an interactive select poll
+      const chat = await getChatOrThrow(rootDb, chatId);
+      const selectable = getSelectableOptions(setting, chat);
+      if (selectable && typeof select === "function") {
+        const chosen = await select(
+          `Choose value for *${setting}*`,
+          selectable.options,
+          { deleteOnSelect: true, currentId: selectable.currentId },
+        );
+        if (chosen) {
+          const isAdmin = getIsAdmin ? await getIsAdmin() : true;
+          if (!isAdmin) return "Only admins can change settings.";
+          return setSetting(rootDb, chatId, setting, chosen, { senderIds, getActions });
+        }
+        // select returned "" (non-interactive or cancelled) — fall through to getSetting
+      }
       return getSetting(rootDb, chatId, setting, { getActions });
     }
 

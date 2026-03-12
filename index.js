@@ -266,14 +266,16 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
           // Model selection
           /** @type {SelectOption[]} */
           const modelSelectOptions = [
-            ...models.map((m) => {
-              const label = `${m.displayName} — ${m.description}`;
-              return { id: m.value, label: currentModel === m.value ? `${label} ✓` : label };
-            }),
+            ...models.map((m) => ({
+              id: m.value,
+              label: `${m.displayName} — ${m.description}`,
+            })),
             { id: "off", label: "Default (Sonnet)" },
           ];
 
-          const modelChoice = await context.select("Choose SDK model", modelSelectOptions);
+          const modelChoice = await context.select("Choose SDK model", modelSelectOptions, {
+            currentId: currentModel ?? undefined,
+          });
 
           /** @type {string | null} */
           let resolvedModelValue = currentModel;
@@ -289,12 +291,14 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
             const effortSelectOptions = [
               ...efforts.map((e) => ({
                 id: e.value,
-                label: currentEffort === e.value ? `${e.label} ✓` : e.label,
+                label: e.label,
               })),
               { id: "off", label: "Default (high)" },
             ];
 
-            const effortChoice = await context.select("Choose effort level", effortSelectOptions);
+            const effortChoice = await context.select("Choose effort level", effortSelectOptions, {
+              currentId: currentEffort ?? undefined,
+            });
 
             if (!effortChoice || effortChoice === "off") {
               await handleEffortCommand(chatId, "off");
