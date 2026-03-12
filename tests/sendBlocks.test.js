@@ -88,7 +88,7 @@ And some text after.`;
   it("long code that splits into multiple images sends them in a single message", async () => {
     const { sock, sent } = createMockSock();
 
-    // 100 lines → splits into 2 images (MAX_LINES_PER_IMAGE = 90)
+    // 100 lines of narrow code — fits in a single image after adaptive splitting
     const longCode = Array.from({ length: 100 }, (_, i) => `const x${i} = ${i};`).join("\n");
 
     await sendBlocks(sock, "test-chat", "llm", [
