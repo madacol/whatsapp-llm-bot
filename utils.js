@@ -93,6 +93,33 @@ export function createToolMessage(toolId, text) {
 
 
 /**
+ * Extract the human-readable output from a tool result text.
+ * For Bash-style JSON results, extracts stdout/stderr instead of showing raw JSON.
+ * @param {string} text
+ * @returns {string}
+ */
+function formatToolResultForInspect(text) {
+  try {
+    const parsed = JSON.parse(text);
+    if (parsed && typeof parsed === "object" && "stdout" in parsed) {
+      /** @type {string[]} */
+      const parts = [];
+      if (typeof parsed.stdout === "string" && parsed.stdout.trim()) {
+        parts.push(parsed.stdout.trim());
+      }
+      if (typeof parsed.stderr === "string" && parsed.stderr.trim()) {
+        parts.push(`_stderr:_\n${parsed.stderr.trim()}`);
+      }
+      if (parts.length > 0) return parts.join("\n\n");
+      return "_no output_";
+    }
+  } catch {
+    // Not JSON — use as-is
+  }
+  return text;
+}
+
+/**
  * Register a 👁 react-to-inspect callback on a message handle.
  * When the user reacts with 👁, the tool-call message is edited
  * to show the full text result (truncated at 3000 chars).
@@ -104,12 +131,13 @@ export function registerInspectHandler(handle, toolName, toolMessage) {
   if (!handle.keyId) return;
   handle.onReaction((emoji) => {
     if (!emoji.startsWith("👁")) return;
-    const text = toolMessage.content
+    const rawText = toolMessage.content
       .filter(b => b.type === "text").map(b => /** @type {TextContentBlock} */ (b).text).join("\n");
+    const text = formatToolResultForInspect(rawText);
     const MAX = 3000;
     const display = text.length <= MAX ? text
       : text.slice(0, MAX) + `\n\n_… truncated (${text.length.toLocaleString()} chars total)_`;
-    handle.edit(`🔧 *${toolName}*\n\n${display}`);
+    handle.edit(`*${toolName}*\n\n${display}`);
   });
 }
 
