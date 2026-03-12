@@ -234,12 +234,6 @@ export function getToolCallSummary(name, args, formatToolCall) {
 export function formatToolCallDisplay(toolCall, isDebug, actionFormatter) {
   const args = parseToolArgs(toolCall.arguments);
 
-  // Non-debug: show only the description when available
-  if (!isDebug) {
-    const description = typeof args.description === "string" ? args.description : null;
-    if (description) return description;
-  }
-
   const name = toolCall.name;
 
   // Bash tool: render command as a syntax-highlighted image with description as caption.
