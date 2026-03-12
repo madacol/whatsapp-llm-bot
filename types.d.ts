@@ -370,7 +370,6 @@ type ExecuteActionOptions = {
   toolCallId?: string | null;
   actionResolver?: (name: string) => Promise<AppAction | null>;
   llmClient?: LlmClient;
-  updateToolMessage?: (chatId: string, toolCallId: string, messageData: ToolMessage) => Promise<import("./store.js").MessageRow | null>;
   agentDepth?: number;
 };
 

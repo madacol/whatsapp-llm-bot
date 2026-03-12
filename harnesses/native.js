@@ -112,7 +112,7 @@ async function executeAndStoreTool({
     }
 
     const functionResponse = await executeActionFn(toolName, actionContext, cleanArgs, {
-      toolCallId: toolCall.id, actionResolver, llmClient: actionLlmClient, updateToolMessage, agentDepth,
+      toolCallId: toolCall.id, actionResolver, llmClient: actionLlmClient, agentDepth,
     });
     log.debug("response", functionResponse);
 
