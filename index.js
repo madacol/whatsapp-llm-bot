@@ -7,8 +7,8 @@ import fs from "node:fs";
 import { getActions, executeAction, getChatActions, getChatAction, getAction } from "./actions.js";
 import config from "./config.js";
 import { createLlmClient } from "./llm.js";
-import { formatTime, isHtmlContent, createToolMessage, formatRelativeTime, getChatWorkDir, errorToString } from "./utils.js";
-import { connectToWhatsApp, sendBlocks, editWhatsAppMessage } from "./whatsapp-adapter.js";
+import { formatTime, isHtmlContent, formatRelativeTime, getChatWorkDir, errorToString } from "./utils.js";
+import { connectToWhatsApp, editWhatsAppMessage } from "./whatsapp-adapter.js";
 import { startReminderDaemon } from "./reminder-daemon.js";
 import { startModelsCacheDaemon } from "./models-cache.js";
 import { initStore } from "./store.js";
@@ -29,14 +29,10 @@ import {
 } from "./memory.js";
 import { storeAndLinkHtml } from "./html-store.js";
 import { startHtmlServer, stopHtmlServer } from "./html-server.js";
-import {
-  loadPendingConfirmations,
-  deletePendingConfirmation,
-} from "./pending-confirmations.js";
 import { resolveHarness, resolveHarnessName, registerHarness, waitForAllHarnesses, MAX_TOOL_CALL_DEPTH } from "./harnesses/index.js";
 import { handleModelCommand, handleEffortCommand, getModels as getSdkModels, getEffortLevels as getSdkEffortLevels } from "./harnesses/claude-agent-sdk.js";
 import { formatToolCallDisplay } from "./tool-display.js";
-import { createMessageActionContext, createSilentActionContext } from "./execute-action-context.js";
+import { createMessageActionContext } from "./execute-action-context.js";
 import { createLogger } from "./logger.js";
 
 const log = createLogger("index");
@@ -587,130 +583,51 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
 
 /**
  * @typedef {{
- *   store: Pick<Store, "addMessage" | "updateToolMessage" | "getToolResultByWaKeyId">;
- *   executeActionFn: typeof executeAction;
- *   pendingByMsgKeyId: Map<string, import("./pending-confirmations.js").PendingConfirmationRow>;
- *   rootDb: import("@electric-sql/pglite").PGlite;
+ *   store: Pick<Store, "getToolResultByWaKeyId">;
  * }} ReactionHandlerDeps
  */
 
 /**
- * Create a reaction handler for resuming pending confirmations after restart.
+ * Create a reaction handler for tool-call inspect (👁 reaction shows result).
  * @param {ReactionHandlerDeps} deps
  * @returns {(event: import("./whatsapp-adapter.js").ReactionEvent, sock: import("@whiskeysockets/baileys").WASocket) => Promise<void>}
  */
-export function createReactionHandler({ store, executeActionFn, pendingByMsgKeyId, rootDb }) {
+export function createReactionHandler({ store }) {
   /**
    * @param {import("./whatsapp-adapter.js").ReactionEvent} event
    * @param {import("@whiskeysockets/baileys").WASocket} sock
    */
   async function onReaction(event, sock) {
-    const { key, reaction } = event;
+    const { key } = event;
 
-    // ── Tool inspect: react to a tool-call message to see its result (DB lookup) ──
     const t0 = Date.now();
     const toolResult = await store.getToolResultByWaKeyId(key.id);
     const t1 = Date.now();
-    if (toolResult) {
-      const { toolMsg, chatId } = toolResult;
-      // Use chatId (standard JID) for relayMessage — LID JIDs from reactions don't work with relayMessage
-      const editJid = toolMsg.wa_msg_is_image ? chatId : key.remoteJid;
-      const msgKey = { id: key.id, remoteJid: editJid, fromMe: true };
-      const toolName = toolMsg.tool_name || "Tool";
-      const resultText = toolMsg.content
-        .filter(/** @param {ToolContentBlock} b */ (b) => b.type === "text")
-        .map(/** @param {TextContentBlock} b */ (b) => b.text)
-        .join("\n");
+    if (!toolResult) return;
 
-      // Always edit the same message — truncate if needed
-      const MAX_EDIT_LEN = 3000;
-      const resultDisplay = resultText.length <= MAX_EDIT_LEN
-        ? resultText
-        : resultText.slice(0, MAX_EDIT_LEN)
-          + `\n\n_… truncated (${resultText.length.toLocaleString()} chars total)_`;
+    const { toolMsg, chatId } = toolResult;
+    // Use chatId (standard JID) for relayMessage — LID JIDs from reactions don't work with relayMessage
+    const editJid = toolMsg.wa_msg_is_image ? chatId : key.remoteJid;
+    const msgKey = { id: key.id, remoteJid: editJid, fromMe: true };
+    const toolName = toolMsg.tool_name || "Tool";
+    const resultText = toolMsg.content
+      .filter(/** @param {ToolContentBlock} b */ (b) => b.type === "text")
+      .map(/** @param {TextContentBlock} b */ (b) => b.text)
+      .join("\n");
 
-      const formatted = `🔧 *${toolName}*\n\n${resultDisplay}`;
-      try {
-        await editWhatsAppMessage(sock, editJid, msgKey, formatted, !!toolMsg.wa_msg_is_image);
-      } catch (editErr) {
-        log.error("onReaction: edit failed:", editErr);
-      }
-      log.info(`onReaction: inspect ${toolMsg.tool_name} — db=${t1 - t0}ms edit=${Date.now() - t1}ms total=${Date.now() - t0}ms`);
-      return;
-    }
+    const MAX_EDIT_LEN = 3000;
+    const resultDisplay = resultText.length <= MAX_EDIT_LEN
+      ? resultText
+      : resultText.slice(0, MAX_EDIT_LEN)
+        + `\n\n_… truncated (${resultText.length.toLocaleString()} chars total)_`;
 
-    // ── Pending confirmations (restart recovery) ──
-    const pending = pendingByMsgKeyId.get(key.id);
-    if (!pending) return;
-
-    const isApproved = reaction.text?.startsWith("\uD83D\uDC4D");
-    const isRejected = reaction.text?.startsWith("\uD83D\uDC4E");
-    if (!isApproved && !isRejected) return;
-
-    const msgKey = { id: pending.msg_key_id, remoteJid: pending.msg_key_remote_jid };
-
-    // Remove from in-memory map and DB
-    pendingByMsgKeyId.delete(key.id);
-    await deletePendingConfirmation(rootDb, key.id);
-
-    if (isRejected) {
-      await sock.sendMessage(pending.msg_key_remote_jid, {
-        react: { text: "❌", key: msgKey },
-      });
-
-      // Store rejection as tool result so the LLM learns the action was rejected
-      if (pending.tool_call_id) {
-        const toolMessage = createToolMessage(pending.tool_call_id, "[action rejected by user]");
-        const updated = await store.updateToolMessage(pending.chat_id, pending.tool_call_id, toolMessage);
-        if (!updated) await store.addMessage(pending.chat_id, toolMessage, pending.sender_ids);
-      }
-
-      log.info(`Pending confirmation for ${pending.action_name} rejected after restart`);
-      return;
-    }
-
-    // Approved — react ✅ and re-execute the action
-    await sock.sendMessage(pending.msg_key_remote_jid, {
-      react: { text: "✅", key: msgKey },
-    });
-
-    log.info(`Resuming action "${pending.action_name}" after restart approval`);
-
-    /** @type {ExecuteActionContext} */
-    const resumeContext = {
-      ...createSilentActionContext(pending.chat_id, pending.sender_ids),
-      send: async (source, content) => sendBlocks(sock, pending.chat_id, source, content),
-      reply: async (source, content) => sendBlocks(sock, pending.chat_id, source, content),
-    };
-
+    const formatted = `🔧 *${toolName}*\n\n${resultDisplay}`;
     try {
-      const { result } = await executeActionFn(
-        pending.action_name, resumeContext, pending.action_params,
-        { toolCallId: pending.tool_call_id },
-      );
-      const resultText = typeof result === "string" ? result : JSON.stringify(result, null, 2);
-
-      // Store tool result so the LLM learns the outcome
-      if (pending.tool_call_id) {
-        const toolMessage = createToolMessage(pending.tool_call_id, resultText);
-        const updated = await store.updateToolMessage(pending.chat_id, pending.tool_call_id, toolMessage);
-        if (!updated) await store.addMessage(pending.chat_id, toolMessage, pending.sender_ids);
-      }
-
-      await resumeContext.send("tool-result", resultText);
-    } catch (error) {
-      log.error(`Error resuming action "${pending.action_name}":`, error);
-      const errorMsg = errorToString(error);
-
-      // Store error as tool result so the LLM learns the failure
-      if (pending.tool_call_id) {
-        const toolMessage = createToolMessage(pending.tool_call_id, `Error executing ${pending.action_name}: ${errorMsg}`);
-        const updated = await store.updateToolMessage(pending.chat_id, pending.tool_call_id, toolMessage);
-        if (!updated) await store.addMessage(pending.chat_id, toolMessage, pending.sender_ids);
-      }
-
-      await resumeContext.send("error", `Error resuming ${pending.action_name}: ${errorMsg}`);
+      await editWhatsAppMessage(sock, editJid, msgKey, formatted, !!toolMsg.wa_msg_is_image);
+    } catch (editErr) {
+      log.error("onReaction: edit failed:", editErr);
     }
+    log.info(`onReaction: inspect ${toolMsg.tool_name} — db=${t1 - t0}ms edit=${Date.now() - t1}ms total=${Date.now() - t0}ms`);
   }
 
   return onReaction;
@@ -764,25 +681,7 @@ if (!process.env.TESTING) {
 
   await startHtmlServer(config.html_server_port, getRootDb());
 
-  const rootDb = getRootDb();
-
-  // Load pending confirmations from a previous session
-  const pendingConfirmations = await loadPendingConfirmations(rootDb);
-  if (pendingConfirmations.length > 0) {
-    log.info(`Loaded ${pendingConfirmations.length} pending confirmation(s) from previous session`);
-  }
-
-  /** @type {Map<string, import("./pending-confirmations.js").PendingConfirmationRow>} */
-  const pendingByMsgKeyId = new Map(
-    pendingConfirmations.map(row => [row.msg_key_id, row]),
-  );
-
-  const onReaction = createReactionHandler({
-    store,
-    executeActionFn: executeAction,
-    pendingByMsgKeyId,
-    rootDb,
-  });
+  const onReaction = createReactionHandler({ store });
 
   const { closeWhatsapp, sendToChat } = await connectToWhatsApp({
     onMessage: handleMessage,
