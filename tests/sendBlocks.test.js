@@ -85,6 +85,26 @@ And some text after.`;
     );
   });
 
+  it("long code that splits into multiple images sends them in a single message", async () => {
+    const { sock, sent } = createMockSock();
+
+    // 100 lines → splits into 2 images (MAX_LINES_PER_IMAGE = 90)
+    const longCode = Array.from({ length: 100 }, (_, i) => `const x${i} = ${i};`).join("\n");
+
+    await sendBlocks(sock, "test-chat", "llm", [
+      { type: "code", language: "javascript", code: longCode },
+    ]);
+
+    // The split images should be bundled into a single message, not sent as
+    // separate sock.sendMessage calls — otherwise the user gets spammed with
+    // individual image messages for what is conceptually one code block.
+    const imageMessages = sent.filter(s => s.msg.image != null);
+    assert.equal(
+      imageMessages.length, 1,
+      `Split images from a single code block should be sent as one message, got ${imageMessages.length}`,
+    );
+  });
+
   it("renders multiple code blocks as separate images", async () => {
     const { sock, sent } = createMockSock();
 
