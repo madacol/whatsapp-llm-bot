@@ -10,3 +10,8 @@
 - For behavioral changes (bug fixes, new features), write a failing test first, then implement. For refactors and trivial changes, existing tests passing is sufficient
 - Prefer integration tests for glue code, unit tests for pure functions with edge cases. Test at the boundary where bugs would be noticed
 - Save tests output to a temporary file so you can grep|head|tail later because the output is usually long
+
+## Adapter Design
+- The adapter should expose semantic primitives (select, confirm, send) not platform event callbacks
+- Platform mechanics (polls, reactions, message editing) are implementation details — callers should not need to know about them
+- When sending a message, the returned handle should give the caller control over the full lifecycle of that message
