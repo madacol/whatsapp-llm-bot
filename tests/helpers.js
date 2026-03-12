@@ -49,12 +49,12 @@ export function createIncomingContext(overrides = {}) {
   const responses = [];
 
   /**
-   * Record blocks from a send/reply call and return a MessageEditor
+   * Record blocks from a send/reply call and return a MessageHandle
    * that records subsequent edits.
    * @param {"send" | "reply"} method
    * @param {MessageSource} source
    * @param {SendContent} content
-   * @returns {MessageEditor}
+   * @returns {MessageHandle}
    */
   const recordBlocks = (method, source, content) => {
     const blocks = typeof content === "string"
@@ -67,13 +67,16 @@ export function createIncomingContext(overrides = {}) {
         : ("alt" in block && block.alt) || "";
       responses.push({ type: method, text, source, blockType: block.type });
     }
-    /** @type {MessageEditor} */
-    const editor = async (newText) => {
-      responses.push({ type: "edit", text: newText, source });
+    /** @type {MessageHandle} */
+    const handle = {
+      keyId: `mock-key-${responses.length}`,
+      isImage: blocks.some(b => b.type === "image" || b.type === "code" || b.type === "diff"),
+      edit: async (newText) => {
+        responses.push({ type: "edit", text: newText, source });
+      },
+      onReaction: () => () => {},
     };
-    editor.keyId = `mock-key-${responses.length}`;
-    editor.isImage = blocks.some(b => b.type === "image" || b.type === "code" || b.type === "diff");
-    return editor;
+    return handle;
   };
 
   /** @type {IncomingContext} */

@@ -91,22 +91,6 @@ export function createToolMessage(toolId, text) {
   return { role: "tool", tool_id: toolId, content: [{ type: "text", text }] };
 }
 
-/**
- * Enrich a tool message with WhatsApp tracking metadata from the editor.
- * Used by both harnesses to attach wa_key_id, tool_name, and wa_msg_is_image.
- * @param {ToolMessage} base
- * @param {MessageEditor | undefined} editor
- * @param {string} toolName
- * @returns {ToolMessage}
- */
-export function withEditorMeta(base, editor, toolName) {
-  return {
-    ...base,
-    ...(editor?.keyId && { wa_key_id: editor.keyId }),
-    ...(toolName && { tool_name: toolName }),
-    ...(editor?.isImage && { wa_msg_is_image: true }),
-  };
-}
 
 /**
  * Extract a human-readable message from an unknown error value.

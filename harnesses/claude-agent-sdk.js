@@ -15,7 +15,7 @@ import { NO_OP_HOOKS } from "./native.js";
 import { getChatActions } from "../actions.js";
 import { createLogger } from "../logger.js";
 import { extractLastUserText } from "../message-formatting.js";
-import { createToolMessage, withEditorMeta, errorToString } from "../utils.js";
+import { createToolMessage, errorToString } from "../utils.js";
 import { getToolCallSummary } from "../tool-display.js";
 import { getRootDb } from "../db.js";
 
@@ -202,7 +202,7 @@ If you want to propose something and wait for the user's decision before acting,
 /**
  * Entry in the activeTools map, tracking a tool call's display state.
  * @typedef {{
- *   editor?: MessageEditor,
+ *   handle?: MessageHandle,
  *   toolName: string,
  *   description: string | null,
  * }} ActiveToolEntry
@@ -777,13 +777,13 @@ async function handleAssistantEvent(event, ctx) {
         log.debug(`  block: tool_use ${name}`);
         const input = /** @type {Record<string, unknown>} */ (block.input ?? {});
         const displayLabel = getToolCallSummary(name, input);
-        const editor = await ctx.hooks.onToolCall({
+        const handle = await ctx.hooks.onToolCall({
           id,
           name,
           arguments: JSON.stringify(block.input),
         });
         ctx.activeTools.set(id, {
-          editor: editor ?? undefined,
+          handle: handle ?? undefined,
           toolName: name,
           description: displayLabel,
         });
@@ -854,9 +854,9 @@ async function handleResultEvent(event, ctx) {
  */
 async function handleToolProgressEvent(event, ctx) {
   const active = ctx.activeTools.get(event.tool_use_id);
-  if (active?.editor) {
+  if (active?.handle) {
     const elapsed = Math.round(event.elapsed_time_seconds);
-    await active.editor(`${active.toolName} (${elapsed}s…)`);
+    await active.handle.edit(`${active.toolName} (${elapsed}s…)`);
   }
 }
 
@@ -873,20 +873,30 @@ async function handleUserEvent(event, ctx) {
   const active = ctx.activeTools.get(resolvedToolUseId);
 
   if (resultText != null) {
-    const toolMsg = withEditorMeta(
-      createToolMessage(resolvedToolUseId, resultText),
-      active?.editor,
-      active?.toolName ?? "",
-    );
+    const toolMsg = createToolMessage(resolvedToolUseId, resultText);
     ctx.messages.push(toolMsg);
     await ctx.session.addMessage(ctx.session.chatId, toolMsg, ctx.session.senderIds);
+
+    // Register 👁 react-to-inspect on the tool-call message handle
+    if (active?.handle?.keyId) {
+      const toolName = active.toolName;
+      active.handle.onReaction((emoji) => {
+        if (!emoji.startsWith("👁")) return;
+        const text = toolMsg.content
+          .filter(b => b.type === "text").map(b => /** @type {TextContentBlock} */ (b).text).join("\n");
+        const MAX = 3000;
+        const display = text.length <= MAX ? text
+          : text.slice(0, MAX) + `\n\n_… truncated (${text.length.toLocaleString()} chars total)_`;
+        active.handle?.edit(`🔧 *${toolName}*\n\n${display}`);
+      });
+    }
   }
 
-  if (active?.editor) {
+  if (active?.handle) {
     try {
-      await active.editor(active.description || active.toolName);
+      await active.handle.edit(active.description || active.toolName);
     } catch (editorErr) {
-      log.error(`Editor failed for ${active.toolName}:`, editorErr);
+      log.error(`Edit failed for ${active.toolName}:`, editorErr);
     }
   }
   ctx.activeTools.delete(resolvedToolUseId);

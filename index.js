@@ -8,7 +8,7 @@ import { getActions, executeAction, getChatActions, getChatAction, getAction } f
 import config from "./config.js";
 import { createLlmClient } from "./llm.js";
 import { formatTime, isHtmlContent, formatRelativeTime, getChatWorkDir, errorToString } from "./utils.js";
-import { connectToWhatsApp, editWhatsAppMessage } from "./whatsapp-adapter.js";
+import { connectToWhatsApp } from "./whatsapp-adapter.js";
 import { startReminderDaemon } from "./reminder-daemon.js";
 import { startModelsCacheDaemon } from "./models-cache.js";
 import { initStore } from "./store.js";
@@ -61,7 +61,7 @@ function isTextBlock(block) {
  * @param {Pick<ExecuteActionContext, "send">} context
  * @param {boolean} isDebug
  * @param {((params: Record<string, any>) => string)} [actionFormatter]
- * @returns {Promise<MessageEditor | undefined>}
+ * @returns {Promise<MessageHandle | undefined>}
  */
 async function displayToolCall(toolCall, context, isDebug, actionFormatter) {
   const content = formatToolCallDisplay(toolCall, isDebug, actionFormatter);
@@ -581,58 +581,6 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
   return { handleMessage };
 }
 
-/**
- * @typedef {{
- *   store: Pick<Store, "getToolResultByWaKeyId">;
- * }} ReactionHandlerDeps
- */
-
-/**
- * Create a reaction handler for tool-call inspect (👁 reaction shows result).
- * @param {ReactionHandlerDeps} deps
- * @returns {(event: import("./whatsapp-adapter.js").ReactionEvent, sock: import("@whiskeysockets/baileys").WASocket) => Promise<void>}
- */
-export function createReactionHandler({ store }) {
-  /**
-   * @param {import("./whatsapp-adapter.js").ReactionEvent} event
-   * @param {import("@whiskeysockets/baileys").WASocket} sock
-   */
-  async function onReaction(event, sock) {
-    const { key } = event;
-
-    const t0 = Date.now();
-    const toolResult = await store.getToolResultByWaKeyId(key.id);
-    const t1 = Date.now();
-    if (!toolResult) return;
-
-    const { toolMsg, chatId } = toolResult;
-    // Use chatId (standard JID) for relayMessage — LID JIDs from reactions don't work with relayMessage
-    const editJid = toolMsg.wa_msg_is_image ? chatId : key.remoteJid;
-    const msgKey = { id: key.id, remoteJid: editJid, fromMe: true };
-    const toolName = toolMsg.tool_name || "Tool";
-    const resultText = toolMsg.content
-      .filter(/** @param {ToolContentBlock} b */ (b) => b.type === "text")
-      .map(/** @param {TextContentBlock} b */ (b) => b.text)
-      .join("\n");
-
-    const MAX_EDIT_LEN = 3000;
-    const resultDisplay = resultText.length <= MAX_EDIT_LEN
-      ? resultText
-      : resultText.slice(0, MAX_EDIT_LEN)
-        + `\n\n_… truncated (${resultText.length.toLocaleString()} chars total)_`;
-
-    const formatted = `🔧 *${toolName}*\n\n${resultDisplay}`;
-    try {
-      await editWhatsAppMessage(sock, editJid, msgKey, formatted, !!toolMsg.wa_msg_is_image);
-    } catch (editErr) {
-      log.error("onReaction: edit failed:", editErr);
-    }
-    log.info(`onReaction: inspect ${toolMsg.tool_name} — db=${t1 - t0}ms edit=${Date.now() - t1}ms total=${Date.now() - t0}ms`);
-  }
-
-  return onReaction;
-}
-
 // ── Default initialization (production) ──
 
 // Register optional harnesses
@@ -681,12 +629,7 @@ if (!process.env.TESTING) {
 
   await startHtmlServer(config.html_server_port, getRootDb());
 
-  const onReaction = createReactionHandler({ store });
-
-  const { closeWhatsapp, sendToChat } = await connectToWhatsApp({
-    onMessage: handleMessage,
-    onReaction,
-  }).catch(async (error) => {
+  const { closeWhatsapp, sendToChat } = await connectToWhatsApp(handleMessage).catch(async (error) => {
       log.error("Initialization error:", error);
       await store.closeDb();
       process.exit(1);
