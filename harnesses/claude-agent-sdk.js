@@ -17,8 +17,130 @@ import { createLogger } from "../logger.js";
 import { extractLastUserText } from "../message-formatting.js";
 import { createToolMessage, withEditorMeta, errorToString } from "../utils.js";
 import { getToolCallSummary } from "../tool-display.js";
+import { getRootDb } from "../db.js";
 
 const log = createLogger("harness:claude-agent-sdk");
+
+// ── Cached SDK model list ──────────────────────────────────────────────
+
+/** @type {import("@anthropic-ai/claude-agent-sdk").ModelInfo[] | null} */
+let cachedModels = null;
+
+/**
+ * Get the cached list of models from the SDK.
+ * Returns null if no session has been started yet.
+ * @returns {import("@anthropic-ai/claude-agent-sdk").ModelInfo[] | null}
+ */
+export function getCachedSdkModels() {
+  return cachedModels;
+}
+
+/** @type {Array<{ value: string, displayName: string, description: string }>} */
+const FALLBACK_MODELS = [
+  { value: "claude-sonnet-4-6", displayName: "Sonnet 4.6", description: "Fast, balanced" },
+  { value: "claude-opus-4-6", displayName: "Opus 4.6", description: "Most capable" },
+  { value: "claude-haiku-4-5", displayName: "Haiku 4.5", description: "Fastest, lightweight" },
+];
+
+/**
+ * Get available models from SDK cache with fallback.
+ * @returns {Array<{ value: string, displayName: string, description: string }>}
+ */
+export function getModels() {
+  if (cachedModels && cachedModels.length > 0) {
+    return cachedModels.map((m) => ({ value: m.value, displayName: m.displayName, description: m.description }));
+  }
+  return FALLBACK_MODELS;
+}
+
+/**
+ * Set or clear the SDK model for a chat. Returns a confirmation string.
+ * @param {string} chatId
+ * @param {string} arg - model name/alias, or "off"/"default"/"none" to clear
+ * @returns {Promise<string>}
+ */
+export async function handleModelCommand(chatId, arg) {
+  const db = getRootDb();
+
+  if (arg === "off" || arg === "default" || arg === "none") {
+    await db.query("UPDATE chats SET sdk_model = NULL WHERE chat_id = $1", [chatId]);
+    return "SDK model reset to default.";
+  }
+
+  const models = getModels();
+  const input = arg.toLowerCase();
+  const match = models.find(
+    (m) => m.value === input || m.value.includes(input) || m.displayName.toLowerCase() === input,
+  );
+  const modelValue = match ? match.value : input;
+
+  await db.query("UPDATE chats SET sdk_model = $1 WHERE chat_id = $2", [modelValue, chatId]);
+  return match
+    ? `SDK model set to \`${match.value}\` (${match.displayName})`
+    : `SDK model set to \`${modelValue}\``;
+}
+
+/** @type {Record<string, string>} */
+const EFFORT_LABELS = {
+  low: "Low — fast, minimal thinking",
+  medium: "Medium — balanced",
+  high: "High — deep reasoning (default)",
+  max: "Max — maximum effort",
+};
+
+/** @type {string[]} */
+const FALLBACK_EFFORT_LEVELS = ["low", "medium", "high"];
+
+/**
+ * Get available effort levels for a specific model.
+ * Uses SDK metadata when available, falls back to low/medium/high.
+ * @param {string | null} modelValue - the sdk_model value, or null for default
+ * @returns {Array<{ value: string, label: string }>}
+ */
+export function getEffortLevels(modelValue) {
+  /** @type {string[]} */
+  let levels = FALLBACK_EFFORT_LEVELS;
+  if (cachedModels && modelValue) {
+    const model = cachedModels.find((m) => m.value === modelValue);
+    if (model?.supportedEffortLevels?.length) {
+      levels = model.supportedEffortLevels;
+    } else if (model && !model.supportsEffort) {
+      return [];
+    }
+  } else if (cachedModels && !modelValue) {
+    // Default model — find it in the cache
+    const defaultModel = cachedModels.find((m) => m.value.includes("sonnet"));
+    if (defaultModel?.supportedEffortLevels?.length) {
+      levels = defaultModel.supportedEffortLevels;
+    } else if (defaultModel && !defaultModel.supportsEffort) {
+      return [];
+    }
+  }
+  return levels.map((v) => ({ value: v, label: EFFORT_LABELS[v] ?? v }));
+}
+
+/**
+ * Set or clear the SDK effort for a chat. Returns a confirmation string.
+ * @param {string} chatId
+ * @param {string} arg - effort level, or "off"/"default"/"none" to clear
+ * @returns {Promise<string>}
+ */
+export async function handleEffortCommand(chatId, arg) {
+  const db = getRootDb();
+
+  if (arg === "off" || arg === "default" || arg === "none") {
+    await db.query("UPDATE chats SET sdk_effort = NULL WHERE chat_id = $1", [chatId]);
+    return "SDK effort reset to default (high).";
+  }
+
+  const input = arg.toLowerCase();
+  const validLevels = ["low", "medium", "high", "max"];
+  if (validLevels.includes(input)) {
+    await db.query("UPDATE chats SET sdk_effort = $1 WHERE chat_id = $2", [input, chatId]);
+    return `SDK effort set to \`${input}\``;
+  }
+  return `Unknown effort level \`${arg}\`. Use: ${validLevels.join(", ")}`;
+}
 
 /**
  * Build the full system prompt for the SDK, including:
@@ -270,7 +392,7 @@ export function createClaudeAgentSdkHarness() {
    * @param {AgentHarnessParams} params
    * @returns {Promise<AgentResult>}
    */
-  async function processLlmResponse({ session, llmConfig, messages, hooks: userHooks, maxDepth, cwd }) {
+  async function processLlmResponse({ session, llmConfig, messages, hooks: userHooks, maxDepth, cwd, sdkModel, sdkEffort }) {
     const rawHooks = { ...NO_OP_HOOKS, ...userHooks };
     const hooks = wrapHooksWithFallbacks(rawHooks);
 
@@ -330,8 +452,8 @@ export function createClaudeAgentSdkHarness() {
         allowDangerouslySkipPermissions: true,
         persistSession: true,
         abortController,
-        // Don't pass llmConfig.chatModel — it's an OpenRouter model ID.
-        // The SDK uses Claude Code's own model (configurable via its own settings).
+        ...(sdkModel && { model: sdkModel }),
+        ...(sdkEffort && { effort: sdkEffort }),
         stderr: (/** @type {string} */ data) => {
           stderrBytes += data.length;
           while (stderrLines.length >= MAX_STDERR_LINES || stderrBytes > MAX_STDERR_BYTES) {
@@ -382,6 +504,13 @@ export function createClaudeAgentSdkHarness() {
       for (const text of buffered) {
         log.debug(`Flushing buffered message for chat ${session.chatId}: "${text.slice(0, 80)}"`);
         injectMessage(session.chatId, text);
+      }
+
+      // Cache available models on first query (non-blocking)
+      if (!cachedModels) {
+        q.supportedModels()
+          .then((models) => { cachedModels = models; })
+          .catch((err) => log.warn("Failed to fetch SDK models:", err));
       }
 
       /** @type {Map<string, ActiveToolEntry>} */

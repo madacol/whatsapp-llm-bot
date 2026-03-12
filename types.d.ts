@@ -331,6 +331,8 @@ type AgentHarnessParams = {
   maxDepth?: number;
   agentDepth?: number;
   cwd?: string;
+  sdkModel?: string;
+  sdkEffort?: 'low' | 'medium' | 'high' | 'max';
 };
 
 type AgentHarness = {
