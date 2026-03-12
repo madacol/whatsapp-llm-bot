@@ -124,6 +124,10 @@ type SelectOption = string | { id: string; label: string };
 type SelectConfig = {
   /** Timeout in ms (default: 5 minutes). */
   timeout?: number;
+  /** Delete the poll message after the user selects a non-cancel option. */
+  deleteOnSelect?: boolean;
+  /** Option IDs treated as cancellation — poll is reacted with ❌ instead of deleted/cleared. */
+  cancelIds?: string[];
 };
 
 type ConfirmHooks = {

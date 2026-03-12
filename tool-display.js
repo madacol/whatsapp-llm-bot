@@ -199,6 +199,13 @@ export function formatBashCommand(command) {
  * @returns {string}
  */
 export function getToolCallSummary(name, args, formatToolCall) {
+  // Bash: always show *Bash* prefix with description or command preview
+  if (name === "Bash" && typeof args.command === "string") {
+    if (typeof args.description === "string") return `*Bash*  _${args.description}_`;
+    const cmd = args.command;
+    return cmd.length > 60 ? `*Bash*  \`${cmd.slice(0, 60)}…\`` : `*Bash*  \`${cmd}\``;
+  }
+
   // Explicit description (any tool — SDK, native, etc.)
   if (typeof args.description === "string") return args.description;
 
@@ -209,12 +216,6 @@ export function getToolCallSummary(name, args, formatToolCall) {
   // File-path tools
   if ((name === "Edit" || name === "Write" || name === "NotebookEdit") && typeof args.file_path === "string") {
     return `*${name}*  \`${args.file_path}\``;
-  }
-
-  // Bash: show truncated command
-  if (name === "Bash" && typeof args.command === "string") {
-    const cmd = args.command;
-    return cmd.length > 60 ? `\`${cmd.slice(0, 60)}…\`` : `\`${cmd}\``;
   }
 
   // Custom actions with formatToolCall
@@ -236,12 +237,12 @@ export function formatToolCallDisplay(toolCall, isDebug, actionFormatter) {
 
   const name = toolCall.name;
 
-  // Bash tool: render command as a syntax-highlighted image with description as caption.
+  // Bash tool: render command as a syntax-highlighted image with *Bash* prefix.
   if (name === "Bash" && typeof args.command === "string") {
     const desc = typeof args.description === "string" ? args.description : null;
     const formatted = formatBashCommand(args.command);
-    const caption = desc ? `*${desc}*` : null;
-    return [{ type: "code", code: formatted, language: "bash", ...(caption && { caption }) }];
+    const caption = desc ? `*Bash*  _${desc}_` : `*Bash*`;
+    return [{ type: "code", code: formatted, language: "bash", caption }];
   }
 
   // SDK built-in tools: compact, human-friendly display

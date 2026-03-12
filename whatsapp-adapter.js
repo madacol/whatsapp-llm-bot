@@ -400,7 +400,8 @@ export function createUserResponseRegistry() {
           poll: { name: question, values: labels, selectableCount: 1 },
         });
         const pollMsgId = sent?.key?.id;
-        log.debug(`select: msgId=${pollMsgId}, key=${JSON.stringify(sent?.key)}`);
+        const pollKey = sent?.key;
+        log.debug(`select: msgId=${pollMsgId}, key=${JSON.stringify(pollKey)}`);
         if (pollMsgId) {
           if (sentPolls.size >= MAX_SENT_POLLS) {
             const oldest = sentPolls.keys().next().value;
@@ -410,17 +411,38 @@ export function createUserResponseRegistry() {
           setTimeout(() => sentPolls.delete(pollMsgId), POLL_TTL_MS);
         }
 
-        if (!pollMsgId) {
+        if (!pollMsgId || !pollKey) {
           return "";
         }
+
+        // React with ⏳ to indicate waiting for response
+        sock.sendMessage(chatId, { react: { text: "⏳", key: pollKey } });
+
+        const cancelIds = config?.cancelIds ? new Set(config.cancelIds) : null;
+        const deleteOnSelect = config?.deleteOnSelect ?? false;
 
         const timeout = config?.timeout ?? SELECT_TIMEOUT_MS;
         return new Promise((resolve) => {
           const timer = setTimeout(() => {
             pending.delete(pollMsgId);
+            sock.sendMessage(chatId, { react: { text: "⌛", key: pollKey } });
             resolve("");
           }, timeout);
-          pending.set(pollMsgId, { resolve, timer, labelToId });
+          pending.set(pollMsgId, {
+            resolve: (id) => {
+              const isCancelled = !id || (cancelIds !== null && cancelIds.has(id));
+              if (isCancelled) {
+                sock.sendMessage(chatId, { react: { text: "❌", key: pollKey } });
+              } else if (deleteOnSelect) {
+                sock.sendMessage(chatId, { delete: pollKey });
+              } else {
+                sock.sendMessage(chatId, { react: { text: "", key: pollKey } });
+              }
+              resolve(id);
+            },
+            timer,
+            labelToId,
+          });
         });
       };
     },
