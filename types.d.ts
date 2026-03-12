@@ -128,6 +128,8 @@ type SelectConfig = {
   deleteOnSelect?: boolean;
   /** Option IDs treated as cancellation — poll is reacted with ❌ instead of deleted/cleared. */
   cancelIds?: string[];
+  /** If set, the option with this id gets a ✅ prefix to highlight the current value. */
+  currentId?: string;
 };
 
 type ConfirmHooks = {

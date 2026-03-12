@@ -6,7 +6,8 @@
  * Chat-specific actions are embedded in the system prompt.
  *
  * Supports mid-conversation message injection via streamInput() and cancellation via AbortController.
- * Clarifying questions (AskUserQuestion) are handled via the canUseTool callback.
+ * Whitelisted tools are auto-approved; AskUserQuestion has a custom handler;
+ * all other tools are prompted to the user for approval via canUseTool.
  */
 
 import { query } from "@anthropic-ai/claude-agent-sdk";
@@ -20,6 +21,22 @@ import { getToolCallSummary } from "../tool-display.js";
 import { getRootDb } from "../db.js";
 
 const log = createLogger("harness:claude-agent-sdk");
+
+// ── Tool approval whitelist ─────────────────────────────────────────────
+
+/** Tools that are auto-approved without prompting the user. */
+const AUTO_APPROVED_TOOLS = new Set([
+  // Code tools
+  "Read", "Write", "Edit", "Glob", "Grep", "Bash", "NotebookEdit",
+  // Agent/task tools
+  "Agent", "TaskOutput", "TaskStop",
+  // Web tools
+  "WebFetch", "WebSearch",
+  // Planning
+  "EnterPlanMode",
+  // Config/workspace
+  "TodoWrite", "EnterWorktree", "ToolSearch", "Skill",
+]);
 
 // ── Cached SDK model list ──────────────────────────────────────────────
 
@@ -465,21 +482,20 @@ export function createClaudeAgentSdkHarness() {
           log.debug("[sdk stderr]", data.trimEnd());
         },
         /**
-         * Handle tool permission requests and AskUserQuestion.
-         * All tools are auto-approved via canUseTool (equivalent to bypassPermissions).
-         * AskUserQuestion is intercepted to present questions as WhatsApp polls.
+         * Handle tool permission requests.
+         * Whitelisted tools are auto-approved. AskUserQuestion has a custom
+         * handler (structured Q&A). Everything else is prompted to the user
+         * with a generic Allow/Deny poll showing tool name and input summary.
          * @type {import("@anthropic-ai/claude-agent-sdk").CanUseTool}
          */
         canUseTool: async (toolName, input, _options) => {
           if (toolName === "AskUserQuestion") {
             return handleAskUserQuestion(input, hooks.onAskUser);
           }
-          if (toolName === "ExitPlanMode") {
-            return handleExitPlanMode(input, hooks.onAskUser);
+          if (AUTO_APPROVED_TOOLS.has(toolName)) {
+            return { behavior: "allow", updatedInput: input };
           }
-          // Auto-approve all tools — this gives us bypassPermissions behavior
-          // while keeping the permission state machine active for plan mode.
-          return { behavior: "allow", updatedInput: input };
+          return handleToolApproval(toolName, input, hooks.onAskUser);
         },
       };
 
@@ -945,20 +961,47 @@ async function handleAskUserQuestion(input, onAskUser) {
 }
 
 /**
- * Handle an ExitPlanMode tool call by presenting the plan to the user
- * for approval via a WhatsApp poll before allowing plan mode to exit.
+ * Summarize a tool's input for display in a user-facing approval prompt.
+ * Keeps it compact: truncates long values and limits the number of fields.
+ * @param {Record<string, unknown>} input
+ * @returns {string}
+ */
+function summarizeToolInput(input) {
+  const MAX_VALUE_LEN = 120;
+  const MAX_FIELDS = 5;
+
+  const entries = Object.entries(input);
+  if (entries.length === 0) return "(no input)";
+
+  const lines = entries.slice(0, MAX_FIELDS).map(([key, val]) => {
+    const str = typeof val === "string" ? val : JSON.stringify(val);
+    const truncated = str.length > MAX_VALUE_LEN ? str.slice(0, MAX_VALUE_LEN) + "…" : str;
+    return `• *${key}:* ${truncated}`;
+  });
+
+  if (entries.length > MAX_FIELDS) {
+    lines.push(`  _(+${entries.length - MAX_FIELDS} more fields)_`);
+  }
+
+  return lines.join("\n");
+}
+
+/**
+ * Generic handler for non-whitelisted tools. Prompts the user with the
+ * tool name and a summary of its input, asking them to Allow or Deny.
+ * @param {string} toolName
  * @param {Record<string, unknown>} input
  * @param {Required<AgentIOHooks>["onAskUser"]} onAskUser
  * @returns {Promise<import("@anthropic-ai/claude-agent-sdk").PermissionResult>}
  */
-async function handleExitPlanMode(input, onAskUser) {
-  const userChoice = await onAskUser(
-    "Plan ready — approve to start implementation?",
-    ["✅ Approve", "❌ Reject"],
-  );
+async function handleToolApproval(toolName, input, onAskUser) {
+  const summary = summarizeToolInput(input);
+  const prompt = `🔧 *${toolName}*\n${summary}`;
 
-  if (userChoice === "❌ Reject") {
-    return { behavior: "deny", message: "User rejected the plan. Revise your approach based on their feedback." };
+  const userChoice = await onAskUser(prompt, ["✅ Allow", "❌ Deny"]);
+
+  if (userChoice === "❌ Deny") {
+    return { behavior: "deny", message: `User denied the ${toolName} tool call.` };
   }
 
   return { behavior: "allow", updatedInput: input };

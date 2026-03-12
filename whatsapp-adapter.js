@@ -343,19 +343,20 @@ const SELECT_TIMEOUT_MS = 5 * 60 * 1000;
 
 /**
  * Normalize a SelectOption[] into poll labels and a label→id map.
+ * When `currentId` is provided, the matching option gets a ✅ prefix.
  * @param {SelectOption[]} options
+ * @param {string} [currentId]
  * @returns {{ labels: string[], labelToId: Map<string, string> }}
  */
-function normalizeSelectOptions(options) {
+function normalizeSelectOptions(options, currentId) {
   /** @type {Map<string, string>} */
   const labelToId = new Map();
   const labels = options.map((opt) => {
-    if (typeof opt === "string") {
-      labelToId.set(opt, opt);
-      return opt;
-    }
-    labelToId.set(opt.label, opt.id);
-    return opt.label;
+    const id = typeof opt === "string" ? opt : opt.id;
+    const baseLabel = typeof opt === "string" ? opt : opt.label;
+    const label = currentId != null && id === currentId ? `✅ ${baseLabel}` : baseLabel;
+    labelToId.set(label, id);
+    return label;
   });
   return { labels, labelToId };
 }
@@ -395,7 +396,7 @@ export function createUserResponseRegistry() {
      */
     createSelect(sock, chatId) {
       return async (question, options, config) => {
-        const { labels, labelToId } = normalizeSelectOptions(options);
+        const { labels, labelToId } = normalizeSelectOptions(options, config?.currentId);
         const sent = await sock.sendMessage(chatId, {
           poll: { name: question, values: labels, selectableCount: 1 },
         });
