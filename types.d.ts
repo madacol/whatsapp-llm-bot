@@ -92,12 +92,6 @@ type ContentBlock = IncomingContentBlock | ToolCallContentBlock;
     role: "tool";
     tool_id: string;
     content: ToolContentBlock[];
-    /** WhatsApp message key ID of the tool-call display message (for react-to-inspect). */
-    wa_key_id?: string;
-    /** Tool name (for display in react-to-inspect). */
-    tool_name?: string;
-    /** True when the tool-call WA message was an image (caption edit instead of text edit). */
-    wa_msg_is_image?: boolean;
   };
 
   type Message = UserMessage | AssistantMessage | ToolMessage;
@@ -113,8 +107,16 @@ type MessageSource = "llm" | "tool-call" | "tool-result" | "error" | "warning" |
 
 // WhatsApp Service Types
 
-/** Edits a previously sent text message in-place. May carry the WA message key ID for reaction tracking. */
-type MessageEditor = ((newText: string) => Promise<void>) & { keyId?: string; isImage?: boolean };
+/** Callback invoked when a reaction is added to a message. */
+type ReactionCallback = (emoji: string, senderId: string) => void;
+
+/** Handle to a sent message, providing lifecycle control (edit, reaction subscription). */
+type MessageHandle = {
+  readonly keyId: string | undefined;
+  readonly isImage: boolean;
+  edit: (text: string) => Promise<void>;
+  onReaction: (callback: ReactionCallback) => () => void;
+};
 
 /** An option for `select()`: either a plain string or an object with id and label. */
 type SelectOption = string | { id: string; label: string };
@@ -144,8 +146,8 @@ type IncomingContext = {
   getIsAdmin: () => Promise<boolean>;
   reactToMessage: (emoji: string) => Promise<void>;
   select: (question: string, options: SelectOption[], config?: SelectConfig) => Promise<string>;
-  send: (source: MessageSource, content: SendContent) => Promise<MessageEditor | undefined>;
-  reply: (source: MessageSource, content: SendContent) => Promise<MessageEditor | undefined>;
+  send: (source: MessageSource, content: SendContent) => Promise<MessageHandle | undefined>;
+  reply: (source: MessageSource, content: SendContent) => Promise<MessageHandle | undefined>;
   confirm: (message: string, hooks?: ConfirmHooks) => Promise<boolean>;
   sendPresenceUpdate: (presence: "composing" | "paused") => Promise<void>;
 
@@ -160,8 +162,8 @@ type ExecuteActionContext = {
   senderIds: string[];
   content: IncomingContentBlock[];
   getIsAdmin: () => Promise<boolean>;
-  send: (source: MessageSource, content: SendContent) => Promise<MessageEditor | undefined>;
-  reply: (source: MessageSource, content: SendContent) => Promise<MessageEditor | undefined>;
+  send: (source: MessageSource, content: SendContent) => Promise<MessageHandle | undefined>;
+  reply: (source: MessageSource, content: SendContent) => Promise<MessageHandle | undefined>;
   reactToMessage: (emoji: string) => Promise<void>;
   select: (question: string, options: SelectOption[], config?: SelectConfig) => Promise<string>;
   confirm: (message: string, hooks?: ConfirmHooks) => Promise<boolean>;
@@ -301,7 +303,7 @@ type AgentIOHooks = {
   onLlmResponse?: (text: string) => Promise<void>;
   /** Present a structured question to the user and wait for their response. Returns the chosen option text. */
   onAskUser?: (question: string, options: string[], preamble?: string, descriptions?: string[]) => Promise<string>;
-  onToolCall?: (toolCall: LlmChatResponse['toolCalls'][0], formatToolCall?: (params: Record<string, any>) => string) => Promise<MessageEditor | void>;
+  onToolCall?: (toolCall: LlmChatResponse['toolCalls'][0], formatToolCall?: (params: Record<string, any>) => string) => Promise<MessageHandle | void>;
   onToolResult?: (blocks: ToolContentBlock[], toolName: string, permissions: PermissionFlags) => Promise<void>;
   onToolError?: (error: string) => Promise<void>;
   onContinuePrompt?: () => Promise<boolean>;

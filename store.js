@@ -164,7 +164,6 @@ export async function initStore(injectedDb){
       `;
       await db.sql`CREATE INDEX IF NOT EXISTS idx_messages_search_text ON messages USING gin (search_text)`;
       await db.sql`CREATE INDEX IF NOT EXISTS idx_memories_search_text ON memories USING gin (search_text)`;
-      await db.sql`CREATE INDEX IF NOT EXISTS idx_messages_wa_key_id ON messages ((message_data->>'wa_key_id')) WHERE message_data->>'wa_key_id' IS NOT NULL`;
       await db.sql`
         CREATE TABLE IF NOT EXISTS agent_runs (
           id SERIAL PRIMARY KEY,
@@ -242,24 +241,6 @@ export async function initStore(injectedDb){
             AND message_data->>'tool_id' = ${toolCallId}
           RETURNING *`;
         return row ? /** @type {MessageRow} */ (row) : null;
-      },
-
-      /**
-       * Look up a tool result message by its WhatsApp message key ID.
-       * Used by the reaction handler for "react to inspect" tool results.
-       * WA message key IDs are globally unique, so no chat_id filter needed.
-       * @param {string} waKeyId
-       * @returns {Promise<{ toolMsg: ToolMessage; chatId: string } | null>}
-       */
-      async getToolResultByWaKeyId (waKeyId) {
-        const { rows: [row] } = await db.sql`
-          SELECT chat_id, message_data FROM messages
-          WHERE message_data->>'role' = 'tool'
-            AND message_data->>'wa_key_id' = ${waKeyId}
-          ORDER BY timestamp DESC LIMIT 1`;
-        return row
-          ? { toolMsg: /** @type {ToolMessage} */ (/** @type {MessageRow} */ (row).message_data), chatId: /** @type {MessageRow} */ (row).chat_id }
-          : null;
       },
 
       /**

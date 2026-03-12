@@ -442,6 +442,79 @@ export function createUserResponseRegistry() {
 }
 
 /**
+ * @typedef {(emoji: string, senderId: string) => void} ReactionCallback
+ */
+
+/**
+ * @typedef {{
+ *   subscribe: (msgKeyId: string, callback: ReactionCallback) => () => void;
+ *   handleReactions: (reactions: Array<{ key: { id: string; remoteJid: string }; reaction: { text: string }; senderId: string }>) => void;
+ *   clear: () => void;
+ *   readonly size: number;
+ * }} ReactionRegistry
+ */
+
+/**
+ * Create a registry that routes reactions to message handles.
+ * Uses a Map<msgKeyId, Set<callback>> so multiple subscribers
+ * (e.g. tool inspect + future status reactions) coexist.
+ *
+ * Lifecycle: create once per connection; on reconnect the same registry
+ * is reused (message IDs are globally unique).
+ * @returns {ReactionRegistry}
+ */
+export function createReactionRegistry() {
+  /** @type {Map<string, Set<ReactionCallback>>} */
+  const listeners = new Map();
+
+  return {
+    /**
+     * Subscribe to reactions on a specific message.
+     * @param {string} msgKeyId
+     * @param {ReactionCallback} callback
+     * @returns {() => void} unsubscribe function
+     */
+    subscribe(msgKeyId, callback) {
+      let set = listeners.get(msgKeyId);
+      if (!set) {
+        set = new Set();
+        listeners.set(msgKeyId, set);
+      }
+      set.add(callback);
+      return () => {
+        set.delete(callback);
+        if (set.size === 0) listeners.delete(msgKeyId);
+      };
+    },
+
+    /**
+     * Route incoming reactions to registered callbacks.
+     * Called once per batch from the socket-level event handler.
+     * @param {Array<{ key: { id: string; remoteJid: string }; reaction: { text: string }; senderId: string }>} reactions
+     */
+    handleReactions(reactions) {
+      for (const { key, reaction, senderId } of reactions) {
+        const set = listeners.get(key.id);
+        if (!set) continue;
+        for (const cb of set) {
+          cb(reaction.text, senderId);
+        }
+      }
+    },
+
+    /** Number of active subscriptions (for testing/monitoring). */
+    get size() {
+      return listeners.size;
+    },
+
+    /** Remove all subscriptions. */
+    clear() {
+      listeners.clear();
+    },
+  };
+}
+
+/**
  * @typedef {(msg: BaileysMessage, type: "buffer", opts: {}) => Promise<Buffer>} DownloadMediaFn
  */
 
@@ -621,16 +694,17 @@ const SOURCE_PREFIX = {
 
 /**
  * Dispatch SendContent as WhatsApp messages with a source-based prefix.
- * Returns an editor function for the last text message sent (if any),
- * allowing callers to update the message in-place.
+ * Returns a MessageHandle for the last editable message sent (if any),
+ * giving callers lifecycle control (edit, reaction subscription).
  * @param {import('@whiskeysockets/baileys').WASocket} sock
  * @param {string} chatId
  * @param {MessageSource} source
  * @param {SendContent} content
  * @param {{ quoted?: BaileysMessage }} [options]
- * @returns {Promise<MessageEditor | undefined>}
+ * @param {ReactionRegistry} [reactionRegistry]
+ * @returns {Promise<MessageHandle | undefined>}
  */
-export async function sendBlocks(sock, chatId, source, content, options) {
+export async function sendBlocks(sock, chatId, source, content, options, reactionRegistry) {
   const prefix = SOURCE_PREFIX[source];
   const blocks = typeof content === "string"
     ? [/** @type {ToolContentBlock} */ ({ type: "text", text: content })]
@@ -678,14 +752,21 @@ export async function sendBlocks(sock, chatId, source, content, options) {
 
   const isImage = lastSentIsImage;
   const editKey = lastSentKey;
+  const keyId = editKey.id ?? undefined;
 
-  /** @type {MessageEditor} */
-  const editor = /** @type {MessageEditor} */ (async (newText) => {
-    await editWhatsAppMessage(sock, chatId, editKey, `${prefix} ${newText}`, isImage);
-  });
-  editor.keyId = editKey.id ?? undefined;
-  editor.isImage = isImage;
-  return editor;
+  /** @type {MessageHandle} */
+  const handle = {
+    keyId,
+    isImage,
+    edit: async (text) => {
+      await editWhatsAppMessage(sock, chatId, editKey, `${prefix} ${text}`, isImage);
+    },
+    onReaction: (callback) => {
+      if (!keyId || !reactionRegistry) return () => {};
+      return reactionRegistry.subscribe(keyId, callback);
+    },
+  };
+  return handle;
 }
 
 /**
@@ -695,8 +776,9 @@ export async function sendBlocks(sock, chatId, source, content, options) {
  * @param {(message: IncomingContext) => Promise<void>} messageHandler
  * @param {ConfirmRegistry} confirmRegistry
  * @param {UserResponseRegistry} userResponseRegistry
+ * @param {ReactionRegistry} reactionRegistry
  */
-export async function adaptIncomingMessage(baileysMessage, sock, messageHandler, confirmRegistry, userResponseRegistry) {
+export async function adaptIncomingMessage(baileysMessage, sock, messageHandler, confirmRegistry, userResponseRegistry, reactionRegistry) {
   // Extract message content from Baileys format
   // Ignore status updates
   if (baileysMessage.key.remoteJid === "status@broadcast") {
@@ -782,9 +864,9 @@ export async function adaptIncomingMessage(baileysMessage, sock, messageHandler,
 
     select: userResponseRegistry.createSelect(sock, chatId),
 
-    send: (source, content) => sendBlocks(sock, chatId, source, content),
+    send: (source, content) => sendBlocks(sock, chatId, source, content, undefined, reactionRegistry),
 
-    reply: (source, content) => sendBlocks(sock, chatId, source, content, { quoted: baileysMessage }),
+    reply: (source, content) => sendBlocks(sock, chatId, source, content, { quoted: baileysMessage }, reactionRegistry),
 
     confirm: confirmRegistry.createConfirm(sock, chatId),
 
@@ -802,10 +884,6 @@ export async function adaptIncomingMessage(baileysMessage, sock, messageHandler,
 }
 
 /**
- * @typedef {{ key: { id: string; remoteJid: string }, reaction: { text: string } }} ReactionEvent
- */
-
-/**
  * @typedef {{ chatId: string, pollMsgId: string, selectedOptions: string[] }} PollVoteEvent
  */
 
@@ -817,9 +895,9 @@ export async function adaptIncomingMessage(baileysMessage, sock, messageHandler,
  * @param {() => Promise<void>} reconnect
  * @param {ConfirmRegistry} confirmRegistry
  * @param {UserResponseRegistry} userResponseRegistry
- * @param {((event: ReactionEvent, sock: import('@whiskeysockets/baileys').WASocket) => Promise<void>) | null} [onReaction]
+ * @param {ReactionRegistry} reactionRegistry
  */
-function registerHandlers(sockRef, saveCreds, onMessageHandler, reconnect, confirmRegistry, userResponseRegistry, onReaction = null) {
+function registerHandlers(sockRef, saveCreds, onMessageHandler, reconnect, confirmRegistry, userResponseRegistry, reactionRegistry) {
   sockRef.current.ev.process(async (events) => {
     if (events["connection.update"]) {
       const update = events["connection.update"];
@@ -903,31 +981,25 @@ function registerHandlers(sockRef, saveCreds, onMessageHandler, reconnect, confi
           continue; // Don't process poll votes as regular messages
         }
 
-        await adaptIncomingMessage(message, sockRef.current, onMessageHandler, confirmRegistry, userResponseRegistry);
+        await adaptIncomingMessage(message, sockRef.current, onMessageHandler, confirmRegistry, userResponseRegistry, reactionRegistry);
       }
     }
 
     if (events["messages.reaction"]) {
-      /** @type {Array<{ key: { id: string; remoteJid: string }; reaction: { text: string } }>} */
+      /** @type {Array<{ key: { id: string; remoteJid: string }; reaction: { text: string }; senderId: string }>} */
       const normalized = [];
       for (const event of events["messages.reaction"]) {
         const { key, reaction } = event;
         if (!key.id || !key.remoteJid || !reaction.text) continue;
-        normalized.push({ key: { id: key.id, remoteJid: key.remoteJid }, reaction: { text: reaction.text } });
+        const senderId = (key.participant || key.remoteJid || "").split("@")[0];
+        normalized.push({ key: { id: key.id, remoteJid: key.remoteJid }, reaction: { text: reaction.text }, senderId });
       }
 
       // Route to pending confirmations (single registry, no per-confirm listeners)
       confirmRegistry.handleReactions(normalized, sockRef.current);
 
-      if (onReaction) {
-        for (const event of normalized) {
-          try {
-            await onReaction(event, sockRef.current);
-          } catch (err) {
-            log.error("Error in onReaction handler:", err);
-          }
-        }
-      }
+      // Route to message handle subscribers (e.g. tool inspect)
+      reactionRegistry.handleReactions(normalized);
     }
   });
 }
@@ -935,21 +1007,10 @@ function registerHandlers(sockRef, saveCreds, onMessageHandler, reconnect, confi
 // TODO: add reconnect integration test
 
 /**
- * @typedef {{
- *   onMessage: (message: IncomingContext) => Promise<void>;
- *   onReaction?: (event: ReactionEvent, sock: import('@whiskeysockets/baileys').WASocket) => Promise<void>;
- * }} ConnectOptions
- */
-
-/**
  * Initialize WhatsApp connection and set up message handling
- * @param {((message: IncomingContext) => Promise<void>) | ConnectOptions} handlerOrOptions
+ * @param {(message: IncomingContext) => Promise<void>} onMessage
  */
-export async function connectToWhatsApp(handlerOrOptions) {
-  const options = typeof handlerOrOptions === "function"
-    ? { onMessage: handlerOrOptions }
-    : handlerOrOptions;
-  const { onMessage, onReaction } = options;
+export async function connectToWhatsApp(onMessage) {
 
   const { version } = await fetchLatestWaWebVersion();
   log.info("Using WA Web version:", version);
@@ -970,6 +1031,7 @@ export async function connectToWhatsApp(handlerOrOptions) {
   // Single registries shared across reconnects (message IDs are globally unique).
   const confirmRegistry = createConfirmRegistry();
   const userResponseRegistry = createUserResponseRegistry();
+  const reactionRegistry = createReactionRegistry();
 
   async function reconnect() {
     const { state: newState, saveCreds: newSaveCreds } = await useMultiFileAuthState(
@@ -980,10 +1042,10 @@ export async function connectToWhatsApp(handlerOrOptions) {
       auth: newState,
       browser: Browsers.ubuntu("Chrome"),
     });
-    registerHandlers(sockRef, newSaveCreds, onMessage, reconnect, confirmRegistry, userResponseRegistry, onReaction);
+    registerHandlers(sockRef, newSaveCreds, onMessage, reconnect, confirmRegistry, userResponseRegistry, reactionRegistry);
   }
 
-  registerHandlers(sockRef, saveCreds, onMessage, reconnect, confirmRegistry, userResponseRegistry, onReaction);
+  registerHandlers(sockRef, saveCreds, onMessage, reconnect, confirmRegistry, userResponseRegistry, reactionRegistry);
 
   return {
     async closeWhatsapp() {

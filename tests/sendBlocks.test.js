@@ -210,57 +210,59 @@ Second block:
   });
 });
 
-describe("sendBlocks – MessageEditor tracking", () => {
-  it("returns editor for text blocks with correct keyId and isImage=false", async () => {
+describe("sendBlocks – MessageHandle tracking", () => {
+  it("returns handle for text blocks with correct keyId and isImage=false", async () => {
     const { sock } = createMockSock();
 
-    const editor = await sendBlocks(sock, "test-chat", "llm", [
+    const handle = await sendBlocks(sock, "test-chat", "llm", [
       { type: "text", text: "hello" },
     ]);
 
-    assert.ok(editor, "Should return an editor");
-    assert.equal(typeof editor, "function", "Editor should be callable");
-    assert.equal(editor.keyId, "msg-1");
-    assert.equal(editor.isImage, false);
+    assert.ok(handle, "Should return a handle");
+    assert.equal(typeof handle, "object", "Handle should be an object");
+    assert.equal(typeof handle.edit, "function", "Handle should have edit method");
+    assert.equal(typeof handle.onReaction, "function", "Handle should have onReaction method");
+    assert.equal(handle.keyId, "msg-1");
+    assert.equal(handle.isImage, false);
   });
 
-  it("returns editor for code image blocks with isImage=true", async () => {
+  it("returns handle for code image blocks with isImage=true", async () => {
     const { sock } = createMockSock();
 
     // 6-line JS code will trigger image rendering
     const code = "const a = 1;\nconst b = 2;\nconst c = 3;\nconst d = 4;\nconst e = 5;\nconst f = 6;";
-    const editor = await sendBlocks(sock, "test-chat", "llm", [
+    const handle = await sendBlocks(sock, "test-chat", "llm", [
       { type: "code", language: "javascript", code },
     ]);
 
-    assert.ok(editor, "Should return an editor for code images");
-    assert.equal(editor.isImage, true);
+    assert.ok(handle, "Should return a handle for code images");
+    assert.equal(handle.isImage, true);
   });
 
   it("tracks the last editable message when multiple blocks are sent", async () => {
     const { sock } = createMockSock();
 
-    const editor = await sendBlocks(sock, "test-chat", "llm", [
+    const handle = await sendBlocks(sock, "test-chat", "llm", [
       { type: "text", text: "first" },
       { type: "text", text: "second" },
     ]);
 
-    assert.ok(editor, "Should return an editor");
+    assert.ok(handle, "Should return a handle");
     // msg-2 because the second text message is the last editable one
-    assert.equal(editor.keyId, "msg-2");
+    assert.equal(handle.keyId, "msg-2");
   });
 
   it("returns undefined when no editable messages are sent", async () => {
     const { sock } = createMockSock();
 
-    const editor = await sendBlocks(sock, "test-chat", "llm", [
+    const handle = await sendBlocks(sock, "test-chat", "llm", [
       { type: "audio", data: Buffer.from("fake").toString("base64"), mime_type: "audio/mp4" },
     ]);
 
-    assert.equal(editor, undefined);
+    assert.equal(handle, undefined);
   });
 
-  it("editor calls editWhatsAppMessage when invoked", async () => {
+  it("handle.edit calls editWhatsAppMessage when invoked", async () => {
     /** @type {Array<{ chatId: string; msg: Record<string, unknown>; opts?: Record<string, unknown> }>} */
     const sent = [];
     const sock = {
@@ -270,16 +272,16 @@ describe("sendBlocks – MessageEditor tracking", () => {
       },
     };
 
-    const editor = await sendBlocks(sock, "test-chat", "llm", [
+    const handle = await sendBlocks(sock, "test-chat", "llm", [
       { type: "text", text: "original" },
     ]);
 
-    assert.ok(editor);
-    await editor("updated");
+    assert.ok(handle);
+    await handle.edit("updated");
 
     // The edit call should be the second sendMessage (first was the original)
     const editCall = sent[1];
-    assert.ok(editCall, "Editor should have sent an edit");
+    assert.ok(editCall, "Handle.edit should have sent an edit");
     assert.ok(
       typeof editCall.msg.text === "string" && editCall.msg.text.includes("updated"),
       "Edit should contain the new text",
@@ -333,16 +335,16 @@ describe("sendBlocks – tool-call → edit pipeline", () => {
     const { sock, calls } = createCaptureSock();
 
     // Step 1: Send initial tool-call message
-    const editor = await sendBlocks(sock, "chat-1", "tool-call", [
+    const handle = await sendBlocks(sock, "chat-1", "tool-call", [
       { type: "text", text: "Read file.js" },
     ]);
 
-    assert.ok(editor, "Should return an editor");
-    assert.equal(editor.isImage, false, "Text message editor should not be image");
+    assert.ok(handle, "Should return a handle");
+    assert.equal(handle.isImage, false, "Text message handle should not be image");
     assert.equal(calls.length, 1, "Should have sent 1 message");
 
     // Step 2: Simulate progress update (tool still running)
-    await editor("Read (3s…)");
+    await handle.edit("Read (3s…)");
     assert.equal(calls.length, 2, "Should have 2 calls after progress update");
 
     const progressCall = calls[1];
@@ -352,7 +354,7 @@ describe("sendBlocks – tool-call → edit pipeline", () => {
     assert.ok(progressMsg.edit != null, "Should include edit key for in-place update");
 
     // Step 3: Simulate final result
-    await editor("Read · file.js (42 lines)");
+    await handle.edit("Read · file.js (42 lines)");
     assert.equal(calls.length, 3, "Should have 3 calls after final update");
 
     const finalCall = calls[2];
@@ -368,17 +370,17 @@ describe("sendBlocks – tool-call → edit pipeline", () => {
 
     // Send a code block that renders as an image (6+ lines triggers image rendering)
     const code = "const a = 1;\nconst b = 2;\nconst c = 3;\nconst d = 4;\nconst e = 5;\nconst f = 6;";
-    const editor = await sendBlocks(sock, "chat-1", "tool-call", [
+    const handle = await sendBlocks(sock, "chat-1", "tool-call", [
       { type: "code", language: "javascript", code },
     ]);
 
-    assert.ok(editor, "Should return an editor for code image");
-    assert.equal(editor.isImage, true, "Code image editor should be marked as image");
+    assert.ok(handle, "Should return a handle for code image");
+    assert.equal(handle.isImage, true, "Code image handle should be marked as image");
 
     const initialCallCount = calls.length;
 
     // Edit the image caption
-    await editor("Edit · foo.js");
+    await handle.edit("Edit · foo.js");
 
     // Image edits use relayMessage, not sendMessage
     const editCall = calls[initialCallCount];
@@ -391,15 +393,15 @@ describe("sendBlocks – tool-call → edit pipeline", () => {
     assert.ok(imageMsg.caption.includes("Edit · foo.js"), "Caption should contain the new text");
   });
 
-  it("editor prepends source prefix on every edit", async () => {
+  it("handle.edit prepends source prefix on every edit", async () => {
     const { sock, calls } = createCaptureSock();
 
-    const editor = await sendBlocks(sock, "chat-1", "tool-call", [
+    const handle = await sendBlocks(sock, "chat-1", "tool-call", [
       { type: "text", text: "running" },
     ]);
 
-    assert.ok(editor);
-    await editor("done");
+    assert.ok(handle);
+    await handle.edit("done");
 
     const editMsg = /** @type {Record<string, unknown>} */ (calls[1].args[1]);
     const editText = /** @type {string} */ (editMsg.text);

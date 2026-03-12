@@ -3,108 +3,113 @@ process.env.MASTER_ID = "master-user";
 process.env.LLM_API_KEY = "test-key";
 process.env.MODEL = "mock-model";
 
-import { describe, it, before } from "node:test";
+import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { createTestDb, seedChat } from "./helpers.js";
-import { setDb } from "../db.js";
+import { createReactionRegistry } from "../whatsapp-adapter.js";
 
-/** @type {import("@electric-sql/pglite").PGlite} */
-let testDb;
-/** @type {Awaited<ReturnType<typeof import("../store.js").initStore>>} */
-let store;
-/** @type {typeof import("../index.js").createReactionHandler} */
-let createReactionHandler;
+describe("createReactionRegistry", () => {
 
-const CHAT_ID = "reaction-test-chat";
+it("routes reactions to subscribed callbacks", () => {
+  const registry = createReactionRegistry();
+  /** @type {Array<{ emoji: string; senderId: string }>} */
+  const received = [];
 
-/**
- * Build a minimal ReactionEvent.
- * @param {string} msgKeyId
- * @param {string} emoji
- * @returns {import("../whatsapp-adapter.js").ReactionEvent}
- */
-function makeReactionEvent(msgKeyId, emoji) {
-  return {
-    key: { id: msgKeyId, remoteJid: "remote-jid-1" },
-    reaction: { text: emoji },
-  };
-}
-
-/**
- * Build a mock sock with sendMessage spy.
- * @returns {{ sendMessage: Function, sent: Array<{jid: string, content: object}> }}
- */
-function makeSock() {
-  /** @type {Array<{jid: string, content: object}> } */
-  const sent = [];
-  return {
-    sent,
-    sendMessage: async (/** @type {string} */ jid, /** @type {object} */ content) => {
-      sent.push({ jid, content });
-    },
-  };
-}
-
-/**
- * Build a mock store for reaction handler tests.
- * @param {{ getToolResultReturns?: any }} [opts]
- */
-function makeMockStore(opts = {}) {
-  const { getToolResultReturns = null } = opts;
-  return {
-    getToolResultByWaKeyId: async () => getToolResultReturns,
-  };
-}
-
-describe("createReactionHandler", { concurrency: 1 }, () => {
-
-before(async () => {
-  testDb = await createTestDb();
-  setDb("./pgdata/root", testDb);
-  const { initStore } = await import("../store.js");
-  store = await initStore(testDb);
-  ({ createReactionHandler } = await import("../index.js"));
-  await seedChat(testDb, CHAT_ID, { enabled: true });
-});
-
-it("edits tool-call message with result on react-to-inspect", async () => {
-  const toolResult = {
-    toolMsg: {
-      role: "tool",
-      tool_id: "toolu_123",
-      tool_name: "Bash",
-      wa_key_id: "wa-key-inspect",
-      content: [{ type: "text", text: "hello from bash" }],
-    },
-    chatId: "test-chat@s.whatsapp.net",
-  };
-  const mockStore = makeMockStore({ getToolResultReturns: toolResult });
-
-  const onReaction = createReactionHandler({
-    store: /** @type {any} */ (mockStore),
+  registry.subscribe("msg-1", (emoji, senderId) => {
+    received.push({ emoji, senderId });
   });
 
-  const sock = makeSock();
-  await onReaction(makeReactionEvent("wa-key-inspect", "👁"), /** @type {any} */ (sock));
+  registry.handleReactions([
+    { key: { id: "msg-1", remoteJid: "chat-1" }, reaction: { text: "👁" }, senderId: "user-1" },
+  ]);
 
-  assert.equal(sock.sent.length, 1, "should send one edit message");
-  const msg = /** @type {any} */ (sock.sent[0].content);
-  assert.ok(msg.edit, "should be an edit message");
-  assert.ok(msg.text.includes("hello from bash"), "should contain tool result");
-  assert.ok(msg.text.includes("Bash"), "should contain tool name");
+  assert.equal(received.length, 1);
+  assert.equal(received[0].emoji, "👁");
+  assert.equal(received[0].senderId, "user-1");
 });
 
-it("does nothing when no tool result is found", async () => {
-  const mockStore = makeMockStore({ getToolResultReturns: null });
+it("does not route reactions to unsubscribed messages", () => {
+  const registry = createReactionRegistry();
+  /** @type {string[]} */
+  const received = [];
 
-  const onReaction = createReactionHandler({
-    store: /** @type {any} */ (mockStore),
-  });
+  registry.subscribe("msg-1", (emoji) => { received.push(emoji); });
 
-  const sock = makeSock();
-  await onReaction(makeReactionEvent("unknown-key", "👁"), /** @type {any} */ (sock));
+  registry.handleReactions([
+    { key: { id: "msg-2", remoteJid: "chat-1" }, reaction: { text: "👍" }, senderId: "user-1" },
+  ]);
 
-  assert.equal(sock.sent.length, 0, "should not send anything");
+  assert.equal(received.length, 0);
+});
+
+it("unsubscribe stops routing", () => {
+  const registry = createReactionRegistry();
+  /** @type {string[]} */
+  const received = [];
+
+  const unsub = registry.subscribe("msg-1", (emoji) => { received.push(emoji); });
+  unsub();
+
+  registry.handleReactions([
+    { key: { id: "msg-1", remoteJid: "chat-1" }, reaction: { text: "👁" }, senderId: "user-1" },
+  ]);
+
+  assert.equal(received.length, 0);
+  assert.equal(registry.size, 0, "should clean up empty listener sets");
+});
+
+it("supports multiple subscribers on same message", () => {
+  const registry = createReactionRegistry();
+  let count = 0;
+
+  registry.subscribe("msg-1", () => { count++; });
+  registry.subscribe("msg-1", () => { count++; });
+
+  registry.handleReactions([
+    { key: { id: "msg-1", remoteJid: "chat-1" }, reaction: { text: "👁" }, senderId: "user-1" },
+  ]);
+
+  assert.equal(count, 2);
+  assert.equal(registry.size, 1, "single message entry in map");
+});
+
+it("clear removes all subscriptions", () => {
+  const registry = createReactionRegistry();
+  /** @type {string[]} */
+  const received = [];
+
+  registry.subscribe("msg-1", (emoji) => { received.push(emoji); });
+  registry.subscribe("msg-2", (emoji) => { received.push(emoji); });
+
+  assert.equal(registry.size, 2);
+  registry.clear();
+  assert.equal(registry.size, 0);
+
+  registry.handleReactions([
+    { key: { id: "msg-1", remoteJid: "chat-1" }, reaction: { text: "👁" }, senderId: "user-1" },
+  ]);
+
+  assert.equal(received.length, 0);
+});
+
+it("handles batch of reactions across multiple messages", () => {
+  const registry = createReactionRegistry();
+  /** @type {Array<{ msgId: string; emoji: string }>} */
+  const received = [];
+
+  registry.subscribe("msg-1", (emoji) => { received.push({ msgId: "msg-1", emoji }); });
+  registry.subscribe("msg-2", (emoji) => { received.push({ msgId: "msg-2", emoji }); });
+
+  registry.handleReactions([
+    { key: { id: "msg-1", remoteJid: "chat-1" }, reaction: { text: "👁" }, senderId: "user-1" },
+    { key: { id: "msg-2", remoteJid: "chat-1" }, reaction: { text: "👍" }, senderId: "user-2" },
+    { key: { id: "msg-3", remoteJid: "chat-1" }, reaction: { text: "❤️" }, senderId: "user-3" },
+  ]);
+
+  assert.equal(received.length, 2);
+  assert.equal(received[0].msgId, "msg-1");
+  assert.equal(received[0].emoji, "👁");
+  assert.equal(received[1].msgId, "msg-2");
+  assert.equal(received[1].emoji, "👍");
 });
 
 });
