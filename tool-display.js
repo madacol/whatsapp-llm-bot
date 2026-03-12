@@ -206,12 +206,13 @@ export function getToolCallSummary(name, args, formatToolCall) {
     return cmd.length > 60 ? `*Bash*  \`${cmd.slice(0, 60)}…\`` : `*Bash*  \`${cmd}\``;
   }
 
-  // Explicit description (any tool — SDK, native, etc.)
-  if (typeof args.description === "string") return args.description;
-
   // SDK built-in tools (Read, Grep, Glob, WebSearch, WebFetch, Agent)
+  // Checked before generic description so tools like Agent get their *Name* prefix.
   const sdkLabel = formatSdkToolCall(name, args);
   if (sdkLabel) return sdkLabel;
+
+  // Explicit description (any tool — SDK, native, etc.)
+  if (typeof args.description === "string") return args.description;
 
   // File-path tools
   if ((name === "Edit" || name === "Write" || name === "NotebookEdit") && typeof args.file_path === "string") {
