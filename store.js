@@ -1,5 +1,4 @@
 import { getRootDb } from "./db.js";
-import { initPendingConfirmationsTable } from "./pending-confirmations.js";
 import { createLogger } from "./logger.js";
 
 const log = createLogger("store");
@@ -177,7 +176,6 @@ export async function initStore(injectedDb){
           created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
       `;
-      await initPendingConfirmationsTable(db);
     } catch (error) {
       log.error("⚠️ SCHEMA MIGRATION FAILED — the database may be in an inconsistent state!", error);
       log.error("⚠️ Review the error above and fix manually if needed. The bot will continue but may malfunction.");

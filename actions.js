@@ -5,9 +5,7 @@ import crypto from "node:crypto";
 import { getDb, getRootDb, getChatDb, getActionDb } from "./db.js";
 import config from "./config.js";
 import { createCallLlm } from "./llm.js";
-import { savePendingConfirmation, deletePendingConfirmation } from "./pending-confirmations.js";
 import { resolveModel } from "./model-roles.js";
-import { createToolMessage } from "./utils.js";
 import { createLogger } from "./logger.js";
 
 const log = createLogger("actions");
@@ -54,7 +52,6 @@ export async function executeAction(actionName, context, params, options = {}) {
     toolCallId = null,
     actionResolver = getAction,
     llmClient,
-    updateToolMessage,
     agentDepth,
   } = options;
   const action = await actionResolver(actionName);
@@ -72,33 +69,6 @@ export async function executeAction(actionName, context, params, options = {}) {
   ) {
     throw new Error(`Action "${actionName}" requires master permissions`);
   }
-
-  // Wrap confirm with persistence hooks so confirmations survive restarts
-  const rootDb = getRootDb();
-  /** @type {(message: string, hooks?: import("./whatsapp-adapter.js").ConfirmHooks) => Promise<boolean>} */
-  const originalConfirm = context.confirm;
-  /** @type {(message: string) => Promise<boolean>} */
-  const persistentConfirm = (message) => originalConfirm(message, {
-    onSent: async (msgKey) => {
-      await savePendingConfirmation(rootDb, {
-        chatId: context.chatId,
-        msgKeyId: msgKey.id,
-        msgKeyRemoteJid: msgKey.remoteJid,
-        actionName,
-        actionParams: params,
-        toolCallId,
-        senderIds: context.senderIds,
-      });
-      if (toolCallId && updateToolMessage) {
-        await updateToolMessage(context.chatId, toolCallId,
-          createToolMessage(toolCallId, `[awaiting user confirmation for ${actionName}]`),
-        );
-      }
-    },
-    onResolved: async (msgKey) => {
-      await deletePendingConfirmation(rootDb, msgKey.id);
-    },
-  });
 
   /** @type {ActionContext & Partial<{chatDb: PGlite, rootDb: PGlite, callLlm: CallLlm, llmClient: LlmClient}>} */
   const actionContext = {
@@ -123,7 +93,7 @@ export async function executeAction(actionName, context, params, options = {}) {
     },
     reactToMessage: context.reactToMessage,
     select: context.select,
-    confirm: persistentConfirm,
+    confirm: context.confirm,
     resolveModel: (role) => resolveModel(role),
     agentDepth,
     toolCallId,
@@ -147,7 +117,7 @@ export async function executeAction(actionName, context, params, options = {}) {
   }
 
   if (!action.permissions?.autoExecute) {
-    const confirmed = await persistentConfirm(
+    const confirmed = await context.confirm(
       `⚠️ *Confirm action: ${actionName}*\n\n` +
       `${action.description}\n\n` +
       `React 👍 to confirm or 👎 to cancel.`

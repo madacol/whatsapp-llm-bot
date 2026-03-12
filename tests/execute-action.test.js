@@ -13,9 +13,6 @@ import { setDb } from "../db.js";
 /** @type {typeof import("../actions.js").executeAction} */
 let executeAction;
 
-/** @type {typeof import("../pending-confirmations.js")} */
-let pendingMod;
-
 /** @type {PGlite} */
 let testDb;
 
@@ -37,9 +34,6 @@ before(async () => {
 
   const mod = await import("../actions.js");
   executeAction = mod.executeAction;
-
-  pendingMod = await import("../pending-confirmations.js");
-  await pendingMod.initPendingConfirmationsTable(testDb);
 });
 
 
@@ -318,79 +312,4 @@ describe("executeAction", () => {
     assert.equal(permissions.autoContinue, true);
   });
 
-  it("saves pending confirmation to DB when confirm is called (non-autoExecute)", async () => {
-    // Clean up any leftover rows
-    await testDb.query("DELETE FROM pending_confirmations");
-
-    /** @type {{ onSent?: Function, onResolved?: Function }} */
-    let capturedHooks = {};
-    const resolver = createResolver({
-      confirm_action: {
-        name: "confirm_action",
-        description: "needs confirmation",
-        parameters: { type: "object", properties: {} },
-        permissions: { autoExecute: false },
-        action_fn: async () => "confirmed",
-      },
-    });
-
-    // Provide a confirm that captures the hooks and simulates the flow
-    const ctx = createMockExecuteActionContext({
-      confirm: async (message, hooks) => {
-        capturedHooks = hooks || {};
-        // Simulate: onSent is called after message is sent
-        if (hooks?.onSent) {
-          await hooks.onSent({ id: "test-msg-key", remoteJid: "test-chat" });
-        }
-        // Check: row should now exist in DB
-        const rows = await pendingMod.loadPendingConfirmations(testDb);
-        assert.ok(rows.some(r => r.msg_key_id === "test-msg-key"), "Pending confirmation should be saved after onSent");
-
-        // Simulate: user reacts 👍
-        if (hooks?.onResolved) {
-          await hooks.onResolved({ id: "test-msg-key", remoteJid: "test-chat" }, true);
-        }
-        return true;
-      },
-    });
-
-    const { result } = await executeAction("confirm_action", ctx, { a: 1 }, { toolCallId: "tc-1", actionResolver: resolver });
-    assert.equal(result, "confirmed");
-
-    // After resolution, row should be deleted
-    const rowsAfter = await pendingMod.loadPendingConfirmations(testDb);
-    assert.ok(!rowsAfter.some(r => r.msg_key_id === "test-msg-key"), "Pending confirmation should be deleted after onResolved");
-  });
-
-  it("deletes pending confirmation from DB when confirm resolves false", async () => {
-    await testDb.query("DELETE FROM pending_confirmations");
-
-    const resolver = createResolver({
-      confirm_action: {
-        name: "confirm_action",
-        description: "needs confirmation",
-        parameters: { type: "object", properties: {} },
-        permissions: { autoExecute: false },
-        action_fn: async () => "confirmed",
-      },
-    });
-
-    const ctx = createMockExecuteActionContext({
-      confirm: async (message, hooks) => {
-        if (hooks?.onSent) {
-          await hooks.onSent({ id: "reject-msg-key", remoteJid: "test-chat" });
-        }
-        if (hooks?.onResolved) {
-          await hooks.onResolved({ id: "reject-msg-key", remoteJid: "test-chat" }, false);
-        }
-        return false;
-      },
-    });
-
-    const { result } = await executeAction("confirm_action", ctx, {}, { actionResolver: resolver });
-    assert.match(result, /cancelled/);
-
-    const rowsAfter = await pendingMod.loadPendingConfirmations(testDb);
-    assert.ok(!rowsAfter.some(r => r.msg_key_id === "reject-msg-key"), "Should be cleaned up even on rejection");
-  });
 });

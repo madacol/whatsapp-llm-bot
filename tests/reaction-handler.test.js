@@ -18,26 +18,6 @@ let createReactionHandler;
 const CHAT_ID = "reaction-test-chat";
 
 /**
- * Build a mock pending confirmation row.
- * @param {Partial<import("../pending-confirmations.js").PendingConfirmationRow>} [overrides]
- * @returns {import("../pending-confirmations.js").PendingConfirmationRow}
- */
-function makePending(overrides = {}) {
-  return {
-    id: 1,
-    chat_id: CHAT_ID,
-    msg_key_id: "msg-key-1",
-    msg_key_remote_jid: "remote-jid-1",
-    action_name: "testAction",
-    action_params: { foo: "bar" },
-    tool_call_id: "call_abc123",
-    sender_ids: ["sender-1"],
-    created_at: new Date().toISOString(),
-    ...overrides,
-  };
-}
-
-/**
  * Build a minimal ReactionEvent.
  * @param {string} msgKeyId
  * @param {string} emoji
@@ -67,18 +47,11 @@ function makeSock() {
 
 /**
  * Build a mock store for reaction handler tests.
- * @param {{ updateCalls?: string[], addMessageCalls?: string[], updateReturns?: any, getToolResultReturns?: any }} [opts]
+ * @param {{ getToolResultReturns?: any }} [opts]
  */
 function makeMockStore(opts = {}) {
-  const { updateCalls = [], addMessageCalls = [], updateReturns = { message_id: 1 }, getToolResultReturns = null } = opts;
+  const { getToolResultReturns = null } = opts;
   return {
-    updateToolMessage: async (/** @type {string} */ chatId, /** @type {string} */ toolCallId, /** @type {ToolMessage} */ msg) => {
-      updateCalls.push(JSON.stringify({ chatId, toolCallId, msg }));
-      return updateReturns;
-    },
-    addMessage: async (/** @type {string} */ chatId, /** @type {ToolMessage} */ msg, /** @type {string[] | null} */ senderIds) => {
-      addMessageCalls.push(JSON.stringify({ chatId, msg, senderIds }));
-    },
     getToolResultByWaKeyId: async () => getToolResultReturns,
   };
 }
@@ -94,147 +67,7 @@ before(async () => {
   await seedChat(testDb, CHAT_ID, { enabled: true });
 });
 
-it("stores tool result on approval via updateToolMessage", async () => {
-  const pending = makePending();
-  /** @type {Map<string, import("../pending-confirmations.js").PendingConfirmationRow>} */
-  const pendingByMsgKeyId = new Map([[pending.msg_key_id, pending]]);
-
-  /** @type {string[]} */
-  const updateCalls = [];
-  /** @type {string[]} */
-  const addMessageCalls = [];
-  const mockStore = makeMockStore({ updateCalls, addMessageCalls });
-
-  const onReaction = createReactionHandler({
-    store: /** @type {any} */ (mockStore),
-    executeActionFn: async () => ({ result: "action completed successfully" }),
-    pendingByMsgKeyId,
-    rootDb: testDb,
-  });
-
-  const sock = makeSock();
-  await onReaction(makeReactionEvent("msg-key-1", "\uD83D\uDC4D"), /** @type {any} */ (sock));
-
-  assert.equal(updateCalls.length, 1, "updateToolMessage should be called once");
-  assert.equal(addMessageCalls.length, 0, "addMessage should not be called when update succeeds");
-  const call = JSON.parse(updateCalls[0]);
-  assert.equal(call.chatId, CHAT_ID);
-  assert.equal(call.toolCallId, "call_abc123");
-  assert.equal(call.msg.role, "tool");
-  assert.equal(call.msg.tool_id, "call_abc123");
-  assert.deepEqual(call.msg.content, [{ type: "text", text: "action completed successfully" }]);
-});
-
-it("stores error tool result on execution failure via updateToolMessage", async () => {
-  const pending = makePending({ msg_key_id: "msg-key-2" });
-  const pendingByMsgKeyId = new Map([[pending.msg_key_id, pending]]);
-
-  /** @type {string[]} */
-  const updateCalls = [];
-  const mockStore = makeMockStore({ updateCalls });
-
-  const onReaction = createReactionHandler({
-    store: /** @type {any} */ (mockStore),
-    executeActionFn: async () => { throw new Error("something broke"); },
-    pendingByMsgKeyId,
-    rootDb: testDb,
-  });
-
-  const sock = makeSock();
-  await onReaction(makeReactionEvent("msg-key-2", "\uD83D\uDC4D"), /** @type {any} */ (sock));
-
-  assert.equal(updateCalls.length, 1, "updateToolMessage should be called once for error");
-  const call = JSON.parse(updateCalls[0]);
-  assert.equal(call.chatId, CHAT_ID);
-  assert.equal(call.toolCallId, "call_abc123");
-  assert.equal(call.msg.role, "tool");
-  assert.equal(call.msg.tool_id, "call_abc123");
-  assert.deepEqual(call.msg.content, [{ type: "text", text: "Error executing testAction: something broke" }]);
-});
-
-it("stores rejection tool result via updateToolMessage", async () => {
-  const pending = makePending({ msg_key_id: "msg-key-3" });
-  const pendingByMsgKeyId = new Map([[pending.msg_key_id, pending]]);
-
-  /** @type {string[]} */
-  const updateCalls = [];
-  const mockStore = makeMockStore({ updateCalls });
-
-  const executeCalled = { value: false };
-  const onReaction = createReactionHandler({
-    store: /** @type {any} */ (mockStore),
-    executeActionFn: async () => { executeCalled.value = true; return { result: "nope" }; },
-    pendingByMsgKeyId,
-    rootDb: testDb,
-  });
-
-  const sock = makeSock();
-  await onReaction(makeReactionEvent("msg-key-3", "\uD83D\uDC4E"), /** @type {any} */ (sock));
-
-  assert.equal(executeCalled.value, false, "executeAction should NOT be called on rejection");
-  assert.equal(updateCalls.length, 1, "updateToolMessage should be called once for rejection");
-  const call = JSON.parse(updateCalls[0]);
-  assert.equal(call.chatId, CHAT_ID);
-  assert.equal(call.toolCallId, "call_abc123");
-  assert.equal(call.msg.role, "tool");
-  assert.equal(call.msg.tool_id, "call_abc123");
-  assert.deepEqual(call.msg.content, [{ type: "text", text: "[action rejected by user]" }]);
-});
-
-it("skips tool storage when tool_call_id is null", async () => {
-  const pending = makePending({ msg_key_id: "msg-key-4", tool_call_id: null });
-  const pendingByMsgKeyId = new Map([[pending.msg_key_id, pending]]);
-
-  /** @type {string[]} */
-  const updateCalls = [];
-  /** @type {string[]} */
-  const addMessageCalls = [];
-  const mockStore = makeMockStore({ updateCalls, addMessageCalls });
-
-  const onReaction = createReactionHandler({
-    store: /** @type {any} */ (mockStore),
-    executeActionFn: async () => ({ result: "done via !command" }),
-    pendingByMsgKeyId,
-    rootDb: testDb,
-  });
-
-  const sock = makeSock();
-  await onReaction(makeReactionEvent("msg-key-4", "\uD83D\uDC4D"), /** @type {any} */ (sock));
-
-  assert.equal(updateCalls.length, 0, "updateToolMessage should NOT be called when tool_call_id is null");
-  assert.equal(addMessageCalls.length, 0, "addMessage should NOT be called when tool_call_id is null");
-});
-
-it("falls back to addMessage when updateToolMessage returns null (pre-stub confirmations)", async () => {
-  const pending = makePending({ msg_key_id: "msg-key-5" });
-  const pendingByMsgKeyId = new Map([[pending.msg_key_id, pending]]);
-
-  /** @type {string[]} */
-  const updateCalls = [];
-  /** @type {string[]} */
-  const addMessageCalls = [];
-  const mockStore = makeMockStore({ updateCalls, addMessageCalls, updateReturns: null });
-
-  const onReaction = createReactionHandler({
-    store: /** @type {any} */ (mockStore),
-    executeActionFn: async () => ({ result: "completed" }),
-    pendingByMsgKeyId,
-    rootDb: testDb,
-  });
-
-  const sock = makeSock();
-  await onReaction(makeReactionEvent("msg-key-5", "\uD83D\uDC4D"), /** @type {any} */ (sock));
-
-  assert.equal(updateCalls.length, 1, "updateToolMessage should be tried first");
-  assert.equal(addMessageCalls.length, 1, "addMessage should be called as fallback");
-  const call = JSON.parse(addMessageCalls[0]);
-  assert.equal(call.msg.role, "tool");
-  assert.equal(call.msg.tool_id, "call_abc123");
-  assert.deepEqual(call.msg.content, [{ type: "text", text: "completed" }]);
-});
-
 it("edits tool-call message with result on react-to-inspect", async () => {
-  const pendingByMsgKeyId = new Map();
   const toolResult = {
     toolMsg: {
       role: "tool",
@@ -249,9 +82,6 @@ it("edits tool-call message with result on react-to-inspect", async () => {
 
   const onReaction = createReactionHandler({
     store: /** @type {any} */ (mockStore),
-    executeActionFn: async () => ({ result: "" }),
-    pendingByMsgKeyId,
-    rootDb: testDb,
   });
 
   const sock = makeSock();
@@ -262,6 +92,19 @@ it("edits tool-call message with result on react-to-inspect", async () => {
   assert.ok(msg.edit, "should be an edit message");
   assert.ok(msg.text.includes("hello from bash"), "should contain tool result");
   assert.ok(msg.text.includes("Bash"), "should contain tool name");
+});
+
+it("does nothing when no tool result is found", async () => {
+  const mockStore = makeMockStore({ getToolResultReturns: null });
+
+  const onReaction = createReactionHandler({
+    store: /** @type {any} */ (mockStore),
+  });
+
+  const sock = makeSock();
+  await onReaction(makeReactionEvent("unknown-key", "👁"), /** @type {any} */ (sock));
+
+  assert.equal(sock.sent.length, 0, "should not send anything");
 });
 
 });
