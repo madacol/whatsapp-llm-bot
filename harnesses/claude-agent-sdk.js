@@ -15,7 +15,7 @@ import { NO_OP_HOOKS } from "./native.js";
 import { getChatActions } from "../actions.js";
 import { createLogger } from "../logger.js";
 import { extractLastUserText } from "../message-formatting.js";
-import { createToolMessage, errorToString } from "../utils.js";
+import { createToolMessage, errorToString, registerInspectHandler } from "../utils.js";
 import { getToolCallSummary } from "../tool-display.js";
 import { getRootDb } from "../db.js";
 
@@ -878,17 +878,8 @@ async function handleUserEvent(event, ctx) {
     await ctx.session.addMessage(ctx.session.chatId, toolMsg, ctx.session.senderIds);
 
     // Register 👁 react-to-inspect on the tool-call message handle
-    if (active?.handle?.keyId) {
-      const toolName = active.toolName;
-      active.handle.onReaction((emoji) => {
-        if (!emoji.startsWith("👁")) return;
-        const text = toolMsg.content
-          .filter(b => b.type === "text").map(b => /** @type {TextContentBlock} */ (b).text).join("\n");
-        const MAX = 3000;
-        const display = text.length <= MAX ? text
-          : text.slice(0, MAX) + `\n\n_… truncated (${text.length.toLocaleString()} chars total)_`;
-        active.handle?.edit(`🔧 *${toolName}*\n\n${display}`);
-      });
+    if (active?.handle) {
+      registerInspectHandler(active.handle, active.toolName, toolMsg);
     }
   }
 

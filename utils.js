@@ -93,6 +93,27 @@ export function createToolMessage(toolId, text) {
 
 
 /**
+ * Register a 👁 react-to-inspect callback on a message handle.
+ * When the user reacts with 👁, the tool-call message is edited
+ * to show the full text result (truncated at 3000 chars).
+ * @param {MessageHandle} handle
+ * @param {string} toolName
+ * @param {ToolMessage} toolMessage
+ */
+export function registerInspectHandler(handle, toolName, toolMessage) {
+  if (!handle.keyId) return;
+  handle.onReaction((emoji) => {
+    if (!emoji.startsWith("👁")) return;
+    const text = toolMessage.content
+      .filter(b => b.type === "text").map(b => /** @type {TextContentBlock} */ (b).text).join("\n");
+    const MAX = 3000;
+    const display = text.length <= MAX ? text
+      : text.slice(0, MAX) + `\n\n_… truncated (${text.length.toLocaleString()} chars total)_`;
+    handle.edit(`🔧 *${toolName}*\n\n${display}`);
+  });
+}
+
+/**
  * Extract a human-readable message from an unknown error value.
  * @param {unknown} err
  * @returns {string}

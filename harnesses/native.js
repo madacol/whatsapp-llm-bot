@@ -3,7 +3,7 @@
  */
 
 import { sendChatCompletion } from "../llm.js";
-import { createToolMessage, isHtmlContent, errorToString } from "../utils.js";
+import { createToolMessage, isHtmlContent, errorToString, registerInspectHandler } from "../utils.js";
 import {
   actionsToToolDefinitions,
   registerMedia,
@@ -96,16 +96,7 @@ async function executeAndStoreTool({
 
   /** Register 👁 react-to-inspect on the tool-call message handle. */
   const registerInspect = (/** @type {ToolMessage} */ toolMessage) => {
-    if (!handle?.keyId) return;
-    handle.onReaction((emoji) => {
-      if (!emoji.startsWith("👁")) return;
-      const text = toolMessage.content
-        .filter(b => b.type === "text").map(b => /** @type {TextContentBlock} */ (b).text).join("\n");
-      const MAX = 3000;
-      const display = text.length <= MAX ? text
-        : text.slice(0, MAX) + `\n\n_… truncated (${text.length.toLocaleString()} chars total)_`;
-      handle.edit(`🔧 *${toolName}*\n\n${display}`);
-    });
+    if (handle) registerInspectHandler(handle, toolName, toolMessage);
   };
 
   try {
