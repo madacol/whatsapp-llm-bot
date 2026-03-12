@@ -220,10 +220,12 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
           { id: "cancel", label: "Cancel" },
         ];
 
-        const choice = await context.select("Which session to resume?", selectOptions);
+        const choice = await context.select("Which session to resume?", selectOptions, {
+          deleteOnSelect: true,
+          cancelIds: ["cancel"],
+        });
 
         if (!choice || choice === "cancel") {
-          await context.reply("tool-result", "Resume cancelled.");
           return true;
         }
 
