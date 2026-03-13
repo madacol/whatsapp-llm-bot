@@ -82,8 +82,8 @@ export function formatSdkToolCall(name, args, cwd) {
     case "Grep": {
       const pattern = typeof args.pattern === "string" ? args.pattern : null;
       if (!pattern) return null;
-      let label = `*Grep*  \`${pattern}\``;
-      if (typeof args.path === "string") label += `  in \`${shortenPath(args.path, cwd)}\``;
+      let label = `*Grep*  _${pattern}_`;
+      if (typeof args.path === "string") label += `\n\`${shortenPath(args.path, cwd)}\``;
       if (typeof args.glob === "string") label += `  (${args.glob})`;
       return label;
     }
