@@ -8,6 +8,19 @@
 import { parseToolArgs } from "./harnesses/index.js";
 import { maxCharsForLineCount } from "./code-image-renderer.js";
 
+/**
+ * Shorten an absolute path by replacing the cwd prefix with ".".
+ * @param {string} p
+ * @param {string | null | undefined} cwd
+ * @returns {string}
+ */
+function shortenPath(p, cwd) {
+  if (!cwd) return p;
+  if (p === cwd) return ".";
+  if (p.startsWith(cwd + "/")) return "." + p.slice(cwd.length);
+  return p;
+}
+
 /** Map file extensions to language identifiers for syntax highlighting. */
 const EXT_TO_LANG = /** @type {Record<string, string>} */ ({
   js: "javascript", mjs: "javascript", cjs: "javascript", jsx: "jsx",
@@ -49,14 +62,15 @@ export function langFromPath(filePath) {
  * into compact, human-friendly strings. Returns null for unknown tools.
  * @param {string} name
  * @param {Record<string, unknown>} args
+ * @param {string | null} [cwd]
  * @returns {string | null}
  */
-export function formatSdkToolCall(name, args) {
+export function formatSdkToolCall(name, args, cwd) {
   switch (name) {
     case "Read": {
       const path = typeof args.file_path === "string" ? args.file_path : null;
       if (!path) return null;
-      let label = `*Read*  \`${path}\``;
+      let label = `*Read*  \`${shortenPath(path, cwd)}\``;
       if (typeof args.offset === "number" || typeof args.limit === "number") {
         const parts = [];
         if (typeof args.offset === "number") parts.push(`from L${args.offset}`);
@@ -69,7 +83,7 @@ export function formatSdkToolCall(name, args) {
       const pattern = typeof args.pattern === "string" ? args.pattern : null;
       if (!pattern) return null;
       let label = `*Grep*  \`${pattern}\``;
-      if (typeof args.path === "string") label += `  in \`${args.path}\``;
+      if (typeof args.path === "string") label += `  in \`${shortenPath(args.path, cwd)}\``;
       if (typeof args.glob === "string") label += `  (${args.glob})`;
       return label;
     }
@@ -77,7 +91,7 @@ export function formatSdkToolCall(name, args) {
       const pattern = typeof args.pattern === "string" ? args.pattern : null;
       if (!pattern) return null;
       let label = `*Glob*  \`${pattern}\``;
-      if (typeof args.path === "string") label += `  in \`${args.path}\``;
+      if (typeof args.path === "string") label += `  in \`${shortenPath(args.path, cwd)}\``;
       return label;
     }
     case "WebSearch": {
@@ -196,9 +210,10 @@ export function formatBashCommand(command) {
  * @param {string} name
  * @param {Record<string, unknown>} args
  * @param {((params: Record<string, any>) => string)} [formatToolCall]
+ * @param {string | null} [cwd]
  * @returns {string}
  */
-export function getToolCallSummary(name, args, formatToolCall) {
+export function getToolCallSummary(name, args, formatToolCall, cwd) {
   // Bash: always show *Bash* prefix with description or command preview
   if (name === "Bash" && typeof args.command === "string") {
     if (typeof args.description === "string") return `*Bash*  _${args.description}_`;
@@ -208,7 +223,7 @@ export function getToolCallSummary(name, args, formatToolCall) {
 
   // SDK built-in tools (Read, Grep, Glob, WebSearch, WebFetch, Agent)
   // Checked before generic description so tools like Agent get their *Name* prefix.
-  const sdkLabel = formatSdkToolCall(name, args);
+  const sdkLabel = formatSdkToolCall(name, args, cwd);
   if (sdkLabel) return sdkLabel;
 
   // Explicit description (any tool — SDK, native, etc.)
@@ -216,7 +231,7 @@ export function getToolCallSummary(name, args, formatToolCall) {
 
   // File-path tools
   if ((name === "Edit" || name === "Write" || name === "NotebookEdit") && typeof args.file_path === "string") {
-    return `*${name}*  \`${args.file_path}\``;
+    return `*${name}*  \`${shortenPath(args.file_path, cwd)}\``;
   }
 
   // Custom actions with formatToolCall
@@ -230,9 +245,10 @@ export function getToolCallSummary(name, args, formatToolCall) {
  * or null if nothing should be displayed.
  * @param {LlmChatResponse['toolCalls'][0]} toolCall
  * @param {((params: Record<string, any>) => string)} [actionFormatter]
+ * @param {string | null} [cwd]
  * @returns {SendContent | null}
  */
-export function formatToolCallDisplay(toolCall, actionFormatter) {
+export function formatToolCallDisplay(toolCall, actionFormatter, cwd) {
   const args = parseToolArgs(toolCall.arguments);
 
   const name = toolCall.name;
@@ -246,13 +262,13 @@ export function formatToolCallDisplay(toolCall, actionFormatter) {
   }
 
   // SDK built-in tools: compact, human-friendly display
-  const sdkDisplay = formatSdkToolCall(name, args);
+  const sdkDisplay = formatSdkToolCall(name, args, cwd);
   if (sdkDisplay) return sdkDisplay;
 
   // Edit/Write: render code content as a syntax-highlighted image
   if ((name === "Edit" || name === "Write") && typeof args.file_path === "string") {
     const lang = langFromPath(args.file_path);
-    const header = `*${name}*  \`${args.file_path}\``;
+    const header = `*${name}*  \`${shortenPath(args.file_path, cwd)}\``;
     /** @type {ToolContentBlock[]} */
     const blocks = [];
     if (name === "Edit" && typeof args.old_string === "string" && typeof args.new_string === "string" && lang) {
