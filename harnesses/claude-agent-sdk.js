@@ -913,7 +913,7 @@ async function handleUserEvent(event, ctx) {
   if (resultText != null) {
     const toolMsg = createToolMessage(resolvedToolUseId, resultText);
     ctx.messages.push(toolMsg);
-    await ctx.session.addMessage(ctx.session.chatId, toolMsg, ctx.session.senderIds);
+    await ctx.session.addMessage(ctx.session.chatId, toolMsg, ctx.session.senderIds, active?.handle?.keyId);
 
     // Register 👁 react-to-inspect on the tool-call message handle
     if (active?.handle) {

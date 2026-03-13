@@ -332,7 +332,8 @@ async function processLlmResponse({ session, llmConfig, messages, mediaRegistry,
     // Insert stubs for each tool call (timestamps anchored to assistant message)
     for (const toolCall of response.toolCalls) {
       const stub = createToolMessage(toolCall.id, `[executing ${toolCall.name}...]`);
-      await addMessage(chatId, stub, senderIds);
+      const state = toolCallState.get(toolCall.id);
+      await addMessage(chatId, stub, senderIds, state?.handle?.keyId);
       messages.push(stub);
     }
 
