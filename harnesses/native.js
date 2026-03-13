@@ -73,12 +73,13 @@ async function tryEdit(handle, text, toolName) {
  *   agentDepth?: number,
  *   handle?: MessageHandle,
  *   actionFormatToolCall?: (params: Record<string, any>) => string,
+ *   cwd?: string,
  * }} params
  * @returns {Promise<boolean | undefined>} The autoContinue value
  */
 async function executeAndStoreTool({
   session, llmConfig, toolCall, messages, mediaRegistry, hooks, agentDepth,
-  handle, actionFormatToolCall,
+  handle, actionFormatToolCall, cwd,
 }) {
   const { chatId, context, updateToolMessage } = session;
   const { executeActionFn, actionResolver, actionLlmClient } = llmConfig;
@@ -164,7 +165,7 @@ async function executeAndStoreTool({
     }
 
     // Edit tool-call message in-place with summary label
-    await tryEdit(handle, getToolCallSummary(toolName, toolArgs, actionFormatToolCall), toolName);
+    await tryEdit(handle, getToolCallSummary(toolName, toolArgs, actionFormatToolCall, cwd ?? null), toolName);
 
     // Register 👁 react-to-inspect for tool results
     registerInspect(toolMessage);
@@ -198,7 +199,7 @@ async function executeAndStoreTool({
  * @param {AgentHarnessParams} params
  * @returns {Promise<AgentResult>}
  */
-async function processLlmResponse({ session, llmConfig, messages, mediaRegistry, hooks: userHooks, maxDepth, agentDepth }) {
+async function processLlmResponse({ session, llmConfig, messages, mediaRegistry, hooks: userHooks, maxDepth, agentDepth, cwd }) {
   const { chatId, senderIds, addMessage } = session;
   const { llmClient, chatModel, actions } = llmConfig;
   const maxToolCallDepth = maxDepth ?? MAX_TOOL_CALL_DEPTH;
@@ -328,6 +329,7 @@ async function processLlmResponse({ session, llmConfig, messages, mediaRegistry,
         session, llmConfig, toolCall, messages, mediaRegistry, hooks, agentDepth,
         handle: state?.handle,
         actionFormatToolCall: state?.formatToolCall,
+        cwd,
       });
       if (!shouldContinue) continueProcessing = false;
     }
