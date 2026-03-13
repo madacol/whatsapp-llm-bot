@@ -164,6 +164,8 @@ function getSelectableOptions(setting, chat) {
       return { options: BOOL_OPTIONS, currentId: chat.memory ? "on" : "off" };
     case "enabled":
       return { options: BOOL_OPTIONS, currentId: chat.is_enabled ? "on" : "off" };
+    case "debug":
+      return { options: BOOL_OPTIONS, currentId: chat.debug ? "on" : "off" };
     case "harness": {
       const available = listHarnesses();
       if (available.length >= 5) return null;
