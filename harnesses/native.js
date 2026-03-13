@@ -23,6 +23,7 @@ export const MAX_TOOL_CALL_DEPTH = 10;
 
 /** @type {Required<AgentIOHooks>} */
 export const NO_OP_HOOKS = {
+  onComposing: async () => {},
   onLlmResponse: async () => {},
   onAskUser: async () => "",
   onToolCall: async () => {},
@@ -218,6 +219,7 @@ async function processLlmResponse({ session, llmConfig, messages, mediaRegistry,
   };
 
   while (depth < maxToolCallDepth) {
+    await hooks.onComposing();
     const response = await sendChatCompletion(llmClient, {
       model: chatModel,
       systemPrompt,
@@ -320,6 +322,7 @@ async function processLlmResponse({ session, llmConfig, messages, mediaRegistry,
     // Execute each tool call
     let continueProcessing = true;
     for (const toolCall of response.toolCalls) {
+      await hooks.onComposing();
       const state = toolCallState.get(toolCall.id);
       const shouldContinue = await executeAndStoreTool({
         session, llmConfig, toolCall, messages, mediaRegistry, hooks, agentDepth,
