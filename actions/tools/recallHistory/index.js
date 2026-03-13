@@ -28,7 +28,6 @@ export default /** @type {defineAction} */ ((x) => x)({
   permissions: {
     autoExecute: true,
     autoContinue: true,
-    silent: true,
     useRootDb: true,
   },
   action_fn: async function ({ chatId, rootDb }, params) {

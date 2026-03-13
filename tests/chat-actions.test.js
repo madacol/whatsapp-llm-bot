@@ -68,7 +68,7 @@ export default {
   name: "chat_restricted",
   description: "Has restricted perms",
   parameters: { type: "object", properties: {} },
-  permissions: { autoExecute: true, requireMaster: true, useRootDb: true, useChatDb: true, silent: true, useLlm: true },
+  permissions: { autoExecute: true, requireMaster: true, useRootDb: true, useChatDb: true, useLlm: true },
   test_functions: [async function noop() {}],
   action_fn: async function() { return "ok"; }
 };
@@ -80,11 +80,10 @@ export default {
     // Allowed: autoExecute, autoContinue, useLlm, requireAdmin
     assert.equal(found.permissions.autoExecute, true);
     assert.equal(found.permissions.useLlm, true);
-    // Disallowed: requireMaster, useRootDb, useChatDb, silent
+    // Disallowed: requireMaster, useRootDb, useChatDb
     assert.equal(found.permissions.requireMaster, undefined);
     assert.equal(found.permissions.useRootDb, undefined);
     assert.equal(found.permissions.useChatDb, undefined);
-    assert.equal(found.permissions.silent, undefined);
   });
 
 });

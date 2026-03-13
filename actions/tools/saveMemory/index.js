@@ -30,7 +30,6 @@ export default /** @type {defineAction} */ ((x) => x)({
   permissions: {
     autoExecute: true,
     autoContinue: true,
-    silent: true,
     useRootDb: true,
     useLlm: true,
   },
