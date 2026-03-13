@@ -196,7 +196,7 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
         harness.cancel?.(chatId);
         // Archive the current session before clearing so it can be resumed later
         await archiveSdkSession(chatId);
-        await context.reply("tool-result", "Session cleared. Next message starts fresh.\nUse /resume to restore this session later.");
+        await context.reply("tool-result", "Session cleared\n\nNext message starts fresh.\nUse */resume* to restore this session later.");
         return true;
       }
       case "resume": {
