@@ -299,14 +299,15 @@ export function formatToolCallDisplay(toolCall, actionFormatter, cwd, context) {
         ? `  _L${context.startLine}–${context.startLine + lineCount - 1}_`
         : `  _L${context.startLine}_`;
     }
+    const displayLang = lang || "text";
     /** @type {ToolContentBlock[]} */
     const blocks = [];
-    if (name === "Edit" && typeof args.old_string === "string" && typeof args.new_string === "string" && lang) {
-      blocks.push({ type: "diff", oldStr: args.old_string, newStr: args.new_string, language: lang, caption: header });
-    } else if (name === "Write" && context?.oldContent != null && typeof args.content === "string" && lang) {
-      blocks.push({ type: "diff", oldStr: context.oldContent, newStr: args.content, language: lang, caption: header });
-    } else if (name === "Write" && typeof args.content === "string" && args.content.trim() && lang) {
-      blocks.push({ type: "code", code: args.content, language: lang, caption: header });
+    if (name === "Edit" && typeof args.old_string === "string" && typeof args.new_string === "string") {
+      blocks.push({ type: "diff", oldStr: args.old_string, newStr: args.new_string, language: displayLang, caption: header });
+    } else if (name === "Write" && context?.oldContent != null && typeof args.content === "string") {
+      blocks.push({ type: "diff", oldStr: context.oldContent, newStr: args.content, language: displayLang, caption: header });
+    } else if (name === "Write" && typeof args.content === "string" && args.content.trim()) {
+      blocks.push({ type: "code", code: args.content, language: displayLang, caption: header });
     } else {
       blocks.push({ type: "text", text: header });
     }
