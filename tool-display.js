@@ -17,8 +17,7 @@ import { maxCharsForLineCount } from "./code-image-renderer.js";
 export function shortenPath(p, cwd) {
   if (!cwd) return p;
   if (p === cwd) return ".";
-  if (p.startsWith(cwd + "/")) return "." + p.slice(cwd.length);
-  return p;
+  return p.replace(cwd + "/", "");
 }
 
 /** Map file extensions to language identifiers for syntax highlighting. */
