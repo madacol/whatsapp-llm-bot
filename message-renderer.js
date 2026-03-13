@@ -6,7 +6,7 @@
  * diff image rendering. No Baileys/socket dependency.
  */
 
-import { renderCodeToImages, renderDiffToImages, MIN_LINES_FOR_IMAGE } from "./code-image-renderer.js";
+import { renderCodeToImages, renderDiffToImages, renderTableToImages, MIN_LINES_FOR_IMAGE, MIN_ROWS_FOR_TABLE_IMAGE } from "./code-image-renderer.js";
 import { createLogger } from "./logger.js";
 
 const log = createLogger("message-renderer");
@@ -167,9 +167,70 @@ export async function renderBlocks(blocks, prefix) {
   return instructions;
 }
 
+/** Regex matching the separator row of a markdown table. */
+const TABLE_SEP_RE = /^\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*$/;
+
 /**
- * Render a markdown block: split into text segments and fenced code blocks,
- * render eligible code as images, convert markdown formatting for WhatsApp.
+ * Split a text segment into interleaved text and table segments.
+ * A markdown table is: header row → separator row → 1+ data rows,
+ * where every line contains at least one `|`.
+ * @param {string} text
+ * @returns {Array<{ kind: "text" | "table", text: string }>}
+ */
+export function splitTables(text) {
+  const lines = text.split("\n");
+  /** @type {Array<{ kind: "text" | "table", text: string }>} */
+  const segments = [];
+  /** @type {string[]} */
+  let textLines = [];
+
+  const flushTextLines = () => {
+    if (textLines.length > 0) {
+      segments.push({ kind: "text", text: textLines.join("\n") });
+      textLines = [];
+    }
+  };
+
+  let i = 0;
+  while (i < lines.length) {
+    // Check for table start: line with |, followed by separator line
+    if (
+      i + 2 < lines.length &&
+      lines[i].includes("|") &&
+      TABLE_SEP_RE.test(lines[i + 1])
+    ) {
+      // Collect table lines
+      /** @type {string[]} */
+      const tableLines = [lines[i], lines[i + 1]];
+      let j = i + 2;
+      while (j < lines.length && lines[j].includes("|") && !TABLE_SEP_RE.test(lines[j])) {
+        tableLines.push(lines[j]);
+        j++;
+      }
+
+      const dataRowCount = tableLines.length - 2; // minus header and separator
+      if (dataRowCount >= MIN_ROWS_FOR_TABLE_IMAGE) {
+        flushTextLines();
+        segments.push({ kind: "table", text: tableLines.join("\n") });
+      } else {
+        // Too small for image — keep as text
+        textLines.push(...tableLines);
+      }
+      i = j;
+    } else {
+      textLines.push(lines[i]);
+      i++;
+    }
+  }
+  flushTextLines();
+
+  return segments;
+}
+
+/**
+ * Render a markdown block: split into text segments, fenced code blocks,
+ * and tables. Render eligible code and tables as images, convert markdown
+ * formatting for WhatsApp.
  * @param {string} text
  * @param {string} prefix
  * @param {SendInstruction[]} instructions - mutated, appended to
@@ -180,7 +241,7 @@ async function renderMarkdownBlock(text, prefix, instructions) {
   const parts = text.split(/(```\w*\n[\s\S]*?```)/g);
 
   // Accumulate text segments and non-image code blocks into a single message.
-  // Flush the buffer whenever we hit an image-rendered code block.
+  // Flush the buffer whenever we hit an image-rendered code block or table.
   let textBuffer = "";
 
   const flushText = () => {
@@ -216,9 +277,26 @@ async function renderMarkdownBlock(text, prefix, instructions) {
         textBuffer += "\n```\n" + code + "\n```\n";
       }
     } else {
-      const converted = markdownToWhatsApp(part).trim();
-      if (converted) {
-        textBuffer += (textBuffer ? "\n" : "") + converted;
+      // Process text segment: split out tables, render remaining as WhatsApp text
+      const tableSegments = splitTables(part);
+      for (const seg of tableSegments) {
+        if (seg.kind === "table") {
+          flushText();
+          try {
+            const images = renderTableToImages(seg.text);
+            for (const image of images) {
+              instructions.push({ kind: "image", image, editable: false });
+            }
+          } catch (err) {
+            log.error("Table image rendering failed, falling back to text:", err);
+            textBuffer += "\n" + seg.text + "\n";
+          }
+        } else {
+          const converted = markdownToWhatsApp(seg.text).trim();
+          if (converted) {
+            textBuffer += (textBuffer ? "\n" : "") + converted;
+          }
+        }
       }
     }
   }

@@ -46,6 +46,15 @@ const DIFF_DEL_BG = "rgba(248, 81, 73, 0.15)";
 const DIFF_ADD_GUTTER = "#2ea04380";
 const DIFF_DEL_GUTTER = "#f8514980";
 
+// Table rendering constants
+const TABLE_HEADER_BG = "#161b22";
+const TABLE_CELL_PADDING_H = 12;
+const TABLE_CELL_PADDING_V = 4;
+const TABLE_BORDER_COLOR = "#30363d";
+const TEXT_COLOR = "#e6edf3";
+const BOLD_FONT_PATH = "/usr/share/fonts/truetype/dejavu/DejaVuSansMono-Bold.ttf";
+export const MIN_ROWS_FOR_TABLE_IMAGE = 3;
+
 /** @type {Awaited<ReturnType<typeof createHighlighter>> | null} */
 let highlighter = null;
 
@@ -233,6 +242,221 @@ export async function renderCodeToImages(code, language) {
   }
 
   return renderAnnotatedLines(lines);
+}
+
+/**
+ * Render a diff (old_string → new_string) as syntax-highlighted PNG image(s).
+ * Removed lines show with red background, added lines with green background,
+ * each with a +/- gutter prefix. Both sides are highlighted in the target language.
+ * @param {string} oldStr
+ * @param {string} newStr
+ * @param {string} [language]
+ * @returns {Promise<Buffer[]>}
+ */
+/**
+ * @typedef {"left" | "center" | "right"} ColumnAlignment
+ */
+
+/**
+ * @typedef {{
+ *   headers: string[],
+ *   alignments: ColumnAlignment[],
+ *   rows: string[][],
+ * }} ParsedTable
+ */
+
+/**
+ * Parse a markdown table string into structured data.
+ * @param {string} markdown
+ * @returns {ParsedTable}
+ */
+function parseMarkdownTable(markdown) {
+  const rawLines = markdown.split("\n").filter(l => l.trim());
+  if (rawLines.length < 2) return { headers: [], alignments: [], rows: [] };
+
+  /** @param {string} line */
+  const splitRow = (line) => {
+    const trimmed = line.trim();
+    // Remove leading/trailing pipe, split by |, trim cells
+    const inner = trimmed.startsWith("|") ? trimmed.slice(1) : trimmed;
+    const chopped = inner.endsWith("|") ? inner.slice(0, -1) : inner;
+    // Handle escaped pipes: replace \| with a placeholder, split, then restore
+    return chopped
+      .replace(/\\\|/g, "\x00")
+      .split("|")
+      .map(cell => cell.replace(/\x00/g, "|").trim());
+  };
+
+  const headers = splitRow(rawLines[0]);
+
+  /** @type {ColumnAlignment[]} */
+  const alignments = splitRow(rawLines[1]).map(cell => {
+    const t = cell.trim();
+    if (t.startsWith(":") && t.endsWith(":")) return "center";
+    if (t.endsWith(":")) return "right";
+    return "left";
+  });
+
+  // Pad alignments to match header count
+  while (alignments.length < headers.length) alignments.push("left");
+
+  /** @type {string[][]} */
+  const rows = [];
+  for (let i = 2; i < rawLines.length; i++) {
+    const cells = splitRow(rawLines[i]);
+    // Pad or truncate to header count
+    while (cells.length < headers.length) cells.push("");
+    rows.push(cells.slice(0, headers.length));
+  }
+
+  return { headers, alignments, rows };
+}
+
+/**
+ * Render a markdown table as a styled PNG image.
+ * Uses the same dark theme as code blocks, with grid lines and header styling.
+ * @param {string} markdownTable
+ * @returns {Buffer[]}
+ */
+export function renderTableToImages(markdownTable) {
+  const { headers, alignments, rows } = parseMarkdownTable(markdownTable);
+  if (headers.length === 0 || rows.length === 0) return [];
+
+  // ── measure column widths ─────────────────────────────────────────
+  const MAX_SVG_WIDTH = 4000;
+  const MAX_PIXELS = 12_500_000;
+  const MAX_LINES_PER_CHUNK = 100;
+
+  /** @type {number[]} */
+  const colWidths = headers.map((h, i) => {
+    let maxLen = h.length;
+    for (const row of rows) {
+      if (row[i].length > maxLen) maxLen = row[i].length;
+    }
+    return maxLen * CHAR_WIDTH + TABLE_CELL_PADDING_H * 2;
+  });
+
+  // Enforce minimum column width
+  const MIN_COL_WIDTH = 50;
+  for (let i = 0; i < colWidths.length; i++) {
+    if (colWidths[i] < MIN_COL_WIDTH) colWidths[i] = MIN_COL_WIDTH;
+  }
+
+  const tableContentWidth = colWidths.reduce((a, b) => a + b, 0);
+  const svgWidth = Math.min(tableContentWidth + PADDING * 2, MAX_SVG_WIDTH);
+
+  // Scale columns if table is too wide
+  if (tableContentWidth + PADDING * 2 > MAX_SVG_WIDTH) {
+    const scale = (MAX_SVG_WIDTH - PADDING * 2) / tableContentWidth;
+    for (let i = 0; i < colWidths.length; i++) {
+      colWidths[i] = Math.max(MIN_COL_WIDTH, Math.floor(colWidths[i] * scale));
+    }
+  }
+
+  // ── chunk rows ────────────────────────────────────────────────────
+  const rowHeight = LINE_HEIGHT + TABLE_CELL_PADDING_V;
+  const maxRowsPerChunk = Math.min(
+    MAX_LINES_PER_CHUNK,
+    Math.max(10, Math.floor((MAX_PIXELS / svgWidth - PADDING * 2) / rowHeight) - 1),
+  );
+
+  /** @type {string[][][]} */
+  const chunks = [];
+  for (let i = 0; i < rows.length; i += maxRowsPerChunk) {
+    chunks.push(rows.slice(i, i + maxRowsPerChunk));
+  }
+
+  /** @type {Buffer[]} */
+  const images = [];
+
+  for (const chunk of chunks) {
+    const totalRows = 1 + chunk.length; // header + data rows
+    const svgHeight = totalRows * rowHeight + PADDING * 2;
+
+    let svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${svgWidth}" height="${svgHeight}">`;
+    svg += `<rect width="100%" height="100%" fill="${BG_COLOR}" rx="8"/>`;
+
+    /**
+     * Draw a row of text cells.
+     * @param {string[]} cells
+     * @param {number} rowIdx — 0-based row index in this chunk (0 = header)
+     * @param {boolean} isHeader
+     */
+    const drawRow = (cells, rowIdx, isHeader) => {
+      const y = PADDING + rowIdx * rowHeight;
+      const textY = y + rowHeight - TABLE_CELL_PADDING_V - 2;
+
+      // Header background
+      if (isHeader) {
+        svg += `<rect x="${PADDING}" y="${y}" width="${svgWidth - PADDING * 2}" height="${rowHeight}" fill="${TABLE_HEADER_BG}"/>`;
+      }
+
+      let x = PADDING;
+      for (let col = 0; col < headers.length; col++) {
+        const cellText = (cells[col] ?? "").slice(0, Math.floor((colWidths[col] - TABLE_CELL_PADDING_H * 2) / CHAR_WIDTH));
+        const truncated = cellText.length < (cells[col] ?? "").length;
+        const display = truncated ? cellText.slice(0, -1) + "…" : cellText;
+        const align = alignments[col] ?? "left";
+
+        let textX;
+        /** @type {string} */
+        let anchor;
+        if (align === "center") {
+          textX = x + colWidths[col] / 2;
+          anchor = "middle";
+        } else if (align === "right") {
+          textX = x + colWidths[col] - TABLE_CELL_PADDING_H;
+          anchor = "end";
+        } else {
+          textX = x + TABLE_CELL_PADDING_H;
+          anchor = "start";
+        }
+
+        const weight = isHeader ? ` font-weight="bold"` : "";
+        svg += `<text x="${textX}" y="${textY}" font-family="${FONT_FAMILY}" font-size="${FONT_SIZE}" fill="${TEXT_COLOR}" text-anchor="${anchor}"${weight} xml:space="preserve">${escapeXml(display)}</text>`;
+
+        x += colWidths[col];
+      }
+    };
+
+    // Draw header
+    drawRow(headers, 0, true);
+
+    // Header separator (thicker)
+    const sepY = PADDING + rowHeight;
+    svg += `<line x1="${PADDING}" y1="${sepY}" x2="${svgWidth - PADDING}" y2="${sepY}" stroke="${TABLE_BORDER_COLOR}" stroke-width="2"/>`;
+
+    // Draw data rows
+    for (let r = 0; r < chunk.length; r++) {
+      drawRow(chunk[r], r + 1, false);
+
+      // Row separator
+      if (r < chunk.length - 1) {
+        const lineY = PADDING + (r + 2) * rowHeight;
+        svg += `<line x1="${PADDING}" y1="${lineY}" x2="${svgWidth - PADDING}" y2="${lineY}" stroke="${TABLE_BORDER_COLOR}" stroke-width="1"/>`;
+      }
+    }
+
+    // Vertical column separators
+    let vx = PADDING;
+    for (let col = 0; col < headers.length - 1; col++) {
+      vx += colWidths[col];
+      svg += `<line x1="${vx}" y1="${PADDING}" x2="${vx}" y2="${PADDING + totalRows * rowHeight}" stroke="${TABLE_BORDER_COLOR}" stroke-width="1"/>`;
+    }
+
+    svg += `</svg>`;
+
+    const resvg = new Resvg(svg, {
+      font: {
+        fontFiles: [FONT_PATH, BOLD_FONT_PATH],
+        loadSystemFonts: false,
+      },
+    });
+    const pngData = resvg.render();
+    images.push(Buffer.from(pngData.asPng()));
+  }
+
+  return images;
 }
 
 /**
