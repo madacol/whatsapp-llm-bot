@@ -36,9 +36,9 @@ describe("code-image-renderer", () => {
       assert.ok(images.length > 0, "long line within pixel budget should render");
     });
 
-    it("handles empty code", async () => {
+    it("returns empty array for empty code", async () => {
       const images = await renderCodeToImages("", "text");
-      assert.ok(images.length > 0, "empty code should still render (1 empty line)");
+      assert.strictEqual(images.length, 0, "empty code should produce no images");
     });
   });
 
