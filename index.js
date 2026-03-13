@@ -59,12 +59,11 @@ function isTextBlock(block) {
  * Display a tool call to the user using the pure formatter.
  * @param {LlmChatResponse['toolCalls'][0]} toolCall
  * @param {Pick<ExecuteActionContext, "send">} context
- * @param {boolean} isDebug
  * @param {((params: Record<string, any>) => string)} [actionFormatter]
  * @returns {Promise<MessageHandle | undefined>}
  */
-async function displayToolCall(toolCall, context, isDebug, actionFormatter) {
-  const content = formatToolCallDisplay(toolCall, isDebug, actionFormatter);
+async function displayToolCall(toolCall, context, actionFormatter) {
+  const content = formatToolCallDisplay(toolCall, actionFormatter);
   if (content != null) {
     return context.send("tool-call", content);
   }
@@ -327,14 +326,13 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
    * @param {object} opts
    * @param {IncomingContext} opts.messageContext
    * @param {import("./store.js").ChatRow | undefined} opts.chatInfo
-   * @param {boolean} opts.isDebug
    * @param {ExecuteActionContext} opts.context
    * @param {Action[]} opts.actions
    * @param {(name: string) => Promise<AppAction | null>} opts.actionResolver
    * @param {TextContentBlock | undefined} opts.firstBlock
    * @param {boolean} [opts.isSlashCommand]
    */
-  async function handleLlmMessage({ messageContext, chatInfo, isDebug, context, actions, actionResolver, firstBlock, isSlashCommand }) {
+  async function handleLlmMessage({ messageContext, chatInfo, context, actions, actionResolver, firstBlock, isSlashCommand }) {
     const { chatId, senderIds, content, isGroup, senderName, selfIds, quotedSenderId } = messageContext;
 
     // Use data from message context
@@ -429,12 +427,10 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
           if (similar.length > 0) {
             systemPrompt += "\n\n## Relevant memories\n" + formatMemoriesContext(similar);
             log.debug("[memory] recalled:", similar.map(m => `#${m.id}(${Number(m.similarity).toFixed(3)})`).join(", "));
-            if (isDebug) {
-              const lines = similar.map(m =>
-                `• [#${m.id}] (score: ${Number(m.similarity).toFixed(3)}) ${m.content.slice(0, 100)}${m.content.length > 100 ? "…" : ""}`
-              );
-              await context.send("memory", `Recalled ${similar.length} memor${similar.length === 1 ? "y" : "ies"}\n${lines.join("\n")}`);
-            }
+            const lines = similar.map(m =>
+              `• [#${m.id}] (score: ${Number(m.similarity).toFixed(3)}) ${m.content.slice(0, 100)}${m.content.length > 100 ? "…" : ""}`
+            );
+            await context.send("memory", `Recalled ${similar.length} memor${similar.length === 1 ? "y" : "ies"}\n${lines.join("\n")}`);
           }
         } catch (err) {
           log.error("Memory search failed:", err);
@@ -485,7 +481,7 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
         return labelMap.get(choice) ?? choice;
       },
       onToolCall: async (toolCall, fmt) => {
-        return displayToolCall(toolCall, context, isDebug, fmt);
+        return displayToolCall(toolCall, context, fmt);
       },
       onToolResult: async (blocks) => { await context.send("tool-result", blocks); },
       onToolError: async (msg) => { await context.send("error", msg); },
@@ -494,7 +490,7 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
         `⚠️ *Depth limit*\n\nReached maximum tool call depth (${MAX_TOOL_CALL_DEPTH}). React 👍 to continue or 👎 to stop.`,
       ),
       onUsage: async (cost, tokens) => {
-        if (isDebug) await context.send("usage", `Cost: ${cost} | prompt=${tokens.prompt} cached=${tokens.cached} completion=${tokens.completion}`);
+        await context.send("usage", `Cost: ${cost} | prompt=${tokens.prompt} cached=${tokens.cached} completion=${tokens.completion}`);
       },
     };
 
@@ -539,9 +535,7 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
     // Ensure chat exists in DB for both command and message paths
     await createChat(chatId);
 
-    // Compute debug state before building context so it's immutable
     const chatInfo = await getChat(chatId);
-    const isDebug = !!chatInfo?.debug_until && new Date(chatInfo.debug_until) > new Date();
 
     const context = createMessageActionContext(messageContext);
 
@@ -586,7 +580,7 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
       // Not a built-in slash command — fall through to LLM as a skill invocation
     }
 
-    return handleLlmMessage({ messageContext, chatInfo, isDebug, context, actions, actionResolver, firstBlock, isSlashCommand: !!isSlashCommand });
+    return handleLlmMessage({ messageContext, chatInfo, context, actions, actionResolver, firstBlock, isSlashCommand: !!isSlashCommand });
   }
 
   return { handleMessage };

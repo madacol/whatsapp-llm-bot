@@ -229,11 +229,10 @@ export function getToolCallSummary(name, args, formatToolCall) {
  * Format a tool call for WhatsApp display. Returns the content to send,
  * or null if nothing should be displayed.
  * @param {LlmChatResponse['toolCalls'][0]} toolCall
- * @param {boolean} isDebug
  * @param {((params: Record<string, any>) => string)} [actionFormatter]
  * @returns {SendContent | null}
  */
-export function formatToolCallDisplay(toolCall, isDebug, actionFormatter) {
+export function formatToolCallDisplay(toolCall, actionFormatter) {
   const args = parseToolArgs(toolCall.arguments);
 
   const name = toolCall.name;
@@ -267,7 +266,7 @@ export function formatToolCallDisplay(toolCall, isDebug, actionFormatter) {
   }
 
   // Generic fallback
-  let msg = isDebug ? `*${toolCall.name}*` : toolCall.name;
+  let msg = `*${toolCall.name}*`;
 
   if (actionFormatter) {
     msg += `: ${actionFormatter(args)}`;
@@ -278,11 +277,7 @@ export function formatToolCallDisplay(toolCall, isDebug, actionFormatter) {
         const val = typeof v === "string" ? v : JSON.stringify(v);
         return entries.length === 1 ? val : `${k}: ${val}`;
       }).join(", ");
-      if (isDebug) {
-        msg += `\n${inline}`;
-      } else if (inline.length <= 80) {
-        msg += `: ${inline}`;
-      }
+      msg += `\n${inline}`;
     }
   }
 
