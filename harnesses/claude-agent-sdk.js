@@ -545,7 +545,7 @@ export function createClaudeAgentSdkHarness() {
         switch (event.type) {
           case "assistant": await handleAssistantEvent(event, ctx); break;
           case "result": await handleResultEvent(event, ctx); break;
-          case "tool_progress": await handleToolProgressEvent(event, ctx); break;
+          case "tool_progress": break;
           case "user": await handleUserEvent(event, ctx); break;
           case "tool_use_summary": await handleToolUseSummaryEvent(event, ctx); break;
           default: break;
@@ -855,18 +855,6 @@ async function handleResultEvent(event, ctx) {
   }
 }
 
-/**
- * Handle an SDK "tool_progress" event: update the tool call message in-place.
- * @param {import("@anthropic-ai/claude-agent-sdk").SDKToolProgressMessage} event
- * @param {SdkEventContext} ctx
- */
-async function handleToolProgressEvent(event, ctx) {
-  const active = ctx.activeTools.get(event.tool_use_id);
-  if (active?.handle) {
-    const elapsed = Math.round(event.elapsed_time_seconds);
-    await active.handle.edit(`${active.toolName} _(${elapsed}s…)_`);
-  }
-}
 
 /**
  * Handle an SDK "user" event (tool result): persist result and restore tool display.
