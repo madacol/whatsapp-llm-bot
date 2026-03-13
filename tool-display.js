@@ -111,11 +111,18 @@ export function formatSdkToolCall(name, args, cwd) {
 }
 
 /**
+ * Minimum number of characters the longest line must shrink by for a wrap
+ * to be worthwhile. Prevents wraps where the continuation line (with its
+ * indent) is nearly as wide as the original.
+ */
+const MIN_WRAP_GAIN = 4;
+
+/**
  * Wrap a single line at the last space that keeps it under `maxWidth`.
  * Continuation lines are indented with `indent` and the previous line
  * gets a trailing ` \` (bash line continuation) for proper syntax highlighting.
- * If no suitable break point exists (e.g. a single very long token), the line
- * is left as-is.
+ * A wrap is only performed if it shrinks the longest resulting line by at
+ * least {@link MIN_WRAP_GAIN} characters; otherwise the line is left as-is.
  * @param {string} line
  * @param {string} indent
  * @param {number} maxWidth
@@ -136,11 +143,20 @@ function wrapLongLine(line, indent, maxWidth) {
     const breakIdx = remaining.lastIndexOf(" ", wrapWidth);
 
     if (breakIdx > contentStart) {
+      // Check if the continuation line would be meaningfully shorter
+      const continuationLen = indent.length + remaining.length - breakIdx - 1;
+      if (remaining.length - continuationLen < MIN_WRAP_GAIN) {
+        break; // not worth wrapping — leave the rest as-is
+      }
       // Space break in actual content — wrap with " \" continuation
       wrapped.push(remaining.slice(0, breakIdx) + " \\");
       remaining = indent + remaining.slice(breakIdx + 1);
     } else {
       // No space in content within width — hard-break with "\"
+      const hardContinuationLen = indent.length + remaining.length - wrapWidth;
+      if (remaining.length - hardContinuationLen < MIN_WRAP_GAIN) {
+        break; // not worth hard-breaking either
+      }
       wrapped.push(remaining.slice(0, wrapWidth) + "\\");
       remaining = indent + remaining.slice(wrapWidth);
     }
