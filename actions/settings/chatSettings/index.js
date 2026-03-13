@@ -101,8 +101,7 @@ async function getInfo(rootDb, chatId, extra) {
   const memoryOn = chat.memory ? "on" : "off";
   const threshold = chat.memory_threshold ?? config.memory_threshold;
 
-  const debugOn = chat.debug_until && new Date(chat.debug_until) > new Date();
-  const debug = debugOn ? "on" : "off";
+  const debug = chat.debug ? "on" : "off";
 
   const mediaToTextModels = chat.media_to_text_models ?? {};
   const mediaToTextEntries = Object.entries(mediaToTextModels);
@@ -222,10 +221,8 @@ async function getSetting(rootDb, chatId, setting, extra) {
     }
     case "enabled":
       return `Bot: ${chat.is_enabled ? "enabled" : "disabled"}`;
-    case "debug": {
-      const debugOn = chat.debug_until && new Date(chat.debug_until) > new Date();
-      return `Debug: ${debugOn ? "on" : "off"}`;
-    }
+    case "debug":
+      return `Debug: ${chat.debug ? "on" : "off"}`;
     case "action": {
       const enabledActions = chat.enabled_actions ?? [];
       const optInStr = await formatOptInActions(enabledActions, extra.getActions);
@@ -370,31 +367,9 @@ async function setSetting(rootDb, chatId, setting, value, extra) {
     }
 
     case "debug": {
-      const input = value.trim().toLowerCase();
-
-      if (input === "off" || input === "false" || input === "no") {
-        await rootDb.sql`UPDATE chats SET debug_until = NULL WHERE chat_id = ${chatId}`;
-        return "Debug off.";
-      }
-
-      const mins = input === "" || input === "on" || input === "true" || input === "yes" ? 10 : Number(input);
-      if (Number.isNaN(mins) || mins < 0) {
-        return `Invalid value: "${value}". Use a number of minutes, 0 for permanent, or "off" to disable.`;
-      }
-
-      if (mins === 0) {
-        await rootDb.sql`UPDATE chats SET debug_until = '9999-01-01' WHERE chat_id = ${chatId}`;
-        return "Debug on (permanent).";
-      }
-
-      const until = new Date(Date.now() + mins * 60 * 1000);
-      const untilIso = until.toISOString();
-      await rootDb.sql`UPDATE chats SET debug_until = ${untilIso} WHERE chat_id = ${chatId}`;
-      const timeStr = until.toLocaleTimeString("en-US", {
-        hour: "2-digit",
-        minute: "2-digit",
-      });
-      return `Debug on for ${mins}min (until ${timeStr}).`;
+      const enabled = toBool(value);
+      await rootDb.sql`UPDATE chats SET debug = ${enabled} WHERE chat_id = ${chatId}`;
+      return `Debug ${enabled ? "on" : "off"}.`;
     }
 
     case "harness": {

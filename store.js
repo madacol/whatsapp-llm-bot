@@ -13,7 +13,7 @@ const log = createLogger("store");
  *   respond_on_mention: boolean;
  *   respond_on_reply: boolean;
  *   respond_on: "any" | "mention+reply" | "mention";
- *   debug_until: string | null;
+ *   debug: boolean;
  *   media_to_text_models: { image?: string, audio?: string, video?: string, general?: string };
  *   model_roles: Record<string, string>;
  *   memory: boolean;
@@ -102,6 +102,7 @@ export async function initStore(injectedDb){
         db.sql`ALTER TABLE messages DROP COLUMN IF EXISTS tool_args`,
         db.sql`ALTER TABLE messages DROP COLUMN IF EXISTS content`,
         db.sql`ALTER TABLE chats ADD COLUMN IF NOT EXISTS debug_until TIMESTAMP`,
+        db.sql`ALTER TABLE chats ADD COLUMN IF NOT EXISTS debug BOOLEAN DEFAULT FALSE`,
         db.sql`ALTER TABLE chats ADD COLUMN IF NOT EXISTS content_models JSONB DEFAULT '{}'`,
         db.sql`ALTER TABLE chats ADD COLUMN IF NOT EXISTS memory BOOLEAN DEFAULT FALSE`,
         db.sql`ALTER TABLE chats ADD COLUMN IF NOT EXISTS memory_threshold REAL`,
@@ -146,6 +147,15 @@ export async function initStore(injectedDb){
         WHERE respond_on = 'mention' AND respond_on_any IS NOT TRUE
           AND respond_on_reply = true AND respond_on_mention IS NOT FALSE
       `;
+
+      // One-time migration: debug_until (timestamp) → debug (boolean).
+      // Migrate any active debug_until to debug = true, then drop the old column.
+      await db.sql`DO $$ BEGIN
+        IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='chats' AND column_name='debug_until') THEN
+          UPDATE chats SET debug = TRUE WHERE debug_until IS NOT NULL AND debug_until > NOW();
+          ALTER TABLE chats DROP COLUMN debug_until;
+        END IF;
+      END $$`;
 
       await db.sql`CREATE EXTENSION IF NOT EXISTS vector`;
       await Promise.all([
