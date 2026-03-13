@@ -210,9 +210,10 @@ export function formatBashCommand(command) {
  * @param {Record<string, unknown>} args
  * @param {((params: Record<string, any>) => string)} [formatToolCall]
  * @param {string | null} [cwd]
+ * @param {{ startLine?: number }} [context]
  * @returns {string}
  */
-export function getToolCallSummary(name, args, formatToolCall, cwd) {
+export function getToolCallSummary(name, args, formatToolCall, cwd, context) {
   // Bash: always show *Bash* prefix with description or command preview
   if (name === "Bash" && typeof args.command === "string") {
     if (typeof args.description === "string") return `*Bash*  _${args.description}_`;
@@ -230,7 +231,14 @@ export function getToolCallSummary(name, args, formatToolCall, cwd) {
 
   // File-path tools
   if ((name === "Edit" || name === "Write" || name === "NotebookEdit") && typeof args.file_path === "string") {
-    return `*${name}*  \`${shortenPath(args.file_path, cwd)}\``;
+    let label = `*${name}*  \`${shortenPath(args.file_path, cwd)}\``;
+    if (context?.startLine != null) {
+      const lineCount = typeof args.old_string === "string" ? args.old_string.split("\n").length : 1;
+      label += lineCount > 1
+        ? `  _L${context.startLine}–${context.startLine + lineCount - 1}_`
+        : `  _L${context.startLine}_`;
+    }
+    return label;
   }
 
   // Custom actions with formatToolCall
@@ -245,7 +253,7 @@ export function getToolCallSummary(name, args, formatToolCall, cwd) {
  * @param {LlmChatResponse['toolCalls'][0]} toolCall
  * @param {((params: Record<string, any>) => string)} [actionFormatter]
  * @param {string | null} [cwd]
- * @param {{ oldContent?: string }} [context]
+ * @param {{ oldContent?: string; startLine?: number }} [context]
  * @returns {SendContent | null}
  */
 export function formatToolCallDisplay(toolCall, actionFormatter, cwd, context) {
@@ -268,7 +276,13 @@ export function formatToolCallDisplay(toolCall, actionFormatter, cwd, context) {
   // Edit/Write: render code content as a syntax-highlighted image
   if ((name === "Edit" || name === "Write") && typeof args.file_path === "string") {
     const lang = langFromPath(args.file_path);
-    const header = `*${name}*  \`${shortenPath(args.file_path, cwd)}\``;
+    let header = `*${name}*  \`${shortenPath(args.file_path, cwd)}\``;
+    if (context?.startLine != null) {
+      const lineCount = typeof args.old_string === "string" ? args.old_string.split("\n").length : 1;
+      header += lineCount > 1
+        ? `  _L${context.startLine}–${context.startLine + lineCount - 1}_`
+        : `  _L${context.startLine}_`;
+    }
     /** @type {ToolContentBlock[]} */
     const blocks = [];
     if (name === "Edit" && typeof args.old_string === "string" && typeof args.new_string === "string" && lang) {
