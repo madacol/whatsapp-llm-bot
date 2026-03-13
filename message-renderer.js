@@ -235,12 +235,14 @@ async function renderCodeBlock(block, prefix, instructions) {
   if (block.language && (block.caption || shouldRenderAsImage(block.language, block.code))) {
     try {
       const images = await renderCodeToImages(block.code, block.language);
-      for (const image of images) {
+      for (let i = 0; i < images.length; i++) {
+        // Only caption the first image — captionless consecutive images
+        // are auto-grouped as an album by WhatsApp.
         instructions.push({
           kind: "image",
-          image,
-          ...(block.caption && { caption: `${prefix} ${block.caption}` }),
-          editable: true,
+          image: images[i],
+          ...(i === 0 && block.caption && { caption: `${prefix} ${block.caption}` }),
+          editable: i === 0,
         });
       }
     } catch (err) {
@@ -270,12 +272,14 @@ async function renderCodeBlock(block, prefix, instructions) {
 async function renderDiffBlock(block, prefix, instructions) {
   try {
     const images = await renderDiffToImages(block.oldStr, block.newStr, block.language);
-    for (const image of images) {
+    for (let i = 0; i < images.length; i++) {
+      // Only caption the first image — captionless consecutive images
+      // are auto-grouped as an album by WhatsApp.
       instructions.push({
         kind: "image",
-        image,
-        ...(block.caption && { caption: `${prefix} ${block.caption}` }),
-        editable: false,
+        image: images[i],
+        ...(i === 0 && block.caption && { caption: `${prefix} ${block.caption}` }),
+        editable: i === 0,
       });
     }
   } catch (err) {

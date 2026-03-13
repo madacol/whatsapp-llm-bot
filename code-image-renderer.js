@@ -216,6 +216,14 @@ export async function renderCodeToImages(code, language) {
   /** @type {AnnotatedLine[]} */
   const lines = result.tokens.map(tokens => ({ tokens }));
 
+  // Strip trailing empty lines (e.g. from trailing newlines in the source)
+  while (lines.length > 1) {
+    const last = lines[lines.length - 1];
+    const text = last.tokens.map(t => t.content).join("");
+    if (text.trim()) break;
+    lines.pop();
+  }
+
   return renderAnnotatedLines(lines);
 }
 
