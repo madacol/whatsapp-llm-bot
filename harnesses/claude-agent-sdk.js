@@ -12,6 +12,7 @@
 
 import { query } from "@anthropic-ai/claude-agent-sdk";
 import { randomUUID } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { NO_OP_HOOKS } from "./native.js";
 import { getChatActions } from "../actions.js";
 import { createLogger } from "../logger.js";
@@ -165,15 +166,10 @@ export async function handleEffortCommand(chatId, arg) {
 async function buildSystemPrompt(llmConfig, chatId, senderIds) {
   let prompt = llmConfig.systemPrompt;
 
-  prompt += `\n\n## Runtime Context
-- Chat ID: ${chatId}
-- Sender IDs: ${senderIds.join(", ")}
-- PGlite root database: ./pgdata/root
-- PGlite chat database: ./pgdata/${chatId}
-- Action databases: ./pgdata/${chatId}/<action_name>/
-
-## User interaction
-If you want to propose something and wait for the user's decision before acting, either use the AskUserQuestion tool (which pauses execution) or finish your response and let the user reply. Do NOT ask a question in plain text and then immediately act on it in the same turn — plain text does not pause execution.`;
+  const promptTemplate = readFileSync(new URL("./claude-agent-sdk-prompt.md", import.meta.url), "utf-8");
+  prompt += "\n\n" + promptTemplate
+    .replace(/\{\{chatId\}\}/g, chatId)
+    .replace(/\{\{senderIds\}\}/g, senderIds.join(", "));
 
   // CLAUDE.md is loaded automatically by the SDK via settingSources: ["project"]
 
