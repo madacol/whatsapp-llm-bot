@@ -14,8 +14,11 @@ import {
   decryptPollVote,
   getKeyAuthor,
   proto,
+  generateWAMessage,
+  generateWAMessageFromContent,
+  generateMessageIDV2,
 } from "@whiskeysockets/baileys";
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { exec } from "node:child_process";
 import { rm } from "node:fs/promises";
 import { needsAuthReset, sendAlertEmail } from "./notifications.js";
@@ -716,6 +719,106 @@ const SOURCE_PREFIX = {
 };
 
 /**
+ * Send multiple images as a WhatsApp album (grouped media) using raw
+ * protocol messages.  The first image carries the optional caption; the
+ * rest are captionless so WhatsApp groups them visually.
+ *
+ * Protocol:
+ *  1. Relay a standalone `albumMessage` (expected-image/video counts).
+ *  2. For each image, `generateWAMessage` → patch `messageContextInfo`
+ *     with a MEDIA_ALBUM association pointing at step-1 → `relayMessage`.
+ *  3. ~500 ms delay between each relay so WhatsApp groups correctly.
+ *
+ * @param {import('@whiskeysockets/baileys').WASocket} sock
+ * @param {string} chatId
+ * @param {Array<{ image: Buffer, caption?: string }>} items  — ≥ 2
+ * @param {{ quoted?: BaileysMessage }} [options]
+ * @returns {Promise<import('@whiskeysockets/baileys').WAMessageKey | undefined>}
+ *   Key of the first media message (useful for later caption-editing).
+ */
+export async function sendAlbum(sock, chatId, items, options) {
+  const userJid = sock.user?.id;
+
+  // ── 1. fallback: ≤1 items are not albums ──────────────────────────
+  if (items.length === 0) return undefined;
+  if (items.length === 1) {
+    const sent = await sock.sendMessage(chatId, {
+      image: items[0].image,
+      ...(items[0].caption && { caption: items[0].caption }),
+    }, options ?? {});
+    return sent?.key;
+  }
+
+  // ── 2. relay the album header ─────────────────────────────────────
+  const albumMsgId = generateMessageIDV2(userJid);
+  const albumMsg = generateWAMessageFromContent(
+    chatId,
+    /** @type {import('@whiskeysockets/baileys').WAMessageContent} */ ({
+      albumMessage: {
+        expectedImageCount: items.length,
+        expectedVideoCount: 0,
+      },
+      messageContextInfo: { messageSecret: randomBytes(32) },
+    }),
+    {
+      userJid: userJid ?? "",
+      messageId: albumMsgId,
+      ...(options?.quoted && { quoted: options.quoted }),
+    },
+  );
+  if (!albumMsg.message) throw new Error("Failed to generate album header message");
+  await sock.relayMessage(chatId, albumMsg.message, { messageId: albumMsgId });
+
+  const parentMessageKey = {
+    remoteJid: albumMsg.key.remoteJid,
+    fromMe: albumMsg.key.fromMe,
+    id: albumMsg.key.id,
+  };
+
+  // ── 3. relay each image with MEDIA_ALBUM association ──────────────
+  /** @type {import('@whiskeysockets/baileys').WAMessageKey | undefined} */
+  let firstMediaKey;
+
+  for (let i = 0; i < items.length; i++) {
+    const item = items[i];
+    const imgMsg = await generateWAMessage(
+      chatId,
+      {
+        image: item.image,
+        ...(item.caption && { caption: item.caption }),
+      },
+      { upload: sock.waUploadToServer, userJid: userJid ?? "" },
+    );
+
+    if (!imgMsg.message) throw new Error(`Failed to generate image message ${i}`);
+
+    // Patch proto with album association
+    imgMsg.message.messageContextInfo = {
+      messageSecret: randomBytes(32),
+      messageAssociation: {
+        associationType: proto.MessageAssociation.AssociationType.MEDIA_ALBUM,
+        parentMessageKey,
+        messageIndex: i,
+      },
+    };
+
+    const imgMsgId = imgMsg.key.id ?? generateMessageIDV2(userJid);
+    await sock.relayMessage(chatId, imgMsg.message, {
+      messageId: imgMsgId,
+    });
+
+    if (i === 0) firstMediaKey = imgMsg.key;
+
+    // delay between images so WhatsApp groups them
+    if (i < items.length - 1) {
+      await new Promise(resolve => setTimeout(resolve, 500));
+    }
+  }
+
+  return firstMediaKey;
+}
+
+/**
  * Dispatch SendContent as WhatsApp messages with a source-based prefix.
  * Returns a MessageHandle for the last editable message sent (if any),
  * giving callers lifecycle control (edit, reaction subscription).
@@ -735,39 +838,72 @@ export async function sendBlocks(sock, chatId, source, content, options, reactio
 
   const instructions = await renderBlocks(blocks, prefix);
 
+  // ── group consecutive images into segments ────────────────────────
+  /** @typedef {{ kind: "images", items: Array<import('./message-renderer.js').SendInstruction & { kind: "image" }> }
+   *          | { kind: "single",  instr: import('./message-renderer.js').SendInstruction }} Segment */
+  /** @type {Segment[]} */
+  const segments = [];
+  /** @type {Array<import('./message-renderer.js').SendInstruction & { kind: "image" }>} */
+  let imgRun = [];
+  for (const instr of instructions) {
+    if (instr.kind === "image") {
+      imgRun.push(instr);
+    } else {
+      if (imgRun.length > 0) { segments.push({ kind: "images", items: imgRun }); imgRun = []; }
+      segments.push({ kind: "single", instr });
+    }
+  }
+  if (imgRun.length > 0) segments.push({ kind: "images", items: imgRun });
+
+  // ── send each segment ─────────────────────────────────────────────
   /** @type {import('@whiskeysockets/baileys').WAMessageKey | undefined} */
   let lastSentKey;
   let lastSentIsImage = false;
 
-  for (const instr of instructions) {
-    /** @type {import('@whiskeysockets/baileys').WAMessage | undefined} */
-    let sent;
-    switch (instr.kind) {
-      case "text":
-        sent = await sock.sendMessage(chatId, { text: instr.text }, options);
-        if (instr.editable && sent?.key) { lastSentKey = sent.key; lastSentIsImage = false; }
-        break;
-      case "image":
-        sent = await sock.sendMessage(chatId, {
-          image: instr.image,
-          ...(instr.caption && { caption: instr.caption }),
-        }, options);
-        if (instr.editable && sent?.key) { lastSentKey = sent.key; lastSentIsImage = true; }
-        break;
-      case "video":
-        await sock.sendMessage(chatId, {
-          video: instr.video,
-          mimetype: instr.mimetype,
-          jpegThumbnail: "",
-          ...(instr.caption && { caption: instr.caption }),
-        }, options);
-        break;
-      case "audio":
-        await sock.sendMessage(chatId, {
-          audio: instr.audio,
-          mimetype: instr.mimetype,
-        }, options);
-        break;
+  for (const seg of segments) {
+    if (seg.kind === "images" && seg.items.length >= 2) {
+      // album path
+      const albumItems = seg.items.map(img => ({
+        image: img.image,
+        ...(img.caption && { caption: img.caption }),
+      }));
+      const albumKey = await sendAlbum(sock, chatId, albumItems, options);
+      if (albumKey && seg.items[0].editable) {
+        lastSentKey = albumKey;
+        lastSentIsImage = true;
+      }
+    } else {
+      // single instruction (or lone image)
+      const instr = seg.kind === "images" ? seg.items[0] : seg.instr;
+      /** @type {import('@whiskeysockets/baileys').WAMessage | undefined} */
+      let sent;
+      switch (instr.kind) {
+        case "text":
+          sent = await sock.sendMessage(chatId, { text: instr.text }, options);
+          if (instr.editable && sent?.key) { lastSentKey = sent.key; lastSentIsImage = false; }
+          break;
+        case "image":
+          sent = await sock.sendMessage(chatId, {
+            image: instr.image,
+            ...(instr.caption && { caption: instr.caption }),
+          }, options);
+          if (instr.editable && sent?.key) { lastSentKey = sent.key; lastSentIsImage = true; }
+          break;
+        case "video":
+          await sock.sendMessage(chatId, {
+            video: instr.video,
+            mimetype: instr.mimetype,
+            jpegThumbnail: "",
+            ...(instr.caption && { caption: instr.caption }),
+          }, options);
+          break;
+        case "audio":
+          await sock.sendMessage(chatId, {
+            audio: instr.audio,
+            mimetype: instr.mimetype,
+          }, options);
+          break;
+      }
     }
   }
 
