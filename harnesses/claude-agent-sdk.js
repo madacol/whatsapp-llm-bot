@@ -240,6 +240,19 @@ function logSuppressedHookError(hookName, err) {
 }
 
 /**
+ * Run a hook safely: suppress errors and return the fallback value on failure.
+ * @template T
+ * @param {string} name
+ * @param {() => Promise<T>} fn
+ * @param {T} fallback
+ * @returns {Promise<T>}
+ */
+async function safeHook(name, fn, fallback) {
+  try { return await fn(); }
+  catch (err) { logSuppressedHookError(name, err); return fallback; }
+}
+
+/**
  * Wrap every hook so that a WhatsApp send failure (e.g. "Connection Closed")
  * doesn't kill the entire SDK query loop. Each hook has an explicit fallback
  * matching its return type contract.
@@ -248,42 +261,19 @@ function logSuppressedHookError(hookName, err) {
  */
 export function wrapHooksWithFallbacks(rawHooks) {
   return {
-    onComposing: async () => {
-      try { await rawHooks.onComposing(); }
-      catch (err) { logSuppressedHookError("onComposing", err); }
-    },
-    onLlmResponse: async (/** @type {string} */ text) => {
-      try { await rawHooks.onLlmResponse(text); }
-      catch (err) { logSuppressedHookError("onLlmResponse", err); }
-    },
-    onAskUser: async (/** @type {string} */ question, /** @type {string[]} */ options, /** @type {string | undefined} */ preamble, /** @type {string[] | undefined} */ descriptions) => {
-      try { return await rawHooks.onAskUser(question, options, preamble, descriptions); }
-      catch (err) { logSuppressedHookError("onAskUser", err); return ""; }
-    },
-    onToolCall: async (/** @type {LlmChatResponse['toolCalls'][0]} */ toolCall, /** @type {((params: Record<string, any>) => string) | undefined} */ formatToolCall) => {
-      try { return await rawHooks.onToolCall(toolCall, formatToolCall); }
-      catch (err) { logSuppressedHookError("onToolCall", err); }
-    },
-    onToolResult: async (/** @type {ToolContentBlock[]} */ blocks, /** @type {string} */ toolName, /** @type {PermissionFlags} */ permissions) => {
-      try { await rawHooks.onToolResult(blocks, toolName, permissions); }
-      catch (err) { logSuppressedHookError("onToolResult", err); }
-    },
-    onToolError: async (/** @type {string} */ error) => {
-      try { await rawHooks.onToolError(error); }
-      catch (err) { logSuppressedHookError("onToolError", err); }
-    },
-    onContinuePrompt: async () => {
-      try { return await rawHooks.onContinuePrompt(); }
-      catch (err) { logSuppressedHookError("onContinuePrompt", err); return true; }
-    },
-    onDepthLimit: async () => {
-      try { return await rawHooks.onDepthLimit(); }
-      catch (err) { logSuppressedHookError("onDepthLimit", err); return false; }
-    },
-    onUsage: async (/** @type {string} */ cost, /** @type {{ prompt: number; completion: number; cached: number }} */ tokens) => {
-      try { await rawHooks.onUsage(cost, tokens); }
-      catch (err) { logSuppressedHookError("onUsage", err); }
-    },
+    onComposing: () => safeHook("onComposing", () => rawHooks.onComposing(), undefined),
+    onLlmResponse: (/** @type {string} */ text) => safeHook("onLlmResponse", () => rawHooks.onLlmResponse(text), undefined),
+    onAskUser: (/** @type {string} */ question, /** @type {string[]} */ options, /** @type {string | undefined} */ preamble, /** @type {string[] | undefined} */ descriptions) =>
+      safeHook("onAskUser", () => rawHooks.onAskUser(question, options, preamble, descriptions), ""),
+    onToolCall: (/** @type {LlmChatResponse['toolCalls'][0]} */ toolCall, /** @type {((params: Record<string, any>) => string) | undefined} */ formatToolCall) =>
+      safeHook("onToolCall", () => rawHooks.onToolCall(toolCall, formatToolCall), undefined),
+    onToolResult: (/** @type {ToolContentBlock[]} */ blocks, /** @type {string} */ toolName, /** @type {PermissionFlags} */ permissions) =>
+      safeHook("onToolResult", () => rawHooks.onToolResult(blocks, toolName, permissions), undefined),
+    onToolError: (/** @type {string} */ error) => safeHook("onToolError", () => rawHooks.onToolError(error), undefined),
+    onContinuePrompt: () => safeHook("onContinuePrompt", () => rawHooks.onContinuePrompt(), true),
+    onDepthLimit: () => safeHook("onDepthLimit", () => rawHooks.onDepthLimit(), false),
+    onUsage: (/** @type {string} */ cost, /** @type {{ prompt: number; completion: number; cached: number }} */ tokens) =>
+      safeHook("onUsage", () => rawHooks.onUsage(cost, tokens), undefined),
   };
 }
 
