@@ -133,11 +133,12 @@ function renderAnnotatedLines(lines, opts) {
   }
   const svgWidth = Math.min(Math.max(maxLineWidth + contentX + PADDING, 200), MAX_SVG_WIDTH);
 
-  // Adaptive chunk size: fit as many lines as the pixel budget allows
-  // instead of splitting at a fixed line count.
-  const maxLinesPerChunk = Math.max(
-    10,
-    Math.floor((MAX_PIXELS / svgWidth - PADDING * 2) / LINE_HEIGHT),
+  // Adaptive chunk size: fit as many lines as the pixel budget allows,
+  // but cap at 100 lines for readability on mobile screens.
+  const MAX_LINES_PER_CHUNK = 100;
+  const maxLinesPerChunk = Math.min(
+    MAX_LINES_PER_CHUNK,
+    Math.max(10, Math.floor((MAX_PIXELS / svgWidth - PADDING * 2) / LINE_HEIGHT)),
   );
 
   /** @type {AnnotatedLine[][]} */
