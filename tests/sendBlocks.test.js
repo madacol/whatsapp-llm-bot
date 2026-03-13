@@ -184,7 +184,7 @@ Second block:
     );
   });
 
-  it("sends diff without caption using language as caption", async () => {
+  it("sends diff without caption when no caption is provided", async () => {
     const { sock, sent } = createMockSock();
 
     await sendBlocks(sock, "test-chat", "tool-call", [
@@ -194,7 +194,7 @@ Second block:
     assert.equal(sent.length, 1);
     const msg = sent[0].msg;
     assert.ok(Buffer.isBuffer(msg.image), "Should be an image buffer");
-    assert.equal(msg.caption, "diff · python");
+    assert.equal(msg.caption, undefined);
   });
 
   it("handles type 'text' without image rendering", async () => {

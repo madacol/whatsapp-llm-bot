@@ -235,14 +235,11 @@ async function renderCodeBlock(block, prefix, instructions) {
   if (block.language && (block.caption || shouldRenderAsImage(block.language, block.code))) {
     try {
       const images = await renderCodeToImages(block.code, block.language);
-      const codeCaption = block.caption
-        ? `${prefix} ${block.caption}`
-        : block.language || undefined;
       for (const image of images) {
         instructions.push({
           kind: "image",
           image,
-          ...(codeCaption && { caption: codeCaption }),
+          ...(block.caption && { caption: `${prefix} ${block.caption}` }),
           editable: true,
         });
       }
@@ -273,14 +270,11 @@ async function renderCodeBlock(block, prefix, instructions) {
 async function renderDiffBlock(block, prefix, instructions) {
   try {
     const images = await renderDiffToImages(block.oldStr, block.newStr, block.language);
-    const diffCaption = block.caption
-      ? `${prefix} ${block.caption}`
-      : block.language ? `diff · ${block.language}` : undefined;
     for (const image of images) {
       instructions.push({
         kind: "image",
         image,
-        ...(diffCaption && { caption: diffCaption }),
+        ...(block.caption && { caption: `${prefix} ${block.caption}` }),
         editable: false,
       });
     }
