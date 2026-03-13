@@ -66,7 +66,7 @@ export async function runAgent(options) {
   const storedMessages = [];
 
   /** @type {import("./store.js").Store['addMessage']} */
-  const addMessage = options.addMessage ?? (async (_chatId, messageData, _senderIds) => {
+  const addMessage = options.addMessage ?? (async (_chatId, messageData, _senderIds, _displayKey) => {
     storedMessages.push(messageData);
     return /** @type {import("./store.js").MessageRow} */ ({
       message_id: storedMessages.length,
@@ -74,6 +74,7 @@ export async function runAgent(options) {
       sender_id: senderIds.join(","),
       message_data: messageData,
       timestamp: new Date(),
+      display_key: _displayKey ?? null,
     });
   });
 
@@ -90,6 +91,7 @@ export async function runAgent(options) {
         sender_id: senderIds.join(","),
         message_data: messageData,
         timestamp: new Date(),
+        display_key: null,
       });
     }
     return null;

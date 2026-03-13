@@ -40,6 +40,7 @@ const log = createLogger("store");
  *   sender_id: string; // Comma-separated sender IDs (e.g. "phone_id,lid_id")
  *   message_data: Message;
  *   timestamp: Date;
+ *   display_key: string | null; // Platform message ID of the display message (e.g. for tool-call inspect)
  * }} MessageRow
  */
 
@@ -117,6 +118,7 @@ export async function initStore(injectedDb){
         db.sql`ALTER TABLE chats ADD COLUMN IF NOT EXISTS sdk_session_history JSONB DEFAULT '[]'`,
         db.sql`ALTER TABLE messages ADD COLUMN IF NOT EXISTS exchange_text TEXT`,
         db.sql`ALTER TABLE messages ADD COLUMN IF NOT EXISTS llm_context JSONB`,
+        db.sql`ALTER TABLE messages ADD COLUMN IF NOT EXISTS display_key TEXT`,
       ]);
 
       // One-time migration: rename content_models → media_to_text_models.
@@ -172,6 +174,7 @@ export async function initStore(injectedDb){
         )
       `;
       await db.sql`CREATE INDEX IF NOT EXISTS idx_messages_search_text ON messages USING gin (search_text)`;
+      await db.sql`CREATE INDEX IF NOT EXISTS idx_messages_display_key ON messages (chat_id, display_key) WHERE display_key IS NOT NULL`;
       await db.sql`CREATE INDEX IF NOT EXISTS idx_memories_search_text ON memories USING gin (search_text)`;
       await db.sql`
         CREATE TABLE IF NOT EXISTS agent_runs (
@@ -227,10 +230,11 @@ export async function initStore(injectedDb){
       * @param {MessageRow['chat_id']} chatId
       * @param {MessageRow['message_data']} message_data
       * @param {MessageRow['sender_id'][]?} senderIds
+      * @param {string | null} [displayKey] - Platform message ID of the display message
       */
-      async addMessage (chatId, message_data, senderIds = null) {
-        const {rows: [message]} = await db.sql`INSERT INTO messages(chat_id, sender_id, message_data)
-          VALUES (${chatId}, ${senderIds?.join(",")}, ${message_data})
+      async addMessage (chatId, message_data, senderIds = null, displayKey = null) {
+        const {rows: [message]} = await db.sql`INSERT INTO messages(chat_id, sender_id, message_data, display_key)
+          VALUES (${chatId}, ${senderIds?.join(",")}, ${message_data}, ${displayKey})
           RETURNING *`;
         return /** @type {MessageRow} */ (message);
       },
@@ -249,6 +253,21 @@ export async function initStore(injectedDb){
             AND message_data->>'role' = 'tool'
             AND message_data->>'tool_id' = ${toolCallId}
           RETURNING *`;
+        return row ? /** @type {MessageRow} */ (row) : null;
+      },
+
+      /**
+       * Look up a message row by the platform display key (e.g. for tool-call inspect).
+       * @param {MessageRow['chat_id']} chatId
+       * @param {string} displayKey
+       * @returns {Promise<MessageRow | null>}
+       */
+      async getMessageByDisplayKey (chatId, displayKey) {
+        const {rows: [row]} = await db.sql`
+          SELECT * FROM messages
+          WHERE chat_id = ${chatId}
+            AND display_key = ${displayKey}
+          LIMIT 1`;
         return row ? /** @type {MessageRow} */ (row) : null;
       },
 
