@@ -608,7 +608,7 @@ if (!process.env.TESTING) {
     const oldPid = parseInt(fs.readFileSync(pidFile, "utf-8"), 10);
     try {
       process.kill(oldPid, 0); // check if alive
-      console.log(`Killing previous instance (PID ${oldPid})...`);
+      log.info(`Killing previous instance (PID ${oldPid})...`);
       process.kill(oldPid, "SIGTERM");
       // Wait for graceful shutdown (active queries get 2min to finish)
       const start = Date.now();

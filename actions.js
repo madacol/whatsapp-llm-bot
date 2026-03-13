@@ -82,7 +82,7 @@ export async function executeAction(actionName, context, params, options = {}) {
     getActions,
     log: async (...args) => {
       const message = args.join(" ");
-      console.log(...args);
+      log.info(...args);
       return message;
     },
     send: async (message) => {
