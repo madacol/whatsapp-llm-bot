@@ -367,7 +367,7 @@ export function createTestHarness({ mockServer, handleMessage, testDb }) {
       setClauses.push(`${col} = $${values.length}`);
     };
 
-    if (rest.debug != null) addCol("debug_until", rest.debug ? "9999-01-01" : null);
+    if (rest.debug != null) addCol("debug", rest.debug);
     if (rest.memory != null) addCol("memory", rest.memory);
     if (rest.memoryThreshold !== undefined) addCol("memory_threshold", rest.memoryThreshold);
     if (rest.respondOn != null) addCol("respond_on", rest.respondOn);

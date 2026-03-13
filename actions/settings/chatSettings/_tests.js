@@ -285,7 +285,7 @@ export default [
       assert.ok(result.includes("0.5"), "should include threshold");
     },
     async function info_shows_debug_status(action_fn, db) {
-      await db.sql`INSERT INTO chats(chat_id, debug_until) VALUES ('cs-info-6', '9999-01-01') ON CONFLICT DO NOTHING`;
+      await db.sql`INSERT INTO chats(chat_id, debug) VALUES ('cs-info-6', TRUE) ON CONFLICT DO NOTHING`;
       const result = await action_fn(
         { chatId: "cs-info-6", rootDb: db, senderIds: ["u1"], getIsAdmin: async () => false },
         { setting: "" },
@@ -395,78 +395,32 @@ export default [
     },
 
     // ── debug ──
-    async function enables_debug_for_default_10_minutes(action_fn, db) {
+    async function enables_debug_on(action_fn, db) {
       await db.sql`INSERT INTO chats(chat_id) VALUES ('cs-dbg-1') ON CONFLICT DO NOTHING`;
-      const before = Date.now();
       const result = await action_fn(
         { chatId: "cs-dbg-1", rootDb: db },
-        { setting: "debug", value: "" },
+        { setting: "debug", value: "on" },
       );
-      const after = Date.now();
+      assert.ok(result.toLowerCase().includes("on"));
 
-      assert.ok(result.includes("10"));
-
-      const { rows: [chat] } = await db.sql`SELECT debug_until FROM chats WHERE chat_id = 'cs-dbg-1'`;
-      const debugUntil = new Date(chat.debug_until).getTime();
-      const tenMinMs = 10 * 60 * 1000;
-      assert.ok(
-        debugUntil >= before + tenMinMs - 1000 &&
-          debugUntil <= after + tenMinMs + 1000,
-        `debug_until should be ~10min in future, got ${chat.debug_until}`,
-      );
-    },
-    async function enables_debug_for_custom_minutes(action_fn, db) {
-      await db.sql`INSERT INTO chats(chat_id) VALUES ('cs-dbg-2') ON CONFLICT DO NOTHING`;
-      const before = Date.now();
-      const result = await action_fn(
-        { chatId: "cs-dbg-2", rootDb: db },
-        { setting: "debug", value: "30" },
-      );
-      const after = Date.now();
-
-      assert.ok(result.includes("30"));
-
-      const { rows: [chat] } = await db.sql`SELECT debug_until FROM chats WHERE chat_id = 'cs-dbg-2'`;
-      const debugUntil = new Date(chat.debug_until).getTime();
-      const thirtyMinMs = 30 * 60 * 1000;
-      assert.ok(
-        debugUntil >= before + thirtyMinMs - 1000 &&
-          debugUntil <= after + thirtyMinMs + 1000,
-        `debug_until should be ~30min in future, got ${chat.debug_until}`,
-      );
-    },
-    async function permanent_debug_with_zero(action_fn, db) {
-      await db.sql`INSERT INTO chats(chat_id) VALUES ('cs-dbg-3') ON CONFLICT DO NOTHING`;
-      const result = await action_fn(
-        { chatId: "cs-dbg-3", rootDb: db },
-        { setting: "debug", value: "0" },
-      );
-
-      assert.ok(result.toLowerCase().includes("permanent"));
-
-      const { rows: [chat] } = await db.sql`SELECT debug_until FROM chats WHERE chat_id = 'cs-dbg-3'`;
-      assert.equal(
-        new Date(chat.debug_until).toISOString().slice(0, 10),
-        "9999-01-01",
-      );
+      const { rows: [chat] } = await db.sql`SELECT debug FROM chats WHERE chat_id = 'cs-dbg-1'`;
+      assert.equal(chat.debug, true);
     },
     async function disables_debug_with_off(action_fn, db) {
-      await db.sql`INSERT INTO chats(chat_id) VALUES ('cs-dbg-4') ON CONFLICT DO NOTHING`;
-      await db.sql`UPDATE chats SET debug_until = '9999-01-01' WHERE chat_id = 'cs-dbg-4'`;
+      await db.sql`INSERT INTO chats(chat_id, debug) VALUES ('cs-dbg-2', TRUE) ON CONFLICT DO NOTHING`;
       const result = await action_fn(
-        { chatId: "cs-dbg-4", rootDb: db },
+        { chatId: "cs-dbg-2", rootDb: db },
         { setting: "debug", value: "off" },
       );
-
       assert.ok(result.toLowerCase().includes("off"));
 
-      const { rows: [chat] } = await db.sql`SELECT debug_until FROM chats WHERE chat_id = 'cs-dbg-4'`;
-      assert.equal(chat.debug_until, null);
+      const { rows: [chat] } = await db.sql`SELECT debug FROM chats WHERE chat_id = 'cs-dbg-2'`;
+      assert.equal(chat.debug, false);
     },
     async function gets_debug_status(action_fn, db) {
-      await db.sql`INSERT INTO chats(chat_id, debug_until) VALUES ('cs-dbg-5', '9999-01-01') ON CONFLICT DO NOTHING`;
+      await db.sql`INSERT INTO chats(chat_id, debug) VALUES ('cs-dbg-3', TRUE) ON CONFLICT DO NOTHING`;
       const result = await action_fn(
-        { chatId: "cs-dbg-5", rootDb: db },
+        { chatId: "cs-dbg-3", rootDb: db },
         { setting: "debug" },
       );
       assert.ok(result.toLowerCase().includes("debug"));

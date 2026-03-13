@@ -173,7 +173,7 @@ describe("per-chat model selection", () => {
   });
 
   describe("debug 'on' enables debug", () => {
-    it("'on' enables debug with default duration", async () => {
+    it("'on' enables debug", async () => {
       await db.sql`INSERT INTO chats(chat_id) VALUES ('dbg-on-1') ON CONFLICT DO NOTHING`;
 
       const mod = await import("../actions/settings/chatSettings/index.js");
@@ -184,8 +184,8 @@ describe("per-chat model selection", () => {
       );
       assert.ok(result.includes("Debug on"), `expected 'Debug on' in: ${result}`);
 
-      const { rows: [chat] } = await db.sql`SELECT debug_until FROM chats WHERE chat_id = 'dbg-on-1'`;
-      assert.ok(chat.debug_until !== null, "debug_until should be set");
+      const { rows: [chat] } = await db.sql`SELECT debug FROM chats WHERE chat_id = 'dbg-on-1'`;
+      assert.equal(chat.debug, true, "debug should be true");
     });
   });
 
