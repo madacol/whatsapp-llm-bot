@@ -707,6 +707,9 @@ export async function editWhatsAppMessage(sock, jid, key, newText, isImage) {
   }
 }
 
+/** Delay between relaying each image in an album so WhatsApp groups them. */
+const ALBUM_RELAY_DELAY_MS = 500;
+
 /** @type {Record<MessageSource, string>} */
 const SOURCE_PREFIX = {
   "llm": "🤖",
@@ -775,21 +778,22 @@ export async function sendAlbum(sock, chatId, items, options) {
     id: albumMsg.key.id,
   };
 
-  // ── 3. relay each image with MEDIA_ALBUM association ──────────────
+  // ── 3. upload all images concurrently, then relay sequentially ────
+  const uploadOpts = { upload: sock.waUploadToServer, userJid: userJid ?? "" };
+  const uploaded = await Promise.all(
+    items.map((item) =>
+      generateWAMessage(chatId, {
+        image: item.image,
+        ...(item.caption && { caption: item.caption }),
+      }, uploadOpts),
+    ),
+  );
+
   /** @type {import('@whiskeysockets/baileys').WAMessageKey | undefined} */
   let firstMediaKey;
 
-  for (let i = 0; i < items.length; i++) {
-    const item = items[i];
-    const imgMsg = await generateWAMessage(
-      chatId,
-      {
-        image: item.image,
-        ...(item.caption && { caption: item.caption }),
-      },
-      { upload: sock.waUploadToServer, userJid: userJid ?? "" },
-    );
-
+  for (let i = 0; i < uploaded.length; i++) {
+    const imgMsg = uploaded[i];
     if (!imgMsg.message) throw new Error(`Failed to generate image message ${i}`);
 
     // Patch proto with album association
@@ -802,16 +806,15 @@ export async function sendAlbum(sock, chatId, items, options) {
       },
     };
 
-    const imgMsgId = imgMsg.key.id ?? generateMessageIDV2(userJid);
     await sock.relayMessage(chatId, imgMsg.message, {
-      messageId: imgMsgId,
+      messageId: /** @type {string} */ (imgMsg.key.id),
     });
 
     if (i === 0) firstMediaKey = imgMsg.key;
 
-    // delay between images so WhatsApp groups them
-    if (i < items.length - 1) {
-      await new Promise(resolve => setTimeout(resolve, 500));
+    // delay between relays so WhatsApp groups them correctly
+    if (i < uploaded.length - 1) {
+      await new Promise(resolve => setTimeout(resolve, ALBUM_RELAY_DELAY_MS));
     }
   }
 
@@ -838,71 +841,80 @@ export async function sendBlocks(sock, chatId, source, content, options, reactio
 
   const instructions = await renderBlocks(blocks, prefix);
 
-  // ── group consecutive images into segments ────────────────────────
-  /** @typedef {{ kind: "images", items: Array<import('./message-renderer.js').SendInstruction & { kind: "image" }> }
-   *          | { kind: "single",  instr: import('./message-renderer.js').SendInstruction }} Segment */
-  /** @type {Segment[]} */
-  const segments = [];
-  /** @type {Array<import('./message-renderer.js').SendInstruction & { kind: "image" }>} */
-  let imgRun = [];
-  for (const instr of instructions) {
-    if (instr.kind === "image") {
-      imgRun.push(instr);
-    } else {
-      if (imgRun.length > 0) { segments.push({ kind: "images", items: imgRun }); imgRun = []; }
-      segments.push({ kind: "single", instr });
-    }
-  }
-  if (imgRun.length > 0) segments.push({ kind: "images", items: imgRun });
-
-  // ── send each segment ─────────────────────────────────────────────
   /** @type {import('@whiskeysockets/baileys').WAMessageKey | undefined} */
   let lastSentKey;
   let lastSentIsImage = false;
 
-  for (const seg of segments) {
-    if (seg.kind === "images" && seg.items.length >= 2) {
-      // album path
-      const albumItems = seg.items.map(img => ({
-        image: img.image,
-        ...(img.caption && { caption: img.caption }),
-      }));
-      const albumKey = await sendAlbum(sock, chatId, albumItems, options);
-      if (albumKey && seg.items[0].editable) {
-        lastSentKey = albumKey;
-        lastSentIsImage = true;
+  /**
+   * Send a single non-album instruction and track editable state.
+   * @param {import('./message-renderer.js').SendInstruction} instr
+   */
+  const sendOne = async (instr) => {
+    /** @type {import('@whiskeysockets/baileys').WAMessage | undefined} */
+    let sent;
+    switch (instr.kind) {
+      case "text":
+        sent = await sock.sendMessage(chatId, { text: instr.text }, options);
+        if (instr.editable && sent?.key) { lastSentKey = sent.key; lastSentIsImage = false; }
+        break;
+      case "image":
+        sent = await sock.sendMessage(chatId, {
+          image: instr.image,
+          ...(instr.caption && { caption: instr.caption }),
+        }, options);
+        if (instr.editable && sent?.key) { lastSentKey = sent.key; lastSentIsImage = true; }
+        break;
+      case "video":
+        await sock.sendMessage(chatId, {
+          video: instr.video,
+          mimetype: instr.mimetype,
+          jpegThumbnail: "",
+          ...(instr.caption && { caption: instr.caption }),
+        }, options);
+        break;
+      case "audio":
+        await sock.sendMessage(chatId, {
+          audio: instr.audio,
+          mimetype: instr.mimetype,
+        }, options);
+        break;
+    }
+  };
+
+  // ── fast path: no album grouping needed when < 2 images ───────────
+  if (instructions.filter(i => i.kind === "image").length < 2) {
+    for (const instr of instructions) await sendOne(instr);
+  } else {
+    // ── group consecutive images into album segments ─────────────────
+    /** @typedef {{ kind: "images", items: Array<import('./message-renderer.js').SendInstruction & { kind: "image" }> }
+     *          | { kind: "single",  instr: import('./message-renderer.js').SendInstruction }} Segment */
+    /** @type {Segment[]} */
+    const segments = [];
+    /** @type {Array<import('./message-renderer.js').SendInstruction & { kind: "image" }>} */
+    let imgRun = [];
+    for (const instr of instructions) {
+      if (instr.kind === "image") {
+        imgRun.push(instr);
+      } else {
+        if (imgRun.length > 0) { segments.push({ kind: "images", items: imgRun }); imgRun = []; }
+        segments.push({ kind: "single", instr });
       }
-    } else {
-      // single instruction (or lone image)
-      const instr = seg.kind === "images" ? seg.items[0] : seg.instr;
-      /** @type {import('@whiskeysockets/baileys').WAMessage | undefined} */
-      let sent;
-      switch (instr.kind) {
-        case "text":
-          sent = await sock.sendMessage(chatId, { text: instr.text }, options);
-          if (instr.editable && sent?.key) { lastSentKey = sent.key; lastSentIsImage = false; }
-          break;
-        case "image":
-          sent = await sock.sendMessage(chatId, {
-            image: instr.image,
-            ...(instr.caption && { caption: instr.caption }),
-          }, options);
-          if (instr.editable && sent?.key) { lastSentKey = sent.key; lastSentIsImage = true; }
-          break;
-        case "video":
-          await sock.sendMessage(chatId, {
-            video: instr.video,
-            mimetype: instr.mimetype,
-            jpegThumbnail: "",
-            ...(instr.caption && { caption: instr.caption }),
-          }, options);
-          break;
-        case "audio":
-          await sock.sendMessage(chatId, {
-            audio: instr.audio,
-            mimetype: instr.mimetype,
-          }, options);
-          break;
+    }
+    if (imgRun.length > 0) segments.push({ kind: "images", items: imgRun });
+
+    for (const seg of segments) {
+      if (seg.kind === "images" && seg.items.length >= 2) {
+        const albumItems = seg.items.map(img => ({
+          image: img.image,
+          ...(img.caption && { caption: img.caption }),
+        }));
+        const albumKey = await sendAlbum(sock, chatId, albumItems, options);
+        if (albumKey && seg.items[0].editable) {
+          lastSentKey = albumKey;
+          lastSentIsImage = true;
+        }
+      } else {
+        await sendOne(seg.kind === "images" ? seg.items[0] : seg.instr);
       }
     }
   }
