@@ -12,6 +12,7 @@ import {
 } from "../message-formatting.js";
 import { getRootDb } from "../db.js";
 import { storeLlmContext } from "../context-log.js";
+import { existsSync, readFileSync } from "node:fs";
 import { storeAndLinkHtml } from "../html-store.js";
 import { recordUsage, resolveCost } from "../usage-tracker.js";
 import { getToolCallSummary } from "../tool-display.js";
@@ -87,6 +88,21 @@ async function executeAndStoreTool({
   const toolArgs = parseToolArgs(toolCall.arguments);
   log.debug("executing", toolName, toolArgs);
 
+  // Compute display context for Edit line numbers
+  /** @type {{ startLine?: number } | undefined} */
+  let displayContext;
+  if (toolName === "Edit" && typeof toolArgs.file_path === "string" && typeof toolArgs.old_string === "string") {
+    try {
+      if (existsSync(toolArgs.file_path)) {
+        const fileContent = readFileSync(toolArgs.file_path, "utf-8");
+        const idx = fileContent.indexOf(toolArgs.old_string);
+        if (idx !== -1) {
+          displayContext = { startLine: fileContent.slice(0, idx).split("\n").length };
+        }
+      }
+    } catch { /* best-effort — display still works without line numbers */ }
+  }
+
   /** Replace the stub in the messages array and persist to DB. */
   const replaceStub = async (/** @type {ToolMessage} */ toolMessage) => {
     await updateToolMessage(chatId, toolCall.id, toolMessage);
@@ -99,7 +115,7 @@ async function executeAndStoreTool({
   /** Register 👁 react-to-inspect on the tool-call message handle. */
   const registerInspect = (/** @type {ToolMessage} */ toolMessage) => {
     if (handle) {
-      const summary = getToolCallSummary(toolName, toolArgs, actionFormatToolCall, cwd ?? null);
+      const summary = getToolCallSummary(toolName, toolArgs, actionFormatToolCall, cwd ?? null, displayContext);
       registerInspectHandler(handle, summary, toolMessage);
     }
   };
@@ -165,7 +181,7 @@ async function executeAndStoreTool({
     }
 
     // Edit tool-call message in-place with summary label
-    await tryEdit(handle, getToolCallSummary(toolName, toolArgs, actionFormatToolCall, cwd ?? null), toolName);
+    await tryEdit(handle, getToolCallSummary(toolName, toolArgs, actionFormatToolCall, cwd ?? null, displayContext), toolName);
 
     // Register 👁 react-to-inspect for tool results
     registerInspect(toolMessage);

@@ -501,13 +501,20 @@ export function createClaudeAgentSdkHarness() {
                 const input = /** @type {import("@anthropic-ai/claude-agent-sdk").PreToolUseHookInput} */ (hookInput);
                 const toolInput = /** @type {Record<string, unknown>} */ (input.tool_input);
 
-                // Capture old content for Write overwrites
-                /** @type {{ oldContent?: string } | undefined} */
+                // Capture file content for display context (Write diffs, Edit line numbers)
+                /** @type {{ oldContent?: string; startLine?: number } | undefined} */
                 let displayContext;
-                if (input.tool_name === "Write") {
-                  const filePath = typeof toolInput.file_path === "string" ? toolInput.file_path : null;
-                  if (filePath && existsSync(filePath)) {
-                    displayContext = { oldContent: readFileSync(filePath, "utf-8") };
+                const filePath = typeof toolInput.file_path === "string" ? toolInput.file_path : null;
+                if (filePath && existsSync(filePath)) {
+                  const fileContent = readFileSync(filePath, "utf-8");
+                  if (input.tool_name === "Write") {
+                    displayContext = { oldContent: fileContent };
+                  } else if (input.tool_name === "Edit" && typeof toolInput.old_string === "string") {
+                    const idx = fileContent.indexOf(toolInput.old_string);
+                    if (idx !== -1) {
+                      const startLine = fileContent.slice(0, idx).split("\n").length;
+                      displayContext = { startLine };
+                    }
                   }
                 }
 
@@ -515,7 +522,7 @@ export function createClaudeAgentSdkHarness() {
                 if (toolUseId) {
                   const toolCall = { id: toolUseId, name: input.tool_name, arguments: JSON.stringify(toolInput) };
                   const content = formatToolCallDisplay(toolCall, undefined, cwd, displayContext);
-                  const summary = getToolCallSummary(input.tool_name, toolInput, undefined, cwd);
+                  const summary = getToolCallSummary(input.tool_name, toolInput, undefined, cwd, displayContext);
                   /** @type {MessageHandle | undefined} */
                   let handle;
                   if (content != null) {
