@@ -17,7 +17,6 @@ import { getChatActions } from "../actions.js";
 import { createLogger } from "../logger.js";
 import { extractLastUserText } from "../message-formatting.js";
 import { createToolMessage, errorToString, registerInspectHandler } from "../utils.js";
-import { getToolCallSummary } from "../tool-display.js";
 import { getRootDb } from "../db.js";
 
 const log = createLogger("harness:claude-agent-sdk");
@@ -221,7 +220,6 @@ If you want to propose something and wait for the user's decision before acting,
  * @typedef {{
  *   handle?: MessageHandle,
  *   toolName: string,
- *   description: string | null,
  * }} ActiveToolEntry
  */
 
@@ -260,6 +258,10 @@ function logSuppressedHookError(hookName, err) {
  */
 export function wrapHooksWithFallbacks(rawHooks) {
   return {
+    onComposing: async () => {
+      try { await rawHooks.onComposing(); }
+      catch (err) { logSuppressedHookError("onComposing", err); }
+    },
     onLlmResponse: async (/** @type {string} */ text) => {
       try { await rawHooks.onLlmResponse(text); }
       catch (err) { logSuppressedHookError("onLlmResponse", err); }
@@ -560,6 +562,11 @@ export function createClaudeAgentSdkHarness() {
           case "tool_use_summary": await handleToolUseSummaryEvent(event, ctx); break;
           default: break;
         }
+
+        // Re-send composing before the next slow await (LLM call or tool execution)
+        if (event.type !== "result") {
+          await hooks.onComposing();
+        }
       }
       log.debug(`SDK query done: events=${eventCount} activeTools=${activeTools.size}`);
     } catch (err) {
@@ -791,8 +798,6 @@ async function handleAssistantEvent(event, ctx) {
         const name = /** @type {string} */ (block.name);
         const id = /** @type {string} */ (block.id);
         log.debug(`  block: tool_use ${name}`);
-        const input = /** @type {Record<string, unknown>} */ (block.input ?? {});
-        const displayLabel = getToolCallSummary(name, input);
         const handle = await ctx.hooks.onToolCall({
           id,
           name,
@@ -801,7 +806,6 @@ async function handleAssistantEvent(event, ctx) {
         ctx.activeTools.set(id, {
           handle: handle ?? undefined,
           toolName: name,
-          description: displayLabel,
         });
         storedBlocks.push({
           type: "tool",
@@ -872,7 +876,7 @@ async function handleToolProgressEvent(event, ctx) {
   const active = ctx.activeTools.get(event.tool_use_id);
   if (active?.handle) {
     const elapsed = Math.round(event.elapsed_time_seconds);
-    await active.handle.edit(`${active.toolName} (${elapsed}s…)`);
+    await active.handle.edit(`${active.toolName} _(${elapsed}s…)_`);
   }
 }
 
@@ -899,13 +903,6 @@ async function handleUserEvent(event, ctx) {
     }
   }
 
-  if (active?.handle) {
-    try {
-      await active.handle.edit(active.description || active.toolName);
-    } catch (editorErr) {
-      log.error(`Edit failed for ${active.toolName}:`, editorErr);
-    }
-  }
   ctx.activeTools.delete(resolvedToolUseId);
 }
 
@@ -961,44 +958,15 @@ async function handleAskUserQuestion(input, onAskUser) {
 }
 
 /**
- * Summarize a tool's input for display in a user-facing approval prompt.
- * Keeps it compact: truncates long values and limits the number of fields.
- * @param {Record<string, unknown>} input
- * @returns {string}
- */
-function summarizeToolInput(input) {
-  const MAX_VALUE_LEN = 120;
-  const MAX_FIELDS = 5;
-
-  const entries = Object.entries(input);
-  if (entries.length === 0) return "(no input)";
-
-  const lines = entries.slice(0, MAX_FIELDS).map(([key, val]) => {
-    const str = typeof val === "string" ? val : JSON.stringify(val);
-    const truncated = str.length > MAX_VALUE_LEN ? str.slice(0, MAX_VALUE_LEN) + "…" : str;
-    return `• *${key}:* ${truncated}`;
-  });
-
-  if (entries.length > MAX_FIELDS) {
-    lines.push(`  _(+${entries.length - MAX_FIELDS} more fields)_`);
-  }
-
-  return lines.join("\n");
-}
-
-/**
  * Generic handler for non-whitelisted tools. Prompts the user with the
- * tool name and a summary of its input, asking them to Allow or Deny.
+ * tool name, asking them to Allow or Deny via a poll.
  * @param {string} toolName
  * @param {Record<string, unknown>} input
  * @param {Required<AgentIOHooks>["onAskUser"]} onAskUser
  * @returns {Promise<import("@anthropic-ai/claude-agent-sdk").PermissionResult>}
  */
 async function handleToolApproval(toolName, input, onAskUser) {
-  const summary = summarizeToolInput(input);
-  const prompt = `🔧 *${toolName}*\n${summary}`;
-
-  const userChoice = await onAskUser(prompt, ["✅ Allow", "❌ Deny"]);
+  const userChoice = await onAskUser(`Allow *${toolName}*?`, ["✅ Allow", "❌ Deny"]);
 
   if (userChoice === "❌ Deny") {
     return { behavior: "deny", message: `User denied the ${toolName} tool call.` };

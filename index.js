@@ -385,12 +385,14 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
     //    All subsequent messages for this chat hit check #1 above.
     pendingLlmChats.set(chatId, []);
 
+    /** Send "composing" presence, swallowing errors. */
+    const sendComposing = async () => {
+      try { await messageContext.sendPresenceUpdate("composing"); }
+      catch (err) { log.debug("Could not send composing signal:", errorToString(err)); }
+    };
+
     // Send composing signal (first await — safe, guard is already set)
-    try {
-      await messageContext.sendPresenceUpdate("composing");
-    } catch (err) {
-      log.debug("Could not send composing signal:", errorToString(err));
-    }
+    await sendComposing();
 
     try {
 
@@ -463,6 +465,7 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
 
     /** @type {AgentIOHooks} */
     const hooks = {
+      onComposing: sendComposing,
       onLlmResponse: async (text) => { await context.reply("llm", [{ type: "markdown", text }]); },
       onAskUser: async (question, options, _preamble, descriptions) => {
         // Embed descriptions into poll labels when available
@@ -475,7 +478,9 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
           return enriched;
         });
 
-        const choice = await context.select(question || "Choose an option:", pollOptions);
+        const choice = await context.select(question || "Choose an option:", pollOptions, {
+          deleteOnSelect: true,
+        });
         // Map enriched label back to original label
         return labelMap.get(choice) ?? choice;
       },
