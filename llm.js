@@ -58,7 +58,7 @@ export async function createEmbedding(llmClient, model, input) {
  * @param {CallLlmPrompt} prompt
  * @returns {string | OpenAI.ChatCompletionContentPart[]}
  */
-export function convertPromptToOpenAI(prompt) {
+function convertPromptToOpenAI(prompt) {
   if (typeof prompt === "string") {
     return prompt;
   }
@@ -305,41 +305,6 @@ async function convertMessagesToOpenAI(messages, registry) {
   }
 
   return formatted;
-}
-
-/**
- * Convert a ToolContentBlock[] result into OpenAI content parts, tagging media in the registry.
- * @param {ToolContentBlock[]} blocks
- * @param {MediaRegistry} registry
- * @returns {{ parts: Array<OpenAI.ChatCompletionContentPart>, mediaIds: Map<ToolContentBlock, number> }}
- */
-export function convertToolResultToOpenAI(blocks, registry) {
-  /** @type {Array<OpenAI.ChatCompletionContentPart>} */
-  const parts = [];
-  /** @type {Map<ToolContentBlock, number>} */
-  const mediaIds = new Map();
-
-  for (const block of blocks) {
-    if (block.type === "text") {
-      parts.push({ type: /** @type {const} */ ("text"), text: block.text });
-    } else if (block.type === "image") {
-      parts.push({
-        type: /** @type {const} */ ("image_url"),
-        image_url: { url: `data:${block.mime_type};base64,${block.data}` },
-      });
-      const id = tagMedia(parts, registry, block);
-      mediaIds.set(block, id);
-    } else if (block.type === "video") {
-      parts.push(videoUrlPart(`data:${block.mime_type};base64,${block.data}`));
-      const id = tagMedia(parts, registry, block);
-      mediaIds.set(block, id);
-    } else if (block.type === "code") {
-      const fenced = "```" + (block.language || "") + "\n" + block.code + "\n```";
-      parts.push({ type: /** @type {const} */ ("text"), text: fenced });
-    }
-  }
-
-  return { parts, mediaIds };
 }
 
 

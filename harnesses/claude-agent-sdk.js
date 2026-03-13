@@ -42,14 +42,6 @@ const AUTO_APPROVED_TOOLS = new Set([
 /** @type {import("@anthropic-ai/claude-agent-sdk").ModelInfo[] | null} */
 let cachedModels = null;
 
-/**
- * Get the cached list of models from the SDK.
- * Returns null if no session has been started yet.
- * @returns {import("@anthropic-ai/claude-agent-sdk").ModelInfo[] | null}
- */
-export function getCachedSdkModels() {
-  return cachedModels;
-}
 
 /** @type {Array<{ value: string, displayName: string, description: string }>} */
 const FALLBACK_MODELS = [
