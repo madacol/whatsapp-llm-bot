@@ -232,8 +232,10 @@ export async function renderDiffToImages(oldStr, newStr, language) {
   const effectiveLang = await loadLang(hl, language || "text");
   const shikiLang = /** @type {import("shiki").BundledLanguage} */ (effectiveLang);
 
-  // Compute a proper line-level diff so unchanged lines are shown as context
-  const changes = diffLines(oldStr, newStr);
+  // Normalize trailing whitespace before diffing — prevents false "changed"
+  // lines caused by invisible trailing spaces the LLM may add or remove.
+  const norm = (/** @type {string} */ s) => s.split("\n").map(l => l.trimEnd()).join("\n");
+  const changes = diffLines(norm(oldStr), norm(newStr));
 
   // Build a single unified string for each "side" so shiki tokenizes with
   // full context, then slice out the token lines per-change.
