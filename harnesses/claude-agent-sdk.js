@@ -73,7 +73,7 @@ export async function handleModelCommand(chatId, arg) {
   const db = getRootDb();
 
   if (arg === "off" || arg === "default" || arg === "none") {
-    await db.query("UPDATE chats SET sdk_model = NULL WHERE chat_id = $1", [chatId]);
+    await db.sql`UPDATE chats SET sdk_model = NULL WHERE chat_id = ${chatId}`;
     return "SDK model reset to default.";
   }
 
@@ -84,7 +84,7 @@ export async function handleModelCommand(chatId, arg) {
   );
   const modelValue = match ? match.value : input;
 
-  await db.query("UPDATE chats SET sdk_model = $1 WHERE chat_id = $2", [modelValue, chatId]);
+  await db.sql`UPDATE chats SET sdk_model = ${modelValue} WHERE chat_id = ${chatId}`;
   return match
     ? `SDK model set to \`${match.value}\` (${match.displayName})`
     : `SDK model set to \`${modelValue}\``;
@@ -139,14 +139,14 @@ export async function handleEffortCommand(chatId, arg) {
   const db = getRootDb();
 
   if (arg === "off" || arg === "default" || arg === "none") {
-    await db.query("UPDATE chats SET sdk_effort = NULL WHERE chat_id = $1", [chatId]);
+    await db.sql`UPDATE chats SET sdk_effort = NULL WHERE chat_id = ${chatId}`;
     return "SDK effort reset to default (high).";
   }
 
   const input = arg.toLowerCase();
   const validLevels = ["low", "medium", "high", "max"];
   if (validLevels.includes(input)) {
-    await db.query("UPDATE chats SET sdk_effort = $1 WHERE chat_id = $2", [input, chatId]);
+    await db.sql`UPDATE chats SET sdk_effort = ${input} WHERE chat_id = ${chatId}`;
     return `SDK effort set to \`${input}\``;
   }
   return `Unknown effort level \`${arg}\`. Use: ${validLevels.join(", ")}`;
