@@ -695,7 +695,7 @@ describe("Confirmation declined prevents action execution", () => {
 // Scenario: save_memory tool call stores memory in DB
 // ═══════════════════════════════════════════════════════════════════
 describe("Memory: save_memory tool call stores memory in DB", () => {
-  it("saves memory via tool call and delivers final LLM reply silently", async () => {
+  it("saves memory via tool call and delivers final LLM reply", async () => {
     const chatId = "mem-save-chat";
     const chat = await t.chat(chatId, { enabled: true, memory: true });
     const r = await chat.send("I really love cats", {
@@ -707,8 +707,6 @@ describe("Memory: save_memory tool call stores memory in DB", () => {
     assert.equal(rows[0].content, "User likes cats");
     assert.ok(r.raw.some(x => x.text.includes("Got it, I'll remember that!")),
       `Should deliver final LLM reply, got: ${r.raw.map(x => x.text).join(" | ")}`);
-    assert.ok(!r.raw.some(x => x.source === "tool-result"),
-      `Should not show result notification for silent action, got: ${r.raw.map(x => x.text).join(" | ")}`);
   });
 });
 

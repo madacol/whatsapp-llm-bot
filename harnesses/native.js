@@ -142,16 +142,13 @@ async function executeAndStoreTool({
       && typeof result[0] === "object"
       && "type" in result[0];
 
-    // Store tool result (silent tools get a stub to satisfy API pairing)
     /** @type {ToolMessage} */
     const toolMessage = {
       role: "tool",
       tool_id: toolCall.id,
-      content: functionResponse.permissions.silent
-        ? [{ type: "text", text: "[recalled prior messages]" }]
-        : isContentBlocks
-          ? /** @type {ToolContentBlock[]} */ (result)
-          : [{ type: "text", text: JSON.stringify(result) }],
+      content: isContentBlocks
+        ? /** @type {ToolContentBlock[]} */ (result)
+        : [{ type: "text", text: JSON.stringify(result) }],
     };
     await replaceStub(toolMessage);
 

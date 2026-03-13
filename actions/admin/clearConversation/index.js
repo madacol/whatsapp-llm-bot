@@ -13,7 +13,6 @@ export default /** @type {defineAction} */ ((x) => x)({
     requireAdmin: true,
     autoExecute: true,
     autoContinue: true,
-    silent: true,
     useRootDb: true,
   },
   action_fn: async function ({ chatId, rootDb }) {

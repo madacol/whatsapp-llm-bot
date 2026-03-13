@@ -213,18 +213,18 @@ describe("LLM pipeline via createMessageHandler", () => {
     );
   });
 
-  it("silent action does not send result to user", async () => {
-    await seedChat("pipe-silent", { enabled: true });
+  it("recall_history stores full result in DB", async () => {
+    await seedChat("pipe-recall", { enabled: true });
 
     // Seed a message so recall_history has something to find
     await db.sql`INSERT INTO messages(chat_id, sender_id, message_data, timestamp)
-      VALUES ('pipe-silent', 'u1', '{"role":"user","content":[{"type":"text","text":"old msg"}]}', '2026-02-01 08:00:00')`;
+      VALUES ('pipe-recall', 'u1', '{"role":"user","content":[{"type":"text","text":"old msg"}]}', '2026-02-01 08:00:00')`;
 
     mockServer.addResponses(
       {
         tool_calls: [
           {
-            id: "call_silent_001",
+            id: "call_recall_001",
             type: "function",
             function: {
               name: "recall_history",
@@ -237,30 +237,25 @@ describe("LLM pipeline via createMessageHandler", () => {
     );
 
     const { context, responses } = createIncomingContext({
-      chatId: "pipe-silent",
+      chatId: "pipe-recall",
       content: [{ type: "text", text: "What did I say before?" }],
     });
     await handleMessage(context);
 
-    // The tool result should NOT be shown to the user
-    assert.ok(
-      !responses.some(r => r.text.includes("Recalled") || r.text.includes("old msg")),
-      `Silent action result should not be sent to user, but got: ${responses.map(r => r.text).join(" | ")}`,
-    );
-    // But the LLM should still get a follow-up and respond
+    // The LLM should get a follow-up and respond
     assert.ok(
       responses.some(r => r.text.includes("Based on the history")),
-      "Should have final LLM reply after silent tool",
+      "Should have final LLM reply after recall tool",
     );
 
-    // The tool result should be stored as a stub in the DB
+    // The tool result should be stored with full content in the DB
     const { rows: toolRows } = await db.sql`
       SELECT message_data FROM messages
-      WHERE chat_id = 'pipe-silent'
+      WHERE chat_id = 'pipe-recall'
         AND message_data::jsonb->>'role' = 'tool'`;
-    assert.equal(toolRows.length, 1, "Silent tool should store a stub in DB");
-    const stubData = toolRows[0].message_data;
-    assert.equal(stubData.content[0].text, "[recalled prior messages]", "Stub should not contain full result");
+    assert.equal(toolRows.length, 1, "Tool result should be stored in DB");
+    const resultData = toolRows[0].message_data;
+    assert.ok(resultData.content[0].text.includes("Recalled"), "Should contain full recall result");
   });
 
   it("clear then continue: LLM only sees post-clear messages", async () => {
