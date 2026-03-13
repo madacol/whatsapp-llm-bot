@@ -124,10 +124,10 @@ function formatToolResultForInspect(text) {
  * When the user reacts with 👁, the tool-call message is edited
  * to show the full text result (truncated at 3000 chars).
  * @param {MessageHandle} handle
- * @param {string} toolName
+ * @param {string} summary - display header (e.g. "*Bash*  _description_" or "*Edit*  `file.js`")
  * @param {ToolMessage} toolMessage
  */
-export function registerInspectHandler(handle, toolName, toolMessage) {
+export function registerInspectHandler(handle, summary, toolMessage) {
   if (!handle.keyId) return;
   handle.onReaction((emoji) => {
     if (!emoji.startsWith("👁")) return;
@@ -137,7 +137,7 @@ export function registerInspectHandler(handle, toolName, toolMessage) {
     const MAX = 3000;
     const display = text.length <= MAX ? text
       : text.slice(0, MAX) + `\n\n_… truncated (${text.length.toLocaleString()} chars total)_`;
-    handle.edit(`*${toolName}*\n\n${display}`);
+    handle.edit(`${summary}\n\n${display}`);
   });
 }
 

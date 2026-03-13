@@ -98,7 +98,10 @@ async function executeAndStoreTool({
 
   /** Register 👁 react-to-inspect on the tool-call message handle. */
   const registerInspect = (/** @type {ToolMessage} */ toolMessage) => {
-    if (handle) registerInspectHandler(handle, toolName, toolMessage);
+    if (handle) {
+      const summary = getToolCallSummary(toolName, toolArgs, actionFormatToolCall, cwd ?? null);
+      registerInspectHandler(handle, summary, toolMessage);
+    }
   };
 
   try {

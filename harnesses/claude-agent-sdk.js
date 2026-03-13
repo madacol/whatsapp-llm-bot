@@ -14,7 +14,7 @@ import { query } from "@anthropic-ai/claude-agent-sdk";
 import { randomUUID } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { NO_OP_HOOKS } from "./native.js";
-import { formatToolCallDisplay } from "../tool-display.js";
+import { formatToolCallDisplay, getToolCallSummary } from "../tool-display.js";
 import { getChatActions } from "../actions.js";
 import { createLogger } from "../logger.js";
 import { extractLastUserText } from "../message-formatting.js";
@@ -209,6 +209,7 @@ async function buildSystemPrompt(llmConfig, chatId, senderIds) {
  * @typedef {{
  *   handle?: MessageHandle,
  *   toolName: string,
+ *   summary?: string,
  * }} ActiveToolEntry
  */
 
@@ -514,6 +515,7 @@ export function createClaudeAgentSdkHarness() {
                 if (toolUseId) {
                   const toolCall = { id: toolUseId, name: input.tool_name, arguments: JSON.stringify(toolInput) };
                   const content = formatToolCallDisplay(toolCall, undefined, cwd, displayContext);
+                  const summary = getToolCallSummary(input.tool_name, toolInput, undefined, cwd);
                   /** @type {MessageHandle | undefined} */
                   let handle;
                   if (content != null) {
@@ -523,7 +525,7 @@ export function createClaudeAgentSdkHarness() {
                       log.warn("PreToolUse display failed:", errorToString(err));
                     }
                   }
-                  activeTools.set(toolUseId, { handle: handle ?? undefined, toolName: input.tool_name });
+                  activeTools.set(toolUseId, { handle: handle ?? undefined, toolName: input.tool_name, summary });
                 }
 
                 return {};
@@ -908,8 +910,13 @@ async function handleUserEvent(event, ctx) {
 
     // Register 👁 react-to-inspect on the tool-call message handle
     if (active?.handle) {
-      registerInspectHandler(active.handle, active.toolName, toolMsg);
+      const summary = active.summary ?? `*${active.toolName}*`;
+      registerInspectHandler(active.handle, summary, toolMsg);
+    } else if (active) {
+      log.warn(`No message handle for tool ${active.toolName} (${resolvedToolUseId}) — 👁 inspect unavailable`);
     }
+  } else if (active) {
+    log.warn(`No result text extracted for tool ${active.toolName} (${resolvedToolUseId}) — 👁 inspect unavailable`);
   }
 
   ctx.activeTools.delete(resolvedToolUseId);
