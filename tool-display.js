@@ -14,7 +14,7 @@ import { maxCharsForLineCount } from "./code-image-renderer.js";
  * @param {string | null | undefined} cwd
  * @returns {string}
  */
-function shortenPath(p, cwd) {
+export function shortenPath(p, cwd) {
   if (!cwd) return p;
   if (p === cwd) return ".";
   if (p.startsWith(cwd + "/")) return "." + p.slice(cwd.length);
@@ -246,9 +246,10 @@ export function getToolCallSummary(name, args, formatToolCall, cwd) {
  * @param {LlmChatResponse['toolCalls'][0]} toolCall
  * @param {((params: Record<string, any>) => string)} [actionFormatter]
  * @param {string | null} [cwd]
+ * @param {{ oldContent?: string }} [context]
  * @returns {SendContent | null}
  */
-export function formatToolCallDisplay(toolCall, actionFormatter, cwd) {
+export function formatToolCallDisplay(toolCall, actionFormatter, cwd, context) {
   const args = parseToolArgs(toolCall.arguments);
 
   const name = toolCall.name;
@@ -273,6 +274,8 @@ export function formatToolCallDisplay(toolCall, actionFormatter, cwd) {
     const blocks = [];
     if (name === "Edit" && typeof args.old_string === "string" && typeof args.new_string === "string" && lang) {
       blocks.push({ type: "diff", oldStr: args.old_string, newStr: args.new_string, language: lang, caption: header });
+    } else if (name === "Write" && context?.oldContent != null && typeof args.content === "string" && lang) {
+      blocks.push({ type: "diff", oldStr: context.oldContent, newStr: args.content, language: lang, caption: header });
     } else if (name === "Write" && typeof args.content === "string" && args.content.trim() && lang) {
       blocks.push({ type: "code", code: args.content, language: lang, caption: header });
     } else {

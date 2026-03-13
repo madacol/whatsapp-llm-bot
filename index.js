@@ -61,10 +61,11 @@ function isTextBlock(block) {
  * @param {Pick<ExecuteActionContext, "send">} context
  * @param {((params: Record<string, any>) => string)} [actionFormatter]
  * @param {string | null} [cwd]
+ * @param {{ oldContent?: string }} [toolContext]
  * @returns {Promise<MessageHandle | undefined>}
  */
-async function displayToolCall(toolCall, context, actionFormatter, cwd) {
-  const content = formatToolCallDisplay(toolCall, actionFormatter, cwd);
+async function displayToolCall(toolCall, context, actionFormatter, cwd, toolContext) {
+  const content = formatToolCallDisplay(toolCall, actionFormatter, cwd, toolContext);
   if (content != null) {
     return context.send("tool-call", content);
   }
@@ -481,8 +482,9 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
         // Map enriched label back to original label
         return labelMap.get(choice) ?? choice;
       },
-      onToolCall: async (toolCall, fmt) => {
-        return displayToolCall(toolCall, context, fmt, chatInfo?.harness_cwd ?? null);
+      onToolCall: async (toolCall, fmt, toolContext) => {
+        const cwd = chatInfo?.harness_cwd ?? null;
+        return displayToolCall(toolCall, context, fmt, cwd, toolContext);
       },
       onToolResult: async (blocks) => { await context.send("tool-result", blocks); },
       onToolError: async (msg) => { await context.send("error", msg); },
