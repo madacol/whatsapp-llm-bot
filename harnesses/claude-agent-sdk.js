@@ -14,49 +14,7 @@ import { query } from "@anthropic-ai/claude-agent-sdk";
 import { randomUUID } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { NO_OP_HOOKS } from "./native.js";
-
-// ── Write old-content capture ──────────────────────────────────────────────
-// PreToolUse (runs before the SDK writes the file) resolves a deferred with
-// the previous content.  onToolCall (may run before or after PreToolUse due
-// to event-loop ordering) awaits the same deferred.  Whichever runs first
-// creates the entry; the other resolves or consumes it.
-
-/** @typedef {{ promise: Promise<string | undefined>, resolve: (v: string | undefined) => void }} WriteDeferred */
-
-/** @type {Map<string, WriteDeferred>} */
-const writeDeferreds = new Map();
-
-/**
- * Get or create a deferred for a Write tool_use ID.
- * @param {string} toolUseId
- * @returns {WriteDeferred}
- */
-function getWriteDeferred(toolUseId) {
-  let entry = writeDeferreds.get(toolUseId);
-  if (!entry) {
-    /** @type {(v: string | undefined) => void} */
-    let resolve = () => {};
-    const promise = new Promise(r => { resolve = r; });
-    entry = { promise, resolve };
-    writeDeferreds.set(toolUseId, entry);
-  }
-  return entry;
-}
-
-/**
- * Await the old file content for a Write tool call, captured by the PreToolUse
- * hook.  Returns `undefined` for new files.  Times out after 5 s so a missed
- * hook never blocks the display path forever.
- * @param {string} toolUseId
- * @returns {Promise<string | undefined>}
- */
-export async function awaitWriteOldContent(toolUseId) {
-  const entry = getWriteDeferred(toolUseId);
-  const timeout = new Promise(r => setTimeout(() => r(undefined), 5_000));
-  const result = /** @type {string | undefined} */ (await Promise.race([entry.promise, timeout]));
-  writeDeferreds.delete(toolUseId);
-  return result;
-}
+import { formatToolCallDisplay } from "../tool-display.js";
 import { getChatActions } from "../actions.js";
 import { createLogger } from "../logger.js";
 import { extractLastUserText } from "../message-formatting.js";
@@ -487,6 +445,10 @@ export function createClaudeAgentSdkHarness() {
     /** @type {string[]} */
     const stderrLines = [];
     let stderrBytes = 0;
+
+    /** @type {Map<string, ActiveToolEntry>} */
+    const activeTools = new Map();
+
     try {
       /** @type {import("@anthropic-ai/claude-agent-sdk").Options} */
       const queryOptions = {
@@ -532,21 +494,38 @@ export function createClaudeAgentSdkHarness() {
         },
         hooks: {
           PreToolUse: [{
-            matcher: "Write",
             hooks: [
               /** @type {import("@anthropic-ai/claude-agent-sdk").HookCallback} */
               async (hookInput, toolUseId) => {
                 const input = /** @type {import("@anthropic-ai/claude-agent-sdk").PreToolUseHookInput} */ (hookInput);
                 const toolInput = /** @type {Record<string, unknown>} */ (input.tool_input);
-                const filePath = typeof toolInput.file_path === "string" ? toolInput.file_path : null;
-                if (toolUseId) {
-                  const deferred = getWriteDeferred(toolUseId);
+
+                // Capture old content for Write overwrites
+                /** @type {{ oldContent?: string } | undefined} */
+                let displayContext;
+                if (input.tool_name === "Write") {
+                  const filePath = typeof toolInput.file_path === "string" ? toolInput.file_path : null;
                   if (filePath && existsSync(filePath)) {
-                    deferred.resolve(readFileSync(filePath, "utf-8"));
-                  } else {
-                    deferred.resolve(undefined);
+                    displayContext = { oldContent: readFileSync(filePath, "utf-8") };
                   }
                 }
+
+                // Display tool call and store handle for inspect handler
+                if (toolUseId) {
+                  const toolCall = { id: toolUseId, name: input.tool_name, arguments: JSON.stringify(toolInput) };
+                  const content = formatToolCallDisplay(toolCall, undefined, cwd, displayContext);
+                  /** @type {MessageHandle | undefined} */
+                  let handle;
+                  if (content != null) {
+                    try {
+                      handle = await session.context.send("tool-call", content);
+                    } catch (err) {
+                      log.warn("PreToolUse display failed:", errorToString(err));
+                    }
+                  }
+                  activeTools.set(toolUseId, { handle: handle ?? undefined, toolName: input.tool_name });
+                }
+
                 return {};
               },
             ],
@@ -583,9 +562,6 @@ export function createClaudeAgentSdkHarness() {
           .then((models) => { cachedModels = models; })
           .catch((err) => log.warn("Failed to fetch SDK models:", err));
       }
-
-      /** @type {Map<string, ActiveToolEntry>} */
-      const activeTools = new Map();
 
       /** @type {SdkEventContext} */
       const ctx = { result, messages, activeTools, hooks, session };
@@ -851,16 +827,7 @@ async function handleAssistantEvent(event, ctx) {
         const name = /** @type {string} */ (block.name);
         const id = /** @type {string} */ (block.id);
         log.debug(`  block: tool_use ${name}`);
-        const oldContent = name === "Write" ? await awaitWriteOldContent(id) : undefined;
-        const handle = await ctx.hooks.onToolCall(
-          { id, name, arguments: JSON.stringify(block.input) },
-          undefined,
-          oldContent != null ? { oldContent } : undefined,
-        );
-        ctx.activeTools.set(id, {
-          handle: handle ?? undefined,
-          toolName: name,
-        });
+        // Display + activeTools entry already handled by PreToolUse hook
         storedBlocks.push({
           type: "tool",
           tool_id: id,
