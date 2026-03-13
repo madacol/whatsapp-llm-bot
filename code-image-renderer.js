@@ -1,6 +1,9 @@
 import { createHighlighter } from "shiki";
 import { Resvg } from "@resvg/resvg-js";
 import { diffLines } from "diff";
+import { createLogger } from "./logger.js";
+
+const log = createLogger("code-image-renderer");
 
 export const MIN_LINES_FOR_IMAGE = 5;
 const FONT_SIZE = 14;
@@ -217,11 +220,16 @@ export async function renderCodeToImages(code, language) {
   const lines = result.tokens.map(tokens => ({ tokens }));
 
   // Strip trailing empty lines (e.g. from trailing newlines in the source)
-  while (lines.length > 1) {
+  while (lines.length > 0) {
     const last = lines[lines.length - 1];
     const text = last.tokens.map(t => t.content).join("");
     if (text.trim()) break;
     lines.pop();
+  }
+
+  if (lines.length === 0) {
+    log.warn("renderCodeToImages called with empty code, skipping image render");
+    return [];
   }
 
   return renderAnnotatedLines(lines);
