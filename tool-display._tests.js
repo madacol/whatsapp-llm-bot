@@ -141,7 +141,7 @@ describe("formatSdkToolCall", () => {
 describe("formatToolCallDisplay", () => {
   it("renders Bash as code block with description as caption", () => {
     const result = formatToolCallDisplay(
-      tc("Bash", { command: "npm test", description: "Run tests" }), true
+      tc("Bash", { command: "npm test", description: "Run tests" })
     );
     assert.ok(Array.isArray(result));
     const block = /** @type {CodeContentBlock} */ (result[0]);
@@ -153,7 +153,7 @@ describe("formatToolCallDisplay", () => {
   it("wraps long Bash commands in code block to fit aspect ratio", () => {
     const longCmd = "pnpm exec tsc --noEmit --project jsconfig.json --strict --noUnusedLocals --noUnusedParameters --skipLibCheck";
     const result = formatToolCallDisplay(
-      tc("Bash", { command: longCmd, description: "Type check" }), true
+      tc("Bash", { command: longCmd, description: "Type check" })
     );
     assert.ok(Array.isArray(result));
     const block = /** @type {CodeContentBlock} */ (result[0]);
@@ -166,7 +166,7 @@ describe("formatToolCallDisplay", () => {
 
   it("renders Edit as diff block for known languages", () => {
     const result = formatToolCallDisplay(
-      tc("Edit", { file_path: "/a.js", old_string: "foo", new_string: "bar" }), true
+      tc("Edit", { file_path: "/a.js", old_string: "foo", new_string: "bar" })
     );
     assert.ok(Array.isArray(result));
     assert.equal(result[0].type, "diff");
@@ -174,19 +174,21 @@ describe("formatToolCallDisplay", () => {
 
   it("renders Edit as text fallback for unknown languages", () => {
     const result = formatToolCallDisplay(
-      tc("Edit", { file_path: "/a.xyz", old_string: "foo", new_string: "bar" }), true
+      tc("Edit", { file_path: "/a.xyz", old_string: "foo", new_string: "bar" })
     );
     assert.ok(Array.isArray(result));
     assert.equal(result[0].type, "text");
   });
 
-  it("in non-debug mode, returns just the description when present", () => {
-    const result = formatToolCallDisplay(tc("anything", { description: "doing stuff" }), false);
-    assert.equal(result, "doing stuff");
+  it("always shows bold tool name with args for generic tools", () => {
+    const result = formatToolCallDisplay(tc("anything", { description: "doing stuff" }));
+    assert.ok(typeof result === "string");
+    assert.ok(result.includes("*anything*"), "should have bold name");
+    assert.ok(result.includes("doing stuff"), "should include args");
   });
 
-  it("in non-debug mode without description, Bash still renders as code block", () => {
-    const result = formatToolCallDisplay(tc("Bash", { command: "ls" }), false);
+  it("Bash always renders as code block", () => {
+    const result = formatToolCallDisplay(tc("Bash", { command: "ls" }));
     assert.ok(Array.isArray(result));
     assert.equal(result[0].type, "code");
   });

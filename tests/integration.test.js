@@ -377,41 +377,38 @@ describe("Scenario 11: Group stores messages even when not responding", () => {
 });
 
 // ═══════════════════════════════════════════════════════════════════
-// Scenario 12: Debug mode — gates tool call verbose output
+// Scenario 12: Tool call display — always verbose
 // ═══════════════════════════════════════════════════════════════════
-describe("Scenario 12: Debug mode gates tool call output", () => {
-  it("shows compact tool call but no result when debug is off", async () => {
-    const chat = await t.chat("s12-debug-off", { enabled: true });
-    const r = await chat.send("Test debug off", {
+describe("Scenario 12: Tool call display is always verbose", () => {
+  it("shows bold tool name with args even without debug mode", async () => {
+    const chat = await t.chat("s12-verbose", { enabled: true });
+    const r = await chat.send("Test verbose", {
       llm: [toolCall("run_javascript", { code: "() => 'hello'" }), "Final answer"],
     });
 
     assert.ok(r.raw.some(x => x.text.includes("Final answer")), "Should have the final LLM reply");
-    assert.ok(r.raw.some(x => x.source === "tool-call" && x.text.startsWith("run_javascript: ")),
-      `Should show compact tool call, got: ${r.raw.map(x=>x.text).join(" | ")}`);
-    assert.ok(!r.raw.some(x => x.source === "tool-result"),
-      `Should NOT show result for autoContinue tool in non-debug, got: ${r.raw.map(x=>x.text).join(" | ")}`);
+    assert.ok(r.raw.some(x => x.source === "tool-call" && x.text.includes("*run_javascript*")),
+      `Should show bold tool name, got: ${r.raw.map(x=>x.text).join(" | ")}`);
   });
 
-  it("shows formatted tool call from formatToolCall in compact mode", async () => {
-    const chat = await t.chat("s12-debug-off", { enabled: true });
+  it("shows formatted tool call from actionFormatter", async () => {
+    const chat = await t.chat("s12-verbose", { enabled: true });
     const r = await chat.send("Show settings", {
       llm: [toolCall("chat_settings", { setting: "model" })],
     });
 
-    assert.ok(r.raw.some(x => x.source === "tool-call" && x.text === "chat_settings: Getting model"),
-      `Should show formatted tool call, got: ${r.raw.map(x=>x.text).join(" | ")}`);
+    assert.ok(r.raw.some(x => x.source === "tool-call" && x.text.includes("chat_settings")),
+      `Should show tool call, got: ${r.raw.map(x=>x.text).join(" | ")}`);
   });
 
-  it("DOES send tool call args and results when debug is on", async () => {
-    const chat = await t.chat("s12-debug-on", { enabled: true, debug: true });
-    const r = await chat.send("Test debug on", {
-      llm: [toolCall("run_javascript", { code: "() => 'hello'" }), "Final answer debug on"],
+  it("shows usage info without requiring debug mode", async () => {
+    const chat = await t.chat("s12-usage", { enabled: true });
+    const r = await chat.send("Test usage", {
+      llm: "Simple answer",
     });
 
-    assert.ok(r.raw.some(x => x.text.includes("Final answer debug on")), "Should have the final LLM reply");
-    assert.ok(r.raw.some(x => x.source === "tool-call"), "Tool call args should be shown when debug is on");
-    assert.ok(r.raw.some(x => x.type === "edit" && x.source === "tool-call"), "Tool call message should be edited in-place with summary");
+    assert.ok(r.raw.some(x => x.source === "usage"),
+      `Should show usage info, got: ${r.raw.map(x => `${x.source}:${x.text}`).join(" | ")}`);
   });
 });
 
