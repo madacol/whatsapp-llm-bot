@@ -47,6 +47,85 @@ function hasCommand(a) {
 }
 
 /**
+ * Build the AgentIOHooks wiring from a message context.
+ * Pure factory — no shared mutable state.
+ * @param {Pick<ExecuteActionContext, "send" | "reply" | "select" | "confirm">} context
+ * @param {() => Promise<void>} sendComposing
+ * @param {string | null} cwd
+ * @returns {AgentIOHooks}
+ */
+function buildAgentIOHooks(context, sendComposing, cwd) {
+  return {
+    onComposing: sendComposing,
+    onLlmResponse: async (text) => { await context.reply("llm", [{ type: "markdown", text }]); },
+    onAskUser: async (question, options, _preamble, descriptions) => {
+      // Embed descriptions into poll labels when available
+      /** @type {Map<string, string>} enriched label → original label */
+      const labelMap = new Map();
+      const pollOptions = options.map((label, i) => {
+        const desc = descriptions?.[i];
+        const enriched = desc ? `${label}\n\n${desc}` : label;
+        labelMap.set(enriched, label);
+        return enriched;
+      });
+
+      const choice = await context.select(question || "Choose an option:", pollOptions, {
+        deleteOnSelect: true,
+      });
+      // Map enriched label back to original label
+      return labelMap.get(choice) ?? choice;
+    },
+    onToolCall: async (toolCall, fmt, toolContext) => {
+      return displayToolCall(toolCall, context, fmt, cwd, toolContext);
+    },
+    onToolResult: async (blocks) => { await context.send("tool-result", blocks); },
+    onToolError: async (msg) => { await context.send("error", msg); },
+    onContinuePrompt: () => context.confirm(`React 👍 to continue or 👎 to stop.`),
+    onDepthLimit: () => context.confirm(
+      `⚠️ *Depth limit*\n\nReached maximum tool call depth (${MAX_TOOL_CALL_DEPTH}). React 👍 to continue or 👎 to stop.`,
+    ),
+    onUsage: async (cost, tokens) => {
+      await context.send("usage", `Cost: ${cost} | prompt=${tokens.prompt} cached=${tokens.cached} completion=${tokens.completion}`);
+    },
+  };
+}
+
+/**
+ * Search long-term memory for relevant context and append to system prompt.
+ * Returns the (possibly extended) system prompt.
+ * @param {object} opts
+ * @param {string} opts.chatId
+ * @param {import("./store.js").ChatRow | undefined} opts.chatInfo
+ * @param {UserMessage} opts.message
+ * @param {LlmClient} opts.llmClient
+ * @param {string} opts.systemPrompt
+ * @param {Pick<ExecuteActionContext, "send">} opts.context
+ * @returns {Promise<string>}
+ */
+async function searchAndAppendMemories({ chatId, chatInfo, message, llmClient, systemPrompt, context }) {
+  const currentText = extractTextFromMessage(message);
+  if (currentText.length < 10) return systemPrompt;
+
+  try {
+    const threshold = chatInfo?.memory_threshold ?? config.memory_threshold;
+    const similar = await findMemories(getRootDb(), llmClient, chatId, currentText, { minSimilarity: threshold });
+    log.debug(`[memory] query="${currentText.slice(0, 80)}" found=${similar.length} threshold=${threshold}`);
+    if (similar.length > 0) {
+      const extended = systemPrompt + "\n\n## Relevant memories\n" + formatMemoriesContext(similar);
+      log.debug("[memory] recalled:", similar.map(m => `#${m.id}(${Number(m.similarity).toFixed(3)})`).join(", "));
+      const lines = similar.map(m =>
+        `• [#${m.id}] (score: ${Number(m.similarity).toFixed(3)}) ${m.content.slice(0, 100)}${m.content.length > 100 ? "…" : ""}`
+      );
+      await context.send("memory", `Recalled ${similar.length} memor${similar.length === 1 ? "y" : "ies"}\n${lines.join("\n")}`);
+      return extended;
+    }
+  } catch (err) {
+    log.error("Memory search failed:", err);
+  }
+  return systemPrompt;
+}
+
+/**
  * Type guard: checks that a content block is a text block.
  * @param {IncomingContentBlock} block
  * @returns {block is TextContentBlock}
@@ -420,24 +499,7 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
 
     // Search long-term memory for relevant past conversations
     if (enableMemory) {
-      const currentText = extractTextFromMessage(message);
-      if (currentText.length >= 10) {
-        try {
-          const threshold = chatInfo?.memory_threshold ?? config.memory_threshold;
-          const similar = await findMemories(getRootDb(), llmClient, chatId, currentText, { minSimilarity: threshold });
-          log.debug(`[memory] query="${currentText.slice(0, 80)}" found=${similar.length} threshold=${threshold}`);
-          if (similar.length > 0) {
-            systemPrompt += "\n\n## Relevant memories\n" + formatMemoriesContext(similar);
-            log.debug("[memory] recalled:", similar.map(m => `#${m.id}(${Number(m.similarity).toFixed(3)})`).join(", "));
-            const lines = similar.map(m =>
-              `• [#${m.id}] (score: ${Number(m.similarity).toFixed(3)}) ${m.content.slice(0, 100)}${m.content.length > 100 ? "…" : ""}`
-            );
-            await context.send("memory", `Recalled ${similar.length} memor${similar.length === 1 ? "y" : "ies"}\n${lines.join("\n")}`);
-          }
-        } catch (err) {
-          log.error("Memory search failed:", err);
-        }
-      }
+      systemPrompt = await searchAndAppendMemories({ chatId, chatInfo, message, llmClient, systemPrompt, context });
     }
 
     // Prepare messages (internal Message[] format)
@@ -461,41 +523,7 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
       executeActionFn, actionResolver, actionLlmClient: llmClient,
     };
 
-    /** @type {AgentIOHooks} */
-    const hooks = {
-      onComposing: sendComposing,
-      onLlmResponse: async (text) => { await context.reply("llm", [{ type: "markdown", text }]); },
-      onAskUser: async (question, options, _preamble, descriptions) => {
-        // Embed descriptions into poll labels when available
-        /** @type {Map<string, string>} enriched label → original label */
-        const labelMap = new Map();
-        const pollOptions = options.map((label, i) => {
-          const desc = descriptions?.[i];
-          const enriched = desc ? `${label}\n\n${desc}` : label;
-          labelMap.set(enriched, label);
-          return enriched;
-        });
-
-        const choice = await context.select(question || "Choose an option:", pollOptions, {
-          deleteOnSelect: true,
-        });
-        // Map enriched label back to original label
-        return labelMap.get(choice) ?? choice;
-      },
-      onToolCall: async (toolCall, fmt, toolContext) => {
-        const cwd = chatInfo?.harness_cwd ?? null;
-        return displayToolCall(toolCall, context, fmt, cwd, toolContext);
-      },
-      onToolResult: async (blocks) => { await context.send("tool-result", blocks); },
-      onToolError: async (msg) => { await context.send("error", msg); },
-      onContinuePrompt: () => context.confirm(`React 👍 to continue or 👎 to stop.`),
-      onDepthLimit: () => context.confirm(
-        `⚠️ *Depth limit*\n\nReached maximum tool call depth (${MAX_TOOL_CALL_DEPTH}). React 👍 to continue or 👎 to stop.`,
-      ),
-      onUsage: async (cost, tokens) => {
-        await context.send("usage", `Cost: ${cost} | prompt=${tokens.prompt} cached=${tokens.cached} completion=${tokens.completion}`);
-      },
-    };
+    const hooks = buildAgentIOHooks(context, sendComposing, chatInfo?.harness_cwd ?? null);
 
     // Append any messages that arrived during setup to the conversation
     const buffered = pendingLlmChats.get(chatId) ?? [];

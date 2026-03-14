@@ -982,7 +982,6 @@ async function handleUserEvent(event, ctx) {
   ctx.activeTools.delete(resolvedToolUseId);
 }
 
-
 /**
  * Handle an SDK "tool_use_summary" event: display summary as a tool call.
  * @param {{ summary?: string }} event
