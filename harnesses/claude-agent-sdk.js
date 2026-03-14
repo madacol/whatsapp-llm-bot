@@ -14,7 +14,8 @@ import { query } from "@anthropic-ai/claude-agent-sdk";
 import { randomUUID } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { NO_OP_HOOKS } from "./native.js";
-import { formatToolCallDisplay, getToolCallSummary } from "../tool-display.js";
+import { formatToolCallDisplay, getToolCallSummary, langFromPath, shortenPath } from "../tool-display.js";
+import { shouldRenderAsImage } from "../message-renderer.js";
 import { getChatActions } from "../actions.js";
 import { createLogger } from "../logger.js";
 import { extractLastUserText } from "../message-formatting.js";
@@ -210,6 +211,7 @@ async function buildSystemPrompt(llmConfig, chatId, senderIds) {
  *   handle?: MessageHandle,
  *   toolName: string,
  *   summary?: string,
+ *   filePath?: string,
  * }} ActiveToolEntry
  */
 
@@ -221,6 +223,7 @@ async function buildSystemPrompt(llmConfig, chatId, senderIds) {
  *   activeTools: Map<string, ActiveToolEntry>,
  *   hooks: Required<AgentIOHooks>,
  *   session: AgentHarnessParams["session"],
+ *   cwd: string | null | undefined,
  * }} SdkEventContext
  */
 
@@ -522,7 +525,12 @@ export function createClaudeAgentSdkHarness() {
                       log.warn("PreToolUse display failed:", errorToString(err));
                     }
                   }
-                  activeTools.set(toolUseId, { handle: handle ?? undefined, toolName: input.tool_name, summary });
+                  activeTools.set(toolUseId, {
+                    handle: handle ?? undefined,
+                    toolName: input.tool_name,
+                    summary,
+                    ...(filePath && { filePath }),
+                  });
                 }
 
                 return {};
@@ -563,7 +571,7 @@ export function createClaudeAgentSdkHarness() {
       }
 
       /** @type {SdkEventContext} */
-      const ctx = { result, messages, activeTools, hooks, session };
+      const ctx = { result, messages, activeTools, hooks, session, cwd: cwd ?? null };
 
       let eventCount = 0;
 
@@ -951,11 +959,39 @@ async function handleUserEvent(event, ctx) {
     } else if (active) {
       log.warn(`No message handle for tool ${active.toolName} (${resolvedToolUseId}) — 👁 inspect unavailable`);
     }
+
+    // Send Read results as syntax-highlighted code images
+    if (active?.toolName === "Read" && active.filePath && resultText) {
+      await sendReadCodeImage(active.filePath, resultText, ctx);
+    }
   } else if (active) {
     log.warn(`No result text extracted for tool ${active.toolName} (${resolvedToolUseId}) — 👁 inspect unavailable`);
   }
 
   ctx.activeTools.delete(resolvedToolUseId);
+}
+
+/**
+ * Send Read tool output as a syntax-highlighted code image.
+ * Only renders if the file is a recognized code language with enough lines.
+ * @param {string} filePath
+ * @param {string} resultText
+ * @param {SdkEventContext} ctx
+ */
+async function sendReadCodeImage(filePath, resultText, ctx) {
+  try {
+    const lang = langFromPath(filePath);
+    // Strip line number prefixes (SDK Read uses "  N→" or "  N\t" format)
+    const stripped = resultText.replace(/^\s*\d+[\t→]\s?/gm, "");
+    if (!lang || !shouldRenderAsImage(lang, stripped) || stripped.length > 20_000) return;
+
+    const caption = `*Read*  \`${shortenPath(filePath, ctx.cwd ?? null)}\``;
+    /** @type {CodeContentBlock} */
+    const codeBlock = { type: "code", code: stripped, language: lang, caption };
+    await ctx.session.context.send("tool-result", [codeBlock]);
+  } catch (err) {
+    log.warn("Read code image rendering failed:", errorToString(err));
+  }
 }
 
 /**
