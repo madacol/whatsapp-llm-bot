@@ -113,7 +113,7 @@ describe("extractToolResultText", () => {
 // ── extractToolResultFromEvent ──
 
 describe("extractToolResultFromEvent", () => {
-  it("extracts toolUseId from parent_tool_use_id", () => {
+  it("falls back to parent_tool_use_id when no content block ID exists", () => {
     const event = {
       type: "user",
       parent_tool_use_id: "tool-123",
@@ -151,6 +151,25 @@ describe("extractToolResultFromEvent", () => {
     const { toolUseId, resultText } = extractToolResultFromEvent(event);
     assert.equal(toolUseId, "tool-456");
     assert.equal(resultText, "block result");
+  });
+
+  it("prefers content block tool_use_id over parent_tool_use_id (sub-agent fix)", () => {
+    // Sub-agent events have parent_tool_use_id pointing to the Agent tool call,
+    // but the content block has the individual tool call ID we actually need.
+    const event = {
+      type: "user",
+      parent_tool_use_id: "agent-tool-999",
+      message: {
+        role: "user",
+        content: [
+          { type: "tool_result", tool_use_id: "bash-456", content: "command output" },
+        ],
+      },
+      session_id: "s1",
+    };
+    const { toolUseId, resultText } = extractToolResultFromEvent(event);
+    assert.equal(toolUseId, "bash-456", "should use content block ID, not parent_tool_use_id");
+    assert.equal(resultText, "command output");
   });
 
   it("extracts text from nested content array in tool_result block", () => {
@@ -194,5 +213,19 @@ describe("extractToolResultFromEvent", () => {
     };
     const { resultText } = extractToolResultFromEvent(event);
     assert.equal(resultText, "direct string");
+  });
+
+  it("sub-agent event with tool_use_result but no content blocks uses parent_tool_use_id", () => {
+    // When no content block provides a tool_use_id, fall back to parent_tool_use_id
+    const event = {
+      type: "user",
+      parent_tool_use_id: "agent-tool-999",
+      tool_use_result: "some output",
+      message: { role: "user", content: "" },
+      session_id: "s1",
+    };
+    const { toolUseId, resultText } = extractToolResultFromEvent(event);
+    assert.equal(toolUseId, "agent-tool-999");
+    assert.equal(resultText, "some output");
   });
 });

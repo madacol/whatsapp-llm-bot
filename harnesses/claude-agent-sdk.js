@@ -680,8 +680,11 @@ export function createClaudeAgentSdkHarness() {
 /**
  * Extract tool use ID and result text from an SDKUserMessage.
  *
- * The SDK's `parent_tool_use_id` is often null for built-in tools, so we also
- * look inside `message.content` for `tool_result` blocks which carry the ID.
+ * Tool use ID resolution order:
+ * 1. `message.content` tool_result blocks — carry the individual tool call ID
+ *    (accurate for both main-agent and sub-agent results)
+ * 2. `parent_tool_use_id` — fallback; for sub-agent events this points to the
+ *    Agent tool call (not the individual tool), so it must not take priority.
  *
  * Result text is extracted from (in order):
  * 1. `tool_use_result` — convenience field (may be absent for built-in tools)
@@ -692,7 +695,7 @@ export function createClaudeAgentSdkHarness() {
  */
 export function extractToolResultFromEvent(userEvent) {
   /** @type {string | null} */
-  let toolUseId = userEvent.parent_tool_use_id ?? null;
+  let toolUseId = null;
   /** @type {string | null} */
   let resultText = null;
 
@@ -702,7 +705,7 @@ export function extractToolResultFromEvent(userEvent) {
   }
 
   // Source 2: message.content — array of content blocks (tool_result blocks)
-  // Also used to resolve toolUseId when parent_tool_use_id is null.
+  // Preferred source for toolUseId (accurate for both main and sub-agent events).
   const message = userEvent.message;
   if (message && typeof message === "object" && "content" in message) {
     const content = /** @type {unknown} */ (message.content);
@@ -721,7 +724,7 @@ export function extractToolResultFromEvent(userEvent) {
         const b = /** @type {Record<string, unknown>} */ (block);
         // tool_result block: { type: "tool_result", tool_use_id: "...", content: "..." | [...] }
         if (b.type === "tool_result") {
-          // Resolve toolUseId from content block when parent_tool_use_id is null
+          // Prefer tool_use_id from content block (accurate for both main and sub-agent)
           if (!toolUseId && typeof b.tool_use_id === "string") {
             toolUseId = b.tool_use_id;
           }
@@ -745,6 +748,13 @@ export function extractToolResultFromEvent(userEvent) {
       }
       if (resultText == null && texts.length > 0) resultText = texts.join("\n");
     }
+  }
+
+  // Fallback: use parent_tool_use_id only when no tool_use_id was found in content blocks.
+  // For sub-agent events, parent_tool_use_id points to the Agent tool call, not the
+  // individual tool — so it must not override the content block ID.
+  if (!toolUseId) {
+    toolUseId = userEvent.parent_tool_use_id ?? null;
   }
 
   return { toolUseId, resultText };
@@ -786,6 +796,17 @@ export function extractToolResultText(result) {
 // ── SDK event handlers ──────────────────────────────────────────────────
 
 /**
+ * Check whether an SDK event originates from a sub-agent.
+ * Sub-agent events have a non-null `parent_tool_use_id` pointing
+ * to the Agent tool call that spawned them.
+ * @param {{ parent_tool_use_id?: string | null }} event
+ * @returns {boolean}
+ */
+function isSubagentEvent(event) {
+  return event.parent_tool_use_id != null;
+}
+
+/**
  * Build a debug label for an SDK event (used for log.debug tracing).
  * @param {{ type: string, message?: { content?: Array<Record<string, unknown>> } }} event
  * @returns {string}
@@ -806,10 +827,15 @@ function getSdkEventLabel(event) {
 
 /**
  * Handle an SDK "assistant" event: dispatch text/tool blocks to hooks and persist.
- * @param {{ message: { content?: Array<Record<string, unknown>>, usage?: Record<string, number> } }} event
+ *
+ * Sub-agent events (parent_tool_use_id != null) are displayed with an "*Agent:*"
+ * prefix but not persisted to the conversation history — the SDK manages
+ * sub-agent history internally.
+ * @param {{ message: { content?: Array<Record<string, unknown>>, usage?: Record<string, number> }, parent_tool_use_id?: string | null }} event
  * @param {SdkEventContext} ctx
  */
 async function handleAssistantEvent(event, ctx) {
+  const isSubagent = isSubagentEvent(event);
   const betaMessage = event.message;
   if (betaMessage.content) {
     /** @type {(TextContentBlock | ToolCallContentBlock)[]} */
@@ -818,14 +844,17 @@ async function handleAssistantEvent(event, ctx) {
     for (const block of betaMessage.content) {
       if (block.type === "text") {
         const text = /** @type {string} */ (block.text);
-        log.debug(`  block: text len=${text.length}`);
-        await ctx.hooks.onLlmResponse(text);
-        ctx.result.response.push({ type: "text", text });
+        log.debug(`  block: text len=${text.length} subagent=${isSubagent}`);
+        const displayText = isSubagent ? `*Agent:* ${text}` : text;
+        await ctx.hooks.onLlmResponse(displayText);
+        if (!isSubagent) {
+          ctx.result.response.push({ type: "text", text });
+        }
         storedBlocks.push({ type: "text", text });
       } else if (block.type === "tool_use") {
         const name = /** @type {string} */ (block.name);
         const id = /** @type {string} */ (block.id);
-        log.debug(`  block: tool_use ${name}`);
+        log.debug(`  block: tool_use ${name} subagent=${isSubagent}`);
         // Display + activeTools entry already handled by PreToolUse hook
         storedBlocks.push({
           type: "tool",
@@ -836,7 +865,8 @@ async function handleAssistantEvent(event, ctx) {
       }
     }
 
-    if (storedBlocks.length > 0) {
+    // Only persist main-agent messages to conversation history
+    if (!isSubagent && storedBlocks.length > 0) {
       /** @type {AssistantMessage} */
       const assistantMsg = { role: "assistant", content: storedBlocks };
       ctx.messages.push(assistantMsg);
@@ -889,11 +919,17 @@ async function handleResultEvent(event, ctx) {
 
 
 /**
- * Handle an SDK "user" event (tool result): persist result and restore tool display.
+ * Handle an SDK "user" event (tool result): persist and register inspect.
+ *
+ * Main and sub-agent tool results are treated the same — persisted to DB
+ * and wired up for 👁 inspect. The only difference: sub-agent results are
+ * not pushed to ctx.messages (the in-memory LLM context) since the SDK
+ * manages sub-agent history internally.
  * @param {import("@anthropic-ai/claude-agent-sdk").SDKUserMessage} event
  * @param {SdkEventContext} ctx
  */
 async function handleUserEvent(event, ctx) {
+  const isSubagent = isSubagentEvent(event);
   const { toolUseId: resolvedToolUseId, resultText } = extractToolResultFromEvent(event);
 
   if (!resolvedToolUseId) return;
@@ -902,7 +938,10 @@ async function handleUserEvent(event, ctx) {
 
   if (resultText != null) {
     const toolMsg = createToolMessage(resolvedToolUseId, resultText);
-    ctx.messages.push(toolMsg);
+
+    if (!isSubagent) {
+      ctx.messages.push(toolMsg);
+    }
     await ctx.session.addMessage(ctx.session.chatId, toolMsg, ctx.session.senderIds, active?.handle?.keyId);
 
     // Register 👁 react-to-inspect on the tool-call message handle
