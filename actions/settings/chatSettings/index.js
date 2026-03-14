@@ -20,7 +20,7 @@ const SETTINGS = [
   "system_prompt",
   "memory",
   "memory_threshold",
-  "respond_on",
+  "trigger",
   "image_to_text_model",
   "audio_to_text_model",
   "video_to_text_model",
@@ -28,7 +28,7 @@ const SETTINGS = [
   ...MODEL_ROLE_SETTINGS,
   "enabled",
   "debug",
-  "action",
+  "actions",
   "harness",
   "harness_cwd",
 ];
@@ -122,18 +122,18 @@ async function getInfo(rootDb, chatId, extra) {
 
   const lines = [
     `*Chat:* ${chatId}`,
-    `*Status:* ${status}`,
+    `*enabled:* ${status}`,
     `*Sender:* ${senderIds.join(", ")}`,
-    `*Model:* ${model}`,
-    `*Prompt:* ${prompt}`,
-    `*respond_on:* ${response}`,
-    `*Memory:* ${memoryOn} (threshold: ${threshold})`,
-    `*Debug:* ${debug}`,
+    `*model:* ${model}`,
+    `*system_prompt:* ${prompt}`,
+    `*trigger:* ${response}`,
+    `*memory:* ${memoryOn} (threshold: ${threshold})`,
+    `*debug:* ${debug}`,
     `*Media-to-text models:* ${mediaToTextStr}`,
     `*Model role overrides:* ${roleOverridesStr}`,
-    `*Opt-in actions:* ${optInStr}`,
-    `*Harness:* ${chat.harness ?? "native"}`,
-    ...(chat.harness_cwd ? [`*Harness CWD:* ${chat.harness_cwd}`] : []),
+    `*actions:* ${optInStr}`,
+    `*harness:* ${chat.harness ?? "native"}`,
+    ...(chat.harness_cwd ? [`*harness_cwd:* ${chat.harness_cwd}`] : []),
   ];
 
   return lines.join("\n");
@@ -155,7 +155,7 @@ const BOOL_OPTIONS = [
  */
 function getSelectableOptions(setting, chat) {
   switch (setting) {
-    case "respond_on":
+    case "trigger":
       return {
         options: RESPOND_ON_VALUES.map((v) => ({ id: v, label: v })),
         currentId: chat.respond_on ?? "mention",
@@ -202,8 +202,8 @@ async function getSetting(rootDb, chatId, setting, extra) {
       return `Memory: ${chat.memory ? "enabled" : "disabled"}`;
     case "memory_threshold":
       return `Memory threshold: ${chat.memory_threshold ?? config.memory_threshold}`;
-    case "respond_on":
-      return `Respond on: ${chat.respond_on ?? "mention"}`;
+    case "trigger":
+      return `Trigger: ${chat.respond_on ?? "mention"}`;
     case "image_to_text_model":
     case "audio_to_text_model":
     case "video_to_text_model": {
@@ -225,10 +225,10 @@ async function getSetting(rootDb, chatId, setting, extra) {
       return `Bot: ${chat.is_enabled ? "enabled" : "disabled"}`;
     case "debug":
       return `Debug: ${chat.debug ? "on" : "off"}`;
-    case "action": {
+    case "actions": {
       const enabledActions = chat.enabled_actions ?? [];
       const optInStr = await formatOptInActions(enabledActions, extra.getActions);
-      return `Opt-in actions: ${optInStr}`;
+      return `Actions: ${optInStr}`;
     }
     case "harness": {
       const available = listHarnesses();
@@ -304,13 +304,13 @@ async function setSetting(rootDb, chatId, setting, value, extra) {
       return `Memory similarity threshold set to ${threshold} for this chat.`;
     }
 
-    case "respond_on": {
+    case "trigger": {
       const trimmed = value.trim().toLowerCase();
       if (!RESPOND_ON_VALUES.includes(trimmed)) {
         return `Invalid value. Must be one of: ${RESPOND_ON_VALUES.join(", ")}`;
       }
       await rootDb.sql`UPDATE chats SET respond_on = ${trimmed} WHERE chat_id = ${chatId}`;
-      return `Respond on: ${trimmed}`;
+      return `Trigger: ${trimmed}`;
     }
 
     case "image_to_text_model":
@@ -427,11 +427,11 @@ async function setSetting(rootDb, chatId, setting, value, extra) {
         : "Harness CWD cleared (will use project root).";
     }
 
-    case "action": {
+    case "actions": {
       // value format: "action_name true" or "action_name false"
       const parts = value.trim().split(/\s+/);
       if (parts.length < 2) {
-        return "Usage: !config action <action_name> <true|false>";
+        return "Usage: !config actions <action_name> <true|false>";
       }
       const actionName = parts[0];
       const actionEnabled = toBool(parts[1]);

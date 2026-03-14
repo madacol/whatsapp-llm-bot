@@ -124,22 +124,22 @@ export default [
       );
     },
 
-    // ── respond_on ──
-    async function sets_respond_on(action_fn, db) {
+    // ── trigger (respond_on) ──
+    async function sets_trigger(action_fn, db) {
       await db.sql`INSERT INTO chats(chat_id) VALUES ('cs-resp-1') ON CONFLICT DO NOTHING`;
       const result = await action_fn(
         { chatId: "cs-resp-1", rootDb: db },
-        { setting: "respond_on", value: "mention+reply" },
+        { setting: "trigger", value: "mention+reply" },
       );
       assert.ok(result.includes("mention+reply"));
       const { rows: [chat] } = await db.sql`SELECT respond_on FROM chats WHERE chat_id = 'cs-resp-1'`;
       assert.equal(chat.respond_on, "mention+reply");
     },
-    async function rejects_invalid_respond_on(action_fn, db) {
+    async function rejects_invalid_trigger(action_fn, db) {
       await db.sql`INSERT INTO chats(chat_id) VALUES ('cs-resp-2') ON CONFLICT DO NOTHING`;
       const result = await action_fn(
         { chatId: "cs-resp-2", rootDb: db },
-        { setting: "respond_on", value: "invalid" },
+        { setting: "trigger", value: "invalid" },
       );
       assert.ok(result.includes("Invalid"));
     },
@@ -427,7 +427,7 @@ export default [
       assert.ok(result.toLowerCase().includes("on"));
     },
 
-    // ── action (opt-in) ──
+    // ── actions (opt-in) ──
     async function enables_opt_in_action(action_fn, db) {
       await db.sql`INSERT INTO chats(chat_id) VALUES ('cs-act-1') ON CONFLICT DO NOTHING`;
       const mockGetActions = async () => /** @type {Action[]} */ ([
@@ -435,7 +435,7 @@ export default [
       ]);
       const result = await action_fn(
         { chatId: "cs-act-1", rootDb: db, getActions: mockGetActions },
-        { setting: "action", value: "test_opt true" },
+        { setting: "actions", value: "test_opt true" },
       );
       assert.ok(result.includes("enabled"));
       const { rows: [chat] } = await db.sql`SELECT enabled_actions FROM chats WHERE chat_id = 'cs-act-1'`;
@@ -448,7 +448,7 @@ export default [
       ]);
       const result = await action_fn(
         { chatId: "cs-act-2", rootDb: db, getActions: mockGetActions },
-        { setting: "action", value: "test_opt false" },
+        { setting: "actions", value: "test_opt false" },
       );
       assert.ok(result.includes("disabled"));
       const { rows: [chat] } = await db.sql`SELECT enabled_actions FROM chats WHERE chat_id = 'cs-act-2'`;
@@ -461,7 +461,7 @@ export default [
       ]);
       const result = await action_fn(
         { chatId: "cs-act-3", rootDb: db, getActions: mockGetActions },
-        { setting: "action", value: "regular_action true" },
+        { setting: "actions", value: "regular_action true" },
       );
       assert.ok(result.includes("not an opt-in action"));
     },
@@ -470,7 +470,7 @@ export default [
       const mockGetActions = async () => /** @type {Action[]} */ ([]);
       const result = await action_fn(
         { chatId: "cs-act-4", rootDb: db, getActions: mockGetActions },
-        { setting: "action", value: "nonexistent true" },
+        { setting: "actions", value: "nonexistent true" },
       );
       assert.ok(result.includes("not found"));
     },
@@ -481,7 +481,7 @@ export default [
       ]);
       await action_fn(
         { chatId: "cs-act-5", rootDb: db, getActions: mockGetActions },
-        { setting: "action", value: "test_opt true" },
+        { setting: "actions", value: "test_opt true" },
       );
       const { rows: [chat] } = await db.sql`SELECT enabled_actions FROM chats WHERE chat_id = 'cs-act-5'`;
       const count = chat.enabled_actions.filter(/** @param {string} a */ (a) => a === "test_opt").length;
@@ -491,7 +491,7 @@ export default [
       await db.sql`INSERT INTO chats(chat_id) VALUES ('cs-act-6') ON CONFLICT DO NOTHING`;
       const result = await action_fn(
         { chatId: "cs-act-6", rootDb: db, getActions: async () => [] },
-        { setting: "action", value: "just_one_arg" },
+        { setting: "actions", value: "just_one_arg" },
       );
       assert.ok(result.includes("Usage"));
     },
