@@ -116,7 +116,7 @@ async function executeAndStoreTool({
   const registerInspect = (/** @type {ToolMessage} */ toolMessage) => {
     if (handle) {
       const summary = getToolCallSummary(toolName, toolArgs, actionFormatToolCall, cwd ?? null, displayContext);
-      registerInspectHandler(handle, summary, toolMessage);
+      registerInspectHandler(handle, summary, toolMessage, toolName);
     }
   };
 
