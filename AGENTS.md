@@ -6,6 +6,7 @@
 - Before cutting corners, ask yourself why do you need to do this, and what needs to be done to avoid this. If you still think cutting this corner is still the best course of action, explain thoroughly to the user and let them decide how to continue with the plan
 
 ## Testing
+- Apply red/green TDD
 - Tests should catch regressions, not mirror implementation. Ask: "if this test fails, what real bug did it catch?" If there's no clear answer, skip the test
 - For behavioral changes (bug fixes, new features), write a failing test first, then implement. For refactors and trivial changes, existing tests passing is sufficient
 - Prefer integration tests for glue code, unit tests for pure functions with edge cases. Test at the boundary where bugs would be noticed
