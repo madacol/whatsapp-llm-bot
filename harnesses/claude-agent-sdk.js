@@ -431,6 +431,9 @@ export function createClaudeAgentSdkHarness() {
     /** @type {string | null} */
     let resolvedSessionId = null;
 
+    /** @type {string | null} Set when we auto-abort due to a fatal SDK error */
+    let fatalAbortReason = null;
+
     // Ring buffer: only keep the last N stderr lines (up to MAX_STDERR_BYTES total)
     // for error diagnostics. The SDK subprocess runs with --verbose, producing
     // massive debug output that was previously accumulated unboundedly (OOM at ~1.9GB).
@@ -469,6 +472,15 @@ export function createClaudeAgentSdkHarness() {
           }
           stderrLines.push(data);
           log.debug("[sdk stderr]", data.trimEnd());
+
+          // Detect fatal stream errors in hook callbacks. When the SDK's
+          // internal stream dies, every subsequent tool use fails with
+          // "Stream closed" creating an infinite retry loop. Abort early.
+          if (data.includes("Stream closed") && data.includes("Error in hook callback")) {
+            fatalAbortReason = "SDK internal stream closed — session needs restart";
+            log.error(fatalAbortReason + "; aborting query");
+            abortController.abort();
+          }
         },
         /**
          * Handle tool permission requests.
@@ -606,9 +618,13 @@ export function createClaudeAgentSdkHarness() {
       }
       log.debug(`SDK query done: events=${eventCount} activeTools=${activeTools.size}`);
     } catch (err) {
-      // Don't log abort as an error — it's expected from !cancel
-      if (abortController.signal.aborted) {
+      // Don't log user-initiated abort as an error — it's expected from !cancel
+      if (abortController.signal.aborted && !fatalAbortReason) {
         log.debug("SDK query was cancelled for chat", session.chatId);
+      } else if (fatalAbortReason) {
+        log.error("SDK query aborted due to fatal error:", fatalAbortReason);
+        await hooks.onToolError(fatalAbortReason);
+        result.response = [{ type: "text", text: fatalAbortReason }];
       } else {
         const errorMsg = errorToString(err);
 
