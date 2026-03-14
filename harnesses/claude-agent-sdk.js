@@ -14,8 +14,7 @@ import { query } from "@anthropic-ai/claude-agent-sdk";
 import { randomUUID } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { NO_OP_HOOKS } from "./native.js";
-import { formatToolCallDisplay, getToolCallSummary, langFromPath, shortenPath } from "../tool-display.js";
-import { shouldRenderAsImage } from "../message-renderer.js";
+import { formatToolCallDisplay, getToolCallSummary } from "../tool-display.js";
 import { getChatActions } from "../actions.js";
 import { createLogger } from "../logger.js";
 import { extractLastUserText } from "../message-formatting.js";
@@ -976,10 +975,6 @@ async function handleUserEvent(event, ctx) {
       log.warn(`No message handle for tool ${active.toolName} (${resolvedToolUseId}) — 👁 inspect unavailable`);
     }
 
-    // Send Read results as syntax-highlighted code images
-    if (active?.toolName === "Read" && active.filePath && resultText) {
-      await sendReadCodeImage(active.filePath, resultText, ctx);
-    }
   } else if (active) {
     log.warn(`No result text extracted for tool ${active.toolName} (${resolvedToolUseId}) — 👁 inspect unavailable`);
   }
@@ -987,28 +982,6 @@ async function handleUserEvent(event, ctx) {
   ctx.activeTools.delete(resolvedToolUseId);
 }
 
-/**
- * Send Read tool output as a syntax-highlighted code image.
- * Only renders if the file is a recognized code language with enough lines.
- * @param {string} filePath
- * @param {string} resultText
- * @param {SdkEventContext} ctx
- */
-async function sendReadCodeImage(filePath, resultText, ctx) {
-  try {
-    const lang = langFromPath(filePath);
-    // Strip line number prefixes (SDK Read uses "  N→" or "  N\t" format)
-    const stripped = resultText.replace(/^\s*\d+[\t→]\s?/gm, "");
-    if (!lang || !shouldRenderAsImage(lang, stripped) || stripped.length > 20_000) return;
-
-    const caption = `*Read*  \`${shortenPath(filePath, ctx.cwd ?? null)}\``;
-    /** @type {CodeContentBlock} */
-    const codeBlock = { type: "code", code: stripped, language: lang, caption };
-    await ctx.session.context.send("tool-result", [codeBlock]);
-  } catch (err) {
-    log.warn("Read code image rendering failed:", errorToString(err));
-  }
-}
 
 /**
  * Handle an SDK "tool_use_summary" event: display summary as a tool call.
