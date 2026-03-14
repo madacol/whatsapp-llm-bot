@@ -94,11 +94,17 @@ export function createToolMessage(toolId, text) {
 
 /**
  * Extract the human-readable output from a tool result text.
- * For Bash-style JSON results, extracts stdout/stderr instead of showing raw JSON.
+ * Formats output differently depending on the tool:
+ * - Bash: extracts stdout/stderr from JSON
+ * - Grep: groups matching lines by file path
+ * - Glob: adds file count summary
+ * - Others: returns as-is
  * @param {string} text
+ * @param {string} [toolName]
  * @returns {string}
  */
-function formatToolResultForInspect(text) {
+function formatToolResultForInspect(text, toolName) {
+  // Bash: parse {stdout, stderr} JSON
   try {
     const parsed = JSON.parse(text);
     if (parsed && typeof parsed === "object" && "stdout" in parsed) {
@@ -114,9 +120,82 @@ function formatToolResultForInspect(text) {
       return "_no output_";
     }
   } catch {
-    // Not JSON — use as-is
+    // Not JSON — continue to tool-specific formatting
   }
+
+  if (toolName === "Grep") {
+    return formatGrepForInspect(text);
+  }
+  if (toolName === "Glob") {
+    return formatGlobForInspect(text);
+  }
+  if (toolName === "Read") {
+    return formatReadForInspect(text);
+  }
+
   return text;
+}
+
+/**
+ * Format Grep output: group matching lines under file path headers.
+ * Input format: `filepath:lineNum:content` or `filepath:lineNum-content` per line.
+ * @param {string} text
+ * @returns {string}
+ */
+function formatGrepForInspect(text) {
+  const lines = text.split("\n");
+  /** @type {Map<string, string[]>} */
+  const groups = new Map();
+  const grepLinePattern = /^(.+?):(\d+)([:-])(.*)$/;
+
+  for (const line of lines) {
+    const m = line.match(grepLinePattern);
+    if (m) {
+      const [, filePath, lineNum, , content] = m;
+      if (!groups.has(filePath)) groups.set(filePath, []);
+      groups.get(filePath)?.push(`${lineNum}: ${content.trim()}`);
+    } else if (line.trim()) {
+      // Non-matching line (e.g. separator, header) — keep as-is
+      const key = "__other__";
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key)?.push(line);
+    }
+  }
+
+  if (groups.size === 0) return text;
+
+  /** @type {string[]} */
+  const parts = [];
+  for (const [filePath, fileLines] of groups) {
+    if (filePath === "__other__") {
+      parts.push(fileLines.join("\n"));
+    } else {
+      parts.push(`*${filePath}*\n\`\`\`\n${fileLines.join("\n")}\n\`\`\``);
+    }
+  }
+  return parts.join("\n\n");
+}
+
+/**
+ * Format Glob output: add file count summary above the path list.
+ * @param {string} text
+ * @returns {string}
+ */
+function formatGlobForInspect(text) {
+  const paths = text.split("\n").filter(l => l.trim());
+  if (paths.length === 0) return "_no files_";
+  return `_${paths.length} file${paths.length === 1 ? "" : "s"}_\n\`\`\`\n${paths.join("\n")}\n\`\`\``;
+}
+
+/**
+ * Format Read output: wrap file content in a code block.
+ * Strips the `  N→` / `  N\t` line number prefixes added by the SDK.
+ * @param {string} text
+ * @returns {string}
+ */
+function formatReadForInspect(text) {
+  const stripped = text.replace(/^\s*\d+[\t→]\s?/gm, "");
+  return `\`\`\`\n${stripped}\n\`\`\``;
 }
 
 /**
@@ -126,14 +205,15 @@ function formatToolResultForInspect(text) {
  * @param {MessageHandle} handle
  * @param {string} summary - display header (e.g. "*Bash*  _description_" or "*Edit*  `file.js`")
  * @param {ToolMessage} toolMessage
+ * @param {string} [toolName] - tool name for format-specific display
  */
-export function registerInspectHandler(handle, summary, toolMessage) {
+export function registerInspectHandler(handle, summary, toolMessage, toolName) {
   if (!handle.keyId) return;
   handle.onReaction((emoji) => {
     if (!emoji.startsWith("👁")) return;
     const rawText = toolMessage.content
       .filter(b => b.type === "text").map(b => /** @type {TextContentBlock} */ (b).text).join("\n");
-    const text = formatToolResultForInspect(rawText);
+    const text = formatToolResultForInspect(rawText, toolName);
     const MAX = 3000;
     const display = text.length <= MAX ? text
       : text.slice(0, MAX) + `\n\n_… truncated (${text.length.toLocaleString()} chars total)_`;

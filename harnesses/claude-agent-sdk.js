@@ -947,7 +947,7 @@ async function handleUserEvent(event, ctx) {
     // Register 👁 react-to-inspect on the tool-call message handle
     if (active?.handle) {
       const summary = active.summary ?? `*${active.toolName}*`;
-      registerInspectHandler(active.handle, summary, toolMsg);
+      registerInspectHandler(active.handle, summary, toolMsg, active.toolName);
     } else if (active) {
       log.warn(`No message handle for tool ${active.toolName} (${resolvedToolUseId}) — 👁 inspect unavailable`);
     }
