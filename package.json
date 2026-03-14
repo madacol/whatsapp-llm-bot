@@ -20,7 +20,7 @@
     "keywords": [],
     "author": "madacol",
     "dependencies": {
-        "@anthropic-ai/claude-agent-sdk": "^0.2.71",
+        "@anthropic-ai/claude-agent-sdk": "^0.2.76",
         "@electric-sql/pglite": "^0.3.3",
         "@mozilla/readability": "^0.6.0",
         "@resvg/resvg-js": "^2.6.2",
