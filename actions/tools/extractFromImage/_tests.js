@@ -10,7 +10,7 @@ async function returns_error_when_no_image(action_fn) {
           log: async () => "",
           resolveModel: () => "test-model",
         },
-        { prompt: "extract data" },
+        { images: [], prompt: "extract data" },
       );
       assert.ok(typeof result === "string");
       assert.ok(result.includes("No image found"));
@@ -22,8 +22,8 @@ async function returns_error_when_no_image(action_fn) {
       /** @type {CallLlmOptions | undefined} */
       let capturedOptions;
 
-      /** @type {IncomingContentBlock[]} */
-      const contentWithImage = [
+      /** @type {ImageContentBlock[]} */
+      const images = [
         { type: "image", encoding: "base64", mime_type: "image/jpeg", data: "fakebase64" },
       ];
 
@@ -34,11 +34,11 @@ async function returns_error_when_no_image(action_fn) {
             capturedOptions = opts;
             return "extracted text";
           })),
-          content: contentWithImage,
+          content: [],
           log: async () => "",
           resolveModel: () => "vision-model",
         },
-        { prompt: "extract invoice data" },
+        { images, prompt: "extract invoice data" },
       );
 
       assert.ok(Array.isArray(capturedPrompt), "prompt should be an array");
@@ -50,19 +50,19 @@ async function returns_error_when_no_image(action_fn) {
     },
 
     async function returns_raw_llm_response(action_fn) {
-      /** @type {IncomingContentBlock[]} */
-      const contentWithImage2 = [
+      /** @type {ImageContentBlock[]} */
+      const images = [
         { type: "image", encoding: "base64", mime_type: "image/jpeg", data: "fakebase64" },
       ];
 
       const result = await action_fn(
         {
           callLlm: /** @type {CallLlm} */ (/** @type {Function} */ (async () => '{"store_name": "Test", "items": [], "total": 42}')),
-          content: contentWithImage2,
+          content: [],
           log: async () => "",
           resolveModel: () => "test-model",
         },
-        { prompt: "extract data" },
+        { images, prompt: "extract data" },
       );
       assert.equal(result, '{"store_name": "Test", "items": [], "total": 42}');
     },
@@ -71,10 +71,9 @@ async function returns_error_when_no_image(action_fn) {
       /** @type {ContentBlock[] | undefined} */
       let capturedPrompt;
 
-      /** @type {IncomingContentBlock[]} */
-      const contentWithImages = [
+      /** @type {ImageContentBlock[]} */
+      const images = [
         { type: "image", encoding: "base64", mime_type: "image/jpeg", data: "img1" },
-        { type: "text", text: "some text" },
         { type: "image", encoding: "base64", mime_type: "image/png", data: "img2" },
       ];
 
@@ -84,15 +83,15 @@ async function returns_error_when_no_image(action_fn) {
             capturedPrompt = prompt;
             return "result";
           })),
-          content: contentWithImages,
+          content: [],
           log: async () => "",
           resolveModel: () => "vision-model",
         },
-        { prompt: "extract all" },
+        { images, prompt: "extract all" },
       );
 
       assert.ok(Array.isArray(capturedPrompt));
-      const images = capturedPrompt.filter((/** @type {ContentBlock} */ b) => b.type === "image");
-      assert.equal(images.length, 2, "should include both images");
+      const imageBlocks = capturedPrompt.filter((/** @type {ContentBlock} */ b) => b.type === "image");
+      assert.equal(imageBlocks.length, 2, "should include both images");
     },
 ];

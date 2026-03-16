@@ -425,9 +425,12 @@ declare function isHtmlContent(value: unknown): value is HtmlContent;
 type FullActionContext = ActionContext & { rootDb: PGlite; chatDb: PGlite; callLlm: CallLlm; llmClient: LlmClient };
 
 /** action_fn as seen by tests — accepts partial context (duck typing). */
+type ActionParamValue = string | number | boolean | null | IncomingContentBlock | IncomingContentBlock[];
+
+/** action_fn as seen by tests — accepts partial context (duck typing). */
 type TestActionFn = (
   context: Partial<FullActionContext>,
-  params: Record<string, string | number | boolean | null>,
+  params: Record<string, ActionParamValue>,
 ) => Promise<string> | string;
 
 /** Standard _tests.js callback: receives action_fn only. */

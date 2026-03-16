@@ -1,26 +1,5 @@
 import sharp from "sharp";
 
-/**
- * Find the last image in content blocks, including inside quotes.
- * Searches from the end so that _media_refs (appended last) take priority
- * over images already present in the user's message.
- * @param {IncomingContentBlock[]} content
- * @returns {ImageContentBlock | undefined}
- */
-function findImage(content) {
-  for (let i = content.length - 1; i >= 0; i--) {
-    const block = content[i];
-    if (block.type === "image") return block;
-    if (block.type === "quote") {
-      const inner = block.content.find(
-        /** @returns {b is ImageContentBlock} */ (b) => b.type === "image",
-      );
-      if (inner) return inner;
-    }
-  }
-  return undefined;
-}
-
 export default /** @type {defineAction} */ ((x) => x)({
   name: "zoom_image",
   description:
@@ -28,6 +7,10 @@ export default /** @type {defineAction} */ ((x) => x)({
   parameters: {
     type: "object",
     properties: {
+      image: {
+        type: "image",
+        description: "The image to zoom into",
+      },
       x: {
         type: "number",
         description: "Left edge of crop region, as percentage of image width (0-100)",
@@ -45,7 +28,7 @@ export default /** @type {defineAction} */ ((x) => x)({
         description: "Height of crop region, as percentage of image height (0-100)",
       },
     },
-    required: ["x", "y", "width", "height"],
+    required: ["image", "x", "y", "width", "height"],
   },
   formatToolCall: ({ x, y, width, height }) =>
     `Zooming: region (${x}%, ${y}%) ${width}%×${height}%`,
@@ -54,24 +37,27 @@ export default /** @type {defineAction} */ ((x) => x)({
     autoContinue: true,
   },
   /**
-   * @param {ActionContext} context
-   * @param {{ x: number, y: number, width: number, height: number }} params
+   * @param {ActionContext} _context
+   * @param {{ image: ImageContentBlock | null, x: number, y: number, width: number, height: number }} params
    */
-  action_fn: async function (context, params) {
-    const { x, y, width, height } = params;
+  action_fn: async function (_context, params) {
+    const { image, x, y, width, height } = params;
 
-    // Validate ranges
-    if (x + width > 100 || y + height > 100) {
-      return `Crop region exceeds image bounds: (${x}+${width}=${x + width}%, ${y}+${height}=${y + height}%). All coordinates must stay within 0-100%.`;
-    }
-
-    const image = findImage(context.content);
     if (!image) {
       return "No image found. Please reference an image using [media:N] so I can zoom into it.";
     }
 
+    // Validate ranges (negative or out-of-bounds)
+    if (x < 0 || y < 0 || width <= 0 || height <= 0) {
+      return `Invalid crop coordinates: x=${x}, y=${y}, width=${width}, height=${height}. All values must be non-negative and width/height must be positive.`;
+    }
+    if (x + width > 100 || y + height > 100) {
+      return `Crop region exceeds image bounds: (${x}+${width}=${x + width}%, ${y}+${height}=${y + height}%). All coordinates must stay within 0-100%.`;
+    }
+
     const inputBuffer = Buffer.from(image.data, "base64");
-    const metadata = await sharp(inputBuffer).metadata();
+    const pipeline = sharp(inputBuffer);
+    const metadata = await pipeline.metadata();
     const imgWidth = metadata.width ?? 0;
     const imgHeight = metadata.height ?? 0;
 
@@ -89,7 +75,7 @@ export default /** @type {defineAction} */ ((x) => x)({
       return "Crop region is too small — results in zero-size image.";
     }
 
-    const croppedBuffer = await sharp(inputBuffer)
+    const croppedBuffer = await pipeline
       .extract({ left, top, width: cropWidth, height: cropHeight })
       .jpeg({ quality: 90 })
       .toBuffer();

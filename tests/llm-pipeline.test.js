@@ -579,13 +579,13 @@ describe("LLM pipeline via createMessageHandler", () => {
         "System prompt should contain media reference hint when media is present",
       );
       assert.ok(
-        systemText.includes("_media_refs"),
-        "System prompt hint should mention _media_refs parameter",
+        systemText.includes("media reference"),
+        "System prompt hint should mention passing media references as parameter values",
       );
     });
   });
 
-  it("injects _media_refs into tool schemas when media is present", async () => {
+  it("converts image params in tool schemas when media is present", async () => {
     const modelsCache = [
       { id: "mock-model", architecture: { input_modalities: ["text", "image", "video", "audio"] } },
     ];
@@ -609,19 +609,24 @@ describe("LLM pipeline via createMessageHandler", () => {
       await handleMessage(context);
 
       const lastReq = mockServer.getRequests().at(-1);
-      // All tools should have _media_refs in their parameters
       const tools = lastReq.tools;
       assert.ok(tools.length > 0, "Should have tools");
+      // Tools with image params should have them converted to string type
+      const imageTools = tools.filter(t =>
+        Object.values(t.function.parameters.properties).some(p => p.description?.includes("[media:N]"))
+      );
+      assert.ok(imageTools.length > 0, "At least one tool should have image params with media hint");
+      // Non-image tools should NOT have media refs injected
       for (const tool of tools) {
         assert.ok(
-          tool.function.parameters.properties._media_refs,
-          `Tool "${tool.function.name}" should have _media_refs property`,
+          !tool.function.parameters.properties._media_refs,
+          `Tool "${tool.function.name}" should NOT have legacy _media_refs`,
         );
       }
     });
   });
 
-  it("does not inject _media_refs when no media is present", async () => {
+  it("does not add media hints to tool schemas when no media is present", async () => {
     await seedChat("pipe-no-media-tools", { enabled: true });
     mockServer.addResponses("Text only!");
 
@@ -634,10 +639,14 @@ describe("LLM pipeline via createMessageHandler", () => {
     const lastReq = mockServer.getRequests().at(-1);
     const tools = lastReq.tools;
     assert.ok(tools.length > 0, "Should have tools");
+    // No tool should mention [media:N] when no media is present
     for (const tool of tools) {
+      const hasMediaHint = Object.values(tool.function.parameters.properties).some(
+        p => p.description?.includes("[media:N]")
+      );
       assert.ok(
-        !tool.function.parameters.properties._media_refs,
-        `Tool "${tool.function.name}" should NOT have _media_refs when no media`,
+        !hasMediaHint,
+        `Tool "${tool.function.name}" should NOT have media hints when no media`,
       );
     }
   });

@@ -3,27 +3,54 @@
  */
 
 /**
+ * Convert a single property schema, replacing custom `type: "image"` with
+ * `type: "string"` and a description hint for the LLM to pass [media:N] references.
+ * @param {{ type: string, description?: string, items?: { type: string } }} propSchema
+ * @param {boolean} hasMedia
+ * @returns {Record<string, unknown>}
+ */
+function convertImageProp(propSchema, hasMedia) {
+  const hint = hasMedia
+    ? "Pass a [media:N] reference from the conversation."
+    : "Image reference (no media available).";
+  if (propSchema.type === "image") {
+    return {
+      ...propSchema,
+      type: "string",
+      description: propSchema.description ? `${propSchema.description}. ${hint}` : hint,
+    };
+  }
+  if (propSchema.type === "array" && propSchema.items?.type === "image") {
+    return {
+      ...propSchema,
+      type: "array",
+      items: { type: "string" },
+      description: propSchema.description ? `${propSchema.description}. ${hint}` : hint,
+    };
+  }
+  return propSchema;
+}
+
+/**
  * Convert actions to tool definitions format.
- * When `hasMedia` is true, injects an optional `_media_refs` parameter
- * so the LLM can reference tagged media from the conversation.
+ * Converts `type: "image"` parameters to `type: "string"` with a media reference hint.
  * @param {Action[]} actions
  * @param {boolean} [hasMedia]
  * @returns {ToolDefinition[]}
  */
 export function actionsToToolDefinitions(actions, hasMedia) {
   return actions.map((action) => {
-    const parameters = hasMedia
-      ? {
-          ...action.parameters,
-          properties: {
-            ...action.parameters.properties,
-            _media_refs: {
-              type: "array",
-              items: { type: "integer" },
-              description: "Optional [media:N] IDs from conversation to include as input",
-            },
-          },
-        }
+    /** @type {Record<string, unknown>} */
+    const convertedProperties = {};
+    let hasImageParams = false;
+    for (const [key, propSchema] of Object.entries(action.parameters.properties)) {
+      const converted = convertImageProp(propSchema, !!hasMedia);
+      if (converted !== propSchema) hasImageParams = true;
+      convertedProperties[key] = converted;
+    }
+
+    const parameters = hasImageParams
+      ? { ...action.parameters, properties: convertedProperties }
       : action.parameters;
 
     return {
@@ -35,6 +62,48 @@ export function actionsToToolDefinitions(actions, hasMedia) {
       },
     };
   });
+}
+
+/**
+ * Parse a media reference string into a numeric media ID.
+ * Handles formats: "media:1", "[media:1]", "1", 1
+ * @param {unknown} ref
+ * @returns {number | null}
+ */
+function parseMediaRef(ref) {
+  if (typeof ref === "number") return ref;
+  if (typeof ref !== "string") return null;
+  const match = ref.match(/^\[?media:(\d+)]?$/i) || ref.match(/^(\d+)$/);
+  return match ? Number(match[1]) : null;
+}
+
+/**
+ * Resolve image parameter values from media reference strings to ImageContentBlocks.
+ * Walks the action's parameter schema and replaces any `type: "image"` param values
+ * with the corresponding content block from the media registry.
+ * @param {Action['parameters']} schema
+ * @param {Record<string, unknown>} args
+ * @param {MediaRegistry} mediaRegistry
+ * @returns {Record<string, unknown>} Args with resolved image blocks
+ */
+export function resolveImageArgs(schema, args, mediaRegistry) {
+  const resolved = { ...args };
+  for (const [key, propSchema] of Object.entries(schema.properties)) {
+    const prop = /** @type {{ type: string, items?: { type: string } }} */ (propSchema);
+    if (prop.type === "image") {
+      const id = parseMediaRef(args[key]);
+      resolved[key] = id !== null ? (mediaRegistry.get(id) ?? null) : null;
+    } else if (prop.type === "array" && prop.items?.type === "image") {
+      const refs = Array.isArray(args[key]) ? args[key] : [];
+      resolved[key] = refs
+        .map((/** @type {unknown} */ r) => {
+          const id = parseMediaRef(r);
+          return id !== null ? (mediaRegistry.get(id) ?? null) : null;
+        })
+        .filter(/** @type {(b: unknown) => b is IncomingContentBlock} */ (b) => b !== null);
+    }
+  }
+  return resolved;
 }
 
 /**

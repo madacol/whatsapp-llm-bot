@@ -18,7 +18,7 @@ export default [
         try {
           const result = await action_fn(
             {
-              content: [{ type: "text", text: "a flying car" }],
+              content: [],
               send: async () => {},
               log: async () => "",
             },
@@ -60,7 +60,7 @@ export default [
         try {
           await action_fn(
             {
-              content: [{ type: "text", text: "test" }],
+              content: [],
               send: async () => {},
               log: async () => "",
             },
@@ -96,7 +96,7 @@ export default [
 
         const result = await action_fn(
           {
-            content: [{ type: "text", text: "test" }],
+            content: [],
             send: async () => {},
             log: async () => "",
           },
@@ -122,7 +122,7 @@ export default [
 
         const result = await action_fn(
           {
-            content: [{ type: "text", text: "test" }],
+            content: [],
             send: async () => {},
             log: async () => "",
           },
@@ -160,72 +160,20 @@ export default [
         try {
           await action_fn(
             {
-              content: [
-                { type: "text", text: "animate this" },
-                { type: "image", encoding: "base64", mime_type: "image/jpeg", data: "aW1hZ2VkYXRh" },
-              ],
+              content: [],
               send: async () => {},
               log: async () => "",
             },
-            { prompt: "animate this" },
+            {
+              image: { type: "image", encoding: "base64", mime_type: "image/jpeg", data: "aW1hZ2VkYXRh" },
+              prompt: "animate this",
+            },
           );
 
           assert.ok(uploadCalled, "uploadImage should have been called");
           assert.ok(captured);
           assert.ok(captured.endpoint.endsWith("/image-to-video"));
           assert.equal(captured.input.start_image_url, "https://cdn.fal.ai/uploaded.jpg");
-        } finally {
-          globalThis.fetch = originalFetch;
-        }
-      } finally {
-        Object.assign(falApi, saved);
-        if (saved.key !== undefined) process.env.FAL_KEY = saved.key;
-        else delete process.env.FAL_KEY;
-      }
-    },
-
-    async function test_sends_quoted_image(action_fn) {
-      const saved = { ...falApi, key: process.env.FAL_KEY };
-      process.env.FAL_KEY = "test-key";
-      /** @type {{ endpoint: string, input: Record<string, unknown> } | undefined} */
-      let captured;
-      let uploadCalled = false;
-      try {
-        falApi.uploadImage = async () => { uploadCalled = true; return "https://cdn.fal.ai/quoted.png"; };
-        falApi.submitJob = async (endpoint, input) => {
-          captured = { endpoint, input };
-          return { statusUrl: "s", responseUrl: "r" };
-        };
-        falApi.pollJob = async () => {};
-        falApi.getResult = async () => ({ video: { url: "https://example.com/v.mp4", content_type: "video/mp4" } });
-
-        const originalFetch = globalThis.fetch;
-        globalThis.fetch = /** @type {typeof fetch} */ (/** @type {unknown} */ (
-          async () => ({ ok: true, arrayBuffer: async () => Buffer.from("fake-video").buffer })
-        ));
-        try {
-          await action_fn(
-            {
-              content: [
-                {
-                  type: "quote",
-                  quotedSenderId: "123",
-                  content: [
-                    { type: "image", encoding: "base64", mime_type: "image/png", data: "cXVvdGVkLWltZw==" },
-                  ],
-                },
-                { type: "text", text: "animate this" },
-              ],
-              send: async () => {},
-              log: async () => "",
-            },
-            { prompt: "animate this" },
-          );
-
-          assert.ok(uploadCalled, "uploadImage should have been called for quoted image");
-          assert.ok(captured);
-          assert.ok(captured.endpoint.endsWith("/image-to-video"));
-          assert.equal(captured.input.start_image_url, "https://cdn.fal.ai/quoted.png");
         } finally {
           globalThis.fetch = originalFetch;
         }
@@ -258,7 +206,7 @@ export default [
         try {
           await action_fn(
             {
-              content: [{ type: "text", text: "a flying car" }],
+              content: [],
               send: async () => {},
               log: async () => "",
             },
@@ -285,7 +233,7 @@ export default [
 
         const result = await action_fn(
           {
-            content: [{ type: "text", text: "test" }],
+            content: [],
             send: async () => {},
             log: async () => "",
           },

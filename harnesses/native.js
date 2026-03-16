@@ -6,6 +6,7 @@ import { sendChatCompletion } from "../llm.js";
 import { createToolMessage, isHtmlContent, errorToString, registerInspectHandler } from "../utils.js";
 import {
   actionsToToolDefinitions,
+  resolveImageArgs,
   registerMedia,
   isMediaBlock,
   parseStructuredQuestion,
@@ -121,23 +122,13 @@ async function executeAndStoreTool({
   };
 
   try {
-    // Resolve _media_refs: pull referenced media from the registry into context.content
-    const { _media_refs, ...cleanArgs } = toolArgs;
-    let actionContext = context;
-    if (Array.isArray(_media_refs) && _media_refs.length > 0) {
-      /** @type {IncomingContentBlock[]} */
-      const resolvedMedia = [];
-      for (const refId of _media_refs) {
-        if (typeof refId !== "number") continue;
-        const block = mediaRegistry.get(refId);
-        if (block) resolvedMedia.push(block);
-      }
-      if (resolvedMedia.length > 0) {
-        actionContext = { ...context, content: [...context.content, ...resolvedMedia] };
-      }
-    }
+    // Resolve image params: look up action schema, replace media refs with actual content blocks
+    const action = llmConfig.actions.find(a => a.name === toolName);
+    const resolvedArgs = action
+      ? resolveImageArgs(action.parameters, toolArgs, mediaRegistry)
+      : toolArgs;
 
-    const functionResponse = await executeActionFn(toolName, actionContext, cleanArgs, {
+    const functionResponse = await executeActionFn(toolName, context, resolvedArgs, {
       toolCallId: toolCall.id, actionResolver, llmClient: actionLlmClient, agentDepth,
     });
     log.debug("response", functionResponse);
@@ -223,7 +214,7 @@ async function processLlmResponse({ session, llmConfig, messages, mediaRegistry,
   const hooks = { ...NO_OP_HOOKS, ...userHooks };
   let { systemPrompt } = llmConfig;
   if (mediaRegistry.size > 0) {
-    systemPrompt += "\n\nMedia in the conversation is tagged with [media:N]. When calling tools that need media from earlier messages, pass the relevant IDs in the `_media_refs` parameter.";
+    systemPrompt += '\n\nMedia in the conversation is tagged with [media:N]. When calling tools with image parameters, pass the media reference (e.g. "media:1") as the parameter value.';
   }
   const injectedActions = new Set();
   let depth = 0;

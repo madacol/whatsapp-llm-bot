@@ -2,16 +2,17 @@ import assert from "node:assert/strict";
 import sharp from "sharp";
 
 /**
- * Create a tiny test image buffer with sharp.
+ * Create a tiny test image content block with sharp.
  * @param {number} width
  * @param {number} height
  * @param {{ r: number, g: number, b: number }} [color]
- * @returns {Promise<Buffer>}
+ * @returns {Promise<ImageContentBlock>}
  */
 async function makeTestImage(width = 100, height = 100, color = { r: 255, g: 0, b: 0 }) {
-  return sharp({
+  const buf = await sharp({
     create: { width, height, channels: 3, background: color },
   }).jpeg().toBuffer();
+  return /** @type {ImageContentBlock} */ ({ type: "image", encoding: "base64", mime_type: "image/jpeg", data: buf.toString("base64") });
 }
 
 /** @type {ActionTestFn[]} */
@@ -19,33 +20,47 @@ export default [
   async function returns_error_when_no_image(action_fn) {
     const result = await action_fn(
       { content: [], log: async () => "" },
-      { x: 0, y: 0, width: 50, height: 50 },
+      { image: null, x: 0, y: 0, width: 50, height: 50 },
     );
     assert.ok(typeof result === "string");
     assert.ok(result.toLowerCase().includes("no image"));
   },
 
-  async function returns_error_for_region_exceeding_bounds(action_fn) {
-    const buf = await makeTestImage();
+  async function returns_error_for_negative_coordinates(action_fn) {
+    const image = await makeTestImage();
     const result = await action_fn(
-      {
-        content: [{ type: "image", encoding: "base64", mime_type: "image/jpeg", data: buf.toString("base64") }],
-        log: async () => "",
-      },
-      { x: 60, y: 0, width: 50, height: 100 },
+      { content: [], log: async () => "" },
+      { image, x: -10, y: 0, width: 50, height: 50 },
+    );
+    assert.ok(typeof result === "string");
+    assert.ok(result.toLowerCase().includes("invalid"));
+  },
+
+  async function returns_error_for_zero_dimensions(action_fn) {
+    const image = await makeTestImage();
+    const result = await action_fn(
+      { content: [], log: async () => "" },
+      { image, x: 0, y: 0, width: 0, height: 50 },
+    );
+    assert.ok(typeof result === "string");
+    assert.ok(result.toLowerCase().includes("invalid"));
+  },
+
+  async function returns_error_for_region_exceeding_bounds(action_fn) {
+    const image = await makeTestImage();
+    const result = await action_fn(
+      { content: [], log: async () => "" },
+      { image, x: 60, y: 0, width: 50, height: 100 },
     );
     assert.ok(typeof result === "string");
     assert.ok(result.toLowerCase().includes("exceed") || result.toLowerCase().includes("beyond") || result.toLowerCase().includes("outside"));
   },
 
   async function crops_image_and_returns_content_blocks(action_fn) {
-    const buf = await makeTestImage(100, 200);
+    const image = await makeTestImage(100, 200);
     const result = await action_fn(
-      {
-        content: [{ type: "image", encoding: "base64", mime_type: "image/jpeg", data: buf.toString("base64") }],
-        log: async () => "",
-      },
-      { x: 0, y: 0, width: 50, height: 50 },
+      { content: [], log: async () => "" },
+      { image, x: 0, y: 0, width: 50, height: 50 },
     );
 
     assert.ok(typeof result === "object" && result !== null && "result" in result, "should return { result: ... }");
@@ -62,68 +77,12 @@ export default [
     assert.equal(cropped.height, 100);
   },
 
-  async function extracts_image_from_quoted_content(action_fn) {
-    const buf = await makeTestImage(80, 80);
-    const result = await action_fn(
-      {
-        content: [
-          { type: "text", text: "zoom in on this" },
-          { type: "quote", content: [
-            { type: "image", encoding: "base64", mime_type: "image/png", data: buf.toString("base64") },
-          ]},
-        ],
-        log: async () => "",
-      },
-      { x: 0, y: 0, width: 50, height: 50 },
-    );
-
-    assert.ok(typeof result === "object" && result !== null && "result" in result);
-    const blocks = /** @type {{ result: ToolContentBlock[] }} */ (result).result;
-    const imageBlock = blocks.find((/** @type {ToolContentBlock} */ b) => b.type === "image");
-    assert.ok(imageBlock, "should find and crop quoted image");
-
-    const cropped = await sharp(Buffer.from(/** @type {ImageContentBlock} */ (imageBlock).data, "base64")).metadata();
-    assert.equal(cropped.width, 40);
-    assert.equal(cropped.height, 40);
-  },
-
-  async function prioritizes_last_image_for_media_refs(action_fn) {
-    // _media_refs are appended at the end of content, so the action should
-    // pick the last image (the one the LLM explicitly referenced)
-    const userImage = await makeTestImage(60, 60, { r: 255, g: 0, b: 0 });
-    const referencedImage = await makeTestImage(200, 200, { r: 0, g: 0, b: 255 });
-    const result = await action_fn(
-      {
-        content: [
-          { type: "image", encoding: "base64", mime_type: "image/jpeg", data: userImage.toString("base64") },
-          { type: "text", text: "zoom into the blue image" },
-          // _media_refs resolved image appended last:
-          { type: "image", encoding: "base64", mime_type: "image/jpeg", data: referencedImage.toString("base64") },
-        ],
-        log: async () => "",
-      },
-      { x: 0, y: 0, width: 50, height: 50 },
-    );
-
-    assert.ok(typeof result === "object" && result !== null && "result" in result);
-    const blocks = /** @type {{ result: ToolContentBlock[] }} */ (result).result;
-    const imageBlock = blocks.find((/** @type {ToolContentBlock} */ b) => b.type === "image");
-    assert.ok(imageBlock);
-    // Should have cropped the 200x200 referenced image, not the 60x60 user image
-    const cropped = await sharp(Buffer.from(/** @type {ImageContentBlock} */ (imageBlock).data, "base64")).metadata();
-    assert.equal(cropped.width, 100, "should crop the last (referenced) 200x200 image → 100px wide");
-    assert.equal(cropped.height, 100);
-  },
-
   async function clamps_rounding_at_edges(action_fn) {
     // 99x99 image, crop bottom-right 50% — percentages won't land on exact pixels
-    const buf = await makeTestImage(99, 99);
+    const image = await makeTestImage(99, 99);
     const result = await action_fn(
-      {
-        content: [{ type: "image", encoding: "base64", mime_type: "image/jpeg", data: buf.toString("base64") }],
-        log: async () => "",
-      },
-      { x: 50, y: 50, width: 50, height: 50 },
+      { content: [], log: async () => "" },
+      { image, x: 50, y: 50, width: 50, height: 50 },
     );
 
     assert.ok(typeof result === "object" && result !== null && "result" in result);
