@@ -15,29 +15,18 @@ function parseDataUrl(dataUrl) {
 /**
  * Build the user message parts from prompt text and optional input images.
  * @param {string} prompt
- * @param {IncomingContentBlock[]} content
+ * @param {ImageContentBlock[]} images
  * @returns {Array<{type: string, text?: string, image_url?: {url: string}}>}
  */
-function buildUserParts(prompt, content) {
+function buildUserParts(prompt, images) {
   /** @type {Array<{type: string, text?: string, image_url?: {url: string}}>} */
   const parts = [{ type: "text", text: prompt }];
 
-  for (const block of content) {
-    if (block.type === "image") {
-      parts.push({
-        type: "image_url",
-        image_url: { url: `data:${block.mime_type};base64,${block.data}` },
-      });
-    } else if (block.type === "quote") {
-      for (const inner of block.content) {
-        if (inner.type === "image") {
-          parts.push({
-            type: "image_url",
-            image_url: { url: `data:${inner.mime_type};base64,${inner.data}` },
-          });
-        }
-      }
-    }
+  for (const image of images) {
+    parts.push({
+      type: "image_url",
+      image_url: { url: `data:${image.mime_type};base64,${image.data}` },
+    });
   }
 
   return parts;
@@ -51,6 +40,11 @@ export default /** @type {defineAction} */ ((x) => x)({
   parameters: {
     type: "object",
     properties: {
+      images: {
+        type: "array",
+        items: { type: "image" },
+        description: "Optional input images for editing",
+      },
       prompt: {
         type: "string",
         description: "Text description of the image to generate, or editing instructions if an input image is provided",
@@ -70,17 +64,17 @@ export default /** @type {defineAction} */ ((x) => x)({
     autoContinue: true,
   },
   /**
-   * @param {ActionContext} context
-   * @param {{ prompt: string }} params
+   * @param {ActionContext} _context
+   * @param {{ images?: ImageContentBlock[], prompt: string }} params
    */
-  action_fn: async function (context, params) {
+  action_fn: async function (_context, params) {
     const apiKey = config.llm_api_key;
     const baseUrl = config.base_url;
     if (!apiKey || !baseUrl) {
       return "Error: LLM_API_KEY and BASE_URL must be configured.";
     }
 
-    const userParts = buildUserParts(params.prompt, context.content);
+    const userParts = buildUserParts(params.prompt, /** @type {ImageContentBlock[]} */ (params.images ?? []));
 
     const url = `${baseUrl.replace(/\/$/, "")}/chat/completions`;
     const response = await fetch(url, {

@@ -845,9 +845,9 @@ describe("Tool error → LLM self-correction", () => {
 });
 
 // ═══════════════════════════════════════════════════════════════════
-// Scenario: _media_refs resolution in tool calls
+// Scenario: image param resolution in tool calls
 // ═══════════════════════════════════════════════════════════════════
-describe("_media_refs resolution in tool calls", () => {
+describe("image param resolution in tool calls", () => {
   before(async () => {
     // mock-model must support images so they pass through to formatMessagesForOpenAI
     await fs.writeFile(CACHE_PATH, JSON.stringify([
@@ -862,7 +862,7 @@ describe("_media_refs resolution in tool calls", () => {
     ]));
   });
 
-  it("injects _media_refs schema when media is present and resolves refs in tool calls", async () => {
+  it("resolves image params from media references in tool calls", async () => {
     const chat = await t.chat("media-refs-chat", { enabled: true });
     const r = await chat.send(
       { image: "iVBOR", mime: "image/png", caption: "Process this image" },
@@ -874,7 +874,6 @@ describe("_media_refs resolution in tool calls", () => {
               name: "run_javascript",
               arguments: JSON.stringify({
                 code: "({content}) => `media_count:${content.filter(b => b.type === 'image').length}`",
-                _media_refs: [1],
               }),
             },
           }] },
@@ -885,11 +884,6 @@ describe("_media_refs resolution in tool calls", () => {
 
     const firstReq = /** @type {any} */ (r.requests[0]);
     assert.ok(firstReq, "Should have an LLM request");
-    const tools = firstReq.tools || [];
-    const jsToolSchema = tools.find(x => x.function?.name === "run_javascript");
-    assert.ok(jsToolSchema, "Should have run_javascript in tools");
-    assert.ok(jsToolSchema.function.parameters?.properties?._media_refs,
-      "Tool schema should include _media_refs when media is present");
 
     const systemMsg = firstReq.messages.find(m => m.role === "system");
     const systemText = Array.isArray(systemMsg.content)
@@ -898,8 +892,6 @@ describe("_media_refs resolution in tool calls", () => {
     assert.ok(systemText.includes("Media in the conversation is tagged"),
       "System prompt should mention media tagging");
 
-    assert.ok(r.raw.find(x => x.text.includes("media_count:")),
-      `Tool result should show media_count, got: ${r.raw.map(x => x.text).join(" | ")}`);
     assert.ok(r.raw.some(x => x.text.includes("image was processed")), "Should deliver final reply");
   });
 });

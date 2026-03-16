@@ -38,12 +38,17 @@ export default /** @type {defineAction} */ ((x) => x)({
   parameters: {
     type: "object",
     properties: {
+      images: {
+        type: "array",
+        items: { type: "image" },
+        description: "Images to extract data from",
+      },
       prompt: {
         type: "string",
         description: "What to extract from the image (e.g. invoice data, text content, etc.)",
       },
     },
-    required: ["prompt"],
+    required: ["images", "prompt"],
   },
   formatToolCall: ({ prompt }) => {
     const maxLen = 60;
@@ -59,10 +64,10 @@ export default /** @type {defineAction} */ ((x) => x)({
   },
   prompt: () => EXTRACT_PROMPT,
   action_fn: async function (context, params) {
-    const { callLlm, content, resolveModel: ctxResolveModel } = context;
+    const { callLlm, resolveModel: ctxResolveModel } = context;
 
     /** @type {ImageContentBlock[]} */
-    const images = /** @type {ImageContentBlock[]} */ (content.filter(c => c.type === "image"));
+    const images = /** @type {ImageContentBlock[]} */ (params.images ?? []);
     if (images.length === 0) {
       return "No image found. Please send an image along with your message.";
     }

@@ -135,6 +135,10 @@ export default /** @type {defineAction} */ ((x) => x)({
   parameters: {
     type: "object",
     properties: {
+      image: {
+        type: "image",
+        description: "Optional reference image for image-to-video generation",
+      },
       prompt: {
         type: "string",
         description: "Text description of the video to generate",
@@ -166,29 +170,17 @@ export default /** @type {defineAction} */ ((x) => x)({
     autoContinue: true,
   },
   /**
-   * @param {ActionContext} context
-   * @param {{ prompt: string, aspect_ratio?: string, duration_seconds?: number, negative_prompt?: string }} params
+   * @param {ActionContext} _context
+   * @param {{ image?: ImageContentBlock | null, prompt: string, aspect_ratio?: string, duration_seconds?: number, negative_prompt?: string }} params
    */
-  action_fn: async function (context, params) {
+  action_fn: async function (_context, params) {
     const apiKey = config.fal_api_key;
     if (!apiKey) {
       return "Error: FAL_KEY must be configured to generate videos.";
     }
 
     const model = config.video_model;
-
-    // Find image in content (direct or quoted)
-    /** @type {ImageContentBlock | undefined} */
-    let image;
-    for (const block of context.content) {
-      if (block.type === "image") { image = block; break; }
-      if (block.type === "quote") {
-        const inner = block.content.find(
-          /** @returns {b is ImageContentBlock} */ (b) => b.type === "image",
-        );
-        if (inner) { image = inner; break; }
-      }
-    }
+    const image = params.image ?? undefined;
 
     // Build endpoint and input
     /** @type {Record<string, unknown>} */

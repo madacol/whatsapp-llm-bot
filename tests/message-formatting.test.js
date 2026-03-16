@@ -29,38 +29,66 @@ describe("actionsToToolDefinitions", () => {
     assert.deepEqual(result[0].function.parameters, actions[0].parameters);
   });
 
-  it("injects _media_refs when hasMedia is true", () => {
+  it("converts type:'image' params to type:'string' with media hint when hasMedia is true", () => {
     const actions = /** @type {Action[]} */ ([
       {
-        name: "edit_image",
-        description: "Edit an image",
-        parameters: { type: "object", properties: { prompt: { type: "string" } } },
+        name: "zoom_image",
+        description: "Zoom into an image",
+        parameters: { type: "object", properties: { image: { type: "image", description: "The image" }, x: { type: "number" } } },
       },
     ]);
     const result = actionsToToolDefinitions(actions, true);
 
     const params = result[0].function.parameters;
-    assert.ok(params.properties._media_refs, "Should have _media_refs property");
-    assert.equal(params.properties._media_refs.type, "array");
-    assert.equal(params.properties._media_refs.items.type, "integer");
-    // Original prompt property should still be there
-    assert.ok(params.properties.prompt, "Original properties should be preserved");
+    assert.equal(params.properties.image.type, "string", "image type should be converted to string");
+    assert.ok(params.properties.image.description.includes("[media:N]"), "description should mention media refs");
+    assert.equal(params.properties.x.type, "number", "non-image params should be unchanged");
   });
 
-  it("does not inject _media_refs when hasMedia is false", () => {
+  it("converts type:'image' to type:'string' even without media", () => {
     const actions = /** @type {Action[]} */ ([
       {
-        name: "test",
-        description: "Test",
-        parameters: { type: "object", properties: { x: { type: "string" } } },
+        name: "zoom_image",
+        description: "Zoom",
+        parameters: { type: "object", properties: { image: { type: "image" } } },
       },
     ]);
     const result = actionsToToolDefinitions(actions, false);
 
-    assert.ok(!result[0].function.parameters.properties._media_refs);
+    assert.equal(result[0].function.parameters.properties.image.type, "string");
+    assert.ok(!result[0].function.parameters.properties.image.description.includes("[media:N]"));
   });
 
-  it("does not mutate original action parameters when injecting _media_refs", () => {
+  it("converts array of image params", () => {
+    const actions = /** @type {Action[]} */ ([
+      {
+        name: "extract",
+        description: "Extract",
+        parameters: { type: "object", properties: { images: { type: "array", items: { type: "image" }, description: "Input images" } } },
+      },
+    ]);
+    const result = actionsToToolDefinitions(actions, true);
+
+    const prop = result[0].function.parameters.properties.images;
+    assert.equal(prop.type, "array");
+    assert.equal(prop.items.type, "string");
+    assert.ok(prop.description.includes("[media:N]"));
+  });
+
+  it("does not mutate original action parameters when converting image params", () => {
+    const actions = /** @type {Action[]} */ ([
+      {
+        name: "test",
+        description: "Test",
+        parameters: { type: "object", properties: { image: { type: "image" } } },
+      },
+    ]);
+    actionsToToolDefinitions(actions, true);
+
+    assert.equal(actions[0].parameters.properties.image.type, "image", "Original action should not be mutated");
+  });
+
+  it("does not modify tools that have no image params", () => {
     const actions = /** @type {Action[]} */ ([
       {
         name: "test",
@@ -68,9 +96,10 @@ describe("actionsToToolDefinitions", () => {
         parameters: { type: "object", properties: { x: { type: "string" } } },
       },
     ]);
-    actionsToToolDefinitions(actions, true);
+    const result = actionsToToolDefinitions(actions, true);
 
-    assert.ok(!actions[0].parameters.properties._media_refs, "Original action should not be mutated");
+    // Should use the original parameters object (no copy needed)
+    assert.deepEqual(result[0].function.parameters, actions[0].parameters);
   });
 
 });

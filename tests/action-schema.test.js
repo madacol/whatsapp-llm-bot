@@ -4,7 +4,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 
 const VALID_JSON_SCHEMA_TYPES = new Set([
-  "string", "number", "integer", "boolean", "object", "array", "null",
+  "string", "number", "integer", "boolean", "object", "array", "null", "image",
 ]);
 
 /** @type {Array<{dirName: string, action: Action}>} */
