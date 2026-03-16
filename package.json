@@ -30,6 +30,7 @@
         "linkedom": "^0.18.12",
         "nodemailer": "^8.0.1",
         "openai": "^4.104.0",
+        "sharp": "^0.34.5",
         "shiki": "^4.0.1",
         "turndown": "^7.2.2"
     },
