@@ -702,8 +702,27 @@ if (!process.env.TESTING) {
     process.exit(0);
   });
   process.on("uncaughtException", async (error) => {
+    // The Claude Agent SDK subprocess throws "Operation aborted" as an
+    // uncaught exception when a query is cancelled via AbortController.
+    // This is a known SDK internal error path (y9.write → handleControlRequest)
+    // that escapes the async iterator's promise chain.  Suppress it instead
+    // of crashing the whole bot.
+    if (error?.message === "Operation aborted" || error?.name === "AbortError") {
+      log.warn("Suppressed SDK abort exception:", error.message);
+      return;
+    }
     log.error("Uncaught Exception:", error);
     await cleanup();
     process.exit(1);
+  });
+  process.on("unhandledRejection", (reason) => {
+    // Same suppression for abort errors surfacing as unhandled rejections
+    if (reason instanceof Error && (reason.message === "Operation aborted" || reason.name === "AbortError")) {
+      log.warn("Suppressed SDK abort rejection:", reason.message);
+      return;
+    }
+    log.error("Unhandled Rejection:", reason);
+    // Don't exit — unhandled rejections are non-fatal by default in Node ≥15
+    // but log them so they're visible.
   });
 }
