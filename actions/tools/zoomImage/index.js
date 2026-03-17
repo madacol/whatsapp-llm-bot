@@ -43,8 +43,11 @@ export default /** @type {defineAction} */ ((x) => x)({
   action_fn: async function (_context, params) {
     const { image, x, y, width, height } = params;
 
-    if (!image) {
-      return "No image found. Please reference an image using [media:N] so I can zoom into it.";
+    if (!image || typeof image === "string") {
+      const detail = typeof image === "string"
+        ? `Received "${image}" which did not resolve to an image.`
+        : "No image reference was provided.";
+      return `${detail} Pass a [media:N] reference from the conversation.`;
     }
 
     // Validate ranges (negative or out-of-bounds)

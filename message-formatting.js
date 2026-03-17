@@ -92,7 +92,11 @@ export function resolveImageArgs(schema, args, mediaRegistry) {
     const prop = /** @type {{ type: string, items?: { type: string } }} */ (propSchema);
     if (prop.type === "image") {
       const id = parseMediaRef(args[key]);
-      resolved[key] = id !== null ? (mediaRegistry.get(id) ?? null) : null;
+      // When resolution succeeds, replace with the block; otherwise keep
+      // the original value so the action can report what the LLM passed.
+      if (id !== null) {
+        resolved[key] = mediaRegistry.get(id) ?? args[key];
+      }
     } else if (prop.type === "array" && prop.items?.type === "image") {
       const refs = Array.isArray(args[key]) ? args[key] : [];
       resolved[key] = refs
