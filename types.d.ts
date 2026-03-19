@@ -400,12 +400,6 @@ type AgentHarnessParams = {
   hooks?: AgentIOHooks;
   maxDepth?: number;
   agentDepth?: number;
-  /** @deprecated Use runConfig.workdir instead. */
-  cwd?: string;
-  /** @deprecated Use runConfig.model instead. */
-  sdkModel?: string;
-  /** @deprecated Use runConfig.reasoningEffort instead. */
-  sdkEffort?: 'low' | 'medium' | 'high' | 'max';
   runConfig?: HarnessRunConfig;
 };
 
