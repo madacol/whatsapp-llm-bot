@@ -234,6 +234,40 @@ describe("LLM pipeline via createMessageHandler", () => {
     );
   });
 
+  it("clears harness sessions through the active harness command surface", async () => {
+    await seedChat("pipe-slash-clear", { enabled: true });
+    await db.sql`
+      UPDATE chats
+      SET harness = 'native',
+          harness_session_id = 'sess-clear-1',
+          harness_session_kind = 'native',
+          harness_session_history = '[]'::jsonb
+      WHERE chat_id = 'pipe-slash-clear'
+    `;
+
+    const { context, responses } = createIncomingContext({
+      chatId: "pipe-slash-clear",
+      content: [{ type: "text", text: "/clear" }],
+    });
+    await handleMessage(context);
+
+    assert.ok(
+      responses.some(r => r.text.includes("Session cleared")),
+      "Expected /clear to be handled via the active harness",
+    );
+
+    const { rows: [chat] } = await db.sql`
+      SELECT harness_session_id, harness_session_kind, harness_session_history
+      FROM chats
+      WHERE chat_id = 'pipe-slash-clear'
+    `;
+    assert.equal(chat.harness_session_id, null);
+    assert.equal(chat.harness_session_kind, null);
+    assert.equal(chat.harness_session_history.length, 1);
+    assert.equal(chat.harness_session_history[0].id, "sess-clear-1");
+    assert.equal(chat.harness_session_history[0].kind, "native");
+  });
+
   it("recall_history stores full result in DB", async () => {
     await seedChat("pipe-recall", { enabled: true });
 

@@ -18,6 +18,7 @@ import { storeAndLinkHtml } from "../html-store.js";
 import { recordUsage, resolveCost } from "../usage-tracker.js";
 import { getToolCallSummary } from "../tool-display.js";
 import { createLogger } from "../logger.js";
+import { handleHarnessSessionCommand } from "./session-commands.js";
 
 const log = createLogger("harness:native");
 
@@ -395,11 +396,16 @@ async function run(params) {
 
 /**
  * Native does not currently own any slash commands.
- * @param {HarnessCommandContext} _input
+ * @param {HarnessCommandContext} input
  * @returns {Promise<boolean>}
  */
-async function handleCommand(_input) {
-  return false;
+async function handleCommand(input) {
+  return handleHarnessSessionCommand({
+    command: input.command,
+    chatId: input.chatId,
+    context: input.context,
+    sessionControl: input.sessionControl,
+  });
 }
 
 /**
