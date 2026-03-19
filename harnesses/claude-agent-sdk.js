@@ -231,7 +231,7 @@ async function buildSystemPrompt(llmConfig, chatId, senderIds) {
  *   activeTools: Map<string, ActiveToolEntry>,
  *   hooks: Required<AgentIOHooks>,
  *   session: AgentHarnessParams["session"],
- *   cwd: string | null | undefined,
+ *   workdir: string | null | undefined,
  * }} SdkEventContext
  */
 
@@ -462,12 +462,9 @@ export function createClaudeAgentSdkHarness() {
    * @returns {Promise<AgentResult>}
    */
   async function run(params) {
-    const { runConfig, session } = params;
-    const nextParams = {
+    const { session } = params;
+    return processLlmResponse({
       ...params,
-      cwd: runConfig?.workdir ?? params.cwd,
-      sdkModel: runConfig?.model ?? params.sdkModel,
-      sdkEffort: runConfig?.reasoningEffort ?? params.sdkEffort,
       session: {
         ...session,
         harnessSession: session.harnessSession?.kind === "claude-sdk"
@@ -481,8 +478,7 @@ export function createClaudeAgentSdkHarness() {
           }
         ),
       },
-    };
-    return processLlmResponse(nextParams);
+    });
   }
 
   /**
@@ -587,9 +583,12 @@ export function createClaudeAgentSdkHarness() {
    * @param {AgentHarnessParams} params
    * @returns {Promise<AgentResult>}
    */
-  async function processLlmResponse({ session, llmConfig, messages, hooks: userHooks, maxDepth, cwd, sdkModel, sdkEffort }) {
+  async function processLlmResponse({ session, llmConfig, messages, hooks: userHooks, maxDepth, runConfig }) {
     const rawHooks = { ...NO_OP_HOOKS, ...userHooks };
     const hooks = wrapHooksWithFallbacks(rawHooks);
+    const workdir = runConfig?.workdir ?? null;
+    const model = runConfig?.model ?? null;
+    const reasoningEffort = runConfig?.reasoningEffort ?? null;
 
     const lastUserText = extractLastUserText(messages);
 
@@ -644,7 +643,7 @@ export function createClaudeAgentSdkHarness() {
       const queryOptions = {
         systemPrompt: fullSystemPrompt,
         maxTurns: maxDepth ?? 50,
-        cwd: cwd ?? process.cwd(),
+        cwd: workdir ?? process.cwd(),
         settingSources: ["project"],
         // Use acceptEdits so the SDK's permission state machine stays active —
         // this lets plan mode (EnterPlanMode / ExitPlanMode) work properly.
@@ -654,8 +653,8 @@ export function createClaudeAgentSdkHarness() {
         allowDangerouslySkipPermissions: true,
         persistSession: true,
         abortController,
-        ...(sdkModel && { model: sdkModel }),
-        ...(sdkEffort && { effort: sdkEffort }),
+        ...(model && { model }),
+        ...(reasoningEffort && { effort: reasoningEffort }),
         stderr: (/** @type {string} */ data) => {
           stderrBytes += data.length;
           while (stderrLines.length >= MAX_STDERR_LINES || stderrBytes > MAX_STDERR_BYTES) {
@@ -719,8 +718,8 @@ export function createClaudeAgentSdkHarness() {
                 // Display tool call and store handle for inspect handler
                 if (toolUseId) {
                   const toolCall = { id: toolUseId, name: input.tool_name, arguments: JSON.stringify(toolInput) };
-                  const content = formatToolCallDisplay(toolCall, undefined, cwd, displayContext);
-                  const summary = getToolCallSummary(input.tool_name, toolInput, undefined, cwd, displayContext);
+                  const content = formatToolCallDisplay(toolCall, undefined, workdir, displayContext);
+                  const summary = getToolCallSummary(input.tool_name, toolInput, undefined, workdir, displayContext);
                   /** @type {MessageHandle | undefined} */
                   let handle;
                   if (content != null) {
@@ -776,7 +775,7 @@ export function createClaudeAgentSdkHarness() {
       }
 
       /** @type {SdkEventContext} */
-      const ctx = { result, messages, activeTools, hooks, session, cwd: cwd ?? null };
+      const ctx = { result, messages, activeTools, hooks, session, workdir };
 
       let eventCount = 0;
 
@@ -837,8 +836,8 @@ export function createClaudeAgentSdkHarness() {
           log.error(`[sdk stderr tail (last ${stderrLines.length} chunks)]`, stderrLines.join(""));
         }
         let displayMsg = errorMsg;
-        if (errorMsg.includes("executable not found") && cwd) {
-          displayMsg += `\n\nHint: The harness_cwd is set to "${cwd}" — make sure this path exists. Use \`!config harness_cwd <path>\` to fix it.`;
+        if (errorMsg.includes("executable not found") && workdir) {
+          displayMsg += `\n\nHint: The harness_cwd is set to "${workdir}" — make sure this path exists. Use \`!config harness_cwd <path>\` to fix it.`;
         }
         await hooks.onToolError(displayMsg);
         result.response = [{ type: "text", text: `SDK error: ${displayMsg}` }];

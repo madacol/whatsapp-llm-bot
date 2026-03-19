@@ -1,5 +1,5 @@
 /**
- * Native harness — the original processLlmResponse loop extracted from index.js.
+ * Native harness — the original run loop extracted from index.js.
  */
 
 import { sendChatCompletion } from "../llm.js";
@@ -88,13 +88,13 @@ async function tryEdit(handle, text, toolName) {
  *   agentDepth?: number,
  *   handle?: MessageHandle,
  *   actionFormatToolCall?: (params: Record<string, any>) => string,
- *   cwd?: string,
+ *   workdir?: string | null,
  * }} params
  * @returns {Promise<boolean | undefined>} The autoContinue value
  */
 async function executeAndStoreTool({
   session, llmConfig, toolCall, messages, mediaRegistry, hooks, agentDepth,
-  handle, actionFormatToolCall, cwd,
+  handle, actionFormatToolCall, workdir,
 }) {
   const { chatId, context, updateToolMessage } = session;
   const { executeActionFn, actionResolver, actionLlmClient } = llmConfig;
@@ -129,7 +129,7 @@ async function executeAndStoreTool({
   /** Register 👁 react-to-inspect on the tool-call message handle. */
   const registerInspect = (/** @type {ToolMessage} */ toolMessage) => {
     if (handle) {
-      const summary = getToolCallSummary(toolName, toolArgs, actionFormatToolCall, cwd ?? null, displayContext);
+      const summary = getToolCallSummary(toolName, toolArgs, actionFormatToolCall, workdir ?? null, displayContext);
       registerInspectHandler(handle, summary, toolMessage, toolName);
     }
   };
@@ -185,7 +185,7 @@ async function executeAndStoreTool({
     }
 
     // Edit tool-call message in-place with summary label
-    await tryEdit(handle, getToolCallSummary(toolName, toolArgs, actionFormatToolCall, cwd ?? null, displayContext), toolName);
+    await tryEdit(handle, getToolCallSummary(toolName, toolArgs, actionFormatToolCall, workdir ?? null, displayContext), toolName);
 
     // Register 👁 react-to-inspect for tool results
     registerInspect(toolMessage);
@@ -219,10 +219,11 @@ async function executeAndStoreTool({
  * @param {AgentHarnessParams} params
  * @returns {Promise<AgentResult>}
  */
-async function processLlmResponse({ session, llmConfig, messages, mediaRegistry, hooks: userHooks, maxDepth, agentDepth, cwd }) {
+async function processLlmResponse({ session, llmConfig, messages, mediaRegistry, hooks: userHooks, maxDepth, agentDepth, runConfig }) {
   const { chatId, senderIds, addMessage } = session;
   const { llmClient, chatModel, actions } = llmConfig;
   const maxToolCallDepth = maxDepth ?? MAX_TOOL_CALL_DEPTH;
+  const workdir = runConfig?.workdir ?? null;
   /** @type {Required<AgentIOHooks>} */
   const hooks = { ...NO_OP_HOOKS, ...userHooks };
   let { systemPrompt } = llmConfig;
@@ -350,7 +351,7 @@ async function processLlmResponse({ session, llmConfig, messages, mediaRegistry,
         session, llmConfig, toolCall, messages, mediaRegistry, hooks, agentDepth,
         handle: state?.handle,
         actionFormatToolCall: state?.formatToolCall,
-        cwd,
+        workdir,
       });
       if (!shouldContinue) continueProcessing = false;
     }
@@ -389,8 +390,7 @@ async function processLlmResponse({ session, llmConfig, messages, mediaRegistry,
  * @returns {Promise<AgentResult>}
  */
 async function run(params) {
-  const workdir = params.runConfig?.workdir ?? params.cwd;
-  return processLlmResponse({ ...params, cwd: workdir });
+  return processLlmResponse(params);
 }
 
 /**
