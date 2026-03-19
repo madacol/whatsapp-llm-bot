@@ -1,0 +1,14 @@
+diff --git a/lib/Utils/messages.js b/lib/Utils/messages.js
+index eff7a53f0b5958edf5a0ce0eeca1e21c1ff008fb..661be3fa1a35ab161e87c6c5d61480cfa31f8aae 100644
+--- a/lib/Utils/messages.js
++++ b/lib/Utils/messages.js
+@@ -614,7 +614,8 @@ export const normalizeMessageContent = (content) => {
+             message?.documentWithCaptionMessage ||
+             message?.viewOnceMessageV2 ||
+             message?.viewOnceMessageV2Extension ||
+-            message?.editedMessage);
++            message?.editedMessage ||
++            message?.associatedChildMessage);
+     }
+ };
+ /**

@@ -1,12 +1,13 @@
 import { describe, it, before } from "node:test";
 import assert from "node:assert/strict";
+import { proto } from "@whiskeysockets/baileys";
 
 process.env.TESTING = "1";
 process.env.MASTER_ID = "master-user";
 process.env.LLM_API_KEY = "test-key";
 process.env.MODEL = "mock-model";
 
-import { createTestDb } from "./helpers.js";
+import { createTestDb, seedChat } from "./helpers.js";
 import { setDb } from "../db.js";
 
 /** @type {typeof import("../whatsapp-adapter.js").getMessageContent} */
@@ -14,6 +15,12 @@ let getMessageContent;
 
 /** @type {typeof import("../whatsapp-adapter.js").createConfirmRegistry} */
 let createConfirmRegistry;
+
+/** @type {typeof import("../whatsapp-adapter.js").createUserResponseRegistry} */
+let createUserResponseRegistry;
+
+/** @type {typeof import("../whatsapp-adapter.js").adaptIncomingMessage} */
+let adaptIncomingMessage;
 
 before(async () => {
   // Seed DB cache so initStore() in index.js uses in-memory DB
@@ -23,7 +30,70 @@ before(async () => {
   const adapter = await import("../whatsapp-adapter.js");
   getMessageContent = adapter.getMessageContent;
   createConfirmRegistry = adapter.createConfirmRegistry;
+  createUserResponseRegistry = adapter.createUserResponseRegistry;
+  adaptIncomingMessage = adapter.adaptIncomingMessage;
 });
+
+/**
+ * @template T
+ * @param {Promise<T>} promise
+ * @param {number} timeoutMs
+ * @returns {Promise<T | "timeout">}
+ */
+function withTimeout(promise, timeoutMs) {
+  return Promise.race([
+    promise,
+    new Promise((resolve) => setTimeout(() => resolve("timeout"), timeoutMs)),
+  ]);
+}
+
+/**
+ * @param {object} params
+ * @param {string} params.chatId
+ * @param {string} params.messageId
+ * @param {number} params.pairedMediaType
+ * @param {string} [params.parentMessageId]
+ * @param {string} [params.mediaKey]
+ * @returns {BaileysMessage}
+ */
+function createHdImageMessage({ chatId, messageId, pairedMediaType, parentMessageId, mediaKey = "bWVkaWEta2V5" }) {
+  /** @type {Record<string, unknown>} */
+  const message = {
+    imageMessage: {
+      mimetype: "image/jpeg",
+      url: `https://example.com/${messageId}.jpg`,
+      directPath: `/v/t62.7118-24/${messageId}`,
+      mediaKey,
+      contextInfo: { pairedMediaType },
+    },
+  };
+
+  if (parentMessageId) {
+    message.associatedChildMessage = {
+      message: message.imageMessage ? { imageMessage: message.imageMessage } : {},
+    };
+    delete message.imageMessage;
+    message.messageContextInfo = {
+      messageAssociation: {
+        parentMessageKey: {
+          remoteJid: chatId,
+          id: parentMessageId,
+        },
+      },
+    };
+  }
+
+  return /** @type {BaileysMessage} */ (/** @type {unknown} */ ({
+    key: {
+      remoteJid: chatId,
+      fromMe: false,
+      id: messageId,
+    },
+    message,
+    messageTimestamp: Math.floor(Date.now() / 1000),
+    pushName: "HD Tester",
+  }));
+}
 
 /**
  * Create a mock Baileys socket and confirm registry for testing.
@@ -268,6 +338,238 @@ describe("getMessageContent", () => {
     });
     const { quotedSenderId } = await getMessageContent(msg);
     assert.equal(quotedSenderId, undefined);
+  });
+
+  it("resolves HD children against their parent message ID when multiple parents are pending in one chat", async () => {
+    const chatId = "multi-hd@s.whatsapp.net";
+    const SD_PARENT = proto.ContextInfo.PairedMediaType.SD_IMAGE_PARENT;
+    const HD_CHILD = proto.ContextInfo.PairedMediaType.HD_IMAGE_CHILD;
+    const mockDownload = async (/** @type {BaileysMessage} */ message) => Buffer.from(message.key.id);
+    /** @type {ImageContentBlock[]} */
+    const parentImages = [];
+    const confirmRegistry = createConfirmRegistry();
+    const userResponseRegistry = createUserResponseRegistry();
+    const sock = /** @type {import("@whiskeysockets/baileys").WASocket} */ (/** @type {unknown} */ ({
+      user: { id: "bot@s.whatsapp.net" },
+      signalRepository: {
+        lidMapping: {
+          getPNForLID: async () => null,
+        },
+      },
+      sendPresenceUpdate: async () => {},
+      readMessages: async () => {},
+    }));
+
+    await adaptIncomingMessage(
+      createHdImageMessage({ chatId, messageId: "sd-parent-1", pairedMediaType: SD_PARENT }),
+      sock,
+      async (ctx) => {
+        parentImages.push(/** @type {ImageContentBlock} */ (ctx.content.find((block) => block.type === "image")));
+      },
+      confirmRegistry,
+      userResponseRegistry,
+      undefined,
+      mockDownload,
+    );
+    await adaptIncomingMessage(
+      createHdImageMessage({ chatId, messageId: "sd-parent-2", pairedMediaType: SD_PARENT }),
+      sock,
+      async (ctx) => {
+        parentImages.push(/** @type {ImageContentBlock} */ (ctx.content.find((block) => block.type === "image")));
+      },
+      confirmRegistry,
+      userResponseRegistry,
+      undefined,
+      mockDownload,
+    );
+
+    const [firstImage, secondImage] = parentImages;
+
+    assert.equal(firstImage._hdParentMessageId, "sd-parent-1");
+    assert.equal(secondImage._hdParentMessageId, "sd-parent-2");
+
+    await adaptIncomingMessage(
+      createHdImageMessage({
+        chatId,
+        messageId: "hd-child-1",
+        pairedMediaType: HD_CHILD,
+        parentMessageId: "sd-parent-1",
+      }),
+      sock,
+      async () => {
+        assert.fail("HD child should not be passed to the message handler");
+      },
+      confirmRegistry,
+      userResponseRegistry,
+      undefined,
+      mockDownload,
+    );
+
+    assert.deepEqual(
+      await withTimeout(firstImage.getHd ?? Promise.resolve(null), 50),
+      /** @type {ImageContentBlock} */ ({
+        type: "image",
+        encoding: "base64",
+        mime_type: "image/jpeg",
+        data: Buffer.from("hd-child-1").toString("base64"),
+      }),
+    );
+    assert.equal(await withTimeout(secondImage.getHd ?? Promise.resolve(null), 50), "timeout");
+  });
+});
+
+describe("HD receive integration", () => {
+  it("normalizes HD child chat IDs before resolving the pending parent upgrade", async () => {
+    const rawChatId = "12345@lid";
+    const normalizedChatId = "12345@s.whatsapp.net";
+    const parentMessageId = "lid-parent-1";
+    const SD_PARENT = proto.ContextInfo.PairedMediaType.SD_IMAGE_PARENT;
+    const HD_CHILD = proto.ContextInfo.PairedMediaType.HD_IMAGE_CHILD;
+    /** @type {ImageContentBlock | null} */
+    let parentImage = null;
+    const confirmRegistry = createConfirmRegistry();
+    const userResponseRegistry = createUserResponseRegistry();
+    const sock = /** @type {import("@whiskeysockets/baileys").WASocket} */ (/** @type {unknown} */ ({
+      user: { id: "bot@s.whatsapp.net" },
+      signalRepository: {
+        lidMapping: {
+          getPNForLID: async (lid) => lid === rawChatId ? normalizedChatId : null,
+        },
+      },
+      sendPresenceUpdate: async () => {},
+      readMessages: async () => {},
+    }));
+    const mockDownload = async (/** @type {BaileysMessage} */ message) => Buffer.from(message.key.id);
+
+    await adaptIncomingMessage(
+      createHdImageMessage({ chatId: rawChatId, messageId: parentMessageId, pairedMediaType: SD_PARENT }),
+      sock,
+      async (ctx) => {
+        assert.equal(ctx.chatId, normalizedChatId);
+        parentImage = /** @type {ImageContentBlock} */ (ctx.content.find((block) => block.type === "image"));
+      },
+      confirmRegistry,
+      userResponseRegistry,
+      undefined,
+      mockDownload,
+    );
+
+    assert.ok(parentImage?.getHd, "Expected SD parent to expose a pending HD promise");
+
+    await adaptIncomingMessage(
+      createHdImageMessage({
+        chatId: rawChatId,
+        messageId: "lid-child-1",
+        pairedMediaType: HD_CHILD,
+        parentMessageId,
+      }),
+      sock,
+      async () => {
+        assert.fail("HD child should not be passed to the message handler");
+      },
+      confirmRegistry,
+      userResponseRegistry,
+      undefined,
+      mockDownload,
+    );
+
+    assert.deepEqual(
+      await withTimeout(parentImage.getHd, 100),
+      /** @type {ImageContentBlock} */ ({
+        type: "image",
+        encoding: "base64",
+        mime_type: "image/jpeg",
+        data: Buffer.from("lid-child-1").toString("base64"),
+      }),
+    );
+  });
+
+  it("updates the stored _hdRef on the matching parent message instead of the newest pending image", async () => {
+    const db = await createTestDb();
+    const chatId = "persist-hd@s.whatsapp.net";
+    const parentMessageId = "persist-parent-1";
+    await seedChat(db, chatId);
+
+    await db.sql`INSERT INTO messages(chat_id, sender_id, message_data, timestamp)
+      VALUES (
+        ${chatId},
+        ${"user-1"},
+        ${{
+          role: "user",
+          content: [{
+            type: "image",
+            encoding: "base64",
+            mime_type: "image/jpeg",
+            data: "c2Qx",
+            _hdRef: null,
+            _hdParentMessageId: parentMessageId,
+          }],
+        }},
+        ${new Date("2026-03-19T00:00:00.000Z")}
+      )`;
+    await db.sql`INSERT INTO messages(chat_id, sender_id, message_data, timestamp)
+      VALUES (
+        ${chatId},
+        ${"user-1"},
+        ${{
+          role: "user",
+          content: [{
+            type: "image",
+            encoding: "base64",
+            mime_type: "image/jpeg",
+            data: "c2Qy",
+            _hdRef: null,
+            _hdParentMessageId: "persist-parent-2",
+          }],
+        }},
+        ${new Date("2026-03-19T00:00:01.000Z")}
+      )`;
+
+    const confirmRegistry = createConfirmRegistry();
+    const userResponseRegistry = createUserResponseRegistry();
+    const sock = /** @type {import("@whiskeysockets/baileys").WASocket} */ (/** @type {unknown} */ ({
+      user: { id: "bot@s.whatsapp.net" },
+      signalRepository: {
+        lidMapping: {
+          getPNForLID: async () => null,
+        },
+      },
+      sendPresenceUpdate: async () => {},
+      readMessages: async () => {},
+    }));
+    const childMessage = createHdImageMessage({
+      chatId,
+      messageId: "persist-child-1",
+      pairedMediaType: proto.ContextInfo.PairedMediaType.HD_IMAGE_CHILD,
+      parentMessageId,
+      mediaKey: "cGVyc2lzdC1tZWRpYS1rZXk=",
+    });
+
+    await adaptIncomingMessage(
+      childMessage,
+      sock,
+      async () => {
+        assert.fail("HD child should not reach the message handler");
+      },
+      confirmRegistry,
+      userResponseRegistry,
+      undefined,
+      async (/** @type {BaileysMessage} */ message) => Buffer.from(message.key.id),
+    );
+
+    const { rows } = await db.sql`SELECT message_data FROM messages WHERE chat_id = ${chatId} ORDER BY timestamp ASC`;
+    const firstRow = /** @type {{ message_data: UserMessage }} */ (rows[0]);
+    const secondRow = /** @type {{ message_data: UserMessage }} */ (rows[1]);
+    const firstImage = /** @type {ImageContentBlock} */ (firstRow.message_data.content[0]);
+    const secondImage = /** @type {ImageContentBlock} */ (secondRow.message_data.content[0]);
+
+    assert.deepEqual(firstImage._hdRef, {
+      url: "https://example.com/persist-child-1.jpg",
+      directPath: "/v/t62.7118-24/persist-child-1",
+      mediaKey: "cGVyc2lzdC1tZWRpYS1rZXk=",
+      mimetype: "image/jpeg",
+    });
+    assert.equal(secondImage._hdRef, null);
   });
 });
 

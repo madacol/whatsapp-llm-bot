@@ -58,7 +58,14 @@ export default /** @type {defineAction} */ ((x) => x)({
       return `Crop region exceeds image bounds: (${x}+${width}=${x + width}%, ${y}+${height}=${y + height}%). All coordinates must stay within 0-100%.`;
     }
 
-    const inputBuffer = Buffer.from(image.data, "base64");
+    let source = image;
+    try {
+      if (image.getHd) {
+        const hd = await image.getHd;
+        if (hd?.data) source = hd;
+      }
+    } catch {}
+    const inputBuffer = Buffer.from(source.data, "base64");
     const pipeline = sharp(inputBuffer);
     const metadata = await pipeline.metadata();
     const imgWidth = metadata.width ?? 0;
@@ -86,7 +93,7 @@ export default /** @type {defineAction} */ ((x) => x)({
     /** @type {ToolContentBlock[]} */
     const result = [
       { type: "text", text: `Cropped region: (${x}%, ${y}%) ${width}%×${height}% → ${cropWidth}×${cropHeight}px` },
-      { type: "image", encoding: "base64", mime_type: "image/jpeg", data: croppedBuffer.toString("base64") },
+      { type: "image", encoding: "base64", mime_type: "image/jpeg", data: croppedBuffer.toString("base64"), quality: "hd" },
     ];
 
     return { result };
