@@ -7,9 +7,8 @@ import fs from "node:fs";
 import { getActions, executeAction, getChatActions, getChatAction, getAction } from "./actions.js";
 import config from "./config.js";
 import { createLlmClient } from "./llm.js";
-import { formatTime, isHtmlContent, getChatWorkDir, errorToString } from "./utils.js";
+import { formatTime, isHtmlContent, errorToString } from "./utils.js";
 import { connectToWhatsApp } from "./whatsapp-adapter.js";
-import { reattachHdDeferreds } from "./whatsapp-hd-media.js";
 import { startReminderDaemon } from "./reminder-daemon.js";
 import { startModelsCacheDaemon } from "./models-cache.js";
 import { initStore } from "./store.js";
@@ -17,23 +16,16 @@ import {
   shouldRespond,
   formatUserMessage,
   parseCommandArgs,
-  prepareMessages,
 } from "./message-formatting.js";
-import { convertUnsupportedMedia } from "./media-to-text.js";
-import { resolveChatModel } from "./model-roles.js";
 import { getAgent } from "./agents.js";
 import { getRootDb } from "./db.js";
-import {
-  extractTextFromMessage,
-  findMemories,
-  formatMemoriesContext,
-} from "./memory.js";
 import { storeAndLinkHtml } from "./html-store.js";
 import { startHtmlServer, stopHtmlServer } from "./html-server.js";
 import { resolveHarness, resolveHarnessName, registerHarness, waitForAllHarnesses, MAX_TOOL_CALL_DEPTH, createHarnessRunCoordinator } from "./harnesses/index.js";
 import { formatToolCallDisplay } from "./tool-display.js";
 import { createMessageActionContext } from "./execute-action-context.js";
 import { createLogger } from "./logger.js";
+import { buildHarnessRunRequest } from "./conversation/build-harness-run-request.js";
 
 const log = createLogger("index");
 
@@ -88,41 +80,6 @@ function buildAgentIOHooks(context, sendComposing, cwd) {
       await context.send("usage", `Cost: ${cost} | prompt=${tokens.prompt} cached=${tokens.cached} completion=${tokens.completion}`);
     },
   };
-}
-
-/**
- * Search long-term memory for relevant context and append to system prompt.
- * Returns the (possibly extended) system prompt.
- * @param {object} opts
- * @param {string} opts.chatId
- * @param {import("./store.js").ChatRow | undefined} opts.chatInfo
- * @param {UserMessage} opts.message
- * @param {LlmClient} opts.llmClient
- * @param {string} opts.systemPrompt
- * @param {Pick<ExecuteActionContext, "send">} opts.context
- * @returns {Promise<string>}
- */
-async function searchAndAppendMemories({ chatId, chatInfo, message, llmClient, systemPrompt, context }) {
-  const currentText = extractTextFromMessage(message);
-  if (currentText.length < 10) return systemPrompt;
-
-  try {
-    const threshold = chatInfo?.memory_threshold ?? config.memory_threshold;
-    const similar = await findMemories(getRootDb(), llmClient, chatId, currentText, { minSimilarity: threshold });
-    log.debug(`[memory] query="${currentText.slice(0, 80)}" found=${similar.length} threshold=${threshold}`);
-    if (similar.length > 0) {
-      const extended = systemPrompt + "\n\n## Relevant memories\n" + formatMemoriesContext(similar);
-      log.debug("[memory] recalled:", similar.map(m => `#${m.id}(${Number(m.similarity).toFixed(3)})`).join(", "));
-      const lines = similar.map(m =>
-        `• [#${m.id}] (score: ${Number(m.similarity).toFixed(3)}) ${m.content.slice(0, 100)}${m.content.length > 100 ? "…" : ""}`
-      );
-      await context.send("memory", `Recalled ${similar.length} memor${similar.length === 1 ? "y" : "ies"}\n${lines.join("\n")}`);
-      return extended;
-    }
-  } catch (err) {
-    log.error("Memory search failed:", err);
-  }
-  return systemPrompt;
 }
 
 /**
@@ -283,8 +240,6 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
     const message = {role: "user", content}
     await addMessage(chatId, message, senderIds);
 
-    const enableMemory = !!chatInfo?.memory;
-
     if (!willRespond) {
       return;
     }
@@ -315,88 +270,29 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
     await sendComposing();
 
     try {
+      const hooks = buildAgentIOHooks(context, sendComposing, chatInfo?.harness_cwd ?? null);
+      runCoordinator.markRunActive(chatId);
 
-    // Resolve active persona (if any)
-    const persona = chatInfo?.active_persona ? await getAgent(chatInfo.active_persona) : null;
+      const { runRequest } = await buildHarnessRunRequest({
+        chatId,
+        senderIds,
+        chatInfo,
+        context,
+        message,
+        actions,
+        actionResolver,
+        llmClient,
+        getMessages,
+        executeActionFn,
+        addMessage,
+        updateToolMessage,
+        saveHarnessSession,
+        hooks,
+        systemPromptSuffix,
+        bufferedTexts: runCoordinator.consumeBufferedTexts(chatId),
+      });
 
-    // Get system prompt and model from persona, chat, or defaults
-    let systemPrompt = (persona?.systemPrompt ?? chatInfo?.system_prompt ?? config.system_prompt) + systemPromptSuffix;
-    const chatModel = resolveChatModel(persona, chatInfo ?? undefined);
-
-    // Get latest messages from DB
-    const chatMessages = await getMessages(chatId)
-
-    // Convert unsupported media types to text for non-multimodal models
-    const mediaToTextModels = chatInfo?.media_to_text_models ?? {};
-    const rootDb = getRootDb();
-    const { messages: translatedMessages, skippedTypes } = await convertUnsupportedMedia(
-      chatMessages, chatModel, mediaToTextModels, llmClient, rootDb,
-    );
-
-    if (skippedTypes.size > 0) {
-      const types = [...skippedTypes].join(", ");
-      await context.send("warning", `${types} not supported by this model. Use \`!config media_to_text_model\` to enable.`);
-    }
-
-    // Search long-term memory for relevant past conversations
-    if (enableMemory) {
-      systemPrompt = await searchAndAppendMemories({ chatId, chatInfo, message, llmClient, systemPrompt, context });
-    }
-
-    // Prepare messages (internal Message[] format)
-    const { messages: preparedMessages, mediaRegistry } = prepareMessages(translatedMessages);
-    reattachHdDeferreds(chatId, mediaRegistry);
-
-    /** @type {Session} */
-    const session = {
-      chatId, senderIds, context, addMessage, updateToolMessage,
-      harnessSession: chatInfo?.harness_session_id && chatInfo?.harness_session_kind
-        ? { id: chatInfo.harness_session_id, kind: chatInfo.harness_session_kind }
-        : null,
-      saveHarnessSession,
-    };
-
-    // Filter actions by persona whitelist if active
-    const activeActions = persona?.allowedActions
-      ? actions.filter(a => persona.allowedActions?.includes(a.name))
-      : actions;
-
-    /** @type {LlmConfig} */
-    const llmConfig = {
-      llmClient, chatModel, systemPrompt, actions: activeActions,
-      executeActionFn, actionResolver, actionLlmClient: llmClient,
-    };
-
-    const hooks = buildAgentIOHooks(context, sendComposing, chatInfo?.harness_cwd ?? null);
-
-    runCoordinator.markRunActive(chatId);
-
-    // Append any messages that arrived during setup to the conversation
-    const buffered = runCoordinator.consumeBufferedTexts(chatId);
-    for (const text of buffered) {
-      if (text) {
-        /** @type {UserMessage} */
-        const bufferedMsg = { role: "user", content: [{ type: "text", text }] };
-        preparedMessages.push(bufferedMsg);
-        log.debug("Appended buffered message to conversation for chat", chatId);
-      }
-    }
-
-    await harness.run({
-      session,
-      llmConfig,
-      messages: preparedMessages,
-      mediaRegistry,
-      hooks,
-      runConfig: {
-        workdir: getChatWorkDir(chatId, chatInfo?.harness_cwd),
-        model: chatInfo?.harness_config?.model ?? undefined,
-        reasoningEffort: /** @type {HarnessRunConfig['reasoningEffort']} */ (chatInfo?.harness_config?.reasoningEffort ?? undefined),
-        sandboxMode: /** @type {HarnessRunConfig['sandboxMode']} */ (chatInfo?.harness_config?.sandboxMode ?? undefined),
-        approvalPolicy: /** @type {HarnessRunConfig['approvalPolicy']} */ (chatInfo?.harness_config?.approvalPolicy ?? undefined),
-      },
-    });
-
+      await harness.run(runRequest);
     } catch (error) {
       log.error("handleLlmMessage failed:", error);
       const errorMessage = errorToString(error);
