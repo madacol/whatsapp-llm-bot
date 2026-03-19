@@ -8,7 +8,8 @@ import { getActions, executeAction, getChatActions, getChatAction, getAction } f
 import config from "./config.js";
 import { createLlmClient } from "./llm.js";
 import { formatTime, isHtmlContent, formatRelativeTime, getChatWorkDir, errorToString } from "./utils.js";
-import { connectToWhatsApp, reattachHdDeferreds } from "./whatsapp-adapter.js";
+import { connectToWhatsApp } from "./whatsapp-adapter.js";
+import { reattachHdDeferreds } from "./whatsapp-hd-media.js";
 import { startReminderDaemon } from "./reminder-daemon.js";
 import { startModelsCacheDaemon } from "./models-cache.js";
 import { initStore } from "./store.js";
