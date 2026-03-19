@@ -2,6 +2,8 @@
  * Pure functions extracted from index.js for testability.
  */
 
+import { hydrateHdRef } from "./whatsapp-adapter.js";
+
 /**
  * Convert a single property schema, replacing custom `type: "image"` with
  * `type: "string"` and a description hint for the LLM to pass [media:N] references.
@@ -102,7 +104,8 @@ export function resolveImageArgs(schema, args, mediaRegistry) {
       resolved[key] = refs
         .map((/** @type {unknown} */ r) => {
           const id = parseMediaRef(r);
-          return id !== null ? (mediaRegistry.get(id) ?? null) : null;
+          if (id === null) return null;
+          return mediaRegistry.get(id) ?? null;
         })
         .filter(/** @type {(b: unknown) => b is IncomingContentBlock} */ (b) => b !== null);
     }
@@ -269,14 +272,16 @@ export function prepareMessages(chatMessages) {
     if (!msg.message_data) continue;
     const messageData = msg.message_data;
 
-    // Scan for media blocks and register them
+    // Scan for media blocks, hydrate HD refs, and register them
     if (messageData.role === "user") {
       for (const block of messageData.content) {
         if (isMediaBlock(block)) {
+          if (block.type === "image") hydrateHdRef(/** @type {ImageContentBlock} */ (block));
           registerMedia(mediaRegistry, block);
         } else if (block.type === "quote") {
           for (const quoteBlock of block.content) {
             if (isMediaBlock(quoteBlock)) {
+              if (quoteBlock.type === "image") hydrateHdRef(/** @type {ImageContentBlock} */ (quoteBlock));
               registerMedia(mediaRegistry, quoteBlock);
             }
           }
@@ -285,6 +290,7 @@ export function prepareMessages(chatMessages) {
     } else if (messageData.role === "tool") {
       for (const block of messageData.content) {
         if (isMediaBlock(block)) {
+          if (block.type === "image") hydrateHdRef(/** @type {ImageContentBlock} */ (block));
           registerMedia(mediaRegistry, block);
         }
       }

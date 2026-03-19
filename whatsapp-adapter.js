@@ -7,6 +7,7 @@ import {
   makeWASocket,
   useMultiFileAuthState,
   downloadMediaMessage,
+  downloadContentFromMessage,
   Browsers,
   fetchLatestWaWebVersion,
   isLidUser,
@@ -24,8 +25,106 @@ import { rm } from "node:fs/promises";
 import { needsAuthReset, sendAlertEmail } from "./notifications.js";
 import { renderBlocks } from "./message-renderer.js";
 import { createLogger } from "./logger.js";
+import { getRootDb } from "./db.js";
 
 const log = createLogger("whatsapp");
+
+// ── HD dual-upload handoff ──────────────────────────────────────────
+// SD parent: download immediately, create a deferred promise, set block.getHd.
+// HD child: download full-res, resolve the deferred, update DB. Don't trigger bot.
+const HD_TIMEOUT_MS = 10_000;
+
+/** @type {Map<string, { promise: Promise<ImageContentBlock | null>, resolve: (block: ImageContentBlock | null) => void }>} */
+const hdDeferreds = new Map();
+
+/**
+ * @param {string} chatId
+ * @param {string} parentMessageId
+ * @returns {string}
+ */
+function getHdDeferredKey(chatId, parentMessageId) {
+  return `${chatId}\u0000${parentMessageId}`;
+}
+
+/**
+ * Create a deferred promise for an HD image upgrade.
+ * @param {string} chatId
+ * @param {string} parentMessageId
+ * @returns {Promise<ImageContentBlock | null>}
+ */
+function createHdDeferred(chatId, parentMessageId) {
+  const key = getHdDeferredKey(chatId, parentMessageId);
+  /** @type {(block: ImageContentBlock | null) => void} */
+  let resolve;
+  const promise = new Promise(r => { resolve = r; });
+  // Clean up after timeout — keep entry alive until then so reattachHdDeferreds can find it
+  const timeout = setTimeout(() => {
+    hdDeferreds.delete(key);
+    resolve(null);
+  }, HD_TIMEOUT_MS);
+  hdDeferreds.set(key, {
+    promise,
+    resolve: (block) => {
+      clearTimeout(timeout);
+      // Don't delete — reattachHdDeferreds needs to find the promise after DB round-trip.
+      // Entry is cleaned up by the next createHdDeferred for the same key, or on timeout.
+      resolve(block);
+    },
+  });
+  return promise;
+}
+
+/**
+ * Move a pending HD deferred from one chat key to another.
+ * Used when Baileys reports the same 1:1 chat under LID and PN JIDs.
+ * @param {string} fromChatId
+ * @param {string} toChatId
+ * @param {string} parentMessageId
+ */
+function rekeyHdDeferred(fromChatId, toChatId, parentMessageId) {
+  if (fromChatId === toChatId) return;
+  const fromKey = getHdDeferredKey(fromChatId, parentMessageId);
+  const toKey = getHdDeferredKey(toChatId, parentMessageId);
+  const entry = hdDeferreds.get(fromKey);
+  if (!entry) return;
+  hdDeferreds.delete(fromKey);
+  hdDeferreds.set(toKey, entry);
+}
+
+/**
+ * Resolve a pending HD deferred for a specific parent message.
+ * @param {string} chatId
+ * @param {string | undefined} parentMessageId
+ * @param {ImageContentBlock | null} block
+ */
+function resolveHdDeferred(chatId, parentMessageId, block) {
+  if (!parentMessageId) return;
+  const deferred = hdDeferreds.get(getHdDeferredKey(chatId, parentMessageId));
+  if (deferred) {
+    deferred.resolve(block);
+  }
+}
+
+/**
+ * Re-attach `getHd` deferred promises to image blocks in the media registry.
+ * Blocks lose their `getHd` during DB round-trip; this restores it from
+ * the in-memory deferred map for the current turn.
+ * @param {string} chatId
+ * @param {MediaRegistry} mediaRegistry
+ */
+export function reattachHdDeferreds(chatId, mediaRegistry) {
+  for (const [id, block] of mediaRegistry.entries()) {
+    if (block.type === "image") {
+      const parentMessageId = block._hdParentMessageId;
+      const entry = parentMessageId
+        ? hdDeferreds.get(getHdDeferredKey(chatId, parentMessageId))
+        : undefined;
+      if (entry && block._hdRef === null && !(block.getHd instanceof Promise)) {
+        block.getHd = entry.promise;
+      }
+    }
+  }
+}
 
 /**
  * Stores sent poll creation messages keyed by message ID so we can
@@ -190,6 +289,32 @@ function getContextInfo(msg) {
     || msg?.audioMessage?.contextInfo
     || msg?.ptvMessage?.contextInfo
     || msg?.stickerMessage?.contextInfo;
+}
+
+/**
+ * Normalize a chat JID so 1:1 conversations consistently use the PN JID.
+ * @param {string} chatId
+ * @param {import('@whiskeysockets/baileys').WASocket} sock
+ * @returns {Promise<string>}
+ */
+async function normalizeChatId(chatId, sock) {
+  if (!isLidUser(chatId)) return chatId;
+  const pn = await sock.signalRepository.lidMapping.getPNForLID(chatId);
+  return pn ? jidNormalizedUser(pn) : chatId;
+}
+
+/**
+ * Extract the associated SD parent message ID from an incoming HD child.
+ * @param {BaileysMessage} baileysMessage
+ * @returns {string | undefined}
+ */
+function getHdParentMessageId(baileysMessage) {
+  const messageAssociation = baileysMessage.message?.messageContextInfo?.messageAssociation
+    || baileysMessage.message?.associatedChildMessage?.message?.messageContextInfo?.messageAssociation;
+  const parentMessageKey = messageAssociation?.parentMessageKey;
+  return typeof parentMessageKey?.id === "string" && parentMessageKey.id.length > 0
+    ? parentMessageKey.id
+    : undefined;
 }
 
 /**
@@ -576,17 +701,114 @@ async function downloadMediaToBlocks(baileysMessage, mediaMessage, type, downloa
 
   return blocks;
 }
+/**
+ * Hydrate the `getHd` promise on an image block from its serialized `_hdRef`.
+ * Call this when loading blocks from DB to restore the HD download capability.
+ * @param {ImageContentBlock} block
+ */
+export function hydrateHdRef(block) {
+  if (block._hdRef && !(block.getHd instanceof Promise)) {
+    const hdRef = block._hdRef;
+    block.getHd = (async () => {
+      try {
+        const mediaKey = Buffer.from(hdRef.mediaKey, "base64");
+        const stream = await downloadContentFromMessage(
+          { mediaKey, directPath: hdRef.directPath, url: hdRef.url },
+          "image",
+        );
+        /** @type {Buffer[]} */
+        const chunks = [];
+        for await (const chunk of stream) chunks.push(chunk);
+        const buffer = Buffer.concat(chunks);
+        return /** @type {ImageContentBlock} */ ({
+          type: "image",
+          encoding: "base64",
+          mime_type: hdRef.mimetype || "image/jpeg",
+          data: buffer.toString("base64"),
+        });
+      } catch {
+        return null;
+      }
+    })();
+  }
+}
+
+/**
+ * Update `_hdRef` on the stored SD parent image block that matches the parent message ID.
+ * Called when the HD child arrives after the SD parent was already stored.
+ * @param {string} chatId
+ * @param {string | undefined} parentMessageId
+ * @param {HdChildRef} ref
+ */
+async function updateStoredHdRef(chatId, parentMessageId, ref) {
+  if (!parentMessageId) return;
+  try {
+    const db = getRootDb();
+    const { rows } = await db.query(
+      `SELECT message_id, message_data FROM messages
+       WHERE chat_id = $1
+         AND message_data->>'role' = 'user'
+         AND EXISTS (
+           SELECT 1
+           FROM jsonb_array_elements(message_data->'content') AS block
+           WHERE block->>'type' = 'image'
+             AND block->>'_hdParentMessageId' = $2
+             AND block->'_hdRef' = 'null'::jsonb
+         )
+       ORDER BY timestamp DESC LIMIT 1`,
+      [chatId, parentMessageId],
+    );
+    if (rows.length === 0) return;
+
+    const row = /** @type {{ message_id: number, message_data: UserMessage }} */ (rows[0]);
+    const messageData = row.message_data;
+    let updated = false;
+    for (const block of messageData.content) {
+      if (
+        block.type === "image"
+        && /** @type {ImageContentBlock} */ (block)._hdRef === null
+        && /** @type {ImageContentBlock} */ (block)._hdParentMessageId === parentMessageId
+      ) {
+        /** @type {ImageContentBlock} */ (block)._hdRef = ref;
+        updated = true;
+        break;
+      }
+    }
+    if (updated) {
+      await db.query(
+        `UPDATE messages SET message_data = $1 WHERE message_id = $2`,
+        [messageData, row.message_id],
+      );
+      log.info("Updated stored _hdRef for chat/message:", chatId, parentMessageId);
+    }
+  } catch (err) {
+    log.warn("Failed to update stored _hdRef:", err);
+  }
+}
+
+/**
+ * @typedef {{ url?: string; directPath?: string; mediaKey: string; mimetype?: string }} HdChildRef
+ */
 
 /**
  * @param {BaileysMessage} baileysMessage
  * @param {DownloadMediaFn} [downloadFn]
- * @returns {Promise<{ content: IncomingContentBlock[], quotedSenderId: string | undefined }>}
+ * @returns {Promise<{
+ *   content: IncomingContentBlock[],
+ *   quotedSenderId: string | undefined,
+ *   hdChild?: { parentMessageId?: string, ref: HdChildRef, imageBlock: ImageContentBlock | null },
+ *   hdParentMessageId?: string,
+ * }>}
  */
 export async function getMessageContent(baileysMessage, downloadFn = downloadMediaMessage) {
   /** @type {IncomingContentBlock[]} */
   const content = [];
   /** @type {string | undefined} */
   let quotedSenderId;
+  /** @type {{ parentMessageId?: string, ref: HdChildRef, imageBlock: ImageContentBlock | null } | undefined} */
+  let hdChild;
+  /** @type {string | undefined} */
+  let hdParentMessageId;
 
   // Check for quoted message content
   const contextInfo = getContextInfo(baileysMessage.message);
@@ -646,8 +868,17 @@ export async function getMessageContent(baileysMessage, downloadFn = downloadMed
     content.push(quote);
   }
 
+
   // Check for image content (including quoted images)
-  const imageMessage = baileysMessage.message?.imageMessage;
+  // HD child arrives wrapped in associatedChildMessage, not as a top-level imageMessage
+  const assocInnerMessage = baileysMessage.message?.associatedChildMessage?.message;
+  const imageMessage = baileysMessage.message?.imageMessage ?? assocInnerMessage?.imageMessage;
+  // Use the unwrapped inner message for media download when image is in associatedChildMessage
+  const msgForImageDownload = baileysMessage.message?.imageMessage
+    ? baileysMessage
+    : assocInnerMessage?.imageMessage
+      ? /** @type {BaileysMessage} */ ({ key: baileysMessage.key, message: assocInnerMessage })
+      : baileysMessage;
   const videoMessage = baileysMessage.message?.videoMessage
     || baileysMessage.message?.ptvMessage;
   const audioMessage = baileysMessage.message?.audioMessage;
@@ -656,7 +887,47 @@ export async function getMessageContent(baileysMessage, downloadFn = downloadMed
     || baileysMessage.message?.documentMessage?.caption
 
   if (imageMessage) {
-    content.push(...await downloadMediaToBlocks(baileysMessage, imageMessage, "image", downloadFn));
+    const pairedType = imageMessage.contextInfo?.pairedMediaType;
+    const SD_PARENT = proto.ContextInfo.PairedMediaType.SD_IMAGE_PARENT;
+    const HD_CHILD = proto.ContextInfo.PairedMediaType.HD_IMAGE_CHILD;
+
+    if (pairedType === HD_CHILD) {
+      const hdBlocks = await downloadMediaToBlocks(msgForImageDownload, imageMessage, "image", downloadFn);
+      const hdImageBlock = /** @type {ImageContentBlock | undefined} */ (hdBlocks.find(b => b.type === "image"));
+      const parentMessageId = getHdParentMessageId(baileysMessage);
+      if (imageMessage.mediaKey) {
+        hdChild = {
+          parentMessageId,
+          imageBlock: hdImageBlock ?? null,
+          ref: {
+            url: imageMessage.url ?? undefined,
+            directPath: imageMessage.directPath ?? undefined,
+            mediaKey: typeof imageMessage.mediaKey === "string"
+              ? imageMessage.mediaKey
+              : Buffer.from(imageMessage.mediaKey).toString("base64"),
+            mimetype: imageMessage.mimetype ?? undefined,
+          },
+        };
+      }
+    } else if (pairedType === SD_PARENT) {
+      const blocks = await downloadMediaToBlocks(msgForImageDownload, imageMessage, "image", downloadFn);
+      const chatId = baileysMessage.key.remoteJid || "";
+      const parentMessageId = typeof baileysMessage.key.id === "string"
+        ? baileysMessage.key.id
+        : undefined;
+      hdParentMessageId = parentMessageId;
+      for (const block of blocks) {
+        if (block.type === "image") {
+          const hdPromise = parentMessageId ? createHdDeferred(chatId, parentMessageId) : Promise.resolve(null);
+          /** @type {ImageContentBlock} */ (block)._hdRef = null; // marker: HD expected
+          /** @type {ImageContentBlock} */ (block)._hdParentMessageId = parentMessageId;
+          /** @type {ImageContentBlock} */ (block).getHd = hdPromise;
+        }
+      }
+      content.push(...blocks);
+    } else {
+      content.push(...await downloadMediaToBlocks(msgForImageDownload, imageMessage, "image", downloadFn));
+    }
   }
 
   if (videoMessage) {
@@ -679,7 +950,7 @@ export async function getMessageContent(baileysMessage, downloadFn = downloadMed
     log.debug("Unknown baileysMessage", JSON.stringify(baileysMessage, null, 2));
   }
 
-  return { content, quotedSenderId };
+  return { content, quotedSenderId, hdChild, hdParentMessageId };
 }
 
 /**
@@ -822,6 +1093,80 @@ export async function sendAlbum(sock, chatId, items, options) {
 }
 
 /**
+ * Send an image as HD using WhatsApp's dual-upload mechanism:
+ * 1. Relay an SD (standard) parent image with pairedMediaType = SD_IMAGE_PARENT
+ * 2. Relay the full-res HD child image linked via HD_IMAGE_DUAL_UPLOAD association
+ *
+ * @param {import('@whiskeysockets/baileys').WASocket} sock
+ * @param {string} chatId
+ * @param {Buffer} imageBuffer  — full-resolution image
+ * @param {string} [caption]
+ * @param {{ quoted?: BaileysMessage }} [options]
+ * @returns {Promise<import('@whiskeysockets/baileys').WAMessage | undefined>}
+ */
+async function sendImageHD(sock, chatId, imageBuffer, caption, options) {
+  const userJid = sock.user?.id ?? "";
+  const uploadOpts = { upload: sock.waUploadToServer, userJid };
+
+  // ── 1. Generate SD (downscaled) parent ──────────────────────────────
+  const { default: sharp } = await import("sharp");
+  const meta = await sharp(imageBuffer).metadata();
+  const maxDim = Math.max(meta.width ?? 0, meta.height ?? 0);
+  // WhatsApp standard quality caps at ~1600px longest side
+  const sdBuffer = maxDim > 1600
+    ? await sharp(imageBuffer).resize({ width: 1600, height: 1600, fit: "inside" }).jpeg({ quality: 80 }).toBuffer()
+    : await sharp(imageBuffer).jpeg({ quality: 80 }).toBuffer();
+
+  const sdMsgId = generateMessageIDV2(userJid);
+  const sdMsg = await generateWAMessage(chatId, {
+    image: sdBuffer,
+    ...(caption && { caption }),
+  }, { ...uploadOpts, messageId: sdMsgId, ...(options?.quoted && { quoted: options.quoted }) });
+
+  if (!sdMsg.message) return undefined;
+
+  // Tag as SD parent
+  const sdCtx = sdMsg.message.imageMessage?.contextInfo ?? {};
+  sdCtx.pairedMediaType = proto.ContextInfo.PairedMediaType.SD_IMAGE_PARENT;
+  if (sdMsg.message.imageMessage) sdMsg.message.imageMessage.contextInfo = sdCtx;
+
+  sdMsg.message.messageContextInfo = { messageSecret: randomBytes(32) };
+  await sock.relayMessage(chatId, sdMsg.message, { messageId: sdMsgId });
+
+  const parentMessageKey = {
+    remoteJid: sdMsg.key.remoteJid,
+    fromMe: sdMsg.key.fromMe,
+    id: sdMsg.key.id,
+  };
+
+  // ── 2. Generate HD child ────────────────────────────────────────────
+  const hdMsgId = generateMessageIDV2(userJid);
+  const hdMsg = await generateWAMessage(chatId, {
+    image: imageBuffer,
+    ...(caption && { caption }),
+  }, { ...uploadOpts, messageId: hdMsgId });
+
+  if (!hdMsg.message) return undefined;
+
+  // Tag as HD child
+  const hdCtx = hdMsg.message.imageMessage?.contextInfo ?? {};
+  hdCtx.pairedMediaType = proto.ContextInfo.PairedMediaType.HD_IMAGE_CHILD;
+  if (hdMsg.message.imageMessage) hdMsg.message.imageMessage.contextInfo = hdCtx;
+
+  hdMsg.message.messageContextInfo = {
+    messageSecret: randomBytes(32),
+    messageAssociation: {
+      associationType: proto.MessageAssociation.AssociationType.HD_IMAGE_DUAL_UPLOAD,
+      parentMessageKey,
+    },
+  };
+
+  await sock.relayMessage(chatId, hdMsg.message, { messageId: hdMsgId });
+
+  return sdMsg;
+}
+
+/**
  * Dispatch SendContent as WhatsApp messages with a source-based prefix.
  * Returns a MessageHandle for the last editable message sent (if any),
  * giving callers lifecycle control (edit, reaction subscription).
@@ -858,10 +1203,14 @@ export async function sendBlocks(sock, chatId, source, content, options, reactio
         if (instr.editable && sent?.key) { lastSentKey = sent.key; lastSentIsImage = false; }
         break;
       case "image":
-        sent = await sock.sendMessage(chatId, {
-          image: instr.image,
-          ...(instr.caption && { caption: instr.caption }),
-        }, options);
+        if (instr.hd) {
+          sent = await sendImageHD(sock, chatId, instr.image, instr.caption, options);
+        } else {
+          sent = await sock.sendMessage(chatId, {
+            image: instr.image,
+            ...(instr.caption && { caption: instr.caption }),
+          }, options);
+        }
         if (instr.editable && sent?.key) { lastSentKey = sent.key; lastSentIsImage = true; }
         break;
       case "video":
@@ -948,29 +1297,30 @@ export async function sendBlocks(sock, chatId, source, content, options, reactio
  * @param {ConfirmRegistry} confirmRegistry
  * @param {UserResponseRegistry} userResponseRegistry
  * @param {ReactionRegistry} reactionRegistry
+ * @param {DownloadMediaFn} [downloadFn]
  */
-export async function adaptIncomingMessage(baileysMessage, sock, messageHandler, confirmRegistry, userResponseRegistry, reactionRegistry) {
+export async function adaptIncomingMessage(baileysMessage, sock, messageHandler, confirmRegistry, userResponseRegistry, reactionRegistry, downloadFn = downloadMediaMessage) {
   // Extract message content from Baileys format
   // Ignore status updates
   if (baileysMessage.key.remoteJid === "status@broadcast") {
     return;
   }
 
-  const { content, quotedSenderId } = await getMessageContent(baileysMessage);
+  const rawChatId = baileysMessage.key.remoteJid || "";
+  const chatId = await normalizeChatId(rawChatId, sock);
+  const { content, quotedSenderId, hdChild, hdParentMessageId } = await getMessageContent(baileysMessage, downloadFn);
 
-  if (content.length === 0) {
-    return
+  if (hdParentMessageId) {
+    rekeyHdDeferred(rawChatId, chatId, hdParentMessageId);
   }
 
-  let chatId = baileysMessage.key.remoteJid || "";
+  if (hdChild) {
+    resolveHdDeferred(chatId, hdChild.parentMessageId, hdChild.imageBlock);
+    await updateStoredHdRef(chatId, hdChild.parentMessageId, hdChild.ref);
+  }
 
-  // Baileys sometimes uses LID (@lid) instead of phone number (@s.whatsapp.net)
-  // for the same 1:1 chat. Normalize to PN so settings/messages stay consistent.
-  if (isLidUser(chatId)) {
-    const pn = await sock.signalRepository.lidMapping.getPNForLID(chatId);
-    if (pn) {
-      chatId = jidNormalizedUser(pn);
-    }
+  if (content.length === 0) {
+    return;
   }
 
   // Baileys key type doesn't declare LID/PID fields used for sender identification

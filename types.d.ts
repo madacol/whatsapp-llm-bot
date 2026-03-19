@@ -8,12 +8,27 @@ type TextContentBlock = {
   type: "text";
   text: string;
 };
+
 type ImageContentBlock = {
   type: "image";
   encoding: "base64";
   mime_type: string;
   data: string;
   alt?: string;
+  /** Delivery quality hint. "hd" asks the adapter to send with full
+   *  dual-upload so the receiver's client shows the HD badge. */
+  quality?: "standard" | "hd";
+  /**
+   * Serializable HD download ref. Set when HD child arrives.
+   * - `null` means "HD is expected but hasn't arrived yet"
+   * - `undefined` (absent) means "no HD version exists"
+   * - `{ ... }` means "HD ref available, can download"
+   */
+  _hdRef?: { url?: string; directPath?: string; mediaKey: string; mimetype?: string } | null;
+  /** Parent SD message ID used to match later HD child upgrades. */
+  _hdParentMessageId?: string;
+  /** Runtime-only deferred promise for HD version. Not serialized. */
+  getHd?: Promise<ImageContentBlock | null>;
 };
 type VideoContentBlock = {
   type: "video";

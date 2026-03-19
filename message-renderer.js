@@ -16,7 +16,7 @@ const log = createLogger("message-renderer");
  * `editable` flags messages whose key should be tracked for in-place editing.
  * @typedef {
  *   | { kind: "text", text: string, editable: boolean }
- *   | { kind: "image", image: Buffer, caption?: string, editable: boolean }
+ *   | { kind: "image", image: Buffer, caption?: string, editable: boolean, hd?: boolean }
  *   | { kind: "video", video: Buffer, mimetype: string, caption?: string }
  *   | { kind: "audio", audio: Buffer, mimetype: string }
  * } SendInstruction
@@ -141,6 +141,7 @@ export async function renderBlocks(blocks, prefix) {
           kind: "image",
           image: Buffer.from(block.data, "base64"),
           ...(block.alt && { caption: block.alt }),
+          ...(block.quality === "hd" && { hd: true }),
           editable: false,
         });
         break;
