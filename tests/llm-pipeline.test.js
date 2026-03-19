@@ -215,7 +215,12 @@ describe("LLM pipeline via createMessageHandler", () => {
 
   it("delegates harness-owned slash commands through handleCommand", async () => {
     await seedChat("pipe-slash-1", { enabled: true });
-    await db.sql`UPDATE chats SET harness = 'claude-agent-sdk', sdk_model = 'claude-sonnet-4-6', sdk_effort = 'medium' WHERE chat_id = 'pipe-slash-1'`;
+    await db.sql`
+      UPDATE chats
+      SET harness = 'claude-agent-sdk',
+          harness_config = '{"model":"claude-sonnet-4-6","reasoningEffort":"medium"}'::jsonb
+      WHERE chat_id = 'pipe-slash-1'
+    `;
 
     const { context, responses } = createIncomingContext({
       chatId: "pipe-slash-1",

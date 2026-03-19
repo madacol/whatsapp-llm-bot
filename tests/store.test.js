@@ -240,4 +240,51 @@ describe("store with injected DB", () => {
       assert.equal(messages[0].message_data.content[0].text, "[executing...]");
     });
   });
+
+  describe("harness session persistence", () => {
+    it("saves and clears the current harness session", async () => {
+      await store.createChat("harness-session-1");
+
+      await store.saveHarnessSession("harness-session-1", { id: "sess-123", kind: "claude-sdk" });
+      let chat = await store.getChat("harness-session-1");
+      assert.equal(chat.harness_session_id, "sess-123");
+      assert.equal(chat.harness_session_kind, "claude-sdk");
+
+      await store.saveHarnessSession("harness-session-1", null);
+      chat = await store.getChat("harness-session-1");
+      assert.equal(chat.harness_session_id, null);
+      assert.equal(chat.harness_session_kind, null);
+    });
+
+    it("archives and restores harness sessions generically", async () => {
+      await store.createChat("harness-session-2");
+
+      await store.saveHarnessSession("harness-session-2", { id: "sess-a", kind: "claude-sdk" });
+      await store.archiveHarnessSession("harness-session-2");
+
+      let history = await store.getHarnessSessionHistory("harness-session-2");
+      assert.equal(history.length, 1);
+      assert.equal(history[0].id, "sess-a");
+      assert.equal(history[0].kind, "claude-sdk");
+
+      await store.saveHarnessSession("harness-session-2", { id: "sess-b", kind: "codex" });
+      await store.archiveHarnessSession("harness-session-2");
+
+      history = await store.getHarnessSessionHistory("harness-session-2");
+      assert.equal(history.length, 2);
+      assert.equal(history[1].id, "sess-b");
+      assert.equal(history[1].kind, "codex");
+
+      const restored = await store.restoreHarnessSession("harness-session-2", 0);
+      assert.ok(restored);
+      assert.equal(restored.id, "sess-b");
+      assert.equal(restored.kind, "codex");
+
+      const chat = await store.getChat("harness-session-2");
+      assert.equal(chat.harness_session_id, "sess-b");
+      assert.equal(chat.harness_session_kind, "codex");
+      assert.equal(chat.harness_session_history.length, 1);
+      assert.equal(chat.harness_session_history[0].id, "sess-a");
+    });
+  });
 });
