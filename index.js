@@ -7,7 +7,7 @@ import fs from "node:fs";
 import { getActions, executeAction, getChatActions, getChatAction, getAction } from "./actions.js";
 import config from "./config.js";
 import { createLlmClient } from "./llm.js";
-import { formatTime, isHtmlContent, formatRelativeTime, getChatWorkDir, errorToString } from "./utils.js";
+import { formatTime, isHtmlContent, getChatWorkDir, errorToString } from "./utils.js";
 import { connectToWhatsApp } from "./whatsapp-adapter.js";
 import { reattachHdDeferreds } from "./whatsapp-hd-media.js";
 import { startReminderDaemon } from "./reminder-daemon.js";
@@ -257,76 +257,6 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
   }
 
   /**
-   * Handle built-in slash commands that operate on the harness level.
-   * Returns true if the command was handled, false if it should fall through to the SDK.
-   * @param {string} command - The slash command text (without leading /)
-   * @param {string} chatId
-   * @param {import("./store.js").ChatRow | undefined} chatInfo
-   * @param {ExecuteActionContext} context
-   * @returns {Promise<boolean>}
-   */
-  async function handleSlashCommand(command, chatId, chatInfo, context) {
-    const persona = chatInfo?.active_persona ? await getAgent(chatInfo.active_persona) : null;
-    const harnessName = resolveHarnessName(persona, chatInfo);
-    const harness = resolveHarness(harnessName);
-
-    switch (command) {
-      case "clear": {
-        // Reset the SDK session — next message starts a fresh conversation
-        // Cancel any active query
-        harness.cancel?.(chatId);
-        // Archive the current session before clearing so it can be resumed later
-        await archiveHarnessSession(chatId);
-        await context.reply("tool-result", "Session cleared\n\nNext message starts fresh.\nUse */resume* to restore this session later.");
-        return true;
-      }
-      case "resume": {
-        // Archive the current active session first so it's not lost
-        await archiveHarnessSession(chatId);
-        const history = await getHarnessSessionHistory(chatId);
-        if (history.length === 0) {
-          await context.reply("tool-result", "No previous sessions to resume.");
-          return true;
-        }
-
-        // Build options: most recent first, with relative time labels
-        // WhatsApp polls support up to 12 options
-        const recentFirst = [...history].reverse().slice(0, 11);
-        /** @type {SelectOption[]} */
-        const selectOptions = [
-          ...recentFirst.map((entry, i) => ({
-            id: String(i),
-            label: `Session ${i + 1} (${formatRelativeTime(Date.now() - new Date(entry.cleared_at).getTime())})`,
-          })),
-          { id: "cancel", label: "Cancel" },
-        ];
-
-        const choice = await context.select("Which session to resume?", selectOptions, {
-          deleteOnSelect: true,
-          cancelIds: ["cancel"],
-        });
-
-        if (!choice || choice === "cancel") {
-          return true;
-        }
-
-        const selectedIndex = parseInt(choice, 10);
-        const restored = await restoreHarnessSession(chatId, selectedIndex);
-        if (!restored) {
-          await context.reply("tool-result", "Failed to restore session.");
-          return true;
-        }
-        const agoStr = formatRelativeTime(Date.now() - new Date(restored.cleared_at).getTime());
-        await context.reply("tool-result", `Session restored (cleared ${agoStr}). Your next message will continue that conversation.`);
-        return true;
-      }
-      default: {
-        return harness.handleCommand({ chatId, chatInfo, context, command });
-      }
-    }
-  }
-
-  /**
    * Handle a regular (non-command) message: format, store, and run through the LLM harness.
    * @param {object} opts
    * @param {IncomingContext} opts.messageContext
@@ -546,7 +476,20 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
         return;
       }
       const slashCmd = firstBlock.text.slice(1).trim().toLowerCase();
-      const handled = await handleSlashCommand(slashCmd, chatId, chatInfo, context);
+      const persona = chatInfo?.active_persona ? await getAgent(chatInfo.active_persona) : null;
+      const harnessName = resolveHarnessName(persona, chatInfo);
+      const harness = resolveHarness(harnessName);
+      const handled = await harness.handleCommand({
+        chatId,
+        chatInfo,
+        context,
+        command: slashCmd,
+        sessionControl: {
+          archive: archiveHarnessSession,
+          getHistory: getHarnessSessionHistory,
+          restore: restoreHarnessSession,
+        },
+      });
       if (handled) return;
       // Not a built-in slash command — fall through to LLM as a skill invocation
     }

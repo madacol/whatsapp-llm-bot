@@ -20,6 +20,7 @@ import { createLogger } from "../logger.js";
 import { extractLastUserText } from "../message-formatting.js";
 import { createToolMessage, errorToString, registerInspectHandler } from "../utils.js";
 import { getRootDb } from "../db.js";
+import { handleHarnessSessionCommand } from "./session-commands.js";
 
 const log = createLogger("harness:claude-agent-sdk");
 
@@ -448,16 +449,33 @@ export function createClaudeAgentSdkHarness() {
     getName: () => "claude-agent-sdk",
     getCapabilities: () => CLAUDE_HARNESS_CAPABILITIES,
     run,
-    handleCommand: handleClaudeHarnessCommand,
+    handleCommand,
     injectMessage,
     cancel,
     waitForIdle,
   };
 
   /**
+   * Handle slash commands owned by the Claude harness instance.
+   * @param {HarnessCommandContext} input
+   * @returns {Promise<boolean>}
+   */
+  async function handleCommand(input) {
+    const handledSessionCommand = await handleHarnessSessionCommand({
+      command: input.command,
+      chatId: input.chatId,
+      context: input.context,
+      cancelActiveQuery: () => cancel(input.chatId),
+      sessionControl: input.sessionControl,
+    });
+    if (handledSessionCommand) {
+      return true;
+    }
+    return handleClaudeHarnessCommand(input);
+  }
+
+  /**
    * New primary run entrypoint for the unified harness abstraction.
-   * Keeps compatibility with the legacy processLlmResponse params by
-   * translating generic runConfig/session fields into the old shape.
    * @param {AgentHarnessParams} params
    * @returns {Promise<AgentResult>}
    */

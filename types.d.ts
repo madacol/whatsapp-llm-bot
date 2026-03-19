@@ -408,6 +408,11 @@ type HarnessCommandContext = {
   chatInfo?: import("./store.js").ChatRow;
   context: ExecuteActionContext;
   command: string;
+  sessionControl?: {
+    archive: import("./store.js").Store['archiveHarnessSession'];
+    getHistory: import("./store.js").Store['getHarnessSessionHistory'];
+    restore: import("./store.js").Store['restoreHarnessSession'];
+  };
 };
 
 type AgentHarness = {
