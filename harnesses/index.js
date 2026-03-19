@@ -126,3 +126,4 @@ export async function waitForAllHarnesses() {
 
 // Re-export commonly used constants from native harness
 export { NO_OP_HOOKS, MAX_TOOL_CALL_DEPTH, parseToolArgs } from "./native.js";
+export { createHarnessRunCoordinator } from "./run-coordinator.js";
