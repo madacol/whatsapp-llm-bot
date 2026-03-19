@@ -321,10 +321,7 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
         return true;
       }
       default: {
-        if (harness.handleCommand) {
-          return harness.handleCommand({ chatId, chatInfo, context, command });
-        }
-        return false;
+        return harness.handleCommand({ chatId, chatInfo, context, command });
       }
     }
   }
@@ -467,8 +464,7 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
       }
     }
 
-    const runFn = harness.run ?? harness.processLlmResponse;
-    await runFn({
+    await harness.run({
       session,
       llmConfig,
       messages: preparedMessages,

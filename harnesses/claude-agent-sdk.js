@@ -449,7 +449,6 @@ export function createClaudeAgentSdkHarness() {
     getCapabilities: () => CLAUDE_HARNESS_CAPABILITIES,
     run,
     handleCommand: handleClaudeHarnessCommand,
-    processLlmResponse,
     injectMessage,
     cancel,
     waitForIdle,

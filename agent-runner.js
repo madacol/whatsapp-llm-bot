@@ -26,7 +26,7 @@ const MAX_AGENT_DEPTH = 3;
  */
 
 /**
- * Run an agent — wraps processLlmResponse with agent-specific config.
+ * Run an agent through the active harness with agent-specific config.
  *
  * Messages are stored in the `agent_runs` table (not the main `messages` table).
  * On completion, the full run is persisted for inspection.
@@ -126,9 +126,7 @@ export async function runAgent(options) {
 
   const harness = resolveHarness(resolveHarnessName(agent, null));
 
-  const runFn = harness.run ?? harness.processLlmResponse;
-
-  const result = await runFn({
+  const result = await harness.run({
     session,
     llmConfig,
     messages,

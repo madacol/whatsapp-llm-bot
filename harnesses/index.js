@@ -13,6 +13,58 @@ const instances = new Map();
 // Register the native harness by default
 registry.set("native", createNativeHarness);
 
+/** @type {HarnessCapabilities} */
+const DEFAULT_HARNESS_CAPABILITIES = {
+  supportsResume: false,
+  supportsCancel: false,
+  supportsLiveInput: false,
+  supportsApprovals: false,
+  supportsWorkdir: false,
+  supportsSandboxConfig: false,
+  supportsModelSelection: false,
+  supportsReasoningEffort: false,
+  supportsSessionFork: false,
+};
+
+/**
+ * @param {AgentHarness | null | undefined} harness
+ * @returns {harness is AgentHarness & { processLlmResponse: (params: AgentHarnessParams) => Promise<AgentResult> }}
+ */
+function hasLegacyRun(harness) {
+  return !!harness
+    && typeof harness === "object"
+    && "processLlmResponse" in harness
+    && typeof harness.processLlmResponse === "function";
+}
+
+/**
+ * Normalize a harness to the unified contract so callers don't need to carry
+ * compatibility branches.
+ * @param {string} name
+ * @param {AgentHarness} harness
+ * @returns {AgentHarness}
+ */
+function normalizeHarness(name, harness) {
+  const getName = harness.getName ?? (() => name);
+  const getCapabilities = harness.getCapabilities ?? (() => DEFAULT_HARNESS_CAPABILITIES);
+  const handleCommand = harness.handleCommand ?? (async () => false);
+  const run = harness.run ?? (
+    hasLegacyRun(harness)
+      ? harness.processLlmResponse.bind(harness)
+      : async () => {
+          throw new Error(`Harness "${name}" does not implement run()`);
+        }
+  );
+
+  return {
+    ...harness,
+    getName,
+    getCapabilities,
+    handleCommand,
+    run,
+  };
+}
+
 /**
  * Register a harness factory under a name.
  * @param {string} name
@@ -36,7 +88,7 @@ export function resolveHarness(name) {
   if (cached) return cached;
 
   const factory = registry.get(key);
-  const harness = factory ? factory() : createNativeHarness();
+  const harness = normalizeHarness(key, factory ? factory() : createNativeHarness());
   instances.set(key, harness);
   return harness;
 }
