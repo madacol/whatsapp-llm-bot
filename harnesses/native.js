@@ -412,6 +412,5 @@ export function createNativeHarness() {
     getCapabilities: () => NATIVE_HARNESS_CAPABILITIES,
     run,
     handleCommand,
-    processLlmResponse,
   };
 }

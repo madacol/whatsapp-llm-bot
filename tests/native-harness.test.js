@@ -9,7 +9,6 @@ describe("createNativeHarness", () => {
     assert.equal(harness.getName?.(), "native");
     assert.equal(typeof harness.getCapabilities, "function");
     assert.equal(typeof harness.run, "function");
-    assert.equal(typeof harness.processLlmResponse, "function");
     assert.equal(typeof harness.handleCommand, "function");
 
     const capabilities = harness.getCapabilities?.();

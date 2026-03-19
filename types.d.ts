@@ -417,12 +417,10 @@ type HarnessCommandContext = {
 };
 
 type AgentHarness = {
-  getName?: () => string;
-  getCapabilities?: () => HarnessCapabilities;
-  run?: (params: AgentHarnessParams) => Promise<AgentResult>;
-  handleCommand?: (input: HarnessCommandContext) => Promise<boolean>;
-  /** @deprecated Use run() instead. */
-  processLlmResponse: (params: AgentHarnessParams) => Promise<AgentResult>;
+  getName: () => string;
+  getCapabilities: () => HarnessCapabilities;
+  run: (params: AgentHarnessParams) => Promise<AgentResult>;
+  handleCommand: (input: HarnessCommandContext) => Promise<boolean>;
   /** Inject a follow-up user message into an active query for this chat. Returns true if injected. */
   injectMessage?: (chatId: string | HarnessSessionRef, text: string) => boolean | Promise<boolean>;
   /** Cancel the active query for this chat. Returns true if cancelled. */
