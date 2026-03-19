@@ -2,7 +2,7 @@
  * Pure functions extracted from index.js for testability.
  */
 
-import { hydrateHdRef } from "./whatsapp-adapter.js";
+import { hydrateHdRef } from "./whatsapp-hd-media.js";
 
 /**
  * Convert a single property schema, replacing custom `type: "image"` with
