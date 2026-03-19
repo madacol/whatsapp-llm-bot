@@ -83,10 +83,8 @@ export function getModels() {
  * @returns {Promise<string>}
  */
 export async function handleModelCommand(chatId, arg) {
-  const db = getRootDb();
-
   if (arg === "off" || arg === "default" || arg === "none") {
-    await db.sql`UPDATE chats SET sdk_model = NULL WHERE chat_id = ${chatId}`;
+    await updateHarnessConfig(chatId, { model: null });
     return "SDK model reset to default.";
   }
 
@@ -97,7 +95,7 @@ export async function handleModelCommand(chatId, arg) {
   );
   const modelValue = match ? match.value : input;
 
-  await db.sql`UPDATE chats SET sdk_model = ${modelValue} WHERE chat_id = ${chatId}`;
+  await updateHarnessConfig(chatId, { model: modelValue });
   return match
     ? `SDK model set to \`${match.value}\` (${match.displayName})`
     : `SDK model set to \`${modelValue}\``;
@@ -117,7 +115,7 @@ const FALLBACK_EFFORT_LEVELS = ["low", "medium", "high"];
 /**
  * Get available effort levels for a specific model.
  * Uses SDK metadata when available, falls back to low/medium/high.
- * @param {string | null} modelValue - the sdk_model value, or null for default
+ * @param {string | null} modelValue - the harness-config model value, or null for default
  * @returns {Array<{ value: string, label: string }>}
  */
 export function getEffortLevels(modelValue) {
@@ -149,17 +147,15 @@ export function getEffortLevels(modelValue) {
  * @returns {Promise<string>}
  */
 export async function handleEffortCommand(chatId, arg) {
-  const db = getRootDb();
-
   if (arg === "off" || arg === "default" || arg === "none") {
-    await db.sql`UPDATE chats SET sdk_effort = NULL WHERE chat_id = ${chatId}`;
+    await updateHarnessConfig(chatId, { reasoningEffort: null });
     return "SDK effort reset to default (high).";
   }
 
   const input = arg.toLowerCase();
   const validLevels = ["low", "medium", "high", "max"];
   if (validLevels.includes(input)) {
-    await db.sql`UPDATE chats SET sdk_effort = ${input} WHERE chat_id = ${chatId}`;
+    await updateHarnessConfig(chatId, { reasoningEffort: input });
     return `SDK effort set to \`${input}\``;
   }
   return `Unknown effort level \`${arg}\`. Use: ${validLevels.join(", ")}`;
@@ -294,7 +290,6 @@ export function wrapHooksWithFallbacks(rawHooks) {
 
 /**
  * Normalize a harness session reference into a Claude SDK session ID.
- * Falls back to the legacy session.sdkSessionId field during migration.
  * @param {Session} session
  * @returns {string | null}
  */
@@ -302,7 +297,7 @@ function getClaudeSessionId(session) {
   if (session.harnessSession?.kind === "claude-sdk") {
     return session.harnessSession.id;
   }
-  return session.sdkSessionId ?? null;
+  return null;
 }
 
 /**
@@ -320,9 +315,40 @@ async function saveClaudeSessionId(session, sessionId) {
     );
     return;
   }
-  if (session.updateSdkSessionId) {
-    await session.updateSdkSessionId(session.chatId, sessionId);
+}
+
+/**
+ * Read the generic harness_config JSONB for a chat.
+ * @param {string} chatId
+ * @returns {Promise<Record<string, unknown>>}
+ */
+async function getHarnessConfig(chatId) {
+  const db = getRootDb();
+  const { rows: [row] } = await db.sql`SELECT harness_config FROM chats WHERE chat_id = ${chatId}`;
+  const config = row?.harness_config;
+  return config && typeof config === "object" && !Array.isArray(config)
+    ? /** @type {Record<string, unknown>} */ (config)
+    : {};
+}
+
+/**
+ * Update the generic harness_config JSONB for a chat.
+ * Null/undefined values remove keys from the stored config.
+ * @param {string} chatId
+ * @param {Record<string, unknown>} patch
+ * @returns {Promise<void>}
+ */
+async function updateHarnessConfig(chatId, patch) {
+  const db = getRootDb();
+  const current = await getHarnessConfig(chatId);
+  for (const [key, value] of Object.entries(patch)) {
+    if (value == null) {
+      delete current[key];
+    } else {
+      current[key] = value;
+    }
   }
+  await db.sql`UPDATE chats SET harness_config = ${JSON.stringify(current)} WHERE chat_id = ${chatId}`;
 }
 
 /**
@@ -358,10 +384,9 @@ async function handleClaudeHarnessCommand({ chatId, command, context }) {
   }
 
   const models = getModels();
-  const db = getRootDb();
-  const { rows } = await db.query("SELECT sdk_model, sdk_effort FROM chats WHERE chat_id = $1", [chatId]);
-  const currentModel = /** @type {string | null} */ (rows[0]?.sdk_model ?? null);
-  const currentEffort = /** @type {string | null} */ (rows[0]?.sdk_effort ?? null);
+  const harnessConfig = await getHarnessConfig(chatId);
+  const currentModel = typeof harnessConfig.model === "string" ? harnessConfig.model : null;
+  const currentEffort = typeof harnessConfig.reasoningEffort === "string" ? harnessConfig.reasoningEffort : null;
 
   /** @type {SelectOption[]} */
   const modelSelectOptions = [
@@ -400,9 +425,9 @@ async function handleClaudeHarnessCommand({ chatId, command, context }) {
     }
   }
 
-  const { rows: updated } = await db.query("SELECT sdk_model, sdk_effort FROM chats WHERE chat_id = $1", [chatId]);
-  const finalModel = updated[0]?.sdk_model ?? "default (Sonnet)";
-  const finalEffort = updated[0]?.sdk_effort ?? "default (high)";
+  const updatedConfig = await getHarnessConfig(chatId);
+  const finalModel = typeof updatedConfig.model === "string" ? updatedConfig.model : "default (Sonnet)";
+  const finalEffort = typeof updatedConfig.reasoningEffort === "string" ? updatedConfig.reasoningEffort : "default (high)";
   await context.reply("tool-result", `SDK model: \`${finalModel}\`\nSDK effort: \`${finalEffort}\``);
   return true;
 }
@@ -446,11 +471,15 @@ export function createClaudeAgentSdkHarness() {
       sdkEffort: runConfig?.reasoningEffort ?? params.sdkEffort,
       session: {
         ...session,
-        sdkSessionId: getClaudeSessionId(session),
-        updateSdkSessionId: session.updateSdkSessionId ?? (
-          session.saveHarnessSession
-            ? async (_chatId, sessionId) => saveClaudeSessionId(session, sessionId)
-            : undefined
+        harnessSession: session.harnessSession?.kind === "claude-sdk"
+          ? session.harnessSession
+          : null,
+        saveHarnessSession: session.saveHarnessSession ?? (
+          async (_chatId, harnessSession) => {
+            if (harnessSession?.kind === "claude-sdk" || harnessSession == null) {
+              await saveClaudeSessionId(session, harnessSession?.id ?? null);
+            }
+          }
         ),
       },
     };

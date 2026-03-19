@@ -386,6 +386,12 @@ type HarnessRunConfig = {
   approvalPolicy?: 'untrusted' | 'on-request' | 'never' | null;
 };
 
+type HarnessSessionHistoryEntry = {
+  id: string;
+  kind: HarnessSessionRef["kind"];
+  cleared_at: string;
+};
+
 type AgentHarnessParams = {
   session: Session;
   llmConfig: LlmConfig;
@@ -452,11 +458,7 @@ type Session = {
   addMessage: import("./store.js").Store['addMessage'];
   updateToolMessage: import("./store.js").Store['updateToolMessage'];
   harnessSession?: HarnessSessionRef | null;
-  saveHarnessSession?: (chatId: string, session: HarnessSessionRef | null) => Promise<void>;
-  /** Current SDK session ID for claude-agent-sdk harness session resumption. */
-  sdkSessionId?: string | null;
-  /** Persist the SDK session ID for future resumption. */
-  updateSdkSessionId?: import("./store.js").Store['updateSdkSessionId'];
+  saveHarnessSession?: import("./store.js").Store['saveHarnessSession'];
 };
 
 type LlmConfig = {

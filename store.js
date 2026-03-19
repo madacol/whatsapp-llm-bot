@@ -22,17 +22,18 @@ const log = createLogger("store");
  *   active_persona: string | null;
  *   harness: string | null;
  *   harness_cwd: string | null;
- *   sdk_model: string | null;
- *   sdk_effort: string | null;
- *   sdk_session_id: string | null;
- *   sdk_session_history: SdkSessionHistoryEntry[];
+ *   harness_config: { model?: string | null, reasoningEffort?: "low" | "medium" | "high" | "max" | null, sandboxMode?: string | null, approvalPolicy?: string | null };
+ *   harness_session_id: string | null;
+ *   harness_session_kind: HarnessSessionRef["kind"] | null;
+ *   harness_session_history: HarnessSessionHistoryEntry[];
  *   timestamp: string;
  * }} ChatRow
  *
  * @typedef {{
  *   id: string;
+ *   kind: HarnessSessionRef["kind"];
  *   cleared_at: string;
- * }} SdkSessionHistoryEntry
+ * }} HarnessSessionHistoryEntry
  *
  * @typedef {{
  *   message_id: number;
@@ -112,6 +113,10 @@ export async function initStore(injectedDb){
         db.sql`ALTER TABLE chats ADD COLUMN IF NOT EXISTS active_persona TEXT`,
         db.sql`ALTER TABLE chats ADD COLUMN IF NOT EXISTS harness TEXT`,
         db.sql`ALTER TABLE chats ADD COLUMN IF NOT EXISTS harness_cwd TEXT`,
+        db.sql`ALTER TABLE chats ADD COLUMN IF NOT EXISTS harness_config JSONB DEFAULT '{}'`,
+        db.sql`ALTER TABLE chats ADD COLUMN IF NOT EXISTS harness_session_id TEXT`,
+        db.sql`ALTER TABLE chats ADD COLUMN IF NOT EXISTS harness_session_kind TEXT`,
+        db.sql`ALTER TABLE chats ADD COLUMN IF NOT EXISTS harness_session_history JSONB DEFAULT '[]'`,
         db.sql`ALTER TABLE chats ADD COLUMN IF NOT EXISTS sdk_model TEXT`,
         db.sql`ALTER TABLE chats ADD COLUMN IF NOT EXISTS sdk_effort TEXT`,
         db.sql`ALTER TABLE chats ADD COLUMN IF NOT EXISTS sdk_session_id TEXT`,
@@ -157,6 +162,52 @@ export async function initStore(injectedDb){
           ALTER TABLE chats DROP COLUMN debug_until;
         END IF;
       END $$`;
+
+      // One-time migration: Claude-specific harness state/config -> generic harness columns.
+      await db.sql`
+        UPDATE chats
+        SET harness_config = jsonb_strip_nulls(jsonb_build_object(
+          'model', sdk_model,
+          'reasoningEffort', sdk_effort
+        ))
+        WHERE (harness_config IS NULL OR harness_config = '{}'::jsonb)
+          AND (sdk_model IS NOT NULL OR sdk_effort IS NOT NULL)
+      `;
+      await db.sql`
+        UPDATE chats
+        SET harness_session_id = sdk_session_id,
+            harness_session_kind = 'claude-sdk'
+        WHERE harness_session_id IS NULL
+          AND sdk_session_id IS NOT NULL
+      `;
+      {
+        const { rows } = await db.sql`
+          SELECT chat_id, sdk_session_history, harness_session_history
+          FROM chats
+          WHERE sdk_session_history IS NOT NULL
+        `;
+        for (const row of rows) {
+          const existingHistory = Array.isArray(row.harness_session_history) ? row.harness_session_history : [];
+          if (existingHistory.length > 0) continue;
+          const legacyHistory = Array.isArray(row.sdk_session_history) ? row.sdk_session_history : [];
+          if (legacyHistory.length === 0) continue;
+          /** @type {HarnessSessionHistoryEntry[]} */
+          const migrated = [];
+          for (const rawEntry of legacyHistory) {
+            if (!rawEntry || typeof rawEntry !== "object") continue;
+            const entry = /** @type {{ id?: unknown, cleared_at?: unknown }} */ (rawEntry);
+            if (typeof entry.id !== "string" || typeof entry.cleared_at !== "string") continue;
+            migrated.push({
+              id: entry.id,
+              kind: "claude-sdk",
+              cleared_at: entry.cleared_at,
+            });
+          }
+          if (migrated.length > 0) {
+            await db.sql`UPDATE chats SET harness_session_history = ${JSON.stringify(migrated)} WHERE chat_id = ${row.chat_id}`;
+          }
+        }
+      }
 
       await db.sql`CREATE EXTENSION IF NOT EXISTS vector`;
       await Promise.all([
@@ -272,66 +323,80 @@ export async function initStore(injectedDb){
       },
 
       /**
-       * Update the SDK session ID for a chat (used by claude-agent-sdk harness for session resumption).
+       * Save the current harness session for a chat, or clear it when null.
        * @param {ChatRow['chat_id']} chatId
-       * @param {string | null} sessionId
+       * @param {HarnessSessionRef | null} session
        */
-      async updateSdkSessionId (chatId, sessionId) {
-        await db.sql`UPDATE chats SET sdk_session_id = ${sessionId} WHERE chat_id = ${chatId}`;
+      async saveHarnessSession (chatId, session) {
+        await db.sql`
+          UPDATE chats
+          SET harness_session_id = ${session?.id ?? null},
+              harness_session_kind = ${session?.kind ?? null}
+          WHERE chat_id = ${chatId}
+        `;
       },
 
       /**
-       * Archive the current SDK session ID into the session history.
+       * Archive the current harness session into the session history.
        * Does nothing if there is no current session.
        * Keeps at most `maxEntries` entries (oldest are dropped).
        * @param {ChatRow['chat_id']} chatId
        * @param {number} [maxEntries=10]
        */
-      async archiveSdkSession (chatId, maxEntries = 10) {
-        const { rows: [row] } = await db.sql`SELECT sdk_session_id, sdk_session_history FROM chats WHERE chat_id = ${chatId}`;
-        const chat = /** @type {Pick<ChatRow, 'sdk_session_id' | 'sdk_session_history'>} */ (row);
-        if (!chat?.sdk_session_id) return;
+      async archiveHarnessSession (chatId, maxEntries = 10) {
+        const { rows: [row] } = await db.sql`
+          SELECT harness_session_id, harness_session_kind, harness_session_history
+          FROM chats WHERE chat_id = ${chatId}
+        `;
+        const chat = /** @type {Pick<ChatRow, 'harness_session_id' | 'harness_session_kind' | 'harness_session_history'>} */ (row);
+        if (!chat?.harness_session_id || !chat?.harness_session_kind) return;
 
-        /** @type {SdkSessionHistoryEntry[]} */
-        const history = Array.isArray(chat.sdk_session_history) ? chat.sdk_session_history : [];
+        /** @type {HarnessSessionHistoryEntry[]} */
+        const history = Array.isArray(chat.harness_session_history) ? chat.harness_session_history : [];
 
         // Avoid duplicates
-        if (history.some(e => e.id === chat.sdk_session_id)) return;
+        if (history.some(e => e.id === chat.harness_session_id && e.kind === chat.harness_session_kind)) return;
 
-        /** @type {SdkSessionHistoryEntry} */
-        const entry = { id: chat.sdk_session_id, cleared_at: new Date().toISOString() };
+        /** @type {HarnessSessionHistoryEntry} */
+        const entry = { id: chat.harness_session_id, kind: chat.harness_session_kind, cleared_at: new Date().toISOString() };
         const updated = [...history, entry].slice(-maxEntries);
 
-        await db.sql`UPDATE chats SET sdk_session_history = ${JSON.stringify(updated)}, sdk_session_id = NULL WHERE chat_id = ${chatId}`;
+        await db.sql`
+          UPDATE chats
+          SET harness_session_history = ${JSON.stringify(updated)},
+              harness_session_id = NULL,
+              harness_session_kind = NULL
+          WHERE chat_id = ${chatId}
+        `;
       },
 
       /**
-       * Get the SDK session history for a chat.
+       * Get the harness session history for a chat.
        * @param {ChatRow['chat_id']} chatId
-       * @returns {Promise<SdkSessionHistoryEntry[]>}
+       * @returns {Promise<HarnessSessionHistoryEntry[]>}
        */
-      async getSdkSessionHistory (chatId) {
-        const { rows: [row] } = await db.sql`SELECT sdk_session_history FROM chats WHERE chat_id = ${chatId}`;
-        const chat = /** @type {Pick<ChatRow, 'sdk_session_history'> | undefined} */ (row);
+      async getHarnessSessionHistory (chatId) {
+        const { rows: [row] } = await db.sql`SELECT harness_session_history FROM chats WHERE chat_id = ${chatId}`;
+        const chat = /** @type {Pick<ChatRow, 'harness_session_history'> | undefined} */ (row);
         if (!chat) return [];
-        return Array.isArray(chat.sdk_session_history) ? chat.sdk_session_history : [];
+        return Array.isArray(chat.harness_session_history) ? chat.harness_session_history : [];
       },
 
       /**
        * Restore a session from history by index (0 = most recent) or session ID.
        * Removes it from history and sets it as the active session.
-       * Caller should call `archiveSdkSession` first to save any active session.
+       * Caller should call `archiveHarnessSession` first to save any active session.
        * @param {ChatRow['chat_id']} chatId
        * @param {number | string} indexOrId - 0-based index from the end (most recent = 0) or a session ID string
-       * @returns {Promise<SdkSessionHistoryEntry | null>} The restored entry, or null if not found
+       * @returns {Promise<HarnessSessionHistoryEntry | null>} The restored entry, or null if not found
        */
-      async restoreSdkSession (chatId, indexOrId) {
-        const { rows: [row] } = await db.sql`SELECT sdk_session_history FROM chats WHERE chat_id = ${chatId}`;
-        const chat = /** @type {Pick<ChatRow, 'sdk_session_history'> | undefined} */ (row);
+      async restoreHarnessSession (chatId, indexOrId) {
+        const { rows: [row] } = await db.sql`SELECT harness_session_history FROM chats WHERE chat_id = ${chatId}`;
+        const chat = /** @type {Pick<ChatRow, 'harness_session_history'> | undefined} */ (row);
         if (!chat) return null;
 
-        /** @type {SdkSessionHistoryEntry[]} */
-        const history = Array.isArray(chat.sdk_session_history) ? chat.sdk_session_history : [];
+        /** @type {HarnessSessionHistoryEntry[]} */
+        const history = Array.isArray(chat.harness_session_history) ? chat.harness_session_history : [];
         if (history.length === 0) return null;
 
         /** @type {number} */
@@ -349,7 +414,13 @@ export async function initStore(injectedDb){
         // Remove the restored entry from history
         history.splice(idx, 1);
 
-        await db.sql`UPDATE chats SET sdk_session_id = ${entry.id}, sdk_session_history = ${JSON.stringify(history)} WHERE chat_id = ${chatId}`;
+        await db.sql`
+          UPDATE chats
+          SET harness_session_id = ${entry.id},
+              harness_session_kind = ${entry.kind},
+              harness_session_history = ${JSON.stringify(history)}
+          WHERE chat_id = ${chatId}
+        `;
         return entry;
       },
     }

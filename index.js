@@ -168,7 +168,7 @@ async function displayToolCall(toolCall, context, actionFormatter, cwd, toolCont
  * @returns {{ handleMessage: (messageContext: IncomingContext) => Promise<void> }}
  */
 export function createMessageHandler({ store, llmClient, getActionsFn, executeActionFn }) {
-  const { addMessage, updateToolMessage, createChat, getChat, getMessages, updateSdkSessionId, archiveSdkSession, getSdkSessionHistory, restoreSdkSession } = store;
+  const { addMessage, updateToolMessage, createChat, getChat, getMessages, saveHarnessSession, archiveHarnessSession, getHarnessSessionHistory, restoreHarnessSession } = store;
 
   /**
    * Chats currently in LLM processing (between "LLM will respond" and harness completion).
@@ -276,14 +276,14 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
         // Cancel any active query
         harness.cancel?.(chatId);
         // Archive the current session before clearing so it can be resumed later
-        await archiveSdkSession(chatId);
+        await archiveHarnessSession(chatId);
         await context.reply("tool-result", "Session cleared\n\nNext message starts fresh.\nUse */resume* to restore this session later.");
         return true;
       }
       case "resume": {
         // Archive the current active session first so it's not lost
-        await archiveSdkSession(chatId);
-        const history = await getSdkSessionHistory(chatId);
+        await archiveHarnessSession(chatId);
+        const history = await getHarnessSessionHistory(chatId);
         if (history.length === 0) {
           await context.reply("tool-result", "No previous sessions to resume.");
           return true;
@@ -311,7 +311,7 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
         }
 
         const selectedIndex = parseInt(choice, 10);
-        const restored = await restoreSdkSession(chatId, selectedIndex);
+        const restored = await restoreHarnessSession(chatId, selectedIndex);
         if (!restored) {
           await context.reply("tool-result", "Failed to restore session.");
           return true;
@@ -436,18 +436,10 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
     /** @type {Session} */
     const session = {
       chatId, senderIds, context, addMessage, updateToolMessage,
-      harnessSession: chatInfo?.sdk_session_id
-        ? { id: chatInfo.sdk_session_id, kind: "claude-sdk" }
+      harnessSession: chatInfo?.harness_session_id && chatInfo?.harness_session_kind
+        ? { id: chatInfo.harness_session_id, kind: chatInfo.harness_session_kind }
         : null,
-      saveHarnessSession: async (_chatId, harnessSession) => {
-        if (harnessSession?.kind === "claude-sdk") {
-          await updateSdkSessionId(chatId, harnessSession.id);
-          return;
-        }
-        await updateSdkSessionId(chatId, null);
-      },
-      sdkSessionId: chatInfo?.sdk_session_id,
-      updateSdkSessionId,
+      saveHarnessSession,
     };
 
     // Filter actions by persona whitelist if active
@@ -484,8 +476,10 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
       hooks,
       runConfig: {
         workdir: getChatWorkDir(chatId, chatInfo?.harness_cwd),
-        model: chatInfo?.sdk_model ?? undefined,
-        reasoningEffort: /** @type {HarnessRunConfig['reasoningEffort']} */ (chatInfo?.sdk_effort ?? undefined),
+        model: chatInfo?.harness_config?.model ?? undefined,
+        reasoningEffort: /** @type {HarnessRunConfig['reasoningEffort']} */ (chatInfo?.harness_config?.reasoningEffort ?? undefined),
+        sandboxMode: /** @type {HarnessRunConfig['sandboxMode']} */ (chatInfo?.harness_config?.sandboxMode ?? undefined),
+        approvalPolicy: /** @type {HarnessRunConfig['approvalPolicy']} */ (chatInfo?.harness_config?.approvalPolicy ?? undefined),
       },
     });
 
