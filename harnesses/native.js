@@ -23,6 +23,19 @@ const log = createLogger("harness:native");
 
 export const MAX_TOOL_CALL_DEPTH = 10;
 
+/** @type {HarnessCapabilities} */
+const NATIVE_HARNESS_CAPABILITIES = {
+  supportsResume: false,
+  supportsCancel: false,
+  supportsLiveInput: false,
+  supportsApprovals: true,
+  supportsWorkdir: true,
+  supportsSandboxConfig: false,
+  supportsModelSelection: false,
+  supportsReasoningEffort: false,
+  supportsSessionFork: false,
+};
+
 /** @type {Required<AgentIOHooks>} */
 export const NO_OP_HOOKS = {
   onComposing: async () => {},
@@ -371,9 +384,34 @@ async function processLlmResponse({ session, llmConfig, messages, mediaRegistry,
 }
 
 /**
+ * Run a native harness turn through the unified harness contract.
+ * @param {AgentHarnessParams} params
+ * @returns {Promise<AgentResult>}
+ */
+async function run(params) {
+  const workdir = params.runConfig?.workdir ?? params.cwd;
+  return processLlmResponse({ ...params, cwd: workdir });
+}
+
+/**
+ * Native does not currently own any slash commands.
+ * @param {HarnessCommandContext} _input
+ * @returns {Promise<boolean>}
+ */
+async function handleCommand(_input) {
+  return false;
+}
+
+/**
  * Create the native harness.
  * @returns {AgentHarness}
  */
 export function createNativeHarness() {
-  return { processLlmResponse };
+  return {
+    getName: () => "native",
+    getCapabilities: () => NATIVE_HARNESS_CAPABILITIES,
+    run,
+    handleCommand,
+    processLlmResponse,
+  };
 }
