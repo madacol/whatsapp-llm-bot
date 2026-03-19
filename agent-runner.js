@@ -126,7 +126,9 @@ export async function runAgent(options) {
 
   const harness = resolveHarness(resolveHarnessName(agent, null));
 
-  const result = await harness.processLlmResponse({
+  const runFn = harness.run ?? harness.processLlmResponse;
+
+  const result = await runFn({
     session,
     llmConfig,
     messages,
@@ -134,7 +136,9 @@ export async function runAgent(options) {
     hooks: userHooks,
     maxDepth: agent.maxDepth,
     agentDepth: agentDepth + 1,
-    cwd: getChatWorkDir(session.chatId),
+    runConfig: {
+      workdir: getChatWorkDir(session.chatId),
+    },
   });
 
   // Persist the run to agent_runs table

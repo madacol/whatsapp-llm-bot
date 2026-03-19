@@ -31,7 +31,6 @@ import {
 import { storeAndLinkHtml } from "./html-store.js";
 import { startHtmlServer, stopHtmlServer } from "./html-server.js";
 import { resolveHarness, resolveHarnessName, registerHarness, waitForAllHarnesses, MAX_TOOL_CALL_DEPTH } from "./harnesses/index.js";
-import { handleModelCommand, handleEffortCommand, getModels as getSdkModels, getEffortLevels as getSdkEffortLevels } from "./harnesses/claude-agent-sdk.js";
 import { formatToolCallDisplay } from "./tool-display.js";
 import { createMessageActionContext } from "./execute-action-context.js";
 import { createLogger } from "./logger.js";
@@ -267,12 +266,13 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
    * @returns {Promise<boolean>}
    */
   async function handleSlashCommand(command, chatId, chatInfo, context) {
+    const persona = chatInfo?.active_persona ? await getAgent(chatInfo.active_persona) : null;
+    const harnessName = resolveHarnessName(persona, chatInfo);
+    const harness = resolveHarness(harnessName);
+
     switch (command) {
       case "clear": {
         // Reset the SDK session — next message starts a fresh conversation
-        const persona = chatInfo?.active_persona ? await getAgent(chatInfo.active_persona) : null;
-        const harnessName = resolveHarnessName(persona, chatInfo);
-        const harness = resolveHarness(harnessName);
         // Cancel any active query
         harness.cancel?.(chatId);
         // Archive the current session before clearing so it can be resumed later
@@ -321,82 +321,8 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
         return true;
       }
       default: {
-        // /model [arg] — list or set SDK model and effort
-        const modelMatch = command.match(/^model(?:\s+(.*))?$/);
-        if (modelMatch) {
-          const arg = modelMatch[1]?.trim() || null;
-          if (arg) {
-            // Direct set: /model effort <level>, /model opus, /model off, etc.
-            const effortMatch = arg.match(/^effort\s+(.+)$/i);
-            if (effortMatch) {
-              const result = await handleEffortCommand(chatId, effortMatch[1].trim());
-              await context.reply("tool-result", result);
-              return true;
-            }
-            const result = await handleModelCommand(chatId, arg);
-            await context.reply("tool-result", result);
-            return true;
-          }
-          // No arg — model poll, then effort poll if the model supports it
-          const models = getSdkModels();
-          const db = getRootDb();
-          const { rows } = await db.query("SELECT sdk_model, sdk_effort FROM chats WHERE chat_id = $1", [chatId]);
-          const currentModel = /** @type {string | null} */ (rows[0]?.sdk_model ?? null);
-          const currentEffort = /** @type {string | null} */ (rows[0]?.sdk_effort ?? null);
-
-          // Model selection
-          /** @type {SelectOption[]} */
-          const modelSelectOptions = [
-            ...models.map((m) => ({
-              id: m.value,
-              label: `${m.displayName} — ${m.description}`,
-            })),
-            { id: "off", label: "Default (Sonnet)" },
-          ];
-
-          const modelChoice = await context.select("Choose SDK model", modelSelectOptions, {
-            currentId: currentModel ?? undefined,
-          });
-
-          /** @type {string | null} */
-          let resolvedModelValue = currentModel;
-          if (modelChoice) {
-            await handleModelCommand(chatId, modelChoice);
-            resolvedModelValue = modelChoice === "off" ? null : modelChoice;
-          }
-
-          // Effort selection — only if the chosen model supports effort levels
-          const efforts = getSdkEffortLevels(resolvedModelValue);
-          if (efforts.length > 0) {
-            /** @type {SelectOption[]} */
-            const effortSelectOptions = [
-              ...efforts.map((e) => ({
-                id: e.value,
-                label: e.label,
-              })),
-              { id: "off", label: "Default (high)" },
-            ];
-
-            const effortChoice = await context.select("Choose effort level", effortSelectOptions, {
-              currentId: currentEffort ?? undefined,
-            });
-
-            if (!effortChoice || effortChoice === "off") {
-              await handleEffortCommand(chatId, "off");
-            } else {
-              await handleEffortCommand(chatId, effortChoice);
-            }
-          } else {
-            // Clear effort for models that don't support it
-            await handleEffortCommand(chatId, "off");
-          }
-
-          // Show final state
-          const { rows: updated } = await db.query("SELECT sdk_model, sdk_effort FROM chats WHERE chat_id = $1", [chatId]);
-          const finalModel = updated[0]?.sdk_model ?? "default (Sonnet)";
-          const finalEffort = updated[0]?.sdk_effort ?? "default (high)";
-          await context.reply("tool-result", `*Model:* ${finalModel}\n*Effort:* ${finalEffort}`);
-          return true;
+        if (harness.handleCommand) {
+          return harness.handleCommand({ chatId, chatInfo, context, command });
         }
         return false;
       }
@@ -510,6 +436,16 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
     /** @type {Session} */
     const session = {
       chatId, senderIds, context, addMessage, updateToolMessage,
+      harnessSession: chatInfo?.sdk_session_id
+        ? { id: chatInfo.sdk_session_id, kind: "claude-sdk" }
+        : null,
+      saveHarnessSession: async (_chatId, harnessSession) => {
+        if (harnessSession?.kind === "claude-sdk") {
+          await updateSdkSessionId(chatId, harnessSession.id);
+          return;
+        }
+        await updateSdkSessionId(chatId, null);
+      },
       sdkSessionId: chatInfo?.sdk_session_id,
       updateSdkSessionId,
     };
@@ -539,7 +475,19 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
       }
     }
 
-    await harness.processLlmResponse({ session, llmConfig, messages: preparedMessages, mediaRegistry, hooks, cwd: getChatWorkDir(chatId, chatInfo?.harness_cwd), sdkModel: chatInfo?.sdk_model ?? undefined, sdkEffort: /** @type {AgentHarnessParams['sdkEffort']} */ (chatInfo?.sdk_effort ?? undefined) });
+    const runFn = harness.run ?? harness.processLlmResponse;
+    await runFn({
+      session,
+      llmConfig,
+      messages: preparedMessages,
+      mediaRegistry,
+      hooks,
+      runConfig: {
+        workdir: getChatWorkDir(chatId, chatInfo?.harness_cwd),
+        model: chatInfo?.sdk_model ?? undefined,
+        reasoningEffort: /** @type {HarnessRunConfig['reasoningEffort']} */ (chatInfo?.sdk_effort ?? undefined),
+      },
+    });
 
     } catch (error) {
       log.error("handleLlmMessage failed:", error);
