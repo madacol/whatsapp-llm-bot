@@ -215,7 +215,7 @@ export async function updateStoredHdRef(chatId, parentMessageId, ref) {
 
 /**
  * @param {BaileysMessage} baileysMessage
- * @param {import('@whiskeysockets/baileys').proto.IImageMessage} imageMessage
+ * @param {import('@whiskeysockets/baileys').proto.Message.IImageMessage} imageMessage
  * @param {DownloadMediaFn} downloadFn
  * @param {DownloadMediaToBlocksFn} downloadMediaToBlocks
  * @returns {Promise<{
