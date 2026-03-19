@@ -213,6 +213,22 @@ describe("LLM pipeline via createMessageHandler", () => {
     );
   });
 
+  it("delegates harness-owned slash commands through handleCommand", async () => {
+    await seedChat("pipe-slash-1", { enabled: true });
+    await db.sql`UPDATE chats SET harness = 'claude-agent-sdk', sdk_model = 'claude-sonnet-4-6', sdk_effort = 'medium' WHERE chat_id = 'pipe-slash-1'`;
+
+    const { context, responses } = createIncomingContext({
+      chatId: "pipe-slash-1",
+      content: [{ type: "text", text: "/model off" }],
+    });
+    await handleMessage(context);
+
+    assert.ok(
+      responses.some(r => r.text.includes("SDK model reset to default.")),
+      "Expected slash command to be delegated to the active harness",
+    );
+  });
+
   it("recall_history stores full result in DB", async () => {
     await seedChat("pipe-recall", { enabled: true });
 
