@@ -333,10 +333,34 @@ type AgentIOHooks = {
   onUsage?: (cost: string, tokens: { prompt: number; completion: number; cached: number }) => Promise<void>;
 };
 
+type HarnessSessionRef = {
+  id: string;
+  kind: "native" | "claude-sdk" | "codex";
+};
+
+type HarnessCapabilities = {
+  supportsResume: boolean;
+  supportsCancel: boolean;
+  supportsLiveInput: boolean;
+  supportsApprovals: boolean;
+  supportsWorkdir: boolean;
+  supportsSandboxConfig: boolean;
+  supportsModelSelection: boolean;
+  supportsReasoningEffort: boolean;
+  supportsSessionFork: boolean;
+};
+
+type HarnessUsage = {
+  promptTokens: number;
+  completionTokens: number;
+  cachedTokens: number;
+  cost: number;
+};
+
 type AgentResult = {
   response: ToolContentBlock[];
   messages: Message[];
-  usage: { promptTokens: number; completionTokens: number; cachedTokens: number; cost: number };
+  usage: HarnessUsage;
 };
 
 type AgentDefinition = {
@@ -354,6 +378,14 @@ type AppAgent = AgentDefinition & { fileName: string };
 
 /* Harness types */
 
+type HarnessRunConfig = {
+  workdir?: string | null;
+  model?: string | null;
+  reasoningEffort?: 'low' | 'medium' | 'high' | 'max' | null;
+  sandboxMode?: 'read-only' | 'workspace-write' | 'danger-full-access' | null;
+  approvalPolicy?: 'untrusted' | 'on-request' | 'never' | null;
+};
+
 type AgentHarnessParams = {
   session: Session;
   llmConfig: LlmConfig;
@@ -362,17 +394,33 @@ type AgentHarnessParams = {
   hooks?: AgentIOHooks;
   maxDepth?: number;
   agentDepth?: number;
+  /** @deprecated Use runConfig.workdir instead. */
   cwd?: string;
+  /** @deprecated Use runConfig.model instead. */
   sdkModel?: string;
+  /** @deprecated Use runConfig.reasoningEffort instead. */
   sdkEffort?: 'low' | 'medium' | 'high' | 'max';
+  runConfig?: HarnessRunConfig;
+};
+
+type HarnessCommandContext = {
+  chatId: string;
+  chatInfo?: import("./store.js").ChatRow;
+  context: ExecuteActionContext;
+  command: string;
 };
 
 type AgentHarness = {
+  getName?: () => string;
+  getCapabilities?: () => HarnessCapabilities;
+  run?: (params: AgentHarnessParams) => Promise<AgentResult>;
+  handleCommand?: (input: HarnessCommandContext) => Promise<boolean>;
+  /** @deprecated Use run() instead. */
   processLlmResponse: (params: AgentHarnessParams) => Promise<AgentResult>;
   /** Inject a follow-up user message into an active query for this chat. Returns true if injected. */
-  injectMessage?: (chatId: string, text: string) => boolean;
+  injectMessage?: (chatId: string | HarnessSessionRef, text: string) => boolean | Promise<boolean>;
   /** Cancel the active query for this chat. Returns true if cancelled. */
-  cancel?: (chatId: string) => boolean;
+  cancel?: (chatId: string | HarnessSessionRef) => boolean | Promise<boolean>;
   /** Wait for all active queries to finish. Returns chat IDs that were waited on. */
   waitForIdle?: () => Promise<string[]>;
 };
@@ -403,6 +451,8 @@ type Session = {
   context: ExecuteActionContext;
   addMessage: import("./store.js").Store['addMessage'];
   updateToolMessage: import("./store.js").Store['updateToolMessage'];
+  harnessSession?: HarnessSessionRef | null;
+  saveHarnessSession?: (chatId: string, session: HarnessSessionRef | null) => Promise<void>;
   /** Current SDK session ID for claude-agent-sdk harness session resumption. */
   sdkSessionId?: string | null;
   /** Persist the SDK session ID for future resumption. */

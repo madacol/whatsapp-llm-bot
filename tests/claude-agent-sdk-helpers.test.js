@@ -26,10 +26,56 @@ import assert from "node:assert/strict";
 // to harnesses/claude-agent-sdk.js
 
 import {
+  createClaudeAgentSdkHarness,
   extractToolResultText,
   extractToolResultFromEvent,
   hasTextField,
 } from "../harnesses/claude-agent-sdk.js";
+
+describe("createClaudeAgentSdkHarness", () => {
+  it("exposes the unified harness contract", async () => {
+    const harness = createClaudeAgentSdkHarness();
+
+    assert.equal(harness.getName?.(), "claude-agent-sdk");
+    assert.equal(typeof harness.run, "function");
+    assert.equal(typeof harness.processLlmResponse, "function");
+    assert.equal(typeof harness.handleCommand, "function");
+
+    const capabilities = harness.getCapabilities?.();
+    assert.deepEqual(capabilities, {
+      supportsResume: true,
+      supportsCancel: true,
+      supportsLiveInput: true,
+      supportsApprovals: true,
+      supportsWorkdir: true,
+      supportsSandboxConfig: false,
+      supportsModelSelection: true,
+      supportsReasoningEffort: true,
+      supportsSessionFork: false,
+    });
+  });
+
+  it("returns false for commands it does not own", async () => {
+    const harness = createClaudeAgentSdkHarness();
+    const handled = await harness.handleCommand?.({
+      chatId: "chat-1",
+      command: "resume",
+      context: /** @type {ExecuteActionContext} */ ({
+        chatId: "chat-1",
+        senderIds: [],
+        content: [],
+        getIsAdmin: async () => true,
+        send: async () => undefined,
+        reply: async () => undefined,
+        reactToMessage: async () => {},
+        select: async () => "",
+        confirm: async () => true,
+      }),
+    });
+
+    assert.equal(handled, false);
+  });
+});
 
 // ── hasTextField ──
 

@@ -23,6 +23,19 @@ import { getRootDb } from "../db.js";
 
 const log = createLogger("harness:claude-agent-sdk");
 
+/** @type {HarnessCapabilities} */
+const CLAUDE_HARNESS_CAPABILITIES = {
+  supportsResume: true,
+  supportsCancel: true,
+  supportsLiveInput: true,
+  supportsApprovals: true,
+  supportsWorkdir: true,
+  supportsSandboxConfig: false,
+  supportsModelSelection: true,
+  supportsReasoningEffort: true,
+  supportsSessionFork: false,
+};
+
 // ── Tool approval whitelist ─────────────────────────────────────────────
 
 /** Tools that are auto-approved without prompting the user. */
@@ -280,6 +293,121 @@ export function wrapHooksWithFallbacks(rawHooks) {
 }
 
 /**
+ * Normalize a harness session reference into a Claude SDK session ID.
+ * Falls back to the legacy session.sdkSessionId field during migration.
+ * @param {Session} session
+ * @returns {string | null}
+ */
+function getClaudeSessionId(session) {
+  if (session.harnessSession?.kind === "claude-sdk") {
+    return session.harnessSession.id;
+  }
+  return session.sdkSessionId ?? null;
+}
+
+/**
+ * Persist the current Claude SDK session through the new generic API when
+ * available, otherwise fall back to the legacy SDK-specific field.
+ * @param {Session} session
+ * @param {string | null} sessionId
+ * @returns {Promise<void>}
+ */
+async function saveClaudeSessionId(session, sessionId) {
+  if (session.saveHarnessSession) {
+    await session.saveHarnessSession(
+      session.chatId,
+      sessionId ? { id: sessionId, kind: "claude-sdk" } : null,
+    );
+    return;
+  }
+  if (session.updateSdkSessionId) {
+    await session.updateSdkSessionId(session.chatId, sessionId);
+  }
+}
+
+/**
+ * Normalize a chat/session reference into the chatId key used by the activeQueries map.
+ * @param {string | HarnessSessionRef} ref
+ * @returns {string}
+ */
+function getActiveQueryKey(ref) {
+  return typeof ref === "string" ? ref : ref.id;
+}
+
+/**
+ * Handle Claude-specific slash commands.
+ * Returns true when the command was consumed by this harness.
+ * @param {HarnessCommandContext} input
+ * @returns {Promise<boolean>}
+ */
+async function handleClaudeHarnessCommand({ chatId, command, context }) {
+  const trimmed = command.trim();
+  const modelMatch = trimmed.match(/^model(?:\s+(.*))?$/);
+  if (!modelMatch) {
+    return false;
+  }
+
+  const arg = modelMatch[1]?.trim() || null;
+  if (arg) {
+    const effortMatch = arg.match(/^effort\s+(.+)$/i);
+    const result = effortMatch
+      ? await handleEffortCommand(chatId, effortMatch[1].trim())
+      : await handleModelCommand(chatId, arg);
+    await context.reply("tool-result", result);
+    return true;
+  }
+
+  const models = getModels();
+  const db = getRootDb();
+  const { rows } = await db.query("SELECT sdk_model, sdk_effort FROM chats WHERE chat_id = $1", [chatId]);
+  const currentModel = /** @type {string | null} */ (rows[0]?.sdk_model ?? null);
+  const currentEffort = /** @type {string | null} */ (rows[0]?.sdk_effort ?? null);
+
+  /** @type {SelectOption[]} */
+  const modelSelectOptions = [
+    ...models.map((m) => ({
+      id: m.value,
+      label: `${m.displayName} — ${m.description}`,
+    })),
+    { id: "off", label: "Default (Sonnet)" },
+  ];
+
+  const modelChoice = await context.select("Choose SDK model", modelSelectOptions, {
+    currentId: currentModel ?? undefined,
+  });
+
+  /** @type {string | null} */
+  let resolvedModelValue = currentModel;
+  if (modelChoice && modelChoice !== currentModel) {
+    await handleModelCommand(chatId, modelChoice);
+    resolvedModelValue = modelChoice === "off" ? null : modelChoice;
+  }
+
+  const efforts = getEffortLevels(resolvedModelValue);
+  if (efforts.length > 0) {
+    /** @type {SelectOption[]} */
+    const effortSelectOptions = [
+      ...efforts.map((e) => ({ id: e.value, label: e.label })),
+      { id: "off", label: "Default (high)" },
+    ];
+
+    const effortChoice = await context.select("Choose reasoning effort", effortSelectOptions, {
+      currentId: currentEffort ?? undefined,
+    });
+
+    if (effortChoice && effortChoice !== currentEffort) {
+      await handleEffortCommand(chatId, effortChoice);
+    }
+  }
+
+  const { rows: updated } = await db.query("SELECT sdk_model, sdk_effort FROM chats WHERE chat_id = $1", [chatId]);
+  const finalModel = updated[0]?.sdk_model ?? "default (Sonnet)";
+  const finalEffort = updated[0]?.sdk_effort ?? "default (high)";
+  await context.reply("tool-result", `SDK model: \`${finalModel}\`\nSDK effort: \`${finalEffort}\``);
+  return true;
+}
+
+/**
  * Create the Claude Agent SDK harness.
  * Maintains per-chat active query state for message injection and cancellation.
  * @returns {AgentHarness}
@@ -291,7 +419,43 @@ export function createClaudeAgentSdkHarness() {
   /** Max time (ms) to wait for active queries before force-cancelling them */
   const SHUTDOWN_TIMEOUT_MS = 120_000;
 
-  return { processLlmResponse, injectMessage, cancel, waitForIdle };
+  return {
+    getName: () => "claude-agent-sdk",
+    getCapabilities: () => CLAUDE_HARNESS_CAPABILITIES,
+    run,
+    handleCommand: handleClaudeHarnessCommand,
+    processLlmResponse,
+    injectMessage,
+    cancel,
+    waitForIdle,
+  };
+
+  /**
+   * New primary run entrypoint for the unified harness abstraction.
+   * Keeps compatibility with the legacy processLlmResponse params by
+   * translating generic runConfig/session fields into the old shape.
+   * @param {AgentHarnessParams} params
+   * @returns {Promise<AgentResult>}
+   */
+  async function run(params) {
+    const { runConfig, session } = params;
+    const nextParams = {
+      ...params,
+      cwd: runConfig?.workdir ?? params.cwd,
+      sdkModel: runConfig?.model ?? params.sdkModel,
+      sdkEffort: runConfig?.reasoningEffort ?? params.sdkEffort,
+      session: {
+        ...session,
+        sdkSessionId: getClaudeSessionId(session),
+        updateSdkSessionId: session.updateSdkSessionId ?? (
+          session.saveHarnessSession
+            ? async (_chatId, sessionId) => saveClaudeSessionId(session, sessionId)
+            : undefined
+        ),
+      },
+    };
+    return processLlmResponse(nextParams);
+  }
 
   /**
    * Wait for all active queries to finish (drain the activeQueries map).
@@ -341,18 +505,19 @@ export function createClaudeAgentSdkHarness() {
 
   /**
    * Inject a follow-up user message into a running query for the given chat.
-   * @param {string} chatId
+   * @param {string | HarnessSessionRef} chatId
    * @param {string} text
    * @returns {boolean} true if injected, false if no active query
    */
   function injectMessage(chatId, text) {
-    const active = activeQueries.get(chatId);
+    const activeQueryKey = getActiveQueryKey(chatId);
+    const active = activeQueries.get(activeQueryKey);
     if (!active) return false;
 
     // If the query hasn't started yet (still in setup), buffer the message
     if (!active.query) {
       active.pendingMessages.push(text);
-      log.debug(`Buffered message for pending query on chat ${chatId}: "${text.slice(0, 80)}"`);
+      log.debug(`Buffered message for pending query on chat ${activeQueryKey}: "${text.slice(0, 80)}"`);
       return true;
     }
 
@@ -371,20 +536,21 @@ export function createClaudeAgentSdkHarness() {
       log.error("Failed to inject message into active query:", err);
     });
 
-    log.debug(`Injected message into active query for chat ${chatId}: "${text.slice(0, 80)}"`);
+    log.debug(`Injected message into active query for chat ${activeQueryKey}: "${text.slice(0, 80)}"`);
     return true;
   }
 
   /**
    * Cancel the active query for the given chat.
-   * @param {string} chatId
+   * @param {string | HarnessSessionRef} chatId
    * @returns {boolean} true if cancelled, false if no active query
    */
   function cancel(chatId) {
-    const active = activeQueries.get(chatId);
+    const activeQueryKey = getActiveQueryKey(chatId);
+    const active = activeQueries.get(activeQueryKey);
     if (!active) return false;
 
-    log.debug(`Cancelling active query for chat ${chatId}`);
+    log.debug(`Cancelling active query for chat ${activeQueryKey}`);
     active.abortController.abort();
     return true;
   }
@@ -423,7 +589,7 @@ export function createClaudeAgentSdkHarness() {
       query: null, abortController, sessionId: "", pendingMessages: [],
     });
 
-    const existingSessionId = session.sdkSessionId ?? null;
+      const existingSessionId = getClaudeSessionId(session);
 
     const fullSystemPrompt = await buildSystemPrompt(llmConfig, session.chatId, session.senderIds);
 
@@ -631,12 +797,10 @@ export function createClaudeAgentSdkHarness() {
         // so the next message starts fresh instead of hitting the same error.
         if (existingSessionId && !resolvedSessionId) {
           log.warn(`Resume failed for session ${existingSessionId}, clearing stale session ID`);
-          if (session.updateSdkSessionId) {
-            try {
-              await session.updateSdkSessionId(session.chatId, null);
-            } catch (clearErr) {
-              log.error("Failed to clear stale SDK session ID:", clearErr);
-            }
+          try {
+            await saveClaudeSessionId(session, null);
+          } catch (clearErr) {
+            log.error("Failed to clear stale SDK session ID:", clearErr);
           }
         }
 
@@ -656,9 +820,9 @@ export function createClaudeAgentSdkHarness() {
 
       // Persist the SDK session ID so the next message can resume the conversation.
       // Save when: we got a session ID AND it differs from what was stored.
-      if (resolvedSessionId && resolvedSessionId !== existingSessionId && session.updateSdkSessionId) {
+      if (resolvedSessionId && resolvedSessionId !== existingSessionId) {
         try {
-          await session.updateSdkSessionId(session.chatId, resolvedSessionId);
+          await saveClaudeSessionId(session, resolvedSessionId);
           log.info(`Saved SDK session ${resolvedSessionId} for chat ${session.chatId}`);
         } catch (err) {
           log.error("Failed to persist SDK session ID:", err);
