@@ -30,7 +30,7 @@ import {
 } from "./memory.js";
 import { storeAndLinkHtml } from "./html-store.js";
 import { startHtmlServer, stopHtmlServer } from "./html-server.js";
-import { resolveHarness, resolveHarnessName, registerHarness, waitForAllHarnesses, MAX_TOOL_CALL_DEPTH } from "./harnesses/index.js";
+import { resolveHarness, resolveHarnessName, registerHarness, waitForAllHarnesses, MAX_TOOL_CALL_DEPTH, createHarnessRunCoordinator } from "./harnesses/index.js";
 import { formatToolCallDisplay } from "./tool-display.js";
 import { createMessageActionContext } from "./execute-action-context.js";
 import { createLogger } from "./logger.js";
@@ -170,14 +170,7 @@ async function displayToolCall(toolCall, context, actionFormatter, cwd, toolCont
 export function createMessageHandler({ store, llmClient, getActionsFn, executeActionFn }) {
   const { addMessage, updateToolMessage, createChat, getChat, getMessages, saveHarnessSession, archiveHarnessSession, getHarnessSessionHistory, restoreHarnessSession } = store;
 
-  /**
-   * Chats currently in LLM processing (between "LLM will respond" and harness completion).
-   * Used to prevent concurrent queries: if a second message arrives during setup,
-   * it gets buffered and injected once the harness is active, instead of spawning
-   * a parallel query.
-   * @type {Map<string, string[]>}
-   */
-  const pendingLlmChats = new Map();
+  const runCoordinator = createHarnessRunCoordinator();
 
 
 
@@ -299,24 +292,18 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
     log.debug("LLM will respond");
 
     const userText = firstBlock?.text ?? "";
+    const harnessName = resolveHarnessName(null, chatInfo);
+    const harness = resolveHarness(harnessName);
 
-    // --- Concurrency guard (fully synchronous — no awaits between check and set) ---
-    // 1. If setup is in progress for this chat, buffer the message
-    if (userText && pendingLlmChats.has(chatId)) {
-      pendingLlmChats.get(chatId)?.push(userText);
-      log.debug("Buffered message for pending LLM setup on chat", chatId);
+    const lifecycleDecision = runCoordinator.beginRun({ chatId, userText, harness });
+    if (lifecycleDecision.status === "buffered") {
+      log.debug("Buffered message for pending harness run on chat", chatId);
       return;
     }
-    // 2. If the harness already has an active query, inject into it
-    const harnessName = resolveHarnessName(null, chatInfo); // sync — persona resolved later
-    const harness = resolveHarness(harnessName);
-    if (userText && harness.injectMessage?.(chatId, userText)) {
+    if (lifecycleDecision.status === "injected") {
       log.debug("Injected message into active harness query for chat", chatId);
       return;
     }
-    // 3. Mark as pending synchronously — before any awaits.
-    //    All subsequent messages for this chat hit check #1 above.
-    pendingLlmChats.set(chatId, []);
 
     /** Send "composing" presence, swallowing errors. */
     const sendComposing = async () => {
@@ -382,9 +369,10 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
 
     const hooks = buildAgentIOHooks(context, sendComposing, chatInfo?.harness_cwd ?? null);
 
+    runCoordinator.markRunActive(chatId);
+
     // Append any messages that arrived during setup to the conversation
-    const buffered = pendingLlmChats.get(chatId) ?? [];
-    pendingLlmChats.delete(chatId);
+    const buffered = runCoordinator.consumeBufferedTexts(chatId);
     for (const text of buffered) {
       if (text) {
         /** @type {UserMessage} */
@@ -414,7 +402,7 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
       const errorMessage = errorToString(error);
       try { await context.reply("error", errorMessage); } catch { /* best effort */ }
     } finally {
-      pendingLlmChats.delete(chatId); // clean up in case of error before flush
+      runCoordinator.finishRun(chatId);
       try {
         await messageContext.sendPresenceUpdate("paused");
       } catch (err) {
