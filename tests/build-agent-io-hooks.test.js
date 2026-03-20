@@ -30,6 +30,35 @@ function createSubject() {
   return { hooks, sent };
 }
 
+/**
+ * @param {string | null} cwd
+ * @returns {{
+ *   hooks: AgentIOHooks,
+ *   sent: Array<{ source: MessageSource, content: SendContent, kind: "send" | "reply" }>,
+ * }}
+ */
+function createSubjectWithCwd(cwd) {
+  /** @type {Array<{ source: MessageSource, content: SendContent, kind: "send" | "reply" }>} */
+  const sent = [];
+  const hooks = buildAgentIoHooks(
+    {
+      send: async (source, content) => {
+        sent.push({ source, content, kind: "send" });
+        return undefined;
+      },
+      reply: async (source, content) => {
+        sent.push({ source, content, kind: "reply" });
+        return undefined;
+      },
+      select: async () => "",
+      confirm: async () => true,
+    },
+    async () => {},
+    cwd,
+  );
+  return { hooks, sent };
+}
+
 describe("buildAgentIoHooks", () => {
   it("maps plan events to an llm reply", async () => {
     const { hooks, sent } = createSubject();
@@ -55,7 +84,7 @@ describe("buildAgentIoHooks", () => {
 
     assert.equal(sent.length, 1);
     assert.equal(sent[0].kind, "send");
-    assert.equal(sent[0].source, "tool-result");
+    assert.equal(sent[0].source, "tool-call");
   });
 
   it("maps file reads to a tool-call message", async () => {
@@ -79,7 +108,7 @@ describe("buildAgentIoHooks", () => {
 
     assert.equal(sent.length, 1);
     assert.equal(sent[0].kind, "send");
-    assert.equal(sent[0].source, "tool-result");
+    assert.equal(sent[0].source, "tool-call");
     const content = /** @type {ToolContentBlock[]} */ (sent[0].content);
     assert.deepEqual(content, [{
       type: "diff",
@@ -87,6 +116,29 @@ describe("buildAgentIoHooks", () => {
       newStr: "const value = 2;\n",
       language: "javascript",
       caption: "*File changed*  `/tmp/file.js`\nUpdated file",
+    }]);
+  });
+
+  it("shortens file change paths and drops redundant summaries", async () => {
+    const { hooks, sent } = createSubjectWithCwd("/repo");
+    await hooks.onFileChange?.({
+      path: "/repo/src/file.js",
+      summary: "/repo/src/file.js (add)",
+      kind: "add",
+      oldText: "",
+      newText: "export const value = 1;\n",
+      diff: ["--- /dev/null", "+++ b/src/file.js", "@@ -0,0 +1,1 @@", "+export const value = 1;"].join("\n"),
+    });
+
+    assert.equal(sent.length, 1);
+    assert.equal(sent[0].source, "tool-call");
+    const content = /** @type {ToolContentBlock[]} */ (sent[0].content);
+    assert.deepEqual(content, [{
+      type: "diff",
+      oldStr: "",
+      newStr: "export const value = 1;\n",
+      language: "javascript",
+      caption: "*File added*  `src/file.js`",
     }]);
   });
 

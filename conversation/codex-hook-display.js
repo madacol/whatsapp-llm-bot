@@ -1,4 +1,4 @@
-import { getToolCallSummary, langFromPath } from "../tool-display.js";
+import { getToolCallSummary, langFromPath, shortenPath } from "../tool-display.js";
 import { createToolMessage, registerInspectHandler } from "../utils.js";
 
 /**
@@ -128,7 +128,7 @@ export function createCodexDisplayHooks({ context, cwd, displayToolCall }) {
       return;
     }
 
-    const body = paths.map((filePath) => `\`${filePath}\``).join("\n");
+    const body = paths.map((filePath) => `\`${shortenPath(filePath, cwd)}\``).join("\n");
     await context.send("tool-call", [{ type: "markdown", text: `*Read file*\n\n${body}` }]);
   }
 
@@ -144,6 +144,8 @@ export function createCodexDisplayHooks({ context, cwd, displayToolCall }) {
    * @returns {Promise<void>}
    */
   async function onFileChange({ path, summary, diff, kind, oldText, newText }) {
+    const displayPath = shortenPath(path, cwd);
+    const cleanedSummary = cleanFileChangeSummary(summary, path, displayPath, kind);
     if (diff) {
       const title = kind === "add"
         ? "*File added*"
@@ -152,11 +154,11 @@ export function createCodexDisplayHooks({ context, cwd, displayToolCall }) {
           : "*File changed*";
 
       if (typeof oldText === "string" || typeof newText === "string") {
-        const captionLines = [`${title}  \`${path}\``];
-        if (summary) {
-          captionLines.push(summary);
+        const captionLines = [`${title}  \`${displayPath}\``];
+        if (cleanedSummary) {
+          captionLines.push(cleanedSummary);
         }
-        await context.send("tool-result", [{
+        await context.send("tool-call", [{
           type: "diff",
           oldStr: oldText ?? "",
           newStr: newText ?? "",
@@ -167,15 +169,37 @@ export function createCodexDisplayHooks({ context, cwd, displayToolCall }) {
       }
 
       const lines = [title, ""];
-      if (summary) {
-        lines.push(summary);
+      if (cleanedSummary) {
+        lines.push(cleanedSummary);
       }
-      lines.push(`\`${path}\``, "", "```diff", diff, "```");
-      await context.send("tool-result", [{ type: "markdown", text: lines.join("\n") }]);
+      lines.push(`\`${displayPath}\``, "", "```diff", diff, "```");
+      await context.send("tool-call", [{ type: "markdown", text: lines.join("\n") }]);
       return;
     }
 
-    const detail = summary ? `${summary}\n\`${path}\`` : `Changed file: \`${path}\``;
-    await context.send("tool-result", detail);
+    const detail = cleanedSummary ? `${cleanedSummary}\n\`${displayPath}\`` : `Changed file: \`${displayPath}\``;
+    await context.send("tool-call", detail);
   }
+}
+
+/**
+ * @param {string | undefined} summary
+ * @param {string} rawPath
+ * @param {string} displayPath
+ * @param {"add" | "delete" | "update" | undefined} kind
+ * @returns {string | undefined}
+ */
+function cleanFileChangeSummary(summary, rawPath, displayPath, kind) {
+  if (!summary) {
+    return undefined;
+  }
+
+  const shortenedSummary = summary.split(rawPath).join(displayPath);
+  const redundantForms = new Set([
+    rawPath,
+    displayPath,
+    ...(kind ? [`${rawPath} (${kind})`, `${displayPath} (${kind})`] : []),
+  ]);
+
+  return redundantForms.has(shortenedSummary) ? undefined : shortenedSummary;
 }

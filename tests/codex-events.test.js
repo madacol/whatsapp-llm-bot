@@ -24,7 +24,7 @@ describe("codex events", () => {
       item: {
         type: "command_execution",
         command: "pnpm test",
-        stdout: "ok",
+        aggregated_output: "ok",
       },
     }), {
       sessionId: null,
@@ -32,6 +32,72 @@ describe("codex events", () => {
         command: "pnpm test",
         status: "completed",
         output: "ok",
+      },
+    });
+  });
+
+  it("normalizes mcp tool call events", () => {
+    assert.deepEqual(normalizeCodexEvent({
+      type: "item.started",
+      item: {
+        id: "tool-1",
+        type: "mcp_tool_call",
+        server: "functions",
+        tool: "spawn_agent",
+        arguments: { message: "hello" },
+        status: "in_progress",
+      },
+    }), {
+      sessionId: null,
+      toolEvent: {
+        id: "tool-1",
+        name: "spawn_agent",
+        arguments: { message: "hello" },
+        status: "started",
+      },
+    });
+
+    assert.deepEqual(normalizeCodexEvent({
+      type: "item.completed",
+      item: {
+        id: "tool-1",
+        type: "mcp_tool_call",
+        server: "functions",
+        tool: "spawn_agent",
+        arguments: { message: "hello" },
+        result: {
+          content: [{ type: "text", text: "agent-pass-2" }],
+          structured_content: null,
+        },
+        status: "completed",
+      },
+    }), {
+      sessionId: null,
+      toolEvent: {
+        id: "tool-1",
+        name: "spawn_agent",
+        arguments: { message: "hello" },
+        status: "completed",
+        output: "agent-pass-2",
+      },
+    });
+  });
+
+  it("normalizes web search events as tool activity", () => {
+    assert.deepEqual(normalizeCodexEvent({
+      type: "item.started",
+      item: {
+        id: "web-1",
+        type: "web_search",
+        query: "time in UTC",
+      },
+    }), {
+      sessionId: null,
+      toolEvent: {
+        id: "web-1",
+        name: "WebSearch",
+        arguments: { query: "time in UTC" },
+        status: "started",
       },
     });
   });
