@@ -7,6 +7,13 @@ import {
   createCodexHarness,
 } from "../harnesses/codex.js";
 
+const TEST_CODEX_MODELS = [
+  { id: "gpt-5.4", label: "GPT-5.4" },
+  { id: "gpt-5.4-mini", label: "GPT-5.4 Mini" },
+  { id: "gpt-5-codex", label: "GPT-5 Codex" },
+  { id: "gpt-5.3-codex", label: "GPT-5.3 Codex" },
+];
+
 before(async () => {
   const db = await createTestDb();
   setDb("./pgdata/root", db);
@@ -35,7 +42,9 @@ describe("createCodexHarness", () => {
   it("handles codex-owned model command", async () => {
     const db = await createTestDb();
     await seedChat(db, "codex-chat-1", { enabled: true });
-    const harness = createCodexHarness();
+    const harness = createCodexHarness({
+      getAvailableModels: async () => TEST_CODEX_MODELS,
+    });
     /** @type {string[]} */
     const replies = [];
     const handled = await harness.handleCommand({
@@ -64,7 +73,9 @@ describe("createCodexHarness", () => {
   it("lets the user choose from valid codex model options when no model is provided", async () => {
     const db = await createTestDb();
     await seedChat(db, "codex-chat-2", { enabled: true });
-    const harness = createCodexHarness();
+    const harness = createCodexHarness({
+      getAvailableModels: async () => TEST_CODEX_MODELS,
+    });
     /** @type {string[]} */
     const replies = [];
     /** @type {SelectOption[] | null} */

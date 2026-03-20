@@ -1,10 +1,11 @@
 /**
- * Codex harness — uses the local Codex CLI in non-interactive JSON mode.
+ * Codex harness — uses the local Codex SDK for stateful agent runs.
  */
 
 import { NO_OP_HOOKS } from "./native.js";
 import { startCodexRun } from "./codex-runner.js";
 import { extractCodexText } from "./codex-events.js";
+import { getCodexAvailableModels } from "./codex-models.js";
 import { getRootDb } from "../db.js";
 import { handleHarnessSessionCommand } from "./session-commands.js";
 export { buildCodexThreadOptions } from "./codex-runner.js";
@@ -28,20 +29,18 @@ const SANDBOX_MODES = new Set(["read-only", "workspace-write", "danger-full-acce
 /** @type {Set<NonNullable<HarnessRunConfig["approvalPolicy"]>>} */
 const APPROVAL_POLICIES = new Set(["untrusted", "on-request", "never"]);
 
-/** @type {Array<{ id: string, label: string }>} */
-const CODEX_MODEL_OPTIONS = [
-  { id: "gpt-5.4", label: "GPT-5.4" },
-  { id: "gpt-5.4-mini", label: "GPT-5.4 Mini" },
-  { id: "gpt-5-codex", label: "GPT-5 Codex" },
-  { id: "gpt-5.3-codex", label: "GPT-5.3 Codex" },
-];
-
 /**
  * @typedef {{
  *   abortController: AbortController;
  *   done: Promise<{ result: AgentResult, sessionId: string | null }>;
  *   aborted: boolean;
  * }} ActiveCodexRun
+ */
+
+/**
+ * @typedef {{
+ *   getAvailableModels?: () => Promise<Array<{ id: string, label: string }>>,
+ * }} CodexHarnessDeps
  */
 
 /**
@@ -106,24 +105,37 @@ function getCodexSessionId(session) {
 
 /**
  * @param {string} value
+ * @param {Array<{ id: string, label: string }>} modelOptions
  * @returns {boolean}
  */
-function isSelectableCodexModel(value) {
-  return CODEX_MODEL_OPTIONS.some((option) => option.id === value);
+function isSelectableCodexModel(value, modelOptions) {
+  return modelOptions.some((option) => option.id === value);
+}
+
+/**
+ * @param {Array<{ id: string, label: string }>} modelOptions
+ * @returns {string}
+ */
+function formatModelOptionsHint(modelOptions) {
+  return modelOptions.length > 0
+    ? modelOptions.map((option) => option.id).join(", ")
+    : "no currently available Codex models";
 }
 
 /**
  * @param {string} chatId
  * @param {string} arg
+ * @param {() => Promise<Array<{ id: string, label: string }>>} getAvailableModels
  * @returns {Promise<string>}
  */
-async function handleModelCommand(chatId, arg) {
+async function handleModelCommand(chatId, arg, getAvailableModels) {
   if (arg === "off" || arg === "default" || arg === "none") {
     await updateHarnessConfig(chatId, { model: null });
     return "Codex model reset to default.";
   }
-  if (!isSelectableCodexModel(arg)) {
-    return `Unknown Codex model \`${arg}\`. Run \`/model\` to choose one of: ${CODEX_MODEL_OPTIONS.map((option) => option.id).join(", ")}`;
+  const modelOptions = await getAvailableModels();
+  if (!isSelectableCodexModel(arg, modelOptions)) {
+    return `Unknown Codex model \`${arg}\`. Run \`/model\` to choose one of: ${formatModelOptionsHint(modelOptions)}`;
   }
   await updateHarnessConfig(chatId, { model: arg });
   return `Codex model set to \`${arg}\``;
@@ -167,9 +179,10 @@ async function handleApprovalCommand(chatId, arg) {
  * Handle Codex-specific slash commands.
  * @param {HarnessCommandContext} input
  * @param {(chatId: string | HarnessSessionRef) => boolean} cancelActiveQuery
+ * @param {() => Promise<Array<{ id: string, label: string }>>} getAvailableModels
  * @returns {Promise<boolean>}
  */
-async function handleCodexHarnessCommand(input, cancelActiveQuery) {
+async function handleCodexHarnessCommand(input, cancelActiveQuery, getAvailableModels) {
   const handledSessionCommand = await handleHarnessSessionCommand({
     command: input.command,
     chatId: input.chatId,
@@ -187,24 +200,25 @@ async function handleCodexHarnessCommand(input, cancelActiveQuery) {
   if (modelMatch) {
     const arg = modelMatch[1]?.trim() ?? null;
     if (arg) {
-      await input.context.reply("tool-result", await handleModelCommand(input.chatId, arg.toLowerCase()));
+      await input.context.reply("tool-result", await handleModelCommand(input.chatId, arg.toLowerCase(), getAvailableModels));
       return true;
     }
 
+    const modelOptions = await getAvailableModels();
     const config = await getHarnessConfig(input.chatId);
-    const currentModel = typeof config.model === "string" && isSelectableCodexModel(config.model)
+    const currentModel = typeof config.model === "string" && isSelectableCodexModel(config.model, modelOptions)
       ? config.model
       : undefined;
     /** @type {SelectOption[]} */
     const modelSelectOptions = [
-      ...CODEX_MODEL_OPTIONS.map((option) => ({ id: option.id, label: option.label })),
+      ...modelOptions.map((option) => ({ id: option.id, label: option.label })),
       { id: "off", label: "Default" },
     ];
     const modelChoice = await input.context.select("Choose Codex model", modelSelectOptions, {
       currentId: currentModel,
     });
     if (modelChoice && modelChoice !== currentModel) {
-      await handleModelCommand(input.chatId, modelChoice);
+      await handleModelCommand(input.chatId, modelChoice, getAvailableModels);
     }
     const updatedConfig = await getHarnessConfig(input.chatId);
     const finalModel = typeof updatedConfig.model === "string" ? updatedConfig.model : "default";
@@ -243,17 +257,19 @@ async function handleCodexHarnessCommand(input, cancelActiveQuery) {
 
 /**
  * Create the Codex harness.
+ * @param {CodexHarnessDeps} [deps]
  * @returns {AgentHarness}
  */
-export function createCodexHarness() {
+export function createCodexHarness(deps = {}) {
   /** @type {Map<string, ActiveCodexRun>} */
   const activeRuns = new Map();
+  const loadAvailableModels = deps.getAvailableModels ?? getCodexAvailableModels;
 
   return {
     getName: () => "codex",
     getCapabilities: () => CODEX_HARNESS_CAPABILITIES,
     run,
-    handleCommand: (input) => handleCodexHarnessCommand(input, cancel),
+    handleCommand: (input) => handleCodexHarnessCommand(input, cancel, loadAvailableModels),
     cancel,
     waitForIdle,
   };
