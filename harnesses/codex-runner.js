@@ -1,10 +1,7 @@
 import { Codex } from "@openai/codex-sdk";
-import fs from "node:fs/promises";
-import path from "node:path";
-import { createTwoFilesPatch } from "diff";
 import { createLogger } from "../logger.js";
-import { analyzeCodexCommand } from "./codex-command-semantics.js";
 import { normalizeCodexEvent } from "./codex-events.js";
+import { createCodexRunState } from "./codex-run-state.js";
 
 const log = createLogger("harness:codex-runner");
 
@@ -132,10 +129,7 @@ export async function startCodexRun(input, deps = {}) {
     let lastAssistantText = null;
     /** @type {string | null} */
     let failureMessage = null;
-    /** @type {Map<string, string | null>} */
-    const fileSnapshots = new Map();
-    /** @type {Map<string, { diff?: string, kind?: "add" | "delete" | "update" }>} */
-    const pendingFileDiffs = new Map();
+    const runState = createCodexRunState({ workdir: input.runConfig?.workdir });
 
     try {
       for await (const event of streamed.events) {
@@ -153,24 +147,13 @@ export async function startCodexRun(input, deps = {}) {
         }
 
         if (normalized.commandEvent) {
-          const semantics = analyzeCodexCommand(normalized.commandEvent.command);
-          if (normalized.commandEvent.status === "started") {
-            await snapshotCommandPaths(input.runConfig?.workdir, semantics.snapshotPaths, fileSnapshots);
-            for (const patch of semantics.patches) {
-              pendingFileDiffs.set(resolveCommandPath(input.runConfig?.workdir, patch.path), {
-                ...(patch.diff ? { diff: patch.diff } : {}),
-                kind: patch.kind,
-              });
-            }
-            if (semantics.readPaths.length > 0) {
-              await hooks.onFileRead({
-                command: normalized.commandEvent.command,
-                paths: semantics.readPaths,
-              });
-              continue;
-            }
+          const dispatch = await runState.handleCommandEvent(normalized.commandEvent);
+          if (dispatch.fileRead) {
+            await hooks.onFileRead(dispatch.fileRead);
           }
-          await hooks.onCommand(normalized.commandEvent);
+          if (dispatch.command) {
+            await hooks.onCommand(dispatch.command);
+          }
         }
 
         if (normalized.assistantText) {
@@ -183,7 +166,7 @@ export async function startCodexRun(input, deps = {}) {
         }
 
         if (normalized.fileChange) {
-          const enrichedFileChange = await enrichFileChangeEvent(input.runConfig?.workdir, normalized.fileChange, fileSnapshots, pendingFileDiffs);
+          const enrichedFileChange = await runState.enrichFileChangeEvent(normalized.fileChange);
           await hooks.onFileChange(enrichedFileChange);
         }
       }
@@ -215,114 +198,4 @@ export async function startCodexRun(input, deps = {}) {
   })();
 
   return { abortController, done };
-}
-
-/**
- * @param {string | null | undefined} workdir
- * @param {string[]} paths
- * @param {Map<string, string | null>} fileSnapshots
- * @returns {Promise<void>}
- */
-async function snapshotCommandPaths(workdir, paths, fileSnapshots) {
-  for (const relativePath of paths) {
-    const absolutePath = resolveCommandPath(workdir, relativePath);
-    if (fileSnapshots.has(absolutePath)) {
-      continue;
-    }
-    fileSnapshots.set(absolutePath, await readOptionalText(absolutePath));
-  }
-}
-
-/**
- * @param {string | null | undefined} workdir
- * @param {{ path: string, summary?: string, diff?: string, kind?: "add" | "delete" | "update" }} fileChange
- * @param {Map<string, string | null>} fileSnapshots
- * @param {Map<string, { diff?: string, kind?: "add" | "delete" | "update" }>} pendingFileDiffs
- * @returns {Promise<{ path: string, summary?: string, diff?: string, kind?: "add" | "delete" | "update" }>}
- */
-async function enrichFileChangeEvent(workdir, fileChange, fileSnapshots, pendingFileDiffs) {
-  const absolutePath = resolveCommandPath(workdir, fileChange.path);
-  const pending = pendingFileDiffs.get(absolutePath);
-  if (pending) {
-    pendingFileDiffs.delete(absolutePath);
-  }
-
-  const previousText = fileSnapshots.has(absolutePath)
-    ? fileSnapshots.get(absolutePath) ?? null
-    : null;
-  const nextText = await readOptionalText(absolutePath);
-  fileSnapshots.set(absolutePath, nextText);
-
-  const diff = fileChange.diff
-    ?? pending?.diff
-    ?? buildFileDiff(fileChange.path, previousText, nextText);
-  const kind = fileChange.kind ?? pending?.kind ?? inferFileChangeKind(previousText, nextText);
-
-  return {
-    ...fileChange,
-    ...(kind ? { kind } : {}),
-    ...(diff ? { diff } : {}),
-  };
-}
-
-/**
- * @param {string | null | undefined} workdir
- * @param {string} relativePath
- * @returns {string}
- */
-function resolveCommandPath(workdir, relativePath) {
-  if (path.isAbsolute(relativePath) || !workdir) {
-    return relativePath;
-  }
-  return path.resolve(workdir, relativePath);
-}
-
-/**
- * @param {string} filePath
- * @param {string | null} oldText
- * @param {string | null} newText
- * @returns {string | undefined}
- */
-function buildFileDiff(filePath, oldText, newText) {
-  if (oldText === newText) {
-    return undefined;
-  }
-  if (oldText == null && newText == null) {
-    return undefined;
-  }
-  const patchText = createTwoFilesPatch(`a/${filePath}`, `b/${filePath}`, oldText ?? "", newText ?? "", "", "", {
-    context: 3,
-  });
-  const lines = patchText.split("\n");
-  return lines.slice(2).join("\n").trim() || undefined;
-}
-
-/**
- * @param {string | null} oldText
- * @param {string | null} newText
- * @returns {"add" | "delete" | "update" | undefined}
- */
-function inferFileChangeKind(oldText, newText) {
-  if (oldText == null && newText != null) {
-    return "add";
-  }
-  if (oldText != null && newText == null) {
-    return "delete";
-  }
-  if (oldText != null && newText != null && oldText !== newText) {
-    return "update";
-  }
-  return undefined;
-}
-
-/**
- * @param {string} filePath
- * @returns {Promise<string | null>}
- */
-async function readOptionalText(filePath) {
-  try {
-    return await fs.readFile(filePath, "utf8");
-  } catch {
-    return null;
-  }
 }
