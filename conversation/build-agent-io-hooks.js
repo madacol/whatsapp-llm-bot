@@ -63,7 +63,16 @@ export function buildAgentIoHooks(context, sendComposing, cwd) {
       }
     },
     onPlan: async (text) => { await context.reply("llm", [{ type: "markdown", text: `*Plan*\n\n${text}` }]); },
-    onFileChange: async ({ path, summary }) => {
+    onFileChange: async ({ path, summary, diff }) => {
+      if (diff) {
+        const lines = ["*File change*", ""];
+        if (summary) {
+          lines.push(summary);
+        }
+        lines.push(`\`${path}\``, "", "```diff", diff, "```");
+        await context.send("tool-result", [{ type: "markdown", text: lines.join("\n") }]);
+        return;
+      }
       const detail = summary ? `${summary}\n\`${path}\`` : `Changed file: \`${path}\``;
       await context.send("tool-result", detail);
     },

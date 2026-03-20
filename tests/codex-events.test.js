@@ -99,6 +99,36 @@ describe("codex events", () => {
     });
   });
 
+  it("preserves diff text when codex emits a file change with patch content", () => {
+    assert.deepEqual(normalizeCodexEvent({
+      type: "item.completed",
+      item: {
+        type: "file_change",
+        changes: [{ path: "src/app.js", kind: "update" }],
+        patch: [
+          "--- a/src/app.js",
+          "+++ b/src/app.js",
+          "@@ -1 +1 @@",
+          "-old",
+          "+new",
+        ].join("\n"),
+      },
+    }), {
+      sessionId: null,
+      fileChange: {
+        path: "src/app.js",
+        summary: "src/app.js (update)",
+        diff: [
+          "--- a/src/app.js",
+          "+++ b/src/app.js",
+          "@@ -1 +1 @@",
+          "-old",
+          "+new",
+        ].join("\n"),
+      },
+    });
+  });
+
   it("unwraps nested error payloads into a usable failure message", () => {
     assert.deepEqual(normalizeCodexEvent({
       type: "error",
