@@ -113,6 +113,48 @@ describe("createCodexHarness", () => {
     ]);
     assert.ok(replies.at(-1)?.includes("Codex model: `gpt-5.3-codex`"));
   });
+
+  it("handles permissions command through a selector and defaults to workspace-write", async () => {
+    const db = await createTestDb();
+    await seedChat(db, "codex-chat-3", { enabled: true });
+    const harness = createCodexHarness({
+      getAvailableModels: async () => TEST_CODEX_MODELS,
+    });
+    /** @type {string[]} */
+    const replies = [];
+    /** @type {SelectOption[] | null} */
+    let selectedOptions = null;
+
+    const handled = await harness.handleCommand({
+      chatId: "codex-chat-3",
+      command: "permissions",
+      context: /** @type {ExecuteActionContext} */ ({
+        chatId: "codex-chat-3",
+        senderIds: [],
+        content: [],
+        getIsAdmin: async () => true,
+        send: async () => undefined,
+        reply: async (_source, content) => {
+          replies.push(typeof content === "string" ? content : JSON.stringify(content));
+          return undefined;
+        },
+        reactToMessage: async () => {},
+        select: async (_question, options) => {
+          selectedOptions = options;
+          return "danger-full-access";
+        },
+        confirm: async () => true,
+      }),
+    });
+
+    assert.equal(handled, true);
+    assert.deepEqual(selectedOptions, [
+      { id: "workspace-write", label: "Workspace Write" },
+      { id: "read-only", label: "Read Only" },
+      { id: "danger-full-access", label: "Full Access" },
+    ]);
+    assert.ok(replies.at(-1)?.includes("Codex permissions: `danger-full-access`"));
+  });
 });
 
 describe("buildCodexThreadOptions", () => {

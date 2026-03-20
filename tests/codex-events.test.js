@@ -36,6 +36,22 @@ describe("codex events", () => {
     });
   });
 
+  it("strips shell wrappers from command displays", () => {
+    assert.deepEqual(normalizeCodexEvent({
+      type: "item.started",
+      item: {
+        type: "command_execution",
+        command: "/bin/zsh -lc \"pnpm type-check\"",
+      },
+    }), {
+      sessionId: null,
+      commandEvent: {
+        command: "pnpm type-check",
+        status: "started",
+      },
+    });
+  });
+
   it("normalizes nested usage on turn completion", () => {
     assert.deepEqual(normalizeCodexEvent({
       type: "turn.completed",

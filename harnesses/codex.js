@@ -29,6 +29,9 @@ const SANDBOX_MODES = new Set(["read-only", "workspace-write", "danger-full-acce
 /** @type {Set<NonNullable<HarnessRunConfig["approvalPolicy"]>>} */
 const APPROVAL_POLICIES = new Set(["untrusted", "on-request", "never"]);
 
+/** @type {NonNullable<HarnessRunConfig["sandboxMode"]>} */
+const DEFAULT_CODEX_SANDBOX_MODE = "workspace-write";
+
 /**
  * @typedef {{
  *   abortController: AbortController;
@@ -123,6 +126,34 @@ function formatModelOptionsHint(modelOptions) {
 }
 
 /**
+ * @param {Record<string, unknown>} config
+ * @returns {NonNullable<HarnessRunConfig["sandboxMode"]>}
+ */
+function getEffectiveSandboxMode(config) {
+  if (typeof config.sandboxMode === "string" && SANDBOX_MODES.has(/** @type {HarnessRunConfig["sandboxMode"]} */ (config.sandboxMode))) {
+    return /** @type {NonNullable<HarnessRunConfig["sandboxMode"]>} */ (config.sandboxMode);
+  }
+  return DEFAULT_CODEX_SANDBOX_MODE;
+}
+
+/**
+ * @param {string} value
+ * @returns {NonNullable<HarnessRunConfig["sandboxMode"]> | null}
+ */
+function normalizePermissionsMode(value) {
+  if (value === "write" || value === "workspace" || value === "workspace-write") {
+    return "workspace-write";
+  }
+  if (value === "readonly" || value === "read-only" || value === "read") {
+    return "read-only";
+  }
+  if (value === "full" || value === "full-access" || value === "danger-full-access") {
+    return "danger-full-access";
+  }
+  return null;
+}
+
+/**
  * @param {string} chatId
  * @param {string} arg
  * @param {() => Promise<Array<{ id: string, label: string }>>} getAvailableModels
@@ -149,13 +180,31 @@ async function handleModelCommand(chatId, arg, getAvailableModels) {
 async function handleSandboxCommand(chatId, arg) {
   if (arg === "off" || arg === "default" || arg === "none") {
     await updateHarnessConfig(chatId, { sandboxMode: null });
-    return "Codex sandbox reset to default.";
+    return `Codex sandbox reset to project default (\`${DEFAULT_CODEX_SANDBOX_MODE}\`).`;
   }
   if (!SANDBOX_MODES.has(/** @type {HarnessRunConfig["sandboxMode"]} */ (arg))) {
     return `Unknown sandbox mode \`${arg}\`. Use: ${[...SANDBOX_MODES].join(", ")}`;
   }
   await updateHarnessConfig(chatId, { sandboxMode: arg });
   return `Codex sandbox set to \`${arg}\``;
+}
+
+/**
+ * @param {string} chatId
+ * @param {string} arg
+ * @returns {Promise<string>}
+ */
+async function handlePermissionsCommand(chatId, arg) {
+  if (arg === "off" || arg === "default" || arg === "none") {
+    await updateHarnessConfig(chatId, { sandboxMode: null });
+    return `Codex permissions reset to project default (\`${DEFAULT_CODEX_SANDBOX_MODE}\`).`;
+  }
+  const sandboxMode = normalizePermissionsMode(arg);
+  if (!sandboxMode) {
+    return `Unknown permissions mode \`${arg}\`. Use: workspace-write, read-only, danger-full-access`;
+  }
+  await updateHarnessConfig(chatId, { sandboxMode });
+  return `Codex permissions: \`${sandboxMode}\``;
 }
 
 /**
@@ -234,8 +283,34 @@ async function handleCodexHarnessCommand(input, cancelActiveQuery, getAvailableM
       return true;
     }
     const config = await getHarnessConfig(input.chatId);
-    const sandboxMode = typeof config.sandboxMode === "string" ? config.sandboxMode : "default";
+    const sandboxMode = getEffectiveSandboxMode(config);
     await input.context.reply("tool-result", `Codex sandbox: \`${sandboxMode}\``);
+    return true;
+  }
+
+  const permissionsMatch = trimmed.match(/^permissions(?:\s+(.+))?$/i);
+  if (permissionsMatch) {
+    const arg = permissionsMatch[1]?.trim() ?? null;
+    if (arg) {
+      await input.context.reply("tool-result", await handlePermissionsCommand(input.chatId, arg.toLowerCase()));
+      return true;
+    }
+    const config = await getHarnessConfig(input.chatId);
+    const currentPermissions = getEffectiveSandboxMode(config);
+    /** @type {SelectOption[]} */
+    const permissionOptions = [
+      { id: "workspace-write", label: "Workspace Write" },
+      { id: "read-only", label: "Read Only" },
+      { id: "danger-full-access", label: "Full Access" },
+    ];
+    const permissionChoice = await input.context.select("Choose Codex permissions", permissionOptions, {
+      currentId: currentPermissions,
+    });
+    if (permissionChoice && permissionChoice !== currentPermissions) {
+      await handlePermissionsCommand(input.chatId, permissionChoice);
+    }
+    const updatedConfig = await getHarnessConfig(input.chatId);
+    await input.context.reply("tool-result", `Codex permissions: \`${getEffectiveSandboxMode(updatedConfig)}\``);
     return true;
   }
 

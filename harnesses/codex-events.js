@@ -121,10 +121,31 @@ function extractCommandText(item) {
   }
   for (const key of ["command", "command_line", "cmd", "input"]) {
     if (typeof item[key] === "string" && item[key].length > 0) {
-      return item[key];
+      return unwrapShellCommand(item[key]);
     }
   }
-  return extractCodexText(item.command) ?? null;
+  const text = extractCodexText(item.command);
+  return text ? unwrapShellCommand(text) : null;
+}
+
+/**
+ * Codex command executions often report the shell wrapper that launched the
+ * command. Strip that transport noise so the user sees the command the agent
+ * actually intended to run.
+ * @param {string} command
+ * @returns {string}
+ */
+function unwrapShellCommand(command) {
+  const match = command.match(/^(?:(?:\/usr\/bin\/env)\s+)?(?:\/bin\/)?(?:zsh|bash|sh)\s+-lc\s+(['"])([\s\S]*)\1$/);
+  if (!match) {
+    return command;
+  }
+  const quote = match[1];
+  const inner = match[2];
+  if (quote === "\"") {
+    return inner.replace(/\\"/g, "\"").replace(/\\\\/g, "\\");
+  }
+  return inner.replace(/'\\''/g, "'");
 }
 
 /**
