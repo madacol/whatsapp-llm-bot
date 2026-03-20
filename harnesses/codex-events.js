@@ -15,6 +15,7 @@
  * @typedef {{
  *   path: string,
  *   summary?: string,
+ *   diff?: string,
  * }} CodexFileChangeEvent
  */
 
@@ -211,6 +212,39 @@ function extractFileSummary(item) {
 
 /**
  * @param {unknown} item
+ * @returns {string | undefined}
+ */
+function extractFileDiff(item) {
+  if (!isRecord(item)) {
+    return undefined;
+  }
+
+  for (const key of ["patch", "diff", "unified_diff"]) {
+    const diffText = extractCodexText(item[key]);
+    if (diffText) {
+      return diffText;
+    }
+  }
+
+  if (Array.isArray(item.changes)) {
+    for (const change of item.changes) {
+      if (!isRecord(change)) {
+        continue;
+      }
+      for (const key of ["patch", "diff", "unified_diff"]) {
+        const diffText = extractCodexText(change[key]);
+        if (diffText) {
+          return diffText;
+        }
+      }
+    }
+  }
+
+  return undefined;
+}
+
+/**
+ * @param {unknown} item
  * @returns {string | null}
  */
 function extractPlanText(item) {
@@ -317,9 +351,11 @@ export function normalizeCodexEvent(event) {
   if (eventType === "item.completed" && (itemType.includes("file") || itemType.includes("patch"))) {
     const filePath = extractFilePath(item);
     if (filePath) {
+      const diff = extractFileDiff(item);
       normalized.fileChange = {
         path: filePath,
         summary: extractFileSummary(item),
+        ...(diff ? { diff } : {}),
       };
     }
     return normalized;

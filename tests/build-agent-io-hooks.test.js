@@ -57,4 +57,35 @@ describe("buildAgentIoHooks", () => {
     assert.equal(sent[0].kind, "send");
     assert.equal(sent[0].source, "tool-result");
   });
+
+  it("renders file change diffs when present", async () => {
+    const { hooks, sent } = createSubject();
+    await hooks.onFileChange?.({
+      path: "/tmp/file.js",
+      summary: "Updated file",
+      diff: ["--- a/file.js", "+++ b/file.js", "@@ -1 +1 @@", "-old", "+new"].join("\n"),
+    });
+
+    assert.equal(sent.length, 1);
+    assert.equal(sent[0].kind, "send");
+    assert.equal(sent[0].source, "tool-result");
+    const content = /** @type {ToolContentBlock[]} */ (sent[0].content);
+    assert.deepEqual(content, [{
+      type: "markdown",
+      text: [
+        "*File change*",
+        "",
+        "Updated file",
+        "`/tmp/file.js`",
+        "",
+        "```diff",
+        "--- a/file.js",
+        "+++ b/file.js",
+        "@@ -1 +1 @@",
+        "-old",
+        "+new",
+        "```",
+      ].join("\n"),
+    }]);
+  });
 });
