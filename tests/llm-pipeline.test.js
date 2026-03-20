@@ -245,7 +245,7 @@ describe("LLM pipeline via createMessageHandler", () => {
 
     const { context, responses } = createChatTurn({
       chatId: "pipe-slash-codex",
-      content: [{ type: "text", text: "/model gpt-5.4-codex" }],
+      content: [{ type: "text", text: "/model gpt-5-codex" }],
     });
     await handleMessage(context);
 

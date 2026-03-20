@@ -40,7 +40,7 @@ describe("createCodexHarness", () => {
     const replies = [];
     const handled = await harness.handleCommand({
       chatId: "codex-chat-1",
-      command: "model gpt-5.4-codex",
+      command: "model gpt-5-codex",
       context: /** @type {ExecuteActionContext} */ ({
         chatId: "codex-chat-1",
         senderIds: [],
@@ -59,6 +59,46 @@ describe("createCodexHarness", () => {
 
     assert.equal(handled, true);
     assert.ok(replies[0]?.includes("Codex model set"));
+  });
+
+  it("lets the user choose from valid codex model options when no model is provided", async () => {
+    const db = await createTestDb();
+    await seedChat(db, "codex-chat-2", { enabled: true });
+    const harness = createCodexHarness();
+    /** @type {string[]} */
+    const replies = [];
+    /** @type {SelectOption[] | null} */
+    let selectedOptions = null;
+
+    const handled = await harness.handleCommand({
+      chatId: "codex-chat-2",
+      command: "model",
+      context: /** @type {ExecuteActionContext} */ ({
+        chatId: "codex-chat-2",
+        senderIds: [],
+        content: [],
+        getIsAdmin: async () => true,
+        send: async () => undefined,
+        reply: async (_source, content) => {
+          replies.push(typeof content === "string" ? content : JSON.stringify(content));
+          return undefined;
+        },
+        reactToMessage: async () => {},
+        select: async (_question, options) => {
+          selectedOptions = options;
+          return "gpt-5.3-codex";
+        },
+        confirm: async () => true,
+      }),
+    });
+
+    assert.equal(handled, true);
+    assert.deepEqual(selectedOptions, [
+      { id: "gpt-5-codex", label: "GPT-5 Codex" },
+      { id: "gpt-5.3-codex", label: "GPT-5.3 Codex" },
+      { id: "off", label: "Default" },
+    ]);
+    assert.ok(replies.at(-1)?.includes("Codex model: `gpt-5.3-codex`"));
   });
 });
 
