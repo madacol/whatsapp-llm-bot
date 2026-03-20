@@ -36,7 +36,7 @@ function convertImageProp(propSchema, hasMedia) {
 /**
  * Convert actions to tool definitions format.
  * Converts `type: "image"` parameters to `type: "string"` with a media reference hint.
- * @param {Action[]} actions
+ * @param {ToolDescriptor[]} actions
  * @param {boolean} [hasMedia]
  * @returns {ToolDefinition[]}
  */

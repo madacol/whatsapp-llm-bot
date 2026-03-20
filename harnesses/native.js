@@ -98,7 +98,7 @@ async function executeAndStoreTool({
   handle, actionFormatToolCall, workdir,
 }) {
   const { chatId, context, updateToolMessage } = session;
-  const { executeActionFn, actionResolver, actionLlmClient } = llmConfig;
+  const { toolRuntime } = llmConfig;
   const toolName = toolCall.name;
   const toolArgs = parseToolArgs(toolCall.arguments);
   log.debug("executing", toolName, toolArgs);
@@ -137,13 +137,14 @@ async function executeAndStoreTool({
 
   try {
     // Resolve image params: look up action schema, replace media refs with actual content blocks
-    const action = llmConfig.actions.find(a => a.name === toolName);
-    const resolvedArgs = action
-      ? resolveImageArgs(action.parameters, toolArgs, mediaRegistry)
+    const tool = await toolRuntime.getTool(toolName);
+    const resolvedArgs = tool
+      ? resolveImageArgs(tool.parameters, toolArgs, mediaRegistry)
       : toolArgs;
 
-    const functionResponse = await executeActionFn(toolName, context, resolvedArgs, {
-      toolCallId: toolCall.id, actionResolver, llmClient: actionLlmClient, agentDepth,
+    const functionResponse = await toolRuntime.executeTool(toolName, context, resolvedArgs, {
+      toolCallId: toolCall.id,
+      agentDepth,
     });
     log.debug("response", functionResponse);
 
@@ -222,9 +223,10 @@ async function executeAndStoreTool({
  */
 async function processLlmResponse({ session, llmConfig, messages, mediaRegistry, hooks: userHooks, maxDepth, agentDepth, runConfig }) {
   const { chatId, senderIds, addMessage } = session;
-  const { llmClient, chatModel, actions } = llmConfig;
+  const { llmClient, chatModel, toolRuntime } = llmConfig;
   const maxToolCallDepth = maxDepth ?? MAX_TOOL_CALL_DEPTH;
   const workdir = runConfig?.workdir ?? null;
+  const tools = toolRuntime.listTools();
   /** @type {Required<AgentIOHooks>} */
   const hooks = { ...NO_OP_HOOKS, ...userHooks };
   let { systemPrompt } = llmConfig;
@@ -247,7 +249,7 @@ async function processLlmResponse({ session, llmConfig, messages, mediaRegistry,
       model: chatModel,
       systemPrompt,
       messages,
-      tools: actionsToToolDefinitions(actions, mediaRegistry.size > 0),
+      tools: actionsToToolDefinitions(tools, mediaRegistry.size > 0),
       mediaRegistry,
     });
 
@@ -309,7 +311,7 @@ async function processLlmResponse({ session, llmConfig, messages, mediaRegistry,
       messages.push(assistantMessage);
       const storedAssistant = await addMessage(chatId, assistantMessage, senderIds);
       if (depth === 0) {
-        storeLlmContext(getRootDb(), storedAssistant.message_id, chatModel, systemPrompt, messages, actions);
+        storeLlmContext(getRootDb(), storedAssistant.message_id, chatModel, systemPrompt, messages, tools);
       }
       return result;
     }
@@ -324,15 +326,15 @@ async function processLlmResponse({ session, llmConfig, messages, mediaRegistry,
         name: toolCall.name,
         arguments: toolCall.arguments,
       });
-      const action = actions.find(a => a.name === toolCall.name);
-      const handle = await hooks.onToolCall(toolCall, action?.formatToolCall);
-      toolCallState.set(toolCall.id, { handle: handle ?? undefined, formatToolCall: action?.formatToolCall });
+      const tool = tools.find((entry) => entry.name === toolCall.name);
+      const handle = await hooks.onToolCall(toolCall, tool?.formatToolCall);
+      toolCallState.set(toolCall.id, { handle: handle ?? undefined, formatToolCall: tool?.formatToolCall });
     }
 
     messages.push(assistantMessage);
     const storedAssistantWithTools = await addMessage(chatId, assistantMessage, senderIds);
     if (depth === 0) {
-      storeLlmContext(getRootDb(), storedAssistantWithTools.message_id, chatModel, systemPrompt, messages, actions);
+      storeLlmContext(getRootDb(), storedAssistantWithTools.message_id, chatModel, systemPrompt, messages, tools);
     }
 
     // Insert stubs for each tool call (timestamps anchored to assistant message)
@@ -361,9 +363,9 @@ async function processLlmResponse({ session, llmConfig, messages, mediaRegistry,
     for (const toolCall of response.toolCalls) {
       const name = toolCall.name;
       if (injectedActions.has(name)) continue;
-      const action = actions.find(a => a.name === name);
-      if (action?.instructions) {
-        systemPrompt += `\n\n## ${action.name} instructions\n${action.instructions}`;
+      const tool = tools.find((entry) => entry.name === name);
+      if (tool?.instructions) {
+        systemPrompt += `\n\n## ${tool.name} instructions\n${tool.instructions}`;
         injectedActions.add(name);
       }
     }

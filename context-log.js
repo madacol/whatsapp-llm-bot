@@ -45,14 +45,14 @@ export function sanitizeMessagesForLog(messages) {
  * @param {string} model
  * @param {string} systemPrompt
  * @param {Message[]} messages
- * @param {Action[]} actions
+ * @param {ToolDescriptor[]} tools
  */
-export async function storeLlmContext(db, messageId, model, systemPrompt, messages, actions) {
+export async function storeLlmContext(db, messageId, model, systemPrompt, messages, tools) {
   const llmContext = {
     model,
     system_prompt: systemPrompt,
     messages: sanitizeMessagesForLog(messages),
-    tools: actions.map(a => a.name),
+    tools: tools.map((tool) => tool.name),
   };
   try {
     await db.sql`UPDATE messages SET llm_context = ${JSON.stringify(llmContext)}
