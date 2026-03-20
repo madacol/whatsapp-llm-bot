@@ -3,7 +3,7 @@
  */
 
 import { NO_OP_HOOKS } from "./native.js";
-import { buildCodexExecArgs, extractCodexText, startCodexRun } from "./codex-runner.js";
+import { extractCodexText, startCodexRun } from "./codex-runner.js";
 import { getRootDb } from "../db.js";
 import { handleHarnessSessionCommand } from "./session-commands.js";
 export { buildCodexExecArgs } from "./codex-runner.js";
@@ -26,6 +26,12 @@ const SANDBOX_MODES = new Set(["read-only", "workspace-write", "danger-full-acce
 
 /** @type {Set<NonNullable<HarnessRunConfig["approvalPolicy"]>>} */
 const APPROVAL_POLICIES = new Set(["untrusted", "on-request", "never"]);
+
+/** @type {Array<{ id: string, label: string }>} */
+const CODEX_MODEL_OPTIONS = [
+  { id: "gpt-5-codex", label: "GPT-5 Codex" },
+  { id: "gpt-5.3-codex", label: "GPT-5.3 Codex" },
+];
 
 /**
  * @typedef {{
@@ -96,6 +102,14 @@ function getCodexSessionId(session) {
 }
 
 /**
+ * @param {string} value
+ * @returns {boolean}
+ */
+function isSelectableCodexModel(value) {
+  return CODEX_MODEL_OPTIONS.some((option) => option.id === value);
+}
+
+/**
  * @param {string} chatId
  * @param {string} arg
  * @returns {Promise<string>}
@@ -104,6 +118,9 @@ async function handleModelCommand(chatId, arg) {
   if (arg === "off" || arg === "default" || arg === "none") {
     await updateHarnessConfig(chatId, { model: null });
     return "Codex model reset to default.";
+  }
+  if (!isSelectableCodexModel(arg)) {
+    return `Unknown Codex model \`${arg}\`. Run \`/model\` to choose one of: ${CODEX_MODEL_OPTIONS.map((option) => option.id).join(", ")}`;
   }
   await updateHarnessConfig(chatId, { model: arg });
   return `Codex model set to \`${arg}\``;
@@ -170,9 +187,25 @@ async function handleCodexHarnessCommand(input, cancelActiveQuery) {
       await input.context.reply("tool-result", await handleModelCommand(input.chatId, arg.toLowerCase()));
       return true;
     }
+
     const config = await getHarnessConfig(input.chatId);
-    const currentModel = typeof config.model === "string" ? config.model : "default";
-    await input.context.reply("tool-result", `Codex model: \`${currentModel}\``);
+    const currentModel = typeof config.model === "string" && isSelectableCodexModel(config.model)
+      ? config.model
+      : undefined;
+    /** @type {SelectOption[]} */
+    const modelSelectOptions = [
+      ...CODEX_MODEL_OPTIONS.map((option) => ({ id: option.id, label: option.label })),
+      { id: "off", label: "Default" },
+    ];
+    const modelChoice = await input.context.select("Choose Codex model", modelSelectOptions, {
+      currentId: currentModel,
+    });
+    if (modelChoice && modelChoice !== currentModel) {
+      await handleModelCommand(input.chatId, modelChoice);
+    }
+    const updatedConfig = await getHarnessConfig(input.chatId);
+    const finalModel = typeof updatedConfig.model === "string" ? updatedConfig.model : "default";
+    await input.context.reply("tool-result", `Codex model: \`${finalModel}\``);
     return true;
   }
 
