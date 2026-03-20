@@ -13,6 +13,7 @@ import { errorToString, formatTime, isHtmlContent } from "../utils.js";
 import { createLogger } from "../logger.js";
 import { buildAgentIoHooks } from "./build-agent-io-hooks.js";
 import { buildHarnessRunRequest } from "./build-harness-run-request.js";
+import { buildRunConfig } from "./build-run-config.js";
 
 const log = createLogger("conversation:runner");
 
@@ -208,7 +209,7 @@ export function createConversationRunner({ store, llmClient, getActionsFn, execu
     await sendComposing();
 
     try {
-      const hooks = buildAgentIoHooks(context, sendComposing, chatInfo?.harness_cwd ?? null);
+      const hooks = buildAgentIoHooks(context, sendComposing, buildRunConfig(chatId, chatInfo).workdir ?? null);
       runCoordinator.markRunActive(chatId);
 
       const runRequest = await buildHarnessRunRequest({

@@ -102,12 +102,17 @@ function extractCommandText(item) {
  * @returns {string}
  */
 function unwrapShellCommand(command) {
-  const match = command.match(/^(?:(?:\/usr\/bin\/env)\s+)?(?:\/bin\/)?(?:zsh|bash|sh)\s+-lc\s+(['"])([\s\S]*)\1$/);
+  const match = command.match(
+    /^(?:(?:\/usr\/bin\/env)\s+)?(?:\/bin\/)?(?:zsh|bash|sh)\s+-lc(?:\s+(['"])([\s\S]*)\1|\s+([\s\S]+))$/,
+  );
   if (!match) {
     return command;
   }
   const quote = match[1];
-  const inner = match[2];
+  const inner = match[2] ?? match[3] ?? "";
+  if (!quote) {
+    return inner;
+  }
   if (quote === "\"") {
     return inner.replace(/\\"/g, "\"").replace(/\\\\/g, "\\");
   }

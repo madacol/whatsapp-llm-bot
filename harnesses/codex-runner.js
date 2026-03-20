@@ -162,6 +162,11 @@ export async function startCodexRun(input, deps = {}) {
         }
 
         if (normalized.toolEvent) {
+          const currentSummary = getCodexToolSummary(
+            normalized.toolEvent.name,
+            normalized.toolEvent.arguments,
+            input.runConfig?.workdir ?? null,
+          );
           if (normalized.toolEvent.status === "started") {
             const toolCall = {
               id: normalized.toolEvent.id,
@@ -170,23 +175,41 @@ export async function startCodexRun(input, deps = {}) {
             };
             const handle = await hooks.onToolCall(toolCall);
             if (handle) {
-              const summary = getCodexToolSummary(
-                normalized.toolEvent.name,
-                normalized.toolEvent.arguments,
-                input.runConfig?.workdir ?? null,
-              );
               activeTools.set(normalized.toolEvent.id, {
                 handle,
-                summary,
+                summary: currentSummary,
                 toolName: normalized.toolEvent.name,
               });
             }
           } else {
-            const activeTool = activeTools.get(normalized.toolEvent.id);
+            let activeTool = activeTools.get(normalized.toolEvent.id);
+            if (!activeTool) {
+              const toolCall = {
+                id: normalized.toolEvent.id,
+                name: normalized.toolEvent.name,
+                arguments: JSON.stringify(normalized.toolEvent.arguments),
+              };
+              const handle = await hooks.onToolCall(toolCall);
+              if (handle) {
+                activeTool = {
+                  handle,
+                  summary: currentSummary,
+                  toolName: normalized.toolEvent.name,
+                };
+              }
+            }
+            if (activeTool && activeTool.summary !== currentSummary) {
+              try {
+                await activeTool.handle.edit(currentSummary);
+              } catch {
+                // best-effort — inspect still works without an in-place update
+              }
+              activeTool.summary = currentSummary;
+            }
             if (activeTool && normalized.toolEvent.output) {
               registerInspectHandler(
                 activeTool.handle,
-                activeTool.summary,
+                currentSummary,
                 createToolMessage(normalized.toolEvent.id, normalized.toolEvent.output),
                 activeTool.toolName,
               );
