@@ -234,6 +234,27 @@ describe("LLM pipeline via createMessageHandler", () => {
     );
   });
 
+  it("delegates codex harness commands through handleCommand", async () => {
+    await seedChat("pipe-slash-codex", { enabled: true });
+    await db.sql`
+      UPDATE chats
+      SET harness = 'codex',
+          harness_config = '{}'::jsonb
+      WHERE chat_id = 'pipe-slash-codex'
+    `;
+
+    const { context, responses } = createChatTurn({
+      chatId: "pipe-slash-codex",
+      content: [{ type: "text", text: "/model gpt-5.4-codex" }],
+    });
+    await handleMessage(context);
+
+    assert.ok(
+      responses.some(r => r.text.includes("Codex model set")),
+      "Expected slash command to be delegated to the codex harness",
+    );
+  });
+
   it("clears harness sessions through the active harness command surface", async () => {
     await seedChat("pipe-slash-clear", { enabled: true });
     await db.sql`

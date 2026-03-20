@@ -3,6 +3,7 @@
  */
 
 import { createNativeHarness } from "./native.js";
+import { createCodexHarness } from "./codex.js";
 
 /** @type {Map<string, () => AgentHarness>} */
 const registry = new Map();
@@ -12,6 +13,7 @@ const instances = new Map();
 
 // Register the native harness by default
 registry.set("native", createNativeHarness);
+registry.set("codex", createCodexHarness);
 
 /** @type {HarnessCapabilities} */
 const DEFAULT_HARNESS_CAPABILITIES = {
