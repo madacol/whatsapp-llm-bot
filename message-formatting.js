@@ -115,19 +115,32 @@ export function resolveImageArgs(schema, args, mediaRegistry) {
 
 /**
  * Decide whether the bot should respond to a message.
+ * Supports the new TurnFacts shape and the previous transport-shaped arguments.
  * @param {import("./store.js").ChatRow | undefined} chatInfo
- * @param {boolean} isGroup
- * @param {IncomingContentBlock[]} content
- * @param {string[]} selfIds
- * @param {string | undefined} quotedSenderId
+ * @param {TurnFacts | boolean} factsOrIsGroup
+ * @param {IncomingContentBlock[]} [content]
+ * @param {string[]} [selfIds]
+ * @param {string | undefined} [quotedSenderId]
  * @returns {boolean}
  */
-export function shouldRespond(chatInfo, isGroup, content, selfIds, quotedSenderId) {
+export function shouldRespond(chatInfo, factsOrIsGroup, content, selfIds, quotedSenderId) {
   if (!chatInfo?.is_enabled) {
     return false;
   }
 
-  if (!isGroup) {
+  /** @type {TurnFacts} */
+  const facts = typeof factsOrIsGroup === "object"
+    ? factsOrIsGroup
+    : {
+        isGroup: factsOrIsGroup,
+        addressedToBot: !!content?.some((contentPart) =>
+          contentPart.type === "text"
+            && (selfIds ?? []).some((selfId) => contentPart.text.includes(`@${selfId}`))),
+        repliedToBot: quotedSenderId != null && (selfIds ?? []).includes(quotedSenderId),
+        quotedSenderId,
+      };
+
+  if (!facts.isGroup) {
     return true;
   }
 
@@ -137,32 +150,26 @@ export function shouldRespond(chatInfo, isGroup, content, selfIds, quotedSenderI
     return true;
   }
 
-  const isMentioned = content.some(contentPart =>
-    contentPart.type === "text"
-      && selfIds.some(selfId => contentPart.text.includes('@' + selfId))
-  );
-  if (isMentioned) {
+  if (facts.addressedToBot) {
     return true;
   }
 
-  if (mode === "mention+reply" && quotedSenderId) {
-    const isReplyToBot = selfIds.includes(quotedSenderId);
-    if (isReplyToBot) {
-      return true;
-    }
+  if (mode === "mention+reply" && facts.repliedToBot) {
+    return true;
   }
 
   return false;
 }
 
 /**
- * Format a user message with timestamp and (for groups) sender name + mention stripping.
+ * Format a user message with timestamp and (for groups) sender name.
+ * Bot mention stripping now happens during transport normalization.
  * Returns the formatted text and an optional system prompt suffix.
  * @param {TextContentBlock} firstBlock
  * @param {boolean} isGroup
  * @param {string} senderName
  * @param {string} time
- * @param {string[]} selfIds
+ * @param {string[]} [selfIds]
  * @returns {{ formattedText: string, systemPromptSuffix: string }}
  */
 export function formatUserMessage(firstBlock, isGroup, senderName, time, selfIds) {
@@ -170,10 +177,10 @@ export function formatUserMessage(firstBlock, isGroup, senderName, time, selfIds
   let systemPromptSuffix = "";
 
   if (isGroup) {
-    // Remove mention of self from start of message
-    const mentionPattern = new RegExp(`^@(${selfIds.join("|")}) *`, "g");
-    const cleanedContent = firstBlock.text.replace(mentionPattern, "");
-    formattedText = `[${time}] ${senderName}: ${cleanedContent}`;
+    const cleanedText = selfIds && selfIds.length > 0
+      ? firstBlock.text.replace(new RegExp(`^@(${selfIds.join("|")}) *`, "g"), "")
+      : firstBlock.text;
+    formattedText = `[${time}] ${senderName}: ${cleanedText}`;
     systemPromptSuffix = `\n\nYou are in a group chat`;
   } else {
     formattedText = `[${time}] ${firstBlock.text}`;

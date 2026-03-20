@@ -152,18 +152,43 @@ type ConfirmHooks = {
   onResolved?: (msgKey: { id: string; remoteJid: string }, confirmed: boolean) => Promise<void>;
 };
 
-type IncomingContext = {
-  // Message data
+type TurnIO = {
+  send: (source: MessageSource, content: SendContent) => Promise<MessageHandle | undefined>;
+  reply: (source: MessageSource, content: SendContent) => Promise<MessageHandle | undefined>;
+  select: (question: string, options: SelectOption[], config?: SelectConfig) => Promise<string>;
+  confirm: (message: string, hooks?: ConfirmHooks) => Promise<boolean>;
+  react: (emoji: string) => Promise<void>;
+  setWorking: (working: boolean) => Promise<void>;
+  getIsAdmin: () => Promise<boolean>;
+};
+
+type TurnFacts = {
+  isGroup: boolean;
+  addressedToBot: boolean;
+  repliedToBot: boolean;
+  quotedSenderId?: string;
+};
+
+type ChatTransport = {
+  start: (onTurn: (turn: ChatTurn) => Promise<void>) => Promise<void>;
+  stop: () => Promise<void>;
+  sendText: (chatId: string, text: string) => Promise<void>;
+};
+
+type ChatTurn = {
   chatId: string;
   senderIds: string[];
   senderName: string;
   content: IncomingContentBlock[];
-  isGroup: boolean;
   timestamp: Date;
-  /** The sender ID of a quoted/replied-to message, if present (without @s.whatsapp.net suffix). */
-  quotedSenderId?: string;
+  facts: TurnFacts;
+  io: TurnIO;
+};
 
-  // High-level actions scoped to this message
+type IncomingContext = ChatTurn & {
+  // Compatibility aliases retained for tests and legacy helpers.
+  isGroup: boolean;
+  quotedSenderId?: string;
   getIsAdmin: () => Promise<boolean>;
   reactToMessage: (emoji: string) => Promise<void>;
   select: (question: string, options: SelectOption[], config?: SelectConfig) => Promise<string>;
@@ -171,8 +196,6 @@ type IncomingContext = {
   reply: (source: MessageSource, content: SendContent) => Promise<MessageHandle | undefined>;
   confirm: (message: string, hooks?: ConfirmHooks) => Promise<boolean>;
   sendPresenceUpdate: (presence: "composing" | "paused") => Promise<void>;
-
-  // Bot info
   selfIds: string[];
   selfName: string;
 };
