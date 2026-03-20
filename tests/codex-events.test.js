@@ -116,6 +116,20 @@ describe("codex events", () => {
         status: "started",
       },
     });
+
+    assert.deepEqual(normalizeCodexEvent({
+      type: "item.started",
+      item: {
+        type: "command_execution",
+        command: "/bin/zsh -lc pwd",
+      },
+    }), {
+      sessionId: null,
+      commandEvent: {
+        command: "pwd",
+        status: "started",
+      },
+    });
   });
 
   it("normalizes nested usage on turn completion", () => {
