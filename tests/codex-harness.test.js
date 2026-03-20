@@ -40,7 +40,7 @@ describe("createCodexHarness", () => {
     const replies = [];
     const handled = await harness.handleCommand({
       chatId: "codex-chat-1",
-      command: "model gpt-5-codex",
+      command: "model gpt-5.4",
       context: /** @type {ExecuteActionContext} */ ({
         chatId: "codex-chat-1",
         senderIds: [],
@@ -94,6 +94,8 @@ describe("createCodexHarness", () => {
 
     assert.equal(handled, true);
     assert.deepEqual(selectedOptions, [
+      { id: "gpt-5.4", label: "GPT-5.4" },
+      { id: "gpt-5.4-mini", label: "GPT-5.4 Mini" },
       { id: "gpt-5-codex", label: "GPT-5 Codex" },
       { id: "gpt-5.3-codex", label: "GPT-5.3 Codex" },
       { id: "off", label: "Default" },
