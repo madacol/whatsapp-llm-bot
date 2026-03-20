@@ -49,6 +49,29 @@ describe("wrapHooksWithFallbacks", () => {
     assert.equal(result, undefined);
   });
 
+  it("onToolCall passes the display context through to the underlying hook", async () => {
+    /** @type {unknown[]} */
+    let captured = [];
+    const hooks = wrapHooksWithFallbacks({
+      ...NO_OP_HOOKS,
+      onToolCall: async (toolCall, formatToolCall, context) => {
+        captured = [toolCall, formatToolCall, context];
+      },
+    });
+
+    await hooks.onToolCall(
+      { id: "t1", name: "Write", arguments: "{}" },
+      undefined,
+      { oldContent: "before\n" },
+    );
+
+    assert.deepEqual(captured, [
+      { id: "t1", name: "Write", arguments: "{}" },
+      undefined,
+      { oldContent: "before\n" },
+    ]);
+  });
+
   it("onLlmResponse suppresses error without crashing", async () => {
     const hooks = wrapHooksWithFallbacks({
       ...NO_OP_HOOKS,

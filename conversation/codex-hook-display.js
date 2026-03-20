@@ -1,4 +1,4 @@
-import { getToolCallSummary, langFromPath, shortenPath } from "../tool-display.js";
+import { formatActivitySummary, getToolCallSummary, langFromPath, shortenPath } from "../tool-display.js";
 import { createToolMessage, registerInspectHandler } from "../utils.js";
 
 /**
@@ -121,8 +121,10 @@ export function createCodexDisplayHooks({ context, cwd, displayToolCall }) {
       return;
     }
 
-    const body = paths.map((filePath) => `\`${shortenPath(filePath, cwd)}\``).join("\n");
-    await context.send("tool-call", [{ type: "markdown", text: `*Read file*\n\n${body}` }]);
+    await context.send("tool-call", formatActivitySummary({
+      title: "Explored",
+      lines: paths.map((filePath) => `Read \`${shortenPath(filePath, cwd)}\``),
+    }));
   }
 
   /**

@@ -136,6 +136,17 @@ describe("formatSdkToolCall", () => {
   it("returns null for unknown tools", () => {
     assert.equal(formatSdkToolCall("MadeUpTool", { x: 1 }), null);
   });
+
+  it("formats read and search tools as semantic activity summaries", () => {
+    assert.equal(
+      formatSdkToolCall("Read", { file_path: "/repo/src/app.js" }, "/repo"),
+      "*Explored*\nRead `src/app.js`",
+    );
+    assert.equal(
+      formatSdkToolCall("Grep", { pattern: "needle", path: "/repo/src" }, "/repo"),
+      "*Searched*\nSearch \"needle\" in `src`",
+    );
+  });
 });
 
 describe("formatToolCallDisplay", () => {
@@ -147,7 +158,7 @@ describe("formatToolCallDisplay", () => {
     const block = /** @type {CodeContentBlock} */ (result[0]);
     assert.equal(block.type, "code");
     assert.equal(block.language, "bash");
-    assert.equal(block.caption, "*Run tests*");
+    assert.equal(block.caption, "*Bash*  _Run tests_");
   });
 
   it("wraps long Bash commands in code block to fit aspect ratio", () => {
@@ -177,7 +188,7 @@ describe("formatToolCallDisplay", () => {
       tc("Edit", { file_path: "/a.xyz", old_string: "foo", new_string: "bar" })
     );
     assert.ok(Array.isArray(result));
-    assert.equal(result[0].type, "text");
+    assert.equal(result[0].type, "diff");
   });
 
   it("always shows bold tool name with args for generic tools", () => {
@@ -187,11 +198,14 @@ describe("formatToolCallDisplay", () => {
     assert.ok(result.includes("doing stuff"), "should include args");
   });
 
-  it("Bash always renders as code block", () => {
-    const result = formatToolCallDisplay(tc("Bash", { command: "ls" }));
+  it("generic Bash commands still render as code blocks", () => {
+    const result = formatToolCallDisplay(tc("Bash", { command: "pwd" }));
     assert.ok(Array.isArray(result));
     assert.equal(result[0].type, "code");
   });
+
+  it("renders classified Bash search commands as semantic activity summaries", () => {
+    const result = formatToolCallDisplay(tc("Bash", { command: "rg -n \"needle\" src" }));
+    assert.equal(result, "*Searched*\nSearch \"needle\" in `src`");
+  });
 });
-
-
