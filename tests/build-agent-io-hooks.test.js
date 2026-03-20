@@ -72,6 +72,8 @@ describe("buildAgentIoHooks", () => {
     await hooks.onFileChange?.({
       path: "/tmp/file.js",
       summary: "Updated file",
+      oldText: "const value = 1;\n",
+      newText: "const value = 2;\n",
       diff: ["--- a/file.js", "+++ b/file.js", "@@ -1 +1 @@", "-old", "+new"].join("\n"),
     });
 
@@ -80,21 +82,69 @@ describe("buildAgentIoHooks", () => {
     assert.equal(sent[0].source, "tool-result");
     const content = /** @type {ToolContentBlock[]} */ (sent[0].content);
     assert.deepEqual(content, [{
-      type: "markdown",
-      text: [
-        "*File changed*",
-        "",
-        "Updated file",
-        "`/tmp/file.js`",
-        "",
-        "```diff",
-        "--- a/file.js",
-        "+++ b/file.js",
-        "@@ -1 +1 @@",
-        "-old",
-        "+new",
-        "```",
-      ].join("\n"),
+      type: "diff",
+      oldStr: "const value = 1;\n",
+      newStr: "const value = 2;\n",
+      language: "javascript",
+      caption: "*File changed*  `/tmp/file.js`\nUpdated file",
     }]);
+  });
+
+  it("registers inspect output for codex file reads", async () => {
+    /** @type {Array<{ callback: ReactionCallback, edits: string[] }>} */
+    const handles = [];
+    const hooks = buildAgentIoHooks(
+      {
+        send: async (_source, _content) => {
+          const entry = {
+            callback: /** @type {ReactionCallback} */ (() => {}),
+            edits: [],
+          };
+          /** @type {ReactionCallback | null} */
+          let reactionCallback = null;
+          const handle = /** @type {MessageHandle} */ ({
+            keyId: `handle-${handles.length + 1}`,
+            isImage: false,
+            edit: async (text) => {
+              entry.edits.push(text);
+            },
+            onReaction: (callback) => {
+              reactionCallback = callback;
+              return () => {};
+            },
+          });
+          entry.callback = (emoji, senderId) => reactionCallback?.(emoji, senderId);
+          handles.push(entry);
+          return handle;
+        },
+        reply: async () => undefined,
+        select: async () => "",
+        confirm: async () => true,
+      },
+      async () => {},
+      null,
+    );
+
+    await hooks.onFileRead?.({
+      command: "sed -n '1,20p' src/app.js",
+      paths: ["src/app.js"],
+    });
+    await hooks.onCommand?.({
+      command: "sed -n '1,20p' src/app.js",
+      status: "completed",
+      output: "  1→ const value = 1;\n  2→ const value = 2;",
+    });
+
+    assert.equal(handles.length, 2);
+    handles[0]?.callback("👁", "user-1");
+    assert.equal(handles[0]?.edits.length, 1);
+    assert.equal(handles[0]?.edits[0], [
+      "*Read*  `src/app.js`",
+      "",
+      "```",
+      "const value = 1;",
+      "const value = 2;",
+      "```",
+    ].join("\n"));
   });
 });
