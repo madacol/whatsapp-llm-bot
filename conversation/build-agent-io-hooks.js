@@ -51,7 +51,7 @@ export function buildAgentIoHooks(context, sendComposing, cwd) {
     onToolError: async (message) => { await context.send("error", message); },
     onCommand: async ({ command, status, output }) => {
       if (status === "started") {
-        return context.send("tool-call", [{ type: "markdown", text: `*Command*\n\`${command}\`` }]);
+        return context.send("tool-call", [{ type: "markdown", text: `*Command*\n\n\`\`\`bash\n${command}\n\`\`\`` }]);
       }
       if (status === "failed") {
         const detail = output ? `\n\n${output}` : "";
@@ -59,7 +59,7 @@ export function buildAgentIoHooks(context, sendComposing, cwd) {
         return;
       }
       if (output) {
-        await context.send("tool-result", [{ type: "markdown", text: `*Command output*\n\`${command}\`\n\n\`\`\`\n${output}\n\`\`\`` }]);
+        await context.send("tool-result", [{ type: "markdown", text: `*Command output*\n\n\`\`\`bash\n${command}\n\`\`\`\n\n\`\`\`\n${output}\n\`\`\`` }]);
       }
     },
     onPlan: async (text) => { await context.reply("llm", [{ type: "markdown", text: `*Plan*\n\n${text}` }]); },
