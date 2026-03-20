@@ -39,7 +39,7 @@ export async function withModelsCache(models, fn) {
 }
 
 /**
- * Create an IncomingContext for testing.
+ * Create a test ChatTurn with legacy IncomingContext compatibility aliases.
  * Default sender is "master-user" (matches process.env.MASTER_ID in tests).
  * @param {Partial<IncomingContext>} [overrides]
  * @returns {{ context: IncomingContext, responses: Array<{type: string, text: string, source?: MessageSource, blockType?: string}> }}
@@ -79,18 +79,10 @@ export function createIncomingContext(overrides = {}) {
     return handle;
   };
 
-  /** @type {IncomingContext} */
-  const context = {
-    chatId: "test-chat",
-    senderIds: ["master-user"],
-    senderName: "Test User",
-    content: [{ type: "text", text: "Hello" }],
-    isGroup: false,
-    timestamp: new Date(),
-    selfIds: ["bot-123"],
-    selfName: "TestBot",
+  /** @type {TurnIO} */
+  const io = {
     getIsAdmin: async () => true,
-    reactToMessage: async (emoji) => {
+    react: async (emoji) => {
       responses.push({ type: "reactToMessage", text: emoji });
     },
     select: async (question, options) => {
@@ -103,11 +95,74 @@ export function createIncomingContext(overrides = {}) {
       responses.push({ type: "confirm", text: message });
       return true;
     },
+    setWorking: async (working) => {
+      responses.push({ type: "sendPresenceUpdate", text: working ? "composing" : "paused" });
+    },
+  };
+
+  /** @type {IncomingContext} */
+  const context = {
+    chatId: "test-chat",
+    senderIds: ["master-user"],
+    senderName: "Test User",
+    content: [{ type: "text", text: "Hello" }],
+    timestamp: new Date(),
+    facts: { isGroup: false, addressedToBot: false, repliedToBot: false },
+    io,
+    isGroup: false,
+    selfIds: ["bot-123"],
+    selfName: "TestBot",
+    getIsAdmin: io.getIsAdmin,
+    reactToMessage: io.react,
+    select: io.select,
+    send: io.send,
+    reply: io.reply,
+    confirm: io.confirm,
     sendPresenceUpdate: async (presence) => {
-      responses.push({ type: "sendPresenceUpdate", text: presence });
+      await io.setWorking(presence === "composing");
     },
     ...overrides,
   };
+
+  const finalIo = {
+    ...io,
+    ...(overrides.io ?? {}),
+    ...(overrides.getIsAdmin && { getIsAdmin: overrides.getIsAdmin }),
+    ...(overrides.send && { send: overrides.send }),
+    ...(overrides.reply && { reply: overrides.reply }),
+    ...(overrides.select && { select: overrides.select }),
+    ...(overrides.confirm && { confirm: overrides.confirm }),
+    ...(overrides.reactToMessage && { react: overrides.reactToMessage }),
+    ...(overrides.sendPresenceUpdate && {
+      setWorking: async (working) => {
+        await overrides.sendPresenceUpdate(working ? "composing" : "paused");
+      },
+    }),
+  };
+
+  const addressedToBot = context.content.some((block) => block.type === "text"
+    && context.selfIds.some((selfId) => block.text.includes(`@${selfId}`)));
+  const repliedToBot = context.quotedSenderId != null && context.selfIds.includes(context.quotedSenderId);
+
+  context.io = finalIo;
+  context.getIsAdmin = finalIo.getIsAdmin;
+  context.reactToMessage = finalIo.react;
+  context.select = finalIo.select;
+  context.send = finalIo.send;
+  context.reply = finalIo.reply;
+  context.confirm = finalIo.confirm;
+  context.sendPresenceUpdate = async (presence) => {
+    await finalIo.setWorking(presence === "composing");
+  };
+
+  if (!overrides.facts) {
+    context.facts = {
+      isGroup: context.isGroup,
+      addressedToBot,
+      repliedToBot,
+      ...(context.quotedSenderId && { quotedSenderId: context.quotedSenderId }),
+    };
+  }
 
   return { context, responses };
 }
@@ -458,6 +513,7 @@ export function createTestHarness({ mockServer, handleMessage, testDb }) {
           responses.push({ type: "confirm", text: msg });
           return result;
         };
+        context.io.confirm = context.confirm;
       }
 
       await handleMessage(context);
@@ -689,4 +745,3 @@ export function createWAMessage(options = {}) {
     pushName: senderName,
   }));
 }
-

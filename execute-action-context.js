@@ -3,21 +3,21 @@
  */
 
 /**
- * Create an ExecuteActionContext from an incoming WhatsApp message.
- * @param {IncomingContext} messageContext
+ * Create an ExecuteActionContext from a normalized chat turn.
+ * @param {ChatTurn} turn
  * @returns {ExecuteActionContext}
  */
-export function createMessageActionContext(messageContext) {
+export function createMessageActionContext(turn) {
   return {
-    chatId: messageContext.chatId,
-    senderIds: messageContext.senderIds,
-    content: messageContext.content,
-    getIsAdmin: messageContext.getIsAdmin,
-    send: messageContext.send,
-    reply: messageContext.reply,
-    reactToMessage: messageContext.reactToMessage,
-    select: messageContext.select,
-    confirm: messageContext.confirm,
+    chatId: turn.chatId,
+    senderIds: turn.senderIds,
+    content: turn.content,
+    getIsAdmin: turn.io.getIsAdmin,
+    send: turn.io.send,
+    reply: turn.io.reply,
+    reactToMessage: turn.io.react,
+    select: turn.io.select,
+    confirm: turn.io.confirm,
   };
 }
 

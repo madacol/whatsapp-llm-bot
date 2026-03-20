@@ -8,7 +8,7 @@ import { getActions, executeAction, getChatActions, getChatAction, getAction } f
 import config from "./config.js";
 import { createLlmClient } from "./llm.js";
 import { formatTime, isHtmlContent, errorToString } from "./utils.js";
-import { connectToWhatsApp } from "./whatsapp-adapter.js";
+import { createWhatsAppTransport } from "./whatsapp-adapter.js";
 import { startReminderDaemon } from "./reminder-daemon.js";
 import { startModelsCacheDaemon } from "./models-cache.js";
 import { initStore } from "./store.js";
@@ -122,7 +122,7 @@ async function displayToolCall(toolCall, context, actionFormatter, cwd, toolCont
 /**
  * Create a message handler with injected dependencies.
  * @param {MessageHandlerDeps} deps
- * @returns {{ handleMessage: (messageContext: IncomingContext) => Promise<void> }}
+ * @returns {{ handleMessage: (turn: ChatTurn) => Promise<void> }}
  */
 export function createMessageHandler({ store, llmClient, getActionsFn, executeActionFn }) {
   const { addMessage, updateToolMessage, createChat, getChat, getMessages, saveHarnessSession, archiveHarnessSession, getHarnessSessionHistory, restoreHarnessSession } = store;
@@ -209,7 +209,7 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
   /**
    * Handle a regular (non-command) message: format, store, and run through the LLM harness.
    * @param {object} opts
-   * @param {IncomingContext} opts.messageContext
+   * @param {ChatTurn} opts.turn
    * @param {import("./store.js").ChatRow | undefined} opts.chatInfo
    * @param {ExecuteActionContext} opts.context
    * @param {Action[]} opts.actions
@@ -217,20 +217,20 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
    * @param {TextContentBlock | undefined} opts.firstBlock
    * @param {boolean} [opts.isSlashCommand]
    */
-  async function handleLlmMessage({ messageContext, chatInfo, context, actions, actionResolver, firstBlock, isSlashCommand }) {
-    const { chatId, senderIds, content, isGroup, senderName, selfIds, quotedSenderId } = messageContext;
+  async function handleLlmMessage({ turn, chatInfo, context, actions, actionResolver, firstBlock, isSlashCommand }) {
+    const { chatId, senderIds, content, senderName, facts } = turn;
 
     // Use data from message context
-    const time = formatTime(messageContext.timestamp);
+    const time = formatTime(turn.timestamp);
 
     // Slash commands always get a response; regular messages check shouldRespond
-    const willRespond = isSlashCommand || shouldRespond(chatInfo, isGroup, content, selfIds, quotedSenderId);
+    const willRespond = isSlashCommand || shouldRespond(chatInfo, facts);
 
     // Format user message text (timestamp, sender name, mention stripping)
     /** @type {string} */
     let systemPromptSuffix = "";
     if (firstBlock) {
-      const formatted = formatUserMessage(firstBlock, isGroup, senderName, time, selfIds);
+      const formatted = formatUserMessage(firstBlock, facts.isGroup, senderName, time);
       firstBlock.text = formatted.formattedText;
       systemPromptSuffix = formatted.systemPromptSuffix;
     }
@@ -262,7 +262,7 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
 
     /** Send "composing" presence, swallowing errors. */
     const sendComposing = async () => {
-      try { await messageContext.sendPresenceUpdate("composing"); }
+      try { await turn.io.setWorking(true); }
       catch (err) { log.debug("Could not send composing signal:", errorToString(err)); }
     };
 
@@ -300,7 +300,7 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
     } finally {
       runCoordinator.finishRun(chatId);
       try {
-        await messageContext.sendPresenceUpdate("paused");
+        await turn.io.setWorking(false);
       } catch (err) {
         log.debug("Could not send paused signal:", errorToString(err));
       }
@@ -309,20 +309,20 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
 
   /**
    * Handle incoming WhatsApp messages — dispatches to command or LLM handler.
-   * @param {IncomingContext} messageContext
+   * @param {ChatTurn} turn
    * @returns {Promise<void>}
    */
-  async function handleMessage(messageContext) {
-    const { chatId, senderIds, content } = messageContext;
+  async function handleMessage(turn) {
+    const { chatId, senderIds, content } = turn;
 
-    log.debug("INCOMING MESSAGE:", JSON.stringify(messageContext, null, 2));
+    log.debug("INCOMING MESSAGE:", JSON.stringify(turn, null, 2));
 
     // Ensure chat exists in DB for both command and message paths
     await createChat(chatId);
 
     const chatInfo = await getChat(chatId);
 
-    const context = createMessageActionContext(messageContext);
+    const context = createMessageActionContext(turn);
 
     // Load actions (global + chat-scoped), filtering out opt-in actions not enabled for this chat.
     // Deduplicate by name — chat-scoped actions override global ones.
@@ -378,7 +378,7 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
       // Not a built-in slash command — fall through to LLM as a skill invocation
     }
 
-    return handleLlmMessage({ messageContext, chatInfo, context, actions, actionResolver, firstBlock, isSlashCommand: !!isSlashCommand });
+      return handleLlmMessage({ turn, chatInfo, context, actions, actionResolver, firstBlock, isSlashCommand: !!isSlashCommand });
   }
 
   return { handleMessage };
@@ -432,13 +432,19 @@ if (!process.env.TESTING) {
 
   await startHtmlServer(config.html_server_port, getRootDb());
 
-  const { closeWhatsapp, sendToChat } = await connectToWhatsApp(handleMessage).catch(async (error) => {
+  const transport = await createWhatsAppTransport().catch(async (error) => {
       log.error("Initialization error:", error);
       await store.closeDb();
       process.exit(1);
     });
 
-  const stopReminders = startReminderDaemon(sendToChat);
+  await transport.start(handleMessage).catch(async (error) => {
+    log.error("Initialization error:", error);
+    await store.closeDb();
+    process.exit(1);
+  });
+
+  const stopReminders = startReminderDaemon(transport.sendText);
   const stopModelsCache = startModelsCacheDaemon();
 
   async function cleanup() {
@@ -450,7 +456,7 @@ if (!process.env.TESTING) {
         log.info(`Shutdown waited on ${waitedOn.length} chat(s): ${waitedOn.join(", ")}`);
       }
       await stopHtmlServer();
-      await closeWhatsapp();
+      await transport.stop();
       await store.closeDb();
     } catch (error) {
       log.error("Error during cleanup:", error);
