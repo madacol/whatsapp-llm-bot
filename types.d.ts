@@ -185,21 +185,6 @@ type ChatTurn = {
   io: TurnIO;
 };
 
-type IncomingContext = ChatTurn & {
-  // Compatibility aliases retained for tests and legacy helpers.
-  isGroup: boolean;
-  quotedSenderId?: string;
-  getIsAdmin: () => Promise<boolean>;
-  reactToMessage: (emoji: string) => Promise<void>;
-  select: (question: string, options: SelectOption[], config?: SelectConfig) => Promise<string>;
-  send: (source: MessageSource, content: SendContent) => Promise<MessageHandle | undefined>;
-  reply: (source: MessageSource, content: SendContent) => Promise<MessageHandle | undefined>;
-  confirm: (message: string, hooks?: ConfirmHooks) => Promise<boolean>;
-  sendPresenceUpdate: (presence: "composing" | "paused") => Promise<void>;
-  selfIds: string[];
-  selfName: string;
-};
-
 // Unified context for message handling
 type ExecuteActionContext = {
   chatId: string;

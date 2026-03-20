@@ -115,30 +115,14 @@ export function resolveImageArgs(schema, args, mediaRegistry) {
 
 /**
  * Decide whether the bot should respond to a message.
- * Supports the new TurnFacts shape and the previous transport-shaped arguments.
  * @param {import("./store.js").ChatRow | undefined} chatInfo
- * @param {TurnFacts | boolean} factsOrIsGroup
- * @param {IncomingContentBlock[]} [content]
- * @param {string[]} [selfIds]
- * @param {string | undefined} [quotedSenderId]
+ * @param {TurnFacts} facts
  * @returns {boolean}
  */
-export function shouldRespond(chatInfo, factsOrIsGroup, content, selfIds, quotedSenderId) {
+export function shouldRespond(chatInfo, facts) {
   if (!chatInfo?.is_enabled) {
     return false;
   }
-
-  /** @type {TurnFacts} */
-  const facts = typeof factsOrIsGroup === "object"
-    ? factsOrIsGroup
-    : {
-        isGroup: factsOrIsGroup,
-        addressedToBot: !!content?.some((contentPart) =>
-          contentPart.type === "text"
-            && (selfIds ?? []).some((selfId) => contentPart.text.includes(`@${selfId}`))),
-        repliedToBot: quotedSenderId != null && (selfIds ?? []).includes(quotedSenderId),
-        quotedSenderId,
-      };
 
   if (!facts.isGroup) {
     return true;
@@ -169,18 +153,14 @@ export function shouldRespond(chatInfo, factsOrIsGroup, content, selfIds, quoted
  * @param {boolean} isGroup
  * @param {string} senderName
  * @param {string} time
- * @param {string[]} [selfIds]
  * @returns {{ formattedText: string, systemPromptSuffix: string }}
  */
-export function formatUserMessage(firstBlock, isGroup, senderName, time, selfIds) {
+export function formatUserMessage(firstBlock, isGroup, senderName, time) {
   let formattedText;
   let systemPromptSuffix = "";
 
   if (isGroup) {
-    const cleanedText = selfIds && selfIds.length > 0
-      ? firstBlock.text.replace(new RegExp(`^@(${selfIds.join("|")}) *`, "g"), "")
-      : firstBlock.text;
-    formattedText = `[${time}] ${senderName}: ${cleanedText}`;
+    formattedText = `[${time}] ${senderName}: ${firstBlock.text}`;
     systemPromptSuffix = `\n\nYou are in a group chat`;
   } else {
     formattedText = `[${time}] ${firstBlock.text}`;

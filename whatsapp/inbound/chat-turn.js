@@ -159,7 +159,7 @@ export function createTurnIo({
 }
 
 /**
- * Normalize a Baileys message into a ChatTurn plus compatibility aliases.
+ * Normalize a Baileys message into a ChatTurn.
  * Returns null when the message should be ignored by the app layer.
  * @param {BaileysMessage} baileysMessage
  * @param {import('@whiskeysockets/baileys').WASocket} sock
@@ -167,7 +167,7 @@ export function createTurnIo({
  * @param {import("../runtime/select-runtime.js").SelectRuntime} selectRuntime
  * @param {import("../runtime/reaction-runtime.js").ReactionRuntime} reactionRuntime
  * @param {(msg: BaileysMessage, type: "buffer", opts: {}) => Promise<Buffer>} [downloadFn]
- * @returns {Promise<IncomingContext | null>}
+ * @returns {Promise<ChatTurn | null>}
  */
 export async function buildIncomingTurn(
   baileysMessage,
@@ -216,7 +216,7 @@ export async function buildIncomingTurn(
     reactionRuntime,
   });
 
-  /** @type {IncomingContext} */
+  /** @type {ChatTurn} */
   const turn = {
     chatId,
     senderIds,
@@ -230,21 +230,6 @@ export async function buildIncomingTurn(
       ...(quotedSenderId && { quotedSenderId }),
     },
     io,
-
-    // Compatibility aliases for existing tests and helper code.
-    isGroup,
-    quotedSenderId,
-    getIsAdmin: io.getIsAdmin,
-    reactToMessage: io.react,
-    select: io.select,
-    send: io.send,
-    reply: io.reply,
-    confirm: io.confirm,
-    sendPresenceUpdate: async (presence) => {
-      await io.setWorking(presence === "composing");
-    },
-    selfIds,
-    selfName: sock.user?.name || "",
   };
 
   return turn;
