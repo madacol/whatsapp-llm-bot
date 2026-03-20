@@ -3,6 +3,10 @@
  * the rest of the bot.
  */
 
+import { extractCodexText, isCodexEventRecord } from "./codex-event-utils.js";
+import { normalizeCodexFileChange } from "./codex-file-events.js";
+export { extractCodexText } from "./codex-event-utils.js";
+
 /**
  * @typedef {{
  *   command: string,
@@ -32,20 +36,12 @@
  */
 
 /**
- * @param {unknown} value
- * @returns {value is Record<string, unknown>}
- */
-function isRecord(value) {
-  return !!value && typeof value === "object" && !Array.isArray(value);
-}
-
-/**
  * Extract a session id from a Codex event when present.
  * @param {unknown} event
  * @returns {string | null}
  */
 export function extractCodexSessionId(event) {
-  if (!isRecord(event)) {
+  if (!isCodexEventRecord(event)) {
     return null;
   }
   if (typeof event.thread_id === "string") {
@@ -54,60 +50,15 @@ export function extractCodexSessionId(event) {
   if (typeof event.session_id === "string") {
     return event.session_id;
   }
-  if (isRecord(event.thread) && typeof event.thread.id === "string") {
+  if (isCodexEventRecord(event.thread) && typeof event.thread.id === "string") {
     return event.thread.id;
   }
-  if (isRecord(event.item) && typeof event.item.thread_id === "string") {
+  if (isCodexEventRecord(event.item) && typeof event.item.thread_id === "string") {
     return event.item.thread_id;
   }
-  if (isRecord(event.item) && isRecord(event.item.thread) && typeof event.item.thread.id === "string") {
+  if (isCodexEventRecord(event.item) && isCodexEventRecord(event.item.thread) && typeof event.item.thread.id === "string") {
     return event.item.thread.id;
   }
-  return null;
-}
-
-/**
- * Best-effort text extraction from Codex event payloads.
- * @param {unknown} value
- * @returns {string | null}
- */
-export function extractCodexText(value) {
-  if (typeof value === "string") {
-    const trimmed = value.trim();
-    if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
-      try {
-        const parsed = JSON.parse(trimmed);
-        const nested = extractCodexText(parsed);
-        if (nested) {
-          return nested;
-        }
-      } catch {
-        // Fall through to the raw string when the payload is not valid JSON.
-      }
-    }
-    return value;
-  }
-  if (Array.isArray(value)) {
-    const parts = value.map(extractCodexText).filter((part) => typeof part === "string" && part.length > 0);
-    return parts.length > 0 ? parts.join("\n") : null;
-  }
-  if (!isRecord(value)) {
-    return null;
-  }
-  for (const key of ["text", "message", "output", "stdout", "stderr", "content", "summary", "details", "error"]) {
-    const nested = extractCodexText(value[key]);
-    if (nested) {
-      return nested;
-    }
-  }
-
-  if (Array.isArray(value.steps)) {
-    const stepText = value.steps.map(extractCodexText).filter((part) => typeof part === "string" && part.length > 0);
-    if (stepText.length > 0) {
-      return stepText.join("\n");
-    }
-  }
-
   return null;
 }
 
@@ -117,7 +68,7 @@ export function extractCodexText(value) {
  * @returns {string | null}
  */
 function extractCommandText(item) {
-  if (!isRecord(item)) {
+  if (!isCodexEventRecord(item)) {
     return null;
   }
   for (const key of ["command", "command_line", "cmd", "input"]) {
@@ -164,96 +115,13 @@ function extractCommandOutput(item) {
  * @param {unknown} item
  * @returns {string | null}
  */
-function extractFilePath(item) {
-  if (!isRecord(item)) {
-    return null;
-  }
-  if (Array.isArray(item.changes)) {
-    const firstChange = item.changes.find(isRecord);
-    if (firstChange && typeof firstChange.path === "string" && firstChange.path.length > 0) {
-      return firstChange.path;
-    }
-  }
-  for (const key of ["path", "file_path", "file"]) {
-    if (typeof item[key] === "string" && item[key].length > 0) {
-      return item[key];
-    }
-  }
-  return null;
-}
-
-/**
- * @param {unknown} item
- * @returns {string | undefined}
- */
-function extractFileSummary(item) {
-  if (!isRecord(item)) {
-    return undefined;
-  }
-  if (Array.isArray(item.changes)) {
-    const parts = item.changes
-      .filter(isRecord)
-      .map((change) => {
-        if (typeof change.path === "string" && typeof change.kind === "string") {
-          return `${change.path} (${change.kind})`;
-        }
-        if (typeof change.path === "string") {
-          return change.path;
-        }
-        return null;
-      })
-      .filter((part) => typeof part === "string" && part.length > 0);
-    if (parts.length > 0) {
-      return parts.join(", ");
-    }
-  }
-  return extractCodexText(item) ?? undefined;
-}
-
-/**
- * @param {unknown} item
- * @returns {string | undefined}
- */
-function extractFileDiff(item) {
-  if (!isRecord(item)) {
-    return undefined;
-  }
-
-  for (const key of ["patch", "diff", "unified_diff"]) {
-    const diffText = extractCodexText(item[key]);
-    if (diffText) {
-      return diffText;
-    }
-  }
-
-  if (Array.isArray(item.changes)) {
-    for (const change of item.changes) {
-      if (!isRecord(change)) {
-        continue;
-      }
-      for (const key of ["patch", "diff", "unified_diff"]) {
-        const diffText = extractCodexText(change[key]);
-        if (diffText) {
-          return diffText;
-        }
-      }
-    }
-  }
-
-  return undefined;
-}
-
-/**
- * @param {unknown} item
- * @returns {string | null}
- */
 function extractPlanText(item) {
-  if (!isRecord(item)) {
+  if (!isCodexEventRecord(item)) {
     return null;
   }
   if (Array.isArray(item.items)) {
     const lines = item.items
-      .filter(isRecord)
+      .filter(isCodexEventRecord)
       .map((entry) => typeof entry.text === "string" ? entry.text : null)
       .filter((text) => typeof text === "string" && text.length > 0);
     if (lines.length > 0) {
@@ -270,7 +138,7 @@ function extractPlanText(item) {
  * @returns {NormalizedCodexEvent | null}
  */
 export function normalizeCodexEvent(event) {
-  if (!isRecord(event)) {
+  if (!isCodexEventRecord(event)) {
     return null;
   }
 
@@ -280,9 +148,9 @@ export function normalizeCodexEvent(event) {
   };
 
   const eventType = typeof event.type === "string" ? event.type : null;
-  const item = isRecord(event.item) ? event.item : null;
+  const item = isCodexEventRecord(event.item) ? event.item : null;
   const itemType = item && typeof item.type === "string" ? item.type : null;
-  const usage = isRecord(event.usage) ? event.usage : null;
+  const usage = isCodexEventRecord(event.usage) ? event.usage : null;
 
   if (eventType === "turn.completed") {
     normalized.usage = {
@@ -349,14 +217,9 @@ export function normalizeCodexEvent(event) {
   }
 
   if (eventType === "item.completed" && (itemType.includes("file") || itemType.includes("patch"))) {
-    const filePath = extractFilePath(item);
-    if (filePath) {
-      const diff = extractFileDiff(item);
-      normalized.fileChange = {
-        path: filePath,
-        summary: extractFileSummary(item),
-        ...(diff ? { diff } : {}),
-      };
+    const fileChange = normalizeCodexFileChange(item);
+    if (fileChange) {
+      normalized.fileChange = fileChange;
     }
     return normalized;
   }
