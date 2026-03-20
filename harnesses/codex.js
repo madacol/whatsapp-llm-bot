@@ -8,6 +8,7 @@ import { createInterface } from "node:readline";
 import path from "node:path";
 import os from "node:os";
 import { NO_OP_HOOKS } from "./native.js";
+import { extractCodexText, normalizeCodexEvent } from "./codex-events.js";
 import { createLogger } from "../logger.js";
 import { errorToString } from "../utils.js";
 import { getRootDb } from "../db.js";
@@ -41,14 +42,6 @@ const APPROVAL_POLICIES = new Set(["untrusted", "on-request", "never"]);
  *   aborted: boolean;
  * }} ActiveCodexRun
  */
-
-/**
- * @param {unknown} value
- * @returns {value is Record<string, unknown>}
- */
-function isRecord(value) {
-  return !!value && typeof value === "object" && !Array.isArray(value);
-}
 
 /**
  * Build the Codex CLI argument vector for a run.
@@ -91,110 +84,6 @@ export function buildCodexExecArgs({ prompt, sessionId, runConfig, outputLastMes
 }
 
 /**
- * Extract a session id from a Codex event when present.
- * @param {unknown} event
- * @returns {string | null}
- */
-export function extractCodexSessionId(event) {
-  if (!isRecord(event)) {
-    return null;
-  }
-  if (typeof event.thread_id === "string") {
-    return event.thread_id;
-  }
-  if (typeof event.session_id === "string") {
-    return event.session_id;
-  }
-  if (isRecord(event.thread) && typeof event.thread.id === "string") {
-    return event.thread.id;
-  }
-  if (isRecord(event.item) && typeof event.item.thread_id === "string") {
-    return event.item.thread_id;
-  }
-  if (isRecord(event.item) && isRecord(event.item.thread) && typeof event.item.thread.id === "string") {
-    return event.item.thread.id;
-  }
-  return null;
-}
-
-/**
- * Best-effort text extraction from Codex event payloads.
- * @param {unknown} value
- * @returns {string | null}
- */
-export function extractCodexText(value) {
-  if (typeof value === "string") {
-    return value;
-  }
-  if (Array.isArray(value)) {
-    const parts = value.map(extractCodexText).filter((part) => typeof part === "string" && part.length > 0);
-    return parts.length > 0 ? parts.join("\n") : null;
-  }
-  if (!isRecord(value)) {
-    return null;
-  }
-  for (const key of ["text", "message", "output", "stdout", "stderr", "content", "summary", "details"]) {
-    const nested = extractCodexText(value[key]);
-    if (nested) {
-      return nested;
-    }
-  }
-
-  if (Array.isArray(value.steps)) {
-    const stepText = value.steps.map(extractCodexText).filter((part) => typeof part === "string" && part.length > 0);
-    if (stepText.length > 0) {
-      return stepText.join("\n");
-    }
-  }
-
-  return null;
-}
-
-/**
- * Build a short display string for command events.
- * @param {unknown} item
- * @returns {string | null}
- */
-function extractCommandText(item) {
-  if (!isRecord(item)) {
-    return null;
-  }
-  for (const key of ["command", "command_line", "cmd", "input"]) {
-    if (typeof item[key] === "string" && item[key].length > 0) {
-      return item[key];
-    }
-  }
-  return extractCodexText(item.command) ?? null;
-}
-
-/**
- * Extract output text for command completion/failure events.
- * @param {unknown} item
- * @returns {string | undefined}
- */
-function extractCommandOutput(item) {
-  const text = extractCodexText(item);
-  return text ?? undefined;
-}
-
-/**
- * Extract a file path from a Codex event item when present.
- * @param {unknown} item
- * @returns {string | null}
- */
-function extractFilePath(item) {
-  if (!isRecord(item)) {
-    return null;
-  }
-  for (const key of ["path", "file_path", "file"]) {
-    if (typeof item[key] === "string" && item[key].length > 0) {
-      return item[key];
-    }
-  }
-  return null;
-}
-
-/**
  * Read the generic harness_config JSONB for a chat.
  * @param {string} chatId
  * @returns {Promise<Record<string, unknown>>}
@@ -203,7 +92,7 @@ async function getHarnessConfig(chatId) {
   const db = getRootDb();
   const { rows: [row] } = await db.sql`SELECT harness_config FROM chats WHERE chat_id = ${chatId}`;
   const config = row?.harness_config;
-  return isRecord(config)
+  return config && typeof config === "object" && !Array.isArray(config)
     ? config
     : {};
 }
@@ -488,100 +377,38 @@ export function createCodexHarness() {
     stdout.on("line", (line) => {
       eventQueue = eventQueue.then(async () => {
         try {
-          const parsed = JSON.parse(line);
-          if (!isRecord(parsed)) {
-            return;
-          }
-          const eventType = typeof parsed.type === "string" ? parsed.type : null;
-          const item = isRecord(parsed.item) ? parsed.item : null;
-          const itemType = item && typeof item.type === "string" ? item.type : null;
-
-          const nextSessionId = extractCodexSessionId(parsed);
-          if (nextSessionId) {
-            resolvedSessionId = nextSessionId;
-          }
-
-          if (eventType === "thread.started") {
+          const normalized = normalizeCodexEvent(JSON.parse(line));
+          if (!normalized) {
             return;
           }
 
-          if (eventType === "turn.completed") {
-            if (typeof parsed.input_tokens === "number") {
-              result.usage.promptTokens = parsed.input_tokens;
-            }
-            if (typeof parsed.output_tokens === "number") {
-              result.usage.completionTokens = parsed.output_tokens;
-            }
-            if (typeof parsed.cached_input_tokens === "number") {
-              result.usage.cachedTokens = parsed.cached_input_tokens;
-            }
-            return;
+          if (normalized.sessionId) {
+            resolvedSessionId = normalized.sessionId;
           }
 
-          if (eventType === "turn.failed" || eventType === "error") {
-            failureMessage = extractCodexText(parsed) ?? "Codex run failed.";
-            return;
+          if (normalized.usage) {
+            result.usage = normalized.usage;
           }
 
-          if (!item || !itemType) {
-            return;
+          if (normalized.failureMessage) {
+            failureMessage = normalized.failureMessage;
           }
 
-          if (eventType === "item.started" && itemType === "command_execution") {
-            const command = extractCommandText(item);
-            if (command) {
-              await hooks.onCommand({ command, status: "started" });
-            }
-            return;
+          if (normalized.commandEvent) {
+            await hooks.onCommand(normalized.commandEvent);
           }
 
-          if (eventType === "item.completed" && itemType === "command_execution") {
-            const command = extractCommandText(item);
-            if (command) {
-              await hooks.onCommand({
-                command,
-                status: "completed",
-                output: extractCommandOutput(item),
-              });
-            }
-            return;
+          if (normalized.assistantText) {
+            lastAssistantText = normalized.assistantText;
+            await hooks.onLlmResponse(normalized.assistantText);
           }
 
-          if (eventType === "item.failed" && itemType === "command_execution") {
-            const command = extractCommandText(item) ?? "command";
-            await hooks.onCommand({
-              command,
-              status: "failed",
-              output: extractCommandOutput(item),
-            });
-            return;
+          if (normalized.planText) {
+            await hooks.onPlan(normalized.planText);
           }
 
-          if (eventType === "item.completed" && itemType === "agent_message") {
-            const text = extractCodexText(item);
-            if (text) {
-              lastAssistantText = text;
-              await hooks.onLlmResponse(text);
-            }
-            return;
-          }
-
-          if (eventType === "item.completed" && itemType.includes("plan")) {
-            const text = extractCodexText(item);
-            if (text) {
-              await hooks.onPlan(text);
-            }
-            return;
-          }
-
-          if (eventType === "item.completed" && (itemType.includes("file") || itemType.includes("patch"))) {
-            const filePath = extractFilePath(item);
-            if (filePath) {
-              await hooks.onFileChange({
-                path: filePath,
-                summary: extractCodexText(item) ?? undefined,
-              });
-            }
+          if (normalized.fileChange) {
+            await hooks.onFileChange(normalized.fileChange);
           }
         } catch (error) {
           log.warn("Failed to parse Codex JSON event:", errorToString(error));

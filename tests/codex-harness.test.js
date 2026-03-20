@@ -5,8 +5,6 @@ import { createTestDb, seedChat } from "./helpers.js";
 import {
   buildCodexExecArgs,
   createCodexHarness,
-  extractCodexSessionId,
-  extractCodexText,
 } from "../harnesses/codex.js";
 
 before(async () => {
@@ -106,17 +104,5 @@ describe("buildCodexExecArgs", () => {
       "--output-last-message", "/tmp/final.txt",
       "-",
     ]);
-  });
-});
-
-describe("codex helpers", () => {
-  it("extracts session ids from thread and session fields", () => {
-    assert.equal(extractCodexSessionId({ thread_id: "thread-1" }), "thread-1");
-    assert.equal(extractCodexSessionId({ session_id: "session-1" }), "session-1");
-  });
-
-  it("extracts nested text from event payloads", () => {
-    assert.equal(extractCodexText({ content: [{ text: "hello" }, { text: "world" }] }), "hello\nworld");
-    assert.equal(extractCodexText({ steps: [{ text: "first" }, { text: "second" }] }), "first\nsecond");
   });
 });
