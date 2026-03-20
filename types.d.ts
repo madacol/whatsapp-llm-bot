@@ -346,6 +346,9 @@ type AgentIOHooks = {
   onToolCall?: (toolCall: LlmChatResponse['toolCalls'][0], formatToolCall?: (params: Record<string, any>) => string, context?: { oldContent?: string }) => Promise<MessageHandle | void>;
   onToolResult?: (blocks: ToolContentBlock[], toolName: string, permissions: PermissionFlags) => Promise<void>;
   onToolError?: (error: string) => Promise<void>;
+  onCommand?: (event: { command: string, status: "started" | "completed" | "failed", output?: string }) => Promise<MessageHandle | void>;
+  onPlan?: (text: string) => Promise<void>;
+  onFileChange?: (event: { path: string, summary?: string }) => Promise<void>;
   onContinuePrompt?: () => Promise<boolean>;
   onDepthLimit?: () => Promise<boolean>;
   onUsage?: (cost: string, tokens: { prompt: number; completion: number; cached: number }) => Promise<void>;

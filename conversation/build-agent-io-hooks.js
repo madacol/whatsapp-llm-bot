@@ -49,6 +49,24 @@ export function buildAgentIoHooks(context, sendComposing, cwd) {
     },
     onToolResult: async (blocks) => { await context.send("tool-result", blocks); },
     onToolError: async (message) => { await context.send("error", message); },
+    onCommand: async ({ command, status, output }) => {
+      if (status === "started") {
+        return context.send("tool-call", [{ type: "markdown", text: `*Command*\n\`${command}\`` }]);
+      }
+      if (status === "failed") {
+        const detail = output ? `\n\n${output}` : "";
+        await context.send("error", `Command failed: \`${command}\`${detail}`);
+        return;
+      }
+      if (output) {
+        await context.send("tool-result", [{ type: "markdown", text: `*Command output*\n\`${command}\`\n\n\`\`\`\n${output}\n\`\`\`` }]);
+      }
+    },
+    onPlan: async (text) => { await context.reply("llm", [{ type: "markdown", text: `*Plan*\n\n${text}` }]); },
+    onFileChange: async ({ path, summary }) => {
+      const detail = summary ? `${summary}\n\`${path}\`` : `Changed file: \`${path}\``;
+      await context.send("tool-result", detail);
+    },
     onContinuePrompt: () => context.confirm("React 👍 to continue or 👎 to stop."),
     onDepthLimit: () => context.confirm(
       `⚠️ *Depth limit*\n\nReached maximum tool call depth (${MAX_TOOL_CALL_DEPTH}). React 👍 to continue or 👎 to stop.`,
