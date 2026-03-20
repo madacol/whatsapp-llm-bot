@@ -124,6 +124,8 @@ export function createIncomingContext(overrides = {}) {
     ...overrides,
   };
 
+  const overrideSendPresenceUpdate = overrides.sendPresenceUpdate;
+
   const finalIo = {
     ...io,
     ...(overrides.io ?? {}),
@@ -133,9 +135,9 @@ export function createIncomingContext(overrides = {}) {
     ...(overrides.select && { select: overrides.select }),
     ...(overrides.confirm && { confirm: overrides.confirm }),
     ...(overrides.reactToMessage && { react: overrides.reactToMessage }),
-    ...(overrides.sendPresenceUpdate && {
-      setWorking: async (working) => {
-        await overrides.sendPresenceUpdate(working ? "composing" : "paused");
+    ...(overrideSendPresenceUpdate && {
+      setWorking: async (/** @type {boolean} */ working) => {
+        await overrideSendPresenceUpdate(working ? "composing" : "paused");
       },
     }),
   };
