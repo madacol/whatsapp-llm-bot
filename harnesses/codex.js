@@ -29,6 +29,8 @@ const APPROVAL_POLICIES = new Set(["untrusted", "on-request", "never"]);
 
 /** @type {Array<{ id: string, label: string }>} */
 const CODEX_MODEL_OPTIONS = [
+  { id: "gpt-5.4", label: "GPT-5.4" },
+  { id: "gpt-5.4-mini", label: "GPT-5.4 Mini" },
   { id: "gpt-5-codex", label: "GPT-5 Codex" },
   { id: "gpt-5.3-codex", label: "GPT-5.3 Codex" },
 ];
