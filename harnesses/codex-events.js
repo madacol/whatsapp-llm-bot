@@ -161,6 +161,58 @@ function extractToolResultOutput(result) {
 }
 
 /**
+ * Extract text from collab tool state when possible.
+ * @param {unknown} states
+ * @returns {string | undefined}
+ */
+function extractCollabToolOutput(states) {
+  if (!isCodexEventRecord(states)) {
+    return undefined;
+  }
+
+  const messages = Object.values(states)
+    .filter(isCodexEventRecord)
+    .map((state) => typeof state.message === "string" ? state.message : null)
+    .filter((message) => typeof message === "string" && message.length > 0);
+
+  return messages.length > 0 ? messages.join("\n") : undefined;
+}
+
+/**
+ * @param {string} toolName
+ * @returns {string}
+ */
+function normalizeCollabToolName(toolName) {
+  switch (toolName) {
+    case "wait":
+      return "wait_agent";
+    default:
+      return toolName;
+  }
+}
+
+/**
+ * @param {Record<string, unknown>} item
+ * @returns {Record<string, unknown>}
+ */
+function extractCollabToolArguments(item) {
+  /** @type {Record<string, unknown>} */
+  const args = {};
+
+  if (typeof item.prompt === "string" && item.prompt.length > 0) {
+    args.prompt = item.prompt;
+  }
+  if (Array.isArray(item.receiver_thread_ids) && item.receiver_thread_ids.length > 0) {
+    args.receiver_thread_ids = item.receiver_thread_ids;
+  }
+  if (Array.isArray(item.agents_states) && item.agents_states.length > 0) {
+    args.agents_states = item.agents_states;
+  }
+
+  return args;
+}
+
+/**
  * Extract a file path from a Codex event item when present.
  * @param {unknown} item
  * @returns {string | null}
@@ -279,6 +331,25 @@ export function normalizeCodexEvent(event) {
         ...(isCodexEventRecord(item.error) && typeof item.error.message === "string"
           ? { output: item.error.message }
           : {}),
+      };
+    }
+    return normalized;
+  }
+
+  if (itemType === "collab_tool_call") {
+    const id = typeof item.id === "string" ? item.id : null;
+    const name = typeof item.tool === "string" ? normalizeCollabToolName(item.tool) : null;
+    if (id && name) {
+      normalized.toolEvent = {
+        id,
+        name,
+        arguments: extractCollabToolArguments(item),
+        status: eventType === "item.started"
+          ? "started"
+          : eventType === "item.failed"
+            ? "failed"
+            : "completed",
+        ...(extractCollabToolOutput(item.agents_states) ? { output: extractCollabToolOutput(item.agents_states) } : {}),
       };
     }
     return normalized;

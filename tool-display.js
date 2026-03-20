@@ -105,6 +105,28 @@ export function formatSdkToolCall(name, args, cwd) {
       const desc = typeof args.description === "string" ? args.description : null;
       return desc ? `*Agent*  _${desc}_` : null;
     }
+    case "spawn_agent": {
+      const prompt = typeof args.prompt === "string" ? args.prompt : null;
+      return prompt ? `*spawn_agent*  _${prompt}_` : "*spawn_agent*";
+    }
+    case "send_input": {
+      const message = typeof args.message === "string"
+        ? args.message
+        : typeof args.prompt === "string"
+          ? args.prompt
+          : null;
+      return message ? `*send_input*  _${message}_` : "*send_input*";
+    }
+    case "wait_agent": {
+      return Array.isArray(args.receiver_thread_ids) && args.receiver_thread_ids.length > 0
+        ? `*wait_agent*  _${args.receiver_thread_ids.length} agent${args.receiver_thread_ids.length === 1 ? "" : "s"}_`
+        : "*wait_agent*";
+    }
+    case "close_agent":
+    case "resume_agent":
+    case "update_plan":
+    case "parallel":
+      return `*${name}*`;
     default:
       return null;
   }
@@ -332,5 +354,4 @@ export function formatToolCallDisplay(toolCall, actionFormatter, cwd, context) {
 
   return msg;
 }
-
 

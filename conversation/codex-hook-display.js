@@ -96,13 +96,6 @@ export function createCodexDisplayHooks({ context, cwd, displayToolCall }) {
       await context.send("error", `Command failed: \`${command}\`${detail}`);
       return;
     }
-
-    if (output) {
-      await context.send("tool-result", [{
-        type: "markdown",
-        text: `*Command output*\n\n\`\`\`bash\n${command}\n\`\`\`\n\n\`\`\`\n${output}\n\`\`\``,
-      }]);
-    }
   }
 
   /**
