@@ -281,7 +281,14 @@ export function wrapHooksWithFallbacks(rawHooks) {
     onFileRead: (/** @type {{ command: string, paths: string[] }} */ event) =>
       safeHook("onFileRead", () => rawHooks.onFileRead(event), undefined),
     onPlan: (/** @type {string} */ text) => safeHook("onPlan", () => rawHooks.onPlan(text), undefined),
-    onFileChange: (/** @type {{ path: string, summary?: string, diff?: string, kind?: "add" | "delete" | "update" }} */ event) =>
+    onFileChange: (/** @type {{
+      path: string,
+      summary?: string,
+      diff?: string,
+      kind?: "add" | "delete" | "update",
+      oldText?: string,
+      newText?: string,
+    }} */ event) =>
       safeHook("onFileChange", () => rawHooks.onFileChange(event), undefined),
     onContinuePrompt: () => safeHook("onContinuePrompt", () => rawHooks.onContinuePrompt(), true),
     onDepthLimit: () => safeHook("onDepthLimit", () => rawHooks.onDepthLimit(), false),

@@ -13,7 +13,19 @@ import { analyzeCodexCommand } from "./codex-command-semantics.js";
 /**
  * @typedef {{
  *   handleCommandEvent: (event: { command: string, status: "started" | "completed" | "failed", output?: string }) => Promise<CodexCommandDispatch>,
- *   enrichFileChangeEvent: (event: { path: string, summary?: string, diff?: string, kind?: "add" | "delete" | "update" }) => Promise<{ path: string, summary?: string, diff?: string, kind?: "add" | "delete" | "update" }>,
+ *   enrichFileChangeEvent: (event: {
+ *     path: string,
+ *     summary?: string,
+ *     diff?: string,
+ *     kind?: "add" | "delete" | "update",
+ *   }) => Promise<{
+ *     path: string,
+ *     summary?: string,
+ *     diff?: string,
+ *     kind?: "add" | "delete" | "update",
+ *     oldText?: string,
+ *     newText?: string,
+ *   }>,
  * }} CodexRunState
  */
 
@@ -62,7 +74,14 @@ export function createCodexRunState({ workdir }) {
 
   /**
    * @param {{ path: string, summary?: string, diff?: string, kind?: "add" | "delete" | "update" }} fileChange
-   * @returns {Promise<{ path: string, summary?: string, diff?: string, kind?: "add" | "delete" | "update" }>}
+   * @returns {Promise<{
+   *   path: string,
+   *   summary?: string,
+   *   diff?: string,
+   *   kind?: "add" | "delete" | "update",
+   *   oldText?: string,
+   *   newText?: string,
+   * }>}
    */
   async function enrichFileChangeEvent(fileChange) {
     const absolutePath = resolveCommandPath(fileChange.path);
@@ -80,11 +99,18 @@ export function createCodexRunState({ workdir }) {
     const diff = fileChange.diff
       ?? pending?.diff
       ?? buildFileDiff(fileChange.path, previousText, nextText);
+    const diffContent = diff ? extractUnifiedDiffContent(diff) : null;
     const kind = fileChange.kind ?? pending?.kind ?? inferFileChangeKind(previousText, nextText);
+    const oldText = previousText ?? diffContent?.oldText;
+    const newText = previousText !== nextText
+      ? nextText
+      : diffContent?.newText ?? nextText;
 
     return {
       ...fileChange,
       ...(kind ? { kind } : {}),
+      ...(oldText != null ? { oldText } : {}),
+      ...(newText != null ? { newText } : {}),
       ...(diff ? { diff } : {}),
     };
   }
@@ -151,6 +177,52 @@ function inferFileChangeKind(oldText, newText) {
     return "update";
   }
   return undefined;
+}
+
+/**
+ * Extract approximate before/after text from a unified diff.
+ * This is a fallback when the filesystem does not reflect the change yet.
+ * @param {string} diffText
+ * @returns {{ oldText?: string, newText?: string } | null}
+ */
+function extractUnifiedDiffContent(diffText) {
+  /** @type {string[]} */
+  const oldLines = [];
+  /** @type {string[]} */
+  const newLines = [];
+
+  for (const line of diffText.split("\n")) {
+    if (
+      line.startsWith("--- ")
+      || line.startsWith("+++ ")
+      || line.startsWith("@@ ")
+      || line === "\\ No newline at end of file"
+    ) {
+      continue;
+    }
+    if (line.startsWith("-")) {
+      oldLines.push(line.slice(1));
+      continue;
+    }
+    if (line.startsWith("+")) {
+      newLines.push(line.slice(1));
+      continue;
+    }
+    if (line.startsWith(" ")) {
+      const content = line.slice(1);
+      oldLines.push(content);
+      newLines.push(content);
+    }
+  }
+
+  if (oldLines.length === 0 && newLines.length === 0) {
+    return null;
+  }
+
+  return {
+    ...(oldLines.length > 0 ? { oldText: oldLines.join("\n") + "\n" } : {}),
+    ...(newLines.length > 0 ? { newText: newLines.join("\n") + "\n" } : {}),
+  };
 }
 
 /**

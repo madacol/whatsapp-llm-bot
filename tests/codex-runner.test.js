@@ -184,6 +184,8 @@ describe("startCodexRun", () => {
       path: "src/app.js",
       summary: "src/app.js (update)",
       kind: "update",
+      oldText: "old\n",
+      newText: "new\n",
       diff: ["--- a/src/app.js", "+++ b/src/app.js", "@@", "-old", "+new"].join("\n"),
     }]);
     assert.deepEqual(assistantMessages, ["Applied fix"]);

@@ -349,7 +349,14 @@ type AgentIOHooks = {
   onCommand?: (event: { command: string, status: "started" | "completed" | "failed", output?: string }) => Promise<MessageHandle | void>;
   onPlan?: (text: string) => Promise<void>;
   onFileRead?: (event: { command: string, paths: string[] }) => Promise<void>;
-  onFileChange?: (event: { path: string, summary?: string, diff?: string, kind?: "add" | "delete" | "update" }) => Promise<void>;
+  onFileChange?: (event: {
+    path: string,
+    summary?: string,
+    diff?: string,
+    kind?: "add" | "delete" | "update",
+    oldText?: string,
+    newText?: string,
+  }) => Promise<void>;
   onContinuePrompt?: () => Promise<boolean>;
   onDepthLimit?: () => Promise<boolean>;
   onUsage?: (cost: string, tokens: { prompt: number; completion: number; cached: number }) => Promise<void>;
