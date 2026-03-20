@@ -1,12 +1,15 @@
 import { Codex } from "@openai/codex-sdk";
 import { createLogger } from "../logger.js";
+import { getToolCallSummary } from "../tool-display.js";
+import { createToolMessage, registerInspectHandler } from "../utils.js";
 import { normalizeCodexEvent } from "./codex-events.js";
 import { createCodexRunState } from "./codex-run-state.js";
 
 const log = createLogger("harness:codex-runner");
 
-/** @type {Pick<Required<AgentIOHooks>, "onCommand" | "onFileRead" | "onPlan" | "onFileChange" | "onLlmResponse" | "onToolError" | "onUsage">} */
+/** @type {Pick<Required<AgentIOHooks>, "onToolCall" | "onCommand" | "onFileRead" | "onPlan" | "onFileChange" | "onLlmResponse" | "onToolError" | "onUsage">} */
 const DEFAULT_CODEX_RUN_HOOKS = {
+  onToolCall: async () => {},
   onCommand: async () => {},
   onFileRead: async () => {},
   onPlan: async () => {},
@@ -95,7 +98,7 @@ function isAbortError(error) {
  *   messages: Message[],
  *   sessionId?: string | null,
  *   runConfig?: HarnessRunConfig,
- *   hooks?: Pick<AgentIOHooks, "onCommand" | "onFileRead" | "onPlan" | "onFileChange" | "onLlmResponse" | "onToolError" | "onUsage">,
+ *   hooks?: Pick<AgentIOHooks, "onToolCall" | "onCommand" | "onFileRead" | "onPlan" | "onFileChange" | "onLlmResponse" | "onToolError" | "onUsage">,
  *   isAborted?: () => boolean,
  * }} input
  * @param {CodexRunnerDeps} [deps]
@@ -130,6 +133,8 @@ export async function startCodexRun(input, deps = {}) {
     /** @type {string | null} */
     let failureMessage = null;
     const runState = createCodexRunState({ workdir: input.runConfig?.workdir });
+    /** @type {Map<string, { handle: MessageHandle, summary: string, toolName: string }>} */
+    const activeTools = new Map();
 
     try {
       for await (const event of streamed.events) {
@@ -153,6 +158,42 @@ export async function startCodexRun(input, deps = {}) {
           }
           if (dispatch.command) {
             await hooks.onCommand(dispatch.command);
+          }
+        }
+
+        if (normalized.toolEvent) {
+          if (normalized.toolEvent.status === "started") {
+            const toolCall = {
+              id: normalized.toolEvent.id,
+              name: normalized.toolEvent.name,
+              arguments: JSON.stringify(normalized.toolEvent.arguments),
+            };
+            const handle = await hooks.onToolCall(toolCall);
+            if (handle) {
+              const summary = getCodexToolSummary(
+                normalized.toolEvent.name,
+                normalized.toolEvent.arguments,
+                input.runConfig?.workdir ?? null,
+              );
+              activeTools.set(normalized.toolEvent.id, {
+                handle,
+                summary,
+                toolName: normalized.toolEvent.name,
+              });
+            }
+          } else {
+            const activeTool = activeTools.get(normalized.toolEvent.id);
+            if (activeTool && normalized.toolEvent.output) {
+              registerInspectHandler(
+                activeTool.handle,
+                activeTool.summary,
+                createToolMessage(normalized.toolEvent.id, normalized.toolEvent.output),
+                activeTool.toolName,
+              );
+            }
+            if (activeTool) {
+              activeTools.delete(normalized.toolEvent.id);
+            }
           }
         }
 
@@ -198,4 +239,15 @@ export async function startCodexRun(input, deps = {}) {
   })();
 
   return { abortController, done };
+}
+
+/**
+ * @param {string} name
+ * @param {Record<string, unknown>} args
+ * @param {string | null} cwd
+ * @returns {string}
+ */
+function getCodexToolSummary(name, args, cwd) {
+  const summary = getToolCallSummary(name, args, undefined, cwd);
+  return summary === name ? `*${name}*` : summary;
 }

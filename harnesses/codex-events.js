@@ -17,6 +17,16 @@ export { extractCodexText } from "./codex-event-utils.js";
 
 /**
  * @typedef {{
+ *   id: string,
+ *   name: string,
+ *   arguments: Record<string, unknown>,
+ *   status: "started" | "completed" | "failed",
+ *   output?: string,
+ * }} CodexToolEvent
+ */
+
+/**
+ * @typedef {{
  *   path: string,
  *   summary?: string,
  *   diff?: string,
@@ -32,6 +42,7 @@ export { extractCodexText } from "./codex-event-utils.js";
  *   usage?: HarnessUsage,
  *   failureMessage?: string,
  *   commandEvent?: CodexCommandEvent,
+ *   toolEvent?: CodexToolEvent,
  *   assistantText?: string,
  *   planText?: string,
  *   fileChange?: CodexFileChangeEvent,
@@ -109,8 +120,39 @@ function unwrapShellCommand(command) {
  * @returns {string | undefined}
  */
 function extractCommandOutput(item) {
+  if (isCodexEventRecord(item) && typeof item.aggregated_output === "string") {
+    return item.aggregated_output;
+  }
   const text = extractCodexText(item);
   return text ?? undefined;
+}
+
+/**
+ * Extract text from a completed MCP tool result when possible.
+ * @param {unknown} result
+ * @returns {string | undefined}
+ */
+function extractToolResultOutput(result) {
+  if (!isCodexEventRecord(result)) {
+    return undefined;
+  }
+
+  if (Array.isArray(result.content)) {
+    const textParts = result.content
+      .filter(isCodexEventRecord)
+      .map((block) => typeof block.text === "string" ? block.text : null)
+      .filter((text) => typeof text === "string" && text.length > 0);
+    if (textParts.length > 0) {
+      return textParts.join("\n");
+    }
+  }
+
+  const structured = extractCodexText(result.structured_content);
+  if (structured) {
+    return structured;
+  }
+
+  return undefined;
 }
 
 /**
@@ -211,6 +253,43 @@ export function normalizeCodexEvent(event) {
 
   if (eventType === "item.completed" && itemType === "agent_message") {
     normalized.assistantText = extractCodexText(item) ?? undefined;
+    return normalized;
+  }
+
+  if (itemType === "mcp_tool_call") {
+    const id = typeof item.id === "string" ? item.id : null;
+    const name = typeof item.tool === "string" ? item.tool : null;
+    const args = isCodexEventRecord(item.arguments) ? item.arguments : {};
+    if (id && name) {
+      normalized.toolEvent = {
+        id,
+        name,
+        arguments: args,
+        status: eventType === "item.started"
+          ? "started"
+          : eventType === "item.failed" || (isCodexEventRecord(item.error) && typeof item.error.message === "string")
+            ? "failed"
+            : "completed",
+        ...(extractToolResultOutput(item.result) ? { output: extractToolResultOutput(item.result) } : {}),
+        ...(isCodexEventRecord(item.error) && typeof item.error.message === "string"
+          ? { output: item.error.message }
+          : {}),
+      };
+    }
+    return normalized;
+  }
+
+  if (itemType === "web_search") {
+    const id = typeof item.id === "string" ? item.id : null;
+    const query = typeof item.query === "string" ? item.query : null;
+    if (id && query) {
+      normalized.toolEvent = {
+        id,
+        name: "WebSearch",
+        arguments: { query },
+        status: eventType === "item.started" ? "started" : "completed",
+      };
+    }
     return normalized;
   }
 

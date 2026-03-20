@@ -201,4 +201,92 @@ describe("startCodexRun", () => {
       tokens: { prompt: 11, completion: 7, cached: 3 },
     }]);
   });
+
+  it("surfaces mcp tool calls and wires inspect for text results", async () => {
+    /** @type {LlmChatResponse["toolCalls"]} */
+    const toolCalls = [];
+    /** @type {string[]} */
+    const edits = [];
+    /** @type {ReactionCallback | null} */
+    let reactionCallback = null;
+
+    const started = await startCodexRun({
+      chatId: "codex-chat",
+      prompt: "Continue",
+      messages: [{ role: "user", content: [{ type: "text", text: "Continue" }] }],
+      runConfig: {
+        workdir: "/repo",
+      },
+      hooks: {
+        onToolCall: async (toolCall) => {
+          toolCalls.push(toolCall);
+          return /** @type {MessageHandle} */ ({
+            keyId: "tool-msg-1",
+            isImage: false,
+            edit: async (text) => {
+              edits.push(text);
+            },
+            onReaction: (callback) => {
+              reactionCallback = callback;
+              return () => {};
+            },
+          });
+        },
+      },
+    }, {
+      createCodex: () => ({
+        startThread: () => ({
+          id: "sess-123",
+          runStreamed: async () => ({
+            events: (async function* () {
+              yield {
+                type: "item.started",
+                item: {
+                  id: "tool-1",
+                  type: "mcp_tool_call",
+                  server: "functions",
+                  tool: "spawn_agent",
+                  arguments: { message: "hello" },
+                  status: "in_progress",
+                },
+              };
+              yield {
+                type: "item.completed",
+                item: {
+                  id: "tool-1",
+                  type: "mcp_tool_call",
+                  server: "functions",
+                  tool: "spawn_agent",
+                  arguments: { message: "hello" },
+                  result: {
+                    content: [{ type: "text", text: "agent-pass-2" }],
+                    structured_content: null,
+                  },
+                  status: "completed",
+                },
+              };
+            })(),
+          }),
+        }),
+        resumeThread: () => {
+          throw new Error("resumeThread should not be called");
+        },
+      }),
+    });
+
+    await started.done;
+
+    assert.deepEqual(toolCalls, [{
+      id: "tool-1",
+      name: "spawn_agent",
+      arguments: JSON.stringify({ message: "hello" }),
+    }]);
+
+    reactionCallback?.("👁", "user-1");
+    assert.deepEqual(edits, [[
+      "*spawn_agent*",
+      "",
+      "agent-pass-2",
+    ].join("\n")]);
+  });
 });
