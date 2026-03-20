@@ -1,5 +1,8 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import { buildCodexThreadOptions, startCodexRun } from "../harnesses/codex-runner.js";
 
 describe("buildCodexThreadOptions", () => {
@@ -23,14 +26,20 @@ describe("startCodexRun", () => {
   it("returns streamed assistant text from SDK events", async () => {
     /** @type {string[]} */
     const commands = [];
+    /** @type {Array<{ command: string, paths: string[] }>} */
+    const fileReads = [];
     /** @type {string[]} */
     const plans = [];
-    /** @type {Array<{ path: string, summary?: string }>} */
+    /** @type {Array<{ path: string, summary?: string, diff?: string, kind?: "add" | "delete" | "update" }>} */
     const fileChanges = [];
     /** @type {string[]} */
     const assistantMessages = [];
     /** @type {Array<{ cost: string, tokens: { prompt: number, completion: number, cached: number } }>} */
     const usageEvents = [];
+
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "codex-runner-"));
+    await fs.mkdir(path.join(tempDir, "src"), { recursive: true });
+    await fs.writeFile(path.join(tempDir, "src/app.js"), "old\n", "utf8");
 
     /** @type {import("@openai/codex-sdk").ThreadEvent[]} */
     const events = [
@@ -38,9 +47,28 @@ describe("startCodexRun", () => {
       {
         type: "item.started",
         item: {
-          id: "cmd-1",
+          id: "cmd-read",
           type: "command_execution",
-          command: "pnpm type-check",
+          command: "sed -n '1,20p' src/app.js",
+          aggregated_output: "",
+          status: "in_progress",
+        },
+      },
+      {
+        type: "item.started",
+        item: {
+          id: "cmd-patch",
+          type: "command_execution",
+          command: [
+            "apply_patch <<'PATCH'",
+            "*** Begin Patch",
+            "*** Update File: src/app.js",
+            "@@",
+            "-old",
+            "+new",
+            "*** End Patch",
+            "PATCH",
+          ].join("\n"),
           aggregated_output: "",
           status: "in_progress",
         },
@@ -91,12 +119,15 @@ describe("startCodexRun", () => {
       prompt: "Continue",
       messages: [{ role: "user", content: [{ type: "text", text: "Continue" }] }],
       runConfig: {
-        workdir: "/repo",
+        workdir: tempDir,
         model: "gpt-5.4",
       },
       hooks: {
         onCommand: async ({ command, status }) => {
           commands.push(`${status}:${command}`);
+        },
+        onFileRead: async (event) => {
+          fileReads.push(event);
         },
         onPlan: async (text) => {
           plans.push(text);
@@ -140,15 +171,21 @@ describe("startCodexRun", () => {
 
     assert.equal(observed.prompt, "Continue");
     assert.deepEqual(observed.threadOptions, {
-      workingDirectory: "/repo",
+      workingDirectory: tempDir,
       model: "gpt-5.4",
       skipGitRepoCheck: true,
     });
     assert.equal(observed.signalAborted, false);
     assert.equal(result.sessionId, "sess-123");
-    assert.deepEqual(commands, ["started:pnpm type-check"]);
+    assert.deepEqual(commands, ["started:apply_patch <<'PATCH'\n*** Begin Patch\n*** Update File: src/app.js\n@@\n-old\n+new\n*** End Patch\nPATCH"]);
+    assert.deepEqual(fileReads, [{ command: "sed -n '1,20p' src/app.js", paths: ["src/app.js"] }]);
     assert.deepEqual(plans, ["Step 1\nStep 2"]);
-    assert.deepEqual(fileChanges, [{ path: "src/app.js", summary: "src/app.js (update)" }]);
+    assert.deepEqual(fileChanges, [{
+      path: "src/app.js",
+      summary: "src/app.js (update)",
+      kind: "update",
+      diff: ["--- a/src/app.js", "+++ b/src/app.js", "@@", "-old", "+new"].join("\n"),
+    }]);
     assert.deepEqual(assistantMessages, ["Applied fix"]);
     assert.deepEqual(result.result.response, [{ type: "markdown", text: "Applied fix" }]);
     assert.deepEqual(result.result.usage, {

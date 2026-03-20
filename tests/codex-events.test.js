@@ -118,6 +118,7 @@ describe("codex events", () => {
       fileChange: {
         path: "src/app.js",
         summary: "src/app.js (update)",
+        kind: "update",
         diff: [
           "--- a/src/app.js",
           "+++ b/src/app.js",
