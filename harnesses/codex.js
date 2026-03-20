@@ -4,7 +4,7 @@
 
 import { NO_OP_HOOKS } from "./native.js";
 import { startCodexRun } from "./codex-runner.js";
-import { extractCodexText } from "./codex-events.js";
+import { extractCodexText } from "./codex-event-utils.js";
 import { getCodexAvailableModels } from "./codex-models.js";
 import { getRootDb } from "../db.js";
 import { handleHarnessSessionCommand } from "./session-commands.js";
