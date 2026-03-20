@@ -108,47 +108,45 @@ describe("actionsToToolDefinitions", () => {
 
 describe("shouldRespond", () => {
   it("returns false for disabled or missing chat", () => {
-    assert.equal(shouldRespond({ is_enabled: false }, false, [], [], undefined), false);
-    assert.equal(shouldRespond(undefined, false, [], [], undefined), false);
+    assert.equal(shouldRespond({ is_enabled: false }, { isGroup: false, addressedToBot: false, repliedToBot: false }), false);
+    assert.equal(shouldRespond(undefined, { isGroup: false, addressedToBot: false, repliedToBot: false }), false);
   });
 
   it("returns true for enabled private chat", () => {
     assert.equal(
-      shouldRespond({ is_enabled: true }, false, [{ type: "text", text: "hi" }], ["bot"], undefined),
+      shouldRespond({ is_enabled: true }, { isGroup: false, addressedToBot: false, repliedToBot: false }),
       true,
     );
   });
 
   it("respond_on=any: responds to every group message", () => {
     assert.equal(
-      shouldRespond({ is_enabled: true, respond_on: "any" }, true, [{ type: "text", text: "hello everyone" }], ["bot-123"], undefined),
+      shouldRespond({ is_enabled: true, respond_on: "any" }, { isGroup: true, addressedToBot: false, repliedToBot: false }),
       true,
     );
   });
 
   it("respond_on=mention: responds only when bot is @-mentioned", () => {
     const chat = { is_enabled: true, respond_on: "mention" };
-    const selfIds = ["bot-123", "alt-id"];
     // Mentioned → true
-    assert.equal(shouldRespond(chat, true, [{ type: "text", text: "@bot-123 hello" }], selfIds, undefined), true);
-    assert.equal(shouldRespond(chat, true, [{ type: "text", text: "hey @alt-id" }], selfIds, undefined), true);
+    assert.equal(shouldRespond(chat, { isGroup: true, addressedToBot: true, repliedToBot: false }), true);
+    assert.equal(shouldRespond(chat, { isGroup: true, addressedToBot: true, repliedToBot: false }), true);
     // Not mentioned → false
-    assert.equal(shouldRespond(chat, true, [{ type: "text", text: "hello everyone" }], selfIds, undefined), false);
+    assert.equal(shouldRespond(chat, { isGroup: true, addressedToBot: false, repliedToBot: false }), false);
     // Reply to bot but no mention → false (mention-only mode)
-    assert.equal(shouldRespond(chat, true, [{ type: "text", text: "hello" }], selfIds, "bot-123"), false);
+    assert.equal(shouldRespond(chat, { isGroup: true, addressedToBot: false, repliedToBot: true, quotedSenderId: "bot-123" }), false);
   });
 
   it("respond_on=mention+reply: responds to mentions and replies to bot", () => {
     const chat = { is_enabled: true, respond_on: "mention+reply" };
-    const selfIds = ["bot-123"];
     // Mentioned → true
-    assert.equal(shouldRespond(chat, true, [{ type: "text", text: "@bot-123 hello" }], selfIds, undefined), true);
+    assert.equal(shouldRespond(chat, { isGroup: true, addressedToBot: true, repliedToBot: false }), true);
     // Reply to bot → true
-    assert.equal(shouldRespond(chat, true, [{ type: "text", text: "hello" }], selfIds, "bot-123"), true);
+    assert.equal(shouldRespond(chat, { isGroup: true, addressedToBot: false, repliedToBot: true, quotedSenderId: "bot-123" }), true);
     // Reply to someone else → false
-    assert.equal(shouldRespond(chat, true, [{ type: "text", text: "hello" }], selfIds, "other-user"), false);
+    assert.equal(shouldRespond(chat, { isGroup: true, addressedToBot: false, repliedToBot: false, quotedSenderId: "other-user" }), false);
     // No mention, no reply → false
-    assert.equal(shouldRespond(chat, true, [{ type: "text", text: "hello" }], selfIds, undefined), false);
+    assert.equal(shouldRespond(chat, { isGroup: true, addressedToBot: false, repliedToBot: false }), false);
   });
 });
 
@@ -158,7 +156,7 @@ describe("formatUserMessage", () => {
   it("formats private message with timestamp", () => {
     const block = /** @type {TextContentBlock} */ ({ type: "text", text: "hello" });
     const { formattedText, systemPromptSuffix } = formatUserMessage(
-      block, false, "User", "01/01/2025, 12:00", ["bot"],
+      block, false, "User", "01/01/2025, 12:00",
     );
     assert.equal(formattedText, "[01/01/2025, 12:00] hello");
     assert.equal(systemPromptSuffix, "");
@@ -167,26 +165,18 @@ describe("formatUserMessage", () => {
   it("formats group message with sender name", () => {
     const block = /** @type {TextContentBlock} */ ({ type: "text", text: "hello" });
     const { formattedText, systemPromptSuffix } = formatUserMessage(
-      block, true, "Alice", "01/01/2025, 12:00", ["bot"],
+      block, true, "Alice", "01/01/2025, 12:00",
     );
     assert.equal(formattedText, "[01/01/2025, 12:00] Alice: hello");
     assert.ok(systemPromptSuffix.includes("group chat"));
   });
 
-  it("strips mention of self from start of group message", () => {
+  it("preserves message text because mention stripping happens at the transport seam", () => {
     const block = /** @type {TextContentBlock} */ ({ type: "text", text: "@bot hello" });
     const { formattedText } = formatUserMessage(
-      block, true, "Alice", "01/01/2025, 12:00", ["bot"],
+      block, true, "Alice", "01/01/2025, 12:00",
     );
-    assert.equal(formattedText, "[01/01/2025, 12:00] Alice: hello");
-  });
-
-  it("strips any of multiple selfIds from start", () => {
-    const block = /** @type {TextContentBlock} */ ({ type: "text", text: "@alt-id hello" });
-    const { formattedText } = formatUserMessage(
-      block, true, "Alice", "01/01/2025, 12:00", ["bot", "alt-id"],
-    );
-    assert.equal(formattedText, "[01/01/2025, 12:00] Alice: hello");
+    assert.equal(formattedText, "[01/01/2025, 12:00] Alice: @bot hello");
   });
 });
 

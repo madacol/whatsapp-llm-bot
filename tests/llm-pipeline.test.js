@@ -7,7 +7,7 @@ process.env.LLM_API_KEY = "test-key";
 process.env.MODEL = "mock-model";
 
 import { PGlite } from "@electric-sql/pglite";
-import { createMockLlmServer, createIncomingContext, createTestDb, seedChat as seedChat_, withModelsCache } from "./helpers.js";
+import { createMockLlmServer, createChatTurn, createTestDb, seedChat as seedChat_, withModelsCache } from "./helpers.js";
 import { setDb } from "../db.js";
 
 /** @type {PGlite} */
@@ -16,7 +16,7 @@ let db;
 let store;
 /** @type {Awaited<ReturnType<typeof createMockLlmServer>>} */
 let mockServer;
-/** @type {(msg: IncomingContext) => Promise<void>} */
+/** @type {(msg: ChatTurn) => Promise<void>} */
 let handleMessage;
 
 before(async () => {
@@ -62,7 +62,7 @@ describe("LLM pipeline via createMessageHandler", () => {
     await seedChat("pipe-1", { enabled: true });
     mockServer.addResponses("Pipeline response!");
 
-    const { context, responses } = createIncomingContext({
+    const { context, responses } = createChatTurn({
       chatId: "pipe-1",
       content: [{ type: "text", text: "Test message" }],
     });
@@ -95,7 +95,7 @@ describe("LLM pipeline via createMessageHandler", () => {
       "The result was received!",
     );
 
-    const { context, responses } = createIncomingContext({
+    const { context, responses } = createChatTurn({
       chatId: "pipe-2",
       content: [{ type: "text", text: "Run something" }],
     });
@@ -131,7 +131,7 @@ describe("LLM pipeline via createMessageHandler", () => {
       "I see there was an error, let me try differently.",
     );
 
-    const { context, responses } = createIncomingContext({
+    const { context, responses } = createChatTurn({
       chatId: "pipe-3",
       content: [{ type: "text", text: "Do something" }],
     });
@@ -151,7 +151,7 @@ describe("LLM pipeline via createMessageHandler", () => {
     await seedChat("pipe-4", { enabled: true });
     // Don't add any mock responses — the server will return 500
 
-    const { context, responses } = createIncomingContext({
+    const { context, responses } = createChatTurn({
       chatId: "pipe-4",
       content: [{ type: "text", text: "Trigger error" }],
     });
@@ -182,7 +182,7 @@ describe("LLM pipeline via createMessageHandler", () => {
       "Recovered from bad args",
     );
 
-    const { context, responses } = createIncomingContext({
+    const { context, responses } = createChatTurn({
       chatId: "pipe-malformed",
       content: [{ type: "text", text: "Do something" }],
     });
@@ -198,7 +198,7 @@ describe("LLM pipeline via createMessageHandler", () => {
     await seedChat("pipe-5", { enabled: true, systemPrompt: "You are a pirate" });
     mockServer.addResponses("Arr matey!");
 
-    const { context } = createIncomingContext({
+    const { context } = createChatTurn({
       chatId: "pipe-5",
       content: [{ type: "text", text: "Hello" }],
     });
@@ -222,7 +222,7 @@ describe("LLM pipeline via createMessageHandler", () => {
       WHERE chat_id = 'pipe-slash-1'
     `;
 
-    const { context, responses } = createIncomingContext({
+    const { context, responses } = createChatTurn({
       chatId: "pipe-slash-1",
       content: [{ type: "text", text: "/model off" }],
     });
@@ -245,7 +245,7 @@ describe("LLM pipeline via createMessageHandler", () => {
       WHERE chat_id = 'pipe-slash-clear'
     `;
 
-    const { context, responses } = createIncomingContext({
+    const { context, responses } = createChatTurn({
       chatId: "pipe-slash-clear",
       content: [{ type: "text", text: "/clear" }],
     });
@@ -291,7 +291,7 @@ describe("LLM pipeline via createMessageHandler", () => {
       "Based on the history, here is my answer.",
     );
 
-    const { context, responses } = createIncomingContext({
+    const { context, responses } = createChatTurn({
       chatId: "pipe-recall",
       content: [{ type: "text", text: "What did I say before?" }],
     });
@@ -318,14 +318,14 @@ describe("LLM pipeline via createMessageHandler", () => {
 
     // First turn: user sends message, LLM replies
     mockServer.addResponses("First reply");
-    const { context: ctx1 } = createIncomingContext({
+    const { context: ctx1 } = createChatTurn({
       chatId: "pipe-clear-cont",
       content: [{ type: "text", text: "Remember this secret: ALPHA" }],
     });
     await handleMessage(ctx1);
 
     // Clear conversation (command path — bypasses LLM, no mock responses needed)
-    const { context: ctx2 } = createIncomingContext({
+    const { context: ctx2 } = createChatTurn({
       chatId: "pipe-clear-cont",
       content: [{ type: "text", text: "!clear" }],
     });
@@ -333,7 +333,7 @@ describe("LLM pipeline via createMessageHandler", () => {
 
     // Second turn after clear: new message
     mockServer.addResponses("Post-clear reply");
-    const { context: ctx3 } = createIncomingContext({
+    const { context: ctx3 } = createChatTurn({
       chatId: "pipe-clear-cont",
       content: [{ type: "text", text: "What do you know?" }],
     });
@@ -368,7 +368,7 @@ describe("LLM pipeline via createMessageHandler", () => {
 
     // Send a new message to trigger the pipeline
     mockServer.addResponses("Order test reply");
-    const { context } = createIncomingContext({
+    const { context } = createChatTurn({
       chatId: "pipe-order",
       content: [{ type: "text", text: "fourth msg" }],
     });
@@ -398,7 +398,7 @@ describe("LLM pipeline via createMessageHandler", () => {
     await seedChat("pipe-6", { enabled: true, model: "gpt-4.1-nano" });
     mockServer.addResponses("Model test");
 
-    const { context } = createIncomingContext({
+    const { context } = createChatTurn({
       chatId: "pipe-6",
       content: [{ type: "text", text: "Hello" }],
     });
@@ -412,7 +412,7 @@ describe("LLM pipeline via createMessageHandler", () => {
     await seedChat("pipe-cache", { enabled: true });
     mockServer.addResponses("Cache test");
 
-    const { context } = createIncomingContext({
+    const { context } = createChatTurn({
       chatId: "pipe-cache",
       content: [{ type: "text", text: "Hello" }],
     });
@@ -434,7 +434,7 @@ describe("LLM pipeline via createMessageHandler", () => {
     await seedChat("pipe-no-instr", { enabled: true });
     mockServer.addResponses("Plain reply");
 
-    const { context } = createIncomingContext({
+    const { context } = createChatTurn({
       chatId: "pipe-no-instr",
       content: [{ type: "text", text: "Hello there" }],
     });
@@ -469,7 +469,7 @@ describe("LLM pipeline via createMessageHandler", () => {
       "Got the result!",
     );
 
-    const { context } = createIncomingContext({
+    const { context } = createChatTurn({
       chatId: "pipe-instr",
       content: [{ type: "text", text: "Run some code" }],
     });
@@ -508,7 +508,7 @@ describe("LLM pipeline via createMessageHandler", () => {
     };
 
     try {
-      const { context } = createIncomingContext({
+      const { context } = createChatTurn({
         chatId: "pipe-usage",
         content: [{ type: "text", text: "Hello" }],
       });
@@ -531,7 +531,7 @@ describe("LLM pipeline via createMessageHandler", () => {
     await seedChat("pipe-presence", { enabled: true });
     mockServer.addResponses("Presence test reply");
 
-    const { context, responses } = createIncomingContext({
+    const { context, responses } = createChatTurn({
       chatId: "pipe-presence",
       content: [{ type: "text", text: "Hello" }],
     });
@@ -555,7 +555,7 @@ describe("LLM pipeline via createMessageHandler", () => {
     await seedChat("pipe-presence-err", { enabled: true });
     // No mock responses → server returns 500
 
-    const { context, responses } = createIncomingContext({
+    const { context, responses } = createChatTurn({
       chatId: "pipe-presence-err",
       content: [{ type: "text", text: "Trigger error" }],
     });
@@ -568,7 +568,7 @@ describe("LLM pipeline via createMessageHandler", () => {
   it("does not send composing when bot decides not to respond", async () => {
     await seedChat("pipe-presence-skip", { enabled: false });
 
-    const { context, responses } = createIncomingContext({
+    const { context, responses } = createChatTurn({
       chatId: "pipe-presence-skip",
       content: [{ type: "text", text: "Hello" }],
     });
@@ -582,7 +582,7 @@ describe("LLM pipeline via createMessageHandler", () => {
     await seedChat("pipe-usage-db", { enabled: true });
     mockServer.addResponses("Persist usage test");
 
-    const { context } = createIncomingContext({
+    const { context } = createChatTurn({
       chatId: "pipe-usage-db",
       content: [{ type: "text", text: "Hello" }],
     });
@@ -620,7 +620,7 @@ describe("LLM pipeline via createMessageHandler", () => {
 
       mockServer.addResponses("I see the image!");
 
-      const { context } = createIncomingContext({
+      const { context } = createChatTurn({
         chatId: "pipe-media-hint",
         content: [{ type: "text", text: "What is in the image?" }],
       });
@@ -657,7 +657,7 @@ describe("LLM pipeline via createMessageHandler", () => {
 
       mockServer.addResponses("Got it!");
 
-      const { context } = createIncomingContext({
+      const { context } = createChatTurn({
         chatId: "pipe-media-tools",
         content: [{ type: "text", text: "What do you see?" }],
       });
@@ -685,7 +685,7 @@ describe("LLM pipeline via createMessageHandler", () => {
     await seedChat("pipe-no-media-tools", { enabled: true });
     mockServer.addResponses("Text only!");
 
-    const { context } = createIncomingContext({
+    const { context } = createChatTurn({
       chatId: "pipe-no-media-tools",
       content: [{ type: "text", text: "Hello" }],
     });

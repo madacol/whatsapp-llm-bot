@@ -22,7 +22,7 @@ const testUserResponseRegistry = createUserResponseRegistry();
 
 /** @type {Awaited<ReturnType<typeof createMockLlmServer>>} */
 let mockServer;
-/** @type {(msg: IncomingContext) => Promise<void>} */
+/** @type {(msg: ChatTurn) => Promise<void>} */
 let handleMessage;
 /** @type {import("@electric-sql/pglite").PGlite} */
 let testDb;
@@ -188,7 +188,7 @@ describe("group detection", () => {
     await adaptIncomingMessage(
       createWAMessage({ text: "hi", chatId: "e2e-group-detect@g.us", isGroup: true }),
       sock,
-      async (ctx) => { capturedIsGroup = ctx.isGroup; },
+      async (ctx) => { capturedIsGroup = ctx.facts.isGroup; },
       testConfirmRegistry,
       testUserResponseRegistry,
     );
@@ -204,7 +204,7 @@ describe("group detection", () => {
     await adaptIncomingMessage(
       createWAMessage({ text: "hi", chatId: "e2e-private-detect@s.whatsapp.net" }),
       sock,
-      async (ctx) => { capturedIsGroup = ctx.isGroup; },
+      async (ctx) => { capturedIsGroup = ctx.facts.isGroup; },
       testConfirmRegistry,
       testUserResponseRegistry,
     );
@@ -218,7 +218,7 @@ describe("group detection", () => {
 // ═══════════════════════════════════════════════════════════════════
 describe("quote extraction", () => {
   it("passes quoted text and quotedSenderId through the adapter", async () => {
-    /** @type {IncomingContext | null} */
+    /** @type {ChatTurn | null} */
     let capturedCtx = null;
     const { sock } = createMockBaileysSocket();
 
@@ -236,7 +236,7 @@ describe("quote extraction", () => {
     );
 
     assert.ok(capturedCtx, "Handler should have been called");
-    assert.equal(capturedCtx.quotedSenderId, "99999");
+    assert.equal(capturedCtx.facts.quotedSenderId, "99999");
 
     const quoteBlock = capturedCtx.content.find(b => b.type === "quote");
     assert.ok(quoteBlock, "Should have a quote content block");
@@ -400,27 +400,41 @@ describe("timestamp parsing", () => {
 });
 
 // ═══════════════════════════════════════════════════════════════════
-// 10. Self IDs extracted from socket user
+// 10. Bot identity extraction stays behind the semantic facts boundary
 // ═══════════════════════════════════════════════════════════════════
-describe("self ID extraction", () => {
-  it("extracts bot phone ID and LID from socket user", async () => {
-    /** @type {string[] | null} */
-    let capturedSelfIds = null;
+describe("bot mention detection", () => {
+  it("marks both phone ID and LID mentions as addressedToBot and strips the prefix", async () => {
+    /** @type {ChatTurn[]} */
+    const capturedTurns = [];
     const { sock } = createMockBaileysSocket({ selfId: "bot-123", selfLid: "bot-lid-456" });
 
     await adaptIncomingMessage(
-      createWAMessage({ text: "hi", chatId: "e2e-self@s.whatsapp.net" }),
+      createWAMessage({ text: "@bot-123 hi", chatId: "e2e-self@g.us", isGroup: true }),
       sock,
       async (ctx) => {
-        capturedSelfIds = ctx.selfIds;
+        capturedTurns.push(ctx);
       },
       testConfirmRegistry,
       testUserResponseRegistry,
     );
 
-    assert.ok(capturedSelfIds, "Should have captured selfIds");
-    assert.ok(capturedSelfIds.includes("bot-123"), `Should contain phone ID, got: ${capturedSelfIds}`);
-    assert.ok(capturedSelfIds.includes("bot-lid-456"), `Should contain LID, got: ${capturedSelfIds}`);
+    await adaptIncomingMessage(
+      createWAMessage({ text: "@bot-lid-456 hi", chatId: "e2e-self@g.us", isGroup: true }),
+      sock,
+      async (ctx) => {
+        capturedTurns.push(ctx);
+      },
+      testConfirmRegistry,
+      testUserResponseRegistry,
+    );
+
+    assert.equal(capturedTurns.length, 2, "Should have captured both turns");
+    assert.equal(capturedTurns[0].facts.addressedToBot, true);
+    assert.equal(capturedTurns[1].facts.addressedToBot, true);
+    assert.equal(capturedTurns[0].content[0].type, "text");
+    assert.equal(capturedTurns[1].content[0].type, "text");
+    assert.equal(/** @type {TextContentBlock} */ (capturedTurns[0].content[0]).text, "hi");
+    assert.equal(/** @type {TextContentBlock} */ (capturedTurns[1].content[0]).text, "hi");
   });
 });
 

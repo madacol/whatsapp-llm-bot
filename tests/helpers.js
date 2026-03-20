@@ -39,12 +39,19 @@ export async function withModelsCache(models, fn) {
 }
 
 /**
- * Create a test ChatTurn with legacy IncomingContext compatibility aliases.
- * Default sender is "master-user" (matches process.env.MASTER_ID in tests).
- * @param {Partial<IncomingContext>} [overrides]
- * @returns {{ context: IncomingContext, responses: Array<{type: string, text: string, source?: MessageSource, blockType?: string}> }}
+ * @typedef {Partial<Omit<ChatTurn, "facts" | "io">> & {
+ *   facts?: Partial<TurnFacts>;
+ *   io?: Partial<TurnIO>;
+ * }} ChatTurnOverrides
  */
-export function createIncomingContext(overrides = {}) {
+
+/**
+ * Create a test ChatTurn.
+ * Default sender is "master-user" (matches process.env.MASTER_ID in tests).
+ * @param {ChatTurnOverrides} [overrides]
+ * @returns {{ context: ChatTurn, responses: Array<{type: string, text: string, source?: MessageSource, blockType?: string}> }}
+ */
+export function createChatTurn(overrides = {}) {
   /** @type {Array<{type: string, text: string, source?: MessageSource, blockType?: string}>} */
   const responses = [];
 
@@ -100,71 +107,37 @@ export function createIncomingContext(overrides = {}) {
     },
   };
 
-  /** @type {IncomingContext} */
-  const context = {
-    chatId: "test-chat",
-    senderIds: ["master-user"],
-    senderName: "Test User",
-    content: [{ type: "text", text: "Hello" }],
-    timestamp: new Date(),
-    facts: { isGroup: false, addressedToBot: false, repliedToBot: false },
-    io,
-    isGroup: false,
-    selfIds: ["bot-123"],
-    selfName: "TestBot",
-    getIsAdmin: io.getIsAdmin,
-    reactToMessage: io.react,
-    select: io.select,
-    send: io.send,
-    reply: io.reply,
-    confirm: io.confirm,
-    sendPresenceUpdate: async (presence) => {
-      await io.setWorking(presence === "composing");
-    },
-    ...overrides,
-  };
-
-  const overrideSendPresenceUpdate = overrides.sendPresenceUpdate;
-
+  /** @type {TurnIO} */
   const finalIo = {
     ...io,
     ...(overrides.io ?? {}),
-    ...(overrides.getIsAdmin && { getIsAdmin: overrides.getIsAdmin }),
-    ...(overrides.send && { send: overrides.send }),
-    ...(overrides.reply && { reply: overrides.reply }),
-    ...(overrides.select && { select: overrides.select }),
-    ...(overrides.confirm && { confirm: overrides.confirm }),
-    ...(overrides.reactToMessage && { react: overrides.reactToMessage }),
-    ...(overrideSendPresenceUpdate && {
-      setWorking: async (/** @type {boolean} */ working) => {
-        await overrideSendPresenceUpdate(working ? "composing" : "paused");
-      },
-    }),
   };
 
-  const addressedToBot = context.content.some((block) => block.type === "text"
-    && context.selfIds.some((selfId) => block.text.includes(`@${selfId}`)));
-  const repliedToBot = context.quotedSenderId != null && context.selfIds.includes(context.quotedSenderId);
+  const content = overrides.content ?? [{ type: "text", text: "Hello" }];
+  const testBotIds = ["bot-123"];
+  const quotedSenderId = overrides.facts?.quotedSenderId;
+  const addressedToBot = content.some((block) => block.type === "text"
+    && testBotIds.some((selfId) => block.text.includes(`@${selfId}`)));
+  const repliedToBot = quotedSenderId != null && testBotIds.includes(quotedSenderId);
 
-  context.io = finalIo;
-  context.getIsAdmin = finalIo.getIsAdmin;
-  context.reactToMessage = finalIo.react;
-  context.select = finalIo.select;
-  context.send = finalIo.send;
-  context.reply = finalIo.reply;
-  context.confirm = finalIo.confirm;
-  context.sendPresenceUpdate = async (presence) => {
-    await finalIo.setWorking(presence === "composing");
+  /** @type {TurnFacts} */
+  const facts = {
+    isGroup: overrides.facts?.isGroup ?? false,
+    addressedToBot: overrides.facts?.addressedToBot ?? addressedToBot,
+    repliedToBot: overrides.facts?.repliedToBot ?? repliedToBot,
+    ...(quotedSenderId != null && { quotedSenderId }),
   };
 
-  if (!overrides.facts) {
-    context.facts = {
-      isGroup: context.isGroup,
-      addressedToBot,
-      repliedToBot,
-      ...(context.quotedSenderId && { quotedSenderId: context.quotedSenderId }),
-    };
-  }
+  /** @type {ChatTurn} */
+  const context = {
+    chatId: overrides.chatId ?? "test-chat",
+    senderIds: overrides.senderIds ?? ["master-user"],
+    senderName: overrides.senderName ?? "Test User",
+    content,
+    timestamp: overrides.timestamp ?? new Date(),
+    facts,
+    io: finalIo,
+  };
 
   return { context, responses };
 }
@@ -396,7 +369,7 @@ export function toolCall(name, args) {
  *
  * @param {{
  *   mockServer: Awaited<ReturnType<typeof createMockLlmServer>>;
- *   handleMessage: (msg: IncomingContext) => Promise<void>;
+ *   handleMessage: (msg: ChatTurn) => Promise<void>;
  *   testDb: import("@electric-sql/pglite").PGlite;
  * }} deps
  * @returns {{ chat: (chatId: string, config?: ChatConfig) => Promise<TestChat> }}
@@ -494,28 +467,29 @@ export function createTestHarness({ mockServer, handleMessage, testDb }) {
 
       // 5. Build and call context
       const sender = options?.sender;
-      /** @type {Partial<IncomingContext>} */
+      /** @type {ChatTurnOverrides} */
       const overrides = {
         chatId,
         content,
-        isGroup: options?.isGroup,
-        quotedSenderId,
+        facts: {
+          isGroup: options?.isGroup ?? false,
+          ...(quotedSenderId != null && { quotedSenderId }),
+        },
       };
       if (sender) {
         overrides.senderIds = [sender.id ?? "master-user"];
         if (sender.name) overrides.senderName = sender.name;
       }
 
-      const { context, responses } = createIncomingContext(overrides);
+      const { context, responses } = createChatTurn(overrides);
 
       if (options?.confirm != null) {
         const userConfirm = options.confirm;
-        context.confirm = async (msg) => {
+        context.io.confirm = async (msg) => {
           const result = typeof userConfirm === "function" ? userConfirm(msg) : userConfirm;
           responses.push({ type: "confirm", text: msg });
           return result;
         };
-        context.io.confirm = context.confirm;
       }
 
       await handleMessage(context);

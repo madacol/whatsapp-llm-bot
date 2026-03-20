@@ -8,7 +8,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import path from "node:path";
 import {
-  createIncomingContext,
+  createChatTurn,
   createMockLlmServer,
   createTestDb,
   createTestHarness,
@@ -21,7 +21,7 @@ import config from "../config.js";
 
 /** @type {Awaited<ReturnType<typeof createMockLlmServer>>} */
 let mockServer;
-/** @type {(msg: IncomingContext) => Promise<void>} */
+/** @type {(msg: ChatTurn) => Promise<void>} */
 let handleMessage;
 /** @type {import("@electric-sql/pglite").PGlite} */
 let testDb;
@@ -75,32 +75,32 @@ after(async () => {
 });
 
 // ═══════════════════════════════════════════════════════════════════
-// Scenario 0: createIncomingContext provides all required capabilities
+// Scenario 0: createChatTurn provides the normalized turn capabilities
 // ═══════════════════════════════════════════════════════════════════
-describe("createIncomingContext shape", () => {
-  it("includes reactToMessage, select, and confirm", () => {
-    const { context } = createIncomingContext();
-    assert.equal(typeof context.reactToMessage, "function", "should have reactToMessage");
-    assert.equal(typeof context.select, "function", "should have select");
-    assert.equal(typeof context.confirm, "function", "should have confirm");
+describe("createChatTurn shape", () => {
+  it("includes react, select, and confirm in io", () => {
+    const { context } = createChatTurn();
+    assert.equal(typeof context.io.react, "function", "should have io.react");
+    assert.equal(typeof context.io.select, "function", "should have io.select");
+    assert.equal(typeof context.io.confirm, "function", "should have io.confirm");
   });
 
-  it("reactToMessage records response", async () => {
-    const { context, responses } = createIncomingContext();
-    await context.reactToMessage("👍");
+  it("io.react records response", async () => {
+    const { context, responses } = createChatTurn();
+    await context.io.react("👍");
     assert.ok(responses.some(r => r.type === "reactToMessage" && r.text === "👍"));
   });
 
-  it("select records response and returns empty string", async () => {
-    const { context, responses } = createIncomingContext();
-    const result = await context.select("Vote", ["A", "B"]);
+  it("io.select records response and returns empty string", async () => {
+    const { context, responses } = createChatTurn();
+    const result = await context.io.select("Vote", ["A", "B"]);
     assert.equal(result, "");
     assert.ok(responses.some(r => r.type === "select"));
   });
 
-  it("confirm records response and returns true by default", async () => {
-    const { context, responses } = createIncomingContext();
-    const result = await context.confirm("Are you sure?");
+  it("io.confirm records response and returns true by default", async () => {
+    const { context, responses } = createChatTurn();
+    const result = await context.io.confirm("Are you sure?");
     assert.equal(result, true);
     assert.ok(responses.some(r => r.type === "confirm" && r.text === "Are you sure?"));
   });
