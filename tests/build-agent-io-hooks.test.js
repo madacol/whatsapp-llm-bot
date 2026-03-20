@@ -78,6 +78,15 @@ describe("buildAgentIoHooks", () => {
     assert.equal(sent[0].source, "tool-call");
   });
 
+  it("does not send a separate success message for completed commands", async () => {
+    const { hooks, sent } = createSubject();
+    await hooks.onCommand?.({ command: "pwd", status: "started" });
+    await hooks.onCommand?.({ command: "pwd", status: "completed", output: "/repo\n" });
+
+    assert.equal(sent.length, 1);
+    assert.equal(sent[0].source, "tool-call");
+  });
+
   it("maps file changes to a tool-result message", async () => {
     const { hooks, sent } = createSubject();
     await hooks.onFileChange?.({ path: "/tmp/file.js", summary: "Updated file" });
@@ -187,7 +196,7 @@ describe("buildAgentIoHooks", () => {
       output: "  1→ const value = 1;\n  2→ const value = 2;",
     });
 
-    assert.equal(handles.length, 2);
+    assert.equal(handles.length, 1);
     handles[0]?.callback("👁", "user-1");
     assert.equal(handles[0]?.edits.length, 1);
     assert.equal(handles[0]?.edits[0], [

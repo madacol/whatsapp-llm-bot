@@ -102,6 +102,56 @@ describe("codex events", () => {
     });
   });
 
+  it("normalizes collab tool call events", () => {
+    assert.deepEqual(normalizeCodexEvent({
+      type: "item.started",
+      item: {
+        id: "item_1",
+        type: "collab_tool_call",
+        tool: "spawn_agent",
+        prompt: "Reply with exactly: agent-probe-ok",
+        receiver_thread_ids: [],
+        agents_states: {},
+        status: "in_progress",
+      },
+    }), {
+      sessionId: null,
+      toolEvent: {
+        id: "item_1",
+        name: "spawn_agent",
+        arguments: { prompt: "Reply with exactly: agent-probe-ok" },
+        status: "started",
+      },
+    });
+
+    assert.deepEqual(normalizeCodexEvent({
+      type: "item.completed",
+      item: {
+        id: "item_2",
+        type: "collab_tool_call",
+        tool: "wait",
+        prompt: null,
+        receiver_thread_ids: ["thread-2"],
+        agents_states: {
+          "thread-2": {
+            status: "completed",
+            message: "agent-probe-ok",
+          },
+        },
+        status: "completed",
+      },
+    }), {
+      sessionId: null,
+      toolEvent: {
+        id: "item_2",
+        name: "wait_agent",
+        arguments: { receiver_thread_ids: ["thread-2"] },
+        status: "completed",
+        output: "agent-probe-ok",
+      },
+    });
+  });
+
   it("strips shell wrappers from command displays", () => {
     assert.deepEqual(normalizeCodexEvent({
       type: "item.started",
