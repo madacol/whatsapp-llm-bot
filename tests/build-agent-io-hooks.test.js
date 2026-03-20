@@ -78,6 +78,15 @@ describe("buildAgentIoHooks", () => {
     assert.equal(sent[0].source, "tool-call");
   });
 
+  it("renders searchable shell commands as searched summaries", async () => {
+    const { hooks, sent } = createSubjectWithCwd("/repo");
+    await hooks.onCommand?.({ command: "rg -n \"needle\" src", status: "started" });
+
+    assert.equal(sent.length, 1);
+    assert.equal(sent[0].source, "tool-call");
+    assert.equal(sent[0].content, "*Searched*\nSearch \"needle\" in `src`");
+  });
+
   it("does not send a separate success message for completed commands", async () => {
     const { hooks, sent } = createSubject();
     await hooks.onCommand?.({ command: "pwd", status: "started" });
@@ -103,6 +112,7 @@ describe("buildAgentIoHooks", () => {
     assert.equal(sent.length, 1);
     assert.equal(sent[0].kind, "send");
     assert.equal(sent[0].source, "tool-call");
+    assert.equal(sent[0].content, "*Explored*\nRead `src/app.js`");
   });
 
   it("renders file change diffs when present", async () => {
@@ -200,7 +210,8 @@ describe("buildAgentIoHooks", () => {
     handles[0]?.callback("👁", "user-1");
     assert.equal(handles[0]?.edits.length, 1);
     assert.equal(handles[0]?.edits[0], [
-      "*Read*  `src/app.js`",
+      "*Explored*",
+      "Read `src/app.js`",
       "",
       "```",
       "const value = 1;",

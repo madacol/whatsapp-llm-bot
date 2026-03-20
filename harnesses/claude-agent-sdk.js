@@ -14,7 +14,7 @@ import { query } from "@anthropic-ai/claude-agent-sdk";
 import { randomUUID } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { NO_OP_HOOKS } from "./native.js";
-import { formatToolCallDisplay, getToolCallSummary } from "../tool-display.js";
+import { getToolCallSummary } from "../tool-display.js";
 import { createLogger } from "../logger.js";
 import { extractLastUserText } from "../message-formatting.js";
 import { createToolMessage, errorToString, registerInspectHandler } from "../utils.js";
@@ -271,8 +271,12 @@ export function wrapHooksWithFallbacks(rawHooks) {
     onLlmResponse: (/** @type {string} */ text) => safeHook("onLlmResponse", () => rawHooks.onLlmResponse(text), undefined),
     onAskUser: (/** @type {string} */ question, /** @type {string[]} */ options, /** @type {string | undefined} */ preamble, /** @type {string[] | undefined} */ descriptions) =>
       safeHook("onAskUser", () => rawHooks.onAskUser(question, options, preamble, descriptions), ""),
-    onToolCall: (/** @type {LlmChatResponse['toolCalls'][0]} */ toolCall, /** @type {((params: Record<string, any>) => string) | undefined} */ formatToolCall) =>
-      safeHook("onToolCall", () => rawHooks.onToolCall(toolCall, formatToolCall), undefined),
+    onToolCall: (
+      /** @type {LlmChatResponse['toolCalls'][0]} */ toolCall,
+      /** @type {((params: Record<string, any>) => string) | undefined} */ formatToolCall,
+      /** @type {{ oldContent?: string } | undefined} */ toolContext,
+    ) =>
+      safeHook("onToolCall", () => rawHooks.onToolCall(toolCall, formatToolCall, toolContext), undefined),
     onToolResult: (/** @type {ToolContentBlock[]} */ blocks, /** @type {string} */ toolName, /** @type {PermissionFlags} */ permissions) =>
       safeHook("onToolResult", () => rawHooks.onToolResult(blocks, toolName, permissions), undefined),
     onToolError: (/** @type {string} */ error) => safeHook("onToolError", () => rawHooks.onToolError(error), undefined),
@@ -744,17 +748,9 @@ export function createClaudeAgentSdkHarness() {
                 // Display tool call and store handle for inspect handler
                 if (toolUseId) {
                   const toolCall = { id: toolUseId, name: input.tool_name, arguments: JSON.stringify(toolInput) };
-                  const content = formatToolCallDisplay(toolCall, undefined, workdir, displayContext);
                   const summary = getToolCallSummary(input.tool_name, toolInput, undefined, workdir, displayContext);
                   /** @type {MessageHandle | undefined} */
-                  let handle;
-                  if (content != null) {
-                    try {
-                      handle = await session.context.send("tool-call", content);
-                    } catch (err) {
-                      log.warn("PreToolUse display failed:", errorToString(err));
-                    }
-                  }
+                  const handle = await hooks.onToolCall(toolCall, undefined, displayContext) ?? undefined;
                   activeTools.set(toolUseId, {
                     handle: handle ?? undefined,
                     toolName: input.tool_name,

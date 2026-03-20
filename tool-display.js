@@ -57,6 +57,343 @@ export function langFromPath(filePath) {
 }
 
 /**
+ * @typedef {{
+ *   title: "Explored" | "Searched",
+ *   lines: string[],
+ * }} ToolActivitySummary
+ */
+
+/**
+ * @param {ToolActivitySummary} activity
+ * @returns {string}
+ */
+export function formatActivitySummary(activity) {
+  return [`*${activity.title}*`, ...activity.lines].join("\n");
+}
+
+/**
+ * @param {string} value
+ * @returns {string}
+ */
+function quoteForDisplay(value) {
+  return JSON.stringify(value);
+}
+
+/**
+ * @param {string | null | undefined} targetPath
+ * @param {string | null | undefined} cwd
+ * @returns {string}
+ */
+function formatDisplayPath(targetPath, cwd) {
+  return `\`${shortenPath(targetPath || ".", cwd)}\``;
+}
+
+/**
+ * @param {string} command
+ * @returns {string}
+ */
+function extractPrimaryShellSegment(command) {
+  const firstLine = command
+    .split("\n")
+    .map((line) => line.trim())
+    .find((line) => line.length > 0) ?? "";
+  const match = firstLine.match(/^(.*?)(?:\s*(?:\|\||&&|\||;)\s+|$)/);
+  return (match?.[1] ?? firstLine).trim();
+}
+
+/**
+ * Tokenize a shell command segment into whitespace-separated words while
+ * preserving quoted sections.
+ * @param {string} command
+ * @returns {string[]}
+ */
+function tokenizeShellWords(command) {
+  /** @type {string[]} */
+  const tokens = [];
+  let current = "";
+  /** @type {'"' | "'" | null} */
+  let quote = null;
+  let escaped = false;
+
+  for (const char of command) {
+    if (escaped) {
+      current += char;
+      escaped = false;
+      continue;
+    }
+
+    if (char === "\\" && quote !== "'") {
+      escaped = true;
+      continue;
+    }
+
+    if (quote) {
+      if (char === quote) {
+        quote = null;
+      } else {
+        current += char;
+      }
+      continue;
+    }
+
+    if (char === "'" || char === "\"") {
+      quote = char;
+      continue;
+    }
+
+    if (/\s/.test(char)) {
+      if (current.length > 0) {
+        tokens.push(current);
+        current = "";
+      }
+      continue;
+    }
+
+    current += char;
+  }
+
+  if (current.length > 0) {
+    tokens.push(current);
+  }
+
+  return tokens;
+}
+
+/**
+ * @param {string[]} tokens
+ * @returns {{ mode: "list" | "search", pattern?: string, path?: string } | null}
+ */
+function classifyRipgrep(tokens) {
+  let filesMode = false;
+  /** @type {string | undefined} */
+  let pattern;
+  /** @type {string | undefined} */
+  let path;
+
+  for (let index = 1; index < tokens.length; index += 1) {
+    const token = tokens[index];
+    if (!token) {
+      continue;
+    }
+    if (token === "--files") {
+      filesMode = true;
+      continue;
+    }
+    if (token === "-e" || token === "--regexp") {
+      pattern = tokens[index + 1];
+      index += 1;
+      continue;
+    }
+    if (token === "-g" || token === "--glob" || token === "-f" || token === "--file") {
+      index += 1;
+      continue;
+    }
+    if (token.startsWith("-")) {
+      continue;
+    }
+    if (filesMode) {
+      path = token;
+      break;
+    }
+    if (!pattern) {
+      pattern = token;
+      continue;
+    }
+    path = token;
+    break;
+  }
+
+  if (filesMode) {
+    return { mode: "list", path };
+  }
+  return pattern ? { mode: "search", pattern, path } : null;
+}
+
+/**
+ * @param {string[]} tokens
+ * @returns {{ pattern: string, path?: string } | null}
+ */
+function classifyGrep(tokens) {
+  /** @type {string | undefined} */
+  let pattern;
+  /** @type {string | undefined} */
+  let path;
+
+  for (let index = 1; index < tokens.length; index += 1) {
+    const token = tokens[index];
+    if (!token) {
+      continue;
+    }
+    if (token === "-e" || token === "--regexp") {
+      pattern = tokens[index + 1];
+      index += 1;
+      continue;
+    }
+    if (token === "--include" || token === "--exclude" || token === "--exclude-dir") {
+      index += 1;
+      continue;
+    }
+    if (token.startsWith("-")) {
+      continue;
+    }
+    if (!pattern) {
+      pattern = token;
+      continue;
+    }
+    path = token;
+    break;
+  }
+
+  return pattern ? { pattern, path } : null;
+}
+
+/**
+ * @param {string} title
+ * @param {string} line
+ * @returns {ToolActivitySummary}
+ */
+function createActivitySummary(title, line) {
+  return { title: /** @type {"Explored" | "Searched"} */ (title), lines: [line] };
+}
+
+/**
+ * @param {string} path
+ * @param {string | null | undefined} cwd
+ * @returns {ToolActivitySummary}
+ */
+function createReadActivity(path, cwd) {
+  return createActivitySummary("Explored", `Read ${formatDisplayPath(path, cwd)}`);
+}
+
+/**
+ * @param {string | undefined} path
+ * @param {string | null | undefined} cwd
+ * @returns {ToolActivitySummary}
+ */
+function createListActivity(path, cwd) {
+  return createActivitySummary("Explored", `List ${formatDisplayPath(path, cwd)}`);
+}
+
+/**
+ * @param {string} pattern
+ * @param {string | undefined} path
+ * @param {string | null | undefined} cwd
+ * @returns {ToolActivitySummary}
+ */
+function createSearchActivity(pattern, path, cwd) {
+  const suffix = path ? ` in ${formatDisplayPath(path, cwd)}` : "";
+  return createActivitySummary("Searched", `Search ${quoteForDisplay(pattern)}${suffix}`);
+}
+
+/**
+ * @param {string[]} tokens
+ * @returns {string | undefined}
+ */
+function findLastNonOptionToken(tokens) {
+  for (let index = tokens.length - 1; index >= 0; index -= 1) {
+    const token = tokens[index];
+    if (token && !token.startsWith("-")) {
+      return token;
+    }
+  }
+  return undefined;
+}
+
+/**
+ * @param {string} command
+ * @param {string | null | undefined} cwd
+ * @returns {ToolActivitySummary | null}
+ */
+export function classifyCommandActivity(command, cwd) {
+  const primaryCommand = extractPrimaryShellSegment(command);
+  const tokens = tokenizeShellWords(primaryCommand);
+  const name = tokens[0];
+
+  if (!name) {
+    return null;
+  }
+
+  switch (name) {
+    case "rg": {
+      const match = classifyRipgrep(tokens);
+      if (!match) {
+        return null;
+      }
+      return match.mode === "list"
+        ? createListActivity(match.path, cwd)
+        : createSearchActivity(match.pattern ?? "", match.path, cwd);
+    }
+    case "grep": {
+      const match = classifyGrep(tokens);
+      return match ? createSearchActivity(match.pattern, match.path, cwd) : null;
+    }
+    case "ls": {
+      const targetPath = tokens.slice(1).find((token) => !token.startsWith("-"));
+      return createListActivity(targetPath, cwd);
+    }
+    case "find":
+    case "fd": {
+      const targetPath = tokens.slice(1).find((token) => !token.startsWith("-"));
+      return createListActivity(targetPath, cwd);
+    }
+    case "cat":
+    case "bat": {
+      const filePath = tokens.slice(1).find((token) => !token.startsWith("-"));
+      return filePath ? createReadActivity(filePath, cwd) : null;
+    }
+    case "head":
+    case "tail":
+    case "nl": {
+      const filePath = findLastNonOptionToken(tokens.slice(1));
+      return filePath ? createReadActivity(filePath, cwd) : null;
+    }
+    case "sed": {
+      const filePath = findLastNonOptionToken(tokens.slice(1));
+      return filePath ? createReadActivity(filePath, cwd) : null;
+    }
+    default:
+      return null;
+  }
+}
+
+/**
+ * @param {string} name
+ * @param {Record<string, unknown>} args
+ * @param {string | null | undefined} cwd
+ * @returns {ToolActivitySummary | null}
+ */
+export function classifyToolActivity(name, args, cwd) {
+  switch (name) {
+    case "Read":
+      return typeof args.file_path === "string" ? createReadActivity(args.file_path, cwd) : null;
+    case "Grep":
+      return typeof args.pattern === "string"
+        ? createSearchActivity(
+          args.pattern,
+          typeof args.path === "string" ? args.path : undefined,
+          cwd,
+        )
+        : null;
+    case "Glob":
+      if (typeof args.pattern !== "string") {
+        return null;
+      }
+      return createActivitySummary(
+        "Explored",
+        typeof args.path === "string"
+          ? `List \`${args.pattern}\` in ${formatDisplayPath(args.path, cwd)}`
+          : `List \`${args.pattern}\``,
+      );
+    case "WebSearch":
+      return typeof args.query === "string" ? createSearchActivity(args.query, undefined, cwd) : null;
+    case "Bash":
+      return typeof args.command === "string" ? classifyCommandActivity(args.command, cwd) : null;
+    default:
+      return null;
+  }
+}
+
+/**
  * Format SDK built-in tool calls (Read, Grep, Glob, WebSearch, WebFetch, Agent)
  * into compact, human-friendly strings. Returns null for unknown tools.
  * @param {string} name
@@ -65,6 +402,11 @@ export function langFromPath(filePath) {
  * @returns {string | null}
  */
 export function formatSdkToolCall(name, args, cwd) {
+  const activity = classifyToolActivity(name, args, cwd);
+  if (activity) {
+    return formatActivitySummary(activity);
+  }
+
   switch (name) {
     case "Read": {
       const path = typeof args.file_path === "string" ? args.file_path : null;
@@ -252,6 +594,11 @@ export function formatBashCommand(command) {
  * @returns {string}
  */
 export function getToolCallSummary(name, args, formatToolCall, cwd, context) {
+  const activity = classifyToolActivity(name, args, cwd);
+  if (activity) {
+    return formatActivitySummary(activity);
+  }
+
   // Bash: always show *Bash* prefix with description or command preview
   if (name === "Bash" && typeof args.command === "string") {
     if (typeof args.description === "string") return `*Bash*  _${args.description}_`;
@@ -298,6 +645,11 @@ export function formatToolCallDisplay(toolCall, actionFormatter, cwd, context) {
   const args = parseToolArgs(toolCall.arguments);
 
   const name = toolCall.name;
+
+  const activity = classifyToolActivity(name, args, cwd);
+  if (activity) {
+    return formatActivitySummary(activity);
+  }
 
   // Bash tool: render command as a syntax-highlighted image with *Bash* prefix.
   if (name === "Bash" && typeof args.command === "string") {
@@ -354,4 +706,3 @@ export function formatToolCallDisplay(toolCall, actionFormatter, cwd, context) {
 
   return msg;
 }
-
