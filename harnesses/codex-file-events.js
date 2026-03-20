@@ -3,7 +3,7 @@ import { extractCodexText, isCodexEventRecord } from "./codex-event-utils.js";
 /**
  * Normalize file-change payloads from Codex item events.
  * @param {unknown} item
- * @returns {{ path: string, summary?: string, diff?: string } | null}
+ * @returns {{ path: string, summary?: string, diff?: string, kind?: "add" | "delete" | "update" } | null}
  */
 export function normalizeCodexFileChange(item) {
   const path = extractFilePath(item);
@@ -12,9 +12,11 @@ export function normalizeCodexFileChange(item) {
   }
 
   const diff = extractFileDiff(item);
+  const kind = extractFileKind(item);
   return {
     path,
     summary: extractFileSummary(item),
+    ...(kind ? { kind } : {}),
     ...(diff ? { diff } : {}),
   };
 }
@@ -100,5 +102,22 @@ function extractFileDiff(item) {
     }
   }
 
+  return undefined;
+}
+
+/**
+ * @param {unknown} item
+ * @returns {"add" | "delete" | "update" | undefined}
+ */
+function extractFileKind(item) {
+  if (!isCodexEventRecord(item)) {
+    return undefined;
+  }
+  if (Array.isArray(item.changes)) {
+    const firstChange = item.changes.find(isCodexEventRecord);
+    if (firstChange && (firstChange.kind === "add" || firstChange.kind === "delete" || firstChange.kind === "update")) {
+      return firstChange.kind;
+    }
+  }
   return undefined;
 }

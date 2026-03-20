@@ -58,6 +58,15 @@ describe("buildAgentIoHooks", () => {
     assert.equal(sent[0].source, "tool-result");
   });
 
+  it("maps file reads to a tool-call message", async () => {
+    const { hooks, sent } = createSubject();
+    await hooks.onFileRead?.({ command: "sed -n '1,20p' src/app.js", paths: ["src/app.js"] });
+
+    assert.equal(sent.length, 1);
+    assert.equal(sent[0].kind, "send");
+    assert.equal(sent[0].source, "tool-call");
+  });
+
   it("renders file change diffs when present", async () => {
     const { hooks, sent } = createSubject();
     await hooks.onFileChange?.({
@@ -73,7 +82,7 @@ describe("buildAgentIoHooks", () => {
     assert.deepEqual(content, [{
       type: "markdown",
       text: [
-        "*File change*",
+        "*File changed*",
         "",
         "Updated file",
         "`/tmp/file.js`",

@@ -46,6 +46,7 @@ export const NO_OP_HOOKS = {
   onToolResult: async (_blocks, _name, _perms) => {},
   onToolError: async () => {},
   onCommand: async () => {},
+  onFileRead: async () => {},
   onPlan: async () => {},
   onFileChange: async () => {},
   onContinuePrompt: async () => true,

@@ -62,10 +62,19 @@ export function buildAgentIoHooks(context, sendComposing, cwd) {
         await context.send("tool-result", [{ type: "markdown", text: `*Command output*\n\n\`\`\`bash\n${command}\n\`\`\`\n\n\`\`\`\n${output}\n\`\`\`` }]);
       }
     },
+    onFileRead: async ({ paths }) => {
+      const body = paths.map((filePath) => `\`${filePath}\``).join("\n");
+      await context.send("tool-call", [{ type: "markdown", text: `*Read file*\n\n${body}` }]);
+    },
     onPlan: async (text) => { await context.reply("llm", [{ type: "markdown", text: `*Plan*\n\n${text}` }]); },
-    onFileChange: async ({ path, summary, diff }) => {
+    onFileChange: async ({ path, summary, diff, kind }) => {
       if (diff) {
-        const lines = ["*File change*", ""];
+        const title = kind === "add"
+          ? "*File added*"
+          : kind === "delete"
+            ? "*File deleted*"
+            : "*File changed*";
+        const lines = [title, ""];
         if (summary) {
           lines.push(summary);
         }

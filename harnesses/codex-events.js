@@ -20,6 +20,7 @@ export { extractCodexText } from "./codex-event-utils.js";
  *   path: string,
  *   summary?: string,
  *   diff?: string,
+ *   kind?: "add" | "delete" | "update",
  * }} CodexFileChangeEvent
  */
 
