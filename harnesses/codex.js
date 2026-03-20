@@ -2,19 +2,11 @@
  * Codex harness — uses the local Codex CLI in non-interactive JSON mode.
  */
 
-import { spawn } from "node:child_process";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
-import { createInterface } from "node:readline";
-import path from "node:path";
-import os from "node:os";
 import { NO_OP_HOOKS } from "./native.js";
-import { extractCodexText, normalizeCodexEvent } from "./codex-events.js";
-import { createLogger } from "../logger.js";
-import { errorToString } from "../utils.js";
+import { buildCodexExecArgs, extractCodexText, startCodexRun } from "./codex-runner.js";
 import { getRootDb } from "../db.js";
 import { handleHarnessSessionCommand } from "./session-commands.js";
-
-const log = createLogger("harness:codex");
+export { buildCodexExecArgs } from "./codex-runner.js";
 
 /** @type {HarnessCapabilities} */
 const CODEX_HARNESS_CAPABILITIES = {
@@ -38,50 +30,10 @@ const APPROVAL_POLICIES = new Set(["untrusted", "on-request", "never"]);
 /**
  * @typedef {{
  *   child: import("node:child_process").ChildProcessWithoutNullStreams;
- *   done: Promise<void>;
+ *   done: Promise<{ result: AgentResult, sessionId: string | null }>;
  *   aborted: boolean;
  * }} ActiveCodexRun
  */
-
-/**
- * Build the Codex CLI argument vector for a run.
- * Prompts are always sent via stdin using `-` so message text that starts with `-`
- * is never parsed as an option.
- * @param {{
- *   prompt: string,
- *   sessionId?: string | null,
- *   runConfig?: HarnessRunConfig,
- *   outputLastMessagePath: string,
- * }} input
- * @returns {string[]}
- */
-export function buildCodexExecArgs({ prompt, sessionId, runConfig, outputLastMessagePath }) {
-  /** @type {string[]} */
-  const args = [];
-
-  if (runConfig?.model) {
-    args.push("-m", runConfig.model);
-  }
-  if (runConfig?.sandboxMode) {
-    args.push("-s", runConfig.sandboxMode);
-  }
-  if (runConfig?.approvalPolicy) {
-    args.push("-a", runConfig.approvalPolicy);
-  }
-  if (runConfig?.workdir) {
-    args.push("-C", runConfig.workdir);
-  }
-
-  args.push("exec");
-
-  if (sessionId) {
-    args.push("resume", sessionId);
-  }
-
-  args.push("--json", "--skip-git-repo-check", "--output-last-message", outputLastMessagePath, prompt ? "-" : "");
-
-  return args.filter(Boolean);
-}
 
 /**
  * Read the generic harness_config JSONB for a chat.
@@ -115,14 +67,6 @@ async function updateHarnessConfig(chatId, patch) {
     }
   }
   await db.sql`UPDATE chats SET harness_config = ${JSON.stringify(current)} WHERE chat_id = ${chatId}`;
-}
-
-/**
- * @param {number} value
- * @returns {string}
- */
-function formatUsageCost(value) {
-  return value.toFixed(6);
 }
 
 /**
@@ -318,159 +262,34 @@ export function createCodexHarness() {
     }
 
     const sessionId = getCodexSessionId(session);
-    const tempDir = await mkdtemp(path.join(os.tmpdir(), "codex-harness-"));
-    const outputLastMessagePath = path.join(tempDir, "last-message.txt");
-    const args = buildCodexExecArgs({
+    /** @type {ActiveCodexRun | null} */
+    let activeRun = null;
+    const started = await startCodexRun({
+      chatId: session.chatId,
       prompt,
+      messages,
       sessionId,
       runConfig,
-      outputLastMessagePath,
+      hooks,
+      isAborted: () => activeRun?.aborted ?? false,
     });
-
-    log.info(`Starting Codex run for chat ${session.chatId}: codex ${args.join(" ")}`);
-
-    /** @type {AgentResult} */
-    const result = {
-      response: [],
-      messages,
-      usage: { promptTokens: 0, completionTokens: 0, cachedTokens: 0, cost: 0 },
-    };
-
-    let resolvedSessionId = sessionId;
-    let lastAssistantText = null;
-    /** @type {string[]} */
-    const stderrLines = [];
-    /** @type {string | null} */
-    let failureMessage = null;
-
-    const child = spawn("codex", args, {
-      cwd: runConfig?.workdir ?? process.cwd(),
-      stdio: ["pipe", "pipe", "pipe"],
-    });
-
-    /** @type {(value?: void | PromiseLike<void>) => void} */
-    let resolveDone = () => {};
-    const done = new Promise((resolve) => {
-      resolveDone = resolve;
-    });
-    activeRuns.set(session.chatId, {
-      child,
-      done,
+    activeRun = {
+      child: started.child,
+      done: started.done,
       aborted: false,
-    });
-
-    child.stdin.write(prompt);
-    child.stdin.end();
-
-    child.stderr.setEncoding("utf8");
-    child.stderr.on("data", (chunk) => {
-      const text = String(chunk);
-      stderrLines.push(text);
-      if (stderrLines.length > 100) {
-        stderrLines.shift();
-      }
-      log.debug("[codex stderr]", text.trimEnd());
-    });
-
-    const stdout = createInterface({ input: child.stdout });
-    let eventQueue = Promise.resolve();
-    stdout.on("line", (line) => {
-      eventQueue = eventQueue.then(async () => {
-        try {
-          const normalized = normalizeCodexEvent(JSON.parse(line));
-          if (!normalized) {
-            return;
-          }
-
-          if (normalized.sessionId) {
-            resolvedSessionId = normalized.sessionId;
-          }
-
-          if (normalized.usage) {
-            result.usage = normalized.usage;
-          }
-
-          if (normalized.failureMessage) {
-            failureMessage = normalized.failureMessage;
-          }
-
-          if (normalized.commandEvent) {
-            await hooks.onCommand(normalized.commandEvent);
-          }
-
-          if (normalized.assistantText) {
-            lastAssistantText = normalized.assistantText;
-            await hooks.onLlmResponse(normalized.assistantText);
-          }
-
-          if (normalized.planText) {
-            await hooks.onPlan(normalized.planText);
-          }
-
-          if (normalized.fileChange) {
-            await hooks.onFileChange(normalized.fileChange);
-          }
-        } catch (error) {
-          log.warn("Failed to parse Codex JSON event:", errorToString(error));
-        }
-      });
-    });
-
-    const exitCode = await new Promise((resolve, reject) => {
-      child.once("error", reject);
-      child.once("close", resolve);
-    }).catch((error) => {
-      const err = /** @type {NodeJS.ErrnoException} */ (error);
-      if (err.code === "ENOENT") {
-        throw new Error("Codex CLI is not installed or not on PATH.");
-      }
-      throw error;
-    });
-
-    await eventQueue;
-
-    const active = activeRuns.get(session.chatId);
-    const aborted = active?.aborted ?? false;
-    activeRuns.delete(session.chatId);
-    resolveDone();
+    };
+    activeRuns.set(session.chatId, activeRun);
 
     try {
-      const finalText = (await readFile(outputLastMessagePath, "utf8").catch(() => "")) || lastAssistantText || "";
-      if (finalText) {
-        result.response = [{ type: "markdown", text: finalText }];
+      const completed = await started.done;
+
+      if (completed.sessionId && completed.sessionId !== sessionId) {
+        await saveCodexSessionId(session, completed.sessionId);
       }
+
+      return completed.result;
     } finally {
-      await rm(tempDir, { recursive: true, force: true }).catch(() => {});
+      activeRuns.delete(session.chatId);
     }
-
-    if (resolvedSessionId && resolvedSessionId !== sessionId) {
-      await saveCodexSessionId(session, resolvedSessionId);
-    }
-
-    if (aborted) {
-      return result;
-    }
-
-    if (failureMessage) {
-      await hooks.onToolError(failureMessage);
-      throw new Error(failureMessage);
-    }
-
-    if (exitCode !== 0) {
-      const stderrTail = stderrLines.join("").trim();
-      const errorMessage = stderrTail || `Codex exited with code ${exitCode}`;
-      await hooks.onToolError(errorMessage);
-      throw new Error(errorMessage);
-    }
-
-    if (result.usage.promptTokens > 0 || result.usage.completionTokens > 0 || result.usage.cachedTokens > 0) {
-      await hooks.onUsage(formatUsageCost(result.usage.cost), {
-        prompt: result.usage.promptTokens,
-        completion: result.usage.completionTokens,
-        cached: result.usage.cachedTokens,
-      });
-    }
-
-    return result;
   }
 }

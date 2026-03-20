@@ -36,6 +36,25 @@ describe("codex events", () => {
     });
   });
 
+  it("normalizes nested usage on turn completion", () => {
+    assert.deepEqual(normalizeCodexEvent({
+      type: "turn.completed",
+      usage: {
+        input_tokens: 12,
+        cached_input_tokens: 3,
+        output_tokens: 5,
+      },
+    }), {
+      sessionId: null,
+      usage: {
+        promptTokens: 12,
+        completionTokens: 5,
+        cachedTokens: 3,
+        cost: 0,
+      },
+    });
+  });
+
   it("normalizes plan and file events", () => {
     assert.deepEqual(normalizeCodexEvent({
       type: "item.completed",
@@ -61,6 +80,16 @@ describe("codex events", () => {
         path: "src/app.js",
         summary: "updated app",
       },
+    });
+  });
+
+  it("unwraps nested error payloads into a usable failure message", () => {
+    assert.deepEqual(normalizeCodexEvent({
+      type: "error",
+      message: "{\"type\":\"error\",\"status\":400,\"error\":{\"type\":\"invalid_request_error\",\"message\":\"The model is not supported.\"}}",
+    }), {
+      sessionId: null,
+      failureMessage: "The model is not supported.",
     });
   });
 });

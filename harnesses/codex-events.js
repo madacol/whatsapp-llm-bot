@@ -72,6 +72,18 @@ export function extractCodexSessionId(event) {
  */
 export function extractCodexText(value) {
   if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
+      try {
+        const parsed = JSON.parse(trimmed);
+        const nested = extractCodexText(parsed);
+        if (nested) {
+          return nested;
+        }
+      } catch {
+        // Fall through to the raw string when the payload is not valid JSON.
+      }
+    }
     return value;
   }
   if (Array.isArray(value)) {
@@ -81,7 +93,7 @@ export function extractCodexText(value) {
   if (!isRecord(value)) {
     return null;
   }
-  for (const key of ["text", "message", "output", "stdout", "stderr", "content", "summary", "details"]) {
+  for (const key of ["text", "message", "output", "stdout", "stderr", "content", "summary", "details", "error"]) {
     const nested = extractCodexText(value[key]);
     if (nested) {
       return nested;
@@ -161,12 +173,19 @@ export function normalizeCodexEvent(event) {
   const eventType = typeof event.type === "string" ? event.type : null;
   const item = isRecord(event.item) ? event.item : null;
   const itemType = item && typeof item.type === "string" ? item.type : null;
+  const usage = isRecord(event.usage) ? event.usage : null;
 
   if (eventType === "turn.completed") {
     normalized.usage = {
-      promptTokens: typeof event.input_tokens === "number" ? event.input_tokens : 0,
-      completionTokens: typeof event.output_tokens === "number" ? event.output_tokens : 0,
-      cachedTokens: typeof event.cached_input_tokens === "number" ? event.cached_input_tokens : 0,
+      promptTokens: typeof usage?.input_tokens === "number"
+        ? usage.input_tokens
+        : typeof event.input_tokens === "number" ? event.input_tokens : 0,
+      completionTokens: typeof usage?.output_tokens === "number"
+        ? usage.output_tokens
+        : typeof event.output_tokens === "number" ? event.output_tokens : 0,
+      cachedTokens: typeof usage?.cached_input_tokens === "number"
+        ? usage.cached_input_tokens
+        : typeof event.cached_input_tokens === "number" ? event.cached_input_tokens : 0,
       cost: 0,
     };
     return normalized;
