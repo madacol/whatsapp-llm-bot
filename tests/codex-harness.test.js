@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { setDb } from "../db.js";
 import { createTestDb, seedChat } from "./helpers.js";
 import {
-  buildCodexExecArgs,
+  buildCodexThreadOptions,
   createCodexHarness,
 } from "../harnesses/codex.js";
 
@@ -104,47 +104,21 @@ describe("createCodexHarness", () => {
   });
 });
 
-describe("buildCodexExecArgs", () => {
-  it("builds args for a new run with model and sandbox config", () => {
-    const args = buildCodexExecArgs({
-      prompt: "Fix the failing test",
-      runConfig: {
-        workdir: "/repo",
-        model: "gpt-5.4-codex",
-        sandboxMode: "workspace-write",
-        approvalPolicy: "never",
-      },
-      outputLastMessagePath: "/tmp/final.txt",
+describe("buildCodexThreadOptions", () => {
+  it("builds SDK thread options from run config", () => {
+    const options = buildCodexThreadOptions({
+      workdir: "/repo",
+      model: "gpt-5.4",
+      sandboxMode: "workspace-write",
+      approvalPolicy: "never",
     });
 
-    assert.deepEqual(args, [
-      "-m", "gpt-5.4-codex",
-      "-s", "workspace-write",
-      "-a", "never",
-      "-C", "/repo",
-      "exec",
-      "--json",
-      "--skip-git-repo-check",
-      "--output-last-message", "/tmp/final.txt",
-      "-",
-    ]);
-  });
-
-  it("builds args for a resumed run", () => {
-    const args = buildCodexExecArgs({
-      prompt: "Continue",
-      sessionId: "sess-123",
-      outputLastMessagePath: "/tmp/final.txt",
+    assert.deepEqual(options, {
+      workingDirectory: "/repo",
+      model: "gpt-5.4",
+      sandboxMode: "workspace-write",
+      approvalPolicy: "never",
+      skipGitRepoCheck: true,
     });
-
-    assert.deepEqual(args, [
-      "exec",
-      "resume",
-      "sess-123",
-      "--json",
-      "--skip-git-repo-check",
-      "--output-last-message", "/tmp/final.txt",
-      "-",
-    ]);
   });
 });

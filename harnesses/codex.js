@@ -3,10 +3,11 @@
  */
 
 import { NO_OP_HOOKS } from "./native.js";
-import { extractCodexText, startCodexRun } from "./codex-runner.js";
+import { startCodexRun } from "./codex-runner.js";
+import { extractCodexText } from "./codex-events.js";
 import { getRootDb } from "../db.js";
 import { handleHarnessSessionCommand } from "./session-commands.js";
-export { buildCodexExecArgs } from "./codex-runner.js";
+export { buildCodexThreadOptions } from "./codex-runner.js";
 
 /** @type {HarnessCapabilities} */
 const CODEX_HARNESS_CAPABILITIES = {
@@ -37,7 +38,7 @@ const CODEX_MODEL_OPTIONS = [
 
 /**
  * @typedef {{
- *   child: import("node:child_process").ChildProcessWithoutNullStreams;
+ *   abortController: AbortController;
  *   done: Promise<{ result: AgentResult, sessionId: string | null }>;
  *   aborted: boolean;
  * }} ActiveCodexRun
@@ -268,7 +269,7 @@ export function createCodexHarness() {
       return false;
     }
     active.aborted = true;
-    active.child.kill("SIGTERM");
+    active.abortController.abort();
     return true;
   }
 
@@ -309,7 +310,7 @@ export function createCodexHarness() {
       isAborted: () => activeRun?.aborted ?? false,
     });
     activeRun = {
-      child: started.child,
+      abortController: started.abortController,
       done: started.done,
       aborted: false,
     };

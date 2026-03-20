@@ -146,12 +146,66 @@ function extractFilePath(item) {
   if (!isRecord(item)) {
     return null;
   }
+  if (Array.isArray(item.changes)) {
+    const firstChange = item.changes.find(isRecord);
+    if (firstChange && typeof firstChange.path === "string" && firstChange.path.length > 0) {
+      return firstChange.path;
+    }
+  }
   for (const key of ["path", "file_path", "file"]) {
     if (typeof item[key] === "string" && item[key].length > 0) {
       return item[key];
     }
   }
   return null;
+}
+
+/**
+ * @param {unknown} item
+ * @returns {string | undefined}
+ */
+function extractFileSummary(item) {
+  if (!isRecord(item)) {
+    return undefined;
+  }
+  if (Array.isArray(item.changes)) {
+    const parts = item.changes
+      .filter(isRecord)
+      .map((change) => {
+        if (typeof change.path === "string" && typeof change.kind === "string") {
+          return `${change.path} (${change.kind})`;
+        }
+        if (typeof change.path === "string") {
+          return change.path;
+        }
+        return null;
+      })
+      .filter((part) => typeof part === "string" && part.length > 0);
+    if (parts.length > 0) {
+      return parts.join(", ");
+    }
+  }
+  return extractCodexText(item) ?? undefined;
+}
+
+/**
+ * @param {unknown} item
+ * @returns {string | null}
+ */
+function extractPlanText(item) {
+  if (!isRecord(item)) {
+    return null;
+  }
+  if (Array.isArray(item.items)) {
+    const lines = item.items
+      .filter(isRecord)
+      .map((entry) => typeof entry.text === "string" ? entry.text : null)
+      .filter((text) => typeof text === "string" && text.length > 0);
+    if (lines.length > 0) {
+      return lines.join("\n");
+    }
+  }
+  return extractCodexText(item);
 }
 
 /**
@@ -234,8 +288,8 @@ export function normalizeCodexEvent(event) {
     return normalized;
   }
 
-  if (eventType === "item.completed" && itemType.includes("plan")) {
-    normalized.planText = extractCodexText(item) ?? undefined;
+  if (eventType === "item.completed" && (itemType.includes("plan") || itemType === "todo_list")) {
+    normalized.planText = extractPlanText(item) ?? undefined;
     return normalized;
   }
 
@@ -244,7 +298,7 @@ export function normalizeCodexEvent(event) {
     if (filePath) {
       normalized.fileChange = {
         path: filePath,
-        summary: extractCodexText(item) ?? undefined,
+        summary: extractFileSummary(item),
       };
     }
     return normalized;
