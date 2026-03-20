@@ -5,6 +5,7 @@ import { resolveChatModel } from "./model-roles.js";
 import { getRootDb } from "./db.js";
 import { createLogger } from "./logger.js";
 import { getChatWorkDir } from "./utils.js";
+import { createToolRuntime } from "./conversation/create-tool-runtime.js";
 
 const log = createLogger("agent-runner");
 
@@ -115,10 +116,12 @@ export async function runAgent(options) {
     llmClient,
     chatModel,
     systemPrompt: agent.systemPrompt,
-    actions,
-    executeActionFn: executeAction,
-    actionResolver,
-    actionLlmClient: llmClient,
+    toolRuntime: createToolRuntime({
+      tools: actions,
+      resolveTool: actionResolver,
+      executeActionFn: executeAction,
+      llmClient,
+    }),
   };
 
   /** @type {MediaRegistry} */

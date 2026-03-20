@@ -325,6 +325,16 @@ type AppAction = Action & {
   app_name: string;
 };
 
+type ToolDescriptor = {
+  name: string;
+  description: string;
+  instructions?: string;
+  scope?: "chat" | "global";
+  parameters: Action["parameters"];
+  permissions: PermissionFlags;
+  formatToolCall?: (params: Record<string, any>) => string;
+};
+
 /* Agent types */
 
 type AgentIOHooks = {
@@ -456,6 +466,22 @@ type ExecuteActionOptions = {
   agentDepth?: number;
 };
 
+type ExecuteToolOptions = {
+  toolCallId?: string | null;
+  agentDepth?: number;
+};
+
+type ToolRuntime = {
+  listTools: () => ToolDescriptor[];
+  getTool: (name: string) => Promise<ToolDescriptor | null>;
+  executeTool: (
+    toolName: string,
+    context: ExecuteActionContext,
+    params: {},
+    options?: ExecuteToolOptions,
+  ) => Promise<{ result: ActionResultValue, permissions: PermissionFlags }>;
+};
+
 type Session = {
   chatId: string;
   senderIds: string[];
@@ -470,10 +496,7 @@ type LlmConfig = {
   llmClient: LlmClient;
   chatModel: string;
   systemPrompt: string;
-  actions: Action[];
-  executeActionFn: (actionName: string, context: ExecuteActionContext, params: {}, options?: ExecuteActionOptions) => Promise<{result: ActionResultValue, permissions: Action['permissions']}>;
-  actionResolver: (name: string) => Promise<AppAction | null>;
-  actionLlmClient: LlmClient;
+  toolRuntime: ToolRuntime;
 };
 
 type App = {

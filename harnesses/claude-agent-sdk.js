@@ -15,7 +15,6 @@ import { randomUUID } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { NO_OP_HOOKS } from "./native.js";
 import { formatToolCallDisplay, getToolCallSummary } from "../tool-display.js";
-import { getChatActions } from "../actions.js";
 import { createLogger } from "../logger.js";
 import { extractLastUserText } from "../message-formatting.js";
 import { createToolMessage, errorToString, registerInspectHandler } from "../utils.js";
@@ -167,7 +166,7 @@ export async function handleEffortCommand(chatId, arg) {
  * - Base system prompt from llmConfig
  * - Chat ID and runtime context
  * - DB paths
- * - Chat-specific action descriptions
+ * - Chat-scoped tool descriptions
  *
  * @param {LlmConfig} llmConfig
  * @param {string} chatId
@@ -184,19 +183,14 @@ async function buildSystemPrompt(llmConfig, chatId, senderIds) {
 
   // CLAUDE.md is loaded automatically by the SDK via settingSources: ["project"]
 
-  // Inject chat-specific action descriptions
-  try {
-    const chatActions = await getChatActions(chatId);
-    if (chatActions.length > 0) {
-      prompt += "\n\n## Chat-specific actions\n";
-      prompt += "These are custom actions created by users for this chat. Execute them by writing and running the appropriate code.\n";
-      for (const action of chatActions) {
-        prompt += `\n### ${action.name}\n${action.description}\n`;
-        prompt += `Parameters: ${JSON.stringify(action.parameters)}\n`;
-      }
+  const chatTools = llmConfig.toolRuntime.listTools().filter((tool) => tool.scope === "chat");
+  if (chatTools.length > 0) {
+    prompt += "\n\n## Chat-specific actions\n";
+    prompt += "These are custom actions created by users for this chat. Execute them by writing and running the appropriate code.\n";
+    for (const tool of chatTools) {
+      prompt += `\n### ${tool.name}\n${tool.description}\n`;
+      prompt += `Parameters: ${JSON.stringify(tool.parameters)}\n`;
     }
-  } catch (err) {
-    log.error("Failed to load chat actions for system prompt:", err);
   }
 
   return prompt;
