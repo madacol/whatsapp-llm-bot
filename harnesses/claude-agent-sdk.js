@@ -20,6 +20,7 @@ import { extractLastUserText } from "../message-formatting.js";
 import { createToolMessage, errorToString, registerInspectHandler } from "../utils.js";
 import { getRootDb } from "../db.js";
 import { handleHarnessSessionCommand } from "./session-commands.js";
+import { formatSandboxEscapeConfirmMessage, getSandboxEscapeRequest } from "./sandbox-approval.js";
 
 const log = createLogger("harness:claude-agent-sdk");
 
@@ -715,6 +716,13 @@ export function createClaudeAgentSdkHarness() {
           if (toolName === "AskUserQuestion") {
             return handleAskUserQuestion(input, hooks.onAskUser);
           }
+          const sandboxEscapeRequest = getSandboxEscapeRequest(toolName, input, {
+            workdir,
+            sandboxMode: "workspace-write",
+          });
+          if (sandboxEscapeRequest) {
+            return handleSandboxEscapeApproval(sandboxEscapeRequest, input, hooks.onAskUser);
+          }
           if (AUTO_APPROVED_TOOLS.has(toolName)) {
             return { behavior: "allow", updatedInput: input };
           }
@@ -1259,6 +1267,33 @@ async function handleToolApproval(toolName, input, onAskUser) {
 
   if (userChoice === "❌ Deny") {
     return { behavior: "deny", message: `User denied the ${toolName} tool call.` };
+  }
+
+  return { behavior: "allow", updatedInput: input };
+}
+
+/**
+ * Prompt the user before allowing a tool call that wants to leave the configured workspace boundary.
+ * @param {{
+ *   toolName: string,
+ *   kind: "path" | "command",
+ *   summary: string,
+ *   workdir: string,
+ *   target?: string,
+ *   command?: string,
+ * }} request
+ * @param {Record<string, unknown>} input
+ * @param {Required<AgentIOHooks>["onAskUser"]} onAskUser
+ * @returns {Promise<import("@anthropic-ai/claude-agent-sdk").PermissionResult>}
+ */
+export async function handleSandboxEscapeApproval(request, input, onAskUser) {
+  const userChoice = await onAskUser(
+    formatSandboxEscapeConfirmMessage(request),
+    ["✅ Allow", "❌ Deny"],
+  );
+
+  if (userChoice === "❌ Deny") {
+    return { behavior: "deny", message: `User denied sandbox escape for ${request.toolName}.` };
   }
 
   return { behavior: "allow", updatedInput: input };

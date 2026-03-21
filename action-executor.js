@@ -4,6 +4,7 @@ import { createCallLlm } from "./llm.js";
 import { resolveModel } from "./model-roles.js";
 import { createLogger } from "./logger.js";
 import { getAction, getActions } from "./action-catalog.js";
+import { formatSandboxEscapeConfirmMessage, getSandboxEscapeRequest } from "./harnesses/sandbox-approval.js";
 
 const log = createLogger("action-executor");
 
@@ -107,6 +108,20 @@ export async function executeAction(actionName, context, params, options = {}) {
     }
     actionContext.callLlm = createCallLlm(llmClient);
     actionContext.llmClient = llmClient;
+  }
+
+  const sandboxEscapeRequest = getSandboxEscapeRequest(actionName, params, {
+    workdir: options.workdir ?? null,
+    sandboxMode: options.sandboxMode ?? null,
+  });
+  if (sandboxEscapeRequest) {
+    const confirmed = await context.confirm(formatSandboxEscapeConfirmMessage(sandboxEscapeRequest));
+    if (!confirmed) {
+      return {
+        result: `Action "${actionName}" was cancelled because sandbox escape was denied.`,
+        permissions: action.permissions,
+      };
+    }
   }
 
   if (!action.permissions?.autoExecute) {

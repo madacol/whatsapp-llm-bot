@@ -475,11 +475,15 @@ type ExecuteActionOptions = {
   actionResolver?: (name: string) => Promise<AppAction | null>;
   llmClient?: LlmClient;
   agentDepth?: number;
+  workdir?: string | null;
+  sandboxMode?: HarnessRunConfig["sandboxMode"] | null;
 };
 
 type ExecuteToolOptions = {
   toolCallId?: string | null;
   agentDepth?: number;
+  workdir?: string | null;
+  sandboxMode?: HarnessRunConfig["sandboxMode"] | null;
 };
 
 type ToolRuntime = {
