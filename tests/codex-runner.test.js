@@ -492,19 +492,220 @@ describe("startCodexRun", () => {
     await started.done;
 
     reactionCallback?.("👁", "user-1");
-    assert.deepEqual(edits, [[
-      "*Search Web*  \"UTC+00:00\"",
-      "",
-      JSON.stringify({
-        results: [
-          {
-            title: "UTC+00:00 - Wikipedia",
-            url: "https://en.wikipedia.org/wiki/UTC%2B00%3A00",
-            snippet: "UTC+00:00 is an identifier for a time offset from UTC of +00:00.",
-          },
-        ],
-      }, null, 2),
-    ].join("\n")]);
+    assert.deepEqual(edits, [
+      "*Web*  search \"UTC+00:00\"",
+      [
+        "*Web*  search \"UTC+00:00\"",
+        "",
+        "*Search Web*  \"UTC+00:00\"",
+        "",
+        "*UTC+00:00 - Wikipedia*",
+        "`en.wikipedia.org/wiki/UTC%2B00%3A00`",
+        "UTC+00:00 is an identifier for a time offset from UTC of +00:00.",
+      ].join("\n"),
+    ]);
+  });
+
+  it("suppresses web-tool narration and groups related web actions into one inspectable handle", async () => {
+    /** @type {LlmChatResponse["toolCalls"]} */
+    const toolCalls = [];
+    /** @type {string[]} */
+    const assistantMessages = [];
+    /** @type {string[]} */
+    const edits = [];
+    /** @type {ReactionCallback | null} */
+    let reactionCallback = null;
+
+    const started = await startCodexRun({
+      chatId: "codex-chat",
+      prompt: "What is UTC+00:00?",
+      messages: [{ role: "user", content: [{ type: "text", text: "What is UTC+00:00?" }] }],
+      runConfig: {
+        workdir: "/repo",
+      },
+      hooks: {
+        onToolCall: async (toolCall) => {
+          toolCalls.push(toolCall);
+          return /** @type {MessageHandle} */ ({
+            keyId: "tool-msg-web-group-1",
+            isImage: false,
+            edit: async (text) => {
+              edits.push(text);
+            },
+            onReaction: (callback) => {
+              reactionCallback = callback;
+              return () => {};
+            },
+          });
+        },
+        onLlmResponse: async (text) => {
+          assistantMessages.push(text);
+        },
+      },
+    }, {
+      createCodex: () => ({
+        startThread: () => ({
+          id: "sess-123",
+          runStreamed: async () => ({
+            events: (async function* () {
+              yield {
+                type: "item.completed",
+                item: {
+                  id: "msg-1",
+                  type: "agent_message",
+                  text: "Using the `web` tool now for a minimal search request in this pass.",
+                },
+              };
+              yield {
+                type: "item.started",
+                item: {
+                  id: "web-search-1",
+                  type: "mcp_tool_call",
+                  server: "web",
+                  tool: "search_query",
+                  arguments: {
+                    search_query: [{ q: "UTC+00:00" }],
+                  },
+                  status: "in_progress",
+                },
+              };
+              yield {
+                type: "item.completed",
+                item: {
+                  id: "web-search-1",
+                  type: "mcp_tool_call",
+                  server: "web",
+                  tool: "search_query",
+                  arguments: {
+                    search_query: [{ q: "UTC+00:00" }],
+                  },
+                  result: {
+                    content: [],
+                    structured_content: {
+                      results: [
+                        {
+                          title: "UTC+00:00 - Wikipedia",
+                          url: "https://en.wikipedia.org/wiki/UTC%2B00%3A00",
+                          snippet: "UTC+00:00 is an identifier for a time offset from UTC of +00:00.",
+                        },
+                      ],
+                    },
+                  },
+                  status: "completed",
+                },
+              };
+              yield {
+                type: "item.started",
+                item: {
+                  id: "web-open-1",
+                  type: "mcp_tool_call",
+                  server: "web",
+                  tool: "open",
+                  arguments: {
+                    ref_id: "https://en.wikipedia.org/wiki/UTC%2B00%3A00",
+                  },
+                  status: "in_progress",
+                },
+              };
+              yield {
+                type: "item.completed",
+                item: {
+                  id: "web-open-1",
+                  type: "mcp_tool_call",
+                  server: "web",
+                  tool: "open",
+                  arguments: {
+                    ref_id: "https://en.wikipedia.org/wiki/UTC%2B00%3A00",
+                  },
+                  result: {
+                    content: [],
+                    structured_content: {
+                      title: "UTC+00:00 - Wikipedia",
+                      url: "https://en.wikipedia.org/wiki/UTC%2B00%3A00",
+                      excerpt: "UTC+00:00 is an identifier for a time offset from UTC of +00:00.",
+                    },
+                  },
+                  status: "completed",
+                },
+              };
+              yield {
+                type: "item.started",
+                item: {
+                  id: "web-find-1",
+                  type: "mcp_tool_call",
+                  server: "web",
+                  tool: "find",
+                  arguments: {
+                    ref_id: "https://en.wikipedia.org/wiki/UTC%2B00%3A00",
+                    pattern: "UTC+00:00 is an identifier for a time offset from UTC of +00:00.",
+                  },
+                  status: "in_progress",
+                },
+              };
+              yield {
+                type: "item.completed",
+                item: {
+                  id: "web-find-1",
+                  type: "mcp_tool_call",
+                  server: "web",
+                  tool: "find",
+                  arguments: {
+                    ref_id: "https://en.wikipedia.org/wiki/UTC%2B00%3A00",
+                    pattern: "UTC+00:00 is an identifier for a time offset from UTC of +00:00.",
+                  },
+                  result: {
+                    content: [],
+                    structured_content: {
+                      matches: [
+                        {
+                          text: "UTC+00:00 is an identifier for a time offset from UTC of +00:00.",
+                        },
+                      ],
+                    },
+                  },
+                  status: "completed",
+                },
+              };
+            })(),
+          }),
+        }),
+        resumeThread: () => {
+          throw new Error("resumeThread should not be called");
+        },
+      }),
+    });
+
+    await started.done;
+
+    assert.deepEqual(assistantMessages, []);
+    assert.equal(toolCalls.length, 1);
+    assert.equal(toolCalls[0]?.name, "search_query");
+
+    reactionCallback?.("👁", "user-1");
+    assert.deepEqual(edits, [
+      "*Web*  search \"UTC+00:00\"",
+      "*Web*  search \"UTC+00:00\" -> open `en.wikipedia.org/wiki/UTC%2B00%3A00`",
+      "*Web*  search \"UTC+00:00\" -> open `en.wikipedia.org/wiki/UTC%2B00%3A00` -> find \"UTC+00:00 is an identifier for a time offset from UTC of +00:00.\"",
+      [
+        "*Web*  search \"UTC+00:00\" -> open `en.wikipedia.org/wiki/UTC%2B00%3A00` -> find \"UTC+00:00 is an identifier for a time offset from UTC of +00:00.\"",
+        "",
+        "*Search Web*  \"UTC+00:00\"",
+        "",
+        "*UTC+00:00 - Wikipedia*",
+        "`en.wikipedia.org/wiki/UTC%2B00%3A00`",
+        "UTC+00:00 is an identifier for a time offset from UTC of +00:00.",
+        "",
+        "*Open Link*  `en.wikipedia.org/wiki/UTC%2B00%3A00`",
+        "",
+        "*UTC+00:00 - Wikipedia*",
+        "`en.wikipedia.org/wiki/UTC%2B00%3A00`",
+        "UTC+00:00 is an identifier for a time offset from UTC of +00:00.",
+        "",
+        "*Find On Page*  \"UTC+00:00 is an identifier for a time offset from UTC of +00:00.\" in `en.wikipedia.org/wiki/UTC%2B00%3A00`",
+        "",
+        "UTC+00:00 is an identifier for a time offset from UTC of +00:00.",
+      ].join("\n"),
+    ]);
   });
 
   it("surfaces todo_list items as update_plan tool calls", async () => {

@@ -18,7 +18,7 @@ export function shortenPath(p, cwd) {
 }
 
 /**
- * @typedef {"Read" | "Search" | "Files" | "Plan" | "Search Web" | "Open Link" | "Find On Page" | "Search Images"} ToolActivityTitle
+ * @typedef {"Read" | "Search" | "List" | "Plan" | "Search Web" | "Open Link" | "Find On Page" | "Search Images"} ToolActivityTitle
  */
 
 /**
@@ -143,15 +143,17 @@ function formatWebRef(refId) {
 
 /**
  * @param {string} command
- * @returns {string}
+ * @returns {string[]}
  */
-function extractPrimaryShellSegment(command) {
+function extractPrimaryShellSegments(command) {
   const firstLine = command
     .split("\n")
     .map((line) => line.trim())
     .find((line) => line.length > 0) ?? "";
-  const match = firstLine.match(/^(.*?)(?:\s*(?:\|\||&&|\||;)\s+|$)/);
-  return (match?.[1] ?? firstLine).trim();
+  return firstLine
+    .split(/\s*(?:\|\||&&|\||;)\s+/)
+    .map((segment) => segment.trim())
+    .filter((segment) => segment.length > 0);
 }
 
 /**
@@ -329,7 +331,7 @@ function createReadPresentation(path, cwd) {
  * @returns {ActivityPresentation}
  */
 function createListPresentation(path, cwd) {
-  const activity = createActivity("Files", formatDisplayPath(path, cwd));
+  const activity = createActivity("List", formatDisplayPath(path, cwd));
   return {
     kind: "activity",
     toolName: "List",
@@ -365,7 +367,7 @@ function createSearchPresentation(pattern, path, cwd) {
  */
 function createGlobPresentation(pattern, path, cwd) {
   const suffix = path ? ` in ${formatDisplayPath(path, cwd)}` : "";
-  const activity = createActivity("Files", `\`${pattern}\`${suffix}`);
+  const activity = createActivity("List", `\`${pattern}\`${suffix}`);
   return {
     kind: "activity",
     toolName: "List",
@@ -390,13 +392,11 @@ function findLastNonOptionToken(tokens) {
 }
 
 /**
- * @param {string} command
+ * @param {string[]} tokens
  * @param {string | null | undefined} cwd
  * @returns {ActivityPresentation | null}
  */
-export function classifyCommandActivity(command, cwd) {
-  const primaryCommand = extractPrimaryShellSegment(command);
-  const tokens = tokenizeShellWords(primaryCommand);
+function classifySingleCommandActivity(tokens, cwd) {
   const name = tokens[0];
 
   if (!name) {
@@ -444,6 +444,32 @@ export function classifyCommandActivity(command, cwd) {
     default:
       return null;
   }
+}
+
+/**
+ * @param {string} command
+ * @param {string | null | undefined} cwd
+ * @returns {ActivityPresentation | null}
+ */
+export function classifyCommandActivity(command, cwd) {
+  const segments = extractPrimaryShellSegments(command);
+  /** @type {ActivityPresentation | null} */
+  let firstMatch = null;
+
+  for (const segment of segments) {
+    const candidate = classifySingleCommandActivity(tokenizeShellWords(segment), cwd);
+    if (!candidate) {
+      continue;
+    }
+    if (!firstMatch) {
+      firstMatch = candidate;
+    }
+    if (candidate.activity.title === "Search") {
+      return candidate;
+    }
+  }
+
+  return firstMatch;
 }
 
 /**
@@ -698,7 +724,7 @@ function buildSdkPresentation(name, args, cwd) {
         ? createGlobPresentation(args.pattern, typeof args.path === "string" ? args.path : undefined, cwd)
         : null;
     case "WebSearch":
-      return typeof args.query === "string" ? createSearchPresentation(args.query, undefined, cwd) : null;
+      return typeof args.query === "string" ? createWebSearchPresentation(args.query) : null;
     case "update_plan":
       return createPlanPresentation(args);
     case "Bash":

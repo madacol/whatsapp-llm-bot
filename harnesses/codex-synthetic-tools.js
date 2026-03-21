@@ -15,7 +15,7 @@ import { createToolMessage, registerInspectHandler } from "../utils.js";
  *   cwd: string | null,
  * }} input
  * @returns {{
- *   handleAssistantText: (text: string) => Promise<void>,
+ *   handleAssistantText: (text: string) => Promise<boolean>,
  *   handleCommandCompletion: (event: { output?: string }) => void,
  * }}
  */
@@ -30,12 +30,12 @@ export function createCodexSyntheticToolAdapter({ onToolCall, cwd }) {
 
   /**
    * @param {string} text
-   * @returns {Promise<void>}
+   * @returns {Promise<boolean>}
    */
   async function handleAssistantText(text) {
     const syntheticTool = extractSyntheticCodexTool(text);
     if (!syntheticTool) {
-      return;
+      return isInternalToolNarration(text);
     }
 
     const toolCall = {
@@ -50,6 +50,7 @@ export function createCodexSyntheticToolAdapter({ onToolCall, cwd }) {
           presentation: buildToolPresentation(syntheticTool, {}, undefined, cwd, undefined),
         });
       }
+      return true;
   }
 
   /**
@@ -91,4 +92,14 @@ function extractSyntheticCodexTool(text) {
     default:
       return null;
   }
+}
+
+/**
+ * @param {string} text
+ * @returns {boolean}
+ */
+function isInternalToolNarration(text) {
+  const trimmed = text.trim();
+  return /^Using (?:the )?`[^`]+`(?: tool)?\b/i.test(trimmed)
+    || /^Using the [A-Za-z0-9_-]+ tool\b/i.test(trimmed);
 }

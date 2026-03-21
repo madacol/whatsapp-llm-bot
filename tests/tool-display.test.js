@@ -29,16 +29,27 @@ describe("tool display", () => {
     assert.equal(/** @type {CodeContentBlock} */ (bashResult[0]).caption, "*Search*  \"needle\" in `src`");
   });
 
-  it("renders file discovery as Files with an inline target", () => {
+  it("renders file discovery as List with an inline target", () => {
     const bashResult = formatToolCallDisplay(toolCall("Bash", { command: "rg --files src" }), undefined, "/repo");
     assert.ok(Array.isArray(bashResult));
     assert.equal(bashResult[0]?.type, "code");
-    assert.equal(/** @type {CodeContentBlock} */ (bashResult[0]).caption, "*Files*  `src`");
+    assert.equal(/** @type {CodeContentBlock} */ (bashResult[0]).caption, "*List*  `src`");
 
     assert.equal(
       formatSdkToolCall("Glob", { pattern: "*.js", path: "/repo/src" }, "/repo"),
-      "*Files*  `*.js` in `src`",
+      "*List*  `*.js` in `src`",
     );
+  });
+
+  it("prefers the query from piped ripgrep searches over the rg --files segment", () => {
+    const bashResult = formatToolCallDisplay(
+      toolCall("Bash", { command: "rg --files . | rg \"needle\"" }),
+      undefined,
+      "/repo",
+    );
+    assert.ok(Array.isArray(bashResult));
+    assert.equal(bashResult[0]?.type, "code");
+    assert.equal(/** @type {CodeContentBlock} */ (bashResult[0]).caption, "*Search*  \"needle\"");
   });
 
   it("renders web sub-actions with intent-specific labels", () => {

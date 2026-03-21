@@ -337,7 +337,7 @@ describe("buildAgentIoHooks", () => {
     handles[0]?.callback("👁", "user-1");
     assert.equal(handles[0]?.edits.length, 1);
     assert.equal(handles[0]?.edits[0], [
-      "*Files*  `.`",
+      "*List*  `.`",
       "",
       "```bash",
       "ls -a",
