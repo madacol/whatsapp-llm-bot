@@ -28,8 +28,8 @@ describe("startCodexRun", () => {
     const commands = [];
     /** @type {Array<{ command: string, paths: string[] }>} */
     const fileReads = [];
-    /** @type {string[]} */
-    const plans = [];
+    /** @type {LlmChatResponse["toolCalls"]} */
+    const toolCalls = [];
     /** @type {Array<{ path: string, summary?: string, diff?: string, kind?: "add" | "delete" | "update" }>} */
     const fileChanges = [];
     /** @type {string[]} */
@@ -129,8 +129,8 @@ describe("startCodexRun", () => {
         onFileRead: async (event) => {
           fileReads.push(event);
         },
-        onPlan: async (text) => {
-          plans.push(text);
+        onToolCall: async (toolCall) => {
+          toolCalls.push(toolCall);
         },
         onFileChange: async (event) => {
           fileChanges.push(event);
@@ -179,7 +179,16 @@ describe("startCodexRun", () => {
     assert.equal(result.sessionId, "sess-123");
     assert.deepEqual(commands, ["started:apply_patch <<'PATCH'\n*** Begin Patch\n*** Update File: src/app.js\n@@\n-old\n+new\n*** End Patch\nPATCH"]);
     assert.deepEqual(fileReads, [{ command: "sed -n '1,20p' src/app.js", paths: ["src/app.js"] }]);
-    assert.deepEqual(plans, ["Step 1\nStep 2"]);
+    assert.deepEqual(toolCalls, [{
+      id: "todo-1",
+      name: "update_plan",
+      arguments: JSON.stringify({
+        items: [
+          { text: "Step 1", completed: false },
+          { text: "Step 2", completed: true },
+        ],
+      }),
+    }]);
     assert.deepEqual(fileChanges, [{
       path: "src/app.js",
       summary: "src/app.js (update)",
@@ -372,6 +381,178 @@ describe("startCodexRun", () => {
       "*update_plan*",
       "",
       "Plan updated",
+    ].join("\n")]);
+  });
+
+  it("surfaces todo_list items as update_plan tool calls", async () => {
+    /** @type {LlmChatResponse["toolCalls"]} */
+    const toolCalls = [];
+    /** @type {string[]} */
+    const edits = [];
+    /** @type {ReactionCallback | null} */
+    let reactionCallback = null;
+
+    const started = await startCodexRun({
+      chatId: "codex-chat",
+      prompt: "Continue",
+      messages: [{ role: "user", content: [{ type: "text", text: "Continue" }] }],
+      runConfig: {
+        workdir: "/repo",
+      },
+      hooks: {
+        onToolCall: async (toolCall) => {
+          toolCalls.push(toolCall);
+          return /** @type {MessageHandle} */ ({
+            keyId: "tool-msg-3",
+            isImage: false,
+            edit: async (text) => {
+              edits.push(text);
+            },
+            onReaction: (callback) => {
+              reactionCallback = callback;
+              return () => {};
+            },
+          });
+        },
+      },
+    }, {
+      createCodex: () => ({
+        startThread: () => ({
+          id: "sess-123",
+          runStreamed: async () => ({
+            events: (async function* () {
+              yield {
+                type: "item.started",
+                item: {
+                  id: "todo-1",
+                  type: "todo_list",
+                  items: [
+                    { text: "Initialize requested plan state", completed: true },
+                  ],
+                },
+              };
+              yield {
+                type: "item.completed",
+                item: {
+                  id: "todo-1",
+                  type: "todo_list",
+                  items: [
+                    { text: "Initialize requested plan state", completed: true },
+                  ],
+                },
+              };
+            })(),
+          }),
+        }),
+        resumeThread: () => {
+          throw new Error("resumeThread should not be called");
+        },
+      }),
+    });
+
+    await started.done;
+
+    assert.deepEqual(toolCalls, [{
+      id: "todo-1",
+      name: "update_plan",
+      arguments: JSON.stringify({
+        items: [
+          { text: "Initialize requested plan state", completed: true },
+        ],
+      }),
+    }]);
+
+    reactionCallback?.("👁", "user-1");
+    assert.deepEqual(edits, [[
+      "*update_plan*",
+      "",
+      "Initialize requested plan state",
+    ].join("\n")]);
+  });
+
+  it("creates a synthetic write_stdin tool call from announced Codex activity", async () => {
+    /** @type {LlmChatResponse["toolCalls"]} */
+    const toolCalls = [];
+    /** @type {string[]} */
+    const edits = [];
+    /** @type {ReactionCallback[]} */
+    const reactions = [];
+
+    const started = await startCodexRun({
+      chatId: "codex-chat",
+      prompt: "Continue",
+      messages: [{ role: "user", content: [{ type: "text", text: "Continue" }] }],
+      runConfig: {
+        workdir: "/repo",
+      },
+      hooks: {
+        onToolCall: async (toolCall) => {
+          toolCalls.push(toolCall);
+          return /** @type {MessageHandle} */ ({
+            keyId: `tool-msg-${toolCalls.length}`,
+            isImage: false,
+            edit: async (text) => {
+              edits.push(text);
+            },
+            onReaction: (callback) => {
+              reactions.push(callback);
+              return () => {};
+            },
+          });
+        },
+      },
+    }, {
+      createCodex: () => ({
+        startThread: () => ({
+          id: "sess-123",
+          runStreamed: async () => ({
+            events: (async function* () {
+              yield {
+                type: "item.completed",
+                item: {
+                  id: "msg-1",
+                  type: "agent_message",
+                  text: "Using `write_stdin` now to send text through the live session.",
+                },
+              };
+              yield {
+                type: "item.started",
+                item: {
+                  id: "cmd-1",
+                  type: "command_execution",
+                  command: "/bin/zsh -lc cat",
+                  aggregated_output: "",
+                  status: "in_progress",
+                },
+              };
+              yield {
+                type: "item.completed",
+                item: {
+                  id: "cmd-1",
+                  type: "command_execution",
+                  command: "/bin/zsh -lc cat",
+                  aggregated_output: "hello\r\nhello\r\n",
+                  exit_code: 0,
+                  status: "completed",
+                },
+              };
+            })(),
+          }),
+        }),
+        resumeThread: () => {
+          throw new Error("resumeThread should not be called");
+        },
+      }),
+    });
+
+    await started.done;
+
+    assert.deepEqual(toolCalls.map((toolCall) => toolCall.name), ["write_stdin"]);
+    reactions[0]?.("👁", "user-1");
+    assert.deepEqual(edits, [[
+      "*write_stdin*",
+      "",
+      "hello\r\nhello\r\n",
     ].join("\n")]);
   });
 });
