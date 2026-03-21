@@ -54,14 +54,42 @@ export function getPollCreationData(msg) {
 function normalizeSelectOptions(options, currentId) {
   /** @type {Map<string, string>} */
   const labelToId = new Map();
+  /** @type {Set<string>} */
+  const usedLabels = new Set();
   const labels = options.map((option) => {
     const id = typeof option === "string" ? option : option.id;
     const baseLabel = typeof option === "string" ? option : option.label;
-    const label = currentId != null && id === currentId ? `✅ ${baseLabel}` : baseLabel;
+    const preferredLabel = currentId != null && id === currentId ? `✅ ${baseLabel}` : baseLabel;
+    const label = createUniquePollLabel(preferredLabel, usedLabels);
     labelToId.set(label, id);
     return label;
   });
   return { labels, labelToId };
+}
+
+/**
+ * Ensure each poll label is unique so selections map back to the right option ID.
+ * WhatsApp poll votes are reported by option label, so duplicate labels would
+ * otherwise collapse onto the last option stored in the map.
+ * @param {string} preferredLabel
+ * @param {Set<string>} usedLabels
+ * @returns {string}
+ */
+function createUniquePollLabel(preferredLabel, usedLabels) {
+  if (!usedLabels.has(preferredLabel)) {
+    usedLabels.add(preferredLabel);
+    return preferredLabel;
+  }
+
+  let suffix = 2;
+  while (true) {
+    const candidate = `${preferredLabel} (${suffix})`;
+    if (!usedLabels.has(candidate)) {
+      usedLabels.add(candidate);
+      return candidate;
+    }
+    suffix += 1;
+  }
 }
 
 /**
@@ -200,7 +228,8 @@ export function createSelectRuntime() {
             }
           }
           sentPolls.set(pollMsgId, sent);
-          setTimeout(() => sentPolls.delete(pollMsgId), POLL_TTL_MS);
+          const cleanupTimer = setTimeout(() => sentPolls.delete(pollMsgId), POLL_TTL_MS);
+          cleanupTimer.unref?.();
         }
 
         if (!pollMsgId || !pollKey) {
