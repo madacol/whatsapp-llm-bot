@@ -4,16 +4,20 @@ import fs from "node:fs";
 import fsp from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { homedir } from "node:os";
 import { getChatWorkDir } from "../utils.js";
 
 describe("getChatWorkDir", () => {
   /** @type {string | undefined} */
   let originalWorkspacesDir;
+  /** @type {string | undefined} */
+  let originalTesting;
   /** @type {string} */
   let tempDir;
 
   beforeEach(async () => {
     originalWorkspacesDir = process.env.WORKSPACES_DIR;
+    originalTesting = process.env.TESTING;
     tempDir = await fsp.mkdtemp(path.join(os.tmpdir(), "chat-workspaces-"));
     process.env.WORKSPACES_DIR = tempDir;
   });
@@ -23,6 +27,11 @@ describe("getChatWorkDir", () => {
       delete process.env.WORKSPACES_DIR;
     } else {
       process.env.WORKSPACES_DIR = originalWorkspacesDir;
+    }
+    if (originalTesting === undefined) {
+      delete process.env.TESTING;
+    } else {
+      process.env.TESTING = originalTesting;
     }
     await fsp.rm(tempDir, { recursive: true, force: true });
   });
@@ -53,5 +62,15 @@ describe("getChatWorkDir", () => {
     const workdir = getChatWorkDir("12345@g.us");
 
     assert.equal(workdir, namedDir);
+  });
+
+  it("keeps test workspaces out of the real home directory by default", () => {
+    delete process.env.WORKSPACES_DIR;
+    process.env.TESTING = "1";
+
+    const workdir = getChatWorkDir("test-chat");
+
+    assert.ok(workdir.startsWith(path.join(os.tmpdir(), "whatsapp-llm-bot-workspaces-")));
+    assert.equal(workdir.startsWith(path.join(homedir(), "chat-workspaces")), false);
   });
 });
