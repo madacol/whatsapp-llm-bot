@@ -87,7 +87,7 @@ describe("buildAgentIoHooks", () => {
     assert.ok(Array.isArray(sent[0].content));
     const block = /** @type {CodeContentBlock} */ (/** @type {ToolContentBlock[]} */ (sent[0].content)[0]);
     assert.equal(block.type, "code");
-    assert.equal(block.caption, "*Search*\n\"needle\" in `src`");
+    assert.equal(block.caption, "*Search*  \"needle\" in `src`");
     assert.equal(block.code, "rg -n \"needle\" src");
   });
 
@@ -116,7 +116,7 @@ describe("buildAgentIoHooks", () => {
     assert.equal(sent.length, 1);
     assert.equal(sent[0].kind, "send");
     assert.equal(sent[0].source, "tool-call");
-    assert.equal(sent[0].content, "*Read*\n`src/app.js`");
+    assert.equal(sent[0].content, "*Read*  `src/app.js`");
   });
 
   it("renders file change diffs when present", async () => {
@@ -214,8 +214,7 @@ describe("buildAgentIoHooks", () => {
     handles[0]?.callback("👁", "user-1");
     assert.equal(handles[0]?.edits.length, 1);
     assert.equal(handles[0]?.edits[0], [
-      "*Read*",
-      "`src/app.js`",
+      "*Read*  `src/app.js`",
       "",
       "```bash",
       "sed -n '1,20p' src/app.js",
@@ -277,8 +276,7 @@ describe("buildAgentIoHooks", () => {
     handles[0]?.callback("👁", "user-1");
     assert.equal(handles[0]?.edits.length, 1);
     assert.equal(handles[0]?.edits[0], [
-      "*Search*",
-      "\"needle\" in `src`",
+      "*Search*  \"needle\" in `src`",
       "",
       "```bash",
       "rg -n \"needle\" src",
@@ -339,8 +337,7 @@ describe("buildAgentIoHooks", () => {
     handles[0]?.callback("👁", "user-1");
     assert.equal(handles[0]?.edits.length, 1);
     assert.equal(handles[0]?.edits[0], [
-      "*List*",
-      "`.`",
+      "*Files*  `.`",
       "",
       "```bash",
       "ls -a",

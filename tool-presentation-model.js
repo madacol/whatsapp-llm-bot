@@ -18,7 +18,7 @@ export function shortenPath(p, cwd) {
 }
 
 /**
- * @typedef {"Read" | "Search" | "List" | "Plan"} ToolActivityTitle
+ * @typedef {"Read" | "Search" | "Files" | "Plan" | "Search Web" | "Open Link" | "Find On Page" | "Search Images"} ToolActivityTitle
  */
 
 /**
@@ -102,6 +102,12 @@ export function shortenPath(p, cwd) {
  * @returns {string}
  */
 export function formatActivitySummary(activity) {
+  if (activity.lines.length === 0) {
+    return `*${activity.title}*`;
+  }
+  if (activity.lines.length === 1) {
+    return `*${activity.title}*  ${activity.lines[0]}`;
+  }
   return [`*${activity.title}*`, ...activity.lines].join("\n");
 }
 
@@ -120,6 +126,19 @@ function quoteForDisplay(value) {
  */
 function formatDisplayPath(targetPath, cwd) {
   return `\`${shortenPath(targetPath || ".", cwd)}\``;
+}
+
+/**
+ * @param {string} refId
+ * @returns {string}
+ */
+function formatWebRef(refId) {
+  try {
+    const url = new URL(refId);
+    return `\`${url.host}${url.pathname}${url.search}\``;
+  } catch {
+    return `\`${refId}\``;
+  }
 }
 
 /**
@@ -310,7 +329,7 @@ function createReadPresentation(path, cwd) {
  * @returns {ActivityPresentation}
  */
 function createListPresentation(path, cwd) {
-  const activity = createActivity("List", formatDisplayPath(path, cwd));
+  const activity = createActivity("Files", formatDisplayPath(path, cwd));
   return {
     kind: "activity",
     toolName: "List",
@@ -346,7 +365,7 @@ function createSearchPresentation(pattern, path, cwd) {
  */
 function createGlobPresentation(pattern, path, cwd) {
   const suffix = path ? ` in ${formatDisplayPath(path, cwd)}` : "";
-  const activity = createActivity("List", `\`${pattern}\`${suffix}`);
+  const activity = createActivity("Files", `\`${pattern}\`${suffix}`);
   return {
     kind: "activity",
     toolName: "List",
@@ -433,6 +452,113 @@ export function classifyCommandActivity(command, cwd) {
  */
 function isRecord(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+/**
+ * @param {unknown} value
+ * @returns {value is { q: string }}
+ */
+function hasQueryString(value) {
+  return isRecord(value) && typeof value.q === "string";
+}
+
+/**
+ * @param {unknown} value
+ * @returns {value is { ref_id: string, lineno?: number }}
+ */
+function hasOpenRef(value) {
+  return isRecord(value)
+    && typeof value.ref_id === "string"
+    && (value.lineno == null || typeof value.lineno === "number");
+}
+
+/**
+ * @param {unknown} value
+ * @returns {value is { ref_id: string, pattern: string }}
+ */
+function hasFindArgs(value) {
+  return isRecord(value)
+    && typeof value.ref_id === "string"
+    && typeof value.pattern === "string";
+}
+
+/**
+ * @template T
+ * @param {Record<string, unknown>} args
+ * @param {string} key
+ * @param {(value: unknown) => value is T} guard
+ * @returns {T | null}
+ */
+function extractToolArgs(args, key, guard) {
+  if (guard(args)) {
+    return args;
+  }
+  const nested = args[key];
+  if (!Array.isArray(nested) || nested.length === 0) {
+    return null;
+  }
+  return guard(nested[0]) ? nested[0] : null;
+}
+
+/**
+ * @param {string} query
+ * @returns {ActivityPresentation}
+ */
+function createWebSearchPresentation(query) {
+  const activity = createActivity("Search Web", quoteForDisplay(query));
+  return {
+    kind: "activity",
+    toolName: "Search Web",
+    summary: formatActivitySummary(activity),
+    activity,
+    inspectMode: "plain",
+  };
+}
+
+/**
+ * @param {string} refId
+ * @returns {ActivityPresentation}
+ */
+function createOpenLinkPresentation(refId) {
+  const activity = createActivity("Open Link", formatWebRef(refId));
+  return {
+    kind: "activity",
+    toolName: "Open Link",
+    summary: formatActivitySummary(activity),
+    activity,
+    inspectMode: "plain",
+  };
+}
+
+/**
+ * @param {string} pattern
+ * @param {string} refId
+ * @returns {ActivityPresentation}
+ */
+function createFindOnPagePresentation(pattern, refId) {
+  const activity = createActivity("Find On Page", `${quoteForDisplay(pattern)} in ${formatWebRef(refId)}`);
+  return {
+    kind: "activity",
+    toolName: "Find On Page",
+    summary: formatActivitySummary(activity),
+    activity,
+    inspectMode: "plain",
+  };
+}
+
+/**
+ * @param {string} query
+ * @returns {ActivityPresentation}
+ */
+function createImageSearchPresentation(query) {
+  const activity = createActivity("Search Images", quoteForDisplay(query));
+  return {
+    kind: "activity",
+    toolName: "Search Images",
+    summary: formatActivitySummary(activity),
+    activity,
+    inspectMode: "plain",
+  };
 }
 
 /**
@@ -545,6 +671,22 @@ function inferBashInspectMode(command, cwd) {
  */
 function buildSdkPresentation(name, args, cwd) {
   switch (name) {
+    case "search_query": {
+      const queryArgs = extractToolArgs(args, "search_query", hasQueryString);
+      return queryArgs ? createWebSearchPresentation(queryArgs.q) : null;
+    }
+    case "image_query": {
+      const queryArgs = extractToolArgs(args, "image_query", hasQueryString);
+      return queryArgs ? createImageSearchPresentation(queryArgs.q) : null;
+    }
+    case "open": {
+      const openArgs = extractToolArgs(args, "open", hasOpenRef);
+      return openArgs ? createOpenLinkPresentation(openArgs.ref_id) : null;
+    }
+    case "find": {
+      const findArgs = extractToolArgs(args, "find", hasFindArgs);
+      return findArgs ? createFindOnPagePresentation(findArgs.pattern, findArgs.ref_id) : null;
+    }
     case "Read":
       return typeof args.file_path === "string" ? createReadPresentation(args.file_path, cwd) : null;
     case "Grep":

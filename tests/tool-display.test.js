@@ -17,16 +17,50 @@ describe("tool display", () => {
   it("renders read and search activities by tool type instead of generic explored labels", () => {
     assert.equal(
       formatSdkToolCall("Read", { file_path: "/repo/src/app.js" }, "/repo"),
-      "*Read*\n`src/app.js`",
+      "*Read*  `src/app.js`",
     );
     assert.equal(
       formatSdkToolCall("Grep", { pattern: "needle", path: "/repo/src" }, "/repo"),
-      "*Search*\n\"needle\" in `src`",
+      "*Search*  \"needle\" in `src`",
     );
     const bashResult = formatToolCallDisplay(toolCall("Bash", { command: "rg -n \"needle\" src" }), undefined, "/repo");
     assert.ok(Array.isArray(bashResult));
     assert.equal(bashResult[0]?.type, "code");
-    assert.equal(/** @type {CodeContentBlock} */ (bashResult[0]).caption, "*Search*\n\"needle\" in `src`");
+    assert.equal(/** @type {CodeContentBlock} */ (bashResult[0]).caption, "*Search*  \"needle\" in `src`");
+  });
+
+  it("renders file discovery as Files with an inline target", () => {
+    const bashResult = formatToolCallDisplay(toolCall("Bash", { command: "rg --files src" }), undefined, "/repo");
+    assert.ok(Array.isArray(bashResult));
+    assert.equal(bashResult[0]?.type, "code");
+    assert.equal(/** @type {CodeContentBlock} */ (bashResult[0]).caption, "*Files*  `src`");
+
+    assert.equal(
+      formatSdkToolCall("Glob", { pattern: "*.js", path: "/repo/src" }, "/repo"),
+      "*Files*  `*.js` in `src`",
+    );
+  });
+
+  it("renders web sub-actions with intent-specific labels", () => {
+    assert.equal(
+      getToolCallSummary("search_query", {
+        search_query: [{ q: "UTC+00:00" }],
+      }),
+      "*Search Web*  \"UTC+00:00\"",
+    );
+    assert.equal(
+      getToolCallSummary("open", {
+        ref_id: "https://en.wikipedia.org/wiki/UTC%2B00%3A00",
+      }),
+      "*Open Link*  `en.wikipedia.org/wiki/UTC%2B00%3A00`",
+    );
+    assert.equal(
+      getToolCallSummary("find", {
+        ref_id: "https://en.wikipedia.org/wiki/UTC%2B00%3A00",
+        pattern: "UTC+00:00 is an identifier for a time offset from UTC of +00:00.",
+      }),
+      "*Find On Page*  \"UTC+00:00 is an identifier for a time offset from UTC of +00:00.\" in `en.wikipedia.org/wiki/UTC%2B00%3A00`",
+    );
   });
 
   it("shows update_plan contents in summaries from plan-style arguments", () => {
