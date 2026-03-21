@@ -145,6 +145,14 @@ async function executeAndStoreTool({
     }
   };
 
+  if (handle) {
+    const summary = getToolCallSummary(toolName, toolArgs, actionFormatToolCall, workdir ?? null, displayContext);
+    const initialInspectText = formatToolInspectBody(toolName, toolArgs, undefined) ?? undefined;
+    if (initialInspectText) {
+      registerInspectHandler(handle, summary, createToolMessage(toolCall.id, ""), toolName, initialInspectText);
+    }
+  }
+
   try {
     // Resolve image params: look up action schema, replace media refs with actual content blocks
     const tool = await toolRuntime.getTool(toolName);
