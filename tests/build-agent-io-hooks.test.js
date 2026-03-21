@@ -84,7 +84,7 @@ describe("buildAgentIoHooks", () => {
 
     assert.equal(sent.length, 1);
     assert.equal(sent[0].source, "tool-call");
-    assert.equal(sent[0].content, "*Searched*\nSearch \"needle\" in `src`");
+    assert.equal(sent[0].content, "*Search*\n\"needle\" in `src`");
   });
 
   it("does not send a separate success message for completed commands", async () => {
@@ -112,7 +112,7 @@ describe("buildAgentIoHooks", () => {
     assert.equal(sent.length, 1);
     assert.equal(sent[0].kind, "send");
     assert.equal(sent[0].source, "tool-call");
-    assert.equal(sent[0].content, "*Explored*\nRead `src/app.js`");
+    assert.equal(sent[0].content, "*Read*\n`src/app.js`");
   });
 
   it("renders file change diffs when present", async () => {
@@ -210,8 +210,8 @@ describe("buildAgentIoHooks", () => {
     handles[0]?.callback("👁", "user-1");
     assert.equal(handles[0]?.edits.length, 1);
     assert.equal(handles[0]?.edits[0], [
-      "*Explored*",
-      "Read `src/app.js`",
+      "*Read*",
+      "`src/app.js`",
       "",
       "```bash",
       "sed -n '1,20p' src/app.js",
@@ -273,14 +273,17 @@ describe("buildAgentIoHooks", () => {
     handles[0]?.callback("👁", "user-1");
     assert.equal(handles[0]?.edits.length, 1);
     assert.equal(handles[0]?.edits[0], [
-      "*Searched*",
-      "Search \"needle\" in `src`",
+      "*Search*",
+      "\"needle\" in `src`",
       "",
       "```bash",
       "rg -n \"needle\" src",
       "```",
       "",
-      "src/app.js:12:needle",
+      "*src/app.js*",
+      "```",
+      "12: needle",
+      "```",
     ].join("\n"));
   });
 
@@ -332,8 +335,8 @@ describe("buildAgentIoHooks", () => {
     handles[0]?.callback("👁", "user-1");
     assert.equal(handles[0]?.edits.length, 1);
     assert.equal(handles[0]?.edits[0], [
-      "*Explored*",
-      "List `.`",
+      "*List*",
+      "`.`",
       "",
       "```bash",
       "ls -a",

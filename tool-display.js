@@ -57,8 +57,12 @@ export function langFromPath(filePath) {
 }
 
 /**
+ * @typedef {"Read" | "Search" | "List" | "Plan"} ToolActivityTitle
+ */
+
+/**
  * @typedef {{
- *   title: "Explored" | "Searched",
+ *   title: ToolActivityTitle,
  *   lines: string[],
  * }} ToolActivitySummary
  */
@@ -248,12 +252,12 @@ function classifyGrep(tokens) {
 }
 
 /**
- * @param {string} title
+ * @param {ToolActivityTitle} title
  * @param {string} line
  * @returns {ToolActivitySummary}
  */
 function createActivitySummary(title, line) {
-  return { title: /** @type {"Explored" | "Searched"} */ (title), lines: [line] };
+  return { title, lines: [line] };
 }
 
 /**
@@ -262,7 +266,7 @@ function createActivitySummary(title, line) {
  * @returns {ToolActivitySummary}
  */
 function createReadActivity(path, cwd) {
-  return createActivitySummary("Explored", `Read ${formatDisplayPath(path, cwd)}`);
+  return createActivitySummary("Read", formatDisplayPath(path, cwd));
 }
 
 /**
@@ -271,7 +275,7 @@ function createReadActivity(path, cwd) {
  * @returns {ToolActivitySummary}
  */
 function createListActivity(path, cwd) {
-  return createActivitySummary("Explored", `List ${formatDisplayPath(path, cwd)}`);
+  return createActivitySummary("List", formatDisplayPath(path, cwd));
 }
 
 /**
@@ -282,7 +286,18 @@ function createListActivity(path, cwd) {
  */
 function createSearchActivity(pattern, path, cwd) {
   const suffix = path ? ` in ${formatDisplayPath(path, cwd)}` : "";
-  return createActivitySummary("Searched", `Search ${quoteForDisplay(pattern)}${suffix}`);
+  return createActivitySummary("Search", `${quoteForDisplay(pattern)}${suffix}`);
+}
+
+/**
+ * @param {string} pattern
+ * @param {string | undefined} path
+ * @param {string | null | undefined} cwd
+ * @returns {ToolActivitySummary}
+ */
+function createGlobActivity(pattern, path, cwd) {
+  const suffix = path ? ` in ${formatDisplayPath(path, cwd)}` : "";
+  return createActivitySummary("List", `\`${pattern}\`${suffix}`);
 }
 
 /**
@@ -378,11 +393,10 @@ export function classifyToolActivity(name, args, cwd) {
       if (typeof args.pattern !== "string") {
         return null;
       }
-      return createActivitySummary(
-        "Explored",
-        typeof args.path === "string"
-          ? `List \`${args.pattern}\` in ${formatDisplayPath(args.path, cwd)}`
-          : `List \`${args.pattern}\``,
+      return createGlobActivity(
+        args.pattern,
+        typeof args.path === "string" ? args.path : undefined,
+        cwd,
       );
     case "WebSearch":
       return typeof args.query === "string" ? createSearchActivity(args.query, undefined, cwd) : null;
@@ -466,12 +480,82 @@ export function formatSdkToolCall(name, args, cwd) {
     }
     case "close_agent":
     case "resume_agent":
-    case "update_plan":
     case "parallel":
       return `*${name}*`;
+    case "update_plan":
+      return formatUpdatePlanSummary(args);
     default:
       return null;
   }
+}
+
+/**
+ * @param {unknown} value
+ * @returns {value is Record<string, unknown>}
+ */
+function isRecord(value) {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+/**
+ * @param {string} text
+ * @param {string} status
+ * @returns {string}
+ */
+function formatPlanLine(text, status) {
+  switch (status) {
+    case "completed":
+      return `[x] ${text}`;
+    case "in_progress":
+      return `[~] ${text}`;
+    case "pending":
+      return `[ ] ${text}`;
+    default:
+      return `[-] ${text}`;
+  }
+}
+
+/**
+ * @param {Record<string, unknown>} args
+ * @returns {string[]}
+ */
+function getUpdatePlanLines(args) {
+  /** @type {string[]} */
+  const lines = [];
+
+  if (typeof args.explanation === "string" && args.explanation.trim()) {
+    lines.push(`_${args.explanation.trim()}_`);
+  }
+
+  if (Array.isArray(args.plan)) {
+    for (const item of args.plan) {
+      if (!isRecord(item) || typeof item.step !== "string" || typeof item.status !== "string") {
+        continue;
+      }
+      lines.push(formatPlanLine(item.step, item.status));
+    }
+    return lines;
+  }
+
+  if (Array.isArray(args.items)) {
+    for (const item of args.items) {
+      if (!isRecord(item) || typeof item.text !== "string" || typeof item.completed !== "boolean") {
+        continue;
+      }
+      lines.push(formatPlanLine(item.text, item.completed ? "completed" : "pending"));
+    }
+  }
+
+  return lines;
+}
+
+/**
+ * @param {Record<string, unknown>} args
+ * @returns {string}
+ */
+function formatUpdatePlanSummary(args) {
+  const lines = getUpdatePlanLines(args);
+  return lines.length > 0 ? formatActivitySummary({ title: "Plan", lines }) : "*Plan*";
 }
 
 /**
@@ -653,10 +737,9 @@ export function formatToolCallDisplay(toolCall, actionFormatter, cwd, context) {
 
   // Bash tool: render command as a syntax-highlighted image with *Bash* prefix.
   if (name === "Bash" && typeof args.command === "string") {
-    const desc = typeof args.description === "string" ? args.description : null;
+    const summary = getToolCallSummary(name, args, undefined, cwd, context);
     const formatted = formatBashCommand(args.command);
-    const caption = desc ? `*Bash*  _${desc}_` : `*Bash*`;
-    return [{ type: "code", code: formatted, language: "bash", caption }];
+    return [{ type: "code", code: formatted, language: "bash", caption: summary }];
   }
 
   // SDK built-in tools: compact, human-friendly display

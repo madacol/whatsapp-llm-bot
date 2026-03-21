@@ -123,8 +123,8 @@ export function createCodexDisplayHooks({ context, cwd, displayToolCall }) {
     }
 
     await context.send("tool-call", formatActivitySummary({
-      title: "Explored",
-      lines: paths.map((filePath) => `Read \`${shortenPath(filePath, cwd)}\``),
+      title: "Read",
+      lines: paths.map((filePath) => `\`${shortenPath(filePath, cwd)}\``),
     }));
   }
 
