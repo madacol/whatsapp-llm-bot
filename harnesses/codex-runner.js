@@ -4,6 +4,7 @@ import { getToolCallSummary } from "../tool-display.js";
 import { createToolMessage, registerInspectHandler } from "../utils.js";
 import { normalizeCodexEvent } from "./codex-events.js";
 import { createCodexRunState } from "./codex-run-state.js";
+import { createCodexSyntheticToolAdapter } from "./codex-synthetic-tools.js";
 
 const log = createLogger("harness:codex-runner");
 
@@ -91,23 +92,6 @@ function isAbortError(error) {
 }
 
 /**
- * @param {string} text
- * @returns {"write_stdin" | null}
- */
-function extractSyntheticCodexTool(text) {
-  const match = text.match(/^Using `([^`]+)`/);
-  if (!match) {
-    return null;
-  }
-  switch (match[1]) {
-    case "write_stdin":
-      return "write_stdin";
-    default:
-      return null;
-  }
-}
-
-/**
  * Start a Codex SDK-backed run and stream semantic events into harness hooks.
  * @param {{
  *   chatId: string,
@@ -152,8 +136,10 @@ export async function startCodexRun(input, deps = {}) {
     const runState = createCodexRunState({ workdir: input.runConfig?.workdir });
     /** @type {Map<string, { handle: MessageHandle, summary: string, toolName: string }>} */
     const activeTools = new Map();
-    /** @type {Array<{ handle: MessageHandle, summary: string, toolName: string }>} */
-    const pendingSyntheticWriteStdin = [];
+    const syntheticToolAdapter = createCodexSyntheticToolAdapter({
+      onToolCall: hooks.onToolCall,
+      cwd: input.runConfig?.workdir ?? null,
+    });
 
     try {
       for await (const event of streamed.events) {
@@ -172,16 +158,8 @@ export async function startCodexRun(input, deps = {}) {
 
         if (normalized.commandEvent) {
           const dispatch = await runState.handleCommandEvent(normalized.commandEvent);
-          if (normalized.commandEvent.status === "completed" && pendingSyntheticWriteStdin.length > 0) {
-            const synthetic = pendingSyntheticWriteStdin.shift();
-            if (synthetic) {
-              registerInspectHandler(
-                synthetic.handle,
-                synthetic.summary,
-                createToolMessage(`codex-synthetic:${synthetic.toolName}`, normalized.commandEvent.output ?? ""),
-                synthetic.toolName,
-              );
-            }
+          if (normalized.commandEvent.status === "completed") {
+            syntheticToolAdapter.handleCommandCompletion(normalized.commandEvent);
           }
           if (dispatch.fileRead) {
             await hooks.onFileRead(dispatch.fileRead);
@@ -251,22 +229,7 @@ export async function startCodexRun(input, deps = {}) {
         }
 
         if (normalized.assistantText) {
-          const syntheticTool = extractSyntheticCodexTool(normalized.assistantText);
-          if (syntheticTool) {
-            const toolCall = {
-              id: `codex-synthetic:${syntheticTool}:${activeTools.size + pendingSyntheticWriteStdin.length + 1}`,
-              name: syntheticTool,
-              arguments: "{}",
-            };
-            const handle = await hooks.onToolCall(toolCall);
-            if (handle && syntheticTool === "write_stdin") {
-              pendingSyntheticWriteStdin.push({
-                handle,
-                summary: getCodexToolSummary(syntheticTool, {}, input.runConfig?.workdir ?? null),
-                toolName: syntheticTool,
-              });
-            }
-          }
+          await syntheticToolAdapter.handleAssistantText(normalized.assistantText);
           lastAssistantText = normalized.assistantText;
           await hooks.onLlmResponse(normalized.assistantText);
         }
