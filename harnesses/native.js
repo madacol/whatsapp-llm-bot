@@ -94,12 +94,13 @@ async function tryEdit(handle, text, toolName) {
  *   handle?: MessageHandle,
  *   actionFormatToolCall?: (params: Record<string, any>) => string,
  *   workdir?: string | null,
+ *   sandboxMode?: HarnessRunConfig["sandboxMode"] | null,
  * }} params
  * @returns {Promise<boolean | undefined>} The autoContinue value
  */
 async function executeAndStoreTool({
   session, llmConfig, toolCall, messages, mediaRegistry, hooks, agentDepth,
-  handle, actionFormatToolCall, workdir,
+  handle, actionFormatToolCall, workdir, sandboxMode,
 }) {
   const { chatId, context, updateToolMessage } = session;
   const { toolRuntime } = llmConfig;
@@ -149,6 +150,8 @@ async function executeAndStoreTool({
     const functionResponse = await toolRuntime.executeTool(toolName, context, resolvedArgs, {
       toolCallId: toolCall.id,
       agentDepth,
+      workdir: workdir ?? null,
+      sandboxMode: sandboxMode ?? null,
     });
     log.debug("response", functionResponse);
 
@@ -359,6 +362,7 @@ async function processLlmResponse({ session, llmConfig, messages, mediaRegistry,
         handle: state?.handle,
         actionFormatToolCall: state?.formatToolCall,
         workdir,
+        sandboxMode: runConfig?.sandboxMode ?? "workspace-write",
       });
       if (!shouldContinue) continueProcessing = false;
     }

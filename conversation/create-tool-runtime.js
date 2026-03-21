@@ -49,6 +49,8 @@ export function createToolRuntime({ tools, resolveTool, executeActionFn, llmClie
         actionResolver: resolveTool,
         llmClient,
         agentDepth: options.agentDepth,
+        workdir: options.workdir ?? null,
+        sandboxMode: options.sandboxMode ?? null,
       });
     },
   };

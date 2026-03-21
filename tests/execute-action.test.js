@@ -149,6 +149,71 @@ describe("executeAction", () => {
     assert.equal(result, "confirmed result");
   });
 
+  it("prompts before a workspace escape even for auto-executed tools", async () => {
+    /** @type {string[]} */
+    const confirmations = [];
+    const resolver = createResolver({
+      write_file: {
+        name: "write_file",
+        description: "writes a file",
+        parameters: { type: "object", properties: {} },
+        permissions: { autoExecute: true },
+        action_fn: async () => "written",
+      },
+    });
+    const ctx = createMockExecuteActionContext({
+      confirm: async (message) => {
+        confirmations.push(message);
+        return false;
+      },
+    });
+
+    const { result } = await executeAction("write_file", ctx, {
+      file_path: "/tmp/out.txt",
+      content: "x",
+    }, {
+      actionResolver: resolver,
+      workdir: "/repo",
+      sandboxMode: "workspace-write",
+    });
+
+    assert.match(result, /sandbox escape was denied/i);
+    assert.equal(confirmations.length, 1);
+    assert.match(confirmations[0] ?? "", /Sandbox escape request/);
+    assert.match(confirmations[0] ?? "", /\/tmp\/out\.txt/);
+  });
+
+  it("does not prompt for in-workspace file access", async () => {
+    let confirmCount = 0;
+    const resolver = createResolver({
+      write_file: {
+        name: "write_file",
+        description: "writes a file",
+        parameters: { type: "object", properties: {} },
+        permissions: { autoExecute: true },
+        action_fn: async () => "written",
+      },
+    });
+    const ctx = createMockExecuteActionContext({
+      confirm: async () => {
+        confirmCount += 1;
+        return true;
+      },
+    });
+
+    const { result } = await executeAction("write_file", ctx, {
+      file_path: "/repo/out.txt",
+      content: "x",
+    }, {
+      actionResolver: resolver,
+      workdir: "/repo",
+      sandboxMode: "workspace-write",
+    });
+
+    assert.equal(result, "written");
+    assert.equal(confirmCount, 0);
+  });
+
   it("passes result through correctly", async () => {
     const resolver = createResolver({
       result_action: {

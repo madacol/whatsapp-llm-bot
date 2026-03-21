@@ -29,6 +29,7 @@ import {
   createClaudeAgentSdkHarness,
   extractToolResultText,
   extractToolResultFromEvent,
+  handleSandboxEscapeApproval,
   hasTextField,
 } from "../harnesses/claude-agent-sdk.js";
 
@@ -272,5 +273,40 @@ describe("extractToolResultFromEvent", () => {
     const { toolUseId, resultText } = extractToolResultFromEvent(event);
     assert.equal(toolUseId, "agent-tool-999");
     assert.equal(resultText, "some output");
+  });
+});
+
+describe("handleSandboxEscapeApproval", () => {
+  it("denies the tool call when the user rejects the sandbox escape", async () => {
+    const result = await handleSandboxEscapeApproval({
+      toolName: "Bash",
+      kind: "command",
+      summary: "Run a shell command that targets `/tmp` outside the workspace `/repo`.",
+      command: "ls /tmp",
+      target: "/tmp",
+      workdir: "/repo",
+    }, { command: "ls /tmp" }, async () => "❌ Deny");
+
+    assert.deepEqual(result, {
+      behavior: "deny",
+      message: "User denied sandbox escape for Bash.",
+    });
+  });
+
+  it("preserves the original SDK input when the user allows the sandbox escape", async () => {
+    const input = { command: "ls /tmp" };
+    const result = await handleSandboxEscapeApproval({
+      toolName: "Bash",
+      kind: "command",
+      summary: "Run a shell command that targets `/tmp` outside the workspace `/repo`.",
+      command: "ls /tmp",
+      target: "/tmp",
+      workdir: "/repo",
+    }, input, async () => "✅ Allow");
+
+    assert.deepEqual(result, {
+      behavior: "allow",
+      updatedInput: input,
+    });
   });
 });

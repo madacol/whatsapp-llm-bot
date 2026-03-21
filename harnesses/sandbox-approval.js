@@ -1,0 +1,232 @@
+import path from "node:path";
+
+/** @typedef {"path" | "command"} SandboxEscapeKind */
+
+/**
+ * @typedef {{
+ *   toolName: string,
+ *   kind: SandboxEscapeKind,
+ *   summary: string,
+ *   workdir: string,
+ *   target?: string,
+ *   command?: string,
+ * }} SandboxEscapeRequest
+ */
+
+/**
+ * Determine whether a tool invocation wants to operate outside the current workspace boundary.
+ * Returns null when the invocation stays within the workspace or when full access is enabled.
+ * @param {string} toolName
+ * @param {Record<string, unknown>} input
+ * @param {{ workdir?: string | null, sandboxMode?: HarnessRunConfig["sandboxMode"] | null }} options
+ * @returns {SandboxEscapeRequest | null}
+ */
+export function getSandboxEscapeRequest(toolName, input, options) {
+  const sandboxMode = options.sandboxMode ?? "workspace-write";
+  const workdir = typeof options.workdir === "string" && options.workdir.trim()
+    ? path.resolve(options.workdir)
+    : null;
+
+  if (!workdir || sandboxMode === "danger-full-access") {
+    return null;
+  }
+
+  const normalizedToolName = toolName.trim();
+
+  if (isFileBoundaryTool(normalizedToolName)) {
+    const filePath = extractPathInput(input);
+    if (!filePath) {
+      return null;
+    }
+    const escapedTarget = resolveEscapedPath(filePath, workdir);
+    if (!escapedTarget) {
+      return null;
+    }
+    return {
+      toolName: normalizedToolName,
+      kind: "path",
+      summary: `Access \`${escapedTarget}\` outside the workspace \`${workdir}\`.`,
+      target: escapedTarget,
+      workdir,
+    };
+  }
+
+  if (isShellTool(normalizedToolName)) {
+    const command = extractCommandInput(input);
+    if (!command) {
+      return null;
+    }
+    const escapedTarget = findEscapedShellTarget(command, workdir);
+    if (!escapedTarget) {
+      return null;
+    }
+    return {
+      toolName: normalizedToolName,
+      kind: "command",
+      summary: `Run a shell command that targets \`${escapedTarget}\` outside the workspace \`${workdir}\`.`,
+      command,
+      target: escapedTarget,
+      workdir,
+    };
+  }
+
+  return null;
+}
+
+/**
+ * Format a confirmation message for a sandbox escape request.
+ * @param {SandboxEscapeRequest} request
+ * @returns {string}
+ */
+export function formatSandboxEscapeConfirmMessage(request) {
+  /** @type {string[]} */
+  const lines = [
+    "⚠️ *Sandbox escape request*",
+    "",
+    `\`${request.toolName}\` wants to leave the workspace boundary.`,
+    "",
+    request.summary,
+  ];
+
+  if (request.command) {
+    lines.push("", "```bash", request.command, "```");
+  }
+
+  lines.push("", "React 👍 to allow or 👎 to deny.");
+  return lines.join("\n");
+}
+
+/**
+ * @param {string} toolName
+ * @returns {boolean}
+ */
+function isFileBoundaryTool(toolName) {
+  return new Set([
+    "read_file",
+    "write_file",
+    "edit_file",
+    "Read",
+    "Write",
+    "Edit",
+    "NotebookEdit",
+  ]).has(toolName);
+}
+
+/**
+ * @param {string} toolName
+ * @returns {boolean}
+ */
+function isShellTool(toolName) {
+  return toolName === "run_bash" || toolName === "Bash";
+}
+
+/**
+ * @param {Record<string, unknown>} input
+ * @returns {string | null}
+ */
+function extractPathInput(input) {
+  const candidateKeys = ["file_path", "path", "notebook_path"];
+  for (const key of candidateKeys) {
+    const value = input[key];
+    if (typeof value === "string" && value.trim()) {
+      return value;
+    }
+  }
+  return null;
+}
+
+/**
+ * @param {Record<string, unknown>} input
+ * @returns {string | null}
+ */
+function extractCommandInput(input) {
+  const value = input.command;
+  return typeof value === "string" && value.trim() ? value : null;
+}
+
+/**
+ * @param {string} candidatePath
+ * @param {string} workdir
+ * @returns {string | null}
+ */
+function resolveEscapedPath(candidatePath, workdir) {
+  const resolvedPath = path.resolve(workdir, candidatePath);
+  return isPathInsideWorkspace(resolvedPath, workdir) ? null : resolvedPath;
+}
+
+/**
+ * @param {string} command
+ * @param {string} workdir
+ * @returns {string | null}
+ */
+function findEscapedShellTarget(command, workdir) {
+  const cdMatch = command.match(/(?:^|[;&|]\s*|\s)cd\s+(?<target>"[^"]+"|'[^']+'|`[^`]+`|[^\s;&|]+)/);
+  const cdTarget = stripShellQuotes(cdMatch?.groups?.target ?? null);
+  if (cdTarget) {
+    const escapedCdTarget = resolveShellPathEscape(cdTarget, workdir);
+    if (escapedCdTarget) {
+      return cdTarget;
+    }
+  }
+
+  const pathMatches = command.matchAll(/(?<target>~\/[^\s;&|]*|\/[^\s;&|]*|\.\.\/[^\s;&|]*|\.\.(?:$|(?=[\s;&|])))/g);
+  for (const match of pathMatches) {
+    const candidate = stripShellQuotes(match.groups?.target ?? null);
+    if (!candidate) {
+      continue;
+    }
+    const escapedCandidate = resolveShellPathEscape(candidate, workdir);
+    if (escapedCandidate) {
+      return candidate;
+    }
+  }
+
+  return null;
+}
+
+/**
+ * @param {string | null} value
+ * @returns {string | null}
+ */
+function stripShellQuotes(value) {
+  if (!value) {
+    return null;
+  }
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return null;
+  }
+  const firstChar = trimmed[0];
+  const lastChar = trimmed.at(-1);
+  if ((firstChar === "\"" || firstChar === "'" || firstChar === "`") && firstChar === lastChar) {
+    return trimmed.slice(1, -1);
+  }
+  return trimmed;
+}
+
+/**
+ * @param {string} candidate
+ * @param {string} workdir
+ * @returns {string | null}
+ */
+function resolveShellPathEscape(candidate, workdir) {
+  if (candidate.startsWith("~/")) {
+    return candidate;
+  }
+  if (!candidate.startsWith("/") && !candidate.startsWith("..")) {
+    return null;
+  }
+  const resolvedPath = path.resolve(workdir, candidate);
+  return isPathInsideWorkspace(resolvedPath, workdir) ? null : resolvedPath;
+}
+
+/**
+ * @param {string} candidatePath
+ * @param {string} workdir
+ * @returns {boolean}
+ */
+function isPathInsideWorkspace(candidatePath, workdir) {
+  const relativePath = path.relative(workdir, candidatePath);
+  return relativePath === ""
+    || (!relativePath.startsWith("..") && !path.isAbsolute(relativePath));
+}
