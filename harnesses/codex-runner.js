@@ -1,6 +1,7 @@
 import { Codex } from "@openai/codex-sdk";
 import { createLogger } from "../logger.js";
-import { formatToolInspectBody, getToolCallSummary } from "../tool-display.js";
+import { buildToolPresentation } from "../tool-presentation-model.js";
+import { formatToolPresentationInspect, formatToolPresentationSummary } from "../whatsapp/tool-presenter.js";
 import { createToolMessage, registerInspectHandler } from "../utils.js";
 import { normalizeCodexEvent } from "./codex-events.js";
 import { analyzeCodexCommand } from "./codex-command-semantics.js";
@@ -210,7 +211,7 @@ async function runCodexAttempt(input) {
   /** @type {string | null} */
   let failureMessage = null;
   const runState = createCodexRunState({ workdir: input.runConfig?.workdir });
-  /** @type {Map<string, { handle: MessageHandle, summary: string, toolName: string, args: Record<string, unknown> }>} */
+  /** @type {Map<string, { handle: MessageHandle, presentation: import("../tool-presentation-model.js").ToolPresentation }>} */
   const activeTools = new Map();
   const syntheticToolAdapter = createCodexSyntheticToolAdapter({
     onToolCall: input.hooks.onToolCall,
@@ -259,11 +260,14 @@ async function runCodexAttempt(input) {
       }
 
       if (normalized.toolEvent) {
-        const currentSummary = getCodexToolSummary(
+        const currentPresentation = buildToolPresentation(
           normalized.toolEvent.name,
           normalized.toolEvent.arguments,
+          undefined,
           input.runConfig?.workdir ?? null,
+          undefined,
         );
+        const currentSummary = formatToolPresentationSummary(currentPresentation);
         if (normalized.toolEvent.status === "started") {
           const toolCall = {
             id: normalized.toolEvent.id,
@@ -272,11 +276,7 @@ async function runCodexAttempt(input) {
           };
           const handle = await input.hooks.onToolCall(toolCall);
           if (handle) {
-            const initialInspectText = formatToolInspectBody(
-              normalized.toolEvent.name,
-              normalized.toolEvent.arguments,
-              undefined,
-            );
+            const initialInspectText = formatToolPresentationInspect(currentPresentation, undefined) ?? undefined;
             if (initialInspectText) {
               registerInspectHandler(
                 handle,
@@ -288,9 +288,7 @@ async function runCodexAttempt(input) {
             }
             activeTools.set(normalized.toolEvent.id, {
               handle,
-              summary: currentSummary,
-              toolName: normalized.toolEvent.name,
-              args: normalized.toolEvent.arguments,
+              presentation: currentPresentation,
             });
           }
         } else {
@@ -305,31 +303,28 @@ async function runCodexAttempt(input) {
             if (handle) {
               activeTool = {
                 handle,
-                summary: currentSummary,
-                toolName: normalized.toolEvent.name,
-                args: normalized.toolEvent.arguments,
+                presentation: currentPresentation,
               };
             }
           }
-          if (activeTool && activeTool.summary !== currentSummary) {
+          if (activeTool && formatToolPresentationSummary(activeTool.presentation) !== currentSummary) {
             try {
               await activeTool.handle.edit(currentSummary);
             } catch {
               // best-effort — inspect still works without an in-place update
             }
-            activeTool.summary = currentSummary;
+            activeTool.presentation = currentPresentation;
           }
           if (activeTool && normalized.toolEvent.output) {
-            const inspectText = formatToolInspectBody(
-              activeTool.toolName,
-              activeTool.args,
+            const inspectText = formatToolPresentationInspect(
+              activeTool.presentation,
               normalized.toolEvent.output,
             ) ?? undefined;
             registerInspectHandler(
               activeTool.handle,
               currentSummary,
               createToolMessage(normalized.toolEvent.id, normalized.toolEvent.output),
-              activeTool.toolName,
+              activeTool.presentation.toolName,
               inspectText,
             );
           }
@@ -476,15 +471,4 @@ class CodexSandboxDeniedError extends Error {
     super(message);
     this.name = "CodexSandboxDeniedError";
   }
-}
-
-/**
- * @param {string} name
- * @param {Record<string, unknown>} args
- * @param {string | null} cwd
- * @returns {string}
- */
-function getCodexToolSummary(name, args, cwd) {
-  const summary = getToolCallSummary(name, args, undefined, cwd);
-  return summary === name ? `*${name}*` : summary;
 }

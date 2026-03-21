@@ -140,11 +140,11 @@ describe("formatSdkToolCall", () => {
   it("formats read and search tools as semantic activity summaries", () => {
     assert.equal(
       formatSdkToolCall("Read", { file_path: "/repo/src/app.js" }, "/repo"),
-      "*Explored*\nRead `src/app.js`",
+      "*Read*\n`src/app.js`",
     );
     assert.equal(
       formatSdkToolCall("Grep", { pattern: "needle", path: "/repo/src" }, "/repo"),
-      "*Searched*\nSearch \"needle\" in `src`",
+      "*Search*\n\"needle\" in `src`",
     );
   });
 });
@@ -206,6 +206,9 @@ describe("formatToolCallDisplay", () => {
 
   it("renders classified Bash search commands as semantic activity summaries", () => {
     const result = formatToolCallDisplay(tc("Bash", { command: "rg -n \"needle\" src" }));
-    assert.equal(result, "*Searched*\nSearch \"needle\" in `src`");
+    assert.ok(Array.isArray(result));
+    const block = /** @type {CodeContentBlock} */ (result[0]);
+    assert.equal(block.type, "code");
+    assert.equal(block.caption, "*Search*\n\"needle\" in `src`");
   });
 });

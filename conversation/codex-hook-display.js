@@ -1,11 +1,12 @@
-import { formatActivitySummary, getToolCallSummary, langFromPath, shortenPath } from "../tool-display.js";
-import { createToolMessage, formatCommandInspectText, registerInspectHandler } from "../utils.js";
+import { buildCommandPresentation, buildMultiReadActivity, buildReadToolPresentation, formatActivitySummary, shortenPath } from "../tool-presentation-model.js";
+import { langFromPath, formatToolPresentationInspect, formatToolPresentationSummary } from "../whatsapp/tool-presenter.js";
+import { createToolMessage, registerInspectHandler } from "../utils.js";
 
 /**
  * @typedef {{
  *   handle: MessageHandle,
- *   summary: string,
- *   toolName: string,
+ *   displayPresentation: import("../tool-presentation-model.js").ToolPresentation,
+ *   inspectPresentation: import("../tool-presentation-model.js").ToolPresentation,
  * }} PendingInspectEntry
  */
 
@@ -74,8 +75,8 @@ export function createCodexDisplayHooks({ context, cwd, displayToolCall }) {
       if (handle) {
         rememberInspect(command, {
           handle,
-          summary: getToolCallSummary("Bash", { command }, undefined, cwd),
-          toolName: "Bash",
+          displayPresentation: buildCommandPresentation(command, cwd),
+          inspectPresentation: buildCommandPresentation(command, cwd),
         });
       }
       return handle;
@@ -83,12 +84,14 @@ export function createCodexDisplayHooks({ context, cwd, displayToolCall }) {
 
     const inspectEntry = consumeInspect(command);
     if (inspectEntry) {
+      const summary = formatToolPresentationSummary(inspectEntry.displayPresentation);
+      const inspectText = formatToolPresentationInspect(inspectEntry.inspectPresentation, output ?? "") ?? undefined;
       registerInspectHandler(
         inspectEntry.handle,
-        inspectEntry.summary,
+        summary,
         createToolMessage(`codex-command:${command}`, output ?? ""),
-        inspectEntry.toolName,
-        formatCommandInspectText(command, output, inspectEntry.toolName),
+        inspectEntry.inspectPresentation.toolName,
+        inspectText,
       );
     }
 
@@ -115,17 +118,14 @@ export function createCodexDisplayHooks({ context, cwd, displayToolCall }) {
       if (handle) {
         rememberInspect(command, {
           handle,
-          summary: getToolCallSummary("Read", { file_path: filePath }, undefined, cwd),
-          toolName: "Read",
+          displayPresentation: buildReadToolPresentation(filePath, cwd),
+          inspectPresentation: buildCommandPresentation(command, cwd),
         });
       }
       return;
     }
 
-    await context.send("tool-call", formatActivitySummary({
-      title: "Read",
-      lines: paths.map((filePath) => `\`${shortenPath(filePath, cwd)}\``),
-    }));
+    await context.send("tool-call", formatActivitySummary(buildMultiReadActivity(paths, cwd)));
   }
 
   /**

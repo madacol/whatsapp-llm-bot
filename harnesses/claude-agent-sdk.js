@@ -14,7 +14,8 @@ import { query } from "@anthropic-ai/claude-agent-sdk";
 import { randomUUID } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { NO_OP_HOOKS } from "./native.js";
-import { formatToolInspectBody, getToolCallSummary } from "../tool-display.js";
+import { buildToolPresentation } from "../tool-presentation-model.js";
+import { formatToolPresentationInspect, formatToolPresentationSummary } from "../whatsapp/tool-presenter.js";
 import { createLogger } from "../logger.js";
 import { extractLastUserText } from "../message-formatting.js";
 import { createToolMessage, errorToString, registerInspectHandler } from "../utils.js";
@@ -215,8 +216,7 @@ async function buildSystemPrompt(llmConfig, chatId, senderIds) {
  * @typedef {{
  *   handle?: MessageHandle,
  *   toolName: string,
- *   summary?: string,
- *   toolArgs?: Record<string, unknown>,
+ *   presentation?: import("../tool-presentation-model.js").ToolPresentation,
  *   filePath?: string,
  * }} ActiveToolEntry
  */
@@ -758,11 +758,18 @@ export function createClaudeAgentSdkHarness() {
                 // Display tool call and store handle for inspect handler
                 if (toolUseId) {
                   const toolCall = { id: toolUseId, name: input.tool_name, arguments: JSON.stringify(toolInput) };
-                  const summary = getToolCallSummary(input.tool_name, toolInput, undefined, workdir, displayContext);
+                  const presentation = buildToolPresentation(
+                    input.tool_name,
+                    toolInput,
+                    undefined,
+                    workdir,
+                    displayContext,
+                  );
+                  const summary = formatToolPresentationSummary(presentation);
                   /** @type {MessageHandle | undefined} */
                   const handle = await hooks.onToolCall(toolCall, undefined, displayContext) ?? undefined;
                   if (handle) {
-                    const initialInspectText = formatToolInspectBody(input.tool_name, toolInput, undefined);
+                    const initialInspectText = formatToolPresentationInspect(presentation, undefined) ?? undefined;
                     if (initialInspectText) {
                       registerInspectHandler(
                         handle,
@@ -776,8 +783,7 @@ export function createClaudeAgentSdkHarness() {
                   activeTools.set(toolUseId, {
                     handle: handle ?? undefined,
                     toolName: input.tool_name,
-                    summary,
-                    toolArgs: toolInput,
+                    presentation,
                     ...(filePath && { filePath }),
                   });
                 }
@@ -1205,9 +1211,11 @@ async function handleUserEvent(event, ctx) {
 
     // Register 👁 react-to-inspect on the tool-call message handle
     if (active?.handle) {
-      const summary = active.summary ?? `*${active.toolName}*`;
-      const inspectText = active.toolArgs
-        ? formatToolInspectBody(active.toolName, active.toolArgs, resultText) ?? undefined
+      const summary = active.presentation
+        ? formatToolPresentationSummary(active.presentation)
+        : `*${active.toolName}*`;
+      const inspectText = active.presentation
+        ? formatToolPresentationInspect(active.presentation, resultText) ?? undefined
         : undefined;
       registerInspectHandler(active.handle, summary, toolMsg, active.toolName, inspectText);
     } else if (active) {
