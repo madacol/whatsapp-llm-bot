@@ -1,4 +1,4 @@
-import { mkdirSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, renameSync } from "node:fs";
 import { homedir } from "node:os";
 import { resolve } from "node:path";
 import config from "./config.js";
@@ -8,6 +8,8 @@ import { formatCommandInspectText as formatWhatsappCommandInspectText } from "./
 /** Workspaces live outside the bot project so the SDK's upward CLAUDE.md
  *  traversal never reaches the bot's own CLAUDE.md / settings. */
 const DEFAULT_WORKSPACES_DIR = resolve(homedir(), "chat-workspaces");
+const WORKSPACE_NAME_DELIMITER = "--";
+const MAX_WORKSPACE_NAME_PREFIX_LENGTH = 80;
 
 /** @returns {string} */
 function getWorkspacesDir() {
@@ -15,18 +17,83 @@ function getWorkspacesDir() {
 }
 
 /**
+ * Turn a chat title into a readable filesystem-safe prefix.
+ * @param {string | null | undefined} chatName
+ * @returns {string}
+ */
+function sanitizeWorkspaceName(chatName) {
+  if (typeof chatName !== "string") return "";
+  return chatName
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^A-Za-z0-9._ -]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, MAX_WORKSPACE_NAME_PREFIX_LENGTH)
+    .trim();
+}
+
+/**
+ * Build the preferred workspace directory name for a chat.
+ * The raw chat ID stays in the suffix so the path remains stable and unique.
+ * @param {string} chatId
+ * @param {string | null | undefined} chatName
+ * @returns {string}
+ */
+function getWorkspaceDirName(chatId, chatName) {
+  const sanitizedChatName = sanitizeWorkspaceName(chatName);
+  return sanitizedChatName
+    ? `${sanitizedChatName}${WORKSPACE_NAME_DELIMITER}${chatId}`
+    : chatId;
+}
+
+/**
+ * Reuse an already-named workspace so callers without chat metadata still land
+ * in the same directory as the main chat run.
+ * @param {string} workspacesDir
+ * @param {string} chatId
+ * @returns {string | null}
+ */
+function findNamedWorkspaceDir(workspacesDir, chatId) {
+  const suffix = `${WORKSPACE_NAME_DELIMITER}${chatId}`;
+  if (!existsSync(workspacesDir)) return null;
+  for (const entry of readdirSync(workspacesDir, { withFileTypes: true })) {
+    if (entry.isDirectory() && entry.name.endsWith(suffix)) {
+      return resolve(workspacesDir, entry.name);
+    }
+  }
+  return null;
+}
+
+/**
  * Return (and lazily create) a unique working directory for a chat.
- * Falls back to `explicitCwd` when set, otherwise `~/chat-workspaces/<chatId>/`.
+ * Falls back to `explicitCwd` when set, otherwise
+ * `~/chat-workspaces/<chat-name>--<chatId>/` when a title is available or
+ * `~/chat-workspaces/<chatId>/` as a fallback.
  *
  * The directory is outside the bot's project tree so the SDK treats each
  * workspace as an independent project root (no inherited CLAUDE.md).
  * @param {string} chatId
  * @param {string | null | undefined} [explicitCwd]
+ * @param {string | null | undefined} [chatName]
  * @returns {string} Absolute path to the chat's working directory
  */
-export function getChatWorkDir(chatId, explicitCwd) {
+export function getChatWorkDir(chatId, explicitCwd, chatName) {
   if (explicitCwd) return resolve(explicitCwd);
-  const dir = resolve(getWorkspacesDir(), chatId);
+  const workspacesDir = getWorkspacesDir();
+  mkdirSync(workspacesDir, { recursive: true });
+
+  const existingNamedDir = findNamedWorkspaceDir(workspacesDir, chatId);
+  if (existingNamedDir) return existingNamedDir;
+
+  const legacyDir = resolve(workspacesDir, chatId);
+  const dir = resolve(workspacesDir, getWorkspaceDirName(chatId, chatName));
+
+  if (dir !== legacyDir && existsSync(legacyDir) && !existsSync(dir)) {
+    renameSync(legacyDir, dir);
+    return dir;
+  }
+
   mkdirSync(dir, { recursive: true });
   return dir;
 }
