@@ -65,7 +65,7 @@ describe("tool display", () => {
     assert.equal(/** @type {CodeContentBlock} */ (result[0]).code, "date -u +%FT%TZ");
   });
 
-  it("summarizes multiline bash commands without showing the full body", () => {
+  it("keeps multiline bash summaries short while rendering the full command image", () => {
     const args = {
         command: "apply_patch <<'PATCH'\n*** Begin Patch\n*** End Patch\nPATCH",
       };
@@ -78,8 +78,8 @@ describe("tool display", () => {
     assert.equal(result[0]?.type, "code");
     const block = /** @type {CodeContentBlock} */ (result[0]);
     assert.equal(block.caption, "*Bash*  `apply_patch <<'PATCH'`  _+3 lines_");
-    assert.ok(block.code.includes("# +3 more lines"), block.code);
-    assert.ok(!block.code.includes("*** Begin Patch"), block.code);
+    assert.ok(block.code.includes("*** Begin Patch"), block.code);
+    assert.ok(block.code.includes("*** End Patch"), block.code);
   });
 });
 

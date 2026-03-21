@@ -624,23 +624,6 @@ function formatBashSummary(command) {
 }
 
 /**
- * @param {string} command
- * @returns {string}
- */
-function formatBashPreviewCommand(command) {
-  const lines = command
-    .split("\n")
-    .map((line) => line.trimEnd())
-    .filter((line) => line.trim().length > 0);
-  if (lines.length <= 1) {
-    return formatBashCommand(command);
-  }
-  const firstLine = lines[0] ?? "";
-  const extraLines = lines.length - 1;
-  return formatBashCommand(`${firstLine}\n# +${extraLines} more line${extraLines === 1 ? "" : "s"}`);
-}
-
-/**
  * @param {string} name
  * @param {Record<string, unknown>} args
  * @param {string | undefined} output
@@ -834,11 +817,10 @@ export function formatToolCallDisplay(toolCall, actionFormatter, cwd, context) {
 
   const name = toolCall.name;
 
-  // Bash tool: render a compact preview image; full command stays in inspect.
+  // Bash tool: render the full command as an image from the start.
   if (name === "Bash" && typeof args.command === "string") {
     const summary = getToolCallSummary(name, args, undefined, cwd, context);
-    const preview = formatBashPreviewCommand(args.command);
-    return [{ type: "code", code: preview, language: "bash", caption: summary }];
+    return [{ type: "code", code: formatBashCommand(args.command), language: "bash", caption: summary }];
   }
 
   const activity = classifyToolActivity(name, args, cwd);

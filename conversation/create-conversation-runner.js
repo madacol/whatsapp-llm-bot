@@ -36,6 +36,23 @@ function isTextBlock(block) {
 }
 
 /**
+ * Extra harness-specific guidance that should be injected into the system prompt.
+ * @param {string} harnessName
+ * @returns {string}
+ */
+export function getHarnessSystemPromptSuffix(harnessName) {
+  if (harnessName !== "codex") {
+    return "";
+  }
+  return [
+    "",
+    "## Codex Harness Notes",
+    "- If a command or file operation needs access outside the current workspace, attempt it normally. The app can pause, ask the user for approval in WhatsApp, and retry with the approved directory.",
+    "- Do not say there is no escalation path just because approval policy is `never` or because direct `sandbox_permissions` arguments are unavailable.",
+  ].join("\n");
+}
+
+/**
  * Resolve the persona and harness for the current chat.
  * @param {import("../store.js").ChatRow | undefined} chatInfo
  * @returns {Promise<{ persona: AgentDefinition | null, harness: AgentHarness }>}
@@ -175,6 +192,7 @@ export function createConversationRunner({ store, llmClient, getActionsFn, execu
       firstBlock.text = formatted.formattedText;
       systemPromptSuffix = formatted.systemPromptSuffix;
     }
+    systemPromptSuffix += getHarnessSystemPromptSuffix(harness.getName());
 
     /** @type {UserMessage} */
     const message = { role: "user", content };
