@@ -144,8 +144,7 @@ function extractToolResultOutput(result) {
 
   if (Array.isArray(result.content)) {
     const textParts = result.content
-      .filter(isCodexEventRecord)
-      .map((block) => typeof block.text === "string" ? block.text : null)
+      .map((block) => extractCodexText(block))
       .filter((text) => typeof text === "string" && text.length > 0);
     if (textParts.length > 0) {
       return textParts.join("\n");
@@ -157,7 +156,7 @@ function extractToolResultOutput(result) {
     return structured;
   }
 
-  return undefined;
+  return extractCodexText(result) ?? undefined;
 }
 
 /**

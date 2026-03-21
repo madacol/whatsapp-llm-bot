@@ -83,6 +83,71 @@ describe("codex events", () => {
     });
   });
 
+  it("extracts structured MCP tool results when no text block is present", () => {
+    assert.deepEqual(normalizeCodexEvent({
+      type: "item.completed",
+      item: {
+        id: "tool-2",
+        type: "mcp_tool_call",
+        server: "functions",
+        tool: "update_plan",
+        arguments: {
+          plan: [{ step: "Do work", status: "completed" }],
+        },
+        result: {
+          content: [],
+          structured_content: {
+            output: "Plan updated",
+          },
+        },
+        status: "completed",
+      },
+    }), {
+      sessionId: null,
+      toolEvent: {
+        id: "tool-2",
+        name: "update_plan",
+        arguments: {
+          plan: [{ step: "Do work", status: "completed" }],
+        },
+        status: "completed",
+        output: "Plan updated",
+      },
+    });
+  });
+
+  it("extracts non-text MCP tool content blocks as JSON when needed", () => {
+    assert.deepEqual(normalizeCodexEvent({
+      type: "item.completed",
+      item: {
+        id: "tool-3",
+        type: "mcp_tool_call",
+        server: "functions",
+        tool: "write_stdin",
+        arguments: { session_id: 42, chars: "hello\n" },
+        result: {
+          content: [{
+            type: "resource",
+            resource: {
+              text: "Command: /bin/zsh -lc cat\n\nOutput:\nhello",
+            },
+          }],
+          structured_content: null,
+        },
+        status: "completed",
+      },
+    }), {
+      sessionId: null,
+      toolEvent: {
+        id: "tool-3",
+        name: "write_stdin",
+        arguments: { session_id: 42, chars: "hello\n" },
+        status: "completed",
+        output: "Command: /bin/zsh -lc cat\n\nOutput:\nhello",
+      },
+    });
+  });
+
   it("normalizes web search events as tool activity", () => {
     assert.deepEqual(normalizeCodexEvent({
       type: "item.started",
