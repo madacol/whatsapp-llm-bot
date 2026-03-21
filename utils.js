@@ -2,6 +2,7 @@ import { mkdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { resolve } from "node:path";
 import config from "./config.js";
+import { classifyCommandActivity } from "./tool-display.js";
 
 /** Workspaces live outside the bot project so the SDK's upward CLAUDE.md
  *  traversal never reaches the bot's own CLAUDE.md / settings. */
@@ -100,8 +101,9 @@ export function createToolMessage(toolId, text) {
  * @returns {string}
  */
 export function formatCommandInspectText(command, output, toolName) {
+  const inspectToolName = inferInspectToolName(command, toolName);
   const body = output != null && output.length > 0
-    ? formatToolResultForInspect(output, toolName)
+    ? formatToolResultForInspect(output, inspectToolName)
     : "_no output_";
   return [
     "```bash",
@@ -110,6 +112,33 @@ export function formatCommandInspectText(command, output, toolName) {
     "",
     body,
   ].join("\n");
+}
+
+/**
+ * @param {string} command
+ * @param {string | undefined} toolName
+ * @returns {string | undefined}
+ */
+function inferInspectToolName(command, toolName) {
+  if (toolName !== "Bash") {
+    return toolName;
+  }
+
+  const activity = classifyCommandActivity(command, undefined);
+  if (!activity) {
+    return toolName;
+  }
+
+  switch (activity.title) {
+    case "Search":
+      return "Grep";
+    case "Read":
+      return "Read";
+    case "List":
+      return "Glob";
+    default:
+      return toolName;
+  }
 }
 
 
