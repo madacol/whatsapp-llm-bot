@@ -74,6 +74,33 @@ describe("tool display", () => {
     );
   });
 
+  it("renders other structured lookup tools with intent-specific labels", () => {
+    assert.equal(
+      getToolCallSummary("time", {
+        time: [{ utc_offset: "+00:00" }],
+      }),
+      "*Time*  `UTC+00:00`",
+    );
+    assert.equal(
+      getToolCallSummary("weather", {
+        weather: [{ location: "San Francisco, CA" }],
+      }),
+      "*Weather*  `San Francisco, CA`",
+    );
+    assert.equal(
+      getToolCallSummary("finance", {
+        finance: [{ ticker: "AMD", type: "equity", market: "USA" }],
+      }),
+      "*Quote*  `AMD`",
+    );
+    assert.equal(
+      getToolCallSummary("spawn_agent", {
+        prompt: "Investigate the failing API route",
+      }),
+      "*Start Agent*  _Investigate the failing API route_",
+    );
+  });
+
   it("shows update_plan contents in summaries from plan-style arguments", () => {
     assert.equal(
       formatSdkToolCall("update_plan", {
@@ -172,6 +199,52 @@ describe("command inspect formatting", () => {
         "[ ] Run tests",
         "",
         "Plan updated",
+      ].join("\n"),
+    );
+  });
+
+  it("formats finance inspect output as readable market data", () => {
+    assert.equal(
+      formatToolInspectBody("finance", {
+        finance: [{ ticker: "AMD", type: "equity", market: "USA" }],
+      }, JSON.stringify([
+        {
+          ticker: "AMD",
+          price: 227.45,
+          currency: "USD",
+          market: "USA",
+          change: 3.14,
+          change_percent: 1.4,
+        },
+      ])),
+      [
+        "*AMD*",
+        "Price: 227.45 USD",
+        "Change: +3.14 (+1.4%)",
+        "Market: USA",
+      ].join("\n"),
+    );
+  });
+
+  it("formats weather inspect output as readable conditions", () => {
+    assert.equal(
+      formatToolInspectBody("weather", {
+        weather: [{ location: "San Francisco, CA" }],
+      }, JSON.stringify([
+        {
+          location: "San Francisco, CA",
+          temperature: 17,
+          temperature_unit: "C",
+          condition: "Sunny",
+          high: 19,
+          low: 12,
+        },
+      ])),
+      [
+        "*San Francisco, CA*",
+        "Condition: Sunny",
+        "Temperature: 17 C",
+        "Range: 12-19 C",
       ].join("\n"),
     );
   });

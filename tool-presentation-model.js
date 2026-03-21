@@ -18,7 +18,7 @@ export function shortenPath(p, cwd) {
 }
 
 /**
- * @typedef {"Read" | "Search" | "List" | "Plan" | "Search Web" | "Open Link" | "Find On Page" | "Search Images"} ToolActivityTitle
+ * @typedef {"Read" | "Search" | "List" | "Plan" | "Search Web" | "Open Link" | "Find On Page" | "Search Images" | "Time" | "Weather" | "Quote" | "Sports Schedule" | "Sports Standings" | "Run Command" | "Start Agent" | "Message Agent" | "Wait For Agent" | "Resume Agent" | "Close Agent" | "Run Parallel" | "Terminal Input"} ToolActivityTitle
  */
 
 /**
@@ -36,7 +36,15 @@ export function shortenPath(p, cwd) {
  */
 
 /**
- * @typedef {"bash" | "read" | "grep" | "glob" | "plain"} ToolInspectMode
+ * @typedef {"bash" | "read" | "grep" | "glob" | "plain" | "web_search" | "open_link" | "find_on_page" | "image_search" | "time" | "weather" | "finance" | "sports_schedule" | "sports_standings"} ToolInspectMode
+ */
+
+/**
+ * @typedef {{
+ *   groupKey: string,
+ *   groupTitle: string,
+ *   detail: string,
+ * }} ToolFlowDescriptor
  */
 
 /**
@@ -46,6 +54,7 @@ export function shortenPath(p, cwd) {
  *   summary: string,
  *   activity: ToolActivitySummary,
  *   inspectMode: ToolInspectMode,
+ *   flow?: ToolFlowDescriptor,
  * }} ActivityPresentation
  */
 
@@ -302,11 +311,21 @@ function classifyGrep(tokens) {
 
 /**
  * @param {ToolActivityTitle} title
- * @param {string} line
+ * @param {string | null | undefined} [line]
  * @returns {ToolActivitySummary}
  */
 function createActivity(title, line) {
-  return { title, lines: [line] };
+  return { title, lines: typeof line === "string" && line.length > 0 ? [line] : [] };
+}
+
+/**
+ * @param {string} groupKey
+ * @param {string} groupTitle
+ * @param {string} detail
+ * @returns {ToolFlowDescriptor}
+ */
+function createFlow(groupKey, groupTitle, detail) {
+  return { groupKey, groupTitle, detail };
 }
 
 /**
@@ -374,6 +393,26 @@ function createGlobPresentation(pattern, path, cwd) {
     summary: formatActivitySummary(activity),
     activity,
     inspectMode: "glob",
+  };
+}
+
+/**
+ * @param {ToolActivityTitle} title
+ * @param {string} toolName
+ * @param {string | null | undefined} line
+ * @param {ToolInspectMode} inspectMode
+ * @param {ToolFlowDescriptor | undefined} [flow]
+ * @returns {ActivityPresentation}
+ */
+function createSimpleActivityPresentation(title, toolName, line, inspectMode, flow) {
+  const activity = createActivity(title, line);
+  return {
+    kind: "activity",
+    toolName,
+    summary: formatActivitySummary(activity),
+    activity,
+    inspectMode,
+    ...(flow ? { flow } : {}),
   };
 }
 
@@ -509,6 +548,48 @@ function hasFindArgs(value) {
 }
 
 /**
+ * @param {unknown} value
+ * @returns {value is { location: string, start?: string, duration?: number }}
+ */
+function hasWeatherArgs(value) {
+  return isRecord(value)
+    && typeof value.location === "string"
+    && (value.start == null || typeof value.start === "string")
+    && (value.duration == null || typeof value.duration === "number");
+}
+
+/**
+ * @param {unknown} value
+ * @returns {value is { ticker: string, type: string, market?: string }}
+ */
+function hasFinanceArgs(value) {
+  return isRecord(value)
+    && typeof value.ticker === "string"
+    && typeof value.type === "string"
+    && (value.market == null || typeof value.market === "string");
+}
+
+/**
+ * @param {unknown} value
+ * @returns {value is { utc_offset: string }}
+ */
+function hasTimeArgs(value) {
+  return isRecord(value) && typeof value.utc_offset === "string";
+}
+
+/**
+ * @param {unknown} value
+ * @returns {value is { fn: "schedule" | "standings", league: string, team?: string, opponent?: string }}
+ */
+function hasSportsArgs(value) {
+  return isRecord(value)
+    && (value.fn === "schedule" || value.fn === "standings")
+    && typeof value.league === "string"
+    && (value.team == null || typeof value.team === "string")
+    && (value.opponent == null || typeof value.opponent === "string");
+}
+
+/**
  * @template T
  * @param {Record<string, unknown>} args
  * @param {string} key
@@ -531,14 +612,14 @@ function extractToolArgs(args, key, guard) {
  * @returns {ActivityPresentation}
  */
 function createWebSearchPresentation(query) {
-  const activity = createActivity("Search Web", quoteForDisplay(query));
-  return {
-    kind: "activity",
-    toolName: "Search Web",
-    summary: formatActivitySummary(activity),
-    activity,
-    inspectMode: "plain",
-  };
+  const detail = quoteForDisplay(query);
+  return createSimpleActivityPresentation(
+    "Search Web",
+    "Search Web",
+    detail,
+    "web_search",
+    createFlow("web", "Web", `search ${detail}`),
+  );
 }
 
 /**
@@ -546,14 +627,14 @@ function createWebSearchPresentation(query) {
  * @returns {ActivityPresentation}
  */
 function createOpenLinkPresentation(refId) {
-  const activity = createActivity("Open Link", formatWebRef(refId));
-  return {
-    kind: "activity",
-    toolName: "Open Link",
-    summary: formatActivitySummary(activity),
-    activity,
-    inspectMode: "plain",
-  };
+  const detail = formatWebRef(refId);
+  return createSimpleActivityPresentation(
+    "Open Link",
+    "Open Link",
+    detail,
+    "open_link",
+    createFlow("web", "Web", `open ${detail}`),
+  );
 }
 
 /**
@@ -562,14 +643,14 @@ function createOpenLinkPresentation(refId) {
  * @returns {ActivityPresentation}
  */
 function createFindOnPagePresentation(pattern, refId) {
-  const activity = createActivity("Find On Page", `${quoteForDisplay(pattern)} in ${formatWebRef(refId)}`);
-  return {
-    kind: "activity",
-    toolName: "Find On Page",
-    summary: formatActivitySummary(activity),
-    activity,
-    inspectMode: "plain",
-  };
+  const displayPattern = quoteForDisplay(pattern);
+  return createSimpleActivityPresentation(
+    "Find On Page",
+    "Find On Page",
+    `${displayPattern} in ${formatWebRef(refId)}`,
+    "find_on_page",
+    createFlow("web", "Web", `find ${displayPattern}`),
+  );
 }
 
 /**
@@ -577,14 +658,58 @@ function createFindOnPagePresentation(pattern, refId) {
  * @returns {ActivityPresentation}
  */
 function createImageSearchPresentation(query) {
-  const activity = createActivity("Search Images", quoteForDisplay(query));
-  return {
-    kind: "activity",
-    toolName: "Search Images",
-    summary: formatActivitySummary(activity),
-    activity,
-    inspectMode: "plain",
-  };
+  const detail = quoteForDisplay(query);
+  return createSimpleActivityPresentation(
+    "Search Images",
+    "Search Images",
+    detail,
+    "image_search",
+    createFlow("web", "Web", `search images ${detail}`),
+  );
+}
+
+/**
+ * @param {string} utcOffset
+ * @returns {ActivityPresentation}
+ */
+function createTimePresentation(utcOffset) {
+  const displayOffset = utcOffset.startsWith("UTC") ? utcOffset : `UTC${utcOffset}`;
+  return createSimpleActivityPresentation("Time", "Time", `\`${displayOffset}\``, "time");
+}
+
+/**
+ * @param {string} location
+ * @returns {ActivityPresentation}
+ */
+function createWeatherPresentation(location) {
+  return createSimpleActivityPresentation("Weather", "Weather", `\`${location}\``, "weather");
+}
+
+/**
+ * @param {string} ticker
+ * @returns {ActivityPresentation}
+ */
+function createFinancePresentation(ticker) {
+  return createSimpleActivityPresentation("Quote", "Quote", `\`${ticker}\``, "finance");
+}
+
+/**
+ * @param {"schedule" | "standings"} fn
+ * @param {string} league
+ * @param {string | undefined} team
+ * @param {string | undefined} opponent
+ * @returns {ActivityPresentation}
+ */
+function createSportsPresentation(fn, league, team, opponent) {
+  const title = fn === "schedule" ? "Sports Schedule" : "Sports Standings";
+  const parts = [league.toUpperCase()];
+  if (team) {
+    parts.push(team);
+  }
+  if (opponent) {
+    parts.push(`vs ${opponent}`);
+  }
+  return createSimpleActivityPresentation(title, title, `\`${parts.join(" ")}\``, fn === "schedule" ? "sports_schedule" : "sports_standings");
 }
 
 /**
@@ -705,6 +830,24 @@ function buildSdkPresentation(name, args, cwd) {
       const queryArgs = extractToolArgs(args, "image_query", hasQueryString);
       return queryArgs ? createImageSearchPresentation(queryArgs.q) : null;
     }
+    case "time": {
+      const timeArgs = extractToolArgs(args, "time", hasTimeArgs);
+      return timeArgs ? createTimePresentation(timeArgs.utc_offset) : null;
+    }
+    case "weather": {
+      const weatherArgs = extractToolArgs(args, "weather", hasWeatherArgs);
+      return weatherArgs ? createWeatherPresentation(weatherArgs.location) : null;
+    }
+    case "finance": {
+      const financeArgs = extractToolArgs(args, "finance", hasFinanceArgs);
+      return financeArgs ? createFinancePresentation(financeArgs.ticker) : null;
+    }
+    case "sports": {
+      const sportsArgs = extractToolArgs(args, "sports", hasSportsArgs);
+      return sportsArgs
+        ? createSportsPresentation(sportsArgs.fn, sportsArgs.league, sportsArgs.team, sportsArgs.opponent)
+        : null;
+    }
     case "open": {
       const openArgs = extractToolArgs(args, "open", hasOpenRef);
       return openArgs ? createOpenLinkPresentation(openArgs.ref_id) : null;
@@ -725,6 +868,16 @@ function buildSdkPresentation(name, args, cwd) {
         : null;
     case "WebSearch":
       return typeof args.query === "string" ? createWebSearchPresentation(args.query) : null;
+    case "exec_command":
+      return typeof args.cmd === "string"
+        ? {
+          kind: "bash",
+          toolName: "Run Command",
+          summary: classifyCommandActivity(args.cmd, cwd)?.summary ?? `*Run Command*  \`${args.cmd.split("\n")[0]?.slice(0, 48) ?? ""}\``,
+          command: args.cmd,
+          inspectMode: inferBashInspectMode(args.cmd, cwd),
+        }
+        : null;
     case "update_plan":
       return createPlanPresentation(args);
     case "Bash":
@@ -788,12 +941,12 @@ export function buildToolPresentation(name, args, formatToolCall, cwd, context) 
   }
 
   if (name === "spawn_agent") {
-    return {
-      kind: "generic",
-      toolName: name,
-      summary: typeof args.prompt === "string" ? `*spawn_agent*  _${args.prompt}_` : "*spawn_agent*",
-      args,
-    };
+    const prompt = typeof args.prompt === "string"
+      ? args.prompt
+      : typeof args.message === "string"
+        ? args.message
+        : null;
+    return createSimpleActivityPresentation("Start Agent", "Start Agent", prompt ? `_${prompt}_` : undefined, "plain");
   }
 
   if (name === "send_input") {
@@ -802,33 +955,60 @@ export function buildToolPresentation(name, args, formatToolCall, cwd, context) 
       : typeof args.prompt === "string"
         ? args.prompt
         : null;
-    return {
-      kind: "generic",
-      toolName: name,
-      summary: message ? `*send_input*  _${message}_` : "*send_input*",
-      args,
-    };
+    return createSimpleActivityPresentation("Message Agent", "Message Agent", message ? `_${message}_` : undefined, "plain");
   }
 
   if (name === "wait_agent") {
-    const count = Array.isArray(args.receiver_thread_ids) ? args.receiver_thread_ids.length : 0;
-    return {
-      kind: "generic",
-      toolName: name,
-      summary: count > 0
-        ? `*wait_agent*  _${count} agent${count === 1 ? "" : "s"}_`
-        : "*wait_agent*",
-      args,
-    };
+    const ids = Array.isArray(args.receiver_thread_ids)
+      ? args.receiver_thread_ids
+      : Array.isArray(args.ids)
+        ? args.ids
+        : [];
+    const count = ids.length;
+    return createSimpleActivityPresentation(
+      "Wait For Agent",
+      "Wait For Agent",
+      count > 0 ? `_${count} agent${count === 1 ? "" : "s"}_` : undefined,
+      "plain",
+    );
   }
 
-  if (name === "close_agent" || name === "resume_agent" || name === "parallel") {
-    return {
-      kind: "generic",
-      toolName: name,
-      summary: `*${name}*`,
-      args,
-    };
+  if (name === "resume_agent") {
+    return createSimpleActivityPresentation(
+      "Resume Agent",
+      "Resume Agent",
+      typeof args.id === "string" ? `\`${args.id}\`` : undefined,
+      "plain",
+    );
+  }
+
+  if (name === "close_agent") {
+    return createSimpleActivityPresentation(
+      "Close Agent",
+      "Close Agent",
+      typeof args.id === "string" ? `\`${args.id}\`` : undefined,
+      "plain",
+    );
+  }
+
+  if (name === "parallel") {
+    const toolUses = Array.isArray(args.tool_uses) ? args.tool_uses.length : 0;
+    return createSimpleActivityPresentation(
+      "Run Parallel",
+      "Run Parallel",
+      toolUses > 0 ? `_${toolUses} tool${toolUses === 1 ? "" : "s"}_` : undefined,
+      "plain",
+    );
+  }
+
+  if (name === "write_stdin") {
+    const chars = typeof args.chars === "string" && args.chars.length > 0 ? args.chars : null;
+    return createSimpleActivityPresentation(
+      "Terminal Input",
+      "Terminal Input",
+      chars ? `_${chars.length} char${chars.length === 1 ? "" : "s"}_` : undefined,
+      "plain",
+    );
   }
 
   if (formatToolCall) {
@@ -889,4 +1069,14 @@ export function buildMultiReadActivity(paths, cwd) {
     title: "Read",
     lines: paths.map((filePath) => `\`${shortenPath(filePath, cwd)}\``),
   };
+}
+
+/**
+ * @param {ToolPresentation} presentation
+ * @returns {ToolFlowDescriptor | null}
+ */
+export function getToolFlowDescriptor(presentation) {
+  return presentation.kind === "activity" && presentation.flow
+    ? presentation.flow
+    : null;
 }

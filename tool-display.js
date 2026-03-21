@@ -30,7 +30,23 @@ const SDK_PRESENTATION_TOOLS = new Set([
   "Grep",
   "Glob",
   "WebSearch",
+  "search_query",
+  "image_query",
+  "open",
+  "find",
+  "time",
+  "weather",
+  "finance",
+  "sports",
   "update_plan",
+  "exec_command",
+  "spawn_agent",
+  "send_input",
+  "wait_agent",
+  "resume_agent",
+  "close_agent",
+  "parallel",
+  "write_stdin",
 ]);
 
 /**
