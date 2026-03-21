@@ -1,4 +1,5 @@
 import path from "node:path";
+import { findEscapedShellTarget } from "./shell-boundary-detector.js";
 
 /** @typedef {"path" | "command"} SandboxEscapeKind */
 
@@ -151,72 +152,6 @@ function extractCommandInput(input) {
  */
 function resolveEscapedPath(candidatePath, workdir) {
   const resolvedPath = path.resolve(workdir, candidatePath);
-  return isPathInsideWorkspace(resolvedPath, workdir) ? null : resolvedPath;
-}
-
-/**
- * @param {string} command
- * @param {string} workdir
- * @returns {string | null}
- */
-function findEscapedShellTarget(command, workdir) {
-  const cdMatch = command.match(/(?:^|[;&|]\s*|\s)cd\s+(?<target>"[^"]+"|'[^']+'|`[^`]+`|[^\s;&|]+)/);
-  const cdTarget = stripShellQuotes(cdMatch?.groups?.target ?? null);
-  if (cdTarget) {
-    const escapedCdTarget = resolveShellPathEscape(cdTarget, workdir);
-    if (escapedCdTarget) {
-      return cdTarget;
-    }
-  }
-
-  const pathMatches = command.matchAll(/(?<target>~\/[^\s;&|]*|\/[^\s;&|]*|\.\.\/[^\s;&|]*|\.\.(?:$|(?=[\s;&|])))/g);
-  for (const match of pathMatches) {
-    const candidate = stripShellQuotes(match.groups?.target ?? null);
-    if (!candidate) {
-      continue;
-    }
-    const escapedCandidate = resolveShellPathEscape(candidate, workdir);
-    if (escapedCandidate) {
-      return candidate;
-    }
-  }
-
-  return null;
-}
-
-/**
- * @param {string | null} value
- * @returns {string | null}
- */
-function stripShellQuotes(value) {
-  if (!value) {
-    return null;
-  }
-  const trimmed = value.trim();
-  if (!trimmed) {
-    return null;
-  }
-  const firstChar = trimmed[0];
-  const lastChar = trimmed.at(-1);
-  if ((firstChar === "\"" || firstChar === "'" || firstChar === "`") && firstChar === lastChar) {
-    return trimmed.slice(1, -1);
-  }
-  return trimmed;
-}
-
-/**
- * @param {string} candidate
- * @param {string} workdir
- * @returns {string | null}
- */
-function resolveShellPathEscape(candidate, workdir) {
-  if (candidate.startsWith("~/")) {
-    return candidate;
-  }
-  if (!candidate.startsWith("/") && !candidate.startsWith("..")) {
-    return null;
-  }
-  const resolvedPath = path.resolve(workdir, candidate);
   return isPathInsideWorkspace(resolvedPath, workdir) ? null : resolvedPath;
 }
 
