@@ -6,6 +6,27 @@ import { createToolRuntime } from "./create-tool-runtime.js";
 import { prepareRunMessages } from "./prepare-run-messages.js";
 
 /**
+ * Build the external system instructions supplied by persona/chat settings and
+ * per-turn conversation context. Harness defaults are applied later by each
+ * harness.
+ * @param {AgentDefinition | null} persona
+ * @param {import("../store.js").ChatRow | undefined} chatInfo
+ * @param {string} systemPromptSuffix
+ * @param {string} harnessName
+ * @returns {string}
+ */
+export function buildExternalSystemPrompt(persona, chatInfo, systemPromptSuffix, harnessName) {
+  const explicitPrompt = persona?.systemPrompt ?? chatInfo?.system_prompt ?? "";
+  if (explicitPrompt) {
+    return `${explicitPrompt}${systemPromptSuffix}`;
+  }
+  if (harnessName === "native") {
+    return `${config.system_prompt}${systemPromptSuffix}`;
+  }
+  return "";
+}
+
+/**
  * Build the full harness run request for a chat turn.
  * @param {{
  *   chatId: string,
@@ -24,6 +45,7 @@ import { prepareRunMessages } from "./prepare-run-messages.js";
  *   saveHarnessSession: import("../store.js").Store["saveHarnessSession"],
  *   hooks: AgentIOHooks,
  *   systemPromptSuffix: string,
+ *   harnessName: string,
  *   bufferedTexts?: string[],
  * }} input
  * @returns {Promise<AgentHarnessParams>}
@@ -45,6 +67,7 @@ export async function buildHarnessRunRequest({
   saveHarnessSession,
   hooks,
   systemPromptSuffix,
+  harnessName,
   bufferedTexts = [],
 }) {
   const toolNames = persona?.allowedActions ?? null;
@@ -65,7 +88,7 @@ export async function buildHarnessRunRequest({
   };
 
   const chatModel = resolveChatModel(persona, chatInfo ?? undefined);
-  const baseSystemPrompt = (persona?.systemPrompt ?? chatInfo?.system_prompt ?? config.system_prompt) + systemPromptSuffix;
+  const baseSystemPrompt = buildExternalSystemPrompt(persona, chatInfo, systemPromptSuffix, harnessName);
   const { systemPrompt, messages, mediaRegistry } = await prepareRunMessages({
     chatId,
     chatInfo,
