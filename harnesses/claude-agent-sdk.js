@@ -166,7 +166,7 @@ export async function handleEffortCommand(chatId, arg) {
 
 /**
  * Build the full system prompt for the SDK, including:
- * - Base system prompt from llmConfig
+ * - External instructions from the conversation layer
  * - Chat ID and runtime context
  * - DB paths
  * - Chat-scoped tool descriptions
@@ -177,7 +177,7 @@ export async function handleEffortCommand(chatId, arg) {
  * @returns {Promise<string>}
  */
 async function buildSystemPrompt(llmConfig, chatId, senderIds) {
-  let prompt = llmConfig.systemPrompt;
+  let prompt = llmConfig.externalInstructions;
 
   const promptTemplate = readFileSync(new URL("./claude-agent-sdk-prompt.md", import.meta.url), "utf-8");
   prompt += "\n\n" + promptTemplate

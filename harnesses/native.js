@@ -257,9 +257,9 @@ async function processLlmResponse({ session, llmConfig, messages, mediaRegistry,
   const tools = toolRuntime.listTools();
   /** @type {Required<AgentIOHooks>} */
   const hooks = { ...NO_OP_HOOKS, ...userHooks };
-  let { systemPrompt } = llmConfig;
+  let effectiveSystemPrompt = llmConfig.externalInstructions;
   if (mediaRegistry.size > 0) {
-    systemPrompt += '\n\nMedia in the conversation is tagged with [media:N]. When calling tools with image parameters, pass the media reference (e.g. "media:1") as the parameter value.';
+    effectiveSystemPrompt += '\n\nMedia in the conversation is tagged with [media:N]. When calling tools with image parameters, pass the media reference (e.g. "media:1") as the parameter value.';
   }
   const injectedActions = new Set();
   let depth = 0;
@@ -275,7 +275,7 @@ async function processLlmResponse({ session, llmConfig, messages, mediaRegistry,
     await hooks.onComposing();
     const response = await sendChatCompletion(llmClient, {
       model: chatModel,
-      systemPrompt,
+      systemPrompt: effectiveSystemPrompt,
       messages,
       tools: actionsToToolDefinitions(tools, mediaRegistry.size > 0),
       mediaRegistry,
@@ -339,7 +339,7 @@ async function processLlmResponse({ session, llmConfig, messages, mediaRegistry,
       messages.push(assistantMessage);
       const storedAssistant = await addMessage(chatId, assistantMessage, senderIds);
       if (depth === 0) {
-        storeLlmContext(getRootDb(), storedAssistant.message_id, chatModel, systemPrompt, messages, tools);
+        storeLlmContext(getRootDb(), storedAssistant.message_id, chatModel, effectiveSystemPrompt, messages, tools);
       }
       return result;
     }
@@ -362,7 +362,7 @@ async function processLlmResponse({ session, llmConfig, messages, mediaRegistry,
     messages.push(assistantMessage);
     const storedAssistantWithTools = await addMessage(chatId, assistantMessage, senderIds);
     if (depth === 0) {
-      storeLlmContext(getRootDb(), storedAssistantWithTools.message_id, chatModel, systemPrompt, messages, tools);
+      storeLlmContext(getRootDb(), storedAssistantWithTools.message_id, chatModel, effectiveSystemPrompt, messages, tools);
     }
 
     // Insert stubs for each tool call (timestamps anchored to assistant message)
@@ -394,7 +394,7 @@ async function processLlmResponse({ session, llmConfig, messages, mediaRegistry,
       if (injectedActions.has(name)) continue;
       const tool = tools.find((entry) => entry.name === name);
       if (tool?.instructions) {
-        systemPrompt += `\n\n## ${tool.name} instructions\n${tool.instructions}`;
+        effectiveSystemPrompt += `\n\n## ${tool.name} instructions\n${tool.instructions}`;
         injectedActions.add(name);
       }
     }

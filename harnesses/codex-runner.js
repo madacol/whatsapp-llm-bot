@@ -65,18 +65,18 @@ const DEFAULT_CODEX_RUN_HOOKS = {
  * Codex SDK threads do not expose a first-class system prompt field, so we
  * prepend the resolved system instructions to each turn input.
  * @param {string} prompt
- * @param {string | null | undefined} systemPrompt
+ * @param {string | null | undefined} externalInstructions
  * @returns {string}
  */
-export function buildCodexTurnInput(prompt, systemPrompt) {
+export function buildCodexTurnInput(prompt, externalInstructions) {
   const trimmedPrompt = prompt.trim();
-  const trimmedSystemPrompt = systemPrompt?.trim() ?? "";
-  if (!trimmedSystemPrompt) {
+  const trimmedExternalInstructions = externalInstructions?.trim() ?? "";
+  if (!trimmedExternalInstructions) {
     return trimmedPrompt;
   }
   return [
     "Follow these instructions for this run:",
-    trimmedSystemPrompt,
+    trimmedExternalInstructions,
     "",
     "User request:",
     trimmedPrompt,
@@ -132,7 +132,7 @@ function isAbortError(error) {
  * @param {{
  *   chatId: string,
  *   prompt: string,
- *   systemPrompt?: string,
+ *   externalInstructions?: string,
  *   messages: Message[],
  *   sessionId?: string | null,
  *   runConfig?: HarnessRunConfig,
@@ -170,7 +170,7 @@ export async function startCodexRun(input, deps = {}) {
         const attempt = await runCodexAttempt({
           chatId: input.chatId,
           prompt: input.prompt,
-          systemPrompt: input.systemPrompt,
+          externalInstructions: input.externalInstructions,
           messages: input.messages,
           sessionId: currentSessionId ?? null,
           runConfig: currentRunConfig,
@@ -207,7 +207,7 @@ export async function startCodexRun(input, deps = {}) {
  * @param {{
  *   chatId: string,
  *   prompt: string,
- *   systemPrompt?: string,
+ *   externalInstructions?: string,
  *   messages: Message[],
  *   sessionId: string | null,
  *   runConfig?: HarnessRunConfig,
@@ -233,7 +233,7 @@ async function runCodexAttempt(input) {
     usage: { promptTokens: 0, completionTokens: 0, cachedTokens: 0, cost: 0 },
   };
 
-  const turnInput = buildCodexTurnInput(input.prompt, input.systemPrompt);
+  const turnInput = buildCodexTurnInput(input.prompt, input.externalInstructions);
   const streamed = await thread.runStreamed(turnInput, { signal: input.abortController.signal });
   let lastAssistantText = null;
   /** @type {string | null} */
