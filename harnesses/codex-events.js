@@ -156,7 +156,29 @@ function extractToolResultOutput(result) {
     return structured;
   }
 
-  return extractCodexText(result) ?? undefined;
+  const serializedStructured = serializeStructuredToolResult(result.structured_content);
+  if (serializedStructured) {
+    return serializedStructured;
+  }
+
+  return extractCodexText(result) ?? serializeStructuredToolResult(result);
+}
+
+/**
+ * Fall back to JSON for structured tool results that do not expose a text-ish
+ * field. This keeps inspect useful for tools like the web MCP, which often
+ * returns records/arrays of results instead of text blocks.
+ * @param {unknown} value
+ * @returns {string | undefined}
+ */
+function serializeStructuredToolResult(value) {
+  if (value == null) {
+    return undefined;
+  }
+  if (Array.isArray(value) || isCodexEventRecord(value)) {
+    return JSON.stringify(value, null, 2);
+  }
+  return undefined;
 }
 
 /**
