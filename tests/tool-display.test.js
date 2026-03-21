@@ -1,6 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
+  formatToolInspectBody,
   formatSdkToolCall,
   formatToolCallDisplay,
   getToolCallSummary,
@@ -38,13 +39,7 @@ describe("tool display", () => {
           { step: "Ship the fix", status: "completed" },
         ],
       }),
-      [
-        "*Plan*",
-        "_Tighten the display labels_",
-        "[~] Patch the formatter",
-        "[ ] Run tests",
-        "[x] Ship the fix",
-      ].join("\n"),
+      "*Plan*  _3 steps_",
     );
   });
 
@@ -56,23 +51,26 @@ describe("tool display", () => {
           { text: "Keep search formatting readable", completed: true },
         ],
       }),
-      [
-        "*Plan*",
-        "[ ] Check the inspect output",
-        "[x] Keep search formatting readable",
-      ].join("\n"),
+      "*Plan*  _2 steps_",
     );
   });
 
-  it("uses the command preview in bash captions", () => {
+  it("keeps bash tool calls compact in the immediate display", () => {
     const result = formatToolCallDisplay(
       toolCall("Bash", { command: "date -u +%FT%TZ" }),
     );
-    assert.ok(Array.isArray(result));
-    assert.equal(result[0]?.type, "code");
     assert.equal(
-      /** @type {CodeContentBlock} */ (result[0]).caption,
+      result,
       "*Bash*  `date -u +%FT%TZ`",
+    );
+  });
+
+  it("summarizes multiline bash commands without showing the full body", () => {
+    assert.equal(
+      getToolCallSummary("Bash", {
+        command: "apply_patch <<'PATCH'\n*** Begin Patch\n*** End Patch\nPATCH",
+      }),
+      "*Bash*  `apply_patch <<'PATCH'`  _+3 lines_",
     );
   });
 });
@@ -104,5 +102,24 @@ describe("command inspect formatting", () => {
     assert.ok(text.includes("```bash\nsed -n '1,20p' src/app.js\n```"), text);
     assert.ok(text.includes("```\nconst one = 1;\nconst two = 2;\n```"), text);
     assert.ok(!text.includes("1\tconst one = 1;"), text);
+  });
+
+  it("keeps full plan details for inspect while summaries stay short", () => {
+    assert.equal(
+      formatToolInspectBody("update_plan", {
+        explanation: "Tighten the display labels",
+        plan: [
+          { step: "Patch the formatter", status: "in_progress" },
+          { step: "Run tests", status: "pending" },
+        ],
+      }, "Plan updated"),
+      [
+        "_Tighten the display labels_",
+        "[~] Patch the formatter",
+        "[ ] Run tests",
+        "",
+        "Plan updated",
+      ].join("\n"),
+    );
   });
 });

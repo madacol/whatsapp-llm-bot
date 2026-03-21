@@ -380,7 +380,8 @@ describe("startCodexRun", () => {
 
     reactionCallback?.("👁", "user-1");
     assert.deepEqual(edits, [[
-      "*Plan*",
+      "*Plan*  _1 step_",
+      "",
       "[x] Do work",
       "",
       "Plan updated",
@@ -467,10 +468,9 @@ describe("startCodexRun", () => {
 
     reactionCallback?.("👁", "user-1");
     assert.deepEqual(edits, [[
-      "*Plan*",
-      "[x] Initialize requested plan state",
+      "*Plan*  _1 step_",
       "",
-      "Initialize requested plan state",
+      "[x] Initialize requested plan state",
     ].join("\n")]);
   });
 
