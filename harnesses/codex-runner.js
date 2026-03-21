@@ -60,6 +60,30 @@ const DEFAULT_CODEX_RUN_HOOKS = {
  */
 
 /**
+ * Build the prompt sent to Codex for a turn.
+ *
+ * Codex SDK threads do not expose a first-class system prompt field, so we
+ * prepend the resolved system instructions to each turn input.
+ * @param {string} prompt
+ * @param {string | null | undefined} systemPrompt
+ * @returns {string}
+ */
+export function buildCodexTurnInput(prompt, systemPrompt) {
+  const trimmedPrompt = prompt.trim();
+  const trimmedSystemPrompt = systemPrompt?.trim() ?? "";
+  if (!trimmedSystemPrompt) {
+    return trimmedPrompt;
+  }
+  return [
+    "Follow these instructions for this run:",
+    trimmedSystemPrompt,
+    "",
+    "User request:",
+    trimmedPrompt,
+  ].join("\n");
+}
+
+/**
  * Build SDK thread options from the shared harness run config.
  * @param {HarnessRunConfig | undefined} runConfig
  * @returns {import("@openai/codex-sdk").ThreadOptions}
@@ -108,6 +132,7 @@ function isAbortError(error) {
  * @param {{
  *   chatId: string,
  *   prompt: string,
+ *   systemPrompt?: string,
  *   messages: Message[],
  *   sessionId?: string | null,
  *   runConfig?: HarnessRunConfig,
@@ -145,6 +170,7 @@ export async function startCodexRun(input, deps = {}) {
         const attempt = await runCodexAttempt({
           chatId: input.chatId,
           prompt: input.prompt,
+          systemPrompt: input.systemPrompt,
           messages: input.messages,
           sessionId: currentSessionId ?? null,
           runConfig: currentRunConfig,
@@ -181,6 +207,7 @@ export async function startCodexRun(input, deps = {}) {
  * @param {{
  *   chatId: string,
  *   prompt: string,
+ *   systemPrompt?: string,
  *   messages: Message[],
  *   sessionId: string | null,
  *   runConfig?: HarnessRunConfig,
@@ -206,7 +233,8 @@ async function runCodexAttempt(input) {
     usage: { promptTokens: 0, completionTokens: 0, cachedTokens: 0, cost: 0 },
   };
 
-  const streamed = await thread.runStreamed(input.prompt, { signal: input.abortController.signal });
+  const turnInput = buildCodexTurnInput(input.prompt, input.systemPrompt);
+  const streamed = await thread.runStreamed(turnInput, { signal: input.abortController.signal });
   let lastAssistantText = null;
   /** @type {string | null} */
   let failureMessage = null;

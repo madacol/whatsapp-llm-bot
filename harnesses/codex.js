@@ -91,7 +91,7 @@ export function createCodexHarness(deps = {}) {
    * @param {AgentHarnessParams} params
    * @returns {Promise<AgentResult>}
    */
-  async function run({ session, messages, hooks: userHooks, runConfig }) {
+  async function run({ session, llmConfig, messages, hooks: userHooks, runConfig }) {
     const hooks = { ...NO_OP_HOOKS, ...userHooks };
     const prompt = extractCodexText(messages.at(-1)?.content) ?? "";
     if (!prompt) {
@@ -108,6 +108,7 @@ export function createCodexHarness(deps = {}) {
     const started = await startCodexRun({
       chatId: session.chatId,
       prompt,
+      systemPrompt: llmConfig.systemPrompt,
       messages,
       sessionId,
       runConfig,
