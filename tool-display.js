@@ -498,6 +498,13 @@ function isRecord(value) {
 }
 
 /**
+ * @typedef {{
+ *   text: string,
+ *   status: "completed" | "in_progress" | "pending" | "unknown",
+ * }} PlanEntry
+ */
+
+/**
  * @param {string} text
  * @param {string} status
  * @returns {string}
@@ -517,24 +524,34 @@ function formatPlanLine(text, status) {
 
 /**
  * @param {Record<string, unknown>} args
- * @returns {string[]}
+ * @returns {string | null}
  */
-function getUpdatePlanLines(args) {
-  /** @type {string[]} */
-  const lines = [];
+function getUpdatePlanExplanation(args) {
+  return typeof args.explanation === "string" && args.explanation.trim()
+    ? args.explanation.trim()
+    : null;
+}
 
-  if (typeof args.explanation === "string" && args.explanation.trim()) {
-    lines.push(`_${args.explanation.trim()}_`);
-  }
-
+/**
+ * @param {Record<string, unknown>} args
+ * @returns {PlanEntry[]}
+ */
+function getUpdatePlanEntries(args) {
+  /** @type {PlanEntry[]} */
+  const items = [];
   if (Array.isArray(args.plan)) {
     for (const item of args.plan) {
       if (!isRecord(item) || typeof item.step !== "string" || typeof item.status !== "string") {
         continue;
       }
-      lines.push(formatPlanLine(item.step, item.status));
+      items.push({
+        text: item.step,
+        status: item.status === "completed" || item.status === "in_progress" || item.status === "pending"
+          ? item.status
+          : "unknown",
+      });
     }
-    return lines;
+    return items;
   }
 
   if (Array.isArray(args.items)) {
@@ -542,10 +559,30 @@ function getUpdatePlanLines(args) {
       if (!isRecord(item) || typeof item.text !== "string" || typeof item.completed !== "boolean") {
         continue;
       }
-      lines.push(formatPlanLine(item.text, item.completed ? "completed" : "pending"));
+      items.push({
+        text: item.text,
+        status: item.completed ? "completed" : "pending",
+      });
     }
   }
 
+  return items;
+}
+
+/**
+ * @param {Record<string, unknown>} args
+ * @returns {string[]}
+ */
+function getUpdatePlanLines(args) {
+  /** @type {string[]} */
+  const lines = [];
+  const explanation = getUpdatePlanExplanation(args);
+  if (explanation) {
+    lines.push(`_${explanation}_`);
+  }
+  for (const item of getUpdatePlanEntries(args)) {
+    lines.push(formatPlanLine(item.text, item.status));
+  }
   return lines;
 }
 
@@ -554,8 +591,59 @@ function getUpdatePlanLines(args) {
  * @returns {string}
  */
 function formatUpdatePlanSummary(args) {
+  const entries = getUpdatePlanEntries(args);
+  if (entries.length > 0) {
+    return `*Plan*  _${entries.length} step${entries.length === 1 ? "" : "s"}_`;
+  }
+  const explanation = getUpdatePlanExplanation(args);
+  if (explanation) {
+    const preview = explanation.length > 48 ? `${explanation.slice(0, 48)}…` : explanation;
+    return `*Plan*  _${preview}_`;
+  }
+  return "*Plan*";
+}
+
+/**
+ * @param {string} command
+ * @returns {string}
+ */
+function formatBashSummary(command) {
+  const lines = command
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+  const firstLine = lines[0] ?? "";
+  if (!firstLine) {
+    return "*Bash*";
+  }
+  const preview = firstLine.length > 48 ? `${firstLine.slice(0, 48)}…` : firstLine;
+  const extraLines = Math.max(0, lines.length - 1);
+  return extraLines > 0
+    ? `*Bash*  \`${preview}\`  _+${extraLines} line${extraLines === 1 ? "" : "s"}_`
+    : `*Bash*  \`${preview}\``;
+}
+
+/**
+ * @param {string} name
+ * @param {Record<string, unknown>} args
+ * @param {string | undefined} output
+ * @returns {string | null}
+ */
+export function formatToolInspectBody(name, args, output) {
+  if (name !== "update_plan") {
+    return null;
+  }
+
   const lines = getUpdatePlanLines(args);
-  return lines.length > 0 ? formatActivitySummary({ title: "Plan", lines }) : "*Plan*";
+  const trimmedOutput = typeof output === "string" ? output.trim() : "";
+  const planText = getUpdatePlanEntries(args).map((item) => item.text).join("\n");
+  const includeOutput = trimmedOutput.length > 0 && trimmedOutput !== planText;
+
+  if (lines.length === 0) {
+    return includeOutput ? trimmedOutput : null;
+  }
+
+  return includeOutput ? [...lines, "", trimmedOutput].join("\n") : lines.join("\n");
 }
 
 /**
@@ -686,8 +774,7 @@ export function getToolCallSummary(name, args, formatToolCall, cwd, context) {
   // Bash: always show *Bash* prefix with description or command preview
   if (name === "Bash" && typeof args.command === "string") {
     if (typeof args.description === "string") return `*Bash*  _${args.description}_`;
-    const cmd = args.command;
-    return cmd.length > 60 ? `*Bash*  \`${cmd.slice(0, 60)}…\`` : `*Bash*  \`${cmd}\``;
+    return formatBashSummary(args.command);
   }
 
   // SDK built-in tools (Read, Grep, Glob, WebSearch, WebFetch, Agent)
@@ -735,11 +822,9 @@ export function formatToolCallDisplay(toolCall, actionFormatter, cwd, context) {
     return formatActivitySummary(activity);
   }
 
-  // Bash tool: render command as a syntax-highlighted image with *Bash* prefix.
+  // Bash tool: keep the immediate display compact; full command stays in inspect.
   if (name === "Bash" && typeof args.command === "string") {
-    const summary = getToolCallSummary(name, args, undefined, cwd, context);
-    const formatted = formatBashCommand(args.command);
-    return [{ type: "code", code: formatted, language: "bash", caption: summary }];
+    return getToolCallSummary(name, args, undefined, cwd, context);
   }
 
   // SDK built-in tools: compact, human-friendly display

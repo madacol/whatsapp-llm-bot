@@ -16,7 +16,7 @@ import { storeLlmContext } from "../context-log.js";
 import { existsSync, readFileSync } from "node:fs";
 import { storeAndLinkHtml } from "../html-store.js";
 import { recordUsage, resolveCost } from "../usage-tracker.js";
-import { getToolCallSummary } from "../tool-display.js";
+import { formatToolInspectBody, getToolCallSummary } from "../tool-display.js";
 import { createLogger } from "../logger.js";
 import { handleHarnessSessionCommand } from "./session-commands.js";
 
@@ -136,7 +136,12 @@ async function executeAndStoreTool({
   const registerInspect = (/** @type {ToolMessage} */ toolMessage) => {
     if (handle) {
       const summary = getToolCallSummary(toolName, toolArgs, actionFormatToolCall, workdir ?? null, displayContext);
-      registerInspectHandler(handle, summary, toolMessage, toolName);
+      const rawText = toolMessage.content
+        .filter((block) => block.type === "text")
+        .map((block) => /** @type {TextContentBlock} */ (block).text)
+        .join("\n");
+      const inspectText = formatToolInspectBody(toolName, toolArgs, rawText || undefined) ?? undefined;
+      registerInspectHandler(handle, summary, toolMessage, toolName, inspectText);
     }
   };
 

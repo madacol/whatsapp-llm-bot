@@ -1,6 +1,6 @@
 import { Codex } from "@openai/codex-sdk";
 import { createLogger } from "../logger.js";
-import { getToolCallSummary } from "../tool-display.js";
+import { formatToolInspectBody, getToolCallSummary } from "../tool-display.js";
 import { createToolMessage, registerInspectHandler } from "../utils.js";
 import { normalizeCodexEvent } from "./codex-events.js";
 import { analyzeCodexCommand } from "./codex-command-semantics.js";
@@ -210,7 +210,7 @@ async function runCodexAttempt(input) {
   /** @type {string | null} */
   let failureMessage = null;
   const runState = createCodexRunState({ workdir: input.runConfig?.workdir });
-  /** @type {Map<string, { handle: MessageHandle, summary: string, toolName: string }>} */
+  /** @type {Map<string, { handle: MessageHandle, summary: string, toolName: string, args: Record<string, unknown> }>} */
   const activeTools = new Map();
   const syntheticToolAdapter = createCodexSyntheticToolAdapter({
     onToolCall: input.hooks.onToolCall,
@@ -276,6 +276,7 @@ async function runCodexAttempt(input) {
               handle,
               summary: currentSummary,
               toolName: normalized.toolEvent.name,
+              args: normalized.toolEvent.arguments,
             });
           }
         } else {
@@ -292,6 +293,7 @@ async function runCodexAttempt(input) {
                 handle,
                 summary: currentSummary,
                 toolName: normalized.toolEvent.name,
+                args: normalized.toolEvent.arguments,
               };
             }
           }
@@ -304,11 +306,17 @@ async function runCodexAttempt(input) {
             activeTool.summary = currentSummary;
           }
           if (activeTool && normalized.toolEvent.output) {
+            const inspectText = formatToolInspectBody(
+              activeTool.toolName,
+              activeTool.args,
+              normalized.toolEvent.output,
+            ) ?? undefined;
             registerInspectHandler(
               activeTool.handle,
               currentSummary,
               createToolMessage(normalized.toolEvent.id, normalized.toolEvent.output),
               activeTool.toolName,
+              inspectText,
             );
           }
           if (activeTool) {

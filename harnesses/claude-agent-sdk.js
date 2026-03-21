@@ -14,7 +14,7 @@ import { query } from "@anthropic-ai/claude-agent-sdk";
 import { randomUUID } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { NO_OP_HOOKS } from "./native.js";
-import { getToolCallSummary } from "../tool-display.js";
+import { formatToolInspectBody, getToolCallSummary } from "../tool-display.js";
 import { createLogger } from "../logger.js";
 import { extractLastUserText } from "../message-formatting.js";
 import { createToolMessage, errorToString, registerInspectHandler } from "../utils.js";
@@ -216,6 +216,7 @@ async function buildSystemPrompt(llmConfig, chatId, senderIds) {
  *   handle?: MessageHandle,
  *   toolName: string,
  *   summary?: string,
+ *   toolArgs?: Record<string, unknown>,
  *   filePath?: string,
  * }} ActiveToolEntry
  */
@@ -764,6 +765,7 @@ export function createClaudeAgentSdkHarness() {
                     handle: handle ?? undefined,
                     toolName: input.tool_name,
                     summary,
+                    toolArgs: toolInput,
                     ...(filePath && { filePath }),
                   });
                 }
@@ -1192,7 +1194,10 @@ async function handleUserEvent(event, ctx) {
     // Register 👁 react-to-inspect on the tool-call message handle
     if (active?.handle) {
       const summary = active.summary ?? `*${active.toolName}*`;
-      registerInspectHandler(active.handle, summary, toolMsg, active.toolName);
+      const inspectText = active.toolArgs
+        ? formatToolInspectBody(active.toolName, active.toolArgs, resultText) ?? undefined
+        : undefined;
+      registerInspectHandler(active.handle, summary, toolMsg, active.toolName, inspectText);
     } else if (active) {
       log.warn(`No message handle for tool ${active.toolName} (${resolvedToolUseId}) — 👁 inspect unavailable`);
     }
