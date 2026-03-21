@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { buildCodexThreadOptions, startCodexRun } from "../harnesses/codex-runner.js";
+import { buildCodexThreadOptions, buildCodexTurnInput, startCodexRun } from "../harnesses/codex-runner.js";
 
 describe("buildCodexThreadOptions", () => {
   it("maps shared run config to Codex SDK thread options", () => {
@@ -21,6 +21,25 @@ describe("buildCodexThreadOptions", () => {
       additionalDirectories: ["/tmp"],
       skipGitRepoCheck: true,
     });
+  });
+});
+
+describe("buildCodexTurnInput", () => {
+  it("prepends the resolved system prompt for Codex turns", () => {
+    assert.equal(
+      buildCodexTurnInput("Continue", "Use available tools."),
+      [
+        "Follow these instructions for this run:",
+        "Use available tools.",
+        "",
+        "User request:",
+        "Continue",
+      ].join("\n"),
+    );
+  });
+
+  it("leaves the prompt untouched when no system prompt is provided", () => {
+    assert.equal(buildCodexTurnInput("Continue", ""), "Continue");
   });
 });
 
@@ -119,6 +138,7 @@ describe("startCodexRun", () => {
     const started = await startCodexRun({
       chatId: "codex-chat",
       prompt: "Continue",
+      systemPrompt: "Use available tools.",
       messages: [{ role: "user", content: [{ type: "text", text: "Continue" }] }],
       runConfig: {
         workdir: tempDir,
@@ -171,7 +191,7 @@ describe("startCodexRun", () => {
 
     const result = await started.done;
 
-    assert.equal(observed.prompt, "Continue");
+    assert.equal(observed.prompt, buildCodexTurnInput("Continue", "Use available tools."));
     assert.deepEqual(observed.threadOptions, {
       workingDirectory: tempDir,
       model: "gpt-5.4",
