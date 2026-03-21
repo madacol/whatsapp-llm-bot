@@ -32,6 +32,7 @@ export function buildExternalSystemPrompt(persona, chatInfo, systemPromptSuffix,
  *   chatId: string,
  *   senderIds: string[],
  *   chatInfo: import("../store.js").ChatRow | undefined,
+ *   chatName?: string,
  *   context: ExecuteActionContext,
  *   message: UserMessage,
  *   persona: AgentDefinition | null,
@@ -54,6 +55,7 @@ export async function buildHarnessRunRequest({
   chatId,
   senderIds,
   chatInfo,
+  chatName,
   context,
   message,
   persona,
@@ -125,6 +127,6 @@ export async function buildHarnessRunRequest({
     messages,
     mediaRegistry,
     hooks,
-    runConfig: buildRunConfig(chatId, chatInfo),
+    runConfig: buildRunConfig(chatId, chatInfo, chatName),
   };
 }

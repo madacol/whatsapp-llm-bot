@@ -179,6 +179,7 @@ type ChatTurn = {
   chatId: string;
   senderIds: string[];
   senderName: string;
+  chatName?: string;
   content: IncomingContentBlock[];
   timestamp: Date;
   facts: TurnFacts;

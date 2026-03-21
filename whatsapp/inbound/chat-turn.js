@@ -108,6 +108,30 @@ function normalizeTimestamp(value) {
 }
 
 /**
+ * Resolve a human-readable chat title when one is available.
+ * Groups use the subject; 1:1 chats fall back to the sender display name.
+ * @param {import('@whiskeysockets/baileys').WASocket} sock
+ * @param {string} chatId
+ * @param {boolean} isGroup
+ * @param {string} senderName
+ * @returns {Promise<string>}
+ */
+async function resolveChatName(sock, chatId, isGroup, senderName) {
+  if (!isGroup) {
+    return senderName;
+  }
+  if (typeof sock.groupMetadata !== "function") {
+    return "";
+  }
+  try {
+    const metadata = await sock.groupMetadata(chatId);
+    return typeof metadata.subject === "string" ? metadata.subject : "";
+  } catch {
+    return "";
+  }
+}
+
+/**
  * Create the message-scoped TurnIO functions.
  * @param {{
  *   sock: import('@whiskeysockets/baileys').WASocket;
@@ -205,6 +229,8 @@ export async function buildIncomingTurn(
   const addressedToBot = detectBotMention(content, selfIds);
   const repliedToBot = quotedSenderId ? selfIds.includes(quotedSenderId) : false;
   const normalizedContent = isGroup ? normalizeContent(content, selfIds) : content;
+  const senderName = baileysMessage.pushName || "";
+  const chatName = await resolveChatName(sock, chatId, isGroup, senderName);
   const io = createTurnIo({
     sock,
     chatId,
@@ -220,7 +246,8 @@ export async function buildIncomingTurn(
   const turn = {
     chatId,
     senderIds,
-    senderName: baileysMessage.pushName || "",
+    senderName,
+    chatName,
     content: normalizedContent,
     timestamp: normalizeTimestamp(baileysMessage.messageTimestamp),
     facts: {

@@ -209,13 +209,14 @@ export function createConversationRunner({ store, llmClient, getActionsFn, execu
     await sendComposing();
 
     try {
-      const hooks = buildAgentIoHooks(context, sendComposing, buildRunConfig(chatId, chatInfo).workdir ?? null);
+      const hooks = buildAgentIoHooks(context, sendComposing, buildRunConfig(chatId, chatInfo, turn.chatName).workdir ?? null);
       runCoordinator.markRunActive(chatId);
 
       const runRequest = await buildHarnessRunRequest({
         chatId,
         senderIds,
         chatInfo,
+        chatName: turn.chatName,
         context,
         message,
         persona,

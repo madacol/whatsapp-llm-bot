@@ -133,6 +133,7 @@ export function createChatTurn(overrides = {}) {
     chatId: overrides.chatId ?? "test-chat",
     senderIds: overrides.senderIds ?? ["master-user"],
     senderName: overrides.senderName ?? "Test User",
+    chatName: overrides.chatName,
     content,
     timestamp: overrides.timestamp ?? new Date(),
     facts,
