@@ -12,6 +12,8 @@
 import { query } from "@anthropic-ai/claude-agent-sdk";
 import { randomUUID } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
+import { mkdir, rm, writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import { NO_OP_HOOKS } from "./native.js";
 import { buildToolPresentation } from "../tool-presentation-model.js";
 import { formatToolPresentationInspect, formatToolPresentationSummary } from "../whatsapp/tool-presenter.js";
@@ -114,6 +116,10 @@ const EFFORT_LABELS = {
 /** @type {string[]} */
 const FALLBACK_EFFORT_LEVELS = ["low", "medium", "high"];
 
+const MADABOT_WORKSPACE_DIR = ".madabot";
+const CHAT_ACTIONS_JSON_FILE = "chat-actions.json";
+const CHAT_ACTIONS_MARKDOWN_FILE = "chat-actions.md";
+
 /**
  * Get available effort levels for a specific model.
  * Uses SDK metadata when available, falls back to low/medium/high.
@@ -173,6 +179,79 @@ export async function handleEffortCommand(chatId, arg) {
 export function buildClaudeSystemPrompt(externalInstructions) {
   const trimmedExternalInstructions = externalInstructions.trim();
   return trimmedExternalInstructions ? trimmedExternalInstructions : null;
+}
+
+/**
+ * @typedef {{
+ *   relativePath: string,
+ *   content: string,
+ * }} ClaudeWorkspaceArtifact
+ */
+
+/**
+ * @param {ToolRuntime} toolRuntime
+ * @returns {ClaudeWorkspaceArtifact[]}
+ */
+export function buildClaudeWorkspaceArtifacts(toolRuntime) {
+  const chatTools = toolRuntime.listTools().filter((tool) => tool.scope === "chat");
+  if (chatTools.length === 0) {
+    return [];
+  }
+
+  const actions = chatTools.map((tool) => ({
+    name: tool.name,
+    description: tool.description,
+    parameters: tool.parameters,
+  }));
+
+  const jsonContent = JSON.stringify({ version: 1, actions }, null, 2);
+  const markdownContent = [
+    "# Chat Actions",
+    "",
+    "These are chat-scoped actions available in this workspace.",
+    "",
+    ...actions.flatMap((action) => [
+      `## ${action.name}`,
+      "",
+      action.description,
+      "",
+      "```json",
+      JSON.stringify(action.parameters, null, 2),
+      "```",
+      "",
+    ]),
+  ].join("\n");
+
+  return [
+    {
+      relativePath: `${MADABOT_WORKSPACE_DIR}/${CHAT_ACTIONS_JSON_FILE}`,
+      content: jsonContent,
+    },
+    {
+      relativePath: `${MADABOT_WORKSPACE_DIR}/${CHAT_ACTIONS_MARKDOWN_FILE}`,
+      content: markdownContent,
+    },
+  ];
+}
+
+/**
+ * @param {string} workdir
+ * @param {ToolRuntime} toolRuntime
+ * @returns {Promise<void>}
+ */
+export async function writeClaudeWorkspaceArtifacts(workdir, toolRuntime) {
+  const artifacts = buildClaudeWorkspaceArtifacts(toolRuntime);
+  const madabotDir = join(workdir, MADABOT_WORKSPACE_DIR);
+
+  if (artifacts.length === 0) {
+    await rm(madabotDir, { recursive: true, force: true });
+    return;
+  }
+
+  await mkdir(madabotDir, { recursive: true });
+  await Promise.all(
+    artifacts.map((artifact) => writeFile(join(workdir, artifact.relativePath), artifact.content, "utf8")),
+  );
 }
 
 /**
@@ -628,6 +707,7 @@ export function createClaudeAgentSdkHarness() {
       const existingSessionId = getClaudeSessionId(session);
 
     const systemPrompt = buildClaudeSystemPrompt(llmConfig.externalInstructions);
+    const effectiveWorkdir = workdir ?? process.cwd();
 
     /** @type {string | null} */
     let resolvedSessionId = null;
@@ -648,10 +728,12 @@ export function createClaudeAgentSdkHarness() {
     const activeTools = new Map();
 
     try {
+      await writeClaudeWorkspaceArtifacts(effectiveWorkdir, llmConfig.toolRuntime);
+
       /** @type {import("@anthropic-ai/claude-agent-sdk").Options} */
       const queryOptions = {
         maxTurns: maxDepth ?? 50,
-        cwd: workdir ?? process.cwd(),
+        cwd: effectiveWorkdir,
         settingSources: ["project"],
         // Use acceptEdits so the SDK's permission state machine stays active —
         // this lets plan mode (EnterPlanMode / ExitPlanMode) work properly.

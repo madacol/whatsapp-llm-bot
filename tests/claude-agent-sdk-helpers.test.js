@@ -1,5 +1,8 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 
 // These are module-internal functions — import the module and test via
 // the public function that uses them (extractToolResultText is not exported).
@@ -27,11 +30,13 @@ import assert from "node:assert/strict";
 
 import {
   buildClaudeSystemPrompt,
+  buildClaudeWorkspaceArtifacts,
   createClaudeAgentSdkHarness,
   extractToolResultText,
   extractToolResultFromEvent,
   handleSandboxEscapeApproval,
   hasTextField,
+  writeClaudeWorkspaceArtifacts,
 } from "../harnesses/claude-agent-sdk.js";
 
 describe("createClaudeAgentSdkHarness", () => {
@@ -89,6 +94,79 @@ describe("buildClaudeSystemPrompt", () => {
       buildClaudeSystemPrompt("  Use the custom prompt.  "),
       "Use the custom prompt.",
     );
+  });
+});
+
+describe("buildClaudeWorkspaceArtifacts", () => {
+  it("returns no files when there are no chat-scoped actions", () => {
+    const artifacts = buildClaudeWorkspaceArtifacts(/** @type {ToolRuntime} */ ({
+      listTools: () => [{
+        name: "Read",
+        description: "Read a file",
+        parameters: { type: "object", properties: {} },
+        scope: "global",
+      }],
+      getTool: async () => null,
+      executeTool: async () => ({ result: "", permissions: {} }),
+    }));
+
+    assert.deepEqual(artifacts, []);
+  });
+
+  it("builds workspace files for chat-scoped actions only", () => {
+    const artifacts = buildClaudeWorkspaceArtifacts(/** @type {ToolRuntime} */ ({
+      listTools: () => [
+        {
+          name: "remind",
+          description: "Schedule a reminder",
+          parameters: {
+            type: "object",
+            properties: { when: { type: "string" } },
+          },
+          scope: "chat",
+        },
+        {
+          name: "Read",
+          description: "Read a file",
+          parameters: { type: "object", properties: {} },
+          scope: "global",
+        },
+      ],
+      getTool: async () => null,
+      executeTool: async () => ({ result: "", permissions: {} }),
+    }));
+
+    assert.equal(artifacts.length, 2);
+    assert.ok(artifacts[0]?.relativePath.endsWith(".madabot/chat-actions.json"));
+    assert.ok(artifacts[1]?.relativePath.endsWith(".madabot/chat-actions.md"));
+    assert.ok(artifacts[0]?.content.includes("\"name\": \"remind\""));
+    assert.ok(!artifacts[0]?.content.includes("\"name\": \"Read\""));
+    assert.ok(artifacts[1]?.content.includes("## remind"));
+  });
+});
+
+describe("writeClaudeWorkspaceArtifacts", () => {
+  it("writes chat action files into .madabot", async () => {
+    const workdir = await fs.mkdtemp(path.join(os.tmpdir(), "claude-sdk-artifacts-"));
+    await writeClaudeWorkspaceArtifacts(workdir, /** @type {ToolRuntime} */ ({
+      listTools: () => [{
+        name: "remind",
+        description: "Schedule a reminder",
+        parameters: {
+          type: "object",
+          properties: { when: { type: "string" } },
+        },
+        scope: "chat",
+      }],
+      getTool: async () => null,
+      executeTool: async () => ({ result: "", permissions: {} }),
+    }));
+
+    const jsonText = await fs.readFile(path.join(workdir, ".madabot/chat-actions.json"), "utf8");
+    const markdownText = await fs.readFile(path.join(workdir, ".madabot/chat-actions.md"), "utf8");
+
+    assert.ok(jsonText.includes("\"name\": \"remind\""));
+    assert.ok(markdownText.includes("## remind"));
   });
 });
 
