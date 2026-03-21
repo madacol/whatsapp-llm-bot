@@ -26,6 +26,7 @@ import assert from "node:assert/strict";
 // to harnesses/claude-agent-sdk.js
 
 import {
+  buildClaudeSystemPrompt,
   createClaudeAgentSdkHarness,
   extractToolResultText,
   extractToolResultFromEvent,
@@ -74,6 +75,20 @@ describe("createClaudeAgentSdkHarness", () => {
     });
 
     assert.equal(handled, false);
+  });
+});
+
+describe("buildClaudeSystemPrompt", () => {
+  it("returns null when no external instructions are provided", () => {
+    assert.equal(buildClaudeSystemPrompt(""), null);
+    assert.equal(buildClaudeSystemPrompt("   "), null);
+  });
+
+  it("passes explicit external instructions through unchanged except trimming", () => {
+    assert.equal(
+      buildClaudeSystemPrompt("  Use the custom prompt.  "),
+      "Use the custom prompt.",
+    );
   });
 });
 
