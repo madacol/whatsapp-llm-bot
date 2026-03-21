@@ -217,6 +217,55 @@ describe("codex events", () => {
     });
   });
 
+  it("normalizes todo_list items as update_plan tool activity", () => {
+    assert.deepEqual(normalizeCodexEvent({
+      type: "item.started",
+      item: {
+        id: "todo-1",
+        type: "todo_list",
+        items: [
+          { text: "Initialize requested plan state", completed: true },
+        ],
+      },
+    }), {
+      sessionId: null,
+      toolEvent: {
+        id: "todo-1",
+        name: "update_plan",
+        arguments: {
+          items: [
+            { text: "Initialize requested plan state", completed: true },
+          ],
+        },
+        status: "started",
+      },
+    });
+
+    assert.deepEqual(normalizeCodexEvent({
+      type: "item.completed",
+      item: {
+        id: "todo-1",
+        type: "todo_list",
+        items: [
+          { text: "Initialize requested plan state", completed: true },
+        ],
+      },
+    }), {
+      sessionId: null,
+      toolEvent: {
+        id: "todo-1",
+        name: "update_plan",
+        arguments: {
+          items: [
+            { text: "Initialize requested plan state", completed: true },
+          ],
+        },
+        status: "completed",
+        output: "Initialize requested plan state",
+      },
+    });
+  });
+
   it("strips shell wrappers from command displays", () => {
     assert.deepEqual(normalizeCodexEvent({
       type: "item.started",

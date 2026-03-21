@@ -368,6 +368,23 @@ export function normalizeCodexEvent(event) {
     return normalized;
   }
 
+  if (itemType === "todo_list") {
+    const id = typeof item.id === "string" ? item.id : null;
+    const items = Array.isArray(item.items) ? item.items : null;
+    if (id && items) {
+      normalized.toolEvent = {
+        id,
+        name: "update_plan",
+        arguments: { items },
+        status: eventType === "item.started" ? "started" : "completed",
+        ...(eventType === "item.completed"
+          ? { output: extractPlanText(item) ?? undefined }
+          : {}),
+      };
+    }
+    return normalized;
+  }
+
   if (eventType === "item.completed" && (itemType.includes("plan") || itemType === "todo_list")) {
     normalized.planText = extractPlanText(item) ?? undefined;
     return normalized;
