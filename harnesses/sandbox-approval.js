@@ -1,4 +1,5 @@
 import path from "node:path";
+import os from "node:os";
 import { findEscapedShellTarget } from "./shell-boundary-detector.js";
 
 /** @typedef {"path" | "command"} SandboxEscapeKind */
@@ -11,6 +12,7 @@ import { findEscapedShellTarget } from "./shell-boundary-detector.js";
  *   workdir: string,
  *   target?: string,
  *   command?: string,
+ *   resolvedTarget?: string,
  * }} SandboxEscapeRequest
  */
 
@@ -19,7 +21,11 @@ import { findEscapedShellTarget } from "./shell-boundary-detector.js";
  * Returns null when the invocation stays within the workspace or when full access is enabled.
  * @param {string} toolName
  * @param {Record<string, unknown>} input
- * @param {{ workdir?: string | null, sandboxMode?: HarnessRunConfig["sandboxMode"] | null }} options
+ * @param {{
+ *   workdir?: string | null,
+ *   sandboxMode?: HarnessRunConfig["sandboxMode"] | null,
+ *   additionalWritableRoots?: string[] | null,
+ * }} options
  * @returns {SandboxEscapeRequest | null}
  */
 export function getSandboxEscapeRequest(toolName, input, options) {
@@ -27,6 +33,7 @@ export function getSandboxEscapeRequest(toolName, input, options) {
   const workdir = typeof options.workdir === "string" && options.workdir.trim()
     ? path.resolve(options.workdir)
     : null;
+  const allowedRoots = getAllowedRoots(workdir, options.additionalWritableRoots ?? null);
 
   if (!workdir || sandboxMode === "danger-full-access") {
     return null;
@@ -39,7 +46,7 @@ export function getSandboxEscapeRequest(toolName, input, options) {
     if (!filePath) {
       return null;
     }
-    const escapedTarget = resolveEscapedPath(filePath, workdir);
+    const escapedTarget = resolveEscapedPath(filePath, allowedRoots, workdir);
     if (!escapedTarget) {
       return null;
     }
@@ -48,6 +55,7 @@ export function getSandboxEscapeRequest(toolName, input, options) {
       kind: "path",
       summary: `Access \`${escapedTarget}\` outside the workspace \`${workdir}\`.`,
       target: escapedTarget,
+      resolvedTarget: escapedTarget,
       workdir,
     };
   }
@@ -61,12 +69,17 @@ export function getSandboxEscapeRequest(toolName, input, options) {
     if (!escapedTarget) {
       return null;
     }
+    const resolvedTarget = resolveSandboxTargetPath(escapedTarget, workdir);
+    if (resolvedTarget && isPathInsideAllowedRoots(resolvedTarget, allowedRoots)) {
+      return null;
+    }
     return {
       toolName: normalizedToolName,
       kind: "command",
       summary: `Run a shell command that targets \`${escapedTarget}\` outside the workspace \`${workdir}\`.`,
       command,
       target: escapedTarget,
+      ...(resolvedTarget ? { resolvedTarget } : {}),
       workdir,
     };
   }
@@ -147,21 +160,61 @@ function extractCommandInput(input) {
 
 /**
  * @param {string} candidatePath
+ * @param {string[]} allowedRoots
  * @param {string} workdir
  * @returns {string | null}
  */
-function resolveEscapedPath(candidatePath, workdir) {
+function resolveEscapedPath(candidatePath, allowedRoots, workdir) {
   const resolvedPath = path.resolve(workdir, candidatePath);
-  return isPathInsideWorkspace(resolvedPath, workdir) ? null : resolvedPath;
+  return isPathInsideAllowedRoots(resolvedPath, allowedRoots) ? null : resolvedPath;
+}
+
+/**
+ * @param {string | null} workdir
+ * @param {string[] | null | undefined} additionalWritableRoots
+ * @returns {string[]}
+ */
+function getAllowedRoots(workdir, additionalWritableRoots) {
+  /** @type {string[]} */
+  const allowedRoots = [];
+  if (workdir) {
+    allowedRoots.push(workdir);
+  }
+  if (Array.isArray(additionalWritableRoots)) {
+    for (const root of additionalWritableRoots) {
+      if (typeof root !== "string" || !root.trim()) {
+        continue;
+      }
+      allowedRoots.push(path.resolve(root));
+    }
+  }
+  return allowedRoots;
+}
+
+/**
+ * @param {string} candidate
+ * @param {string} workdir
+ * @returns {string | null}
+ */
+function resolveSandboxTargetPath(candidate, workdir) {
+  if (!candidate.trim()) {
+    return null;
+  }
+  if (candidate.startsWith("~/")) {
+    return path.join(os.homedir(), candidate.slice(2));
+  }
+  return path.resolve(workdir, candidate);
 }
 
 /**
  * @param {string} candidatePath
- * @param {string} workdir
+ * @param {string[]} allowedRoots
  * @returns {boolean}
  */
-function isPathInsideWorkspace(candidatePath, workdir) {
-  const relativePath = path.relative(workdir, candidatePath);
-  return relativePath === ""
-    || (!relativePath.startsWith("..") && !path.isAbsolute(relativePath));
+function isPathInsideAllowedRoots(candidatePath, allowedRoots) {
+  return allowedRoots.some((root) => {
+    const relativePath = path.relative(root, candidatePath);
+    return relativePath === ""
+      || (!relativePath.startsWith("..") && !path.isAbsolute(relativePath));
+  });
 }

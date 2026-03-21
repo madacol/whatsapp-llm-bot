@@ -30,6 +30,7 @@ describe("getSandboxEscapeRequest", () => {
       kind: "path",
       summary: "Access `/tmp/out.txt` outside the workspace `/repo`.",
       target: "/tmp/out.txt",
+      resolvedTarget: "/tmp/out.txt",
       workdir: "/repo",
     });
   });
@@ -48,8 +49,20 @@ describe("getSandboxEscapeRequest", () => {
       summary: "Run a shell command that targets `../..` outside the workspace `/repo/project`.",
       command: "cd ../.. && pwd",
       target: "../..",
+      resolvedTarget: "/",
       workdir: "/repo/project",
     });
+  });
+
+  it("does not treat relative workspace paths with slashes as escapes", () => {
+    const request = getSandboxEscapeRequest("run_bash", {
+      command: "sed -n '1,20p' src/app.js",
+    }, {
+      workdir: "/repo",
+      sandboxMode: "workspace-write",
+    });
+
+    assert.equal(request, null);
   });
 
   it("does not flag paths when full access is enabled", () => {
@@ -58,6 +71,18 @@ describe("getSandboxEscapeRequest", () => {
     }, {
       workdir: "/repo",
       sandboxMode: "danger-full-access",
+    });
+
+    assert.equal(request, null);
+  });
+
+  it("allows access inside approved additional writable roots", () => {
+    const request = getSandboxEscapeRequest("write_file", {
+      file_path: "/tmp/out.txt",
+    }, {
+      workdir: "/repo",
+      sandboxMode: "workspace-write",
+      additionalWritableRoots: ["/tmp"],
     });
 
     assert.equal(request, null);

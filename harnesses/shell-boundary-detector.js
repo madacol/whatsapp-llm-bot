@@ -15,7 +15,7 @@ export function findEscapedShellTarget(command, workdir) {
     return cdTarget;
   }
 
-  const pathMatches = command.matchAll(/(?<target>~\/[^\s;&|]*|\/[^\s;&|]*|\.\.\/[^\s;&|]*|\.\.(?:$|(?=[\s;&|])))/g);
+  const pathMatches = command.matchAll(/(?:^|[;&|]\s*|\s)(?<target>~\/[^\s;&|]*|\/[^\s;&|]*|\.\.\/[^\s;&|]*|\.\.(?:$|(?=[\s;&|])))/g);
   for (const match of pathMatches) {
     const candidate = stripShellQuotes(match.groups?.target ?? null);
     if (candidate && resolvesOutsideWorkspace(candidate, workdir)) {

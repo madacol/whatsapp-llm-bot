@@ -12,11 +12,13 @@ describe("buildCodexThreadOptions", () => {
       model: "gpt-5.4",
       sandboxMode: "workspace-write",
       approvalPolicy: "never",
+      additionalDirectories: ["/tmp"],
     }), {
       workingDirectory: "/repo",
       model: "gpt-5.4",
       sandboxMode: "workspace-write",
       approvalPolicy: "never",
+      additionalDirectories: ["/tmp"],
       skipGitRepoCheck: true,
     });
   });
@@ -554,5 +556,158 @@ describe("startCodexRun", () => {
       "",
       "hello\r\nhello\r\n",
     ].join("\n")]);
+  });
+
+  it("asks for approval and retries with an additional writable directory", async () => {
+    /** @type {import("@openai/codex-sdk").ThreadOptions[]} */
+    const observedOptions = [];
+    /** @type {string[]} */
+    const prompts = [];
+    /** @type {string[]} */
+    const errors = [];
+
+    const started = await startCodexRun({
+      chatId: "codex-chat",
+      prompt: "Continue",
+      messages: [{ role: "user", content: [{ type: "text", text: "Continue" }] }],
+      runConfig: {
+        workdir: "/repo/project",
+        sandboxMode: "workspace-write",
+      },
+      hooks: {
+        onAskUser: async (question, options) => {
+          prompts.push(question);
+          assert.deepEqual(options, ["✅ Allow", "❌ Deny"]);
+          return "✅ Allow";
+        },
+        onToolError: async (message) => {
+          errors.push(message);
+        },
+      },
+    }, {
+      createCodex: () => ({
+        startThread: (threadOptions) => {
+          observedOptions.push(threadOptions ?? {});
+          return {
+            id: "sess-123",
+            runStreamed: async () => ({
+              events: (async function* () {
+                yield {
+                  type: "item.started",
+                  item: {
+                    id: "cmd-1",
+                    type: "command_execution",
+                    command: "mkdir -p ../shared",
+                    aggregated_output: "",
+                    status: "in_progress",
+                  },
+                };
+              })(),
+            }),
+          };
+        },
+        resumeThread: (id, threadOptions) => {
+          assert.equal(id, "sess-123");
+          observedOptions.push(threadOptions ?? {});
+          return {
+            id,
+            runStreamed: async () => ({
+              events: (async function* () {
+                yield {
+                  type: "item.completed",
+                  item: {
+                    id: "msg-1",
+                    type: "agent_message",
+                    text: "Applied fix after approval",
+                  },
+                };
+                yield {
+                  type: "turn.completed",
+                  usage: {
+                    input_tokens: 3,
+                    output_tokens: 2,
+                    cached_input_tokens: 0,
+                  },
+                };
+              })(),
+            }),
+          };
+        },
+      }),
+    });
+
+    const completed = await started.done;
+
+    assert.equal(errors.length, 0);
+    assert.equal(prompts.length, 1);
+    assert.match(prompts[0] ?? "", /Sandbox escape request/);
+    assert.deepEqual(observedOptions, [
+      {
+        workingDirectory: "/repo/project",
+        sandboxMode: "workspace-write",
+        skipGitRepoCheck: true,
+      },
+      {
+        workingDirectory: "/repo/project",
+        sandboxMode: "workspace-write",
+        additionalDirectories: ["/repo/shared"],
+        skipGitRepoCheck: true,
+      },
+    ]);
+    assert.equal(completed.sessionId, "sess-123");
+    assert.deepEqual(completed.result.response, [{ type: "markdown", text: "Applied fix after approval" }]);
+  });
+
+  it("fails cleanly when sandbox escape approval is denied", async () => {
+    /** @type {string[]} */
+    const prompts = [];
+    /** @type {string[]} */
+    const errors = [];
+
+    const started = await startCodexRun({
+      chatId: "codex-chat",
+      prompt: "Continue",
+      messages: [{ role: "user", content: [{ type: "text", text: "Continue" }] }],
+      runConfig: {
+        workdir: "/repo/project",
+        sandboxMode: "workspace-write",
+      },
+      hooks: {
+        onAskUser: async (question) => {
+          prompts.push(question);
+          return "❌ Deny";
+        },
+        onToolError: async (message) => {
+          errors.push(message);
+        },
+      },
+    }, {
+      createCodex: () => ({
+        startThread: () => ({
+          id: "sess-123",
+          runStreamed: async () => ({
+            events: (async function* () {
+              yield {
+                type: "item.started",
+                item: {
+                  id: "cmd-1",
+                  type: "command_execution",
+                  command: "touch ../shared/out.txt",
+                  aggregated_output: "",
+                  status: "in_progress",
+                },
+              };
+            })(),
+          }),
+        }),
+        resumeThread: () => {
+          throw new Error("resumeThread should not be called");
+        },
+      }),
+    });
+
+    await assert.rejects(started.done, /Sandbox escape denied for `\/repo\/shared`/);
+    assert.equal(prompts.length, 1);
+    assert.deepEqual(errors, ["Sandbox escape denied for `/repo/shared`"]);
   });
 });
