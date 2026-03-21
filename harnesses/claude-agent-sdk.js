@@ -2,8 +2,7 @@
  * Claude Agent SDK harness — uses @anthropic-ai/claude-agent-sdk for agentic processing.
  *
  * All SDK built-in tools are enabled (Read, Write, Edit, Bash, Glob, Grep, WebSearch, WebFetch).
- * Custom bot actions are exposed as Skills (SKILL.md files) rather than MCP tools.
- * Chat-specific actions are embedded in the system prompt.
+ * Custom bot actions are not surfaced as MCP tools in this harness.
  *
  * Supports mid-conversation message injection via streamInput() and cancellation via AbortController.
  * Whitelisted tools are auto-approved; AskUserQuestion has a custom handler;
@@ -165,38 +164,15 @@ export async function handleEffortCommand(chatId, arg) {
 }
 
 /**
- * Build the full system prompt for the SDK, including:
- * - External instructions from the conversation layer
- * - Chat ID and runtime context
- * - DB paths
- * - Chat-scoped tool descriptions
- *
- * @param {LlmConfig} llmConfig
- * @param {string} chatId
- * @param {string[]} senderIds
- * @returns {Promise<string>}
+ * Resolve the optional system prompt to send to the Claude SDK.
+ * When empty, no explicit system prompt is passed so the SDK behaves like the
+ * CLI by default.
+ * @param {string} externalInstructions
+ * @returns {string | null}
  */
-async function buildSystemPrompt(llmConfig, chatId, senderIds) {
-  let prompt = llmConfig.externalInstructions;
-
-  const promptTemplate = readFileSync(new URL("./claude-agent-sdk-prompt.md", import.meta.url), "utf-8");
-  prompt += "\n\n" + promptTemplate
-    .replace(/\{\{chatId\}\}/g, chatId)
-    .replace(/\{\{senderIds\}\}/g, senderIds.join(", "));
-
-  // CLAUDE.md is loaded automatically by the SDK via settingSources: ["project"]
-
-  const chatTools = llmConfig.toolRuntime.listTools().filter((tool) => tool.scope === "chat");
-  if (chatTools.length > 0) {
-    prompt += "\n\n## Chat-specific actions\n";
-    prompt += "These are custom actions created by users for this chat. Execute them by writing and running the appropriate code.\n";
-    for (const tool of chatTools) {
-      prompt += `\n### ${tool.name}\n${tool.description}\n`;
-      prompt += `Parameters: ${JSON.stringify(tool.parameters)}\n`;
-    }
-  }
-
-  return prompt;
+export function buildClaudeSystemPrompt(externalInstructions) {
+  const trimmedExternalInstructions = externalInstructions.trim();
+  return trimmedExternalInstructions ? trimmedExternalInstructions : null;
 }
 
 /**
@@ -651,7 +627,7 @@ export function createClaudeAgentSdkHarness() {
 
       const existingSessionId = getClaudeSessionId(session);
 
-    const fullSystemPrompt = await buildSystemPrompt(llmConfig, session.chatId, session.senderIds);
+    const systemPrompt = buildClaudeSystemPrompt(llmConfig.externalInstructions);
 
     /** @type {string | null} */
     let resolvedSessionId = null;
@@ -674,7 +650,6 @@ export function createClaudeAgentSdkHarness() {
     try {
       /** @type {import("@anthropic-ai/claude-agent-sdk").Options} */
       const queryOptions = {
-        systemPrompt: fullSystemPrompt,
         maxTurns: maxDepth ?? 50,
         cwd: workdir ?? process.cwd(),
         settingSources: ["project"],
@@ -686,6 +661,7 @@ export function createClaudeAgentSdkHarness() {
         allowDangerouslySkipPermissions: true,
         persistSession: true,
         abortController,
+        ...(systemPrompt ? { systemPrompt } : {}),
         ...(model && { model }),
         ...(reasoningEffort && { effort: reasoningEffort }),
         stderr: (/** @type {string} */ data) => {
