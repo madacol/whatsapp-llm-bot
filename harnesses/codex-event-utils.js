@@ -38,7 +38,7 @@ export function extractCodexText(value) {
   if (!isCodexEventRecord(value)) {
     return null;
   }
-  for (const key of ["text", "message", "output", "stdout", "stderr", "content", "summary", "details", "error"]) {
+  for (const key of ["text", "message", "output", "stdout", "stderr", "content", "summary", "details", "error", "resource", "status", "data"]) {
     const nested = extractCodexText(value[key]);
     if (nested) {
       return nested;

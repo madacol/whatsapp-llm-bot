@@ -289,4 +289,89 @@ describe("startCodexRun", () => {
       "agent-pass-2",
     ].join("\n")]);
   });
+
+  it("wires inspect for structured MCP tool results", async () => {
+    /** @type {string[]} */
+    const edits = [];
+    /** @type {ReactionCallback | null} */
+    let reactionCallback = null;
+
+    const started = await startCodexRun({
+      chatId: "codex-chat",
+      prompt: "Continue",
+      messages: [{ role: "user", content: [{ type: "text", text: "Continue" }] }],
+      runConfig: {
+        workdir: "/repo",
+      },
+      hooks: {
+        onToolCall: async () => {
+          return /** @type {MessageHandle} */ ({
+            keyId: "tool-msg-2",
+            isImage: false,
+            edit: async (text) => {
+              edits.push(text);
+            },
+            onReaction: (callback) => {
+              reactionCallback = callback;
+              return () => {};
+            },
+          });
+        },
+      },
+    }, {
+      createCodex: () => ({
+        startThread: () => ({
+          id: "sess-123",
+          runStreamed: async () => ({
+            events: (async function* () {
+              yield {
+                type: "item.started",
+                item: {
+                  id: "tool-2",
+                  type: "mcp_tool_call",
+                  server: "functions",
+                  tool: "update_plan",
+                  arguments: {
+                    plan: [{ step: "Do work", status: "completed" }],
+                  },
+                  status: "in_progress",
+                },
+              };
+              yield {
+                type: "item.completed",
+                item: {
+                  id: "tool-2",
+                  type: "mcp_tool_call",
+                  server: "functions",
+                  tool: "update_plan",
+                  arguments: {
+                    plan: [{ step: "Do work", status: "completed" }],
+                  },
+                  result: {
+                    content: [],
+                    structured_content: {
+                      output: "Plan updated",
+                    },
+                  },
+                  status: "completed",
+                },
+              };
+            })(),
+          }),
+        }),
+        resumeThread: () => {
+          throw new Error("resumeThread should not be called");
+        },
+      }),
+    });
+
+    await started.done;
+
+    reactionCallback?.("👁", "user-1");
+    assert.deepEqual(edits, [[
+      "*update_plan*",
+      "",
+      "Plan updated",
+    ].join("\n")]);
+  });
 });
