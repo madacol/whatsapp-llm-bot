@@ -78,6 +78,10 @@ export async function getMessageContent(baileysMessage, downloadFn = downloadMed
   /** @type {string | undefined} */
   let hdParentMessageId;
 
+  if (baileysMessage.message?.reactionMessage) {
+    return { content, quotedSenderId, hdChild, hdParentMessageId };
+  }
+
   const contextInfo = getContextInfo(baileysMessage.message);
   const quotedMessage = contextInfo?.quotedMessage;
 

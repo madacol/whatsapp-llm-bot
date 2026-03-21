@@ -61,6 +61,38 @@ function normalizeReactionEvents(events) {
 }
 
 /**
+ * Normalize a reaction that arrived as a `messages.upsert` payload instead of
+ * the dedicated `messages.reaction` event stream.
+ * @param {BaileysMessage} message
+ * @returns {Array<{ key: { id: string; remoteJid: string }; reaction: { text: string }; senderId: string }>}
+ */
+export function normalizeUpsertReactionMessage(message) {
+  const reactionMessage = message.message?.reactionMessage;
+  const reactedKey = reactionMessage?.key;
+  if (!reactedKey?.id || !reactionMessage?.text) {
+    return [];
+  }
+
+  const remoteJid = reactedKey.remoteJid || message.key.remoteJid;
+  if (!remoteJid) {
+    return [];
+  }
+
+  const senderId = (
+    message.key.participant
+    || /** @type {{ participantAlt?: string | null }} */ (message.key).participantAlt
+    || message.key.remoteJid
+    || "unknown"
+  ).split("@")[0];
+
+  return [{
+    key: { id: reactedKey.id, remoteJid },
+    reaction: { text: reactionMessage.text },
+    senderId,
+  }];
+}
+
+/**
  * Build a WASocket instance from auth state.
  * @param {Awaited<ReturnType<typeof useMultiFileAuthState>>["state"]} auth
  * @param {[number, number, number]} version
@@ -186,6 +218,13 @@ export async function createWhatsAppTransport() {
         const { messages } = events["messages.upsert"];
         for (const message of messages) {
           if (message.key.fromMe || !message.message) continue;
+
+          const upsertReactions = normalizeUpsertReactionMessage(message);
+          if (upsertReactions.length > 0) {
+            confirmRuntime.handleReactions(upsertReactions, sock);
+            reactionRuntime.handleReactions(upsertReactions);
+            continue;
+          }
 
           if (message.message.pollUpdateMessage) {
             try {
