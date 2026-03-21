@@ -720,7 +720,7 @@ export function createClaudeAgentSdkHarness() {
           }
           const sandboxEscapeRequest = getSandboxEscapeRequest(toolName, input, {
             workdir,
-            sandboxMode: "workspace-write",
+            sandboxMode: runConfig?.sandboxMode ?? "workspace-write",
           });
           if (sandboxEscapeRequest) {
             return handleSandboxEscapeApproval(sandboxEscapeRequest, input, hooks.onAskUser);
