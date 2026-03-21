@@ -2,7 +2,7 @@ import { Codex } from "@openai/codex-sdk";
 import { createLogger } from "../logger.js";
 import { buildToolPresentation } from "../tool-presentation-model.js";
 import { formatToolPresentationInspect, formatToolPresentationSummary } from "../whatsapp/tool-presenter.js";
-import { createToolMessage, registerInspectHandler } from "../utils.js";
+import { createToolMessage, registerDynamicInspectHandler, registerInspectHandler } from "../utils.js";
 import { normalizeCodexEvent } from "./codex-events.js";
 import { analyzeCodexCommand } from "./codex-command-semantics.js";
 import { createCodexRunState } from "./codex-run-state.js";
@@ -128,6 +128,90 @@ function isAbortError(error) {
 }
 
 /**
+ * @param {string} toolName
+ * @returns {boolean}
+ */
+function isWebToolName(toolName) {
+  return toolName === "search_query"
+    || toolName === "open"
+    || toolName === "find"
+    || toolName === "image_query"
+    || toolName === "WebSearch";
+}
+
+/**
+ * @typedef {{
+ *   id: string,
+ *   presentation: import("../tool-presentation-model.js").ToolPresentation,
+ *   output?: string,
+ * }} WebFlowStep
+ */
+
+/**
+ * @typedef {{
+ *   handle?: MessageHandle,
+ *   steps: WebFlowStep[],
+ * }} WebToolFlow
+ */
+
+/**
+ * @param {import("../tool-presentation-model.js").ToolPresentation} presentation
+ * @returns {string | null}
+ */
+function describeWebFlowStep(presentation) {
+  if (presentation.kind !== "activity") {
+    return null;
+  }
+
+  const detail = presentation.activity.lines[0] ?? "";
+  switch (presentation.toolName) {
+    case "Search Web":
+      return `search ${detail}`;
+    case "Search Images":
+      return `search images ${detail}`;
+    case "Open Link":
+      return `open ${detail}`;
+    case "Find On Page":
+      return `find ${detail.split(" in `")[0] ?? detail}`;
+    default:
+      return null;
+  }
+}
+
+/**
+ * @param {WebToolFlow} webToolFlow
+ * @returns {string}
+ */
+function buildWebFlowSummary(webToolFlow) {
+  const parts = webToolFlow.steps
+    .map((step) => describeWebFlowStep(step.presentation))
+    .filter((part) => typeof part === "string" && part.length > 0);
+  return parts.length > 0 ? `*Web*  ${parts.join(" -> ")}` : "*Web*";
+}
+
+/**
+ * @param {WebToolFlow} webToolFlow
+ * @returns {string}
+ */
+function buildWebFlowInspectText(webToolFlow) {
+  /** @type {string[]} */
+  const sections = [];
+
+  for (const step of webToolFlow.steps) {
+    sections.push(formatToolPresentationSummary(step.presentation));
+    sections.push("");
+    sections.push(formatToolPresentationInspect(step.presentation, step.output) ?? "_no output_");
+    sections.push("");
+  }
+
+  while (sections.length > 0 && sections[sections.length - 1] === "") {
+    sections.pop();
+  }
+
+  return sections.join("\n");
+}
+
+/**
  * Start a Codex SDK-backed run and stream semantic events into harness hooks.
  * @param {{
  *   chatId: string,
@@ -239,12 +323,14 @@ async function runCodexAttempt(input) {
   /** @type {string | null} */
   let failureMessage = null;
   const runState = createCodexRunState({ workdir: input.runConfig?.workdir });
-  /** @type {Map<string, { handle: MessageHandle, presentation: import("../tool-presentation-model.js").ToolPresentation }>} */
+  /** @type {Map<string, { handle?: MessageHandle, presentation: import("../tool-presentation-model.js").ToolPresentation, webToolFlow?: WebToolFlow }>} */
   const activeTools = new Map();
   const syntheticToolAdapter = createCodexSyntheticToolAdapter({
     onToolCall: input.hooks.onToolCall,
     cwd: input.runConfig?.workdir ?? null,
   });
+  /** @type {WebToolFlow | null} */
+  let webToolFlow = null;
 
   try {
     for await (const event of streamed.events) {
@@ -288,19 +374,68 @@ async function runCodexAttempt(input) {
       }
 
       if (normalized.toolEvent) {
+        const toolEvent = normalized.toolEvent;
         const currentPresentation = buildToolPresentation(
-          normalized.toolEvent.name,
-          normalized.toolEvent.arguments,
+          toolEvent.name,
+          toolEvent.arguments,
           undefined,
           input.runConfig?.workdir ?? null,
           undefined,
         );
         const currentSummary = formatToolPresentationSummary(currentPresentation);
-        if (normalized.toolEvent.status === "started") {
+        if (isWebToolName(toolEvent.name)) {
+          if (!webToolFlow) {
+            const toolCall = {
+              id: toolEvent.id,
+              name: toolEvent.name,
+              arguments: JSON.stringify(toolEvent.arguments),
+            };
+            const handle = await input.hooks.onToolCall(toolCall) ?? undefined;
+            webToolFlow = { handle, steps: [] };
+            if (handle) {
+              registerDynamicInspectHandler(handle, () => ({
+                summary: buildWebFlowSummary(webToolFlow ?? { steps: [] }),
+                text: buildWebFlowInspectText(webToolFlow ?? { steps: [] }),
+              }));
+            }
+          }
+
+          const currentWebToolFlow = webToolFlow;
+          let step = currentWebToolFlow.steps.find((candidate) => candidate.id === toolEvent.id);
+          if (!step) {
+            step = { id: toolEvent.id, presentation: currentPresentation };
+            currentWebToolFlow.steps.push(step);
+          } else {
+            step.presentation = currentPresentation;
+          }
+
+          activeTools.set(toolEvent.id, {
+            handle: currentWebToolFlow.handle,
+            presentation: currentPresentation,
+            webToolFlow: currentWebToolFlow,
+          });
+
+          if (currentWebToolFlow.handle && toolEvent.status === "started") {
+            try {
+              await currentWebToolFlow.handle.edit(buildWebFlowSummary(currentWebToolFlow));
+            } catch {
+              // best-effort — grouping still improves inspect without an in-place update
+            }
+          }
+
+          if (toolEvent.status !== "started") {
+            step.output = toolEvent.output;
+            activeTools.delete(toolEvent.id);
+          }
+
+          continue;
+        }
+
+        if (toolEvent.status === "started") {
           const toolCall = {
-            id: normalized.toolEvent.id,
-            name: normalized.toolEvent.name,
-            arguments: JSON.stringify(normalized.toolEvent.arguments),
+            id: toolEvent.id,
+            name: toolEvent.name,
+            arguments: JSON.stringify(toolEvent.arguments),
           };
           const handle = await input.hooks.onToolCall(toolCall);
           if (handle) {
@@ -309,23 +444,23 @@ async function runCodexAttempt(input) {
               registerInspectHandler(
                 handle,
                 currentSummary,
-                createToolMessage(normalized.toolEvent.id, ""),
-                normalized.toolEvent.name,
+                createToolMessage(toolEvent.id, ""),
+                toolEvent.name,
                 initialInspectText,
               );
             }
-            activeTools.set(normalized.toolEvent.id, {
+            activeTools.set(toolEvent.id, {
               handle,
               presentation: currentPresentation,
             });
           }
         } else {
-          let activeTool = activeTools.get(normalized.toolEvent.id);
+          let activeTool = activeTools.get(toolEvent.id);
           if (!activeTool) {
             const toolCall = {
-              id: normalized.toolEvent.id,
-              name: normalized.toolEvent.name,
-              arguments: JSON.stringify(normalized.toolEvent.arguments),
+              id: toolEvent.id,
+              name: toolEvent.name,
+              arguments: JSON.stringify(toolEvent.arguments),
             };
             const handle = await input.hooks.onToolCall(toolCall);
             if (handle) {
@@ -335,7 +470,7 @@ async function runCodexAttempt(input) {
               };
             }
           }
-          if (activeTool && formatToolPresentationSummary(activeTool.presentation) !== currentSummary) {
+          if (activeTool?.handle && formatToolPresentationSummary(activeTool.presentation) !== currentSummary) {
             try {
               await activeTool.handle.edit(currentSummary);
             } catch {
@@ -343,29 +478,31 @@ async function runCodexAttempt(input) {
             }
             activeTool.presentation = currentPresentation;
           }
-          if (activeTool && normalized.toolEvent.output) {
+          if (activeTool?.handle && toolEvent.output) {
             const inspectText = formatToolPresentationInspect(
               activeTool.presentation,
-              normalized.toolEvent.output,
+              toolEvent.output,
             ) ?? undefined;
             registerInspectHandler(
               activeTool.handle,
               currentSummary,
-              createToolMessage(normalized.toolEvent.id, normalized.toolEvent.output),
+              createToolMessage(toolEvent.id, toolEvent.output),
               activeTool.presentation.toolName,
               inspectText,
             );
           }
           if (activeTool) {
-            activeTools.delete(normalized.toolEvent.id);
+            activeTools.delete(toolEvent.id);
           }
         }
       }
 
       if (normalized.assistantText) {
-        await syntheticToolAdapter.handleAssistantText(normalized.assistantText);
-        lastAssistantText = normalized.assistantText;
-        await input.hooks.onLlmResponse(normalized.assistantText);
+        const suppressAssistantText = await syntheticToolAdapter.handleAssistantText(normalized.assistantText);
+        if (!suppressAssistantText) {
+          lastAssistantText = normalized.assistantText;
+          await input.hooks.onLlmResponse(normalized.assistantText);
+        }
       }
 
       if (normalized.planText) {

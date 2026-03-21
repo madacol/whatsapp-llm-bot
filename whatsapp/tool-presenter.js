@@ -212,6 +212,172 @@ function formatBashInspectOutput(text) {
 
 /**
  * @param {string} text
+ * @returns {unknown}
+ */
+function parseInspectJson(text) {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * @param {unknown} value
+ * @returns {value is Record<string, unknown>}
+ */
+function isInspectRecord(value) {
+  return !!value && typeof value === "object" && !Array.isArray(value);
+}
+
+/**
+ * @param {unknown} value
+ * @returns {string | null}
+ */
+function getInspectText(value) {
+  if (typeof value === "string" && value.trim()) {
+    return value.trim();
+  }
+  return null;
+}
+
+/**
+ * @param {unknown} value
+ * @returns {string | null}
+ */
+function getInspectUrl(value) {
+  if (typeof value !== "string" || !value.trim()) {
+    return null;
+  }
+  try {
+    const url = new URL(value);
+    return `\`${url.host}${url.pathname}${url.search}\``;
+  } catch {
+    return `\`${value.trim()}\``;
+  }
+}
+
+/**
+ * @param {Record<string, unknown>} entry
+ * @returns {string | null}
+ */
+function formatSearchResultEntry(entry) {
+  const title = getInspectText(entry.title) ?? getInspectText(entry.name) ?? getInspectText(entry.heading);
+  const url = getInspectUrl(entry.url) ?? getInspectUrl(entry.link);
+  const snippet = getInspectText(entry.snippet)
+    ?? getInspectText(entry.description)
+    ?? getInspectText(entry.summary)
+    ?? getInspectText(entry.text)
+    ?? getInspectText(entry.excerpt);
+
+  /** @type {string[]} */
+  const lines = [];
+  if (title) {
+    lines.push(`*${title}*`);
+  }
+  if (url) {
+    lines.push(url);
+  }
+  if (snippet) {
+    lines.push(snippet);
+  }
+  return lines.length > 0 ? lines.join("\n") : null;
+}
+
+/**
+ * @param {string} text
+ * @returns {string}
+ */
+function formatWebSearchInspectOutput(text) {
+  const parsed = parseInspectJson(text);
+  const results = Array.isArray(parsed)
+    ? parsed
+    : isInspectRecord(parsed) && Array.isArray(parsed.results)
+      ? parsed.results
+      : null;
+
+  if (!results) {
+    return text;
+  }
+
+  const sections = results
+    .filter(isInspectRecord)
+    .map(formatSearchResultEntry)
+    .filter((section) => typeof section === "string" && section.length > 0);
+
+  return sections.length > 0 ? sections.join("\n\n") : text;
+}
+
+/**
+ * @param {string} text
+ * @returns {string}
+ */
+function formatOpenLinkInspectOutput(text) {
+  const parsed = parseInspectJson(text);
+  if (!isInspectRecord(parsed)) {
+    return text;
+  }
+
+  const title = getInspectText(parsed.title) ?? getInspectText(parsed.name);
+  const url = getInspectUrl(parsed.url) ?? getInspectUrl(parsed.link);
+  const excerpt = getInspectText(parsed.excerpt)
+    ?? getInspectText(parsed.snippet)
+    ?? getInspectText(parsed.summary)
+    ?? getInspectText(parsed.text)
+    ?? getInspectText(parsed.content);
+
+  /** @type {string[]} */
+  const lines = [];
+  if (title) {
+    lines.push(`*${title}*`);
+  }
+  if (url) {
+    lines.push(url);
+  }
+  if (excerpt) {
+    lines.push(excerpt);
+  }
+
+  return lines.length > 0 ? lines.join("\n") : text;
+}
+
+/**
+ * @param {Record<string, unknown>} entry
+ * @returns {string | null}
+ */
+function formatFindMatchEntry(entry) {
+  return getInspectText(entry.text)
+    ?? getInspectText(entry.snippet)
+    ?? getInspectText(entry.content)
+    ?? getInspectText(entry.quote)
+    ?? getInspectText(entry.excerpt);
+}
+
+/**
+ * @param {string} text
+ * @returns {string}
+ */
+function formatFindOnPageInspectOutput(text) {
+  const parsed = parseInspectJson(text);
+  const matches = Array.isArray(parsed)
+    ? parsed
+    : isInspectRecord(parsed) && Array.isArray(parsed.matches)
+      ? parsed.matches
+      : null;
+
+  if (!matches) {
+    return text;
+  }
+
+  const lines = matches
+    .map((entry) => isInspectRecord(entry) ? formatFindMatchEntry(entry) : getInspectText(entry))
+    .filter((line) => typeof line === "string" && line.length > 0);
+
+  return lines.length > 0 ? lines.join("\n\n") : text;
+}
+
+/**
+ * @param {string} text
  * @param {import("../tool-presentation-model.js").ToolInspectMode} inspectMode
  * @returns {string}
  */
@@ -257,6 +423,25 @@ function buildPlanInspectLines(presentation) {
     }
   }
   return lines;
+}
+
+/**
+ * @param {import("../tool-presentation-model.js").ActivityPresentation} presentation
+ * @param {string} output
+ * @returns {string}
+ */
+function formatActivityInspectOutput(presentation, output) {
+  switch (presentation.toolName) {
+    case "Search Web":
+    case "Search Images":
+      return formatWebSearchInspectOutput(output);
+    case "Open Link":
+      return formatOpenLinkInspectOutput(output);
+    case "Find On Page":
+      return formatFindOnPageInspectOutput(output);
+    default:
+      return formatInspectOutput(output, presentation.inspectMode);
+  }
 }
 
 /**
@@ -358,7 +543,7 @@ export function formatToolPresentationInspect(presentation, output) {
   switch (presentation.kind) {
     case "activity":
       return typeof output === "string" && output.length > 0
-        ? formatInspectOutput(output, presentation.inspectMode)
+        ? formatActivityInspectOutput(presentation, output)
         : "_no output_";
     case "plan": {
       const lines = buildPlanInspectLines(presentation);
