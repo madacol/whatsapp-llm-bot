@@ -408,6 +408,105 @@ describe("startCodexRun", () => {
     ].join("\n")]);
   });
 
+  it("wires inspect for structured web tool results without text fields", async () => {
+    /** @type {string[]} */
+    const edits = [];
+    /** @type {ReactionCallback | null} */
+    let reactionCallback = null;
+
+    const started = await startCodexRun({
+      chatId: "codex-chat",
+      prompt: "What is UTC+00:00?",
+      messages: [{ role: "user", content: [{ type: "text", text: "What is UTC+00:00?" }] }],
+      runConfig: {
+        workdir: "/repo",
+      },
+      hooks: {
+        onToolCall: async () => {
+          return /** @type {MessageHandle} */ ({
+            keyId: "tool-msg-web-1",
+            isImage: false,
+            edit: async (text) => {
+              edits.push(text);
+            },
+            onReaction: (callback) => {
+              reactionCallback = callback;
+              return () => {};
+            },
+          });
+        },
+      },
+    }, {
+      createCodex: () => ({
+        startThread: () => ({
+          id: "sess-123",
+          runStreamed: async () => ({
+            events: (async function* () {
+              yield {
+                type: "item.started",
+                item: {
+                  id: "tool-web-1",
+                  type: "mcp_tool_call",
+                  server: "web",
+                  tool: "search_query",
+                  arguments: {
+                    search_query: [{ q: "UTC+00:00" }],
+                  },
+                  status: "in_progress",
+                },
+              };
+              yield {
+                type: "item.completed",
+                item: {
+                  id: "tool-web-1",
+                  type: "mcp_tool_call",
+                  server: "web",
+                  tool: "search_query",
+                  arguments: {
+                    search_query: [{ q: "UTC+00:00" }],
+                  },
+                  result: {
+                    content: [],
+                    structured_content: {
+                      results: [
+                        {
+                          title: "UTC+00:00 - Wikipedia",
+                          url: "https://en.wikipedia.org/wiki/UTC%2B00%3A00",
+                          snippet: "UTC+00:00 is an identifier for a time offset from UTC of +00:00.",
+                        },
+                      ],
+                    },
+                  },
+                  status: "completed",
+                },
+              };
+            })(),
+          }),
+        }),
+        resumeThread: () => {
+          throw new Error("resumeThread should not be called");
+        },
+      }),
+    });
+
+    await started.done;
+
+    reactionCallback?.("👁", "user-1");
+    assert.deepEqual(edits, [[
+      "*Search Web*  \"UTC+00:00\"",
+      "",
+      JSON.stringify({
+        results: [
+          {
+            title: "UTC+00:00 - Wikipedia",
+            url: "https://en.wikipedia.org/wiki/UTC%2B00%3A00",
+            snippet: "UTC+00:00 is an identifier for a time offset from UTC of +00:00.",
+          },
+        ],
+      }, null, 2),
+    ].join("\n")]);
+  });
+
   it("surfaces todo_list items as update_plan tool calls", async () => {
     /** @type {LlmChatResponse["toolCalls"]} */
     const toolCalls = [];
