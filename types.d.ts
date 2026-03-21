@@ -511,7 +511,7 @@ type Session = {
 type LlmConfig = {
   llmClient: LlmClient;
   chatModel: string;
-  systemPrompt: string;
+  externalInstructions: string;
   toolRuntime: ToolRuntime;
 };
 

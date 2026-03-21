@@ -88,14 +88,14 @@ export async function buildHarnessRunRequest({
   };
 
   const chatModel = resolveChatModel(persona, chatInfo ?? undefined);
-  const baseSystemPrompt = buildExternalSystemPrompt(persona, chatInfo, systemPromptSuffix, harnessName);
-  const { systemPrompt, messages, mediaRegistry } = await prepareRunMessages({
+  const baseExternalInstructions = buildExternalSystemPrompt(persona, chatInfo, systemPromptSuffix, harnessName);
+  const { externalInstructions, messages, mediaRegistry } = await prepareRunMessages({
     chatId,
     chatInfo,
     message,
     llmClient,
     chatModel,
-    baseSystemPrompt,
+    baseExternalInstructions,
     context,
     getMessages,
     bufferedTexts,
@@ -114,7 +114,7 @@ export async function buildHarnessRunRequest({
     llmConfig: {
       llmClient,
       chatModel,
-      systemPrompt,
+      externalInstructions,
       toolRuntime: createToolRuntime({
         tools: activeTools,
         resolveTool,

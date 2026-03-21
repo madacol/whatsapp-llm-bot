@@ -138,7 +138,7 @@ describe("startCodexRun", () => {
     const started = await startCodexRun({
       chatId: "codex-chat",
       prompt: "Continue",
-      systemPrompt: "Use available tools.",
+      externalInstructions: "Use available tools.",
       messages: [{ role: "user", content: [{ type: "text", text: "Continue" }] }],
       runConfig: {
         workdir: tempDir,

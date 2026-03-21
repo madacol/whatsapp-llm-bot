@@ -108,7 +108,7 @@ export function createCodexHarness(deps = {}) {
     const started = await startCodexRun({
       chatId: session.chatId,
       prompt,
-      systemPrompt: llmConfig.systemPrompt,
+      externalInstructions: llmConfig.externalInstructions,
       messages,
       sessionId,
       runConfig,

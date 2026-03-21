@@ -115,7 +115,7 @@ export async function runAgent(options) {
   const llmConfig = {
     llmClient,
     chatModel,
-    systemPrompt: agent.systemPrompt,
+    externalInstructions: agent.systemPrompt,
     toolRuntime: createToolRuntime({
       tools: actions,
       resolveTool: actionResolver,

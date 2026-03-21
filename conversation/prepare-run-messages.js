@@ -19,15 +19,15 @@ const log = createLogger("conversation:prepare-run-messages");
  *   chatInfo: import("../store.js").ChatRow | undefined,
  *   message: UserMessage,
  *   llmClient: LlmClient,
- *   systemPrompt: string,
+ *   externalInstructions: string,
  *   context: Pick<ExecuteActionContext, "send">,
  * }} input
  * @returns {Promise<string>}
  */
-async function searchAndAppendMemories({ chatId, chatInfo, message, llmClient, systemPrompt, context }) {
+async function searchAndAppendMemories({ chatId, chatInfo, message, llmClient, externalInstructions, context }) {
   const currentText = extractTextFromMessage(message);
   if (currentText.length < 10) {
-    return systemPrompt;
+    return externalInstructions;
   }
 
   try {
@@ -36,10 +36,10 @@ async function searchAndAppendMemories({ chatId, chatInfo, message, llmClient, s
     log.debug(`[memory] query="${currentText.slice(0, 80)}" found=${similar.length} threshold=${threshold}`);
 
     if (similar.length === 0) {
-      return systemPrompt;
+      return externalInstructions;
     }
 
-    const extended = systemPrompt + "\n\n## Relevant memories\n" + formatMemoriesContext(similar);
+    const extended = externalInstructions + "\n\n## Relevant memories\n" + formatMemoriesContext(similar);
     log.debug("[memory] recalled:", similar.map((memory) => `#${memory.id}(${Number(memory.similarity).toFixed(3)})`).join(", "));
 
     const lines = similar.map((memory) =>
@@ -50,7 +50,7 @@ async function searchAndAppendMemories({ chatId, chatInfo, message, llmClient, s
     return extended;
   } catch (err) {
     log.error("Memory search failed:", err);
-    return systemPrompt;
+    return externalInstructions;
   }
 }
 
@@ -62,12 +62,12 @@ async function searchAndAppendMemories({ chatId, chatInfo, message, llmClient, s
  *   message: UserMessage,
  *   llmClient: LlmClient,
  *   chatModel: string,
- *   baseSystemPrompt: string,
+ *   baseExternalInstructions: string,
  *   context: Pick<ExecuteActionContext, "send">,
  *   getMessages: import("../store.js").Store["getMessages"],
  *   bufferedTexts?: string[],
  * }} input
- * @returns {Promise<{ systemPrompt: string, messages: Message[], mediaRegistry: MediaRegistry }>}
+ * @returns {Promise<{ externalInstructions: string, messages: Message[], mediaRegistry: MediaRegistry }>}
  */
 export async function prepareRunMessages({
   chatId,
@@ -75,12 +75,12 @@ export async function prepareRunMessages({
   message,
   llmClient,
   chatModel,
-  baseSystemPrompt,
+  baseExternalInstructions,
   context,
   getMessages,
   bufferedTexts = [],
 }) {
-  let systemPrompt = baseSystemPrompt;
+  let externalInstructions = baseExternalInstructions;
   const chatMessages = await getMessages(chatId);
   const mediaToTextModels = chatInfo?.media_to_text_models ?? {};
   const rootDb = getRootDb();
@@ -98,12 +98,12 @@ export async function prepareRunMessages({
   }
 
   if (chatInfo?.memory) {
-    systemPrompt = await searchAndAppendMemories({
+    externalInstructions = await searchAndAppendMemories({
       chatId,
       chatInfo,
       message,
       llmClient,
-      systemPrompt,
+      externalInstructions,
       context,
     });
   }
@@ -120,7 +120,7 @@ export async function prepareRunMessages({
   }
 
   return {
-    systemPrompt,
+    externalInstructions,
     messages,
     mediaRegistry,
   };
