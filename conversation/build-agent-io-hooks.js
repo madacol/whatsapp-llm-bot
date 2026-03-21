@@ -1,18 +1,27 @@
-import { MAX_TOOL_CALL_DEPTH } from "../harnesses/index.js";
-import { formatToolCallDisplay } from "../tool-display.js";
+import { MAX_TOOL_CALL_DEPTH, parseToolArgs } from "../harnesses/index.js";
+import { buildToolPresentation } from "../tool-presentation-model.js";
+import { formatToolPresentationDisplay } from "../whatsapp/tool-presenter.js";
 import { createCodexDisplayHooks } from "./codex-hook-display.js";
 
 /**
  * Display a tool call to the user using the formatter shared across harnesses.
  * @param {LlmChatResponse["toolCalls"][0]} toolCall
  * @param {Pick<ExecuteActionContext, "send">} context
- * @param {((params: Record<string, any>) => string) | undefined} actionFormatter
+ * @param {((params: Record<string, unknown>) => string) | undefined} actionFormatter
  * @param {string | null | undefined} cwd
  * @param {{ oldContent?: string } | undefined} toolContext
  * @returns {Promise<MessageHandle | undefined>}
  */
 async function displayToolCall(toolCall, context, actionFormatter, cwd, toolContext) {
-  const content = formatToolCallDisplay(toolCall, actionFormatter, cwd ?? null, toolContext);
+  const content = formatToolPresentationDisplay(
+    buildToolPresentation(
+      toolCall.name,
+      parseToolArgs(toolCall.arguments),
+      actionFormatter,
+      cwd ?? null,
+      toolContext,
+    ),
+  );
   if (content == null) {
     return undefined;
   }

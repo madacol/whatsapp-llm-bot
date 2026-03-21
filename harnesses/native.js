@@ -16,7 +16,8 @@ import { storeLlmContext } from "../context-log.js";
 import { existsSync, readFileSync } from "node:fs";
 import { storeAndLinkHtml } from "../html-store.js";
 import { recordUsage, resolveCost } from "../usage-tracker.js";
-import { formatToolInspectBody, getToolCallSummary } from "../tool-display.js";
+import { buildToolPresentation } from "../tool-presentation-model.js";
+import { formatToolPresentationInspect, formatToolPresentationSummary } from "../whatsapp/tool-presenter.js";
 import { createLogger } from "../logger.js";
 import { handleHarnessSessionCommand } from "./session-commands.js";
 
@@ -123,6 +124,15 @@ async function executeAndStoreTool({
     } catch { /* best-effort — display still works without line numbers */ }
   }
 
+  const presentation = buildToolPresentation(
+    toolName,
+    toolArgs,
+    actionFormatToolCall,
+    workdir ?? null,
+    displayContext,
+  );
+  const toolSummary = formatToolPresentationSummary(presentation);
+
   /** Replace the stub in the messages array and persist to DB. */
   const replaceStub = async (/** @type {ToolMessage} */ toolMessage) => {
     await updateToolMessage(chatId, toolCall.id, toolMessage);
@@ -135,21 +145,19 @@ async function executeAndStoreTool({
   /** Register 👁 react-to-inspect on the tool-call message handle. */
   const registerInspect = (/** @type {ToolMessage} */ toolMessage) => {
     if (handle) {
-      const summary = getToolCallSummary(toolName, toolArgs, actionFormatToolCall, workdir ?? null, displayContext);
       const rawText = toolMessage.content
         .filter((block) => block.type === "text")
         .map((block) => /** @type {TextContentBlock} */ (block).text)
         .join("\n");
-      const inspectText = formatToolInspectBody(toolName, toolArgs, rawText || undefined) ?? undefined;
-      registerInspectHandler(handle, summary, toolMessage, toolName, inspectText);
+      const inspectText = formatToolPresentationInspect(presentation, rawText || undefined) ?? undefined;
+      registerInspectHandler(handle, toolSummary, toolMessage, toolName, inspectText);
     }
   };
 
   if (handle) {
-    const summary = getToolCallSummary(toolName, toolArgs, actionFormatToolCall, workdir ?? null, displayContext);
-    const initialInspectText = formatToolInspectBody(toolName, toolArgs, undefined) ?? undefined;
+    const initialInspectText = formatToolPresentationInspect(presentation, undefined) ?? undefined;
     if (initialInspectText) {
-      registerInspectHandler(handle, summary, createToolMessage(toolCall.id, ""), toolName, initialInspectText);
+      registerInspectHandler(handle, toolSummary, createToolMessage(toolCall.id, ""), toolName, initialInspectText);
     }
   }
 
@@ -207,7 +215,7 @@ async function executeAndStoreTool({
     }
 
     // Edit tool-call message in-place with summary label
-    await tryEdit(handle, getToolCallSummary(toolName, toolArgs, actionFormatToolCall, workdir ?? null, displayContext), toolName);
+    await tryEdit(handle, toolSummary, toolName);
 
     // Register 👁 react-to-inspect for tool results
     registerInspect(toolMessage);

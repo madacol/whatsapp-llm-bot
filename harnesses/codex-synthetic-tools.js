@@ -1,11 +1,11 @@
-import { getToolCallSummary } from "../tool-display.js";
+import { buildToolPresentation } from "../tool-presentation-model.js";
+import { formatToolPresentationInspect, formatToolPresentationSummary } from "../whatsapp/tool-presenter.js";
 import { createToolMessage, registerInspectHandler } from "../utils.js";
 
 /**
  * @typedef {{
  *   handle: MessageHandle,
- *   summary: string,
- *   toolName: string,
+ *   presentation: import("../tool-presentation-model.js").ToolPresentation,
  * }} PendingSyntheticTool
  */
 
@@ -43,14 +43,13 @@ export function createCodexSyntheticToolAdapter({ onToolCall, cwd }) {
       name: syntheticTool,
       arguments: "{}",
     };
-    const handle = await onToolCall(toolCall);
-    if (handle && syntheticTool === "write_stdin") {
-      pendingWriteStdin.push({
-        handle,
-        summary: getCodexToolSummary(syntheticTool, {}, cwd),
-        toolName: syntheticTool,
-      });
-    }
+      const handle = await onToolCall(toolCall);
+      if (handle && syntheticTool === "write_stdin") {
+        pendingWriteStdin.push({
+          handle,
+          presentation: buildToolPresentation(syntheticTool, {}, undefined, cwd, undefined),
+        });
+      }
   }
 
   /**
@@ -69,9 +68,10 @@ export function createCodexSyntheticToolAdapter({ onToolCall, cwd }) {
 
     registerInspectHandler(
       synthetic.handle,
-      synthetic.summary,
-      createToolMessage(`codex-synthetic:${synthetic.toolName}`, event.output ?? ""),
-      synthetic.toolName,
+      formatToolPresentationSummary(synthetic.presentation),
+      createToolMessage(`codex-synthetic:${synthetic.presentation.toolName}`, event.output ?? ""),
+      synthetic.presentation.toolName,
+      formatToolPresentationInspect(synthetic.presentation, event.output ?? "") ?? undefined,
     );
   }
 }
@@ -91,15 +91,4 @@ function extractSyntheticCodexTool(text) {
     default:
       return null;
   }
-}
-
-/**
- * @param {string} name
- * @param {Record<string, unknown>} args
- * @param {string | null} cwd
- * @returns {string}
- */
-function getCodexToolSummary(name, args, cwd) {
-  const summary = getToolCallSummary(name, args, undefined, cwd);
-  return summary === name ? `*${name}*` : summary;
 }
