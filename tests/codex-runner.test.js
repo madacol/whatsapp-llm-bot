@@ -315,7 +315,7 @@ describe("startCodexRun", () => {
 
     reactionCallback?.("👁", "user-1");
     assert.deepEqual(edits, [[
-      "*spawn_agent*",
+      "*Start Agent*  _hello_",
       "",
       "agent-pass-2",
     ].join("\n")]);
@@ -504,6 +504,101 @@ describe("startCodexRun", () => {
         "UTC+00:00 is an identifier for a time offset from UTC of +00:00.",
       ].join("\n"),
     ]);
+  });
+
+  it("formats structured finance tool results readably in inspect", async () => {
+    /** @type {string[]} */
+    const edits = [];
+    /** @type {ReactionCallback | null} */
+    let reactionCallback = null;
+
+    const started = await startCodexRun({
+      chatId: "codex-chat",
+      prompt: "Check AMD",
+      messages: [{ role: "user", content: [{ type: "text", text: "Check AMD" }] }],
+      runConfig: {
+        workdir: "/repo",
+      },
+      hooks: {
+        onToolCall: async () => {
+          return /** @type {MessageHandle} */ ({
+            keyId: "tool-msg-finance-1",
+            isImage: false,
+            edit: async (text) => {
+              edits.push(text);
+            },
+            onReaction: (callback) => {
+              reactionCallback = callback;
+              return () => {};
+            },
+          });
+        },
+      },
+    }, {
+      createCodex: () => ({
+        startThread: () => ({
+          id: "sess-123",
+          runStreamed: async () => ({
+            events: (async function* () {
+              yield {
+                type: "item.started",
+                item: {
+                  id: "tool-finance-1",
+                  type: "mcp_tool_call",
+                  server: "web",
+                  tool: "finance",
+                  arguments: {
+                    finance: [{ ticker: "AMD", type: "equity", market: "USA" }],
+                  },
+                  status: "in_progress",
+                },
+              };
+              yield {
+                type: "item.completed",
+                item: {
+                  id: "tool-finance-1",
+                  type: "mcp_tool_call",
+                  server: "web",
+                  tool: "finance",
+                  arguments: {
+                    finance: [{ ticker: "AMD", type: "equity", market: "USA" }],
+                  },
+                  result: {
+                    content: [],
+                    structured_content: [
+                      {
+                        ticker: "AMD",
+                        price: 227.45,
+                        currency: "USD",
+                        market: "USA",
+                        change: 3.14,
+                        change_percent: 1.4,
+                      },
+                    ],
+                  },
+                  status: "completed",
+                },
+              };
+            })(),
+          }),
+        }),
+        resumeThread: () => {
+          throw new Error("resumeThread should not be called");
+        },
+      }),
+    });
+
+    await started.done;
+
+    reactionCallback?.("👁", "user-1");
+    assert.deepEqual(edits, [[
+      "*Quote*  `AMD`",
+      "",
+      "*AMD*",
+      "Price: 227.45 USD",
+      "Change: +3.14 (+1.4%)",
+      "Market: USA",
+    ].join("\n")]);
   });
 
   it("suppresses web-tool narration and groups related web actions into one inspectable handle", async () => {
@@ -939,7 +1034,7 @@ describe("startCodexRun", () => {
     assert.deepEqual(toolCalls.map((toolCall) => toolCall.name), ["write_stdin"]);
     reactions[0]?.("👁", "user-1");
     assert.deepEqual(edits, [[
-      "*write_stdin*",
+      "*Terminal Input*",
       "",
       "hello\r\nhello\r\n",
     ].join("\n")]);

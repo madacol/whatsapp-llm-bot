@@ -1,6 +1,7 @@
 import { Codex } from "@openai/codex-sdk";
 import { createLogger } from "../logger.js";
-import { buildToolPresentation } from "../tool-presentation-model.js";
+import { buildToolPresentation, getToolFlowDescriptor } from "../tool-presentation-model.js";
+import { formatToolFlowInspectText, formatToolFlowSummary } from "../tool-flow-presentation.js";
 import { formatToolPresentationInspect, formatToolPresentationSummary } from "../whatsapp/tool-presenter.js";
 import { createToolMessage, registerDynamicInspectHandler, registerInspectHandler } from "../utils.js";
 import { normalizeCodexEvent } from "./codex-events.js";
@@ -128,90 +129,6 @@ function isAbortError(error) {
 }
 
 /**
- * @param {string} toolName
- * @returns {boolean}
- */
-function isWebToolName(toolName) {
-  return toolName === "search_query"
-    || toolName === "open"
-    || toolName === "find"
-    || toolName === "image_query"
-    || toolName === "WebSearch";
-}
-
-/**
- * @typedef {{
- *   id: string,
- *   presentation: import("../tool-presentation-model.js").ToolPresentation,
- *   output?: string,
- * }} WebFlowStep
- */
-
-/**
- * @typedef {{
- *   handle?: MessageHandle,
- *   steps: WebFlowStep[],
- * }} WebToolFlow
- */
-
-/**
- * @param {import("../tool-presentation-model.js").ToolPresentation} presentation
- * @returns {string | null}
- */
-function describeWebFlowStep(presentation) {
-  if (presentation.kind !== "activity") {
-    return null;
-  }
-
-  const detail = presentation.activity.lines[0] ?? "";
-  switch (presentation.toolName) {
-    case "Search Web":
-      return `search ${detail}`;
-    case "Search Images":
-      return `search images ${detail}`;
-    case "Open Link":
-      return `open ${detail}`;
-    case "Find On Page":
-      return `find ${detail.split(" in `")[0] ?? detail}`;
-    default:
-      return null;
-  }
-}
-
-/**
- * @param {WebToolFlow} webToolFlow
- * @returns {string}
- */
-function buildWebFlowSummary(webToolFlow) {
-  const parts = webToolFlow.steps
-    .map((step) => describeWebFlowStep(step.presentation))
-    .filter((part) => typeof part === "string" && part.length > 0);
-  return parts.length > 0 ? `*Web*  ${parts.join(" -> ")}` : "*Web*";
-}
-
-/**
- * @param {WebToolFlow} webToolFlow
- * @returns {string}
- */
-function buildWebFlowInspectText(webToolFlow) {
-  /** @type {string[]} */
-  const sections = [];
-
-  for (const step of webToolFlow.steps) {
-    sections.push(formatToolPresentationSummary(step.presentation));
-    sections.push("");
-    sections.push(formatToolPresentationInspect(step.presentation, step.output) ?? "_no output_");
-    sections.push("");
-  }
-
-  while (sections.length > 0 && sections[sections.length - 1] === "") {
-    sections.pop();
-  }
-
-  return sections.join("\n");
-}
-
-/**
  * Start a Codex SDK-backed run and stream semantic events into harness hooks.
  * @param {{
  *   chatId: string,
@@ -323,14 +240,14 @@ async function runCodexAttempt(input) {
   /** @type {string | null} */
   let failureMessage = null;
   const runState = createCodexRunState({ workdir: input.runConfig?.workdir });
-  /** @type {Map<string, { handle?: MessageHandle, presentation: import("../tool-presentation-model.js").ToolPresentation, webToolFlow?: WebToolFlow }>} */
+  /** @type {Map<string, { handle?: MessageHandle, presentation: import("../tool-presentation-model.js").ToolPresentation, flowKey?: string }>} */
   const activeTools = new Map();
   const syntheticToolAdapter = createCodexSyntheticToolAdapter({
     onToolCall: input.hooks.onToolCall,
     cwd: input.runConfig?.workdir ?? null,
   });
-  /** @type {WebToolFlow | null} */
-  let webToolFlow = null;
+  /** @type {Map<string, { handle?: MessageHandle, state: import("../tool-flow-presentation.js").ToolFlowState }>} */
+  const activeFlows = new Map();
 
   try {
     for await (const event of streamed.events) {
@@ -383,41 +300,49 @@ async function runCodexAttempt(input) {
           undefined,
         );
         const currentSummary = formatToolPresentationSummary(currentPresentation);
-        if (isWebToolName(toolEvent.name)) {
-          if (!webToolFlow) {
+        const flow = getToolFlowDescriptor(currentPresentation);
+        if (flow) {
+          let activeFlow = activeFlows.get(flow.groupKey);
+          if (!activeFlow) {
             const toolCall = {
               id: toolEvent.id,
               name: toolEvent.name,
               arguments: JSON.stringify(toolEvent.arguments),
             };
             const handle = await input.hooks.onToolCall(toolCall) ?? undefined;
-            webToolFlow = { handle, steps: [] };
+            activeFlow = {
+              handle,
+              state: { title: flow.groupTitle, steps: [] },
+            };
+            activeFlows.set(flow.groupKey, activeFlow);
             if (handle) {
               registerDynamicInspectHandler(handle, () => ({
-                summary: buildWebFlowSummary(webToolFlow ?? { steps: [] }),
-                text: buildWebFlowInspectText(webToolFlow ?? { steps: [] }),
+                summary: formatToolFlowSummary(activeFlow?.state ?? { title: flow.groupTitle, steps: [] }),
+                text: formatToolFlowInspectText(
+                  activeFlow?.state ?? { title: flow.groupTitle, steps: [] },
+                  formatToolPresentationInspect,
+                ),
               }));
             }
           }
 
-          const currentWebToolFlow = webToolFlow;
-          let step = currentWebToolFlow.steps.find((candidate) => candidate.id === toolEvent.id);
+          let step = activeFlow.state.steps.find((candidate) => candidate.id === toolEvent.id);
           if (!step) {
             step = { id: toolEvent.id, presentation: currentPresentation };
-            currentWebToolFlow.steps.push(step);
+            activeFlow.state.steps.push(step);
           } else {
             step.presentation = currentPresentation;
           }
 
           activeTools.set(toolEvent.id, {
-            handle: currentWebToolFlow.handle,
+            handle: activeFlow.handle,
             presentation: currentPresentation,
-            webToolFlow: currentWebToolFlow,
+            flowKey: flow.groupKey,
           });
 
-          if (currentWebToolFlow.handle && toolEvent.status === "started") {
+          if (activeFlow.handle && toolEvent.status === "started") {
             try {
-              await currentWebToolFlow.handle.edit(buildWebFlowSummary(currentWebToolFlow));
+              await activeFlow.handle.edit(formatToolFlowSummary(activeFlow.state));
             } catch {
               // best-effort — grouping still improves inspect without an in-place update
             }
