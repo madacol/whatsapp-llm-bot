@@ -1,5 +1,5 @@
 import { formatActivitySummary, getToolCallSummary, langFromPath, shortenPath } from "../tool-display.js";
-import { createToolMessage, registerInspectHandler } from "../utils.js";
+import { createToolMessage, formatCommandInspectText, registerInspectHandler } from "../utils.js";
 
 /**
  * @typedef {{
@@ -82,12 +82,13 @@ export function createCodexDisplayHooks({ context, cwd, displayToolCall }) {
     }
 
     const inspectEntry = consumeInspect(command);
-    if (inspectEntry && output) {
+    if (inspectEntry) {
       registerInspectHandler(
         inspectEntry.handle,
         inspectEntry.summary,
-        createToolMessage(`codex-command:${command}`, output),
+        createToolMessage(`codex-command:${command}`, output ?? ""),
         inspectEntry.toolName,
+        formatCommandInspectText(command, output, inspectEntry.toolName),
       );
     }
 

@@ -213,10 +213,133 @@ describe("buildAgentIoHooks", () => {
       "*Explored*",
       "Read `src/app.js`",
       "",
+      "```bash",
+      "sed -n '1,20p' src/app.js",
+      "```",
+      "",
       "```",
       "const value = 1;",
       "const value = 2;",
       "```",
+    ].join("\n"));
+  });
+
+  it("shows the original shell command in inspect for searched summaries", async () => {
+    /** @type {Array<{ callback: ReactionCallback, edits: string[] }>} */
+    const handles = [];
+    const hooks = buildAgentIoHooks(
+      {
+        send: async (_source, _content) => {
+          const entry = {
+            callback: /** @type {ReactionCallback} */ (() => {}),
+            edits: [],
+          };
+          /** @type {ReactionCallback | null} */
+          let reactionCallback = null;
+          const handle = /** @type {MessageHandle} */ ({
+            keyId: `handle-${handles.length + 1}`,
+            isImage: false,
+            edit: async (text) => {
+              entry.edits.push(text);
+            },
+            onReaction: (callback) => {
+              reactionCallback = callback;
+              return () => {};
+            },
+          });
+          entry.callback = (emoji, senderId) => reactionCallback?.(emoji, senderId);
+          handles.push(entry);
+          return handle;
+        },
+        reply: async () => undefined,
+        select: async () => "",
+        confirm: async () => true,
+      },
+      async () => {},
+      "/repo",
+    );
+
+    await hooks.onCommand?.({
+      command: "rg -n \"needle\" src",
+      status: "started",
+    });
+    await hooks.onCommand?.({
+      command: "rg -n \"needle\" src",
+      status: "completed",
+      output: "src/app.js:12:needle",
+    });
+
+    assert.equal(handles.length, 1);
+    handles[0]?.callback("👁", "user-1");
+    assert.equal(handles[0]?.edits.length, 1);
+    assert.equal(handles[0]?.edits[0], [
+      "*Searched*",
+      "Search \"needle\" in `src`",
+      "",
+      "```bash",
+      "rg -n \"needle\" src",
+      "```",
+      "",
+      "src/app.js:12:needle",
+    ].join("\n"));
+  });
+
+  it("keeps inspect available for classified commands with no output", async () => {
+    /** @type {Array<{ callback: ReactionCallback, edits: string[] }>} */
+    const handles = [];
+    const hooks = buildAgentIoHooks(
+      {
+        send: async (_source, _content) => {
+          const entry = {
+            callback: /** @type {ReactionCallback} */ (() => {}),
+            edits: [],
+          };
+          /** @type {ReactionCallback | null} */
+          let reactionCallback = null;
+          const handle = /** @type {MessageHandle} */ ({
+            keyId: `handle-${handles.length + 1}`,
+            isImage: false,
+            edit: async (text) => {
+              entry.edits.push(text);
+            },
+            onReaction: (callback) => {
+              reactionCallback = callback;
+              return () => {};
+            },
+          });
+          entry.callback = (emoji, senderId) => reactionCallback?.(emoji, senderId);
+          handles.push(entry);
+          return handle;
+        },
+        reply: async () => undefined,
+        select: async () => "",
+        confirm: async () => true,
+      },
+      async () => {},
+      "/repo",
+    );
+
+    await hooks.onCommand?.({
+      command: "ls -a",
+      status: "started",
+    });
+    await hooks.onCommand?.({
+      command: "ls -a",
+      status: "completed",
+    });
+
+    assert.equal(handles.length, 1);
+    handles[0]?.callback("👁", "user-1");
+    assert.equal(handles[0]?.edits.length, 1);
+    assert.equal(handles[0]?.edits[0], [
+      "*Explored*",
+      "List `.`",
+      "",
+      "```bash",
+      "ls -a",
+      "```",
+      "",
+      "_no output_",
     ].join("\n"));
   });
 });

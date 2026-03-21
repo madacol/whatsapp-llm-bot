@@ -91,6 +91,27 @@ export function createToolMessage(toolId, text) {
   return { role: "tool", tool_id: toolId, content: [{ type: "text", text }] };
 }
 
+/**
+ * Build inspect text for a shell command, always showing the command first and
+ * then the formatted command result below it.
+ * @param {string} command
+ * @param {string | undefined} output
+ * @param {string} [toolName]
+ * @returns {string}
+ */
+export function formatCommandInspectText(command, output, toolName) {
+  const body = output != null && output.length > 0
+    ? formatToolResultForInspect(output, toolName)
+    : "_no output_";
+  return [
+    "```bash",
+    command,
+    "```",
+    "",
+    body,
+  ].join("\n");
+}
+
 
 /**
  * Extract the human-readable output from a tool result text.
@@ -206,14 +227,15 @@ function formatReadForInspect(text) {
  * @param {string} summary - display header (e.g. "*Bash*  _description_" or "*Edit*  `file.js`")
  * @param {ToolMessage} toolMessage
  * @param {string} [toolName] - tool name for format-specific display
+ * @param {string} [inspectText] - preformatted inspect body; bypasses default formatting
  */
-export function registerInspectHandler(handle, summary, toolMessage, toolName) {
+export function registerInspectHandler(handle, summary, toolMessage, toolName, inspectText) {
   if (!handle.keyId) return;
   handle.onReaction((emoji) => {
     if (!emoji.startsWith("👁")) return;
     const rawText = toolMessage.content
       .filter(b => b.type === "text").map(b => /** @type {TextContentBlock} */ (b).text).join("\n");
-    const text = formatToolResultForInspect(rawText, toolName);
+    const text = inspectText ?? formatToolResultForInspect(rawText, toolName);
     const MAX = 3000;
     const display = text.length <= MAX ? text
       : text.slice(0, MAX) + `\n\n_… truncated (${text.length.toLocaleString()} chars total)_`;
