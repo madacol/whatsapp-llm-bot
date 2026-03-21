@@ -1,5 +1,5 @@
-import { existsSync, mkdirSync, readdirSync, renameSync } from "node:fs";
-import { homedir } from "node:os";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, renameSync, rmSync } from "node:fs";
+import { homedir, tmpdir } from "node:os";
 import { resolve } from "node:path";
 import config from "./config.js";
 import { buildCommandPresentation } from "./tool-presentation-model.js";
@@ -10,10 +10,39 @@ import { formatCommandInspectText as formatWhatsappCommandInspectText } from "./
 const DEFAULT_WORKSPACES_DIR = resolve(homedir(), "chat-workspaces");
 const WORKSPACE_NAME_DELIMITER = "--";
 const MAX_WORKSPACE_NAME_PREFIX_LENGTH = 80;
+/** @type {string | null} */
+let testingWorkspacesDir = null;
+let registeredTestingWorkspacesCleanup = false;
 
 /** @returns {string} */
 function getWorkspacesDir() {
-  return config.workspaces_dir ? resolve(config.workspaces_dir) : DEFAULT_WORKSPACES_DIR;
+  if (config.workspaces_dir) {
+    return resolve(config.workspaces_dir);
+  }
+  if (process.env.TESTING) {
+    return getTestingWorkspacesDir();
+  }
+  return DEFAULT_WORKSPACES_DIR;
+}
+
+/**
+ * Keep test-created workspaces out of `~/chat-workspaces` so the real
+ * workspace root only reflects actual chats.
+ * @returns {string}
+ */
+function getTestingWorkspacesDir() {
+  if (!testingWorkspacesDir) {
+    testingWorkspacesDir = mkdtempSync(resolve(tmpdir(), "whatsapp-llm-bot-workspaces-"));
+  }
+  if (!registeredTestingWorkspacesCleanup) {
+    process.once("exit", () => {
+      if (testingWorkspacesDir) {
+        rmSync(testingWorkspacesDir, { recursive: true, force: true });
+      }
+    });
+    registeredTestingWorkspacesCleanup = true;
+  }
+  return testingWorkspacesDir;
 }
 
 /**
