@@ -1,13 +1,16 @@
 import { Codex } from "@openai/codex-sdk";
-import fs from "node:fs";
-import path from "node:path";
 import { createLogger } from "../logger.js";
 import { getToolCallSummary } from "../tool-display.js";
 import { createToolMessage, registerInspectHandler } from "../utils.js";
 import { normalizeCodexEvent } from "./codex-events.js";
 import { analyzeCodexCommand } from "./codex-command-semantics.js";
 import { createCodexRunState } from "./codex-run-state.js";
-import { formatSandboxEscapeConfirmMessage, getSandboxEscapeRequest } from "./sandbox-approval.js";
+import { getSandboxEscapeRequest } from "./sandbox-approval.js";
+import {
+  appendSandboxWritableRoot,
+  requestSandboxEscapeApproval,
+  resolveSandboxApprovalDirectory,
+} from "./sandbox-approval-coordinator.js";
 import { createCodexSyntheticToolAdapter } from "./codex-synthetic-tools.js";
 
 const log = createLogger("harness:codex-runner");
@@ -387,18 +390,15 @@ async function maybeApproveSandboxEscape(input) {
     return null;
   }
 
-  const userChoice = await input.hooks.onAskUser(
-    formatSandboxEscapeConfirmMessage(request),
-    ["✅ Allow", "❌ Deny"],
-  );
+  const allowed = await requestSandboxEscapeApproval(request, input.hooks.onAskUser);
   const additionalDirectory = resolveSandboxApprovalDirectory(request);
-  if (userChoice !== "✅ Allow") {
+  if (!allowed) {
     input.abortController.abort();
     throw new CodexSandboxDeniedError(`Sandbox escape denied for \`${additionalDirectory}\``);
   }
 
   input.abortController.abort();
-  return appendAdditionalDirectory(input.runConfig, additionalDirectory);
+  return appendSandboxWritableRoot(input.runConfig, additionalDirectory);
 }
 
 /**
@@ -429,65 +429,6 @@ function getCodexSandboxEscapeRequest(command, runConfig) {
   }
 
   return getSandboxEscapeRequest("run_bash", { command }, sandboxOptions);
-}
-
-/**
- * @param {HarnessRunConfig | undefined} runConfig
- * @param {string} additionalDirectory
- * @returns {HarnessRunConfig}
- */
-function appendAdditionalDirectory(runConfig, additionalDirectory) {
-  const existingDirectories = Array.isArray(runConfig?.additionalDirectories)
-    ? runConfig.additionalDirectories.filter((directory) => typeof directory === "string" && directory.trim())
-    : [];
-  if (existingDirectories.includes(additionalDirectory)) {
-    return {
-      ...runConfig,
-      additionalDirectories: existingDirectories,
-    };
-  }
-  return {
-    ...runConfig,
-    additionalDirectories: [...existingDirectories, additionalDirectory],
-  };
-}
-
-/**
- * @param {{ resolvedTarget?: string, target?: string, workdir: string, command?: string }} request
- * @returns {string}
- */
-function resolveSandboxApprovalDirectory(request) {
-  const resolvedTarget = request.resolvedTarget
-    ?? (typeof request.target === "string" ? path.resolve(request.workdir, request.target) : request.workdir);
-
-  if (looksLikeDirectoryTarget(request, resolvedTarget)) {
-    return resolvedTarget;
-  }
-  return path.dirname(resolvedTarget);
-}
-
-/**
- * @param {{ target?: string, command?: string }} request
- * @param {string} resolvedTarget
- * @returns {boolean}
- */
-function looksLikeDirectoryTarget(request, resolvedTarget) {
-  const rawTarget = request.target ?? "";
-  if (
-    rawTarget === "."
-    || rawTarget === ".."
-    || rawTarget.endsWith("/")
-    || rawTarget.endsWith(`${path.sep}.`)
-    || rawTarget.endsWith(`${path.sep}..`)
-  ) {
-    return true;
-  }
-
-  try {
-    return fs.statSync(resolvedTarget).isDirectory();
-  } catch {
-    return typeof request.command === "string" && /\b(?:cd|mkdir)\b/.test(request.command);
-  }
 }
 
 class CodexRunRetryError extends Error {

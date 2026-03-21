@@ -20,7 +20,8 @@ import { extractLastUserText } from "../message-formatting.js";
 import { createToolMessage, errorToString, registerInspectHandler } from "../utils.js";
 import { getRootDb } from "../db.js";
 import { handleHarnessSessionCommand } from "./session-commands.js";
-import { formatSandboxEscapeConfirmMessage, getSandboxEscapeRequest } from "./sandbox-approval.js";
+import { getSandboxEscapeRequest } from "./sandbox-approval.js";
+import { requestSandboxEscapeApproval } from "./sandbox-approval-coordinator.js";
 
 const log = createLogger("harness:claude-agent-sdk");
 
@@ -1287,12 +1288,9 @@ async function handleToolApproval(toolName, input, onAskUser) {
  * @returns {Promise<import("@anthropic-ai/claude-agent-sdk").PermissionResult>}
  */
 export async function handleSandboxEscapeApproval(request, input, onAskUser) {
-  const userChoice = await onAskUser(
-    formatSandboxEscapeConfirmMessage(request),
-    ["✅ Allow", "❌ Deny"],
-  );
+  const allowed = await requestSandboxEscapeApproval(request, onAskUser);
 
-  if (userChoice === "❌ Deny") {
+  if (!allowed) {
     return { behavior: "deny", message: `User denied sandbox escape for ${request.toolName}.` };
   }
 
