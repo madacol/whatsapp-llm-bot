@@ -23,10 +23,10 @@ describe("tool display", () => {
       formatSdkToolCall("Grep", { pattern: "needle", path: "/repo/src" }, "/repo"),
       "*Search*\n\"needle\" in `src`",
     );
-    assert.equal(
-      formatToolCallDisplay(toolCall("Bash", { command: "rg -n \"needle\" src" }), undefined, "/repo"),
-      "*Search*\n\"needle\" in `src`",
-    );
+    const bashResult = formatToolCallDisplay(toolCall("Bash", { command: "rg -n \"needle\" src" }), undefined, "/repo");
+    assert.ok(Array.isArray(bashResult));
+    assert.equal(bashResult[0]?.type, "code");
+    assert.equal(/** @type {CodeContentBlock} */ (bashResult[0]).caption, "*Search*\n\"needle\" in `src`");
   });
 
   it("shows update_plan contents in summaries from plan-style arguments", () => {
@@ -59,19 +59,27 @@ describe("tool display", () => {
     const result = formatToolCallDisplay(
       toolCall("Bash", { command: "date -u +%FT%TZ" }),
     );
-    assert.equal(
-      result,
-      "*Bash*  `date -u +%FT%TZ`",
-    );
+    assert.ok(Array.isArray(result));
+    assert.equal(result[0]?.type, "code");
+    assert.equal(/** @type {CodeContentBlock} */ (result[0]).caption, "*Bash*  `date -u +%FT%TZ`");
+    assert.equal(/** @type {CodeContentBlock} */ (result[0]).code, "date -u +%FT%TZ");
   });
 
   it("summarizes multiline bash commands without showing the full body", () => {
-    assert.equal(
-      getToolCallSummary("Bash", {
+    const args = {
         command: "apply_patch <<'PATCH'\n*** Begin Patch\n*** End Patch\nPATCH",
-      }),
+      };
+    assert.equal(
+      getToolCallSummary("Bash", args),
       "*Bash*  `apply_patch <<'PATCH'`  _+3 lines_",
     );
+    const result = formatToolCallDisplay(toolCall("Bash", args));
+    assert.ok(Array.isArray(result));
+    assert.equal(result[0]?.type, "code");
+    const block = /** @type {CodeContentBlock} */ (result[0]);
+    assert.equal(block.caption, "*Bash*  `apply_patch <<'PATCH'`  _+3 lines_");
+    assert.ok(block.code.includes("# +3 more lines"), block.code);
+    assert.ok(!block.code.includes("*** Begin Patch"), block.code);
   });
 });
 

@@ -272,6 +272,20 @@ async function runCodexAttempt(input) {
           };
           const handle = await input.hooks.onToolCall(toolCall);
           if (handle) {
+            const initialInspectText = formatToolInspectBody(
+              normalized.toolEvent.name,
+              normalized.toolEvent.arguments,
+              undefined,
+            );
+            if (initialInspectText) {
+              registerInspectHandler(
+                handle,
+                currentSummary,
+                createToolMessage(normalized.toolEvent.id, ""),
+                normalized.toolEvent.name,
+                initialInspectText,
+              );
+            }
             activeTools.set(normalized.toolEvent.id, {
               handle,
               summary: currentSummary,

@@ -84,7 +84,11 @@ describe("buildAgentIoHooks", () => {
 
     assert.equal(sent.length, 1);
     assert.equal(sent[0].source, "tool-call");
-    assert.equal(sent[0].content, "*Search*\n\"needle\" in `src`");
+    assert.ok(Array.isArray(sent[0].content));
+    const block = /** @type {CodeContentBlock} */ (/** @type {ToolContentBlock[]} */ (sent[0].content)[0]);
+    assert.equal(block.type, "code");
+    assert.equal(block.caption, "*Search*\n\"needle\" in `src`");
+    assert.equal(block.code, "rg -n \"needle\" src");
   });
 
   it("does not send a separate success message for completed commands", async () => {

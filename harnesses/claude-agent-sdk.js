@@ -761,6 +761,18 @@ export function createClaudeAgentSdkHarness() {
                   const summary = getToolCallSummary(input.tool_name, toolInput, undefined, workdir, displayContext);
                   /** @type {MessageHandle | undefined} */
                   const handle = await hooks.onToolCall(toolCall, undefined, displayContext) ?? undefined;
+                  if (handle) {
+                    const initialInspectText = formatToolInspectBody(input.tool_name, toolInput, undefined);
+                    if (initialInspectText) {
+                      registerInspectHandler(
+                        handle,
+                        summary,
+                        createToolMessage(toolUseId, ""),
+                        input.tool_name,
+                        initialInspectText,
+                      );
+                    }
+                  }
                   activeTools.set(toolUseId, {
                     handle: handle ?? undefined,
                     toolName: input.tool_name,

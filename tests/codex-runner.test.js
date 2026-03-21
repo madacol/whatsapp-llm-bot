@@ -474,6 +474,71 @@ describe("startCodexRun", () => {
     ].join("\n")]);
   });
 
+  it("keeps the first update_plan message inspectable before completion", async () => {
+    /** @type {string[]} */
+    const edits = [];
+    /** @type {ReactionCallback | null} */
+    let reactionCallback = null;
+
+    const started = await startCodexRun({
+      chatId: "codex-chat",
+      prompt: "Continue",
+      messages: [{ role: "user", content: [{ type: "text", text: "Continue" }] }],
+      runConfig: {
+        workdir: "/repo",
+      },
+      hooks: {
+        onToolCall: async () => {
+          return /** @type {MessageHandle} */ ({
+            keyId: "tool-msg-plan-start",
+            isImage: false,
+            edit: async (text) => {
+              edits.push(text);
+            },
+            onReaction: (callback) => {
+              reactionCallback = callback;
+              return () => {};
+            },
+          });
+        },
+      },
+    }, {
+      createCodex: () => ({
+        startThread: () => ({
+          id: "sess-123",
+          runStreamed: async () => ({
+            events: (async function* () {
+              yield {
+                type: "item.started",
+                item: {
+                  id: "todo-start-1",
+                  type: "todo_list",
+                  items: [
+                    { text: "Inspectable immediately", completed: false },
+                    { text: "Not finished yet", completed: false },
+                  ],
+                },
+              };
+            })(),
+          }),
+        }),
+        resumeThread: () => {
+          throw new Error("resumeThread should not be called");
+        },
+      }),
+    });
+
+    await started.done;
+
+    reactionCallback?.("👁", "user-1");
+    assert.deepEqual(edits, [[
+      "*Plan*  _2 steps_",
+      "",
+      "[ ] Inspectable immediately",
+      "[ ] Not finished yet",
+    ].join("\n")]);
+  });
+
   it("creates a synthetic write_stdin tool call from announced Codex activity", async () => {
     /** @type {LlmChatResponse["toolCalls"]} */
     const toolCalls = [];
