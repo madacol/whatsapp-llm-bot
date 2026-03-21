@@ -413,6 +413,7 @@ type HarnessRunConfig = {
   reasoningEffort?: 'low' | 'medium' | 'high' | 'max' | null;
   sandboxMode?: 'read-only' | 'workspace-write' | 'danger-full-access' | null;
   approvalPolicy?: 'untrusted' | 'on-request' | 'never' | null;
+  additionalDirectories?: string[] | null;
 };
 
 type HarnessSessionHistoryEntry = {
