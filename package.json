@@ -7,6 +7,10 @@
     "description": "",
     "type": "module",
     "main": "index.js",
+    "imports": {
+        "#presentation/whatsapp": "./presentation/whatsapp.js",
+        "#whatsapp": "./whatsapp/index.js"
+    },
     "scripts": {
         "dev": "node --max-old-space-size=2560 --watch index.js",
         "start": "while node --max-old-space-size=2560 index.js; do sleep 1; done",

@@ -1,5 +1,5 @@
 import { buildToolPresentation } from "../tool-presentation-model.js";
-import { formatToolPresentationInspect, formatToolPresentationSummary } from "../whatsapp/tool-presenter.js";
+import { formatToolPresentationInspect, formatToolPresentationSummary } from "#presentation/whatsapp";
 import { createToolMessage, registerInspectHandler } from "../utils.js";
 
 /**

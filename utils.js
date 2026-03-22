@@ -3,7 +3,7 @@ import { homedir, tmpdir } from "node:os";
 import { resolve } from "node:path";
 import config from "./config.js";
 import { buildCommandPresentation } from "./tool-presentation-model.js";
-import { formatCommandInspectText as formatWhatsappCommandInspectText } from "./whatsapp/tool-presenter.js";
+import { formatCommandInspectText as formatWhatsappCommandInspectText } from "#presentation/whatsapp";
 
 /** Workspaces live outside the bot project so the SDK's upward CLAUDE.md
  *  traversal never reaches the bot's own CLAUDE.md / settings. */
