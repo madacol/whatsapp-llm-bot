@@ -174,6 +174,37 @@ describe("message filtering", () => {
 
     assert.equal(handlerCalled, false, "Handler should not be called for empty messages");
   });
+
+  it("ignores reaction-message upserts when called directly", async () => {
+    let handlerCalled = false;
+    const { sock } = createMockBaileysSocket();
+    const msg = /** @type {BaileysMessage} */ ({
+      key: {
+        remoteJid: "120363042584279820@g.us",
+        fromMe: false,
+        id: "reaction-upsert-1",
+        participant: "213597330374785@lid",
+      },
+      message: {
+        reactionMessage: {
+          key: {
+            remoteJid: "120363042584279820@g.us",
+            fromMe: true,
+            id: "3EB059407A39C3E611C2B4",
+          },
+          text: "👁",
+        },
+      },
+      messageTimestamp: Math.floor(Date.now() / 1000),
+      pushName: "Marco D'Agostini",
+    });
+
+    await adaptIncomingMessage(msg, sock, async () => {
+      handlerCalled = true;
+    }, testConfirmRegistry, testUserResponseRegistry);
+
+    assert.equal(handlerCalled, false, "Handler should not be called for reaction upserts");
+  });
 });
 
 // ═══════════════════════════════════════════════════════════════════

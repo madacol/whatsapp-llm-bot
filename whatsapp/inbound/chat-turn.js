@@ -1,5 +1,6 @@
 import { downloadMediaMessage } from "@whiskeysockets/baileys";
 import { normalizeChatId, rekeyHdDeferred, resolveHdDeferred, updateStoredHdRef } from "../../whatsapp-hd-media.js";
+import { classifyIncomingMessageEvent } from "./message-event-classifier.js";
 import { getMessageContent } from "./message-content.js";
 import { sendBlocks } from "../outbound/send-content.js";
 import { createReactionRuntime } from "../runtime/reaction-runtime.js";
@@ -201,13 +202,15 @@ export async function buildIncomingTurn(
   reactionRuntime = createReactionRuntime(),
   downloadFn = downloadMediaMessage,
 ) {
-  if (baileysMessage.key.remoteJid === "status@broadcast") {
+  const incomingEvent = classifyIncomingMessageEvent(baileysMessage);
+  if (incomingEvent.kind !== "turn") {
     return null;
   }
+  const turnMessage = incomingEvent.message;
 
-  const rawChatId = baileysMessage.key.remoteJid || "";
+  const rawChatId = turnMessage.key.remoteJid || "";
   const chatId = await normalizeChatId(rawChatId, sock);
-  const { content, quotedSenderId, hdChild, hdParentMessageId } = await getMessageContent(baileysMessage, downloadFn);
+  const { content, quotedSenderId, hdChild, hdParentMessageId } = await getMessageContent(turnMessage, downloadFn);
 
   if (hdParentMessageId) {
     rekeyHdDeferred(rawChatId, chatId, hdParentMessageId);
@@ -222,19 +225,19 @@ export async function buildIncomingTurn(
     return null;
   }
 
-  const key = /** @type {BaileysMessage["key"] & { participantLid?: string, participantPid?: string, senderLid?: string, senderPid?: string }} */ (baileysMessage.key);
+  const key = /** @type {BaileysMessage["key"] & { participantLid?: string, participantPid?: string, senderLid?: string, senderPid?: string }} */ (turnMessage.key);
   const senderIds = extractSenderIds(key);
   const isGroup = chatId.endsWith("@g.us");
   const selfIds = getSelfIds(sock);
   const addressedToBot = detectBotMention(content, selfIds);
   const repliedToBot = quotedSenderId ? selfIds.includes(quotedSenderId) : false;
   const normalizedContent = isGroup ? normalizeContent(content, selfIds) : content;
-  const senderName = baileysMessage.pushName || "";
+  const senderName = turnMessage.pushName || "";
   const chatName = await resolveChatName(sock, chatId, isGroup, senderName);
   const io = createTurnIo({
     sock,
     chatId,
-    message: baileysMessage,
+    message: turnMessage,
     senderIds,
     isGroup,
     selectRuntime,
@@ -246,10 +249,10 @@ export async function buildIncomingTurn(
   const turn = {
     chatId,
     senderIds,
-    senderName,
+    senderName: turnMessage.pushName || "",
     chatName,
     content: normalizedContent,
-    timestamp: normalizeTimestamp(baileysMessage.messageTimestamp),
+    timestamp: normalizeTimestamp(turnMessage.messageTimestamp),
     facts: {
       isGroup,
       addressedToBot,
