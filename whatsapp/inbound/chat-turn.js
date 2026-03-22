@@ -1,6 +1,7 @@
 import { downloadMediaMessage } from "@whiskeysockets/baileys";
-import { normalizeChatId, rekeyHdDeferred, resolveHdDeferred, updateStoredHdRef } from "../../whatsapp-hd-media.js";
+import { normalizeChatId } from "../../whatsapp-hd-media.js";
 import { classifyIncomingMessageEvent } from "./message-event-classifier.js";
+import { applyHdInboundLifecycle } from "./hd-image-lifecycle.js";
 import { getMessageContent } from "./message-content.js";
 import { sendBlocks } from "../outbound/send-content.js";
 import { createReactionRuntime } from "../runtime/reaction-runtime.js";
@@ -210,16 +211,8 @@ export async function buildIncomingTurn(
 
   const rawChatId = turnMessage.key.remoteJid || "";
   const chatId = await normalizeChatId(rawChatId, sock);
-  const { content, quotedSenderId, hdChild, hdParentMessageId } = await getMessageContent(turnMessage, downloadFn);
-
-  if (hdParentMessageId) {
-    rekeyHdDeferred(rawChatId, chatId, hdParentMessageId);
-  }
-
-  if (hdChild) {
-    resolveHdDeferred(chatId, hdChild.parentMessageId, hdChild.imageBlock);
-    await updateStoredHdRef(chatId, hdChild.parentMessageId, hdChild.ref);
-  }
+  const { content, quotedSenderId, hdLifecycle } = await getMessageContent(turnMessage, downloadFn);
+  await applyHdInboundLifecycle({ rawChatId, chatId, lifecycle: hdLifecycle });
 
   if (content.length === 0) {
     return null;
