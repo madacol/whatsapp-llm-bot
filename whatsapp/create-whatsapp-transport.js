@@ -9,6 +9,7 @@ import { rm } from "node:fs/promises";
 import { createLogger } from "../logger.js";
 import { needsAuthReset, sendAlertEmail } from "../notifications.js";
 import { adaptIncomingMessage } from "./inbound/chat-turn.js";
+import { classifyIncomingMessageEvent, normalizeReactionEvents } from "./inbound/message-event-classifier.js";
 import { createConfirmRuntime } from "./runtime/confirm-runtime.js";
 import { createReactionRuntime } from "./runtime/reaction-runtime.js";
 import { createSelectRuntime } from "./runtime/select-runtime.js";
@@ -32,64 +33,6 @@ function printQrCode(qr) {
     }
     log.info(stdout);
   });
-}
-
-/**
- * Create the normalized payload used by reaction runtimes.
- * @param {Array<{
- *   key?: { id?: string | null, remoteJid?: string | null, participant?: string | null };
- *   reaction?: { text?: string | null };
- * }>} events
- * @returns {Array<{ key: { id: string; remoteJid: string }; reaction: { text: string }; senderId: string }>}
- */
-function normalizeReactionEvents(events) {
-  /** @type {Array<{ key: { id: string; remoteJid: string }; reaction: { text: string }; senderId: string }>} */
-  const normalized = [];
-
-  for (const event of events) {
-    const { key, reaction } = event;
-    if (!key?.id || !key.remoteJid || !reaction?.text) continue;
-
-    normalized.push({
-      key: { id: key.id, remoteJid: key.remoteJid },
-      reaction: { text: reaction.text },
-      senderId: (key.participant || key.remoteJid).split("@")[0],
-    });
-  }
-
-  return normalized;
-}
-
-/**
- * Normalize a reaction that arrived as a `messages.upsert` payload instead of
- * the dedicated `messages.reaction` event stream.
- * @param {BaileysMessage} message
- * @returns {Array<{ key: { id: string; remoteJid: string }; reaction: { text: string }; senderId: string }>}
- */
-export function normalizeUpsertReactionMessage(message) {
-  const reactionMessage = message.message?.reactionMessage;
-  const reactedKey = reactionMessage?.key;
-  if (!reactedKey?.id || !reactionMessage?.text) {
-    return [];
-  }
-
-  const remoteJid = reactedKey.remoteJid || message.key.remoteJid;
-  if (!remoteJid) {
-    return [];
-  }
-
-  const senderId = (
-    message.key.participant
-    || /** @type {{ participantAlt?: string | null }} */ (message.key).participantAlt
-    || message.key.remoteJid
-    || "unknown"
-  ).split("@")[0];
-
-  return [{
-    key: { id: reactedKey.id, remoteJid },
-    reaction: { text: reactionMessage.text },
-    senderId,
-  }];
 }
 
 /**
@@ -217,35 +160,39 @@ export async function createWhatsAppTransport() {
       if (events["messages.upsert"]) {
         const { messages } = events["messages.upsert"];
         for (const message of messages) {
-          if (message.key.fromMe || !message.message) continue;
+          if (message.key.fromMe) continue;
 
-          const upsertReactions = normalizeUpsertReactionMessage(message);
-          if (upsertReactions.length > 0) {
-            confirmRuntime.handleReactions(upsertReactions, sock);
-            reactionRuntime.handleReactions(upsertReactions);
-            continue;
-          }
-
-          if (message.message.pollUpdateMessage) {
-            try {
-              const pollVoteEvent = await selectRuntime.resolvePollVoteMessage(message, sock);
-              if (pollVoteEvent) {
-                selectRuntime.handlePollVote(pollVoteEvent);
+          const incomingEvent = classifyIncomingMessageEvent(message);
+          switch (incomingEvent.kind) {
+            case "ignore":
+              continue;
+            case "reaction":
+              confirmRuntime.handleReactions(incomingEvent.reactions, sock);
+              reactionRuntime.handleReactions(incomingEvent.reactions);
+              continue;
+            case "poll_update":
+              try {
+                const pollVoteEvent = await selectRuntime.resolvePollVoteMessage(incomingEvent.message, sock);
+                if (pollVoteEvent) {
+                  selectRuntime.handlePollVote(pollVoteEvent);
+                }
+              } catch (error) {
+                log.error("Error processing poll vote from upsert:", error);
               }
-            } catch (error) {
-              log.error("Error processing poll vote from upsert:", error);
-            }
-            continue;
+              continue;
+            case "turn":
+              await adaptIncomingMessage(
+                incomingEvent.message,
+                sock,
+                onTurn,
+                confirmRuntime,
+                selectRuntime,
+                reactionRuntime,
+              );
+              continue;
+            default:
+              continue;
           }
-
-          await adaptIncomingMessage(
-            message,
-            sock,
-            onTurn,
-            confirmRuntime,
-            selectRuntime,
-            reactionRuntime,
-          );
         }
       }
 

@@ -1,9 +1,13 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { normalizeUpsertReactionMessage } from "../whatsapp/create-whatsapp-transport.js";
+import {
+  classifyIncomingMessageEvent,
+  normalizeReactionEvents,
+  normalizeUpsertReactionMessage,
+} from "../whatsapp/inbound/message-event-classifier.js";
 import { createReactionRuntime } from "../whatsapp/runtime/reaction-runtime.js";
 
-describe("normalizeUpsertReactionMessage", () => {
+describe("message-event-classifier", () => {
   it("extracts reaction-message upserts into runtime reaction events", () => {
     const normalized = normalizeUpsertReactionMessage(/** @type {BaileysMessage} */ ({
       key: {
@@ -51,8 +55,71 @@ describe("normalizeUpsertReactionMessage", () => {
     });
   });
 
+  it("classifies reaction-message upserts as reaction events", () => {
+    const event = classifyIncomingMessageEvent(/** @type {BaileysMessage} */ ({
+      key: {
+        remoteJid: "chat@g.us",
+        fromMe: false,
+        id: "msg-1",
+        participant: "user@lid",
+      },
+      message: {
+        reactionMessage: {
+          key: {
+            remoteJid: "chat@g.us",
+            id: "tool-msg-1",
+          },
+          text: "👁",
+        },
+      },
+    }));
+
+    assert.deepEqual(event, {
+      kind: "reaction",
+      reactions: [{
+        key: { id: "tool-msg-1", remoteJid: "chat@g.us" },
+        reaction: { text: "👁" },
+        senderId: "user",
+      }],
+    });
+  });
+
+  it("classifies poll updates separately from normal turns", () => {
+    const event = classifyIncomingMessageEvent(/** @type {BaileysMessage} */ ({
+      key: {
+        remoteJid: "chat@g.us",
+        fromMe: false,
+        id: "msg-poll-1",
+      },
+      message: {
+        pollUpdateMessage: /** @type {Record<string, unknown>} */ ({}),
+      },
+    }));
+
+    assert.equal(event.kind, "poll_update");
+    if (event.kind === "poll_update") {
+      assert.equal(event.message.key.id, "msg-poll-1");
+    }
+  });
+
+  it("ignores status broadcasts before turn parsing", () => {
+    assert.deepEqual(
+      classifyIncomingMessageEvent(/** @type {BaileysMessage} */ ({
+        key: {
+          remoteJid: "status@broadcast",
+          fromMe: false,
+          id: "status-1",
+        },
+        message: {
+          conversation: "status update",
+        },
+      })),
+      { kind: "ignore" },
+    );
+  });
+
   it("ignores non-reaction upserts", () => {
-    assert.deepEqual(normalizeUpsertReactionMessage(/** @type {BaileysMessage} */ ({
+    const event = classifyIncomingMessageEvent(/** @type {BaileysMessage} */ ({
       key: {
         remoteJid: "chat@s.whatsapp.net",
         fromMe: false,
@@ -61,6 +128,26 @@ describe("normalizeUpsertReactionMessage", () => {
       message: {
         conversation: "hello",
       },
-    })), []);
+    }));
+
+    assert.equal(event.kind, "turn");
+  });
+
+  it("normalizes direct reaction events with participantAlt fallback", () => {
+    assert.deepEqual(
+      normalizeReactionEvents([{
+        key: {
+          id: "msg-1",
+          remoteJid: "chat@g.us",
+          participantAlt: "fallback@s.whatsapp.net",
+        },
+        reaction: { text: "👁" },
+      }]),
+      [{
+        key: { id: "msg-1", remoteJid: "chat@g.us" },
+        reaction: { text: "👁" },
+        senderId: "fallback",
+      }],
+    );
   });
 });
