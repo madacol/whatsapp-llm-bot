@@ -10,6 +10,15 @@ const log = createLogger("whatsapp:content");
  */
 
 /**
+ * @typedef {{
+ *   content: IncomingContentBlock[],
+ *   quotedSenderId: string | undefined,
+ *   hdChild?: { parentMessageId?: string, ref: { url?: string, directPath?: string, mediaKey: string, mimetype?: string }, imageBlock: ImageContentBlock | null },
+ *   hdParentMessageId?: string,
+ * }} MessageContentResult
+ */
+
+/**
  * Extract contextInfo from any Baileys message type that carries it.
  * @param {BaileysMessage['message']} message
  * @returns {proto.IContextInfo | undefined}
@@ -23,6 +32,42 @@ function getContextInfo(message) {
     || message?.ptvMessage?.contextInfo
     || message?.stickerMessage?.contextInfo
     || undefined;
+}
+
+/**
+ * @param {BaileysMessage["message"] | proto.IMessage | undefined} message
+ * @returns {string | undefined}
+ */
+function getTextMessage(message) {
+  return message?.conversation
+    || message?.extendedTextMessage?.text
+    || message?.documentMessage?.caption
+    || undefined;
+}
+
+/**
+ * @param {proto.IMessage | undefined} quotedMessage
+ * @returns {string | undefined}
+ */
+function getQuotedText(quotedMessage) {
+  return quotedMessage?.conversation
+    || quotedMessage?.extendedTextMessage?.text
+    || quotedMessage?.imageMessage?.caption
+    || quotedMessage?.videoMessage?.caption
+    || quotedMessage?.documentMessage?.caption
+    || undefined;
+}
+
+/**
+ * @returns {MessageContentResult}
+ */
+function createEmptyMessageContentResult() {
+  return {
+    content: [],
+    quotedSenderId: undefined,
+    hdChild: undefined,
+    hdParentMessageId: undefined,
+  };
 }
 
 /**
@@ -59,91 +104,95 @@ async function downloadMediaToBlocks(baileysMessage, mediaMessage, type, downloa
 }
 
 /**
+ * @param {proto.IContextInfo | undefined} contextInfo
+ * @param {DownloadMediaFn} downloadFn
+ * @returns {Promise<{ quoteBlock: QuoteContentBlock | null, quotedSenderId: string | undefined }>}
+ */
+async function extractQuotedContent(contextInfo, downloadFn) {
+  const quotedMessage = contextInfo?.quotedMessage;
+  if (!quotedMessage) {
+    return { quoteBlock: null, quotedSenderId: undefined };
+  }
+
+  /** @type {QuoteContentBlock} */
+  const quoteBlock = {
+    type: "quote",
+    content: [],
+  };
+
+  const rawQuotedSenderId = typeof contextInfo?.participant === "string"
+    ? contextInfo.participant
+    : undefined;
+  const quotedSenderId = rawQuotedSenderId?.split("@")[0];
+  if (quotedSenderId) {
+    quoteBlock.quotedSenderId = quotedSenderId;
+  }
+
+  const quoteText = getQuotedText(quotedMessage);
+  if (quoteText) {
+    quoteBlock.content.push({ type: "text", text: quoteText });
+  }
+
+  const quotedImage = quotedMessage.imageMessage;
+  const quotedVideo = quotedMessage.videoMessage || quotedMessage.ptvMessage;
+  const quotedAudio = quotedMessage.audioMessage;
+  const quotedMedia = quotedImage || quotedVideo || quotedAudio;
+
+  if (quotedMedia) {
+    const mediaType = quotedImage ? "image" : quotedAudio ? "audio" : "video";
+    try {
+      const fakeMessage = /** @type {BaileysMessage} */ ({ message: quotedMessage });
+      const mediaBlocks = await downloadMediaToBlocks(fakeMessage, quotedMedia, mediaType, downloadFn);
+      quoteBlock.content.push(...mediaBlocks);
+    } catch {
+      quoteBlock.content.push({
+        type: "text",
+        text: `[Quoted ${mediaType}]`,
+      });
+    }
+  }
+
+  return {
+    quoteBlock: quoteBlock.content.length > 0 || quoteBlock.quotedSenderId ? quoteBlock : null,
+    quotedSenderId,
+  };
+}
+
+/**
  * @param {BaileysMessage} baileysMessage
- * @param {DownloadMediaFn} [downloadFn]
+ * @returns {{
+ *   imageMessage: NonNullable<BaileysMessage["message"]>["imageMessage"] | undefined,
+ *   videoMessage: NonNullable<BaileysMessage["message"]>["videoMessage"] | NonNullable<BaileysMessage["message"]>["ptvMessage"] | undefined,
+ *   audioMessage: NonNullable<BaileysMessage["message"]>["audioMessage"] | undefined,
+ * }}
+ */
+function getDirectMediaMessages(baileysMessage) {
+  const associatedInnerMessage = baileysMessage.message?.associatedChildMessage?.message;
+  return {
+    imageMessage: baileysMessage.message?.imageMessage ?? associatedInnerMessage?.imageMessage,
+    videoMessage: baileysMessage.message?.videoMessage || baileysMessage.message?.ptvMessage,
+    audioMessage: baileysMessage.message?.audioMessage,
+  };
+}
+
+/**
+ * @param {BaileysMessage} baileysMessage
+ * @param {DownloadMediaFn} downloadFn
  * @returns {Promise<{
  *   content: IncomingContentBlock[],
- *   quotedSenderId: string | undefined,
  *   hdChild?: { parentMessageId?: string, ref: { url?: string, directPath?: string, mediaKey: string, mimetype?: string }, imageBlock: ImageContentBlock | null },
  *   hdParentMessageId?: string,
  * }>}
  */
-export async function getMessageContent(baileysMessage, downloadFn = downloadMediaMessage) {
+async function extractDirectContent(baileysMessage, downloadFn) {
   /** @type {IncomingContentBlock[]} */
   const content = [];
-  /** @type {string | undefined} */
-  let quotedSenderId;
   /** @type {{ parentMessageId?: string, ref: { url?: string, directPath?: string, mediaKey: string, mimetype?: string }, imageBlock: ImageContentBlock | null } | undefined} */
   let hdChild;
   /** @type {string | undefined} */
   let hdParentMessageId;
 
-  if (baileysMessage.message?.reactionMessage) {
-    return { content, quotedSenderId, hdChild, hdParentMessageId };
-  }
-
-  const contextInfo = getContextInfo(baileysMessage.message);
-  const quotedMessage = contextInfo?.quotedMessage;
-
-  if (quotedMessage) {
-    const quoteText = quotedMessage.conversation
-      || quotedMessage.extendedTextMessage?.text
-      || quotedMessage.imageMessage?.caption
-      || quotedMessage.videoMessage?.caption
-      || quotedMessage.documentMessage?.caption;
-
-    const rawQuotedSenderId = typeof contextInfo?.participant === "string"
-      ? contextInfo.participant
-      : undefined;
-
-    /** @type {QuoteContentBlock} */
-    const quote = {
-      type: "quote",
-      content: [],
-    };
-
-    if (rawQuotedSenderId) {
-      const strippedSenderId = rawQuotedSenderId.split("@")[0];
-      quote.quotedSenderId = strippedSenderId;
-      quotedSenderId = strippedSenderId;
-    }
-
-    if (quoteText) {
-      quote.content.push({
-        type: "text",
-        text: quoteText,
-      });
-    }
-
-    const quotedImage = quotedMessage.imageMessage;
-    const quotedVideo = quotedMessage.videoMessage || quotedMessage.ptvMessage;
-    const quotedAudio = quotedMessage.audioMessage;
-    const quotedMedia = quotedImage || quotedVideo || quotedAudio;
-
-    if (quotedMedia) {
-      const mediaType = quotedImage ? "image" : quotedAudio ? "audio" : "video";
-      try {
-        const fakeMessage = /** @type {BaileysMessage} */ ({ message: quotedMessage });
-        const mediaBlocks = await downloadMediaToBlocks(fakeMessage, quotedMedia, mediaType, downloadFn);
-        quote.content.push(...mediaBlocks);
-      } catch {
-        quote.content.push({
-          type: "text",
-          text: `[Quoted ${mediaType}]`,
-        });
-      }
-    }
-
-    content.push(quote);
-  }
-
-  const associatedInnerMessage = baileysMessage.message?.associatedChildMessage?.message;
-  const imageMessage = baileysMessage.message?.imageMessage ?? associatedInnerMessage?.imageMessage;
-  const videoMessage = baileysMessage.message?.videoMessage || baileysMessage.message?.ptvMessage;
-  const audioMessage = baileysMessage.message?.audioMessage;
-  const textMessage = baileysMessage.message?.conversation
-    || baileysMessage.message?.extendedTextMessage?.text
-    || baileysMessage.message?.documentMessage?.caption;
+  const { imageMessage, videoMessage, audioMessage } = getDirectMediaMessages(baileysMessage);
 
   if (imageMessage) {
     const imageResult = await processHdImageMessage(
@@ -171,6 +220,7 @@ export async function getMessageContent(baileysMessage, downloadFn = downloadMed
     content.push(...await downloadMediaToBlocks(baileysMessage, audioMessage, "audio", downloadFn));
   }
 
+  const textMessage = getTextMessage(baileysMessage.message);
   if (textMessage) {
     content.push({
       type: "text",
@@ -178,9 +228,35 @@ export async function getMessageContent(baileysMessage, downloadFn = downloadMed
     });
   }
 
+  return { content, hdChild, hdParentMessageId };
+}
+
+/**
+ * @param {BaileysMessage} baileysMessage
+ * @param {DownloadMediaFn} [downloadFn]
+ * @returns {Promise<MessageContentResult>}
+ */
+export async function getMessageContent(baileysMessage, downloadFn = downloadMediaMessage) {
+  if (baileysMessage.message?.reactionMessage) {
+    return createEmptyMessageContentResult();
+  }
+
+  const contextInfo = getContextInfo(baileysMessage.message);
+  const quoted = await extractQuotedContent(contextInfo, downloadFn);
+  const direct = await extractDirectContent(baileysMessage, downloadFn);
+  const content = [
+    ...(quoted.quoteBlock ? [quoted.quoteBlock] : []),
+    ...direct.content,
+  ];
+
   if (content.length === 0) {
     log.debug("Unknown baileysMessage", JSON.stringify(baileysMessage, null, 2));
   }
 
-  return { content, quotedSenderId, hdChild, hdParentMessageId };
+  return {
+    content,
+    quotedSenderId: quoted.quotedSenderId,
+    hdChild: direct.hdChild,
+    hdParentMessageId: direct.hdParentMessageId,
+  };
 }
