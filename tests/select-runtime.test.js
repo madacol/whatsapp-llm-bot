@@ -68,4 +68,25 @@ describe("createSelectRuntime", () => {
 
     assert.equal(await selectionPromise, "first");
   });
+
+  it("clear() resolves pending selects without sending cancellation reactions", async () => {
+    const registry = createUserResponseRegistry();
+    const { sock, sentMessages } = createMockSock();
+    const select = registry.createSelect(sock, "chat-1");
+
+    const selectionPromise = select("Pick one", ["First", "Second"]);
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    assert.equal(sentMessages.length, 2, "expected poll and initial pending reaction");
+    registry.clear();
+
+    assert.equal(await selectionPromise, "");
+    assert.equal(registry.size, 0, "pending selects should be cleared");
+    assert.equal(
+      sentMessages.length,
+      2,
+      "clear() should not emit additional WhatsApp messages during teardown",
+    );
+  });
 });

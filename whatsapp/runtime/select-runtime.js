@@ -29,7 +29,13 @@ export function getPollCreationData(msg) {
 
 /**
  * @typedef {{
- *   resolve: (id: string) => void;
+ *   suppressEffects?: boolean;
+ * }} SelectSettlementOptions
+ */
+
+/**
+ * @typedef {{
+ *   settle: (id: string, options?: SelectSettlementOptions) => void;
  *   timer: ReturnType<typeof setTimeout>;
  *   labelToId: Map<string, string>;
  * }} PendingSelect
@@ -201,7 +207,7 @@ export function createSelectRuntime() {
       pending.delete(event.pollMsgId);
 
       const selectedLabel = event.selectedOptions[0];
-      entry.resolve(entry.labelToId.get(selectedLabel) ?? selectedLabel);
+      entry.settle(entry.labelToId.get(selectedLabel) ?? selectedLabel);
       return true;
     },
 
@@ -236,7 +242,10 @@ export function createSelectRuntime() {
           return "";
         }
 
-        sock.sendMessage(chatId, { react: { text: "⏳", key: pollKey } });
+        /** @type {import('@whiskeysockets/baileys').WAMessageKey} */
+        const sentPollKey = pollKey;
+
+        sock.sendMessage(chatId, { react: { text: "⏳", key: sentPollKey } });
 
         const cancelIds = config?.cancelIds ? new Set(config.cancelIds) : null;
         const deleteOnSelect = config?.deleteOnSelect ?? false;
@@ -245,25 +254,32 @@ export function createSelectRuntime() {
         return new Promise((resolve) => {
           const timer = setTimeout(() => {
             pending.delete(pollMsgId);
-            sock.sendMessage(chatId, { react: { text: "⌛", key: pollKey } });
-            resolve("");
+            settle("");
           }, timeout);
+          timer.unref?.();
 
-          pending.set(pollMsgId, {
-            resolve: (id) => {
+          /**
+           * Complete the pending selection and optionally suppress transport-side effects.
+           * @param {string} id
+           * @param {SelectSettlementOptions} [options]
+           * @returns {void}
+           */
+          function settle(id, options = {}) {
+            if (!options.suppressEffects) {
               const isCancelled = !id || (cancelIds !== null && cancelIds.has(id));
               if (isCancelled) {
-                sock.sendMessage(chatId, { react: { text: "❌", key: pollKey } });
+                sock.sendMessage(chatId, { react: { text: "❌", key: sentPollKey } });
               } else if (deleteOnSelect) {
-                sock.sendMessage(chatId, { delete: pollKey });
+                sock.sendMessage(chatId, { delete: sentPollKey });
               } else {
-                sock.sendMessage(chatId, { react: { text: "", key: pollKey } });
+                sock.sendMessage(chatId, { react: { text: "", key: sentPollKey } });
               }
-              resolve(id);
-            },
-            timer,
-            labelToId,
-          });
+            }
+
+            resolve(id);
+          }
+
+          pending.set(pollMsgId, { settle, timer, labelToId });
         });
       };
     },
@@ -285,7 +301,7 @@ export function createSelectRuntime() {
     clear() {
       for (const entry of pending.values()) {
         clearTimeout(entry.timer);
-        entry.resolve("");
+        entry.settle("", { suppressEffects: true });
       }
       pending.clear();
       sentPolls.clear();
