@@ -1,53 +1,12 @@
-import {
-  Browsers,
-  fetchLatestWaWebVersion,
-  makeWASocket,
-  useMultiFileAuthState,
-} from "@whiskeysockets/baileys";
-import { exec } from "node:child_process";
-import { rm } from "node:fs/promises";
 import { createLogger } from "../logger.js";
-import { needsAuthReset, sendAlertEmail } from "../notifications.js";
 import { adaptIncomingMessage } from "./inbound/chat-turn.js";
+import { createWhatsAppConnectionSupervisor } from "./connection-supervisor.js";
 import { classifyIncomingMessageEvent, normalizeReactionEvents } from "./inbound/message-event-classifier.js";
 import { createConfirmRuntime } from "./runtime/confirm-runtime.js";
 import { createReactionRuntime } from "./runtime/reaction-runtime.js";
 import { createSelectRuntime } from "./runtime/select-runtime.js";
 
 const log = createLogger("whatsapp");
-
-const AUTH_DIR = "./auth_info_baileys";
-const QR_TIMEOUT_MS = 5 * 60 * 1000;
-
-/**
- * Print a WhatsApp QR code to the terminal.
- * @param {string} qr
- * @returns {void}
- */
-function printQrCode(qr) {
-  exec(`echo "${qr}" | qrencode -t ansiutf8`, (error, stdout, stderr) => {
-    if (error) {
-      log.error(error);
-      log.error(stderr);
-      return;
-    }
-    log.info(stdout);
-  });
-}
-
-/**
- * Build a WASocket instance from auth state.
- * @param {Awaited<ReturnType<typeof useMultiFileAuthState>>["state"]} auth
- * @param {[number, number, number]} version
- * @returns {import('@whiskeysockets/baileys').WASocket}
- */
-function createSocket(auth, version) {
-  return makeWASocket({
-    version,
-    auth,
-    browser: Browsers.ubuntu("Chrome"),
-  });
-}
 
 /**
  * @typedef {{
@@ -62,66 +21,27 @@ function createSocket(auth, version) {
  * @returns {Promise<ChatTransport>}
  */
 export async function createWhatsAppTransport() {
-  const { version: latestVersion } = await fetchLatestWaWebVersion();
-  /** @type {[number, number, number]} */
-  const version = [latestVersion[0], latestVersion[1], latestVersion[2]];
-  log.info("Using WA Web version:", version);
-
   const confirmRuntime = createConfirmRuntime();
   const selectRuntime = createSelectRuntime();
   const reactionRuntime = createReactionRuntime();
 
-  /** @type {{ current: import('@whiskeysockets/baileys').WASocket | null }} */
-  const sockRef = { current: null };
   /** @type {(turn: ChatTurn) => Promise<void>} */
   let onTurn = async () => {};
-  /** @type {ReturnType<typeof setTimeout> | null} */
-  let qrExitTimer = null;
-  let sessionResetInProgress = false;
-  let stopped = false;
 
   /**
    * Clear all transport-owned runtime state and timers.
    * @returns {void}
    */
   function clearRuntimeState() {
-    if (qrExitTimer) {
-      clearTimeout(qrExitTimer);
-      qrExitTimer = null;
-    }
     confirmRuntime.clear();
     selectRuntime.clear();
     reactionRuntime.clear();
-    sessionResetInProgress = false;
   }
 
-  /**
-   * Create a new socket, wire handlers, and swap it into the ref.
-   * @returns {Promise<void>}
-   */
-  async function connect() {
-    if (stopped) return;
-    const { state, saveCreds } = await useMultiFileAuthState(AUTH_DIR);
-    if (stopped) return;
-
-    const sock = createSocket(state, version);
-    if (stopped) {
-      sock.end(undefined);
-      return;
-    }
-
-    sockRef.current = sock;
-    registerHandlers(sock, saveCreds);
-  }
-
-  /**
-   * Reconnect the socket using fresh auth state.
-   * @returns {Promise<void>}
-   */
-  async function reconnect() {
-    if (stopped) return;
-    await connect();
-  }
+  const connectionSupervisor = await createWhatsAppConnectionSupervisor({
+    onSocketReady: registerHandlers,
+    onClearState: clearRuntimeState,
+  });
 
   /**
    * Register socket handlers on the current socket instance.
@@ -131,56 +51,12 @@ export async function createWhatsAppTransport() {
    */
   function registerHandlers(sock, saveCreds) {
     sock.ev.process(async (events) => {
-      if (stopped) {
+      if (connectionSupervisor.isStopped()) {
         return;
       }
 
       if (events["connection.update"]) {
-        const update = events["connection.update"];
-        const { connection, lastDisconnect, qr } = update;
-
-        if (qr) {
-          printQrCode(qr);
-        }
-
-        if (connection === "close") {
-          const statusCode = /** @type {{ output?: { statusCode?: number } } | undefined} */ (lastDisconnect?.error)?.output?.statusCode;
-          log.info("Connection closed due to ", lastDisconnect?.error, ", status code:", statusCode);
-
-          if (needsAuthReset(lastDisconnect) && !sessionResetInProgress) {
-            sessionResetInProgress = true;
-            log.warn(`Auth failure (${statusCode}). Clearing auth and requesting re-pair...`);
-            await rm(AUTH_DIR, { recursive: true, force: true });
-            sendAlertEmail(
-              `WhatsApp Bot: Auth failure (${statusCode})`,
-              `The WhatsApp bot connection failed with status ${statusCode}.\n`
-              + "Auth credentials have been cleared and a QR code is being displayed.\n"
-              + "Please scan the QR code within 5 minutes or the process will exit.\n"
-              + `Time: ${new Date().toISOString()}`,
-            );
-            sock.end(undefined);
-            await reconnect();
-            qrExitTimer = setTimeout(() => {
-              log.error("QR code was not scanned within 5 minutes. Exiting.");
-              process.exit(1);
-            }, QR_TIMEOUT_MS);
-          } else if (needsAuthReset(lastDisconnect) && sessionResetInProgress) {
-            log.error(`Auth still failing (${statusCode}) after reset. Exiting.`);
-            process.exit(1);
-          } else if (statusCode !== 401) {
-            sock.end(undefined);
-            await new Promise((resolve) => setTimeout(resolve, 1000));
-            await reconnect();
-          }
-        } else if (connection === "open") {
-          if (qrExitTimer) {
-            clearTimeout(qrExitTimer);
-            qrExitTimer = null;
-            sessionResetInProgress = false;
-            log.info("QR code scanned successfully, exit timer cancelled.");
-          }
-          log.info("WhatsApp connection opened");
-        }
+        await connectionSupervisor.handleConnectionUpdate(events["connection.update"], sock);
       }
 
       if (events["creds.update"]) {
@@ -236,31 +112,17 @@ export async function createWhatsAppTransport() {
 
   return {
     async start(turnHandler) {
-      stopped = false;
       onTurn = turnHandler;
-      await connect();
+      await connectionSupervisor.start();
     },
 
     async stop() {
-      log.info("Cleaning up WhatsApp connection...");
-      stopped = true;
       onTurn = async () => {};
-      clearRuntimeState();
-      const sock = sockRef.current;
-      sockRef.current = null;
-      try {
-        sock?.end(undefined);
-      } catch (error) {
-        log.error("Error during WhatsApp cleanup:", error);
-      }
+      await connectionSupervisor.stop();
     },
 
     async sendText(chatId, text) {
-      const sock = sockRef.current;
-      if (!sock) {
-        throw new Error("WhatsApp transport has not been started");
-      }
-      await sock.sendMessage(chatId, { text });
+      await connectionSupervisor.sendText(chatId, text);
     },
   };
 }
