@@ -1,7 +1,7 @@
 import { downloadMediaMessage, proto } from "@whiskeysockets/baileys";
 import { createLogger } from "../../logger.js";
-import { hydrateHdRef } from "../../whatsapp-hd-media.js";
 import { processHdImageMessage } from "../../whatsapp-hd-media.js";
+import { createEmptyHdInboundLifecycle, finalizeHdImageResult } from "./hd-image-lifecycle.js";
 
 const log = createLogger("whatsapp:content");
 
@@ -13,8 +13,7 @@ const log = createLogger("whatsapp:content");
  * @typedef {{
  *   content: IncomingContentBlock[],
  *   quotedSenderId: string | undefined,
- *   hdChild?: { parentMessageId?: string, ref: { url?: string, directPath?: string, mediaKey: string, mimetype?: string }, imageBlock: ImageContentBlock | null },
- *   hdParentMessageId?: string,
+ *   hdLifecycle?: import("./hd-image-lifecycle.js").HdInboundLifecycle,
  * }} MessageContentResult
  */
 
@@ -65,8 +64,7 @@ function createEmptyMessageContentResult() {
   return {
     content: [],
     quotedSenderId: undefined,
-    hdChild: undefined,
-    hdParentMessageId: undefined,
+    hdLifecycle: createEmptyHdInboundLifecycle(),
   };
 }
 
@@ -180,36 +178,26 @@ function getDirectMediaMessages(baileysMessage) {
  * @param {DownloadMediaFn} downloadFn
  * @returns {Promise<{
  *   content: IncomingContentBlock[],
- *   hdChild?: { parentMessageId?: string, ref: { url?: string, directPath?: string, mediaKey: string, mimetype?: string }, imageBlock: ImageContentBlock | null },
- *   hdParentMessageId?: string,
+ *   hdLifecycle?: import("./hd-image-lifecycle.js").HdInboundLifecycle,
  * }>}
  */
 async function extractDirectContent(baileysMessage, downloadFn) {
   /** @type {IncomingContentBlock[]} */
   const content = [];
-  /** @type {{ parentMessageId?: string, ref: { url?: string, directPath?: string, mediaKey: string, mimetype?: string }, imageBlock: ImageContentBlock | null } | undefined} */
-  let hdChild;
-  /** @type {string | undefined} */
-  let hdParentMessageId;
+  /** @type {import("./hd-image-lifecycle.js").HdInboundLifecycle | undefined} */
+  let hdLifecycle;
 
   const { imageMessage, videoMessage, audioMessage } = getDirectMediaMessages(baileysMessage);
 
   if (imageMessage) {
-    const imageResult = await processHdImageMessage(
+    const finalized = finalizeHdImageResult(await processHdImageMessage(
       baileysMessage,
       imageMessage,
       downloadFn,
       downloadMediaToBlocks,
-    );
-    if (imageResult.content.length > 0) {
-      const firstImage = imageResult.content.find((block) => block.type === "image");
-      if (firstImage && firstImage.type === "image") {
-        hydrateHdRef(firstImage);
-      }
-    }
-    content.push(...imageResult.content);
-    hdChild = imageResult.hdChild;
-    hdParentMessageId = imageResult.hdParentMessageId;
+    ));
+    content.push(...finalized.content);
+    hdLifecycle = finalized.lifecycle;
   }
 
   if (videoMessage) {
@@ -228,7 +216,7 @@ async function extractDirectContent(baileysMessage, downloadFn) {
     });
   }
 
-  return { content, hdChild, hdParentMessageId };
+  return { content, hdLifecycle };
 }
 
 /**
@@ -256,7 +244,6 @@ export async function getMessageContent(baileysMessage, downloadFn = downloadMed
   return {
     content,
     quotedSenderId: quoted.quotedSenderId,
-    hdChild: direct.hdChild,
-    hdParentMessageId: direct.hdParentMessageId,
+    hdLifecycle: direct.hdLifecycle,
   };
 }
