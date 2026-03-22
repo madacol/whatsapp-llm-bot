@@ -16,7 +16,7 @@ import { mkdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { NO_OP_HOOKS } from "./native.js";
 import { buildToolPresentation } from "../tool-presentation-model.js";
-import { formatToolPresentationInspect, formatToolPresentationSummary } from "../whatsapp/tool-presenter.js";
+import { formatToolPresentationInspect, formatToolPresentationSummary } from "#presentation/whatsapp";
 import { createLogger } from "../logger.js";
 import { extractLastUserText } from "../message-formatting.js";
 import { createToolMessage, errorToString, registerInspectHandler } from "../utils.js";

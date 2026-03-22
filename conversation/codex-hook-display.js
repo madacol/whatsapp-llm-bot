@@ -1,5 +1,5 @@
 import { buildCommandPresentation, buildMultiReadActivity, buildReadToolPresentation, formatActivitySummary, shortenPath } from "../tool-presentation-model.js";
-import { langFromPath, formatToolPresentationInspect, formatToolPresentationSummary } from "../whatsapp/tool-presenter.js";
+import { langFromPath, formatToolPresentationInspect, formatToolPresentationSummary } from "#presentation/whatsapp";
 import { createToolMessage, registerInspectHandler } from "../utils.js";
 
 /**

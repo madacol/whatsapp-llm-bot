@@ -1,6 +1,6 @@
 import { MAX_TOOL_CALL_DEPTH, parseToolArgs } from "../harnesses/index.js";
 import { buildToolPresentation } from "../tool-presentation-model.js";
-import { formatToolPresentationDisplay } from "../whatsapp/tool-presenter.js";
+import { formatToolPresentationDisplay } from "#presentation/whatsapp";
 import { createCodexDisplayHooks } from "./codex-hook-display.js";
 
 /**

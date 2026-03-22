@@ -8,7 +8,7 @@ import { getActions, executeAction } from "./actions.js";
 import config from "./config.js";
 import { createLlmClient } from "./llm.js";
 import { errorToString } from "./utils.js";
-import { createWhatsAppTransport } from "./whatsapp-adapter.js";
+import { createWhatsAppTransport } from "#whatsapp";
 import { startReminderDaemon } from "./reminder-daemon.js";
 import { startModelsCacheDaemon } from "./models-cache.js";
 import { initStore } from "./store.js";

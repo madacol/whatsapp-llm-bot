@@ -2,7 +2,7 @@
  * Grouped tool-flow presentation helpers.
  */
 
-import { formatToolPresentationSummary } from "./whatsapp/tool-presenter.js";
+import { formatToolPresentationSummary } from "#presentation/whatsapp";
 import { getToolFlowDescriptor } from "./tool-presentation-model.js";
 
 /**

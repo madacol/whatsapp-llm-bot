@@ -2,7 +2,7 @@ import { Codex } from "@openai/codex-sdk";
 import { createLogger } from "../logger.js";
 import { buildToolPresentation, getToolFlowDescriptor } from "../tool-presentation-model.js";
 import { formatToolFlowInspectText, formatToolFlowSummary } from "../tool-flow-presentation.js";
-import { formatToolPresentationInspect, formatToolPresentationSummary } from "../whatsapp/tool-presenter.js";
+import { formatToolPresentationInspect, formatToolPresentationSummary } from "#presentation/whatsapp";
 import { createToolMessage, registerDynamicInspectHandler, registerInspectHandler } from "../utils.js";
 import { normalizeCodexEvent } from "./codex-events.js";
 import { analyzeCodexCommand } from "./codex-command-semantics.js";

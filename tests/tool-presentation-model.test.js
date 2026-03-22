@@ -5,7 +5,7 @@ import {
   formatToolPresentationDisplay,
   formatToolPresentationInspect,
   formatToolPresentationSummary,
-} from "../whatsapp/tool-presenter.js";
+} from "../presentation/whatsapp.js";
 
 describe("tool presentation model", () => {
   it("keeps bash summaries compact while preserving the full command payload", () => {

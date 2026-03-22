@@ -2,7 +2,7 @@
  * Compatibility exports for tool presentation.
  *
  * The semantic model lives in `tool-presentation-model.js`. WhatsApp-specific
- * display and inspect policy lives in `whatsapp/tool-presenter.js`.
+ * display and inspect policy lives in `presentation/whatsapp.js`.
  */
 
 import { parseToolArgs } from "./harnesses/index.js";
@@ -18,7 +18,7 @@ import {
   formatToolPresentationInspect,
   formatToolPresentationSummary,
   langFromPath,
-} from "./whatsapp/tool-presenter.js";
+} from "#presentation/whatsapp";
 
 /**
  * Tool names that map to the shared semantic SDK-style presentation layer.

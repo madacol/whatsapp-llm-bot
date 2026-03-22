@@ -17,7 +17,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { storeAndLinkHtml } from "../html-store.js";
 import { recordUsage, resolveCost } from "../usage-tracker.js";
 import { buildToolPresentation } from "../tool-presentation-model.js";
-import { formatToolPresentationInspect, formatToolPresentationSummary } from "../whatsapp/tool-presenter.js";
+import { formatToolPresentationInspect, formatToolPresentationSummary } from "#presentation/whatsapp";
 import { createLogger } from "../logger.js";
 import { handleHarnessSessionCommand } from "./session-commands.js";
 
