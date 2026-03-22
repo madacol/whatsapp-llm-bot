@@ -78,15 +78,40 @@ export async function createWhatsAppTransport() {
   /** @type {ReturnType<typeof setTimeout> | null} */
   let qrExitTimer = null;
   let sessionResetInProgress = false;
+  let stopped = false;
+
+  /**
+   * Clear all transport-owned runtime state and timers.
+   * @returns {void}
+   */
+  function clearRuntimeState() {
+    if (qrExitTimer) {
+      clearTimeout(qrExitTimer);
+      qrExitTimer = null;
+    }
+    confirmRuntime.clear();
+    selectRuntime.clear();
+    reactionRuntime.clear();
+    sessionResetInProgress = false;
+  }
 
   /**
    * Create a new socket, wire handlers, and swap it into the ref.
    * @returns {Promise<void>}
    */
   async function connect() {
+    if (stopped) return;
     const { state, saveCreds } = await useMultiFileAuthState(AUTH_DIR);
-    sockRef.current = createSocket(state, version);
-    registerHandlers(sockRef.current, saveCreds);
+    if (stopped) return;
+
+    const sock = createSocket(state, version);
+    if (stopped) {
+      sock.end(undefined);
+      return;
+    }
+
+    sockRef.current = sock;
+    registerHandlers(sock, saveCreds);
   }
 
   /**
@@ -94,6 +119,7 @@ export async function createWhatsAppTransport() {
    * @returns {Promise<void>}
    */
   async function reconnect() {
+    if (stopped) return;
     await connect();
   }
 
@@ -105,6 +131,10 @@ export async function createWhatsAppTransport() {
    */
   function registerHandlers(sock, saveCreds) {
     sock.ev.process(async (events) => {
+      if (stopped) {
+        return;
+      }
+
       if (events["connection.update"]) {
         const update = events["connection.update"];
         const { connection, lastDisconnect, qr } = update;
@@ -206,14 +236,20 @@ export async function createWhatsAppTransport() {
 
   return {
     async start(turnHandler) {
+      stopped = false;
       onTurn = turnHandler;
       await connect();
     },
 
     async stop() {
       log.info("Cleaning up WhatsApp connection...");
+      stopped = true;
+      onTurn = async () => {};
+      clearRuntimeState();
+      const sock = sockRef.current;
+      sockRef.current = null;
       try {
-        sockRef.current?.end(undefined);
+        sock?.end(undefined);
       } catch (error) {
         log.error("Error during WhatsApp cleanup:", error);
       }
