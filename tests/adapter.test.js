@@ -10,16 +10,16 @@ process.env.MODEL = "mock-model";
 import { createTestDb, seedChat } from "./helpers.js";
 import { setDb } from "../db.js";
 
-/** @type {typeof import("../whatsapp-adapter.js").getMessageContent} */
+/** @type {typeof import("../whatsapp/inbound/message-content.js").getMessageContent} */
 let getMessageContent;
 
-/** @type {typeof import("../whatsapp-adapter.js").createConfirmRegistry} */
-let createConfirmRegistry;
+/** @type {typeof import("../whatsapp/runtime/confirm-runtime.js").createConfirmRuntime} */
+let createConfirmRuntime;
 
-/** @type {typeof import("../whatsapp-adapter.js").createUserResponseRegistry} */
-let createUserResponseRegistry;
+/** @type {typeof import("../whatsapp/runtime/select-runtime.js").createSelectRuntime} */
+let createSelectRuntime;
 
-/** @type {typeof import("../whatsapp-adapter.js").adaptIncomingMessage} */
+/** @type {typeof import("../whatsapp/inbound/chat-turn.js").adaptIncomingMessage} */
 let adaptIncomingMessage;
 
 before(async () => {
@@ -27,11 +27,10 @@ before(async () => {
   const testDb = await createTestDb();
   setDb("./pgdata/root", testDb);
 
-  const adapter = await import("../whatsapp-adapter.js");
-  getMessageContent = adapter.getMessageContent;
-  createConfirmRegistry = adapter.createConfirmRegistry;
-  createUserResponseRegistry = adapter.createUserResponseRegistry;
-  adaptIncomingMessage = adapter.adaptIncomingMessage;
+  ({ getMessageContent } = await import("../whatsapp/inbound/message-content.js"));
+  ({ createConfirmRuntime } = await import("../whatsapp/runtime/confirm-runtime.js"));
+  ({ createSelectRuntime } = await import("../whatsapp/runtime/select-runtime.js"));
+  ({ adaptIncomingMessage } = await import("../whatsapp/inbound/chat-turn.js"));
 });
 
 /**
@@ -97,7 +96,7 @@ function createHdImageMessage({ chatId, messageId, pairedMediaType, parentMessag
 
 /**
  * Create a mock Baileys socket and confirm registry for testing.
- * @returns {{ sock: any, registry: ReturnType<typeof createConfirmRegistry>, sentMessages: any[], reactions: any[], emitReaction: (key: any, reaction: any) => void }}
+ * @returns {{ sock: any, registry: ReturnType<typeof createConfirmRuntime>, sentMessages: any[], reactions: any[], emitReaction: (key: any, reaction: any) => void }}
  */
 function createMockSock() {
   /** @type {any[]} */
@@ -117,7 +116,7 @@ function createMockSock() {
     },
   };
 
-  const registry = createConfirmRegistry();
+  const registry = createConfirmRuntime();
 
   return {
     sock,
@@ -347,8 +346,8 @@ describe("getMessageContent", () => {
     const mockDownload = async (/** @type {BaileysMessage} */ message) => Buffer.from(message.key.id);
     /** @type {ImageContentBlock[]} */
     const parentImages = [];
-    const confirmRegistry = createConfirmRegistry();
-    const userResponseRegistry = createUserResponseRegistry();
+    const confirmRegistry = createConfirmRuntime();
+    const userResponseRegistry = createSelectRuntime();
     const sock = /** @type {import("@whiskeysockets/baileys").WASocket} */ (/** @type {unknown} */ ({
       user: { id: "bot@s.whatsapp.net" },
       signalRepository: {
@@ -427,8 +426,8 @@ describe("HD receive integration", () => {
     const HD_CHILD = proto.ContextInfo.PairedMediaType.HD_IMAGE_CHILD;
     /** @type {ImageContentBlock | null} */
     let parentImage = null;
-    const confirmRegistry = createConfirmRegistry();
-    const userResponseRegistry = createUserResponseRegistry();
+    const confirmRegistry = createConfirmRuntime();
+    const userResponseRegistry = createSelectRuntime();
     const sock = /** @type {import("@whiskeysockets/baileys").WASocket} */ (/** @type {unknown} */ ({
       user: { id: "bot@s.whatsapp.net" },
       signalRepository: {
@@ -525,8 +524,8 @@ describe("HD receive integration", () => {
         ${new Date("2026-03-19T00:00:01.000Z")}
       )`;
 
-    const confirmRegistry = createConfirmRegistry();
-    const userResponseRegistry = createUserResponseRegistry();
+    const confirmRegistry = createConfirmRuntime();
+    const userResponseRegistry = createSelectRuntime();
     const sock = /** @type {import("@whiskeysockets/baileys").WASocket} */ (/** @type {unknown} */ ({
       user: { id: "bot@s.whatsapp.net" },
       signalRepository: {
@@ -573,7 +572,7 @@ describe("HD receive integration", () => {
   });
 });
 
-describe("createConfirmRegistry", () => {
+describe("createConfirmRuntime", () => {
   it("resolves true on thumbs-up reaction and shows checkmark", async () => {
     const { sock, registry, reactions, emitReaction } = createMockSock();
     const confirm = registry.createConfirm(sock, "test-chat");

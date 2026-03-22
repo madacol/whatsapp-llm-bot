@@ -1,6 +1,6 @@
 import { MAX_TOOL_CALL_DEPTH, parseToolArgs } from "../harnesses/index.js";
 import { buildToolPresentation } from "../tool-presentation-model.js";
-import { formatToolPresentationDisplay } from "#presentation/whatsapp";
+import { contentEvent, planEvent, toolCallEvent, usageEvent } from "../outbound-events.js";
 import { createCodexDisplayHooks } from "./codex-hook-display.js";
 
 /**
@@ -13,7 +13,7 @@ import { createCodexDisplayHooks } from "./codex-hook-display.js";
  * @returns {Promise<MessageHandle | undefined>}
  */
 async function displayToolCall(toolCall, context, actionFormatter, cwd, toolContext) {
-  const content = formatToolPresentationDisplay(
+  return context.send(toolCallEvent(
     buildToolPresentation(
       toolCall.name,
       parseToolArgs(toolCall.arguments),
@@ -21,11 +21,7 @@ async function displayToolCall(toolCall, context, actionFormatter, cwd, toolCont
       cwd ?? null,
       toolContext,
     ),
-  );
-  if (content == null) {
-    return undefined;
-  }
-  return context.send("tool-call", content);
+  ));
 }
 
 /**
@@ -44,7 +40,7 @@ export function buildAgentIoHooks(context, sendComposing, cwd) {
 
   return {
     onComposing: sendComposing,
-    onLlmResponse: async (text) => { await context.reply("llm", [{ type: "markdown", text }]); },
+    onLlmResponse: async (text) => { await context.reply(contentEvent("llm", [{ type: "markdown", text }])); },
     onAskUser: async (question, options, _preamble, descriptions) => {
       /** @type {Map<string, string>} */
       const labelMap = new Map();
@@ -63,18 +59,16 @@ export function buildAgentIoHooks(context, sendComposing, cwd) {
     onToolCall: async (toolCall, formatToolCall, toolContext) => {
       return displayToolCall(toolCall, context, formatToolCall, cwd, toolContext);
     },
-    onToolResult: async (blocks) => { await context.send("tool-result", blocks); },
-    onToolError: async (message) => { await context.send("error", message); },
+    onToolResult: async (blocks) => { await context.send(contentEvent("tool-result", blocks)); },
+    onToolError: async (message) => { await context.send(contentEvent("error", message)); },
     onCommand: codexDisplayHooks.onCommand,
     onFileRead: codexDisplayHooks.onFileRead,
-    onPlan: async (text) => { await context.reply("llm", [{ type: "markdown", text: `*Plan*\n\n${text}` }]); },
+    onPlan: async (text) => { await context.reply(planEvent(text)); },
     onFileChange: codexDisplayHooks.onFileChange,
     onContinuePrompt: () => context.confirm("React 👍 to continue or 👎 to stop."),
     onDepthLimit: () => context.confirm(
       `⚠️ *Depth limit*\n\nReached maximum tool call depth (${MAX_TOOL_CALL_DEPTH}). React 👍 to continue or 👎 to stop.`,
     ),
-    onUsage: async (cost, tokens) => {
-      await context.send("usage", `Cost: ${cost} | prompt=${tokens.prompt} cached=${tokens.cached} completion=${tokens.completion}`);
-    },
+    onUsage: async (cost, tokens) => { await context.send(usageEvent(cost, tokens)); },
   };
 }

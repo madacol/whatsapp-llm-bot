@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { getPollCreationData } from "../whatsapp-adapter.js";
+import { getPollCreationData } from "../whatsapp/runtime/select-runtime.js";
 
 describe("getPollCreationData", () => {
   it("extracts options from pollCreationMessage (V1)", () => {

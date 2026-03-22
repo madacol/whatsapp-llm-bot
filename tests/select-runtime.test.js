@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { createUserResponseRegistry } from "../whatsapp-adapter.js";
+import { createSelectRuntime } from "../whatsapp/runtime/select-runtime.js";
 
 /**
  * Create a mock socket that captures poll payloads.
@@ -36,7 +36,7 @@ function createMockSock() {
 
 describe("createSelectRuntime", () => {
   it("preserves option identity when labels are duplicated", async () => {
-    const registry = createUserResponseRegistry();
+    const registry = createSelectRuntime();
     const { sock, sentMessages } = createMockSock();
     const select = registry.createSelect(sock, "chat-1");
 
@@ -70,7 +70,7 @@ describe("createSelectRuntime", () => {
   });
 
   it("clear() resolves pending selects without sending cancellation reactions", async () => {
-    const registry = createUserResponseRegistry();
+    const registry = createSelectRuntime();
     const { sock, sentMessages } = createMockSock();
     const select = registry.createSelect(sock, "chat-1");
 

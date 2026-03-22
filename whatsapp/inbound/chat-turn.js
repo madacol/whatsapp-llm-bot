@@ -3,7 +3,7 @@ import { normalizeChatId } from "../../whatsapp-hd-media.js";
 import { classifyIncomingMessageEvent } from "./message-event-classifier.js";
 import { applyHdInboundLifecycle } from "./hd-image-lifecycle.js";
 import { getMessageContent } from "./message-content.js";
-import { sendBlocks } from "../outbound/send-content.js";
+import { sendEvent } from "../outbound/send-content.js";
 import { createReactionRuntime } from "../runtime/reaction-runtime.js";
 
 /**
@@ -158,8 +158,8 @@ export function createTurnIo({
   reactionRuntime,
 }) {
   return {
-    send: (source, content) => sendBlocks(sock, chatId, source, content, undefined, reactionRuntime),
-    reply: (source, content) => sendBlocks(sock, chatId, source, content, { quoted: message }, reactionRuntime),
+    send: (event) => sendEvent(sock, chatId, event, undefined, reactionRuntime),
+    reply: (event) => sendEvent(sock, chatId, event, { quoted: message }, reactionRuntime),
     select: selectRuntime.createSelect(sock, chatId),
     confirm: confirmRuntime.createConfirm(sock, chatId),
     react: async (emoji) => {

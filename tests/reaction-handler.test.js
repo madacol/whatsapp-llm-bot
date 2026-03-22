@@ -5,7 +5,7 @@ process.env.MODEL = "mock-model";
 
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { createReactionRegistry } from "../whatsapp-adapter.js";
+import { createReactionRuntime as createReactionRegistry } from "../whatsapp/runtime/reaction-runtime.js";
 
 describe("createReactionRegistry", () => {
 

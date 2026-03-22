@@ -1,5 +1,6 @@
 import config from "../config.js";
 import { getRootDb } from "../db.js";
+import { contentEvent } from "../outbound-events.js";
 import {
   extractTextFromMessage,
   findMemories,
@@ -45,7 +46,7 @@ async function searchAndAppendMemories({ chatId, chatInfo, message, llmClient, e
     const lines = similar.map((memory) =>
       `- [#${memory.id}] (score: ${Number(memory.similarity).toFixed(3)}) ${memory.content.slice(0, 100)}${memory.content.length > 100 ? "..." : ""}`
     );
-    await context.send("memory", `Recalled ${similar.length} memor${similar.length === 1 ? "y" : "ies"}\n${lines.join("\n")}`);
+    await context.send(contentEvent("memory", `Recalled ${similar.length} memor${similar.length === 1 ? "y" : "ies"}\n${lines.join("\n")}`));
 
     return extended;
   } catch (err) {
@@ -94,7 +95,7 @@ export async function prepareRunMessages({
 
   if (skippedTypes.size > 0) {
     const types = [...skippedTypes].join(", ");
-    await context.send("warning", `${types} not supported by this model. Use \`!config media_to_text_model\` to enable.`);
+    await context.send(contentEvent("warning", `${types} not supported by this model. Use \`!config media_to_text_model\` to enable.`));
   }
 
   if (chatInfo?.memory) {

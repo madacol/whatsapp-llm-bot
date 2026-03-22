@@ -125,12 +125,82 @@ type MessageSource = "llm" | "tool-call" | "tool-result" | "error" | "warning" |
 /** Callback invoked when a reaction is added to a message. */
 type ReactionCallback = (emoji: string, senderId: string) => void;
 
-/** Handle to a sent message, providing lifecycle control (edit, reaction subscription). */
+type ToolFlowStep = {
+  id: string;
+  presentation: import("./tool-presentation-model.js").ToolPresentation;
+  output?: string;
+};
+
+type ToolFlowState = {
+  title: string;
+  steps: ToolFlowStep[];
+};
+
+type ContentEvent = {
+  kind: "content";
+  source: MessageSource;
+  content: SendContent;
+};
+
+type ToolCallEvent = {
+  kind: "tool_call";
+  presentation: import("./tool-presentation-model.js").ToolPresentation;
+};
+
+type ToolActivityEvent = {
+  kind: "tool_activity";
+  activity: import("./tool-presentation-model.js").ToolActivitySummary;
+};
+
+type PlanEvent = {
+  kind: "plan";
+  text: string;
+};
+
+type FileChangeEvent = {
+  kind: "file_change";
+  path: string;
+  summary?: string;
+  diff?: string;
+  changeKind?: "add" | "delete" | "update";
+  oldText?: string;
+  newText?: string;
+  cwd?: string | null;
+};
+
+type UsageEvent = {
+  kind: "usage";
+  cost: string;
+  tokens: {
+    prompt: number;
+    completion: number;
+    cached: number;
+  };
+};
+
+type OutboundEvent =
+  | ContentEvent
+  | ToolCallEvent
+  | ToolActivityEvent
+  | PlanEvent
+  | FileChangeEvent
+  | UsageEvent;
+
+type MessageHandleUpdate =
+  | { kind: "text"; text: string }
+  | { kind: "tool_call"; presentation: import("./tool-presentation-model.js").ToolPresentation }
+  | { kind: "tool_flow"; state: ToolFlowState };
+
+type MessageInspectState =
+  | { kind: "tool"; presentation: import("./tool-presentation-model.js").ToolPresentation; output?: string }
+  | { kind: "tool_flow"; state: ToolFlowState };
+
+/** Handle to a sent message, providing semantic lifecycle control. */
 type MessageHandle = {
   readonly keyId: string | undefined;
   readonly isImage: boolean;
-  edit: (text: string) => Promise<void>;
-  onReaction: (callback: ReactionCallback) => () => void;
+  update: (update: MessageHandleUpdate) => Promise<void>;
+  setInspect: (inspect: MessageInspectState | null) => void;
 };
 
 /** An option for `select()`: either a plain string or an object with id and label. */
@@ -153,8 +223,8 @@ type ConfirmHooks = {
 };
 
 type TurnIO = {
-  send: (source: MessageSource, content: SendContent) => Promise<MessageHandle | undefined>;
-  reply: (source: MessageSource, content: SendContent) => Promise<MessageHandle | undefined>;
+  send: (event: OutboundEvent) => Promise<MessageHandle | undefined>;
+  reply: (event: OutboundEvent) => Promise<MessageHandle | undefined>;
   select: (question: string, options: SelectOption[], config?: SelectConfig) => Promise<string>;
   confirm: (message: string, hooks?: ConfirmHooks) => Promise<boolean>;
   react: (emoji: string) => Promise<void>;
@@ -192,8 +262,8 @@ type ExecuteActionContext = {
   senderIds: string[];
   content: IncomingContentBlock[];
   getIsAdmin: () => Promise<boolean>;
-  send: (source: MessageSource, content: SendContent) => Promise<MessageHandle | undefined>;
-  reply: (source: MessageSource, content: SendContent) => Promise<MessageHandle | undefined>;
+  send: (event: OutboundEvent) => Promise<MessageHandle | undefined>;
+  reply: (event: OutboundEvent) => Promise<MessageHandle | undefined>;
   reactToMessage: (emoji: string) => Promise<void>;
   select: (question: string, options: SelectOption[], config?: SelectConfig) => Promise<string>;
   confirm: (message: string, hooks?: ConfirmHooks) => Promise<boolean>;

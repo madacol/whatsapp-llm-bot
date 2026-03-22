@@ -18,7 +18,7 @@ import {
   formatToolPresentationInspect,
   formatToolPresentationSummary,
   langFromPath,
-} from "#presentation/whatsapp";
+} from "./presentation/whatsapp.js";
 
 /**
  * Tool names that map to the shared semantic SDK-style presentation layer.

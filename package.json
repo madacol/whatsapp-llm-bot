@@ -8,7 +8,6 @@
     "type": "module",
     "main": "index.js",
     "imports": {
-        "#presentation/whatsapp": "./presentation/whatsapp.js",
         "#whatsapp": "./whatsapp/index.js"
     },
     "scripts": {

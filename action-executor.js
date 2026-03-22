@@ -3,6 +3,7 @@ import config from "./config.js";
 import { createCallLlm } from "./llm.js";
 import { resolveModel } from "./model-roles.js";
 import { createLogger } from "./logger.js";
+import { contentEvent } from "./outbound-events.js";
 import { getAction, getActions } from "./action-catalog.js";
 import { getSandboxEscapeRequest } from "./harnesses/sandbox-approval.js";
 import { confirmSandboxEscape } from "./harnesses/sandbox-approval-coordinator.js";
@@ -81,10 +82,10 @@ export async function executeAction(actionName, context, params, options = {}) {
       return message;
     },
     send: async (message) => {
-      await context.send("tool-call", message);
+      await context.send(contentEvent("tool-call", message));
     },
     reply: async (message) => {
-      await context.reply("tool-call", message);
+      await context.reply(contentEvent("tool-call", message));
     },
     reactToMessage: context.reactToMessage,
     select: context.select,

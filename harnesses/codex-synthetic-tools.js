@@ -1,6 +1,5 @@
 import { buildToolPresentation } from "../tool-presentation-model.js";
-import { formatToolPresentationInspect, formatToolPresentationSummary } from "#presentation/whatsapp";
-import { createToolMessage, registerInspectHandler } from "../utils.js";
+import { toolInspectState } from "../outbound-events.js";
 
 /**
  * @typedef {{
@@ -67,13 +66,7 @@ export function createCodexSyntheticToolAdapter({ onToolCall, cwd }) {
       return;
     }
 
-    registerInspectHandler(
-      synthetic.handle,
-      formatToolPresentationSummary(synthetic.presentation),
-      createToolMessage(`codex-synthetic:${synthetic.presentation.toolName}`, event.output ?? ""),
-      synthetic.presentation.toolName,
-      formatToolPresentationInspect(synthetic.presentation, event.output ?? "") ?? undefined,
-    );
+    synthetic.handle.setInspect(toolInspectState(synthetic.presentation, event.output ?? ""));
   }
 }
 

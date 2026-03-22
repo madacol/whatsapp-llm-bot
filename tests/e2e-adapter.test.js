@@ -15,10 +15,12 @@ import {
   seedChat,
 } from "./helpers.js";
 import { setDb } from "../db.js";
-import { adaptIncomingMessage, createConfirmRegistry, createUserResponseRegistry } from "../whatsapp-adapter.js";
+import { adaptIncomingMessage } from "../whatsapp/inbound/chat-turn.js";
+import { createConfirmRuntime } from "../whatsapp/runtime/confirm-runtime.js";
+import { createSelectRuntime } from "../whatsapp/runtime/select-runtime.js";
 
-const testConfirmRegistry = createConfirmRegistry();
-const testUserResponseRegistry = createUserResponseRegistry();
+const testConfirmRegistry = createConfirmRuntime();
+const testUserResponseRegistry = createSelectRuntime();
 
 /** @type {Awaited<ReturnType<typeof createMockLlmServer>>} */
 let mockServer;

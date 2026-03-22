@@ -1,6 +1,14 @@
 import { generateMessageIDV2, generateWAMessage, generateWAMessageFromContent, proto } from "@whiskeysockets/baileys";
 import { randomBytes } from "node:crypto";
 import { renderBlocks } from "../../message-renderer.js";
+import { formatToolFlowInspectText, formatToolFlowSummary } from "../../tool-flow-presentation.js";
+import { formatActivitySummary, shortenPath } from "../../tool-presentation-model.js";
+import {
+  formatToolPresentationDisplay,
+  formatToolPresentationInspect,
+  formatToolPresentationSummary,
+  langFromPath,
+} from "../../presentation/whatsapp.js";
 import { sendImageHD } from "../../whatsapp-hd-media.js";
 
 /** Delay between relaying each image in an album so WhatsApp groups them. */
@@ -16,6 +24,147 @@ const SOURCE_PREFIX = {
   usage: "📊",
   memory: "🧠",
 };
+
+/**
+ * Format inspect text for editing into a WhatsApp message with truncation.
+ * @param {string} summary
+ * @param {string} text
+ * @returns {string}
+ */
+function formatInspectEditText(summary, text) {
+  const MAX = 3000;
+  const display = text.length <= MAX ? text
+    : text.slice(0, MAX) + `\n\n_… truncated (${text.length.toLocaleString()} chars total)_`;
+  return `${summary}\n\n${display}`;
+}
+
+/**
+ * @param {string | undefined} summary
+ * @param {string} rawPath
+ * @param {string} displayPath
+ * @param {"add" | "delete" | "update" | undefined} kind
+ * @returns {string | undefined}
+ */
+function cleanFileChangeSummary(summary, rawPath, displayPath, kind) {
+  if (!summary) {
+    return undefined;
+  }
+
+  const shortenedSummary = summary.split(rawPath).join(displayPath);
+  const redundantForms = new Set([
+    rawPath,
+    displayPath,
+    ...(kind ? [`${rawPath} (${kind})`, `${displayPath} (${kind})`] : []),
+  ]);
+
+  return redundantForms.has(shortenedSummary) ? undefined : shortenedSummary;
+}
+
+/**
+ * @param {FileChangeEvent} event
+ * @returns {SendContent}
+ */
+function renderFileChangeContent(event) {
+  const displayPath = shortenPath(event.path, event.cwd ?? null);
+  const cleanedSummary = cleanFileChangeSummary(event.summary, event.path, displayPath, event.changeKind);
+
+  if (event.diff) {
+    const title = event.changeKind === "add"
+      ? "*File added*"
+      : event.changeKind === "delete"
+        ? "*File deleted*"
+        : "*File changed*";
+
+    if (typeof event.oldText === "string" || typeof event.newText === "string") {
+      const captionLines = [`${title}  \`${displayPath}\``];
+      if (cleanedSummary) {
+        captionLines.push(cleanedSummary);
+      }
+      return [{
+        type: "diff",
+        oldStr: event.oldText ?? "",
+        newStr: event.newText ?? "",
+        language: langFromPath(event.path) || "text",
+        caption: captionLines.join("\n"),
+      }];
+    }
+
+    const lines = [title, ""];
+    if (cleanedSummary) {
+      lines.push(cleanedSummary);
+    }
+    lines.push(`\`${displayPath}\``, "", "```diff", event.diff, "```");
+    return [{ type: "markdown", text: lines.join("\n") }];
+  }
+
+  return cleanedSummary ? `${cleanedSummary}\n\`${displayPath}\`` : `Changed file: \`${displayPath}\``;
+}
+
+/**
+ * @param {OutboundEvent} event
+ * @returns {{ source: MessageSource, content: SendContent } | null}
+ */
+function renderOutboundEvent(event) {
+  switch (event.kind) {
+    case "content":
+      return { source: event.source, content: event.content };
+    case "tool_call": {
+      const content = formatToolPresentationDisplay(event.presentation) ?? formatToolPresentationSummary(event.presentation);
+      return { source: "tool-call", content };
+    }
+    case "tool_activity":
+      return { source: "tool-call", content: formatActivitySummary(event.activity) };
+    case "plan":
+      return { source: "llm", content: [{ type: "markdown", text: `*Plan*\n\n${event.text}` }] };
+    case "file_change":
+      return { source: "tool-call", content: renderFileChangeContent(event) };
+    case "usage":
+      return {
+        source: "usage",
+        content: `Cost: ${event.cost} | prompt=${event.tokens.prompt} cached=${event.tokens.cached} completion=${event.tokens.completion}`,
+      };
+    default:
+      return null;
+  }
+}
+
+/**
+ * @param {MessageHandleUpdate} update
+ * @returns {string}
+ */
+function summarizeHandleUpdate(update) {
+  switch (update.kind) {
+    case "text":
+      return update.text;
+    case "tool_call":
+      return formatToolPresentationSummary(update.presentation);
+    case "tool_flow":
+      return formatToolFlowSummary(update.state);
+    default:
+      return "";
+  }
+}
+
+/**
+ * @param {MessageInspectState} inspect
+ * @returns {{ summary: string, text: string }}
+ */
+function formatInspectState(inspect) {
+  switch (inspect.kind) {
+    case "tool": {
+      const summary = formatToolPresentationSummary(inspect.presentation);
+      const text = formatToolPresentationInspect(inspect.presentation, inspect.output) ?? "_no output_";
+      return { summary, text };
+    }
+    case "tool_flow":
+      return {
+        summary: formatToolFlowSummary(inspect.state),
+        text: formatToolFlowInspectText(inspect.state, formatToolPresentationInspect),
+      };
+    default:
+      return { summary: "", text: "_no output_" };
+  }
+}
 
 /**
  * Send multiple images as a WhatsApp album using raw protocol messages.
@@ -132,6 +281,24 @@ export async function editWhatsAppMessage(sock, jid, key, newText, isImage) {
 }
 
 /**
+ * Dispatch a semantic outbound event as WhatsApp messages.
+ * Returns a MessageHandle for the last editable message sent (if any).
+ * @param {import('@whiskeysockets/baileys').WASocket} sock
+ * @param {string} chatId
+ * @param {OutboundEvent} event
+ * @param {{ quoted?: BaileysMessage } | undefined} options
+ * @param {import("../runtime/reaction-runtime.js").ReactionRuntime | undefined} reactionRuntime
+ * @returns {Promise<MessageHandle | undefined>}
+ */
+export async function sendEvent(sock, chatId, event, options, reactionRuntime) {
+  const rendered = renderOutboundEvent(event);
+  if (!rendered) {
+    return undefined;
+  }
+  return sendBlocks(sock, chatId, rendered.source, rendered.content, options, reactionRuntime, event);
+}
+
+/**
  * Dispatch SendContent as WhatsApp messages with a source-based prefix.
  * Returns a MessageHandle for the last editable message sent (if any).
  * @param {import('@whiskeysockets/baileys').WASocket} sock
@@ -140,9 +307,10 @@ export async function editWhatsAppMessage(sock, jid, key, newText, isImage) {
  * @param {SendContent} content
  * @param {{ quoted?: BaileysMessage } | undefined} options
  * @param {import("../runtime/reaction-runtime.js").ReactionRuntime | undefined} reactionRuntime
+ * @param {OutboundEvent | undefined} [event]
  * @returns {Promise<MessageHandle | undefined>}
  */
-export async function sendBlocks(sock, chatId, source, content, options, reactionRuntime) {
+export async function sendBlocks(sock, chatId, source, content, options, reactionRuntime, event) {
   const prefix = SOURCE_PREFIX[source];
   const blocks = typeof content === "string"
     ? [/** @type {ToolContentBlock} */ ({ type: "text", text: content })]
@@ -255,21 +423,39 @@ export async function sendBlocks(sock, chatId, source, content, options, reactio
   const editKey = lastSentKey;
   const isImage = lastSentIsImage;
   const keyId = editKey.id ?? undefined;
+  /** @type {MessageInspectState | null} */
+  let inspectState = event?.kind === "tool_call"
+    ? { kind: "tool", presentation: event.presentation }
+    : null;
 
   /** @type {MessageHandle} */
   const handle = {
     keyId,
     isImage,
-    edit: async (text) => {
+    update: async (update) => {
+      const text = summarizeHandleUpdate(update);
       await editWhatsAppMessage(sock, chatId, editKey, `${prefix} ${text}`, isImage);
     },
-    onReaction: (callback) => {
-      if (!keyId || !reactionRuntime) {
-        return () => {};
-      }
-      return reactionRuntime.subscribe(keyId, callback);
+    setInspect: (inspect) => {
+      inspectState = inspect;
     },
   };
+
+  if (keyId && reactionRuntime) {
+    reactionRuntime.subscribe(keyId, (emoji) => {
+      if (!emoji.startsWith("👁") || !inspectState) {
+        return;
+      }
+      const inspect = formatInspectState(inspectState);
+      void editWhatsAppMessage(
+        sock,
+        chatId,
+        editKey,
+        `${prefix} ${formatInspectEditText(inspect.summary, inspect.text)}`,
+        isImage,
+      );
+    });
+  }
 
   return handle;
 }

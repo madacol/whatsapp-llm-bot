@@ -3,7 +3,7 @@
  */
 
 import { sendChatCompletion } from "../llm.js";
-import { createToolMessage, isHtmlContent, errorToString, registerInspectHandler } from "../utils.js";
+import { createToolMessage, isHtmlContent, errorToString } from "../utils.js";
 import {
   actionsToToolDefinitions,
   resolveImageArgs,
@@ -14,10 +14,10 @@ import {
 import { getRootDb } from "../db.js";
 import { storeLlmContext } from "../context-log.js";
 import { existsSync, readFileSync } from "node:fs";
+import { textUpdate, toolCallUpdate, toolInspectState } from "../outbound-events.js";
 import { storeAndLinkHtml } from "../html-store.js";
 import { recordUsage, resolveCost } from "../usage-tracker.js";
 import { buildToolPresentation } from "../tool-presentation-model.js";
-import { formatToolPresentationInspect, formatToolPresentationSummary } from "#presentation/whatsapp";
 import { createLogger } from "../logger.js";
 import { handleHarnessSessionCommand } from "./session-commands.js";
 
@@ -77,7 +77,7 @@ export function parseToolArgs(argsString) {
  */
 async function tryEdit(handle, text, toolName) {
   if (!handle) return;
-  try { await handle.edit(text); }
+  try { await handle.update(textUpdate(text)); }
   catch (err) { log.error(`Edit failed for ${toolName}:`, err); }
 }
 
@@ -131,7 +131,6 @@ async function executeAndStoreTool({
     workdir ?? null,
     displayContext,
   );
-  const toolSummary = formatToolPresentationSummary(presentation);
 
   /** Replace the stub in the messages array and persist to DB. */
   const replaceStub = async (/** @type {ToolMessage} */ toolMessage) => {
@@ -149,17 +148,9 @@ async function executeAndStoreTool({
         .filter((block) => block.type === "text")
         .map((block) => /** @type {TextContentBlock} */ (block).text)
         .join("\n");
-      const inspectText = formatToolPresentationInspect(presentation, rawText || undefined) ?? undefined;
-      registerInspectHandler(handle, toolSummary, toolMessage, toolName, inspectText);
+      handle.setInspect(toolInspectState(presentation, rawText || undefined));
     }
   };
-
-  if (handle) {
-    const initialInspectText = formatToolPresentationInspect(presentation, undefined) ?? undefined;
-    if (initialInspectText) {
-      registerInspectHandler(handle, toolSummary, createToolMessage(toolCall.id, ""), toolName, initialInspectText);
-    }
-  }
 
   try {
     // Resolve image params: look up action schema, replace media refs with actual content blocks
@@ -215,7 +206,9 @@ async function executeAndStoreTool({
     }
 
     // Edit tool-call message in-place with summary label
-    await tryEdit(handle, toolSummary, toolName);
+    if (handle) {
+      await handle.update(toolCallUpdate(presentation));
+    }
 
     // Register 👁 react-to-inspect for tool results
     registerInspect(toolMessage);
@@ -301,7 +294,7 @@ async function processLlmResponse({ session, llmConfig, messages, mediaRegistry,
       const parsed = parseStructuredQuestion(response.content);
       if (parsed && parsed.options.length >= 2) {
         if (parsed.preamble) {
-          await hooks.onLlmResponse(parsed.preamble);
+        await hooks.onLlmResponse(parsed.preamble);
         }
         const userChoice = await hooks.onAskUser(parsed.question, parsed.options, parsed.preamble);
 

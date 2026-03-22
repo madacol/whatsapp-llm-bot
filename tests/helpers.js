@@ -4,6 +4,8 @@ import { createServer } from "node:http";
 import { EventEmitter } from "node:events";
 import { PGlite } from "@electric-sql/pglite";
 import { vector } from "@electric-sql/pglite/vector";
+import { formatActivitySummary } from "../tool-presentation-model.js";
+import { formatToolPresentationDisplay, formatToolPresentationSummary } from "../presentation/whatsapp.js";
 import { initStore } from "../store.js";
 
 const MODELS_CACHE_PATH = path.resolve("data/models.json");
@@ -57,13 +59,46 @@ export function createChatTurn(overrides = {}) {
 
   /**
    * Record blocks from a send/reply call and return a MessageHandle
-   * that records subsequent edits.
+   * that records subsequent semantic updates.
    * @param {"send" | "reply"} method
-   * @param {MessageSource} source
-   * @param {SendContent} content
+   * @param {OutboundEvent} event
    * @returns {MessageHandle}
    */
-  const recordBlocks = (method, source, content) => {
+  const recordBlocks = (method, event) => {
+    /** @type {MessageSource} */
+    let source;
+    /** @type {SendContent} */
+    let content;
+    switch (event.kind) {
+      case "content":
+        source = event.source;
+        content = event.content;
+        break;
+      case "tool_call":
+        source = "tool-call";
+        content = formatToolPresentationDisplay(event.presentation) ?? formatToolPresentationSummary(event.presentation);
+        break;
+      case "tool_activity":
+        source = "tool-call";
+        content = formatActivitySummary(event.activity);
+        break;
+      case "plan":
+        source = "llm";
+        content = [{ type: "markdown", text: `*Plan*\n\n${event.text}` }];
+        break;
+      case "usage":
+        source = "usage";
+        content = `Cost: ${event.cost} | prompt=${event.tokens.prompt} cached=${event.tokens.cached} completion=${event.tokens.completion}`;
+        break;
+      case "file_change":
+        source = "tool-call";
+        content = event.summary ?? event.path;
+        break;
+      default:
+        source = "tool-result";
+        content = "";
+        break;
+    }
     const blocks = typeof content === "string"
       ? [/** @type {ToolContentBlock} */ ({ type: "text", text: content })]
       : Array.isArray(content) ? content : [content];
@@ -78,10 +113,15 @@ export function createChatTurn(overrides = {}) {
     const handle = {
       keyId: `mock-key-${responses.length}`,
       isImage: blocks.some(b => b.type === "image" || b.type === "code" || b.type === "diff"),
-      edit: async (newText) => {
-        responses.push({ type: "edit", text: newText, source });
+      update: async (update) => {
+        const text = update.kind === "text"
+          ? update.text
+          : update.kind === "tool_call"
+            ? formatToolPresentationSummary(update.presentation)
+            : update.state.title;
+        responses.push({ type: "edit", text, source });
       },
-      onReaction: () => () => {},
+      setInspect: () => {},
     };
     return handle;
   };
@@ -96,8 +136,8 @@ export function createChatTurn(overrides = {}) {
       responses.push({ type: "select", text: JSON.stringify({ question, options }) });
       return "";
     },
-    send: async (source, content) => recordBlocks("send", source, content),
-    reply: async (source, content) => recordBlocks("reply", source, content),
+    send: async (event) => recordBlocks("send", event),
+    reply: async (event) => recordBlocks("reply", event),
     confirm: async (message) => {
       responses.push({ type: "confirm", text: message });
       return true;

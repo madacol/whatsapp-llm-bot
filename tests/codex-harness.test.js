@@ -14,6 +14,15 @@ const TEST_CODEX_MODELS = [
   { id: "gpt-5.3-codex", label: "GPT-5.3 Codex" },
 ];
 
+/**
+ * @param {OutboundEvent} event
+ * @returns {string}
+ */
+function getReplyText(event) {
+  assert.equal(event.kind, "content");
+  return typeof event.content === "string" ? event.content : JSON.stringify(event.content);
+}
+
 before(async () => {
   const db = await createTestDb();
   setDb("./pgdata/root", db);
@@ -56,8 +65,8 @@ describe("createCodexHarness", () => {
         content: [],
         getIsAdmin: async () => true,
         send: async () => undefined,
-        reply: async (_source, content) => {
-          replies.push(typeof content === "string" ? content : JSON.stringify(content));
+        reply: async (event) => {
+          replies.push(getReplyText(event));
           return undefined;
         },
         reactToMessage: async () => {},
@@ -90,8 +99,8 @@ describe("createCodexHarness", () => {
         content: [],
         getIsAdmin: async () => true,
         send: async () => undefined,
-        reply: async (_source, content) => {
-          replies.push(typeof content === "string" ? content : JSON.stringify(content));
+        reply: async (event) => {
+          replies.push(getReplyText(event));
           return undefined;
         },
         reactToMessage: async () => {},
@@ -134,8 +143,8 @@ describe("createCodexHarness", () => {
         content: [],
         getIsAdmin: async () => true,
         send: async () => undefined,
-        reply: async (_source, content) => {
-          replies.push(typeof content === "string" ? content : JSON.stringify(content));
+        reply: async (event) => {
+          replies.push(getReplyText(event));
           return undefined;
         },
         reactToMessage: async () => {},

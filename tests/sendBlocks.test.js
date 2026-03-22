@@ -9,17 +9,17 @@ process.env.MODEL = "mock-model";
 import { createTestDb } from "./helpers.js";
 import { setDb } from "../db.js";
 
-/** @type {typeof import("../whatsapp-adapter.js").sendBlocks} */
+/** @type {typeof import("../whatsapp/outbound/send-content.js").sendBlocks} */
 let sendBlocks;
-/** @type {typeof import("../whatsapp-adapter.js").editWhatsAppMessage} */
+/** @type {typeof import("../whatsapp/outbound/send-content.js").editWhatsAppMessage} */
 let editWhatsAppMessage;
 
 before(async () => {
   const testDb = await createTestDb();
   setDb("./pgdata/root", testDb);
-  const adapter = await import("../whatsapp-adapter.js");
-  sendBlocks = adapter.sendBlocks;
-  editWhatsAppMessage = adapter.editWhatsAppMessage;
+  const outbound = await import("../whatsapp/outbound/send-content.js");
+  sendBlocks = outbound.sendBlocks;
+  editWhatsAppMessage = outbound.editWhatsAppMessage;
 });
 
 /**
@@ -220,8 +220,8 @@ describe("sendBlocks – MessageHandle tracking", () => {
 
     assert.ok(handle, "Should return a handle");
     assert.equal(typeof handle, "object", "Handle should be an object");
-    assert.equal(typeof handle.edit, "function", "Handle should have edit method");
-    assert.equal(typeof handle.onReaction, "function", "Handle should have onReaction method");
+    assert.equal(typeof handle.update, "function", "Handle should have update method");
+    assert.equal(typeof handle.setInspect, "function", "Handle should have setInspect method");
     assert.equal(handle.keyId, "msg-1");
     assert.equal(handle.isImage, false);
   });
@@ -262,7 +262,7 @@ describe("sendBlocks – MessageHandle tracking", () => {
     assert.equal(handle, undefined);
   });
 
-  it("handle.edit calls editWhatsAppMessage when invoked", async () => {
+  it("handle.update calls editWhatsAppMessage when invoked", async () => {
     /** @type {Array<{ chatId: string; msg: Record<string, unknown>; opts?: Record<string, unknown> }>} */
     const sent = [];
     const sock = {
@@ -277,11 +277,11 @@ describe("sendBlocks – MessageHandle tracking", () => {
     ]);
 
     assert.ok(handle);
-    await handle.edit("updated");
+    await handle.update({ kind: "text", text: "updated" });
 
-    // The edit call should be the second sendMessage (first was the original)
+    // The update call should be the second sendMessage (first was the original)
     const editCall = sent[1];
-    assert.ok(editCall, "Handle.edit should have sent an edit");
+    assert.ok(editCall, "Handle.update should have sent an edit");
     assert.ok(
       typeof editCall.msg.text === "string" && editCall.msg.text.includes("updated"),
       "Edit should contain the new text",
@@ -344,7 +344,7 @@ describe("sendBlocks – tool-call → edit pipeline", () => {
     assert.equal(calls.length, 1, "Should have sent 1 message");
 
     // Step 2: Simulate progress update (tool still running)
-    await handle.edit("Read (3s…)");
+    await handle.update({ kind: "text", text: "Read (3s…)" });
     assert.equal(calls.length, 2, "Should have 2 calls after progress update");
 
     const progressCall = calls[1];
@@ -354,7 +354,7 @@ describe("sendBlocks – tool-call → edit pipeline", () => {
     assert.ok(progressMsg.edit != null, "Should include edit key for in-place update");
 
     // Step 3: Simulate final result
-    await handle.edit("Read · file.js (42 lines)");
+    await handle.update({ kind: "text", text: "Read · file.js (42 lines)" });
     assert.equal(calls.length, 3, "Should have 3 calls after final update");
 
     const finalCall = calls[2];
@@ -380,7 +380,7 @@ describe("sendBlocks – tool-call → edit pipeline", () => {
     const initialCallCount = calls.length;
 
     // Edit the image caption
-    await handle.edit("Edit · foo.js");
+    await handle.update({ kind: "text", text: "Edit · foo.js" });
 
     // Image edits use relayMessage, not sendMessage
     const editCall = calls[initialCallCount];
@@ -393,7 +393,7 @@ describe("sendBlocks – tool-call → edit pipeline", () => {
     assert.ok(imageMsg.caption.includes("Edit · foo.js"), "Caption should contain the new text");
   });
 
-  it("handle.edit prepends source prefix on every edit", async () => {
+  it("handle.update prepends source prefix on every edit", async () => {
     const { sock, calls } = createCaptureSock();
 
     const handle = await sendBlocks(sock, "chat-1", "tool-call", [
@@ -401,7 +401,7 @@ describe("sendBlocks – tool-call → edit pipeline", () => {
     ]);
 
     assert.ok(handle);
-    await handle.edit("done");
+    await handle.update({ kind: "text", text: "done" });
 
     const editMsg = /** @type {Record<string, unknown>} */ (calls[1].args[1]);
     const editText = /** @type {string} */ (editMsg.text);

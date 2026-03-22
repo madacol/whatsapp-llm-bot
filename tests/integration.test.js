@@ -416,12 +416,11 @@ describe("Scenario 12: Tool call display is always verbose", () => {
 // Scenario 11: Adapter — getMessageContent extraction
 // ═══════════════════════════════════════════════════════════════════
 describe("Scenario 11: getMessageContent extraction", () => {
-  /** @type {typeof import("../whatsapp-adapter.js").getMessageContent} */
+  /** @type {typeof import("../whatsapp/inbound/message-content.js").getMessageContent} */
   let getMessageContent;
 
   before(async () => {
-    const adapter = await import("../whatsapp-adapter.js");
-    getMessageContent = adapter.getMessageContent;
+    ({ getMessageContent } = await import("../whatsapp/inbound/message-content.js"));
   });
 
   it("extracts plain text conversation message", async () => {

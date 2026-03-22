@@ -16,10 +16,10 @@ import { mkdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { NO_OP_HOOKS } from "./native.js";
 import { buildToolPresentation } from "../tool-presentation-model.js";
-import { formatToolPresentationInspect, formatToolPresentationSummary } from "#presentation/whatsapp";
 import { createLogger } from "../logger.js";
 import { extractLastUserText } from "../message-formatting.js";
-import { createToolMessage, errorToString, registerInspectHandler } from "../utils.js";
+import { createToolMessage, errorToString } from "../utils.js";
+import { contentEvent, toolInspectState } from "../outbound-events.js";
 import { getRootDb } from "../db.js";
 import { handleHarnessSessionCommand } from "./session-commands.js";
 import { getSandboxEscapeRequest } from "./sandbox-approval.js";
@@ -450,7 +450,7 @@ async function handleClaudeHarnessCommand({ chatId, command, context }) {
     const result = effortMatch
       ? await handleEffortCommand(chatId, effortMatch[1].trim())
       : await handleModelCommand(chatId, arg);
-    await context.reply("tool-result", result);
+    await context.reply(contentEvent("tool-result", result));
     return true;
   }
 
@@ -499,7 +499,7 @@ async function handleClaudeHarnessCommand({ chatId, command, context }) {
   const updatedConfig = await getHarnessConfig(chatId);
   const finalModel = typeof updatedConfig.model === "string" ? updatedConfig.model : "default (Sonnet)";
   const finalEffort = typeof updatedConfig.reasoningEffort === "string" ? updatedConfig.reasoningEffort : "default (high)";
-  await context.reply("tool-result", `SDK model: \`${finalModel}\`\nSDK effort: \`${finalEffort}\``);
+  await context.reply(contentEvent("tool-result", `SDK model: \`${finalModel}\`\nSDK effort: \`${finalEffort}\``));
   return true;
 }
 
@@ -823,21 +823,8 @@ export function createClaudeAgentSdkHarness() {
                     workdir,
                     displayContext,
                   );
-                  const summary = formatToolPresentationSummary(presentation);
                   /** @type {MessageHandle | undefined} */
                   const handle = await hooks.onToolCall(toolCall, undefined, displayContext) ?? undefined;
-                  if (handle) {
-                    const initialInspectText = formatToolPresentationInspect(presentation, undefined) ?? undefined;
-                    if (initialInspectText) {
-                      registerInspectHandler(
-                        handle,
-                        summary,
-                        createToolMessage(toolUseId, ""),
-                        input.tool_name,
-                        initialInspectText,
-                      );
-                    }
-                  }
                   activeTools.set(toolUseId, {
                     handle: handle ?? undefined,
                     toolName: input.tool_name,
@@ -1269,13 +1256,9 @@ async function handleUserEvent(event, ctx) {
 
     // Register 👁 react-to-inspect on the tool-call message handle
     if (active?.handle) {
-      const summary = active.presentation
-        ? formatToolPresentationSummary(active.presentation)
-        : `*${active.toolName}*`;
-      const inspectText = active.presentation
-        ? formatToolPresentationInspect(active.presentation, resultText) ?? undefined
-        : undefined;
-      registerInspectHandler(active.handle, summary, toolMsg, active.toolName, inspectText);
+      if (active.presentation) {
+        active.handle.setInspect(toolInspectState(active.presentation, resultText));
+      }
     } else if (active) {
       log.warn(`No message handle for tool ${active.toolName} (${resolvedToolUseId}) — 👁 inspect unavailable`);
     }

@@ -1,6 +1,10 @@
-import { buildCommandPresentation, buildMultiReadActivity, buildReadToolPresentation, formatActivitySummary, shortenPath } from "../tool-presentation-model.js";
-import { langFromPath, formatToolPresentationInspect, formatToolPresentationSummary } from "#presentation/whatsapp";
-import { createToolMessage, registerInspectHandler } from "../utils.js";
+import { buildCommandPresentation, buildMultiReadActivity, buildReadToolPresentation } from "../tool-presentation-model.js";
+import {
+  contentEvent,
+  fileChangeEvent,
+  toolActivityEvent,
+  toolInspectState,
+} from "../outbound-events.js";
 
 /**
  * @typedef {{
@@ -64,7 +68,7 @@ export function createCodexDisplayHooks({ context, cwd, displayToolCall }) {
    * @param {{ command: string, status: "started" | "completed" | "failed", output?: string }} event
    * @returns {Promise<MessageHandle | void>}
    */
-  async function onCommand({ command, status, output }) {
+async function onCommand({ command, status, output }) {
     if (status === "started") {
       const toolCall = {
         id: `codex-command:${command}`,
@@ -84,20 +88,12 @@ export function createCodexDisplayHooks({ context, cwd, displayToolCall }) {
 
     const inspectEntry = consumeInspect(command);
     if (inspectEntry) {
-      const summary = formatToolPresentationSummary(inspectEntry.displayPresentation);
-      const inspectText = formatToolPresentationInspect(inspectEntry.inspectPresentation, output ?? "") ?? undefined;
-      registerInspectHandler(
-        inspectEntry.handle,
-        summary,
-        createToolMessage(`codex-command:${command}`, output ?? ""),
-        inspectEntry.inspectPresentation.toolName,
-        inspectText,
-      );
+      inspectEntry.handle.setInspect(toolInspectState(inspectEntry.inspectPresentation, output ?? ""));
     }
 
     if (status === "failed") {
       const detail = output ? `\n\n${output}` : "";
-      await context.send("error", `Command failed: \`${command}\`${detail}`);
+      await context.send(contentEvent("error", `Command failed: \`${command}\`${detail}`));
       return;
     }
   }
@@ -125,7 +121,7 @@ export function createCodexDisplayHooks({ context, cwd, displayToolCall }) {
       return;
     }
 
-    await context.send("tool-call", formatActivitySummary(buildMultiReadActivity(paths, cwd)));
+    await context.send(toolActivityEvent(buildMultiReadActivity(paths, cwd)));
   }
 
   /**
@@ -140,62 +136,14 @@ export function createCodexDisplayHooks({ context, cwd, displayToolCall }) {
    * @returns {Promise<void>}
    */
   async function onFileChange({ path, summary, diff, kind, oldText, newText }) {
-    const displayPath = shortenPath(path, cwd);
-    const cleanedSummary = cleanFileChangeSummary(summary, path, displayPath, kind);
-    if (diff) {
-      const title = kind === "add"
-        ? "*File added*"
-        : kind === "delete"
-          ? "*File deleted*"
-          : "*File changed*";
-
-      if (typeof oldText === "string" || typeof newText === "string") {
-        const captionLines = [`${title}  \`${displayPath}\``];
-        if (cleanedSummary) {
-          captionLines.push(cleanedSummary);
-        }
-        await context.send("tool-call", [{
-          type: "diff",
-          oldStr: oldText ?? "",
-          newStr: newText ?? "",
-          language: langFromPath(path) || "text",
-          caption: captionLines.join("\n"),
-        }]);
-        return;
-      }
-
-      const lines = [title, ""];
-      if (cleanedSummary) {
-        lines.push(cleanedSummary);
-      }
-      lines.push(`\`${displayPath}\``, "", "```diff", diff, "```");
-      await context.send("tool-call", [{ type: "markdown", text: lines.join("\n") }]);
-      return;
-    }
-
-    const detail = cleanedSummary ? `${cleanedSummary}\n\`${displayPath}\`` : `Changed file: \`${displayPath}\``;
-    await context.send("tool-call", detail);
+    await context.send(fileChangeEvent({
+      path,
+      ...(summary !== undefined && { summary }),
+      ...(diff !== undefined && { diff }),
+      ...(kind !== undefined && { changeKind: kind }),
+      ...(oldText !== undefined && { oldText }),
+      ...(newText !== undefined && { newText }),
+      cwd,
+    }));
   }
-}
-
-/**
- * @param {string | undefined} summary
- * @param {string} rawPath
- * @param {string} displayPath
- * @param {"add" | "delete" | "update" | undefined} kind
- * @returns {string | undefined}
- */
-function cleanFileChangeSummary(summary, rawPath, displayPath, kind) {
-  if (!summary) {
-    return undefined;
-  }
-
-  const shortenedSummary = summary.split(rawPath).join(displayPath);
-  const redundantForms = new Set([
-    rawPath,
-    displayPath,
-    ...(kind ? [`${rawPath} (${kind})`, `${displayPath} (${kind})`] : []),
-  ]);
-
-  return redundantForms.has(shortenedSummary) ? undefined : shortenedSummary;
 }

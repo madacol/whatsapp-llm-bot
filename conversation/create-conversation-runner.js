@@ -3,6 +3,7 @@ import { getAgent } from "../agents.js";
 import { getRootDb } from "../db.js";
 import { storeAndLinkHtml } from "../html-store.js";
 import { resolveHarness, resolveHarnessName, createHarnessRunCoordinator } from "../harnesses/index.js";
+import { contentEvent } from "../outbound-events.js";
 import {
   shouldRespond,
   formatUserMessage,
@@ -103,9 +104,9 @@ export function createConversationRunner({ store, llmClient, getActionsFn, execu
     if (commandText === "cancel") {
       const { harness } = await resolveConversationHarness(chatInfo);
       if (harness.cancel?.(chatId)) {
-        await context.reply("tool-result", "Cancelled.");
+        await context.reply(contentEvent("tool-result", "Cancelled."));
       } else {
-        await context.reply("tool-result", "Nothing to cancel.");
+        await context.reply(contentEvent("tool-result", "Nothing to cancel."));
       }
       return;
     }
@@ -116,7 +117,7 @@ export function createConversationRunner({ store, llmClient, getActionsFn, execu
       .find((candidate) => commandText === candidate.command || commandText.startsWith(candidate.command + " "));
 
     if (!action) {
-      await context.reply("error", `Unknown command: ${commandText.split(" ")[0]}`);
+      await context.reply(contentEvent("error", `Unknown command: ${commandText.split(" ")[0]}`));
       return;
     }
 
@@ -135,17 +136,17 @@ export function createConversationRunner({ store, llmClient, getActionsFn, execu
 
       if (isHtmlContent(result)) {
         const linkText = await storeAndLinkHtml(getRootDb(), result);
-        await context.reply("tool-result", linkText);
+        await context.reply(contentEvent("tool-result", linkText));
       } else if (typeof result === "string") {
-        await context.reply("tool-result", result);
+        await context.reply(contentEvent("tool-result", result));
       } else if (Array.isArray(result)) {
-        await context.reply("tool-result", /** @type {ToolContentBlock[]} */ (result));
+        await context.reply(contentEvent("tool-result", /** @type {ToolContentBlock[]} */ (result)));
       } else {
-        await context.reply("tool-result", JSON.stringify(result, null, 2));
+        await context.reply(contentEvent("tool-result", JSON.stringify(result, null, 2)));
       }
     } catch (error) {
       log.error("Error executing command:", error);
-      await context.reply("error", `Error: ${errorToString(error)}`);
+      await context.reply(contentEvent("error", `Error: ${errorToString(error)}`));
     }
   }
 
@@ -239,7 +240,7 @@ export function createConversationRunner({ store, llmClient, getActionsFn, execu
       log.error("handleLlmMessage failed:", error);
       const errorMessage = errorToString(error);
       try {
-        await context.reply("error", errorMessage);
+        await context.reply(contentEvent("error", errorMessage));
       } catch {
         // best effort
       }
@@ -297,7 +298,7 @@ export function createConversationRunner({ store, llmClient, getActionsFn, execu
     const isSlashCommand = firstBlock?.text?.startsWith("/");
     if (isSlashCommand && firstBlock) {
       if (!chatInfo?.is_enabled) {
-        await context.reply("error", "Bot is not enabled in this chat. Use !config enabled true");
+        await context.reply(contentEvent("error", "Bot is not enabled in this chat. Use !config enabled true"));
         return;
       }
 
