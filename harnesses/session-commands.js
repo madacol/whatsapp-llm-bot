@@ -1,4 +1,5 @@
 import { formatRelativeTime } from "../utils.js";
+import { contentEvent } from "../outbound-events.js";
 
 /**
  * @typedef {{
@@ -30,14 +31,14 @@ export async function handleHarnessSessionCommand({ command, chatId, context, ca
     case "clear": {
       await cancelActiveQuery?.();
       await sessionControl.archive(chatId);
-      await context.reply("tool-result", "Session cleared\n\nNext message starts fresh.\nUse */resume* to restore this session later.");
+      await context.reply(contentEvent("tool-result", "Session cleared\n\nNext message starts fresh.\nUse */resume* to restore this session later."));
       return true;
     }
     case "resume": {
       await sessionControl.archive(chatId);
       const history = await sessionControl.getHistory(chatId);
       if (history.length === 0) {
-        await context.reply("tool-result", "No previous sessions to resume.");
+        await context.reply(contentEvent("tool-result", "No previous sessions to resume."));
         return true;
       }
 
@@ -62,12 +63,12 @@ export async function handleHarnessSessionCommand({ command, chatId, context, ca
       const selectedIndex = parseInt(choice, 10);
       const restored = await sessionControl.restore(chatId, selectedIndex);
       if (!restored) {
-        await context.reply("tool-result", "Failed to restore session.");
+        await context.reply(contentEvent("tool-result", "Failed to restore session."));
         return true;
       }
 
       const agoStr = formatRelativeTime(now().getTime() - new Date(restored.cleared_at).getTime());
-      await context.reply("tool-result", `Session restored (cleared ${agoStr}). Your next message will continue that conversation.`);
+      await context.reply(contentEvent("tool-result", `Session restored (cleared ${agoStr}). Your next message will continue that conversation.`));
       return true;
     }
     default:

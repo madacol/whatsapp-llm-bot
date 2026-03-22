@@ -7,6 +7,7 @@ import {
   normalizeCodexPermissionsMode,
   updateCodexConfig,
 } from "./codex-config.js";
+import { contentEvent } from "../outbound-events.js";
 import { handleHarnessSessionCommand } from "./session-commands.js";
 
 /**
@@ -48,7 +49,7 @@ async function handleCodexHarnessCommand(input, deps) {
   if (modelMatch) {
     const arg = modelMatch[1]?.trim() ?? null;
     if (arg) {
-      await input.context.reply("tool-result", await handleModelCommand(input.chatId, arg.toLowerCase(), deps.getAvailableModels));
+      await input.context.reply(contentEvent("tool-result", await handleModelCommand(input.chatId, arg.toLowerCase(), deps.getAvailableModels)));
       return true;
     }
 
@@ -70,7 +71,7 @@ async function handleCodexHarnessCommand(input, deps) {
     }
     const updatedConfig = await getCodexConfig(input.chatId);
     const finalModel = typeof updatedConfig.model === "string" ? updatedConfig.model : "default";
-    await input.context.reply("tool-result", `Codex model: \`${finalModel}\``);
+    await input.context.reply(contentEvent("tool-result", `Codex model: \`${finalModel}\``));
     return true;
   }
 
@@ -78,12 +79,12 @@ async function handleCodexHarnessCommand(input, deps) {
   if (sandboxMatch) {
     const arg = sandboxMatch[1]?.trim() ?? null;
     if (arg) {
-      await input.context.reply("tool-result", await handleSandboxCommand(input.chatId, arg.toLowerCase()));
+      await input.context.reply(contentEvent("tool-result", await handleSandboxCommand(input.chatId, arg.toLowerCase())));
       return true;
     }
     const config = await getCodexConfig(input.chatId);
     const sandboxMode = getEffectiveCodexSandboxMode(config);
-    await input.context.reply("tool-result", `Codex sandbox: \`${sandboxMode}\``);
+    await input.context.reply(contentEvent("tool-result", `Codex sandbox: \`${sandboxMode}\``));
     return true;
   }
 
@@ -91,7 +92,7 @@ async function handleCodexHarnessCommand(input, deps) {
   if (permissionsMatch) {
     const arg = permissionsMatch[1]?.trim() ?? null;
     if (arg) {
-      await input.context.reply("tool-result", await handlePermissionsCommand(input.chatId, arg.toLowerCase()));
+      await input.context.reply(contentEvent("tool-result", await handlePermissionsCommand(input.chatId, arg.toLowerCase())));
       return true;
     }
     const config = await getCodexConfig(input.chatId);
@@ -109,7 +110,7 @@ async function handleCodexHarnessCommand(input, deps) {
       await handlePermissionsCommand(input.chatId, permissionChoice);
     }
     const updatedConfig = await getCodexConfig(input.chatId);
-    await input.context.reply("tool-result", `Codex permissions: \`${getEffectiveCodexSandboxMode(updatedConfig)}\``);
+    await input.context.reply(contentEvent("tool-result", `Codex permissions: \`${getEffectiveCodexSandboxMode(updatedConfig)}\``));
     return true;
   }
 
@@ -117,12 +118,12 @@ async function handleCodexHarnessCommand(input, deps) {
   if (approvalMatch) {
     const arg = approvalMatch[1]?.trim() ?? null;
     if (arg) {
-      await input.context.reply("tool-result", await handleApprovalCommand(input.chatId, arg.toLowerCase()));
+      await input.context.reply(contentEvent("tool-result", await handleApprovalCommand(input.chatId, arg.toLowerCase())));
       return true;
     }
     const config = await getCodexConfig(input.chatId);
     const approvalPolicy = typeof config.approvalPolicy === "string" ? config.approvalPolicy : "default";
-    await input.context.reply("tool-result", `Codex approval policy: \`${approvalPolicy}\``);
+    await input.context.reply(contentEvent("tool-result", `Codex approval policy: \`${approvalPolicy}\``));
     return true;
   }
 

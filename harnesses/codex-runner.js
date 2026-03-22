@@ -1,9 +1,7 @@
 import { Codex } from "@openai/codex-sdk";
 import { createLogger } from "../logger.js";
 import { buildToolPresentation, getToolFlowDescriptor } from "../tool-presentation-model.js";
-import { formatToolFlowInspectText, formatToolFlowSummary } from "../tool-flow-presentation.js";
-import { formatToolPresentationInspect, formatToolPresentationSummary } from "#presentation/whatsapp";
-import { createToolMessage, registerDynamicInspectHandler, registerInspectHandler } from "../utils.js";
+import { toolCallUpdate, toolFlowInspectState, toolFlowUpdate, toolInspectState } from "../outbound-events.js";
 import { normalizeCodexEvent } from "./codex-events.js";
 import { analyzeCodexCommand } from "./codex-command-semantics.js";
 import { createCodexRunState } from "./codex-run-state.js";
@@ -299,7 +297,6 @@ async function runCodexAttempt(input) {
           input.runConfig?.workdir ?? null,
           undefined,
         );
-        const currentSummary = formatToolPresentationSummary(currentPresentation);
         const flow = getToolFlowDescriptor(currentPresentation);
         if (flow) {
           let activeFlow = activeFlows.get(flow.groupKey);
@@ -315,15 +312,6 @@ async function runCodexAttempt(input) {
               state: { title: flow.groupTitle, steps: [] },
             };
             activeFlows.set(flow.groupKey, activeFlow);
-            if (handle) {
-              registerDynamicInspectHandler(handle, () => ({
-                summary: formatToolFlowSummary(activeFlow?.state ?? { title: flow.groupTitle, steps: [] }),
-                text: formatToolFlowInspectText(
-                  activeFlow?.state ?? { title: flow.groupTitle, steps: [] },
-                  formatToolPresentationInspect,
-                ),
-              }));
-            }
           }
 
           let step = activeFlow.state.steps.find((candidate) => candidate.id === toolEvent.id);
@@ -342,7 +330,8 @@ async function runCodexAttempt(input) {
 
           if (activeFlow.handle && toolEvent.status === "started") {
             try {
-              await activeFlow.handle.edit(formatToolFlowSummary(activeFlow.state));
+              await activeFlow.handle.update(toolFlowUpdate(activeFlow.state));
+              activeFlow.handle.setInspect(toolFlowInspectState(activeFlow.state));
             } catch {
               // best-effort — grouping still improves inspect without an in-place update
             }
@@ -350,6 +339,13 @@ async function runCodexAttempt(input) {
 
           if (toolEvent.status !== "started") {
             step.output = toolEvent.output;
+            if (activeFlow.handle) {
+              try {
+                activeFlow.handle.setInspect(toolFlowInspectState(activeFlow.state));
+              } catch {
+                // best-effort — inspect should reflect the final flow output when available
+              }
+            }
             activeTools.delete(toolEvent.id);
           }
 
@@ -364,15 +360,10 @@ async function runCodexAttempt(input) {
           };
           const handle = await input.hooks.onToolCall(toolCall);
           if (handle) {
-            const initialInspectText = formatToolPresentationInspect(currentPresentation, undefined) ?? undefined;
-            if (initialInspectText) {
-              registerInspectHandler(
-                handle,
-                currentSummary,
-                createToolMessage(toolEvent.id, ""),
-                toolEvent.name,
-                initialInspectText,
-              );
+            try {
+              handle.setInspect(toolInspectState(currentPresentation));
+            } catch {
+              // best-effort — callers may still provide a simpler message handle
             }
             activeTools.set(toolEvent.id, {
               handle,
@@ -395,26 +386,16 @@ async function runCodexAttempt(input) {
               };
             }
           }
-          if (activeTool?.handle && formatToolPresentationSummary(activeTool.presentation) !== currentSummary) {
+          if (activeTool?.handle && activeTool.presentation.summary !== currentPresentation.summary) {
             try {
-              await activeTool.handle.edit(currentSummary);
+              await activeTool.handle.update(toolCallUpdate(currentPresentation));
             } catch {
               // best-effort — inspect still works without an in-place update
             }
             activeTool.presentation = currentPresentation;
           }
           if (activeTool?.handle && toolEvent.output) {
-            const inspectText = formatToolPresentationInspect(
-              activeTool.presentation,
-              toolEvent.output,
-            ) ?? undefined;
-            registerInspectHandler(
-              activeTool.handle,
-              currentSummary,
-              createToolMessage(toolEvent.id, toolEvent.output),
-              activeTool.presentation.toolName,
-              inspectText,
-            );
+            activeTool.handle.setInspect(toolInspectState(activeTool.presentation, toolEvent.output));
           }
           if (activeTool) {
             activeTools.delete(toolEvent.id);

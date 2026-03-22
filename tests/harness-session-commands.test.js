@@ -19,6 +19,15 @@ function createContext() {
   });
 }
 
+/**
+ * @param {OutboundEvent} event
+ * @returns {string}
+ */
+function getReplyText(event) {
+  assert.equal(event.kind, "content");
+  return typeof event.content === "string" ? event.content : JSON.stringify(event.content);
+}
+
 describe("handleHarnessSessionCommand", () => {
   it("clears the active session through session control primitives", async () => {
     /** @type {string[]} */
@@ -26,8 +35,8 @@ describe("handleHarnessSessionCommand", () => {
     /** @type {string[]} */
     const replies = [];
     const context = createContext();
-    context.reply = async (_source, content) => {
-      replies.push(typeof content === "string" ? content : JSON.stringify(content));
+    context.reply = async (event) => {
+      replies.push(getReplyText(event));
       return undefined;
     };
 
@@ -59,8 +68,8 @@ describe("handleHarnessSessionCommand", () => {
     /** @type {string[]} */
     const replies = [];
     const context = createContext();
-    context.reply = async (_source, content) => {
-      replies.push(typeof content === "string" ? content : JSON.stringify(content));
+    context.reply = async (event) => {
+      replies.push(getReplyText(event));
       return undefined;
     };
     context.select = async () => "0";

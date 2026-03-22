@@ -3,7 +3,7 @@ import { homedir, tmpdir } from "node:os";
 import { resolve } from "node:path";
 import config from "./config.js";
 import { buildCommandPresentation } from "./tool-presentation-model.js";
-import { formatCommandInspectText as formatWhatsappCommandInspectText } from "#presentation/whatsapp";
+import { formatCommandInspectText as formatWhatsappCommandInspectText } from "./presentation/whatsapp.js";
 
 /** Workspaces live outside the bot project so the SDK's upward CLAUDE.md
  *  traversal never reaches the bot's own CLAUDE.md / settings. */
@@ -201,54 +201,6 @@ export function formatCommandInspectText(command, output, toolName) {
   const presentation = buildCommandPresentation(command, undefined);
   const inspectMode = toolName === "Bash" ? presentation.inspectMode : "plain";
   return formatWhatsappCommandInspectText(command, output, inspectMode);
-}
-
-/**
- * Register a 👁 react-to-inspect callback on a message handle.
- * When the user reacts with 👁, the tool-call message is edited
- * to show the full text result (truncated at 3000 chars).
- * @param {MessageHandle} handle
- * @param {string} summary - display header (e.g. "*Bash*  _description_" or "*Edit*  `file.js`")
- * @param {ToolMessage} toolMessage
- * @param {string} [_toolName] - reserved for call-site compatibility
- * @param {string} [inspectText] - preformatted inspect body; bypasses default formatting
- */
-export function registerInspectHandler(handle, summary, toolMessage, _toolName, inspectText) {
-  if (!handle.keyId) return;
-  handle.onReaction((emoji) => {
-    if (!emoji.startsWith("👁")) return;
-    const rawText = toolMessage.content
-      .filter(b => b.type === "text").map(b => /** @type {TextContentBlock} */ (b).text).join("\n");
-    const text = inspectText ?? rawText;
-    handle.edit(formatInspectEditText(summary, text));
-  });
-}
-
-/**
- * Format inspect text for editing into a WhatsApp message with truncation.
- * @param {string} summary
- * @param {string} text
- * @returns {string}
- */
-export function formatInspectEditText(summary, text) {
-  const MAX = 3000;
-  const display = text.length <= MAX ? text
-    : text.slice(0, MAX) + `\n\n_… truncated (${text.length.toLocaleString()} chars total)_`;
-  return `${summary}\n\n${display}`;
-}
-
-/**
- * Register a 👁 callback whose inspect payload can change over time.
- * @param {MessageHandle} handle
- * @param {() => { summary: string, text: string }} getState
- */
-export function registerDynamicInspectHandler(handle, getState) {
-  if (!handle.keyId) return;
-  handle.onReaction((emoji) => {
-    if (!emoji.startsWith("👁")) return;
-    const { summary, text } = getState();
-    handle.edit(formatInspectEditText(summary, text));
-  });
 }
 
 /**

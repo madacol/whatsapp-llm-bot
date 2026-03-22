@@ -4,6 +4,37 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { buildCodexThreadOptions, buildCodexTurnInput, startCodexRun } from "../harnesses/codex-runner.js";
+import { formatToolFlowSummary } from "../tool-flow-presentation.js";
+
+/**
+ * @param {string} keyId
+ * @returns {{
+ *   handle: MessageHandle,
+ *   updates: MessageHandleUpdate[],
+ *   inspects: Array<MessageInspectState | null>,
+ * }}
+ */
+function createRecordedHandle(keyId) {
+  /** @type {MessageHandleUpdate[]} */
+  const updates = [];
+  /** @type {Array<MessageInspectState | null>} */
+  const inspects = [];
+
+  return {
+    updates,
+    inspects,
+    handle: {
+      keyId,
+      isImage: false,
+      update: async (update) => {
+        updates.push(structuredClone(update));
+      },
+      setInspect: (inspect) => {
+        inspects.push(inspect == null ? null : structuredClone(inspect));
+      },
+    },
+  };
+}
 
 describe("buildCodexThreadOptions", () => {
   it("maps shared run config to Codex SDK thread options", () => {
@@ -236,10 +267,7 @@ describe("startCodexRun", () => {
   it("surfaces mcp tool calls and wires inspect for text results", async () => {
     /** @type {LlmChatResponse["toolCalls"]} */
     const toolCalls = [];
-    /** @type {string[]} */
-    const edits = [];
-    /** @type {ReactionCallback | null} */
-    let reactionCallback = null;
+    const recorded = createRecordedHandle("tool-msg-1");
 
     const started = await startCodexRun({
       chatId: "codex-chat",
@@ -251,17 +279,7 @@ describe("startCodexRun", () => {
       hooks: {
         onToolCall: async (toolCall) => {
           toolCalls.push(toolCall);
-          return /** @type {MessageHandle} */ ({
-            keyId: "tool-msg-1",
-            isImage: false,
-            edit: async (text) => {
-              edits.push(text);
-            },
-            onReaction: (callback) => {
-              reactionCallback = callback;
-              return () => {};
-            },
-          });
+          return recorded.handle;
         },
       },
     }, {
@@ -312,20 +330,18 @@ describe("startCodexRun", () => {
       name: "spawn_agent",
       arguments: JSON.stringify({ message: "hello" }),
     }]);
-
-    reactionCallback?.("👁", "user-1");
-    assert.deepEqual(edits, [[
-      "*Start Agent*  _hello_",
-      "",
-      "agent-pass-2",
-    ].join("\n")]);
+    assert.equal(recorded.updates.length, 0);
+    assert.equal(recorded.inspects.length, 2);
+    assert.equal(recorded.inspects[0]?.kind, "tool");
+    assert.equal(recorded.inspects[0]?.presentation.summary, "*Start Agent*  _hello_");
+    assert.equal(recorded.inspects[0]?.output, undefined);
+    assert.equal(recorded.inspects[1]?.kind, "tool");
+    assert.equal(recorded.inspects[1]?.presentation.summary, "*Start Agent*  _hello_");
+    assert.equal(recorded.inspects[1]?.output, "agent-pass-2");
   });
 
   it("wires inspect for structured MCP tool results", async () => {
-    /** @type {string[]} */
-    const edits = [];
-    /** @type {ReactionCallback | null} */
-    let reactionCallback = null;
+    const recorded = createRecordedHandle("tool-msg-2");
 
     const started = await startCodexRun({
       chatId: "codex-chat",
@@ -336,17 +352,7 @@ describe("startCodexRun", () => {
       },
       hooks: {
         onToolCall: async () => {
-          return /** @type {MessageHandle} */ ({
-            keyId: "tool-msg-2",
-            isImage: false,
-            edit: async (text) => {
-              edits.push(text);
-            },
-            onReaction: (callback) => {
-              reactionCallback = callback;
-              return () => {};
-            },
-          });
+          return recorded.handle;
         },
       },
     }, {
@@ -397,22 +403,18 @@ describe("startCodexRun", () => {
     });
 
     await started.done;
-
-    reactionCallback?.("👁", "user-1");
-    assert.deepEqual(edits, [[
-      "*Plan*  _1 step_",
-      "",
-      "[x] Do work",
-      "",
-      "Plan updated",
-    ].join("\n")]);
+    assert.equal(recorded.updates.length, 0);
+    assert.equal(recorded.inspects.length, 2);
+    assert.equal(recorded.inspects[0]?.kind, "tool");
+    assert.equal(recorded.inspects[0]?.presentation.summary, "*Plan*  _1 step_");
+    assert.equal(recorded.inspects[0]?.output, undefined);
+    assert.equal(recorded.inspects[1]?.kind, "tool");
+    assert.equal(recorded.inspects[1]?.presentation.summary, "*Plan*  _1 step_");
+    assert.equal(recorded.inspects[1]?.output, "Plan updated");
   });
 
   it("wires inspect for structured web tool results without text fields", async () => {
-    /** @type {string[]} */
-    const edits = [];
-    /** @type {ReactionCallback | null} */
-    let reactionCallback = null;
+    const recorded = createRecordedHandle("tool-msg-web-1");
 
     const started = await startCodexRun({
       chatId: "codex-chat",
@@ -423,17 +425,7 @@ describe("startCodexRun", () => {
       },
       hooks: {
         onToolCall: async () => {
-          return /** @type {MessageHandle} */ ({
-            keyId: "tool-msg-web-1",
-            isImage: false,
-            edit: async (text) => {
-              edits.push(text);
-            },
-            onReaction: (callback) => {
-              reactionCallback = callback;
-              return () => {};
-            },
-          });
+          return recorded.handle;
         },
       },
     }, {
@@ -490,27 +482,19 @@ describe("startCodexRun", () => {
     });
 
     await started.done;
-
-    reactionCallback?.("👁", "user-1");
-    assert.deepEqual(edits, [
-      "*Web*  search \"UTC+00:00\"",
-      [
-        "*Web*  search \"UTC+00:00\"",
-        "",
-        "*Search Web*  \"UTC+00:00\"",
-        "",
-        "*UTC+00:00 - Wikipedia*",
-        "`en.wikipedia.org/wiki/UTC%2B00%3A00`",
-        "UTC+00:00 is an identifier for a time offset from UTC of +00:00.",
-      ].join("\n"),
-    ]);
+    assert.deepEqual(
+      recorded.updates.map((update) => update.kind === "tool_flow" ? formatToolFlowSummary(update.state) : ""),
+      ["*Web*  search \"UTC+00:00\""],
+    );
+    assert.equal(recorded.inspects.length, 2);
+    assert.equal(recorded.inspects.at(-1)?.kind, "tool_flow");
+    assert.equal(recorded.inspects.at(-1)?.state.steps.length, 1);
+    assert.ok(recorded.inspects.at(-1)?.state.steps[0]?.output?.includes("\"UTC+00:00 - Wikipedia\""));
+    assert.ok(recorded.inspects.at(-1)?.state.steps[0]?.output?.includes("\"UTC+00:00 is an identifier for a time offset from UTC of +00:00.\""));
   });
 
   it("formats structured finance tool results readably in inspect", async () => {
-    /** @type {string[]} */
-    const edits = [];
-    /** @type {ReactionCallback | null} */
-    let reactionCallback = null;
+    const recorded = createRecordedHandle("tool-msg-finance-1");
 
     const started = await startCodexRun({
       chatId: "codex-chat",
@@ -521,17 +505,7 @@ describe("startCodexRun", () => {
       },
       hooks: {
         onToolCall: async () => {
-          return /** @type {MessageHandle} */ ({
-            keyId: "tool-msg-finance-1",
-            isImage: false,
-            edit: async (text) => {
-              edits.push(text);
-            },
-            onReaction: (callback) => {
-              reactionCallback = callback;
-              return () => {};
-            },
-          });
+          return recorded.handle;
         },
       },
     }, {
@@ -589,16 +563,15 @@ describe("startCodexRun", () => {
     });
 
     await started.done;
-
-    reactionCallback?.("👁", "user-1");
-    assert.deepEqual(edits, [[
-      "*Quote*  `AMD`",
-      "",
-      "*AMD*",
-      "Price: 227.45 USD",
-      "Change: +3.14 (+1.4%)",
-      "Market: USA",
-    ].join("\n")]);
+    assert.equal(recorded.updates.length, 0);
+    assert.equal(recorded.inspects.length, 2);
+    assert.equal(recorded.inspects[0]?.kind, "tool");
+    assert.equal(recorded.inspects[0]?.presentation.summary, "*Quote*  `AMD`");
+    assert.equal(recorded.inspects[0]?.output, undefined);
+    assert.equal(recorded.inspects[1]?.kind, "tool");
+    assert.equal(recorded.inspects[1]?.presentation.summary, "*Quote*  `AMD`");
+    assert.ok(recorded.inspects[1]?.output?.includes("\"ticker\": \"AMD\""));
+    assert.ok(recorded.inspects[1]?.output?.includes("\"price\": 227.45"));
   });
 
   it("suppresses web-tool narration and groups related web actions into one inspectable handle", async () => {
@@ -606,10 +579,7 @@ describe("startCodexRun", () => {
     const toolCalls = [];
     /** @type {string[]} */
     const assistantMessages = [];
-    /** @type {string[]} */
-    const edits = [];
-    /** @type {ReactionCallback | null} */
-    let reactionCallback = null;
+    const recorded = createRecordedHandle("tool-msg-web-group-1");
 
     const started = await startCodexRun({
       chatId: "codex-chat",
@@ -621,17 +591,7 @@ describe("startCodexRun", () => {
       hooks: {
         onToolCall: async (toolCall) => {
           toolCalls.push(toolCall);
-          return /** @type {MessageHandle} */ ({
-            keyId: "tool-msg-web-group-1",
-            isImage: false,
-            edit: async (text) => {
-              edits.push(text);
-            },
-            onReaction: (callback) => {
-              reactionCallback = callback;
-              return () => {};
-            },
-          });
+          return recorded.handle;
         },
         onLlmResponse: async (text) => {
           assistantMessages.push(text);
@@ -775,41 +735,25 @@ describe("startCodexRun", () => {
     assert.deepEqual(assistantMessages, []);
     assert.equal(toolCalls.length, 1);
     assert.equal(toolCalls[0]?.name, "search_query");
-
-    reactionCallback?.("👁", "user-1");
-    assert.deepEqual(edits, [
-      "*Web*  search \"UTC+00:00\"",
-      "*Web*  search \"UTC+00:00\" -> open `en.wikipedia.org/wiki/UTC%2B00%3A00`",
-      "*Web*  search \"UTC+00:00\" -> open `en.wikipedia.org/wiki/UTC%2B00%3A00` -> find \"UTC+00:00 is an identifier for a time offset from UTC of +00:00.\"",
+    assert.deepEqual(
+      recorded.updates.map((update) => update.kind === "tool_flow" ? formatToolFlowSummary(update.state) : ""),
       [
+        "*Web*  search \"UTC+00:00\"",
+        "*Web*  search \"UTC+00:00\" -> open `en.wikipedia.org/wiki/UTC%2B00%3A00`",
         "*Web*  search \"UTC+00:00\" -> open `en.wikipedia.org/wiki/UTC%2B00%3A00` -> find \"UTC+00:00 is an identifier for a time offset from UTC of +00:00.\"",
-        "",
-        "*Search Web*  \"UTC+00:00\"",
-        "",
-        "*UTC+00:00 - Wikipedia*",
-        "`en.wikipedia.org/wiki/UTC%2B00%3A00`",
-        "UTC+00:00 is an identifier for a time offset from UTC of +00:00.",
-        "",
-        "*Open Link*  `en.wikipedia.org/wiki/UTC%2B00%3A00`",
-        "",
-        "*UTC+00:00 - Wikipedia*",
-        "`en.wikipedia.org/wiki/UTC%2B00%3A00`",
-        "UTC+00:00 is an identifier for a time offset from UTC of +00:00.",
-        "",
-        "*Find On Page*  \"UTC+00:00 is an identifier for a time offset from UTC of +00:00.\" in `en.wikipedia.org/wiki/UTC%2B00%3A00`",
-        "",
-        "UTC+00:00 is an identifier for a time offset from UTC of +00:00.",
-      ].join("\n"),
-    ]);
+      ],
+    );
+    assert.equal(recorded.inspects.at(-1)?.kind, "tool_flow");
+    assert.equal(recorded.inspects.at(-1)?.state.steps.length, 3);
+    assert.ok(recorded.inspects.at(-1)?.state.steps[0]?.output?.includes("\"UTC+00:00 - Wikipedia\""));
+    assert.ok(recorded.inspects.at(-1)?.state.steps[1]?.output?.includes("\"excerpt\": \"UTC+00:00 is an identifier for a time offset from UTC of +00:00.\""));
+    assert.ok(recorded.inspects.at(-1)?.state.steps[2]?.output?.includes("\"matches\""));
   });
 
   it("surfaces todo_list items as update_plan tool calls", async () => {
     /** @type {LlmChatResponse["toolCalls"]} */
     const toolCalls = [];
-    /** @type {string[]} */
-    const edits = [];
-    /** @type {ReactionCallback | null} */
-    let reactionCallback = null;
+    const recorded = createRecordedHandle("tool-msg-3");
 
     const started = await startCodexRun({
       chatId: "codex-chat",
@@ -821,17 +765,7 @@ describe("startCodexRun", () => {
       hooks: {
         onToolCall: async (toolCall) => {
           toolCalls.push(toolCall);
-          return /** @type {MessageHandle} */ ({
-            keyId: "tool-msg-3",
-            isImage: false,
-            edit: async (text) => {
-              edits.push(text);
-            },
-            onReaction: (callback) => {
-              reactionCallback = callback;
-              return () => {};
-            },
-          });
+          return recorded.handle;
         },
       },
     }, {
@@ -880,20 +814,17 @@ describe("startCodexRun", () => {
         ],
       }),
     }]);
-
-    reactionCallback?.("👁", "user-1");
-    assert.deepEqual(edits, [[
-      "*Plan*  _1 step_",
-      "",
-      "[x] Initialize requested plan state",
-    ].join("\n")]);
+    assert.equal(recorded.inspects.length, 2);
+    assert.equal(recorded.inspects.at(-1)?.kind, "tool");
+    assert.equal(recorded.inspects.at(-1)?.presentation.kind, "plan");
+    assert.deepEqual(recorded.inspects.at(-1)?.presentation.entries, [
+      { text: "Initialize requested plan state", status: "completed" },
+    ]);
+    assert.equal(recorded.inspects.at(-1)?.output, "Initialize requested plan state");
   });
 
   it("keeps the first update_plan message inspectable before completion", async () => {
-    /** @type {string[]} */
-    const edits = [];
-    /** @type {ReactionCallback | null} */
-    let reactionCallback = null;
+    const recorded = createRecordedHandle("tool-msg-plan-start");
 
     const started = await startCodexRun({
       chatId: "codex-chat",
@@ -904,17 +835,7 @@ describe("startCodexRun", () => {
       },
       hooks: {
         onToolCall: async () => {
-          return /** @type {MessageHandle} */ ({
-            keyId: "tool-msg-plan-start",
-            isImage: false,
-            edit: async (text) => {
-              edits.push(text);
-            },
-            onReaction: (callback) => {
-              reactionCallback = callback;
-              return () => {};
-            },
-          });
+          return recorded.handle;
         },
       },
     }, {
@@ -944,23 +865,20 @@ describe("startCodexRun", () => {
     });
 
     await started.done;
-
-    reactionCallback?.("👁", "user-1");
-    assert.deepEqual(edits, [[
-      "*Plan*  _2 steps_",
-      "",
-      "[ ] Inspectable immediately",
-      "[ ] Not finished yet",
-    ].join("\n")]);
+    assert.equal(recorded.inspects.length, 1);
+    assert.equal(recorded.inspects[0]?.kind, "tool");
+    assert.equal(recorded.inspects[0]?.presentation.kind, "plan");
+    assert.deepEqual(recorded.inspects[0]?.presentation.entries, [
+      { text: "Inspectable immediately", status: "pending" },
+      { text: "Not finished yet", status: "pending" },
+    ]);
   });
 
   it("creates a synthetic write_stdin tool call from announced Codex activity", async () => {
     /** @type {LlmChatResponse["toolCalls"]} */
     const toolCalls = [];
-    /** @type {string[]} */
-    const edits = [];
-    /** @type {ReactionCallback[]} */
-    const reactions = [];
+    /** @type {ReturnType<typeof createRecordedHandle>[]} */
+    const handles = [];
 
     const started = await startCodexRun({
       chatId: "codex-chat",
@@ -972,17 +890,9 @@ describe("startCodexRun", () => {
       hooks: {
         onToolCall: async (toolCall) => {
           toolCalls.push(toolCall);
-          return /** @type {MessageHandle} */ ({
-            keyId: `tool-msg-${toolCalls.length}`,
-            isImage: false,
-            edit: async (text) => {
-              edits.push(text);
-            },
-            onReaction: (callback) => {
-              reactions.push(callback);
-              return () => {};
-            },
-          });
+          const recorded = createRecordedHandle(`tool-msg-${toolCalls.length}`);
+          handles.push(recorded);
+          return recorded.handle;
         },
       },
     }, {
@@ -1032,12 +942,11 @@ describe("startCodexRun", () => {
     await started.done;
 
     assert.deepEqual(toolCalls.map((toolCall) => toolCall.name), ["write_stdin"]);
-    reactions[0]?.("👁", "user-1");
-    assert.deepEqual(edits, [[
-      "*Terminal Input*",
-      "",
-      "hello\r\nhello\r\n",
-    ].join("\n")]);
+    assert.equal(handles.length, 1);
+    assert.equal(handles[0].inspects.length, 1);
+    assert.equal(handles[0].inspects[0]?.kind, "tool");
+    assert.equal(handles[0].inspects[0]?.presentation.summary, "*Terminal Input*");
+    assert.equal(handles[0].inspects[0]?.output, "hello\r\nhello\r\n");
   });
 
   it("asks for approval and retries with an additional writable directory", async () => {
