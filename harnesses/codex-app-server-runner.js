@@ -1,11 +1,8 @@
-import { buildToolPresentation, getToolFlowDescriptor } from "../tool-presentation-model.js";
-import { toolCallUpdate, toolFlowInspectState, toolFlowUpdate, toolInspectState } from "../outbound-events.js";
-import { normalizeCodexAppServerEvent } from "./codex-events.js";
-import { createCodexRunState } from "./codex-run-state.js";
+import { normalizeCodexAppServerEvent } from "./codex-app-server-events.js";
 import { ReportedHarnessRunError, reportHarnessRunError } from "./harness-run-errors.js";
-import { createCodexSyntheticToolAdapter } from "./codex-synthetic-tools.js";
 import { buildCodexTurnInput } from "./codex-runner.js";
 import { openCodexAppServerConnection } from "./codex-app-server-client.js";
+import { createCodexEventDispatcher } from "./codex-event-dispatcher.js";
 
 /** @type {Pick<Required<AgentIOHooks>, "onAskUser" | "onToolCall" | "onCommand" | "onFileRead" | "onPlan" | "onFileChange" | "onLlmResponse" | "onToolError" | "onUsage">} */
 const DEFAULT_CODEX_RUN_HOOKS = {
@@ -94,12 +91,10 @@ export async function startCodexAppServerRun(input) {
   const prompt = buildCodexTurnInput(input.prompt, input.externalInstructions);
   const sandboxPolicy = buildSandboxPolicy(input.runConfig);
   const approvalPolicy = mapApprovalPolicy(input.runConfig?.approvalPolicy);
-  const activeTools = new Map();
-  const activeFlows = new Map();
-  const runState = createCodexRunState({ workdir: input.runConfig?.workdir });
-  const syntheticToolAdapter = createCodexSyntheticToolAdapter({
-    onToolCall: hooks.onToolCall,
-    cwd: input.runConfig?.workdir ?? null,
+  const dispatcher = createCodexEventDispatcher({
+    hooks,
+    runConfig: input.runConfig,
+    messages: input.messages,
   });
 
   /** @type {string | null} */
@@ -146,17 +141,6 @@ export async function startCodexAppServerRun(input) {
   );
   turnId = typeof turnResult.turn?.id === "string" ? turnResult.turn.id : null;
 
-  /** @type {AgentResult} */
-  const result = {
-    response: [],
-    messages: input.messages,
-    usage: { promptTokens: 0, completionTokens: 0, cachedTokens: 0, cost: 0 },
-  };
-
-  let lastAssistantText = null;
-  /** @type {string | null} */
-  let failureMessage = null;
-
   const done = (async () => {
     try {
       for await (const message of connection.notifications) {
@@ -172,152 +156,7 @@ export async function startCodexAppServerRun(input) {
         if (typeof message.method === "string" && message.method === "turn/completed") {
           turnCompleted = true;
         }
-
-        if (normalized.usage) {
-          result.usage = normalized.usage;
-        }
-
-        if (normalized.failureMessage) {
-          failureMessage = normalized.failureMessage;
-        }
-
-        if (normalized.commandEvent) {
-          const dispatch = await runState.handleCommandEvent(normalized.commandEvent);
-          if (normalized.commandEvent.status === "completed") {
-            syntheticToolAdapter.handleCommandCompletion(normalized.commandEvent);
-          }
-          if (dispatch.fileRead) {
-            await hooks.onFileRead(dispatch.fileRead);
-          }
-          if (dispatch.command) {
-            await hooks.onCommand(dispatch.command);
-          }
-        }
-
-        if (normalized.toolEvent) {
-          const toolEvent = normalized.toolEvent;
-          const currentPresentation = buildToolPresentation(
-            toolEvent.name,
-            toolEvent.arguments,
-            undefined,
-            input.runConfig?.workdir ?? null,
-            undefined,
-          );
-          const flow = getToolFlowDescriptor(currentPresentation);
-          if (flow) {
-            let activeFlow = activeFlows.get(flow.groupKey);
-            if (!activeFlow) {
-              const toolCall = {
-                id: toolEvent.id,
-                name: toolEvent.name,
-                arguments: JSON.stringify(toolEvent.arguments),
-              };
-              const handle = await hooks.onToolCall(toolCall) ?? undefined;
-              activeFlow = {
-                handle,
-                state: { title: flow.groupTitle, steps: [] },
-              };
-              activeFlows.set(flow.groupKey, activeFlow);
-            }
-
-            let step = activeFlow.state.steps.find((/** @type {import("../tool-flow-presentation.js").ToolFlowStep} */ candidate) => candidate.id === toolEvent.id);
-            if (!step) {
-              step = { id: toolEvent.id, presentation: currentPresentation };
-              activeFlow.state.steps.push(step);
-            } else {
-              step.presentation = currentPresentation;
-            }
-
-            activeTools.set(toolEvent.id, {
-              handle: activeFlow.handle,
-              presentation: currentPresentation,
-              flowKey: flow.groupKey,
-            });
-
-            if (activeFlow.handle && toolEvent.status === "started") {
-              try {
-                await activeFlow.handle.update(toolFlowUpdate(activeFlow.state));
-                activeFlow.handle.setInspect(toolFlowInspectState(activeFlow.state));
-              } catch {
-                // best-effort
-              }
-            }
-
-            if (toolEvent.status !== "started") {
-              step.output = toolEvent.output;
-              if (activeFlow.handle) {
-                try {
-                  activeFlow.handle.setInspect(toolFlowInspectState(activeFlow.state));
-                } catch {
-                  // best-effort
-                }
-              }
-              activeTools.delete(toolEvent.id);
-            }
-          } else if (toolEvent.status === "started") {
-            const toolCall = {
-              id: toolEvent.id,
-              name: toolEvent.name,
-              arguments: JSON.stringify(toolEvent.arguments),
-            };
-            const handle = await hooks.onToolCall(toolCall);
-            if (handle) {
-              try {
-                handle.setInspect(toolInspectState(currentPresentation));
-              } catch {
-                // best-effort
-              }
-              activeTools.set(toolEvent.id, {
-                handle,
-                presentation: currentPresentation,
-              });
-            }
-          } else {
-            let activeTool = activeTools.get(toolEvent.id);
-            if (!activeTool) {
-              const toolCall = {
-                id: toolEvent.id,
-                name: toolEvent.name,
-                arguments: JSON.stringify(toolEvent.arguments),
-              };
-              const handle = await hooks.onToolCall(toolCall);
-              if (handle) {
-                activeTool = { handle, presentation: currentPresentation };
-              }
-            }
-            if (activeTool?.handle && activeTool.presentation.summary !== currentPresentation.summary) {
-              try {
-                await activeTool.handle.update(toolCallUpdate(currentPresentation));
-              } catch {
-                // best-effort
-              }
-              activeTool.presentation = currentPresentation;
-            }
-            if (activeTool?.handle && toolEvent.output) {
-              activeTool.handle.setInspect(toolInspectState(activeTool.presentation, toolEvent.output));
-            }
-            if (activeTool) {
-              activeTools.delete(toolEvent.id);
-            }
-          }
-        }
-
-        if (normalized.assistantText) {
-          const suppressAssistantText = await syntheticToolAdapter.handleAssistantText(normalized.assistantText);
-          if (!suppressAssistantText) {
-            lastAssistantText = normalized.assistantText;
-            await hooks.onLlmResponse(normalized.assistantText);
-          }
-        }
-
-        if (normalized.planText) {
-          await hooks.onPlan(normalized.planText);
-        }
-
-        if (normalized.fileChange) {
-          const enrichedFileChange = await runState.enrichFileChangeEvent(normalized.fileChange);
-          await hooks.onFileChange(enrichedFileChange);
-        }
+        await dispatcher.handleNormalized(normalized);
 
         if (turnCompleted) {
           break;
@@ -325,8 +164,9 @@ export async function startCodexAppServerRun(input) {
       }
     } catch (error) {
       if (input.isAborted?.() || isAbortError(error)) {
-        return { result, sessionId: threadId };
+        return { result: dispatcher.result, sessionId: threadId };
       }
+      const { failureMessage } = dispatcher.finalize();
       if (failureMessage) {
         await hooks.onToolError(failureMessage);
         throw new ReportedHarnessRunError(failureMessage);
@@ -336,9 +176,7 @@ export async function startCodexAppServerRun(input) {
       await connection.close();
     }
 
-    if (lastAssistantText) {
-      result.response = [{ type: "markdown", text: lastAssistantText }];
-    }
+    const { result, failureMessage } = dispatcher.finalize();
 
     if (failureMessage) {
       await hooks.onToolError(failureMessage);

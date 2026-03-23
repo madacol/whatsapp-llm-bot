@@ -1,10 +1,7 @@
 import { Codex } from "@openai/codex-sdk";
 import { createLogger } from "../logger.js";
-import { buildToolPresentation, getToolFlowDescriptor } from "../tool-presentation-model.js";
-import { toolCallUpdate, toolFlowInspectState, toolFlowUpdate, toolInspectState } from "../outbound-events.js";
-import { normalizeCodexEvent } from "./codex-events.js";
+import { normalizeCodexEvent } from "./codex-sdk-events.js";
 import { analyzeCodexCommand } from "./codex-command-semantics.js";
-import { createCodexRunState } from "./codex-run-state.js";
 import { ReportedHarnessRunError, reportHarnessRunError, isReportedHarnessRunError } from "./harness-run-errors.js";
 import { getSandboxEscapeRequest } from "./sandbox-approval.js";
 import {
@@ -12,7 +9,7 @@ import {
   requestSandboxEscapeApproval,
   resolveSandboxApprovalDirectory,
 } from "./sandbox-approval-coordinator.js";
-import { createCodexSyntheticToolAdapter } from "./codex-synthetic-tools.js";
+import { createCodexEventDispatcher } from "./codex-event-dispatcher.js";
 
 const log = createLogger("harness:codex-runner");
 
@@ -233,26 +230,11 @@ async function runCodexAttempt(input) {
     : input.codex.startThread(threadOptions);
 
   log.info(`Starting Codex SDK run for chat ${input.chatId}`);
-
-  /** @type {AgentResult} */
-  const result = {
-    response: [],
+  const dispatcher = createCodexEventDispatcher({
+    hooks: input.hooks,
+    runConfig: input.runConfig,
     messages: input.messages,
-    usage: { promptTokens: 0, completionTokens: 0, cachedTokens: 0, cost: 0 },
-  };
-
-  let lastAssistantText = null;
-  /** @type {string | null} */
-  let failureMessage = null;
-  const runState = createCodexRunState({ workdir: input.runConfig?.workdir });
-  /** @type {Map<string, { handle?: MessageHandle, presentation: import("../tool-presentation-model.js").ToolPresentation, flowKey?: string }>} */
-  const activeTools = new Map();
-  const syntheticToolAdapter = createCodexSyntheticToolAdapter({
-    onToolCall: input.hooks.onToolCall,
-    cwd: input.runConfig?.workdir ?? null,
   });
-  /** @type {Map<string, { handle?: MessageHandle, state: import("../tool-flow-presentation.js").ToolFlowState }>} */
-  const activeFlows = new Map();
 
   try {
     const turnInput = buildCodexTurnInput(input.prompt, input.externalInstructions);
@@ -264,171 +246,19 @@ async function runCodexAttempt(input) {
         continue;
       }
 
-      if (normalized.usage) {
-        result.usage = normalized.usage;
-      }
-
-      if (normalized.failureMessage) {
-        failureMessage = normalized.failureMessage;
-      }
-
-      if (normalized.commandEvent) {
-        if (normalized.commandEvent.status === "started") {
-          const retryRunConfig = await maybeApproveSandboxEscape({
-            command: normalized.commandEvent.command,
-            runConfig: input.runConfig,
-            hooks: input.hooks,
-            sessionId: thread.id,
-            abortController: input.abortController,
-          });
-          if (retryRunConfig) {
-            throw new CodexRunRetryError(retryRunConfig, thread.id);
-          }
-        }
-
-        const dispatch = await runState.handleCommandEvent(normalized.commandEvent);
-        if (normalized.commandEvent.status === "completed") {
-          syntheticToolAdapter.handleCommandCompletion(normalized.commandEvent);
-        }
-        if (dispatch.fileRead) {
-          await input.hooks.onFileRead(dispatch.fileRead);
-        }
-        if (dispatch.command) {
-          await input.hooks.onCommand(dispatch.command);
+      if (normalized.commandEvent?.status === "started") {
+        const retryRunConfig = await maybeApproveSandboxEscape({
+          command: normalized.commandEvent.command,
+          runConfig: input.runConfig,
+          hooks: input.hooks,
+          sessionId: thread.id,
+          abortController: input.abortController,
+        });
+        if (retryRunConfig) {
+          throw new CodexRunRetryError(retryRunConfig, thread.id);
         }
       }
-
-      if (normalized.toolEvent) {
-        const toolEvent = normalized.toolEvent;
-        const currentPresentation = buildToolPresentation(
-          toolEvent.name,
-          toolEvent.arguments,
-          undefined,
-          input.runConfig?.workdir ?? null,
-          undefined,
-        );
-        const flow = getToolFlowDescriptor(currentPresentation);
-        if (flow) {
-          let activeFlow = activeFlows.get(flow.groupKey);
-          if (!activeFlow) {
-            const toolCall = {
-              id: toolEvent.id,
-              name: toolEvent.name,
-              arguments: JSON.stringify(toolEvent.arguments),
-            };
-            const handle = await input.hooks.onToolCall(toolCall) ?? undefined;
-            activeFlow = {
-              handle,
-              state: { title: flow.groupTitle, steps: [] },
-            };
-            activeFlows.set(flow.groupKey, activeFlow);
-          }
-
-          let step = activeFlow.state.steps.find((candidate) => candidate.id === toolEvent.id);
-          if (!step) {
-            step = { id: toolEvent.id, presentation: currentPresentation };
-            activeFlow.state.steps.push(step);
-          } else {
-            step.presentation = currentPresentation;
-          }
-
-          activeTools.set(toolEvent.id, {
-            handle: activeFlow.handle,
-            presentation: currentPresentation,
-            flowKey: flow.groupKey,
-          });
-
-          if (activeFlow.handle && toolEvent.status === "started") {
-            try {
-              await activeFlow.handle.update(toolFlowUpdate(activeFlow.state));
-              activeFlow.handle.setInspect(toolFlowInspectState(activeFlow.state));
-            } catch {
-              // best-effort — grouping still improves inspect without an in-place update
-            }
-          }
-
-          if (toolEvent.status !== "started") {
-            step.output = toolEvent.output;
-            if (activeFlow.handle) {
-              try {
-                activeFlow.handle.setInspect(toolFlowInspectState(activeFlow.state));
-              } catch {
-                // best-effort — inspect should reflect the final flow output when available
-              }
-            }
-            activeTools.delete(toolEvent.id);
-          }
-
-          continue;
-        }
-
-        if (toolEvent.status === "started") {
-          const toolCall = {
-            id: toolEvent.id,
-            name: toolEvent.name,
-            arguments: JSON.stringify(toolEvent.arguments),
-          };
-          const handle = await input.hooks.onToolCall(toolCall);
-          if (handle) {
-            try {
-              handle.setInspect(toolInspectState(currentPresentation));
-            } catch {
-              // best-effort — callers may still provide a simpler message handle
-            }
-            activeTools.set(toolEvent.id, {
-              handle,
-              presentation: currentPresentation,
-            });
-          }
-        } else {
-          let activeTool = activeTools.get(toolEvent.id);
-          if (!activeTool) {
-            const toolCall = {
-              id: toolEvent.id,
-              name: toolEvent.name,
-              arguments: JSON.stringify(toolEvent.arguments),
-            };
-            const handle = await input.hooks.onToolCall(toolCall);
-            if (handle) {
-              activeTool = {
-                handle,
-                presentation: currentPresentation,
-              };
-            }
-          }
-          if (activeTool?.handle && activeTool.presentation.summary !== currentPresentation.summary) {
-            try {
-              await activeTool.handle.update(toolCallUpdate(currentPresentation));
-            } catch {
-              // best-effort — inspect still works without an in-place update
-            }
-            activeTool.presentation = currentPresentation;
-          }
-          if (activeTool?.handle && toolEvent.output) {
-            activeTool.handle.setInspect(toolInspectState(activeTool.presentation, toolEvent.output));
-          }
-          if (activeTool) {
-            activeTools.delete(toolEvent.id);
-          }
-        }
-      }
-
-      if (normalized.assistantText) {
-        const suppressAssistantText = await syntheticToolAdapter.handleAssistantText(normalized.assistantText);
-        if (!suppressAssistantText) {
-          lastAssistantText = normalized.assistantText;
-          await input.hooks.onLlmResponse(normalized.assistantText);
-        }
-      }
-
-      if (normalized.planText) {
-        await input.hooks.onPlan(normalized.planText);
-      }
-
-      if (normalized.fileChange) {
-        const enrichedFileChange = await runState.enrichFileChangeEvent(normalized.fileChange);
-        await input.hooks.onFileChange(enrichedFileChange);
-      }
+      await dispatcher.handleNormalized(normalized);
     }
   } catch (error) {
     if (error instanceof CodexRunRetryError) {
@@ -442,14 +272,12 @@ async function runCodexAttempt(input) {
       throw new ReportedHarnessRunError(error.message, error);
     }
     if (input.isAborted?.() || isAbortError(error)) {
-      return { result, sessionId: thread.id };
+      return { result: dispatcher.result, sessionId: thread.id };
     }
     throw await reportHarnessRunError(error, input.hooks.onToolError);
   }
 
-  if (lastAssistantText) {
-    result.response = [{ type: "markdown", text: lastAssistantText }];
-  }
+  const { result, failureMessage } = dispatcher.finalize();
 
   if (failureMessage) {
     await input.hooks.onToolError(failureMessage);
