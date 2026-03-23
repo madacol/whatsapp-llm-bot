@@ -1101,4 +1101,35 @@ describe("startCodexRun", () => {
     assert.equal(prompts.length, 1);
     assert.deepEqual(errors, ["Sandbox escape denied for `/repo/shared`"]);
   });
+
+  it("reports Codex SDK failures that happen before event streaming starts", async () => {
+    /** @type {string[]} */
+    const errors = [];
+
+    const started = await startCodexRun({
+      chatId: "codex-chat",
+      prompt: "Continue",
+      messages: [{ role: "user", content: [{ type: "text", text: "Continue" }] }],
+      hooks: {
+        onToolError: async (message) => {
+          errors.push(message);
+        },
+      },
+    }, {
+      createCodex: () => ({
+        startThread: () => ({
+          id: "sess-123",
+          runStreamed: async () => {
+            throw new Error("Codex Exec exited with code 1: Reading prompt from stdin...");
+          },
+        }),
+        resumeThread: () => {
+          throw new Error("resumeThread should not be called");
+        },
+      }),
+    });
+
+    await assert.rejects(started.done, /Codex Exec exited with code 1: Reading prompt from stdin/);
+    assert.deepEqual(errors, ["Codex Exec exited with code 1: Reading prompt from stdin..."]);
+  });
 });

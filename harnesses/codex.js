@@ -2,8 +2,10 @@
  * Codex harness — uses the local Codex SDK for stateful agent runs.
  */
 
+import { createLogger } from "../logger.js";
+import { errorToString } from "../utils.js";
 import { NO_OP_HOOKS } from "./native.js";
-import { startCodexRun } from "./codex-runner.js";
+import { isHandledCodexRunError, startCodexRun } from "./codex-runner.js";
 import { extractCodexText } from "./codex-event-utils.js";
 import { createCodexCommandHandler } from "./codex-commands.js";
 import { getCodexAvailableModels } from "./codex-models.js";
@@ -12,6 +14,8 @@ import {
   saveCodexSession,
 } from "./codex-config.js";
 export { buildCodexThreadOptions } from "./codex-runner.js";
+
+const log = createLogger("harness:codex");
 
 /** @type {HarnessCapabilities} */
 const CODEX_HARNESS_CAPABILITIES = {
@@ -37,6 +41,7 @@ const CODEX_HARNESS_CAPABILITIES = {
 /**
  * @typedef {{
  *   getAvailableModels?: () => Promise<Array<{ id: string, label: string }>>,
+ *   startRun?: typeof startCodexRun,
  * }} CodexHarnessDeps
  */
 
@@ -49,6 +54,7 @@ export function createCodexHarness(deps = {}) {
   /** @type {Map<string, ActiveCodexRun>} */
   const activeRuns = new Map();
   const loadAvailableModels = deps.getAvailableModels ?? getCodexAvailableModels;
+  const beginRun = deps.startRun ?? startCodexRun;
   const handleCommand = createCodexCommandHandler({
     getAvailableModels: loadAvailableModels,
     cancelActiveQuery: cancel,
@@ -105,24 +111,24 @@ export function createCodexHarness(deps = {}) {
     const sessionId = getCodexSessionId(session);
     /** @type {ActiveCodexRun | null} */
     let activeRun = null;
-    const started = await startCodexRun({
-      chatId: session.chatId,
-      prompt,
-      externalInstructions: llmConfig.externalInstructions,
-      messages,
-      sessionId,
-      runConfig,
-      hooks,
-      isAborted: () => activeRun?.aborted ?? false,
-    });
-    activeRun = {
-      abortController: started.abortController,
-      done: started.done,
-      aborted: false,
-    };
-    activeRuns.set(session.chatId, activeRun);
-
     try {
+      const started = await beginRun({
+        chatId: session.chatId,
+        prompt,
+        externalInstructions: llmConfig.externalInstructions,
+        messages,
+        sessionId,
+        runConfig,
+        hooks,
+        isAborted: () => activeRun?.aborted ?? false,
+      });
+      activeRun = {
+        abortController: started.abortController,
+        done: started.done,
+        aborted: false,
+      };
+      activeRuns.set(session.chatId, activeRun);
+
       const completed = await started.done;
 
       if (completed.sessionId && completed.sessionId !== sessionId) {
@@ -130,6 +136,25 @@ export function createCodexHarness(deps = {}) {
       }
 
       return completed.result;
+    } catch (error) {
+      if (sessionId) {
+        log.warn(`Codex run failed for saved session ${sessionId}; clearing persisted session`);
+        try {
+          await saveCodexSession(session, null);
+        } catch (clearError) {
+          log.error("Failed to clear stale Codex session ID:", clearError);
+        }
+      }
+
+      const errorMessage = errorToString(error);
+      if (!isHandledCodexRunError(error)) {
+        await hooks.onToolError(errorMessage);
+      }
+      return {
+        response: [{ type: "text", text: `SDK error: ${errorMessage}` }],
+        messages,
+        usage: { promptTokens: 0, completionTokens: 0, cachedTokens: 0, cost: 0 },
+      };
     } finally {
       activeRuns.delete(session.chatId);
     }
