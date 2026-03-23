@@ -12,6 +12,7 @@ import { buildSdkErrorResponse, clearStaleHarnessSession, getHarnessRunErrorMess
 import {
   getCodexSessionId,
   saveCodexSession,
+  updateCodexConfig,
 } from "./codex-config.js";
 export { buildCodexThreadOptions } from "./codex-runner.js";
 
@@ -29,6 +30,18 @@ const CODEX_HARNESS_CAPABILITIES = {
   supportsReasoningEffort: false,
   supportsSessionFork: false,
 };
+
+/**
+ * @param {string} model
+ * @returns {boolean}
+ */
+function isLegacyClaudeModel(model) {
+  const normalized = model.trim().toLowerCase();
+  return normalized === "sonnet"
+    || normalized === "opus"
+    || normalized === "haiku"
+    || normalized.startsWith("claude");
+}
 
 /**
  * @typedef {{
@@ -109,6 +122,7 @@ export function createCodexHarness(deps = {}) {
     }
 
     const sessionId = getCodexSessionId(session);
+    const effectiveRunConfig = await sanitizeRunConfig(session.chatId, runConfig);
     /** @type {ActiveCodexRun | null} */
     let activeRun = null;
     try {
@@ -118,7 +132,7 @@ export function createCodexHarness(deps = {}) {
         externalInstructions: llmConfig.externalInstructions,
         messages,
         sessionId,
-        runConfig,
+        runConfig: effectiveRunConfig,
         hooks,
         isAborted: () => activeRun?.aborted ?? false,
       });
@@ -156,5 +170,35 @@ export function createCodexHarness(deps = {}) {
     } finally {
       activeRuns.delete(session.chatId);
     }
+  }
+
+  /**
+   * Drop invalid persisted model overrides before starting the Codex CLI.
+   * This prevents stale Claude selections like `sonnet` from poisoning Codex runs.
+   * @param {string} chatId
+   * @param {HarnessRunConfig | undefined} runConfig
+   * @returns {Promise<HarnessRunConfig | undefined>}
+   */
+  async function sanitizeRunConfig(chatId, runConfig) {
+    if (!runConfig?.model) {
+      return runConfig;
+    }
+
+    const modelOptions = await loadAvailableModels();
+    const modelIsAvailable = modelOptions.some((option) => option.id === runConfig.model);
+    const mustClearModel = modelOptions.length > 0
+      ? !modelIsAvailable
+      : isLegacyClaudeModel(runConfig.model);
+
+    if (!mustClearModel) {
+      return runConfig;
+    }
+
+    log.warn(`Ignoring invalid Codex model "${runConfig.model}" for chat ${chatId}`);
+    await updateCodexConfig(chatId, { model: null });
+    return {
+      ...runConfig,
+      model: undefined,
+    };
   }
 }

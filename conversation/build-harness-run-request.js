@@ -127,6 +127,6 @@ export async function buildHarnessRunRequest({
     messages,
     mediaRegistry,
     hooks,
-    runConfig: buildRunConfig(chatId, chatInfo, chatName),
+    runConfig: buildRunConfig(chatId, chatInfo, chatName, harnessName),
   };
 }

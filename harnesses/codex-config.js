@@ -1,4 +1,4 @@
-import { getRootDb } from "../db.js";
+import { getHarnessConfig, updateHarnessConfig } from "../harness-config.js";
 
 /** @type {Set<HarnessRunConfig["sandboxMode"]>} */
 export const CODEX_SANDBOX_MODES = new Set(["read-only", "workspace-write", "danger-full-access"]);
@@ -15,12 +15,7 @@ export const DEFAULT_CODEX_SANDBOX_MODE = "workspace-write";
  * @returns {Promise<Record<string, unknown>>}
  */
 export async function getCodexConfig(chatId) {
-  const db = getRootDb();
-  const { rows: [row] } = await db.sql`SELECT harness_config FROM chats WHERE chat_id = ${chatId}`;
-  const config = row?.harness_config;
-  return config && typeof config === "object" && !Array.isArray(config)
-    ? config
-    : {};
+  return getHarnessConfig(chatId, "codex");
 }
 
 /**
@@ -31,16 +26,7 @@ export async function getCodexConfig(chatId) {
  * @returns {Promise<void>}
  */
 export async function updateCodexConfig(chatId, patch) {
-  const db = getRootDb();
-  const current = await getCodexConfig(chatId);
-  for (const [key, value] of Object.entries(patch)) {
-    if (value == null) {
-      delete current[key];
-    } else {
-      current[key] = value;
-    }
-  }
-  await db.sql`UPDATE chats SET harness_config = ${JSON.stringify(current)} WHERE chat_id = ${chatId}`;
+  await updateHarnessConfig(chatId, "codex", patch);
 }
 
 /**

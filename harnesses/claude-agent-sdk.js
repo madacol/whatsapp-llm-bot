@@ -20,13 +20,14 @@ import { createLogger } from "../logger.js";
 import { extractLastUserText } from "../message-formatting.js";
 import { createToolMessage, errorToString } from "../utils.js";
 import { contentEvent, toolInspectState } from "../outbound-events.js";
-import { getRootDb } from "../db.js";
+import { getHarnessConfig, updateHarnessConfig } from "../harness-config.js";
 import { handleHarnessSessionCommand } from "./session-commands.js";
 import { getSandboxEscapeRequest } from "./sandbox-approval.js";
 import { requestSandboxEscapeApproval } from "./sandbox-approval-coordinator.js";
 import { buildSdkErrorResponse, clearStaleHarnessSession } from "./harness-run-errors.js";
 
 const log = createLogger("harness:claude-agent-sdk");
+const HARNESS_NAME = "claude-agent-sdk";
 
 /** @type {HarnessCapabilities} */
 const CLAUDE_HARNESS_CAPABILITIES = {
@@ -89,7 +90,7 @@ export function getModels() {
  */
 export async function handleModelCommand(chatId, arg) {
   if (arg === "off" || arg === "default" || arg === "none") {
-    await updateHarnessConfig(chatId, { model: null });
+    await updateHarnessConfig(chatId, HARNESS_NAME, { model: null });
     return "SDK model reset to default.";
   }
 
@@ -100,7 +101,7 @@ export async function handleModelCommand(chatId, arg) {
   );
   const modelValue = match ? match.value : input;
 
-  await updateHarnessConfig(chatId, { model: modelValue });
+  await updateHarnessConfig(chatId, HARNESS_NAME, { model: modelValue });
   return match
     ? `SDK model set to \`${match.value}\` (${match.displayName})`
     : `SDK model set to \`${modelValue}\``;
@@ -157,14 +158,14 @@ export function getEffortLevels(modelValue) {
  */
 export async function handleEffortCommand(chatId, arg) {
   if (arg === "off" || arg === "default" || arg === "none") {
-    await updateHarnessConfig(chatId, { reasoningEffort: null });
+    await updateHarnessConfig(chatId, HARNESS_NAME, { reasoningEffort: null });
     return "SDK effort reset to default (high).";
   }
 
   const input = arg.toLowerCase();
   const validLevels = ["low", "medium", "high", "max"];
   if (validLevels.includes(input)) {
-    await updateHarnessConfig(chatId, { reasoningEffort: input });
+    await updateHarnessConfig(chatId, HARNESS_NAME, { reasoningEffort: input });
     return `SDK effort set to \`${input}\``;
   }
   return `Unknown effort level \`${arg}\`. Use: ${validLevels.join(", ")}`;
@@ -390,39 +391,6 @@ async function saveClaudeSessionId(session, sessionId) {
 }
 
 /**
- * Read the generic harness_config JSONB for a chat.
- * @param {string} chatId
- * @returns {Promise<Record<string, unknown>>}
- */
-async function getHarnessConfig(chatId) {
-  const db = getRootDb();
-  const { rows: [row] } = await db.sql`SELECT harness_config FROM chats WHERE chat_id = ${chatId}`;
-  const config = row?.harness_config;
-  return config && typeof config === "object" && !Array.isArray(config)
-    ? /** @type {Record<string, unknown>} */ (config)
-    : {};
-}
-
-/**
- * Update the generic harness_config JSONB for a chat.
- * Null/undefined values remove keys from the stored config.
- * @param {string} chatId
- * @param {Record<string, unknown>} patch
- * @returns {Promise<void>}
- */
-async function updateHarnessConfig(chatId, patch) {
-  const db = getRootDb();
-  const current = await getHarnessConfig(chatId);
-  for (const [key, value] of Object.entries(patch)) {
-    if (value == null) {
-      delete current[key];
-    } else {
-      current[key] = value;
-    }
-  }
-  await db.sql`UPDATE chats SET harness_config = ${JSON.stringify(current)} WHERE chat_id = ${chatId}`;
-}
-
 /**
  * Normalize a chat/session reference into the chatId key used by the activeQueries map.
  * @param {string | HarnessSessionRef} ref
@@ -456,7 +424,7 @@ async function handleClaudeHarnessCommand({ chatId, command, context }) {
   }
 
   const models = getModels();
-  const harnessConfig = await getHarnessConfig(chatId);
+  const harnessConfig = await getHarnessConfig(chatId, HARNESS_NAME);
   const currentModel = typeof harnessConfig.model === "string" ? harnessConfig.model : null;
   const currentEffort = typeof harnessConfig.reasoningEffort === "string" ? harnessConfig.reasoningEffort : null;
 
@@ -497,7 +465,7 @@ async function handleClaudeHarnessCommand({ chatId, command, context }) {
     }
   }
 
-  const updatedConfig = await getHarnessConfig(chatId);
+  const updatedConfig = await getHarnessConfig(chatId, HARNESS_NAME);
   const finalModel = typeof updatedConfig.model === "string" ? updatedConfig.model : "default (Sonnet)";
   const finalEffort = typeof updatedConfig.reasoningEffort === "string" ? updatedConfig.reasoningEffort : "default (high)";
   await context.reply(contentEvent("tool-result", `SDK model: \`${finalModel}\`\nSDK effort: \`${finalEffort}\``));

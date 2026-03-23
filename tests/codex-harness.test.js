@@ -226,6 +226,94 @@ describe("createCodexHarness", () => {
       text: "SDK error: Codex Exec exited with code 1: Reading prompt from stdin...",
     }]);
   });
+
+  it("ignores a stale Claude model in the shared chat row before starting Codex", async () => {
+    const db = await createTestDb();
+    await seedChat(db, "codex-chat-invalid-model", { enabled: true });
+    await db.sql`
+      UPDATE chats
+      SET harness = 'codex',
+          harness_config = '{"model":"sonnet","sandboxMode":"danger-full-access"}'::jsonb
+      WHERE chat_id = 'codex-chat-invalid-model'
+    `;
+
+    /** @type {HarnessRunConfig | undefined} */
+    let seenRunConfig;
+    const harness = createCodexHarness({
+      getAvailableModels: async () => TEST_CODEX_MODELS,
+      startRun: async (input) => {
+        seenRunConfig = input.runConfig;
+        return {
+          abortController: new AbortController(),
+          done: Promise.resolve({
+            sessionId: null,
+            result: {
+              response: [{ type: "text", text: "ok" }],
+              messages: input.messages,
+              usage: { promptTokens: 0, completionTokens: 0, cachedTokens: 0, cost: 0 },
+            },
+          }),
+        };
+      },
+    });
+
+    const result = await harness.run({
+      session: {
+        chatId: "codex-chat-invalid-model",
+        senderIds: [],
+        context: /** @type {ExecuteActionContext} */ ({
+          chatId: "codex-chat-invalid-model",
+          senderIds: [],
+          content: [],
+          getIsAdmin: async () => true,
+          send: async () => undefined,
+          reply: async () => undefined,
+          reactToMessage: async () => {},
+          select: async () => "",
+          confirm: async () => true,
+        }),
+        addMessage: async () => undefined,
+        updateToolMessage: async () => undefined,
+        harnessSession: null,
+        saveHarnessSession: async () => undefined,
+      },
+      llmConfig: {
+        llmClient: /** @type {LlmClient} */ ({}),
+        chatModel: null,
+        externalInstructions: "",
+        toolRuntime: /** @type {ToolRuntime} */ ({
+          getTool: async () => null,
+          executeTool: async () => {
+            throw new Error("executeTool should not be called");
+          },
+        }),
+      },
+      messages: [{ role: "user", content: [{ type: "text", text: "Continue" }] }],
+      hooks: {},
+      runConfig: {
+        model: "sonnet",
+        sandboxMode: "danger-full-access",
+      },
+    });
+
+    assert.equal(seenRunConfig?.model, undefined);
+    assert.equal(seenRunConfig?.sandboxMode, "danger-full-access");
+    assert.deepEqual(result.response, [{ type: "text", text: "ok" }]);
+
+    const { rows: [chat] } = await db.sql`
+      SELECT harness_config
+      FROM chats
+      WHERE chat_id = 'codex-chat-invalid-model'
+    `;
+    assert.deepEqual(chat.harness_config, {
+      codex: {
+        sandboxMode: "danger-full-access",
+      },
+      "claude-agent-sdk": {
+        model: "sonnet",
+      },
+    });
+  });
 });
 
 describe("buildCodexThreadOptions", () => {
