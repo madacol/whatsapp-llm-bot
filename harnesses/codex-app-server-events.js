@@ -1,5 +1,5 @@
 import { normalizeCodexFileChange } from "./codex-file-events.js";
-import { extractCodexText, isCodexEventRecord } from "./codex-event-utils.js";
+import { extractCodexText, isCodexEventRecord, normalizeCodexUsage } from "./codex-event-utils.js";
 import {
   extractCollabToolArguments,
   extractCollabToolOutput,
@@ -9,33 +9,6 @@ import {
   extractToolResultOutput,
   normalizeCollabToolName,
 } from "./codex-normalization-helpers.js";
-
-/**
- * Resolve the usage record from a Codex App Server token usage update.
- * Newer payloads nest counts under `tokenUsage.last` / `tokenUsage.total`,
- * while older payloads may keep the counters flat.
- * @param {Record<string, unknown>} params
- * @returns {Record<string, unknown> | null}
- */
-function getCodexAppServerUsageRecord(params) {
-  if (isCodexEventRecord(params.usage)) {
-    return params.usage;
-  }
-
-  if (!isCodexEventRecord(params.tokenUsage)) {
-    return null;
-  }
-
-  if (isCodexEventRecord(params.tokenUsage.last)) {
-    return params.tokenUsage.last;
-  }
-
-  if (isCodexEventRecord(params.tokenUsage.total)) {
-    return params.tokenUsage.total;
-  }
-
-  return params.tokenUsage;
-}
 
 /**
  * Normalize a Codex App Server JSON-RPC message into the semantic event shape
@@ -92,21 +65,7 @@ export function normalizeCodexAppServerEvent(message) {
   }
 
   if (method === "thread/tokenUsage/updated") {
-    const usage = getCodexAppServerUsageRecord(params);
-    if (usage) {
-      normalized.usage = {
-        promptTokens: typeof usage.input_tokens === "number"
-          ? usage.input_tokens
-          : typeof usage.inputTokens === "number" ? usage.inputTokens : 0,
-        completionTokens: typeof usage.output_tokens === "number"
-          ? usage.output_tokens
-          : typeof usage.outputTokens === "number" ? usage.outputTokens : 0,
-        cachedTokens: typeof usage.cached_input_tokens === "number"
-          ? usage.cached_input_tokens
-          : typeof usage.cachedInputTokens === "number" ? usage.cachedInputTokens : 0,
-        cost: typeof usage.cost === "number" ? usage.cost : 0,
-      };
-    }
+    normalized.usage = normalizeCodexUsage(params);
     return normalized;
   }
 
