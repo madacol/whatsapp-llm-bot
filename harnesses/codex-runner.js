@@ -157,7 +157,7 @@ export async function startCodexRun(input, deps = {}) {
   const createCodex = deps.createCodex ?? ((options) => new Codex(options));
   const hooks = { ...DEFAULT_CODEX_RUN_HOOKS, ...input.hooks };
   const abortController = new AbortController();
-  const codex = createCodex({ codexPathOverride: "codex" });
+  const codex = createCodex({});
   const done = (async () => {
     /** @type {string | null | undefined} */
     let currentSessionId = input.sessionId;
