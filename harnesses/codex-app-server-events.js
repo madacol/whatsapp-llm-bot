@@ -11,6 +11,33 @@ import {
 } from "./codex-normalization-helpers.js";
 
 /**
+ * Resolve the usage record from a Codex App Server token usage update.
+ * Newer payloads nest counts under `tokenUsage.last` / `tokenUsage.total`,
+ * while older payloads may keep the counters flat.
+ * @param {Record<string, unknown>} params
+ * @returns {Record<string, unknown> | null}
+ */
+function getCodexAppServerUsageRecord(params) {
+  if (isCodexEventRecord(params.usage)) {
+    return params.usage;
+  }
+
+  if (!isCodexEventRecord(params.tokenUsage)) {
+    return null;
+  }
+
+  if (isCodexEventRecord(params.tokenUsage.last)) {
+    return params.tokenUsage.last;
+  }
+
+  if (isCodexEventRecord(params.tokenUsage.total)) {
+    return params.tokenUsage.total;
+  }
+
+  return params.tokenUsage;
+}
+
+/**
  * Normalize a Codex App Server JSON-RPC message into the semantic event shape
  * used by the harness wrapper.
  * @param {unknown} message
@@ -65,9 +92,7 @@ export function normalizeCodexAppServerEvent(message) {
   }
 
   if (method === "thread/tokenUsage/updated") {
-    const usage = isCodexEventRecord(params.usage)
-      ? params.usage
-      : isCodexEventRecord(params.tokenUsage) ? params.tokenUsage : null;
+    const usage = getCodexAppServerUsageRecord(params);
     if (usage) {
       normalized.usage = {
         promptTokens: typeof usage.input_tokens === "number"
