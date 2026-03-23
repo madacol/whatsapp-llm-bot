@@ -3,9 +3,13 @@
  */
 
 /**
+ * @typedef {import('@whiskeysockets/baileys').WASocket | (() => import('@whiskeysockets/baileys').WASocket | null)} SocketResolver
+ */
+
+/**
  * @typedef {{
  *   handleReactions: (reactions: Array<{ key: { id: string; remoteJid: string }; reaction: { text: string } }>, sock: import('@whiskeysockets/baileys').WASocket) => void;
- *   createConfirm: (sock: import('@whiskeysockets/baileys').WASocket, chatId: string) => (message: string, hooks?: ConfirmHooks) => Promise<boolean>;
+ *   createConfirm: (sock: SocketResolver, chatId: string) => (message: string, hooks?: ConfirmHooks) => Promise<boolean>;
  *   readonly size: number;
  *   clear: () => void;
  * }} ConfirmRuntime
@@ -24,6 +28,26 @@
 
 /** Safety-net timeout: auto-reject after 30 minutes of no reaction. */
 const CONFIRM_TIMEOUT_MS = 30 * 60 * 1000;
+
+/**
+ * @param {SocketResolver} socketResolver
+ * @returns {() => import('@whiskeysockets/baileys').WASocket | null}
+ */
+function createSocketGetter(socketResolver) {
+  return typeof socketResolver === "function" ? socketResolver : () => socketResolver;
+}
+
+/**
+ * @param {() => import('@whiskeysockets/baileys').WASocket | null} getSocket
+ * @returns {import('@whiskeysockets/baileys').WASocket}
+ */
+function requireSocket(getSocket) {
+  const sock = getSocket();
+  if (!sock) {
+    throw new Error("WhatsApp socket is not connected");
+  }
+  return sock;
+}
 
 /**
  * Create a registry that routes reactions to pending confirmations.
@@ -75,13 +99,15 @@ export function createConfirmRuntime() {
 
     /**
      * Create a confirm function scoped to a chat.
-     * @param {import('@whiskeysockets/baileys').WASocket} sock
+     * @param {SocketResolver} sock
      * @param {string} chatId
      * @returns {(message: string, hooks?: ConfirmHooks) => Promise<boolean>}
      */
     createConfirm(sock, chatId) {
+      const getSocket = createSocketGetter(sock);
+
       return async (message, hooks) => {
-        const sentMsg = await sock.sendMessage(chatId, { text: message });
+        const sentMsg = await requireSocket(getSocket).sendMessage(chatId, { text: message });
         if (!sentMsg) return false;
 
         const rawKey = sentMsg.key;
@@ -90,7 +116,7 @@ export function createConfirmRuntime() {
         /** @type {{ id: string; remoteJid: string }} */
         const msgKey = { id: rawKey.id, remoteJid: rawKey.remoteJid };
 
-        sock.sendMessage(chatId, {
+        getSocket()?.sendMessage(chatId, {
           react: { text: "⏳", key: rawKey },
         });
 
@@ -101,7 +127,7 @@ export function createConfirmRuntime() {
         return new Promise((resolve) => {
           const timer = setTimeout(() => {
             pending.delete(msgKey.id);
-            sock.sendMessage(chatId, { react: { text: "⌛", key: rawKey } });
+            getSocket()?.sendMessage(chatId, { react: { text: "⌛", key: rawKey } });
             resolve(false);
           }, CONFIRM_TIMEOUT_MS);
 

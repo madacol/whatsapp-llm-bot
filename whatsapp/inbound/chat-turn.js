@@ -174,8 +174,8 @@ export function createTurnIo({
   return {
     send: (event) => sendEvent(requireSocket(), chatId, event, undefined, reactionRuntime),
     reply: (event) => sendEvent(requireSocket(), chatId, event, undefined, reactionRuntime),
-    select: selectRuntime.createSelect(sock, chatId),
-    confirm: confirmRuntime.createConfirm(sock, chatId),
+    select: selectRuntime.createSelect(getSocket ?? sock, chatId),
+    confirm: confirmRuntime.createConfirm(getSocket ?? sock, chatId),
     react: async (emoji) => {
       await requireSocket().sendMessage(chatId, {
         react: { text: emoji, key: message.key },

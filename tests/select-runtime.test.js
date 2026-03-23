@@ -35,6 +35,59 @@ function createMockSock() {
 }
 
 describe("createSelectRuntime", () => {
+  it("uses the latest live socket when a select prompt is sent after reconnect", async () => {
+    const registry = createSelectRuntime();
+    const oldSocket = createMockSock();
+    const newSocket = createMockSock();
+    /** @type {typeof oldSocket.sock | null} */
+    let currentSocket = oldSocket.sock;
+
+    const select = registry.createSelect(() => currentSocket, "chat-1");
+
+    currentSocket = newSocket.sock;
+    const selectionPromise = select("Pick one", ["First", "Second"]);
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    assert.equal(oldSocket.sentMessages.length, 0);
+    assert.equal(newSocket.sentMessages.length, 2, "expected poll and pending reaction on the new socket");
+
+    registry.handlePollVote({
+      chatId: "chat-1",
+      pollMsgId: "poll-1",
+      selectedOptions: ["First"],
+    });
+
+    assert.equal(await selectionPromise, "First");
+  });
+
+  it("uses the latest live socket for select settlement effects after reconnect", async () => {
+    const registry = createSelectRuntime();
+    const oldSocket = createMockSock();
+    const newSocket = createMockSock();
+    /** @type {typeof oldSocket.sock | null} */
+    let currentSocket = oldSocket.sock;
+
+    const select = registry.createSelect(() => currentSocket, "chat-1");
+    const selectionPromise = select("Pick one", ["First", "Second"]);
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    currentSocket = newSocket.sock;
+    registry.handlePollVote({
+      chatId: "chat-1",
+      pollMsgId: "poll-1",
+      selectedOptions: ["First"],
+    });
+
+    assert.equal(await selectionPromise, "First");
+    assert.equal(oldSocket.sentMessages.length, 2, "original socket should only have the initial poll send");
+    assert.equal(newSocket.sentMessages.length, 1, "settlement effect should be sent on the replacement socket");
+    assert.deepEqual(newSocket.sentMessages[0]?.message, {
+      react: { text: "", key: { id: "poll-1", remoteJid: "chat-1" } },
+    });
+  });
+
   it("preserves option identity when labels are duplicated", async () => {
     const registry = createSelectRuntime();
     const { sock, sentMessages } = createMockSock();
