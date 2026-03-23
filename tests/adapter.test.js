@@ -797,4 +797,27 @@ describe("createConfirmRuntime", () => {
     assert.equal(r2, false, "Second should resolve false on clear");
     assert.equal(registry.size, 0, "Should be empty after clear");
   });
+
+  it("uses the latest live socket when a confirm prompt is sent after reconnect", async () => {
+    const oldSocket = createMockSock();
+    const newSocket = createMockSock();
+    /** @type {BaileysSocket | null} */
+    let currentSocket = oldSocket.sock;
+
+    const confirm = oldSocket.registry.createConfirm(() => currentSocket, "test-chat");
+
+    currentSocket = newSocket.sock;
+    const promise = confirm("Confirm this?");
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    assert.equal(oldSocket.sentMessages.length, 0);
+    assert.equal(newSocket.sentMessages.length, 1);
+    assert.ok(newSocket.reactions.some((reaction) => reaction.text === "⏳"), "Should react on the replacement socket");
+
+    oldSocket.registry.handleReactions(
+      [{ key: { id: "msg-0", remoteJid: "test-chat" }, reaction: { text: "\uD83D\uDC4D" } }],
+      newSocket.sock,
+    );
+    await promise;
+  });
 });

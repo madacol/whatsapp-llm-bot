@@ -13,6 +13,10 @@ const MAX_SENT_POLLS = 200;
 const SELECT_TIMEOUT_MS = 5 * 60 * 1000;
 
 /**
+ * @typedef {import('@whiskeysockets/baileys').WASocket | (() => import('@whiskeysockets/baileys').WASocket | null)} SocketResolver
+ */
+
+/**
  * Resolve the poll creation data from any Baileys poll message version (V1–V5).
  * @param {import('@whiskeysockets/baileys').WAMessage["message"] | null | undefined} msg
  * @returns {{ options: Array<{optionName?: string | null}> } | null}
@@ -44,7 +48,7 @@ export function getPollCreationData(msg) {
 /**
  * @typedef {{
  *   handlePollVote: (event: PollVoteEvent) => boolean;
- *   createSelect: (sock: import('@whiskeysockets/baileys').WASocket, chatId: string) => (question: string, options: SelectOption[], config?: SelectConfig) => Promise<string>;
+ *   createSelect: (sock: SocketResolver, chatId: string) => (question: string, options: SelectOption[], config?: SelectConfig) => Promise<string>;
  *   resolvePollVoteMessage: (message: import('@whiskeysockets/baileys').WAMessage, sock: import('@whiskeysockets/baileys').WASocket) => Promise<PollVoteEvent | null>;
  *   readonly size: number;
  *   clear: () => void;
@@ -96,6 +100,26 @@ function createUniquePollLabel(preferredLabel, usedLabels) {
     }
     suffix += 1;
   }
+}
+
+/**
+ * @param {SocketResolver} socketResolver
+ * @returns {() => import('@whiskeysockets/baileys').WASocket | null}
+ */
+function createSocketGetter(socketResolver) {
+  return typeof socketResolver === "function" ? socketResolver : () => socketResolver;
+}
+
+/**
+ * @param {() => import('@whiskeysockets/baileys').WASocket | null} getSocket
+ * @returns {import('@whiskeysockets/baileys').WASocket}
+ */
+function requireSocket(getSocket) {
+  const sock = getSocket();
+  if (!sock) {
+    throw new Error("WhatsApp socket is not connected");
+  }
+  return sock;
 }
 
 /**
@@ -213,14 +237,16 @@ export function createSelectRuntime() {
 
     /**
      * Create a select function scoped to a chat.
-     * @param {import('@whiskeysockets/baileys').WASocket} sock
+     * @param {SocketResolver} sock
      * @param {string} chatId
      * @returns {(question: string, options: SelectOption[], config?: SelectConfig) => Promise<string>}
      */
     createSelect(sock, chatId) {
+      const getSocket = createSocketGetter(sock);
+
       return async (question, options, config) => {
         const { labels, labelToId } = normalizeSelectOptions(options, config?.currentId);
-        const sent = await sock.sendMessage(chatId, {
+        const sent = await requireSocket(getSocket).sendMessage(chatId, {
           poll: { name: question, values: labels, selectableCount: 1 },
         });
         const pollMsgId = sent?.key?.id;
@@ -245,7 +271,7 @@ export function createSelectRuntime() {
         /** @type {import('@whiskeysockets/baileys').WAMessageKey} */
         const sentPollKey = pollKey;
 
-        sock.sendMessage(chatId, { react: { text: "⏳", key: sentPollKey } });
+        getSocket()?.sendMessage(chatId, { react: { text: "⏳", key: sentPollKey } });
 
         const cancelIds = config?.cancelIds ? new Set(config.cancelIds) : null;
         const deleteOnSelect = config?.deleteOnSelect ?? false;
@@ -268,11 +294,11 @@ export function createSelectRuntime() {
             if (!options.suppressEffects) {
               const isCancelled = !id || (cancelIds !== null && cancelIds.has(id));
               if (isCancelled) {
-                sock.sendMessage(chatId, { react: { text: "❌", key: sentPollKey } });
+                getSocket()?.sendMessage(chatId, { react: { text: "❌", key: sentPollKey } });
               } else if (deleteOnSelect) {
-                sock.sendMessage(chatId, { delete: sentPollKey });
+                getSocket()?.sendMessage(chatId, { delete: sentPollKey });
               } else {
-                sock.sendMessage(chatId, { react: { text: "", key: sentPollKey } });
+                getSocket()?.sendMessage(chatId, { react: { text: "", key: sentPollKey } });
               }
             }
 
