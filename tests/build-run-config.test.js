@@ -38,4 +38,38 @@ describe("buildRunConfig", () => {
 
     assert.equal(path.basename(config.workdir ?? ""), "Project Alpha--chat-1");
   });
+
+  it("reads the active harness namespace instead of a shared model field", () => {
+    const config = buildRunConfig("chat-1", /** @type {import("../store.js").ChatRow} */ ({
+      chat_id: "chat-1",
+      harness: "codex",
+      harness_cwd: null,
+      harness_config: {
+        codex: { model: "gpt-5.4", sandboxMode: "danger-full-access" },
+        "claude-agent-sdk": { model: "claude-sonnet-4-6", reasoningEffort: "medium" },
+      },
+    }), "Project Alpha", "codex");
+
+    assert.equal(config.model, "gpt-5.4");
+    assert.equal(config.sandboxMode, "danger-full-access");
+    assert.equal(config.reasoningEffort, undefined);
+  });
+
+  it("does not leak a legacy Claude model into Codex runs", () => {
+    const codexConfig = buildRunConfig("chat-1", /** @type {import("../store.js").ChatRow} */ ({
+      chat_id: "chat-1",
+      harness: "codex",
+      harness_cwd: null,
+      harness_config: { model: "sonnet" },
+    }), "Project Alpha", "codex");
+    const claudeConfig = buildRunConfig("chat-1", /** @type {import("../store.js").ChatRow} */ ({
+      chat_id: "chat-1",
+      harness: "codex",
+      harness_cwd: null,
+      harness_config: { model: "sonnet" },
+    }), "Project Alpha", "claude-agent-sdk");
+
+    assert.equal(codexConfig.model, undefined);
+    assert.equal(claudeConfig.model, "sonnet");
+  });
 });

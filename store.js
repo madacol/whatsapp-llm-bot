@@ -1,5 +1,6 @@
 import { getRootDb } from "./db.js";
 import { createLogger } from "./logger.js";
+import { normalizeHarnessConfig } from "./harness-config.js";
 
 const log = createLogger("store");
 
@@ -22,7 +23,7 @@ const log = createLogger("store");
  *   active_persona: string | null;
  *   harness: string | null;
  *   harness_cwd: string | null;
- *   harness_config: { model?: string | null, reasoningEffort?: "low" | "medium" | "high" | "max" | null, sandboxMode?: string | null, approvalPolicy?: string | null };
+ *   harness_config: Record<string, { model?: string | null, reasoningEffort?: "low" | "medium" | "high" | "max" | null, sandboxMode?: string | null, approvalPolicy?: string | null }>;
  *   harness_session_id: string | null;
  *   harness_session_kind: HarnessSessionRef["kind"] | null;
  *   harness_session_history: HarnessSessionHistoryEntry[];
@@ -180,6 +181,23 @@ export async function initStore(injectedDb){
         WHERE harness_session_id IS NULL
           AND sdk_session_id IS NOT NULL
       `;
+      {
+        const { rows } = await db.sql`
+          SELECT chat_id, harness, harness_config
+          FROM chats
+          WHERE harness_config IS NOT NULL
+        `;
+        for (const row of rows) {
+          const normalizedConfig = normalizeHarnessConfig(row.harness_config, row.harness);
+          if (JSON.stringify(normalizedConfig) !== JSON.stringify(row.harness_config ?? {})) {
+            await db.sql`
+              UPDATE chats
+              SET harness_config = ${JSON.stringify(normalizedConfig)}
+              WHERE chat_id = ${row.chat_id}
+            `;
+          }
+        }
+      }
       {
         const { rows } = await db.sql`
           SELECT chat_id, sdk_session_history, harness_session_history
