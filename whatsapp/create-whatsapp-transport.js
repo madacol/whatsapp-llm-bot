@@ -27,12 +27,15 @@ export async function createWhatsAppTransport() {
 
   /** @type {(turn: ChatTurn) => Promise<void>} */
   let onTurn = async () => {};
+  /** @type {import('@whiskeysockets/baileys').WASocket | null} */
+  let currentSocket = null;
 
   /**
    * Clear all transport-owned runtime state and timers.
    * @returns {void}
    */
   function clearRuntimeState() {
+    currentSocket = null;
     confirmRuntime.clear();
     selectRuntime.clear();
     reactionRuntime.clear();
@@ -50,12 +53,17 @@ export async function createWhatsAppTransport() {
    * @returns {void}
    */
   function registerHandlers(sock, saveCreds) {
+    currentSocket = sock;
+
     sock.ev.process(async (events) => {
       if (connectionSupervisor.isStopped()) {
         return;
       }
 
       if (events["connection.update"]) {
+        if (events["connection.update"].connection === "close" && currentSocket === sock) {
+          currentSocket = null;
+        }
         await connectionSupervisor.handleConnectionUpdate(events["connection.update"], sock);
       }
 
@@ -94,6 +102,8 @@ export async function createWhatsAppTransport() {
                 confirmRuntime,
                 selectRuntime,
                 reactionRuntime,
+                undefined,
+                { getSocket: () => currentSocket },
               );
               continue;
             default:

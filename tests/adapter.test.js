@@ -451,6 +451,41 @@ describe("createTurnIo", () => {
     assert.equal(sentMessages.length, 1);
     assert.equal(sentMessages[0]?.options?.quoted, undefined);
   });
+
+  it("routes outbound replies through the latest live socket after reconnect", async () => {
+    const oldSocket = createMockSock();
+    const newSocket = createMockSock();
+    /** @type {BaileysSocket | null} */
+    let currentSocket = oldSocket.sock;
+
+    const io = createTurnIo({
+      sock: oldSocket.sock,
+      getSocket: () => currentSocket,
+      chatId: "test-chat",
+      message: /** @type {BaileysMessage} */ ({
+        key: {
+          remoteJid: "test-chat",
+          fromMe: false,
+          id: "incoming-msg-2",
+        },
+      }),
+      senderIds: ["sender-1"],
+      isGroup: false,
+      selectRuntime: createSelectRuntime(),
+      confirmRuntime: oldSocket.registry,
+      reactionRuntime: createReactionRuntime(),
+    });
+
+    currentSocket = newSocket.sock;
+    await io.reply({
+      kind: "content",
+      source: "llm",
+      content: "Recovered send",
+    });
+
+    assert.equal(oldSocket.sentMessages.length, 0);
+    assert.equal(newSocket.sentMessages.length, 1);
+  });
 });
 
 describe("HD receive integration", () => {
