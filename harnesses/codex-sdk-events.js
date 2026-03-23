@@ -1,5 +1,5 @@
 import { normalizeCodexFileChange } from "./codex-file-events.js";
-import { extractCodexText, isCodexEventRecord } from "./codex-event-utils.js";
+import { extractCodexText, isCodexEventRecord, normalizeCodexUsage } from "./codex-event-utils.js";
 import {
   extractCollabToolArguments,
   extractCollabToolOutput,
@@ -56,21 +56,9 @@ export function normalizeCodexEvent(event) {
   const eventType = typeof event.type === "string" ? event.type : null;
   const item = isCodexEventRecord(event.item) ? event.item : null;
   const itemType = item && typeof item.type === "string" ? item.type : null;
-  const usage = isCodexEventRecord(event.usage) ? event.usage : null;
 
   if (eventType === "turn.completed") {
-    normalized.usage = {
-      promptTokens: typeof usage?.input_tokens === "number"
-        ? usage.input_tokens
-        : typeof event.input_tokens === "number" ? event.input_tokens : 0,
-      completionTokens: typeof usage?.output_tokens === "number"
-        ? usage.output_tokens
-        : typeof event.output_tokens === "number" ? event.output_tokens : 0,
-      cachedTokens: typeof usage?.cached_input_tokens === "number"
-        ? usage.cached_input_tokens
-        : typeof event.cached_input_tokens === "number" ? event.cached_input_tokens : 0,
-      cost: 0,
-    };
+    normalized.usage = normalizeCodexUsage(event, event);
     return normalized;
   }
 
