@@ -429,4 +429,39 @@ describe("codex events", () => {
       planText: "Replanning around user steer.\nRead failing test\nPatch issue",
     });
   });
+
+  it("normalizes Codex App Server nested token usage updates", () => {
+    assert.deepEqual(normalizeCodexAppServerEvent({
+      method: "thread/tokenUsage/updated",
+      params: {
+        threadId: "thr_123",
+        turnId: "turn_456",
+        tokenUsage: {
+          total: {
+            totalTokens: 12246,
+            inputTokens: 12227,
+            cachedInputTokens: 9600,
+            outputTokens: 19,
+            reasoningOutputTokens: 12,
+          },
+          last: {
+            totalTokens: 12246,
+            inputTokens: 12227,
+            cachedInputTokens: 9600,
+            outputTokens: 19,
+            reasoningOutputTokens: 12,
+          },
+          modelContextWindow: 258400,
+        },
+      },
+    }), {
+      sessionId: "thr_123",
+      usage: {
+        promptTokens: 12227,
+        completionTokens: 19,
+        cachedTokens: 9600,
+        cost: 0,
+      },
+    });
+  });
 });
