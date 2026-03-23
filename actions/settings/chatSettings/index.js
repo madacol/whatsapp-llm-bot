@@ -4,7 +4,7 @@ import config from "../../../config.js";
 import { validateModel, getModelModalities } from "../../../models-cache.js";
 import { getChatOrThrow } from "../../../store.js";
 import { ROLE_DEFINITIONS, resolveModel } from "../../../model-roles.js";
-import { listHarnesses } from "../../../harnesses/index.js";
+import { listHarnesses } from "#harnesses";
 
 /**
  * Role names that use model_roles JSONB for per-chat overrides.

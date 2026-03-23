@@ -4,6 +4,12 @@
 
 import { createNativeHarness } from "./native.js";
 import { createCodexHarness } from "./codex.js";
+import { getSandboxEscapeRequest } from "./sandbox-approval.js";
+import { confirmSandboxEscape } from "./sandbox-approval-coordinator.js";
+import { createLogger } from "../logger.js";
+import { errorToString } from "../utils.js";
+
+const log = createLogger("harnesses");
 
 /** @type {Map<string, () => AgentHarness>} */
 const registry = new Map();
@@ -124,6 +130,50 @@ export async function waitForAllHarnesses() {
       .map(h => /** @type {() => Promise<string[]>} */ (h.waitForIdle)())
   );
   return results.flat();
+}
+
+/**
+ * Register optional harness implementations that may not be installed in every environment.
+ * Missing optional dependencies are ignored quietly; other failures are logged.
+ * @returns {Promise<void>}
+ */
+export async function registerOptionalHarnesses() {
+  try {
+    const { createClaudeAgentSdkHarness } = await import("./claude-agent-sdk.js");
+    registerHarness("claude-agent-sdk", createClaudeAgentSdkHarness);
+  } catch (error) {
+    const message = errorToString(error);
+    if (message.includes("Cannot find") || message.includes("MODULE_NOT_FOUND")) {
+      log.debug("Claude Agent SDK not installed, skipping harness registration");
+      return;
+    }
+    log.warn("Failed to load Claude Agent SDK harness:", message);
+  }
+}
+
+/**
+ * Confirm a harness-style sandbox escape request when one is required.
+ * Returns `true` when no sandbox escape is needed or the user allows it.
+ * @param {{
+ *   toolName: string,
+ *   input: Record<string, unknown>,
+ *   confirm: (message: string) => Promise<boolean>,
+ *   workdir?: string | null,
+ *   sandboxMode?: HarnessRunConfig["sandboxMode"] | null,
+ *   additionalWritableRoots?: string[] | null,
+ * }} input
+ * @returns {Promise<boolean>}
+ */
+export async function confirmHarnessSandboxEscape(input) {
+  const request = getSandboxEscapeRequest(input.toolName, input.input, {
+    workdir: input.workdir ?? null,
+    sandboxMode: input.sandboxMode ?? null,
+    additionalWritableRoots: input.additionalWritableRoots ?? null,
+  });
+  if (!request) {
+    return true;
+  }
+  return confirmSandboxEscape(request, input.confirm);
 }
 
 // Re-export commonly used constants from native harness

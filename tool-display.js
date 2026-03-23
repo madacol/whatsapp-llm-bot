@@ -5,7 +5,7 @@
  * display and inspect policy lives in `presentation/whatsapp.js`.
  */
 
-import { parseToolArgs } from "./harnesses/index.js";
+import { parseToolArgs } from "#harnesses";
 import {
   buildToolPresentation,
   classifyCommandActivity,
