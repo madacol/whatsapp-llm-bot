@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   extractCodexSessionId,
   extractCodexText,
+  normalizeCodexAppServerEvent,
   normalizeCodexEvent,
 } from "../harnesses/codex-events.js";
 
@@ -381,6 +382,51 @@ describe("codex events", () => {
     }), {
       sessionId: null,
       failureMessage: "The model is not supported.",
+    });
+  });
+
+  it("normalizes Codex App Server steerable web search events", () => {
+    assert.deepEqual(normalizeCodexAppServerEvent({
+      method: "item/started",
+      params: {
+        threadId: "thr_123",
+        item: {
+          id: "web_1",
+          type: "webSearch",
+          action: {
+            type: "openPage",
+            url: "https://example.com/page",
+          },
+        },
+      },
+    }), {
+      sessionId: "thr_123",
+      toolEvent: {
+        id: "web_1",
+        name: "open",
+        arguments: {
+          open: [{ ref_id: "https://example.com/page" }],
+        },
+        status: "started",
+      },
+    });
+  });
+
+  it("normalizes Codex App Server turn steering plan updates", () => {
+    assert.deepEqual(normalizeCodexAppServerEvent({
+      method: "turn/plan/updated",
+      params: {
+        threadId: "thr_123",
+        turnId: "turn_456",
+        explanation: "Replanning around user steer.",
+        plan: [
+          { step: "Read failing test", status: "inProgress" },
+          { step: "Patch issue", status: "pending" },
+        ],
+      },
+    }), {
+      sessionId: "thr_123",
+      planText: "Replanning around user steer.\nRead failing test\nPatch issue",
     });
   });
 });

@@ -5,6 +5,7 @@
 import { createLogger } from "../logger.js";
 import { NO_OP_HOOKS } from "./native.js";
 import { isHandledCodexRunError, startCodexRun } from "./codex-runner.js";
+import { startCodexAppServerRun } from "./codex-app-server-runner.js";
 import { extractCodexText } from "./codex-event-utils.js";
 import { createCodexCommandHandler } from "./codex-commands.js";
 import { getCodexAvailableModels } from "./codex-models.js";
@@ -22,7 +23,7 @@ const log = createLogger("harness:codex");
 const CODEX_HARNESS_CAPABILITIES = {
   supportsResume: true,
   supportsCancel: true,
-  supportsLiveInput: false,
+  supportsLiveInput: true,
   supportsApprovals: true,
   supportsWorkdir: true,
   supportsSandboxConfig: true,
@@ -47,6 +48,8 @@ function isLegacyClaudeModel(model) {
  * @typedef {{
  *   abortController: AbortController;
  *   done: Promise<{ result: AgentResult, sessionId: string | null }>;
+ *   steer?: (text: string) => boolean | Promise<boolean>;
+ *   interrupt?: () => boolean | Promise<boolean>;
  *   aborted: boolean;
  * }} ActiveCodexRun
  */
@@ -54,7 +57,12 @@ function isLegacyClaudeModel(model) {
 /**
  * @typedef {{
  *   getAvailableModels?: () => Promise<Array<{ id: string, label: string }>>,
- *   startRun?: typeof startCodexRun,
+ *   startRun?: (input: Parameters<typeof startCodexRun>[0]) => Promise<{
+ *     abortController: AbortController,
+ *     done: Promise<{ result: AgentResult, sessionId: string | null }>,
+ *     steer?: (text: string) => boolean | Promise<boolean>,
+ *     interrupt?: () => boolean | Promise<boolean>,
+ *   }>,
  * }} CodexHarnessDeps
  */
 
@@ -67,7 +75,7 @@ export function createCodexHarness(deps = {}) {
   /** @type {Map<string, ActiveCodexRun>} */
   const activeRuns = new Map();
   const loadAvailableModels = deps.getAvailableModels ?? getCodexAvailableModels;
-  const beginRun = deps.startRun ?? startCodexRun;
+  const beginRun = deps.startRun ?? startCodexAppServerRun;
   const handleCommand = createCodexCommandHandler({
     getAvailableModels: loadAvailableModels,
     cancelActiveQuery: cancel,
@@ -78,9 +86,24 @@ export function createCodexHarness(deps = {}) {
     getCapabilities: () => CODEX_HARNESS_CAPABILITIES,
     run,
     handleCommand,
+    injectMessage,
     cancel,
     waitForIdle,
   };
+
+  /**
+   * @param {string | HarnessSessionRef} chatId
+   * @param {string} text
+   * @returns {Promise<boolean>}
+   */
+  async function injectMessage(chatId, text) {
+    const key = typeof chatId === "string" ? chatId : chatId.id;
+    const active = activeRuns.get(key);
+    if (!active?.steer || !text) {
+      return false;
+    }
+    return !!(await active.steer(text));
+  }
 
   /**
    * @param {string | HarnessSessionRef} chatId
@@ -93,6 +116,13 @@ export function createCodexHarness(deps = {}) {
       return false;
     }
     active.aborted = true;
+    if (active.interrupt) {
+      void Promise.resolve(active.interrupt()).catch((error) => {
+        log.warn("Codex interrupt failed, falling back to abort:", error);
+        active.abortController.abort();
+      });
+      return true;
+    }
     active.abortController.abort();
     return true;
   }
@@ -139,6 +169,8 @@ export function createCodexHarness(deps = {}) {
       activeRun = {
         abortController: started.abortController,
         done: started.done,
+        ...(started.steer && { steer: started.steer }),
+        ...(started.interrupt && { interrupt: started.interrupt }),
         aborted: false,
       };
       activeRuns.set(session.chatId, activeRun);

@@ -422,3 +422,191 @@ export function normalizeCodexEvent(event) {
 
   return normalized;
 }
+
+/**
+ * Normalize a Codex App Server JSON-RPC message into the semantic event shape
+ * used by the harness wrapper.
+ * @param {unknown} message
+ * @returns {NormalizedCodexEvent | null}
+ */
+export function normalizeCodexAppServerEvent(message) {
+  if (!isCodexEventRecord(message)) {
+    return null;
+  }
+
+  const method = typeof message.method === "string" ? message.method : null;
+  const params = isCodexEventRecord(message.params) ? message.params : null;
+  if (!method || !params) {
+    return null;
+  }
+
+  /** @type {NormalizedCodexEvent} */
+  const normalized = {
+    sessionId: typeof params.threadId === "string"
+      ? params.threadId
+      : isCodexEventRecord(params.thread) && typeof params.thread.id === "string"
+        ? params.thread.id
+        : null,
+  };
+
+  if (method === "error") {
+    normalized.failureMessage = extractCodexText(params.error) ?? extractCodexText(params) ?? "Codex run failed.";
+    return normalized;
+  }
+
+  if (method === "turn/completed") {
+    const turn = isCodexEventRecord(params.turn) ? params.turn : null;
+    const turnStatus = typeof turn?.status === "string" ? turn.status : null;
+    if (turnStatus === "failed") {
+      normalized.failureMessage = extractCodexText(turn?.error) ?? "Codex run failed.";
+      return normalized;
+    }
+    return normalized;
+  }
+
+  if (method === "turn/plan/updated") {
+    const plan = Array.isArray(params.plan) ? params.plan : [];
+    const lines = plan
+      .filter(isCodexEventRecord)
+      .map((entry) => typeof entry.step === "string" ? entry.step : null)
+      .filter((line) => typeof line === "string" && line.length > 0);
+    if (typeof params.explanation === "string" && params.explanation.length > 0) {
+      lines.unshift(params.explanation);
+    }
+    normalized.planText = lines.join("\n") || undefined;
+    return normalized;
+  }
+
+  if (method === "thread/tokenUsage/updated") {
+    const usage = isCodexEventRecord(params.usage)
+      ? params.usage
+      : isCodexEventRecord(params.tokenUsage) ? params.tokenUsage : null;
+    if (usage) {
+      normalized.usage = {
+        promptTokens: typeof usage.input_tokens === "number"
+          ? usage.input_tokens
+          : typeof usage.inputTokens === "number" ? usage.inputTokens : 0,
+        completionTokens: typeof usage.output_tokens === "number"
+          ? usage.output_tokens
+          : typeof usage.outputTokens === "number" ? usage.outputTokens : 0,
+        cachedTokens: typeof usage.cached_input_tokens === "number"
+          ? usage.cached_input_tokens
+          : typeof usage.cachedInputTokens === "number" ? usage.cachedInputTokens : 0,
+        cost: typeof usage.cost === "number" ? usage.cost : 0,
+      };
+    }
+    return normalized;
+  }
+
+  if (method !== "item/started" && method !== "item/completed") {
+    return normalized;
+  }
+
+  const item = isCodexEventRecord(params.item) ? params.item : null;
+  const itemType = item && typeof item.type === "string" ? item.type : null;
+  if (!item || !itemType) {
+    return normalized;
+  }
+
+  if (itemType === "commandExecution") {
+    const command = extractCommandText(item);
+    if (command) {
+      normalized.commandEvent = {
+        command,
+        status: method === "item/started"
+          ? "started"
+          : item.status === "failed" || item.status === "declined" ? "failed" : "completed",
+        ...(extractCommandOutput(item) ? { output: extractCommandOutput(item) } : {}),
+      };
+    }
+    return normalized;
+  }
+
+  if (itemType === "agentMessage" && method === "item/completed") {
+    normalized.assistantText = typeof item.text === "string" ? item.text : extractCodexText(item) ?? undefined;
+    return normalized;
+  }
+
+  if (itemType === "mcpToolCall" || itemType === "dynamicToolCall" || itemType === "collabToolCall") {
+    const id = typeof item.id === "string" ? item.id : null;
+    const name = typeof item.tool === "string"
+      ? itemType === "collabToolCall" ? normalizeCollabToolName(item.tool) : item.tool
+      : null;
+    if (id && name) {
+      normalized.toolEvent = {
+        id,
+        name,
+        arguments: itemType === "collabToolCall"
+          ? extractCollabToolArguments(item)
+          : isCodexEventRecord(item.arguments) ? item.arguments : {},
+        status: method === "item/started"
+          ? "started"
+          : item.status === "failed" || item.status === "declined" || isCodexEventRecord(item.error)
+            ? "failed"
+            : "completed",
+        ...(itemType === "collabToolCall"
+          ? { output: extractCollabToolOutput(item) }
+          : itemType === "dynamicToolCall"
+            ? { output: extractCodexText(item.contentItems) ?? extractCodexText(item.success) ?? undefined }
+            : { output: extractToolResultOutput(item.result) ?? extractCodexText(item.error) ?? undefined }),
+      };
+    }
+    return normalized;
+  }
+
+  if (itemType === "webSearch") {
+    const id = typeof item.id === "string" ? item.id : null;
+    if (!id) {
+      return normalized;
+    }
+
+    const action = isCodexEventRecord(item.action) ? item.action : null;
+    const actionType = typeof action?.type === "string" ? action.type : "search";
+    if (actionType === "openPage" && typeof action?.url === "string") {
+      normalized.toolEvent = {
+        id,
+        name: "open",
+        arguments: { open: [{ ref_id: action.url }] },
+        status: method === "item/started" ? "started" : "completed",
+      };
+      return normalized;
+    }
+    if (actionType === "findInPage" && typeof action?.url === "string" && typeof action?.pattern === "string") {
+      normalized.toolEvent = {
+        id,
+        name: "find",
+        arguments: { find: [{ ref_id: action.url, pattern: action.pattern }] },
+        status: method === "item/started" ? "started" : "completed",
+      };
+      return normalized;
+    }
+
+    const query = typeof item.query === "string"
+      ? item.query
+      : Array.isArray(action?.queries) && typeof action?.queries[0] === "string" ? action.queries[0] : null;
+    if (query) {
+      normalized.toolEvent = {
+        id,
+        name: "search_query",
+        arguments: { search_query: [{ q: query }] },
+        status: method === "item/started" ? "started" : "completed",
+      };
+    }
+    return normalized;
+  }
+
+  if (itemType === "plan" && method === "item/completed") {
+    normalized.planText = typeof item.text === "string" ? item.text : extractPlanText(item) ?? undefined;
+    return normalized;
+  }
+
+  if (method === "item/completed" && itemType === "fileChange") {
+    const fileChange = normalizeCodexFileChange(item);
+    if (fileChange) {
+      normalized.fileChange = fileChange;
+    }
+    return normalized;
+  }
+
+  return normalized;
+}
