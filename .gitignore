@@ -10,3 +10,4 @@ auth_info_baileys
 data/
 .claude/worktrees/
 .bot.pid
+.madabot/
