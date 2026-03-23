@@ -15,8 +15,8 @@
         "dev": "node --max-old-space-size=2560 --watch index.js",
         "start": "while node --max-old-space-size=2560 index.js; do sleep 1; done",
         "restart": "kill $(cat .bot.pid)",
-        "test": "node --test --experimental-test-isolation=none tests/*.test.js",
-        "test:watch": "node --test --experimental-test-isolation=none --watch tests/*.test.js",
+        "test": "node scripts/test-runner.js",
+        "test:watch": "node scripts/test-runner.js --watch",
         "test:prompts": "node --test tests/*.prompt-test.js",
         "type-check": "npx tsc --noEmit --project jsconfig.json",
         "optimize-prompt": "node scripts/optimize-prompt.js"

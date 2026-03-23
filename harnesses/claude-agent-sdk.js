@@ -24,6 +24,7 @@ import { getRootDb } from "../db.js";
 import { handleHarnessSessionCommand } from "./session-commands.js";
 import { getSandboxEscapeRequest } from "./sandbox-approval.js";
 import { requestSandboxEscapeApproval } from "./sandbox-approval-coordinator.js";
+import { buildSdkErrorResponse, clearStaleHarnessSession } from "./harness-run-errors.js";
 
 const log = createLogger("harness:claude-agent-sdk");
 
@@ -918,14 +919,13 @@ export function createClaudeAgentSdkHarness() {
 
         // If resume failed (session not found / corrupt), clear the stale session ID
         // so the next message starts fresh instead of hitting the same error.
-        if (existingSessionId && !resolvedSessionId) {
-          log.warn(`Resume failed for session ${existingSessionId}, clearing stale session ID`);
-          try {
-            await saveClaudeSessionId(session, null);
-          } catch (clearErr) {
-            log.error("Failed to clear stale SDK session ID:", clearErr);
-          }
-        }
+        await clearStaleHarnessSession({
+          existingSessionId,
+          resolvedSessionId,
+          clearSession: async () => saveClaudeSessionId(session, null),
+          log,
+          harnessLabel: "Claude SDK",
+        });
 
         log.error("Claude Agent SDK query failed:", err);
         if (stderrLines.length > 0) {
@@ -936,7 +936,7 @@ export function createClaudeAgentSdkHarness() {
           displayMsg += `\n\nHint: The harness_cwd is set to "${workdir}" — make sure this path exists. Use \`!config harness_cwd <path>\` to fix it.`;
         }
         await hooks.onToolError(displayMsg);
-        result.response = [{ type: "text", text: `SDK error: ${displayMsg}` }];
+        result.response = buildSdkErrorResponse(displayMsg);
       }
     } finally {
       activeQueries.delete(session.chatId);
