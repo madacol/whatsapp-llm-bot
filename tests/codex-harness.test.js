@@ -164,6 +164,68 @@ describe("createCodexHarness", () => {
     ]);
     assert.ok(replies.at(-1)?.includes("Codex permissions: `danger-full-access`"));
   });
+
+  it("clears the saved Codex session and returns an SDK error response when a resumed run fails", async () => {
+    /** @type {Array<{ chatId: string, session: HarnessSessionRef | null }>} */
+    const savedSessions = [];
+    /** @type {string[]} */
+    const errors = [];
+    const harness = createCodexHarness({
+      startRun: async () => ({
+        abortController: new AbortController(),
+        done: Promise.reject(new Error("Codex Exec exited with code 1: Reading prompt from stdin...")),
+      }),
+    });
+
+    const result = await harness.run({
+      session: {
+        chatId: "codex-chat-4",
+        senderIds: [],
+        context: /** @type {ExecuteActionContext} */ ({
+          chatId: "codex-chat-4",
+          senderIds: [],
+          content: [],
+          getIsAdmin: async () => true,
+          send: async () => undefined,
+          reply: async () => undefined,
+          reactToMessage: async () => {},
+          select: async () => "",
+          confirm: async () => true,
+        }),
+        addMessage: async () => undefined,
+        updateToolMessage: async () => undefined,
+        harnessSession: { id: "sess-stale", kind: "codex" },
+        saveHarnessSession: async (chatId, session) => {
+          savedSessions.push({ chatId, session });
+        },
+      },
+      llmConfig: {
+        llmClient: /** @type {LlmClient} */ ({}),
+        chatModel: null,
+        externalInstructions: "",
+        toolRuntime: /** @type {ToolRuntime} */ ({
+          getTool: async () => null,
+          executeTool: async () => {
+            throw new Error("executeTool should not be called");
+          },
+        }),
+      },
+      messages: [{ role: "user", content: [{ type: "text", text: "Continue" }] }],
+      hooks: {
+        onToolError: async (message) => {
+          errors.push(message);
+        },
+      },
+      runConfig: undefined,
+    });
+
+    assert.deepEqual(savedSessions, [{ chatId: "codex-chat-4", session: null }]);
+    assert.deepEqual(errors, ["Codex Exec exited with code 1: Reading prompt from stdin..."]);
+    assert.deepEqual(result.response, [{
+      type: "text",
+      text: "SDK error: Codex Exec exited with code 1: Reading prompt from stdin...",
+    }]);
+  });
 });
 
 describe("buildCodexThreadOptions", () => {

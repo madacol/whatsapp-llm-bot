@@ -2,6 +2,7 @@ import { Codex } from "@openai/codex-sdk";
 import { createLogger } from "../logger.js";
 import { buildToolPresentation, getToolFlowDescriptor } from "../tool-presentation-model.js";
 import { toolCallUpdate, toolFlowInspectState, toolFlowUpdate, toolInspectState } from "../outbound-events.js";
+import { errorToString } from "../utils.js";
 import { normalizeCodexEvent } from "./codex-events.js";
 import { analyzeCodexCommand } from "./codex-command-semantics.js";
 import { createCodexRunState } from "./codex-run-state.js";
@@ -15,6 +16,20 @@ import { createCodexSyntheticToolAdapter } from "./codex-synthetic-tools.js";
 
 const log = createLogger("harness:codex-runner");
 
+class HandledCodexRunError extends Error {
+  /**
+   * @param {string} message
+   * @param {unknown} [cause]
+   */
+  constructor(message, cause) {
+    super(message);
+    this.name = "HandledCodexRunError";
+    if (cause !== undefined) {
+      this.cause = cause;
+    }
+  }
+}
+
 /** @type {Pick<Required<AgentIOHooks>, "onAskUser" | "onToolCall" | "onCommand" | "onFileRead" | "onPlan" | "onFileChange" | "onLlmResponse" | "onToolError" | "onUsage">} */
 const DEFAULT_CODEX_RUN_HOOKS = {
   onAskUser: async () => "",
@@ -27,6 +42,14 @@ const DEFAULT_CODEX_RUN_HOOKS = {
   onToolError: async () => {},
   onUsage: async () => {},
 };
+
+/**
+ * @param {unknown} error
+ * @returns {error is HandledCodexRunError}
+ */
+export function isHandledCodexRunError(error) {
+  return error instanceof HandledCodexRunError;
+}
 
 /**
  * @typedef {{
@@ -232,8 +255,6 @@ async function runCodexAttempt(input) {
     usage: { promptTokens: 0, completionTokens: 0, cachedTokens: 0, cost: 0 },
   };
 
-  const turnInput = buildCodexTurnInput(input.prompt, input.externalInstructions);
-  const streamed = await thread.runStreamed(turnInput, { signal: input.abortController.signal });
   let lastAssistantText = null;
   /** @type {string | null} */
   let failureMessage = null;
@@ -248,6 +269,9 @@ async function runCodexAttempt(input) {
   const activeFlows = new Map();
 
   try {
+    const turnInput = buildCodexTurnInput(input.prompt, input.externalInstructions);
+    const streamed = await thread.runStreamed(turnInput, { signal: input.abortController.signal });
+
     for await (const event of streamed.events) {
       const normalized = normalizeCodexEvent(event);
       if (!normalized) {
@@ -429,12 +453,14 @@ async function runCodexAttempt(input) {
     }
     if (error instanceof CodexSandboxDeniedError) {
       await input.hooks.onToolError(error.message);
-      throw error;
+      throw new HandledCodexRunError(error.message, error);
     }
     if (input.isAborted?.() || isAbortError(error)) {
       return { result, sessionId: thread.id };
     }
-    throw error;
+    const errorMessage = errorToString(error);
+    await input.hooks.onToolError(errorMessage);
+    throw new HandledCodexRunError(errorMessage, error);
   }
 
   if (lastAssistantText) {
@@ -443,7 +469,7 @@ async function runCodexAttempt(input) {
 
   if (failureMessage) {
     await input.hooks.onToolError(failureMessage);
-    throw new Error(failureMessage);
+    throw new HandledCodexRunError(failureMessage);
   }
 
   if (result.usage.promptTokens > 0 || result.usage.completionTokens > 0 || result.usage.cachedTokens > 0) {
