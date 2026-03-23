@@ -130,7 +130,7 @@ async function cacheIsFresh(deps) {
  * @returns {Promise<boolean>}
  */
 async function probeCodexModel(modelId) {
-  const codex = new Codex({ codexPathOverride: "codex" });
+  const codex = new Codex();
   const thread = codex.startThread({
     model: modelId,
     skipGitRepoCheck: true,

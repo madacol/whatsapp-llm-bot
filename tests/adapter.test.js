@@ -18,9 +18,13 @@ let createConfirmRuntime;
 
 /** @type {typeof import("../whatsapp/runtime/select-runtime.js").createSelectRuntime} */
 let createSelectRuntime;
+/** @type {typeof import("../whatsapp/runtime/reaction-runtime.js").createReactionRuntime} */
+let createReactionRuntime;
 
 /** @type {typeof import("../whatsapp/inbound/chat-turn.js").adaptIncomingMessage} */
 let adaptIncomingMessage;
+/** @type {typeof import("../whatsapp/inbound/chat-turn.js").createTurnIo} */
+let createTurnIo;
 
 before(async () => {
   // Seed DB cache so initStore() in index.js uses in-memory DB
@@ -30,7 +34,8 @@ before(async () => {
   ({ getMessageContent } = await import("../whatsapp/inbound/message-content.js"));
   ({ createConfirmRuntime } = await import("../whatsapp/runtime/confirm-runtime.js"));
   ({ createSelectRuntime } = await import("../whatsapp/runtime/select-runtime.js"));
-  ({ adaptIncomingMessage } = await import("../whatsapp/inbound/chat-turn.js"));
+  ({ createReactionRuntime } = await import("../whatsapp/runtime/reaction-runtime.js"));
+  ({ adaptIncomingMessage, createTurnIo } = await import("../whatsapp/inbound/chat-turn.js"));
 });
 
 /**
@@ -96,22 +101,22 @@ function createHdImageMessage({ chatId, messageId, pairedMediaType, parentMessag
 
 /**
  * Create a mock Baileys socket and confirm registry for testing.
- * @returns {{ sock: any, registry: ReturnType<typeof createConfirmRuntime>, sentMessages: any[], reactions: any[], emitReaction: (key: any, reaction: any) => void }}
+ * @returns {{ sock: any, registry: ReturnType<typeof createConfirmRuntime>, sentMessages: Array<{ chatId: string, msg: any, key: { id: string, remoteJid: string }, options?: Record<string, unknown> }>, reactions: any[], emitReaction: (key: any, reaction: any) => void }}
  */
 function createMockSock() {
-  /** @type {any[]} */
+  /** @type {Array<{ chatId: string, msg: any, key: { id: string, remoteJid: string }, options?: Record<string, unknown> }>} */
   const sentMessages = [];
   /** @type {any[]} */
   const reactions = [];
 
   const sock = {
-    sendMessage: async (/** @type {string} */ chatId, /** @type {any} */ msg) => {
+    sendMessage: async (/** @type {string} */ chatId, /** @type {any} */ msg, /** @type {Record<string, unknown> | undefined} */ options) => {
       if (msg.react) {
         reactions.push(msg.react);
         return null;
       }
       const key = { id: `msg-${sentMessages.length}`, remoteJid: chatId };
-      sentMessages.push({ chatId, msg, key });
+      sentMessages.push({ chatId, msg, key, options });
       return { key };
     },
   };
@@ -414,6 +419,37 @@ describe("getMessageContent", () => {
       }),
     );
     assert.equal(await withTimeout(secondImage.getHd ?? Promise.resolve(null), 50), "timeout");
+  });
+});
+
+describe("createTurnIo", () => {
+  it("sends reply events as plain messages instead of quoted replies", async () => {
+    const { sock, registry, sentMessages } = createMockSock();
+    const io = createTurnIo({
+      sock,
+      chatId: "test-chat",
+      message: /** @type {BaileysMessage} */ ({
+        key: {
+          remoteJid: "test-chat",
+          fromMe: false,
+          id: "incoming-msg-1",
+        },
+      }),
+      senderIds: ["sender-1"],
+      isGroup: false,
+      selectRuntime: createSelectRuntime(),
+      confirmRuntime: registry,
+      reactionRuntime: createReactionRuntime(),
+    });
+
+    await io.reply({
+      kind: "content",
+      source: "llm",
+      content: "Plain send",
+    });
+
+    assert.equal(sentMessages.length, 1);
+    assert.equal(sentMessages[0]?.options?.quoted, undefined);
   });
 });
 

@@ -159,7 +159,7 @@ export function createTurnIo({
 }) {
   return {
     send: (event) => sendEvent(sock, chatId, event, undefined, reactionRuntime),
-    reply: (event) => sendEvent(sock, chatId, event, { quoted: message }, reactionRuntime),
+    reply: (event) => sendEvent(sock, chatId, event, undefined, reactionRuntime),
     select: selectRuntime.createSelect(sock, chatId),
     confirm: confirmRuntime.createConfirm(sock, chatId),
     react: async (emoji) => {

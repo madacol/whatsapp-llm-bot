@@ -75,6 +75,49 @@ describe("buildCodexTurnInput", () => {
 });
 
 describe("startCodexRun", () => {
+  it("uses the SDK-managed Codex binary by default", async () => {
+    /** @type {import("@openai/codex-sdk").CodexOptions | undefined} */
+    let receivedOptions;
+
+    const started = await startCodexRun({
+      chatId: "codex-chat",
+      prompt: "Continue",
+      messages: [{ role: "user", content: [{ type: "text", text: "Continue" }] }],
+    }, {
+      createCodex: (options) => {
+        receivedOptions = options;
+        return {
+          startThread: () => ({
+            id: "sess-123",
+            runStreamed: async () => ({
+              events: (async function* () {
+                yield {
+                  type: "thread.started",
+                  thread_id: "sess-123",
+                };
+                yield {
+                  type: "turn.completed",
+                  usage: {
+                    input_tokens: 0,
+                    output_tokens: 0,
+                    cached_input_tokens: 0,
+                  },
+                };
+              })(),
+            }),
+          }),
+          resumeThread: () => {
+            throw new Error("resumeThread should not be called");
+          },
+        };
+      },
+    });
+
+    await started.done;
+
+    assert.deepEqual(receivedOptions, {});
+  });
+
   it("returns streamed assistant text from SDK events", async () => {
     /** @type {string[]} */
     const commands = [];
