@@ -2,10 +2,10 @@ import { Codex } from "@openai/codex-sdk";
 import { createLogger } from "../logger.js";
 import { buildToolPresentation, getToolFlowDescriptor } from "../tool-presentation-model.js";
 import { toolCallUpdate, toolFlowInspectState, toolFlowUpdate, toolInspectState } from "../outbound-events.js";
-import { errorToString } from "../utils.js";
 import { normalizeCodexEvent } from "./codex-events.js";
 import { analyzeCodexCommand } from "./codex-command-semantics.js";
 import { createCodexRunState } from "./codex-run-state.js";
+import { ReportedHarnessRunError, reportHarnessRunError, isReportedHarnessRunError } from "./harness-run-errors.js";
 import { getSandboxEscapeRequest } from "./sandbox-approval.js";
 import {
   appendSandboxWritableRoot,
@@ -15,20 +15,6 @@ import {
 import { createCodexSyntheticToolAdapter } from "./codex-synthetic-tools.js";
 
 const log = createLogger("harness:codex-runner");
-
-class HandledCodexRunError extends Error {
-  /**
-   * @param {string} message
-   * @param {unknown} [cause]
-   */
-  constructor(message, cause) {
-    super(message);
-    this.name = "HandledCodexRunError";
-    if (cause !== undefined) {
-      this.cause = cause;
-    }
-  }
-}
 
 /** @type {Pick<Required<AgentIOHooks>, "onAskUser" | "onToolCall" | "onCommand" | "onFileRead" | "onPlan" | "onFileChange" | "onLlmResponse" | "onToolError" | "onUsage">} */
 const DEFAULT_CODEX_RUN_HOOKS = {
@@ -45,10 +31,10 @@ const DEFAULT_CODEX_RUN_HOOKS = {
 
 /**
  * @param {unknown} error
- * @returns {error is HandledCodexRunError}
+ * @returns {error is ReportedHarnessRunError}
  */
 export function isHandledCodexRunError(error) {
-  return error instanceof HandledCodexRunError;
+  return isReportedHarnessRunError(error);
 }
 
 /**
@@ -453,14 +439,12 @@ async function runCodexAttempt(input) {
     }
     if (error instanceof CodexSandboxDeniedError) {
       await input.hooks.onToolError(error.message);
-      throw new HandledCodexRunError(error.message, error);
+      throw new ReportedHarnessRunError(error.message, error);
     }
     if (input.isAborted?.() || isAbortError(error)) {
       return { result, sessionId: thread.id };
     }
-    const errorMessage = errorToString(error);
-    await input.hooks.onToolError(errorMessage);
-    throw new HandledCodexRunError(errorMessage, error);
+    throw await reportHarnessRunError(error, input.hooks.onToolError);
   }
 
   if (lastAssistantText) {
@@ -469,7 +453,7 @@ async function runCodexAttempt(input) {
 
   if (failureMessage) {
     await input.hooks.onToolError(failureMessage);
-    throw new HandledCodexRunError(failureMessage);
+    throw new ReportedHarnessRunError(failureMessage);
   }
 
   if (result.usage.promptTokens > 0 || result.usage.completionTokens > 0 || result.usage.cachedTokens > 0) {

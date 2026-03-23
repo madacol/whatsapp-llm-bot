@@ -3,12 +3,12 @@
  */
 
 import { createLogger } from "../logger.js";
-import { errorToString } from "../utils.js";
 import { NO_OP_HOOKS } from "./native.js";
 import { isHandledCodexRunError, startCodexRun } from "./codex-runner.js";
 import { extractCodexText } from "./codex-event-utils.js";
 import { createCodexCommandHandler } from "./codex-commands.js";
 import { getCodexAvailableModels } from "./codex-models.js";
+import { buildSdkErrorResponse, clearStaleHarnessSession, getHarnessRunErrorMessage } from "./harness-run-errors.js";
 import {
   getCodexSessionId,
   saveCodexSession,
@@ -137,21 +137,19 @@ export function createCodexHarness(deps = {}) {
 
       return completed.result;
     } catch (error) {
-      if (sessionId) {
-        log.warn(`Codex run failed for saved session ${sessionId}; clearing persisted session`);
-        try {
-          await saveCodexSession(session, null);
-        } catch (clearError) {
-          log.error("Failed to clear stale Codex session ID:", clearError);
-        }
-      }
+      await clearStaleHarnessSession({
+        existingSessionId: sessionId,
+        clearSession: async () => saveCodexSession(session, null),
+        log,
+        harnessLabel: "Codex",
+      });
 
-      const errorMessage = errorToString(error);
+      const errorMessage = getHarnessRunErrorMessage(error);
       if (!isHandledCodexRunError(error)) {
         await hooks.onToolError(errorMessage);
       }
       return {
-        response: [{ type: "text", text: `SDK error: ${errorMessage}` }],
+        response: buildSdkErrorResponse(errorMessage),
         messages,
         usage: { promptTokens: 0, completionTokens: 0, cachedTokens: 0, cost: 0 },
       };
