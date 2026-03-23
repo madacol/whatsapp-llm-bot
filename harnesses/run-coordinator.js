@@ -15,30 +15,37 @@
  * The coordinator does not execute runs itself; it only mediates lifecycle.
  *
  * @returns {{
- *   beginRun: (input: { chatId: string, userText: string, harness: AgentHarness }) => HarnessRunDecision,
+ *   beginRun: (input: { turn: ChatTurn, userText: string, harness: AgentHarness }) => HarnessRunDecision,
  *   markRunActive: (chatId: string) => void,
  *   consumeBufferedTexts: (chatId: string) => string[],
- *   finishRun: (chatId: string) => void,
+ *   finishRun: (chatId: string) => ChatTurn | null,
  * }}
  */
 export function createHarnessRunCoordinator() {
-  /** @type {Map<string, { bufferedTexts: string[], isActive: boolean }>} */
+  /** @type {Map<string, { bufferedTexts: string[], queuedTurns: ChatTurn[], isActive: boolean }>} */
   const pendingRuns = new Map();
 
   return {
-    beginRun({ chatId, userText, harness }) {
-      if (userText) {
-        const pending = pendingRuns.get(chatId);
-        if (pending) {
-          if (pending.isActive && harness.injectMessage?.(chatId, userText)) {
-            return { status: "injected" };
-          }
-          pending.bufferedTexts.push(userText);
+    beginRun({ turn, userText, harness }) {
+      const { chatId } = turn;
+      const pending = pendingRuns.get(chatId);
+      if (pending) {
+        if (pending.isActive && userText && harness.injectMessage?.(chatId, userText)) {
+          return { status: "injected" };
+        }
+        if (pending.isActive) {
+          pending.queuedTurns.push(turn);
           return { status: "buffered" };
         }
+        if (userText) {
+          pending.bufferedTexts.push(userText);
+        } else {
+          pending.queuedTurns.push(turn);
+        }
+        return { status: "buffered" };
       }
 
-      pendingRuns.set(chatId, { bufferedTexts: [], isActive: false });
+      pendingRuns.set(chatId, { bufferedTexts: [], queuedTurns: [], isActive: false });
       return { status: "started" };
     },
 
@@ -60,7 +67,19 @@ export function createHarnessRunCoordinator() {
     },
 
     finishRun(chatId) {
+      const pending = pendingRuns.get(chatId);
+      if (!pending) {
+        return null;
+      }
+
+      const nextTurn = pending.queuedTurns.at(-1) ?? null;
+      if (!nextTurn) {
+        pendingRuns.delete(chatId);
+        return null;
+      }
+
       pendingRuns.delete(chatId);
+      return nextTurn;
     },
   };
 }

@@ -163,7 +163,7 @@ export function createConversationRunner({ store, llmClient, getActionsFn, execu
    *   harness: AgentHarness,
    *   isSlashCommand?: boolean,
    * }} input
-   * @returns {Promise<void>}
+   * @returns {Promise<ChatTurn | null>}
    */
   async function handleLlmMessage({ turn, chatInfo, context, actions, actionResolver, firstBlock, persona, harness, isSlashCommand }) {
     const { chatId, senderIds, content, senderName, facts } = turn;
@@ -171,31 +171,39 @@ export function createConversationRunner({ store, llmClient, getActionsFn, execu
     const willRespond = isSlashCommand || shouldRespond(chatInfo, facts);
 
     let systemPromptSuffix = "";
+    let userText = firstBlock?.text ?? "";
+    /** @type {IncomingContentBlock[]} */
+    let messageContent = content;
     if (firstBlock) {
       const formatted = formatUserMessage(firstBlock, facts.isGroup, senderName, time);
-      firstBlock.text = formatted.formattedText;
       systemPromptSuffix = formatted.systemPromptSuffix;
+      userText = formatted.formattedText;
+      const firstBlockIndex = content.indexOf(firstBlock);
+      messageContent = content.map((block, index) => (
+        index === firstBlockIndex
+          ? { ...firstBlock, text: formatted.formattedText }
+          : block
+      ));
     }
 
     /** @type {UserMessage} */
-    const message = { role: "user", content };
+    const message = { role: "user", content: messageContent };
     await addMessage(chatId, message, senderIds);
 
     if (!willRespond) {
-      return;
+      return null;
     }
 
     log.debug("LLM will respond");
 
-    const userText = firstBlock?.text ?? "";
-    const lifecycleDecision = runCoordinator.beginRun({ chatId, userText, harness });
+    const lifecycleDecision = runCoordinator.beginRun({ turn, userText, harness });
     if (lifecycleDecision.status === "buffered") {
       log.debug("Buffered message for pending harness run on chat", chatId);
-      return;
+      return null;
     }
     if (lifecycleDecision.status === "injected") {
       log.debug("Injected message into active harness query for chat", chatId);
-      return;
+      return null;
     }
 
     /** Send "composing" presence, swallowing errors. */
@@ -209,6 +217,8 @@ export function createConversationRunner({ store, llmClient, getActionsFn, execu
 
     await sendComposing();
 
+    /** @type {ChatTurn | null} */
+    let nextTurn = null;
     try {
       const hooks = buildAgentIoHooks(context, sendComposing, buildRunConfig(chatId, chatInfo, turn.chatName, harness.getName()).workdir ?? null);
       runCoordinator.markRunActive(chatId);
@@ -245,21 +255,23 @@ export function createConversationRunner({ store, llmClient, getActionsFn, execu
         // best effort
       }
     } finally {
-      runCoordinator.finishRun(chatId);
+      nextTurn = runCoordinator.finishRun(chatId);
       try {
         await turn.io.setWorking(false);
       } catch (err) {
         log.debug("Could not send paused signal:", errorToString(err));
       }
     }
+
+    return nextTurn;
   }
 
   /**
    * Handle one normalized chat turn from the transport.
    * @param {ChatTurn} turn
-   * @returns {Promise<void>}
+   * @returns {Promise<ChatTurn | null>}
    */
-  async function handleMessage(turn) {
+  async function handleSingleMessage(turn) {
     const { chatId, senderIds, content } = turn;
 
     log.debug("INCOMING MESSAGE:", JSON.stringify(turn, null, 2));
@@ -292,14 +304,15 @@ export function createConversationRunner({ store, llmClient, getActionsFn, execu
     const firstBlock = content.find(isTextBlock);
 
     if (firstBlock?.text?.startsWith("!")) {
-      return handleCommandMessage({ chatId, senderIds, content, firstBlock, chatInfo, context, actions, actionResolver });
+      await handleCommandMessage({ chatId, senderIds, content, firstBlock, chatInfo, context, actions, actionResolver });
+      return null;
     }
 
     const isSlashCommand = firstBlock?.text?.startsWith("/");
     if (isSlashCommand && firstBlock) {
       if (!chatInfo?.is_enabled) {
         await context.reply(contentEvent("error", "Bot is not enabled in this chat. Use !config enabled true"));
-        return;
+        return null;
       }
 
       const slashCommand = firstBlock.text.slice(1).trim().toLowerCase();
@@ -315,7 +328,7 @@ export function createConversationRunner({ store, llmClient, getActionsFn, execu
         },
       });
       if (handled) {
-        return;
+        return null;
       }
     }
 
@@ -332,5 +345,13 @@ export function createConversationRunner({ store, llmClient, getActionsFn, execu
     });
   }
 
-  return { handleMessage };
+  return {
+    async handleMessage(turn) {
+      /** @type {ChatTurn | null} */
+      let nextTurn = turn;
+      while (nextTurn) {
+        nextTurn = await handleSingleMessage(nextTurn);
+      }
+    },
+  };
 }

@@ -47,6 +47,19 @@ afterEach(() => {
 /** @param {string} chatId @param {{enabled?: boolean, systemPrompt?: string | null, model?: string | null}} [options] */
 const seedChat = (chatId, options) => seedChat_(db, chatId, options);
 
+/**
+ * @param {Message[]} messages
+ * @returns {string}
+ */
+function getLastUserText(messages) {
+  const lastMessage = messages.at(-1);
+  assert.ok(lastMessage, "Expected a final message");
+  assert.equal(lastMessage.role, "user");
+  const textBlock = lastMessage.content.find((block) => block.type === "text");
+  assert.ok(textBlock, "Expected the last user message to include text");
+  return textBlock.text;
+}
+
 describe("createConversationRunner with codex harness", () => {
   it("shows a startup failure, clears the stale session, and recovers on the next turn", async () => {
     await seedChat("conv-codex-recover", { enabled: true });
@@ -119,5 +132,87 @@ describe("createConversationRunner with codex harness", () => {
     assert.equal(chat?.harness_session_id, "sess-fresh");
     assert.equal(chat?.harness_session_kind, "codex");
     assert.deepEqual(seenSessionIds, ["sess-stale", null]);
+  });
+
+  it("queues buffered turns until the active Codex run completes", async () => {
+    await seedChat("conv-codex-queue", { enabled: true });
+    await db.sql`
+      UPDATE chats
+      SET harness = 'codex',
+          harness_config = '{}'::jsonb
+      WHERE chat_id = 'conv-codex-queue'
+    `;
+
+    /** @type {string[]} */
+    const seenPrompts = [];
+    /** @type {() => void} */
+    let releaseFirstRun = () => {};
+    const firstRunReleased = new Promise((resolve) => {
+      releaseFirstRun = resolve;
+    });
+    /** @type {() => void} */
+    let notifyFirstRunStarted = () => {};
+    const firstRunStarted = new Promise((resolve) => {
+      notifyFirstRunStarted = resolve;
+    });
+    let runCount = 0;
+
+    registerHarness("codex", () => createCodexHarness({
+      startRun: async (input) => {
+        runCount += 1;
+        const prompt = getLastUserText(input.messages);
+        seenPrompts.push(prompt);
+
+        return {
+          abortController: new AbortController(),
+          done: (async () => {
+            await input.hooks?.onLlmResponse?.(`Response for ${prompt}`);
+            if (runCount === 1) {
+              notifyFirstRunStarted();
+              await firstRunReleased;
+            }
+            return {
+              sessionId: null,
+              result: {
+                response: [{ type: "markdown", text: `Response for ${prompt}` }],
+                messages: input.messages,
+                usage: { promptTokens: 0, completionTokens: 0, cachedTokens: 0, cost: 0 },
+              },
+            };
+          })(),
+        };
+      },
+    }));
+
+    const firstTurn = createChatTurn({
+      chatId: "conv-codex-queue",
+      content: [{ type: "text", text: "First question" }],
+    });
+    const secondTurn = createChatTurn({
+      chatId: "conv-codex-queue",
+      content: [{ type: "text", text: "Second question" }],
+    });
+
+    const firstTurnPromise = handleMessage(firstTurn.context);
+    await firstRunStarted;
+
+    await handleMessage(secondTurn.context);
+    assert.equal(seenPrompts.length, 1);
+    assert.ok(seenPrompts[0]?.includes("First question"));
+
+    releaseFirstRun();
+    await firstTurnPromise;
+
+    assert.equal(seenPrompts.length, 2);
+    assert.ok(seenPrompts[0]?.includes("First question"));
+    assert.ok(seenPrompts[1]?.includes("Second question"));
+    assert.ok(
+      firstTurn.responses.some((response) => response.text.includes("Response for") && response.text.includes("First question")),
+      `Expected the first turn to respond, got: ${firstTurn.responses.map((response) => response.text).join(" | ")}`,
+    );
+    assert.ok(
+      secondTurn.responses.some((response) => response.text.includes("Response for") && response.text.includes("Second question")),
+      `Expected the buffered second turn to run after the first completes, got: ${secondTurn.responses.map((response) => response.text).join(" | ")}`,
+    );
   });
 });
