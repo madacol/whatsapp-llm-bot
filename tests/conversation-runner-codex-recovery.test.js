@@ -134,7 +134,7 @@ describe("createConversationRunner with codex harness", () => {
     assert.deepEqual(seenSessionIds, ["sess-stale", null]);
   });
 
-  it("queues buffered turns until the active Codex run completes", async () => {
+  it("steers follow-up turns into the active Codex run", async () => {
     await seedChat("conv-codex-queue", { enabled: true });
     await db.sql`
       UPDATE chats
@@ -145,6 +145,8 @@ describe("createConversationRunner with codex harness", () => {
 
     /** @type {string[]} */
     const seenPrompts = [];
+    /** @type {string[]} */
+    const steeredPrompts = [];
     /** @type {() => void} */
     let releaseFirstRun = () => {};
     const firstRunReleased = new Promise((resolve) => {
@@ -165,6 +167,10 @@ describe("createConversationRunner with codex harness", () => {
 
         return {
           abortController: new AbortController(),
+          steer: async (text) => {
+            steeredPrompts.push(text);
+            return true;
+          },
           done: (async () => {
             await input.hooks?.onLlmResponse?.(`Response for ${prompt}`);
             if (runCount === 1) {
@@ -199,20 +205,18 @@ describe("createConversationRunner with codex harness", () => {
     await handleMessage(secondTurn.context);
     assert.equal(seenPrompts.length, 1);
     assert.ok(seenPrompts[0]?.includes("First question"));
+    assert.equal(steeredPrompts.length, 1);
+    assert.ok(steeredPrompts[0]?.includes("Second question"));
 
     releaseFirstRun();
     await firstTurnPromise;
 
-    assert.equal(seenPrompts.length, 2);
+    assert.equal(seenPrompts.length, 1);
     assert.ok(seenPrompts[0]?.includes("First question"));
-    assert.ok(seenPrompts[1]?.includes("Second question"));
     assert.ok(
       firstTurn.responses.some((response) => response.text.includes("Response for") && response.text.includes("First question")),
       `Expected the first turn to respond, got: ${firstTurn.responses.map((response) => response.text).join(" | ")}`,
     );
-    assert.ok(
-      secondTurn.responses.some((response) => response.text.includes("Response for") && response.text.includes("Second question")),
-      `Expected the buffered second turn to run after the first completes, got: ${secondTurn.responses.map((response) => response.text).join(" | ")}`,
-    );
+    assert.equal(secondTurn.responses.length, 0);
   });
 });

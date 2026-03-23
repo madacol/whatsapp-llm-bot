@@ -38,7 +38,7 @@ describe("createCodexHarness", () => {
     assert.deepEqual(harness.getCapabilities(), {
       supportsResume: true,
       supportsCancel: true,
-      supportsLiveInput: false,
+      supportsLiveInput: true,
       supportsApprovals: true,
       supportsWorkdir: true,
       supportsSandboxConfig: true,
@@ -313,6 +313,156 @@ describe("createCodexHarness", () => {
         model: "sonnet",
       },
     });
+  });
+
+  it("injects follow-up text into an active Codex run when the transport supports steering", async () => {
+    /** @type {string[]} */
+    const steerCalls = [];
+    /** @type {(value: { sessionId: string | null, result: AgentResult }) => void} */
+    let resolveDone = () => {};
+
+    const harness = createCodexHarness({
+      startRun: async (input) => ({
+        abortController: new AbortController(),
+        steer: async (text) => {
+          steerCalls.push(text);
+          return true;
+        },
+        interrupt: async () => true,
+        done: new Promise((resolve) => {
+          resolveDone = resolve;
+        }),
+      }),
+    });
+
+    const runPromise = harness.run({
+      session: {
+        chatId: "codex-chat-live-input",
+        senderIds: [],
+        context: /** @type {ExecuteActionContext} */ ({
+          chatId: "codex-chat-live-input",
+          senderIds: [],
+          content: [],
+          getIsAdmin: async () => true,
+          send: async () => undefined,
+          reply: async () => undefined,
+          reactToMessage: async () => {},
+          select: async () => "",
+          confirm: async () => true,
+        }),
+        addMessage: async () => undefined,
+        updateToolMessage: async () => undefined,
+        harnessSession: { id: "sess-live", kind: "codex" },
+        saveHarnessSession: async () => undefined,
+      },
+      llmConfig: {
+        llmClient: /** @type {LlmClient} */ ({}),
+        chatModel: null,
+        externalInstructions: "",
+        toolRuntime: /** @type {ToolRuntime} */ ({
+          getTool: async () => null,
+          executeTool: async () => {
+            throw new Error("executeTool should not be called");
+          },
+        }),
+      },
+      messages: [{ role: "user", content: [{ type: "text", text: "Continue" }] }],
+      hooks: {},
+      runConfig: undefined,
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const injected = await harness.injectMessage?.("codex-chat-live-input", "Actually check the failing test first");
+    assert.equal(injected, true);
+    assert.deepEqual(steerCalls, ["Actually check the failing test first"]);
+
+    resolveDone({
+      sessionId: "sess-live",
+      result: {
+        response: [{ type: "text", text: "ok" }],
+        messages: [{ role: "assistant", content: [{ type: "text", text: "ok" }] }],
+        usage: { promptTokens: 0, completionTokens: 0, cachedTokens: 0, cost: 0 },
+      },
+    });
+    await runPromise;
+  });
+
+  it("interrupts an active Codex run before falling back to abort", async () => {
+    /** @type {string[]} */
+    const calls = [];
+    /** @type {(value: { sessionId: string | null, result: AgentResult }) => void} */
+    let resolveDone = () => {};
+    const abortController = new AbortController();
+    abortController.signal.addEventListener("abort", () => {
+      calls.push("abort");
+    });
+
+    const harness = createCodexHarness({
+      startRun: async () => ({
+        abortController,
+        steer: async () => true,
+        interrupt: async () => {
+          calls.push("interrupt");
+          return true;
+        },
+        done: new Promise((resolve) => {
+          resolveDone = resolve;
+        }),
+      }),
+    });
+
+    const runPromise = harness.run({
+      session: {
+        chatId: "codex-chat-interrupt",
+        senderIds: [],
+        context: /** @type {ExecuteActionContext} */ ({
+          chatId: "codex-chat-interrupt",
+          senderIds: [],
+          content: [],
+          getIsAdmin: async () => true,
+          send: async () => undefined,
+          reply: async () => undefined,
+          reactToMessage: async () => {},
+          select: async () => "",
+          confirm: async () => true,
+        }),
+        addMessage: async () => undefined,
+        updateToolMessage: async () => undefined,
+        harnessSession: { id: "sess-interrupt", kind: "codex" },
+        saveHarnessSession: async () => undefined,
+      },
+      llmConfig: {
+        llmClient: /** @type {LlmClient} */ ({}),
+        chatModel: null,
+        externalInstructions: "",
+        toolRuntime: /** @type {ToolRuntime} */ ({
+          getTool: async () => null,
+          executeTool: async () => {
+            throw new Error("executeTool should not be called");
+          },
+        }),
+      },
+      messages: [{ role: "user", content: [{ type: "text", text: "Continue" }] }],
+      hooks: {},
+      runConfig: undefined,
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const cancelled = await harness.cancel?.("codex-chat-interrupt");
+    assert.equal(cancelled, true);
+    assert.deepEqual(calls, ["interrupt"]);
+
+    resolveDone({
+      sessionId: "sess-interrupt",
+      result: {
+        response: [],
+        messages: [],
+        usage: { promptTokens: 0, completionTokens: 0, cachedTokens: 0, cost: 0 },
+      },
+    });
+    await runPromise;
   });
 });
 
