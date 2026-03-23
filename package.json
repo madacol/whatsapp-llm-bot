@@ -8,6 +8,7 @@
     "type": "module",
     "main": "index.js",
     "imports": {
+        "#harnesses": "./harnesses/index.js",
         "#whatsapp": "./whatsapp/index.js"
     },
     "scripts": {

@@ -1,4 +1,4 @@
-import { MAX_TOOL_CALL_DEPTH, parseToolArgs } from "../harnesses/index.js";
+import { MAX_TOOL_CALL_DEPTH, parseToolArgs } from "#harnesses";
 import { buildToolPresentation } from "../tool-presentation-model.js";
 import { contentEvent, planEvent, toolCallEvent, usageEvent } from "../outbound-events.js";
 import { createCodexDisplayHooks } from "./codex-hook-display.js";

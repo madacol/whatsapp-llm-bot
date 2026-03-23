@@ -1,4 +1,4 @@
-import { resolveHarness, resolveHarnessName } from "./harnesses/index.js";
+import { resolveHarness, resolveHarnessName } from "#harnesses";
 import { getActions, getAction, getChatAction, executeAction } from "./actions.js";
 import { createSilentActionContext } from "./execute-action-context.js";
 import { resolveChatModel } from "./model-roles.js";

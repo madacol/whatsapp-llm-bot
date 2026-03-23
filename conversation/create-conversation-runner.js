@@ -2,7 +2,7 @@ import { getChatAction, getChatActions, getAction } from "../actions.js";
 import { getAgent } from "../agents.js";
 import { getRootDb } from "../db.js";
 import { storeAndLinkHtml } from "../html-store.js";
-import { resolveHarness, resolveHarnessName, createHarnessRunCoordinator } from "../harnesses/index.js";
+import { resolveHarness, resolveHarnessName, createHarnessRunCoordinator } from "#harnesses";
 import { contentEvent } from "../outbound-events.js";
 import {
   shouldRespond,

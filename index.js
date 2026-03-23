@@ -7,14 +7,13 @@ import fs from "node:fs";
 import { getActions, executeAction } from "./actions.js";
 import config from "./config.js";
 import { createLlmClient } from "./llm.js";
-import { errorToString } from "./utils.js";
 import { createWhatsAppTransport } from "#whatsapp";
 import { startReminderDaemon } from "./reminder-daemon.js";
 import { startModelsCacheDaemon } from "./models-cache.js";
 import { initStore } from "./store.js";
 import { getRootDb } from "./db.js";
 import { startHtmlServer, stopHtmlServer } from "./html-server.js";
-import { registerHarness, waitForAllHarnesses } from "./harnesses/index.js";
+import { registerOptionalHarnesses, waitForAllHarnesses } from "#harnesses";
 import { createLogger } from "./logger.js";
 import { createConversationRunner } from "./conversation/create-conversation-runner.js";
 
@@ -48,17 +47,7 @@ export function createMessageHandler({ store, llmClient, getActionsFn, executeAc
 // ── Default initialization (production) ──
 
 // Register optional harnesses
-try {
-  const { createClaudeAgentSdkHarness } = await import("./harnesses/claude-agent-sdk.js");
-  registerHarness("claude-agent-sdk", createClaudeAgentSdkHarness);
-} catch (err) {
-  const msg = errorToString(err);
-  if (msg.includes("Cannot find") || msg.includes("MODULE_NOT_FOUND")) {
-    log.debug("Claude Agent SDK not installed, skipping harness registration");
-  } else {
-    log.warn("Failed to load Claude Agent SDK harness:", msg);
-  }
-}
+await registerOptionalHarnesses();
 
 if (!process.env.TESTING) {
   // Prevent duplicate instances: if old PID is still running, kill it first
