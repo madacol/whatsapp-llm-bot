@@ -137,6 +137,7 @@ async function resolveChatName(sock, chatId, isGroup, senderName) {
  * Create the message-scoped TurnIO functions.
  * @param {{
  *   sock: import('@whiskeysockets/baileys').WASocket;
+ *   getSocket?: () => import('@whiskeysockets/baileys').WASocket | null;
  *   chatId: string;
  *   message: BaileysMessage;
  *   senderIds: string[];
@@ -149,6 +150,7 @@ async function resolveChatName(sock, chatId, isGroup, senderName) {
  */
 export function createTurnIo({
   sock,
+  getSocket,
   chatId,
   message,
   senderIds,
@@ -157,24 +159,36 @@ export function createTurnIo({
   confirmRuntime,
   reactionRuntime,
 }) {
+  /**
+   * Resolve the current live socket for outbound operations.
+   * @returns {import('@whiskeysockets/baileys').WASocket}
+   */
+  function requireSocket() {
+    const activeSocket = getSocket ? getSocket() : sock;
+    if (!activeSocket) {
+      throw new Error("WhatsApp socket is not connected");
+    }
+    return activeSocket;
+  }
+
   return {
-    send: (event) => sendEvent(sock, chatId, event, undefined, reactionRuntime),
-    reply: (event) => sendEvent(sock, chatId, event, undefined, reactionRuntime),
+    send: (event) => sendEvent(requireSocket(), chatId, event, undefined, reactionRuntime),
+    reply: (event) => sendEvent(requireSocket(), chatId, event, undefined, reactionRuntime),
     select: selectRuntime.createSelect(sock, chatId),
     confirm: confirmRuntime.createConfirm(sock, chatId),
     react: async (emoji) => {
-      await sock.sendMessage(chatId, {
+      await requireSocket().sendMessage(chatId, {
         react: { text: emoji, key: message.key },
       });
     },
     setWorking: async (working) => {
-      await sock.sendPresenceUpdate(working ? "composing" : "paused", chatId);
+      await requireSocket().sendPresenceUpdate(working ? "composing" : "paused", chatId);
     },
     getIsAdmin: async () => {
       if (!isGroup) return true;
 
       try {
-        const groupMetadata = await sock.groupMetadata(chatId);
+        const groupMetadata = await requireSocket().groupMetadata(chatId);
         const participant = groupMetadata.participants.find((member) => senderIds.includes(member.id.split("@")[0]));
         return participant?.admin === "admin" || participant?.admin === "superadmin";
       } catch {
@@ -193,6 +207,7 @@ export function createTurnIo({
  * @param {import("../runtime/select-runtime.js").SelectRuntime} selectRuntime
  * @param {import("../runtime/reaction-runtime.js").ReactionRuntime} reactionRuntime
  * @param {(msg: BaileysMessage, type: "buffer", opts: {}) => Promise<Buffer>} [downloadFn]
+ * @param {{ getSocket?: () => import('@whiskeysockets/baileys').WASocket | null } | undefined} [ioOptions]
  * @returns {Promise<ChatTurn | null>}
  */
 export async function buildIncomingTurn(
@@ -202,6 +217,7 @@ export async function buildIncomingTurn(
   selectRuntime,
   reactionRuntime = createReactionRuntime(),
   downloadFn = downloadMediaMessage,
+  ioOptions,
 ) {
   const incomingEvent = classifyIncomingMessageEvent(baileysMessage);
   if (incomingEvent.kind !== "turn") {
@@ -229,6 +245,7 @@ export async function buildIncomingTurn(
   const chatName = await resolveChatName(sock, chatId, isGroup, senderName);
   const io = createTurnIo({
     sock,
+    getSocket: ioOptions?.getSocket,
     chatId,
     message: turnMessage,
     senderIds,
@@ -267,6 +284,7 @@ export async function buildIncomingTurn(
  * @param {import("../runtime/select-runtime.js").SelectRuntime} selectRuntime
  * @param {import("../runtime/reaction-runtime.js").ReactionRuntime} reactionRuntime
  * @param {(msg: BaileysMessage, type: "buffer", opts: {}) => Promise<Buffer>} [downloadFn]
+ * @param {{ getSocket?: () => import('@whiskeysockets/baileys').WASocket | null } | undefined} [ioOptions]
  * @returns {Promise<void>}
  */
 export async function adaptIncomingMessage(
@@ -277,6 +295,7 @@ export async function adaptIncomingMessage(
   selectRuntime,
   reactionRuntime = createReactionRuntime(),
   downloadFn = downloadMediaMessage,
+  ioOptions,
 ) {
   const turn = await buildIncomingTurn(
     baileysMessage,
@@ -285,6 +304,7 @@ export async function adaptIncomingMessage(
     selectRuntime,
     reactionRuntime,
     downloadFn,
+    ioOptions,
   );
 
   if (!turn) {
