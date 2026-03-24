@@ -25,7 +25,7 @@ function createSubject() {
       confirm: async () => true,
     },
     async () => {},
-    async () => {},
+    () => {},
     null,
   );
   return { hooks, sent };
@@ -59,8 +59,9 @@ function createSubjectWithWorkingSpy() {
     async () => {
       workingStates.push(true);
     },
-    async () => {
+    () => {
       workingStates.push(false);
+      workingStates.push(true);
     },
     null,
   );
@@ -95,7 +96,7 @@ function createSubjectWithCwd(cwd) {
       confirm: async () => true,
     },
     async () => {},
-    async () => {},
+    () => {},
     cwd,
   );
   return { hooks, sent };
@@ -119,6 +120,35 @@ describe("buildAgentIoHooks", () => {
 
     assert.equal(subject.sent.length, 2);
     assert.deepEqual(subject.workingStates, [false, true, false, true]);
+  });
+
+  it("does not wait for typing restarts before returning", async () => {
+    /** @type {(() => void) | undefined} */
+    let resolveRestart;
+    const hooks = buildAgentIoHooks(
+      {
+        send: async () => undefined,
+        reply: async () => undefined,
+        select: async () => "",
+        confirm: async () => true,
+      },
+      async () => {},
+      () => new Promise((resolve) => {
+        resolveRestart = resolve;
+      }),
+      null,
+    );
+
+    let completed = false;
+    const pending = hooks.onLlmResponse?.("Still working").then(() => {
+      completed = true;
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    assert.equal(completed, true, "Hook should resolve before the background typing restart completes");
+    resolveRestart?.();
+    await pending;
   });
 
   it("maps command start events to a tool-call message", async () => {
