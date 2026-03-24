@@ -330,6 +330,9 @@ export function createTurnIo({
     void presence.afterOutboundMessage().catch(() => {});
   }
 
+  const select = selectRuntime.createSelect(getSocket ?? sock, chatId);
+  const confirm = confirmRuntime.createConfirm(getSocket ?? sock, chatId);
+
   return {
     send: async (event) => {
       const handle = await sendEvent(requireSocket(), chatId, event, undefined, reactionRuntime);
@@ -341,8 +344,14 @@ export function createTurnIo({
       refreshComposingAfterOutboundMessage();
       return handle;
     },
-    select: selectRuntime.createSelect(getSocket ?? sock, chatId),
-    confirm: confirmRuntime.createConfirm(getSocket ?? sock, chatId),
+    select: async (question, options, config) => {
+      await presence.end().catch(() => {});
+      return select(question, options, config);
+    },
+    confirm: async (prompt, hooks) => {
+      await presence.end().catch(() => {});
+      return confirm(prompt, hooks);
+    },
     react: async (emoji) => {
       await requireSocket().sendMessage(chatId, {
         react: { text: emoji, key: message.key },
