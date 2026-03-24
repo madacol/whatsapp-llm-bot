@@ -48,7 +48,7 @@ export function getPollCreationData(msg) {
 /**
  * @typedef {{
  *   handlePollVote: (event: PollVoteEvent) => boolean;
- *   createSelect: (sock: SocketResolver, chatId: string) => (question: string, options: SelectOption[], config?: SelectConfig) => Promise<string>;
+ *   createSelect: (sock: SocketResolver, chatId: string, afterVisibleMessage?: () => void) => (question: string, options: SelectOption[], config?: SelectConfig) => Promise<string>;
  *   resolvePollVoteMessage: (message: import('@whiskeysockets/baileys').WAMessage, sock: import('@whiskeysockets/baileys').WASocket) => Promise<PollVoteEvent | null>;
  *   readonly size: number;
  *   clear: () => void;
@@ -239,9 +239,10 @@ export function createSelectRuntime() {
      * Create a select function scoped to a chat.
      * @param {SocketResolver} sock
      * @param {string} chatId
+     * @param {(() => void) | undefined} [afterVisibleMessage]
      * @returns {(question: string, options: SelectOption[], config?: SelectConfig) => Promise<string>}
      */
-    createSelect(sock, chatId) {
+    createSelect(sock, chatId, afterVisibleMessage) {
       const getSocket = createSocketGetter(sock);
 
       return async (question, options, config) => {
@@ -249,6 +250,7 @@ export function createSelectRuntime() {
         const sent = await requireSocket(getSocket).sendMessage(chatId, {
           poll: { name: question, values: labels, selectableCount: 1 },
         });
+        afterVisibleMessage?.();
         const pollMsgId = sent?.key?.id;
         const pollKey = sent?.key;
 
