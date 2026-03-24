@@ -411,6 +411,8 @@ type ToolDescriptor = {
 type AgentIOHooks = {
   /** Signal that the bot is working (e.g. WhatsApp "composing" presence). Fire-and-forget. */
   onComposing?: () => Promise<void>;
+  /** Signal that the bot stopped working (e.g. WhatsApp "paused" presence). Fire-and-forget. */
+  onPaused?: () => Promise<void>;
   onLlmResponse?: (text: string) => Promise<void>;
   /** Present a structured question to the user and wait for their response. Returns the chosen option text. */
   onAskUser?: (question: string, options: string[], preamble?: string, descriptions?: string[]) => Promise<string>;

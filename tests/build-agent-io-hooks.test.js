@@ -25,6 +25,7 @@ function createSubject() {
       confirm: async () => true,
     },
     async () => {},
+    async () => {},
     () => {},
     null,
   );
@@ -58,6 +59,9 @@ function createSubjectWithWorkingSpy() {
     },
     async () => {
       workingStates.push(true);
+    },
+    async () => {
+      workingStates.push(false);
     },
     () => {
       workingStates.push(true);
@@ -94,6 +98,7 @@ function createSubjectWithCwd(cwd) {
       select: async () => "",
       confirm: async () => true,
     },
+    async () => {},
     async () => {},
     () => {},
     cwd,
@@ -132,6 +137,7 @@ describe("buildAgentIoHooks", () => {
         select: async () => "",
         confirm: async () => true,
       },
+      async () => {},
       async () => {},
       () => new Promise((resolve) => {
         resolveRestart = resolve;
@@ -271,6 +277,7 @@ describe("buildAgentIoHooks", () => {
       },
       async () => {},
       async () => {},
+      () => {},
       null,
     );
 
@@ -319,6 +326,7 @@ describe("buildAgentIoHooks", () => {
       },
       async () => {},
       async () => {},
+      () => {},
       "/repo",
     );
 
@@ -366,6 +374,7 @@ describe("buildAgentIoHooks", () => {
       },
       async () => {},
       async () => {},
+      () => {},
       "/repo",
     );
 
