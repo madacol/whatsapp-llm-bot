@@ -224,6 +224,21 @@ export function createConversationRunner({ store, llmClient, getActionsFn, execu
       }
     };
 
+    let workingRefreshVersion = 0;
+    let workingStopped = false;
+
+    /** Restart typing in the background without delaying the next harness event. */
+    const restartWorking = () => {
+      const refreshVersion = ++workingRefreshVersion;
+      void (async () => {
+        await sendPaused();
+        if (workingStopped || refreshVersion !== workingRefreshVersion) {
+          return;
+        }
+        await sendComposing();
+      })();
+    };
+
     await sendComposing();
 
     /** @type {ChatTurn | null} */
@@ -232,7 +247,7 @@ export function createConversationRunner({ store, llmClient, getActionsFn, execu
       const hooks = buildAgentIoHooks(
         context,
         sendComposing,
-        sendPaused,
+        restartWorking,
         buildRunConfig(chatId, chatInfo, turn.chatName, harness.getName()).workdir ?? null,
       );
       runCoordinator.markRunActive(chatId);
@@ -270,6 +285,8 @@ export function createConversationRunner({ store, llmClient, getActionsFn, execu
       }
     } finally {
       nextTurn = runCoordinator.finishRun(chatId);
+      workingStopped = true;
+      workingRefreshVersion += 1;
       await sendPaused();
     }
 
