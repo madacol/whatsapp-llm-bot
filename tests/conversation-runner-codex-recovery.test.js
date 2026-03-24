@@ -220,7 +220,7 @@ describe("createConversationRunner with codex harness", () => {
     assert.equal(secondTurn.responses.length, 0);
   });
 
-  it("re-arms composing after intermediate Codex replies until the run finishes", async () => {
+  it("restarts typing after intermediate Codex replies and tool calls until the run finishes", async () => {
     await seedChat("conv-codex-presence", { enabled: true });
     await db.sql`
       UPDATE chats
@@ -234,6 +234,11 @@ describe("createConversationRunner with codex harness", () => {
         abortController: new AbortController(),
         done: (async () => {
           await input.hooks?.onLlmResponse?.("First Codex progress update");
+          await input.hooks?.onToolCall?.({
+            id: "dummy-tool-1",
+            name: "run_bash",
+            arguments: JSON.stringify({ command: "sleep 3" }),
+          });
           await input.hooks?.onLlmResponse?.("Final Codex answer");
           return {
             sessionId: null,
@@ -256,14 +261,47 @@ describe("createConversationRunner with codex harness", () => {
     const firstReplyIndex = turn.responses.findIndex((response) => response.text.includes("First Codex progress update"));
     assert.ok(firstReplyIndex >= 0, `Expected an intermediate Codex reply, got: ${turn.responses.map((response) => response.text).join(" | ")}`);
 
-    const composingAfterFirstReplyIndex = turn.responses.findIndex((response, index) => (
+    const pausedAfterFirstReplyIndex = turn.responses.findIndex((response, index) => (
       index > firstReplyIndex
+      && response.type === "sendPresenceUpdate"
+      && response.text === "paused"
+    ));
+    assert.ok(
+      pausedAfterFirstReplyIndex > firstReplyIndex,
+      `Expected typing to stop after the first Codex reply, got: ${turn.responses.map((response) => `${response.type}:${response.text}`).join(" | ")}`,
+    );
+
+    const composingAfterFirstReplyIndex = turn.responses.findIndex((response, index) => (
+      index > pausedAfterFirstReplyIndex
       && response.type === "sendPresenceUpdate"
       && response.text === "composing"
     ));
     assert.ok(
-      composingAfterFirstReplyIndex > firstReplyIndex,
-      `Expected composing to be re-armed after the first Codex reply, got: ${turn.responses.map((response) => `${response.type}:${response.text}`).join(" | ")}`,
+      composingAfterFirstReplyIndex > pausedAfterFirstReplyIndex,
+      `Expected typing to restart after the first Codex reply, got: ${turn.responses.map((response) => `${response.type}:${response.text}`).join(" | ")}`,
+    );
+
+    const toolCallIndex = turn.responses.findIndex((response) => response.type === "send" && response.text.includes("sleep 3"));
+    assert.ok(toolCallIndex > composingAfterFirstReplyIndex, `Expected a tool-call update after typing restarted, got: ${turn.responses.map((response) => `${response.type}:${response.text}`).join(" | ")}`);
+
+    const pausedAfterToolCallIndex = turn.responses.findIndex((response, index) => (
+      index > toolCallIndex
+      && response.type === "sendPresenceUpdate"
+      && response.text === "paused"
+    ));
+    assert.ok(
+      pausedAfterToolCallIndex > toolCallIndex,
+      `Expected typing to stop after the tool-call update, got: ${turn.responses.map((response) => `${response.type}:${response.text}`).join(" | ")}`,
+    );
+
+    const composingAfterToolCallIndex = turn.responses.findIndex((response, index) => (
+      index > pausedAfterToolCallIndex
+      && response.type === "sendPresenceUpdate"
+      && response.text === "composing"
+    ));
+    assert.ok(
+      composingAfterToolCallIndex > pausedAfterToolCallIndex,
+      `Expected typing to restart after the tool-call update, got: ${turn.responses.map((response) => `${response.type}:${response.text}`).join(" | ")}`,
     );
     assert.equal(turn.responses.at(-1)?.text, "paused");
   });

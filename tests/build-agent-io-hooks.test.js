@@ -25,6 +25,7 @@ function createSubject() {
       confirm: async () => true,
     },
     async () => {},
+    async () => {},
     null,
   );
   return { hooks, sent };
@@ -34,13 +35,14 @@ function createSubject() {
  * @returns {{
  *   hooks: AgentIOHooks,
  *   sent: Array<{ event: OutboundEvent, kind: "send" | "reply" }>,
- *   composingCalls: number,
+ *   workingStates: boolean[],
  * }}
  */
-function createSubjectWithComposingSpy() {
+function createSubjectWithWorkingSpy() {
   /** @type {Array<{ event: OutboundEvent, kind: "send" | "reply" }>} */
   const sent = [];
-  let composingCalls = 0;
+  /** @type {boolean[]} */
+  const workingStates = [];
   const hooks = buildAgentIoHooks(
     {
       send: async (event) => {
@@ -55,16 +57,17 @@ function createSubjectWithComposingSpy() {
       confirm: async () => true,
     },
     async () => {
-      composingCalls += 1;
+      workingStates.push(true);
+    },
+    async () => {
+      workingStates.push(false);
     },
     null,
   );
   return {
     hooks,
     sent,
-    get composingCalls() {
-      return composingCalls;
-    },
+    workingStates,
   };
 }
 
@@ -92,6 +95,7 @@ function createSubjectWithCwd(cwd) {
       confirm: async () => true,
     },
     async () => {},
+    async () => {},
     cwd,
   );
   return { hooks, sent };
@@ -108,13 +112,13 @@ describe("buildAgentIoHooks", () => {
   });
 
   it("re-arms composing after intermediate outbound progress messages", async () => {
-    const subject = createSubjectWithComposingSpy();
+    const subject = createSubjectWithWorkingSpy();
 
     await subject.hooks.onLlmResponse?.("Still working");
     await subject.hooks.onToolResult?.([{ type: "text", text: "Intermediate tool output" }]);
 
     assert.equal(subject.sent.length, 2);
-    assert.equal(subject.composingCalls, 2);
+    assert.deepEqual(subject.workingStates, [false, true, false, true]);
   });
 
   it("maps command start events to a tool-call message", async () => {
@@ -236,6 +240,7 @@ describe("buildAgentIoHooks", () => {
         confirm: async () => true,
       },
       async () => {},
+      async () => {},
       null,
     );
 
@@ -283,6 +288,7 @@ describe("buildAgentIoHooks", () => {
         confirm: async () => true,
       },
       async () => {},
+      async () => {},
       "/repo",
     );
 
@@ -328,6 +334,7 @@ describe("buildAgentIoHooks", () => {
         select: async () => "",
         confirm: async () => true,
       },
+      async () => {},
       async () => {},
       "/repo",
     );

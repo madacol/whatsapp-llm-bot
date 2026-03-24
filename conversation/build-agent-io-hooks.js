@@ -28,20 +28,22 @@ async function displayToolCall(toolCall, context, actionFormatter, cwd, toolCont
  * Build the AgentIOHooks wiring from a message context.
  * @param {Pick<ExecuteActionContext, "send" | "reply" | "select" | "confirm">} context
  * @param {() => Promise<void>} sendComposing
+ * @param {() => Promise<void>} sendPaused
  * @param {string | null} cwd
  * @returns {AgentIOHooks}
  */
-export function buildAgentIoHooks(context, sendComposing, cwd) {
+export function buildAgentIoHooks(context, sendComposing, sendPaused, cwd) {
   /**
-   * Re-arm WhatsApp composing after an outbound progress message.
-   * WhatsApp clears typing when a message is sent, so long-running runs need
-   * to refresh presence after intermediate output.
+   * Restart WhatsApp typing after an outbound progress message.
+   * WhatsApp clears typing when a message is sent, and some clients only show
+   * a fresh composing indicator after an explicit paused -> composing cycle.
    * @template T
    * @param {() => Promise<T>} emit
    * @returns {Promise<T>}
    */
   async function emitWhileWorking(emit) {
     const value = await emit();
+    await sendPaused();
     await sendComposing();
     return value;
   }

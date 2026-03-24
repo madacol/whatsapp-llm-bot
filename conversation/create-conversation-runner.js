@@ -215,12 +215,26 @@ export function createConversationRunner({ store, llmClient, getActionsFn, execu
       }
     };
 
+    /** Send "paused" presence, swallowing errors. */
+    const sendPaused = async () => {
+      try {
+        await turn.io.setWorking(false);
+      } catch (err) {
+        log.debug("Could not send paused signal:", errorToString(err));
+      }
+    };
+
     await sendComposing();
 
     /** @type {ChatTurn | null} */
     let nextTurn = null;
     try {
-      const hooks = buildAgentIoHooks(context, sendComposing, buildRunConfig(chatId, chatInfo, turn.chatName, harness.getName()).workdir ?? null);
+      const hooks = buildAgentIoHooks(
+        context,
+        sendComposing,
+        sendPaused,
+        buildRunConfig(chatId, chatInfo, turn.chatName, harness.getName()).workdir ?? null,
+      );
       runCoordinator.markRunActive(chatId);
 
       const runRequest = await buildHarnessRunRequest({
@@ -256,11 +270,7 @@ export function createConversationRunner({ store, llmClient, getActionsFn, execu
       }
     } finally {
       nextTurn = runCoordinator.finishRun(chatId);
-      try {
-        await turn.io.setWorking(false);
-      } catch (err) {
-        log.debug("Could not send paused signal:", errorToString(err));
-      }
+      await sendPaused();
     }
 
     return nextTurn;
