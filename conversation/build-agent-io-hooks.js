@@ -56,7 +56,7 @@ export function buildAgentIoHooks(context, sendComposing, refreshWorking, cwd) {
   return {
     onComposing: sendComposing,
     onLlmResponse: async (text) => {
-      await emitWhileWorking(() => context.reply(contentEvent("llm", [{ type: "markdown", text }])));
+      await context.reply(contentEvent("llm", [{ type: "markdown", text }]));
     },
     onAskUser: async (question, options, _preamble, descriptions) => {
       /** @type {Map<string, string>} */
@@ -74,7 +74,7 @@ export function buildAgentIoHooks(context, sendComposing, refreshWorking, cwd) {
       return labelMap.get(choice) ?? choice;
     },
     onToolCall: async (toolCall, formatToolCall, toolContext) => {
-      return emitWhileWorking(() => displayToolCall(toolCall, context, formatToolCall, cwd, toolContext));
+      return displayToolCall(toolCall, context, formatToolCall, cwd, toolContext);
     },
     onToolResult: async (blocks) => {
       await emitWhileWorking(() => context.send(contentEvent("tool-result", blocks)));
