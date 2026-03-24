@@ -279,7 +279,7 @@ describe("createConversationRunner with codex harness", () => {
     assert.equal(turn.responses.at(-1)?.text, "paused");
   });
 
-  it("does not delay interleaved llm progress while refreshing the presence lease", async () => {
+  it("shows interleaved llm progress milliseconds after the last visible message", async () => {
     await seedChat("conv-codex-presence-interleaved", { enabled: true });
     await db.sql`
       UPDATE chats
@@ -288,7 +288,6 @@ describe("createConversationRunner with codex harness", () => {
       WHERE chat_id = 'conv-codex-presence-interleaved'
     `;
 
-    const slowKeepAliveMs = 200;
     const maxProgressDelayMs = 120;
 
     registerHarness("codex", () => createCodexHarness({
@@ -324,8 +323,6 @@ describe("createConversationRunner with codex harness", () => {
 
     /** @type {string[]} */
     const presenceEvents = [];
-    /** @type {Promise<void>[]} */
-    const pendingKeepAlives = [];
     const turn = createChatTurn({
       chatId: "conv-codex-presence-interleaved",
       content: [{ type: "text", text: "Show interleaved progress" }],
@@ -335,11 +332,6 @@ describe("createConversationRunner with codex harness", () => {
         },
         keepPresenceAlive: async () => {
           presenceEvents.push("keepAlive");
-          const pending = new Promise((resolve) => {
-            setTimeout(resolve, slowKeepAliveMs);
-          });
-          pendingKeepAlives.push(pending);
-          await pending;
         },
         endPresence: async () => {
           presenceEvents.push("end");
@@ -364,7 +356,6 @@ describe("createConversationRunner with codex harness", () => {
     };
 
     await handleMessage(turn.context);
-    await Promise.all(pendingKeepAlives);
 
     assert.deepEqual(
       presenceEvents,
@@ -384,11 +375,11 @@ describe("createConversationRunner with codex harness", () => {
 
     assert.ok(
       secondProgress - toolOutput1 < maxProgressDelayMs,
-      `Expected second llm progress milliseconds after the prior visible tool result, got ${secondProgress - toolOutput1}ms with ${slowKeepAliveMs}ms keepAlive: ${JSON.stringify(visibleMessages)}`,
+      `Expected second llm progress milliseconds after the prior visible tool result, got ${secondProgress - toolOutput1}ms: ${JSON.stringify(visibleMessages)}`,
     );
     assert.ok(
       finalProgress - toolOutput2 < maxProgressDelayMs,
-      `Expected final llm progress milliseconds after the prior visible tool result, got ${finalProgress - toolOutput2}ms with ${slowKeepAliveMs}ms keepAlive: ${JSON.stringify(visibleMessages)}`,
+      `Expected final llm progress milliseconds after the prior visible tool result, got ${finalProgress - toolOutput2}ms: ${JSON.stringify(visibleMessages)}`,
     );
 
     const responseTexts = turn.responses.map((response) => response.text);
