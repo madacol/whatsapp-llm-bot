@@ -583,6 +583,59 @@ describe("createTurnIo", () => {
 
     await io.endPresence();
   });
+
+  it("re-sends composing after outbound messages while the lease is active", async () => {
+    /** @type {Array<{ presence: string, chatId: string }>} */
+    const presenceUpdates = [];
+    /** @type {Array<{ chatId: string, msg: Record<string, unknown>, options?: Record<string, unknown> }>} */
+    const sentMessages = [];
+    const io = createTurnIo({
+      sock: /** @type {import("@whiskeysockets/baileys").WASocket} */ (/** @type {unknown} */ ({
+        sendMessage: async (chatId, msg, options) => {
+          sentMessages.push({ chatId, msg, options });
+          return { key: { id: "sent-3", remoteJid: chatId } };
+        },
+        sendPresenceUpdate: async (presence, chatId) => {
+          presenceUpdates.push({ presence, chatId });
+        },
+      })),
+      chatId: "presence-chat",
+      message: /** @type {BaileysMessage} */ ({
+        key: {
+          remoteJid: "presence-chat",
+          fromMe: false,
+          id: "incoming-msg-5",
+        },
+      }),
+      senderIds: ["sender-1"],
+      isGroup: false,
+      selectRuntime: createSelectRuntime(),
+      confirmRuntime: createConfirmRuntime(),
+      reactionRuntime: createReactionRuntime(),
+      presenceConfig: {
+        defaultLeaseTtlMs: 50,
+        pulseIntervalMs: 500,
+      },
+    });
+
+    await io.startPresence(50);
+    presenceUpdates.length = 0;
+
+    await io.reply({
+      kind: "content",
+      source: "llm",
+      content: "Still working",
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    assert.equal(sentMessages.length, 1);
+    assert.deepEqual(presenceUpdates, [{
+      presence: "composing",
+      chatId: "presence-chat",
+    }]);
+
+    await io.endPresence();
+  });
 });
 
 describe("HD receive integration", () => {

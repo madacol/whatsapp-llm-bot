@@ -149,6 +149,7 @@ async function resolveChatName(sock, chatId, isGroup, senderName) {
  * @returns {{
  *   start: (ttlMs: number) => Promise<void>,
  *   keepAlive: (ttlMs?: number) => Promise<void>,
+ *   afterOutboundMessage: () => Promise<void>,
  *   end: () => Promise<void>,
  * }}
  */
@@ -255,6 +256,13 @@ function createPresenceLeaseController({
       leaseTtlMs = nextTtlMs;
       scheduleLeaseExpiry(nextTtlMs);
     },
+    afterOutboundMessage: async () => {
+      if (!active) {
+        return;
+      }
+      await sendPresenceUpdate("composing", chatId);
+      schedulePulse();
+    },
     end: async () => {
       await pauseAndRelease();
     },
@@ -313,9 +321,26 @@ export function createTurnIo({
     pulseIntervalMs: presenceConfig?.pulseIntervalMs,
   });
 
+  /**
+   * Re-assert composing after visible outbound messages without delaying the
+   * next harness step.
+   * @returns {void}
+   */
+  function refreshComposingAfterOutboundMessage() {
+    void presence.afterOutboundMessage().catch(() => {});
+  }
+
   return {
-    send: (event) => sendEvent(requireSocket(), chatId, event, undefined, reactionRuntime),
-    reply: (event) => sendEvent(requireSocket(), chatId, event, undefined, reactionRuntime),
+    send: async (event) => {
+      const handle = await sendEvent(requireSocket(), chatId, event, undefined, reactionRuntime);
+      refreshComposingAfterOutboundMessage();
+      return handle;
+    },
+    reply: async (event) => {
+      const handle = await sendEvent(requireSocket(), chatId, event, undefined, reactionRuntime);
+      refreshComposingAfterOutboundMessage();
+      return handle;
+    },
     select: selectRuntime.createSelect(getSocket ?? sock, chatId),
     confirm: confirmRuntime.createConfirm(getSocket ?? sock, chatId),
     react: async (emoji) => {
