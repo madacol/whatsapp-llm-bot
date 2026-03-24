@@ -13,8 +13,9 @@ import { createCodexEventDispatcher } from "./codex-event-dispatcher.js";
 
 const log = createLogger("harness:codex-runner");
 
-/** @type {Pick<Required<AgentIOHooks>, "onAskUser" | "onToolCall" | "onCommand" | "onFileRead" | "onPlan" | "onFileChange" | "onLlmResponse" | "onToolError" | "onUsage">} */
+/** @type {Pick<Required<AgentIOHooks>, "onComposing" | "onAskUser" | "onToolCall" | "onCommand" | "onFileRead" | "onPlan" | "onFileChange" | "onLlmResponse" | "onToolError" | "onUsage">} */
 const DEFAULT_CODEX_RUN_HOOKS = {
+  onComposing: async () => {},
   onAskUser: async () => "",
   onToolCall: async () => {},
   onCommand: async () => {},
@@ -141,7 +142,7 @@ function isAbortError(error) {
  *   messages: Message[],
  *   sessionId?: string | null,
  *   runConfig?: HarnessRunConfig,
- *   hooks?: Pick<AgentIOHooks, "onAskUser" | "onToolCall" | "onCommand" | "onFileRead" | "onPlan" | "onFileChange" | "onLlmResponse" | "onToolError" | "onUsage">,
+ *   hooks?: Pick<AgentIOHooks, "onComposing" | "onAskUser" | "onToolCall" | "onCommand" | "onFileRead" | "onPlan" | "onFileChange" | "onLlmResponse" | "onToolError" | "onUsage">,
  *   isAborted?: () => boolean,
  * }} input
  * @param {CodexRunnerDeps} [deps]
@@ -216,7 +217,7 @@ export async function startCodexRun(input, deps = {}) {
  *   messages: Message[],
  *   sessionId: string | null,
  *   runConfig?: HarnessRunConfig,
- *   hooks: Pick<Required<AgentIOHooks>, "onAskUser" | "onToolCall" | "onCommand" | "onFileRead" | "onPlan" | "onFileChange" | "onLlmResponse" | "onToolError" | "onUsage">,
+ *   hooks: Pick<Required<AgentIOHooks>, "onComposing" | "onAskUser" | "onToolCall" | "onCommand" | "onFileRead" | "onPlan" | "onFileChange" | "onLlmResponse" | "onToolError" | "onUsage">,
  *   isAborted?: () => boolean,
  *   codex: CodexClientLike,
  *   abortController: AbortController,
