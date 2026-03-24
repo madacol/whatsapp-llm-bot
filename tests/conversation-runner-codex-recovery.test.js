@@ -219,4 +219,52 @@ describe("createConversationRunner with codex harness", () => {
     );
     assert.equal(secondTurn.responses.length, 0);
   });
+
+  it("re-arms composing after intermediate Codex replies until the run finishes", async () => {
+    await seedChat("conv-codex-presence", { enabled: true });
+    await db.sql`
+      UPDATE chats
+      SET harness = 'codex',
+          harness_config = '{}'::jsonb
+      WHERE chat_id = 'conv-codex-presence'
+    `;
+
+    registerHarness("codex", () => createCodexHarness({
+      startRun: async (input) => ({
+        abortController: new AbortController(),
+        done: (async () => {
+          await input.hooks?.onLlmResponse?.("First Codex progress update");
+          await input.hooks?.onLlmResponse?.("Final Codex answer");
+          return {
+            sessionId: null,
+            result: {
+              response: [{ type: "markdown", text: "Final Codex answer" }],
+              messages: input.messages,
+              usage: { promptTokens: 0, completionTokens: 0, cachedTokens: 0, cost: 0 },
+            },
+          };
+        })(),
+      }),
+    }));
+
+    const turn = createChatTurn({
+      chatId: "conv-codex-presence",
+      content: [{ type: "text", text: "Show progress while you work" }],
+    });
+    await handleMessage(turn.context);
+
+    const firstReplyIndex = turn.responses.findIndex((response) => response.text.includes("First Codex progress update"));
+    assert.ok(firstReplyIndex >= 0, `Expected an intermediate Codex reply, got: ${turn.responses.map((response) => response.text).join(" | ")}`);
+
+    const composingAfterFirstReplyIndex = turn.responses.findIndex((response, index) => (
+      index > firstReplyIndex
+      && response.type === "sendPresenceUpdate"
+      && response.text === "composing"
+    ));
+    assert.ok(
+      composingAfterFirstReplyIndex > firstReplyIndex,
+      `Expected composing to be re-armed after the first Codex reply, got: ${turn.responses.map((response) => `${response.type}:${response.text}`).join(" | ")}`,
+    );
+    assert.equal(turn.responses.at(-1)?.text, "paused");
+  });
 });

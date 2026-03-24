@@ -31,6 +31,44 @@ function createSubject() {
 }
 
 /**
+ * @returns {{
+ *   hooks: AgentIOHooks,
+ *   sent: Array<{ event: OutboundEvent, kind: "send" | "reply" }>,
+ *   composingCalls: number,
+ * }}
+ */
+function createSubjectWithComposingSpy() {
+  /** @type {Array<{ event: OutboundEvent, kind: "send" | "reply" }>} */
+  const sent = [];
+  let composingCalls = 0;
+  const hooks = buildAgentIoHooks(
+    {
+      send: async (event) => {
+        sent.push({ event, kind: "send" });
+        return undefined;
+      },
+      reply: async (event) => {
+        sent.push({ event, kind: "reply" });
+        return undefined;
+      },
+      select: async () => "",
+      confirm: async () => true,
+    },
+    async () => {
+      composingCalls += 1;
+    },
+    null,
+  );
+  return {
+    hooks,
+    sent,
+    get composingCalls() {
+      return composingCalls;
+    },
+  };
+}
+
+/**
  * @param {string | null} cwd
  * @returns {{
  *   hooks: AgentIOHooks,
@@ -67,6 +105,16 @@ describe("buildAgentIoHooks", () => {
     assert.equal(sent.length, 1);
     assert.equal(sent[0].kind, "reply");
     assert.equal(sent[0].event.kind, "plan");
+  });
+
+  it("re-arms composing after intermediate outbound progress messages", async () => {
+    const subject = createSubjectWithComposingSpy();
+
+    await subject.hooks.onLlmResponse?.("Still working");
+    await subject.hooks.onToolResult?.([{ type: "text", text: "Intermediate tool output" }]);
+
+    assert.equal(subject.sent.length, 2);
+    assert.equal(subject.composingCalls, 2);
   });
 
   it("maps command start events to a tool-call message", async () => {
