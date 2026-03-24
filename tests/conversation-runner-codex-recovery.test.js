@@ -278,4 +278,82 @@ describe("createConversationRunner with codex harness", () => {
     );
     assert.equal(turn.responses.at(-1)?.text, "paused");
   });
+
+  it("keeps the presence lease aligned across interleaved tool activity and llm progress", async () => {
+    await seedChat("conv-codex-presence-interleaved", { enabled: true });
+    await db.sql`
+      UPDATE chats
+      SET harness = 'codex',
+          harness_config = '{}'::jsonb
+      WHERE chat_id = 'conv-codex-presence-interleaved'
+    `;
+
+    registerHarness("codex", () => createCodexHarness({
+      startRun: async (input) => ({
+        abortController: new AbortController(),
+        done: (async () => {
+          await input.hooks?.onLlmResponse?.("Initial progress update");
+          await input.hooks?.onToolCall?.({
+            id: "dummy-tool-1",
+            name: "run_bash",
+            arguments: JSON.stringify({ command: "sleep 5" }),
+          });
+          await input.hooks?.onToolResult?.([{ type: "text", text: "dummy tool output 1" }]);
+          await input.hooks?.onLlmResponse?.("Second progress update");
+          await input.hooks?.onToolCall?.({
+            id: "dummy-tool-2",
+            name: "run_bash",
+            arguments: JSON.stringify({ command: "sleep 20" }),
+          });
+          await input.hooks?.onToolResult?.([{ type: "text", text: "dummy tool output 2" }]);
+          await input.hooks?.onLlmResponse?.("Final interleaved answer");
+          return {
+            sessionId: null,
+            result: {
+              response: [{ type: "markdown", text: "Final interleaved answer" }],
+              messages: input.messages,
+              usage: { promptTokens: 0, completionTokens: 0, cachedTokens: 0, cost: 0 },
+            },
+          };
+        })(),
+      }),
+    }));
+
+    /** @type {string[]} */
+    const presenceEvents = [];
+    const turn = createChatTurn({
+      chatId: "conv-codex-presence-interleaved",
+      content: [{ type: "text", text: "Show interleaved progress" }],
+      io: {
+        startPresence: async () => {
+          presenceEvents.push("start");
+        },
+        keepPresenceAlive: async () => {
+          presenceEvents.push("keepAlive");
+        },
+        endPresence: async () => {
+          presenceEvents.push("end");
+        },
+      },
+    });
+
+    await handleMessage(turn.context);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    assert.deepEqual(
+      presenceEvents,
+      ["start", "keepAlive", "keepAlive", "end"],
+      `Expected only tool-result interleaving to refresh the lease, got: ${presenceEvents.join(" -> ")}`,
+    );
+
+    const responseTexts = turn.responses.map((response) => response.text);
+    assert.ok(
+      responseTexts.includes("Initial progress update")
+      && responseTexts.includes("dummy tool output 1")
+      && responseTexts.includes("Second progress update")
+      && responseTexts.includes("dummy tool output 2")
+      && responseTexts.includes("Final interleaved answer"),
+      `Expected interleaved dummy progress and tool output, got: ${responseTexts.join(" | ")}`,
+    );
+  });
 });
