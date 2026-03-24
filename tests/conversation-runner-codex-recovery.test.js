@@ -279,7 +279,7 @@ describe("createConversationRunner with codex harness", () => {
     assert.equal(turn.responses.at(-1)?.text, "paused");
   });
 
-  it("keeps the presence lease aligned across interleaved tool activity and llm progress", async () => {
+  it("does not delay interleaved llm progress while refreshing the presence lease", async () => {
     await seedChat("conv-codex-presence-interleaved", { enabled: true });
     await db.sql`
       UPDATE chats
@@ -287,6 +287,9 @@ describe("createConversationRunner with codex harness", () => {
           harness_config = '{}'::jsonb
       WHERE chat_id = 'conv-codex-presence-interleaved'
     `;
+
+    const slowKeepAliveMs = 200;
+    const maxProgressDelayMs = 120;
 
     registerHarness("codex", () => createCodexHarness({
       startRun: async (input) => ({
@@ -321,6 +324,8 @@ describe("createConversationRunner with codex harness", () => {
 
     /** @type {string[]} */
     const presenceEvents = [];
+    /** @type {Promise<void>[]} */
+    const pendingKeepAlives = [];
     const turn = createChatTurn({
       chatId: "conv-codex-presence-interleaved",
       content: [{ type: "text", text: "Show interleaved progress" }],
@@ -330,20 +335,60 @@ describe("createConversationRunner with codex harness", () => {
         },
         keepPresenceAlive: async () => {
           presenceEvents.push("keepAlive");
+          const pending = new Promise((resolve) => {
+            setTimeout(resolve, slowKeepAliveMs);
+          });
+          pendingKeepAlives.push(pending);
+          await pending;
         },
         endPresence: async () => {
           presenceEvents.push("end");
         },
       },
     });
+    /** @type {Array<{ kind: "send" | "reply", text: string, at: number }>} */
+    const visibleMessages = [];
+    const originalSend = turn.context.io.send;
+    const originalReply = turn.context.io.reply;
+    turn.context.io.send = async (event) => {
+      const handle = await originalSend(event);
+      const text = turn.responses.at(-1)?.text ?? "";
+      visibleMessages.push({ kind: "send", text, at: Date.now() });
+      return handle;
+    };
+    turn.context.io.reply = async (event) => {
+      const handle = await originalReply(event);
+      const text = turn.responses.at(-1)?.text ?? "";
+      visibleMessages.push({ kind: "reply", text, at: Date.now() });
+      return handle;
+    };
 
     await handleMessage(turn.context);
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    await Promise.all(pendingKeepAlives);
 
     assert.deepEqual(
       presenceEvents,
       ["start", "keepAlive", "keepAlive", "end"],
       `Expected only tool-result interleaving to refresh the lease, got: ${presenceEvents.join(" -> ")}`,
+    );
+
+    const toolOutput1 = visibleMessages.find((entry) => entry.text.includes("dummy tool output 1"))?.at;
+    const secondProgress = visibleMessages.find((entry) => entry.text.includes("Second progress update"))?.at;
+    const toolOutput2 = visibleMessages.find((entry) => entry.text.includes("dummy tool output 2"))?.at;
+    const finalProgress = visibleMessages.find((entry) => entry.text.includes("Final interleaved answer"))?.at;
+
+    assert.notEqual(toolOutput1, undefined);
+    assert.notEqual(secondProgress, undefined);
+    assert.notEqual(toolOutput2, undefined);
+    assert.notEqual(finalProgress, undefined);
+
+    assert.ok(
+      secondProgress - toolOutput1 < maxProgressDelayMs,
+      `Expected second llm progress milliseconds after the prior visible tool result, got ${secondProgress - toolOutput1}ms with ${slowKeepAliveMs}ms keepAlive: ${JSON.stringify(visibleMessages)}`,
+    );
+    assert.ok(
+      finalProgress - toolOutput2 < maxProgressDelayMs,
+      `Expected final llm progress milliseconds after the prior visible tool result, got ${finalProgress - toolOutput2}ms with ${slowKeepAliveMs}ms keepAlive: ${JSON.stringify(visibleMessages)}`,
     );
 
     const responseTexts = turn.responses.map((response) => response.text);
