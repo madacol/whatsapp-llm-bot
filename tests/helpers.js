@@ -2,7 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { createServer } from "node:http";
 import { EventEmitter } from "node:events";
-import { PGlite } from "@electric-sql/pglite";
+import { PGlite as PGliteDriver } from "@electric-sql/pglite";
 import { vector } from "@electric-sql/pglite/vector";
 import { formatActivitySummary } from "../tool-presentation-model.js";
 import { formatToolPresentationDisplay, formatToolPresentationSummary } from "../presentation/whatsapp.js";
@@ -196,8 +196,11 @@ let sharedTestDb = null;
  * @returns {Promise<PGlite>}
  */
 export async function createTestDb() {
-  if (sharedTestDb) return sharedTestDb;
-  const db = new PGlite("memory://", { extensions: { vector } });
+  if (sharedTestDb && !sharedTestDb.closed) {
+    return sharedTestDb;
+  }
+
+  const db = new PGliteDriver("memory://", { extensions: { vector } });
   await initStore(db);
   sharedTestDb = db;
   return db;

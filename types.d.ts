@@ -1,4 +1,26 @@
-type PGlite = import("@electric-sql/pglite").PGlite;
+type PGliteDriver = import("@electric-sql/pglite").PGlite;
+type PGlite = Pick<
+  PGliteDriver,
+  | "waitReady"
+  | "debug"
+  | "ready"
+  | "closed"
+  | "close"
+  | "query"
+  | "sql"
+  | "exec"
+  | "describeQuery"
+  | "transaction"
+  | "execProtocolRaw"
+  | "execProtocol"
+  | "runExclusive"
+  | "listen"
+  | "unlisten"
+  | "onNotification"
+  | "offNotification"
+  | "dumpDataDir"
+  | "refreshArrayTypes"
+>;
 
 // Baileys types
 type BaileysMessage = import("@whiskeysockets/baileys").WAMessage;

@@ -1,6 +1,6 @@
 import { describe, it, before } from "node:test";
 import assert from "node:assert/strict";
-import { PGlite } from "@electric-sql/pglite";
+import { PGlite as PGliteDriver } from "@electric-sql/pglite";
 import { vector } from "@electric-sql/pglite/vector";
 import { initStore, getChatOrThrow } from "../store.js";
 import { createTestDb } from "./helpers.js";
@@ -18,7 +18,7 @@ describe("store with injected DB", () => {
 
   it("does not create module-owned tables (reminders, media_to_text_cache)", async () => {
     // Use a fresh DB to avoid pollution from other test files sharing createTestDb()
-    const freshDb = new PGlite("memory://", { extensions: { vector } });
+    const freshDb = new PGliteDriver("memory://", { extensions: { vector } });
     await initStore(freshDb);
     const { rows } = await freshDb.sql`
       SELECT table_name FROM information_schema.tables
@@ -31,7 +31,7 @@ describe("store with injected DB", () => {
   });
 
   it("memories table is created by initStore", async () => {
-    const freshDb = new PGlite("memory://", { extensions: { vector } });
+    const freshDb = new PGliteDriver("memory://", { extensions: { vector } });
     await initStore(freshDb);
     const { rows } = await freshDb.sql`
       SELECT table_name FROM information_schema.tables

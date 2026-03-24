@@ -1,6 +1,6 @@
 import { describe, it, before } from "node:test";
 import assert from "node:assert/strict";
-import { PGlite } from "@electric-sql/pglite";
+import { PGlite as PGliteDriver } from "@electric-sql/pglite";
 import {
   ensureChatActionsSchema,
   saveChatAction,
@@ -15,7 +15,7 @@ import { setDb } from "../db.js";
 let db;
 
 before(async () => {
-  db = new PGlite("memory://");
+  db = new PGliteDriver("memory://");
   // Point the DB cache at our test db for the chat action paths
   setDb("./pgdata/test-chat-id/create_action", db);
   await ensureChatActionsSchema(db);

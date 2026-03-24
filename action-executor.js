@@ -12,9 +12,9 @@ const log = createLogger("action-executor");
 /**
  * Define a lazy DB property on an object. The DB instance is only created when
  * first accessed, then the property is replaced with the resolved value.
- * @param {Record<string, any>} obj
+ * @param {Record<string, unknown>} obj
  * @param {string} prop
- * @param {() => import("@electric-sql/pglite").PGlite} factory
+ * @param {() => PGlite} factory
  * @returns {void}
  */
 function defineLazyDb(obj, prop, factory) {
@@ -66,14 +66,12 @@ export async function executeAction(actionName, context, params, options = {}) {
     throw new Error(`Action "${actionName}" requires master permissions`);
   }
 
-  /** @type {ActionContext & Partial<{ chatDb: PGlite, rootDb: PGlite, callLlm: CallLlm, llmClient: LlmClient }>} */
+  /** @type {Pick<ActionContext, "chatId" | "senderIds" | "content" | "getIsAdmin" | "getActions" | "log" | "send" | "reply" | "reactToMessage" | "select" | "confirm" | "resolveModel" | "agentDepth" | "toolCallId"> & Partial<Pick<ActionContext, "db" | "sessionDb">> & Partial<{ chatDb: PGlite, rootDb: PGlite, callLlm: CallLlm, llmClient: LlmClient }>} */
   const actionContext = {
     chatId: context.chatId,
     senderIds: context.senderIds,
     content: context.content,
     getIsAdmin: context.getIsAdmin,
-    db: /** @type {PGlite} */ (/** @type {unknown} */ (undefined)),
-    sessionDb: /** @type {PGlite} */ (/** @type {unknown} */ (undefined)),
     getActions,
     log: async (...args) => {
       const message = args.join(" ");
@@ -111,6 +109,8 @@ export async function executeAction(actionName, context, params, options = {}) {
     actionContext.llmClient = llmClient;
   }
 
+  const resolvedActionContext = /** @type {ActionContext & Partial<{ chatDb: PGlite, rootDb: PGlite, callLlm: CallLlm, llmClient: LlmClient }>} */ (actionContext);
+
   const confirmedSandboxEscape = await confirmHarnessSandboxEscape({
     toolName: actionName,
     input: params,
@@ -140,7 +140,7 @@ export async function executeAction(actionName, context, params, options = {}) {
   }
 
   try {
-    const raw = await action.action_fn(actionContext, params);
+    const raw = await action.action_fn(resolvedActionContext, params);
 
     /** @type {ActionResult} */
     const actionResult = (raw != null && typeof raw === "object" && !Array.isArray(raw) && "result" in raw)
