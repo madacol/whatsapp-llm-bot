@@ -32,6 +32,20 @@ async function displayToolCall(toolCall, context, actionFormatter, cwd, toolCont
  * @returns {AgentIOHooks}
  */
 export function buildAgentIoHooks(context, sendComposing, cwd) {
+  /**
+   * Re-arm WhatsApp composing after an outbound progress message.
+   * WhatsApp clears typing when a message is sent, so long-running runs need
+   * to refresh presence after intermediate output.
+   * @template T
+   * @param {() => Promise<T>} emit
+   * @returns {Promise<T>}
+   */
+  async function emitWhileWorking(emit) {
+    const value = await emit();
+    await sendComposing();
+    return value;
+  }
+
   const codexDisplayHooks = createCodexDisplayHooks({
     context,
     cwd,
@@ -40,7 +54,9 @@ export function buildAgentIoHooks(context, sendComposing, cwd) {
 
   return {
     onComposing: sendComposing,
-    onLlmResponse: async (text) => { await context.reply(contentEvent("llm", [{ type: "markdown", text }])); },
+    onLlmResponse: async (text) => {
+      await emitWhileWorking(() => context.reply(contentEvent("llm", [{ type: "markdown", text }])));
+    },
     onAskUser: async (question, options, _preamble, descriptions) => {
       /** @type {Map<string, string>} */
       const labelMap = new Map();
@@ -57,14 +73,22 @@ export function buildAgentIoHooks(context, sendComposing, cwd) {
       return labelMap.get(choice) ?? choice;
     },
     onToolCall: async (toolCall, formatToolCall, toolContext) => {
-      return displayToolCall(toolCall, context, formatToolCall, cwd, toolContext);
+      return emitWhileWorking(() => displayToolCall(toolCall, context, formatToolCall, cwd, toolContext));
     },
-    onToolResult: async (blocks) => { await context.send(contentEvent("tool-result", blocks)); },
-    onToolError: async (message) => { await context.send(contentEvent("error", message)); },
-    onCommand: codexDisplayHooks.onCommand,
-    onFileRead: codexDisplayHooks.onFileRead,
-    onPlan: async (text) => { await context.reply(planEvent(text)); },
-    onFileChange: codexDisplayHooks.onFileChange,
+    onToolResult: async (blocks) => {
+      await emitWhileWorking(() => context.send(contentEvent("tool-result", blocks)));
+    },
+    onToolError: async (message) => {
+      await emitWhileWorking(() => context.send(contentEvent("error", message)));
+    },
+    onCommand: async (commandEvent) => { await emitWhileWorking(() => codexDisplayHooks.onCommand(commandEvent)); },
+    onFileRead: async (fileReadEvent) => { await emitWhileWorking(() => codexDisplayHooks.onFileRead(fileReadEvent)); },
+    onPlan: async (text) => {
+      await emitWhileWorking(() => context.reply(planEvent(text)));
+    },
+    onFileChange: async (fileChangeEvent) => {
+      await emitWhileWorking(() => codexDisplayHooks.onFileChange(fileChangeEvent));
+    },
     onContinuePrompt: () => context.confirm("React 👍 to continue or 👎 to stop."),
     onDepthLimit: () => context.confirm(
       `⚠️ *Depth limit*\n\nReached maximum tool call depth (${MAX_TOOL_CALL_DEPTH}). React 👍 to continue or 👎 to stop.`,
