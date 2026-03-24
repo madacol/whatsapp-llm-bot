@@ -60,7 +60,6 @@ function createSubjectWithWorkingSpy() {
       workingStates.push(true);
     },
     () => {
-      workingStates.push(false);
       workingStates.push(true);
     },
     null,
@@ -112,17 +111,17 @@ describe("buildAgentIoHooks", () => {
     assert.equal(sent[0].event.kind, "plan");
   });
 
-  it("re-arms composing after intermediate outbound progress messages", async () => {
+  it("refreshes composing after intermediate outbound progress messages", async () => {
     const subject = createSubjectWithWorkingSpy();
 
     await subject.hooks.onLlmResponse?.("Still working");
     await subject.hooks.onToolResult?.([{ type: "text", text: "Intermediate tool output" }]);
 
     assert.equal(subject.sent.length, 2);
-    assert.deepEqual(subject.workingStates, [false, true, false, true]);
+    assert.deepEqual(subject.workingStates, [true, true]);
   });
 
-  it("does not wait for typing restarts before returning", async () => {
+  it("does not wait for typing refreshes before returning", async () => {
     /** @type {(() => void) | undefined} */
     let resolveRestart;
     const hooks = buildAgentIoHooks(
@@ -146,7 +145,7 @@ describe("buildAgentIoHooks", () => {
 
     await new Promise((resolve) => setTimeout(resolve, 0));
 
-    assert.equal(completed, true, "Hook should resolve before the background typing restart completes");
+    assert.equal(completed, true, "Hook should resolve before the background typing refresh completes");
     resolveRestart?.();
     await pending;
   });

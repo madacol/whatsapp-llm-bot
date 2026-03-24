@@ -227,11 +227,10 @@ export function createConversationRunner({ store, llmClient, getActionsFn, execu
     let workingRefreshVersion = 0;
     let workingStopped = false;
 
-    /** Restart typing in the background without delaying the next harness event. */
-    const restartWorking = () => {
+    /** Refresh typing in the background without delaying the next harness event. */
+    const refreshWorking = () => {
       const refreshVersion = ++workingRefreshVersion;
       void (async () => {
-        await sendPaused();
         if (workingStopped || refreshVersion !== workingRefreshVersion) {
           return;
         }
@@ -247,7 +246,7 @@ export function createConversationRunner({ store, llmClient, getActionsFn, execu
       const hooks = buildAgentIoHooks(
         context,
         sendComposing,
-        restartWorking,
+        refreshWorking,
         buildRunConfig(chatId, chatInfo, turn.chatName, harness.getName()).workdir ?? null,
       );
       runCoordinator.markRunActive(chatId);
