@@ -28,13 +28,13 @@ async function displayToolCall(toolCall, context, actionFormatter, cwd, toolCont
  * Build the AgentIOHooks wiring from a message context.
  * @param {Pick<ExecuteActionContext, "send" | "reply" | "select" | "confirm">} context
  * @param {() => Promise<void>} sendComposing
- * @param {() => void} restartWorking
+ * @param {() => void} refreshWorking
  * @param {string | null} cwd
  * @returns {AgentIOHooks}
  */
-export function buildAgentIoHooks(context, sendComposing, restartWorking, cwd) {
+export function buildAgentIoHooks(context, sendComposing, refreshWorking, cwd) {
   /**
-   * Restart WhatsApp typing after an outbound progress message without
+   * Refresh WhatsApp typing after an outbound progress message without
    * delaying the next harness event. Codex streams events serially, so waiting
    * on the refresh here would postpone the following tool-call display.
    * @template T
@@ -43,7 +43,7 @@ export function buildAgentIoHooks(context, sendComposing, restartWorking, cwd) {
    */
   async function emitWhileWorking(emit) {
     const value = await emit();
-    restartWorking();
+    refreshWorking();
     return value;
   }
 
