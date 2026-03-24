@@ -142,8 +142,13 @@ export function createChatTurn(overrides = {}) {
       responses.push({ type: "confirm", text: message });
       return true;
     },
-    setWorking: async (working) => {
-      responses.push({ type: "sendPresenceUpdate", text: working ? "composing" : "paused" });
+    startPresence: async (_ttlMs) => {
+      responses.push({ type: "sendPresenceUpdate", text: "composing" });
+    },
+    keepPresenceAlive: async (_ttlMs) => {
+    },
+    endPresence: async () => {
+      responses.push({ type: "sendPresenceUpdate", text: "paused" });
     },
   };
 

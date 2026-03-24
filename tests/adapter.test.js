@@ -486,6 +486,103 @@ describe("createTurnIo", () => {
     assert.equal(oldSocket.sentMessages.length, 0);
     assert.equal(newSocket.sentMessages.length, 1);
   });
+
+  it("opens a lease, pulses composing on the adapter cadence, then pauses on expiry", async () => {
+    /** @type {Array<{ presence: string, chatId: string }>} */
+    const presenceUpdates = [];
+    const io = createTurnIo({
+      sock: /** @type {import("@whiskeysockets/baileys").WASocket} */ (/** @type {unknown} */ ({
+        sendMessage: async () => ({ key: { id: "sent-1", remoteJid: "presence-chat" } }),
+        sendPresenceUpdate: async (presence, chatId) => {
+          presenceUpdates.push({ presence, chatId });
+        },
+      })),
+      chatId: "presence-chat",
+      message: /** @type {BaileysMessage} */ ({
+        key: {
+          remoteJid: "presence-chat",
+          fromMe: false,
+          id: "incoming-msg-3",
+        },
+      }),
+      senderIds: ["sender-1"],
+      isGroup: false,
+      selectRuntime: createSelectRuntime(),
+      confirmRuntime: createConfirmRuntime(),
+      reactionRuntime: createReactionRuntime(),
+      presenceConfig: {
+        defaultLeaseTtlMs: 20,
+        pulseIntervalMs: 5,
+      },
+    });
+
+    await io.startPresence(18);
+    await new Promise((resolve) => setTimeout(resolve, 24));
+
+    assert.ok(
+      presenceUpdates.filter((update) => update.presence === "composing").length >= 2,
+      `Expected adapter-managed composing pulses, got: ${JSON.stringify(presenceUpdates)}`,
+    );
+    assert.equal(
+      presenceUpdates.at(-1)?.presence,
+      "paused",
+      `Expected expiry to end with paused, got: ${JSON.stringify(presenceUpdates)}`,
+    );
+  });
+
+  it("treats keepAlive as a lease refresh when active and as a new lease when inactive", async () => {
+    /** @type {Array<{ presence: string, chatId: string }>} */
+    const presenceUpdates = [];
+    const io = createTurnIo({
+      sock: /** @type {import("@whiskeysockets/baileys").WASocket} */ (/** @type {unknown} */ ({
+        sendMessage: async () => ({ key: { id: "sent-2", remoteJid: "presence-chat" } }),
+        sendPresenceUpdate: async (presence, chatId) => {
+          presenceUpdates.push({ presence, chatId });
+        },
+      })),
+      chatId: "presence-chat",
+      message: /** @type {BaileysMessage} */ ({
+        key: {
+          remoteJid: "presence-chat",
+          fromMe: false,
+          id: "incoming-msg-4",
+        },
+      }),
+      senderIds: ["sender-1"],
+      isGroup: false,
+      selectRuntime: createSelectRuntime(),
+      confirmRuntime: createConfirmRuntime(),
+      reactionRuntime: createReactionRuntime(),
+      presenceConfig: {
+        defaultLeaseTtlMs: 20,
+        pulseIntervalMs: 50,
+      },
+    });
+
+    await io.startPresence(20);
+    presenceUpdates.length = 0;
+
+    await io.keepPresenceAlive();
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    assert.deepEqual(
+      presenceUpdates,
+      [],
+      `Expected active keepAlive to refresh only the lease, got: ${JSON.stringify(presenceUpdates)}`,
+    );
+
+    await new Promise((resolve) => setTimeout(resolve, 22));
+    assert.equal(presenceUpdates.at(-1)?.presence, "paused");
+
+    presenceUpdates.length = 0;
+    await io.keepPresenceAlive();
+
+    assert.deepEqual(presenceUpdates, [{
+      presence: "composing",
+      chatId: "presence-chat",
+    }]);
+
+    await io.endPresence();
+  });
 });
 
 describe("HD receive integration", () => {

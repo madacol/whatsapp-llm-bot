@@ -17,6 +17,7 @@ import { buildHarnessRunRequest } from "./build-harness-run-request.js";
 import { buildRunConfig } from "./build-run-config.js";
 
 const log = createLogger("conversation:runner");
+const PRESENCE_LEASE_TTL_MS = 20_000;
 
 /**
  * Type guard: checks that an action has a command string.
@@ -206,48 +207,57 @@ export function createConversationRunner({ store, llmClient, getActionsFn, execu
       return null;
     }
 
-    /** Send "composing" presence, swallowing errors. */
-    const sendComposing = async () => {
+    /** Start the transport presence lease, swallowing errors. */
+    const startPresence = async () => {
       try {
-        await turn.io.setWorking(true);
+        await turn.io.startPresence(PRESENCE_LEASE_TTL_MS);
       } catch (err) {
-        log.debug("Could not send composing signal:", errorToString(err));
+        log.debug("Could not start presence lease:", errorToString(err));
       }
     };
 
-    /** Send "paused" presence, swallowing errors. */
-    const sendPaused = async () => {
+    /** Refresh the transport presence lease, swallowing errors. */
+    const keepPresenceAlive = async () => {
       try {
-        await turn.io.setWorking(false);
+        await turn.io.keepPresenceAlive();
       } catch (err) {
-        log.debug("Could not send paused signal:", errorToString(err));
+        log.debug("Could not refresh presence lease:", errorToString(err));
       }
     };
 
-    let workingRefreshVersion = 0;
-    let workingStopped = false;
+    /** End the transport presence lease, swallowing errors. */
+    const endPresence = async () => {
+      try {
+        await turn.io.endPresence();
+      } catch (err) {
+        log.debug("Could not end presence lease:", errorToString(err));
+      }
+    };
 
-    /** Refresh typing in the background without delaying the next harness event. */
-    const refreshWorking = () => {
-      const refreshVersion = ++workingRefreshVersion;
+    let presenceRefreshVersion = 0;
+    let presenceStopped = false;
+
+    /** Refresh the presence lease in the background without delaying the next harness event. */
+    const refreshPresenceLease = () => {
+      const refreshVersion = ++presenceRefreshVersion;
       void (async () => {
-        if (workingStopped || refreshVersion !== workingRefreshVersion) {
+        if (presenceStopped || refreshVersion !== presenceRefreshVersion) {
           return;
         }
-        await sendComposing();
+        await keepPresenceAlive();
       })();
     };
 
-    await sendComposing();
+    await startPresence();
 
     /** @type {ChatTurn | null} */
     let nextTurn = null;
     try {
       const hooks = buildAgentIoHooks(
         context,
-        sendComposing,
-        sendPaused,
-        refreshWorking,
+        keepPresenceAlive,
+        endPresence,
+        refreshPresenceLease,
         buildRunConfig(chatId, chatInfo, turn.chatName, harness.getName()).workdir ?? null,
       );
       runCoordinator.markRunActive(chatId);
@@ -285,9 +295,9 @@ export function createConversationRunner({ store, llmClient, getActionsFn, execu
       }
     } finally {
       nextTurn = runCoordinator.finishRun(chatId);
-      workingStopped = true;
-      workingRefreshVersion += 1;
-      await sendPaused();
+      presenceStopped = true;
+      presenceRefreshVersion += 1;
+      await endPresence();
     }
 
     return nextTurn;

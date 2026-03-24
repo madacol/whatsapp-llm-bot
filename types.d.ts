@@ -228,7 +228,9 @@ type TurnIO = {
   select: (question: string, options: SelectOption[], config?: SelectConfig) => Promise<string>;
   confirm: (message: string, hooks?: ConfirmHooks) => Promise<boolean>;
   react: (emoji: string) => Promise<void>;
-  setWorking: (working: boolean) => Promise<void>;
+  startPresence: (ttlMs: number) => Promise<void>;
+  keepPresenceAlive: (ttlMs?: number) => Promise<void>;
+  endPresence: () => Promise<void>;
   getIsAdmin: () => Promise<boolean>;
 };
 
