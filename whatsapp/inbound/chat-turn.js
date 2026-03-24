@@ -341,8 +341,8 @@ export function createTurnIo({
       refreshComposingAfterOutboundMessage();
       return handle;
     },
-    select: selectRuntime.createSelect(getSocket ?? sock, chatId, refreshComposingAfterOutboundMessage),
-    confirm: confirmRuntime.createConfirm(getSocket ?? sock, chatId, refreshComposingAfterOutboundMessage),
+    select: selectRuntime.createSelect(getSocket ?? sock, chatId),
+    confirm: confirmRuntime.createConfirm(getSocket ?? sock, chatId),
     react: async (emoji) => {
       await requireSocket().sendMessage(chatId, {
         react: { text: emoji, key: message.key },

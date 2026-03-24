@@ -9,7 +9,7 @@
 /**
  * @typedef {{
  *   handleReactions: (reactions: Array<{ key: { id: string; remoteJid: string }; reaction: { text: string } }>, sock: import('@whiskeysockets/baileys').WASocket) => void;
- *   createConfirm: (sock: SocketResolver, chatId: string, afterVisibleMessage?: () => void) => (message: string, hooks?: ConfirmHooks) => Promise<boolean>;
+ *   createConfirm: (sock: SocketResolver, chatId: string) => (message: string, hooks?: ConfirmHooks) => Promise<boolean>;
  *   readonly size: number;
  *   clear: () => void;
  * }} ConfirmRuntime
@@ -101,16 +101,14 @@ export function createConfirmRuntime() {
      * Create a confirm function scoped to a chat.
      * @param {SocketResolver} sock
      * @param {string} chatId
-     * @param {(() => void) | undefined} [afterVisibleMessage]
      * @returns {(message: string, hooks?: ConfirmHooks) => Promise<boolean>}
      */
-    createConfirm(sock, chatId, afterVisibleMessage) {
+    createConfirm(sock, chatId) {
       const getSocket = createSocketGetter(sock);
 
       return async (message, hooks) => {
         const sentMsg = await requireSocket(getSocket).sendMessage(chatId, { text: message });
         if (!sentMsg) return false;
-        afterVisibleMessage?.();
 
         const rawKey = sentMsg.key;
         if (!rawKey.id || !rawKey.remoteJid) return false;
