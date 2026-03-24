@@ -246,6 +246,7 @@ export function createConversationRunner({ store, llmClient, getActionsFn, execu
       const hooks = buildAgentIoHooks(
         context,
         sendComposing,
+        sendPaused,
         refreshWorking,
         buildRunConfig(chatId, chatInfo, turn.chatName, harness.getName()).workdir ?? null,
       );

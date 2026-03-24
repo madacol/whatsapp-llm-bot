@@ -4,9 +4,10 @@ import { buildCodexTurnInput } from "./codex-runner.js";
 import { openCodexAppServerConnection } from "./codex-app-server-client.js";
 import { createCodexEventDispatcher } from "./codex-event-dispatcher.js";
 
-/** @type {Pick<Required<AgentIOHooks>, "onComposing" | "onAskUser" | "onToolCall" | "onCommand" | "onFileRead" | "onPlan" | "onFileChange" | "onLlmResponse" | "onToolError" | "onUsage">} */
+/** @type {Pick<Required<AgentIOHooks>, "onComposing" | "onPaused" | "onAskUser" | "onToolCall" | "onCommand" | "onFileRead" | "onPlan" | "onFileChange" | "onLlmResponse" | "onToolError" | "onUsage">} */
 const DEFAULT_CODEX_RUN_HOOKS = {
   onComposing: async () => {},
+  onPaused: async () => {},
   onAskUser: async () => "",
   onToolCall: async () => {},
   onCommand: async () => {},
@@ -76,7 +77,7 @@ function isAbortError(error) {
  *   messages: Message[],
  *   sessionId?: string | null,
  *   runConfig?: HarnessRunConfig,
- *   hooks?: Pick<AgentIOHooks, "onComposing" | "onAskUser" | "onToolCall" | "onCommand" | "onFileRead" | "onPlan" | "onFileChange" | "onLlmResponse" | "onToolError" | "onUsage">,
+ *   hooks?: Pick<AgentIOHooks, "onComposing" | "onPaused" | "onAskUser" | "onToolCall" | "onCommand" | "onFileRead" | "onPlan" | "onFileChange" | "onLlmResponse" | "onToolError" | "onUsage">,
  *   isAborted?: () => boolean,
  * }} input
  * @returns {Promise<{

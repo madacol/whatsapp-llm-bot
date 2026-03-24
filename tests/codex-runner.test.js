@@ -307,7 +307,7 @@ describe("startCodexRun", () => {
     }]);
   });
 
-  it("re-sends composing when Codex reports a tool has started", async () => {
+  it("sends paused then composing when Codex reports a tool has started", async () => {
     /** @type {string[]} */
     const eventOrder = [];
 
@@ -325,6 +325,9 @@ describe("startCodexRun", () => {
         },
         onComposing: async () => {
           eventOrder.push("composing");
+        },
+        onPaused: async () => {
+          eventOrder.push("paused");
         },
       },
     }, {
@@ -373,6 +376,70 @@ describe("startCodexRun", () => {
     assert.deepEqual(eventOrder, [
       "llm:Thinking...",
       "tool:run_bash",
+      "paused",
+      "composing",
+    ]);
+  });
+
+  it("sends paused then composing when Codex reports a command execution has started", async () => {
+    /** @type {string[]} */
+    const eventOrder = [];
+
+    const started = await startCodexRun({
+      chatId: "codex-chat",
+      prompt: "Continue",
+      messages: [{ role: "user", content: [{ type: "text", text: "Continue" }] }],
+      hooks: {
+        onCommand: async ({ command, status }) => {
+          eventOrder.push(`command:${status}:${command}`);
+          return undefined;
+        },
+        onComposing: async () => {
+          eventOrder.push("composing");
+        },
+        onPaused: async () => {
+          eventOrder.push("paused");
+        },
+      },
+    }, {
+      createCodex: () => ({
+        startThread: () => ({
+          id: "sess-123",
+          runStreamed: async () => ({
+            events: (async function* () {
+              yield { type: "thread.started", thread_id: "sess-123" };
+              yield {
+                type: "item.started",
+                item: {
+                  id: "cmd-1",
+                  type: "command_execution",
+                  command: "sleep 5",
+                  aggregated_output: "",
+                  status: "in_progress",
+                },
+              };
+              yield {
+                type: "turn.completed",
+                usage: {
+                  input_tokens: 0,
+                  output_tokens: 0,
+                  cached_input_tokens: 0,
+                },
+              };
+            })(),
+          }),
+        }),
+        resumeThread: () => {
+          throw new Error("resumeThread should not be called");
+        },
+      }),
+    });
+
+    await started.done;
+
+    assert.deepEqual(eventOrder, [
+      "command:started:sleep 5",
+      "paused",
       "composing",
     ]);
   });

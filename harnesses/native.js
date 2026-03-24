@@ -41,6 +41,7 @@ const NATIVE_HARNESS_CAPABILITIES = {
 /** @type {Required<AgentIOHooks>} */
 export const NO_OP_HOOKS = {
   onComposing: async () => {},
+  onPaused: async () => {},
   onLlmResponse: async () => {},
   onAskUser: async () => "",
   onToolCall: async () => {},
