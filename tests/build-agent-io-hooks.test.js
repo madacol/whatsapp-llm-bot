@@ -36,14 +36,14 @@ function createSubject() {
  * @returns {{
  *   hooks: AgentIOHooks,
  *   sent: Array<{ event: OutboundEvent, kind: "send" | "reply" }>,
- *   workingStates: boolean[],
+ *   presenceEvents: string[],
  * }}
  */
 function createSubjectWithWorkingSpy() {
   /** @type {Array<{ event: OutboundEvent, kind: "send" | "reply" }>} */
   const sent = [];
-  /** @type {boolean[]} */
-  const workingStates = [];
+  /** @type {string[]} */
+  const presenceEvents = [];
   const hooks = buildAgentIoHooks(
     {
       send: async (event) => {
@@ -58,20 +58,20 @@ function createSubjectWithWorkingSpy() {
       confirm: async () => true,
     },
     async () => {
-      workingStates.push(true);
+      presenceEvents.push("keepAlive");
     },
     async () => {
-      workingStates.push(false);
+      presenceEvents.push("end");
     },
     () => {
-      workingStates.push(true);
+      presenceEvents.push("refresh");
     },
     null,
   );
   return {
     hooks,
     sent,
-    workingStates,
+    presenceEvents,
   };
 }
 
@@ -116,7 +116,7 @@ describe("buildAgentIoHooks", () => {
     assert.equal(sent[0].event.kind, "plan");
   });
 
-  it("refreshes composing for tool-result progress, but not for llm or tool-call display", async () => {
+  it("refreshes the presence lease for tool-result progress, but not for llm or tool-call display", async () => {
     const subject = createSubjectWithWorkingSpy();
 
     await subject.hooks.onLlmResponse?.("Still working");
@@ -124,7 +124,7 @@ describe("buildAgentIoHooks", () => {
     await subject.hooks.onToolResult?.([{ type: "text", text: "Intermediate tool output" }]);
 
     assert.equal(subject.sent.length, 3);
-    assert.deepEqual(subject.workingStates, [true]);
+    assert.deepEqual(subject.presenceEvents, ["refresh"]);
   });
 
   it("does not wait for typing refreshes before returning", async () => {

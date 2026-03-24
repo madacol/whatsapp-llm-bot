@@ -6,6 +6,9 @@ import { getMessageContent } from "./message-content.js";
 import { sendEvent } from "../outbound/send-content.js";
 import { createReactionRuntime } from "../runtime/reaction-runtime.js";
 
+const DEFAULT_PRESENCE_LEASE_TTL_MS = 20_000;
+const WHATSAPP_PRESENCE_PULSE_INTERVAL_MS = 8_000;
+
 /**
  * Escape a string for safe use inside a RegExp.
  * @param {string} value
@@ -134,6 +137,131 @@ async function resolveChatName(sock, chatId, isGroup, senderName) {
 }
 
 /**
+ * Build a per-chat presence lease controller.
+ * The lease lifecycle is semantic: start, keepAlive, end.
+ * The WhatsApp-specific composing pulse cadence is owned here.
+ * @param {{
+ *   sendPresenceUpdate: (presence: "composing" | "paused", chatId: string) => Promise<void>,
+ *   chatId: string,
+ *   defaultLeaseTtlMs?: number,
+ *   pulseIntervalMs?: number,
+ * }} input
+ * @returns {{
+ *   start: (ttlMs: number) => Promise<void>,
+ *   keepAlive: (ttlMs?: number) => Promise<void>,
+ *   end: () => Promise<void>,
+ * }}
+ */
+function createPresenceLeaseController({
+  sendPresenceUpdate,
+  chatId,
+  defaultLeaseTtlMs = DEFAULT_PRESENCE_LEASE_TTL_MS,
+  pulseIntervalMs = WHATSAPP_PRESENCE_PULSE_INTERVAL_MS,
+}) {
+  let active = false;
+  let leaseTtlMs = defaultLeaseTtlMs;
+  /** @type {ReturnType<typeof setTimeout> | null} */
+  let leaseTimer = null;
+  /** @type {ReturnType<typeof setTimeout> | null} */
+  let pulseTimer = null;
+
+  function clearLeaseTimer() {
+    if (leaseTimer) {
+      clearTimeout(leaseTimer);
+      leaseTimer = null;
+    }
+  }
+
+  function clearPulseTimer() {
+    if (pulseTimer) {
+      clearTimeout(pulseTimer);
+      pulseTimer = null;
+    }
+  }
+
+  function clearTimers() {
+    clearLeaseTimer();
+    clearPulseTimer();
+  }
+
+  /**
+   * @returns {Promise<void>}
+   */
+  async function pauseAndRelease() {
+    if (!active) {
+      leaseTtlMs = defaultLeaseTtlMs;
+      clearTimers();
+      return;
+    }
+    active = false;
+    leaseTtlMs = defaultLeaseTtlMs;
+    clearTimers();
+    await sendPresenceUpdate("paused", chatId);
+  }
+
+  function schedulePulse() {
+    clearPulseTimer();
+    if (!active) {
+      return;
+    }
+    pulseTimer = setTimeout(() => {
+      void (async () => {
+        if (!active) {
+          return;
+        }
+        try {
+          await sendPresenceUpdate("composing", chatId);
+        } catch {
+          return;
+        }
+        schedulePulse();
+      })();
+    }, pulseIntervalMs);
+  }
+
+  /**
+   * @param {number} ttlMs
+   */
+  function scheduleLeaseExpiry(ttlMs) {
+    clearLeaseTimer();
+    leaseTimer = setTimeout(() => {
+      void pauseAndRelease().catch(() => {});
+    }, ttlMs);
+  }
+
+  /**
+   * @param {number} ttlMs
+   * @returns {Promise<void>}
+   */
+  async function activateLease(ttlMs) {
+    active = true;
+    leaseTtlMs = ttlMs;
+    clearTimers();
+    await sendPresenceUpdate("composing", chatId);
+    scheduleLeaseExpiry(ttlMs);
+    schedulePulse();
+  }
+
+  return {
+    start: async (ttlMs) => {
+      await activateLease(ttlMs);
+    },
+    keepAlive: async (ttlMs) => {
+      const nextTtlMs = ttlMs ?? leaseTtlMs;
+      if (!active) {
+        await activateLease(nextTtlMs);
+        return;
+      }
+      leaseTtlMs = nextTtlMs;
+      scheduleLeaseExpiry(nextTtlMs);
+    },
+    end: async () => {
+      await pauseAndRelease();
+    },
+  };
+}
+
+/**
  * Create the message-scoped TurnIO functions.
  * @param {{
  *   sock: import('@whiskeysockets/baileys').WASocket;
@@ -145,6 +273,10 @@ async function resolveChatName(sock, chatId, isGroup, senderName) {
  *   selectRuntime: import("../runtime/select-runtime.js").SelectRuntime;
  *   confirmRuntime: import("../runtime/confirm-runtime.js").ConfirmRuntime;
  *   reactionRuntime: import("../runtime/reaction-runtime.js").ReactionRuntime;
+ *   presenceConfig?: {
+ *     defaultLeaseTtlMs?: number,
+ *     pulseIntervalMs?: number,
+ *   };
  * }} input
  * @returns {TurnIO}
  */
@@ -158,6 +290,7 @@ export function createTurnIo({
   selectRuntime,
   confirmRuntime,
   reactionRuntime,
+  presenceConfig,
 }) {
   /**
    * Resolve the current live socket for outbound operations.
@@ -171,6 +304,15 @@ export function createTurnIo({
     return activeSocket;
   }
 
+  const presence = createPresenceLeaseController({
+    sendPresenceUpdate: async (presenceState, targetChatId) => {
+      await requireSocket().sendPresenceUpdate(presenceState, targetChatId);
+    },
+    chatId,
+    defaultLeaseTtlMs: presenceConfig?.defaultLeaseTtlMs,
+    pulseIntervalMs: presenceConfig?.pulseIntervalMs,
+  });
+
   return {
     send: (event) => sendEvent(requireSocket(), chatId, event, undefined, reactionRuntime),
     reply: (event) => sendEvent(requireSocket(), chatId, event, undefined, reactionRuntime),
@@ -181,8 +323,14 @@ export function createTurnIo({
         react: { text: emoji, key: message.key },
       });
     },
-    setWorking: async (working) => {
-      await requireSocket().sendPresenceUpdate(working ? "composing" : "paused", chatId);
+    startPresence: async (ttlMs) => {
+      await presence.start(ttlMs);
+    },
+    keepPresenceAlive: async (ttlMs) => {
+      await presence.keepAlive(ttlMs);
+    },
+    endPresence: async () => {
+      await presence.end();
     },
     getIsAdmin: async () => {
       if (!isGroup) return true;

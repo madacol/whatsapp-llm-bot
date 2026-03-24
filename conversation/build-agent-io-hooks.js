@@ -27,24 +27,24 @@ async function displayToolCall(toolCall, context, actionFormatter, cwd, toolCont
 /**
  * Build the AgentIOHooks wiring from a message context.
  * @param {Pick<ExecuteActionContext, "send" | "reply" | "select" | "confirm">} context
- * @param {() => Promise<void>} sendComposing
- * @param {() => Promise<void>} sendPaused
- * @param {() => void} refreshWorking
+ * @param {() => Promise<void>} keepPresenceAlive
+ * @param {() => Promise<void>} endPresence
+ * @param {() => void} refreshPresenceLease
  * @param {string | null} cwd
  * @returns {AgentIOHooks}
  */
-export function buildAgentIoHooks(context, sendComposing, sendPaused, refreshWorking, cwd) {
+export function buildAgentIoHooks(context, keepPresenceAlive, endPresence, refreshPresenceLease, cwd) {
   /**
-   * Refresh WhatsApp typing after an outbound progress message without
+   * Refresh the transport presence lease after an outbound progress message without
    * delaying the next harness event. Codex streams events serially, so waiting
-   * on the refresh here would postpone the following tool-call display.
+   * on the lease refresh here would postpone the following tool-call display.
    * @template T
    * @param {() => Promise<T>} emit
    * @returns {Promise<T>}
    */
   async function emitWhileWorking(emit) {
     const value = await emit();
-    refreshWorking();
+    refreshPresenceLease();
     return value;
   }
 
@@ -55,8 +55,8 @@ export function buildAgentIoHooks(context, sendComposing, sendPaused, refreshWor
   });
 
   return {
-    onComposing: sendComposing,
-    onPaused: sendPaused,
+    onComposing: keepPresenceAlive,
+    onPaused: endPresence,
     onLlmResponse: async (text) => {
       await context.reply(contentEvent("llm", [{ type: "markdown", text }]));
     },
