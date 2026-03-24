@@ -220,7 +220,7 @@ describe("createConversationRunner with codex harness", () => {
     assert.equal(secondTurn.responses.length, 0);
   });
 
-  it("refreshes composing after intermediate Codex replies and tool calls until the run finishes", async () => {
+  it("does not refresh composing before the Codex tool-call display", async () => {
     await seedChat("conv-codex-presence", { enabled: true });
     await db.sql`
       UPDATE chats
@@ -266,22 +266,15 @@ describe("createConversationRunner with codex harness", () => {
       && response.type === "sendPresenceUpdate"
       && response.text === "composing"
     ));
-    assert.ok(
-      composingAfterFirstReplyIndex > firstReplyIndex,
-      `Expected typing to refresh after the first Codex reply, got: ${turn.responses.map((response) => `${response.type}:${response.text}`).join(" | ")}`,
-    );
-
     const toolCallIndex = turn.responses.findIndex((response) => response.type === "send" && response.text.includes("sleep 3"));
-    assert.ok(toolCallIndex > composingAfterFirstReplyIndex, `Expected a tool-call update after typing restarted, got: ${turn.responses.map((response) => `${response.type}:${response.text}`).join(" | ")}`);
-
-    const composingAfterToolCallIndex = turn.responses.findIndex((response, index) => (
-      index > toolCallIndex
-      && response.type === "sendPresenceUpdate"
-      && response.text === "composing"
-    ));
     assert.ok(
-      composingAfterToolCallIndex > toolCallIndex,
-      `Expected typing to refresh after the tool-call update, got: ${turn.responses.map((response) => `${response.type}:${response.text}`).join(" | ")}`,
+      toolCallIndex > firstReplyIndex,
+      `Expected the tool-call update after the first Codex reply, got: ${turn.responses.map((response) => `${response.type}:${response.text}`).join(" | ")}`,
+    );
+    assert.equal(
+      composingAfterFirstReplyIndex,
+      -1,
+      `Did not expect typing to refresh before the tool-call display, got: ${turn.responses.map((response) => `${response.type}:${response.text}`).join(" | ")}`,
     );
     assert.equal(turn.responses.at(-1)?.text, "paused");
   });

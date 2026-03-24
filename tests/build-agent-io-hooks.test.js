@@ -111,14 +111,15 @@ describe("buildAgentIoHooks", () => {
     assert.equal(sent[0].event.kind, "plan");
   });
 
-  it("refreshes composing after intermediate outbound progress messages", async () => {
+  it("refreshes composing for tool-result progress, but not for llm or tool-call display", async () => {
     const subject = createSubjectWithWorkingSpy();
 
     await subject.hooks.onLlmResponse?.("Still working");
+    await subject.hooks.onToolCall?.({ id: "tool-1", name: "run_bash", arguments: "{\"command\":\"echo hi\"}" });
     await subject.hooks.onToolResult?.([{ type: "text", text: "Intermediate tool output" }]);
 
-    assert.equal(subject.sent.length, 2);
-    assert.deepEqual(subject.workingStates, [true, true]);
+    assert.equal(subject.sent.length, 3);
+    assert.deepEqual(subject.workingStates, [true]);
   });
 
   it("does not wait for typing refreshes before returning", async () => {
@@ -139,7 +140,7 @@ describe("buildAgentIoHooks", () => {
     );
 
     let completed = false;
-    const pending = hooks.onLlmResponse?.("Still working").then(() => {
+    const pending = hooks.onToolResult?.([{ type: "text", text: "Still working" }]).then(() => {
       completed = true;
     });
 
