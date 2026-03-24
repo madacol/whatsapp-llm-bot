@@ -307,6 +307,76 @@ describe("startCodexRun", () => {
     }]);
   });
 
+  it("re-sends composing when Codex reports a tool has started", async () => {
+    /** @type {string[]} */
+    const eventOrder = [];
+
+    const started = await startCodexRun({
+      chatId: "codex-chat",
+      prompt: "Continue",
+      messages: [{ role: "user", content: [{ type: "text", text: "Continue" }] }],
+      hooks: {
+        onLlmResponse: async (text) => {
+          eventOrder.push(`llm:${text}`);
+        },
+        onToolCall: async (toolCall) => {
+          eventOrder.push(`tool:${toolCall.name}`);
+          return undefined;
+        },
+        onComposing: async () => {
+          eventOrder.push("composing");
+        },
+      },
+    }, {
+      createCodex: () => ({
+        startThread: () => ({
+          id: "sess-123",
+          runStreamed: async () => ({
+            events: (async function* () {
+              yield { type: "thread.started", thread_id: "sess-123" };
+              yield {
+                type: "item.completed",
+                item: {
+                  id: "msg-1",
+                  type: "agent_message",
+                  text: "Thinking...",
+                },
+              };
+              yield {
+                type: "item.started",
+                item: {
+                  id: "tool-1",
+                  type: "mcp_tool_call",
+                  tool: "run_bash",
+                  arguments: { command: "sleep 3" },
+                },
+              };
+              yield {
+                type: "turn.completed",
+                usage: {
+                  input_tokens: 0,
+                  output_tokens: 0,
+                  cached_input_tokens: 0,
+                },
+              };
+            })(),
+          }),
+        }),
+        resumeThread: () => {
+          throw new Error("resumeThread should not be called");
+        },
+      }),
+    });
+
+    await started.done;
+
+    assert.deepEqual(eventOrder, [
+      "llm:Thinking...",
+      "tool:run_bash",
+      "composing",
+    ]);
+  });
+
   it("surfaces mcp tool calls and wires inspect for text results", async () => {
     /** @type {LlmChatResponse["toolCalls"]} */
     const toolCalls = [];
