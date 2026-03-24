@@ -636,6 +636,110 @@ describe("createTurnIo", () => {
 
     await io.endPresence();
   });
+
+  it("re-sends composing after select prompts while the lease is active", async () => {
+    /** @type {Array<{ presence: string, chatId: string }>} */
+    const presenceUpdates = [];
+    /** @type {Array<{ chatId: string, msg: Record<string, unknown>, options?: Record<string, unknown> }>} */
+    const sentMessages = [];
+    const selectRuntime = createSelectRuntime();
+    const io = createTurnIo({
+      sock: /** @type {import("@whiskeysockets/baileys").WASocket} */ (/** @type {unknown} */ ({
+        sendMessage: async (chatId, msg, options) => {
+          sentMessages.push({ chatId, msg, options });
+          return { key: { id: `sent-${sentMessages.length}`, remoteJid: chatId } };
+        },
+        sendPresenceUpdate: async (presence, chatId) => {
+          presenceUpdates.push({ presence, chatId });
+        },
+      })),
+      chatId: "presence-chat",
+      message: /** @type {BaileysMessage} */ ({
+        key: {
+          remoteJid: "presence-chat",
+          fromMe: false,
+          id: "incoming-msg-6",
+        },
+      }),
+      senderIds: ["sender-1"],
+      isGroup: false,
+      selectRuntime,
+      confirmRuntime: createConfirmRuntime(),
+      reactionRuntime: createReactionRuntime(),
+      presenceConfig: {
+        defaultLeaseTtlMs: 50,
+        pulseIntervalMs: 500,
+      },
+    });
+
+    await io.startPresence(50);
+    presenceUpdates.length = 0;
+
+    const selectPromise = io.select("Choose one", ["A", "B"]);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    assert.equal(sentMessages.length >= 1, true);
+    assert.deepEqual(presenceUpdates, [{
+      presence: "composing",
+      chatId: "presence-chat",
+    }]);
+
+    selectRuntime.clear();
+    await selectPromise;
+    await io.endPresence();
+  });
+
+  it("re-sends composing after confirm prompts while the lease is active", async () => {
+    /** @type {Array<{ presence: string, chatId: string }>} */
+    const presenceUpdates = [];
+    /** @type {Array<{ chatId: string, msg: Record<string, unknown>, options?: Record<string, unknown> }>} */
+    const sentMessages = [];
+    const confirmRuntime = createConfirmRuntime();
+    const io = createTurnIo({
+      sock: /** @type {import("@whiskeysockets/baileys").WASocket} */ (/** @type {unknown} */ ({
+        sendMessage: async (chatId, msg, options) => {
+          sentMessages.push({ chatId, msg, options });
+          return { key: { id: `sent-${sentMessages.length}`, remoteJid: chatId } };
+        },
+        sendPresenceUpdate: async (presence, chatId) => {
+          presenceUpdates.push({ presence, chatId });
+        },
+      })),
+      chatId: "presence-chat",
+      message: /** @type {BaileysMessage} */ ({
+        key: {
+          remoteJid: "presence-chat",
+          fromMe: false,
+          id: "incoming-msg-7",
+        },
+      }),
+      senderIds: ["sender-1"],
+      isGroup: false,
+      selectRuntime: createSelectRuntime(),
+      confirmRuntime,
+      reactionRuntime: createReactionRuntime(),
+      presenceConfig: {
+        defaultLeaseTtlMs: 50,
+        pulseIntervalMs: 500,
+      },
+    });
+
+    await io.startPresence(50);
+    presenceUpdates.length = 0;
+
+    const confirmPromise = io.confirm("Continue?");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    assert.equal(sentMessages.length >= 1, true);
+    assert.deepEqual(presenceUpdates, [{
+      presence: "composing",
+      chatId: "presence-chat",
+    }]);
+
+    confirmRuntime.clear();
+    await confirmPromise;
+    await io.endPresence();
+  });
 });
 
 describe("HD receive integration", () => {
