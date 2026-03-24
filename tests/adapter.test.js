@@ -636,6 +636,96 @@ describe("createTurnIo", () => {
 
     await io.endPresence();
   });
+
+  it("ends the active lease before select prompts", async () => {
+    /** @type {Array<{ presence: string, chatId: string }>} */
+    const presenceUpdates = [];
+    const selectRuntime = createSelectRuntime();
+    const io = createTurnIo({
+      sock: /** @type {import("@whiskeysockets/baileys").WASocket} */ (/** @type {unknown} */ ({
+        sendMessage: async (chatId) => ({ key: { id: `sent-${chatId}`, remoteJid: chatId } }),
+        sendPresenceUpdate: async (presence, chatId) => {
+          presenceUpdates.push({ presence, chatId });
+        },
+      })),
+      chatId: "presence-chat",
+      message: /** @type {BaileysMessage} */ ({
+        key: {
+          remoteJid: "presence-chat",
+          fromMe: false,
+          id: "incoming-msg-6",
+        },
+      }),
+      senderIds: ["sender-1"],
+      isGroup: false,
+      selectRuntime,
+      confirmRuntime: createConfirmRuntime(),
+      reactionRuntime: createReactionRuntime(),
+      presenceConfig: {
+        defaultLeaseTtlMs: 50,
+        pulseIntervalMs: 5,
+      },
+    });
+
+    await io.startPresence(50);
+    presenceUpdates.length = 0;
+
+    const selectPromise = io.select("Choose one", ["A", "B"]);
+    await new Promise((resolve) => setTimeout(resolve, 15));
+
+    assert.deepEqual(presenceUpdates, [{
+      presence: "paused",
+      chatId: "presence-chat",
+    }]);
+
+    selectRuntime.clear();
+    await selectPromise;
+  });
+
+  it("ends the active lease before confirm prompts", async () => {
+    /** @type {Array<{ presence: string, chatId: string }>} */
+    const presenceUpdates = [];
+    const confirmRuntime = createConfirmRuntime();
+    const io = createTurnIo({
+      sock: /** @type {import("@whiskeysockets/baileys").WASocket} */ (/** @type {unknown} */ ({
+        sendMessage: async (chatId) => ({ key: { id: `sent-${chatId}`, remoteJid: chatId } }),
+        sendPresenceUpdate: async (presence, chatId) => {
+          presenceUpdates.push({ presence, chatId });
+        },
+      })),
+      chatId: "presence-chat",
+      message: /** @type {BaileysMessage} */ ({
+        key: {
+          remoteJid: "presence-chat",
+          fromMe: false,
+          id: "incoming-msg-7",
+        },
+      }),
+      senderIds: ["sender-1"],
+      isGroup: false,
+      selectRuntime: createSelectRuntime(),
+      confirmRuntime,
+      reactionRuntime: createReactionRuntime(),
+      presenceConfig: {
+        defaultLeaseTtlMs: 50,
+        pulseIntervalMs: 5,
+      },
+    });
+
+    await io.startPresence(50);
+    presenceUpdates.length = 0;
+
+    const confirmPromise = io.confirm("Continue?");
+    await new Promise((resolve) => setTimeout(resolve, 15));
+
+    assert.deepEqual(presenceUpdates, [{
+      presence: "paused",
+      chatId: "presence-chat",
+    }]);
+
+    confirmRuntime.clear();
+    await confirmPromise;
+  });
 });
 
 describe("HD receive integration", () => {
