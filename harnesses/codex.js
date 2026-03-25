@@ -86,6 +86,7 @@ export function createCodexHarness(deps = {}) {
     getCapabilities: () => CODEX_HARNESS_CAPABILITIES,
     run,
     handleCommand,
+    listSlashCommands,
     injectMessage,
     cancel,
     waitForIdle,
@@ -125,6 +126,13 @@ export function createCodexHarness(deps = {}) {
     }
     active.abortController.abort();
     return true;
+  }
+
+  /**
+   * @returns {string[]}
+   */
+  function listSlashCommands() {
+    return ["/clear", "/resume", "/model", "/sandbox", "/permissions", "/approval"];
   }
 
   /**

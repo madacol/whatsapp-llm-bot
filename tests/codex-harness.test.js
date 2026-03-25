@@ -35,6 +35,7 @@ describe("createCodexHarness", () => {
     assert.equal(harness.getName(), "codex");
     assert.equal(typeof harness.run, "function");
     assert.equal(typeof harness.handleCommand, "function");
+    assert.equal(typeof harness.listSlashCommands, "function");
     assert.deepEqual(harness.getCapabilities(), {
       supportsResume: true,
       supportsCancel: true,
@@ -46,6 +47,14 @@ describe("createCodexHarness", () => {
       supportsReasoningEffort: false,
       supportsSessionFork: false,
     });
+    assert.deepEqual(harness.listSlashCommands(), [
+      "/clear",
+      "/resume",
+      "/model",
+      "/sandbox",
+      "/permissions",
+      "/approval",
+    ]);
   });
 
   it("handles codex-owned model command", async () => {

@@ -38,22 +38,6 @@ function isTextBlock(block) {
 }
 
 /**
- * Return the slash commands exposed through the bot for the active harness.
- * @param {AgentHarness} harness
- * @returns {string[]}
- */
-function listAvailableSlashCommands(harness) {
-  switch (harness.getName()) {
-    case "claude-agent-sdk":
-      return ["/clear", "/resume", "/model"];
-    case "codex":
-      return ["/clear", "/resume", "/model", "/sandbox", "/permissions", "/approval"];
-    default:
-      return ["/clear", "/resume"];
-  }
-}
-
-/**
  * Resolve the persona and harness for the current chat.
  * @param {import("../store.js").ChatRow | undefined} chatInfo
  * @returns {Promise<{ persona: AgentDefinition | null, harness: AgentHarness }>}
@@ -384,7 +368,7 @@ export function createConversationRunner({ store, llmClient, getActionsFn, execu
         return null;
       }
 
-      const availableSlashCommands = listAvailableSlashCommands(harness);
+      const availableSlashCommands = harness.listSlashCommands();
       const slashCommandName = firstBlock.text.split(/\s+/, 1)[0] ?? "/";
       await context.reply(contentEvent(
         "tool-result",
