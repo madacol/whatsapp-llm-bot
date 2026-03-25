@@ -2,9 +2,11 @@ import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import path from "node:path";
 import config from "../../../config.js";
+import { writeMedia } from "../../../media-store.js";
 import { seedChat } from "../../../tests/helpers.js";
 
 const regressionsDir = path.resolve(process.cwd(), "tests", "prompt-regressions");
+const fixturesDir = path.join(regressionsDir, "fixtures");
 
 /**
  * Remove a test JSON file written during a test.
@@ -12,6 +14,14 @@ const regressionsDir = path.resolve(process.cwd(), "tests", "prompt-regressions"
  */
 async function cleanupTestFile(testName) {
   await fs.rm(path.join(regressionsDir, `${testName}.json`), { force: true });
+}
+
+/**
+ * Remove a fixture file written during a test.
+ * @param {string} fixtureName
+ */
+async function cleanupFixtureFile(fixtureName) {
+  await fs.rm(path.join(fixturesDir, fixtureName), { force: true });
 }
 
 /**
@@ -263,6 +273,56 @@ export default [
         `Expected config system prompt, got: "${testCase.system_prompt}"`);
     } finally {
       await cleanupTestFile(testName);
+    }
+  },
+
+  /** @type {ActionDbTestFn} */
+  async function resolves_media_paths_into_regression_fixtures(action_fn, db) {
+    const testName = "test-media-path-fixtures";
+    const imageBuffer = Buffer.from("create-prompt-test-image");
+    const mediaPath = await writeMedia(imageBuffer, "image/png", "image");
+
+    try {
+      const result = await action_fn(
+        {
+          chatId: "test-chat-media-path",
+          rootDb: db,
+          callLlm: mockCallLlm({ content: "wrong", toolCalls: [] }),
+          confirm: async () => true,
+          log: async () => "",
+          getActions: async () => [],
+        },
+        {
+          test_name: testName,
+          description: "stores media fixtures by canonical path",
+          messages: JSON.stringify([
+            {
+              role: "user",
+              content: [
+                { type: "image", path: mediaPath },
+                { type: "text", text: "describe this" },
+              ],
+            },
+          ]),
+          assertion: '{"type":"contains","value":"hello"}',
+        },
+      );
+
+      assert.ok(typeof result === "string" && result.includes("Fixtures:"), `Expected fixture summary, got: ${result}`);
+
+      const raw = await fs.readFile(path.join(regressionsDir, `${testName}.json`), "utf-8");
+      const testCase = JSON.parse(raw);
+      assert.deepEqual(testCase.messages[0].content[0], {
+        type: "image",
+        fixture: mediaPath,
+        mime_type: "image/png",
+      });
+
+      const fixtureData = await fs.readFile(path.join(fixturesDir, mediaPath));
+      assert.deepEqual(fixtureData, imageBuffer);
+    } finally {
+      await cleanupTestFile(testName);
+      await cleanupFixtureFile(mediaPath);
     }
   },
 ];

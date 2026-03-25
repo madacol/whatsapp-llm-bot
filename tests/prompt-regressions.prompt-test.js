@@ -54,7 +54,7 @@ let toolDefsByName = new Map();
 
 /**
  * Resolve fixture references in message content blocks.
- * Replaces `{type:"image", fixture:"...", mime_type:"..."}` with actual base64 data.
+ * Replaces `{type:"image"|"audio"|"video", fixture:"...", mime_type:"..."}` with actual inline data.
  * @param {ChatMessage[]} messages
  * @returns {Promise<ChatMessage[]>}
  */
@@ -69,18 +69,32 @@ async function resolveFixtures(messages) {
     const resolvedContent = await Promise.all(
       msg.content.map(async (block) => {
         if (
-          block.type === "image" &&
+          (block.type === "image" || block.type === "audio" || block.type === "video") &&
           "fixture" in block &&
           typeof block.fixture === "string"
         ) {
           const fixturePath = path.join(fixturesDir, block.fixture);
           const data = await fs.readFile(fixturePath);
-          return {
-            type: /** @type {const} */ ("image"),
-            encoding: /** @type {const} */ ("base64"),
-            mime_type: block.mime_type || "image/jpeg",
-            data: data.toString("base64"),
-          };
+          return block.type === "image"
+            ? {
+              type: /** @type {const} */ ("image"),
+              encoding: /** @type {const} */ ("base64"),
+              mime_type: block.mime_type || "image/jpeg",
+              data: data.toString("base64"),
+            }
+            : block.type === "audio"
+              ? {
+                type: /** @type {const} */ ("audio"),
+                encoding: /** @type {const} */ ("base64"),
+                mime_type: block.mime_type || "audio/mp4",
+                data: data.toString("base64"),
+              }
+              : {
+                type: /** @type {const} */ ("video"),
+                encoding: /** @type {const} */ ("base64"),
+                mime_type: block.mime_type || "video/mp4",
+                data: data.toString("base64"),
+              };
         }
         return block;
       }),

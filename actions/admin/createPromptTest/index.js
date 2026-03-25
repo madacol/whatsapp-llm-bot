@@ -2,12 +2,14 @@ import fs from "node:fs/promises";
 import path from "node:path";
 
 import config from "../../../config.js";
-import { readBlockBase64, readBlockBuffer } from "../../../media-store.js";
 import {
-  actionsToToolDefinitions,
-  isMediaBlock,
-  registerMedia,
-} from "../../../message-formatting.js";
+  createImageBlockFromPath,
+  isValidMediaPath,
+  mediaPathToMimeType,
+  readBlockBase64,
+  readBlockBuffer,
+} from "../../../media-store.js";
+import { actionsToToolDefinitions } from "../../../message-formatting.js";
 import { checkAssertion } from "../../../tests/prompt-regressions/assertions.js";
 
 /** @typedef {import("../../../tests/prompt-regressions/assertions.js").TestAssertion} TestAssertion */
@@ -90,109 +92,96 @@ function parseMessages(messagesJson) {
 }
 
 /**
- * Reconstruct the media registry from DB messages, matching
- * how prepareMessages() counts media blocks.
- * @param {PGlite} rootDb
- * @param {string} chatId
- * @returns {Promise<MediaRegistry>}
+ * @param {unknown} block
+ * @returns {block is { type: "image" | "audio" | "video", path: string, mime_type?: string }}
  */
-async function reconstructMediaRegistry(rootDb, chatId) {
-  const { rows } = await rootDb.sql`
-    SELECT message_data FROM messages
-    WHERE chat_id = ${chatId} AND cleared_at IS NULL
-    ORDER BY timestamp ASC
-  `;
+function isPathMediaBlock(block) {
+  return !!block
+    && typeof block === "object"
+    && "type" in block
+    && "path" in block
+    && (block.type === "image" || block.type === "audio" || block.type === "video")
+    && typeof block.path === "string"
+    && isValidMediaPath(block.path);
+}
 
-  /** @type {MediaRegistry} */
-  const registry = new Map();
-
-  for (const row of rows) {
-    const msg = /** @type {Message} */ (row.message_data);
-    if (!msg) continue;
-
-    if (msg.role === "user") {
-      for (const block of msg.content) {
-        if (isMediaBlock(block)) {
-          registerMedia(registry, block);
-        } else if (block.type === "quote") {
-          for (const quoteBlock of block.content) {
-            if (isMediaBlock(quoteBlock)) {
-              registerMedia(registry, quoteBlock);
-            }
-          }
-        }
-      }
-    } else if (msg.role === "tool") {
-      for (const block of msg.content) {
-        if (isMediaBlock(block)) {
-          registerMedia(registry, block);
-        }
-      }
-    }
+/**
+ * @param {{ type: "image" | "audio" | "video", path: string, mime_type?: string }} block
+ * @returns {ImageContentBlock | VideoContentBlock | AudioContentBlock}
+ */
+function createStoredMediaBlock(block) {
+  if (block.type === "image") {
+    return createImageBlockFromPath(block.path);
   }
-
-  return registry;
+  if (block.type === "video") {
+    return {
+      type: "video",
+      path: block.path,
+      mime_type: mediaPathToMimeType(block.path, block.mime_type),
+    };
+  }
+  return {
+    type: "audio",
+    path: block.path,
+    mime_type: mediaPathToMimeType(block.path, block.mime_type),
+  };
 }
 
 /**
- * Get file extension from a MIME type.
- * @param {string} mimeType
- * @returns {string}
+ * @param {ChatMessage[]} messages
+ * @returns {boolean}
  */
-function extFromMime(mimeType) {
-  const map = /** @type {Record<string, string>} */ ({
-    "image/jpeg": "jpeg",
-    "image/png": "png",
-    "image/gif": "gif",
-    "image/webp": "webp",
-    "video/mp4": "mp4",
-    "audio/ogg": "ogg",
-    "audio/mpeg": "mp3",
-  });
-  return map[mimeType] || mimeType.split("/")[1] || "bin";
+function hasPathMedia(messages) {
+  return messages.some((msg) =>
+    Array.isArray(msg.content) && msg.content.some((block) => isPathMediaBlock(block))
+  );
 }
 
 /**
- * @param {MediaRegistry} mediaRegistry
- * @param {number} mediaId
- * @returns {IncomingContentBlock | undefined}
- */
-function getMediaBlockByIndex(mediaRegistry, mediaId) {
-  return Array.from(mediaRegistry.values())[mediaId - 1];
-}
-
-/**
- * Build messages for inline LLM verification using base64 data from the media registry.
- * @param {ChatMessage[]} originalMessages - Original messages with media_ref markers
- * @param {MediaRegistry} mediaRegistry
+ * Build messages for inline LLM verification using base64 data from media paths.
+ * @param {ChatMessage[]} originalMessages
  * @returns {Promise<ChatMessage[]>}
  */
-async function buildVerificationMessages(originalMessages, mediaRegistry) {
+async function buildVerificationMessages(originalMessages) {
   return Promise.all(originalMessages.map(async (msg) => {
     if (!Array.isArray(msg.content)) return msg;
 
     /** @type {ContentBlock[]} */
     const content = await Promise.all(msg.content.map(async (block) => {
-      if (
-        typeof block === "object" &&
-        block !== null &&
-        block.type === "image" &&
-        "media_ref" in block
-      ) {
-        const mediaId = /** @type {number} */ (/** @type {Record<string, unknown>} */ (block).media_ref);
-        const mediaBlock = getMediaBlockByIndex(mediaRegistry, mediaId);
-        if (mediaBlock && mediaBlock.type === "image") {
-          const mimeType =
-            "mime_type" in mediaBlock && typeof mediaBlock.mime_type === "string"
-              ? mediaBlock.mime_type
-              : "image/jpeg";
-          return /** @type {ImageContentBlock} */ ({
+      if (isPathMediaBlock(block)) {
+        if (block.type === "image") {
+          const imageBlock = createImageBlockFromPath(block.path);
+          return {
             type: "image",
             encoding: "base64",
-            mime_type: mimeType,
-            data: await readBlockBase64(mediaBlock),
-          });
+            mime_type: imageBlock.mime_type,
+            data: await readBlockBase64(imageBlock),
+          };
         }
+        if (block.type === "video") {
+          const videoBlock = /** @type {VideoContentBlock} */ ({
+            type: "video",
+            path: block.path,
+            mime_type: mediaPathToMimeType(block.path, block.mime_type),
+          });
+          return {
+            type: "video",
+            encoding: "base64",
+            mime_type: videoBlock.mime_type,
+            data: await readBlockBase64(videoBlock),
+          };
+        }
+        const audioBlock = /** @type {AudioContentBlock} */ ({
+          type: "audio",
+          path: block.path,
+          mime_type: mediaPathToMimeType(block.path, block.mime_type),
+        });
+        return {
+          type: "audio",
+          encoding: "base64",
+          mime_type: audioBlock.mime_type,
+          data: await readBlockBase64(audioBlock),
+        };
       }
       return /** @type {ContentBlock} */ (block);
     }));
@@ -226,49 +215,33 @@ function formatAssertionDesc(assertion) {
 }
 
 /**
- * Build the fixture-ref messages for the JSON file (with fixture references instead of base64 data).
- * @param {ChatMessage[]} originalMessages - Messages with media_ref markers
- * @param {MediaRegistry} mediaRegistry
- * @param {string} testName
+ * Build the fixture-ref messages for the JSON file (with fixture references instead of media paths).
+ * @param {ChatMessage[]} originalMessages
  * @returns {Promise<{ messages: Array<Record<string, unknown>>, fixtures: Array<{path: string, data: Buffer}>, warnings: string[] }>}
  */
-async function buildTestCaseMessages(originalMessages, mediaRegistry, testName) {
+async function buildTestCaseMessages(originalMessages) {
   /** @type {Array<{path: string, data: Buffer}>} */
   const fixtures = [];
   /** @type {string[]} */
   const warnings = [];
+  /** @type {Set<string>} */
+  const seenFixtures = new Set();
 
   const messages = await Promise.all(originalMessages.map(async (msg) => {
     if (!Array.isArray(msg.content)) return msg;
 
     const content = await Promise.all(msg.content.map(async (block) => {
-      if (
-        typeof block === "object" &&
-        block !== null &&
-        block.type === "image" &&
-        "media_ref" in block
-      ) {
-        const mediaId = /** @type {number} */ (/** @type {Record<string, unknown>} */ (block).media_ref);
-        const mediaBlock = getMediaBlockByIndex(mediaRegistry, mediaId);
-
-        if (!mediaBlock) {
-          warnings.push(`Could not find [media:${mediaId}]. Add fixture manually.`);
-          return block;
+      if (isPathMediaBlock(block)) {
+        const storedBlock = createStoredMediaBlock(block);
+        const fixtureName = block.path;
+        if (!seenFixtures.has(fixtureName)) {
+          fixtures.push({
+            path: path.join(fixturesDir, fixtureName),
+            data: await readBlockBuffer(storedBlock),
+          });
+          seenFixtures.add(fixtureName);
         }
-
-        const mimeType =
-          "mime_type" in mediaBlock && typeof mediaBlock.mime_type === "string"
-            ? mediaBlock.mime_type
-            : "image/jpeg";
-        const ext = extFromMime(mimeType);
-        const fixtureName = `${testName}-media${mediaId}.${ext}`;
-
-        fixtures.push({
-          path: path.join(fixturesDir, fixtureName),
-          data: await readBlockBuffer(/** @type {ImageContentBlock | AudioContentBlock | VideoContentBlock} */ (mediaBlock)),
-        });
-
-        return { type: "image", fixture: fixtureName, mime_type: mimeType };
+        return { type: block.type, fixture: fixtureName, mime_type: storedBlock.mime_type };
       }
       return block;
     }));
@@ -299,7 +272,7 @@ export default /** @type {defineAction} */ ((x) => x)({
       messages: {
         type: "string",
         description:
-          'JSON array of ChatMessage[]. User: {"role":"user","content":[{"type":"text","text":"..."}]}. Assistant text: {"role":"assistant","content":[{"type":"text","text":"..."}]}. Assistant tool call: {"role":"assistant","content":[{"type":"tool","tool_id":"call_1","name":"fn","arguments":"{}"}]}. Tool result: {"role":"tool","tool_id":"call_1","content":[{"type":"text","text":"result"}]}. For media: {"type":"image","media_ref":N}.',
+          'JSON array of ChatMessage[]. User: {"role":"user","content":[{"type":"text","text":"..."}]}. Assistant text: {"role":"assistant","content":[{"type":"text","text":"..."}]}. Assistant tool call: {"role":"assistant","content":[{"type":"tool","tool_id":"call_1","name":"fn","arguments":"{}"}]}. Tool result: {"role":"tool","tool_id":"call_1","content":[{"type":"text","text":"result"}]}. For media: {"type":"image","path":"<sha>.<ext>"}.',
       },
       assertion: {
         type: "string",
@@ -354,8 +327,8 @@ export default /** @type {defineAction} */ ((x) => x)({
       ];
     }
 
-    // Step 4: Resolve media refs
-    const hasMediaRefs = JSON.stringify(messages).includes('"media_ref"');
+    // Step 4: Resolve media paths
+    const hasMediaPaths = hasPathMedia(messages);
 
     /** @type {Array<{path: string, data: Buffer}>} */
     let fixtureFiles = [];
@@ -366,17 +339,15 @@ export default /** @type {defineAction} */ ((x) => x)({
     /** @type {Array<Record<string, unknown>>} */
     let testCaseMessages = messages;
 
-    if (hasMediaRefs) {
-      const mediaRegistry = await reconstructMediaRegistry(rootDb, chatId);
-
+    if (hasMediaPaths) {
       // Build fixture-ref messages for the JSON file
-      const testCaseResult = await buildTestCaseMessages(messages, mediaRegistry, params.test_name);
+      const testCaseResult = await buildTestCaseMessages(messages);
       testCaseMessages = testCaseResult.messages;
       fixtureFiles = testCaseResult.fixtures;
       mediaWarnings = testCaseResult.warnings;
 
-      // Build base64 messages for inline verification
-      messagesForLlm = await buildVerificationMessages(messages, mediaRegistry);
+      // Build inline media messages for inline verification
+      messagesForLlm = await buildVerificationMessages(messages);
     }
 
     // Step 5: Get tool definitions
