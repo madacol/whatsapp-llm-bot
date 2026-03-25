@@ -617,13 +617,7 @@ declare function isHtmlContent(value: unknown): value is HtmlContent;
 type FullActionContext = ActionContext & { rootDb: PGlite; chatDb: PGlite; callLlm: CallLlm; llmClient: LlmClient };
 
 /** action_fn as seen by tests — accepts partial context (duck typing). */
-type ActionParamValue =
-  | string
-  | number
-  | boolean
-  | null
-  | IncomingContentBlock
-  | Array<string | IncomingContentBlock>;
+type ActionParamValue = string | number | boolean | null | IncomingContentBlock | IncomingContentBlock[];
 
 /** action_fn as seen by tests — accepts partial context (duck typing). */
 type TestActionFn = (

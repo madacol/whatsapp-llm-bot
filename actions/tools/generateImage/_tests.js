@@ -1,7 +1,4 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import path from "node:path";
 
 /** @type {ActionTestFn[]} */
 export default [
@@ -87,57 +84,6 @@ async function test_generates_image_from_prompt(action_fn) {
       } finally {
         globalThis.fetch = originalFetch;
       }
-    },
-
-    async function test_accepts_temp_file_paths_for_editing(action_fn) {
-      const originalFetch = globalThis.fetch;
-      const tempDir = await mkdtemp(path.join(tmpdir(), "generate-image-"));
-      const imagePath = path.join(tempDir, "input.jpg");
-      const images = /** @type {Array<string | ImageContentBlock>} */ ([imagePath]);
-      /** @type {unknown} */
-      let capturedBody;
-      await writeFile(imagePath, Buffer.from("aGVsbG8=", "base64"));
-
-      try {
-        globalThis.fetch = /** @type {typeof fetch} */ (/** @type {unknown} */ (async (/** @type {string} */ _url, /** @type {RequestInit} */ init) => {
-          capturedBody = JSON.parse(/** @type {string} */ (init.body));
-          return {
-            ok: true,
-            json: async () => ({
-              choices: [{
-                message: {
-                  role: "assistant",
-                  content: "Edited image",
-                  images: [{
-                    type: "image_url",
-                    image_url: { url: "data:image/png;base64,AAAA" },
-                  }],
-                },
-              }],
-            }),
-          };
-        }));
-
-        await action_fn(
-          {
-            content: [],
-            send: async () => {},
-            log: async () => "",
-          },
-          {
-            images,
-            prompt: "make it blue",
-          },
-        );
-      } finally {
-        globalThis.fetch = originalFetch;
-        await rm(tempDir, { recursive: true, force: true });
-      }
-
-      const body = /** @type {{messages: Array<{content: Array<{type: string, image_url?: {url: string}}>}>}} */ (capturedBody);
-      const userContent = body.messages[0].content;
-      const imagepart = userContent.find((/** @type {{type: string}} */ p) => p.type === "image_url");
-      assert.ok(imagepart, "Request should include the temp-file image");
     },
 
     async function test_deduplicates_images_from_content_array_and_images_field(action_fn) {

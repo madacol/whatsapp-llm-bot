@@ -157,7 +157,7 @@ async function executeAndStoreTool({
     // Resolve image params: look up action schema, replace media refs with actual content blocks
     const tool = await toolRuntime.getTool(toolName);
     const resolvedArgs = tool
-      ? await resolveImageArgs(tool.parameters, toolArgs, mediaRegistry)
+      ? resolveImageArgs(tool.parameters, toolArgs, mediaRegistry)
       : toolArgs;
 
     const functionResponse = await toolRuntime.executeTool(toolName, context, resolvedArgs, {
@@ -253,7 +253,7 @@ async function processLlmResponse({ session, llmConfig, messages, mediaRegistry,
   const hooks = { ...NO_OP_HOOKS, ...userHooks };
   let effectiveSystemPrompt = llmConfig.externalInstructions;
   if (mediaRegistry.size > 0) {
-    effectiveSystemPrompt += "\n\nImages in the conversation are annotated with temporary file paths. When calling tools with image parameters, pass the temporary file path as the parameter value.";
+    effectiveSystemPrompt += '\n\nMedia in the conversation is tagged with [media:N]. When calling tools with image parameters, pass the media reference (e.g. "media:1") as the parameter value.';
   }
   const injectedActions = new Set();
   let depth = 0;

@@ -1,6 +1,4 @@
-import { readFile } from "node:fs/promises";
 import sharp from "sharp";
-import { isImageInputBlock } from "../../../media-temp-files.js";
 
 export default /** @type {defineAction} */ ((x) => x)({
   name: "zoom_image",
@@ -40,13 +38,16 @@ export default /** @type {defineAction} */ ((x) => x)({
   },
   /**
    * @param {ActionContext} _context
-   * @param {{ image: string | ImageContentBlock | null, x: number, y: number, width: number, height: number }} params
+   * @param {{ image: ImageContentBlock | null, x: number, y: number, width: number, height: number }} params
    */
   action_fn: async function (_context, params) {
     const { image, x, y, width, height } = params;
 
-    if (!image) {
-      return "No image reference was provided. Pass the temporary file path for an image from the conversation.";
+    if (!image || typeof image === "string") {
+      const detail = typeof image === "string"
+        ? `Received "${image}" which did not resolve to an image.`
+        : "No image reference was provided.";
+      return `${detail} Pass a [media:N] reference from the conversation.`;
     }
 
     // Validate ranges (negative or out-of-bounds)
@@ -59,14 +60,12 @@ export default /** @type {defineAction} */ ((x) => x)({
 
     let source = image;
     try {
-      if (isImageInputBlock(image) && image.getHd) {
+      if (image.getHd) {
         const hd = await image.getHd;
         if (hd?.data) source = hd;
       }
     } catch {}
-    const inputBuffer = typeof source === "string"
-      ? await readFile(source)
-      : Buffer.from(source.data, "base64");
+    const inputBuffer = Buffer.from(source.data, "base64");
     const pipeline = sharp(inputBuffer);
     const metadata = await pipeline.metadata();
     const imgWidth = metadata.width ?? 0;
