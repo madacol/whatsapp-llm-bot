@@ -934,8 +934,8 @@ describe("image param resolution in tool calls", () => {
     const systemText = Array.isArray(systemMsg.content)
       ? systemMsg.content.map(c => c.text).join("")
       : systemMsg.content;
-    assert.ok(systemText.includes("temporary file paths"),
-      "System prompt should mention temp-file image tagging");
+    assert.ok(systemText.includes("Media in the conversation is tagged"),
+      "System prompt should mention media tagging");
 
     assert.ok(r.raw.some(x => x.text.includes("image was processed")), "Should deliver final reply");
   });

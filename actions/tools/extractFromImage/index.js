@@ -1,6 +1,4 @@
 
-import { normalizeImageInputs } from "../../../media-temp-files.js";
-
 const EXTRACT_PROMPT = `Extrae datos de la factura en JSON estricto (solo JSON):
 {
   "store_name": "nombre",
@@ -65,14 +63,11 @@ export default /** @type {defineAction} */ ((x) => x)({
     autoContinue: true,
   },
   prompt: () => EXTRACT_PROMPT,
-  /**
-   * @param {ExtendedActionContext<{ useLlm: true, autoExecute: true, autoContinue: true }>} context
-   * @param {{ images?: Array<string | ImageContentBlock>, prompt: string }} params
-   */
   action_fn: async function (context, params) {
     const { callLlm, resolveModel: ctxResolveModel } = context;
 
-    const images = await normalizeImageInputs(params.images ?? []);
+    /** @type {ImageContentBlock[]} */
+    const images = /** @type {ImageContentBlock[]} */ (params.images ?? []);
     if (images.length === 0) {
       return "No image found. Please send an image along with your message.";
     }

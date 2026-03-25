@@ -1,6 +1,5 @@
 import { describe, it, before, after, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { tmpdir } from "node:os";
 
 process.env.TESTING = "1";
 process.env.MASTER_ID = "master-user";
@@ -677,12 +676,12 @@ describe("LLM pipeline via createMessageHandler", () => {
       const systemMsg = lastReq.messages.find(m => m.role === "system");
       const systemText = Array.isArray(systemMsg.content) ? systemMsg.content[0].text : systemMsg.content;
       assert.ok(
-        systemText.includes("temporary file path"),
-        "System prompt should contain temp-file hint when media is present",
+        systemText.includes("[media:N]"),
+        "System prompt should contain media reference hint when media is present",
       );
       assert.ok(
-        systemText.includes("pass the temporary file path"),
-        "System prompt hint should mention passing temp-file paths as parameter values",
+        systemText.includes("media reference"),
+        "System prompt hint should mention passing media references as parameter values",
       );
     });
   });
@@ -715,9 +714,9 @@ describe("LLM pipeline via createMessageHandler", () => {
       assert.ok(tools.length > 0, "Should have tools");
       // Tools with image params should have them converted to string type
       const imageTools = tools.filter(t =>
-        Object.values(t.function.parameters.properties).some(p => p.description?.includes("temporary file path"))
+        Object.values(t.function.parameters.properties).some(p => p.description?.includes("[media:N]"))
       );
-      assert.ok(imageTools.length > 0, "At least one tool should have image params with temp-file hint");
+      assert.ok(imageTools.length > 0, "At least one tool should have image params with media hint");
       // Non-image tools should NOT have media refs injected
       for (const tool of tools) {
         assert.ok(
@@ -728,7 +727,7 @@ describe("LLM pipeline via createMessageHandler", () => {
     });
   });
 
-  it("does not add temp-file hints to tool schemas when no media is present", async () => {
+  it("does not add media hints to tool schemas when no media is present", async () => {
     await seedChat("pipe-no-media-tools", { enabled: true });
     mockServer.addResponses("Text only!");
 
@@ -741,51 +740,15 @@ describe("LLM pipeline via createMessageHandler", () => {
     const lastReq = mockServer.getRequests().at(-1);
     const tools = lastReq.tools;
     assert.ok(tools.length > 0, "Should have tools");
-    // No tool should mention temp-file paths when no media is present
+    // No tool should mention [media:N] when no media is present
     for (const tool of tools) {
       const hasMediaHint = Object.values(tool.function.parameters.properties).some(
-        p => p.description?.includes("temporary file path")
+        p => p.description?.includes("[media:N]")
       );
       assert.ok(
         !hasMediaHint,
-        `Tool "${tool.function.name}" should NOT have temp-file hints when no media`,
+        `Tool "${tool.function.name}" should NOT have media hints when no media`,
       );
     }
-  });
-
-  it("includes temp file path markers for media in the LLM request", async () => {
-    const modelsCache = [
-      { id: "mock-model", architecture: { input_modalities: ["text", "image", "video", "audio"] } },
-    ];
-    await withModelsCache(modelsCache, async () => {
-      await seedChat("pipe-media-path", { enabled: true });
-
-      const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString();
-      await db.sql`INSERT INTO messages(chat_id, sender_id, message_data, timestamp)
-        VALUES ('pipe-media-path', 'u1', ${JSON.stringify({
-          role: "user",
-          content: [{ type: "image", mime_type: "image/png", data: "aGVsbG8=", encoding: "base64" }],
-        })}, ${twoHoursAgo})`;
-
-      mockServer.addResponses("I see the image!");
-
-      const { context } = createChatTurn({
-        chatId: "pipe-media-path",
-        content: [{ type: "text", text: "What is in the image?" }],
-      });
-      await handleMessage(context);
-
-      const lastReq = mockServer.getRequests().at(-1);
-      const userTextParts = lastReq.messages
-        .filter((message) => message.role === "user" && Array.isArray(message.content))
-        .flatMap((message) => message.content)
-        .filter((part) => part.type === "text")
-        .map((part) => part.text);
-
-      assert.ok(
-        userTextParts.some((text) => text.includes(`${tmpdir()}/whatsapp-llm-bot-media/`)),
-        "Expected a temp-file marker for the image in the user message payload",
-      );
-    });
   });
 });
