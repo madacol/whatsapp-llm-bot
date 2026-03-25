@@ -115,7 +115,7 @@ describe("createConversationRunner with SDK slash commands", () => {
     );
   });
 
-  it("keeps Codex slash-prefixed messages on the harness command surface", async () => {
+  it("sends Codex slash-prefixed messages directly to the SDK without local command handling or chat formatting", async () => {
     await seedChat("conv-sdk-slash-codex", { enabled: true });
     await db.sql`
       UPDATE chats
@@ -124,9 +124,9 @@ describe("createConversationRunner with SDK slash commands", () => {
       WHERE chat_id = 'conv-sdk-slash-codex'
     `;
 
-    /** @type {string[]} */
-    const seenCommands = [];
-    let runCalls = 0;
+    let handledCommandCalls = 0;
+    /** @type {string | null} */
+    let seenPrompt = null;
 
     registerHarness("codex", () => ({
       getName: () => "codex",
@@ -141,20 +141,20 @@ describe("createConversationRunner with SDK slash commands", () => {
         supportsReasoningEffort: false,
         supportsSessionFork: false,
       }),
-      handleCommand: async (input) => {
-        seenCommands.push(input.command);
-        await input.context.reply({
-          kind: "content",
-          source: "tool-result",
-          content: "Codex slash command handled",
-        });
-        return true;
+      handleCommand: async () => {
+        handledCommandCalls += 1;
+        return false;
       },
       run: async (params) => {
-        runCalls += 1;
-        await params.hooks.onLlmResponse("run should not be called");
+        const lastMessage = params.messages.at(-1);
+        assert.ok(lastMessage, "Expected a final message");
+        assert.equal(lastMessage.role, "user");
+        const textBlock = lastMessage.content.find((block) => block.type === "text");
+        assert.ok(textBlock, "Expected the final user message to include text");
+        seenPrompt = textBlock.text;
+        await params.hooks.onLlmResponse("Codex SDK slash command received");
         return {
-          response: [{ type: "text", text: "run should not be called" }],
+          response: [{ type: "text", text: "Codex SDK slash command received" }],
           messages: params.messages,
           usage: { promptTokens: 0, completionTokens: 0, cachedTokens: 0, cost: 0 },
         };
@@ -163,15 +163,17 @@ describe("createConversationRunner with SDK slash commands", () => {
 
     const { context, responses } = createChatTurn({
       chatId: "conv-sdk-slash-codex",
+      senderName: "Marco",
+      facts: { isGroup: true },
       content: [{ type: "text", text: "/model GPT-5.4" }],
     });
     await handleMessage(context);
 
-    assert.deepEqual(seenCommands, ["model gpt-5.4"]);
-    assert.equal(runCalls, 0);
+    assert.equal(handledCommandCalls, 0);
+    assert.equal(seenPrompt, "/model GPT-5.4");
     assert.ok(
-      responses.some((response) => response.text.includes("Codex slash command handled")),
-      `Expected Codex to handle the slash command locally, got: ${responses.map((response) => response.text).join(" | ")}`,
+      responses.some((response) => response.text.includes("Codex SDK slash command received")),
+      `Expected Codex SDK to receive the slash command, got: ${responses.map((response) => response.text).join(" | ")}`,
     );
   });
 });
