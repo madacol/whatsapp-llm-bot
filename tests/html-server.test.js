@@ -2,7 +2,7 @@ process.env.TESTING = "1";
 
 import { describe, it, before, after } from "node:test";
 import assert from "node:assert/strict";
-import { PGlite as PGliteDriver } from "@electric-sql/pglite";
+import { PGlite } from "@electric-sql/pglite";
 import { storePage } from "../html-store.js";
 import { startHtmlServer, stopHtmlServer } from "../html-server.js";
 
@@ -13,7 +13,7 @@ describe("html-server", () => {
   let assignedPort;
 
   before(async () => {
-    db = new PGliteDriver("memory://");
+    db = new PGlite("memory://");
     assignedPort = await startHtmlServer(0, db);
   });
 

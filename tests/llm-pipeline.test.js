@@ -6,7 +6,7 @@ process.env.MASTER_ID = "master-user";
 process.env.LLM_API_KEY = "test-key";
 process.env.MODEL = "mock-model";
 
-import { PGlite as PGliteDriver } from "@electric-sql/pglite";
+import { PGlite } from "@electric-sql/pglite";
 import { createMockLlmServer, createChatTurn, createTestDb, seedChat as seedChat_, withModelsCache } from "./helpers.js";
 import { setDb } from "../db.js";
 
