@@ -38,16 +38,6 @@ function isTextBlock(block) {
 }
 
 /**
- * SDK-backed harnesses need raw slash commands to reach the runtime unchanged.
- * @param {AgentHarness} harness
- * @returns {boolean}
- */
-function sendsSlashCommandsDirectlyToRuntime(harness) {
-  const harnessName = harness.getName();
-  return harnessName === "claude-agent-sdk" || harnessName === "codex";
-}
-
-/**
  * Resolve the persona and harness for the current chat.
  * @param {import("../store.js").ChatRow | undefined} chatInfo
  * @returns {Promise<{ persona: AgentDefinition | null, harness: AgentHarness }>}
@@ -173,22 +163,10 @@ export function createConversationRunner({ store, llmClient, getActionsFn, execu
    *   persona: AgentDefinition | null,
    *   harness: AgentHarness,
    *   isSlashCommand?: boolean,
-   *   preserveRawFirstBlockText?: boolean,
    * }} input
    * @returns {Promise<ChatTurn | null>}
    */
-  async function handleLlmMessage({
-    turn,
-    chatInfo,
-    context,
-    actions,
-    actionResolver,
-    firstBlock,
-    persona,
-    harness,
-    isSlashCommand,
-    preserveRawFirstBlockText,
-  }) {
+  async function handleLlmMessage({ turn, chatInfo, context, actions, actionResolver, firstBlock, persona, harness, isSlashCommand }) {
     const { chatId, senderIds, content, senderName, facts } = turn;
     const time = formatTime(turn.timestamp);
     const willRespond = isSlashCommand || shouldRespond(chatInfo, facts);
@@ -198,19 +176,15 @@ export function createConversationRunner({ store, llmClient, getActionsFn, execu
     /** @type {IncomingContentBlock[]} */
     let messageContent = content;
     if (firstBlock) {
-      if (preserveRawFirstBlockText) {
-        userText = firstBlock.text;
-      } else {
-        const formatted = formatUserMessage(firstBlock, facts.isGroup, senderName, time);
-        systemPromptSuffix = formatted.systemPromptSuffix;
-        userText = formatted.formattedText;
-        const firstBlockIndex = content.indexOf(firstBlock);
-        messageContent = content.map((block, index) => (
-          index === firstBlockIndex
-            ? { ...firstBlock, text: formatted.formattedText }
-            : block
-        ));
-      }
+      const formatted = formatUserMessage(firstBlock, facts.isGroup, senderName, time);
+      systemPromptSuffix = formatted.systemPromptSuffix;
+      userText = formatted.formattedText;
+      const firstBlockIndex = content.indexOf(firstBlock);
+      messageContent = content.map((block, index) => (
+        index === firstBlockIndex
+          ? { ...firstBlock, text: formatted.formattedText }
+          : block
+      ));
     }
 
     /** @type {UserMessage} */
@@ -372,29 +346,26 @@ export function createConversationRunner({ store, llmClient, getActionsFn, execu
     }
 
     const isSlashCommand = firstBlock?.text?.startsWith("/");
-    const routeSlashCommandDirectlyToRuntime = !!isSlashCommand && sendsSlashCommandsDirectlyToRuntime(harness);
     if (isSlashCommand && firstBlock) {
       if (!chatInfo?.is_enabled) {
         await context.reply(contentEvent("error", "Bot is not enabled in this chat. Use !config enabled true"));
         return null;
       }
 
-      if (!routeSlashCommandDirectlyToRuntime) {
-        const slashCommand = firstBlock.text.slice(1).trim().toLowerCase();
-        const handled = await harness.handleCommand({
-          chatId,
-          chatInfo,
-          context,
-          command: slashCommand,
-          sessionControl: {
-            archive: archiveHarnessSession,
-            getHistory: getHarnessSessionHistory,
-            restore: restoreHarnessSession,
-          },
-        });
-        if (handled) {
-          return null;
-        }
+      const slashCommand = firstBlock.text.slice(1).trim().toLowerCase();
+      const handled = await harness.handleCommand({
+        chatId,
+        chatInfo,
+        context,
+        command: slashCommand,
+        sessionControl: {
+          archive: archiveHarnessSession,
+          getHistory: getHarnessSessionHistory,
+          restore: restoreHarnessSession,
+        },
+      });
+      if (handled) {
+        return null;
       }
     }
 
@@ -408,7 +379,6 @@ export function createConversationRunner({ store, llmClient, getActionsFn, execu
       persona,
       harness,
       isSlashCommand: !!isSlashCommand,
-      preserveRawFirstBlockText: routeSlashCommandDirectlyToRuntime,
     });
   }
 
