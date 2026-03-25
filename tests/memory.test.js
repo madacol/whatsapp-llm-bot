@@ -2,7 +2,7 @@ process.env.TESTING = "1";
 
 import { describe, it, before } from "node:test";
 import assert from "node:assert/strict";
-import { PGlite as PGliteDriver } from "@electric-sql/pglite";
+import { PGlite } from "@electric-sql/pglite";
 import { vector } from "@electric-sql/pglite/vector";
 import { initStore } from "../store.js";
 import {
@@ -21,7 +21,7 @@ let db;
 let store;
 
 before(async () => {
-  db = new PGliteDriver("memory://", { extensions: { vector } });
+  db = new PGlite("memory://", { extensions: { vector } });
   store = await initStore(db);
 
   // Create memories table (will be in store.js after Phase 1A merge)

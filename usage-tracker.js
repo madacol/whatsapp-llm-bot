@@ -29,6 +29,10 @@ export async function resolveCost(nativeCost, model, promptTokens, completionTok
   return estimateCost(model, promptTokens, completionTokens);
 }
 
+/**
+ * @typedef {import("@electric-sql/pglite").PGlite} PGlite
+ */
+
 /** @type {WeakSet<PGlite>} */
 const initialized = new WeakSet();
 
