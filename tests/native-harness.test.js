@@ -24,7 +24,10 @@ describe("createNativeHarness", () => {
       supportsReasoningEffort: false,
       supportsSessionFork: false,
     });
-    assert.deepEqual(harness.listSlashCommands?.(), ["/clear", "/resume"]);
+    assert.deepEqual(harness.listSlashCommands?.(), [
+      { name: "clear", description: "Clear the current harness session" },
+      { name: "resume", description: "Restore a previously cleared harness session" },
+    ]);
 
     const handled = await harness.handleCommand?.({
       chatId: "chat-1",

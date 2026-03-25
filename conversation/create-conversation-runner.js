@@ -38,6 +38,16 @@ function isTextBlock(block) {
 }
 
 /**
+ * @param {SlashCommandDescriptor[]} commands
+ * @returns {string}
+ */
+function formatAvailableSlashCommands(commands) {
+  return commands
+    .map((command) => `/${command.name} - ${command.description}`)
+    .join("\n");
+}
+
+/**
  * Resolve the persona and harness for the current chat.
  * @param {import("../store.js").ChatRow | undefined} chatInfo
  * @returns {Promise<{ persona: AgentDefinition | null, harness: AgentHarness }>}
@@ -372,7 +382,7 @@ export function createConversationRunner({ store, llmClient, getActionsFn, execu
       const slashCommandName = firstBlock.text.split(/\s+/, 1)[0] ?? "/";
       await context.reply(contentEvent(
         "tool-result",
-        `Unknown slash command: ${slashCommandName}\nAvailable slash commands: ${availableSlashCommands.join(", ")}`,
+        `Unknown slash command: ${slashCommandName}\nAvailable slash commands:\n${formatAvailableSlashCommands(availableSlashCommands)}`,
       ));
       return null;
     }

@@ -516,10 +516,14 @@ export function createClaudeAgentSdkHarness() {
   }
 
   /**
-   * @returns {string[]}
+   * @returns {SlashCommandDescriptor[]}
    */
   function listSlashCommands() {
-    return ["/clear", "/resume", "/model"];
+    return [
+      { name: "clear", description: "Clear the current harness session" },
+      { name: "resume", description: "Restore a previously cleared harness session" },
+      { name: "model", description: "Choose or set the Claude SDK model and reasoning effort" },
+    ];
   }
 
   /**

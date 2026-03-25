@@ -434,10 +434,13 @@ async function handleCommand(input) {
 }
 
 /**
- * @returns {string[]}
+ * @returns {SlashCommandDescriptor[]}
  */
 function listSlashCommands() {
-  return ["/clear", "/resume"];
+  return [
+    { name: "clear", description: "Clear the current harness session" },
+    { name: "resume", description: "Restore a previously cleared harness session" },
+  ];
 }
 
 /**

@@ -60,7 +60,11 @@ describe("createClaudeAgentSdkHarness", () => {
       supportsReasoningEffort: true,
       supportsSessionFork: false,
     });
-    assert.deepEqual(harness.listSlashCommands?.(), ["/clear", "/resume", "/model"]);
+    assert.deepEqual(harness.listSlashCommands?.(), [
+      { name: "clear", description: "Clear the current harness session" },
+      { name: "resume", description: "Restore a previously cleared harness session" },
+      { name: "model", description: "Choose or set the Claude SDK model and reasoning effort" },
+    ]);
   });
 
   it("returns false for commands it does not own", async () => {
