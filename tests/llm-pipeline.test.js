@@ -289,6 +289,31 @@ describe("LLM pipeline via createMessageHandler", () => {
     assert.equal(chat.harness_session_history[0].kind, "native");
   });
 
+  it("returns available slash commands when a slash command is not handled", async () => {
+    await seedChat("pipe-slash-unknown", { enabled: true });
+
+    const requestCountBefore = mockServer.getRequests().length;
+    const { context, responses } = createChatTurn({
+      chatId: "pipe-slash-unknown",
+      content: [{ type: "text", text: "/status" }],
+    });
+    await handleMessage(context);
+
+    assert.ok(
+      responses.some((response) => response.text.includes("Available slash commands")),
+      `Expected available slash commands reply, got: ${responses.map((response) => response.text).join(" | ")}`,
+    );
+    assert.ok(
+      responses.some((response) => response.text.includes("/clear") && response.text.includes("/resume")),
+      `Expected native slash command list, got: ${responses.map((response) => response.text).join(" | ")}`,
+    );
+    assert.equal(
+      mockServer.getRequests().length,
+      requestCountBefore,
+      "Unknown slash commands should not fall through to the regular LLM path",
+    );
+  });
+
   it("recall_history stores full result in DB", async () => {
     await seedChat("pipe-recall", { enabled: true });
 
