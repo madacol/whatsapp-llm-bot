@@ -490,6 +490,7 @@ export function createClaudeAgentSdkHarness() {
     getCapabilities: () => CLAUDE_HARNESS_CAPABILITIES,
     run,
     handleCommand,
+    listSlashCommands,
     injectMessage,
     cancel,
     waitForIdle,
@@ -512,6 +513,13 @@ export function createClaudeAgentSdkHarness() {
       return true;
     }
     return handleClaudeHarnessCommand(input);
+  }
+
+  /**
+   * @returns {string[]}
+   */
+  function listSlashCommands() {
+    return ["/clear", "/resume", "/model"];
   }
 
   /**

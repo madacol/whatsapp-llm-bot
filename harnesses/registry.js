@@ -46,6 +46,7 @@ function normalizeHarness(name, harness) {
   const getName = harness.getName ?? (() => name);
   const getCapabilities = harness.getCapabilities ?? (() => DEFAULT_HARNESS_CAPABILITIES);
   const handleCommand = harness.handleCommand ?? (async () => false);
+  const listSlashCommands = harness.listSlashCommands ?? (() => []);
   const run = harness.run ?? (
     hasLegacyRun(harness)
       ? harness.processLlmResponse.bind(harness)
@@ -59,6 +60,7 @@ function normalizeHarness(name, harness) {
     getName,
     getCapabilities,
     handleCommand,
+    listSlashCommands,
     run,
   };
 }

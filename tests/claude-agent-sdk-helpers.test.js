@@ -46,6 +46,7 @@ describe("createClaudeAgentSdkHarness", () => {
     assert.equal(harness.getName?.(), "claude-agent-sdk");
     assert.equal(typeof harness.run, "function");
     assert.equal(typeof harness.handleCommand, "function");
+    assert.equal(typeof harness.listSlashCommands, "function");
 
     const capabilities = harness.getCapabilities?.();
     assert.deepEqual(capabilities, {
@@ -59,6 +60,7 @@ describe("createClaudeAgentSdkHarness", () => {
       supportsReasoningEffort: true,
       supportsSessionFork: false,
     });
+    assert.deepEqual(harness.listSlashCommands?.(), ["/clear", "/resume", "/model"]);
   });
 
   it("returns false for commands it does not own", async () => {

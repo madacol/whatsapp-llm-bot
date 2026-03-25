@@ -24,6 +24,8 @@ describe("resolveHarness", () => {
     assert.equal(typeof harness.getCapabilities, "function");
     assert.equal(typeof harness.run, "function");
     assert.equal(typeof harness.handleCommand, "function");
+    assert.equal(typeof harness.listSlashCommands, "function");
+    assert.deepEqual(harness.listSlashCommands(), []);
     assert.equal(await harness.handleCommand({
       chatId: "chat-1",
       command: "noop",

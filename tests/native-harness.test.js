@@ -10,6 +10,7 @@ describe("createNativeHarness", () => {
     assert.equal(typeof harness.getCapabilities, "function");
     assert.equal(typeof harness.run, "function");
     assert.equal(typeof harness.handleCommand, "function");
+    assert.equal(typeof harness.listSlashCommands, "function");
 
     const capabilities = harness.getCapabilities?.();
     assert.deepEqual(capabilities, {
@@ -23,6 +24,7 @@ describe("createNativeHarness", () => {
       supportsReasoningEffort: false,
       supportsSessionFork: false,
     });
+    assert.deepEqual(harness.listSlashCommands?.(), ["/clear", "/resume"]);
 
     const handled = await harness.handleCommand?.({
       chatId: "chat-1",

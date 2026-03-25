@@ -434,6 +434,13 @@ async function handleCommand(input) {
 }
 
 /**
+ * @returns {string[]}
+ */
+function listSlashCommands() {
+  return ["/clear", "/resume"];
+}
+
+/**
  * Create the native harness.
  * @returns {AgentHarness}
  */
@@ -443,5 +450,6 @@ export function createNativeHarness() {
     getCapabilities: () => NATIVE_HARNESS_CAPABILITIES,
     run,
     handleCommand,
+    listSlashCommands,
   };
 }
