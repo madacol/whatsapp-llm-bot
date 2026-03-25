@@ -241,6 +241,42 @@ describe("Scenario 7: Show info", () => {
 });
 
 // ═══════════════════════════════════════════════════════════════════
+// Scenario 7b: Guided setup command
+// ═══════════════════════════════════════════════════════════════════
+describe("Scenario 7b: Guided setup command", () => {
+  it("applies the basic chat configuration through !setup", async () => {
+    const chatId = "s7b-chat";
+    await seedChat(chatId);
+
+    /** @type {string[]} */
+    const selections = ["on", "mention+reply", "on", "off"];
+    const { context, responses } = createChatTurn({
+      chatId,
+      content: [{ type: "text", text: "!setup" }],
+    });
+    context.io.select = async (question, options) => {
+      responses.push({ type: "select", text: JSON.stringify({ question, options }) });
+      return selections.shift() ?? "";
+    };
+
+    await handleMessage(context);
+
+    const allText = responses.map((entry) => entry.text).join(" ");
+    assert.ok(allText.includes("mention+reply"), `Expected trigger summary, got: ${allText}`);
+
+    const { rows: [chat] } = await testDb.sql`
+      SELECT is_enabled, respond_on, memory, debug
+      FROM chats
+      WHERE chat_id = ${chatId}
+    `;
+    assert.equal(chat.is_enabled, true);
+    assert.equal(chat.respond_on, "mention+reply");
+    assert.equal(chat.memory, true);
+    assert.equal(chat.debug, false);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════
 // Scenario 8: Run JavaScript via LLM tool call
 // ═══════════════════════════════════════════════════════════════════
 describe("Scenario 8: Run JavaScript via tool call", () => {
