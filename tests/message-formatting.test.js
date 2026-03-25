@@ -41,7 +41,7 @@ describe("actionsToToolDefinitions", () => {
 
     const params = result[0].function.parameters;
     assert.equal(params.properties.image.type, "string", "image type should be converted to string");
-    assert.ok(params.properties.image.description.includes("[media:N]"), "description should mention media refs");
+    assert.ok(params.properties.image.description.includes("file path"), "description should mention media file paths");
     assert.equal(params.properties.x.type, "number", "non-image params should be unchanged");
   });
 
@@ -72,7 +72,7 @@ describe("actionsToToolDefinitions", () => {
     const prop = result[0].function.parameters.properties.images;
     assert.equal(prop.type, "array");
     assert.equal(prop.items.type, "string");
-    assert.ok(prop.description.includes("[media:N]"));
+    assert.ok(prop.description.includes("file path"));
   });
 
   it("does not mutate original action parameters when converting image params", () => {
@@ -236,7 +236,7 @@ describe("prepareMessages", () => {
     assert.deepEqual(result[0].content, [{ type: "text", text: "hello" }]);
   });
 
-  it("registers user image in media registry", () => {
+  it("registers user image in media registry by canonical path", () => {
     const messages = [
       {
         message_data: {
@@ -254,10 +254,12 @@ describe("prepareMessages", () => {
     assert.equal(result[0].role, "user");
     // Message content should be unchanged (internal format)
     assert.equal(result[0].content[0].type, "image");
-    // Registry should map ID 1 to the original image block
+    // Registry should map the canonical media path to the original image block
     assert.equal(mediaRegistry.size, 1);
-    assert.equal(mediaRegistry.get(1).type, "image");
-    assert.equal(mediaRegistry.get(1).data, "abc123");
+    const [[mediaPath, mediaBlock]] = [...mediaRegistry.entries()];
+    assert.match(mediaPath, /^[a-f0-9]{64}\.png$/);
+    assert.equal(mediaBlock.type, "image");
+    assert.equal(mediaBlock.path, mediaPath);
   });
 
   it("preserves user quote message", () => {
@@ -389,7 +391,7 @@ describe("prepareMessages", () => {
     assert.equal(result[0].content[0].type, "audio");
     // Audio should be registered
     assert.equal(mediaRegistry.size, 1);
-    assert.equal(mediaRegistry.get(1).type, "audio");
+    assert.equal([...mediaRegistry.values()][0].type, "audio");
   });
 
   it("registers video in media registry", () => {
@@ -409,7 +411,7 @@ describe("prepareMessages", () => {
     assert.equal(result.length, 1);
     assert.equal(result[0].content[0].type, "video");
     assert.equal(mediaRegistry.size, 1);
-    assert.equal(mediaRegistry.get(1).type, "video");
+    assert.equal([...mediaRegistry.values()][0].type, "video");
   });
 
   it("registers image blocks from tool messages in media registry", () => {
@@ -445,9 +447,9 @@ describe("prepareMessages", () => {
 
     // Tool image should be tagged in the registry
     assert.equal(mediaRegistry.size, 1);
-    const registeredBlock = mediaRegistry.get(1);
+    const registeredBlock = [...mediaRegistry.values()][0];
     assert.equal(registeredBlock.type, "image");
-    assert.equal(registeredBlock.data, "iVBOR");
+    assert.match(registeredBlock.path, /^[a-f0-9]{64}\.png$/);
   });
 
   it("strips leading tool results from message list", () => {
@@ -588,9 +590,10 @@ describe("prepareMessages", () => {
     // First message (after reverse) has image + video → IDs 1, 2
     // Second message has image → ID 3
     assert.equal(mediaRegistry.size, 3);
-    assert.equal(mediaRegistry.get(1).data, "img1");
-    assert.equal(mediaRegistry.get(2).data, "vid1");
-    assert.equal(mediaRegistry.get(3).data, "img2");
+    const blocks = [...mediaRegistry.values()];
+    assert.equal(blocks[0].path.endsWith(".png"), true);
+    assert.equal(blocks[1].path.endsWith(".mp4"), true);
+    assert.equal(blocks[2].path.endsWith(".jpg"), true);
   });
 
   it("tags quoted images in media registry", () => {
@@ -613,7 +616,7 @@ describe("prepareMessages", () => {
     const { mediaRegistry } = prepareMessages(messages);
 
     assert.equal(mediaRegistry.size, 1);
-    assert.equal(mediaRegistry.get(1).data, "quotedImg");
+    assert.match([...mediaRegistry.values()][0].path, /^[a-f0-9]{64}\.png$/);
   });
 });
 

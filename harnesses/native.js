@@ -253,7 +253,7 @@ async function processLlmResponse({ session, llmConfig, messages, mediaRegistry,
   const hooks = { ...NO_OP_HOOKS, ...userHooks };
   let effectiveSystemPrompt = llmConfig.externalInstructions;
   if (mediaRegistry.size > 0) {
-    effectiveSystemPrompt += '\n\nMedia in the conversation is tagged with [media:N]. When calling tools with image parameters, pass the media reference (e.g. "media:1") as the parameter value.';
+    effectiveSystemPrompt += '\n\nMedia in the conversation is identified by canonical file paths like <sha>.jpg. When calling tools with image parameters, pass the media file path from the conversation as the parameter value.';
   }
   const injectedActions = new Set();
   let depth = 0;

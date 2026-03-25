@@ -1,4 +1,5 @@
 import sharp from "sharp";
+import { readBlockBuffer, writeMedia } from "../../../media-store.js";
 
 export default /** @type {defineAction} */ ((x) => x)({
   name: "zoom_image",
@@ -47,7 +48,7 @@ export default /** @type {defineAction} */ ((x) => x)({
       const detail = typeof image === "string"
         ? `Received "${image}" which did not resolve to an image.`
         : "No image reference was provided.";
-      return `${detail} Pass a [media:N] reference from the conversation.`;
+      return `${detail} Pass the media file path from the conversation.`;
     }
 
     // Validate ranges (negative or out-of-bounds)
@@ -62,10 +63,10 @@ export default /** @type {defineAction} */ ((x) => x)({
     try {
       if (image.getHd) {
         const hd = await image.getHd;
-        if (hd?.data) source = hd;
+        if (hd) source = hd;
       }
     } catch {}
-    const inputBuffer = Buffer.from(source.data, "base64");
+    const inputBuffer = await readBlockBuffer(source);
     const pipeline = sharp(inputBuffer);
     const metadata = await pipeline.metadata();
     const imgWidth = metadata.width ?? 0;
@@ -93,7 +94,7 @@ export default /** @type {defineAction} */ ((x) => x)({
     /** @type {ToolContentBlock[]} */
     const result = [
       { type: "text", text: `Cropped region: (${x}%, ${y}%) ${width}%×${height}% → ${cropWidth}×${cropHeight}px` },
-      { type: "image", encoding: "base64", mime_type: "image/jpeg", data: croppedBuffer.toString("base64"), quality: "hd" },
+      { type: "image", path: await writeMedia(croppedBuffer, "image/jpeg", "image"), mime_type: "image/jpeg", quality: "hd" },
     ];
 
     return { result };

@@ -8,6 +8,7 @@ pgdata
 .env
 auth_info_baileys
 data/
+.media/
 .claude/worktrees/
 .bot.pid
 .madabot/

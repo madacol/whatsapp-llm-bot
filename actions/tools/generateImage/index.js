@@ -1,4 +1,5 @@
 import config from "../../../config.js";
+import { blockToDataUrl, writeMedia } from "../../../media-store.js";
 import { resolveModel } from "../../../model-roles.js";
 
 /**
@@ -16,16 +17,16 @@ function parseDataUrl(dataUrl) {
  * Build the user message parts from prompt text and optional input images.
  * @param {string} prompt
  * @param {ImageContentBlock[]} images
- * @returns {Array<{type: string, text?: string, image_url?: {url: string}}>}
+ * @returns {Promise<Array<{type: string, text?: string, image_url?: {url: string}}>>}
  */
-function buildUserParts(prompt, images) {
+async function buildUserParts(prompt, images) {
   /** @type {Array<{type: string, text?: string, image_url?: {url: string}}>} */
   const parts = [{ type: "text", text: prompt }];
 
   for (const image of images) {
     parts.push({
       type: "image_url",
-      image_url: { url: `data:${image.mime_type};base64,${image.data}` },
+      image_url: { url: await blockToDataUrl(image) },
     });
   }
 
@@ -74,7 +75,7 @@ export default /** @type {defineAction} */ ((x) => x)({
       return "Error: LLM_API_KEY and BASE_URL must be configured.";
     }
 
-    const userParts = buildUserParts(params.prompt, /** @type {ImageContentBlock[]} */ (params.images ?? []));
+    const userParts = await buildUserParts(params.prompt, /** @type {ImageContentBlock[]} */ (params.images ?? []));
 
     const url = `${baseUrl.replace(/\/$/, "")}/chat/completions`;
     const response = await fetch(url, {
@@ -136,12 +137,10 @@ export default /** @type {defineAction} */ ((x) => x)({
 
     for (const dataUrl of imageUrls) {
       const { mime_type, buffer } = parseDataUrl(dataUrl);
-      const base64 = buffer.toString("base64");
       contentBlocks.push({
         type: "image",
-        encoding: "base64",
+        path: await writeMedia(buffer, mime_type, "image"),
         mime_type,
-        data: base64,
       });
     }
 

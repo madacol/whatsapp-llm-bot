@@ -676,12 +676,12 @@ describe("LLM pipeline via createMessageHandler", () => {
       const systemMsg = lastReq.messages.find(m => m.role === "system");
       const systemText = Array.isArray(systemMsg.content) ? systemMsg.content[0].text : systemMsg.content;
       assert.ok(
-        systemText.includes("[media:N]"),
-        "System prompt should contain media reference hint when media is present",
+        systemText.includes("canonical file paths"),
+        "System prompt should contain media file-path hint when media is present",
       );
       assert.ok(
-        systemText.includes("media reference"),
-        "System prompt hint should mention passing media references as parameter values",
+        systemText.includes("<sha>.jpg"),
+        "System prompt hint should mention passing media file paths as parameter values",
       );
     });
   });
@@ -714,7 +714,7 @@ describe("LLM pipeline via createMessageHandler", () => {
       assert.ok(tools.length > 0, "Should have tools");
       // Tools with image params should have them converted to string type
       const imageTools = tools.filter(t =>
-        Object.values(t.function.parameters.properties).some(p => p.description?.includes("[media:N]"))
+        Object.values(t.function.parameters.properties).some(p => p.description?.includes("file path"))
       );
       assert.ok(imageTools.length > 0, "At least one tool should have image params with media hint");
       // Non-image tools should NOT have media refs injected
@@ -740,10 +740,10 @@ describe("LLM pipeline via createMessageHandler", () => {
     const lastReq = mockServer.getRequests().at(-1);
     const tools = lastReq.tools;
     assert.ok(tools.length > 0, "Should have tools");
-    // No tool should mention [media:N] when no media is present
+    // No tool should mention runtime media file hints when no media is present
     for (const tool of tools) {
       const hasMediaHint = Object.values(tool.function.parameters.properties).some(
-        p => p.description?.includes("[media:N]")
+        p => p.description?.includes("<sha>.jpg")
       );
       assert.ok(
         !hasMediaHint,

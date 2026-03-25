@@ -1,5 +1,6 @@
 import { downloadMediaMessage, proto } from "@whiskeysockets/baileys";
 import { createLogger } from "../../logger.js";
+import { writeMedia } from "../../media-store.js";
 import { processHdImageMessage } from "../../whatsapp-hd-media.js";
 import { createEmptyHdInboundLifecycle, finalizeHdImageResult } from "./hd-image-lifecycle.js";
 
@@ -80,17 +81,16 @@ async function downloadMediaToBlocks(baileysMessage, mediaMessage, type, downloa
   /** @type {IncomingContentBlock[]} */
   const blocks = [];
   const buffer = await downloadFn(baileysMessage, "buffer", {});
-  const base64Data = buffer.toString("base64");
   const mimeType = mediaMessage.mimetype;
 
   if (type === "image" && !mimeType) {
     blocks.push({ type: "text", text: "Error reading image: No mimetype found" });
   } else {
+    const mediaPath = await writeMedia(buffer, mimeType || undefined, type);
     blocks.push(/** @type {IncomingContentBlock} */ ({
       type,
-      encoding: "base64",
+      path: mediaPath,
       mime_type: mimeType || undefined,
-      data: base64Data,
     }));
   }
 

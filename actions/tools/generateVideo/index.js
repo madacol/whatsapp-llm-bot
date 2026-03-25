@@ -1,5 +1,6 @@
 import config from "../../../config.js";
 import { createLogger } from "../../../logger.js";
+import { readBlockBase64, writeMedia } from "../../../media-store.js";
 
 const log = createLogger("generateVideo");
 
@@ -194,7 +195,7 @@ export default /** @type {defineAction} */ ((x) => x)({
 
     try {
       if (image) {
-        const fileUrl = await falApi.uploadImage(image.data, image.mime_type, apiKey);
+        const fileUrl = await falApi.uploadImage(await readBlockBase64(image), image.mime_type, apiKey);
         input.start_image_url = fileUrl;
         endpoint = `${model}/image-to-video`;
       } else {
@@ -220,13 +221,10 @@ export default /** @type {defineAction} */ ((x) => x)({
       const buffer = Buffer.from(arrayBuffer);
 
       const caption = `Generated video: ${params.prompt}`;
-
-      const base64 = buffer.toString("base64");
-
       /** @type {ToolContentBlock[]} */
       const contentBlocks = [
         { type: "text", text: caption },
-        { type: "video", encoding: "base64", data: base64 },
+        { type: "video", path: await writeMedia(buffer, "video/mp4", "video"), mime_type: "video/mp4" },
       ];
 
       return { result: contentBlocks };

@@ -9,6 +9,7 @@ process.env.MODEL = "mock-model";
 
 import { createTestDb, seedChat } from "./helpers.js";
 import { setDb } from "../db.js";
+import { readBlockBase64 } from "../media-store.js";
 
 /** @type {typeof import("../whatsapp/inbound/message-content.js").getMessageContent} */
 let getMessageContent;
@@ -261,7 +262,7 @@ describe("getMessageContent", () => {
     );
     const imageBlock = /** @type {ImageContentBlock} */ (quote.content.find(b => b.type === "image"));
     assert.equal(imageBlock.mime_type, "image/jpeg");
-    assert.equal(imageBlock.data, fakeBuffer.toString("base64"));
+    assert.equal(await readBlockBase64(imageBlock), fakeBuffer.toString("base64"));
   });
 
   it("downloads quoted video into quote block", async () => {
@@ -409,15 +410,11 @@ describe("getMessageContent", () => {
       mockDownload,
     );
 
-    assert.deepEqual(
-      await withTimeout(firstImage.getHd ?? Promise.resolve(null), 50),
-      /** @type {ImageContentBlock} */ ({
-        type: "image",
-        encoding: "base64",
-        mime_type: "image/jpeg",
-        data: Buffer.from("hd-child-1").toString("base64"),
-      }),
-    );
+    const resolvedHd = await withTimeout(firstImage.getHd ?? Promise.resolve(null), 50);
+    assert.ok(resolvedHd && resolvedHd !== "timeout");
+    assert.equal(resolvedHd.type, "image");
+    assert.equal(resolvedHd.mime_type, "image/jpeg");
+    assert.equal(await readBlockBase64(resolvedHd), Buffer.from("hd-child-1").toString("base64"));
     assert.equal(await withTimeout(secondImage.getHd ?? Promise.resolve(null), 50), "timeout");
   });
 });
@@ -783,15 +780,11 @@ describe("HD receive integration", () => {
       mockDownload,
     );
 
-    assert.deepEqual(
-      await withTimeout(parentImage.getHd, 100),
-      /** @type {ImageContentBlock} */ ({
-        type: "image",
-        encoding: "base64",
-        mime_type: "image/jpeg",
-        data: Buffer.from("lid-child-1").toString("base64"),
-      }),
-    );
+    const resolvedHd = await withTimeout(parentImage.getHd, 100);
+    assert.ok(resolvedHd && resolvedHd !== "timeout");
+    assert.equal(resolvedHd.type, "image");
+    assert.equal(resolvedHd.mime_type, "image/jpeg");
+    assert.equal(await readBlockBase64(resolvedHd), Buffer.from("lid-child-1").toString("base64"));
   });
 
   it("updates the stored _hdRef on the matching parent message instead of the newest pending image", async () => {

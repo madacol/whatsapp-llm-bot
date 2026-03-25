@@ -3,6 +3,7 @@ import config from "./config.js";
 import { resolveModel } from "./model-roles.js";
 import { convertAudioToMp3Base64 } from "./audio_conversion.js";
 import { registerMedia, isMediaBlock } from "./message-formatting.js";
+import { blockToDataUrl, ensureMediaPathForBlock, readBlockBase64 } from "./media-store.js";
 import { createLogger } from "./logger.js";
 
 const log = createLogger("llm");
@@ -54,32 +55,6 @@ export async function createEmbedding(llmClient, model, input) {
 }
 
 /**
- * Convert a CallLlmPrompt (string or ContentBlock[]) into the format OpenAI expects.
- * @param {CallLlmPrompt} prompt
- * @returns {string | OpenAI.ChatCompletionContentPart[]}
- */
-function convertPromptToOpenAI(prompt) {
-  if (typeof prompt === "string") {
-    return prompt;
-  }
-  return prompt.map(block => {
-    switch (block.type) {
-      case "text":
-        return { type: /** @type {const} */ ("text"), text: block.text };
-      case "image":
-        return { type: /** @type {const} */ ("image_url"), image_url: { url: `data:${block.mime_type};base64,${block.data}` } };
-      case "audio":
-        return { type: /** @type {const} */ ("input_audio"), input_audio: { data: block.data, format: /** @type {const} */ ("mp3") } };
-      case "video":
-        return videoUrlPart(`data:${block.mime_type};base64,${block.data}`);
-      default:
-        return { type: /** @type {const} */ ("text"), text: `[Unsupported content type: ${/** @type {{type: string}} */ (block).type}]` };
-    }
-  });
-}
-
-
-/**
  * Normalize an OpenAI ChatCompletion into LlmChatResponse.
  * @param {OpenAI.Chat.Completions.ChatCompletion} completion
  * @param {number | undefined} nativeCost
@@ -110,16 +85,17 @@ function normalizeChatCompletion(completion, nativeCost) {
 // ── Internal Message[] → OpenAI conversion helpers ──
 
 /**
- * Register a media block in the registry and append a `[media:N]` text marker.
+ * Register a media block in the registry and append its canonical media path.
  * @param {Array<OpenAI.ChatCompletionContentPart>} parts
  * @param {MediaRegistry} registry
- * @param {IncomingContentBlock} originalBlock
- * @returns {number} The assigned media ID
+ * @param {ImageContentBlock | VideoContentBlock | AudioContentBlock} originalBlock
+ * @returns {Promise<string>} The canonical media path
  */
-function tagMedia(parts, registry, originalBlock) {
-  const id = registerMedia(registry, originalBlock);
-  parts.push({ type: "text", text: `[media:${id}]` });
-  return id;
+async function tagMedia(parts, registry, originalBlock) {
+  const mediaPath = await ensureMediaPathForBlock(originalBlock);
+  registerMedia(registry, originalBlock);
+  parts.push({ type: "text", text: mediaPath });
+  return mediaPath;
 }
 
 /**
@@ -141,9 +117,8 @@ async function formatUserContent(message, registry) {
               parts.push({ type: "text", text: `> ${quoteBlock.text.trim().replace(/\n/g, '\n> ')}` });
               break;
             case "image": {
-              const dataUrl = `data:${quoteBlock.mime_type};base64,${quoteBlock.data}`;
-              parts.push({ type: "image_url", image_url: { url: dataUrl } });
-              tagMedia(parts, registry, quoteBlock);
+              parts.push({ type: "image_url", image_url: { url: await blockToDataUrl(quoteBlock) } });
+              await tagMedia(parts, registry, quoteBlock);
               break;
             }
           }
@@ -154,9 +129,8 @@ async function formatUserContent(message, registry) {
         parts.push(contentBlock);
         break;
       case "image": {
-        const dataUrl = `data:${contentBlock.mime_type};base64,${contentBlock.data}`;
-        parts.push({ type: "image_url", image_url: { url: dataUrl } });
-        tagMedia(parts, registry, contentBlock);
+        parts.push({ type: "image_url", image_url: { url: await blockToDataUrl(contentBlock) } });
+        await tagMedia(parts, registry, contentBlock);
         break;
       }
       case "audio": {
@@ -166,22 +140,21 @@ async function formatUserContent(message, registry) {
         const audioFormat = contentBlock.mime_type?.split("audio/")[1]?.split(";")[0];
         if (audioFormat === "wav" || audioFormat === "mp3") {
           format = audioFormat;
-          data = contentBlock.data;
+          data = await readBlockBase64(contentBlock);
         } else {
           log.warn(`Unsupported audio format: ${contentBlock.mime_type}`);
-          data = await convertAudioToMp3Base64(contentBlock.data);
+          data = await convertAudioToMp3Base64(await readBlockBase64(contentBlock));
         }
         parts.push({
           type: "input_audio",
           input_audio: { data, format },
         });
-        tagMedia(parts, registry, contentBlock);
+        await tagMedia(parts, registry, contentBlock);
         break;
       }
       case "video": {
-        const videoUrl = `data:${contentBlock.mime_type};base64,${contentBlock.data}`;
-        parts.push(videoUrlPart(videoUrl));
-        tagMedia(parts, registry, contentBlock);
+        parts.push(videoUrlPart(await blockToDataUrl(contentBlock)));
+        await tagMedia(parts, registry, contentBlock);
         break;
       }
     }
@@ -227,9 +200,9 @@ function formatAssistantContent(message) {
  * Format a tool message into OpenAI ChatCompletionMessageParam(s).
  * @param {ToolMessage} message
  * @param {MediaRegistry} registry
- * @returns {Array<OpenAI.ChatCompletionMessageParam>}
+ * @returns {Promise<Array<OpenAI.ChatCompletionMessageParam>>}
  */
-function formatToolContent(message, registry) {
+async function formatToolContent(message, registry) {
   const hasMedia = message.content.some(isMediaBlock);
 
   const hasCode = message.content.some(b => b.type === "code");
@@ -258,12 +231,12 @@ function formatToolContent(message, registry) {
     } else if (block.type === "image") {
       parts.push({
         type: /** @type {const} */ ("image_url"),
-        image_url: { url: `data:${block.mime_type};base64,${block.data}` },
+        image_url: { url: await blockToDataUrl(block) },
       });
-      tagMedia(parts, registry, block);
+      await tagMedia(parts, registry, block);
     } else if (block.type === "video") {
-      parts.push(videoUrlPart(`data:${block.mime_type};base64,${block.data}`));
-      tagMedia(parts, registry, block);
+      parts.push(videoUrlPart(await blockToDataUrl(block)));
+      await tagMedia(parts, registry, block);
     } else if (block.type === "code") {
       const fenced = "```" + (block.language || "") + "\n" + block.code + "\n```";
       parts.push({ type: /** @type {const} */ ("text"), text: fenced });
@@ -299,7 +272,7 @@ async function convertMessagesToOpenAI(messages, registry) {
         formatted.push(formatAssistantContent(msg));
         break;
       case "tool":
-        formatted.push(...formatToolContent(msg, registry));
+        formatted.push(...await formatToolContent(msg, registry));
         break;
     }
   }
@@ -377,7 +350,15 @@ export function createCallLlm(llmClient, defaultModel = resolveModel("chat")) {
       return normalizeChatCompletion(completion, nativeCost);
     }
     // Simple mode
-    const content = convertPromptToOpenAI(promptOrOpts);
+    const content = typeof promptOrOpts === "string"
+      ? promptOrOpts
+      : await formatUserContent({
+        role: "user",
+        content: promptOrOpts.filter(
+          /** @returns {block is IncomingContentBlock} */
+          (block) => block.type !== "tool",
+        ),
+      }, new Map());
     const response = await client.chat.completions.create({
       model: options.model || defaultModel,
       messages: [{ role: "user", content }],
