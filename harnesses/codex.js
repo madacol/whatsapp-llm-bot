@@ -136,7 +136,7 @@ export function createCodexHarness(deps = {}) {
       { name: "clear", description: "Clear the current harness session" },
       { name: "resume", description: "Restore a previously cleared harness session" },
       { name: "model", description: "Choose or set the Codex model" },
-      { name: "sandbox", description: "Show or set the Codex sandbox mode" },
+      { name: "sandbox", description: "Alias of /permissions" },
       { name: "permissions", description: "Show or set the Codex permissions mode" },
       { name: "approval", description: "Show or set the Codex approval policy" },
     ];
