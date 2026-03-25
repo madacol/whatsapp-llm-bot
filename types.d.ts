@@ -520,12 +520,17 @@ type HarnessCommandContext = {
   };
 };
 
+type SlashCommandDescriptor = {
+  name: string;
+  description: string;
+};
+
 type AgentHarness = {
   getName: () => string;
   getCapabilities: () => HarnessCapabilities;
   run: (params: AgentHarnessParams) => Promise<AgentResult>;
   handleCommand: (input: HarnessCommandContext) => Promise<boolean>;
-  listSlashCommands: () => string[];
+  listSlashCommands: () => SlashCommandDescriptor[];
   /** Inject a follow-up user message into an active query for this chat. Returns true if injected. */
   injectMessage?: (chatId: string | HarnessSessionRef, text: string) => boolean | Promise<boolean>;
   /** Cancel the active query for this chat. Returns true if cancelled. */
