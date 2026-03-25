@@ -1,4 +1,7 @@
 import assert from "node:assert/strict";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 
 /** @type {ActionTestFn[]} */
 export default [
@@ -93,5 +96,36 @@ async function returns_error_when_no_image(action_fn) {
       assert.ok(Array.isArray(capturedPrompt));
       const imageBlocks = capturedPrompt.filter((/** @type {ContentBlock} */ b) => b.type === "image");
       assert.equal(imageBlocks.length, 2, "should include both images");
+    },
+
+    async function accepts_temp_file_paths(action_fn) {
+      const tempDir = await mkdtemp(path.join(tmpdir(), "extract-from-image-"));
+      const imagePath = path.join(tempDir, "input.png");
+      await writeFile(imagePath, Buffer.from("aGVsbG8=", "base64"));
+      const images = /** @type {Array<string | ImageContentBlock>} */ ([imagePath]);
+
+      /** @type {ContentBlock[] | undefined} */
+      let capturedPrompt;
+      try {
+        await action_fn(
+          {
+            callLlm: /** @type {CallLlm} */ (/** @type {Function} */ (async (/** @type {ContentBlock[]} */ prompt) => {
+              capturedPrompt = prompt;
+              return "result";
+            })),
+            content: [],
+            log: async () => "",
+            resolveModel: () => "vision-model",
+          },
+          { images, prompt: "extract all" },
+        );
+      } finally {
+        await rm(tempDir, { recursive: true, force: true });
+      }
+
+      assert.ok(Array.isArray(capturedPrompt));
+      const imageBlock = capturedPrompt.find((/** @type {ContentBlock} */ block) => block.type === "image");
+      assert.ok(imageBlock, "should convert the temp file into an image block");
+      assert.equal(/** @type {ImageContentBlock} */ (imageBlock).data, "aGVsbG8=");
     },
 ];

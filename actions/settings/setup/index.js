@@ -1,8 +1,6 @@
 import { getScopedHarnessConfig, normalizeHarnessConfig } from "../../../harness-config.js";
-import { getModels as getClaudeSdkModels } from "../../../harnesses/claude-agent-sdk.js";
-import { getCodexAvailableModels } from "../../../harnesses/codex-models.js";
 import { getChatOrThrow } from "../../../store.js";
-import { listHarnesses, resolveHarness } from "#harnesses";
+import { getHarnessModelOptions as getPublicHarnessModelOptions, listHarnesses, resolveHarness } from "#harnesses";
 import {
   getSelectableOptions,
   isMaster,
@@ -64,23 +62,7 @@ function getHarnessSelectOptions(chat) {
  * @returns {Promise<SelectOption[]>}
  */
 async function getHarnessModelOptions(harnessName) {
-  if (harnessName === "claude-agent-sdk") {
-    return [
-      ...getClaudeSdkModels().map((model) => ({ id: model.value, label: model.displayName })),
-      { id: "off", label: "Default" },
-    ];
-  }
-  if (harnessName === "codex") {
-    const availableModels = await getCodexAvailableModels();
-    if (availableModels.length === 0) {
-      return [];
-    }
-    return [
-      ...availableModels.map((model) => ({ id: model.id, label: model.label })),
-      { id: "off", label: "Default" },
-    ];
-  }
-  return [];
+  return getPublicHarnessModelOptions(harnessName);
 }
 
 /**

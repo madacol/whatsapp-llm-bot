@@ -1,4 +1,7 @@
 import assert from "node:assert/strict";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import sharp from "sharp";
 
 /**
@@ -89,5 +92,26 @@ export default [
     const blocks = /** @type {{ result: ToolContentBlock[] }} */ (result).result;
     const imageBlock = blocks.find((/** @type {ToolContentBlock} */ b) => b.type === "image");
     assert.ok(imageBlock, "should handle odd-sized images without crashing");
+  },
+
+  async function accepts_temp_file_path_inputs(action_fn) {
+    const image = await makeTestImage(100, 200);
+    const tempDir = await mkdtemp(path.join(tmpdir(), "zoom-image-"));
+    const imagePath = path.join(tempDir, "input.jpg");
+    await writeFile(imagePath, Buffer.from(image.data, "base64"));
+
+    try {
+      const result = await action_fn(
+        { content: [], log: async () => "" },
+        { image: imagePath, x: 0, y: 0, width: 50, height: 50 },
+      );
+
+      assert.ok(typeof result === "object" && result !== null && "result" in result);
+      const blocks = /** @type {{ result: ToolContentBlock[] }} */ (result).result;
+      const imageBlock = blocks.find((/** @type {ToolContentBlock} */ b) => b.type === "image");
+      assert.ok(imageBlock, "should crop when given a temp file path");
+    } finally {
+      await rm(tempDir, { recursive: true, force: true });
+    }
   },
 ];

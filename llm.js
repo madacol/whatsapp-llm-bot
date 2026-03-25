@@ -4,6 +4,7 @@ import { resolveModel } from "./model-roles.js";
 import { convertAudioToMp3Base64 } from "./audio_conversion.js";
 import { registerMedia, isMediaBlock } from "./message-formatting.js";
 import { createLogger } from "./logger.js";
+import { isImageContentBlock, writeMediaBlockToTempFile } from "./media-temp-files.js";
 
 const log = createLogger("llm");
 
@@ -110,15 +111,21 @@ function normalizeChatCompletion(completion, nativeCost) {
 // ── Internal Message[] → OpenAI conversion helpers ──
 
 /**
- * Register a media block in the registry and append a `[media:N]` text marker.
+ * Register a media block in the registry and append a reference marker.
+ * Images get temp-file paths so tools can reuse them directly.
  * @param {Array<OpenAI.ChatCompletionContentPart>} parts
  * @param {MediaRegistry} registry
  * @param {IncomingContentBlock} originalBlock
- * @returns {number} The assigned media ID
+ * @returns {Promise<number>} The assigned media ID
  */
-function tagMedia(parts, registry, originalBlock) {
+async function tagMedia(parts, registry, originalBlock) {
   const id = registerMedia(registry, originalBlock);
-  parts.push({ type: "text", text: `[media:${id}]` });
+  if (isImageContentBlock(originalBlock)) {
+    const filePath = await writeMediaBlockToTempFile(originalBlock);
+    parts.push({ type: "text", text: filePath });
+  } else {
+    parts.push({ type: "text", text: `[media:${id}]` });
+  }
   return id;
 }
 
@@ -143,7 +150,7 @@ async function formatUserContent(message, registry) {
             case "image": {
               const dataUrl = `data:${quoteBlock.mime_type};base64,${quoteBlock.data}`;
               parts.push({ type: "image_url", image_url: { url: dataUrl } });
-              tagMedia(parts, registry, quoteBlock);
+              await tagMedia(parts, registry, quoteBlock);
               break;
             }
           }
@@ -156,7 +163,7 @@ async function formatUserContent(message, registry) {
       case "image": {
         const dataUrl = `data:${contentBlock.mime_type};base64,${contentBlock.data}`;
         parts.push({ type: "image_url", image_url: { url: dataUrl } });
-        tagMedia(parts, registry, contentBlock);
+        await tagMedia(parts, registry, contentBlock);
         break;
       }
       case "audio": {
@@ -175,13 +182,13 @@ async function formatUserContent(message, registry) {
           type: "input_audio",
           input_audio: { data, format },
         });
-        tagMedia(parts, registry, contentBlock);
+        await tagMedia(parts, registry, contentBlock);
         break;
       }
       case "video": {
         const videoUrl = `data:${contentBlock.mime_type};base64,${contentBlock.data}`;
         parts.push(videoUrlPart(videoUrl));
-        tagMedia(parts, registry, contentBlock);
+        await tagMedia(parts, registry, contentBlock);
         break;
       }
     }
@@ -227,9 +234,9 @@ function formatAssistantContent(message) {
  * Format a tool message into OpenAI ChatCompletionMessageParam(s).
  * @param {ToolMessage} message
  * @param {MediaRegistry} registry
- * @returns {Array<OpenAI.ChatCompletionMessageParam>}
+ * @returns {Promise<Array<OpenAI.ChatCompletionMessageParam>>}
  */
-function formatToolContent(message, registry) {
+async function formatToolContent(message, registry) {
   const hasMedia = message.content.some(isMediaBlock);
 
   const hasCode = message.content.some(b => b.type === "code");
@@ -260,10 +267,10 @@ function formatToolContent(message, registry) {
         type: /** @type {const} */ ("image_url"),
         image_url: { url: `data:${block.mime_type};base64,${block.data}` },
       });
-      tagMedia(parts, registry, block);
+      await tagMedia(parts, registry, block);
     } else if (block.type === "video") {
       parts.push(videoUrlPart(`data:${block.mime_type};base64,${block.data}`));
-      tagMedia(parts, registry, block);
+      await tagMedia(parts, registry, block);
     } else if (block.type === "code") {
       const fenced = "```" + (block.language || "") + "\n" + block.code + "\n```";
       parts.push({ type: /** @type {const} */ ("text"), text: fenced });
@@ -299,7 +306,7 @@ async function convertMessagesToOpenAI(messages, registry) {
         formatted.push(formatAssistantContent(msg));
         break;
       case "tool":
-        formatted.push(...formatToolContent(msg, registry));
+        formatted.push(...await formatToolContent(msg, registry));
         break;
     }
   }

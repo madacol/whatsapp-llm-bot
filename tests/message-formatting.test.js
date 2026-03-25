@@ -1,5 +1,8 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import {
   actionsToToolDefinitions,
   shouldRespond,
@@ -7,6 +10,7 @@ import {
   parseCommandArgs,
   prepareMessages,
   parseStructuredQuestion,
+  resolveImageArgs,
 } from "../message-formatting.js";
 
 // ── actionsToToolDefinitions ──
@@ -29,7 +33,7 @@ describe("actionsToToolDefinitions", () => {
     assert.deepEqual(result[0].function.parameters, actions[0].parameters);
   });
 
-  it("converts type:'image' params to type:'string' with media hint when hasMedia is true", () => {
+  it("converts type:'image' params to type:'string' with temp-file hint when media is present", () => {
     const actions = /** @type {Action[]} */ ([
       {
         name: "zoom_image",
@@ -41,7 +45,7 @@ describe("actionsToToolDefinitions", () => {
 
     const params = result[0].function.parameters;
     assert.equal(params.properties.image.type, "string", "image type should be converted to string");
-    assert.ok(params.properties.image.description.includes("[media:N]"), "description should mention media refs");
+    assert.ok(params.properties.image.description.includes("temporary file path"), "description should mention temp-file paths");
     assert.equal(params.properties.x.type, "number", "non-image params should be unchanged");
   });
 
@@ -56,7 +60,7 @@ describe("actionsToToolDefinitions", () => {
     const result = actionsToToolDefinitions(actions, false);
 
     assert.equal(result[0].function.parameters.properties.image.type, "string");
-    assert.ok(!result[0].function.parameters.properties.image.description.includes("[media:N]"));
+    assert.ok(!result[0].function.parameters.properties.image.description.includes("temporary file path"));
   });
 
   it("converts array of image params", () => {
@@ -72,7 +76,7 @@ describe("actionsToToolDefinitions", () => {
     const prop = result[0].function.parameters.properties.images;
     assert.equal(prop.type, "array");
     assert.equal(prop.items.type, "string");
-    assert.ok(prop.description.includes("[media:N]"));
+    assert.ok(prop.description.includes("temporary file path"));
   });
 
   it("does not mutate original action parameters when converting image params", () => {
@@ -102,6 +106,27 @@ describe("actionsToToolDefinitions", () => {
     assert.deepEqual(result[0].function.parameters, actions[0].parameters);
   });
 
+});
+
+describe("resolveImageArgs", () => {
+  it("materializes image refs into temp file paths", async () => {
+    const schema = /** @type {Action["parameters"]} */ ({
+      type: "object",
+      properties: {
+        image: { type: "image" },
+      },
+    });
+    const mediaRegistry = /** @type {MediaRegistry} */ (new Map([
+      [1, { type: "image", mime_type: "image/png", data: "aGVsbG8=", encoding: "base64" }],
+    ]));
+
+    const resolved = await resolveImageArgs(schema, { image: "media:1" }, mediaRegistry);
+
+    assert.equal(typeof resolved.image, "string");
+    assert.ok(resolved.image.startsWith(path.join(tmpdir(), "whatsapp-llm-bot-media")));
+    const fileBytes = await readFile(resolved.image);
+    assert.deepEqual(fileBytes, Buffer.from("aGVsbG8=", "base64"));
+  });
 });
 
 // ── shouldRespond ──

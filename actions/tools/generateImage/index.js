@@ -1,4 +1,5 @@
 import config from "../../../config.js";
+import { normalizeImageInputs } from "../../../media-temp-files.js";
 import { resolveModel } from "../../../model-roles.js";
 
 /**
@@ -65,7 +66,7 @@ export default /** @type {defineAction} */ ((x) => x)({
   },
   /**
    * @param {ActionContext} _context
-   * @param {{ images?: ImageContentBlock[], prompt: string }} params
+   * @param {{ images?: Array<string | ImageContentBlock>, prompt: string }} params
    */
   action_fn: async function (_context, params) {
     const apiKey = config.llm_api_key;
@@ -74,7 +75,8 @@ export default /** @type {defineAction} */ ((x) => x)({
       return "Error: LLM_API_KEY and BASE_URL must be configured.";
     }
 
-    const userParts = buildUserParts(params.prompt, /** @type {ImageContentBlock[]} */ (params.images ?? []));
+    const images = await normalizeImageInputs(params.images ?? []);
+    const userParts = buildUserParts(params.prompt, images);
 
     const url = `${baseUrl.replace(/\/$/, "")}/chat/completions`;
     const response = await fetch(url, {

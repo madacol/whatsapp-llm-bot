@@ -3,18 +3,19 @@
  */
 
 import { hydrateHdRef } from "./whatsapp-hd-media.js";
+import { isImageContentBlock, isImageInputBlock, writeMediaBlockToTempFile } from "./media-temp-files.js";
 
 /**
  * Convert a single property schema, replacing custom `type: "image"` with
- * `type: "string"` and a description hint for the LLM to pass [media:N] references.
+ * `type: "string"` and a description hint for the LLM to pass temp-file paths.
  * @param {{ type: string, description?: string, items?: { type: string } }} propSchema
  * @param {boolean} hasMedia
  * @returns {Record<string, unknown>}
  */
 function convertImageProp(propSchema, hasMedia) {
   const hint = hasMedia
-    ? "Pass a [media:N] reference from the conversation."
-    : "Image reference (no media available).";
+    ? "Pass the temporary file path for the image from the conversation."
+    : "Image file path (no media available).";
   if (propSchema.type === "image") {
     return {
       ...propSchema,
@@ -35,7 +36,7 @@ function convertImageProp(propSchema, hasMedia) {
 
 /**
  * Convert actions to tool definitions format.
- * Converts `type: "image"` parameters to `type: "string"` with a media reference hint.
+ * Converts `type: "image"` parameters to `type: "string"` with a temp-file hint.
  * @param {ToolDescriptor[]} actions
  * @param {boolean} [hasMedia]
  * @returns {ToolDefinition[]}
@@ -80,37 +81,58 @@ function parseMediaRef(ref) {
 }
 
 /**
- * Resolve image parameter values from media reference strings to ImageContentBlocks.
+ * Resolve image parameter values to temp file paths.
  * Walks the action's parameter schema and replaces any `type: "image"` param values
- * with the corresponding content block from the media registry.
+ * with temporary file paths when they reference conversation media.
  * @param {Action['parameters']} schema
  * @param {Record<string, unknown>} args
  * @param {MediaRegistry} mediaRegistry
- * @returns {Record<string, unknown>} Args with resolved image blocks
+ * @returns {Promise<Record<string, unknown>>} Args with resolved image paths
  */
-export function resolveImageArgs(schema, args, mediaRegistry) {
+export async function resolveImageArgs(schema, args, mediaRegistry) {
   const resolved = { ...args };
   for (const [key, propSchema] of Object.entries(schema.properties)) {
     const prop = /** @type {{ type: string, items?: { type: string } }} */ (propSchema);
     if (prop.type === "image") {
-      const id = parseMediaRef(args[key]);
-      // When resolution succeeds, replace with the block; otherwise keep
-      // the original value so the action can report what the LLM passed.
-      if (id !== null) {
-        resolved[key] = mediaRegistry.get(id) ?? args[key];
-      }
+      resolved[key] = await resolveImageArgValue(args[key], mediaRegistry);
     } else if (prop.type === "array" && prop.items?.type === "image") {
       const refs = Array.isArray(args[key]) ? args[key] : [];
-      resolved[key] = refs
-        .map((/** @type {unknown} */ r) => {
-          const id = parseMediaRef(r);
-          if (id === null) return null;
-          return mediaRegistry.get(id) ?? null;
-        })
-        .filter(/** @type {(b: unknown) => b is IncomingContentBlock} */ (b) => b !== null);
+      /** @type {string[]} */
+      const imagePaths = [];
+      for (const ref of refs) {
+        const imagePath = await resolveImageArgValue(ref, mediaRegistry);
+        if (typeof imagePath === "string" && imagePath.trim()) {
+          imagePaths.push(imagePath);
+        }
+      }
+      resolved[key] = imagePaths;
     }
   }
   return resolved;
+}
+
+/**
+ * @param {unknown} value
+ * @param {MediaRegistry} mediaRegistry
+ * @returns {Promise<unknown>}
+ */
+async function resolveImageArgValue(value, mediaRegistry) {
+  if (typeof value === "string" && value.trim()) {
+    const id = parseMediaRef(value);
+    if (id === null) {
+      return value;
+    }
+    const mediaBlock = mediaRegistry.get(id);
+    return isImageContentBlock(mediaBlock)
+      ? writeMediaBlockToTempFile(mediaBlock)
+      : value;
+  }
+
+  if (isImageInputBlock(value)) {
+    return writeMediaBlockToTempFile(value);
+  }
+
+  return value;
 }
 
 /**
