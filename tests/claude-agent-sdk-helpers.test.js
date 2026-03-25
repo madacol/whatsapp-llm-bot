@@ -29,6 +29,7 @@ import path from "node:path";
 // to harnesses/claude-agent-sdk.js
 
 import {
+  buildClaudePrompt,
   buildClaudeSystemPrompt,
   buildClaudeWorkspaceArtifacts,
   createClaudeAgentSdkHarness,
@@ -100,6 +101,35 @@ describe("buildClaudeSystemPrompt", () => {
       buildClaudeSystemPrompt("  Use the custom prompt.  "),
       "Use the custom prompt.",
     );
+  });
+});
+
+describe("buildClaudePrompt", () => {
+  it("includes canonical media paths for media-only user turns", () => {
+    const mediaPath = `${"b".repeat(64)}.jpg`;
+    const prompt = buildClaudePrompt([{
+      role: "user",
+      content: [{
+        type: "image",
+        path: mediaPath,
+        mime_type: "image/jpeg",
+      }],
+    }]);
+
+    assert.equal(prompt, `Attached media files:\n- image: ${mediaPath}`);
+  });
+
+  it("keeps user text and appends media paths when both are present", () => {
+    const mediaPath = `${"c".repeat(64)}.png`;
+    const prompt = buildClaudePrompt([{
+      role: "user",
+      content: [
+        { type: "text", text: "Describe this image" },
+        { type: "image", path: mediaPath, mime_type: "image/png" },
+      ],
+    }]);
+
+    assert.equal(prompt, `Describe this image\n\nAttached media files:\n- image: ${mediaPath}`);
   });
 });
 

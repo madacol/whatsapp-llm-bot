@@ -14,10 +14,11 @@ import { randomUUID } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { hasMediaPath } from "../media-store.js";
+import { renderContentBlock } from "../message-formatting.js";
 import { NO_OP_HOOKS } from "./native.js";
 import { buildToolPresentation } from "../tool-presentation-model.js";
 import { createLogger } from "../logger.js";
-import { extractLastUserText } from "../message-formatting.js";
 import { createToolMessage, errorToString } from "../utils.js";
 import { contentEvent, toolInspectState } from "../outbound-events.js";
 import { getHarnessConfig, updateHarnessConfig } from "../harness-config.js";
@@ -181,6 +182,88 @@ export async function handleEffortCommand(chatId, arg) {
 export function buildClaudeSystemPrompt(externalInstructions) {
   const trimmedExternalInstructions = externalInstructions.trim();
   return trimmedExternalInstructions ? trimmedExternalInstructions : null;
+}
+
+/**
+ * Collect Claude prompt text and canonical media path lines from a content list.
+ * Claude SDK runs are text-only here, so media is surfaced as explicit path
+ * references in the prompt instead of a shared global renderer.
+ * @param {Array<IncomingContentBlock | ToolContentBlock>} blocks
+ * @param {string[]} textParts
+ * @param {string[]} mediaLines
+ * @returns {void}
+ */
+function collectClaudePromptParts(blocks, textParts, mediaLines) {
+  for (const block of blocks) {
+    if (block.type === "quote") {
+      const renderedQuote = renderContentBlock(block);
+      if (renderedQuote) {
+        textParts.push(renderedQuote);
+      }
+      collectQuotedClaudeMedia(block.content, mediaLines);
+      continue;
+    }
+
+    if ((block.type === "image" || block.type === "video" || block.type === "audio") && hasMediaPath(block)) {
+      mediaLines.push(`- ${block.type}: ${block.path}`);
+      continue;
+    }
+
+    const rendered = renderContentBlock(block);
+    if (rendered) {
+      textParts.push(rendered);
+    }
+  }
+}
+
+/**
+ * Collect quoted media lines without duplicating the quoted text wrapper.
+ * @param {IncomingContentBlock[]} blocks
+ * @param {string[]} mediaLines
+ * @returns {void}
+ */
+function collectQuotedClaudeMedia(blocks, mediaLines) {
+  for (const block of blocks) {
+    if (block.type === "quote") {
+      collectQuotedClaudeMedia(block.content, mediaLines);
+      continue;
+    }
+    if ((block.type === "image" || block.type === "video" || block.type === "audio") && hasMediaPath(block)) {
+      mediaLines.push(`- ${block.type}: ${block.path}`);
+    }
+  }
+}
+
+/**
+ * Build the Claude prompt from the most recent user turn.
+ * The Claude harness chooses its own text representation, preserving user text
+ * and appending canonical media paths when available.
+ * @param {Message[]} messages
+ * @returns {string}
+ */
+export function buildClaudePrompt(messages) {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const msg = messages[i];
+    if (msg.role !== "user") {
+      continue;
+    }
+
+    /** @type {string[]} */
+    const textParts = [];
+    /** @type {string[]} */
+    const mediaLines = [];
+    collectClaudePromptParts(msg.content, textParts, mediaLines);
+
+    const sections = [];
+    if (textParts.length > 0) {
+      sections.push(textParts.join("\n"));
+    }
+    if (mediaLines.length > 0) {
+      sections.push(`Attached media files:\n${mediaLines.join("\n")}`);
+    }
+    return sections.join("\n\n");
+  }
+  return "";
 }
 
 /**
@@ -660,7 +743,7 @@ export function createClaudeAgentSdkHarness() {
     const model = runConfig?.model ?? null;
     const reasoningEffort = runConfig?.reasoningEffort ?? null;
 
-    const lastUserText = extractLastUserText(messages);
+    const lastUserText = buildClaudePrompt(messages);
 
     if (!lastUserText) {
       log.error("No user text found in messages");

@@ -3,10 +3,11 @@
  */
 
 import { createLogger } from "../logger.js";
+import { hasMediaPath } from "../media-store.js";
+import { renderContentBlock } from "../message-formatting.js";
 import { NO_OP_HOOKS } from "./native.js";
 import { isHandledCodexRunError, startCodexRun } from "./codex-runner.js";
 import { startCodexAppServerRun } from "./codex-app-server-runner.js";
-import { extractCodexText } from "./codex-event-utils.js";
 import { createCodexCommandHandler } from "./codex-commands.js";
 import { getCodexAvailableModels } from "./codex-models.js";
 import { buildSdkErrorResponse, clearStaleHarnessSession, getHarnessRunErrorMessage } from "./harness-run-errors.js";
@@ -31,6 +32,92 @@ const CODEX_HARNESS_CAPABILITIES = {
   supportsReasoningEffort: false,
   supportsSessionFork: false,
 };
+
+/**
+ * Collect plain-text content and canonical media paths from a content block list.
+ * Codex is text-first, so media is represented as explicit file references in
+ * the synthesized prompt rather than as multimodal inputs.
+ * @param {Array<IncomingContentBlock | ToolContentBlock>} blocks
+ * @param {string[]} textParts
+ * @param {string[]} mediaPaths
+ * @returns {void}
+ */
+function collectCodexPromptParts(blocks, textParts, mediaPaths) {
+  for (const block of blocks) {
+    if (block.type === "quote") {
+      const renderedQuote = renderContentBlock(block);
+      if (renderedQuote) {
+        textParts.push(renderedQuote);
+      }
+      collectQuotedMediaPaths(block.content, mediaPaths);
+      continue;
+    }
+
+    if ((block.type === "image" || block.type === "video" || block.type === "audio") && hasMediaPath(block)) {
+      mediaPaths.push(block.path);
+      continue;
+    }
+
+    const rendered = renderContentBlock(block);
+    if (rendered) {
+      textParts.push(rendered);
+    }
+  }
+}
+
+/**
+ * Collect canonical media paths from quoted content without duplicating the
+ * quoted text that `renderContentBlock()` already produced.
+ * @param {IncomingContentBlock[]} blocks
+ * @param {string[]} mediaPaths
+ * @returns {void}
+ */
+function collectQuotedMediaPaths(blocks, mediaPaths) {
+  for (const block of blocks) {
+    if (block.type === "quote") {
+      collectQuotedMediaPaths(block.content, mediaPaths);
+      continue;
+    }
+    if ((block.type === "image" || block.type === "video" || block.type === "audio") && hasMediaPath(block)) {
+      mediaPaths.push(block.path);
+    }
+  }
+}
+
+/**
+ * Build the text prompt that Codex should see for the current turn.
+ * The Codex harness chooses a text-only representation, appending canonical
+ * media file paths so the agent can refer to them explicitly.
+ * @param {Message[]} messages
+ * @returns {string}
+ */
+function buildCodexPrompt(messages) {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const msg = messages[i];
+    if (msg.role !== "user") {
+      continue;
+    }
+
+    /** @type {string[]} */
+    const textParts = [];
+    /** @type {string[]} */
+    const mediaPaths = [];
+    collectCodexPromptParts(msg.content, textParts, mediaPaths);
+
+    const sections = [];
+    if (textParts.length > 0) {
+      sections.push(textParts.join("\n"));
+    }
+    if (mediaPaths.length > 0) {
+      const heading = mediaPaths.length === 1
+        ? "Media file available in this request:"
+        : "Media files available in this request:";
+      sections.push(`${heading}\n${mediaPaths.map((mediaPath) => `- ${mediaPath}`).join("\n")}`);
+    }
+    return sections.join("\n\n");
+  }
+  return "";
+}
 
 /**
  * @param {string} model
@@ -157,7 +244,7 @@ export function createCodexHarness(deps = {}) {
    */
   async function run({ session, llmConfig, messages, hooks: userHooks, runConfig }) {
     const hooks = { ...NO_OP_HOOKS, ...userHooks };
-    const prompt = extractCodexText(messages.at(-1)?.content) ?? "";
+    const prompt = buildCodexPrompt(messages);
     if (!prompt) {
       return {
         response: [{ type: "text", text: "No input message found." }],
