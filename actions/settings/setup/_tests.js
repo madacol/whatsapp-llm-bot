@@ -1,5 +1,9 @@
 import assert from "node:assert/strict";
+import fs from "node:fs/promises";
+import path from "node:path";
 import config from "../../../config.js";
+
+const CODEX_CACHE_PATH = path.resolve("data/codex-models.json");
 
 /** @type {ActionDbTestFn[]} */
 export default [
@@ -7,11 +11,16 @@ export default [
     await db.sql`INSERT INTO chats(chat_id, is_enabled, respond_on, memory, debug)
       VALUES ('setup-1', false, 'mention', false, true)
       ON CONFLICT DO NOTHING`;
+    await fs.mkdir(path.dirname(CODEX_CACHE_PATH), { recursive: true });
+    await fs.writeFile(CODEX_CACHE_PATH, JSON.stringify({
+      checkedAt: new Date().toISOString(),
+      models: [{ id: "gpt-5.4", label: "GPT-5.4" }],
+    }));
 
     /** @type {Array<{ question: string, options: SelectOption[] }>} */
     const prompts = [];
     /** @type {string[]} */
-    const selections = ["on", "mention+reply", "on", "off"];
+    const selections = ["on", "mention+reply", "codex", "gpt-5.4", "off"];
 
     const originalMaster = config.MASTER_IDs;
     config.MASTER_IDs = ["master-user"];
@@ -30,23 +39,27 @@ export default [
         {},
       );
 
-      assert.equal(prompts.length, 4, "wizard should ask all basic setup questions");
+      assert.equal(prompts.length, 5, "wizard should ask all basic setup questions");
       assert.ok(result.includes("enabled"), `Expected enabled summary, got: ${result}`);
       assert.ok(result.includes("mention+reply"), `Expected trigger summary, got: ${result}`);
-      assert.ok(result.toLowerCase().includes("memory"), `Expected memory summary, got: ${result}`);
+      assert.ok(result.includes("codex"), `Expected harness summary, got: ${result}`);
+      assert.ok(result.includes("gpt-5.4"), `Expected harness model summary, got: ${result}`);
       assert.ok(result.toLowerCase().includes("debug"), `Expected debug summary, got: ${result}`);
 
       const { rows: [chat] } = await db.sql`
-        SELECT is_enabled, respond_on, memory, debug
+        SELECT is_enabled, respond_on, memory, debug, harness, harness_config
         FROM chats
         WHERE chat_id = 'setup-1'
       `;
       assert.equal(chat.is_enabled, true);
       assert.equal(chat.respond_on, "mention+reply");
-      assert.equal(chat.memory, true);
+      assert.equal(chat.memory, false, "setup should no longer modify memory");
       assert.equal(chat.debug, false);
+      assert.equal(chat.harness, "codex");
+      assert.equal(chat.harness_config.codex.model, "gpt-5.4");
     } finally {
       config.MASTER_IDs = originalMaster;
+      await fs.rm(CODEX_CACHE_PATH, { force: true });
     }
   },
 

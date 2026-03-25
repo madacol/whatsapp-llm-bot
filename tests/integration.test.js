@@ -34,6 +34,7 @@ const seedChat = (chatId, options) => seedChat_(testDb, chatId, options);
 describe("integration", { concurrency: 1 }, () => {
 
 const CACHE_PATH = path.resolve("data/models.json");
+const CODEX_CACHE_PATH = path.resolve("data/codex-models.json");
 
 before(async () => {
   // 0. Seed models cache so setModel validation passes
@@ -41,6 +42,10 @@ before(async () => {
   await fs.writeFile(CACHE_PATH, JSON.stringify([
     { id: "gpt-4.1-mini", name: "GPT-4.1 Mini", context_length: 128000, pricing: { prompt: "0.000001", completion: "0.000003" } },
   ]));
+  await fs.writeFile(CODEX_CACHE_PATH, JSON.stringify({
+    checkedAt: new Date().toISOString(),
+    models: [{ id: "gpt-5.4", label: "GPT-5.4" }],
+  }));
 
   // 1. In-memory DB → seed the cache so initStore() uses it
   testDb = await createTestDb();
@@ -72,6 +77,7 @@ let t;
 after(async () => {
   await mockServer?.close();
   await fs.rm(CACHE_PATH, { force: true });
+  await fs.rm(CODEX_CACHE_PATH, { force: true });
 });
 
 // ═══════════════════════════════════════════════════════════════════
@@ -249,7 +255,7 @@ describe("Scenario 7b: Guided setup command", () => {
     await seedChat(chatId);
 
     /** @type {string[]} */
-    const selections = ["on", "mention+reply", "on", "off"];
+    const selections = ["on", "mention+reply", "codex", "gpt-5.4", "off"];
     const { context, responses } = createChatTurn({
       chatId,
       content: [{ type: "text", text: "!setup" }],
@@ -263,16 +269,20 @@ describe("Scenario 7b: Guided setup command", () => {
 
     const allText = responses.map((entry) => entry.text).join(" ");
     assert.ok(allText.includes("mention+reply"), `Expected trigger summary, got: ${allText}`);
+    assert.ok(allText.includes("codex"), `Expected harness summary, got: ${allText}`);
+    assert.ok(allText.includes("gpt-5.4"), `Expected harness model summary, got: ${allText}`);
 
     const { rows: [chat] } = await testDb.sql`
-      SELECT is_enabled, respond_on, memory, debug
+      SELECT is_enabled, respond_on, memory, debug, harness, harness_config
       FROM chats
       WHERE chat_id = ${chatId}
     `;
     assert.equal(chat.is_enabled, true);
     assert.equal(chat.respond_on, "mention+reply");
-    assert.equal(chat.memory, true);
+    assert.equal(chat.memory, false);
     assert.equal(chat.debug, false);
+    assert.equal(chat.harness, "codex");
+    assert.equal(chat.harness_config.codex.model, "gpt-5.4");
   });
 });
 
