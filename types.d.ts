@@ -9,11 +9,19 @@ type TextContentBlock = {
   text: string;
 };
 
+type StoredMediaFields = {
+  path: string;
+  sha256?: string;
+};
+
+type InlineMediaFields = {
+  encoding: "base64";
+  data: string;
+};
+
 type ImageContentBlock = {
   type: "image";
-  encoding: "base64";
   mime_type: string;
-  data: string;
   alt?: string;
   /** Delivery quality hint. "hd" asks the adapter to send with full
    *  dual-upload so the receiver's client shows the HD badge. */
@@ -29,20 +37,16 @@ type ImageContentBlock = {
   _hdParentMessageId?: string;
   /** Runtime-only deferred promise for HD version. Not serialized. */
   getHd?: Promise<ImageContentBlock | null>;
-};
+} & (StoredMediaFields | InlineMediaFields);
 type VideoContentBlock = {
   type: "video";
-  encoding: "base64";
   mime_type?: string;
-  data: string;
   alt?: string;
-};
+} & (StoredMediaFields | InlineMediaFields);
 type AudioContentBlock = {
   type: "audio";
-  encoding: "base64";
   mime_type?: string;
-  data: string;
-};
+} & (StoredMediaFields | InlineMediaFields);
 type CodeContentBlock = {
   type: "code";
   language?: string;
@@ -89,7 +93,7 @@ type IncomingContentBlock =
   | AudioContentBlock
   | QuoteContentBlock;
 
-type MediaRegistry = Map<number, IncomingContentBlock>;
+type MediaRegistry = Map<string, IncomingContentBlock>;
 
 type ContentBlock = IncomingContentBlock | ToolCallContentBlock;
 

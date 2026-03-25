@@ -1,7 +1,7 @@
-import crypto from "node:crypto";
 import { getModelModalities } from "./models-cache.js";
 import config from "./config.js";
 import { sendSimpleChatCompletion } from "./llm.js";
+import { hashMediaBlock } from "./media-store.js";
 import { isMediaBlock } from "./message-formatting.js";
 
 /**
@@ -50,15 +50,6 @@ const DESCRIPTION_LABELS = {
   audio: "Audio description",
   video: "Video description",
 };
-
-/**
- * Hash content data for cache lookup.
- * @param {string} data
- * @returns {string} First 16 hex chars of SHA-256
- */
-function hashContent(data) {
-  return crypto.createHash("sha256").update(data).digest("hex").slice(0, 16);
-}
 
 /**
  * @typedef {import("./store.js").MessageRow} MessageRow
@@ -131,8 +122,7 @@ function resolveMediaModel(contentType, mediaToTextModels) {
  * @returns {Promise<TextContentBlock>}
  */
 async function translateMediaBlock(block, contentType, modelId, llmClient, db, contextMessages, currentText) {
-  const data = /** @type {{ data: string }} */ (block).data;
-  const hash = hashContent(data);
+  const hash = (await hashMediaBlock(/** @type {ImageContentBlock | AudioContentBlock | VideoContentBlock} */ (block))).slice(0, 16);
 
   // Check cache
   const { rows } =

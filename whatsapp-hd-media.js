@@ -9,6 +9,7 @@ import {
 import { randomBytes } from "node:crypto";
 import { getRootDb } from "./db.js";
 import { createLogger } from "./logger.js";
+import { writeMedia } from "./media-store.js";
 
 const log = createLogger("whatsapp-hd-media");
 
@@ -124,11 +125,11 @@ export function hydrateHdRef(block) {
         const chunks = [];
         for await (const chunk of stream) chunks.push(chunk);
         const buffer = Buffer.concat(chunks);
+        const mediaPath = await writeMedia(buffer, hdRef.mimetype || "image/jpeg", "image");
         return /** @type {ImageContentBlock} */ ({
           type: "image",
-          encoding: "base64",
+          path: mediaPath,
           mime_type: hdRef.mimetype || "image/jpeg",
-          data: buffer.toString("base64"),
         });
       } catch {
         return null;
@@ -180,7 +181,6 @@ export async function updateStoredHdRef(chatId, parentMessageId, ref) {
            FROM jsonb_array_elements(message_data->'content') AS block
            WHERE block->>'type' = 'image'
              AND block->>'_hdParentMessageId' = $2
-             AND block->'_hdRef' = 'null'::jsonb
          )
        ORDER BY timestamp DESC LIMIT 1`,
       [chatId, parentMessageId],

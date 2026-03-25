@@ -8,6 +8,7 @@
 
 import { renderCodeToImages, renderDiffToImages, renderTableToImages, MIN_LINES_FOR_IMAGE, MIN_ROWS_FOR_TABLE_IMAGE } from "./code-image-renderer.js";
 import { createLogger } from "./logger.js";
+import { readBlockBuffer } from "./media-store.js";
 
 const log = createLogger("message-renderer");
 
@@ -139,7 +140,7 @@ export async function renderBlocks(blocks, prefix) {
       case "image":
         instructions.push({
           kind: "image",
-          image: Buffer.from(block.data, "base64"),
+          image: await readBlockBuffer(block),
           ...(block.alt && { caption: block.alt }),
           ...(block.quality === "hd" && { hd: true }),
           editable: false,
@@ -149,7 +150,7 @@ export async function renderBlocks(blocks, prefix) {
       case "video":
         instructions.push({
           kind: "video",
-          video: Buffer.from(block.data, "base64"),
+          video: await readBlockBuffer(block),
           mimetype: block.mime_type || "video/mp4",
           ...(block.alt && { caption: block.alt }),
         });
@@ -158,7 +159,7 @@ export async function renderBlocks(blocks, prefix) {
       case "audio":
         instructions.push({
           kind: "audio",
-          audio: Buffer.from(block.data, "base64"),
+          audio: await readBlockBuffer(block),
           mimetype: block.mime_type || "audio/mp4",
         });
         break;

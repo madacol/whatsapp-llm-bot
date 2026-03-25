@@ -1,8 +1,6 @@
 import { getScopedHarnessConfig, normalizeHarnessConfig } from "../../../harness-config.js";
-import { getModels as getClaudeSdkModels } from "../../../harnesses/claude-agent-sdk.js";
-import { getCodexAvailableModels } from "../../../harnesses/codex-models.js";
 import { getChatOrThrow } from "../../../store.js";
-import { listHarnesses, resolveHarness } from "#harnesses";
+import { getClaudeSdkModels, getCodexAvailableModels, listHarnesses, resolveHarness } from "#harnesses";
 import {
   getSelectableOptions,
   isMaster,

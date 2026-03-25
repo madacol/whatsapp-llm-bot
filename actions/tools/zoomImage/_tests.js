@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import sharp from "sharp";
+import { readBlockBuffer } from "../../../media-store.js";
 
 /**
  * Create a tiny test image content block with sharp.
@@ -72,7 +73,7 @@ export default [
     assert.equal(/** @type {ImageContentBlock} */ (imageBlock).mime_type, "image/jpeg");
 
     // Verify cropped dimensions: 50% of 100x200 = 50x100
-    const cropped = await sharp(Buffer.from(/** @type {ImageContentBlock} */ (imageBlock).data, "base64")).metadata();
+    const cropped = await sharp(await readBlockBuffer(/** @type {ImageContentBlock} */ (imageBlock))).metadata();
     assert.equal(cropped.width, 50);
     assert.equal(cropped.height, 100);
   },

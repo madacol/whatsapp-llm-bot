@@ -907,7 +907,7 @@ describe("image param resolution in tool calls", () => {
     ]));
   });
 
-  it("resolves image params from media references in tool calls", async () => {
+  it("resolves image params from media file paths in tool calls", async () => {
     const chat = await t.chat("media-refs-chat", { enabled: true });
     const r = await chat.send(
       { image: "iVBOR", mime: "image/png", caption: "Process this image" },
@@ -934,8 +934,8 @@ describe("image param resolution in tool calls", () => {
     const systemText = Array.isArray(systemMsg.content)
       ? systemMsg.content.map(c => c.text).join("")
       : systemMsg.content;
-    assert.ok(systemText.includes("Media in the conversation is tagged"),
-      "System prompt should mention media tagging");
+    assert.ok(systemText.includes("canonical file paths"),
+      "System prompt should mention media file paths");
 
     assert.ok(r.raw.some(x => x.text.includes("image was processed")), "Should deliver final reply");
   });

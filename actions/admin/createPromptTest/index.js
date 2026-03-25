@@ -2,6 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 
 import config from "../../../config.js";
+import { readBlockBase64, readBlockBuffer } from "../../../media-store.js";
 import {
   actionsToToolDefinitions,
   isMediaBlock,
@@ -152,17 +153,26 @@ function extFromMime(mimeType) {
 }
 
 /**
+ * @param {MediaRegistry} mediaRegistry
+ * @param {number} mediaId
+ * @returns {IncomingContentBlock | undefined}
+ */
+function getMediaBlockByIndex(mediaRegistry, mediaId) {
+  return Array.from(mediaRegistry.values())[mediaId - 1];
+}
+
+/**
  * Build messages for inline LLM verification using base64 data from the media registry.
  * @param {ChatMessage[]} originalMessages - Original messages with media_ref markers
  * @param {MediaRegistry} mediaRegistry
- * @returns {ChatMessage[]}
+ * @returns {Promise<ChatMessage[]>}
  */
-function buildVerificationMessages(originalMessages, mediaRegistry) {
-  return originalMessages.map((msg) => {
+async function buildVerificationMessages(originalMessages, mediaRegistry) {
+  return Promise.all(originalMessages.map(async (msg) => {
     if (!Array.isArray(msg.content)) return msg;
 
     /** @type {ContentBlock[]} */
-    const content = msg.content.map((block) => {
+    const content = await Promise.all(msg.content.map(async (block) => {
       if (
         typeof block === "object" &&
         block !== null &&
@@ -170,8 +180,8 @@ function buildVerificationMessages(originalMessages, mediaRegistry) {
         "media_ref" in block
       ) {
         const mediaId = /** @type {number} */ (/** @type {Record<string, unknown>} */ (block).media_ref);
-        const mediaBlock = mediaRegistry.get(mediaId);
-        if (mediaBlock && "data" in mediaBlock && typeof mediaBlock.data === "string") {
+        const mediaBlock = getMediaBlockByIndex(mediaRegistry, mediaId);
+        if (mediaBlock && mediaBlock.type === "image") {
           const mimeType =
             "mime_type" in mediaBlock && typeof mediaBlock.mime_type === "string"
               ? mediaBlock.mime_type
@@ -180,15 +190,15 @@ function buildVerificationMessages(originalMessages, mediaRegistry) {
             type: "image",
             encoding: "base64",
             mime_type: mimeType,
-            data: mediaBlock.data,
+            data: await readBlockBase64(mediaBlock),
           });
         }
       }
       return /** @type {ContentBlock} */ (block);
-    });
+    }));
 
     return /** @type {ChatMessage} */ ({ ...msg, content });
-  });
+  }));
 }
 
 /**
@@ -220,18 +230,18 @@ function formatAssertionDesc(assertion) {
  * @param {ChatMessage[]} originalMessages - Messages with media_ref markers
  * @param {MediaRegistry} mediaRegistry
  * @param {string} testName
- * @returns {{ messages: Array<Record<string, unknown>>, fixtures: Array<{path: string, data: Buffer}>, warnings: string[] }}
+ * @returns {Promise<{ messages: Array<Record<string, unknown>>, fixtures: Array<{path: string, data: Buffer}>, warnings: string[] }>}
  */
-function buildTestCaseMessages(originalMessages, mediaRegistry, testName) {
+async function buildTestCaseMessages(originalMessages, mediaRegistry, testName) {
   /** @type {Array<{path: string, data: Buffer}>} */
   const fixtures = [];
   /** @type {string[]} */
   const warnings = [];
 
-  const messages = originalMessages.map((msg) => {
+  const messages = await Promise.all(originalMessages.map(async (msg) => {
     if (!Array.isArray(msg.content)) return msg;
 
-    const content = msg.content.map((block) => {
+    const content = await Promise.all(msg.content.map(async (block) => {
       if (
         typeof block === "object" &&
         block !== null &&
@@ -239,7 +249,7 @@ function buildTestCaseMessages(originalMessages, mediaRegistry, testName) {
         "media_ref" in block
       ) {
         const mediaId = /** @type {number} */ (/** @type {Record<string, unknown>} */ (block).media_ref);
-        const mediaBlock = mediaRegistry.get(mediaId);
+        const mediaBlock = getMediaBlockByIndex(mediaRegistry, mediaId);
 
         if (!mediaBlock) {
           warnings.push(`Could not find [media:${mediaId}]. Add fixture manually.`);
@@ -253,20 +263,18 @@ function buildTestCaseMessages(originalMessages, mediaRegistry, testName) {
         const ext = extFromMime(mimeType);
         const fixtureName = `${testName}-media${mediaId}.${ext}`;
 
-        if ("data" in mediaBlock && typeof mediaBlock.data === "string") {
-          fixtures.push({
-            path: path.join(fixturesDir, fixtureName),
-            data: Buffer.from(mediaBlock.data, "base64"),
-          });
-        }
+        fixtures.push({
+          path: path.join(fixturesDir, fixtureName),
+          data: await readBlockBuffer(/** @type {ImageContentBlock | AudioContentBlock | VideoContentBlock} */ (mediaBlock)),
+        });
 
         return { type: "image", fixture: fixtureName, mime_type: mimeType };
       }
       return block;
-    });
+    }));
 
     return { ...msg, content };
-  });
+  }));
 
   return { messages, fixtures, warnings };
 }
@@ -362,13 +370,13 @@ export default /** @type {defineAction} */ ((x) => x)({
       const mediaRegistry = await reconstructMediaRegistry(rootDb, chatId);
 
       // Build fixture-ref messages for the JSON file
-      const testCaseResult = buildTestCaseMessages(messages, mediaRegistry, params.test_name);
+      const testCaseResult = await buildTestCaseMessages(messages, mediaRegistry, params.test_name);
       testCaseMessages = testCaseResult.messages;
       fixtureFiles = testCaseResult.fixtures;
       mediaWarnings = testCaseResult.warnings;
 
       // Build base64 messages for inline verification
-      messagesForLlm = buildVerificationMessages(messages, mediaRegistry);
+      messagesForLlm = await buildVerificationMessages(messages, mediaRegistry);
     }
 
     // Step 5: Get tool definitions
