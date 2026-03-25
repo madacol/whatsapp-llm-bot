@@ -22,6 +22,8 @@ let handleMessage;
 let registerHarness;
 /** @type {typeof import("../harnesses/claude-agent-sdk.js").createClaudeAgentSdkHarness | undefined} */
 let createClaudeAgentSdkHarness;
+/** @type {typeof import("../harnesses/codex.js").createCodexHarness | undefined} */
+let createCodexHarness;
 
 before(async () => {
   db = await createTestDb();
@@ -41,6 +43,7 @@ before(async () => {
   const { getActions, executeAction } = await import("../actions.js");
   ({ registerHarness } = await import("../harnesses/index.js"));
   ({ createClaudeAgentSdkHarness } = await import("../harnesses/claude-agent-sdk.js"));
+  ({ createCodexHarness } = await import("../harnesses/codex.js"));
 
   const handler = createMessageHandler({
     store,
@@ -62,6 +65,9 @@ describe("LLM pipeline via createMessageHandler", () => {
   afterEach(() => {
     if (registerHarness && createClaudeAgentSdkHarness) {
       registerHarness("claude-agent-sdk", createClaudeAgentSdkHarness);
+    }
+    if (registerHarness && createCodexHarness) {
+      registerHarness("codex", createCodexHarness);
     }
     const pending = mockServer.pendingResponses();
     assert.equal(pending, 0, `Mock response queue should be empty after each test, but has ${pending} unconsumed response(s). This will corrupt subsequent tests.`);
@@ -283,7 +289,7 @@ describe("LLM pipeline via createMessageHandler", () => {
     );
   });
 
-  it("delegates codex harness commands through handleCommand", async () => {
+  it("sends Codex SDK slash commands directly to the SDK runtime", async () => {
     await seedChat("pipe-slash-codex", { enabled: true });
     await db.sql`
       UPDATE chats
@@ -292,15 +298,55 @@ describe("LLM pipeline via createMessageHandler", () => {
       WHERE chat_id = 'pipe-slash-codex'
     `;
 
+    let handledCommandCalls = 0;
+    /** @type {string | null} */
+    let seenPrompt = null;
+    registerHarness?.("codex", () => ({
+      getName: () => "codex",
+      getCapabilities: () => ({
+        supportsResume: true,
+        supportsCancel: true,
+        supportsLiveInput: true,
+        supportsApprovals: true,
+        supportsWorkdir: true,
+        supportsSandboxConfig: true,
+        supportsModelSelection: true,
+        supportsReasoningEffort: false,
+        supportsSessionFork: false,
+      }),
+      handleCommand: async () => {
+        handledCommandCalls += 1;
+        return false;
+      },
+      run: async (params) => {
+        const lastMessage = params.messages.at(-1);
+        assert.ok(lastMessage, "Expected a final message");
+        assert.equal(lastMessage.role, "user");
+        const textBlock = lastMessage.content.find((block) => block.type === "text");
+        assert.ok(textBlock, "Expected the final user message to include text");
+        seenPrompt = textBlock.text;
+        await params.hooks.onLlmResponse("Codex SDK slash command received");
+        return {
+          response: [{ type: "text", text: "Codex SDK slash command received" }],
+          messages: params.messages,
+          usage: { promptTokens: 0, completionTokens: 0, cachedTokens: 0, cost: 0 },
+        };
+      },
+    }));
+
     const { context, responses } = createChatTurn({
       chatId: "pipe-slash-codex",
-      content: [{ type: "text", text: "/model gpt-5.4" }],
+      senderName: "Marco",
+      facts: { isGroup: true },
+      content: [{ type: "text", text: "/model GPT-5.4" }],
     });
     await handleMessage(context);
 
+    assert.equal(handledCommandCalls, 0);
+    assert.equal(seenPrompt, "/model GPT-5.4");
     assert.ok(
-      responses.some(r => r.text.includes("Codex model set")),
-      "Expected slash command to be delegated to the codex harness",
+      responses.some(r => r.text.includes("Codex SDK slash command received")),
+      "Expected slash command to be passed directly to the Codex SDK runtime",
     );
   });
 

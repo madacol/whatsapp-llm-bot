@@ -38,12 +38,13 @@ function isTextBlock(block) {
 }
 
 /**
- * Claude SDK slash commands need to reach the SDK unchanged.
+ * SDK-backed harnesses need raw slash commands to reach the runtime unchanged.
  * @param {AgentHarness} harness
  * @returns {boolean}
  */
 function sendsSlashCommandsDirectlyToRuntime(harness) {
-  return harness.getName() === "claude-agent-sdk";
+  const harnessName = harness.getName();
+  return harnessName === "claude-agent-sdk" || harnessName === "codex";
 }
 
 /**
