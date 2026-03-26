@@ -307,6 +307,122 @@ describe("startCodexRun", () => {
     }]);
   });
 
+  it("emits one file-change event per changed file when Codex reports a batched file_change item", async () => {
+    /** @type {Array<{ path: string, summary?: string, diff?: string, kind?: "add" | "delete" | "update", oldText?: string, newText?: string }>} */
+    const fileChanges = [];
+
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "codex-runner-batched-file-change-"));
+    await fs.mkdir(path.join(tempDir, "nested"), { recursive: true });
+    await fs.writeFile(path.join(tempDir, "plain.txt"), "before\n", "utf8");
+    await fs.writeFile(path.join(tempDir, "nested/delete-me.txt"), "gone soon\n", "utf8");
+
+    const started = await startCodexRun({
+      chatId: "codex-chat",
+      prompt: "Continue",
+      messages: [{ role: "user", content: [{ type: "text", text: "Continue" }] }],
+      runConfig: {
+        workdir: tempDir,
+      },
+      hooks: {
+        onFileChange: async (event) => {
+          fileChanges.push(event);
+        },
+      },
+    }, {
+      createCodex: () => ({
+        startThread: () => ({
+          id: "sess-batch-1",
+          runStreamed: async () => ({
+            events: (async function* () {
+              yield {
+                type: "item.started",
+                item: {
+                  id: "cmd-read",
+                  type: "command_execution",
+                  command: "cat plain.txt nested/delete-me.txt",
+                  aggregated_output: "",
+                  status: "in_progress",
+                },
+              };
+
+              await fs.writeFile(path.join(tempDir, "draft.txt"), "draft version\n", "utf8");
+              await fs.writeFile(path.join(tempDir, "plain.txt"), "after\n", "utf8");
+              await fs.rm(path.join(tempDir, "nested/delete-me.txt"));
+
+              yield {
+                type: "item.completed",
+                item: {
+                  id: "patch-batch-1",
+                  type: "file_change",
+                  changes: [
+                    { path: path.join(tempDir, "draft.txt"), kind: "add" },
+                    { path: path.join(tempDir, "nested/delete-me.txt"), kind: "delete" },
+                    { path: path.join(tempDir, "plain.txt"), kind: "update" },
+                  ],
+                  status: "completed",
+                },
+              };
+              yield {
+                type: "turn.completed",
+                usage: {
+                  input_tokens: 0,
+                  output_tokens: 0,
+                  cached_input_tokens: 0,
+                },
+              };
+            })(),
+          }),
+        }),
+        resumeThread: () => {
+          throw new Error("resumeThread should not be called");
+        },
+      }),
+    });
+
+    await started.done;
+
+    assert.deepEqual(fileChanges, [
+      {
+        path: path.join(tempDir, "draft.txt"),
+        summary: `${path.join(tempDir, "draft.txt")} (add)`,
+        kind: "add",
+        newText: "draft version\n",
+        diff: [
+          `--- a/${path.join(tempDir, "draft.txt")}`,
+          `+++ b/${path.join(tempDir, "draft.txt")}`,
+          "@@ -0,0 +1,1 @@",
+          "+draft version",
+        ].join("\n"),
+      },
+      {
+        path: path.join(tempDir, "nested/delete-me.txt"),
+        summary: `${path.join(tempDir, "nested/delete-me.txt")} (delete)`,
+        kind: "delete",
+        oldText: "gone soon\n",
+        diff: [
+          `--- a/${path.join(tempDir, "nested/delete-me.txt")}`,
+          `+++ b/${path.join(tempDir, "nested/delete-me.txt")}`,
+          "@@ -1,1 +0,0 @@",
+          "-gone soon",
+        ].join("\n"),
+      },
+      {
+        path: path.join(tempDir, "plain.txt"),
+        summary: `${path.join(tempDir, "plain.txt")} (update)`,
+        kind: "update",
+        oldText: "before\n",
+        newText: "after\n",
+        diff: [
+          `--- a/${path.join(tempDir, "plain.txt")}`,
+          `+++ b/${path.join(tempDir, "plain.txt")}`,
+          "@@ -1,1 +1,1 @@",
+          "-before",
+          "+after",
+        ].join("\n"),
+      },
+    ]);
+  });
+
   it("sends paused then composing when Codex reports a tool has started", async () => {
     /** @type {string[]} */
     const eventOrder = [];

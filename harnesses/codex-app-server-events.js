@@ -1,4 +1,4 @@
-import { normalizeCodexFileChange } from "./codex-file-events.js";
+import { normalizeCodexFileChanges } from "./codex-file-events.js";
 import { extractCodexText, isCodexEventRecord, normalizeCodexUsage } from "./codex-event-utils.js";
 import {
   extractCollabToolArguments,
@@ -174,9 +174,11 @@ export function normalizeCodexAppServerEvent(message) {
   }
 
   if (method === "item/completed" && itemType === "fileChange") {
-    const fileChange = normalizeCodexFileChange(item);
-    if (fileChange) {
-      normalized.fileChange = fileChange;
+    const fileChanges = normalizeCodexFileChanges(item);
+    if (fileChanges.length === 1) {
+      normalized.fileChange = fileChanges[0];
+    } else if (fileChanges.length > 1) {
+      normalized.fileChanges = fileChanges;
     }
     return normalized;
   }

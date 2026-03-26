@@ -52,5 +52,6 @@ export {
  *   assistantText?: string,
  *   planText?: string,
  *   fileChange?: CodexFileChangeEvent,
+ *   fileChanges?: CodexFileChangeEvent[],
  * }} NormalizedCodexEvent
  */

@@ -9,40 +9,84 @@ const log = createLogger("harness:codex-file-events");
  * @returns {{ path: string, summary?: string, diff?: string, kind?: "add" | "delete" | "update" } | null}
  */
 export function normalizeCodexFileChange(item) {
-  const path = extractFilePath(item);
-  if (!path) {
-    return null;
-  }
+  return normalizeCodexFileChanges(item)[0] ?? null;
+}
 
-  const diff = extractFileDiff(item);
-  const kind = extractFileKind(item);
-  const normalized = {
-    path,
-    summary: extractFileSummary(item),
-    ...(kind ? { kind } : {}),
-    ...(diff ? { diff } : {}),
-  };
+/**
+ * Normalize file-change payloads from Codex item events into one entry per
+ * changed file. The SDK can batch several paths into a single `file_change`.
+ * @param {unknown} item
+ * @returns {Array<{ path: string, summary?: string, diff?: string, kind?: "add" | "delete" | "update" }>}
+ */
+export function normalizeCodexFileChanges(item) {
+  const normalized = extractFileChanges(item);
   log.debug("Normalized Codex file change payload", {
     input: item,
-    output: normalized,
+    output: normalized.length === 1 ? normalized[0] : normalized,
   });
   return normalized;
 }
 
 /**
- * Extract a file path from a Codex event item when present.
+ * Extract file changes from a Codex event item when present.
+ * @param {unknown} item
+ * @returns {Array<{ path: string, summary?: string, diff?: string, kind?: "add" | "delete" | "update" }>}
+ */
+function extractFileChanges(item) {
+  if (!isCodexEventRecord(item)) {
+    return [];
+  }
+  if (Array.isArray(item.changes)) {
+    const topLevelDiff = item.changes.length === 1
+      ? extractTopLevelChangeDiff(item)
+      : undefined;
+    const normalizedChanges = item.changes
+      .filter(isCodexEventRecord)
+      .map((change) => {
+        const path = typeof change.path === "string" && change.path.length > 0
+          ? change.path
+          : null;
+        if (!path) {
+          return null;
+        }
+        const kind = extractChangeKind(change);
+        const diff = extractTopLevelChangeDiff(change) ?? topLevelDiff;
+        return {
+          path,
+          summary: kind ? `${path} (${kind})` : path,
+          ...(kind ? { kind } : {}),
+          ...(diff ? { diff } : {}),
+        };
+      })
+      .filter((change) => change != null);
+    if (normalizedChanges.length > 0) {
+      return normalizedChanges;
+    }
+  }
+
+  const path = extractStandaloneFilePath(item);
+  if (!path) {
+    return [];
+  }
+
+  const diff = extractTopLevelChangeDiff(item);
+  const kind = extractChangeKind(item);
+  return [{
+    path,
+    summary: extractFileSummary(item),
+    ...(kind ? { kind } : {}),
+    ...(diff ? { diff } : {}),
+  }];
+}
+
+/**
+ * Extract a file path from a non-batched Codex event item when present.
  * @param {unknown} item
  * @returns {string | null}
  */
-function extractFilePath(item) {
+function extractStandaloneFilePath(item) {
   if (!isCodexEventRecord(item)) {
     return null;
-  }
-  if (Array.isArray(item.changes)) {
-    const firstChange = item.changes.find(isCodexEventRecord);
-    if (firstChange && typeof firstChange.path === "string" && firstChange.path.length > 0) {
-      return firstChange.path;
-    }
   }
   for (const key of ["path", "file_path", "file"]) {
     if (typeof item[key] === "string" && item[key].length > 0) {
@@ -84,7 +128,7 @@ function extractFileSummary(item) {
  * @param {unknown} item
  * @returns {string | undefined}
  */
-function extractFileDiff(item) {
+function extractTopLevelChangeDiff(item) {
   if (!isCodexEventRecord(item)) {
     return undefined;
   }
@@ -95,21 +139,6 @@ function extractFileDiff(item) {
       return diffText;
     }
   }
-
-  if (Array.isArray(item.changes)) {
-    for (const change of item.changes) {
-      if (!isCodexEventRecord(change)) {
-        continue;
-      }
-      for (const key of ["patch", "diff", "unified_diff"]) {
-        const diffText = extractCodexText(change[key]);
-        if (diffText) {
-          return diffText;
-        }
-      }
-    }
-  }
-
   return undefined;
 }
 
@@ -117,15 +146,12 @@ function extractFileDiff(item) {
  * @param {unknown} item
  * @returns {"add" | "delete" | "update" | undefined}
  */
-function extractFileKind(item) {
+function extractChangeKind(item) {
   if (!isCodexEventRecord(item)) {
     return undefined;
   }
-  if (Array.isArray(item.changes)) {
-    const firstChange = item.changes.find(isCodexEventRecord);
-    if (firstChange && (firstChange.kind === "add" || firstChange.kind === "delete" || firstChange.kind === "update")) {
-      return firstChange.kind;
-    }
+  if (item.kind === "add" || item.kind === "delete" || item.kind === "update") {
+    return item.kind;
   }
   return undefined;
 }
