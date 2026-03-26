@@ -1,7 +1,12 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { createTwoFilesPatch } from "diff";
+import { createLogger } from "../logger.js";
 import { analyzeCodexCommand } from "./codex-command-semantics.js";
+
+const log = createLogger("harness:codex-run-state");
+const WORKSPACE_BASELINE_MAX_BYTES = 256 * 1024;
+const WORKSPACE_BASELINE_SKIPPED_DIRS = new Set([".git", "node_modules"]);
 
 /**
  * @typedef {{
@@ -32,14 +37,23 @@ import { analyzeCodexCommand } from "./codex-command-semantics.js";
 /**
  * Create the transient run-state used to correlate Codex commands with later
  * file-change events.
- * @param {{ workdir?: string | null }} input
+ * @param {{
+ *   workdir?: string | null,
+ *   loadWorkspaceBaseline?: (workdir: string) => Promise<Map<string, string>>,
+ * }} input
  * @returns {CodexRunState}
  */
-export function createCodexRunState({ workdir }) {
+export function createCodexRunState({ workdir, loadWorkspaceBaseline = loadWorkspaceBaselineSnapshot }) {
+  const resolvedWorkdir = typeof workdir === "string" && workdir.length > 0
+    ? path.resolve(workdir)
+    : null;
   /** @type {Map<string, string | null>} */
   const fileSnapshots = new Map();
   /** @type {Map<string, { diff?: string, kind?: "add" | "delete" | "update" }>} */
   const pendingFileDiffs = new Map();
+  const workspaceBaselinePromise = resolvedWorkdir
+    ? loadWorkspaceBaseline(resolvedWorkdir).catch(() => new Map())
+    : null;
 
   return {
     handleCommandEvent,
@@ -90,10 +104,18 @@ export function createCodexRunState({ workdir }) {
       pendingFileDiffs.delete(absolutePath);
     }
 
-    const previousText = fileSnapshots.has(absolutePath)
+    let previousText = fileSnapshots.has(absolutePath)
       ? fileSnapshots.get(absolutePath) ?? null
       : null;
     const nextText = await readOptionalText(absolutePath);
+    let usedWorkspaceBaseline = false;
+    if (previousText == null && shouldUseWorkspaceBaseline(fileChange, pending)) {
+      const baselineText = await readWorkspaceBaselineText(absolutePath);
+      if (baselineText != null) {
+        previousText = baselineText;
+        usedWorkspaceBaseline = true;
+      }
+    }
     fileSnapshots.set(absolutePath, nextText);
 
     const diff = fileChange.diff
@@ -105,14 +127,33 @@ export function createCodexRunState({ workdir }) {
     const newText = previousText !== nextText
       ? nextText
       : diffContent?.newText ?? nextText;
+    const diffSource = fileChange.diff
+      ? "event"
+      : pending?.diff
+        ? "apply_patch"
+        : usedWorkspaceBaseline && diff
+          ? "workspace_baseline"
+        : diff
+          ? "filesystem"
+          : "none";
 
-    return {
+    const enriched = {
       ...fileChange,
       ...(kind ? { kind } : {}),
       ...(oldText != null ? { oldText } : {}),
       ...(newText != null ? { newText } : {}),
       ...(diff ? { diff } : {}),
     };
+    log.debug("Enriched Codex file change", {
+      diffSource,
+      input: fileChange,
+      pending,
+      previousText,
+      nextText,
+      usedWorkspaceBaseline,
+      output: enriched,
+    });
+    return enriched;
   }
 
   /**
@@ -134,10 +175,78 @@ export function createCodexRunState({ workdir }) {
    * @returns {string}
    */
   function resolveCommandPath(relativePath) {
-    if (path.isAbsolute(relativePath) || !workdir) {
+    if (path.isAbsolute(relativePath) || !resolvedWorkdir) {
       return relativePath;
     }
-    return path.resolve(workdir, relativePath);
+    return path.resolve(resolvedWorkdir, relativePath);
+  }
+
+  /**
+   * @param {string} absolutePath
+   * @returns {Promise<string | null>}
+   */
+  async function readWorkspaceBaselineText(absolutePath) {
+    if (!workspaceBaselinePromise) {
+      return null;
+    }
+    const baseline = await workspaceBaselinePromise;
+    return baseline.get(absolutePath) ?? null;
+  }
+}
+
+/**
+ * @param {{ kind?: "add" | "delete" | "update", diff?: string }} fileChange
+ * @param {{ diff?: string, kind?: "add" | "delete" | "update" } | undefined} pending
+ * @returns {boolean}
+ */
+function shouldUseWorkspaceBaseline(fileChange, pending) {
+  if (fileChange.diff || pending?.diff) {
+    return false;
+  }
+  return fileChange.kind !== "add";
+}
+
+/**
+ * Capture a text snapshot of the workspace at run start so later bare
+ * `file_change` events from the SDK can still be diffed, especially deletes.
+ * @param {string} workdir
+ * @returns {Promise<Map<string, string>>}
+ */
+async function loadWorkspaceBaselineSnapshot(workdir) {
+  /** @type {Map<string, string>} */
+  const snapshot = new Map();
+  await walk(workdir);
+  return snapshot;
+
+  /**
+   * @param {string} dirPath
+   * @returns {Promise<void>}
+   */
+  async function walk(dirPath) {
+    /** @type {import("node:fs").Dirent[]} */
+    let entries;
+    try {
+      entries = await fs.readdir(dirPath, { withFileTypes: true });
+    } catch {
+      return;
+    }
+
+    for (const entry of entries) {
+      const entryPath = path.join(dirPath, entry.name);
+      if (entry.isDirectory()) {
+        if (!WORKSPACE_BASELINE_SKIPPED_DIRS.has(entry.name)) {
+          await walk(entryPath);
+        }
+        continue;
+      }
+      if (!entry.isFile()) {
+        continue;
+      }
+      const text = await readOptionalText(entryPath, { maxBytes: WORKSPACE_BASELINE_MAX_BYTES });
+      if (text != null) {
+        snapshot.set(entryPath, text);
+      }
+    }
   }
 }
 
@@ -158,7 +267,14 @@ function buildFileDiff(filePath, oldText, newText) {
     context: 3,
   });
   const lines = patchText.split("\n");
-  return lines.slice(2).join("\n").trim() || undefined;
+  const diffStart = lines.findIndex((line) => line.startsWith("--- "));
+  const relevantLines = diffStart >= 0 ? lines.slice(diffStart) : lines;
+  const normalizedLines = relevantLines.map((line) => (
+    line.startsWith("--- ") || line.startsWith("+++ ")
+      ? line.replace(/\t.*$/, "")
+      : line
+  ));
+  return normalizedLines.join("\n").trim() || undefined;
 }
 
 /**
@@ -227,11 +343,19 @@ function extractUnifiedDiffContent(diffText) {
 
 /**
  * @param {string} filePath
+ * @param {{ maxBytes?: number }} [options]
  * @returns {Promise<string | null>}
  */
-async function readOptionalText(filePath) {
+async function readOptionalText(filePath, options = {}) {
   try {
-    return await fs.readFile(filePath, "utf8");
+    const content = await fs.readFile(filePath);
+    if (typeof options.maxBytes === "number" && content.byteLength > options.maxBytes) {
+      return null;
+    }
+    if (content.includes(0)) {
+      return null;
+    }
+    return content.toString("utf8");
   } catch {
     return null;
   }
