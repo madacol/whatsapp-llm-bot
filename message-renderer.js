@@ -89,8 +89,12 @@ export function markdownToWhatsApp(text) {
   result = result.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, "$1 ($2)");
 
   // Links: [text](url) → text (url), except local file refs which should
-  // degrade to a compact label for WhatsApp.
-  result = result.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_match, label, target) => formatMarkdownLink(label, target));
+  // degrade to a compact label for WhatsApp. File refs may also include an
+  // explicit trailing :line suffix outside the markdown link.
+  result = result.replace(
+    /\[([^\]]+)\]\(([^)]+)\)(?::(\d+)(?::(\d+))?)?/g,
+    (_match, label, target, explicitLine, explicitColumn) => formatMarkdownLink(label, target, explicitLine, explicitColumn),
+  );
 
   // Unordered lists: - item or * item → • item (preserve indentation)
   // Use non-breaking spaces (\u00A0) because WhatsApp strips regular leading spaces
@@ -115,19 +119,36 @@ export function markdownToWhatsApp(text) {
  * Render a markdown link into compact WhatsApp text.
  * @param {string} label
  * @param {string} target
+ * @param {string | undefined} explicitLine
+ * @param {string | undefined} explicitColumn
  * @returns {string}
  */
-function formatMarkdownLink(label, target) {
+function formatMarkdownLink(label, target, explicitLine, explicitColumn) {
   if (!isLocalFileTarget(target)) {
-    return `${label} (${target})`;
+    return `${label} (${target})${formatExplicitLocationSuffix(explicitLine, explicitColumn)}`;
   }
 
-  const lineNumber = getLocalFileLineNumber(target);
+  const lineNumber = explicitLine ?? getLocalFileLineNumber(target);
   if (!lineNumber || labelIncludesLineNumber(label, lineNumber)) {
     return label;
   }
 
   return `${label}:${lineNumber}`;
+}
+
+/**
+ * @param {string | undefined} explicitLine
+ * @param {string | undefined} explicitColumn
+ * @returns {string}
+ */
+function formatExplicitLocationSuffix(explicitLine, explicitColumn) {
+  if (!explicitLine) {
+    return "";
+  }
+
+  return explicitColumn
+    ? `:${explicitLine}:${explicitColumn}`
+    : `:${explicitLine}`;
 }
 
 /**
@@ -180,7 +201,7 @@ function getLocalFileLineNumber(target) {
  * @returns {boolean}
  */
 function labelIncludesLineNumber(label, lineNumber) {
-  return label.endsWith(`:${lineNumber}`) || label.endsWith(`#L${lineNumber}`);
+  return new RegExp(`(?::|#L)${lineNumber}(?:[:C]\\d+)?$`).test(label);
 }
 
 /**
