@@ -1,5 +1,6 @@
 import { describe, it, before } from "node:test";
 import assert from "node:assert/strict";
+import path from "node:path";
 
 process.env.TESTING = "1";
 process.env.MASTER_ID = "master-user";
@@ -202,6 +203,35 @@ Second block:
     assert.ok(
       textMessages.every(m => !/** @type {string} */ (m.msg.text).includes("data:image")),
       "Should not leak embedded image data URLs into text messages",
+    );
+  });
+
+  it("renders embedded markdown local image paths as WhatsApp images", async () => {
+    const { sock, sent } = createMockSock();
+    const imagePath = path.resolve("tests/fixtures/pizza.jpg");
+
+    await sendBlocks(sock, "test-chat", "llm", [{
+      type: "markdown",
+      text: `Before\n\n![Pizza](${imagePath})\n\nAfter`,
+    }]);
+
+    const imageMessages = sent.filter(s => s.msg.image != null);
+    const textMessages = sent.filter(s => typeof s.msg.text === "string");
+
+    assert.equal(imageMessages.length, 1, "Should send the embedded local image as an image message");
+    assert.ok(Buffer.isBuffer(imageMessages[0].msg.image), "Embedded local image should be sent as a Buffer");
+    assert.equal(imageMessages[0].msg.caption, "Pizza");
+    assert.ok(
+      textMessages.some(m => /** @type {string} */ (m.msg.text).includes("Before")),
+      "Should preserve text before the embedded local image",
+    );
+    assert.ok(
+      textMessages.some(m => /** @type {string} */ (m.msg.text).includes("After")),
+      "Should preserve text after the embedded local image",
+    );
+    assert.ok(
+      textMessages.every(m => !/** @type {string} */ (m.msg.text).includes(imagePath)),
+      "Should not leak embedded local image paths into text messages",
     );
   });
 

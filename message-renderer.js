@@ -6,6 +6,7 @@
  * diff image rendering. No Baileys/socket dependency.
  */
 
+import { readFile } from "node:fs/promises";
 import { basename } from "node:path";
 import { Resvg } from "@resvg/resvg-js";
 import { renderCodeToImages, renderDiffToImages, renderTableToImages, renderUnifiedDiffToImages, MIN_LINES_FOR_IMAGE, MIN_ROWS_FOR_TABLE_IMAGE } from "./code-image-renderer.js";
@@ -13,7 +14,8 @@ import { createLogger } from "./logger.js";
 import { readBlockBuffer } from "./media-store.js";
 
 const log = createLogger("message-renderer");
-const EMBEDDED_MARKDOWN_IMAGE_RE = /!\[([^\]]*)\]\((data:image\/[^)]+)\)/gi;
+const EMBEDDED_MARKDOWN_IMAGE_RE = /!\[([^\]]*)\]\(([^)]+)\)/gi;
+const LOCAL_IMAGE_EXTENSIONS = new Set([".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".svg"]);
 
 /**
  * A single WhatsApp message to be sent, produced by the rendering pipeline.
@@ -162,6 +164,14 @@ function formatInlineCode(text) {
 }
 
 /**
+ * @param {string} target
+ * @returns {boolean}
+ */
+function isInlineDataUrl(target) {
+  return /^data:/i.test(target);
+}
+
+/**
  * Detect absolute local file targets produced by terminal-style file refs.
  * @param {string} target
  * @returns {boolean}
@@ -252,12 +262,48 @@ function renderSvgToPng(svgBuffer) {
 }
 
 /**
- * Split a text run into plain text and embedded markdown image segments.
- * Only `data:image/...` payloads are turned into image segments here.
- * @param {string} text
- * @returns {MarkdownInlineSegment[]}
+ * @param {string} target
+ * @returns {boolean}
  */
-function splitEmbeddedMarkdownImages(text) {
+function isLocalImageTarget(target) {
+  if (!isLocalFileTarget(target)) {
+    return false;
+  }
+
+  const normalizedTarget = stripLocalFileLocation(target).toLowerCase();
+  return [...LOCAL_IMAGE_EXTENSIONS].some((extension) => normalizedTarget.endsWith(extension));
+}
+
+/**
+ * @param {string} target
+ * @returns {Promise<Buffer | null>}
+ */
+async function resolveEmbeddedMarkdownImage(target) {
+  if (isInlineDataUrl(target)) {
+    const { mimeType, buffer } = parseDataUrl(target);
+    if (!mimeType.startsWith("image/")) {
+      return null;
+    }
+    return mimeType === "image/svg+xml" ? renderSvgToPng(buffer) : buffer;
+  }
+
+  if (!isLocalImageTarget(target)) {
+    return null;
+  }
+
+  const filePath = stripLocalFileLocation(target);
+  const buffer = await readFile(filePath);
+  return filePath.toLowerCase().endsWith(".svg") ? renderSvgToPng(buffer) : buffer;
+}
+
+/**
+ * Split a text run into plain text and embedded markdown image segments.
+ * `data:image/...` payloads and absolute local image paths are turned into
+ * outbound image segments here.
+ * @param {string} text
+ * @returns {Promise<MarkdownInlineSegment[]>}
+ */
+async function splitEmbeddedMarkdownImages(text) {
   /** @type {MarkdownInlineSegment[]} */
   const segments = [];
   let lastIndex = 0;
@@ -265,7 +311,7 @@ function splitEmbeddedMarkdownImages(text) {
   for (const match of text.matchAll(EMBEDDED_MARKDOWN_IMAGE_RE)) {
     const fullMatch = match[0];
     const alt = (match[1] || "").trim();
-    const dataUrl = match[2];
+    const target = match[2];
     const matchIndex = match.index ?? 0;
 
     if (matchIndex > lastIndex) {
@@ -273,15 +319,16 @@ function splitEmbeddedMarkdownImages(text) {
     }
 
     try {
-      const { mimeType, buffer } = parseDataUrl(dataUrl);
-      const image = mimeType === "image/svg+xml"
-        ? renderSvgToPng(buffer)
-        : buffer;
-      segments.push({
-        kind: "image",
-        image,
-        ...(alt ? { caption: alt } : {}),
-      });
+      const image = await resolveEmbeddedMarkdownImage(target);
+      if (image) {
+        segments.push({
+          kind: "image",
+          image,
+          ...(alt ? { caption: alt } : {}),
+        });
+      } else {
+        segments.push({ kind: "text", text: fullMatch });
+      }
     } catch (error) {
       log.error("Embedded markdown image rendering failed, falling back to text:", error);
       segments.push({ kind: "text", text: fullMatch });
@@ -482,7 +529,7 @@ async function renderMarkdownBlock(text, prefix, instructions) {
             textBuffer += "\n" + seg.text + "\n";
           }
         } else {
-          const inlineSegments = splitEmbeddedMarkdownImages(seg.text);
+          const inlineSegments = await splitEmbeddedMarkdownImages(seg.text);
           for (const inlineSegment of inlineSegments) {
             if (inlineSegment.kind === "image") {
               flushText();
