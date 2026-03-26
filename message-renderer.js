@@ -7,11 +7,13 @@
  */
 
 import { basename } from "node:path";
+import { Resvg } from "@resvg/resvg-js";
 import { renderCodeToImages, renderDiffToImages, renderTableToImages, renderUnifiedDiffToImages, MIN_LINES_FOR_IMAGE, MIN_ROWS_FOR_TABLE_IMAGE } from "./code-image-renderer.js";
 import { createLogger } from "./logger.js";
 import { readBlockBuffer } from "./media-store.js";
 
 const log = createLogger("message-renderer");
+const EMBEDDED_MARKDOWN_IMAGE_RE = /!\[([^\]]*)\]\((data:image\/[^)]+)\)/gi;
 
 /**
  * A single WhatsApp message to be sent, produced by the rendering pipeline.
@@ -213,6 +215,89 @@ function labelIncludesLineNumber(label, lineNumber) {
 }
 
 /**
+ * @typedef {
+ *   | { kind: "text", text: string }
+ *   | { kind: "image", image: Buffer, caption?: string }
+ * } MarkdownInlineSegment
+ */
+
+/**
+ * @param {string} dataUrl
+ * @returns {{ mimeType: string, buffer: Buffer }}
+ */
+function parseDataUrl(dataUrl) {
+  const match = dataUrl.match(/^data:([^;,]+)((?:;[^;,=]+=[^;,]+)*)(;base64)?,(.*)$/is);
+  if (!match) {
+    throw new Error("Invalid data URL");
+  }
+
+  const mimeType = match[1] || "text/plain";
+  const isBase64 = match[3] === ";base64";
+  const payload = match[4] || "";
+  return {
+    mimeType,
+    buffer: isBase64
+      ? Buffer.from(payload, "base64")
+      : Buffer.from(decodeURIComponent(payload), "utf8"),
+  };
+}
+
+/**
+ * @param {Buffer} svgBuffer
+ * @returns {Buffer}
+ */
+function renderSvgToPng(svgBuffer) {
+  const resvg = new Resvg(svgBuffer);
+  return resvg.render().asPng();
+}
+
+/**
+ * Split a text run into plain text and embedded markdown image segments.
+ * Only `data:image/...` payloads are turned into image segments here.
+ * @param {string} text
+ * @returns {MarkdownInlineSegment[]}
+ */
+function splitEmbeddedMarkdownImages(text) {
+  /** @type {MarkdownInlineSegment[]} */
+  const segments = [];
+  let lastIndex = 0;
+
+  for (const match of text.matchAll(EMBEDDED_MARKDOWN_IMAGE_RE)) {
+    const fullMatch = match[0];
+    const alt = (match[1] || "").trim();
+    const dataUrl = match[2];
+    const matchIndex = match.index ?? 0;
+
+    if (matchIndex > lastIndex) {
+      segments.push({ kind: "text", text: text.slice(lastIndex, matchIndex) });
+    }
+
+    try {
+      const { mimeType, buffer } = parseDataUrl(dataUrl);
+      const image = mimeType === "image/svg+xml"
+        ? renderSvgToPng(buffer)
+        : buffer;
+      segments.push({
+        kind: "image",
+        image,
+        ...(alt ? { caption: alt } : {}),
+      });
+    } catch (error) {
+      log.error("Embedded markdown image rendering failed, falling back to text:", error);
+      segments.push({ kind: "text", text: fullMatch });
+    }
+
+    lastIndex = matchIndex + fullMatch.length;
+  }
+
+  if (lastIndex < text.length) {
+    segments.push({ kind: "text", text: text.slice(lastIndex) });
+  }
+
+  return segments.length > 0 ? segments : [{ kind: "text", text }];
+}
+
+/**
  * Render ToolContentBlocks into transport-agnostic SendInstructions.
  * @param {ToolContentBlock[]} blocks
  * @param {string} prefix - source emoji prefix (e.g. "🤖")
@@ -397,9 +482,23 @@ async function renderMarkdownBlock(text, prefix, instructions) {
             textBuffer += "\n" + seg.text + "\n";
           }
         } else {
-          const converted = markdownToWhatsApp(seg.text).trim();
-          if (converted) {
-            textBuffer += (textBuffer ? "\n" : "") + converted;
+          const inlineSegments = splitEmbeddedMarkdownImages(seg.text);
+          for (const inlineSegment of inlineSegments) {
+            if (inlineSegment.kind === "image") {
+              flushText();
+              instructions.push({
+                kind: "image",
+                image: inlineSegment.image,
+                ...(inlineSegment.caption ? { caption: inlineSegment.caption } : {}),
+                editable: false,
+              });
+              continue;
+            }
+
+            const converted = markdownToWhatsApp(inlineSegment.text).trim();
+            if (converted) {
+              textBuffer += (textBuffer ? "\n" : "") + converted;
+            }
           }
         }
       }

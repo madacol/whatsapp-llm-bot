@@ -170,6 +170,41 @@ Second block:
     assert.ok(text.includes("_italic_"), "Italic should be converted to WhatsApp format");
   });
 
+  it("renders embedded markdown data-url images as WhatsApp images", async () => {
+    const { sock, sent } = createMockSock();
+    const svg = [
+      '<svg xmlns="http://www.w3.org/2000/svg" width="120" height="40">',
+      '<rect width="120" height="40" fill="white"/>',
+      '<text x="10" y="25" font-size="16">Barcode</text>',
+      "</svg>",
+    ].join("");
+    const dataUrl = `data:image/svg+xml;base64,${Buffer.from(svg).toString("base64")}`;
+
+    await sendBlocks(sock, "test-chat", "llm", [{
+      type: "markdown",
+      text: `Before\n\n![Barcode](${dataUrl})\n\nAfter`,
+    }]);
+
+    const imageMessages = sent.filter(s => s.msg.image != null);
+    const textMessages = sent.filter(s => typeof s.msg.text === "string");
+
+    assert.equal(imageMessages.length, 1, "Should send the embedded image as an image message");
+    assert.ok(Buffer.isBuffer(imageMessages[0].msg.image), "Embedded image should be sent as a Buffer");
+    assert.equal(imageMessages[0].msg.caption, "Barcode");
+    assert.ok(
+      textMessages.some(m => /** @type {string} */ (m.msg.text).includes("Before")),
+      "Should preserve text before the embedded image",
+    );
+    assert.ok(
+      textMessages.some(m => /** @type {string} */ (m.msg.text).includes("After")),
+      "Should preserve text after the embedded image",
+    );
+    assert.ok(
+      textMessages.every(m => !/** @type {string} */ (m.msg.text).includes("data:image")),
+      "Should not leak embedded image data URLs into text messages",
+    );
+  });
+
   it("omits absolute paths when rendering local file links for WhatsApp", async () => {
     const { sock, sent } = createMockSock();
 
