@@ -1,6 +1,5 @@
 import { getMediaTranslation, resolveMediaModel } from "../media-to-text.js";
 import { hasMediaPath, resolveMediaPath } from "../media-store.js";
-import { pathToFileURL } from "node:url";
 
 /**
  * @param {string} text
@@ -22,7 +21,7 @@ export function renderMarkdownImageReference(block) {
   if (!hasMediaPath(block) || !block.alt) {
     return null;
   }
-  return `![${escapeMarkdownImageAlt(block.alt)}](${pathToFileURL(resolveMediaPath(block.path)).href})`;
+  return `![${escapeMarkdownImageAlt(block.alt)}](${resolveMediaPath(block.path)})`;
 }
 
 /**
