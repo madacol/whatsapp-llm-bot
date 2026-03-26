@@ -105,23 +105,33 @@ function hasUnsupportedContent(messages, supportedModalities) {
  * @param {{ image?: string, audio?: string, video?: string, general?: string }} mediaToTextModels
  * @returns {string} Model ID, or empty string if none configured
  */
-function resolveMediaModel(contentType, mediaToTextModels) {
+export function resolveMediaModel(contentType, mediaToTextModels) {
   return mediaToTextModels[contentType] || mediaToTextModels.general || config[`${contentType}_to_text_model`] || config.media_to_text_model || "";
 }
 
 /**
- * Translate a single unsupported media block to a text description, using cache when available.
- *
- * @param {IncomingContentBlock} block - The media block to convert
- * @param {"image" | "audio" | "video"} contentType
- * @param {string} modelId - The media-to-text model to use
- * @param {LlmClient} llmClient
- * @param {PGlite} db
- * @param {ChatMessage[]} contextMessages - Preceding conversation for richer prompts
- * @param {string} currentText - Text from the current message for context
- * @returns {Promise<TextContentBlock>}
+ * Generate cached descriptive text for a media block.
+ * @param {{
+ *   block: IncomingContentBlock,
+ *   contentType: "image" | "audio" | "video",
+ *   modelId: string,
+ *   llmClient: LlmClient,
+ *   db: PGlite,
+ *   contextMessages: ChatMessage[],
+ *   currentText: string,
+ * }} input
+ * @returns {Promise<string>}
  */
-async function translateMediaBlock(block, contentType, modelId, llmClient, db, contextMessages, currentText) {
+export async function getMediaTranslation({
+  block,
+  contentType,
+  modelId,
+  llmClient,
+  db,
+  contextMessages,
+  currentText,
+}) {
+  await init(db);
   const hash = (await hashMediaBlock(/** @type {ImageContentBlock | AudioContentBlock | VideoContentBlock} */ (block))).slice(0, 16);
 
   // Check cache
@@ -159,6 +169,31 @@ async function translateMediaBlock(block, contentType, modelId, llmClient, db, c
       ON CONFLICT (content_hash, model_id) DO NOTHING`;
   }
 
+  return translation;
+}
+
+/**
+ * Translate a single unsupported media block to a labeled text description.
+ *
+ * @param {IncomingContentBlock} block - The media block to convert
+ * @param {"image" | "audio" | "video"} contentType
+ * @param {string} modelId - The media-to-text model to use
+ * @param {LlmClient} llmClient
+ * @param {PGlite} db
+ * @param {ChatMessage[]} contextMessages - Preceding conversation for richer prompts
+ * @param {string} currentText - Text from the current message for context
+ * @returns {Promise<TextContentBlock>}
+ */
+async function translateMediaBlock(block, contentType, modelId, llmClient, db, contextMessages, currentText) {
+  const translation = await getMediaTranslation({
+    block,
+    contentType,
+    modelId,
+    llmClient,
+    db,
+    contextMessages,
+    currentText,
+  });
   const label = DESCRIPTION_LABELS[contentType] || `${contentType} description`;
   return /** @type {TextContentBlock} */ ({
     type: "text",

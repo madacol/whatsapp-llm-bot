@@ -64,6 +64,7 @@ async function searchAndAppendMemories({ chatId, chatInfo, message, llmClient, e
  *   llmClient: LlmClient,
  *   chatModel: string,
  *   baseExternalInstructions: string,
+ *   harnessName: string,
  *   context: Pick<ExecuteActionContext, "send">,
  *   getMessages: import("../store.js").Store["getMessages"],
  *   bufferedTexts?: string[],
@@ -77,21 +78,30 @@ export async function prepareRunMessages({
   llmClient,
   chatModel,
   baseExternalInstructions,
+  harnessName,
   context,
   getMessages,
   bufferedTexts = [],
 }) {
   let externalInstructions = baseExternalInstructions;
   const chatMessages = await getMessages(chatId);
-  const mediaToTextModels = chatInfo?.media_to_text_models ?? {};
-  const rootDb = getRootDb();
-  const { messages: translatedMessages, skippedTypes } = await convertUnsupportedMedia(
-    chatMessages,
-    chatModel,
-    mediaToTextModels,
-    llmClient,
-    rootDb,
-  );
+  const shouldConvertUnsupportedMedia = harnessName !== "codex" && harnessName !== "claude-agent-sdk";
+  let translatedMessages = chatMessages;
+  let skippedTypes = new Set();
+
+  if (shouldConvertUnsupportedMedia) {
+    const mediaToTextModels = chatInfo?.media_to_text_models ?? {};
+    const rootDb = getRootDb();
+    const converted = await convertUnsupportedMedia(
+      chatMessages,
+      chatModel,
+      mediaToTextModels,
+      llmClient,
+      rootDb,
+    );
+    translatedMessages = converted.messages;
+    skippedTypes = converted.skippedTypes;
+  }
 
   if (skippedTypes.size > 0) {
     const types = [...skippedTypes].join(", ");

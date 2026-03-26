@@ -131,6 +131,27 @@ describe("buildClaudePrompt", () => {
 
     assert.equal(prompt, `Describe this image\n\nAttached media files:\n- image: ${mediaPath}`);
   });
+
+  it("renders images with alt text as markdown while keeping the media path", () => {
+    const mediaPath = `${"d".repeat(64)}.jpg`;
+    const prompt = buildClaudePrompt([{
+      role: "user",
+      content: [
+        { type: "text", text: "explain" },
+        {
+          type: "image",
+          path: mediaPath,
+          mime_type: "image/jpeg",
+          alt: "Two green iguanas standing upright and leaning against each other.",
+        },
+      ],
+    }]);
+
+    assert.equal(
+      prompt,
+      `explain\n![Two green iguanas standing upright and leaning against each other.](${mediaPath})`,
+    );
+  });
 });
 
 describe("buildClaudeWorkspaceArtifacts", () => {

@@ -5,11 +5,13 @@
 import { createLogger } from "../logger.js";
 import { hasMediaPath } from "../media-store.js";
 import { renderContentBlock } from "../message-formatting.js";
+import { getRootDb } from "../db.js";
 import { NO_OP_HOOKS } from "./native.js";
 import { isHandledCodexRunError, startCodexRun } from "./codex-runner.js";
 import { startCodexAppServerRun } from "./codex-app-server-runner.js";
 import { createCodexCommandHandler } from "./codex-commands.js";
 import { getCodexAvailableModels } from "./codex-models.js";
+import { augmentLatestUserMessageForTextHarness, renderMarkdownImageReference } from "./prompt-media.js";
 import { buildSdkErrorResponse, clearStaleHarnessSession, getHarnessRunErrorMessage } from "./harness-run-errors.js";
 import {
   getCodexSessionId,
@@ -53,7 +55,17 @@ function collectCodexPromptParts(blocks, textParts, mediaPaths) {
       continue;
     }
 
-    if ((block.type === "image" || block.type === "video" || block.type === "audio") && hasMediaPath(block)) {
+    if (block.type === "image" && hasMediaPath(block)) {
+      const markdownImage = renderMarkdownImageReference(block);
+      if (markdownImage) {
+        textParts.push(markdownImage);
+        continue;
+      }
+      mediaPaths.push(block.path);
+      continue;
+    }
+
+    if ((block.type === "video" || block.type === "audio") && hasMediaPath(block)) {
       mediaPaths.push(block.path);
       continue;
     }
@@ -244,7 +256,8 @@ export function createCodexHarness(deps = {}) {
    */
   async function run({ session, llmConfig, messages, hooks: userHooks, runConfig }) {
     const hooks = { ...NO_OP_HOOKS, ...userHooks };
-    const prompt = buildCodexPrompt(messages);
+    const promptMessages = await augmentLatestUserMessageForTextHarness(messages, llmConfig, getRootDb());
+    const prompt = buildCodexPrompt(promptMessages);
     if (!prompt) {
       return {
         response: [{ type: "text", text: "No input message found." }],

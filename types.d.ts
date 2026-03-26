@@ -597,6 +597,7 @@ type LlmConfig = {
   llmClient: LlmClient;
   chatModel: string;
   externalInstructions: string;
+  mediaToTextModels?: { image?: string; audio?: string; video?: string; general?: string };
   toolRuntime: ToolRuntime;
 };
 
