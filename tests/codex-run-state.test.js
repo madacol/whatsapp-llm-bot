@@ -253,6 +253,7 @@ describe("createCodexRunState", () => {
 
     assert.equal(calls[0]?.[2]?.diffSource, "workspace_baseline");
   });
+
 });
 
 /**

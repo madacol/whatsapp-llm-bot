@@ -519,3 +519,83 @@ export async function renderDiffToImages(oldStr, newStr, language) {
 
   return renderAnnotatedLines(lines, { gutterWidth: GUTTER_WIDTH });
 }
+
+/**
+ * Render a unified diff as syntax-highlighted PNG image(s), preserving the
+ * existing hunk boundaries and context lines instead of re-diffing full files.
+ * @param {string} diffText
+ * @param {string} [language]
+ * @returns {Promise<Buffer[]>}
+ */
+export async function renderUnifiedDiffToImages(diffText, language) {
+  const hl = await getHighlighter();
+  const effectiveLang = await loadLang(hl, language || "text");
+  const shikiLang = /** @type {import("shiki").BundledLanguage} */ (effectiveLang);
+
+  /** @type {AnnotatedLine[]} */
+  const lines = [];
+
+  for (const rawLine of diffText.split("\n")) {
+    if (rawLine.startsWith("--- ") || rawLine.startsWith("+++ ") || rawLine.startsWith("@@ ")) {
+      lines.push({ tokens: createPlainTokens(rawLine, "#8b949e") });
+      continue;
+    }
+
+    if (rawLine === "\\ No newline at end of file") {
+      lines.push({ tokens: createPlainTokens(rawLine, "#d29922") });
+      continue;
+    }
+
+    if (rawLine.startsWith("+")) {
+      lines.push({
+        tokens: tokenizeDiffContentLine(hl, rawLine.slice(1), shikiLang),
+        bg: DIFF_ADD_BG,
+        gutter: DIFF_ADD_GUTTER,
+        prefix: "+",
+      });
+      continue;
+    }
+
+    if (rawLine.startsWith("-")) {
+      lines.push({
+        tokens: tokenizeDiffContentLine(hl, rawLine.slice(1), shikiLang),
+        bg: DIFF_DEL_BG,
+        gutter: DIFF_DEL_GUTTER,
+        prefix: "-",
+      });
+      continue;
+    }
+
+    if (rawLine.startsWith(" ")) {
+      lines.push({
+        tokens: tokenizeDiffContentLine(hl, rawLine.slice(1), shikiLang),
+        prefix: " ",
+      });
+      continue;
+    }
+
+    lines.push({ tokens: createPlainTokens(rawLine) });
+  }
+
+  return renderAnnotatedLines(lines, { gutterWidth: GUTTER_WIDTH });
+}
+
+/**
+ * @param {Awaited<ReturnType<typeof createHighlighter>>} hl
+ * @param {string} line
+ * @param {import("shiki").BundledLanguage} language
+ * @returns {import("shiki").ThemedToken[]}
+ */
+function tokenizeDiffContentLine(hl, line, language) {
+  const tokenLines = hl.codeToTokens(line, { lang: language, theme: THEME }).tokens;
+  return tokenLines[0] ?? createPlainTokens("");
+}
+
+/**
+ * @param {string} content
+ * @param {string} [color]
+ * @returns {import("shiki").ThemedToken[]}
+ */
+function createPlainTokens(content, color = TEXT_COLOR) {
+  return [{ content, color, offset: 0 }];
+}

@@ -62,39 +62,82 @@ function cleanFileChangeSummary(summary, rawPath, displayPath, kind) {
 
 /**
  * @param {FileChangeEvent} event
+ * @returns {"add" | "delete" | "update" | undefined}
+ */
+function inferDisplayedFileChangeKind(event) {
+  if (event.changeKind) {
+    return event.changeKind;
+  }
+
+  const diffKind = inferFileChangeKindFromDiff(event.diff);
+  if (diffKind) {
+    return diffKind;
+  }
+
+  if (typeof event.oldText === "string" && typeof event.newText === "string") {
+    if (event.oldText !== event.newText) {
+      return "update";
+    }
+  } else if (typeof event.oldText === "string") {
+    return "delete";
+  } else if (typeof event.newText === "string") {
+    return "add";
+  }
+
+  return event.changeKind;
+}
+
+/**
+ * @param {string | undefined} diffText
+ * @returns {"add" | "delete" | "update" | undefined}
+ */
+function inferFileChangeKindFromDiff(diffText) {
+  if (!diffText) {
+    return undefined;
+  }
+
+  for (const line of diffText.split("\n")) {
+    if (line.startsWith("--- ")) {
+      if (line.includes("/dev/null")) {
+        return "add";
+      }
+      continue;
+    }
+    if (line.startsWith("+++ ") && line.includes("/dev/null")) {
+      return "delete";
+    }
+  }
+
+  return undefined;
+}
+
+/**
+ * @param {FileChangeEvent} event
  * @returns {SendContent}
  */
-function renderFileChangeContent(event) {
+export function renderFileChangeContent(event) {
   const displayPath = shortenPath(event.path, event.cwd ?? null);
-  const cleanedSummary = cleanFileChangeSummary(event.summary, event.path, displayPath, event.changeKind);
+  const displayKind = inferDisplayedFileChangeKind(event);
+  const cleanedSummary = cleanFileChangeSummary(event.summary, event.path, displayPath, displayKind);
 
   if (event.diff) {
-    const title = event.changeKind === "add"
+    const title = displayKind === "add"
       ? "*File added*"
-      : event.changeKind === "delete"
+      : displayKind === "delete"
         ? "*File deleted*"
         : "*File changed*";
-
-    if (typeof event.oldText === "string" || typeof event.newText === "string") {
-      const captionLines = [`${title}  \`${displayPath}\``];
-      if (cleanedSummary) {
-        captionLines.push(cleanedSummary);
-      }
-      return [{
-        type: "diff",
-        oldStr: event.oldText ?? "",
-        newStr: event.newText ?? "",
-        language: langFromPath(event.path) || "text",
-        caption: captionLines.join("\n"),
-      }];
-    }
-
-    const lines = [title, ""];
+    const captionLines = [`${title}  \`${displayPath}\``];
     if (cleanedSummary) {
-      lines.push(cleanedSummary);
+      captionLines.push(cleanedSummary);
     }
-    lines.push(`\`${displayPath}\``, "", "```diff", event.diff, "```");
-    return [{ type: "markdown", text: lines.join("\n") }];
+    return [{
+      type: "diff",
+      oldStr: event.oldText ?? "",
+      newStr: event.newText ?? "",
+      diffText: event.diff,
+      language: langFromPath(event.path) || "text",
+      caption: captionLines.join("\n"),
+    }];
   }
 
   return cleanedSummary ? `${cleanedSummary}\n\`${displayPath}\`` : `Changed file: \`${displayPath}\``;

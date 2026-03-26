@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { renderCodeToImages, renderDiffToImages, maxCharsForLineCount } from "../code-image-renderer.js";
+import { renderCodeToImages, renderDiffToImages, renderUnifiedDiffToImages, maxCharsForLineCount } from "../code-image-renderer.js";
 import { formatBashCommand } from "../tool-display.js";
 
 describe("code-image-renderer", () => {
@@ -57,6 +57,21 @@ describe("code-image-renderer", () => {
       const newStr = Array.from({ length: 100 }, (_, i) => "new_" + "y".repeat(500) + i).join("\n");
       const images = await renderDiffToImages(oldStr, newStr, "text");
       assert.ok(images.length >= 2, `200 wide diff lines should split, got ${images.length} image(s)`);
+    });
+
+    it("renders unified diff hunks without reconstructing the whole file", async () => {
+      const images = await renderUnifiedDiffToImages([
+        "--- a/plain.txt",
+        "+++ b/plain.txt",
+        "@@ -10,5 +10,5 @@",
+        " context before",
+        "-old line",
+        "+new line",
+        " context after",
+      ].join("\n"), "text");
+
+      assert.ok(images.length > 0, "unified diff should produce at least one image");
+      assert.ok(Buffer.isBuffer(images[0]), "unified diff render should return image buffers");
     });
   });
 

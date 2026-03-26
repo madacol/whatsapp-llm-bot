@@ -122,11 +122,11 @@ export function createCodexRunState({ workdir, loadWorkspaceBaseline = loadWorks
       ?? pending?.diff
       ?? buildFileDiff(fileChange.path, previousText, nextText);
     const diffContent = diff ? extractUnifiedDiffContent(diff) : null;
-    const kind = fileChange.kind ?? pending?.kind ?? inferFileChangeKind(previousText, nextText);
     const oldText = previousText ?? diffContent?.oldText;
     const newText = previousText !== nextText
       ? nextText
       : diffContent?.newText ?? nextText;
+    const kind = resolveFileChangeKind(fileChange.kind ?? pending?.kind, oldText ?? null, newText ?? null);
     const diffSource = fileChange.diff
       ? "event"
       : pending?.diff
@@ -293,6 +293,17 @@ function inferFileChangeKind(oldText, newText) {
     return "update";
   }
   return undefined;
+}
+
+/**
+ * Keep the reported kind authoritative and only infer when it is absent.
+ * @param {"add" | "delete" | "update" | undefined} reportedKind
+ * @param {string | null} oldText
+ * @param {string | null} newText
+ * @returns {"add" | "delete" | "update" | undefined}
+ */
+function resolveFileChangeKind(reportedKind, oldText, newText) {
+  return reportedKind ?? inferFileChangeKind(oldText, newText);
 }
 
 /**

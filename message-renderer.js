@@ -7,7 +7,7 @@
  */
 
 import { basename } from "node:path";
-import { renderCodeToImages, renderDiffToImages, renderTableToImages, MIN_LINES_FOR_IMAGE, MIN_ROWS_FOR_TABLE_IMAGE } from "./code-image-renderer.js";
+import { renderCodeToImages, renderDiffToImages, renderTableToImages, renderUnifiedDiffToImages, MIN_LINES_FOR_IMAGE, MIN_ROWS_FOR_TABLE_IMAGE } from "./code-image-renderer.js";
 import { createLogger } from "./logger.js";
 import { readBlockBuffer } from "./media-store.js";
 
@@ -454,7 +454,9 @@ async function renderCodeBlock(block, prefix, instructions) {
  */
 async function renderDiffBlock(block, prefix, instructions) {
   try {
-    const images = await renderDiffToImages(block.oldStr, block.newStr, block.language);
+    const images = block.diffText
+      ? await renderUnifiedDiffToImages(block.diffText, block.language)
+      : await renderDiffToImages(block.oldStr, block.newStr, block.language);
     for (let i = 0; i < images.length; i++) {
       // Only caption the first image — captionless consecutive images
       // are auto-grouped as an album by WhatsApp.
@@ -467,13 +469,25 @@ async function renderDiffBlock(block, prefix, instructions) {
     }
   } catch (err) {
     log.error("Diff image rendering failed, falling back to text:", err);
-    const lines = [];
-    for (const line of block.oldStr.split("\n")) lines.push(`- ${line}`);
-    for (const line of block.newStr.split("\n")) lines.push(`+ ${line}`);
+    const text = block.diffText
+      ? "```diff\n" + block.diffText + "\n```"
+      : "```\n" + buildSimpleDiffFallback(block.oldStr, block.newStr) + "\n```";
     instructions.push({
       kind: "text",
-      text: "```\n" + lines.join("\n") + "\n```",
+      text,
       editable: false,
     });
   }
+}
+
+/**
+ * @param {string} oldStr
+ * @param {string} newStr
+ * @returns {string}
+ */
+function buildSimpleDiffFallback(oldStr, newStr) {
+  const lines = [];
+  for (const line of oldStr.split("\n")) lines.push(`- ${line}`);
+  for (const line of newStr.split("\n")) lines.push(`+ ${line}`);
+  return lines.join("\n");
 }
