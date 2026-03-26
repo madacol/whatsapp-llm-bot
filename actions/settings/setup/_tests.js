@@ -20,7 +20,7 @@ export default [
     /** @type {Array<{ question: string, options: SelectOption[] }>} */
     const prompts = [];
     /** @type {string[]} */
-    const selections = ["on", "mention+reply", "codex", "gpt-5.4", "off"];
+    const selections = ["mention+reply", "codex", "gpt-5.4", "off"];
 
     const originalMaster = config.MASTER_IDs;
     config.MASTER_IDs = ["master-user"];
@@ -39,12 +39,14 @@ export default [
         {},
       );
 
-      assert.equal(prompts.length, 5, "wizard should ask all basic setup questions");
+      assert.equal(prompts.length, 4, "wizard should skip the enable prompt and ask the remaining setup questions");
+      assert.equal(prompts[0]?.question, "When should the bot reply in group chats?");
       assert.ok(result.includes("enabled"), `Expected enabled summary, got: ${result}`);
       assert.ok(result.includes("mention+reply"), `Expected trigger summary, got: ${result}`);
       assert.ok(result.includes("codex"), `Expected harness summary, got: ${result}`);
       assert.ok(result.includes("gpt-5.4"), `Expected harness model summary, got: ${result}`);
       assert.ok(result.toLowerCase().includes("debug"), `Expected debug summary, got: ${result}`);
+      assert.ok(!prompts.some((prompt) => prompt.question === "Enable the bot for this chat?"), "wizard should not ask the enable question");
 
       const { rows: [chat] } = await db.sql`
         SELECT is_enabled, respond_on, memory, debug, harness, harness_config

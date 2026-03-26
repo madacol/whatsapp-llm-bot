@@ -255,12 +255,15 @@ describe("Scenario 7b: Guided setup command", () => {
     await seedChat(chatId);
 
     /** @type {string[]} */
-    const selections = ["on", "mention+reply", "codex", "gpt-5.4", "off"];
+    const selections = ["mention+reply", "codex", "gpt-5.4", "off"];
+    /** @type {string[]} */
+    const questions = [];
     const { context, responses } = createChatTurn({
       chatId,
       content: [{ type: "text", text: "!setup" }],
     });
     context.io.select = async (question, options) => {
+      questions.push(question);
       responses.push({ type: "select", text: JSON.stringify({ question, options }) });
       return selections.shift() ?? "";
     };
@@ -268,6 +271,9 @@ describe("Scenario 7b: Guided setup command", () => {
     await handleMessage(context);
 
     const allText = responses.map((entry) => entry.text).join(" ");
+    assert.equal(questions[0], "When should the bot reply in group chats?");
+    assert.ok(!questions.includes("Enable the bot for this chat?"), `Enable prompt should be skipped, got: ${questions.join(" | ")}`);
+    assert.ok(allText.toLowerCase().includes("enabled"), `Expected enabled summary, got: ${allText}`);
     assert.ok(allText.includes("mention+reply"), `Expected trigger summary, got: ${allText}`);
     assert.ok(allText.includes("codex"), `Expected harness summary, got: ${allText}`);
     assert.ok(allText.includes("gpt-5.4"), `Expected harness model summary, got: ${allText}`);

@@ -23,7 +23,6 @@ import {
 
 /** @type {BasicSetupStep[]} */
 const ALL_SETUP_STEPS = [
-  { setting: "enabled", question: "Enable the bot for this chat?" },
   { setting: "trigger", question: "When should the bot reply in group chats?" },
   { setting: "harness", question: "Which harness should power this chat?" },
   { setting: "debug", question: "Enable debug output for this chat?" },
@@ -38,12 +37,10 @@ function isObjectRecord(value) {
 }
 
 /**
- * @param {string[]} senderIds
  * @returns {BasicSetupStep[]}
  */
-function getSetupSteps(senderIds) {
-  const canSetEnabled = isMaster(senderIds);
-  return ALL_SETUP_STEPS.filter((step) => step.setting !== "enabled" || canSetEnabled);
+function getSetupSteps() {
+  return ALL_SETUP_STEPS;
 }
 
 /**
@@ -186,7 +183,7 @@ export default /** @type {defineAction} */ ((x) => x)({
    */
   action_fn: async function ({ chatId, rootDb, senderIds, select }, _params) {
     const chat = await getChatOrThrow(rootDb, chatId);
-    const steps = getSetupSteps(senderIds);
+    const steps = getSetupSteps();
 
     if (steps.length === 0) {
       return "No setup steps are available for this chat.";
@@ -257,7 +254,11 @@ export default /** @type {defineAction} */ ((x) => x)({
       applied.push(await applyHarnessModelSelection(rootDb, chatId, chat, stagedHarnessModel));
     }
 
-    if (!isMaster(senderIds)) {
+    if (isMaster(senderIds)) {
+      if (!chat.is_enabled) {
+        applied.push(await setChatSetting(rootDb, chatId, "enabled", "on", { senderIds }));
+      }
+    } else {
       notes.push("Enabled setting was skipped because only master users can change it.");
     }
 
