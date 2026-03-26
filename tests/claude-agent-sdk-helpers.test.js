@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 
 // These are module-internal functions — import the module and test via
 // the public function that uses them (extractToolResultText is not exported).
@@ -39,6 +40,7 @@ import {
   hasTextField,
   writeClaudeWorkspaceArtifacts,
 } from "../harnesses/claude-agent-sdk.js";
+import { resolveMediaPath } from "../media-store.js";
 
 describe("createClaudeAgentSdkHarness", () => {
   it("exposes the unified harness contract", async () => {
@@ -134,6 +136,7 @@ describe("buildClaudePrompt", () => {
 
   it("renders images with alt text as markdown while keeping the media path", () => {
     const mediaPath = `${"d".repeat(64)}.jpg`;
+    const mediaUrl = pathToFileURL(resolveMediaPath(mediaPath)).href;
     const prompt = buildClaudePrompt([{
       role: "user",
       content: [
@@ -149,7 +152,7 @@ describe("buildClaudePrompt", () => {
 
     assert.equal(
       prompt,
-      `explain\n![Two green iguanas standing upright and leaning against each other.](${mediaPath})`,
+      `explain\n![Two green iguanas standing upright and leaning against each other.](${mediaUrl})`,
     );
   });
 });
