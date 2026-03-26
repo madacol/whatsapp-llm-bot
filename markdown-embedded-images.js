@@ -52,16 +52,25 @@ function stripLocalFileLocation(target) {
  * @returns {{ mimeType: string, buffer: Buffer }}
  */
 function parseDataUrl(dataUrl) {
-  const match = dataUrl.match(/^data:([^;,]+)((?:;[^;,=]+=[^;,]+)*)(;base64)?,(.*)$/is);
-  if (!match) {
+  if (!dataUrl.startsWith("data:")) {
     throw new Error("Invalid data URL");
   }
 
-  const mimeType = match[1] || "text/plain";
-  const isBase64 = match[3] === ";base64";
-  const payload = match[4] || "";
+  const commaIndex = dataUrl.indexOf(",");
+  if (commaIndex < 0) {
+    throw new Error("Invalid data URL");
+  }
+
+  const header = dataUrl.slice("data:".length, commaIndex);
+  const payload = dataUrl.slice(commaIndex + 1);
+  const headerParts = header.split(";").filter(Boolean);
+  const hasExplicitMimeType = headerParts.length > 0 && headerParts[0].includes("/");
+  const mimeType = hasExplicitMimeType ? headerParts[0] : "text/plain";
+  const metadataParts = hasExplicitMimeType ? headerParts.slice(1) : headerParts;
+  const isBase64 = metadataParts.some((part) => part.toLowerCase() === "base64");
+
   return {
-    mimeType,
+    mimeType: mimeType || "text/plain",
     buffer: isBase64
       ? Buffer.from(payload, "base64")
       : Buffer.from(decodeURIComponent(payload), "utf8"),

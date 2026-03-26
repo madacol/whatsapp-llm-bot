@@ -206,6 +206,30 @@ Second block:
     );
   });
 
+  it("renders utf8 svg data-url images as WhatsApp images", async () => {
+    const { sock, sent } = createMockSock();
+    const svg = [
+      "<svg xmlns='http://www.w3.org/2000/svg' width='120' height='40'>",
+      "<rect width='120' height='40' fill='white'/>",
+      "<text x='10' y='25' font-size='16'>Barcode</text>",
+      "</svg>",
+    ].join("");
+    const dataUrl = `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
+
+    await sendBlocks(sock, "test-chat", "llm", [{
+      type: "markdown",
+      text: `![Barcode](${dataUrl})`,
+    }]);
+
+    const imageMessages = sent.filter(s => s.msg.image != null);
+    const textMessages = sent.filter(s => typeof s.msg.text === "string");
+
+    assert.equal(imageMessages.length, 1, "Should send the utf8 SVG as an image message");
+    assert.ok(Buffer.isBuffer(imageMessages[0].msg.image), "UTF-8 SVG should be rasterized into a Buffer");
+    assert.equal(imageMessages[0].msg.caption, "Barcode");
+    assert.equal(textMessages.length, 0, "Should not fall back to a text message for utf8 SVG data URLs");
+  });
+
   it("renders embedded markdown local image paths as WhatsApp images", async () => {
     const { sock, sent } = createMockSock();
     const imagePath = path.resolve("tests/fixtures/pizza.jpg");
