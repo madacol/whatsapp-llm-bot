@@ -183,6 +183,21 @@ Second block:
     assert.ok(!text.includes("/home/mada/whatsapp-llm-bot/"), "Should not leak absolute file paths into WhatsApp text");
   });
 
+  it("does not duplicate line numbers when a local file link already has an explicit suffix", async () => {
+    const { sock, sent } = createMockSock();
+
+    const markdown = "Changed [message-formatting.js](/home/mada/whatsapp-llm-bot/message-formatting.js#L326):326.";
+
+    await sendBlocks(sock, "test-chat", "llm", [{ type: "markdown", text: markdown }]);
+
+    const textMessages = sent.filter(s => typeof s.msg.text === "string");
+    assert.equal(textMessages.length, 1, "Should send one text message");
+
+    const text = /** @type {string} */ (textMessages[0].msg.text);
+    assert.ok(text.includes("message-formatting.js:326"), "Should keep one compact line reference");
+    assert.ok(!text.includes("message-formatting.js:326:326"), "Should not duplicate the line number");
+  });
+
   it("sends one-line diff as a single image message with caption", async () => {
     const { sock, sent } = createMockSock();
 
