@@ -130,10 +130,10 @@ function formatMarkdownLink(label, target, explicitLine, explicitColumn) {
 
   const lineNumber = explicitLine ?? getLocalFileLineNumber(target);
   if (!lineNumber || labelIncludesLineNumber(label, lineNumber)) {
-    return label;
+    return formatInlineCode(label);
   }
 
-  return `${label}:${lineNumber}`;
+  return formatInlineCode(`${label}:${lineNumber}`);
 }
 
 /**
@@ -149,6 +149,14 @@ function formatExplicitLocationSuffix(explicitLine, explicitColumn) {
   return explicitColumn
     ? `:${explicitLine}:${explicitColumn}`
     : `:${explicitLine}`;
+}
+
+/**
+ * @param {string} text
+ * @returns {string}
+ */
+function formatInlineCode(text) {
+  return `\`${text}\``;
 }
 
 /**

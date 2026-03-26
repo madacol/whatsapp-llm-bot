@@ -178,8 +178,8 @@ Second block:
     assert.equal(textMessages.length, 1, "Should send one text message");
 
     const text = /** @type {string} */ (textMessages[0].msg.text);
-    assert.ok(text.includes("prepare-run-messages.js"), "Should keep the file label");
-    assert.ok(text.includes("message-formatting.js:326"), "Should preserve line context compactly");
+    assert.ok(text.includes("`prepare-run-messages.js`"), "Should render local file labels as inline code");
+    assert.ok(text.includes("`message-formatting.js:326`"), "Should preserve line context as inline code");
     assert.ok(!text.includes("/home/mada/whatsapp-llm-bot/"), "Should not leak absolute file paths into WhatsApp text");
   });
 
@@ -194,7 +194,7 @@ Second block:
     assert.equal(textMessages.length, 1, "Should send one text message");
 
     const text = /** @type {string} */ (textMessages[0].msg.text);
-    assert.ok(text.includes("message-formatting.js:326"), "Should keep one compact line reference");
+    assert.ok(text.includes("`message-formatting.js:326`"), "Should keep one compact inline code line reference");
     assert.ok(!text.includes("message-formatting.js:326:326"), "Should not duplicate the line number");
   });
 
