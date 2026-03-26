@@ -196,8 +196,9 @@ export function createCodexEventDispatcher(input) {
       await input.hooks.onPlan(normalized.planText);
     }
 
-    if (normalized.fileChange) {
-      const enrichedFileChange = await runState.enrichFileChangeEvent(normalized.fileChange);
+    const fileChanges = normalized.fileChanges ?? (normalized.fileChange ? [normalized.fileChange] : []);
+    for (const fileChange of fileChanges) {
+      const enrichedFileChange = await runState.enrichFileChangeEvent(fileChange);
       await input.hooks.onFileChange(enrichedFileChange);
     }
   }

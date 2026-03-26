@@ -375,6 +375,39 @@ describe("codex events", () => {
     });
   });
 
+  it("expands multi-file file_change payloads into separate normalized file changes", () => {
+    assert.deepEqual(normalizeCodexEvent({
+      type: "item.completed",
+      item: {
+        type: "file_change",
+        changes: [
+          { path: "src/add.js", kind: "add" },
+          { path: "src/update.js", kind: "update" },
+          { path: "src/delete.js", kind: "delete" },
+        ],
+      },
+    }), {
+      sessionId: null,
+      fileChanges: [
+        {
+          path: "src/add.js",
+          summary: "src/add.js (add)",
+          kind: "add",
+        },
+        {
+          path: "src/update.js",
+          summary: "src/update.js (update)",
+          kind: "update",
+        },
+        {
+          path: "src/delete.js",
+          summary: "src/delete.js (delete)",
+          kind: "delete",
+        },
+      ],
+    });
+  });
+
   it("unwraps nested error payloads into a usable failure message", () => {
     assert.deepEqual(normalizeCodexEvent({
       type: "error",
