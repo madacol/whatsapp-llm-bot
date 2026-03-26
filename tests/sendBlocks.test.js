@@ -167,6 +167,22 @@ Second block:
     assert.ok(text.includes("_italic_"), "Italic should be converted to WhatsApp format");
   });
 
+  it("omits absolute paths when rendering local file links for WhatsApp", async () => {
+    const { sock, sent } = createMockSock();
+
+    const markdown = "Updated [prepare-run-messages.js](/home/mada/whatsapp-llm-bot/conversation/prepare-run-messages.js) and [message-formatting.js](/home/mada/whatsapp-llm-bot/message-formatting.js#L326).";
+
+    await sendBlocks(sock, "test-chat", "llm", [{ type: "markdown", text: markdown }]);
+
+    const textMessages = sent.filter(s => typeof s.msg.text === "string");
+    assert.equal(textMessages.length, 1, "Should send one text message");
+
+    const text = /** @type {string} */ (textMessages[0].msg.text);
+    assert.ok(text.includes("prepare-run-messages.js"), "Should keep the file label");
+    assert.ok(text.includes("message-formatting.js:326"), "Should preserve line context compactly");
+    assert.ok(!text.includes("/home/mada/whatsapp-llm-bot/"), "Should not leak absolute file paths into WhatsApp text");
+  });
+
   it("sends one-line diff as a single image message with caption", async () => {
     const { sock, sent } = createMockSock();
 
