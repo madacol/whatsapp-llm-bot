@@ -6,6 +6,7 @@
  * diff image rendering. No Baileys/socket dependency.
  */
 
+import { basename } from "node:path";
 import { renderCodeToImages, renderDiffToImages, renderTableToImages, MIN_LINES_FOR_IMAGE, MIN_ROWS_FOR_TABLE_IMAGE } from "./code-image-renderer.js";
 import { createLogger } from "./logger.js";
 import { readBlockBuffer } from "./media-store.js";
@@ -87,8 +88,9 @@ export function markdownToWhatsApp(text) {
   // Images: ![alt](url) → alt (url) — must be before links
   result = result.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, "$1 ($2)");
 
-  // Links: [text](url) → text (url)
-  result = result.replace(/\[([^\]]+)\]\(([^)]+)\)/g, "$1 ($2)");
+  // Links: [text](url) → text (url), except local file refs which should
+  // degrade to a compact label for WhatsApp.
+  result = result.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_match, label, target) => formatMarkdownLink(label, target));
 
   // Unordered lists: - item or * item → • item (preserve indentation)
   // Use non-breaking spaces (\u00A0) because WhatsApp strips regular leading spaces
@@ -107,6 +109,78 @@ export function markdownToWhatsApp(text) {
   result = result.replace(/^(-{3,}|\*{3,}|_{3,})$/gm, "———");
 
   return result;
+}
+
+/**
+ * Render a markdown link into compact WhatsApp text.
+ * @param {string} label
+ * @param {string} target
+ * @returns {string}
+ */
+function formatMarkdownLink(label, target) {
+  if (!isLocalFileTarget(target)) {
+    return `${label} (${target})`;
+  }
+
+  const lineNumber = getLocalFileLineNumber(target);
+  if (!lineNumber || labelIncludesLineNumber(label, lineNumber)) {
+    return label;
+  }
+
+  return `${label}:${lineNumber}`;
+}
+
+/**
+ * Detect absolute local file targets produced by terminal-style file refs.
+ * @param {string} target
+ * @returns {boolean}
+ */
+function isLocalFileTarget(target) {
+  if (!target.startsWith("/") || target.startsWith("//")) {
+    return false;
+  }
+
+  const pathWithoutLocation = stripLocalFileLocation(target);
+  return basename(pathWithoutLocation).includes(".");
+}
+
+/**
+ * Strip trailing line metadata from a local file target.
+ * @param {string} target
+ * @returns {string}
+ */
+function stripLocalFileLocation(target) {
+  return target
+    .replace(/#L\d+(?:C\d+)?$/, "")
+    .replace(/:\d+(?::\d+)?$/, "");
+}
+
+/**
+ * Extract the trailing line number from a local file target.
+ * @param {string} target
+ * @returns {string | null}
+ */
+function getLocalFileLineNumber(target) {
+  const hashMatch = target.match(/#L(\d+)(?:C\d+)?$/);
+  if (hashMatch) {
+    return hashMatch[1];
+  }
+
+  const colonMatch = target.match(/:(\d+)(?::\d+)?$/);
+  if (colonMatch) {
+    return colonMatch[1];
+  }
+
+  return null;
+}
+
+/**
+ * @param {string} label
+ * @param {string} lineNumber
+ * @returns {boolean}
+ */
+function labelIncludesLineNumber(label, lineNumber) {
+  return label.endsWith(`:${lineNumber}`) || label.endsWith(`#L${lineNumber}`);
 }
 
 /**
