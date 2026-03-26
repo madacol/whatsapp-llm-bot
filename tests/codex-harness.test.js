@@ -1,6 +1,7 @@
 import { afterEach, describe, it, before } from "node:test";
 import assert from "node:assert/strict";
 import { rm } from "node:fs/promises";
+import { pathToFileURL } from "node:url";
 import { setDb } from "../db.js";
 import { createMockLlmServer, createTestDb, seedChat, withModelsCache } from "./helpers.js";
 import {
@@ -492,6 +493,7 @@ describe("createCodexHarness", () => {
 
       const mediaPath = await writeMedia(Buffer.from("iguanas"), "image/jpeg", "image");
       createdMediaPaths.add(mediaPath);
+      const mediaUrl = pathToFileURL(resolveMediaPath(mediaPath)).href;
 
       /** @type {string | null} */
       let seenPrompt = null;
@@ -572,7 +574,7 @@ describe("createCodexHarness", () => {
 
       assert.equal(
         seenPrompt,
-        `![Two green iguanas standing upright and leaning against each other.](${mediaPath})\nexplain`,
+        `![Two green iguanas standing upright and leaning against each other.](${mediaUrl})\nexplain`,
       );
     } finally {
       await mockServer.close();
