@@ -1,4 +1,7 @@
+import { createLogger } from "../logger.js";
 import { extractCodexText, isCodexEventRecord } from "./codex-event-utils.js";
+
+const log = createLogger("harness:codex-file-events");
 
 /**
  * Normalize file-change payloads from Codex item events.
@@ -13,12 +16,17 @@ export function normalizeCodexFileChange(item) {
 
   const diff = extractFileDiff(item);
   const kind = extractFileKind(item);
-  return {
+  const normalized = {
     path,
     summary: extractFileSummary(item),
     ...(kind ? { kind } : {}),
     ...(diff ? { diff } : {}),
   };
+  log.debug("Normalized Codex file change payload", {
+    input: item,
+    output: normalized,
+  });
+  return normalized;
 }
 
 /**
