@@ -13,6 +13,8 @@ import { setDb } from "../db.js";
 let sendBlocks;
 /** @type {typeof import("../whatsapp/outbound/send-content.js").editWhatsAppMessage} */
 let editWhatsAppMessage;
+/** @type {typeof import("../whatsapp/outbound/send-content.js").renderFileChangeContent} */
+let renderFileChangeContent;
 
 before(async () => {
   const testDb = await createTestDb();
@@ -20,6 +22,7 @@ before(async () => {
   const outbound = await import("../whatsapp/outbound/send-content.js");
   sendBlocks = outbound.sendBlocks;
   editWhatsAppMessage = outbound.editWhatsAppMessage;
+  renderFileChangeContent = outbound.renderFileChangeContent;
 });
 
 /**
@@ -226,6 +229,40 @@ Second block:
     const msg = sent[0].msg;
     assert.ok(Buffer.isBuffer(msg.image), "Should be an image buffer");
     assert.equal(msg.caption, undefined);
+  });
+
+  it("renders file-change diff blocks from unified diff hunks without expanding the full file", () => {
+    const content = renderFileChangeContent({
+      kind: "file_change",
+      path: "/tmp/plain.txt",
+      cwd: "/tmp",
+      changeKind: "update",
+      oldText: "before\nline 2\nline 3\n",
+      newText: "after\nline 2\nline 3\n",
+      diff: [
+        "--- a/plain.txt",
+        "+++ b/plain.txt",
+        "@@ -1,3 +1,3 @@",
+        "-before",
+        "+after",
+        " line 2",
+        " line 3",
+      ].join("\n"),
+    });
+
+    assert.ok(Array.isArray(content), "Expected diff content blocks");
+    const diffBlock = /** @type {DiffContentBlock} */ (content[0]);
+    assert.equal(diffBlock.type, "diff");
+    assert.equal(diffBlock.diffText, [
+      "--- a/plain.txt",
+      "+++ b/plain.txt",
+      "@@ -1,3 +1,3 @@",
+      "-before",
+      "+after",
+      " line 2",
+      " line 3",
+    ].join("\n"));
+    assert.equal(diffBlock.caption, "*File changed*  `plain.txt`");
   });
 
   it("handles type 'text' without image rendering", async () => {

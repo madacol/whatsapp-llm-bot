@@ -59,6 +59,7 @@ type DiffContentBlock = {
   language?: string;
   oldStr: string;
   newStr: string;
+  diffText?: string;
   caption?: string;
 };
 
