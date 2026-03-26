@@ -98,6 +98,7 @@ export async function buildHarnessRunRequest({
     llmClient,
     chatModel,
     baseExternalInstructions,
+    harnessName,
     context,
     getMessages,
     bufferedTexts,
@@ -117,6 +118,7 @@ export async function buildHarnessRunRequest({
       llmClient,
       chatModel,
       externalInstructions,
+      mediaToTextModels: chatInfo?.media_to_text_models ?? {},
       toolRuntime: createToolRuntime({
         tools: activeTools,
         resolveTool,

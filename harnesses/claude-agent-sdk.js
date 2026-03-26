@@ -16,6 +16,7 @@ import { mkdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { hasMediaPath } from "../media-store.js";
 import { renderContentBlock } from "../message-formatting.js";
+import { getRootDb } from "../db.js";
 import { NO_OP_HOOKS } from "./native.js";
 import { buildToolPresentation } from "../tool-presentation-model.js";
 import { createLogger } from "../logger.js";
@@ -26,6 +27,7 @@ import { handleHarnessSessionCommand } from "./session-commands.js";
 import { getSandboxEscapeRequest } from "./sandbox-approval.js";
 import { requestSandboxEscapeApproval } from "./sandbox-approval-coordinator.js";
 import { buildSdkErrorResponse, clearStaleHarnessSession } from "./harness-run-errors.js";
+import { augmentLatestUserMessageForTextHarness, renderMarkdownImageReference } from "./prompt-media.js";
 
 const log = createLogger("harness:claude-agent-sdk");
 const HARNESS_NAME = "claude-agent-sdk";
@@ -204,7 +206,17 @@ function collectClaudePromptParts(blocks, textParts, mediaLines) {
       continue;
     }
 
-    if ((block.type === "image" || block.type === "video" || block.type === "audio") && hasMediaPath(block)) {
+    if (block.type === "image" && hasMediaPath(block)) {
+      const markdownImage = renderMarkdownImageReference(block);
+      if (markdownImage) {
+        textParts.push(markdownImage);
+        continue;
+      }
+      mediaLines.push(`- ${block.type}: ${block.path}`);
+      continue;
+    }
+
+    if ((block.type === "video" || block.type === "audio") && hasMediaPath(block)) {
       mediaLines.push(`- ${block.type}: ${block.path}`);
       continue;
     }
@@ -743,7 +755,8 @@ export function createClaudeAgentSdkHarness() {
     const model = runConfig?.model ?? null;
     const reasoningEffort = runConfig?.reasoningEffort ?? null;
 
-    const lastUserText = buildClaudePrompt(messages);
+    const promptMessages = await augmentLatestUserMessageForTextHarness(messages, llmConfig, getRootDb());
+    const lastUserText = buildClaudePrompt(promptMessages);
 
     if (!lastUserText) {
       log.error("No user text found in messages");

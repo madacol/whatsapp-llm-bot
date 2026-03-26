@@ -1,11 +1,14 @@
-import { describe, it, before } from "node:test";
+import { afterEach, describe, it, before } from "node:test";
 import assert from "node:assert/strict";
+import { rm } from "node:fs/promises";
 import { setDb } from "../db.js";
-import { createTestDb, seedChat } from "./helpers.js";
+import { createMockLlmServer, createTestDb, seedChat, withModelsCache } from "./helpers.js";
 import {
   buildCodexThreadOptions,
   createCodexHarness,
 } from "../harnesses/codex.js";
+import { createLlmClient } from "../llm.js";
+import { resolveMediaPath, writeMedia } from "../media-store.js";
 
 const TEST_CODEX_MODELS = [
   { id: "gpt-5.4", label: "GPT-5.4" },
@@ -26,6 +29,18 @@ function getReplyText(event) {
 before(async () => {
   const db = await createTestDb();
   setDb("./pgdata/root", db);
+});
+
+/** @type {Set<string>} */
+const createdMediaPaths = new Set();
+
+afterEach(async () => {
+  await Promise.all(
+    [...createdMediaPaths].map(async (mediaPath) => {
+      await rm(resolveMediaPath(mediaPath), { force: true });
+    }),
+  );
+  createdMediaPaths.clear();
 });
 
 describe("createCodexHarness", () => {
@@ -464,6 +479,104 @@ describe("createCodexHarness", () => {
 
     assert.equal(seenPrompt, `Media file available in this request:\n- ${mediaPath}`);
     assert.deepEqual(result.response, [{ type: "text", text: "ok" }]);
+  });
+
+  it("renders canonical images as markdown with generated alt while keeping the media path", async () => {
+    const mockServer = await createMockLlmServer();
+    try {
+      const llmClient = createLlmClient({
+        apiKey: "test-key",
+        baseURL: mockServer.url,
+      });
+      mockServer.addResponses("Two green iguanas standing upright and leaning against each other.");
+
+      const mediaPath = await writeMedia(Buffer.from("iguanas"), "image/jpeg", "image");
+      createdMediaPaths.add(mediaPath);
+
+      /** @type {string | null} */
+      let seenPrompt = null;
+      const harness = createCodexHarness({
+        startRun: async (input) => {
+          seenPrompt = input.prompt;
+          return {
+            abortController: new AbortController(),
+            done: Promise.resolve({
+              sessionId: null,
+              result: {
+                response: [{ type: "text", text: "ok" }],
+                messages: input.messages,
+                usage: { promptTokens: 0, completionTokens: 0, cachedTokens: 0, cost: 0 },
+              },
+            }),
+          };
+        },
+      });
+
+      await withModelsCache([
+        {
+          id: "openai/gpt-4o",
+          name: "GPT-4o",
+          context_length: 128000,
+          pricing: { prompt: "0.000005", completion: "0.000015" },
+          architecture: { input_modalities: ["text", "image"] },
+        },
+      ], async () => {
+        await harness.run({
+          session: {
+            chatId: "codex-chat-markdown-media",
+            senderIds: [],
+            context: /** @type {ExecuteActionContext} */ ({
+              chatId: "codex-chat-markdown-media",
+              senderIds: [],
+              content: [],
+              getIsAdmin: async () => true,
+              send: async () => undefined,
+              reply: async () => undefined,
+              reactToMessage: async () => {},
+              select: async () => "",
+              confirm: async () => true,
+            }),
+            addMessage: async () => undefined,
+            updateToolMessage: async () => undefined,
+            harnessSession: null,
+            saveHarnessSession: async () => undefined,
+          },
+          llmConfig: {
+            llmClient,
+            chatModel: "gpt-4.1",
+            externalInstructions: "",
+            mediaToTextModels: { image: "openai/gpt-4o" },
+            toolRuntime: /** @type {ToolRuntime} */ ({
+              listTools: () => [],
+              getTool: async () => null,
+              executeTool: async () => {
+                throw new Error("executeTool should not be called");
+              },
+            }),
+          },
+          messages: [{
+            role: "user",
+            content: [
+              {
+                type: "image",
+                path: mediaPath,
+                mime_type: "image/jpeg",
+              },
+              { type: "text", text: "explain" },
+            ],
+          }],
+          hooks: {},
+          runConfig: { model: "gpt-5.4" },
+        });
+      });
+
+      assert.equal(
+        seenPrompt,
+        `![Two green iguanas standing upright and leaning against each other.](${mediaPath})\nexplain`,
+      );
+    } finally {
+      await mockServer.close();
+    }
   });
 
   it("interrupts an active Codex run before falling back to abort", async () => {
