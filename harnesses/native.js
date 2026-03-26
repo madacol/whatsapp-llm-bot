@@ -4,6 +4,7 @@
 
 import { sendChatCompletion } from "../llm.js";
 import { createToolMessage, isHtmlContent, errorToString } from "../utils.js";
+import { contentEvent, textUpdate, toolCallUpdate, toolInspectState } from "../outbound-events.js";
 import {
   actionsToToolDefinitions,
   resolveImageArgs,
@@ -14,12 +15,12 @@ import {
 import { getRootDb } from "../db.js";
 import { storeLlmContext } from "../context-log.js";
 import { existsSync, readFileSync } from "node:fs";
-import { textUpdate, toolCallUpdate, toolInspectState } from "../outbound-events.js";
 import { storeAndLinkHtml } from "../html-store.js";
 import { recordUsage, resolveCost } from "../usage-tracker.js";
 import { buildToolPresentation } from "../tool-presentation-model.js";
 import { createLogger } from "../logger.js";
 import { handleHarnessSessionCommand } from "./session-commands.js";
+import { convertUnsupportedMedia } from "../media-to-text.js";
 
 const log = createLogger("harness:native");
 
@@ -256,6 +257,7 @@ async function processLlmResponse({ session, llmConfig, messages, mediaRegistry,
     effectiveSystemPrompt += '\n\nMedia in the conversation is identified by canonical file paths like <sha>.jpg. When calling tools with image parameters, pass the media file path from the conversation as the parameter value.';
   }
   const injectedActions = new Set();
+  const warnedUnsupportedTypes = new Set();
   let depth = 0;
 
   /** @type {AgentResult} */
@@ -267,10 +269,36 @@ async function processLlmResponse({ session, llmConfig, messages, mediaRegistry,
 
   while (depth < maxToolCallDepth) {
     await hooks.onComposing();
+    const { messages: effectiveMessages, skippedTypes } = await convertUnsupportedMedia(
+      messages.map((message, index) => ({
+        message_id: index + 1,
+        chat_id: chatId,
+        sender_id: senderIds.join(","),
+        message_data: message,
+        timestamp: new Date(index),
+        display_key: null,
+      })),
+      chatModel,
+      llmConfig.mediaToTextModels ?? {},
+      llmClient,
+      getRootDb(),
+    );
+
+    const newSkippedTypes = [...skippedTypes].filter((type) => !warnedUnsupportedTypes.has(type));
+    if (newSkippedTypes.length > 0) {
+      for (const type of newSkippedTypes) {
+        warnedUnsupportedTypes.add(type);
+      }
+      await session.context.send(contentEvent(
+        "warning",
+        `${newSkippedTypes.join(", ")} not supported by this model. Use \`!config media_to_text_model\` to enable.`,
+      ));
+    }
+
     const response = await sendChatCompletion(llmClient, {
       model: chatModel,
       systemPrompt: effectiveSystemPrompt,
-      messages,
+      messages: effectiveMessages.map((row) => row.message_data),
       tools: actionsToToolDefinitions(tools, mediaRegistry.size > 0),
       mediaRegistry,
     });

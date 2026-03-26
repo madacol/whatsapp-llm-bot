@@ -6,7 +6,6 @@ import {
   findMemories,
   formatMemoriesContext,
 } from "../memory.js";
-import { convertUnsupportedMedia } from "../media-to-text.js";
 import { prepareMessages } from "../message-formatting.js";
 import { reattachHdDeferreds } from "../whatsapp-hd-media.js";
 import { createLogger } from "../logger.js";
@@ -62,9 +61,7 @@ async function searchAndAppendMemories({ chatId, chatInfo, message, llmClient, e
  *   chatInfo: import("../store.js").ChatRow | undefined,
  *   message: UserMessage,
  *   llmClient: LlmClient,
- *   chatModel: string,
  *   baseExternalInstructions: string,
- *   harnessName: string,
  *   context: Pick<ExecuteActionContext, "send">,
  *   getMessages: import("../store.js").Store["getMessages"],
  *   bufferedTexts?: string[],
@@ -76,37 +73,13 @@ export async function prepareRunMessages({
   chatInfo,
   message,
   llmClient,
-  chatModel,
   baseExternalInstructions,
-  harnessName,
   context,
   getMessages,
   bufferedTexts = [],
 }) {
   let externalInstructions = baseExternalInstructions;
   const chatMessages = await getMessages(chatId);
-  const shouldConvertUnsupportedMedia = harnessName !== "codex" && harnessName !== "claude-agent-sdk";
-  let translatedMessages = chatMessages;
-  let skippedTypes = new Set();
-
-  if (shouldConvertUnsupportedMedia) {
-    const mediaToTextModels = chatInfo?.media_to_text_models ?? {};
-    const rootDb = getRootDb();
-    const converted = await convertUnsupportedMedia(
-      chatMessages,
-      chatModel,
-      mediaToTextModels,
-      llmClient,
-      rootDb,
-    );
-    translatedMessages = converted.messages;
-    skippedTypes = converted.skippedTypes;
-  }
-
-  if (skippedTypes.size > 0) {
-    const types = [...skippedTypes].join(", ");
-    await context.send(contentEvent("warning", `${types} not supported by this model. Use \`!config media_to_text_model\` to enable.`));
-  }
 
   if (chatInfo?.memory) {
     externalInstructions = await searchAndAppendMemories({
@@ -119,7 +92,7 @@ export async function prepareRunMessages({
     });
   }
 
-  const { messages, mediaRegistry } = prepareMessages(translatedMessages);
+  const { messages, mediaRegistry } = prepareMessages(chatMessages);
   reattachHdDeferreds(chatId, mediaRegistry);
 
   for (const text of bufferedTexts) {
