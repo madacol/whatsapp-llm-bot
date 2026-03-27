@@ -1,60 +1,91 @@
 import { getChatOrThrow } from "../../../store.js";
 import {
-  SETTINGS,
-  getSelectableOptions,
+  CONFIG_KEYS,
+  describeConfigKey,
+  getConfigKeyDefinition,
   getChatSettingsInfo,
-  getChatSetting,
-  setChatSetting,
+  getSelectableOptions,
+  resetConfigValue,
+  setConfigValue,
 } from "./_service.js";
 
 export default /** @type {defineAction} */ ((x) => x)({
   name: "chat_settings",
-  command: "config",
+  command: "c",
   description:
-    `Get or set chat settings. Available settings: ${SETTINGS.join(", ")}. Omit value to see current setting.`,
+    `Inspect and change chat settings. Use \`!c\`, \`!c <key>\`, \`!c help <key>\`, \`!c <key> <value>\`, or \`!c reset <key>\`. Keys: ${CONFIG_KEYS.join(", ")}.`,
   parameters: {
     type: "object",
     properties: {
       setting: {
         type: "string",
-        enum: SETTINGS,
-        description: "The setting to get or set",
+        enum: ["help", "list", "reset", ...CONFIG_KEYS],
+        description: "The config key to inspect or set, or the verb `help` / `reset`",
       },
       value: {
         type: "string",
-        description: "The value to set (omit to get current value)",
+        description: "The value to set, or the key to reset when `setting` is `reset`",
       },
     },
-    required: ["setting"],
   },
-  formatToolCall: ({ setting, value }) =>
-    value != null ? `Setting ${setting} = ${value}` : `Getting ${setting}`,
+  formatToolCall: ({ setting, value }) => {
+    if (!setting) return "Showing config summary";
+    if (setting === "reset") return `Resetting ${value ?? "config setting"}`;
+    return value != null ? `Setting ${setting} = ${value}` : `Inspecting ${setting}`;
+  },
   permissions: {
     autoExecute: true,
     autoContinue: true,
     useRootDb: true,
   },
   action_fn: async function ({ chatId, rootDb, senderIds, getActions, getIsAdmin, select }, { setting, value }) {
-    if (!setting || !SETTINGS.includes(setting)) {
+    if (!setting || setting === "list") {
       return getChatSettingsInfo(rootDb, chatId, { senderIds, getActions });
     }
 
+    if (setting === "help") {
+      const key = value?.trim();
+      if (!key) {
+        return "Usage: !c help <key>";
+      }
+      return describeConfigKey(rootDb, chatId, key, { getActions });
+    }
+
+    if (setting === "reset") {
+      const key = value?.trim();
+      if (!key) {
+        return "Usage: !c reset <key>";
+      }
+      const isAdmin = getIsAdmin ? await getIsAdmin() : true;
+      if (!isAdmin) {
+        return "Only admins can change settings.";
+      }
+      return resetConfigValue(rootDb, chatId, key, { senderIds, getActions });
+    }
+
     if (value === undefined || value === null) {
+      const definition = getConfigKeyDefinition(setting);
+      if (!definition) {
+        return `Unknown config key \`${setting}\`.\nAvailable keys: ${CONFIG_KEYS.join(", ")}`;
+      }
       const chat = await getChatOrThrow(rootDb, chatId);
-      const selectable = getSelectableOptions(setting, chat);
+      const selectable = getSelectableOptions(definition.setting, chat);
       if (selectable && typeof select === "function") {
+        const helpText = await describeConfigKey(rootDb, chatId, setting, { getActions });
         const chosen = await select(
-          `Choose value for *${setting}*`,
+          helpText,
           selectable.options,
           { deleteOnSelect: true, currentId: selectable.currentId },
         );
         if (chosen) {
           const isAdmin = getIsAdmin ? await getIsAdmin() : true;
-          if (!isAdmin) return "Only admins can change settings.";
-          return setChatSetting(rootDb, chatId, setting, chosen, { senderIds, getActions });
+          if (!isAdmin) {
+            return "Only admins can change settings.";
+          }
+          return setConfigValue(rootDb, chatId, setting, chosen, { senderIds, getActions });
         }
       }
-      return getChatSetting(rootDb, chatId, setting, { getActions });
+      return describeConfigKey(rootDb, chatId, setting, { getActions });
     }
 
     const isAdmin = getIsAdmin ? await getIsAdmin() : true;
@@ -62,6 +93,6 @@ export default /** @type {defineAction} */ ((x) => x)({
       return "Only admins can change settings.";
     }
 
-    return setChatSetting(rootDb, chatId, setting, String(value), { senderIds, getActions });
+    return setConfigValue(rootDb, chatId, setting, String(value), { senderIds, getActions });
   },
 });

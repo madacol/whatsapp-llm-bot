@@ -293,11 +293,11 @@ describe("command through adapter", () => {
     await seedChat(testDb, chatId);
   });
 
-  it("processes !config command sent as a WAMessage", async () => {
+  it("processes !c command sent as a WAMessage", async () => {
     const { sock, getTextMessages } = createMockBaileysSocket();
 
     await adaptIncomingMessage(
-      createWAMessage({ text: "!config enabled true" }),
+      createWAMessage({ text: "!c enabled on" }),
       sock,
       handleMessage,
       testConfirmRegistry,

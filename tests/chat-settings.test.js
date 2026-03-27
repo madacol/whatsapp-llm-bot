@@ -233,4 +233,38 @@ describe("per-chat model selection", () => {
     });
   });
 
+  describe("mobile-first config command semantics", () => {
+    it("shows help text for a friendly key", async () => {
+      await db.sql`INSERT INTO chats(chat_id, harness_cwd) VALUES ('cfg-help-1', '/tmp') ON CONFLICT DO NOTHING`;
+
+      const mod = await import("../actions/settings/chatSettings/index.js");
+      const action = mod.default;
+      const result = await action.action_fn(
+        { chatId: "cfg-help-1", rootDb: db, senderIds: ["u1"] },
+        { setting: "folder" },
+      );
+
+      assert.ok(result.includes("folder"), `expected setting title, got: ${result}`);
+      assert.ok(result.includes("/tmp"), `expected current value, got: ${result}`);
+      assert.ok(result.toLowerCase().includes("what it does"), `expected description section, got: ${result}`);
+      assert.ok(result.toLowerCase().includes("examples"), `expected examples section, got: ${result}`);
+    });
+
+    it("resets a friendly key through the reset verb", async () => {
+      await db.sql`INSERT INTO chats(chat_id, harness_cwd) VALUES ('cfg-reset-1', '/tmp') ON CONFLICT DO NOTHING`;
+
+      const mod = await import("../actions/settings/chatSettings/index.js");
+      const action = mod.default;
+      const result = await action.action_fn(
+        { chatId: "cfg-reset-1", rootDb: db, senderIds: ["u1"] },
+        { setting: "reset", value: "folder" },
+      );
+
+      assert.ok(result.toLowerCase().includes("default") || result.toLowerCase().includes("workspace"), `expected reset confirmation, got: ${result}`);
+
+      const { rows: [chat] } = await db.sql`SELECT harness_cwd FROM chats WHERE chat_id = 'cfg-reset-1'`;
+      assert.equal(chat.harness_cwd, null);
+    });
+  });
+
 });

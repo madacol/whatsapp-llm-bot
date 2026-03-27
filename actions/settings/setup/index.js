@@ -268,7 +268,7 @@ export default /** @type {defineAction} */ ((x) => x)({
       ...applied,
       ...(notes.length > 0 ? ["", ...notes] : []),
       "",
-      "Use `!config` for advanced settings like prompt, media models, cwd, and action toggles.",
+      "Use `!c` for advanced settings like prompt, readers, folder, and action toggles.",
     ].join("\n");
   },
 });
