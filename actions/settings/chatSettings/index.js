@@ -71,7 +71,7 @@ export default /** @type {defineAction} */ ((x) => x)({
       const chat = await getChatOrThrow(rootDb, chatId);
       const selectable = getSelectableOptions(definition.setting, chat);
       if (selectable && typeof select === "function") {
-        const helpText = await describeConfigKey(rootDb, chatId, setting, { getActions });
+        const helpText = await describeConfigKey(rootDb, chatId, setting, { getActions, compact: true });
         const chosen = await select(
           helpText,
           selectable.options,
@@ -84,6 +84,7 @@ export default /** @type {defineAction} */ ((x) => x)({
           }
           return setConfigValue(rootDb, chatId, setting, chosen, { senderIds, getActions });
         }
+        return helpText;
       }
       return describeConfigKey(rootDb, chatId, setting, { getActions });
     }
