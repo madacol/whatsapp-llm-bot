@@ -49,11 +49,14 @@ describe("per-chat model selection", () => {
       const enabled = service.getConfigKeyDefinition("enabled");
       const harness = service.getConfigKeyDefinition("harness");
       const prompt = service.getConfigKeyDefinition("prompt");
+      const show = service.getConfigKeyDefinition("show");
 
       assert.ok(enabled?.picker?.options, "expected enabled picker options in metadata");
       assert.equal(Object.hasOwn(enabled ?? {}, "options"), false, "top-level options should be gone");
       assert.ok(harness?.picker, "expected harness picker metadata");
       assert.equal(prompt?.picker, undefined, "prompt should remain free-text");
+      assert.equal(show?.setting, "output_visibility");
+      assert.deepEqual(show?.flags?.map((flag) => flag.key), ["commands", "thinking", "tools", "changes"]);
     });
   });
 
@@ -322,6 +325,55 @@ describe("per-chat model selection", () => {
 
       const { rows: [chat] } = await db.sql`SELECT harness_cwd FROM chats WHERE chat_id = 'cfg-reset-1'`;
       assert.equal(chat.harness_cwd, null);
+    });
+
+    it("describes grouped visibility controls with per-flag defaults", async () => {
+      await db.sql`
+        INSERT INTO chats(chat_id, output_visibility)
+        VALUES ('cfg-show-1', '{"thinking":true}'::jsonb)
+        ON CONFLICT DO NOTHING
+      `;
+
+      const mod = await import("../actions/settings/chatSettings/index.js");
+      const action = mod.default;
+      const result = await action.action_fn(
+        { chatId: "cfg-show-1", rootDb: db, senderIds: ["u1"] },
+        { setting: "show" },
+      );
+
+      assert.ok(result.includes("*Show*"), `expected setting title, got: ${result}`);
+      assert.ok(result.includes("- Current: commands on, thinking on, tools on, changes on"), `expected current summary, got: ${result}`);
+      assert.ok(result.includes("*Controls*"), `expected controls section, got: ${result}`);
+      assert.ok(result.includes("- commands"), `expected commands flag, got: ${result}`);
+      assert.ok(result.includes("- thinking"), `expected thinking flag, got: ${result}`);
+      assert.ok(result.includes("- tools"), `expected tools flag, got: ${result}`);
+      assert.ok(result.includes("- changes"), `expected changes flag, got: ${result}`);
+    });
+
+    it("stores show flag overrides without persisting default values", async () => {
+      await db.sql`INSERT INTO chats(chat_id) VALUES ('cfg-show-2') ON CONFLICT DO NOTHING`;
+
+      const mod = await import("../actions/settings/chatSettings/index.js");
+      const action = mod.default;
+      const offResult = await action.action_fn(
+        { chatId: "cfg-show-2", rootDb: db, senderIds: ["u1"] },
+        { setting: "show", value: "commands off" },
+      );
+      assert.ok(offResult.includes("commands"), `expected flag name in confirmation, got: ${offResult}`);
+      assert.ok(offResult.includes("off"), `expected off confirmation, got: ${offResult}`);
+
+      let rows = await db.sql`SELECT output_visibility FROM chats WHERE chat_id = 'cfg-show-2'`;
+      assert.deepEqual(rows.rows[0]?.output_visibility, { commands: false });
+
+      const onResult = await action.action_fn(
+        { chatId: "cfg-show-2", rootDb: db, senderIds: ["u1"] },
+        { setting: "show", value: "commands on" },
+      );
+      assert.ok(onResult.includes("commands"), `expected flag name in confirmation, got: ${onResult}`);
+      assert.ok(onResult.includes("on"), `expected on confirmation, got: ${onResult}`);
+
+      rows = await db.sql`SELECT output_visibility FROM chats WHERE chat_id = 'cfg-show-2'`;
+      assert.deepEqual(rows.rows[0]?.output_visibility, {});
     });
   });
 

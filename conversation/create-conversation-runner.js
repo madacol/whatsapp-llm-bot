@@ -15,6 +15,7 @@ import { createLogger } from "../logger.js";
 import { buildAgentIoHooks } from "./build-agent-io-hooks.js";
 import { buildHarnessRunRequest } from "./build-harness-run-request.js";
 import { buildRunConfig } from "./build-run-config.js";
+import { resolveOutputVisibility } from "../chat-output-visibility.js";
 
 const log = createLogger("conversation:runner");
 const PRESENCE_LEASE_TTL_MS = 20_000;
@@ -269,6 +270,7 @@ export function createConversationRunner({ store, llmClient, getActionsFn, execu
         endPresence,
         refreshPresenceLease,
         buildRunConfig(chatId, chatInfo, turn.chatName, harness.getName()).workdir ?? null,
+        resolveOutputVisibility(chatInfo?.output_visibility),
       );
       runCoordinator.markRunActive(chatId);
 

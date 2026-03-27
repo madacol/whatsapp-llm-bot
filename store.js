@@ -23,6 +23,7 @@ const log = createLogger("store");
  *   active_persona: string | null;
  *   harness: string | null;
  *   harness_cwd: string | null;
+ *   output_visibility: import("./chat-output-visibility.js").OutputVisibilityOverrides;
  *   harness_config: Record<string, { model?: string | null, reasoningEffort?: "low" | "medium" | "high" | "max" | null, sandboxMode?: string | null, approvalPolicy?: string | null }>;
  *   harness_session_id: string | null;
  *   harness_session_kind: HarnessSessionRef["kind"] | null;
@@ -114,6 +115,7 @@ export async function initStore(injectedDb){
         db.sql`ALTER TABLE chats ADD COLUMN IF NOT EXISTS active_persona TEXT`,
         db.sql`ALTER TABLE chats ADD COLUMN IF NOT EXISTS harness TEXT`,
         db.sql`ALTER TABLE chats ADD COLUMN IF NOT EXISTS harness_cwd TEXT`,
+        db.sql`ALTER TABLE chats ADD COLUMN IF NOT EXISTS output_visibility JSONB DEFAULT '{}'`,
         db.sql`ALTER TABLE chats ADD COLUMN IF NOT EXISTS harness_config JSONB DEFAULT '{}'`,
         db.sql`ALTER TABLE chats ADD COLUMN IF NOT EXISTS harness_session_id TEXT`,
         db.sql`ALTER TABLE chats ADD COLUMN IF NOT EXISTS harness_session_kind TEXT`,

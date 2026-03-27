@@ -5,6 +5,13 @@ import { validateModel, getModelModalities } from "../../../models-cache.js";
 import { getChatOrThrow } from "../../../store.js";
 import { ROLE_DEFINITIONS, resolveModel } from "../../../model-roles.js";
 import { listHarnesses } from "#harnesses";
+import {
+  OUTPUT_VISIBILITY_FLAGS,
+  formatOutputVisibility,
+  formatOutputVisibilityDefault,
+  getOutputVisibilityFlagDefinition,
+  setOutputVisibilityOverride,
+} from "../../../chat-output-visibility.js";
 
 /**
  * Role names that use model_roles JSONB for per-chat overrides.
@@ -31,11 +38,16 @@ export const SETTINGS = [
   "actions",
   "harness",
   "harness_cwd",
+  "output_visibility",
 ];
 
 const RESPOND_ON_VALUES = ["any", "mention+reply", "mention"];
 const CHAT_WORKSPACE_DEFAULT_LABEL = "chat workspace default";
 const BOOL_VALUE_IDS = ["on", "off"];
+
+/**
+ * @typedef {import("../../../chat-output-visibility.js").OutputVisibilityFlagDefinition} ConfigFlagDefinition
+ */
 
 /**
  * @typedef {{
@@ -54,6 +66,7 @@ const BOOL_VALUE_IDS = ["on", "off"];
  *   examples: string[];
  *   aliases?: readonly string[];
  *   picker?: ConfigPickerDefinition;
+ *   flags?: readonly ConfigFlagDefinition[];
  *   resettable?: boolean;
  * }} ConfigKeyDefinition
  */
@@ -157,6 +170,16 @@ const BASE_CONFIG_KEYS = [
       getOptions: () => listHarnesses(),
       currentId: (chat) => chat.harness ?? "native",
     },
+    resettable: true,
+  },
+  {
+    key: "show",
+    setting: "output_visibility",
+    label: "show",
+    description: "Controls which extra agent progress outputs are shown in chat.",
+    aliases: ["output_visibility", "output-visibility"],
+    examples: ["!c show", "!c show commands off", "!c show thinking on", "!c show changes off", "!c reset show"],
+    flags: OUTPUT_VISIBILITY_FLAGS,
     resettable: true,
   },
   {
@@ -322,6 +345,8 @@ async function formatCurrentValue(chat, setting, extra) {
       return chat.harness ?? "native";
     case "harness_cwd":
       return chat.harness_cwd ?? CHAT_WORKSPACE_DEFAULT_LABEL;
+    case "output_visibility":
+      return formatOutputVisibility(chat.output_visibility);
     case "actions":
       return formatOptInActions(chat.enabled_actions ?? [], extra.getActions);
     case "media_to_text_model":
@@ -365,6 +390,8 @@ function formatDefaultValue(setting) {
       return "native";
     case "harness_cwd":
       return CHAT_WORKSPACE_DEFAULT_LABEL;
+    case "output_visibility":
+      return formatOutputVisibilityDefault();
     case "actions":
       return "all opt-in actions off";
     case "media_to_text_model":
@@ -428,6 +455,7 @@ export async function getChatSettingsInfo(rootDb, chatId, extra) {
     `- memory: ${chat.memory ? "on" : "off"}`,
     `- threshold: ${chat.memory_threshold ?? config.memory_threshold}`,
     `- debug: ${chat.debug ? "on" : "off"}`,
+    `- show: ${formatOutputVisibility(chat.output_visibility)}`,
     "",
     "Harness",
     `- harness: ${chat.harness ?? "native"}`,
@@ -491,6 +519,7 @@ export async function describeConfigKey(rootDb, chatId, key, extra) {
   const chat = await getChatOrThrow(rootDb, chatId);
   const current = await formatCurrentValue(chat, definition.setting, extra);
   const options = getDefinitionOptions(definition);
+  const flags = definition.flags ?? [];
   const title = definition.label
     .replace(/-/g, " ")
     .replace(/\b\w/g, (match) => match.toUpperCase());
@@ -505,6 +534,12 @@ export async function describeConfigKey(rootDb, chatId, key, extra) {
     lines.push("");
     lines.push("*Options*");
     lines.push(...options.map((option) => `- ${option}`));
+  }
+
+  if (!extra.compact && flags.length > 0) {
+    lines.push("");
+    lines.push("*Controls*");
+    lines.push(...flags.map((flag) => `- ${flag.label}: ${flag.description} Default: ${flag.defaultValue ? "on" : "off"}.`));
   }
 
   if (!extra.compact) {
@@ -609,6 +644,8 @@ export async function getChatSetting(rootDb, chatId, setting, extra) {
     }
     case "harness_cwd":
       return `Harness folder: ${chat.harness_cwd ?? `not set (${CHAT_WORKSPACE_DEFAULT_LABEL})`}`;
+    case "output_visibility":
+      return `Show: ${formatOutputVisibility(chat.output_visibility)}`;
     default: {
       if (MODEL_ROLE_SETTINGS.includes(setting)) {
         const roleName = setting.replace(/_model$/, "");
@@ -827,6 +864,33 @@ export async function setChatSetting(rootDb, chatId, setting, value, extra) {
       return cwdValue
         ? `Harness folder set to \`${cwdValue}\``
         : `Harness folder cleared; using ${CHAT_WORKSPACE_DEFAULT_LABEL}.`;
+    }
+
+    case "output_visibility": {
+      const trimmed = value.trim();
+      if (trimmed.length === 0) {
+        await rootDb.sql`UPDATE chats SET output_visibility = '{}'::jsonb WHERE chat_id = ${chatId}`;
+        return `Show reset to defaults (${formatOutputVisibilityDefault()}).`;
+      }
+
+      const parts = trimmed.split(/\s+/);
+      if (parts.length !== 2) {
+        return "Usage: !c show <commands|thinking|tools|changes> <on|off>";
+      }
+
+      const flagDefinition = getOutputVisibilityFlagDefinition(parts[0] ?? "");
+      if (!flagDefinition) {
+        return "Unknown show control. Available: commands, thinking, tools, changes";
+      }
+
+      const enabled = toBool(parts[1] ?? "");
+      const nextVisibility = setOutputVisibilityOverride(chat.output_visibility, flagDefinition.key, enabled);
+      await rootDb.sql`
+        UPDATE chats
+        SET output_visibility = ${JSON.stringify(nextVisibility)}::jsonb
+        WHERE chat_id = ${chatId}
+      `;
+      return `Show ${flagDefinition.label}: ${enabled ? "on" : "off"}.`;
     }
 
     case "actions": {
