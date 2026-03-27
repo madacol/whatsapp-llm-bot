@@ -250,6 +250,50 @@ describe("per-chat model selection", () => {
       assert.ok(result.toLowerCase().includes("examples"), `expected examples section, got: ${result}`);
     });
 
+    it("formats harness help as sectioned bullet points", async () => {
+      await db.sql`INSERT INTO chats(chat_id, harness) VALUES ('cfg-help-2', 'codex') ON CONFLICT DO NOTHING`;
+
+      const mod = await import("../actions/settings/chatSettings/index.js");
+      const action = mod.default;
+      const result = await action.action_fn(
+        { chatId: "cfg-help-2", rootDb: db, senderIds: ["u1"] },
+        { setting: "harness" },
+      );
+
+      assert.ok(result.includes("*Harness*"), `expected titled header, got: ${result}`);
+      assert.ok(result.includes("- Current: codex"), `expected current bullet, got: ${result}`);
+      assert.ok(result.includes("*Options*"), `expected options section, got: ${result}`);
+      assert.ok(result.includes("- native"), `expected native option bullet, got: ${result}`);
+      assert.ok(result.includes("*Examples*"), `expected examples section, got: ${result}`);
+    });
+
+    it("keeps picker prompts compact for selectable settings", async () => {
+      await db.sql`INSERT INTO chats(chat_id, harness) VALUES ('cfg-help-3', 'codex') ON CONFLICT DO NOTHING`;
+
+      /** @type {string | null} */
+      let promptText = null;
+      const mod = await import("../actions/settings/chatSettings/index.js");
+      const action = mod.default;
+      const result = await action.action_fn(
+        {
+          chatId: "cfg-help-3",
+          rootDb: db,
+          senderIds: ["u1"],
+          select: async (question) => {
+            promptText = question;
+            return "";
+          },
+        },
+        { setting: "harness" },
+      );
+
+      assert.equal(result, promptText);
+      assert.ok(promptText?.includes("*Harness*"), `expected titled header, got: ${promptText}`);
+      assert.ok(promptText?.includes("- Current: codex"), `expected current bullet, got: ${promptText}`);
+      assert.ok(!promptText?.includes("*Options*"), `picker prompt should omit options, got: ${promptText}`);
+      assert.ok(!promptText?.includes("*Examples*"), `picker prompt should omit examples, got: ${promptText}`);
+    });
+
     it("resets a friendly key through the reset verb", async () => {
       await db.sql`INSERT INTO chats(chat_id, harness_cwd) VALUES ('cfg-reset-1', '/tmp') ON CONFLICT DO NOTHING`;
 

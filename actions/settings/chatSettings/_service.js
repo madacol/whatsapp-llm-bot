@@ -466,7 +466,7 @@ export function getSelectableOptions(setting, chat) {
  * @param {PGlite} rootDb
  * @param {string} chatId
  * @param {string} key
- * @param {{ getActions?: () => Promise<Action[]> }} extra
+ * @param {{ getActions?: () => Promise<Action[]>, compact?: boolean }} extra
  * @returns {Promise<string>}
  */
 export async function describeConfigKey(rootDb, chatId, key, extra) {
@@ -478,19 +478,27 @@ export async function describeConfigKey(rootDb, chatId, key, extra) {
   const chat = await getChatOrThrow(rootDb, chatId);
   const current = await formatCurrentValue(chat, definition.setting, extra);
   const options = getDefinitionOptions(definition);
+  const title = definition.label
+    .replace(/-/g, " ")
+    .replace(/\b\w/g, (match) => match.toUpperCase());
   const lines = [
-    definition.label,
-    `Current: ${current}`,
-    `Default: ${formatDefaultValue(definition.setting)}`,
-    `What it does: ${definition.description}`,
+    `*${title}*`,
+    `- Current: ${current}`,
+    `- Default: ${formatDefaultValue(definition.setting)}`,
+    `- What it does: ${definition.description}`,
   ];
 
-  if (options.length > 0) {
-    lines.push(`Options: ${options.join(", ")}`);
+  if (!extra.compact && options.length > 0) {
+    lines.push("");
+    lines.push("*Options*");
+    lines.push(...options.map((option) => `- ${option}`));
   }
 
-  lines.push("Examples:");
-  lines.push(...definition.examples);
+  if (!extra.compact) {
+    lines.push("");
+    lines.push("*Examples*");
+    lines.push(...definition.examples.map((example) => `- ${example}`));
+  }
 
   return lines.join("\n");
 }
