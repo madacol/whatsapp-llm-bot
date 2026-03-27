@@ -2,6 +2,7 @@ import { MAX_TOOL_CALL_DEPTH, parseToolArgs } from "#harnesses";
 import { buildToolPresentation } from "../tool-presentation-model.js";
 import { contentEvent, planEvent, reasoningInspectState, textUpdate, toolCallEvent, usageEvent } from "../outbound-events.js";
 import { createCodexDisplayHooks } from "./codex-hook-display.js";
+import { DEFAULT_OUTPUT_VISIBILITY } from "../chat-output-visibility.js";
 
 /**
  * Display a tool call to the user using the formatter shared across harnesses.
@@ -31,9 +32,17 @@ async function displayToolCall(toolCall, context, actionFormatter, cwd, toolCont
  * @param {() => Promise<void>} endPresence
  * @param {() => void} refreshPresenceLease
  * @param {string | null} cwd
+ * @param {import("../chat-output-visibility.js").OutputVisibility} [visibility]
  * @returns {AgentIOHooks}
  */
-export function buildAgentIoHooks(context, keepPresenceAlive, endPresence, refreshPresenceLease, cwd) {
+export function buildAgentIoHooks(
+  context,
+  keepPresenceAlive,
+  endPresence,
+  refreshPresenceLease,
+  cwd,
+  visibility = DEFAULT_OUTPUT_VISIBILITY,
+) {
   /**
    * Refresh the transport presence lease after an outbound progress message without
    * delaying the next harness event. Codex streams events serially, so waiting
@@ -51,6 +60,7 @@ export function buildAgentIoHooks(context, keepPresenceAlive, endPresence, refre
   const codexDisplayHooks = createCodexDisplayHooks({
     context,
     cwd,
+    visibility,
     displayToolCall: async (toolCall) => displayToolCall(toolCall, context, undefined, cwd, undefined),
   });
   /** @type {MessageHandle | null} */
@@ -76,6 +86,9 @@ export function buildAgentIoHooks(context, keepPresenceAlive, endPresence, refre
     onComposing: keepPresenceAlive,
     onPaused: endPresence,
     onReasoning: async (event) => {
+      if (!visibility.thinking) {
+        return;
+      }
       if (!reasoningHandle) {
         reasoningHandle = await emitWhileWorking(() => context.reply(contentEvent("llm", [{ type: "text", text: "Thinking..." }]))) ?? null;
       }
@@ -109,9 +122,15 @@ export function buildAgentIoHooks(context, keepPresenceAlive, endPresence, refre
       return labelMap.get(choice) ?? choice;
     },
     onToolCall: async (toolCall, formatToolCall, toolContext) => {
+      if (!visibility.commands) {
+        return undefined;
+      }
       return displayToolCall(toolCall, context, formatToolCall, cwd, toolContext);
     },
     onToolResult: async (blocks) => {
+      if (!visibility.tools) {
+        return;
+      }
       await emitWhileWorking(() => context.send(contentEvent("tool-result", blocks)));
     },
     onToolError: async (message) => {

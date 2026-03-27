@@ -20,11 +20,12 @@ import {
  * @param {{
  *   context: Pick<ExecuteActionContext, "send">,
  *   cwd: string | null,
+ *   visibility: import("../chat-output-visibility.js").OutputVisibility,
  *   displayToolCall: (toolCall: LlmChatResponse["toolCalls"][0]) => Promise<MessageHandle | undefined>,
  * }} input
  * @returns {Pick<Required<AgentIOHooks>, "onCommand" | "onFileRead" | "onFileChange">}
  */
-export function createCodexDisplayHooks({ context, cwd, displayToolCall }) {
+export function createCodexDisplayHooks({ context, cwd, visibility, displayToolCall }) {
   /** @type {Map<string, PendingInspectEntry[]>} */
   const activeInspects = new Map();
 
@@ -70,6 +71,9 @@ export function createCodexDisplayHooks({ context, cwd, displayToolCall }) {
    */
 async function onCommand({ command, status, output }) {
     if (status === "started") {
+      if (!visibility.commands) {
+        return;
+      }
       const toolCall = {
         id: `codex-command:${command}`,
         name: "Bash",
@@ -103,6 +107,10 @@ async function onCommand({ command, status, output }) {
    * @returns {Promise<void>}
    */
   async function onFileRead({ command, paths }) {
+    if (!visibility.commands) {
+      return;
+    }
+
     if (paths.length === 1 && typeof paths[0] === "string") {
       const filePath = paths[0];
       const toolCall = {
@@ -136,6 +144,10 @@ async function onCommand({ command, status, output }) {
    * @returns {Promise<void>}
    */
   async function onFileChange({ path, summary, diff, kind, oldText, newText }) {
+    if (!visibility.changes) {
+      return;
+    }
+
     await context.send(fileChangeEvent({
       path,
       ...(summary !== undefined && { summary }),

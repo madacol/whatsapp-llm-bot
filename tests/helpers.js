@@ -368,6 +368,7 @@ export function toolCall(name, args) {
  *   persona?: string | null;
  *   modelRoles?: Record<string, string>;
  *   mediaToTextModels?: { image?: string; audio?: string; video?: string; general?: string };
+ *   outputVisibility?: { commands?: boolean; thinking?: boolean; tools?: boolean };
  * }} ChatConfig
  */
 
@@ -451,6 +452,7 @@ export function createTestHarness({ mockServer, handleMessage, testDb }) {
     if (rest.persona !== undefined) addCol("active_persona", rest.persona);
     if (rest.modelRoles != null) addCol("model_roles", JSON.stringify(rest.modelRoles));
     if (rest.mediaToTextModels != null) addCol("media_to_text_models", JSON.stringify(rest.mediaToTextModels));
+    if (rest.outputVisibility != null) addCol("output_visibility", JSON.stringify(rest.outputVisibility));
 
     if (setClauses.length > 0) {
       await testDb.query(

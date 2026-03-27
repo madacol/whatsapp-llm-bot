@@ -1,6 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { buildAgentIoHooks } from "../conversation/build-agent-io-hooks.js";
+import { DEFAULT_OUTPUT_VISIBILITY } from "../chat-output-visibility.js";
 
 /**
  * @returns {{
@@ -8,7 +9,7 @@ import { buildAgentIoHooks } from "../conversation/build-agent-io-hooks.js";
  *   sent: Array<{ event: OutboundEvent, kind: "send" | "reply" }>,
  * }}
  */
-function createSubject() {
+function createSubject(visibility = DEFAULT_OUTPUT_VISIBILITY) {
   /** @type {Array<{ event: OutboundEvent, kind: "send" | "reply" }>} */
   const sent = [];
   const hooks = buildAgentIoHooks(
@@ -28,6 +29,7 @@ function createSubject() {
     async () => {},
     () => {},
     null,
+    visibility,
   );
   return { hooks, sent };
 }
@@ -39,7 +41,7 @@ function createSubject() {
  *   presenceEvents: string[],
  * }}
  */
-function createSubjectWithWorkingSpy() {
+function createSubjectWithWorkingSpy(visibility = DEFAULT_OUTPUT_VISIBILITY) {
   /** @type {Array<{ event: OutboundEvent, kind: "send" | "reply" }>} */
   const sent = [];
   /** @type {string[]} */
@@ -67,6 +69,7 @@ function createSubjectWithWorkingSpy() {
       presenceEvents.push("refresh");
     },
     null,
+    visibility,
   );
   return {
     hooks,
@@ -82,7 +85,7 @@ function createSubjectWithWorkingSpy() {
  *   sent: Array<{ event: OutboundEvent, kind: "send" | "reply" }>,
  * }}
  */
-function createSubjectWithCwd(cwd) {
+function createSubjectWithCwd(cwd, visibility = DEFAULT_OUTPUT_VISIBILITY) {
   /** @type {Array<{ event: OutboundEvent, kind: "send" | "reply" }>} */
   const sent = [];
   const hooks = buildAgentIoHooks(
@@ -102,6 +105,7 @@ function createSubjectWithCwd(cwd) {
     async () => {},
     () => {},
     cwd,
+    visibility,
   );
   return { hooks, sent };
 }
@@ -114,7 +118,7 @@ function createSubjectWithCwd(cwd) {
  *   reasoningInspects: MessageInspectState[],
  * }}
  */
-function createReasoningSubject() {
+function createReasoningSubject(visibility = { ...DEFAULT_OUTPUT_VISIBILITY, thinking: true }) {
   /** @type {Array<{ event: OutboundEvent, kind: "send" | "reply" }>} */
   const sent = [];
   /** @type {MessageHandleUpdate[]} */
@@ -149,6 +153,7 @@ function createReasoningSubject() {
     async () => {},
     () => {},
     null,
+    visibility,
   );
   return { hooks, sent, reasoningUpdates, reasoningInspects };
 }
@@ -214,6 +219,22 @@ describe("buildAgentIoHooks", () => {
     });
   });
 
+  it("suppresses thinking output when visibility disables it", async () => {
+    const subject = createReasoningSubject({ ...DEFAULT_OUTPUT_VISIBILITY, thinking: false });
+
+    await subject.hooks.onReasoning?.({
+      status: "completed",
+      itemId: "reason-hidden-1",
+      summaryParts: [],
+      contentParts: ["This should stay hidden."],
+      text: "This should stay hidden.",
+    });
+
+    assert.equal(subject.sent.length, 0);
+    assert.deepEqual(subject.reasoningUpdates, []);
+    assert.deepEqual(subject.reasoningInspects, []);
+  });
+
   it("refreshes the presence lease for tool-result progress, but not for llm or tool-call display", async () => {
     const subject = createSubjectWithWorkingSpy();
 
@@ -262,6 +283,32 @@ describe("buildAgentIoHooks", () => {
     assert.equal(sent.length, 1);
     assert.equal(sent[0].kind, "send");
     assert.equal(sent[0].event.kind, "tool_call");
+  });
+
+  it("suppresses command progress events when visibility disables commands", async () => {
+    const { hooks, sent } = createSubject({ ...DEFAULT_OUTPUT_VISIBILITY, commands: false });
+
+    await hooks.onToolCall?.({ id: "tool-1", name: "run_bash", arguments: "{\"command\":\"pwd\"}" });
+    await hooks.onCommand?.({ command: "pwd", status: "started" });
+    await hooks.onFileRead?.({ command: "sed -n '1,20p' src/app.js", paths: ["src/app.js"] });
+
+    assert.equal(sent.length, 0);
+  });
+
+  it("suppresses tool result progress events when visibility disables tools", async () => {
+    const { hooks, sent } = createSubject({ ...DEFAULT_OUTPUT_VISIBILITY, tools: false });
+
+    await hooks.onToolResult?.([{ type: "text", text: "Intermediate tool output" }]);
+
+    assert.equal(sent.length, 0);
+  });
+
+  it("suppresses file change progress when visibility disables changes", async () => {
+    const { hooks, sent } = createSubject({ ...DEFAULT_OUTPUT_VISIBILITY, changes: false });
+
+    await hooks.onFileChange?.({ path: "/tmp/file.js", summary: "Updated file" });
+
+    assert.equal(sent.length, 0);
   });
 
   it("renders searchable shell commands as searched summaries", async () => {

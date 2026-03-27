@@ -475,6 +475,22 @@ describe("Scenario 12: Tool call display is always verbose", () => {
     assert.ok(r.raw.some(x => x.source === "usage"),
       `Should show usage info, got: ${r.raw.map(x => `${x.source}:${x.text}`).join(" | ")}`);
   });
+
+  it("hides command and tool progress when show overrides disable them", async () => {
+    const chat = await t.chat("s12-show-off", {
+      enabled: true,
+      outputVisibility: { commands: false, tools: false },
+    });
+    const r = await chat.send("Test hidden progress", {
+      llm: [toolCall("run_javascript", { code: "() => 'hello'" }), "Final answer"],
+    });
+
+    assert.ok(r.raw.some(x => x.text.includes("Final answer")), "Should still show the final LLM reply");
+    assert.ok(!r.raw.some(x => x.source === "tool-call"),
+      `Should hide command/tool-call progress, got: ${r.raw.map(x => `${x.source}:${x.text}`).join(" | ")}`);
+    assert.ok(!r.raw.some(x => x.source === "tool-result" && !x.text.includes("Final answer")),
+      `Should hide intermediate tool results, got: ${r.raw.map(x => `${x.source}:${x.text}`).join(" | ")}`);
+  });
 });
 
 // ═══════════════════════════════════════════════════════════════════
