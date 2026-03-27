@@ -358,7 +358,7 @@ export function createConversationRunner({ store, llmClient, getActionsFn, execu
     const isSlashCommand = firstBlock?.text?.startsWith("/");
     if (isSlashCommand && firstBlock) {
       if (!chatInfo?.is_enabled) {
-        await context.reply(contentEvent("error", "Bot is not enabled in this chat. Use !config enabled true"));
+        await context.reply(contentEvent("error", "Bot is not enabled in this chat. Use !c enabled on"));
         return null;
       }
 

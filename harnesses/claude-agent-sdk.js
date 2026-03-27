@@ -1012,7 +1012,7 @@ export function createClaudeAgentSdkHarness() {
         }
         let displayMsg = errorMsg;
         if (errorMsg.includes("executable not found") && workdir) {
-          displayMsg += `\n\nHint: The harness_cwd is set to "${workdir}" — make sure this path exists. Use \`!config harness_cwd <path>\` to fix it.`;
+          displayMsg += `\n\nHint: The folder setting is "${workdir}" — make sure this path exists. Use \`!c folder <path>\` to fix it or \`!c reset folder\` to use the chat workspace default.`;
         }
         await hooks.onToolError(displayMsg);
         result.response = buildSdkErrorResponse(displayMsg);
