@@ -204,6 +204,11 @@ function formatInspectState(inspect) {
         summary: formatToolFlowSummary(inspect.state),
         text: formatToolFlowInspectText(inspect.state, formatToolPresentationInspect),
       };
+    case "reasoning":
+      return {
+        summary: inspect.summary,
+        text: inspect.text,
+      };
     default:
       return { summary: "", text: "_no output_" };
   }

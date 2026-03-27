@@ -1,6 +1,6 @@
 import { MAX_TOOL_CALL_DEPTH, parseToolArgs } from "#harnesses";
 import { buildToolPresentation } from "../tool-presentation-model.js";
-import { contentEvent, planEvent, toolCallEvent, usageEvent } from "../outbound-events.js";
+import { contentEvent, planEvent, reasoningInspectState, textUpdate, toolCallEvent, usageEvent } from "../outbound-events.js";
 import { createCodexDisplayHooks } from "./codex-hook-display.js";
 
 /**
@@ -53,10 +53,29 @@ export function buildAgentIoHooks(context, keepPresenceAlive, endPresence, refre
     cwd,
     displayToolCall: async (toolCall) => displayToolCall(toolCall, context, undefined, cwd, undefined),
   });
+  /** @type {MessageHandle | null} */
+  let reasoningHandle = null;
 
   return {
     onComposing: keepPresenceAlive,
     onPaused: endPresence,
+    onReasoning: async (event) => {
+      if (!reasoningHandle) {
+        reasoningHandle = await emitWhileWorking(() => context.reply(contentEvent("llm", [{ type: "text", text: "Thinking..." }]))) ?? null;
+      }
+      if (!reasoningHandle) {
+        return;
+      }
+
+      const text = typeof event.text === "string" && event.text.trim()
+        ? event.text.trim()
+        : "_Still thinking..._";
+      reasoningHandle.setInspect(reasoningInspectState("*Thinking*", text));
+
+      if (event.status === "completed") {
+        await emitWhileWorking(() => reasoningHandle ? reasoningHandle.update(textUpdate("Thought")) : Promise.resolve());
+      }
+    },
     onLlmResponse: async (text) => {
       await context.reply(contentEvent("llm", [{ type: "markdown", text }]));
     },

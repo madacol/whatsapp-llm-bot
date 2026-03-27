@@ -7,7 +7,7 @@ import { createCodexSyntheticToolAdapter } from "./codex-synthetic-tools.js";
  * Shared semantic dispatcher for normalized Codex events, independent of the
  * underlying transport (SDK exec or App Server).
  * @param {{
- *   hooks: Pick<Required<AgentIOHooks>, "onComposing" | "onPaused" | "onToolCall" | "onCommand" | "onFileRead" | "onPlan" | "onFileChange" | "onLlmResponse" | "onToolError" | "onUsage">,
+ *   hooks: Pick<Required<AgentIOHooks>, "onComposing" | "onPaused" | "onReasoning" | "onToolCall" | "onCommand" | "onFileRead" | "onPlan" | "onFileChange" | "onLlmResponse" | "onToolError" | "onUsage">,
  *   runConfig?: HarnessRunConfig,
  *   messages: Message[],
  * }} input
@@ -182,6 +182,13 @@ export function createCodexEventDispatcher(input) {
           activeTools.delete(toolEvent.id);
         }
       }
+    }
+
+    if (normalized.reasoningEvent) {
+      await input.hooks.onReasoning({
+        status: normalized.reasoningEvent.status,
+        ...(normalized.reasoningEvent.text ? { text: normalized.reasoningEvent.text } : {}),
+      });
     }
 
     if (normalized.assistantText) {

@@ -105,6 +105,21 @@ export function normalizeCodexEvent(event) {
     return normalized;
   }
 
+  if ((eventType === "item.started" || eventType === "item.updated" || eventType === "item.completed") && itemType === "reasoning") {
+    const id = typeof item.id === "string" ? item.id : null;
+    if (id) {
+      const text = extractCodexText(item) ?? undefined;
+      normalized.reasoningEvent = {
+        id,
+        status: eventType === "item.started"
+          ? "started"
+          : eventType === "item.updated" ? "updated" : "completed",
+        ...(text ? { text } : {}),
+      };
+    }
+    return normalized;
+  }
+
   if (itemType === "mcp_tool_call") {
     const id = typeof item.id === "string" ? item.id : null;
     const name = typeof item.tool === "string" ? item.tool : null;

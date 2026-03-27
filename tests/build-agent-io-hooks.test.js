@@ -106,6 +106,53 @@ function createSubjectWithCwd(cwd) {
   return { hooks, sent };
 }
 
+/**
+ * @returns {{
+ *   hooks: AgentIOHooks,
+ *   sent: Array<{ event: OutboundEvent, kind: "send" | "reply" }>,
+ *   reasoningUpdates: MessageHandleUpdate[],
+ *   reasoningInspects: MessageInspectState[],
+ * }}
+ */
+function createReasoningSubject() {
+  /** @type {Array<{ event: OutboundEvent, kind: "send" | "reply" }>} */
+  const sent = [];
+  /** @type {MessageHandleUpdate[]} */
+  const reasoningUpdates = [];
+  /** @type {MessageInspectState[]} */
+  const reasoningInspects = [];
+  const hooks = buildAgentIoHooks(
+    {
+      send: async (event) => {
+        sent.push({ event, kind: "send" });
+        return undefined;
+      },
+      reply: async (event) => {
+        sent.push({ event, kind: "reply" });
+        return {
+          keyId: "reasoning-msg-1",
+          isImage: false,
+          update: async (update) => {
+            reasoningUpdates.push(structuredClone(update));
+          },
+          setInspect: (inspect) => {
+            if (inspect) {
+              reasoningInspects.push(structuredClone(inspect));
+            }
+          },
+        };
+      },
+      select: async () => "",
+      confirm: async () => true,
+    },
+    async () => {},
+    async () => {},
+    () => {},
+    null,
+  );
+  return { hooks, sent, reasoningUpdates, reasoningInspects };
+}
+
 describe("buildAgentIoHooks", () => {
   it("maps plan events to an llm reply", async () => {
     const { hooks, sent } = createSubject();
@@ -114,6 +161,33 @@ describe("buildAgentIoHooks", () => {
     assert.equal(sent.length, 1);
     assert.equal(sent[0].kind, "reply");
     assert.equal(sent[0].event.kind, "plan");
+  });
+
+  it("sends one thinking placeholder and makes it inspectable", async () => {
+    const subject = createReasoningSubject();
+
+    await subject.hooks.onReasoning?.({ status: "started" });
+    await subject.hooks.onReasoning?.({ status: "completed", text: "Inspect the file, then patch the bug." });
+
+    assert.equal(subject.sent.length, 1);
+    assert.equal(subject.sent[0].kind, "reply");
+    assert.equal(subject.sent[0].event.kind, "content");
+    if (subject.sent[0].event.kind !== "content") {
+      assert.fail("Expected content event");
+    }
+    assert.deepEqual(subject.sent[0].event.content, [{ type: "text", text: "Thinking..." }]);
+    assert.deepEqual(subject.reasoningUpdates, [{ kind: "text", text: "Thought" }]);
+    assert.equal(subject.reasoningInspects.length, 2);
+    assert.deepEqual(subject.reasoningInspects[0], {
+      kind: "reasoning",
+      summary: "*Thinking*",
+      text: "_Still thinking..._",
+    });
+    assert.deepEqual(subject.reasoningInspects[1], {
+      kind: "reasoning",
+      summary: "*Thinking*",
+      text: "Inspect the file, then patch the bug.",
+    });
   });
 
   it("refreshes the presence lease for tool-result progress, but not for llm or tool-call display", async () => {

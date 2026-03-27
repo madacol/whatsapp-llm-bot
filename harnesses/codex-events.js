@@ -44,11 +44,20 @@ export {
 
 /**
  * @typedef {{
+ *   id: string,
+ *   status: "started" | "updated" | "completed",
+ *   text?: string,
+ * }} CodexReasoningEvent
+ */
+
+/**
+ * @typedef {{
  *   sessionId: string | null,
  *   usage?: HarnessUsage,
  *   failureMessage?: string,
  *   commandEvent?: CodexCommandEvent,
  *   toolEvent?: CodexToolEvent,
+ *   reasoningEvent?: CodexReasoningEvent,
  *   assistantText?: string,
  *   planText?: string,
  *   fileChange?: CodexFileChangeEvent,

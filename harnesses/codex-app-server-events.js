@@ -69,7 +69,7 @@ export function normalizeCodexAppServerEvent(message) {
     return normalized;
   }
 
-  if (method !== "item/started" && method !== "item/completed") {
+  if (method !== "item/started" && method !== "item/updated" && method !== "item/completed") {
     return normalized;
   }
 
@@ -89,6 +89,21 @@ export function normalizeCodexAppServerEvent(message) {
           ? "started"
           : item.status === "failed" || item.status === "declined" ? "failed" : "completed",
         ...(output ? { output } : {}),
+      };
+    }
+    return normalized;
+  }
+
+  if (itemType === "reasoning") {
+    const id = typeof item.id === "string" ? item.id : null;
+    if (id) {
+      const text = extractCodexText(item) ?? undefined;
+      normalized.reasoningEvent = {
+        id,
+        status: method === "item/started"
+          ? "started"
+          : method === "item/updated" ? "updated" : "completed",
+        ...(text ? { text } : {}),
       };
     }
     return normalized;

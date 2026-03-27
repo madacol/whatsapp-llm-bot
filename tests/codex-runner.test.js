@@ -307,6 +307,66 @@ describe("startCodexRun", () => {
     }]);
   });
 
+  it("forwards reasoning events from Codex runs", async () => {
+    /** @type {Array<{ status: "started" | "updated" | "completed", text?: string }>} */
+    const reasoningEvents = [];
+
+    const started = await startCodexRun({
+      chatId: "codex-chat",
+      prompt: "Continue",
+      messages: [{ role: "user", content: [{ type: "text", text: "Continue" }] }],
+      hooks: {
+        onReasoning: async (event) => {
+          reasoningEvents.push(event);
+        },
+      },
+    }, {
+      createCodex: () => ({
+        startThread: () => ({
+          id: "sess-reason-1",
+          runStreamed: async () => ({
+            events: (async function* () {
+              yield {
+                type: "item.started",
+                item: {
+                  id: "reason-1",
+                  type: "reasoning",
+                  text: "",
+                },
+              };
+              yield {
+                type: "item.completed",
+                item: {
+                  id: "reason-1",
+                  type: "reasoning",
+                  text: "Inspect the file, then patch it.",
+                },
+              };
+              yield {
+                type: "turn.completed",
+                usage: {
+                  input_tokens: 0,
+                  output_tokens: 0,
+                  cached_input_tokens: 0,
+                },
+              };
+            })(),
+          }),
+        }),
+        resumeThread: () => {
+          throw new Error("resumeThread should not be called");
+        },
+      }),
+    });
+
+    await started.done;
+
+    assert.deepEqual(reasoningEvents, [
+      { status: "started" },
+      { status: "completed", text: "Inspect the file, then patch it." },
+    ]);
+  });
+
   it("emits one file-change event per changed file when Codex reports a batched file_change item", async () => {
     /** @type {Array<{ path: string, summary?: string, diff?: string, kind?: "add" | "delete" | "update", oldText?: string, newText?: string }>} */
     const fileChanges = [];
