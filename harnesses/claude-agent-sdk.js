@@ -1121,11 +1121,10 @@ export function extractToolResultFromEvent(userEvent) {
             const inner = b.content;
             if (typeof inner === "string") {
               texts.push(inner);
-            } else if (Array.isArray(inner)) {
-              for (const sub of inner) {
-                if (sub && typeof sub === "object" && typeof /** @type {Record<string, unknown>} */ (sub).text === "string") {
-                  texts.push(/** @type {{ text: string }} */ (sub).text);
-                }
+            } else if (inner != null) {
+              const extractedInnerText = extractToolResultText(inner);
+              if (extractedInnerText.length > 0) {
+                texts.push(extractedInnerText);
               }
             }
           }
