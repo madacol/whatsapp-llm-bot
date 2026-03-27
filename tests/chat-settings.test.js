@@ -43,6 +43,20 @@ describe("per-chat model selection", () => {
     });
   });
 
+  describe("config metadata", () => {
+    it("marks picker-backed settings in the registry", async () => {
+      const service = await import("../actions/settings/chatSettings/_service.js");
+      const enabled = service.getConfigKeyDefinition("enabled");
+      const harness = service.getConfigKeyDefinition("harness");
+      const prompt = service.getConfigKeyDefinition("prompt");
+
+      assert.ok(enabled?.picker?.options, "expected enabled picker options in metadata");
+      assert.equal(Object.hasOwn(enabled ?? {}, "options"), false, "top-level options should be gone");
+      assert.ok(harness?.picker, "expected harness picker metadata");
+      assert.equal(prompt?.picker, undefined, "prompt should remain free-text");
+    });
+  });
+
   describe("chat_settings model via dispatch", () => {
     it("updates the model in the DB", async () => {
       await db.sql`INSERT INTO chats(chat_id) VALUES ('chat-set-1') ON CONFLICT DO NOTHING`;

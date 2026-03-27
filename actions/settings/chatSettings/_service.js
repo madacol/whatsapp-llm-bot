@@ -35,16 +35,25 @@ export const SETTINGS = [
 
 const RESPOND_ON_VALUES = ["any", "mention+reply", "mention"];
 const CHAT_WORKSPACE_DEFAULT_LABEL = "chat workspace default";
+const BOOL_VALUE_IDS = ["on", "off"];
+
+/**
+ * @typedef {{
+ *   currentId: (chat: import("../../../store.js").ChatRow) => string;
+ *   options?: readonly string[];
+ *   getOptions?: () => readonly string[];
+ * }} ConfigPickerDefinition
+ */
 
 /**
  * @typedef {{
  *   key: string;
- *   setting: string;
+  *   setting: string;
  *   label: string;
  *   description: string;
  *   examples: string[];
  *   aliases?: readonly string[];
- *   options?: readonly string[];
+ *   picker?: ConfigPickerDefinition;
  *   resettable?: boolean;
  * }} ConfigKeyDefinition
  */
@@ -73,8 +82,11 @@ const BASE_CONFIG_KEYS = [
     setting: "enabled",
     label: "enabled",
     description: "Turns the bot on or off for this chat.",
-    options: ["on", "off"],
     examples: ["!c enabled on", "!c enabled off"],
+    picker: {
+      options: BOOL_VALUE_IDS,
+      currentId: (chat) => chat.is_enabled ? "on" : "off",
+    },
   },
   {
     key: "model",
@@ -98,16 +110,22 @@ const BASE_CONFIG_KEYS = [
     setting: "trigger",
     label: "trigger",
     description: "Controls when the bot responds in the chat.",
-    options: RESPOND_ON_VALUES,
     examples: ["!c trigger mention", "!c trigger mention+reply", "!c trigger any"],
+    picker: {
+      options: RESPOND_ON_VALUES,
+      currentId: (chat) => chat.respond_on ?? "mention",
+    },
   },
   {
     key: "memory",
     setting: "memory",
     label: "memory",
     description: "Turns long-term memory on or off for this chat.",
-    options: ["on", "off"],
     examples: ["!c memory on", "!c memory off"],
+    picker: {
+      options: BOOL_VALUE_IDS,
+      currentId: (chat) => chat.memory ? "on" : "off",
+    },
   },
   {
     key: "threshold",
@@ -123,8 +141,11 @@ const BASE_CONFIG_KEYS = [
     setting: "debug",
     label: "debug",
     description: "Shows extra internal debugging details in this chat.",
-    options: ["on", "off"],
     examples: ["!c debug on", "!c debug off"],
+    picker: {
+      options: BOOL_VALUE_IDS,
+      currentId: (chat) => chat.debug ? "on" : "off",
+    },
   },
   {
     key: "harness",
@@ -132,6 +153,10 @@ const BASE_CONFIG_KEYS = [
     label: "harness",
     description: "Chooses which harness runs the conversation.",
     examples: ["!c harness native", "!c harness codex", "!c reset harness"],
+    picker: {
+      getOptions: () => listHarnesses(),
+      currentId: (chat) => chat.harness ?? "native",
+    },
     resettable: true,
   },
   {
@@ -361,10 +386,13 @@ function formatDefaultValue(setting) {
  * @returns {string[]}
  */
 function getDefinitionOptions(definition) {
-  if (definition.setting === "harness") {
-    return listHarnesses();
+  if (definition.picker?.options) {
+    return [...definition.picker.options];
   }
-  return definition.options ? [...definition.options] : [];
+  if (definition.picker?.getOptions) {
+    return [...definition.picker.getOptions()];
+  }
+  return [];
 }
 
 /**
@@ -421,44 +449,29 @@ export async function getChatSettingsInfo(rootDb, chatId, extra) {
   return lines.join("\n");
 }
 
-/** @type {SelectOption[]} */
-const BOOL_OPTIONS = [
-  { id: "on", label: "on" },
-  { id: "off", label: "off" },
-];
-
 /**
  * Return selectable options and the current value id for settings with fewer
  * than 5 fixed choices. Returns `null` if the setting is free-text.
  *
- * @param {string} setting
+ * @param {string | ConfigKeyDefinition} config
  * @param {import("../../../store.js").ChatRow} chat
  * @returns {{ options: SelectOption[], currentId: string } | null}
  */
-export function getSelectableOptions(setting, chat) {
-  switch (setting) {
-    case "trigger":
-      return {
-        options: RESPOND_ON_VALUES.map((v) => ({ id: v, label: v })),
-        currentId: chat.respond_on ?? "mention",
-      };
-    case "memory":
-      return { options: BOOL_OPTIONS, currentId: chat.memory ? "on" : "off" };
-    case "enabled":
-      return { options: BOOL_OPTIONS, currentId: chat.is_enabled ? "on" : "off" };
-    case "debug":
-      return { options: BOOL_OPTIONS, currentId: chat.debug ? "on" : "off" };
-    case "harness": {
-      const available = listHarnesses();
-      if (available.length >= 5) return null;
-      return {
-        options: available.map((h) => ({ id: h, label: h })),
-        currentId: chat.harness ?? "native",
-      };
-    }
-    default:
-      return null;
+export function getSelectableOptions(config, chat) {
+  const definition = typeof config === "string" ? getConfigKeyDefinition(config) : config;
+  if (!definition?.picker) {
+    return null;
   }
+
+  const optionIds = getDefinitionOptions(definition);
+  if (optionIds.length === 0 || optionIds.length >= 5) {
+    return null;
+  }
+
+  return {
+    options: optionIds.map((optionId) => ({ id: optionId, label: optionId })),
+    currentId: definition.picker.currentId(chat),
+  };
 }
 
 /**
