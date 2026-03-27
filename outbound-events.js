@@ -111,3 +111,12 @@ export function toolInspectState(presentation, output) {
 export function toolFlowInspectState(state) {
   return { kind: "tool_flow", state };
 }
+
+/**
+ * @param {string} summary
+ * @param {string} text
+ * @returns {MessageInspectState}
+ */
+export function reasoningInspectState(summary, text) {
+  return { kind: "reasoning", summary, text };
+}

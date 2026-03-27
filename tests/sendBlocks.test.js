@@ -9,6 +9,7 @@ process.env.MODEL = "mock-model";
 
 import { createTestDb } from "./helpers.js";
 import { setDb } from "../db.js";
+import { createReactionRuntime } from "../whatsapp/runtime/reaction-runtime.js";
 
 /** @type {typeof import("../whatsapp/outbound/send-content.js").sendBlocks} */
 let sendBlocks;
@@ -565,6 +566,40 @@ describe("sendBlocks – tool-call → edit pipeline", () => {
     // "tool-call" prefix is "🔧"
     assert.ok(editText.startsWith("🔧"), `Edit text should start with tool-call prefix, got: ${editText}`);
     assert.ok(editText.includes("done"), "Edit text should contain new content");
+  });
+
+  it("formats reasoning inspect text when the user reacts with 👁", async () => {
+    const { sock, calls } = createCaptureSock();
+    const reactionRuntime = createReactionRuntime();
+
+    const handle = await sendBlocks(
+      sock,
+      "chat-1",
+      "llm",
+      [{ type: "text", text: "Thinking..." }],
+      undefined,
+      reactionRuntime,
+    );
+
+    assert.ok(handle);
+    handle.setInspect({
+      kind: "reasoning",
+      summary: "*Thinking*",
+      text: "Inspect the file, then patch the bug.",
+    });
+
+    reactionRuntime.handleReactions([{
+      key: { id: "msg-1", remoteJid: "chat-1" },
+      reaction: { text: "👁" },
+      senderId: "user-1",
+    }]);
+
+    assert.equal(calls.length, 2, "Expected one initial send and one inspect edit");
+    const inspectCall = calls[1];
+    assert.equal(inspectCall.method, "sendMessage");
+    const inspectMsg = /** @type {Record<string, unknown>} */ (inspectCall.args[1]);
+    assert.ok(typeof inspectMsg.text === "string" && inspectMsg.text.includes("*Thinking*"));
+    assert.ok(typeof inspectMsg.text === "string" && inspectMsg.text.includes("Inspect the file, then patch the bug."));
   });
 
   it("editWhatsAppMessage directly: text path sends edit key", async () => {

@@ -37,6 +37,39 @@ describe("codex events", () => {
     });
   });
 
+  it("normalizes reasoning items from SDK events", () => {
+    assert.deepEqual(normalizeCodexEvent({
+      type: "item.started",
+      item: {
+        id: "reason-1",
+        type: "reasoning",
+        text: "",
+      },
+    }), {
+      sessionId: null,
+      reasoningEvent: {
+        id: "reason-1",
+        status: "started",
+      },
+    });
+
+    assert.deepEqual(normalizeCodexEvent({
+      type: "item.completed",
+      item: {
+        id: "reason-1",
+        type: "reasoning",
+        text: "Plan the edit, then patch the file.",
+      },
+    }), {
+      sessionId: null,
+      reasoningEvent: {
+        id: "reason-1",
+        status: "completed",
+        text: "Plan the edit, then patch the file.",
+      },
+    });
+  });
+
   it("normalizes mcp tool call events", () => {
     assert.deepEqual(normalizeCodexEvent({
       type: "item.started",
@@ -263,6 +296,45 @@ describe("codex events", () => {
         },
         status: "completed",
         output: "Initialize requested plan state",
+      },
+    });
+  });
+
+  it("normalizes reasoning items from app-server events", () => {
+    assert.deepEqual(normalizeCodexAppServerEvent({
+      method: "item/started",
+      params: {
+        threadId: "thread-1",
+        item: {
+          id: "reason-2",
+          type: "reasoning",
+          text: "",
+        },
+      },
+    }), {
+      sessionId: "thread-1",
+      reasoningEvent: {
+        id: "reason-2",
+        status: "started",
+      },
+    });
+
+    assert.deepEqual(normalizeCodexAppServerEvent({
+      method: "item/completed",
+      params: {
+        threadId: "thread-1",
+        item: {
+          id: "reason-2",
+          type: "reasoning",
+          text: "Summarize the approach before replying.",
+        },
+      },
+    }), {
+      sessionId: "thread-1",
+      reasoningEvent: {
+        id: "reason-2",
+        status: "completed",
+        text: "Summarize the approach before replying.",
       },
     });
   });

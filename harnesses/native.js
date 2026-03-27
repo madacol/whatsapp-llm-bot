@@ -43,6 +43,7 @@ const NATIVE_HARNESS_CAPABILITIES = {
 export const NO_OP_HOOKS = {
   onComposing: async () => {},
   onPaused: async () => {},
+  onReasoning: async () => {},
   onLlmResponse: async () => {},
   onAskUser: async () => "",
   onToolCall: async () => {},
