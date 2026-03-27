@@ -308,7 +308,7 @@ describe("startCodexRun", () => {
   });
 
   it("forwards reasoning events from Codex runs", async () => {
-    /** @type {Array<{ status: "started" | "updated" | "completed", text?: string }>} */
+    /** @type {Array<{ status: "started" | "updated" | "completed", itemId?: string, summaryParts: string[], contentParts: string[], text?: string, hasEncryptedContent?: boolean }>} */
     const reasoningEvents = [];
 
     const started = await startCodexRun({
@@ -362,8 +362,19 @@ describe("startCodexRun", () => {
     await started.done;
 
     assert.deepEqual(reasoningEvents, [
-      { status: "started" },
-      { status: "completed", text: "Inspect the file, then patch it." },
+      {
+        status: "started",
+        itemId: "reason-1",
+        summaryParts: [],
+        contentParts: [],
+      },
+      {
+        status: "completed",
+        itemId: "reason-1",
+        summaryParts: [],
+        contentParts: ["Inspect the file, then patch it."],
+        text: "Inspect the file, then patch it.",
+      },
     ]);
   });
 

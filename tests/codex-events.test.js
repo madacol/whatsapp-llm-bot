@@ -48,8 +48,10 @@ describe("codex events", () => {
     }), {
       sessionId: null,
       reasoningEvent: {
-        id: "reason-1",
+        itemId: "reason-1",
         status: "started",
+        summarySnapshot: [],
+        contentSnapshot: [],
       },
     });
 
@@ -63,9 +65,10 @@ describe("codex events", () => {
     }), {
       sessionId: null,
       reasoningEvent: {
-        id: "reason-1",
+        itemId: "reason-1",
         status: "completed",
-        text: "Plan the edit, then patch the file.",
+        summarySnapshot: [],
+        contentSnapshot: ["Plan the edit, then patch the file."],
       },
     });
   });
@@ -308,14 +311,17 @@ describe("codex events", () => {
         item: {
           id: "reason-2",
           type: "reasoning",
-          text: "",
+          summary: [],
+          content: [],
         },
       },
     }), {
       sessionId: "thread-1",
       reasoningEvent: {
-        id: "reason-2",
+        itemId: "reason-2",
         status: "started",
+        summarySnapshot: [],
+        contentSnapshot: [],
       },
     });
 
@@ -326,15 +332,97 @@ describe("codex events", () => {
         item: {
           id: "reason-2",
           type: "reasoning",
-          text: "Summarize the approach before replying.",
+          summary: ["Summarize the approach before replying."],
+          content: [],
         },
       },
     }), {
       sessionId: "thread-1",
       reasoningEvent: {
-        id: "reason-2",
+        itemId: "reason-2",
         status: "completed",
-        text: "Summarize the approach before replying.",
+        summarySnapshot: ["Summarize the approach before replying."],
+        contentSnapshot: [],
+      },
+    });
+
+    assert.deepEqual(normalizeCodexAppServerEvent({
+      method: "rawResponseItem/completed",
+      params: {
+        threadId: "thread-1",
+        item: {
+          type: "reasoning",
+          summary: [{ type: "summary_text", text: "Summarize the approach before replying." }],
+          content: null,
+          encrypted_content: "gAAAAA...",
+        },
+      },
+    }), {
+      sessionId: "thread-1",
+      reasoningEvent: {
+        status: "updated",
+        summarySnapshot: ["Summarize the approach before replying."],
+        contentSnapshot: [],
+        hasEncryptedContent: true,
+      },
+    });
+
+    assert.deepEqual(normalizeCodexAppServerEvent({
+      method: "item/reasoning/summaryPartAdded",
+      params: {
+        threadId: "thread-1",
+        itemId: "reason-2",
+        summaryIndex: 0,
+      },
+    }), {
+      sessionId: "thread-1",
+      reasoningEvent: {
+        itemId: "reason-2",
+        status: "updated",
+        summaryDelta: {
+          index: 0,
+          text: "",
+        },
+      },
+    });
+
+    assert.deepEqual(normalizeCodexAppServerEvent({
+      method: "item/reasoning/summaryTextDelta",
+      params: {
+        threadId: "thread-1",
+        itemId: "reason-2",
+        summaryIndex: 0,
+        delta: "Summarize the approach before replying.",
+      },
+    }), {
+      sessionId: "thread-1",
+      reasoningEvent: {
+        itemId: "reason-2",
+        status: "updated",
+        summaryDelta: {
+          index: 0,
+          text: "Summarize the approach before replying.",
+        },
+      },
+    });
+
+    assert.deepEqual(normalizeCodexAppServerEvent({
+      method: "item/reasoning/textDelta",
+      params: {
+        threadId: "thread-1",
+        itemId: "reason-2",
+        contentIndex: 0,
+        delta: "Inspect the file, then patch the bug.",
+      },
+    }), {
+      sessionId: "thread-1",
+      reasoningEvent: {
+        itemId: "reason-2",
+        status: "updated",
+        contentDelta: {
+          index: 0,
+          text: "Inspect the file, then patch the bug.",
+        },
       },
     });
   });

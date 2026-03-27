@@ -1,5 +1,6 @@
 import { buildToolPresentation, getToolFlowDescriptor } from "../tool-presentation-model.js";
 import { toolCallUpdate, toolFlowInspectState, toolFlowUpdate, toolInspectState } from "../outbound-events.js";
+import { createCodexReasoningState } from "./codex-reasoning-state.js";
 import { createCodexRunState } from "./codex-run-state.js";
 import { createCodexSyntheticToolAdapter } from "./codex-synthetic-tools.js";
 
@@ -23,6 +24,7 @@ export function createCodexEventDispatcher(input) {
     onToolCall: input.hooks.onToolCall,
     cwd: input.runConfig?.workdir ?? null,
   });
+  const reasoningState = createCodexReasoningState();
   /** @type {Map<string, { handle?: MessageHandle, presentation: import("../tool-presentation-model.js").ToolPresentation, flowKey?: string }>} */
   const activeTools = new Map();
   /** @type {Map<string, { handle?: MessageHandle, state: import("../tool-flow-presentation.js").ToolFlowState }>} */
@@ -185,10 +187,7 @@ export function createCodexEventDispatcher(input) {
     }
 
     if (normalized.reasoningEvent) {
-      await input.hooks.onReasoning({
-        status: normalized.reasoningEvent.status,
-        ...(normalized.reasoningEvent.text ? { text: normalized.reasoningEvent.text } : {}),
-      });
+      await input.hooks.onReasoning(reasoningState.apply(normalized.reasoningEvent));
     }
 
     if (normalized.assistantText) {

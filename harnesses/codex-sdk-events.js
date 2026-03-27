@@ -1,5 +1,5 @@
 import { normalizeCodexFileChanges } from "./codex-file-events.js";
-import { extractCodexText, isCodexEventRecord, normalizeCodexUsage } from "./codex-event-utils.js";
+import { extractCodexReasoningParts, extractCodexText, isCodexEventRecord, normalizeCodexUsage } from "./codex-event-utils.js";
 import {
   extractCollabToolArguments,
   extractCollabToolOutput,
@@ -108,13 +108,18 @@ export function normalizeCodexEvent(event) {
   if ((eventType === "item.started" || eventType === "item.updated" || eventType === "item.completed") && itemType === "reasoning") {
     const id = typeof item.id === "string" ? item.id : null;
     if (id) {
-      const text = extractCodexText(item) ?? undefined;
+      const contentSnapshot = extractCodexReasoningParts(item.content);
+      const summarySnapshot = extractCodexReasoningParts(item.summary);
+      const text = typeof item.text === "string" && item.text.length > 0 ? item.text : extractCodexText(item) ?? undefined;
       normalized.reasoningEvent = {
-        id,
+        itemId: id,
         status: eventType === "item.started"
           ? "started"
           : eventType === "item.updated" ? "updated" : "completed",
-        ...(text ? { text } : {}),
+        summarySnapshot,
+        contentSnapshot: contentSnapshot.length > 0
+          ? contentSnapshot
+          : text ? [text] : [],
       };
     }
     return normalized;

@@ -424,7 +424,7 @@ export function wrapHooksWithFallbacks(rawHooks) {
   return {
     onComposing: () => safeHook("onComposing", () => rawHooks.onComposing(), undefined),
     onPaused: () => safeHook("onPaused", () => rawHooks.onPaused(), undefined),
-    onReasoning: (/** @type {{ status: "started" | "updated" | "completed", text?: string }} */ event) =>
+    onReasoning: (/** @type {{ status: "started" | "updated" | "completed", itemId?: string, summaryParts: string[], contentParts: string[], text?: string, hasEncryptedContent?: boolean }} */ event) =>
       safeHook("onReasoning", () => rawHooks.onReasoning(event), undefined),
     onLlmResponse: (/** @type {string} */ text) => safeHook("onLlmResponse", () => rawHooks.onLlmResponse(text), undefined),
     onAskUser: (/** @type {string} */ question, /** @type {string[]} */ options, /** @type {string | undefined} */ preamble, /** @type {string[] | undefined} */ descriptions) =>

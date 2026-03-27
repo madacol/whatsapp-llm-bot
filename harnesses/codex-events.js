@@ -44,9 +44,13 @@ export {
 
 /**
  * @typedef {{
- *   id: string,
+ *   itemId?: string,
  *   status: "started" | "updated" | "completed",
- *   text?: string,
+ *   summarySnapshot?: string[],
+ *   contentSnapshot?: string[],
+ *   summaryDelta?: { index: number, text: string },
+ *   contentDelta?: { index: number, text: string },
+ *   hasEncryptedContent?: boolean,
  * }} CodexReasoningEvent
  */
 
