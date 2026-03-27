@@ -56,6 +56,22 @@ export function buildAgentIoHooks(context, keepPresenceAlive, endPresence, refre
   /** @type {MessageHandle | null} */
   let reasoningHandle = null;
 
+  /**
+   * @param {{ text?: string, summaryParts: string[], contentParts: string[], hasEncryptedContent?: boolean }} event
+   * @returns {string}
+   */
+  function getReasoningInspectText(event) {
+    const text = typeof event.text === "string" && event.text.trim()
+      ? event.text.trim()
+      : event.contentParts.join("\n").trim() || event.summaryParts.join("\n").trim();
+    if (text) {
+      return text;
+    }
+    return event.hasEncryptedContent
+      ? "_Codex returned encrypted reasoning, but no public reasoning text._"
+      : "_Codex exposed no public reasoning text for this step._";
+  }
+
   return {
     onComposing: keepPresenceAlive,
     onPaused: endPresence,
@@ -67,9 +83,7 @@ export function buildAgentIoHooks(context, keepPresenceAlive, endPresence, refre
         return;
       }
 
-      const text = typeof event.text === "string" && event.text.trim()
-        ? event.text.trim()
-        : "_Still thinking..._";
+      const text = getReasoningInspectText(event);
       reasoningHandle.setInspect(reasoningInspectState("*Thinking*", text));
 
       if (event.status === "completed") {

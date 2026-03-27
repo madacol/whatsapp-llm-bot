@@ -1,5 +1,5 @@
 import { normalizeCodexFileChanges } from "./codex-file-events.js";
-import { extractCodexText, isCodexEventRecord, normalizeCodexUsage } from "./codex-event-utils.js";
+import { extractCodexReasoningParts, extractCodexText, isCodexEventRecord, normalizeCodexUsage } from "./codex-event-utils.js";
 import {
   extractCollabToolArguments,
   extractCollabToolOutput,
@@ -69,6 +69,69 @@ export function normalizeCodexAppServerEvent(message) {
     return normalized;
   }
 
+  if (method === "rawResponseItem/completed") {
+    const item = isCodexEventRecord(params.item) ? params.item : null;
+    if (item && item.type === "reasoning") {
+      normalized.reasoningEvent = {
+        status: "updated",
+        summarySnapshot: extractCodexReasoningParts(item.summary),
+        contentSnapshot: extractCodexReasoningParts(item.content),
+        hasEncryptedContent: typeof item.encrypted_content === "string" && item.encrypted_content.length > 0,
+      };
+    }
+    return normalized;
+  }
+
+  if (method === "item/reasoning/summaryPartAdded") {
+    const itemId = typeof params.itemId === "string" ? params.itemId : null;
+    const summaryIndex = typeof params.summaryIndex === "number" ? params.summaryIndex : null;
+    if (itemId && summaryIndex !== null) {
+      normalized.reasoningEvent = {
+        itemId,
+        status: "updated",
+        summaryDelta: {
+          index: summaryIndex,
+          text: "",
+        },
+      };
+    }
+    return normalized;
+  }
+
+  if (method === "item/reasoning/summaryTextDelta") {
+    const itemId = typeof params.itemId === "string" ? params.itemId : null;
+    const summaryIndex = typeof params.summaryIndex === "number" ? params.summaryIndex : null;
+    const delta = typeof params.delta === "string" ? params.delta : null;
+    if (itemId && summaryIndex !== null && delta !== null) {
+      normalized.reasoningEvent = {
+        itemId,
+        status: "updated",
+        summaryDelta: {
+          index: summaryIndex,
+          text: delta,
+        },
+      };
+    }
+    return normalized;
+  }
+
+  if (method === "item/reasoning/textDelta") {
+    const itemId = typeof params.itemId === "string" ? params.itemId : null;
+    const contentIndex = typeof params.contentIndex === "number" ? params.contentIndex : null;
+    const delta = typeof params.delta === "string" ? params.delta : null;
+    if (itemId && contentIndex !== null && delta !== null) {
+      normalized.reasoningEvent = {
+        itemId,
+        status: "updated",
+        contentDelta: {
+          index: contentIndex,
+          text: delta,
+        },
+      };
+    }
+    return normalized;
+  }
+
   if (method !== "item/started" && method !== "item/updated" && method !== "item/completed") {
     return normalized;
   }
@@ -97,13 +160,13 @@ export function normalizeCodexAppServerEvent(message) {
   if (itemType === "reasoning") {
     const id = typeof item.id === "string" ? item.id : null;
     if (id) {
-      const text = extractCodexText(item) ?? undefined;
       normalized.reasoningEvent = {
-        id,
+        itemId: id,
         status: method === "item/started"
           ? "started"
           : method === "item/updated" ? "updated" : "completed",
-        ...(text ? { text } : {}),
+        summarySnapshot: extractCodexReasoningParts(item.summary),
+        contentSnapshot: extractCodexReasoningParts(item.content),
       };
     }
     return normalized;

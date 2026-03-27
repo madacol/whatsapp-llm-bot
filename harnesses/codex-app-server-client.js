@@ -229,9 +229,6 @@ export async function openCodexAppServerConnection(options = {}) {
         "item/agentMessage/delta",
         "item/commandExecution/outputDelta",
         "item/fileChange/outputDelta",
-        "item/reasoning/textDelta",
-        "item/reasoning/summaryTextDelta",
-        "item/reasoning/summaryPartAdded",
       ],
     },
   });

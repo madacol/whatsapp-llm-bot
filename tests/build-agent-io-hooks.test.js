@@ -166,8 +166,14 @@ describe("buildAgentIoHooks", () => {
   it("sends one thinking placeholder and makes it inspectable", async () => {
     const subject = createReasoningSubject();
 
-    await subject.hooks.onReasoning?.({ status: "started" });
-    await subject.hooks.onReasoning?.({ status: "completed", text: "Inspect the file, then patch the bug." });
+    await subject.hooks.onReasoning?.({ status: "started", summaryParts: [], contentParts: [] });
+    await subject.hooks.onReasoning?.({
+      status: "completed",
+      itemId: "reason-1",
+      summaryParts: [],
+      contentParts: ["Inspect the file, then patch the bug."],
+      text: "Inspect the file, then patch the bug.",
+    });
 
     assert.equal(subject.sent.length, 1);
     assert.equal(subject.sent[0].kind, "reply");
@@ -181,12 +187,30 @@ describe("buildAgentIoHooks", () => {
     assert.deepEqual(subject.reasoningInspects[0], {
       kind: "reasoning",
       summary: "*Thinking*",
-      text: "_Still thinking..._",
+      text: "_Codex exposed no public reasoning text for this step._",
     });
     assert.deepEqual(subject.reasoningInspects[1], {
       kind: "reasoning",
       summary: "*Thinking*",
       text: "Inspect the file, then patch the bug.",
+    });
+  });
+
+  it("reports encrypted reasoning honestly when no public reasoning text is available", async () => {
+    const subject = createReasoningSubject();
+
+    await subject.hooks.onReasoning?.({
+      status: "updated",
+      summaryParts: [],
+      contentParts: [],
+      hasEncryptedContent: true,
+    });
+
+    assert.equal(subject.reasoningInspects.length, 1);
+    assert.deepEqual(subject.reasoningInspects[0], {
+      kind: "reasoning",
+      summary: "*Thinking*",
+      text: "_Codex returned encrypted reasoning, but no public reasoning text._",
     });
   });
 

@@ -132,3 +132,26 @@ export function extractCodexText(value) {
 
   return null;
 }
+
+/**
+ * Extract an ordered list of text fragments from Codex reasoning content.
+ * Supports plain strings, arrays of strings, and object items that expose
+ * a `text` field.
+ * @param {unknown} value
+ * @returns {string[]}
+ */
+export function extractCodexReasoningParts(value) {
+  if (typeof value === "string") {
+    return value.length > 0 ? [value] : [];
+  }
+  if (Array.isArray(value)) {
+    return value.flatMap((entry) => extractCodexReasoningParts(entry));
+  }
+  if (!isCodexEventRecord(value)) {
+    return [];
+  }
+  if (typeof value.text === "string") {
+    return value.text.length > 0 ? [value.text] : [];
+  }
+  return [];
+}
