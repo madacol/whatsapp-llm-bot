@@ -69,7 +69,7 @@ export default /** @type {defineAction} */ ((x) => x)({
         return `Unknown config key \`${setting}\`.\nAvailable keys: ${CONFIG_KEYS.join(", ")}`;
       }
       const chat = await getChatOrThrow(rootDb, chatId);
-      const selectable = getSelectableOptions(definition.setting, chat);
+      const selectable = getSelectableOptions(definition, chat);
       if (selectable && typeof select === "function") {
         const helpText = await describeConfigKey(rootDb, chatId, setting, { getActions, compact: true });
         const chosen = await select(
