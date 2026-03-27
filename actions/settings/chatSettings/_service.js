@@ -59,6 +59,28 @@ const BOOL_VALUE_IDS = ["on", "off"];
 
 /**
  * @typedef {{
+ *   rootDb: PGlite;
+ *   chatId: string;
+ *   chat: import("../../../store.js").ChatRow;
+ *   value: string;
+ *   extra: { senderIds?: string[], getActions?: () => Promise<Action[]> };
+ * }} ConfigSetContext
+ */
+
+/**
+ * @typedef {(chat: import("../../../store.js").ChatRow, extra: { getActions?: () => Promise<Action[]> }) => string | Promise<string>} ConfigCurrentFormatter
+ */
+
+/**
+ * @typedef {() => string} ConfigDefaultFormatter
+ */
+
+/**
+ * @typedef {(context: ConfigSetContext) => Promise<string>} ConfigSetter
+ */
+
+/**
+ * @typedef {{
  *   key: string;
   *   setting: string;
  *   label: string;
@@ -68,6 +90,9 @@ const BOOL_VALUE_IDS = ["on", "off"];
  *   picker?: ConfigPickerDefinition;
  *   flags?: readonly ConfigFlagDefinition[];
  *   resettable?: boolean;
+ *   formatCurrent: ConfigCurrentFormatter;
+ *   formatDefault: ConfigDefaultFormatter;
+ *   setValue: ConfigSetter;
  * }} ConfigKeyDefinition
  */
 
@@ -88,9 +113,39 @@ function roleSettingToFriendlyKey(roleName) {
   }
 }
 
+/**
+ * @param {boolean} value
+ * @returns {string}
+ */
+function formatBoolValue(value) {
+  return value ? "on" : "off";
+}
+
+/**
+ * @param {string} label
+ * @returns {string}
+ */
+function formatSettingTitle(label) {
+  return label
+    .replace(/-/g, " ")
+    .replace(/\b\w/g, (match) => match.toUpperCase());
+}
+
+/**
+ * @param {Omit<ConfigKeyDefinition, "formatCurrent" | "formatDefault" | "setValue"> & {
+ *   formatCurrent: ConfigCurrentFormatter;
+ *   formatDefault: ConfigDefaultFormatter;
+ *   setValue: ConfigSetter;
+ * }} definition
+ * @returns {ConfigKeyDefinition}
+ */
+function createConfigKeyDefinition(definition) {
+  return definition;
+}
+
 /** @type {ConfigKeyDefinition[]} */
 const BASE_CONFIG_KEYS = [
-  {
+  createConfigKeyDefinition({
     key: "enabled",
     setting: "enabled",
     label: "enabled",
@@ -100,16 +155,41 @@ const BASE_CONFIG_KEYS = [
       options: BOOL_VALUE_IDS,
       currentId: (chat) => chat.is_enabled ? "on" : "off",
     },
-  },
-  {
+    formatCurrent: (chat) => formatBoolValue(chat.is_enabled),
+    formatDefault: () => "off",
+    setValue: async ({ rootDb, chatId, value, extra }) => {
+      const senderIds = extra.senderIds ?? [];
+      if (!isMaster(senderIds)) {
+        return "Only master users can change the enabled setting.";
+      }
+      const enabled = toBool(value);
+      await rootDb.sql`UPDATE chats SET is_enabled = ${enabled} WHERE chat_id = ${chatId}`;
+      return `Bot ${enabled ? "enabled" : "disabled"}.`;
+    },
+  }),
+  createConfigKeyDefinition({
     key: "model",
     setting: "model",
     label: "model",
     description: "Chooses the main chat model for this chat.",
     examples: ["!c model gpt-5.4", "!c reset model"],
     resettable: true,
-  },
-  {
+    formatCurrent: (chat) => chat.model ?? `${resolveModel("chat")} (default)`,
+    formatDefault: () => resolveModel("chat"),
+    setValue: async ({ rootDb, chatId, value }) => {
+      const trimmed = value.trim();
+      const modelValue = trimmed.length === 0 ? null : trimmed;
+      if (modelValue) {
+        const error = await validateModel(modelValue);
+        if (error) return error;
+      }
+      await rootDb.sql`UPDATE chats SET model = ${modelValue} WHERE chat_id = ${chatId}`;
+      return modelValue
+        ? `Model set to \`${modelValue}\``
+        : `Model reverted to default (\`${resolveModel("chat")}\`)`;
+    },
+  }),
+  createConfigKeyDefinition({
     key: "prompt",
     setting: "system_prompt",
     label: "prompt",
@@ -117,8 +197,18 @@ const BASE_CONFIG_KEYS = [
     aliases: ["system_prompt"],
     examples: ["!c prompt Be concise and skeptical.", "!c reset prompt"],
     resettable: true,
-  },
-  {
+    formatCurrent: (chat) => chat.system_prompt ?? `${config.system_prompt} (default)`,
+    formatDefault: () => config.system_prompt,
+    setValue: async ({ rootDb, chatId, value }) => {
+      const trimmed = value.trim();
+      const newPrompt = trimmed.length === 0 ? null : trimmed;
+      await rootDb.sql`UPDATE chats SET system_prompt = ${newPrompt} WHERE chat_id = ${chatId}`;
+      return newPrompt === null
+        ? "Prompt cleared, using default."
+        : `Prompt set to: ${trimmed}`;
+    },
+  }),
+  createConfigKeyDefinition({
     key: "trigger",
     setting: "trigger",
     label: "trigger",
@@ -128,8 +218,18 @@ const BASE_CONFIG_KEYS = [
       options: RESPOND_ON_VALUES,
       currentId: (chat) => chat.respond_on ?? "mention",
     },
-  },
-  {
+    formatCurrent: (chat) => chat.respond_on ?? "mention",
+    formatDefault: () => "mention",
+    setValue: async ({ rootDb, chatId, value }) => {
+      const trimmed = value.trim().toLowerCase();
+      if (!RESPOND_ON_VALUES.includes(trimmed)) {
+        return `Invalid value. Must be one of: ${RESPOND_ON_VALUES.join(", ")}`;
+      }
+      await rootDb.sql`UPDATE chats SET respond_on = ${trimmed} WHERE chat_id = ${chatId}`;
+      return `Trigger: ${trimmed}`;
+    },
+  }),
+  createConfigKeyDefinition({
     key: "memory",
     setting: "memory",
     label: "memory",
@@ -139,8 +239,15 @@ const BASE_CONFIG_KEYS = [
       options: BOOL_VALUE_IDS,
       currentId: (chat) => chat.memory ? "on" : "off",
     },
-  },
-  {
+    formatCurrent: (chat) => formatBoolValue(chat.memory),
+    formatDefault: () => "off",
+    setValue: async ({ rootDb, chatId, value }) => {
+      const enabled = toBool(value);
+      await rootDb.sql`UPDATE chats SET memory = ${enabled} WHERE chat_id = ${chatId}`;
+      return `Long-term memory ${enabled ? "enabled" : "disabled"} for this chat.`;
+    },
+  }),
+  createConfigKeyDefinition({
     key: "threshold",
     setting: "memory_threshold",
     label: "threshold",
@@ -148,8 +255,23 @@ const BASE_CONFIG_KEYS = [
     aliases: ["memory_threshold"],
     examples: ["!c threshold 0.7", "!c reset threshold"],
     resettable: true,
-  },
-  {
+    formatCurrent: (chat) => String(chat.memory_threshold ?? config.memory_threshold),
+    formatDefault: () => String(config.memory_threshold),
+    setValue: async ({ rootDb, chatId, value }) => {
+      const trimmed = value.trim();
+      if (trimmed.length === 0) {
+        await rootDb.sql`UPDATE chats SET memory_threshold = NULL WHERE chat_id = ${chatId}`;
+        return `Memory threshold reset to default (${config.memory_threshold}).`;
+      }
+      const threshold = parseFloat(trimmed);
+      if (isNaN(threshold) || threshold < 0 || threshold > 1) {
+        throw new Error("Threshold must be a number between 0 and 1.");
+      }
+      await rootDb.sql`UPDATE chats SET memory_threshold = ${threshold} WHERE chat_id = ${chatId}`;
+      return `Memory similarity threshold set to ${threshold} for this chat.`;
+    },
+  }),
+  createConfigKeyDefinition({
     key: "debug",
     setting: "debug",
     label: "debug",
@@ -159,8 +281,15 @@ const BASE_CONFIG_KEYS = [
       options: BOOL_VALUE_IDS,
       currentId: (chat) => chat.debug ? "on" : "off",
     },
-  },
-  {
+    formatCurrent: (chat) => formatBoolValue(chat.debug),
+    formatDefault: () => "off",
+    setValue: async ({ rootDb, chatId, value }) => {
+      const enabled = toBool(value);
+      await rootDb.sql`UPDATE chats SET debug = ${enabled} WHERE chat_id = ${chatId}`;
+      return `Debug ${enabled ? "on" : "off"}.`;
+    },
+  }),
+  createConfigKeyDefinition({
     key: "harness",
     setting: "harness",
     label: "harness",
@@ -171,8 +300,24 @@ const BASE_CONFIG_KEYS = [
       currentId: (chat) => chat.harness ?? "native",
     },
     resettable: true,
-  },
-  {
+    formatCurrent: (chat) => chat.harness ?? "native",
+    formatDefault: () => "native",
+    setValue: async ({ rootDb, chatId, value }) => {
+      const trimmed = value.trim();
+      if (trimmed.length === 0) {
+        await rootDb.sql`UPDATE chats SET harness = NULL WHERE chat_id = ${chatId}`;
+        return "Harness reset to `native`.";
+      }
+      const available = listHarnesses();
+      if (!available.includes(trimmed)) {
+        return `Unknown harness \`${trimmed}\`. Available: ${available.join(", ")}`;
+      }
+      const harnessValue = trimmed === "native" ? null : trimmed;
+      await rootDb.sql`UPDATE chats SET harness = ${harnessValue} WHERE chat_id = ${chatId}`;
+      return `Harness set to \`${trimmed}\``;
+    },
+  }),
+  createConfigKeyDefinition({
     key: "show",
     setting: "output_visibility",
     label: "show",
@@ -181,8 +326,36 @@ const BASE_CONFIG_KEYS = [
     examples: ["!c show", "!c show commands off", "!c show thinking on", "!c show changes off", "!c reset show"],
     flags: OUTPUT_VISIBILITY_FLAGS,
     resettable: true,
-  },
-  {
+    formatCurrent: (chat) => formatOutputVisibility(chat.output_visibility),
+    formatDefault: () => formatOutputVisibilityDefault(),
+    setValue: async ({ rootDb, chatId, chat, value }) => {
+      const trimmed = value.trim();
+      if (trimmed.length === 0) {
+        await rootDb.sql`UPDATE chats SET output_visibility = '{}'::jsonb WHERE chat_id = ${chatId}`;
+        return `Show reset to defaults (${formatOutputVisibilityDefault()}).`;
+      }
+
+      const parts = trimmed.split(/\s+/);
+      if (parts.length !== 2) {
+        return "Usage: !c show <commands|thinking|tools|changes> <on|off>";
+      }
+
+      const flagDefinition = getOutputVisibilityFlagDefinition(parts[0] ?? "");
+      if (!flagDefinition) {
+        return "Unknown show control. Available: commands, thinking, tools, changes";
+      }
+
+      const enabled = toBool(parts[1] ?? "");
+      const nextVisibility = setOutputVisibilityOverride(chat.output_visibility, flagDefinition.key, enabled);
+      await rootDb.sql`
+        UPDATE chats
+        SET output_visibility = ${JSON.stringify(nextVisibility)}::jsonb
+        WHERE chat_id = ${chatId}
+      `;
+      return `Show ${flagDefinition.label}: ${enabled ? "on" : "off"}.`;
+    },
+  }),
+  createConfigKeyDefinition({
     key: "folder",
     setting: "harness_cwd",
     label: "folder",
@@ -190,8 +363,51 @@ const BASE_CONFIG_KEYS = [
     aliases: ["harness_cwd"],
     examples: ["!c folder /home/mada/project", "!c reset folder"],
     resettable: true,
-  },
-  {
+    formatCurrent: (chat) => chat.harness_cwd ?? CHAT_WORKSPACE_DEFAULT_LABEL,
+    formatDefault: () => CHAT_WORKSPACE_DEFAULT_LABEL,
+    setValue: async ({ rootDb, chatId, value }) => {
+      const trimmed = value.trim();
+      const cwdValue = trimmed.length === 0 ? null : trimmed;
+
+      if (cwdValue && !existsSync(cwdValue)) {
+        const parent = dirname(resolve(cwdValue));
+        const target = basename(cwdValue);
+        /** @type {string[]} */
+        let suggestions = [];
+        if (existsSync(parent)) {
+          try {
+            suggestions = readdirSync(parent, { withFileTypes: true })
+              .filter((d) => d.isDirectory())
+              .map((d) => `${parent}/${d.name}`)
+              .filter((p) => p !== cwdValue)
+              .sort((a, b) => {
+                const aName = basename(a).toLowerCase();
+                const bName = basename(b).toLowerCase();
+                const t = target.toLowerCase();
+                const aMatch = aName.includes(t) || t.includes(aName) ? 1 : 0;
+                const bMatch = bName.includes(t) || t.includes(bName) ? 1 : 0;
+                return bMatch - aMatch;
+              })
+              .slice(0, 5);
+          } catch {
+          }
+        }
+        let msg = `Path \`${cwdValue}\` does not exist.`;
+        if (suggestions.length > 0) {
+          msg += `\n\nDid you mean one of these?\n${suggestions.map((s) => `• \`${s}\``).join("\n")}`;
+        } else {
+          msg += `\nThe parent directory \`${parent}\` ${existsSync(parent) ? "exists but is empty" : "does not exist either"}.`;
+        }
+        return msg;
+      }
+
+      await rootDb.sql`UPDATE chats SET harness_cwd = ${cwdValue} WHERE chat_id = ${chatId}`;
+      return cwdValue
+        ? `Harness folder set to \`${cwdValue}\``
+        : `Harness folder cleared; using ${CHAT_WORKSPACE_DEFAULT_LABEL}.`;
+    },
+  }),
+  createConfigKeyDefinition({
     key: "media-reader",
     setting: "media_to_text_model",
     label: "media-reader",
@@ -199,8 +415,39 @@ const BASE_CONFIG_KEYS = [
     aliases: ["media_to_text_model"],
     examples: ["!c media-reader openai/gpt-4.1", "!c reset media-reader"],
     resettable: true,
-  },
-  {
+    formatCurrent: (chat) => chat.media_to_text_models?.general ?? "default",
+    formatDefault: () => "default",
+    setValue: async ({ rootDb, chatId, chat, value }) => {
+      const trimmed = value.trim();
+      const currentModels = { ...(chat.media_to_text_models ?? {}) };
+      if (trimmed.length === 0) {
+        delete currentModels.general;
+        await rootDb.sql`
+          UPDATE chats
+          SET media_to_text_models = ${JSON.stringify(currentModels)}::jsonb
+          WHERE chat_id = ${chatId}
+        `;
+        return "media-reader reset to default.";
+      }
+
+      const error = await validateModel(trimmed);
+      if (error) return error;
+
+      const modalities = await getModelModalities(trimmed);
+      if (!modalities.some((m) => ["image", "audio", "video"].includes(m))) {
+        return `Model \`${trimmed}\` does not support any media input (image, audio, or video).`;
+      }
+
+      currentModels.general = trimmed;
+      await rootDb.sql`
+        UPDATE chats
+        SET media_to_text_models = ${JSON.stringify(currentModels)}::jsonb
+        WHERE chat_id = ${chatId}
+      `;
+      return `media-to-text model set to \`${trimmed}\``;
+    },
+  }),
+  createConfigKeyDefinition({
     key: "image-reader",
     setting: "image_to_text_model",
     label: "image-reader",
@@ -208,8 +455,39 @@ const BASE_CONFIG_KEYS = [
     aliases: ["image_to_text_model"],
     examples: ["!c image-reader openai/gpt-4.1", "!c reset image-reader"],
     resettable: true,
-  },
-  {
+    formatCurrent: (chat) => chat.media_to_text_models?.image ?? "default",
+    formatDefault: () => "default",
+    setValue: async ({ rootDb, chatId, chat, value }) => {
+      const trimmed = value.trim();
+      const currentModels = { ...(chat.media_to_text_models ?? {}) };
+      if (trimmed.length === 0) {
+        delete currentModels.image;
+        await rootDb.sql`
+          UPDATE chats
+          SET media_to_text_models = ${JSON.stringify(currentModels)}::jsonb
+          WHERE chat_id = ${chatId}
+        `;
+        return "image-reader reset to default.";
+      }
+
+      const error = await validateModel(trimmed);
+      if (error) return error;
+
+      const modalities = await getModelModalities(trimmed);
+      if (!modalities.includes("image")) {
+        return `Model \`${trimmed}\` does not support \`image\` input. Its supported modalities are: ${modalities.join(", ")}`;
+      }
+
+      currentModels.image = trimmed;
+      await rootDb.sql`
+        UPDATE chats
+        SET media_to_text_models = ${JSON.stringify(currentModels)}::jsonb
+        WHERE chat_id = ${chatId}
+      `;
+      return `image-to-text model set to \`${trimmed}\``;
+    },
+  }),
+  createConfigKeyDefinition({
     key: "audio-reader",
     setting: "audio_to_text_model",
     label: "audio-reader",
@@ -217,8 +495,39 @@ const BASE_CONFIG_KEYS = [
     aliases: ["audio_to_text_model"],
     examples: ["!c audio-reader openai/gpt-4.1", "!c reset audio-reader"],
     resettable: true,
-  },
-  {
+    formatCurrent: (chat) => chat.media_to_text_models?.audio ?? "default",
+    formatDefault: () => "default",
+    setValue: async ({ rootDb, chatId, chat, value }) => {
+      const trimmed = value.trim();
+      const currentModels = { ...(chat.media_to_text_models ?? {}) };
+      if (trimmed.length === 0) {
+        delete currentModels.audio;
+        await rootDb.sql`
+          UPDATE chats
+          SET media_to_text_models = ${JSON.stringify(currentModels)}::jsonb
+          WHERE chat_id = ${chatId}
+        `;
+        return "audio-reader reset to default.";
+      }
+
+      const error = await validateModel(trimmed);
+      if (error) return error;
+
+      const modalities = await getModelModalities(trimmed);
+      if (!modalities.includes("audio")) {
+        return `Model \`${trimmed}\` does not support \`audio\` input. Its supported modalities are: ${modalities.join(", ")}`;
+      }
+
+      currentModels.audio = trimmed;
+      await rootDb.sql`
+        UPDATE chats
+        SET media_to_text_models = ${JSON.stringify(currentModels)}::jsonb
+        WHERE chat_id = ${chatId}
+      `;
+      return `audio-to-text model set to \`${trimmed}\``;
+    },
+  }),
+  createConfigKeyDefinition({
     key: "video-reader",
     setting: "video_to_text_model",
     label: "video-reader",
@@ -226,21 +535,91 @@ const BASE_CONFIG_KEYS = [
     aliases: ["video_to_text_model"],
     examples: ["!c video-reader openai/gpt-4.1", "!c reset video-reader"],
     resettable: true,
-  },
-  {
+    formatCurrent: (chat) => chat.media_to_text_models?.video ?? "default",
+    formatDefault: () => "default",
+    setValue: async ({ rootDb, chatId, chat, value }) => {
+      const trimmed = value.trim();
+      const currentModels = { ...(chat.media_to_text_models ?? {}) };
+      if (trimmed.length === 0) {
+        delete currentModels.video;
+        await rootDb.sql`
+          UPDATE chats
+          SET media_to_text_models = ${JSON.stringify(currentModels)}::jsonb
+          WHERE chat_id = ${chatId}
+        `;
+        return "video-reader reset to default.";
+      }
+
+      const error = await validateModel(trimmed);
+      if (error) return error;
+
+      const modalities = await getModelModalities(trimmed);
+      if (!modalities.includes("video")) {
+        return `Model \`${trimmed}\` does not support \`video\` input. Its supported modalities are: ${modalities.join(", ")}`;
+      }
+
+      currentModels.video = trimmed;
+      await rootDb.sql`
+        UPDATE chats
+        SET media_to_text_models = ${JSON.stringify(currentModels)}::jsonb
+        WHERE chat_id = ${chatId}
+      `;
+      return `video-to-text model set to \`${trimmed}\``;
+    },
+  }),
+  createConfigKeyDefinition({
     key: "action",
     setting: "actions",
     label: "action",
     aliases: ["actions"],
     description: "Enables or disables one opt-in action for this chat.",
     examples: ["!c action searchWeb on", "!c action searchWeb off"],
-  },
+    formatCurrent: async (chat, extra) => formatOptInActions(chat.enabled_actions ?? [], extra.getActions),
+    formatDefault: () => "all opt-in actions off",
+    setValue: async ({ rootDb, chatId, value, extra }) => {
+      const parts = value.trim().split(/\s+/);
+      if (parts.length < 2) {
+        return "Usage: !c action <action_name> <on|off>";
+      }
+      const actionName = parts[0];
+      const actionEnabled = toBool(parts[1]);
+
+      const getActions = extra.getActions;
+      if (!getActions) {
+        return "Internal error: getActions not available.";
+      }
+
+      const allActions = await getActions();
+      const targetAction = allActions.find((a) => a.name === actionName);
+      if (!targetAction) {
+        return `Action \`${actionName}\` not found.`;
+      }
+      if (!targetAction.optIn) {
+        return `Action \`${actionName}\` is not an opt-in action.`;
+      }
+
+      const { rows: [current] } = await rootDb.sql`SELECT enabled_actions FROM chats WHERE chat_id = ${chatId}`;
+      /** @type {string[]} */
+      const currentActions = current.enabled_actions ?? [];
+
+      /** @type {string[]} */
+      let updated;
+      if (actionEnabled) {
+        updated = currentActions.includes(actionName) ? currentActions : [...currentActions, actionName];
+      } else {
+        updated = currentActions.filter((a) => a !== actionName);
+      }
+
+      await rootDb.sql`UPDATE chats SET enabled_actions = ${JSON.stringify(updated)}::jsonb WHERE chat_id = ${chatId}`;
+      return `Action \`${actionName}\` ${actionEnabled ? "enabled" : "disabled"} for this chat.`;
+    },
+  }),
 ];
 
 /** @type {ConfigKeyDefinition[]} */
 const ROLE_CONFIG_KEYS = Object.keys(ROLE_DEFINITIONS)
   .filter((roleName) => !roleName.endsWith("_to_text") && roleName !== "chat")
-  .map((roleName) => ({
+  .map((roleName) => createConfigKeyDefinition({
     key: roleSettingToFriendlyKey(roleName),
     setting: `${roleName}_model`,
     label: roleSettingToFriendlyKey(roleName),
@@ -248,6 +627,37 @@ const ROLE_CONFIG_KEYS = Object.keys(ROLE_DEFINITIONS)
     aliases: [`${roleName}_model`, roleName],
     examples: [`!c ${roleSettingToFriendlyKey(roleName)} openai/gpt-4.1`, `!c reset ${roleSettingToFriendlyKey(roleName)}`],
     resettable: true,
+    formatCurrent: (chat) => chat.model_roles?.[roleName] ?? "default",
+    formatDefault: () => resolveModel(roleName),
+    setValue: async ({ rootDb, chatId, chat, value }) => {
+      const trimmed = value.trim();
+      if (trimmed.length === 0) {
+        const currentRoles = { ...(chat.model_roles ?? {}) };
+        delete currentRoles[roleName];
+        await rootDb.sql`
+          UPDATE chats
+          SET model_roles = ${JSON.stringify(currentRoles)}::jsonb
+          WHERE chat_id = ${chatId}
+        `;
+        const def = ROLE_DEFINITIONS[roleName];
+        const defaultVal = /** @type {string} */ (config[def.configKey]);
+        return defaultVal
+          ? `${roleName} model cleared, reverted to default (\`${defaultVal}\`)`
+          : `${roleName} model cleared.`;
+      }
+
+      const error = await validateModel(trimmed);
+      if (error) return error;
+
+      const currentRoles = { ...(chat.model_roles ?? {}) };
+      currentRoles[roleName] = trimmed;
+      await rootDb.sql`
+        UPDATE chats
+        SET model_roles = ${JSON.stringify(currentRoles)}::jsonb
+        WHERE chat_id = ${chatId}
+      `;
+      return `${roleName} model set to \`${trimmed}\``;
+    },
   }));
 
 /** @type {ConfigKeyDefinition[]} */
@@ -259,6 +669,11 @@ const CONFIG_KEY_MAP = new Map(
     const names = [definition.key, definition.setting, ...(definition.aliases ?? [])];
     return names.map((name) => [name.toLowerCase(), definition]);
   }),
+);
+
+/** @type {ReadonlyMap<string, ConfigKeyDefinition>} */
+const CONFIG_SETTING_MAP = new Map(
+  CONFIG_KEY_DEFINITIONS.map((definition) => [definition.setting, definition]),
 );
 
 export const CONFIG_KEYS = CONFIG_KEY_DEFINITIONS.map((definition) => definition.key);
@@ -321,91 +736,20 @@ export function getConfigKeyDefinition(key) {
 
 /**
  * @param {import("../../../store.js").ChatRow} chat
- * @param {string} setting
+ * @param {ConfigKeyDefinition} definition
  * @param {{ getActions?: () => Promise<Action[]> }} extra
  * @returns {Promise<string>}
  */
-async function formatCurrentValue(chat, setting, extra) {
-  switch (setting) {
-    case "model":
-      return chat.model ?? `${resolveModel("chat")} (default)`;
-    case "system_prompt":
-      return chat.system_prompt ?? `${config.system_prompt} (default)`;
-    case "memory":
-      return chat.memory ? "on" : "off";
-    case "memory_threshold":
-      return String(chat.memory_threshold ?? config.memory_threshold);
-    case "trigger":
-      return chat.respond_on ?? "mention";
-    case "enabled":
-      return chat.is_enabled ? "on" : "off";
-    case "debug":
-      return chat.debug ? "on" : "off";
-    case "harness":
-      return chat.harness ?? "native";
-    case "harness_cwd":
-      return chat.harness_cwd ?? CHAT_WORKSPACE_DEFAULT_LABEL;
-    case "output_visibility":
-      return formatOutputVisibility(chat.output_visibility);
-    case "actions":
-      return formatOptInActions(chat.enabled_actions ?? [], extra.getActions);
-    case "media_to_text_model":
-      return chat.media_to_text_models?.general ?? "default";
-    case "image_to_text_model":
-      return chat.media_to_text_models?.image ?? "default";
-    case "audio_to_text_model":
-      return chat.media_to_text_models?.audio ?? "default";
-    case "video_to_text_model":
-      return chat.media_to_text_models?.video ?? "default";
-    default:
-      if (MODEL_ROLE_SETTINGS.includes(setting)) {
-        const roleName = setting.replace(/_model$/, "");
-        return chat.model_roles?.[roleName] ?? "default";
-      }
-      return "unknown";
-  }
+async function formatCurrentValue(chat, definition, extra) {
+  return definition.formatCurrent(chat, extra);
 }
 
 /**
- * @param {string} setting
+ * @param {ConfigKeyDefinition} definition
  * @returns {string}
  */
-function formatDefaultValue(setting) {
-  switch (setting) {
-    case "model":
-      return resolveModel("chat");
-    case "system_prompt":
-      return config.system_prompt;
-    case "memory":
-      return "off";
-    case "memory_threshold":
-      return String(config.memory_threshold);
-    case "trigger":
-      return "mention";
-    case "enabled":
-      return "off";
-    case "debug":
-      return "off";
-    case "harness":
-      return "native";
-    case "harness_cwd":
-      return CHAT_WORKSPACE_DEFAULT_LABEL;
-    case "output_visibility":
-      return formatOutputVisibilityDefault();
-    case "actions":
-      return "all opt-in actions off";
-    case "media_to_text_model":
-    case "image_to_text_model":
-    case "audio_to_text_model":
-    case "video_to_text_model":
-      return "default";
-    default:
-      if (MODEL_ROLE_SETTINGS.includes(setting)) {
-        const roleName = setting.replace(/_model$/, "");
-        return resolveModel(roleName);
-      }
-      return "default";
-  }
+function formatDefaultValue(definition) {
+  return definition.formatDefault();
 }
 
 /**
@@ -517,16 +861,14 @@ export async function describeConfigKey(rootDb, chatId, key, extra) {
   }
 
   const chat = await getChatOrThrow(rootDb, chatId);
-  const current = await formatCurrentValue(chat, definition.setting, extra);
+  const current = await formatCurrentValue(chat, definition, extra);
   const options = getDefinitionOptions(definition);
   const flags = definition.flags ?? [];
-  const title = definition.label
-    .replace(/-/g, " ")
-    .replace(/\b\w/g, (match) => match.toUpperCase());
+  const title = formatSettingTitle(definition.label);
   const lines = [
     `*${title}*`,
     `- Current: ${current}`,
-    `- Default: ${formatDefaultValue(definition.setting)}`,
+    `- Default: ${formatDefaultValue(definition)}`,
     `- What it does: ${definition.description}`,
   ];
 
@@ -565,7 +907,8 @@ export async function setConfigValue(rootDb, chatId, key, value, extra) {
   if (!definition) {
     return `Unknown config key \`${key}\`.\nAvailable keys: ${CONFIG_KEYS.join(", ")}`;
   }
-  return setChatSetting(rootDb, chatId, definition.setting, value, extra);
+  const chat = await getChatOrThrow(rootDb, chatId);
+  return definition.setValue({ rootDb, chatId, chat, value, extra });
 }
 
 /**
@@ -584,7 +927,8 @@ export async function resetConfigValue(rootDb, chatId, key, extra) {
   if (!definition.resettable) {
     return `\`${definition.label}\` cannot be reset. Set an explicit value instead.`;
   }
-  return setChatSetting(rootDb, chatId, definition.setting, "", extra);
+  const chat = await getChatOrThrow(rootDb, chatId);
+  return definition.setValue({ rootDb, chatId, chat, value: "", extra });
 }
 
 /**
@@ -596,73 +940,17 @@ export async function resetConfigValue(rootDb, chatId, key, extra) {
  */
 export async function getChatSetting(rootDb, chatId, setting, extra) {
   const chat = await getChatOrThrow(rootDb, chatId);
-
-  switch (setting) {
-    case "model":
-      return chat.model
-        ? `Model: \`${chat.model}\``
-        : `Model (default): \`${resolveModel("chat")}\``;
-    case "system_prompt":
-      return chat.system_prompt
-        ? `Prompt: ${chat.system_prompt}`
-        : `Prompt (default): ${config.system_prompt}`;
-    case "memory":
-      return `Memory: ${chat.memory ? "enabled" : "disabled"}`;
-    case "memory_threshold":
-      return `Memory threshold: ${chat.memory_threshold ?? config.memory_threshold}`;
-    case "trigger":
-      return `Trigger: ${chat.respond_on ?? "mention"}`;
-    case "image_to_text_model":
-    case "audio_to_text_model":
-    case "video_to_text_model": {
-      const type = setting.replace("_to_text_model", "");
-      const models = chat.media_to_text_models ?? {};
-      const model = models[/** @type {"image"|"audio"|"video"} */ (type)];
-      return model
-        ? `${type}-to-text model: \`${model}\``
-        : `${type}-to-text model: not set`;
-    }
-    case "media_to_text_model": {
-      const models = chat.media_to_text_models ?? {};
-      const model = models.general;
-      return model
-        ? `media-to-text model: \`${model}\``
-        : `media-to-text model: not set`;
-    }
-    case "enabled":
-      return `Bot: ${chat.is_enabled ? "enabled" : "disabled"}`;
-    case "debug":
-      return `Debug: ${chat.debug ? "on" : "off"}`;
-    case "actions": {
-      const enabledActions = chat.enabled_actions ?? [];
-      const optInStr = await formatOptInActions(enabledActions, extra.getActions);
-      return `Actions: ${optInStr}`;
-    }
-    case "harness": {
-      const available = listHarnesses();
-      return `Harness: ${chat.harness ?? "native"}\nAvailable: ${available.join(", ")}`;
-    }
-    case "harness_cwd":
-      return `Harness folder: ${chat.harness_cwd ?? `not set (${CHAT_WORKSPACE_DEFAULT_LABEL})`}`;
-    case "output_visibility":
-      return `Show: ${formatOutputVisibility(chat.output_visibility)}`;
-    default: {
-      if (MODEL_ROLE_SETTINGS.includes(setting)) {
-        const roleName = setting.replace(/_model$/, "");
-        const roles = chat.model_roles ?? {};
-        const override = roles[roleName];
-        const def = ROLE_DEFINITIONS[roleName];
-        const defaultVal = /** @type {string} */ (config[def.configKey]);
-        if (override) {
-          return `${roleName} model: \`${override}\``;
-        }
-        return defaultVal
-          ? `${roleName} model (default): \`${defaultVal}\``
-          : `${roleName} model: not set`;
-      }
-      return `Unknown setting: ${setting}`;
-    }
+  const definition = CONFIG_SETTING_MAP.get(setting);
+  if (!definition) {
+    return `Unknown setting: ${setting}`;
   }
+  const current = await definition.formatCurrent(chat, extra);
+  const options = getDefinitionOptions(definition);
+  const lines = [`${formatSettingTitle(definition.label)}: ${current}`];
+  if (options.length > 0) {
+    lines.push(`Available: ${options.join(", ")}`);
+  }
+  return lines.join("\n");
 }
 
 /**
@@ -675,295 +963,9 @@ export async function getChatSetting(rootDb, chatId, setting, extra) {
  */
 export async function setChatSetting(rootDb, chatId, setting, value, extra) {
   const chat = await getChatOrThrow(rootDb, chatId);
-
-  switch (setting) {
-    case "model": {
-      const trimmed = value.trim();
-      const modelValue = trimmed.length === 0 ? null : trimmed;
-      if (modelValue) {
-        const error = await validateModel(modelValue);
-        if (error) return error;
-      }
-      await rootDb.sql`UPDATE chats SET model = ${modelValue} WHERE chat_id = ${chatId}`;
-      return modelValue
-        ? `Model set to \`${modelValue}\``
-        : `Model reverted to default (\`${resolveModel("chat")}\`)`;
-    }
-
-    case "system_prompt": {
-      const trimmed = value.trim();
-      const newPrompt = trimmed.length === 0 ? null : trimmed;
-      await rootDb.sql`UPDATE chats SET system_prompt = ${newPrompt} WHERE chat_id = ${chatId}`;
-      return newPrompt === null
-        ? "Prompt cleared, using default."
-        : `Prompt set to: ${trimmed}`;
-    }
-
-    case "memory": {
-      const enabled = toBool(value);
-      await rootDb.sql`UPDATE chats SET memory = ${enabled} WHERE chat_id = ${chatId}`;
-      return `Long-term memory ${enabled ? "enabled" : "disabled"} for this chat.`;
-    }
-
-    case "memory_threshold": {
-      const trimmed = value.trim();
-      if (trimmed.length === 0) {
-        await rootDb.sql`UPDATE chats SET memory_threshold = NULL WHERE chat_id = ${chatId}`;
-        return `Memory threshold reset to default (${config.memory_threshold}).`;
-      }
-      const threshold = parseFloat(trimmed);
-      if (isNaN(threshold) || threshold < 0 || threshold > 1) {
-        throw new Error("Threshold must be a number between 0 and 1.");
-      }
-      await rootDb.sql`UPDATE chats SET memory_threshold = ${threshold} WHERE chat_id = ${chatId}`;
-      return `Memory similarity threshold set to ${threshold} for this chat.`;
-    }
-
-    case "trigger": {
-      const trimmed = value.trim().toLowerCase();
-      if (!RESPOND_ON_VALUES.includes(trimmed)) {
-        return `Invalid value. Must be one of: ${RESPOND_ON_VALUES.join(", ")}`;
-      }
-      await rootDb.sql`UPDATE chats SET respond_on = ${trimmed} WHERE chat_id = ${chatId}`;
-      return `Trigger: ${trimmed}`;
-    }
-
-    case "image_to_text_model":
-    case "audio_to_text_model":
-    case "video_to_text_model": {
-      const type = /** @type {"image"|"audio"|"video"} */ (setting.replace("_to_text_model", ""));
-      const trimmed = value.trim();
-
-      const currentModels = { ...(chat.media_to_text_models ?? {}) };
-      if (trimmed.length === 0) {
-        delete currentModels[type];
-        await rootDb.sql`
-          UPDATE chats
-          SET media_to_text_models = ${JSON.stringify(currentModels)}::jsonb
-          WHERE chat_id = ${chatId}
-        `;
-        return `${type}-reader reset to default.`;
-      }
-
-      const error = await validateModel(trimmed);
-      if (error) return error;
-
-      const modalities = await getModelModalities(trimmed);
-      if (!modalities.includes(type)) {
-        return `Model \`${trimmed}\` does not support \`${type}\` input. Its supported modalities are: ${modalities.join(", ")}`;
-      }
-
-      currentModels[type] = trimmed;
-      await rootDb.sql`
-        UPDATE chats
-        SET media_to_text_models = ${JSON.stringify(currentModels)}::jsonb
-        WHERE chat_id = ${chatId}
-      `;
-      return `${type}-to-text model set to \`${trimmed}\``;
-    }
-
-    case "media_to_text_model": {
-      const trimmed = value.trim();
-
-      const currentModels = { ...(chat.media_to_text_models ?? {}) };
-      if (trimmed.length === 0) {
-        delete currentModels.general;
-        await rootDb.sql`
-          UPDATE chats
-          SET media_to_text_models = ${JSON.stringify(currentModels)}::jsonb
-          WHERE chat_id = ${chatId}
-        `;
-        return "media-reader reset to default.";
-      }
-
-      const error = await validateModel(trimmed);
-      if (error) return error;
-
-      const modalities = await getModelModalities(trimmed);
-      if (!modalities.some((m) => ["image", "audio", "video"].includes(m))) {
-        return `Model \`${trimmed}\` does not support any media input (image, audio, or video).`;
-      }
-
-      currentModels.general = trimmed;
-      await rootDb.sql`
-        UPDATE chats
-        SET media_to_text_models = ${JSON.stringify(currentModels)}::jsonb
-        WHERE chat_id = ${chatId}
-      `;
-      return `media-to-text model set to \`${trimmed}\``;
-    }
-
-    case "enabled": {
-      const senderIds = extra.senderIds ?? [];
-      if (!isMaster(senderIds)) {
-        return "Only master users can change the enabled setting.";
-      }
-      const enabled = toBool(value);
-      await rootDb.sql`UPDATE chats SET is_enabled = ${enabled} WHERE chat_id = ${chatId}`;
-      return `Bot ${enabled ? "enabled" : "disabled"}.`;
-    }
-
-    case "debug": {
-      const enabled = toBool(value);
-      await rootDb.sql`UPDATE chats SET debug = ${enabled} WHERE chat_id = ${chatId}`;
-      return `Debug ${enabled ? "on" : "off"}.`;
-    }
-
-    case "harness": {
-      const trimmed = value.trim();
-      if (trimmed.length === 0) {
-        await rootDb.sql`UPDATE chats SET harness = NULL WHERE chat_id = ${chatId}`;
-        return "Harness reset to `native`.";
-      }
-      const available = listHarnesses();
-      if (!available.includes(trimmed)) {
-        return `Unknown harness \`${trimmed}\`. Available: ${available.join(", ")}`;
-      }
-      const harnessValue = trimmed === "native" ? null : trimmed;
-      await rootDb.sql`UPDATE chats SET harness = ${harnessValue} WHERE chat_id = ${chatId}`;
-      return `Harness set to \`${trimmed}\``;
-    }
-
-    case "harness_cwd": {
-      const trimmed = value.trim();
-      const cwdValue = trimmed.length === 0 ? null : trimmed;
-
-      if (cwdValue && !existsSync(cwdValue)) {
-        const parent = dirname(resolve(cwdValue));
-        const target = basename(cwdValue);
-        /** @type {string[]} */
-        let suggestions = [];
-        if (existsSync(parent)) {
-          try {
-            suggestions = readdirSync(parent, { withFileTypes: true })
-              .filter((d) => d.isDirectory())
-              .map((d) => `${parent}/${d.name}`)
-              .filter((p) => p !== cwdValue)
-              .sort((a, b) => {
-                const aName = basename(a).toLowerCase();
-                const bName = basename(b).toLowerCase();
-                const t = target.toLowerCase();
-                const aMatch = aName.includes(t) || t.includes(aName) ? 1 : 0;
-                const bMatch = bName.includes(t) || t.includes(bName) ? 1 : 0;
-                return bMatch - aMatch;
-              })
-              .slice(0, 5);
-          } catch {
-          }
-        }
-        let msg = `Path \`${cwdValue}\` does not exist.`;
-        if (suggestions.length > 0) {
-          msg += `\n\nDid you mean one of these?\n${suggestions.map((s) => `• \`${s}\``).join("\n")}`;
-        } else {
-          msg += `\nThe parent directory \`${parent}\` ${existsSync(parent) ? "exists but is empty" : "does not exist either"}.`;
-        }
-        return msg;
-      }
-
-      await rootDb.sql`UPDATE chats SET harness_cwd = ${cwdValue} WHERE chat_id = ${chatId}`;
-      return cwdValue
-        ? `Harness folder set to \`${cwdValue}\``
-        : `Harness folder cleared; using ${CHAT_WORKSPACE_DEFAULT_LABEL}.`;
-    }
-
-    case "output_visibility": {
-      const trimmed = value.trim();
-      if (trimmed.length === 0) {
-        await rootDb.sql`UPDATE chats SET output_visibility = '{}'::jsonb WHERE chat_id = ${chatId}`;
-        return `Show reset to defaults (${formatOutputVisibilityDefault()}).`;
-      }
-
-      const parts = trimmed.split(/\s+/);
-      if (parts.length !== 2) {
-        return "Usage: !c show <commands|thinking|tools|changes> <on|off>";
-      }
-
-      const flagDefinition = getOutputVisibilityFlagDefinition(parts[0] ?? "");
-      if (!flagDefinition) {
-        return "Unknown show control. Available: commands, thinking, tools, changes";
-      }
-
-      const enabled = toBool(parts[1] ?? "");
-      const nextVisibility = setOutputVisibilityOverride(chat.output_visibility, flagDefinition.key, enabled);
-      await rootDb.sql`
-        UPDATE chats
-        SET output_visibility = ${JSON.stringify(nextVisibility)}::jsonb
-        WHERE chat_id = ${chatId}
-      `;
-      return `Show ${flagDefinition.label}: ${enabled ? "on" : "off"}.`;
-    }
-
-    case "actions": {
-      const parts = value.trim().split(/\s+/);
-      if (parts.length < 2) {
-        return "Usage: !c action <action_name> <on|off>";
-      }
-      const actionName = parts[0];
-      const actionEnabled = toBool(parts[1]);
-
-      const getActions = extra.getActions;
-      if (!getActions) {
-        return "Internal error: getActions not available.";
-      }
-
-      const allActions = await getActions();
-      const targetAction = allActions.find((a) => a.name === actionName);
-      if (!targetAction) {
-        return `Action \`${actionName}\` not found.`;
-      }
-      if (!targetAction.optIn) {
-        return `Action \`${actionName}\` is not an opt-in action.`;
-      }
-
-      const { rows: [current] } = await rootDb.sql`SELECT enabled_actions FROM chats WHERE chat_id = ${chatId}`;
-      /** @type {string[]} */
-      const currentActions = current.enabled_actions ?? [];
-
-      /** @type {string[]} */
-      let updated;
-      if (actionEnabled) {
-        updated = currentActions.includes(actionName) ? currentActions : [...currentActions, actionName];
-      } else {
-        updated = currentActions.filter((a) => a !== actionName);
-      }
-
-      await rootDb.sql`UPDATE chats SET enabled_actions = ${JSON.stringify(updated)}::jsonb WHERE chat_id = ${chatId}`;
-      return `Action \`${actionName}\` ${actionEnabled ? "enabled" : "disabled"} for this chat.`;
-    }
-
-    default: {
-      if (MODEL_ROLE_SETTINGS.includes(setting)) {
-        const roleName = setting.replace(/_model$/, "");
-        const trimmed = value.trim();
-
-        if (trimmed.length === 0) {
-          const currentRoles = chat.model_roles ?? {};
-          delete currentRoles[roleName];
-          await rootDb.sql`
-            UPDATE chats
-            SET model_roles = ${JSON.stringify(currentRoles)}::jsonb
-            WHERE chat_id = ${chatId}
-          `;
-          const def = ROLE_DEFINITIONS[roleName];
-          const defaultVal = /** @type {string} */ (config[def.configKey]);
-          return defaultVal
-            ? `${roleName} model cleared, reverted to default (\`${defaultVal}\`)`
-            : `${roleName} model cleared.`;
-        }
-
-        const error = await validateModel(trimmed);
-        if (error) return error;
-
-        const currentRoles = chat.model_roles ?? {};
-        currentRoles[roleName] = trimmed;
-        await rootDb.sql`
-          UPDATE chats
-          SET model_roles = ${JSON.stringify(currentRoles)}::jsonb
-          WHERE chat_id = ${chatId}
-        `;
-        return `${roleName} model set to \`${trimmed}\``;
-      }
-      return `Unknown setting: ${setting}`;
-    }
+  const definition = CONFIG_SETTING_MAP.get(setting);
+  if (!definition) {
+    return `Unknown setting: ${setting}`;
   }
+  return definition.setValue({ rootDb, chatId, chat, value, extra });
 }
