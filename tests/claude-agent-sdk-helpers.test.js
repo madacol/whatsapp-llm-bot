@@ -390,6 +390,34 @@ describe("extractToolResultFromEvent", () => {
     assert.equal(resultText, "nested text");
   });
 
+  it("stringifies structured tool_result block content when no text blocks are present", () => {
+    const event = {
+      type: "user",
+      parent_tool_use_id: "tool-1",
+      message: {
+        role: "user",
+        content: [
+          {
+            type: "tool_result",
+            tool_use_id: "tool-1",
+            content: {
+              stdout: "line 1\nline 2",
+              stderr: "",
+              exit_code: 0,
+            },
+          },
+        ],
+      },
+      session_id: "s1",
+    };
+    const { resultText } = extractToolResultFromEvent(event);
+    assert.equal(resultText, JSON.stringify({
+      stdout: "line 1\nline 2",
+      stderr: "",
+      exit_code: 0,
+    }, null, 2));
+  });
+
   it("returns null toolUseId and resultText when message has no content", () => {
     const event = {
       type: "user",
