@@ -49,11 +49,29 @@ function unwrapShellCommand(command) {
  * @returns {string | undefined}
  */
 export function extractCommandOutput(item) {
-  if (isCodexEventRecord(item) && typeof item.aggregated_output === "string") {
-    return item.aggregated_output;
+  if (!isCodexEventRecord(item)) {
+    return undefined;
   }
-  const text = extractCodexText(item);
-  return text ?? undefined;
+
+  const directOutput = [
+    item.aggregated_output,
+    item.aggregatedOutput,
+    item.output,
+    item.stdout,
+    item.stderr,
+    item.content,
+    item.details,
+    item.data,
+  ];
+
+  for (const candidate of directOutput) {
+    const text = extractCodexText(candidate);
+    if (text != null) {
+      return text;
+    }
+  }
+
+  return undefined;
 }
 
 /**
