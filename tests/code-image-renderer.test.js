@@ -63,16 +63,31 @@ describe("code-image-renderer", () => {
       assert.ok(height >= 1000, `expected hard-wrapped code image to grow taller, got ${height}px`);
     });
 
-    it("keeps lines under the 3x wrap threshold on a single rendered line", async () => {
-      const baseWrapWidth = maxCharsForLineCount(1);
-      const line = "x".repeat(baseWrapWidth * 2);
-      const images = await renderCodeToImages(line, "text");
+    it("uses the same width cap regardless of line count", async () => {
+      const longLine = "x".repeat(80);
+      const singleLineImages = await renderCodeToImages(longLine, "text");
+      const manyLineImages = await renderCodeToImages(Array.from({ length: 20 }, () => longLine).join("\n"), "text");
 
-      assert.equal(images.length, 1, "single-line code should stay in one image");
+      const singleWidth = getPngDimensions(singleLineImages[0]).width;
+      const manyWidth = getPngDimensions(manyLineImages[0]).width;
 
-      const { width, height } = getPngDimensions(images[0]);
-      assert.equal(height, 52, `expected no wrapping under the wider threshold, got ${height}px tall image`);
-      assert.ok(width > 300, `expected the wider threshold to allow a wider single line, got ${width}px`);
+      assert.equal(
+        manyWidth,
+        singleWidth,
+        `expected the same longest line to render at the same width, got ${singleWidth}px vs ${manyWidth}px`,
+      );
+    });
+
+    it("keeps a small overflow in the same image instead of creating a tiny trailing chunk", async () => {
+      const longLine = "x".repeat(60);
+      const code = Array.from({ length: 54 }, () => longLine).join("\n");
+      const images = await renderCodeToImages(code, "text");
+
+      assert.equal(
+        images.length,
+        1,
+        `expected a small height overflow to stay in one image, got ${images.length} image(s)`,
+      );
     });
 
     it("returns empty array for empty code", async () => {

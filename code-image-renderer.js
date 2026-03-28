@@ -11,8 +11,9 @@ const LINE_HEIGHT = 20;
 const PADDING = 16;
 const CHAR_WIDTH = FONT_SIZE * 0.6;
 const MIN_WRAP_CHARS = 20;
-const WRAP_WIDTH_MULTIPLIER = 3;
 const CONTINUATION_INDENT = "    ";
+const CODE_IMAGE_WIDTH_CAP = 560;
+const CHUNK_HEIGHT_OVERFLOW_RATIO = 1.15;
 
 /**
  * Maximum image aspect ratio (width:height) before WhatsApp renders the
@@ -47,6 +48,18 @@ function maxCharsForLayout(lineCount, options) {
   const gutterWidth = options.gutterWidth ?? 0;
   const prefixChars = options.prefixChars ?? 0;
   const maxChars = Math.floor((maxWidth - PADDING * 2 - gutterWidth) / CHAR_WIDTH) - prefixChars;
+  return Math.max(maxChars, MIN_WRAP_CHARS);
+}
+
+/**
+ * Compute the maximum number of content characters that fit within a fixed image width cap.
+ * @param {{ maxSvgWidth: number, gutterWidth?: number, prefixChars?: number }} options
+ * @returns {number}
+ */
+function maxContentCharsForWidthCap(options) {
+  const gutterWidth = options.gutterWidth ?? 0;
+  const prefixChars = options.prefixChars ?? 0;
+  const maxChars = Math.floor((options.maxSvgWidth - PADDING * 2 - gutterWidth) / CHAR_WIDTH) - prefixChars;
   return Math.max(maxChars, MIN_WRAP_CHARS);
 }
 const GUTTER_WIDTH = 28; // Width for the +/- prefix gutter in diffs
@@ -173,16 +186,28 @@ function renderAnnotatedLines(lines, opts) {
   }
   const svgWidth = Math.min(Math.max(maxLineWidth + contentX + PADDING, 200), maxSvgWidth);
 
-  // Adaptive chunk size: fit as many lines as the pixel budget allows,
-  // but cap at the configured line limit for readability on mobile screens.
-  const maxLinesPerChunk = Math.min(
-    maxLinesPerChunkLimit,
-    Math.max(10, Math.floor((maxPixels / svgWidth - PADDING * 2) / LINE_HEIGHT)),
+  // Width is decided first from the longest wrapped line. From that final width,
+  // derive a height cap, then allow a small last-chunk overflow to avoid
+  // emitting trailing images with only a few lines.
+  const minChunkHeightByLineLimit = maxLinesPerChunkLimit * LINE_HEIGHT + PADDING * 2;
+  const maxHeightByAspect = Math.max(LINE_HEIGHT + PADDING * 2, Math.floor(svgWidth * MAX_ASPECT_RATIO));
+  const maxHeightByPixels = Math.max(LINE_HEIGHT + PADDING * 2, Math.floor(maxPixels / svgWidth));
+  const baseMaxChunkHeight = Math.min(maxHeightByPixels, Math.max(maxHeightByAspect, minChunkHeightByLineLimit));
+  const overflowMaxChunkHeight = Math.min(
+    Math.floor(baseMaxChunkHeight * CHUNK_HEIGHT_OVERFLOW_RATIO),
+    maxHeightByPixels,
   );
+  const maxLinesPerChunk = Math.max(1, Math.floor((baseMaxChunkHeight - PADDING * 2) / LINE_HEIGHT));
+  const maxLinesPerChunkWithOverflow = Math.max(maxLinesPerChunk, Math.floor((overflowMaxChunkHeight - PADDING * 2) / LINE_HEIGHT));
 
   /** @type {AnnotatedLine[][]} */
   const chunks = [];
   for (let i = 0; i < lines.length; i += maxLinesPerChunk) {
+    const remainingLines = lines.length - i;
+    if (remainingLines <= maxLinesPerChunkWithOverflow) {
+      chunks.push(lines.slice(i));
+      break;
+    }
     chunks.push(lines.slice(i, i + maxLinesPerChunk));
   }
 
@@ -791,18 +816,18 @@ function prefixTokens(tokens, prefix) {
 function renderCodeLikeAnnotatedLines(lines, options) {
   const gutterWidth = options?.gutterWidth ?? 0;
   const prefixChars = options?.prefixChars ?? 0;
-  const baseContentChars = maxCharsForLayout(lines.length, {
-    maxAspectRatio: MAX_ASPECT_RATIO,
+  const maxContentChars = maxContentCharsForWidthCap({
+    maxSvgWidth: CODE_IMAGE_WIDTH_CAP,
     gutterWidth,
     prefixChars,
   });
   const wrappedLines = wrapAnnotatedLinesForDisplay(lines, {
-    maxContentChars: baseContentChars * WRAP_WIDTH_MULTIPLIER,
+    maxContentChars,
     continuationIndent: CONTINUATION_INDENT,
   });
   return renderAnnotatedLines(wrappedLines, {
     gutterWidth,
-    maxSvgWidth: MAX_SVG_WIDTH,
+    maxSvgWidth: CODE_IMAGE_WIDTH_CAP,
     maxLinesPerChunk: MAX_LINES_PER_CHUNK,
   });
 }
