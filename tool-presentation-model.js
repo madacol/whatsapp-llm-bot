@@ -532,6 +532,22 @@ function formatBashSummary(command) {
 }
 
 /**
+ * @param {string} toolName
+ * @param {string} command
+ * @param {string} summary
+ * @returns {BashPresentation}
+ */
+function createBashToolPresentation(toolName, command, summary) {
+  return {
+    kind: "bash",
+    toolName,
+    summary,
+    command,
+    inspectMode: "bash",
+  };
+}
+
+/**
  * @param {string} name
  * @param {Record<string, unknown>} args
  * @param {string | null | undefined} cwd
@@ -587,25 +603,17 @@ function buildSdkPresentation(name, args, cwd) {
       return typeof args.query === "string" ? createWebSearchPresentation(args.query) : null;
     case "exec_command":
       return typeof args.cmd === "string"
-        ? {
-          kind: "bash",
-          toolName: "Run Command",
-          summary: `*Run Command*  \`${args.cmd.split("\n")[0]?.slice(0, 48) ?? ""}\``,
-          command: args.cmd,
-          inspectMode: "bash",
-        }
+        ? createBashToolPresentation(
+          "Run Command",
+          args.cmd,
+          `*Run Command*  \`${args.cmd.split("\n")[0]?.slice(0, 48) ?? ""}\``,
+        )
         : null;
     case "update_plan":
       return createPlanPresentation(args);
     case "Bash":
       return typeof args.command === "string"
-        ? {
-          kind: "bash",
-          toolName: "Bash",
-          summary: formatBashSummary(args.command),
-          command: args.command,
-          inspectMode: "bash",
-        }
+        ? createBashToolPresentation("Bash", args.command, formatBashSummary(args.command))
         : null;
     default:
       return null;
