@@ -311,7 +311,7 @@ describe("buildAgentIoHooks", () => {
     assert.equal(sent.length, 0);
   });
 
-  it("renders searchable shell commands as searched summaries", async () => {
+  it("renders shell commands as bash summaries", async () => {
     const { hooks, sent } = createSubjectWithCwd("/repo");
     await hooks.onCommand?.({ command: "rg -n \"needle\" src", status: "started" });
 
@@ -320,7 +320,7 @@ describe("buildAgentIoHooks", () => {
     if (sent[0].event.kind !== "tool_call") {
       assert.fail("Expected tool_call event");
     }
-    assert.equal(sent[0].event.presentation.summary, "*Search*  \"needle\" in `src`");
+    assert.equal(sent[0].event.presentation.summary, "*Bash*  `rg -n \"needle\" src`");
     assert.equal(sent[0].event.presentation.kind, "bash");
     assert.equal(sent[0].event.presentation.command, "rg -n \"needle\" src");
   });
@@ -491,11 +491,11 @@ describe("buildAgentIoHooks", () => {
     if (!inspect || inspect.kind !== "tool") {
       assert.fail("Expected tool inspect state");
     }
-    assert.equal(inspect.presentation.summary, "*Search*  \"needle\" in `src`");
+    assert.equal(inspect.presentation.summary, "*Bash*  `rg -n \"needle\" src`");
     assert.equal(inspect.output, "src/app.js:12:needle");
   });
 
-  it("keeps semantic inspect state available for classified commands with no output", async () => {
+  it("keeps bash inspect state available for commands with no output", async () => {
     /** @type {Array<{ inspects: MessageInspectState[] }>} */
     const handles = [];
     const hooks = buildAgentIoHooks(
@@ -538,7 +538,7 @@ describe("buildAgentIoHooks", () => {
     if (!inspect || inspect.kind !== "tool") {
       assert.fail("Expected tool inspect state");
     }
-    assert.equal(inspect.presentation.summary, "*List*  `.`");
+    assert.equal(inspect.presentation.summary, "*Bash*  `ls -a`");
     assert.equal(inspect.output, "");
   });
 });

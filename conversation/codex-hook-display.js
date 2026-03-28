@@ -120,10 +120,11 @@ async function onCommand({ command, status, output }) {
       };
       const handle = await displayToolCall(toolCall);
       if (handle) {
+        const readPresentation = buildReadToolPresentation(filePath, cwd);
         rememberInspect(command, {
           handle,
-          displayPresentation: buildReadToolPresentation(filePath, cwd),
-          inspectPresentation: buildCommandPresentation(command, cwd),
+          displayPresentation: readPresentation,
+          inspectPresentation: readPresentation,
         });
       }
       return;

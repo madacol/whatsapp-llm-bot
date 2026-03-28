@@ -151,165 +151,6 @@ function formatWebRef(refId) {
 }
 
 /**
- * @param {string} command
- * @returns {string[]}
- */
-function extractPrimaryShellSegments(command) {
-  const firstLine = command
-    .split("\n")
-    .map((line) => line.trim())
-    .find((line) => line.length > 0) ?? "";
-  return firstLine
-    .split(/\s*(?:\|\||&&|\||;)\s+/)
-    .map((segment) => segment.trim())
-    .filter((segment) => segment.length > 0);
-}
-
-/**
- * @param {string} command
- * @returns {string[]}
- */
-function tokenizeShellWords(command) {
-  /** @type {string[]} */
-  const tokens = [];
-  let current = "";
-  /** @type {'"' | "'" | null} */
-  let quote = null;
-  let escaped = false;
-
-  for (const char of command) {
-    if (escaped) {
-      current += char;
-      escaped = false;
-      continue;
-    }
-
-    if (char === "\\" && quote !== "'") {
-      escaped = true;
-      continue;
-    }
-
-    if (quote) {
-      if (char === quote) {
-        quote = null;
-      } else {
-        current += char;
-      }
-      continue;
-    }
-
-    if (char === "'" || char === "\"") {
-      quote = char;
-      continue;
-    }
-
-    if (/\s/.test(char)) {
-      if (current.length > 0) {
-        tokens.push(current);
-        current = "";
-      }
-      continue;
-    }
-
-    current += char;
-  }
-
-  if (current.length > 0) {
-    tokens.push(current);
-  }
-
-  return tokens;
-}
-
-/**
- * @param {string[]} tokens
- * @returns {{ mode: "list" | "search", pattern?: string, path?: string } | null}
- */
-function classifyRipgrep(tokens) {
-  let filesMode = false;
-  /** @type {string | undefined} */
-  let pattern;
-  /** @type {string | undefined} */
-  let path;
-
-  for (let index = 1; index < tokens.length; index += 1) {
-    const token = tokens[index];
-    if (!token) {
-      continue;
-    }
-    if (token === "--files") {
-      filesMode = true;
-      continue;
-    }
-    if (token === "-e" || token === "--regexp") {
-      pattern = tokens[index + 1];
-      index += 1;
-      continue;
-    }
-    if (token === "-g" || token === "--glob" || token === "-f" || token === "--file") {
-      index += 1;
-      continue;
-    }
-    if (token.startsWith("-")) {
-      continue;
-    }
-    if (filesMode) {
-      path = token;
-      break;
-    }
-    if (!pattern) {
-      pattern = token;
-      continue;
-    }
-    path = token;
-    break;
-  }
-
-  if (filesMode) {
-    return { mode: "list", path };
-  }
-  return pattern ? { mode: "search", pattern, path } : null;
-}
-
-/**
- * @param {string[]} tokens
- * @returns {{ pattern: string, path?: string } | null}
- */
-function classifyGrep(tokens) {
-  /** @type {string | undefined} */
-  let pattern;
-  /** @type {string | undefined} */
-  let path;
-
-  for (let index = 1; index < tokens.length; index += 1) {
-    const token = tokens[index];
-    if (!token) {
-      continue;
-    }
-    if (token === "-e" || token === "--regexp") {
-      pattern = tokens[index + 1];
-      index += 1;
-      continue;
-    }
-    if (token === "--include" || token === "--exclude" || token === "--exclude-dir") {
-      index += 1;
-      continue;
-    }
-    if (token.startsWith("-")) {
-      continue;
-    }
-    if (!pattern) {
-      pattern = token;
-      continue;
-    }
-    path = token;
-    break;
-  }
-
-  return pattern ? { pattern, path } : null;
-}
-
-/**
  * @param {ToolActivityTitle} title
  * @param {string | null | undefined} [line]
  * @returns {ToolActivitySummary}
@@ -341,22 +182,6 @@ function createReadPresentation(path, cwd) {
     summary: formatActivitySummary(activity),
     activity,
     inspectMode: "read",
-  };
-}
-
-/**
- * @param {string | undefined} path
- * @param {string | null | undefined} cwd
- * @returns {ActivityPresentation}
- */
-function createListPresentation(path, cwd) {
-  const activity = createActivity("List", formatDisplayPath(path, cwd));
-  return {
-    kind: "activity",
-    toolName: "List",
-    summary: formatActivitySummary(activity),
-    activity,
-    inspectMode: "glob",
   };
 }
 
@@ -414,101 +239,6 @@ function createSimpleActivityPresentation(title, toolName, line, inspectMode, fl
     inspectMode,
     ...(flow ? { flow } : {}),
   };
-}
-
-/**
- * @param {string[]} tokens
- * @returns {string | undefined}
- */
-function findLastNonOptionToken(tokens) {
-  for (let index = tokens.length - 1; index >= 0; index -= 1) {
-    const token = tokens[index];
-    if (token && !token.startsWith("-")) {
-      return token;
-    }
-  }
-  return undefined;
-}
-
-/**
- * @param {string[]} tokens
- * @param {string | null | undefined} cwd
- * @returns {ActivityPresentation | null}
- */
-function classifySingleCommandActivity(tokens, cwd) {
-  const name = tokens[0];
-
-  if (!name) {
-    return null;
-  }
-
-  switch (name) {
-    case "rg": {
-      const match = classifyRipgrep(tokens);
-      if (!match) {
-        return null;
-      }
-      return match.mode === "list"
-        ? createListPresentation(match.path, cwd)
-        : createSearchPresentation(match.pattern ?? "", match.path, cwd);
-    }
-    case "grep": {
-      const match = classifyGrep(tokens);
-      return match ? createSearchPresentation(match.pattern, match.path, cwd) : null;
-    }
-    case "ls": {
-      const targetPath = tokens.slice(1).find((token) => !token.startsWith("-"));
-      return createListPresentation(targetPath, cwd);
-    }
-    case "find":
-    case "fd": {
-      const targetPath = tokens.slice(1).find((token) => !token.startsWith("-"));
-      return createListPresentation(targetPath, cwd);
-    }
-    case "cat":
-    case "bat": {
-      const filePath = tokens.slice(1).find((token) => !token.startsWith("-"));
-      return filePath ? createReadPresentation(filePath, cwd) : null;
-    }
-    case "head":
-    case "tail":
-    case "nl": {
-      const filePath = findLastNonOptionToken(tokens.slice(1));
-      return filePath ? createReadPresentation(filePath, cwd) : null;
-    }
-    case "sed": {
-      const filePath = findLastNonOptionToken(tokens.slice(1));
-      return filePath ? createReadPresentation(filePath, cwd) : null;
-    }
-    default:
-      return null;
-  }
-}
-
-/**
- * @param {string} command
- * @param {string | null | undefined} cwd
- * @returns {ActivityPresentation | null}
- */
-export function classifyCommandActivity(command, cwd) {
-  const segments = extractPrimaryShellSegments(command);
-  /** @type {ActivityPresentation | null} */
-  let firstMatch = null;
-
-  for (const segment of segments) {
-    const candidate = classifySingleCommandActivity(tokenizeShellWords(segment), cwd);
-    if (!candidate) {
-      continue;
-    }
-    if (!firstMatch) {
-      firstMatch = candidate;
-    }
-    if (candidate.activity.title === "Search") {
-      return candidate;
-    }
-  }
-
-  return firstMatch;
 }
 
 /**
@@ -802,19 +532,6 @@ function formatBashSummary(command) {
 }
 
 /**
- * @param {string} command
- * @param {string | null | undefined} cwd
- * @returns {ToolInspectMode}
- */
-function inferBashInspectMode(command, cwd) {
-  const activity = classifyCommandActivity(command, cwd);
-  if (!activity) {
-    return "bash";
-  }
-  return activity.inspectMode;
-}
-
-/**
  * @param {string} name
  * @param {Record<string, unknown>} args
  * @param {string | null | undefined} cwd
@@ -873,9 +590,9 @@ function buildSdkPresentation(name, args, cwd) {
         ? {
           kind: "bash",
           toolName: "Run Command",
-          summary: classifyCommandActivity(args.cmd, cwd)?.summary ?? `*Run Command*  \`${args.cmd.split("\n")[0]?.slice(0, 48) ?? ""}\``,
+          summary: `*Run Command*  \`${args.cmd.split("\n")[0]?.slice(0, 48) ?? ""}\``,
           command: args.cmd,
-          inspectMode: inferBashInspectMode(args.cmd, cwd),
+          inspectMode: "bash",
         }
         : null;
     case "update_plan":
@@ -885,9 +602,9 @@ function buildSdkPresentation(name, args, cwd) {
         ? {
           kind: "bash",
           toolName: "Bash",
-          summary: classifyCommandActivity(args.command, cwd)?.summary ?? formatBashSummary(args.command),
+          summary: formatBashSummary(args.command),
           command: args.command,
-          inspectMode: inferBashInspectMode(args.command, cwd),
+          inspectMode: "bash",
         }
         : null;
     default:

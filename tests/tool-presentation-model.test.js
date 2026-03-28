@@ -34,6 +34,28 @@ describe("tool presentation model", () => {
     assert.ok(block.code.includes("*** Begin Patch"), block.code);
   });
 
+  it("keeps shell commands as bash presentations", () => {
+    const searchPresentation = buildToolPresentation("Bash", {
+      command: "rg -n \"needle\" src",
+    }, undefined, "/repo", undefined);
+    const listPresentation = buildToolPresentation("Bash", {
+      command: "rg --files src",
+    }, undefined, "/repo", undefined);
+    const readPresentation = buildToolPresentation("Bash", {
+      command: "sed -n '1,20p' src/app.js",
+    }, undefined, "/repo", undefined);
+
+    assert.equal(formatToolPresentationSummary(searchPresentation), "*Bash*  `rg -n \"needle\" src`");
+    assert.equal(formatToolPresentationSummary(listPresentation), "*Bash*  `rg --files src`");
+    assert.equal(formatToolPresentationSummary(readPresentation), "*Bash*  `sed -n '1,20p' src/app.js`");
+    assert.equal(searchPresentation.kind, "bash");
+    assert.equal(searchPresentation.inspectMode, "bash");
+    assert.equal(listPresentation.kind, "bash");
+    assert.equal(listPresentation.inspectMode, "bash");
+    assert.equal(readPresentation.kind, "bash");
+    assert.equal(readPresentation.inspectMode, "bash");
+  });
+
   it("renders full plan details for inspect from the semantic presentation", () => {
     const presentation = buildToolPresentation("update_plan", {
       explanation: "Tighten the display labels",

@@ -14,7 +14,7 @@ function toolCall(name, args) {
 }
 
 describe("tool display", () => {
-  it("renders read and search activities by tool type instead of generic explored labels", () => {
+  it("keeps semantic labels for explicit tools but not for shell commands", () => {
     assert.equal(
       formatSdkToolCall("Read", { file_path: "/repo/src/app.js" }, "/repo"),
       "*Read*  `src/app.js`",
@@ -26,14 +26,14 @@ describe("tool display", () => {
     const bashResult = formatToolCallDisplay(toolCall("Bash", { command: "rg -n \"needle\" src" }), undefined, "/repo");
     assert.ok(Array.isArray(bashResult));
     assert.equal(bashResult[0]?.type, "code");
-    assert.equal(/** @type {CodeContentBlock} */ (bashResult[0]).caption, "*Search*  \"needle\" in `src`");
+    assert.equal(/** @type {CodeContentBlock} */ (bashResult[0]).caption, "*Bash*  `rg -n \"needle\" src`");
   });
 
-  it("renders file discovery as List with an inline target", () => {
+  it("keeps rg --files shell commands as Bash", () => {
     const bashResult = formatToolCallDisplay(toolCall("Bash", { command: "rg --files src" }), undefined, "/repo");
     assert.ok(Array.isArray(bashResult));
     assert.equal(bashResult[0]?.type, "code");
-    assert.equal(/** @type {CodeContentBlock} */ (bashResult[0]).caption, "*List*  `src`");
+    assert.equal(/** @type {CodeContentBlock} */ (bashResult[0]).caption, "*Bash*  `rg --files src`");
 
     assert.equal(
       formatSdkToolCall("Glob", { pattern: "*.js", path: "/repo/src" }, "/repo"),
@@ -41,7 +41,7 @@ describe("tool display", () => {
     );
   });
 
-  it("prefers the query from piped ripgrep searches over the rg --files segment", () => {
+  it("keeps piped ripgrep shell commands as Bash", () => {
     const bashResult = formatToolCallDisplay(
       toolCall("Bash", { command: "rg --files . | rg \"needle\"" }),
       undefined,
@@ -49,7 +49,18 @@ describe("tool display", () => {
     );
     assert.ok(Array.isArray(bashResult));
     assert.equal(bashResult[0]?.type, "code");
-    assert.equal(/** @type {CodeContentBlock} */ (bashResult[0]).caption, "*Search*  \"needle\"");
+    assert.equal(/** @type {CodeContentBlock} */ (bashResult[0]).caption, "*Bash*  `rg --files . | rg \"needle\"`");
+  });
+
+  it("keeps non-rg shell inspection commands as Bash", () => {
+    const bashResult = formatToolCallDisplay(
+      toolCall("Bash", { command: "sed -n '1,20p' src/app.js" }),
+      undefined,
+      "/repo",
+    );
+    assert.ok(Array.isArray(bashResult));
+    assert.equal(bashResult[0]?.type, "code");
+    assert.equal(/** @type {CodeContentBlock} */ (bashResult[0]).caption, "*Bash*  `sed -n '1,20p' src/app.js`");
   });
 
   it("renders web sub-actions with intent-specific labels", () => {
@@ -156,7 +167,7 @@ describe("tool display", () => {
 });
 
 describe("command inspect formatting", () => {
-  it("formats ripgrep command output using the search inspector", () => {
+  it("keeps ripgrep command output in the bash formatter", () => {
     const text = formatCommandInspectText(
       "rg -n \"needle\" src",
       [
@@ -165,12 +176,12 @@ describe("command inspect formatting", () => {
       ].join("\n"),
       "Bash",
     );
-    assert.ok(text.includes("*src/one.js*"), text);
-    assert.ok(text.includes("3: needle"), text);
-    assert.ok(text.includes("*src/two.js*"), text);
+    assert.ok(text.includes("```bash\nrg -n \"needle\" src\n```"), text);
+    assert.ok(text.includes("src/one.js:3:needle"), text);
+    assert.ok(text.includes("src/two.js:8:needle again"), text);
   });
 
-  it("formats read-like shell commands using the read inspector", () => {
+  it("keeps non-rg shell inspect output in the bash formatter", () => {
     const text = formatCommandInspectText(
       "sed -n '1,20p' src/app.js",
       [
@@ -180,8 +191,8 @@ describe("command inspect formatting", () => {
       "Bash",
     );
     assert.ok(text.includes("```bash\nsed -n '1,20p' src/app.js\n```"), text);
-    assert.ok(text.includes("```\nconst one = 1;\nconst two = 2;\n```"), text);
-    assert.ok(!text.includes("1\tconst one = 1;"), text);
+    assert.ok(text.includes("1\tconst one = 1;"), text);
+    assert.ok(text.includes("2\tconst two = 2;"), text);
   });
 
   it("keeps full plan details for inspect while summaries stay short", () => {

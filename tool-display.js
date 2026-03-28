@@ -8,7 +8,6 @@
 import { parseToolArgs } from "#harnesses";
 import {
   buildToolPresentation,
-  classifyCommandActivity,
   formatActivitySummary,
   shortenPath,
 } from "./tool-presentation-model.js";
@@ -103,7 +102,6 @@ export function formatToolCallDisplay(toolCall, actionFormatter, cwd, context) {
 
 export {
   buildToolPresentation,
-  classifyCommandActivity,
   formatActivitySummary,
   formatBashCommand,
   formatToolPresentationDisplay,
