@@ -457,6 +457,30 @@ describe("codex events", () => {
     });
   });
 
+  it("extracts app-server command output from camelCase aggregatedOutput", () => {
+    assert.deepEqual(normalizeCodexAppServerEvent({
+      method: "item/completed",
+      params: {
+        threadId: "thread-1",
+        item: {
+          id: "call-1",
+          type: "commandExecution",
+          command: "/bin/zsh -lc pwd",
+          status: "completed",
+          aggregatedOutput: "/home/mada/whatsapp-llm-bot\n",
+          exitCode: 0,
+        },
+      },
+    }), {
+      sessionId: "thread-1",
+      commandEvent: {
+        command: "pwd",
+        status: "completed",
+        output: "/home/mada/whatsapp-llm-bot\n",
+      },
+    });
+  });
+
   it("normalizes nested usage on turn completion", () => {
     assert.deepEqual(normalizeCodexEvent({
       type: "turn.completed",
