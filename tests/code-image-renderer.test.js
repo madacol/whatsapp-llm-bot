@@ -3,6 +3,18 @@ import assert from "node:assert/strict";
 import { renderCodeToImages, renderDiffToImages, renderUnifiedDiffToImages, maxCharsForLineCount } from "../code-image-renderer.js";
 import { formatBashCommand } from "../tool-display.js";
 
+/**
+ * @param {Buffer} png
+ * @returns {{ width: number, height: number }}
+ */
+function getPngDimensions(png) {
+  assert.deepStrictEqual(png.subarray(12, 16), Buffer.from("IHDR"));
+  return {
+    width: png.readUInt32BE(16),
+    height: png.readUInt32BE(20),
+  };
+}
+
 describe("code-image-renderer", () => {
   describe("renderCodeToImages", () => {
     it("renders a short code block successfully", async () => {
@@ -72,6 +84,38 @@ describe("code-image-renderer", () => {
 
       assert.ok(images.length > 0, "unified diff should produce at least one image");
       assert.ok(Buffer.isBuffer(images[0]), "unified diff render should return image buffers");
+    });
+
+    it("wraps long unified diff lines into a narrower, taller image", async () => {
+      const longLine = Array.from({ length: 40 }, (_, index) => `segment${index}`).join(" ");
+      const images = await renderUnifiedDiffToImages([
+        "--- a/plain.txt",
+        "+++ b/plain.txt",
+        "@@ -1 +1 @@",
+        `-${longLine}`,
+        `+${longLine} changed`,
+      ].join("\n"), "text");
+
+      assert.equal(images.length, 1, "wrapped long unified diff should still fit in a single image");
+      const { width, height } = getPngDimensions(images[0]);
+      assert.ok(width <= 260, `expected wrapped unified diff image to stay narrow, got ${width}px`);
+      assert.ok(height >= 400, `expected wrapped unified diff image to grow taller, got ${height}px`);
+    });
+
+    it("splits unified diffs into multiple shorter images to keep them less dense", async () => {
+      const diffLines = [
+        "--- a/plain.txt",
+        "+++ b/plain.txt",
+        "@@ -1,40 +1,40 @@",
+      ];
+
+      for (let index = 0; index < 40; index++) {
+        diffLines.push(`-const oldValue${index} = ${index};`);
+        diffLines.push(`+const newValue${index} = ${index + 1};`);
+      }
+
+      const images = await renderUnifiedDiffToImages(diffLines.join("\n"), "javascript");
+      assert.ok(images.length >= 2, `expected unified diff to split into multiple images, got ${images.length}`);
     });
   });
 

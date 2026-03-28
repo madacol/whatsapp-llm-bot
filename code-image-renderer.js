@@ -10,6 +10,7 @@ const FONT_SIZE = 14;
 const LINE_HEIGHT = 20;
 const PADDING = 16;
 const CHAR_WIDTH = FONT_SIZE * 0.6;
+const MIN_WRAP_CHARS = 20;
 
 /**
  * Maximum image aspect ratio (width:height) before WhatsApp crops or
@@ -19,6 +20,12 @@ const CHAR_WIDTH = FONT_SIZE * 0.6;
  * At 6:1: 1 line → 33 chars, 2 → 47, 3 → 61, 5+ → 80 (capped by caller).
  */
 const MAX_ASPECT_RATIO = 6;
+const DIFF_MAX_ASPECT_RATIO = 2;
+const MAX_PIXELS = 12_500_000;
+const MAX_SVG_WIDTH = 4000;
+const MAX_LINES_PER_CHUNK = 100;
+const DIFF_MAX_SVG_WIDTH = 2000;
+const DIFF_MAX_LINES_PER_CHUNK = 50;
 
 /**
  * Compute the maximum number of characters per line that keeps the rendered
@@ -28,11 +35,22 @@ const MAX_ASPECT_RATIO = 6;
  * @returns {number}
  */
 export function maxCharsForLineCount(lineCount) {
+  return maxCharsForLayout(lineCount, { maxAspectRatio: MAX_ASPECT_RATIO });
+}
+
+/**
+ * Compute the maximum number of content characters per line for a given layout.
+ * @param {number} lineCount
+ * @param {{ maxAspectRatio: number, gutterWidth?: number, prefixChars?: number }} options
+ * @returns {number}
+ */
+function maxCharsForLayout(lineCount, options) {
   const height = lineCount * LINE_HEIGHT + PADDING * 2;
-  const maxWidth = MAX_ASPECT_RATIO * height;
-  // svgWidth = chars * CHAR_WIDTH + PADDING + PADDING  (contentX = PADDING for non-diff)
-  const maxChars = Math.floor((maxWidth - PADDING * 2) / CHAR_WIDTH);
-  return Math.max(maxChars, 20); // floor at 20 to avoid absurdly narrow wrapping
+  const maxWidth = options.maxAspectRatio * height;
+  const gutterWidth = options.gutterWidth ?? 0;
+  const prefixChars = options.prefixChars ?? 0;
+  const maxChars = Math.floor((maxWidth - PADDING * 2 - gutterWidth) / CHAR_WIDTH) - prefixChars;
+  return Math.max(maxChars, MIN_WRAP_CHARS);
 }
 const GUTTER_WIDTH = 28; // Width for the +/- prefix gutter in diffs
 const FONT_FAMILY = "DejaVu Sans Mono";
@@ -119,21 +137,27 @@ async function loadLang(hl, lang) {
  */
 
 /**
+ * @typedef {{
+ *   gutterWidth?: number,
+ *   maxPixels?: number,
+ *   maxSvgWidth?: number,
+ *   maxLinesPerChunk?: number,
+ * }} AnnotatedLineRenderOptions
+ */
+
+/**
  * Render annotated token lines into PNG image buffers.
  * Each line can have an optional background color, gutter color, and prefix character.
  * @param {AnnotatedLine[]} lines
- * @param {{ gutterWidth?: number }} [opts]
+ * @param {AnnotatedLineRenderOptions} [opts]
  * @returns {Buffer[]}
  */
 function renderAnnotatedLines(lines, opts) {
   const gutterWidth = opts?.gutterWidth ?? 0;
   const contentX = PADDING + gutterWidth;
-
-  // Guard: max pixel budget to prevent OOM from Resvg rendering.
-  // Resvg allocates width × height × 4 bytes for the pixel buffer.
-  // Cap at ~50MB per image (50_000_000 / 4 = 12_500_000 pixels).
-  const MAX_PIXELS = 12_500_000;
-  const MAX_SVG_WIDTH = 4000; // ~475 chars at 8.4px/char — generous but bounded
+  const maxPixels = opts?.maxPixels ?? MAX_PIXELS;
+  const maxSvgWidth = opts?.maxSvgWidth ?? MAX_SVG_WIDTH;
+  const maxLinesPerChunkLimit = opts?.maxLinesPerChunk ?? MAX_LINES_PER_CHUNK;
 
   // Compute image width from the widest line across ALL lines so chunks
   // share a consistent width and we can derive an adaptive chunk size.
@@ -143,14 +167,13 @@ function renderAnnotatedLines(lines, opts) {
     const width = estimateTextWidth(lineText);
     if (width > maxLineWidth) maxLineWidth = width;
   }
-  const svgWidth = Math.min(Math.max(maxLineWidth + contentX + PADDING, 200), MAX_SVG_WIDTH);
+  const svgWidth = Math.min(Math.max(maxLineWidth + contentX + PADDING, 200), maxSvgWidth);
 
   // Adaptive chunk size: fit as many lines as the pixel budget allows,
   // but cap at 100 lines for readability on mobile screens.
-  const MAX_LINES_PER_CHUNK = 100;
   const maxLinesPerChunk = Math.min(
-    MAX_LINES_PER_CHUNK,
-    Math.max(10, Math.floor((MAX_PIXELS / svgWidth - PADDING * 2) / LINE_HEIGHT)),
+    maxLinesPerChunkLimit,
+    Math.max(10, Math.floor((maxPixels / svgWidth - PADDING * 2) / LINE_HEIGHT)),
   );
 
   /** @type {AnnotatedLine[][]} */
@@ -517,7 +540,7 @@ export async function renderDiffToImages(oldStr, newStr, language) {
     }
   }
 
-  return renderAnnotatedLines(lines, { gutterWidth: GUTTER_WIDTH });
+  return renderDiffAnnotatedLines(lines);
 }
 
 /**
@@ -577,7 +600,7 @@ export async function renderUnifiedDiffToImages(diffText, language) {
     lines.push({ tokens: createPlainTokens(rawLine) });
   }
 
-  return renderAnnotatedLines(lines, { gutterWidth: GUTTER_WIDTH });
+  return renderDiffAnnotatedLines(lines);
 }
 
 /**
@@ -598,4 +621,141 @@ function tokenizeDiffContentLine(hl, line, language) {
  */
 function createPlainTokens(content, color = TEXT_COLOR) {
   return [{ content, color, offset: 0 }];
+}
+
+/**
+ * Wrap annotated lines to keep diff images narrow enough to stay readable in WhatsApp.
+ * @param {AnnotatedLine[]} lines
+ * @param {number} maxContentChars
+ * @returns {AnnotatedLine[]}
+ */
+function wrapAnnotatedLines(lines, maxContentChars) {
+  if (maxContentChars <= 0) {
+    return lines;
+  }
+
+  /** @type {AnnotatedLine[]} */
+  const wrappedLines = [];
+
+  for (const line of lines) {
+    const text = line.tokens.map(token => token.content).join("");
+    if (text.length <= maxContentChars) {
+      wrappedLines.push(line);
+      continue;
+    }
+
+    for (const range of splitWrapRanges(text, maxContentChars)) {
+      wrappedLines.push({
+        ...line,
+        tokens: sliceTokens(line.tokens, range.start, range.end),
+      });
+    }
+  }
+
+  return wrappedLines;
+}
+
+/**
+ * @param {string} text
+ * @param {number} maxContentChars
+ * @returns {Array<{ start: number, end: number }>}
+ */
+function splitWrapRanges(text, maxContentChars) {
+  /** @type {Array<{ start: number, end: number }>} */
+  const ranges = [];
+  let start = 0;
+
+  while (start < text.length) {
+    const remaining = text.length - start;
+    if (remaining <= maxContentChars) {
+      ranges.push({ start, end: text.length });
+      break;
+    }
+
+    const limit = start + maxContentChars;
+    let breakAt = -1;
+    for (let index = limit; index > start; index--) {
+      if (/\s/.test(text[index - 1] ?? "")) {
+        breakAt = index - 1;
+        break;
+      }
+    }
+
+    if (breakAt < start) {
+      ranges.push({ start, end: limit });
+      start = limit;
+      continue;
+    }
+
+    let nextStart = breakAt + 1;
+    while (nextStart < text.length && /\s/.test(text[nextStart] ?? "")) {
+      nextStart += 1;
+    }
+
+    if (breakAt === start) {
+      ranges.push({ start, end: limit });
+      start = limit;
+      continue;
+    }
+
+    ranges.push({ start, end: breakAt });
+    start = nextStart;
+  }
+
+  return ranges;
+}
+
+/**
+ * @param {import("shiki").ThemedToken[]} tokens
+ * @param {number} start
+ * @param {number} end
+ * @returns {import("shiki").ThemedToken[]}
+ */
+function sliceTokens(tokens, start, end) {
+  /** @type {import("shiki").ThemedToken[]} */
+  const slicedTokens = [];
+  let offset = 0;
+
+  for (const token of tokens) {
+    const tokenStart = offset;
+    const tokenEnd = tokenStart + token.content.length;
+    offset = tokenEnd;
+
+    if (tokenEnd <= start || tokenStart >= end) {
+      continue;
+    }
+
+    const sliceStart = Math.max(start - tokenStart, 0);
+    const sliceEnd = Math.min(end - tokenStart, token.content.length);
+    const content = token.content.slice(sliceStart, sliceEnd);
+    if (!content) {
+      continue;
+    }
+
+    slicedTokens.push({
+      ...token,
+      content,
+      offset: slicedTokens.length === 0 ? 0 : slicedTokens[slicedTokens.length - 1].offset + slicedTokens[slicedTokens.length - 1].content.length,
+    });
+  }
+
+  return slicedTokens.length > 0 ? slicedTokens : createPlainTokens("");
+}
+
+/**
+ * @param {AnnotatedLine[]} lines
+ * @returns {Buffer[]}
+ */
+function renderDiffAnnotatedLines(lines) {
+  const maxContentChars = maxCharsForLayout(lines.length, {
+    maxAspectRatio: DIFF_MAX_ASPECT_RATIO,
+    gutterWidth: GUTTER_WIDTH,
+    prefixChars: 1,
+  });
+  const wrappedLines = wrapAnnotatedLines(lines, maxContentChars);
+  return renderAnnotatedLines(wrappedLines, {
+    gutterWidth: GUTTER_WIDTH,
+    maxSvgWidth: DIFF_MAX_SVG_WIDTH,
+    maxLinesPerChunk: DIFF_MAX_LINES_PER_CHUNK,
+  });
 }
