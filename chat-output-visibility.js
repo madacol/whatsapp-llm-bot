@@ -191,3 +191,25 @@ export function buildOutputVisibilityOverrides(enabledKeys) {
 
   return overrides;
 }
+
+/**
+ * Toggle a subset of keys relative to the current resolved visibility.
+ * @param {unknown} raw
+ * @param {readonly OutputVisibilityKey[]} toggledKeys
+ * @returns {OutputVisibilityOverrides}
+ */
+export function toggleOutputVisibilityOverrides(raw, toggledKeys) {
+  const current = resolveOutputVisibility(raw);
+  const toggledSet = new Set(toggledKeys);
+  /** @type {OutputVisibilityKey[]} */
+  const enabledKeys = [];
+
+  for (const flag of OUTPUT_VISIBILITY_FLAGS) {
+    const enabled = toggledSet.has(flag.key) ? !current[flag.key] : current[flag.key];
+    if (enabled) {
+      enabledKeys.push(flag.key);
+    }
+  }
+
+  return buildOutputVisibilityOverrides(enabledKeys);
+}

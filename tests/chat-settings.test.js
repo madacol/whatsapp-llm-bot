@@ -411,15 +411,14 @@ describe("per-chat model selection", () => {
         currentIds: ["commands", "tools", "changes"],
       });
       assert.ok(result.includes("thinking on"), `expected selected thinking flag, got: ${result}`);
-      assert.ok(result.includes("changes on"), `expected selected changes flag, got: ${result}`);
-      assert.ok(result.includes("commands off"), `expected deselected commands flag, got: ${result}`);
-      assert.ok(result.includes("tools off"), `expected deselected tools flag, got: ${result}`);
+      assert.ok(result.includes("changes off"), `expected toggled changes flag, got: ${result}`);
+      assert.ok(result.includes("commands on"), `expected untouched commands flag, got: ${result}`);
+      assert.ok(result.includes("tools on"), `expected untouched tools flag, got: ${result}`);
 
       const rows = await db.sql`SELECT output_visibility FROM chats WHERE chat_id = 'cfg-show-3'`;
       assert.deepEqual(rows.rows[0]?.output_visibility, {
-        commands: false,
         thinking: true,
-        tools: false,
+        changes: false,
       });
     });
   });

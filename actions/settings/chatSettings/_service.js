@@ -13,6 +13,7 @@ import {
   getEnabledOutputVisibilityKeys,
   isOutputVisibilityKey,
   DEFAULT_OUTPUT_VISIBILITY,
+  toggleOutputVisibilityOverrides,
 } from "../../../chat-output-visibility.js";
 
 /**
@@ -382,7 +383,7 @@ const BASE_CONFIG_KEYS = [
     resettable: true,
     formatCurrent: (chat) => formatOutputVisibility(chat.output_visibility),
     formatDefault: () => formatOutputVisibilityDefault(),
-    setValue: async ({ rootDb, chatId, value }) => {
+    setValue: async ({ rootDb, chatId, chat, value }) => {
       const trimmed = value.trim();
       if (trimmed.length === 0) {
         await rootDb.sql`UPDATE chats SET output_visibility = '{}'::jsonb WHERE chat_id = ${chatId}`;
@@ -405,7 +406,7 @@ const BASE_CONFIG_KEYS = [
       if (!areOutputVisibilityKeys(selectedIds)) {
         return "Use `!c show` to pick visible outputs, or `!c reset show` to restore defaults.";
       }
-      const nextVisibility = buildOutputVisibilityOverrides(selectedIds);
+      const nextVisibility = toggleOutputVisibilityOverrides(chat.output_visibility, selectedIds);
       await rootDb.sql`
         UPDATE chats
         SET output_visibility = ${JSON.stringify(nextVisibility)}::jsonb
