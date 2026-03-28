@@ -11,6 +11,7 @@ const log = createLogger("whatsapp:select");
 const POLL_TTL_MS = 10 * 60 * 1000;
 const MAX_SENT_POLLS = 200;
 const SELECT_TIMEOUT_MS = 5 * 60 * 1000;
+const MULTI_SELECT_IDLE_COMMIT_MS = 3 * 1000;
 
 /**
  * @typedef {import('@whiskeysockets/baileys').WASocket | (() => import('@whiskeysockets/baileys').WASocket | null)} SocketResolver
@@ -54,6 +55,8 @@ export function getPollCreationData(msg) {
 /**
  * @typedef {PendingSelectBase & {
  *   mode: "multi";
+ *   idleTimer: ReturnType<typeof setTimeout> | null;
+ *   selectedIds: string[];
  *   settle: (ids: string[], options?: SelectSettlementOptions) => void;
  * }} PendingMultiSelect
  */
@@ -322,16 +325,24 @@ export function createSelectRuntime() {
       const entry = pending.get(event.pollMsgId);
       if (!entry || event.selectedOptions.length === 0) return false;
 
-      clearTimeout(entry.timer);
-      pending.delete(event.pollMsgId);
-
       const selectedIds = event.selectedOptions
         .map((label) => entry.labelToId.get(label) ?? label)
         .filter((id) => id.length > 0);
 
       if (entry.mode === "multi") {
-        entry.settle(selectedIds);
+        entry.selectedIds = selectedIds;
+        if (entry.idleTimer) {
+          clearTimeout(entry.idleTimer);
+        }
+        entry.idleTimer = setTimeout(() => {
+          clearTimeout(entry.timer);
+          pending.delete(event.pollMsgId);
+          entry.settle(entry.selectedIds);
+        }, MULTI_SELECT_IDLE_COMMIT_MS);
+        entry.idleTimer.unref?.();
       } else {
+        clearTimeout(entry.timer);
+        pending.delete(event.pollMsgId);
         entry.settle(selectedIds[0] ?? "");
       }
       return true;
@@ -423,6 +434,10 @@ export function createSelectRuntime() {
 
         return new Promise((resolve) => {
           const timer = setTimeout(() => {
+            const entry = pending.get(promptData.pollMsgId);
+            if (entry?.mode === "multi" && entry.idleTimer) {
+              clearTimeout(entry.idleTimer);
+            }
             pending.delete(promptData.pollMsgId);
             settle([]);
           }, timeout);
@@ -447,7 +462,14 @@ export function createSelectRuntime() {
             resolve(ids);
           }
 
-          pending.set(promptData.pollMsgId, { mode: "multi", settle, timer, labelToId: promptData.labelToId });
+          pending.set(promptData.pollMsgId, {
+            mode: "multi",
+            idleTimer: null,
+            selectedIds: [],
+            settle,
+            timer,
+            labelToId: promptData.labelToId,
+          });
         });
       };
     },
@@ -470,6 +492,9 @@ export function createSelectRuntime() {
       for (const entry of pending.values()) {
         clearTimeout(entry.timer);
         if (entry.mode === "multi") {
+          if (entry.idleTimer) {
+            clearTimeout(entry.idleTimer);
+          }
           entry.settle([], { suppressEffects: true });
         } else {
           entry.settle("", { suppressEffects: true });
