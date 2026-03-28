@@ -2,7 +2,6 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, renameSync, rmSync } f
 import { homedir, tmpdir } from "node:os";
 import { resolve } from "node:path";
 import config from "./config.js";
-import { buildCommandPresentation } from "./tool-presentation-model.js";
 import { formatCommandInspectText as formatWhatsappCommandInspectText } from "./presentation/whatsapp.js";
 
 /** Workspaces live outside the bot project so the SDK's upward CLAUDE.md
@@ -198,8 +197,7 @@ export function createToolMessage(toolId, text) {
  * @returns {string}
  */
 export function formatCommandInspectText(command, output, toolName) {
-  const presentation = buildCommandPresentation(command, undefined);
-  const inspectMode = toolName === "Bash" ? presentation.inspectMode : "plain";
+  const inspectMode = toolName === "Bash" ? "bash" : "plain";
   return formatWhatsappCommandInspectText(command, output, inspectMode);
 }
 
