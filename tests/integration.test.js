@@ -307,7 +307,7 @@ describe("Scenario 7b: Guided setup command", () => {
     assert.equal(chat.respond_on, "mention+reply");
     assert.equal(chat.memory, false);
     assert.equal(chat.debug, false);
-    assert.deepEqual(chat.output_visibility, { commands: false, thinking: true, tools: false });
+    assert.deepEqual(chat.output_visibility, { thinking: true, changes: false });
     assert.equal(chat.harness, "codex");
     assert.equal(chat.harness_config.codex.model, "gpt-5.4");
   });
