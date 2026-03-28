@@ -11,6 +11,8 @@ const LINE_HEIGHT = 20;
 const PADDING = 16;
 const CHAR_WIDTH = FONT_SIZE * 0.6;
 const MIN_WRAP_CHARS = 20;
+const WRAP_WIDTH_MULTIPLIER = 3;
+const CONTINUATION_INDENT = "    ";
 
 /**
  * Maximum image aspect ratio (width:height) before WhatsApp renders the
@@ -129,6 +131,13 @@ async function loadLang(hl, lang) {
 
 /**
  * @typedef {{ tokens: import("shiki").ThemedToken[]; bg?: string; gutter?: string; prefix?: string }} AnnotatedLine
+ */
+
+/**
+ * @typedef {{
+ *   maxContentChars: number,
+ *   continuationIndent?: string,
+ * }} AnnotatedLineWrapOptions
  */
 
 /**
@@ -621,13 +630,17 @@ function createPlainTokens(content, color = TEXT_COLOR) {
 /**
  * Wrap annotated lines to keep code and diff images readable in WhatsApp.
  * @param {AnnotatedLine[]} lines
- * @param {number} maxContentChars
+ * @param {AnnotatedLineWrapOptions} options
  * @returns {AnnotatedLine[]}
  */
-function wrapAnnotatedLines(lines, maxContentChars) {
+export function wrapAnnotatedLinesForDisplay(lines, options) {
+  const maxContentChars = options.maxContentChars;
   if (maxContentChars <= 0) {
     return lines;
   }
+
+  const continuationIndent = options.continuationIndent ?? CONTINUATION_INDENT;
+  const continuationContentChars = Math.max(maxContentChars - continuationIndent.length, 1);
 
   /** @type {AnnotatedLine[]} */
   const wrappedLines = [];
@@ -639,10 +652,13 @@ function wrapAnnotatedLines(lines, maxContentChars) {
       continue;
     }
 
-    for (const range of splitWrapRanges(text, maxContentChars)) {
+    const ranges = splitWrapRanges(text, maxContentChars, continuationContentChars);
+    for (let index = 0; index < ranges.length; index += 1) {
+      const range = ranges[index];
+      const tokens = sliceTokens(line.tokens, range.start, range.end);
       wrappedLines.push({
         ...line,
-        tokens: sliceTokens(line.tokens, range.start, range.end),
+        tokens: index === 0 ? tokens : prefixTokens(tokens, continuationIndent),
       });
     }
   }
@@ -652,22 +668,24 @@ function wrapAnnotatedLines(lines, maxContentChars) {
 
 /**
  * @param {string} text
- * @param {number} maxContentChars
+ * @param {number} firstLineChars
+ * @param {number} continuationChars
  * @returns {Array<{ start: number, end: number }>}
  */
-function splitWrapRanges(text, maxContentChars) {
+function splitWrapRanges(text, firstLineChars, continuationChars) {
   /** @type {Array<{ start: number, end: number }>} */
   const ranges = [];
   let start = 0;
+  let currentLineChars = firstLineChars;
 
   while (start < text.length) {
     const remaining = text.length - start;
-    if (remaining <= maxContentChars) {
+    if (remaining <= currentLineChars) {
       ranges.push({ start, end: text.length });
       break;
     }
 
-    const limit = start + maxContentChars;
+    const limit = start + currentLineChars;
     let breakAt = -1;
     for (let index = limit; index > start; index--) {
       if (/\s/.test(text[index - 1] ?? "")) {
@@ -679,6 +697,7 @@ function splitWrapRanges(text, maxContentChars) {
     if (breakAt < start) {
       ranges.push({ start, end: limit });
       start = limit;
+      currentLineChars = continuationChars;
       continue;
     }
 
@@ -690,11 +709,13 @@ function splitWrapRanges(text, maxContentChars) {
     if (breakAt === start) {
       ranges.push({ start, end: limit });
       start = limit;
+      currentLineChars = continuationChars;
       continue;
     }
 
     ranges.push({ start, end: breakAt });
     start = nextStart;
+    currentLineChars = continuationChars;
   }
 
   return ranges;
@@ -738,6 +759,31 @@ function sliceTokens(tokens, start, end) {
 }
 
 /**
+ * @param {import("shiki").ThemedToken[]} tokens
+ * @param {string} prefix
+ * @returns {import("shiki").ThemedToken[]}
+ */
+function prefixTokens(tokens, prefix) {
+  if (!prefix) {
+    return tokens;
+  }
+
+  /** @type {import("shiki").ThemedToken[]} */
+  const prefixedTokens = createPlainTokens(prefix);
+  let offset = prefix.length;
+
+  for (const token of tokens) {
+    prefixedTokens.push({
+      ...token,
+      offset,
+    });
+    offset += token.content.length;
+  }
+
+  return prefixedTokens;
+}
+
+/**
  * @param {AnnotatedLine[]} lines
  * @param {{ gutterWidth?: number, prefixChars?: number }} [options]
  * @returns {Buffer[]}
@@ -745,12 +791,15 @@ function sliceTokens(tokens, start, end) {
 function renderCodeLikeAnnotatedLines(lines, options) {
   const gutterWidth = options?.gutterWidth ?? 0;
   const prefixChars = options?.prefixChars ?? 0;
-  const maxContentChars = maxCharsForLayout(lines.length, {
+  const baseContentChars = maxCharsForLayout(lines.length, {
     maxAspectRatio: MAX_ASPECT_RATIO,
     gutterWidth,
     prefixChars,
   });
-  const wrappedLines = wrapAnnotatedLines(lines, maxContentChars);
+  const wrappedLines = wrapAnnotatedLinesForDisplay(lines, {
+    maxContentChars: baseContentChars * WRAP_WIDTH_MULTIPLIER,
+    continuationIndent: CONTINUATION_INDENT,
+  });
   return renderAnnotatedLines(wrappedLines, {
     gutterWidth,
     maxSvgWidth: MAX_SVG_WIDTH,

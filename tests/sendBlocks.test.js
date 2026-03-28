@@ -29,18 +29,37 @@ before(async () => {
 
 /**
  * Create a mock socket that captures sent messages.
- * @returns {{ sock: any, sent: Array<{ chatId: string; msg: Record<string, unknown> }> }}
+ * @returns {{
+ *   sock: {
+ *     sendMessage: (chatId: string, msg: Record<string, unknown>) => Promise<{ key: { id: string, remoteJid: string } }>,
+ *     relayMessage: (chatId: string, msg: Record<string, unknown>, opts: Record<string, unknown>) => Promise<void>,
+ *     waUploadToServer: (filePath: string, options: Record<string, unknown>) => Promise<{ mediaUrl: string, directPath: string }>,
+ *     user: { id: string },
+ *   },
+ *   sent: Array<{ chatId: string; msg: Record<string, unknown> }>,
+ *   relayed: Array<{ chatId: string; msg: Record<string, unknown>; opts: Record<string, unknown> }>,
+ * }}
  */
 function createMockSock() {
   /** @type {Array<{ chatId: string; msg: Record<string, unknown> }>} */
   const sent = [];
+  /** @type {Array<{ chatId: string; msg: Record<string, unknown>; opts: Record<string, unknown> }>} */
+  const relayed = [];
   const sock = {
     sendMessage: async (/** @type {string} */ chatId, /** @type {Record<string, unknown>} */ msg) => {
       sent.push({ chatId, msg });
       return { key: { id: `msg-${sent.length}`, remoteJid: chatId } };
     },
+    relayMessage: async (/** @type {string} */ chatId, /** @type {Record<string, unknown>} */ msg, /** @type {Record<string, unknown>} */ opts) => {
+      relayed.push({ chatId, msg, opts });
+    },
+    waUploadToServer: async () => ({
+      mediaUrl: "https://example.test/media",
+      directPath: "/direct/path",
+    }),
+    user: { id: "test-user@s.whatsapp.net" },
   };
-  return { sock, sent };
+  return { sock, sent, relayed };
 }
 
 describe("sendBlocks – markdown with code", () => {
@@ -91,7 +110,7 @@ And some text after.`;
   });
 
   it("long code that splits into multiple images sends them in a single message", async () => {
-    const { sock, sent } = createMockSock();
+    const { sock, sent, relayed } = createMockSock();
 
     // 100 lines of narrow code — fits in a single image after adaptive splitting
     const longCode = Array.from({ length: 100 }, (_, i) => `const x${i} = ${i};`).join("\n");
@@ -104,10 +123,13 @@ And some text after.`;
     // separate sock.sendMessage calls — otherwise the user gets spammed with
     // individual image messages for what is conceptually one code block.
     const imageMessages = sent.filter(s => s.msg.image != null);
-    assert.equal(
-      imageMessages.length, 1,
-      `Split images from a single code block should be sent as one message, got ${imageMessages.length}`,
-    );
+    assert.equal(imageMessages.length, 0, "Album sends should not fall back to separate sendMessage image calls");
+
+    const albumHeaders = relayed.filter(({ msg }) => msg.albumMessage != null);
+    assert.equal(albumHeaders.length, 1, `Expected one album header relay, got ${albumHeaders.length}`);
+
+    const albumImages = relayed.filter(({ msg }) => msg.imageMessage != null);
+    assert.ok(albumImages.length >= 2, `Expected relayed album images, got ${albumImages.length}`);
   });
 
   it("renders multiple code blocks as separate images", async () => {

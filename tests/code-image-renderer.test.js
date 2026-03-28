@@ -1,6 +1,12 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { renderCodeToImages, renderDiffToImages, renderUnifiedDiffToImages, maxCharsForLineCount } from "../code-image-renderer.js";
+import {
+  renderCodeToImages,
+  renderDiffToImages,
+  renderUnifiedDiffToImages,
+  maxCharsForLineCount,
+  wrapAnnotatedLinesForDisplay,
+} from "../code-image-renderer.js";
 import { formatBashCommand } from "../tool-display.js";
 
 /**
@@ -39,13 +45,13 @@ describe("code-image-renderer", () => {
       assert.ok(images.length >= 2, `200 wide lines should split, got ${images.length} image(s)`);
     });
 
-    it("wraps long code lines into a narrower, taller image", async () => {
+    it("wraps long code lines into a bounded, taller image", async () => {
       const longLine = Array.from({ length: 40 }, (_, index) => `segment${index}`).join(" ");
       const images = await renderCodeToImages(longLine, "text");
       assert.equal(images.length, 1, "wrapped long code should still fit in a single image");
       const { width, height } = getPngDimensions(images[0]);
-      assert.ok(width <= 220, `expected wrapped code image to stay narrow, got ${width}px`);
-      assert.ok(height >= 400, `expected wrapped code image to grow taller, got ${height}px`);
+      assert.ok(width <= 560, `expected wrapped code image to stay bounded, got ${width}px`);
+      assert.ok(height >= 160, `expected wrapped code image to grow taller, got ${height}px`);
     });
 
     it("hard-wraps extremely long single tokens instead of rendering an excessively wide image", async () => {
@@ -53,8 +59,20 @@ describe("code-image-renderer", () => {
       const images = await renderCodeToImages(longLine, "text");
       assert.ok(images.length > 0, "very long single-token code should still render");
       const { width, height } = getPngDimensions(images[0]);
-      assert.ok(width <= 220, `expected hard-wrapped code image to stay narrow, got ${width}px`);
-      assert.ok(height >= 400, `expected hard-wrapped code image to grow taller, got ${height}px`);
+      assert.ok(width <= 560, `expected hard-wrapped code image to stay bounded, got ${width}px`);
+      assert.ok(height >= 1000, `expected hard-wrapped code image to grow taller, got ${height}px`);
+    });
+
+    it("keeps lines under the 3x wrap threshold on a single rendered line", async () => {
+      const baseWrapWidth = maxCharsForLineCount(1);
+      const line = "x".repeat(baseWrapWidth * 2);
+      const images = await renderCodeToImages(line, "text");
+
+      assert.equal(images.length, 1, "single-line code should stay in one image");
+
+      const { width, height } = getPngDimensions(images[0]);
+      assert.equal(height, 52, `expected no wrapping under the wider threshold, got ${height}px tall image`);
+      assert.ok(width > 300, `expected the wider threshold to allow a wider single line, got ${width}px`);
     });
 
     it("returns empty array for empty code", async () => {
@@ -94,7 +112,7 @@ describe("code-image-renderer", () => {
       assert.ok(Buffer.isBuffer(images[0]), "unified diff render should return image buffers");
     });
 
-    it("wraps long unified diff lines into a narrower, taller image", async () => {
+    it("wraps long unified diff lines into a bounded, taller image", async () => {
       const longLine = Array.from({ length: 40 }, (_, index) => `segment${index}`).join(" ");
       const images = await renderUnifiedDiffToImages([
         "--- a/plain.txt",
@@ -106,8 +124,8 @@ describe("code-image-renderer", () => {
 
       assert.equal(images.length, 1, "wrapped long unified diff should still fit in a single image");
       const { width, height } = getPngDimensions(images[0]);
-      assert.ok(width <= 260, `expected wrapped unified diff image to stay narrow, got ${width}px`);
-      assert.ok(height >= 400, `expected wrapped unified diff image to grow taller, got ${height}px`);
+      assert.ok(width <= 620, `expected wrapped unified diff image to stay bounded, got ${width}px`);
+      assert.ok(height >= 300, `expected wrapped unified diff image to grow taller, got ${height}px`);
     });
 
     it("splits unified diffs into multiple shorter images to keep them less dense", async () => {
@@ -192,6 +210,29 @@ describe("code-image-renderer", () => {
       const one = maxCharsForLineCount(1);
       const ten = maxCharsForLineCount(10);
       assert.ok(ten > one, "more lines should allow wider images");
+    });
+  });
+
+  describe("wrapAnnotatedLinesForDisplay", () => {
+    it("indents wrapped continuation lines", () => {
+      const wrapped = wrapAnnotatedLinesForDisplay([
+        {
+          tokens: [{ content: "alpha beta gamma delta", color: "#e6edf3", offset: 0 }],
+          bg: "#123456",
+          gutter: "#654321",
+          prefix: "+",
+        },
+      ], {
+        maxContentChars: 12,
+      });
+
+      assert.equal(wrapped.length, 3, `expected wrapping into three lines, got ${wrapped.length}`);
+      assert.equal(wrapped[0]?.tokens.map(token => token.content).join(""), "alpha beta");
+      assert.equal(wrapped[1]?.tokens.map(token => token.content).join(""), "    gamma");
+      assert.equal(wrapped[2]?.tokens.map(token => token.content).join(""), "    delta");
+      assert.equal(wrapped[1]?.prefix, "+");
+      assert.equal(wrapped[1]?.bg, "#123456");
+      assert.equal(wrapped[1]?.gutter, "#654321");
     });
   });
 });
