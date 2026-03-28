@@ -399,16 +399,16 @@ describe("per-chat model selection", () => {
       assert.deepEqual(
         pickerOptions,
         [
-          { id: "commands", label: "commands (on)" },
-          { id: "thinking", label: "thinking (off)" },
-          { id: "tools", label: "tools (on)" },
-          { id: "changes", label: "changes (on)" },
-          { id: "none", label: "none (off)" },
+          { id: "commands", label: "commands (on; tap=off)" },
+          { id: "thinking", label: "thinking (off; tap=on)" },
+          { id: "tools", label: "tools (on; tap=off)" },
+          { id: "changes", label: "changes (on; tap=off)" },
+          { id: "none", label: "none (off; tap=reset)" },
         ],
       );
       assert.deepEqual(pickerConfig, {
         deleteOnSelect: true,
-        currentIds: ["commands", "tools", "changes"],
+        currentIds: [],
       });
       assert.ok(result.includes("thinking on"), `expected selected thinking flag, got: ${result}`);
       assert.ok(result.includes("changes off"), `expected toggled changes flag, got: ${result}`);
