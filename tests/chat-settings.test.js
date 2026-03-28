@@ -57,6 +57,7 @@ describe("per-chat model selection", () => {
       assert.equal(prompt?.picker, undefined, "prompt should remain free-text");
       assert.equal(show?.setting, "output_visibility");
       assert.deepEqual(show?.flags?.map((flag) => flag.key), ["commands", "thinking", "tools", "changes"]);
+      assert.ok(show?.multiPicker, "expected show multi-picker metadata");
     });
   });
 
@@ -350,29 +351,20 @@ describe("per-chat model selection", () => {
       assert.ok(result.includes("- changes"), `expected changes flag, got: ${result}`);
     });
 
-    it("stores show flag overrides without persisting default values", async () => {
+    it("does not accept text subcommands for show anymore", async () => {
       await db.sql`INSERT INTO chats(chat_id) VALUES ('cfg-show-2') ON CONFLICT DO NOTHING`;
 
       const mod = await import("../actions/settings/chatSettings/index.js");
       const action = mod.default;
-      const offResult = await action.action_fn(
+      const result = await action.action_fn(
         { chatId: "cfg-show-2", rootDb: db, senderIds: ["u1"] },
         { setting: "show", value: "commands off" },
       );
-      assert.ok(offResult.includes("commands"), `expected flag name in confirmation, got: ${offResult}`);
-      assert.ok(offResult.includes("off"), `expected off confirmation, got: ${offResult}`);
 
-      let rows = await db.sql`SELECT output_visibility FROM chats WHERE chat_id = 'cfg-show-2'`;
-      assert.deepEqual(rows.rows[0]?.output_visibility, { commands: false });
+      assert.ok(result.includes("Use `!c show`"), `expected picker guidance, got: ${result}`);
+      assert.ok(result.includes("!c reset show"), `expected reset guidance, got: ${result}`);
 
-      const onResult = await action.action_fn(
-        { chatId: "cfg-show-2", rootDb: db, senderIds: ["u1"] },
-        { setting: "show", value: "commands on" },
-      );
-      assert.ok(onResult.includes("commands"), `expected flag name in confirmation, got: ${onResult}`);
-      assert.ok(onResult.includes("on"), `expected on confirmation, got: ${onResult}`);
-
-      rows = await db.sql`SELECT output_visibility FROM chats WHERE chat_id = 'cfg-show-2'`;
+      const rows = await db.sql`SELECT output_visibility FROM chats WHERE chat_id = 'cfg-show-2'`;
       assert.deepEqual(rows.rows[0]?.output_visibility, {});
     });
 

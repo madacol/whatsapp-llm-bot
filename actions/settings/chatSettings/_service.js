@@ -6,11 +6,13 @@ import { getChatOrThrow } from "../../../store.js";
 import { ROLE_DEFINITIONS, resolveModel } from "../../../model-roles.js";
 import { listHarnesses } from "#harnesses";
 import {
+  buildOutputVisibilityOverrides,
   OUTPUT_VISIBILITY_FLAGS,
   formatOutputVisibility,
   formatOutputVisibilityDefault,
-  getOutputVisibilityFlagDefinition,
-  setOutputVisibilityOverride,
+  getEnabledOutputVisibilityKeys,
+  isOutputVisibilityKey,
+  DEFAULT_OUTPUT_VISIBILITY,
 } from "../../../chat-output-visibility.js";
 
 /**
@@ -44,6 +46,7 @@ export const SETTINGS = [
 const RESPOND_ON_VALUES = ["any", "mention+reply", "mention"];
 const CHAT_WORKSPACE_DEFAULT_LABEL = "chat workspace default";
 const BOOL_VALUE_IDS = ["on", "off"];
+const SHOW_NONE_OPTION_ID = "none";
 
 /**
  * @typedef {import("../../../chat-output-visibility.js").OutputVisibilityFlagDefinition} ConfigFlagDefinition
@@ -55,6 +58,14 @@ const BOOL_VALUE_IDS = ["on", "off"];
  *   options?: readonly string[];
  *   getOptions?: () => readonly string[];
  * }} ConfigPickerDefinition
+ */
+
+/**
+ * @typedef {{
+ *   currentIds: (chat: import("../../../store.js").ChatRow) => string[];
+ *   options?: readonly string[];
+ *   getOptions?: () => readonly string[];
+ * }} ConfigMultiPickerDefinition
  */
 
 /**
@@ -88,6 +99,7 @@ const BOOL_VALUE_IDS = ["on", "off"];
  *   examples: string[];
  *   aliases?: readonly string[];
  *   picker?: ConfigPickerDefinition;
+ *   multiPicker?: ConfigMultiPickerDefinition;
  *   flags?: readonly ConfigFlagDefinition[];
  *   resettable?: boolean;
  *   formatCurrent: ConfigCurrentFormatter;
@@ -129,6 +141,14 @@ function formatSettingTitle(label) {
   return label
     .replace(/-/g, " ")
     .replace(/\b\w/g, (match) => match.toUpperCase());
+}
+
+/**
+ * @param {string[]} selectedIds
+ * @returns {selectedIds is import("../../../chat-output-visibility.js").OutputVisibilityKey[]}
+ */
+function areOutputVisibilityKeys(selectedIds) {
+  return selectedIds.every((id) => isOutputVisibilityKey(id));
 }
 
 /**
@@ -323,36 +343,52 @@ const BASE_CONFIG_KEYS = [
     label: "show",
     description: "Controls which extra agent progress outputs are shown in chat.",
     aliases: ["output_visibility", "output-visibility"],
-    examples: ["!c show", "!c show commands off", "!c show thinking on", "!c show changes off", "!c reset show"],
+    examples: ["!c show", "!c reset show"],
+    multiPicker: {
+      options: [...OUTPUT_VISIBILITY_FLAGS.map((flag) => flag.key), SHOW_NONE_OPTION_ID],
+      currentIds: (chat) => {
+        const enabled = getEnabledOutputVisibilityKeys(chat.output_visibility);
+        return enabled.length > 0 ? enabled : [SHOW_NONE_OPTION_ID];
+      },
+    },
     flags: OUTPUT_VISIBILITY_FLAGS,
     resettable: true,
     formatCurrent: (chat) => formatOutputVisibility(chat.output_visibility),
     formatDefault: () => formatOutputVisibilityDefault(),
-    setValue: async ({ rootDb, chatId, chat, value }) => {
+    setValue: async ({ rootDb, chatId, value }) => {
       const trimmed = value.trim();
       if (trimmed.length === 0) {
         await rootDb.sql`UPDATE chats SET output_visibility = '{}'::jsonb WHERE chat_id = ${chatId}`;
         return `Show reset to defaults (${formatOutputVisibilityDefault()}).`;
       }
 
-      const parts = trimmed.split(/\s+/);
-      if (parts.length !== 2) {
-        return "Usage: !c show <commands|thinking|tools|changes> <on|off>";
+      const selectedIds = [...new Set(trimmed.split(/\s+/).filter((part) => part.length > 0))];
+      if (selectedIds.includes(SHOW_NONE_OPTION_ID)) {
+        if (selectedIds.length > 1) {
+          return "Choose `none` by itself to hide all extra outputs.";
+        }
+        const nextVisibility = buildOutputVisibilityOverrides([]);
+        await rootDb.sql`
+          UPDATE chats
+          SET output_visibility = ${JSON.stringify(nextVisibility)}::jsonb
+          WHERE chat_id = ${chatId}
+        `;
+        return `Show set to ${formatOutputVisibility(nextVisibility)}.`;
       }
-
-      const flagDefinition = getOutputVisibilityFlagDefinition(parts[0] ?? "");
-      if (!flagDefinition) {
-        return "Unknown show control. Available: commands, thinking, tools, changes";
+      if (!areOutputVisibilityKeys(selectedIds)) {
+        return "Use `!c show` to pick visible outputs, or `!c reset show` to restore defaults.";
       }
-
-      const enabled = toBool(parts[1] ?? "");
-      const nextVisibility = setOutputVisibilityOverride(chat.output_visibility, flagDefinition.key, enabled);
+      const nextVisibility = buildOutputVisibilityOverrides(selectedIds);
       await rootDb.sql`
         UPDATE chats
         SET output_visibility = ${JSON.stringify(nextVisibility)}::jsonb
         WHERE chat_id = ${chatId}
       `;
-      return `Show ${flagDefinition.label}: ${enabled ? "on" : "off"}.`;
+      const matchesDefault = Object.keys(nextVisibility).length === 0;
+      if (matchesDefault) {
+        return `Show set to ${formatOutputVisibility(DEFAULT_OUTPUT_VISIBILITY)}.`;
+      }
+      return `Show set to ${formatOutputVisibility(nextVisibility)}.`;
     },
   }),
   createConfigKeyDefinition({
@@ -767,6 +803,20 @@ function getDefinitionOptions(definition) {
 }
 
 /**
+ * @param {ConfigKeyDefinition} definition
+ * @returns {string[]}
+ */
+function getDefinitionMultiOptions(definition) {
+  if (definition.multiPicker?.options) {
+    return [...definition.multiPicker.options];
+  }
+  if (definition.multiPicker?.getOptions) {
+    return [...definition.multiPicker.getOptions()];
+  }
+  return [];
+}
+
+/**
  * Show a full summary of all chat settings.
  * @param {PGlite} rootDb
  * @param {string} chatId
@@ -843,6 +893,31 @@ export function getSelectableOptions(config, chat) {
   return {
     options: optionIds.map((optionId) => ({ id: optionId, label: optionId })),
     currentId: definition.picker.currentId(chat),
+  };
+}
+
+/**
+ * Return multi-selectable options for settings that expose semantic sets of
+ * enabled values. Returns `null` if the setting is not multi-selectable.
+ *
+ * @param {string | ConfigKeyDefinition} config
+ * @param {import("../../../store.js").ChatRow} chat
+ * @returns {{ options: SelectOption[], currentIds: string[] } | null}
+ */
+export function getMultiSelectableOptions(config, chat) {
+  const definition = typeof config === "string" ? getConfigKeyDefinition(config) : config;
+  if (!definition?.multiPicker) {
+    return null;
+  }
+
+  const optionIds = getDefinitionMultiOptions(definition);
+  if (optionIds.length === 0) {
+    return null;
+  }
+
+  return {
+    options: optionIds.map((optionId) => ({ id: optionId, label: optionId })),
+    currentIds: definition.multiPicker.currentIds(chat),
   };
 }
 
