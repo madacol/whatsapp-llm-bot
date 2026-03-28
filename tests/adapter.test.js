@@ -102,7 +102,13 @@ function createHdImageMessage({ chatId, messageId, pairedMediaType, parentMessag
 
 /**
  * Create a mock Baileys socket and confirm registry for testing.
- * @returns {{ sock: any, registry: ReturnType<typeof createConfirmRuntime>, sentMessages: Array<{ chatId: string, msg: any, key: { id: string, remoteJid: string }, options?: Record<string, unknown> }>, reactions: any[], emitReaction: (key: any, reaction: any) => void }}
+ * @returns {{
+ *   sock: any,
+ *   registry: ReturnType<typeof createConfirmRuntime>,
+ *   sentMessages: Array<{ chatId: string, msg: any, key: { id: string, remoteJid: string }, options?: Record<string, unknown> }>,
+ *   reactions: any[],
+ *   emitPollVote: (pollMsgId: string, selectedOptions: string[]) => void,
+ * }}
  */
 function createMockSock() {
   /** @type {Array<{ chatId: string, msg: any, key: { id: string, remoteJid: string }, options?: Record<string, unknown> }>} */
@@ -129,9 +135,9 @@ function createMockSock() {
     registry,
     sentMessages,
     reactions,
-    /** Route a reaction through the registry (mirrors what registerHandlers does). */
-    emitReaction: (/** @type {{ id: string; remoteJid: string }} */ key, /** @type {{ text: string }} */ reaction) => {
-      registry.handleReactions([{ key, reaction }], sock);
+    /** Route a poll vote through the registry. */
+    emitPollVote: (/** @type {string} */ pollMsgId, /** @type {string[]} */ selectedOptions) => {
+      registry.handlePollVote({ chatId: "test-chat", pollMsgId, selectedOptions });
     },
   };
 }
@@ -877,55 +883,56 @@ describe("HD receive integration", () => {
 });
 
 describe("createConfirmRuntime", () => {
-  it("resolves true on thumbs-up reaction and shows checkmark", async () => {
-    const { sock, registry, reactions, emitReaction } = createMockSock();
+  it("sends a confirm/cancel poll and resolves true on confirm vote", async () => {
+    const { sock, registry, sentMessages, reactions, emitPollVote } = createMockSock();
     const confirm = registry.createConfirm(sock, "test-chat");
 
     const promise = confirm("Confirm this?");
-    // Allow the async sendMessage to complete
     await new Promise(r => setTimeout(r, 10));
 
-    // Emit 👍 on the message
-    emitReaction({ id: "msg-0", remoteJid: "test-chat" }, { text: "\uD83D\uDC4D" });
+    assert.equal(sentMessages.length, 1, "confirm() should send one poll prompt");
+    assert.deepEqual(sentMessages[0]?.msg.poll, {
+      name: "Confirm this?",
+      values: ["Confirm", "Cancel ❌"],
+      selectableCount: 1,
+    });
+    assert.equal(reactions.length, 0, "confirm() should not use reaction status markers");
+
+    emitPollVote("msg-0", ["Confirm"]);
 
     const result = await promise;
     assert.equal(result, true);
-    assert.ok(reactions.some(r => r.text === "✅"), "Should react with ✅");
   });
 
-  it("resolves false on thumbs-down reaction and shows X", async () => {
-    const { sock, registry, reactions, emitReaction } = createMockSock();
+  it("resolves false on cancel vote", async () => {
+    const { sock, registry, reactions, emitPollVote } = createMockSock();
     const confirm = registry.createConfirm(sock, "test-chat");
 
     const promise = confirm("Confirm this?");
     await new Promise(r => setTimeout(r, 10));
 
-    emitReaction({ id: "msg-0", remoteJid: "test-chat" }, { text: "\uD83D\uDC4E" });
+    emitPollVote("msg-0", ["Cancel ❌"]);
 
     const result = await promise;
     assert.equal(result, false);
-    assert.ok(reactions.some(r => r.text === "❌"), "Should react with ❌");
+    assert.equal(reactions.length, 0, "cancel should not add reaction side effects");
   });
 
-  it("shows hourglass reaction immediately (not countdown)", async () => {
-    const { sock, registry, reactions, emitReaction } = createMockSock();
+  it("does not send any reaction markers while pending", async () => {
+    const { sock, registry, reactions, emitPollVote } = createMockSock();
     const confirm = registry.createConfirm(sock, "test-chat");
 
     const promise = confirm("Confirm this?");
     await new Promise(r => setTimeout(r, 10));
 
-    // Should have ⏳ as the first/only reaction
-    assert.ok(reactions.some(r => r.text === "⏳"), "Should react with ⏳");
-    // Should NOT have any countdown emojis
-    assert.ok(!reactions.some(r => r.text === "🔟"), "Should not have countdown emojis");
+    assert.equal(reactions.length, 0, "poll-backed confirm should not send pending reactions");
 
-    // Clean up: resolve the promise
-    emitReaction({ id: "msg-0", remoteJid: "test-chat" }, { text: "\uD83D\uDC4D" });
+    emitPollVote("msg-0", ["Confirm"]);
     await promise;
   });
 
   it("does NOT auto-resolve within short timeframes", async () => {
-    const { sock, registry, reactions, emitReaction } = createMockSock();
+    const { sock, registry, reactions, emitPollVote } = createMockSock();
     const confirm = registry.createConfirm(sock, "test-chat");
 
     const promise = confirm("Confirm this?");
@@ -936,17 +943,15 @@ describe("createConfirmRuntime", () => {
     promise.then(() => { resolved = true; });
     await new Promise(r => setTimeout(r, 200));
     assert.equal(resolved, false, "Promise should not auto-resolve");
-
-    // No ❌ from timeout
-    assert.ok(!reactions.some(r => r.text === "❌"), "Should not have auto-cancelled");
+    assert.equal(reactions.length, 0, "pending confirm should still avoid reaction side effects");
 
     // Clean up
-    emitReaction({ id: "msg-0", remoteJid: "test-chat" }, { text: "\uD83D\uDC4D" });
+    emitPollVote("msg-0", ["Confirm"]);
     await promise;
   });
 
   it("calls onSent hook with message key after sending", async () => {
-    const { sock, registry, emitReaction } = createMockSock();
+    const { sock, registry, emitPollVote } = createMockSock();
     const confirm = registry.createConfirm(sock, "test-chat");
 
     /** @type {any} */
@@ -960,12 +965,12 @@ describe("createConfirmRuntime", () => {
     assert.equal(sentKey.id, "msg-0");
     assert.equal(sentKey.remoteJid, "test-chat");
 
-    emitReaction({ id: "msg-0", remoteJid: "test-chat" }, { text: "\uD83D\uDC4D" });
+    emitPollVote("msg-0", ["Confirm"]);
     await promise;
   });
 
-  it("calls onResolved hook with (msgKey, confirmed) after reaction", async () => {
-    const { sock, registry, emitReaction } = createMockSock();
+  it("calls onResolved hook with (msgKey, confirmed) after poll vote", async () => {
+    const { sock, registry, emitPollVote } = createMockSock();
     const confirm = registry.createConfirm(sock, "test-chat");
 
     /** @type {any[]} */
@@ -975,7 +980,7 @@ describe("createConfirmRuntime", () => {
     });
     await new Promise(r => setTimeout(r, 10));
 
-    emitReaction({ id: "msg-0", remoteJid: "test-chat" }, { text: "\uD83D\uDC4E" });
+    emitPollVote("msg-0", ["Cancel ❌"]);
     await promise;
 
     assert.equal(resolvedCalls.length, 1);
@@ -984,31 +989,29 @@ describe("createConfirmRuntime", () => {
   });
 
   it("removes pending entry after resolution", async () => {
-    const { sock, registry, emitReaction } = createMockSock();
+    const { sock, registry, emitPollVote } = createMockSock();
     const confirm = registry.createConfirm(sock, "test-chat");
 
     const promise = confirm("Confirm?");
     await new Promise(r => setTimeout(r, 10));
 
     assert.equal(registry.size, 1, "Should have one pending confirmation");
-    emitReaction({ id: "msg-0", remoteJid: "test-chat" }, { text: "\uD83D\uDC4D" });
+    emitPollVote("msg-0", ["Confirm"]);
     await promise;
     assert.equal(registry.size, 0, "Should have no pending confirmations after resolution");
   });
 
-  it("ignores non-matching reactions without leaking", async () => {
-    const { sock, registry, emitReaction } = createMockSock();
+  it("ignores non-matching poll options without leaking", async () => {
+    const { sock, registry, emitPollVote } = createMockSock();
     const confirm = registry.createConfirm(sock, "test-chat");
 
     const promise = confirm("Confirm?");
     await new Promise(r => setTimeout(r, 10));
 
-    // Send a heart reaction — should be ignored
-    emitReaction({ id: "msg-0", remoteJid: "test-chat" }, { text: "❤️" });
-    assert.equal(registry.size, 1, "Should still have pending confirmation after non-matching reaction");
+    emitPollVote("msg-0", ["Maybe later"]);
+    assert.equal(registry.size, 1, "Should still have pending confirmation after non-matching vote");
 
-    // Now resolve properly
-    emitReaction({ id: "msg-0", remoteJid: "test-chat" }, { text: "\uD83D\uDC4D" });
+    emitPollVote("msg-0", ["Confirm"]);
     await promise;
     assert.equal(registry.size, 0, "Should be clean after resolution");
   });
@@ -1045,12 +1048,17 @@ describe("createConfirmRuntime", () => {
 
     assert.equal(oldSocket.sentMessages.length, 0);
     assert.equal(newSocket.sentMessages.length, 1);
-    assert.ok(newSocket.reactions.some((reaction) => reaction.text === "⏳"), "Should react on the replacement socket");
+    assert.deepEqual(newSocket.sentMessages[0]?.msg.poll, {
+      name: "Confirm this?",
+      values: ["Confirm", "Cancel ❌"],
+      selectableCount: 1,
+    });
 
-    oldSocket.registry.handleReactions(
-      [{ key: { id: "msg-0", remoteJid: "test-chat" }, reaction: { text: "\uD83D\uDC4D" } }],
-      newSocket.sock,
-    );
+    oldSocket.registry.handlePollVote({
+      chatId: "test-chat",
+      pollMsgId: "msg-0",
+      selectedOptions: ["Confirm"],
+    });
     await promise;
   });
 });

@@ -1,5 +1,7 @@
+import { createSelectRuntime } from "./select-runtime.js";
+
 /**
- * Confirmation runtime for WhatsApp reactions.
+ * Confirmation runtime for WhatsApp polls.
  */
 
 /**
@@ -7,8 +9,14 @@
  */
 
 /**
+ * @typedef {{ chatId: string, pollMsgId: string, selectedOptions: string[] }} ConfirmPollVoteEvent
+ */
+
+/**
  * @typedef {{
  *   handleReactions: (reactions: Array<{ key: { id: string; remoteJid: string }; reaction: { text: string } }>, sock: import('@whiskeysockets/baileys').WASocket) => void;
+ *   handlePollVote: (event: ConfirmPollVoteEvent) => boolean;
+ *   resolvePollVoteMessage: (message: import('@whiskeysockets/baileys').WAMessage, sock: import('@whiskeysockets/baileys').WASocket) => Promise<ConfirmPollVoteEvent | null>;
  *   createConfirm: (sock: SocketResolver, chatId: string) => (message: string, hooks?: ConfirmHooks) => Promise<boolean>;
  *   readonly size: number;
  *   clear: () => void;
@@ -16,136 +24,33 @@
  */
 
 /**
- * @typedef {{
- *   resolve: (value: boolean) => void;
- *   rawKey: import('@whiskeysockets/baileys').WAMessageKey;
- *   msgKey: { id: string; remoteJid: string };
- *   chatId: string;
- *   hooks?: ConfirmHooks;
- *   timer: ReturnType<typeof setTimeout>;
- * }} PendingConfirm
- */
-
-/** Safety-net timeout: auto-reject after 30 minutes of no reaction. */
-const CONFIRM_TIMEOUT_MS = 30 * 60 * 1000;
-
-/**
- * @param {SocketResolver} socketResolver
- * @returns {() => import('@whiskeysockets/baileys').WASocket | null}
- */
-function createSocketGetter(socketResolver) {
-  return typeof socketResolver === "function" ? socketResolver : () => socketResolver;
-}
-
-/**
- * @param {() => import('@whiskeysockets/baileys').WASocket | null} getSocket
- * @returns {import('@whiskeysockets/baileys').WASocket}
- */
-function requireSocket(getSocket) {
-  const sock = getSocket();
-  if (!sock) {
-    throw new Error("WhatsApp socket is not connected");
-  }
-  return sock;
-}
-
-/**
- * Create a registry that routes reactions to pending confirmations.
- * Uses a single Map instead of per-confirm event listeners, so there is
- * exactly zero risk of listener accumulation.
- *
- * Lifecycle: create once per connection; on reconnect the same runtime
- * is reused because message IDs are globally unique.
+ * Create a poll-backed confirmation runtime.
  * @returns {ConfirmRuntime}
  */
 export function createConfirmRuntime() {
-  /** @type {Map<string, PendingConfirm>} */
-  const pending = new Map();
+  const pollRuntime = createSelectRuntime();
 
   return {
-    /**
-     * Route incoming reactions to any matching pending confirmation.
-     * Called once per batch from the socket-level event handler.
-     * @param {Array<{ key: { id: string; remoteJid: string }; reaction: { text: string } }>} reactions
-     * @param {import('@whiskeysockets/baileys').WASocket} sock
-     */
-    handleReactions(reactions, sock) {
-      for (const { key, reaction } of reactions) {
-        const entry = pending.get(key.id);
-        if (!entry) continue;
+    handleReactions() {},
 
-        /** @type {boolean | null} */
-        let confirmed = null;
-        /** @type {string} */
-        let emoji = "";
-
-        if (reaction.text?.startsWith("👍")) {
-          confirmed = true;
-          emoji = "✅";
-        } else if (reaction.text?.startsWith("👎")) {
-          confirmed = false;
-          emoji = "❌";
-        }
-
-        if (confirmed === null) continue;
-
-        clearTimeout(entry.timer);
-        pending.delete(key.id);
-        sock.sendMessage(entry.chatId, { react: { text: emoji, key: entry.rawKey } });
-        entry.hooks?.onResolved?.(entry.msgKey, confirmed);
-        entry.resolve(confirmed);
-      }
+    handlePollVote(event) {
+      return pollRuntime.handlePollVote(event);
     },
 
-    /**
-     * Create a confirm function scoped to a chat.
-     * @param {SocketResolver} sock
-     * @param {string} chatId
-     * @returns {(message: string, hooks?: ConfirmHooks) => Promise<boolean>}
-     */
+    resolvePollVoteMessage(message, sock) {
+      return pollRuntime.resolvePollVoteMessage(message, sock);
+    },
+
     createConfirm(sock, chatId) {
-      const getSocket = createSocketGetter(sock);
-
-      return async (message, hooks) => {
-        const sentMsg = await requireSocket(getSocket).sendMessage(chatId, { text: message });
-        if (!sentMsg) return false;
-
-        const rawKey = sentMsg.key;
-        if (!rawKey.id || !rawKey.remoteJid) return false;
-
-        /** @type {{ id: string; remoteJid: string }} */
-        const msgKey = { id: rawKey.id, remoteJid: rawKey.remoteJid };
-
-        getSocket()?.sendMessage(chatId, {
-          react: { text: "⏳", key: rawKey },
-        });
-
-        if (hooks?.onSent) {
-          await hooks.onSent(msgKey);
-        }
-
-        return new Promise((resolve) => {
-          const timer = setTimeout(() => {
-            pending.delete(msgKey.id);
-            getSocket()?.sendMessage(chatId, { react: { text: "⌛", key: rawKey } });
-            resolve(false);
-          }, CONFIRM_TIMEOUT_MS);
-
-          pending.set(msgKey.id, { resolve, rawKey, msgKey, chatId, hooks, timer });
-        });
-      };
+      return pollRuntime.createConfirm(sock, chatId);
     },
 
     get size() {
-      return pending.size;
+      return pollRuntime.size;
     },
 
     clear() {
-      for (const entry of pending.values()) {
-        clearTimeout(entry.timer);
-        entry.resolve(false);
-      }
-      pending.clear();
+      pollRuntime.clear();
     },
   };
 }

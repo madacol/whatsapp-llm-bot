@@ -12,6 +12,11 @@ const POLL_TTL_MS = 10 * 60 * 1000;
 const MAX_SENT_POLLS = 200;
 const SELECT_TIMEOUT_MS = 5 * 60 * 1000;
 const MULTI_SELECT_IDLE_COMMIT_MS = 3 * 1000;
+const CONFIRM_TIMEOUT_MS = 30 * 60 * 1000;
+const CONFIRM_OPTION_ID = "confirm";
+const CONFIRM_OPTION_LABEL = "Confirm";
+const CANCEL_OPTION_ID = "cancel";
+const CANCEL_OPTION_LABEL = "Cancel ❌";
 
 /**
  * @typedef {import('@whiskeysockets/baileys').WASocket | (() => import('@whiskeysockets/baileys').WASocket | null)} SocketResolver
@@ -40,6 +45,12 @@ export function getPollCreationData(msg) {
 
 /**
  * @typedef {{
+ *   showPendingReaction?: boolean;
+ * }} PollPromptOptions
+ */
+
+/**
+ * @typedef {{
  *   timer: ReturnType<typeof setTimeout>;
  *   labelToId: Map<string, string>;
  * }} PendingSelectBase
@@ -55,14 +66,21 @@ export function getPollCreationData(msg) {
 /**
  * @typedef {PendingSelectBase & {
  *   mode: "multi";
- *   idleTimer: ReturnType<typeof setTimeout> | null;
- *   selectedIds: string[];
- *   settle: (ids: string[], options?: SelectSettlementOptions) => void;
+  *   idleTimer: ReturnType<typeof setTimeout> | null;
+  *   selectedIds: string[];
+  *   settle: (ids: string[], options?: SelectSettlementOptions) => void;
  * }} PendingMultiSelect
  */
 
 /**
- * @typedef {PendingSingleSelect | PendingMultiSelect} PendingSelect
+ * @typedef {PendingSelectBase & {
+ *   mode: "confirm";
+ *   settle: (confirmed: boolean, options?: SelectSettlementOptions) => void;
+ * }} PendingConfirm
+ */
+
+/**
+ * @typedef {PendingSingleSelect | PendingMultiSelect | PendingConfirm} PendingSelect
  */
 
 /**
@@ -70,6 +88,7 @@ export function getPollCreationData(msg) {
  *   handlePollVote: (event: PollVoteEvent) => boolean;
  *   createSelect: (sock: SocketResolver, chatId: string) => (question: string, options: SelectOption[], config?: SelectConfig) => Promise<string>;
  *   createSelectMany: (sock: SocketResolver, chatId: string) => (question: string, options: SelectOption[], config?: SelectManyConfig) => Promise<string[]>;
+ *   createConfirm: (sock: SocketResolver, chatId: string) => (message: string, hooks?: ConfirmHooks) => Promise<boolean>;
  *   resolvePollVoteMessage: (message: import('@whiskeysockets/baileys').WAMessage, sock: import('@whiskeysockets/baileys').WASocket) => Promise<PollVoteEvent | null>;
  *   readonly size: number;
  *   clear: () => void;
@@ -172,13 +191,14 @@ function rememberSentPoll(sentPolls, pollMsgId, sent) {
  * @param {SelectOption[]} options
  * @param {readonly string[] | undefined} currentIds
  * @param {number} selectableCount
+ * @param {PollPromptOptions} [promptOptions]
  * @returns {Promise<{
  *   pollMsgId: string;
  *   sentPollKey: import('@whiskeysockets/baileys').WAMessageKey;
  *   labelToId: Map<string, string>;
  * } | null>}
  */
-async function sendPollPrompt(getSocket, sentPolls, chatId, question, options, currentIds, selectableCount) {
+async function sendPollPrompt(getSocket, sentPolls, chatId, question, options, currentIds, selectableCount, promptOptions = {}) {
   const { labels, labelToId } = normalizeSelectOptions(options, currentIds);
   const sent = await requireSocket(getSocket).sendMessage(chatId, {
     poll: { name: question, values: labels, selectableCount },
@@ -196,7 +216,9 @@ async function sendPollPrompt(getSocket, sentPolls, chatId, question, options, c
 
   /** @type {import('@whiskeysockets/baileys').WAMessageKey} */
   const sentPollKey = pollKey;
-  getSocket()?.sendMessage(chatId, { react: { text: "⏳", key: sentPollKey } });
+  if (promptOptions.showPendingReaction ?? true) {
+    getSocket()?.sendMessage(chatId, { react: { text: "⏳", key: sentPollKey } });
+  }
 
   return { pollMsgId, sentPollKey, labelToId };
 }
@@ -218,6 +240,16 @@ function applySettlementEffect(getSocket, chatId, sentPollKey, isCancelled, dele
   } else {
     getSocket()?.sendMessage(chatId, { react: { text: "", key: sentPollKey } });
   }
+}
+
+/**
+ * Remove a poll prompt after a confirm settles so no reaction mechanism is involved.
+ * @param {() => import('@whiskeysockets/baileys').WASocket | null} getSocket
+ * @param {import('@whiskeysockets/baileys').WAMessageKey} sentPollKey
+ * @returns {void}
+ */
+function deletePollPrompt(getSocket, sentPollKey) {
+  getSocket()?.sendMessage(sentPollKey.remoteJid ?? "", { delete: sentPollKey });
 }
 
 /**
@@ -329,7 +361,16 @@ export function createSelectRuntime() {
         .map((label) => entry.labelToId.get(label) ?? label)
         .filter((id) => id.length > 0);
 
-      if (entry.mode === "multi") {
+      if (entry.mode === "confirm") {
+        const selectedId = selectedIds[0] ?? "";
+        if (selectedId !== CONFIRM_OPTION_ID && selectedId !== CANCEL_OPTION_ID) {
+          return false;
+        }
+
+        clearTimeout(entry.timer);
+        pending.delete(event.pollMsgId);
+        entry.settle(selectedId === CONFIRM_OPTION_ID);
+      } else if (entry.mode === "multi") {
         entry.selectedIds = selectedIds;
         if (entry.idleTimer) {
           clearTimeout(entry.idleTimer);
@@ -475,6 +516,75 @@ export function createSelectRuntime() {
     },
 
     /**
+     * Create a confirm function scoped to a chat.
+     * @param {SocketResolver} sock
+     * @param {string} chatId
+     * @returns {(message: string, hooks?: ConfirmHooks) => Promise<boolean>}
+     */
+    createConfirm(sock, chatId) {
+      const getSocket = createSocketGetter(sock);
+
+      return async (message, hooks) => {
+        const prompt = await sendPollPrompt(
+          getSocket,
+          sentPolls,
+          chatId,
+          message,
+          [
+            { id: CONFIRM_OPTION_ID, label: CONFIRM_OPTION_LABEL },
+            { id: CANCEL_OPTION_ID, label: CANCEL_OPTION_LABEL },
+          ],
+          undefined,
+          1,
+          { showPendingReaction: false },
+        );
+        if (!prompt) {
+          return false;
+        }
+
+        const promptData = prompt;
+        const msgKey = {
+          id: promptData.sentPollKey.id ?? promptData.pollMsgId,
+          remoteJid: promptData.sentPollKey.remoteJid ?? chatId,
+        };
+
+        if (hooks?.onSent) {
+          await hooks.onSent(msgKey);
+        }
+
+        return new Promise((resolve) => {
+          const timer = setTimeout(() => {
+            pending.delete(promptData.pollMsgId);
+            settle(false);
+          }, CONFIRM_TIMEOUT_MS);
+          timer.unref?.();
+
+          /**
+           * Complete the pending confirmation and optionally suppress transport-side effects.
+           * @param {boolean} confirmed
+           * @param {SelectSettlementOptions} [options]
+           * @returns {void}
+           */
+          function settle(confirmed, options = {}) {
+            if (!options.suppressEffects) {
+              deletePollPrompt(getSocket, promptData.sentPollKey);
+            }
+
+            void hooks?.onResolved?.(msgKey, confirmed);
+            resolve(confirmed);
+          }
+
+          pending.set(promptData.pollMsgId, {
+            mode: "confirm",
+            settle,
+            timer,
+            labelToId: promptData.labelToId,
+          });
+        });
+      };
+    },
+
+    /**
      * Decrypt and resolve an incoming poll vote message.
      * @param {import('@whiskeysockets/baileys').WAMessage} message
      * @param {import('@whiskeysockets/baileys').WASocket} sock
@@ -496,6 +606,8 @@ export function createSelectRuntime() {
             clearTimeout(entry.idleTimer);
           }
           entry.settle([], { suppressEffects: true });
+        } else if (entry.mode === "confirm") {
+          entry.settle(false, { suppressEffects: true });
         } else {
           entry.settle("", { suppressEffects: true });
         }
