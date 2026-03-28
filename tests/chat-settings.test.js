@@ -375,6 +375,61 @@ describe("per-chat model selection", () => {
       rows = await db.sql`SELECT output_visibility FROM chats WHERE chat_id = 'cfg-show-2'`;
       assert.deepEqual(rows.rows[0]?.output_visibility, {});
     });
+
+    it("uses a multi-select picker for show and stores the selected outputs", async () => {
+      await db.sql`INSERT INTO chats(chat_id) VALUES ('cfg-show-3') ON CONFLICT DO NOTHING`;
+
+      /** @type {string | null} */
+      let promptText = null;
+      /** @type {SelectOption[] | null} */
+      let pickerOptions = null;
+      /** @type {SelectManyConfig | null} */
+      let pickerConfig = null;
+
+      const mod = await import("../actions/settings/chatSettings/index.js");
+      const action = mod.default;
+      const result = await action.action_fn(
+        {
+          chatId: "cfg-show-3",
+          rootDb: db,
+          senderIds: ["u1"],
+          selectMany: async (question, options, config) => {
+            promptText = question;
+            pickerOptions = options;
+            pickerConfig = config ?? null;
+            return ["thinking", "changes"];
+          },
+        },
+        { setting: "show" },
+      );
+
+      assert.ok(promptText?.includes("*Show*"), `expected setting title, got: ${promptText}`);
+      assert.deepEqual(
+        pickerOptions,
+        [
+          { id: "commands", label: "commands" },
+          { id: "thinking", label: "thinking" },
+          { id: "tools", label: "tools" },
+          { id: "changes", label: "changes" },
+          { id: "none", label: "none" },
+        ],
+      );
+      assert.deepEqual(pickerConfig, {
+        deleteOnSelect: true,
+        currentIds: ["commands", "tools", "changes"],
+      });
+      assert.ok(result.includes("thinking on"), `expected selected thinking flag, got: ${result}`);
+      assert.ok(result.includes("changes on"), `expected selected changes flag, got: ${result}`);
+      assert.ok(result.includes("commands off"), `expected deselected commands flag, got: ${result}`);
+      assert.ok(result.includes("tools off"), `expected deselected tools flag, got: ${result}`);
+
+      const rows = await db.sql`SELECT output_visibility FROM chats WHERE chat_id = 'cfg-show-3'`;
+      assert.deepEqual(rows.rows[0]?.output_visibility, {
+        commands: false,
+        thinking: true,
+        tools: false,
+      });
+    });
   });
 
 });

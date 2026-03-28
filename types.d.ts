@@ -223,6 +223,17 @@ type SelectConfig = {
   currentId?: string;
 };
 
+type SelectManyConfig = {
+  /** Timeout in ms (default: 5 minutes). */
+  timeout?: number;
+  /** Delete the poll message after the user selects a non-cancel option. */
+  deleteOnSelect?: boolean;
+  /** Option IDs treated as cancellation — poll is reacted with ❌ instead of deleted/cleared. */
+  cancelIds?: string[];
+  /** If set, options with these ids get a ✅ prefix to highlight current values. */
+  currentIds?: string[];
+};
+
 type ConfirmHooks = {
   onSent?: (msgKey: { id: string; remoteJid: string }) => Promise<void>;
   onResolved?: (msgKey: { id: string; remoteJid: string }, confirmed: boolean) => Promise<void>;
@@ -232,6 +243,7 @@ type TurnIO = {
   send: (event: OutboundEvent) => Promise<MessageHandle | undefined>;
   reply: (event: OutboundEvent) => Promise<MessageHandle | undefined>;
   select: (question: string, options: SelectOption[], config?: SelectConfig) => Promise<string>;
+  selectMany?: (question: string, options: SelectOption[], config?: SelectManyConfig) => Promise<string[]>;
   confirm: (message: string, hooks?: ConfirmHooks) => Promise<boolean>;
   react: (emoji: string) => Promise<void>;
   startPresence: (ttlMs: number) => Promise<void>;
@@ -274,6 +286,7 @@ type ExecuteActionContext = {
   reply: (event: OutboundEvent) => Promise<MessageHandle | undefined>;
   reactToMessage: (emoji: string) => Promise<void>;
   select: (question: string, options: SelectOption[], config?: SelectConfig) => Promise<string>;
+  selectMany?: (question: string, options: SelectOption[], config?: SelectManyConfig) => Promise<string[]>;
   confirm: (message: string, hooks?: ConfirmHooks) => Promise<boolean>;
 };
 
@@ -293,6 +306,7 @@ type ActionContext = {
   reply: (message: SendContent) => Promise<void>; // Header already baked in
   reactToMessage: (emoji: string) => Promise<void>;
   select: (question: string, options: SelectOption[], config?: SelectConfig) => Promise<string>;
+  selectMany?: (question: string, options: SelectOption[], config?: SelectManyConfig) => Promise<string[]>;
   confirm: (message: string) => Promise<boolean>;
   resolveModel: (role: string) => string;
   agentDepth?: number;

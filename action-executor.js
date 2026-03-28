@@ -88,6 +88,7 @@ export async function executeAction(actionName, context, params, options = {}) {
     },
     reactToMessage: context.reactToMessage,
     select: context.select,
+    selectMany: context.selectMany,
     confirm: context.confirm,
     resolveModel: (role) => resolveModel(role),
     agentDepth,

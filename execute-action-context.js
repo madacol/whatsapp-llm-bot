@@ -17,6 +17,7 @@ export function createMessageActionContext(turn) {
     reply: turn.io.reply,
     reactToMessage: turn.io.react,
     select: turn.io.select,
+    selectMany: turn.io.selectMany,
     confirm: turn.io.confirm,
   };
 }
@@ -37,6 +38,7 @@ export function createSilentActionContext(chatId, senderIds) {
     reply: async (_event) => undefined,
     reactToMessage: async () => {},
     select: async () => "",
+    selectMany: async () => [],
     confirm: async () => true,
   };
 }

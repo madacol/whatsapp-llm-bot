@@ -1,5 +1,12 @@
 import { getChatOrThrow } from "../../../store.js";
 import {
+  buildOutputVisibilityOverrides,
+  formatOutputVisibility,
+  getEnabledOutputVisibilityKeys,
+  isOutputVisibilityKey,
+  OUTPUT_VISIBILITY_FLAGS,
+} from "../../../chat-output-visibility.js";
+import {
   CONFIG_KEYS,
   describeConfigKey,
   getConfigKeyDefinition,
@@ -8,6 +15,31 @@ import {
   resetConfigValue,
   setConfigValue,
 } from "./_service.js";
+
+const SHOW_NONE_OPTION_ID = "none";
+
+/**
+ * @param {import("../../../store.js").ChatRow} chat
+ * @returns {{ options: SelectOption[], currentIds: string[] }}
+ */
+function getShowSelectManyOptions(chat) {
+  const currentIds = getEnabledOutputVisibilityKeys(chat.output_visibility);
+  return {
+    options: [
+      ...OUTPUT_VISIBILITY_FLAGS.map((flag) => ({ id: flag.key, label: flag.label })),
+      { id: SHOW_NONE_OPTION_ID, label: SHOW_NONE_OPTION_ID },
+    ],
+    currentIds: currentIds.length > 0 ? currentIds : [SHOW_NONE_OPTION_ID],
+  };
+}
+
+/**
+ * @param {string[]} selectedIds
+ * @returns {selectedIds is import("../../../chat-output-visibility.js").OutputVisibilityKey[]}
+ */
+function areOutputVisibilityKeys(selectedIds) {
+  return selectedIds.every((id) => isOutputVisibilityKey(id));
+}
 
 export default /** @type {defineAction} */ ((x) => x)({
   name: "chat_settings",
@@ -38,7 +70,7 @@ export default /** @type {defineAction} */ ((x) => x)({
     autoContinue: true,
     useRootDb: true,
   },
-  action_fn: async function ({ chatId, rootDb, senderIds, getActions, getIsAdmin, select }, { setting, value }) {
+  action_fn: async function ({ chatId, rootDb, senderIds, getActions, getIsAdmin, select, selectMany }, { setting, value }) {
     if (!setting || setting === "list") {
       return getChatSettingsInfo(rootDb, chatId, { senderIds, getActions });
     }
@@ -69,6 +101,44 @@ export default /** @type {defineAction} */ ((x) => x)({
         return `Unknown config key \`${setting}\`.\nAvailable keys: ${CONFIG_KEYS.join(", ")}`;
       }
       const chat = await getChatOrThrow(rootDb, chatId);
+      if (setting === "show" && typeof selectMany === "function") {
+        const helpText = await describeConfigKey(rootDb, chatId, setting, { getActions, compact: true });
+        const { options, currentIds } = getShowSelectManyOptions(chat);
+        const selectedIds = await selectMany(
+          helpText,
+          options,
+          { deleteOnSelect: true, currentIds },
+        );
+        if (selectedIds.length === 0) {
+          return helpText;
+        }
+        const isAdmin = getIsAdmin ? await getIsAdmin() : true;
+        if (!isAdmin) {
+          return "Only admins can change settings.";
+        }
+        if (selectedIds.includes(SHOW_NONE_OPTION_ID)) {
+          if (selectedIds.length > 1) {
+            return "Choose `none` by itself to hide all extra outputs.";
+          }
+          const nextVisibility = buildOutputVisibilityOverrides([]);
+          await rootDb.sql`
+            UPDATE chats
+            SET output_visibility = ${JSON.stringify(nextVisibility)}::jsonb
+            WHERE chat_id = ${chatId}
+          `;
+          return `Show set to ${formatOutputVisibility(nextVisibility)}.`;
+        }
+        if (!areOutputVisibilityKeys(selectedIds)) {
+          return "Unknown show control. Available: commands, thinking, tools, changes";
+        }
+        const nextVisibility = buildOutputVisibilityOverrides(selectedIds);
+        await rootDb.sql`
+          UPDATE chats
+          SET output_visibility = ${JSON.stringify(nextVisibility)}::jsonb
+          WHERE chat_id = ${chatId}
+        `;
+        return `Show set to ${formatOutputVisibility(nextVisibility)}.`;
+      }
       const selectable = getSelectableOptions(definition, chat);
       if (selectable && typeof select === "function") {
         const helpText = await describeConfigKey(rootDb, chatId, setting, { getActions, compact: true });

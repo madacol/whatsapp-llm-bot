@@ -134,6 +134,17 @@ export function formatOutputVisibilityDefault() {
 }
 
 /**
+ * @param {unknown} raw
+ * @returns {OutputVisibilityKey[]}
+ */
+export function getEnabledOutputVisibilityKeys(raw) {
+  const visibility = resolveOutputVisibility(raw);
+  return OUTPUT_VISIBILITY_FLAGS
+    .filter((flag) => visibility[flag.key])
+    .map((flag) => flag.key);
+}
+
+/**
  * @param {string} key
  * @returns {OutputVisibilityFlagDefinition | null}
  */
@@ -158,5 +169,25 @@ export function setOutputVisibilityOverride(raw, key, enabled) {
   } else {
     overrides[key] = enabled;
   }
+  return overrides;
+}
+
+/**
+ * Build overrides from the full set of enabled keys.
+ * @param {readonly OutputVisibilityKey[]} enabledKeys
+ * @returns {OutputVisibilityOverrides}
+ */
+export function buildOutputVisibilityOverrides(enabledKeys) {
+  const enabledSet = new Set(enabledKeys);
+  /** @type {OutputVisibilityOverrides} */
+  const overrides = {};
+
+  for (const flag of OUTPUT_VISIBILITY_FLAGS) {
+    const enabled = enabledSet.has(flag.key);
+    if (enabled !== DEFAULT_OUTPUT_VISIBILITY[flag.key]) {
+      overrides[flag.key] = enabled;
+    }
+  }
+
   return overrides;
 }
