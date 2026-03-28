@@ -3,7 +3,7 @@
 - Use JSDoc for all type annotations
 - Avoid weak typing like `@type {any|unknown}` casts. Use proper type guards and narrowing instead. Aspire to have strong and precise types everywhere
 - Before making a non-trivial change, start with a very high-level plan, give the user a chance to redirect, then expand into detailed steps, edge cases, and execution only after the direction is clear
-- After making a code-affecting change, `pnpm type-check`, then test and then commit!. For docs-only or instruction-only changes, skip code verification and just commit. Then if there's any refactor worth doing, explain why and how it can be done
+- After making a change that can affect runtime behavior, `pnpm type-check`, then test and then commit!. For docs-only or instruction-only changes, skip code verification and just commit. Then if there's any refactor worth doing, explain why and how it can be done
 - When refactoring, identify the main seams between subsystems and reduce each seam to a small semantic boundary
 - Before cutting corners, ask yourself why do you need to do this, and what needs to be done to avoid this. If you still think cutting this corner is still the best course of action, explain thoroughly to the user and let them decide how to continue with the plan
 - When implementation depends on an external payload or event format from an LLM API, WhatsApp/Baileys, an SDK, or an app server, make an empirical request first and inspect the full real response before proposing the plan. Do not rely on docs, assumptions, or partial samples when that format is a key dependency
