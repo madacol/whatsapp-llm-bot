@@ -268,18 +268,25 @@ describe("Scenario 7b: Guided setup command", () => {
     await seedChat(chatId);
 
     /** @type {string[]} */
-    const selections = ["mention+reply", "codex", "gpt-5.4", "off"];
+    const selections = ["mention+reply", "codex", "gpt-5.4"];
     /** @type {string[]} */
     const questions = [];
     const { context, responses } = createChatTurn({
       chatId,
       content: [{ type: "text", text: "!setup" }],
+      io: {
+        select: async (question, options) => {
+          questions.push(question);
+          responses.push({ type: "select", text: JSON.stringify({ question, options }) });
+          return selections.shift() ?? "";
+        },
+        selectMany: async (question, options) => {
+          questions.push(question);
+          responses.push({ type: "selectMany", text: JSON.stringify({ question, options }) });
+          return ["thinking", "changes"];
+        },
+      },
     });
-    context.io.select = async (question, options) => {
-      questions.push(question);
-      responses.push({ type: "select", text: JSON.stringify({ question, options }) });
-      return selections.shift() ?? "";
-    };
 
     await handleMessage(context);
 
@@ -292,7 +299,7 @@ describe("Scenario 7b: Guided setup command", () => {
     assert.ok(allText.includes("gpt-5.4"), `Expected harness model summary, got: ${allText}`);
 
     const { rows: [chat] } = await testDb.sql`
-      SELECT is_enabled, respond_on, memory, debug, harness, harness_config
+      SELECT is_enabled, respond_on, memory, debug, output_visibility, harness, harness_config
       FROM chats
       WHERE chat_id = ${chatId}
     `;
@@ -300,6 +307,7 @@ describe("Scenario 7b: Guided setup command", () => {
     assert.equal(chat.respond_on, "mention+reply");
     assert.equal(chat.memory, false);
     assert.equal(chat.debug, false);
+    assert.deepEqual(chat.output_visibility, { commands: false, thinking: true, tools: false });
     assert.equal(chat.harness, "codex");
     assert.equal(chat.harness_config.codex.model, "gpt-5.4");
   });

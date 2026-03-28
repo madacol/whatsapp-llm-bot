@@ -2,14 +2,15 @@ import { getScopedHarnessConfig, normalizeHarnessConfig } from "../../../harness
 import { getChatOrThrow } from "../../../store.js";
 import { getClaudeSdkModels, getCodexAvailableModels, listHarnesses, resolveHarness } from "#harnesses";
 import {
+  getMultiSelectableOptions,
   getSelectableOptions,
   isMaster,
-  setChatSetting,
+  setConfigValue,
 } from "../chatSettings/_service.js";
 
 /**
  * @typedef {{
- *   setting: "enabled" | "trigger" | "harness" | "debug";
+ *   setting: "enabled" | "trigger" | "harness" | "show";
  *   question: string;
  * }} BasicSetupStep
  */
@@ -25,7 +26,7 @@ import {
 const ALL_SETUP_STEPS = [
   { setting: "trigger", question: "When should the bot reply in group chats?" },
   { setting: "harness", question: "Which harness should power this chat?" },
-  { setting: "debug", question: "Enable debug output for this chat?" },
+  { setting: "show", question: "Which extra outputs should stay visible in chat?" },
 ];
 
 /**
@@ -181,7 +182,7 @@ export default /** @type {defineAction} */ ((x) => x)({
    * @param {ExtendedActionContext<{autoExecute: true, useRootDb: true, requireAdmin: true}>} context
    * @param {Record<string, never>} _params
    */
-  action_fn: async function ({ chatId, rootDb, senderIds, select }, _params) {
+  action_fn: async function ({ chatId, rootDb, senderIds, select, selectMany }, _params) {
     const chat = await getChatOrThrow(rootDb, chatId);
     const steps = getSetupSteps();
 
@@ -197,6 +198,21 @@ export default /** @type {defineAction} */ ((x) => x)({
     const notes = [];
 
     for (const step of steps) {
+      const multiSelectable = getMultiSelectableOptions(step.setting, chat);
+      if (multiSelectable && typeof selectMany === "function") {
+        const selectedIds = await selectMany(
+          step.question,
+          multiSelectable.options,
+          { deleteOnSelect: true, currentIds: multiSelectable.currentIds },
+        );
+        if (selectedIds.length === 0) {
+          return "Setup cancelled. No changes were made.";
+        }
+
+        stagedChanges.push({ setting: step.setting, value: selectedIds.join(" ") });
+        continue;
+      }
+
       const selectable = step.setting === "harness"
         ? getHarnessSelectOptions(chat)
         : getSelectableOptions(step.setting, chat);
@@ -248,7 +264,7 @@ export default /** @type {defineAction} */ ((x) => x)({
     /** @type {string[]} */
     const applied = [];
     for (const change of stagedChanges) {
-      applied.push(await setChatSetting(rootDb, chatId, change.setting, change.value, { senderIds }));
+      applied.push(await setConfigValue(rootDb, chatId, change.setting, change.value, { senderIds }));
     }
     if (stagedHarnessModel) {
       applied.push(await applyHarnessModelSelection(rootDb, chatId, chat, stagedHarnessModel));
@@ -256,7 +272,7 @@ export default /** @type {defineAction} */ ((x) => x)({
 
     if (isMaster(senderIds)) {
       if (!chat.is_enabled) {
-        applied.push(await setChatSetting(rootDb, chatId, "enabled", "on", { senderIds }));
+        applied.push(await setConfigValue(rootDb, chatId, "enabled", "on", { senderIds }));
       }
     } else {
       notes.push("Enabled setting was skipped because only master users can change it.");
