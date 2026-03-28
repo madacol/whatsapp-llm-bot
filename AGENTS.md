@@ -2,12 +2,11 @@
 
 - Use JSDoc for all type annotations
 - Avoid weak typing like `@type {any|unknown}` casts. Use proper type guards and narrowing instead. Aspire to have strong and precise types everywhere
-- Prefer planning before implementation. Start with a very high-level plan, give the user a chance to correct course, then expand the plan progressively before making the change
-- When a task is non-trivial, present the first plan at the highest useful level. Only add detailed steps, edge cases, and execution details after the direction is confirmed or the user has had a chance to redirect
+- Before making a non-trivial change, start with a very high-level plan, give the user a chance to redirect, then expand into detailed steps, edge cases, and execution only after the direction is clear
 - After making any change, `pnpm type-check`, then test and then commit!. Then if there's any refactor worth doing, explain why and how it can be done
 - When refactoring, identify the main seams between subsystems and reduce each seam to a small semantic boundary
 - Before cutting corners, ask yourself why do you need to do this, and what needs to be done to avoid this. If you still think cutting this corner is still the best course of action, explain thoroughly to the user and let them decide how to continue with the plan
-- When depending on a specific format owned by an external service, make an empirical request first and inspect the full response before proposing an implementation plan. Do not rely on docs, assumptions, or partial samples when the wire format is a key dependency
+- When implementation depends on an external payload or event format from an LLM API, WhatsApp/Baileys, an SDK, or an app server, make an empirical request first and inspect the full real response before proposing the plan. Do not rely on docs, assumptions, or partial samples when that format is a key dependency
 
 ## Testing
 - Apply red/green TDD
