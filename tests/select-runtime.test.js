@@ -122,7 +122,7 @@ describe("createSelectRuntime", () => {
     assert.equal(await selectionPromise, "first");
   });
 
-  it("supports multi-select polls and resolves all selected ids", async () => {
+  it("commits multi-select polls 3 seconds after the last vote", async () => {
     const registry = createSelectRuntime();
     const { sock, sentMessages } = createMockSock();
     const selectMany = registry.createSelectMany(sock, "chat-1");
@@ -147,11 +147,27 @@ describe("createSelectRuntime", () => {
     assert.equal(poll.selectableCount, 2);
     assert.deepEqual(poll.values, ["✅ commands", "thinking"]);
 
+    let resolved = false;
+    void selectionPromise.then(() => {
+      resolved = true;
+    });
+
+    registry.handlePollVote({
+      chatId: "chat-1",
+      pollMsgId: "poll-1",
+      selectedOptions: [poll.values[0]],
+    });
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    assert.equal(resolved, false, "multi-select should stay open after a vote");
+    assert.equal(sentMessages.length, 2, "no settlement effect should be sent before the idle timeout");
+
     registry.handlePollVote({
       chatId: "chat-1",
       pollMsgId: "poll-1",
       selectedOptions: poll.values,
     });
+    await new Promise((resolve) => setTimeout(resolve, 2900));
+    assert.equal(resolved, false, "a new vote should reset the idle commit timer");
 
     assert.deepEqual(await selectionPromise, ["commands", "thinking"]);
     assert.deepEqual(sentMessages[sentMessages.length - 1]?.message, {
