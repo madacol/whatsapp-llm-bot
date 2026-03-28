@@ -63,8 +63,8 @@ const SHOW_NONE_OPTION_ID = "none";
 /**
  * @typedef {{
  *   currentIds: (chat: import("../../../store.js").ChatRow) => string[];
- *   options?: readonly string[];
- *   getOptions?: () => readonly string[];
+ *   options?: readonly SelectOption[];
+ *   getOptions?: (chat: import("../../../store.js").ChatRow) => readonly SelectOption[];
  * }} ConfigMultiPickerDefinition
  */
 
@@ -149,6 +149,33 @@ function formatSettingTitle(label) {
  */
 function areOutputVisibilityKeys(selectedIds) {
   return selectedIds.every((id) => isOutputVisibilityKey(id));
+}
+
+/**
+ * @param {string} label
+ * @param {boolean} enabled
+ * @returns {string}
+ */
+function formatBooleanOptionLabel(label, enabled) {
+  return `${label} (${enabled ? "on" : "off"})`;
+}
+
+/**
+ * @param {import("../../../store.js").ChatRow} chat
+ * @returns {SelectOption[]}
+ */
+function getShowMultiPickerOptions(chat) {
+  const enabledKeys = new Set(getEnabledOutputVisibilityKeys(chat.output_visibility));
+  return [
+    ...OUTPUT_VISIBILITY_FLAGS.map((flag) => ({
+      id: flag.key,
+      label: formatBooleanOptionLabel(flag.label, enabledKeys.has(flag.key)),
+    })),
+    {
+      id: SHOW_NONE_OPTION_ID,
+      label: formatBooleanOptionLabel(SHOW_NONE_OPTION_ID, enabledKeys.size === 0),
+    },
+  ];
 }
 
 /**
@@ -345,7 +372,7 @@ const BASE_CONFIG_KEYS = [
     aliases: ["output_visibility", "output-visibility"],
     examples: ["!c show", "!c reset show"],
     multiPicker: {
-      options: [...OUTPUT_VISIBILITY_FLAGS.map((flag) => flag.key), SHOW_NONE_OPTION_ID],
+      getOptions: (chat) => getShowMultiPickerOptions(chat),
       currentIds: (chat) => {
         const enabled = getEnabledOutputVisibilityKeys(chat.output_visibility);
         return enabled.length > 0 ? enabled : [SHOW_NONE_OPTION_ID];
@@ -804,14 +831,15 @@ function getDefinitionOptions(definition) {
 
 /**
  * @param {ConfigKeyDefinition} definition
- * @returns {string[]}
+ * @param {import("../../../store.js").ChatRow} chat
+ * @returns {SelectOption[]}
  */
-function getDefinitionMultiOptions(definition) {
+function getDefinitionMultiOptions(definition, chat) {
   if (definition.multiPicker?.options) {
     return [...definition.multiPicker.options];
   }
   if (definition.multiPicker?.getOptions) {
-    return [...definition.multiPicker.getOptions()];
+    return [...definition.multiPicker.getOptions(chat)];
   }
   return [];
 }
@@ -910,13 +938,13 @@ export function getMultiSelectableOptions(config, chat) {
     return null;
   }
 
-  const optionIds = getDefinitionMultiOptions(definition);
-  if (optionIds.length === 0) {
+  const options = getDefinitionMultiOptions(definition, chat);
+  if (options.length === 0) {
     return null;
   }
 
   return {
-    options: optionIds.map((optionId) => ({ id: optionId, label: optionId })),
+    options: options.map((option) => typeof option === "string" ? { id: option, label: option } : option),
     currentIds: definition.multiPicker.currentIds(chat),
   };
 }
