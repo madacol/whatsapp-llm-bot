@@ -331,6 +331,7 @@ export function createTurnIo({
   }
 
   const select = selectRuntime.createSelect(getSocket ?? sock, chatId);
+  const selectMany = selectRuntime.createSelectMany(getSocket ?? sock, chatId);
   const confirm = confirmRuntime.createConfirm(getSocket ?? sock, chatId);
 
   return {
@@ -347,6 +348,10 @@ export function createTurnIo({
     select: async (question, options, config) => {
       await presence.end().catch(() => {});
       return select(question, options, config);
+    },
+    selectMany: async (question, options, config) => {
+      await presence.end().catch(() => {});
+      return selectMany(question, options, config);
     },
     confirm: async (prompt, hooks) => {
       await presence.end().catch(() => {});

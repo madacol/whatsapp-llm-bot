@@ -39,16 +39,34 @@ export function getPollCreationData(msg) {
 
 /**
  * @typedef {{
- *   settle: (id: string, options?: SelectSettlementOptions) => void;
  *   timer: ReturnType<typeof setTimeout>;
  *   labelToId: Map<string, string>;
- * }} PendingSelect
+ * }} PendingSelectBase
+ */
+
+/**
+ * @typedef {PendingSelectBase & {
+ *   mode: "single";
+ *   settle: (id: string, options?: SelectSettlementOptions) => void;
+ * }} PendingSingleSelect
+ */
+
+/**
+ * @typedef {PendingSelectBase & {
+ *   mode: "multi";
+ *   settle: (ids: string[], options?: SelectSettlementOptions) => void;
+ * }} PendingMultiSelect
+ */
+
+/**
+ * @typedef {PendingSingleSelect | PendingMultiSelect} PendingSelect
  */
 
 /**
  * @typedef {{
  *   handlePollVote: (event: PollVoteEvent) => boolean;
  *   createSelect: (sock: SocketResolver, chatId: string) => (question: string, options: SelectOption[], config?: SelectConfig) => Promise<string>;
+ *   createSelectMany: (sock: SocketResolver, chatId: string) => (question: string, options: SelectOption[], config?: SelectManyConfig) => Promise<string[]>;
  *   resolvePollVoteMessage: (message: import('@whiskeysockets/baileys').WAMessage, sock: import('@whiskeysockets/baileys').WASocket) => Promise<PollVoteEvent | null>;
  *   readonly size: number;
  *   clear: () => void;
@@ -58,18 +76,19 @@ export function getPollCreationData(msg) {
 /**
  * Normalize SelectOption[] into poll labels and a label->id map.
  * @param {SelectOption[]} options
- * @param {string | undefined} currentId
+ * @param {readonly string[] | undefined} currentIds
  * @returns {{ labels: string[], labelToId: Map<string, string> }}
  */
-function normalizeSelectOptions(options, currentId) {
+function normalizeSelectOptions(options, currentIds) {
   /** @type {Map<string, string>} */
   const labelToId = new Map();
   /** @type {Set<string>} */
   const usedLabels = new Set();
+  const selectedIds = new Set(currentIds ?? []);
   const labels = options.map((option) => {
     const id = typeof option === "string" ? option : option.id;
     const baseLabel = typeof option === "string" ? option : option.label;
-    const preferredLabel = currentId != null && id === currentId ? `✅ ${baseLabel}` : baseLabel;
+    const preferredLabel = selectedIds.has(id) ? `✅ ${baseLabel}` : baseLabel;
     const label = createUniquePollLabel(preferredLabel, usedLabels);
     labelToId.set(label, id);
     return label;
@@ -120,6 +139,25 @@ function requireSocket(getSocket) {
     throw new Error("WhatsApp socket is not connected");
   }
   return sock;
+}
+
+/**
+ * Track a sent poll message long enough to decrypt later votes.
+ * @param {Map<string, import('@whiskeysockets/baileys').WAMessage>} sentPolls
+ * @param {string} pollMsgId
+ * @param {import('@whiskeysockets/baileys').WAMessage} sent
+ * @returns {void}
+ */
+function rememberSentPoll(sentPolls, pollMsgId, sent) {
+  if (sentPolls.size >= MAX_SENT_POLLS) {
+    const oldestKey = sentPolls.keys().next().value;
+    if (oldestKey) {
+      sentPolls.delete(oldestKey);
+    }
+  }
+  sentPolls.set(pollMsgId, sent);
+  const cleanupTimer = setTimeout(() => sentPolls.delete(pollMsgId), POLL_TTL_MS);
+  cleanupTimer.unref?.();
 }
 
 /**
@@ -230,8 +268,15 @@ export function createSelectRuntime() {
       clearTimeout(entry.timer);
       pending.delete(event.pollMsgId);
 
-      const selectedLabel = event.selectedOptions[0];
-      entry.settle(entry.labelToId.get(selectedLabel) ?? selectedLabel);
+      const selectedIds = event.selectedOptions
+        .map((label) => entry.labelToId.get(label) ?? label)
+        .filter((id) => id.length > 0);
+
+      if (entry.mode === "multi") {
+        entry.settle(selectedIds);
+      } else {
+        entry.settle(selectedIds[0] ?? "");
+      }
       return true;
     },
 
@@ -245,23 +290,18 @@ export function createSelectRuntime() {
       const getSocket = createSocketGetter(sock);
 
       return async (question, options, config) => {
-        const { labels, labelToId } = normalizeSelectOptions(options, config?.currentId);
+        const { labels, labelToId } = normalizeSelectOptions(
+          options,
+          config?.currentId ? [config.currentId] : [],
+        );
         const sent = await requireSocket(getSocket).sendMessage(chatId, {
           poll: { name: question, values: labels, selectableCount: 1 },
         });
         const pollMsgId = sent?.key?.id;
         const pollKey = sent?.key;
 
-        if (pollMsgId) {
-          if (sentPolls.size >= MAX_SENT_POLLS) {
-            const oldestKey = sentPolls.keys().next().value;
-            if (oldestKey) {
-              sentPolls.delete(oldestKey);
-            }
-          }
-          sentPolls.set(pollMsgId, sent);
-          const cleanupTimer = setTimeout(() => sentPolls.delete(pollMsgId), POLL_TTL_MS);
-          cleanupTimer.unref?.();
+        if (pollMsgId && sent) {
+          rememberSentPoll(sentPolls, pollMsgId, sent);
         }
 
         if (!pollMsgId || !pollKey) {
@@ -305,7 +345,79 @@ export function createSelectRuntime() {
             resolve(id);
           }
 
-          pending.set(pollMsgId, { settle, timer, labelToId });
+          pending.set(pollMsgId, { mode: "single", settle, timer, labelToId });
+        });
+      };
+    },
+
+    /**
+     * Create a multi-select function scoped to a chat.
+     * @param {SocketResolver} sock
+     * @param {string} chatId
+     * @returns {(question: string, options: SelectOption[], config?: SelectManyConfig) => Promise<string[]>}
+     */
+    createSelectMany(sock, chatId) {
+      const getSocket = createSocketGetter(sock);
+
+      return async (question, options, config) => {
+        const { labels, labelToId } = normalizeSelectOptions(options, config?.currentIds);
+        const selectableCount = Math.max(labels.length, 1);
+        const sent = await requireSocket(getSocket).sendMessage(chatId, {
+          poll: { name: question, values: labels, selectableCount },
+        });
+        const pollMsgId = sent?.key?.id;
+        const pollKey = sent?.key;
+
+        if (pollMsgId && sent) {
+          rememberSentPoll(sentPolls, pollMsgId, sent);
+        }
+
+        if (!pollMsgId || !pollKey) {
+          return [];
+        }
+
+        /** @type {import('@whiskeysockets/baileys').WAMessageKey} */
+        const sentPollKey = pollKey;
+
+        getSocket()?.sendMessage(chatId, { react: { text: "⏳", key: sentPollKey } });
+
+        const cancelIds = config?.cancelIds ? new Set(config.cancelIds) : null;
+        const deleteOnSelect = config?.deleteOnSelect ?? false;
+        const timeout = config?.timeout ?? SELECT_TIMEOUT_MS;
+
+        return new Promise((resolve) => {
+          const timer = setTimeout(() => {
+            pending.delete(pollMsgId);
+            settle([]);
+          }, timeout);
+          timer.unref?.();
+
+          /**
+           * Complete the pending selection and optionally suppress transport-side effects.
+           * @param {string[]} ids
+           * @param {SelectSettlementOptions} [options]
+           * @returns {void}
+           */
+          function settle(ids, options = {}) {
+            if (!options.suppressEffects) {
+              const isCancelled = ids.length === 0 || (
+                cancelIds !== null
+                && ids.length === 1
+                && cancelIds.has(ids[0] ?? "")
+              );
+              if (isCancelled) {
+                getSocket()?.sendMessage(chatId, { react: { text: "❌", key: sentPollKey } });
+              } else if (deleteOnSelect) {
+                getSocket()?.sendMessage(chatId, { delete: sentPollKey });
+              } else {
+                getSocket()?.sendMessage(chatId, { react: { text: "", key: sentPollKey } });
+              }
+            }
+
+            resolve(ids);
+          }
+
+          pending.set(pollMsgId, { mode: "multi", settle, timer, labelToId });
         });
       };
     },
@@ -327,7 +439,11 @@ export function createSelectRuntime() {
     clear() {
       for (const entry of pending.values()) {
         clearTimeout(entry.timer);
-        entry.settle("", { suppressEffects: true });
+        if (entry.mode === "multi") {
+          entry.settle([], { suppressEffects: true });
+        } else {
+          entry.settle("", { suppressEffects: true });
+        }
       }
       pending.clear();
       sentPolls.clear();

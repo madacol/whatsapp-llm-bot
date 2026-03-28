@@ -122,6 +122,43 @@ describe("createSelectRuntime", () => {
     assert.equal(await selectionPromise, "first");
   });
 
+  it("supports multi-select polls and resolves all selected ids", async () => {
+    const registry = createSelectRuntime();
+    const { sock, sentMessages } = createMockSock();
+    const selectMany = registry.createSelectMany(sock, "chat-1");
+
+    const selectionPromise = selectMany(
+      "Pick any",
+      [
+        { id: "commands", label: "commands" },
+        { id: "thinking", label: "thinking" },
+      ],
+      { currentIds: ["commands"], deleteOnSelect: true },
+    );
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const pollMessage = sentMessages.find((entry) => "poll" in entry.message);
+    assert.ok(pollMessage, "expected selectMany() to send a poll message");
+
+    const poll = pollMessage.message.poll;
+    assert.ok(poll && typeof poll === "object", "expected poll payload");
+    assert.ok(Array.isArray(poll.values), "expected poll values array");
+    assert.equal(poll.selectableCount, 2);
+    assert.deepEqual(poll.values, ["✅ commands", "thinking"]);
+
+    registry.handlePollVote({
+      chatId: "chat-1",
+      pollMsgId: "poll-1",
+      selectedOptions: poll.values,
+    });
+
+    assert.deepEqual(await selectionPromise, ["commands", "thinking"]);
+    assert.deepEqual(sentMessages[sentMessages.length - 1]?.message, {
+      delete: { id: "poll-1", remoteJid: "chat-1" },
+    });
+  });
+
   it("clear() resolves pending selects without sending cancellation reactions", async () => {
     const registry = createSelectRuntime();
     const { sock, sentMessages } = createMockSock();
