@@ -25,27 +25,36 @@ describe("code-image-renderer", () => {
       assert.deepStrictEqual(images[0].subarray(0, 4), Buffer.from([0x89, 0x50, 0x4e, 0x47]));
     });
 
-    it("renders 100 lines of narrow code as a single image", async () => {
+    it("splits 100 lines of narrow code into shorter images", async () => {
       const code = Array.from({ length: 100 }, (_, i) => `const x${i} = ${i};`).join("\n");
       const images = await renderCodeToImages(code, "javascript");
-      assert.strictEqual(images.length, 1, "100 narrow lines should fit in one image");
+      assert.strictEqual(images.length, 2, "100 narrow lines should split into two less-dense images");
     });
 
     it("splits into multiple images when pixel budget is exceeded", async () => {
-      // Wide lines (500+ chars) get capped to MAX_SVG_WIDTH=4000px.
-      // At 4000px, max ~154 lines fit per image, so 200 lines → 2 chunks.
+      // Wide code should still split once the shared line cap is exceeded.
       const wideLine = "x".repeat(500);
       const code = Array.from({ length: 200 }, () => wideLine).join("\n");
       const images = await renderCodeToImages(code, "text");
       assert.ok(images.length >= 2, `200 wide lines should split, got ${images.length} image(s)`);
     });
 
-    it("throws on extremely long single lines (exceeds pixel budget)", async () => {
-      // A single line of 10,000 chars → ~84,000px wide, capped to 4000px.
-      // 4000 × 52 = 208,000 pixels — well under limit, should NOT throw.
+    it("wraps long code lines into a narrower, taller image", async () => {
+      const longLine = Array.from({ length: 40 }, (_, index) => `segment${index}`).join(" ");
+      const images = await renderCodeToImages(longLine, "text");
+      assert.equal(images.length, 1, "wrapped long code should still fit in a single image");
+      const { width, height } = getPngDimensions(images[0]);
+      assert.ok(width <= 220, `expected wrapped code image to stay narrow, got ${width}px`);
+      assert.ok(height >= 400, `expected wrapped code image to grow taller, got ${height}px`);
+    });
+
+    it("hard-wraps extremely long single tokens instead of rendering an excessively wide image", async () => {
       const longLine = "x".repeat(10_000);
       const images = await renderCodeToImages(longLine, "text");
-      assert.ok(images.length > 0, "long line within pixel budget should render");
+      assert.ok(images.length > 0, "very long single-token code should still render");
+      const { width, height } = getPngDimensions(images[0]);
+      assert.ok(width <= 220, `expected hard-wrapped code image to stay narrow, got ${width}px`);
+      assert.ok(height >= 400, `expected hard-wrapped code image to grow taller, got ${height}px`);
     });
 
     it("returns empty array for empty code", async () => {
@@ -62,9 +71,8 @@ describe("code-image-renderer", () => {
     });
 
     it("renders a large diff across multiple chunks when pixel budget exceeded", async () => {
-      // Wide lines (500+ chars) hit MAX_SVG_WIDTH=4000px.
       // Completely different content → 100 removed + 100 added = 200 diff lines.
-      // At 4000px, max ~154 lines fit → splits into 2 chunks.
+      // Shared wrapping and chunking should split this into multiple images.
       const oldStr = Array.from({ length: 100 }, (_, i) => "old_" + "x".repeat(500) + i).join("\n");
       const newStr = Array.from({ length: 100 }, (_, i) => "new_" + "y".repeat(500) + i).join("\n");
       const images = await renderDiffToImages(oldStr, newStr, "text");
@@ -120,12 +128,11 @@ describe("code-image-renderer", () => {
   });
 
   describe("pixel budget guard", () => {
-    it("caps SVG width at MAX_SVG_WIDTH (4000px)", async () => {
-      // Very long line — width would be huge uncapped, but gets clamped to 4000px.
-      // At 4000px × 52px height = 208,000 pixels → well under 12.5M, renders fine.
-      const code = "A".repeat(5000);
+    it("keeps very wide code images split across multiple wrapped chunks", async () => {
+      const wideLine = "A".repeat(1500);
+      const code = Array.from({ length: 60 }, () => wideLine).join("\n");
       const images = await renderCodeToImages(code, "text");
-      assert.ok(images.length > 0, "width-capped render should succeed");
+      assert.ok(images.length >= 3, `expected wrapped wide code to split across multiple images, got ${images.length}`);
     });
   });
 

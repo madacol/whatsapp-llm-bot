@@ -13,19 +13,14 @@ const CHAR_WIDTH = FONT_SIZE * 0.6;
 const MIN_WRAP_CHARS = 20;
 
 /**
- * Maximum image aspect ratio (width:height) before WhatsApp crops or
- * renders the image too small. A ratio of ~6:1 keeps code images readable
- * on mobile without being excessively wide.
- *
- * At 6:1: 1 line → 33 chars, 2 → 47, 3 → 61, 5+ → 80 (capped by caller).
+ * Maximum image aspect ratio (width:height) before WhatsApp renders the
+ * content too densely. A ratio of ~2:1 keeps code and diff images narrow
+ * enough that WhatsApp presents them larger on mobile.
  */
-const MAX_ASPECT_RATIO = 6;
-const DIFF_MAX_ASPECT_RATIO = 2;
+const MAX_ASPECT_RATIO = 2;
 const MAX_PIXELS = 12_500_000;
-const MAX_SVG_WIDTH = 4000;
-const MAX_LINES_PER_CHUNK = 100;
-const DIFF_MAX_SVG_WIDTH = 2000;
-const DIFF_MAX_LINES_PER_CHUNK = 50;
+const MAX_SVG_WIDTH = 2000;
+const MAX_LINES_PER_CHUNK = 50;
 
 /**
  * Compute the maximum number of characters per line that keeps the rendered
@@ -170,7 +165,7 @@ function renderAnnotatedLines(lines, opts) {
   const svgWidth = Math.min(Math.max(maxLineWidth + contentX + PADDING, 200), maxSvgWidth);
 
   // Adaptive chunk size: fit as many lines as the pixel budget allows,
-  // but cap at 100 lines for readability on mobile screens.
+  // but cap at the configured line limit for readability on mobile screens.
   const maxLinesPerChunk = Math.min(
     maxLinesPerChunkLimit,
     Math.max(10, Math.floor((maxPixels / svgWidth - PADDING * 2) / LINE_HEIGHT)),
@@ -264,7 +259,7 @@ export async function renderCodeToImages(code, language) {
     return [];
   }
 
-  return renderAnnotatedLines(lines);
+  return renderCodeLikeAnnotatedLines(lines);
 }
 
 /**
@@ -540,7 +535,7 @@ export async function renderDiffToImages(oldStr, newStr, language) {
     }
   }
 
-  return renderDiffAnnotatedLines(lines);
+  return renderCodeLikeAnnotatedLines(lines, { gutterWidth: GUTTER_WIDTH, prefixChars: 1 });
 }
 
 /**
@@ -600,7 +595,7 @@ export async function renderUnifiedDiffToImages(diffText, language) {
     lines.push({ tokens: createPlainTokens(rawLine) });
   }
 
-  return renderDiffAnnotatedLines(lines);
+  return renderCodeLikeAnnotatedLines(lines, { gutterWidth: GUTTER_WIDTH, prefixChars: 1 });
 }
 
 /**
@@ -624,7 +619,7 @@ function createPlainTokens(content, color = TEXT_COLOR) {
 }
 
 /**
- * Wrap annotated lines to keep diff images narrow enough to stay readable in WhatsApp.
+ * Wrap annotated lines to keep code and diff images readable in WhatsApp.
  * @param {AnnotatedLine[]} lines
  * @param {number} maxContentChars
  * @returns {AnnotatedLine[]}
@@ -744,18 +739,21 @@ function sliceTokens(tokens, start, end) {
 
 /**
  * @param {AnnotatedLine[]} lines
+ * @param {{ gutterWidth?: number, prefixChars?: number }} [options]
  * @returns {Buffer[]}
  */
-function renderDiffAnnotatedLines(lines) {
+function renderCodeLikeAnnotatedLines(lines, options) {
+  const gutterWidth = options?.gutterWidth ?? 0;
+  const prefixChars = options?.prefixChars ?? 0;
   const maxContentChars = maxCharsForLayout(lines.length, {
-    maxAspectRatio: DIFF_MAX_ASPECT_RATIO,
-    gutterWidth: GUTTER_WIDTH,
-    prefixChars: 1,
+    maxAspectRatio: MAX_ASPECT_RATIO,
+    gutterWidth,
+    prefixChars,
   });
   const wrappedLines = wrapAnnotatedLines(lines, maxContentChars);
   return renderAnnotatedLines(wrappedLines, {
-    gutterWidth: GUTTER_WIDTH,
-    maxSvgWidth: DIFF_MAX_SVG_WIDTH,
-    maxLinesPerChunk: DIFF_MAX_LINES_PER_CHUNK,
+    gutterWidth,
+    maxSvgWidth: MAX_SVG_WIDTH,
+    maxLinesPerChunk: MAX_LINES_PER_CHUNK,
   });
 }
