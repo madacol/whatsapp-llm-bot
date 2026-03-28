@@ -8,8 +8,8 @@ const CODEX_CACHE_PATH = path.resolve("data/codex-models.json");
 /** @type {ActionDbTestFn[]} */
 export default [
   async function applies_basic_setup_choices_in_one_go(action_fn, db) {
-    await db.sql`INSERT INTO chats(chat_id, is_enabled, respond_on, memory, debug)
-      VALUES ('setup-1', false, 'mention', false, true)
+    await db.sql`INSERT INTO chats(chat_id, is_enabled, respond_on, memory, debug, output_visibility)
+      VALUES ('setup-1', false, 'mention', false, true, '{}'::jsonb)
       ON CONFLICT DO NOTHING`;
     await fs.mkdir(path.dirname(CODEX_CACHE_PATH), { recursive: true });
     await fs.writeFile(CODEX_CACHE_PATH, JSON.stringify({
@@ -20,7 +20,7 @@ export default [
     /** @type {Array<{ question: string, options: SelectOption[] }>} */
     const prompts = [];
     /** @type {string[]} */
-    const selections = ["mention+reply", "codex", "gpt-5.4", "off"];
+    const selections = ["mention+reply", "codex", "gpt-5.4"];
 
     const originalMaster = config.MASTER_IDs;
     config.MASTER_IDs = ["master-user"];
@@ -35,6 +35,10 @@ export default [
             prompts.push({ question, options });
             return selections.shift() ?? "";
           },
+          selectMany: async (question, options) => {
+            prompts.push({ question, options });
+            return ["thinking", "changes"];
+          },
         },
         {},
       );
@@ -45,18 +49,20 @@ export default [
       assert.ok(result.includes("mention+reply"), `Expected trigger summary, got: ${result}`);
       assert.ok(result.includes("codex"), `Expected harness summary, got: ${result}`);
       assert.ok(result.includes("gpt-5.4"), `Expected harness model summary, got: ${result}`);
-      assert.ok(result.toLowerCase().includes("debug"), `Expected debug summary, got: ${result}`);
+      assert.ok(result.includes("thinking on"), `Expected show summary, got: ${result}`);
+      assert.ok(result.includes("commands off"), `Expected show summary, got: ${result}`);
       assert.ok(!prompts.some((prompt) => prompt.question === "Enable the bot for this chat?"), "wizard should not ask the enable question");
 
       const { rows: [chat] } = await db.sql`
-        SELECT is_enabled, respond_on, memory, debug, harness, harness_config
+        SELECT is_enabled, respond_on, memory, debug, output_visibility, harness, harness_config
         FROM chats
         WHERE chat_id = 'setup-1'
       `;
       assert.equal(chat.is_enabled, true);
       assert.equal(chat.respond_on, "mention+reply");
       assert.equal(chat.memory, false, "setup should no longer modify memory");
-      assert.equal(chat.debug, false);
+      assert.equal(chat.debug, true);
+      assert.deepEqual(chat.output_visibility, { commands: false, thinking: true, tools: false });
       assert.equal(chat.harness, "codex");
       assert.equal(chat.harness_config.codex.model, "gpt-5.4");
     } finally {
@@ -66,8 +72,8 @@ export default [
   },
 
   async function cancels_without_changing_anything(action_fn, db) {
-    await db.sql`INSERT INTO chats(chat_id, is_enabled, respond_on, memory, debug)
-      VALUES ('setup-2', false, 'mention', false, false)
+    await db.sql`INSERT INTO chats(chat_id, is_enabled, respond_on, memory, debug, output_visibility)
+      VALUES ('setup-2', false, 'mention', false, false, '{}'::jsonb)
       ON CONFLICT DO NOTHING`;
 
     const originalMaster = config.MASTER_IDs;
@@ -87,7 +93,7 @@ export default [
       assert.ok(result.toLowerCase().includes("cancel"), `Expected cancellation message, got: ${result}`);
 
       const { rows: [chat] } = await db.sql`
-        SELECT is_enabled, respond_on, memory, debug
+        SELECT is_enabled, respond_on, memory, debug, output_visibility
         FROM chats
         WHERE chat_id = 'setup-2'
       `;
@@ -95,6 +101,7 @@ export default [
       assert.equal(chat.respond_on, "mention");
       assert.equal(chat.memory, false);
       assert.equal(chat.debug, false);
+      assert.deepEqual(chat.output_visibility, {});
     } finally {
       config.MASTER_IDs = originalMaster;
     }
