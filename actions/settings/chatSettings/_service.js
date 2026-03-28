@@ -154,11 +154,12 @@ function areOutputVisibilityKeys(selectedIds) {
 
 /**
  * @param {string} label
- * @param {boolean} enabled
+ * @param {string} currentState
+ * @param {string} tapState
  * @returns {string}
  */
-function formatBooleanOptionLabel(label, enabled) {
-  return `${label} (${enabled ? "on" : "off"})`;
+function formatBooleanOptionLabel(label, currentState, tapState) {
+  return `${label} (${currentState}; tap=${tapState})`;
 }
 
 /**
@@ -170,11 +171,11 @@ function getShowMultiPickerOptions(chat) {
   return [
     ...OUTPUT_VISIBILITY_FLAGS.map((flag) => ({
       id: flag.key,
-      label: formatBooleanOptionLabel(flag.label, enabledKeys.has(flag.key)),
+      label: formatBooleanOptionLabel(flag.label, enabledKeys.has(flag.key) ? "on" : "off", enabledKeys.has(flag.key) ? "off" : "on"),
     })),
     {
       id: SHOW_NONE_OPTION_ID,
-      label: formatBooleanOptionLabel(SHOW_NONE_OPTION_ID, enabledKeys.size === 0),
+      label: formatBooleanOptionLabel(SHOW_NONE_OPTION_ID, enabledKeys.size === 0 ? "on" : "off", "reset"),
     },
   ];
 }
@@ -374,10 +375,7 @@ const BASE_CONFIG_KEYS = [
     examples: ["!c show", "!c reset show"],
     multiPicker: {
       getOptions: (chat) => getShowMultiPickerOptions(chat),
-      currentIds: (chat) => {
-        const enabled = getEnabledOutputVisibilityKeys(chat.output_visibility);
-        return enabled.length > 0 ? enabled : [SHOW_NONE_OPTION_ID];
-      },
+      currentIds: () => [],
     },
     flags: OUTPUT_VISIBILITY_FLAGS,
     resettable: true,
