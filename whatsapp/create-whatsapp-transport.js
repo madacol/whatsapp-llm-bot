@@ -81,14 +81,16 @@ export async function createWhatsAppTransport() {
             case "ignore":
               continue;
             case "reaction":
-              confirmRuntime.handleReactions(incomingEvent.reactions, sock);
               reactionRuntime.handleReactions(incomingEvent.reactions);
               continue;
             case "poll_update":
               try {
-                const pollVoteEvent = await selectRuntime.resolvePollVoteMessage(incomingEvent.message, sock);
+                const pollVoteEvent = await selectRuntime.resolvePollVoteMessage(incomingEvent.message, sock)
+                  ?? await confirmRuntime.resolvePollVoteMessage(incomingEvent.message, sock);
                 if (pollVoteEvent) {
-                  selectRuntime.handlePollVote(pollVoteEvent);
+                  if (!selectRuntime.handlePollVote(pollVoteEvent)) {
+                    confirmRuntime.handlePollVote(pollVoteEvent);
+                  }
                 }
               } catch (error) {
                 log.error("Error processing poll vote from upsert:", error);
@@ -114,7 +116,6 @@ export async function createWhatsAppTransport() {
 
       if (events["messages.reaction"]) {
         const normalized = normalizeReactionEvents(events["messages.reaction"]);
-        confirmRuntime.handleReactions(normalized, sock);
         reactionRuntime.handleReactions(normalized);
       }
     });
