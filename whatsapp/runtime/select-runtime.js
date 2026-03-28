@@ -161,6 +161,63 @@ function rememberSentPoll(sentPolls, pollMsgId, sent) {
 }
 
 /**
+ * Send a poll prompt and return the metadata needed to track its result.
+ * @param {() => import('@whiskeysockets/baileys').WASocket | null} getSocket
+ * @param {Map<string, import('@whiskeysockets/baileys').WAMessage>} sentPolls
+ * @param {string} chatId
+ * @param {string} question
+ * @param {SelectOption[]} options
+ * @param {readonly string[] | undefined} currentIds
+ * @param {number} selectableCount
+ * @returns {Promise<{
+ *   pollMsgId: string;
+ *   sentPollKey: import('@whiskeysockets/baileys').WAMessageKey;
+ *   labelToId: Map<string, string>;
+ * } | null>}
+ */
+async function sendPollPrompt(getSocket, sentPolls, chatId, question, options, currentIds, selectableCount) {
+  const { labels, labelToId } = normalizeSelectOptions(options, currentIds);
+  const sent = await requireSocket(getSocket).sendMessage(chatId, {
+    poll: { name: question, values: labels, selectableCount },
+  });
+  const pollMsgId = sent?.key?.id;
+  const pollKey = sent?.key;
+
+  if (pollMsgId && sent) {
+    rememberSentPoll(sentPolls, pollMsgId, sent);
+  }
+
+  if (!pollMsgId || !pollKey) {
+    return null;
+  }
+
+  /** @type {import('@whiskeysockets/baileys').WAMessageKey} */
+  const sentPollKey = pollKey;
+  getSocket()?.sendMessage(chatId, { react: { text: "⏳", key: sentPollKey } });
+
+  return { pollMsgId, sentPollKey, labelToId };
+}
+
+/**
+ * Apply the transport-side effect after a selection settles.
+ * @param {() => import('@whiskeysockets/baileys').WASocket | null} getSocket
+ * @param {string} chatId
+ * @param {import('@whiskeysockets/baileys').WAMessageKey} sentPollKey
+ * @param {boolean} isCancelled
+ * @param {boolean} deleteOnSelect
+ * @returns {void}
+ */
+function applySettlementEffect(getSocket, chatId, sentPollKey, isCancelled, deleteOnSelect) {
+  if (isCancelled) {
+    getSocket()?.sendMessage(chatId, { react: { text: "❌", key: sentPollKey } });
+  } else if (deleteOnSelect) {
+    getSocket()?.sendMessage(chatId, { delete: sentPollKey });
+  } else {
+    getSocket()?.sendMessage(chatId, { react: { text: "", key: sentPollKey } });
+  }
+}
+
+/**
  * Decrypt a poll vote message and resolve the selected option names.
  * @param {Map<string, import('@whiskeysockets/baileys').WAMessage>} sentPolls
  * @param {import('@whiskeysockets/baileys').WAMessage} message
@@ -290,36 +347,27 @@ export function createSelectRuntime() {
       const getSocket = createSocketGetter(sock);
 
       return async (question, options, config) => {
-        const { labels, labelToId } = normalizeSelectOptions(
+        const prompt = await sendPollPrompt(
+          getSocket,
+          sentPolls,
+          chatId,
+          question,
           options,
           config?.currentId ? [config.currentId] : [],
+          1,
         );
-        const sent = await requireSocket(getSocket).sendMessage(chatId, {
-          poll: { name: question, values: labels, selectableCount: 1 },
-        });
-        const pollMsgId = sent?.key?.id;
-        const pollKey = sent?.key;
-
-        if (pollMsgId && sent) {
-          rememberSentPoll(sentPolls, pollMsgId, sent);
-        }
-
-        if (!pollMsgId || !pollKey) {
+        if (!prompt) {
           return "";
         }
 
-        /** @type {import('@whiskeysockets/baileys').WAMessageKey} */
-        const sentPollKey = pollKey;
-
-        getSocket()?.sendMessage(chatId, { react: { text: "⏳", key: sentPollKey } });
-
+        const promptData = prompt;
         const cancelIds = config?.cancelIds ? new Set(config.cancelIds) : null;
         const deleteOnSelect = config?.deleteOnSelect ?? false;
         const timeout = config?.timeout ?? SELECT_TIMEOUT_MS;
 
         return new Promise((resolve) => {
           const timer = setTimeout(() => {
-            pending.delete(pollMsgId);
+            pending.delete(promptData.pollMsgId);
             settle("");
           }, timeout);
           timer.unref?.();
@@ -333,19 +381,13 @@ export function createSelectRuntime() {
           function settle(id, options = {}) {
             if (!options.suppressEffects) {
               const isCancelled = !id || (cancelIds !== null && cancelIds.has(id));
-              if (isCancelled) {
-                getSocket()?.sendMessage(chatId, { react: { text: "❌", key: sentPollKey } });
-              } else if (deleteOnSelect) {
-                getSocket()?.sendMessage(chatId, { delete: sentPollKey });
-              } else {
-                getSocket()?.sendMessage(chatId, { react: { text: "", key: sentPollKey } });
-              }
+              applySettlementEffect(getSocket, chatId, promptData.sentPollKey, isCancelled, deleteOnSelect);
             }
 
             resolve(id);
           }
 
-          pending.set(pollMsgId, { mode: "single", settle, timer, labelToId });
+          pending.set(promptData.pollMsgId, { mode: "single", settle, timer, labelToId: promptData.labelToId });
         });
       };
     },
@@ -360,34 +402,28 @@ export function createSelectRuntime() {
       const getSocket = createSocketGetter(sock);
 
       return async (question, options, config) => {
-        const { labels, labelToId } = normalizeSelectOptions(options, config?.currentIds);
-        const selectableCount = Math.max(labels.length, 1);
-        const sent = await requireSocket(getSocket).sendMessage(chatId, {
-          poll: { name: question, values: labels, selectableCount },
-        });
-        const pollMsgId = sent?.key?.id;
-        const pollKey = sent?.key;
-
-        if (pollMsgId && sent) {
-          rememberSentPoll(sentPolls, pollMsgId, sent);
-        }
-
-        if (!pollMsgId || !pollKey) {
+        const selectableCount = Math.max(options.length, 1);
+        const prompt = await sendPollPrompt(
+          getSocket,
+          sentPolls,
+          chatId,
+          question,
+          options,
+          config?.currentIds,
+          selectableCount,
+        );
+        if (!prompt) {
           return [];
         }
 
-        /** @type {import('@whiskeysockets/baileys').WAMessageKey} */
-        const sentPollKey = pollKey;
-
-        getSocket()?.sendMessage(chatId, { react: { text: "⏳", key: sentPollKey } });
-
+        const promptData = prompt;
         const cancelIds = config?.cancelIds ? new Set(config.cancelIds) : null;
         const deleteOnSelect = config?.deleteOnSelect ?? false;
         const timeout = config?.timeout ?? SELECT_TIMEOUT_MS;
 
         return new Promise((resolve) => {
           const timer = setTimeout(() => {
-            pending.delete(pollMsgId);
+            pending.delete(promptData.pollMsgId);
             settle([]);
           }, timeout);
           timer.unref?.();
@@ -405,19 +441,13 @@ export function createSelectRuntime() {
                 && ids.length === 1
                 && cancelIds.has(ids[0] ?? "")
               );
-              if (isCancelled) {
-                getSocket()?.sendMessage(chatId, { react: { text: "❌", key: sentPollKey } });
-              } else if (deleteOnSelect) {
-                getSocket()?.sendMessage(chatId, { delete: sentPollKey });
-              } else {
-                getSocket()?.sendMessage(chatId, { react: { text: "", key: sentPollKey } });
-              }
+              applySettlementEffect(getSocket, chatId, promptData.sentPollKey, isCancelled, deleteOnSelect);
             }
 
             resolve(ids);
           }
 
-          pending.set(pollMsgId, { mode: "multi", settle, timer, labelToId });
+          pending.set(promptData.pollMsgId, { mode: "multi", settle, timer, labelToId: promptData.labelToId });
         });
       };
     },
