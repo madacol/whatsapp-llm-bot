@@ -54,12 +54,21 @@ function mapApprovalPolicy(approvalPolicy) {
     case "never":
       return "never";
     case "on-request":
-      return "onRequest";
+      return "on-request";
     case "untrusted":
       return "unlessTrusted";
     default:
       return undefined;
   }
+}
+
+/**
+ * Build the structured approval response expected by the app server.
+ * @param {boolean} allowed
+ * @returns {{ decision: "accept" | "cancel" }}
+ */
+function buildApprovalDecision(allowed) {
+  return { decision: allowed ? "accept" : "cancel" };
 }
 
 /**
@@ -81,6 +90,9 @@ function isAbortError(error) {
  *   hooks?: Pick<AgentIOHooks, "onComposing" | "onPaused" | "onReasoning" | "onAskUser" | "onToolCall" | "onCommand" | "onFileRead" | "onPlan" | "onFileChange" | "onLlmResponse" | "onToolError" | "onUsage">,
  *   isAborted?: () => boolean,
  * }} input
+ * @param {{
+ *   openConnection?: typeof openCodexAppServerConnection,
+ * }} [deps]
  * @returns {Promise<{
  *   abortController: AbortController,
  *   done: Promise<{ result: AgentResult, sessionId: string | null }>,
@@ -88,7 +100,8 @@ function isAbortError(error) {
  *   interrupt: () => Promise<boolean>,
  * }>}
  */
-export async function startCodexAppServerRun(input) {
+export async function startCodexAppServerRun(input, deps = {}) {
+  const openConnection = deps.openConnection ?? openCodexAppServerConnection;
   const hooks = { ...DEFAULT_CODEX_RUN_HOOKS, ...input.hooks };
   const abortController = new AbortController();
   const prompt = buildCodexTurnInput(input.prompt, input.externalInstructions);
@@ -106,7 +119,7 @@ export async function startCodexAppServerRun(input) {
   let turnId = null;
   let turnCompleted = false;
 
-  const connection = await openCodexAppServerConnection({
+  const connection = await openConnection({
     signal: abortController.signal,
     handleRequest: async (message) => handleServerRequest(message, hooks),
   });
@@ -241,12 +254,12 @@ async function handleServerRequest(message, hooks) {
   if (method === "item/commandExecution/requestApproval") {
     const command = typeof params.command === "string" ? params.command : "this command";
     const choice = await hooks.onAskUser(`Allow *command execution*?`, ["✅ Allow", "❌ Deny"], undefined, [command]);
-    return choice === "✅ Allow" ? "accept" : "decline";
+    return buildApprovalDecision(choice === "✅ Allow");
   }
 
   if (method === "item/fileChange/requestApproval") {
     const choice = await hooks.onAskUser("Allow *file changes*?", ["✅ Allow", "❌ Deny"]);
-    return choice === "✅ Allow" ? "accept" : "decline";
+    return buildApprovalDecision(choice === "✅ Allow");
   }
 
   if (method === "tool/requestUserInput") {
