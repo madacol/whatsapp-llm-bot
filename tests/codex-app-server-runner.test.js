@@ -1,6 +1,11 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { startCodexAppServerRun } from "../harnesses/codex-app-server-runner.js";
+import {
+  buildCodexAppServerSandboxPolicy,
+  handleCodexAppServerRequest,
+  mapCodexAppServerApprovalPolicy,
+} from "../harnesses/codex-app-server-protocol.js";
 
 /**
  * @typedef {{
@@ -95,48 +100,35 @@ describe("startCodexAppServerRun", () => {
           threadId: "thread-1",
           input: [{ type: "text", text: "Continue" }],
           cwd: "/repo/project",
-          approvalPolicy: "on-request",
-          sandboxPolicy: {
-            type: "workspaceWrite",
-            writableRoots: ["/repo/project"],
-            networkAccess: true,
-          },
+          approvalPolicy: mapCodexAppServerApprovalPolicy("on-request"),
+          sandboxPolicy: buildCodexAppServerSandboxPolicy({
+            workdir: "/repo/project",
+            sandboxMode: "workspace-write",
+          }),
         },
       },
     ]);
   });
+});
 
+describe("handleCodexAppServerRequest", () => {
   it("returns a structured accept decision for command approvals", async () => {
-    const connectionMock = createOpenConnectionMock();
     /** @type {Array<{ question: string, options: string[], details: string[] | undefined }>} */
     const prompts = [];
-
-    const started = await startCodexAppServerRun({
-      chatId: "chat-1",
-      prompt: "Continue",
-      messages: [{ role: "user", content: [{ type: "text", text: "Continue" }] }],
-      hooks: {
-        onAskUser: async (question, options, _defaultOption, details) => {
-          prompts.push({ question, options, details });
-          return "✅ Allow";
-        },
+    const hooks = {
+      onAskUser: async (question, options, _defaultOption, details) => {
+        prompts.push({ question, options, details });
+        return "✅ Allow";
       },
-    }, {
-      openConnection: connectionMock.openConnection,
-    });
+    };
 
-    const handleRequest = connectionMock.getHandleRequest();
-    assert.ok(handleRequest, "App server request handler should be captured");
-
-    const result = await handleRequest({
+    const result = await handleCodexAppServerRequest({
       method: "item/commandExecution/requestApproval",
       params: {
         command: "/bin/zsh -lc 'git commit -m test'",
         availableDecisions: ["accept", "cancel"],
       },
-    });
-
-    await started.done;
+    }, hooks);
 
     assert.deepEqual(result, { decision: "accept" });
     assert.deepEqual(prompts, [{
@@ -147,31 +139,15 @@ describe("startCodexAppServerRun", () => {
   });
 
   it("returns a structured cancel decision when the user denies command approval", async () => {
-    const connectionMock = createOpenConnectionMock();
-
-    const started = await startCodexAppServerRun({
-      chatId: "chat-1",
-      prompt: "Continue",
-      messages: [{ role: "user", content: [{ type: "text", text: "Continue" }] }],
-      hooks: {
-        onAskUser: async () => "❌ Deny",
-      },
-    }, {
-      openConnection: connectionMock.openConnection,
-    });
-
-    const handleRequest = connectionMock.getHandleRequest();
-    assert.ok(handleRequest, "App server request handler should be captured");
-
-    const result = await handleRequest({
+    const result = await handleCodexAppServerRequest({
       method: "item/commandExecution/requestApproval",
       params: {
         command: "/bin/zsh -lc 'git commit -m test'",
         availableDecisions: ["accept", "cancel"],
       },
+    }, {
+      onAskUser: async () => "❌ Deny",
     });
-
-    await started.done;
 
     assert.deepEqual(result, { decision: "cancel" });
   });
