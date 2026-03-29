@@ -3,6 +3,11 @@ import { ReportedHarnessRunError, reportHarnessRunError } from "./harness-run-er
 import { buildCodexTurnInput } from "./codex-runner.js";
 import { openCodexAppServerConnection } from "./codex-app-server-client.js";
 import { createCodexEventDispatcher } from "./codex-event-dispatcher.js";
+import {
+  buildCodexAppServerSandboxPolicy,
+  handleCodexAppServerRequest,
+  mapCodexAppServerApprovalPolicy,
+} from "./codex-app-server-protocol.js";
 
 /** @type {Pick<Required<AgentIOHooks>, "onComposing" | "onPaused" | "onReasoning" | "onAskUser" | "onToolCall" | "onCommand" | "onFileRead" | "onPlan" | "onFileChange" | "onLlmResponse" | "onToolError" | "onUsage">} */
 const DEFAULT_CODEX_RUN_HOOKS = {
@@ -19,57 +24,6 @@ const DEFAULT_CODEX_RUN_HOOKS = {
   onToolError: async () => {},
   onUsage: async () => {},
 };
-
-/**
- * @param {HarnessRunConfig | undefined} runConfig
- * @returns {Record<string, unknown> | undefined}
- */
-function buildSandboxPolicy(runConfig) {
-  const mode = runConfig?.sandboxMode ?? null;
-  const workdir = typeof runConfig?.workdir === "string" ? runConfig.workdir : null;
-  switch (mode) {
-    case "read-only":
-      return { type: "readOnly" };
-    case "danger-full-access":
-      return { type: "dangerFullAccess" };
-    case "workspace-write":
-      return workdir
-        ? {
-          type: "workspaceWrite",
-          writableRoots: [workdir, ...(runConfig?.additionalDirectories ?? [])],
-          networkAccess: true,
-        }
-        : { type: "workspaceWrite", networkAccess: true };
-    default:
-      return undefined;
-  }
-}
-
-/**
- * @param {HarnessRunConfig["approvalPolicy"] | undefined} approvalPolicy
- * @returns {string | undefined}
- */
-function mapApprovalPolicy(approvalPolicy) {
-  switch (approvalPolicy) {
-    case "never":
-      return "never";
-    case "on-request":
-      return "on-request";
-    case "untrusted":
-      return "unlessTrusted";
-    default:
-      return undefined;
-  }
-}
-
-/**
- * Build the structured approval response expected by the app server.
- * @param {boolean} allowed
- * @returns {{ decision: "accept" | "cancel" }}
- */
-function buildApprovalDecision(allowed) {
-  return { decision: allowed ? "accept" : "cancel" };
-}
 
 /**
  * @param {unknown} error
@@ -105,8 +59,8 @@ export async function startCodexAppServerRun(input, deps = {}) {
   const hooks = { ...DEFAULT_CODEX_RUN_HOOKS, ...input.hooks };
   const abortController = new AbortController();
   const prompt = buildCodexTurnInput(input.prompt, input.externalInstructions);
-  const sandboxPolicy = buildSandboxPolicy(input.runConfig);
-  const approvalPolicy = mapApprovalPolicy(input.runConfig?.approvalPolicy);
+  const sandboxPolicy = buildCodexAppServerSandboxPolicy(input.runConfig);
+  const approvalPolicy = mapCodexAppServerApprovalPolicy(input.runConfig?.approvalPolicy);
   const dispatcher = createCodexEventDispatcher({
     hooks,
     runConfig: input.runConfig,
@@ -121,7 +75,7 @@ export async function startCodexAppServerRun(input, deps = {}) {
 
   const connection = await openConnection({
     signal: abortController.signal,
-    handleRequest: async (message) => handleServerRequest(message, hooks),
+    handleRequest: async (message) => handleCodexAppServerRequest(message, hooks),
   });
 
   const threadRequestParams = {
@@ -235,55 +189,4 @@ export async function startCodexAppServerRun(input, deps = {}) {
       return true;
     },
   };
-}
-
-/**
- * @param {Record<string, unknown>} message
- * @param {Pick<Required<AgentIOHooks>, "onAskUser">} hooks
- * @returns {Promise<unknown>}
- */
-async function handleServerRequest(message, hooks) {
-  const method = typeof message.method === "string" ? message.method : null;
-  const params = message.params && typeof message.params === "object"
-    ? /** @type {Record<string, unknown>} */ (message.params)
-    : {};
-  if (!method) {
-    return {};
-  }
-
-  if (method === "item/commandExecution/requestApproval") {
-    const command = typeof params.command === "string" ? params.command : "this command";
-    const choice = await hooks.onAskUser(`Allow *command execution*?`, ["✅ Allow", "❌ Deny"], undefined, [command]);
-    return buildApprovalDecision(choice === "✅ Allow");
-  }
-
-  if (method === "item/fileChange/requestApproval") {
-    const choice = await hooks.onAskUser("Allow *file changes*?", ["✅ Allow", "❌ Deny"]);
-    return buildApprovalDecision(choice === "✅ Allow");
-  }
-
-  if (method === "tool/requestUserInput") {
-    const questions = Array.isArray(params.questions) ? params.questions : [];
-    /** @type {Record<string, string>} */
-    const answers = {};
-    for (const question of questions) {
-      if (!question || typeof question !== "object") {
-        continue;
-      }
-      const record = /** @type {Record<string, unknown>} */ (question);
-      const prompt = typeof record.question === "string" ? record.question : "Choose an option:";
-      const options = Array.isArray(record.options)
-        ? record.options
-          .map((option) => option && typeof option === "object" && typeof /** @type {Record<string, unknown>} */ (option).label === "string"
-            ? /** @type {Record<string, unknown>} */ (option).label
-            : null)
-          .filter((label) => typeof label === "string")
-        : [];
-      const answer = await hooks.onAskUser(prompt, options.length > 0 ? options : ["OK"]);
-      answers[prompt] = answer || options[0] || "OK";
-    }
-    return { answers };
-  }
-
-  return {};
 }
