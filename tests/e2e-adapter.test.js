@@ -207,6 +207,70 @@ describe("message filtering", () => {
 
     assert.equal(handlerCalled, false, "Handler should not be called for reaction upserts");
   });
+
+  it("drops group text messages prefixed with // before they reach the app", async () => {
+    const chatId = "e2e-ignore-text@g.us";
+    await seedChat(testDb, chatId, { enabled: true });
+    await testDb.sql`UPDATE chats SET respond_on = 'any' WHERE chat_id = ${chatId}`;
+
+    mockServer.clearRequests();
+    const { sock, getSentMessages } = createMockBaileysSocket();
+
+    await adaptIncomingMessage(
+      createWAMessage({
+        text: "// operator note",
+        chatId,
+        isGroup: true,
+        senderId: "e2e-ignore-user",
+      }),
+      sock,
+      handleMessage,
+      testConfirmRegistry,
+      testUserResponseRegistry,
+    );
+
+    const { rows } = await testDb.sql`SELECT COUNT(*)::int AS count FROM messages WHERE chat_id = ${chatId}`;
+    const messageCount = /** @type {{ count: number }} */ (rows[0]).count;
+
+    assert.equal(messageCount, 0, "Ignored messages should not be persisted");
+    assert.deepEqual(getSentMessages(), [], "Ignored messages should not produce socket output");
+    assert.deepEqual(mockServer.getRequests(), [], "Ignored messages should not call the LLM");
+  });
+
+  it("drops media captions prefixed with // before downloading or storing media", async () => {
+    const chatId = "e2e-ignore-caption@g.us";
+    await seedChat(testDb, chatId, { enabled: true });
+    await testDb.sql`UPDATE chats SET respond_on = 'any' WHERE chat_id = ${chatId}`;
+
+    let downloadCalled = false;
+    const { sock, getSentMessages } = createMockBaileysSocket();
+
+    await adaptIncomingMessage(
+      createWAMessage({
+        chatId,
+        isGroup: true,
+        senderId: "e2e-ignore-user",
+        image: { mimetype: "image/jpeg", caption: "// hidden caption" },
+      }),
+      sock,
+      handleMessage,
+      testConfirmRegistry,
+      testUserResponseRegistry,
+      undefined,
+      async () => {
+        downloadCalled = true;
+        return Buffer.from("ignored-image");
+      },
+    );
+
+    const { rows } = await testDb.sql`SELECT COUNT(*)::int AS count FROM messages WHERE chat_id = ${chatId}`;
+    const messageCount = /** @type {{ count: number }} */ (rows[0]).count;
+
+    assert.equal(downloadCalled, false, "Ignored captions should short-circuit before media download");
+    assert.equal(messageCount, 0, "Ignored captioned media should not be persisted");
+    assert.deepEqual(getSentMessages(), [], "Ignored captioned media should not produce socket output");
+    assert.deepEqual(mockServer.getRequests(), [], "Ignored captioned media should not call the LLM");
+  });
 });
 
 // ═══════════════════════════════════════════════════════════════════
