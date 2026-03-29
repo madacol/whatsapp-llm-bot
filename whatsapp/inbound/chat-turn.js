@@ -2,12 +2,13 @@ import { downloadMediaMessage } from "@whiskeysockets/baileys";
 import { normalizeChatId } from "../../whatsapp-hd-media.js";
 import { classifyIncomingMessageEvent } from "./message-event-classifier.js";
 import { applyHdInboundLifecycle } from "./hd-image-lifecycle.js";
-import { getMessageContent } from "./message-content.js";
+import { getDirectMessageText, getMessageContent } from "./message-content.js";
 import { sendEvent } from "../outbound/send-content.js";
 import { createReactionRuntime } from "../runtime/reaction-runtime.js";
 
 const DEFAULT_PRESENCE_LEASE_TTL_MS = 20_000;
 const WHATSAPP_PRESENCE_PULSE_INTERVAL_MS = 8_000;
+const HARD_IGNORE_PREFIX = "//";
 
 /**
  * Escape a string for safe use inside a RegExp.
@@ -75,6 +76,16 @@ function normalizeContent(content, selfIds) {
       text: block.text.replace(prefixPattern, ""),
     };
   });
+}
+
+/**
+ * Detect transport-level control messages that should never become app turns.
+ * @param {BaileysMessage} baileysMessage
+ * @returns {boolean}
+ */
+function shouldHardIgnoreMessage(baileysMessage) {
+  const directText = getDirectMessageText(baileysMessage);
+  return typeof directText === "string" && directText.startsWith(HARD_IGNORE_PREFIX);
 }
 
 /**
@@ -411,6 +422,9 @@ export async function buildIncomingTurn(
     return null;
   }
   const turnMessage = incomingEvent.message;
+  if (shouldHardIgnoreMessage(turnMessage)) {
+    return null;
+  }
 
   const rawChatId = turnMessage.key.remoteJid || "";
   const chatId = await normalizeChatId(rawChatId, sock);

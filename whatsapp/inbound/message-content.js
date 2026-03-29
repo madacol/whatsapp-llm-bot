@@ -46,6 +46,20 @@ function getTextMessage(message) {
 }
 
 /**
+ * Return the direct user-authored text for an inbound message without
+ * downloading media or inspecting quoted content.
+ * @param {BaileysMessage} baileysMessage
+ * @returns {string | undefined}
+ */
+export function getDirectMessageText(baileysMessage) {
+  const { imageMessage, videoMessage } = getDirectMediaMessages(baileysMessage);
+  return getTextMessage(baileysMessage.message)
+    || imageMessage?.caption
+    || videoMessage?.caption
+    || undefined;
+}
+
+/**
  * @param {proto.IMessage | undefined} quotedMessage
  * @returns {string | undefined}
  */
