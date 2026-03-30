@@ -523,6 +523,7 @@ type HarnessSessionHistoryEntry = {
   id: string;
   kind: HarnessSessionRef["kind"];
   cleared_at: string;
+  title: string | null;
 };
 
 type AgentHarnessParams = {

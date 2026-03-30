@@ -286,12 +286,13 @@ describe("store with injected DB", () => {
       await store.createChat("harness-session-2");
 
       await store.saveHarnessSession("harness-session-2", { id: "sess-a", kind: "claude-sdk" });
-      await store.archiveHarnessSession("harness-session-2");
+      await store.archiveHarnessSession("harness-session-2", { title: "Debugging payment sync" });
 
       let history = await store.getHarnessSessionHistory("harness-session-2");
       assert.equal(history.length, 1);
       assert.equal(history[0].id, "sess-a");
       assert.equal(history[0].kind, "claude-sdk");
+      assert.equal(history[0].title, "Debugging payment sync");
 
       await store.saveHarnessSession("harness-session-2", { id: "sess-b", kind: "codex" });
       await store.archiveHarnessSession("harness-session-2");
@@ -305,12 +306,14 @@ describe("store with injected DB", () => {
       assert.ok(restored);
       assert.equal(restored.id, "sess-b");
       assert.equal(restored.kind, "codex");
+      assert.equal(restored.title, null);
 
       const chat = await store.getChat("harness-session-2");
       assert.equal(chat.harness_session_id, "sess-b");
       assert.equal(chat.harness_session_kind, "codex");
       assert.equal(chat.harness_session_history.length, 1);
       assert.equal(chat.harness_session_history[0].id, "sess-a");
+      assert.equal(chat.harness_session_history[0].title, "Debugging payment sync");
     });
   });
 });

@@ -260,11 +260,19 @@ describe("LLM pipeline via createMessageHandler", () => {
     await db.sql`
       UPDATE chats
       SET harness = 'native',
+          model_roles = '{"fast":"mock-fast-model"}'::jsonb,
           harness_session_id = 'sess-clear-1',
           harness_session_kind = 'native',
           harness_session_history = '[]'::jsonb
       WHERE chat_id = 'pipe-slash-clear'
     `;
+    await db.sql`
+      INSERT INTO messages(chat_id, sender_id, message_data)
+      VALUES
+        ('pipe-slash-clear', 'u1', '{"role":"user","content":[{"type":"text","text":"We are debugging a slow sync job"}]}'),
+        ('pipe-slash-clear', null, '{"role":"assistant","content":[{"type":"text","text":"The bottleneck seems to be duplicate writes"}]}')
+    `;
+    mockServer.addResponses("Slow sync job debugging");
 
     const { context, responses } = createChatTurn({
       chatId: "pipe-slash-clear",
@@ -287,6 +295,10 @@ describe("LLM pipeline via createMessageHandler", () => {
     assert.equal(chat.harness_session_history.length, 1);
     assert.equal(chat.harness_session_history[0].id, "sess-clear-1");
     assert.equal(chat.harness_session_history[0].kind, "native");
+    assert.equal(chat.harness_session_history[0].title, "Slow sync job debugging");
+
+    const [summaryRequest] = mockServer.getRequests().slice(-1);
+    assert.equal(summaryRequest.model, "mock-fast-model");
   });
 
   it("returns available slash commands when a slash command is not handled", async () => {

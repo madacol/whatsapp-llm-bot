@@ -3,11 +3,23 @@ import { contentEvent } from "../outbound-events.js";
 
 /**
  * @typedef {{
- *   archive: (chatId: string) => Promise<void>;
+ *   archive: (chatId: string) => Promise<HarnessSessionHistoryEntry | null>;
  *   getHistory: (chatId: string) => Promise<HarnessSessionHistoryEntry[]>;
  *   restore: (chatId: string, indexOrId: number | string) => Promise<HarnessSessionHistoryEntry | null>;
  * }} HarnessSessionControl
  */
+
+/**
+ * @param {HarnessSessionHistoryEntry} entry
+ * @param {number} index
+ * @param {Date} now
+ * @returns {string}
+ */
+function formatSessionLabel(entry, index, now) {
+  const ago = formatRelativeTime(now.getTime() - new Date(entry.cleared_at).getTime());
+  const baseLabel = entry.title ?? `Session ${index + 1}`;
+  return `${baseLabel} (${ago})`;
+}
 
 /**
  * Handle generic harness session commands such as /clear and /resume.
@@ -30,8 +42,9 @@ export async function handleHarnessSessionCommand({ command, chatId, context, ca
   switch (command) {
     case "clear": {
       await cancelActiveQuery?.();
-      await sessionControl.archive(chatId);
-      await context.reply(contentEvent("tool-result", "Session cleared\n\nNext message starts fresh.\nUse */resume* to restore this session later."));
+      const archived = await sessionControl.archive(chatId);
+      const titleLine = archived?.title ? `Session cleared: ${archived.title}\n\n` : "Session cleared\n\n";
+      await context.reply(contentEvent("tool-result", `${titleLine}Next message starts fresh.\nUse */resume* to restore this session later.`));
       return true;
     }
     case "resume": {
@@ -41,12 +54,13 @@ export async function handleHarnessSessionCommand({ command, chatId, context, ca
         await context.reply(contentEvent("tool-result", "No previous sessions to resume."));
         return true;
       }
+      const currentTime = now();
 
       /** @type {SelectOption[]} */
       const selectOptions = [
         ...[...history].reverse().slice(0, 11).map((entry, index) => ({
           id: String(index),
-          label: `Session ${index + 1} (${formatRelativeTime(now().getTime() - new Date(entry.cleared_at).getTime())})`,
+          label: formatSessionLabel(entry, index, currentTime),
         })),
         { id: "cancel", label: "Cancel" },
       ];
@@ -67,8 +81,9 @@ export async function handleHarnessSessionCommand({ command, chatId, context, ca
         return true;
       }
 
-      const agoStr = formatRelativeTime(now().getTime() - new Date(restored.cleared_at).getTime());
-      await context.reply(contentEvent("tool-result", `Session restored (cleared ${agoStr}). Your next message will continue that conversation.`));
+      const agoStr = formatRelativeTime(currentTime.getTime() - new Date(restored.cleared_at).getTime());
+      const restoredLabel = restored.title ? `Session restored: ${restored.title}` : "Session restored";
+      await context.reply(contentEvent("tool-result", `${restoredLabel} (cleared ${agoStr}). Your next message will continue that conversation.`));
       return true;
     }
     default:

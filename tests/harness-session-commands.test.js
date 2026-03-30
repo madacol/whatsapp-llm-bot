@@ -67,12 +67,17 @@ describe("handleHarnessSessionCommand", () => {
     const calls = [];
     /** @type {string[]} */
     const replies = [];
+    /** @type {SelectOption[]} */
+    let seenOptions = [];
     const context = createContext();
     context.reply = async (event) => {
       replies.push(getReplyText(event));
       return undefined;
     };
-    context.select = async () => "0";
+    context.select = async (_question, options) => {
+      seenOptions = options;
+      return "0";
+    };
 
     const handled = await handleHarnessSessionCommand({
       command: "resume",
@@ -82,14 +87,15 @@ describe("handleHarnessSessionCommand", () => {
       sessionControl: {
         archive: async (chatId) => {
           calls.push(`archive:${chatId}`);
+          return null;
         },
         getHistory: async () => [
-          { id: "sess-older", kind: "claude-sdk", cleared_at: "2026-03-19T20:00:00.000Z" },
-          { id: "sess-newer", kind: "codex", cleared_at: "2026-03-19T21:00:00.000Z" },
+          { id: "sess-older", kind: "claude-sdk", cleared_at: "2026-03-19T20:00:00.000Z", title: "Planning refactor" },
+          { id: "sess-newer", kind: "codex", cleared_at: "2026-03-19T21:00:00.000Z", title: "Fixing WhatsApp parser" },
         ],
         restore: async (chatId, index) => {
           calls.push(`restore:${chatId}:${index}`);
-          return { id: "sess-newer", kind: "codex", cleared_at: "2026-03-19T21:00:00.000Z" };
+          return { id: "sess-newer", kind: "codex", cleared_at: "2026-03-19T21:00:00.000Z", title: "Fixing WhatsApp parser" };
         },
       },
       now: () => new Date("2026-03-19T22:00:00.000Z"),
@@ -97,6 +103,8 @@ describe("handleHarnessSessionCommand", () => {
 
     assert.equal(handled, true);
     assert.deepEqual(calls, ["archive:chat-1", "restore:chat-1:0"]);
+    assert.equal(seenOptions[0]?.label, "Fixing WhatsApp parser (1h ago)");
     assert.ok(replies[0]?.includes("Session restored"));
+    assert.ok(replies[0]?.includes("Fixing WhatsApp parser"));
   });
 });
