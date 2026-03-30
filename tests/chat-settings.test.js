@@ -398,10 +398,10 @@ describe("per-chat model selection", () => {
       assert.deepEqual(
         pickerOptions,
         [
-          { id: "tools", label: "tools (on; tap=off)" },
-          { id: "thinking", label: "thinking (off; tap=on)" },
-          { id: "changes", label: "changes (on; tap=off)" },
-          { id: "none", label: "none (off; tap=reset)" },
+          { id: "tools", label: "🟢 Hide tool activity" },
+          { id: "thinking", label: "⚪ Show thinking" },
+          { id: "changes", label: "🟢 Hide file changes" },
+          { id: "none", label: "⚪ Hide all extras" },
         ],
       );
       assert.deepEqual(pickerConfig, {
