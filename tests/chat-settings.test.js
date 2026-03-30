@@ -56,7 +56,7 @@ describe("per-chat model selection", () => {
       assert.ok(harness?.picker, "expected harness picker metadata");
       assert.equal(prompt?.picker, undefined, "prompt should remain free-text");
       assert.equal(show?.setting, "output_visibility");
-      assert.deepEqual(show?.flags?.map((flag) => flag.key), ["commands", "thinking", "tools", "changes"]);
+      assert.deepEqual(show?.flags?.map((flag) => flag.key), ["tools", "thinking", "changes"]);
       assert.ok(show?.multiPicker, "expected show multi-picker metadata");
     });
   });
@@ -343,11 +343,10 @@ describe("per-chat model selection", () => {
       );
 
       assert.ok(result.includes("*Show*"), `expected setting title, got: ${result}`);
-      assert.ok(result.includes("- Current: commands on, thinking on, tools on, changes on"), `expected current summary, got: ${result}`);
+      assert.ok(result.includes("- Current: tools on, thinking on, changes on"), `expected current summary, got: ${result}`);
       assert.ok(result.includes("*Controls*"), `expected controls section, got: ${result}`);
-      assert.ok(result.includes("- commands"), `expected commands flag, got: ${result}`);
-      assert.ok(result.includes("- thinking"), `expected thinking flag, got: ${result}`);
       assert.ok(result.includes("- tools"), `expected tools flag, got: ${result}`);
+      assert.ok(result.includes("- thinking"), `expected thinking flag, got: ${result}`);
       assert.ok(result.includes("- changes"), `expected changes flag, got: ${result}`);
     });
 
@@ -399,9 +398,8 @@ describe("per-chat model selection", () => {
       assert.deepEqual(
         pickerOptions,
         [
-          { id: "commands", label: "commands (on; tap=off)" },
-          { id: "thinking", label: "thinking (off; tap=on)" },
           { id: "tools", label: "tools (on; tap=off)" },
+          { id: "thinking", label: "thinking (off; tap=on)" },
           { id: "changes", label: "changes (on; tap=off)" },
           { id: "none", label: "none (off; tap=reset)" },
         ],
@@ -412,7 +410,6 @@ describe("per-chat model selection", () => {
       });
       assert.ok(result.includes("thinking on"), `expected selected thinking flag, got: ${result}`);
       assert.ok(result.includes("changes off"), `expected toggled changes flag, got: ${result}`);
-      assert.ok(result.includes("commands on"), `expected untouched commands flag, got: ${result}`);
       assert.ok(result.includes("tools on"), `expected untouched tools flag, got: ${result}`);
 
       const rows = await db.sql`SELECT output_visibility FROM chats WHERE chat_id = 'cfg-show-3'`;

@@ -64,6 +64,32 @@ describe("store with injected DB", () => {
         { message: "Chat no-such-chat does not exist." }
       );
     });
+
+    it("migrates legacy output visibility keys to the unified tools flag", async () => {
+      const freshDb = new PGlite("memory://", { extensions: { vector } });
+      await initStore(freshDb);
+      await freshDb.sql`
+        INSERT INTO chats(chat_id, output_visibility)
+        VALUES (
+          'legacy-output-visibility-1',
+          '{"commands":true,"tools":false,"thinking":true,"changes":false}'::jsonb
+        )
+      `;
+
+      await initStore(freshDb);
+
+      const { rows: [chat] } = await freshDb.sql`
+        SELECT output_visibility
+        FROM chats
+        WHERE chat_id = 'legacy-output-visibility-1'
+      `;
+
+      assert.deepEqual(chat.output_visibility, {
+        tools: false,
+        thinking: true,
+        changes: false,
+      });
+    });
   });
 
   describe("addMessage / getMessages", () => {
