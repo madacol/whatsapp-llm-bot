@@ -153,13 +153,44 @@ function areOutputVisibilityKeys(selectedIds) {
 }
 
 /**
- * @param {string} label
- * @param {string} currentState
- * @param {string} tapState
+ * @param {boolean} enabled
  * @returns {string}
  */
-function formatBooleanOptionLabel(label, currentState, tapState) {
-  return `${label} (${currentState}; tap=${tapState})`;
+function formatOutputVisibilityStateEmoji(enabled) {
+  return enabled ? "🟢" : "⚪";
+}
+
+/**
+ * @param {import("../../../chat-output-visibility.js").OutputVisibilityKey} key
+ * @returns {string}
+ */
+function getShowPickerSubject(key) {
+  switch (key) {
+    case "tools":
+      return "tool activity";
+    case "thinking":
+      return "thinking";
+    case "changes":
+      return "file changes";
+  }
+}
+
+/**
+ * @param {import("../../../chat-output-visibility.js").OutputVisibilityKey} key
+ * @param {boolean} enabled
+ * @returns {string}
+ */
+function formatShowPickerOptionLabel(key, enabled) {
+  const verb = enabled ? "Hide" : "Show";
+  return `${formatOutputVisibilityStateEmoji(enabled)} ${verb} ${getShowPickerSubject(key)}`;
+}
+
+/**
+ * @param {boolean} allHidden
+ * @returns {string}
+ */
+function formatShowHideAllOptionLabel(allHidden) {
+  return `${formatOutputVisibilityStateEmoji(allHidden)} Hide all extras`;
 }
 
 /**
@@ -171,11 +202,11 @@ function getShowMultiPickerOptions(chat) {
   return [
     ...OUTPUT_VISIBILITY_FLAGS.map((flag) => ({
       id: flag.key,
-      label: formatBooleanOptionLabel(flag.label, enabledKeys.has(flag.key) ? "on" : "off", enabledKeys.has(flag.key) ? "off" : "on"),
+      label: formatShowPickerOptionLabel(flag.key, enabledKeys.has(flag.key)),
     })),
     {
       id: SHOW_NONE_OPTION_ID,
-      label: formatBooleanOptionLabel(SHOW_NONE_OPTION_ID, enabledKeys.size === 0 ? "on" : "off", "reset"),
+      label: formatShowHideAllOptionLabel(enabledKeys.size === 0),
     },
   ];
 }
