@@ -36,6 +36,7 @@ const log = createLogger("store");
  *   id: string;
  *   kind: HarnessSessionRef["kind"];
  *   cleared_at: string;
+ *   title: string | null;
  * }} HarnessSessionHistoryEntry
  *
  * @typedef {{
@@ -60,6 +61,41 @@ export async function getChatOrThrow(db, chatId) {
     throw new Error(`Chat ${chatId} does not exist.`);
   }
   return /** @type {ChatRow} */ (chat);
+}
+
+/**
+ * Normalize one persisted harness session history entry from JSONB.
+ * @param {unknown} raw
+ * @returns {HarnessSessionHistoryEntry | null}
+ */
+function normalizeHarnessSessionHistoryEntry(raw) {
+  if (!raw || typeof raw !== "object") {
+    return null;
+  }
+  const entry = /** @type {{ id?: unknown, kind?: unknown, cleared_at?: unknown, title?: unknown }} */ (raw);
+  if (typeof entry.id !== "string" || typeof entry.kind !== "string" || typeof entry.cleared_at !== "string") {
+    return null;
+  }
+  return {
+    id: entry.id,
+    kind: /** @type {HarnessSessionRef["kind"]} */ (entry.kind),
+    cleared_at: entry.cleared_at,
+    title: typeof entry.title === "string" && entry.title.trim() ? entry.title : null,
+  };
+}
+
+/**
+ * Normalize a JSONB array of harness session history entries.
+ * @param {unknown} raw
+ * @returns {HarnessSessionHistoryEntry[]}
+ */
+function normalizeHarnessSessionHistory(raw) {
+  if (!Array.isArray(raw)) {
+    return [];
+  }
+  return raw
+    .map(normalizeHarnessSessionHistoryEntry)
+    .filter(/** @returns {entry is HarnessSessionHistoryEntry} */ (entry) => entry !== null);
 }
 
 /**
@@ -239,6 +275,7 @@ export async function initStore(injectedDb){
               id: entry.id,
               kind: "claude-sdk",
               cleared_at: entry.cleared_at,
+              title: null,
             });
           }
           if (migrated.length > 0) {
@@ -379,24 +416,32 @@ export async function initStore(injectedDb){
        * Does nothing if there is no current session.
        * Keeps at most `maxEntries` entries (oldest are dropped).
        * @param {ChatRow['chat_id']} chatId
-       * @param {number} [maxEntries=10]
+       * @param {{ maxEntries?: number, title?: string | null }} [options]
+       * @returns {Promise<HarnessSessionHistoryEntry | null>}
        */
-      async archiveHarnessSession (chatId, maxEntries = 10) {
+      async archiveHarnessSession (chatId, options = {}) {
+        const maxEntries = options.maxEntries ?? 10;
         const { rows: [row] } = await db.sql`
           SELECT harness_session_id, harness_session_kind, harness_session_history
           FROM chats WHERE chat_id = ${chatId}
         `;
         const chat = /** @type {Pick<ChatRow, 'harness_session_id' | 'harness_session_kind' | 'harness_session_history'>} */ (row);
-        if (!chat?.harness_session_id || !chat?.harness_session_kind) return;
+        if (!chat?.harness_session_id || !chat?.harness_session_kind) return null;
 
-        /** @type {HarnessSessionHistoryEntry[]} */
-        const history = Array.isArray(chat.harness_session_history) ? chat.harness_session_history : [];
+        const history = normalizeHarnessSessionHistory(chat.harness_session_history);
 
         // Avoid duplicates
-        if (history.some(e => e.id === chat.harness_session_id && e.kind === chat.harness_session_kind)) return;
+        if (history.some(e => e.id === chat.harness_session_id && e.kind === chat.harness_session_kind)) {
+          return null;
+        }
 
         /** @type {HarnessSessionHistoryEntry} */
-        const entry = { id: chat.harness_session_id, kind: chat.harness_session_kind, cleared_at: new Date().toISOString() };
+        const entry = {
+          id: chat.harness_session_id,
+          kind: chat.harness_session_kind,
+          cleared_at: new Date().toISOString(),
+          title: typeof options.title === "string" && options.title.trim() ? options.title.trim() : null,
+        };
         const updated = [...history, entry].slice(-maxEntries);
 
         await db.sql`
@@ -406,6 +451,7 @@ export async function initStore(injectedDb){
               harness_session_kind = NULL
           WHERE chat_id = ${chatId}
         `;
+        return entry;
       },
 
       /**
@@ -417,7 +463,7 @@ export async function initStore(injectedDb){
         const { rows: [row] } = await db.sql`SELECT harness_session_history FROM chats WHERE chat_id = ${chatId}`;
         const chat = /** @type {Pick<ChatRow, 'harness_session_history'> | undefined} */ (row);
         if (!chat) return [];
-        return Array.isArray(chat.harness_session_history) ? chat.harness_session_history : [];
+        return normalizeHarnessSessionHistory(chat.harness_session_history);
       },
 
       /**
@@ -433,8 +479,7 @@ export async function initStore(injectedDb){
         const chat = /** @type {Pick<ChatRow, 'harness_session_history'> | undefined} */ (row);
         if (!chat) return null;
 
-        /** @type {HarnessSessionHistoryEntry[]} */
-        const history = Array.isArray(chat.harness_session_history) ? chat.harness_session_history : [];
+        const history = normalizeHarnessSessionHistory(chat.harness_session_history);
         if (history.length === 0) return null;
 
         /** @type {number} */

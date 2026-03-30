@@ -15,6 +15,7 @@ import { createLogger } from "../logger.js";
 import { buildAgentIoHooks } from "./build-agent-io-hooks.js";
 import { buildHarnessRunRequest } from "./build-harness-run-request.js";
 import { buildRunConfig } from "./build-run-config.js";
+import { generateSessionTitle } from "./session-title.js";
 import { resolveOutputVisibility } from "../chat-output-visibility.js";
 
 const log = createLogger("conversation:runner");
@@ -94,6 +95,32 @@ export function createConversationRunner({ store, llmClient, getActionsFn, execu
   } = store;
 
   const runCoordinator = createHarnessRunCoordinator();
+
+  /**
+   * Archive the active harness session, attaching a generated title when possible.
+   * Falls back to a plain archive if title generation fails.
+   * @param {string} chatId
+   * @param {import("../store.js").ChatRow | undefined} chatInfo
+   * @returns {Promise<HarnessSessionHistoryEntry | null>}
+   */
+  async function archiveSessionWithGeneratedTitle(chatId, chatInfo) {
+    if (!chatInfo?.harness_session_id || !chatInfo?.harness_session_kind) {
+      return archiveHarnessSession(chatId);
+    }
+
+    try {
+      const messageRows = await getMessages(chatId);
+      const title = await generateSessionTitle({
+        llmClient,
+        chatInfo,
+        messageRows,
+      });
+      return archiveHarnessSession(chatId, { title });
+    } catch (error) {
+      log.warn("Failed to generate session title before archive:", error);
+      return archiveHarnessSession(chatId);
+    }
+  }
 
   /**
    * Handle a `!command` message.
@@ -371,7 +398,7 @@ export function createConversationRunner({ store, llmClient, getActionsFn, execu
         context,
         command: slashCommand,
         sessionControl: {
-          archive: archiveHarnessSession,
+          archive: async (sessionChatId) => archiveSessionWithGeneratedTitle(sessionChatId, chatInfo),
           getHistory: getHarnessSessionHistory,
           restore: restoreHarnessSession,
         },
