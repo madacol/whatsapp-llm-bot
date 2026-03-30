@@ -285,8 +285,8 @@ describe("buildAgentIoHooks", () => {
     assert.equal(sent[0].event.kind, "tool_call");
   });
 
-  it("suppresses command progress events when visibility disables commands", async () => {
-    const { hooks, sent } = createSubject({ ...DEFAULT_OUTPUT_VISIBILITY, commands: false });
+  it("suppresses tool-call and command progress events when visibility disables tools", async () => {
+    const { hooks, sent } = createSubject({ ...DEFAULT_OUTPUT_VISIBILITY, tools: false });
 
     await hooks.onToolCall?.({ id: "tool-1", name: "run_bash", arguments: "{\"command\":\"pwd\"}" });
     await hooks.onCommand?.({ command: "pwd", status: "started" });

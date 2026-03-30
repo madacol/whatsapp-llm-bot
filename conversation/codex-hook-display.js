@@ -71,7 +71,7 @@ export function createCodexDisplayHooks({ context, cwd, visibility, displayToolC
    */
 async function onCommand({ command, status, output }) {
     if (status === "started") {
-      if (!visibility.commands) {
+      if (!visibility.tools) {
         return;
       }
       const toolCall = {
@@ -107,7 +107,7 @@ async function onCommand({ command, status, output }) {
    * @returns {Promise<void>}
    */
   async function onFileRead({ command, paths }) {
-    if (!visibility.commands) {
+    if (!visibility.tools) {
       return;
     }
 

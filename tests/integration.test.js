@@ -484,10 +484,10 @@ describe("Scenario 12: Tool call display is always verbose", () => {
       `Should show usage info, got: ${r.raw.map(x => `${x.source}:${x.text}`).join(" | ")}`);
   });
 
-  it("hides command and tool progress when show overrides disable them", async () => {
+  it("hides tool progress when show overrides disable it", async () => {
     const chat = await t.chat("s12-show-off", {
       enabled: true,
-      outputVisibility: { commands: false, tools: false },
+      outputVisibility: { tools: false },
     });
     const r = await chat.send("Test hidden progress", {
       llm: [toolCall("run_javascript", { code: "() => 'hello'" }), "Final answer"],

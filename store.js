@@ -1,6 +1,7 @@
 import { getRootDb } from "./db.js";
 import { createLogger } from "./logger.js";
 import { normalizeHarnessConfig } from "./harness-config.js";
+import { compactOutputVisibilityOverrides } from "./chat-output-visibility.js";
 
 const log = createLogger("store");
 
@@ -195,6 +196,23 @@ export async function initStore(injectedDb){
             await db.sql`
               UPDATE chats
               SET harness_config = ${JSON.stringify(normalizedConfig)}
+              WHERE chat_id = ${row.chat_id}
+            `;
+          }
+        }
+      }
+      {
+        const { rows } = await db.sql`
+          SELECT chat_id, output_visibility
+          FROM chats
+          WHERE output_visibility IS NOT NULL
+        `;
+        for (const row of rows) {
+          const compactedVisibility = compactOutputVisibilityOverrides(row.output_visibility);
+          if (JSON.stringify(compactedVisibility) !== JSON.stringify(row.output_visibility ?? {})) {
+            await db.sql`
+              UPDATE chats
+              SET output_visibility = ${JSON.stringify(compactedVisibility)}::jsonb
               WHERE chat_id = ${row.chat_id}
             `;
           }

@@ -122,7 +122,7 @@ export function buildAgentIoHooks(
       return labelMap.get(choice) ?? choice;
     },
     onToolCall: async (toolCall, formatToolCall, toolContext) => {
-      if (!visibility.commands) {
+      if (!visibility.tools) {
         return undefined;
       }
       return displayToolCall(toolCall, context, formatToolCall, cwd, toolContext);

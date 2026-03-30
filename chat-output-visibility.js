@@ -3,19 +3,17 @@
  */
 
 /**
- * @typedef {"commands" | "thinking" | "tools" | "changes"} OutputVisibilityKey
+ * @typedef {"tools" | "thinking" | "changes"} OutputVisibilityKey
  *
  * @typedef {{
- *   commands?: boolean;
  *   thinking?: boolean;
  *   tools?: boolean;
  *   changes?: boolean;
  * }} OutputVisibilityOverrides
  *
  * @typedef {{
- *   commands: boolean;
- *   thinking: boolean;
  *   tools: boolean;
+ *   thinking: boolean;
  *   changes: boolean;
  * }} OutputVisibility
  *
@@ -30,9 +28,9 @@
 /** @type {readonly OutputVisibilityFlagDefinition[]} */
 export const OUTPUT_VISIBILITY_FLAGS = Object.freeze([
   {
-    key: "commands",
-    label: "commands",
-    description: "Show command and tool-call progress such as shell commands and file reads.",
+    key: "tools",
+    label: "tools",
+    description: "Show tool progress such as shell commands, file reads, and intermediate tool output.",
     defaultValue: true,
   },
   {
@@ -40,12 +38,6 @@ export const OUTPUT_VISIBILITY_FLAGS = Object.freeze([
     label: "thinking",
     description: "Show reasoning placeholders and inspectable thinking summaries when available.",
     defaultValue: false,
-  },
-  {
-    key: "tools",
-    label: "tools",
-    description: "Show intermediate tool result messages while the agent works.",
-    defaultValue: true,
   },
   {
     key: "changes",
@@ -62,9 +54,8 @@ const OUTPUT_VISIBILITY_FLAG_MAP = new Map(
 
 /** @type {OutputVisibility} */
 export const DEFAULT_OUTPUT_VISIBILITY = Object.freeze({
-  commands: true,
-  thinking: false,
   tools: true,
+  thinking: false,
   changes: true,
 });
 
@@ -74,6 +65,31 @@ export const DEFAULT_OUTPUT_VISIBILITY = Object.freeze({
  */
 function isRecord(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/**
+ * Legacy rows may contain both `commands` and `tools`.
+ * Since the new `tools` flag now covers both buckets, merge conservatively so
+ * we do not re-enable progress the user had explicitly hidden.
+ * @param {Record<string, unknown>} raw
+ * @returns {boolean | undefined}
+ */
+function normalizeToolVisibilityValue(raw) {
+  const tools = raw.tools;
+  const commands = raw.commands;
+  const hasTools = typeof tools === "boolean";
+  const hasCommands = typeof commands === "boolean";
+
+  if (hasTools && hasCommands) {
+    return tools && commands;
+  }
+  if (hasTools) {
+    return tools;
+  }
+  if (hasCommands) {
+    return commands;
+  }
+  return undefined;
 }
 
 /**
@@ -95,11 +111,19 @@ export function normalizeOutputVisibility(raw) {
 
   /** @type {OutputVisibilityOverrides} */
   const normalized = {};
-  for (const flag of OUTPUT_VISIBILITY_FLAGS) {
-    const value = raw[flag.key];
-    if (typeof value === "boolean") {
-      normalized[flag.key] = value;
-    }
+  const tools = normalizeToolVisibilityValue(raw);
+  if (typeof tools === "boolean") {
+    normalized.tools = tools;
+  }
+
+  const thinking = raw.thinking;
+  if (typeof thinking === "boolean") {
+    normalized.thinking = thinking;
+  }
+
+  const changes = raw.changes;
+  if (typeof changes === "boolean") {
+    normalized.changes = changes;
   }
   return normalized;
 }
@@ -170,6 +194,15 @@ export function setOutputVisibilityOverride(raw, key, enabled) {
     overrides[key] = enabled;
   }
   return overrides;
+}
+
+/**
+ * Normalize persisted overrides into the current compact DB shape.
+ * @param {unknown} raw
+ * @returns {OutputVisibilityOverrides}
+ */
+export function compactOutputVisibilityOverrides(raw) {
+  return buildOutputVisibilityOverrides(getEnabledOutputVisibilityKeys(raw));
 }
 
 /**
