@@ -1,4 +1,5 @@
 import { getRootDb } from "./db.js";
+import { randomUUID } from "node:crypto";
 import { createLogger } from "./logger.js";
 import { normalizeHarnessConfig } from "./harness-config.js";
 import { compactOutputVisibilityOverrides } from "./chat-output-visibility.js";
@@ -55,6 +56,142 @@ const log = createLogger("store");
  *   display_key: string | null; // Platform message ID of the display message (e.g. for tool-call inspect)
  * }} MessageRow
  */
+
+/**
+ * @param {unknown} value
+ * @returns {value is Record<string, unknown>}
+ */
+function isRecord(value) {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+/**
+ * @param {unknown} value
+ * @returns {value is WorkspaceStatus}
+ */
+function isWorkspaceStatus(value) {
+  return value === "ready" || value === "busy" || value === "conflicted" || value === "archived";
+}
+
+/**
+ * @param {unknown} value
+ * @returns {value is WorkspaceRow["last_test_status"]}
+ */
+function isWorkspaceTestStatus(value) {
+  return value === "not_run" || value === "passed" || value === "failed";
+}
+
+/**
+ * @param {unknown} value
+ * @returns {string | null}
+ */
+function normalizeTimestampValue(value) {
+  if (typeof value === "string") {
+    return value;
+  }
+  if (value instanceof Date) {
+    return value.toISOString();
+  }
+  return null;
+}
+
+/**
+ * @param {unknown} raw
+ * @returns {RepoRow | null}
+ */
+function normalizeRepoRow(raw) {
+  if (!isRecord(raw)) {
+    return null;
+  }
+  const timestamp = normalizeTimestampValue(raw.timestamp);
+  if (
+    typeof raw.repo_id !== "string"
+    || typeof raw.name !== "string"
+    || typeof raw.root_path !== "string"
+    || typeof raw.default_base_branch !== "string"
+    || typeof raw.control_chat_id !== "string"
+    || !timestamp
+  ) {
+    return null;
+  }
+  return {
+    repo_id: raw.repo_id,
+    name: raw.name,
+    root_path: raw.root_path,
+    default_base_branch: raw.default_base_branch,
+    control_chat_id: raw.control_chat_id,
+    timestamp,
+  };
+}
+
+/**
+ * @param {unknown} raw
+ * @returns {WorkspaceRow | null}
+ */
+function normalizeWorkspaceRow(raw) {
+  if (!isRecord(raw)) {
+    return null;
+  }
+  const timestamp = normalizeTimestampValue(raw.timestamp);
+  const archivedAt = raw.archived_at === null ? null : normalizeTimestampValue(raw.archived_at);
+  if (
+    typeof raw.workspace_id !== "string"
+    || typeof raw.repo_id !== "string"
+    || typeof raw.name !== "string"
+    || typeof raw.branch !== "string"
+    || typeof raw.base_branch !== "string"
+    || typeof raw.worktree_path !== "string"
+    || !isWorkspaceStatus(raw.status)
+    || typeof raw.workspace_chat_id !== "string"
+    || !isWorkspaceTestStatus(raw.last_test_status)
+    || (raw.last_commit_oid !== null && typeof raw.last_commit_oid !== "string")
+    || (raw.archived_at !== null && !archivedAt)
+    || !timestamp
+  ) {
+    return null;
+  }
+  return {
+    workspace_id: raw.workspace_id,
+    repo_id: raw.repo_id,
+    name: raw.name,
+    branch: raw.branch,
+    base_branch: raw.base_branch,
+    worktree_path: raw.worktree_path,
+    status: raw.status,
+    workspace_chat_id: raw.workspace_chat_id,
+    last_test_status: raw.last_test_status,
+    last_commit_oid: raw.last_commit_oid,
+    archived_at: archivedAt,
+    timestamp,
+  };
+}
+
+/**
+ * @param {unknown} raw
+ * @returns {ChatBindingRow | null}
+ */
+function normalizeChatBindingRow(raw) {
+  if (!isRecord(raw)) {
+    return null;
+  }
+  const timestamp = normalizeTimestampValue(raw.timestamp);
+  if (
+    typeof raw.chat_id !== "string"
+    || (raw.binding_kind !== "repo" && raw.binding_kind !== "workspace")
+    || (raw.repo_id !== null && typeof raw.repo_id !== "string")
+    || (raw.workspace_id !== null && typeof raw.workspace_id !== "string")
+    || !timestamp
+  ) {
+    return null;
+  }
+  return {
+    chat_id: raw.chat_id,
+    binding_kind: raw.binding_kind,
+    repo_id: raw.repo_id,
+    workspace_id: raw.workspace_id,
+    timestamp,
+  };
+}
 
 /**
  * Returns the ChatRow for the given chat, or throws if it does not exist.
@@ -152,6 +289,45 @@ export async function initStore(injectedDb){
             chat_id VARCHAR(50) PRIMARY KEY,
             is_enabled BOOLEAN DEFAULT FALSE,
             system_prompt TEXT,
+            timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+    `;
+
+    await db.sql`
+        CREATE TABLE IF NOT EXISTS repos (
+            repo_id TEXT PRIMARY KEY,
+            name TEXT NOT NULL UNIQUE,
+            root_path TEXT NOT NULL,
+            default_base_branch TEXT NOT NULL,
+            control_chat_id VARCHAR(50) NOT NULL REFERENCES chats(chat_id) UNIQUE,
+            timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+    `;
+
+    await db.sql`
+        CREATE TABLE IF NOT EXISTS workspaces (
+            workspace_id TEXT PRIMARY KEY,
+            repo_id TEXT NOT NULL REFERENCES repos(repo_id),
+            name TEXT NOT NULL,
+            branch TEXT NOT NULL,
+            base_branch TEXT NOT NULL,
+            worktree_path TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'ready',
+            workspace_chat_id VARCHAR(50) NOT NULL REFERENCES chats(chat_id) UNIQUE,
+            last_test_status TEXT NOT NULL DEFAULT 'not_run',
+            last_commit_oid TEXT,
+            archived_at TIMESTAMP,
+            timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE (repo_id, name)
+        );
+    `;
+
+    await db.sql`
+        CREATE TABLE IF NOT EXISTS chat_bindings (
+            chat_id VARCHAR(50) PRIMARY KEY REFERENCES chats(chat_id),
+            binding_kind TEXT NOT NULL,
+            repo_id TEXT REFERENCES repos(repo_id),
+            workspace_id TEXT REFERENCES workspaces(workspace_id) UNIQUE,
             timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
     `;
@@ -360,6 +536,40 @@ export async function initStore(injectedDb){
       log.error("⚠️ Review the error above and fix manually if needed. The bot will continue but may malfunction.");
     }
 
+    /**
+     * @param {string} chatId
+     * @returns {Promise<void>}
+     */
+    async function ensureChatExists(chatId) {
+      await db.sql`INSERT INTO chats(chat_id) VALUES (${chatId}) ON CONFLICT (chat_id) DO NOTHING;`;
+    }
+
+    /**
+     * @param {{
+     *   chatId: string,
+     *   bindingKind: ChatBindingKind,
+     *   repoId?: string | null,
+     *   workspaceId?: string | null,
+     * }} input
+     * @returns {Promise<ChatBindingRow>}
+     */
+    async function upsertChatBinding({ chatId, bindingKind, repoId = null, workspaceId = null }) {
+      await ensureChatExists(chatId);
+      const { rows: [row] } = await db.sql`
+        INSERT INTO chat_bindings (chat_id, binding_kind, repo_id, workspace_id)
+        VALUES (${chatId}, ${bindingKind}, ${repoId}, ${workspaceId})
+        ON CONFLICT (chat_id) DO UPDATE SET
+          binding_kind = EXCLUDED.binding_kind,
+          repo_id = EXCLUDED.repo_id,
+          workspace_id = EXCLUDED.workspace_id
+        RETURNING *
+      `;
+      const binding = normalizeChatBindingRow(row);
+      if (!binding) {
+        throw new Error("Failed to normalize chat binding row");
+      }
+      return binding;
+    }
 
     return {
       /**
@@ -391,7 +601,243 @@ export async function initStore(injectedDb){
       * @param {ChatRow['chat_id']} chatId
       */
       async createChat (chatId) {
-        await db.sql`INSERT INTO chats(chat_id) VALUES (${chatId}) ON CONFLICT (chat_id) DO NOTHING;`;
+        await ensureChatExists(chatId);
+      },
+
+      /**
+       * @param {{
+       *   name: string,
+       *   rootPath: string,
+       *   defaultBaseBranch: string,
+       *   controlChatId: string,
+       * }} input
+       * @returns {Promise<RepoRow>}
+       */
+      async createRepo ({ name, rootPath, defaultBaseBranch, controlChatId }) {
+        await ensureChatExists(controlChatId);
+        const repoId = randomUUID();
+        const { rows: [row] } = await db.sql`
+          INSERT INTO repos (repo_id, name, root_path, default_base_branch, control_chat_id)
+          VALUES (${repoId}, ${name}, ${rootPath}, ${defaultBaseBranch}, ${controlChatId})
+          RETURNING *
+        `;
+        const repo = normalizeRepoRow(row);
+        if (!repo) {
+          throw new Error("Failed to normalize repo row");
+        }
+        await upsertChatBinding({
+          chatId: controlChatId,
+          bindingKind: "repo",
+          repoId: repo.repo_id,
+        });
+        return repo;
+      },
+
+      /**
+       * @param {string} repoId
+       * @returns {Promise<RepoRow | null>}
+       */
+      async getRepo (repoId) {
+        const { rows: [row] } = await db.sql`
+          SELECT * FROM repos
+          WHERE repo_id = ${repoId}
+          LIMIT 1
+        `;
+        return normalizeRepoRow(row);
+      },
+
+      /**
+       * @param {string} chatId
+       * @returns {Promise<RepoRow | null>}
+       */
+      async getRepoByControlChat (chatId) {
+        const { rows: [row] } = await db.sql`
+          SELECT * FROM repos
+          WHERE control_chat_id = ${chatId}
+          LIMIT 1
+        `;
+        return normalizeRepoRow(row);
+      },
+
+      /**
+       * @param {{
+       *   repoId: string,
+       *   name: string,
+       *   branch: string,
+       *   baseBranch: string,
+       *   worktreePath: string,
+       *   workspaceChatId: string,
+       *   status?: WorkspaceStatus,
+       * }} input
+       * @returns {Promise<WorkspaceRow>}
+       */
+      async createWorkspace ({
+        repoId,
+        name,
+        branch,
+        baseBranch,
+        worktreePath,
+        workspaceChatId,
+        status = "ready",
+      }) {
+        await ensureChatExists(workspaceChatId);
+        const workspaceId = randomUUID();
+        const { rows: [row] } = await db.sql`
+          INSERT INTO workspaces (
+            workspace_id,
+            repo_id,
+            name,
+            branch,
+            base_branch,
+            worktree_path,
+            status,
+            workspace_chat_id
+          )
+          VALUES (
+            ${workspaceId},
+            ${repoId},
+            ${name},
+            ${branch},
+            ${baseBranch},
+            ${worktreePath},
+            ${status},
+            ${workspaceChatId}
+          )
+          RETURNING *
+        `;
+        const workspace = normalizeWorkspaceRow(row);
+        if (!workspace) {
+          throw new Error("Failed to normalize workspace row");
+        }
+        await upsertChatBinding({
+          chatId: workspaceChatId,
+          bindingKind: "workspace",
+          repoId,
+          workspaceId: workspace.workspace_id,
+        });
+        return workspace;
+      },
+
+      /**
+       * @param {string} workspaceId
+       * @returns {Promise<WorkspaceRow | null>}
+       */
+      async getWorkspace (workspaceId) {
+        const { rows: [row] } = await db.sql`
+          SELECT * FROM workspaces
+          WHERE workspace_id = ${workspaceId}
+          LIMIT 1
+        `;
+        return normalizeWorkspaceRow(row);
+      },
+
+      /**
+       * @param {string} chatId
+       * @returns {Promise<WorkspaceRow | null>}
+       */
+      async getWorkspaceByChat (chatId) {
+        const { rows: [row] } = await db.sql`
+          SELECT * FROM workspaces
+          WHERE workspace_chat_id = ${chatId}
+          LIMIT 1
+        `;
+        return normalizeWorkspaceRow(row);
+      },
+
+      /**
+       * @param {string} repoId
+       * @param {string} name
+       * @returns {Promise<WorkspaceRow | null>}
+       */
+      async getWorkspaceByName (repoId, name) {
+        const { rows: [row] } = await db.sql`
+          SELECT * FROM workspaces
+          WHERE repo_id = ${repoId}
+            AND name = ${name}
+          LIMIT 1
+        `;
+        return normalizeWorkspaceRow(row);
+      },
+
+      /**
+       * @param {string} repoId
+       * @returns {Promise<WorkspaceRow[]>}
+       */
+      async listActiveWorkspaces (repoId) {
+        const { rows } = await db.sql`
+          SELECT * FROM workspaces
+          WHERE repo_id = ${repoId}
+            AND archived_at IS NULL
+            AND status <> 'archived'
+          ORDER BY name
+        `;
+        return rows
+          .map(normalizeWorkspaceRow)
+          .filter(/** @returns {row is WorkspaceRow} */ (row) => row !== null);
+      },
+
+      /**
+       * @param {string} chatId
+       * @param {string} repoId
+       * @returns {Promise<ChatBindingRow>}
+       */
+      async bindChatToRepo (chatId, repoId) {
+        return upsertChatBinding({
+          chatId,
+          bindingKind: "repo",
+          repoId,
+        });
+      },
+
+      /**
+       * @param {string} chatId
+       * @param {string} workspaceId
+       * @returns {Promise<ChatBindingRow>}
+       */
+      async bindChatToWorkspace (chatId, workspaceId) {
+        const { rows: [row] } = await db.sql`
+          SELECT * FROM workspaces
+          WHERE workspace_id = ${workspaceId}
+          LIMIT 1
+        `;
+        const workspace = normalizeWorkspaceRow(row);
+        if (!workspace) {
+          throw new Error(`Workspace ${workspaceId} does not exist.`);
+        }
+        return upsertChatBinding({
+          chatId,
+          bindingKind: "workspace",
+          repoId: workspace.repo_id,
+          workspaceId,
+        });
+      },
+
+      /**
+       * @param {string} chatId
+       * @returns {Promise<ChatBindingRow | null>}
+       */
+      async getChatBinding (chatId) {
+        const { rows: [row] } = await db.sql`
+          SELECT * FROM chat_bindings
+          WHERE chat_id = ${chatId}
+          LIMIT 1
+        `;
+        return normalizeChatBindingRow(row);
+      },
+
+      /**
+       * @param {string} workspaceId
+       * @returns {Promise<WorkspaceRow | null>}
+       */
+      async archiveWorkspace (workspaceId) {
+        const { rows: [row] } = await db.sql`
+          UPDATE workspaces
+          SET status = 'archived',
+              archived_at = COALESCE(archived_at, CURRENT_TIMESTAMP)
+          WHERE workspace_id = ${workspaceId}
+          RETURNING *
+        `;
+        return normalizeWorkspaceRow(row);
       },
 
       /**
