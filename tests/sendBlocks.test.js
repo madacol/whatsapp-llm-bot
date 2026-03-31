@@ -663,6 +663,53 @@ describe("sendBlocks – tool-call → edit pipeline", () => {
     );
   });
 
+  it("truncates long plain-text inspect output after 👁 reactions", async () => {
+    const { sock, calls } = createCaptureSock();
+    const reactionRuntime = createReactionRuntime();
+    const longInspectText = Array.from(
+      { length: 220 },
+      (_, index) => `🔧 *Bash*  \`command ${String(index).padStart(3, "0")}\``,
+    ).join("\n");
+
+    const handle = await sendBlocks(
+      sock,
+      "chat-1",
+      "plain",
+      [{ type: "text", text: "🔧 *Bash*  `command 000`" }],
+      undefined,
+      reactionRuntime,
+    );
+
+    assert.ok(handle);
+    handle.setInspect({
+      kind: "text",
+      text: longInspectText,
+      persistOnInspect: true,
+    });
+
+    reactionRuntime.handleReactions([{
+      key: { id: "msg-1", remoteJid: "chat-1" },
+      reaction: { text: "👁" },
+      senderId: "user-1",
+    }]);
+
+    const inspectMsg = /** @type {Record<string, unknown>} */ (calls[1].args[1]);
+    assert.equal(typeof inspectMsg.text, "string");
+    assert.ok(inspectMsg.text.startsWith("🔧 *Bash*  `command 000`"));
+    assert.ok(inspectMsg.text.includes("_… truncated ("));
+    assert.ok(inspectMsg.text.length < longInspectText.length);
+
+    await handle.update({
+      kind: "text",
+      text: "... +217 earlier tools\n🔧 *Bash*  `command 217`\n🔧 *Bash*  `command 218`\n🔧 *Bash*  `command 219`",
+    });
+
+    const persistedEditMsg = /** @type {Record<string, unknown>} */ (calls[2].args[1]);
+    assert.equal(typeof persistedEditMsg.text, "string");
+    assert.ok(persistedEditMsg.text.includes("_… truncated ("));
+    assert.ok(persistedEditMsg.text.length < longInspectText.length);
+  });
+
   it("formats reasoning inspect text when the user reacts with 👁", async () => {
     const { sock, calls } = createCaptureSock();
     const reactionRuntime = createReactionRuntime();
