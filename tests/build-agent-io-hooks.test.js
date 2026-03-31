@@ -322,14 +322,14 @@ describe("buildAgentIoHooks", () => {
       assert.fail("Expected compact content event");
     }
     assert.equal(sent[0].event.source, "plain");
-    assert.equal(sent[0].event.content, "🔧Read `src/app.js`");
+    assert.equal(sent[0].event.content, "🔧 *Read*  `src/app.js`");
 
     assert.equal(updates.length, 0, "expected debounce to defer compact edits");
     await new Promise((resolve) => setTimeout(resolve, 1100));
 
     assert.deepEqual(updates, [{
       kind: "text",
-      text: "🔧Read `src/app.js`\n🔧Bash `pnpm type-check`\n🔧Bash `git diff`",
+      text: "🔧 *Read*  `src/app.js`\n🔧 *Bash*  `pnpm type-check`\n🔧 *Bash*  `git diff`",
     }]);
   });
 
@@ -364,7 +364,7 @@ describe("buildAgentIoHooks", () => {
 
     assert.deepEqual(updates[updates.length - 1], {
       kind: "text",
-      text: "🔧Bash `pnpm type-check`\n🔧Read `src/app.js`\n🔧Bash `git diff`",
+      text: "... +1 earlier tools\n🔧 *Bash*  `pnpm type-check`\n🔧 *Read*  `src/app.js`\n🔧 *Bash*  `git diff`",
     });
   });
 
@@ -413,10 +413,10 @@ describe("buildAgentIoHooks", () => {
       assert.fail("Expected a new compact content event after llm reply");
     }
     assert.equal(sent[2].event.source, "plain");
-    assert.equal(sent[2].event.content, "🔧Bash `git diff`");
+    assert.equal(sent[2].event.content, "🔧 *Bash*  `git diff`");
     assert.deepEqual(handleUpdates[0], [{
       kind: "text",
-      text: "🔧Bash `pwd`\n🔧Bash `pnpm type-check`",
+      text: "🔧 *Bash*  `pwd`\n🔧 *Bash*  `pnpm type-check`",
     }]);
     assert.deepEqual(handleUpdates[1], []);
   });
@@ -463,10 +463,10 @@ describe("buildAgentIoHooks", () => {
       assert.fail("Expected a new compact content event after file change");
     }
     assert.equal(sent[2].event.source, "plain");
-    assert.equal(sent[2].event.content, "🔧Bash `ls`");
+    assert.equal(sent[2].event.content, "🔧 *Bash*  `ls`");
     assert.deepEqual(handleUpdates[0], [{
       kind: "text",
-      text: "🔧Bash `pwd`\n🔧Bash `git diff`",
+      text: "🔧 *Bash*  `pwd`\n🔧 *Bash*  `git diff`",
     }]);
     assert.deepEqual(handleUpdates[2], []);
   });

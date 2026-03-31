@@ -607,6 +607,62 @@ describe("sendBlocks – tool-call → edit pipeline", () => {
     assert.equal(editMsg.text, "🔧Read `src/app.js`\n🔧Bash `git diff`");
   });
 
+  it("persists full plain-text inspect output after 👁 reactions", async () => {
+    const { sock, calls } = createCaptureSock();
+    const reactionRuntime = createReactionRuntime();
+
+    const handle = await sendBlocks(
+      sock,
+      "chat-1",
+      "plain",
+      [{ type: "text", text: "🔧 *Read*  `src/app.js`" }],
+      undefined,
+      reactionRuntime,
+    );
+
+    assert.ok(handle);
+    handle.setInspect({
+      kind: "text",
+      text: [
+        "🔧 *Read*  `src/app.js`",
+        "🔧 *Bash*  `pnpm type-check`",
+      ].join("\n"),
+      persistOnInspect: true,
+    });
+
+    reactionRuntime.handleReactions([{
+      key: { id: "msg-1", remoteJid: "chat-1" },
+      reaction: { text: "👁" },
+      senderId: "user-1",
+    }]);
+
+    const inspectMsg = /** @type {Record<string, unknown>} */ (calls[1].args[1]);
+    assert.equal(
+      inspectMsg.text,
+      "🔧 *Read*  `src/app.js`\n🔧 *Bash*  `pnpm type-check`",
+    );
+
+    handle.setInspect({
+      kind: "text",
+      text: [
+        "🔧 *Read*  `src/app.js`",
+        "🔧 *Bash*  `pnpm type-check`",
+        "🔧 *Bash*  `git diff`",
+      ].join("\n"),
+      persistOnInspect: true,
+    });
+    await handle.update({
+      kind: "text",
+      text: "... +1 earlier tools\n🔧 *Bash*  `pnpm type-check`\n🔧 *Bash*  `git diff`",
+    });
+
+    const persistedEditMsg = /** @type {Record<string, unknown>} */ (calls[2].args[1]);
+    assert.equal(
+      persistedEditMsg.text,
+      "🔧 *Read*  `src/app.js`\n🔧 *Bash*  `pnpm type-check`\n🔧 *Bash*  `git diff`",
+    );
+  });
+
   it("formats reasoning inspect text when the user reacts with 👁", async () => {
     const { sock, calls } = createCaptureSock();
     const reactionRuntime = createReactionRuntime();

@@ -219,6 +219,11 @@ function formatInspectState(inspect) {
         summary: inspect.summary,
         text: inspect.text,
       };
+    case "text":
+      return {
+        summary: "",
+        text: inspect.text,
+      };
     default:
       return { summary: "", text: "_no output_" };
   }
@@ -485,13 +490,16 @@ export async function sendBlocks(sock, chatId, source, content, options, reactio
   let inspectState = event?.kind === "tool_call"
     ? { kind: "tool", presentation: event.presentation }
     : null;
+  let persistInspectText = false;
 
   /** @type {MessageHandle} */
   const handle = {
     keyId,
     isImage,
     update: async (update) => {
-      const text = summarizeHandleUpdate(update);
+      const text = persistInspectText && inspectState?.kind === "text" && inspectState.persistOnInspect
+        ? inspectState.text
+        : summarizeHandleUpdate(update);
       await editWhatsAppMessage(sock, chatId, editKey, prependSourcePrefix(prefix, text), isImage);
     },
     setInspect: (inspect) => {
@@ -502,6 +510,17 @@ export async function sendBlocks(sock, chatId, source, content, options, reactio
   if (keyId && reactionRuntime) {
     reactionRuntime.subscribe(keyId, (emoji) => {
       if (!emoji.startsWith("👁") || !inspectState) {
+        return;
+      }
+      if (inspectState.kind === "text") {
+        persistInspectText = inspectState.persistOnInspect === true;
+        void editWhatsAppMessage(
+          sock,
+          chatId,
+          editKey,
+          prependSourcePrefix(prefix, inspectState.text),
+          isImage,
+        );
         return;
       }
       const inspect = formatInspectState(inspectState);
