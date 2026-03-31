@@ -17,6 +17,7 @@ import { buildHarnessRunRequest } from "./build-harness-run-request.js";
 import { buildRunConfig } from "./build-run-config.js";
 import { generateSessionTitle } from "./session-title.js";
 import { resolveOutputVisibility } from "../chat-output-visibility.js";
+import { resolveChatBinding } from "../workspace-resolver.js";
 
 const log = createLogger("conversation:runner");
 const PRESENCE_LEASE_TTL_MS = 20_000;
@@ -37,6 +38,18 @@ function hasCommand(action) {
  */
 function isTextBlock(block) {
   return block.type === "text";
+}
+
+/**
+ * @param {ResolvedChatBinding} binding
+ * @param {TextContentBlock | undefined} firstBlock
+ * @returns {boolean}
+ */
+function isRepoChatCodingRequest(binding, firstBlock) {
+  return binding.kind === "repo"
+    && !!firstBlock
+    && !firstBlock.text.startsWith("!")
+    && !firstBlock.text.startsWith("/");
 }
 
 /**
@@ -199,14 +212,26 @@ export function createConversationRunner({ store, llmClient, getActionsFn, execu
    *   context: ExecuteActionContext,
    *   actions: Action[],
    *   actionResolver: (name: string) => Promise<AppAction | null>,
-   *   firstBlock: TextContentBlock | undefined,
-   *   persona: AgentDefinition | null,
-   *   harness: AgentHarness,
-   *   isSlashCommand?: boolean,
-   * }} input
-   * @returns {Promise<ChatTurn | null>}
-   */
-  async function handleLlmMessage({ turn, chatInfo, context, actions, actionResolver, firstBlock, persona, harness, isSlashCommand }) {
+ *   firstBlock: TextContentBlock | undefined,
+ *   persona: AgentDefinition | null,
+ *   harness: AgentHarness,
+ *   isSlashCommand?: boolean,
+ *   resolvedBinding: ResolvedChatBinding,
+ * }} input
+ * @returns {Promise<ChatTurn | null>}
+ */
+  async function handleLlmMessage({
+    turn,
+    chatInfo,
+    context,
+    actions,
+    actionResolver,
+    firstBlock,
+    persona,
+    harness,
+    isSlashCommand,
+    resolvedBinding,
+  }) {
     const { chatId, senderIds, content, senderName, facts } = turn;
     const time = formatTime(turn.timestamp);
     const willRespond = isSlashCommand || shouldRespond(chatInfo, facts);
@@ -293,12 +318,13 @@ export function createConversationRunner({ store, llmClient, getActionsFn, execu
     /** @type {ChatTurn | null} */
     let nextTurn = null;
     try {
+      const runConfig = buildRunConfig(chatId, chatInfo, turn.chatName, harness.getName(), resolvedBinding);
       const hooks = buildAgentIoHooks(
         context,
         keepPresenceAlive,
         endPresence,
         refreshPresenceLease,
-        buildRunConfig(chatId, chatInfo, turn.chatName, harness.getName()).workdir ?? null,
+        runConfig.workdir ?? null,
         resolveOutputVisibility(chatInfo?.output_visibility),
       );
       runCoordinator.markRunActive(chatId);
@@ -322,6 +348,7 @@ export function createConversationRunner({ store, llmClient, getActionsFn, execu
         hooks,
         systemPromptSuffix,
         harnessName: harness.getName(),
+        resolvedBinding,
         bufferedTexts: runCoordinator.consumeBufferedTexts(chatId),
       });
 
@@ -358,6 +385,7 @@ export function createConversationRunner({ store, llmClient, getActionsFn, execu
 
     const chatInfo = await getChat(chatId);
     const context = createMessageActionContext(turn);
+    const resolvedBinding = await resolveChatBinding(store, chatId);
     const { persona, harness } = await resolveConversationHarness(chatInfo);
 
     const globalActions = await getActionsFn();
@@ -380,6 +408,14 @@ export function createConversationRunner({ store, llmClient, getActionsFn, execu
     };
 
     const firstBlock = content.find(isTextBlock);
+
+    if (isRepoChatCodingRequest(resolvedBinding, firstBlock)) {
+      await context.reply(contentEvent(
+        "error",
+        "Repo chats do not accept coding requests. Use !new, !list, or !archive <name>, then work inside a workspace chat.",
+      ));
+      return null;
+    }
 
     if (firstBlock?.text?.startsWith("!")) {
       await handleCommandMessage({ chatId, senderIds, content, firstBlock, chatInfo, context, actions, actionResolver });
@@ -433,6 +469,7 @@ export function createConversationRunner({ store, llmClient, getActionsFn, execu
       persona,
       harness,
       isSlashCommand: !!isSlashCommand,
+      resolvedBinding,
     });
   }
 
