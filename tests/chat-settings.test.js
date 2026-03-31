@@ -412,9 +412,10 @@ describe("per-chat model selection", () => {
         deleteOnSelect: true,
         currentIds: [],
       });
+      assert.ok(result.includes("Show changed:"), `expected change summary, got: ${result}`);
       assert.ok(result.includes("thinking on"), `expected selected thinking flag, got: ${result}`);
       assert.ok(result.includes("changes off"), `expected toggled changes flag, got: ${result}`);
-      assert.ok(result.includes("tools on"), `expected untouched tools flag, got: ${result}`);
+      assert.ok(!result.includes("tools on"), `did not expect unchanged tools flag, got: ${result}`);
 
       const rows = await db.sql`SELECT output_visibility FROM chats WHERE chat_id = 'cfg-show-3'`;
       assert.deepEqual(rows.rows[0]?.output_visibility, {

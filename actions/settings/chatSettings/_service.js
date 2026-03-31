@@ -12,7 +12,7 @@ import {
   formatOutputVisibilityDefault,
   getEnabledOutputVisibilityKeys,
   isOutputVisibilityKey,
-  DEFAULT_OUTPUT_VISIBILITY,
+  resolveOutputVisibility,
   toggleOutputVisibilityOverrides,
 } from "../../../chat-output-visibility.js";
 
@@ -209,6 +209,21 @@ function getShowMultiPickerOptions(chat) {
       label: formatShowHideAllOptionLabel(enabledKeys.size === 0),
     },
   ];
+}
+
+/**
+ * @param {unknown} previousRaw
+ * @param {unknown} nextRaw
+ * @returns {string}
+ */
+function formatOutputVisibilityChanges(previousRaw, nextRaw) {
+  const previous = resolveOutputVisibility(previousRaw);
+  const next = resolveOutputVisibility(nextRaw);
+  const changed = OUTPUT_VISIBILITY_FLAGS
+    .filter((flag) => previous[flag.key] !== next[flag.key])
+    .map((flag) => `${flag.label} ${next[flag.key] ? "on" : "off"}`);
+
+  return changed.length > 0 ? changed.join(", ") : "no changes";
 }
 
 /**
@@ -430,7 +445,7 @@ const BASE_CONFIG_KEYS = [
           SET output_visibility = ${JSON.stringify(nextVisibility)}::jsonb
           WHERE chat_id = ${chatId}
         `;
-        return `Show set to ${formatOutputVisibility(nextVisibility)}.`;
+        return `Show changed: ${formatOutputVisibilityChanges(chat.output_visibility, nextVisibility)}.`;
       }
       if (!areOutputVisibilityKeys(selectedIds)) {
         return "Use `!c show` to pick visible outputs, or `!c reset show` to restore defaults.";
@@ -441,11 +456,7 @@ const BASE_CONFIG_KEYS = [
         SET output_visibility = ${JSON.stringify(nextVisibility)}::jsonb
         WHERE chat_id = ${chatId}
       `;
-      const matchesDefault = Object.keys(nextVisibility).length === 0;
-      if (matchesDefault) {
-        return `Show set to ${formatOutputVisibility(DEFAULT_OUTPUT_VISIBILITY)}.`;
-      }
-      return `Show set to ${formatOutputVisibility(nextVisibility)}.`;
+      return `Show changed: ${formatOutputVisibilityChanges(chat.output_visibility, nextVisibility)}.`;
     },
   }),
   createConfigKeyDefinition({
