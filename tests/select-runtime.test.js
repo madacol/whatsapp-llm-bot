@@ -169,7 +169,7 @@ describe("createSelectRuntime", () => {
     await new Promise((resolve) => setTimeout(resolve, 2900));
     assert.equal(resolved, false, "a new vote should reset the idle commit timer");
 
-    assert.deepEqual(await selectionPromise, ["commands", "thinking"]);
+    assert.deepEqual(await selectionPromise, { kind: "selected", ids: ["commands", "thinking"] });
     assert.deepEqual(sentMessages[sentMessages.length - 1]?.message, {
       delete: { id: "poll-1", remoteJid: "chat-1" },
     });
@@ -205,7 +205,7 @@ describe("createSelectRuntime", () => {
     });
     await new Promise((resolve) => setTimeout(resolve, 2900));
 
-    assert.deepEqual(await selectionPromise, []);
+    assert.deepEqual(await selectionPromise, { kind: "unchanged" });
     assert.deepEqual(sentMessages[sentMessages.length - 1]?.message, {
       delete: { id: "poll-1", remoteJid: "chat-1" },
     });

@@ -200,16 +200,19 @@ export default /** @type {defineAction} */ ((x) => x)({
     for (const step of steps) {
       const multiSelectable = getMultiSelectableOptions(step.setting, chat);
       if (multiSelectable && typeof selectMany === "function") {
-        const selectedIds = await selectMany(
+        const selection = await selectMany(
           step.question,
           multiSelectable.options,
           { deleteOnSelect: true, currentIds: multiSelectable.currentIds },
         );
-        if (selectedIds.length === 0) {
+        if (selection.kind === "cancelled") {
           return "Setup cancelled. No changes were made.";
         }
+        if (selection.kind === "unchanged") {
+          continue;
+        }
 
-        stagedChanges.push({ setting: step.setting, value: selectedIds.join(" ") });
+        stagedChanges.push({ setting: step.setting, value: selection.ids.join(" ") });
         continue;
       }
 

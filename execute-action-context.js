@@ -38,7 +38,7 @@ export function createSilentActionContext(chatId, senderIds) {
     reply: async (_event) => undefined,
     reactToMessage: async () => {},
     select: async () => "",
-    selectMany: async () => [],
+    selectMany: async () => ({ kind: "cancelled" }),
     confirm: async () => true,
   };
 }

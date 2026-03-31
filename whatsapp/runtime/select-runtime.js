@@ -66,10 +66,11 @@ export function getPollCreationData(msg) {
 /**
  * @typedef {PendingSelectBase & {
  *   mode: "multi";
-  *   idleTimer: ReturnType<typeof setTimeout> | null;
-  *   selectedIds: string[];
+ *   idleTimer: ReturnType<typeof setTimeout> | null;
+ *   selectedIds: string[];
   *   hasInteracted: boolean;
-  *   settle: (ids: string[], options?: SelectSettlementOptions) => void;
+  *   cancelIds: ReadonlySet<string> | null;
+  *   settle: (result: SelectManyResult, options?: SelectSettlementOptions) => void;
  * }} PendingMultiSelect
  */
 
@@ -88,7 +89,7 @@ export function getPollCreationData(msg) {
  * @typedef {{
  *   handlePollVote: (event: PollVoteEvent) => boolean;
  *   createSelect: (sock: SocketResolver, chatId: string) => (question: string, options: SelectOption[], config?: SelectConfig) => Promise<string>;
- *   createSelectMany: (sock: SocketResolver, chatId: string) => (question: string, options: SelectOption[], config?: SelectManyConfig) => Promise<string[]>;
+ *   createSelectMany: (sock: SocketResolver, chatId: string) => (question: string, options: SelectOption[], config?: SelectManyConfig) => Promise<SelectManyResult>;
  *   createConfirm: (sock: SocketResolver, chatId: string) => (message: string, hooks?: ConfirmHooks) => Promise<boolean>;
  *   resolvePollVoteMessage: (message: import('@whiskeysockets/baileys').WAMessage, sock: import('@whiskeysockets/baileys').WASocket) => Promise<PollVoteEvent | null>;
  *   readonly size: number;
@@ -254,6 +255,28 @@ function deletePollPrompt(getSocket, sentPollKey) {
 }
 
 /**
+ * @param {readonly string[]} selectedIds
+ * @param {ReadonlySet<string> | null} cancelIds
+ * @param {boolean} hasInteracted
+ * @returns {SelectManyResult}
+ */
+function buildSelectManyResult(selectedIds, cancelIds, hasInteracted) {
+  if (
+    cancelIds !== null
+    && selectedIds.length === 1
+    && cancelIds.has(selectedIds[0] ?? "")
+  ) {
+    return { kind: "cancelled" };
+  }
+
+  if (selectedIds.length > 0) {
+    return { kind: "selected", ids: [...selectedIds] };
+  }
+
+  return hasInteracted ? { kind: "unchanged" } : { kind: "cancelled" };
+}
+
+/**
  * Decrypt a poll vote message and resolve the selected option names.
  * @param {Map<string, import('@whiskeysockets/baileys').WAMessage>} sentPolls
  * @param {import('@whiskeysockets/baileys').WAMessage} message
@@ -378,7 +401,7 @@ export function createSelectRuntime() {
         entry.idleTimer = setTimeout(() => {
           clearTimeout(entry.timer);
           pending.delete(event.pollMsgId);
-          entry.settle(entry.selectedIds);
+          entry.settle(buildSelectManyResult(entry.selectedIds, entry.cancelIds, entry.hasInteracted));
         }, MULTI_SELECT_IDLE_COMMIT_MS);
         entry.idleTimer.unref?.();
       } else {
@@ -448,7 +471,7 @@ export function createSelectRuntime() {
      * Create a multi-select function scoped to a chat.
      * @param {SocketResolver} sock
      * @param {string} chatId
-     * @returns {(question: string, options: SelectOption[], config?: SelectManyConfig) => Promise<string[]>}
+     * @returns {(question: string, options: SelectOption[], config?: SelectManyConfig) => Promise<SelectManyResult>}
      */
     createSelectMany(sock, chatId) {
       const getSocket = createSocketGetter(sock);
@@ -465,7 +488,7 @@ export function createSelectRuntime() {
           selectableCount,
         );
         if (!prompt) {
-          return [];
+          return { kind: "cancelled" };
         }
 
         const promptData = prompt;
@@ -479,21 +502,17 @@ export function createSelectRuntime() {
 
           /**
            * Complete the pending selection and optionally suppress transport-side effects.
-           * @param {string[]} ids
+           * @param {SelectManyResult} result
            * @param {SelectSettlementOptions} [options]
            * @returns {void}
            */
-          function settle(ids, options = {}) {
+          function settle(result, options = {}) {
             if (!options.suppressEffects) {
-              const isCancelled = (!(pendingEntry?.hasInteracted) && ids.length === 0) || (
-                cancelIds !== null
-                && ids.length === 1
-                && cancelIds.has(ids[0] ?? "")
-              );
+              const isCancelled = result.kind === "cancelled";
               applySettlementEffect(getSocket, chatId, promptData.sentPollKey, isCancelled, deleteOnSelect);
             }
 
-            resolve(ids);
+            resolve(result);
           }
 
           const timer = setTimeout(() => {
@@ -502,7 +521,7 @@ export function createSelectRuntime() {
               clearTimeout(entry.idleTimer);
             }
             pending.delete(promptData.pollMsgId);
-            settle([]);
+            settle(buildSelectManyResult([], cancelIds, pendingEntry?.hasInteracted ?? false));
           }, timeout);
           timer.unref?.();
 
@@ -511,6 +530,7 @@ export function createSelectRuntime() {
             idleTimer: null,
             selectedIds: [],
             hasInteracted: false,
+            cancelIds,
             settle,
             timer,
             labelToId: promptData.labelToId,
@@ -611,7 +631,7 @@ export function createSelectRuntime() {
           if (entry.idleTimer) {
             clearTimeout(entry.idleTimer);
           }
-          entry.settle([], { suppressEffects: true });
+          entry.settle({ kind: "cancelled" }, { suppressEffects: true });
         } else if (entry.mode === "confirm") {
           entry.settle(false, { suppressEffects: true });
         } else {

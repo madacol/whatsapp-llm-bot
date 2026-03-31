@@ -388,7 +388,7 @@ describe("per-chat model selection", () => {
             promptText = question;
             pickerOptions = options;
             pickerConfig = config ?? null;
-            return ["thinking", "changes"];
+            return { kind: "selected", ids: ["thinking", "changes"] };
           },
         },
         { setting: "show" },
@@ -433,7 +433,7 @@ describe("per-chat model selection", () => {
           chatId: "cfg-show-4",
           rootDb: db,
           senderIds: ["u1"],
-          selectMany: async () => [],
+          selectMany: async () => ({ kind: "unchanged" }),
         },
         { setting: "show" },
       );
