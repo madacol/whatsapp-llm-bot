@@ -212,6 +212,23 @@ function getShowMultiPickerOptions(chat) {
 }
 
 /**
+ * @param {string[]} items
+ * @returns {string}
+ */
+function formatReadableList(items) {
+  if (items.length === 0) {
+    return "";
+  }
+  if (items.length === 1) {
+    return items[0] ?? "";
+  }
+  if (items.length === 2) {
+    return `${items[0] ?? ""} and ${items[1] ?? ""}`;
+  }
+  return `${items.slice(0, -1).join(", ")}, and ${items[items.length - 1] ?? ""}`;
+}
+
+/**
  * @param {unknown} previousRaw
  * @param {unknown} nextRaw
  * @returns {string}
@@ -219,11 +236,33 @@ function getShowMultiPickerOptions(chat) {
 function formatOutputVisibilityChanges(previousRaw, nextRaw) {
   const previous = resolveOutputVisibility(previousRaw);
   const next = resolveOutputVisibility(nextRaw);
-  const changed = OUTPUT_VISIBILITY_FLAGS
-    .filter((flag) => previous[flag.key] !== next[flag.key])
-    .map((flag) => `${flag.label} ${next[flag.key] ? "on" : "off"}`);
+  /** @type {string[]} */
+  const shown = [];
+  /** @type {string[]} */
+  const hidden = [];
 
-  return changed.length > 0 ? changed.join(", ") : "no changes";
+  for (const flag of OUTPUT_VISIBILITY_FLAGS) {
+    if (previous[flag.key] === next[flag.key]) {
+      continue;
+    }
+    const subject = getShowPickerSubject(flag.key);
+    if (next[flag.key]) {
+      shown.push(subject);
+    } else {
+      hidden.push(subject);
+    }
+  }
+
+  /** @type {string[]} */
+  const parts = [];
+  if (shown.length > 0) {
+    parts.push(`Show ${formatReadableList(shown)}`);
+  }
+  if (hidden.length > 0) {
+    parts.push(`Hide ${formatReadableList(hidden)}`);
+  }
+
+  return parts.length > 0 ? `${parts.join(". ")}.` : "No changes.";
 }
 
 /**
@@ -445,7 +484,7 @@ const BASE_CONFIG_KEYS = [
           SET output_visibility = ${JSON.stringify(nextVisibility)}::jsonb
           WHERE chat_id = ${chatId}
         `;
-        return `Show changed: ${formatOutputVisibilityChanges(chat.output_visibility, nextVisibility)}.`;
+        return formatOutputVisibilityChanges(chat.output_visibility, nextVisibility);
       }
       if (!areOutputVisibilityKeys(selectedIds)) {
         return "Use `!c show` to pick visible outputs, or `!c reset show` to restore defaults.";
@@ -456,7 +495,7 @@ const BASE_CONFIG_KEYS = [
         SET output_visibility = ${JSON.stringify(nextVisibility)}::jsonb
         WHERE chat_id = ${chatId}
       `;
-      return `Show changed: ${formatOutputVisibilityChanges(chat.output_visibility, nextVisibility)}.`;
+      return formatOutputVisibilityChanges(chat.output_visibility, nextVisibility);
     },
   }),
   createConfigKeyDefinition({
