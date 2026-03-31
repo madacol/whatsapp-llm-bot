@@ -47,18 +47,6 @@ function isTextBlock(block) {
  * @param {TextContentBlock | undefined} firstBlock
  * @returns {boolean}
  */
-function isRepoChatCodingRequest(binding, firstBlock) {
-  return binding.kind === "repo"
-    && !!firstBlock
-    && !firstBlock.text.startsWith("!")
-    && !firstBlock.text.startsWith("/");
-}
-
-/**
- * @param {ResolvedChatBinding} binding
- * @param {TextContentBlock | undefined} firstBlock
- * @returns {boolean}
- */
 function isArchivedWorkspaceCodingRequest(binding, firstBlock) {
   return binding.kind === "workspace"
     && binding.workspace.status === "archived"
@@ -435,14 +423,6 @@ export function createConversationRunner({ store, llmClient, getActionsFn, execu
     };
 
     const firstBlock = content.find(isTextBlock);
-
-    if (isRepoChatCodingRequest(resolvedBinding, firstBlock)) {
-      await context.reply(contentEvent(
-        "error",
-        "Repo chats do not accept coding requests. Use !new, !list, or !archive <name>, then work inside a workspace chat.",
-      ));
-      return null;
-    }
 
     if (isArchivedWorkspaceCodingRequest(resolvedBinding, firstBlock)) {
       await context.reply(contentEvent(
