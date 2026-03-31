@@ -90,6 +90,7 @@ function formatCompactToolCall(toolCall, actionFormatter, cwd, toolContext) {
  *     actionFormatter?: (params: Record<string, unknown>) => string,
  *     toolContext?: { oldContent?: string },
  *   ) => Promise<void>,
+ *   close: () => Promise<void>,
  * }}
  */
 export function createCompactToolActivityFeed({ send, cwd }) {
@@ -131,10 +132,29 @@ export function createCompactToolActivityFeed({ send, cwd }) {
     scheduleFlush();
   }
 
+  /**
+   * Flush the current compact message once, then drop all state so later tool
+   * activity starts from a new message.
+   * @returns {Promise<void>}
+   */
+  async function close() {
+    if (debounceTimer) {
+      clearTimeout(debounceTimer);
+      debounceTimer = null;
+      if (handle) {
+        await handle.update(textUpdate(lines.join("\n")));
+      }
+    }
+
+    handle = null;
+    lines = [];
+  }
+
   return {
     addCommand: async (command) => addLine(formatCompactCommand(command)),
     addFileRead: async (paths) => addLine(formatCompactRead(paths)),
     addToolCall: async (toolCall, actionFormatter, toolContext) =>
       addLine(formatCompactToolCall(toolCall, actionFormatter, cwd, toolContext)),
+    close,
   };
 }
