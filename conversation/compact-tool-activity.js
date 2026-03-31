@@ -6,6 +6,15 @@ const COMPACT_TOOL_ACTIVITY_LIMIT = 3;
 const COMPACT_TOOL_ACTIVITY_DEBOUNCE_MS = 1000;
 
 /**
+ * @param {string} tool
+ * @param {string} [detail]
+ * @returns {string}
+ */
+function formatCompactEntry(tool, detail) {
+  return detail ? `🔧 *${tool}*  ${detail}` : `🔧 *${tool}*`;
+}
+
+/**
  * @param {string} command
  * @returns {string}
  */
@@ -16,9 +25,9 @@ function formatCompactCommand(command) {
     .filter((line) => line.length > 0);
   const firstLine = lines[0] ?? "";
   if (!firstLine) {
-    return "🔧Bash";
+    return formatCompactEntry("Bash");
   }
-  return `🔧Bash \`${firstLine}\``;
+  return formatCompactEntry("Bash", `\`${firstLine}\``);
 }
 
 /**
@@ -30,9 +39,9 @@ function formatCompactRead(paths) {
     .filter((path) => typeof path === "string" && path.length > 0)
     .map((path) => `\`${path}\``);
   if (displayPaths.length === 0) {
-    return "🔧Read";
+    return formatCompactEntry("Read");
   }
-  return `🔧Read ${displayPaths.join(", ")}`;
+  return formatCompactEntry("Read", displayPaths.join(", "));
 }
 
 /**
@@ -63,17 +72,23 @@ function formatCompactToolCall(toolCall, actionFormatter, cwd, toolContext) {
     case "bash":
       return formatCompactCommand(presentation.command);
     case "activity":
-      return presentation.activity.lines.length > 0
-        ? `🔧${presentation.activity.title} ${presentation.activity.lines.join(", ")}`
-        : `🔧${presentation.activity.title}`;
+      return formatCompactEntry(
+        presentation.activity.title,
+        presentation.activity.lines.length > 0 ? presentation.activity.lines.join(", ") : undefined,
+      );
     case "file":
-      return `🔧${presentation.toolName} \`${presentation.filePath}\``;
+      return formatCompactEntry(presentation.toolName, `\`${presentation.filePath}\``);
     case "plan":
-      return "🔧Plan";
-    case "generic":
-      return `🔧${presentation.toolName}`;
+      return formatCompactEntry("Plan");
+    case "generic": {
+      const summary = presentation.summary.trim();
+      const detail = summary && summary !== presentation.toolName && !summary.includes("\n")
+        ? `\`${summary}\``
+        : undefined;
+      return formatCompactEntry(presentation.toolName, detail);
+    }
     default:
-      return `🔧${toolCall.name}`;
+      return formatCompactEntry(toolCall.name);
   }
 }
 
@@ -97,9 +112,41 @@ export function createCompactToolActivityFeed({ send, cwd }) {
   /** @type {MessageHandle | null} */
   let handle = null;
   /** @type {string[]} */
-  let lines = [];
+  let allLines = [];
   /** @type {ReturnType<typeof setTimeout> | null} */
   let debounceTimer = null;
+
+  /**
+   * @returns {string}
+   */
+  function getCompactText() {
+    const hiddenCount = Math.max(0, allLines.length - COMPACT_TOOL_ACTIVITY_LIMIT);
+    const visibleLines = hiddenCount > 0
+      ? allLines.slice(-COMPACT_TOOL_ACTIVITY_LIMIT)
+      : allLines;
+    return [
+      ...(hiddenCount > 0 ? [`... +${hiddenCount} earlier tools`] : []),
+      ...visibleLines,
+    ].join("\n");
+  }
+
+  /**
+   * @returns {string}
+   */
+  function getFullText() {
+    return allLines.join("\n");
+  }
+
+  /**
+   * @returns {void}
+   */
+  function updateInspectState() {
+    handle?.setInspect({
+      kind: "text",
+      text: getFullText(),
+      persistOnInspect: true,
+    });
+  }
 
   /**
    * @returns {void}
@@ -113,7 +160,8 @@ export function createCompactToolActivityFeed({ send, cwd }) {
     }
     debounceTimer = setTimeout(() => {
       debounceTimer = null;
-      void handle?.update(textUpdate(lines.join("\n")));
+      updateInspectState();
+      void handle?.update(textUpdate(getCompactText()));
     }, COMPACT_TOOL_ACTIVITY_DEBOUNCE_MS);
   }
 
@@ -122,13 +170,15 @@ export function createCompactToolActivityFeed({ send, cwd }) {
    * @returns {Promise<void>}
    */
   async function addLine(line) {
-    lines = [...lines, line].slice(-COMPACT_TOOL_ACTIVITY_LIMIT);
+    allLines.push(line);
 
     if (!handle) {
-      handle = await send(contentEvent("plain", line)) ?? null;
+      handle = await send(contentEvent("plain", getCompactText())) ?? null;
+      updateInspectState();
       return;
     }
 
+    updateInspectState();
     scheduleFlush();
   }
 
@@ -142,12 +192,13 @@ export function createCompactToolActivityFeed({ send, cwd }) {
       clearTimeout(debounceTimer);
       debounceTimer = null;
       if (handle) {
-        await handle.update(textUpdate(lines.join("\n")));
+        updateInspectState();
+        await handle.update(textUpdate(getCompactText()));
       }
     }
 
     handle = null;
-    lines = [];
+    allLines = [];
   }
 
   return {
