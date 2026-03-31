@@ -109,6 +109,7 @@ export function buildAgentIoHooks(
       }
     },
     onLlmResponse: async (text) => {
+      await compactToolActivity.close();
       await context.reply(contentEvent("llm", [{ type: "markdown", text }]));
     },
     onAskUser: async (question, options, _preamble, descriptions) => {
@@ -160,6 +161,9 @@ export function buildAgentIoHooks(
       await emitWhileWorking(() => context.reply(planEvent(text)));
     },
     onFileChange: async (fileChangeEvent) => {
+      if (visibility.changes) {
+        await compactToolActivity.close();
+      }
       await emitWhileWorking(() => codexDisplayHooks.onFileChange(fileChangeEvent));
     },
     onContinuePrompt: () => context.confirm("React 👍 to continue or 👎 to stop."),

@@ -368,6 +368,109 @@ describe("buildAgentIoHooks", () => {
     });
   });
 
+  it("starts a new compact tool message after an llm reply", async () => {
+    /** @type {Array<{ event: OutboundEvent, kind: "send" | "reply" }>} */
+    const sent = [];
+    /** @type {MessageHandleUpdate[][]} */
+    const handleUpdates = [];
+    const hooks = buildAgentIoHooks(
+      {
+        send: async (event) => {
+          sent.push({ event, kind: "send" });
+          const updates = [];
+          handleUpdates.push(updates);
+          return {
+            keyId: `compact-tools-${handleUpdates.length}`,
+            isImage: false,
+            update: async (update) => { updates.push(structuredClone(update)); },
+            setInspect: () => {},
+          };
+        },
+        reply: async (event) => {
+          sent.push({ event, kind: "reply" });
+          return undefined;
+        },
+        select: async () => "",
+        confirm: async () => true,
+      },
+      async () => {},
+      async () => {},
+      () => {},
+      "/repo",
+      { ...DEFAULT_OUTPUT_VISIBILITY, tools: false },
+    );
+
+    await hooks.onCommand?.({ command: "pwd", status: "started" });
+    await hooks.onCommand?.({ command: "pnpm type-check", status: "started" });
+    await hooks.onLlmResponse?.("Done");
+    await hooks.onToolCall?.({ id: "tool-3", name: "run_bash", arguments: "{\"command\":\"git diff\"}" });
+
+    assert.equal(sent.length, 3);
+    assert.equal(sent[0]?.event.kind, "content");
+    assert.equal(sent[1]?.kind, "reply");
+    assert.equal(sent[2]?.event.kind, "content");
+    if (sent[2]?.event.kind !== "content") {
+      assert.fail("Expected a new compact content event after llm reply");
+    }
+    assert.equal(sent[2].event.source, "plain");
+    assert.equal(sent[2].event.content, "🔧Bash `git diff`");
+    assert.deepEqual(handleUpdates[0], [{
+      kind: "text",
+      text: "🔧Bash `pwd`\n🔧Bash `pnpm type-check`",
+    }]);
+    assert.deepEqual(handleUpdates[1], []);
+  });
+
+  it("starts a new compact tool message after a file change message", async () => {
+    /** @type {Array<{ event: OutboundEvent, kind: "send" | "reply" }>} */
+    const sent = [];
+    /** @type {MessageHandleUpdate[][]} */
+    const handleUpdates = [];
+    const hooks = buildAgentIoHooks(
+      {
+        send: async (event) => {
+          sent.push({ event, kind: "send" });
+          const updates = [];
+          handleUpdates.push(updates);
+          return {
+            keyId: `compact-tools-${handleUpdates.length}`,
+            isImage: false,
+            update: async (update) => { updates.push(structuredClone(update)); },
+            setInspect: () => {},
+          };
+        },
+        reply: async () => undefined,
+        select: async () => "",
+        confirm: async () => true,
+      },
+      async () => {},
+      async () => {},
+      () => {},
+      "/repo",
+      { ...DEFAULT_OUTPUT_VISIBILITY, tools: false },
+    );
+
+    await hooks.onCommand?.({ command: "pwd", status: "started" });
+    await hooks.onToolCall?.({ id: "tool-4", name: "run_bash", arguments: "{\"command\":\"git diff\"}" });
+    await hooks.onFileChange?.({ path: "/repo/src/app.js", summary: "Updated file" });
+    await hooks.onCommand?.({ command: "ls", status: "started" });
+
+    assert.equal(sent.length, 3);
+    assert.equal(sent[0]?.event.kind, "content");
+    assert.equal(sent[1]?.event.kind, "file_change");
+    assert.equal(sent[2]?.event.kind, "content");
+    if (sent[2]?.event.kind !== "content") {
+      assert.fail("Expected a new compact content event after file change");
+    }
+    assert.equal(sent[2].event.source, "plain");
+    assert.equal(sent[2].event.content, "🔧Bash `ls`");
+    assert.deepEqual(handleUpdates[0], [{
+      kind: "text",
+      text: "🔧Bash `pwd`\n🔧Bash `git diff`",
+    }]);
+    assert.deepEqual(handleUpdates[2], []);
+  });
+
   it("suppresses tool result progress events when visibility disables tools", async () => {
     const { hooks, sent } = createSubject({ ...DEFAULT_OUTPUT_VISIBILITY, tools: false });
 
