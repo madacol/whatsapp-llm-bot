@@ -51,6 +51,7 @@ export default [
       assert.ok(result.includes("gpt-5.4"), `Expected harness model summary, got: ${result}`);
       assert.ok(result.includes("Show thinking"), `Expected show summary, got: ${result}`);
       assert.ok(result.includes("Hide file changes"), `Expected show summary, got: ${result}`);
+      assert.ok(result.includes("!clone"), `Expected clone hint, got: ${result}`);
       assert.ok(!prompts.some((prompt) => prompt.question === "Enable the bot for this chat?"), "wizard should not ask the enable question");
 
       const { rows: [chat] } = await db.sql`

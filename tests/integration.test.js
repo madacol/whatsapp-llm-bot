@@ -322,6 +322,7 @@ describe("Scenario 7b: Guided setup command", () => {
     assert.ok(allText.includes("mention+reply"), `Expected trigger summary, got: ${allText}`);
     assert.ok(allText.includes("codex"), `Expected harness summary, got: ${allText}`);
     assert.ok(allText.includes("gpt-5.4"), `Expected harness model summary, got: ${allText}`);
+    assert.ok(allText.includes("!clone"), `Expected clone hint, got: ${allText}`);
 
     const { rows: [chat] } = await testDb.sql`
       SELECT is_enabled, respond_on, memory, debug, output_visibility, harness, harness_config
