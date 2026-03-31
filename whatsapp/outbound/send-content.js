@@ -45,7 +45,7 @@ function formatInspectEditText(summary, text) {
   const MAX = 3000;
   const display = text.length <= MAX ? text
     : text.slice(0, MAX) + `\n\n_… truncated (${text.length.toLocaleString()} chars total)_`;
-  return `${summary}\n\n${display}`;
+  return summary ? `${summary}\n\n${display}` : display;
 }
 
 /**
@@ -498,7 +498,7 @@ export async function sendBlocks(sock, chatId, source, content, options, reactio
     isImage,
     update: async (update) => {
       const text = persistInspectText && inspectState?.kind === "text" && inspectState.persistOnInspect
-        ? inspectState.text
+        ? formatInspectEditText("", inspectState.text)
         : summarizeHandleUpdate(update);
       await editWhatsAppMessage(sock, chatId, editKey, prependSourcePrefix(prefix, text), isImage);
     },
@@ -518,7 +518,7 @@ export async function sendBlocks(sock, chatId, source, content, options, reactio
           sock,
           chatId,
           editKey,
-          prependSourcePrefix(prefix, inspectState.text),
+          prependSourcePrefix(prefix, formatInspectEditText("", inspectState.text)),
           isImage,
         );
         return;
