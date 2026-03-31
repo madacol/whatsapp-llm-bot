@@ -175,6 +175,42 @@ describe("createSelectRuntime", () => {
     });
   });
 
+  it("treats a select-then-deselect cycle as a no-op for multi-select polls", async () => {
+    const registry = createSelectRuntime();
+    const { sock, sentMessages } = createMockSock();
+    const selectMany = registry.createSelectMany(sock, "chat-1");
+
+    const selectionPromise = selectMany(
+      "Pick any",
+      [
+        { id: "commands", label: "commands" },
+        { id: "thinking", label: "thinking" },
+      ],
+      { deleteOnSelect: true },
+    );
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    registry.handlePollVote({
+      chatId: "chat-1",
+      pollMsgId: "poll-1",
+      selectedOptions: ["thinking"],
+    });
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+
+    registry.handlePollVote({
+      chatId: "chat-1",
+      pollMsgId: "poll-1",
+      selectedOptions: [],
+    });
+    await new Promise((resolve) => setTimeout(resolve, 2900));
+
+    assert.deepEqual(await selectionPromise, []);
+    assert.deepEqual(sentMessages[sentMessages.length - 1]?.message, {
+      delete: { id: "poll-1", remoteJid: "chat-1" },
+    });
+  });
+
   it("clear() resolves pending selects without sending cancellation reactions", async () => {
     const registry = createSelectRuntime();
     const { sock, sentMessages } = createMockSock();

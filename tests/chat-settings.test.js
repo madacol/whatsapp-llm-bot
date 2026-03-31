@@ -422,6 +422,27 @@ describe("per-chat model selection", () => {
         changes: false,
       });
     });
+
+    it("treats an empty multi-select result as a no-op for show", async () => {
+      await db.sql`INSERT INTO chats(chat_id) VALUES ('cfg-show-4') ON CONFLICT DO NOTHING`;
+
+      const mod = await import("../actions/settings/chatSettings/index.js");
+      const action = mod.default;
+      const result = await action.action_fn(
+        {
+          chatId: "cfg-show-4",
+          rootDb: db,
+          senderIds: ["u1"],
+          selectMany: async () => [],
+        },
+        { setting: "show" },
+      );
+
+      assert.equal(result, "");
+
+      const rows = await db.sql`SELECT output_visibility FROM chats WHERE chat_id = 'cfg-show-4'`;
+      assert.deepEqual(rows.rows[0]?.output_visibility, {});
+    });
   });
 
 });
