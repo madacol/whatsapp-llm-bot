@@ -23,7 +23,17 @@ const SOURCE_PREFIX = {
   warning: "⚠️",
   usage: "📊",
   memory: "🧠",
+  plain: "",
 };
+
+/**
+ * @param {string} prefix
+ * @param {string} text
+ * @returns {string}
+ */
+function prependSourcePrefix(prefix, text) {
+  return prefix ? `${prefix} ${text}` : text;
+}
 
 /**
  * Format inspect text for editing into a WhatsApp message with truncation.
@@ -482,7 +492,7 @@ export async function sendBlocks(sock, chatId, source, content, options, reactio
     isImage,
     update: async (update) => {
       const text = summarizeHandleUpdate(update);
-      await editWhatsAppMessage(sock, chatId, editKey, `${prefix} ${text}`, isImage);
+      await editWhatsAppMessage(sock, chatId, editKey, prependSourcePrefix(prefix, text), isImage);
     },
     setInspect: (inspect) => {
       inspectState = inspect;
@@ -499,7 +509,7 @@ export async function sendBlocks(sock, chatId, source, content, options, reactio
         sock,
         chatId,
         editKey,
-        `${prefix} ${formatInspectEditText(inspect.summary, inspect.text)}`,
+        prependSourcePrefix(prefix, formatInspectEditText(inspect.summary, inspect.text)),
         isImage,
       );
     });

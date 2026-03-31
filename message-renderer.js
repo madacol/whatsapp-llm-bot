@@ -117,6 +117,16 @@ export function markdownToWhatsApp(text) {
 }
 
 /**
+ * Prefix a rendered text fragment when the message source has a visible marker.
+ * @param {string} prefix
+ * @param {string} text
+ * @returns {string}
+ */
+function prependSourcePrefix(prefix, text) {
+  return prefix ? `${prefix} ${text}` : text;
+}
+
+/**
  * Render a markdown link into compact WhatsApp text.
  * @param {string} label
  * @param {string} target
@@ -226,7 +236,7 @@ export async function renderBlocks(blocks, prefix) {
   for (const block of blocks) {
     switch (block.type) {
       case "text":
-        instructions.push({ kind: "text", text: `${prefix} ${block.text}`, editable: true });
+        instructions.push({ kind: "text", text: prependSourcePrefix(prefix, block.text), editable: true });
         break;
 
       case "markdown":
@@ -353,7 +363,7 @@ async function renderMarkdownBlock(text, prefix, instructions) {
   const flushText = () => {
     const trimmed = textBuffer.trim();
     if (trimmed) {
-      instructions.push({ kind: "text", text: `${prefix} ${trimmed}`, editable: true });
+      instructions.push({ kind: "text", text: prependSourcePrefix(prefix, trimmed), editable: true });
     }
     textBuffer = "";
   };
@@ -439,7 +449,7 @@ async function renderCodeBlock(block, prefix, instructions) {
         instructions.push({
           kind: "image",
           image: images[i],
-          ...(i === 0 && block.caption && { caption: `${prefix} ${block.caption}` }),
+          ...(i === 0 && block.caption && { caption: prependSourcePrefix(prefix, block.caption) }),
           editable: i === 0,
         });
       }
@@ -478,7 +488,7 @@ async function renderDiffBlock(block, prefix, instructions) {
       instructions.push({
         kind: "image",
         image: images[i],
-        ...(i === 0 && block.caption && { caption: `${prefix} ${block.caption}` }),
+        ...(i === 0 && block.caption && { caption: prependSourcePrefix(prefix, block.caption) }),
         editable: i === 0,
       });
     }

@@ -285,14 +285,87 @@ describe("buildAgentIoHooks", () => {
     assert.equal(sent[0].event.kind, "tool_call");
   });
 
-  it("suppresses tool-call and command progress events when visibility disables tools", async () => {
-    const { hooks, sent } = createSubject({ ...DEFAULT_OUTPUT_VISIBILITY, tools: false });
+  it("shows one debounced compact tool summary when visibility disables tools", async () => {
+    /** @type {Array<{ event: OutboundEvent, kind: "send" | "reply" }>} */
+    const sent = [];
+    /** @type {MessageHandleUpdate[]} */
+    const updates = [];
+    const hooks = buildAgentIoHooks(
+      {
+        send: async (event) => {
+          sent.push({ event, kind: "send" });
+          return {
+            keyId: "compact-tools-1",
+            isImage: false,
+            update: async (update) => { updates.push(update); },
+            setInspect: () => {},
+          };
+        },
+        reply: async () => undefined,
+        select: async () => "",
+        confirm: async () => true,
+      },
+      async () => {},
+      async () => {},
+      () => {},
+      "/repo",
+      { ...DEFAULT_OUTPUT_VISIBILITY, tools: false },
+    );
 
-    await hooks.onToolCall?.({ id: "tool-1", name: "run_bash", arguments: "{\"command\":\"pwd\"}" });
-    await hooks.onCommand?.({ command: "pwd", status: "started" });
     await hooks.onFileRead?.({ command: "sed -n '1,20p' src/app.js", paths: ["src/app.js"] });
+    await hooks.onCommand?.({ command: "pnpm type-check", status: "started" });
+    await hooks.onToolCall?.({ id: "tool-1", name: "run_bash", arguments: "{\"command\":\"git diff\"}" });
 
-    assert.equal(sent.length, 0);
+    assert.equal(sent.length, 1);
+    assert.equal(sent[0]?.event.kind, "content");
+    if (sent[0]?.event.kind !== "content") {
+      assert.fail("Expected compact content event");
+    }
+    assert.equal(sent[0].event.source, "plain");
+    assert.equal(sent[0].event.content, "🔧Read `src/app.js`");
+
+    assert.equal(updates.length, 0, "expected debounce to defer compact edits");
+    await new Promise((resolve) => setTimeout(resolve, 1100));
+
+    assert.deepEqual(updates, [{
+      kind: "text",
+      text: "🔧Read `src/app.js`\n🔧Bash `pnpm type-check`\n🔧Bash `git diff`",
+    }]);
+  });
+
+  it("keeps only the last 3 compact tool entries when visibility disables tools", async () => {
+    /** @type {MessageHandleUpdate[]} */
+    const updates = [];
+    const hooks = buildAgentIoHooks(
+      {
+        send: async () => ({
+          keyId: "compact-tools-2",
+          isImage: false,
+          update: async (update) => { updates.push(update); },
+          setInspect: () => {},
+        }),
+        reply: async () => undefined,
+        select: async () => "",
+        confirm: async () => true,
+      },
+      async () => {},
+      async () => {},
+      () => {},
+      "/repo",
+      { ...DEFAULT_OUTPUT_VISIBILITY, tools: false },
+    );
+
+    await hooks.onCommand?.({ command: "pwd", status: "started" });
+    await hooks.onCommand?.({ command: "pnpm type-check", status: "started" });
+    await hooks.onFileRead?.({ command: "sed -n '1,20p' src/app.js", paths: ["src/app.js"] });
+    await hooks.onToolCall?.({ id: "tool-2", name: "run_bash", arguments: "{\"command\":\"git diff\"}" });
+
+    await new Promise((resolve) => setTimeout(resolve, 1100));
+
+    assert.deepEqual(updates[updates.length - 1], {
+      kind: "text",
+      text: "🔧Bash `pnpm type-check`\n🔧Read `src/app.js`\n🔧Bash `git diff`",
+    });
   });
 
   it("suppresses tool result progress events when visibility disables tools", async () => {

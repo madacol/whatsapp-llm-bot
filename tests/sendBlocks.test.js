@@ -590,6 +590,23 @@ describe("sendBlocks – tool-call → edit pipeline", () => {
     assert.ok(editText.includes("done"), "Edit text should contain new content");
   });
 
+  it("plain source sends and edits text without an automatic prefix", async () => {
+    const { sock, calls } = createCaptureSock();
+
+    const handle = await sendBlocks(sock, "chat-1", "plain", [
+      { type: "text", text: "🔧Read `src/app.js`" },
+    ]);
+
+    assert.ok(handle);
+    const firstMsg = /** @type {Record<string, unknown>} */ (calls[0].args[1]);
+    assert.equal(firstMsg.text, "🔧Read `src/app.js`");
+
+    await handle.update({ kind: "text", text: "🔧Read `src/app.js`\n🔧Bash `git diff`" });
+
+    const editMsg = /** @type {Record<string, unknown>} */ (calls[1].args[1]);
+    assert.equal(editMsg.text, "🔧Read `src/app.js`\n🔧Bash `git diff`");
+  });
+
   it("formats reasoning inspect text when the user reacts with 👁", async () => {
     const { sock, calls } = createCaptureSock();
     const reactionRuntime = createReactionRuntime();

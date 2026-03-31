@@ -4,6 +4,9 @@ import { contentEvent, planEvent, reasoningInspectState, textUpdate, toolCallEve
 import { createCodexDisplayHooks } from "./codex-hook-display.js";
 import { DEFAULT_OUTPUT_VISIBILITY } from "../chat-output-visibility.js";
 
+const COMPACT_TOOL_ACTIVITY_LIMIT = 3;
+const COMPACT_TOOL_ACTIVITY_DEBOUNCE_MS = 1000;
+
 /**
  * Display a tool call to the user using the formatter shared across harnesses.
  * @param {LlmChatResponse["toolCalls"][0]} toolCall
@@ -23,6 +26,78 @@ async function displayToolCall(toolCall, context, actionFormatter, cwd, toolCont
       toolContext,
     ),
   ));
+}
+
+/**
+ * @param {string} command
+ * @returns {string}
+ */
+function formatCompactCommand(command) {
+  const lines = command
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+  const firstLine = lines[0] ?? "";
+  if (!firstLine) {
+    return "🔧Bash";
+  }
+  return `🔧Bash \`${firstLine}\``;
+}
+
+/**
+ * @param {string[]} paths
+ * @returns {string}
+ */
+function formatCompactRead(paths) {
+  const displayPaths = paths
+    .filter((path) => typeof path === "string" && path.length > 0)
+    .map((path) => `\`${path}\``);
+  if (displayPaths.length === 0) {
+    return "🔧Read";
+  }
+  return `🔧Read ${displayPaths.join(", ")}`;
+}
+
+/**
+ * @param {LlmChatResponse["toolCalls"][0]} toolCall
+ * @param {((params: Record<string, unknown>) => string) | undefined} actionFormatter
+ * @param {string | null | undefined} cwd
+ * @param {{ oldContent?: string } | undefined} toolContext
+ * @returns {string}
+ */
+function formatCompactToolCall(toolCall, actionFormatter, cwd, toolContext) {
+  const args = parseToolArgs(toolCall.arguments);
+  if ((toolCall.name === "run_bash" || toolCall.name === "Bash") && typeof args.command === "string") {
+    return formatCompactCommand(args.command);
+  }
+  if (toolCall.name === "exec_command" && typeof args.cmd === "string") {
+    return formatCompactCommand(args.cmd);
+  }
+
+  const presentation = buildToolPresentation(
+    toolCall.name,
+    args,
+    actionFormatter,
+    cwd ?? null,
+    toolContext,
+  );
+
+  switch (presentation.kind) {
+    case "bash":
+      return formatCompactCommand(presentation.command);
+    case "activity":
+      return presentation.activity.lines.length > 0
+        ? `🔧${presentation.activity.title} ${presentation.activity.lines.join(", ")}`
+        : `🔧${presentation.activity.title}`;
+    case "file":
+      return `🔧${presentation.toolName} \`${presentation.filePath}\``;
+    case "plan":
+      return "🔧Plan";
+    case "generic":
+      return `🔧${presentation.toolName}`;
+    default:
+      return `🔧${toolCall.name}`;
+  }
 }
 
 /**
@@ -65,6 +140,12 @@ export function buildAgentIoHooks(
   });
   /** @type {MessageHandle | null} */
   let reasoningHandle = null;
+  /** @type {MessageHandle | null} */
+  let compactToolHandle = null;
+  /** @type {string[]} */
+  let compactToolLines = [];
+  /** @type {ReturnType<typeof setTimeout> | null} */
+  let compactToolDebounceTimer = null;
 
   /**
    * @param {{ text?: string, summaryParts: string[], contentParts: string[], hasEncryptedContent?: boolean }} event
@@ -80,6 +161,37 @@ export function buildAgentIoHooks(
     return event.hasEncryptedContent
       ? "_Codex returned encrypted reasoning, but no public reasoning text._"
       : "_Codex exposed no public reasoning text for this step._";
+  }
+
+  /**
+   * @returns {void}
+   */
+  function scheduleCompactToolFlush() {
+    if (!compactToolHandle) {
+      return;
+    }
+    if (compactToolDebounceTimer) {
+      clearTimeout(compactToolDebounceTimer);
+    }
+    compactToolDebounceTimer = setTimeout(() => {
+      compactToolDebounceTimer = null;
+      void compactToolHandle?.update(textUpdate(compactToolLines.join("\n")));
+    }, COMPACT_TOOL_ACTIVITY_DEBOUNCE_MS);
+  }
+
+  /**
+   * @param {string} line
+   * @returns {Promise<void>}
+   */
+  async function addCompactToolLine(line) {
+    compactToolLines = [...compactToolLines, line].slice(-COMPACT_TOOL_ACTIVITY_LIMIT);
+
+    if (!compactToolHandle) {
+      compactToolHandle = await context.send(contentEvent("plain", line)) ?? null;
+      return;
+    }
+
+    scheduleCompactToolFlush();
   }
 
   return {
@@ -123,6 +235,7 @@ export function buildAgentIoHooks(
     },
     onToolCall: async (toolCall, formatToolCall, toolContext) => {
       if (!visibility.tools) {
+        await addCompactToolLine(formatCompactToolCall(toolCall, formatToolCall, cwd, toolContext));
         return undefined;
       }
       return displayToolCall(toolCall, context, formatToolCall, cwd, toolContext);
@@ -136,8 +249,20 @@ export function buildAgentIoHooks(
     onToolError: async (message) => {
       await emitWhileWorking(() => context.send(contentEvent("error", message)));
     },
-    onCommand: async (commandEvent) => { await emitWhileWorking(() => codexDisplayHooks.onCommand(commandEvent)); },
-    onFileRead: async (fileReadEvent) => { await emitWhileWorking(() => codexDisplayHooks.onFileRead(fileReadEvent)); },
+    onCommand: async (commandEvent) => {
+      if (!visibility.tools && commandEvent.status === "started") {
+        await addCompactToolLine(formatCompactCommand(commandEvent.command));
+        return;
+      }
+      await emitWhileWorking(() => codexDisplayHooks.onCommand(commandEvent));
+    },
+    onFileRead: async (fileReadEvent) => {
+      if (!visibility.tools) {
+        await addCompactToolLine(formatCompactRead(fileReadEvent.paths));
+        return;
+      }
+      await emitWhileWorking(() => codexDisplayHooks.onFileRead(fileReadEvent));
+    },
     onPlan: async (text) => {
       await emitWhileWorking(() => context.reply(planEvent(text)));
     },
