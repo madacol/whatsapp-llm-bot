@@ -5,8 +5,11 @@ process.env.MODEL = "mock-model";
 
 import { describe, it, before, after } from "node:test";
 import assert from "node:assert/strict";
+import { execFile as execFileCallback } from "node:child_process";
 import fs from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
+import { promisify } from "node:util";
 import {
   createChatTurn,
   createMockLlmServer,
@@ -18,6 +21,9 @@ import {
 import { setDb } from "../db.js";
 import { startHtmlServer, stopHtmlServer } from "../html-server.js";
 import config from "../config.js";
+import { getChatWorkDir } from "../utils.js";
+
+const execFile = promisify(execFileCallback);
 
 /** @type {Awaited<ReturnType<typeof createMockLlmServer>>} */
 let mockServer;
@@ -171,6 +177,25 @@ describe("Scenario 3: Unknown command", () => {
     const r = await chat.send("!foobar");
     assert.ok(r.raw.length > 0, "Bot should respond");
     assert.ok(r.raw.some(x => x.text.toLowerCase().includes("unknown command")), "Should mention unknown command");
+  });
+});
+
+describe("Scenario 3b: Clone repository command", () => {
+  it("clones a repository into the chat workdir", async () => {
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "clone-integration-"));
+    const sourceRepo = path.join(tempDir, "source.git");
+    const chatId = "s3b-clone-chat";
+
+    await execFile("git", ["init", "--bare", sourceRepo]);
+
+    const chat = await t.chat(chatId);
+    const r = await chat.send(`!clone ${sourceRepo}`);
+    const clonedDir = path.join(getChatWorkDir(chatId), "source");
+    const stat = await fs.stat(clonedDir);
+
+    assert.equal(stat.isDirectory(), true);
+    assert.ok(r.raw.some(x => x.text.includes(`Cloned into \`${clonedDir}\``)),
+      `Should confirm clone destination, got: ${JSON.stringify(r.raw.map(x => x.text))}`);
   });
 });
 
