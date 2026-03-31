@@ -396,7 +396,7 @@ describe("per-chat model selection", () => {
 
       assert.equal(
         promptText,
-        "*Extra outputs*\nChoose which extra agent progress outputs are shown in chat.",
+        "Choose which extra agent progress outputs are shown in chat.",
         `expected concise show prompt, got: ${promptText}`,
       );
       assert.deepEqual(

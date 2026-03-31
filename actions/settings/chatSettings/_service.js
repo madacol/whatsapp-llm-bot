@@ -1044,7 +1044,7 @@ export async function describeConfigKey(rootDb, chatId, key, extra) {
   }
 
   if (extra.compact && definition.key === "show") {
-    return "*Extra outputs*\nChoose which extra agent progress outputs are shown in chat.";
+    return "Choose which extra agent progress outputs are shown in chat.";
   }
 
   const chat = await getChatOrThrow(rootDb, chatId);
