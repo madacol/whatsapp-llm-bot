@@ -283,7 +283,7 @@ describe("Scenario 7b: Guided setup command", () => {
         selectMany: async (question, options) => {
           questions.push(question);
           responses.push({ type: "selectMany", text: JSON.stringify({ question, options }) });
-          return ["thinking", "changes"];
+          return { kind: "selected", ids: ["thinking", "changes"] };
         },
       },
     });

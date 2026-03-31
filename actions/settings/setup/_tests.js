@@ -37,7 +37,7 @@ export default [
           },
           selectMany: async (question, options) => {
             prompts.push({ question, options });
-            return ["thinking", "changes"];
+            return { kind: "selected", ids: ["thinking", "changes"] };
           },
         },
         {},
@@ -63,6 +63,53 @@ export default [
       assert.equal(chat.memory, false, "setup should no longer modify memory");
       assert.equal(chat.debug, true);
       assert.deepEqual(chat.output_visibility, { thinking: true, changes: false });
+      assert.equal(chat.harness, "codex");
+      assert.equal(chat.harness_config.codex.model, "gpt-5.4");
+    } finally {
+      config.MASTER_IDs = originalMaster;
+      await fs.rm(CODEX_CACHE_PATH, { force: true });
+    }
+  },
+
+  async function keeps_setup_running_when_show_step_is_unchanged(action_fn, db) {
+    await db.sql`INSERT INTO chats(chat_id, is_enabled, respond_on, memory, debug, output_visibility)
+      VALUES ('setup-3', false, 'mention', false, false, '{}'::jsonb)
+      ON CONFLICT DO NOTHING`;
+
+    await fs.mkdir(path.dirname(CODEX_CACHE_PATH), { recursive: true });
+    await fs.writeFile(CODEX_CACHE_PATH, JSON.stringify({
+      checkedAt: new Date().toISOString(),
+      models: [{ id: "gpt-5.4", label: "GPT-5.4" }],
+    }));
+
+    /** @type {string[]} */
+    const selections = ["mention+reply", "codex", "gpt-5.4"];
+
+    const originalMaster = config.MASTER_IDs;
+    config.MASTER_IDs = ["master-user"];
+    try {
+      const result = await action_fn(
+        {
+          chatId: "setup-3",
+          rootDb: db,
+          senderIds: ["master-user"],
+          getIsAdmin: async () => true,
+          select: async () => selections.shift() ?? "",
+          selectMany: async () => ({ kind: "unchanged" }),
+        },
+        {},
+      );
+
+      assert.ok(result.includes("enabled"), `Expected enabled summary, got: ${result}`);
+      assert.ok(result.includes("mention+reply"), `Expected trigger summary, got: ${result}`);
+      assert.ok(result.includes("codex"), `Expected harness summary, got: ${result}`);
+
+      const { rows: [chat] } = await db.sql`
+        SELECT output_visibility, harness, harness_config
+        FROM chats
+        WHERE chat_id = 'setup-3'
+      `;
+      assert.deepEqual(chat.output_visibility, {});
       assert.equal(chat.harness, "codex");
       assert.equal(chat.harness_config.codex.model, "gpt-5.4");
     } finally {

@@ -73,22 +73,22 @@ export default /** @type {defineAction} */ ((x) => x)({
       const multiSelectable = getMultiSelectableOptions(definition, chat);
       if (multiSelectable && typeof selectMany === "function") {
         const helpText = await describeConfigKey(rootDb, chatId, setting, { getActions, compact: true });
-        const selectedIds = await selectMany(
+        const selection = await selectMany(
           helpText,
           multiSelectable.options,
           { deleteOnSelect: true, currentIds: multiSelectable.currentIds },
         );
-        if (selectedIds.length === 0) {
-          if (multiSelectable.currentIds.length === 0) {
-            return "";
-          }
+        if (selection.kind === "cancelled") {
           return helpText;
+        }
+        if (selection.kind === "unchanged") {
+          return "";
         }
         const isAdmin = getIsAdmin ? await getIsAdmin() : true;
         if (!isAdmin) {
           return "Only admins can change settings.";
         }
-        return setConfigValue(rootDb, chatId, setting, selectedIds.join(" "), { senderIds, getActions });
+        return setConfigValue(rootDb, chatId, setting, selection.ids.join(" "), { senderIds, getActions });
       }
       const selectable = getSelectableOptions(definition, chat);
       if (selectable && typeof select === "function") {
