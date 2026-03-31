@@ -258,6 +258,47 @@ type TurnIO = {
   getIsAdmin: () => Promise<boolean>;
 };
 
+type WorkspaceStatus = "ready" | "busy" | "conflicted" | "archived";
+
+type RepoRow = {
+  repo_id: string;
+  name: string;
+  root_path: string;
+  default_base_branch: string;
+  control_chat_id: string;
+  timestamp: string;
+};
+
+type WorkspaceRow = {
+  workspace_id: string;
+  repo_id: string;
+  name: string;
+  branch: string;
+  base_branch: string;
+  worktree_path: string;
+  status: WorkspaceStatus;
+  workspace_chat_id: string;
+  last_test_status: "not_run" | "passed" | "failed";
+  last_commit_oid: string | null;
+  archived_at: string | null;
+  timestamp: string;
+};
+
+type ChatBindingKind = "repo" | "workspace";
+
+type ChatBindingRow = {
+  chat_id: string;
+  binding_kind: ChatBindingKind;
+  repo_id: string | null;
+  workspace_id: string | null;
+  timestamp: string;
+};
+
+type ResolvedChatBinding =
+  | { kind: "unbound" }
+  | { kind: "repo"; repo: RepoRow }
+  | { kind: "workspace"; repo: RepoRow; workspace: WorkspaceRow };
+
 type TurnFacts = {
   isGroup: boolean;
   addressedToBot: boolean;
