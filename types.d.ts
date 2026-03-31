@@ -526,6 +526,12 @@ type HarnessSessionHistoryEntry = {
   title: string | null;
 };
 
+type HarnessForkStackEntry = {
+  id: string;
+  kind: HarnessSessionRef["kind"];
+  label: string | null;
+};
+
 type AgentHarnessParams = {
   session: Session;
   llmConfig: LlmConfig;
@@ -546,6 +552,11 @@ type HarnessCommandContext = {
     archive: import("./store.js").Store['archiveHarnessSession'];
     getHistory: import("./store.js").Store['getHarnessSessionHistory'];
     restore: import("./store.js").Store['restoreHarnessSession'];
+  };
+  sessionForkControl?: {
+    save: import("./store.js").Store['saveHarnessSession'];
+    push: import("./store.js").Store['pushHarnessForkStack'];
+    pop: import("./store.js").Store['popHarnessForkStack'];
   };
 };
 

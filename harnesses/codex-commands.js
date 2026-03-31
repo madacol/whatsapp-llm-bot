@@ -7,15 +7,118 @@ import {
   normalizeCodexPermissionsMode,
   updateCodexConfig,
 } from "./codex-config.js";
+import { openCodexAppServerConnection } from "./codex-app-server-client.js";
 import { contentEvent } from "../outbound-events.js";
 import { handleHarnessSessionCommand } from "./session-commands.js";
+import { errorToString } from "../utils.js";
 
 /**
  * @typedef {{
  *   getAvailableModels: () => Promise<Array<{ id: string, label: string }>>,
  *   cancelActiveQuery: (chatId: string | HarnessSessionRef) => boolean,
+ *   readThread?: (threadId: string, includeTurns: boolean) => Promise<{ thread?: { id?: string, preview?: string, turns?: Array<{ status?: string, items?: Array<{ type?: string, content?: Array<{ type?: string, text?: string }> }> }> } }>,
+ *   forkThread?: (threadId: string) => Promise<{ thread?: { id?: string } }>,
  * }} CodexCommandDeps
  */
+
+/**
+ * @param {string} threadId
+ * @param {boolean} includeTurns
+ * @returns {Promise<{ thread?: { id?: string, preview?: string, turns?: Array<{ status?: string, items?: Array<{ type?: string, content?: Array<{ type?: string, text?: string }> }> }> } }>}
+ */
+async function readCodexThread(threadId, includeTurns) {
+  const connection = await openCodexAppServerConnection({ handleRequest: async () => ({}) });
+  try {
+    return /** @type {Promise<{ thread?: { id?: string, preview?: string, turns?: Array<{ status?: string, items?: Array<{ type?: string, content?: Array<{ type?: string, text?: string }> }> }> } }>} */ (
+      connection.sendRequest("thread/read", { threadId, ...(includeTurns ? { includeTurns: true } : {}) })
+    );
+  } finally {
+    await connection.close();
+  }
+}
+
+/**
+ * @param {string} threadId
+ * @returns {Promise<{ thread?: { id?: string } }>}
+ */
+async function forkCodexThread(threadId) {
+  const connection = await openCodexAppServerConnection({ handleRequest: async () => ({}) });
+  try {
+    return /** @type {Promise<{ thread?: { id?: string } }>} */ (
+      connection.sendRequest("thread/fork", { threadId, ephemeral: false })
+    );
+  } finally {
+    await connection.close();
+  }
+}
+
+/**
+ * @param {{ preview?: string, turns?: Array<{ status?: string, items?: Array<{ type?: string, content?: Array<{ type?: string, text?: string }> }> }> }} thread
+ * @returns {boolean}
+ */
+function hasCompletedTurns(thread) {
+  return Array.isArray(thread.turns) && thread.turns.some((turn) => turn?.status === "completed");
+}
+
+/**
+ * @param {Array<{ type?: string, content?: Array<{ type?: string, text?: string }> }> | undefined} items
+ * @returns {string | null}
+ */
+function getLastUserMessageText(items) {
+  if (!Array.isArray(items)) {
+    return null;
+  }
+  for (let i = items.length - 1; i >= 0; i--) {
+    const item = items[i];
+    if (item?.type !== "userMessage" || !Array.isArray(item.content)) {
+      continue;
+    }
+    const text = item.content
+      .filter((part) => part?.type === "text" && typeof part.text === "string")
+      .map((part) => /** @type {string} */ (part.text).trim())
+      .filter(Boolean)
+      .join(" ");
+    if (text) {
+      return text;
+    }
+  }
+  return null;
+}
+
+/**
+ * @param {string} value
+ * @returns {string}
+ */
+function compactLabel(value) {
+  const normalized = value.trim().replace(/\s+/g, " ");
+  if (normalized.length <= 60) {
+    return normalized;
+  }
+  return normalized.slice(0, 60).trimEnd() + "...";
+}
+
+/**
+ * @param {{ preview?: string, turns?: Array<{ status?: string, items?: Array<{ type?: string, content?: Array<{ type?: string, text?: string }> }> }> }} thread
+ * @returns {string | null}
+ */
+function deriveForkLabel(thread) {
+  if (Array.isArray(thread.turns)) {
+    for (let i = thread.turns.length - 1; i >= 0; i--) {
+      const turn = thread.turns[i];
+      if (turn?.status !== "completed") {
+        continue;
+      }
+      const text = getLastUserMessageText(turn.items);
+      if (text) {
+        return compactLabel(text);
+      }
+    }
+  }
+  if (typeof thread.preview === "string" && thread.preview.trim()) {
+    return compactLabel(thread.preview);
+  }
+  return null;
+}
 
 /**
  * @param {CodexCommandDeps} deps
@@ -32,6 +135,8 @@ export function createCodexCommandHandler(deps) {
  * @returns {Promise<boolean>}
  */
 async function handleCodexHarnessCommand(input, deps) {
+  const loadThread = deps.readThread ?? readCodexThread;
+  const createFork = deps.forkThread ?? forkCodexThread;
   const handledSessionCommand = await handleHarnessSessionCommand({
     command: input.command,
     chatId: input.chatId,
@@ -44,6 +149,59 @@ async function handleCodexHarnessCommand(input, deps) {
   }
 
   const trimmed = input.command.trim();
+
+  if (/^fork$/i.test(trimmed)) {
+    const currentSessionId = input.chatInfo?.harness_session_kind === "codex"
+      ? input.chatInfo.harness_session_id
+      : null;
+    if (!currentSessionId || !input.sessionForkControl) {
+      await input.context.reply(contentEvent("tool-result", "Can't fork yet. Start a Codex session first."));
+      return true;
+    }
+
+    try {
+      const readResult = await loadThread(currentSessionId, true);
+      const thread = readResult.thread ?? {};
+      if (!hasCompletedTurns(thread)) {
+        await input.context.reply(contentEvent("tool-result", "Can't fork yet. Send at least one normal Codex turn first."));
+        return true;
+      }
+
+      const label = deriveForkLabel(thread);
+      const forked = await createFork(currentSessionId);
+      const forkId = forked.thread?.id;
+      if (typeof forkId !== "string" || !forkId) {
+        throw new Error("Codex app server did not return a fork thread id.");
+      }
+
+      await input.sessionForkControl.push(input.chatId, {
+        id: currentSessionId,
+        kind: "codex",
+        label,
+      });
+      await input.sessionForkControl.save(input.chatId, { id: forkId, kind: "codex" });
+      await input.context.reply(contentEvent("tool-result", `Forked${label ? `: ${label}` : ""}. You are now in a side thread. Use \`/back\` to return.`));
+      return true;
+    } catch (error) {
+      await input.context.reply(contentEvent("tool-result", `Codex fork failed: ${errorToString(error)}`));
+      return true;
+    }
+  }
+
+  if (/^back$/i.test(trimmed)) {
+    if (!input.sessionForkControl) {
+      await input.context.reply(contentEvent("tool-result", "No parent fork to return to."));
+      return true;
+    }
+    const parent = await input.sessionForkControl.pop(input.chatId);
+    if (!parent) {
+      await input.context.reply(contentEvent("tool-result", "No parent fork to return to."));
+      return true;
+    }
+    await input.sessionForkControl.save(input.chatId, { id: parent.id, kind: parent.kind });
+    await input.context.reply(contentEvent("tool-result", `Returned to previous thread${parent.label ? `: ${parent.label}` : ""}.`));
+    return true;
+  }
 
   const modelMatch = trimmed.match(/^model(?:\s+(.+))?$/i);
   if (modelMatch) {

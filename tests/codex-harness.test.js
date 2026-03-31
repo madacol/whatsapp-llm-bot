@@ -60,11 +60,13 @@ describe("createCodexHarness", () => {
       supportsSandboxConfig: true,
       supportsModelSelection: true,
       supportsReasoningEffort: false,
-      supportsSessionFork: false,
+      supportsSessionFork: true,
     });
     assert.deepEqual(harness.listSlashCommands(), [
       { name: "clear", description: "Clear the current harness session" },
       { name: "resume", description: "Restore a previously cleared harness session" },
+      { name: "fork", description: "Fork the current Codex thread" },
+      { name: "back", description: "Return to the previous Codex fork parent" },
       { name: "model", description: "Choose or set the Codex model" },
       { name: "sandbox", description: "Alias of /permissions" },
       { name: "permissions", description: "Show or set the Codex permissions mode" },
@@ -101,6 +103,182 @@ describe("createCodexHarness", () => {
 
     assert.equal(handled, true);
     assert.ok(replies[0]?.includes("Codex model set"));
+  });
+
+  it("forks the active Codex session and switches the saved session id", async () => {
+    const harness = createCodexHarness({
+      getAvailableModels: async () => TEST_CODEX_MODELS,
+      readThread: async (threadId, includeTurns) => {
+        assert.equal(threadId, "sess-parent");
+        assert.equal(includeTurns, true);
+        return {
+          thread: {
+            preview: "Debugging sync latency",
+            turns: [
+              {
+                status: "completed",
+                items: [
+                  {
+                    type: "userMessage",
+                    content: [{ type: "text", text: "Debugging sync latency", text_elements: [] }],
+                  },
+                ],
+              },
+            ],
+          },
+        };
+      },
+      forkThread: async (threadId) => {
+        assert.equal(threadId, "sess-parent");
+        return {
+          thread: { id: "sess-forked" },
+        };
+      },
+    });
+    /** @type {Array<{ chatId: string, session: HarnessSessionRef | null }>} */
+    const savedSessions = [];
+    /** @type {Array<{ chatId: string, entry: HarnessForkStackEntry }>} */
+    const pushedEntries = [];
+    /** @type {string[]} */
+    const replies = [];
+
+    const handled = await harness.handleCommand({
+      chatId: "codex-fork-1",
+      chatInfo: /** @type {import("../store.js").ChatRow} */ ({
+        chat_id: "codex-fork-1",
+        harness_session_id: "sess-parent",
+        harness_session_kind: "codex",
+      }),
+      command: "fork",
+      context: /** @type {ExecuteActionContext} */ ({
+        chatId: "codex-fork-1",
+        senderIds: [],
+        content: [],
+        getIsAdmin: async () => true,
+        send: async () => undefined,
+        reply: async (event) => {
+          replies.push(getReplyText(event));
+          return undefined;
+        },
+        reactToMessage: async () => {},
+        select: async () => "",
+        confirm: async () => true,
+      }),
+      sessionForkControl: {
+        save: async (chatId, session) => {
+          savedSessions.push({ chatId, session });
+        },
+        push: async (chatId, entry) => {
+          pushedEntries.push({ chatId, entry });
+        },
+        pop: async () => null,
+      },
+    });
+
+    assert.equal(handled, true);
+    assert.deepEqual(pushedEntries, [{
+      chatId: "codex-fork-1",
+      entry: { id: "sess-parent", kind: "codex", label: "Debugging sync latency" },
+    }]);
+    assert.deepEqual(savedSessions, [{
+      chatId: "codex-fork-1",
+      session: { id: "sess-forked", kind: "codex" },
+    }]);
+    assert.ok(replies[0]?.includes("Forked"));
+    assert.ok(replies[0]?.includes("Debugging sync latency"));
+  });
+
+  it("returns to the previous Codex fork parent on back", async () => {
+    const harness = createCodexHarness({
+      getAvailableModels: async () => TEST_CODEX_MODELS,
+    });
+    /** @type {Array<{ chatId: string, session: HarnessSessionRef | null }>} */
+    const savedSessions = [];
+    /** @type {string[]} */
+    const replies = [];
+
+    const handled = await harness.handleCommand({
+      chatId: "codex-fork-2",
+      command: "back",
+      context: /** @type {ExecuteActionContext} */ ({
+        chatId: "codex-fork-2",
+        senderIds: [],
+        content: [],
+        getIsAdmin: async () => true,
+        send: async () => undefined,
+        reply: async (event) => {
+          replies.push(getReplyText(event));
+          return undefined;
+        },
+        reactToMessage: async () => {},
+        select: async () => "",
+        confirm: async () => true,
+      }),
+      sessionForkControl: {
+        save: async (chatId, session) => {
+          savedSessions.push({ chatId, session });
+        },
+        push: async () => undefined,
+        pop: async () => ({ id: "sess-parent", kind: "codex", label: "Parent thread" }),
+      },
+    });
+
+    assert.equal(handled, true);
+    assert.deepEqual(savedSessions, [{
+      chatId: "codex-fork-2",
+      session: { id: "sess-parent", kind: "codex" },
+    }]);
+    assert.ok(replies[0]?.includes("Returned"));
+    assert.ok(replies[0]?.includes("Parent thread"));
+  });
+
+  it("refuses to fork when the current Codex thread has no completed turns", async () => {
+    const harness = createCodexHarness({
+      getAvailableModels: async () => TEST_CODEX_MODELS,
+      readThread: async () => ({
+        thread: {
+          preview: "",
+          turns: [],
+        },
+      }),
+      forkThread: async () => {
+        throw new Error("forkThread should not be called");
+      },
+    });
+    /** @type {string[]} */
+    const replies = [];
+
+    const handled = await harness.handleCommand({
+      chatId: "codex-fork-3",
+      chatInfo: /** @type {import("../store.js").ChatRow} */ ({
+        chat_id: "codex-fork-3",
+        harness_session_id: "sess-empty",
+        harness_session_kind: "codex",
+      }),
+      command: "fork",
+      context: /** @type {ExecuteActionContext} */ ({
+        chatId: "codex-fork-3",
+        senderIds: [],
+        content: [],
+        getIsAdmin: async () => true,
+        send: async () => undefined,
+        reply: async (event) => {
+          replies.push(getReplyText(event));
+          return undefined;
+        },
+        reactToMessage: async () => {},
+        select: async () => "",
+        confirm: async () => true,
+      }),
+      sessionForkControl: {
+        save: async () => undefined,
+        push: async () => undefined,
+        pop: async () => null,
+      },
+    });
+
+    assert.equal(handled, true);
+    assert.ok(replies[0]?.includes("Can't fork yet"));
   });
 
   it("lets the user choose from valid codex model options when no model is provided", async () => {

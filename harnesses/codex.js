@@ -32,7 +32,7 @@ const CODEX_HARNESS_CAPABILITIES = {
   supportsSandboxConfig: true,
   supportsModelSelection: true,
   supportsReasoningEffort: false,
-  supportsSessionFork: false,
+  supportsSessionFork: true,
 };
 
 /**
@@ -162,6 +162,8 @@ function isLegacyClaudeModel(model) {
  *     steer?: (text: string) => boolean | Promise<boolean>,
  *     interrupt?: () => boolean | Promise<boolean>,
  *   }>,
+ *   readThread?: Parameters<typeof createCodexCommandHandler>[0]["readThread"],
+ *   forkThread?: Parameters<typeof createCodexCommandHandler>[0]["forkThread"],
  * }} CodexHarnessDeps
  */
 
@@ -178,6 +180,8 @@ export function createCodexHarness(deps = {}) {
   const handleCommand = createCodexCommandHandler({
     getAvailableModels: loadAvailableModels,
     cancelActiveQuery: cancel,
+    readThread: deps.readThread,
+    forkThread: deps.forkThread,
   });
 
   return {
@@ -234,6 +238,8 @@ export function createCodexHarness(deps = {}) {
     return [
       { name: "clear", description: "Clear the current harness session" },
       { name: "resume", description: "Restore a previously cleared harness session" },
+      { name: "fork", description: "Fork the current Codex thread" },
+      { name: "back", description: "Return to the previous Codex fork parent" },
       { name: "model", description: "Choose or set the Codex model" },
       { name: "sandbox", description: "Alias of /permissions" },
       { name: "permissions", description: "Show or set the Codex permissions mode" },

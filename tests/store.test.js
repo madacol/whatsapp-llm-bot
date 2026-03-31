@@ -315,5 +315,26 @@ describe("store with injected DB", () => {
       assert.equal(chat.harness_session_history[0].id, "sess-a");
       assert.equal(chat.harness_session_history[0].title, "Debugging payment sync");
     });
+
+    it("pushes and pops the harness fork stack", async () => {
+      await store.createChat("harness-fork-stack-1");
+
+      await store.pushHarnessForkStack("harness-fork-stack-1", { id: "sess-parent", kind: "codex", label: "Parent thread" });
+      await store.pushHarnessForkStack("harness-fork-stack-1", { id: "sess-grandparent", kind: "codex", label: null });
+
+      let stack = await store.getHarnessForkStack("harness-fork-stack-1");
+      assert.deepEqual(stack, [
+        { id: "sess-parent", kind: "codex", label: "Parent thread" },
+        { id: "sess-grandparent", kind: "codex", label: null },
+      ]);
+
+      const popped = await store.popHarnessForkStack("harness-fork-stack-1");
+      assert.deepEqual(popped, { id: "sess-grandparent", kind: "codex", label: null });
+
+      stack = await store.getHarnessForkStack("harness-fork-stack-1");
+      assert.deepEqual(stack, [
+        { id: "sess-parent", kind: "codex", label: "Parent thread" },
+      ]);
+    });
   });
 });
