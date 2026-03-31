@@ -18,6 +18,7 @@ import { buildRunConfig } from "./build-run-config.js";
 import { generateSessionTitle } from "./session-title.js";
 import { resolveOutputVisibility } from "../chat-output-visibility.js";
 import { resolveChatBinding } from "../workspace-resolver.js";
+import { tryHandleWorkspaceCommand } from "../workspace-command-router.js";
 
 const log = createLogger("conversation:runner");
 const PRESENCE_LEASE_TTL_MS = 20_000;
@@ -47,6 +48,19 @@ function isTextBlock(block) {
  */
 function isRepoChatCodingRequest(binding, firstBlock) {
   return binding.kind === "repo"
+    && !!firstBlock
+    && !firstBlock.text.startsWith("!")
+    && !firstBlock.text.startsWith("/");
+}
+
+/**
+ * @param {ResolvedChatBinding} binding
+ * @param {TextContentBlock | undefined} firstBlock
+ * @returns {boolean}
+ */
+function isArchivedWorkspaceCodingRequest(binding, firstBlock) {
+  return binding.kind === "workspace"
+    && binding.workspace.status === "archived"
     && !!firstBlock
     && !firstBlock.text.startsWith("!")
     && !firstBlock.text.startsWith("/");
@@ -148,12 +162,22 @@ export function createConversationRunner({ store, llmClient, getActionsFn, execu
    *   context: ExecuteActionContext,
    *   actions: Action[],
    *   actionResolver: (name: string) => Promise<AppAction | null>,
+   *   resolvedBinding: ResolvedChatBinding,
    * }} input
    * @returns {Promise<void>}
    */
-  async function handleCommandMessage({ chatId, senderIds, content, firstBlock, chatInfo, context, actions, actionResolver }) {
+  async function handleCommandMessage({ chatId, senderIds, content, firstBlock, chatInfo, context, actions, actionResolver, resolvedBinding }) {
     const inputText = firstBlock.text.slice(1).trim();
     const commandText = inputText.toLowerCase();
+
+    if (await tryHandleWorkspaceCommand({
+      store,
+      context,
+      binding: resolvedBinding,
+      inputText,
+    })) {
+      return;
+    }
 
     if (commandText === "cancel") {
       const { harness } = await resolveConversationHarness(chatInfo);
@@ -417,8 +441,26 @@ export function createConversationRunner({ store, llmClient, getActionsFn, execu
       return null;
     }
 
+    if (isArchivedWorkspaceCodingRequest(resolvedBinding, firstBlock)) {
+      await context.reply(contentEvent(
+        "error",
+        "This workspace is archived and no longer accepts work.",
+      ));
+      return null;
+    }
+
     if (firstBlock?.text?.startsWith("!")) {
-      await handleCommandMessage({ chatId, senderIds, content, firstBlock, chatInfo, context, actions, actionResolver });
+      await handleCommandMessage({
+        chatId,
+        senderIds,
+        content,
+        firstBlock,
+        chatInfo,
+        context,
+        actions,
+        actionResolver,
+        resolvedBinding,
+      });
       return null;
     }
 
