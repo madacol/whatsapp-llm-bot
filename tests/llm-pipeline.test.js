@@ -75,7 +75,7 @@ describe("LLM pipeline via createMessageHandler", () => {
     );
   });
 
-  it("rejects freeform LLM work in repo chats", async () => {
+  it("allows freeform LLM work in repo chats", async () => {
     await seedChat("pipe-repo-chat", { enabled: true });
     await store.createRepo({
       name: "pipe-repo",
@@ -83,6 +83,7 @@ describe("LLM pipeline via createMessageHandler", () => {
       defaultBaseBranch: "master",
       controlChatId: "pipe-repo-chat",
     });
+    mockServer.addResponses("Repo chat response!");
 
     const requestCountBefore = mockServer.getRequests().length;
     const { context, responses } = createChatTurn({
@@ -92,13 +93,12 @@ describe("LLM pipeline via createMessageHandler", () => {
     await handleMessage(context);
 
     assert.ok(
-      responses.some((response) => response.text.includes("Repo chats do not accept coding requests")),
-      `Expected repo-chat rejection, got: ${responses.map((response) => response.text).join(" | ")}`,
+      responses.some((response) => response.text.includes("Repo chat response!")),
+      `Expected repo-chat LLM response, got: ${responses.map((response) => response.text).join(" | ")}`,
     );
-    assert.equal(
-      mockServer.getRequests().length,
-      requestCountBefore,
-      "Repo chat freeform should not hit the LLM",
+    assert.ok(
+      mockServer.getRequests().length > requestCountBefore,
+      "Repo chat freeform should hit the LLM",
     );
   });
 
