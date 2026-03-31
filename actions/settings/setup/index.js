@@ -288,6 +288,7 @@ export default /** @type {defineAction} */ ((x) => x)({
       ...(notes.length > 0 ? ["", ...notes] : []),
       "",
       "Use `!c` for advanced settings like prompt, readers, folder, and action toggles.",
+      "Use `!clone <repository_url>` to clone a git repository into the current working folder.",
     ].join("\n");
   },
 });
