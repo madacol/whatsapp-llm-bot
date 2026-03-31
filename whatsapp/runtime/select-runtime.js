@@ -68,6 +68,7 @@ export function getPollCreationData(msg) {
  *   mode: "multi";
   *   idleTimer: ReturnType<typeof setTimeout> | null;
   *   selectedIds: string[];
+  *   hasInteracted: boolean;
   *   settle: (ids: string[], options?: SelectSettlementOptions) => void;
  * }} PendingMultiSelect
  */
@@ -324,8 +325,6 @@ async function decryptAndResolvePollVote(sentPolls, message, sock) {
     })
     .map((option) => option.optionName ?? "");
 
-  if (selectedOptions.length === 0) return null;
-
   let chatId = message.key.remoteJid || pollCreation.key?.remoteJid || "";
   if (isLidUser(chatId)) {
     const phoneNumber = await sock.signalRepository.lidMapping.getPNForLID(chatId);
@@ -355,7 +354,7 @@ export function createSelectRuntime() {
      */
     handlePollVote(event) {
       const entry = pending.get(event.pollMsgId);
-      if (!entry || event.selectedOptions.length === 0) return false;
+      if (!entry) return false;
 
       const selectedIds = event.selectedOptions
         .map((label) => entry.labelToId.get(label) ?? label)
@@ -372,6 +371,7 @@ export function createSelectRuntime() {
         entry.settle(selectedId === CONFIRM_OPTION_ID);
       } else if (entry.mode === "multi") {
         entry.selectedIds = selectedIds;
+        entry.hasInteracted = true;
         if (entry.idleTimer) {
           clearTimeout(entry.idleTimer);
         }
@@ -474,15 +474,8 @@ export function createSelectRuntime() {
         const timeout = config?.timeout ?? SELECT_TIMEOUT_MS;
 
         return new Promise((resolve) => {
-          const timer = setTimeout(() => {
-            const entry = pending.get(promptData.pollMsgId);
-            if (entry?.mode === "multi" && entry.idleTimer) {
-              clearTimeout(entry.idleTimer);
-            }
-            pending.delete(promptData.pollMsgId);
-            settle([]);
-          }, timeout);
-          timer.unref?.();
+          /** @type {PendingMultiSelect | null} */
+          let pendingEntry = null;
 
           /**
            * Complete the pending selection and optionally suppress transport-side effects.
@@ -492,7 +485,7 @@ export function createSelectRuntime() {
            */
           function settle(ids, options = {}) {
             if (!options.suppressEffects) {
-              const isCancelled = ids.length === 0 || (
+              const isCancelled = (!(pendingEntry?.hasInteracted) && ids.length === 0) || (
                 cancelIds !== null
                 && ids.length === 1
                 && cancelIds.has(ids[0] ?? "")
@@ -503,14 +496,27 @@ export function createSelectRuntime() {
             resolve(ids);
           }
 
-          pending.set(promptData.pollMsgId, {
+          const timer = setTimeout(() => {
+            const entry = pending.get(promptData.pollMsgId);
+            if (entry?.mode === "multi" && entry.idleTimer) {
+              clearTimeout(entry.idleTimer);
+            }
+            pending.delete(promptData.pollMsgId);
+            settle([]);
+          }, timeout);
+          timer.unref?.();
+
+          pendingEntry = {
             mode: "multi",
             idleTimer: null,
             selectedIds: [],
+            hasInteracted: false,
             settle,
             timer,
             labelToId: promptData.labelToId,
-          });
+          };
+
+          pending.set(promptData.pollMsgId, pendingEntry);
         });
       };
     },

@@ -79,6 +79,9 @@ export default /** @type {defineAction} */ ((x) => x)({
           { deleteOnSelect: true, currentIds: multiSelectable.currentIds },
         );
         if (selectedIds.length === 0) {
+          if (multiSelectable.currentIds.length === 0) {
+            return "";
+          }
           return helpText;
         }
         const isAdmin = getIsAdmin ? await getIsAdmin() : true;
