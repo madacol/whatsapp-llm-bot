@@ -394,7 +394,11 @@ describe("per-chat model selection", () => {
         { setting: "show" },
       );
 
-      assert.ok(promptText?.includes("*Show*"), `expected setting title, got: ${promptText}`);
+      assert.equal(
+        promptText,
+        "*Extra outputs*\nChoose which extra agent progress outputs are shown in chat.",
+        `expected concise show prompt, got: ${promptText}`,
+      );
       assert.deepEqual(
         pickerOptions,
         [

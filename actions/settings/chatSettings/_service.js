@@ -993,6 +993,10 @@ export async function describeConfigKey(rootDb, chatId, key, extra) {
     return `Unknown config key \`${key}\`.\nAvailable keys: ${CONFIG_KEYS.join(", ")}`;
   }
 
+  if (extra.compact && definition.key === "show") {
+    return "*Extra outputs*\nChoose which extra agent progress outputs are shown in chat.";
+  }
+
   const chat = await getChatOrThrow(rootDb, chatId);
   const current = await formatCurrentValue(chat, definition, extra);
   const options = getDefinitionOptions(definition);
