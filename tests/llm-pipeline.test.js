@@ -75,6 +75,33 @@ describe("LLM pipeline via createMessageHandler", () => {
     );
   });
 
+  it("rejects freeform LLM work in repo chats", async () => {
+    await seedChat("pipe-repo-chat", { enabled: true });
+    await store.createRepo({
+      name: "pipe-repo",
+      rootPath: "/repo/main",
+      defaultBaseBranch: "master",
+      controlChatId: "pipe-repo-chat",
+    });
+
+    const requestCountBefore = mockServer.getRequests().length;
+    const { context, responses } = createChatTurn({
+      chatId: "pipe-repo-chat",
+      content: [{ type: "text", text: "implement retry logic" }],
+    });
+    await handleMessage(context);
+
+    assert.ok(
+      responses.some((response) => response.text.includes("Repo chats do not accept coding requests")),
+      `Expected repo-chat rejection, got: ${responses.map((response) => response.text).join(" | ")}`,
+    );
+    assert.equal(
+      mockServer.getRequests().length,
+      requestCountBefore,
+      "Repo chat freeform should not hit the LLM",
+    );
+  });
+
   it("tool call → action → autoContinue → second LLM call", async () => {
     await seedChat("pipe-2", { enabled: true });
     // Tool call output is now always visible (debug mode no longer gates it)

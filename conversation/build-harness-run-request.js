@@ -47,6 +47,7 @@ export function buildExternalSystemPrompt(persona, chatInfo, systemPromptSuffix,
  *   hooks: AgentIOHooks,
  *   systemPromptSuffix: string,
  *   harnessName: string,
+ *   resolvedBinding?: ResolvedChatBinding,
  *   bufferedTexts?: string[],
  * }} input
  * @returns {Promise<AgentHarnessParams>}
@@ -70,6 +71,7 @@ export async function buildHarnessRunRequest({
   hooks,
   systemPromptSuffix,
   harnessName,
+  resolvedBinding,
   bufferedTexts = [],
 }) {
   const toolNames = persona?.allowedActions ?? null;
@@ -127,6 +129,6 @@ export async function buildHarnessRunRequest({
     messages,
     mediaRegistry,
     hooks,
-    runConfig: buildRunConfig(chatId, chatInfo, chatName, harnessName),
+    runConfig: buildRunConfig(chatId, chatInfo, chatName, harnessName, resolvedBinding),
   };
 }
