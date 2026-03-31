@@ -27,6 +27,7 @@ const log = createLogger("index");
  *   llmClient: LlmClient,
  *   getActionsFn: typeof getActions,
  *   executeActionFn: typeof executeAction,
+ *   transport?: ChatTransport,
  * }} MessageHandlerDeps
  */
 
@@ -35,12 +36,13 @@ const log = createLogger("index");
  * @param {MessageHandlerDeps} deps
  * @returns {{ handleMessage: (turn: ChatTurn) => Promise<void> }}
  */
-export function createMessageHandler({ store, llmClient, getActionsFn, executeActionFn }) {
+export function createMessageHandler({ store, llmClient, getActionsFn, executeActionFn, transport }) {
   return createConversationRunner({
     store,
     llmClient,
     getActionsFn,
     executeActionFn,
+    transport,
   });
 }
 
@@ -72,21 +74,21 @@ if (!process.env.TESTING) {
 
   const store = await initStore();
   const llmClient = createLlmClient();
+  const transport = await createWhatsAppTransport().catch(async (error) => {
+      log.error("Initialization error:", error);
+      await store.closeDb();
+      process.exit(1);
+    });
 
   const { handleMessage } = createMessageHandler({
     store,
     llmClient,
     getActionsFn: getActions,
     executeActionFn: executeAction,
+    transport,
   });
 
   await startHtmlServer(config.html_server_port, getRootDb());
-
-  const transport = await createWhatsAppTransport().catch(async (error) => {
-      log.error("Initialization error:", error);
-      await store.closeDb();
-      process.exit(1);
-    });
 
   await transport.start(handleMessage).catch(async (error) => {
     log.error("Initialization error:", error);

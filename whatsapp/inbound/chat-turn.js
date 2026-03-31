@@ -109,6 +109,24 @@ function extractSenderIds(key) {
 }
 
 /**
+ * Extract full sender JIDs from a Baileys message key.
+ * The first entry is the primary participant/remote JID; later entries are
+ * secondary addressing forms such as LID identifiers.
+ * @param {BaileysMessage["key"] & { participantLid?: string, participantPid?: string, senderLid?: string, senderPid?: string }} key
+ * @returns {string[]}
+ */
+function extractSenderJids(key) {
+  return [
+    key.participant || key.remoteJid || "unknown@s.whatsapp.net",
+    key.participantLid
+      || key.participantPid
+      || key.senderLid
+      || key.senderPid
+      || null,
+  ].filter(/** @returns {jid is string} */ (jid) => typeof jid === "string");
+}
+
+/**
  * Convert a Baileys timestamp into a Date.
  * @param {BaileysMessage["messageTimestamp"]} value
  * @returns {Date}
@@ -437,6 +455,7 @@ export async function buildIncomingTurn(
 
   const key = /** @type {BaileysMessage["key"] & { participantLid?: string, participantPid?: string, senderLid?: string, senderPid?: string }} */ (turnMessage.key);
   const senderIds = extractSenderIds(key);
+  const senderJids = extractSenderJids(key);
   const isGroup = chatId.endsWith("@g.us");
   const selfIds = getSelfIds(sock);
   const addressedToBot = detectBotMention(content, selfIds);
@@ -460,6 +479,7 @@ export async function buildIncomingTurn(
   const turn = {
     chatId,
     senderIds,
+    senderJids,
     senderName: turnMessage.pushName || "",
     chatName,
     content: normalizedContent,

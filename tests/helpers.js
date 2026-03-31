@@ -177,6 +177,7 @@ export function createChatTurn(overrides = {}) {
   const context = {
     chatId: overrides.chatId ?? "test-chat",
     senderIds: overrides.senderIds ?? ["master-user"],
+    senderJids: overrides.senderJids ?? ["master-user@s.whatsapp.net"],
     senderName: overrides.senderName ?? "Test User",
     chatName: overrides.chatName,
     content,

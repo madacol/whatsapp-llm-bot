@@ -134,6 +134,9 @@ function normalizeWorkspaceRow(raw) {
   }
   const timestamp = normalizeTimestampValue(raw.timestamp);
   const archivedAt = raw.archived_at === null ? null : normalizeTimestampValue(raw.archived_at);
+  const conflictedFiles = Array.isArray(raw.conflicted_files)
+    ? raw.conflicted_files.filter((value) => typeof value === "string")
+    : [];
   if (
     typeof raw.workspace_id !== "string"
     || typeof raw.repo_id !== "string"
@@ -146,6 +149,7 @@ function normalizeWorkspaceRow(raw) {
     || !isWorkspaceTestStatus(raw.last_test_status)
     || (raw.last_commit_oid !== null && typeof raw.last_commit_oid !== "string")
     || (raw.archived_at !== null && !archivedAt)
+    || conflictedFiles.length !== (Array.isArray(raw.conflicted_files) ? raw.conflicted_files.length : 0)
     || !timestamp
   ) {
     return null;
@@ -161,6 +165,7 @@ function normalizeWorkspaceRow(raw) {
     workspace_chat_id: raw.workspace_chat_id,
     last_test_status: raw.last_test_status,
     last_commit_oid: raw.last_commit_oid,
+    conflicted_files: conflictedFiles,
     archived_at: archivedAt,
     timestamp,
   };
@@ -316,6 +321,7 @@ export async function initStore(injectedDb){
             workspace_chat_id VARCHAR(50) NOT NULL REFERENCES chats(chat_id) UNIQUE,
             last_test_status TEXT NOT NULL DEFAULT 'not_run',
             last_commit_oid TEXT,
+            conflicted_files JSONB NOT NULL DEFAULT '[]',
             archived_at TIMESTAMP,
             timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             UNIQUE (repo_id, name)
@@ -506,6 +512,7 @@ export async function initStore(injectedDb){
       await Promise.all([
         db.sql`ALTER TABLE messages ADD COLUMN IF NOT EXISTS embedding vector`,
         db.sql`ALTER TABLE messages ADD COLUMN IF NOT EXISTS search_text tsvector`,
+        db.sql`ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS conflicted_files JSONB NOT NULL DEFAULT '[]'`,
       ]);
       await db.sql`
         CREATE TABLE IF NOT EXISTS memories (
@@ -833,7 +840,56 @@ export async function initStore(injectedDb){
         const { rows: [row] } = await db.sql`
           UPDATE workspaces
           SET status = 'archived',
+              conflicted_files = '[]'::jsonb,
               archived_at = COALESCE(archived_at, CURRENT_TIMESTAMP)
+          WHERE workspace_id = ${workspaceId}
+          RETURNING *
+        `;
+        return normalizeWorkspaceRow(row);
+      },
+
+      /**
+       * @param {string} workspaceId
+       * @param {WorkspaceStatus} status
+       * @param {{ conflictedFiles?: string[] }} [options]
+       * @returns {Promise<WorkspaceRow | null>}
+       */
+      async setWorkspaceStatus (workspaceId, status, options = {}) {
+        const conflictedFiles = options.conflictedFiles ?? [];
+        const { rows: [row] } = await db.sql`
+          UPDATE workspaces
+          SET status = ${status},
+              conflicted_files = ${JSON.stringify(conflictedFiles)}::jsonb
+          WHERE workspace_id = ${workspaceId}
+          RETURNING *
+        `;
+        return normalizeWorkspaceRow(row);
+      },
+
+      /**
+       * @param {string} workspaceId
+       * @param {WorkspaceRow["last_test_status"]} lastTestStatus
+       * @returns {Promise<WorkspaceRow | null>}
+       */
+      async updateWorkspaceLastTestStatus (workspaceId, lastTestStatus) {
+        const { rows: [row] } = await db.sql`
+          UPDATE workspaces
+          SET last_test_status = ${lastTestStatus}
+          WHERE workspace_id = ${workspaceId}
+          RETURNING *
+        `;
+        return normalizeWorkspaceRow(row);
+      },
+
+      /**
+       * @param {string} workspaceId
+       * @param {string | null} lastCommitOid
+       * @returns {Promise<WorkspaceRow | null>}
+       */
+      async updateWorkspaceLastCommitOid (workspaceId, lastCommitOid) {
+        const { rows: [row] } = await db.sql`
+          UPDATE workspaces
+          SET last_commit_oid = ${lastCommitOid}
           WHERE workspace_id = ${workspaceId}
           RETURNING *
         `;

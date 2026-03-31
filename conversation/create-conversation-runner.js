@@ -19,6 +19,7 @@ import { generateSessionTitle } from "./session-title.js";
 import { resolveOutputVisibility } from "../chat-output-visibility.js";
 import { resolveChatBinding } from "../workspace-resolver.js";
 import { tryHandleWorkspaceCommand } from "../workspace-command-router.js";
+import { createWorkspaceControl } from "../workspace-control.js";
 
 const log = createLogger("conversation:runner");
 const PRESENCE_LEASE_TTL_MS = 20_000;
@@ -100,6 +101,7 @@ async function resolveConversationHarness(chatInfo) {
  *   llmClient: LlmClient,
  *   getActionsFn: typeof import("../actions.js").getActions,
  *   executeActionFn: typeof import("../actions.js").executeAction,
+ *   transport?: ChatTransport,
  * }} ConversationRunnerDeps
  */
 
@@ -108,7 +110,7 @@ async function resolveConversationHarness(chatInfo) {
  * @param {ConversationRunnerDeps} deps
  * @returns {{ handleMessage: (turn: ChatTurn) => Promise<void> }}
  */
-export function createConversationRunner({ store, llmClient, getActionsFn, executeActionFn }) {
+export function createConversationRunner({ store, llmClient, getActionsFn, executeActionFn, transport }) {
   const {
     addMessage,
     updateToolMessage,
@@ -124,6 +126,7 @@ export function createConversationRunner({ store, llmClient, getActionsFn, execu
   } = store;
 
   const runCoordinator = createHarnessRunCoordinator();
+  const workspaceControl = createWorkspaceControl({ store, transport });
 
   /**
    * Archive the active harness session, attaching a generated title when possible.
@@ -171,10 +174,10 @@ export function createConversationRunner({ store, llmClient, getActionsFn, execu
     const commandText = inputText.toLowerCase();
 
     if (await tryHandleWorkspaceCommand({
-      store,
       context,
       binding: resolvedBinding,
       inputText,
+      workspaceControl,
     })) {
       return;
     }
