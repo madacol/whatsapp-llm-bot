@@ -11,6 +11,7 @@ export function createMessageActionContext(turn) {
   return {
     chatId: turn.chatId,
     senderIds: turn.senderIds,
+    senderJids: turn.senderJids,
     content: turn.content,
     getIsAdmin: turn.io.getIsAdmin,
     send: turn.io.send,
@@ -32,6 +33,7 @@ export function createSilentActionContext(chatId, senderIds) {
   return {
     chatId,
     senderIds,
+    senderJids: [],
     content: [],
     getIsAdmin: async () => true,
     send: async (_event) => undefined,

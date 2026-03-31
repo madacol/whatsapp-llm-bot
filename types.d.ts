@@ -280,6 +280,7 @@ type WorkspaceRow = {
   workspace_chat_id: string;
   last_test_status: "not_run" | "passed" | "failed";
   last_commit_oid: string | null;
+  conflicted_files: string[];
   archived_at: string | null;
   timestamp: string;
 };
@@ -310,11 +311,15 @@ type ChatTransport = {
   start: (onTurn: (turn: ChatTurn) => Promise<void>) => Promise<void>;
   stop: () => Promise<void>;
   sendText: (chatId: string, text: string) => Promise<void>;
+  createGroup?: (subject: string, participants: string[]) => Promise<{ chatId: string, subject: string }>;
+  renameGroup?: (chatId: string, subject: string) => Promise<void>;
+  setAnnouncementOnly?: (chatId: string, enabled: boolean) => Promise<void>;
 };
 
 type ChatTurn = {
   chatId: string;
   senderIds: string[];
+  senderJids?: string[];
   senderName: string;
   chatName?: string;
   content: IncomingContentBlock[];
@@ -327,6 +332,7 @@ type ChatTurn = {
 type ExecuteActionContext = {
   chatId: string;
   senderIds: string[];
+  senderJids?: string[];
   content: IncomingContentBlock[];
   getIsAdmin: () => Promise<boolean>;
   send: (event: OutboundEvent) => Promise<MessageHandle | undefined>;

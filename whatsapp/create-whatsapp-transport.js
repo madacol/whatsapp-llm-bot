@@ -13,6 +13,9 @@ const log = createLogger("whatsapp");
  *   start: (onTurn: (turn: ChatTurn) => Promise<void>) => Promise<void>;
  *   stop: () => Promise<void>;
  *   sendText: (chatId: string, text: string) => Promise<void>;
+ *   createGroup: (subject: string, participants: string[]) => Promise<{ chatId: string, subject: string }>;
+ *   renameGroup: (chatId: string, subject: string) => Promise<void>;
+ *   setAnnouncementOnly: (chatId: string, enabled: boolean) => Promise<void>;
  * }} ChatTransport
  */
 
@@ -134,6 +137,37 @@ export async function createWhatsAppTransport() {
 
     async sendText(chatId, text) {
       await connectionSupervisor.sendText(chatId, text);
+    },
+
+    async createGroup(subject, participants) {
+      const sock = currentSocket;
+      if (!sock) {
+        throw new Error("WhatsApp transport has not been started");
+      }
+      const metadata = await sock.groupCreate(subject, participants);
+      if (typeof metadata.id !== "string") {
+        throw new Error("Baileys groupCreate returned no group id.");
+      }
+      return {
+        chatId: metadata.id,
+        subject: typeof metadata.subject === "string" ? metadata.subject : subject,
+      };
+    },
+
+    async renameGroup(chatId, subject) {
+      const sock = currentSocket;
+      if (!sock) {
+        throw new Error("WhatsApp transport has not been started");
+      }
+      await sock.groupUpdateSubject(chatId, subject);
+    },
+
+    async setAnnouncementOnly(chatId, enabled) {
+      const sock = currentSocket;
+      if (!sock) {
+        throw new Error("WhatsApp transport has not been started");
+      }
+      await sock.groupSettingUpdate(chatId, enabled ? "announcement" : "not_announcement");
     },
   };
 }

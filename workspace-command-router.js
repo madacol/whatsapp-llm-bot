@@ -1,14 +1,21 @@
 import { contentEvent } from "./outbound-events.js";
-import {
-  archiveWorkspaceById,
-  formatWorkspaceStatus,
-  getWorkspaceForArchiveByName,
-  getWorkspaceForCurrentArchive,
-  listRepoWorkspaces,
-} from "./workspace-service.js";
 
 /**
- * @typedef {import("./store.js").Store} Store
+ * @typedef {{
+ *   list: (chatId: string) => Promise<string>;
+ *   create: (context: ExecuteActionContext, workspaceName: string, explicitBaseBranch?: string) => Promise<string>;
+ *   status: (chatId: string) => Promise<string>;
+ *   diff: (chatId: string) => Promise<string>;
+ *   test: (chatId: string) => Promise<string>;
+ *   commit: (chatId: string, message: string) => Promise<string>;
+ *   archiveByName: (repoChatId: string, workspaceName: string) => Promise<string>;
+ *   archiveCurrent: (workspaceChatId: string) => Promise<string>;
+ *   merge: (workspaceChatId: string) => Promise<string>;
+ *   showConflict: (workspaceChatId: string) => Promise<string>;
+ *   resolveConflicts: (workspaceChatId: string) => Promise<string>;
+ *   abortMerge: (workspaceChatId: string) => Promise<string>;
+ *   getState: (workspaceChatId: string) => Promise<{ archived: boolean, conflicted: boolean, busy: boolean }>;
+ * }} WorkspaceControl
  */
 
 /**
@@ -28,6 +35,25 @@ function parseCommandText(inputText) {
     name: trimmed.slice(0, firstSpace).toLowerCase(),
     argsText: trimmed.slice(firstSpace + 1).trim(),
     lowered: trimmed.toLowerCase(),
+  };
+}
+
+/**
+ * @param {string} argsText
+ * @returns {{ workspaceName: string, explicitBaseBranch?: string } | null}
+ */
+function parseNewArgs(argsText) {
+  const trimmed = argsText.trim();
+  if (!trimmed) {
+    return null;
+  }
+  const match = trimmed.match(/^([A-Za-z0-9_-]+)(?:\s+from\s+(.+))?$/i);
+  if (!match?.[1]) {
+    return null;
+  }
+  return {
+    workspaceName: match[1],
+    ...(typeof match[2] === "string" && match[2].trim() ? { explicitBaseBranch: match[2].trim() } : {}),
   };
 }
 
@@ -55,104 +81,151 @@ function isRepoOnlyCommand(loweredCommandText) {
 }
 
 /**
+ * @param {ExecuteActionContext} context
+ * @param {string} message
+ * @returns {Promise<void>}
+ */
+async function replyToolResult(context, message) {
+  await context.reply(contentEvent("tool-result", message));
+}
+
+/**
+ * @param {ExecuteActionContext} context
+ * @param {string} message
+ * @returns {Promise<void>}
+ */
+async function replyError(context, message) {
+  await context.reply(contentEvent("error", message));
+}
+
+/**
  * @param {{
- *   store: Store,
  *   context: ExecuteActionContext,
  *   binding: ResolvedChatBinding,
  *   inputText: string,
+ *   workspaceControl: WorkspaceControl,
  * }} input
  * @returns {Promise<boolean>}
  */
-export async function tryHandleWorkspaceCommand({ store, context, binding, inputText }) {
+export async function tryHandleWorkspaceCommand({ context, binding, inputText, workspaceControl }) {
   const { name, argsText, lowered } = parseCommandText(inputText);
 
   if (!name) {
     return false;
   }
 
-  if (binding.kind === "repo") {
-    if (isWorkspaceOnlyCommand(lowered)) {
-      await context.reply(contentEvent("error", "Workspace commands must be run inside a workspace chat."));
-      return true;
-    }
-
-    if (name === "list" && !argsText) {
-      const result = await listRepoWorkspaces(store, context.chatId);
-      await context.reply(contentEvent("tool-result", result));
-      return true;
-    }
-
-    if (name === "new") {
-      await context.reply(contentEvent(
-        "warning",
-        "Workspace creation is not wired yet. The workspace data model is in place, but workspace-chat creation still needs WhatsApp group primitives.",
-      ));
-      return true;
-    }
-
-    if (name === "archive") {
-      if (!argsText) {
-        await context.reply(contentEvent("error", "Use `!archive <name>` in the repo chat."));
+  try {
+    if (binding.kind === "repo") {
+      if (isWorkspaceOnlyCommand(lowered)) {
+        await replyError(context, "Workspace commands must be run inside a workspace chat.");
         return true;
       }
-      const workspace = await getWorkspaceForArchiveByName(store, context.chatId, argsText);
-      if (!workspace) {
-        await context.reply(contentEvent("error", `Workspace \`${argsText}\` does not exist.`));
+
+      if (name === "list" && !argsText) {
+        await replyToolResult(context, await workspaceControl.list(context.chatId));
         return true;
       }
-      if (workspace.status === "archived") {
-        await context.reply(contentEvent("tool-result", `Workspace \`${workspace.name}\` is already archived.`));
+
+      if (name === "new") {
+        const parsed = parseNewArgs(argsText);
+        if (!parsed) {
+          await replyError(context, "Usage: `!new <name>` or `!new <name> from <base>`.");
+          return true;
+        }
+        await replyToolResult(
+          context,
+          await workspaceControl.create(context, parsed.workspaceName, parsed.explicitBaseBranch),
+        );
         return true;
       }
-      const confirmed = await context.confirm(
-        `Archive workspace \`${workspace.name}\`?\nThis will freeze chat \`${workspace.branch}\` and stop new work there.`,
-      );
-      if (!confirmed) {
-        await context.reply(contentEvent("tool-result", "Archive cancelled."));
+
+      if (name === "archive") {
+        if (!argsText) {
+          await replyError(context, "Use `!archive <name>` in the repo chat.");
+          return true;
+        }
+        const confirmed = await context.confirm(
+          `Archive workspace \`${argsText}\`?\nThis will freeze its workspace chat and stop new work there.`,
+        );
+        if (!confirmed) {
+          await replyToolResult(context, "Archive cancelled.");
+          return true;
+        }
+        await replyToolResult(context, await workspaceControl.archiveByName(context.chatId, argsText));
         return true;
       }
-      await archiveWorkspaceById(store, workspace.workspace_id);
-      await context.reply(contentEvent("tool-result", `Archived workspace \`${workspace.name}\`.`));
-      return true;
+
+      return false;
     }
 
-    return false;
-  }
-
-  if (binding.kind === "workspace") {
-    if (isRepoOnlyCommand(lowered) || (name === "archive" && !!argsText)) {
-      await context.reply(contentEvent("error", "Repo lifecycle commands must be run inside the repo chat."));
-      return true;
-    }
-
-    if (name === "status" && !argsText) {
-      const result = await formatWorkspaceStatus(store, context.chatId);
-      await context.reply(contentEvent("tool-result", result));
-      return true;
-    }
-
-    if (name === "archive" && !argsText) {
-      const workspace = await getWorkspaceForCurrentArchive(store, context.chatId);
-      if (workspace.status === "archived") {
-        await context.reply(contentEvent("tool-result", `Workspace \`${workspace.name}\` is already archived.`));
+    if (binding.kind === "workspace") {
+      if (isRepoOnlyCommand(lowered) || (name === "archive" && !!argsText)) {
+        await replyError(context, "Repo lifecycle commands must be run inside the repo chat.");
         return true;
       }
-      const confirmed = await context.confirm(
-        `Archive this workspace?\nThis will freeze \`${workspace.branch}\` and stop new work here.`,
-      );
-      if (!confirmed) {
-        await context.reply(contentEvent("tool-result", "Archive cancelled."));
+
+      const state = await workspaceControl.getState(context.chatId);
+      if (state.busy && name !== "status") {
+        await replyError(context, "Workspace is busy.\nUse `!cancel` or wait for the current task to finish.");
         return true;
       }
-      await archiveWorkspaceById(store, workspace.workspace_id);
-      await context.reply(contentEvent("tool-result", `Archived workspace \`${workspace.name}\`.`));
-      return true;
-    }
+      if (state.archived && name !== "status") {
+        await replyError(context, "This workspace is archived and no longer accepts work.");
+        return true;
+      }
+      if (state.conflicted && !["status", "show conflict", "resolve conflicts", "abort merge", "archive"].includes(lowered)) {
+        await replyError(context, "This workspace has merge conflicts.\nUse `!show conflict`, `!resolve conflicts`, or `!abort merge`.");
+        return true;
+      }
 
-    if (binding.workspace.status === "archived" && name !== "status") {
-      await context.reply(contentEvent("error", "This workspace is archived and no longer accepts work."));
-      return true;
+      if (name === "status" && !argsText) {
+        await replyToolResult(context, await workspaceControl.status(context.chatId));
+        return true;
+      }
+      if (name === "diff" && !argsText) {
+        await replyToolResult(context, await workspaceControl.diff(context.chatId));
+        return true;
+      }
+      if (name === "test" && !argsText) {
+        await replyToolResult(context, await workspaceControl.test(context.chatId));
+        return true;
+      }
+      if (name === "commit") {
+        await replyToolResult(context, await workspaceControl.commit(context.chatId, argsText));
+        return true;
+      }
+      if (name === "merge" && !argsText) {
+        await replyToolResult(context, await workspaceControl.merge(context.chatId));
+        return true;
+      }
+      if (lowered === "show conflict") {
+        await replyToolResult(context, await workspaceControl.showConflict(context.chatId));
+        return true;
+      }
+      if (lowered === "resolve conflicts") {
+        await replyToolResult(context, await workspaceControl.resolveConflicts(context.chatId));
+        return true;
+      }
+      if (lowered === "abort merge") {
+        await replyToolResult(context, await workspaceControl.abortMerge(context.chatId));
+        return true;
+      }
+      if (name === "archive" && !argsText) {
+        const confirmed = await context.confirm(
+          "Archive this workspace?\nThis will freeze the workspace chat and stop new work here.",
+        );
+        if (!confirmed) {
+          await replyToolResult(context, "Archive cancelled.");
+          return true;
+        }
+        await replyToolResult(context, await workspaceControl.archiveCurrent(context.chatId));
+        return true;
+      }
     }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    await replyError(context, message);
+    return true;
   }
 
   return false;
