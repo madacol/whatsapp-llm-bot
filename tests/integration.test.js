@@ -484,7 +484,7 @@ describe("Scenario 12: Tool call display is always verbose", () => {
       `Should show usage info, got: ${r.raw.map(x => `${x.source}:${x.text}`).join(" | ")}`);
   });
 
-  it("hides tool progress when show overrides disable it", async () => {
+  it("shows a compact tool summary when show overrides disable full tool activity", async () => {
     const chat = await t.chat("s12-show-off", {
       enabled: true,
       outputVisibility: { tools: false },
@@ -494,8 +494,8 @@ describe("Scenario 12: Tool call display is always verbose", () => {
     });
 
     assert.ok(r.raw.some(x => x.text.includes("Final answer")), "Should still show the final LLM reply");
-    assert.ok(!r.raw.some(x => x.source === "tool-call"),
-      `Should hide command/tool-call progress, got: ${r.raw.map(x => `${x.source}:${x.text}`).join(" | ")}`);
+    assert.ok(r.raw.some(x => x.source === "plain" && x.text.includes("🔧run_javascript")),
+      `Should show compact tool summary, got: ${r.raw.map(x => `${x.source}:${x.text}`).join(" | ")}`);
     assert.ok(!r.raw.some(x => x.source === "tool-result" && !x.text.includes("Final answer")),
       `Should hide intermediate tool results, got: ${r.raw.map(x => `${x.source}:${x.text}`).join(" | ")}`);
   });

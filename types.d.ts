@@ -123,7 +123,7 @@ type ContentBlock = IncomingContentBlock | ToolCallContentBlock;
 
   type ChatMessage = SystemMessage | Message;
 
-type MessageSource = "llm" | "tool-call" | "tool-result" | "error" | "warning" | "usage" | "memory";
+type MessageSource = "llm" | "tool-call" | "tool-result" | "error" | "warning" | "usage" | "memory" | "plain";
 
 // WhatsApp Service Types
 
