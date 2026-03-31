@@ -29,6 +29,7 @@ const log = createLogger("store");
  *   harness_session_id: string | null;
  *   harness_session_kind: HarnessSessionRef["kind"] | null;
  *   harness_session_history: HarnessSessionHistoryEntry[];
+ *   harness_fork_stack: HarnessForkStackEntry[];
  *   timestamp: string;
  * }} ChatRow
  *
@@ -38,6 +39,12 @@ const log = createLogger("store");
  *   cleared_at: string;
  *   title: string | null;
  * }} HarnessSessionHistoryEntry
+ *
+ * @typedef {{
+ *   id: string;
+ *   kind: HarnessSessionRef["kind"];
+ *   label: string | null;
+ * }} HarnessForkStackEntry
  *
  * @typedef {{
  *   message_id: number;
@@ -99,6 +106,40 @@ function normalizeHarnessSessionHistory(raw) {
 }
 
 /**
+ * Normalize one persisted harness fork stack entry from JSONB.
+ * @param {unknown} raw
+ * @returns {HarnessForkStackEntry | null}
+ */
+function normalizeHarnessForkStackEntry(raw) {
+  if (!raw || typeof raw !== "object") {
+    return null;
+  }
+  const entry = /** @type {{ id?: unknown, kind?: unknown, label?: unknown }} */ (raw);
+  if (typeof entry.id !== "string" || typeof entry.kind !== "string") {
+    return null;
+  }
+  return {
+    id: entry.id,
+    kind: /** @type {HarnessSessionRef["kind"]} */ (entry.kind),
+    label: typeof entry.label === "string" && entry.label.trim() ? entry.label : null,
+  };
+}
+
+/**
+ * Normalize a JSONB array of harness fork stack entries.
+ * @param {unknown} raw
+ * @returns {HarnessForkStackEntry[]}
+ */
+function normalizeHarnessForkStack(raw) {
+  if (!Array.isArray(raw)) {
+    return [];
+  }
+  return raw
+    .map(normalizeHarnessForkStackEntry)
+    .filter(/** @returns {entry is HarnessForkStackEntry} */ (entry) => entry !== null);
+}
+
+/**
  * @param {PGlite} [injectedDb]
  */
 export async function initStore(injectedDb){
@@ -157,6 +198,7 @@ export async function initStore(injectedDb){
         db.sql`ALTER TABLE chats ADD COLUMN IF NOT EXISTS harness_session_id TEXT`,
         db.sql`ALTER TABLE chats ADD COLUMN IF NOT EXISTS harness_session_kind TEXT`,
         db.sql`ALTER TABLE chats ADD COLUMN IF NOT EXISTS harness_session_history JSONB DEFAULT '[]'`,
+        db.sql`ALTER TABLE chats ADD COLUMN IF NOT EXISTS harness_fork_stack JSONB DEFAULT '[]'`,
         db.sql`ALTER TABLE chats ADD COLUMN IF NOT EXISTS sdk_model TEXT`,
         db.sql`ALTER TABLE chats ADD COLUMN IF NOT EXISTS sdk_effort TEXT`,
         db.sql`ALTER TABLE chats ADD COLUMN IF NOT EXISTS sdk_session_id TEXT`,
@@ -502,6 +544,57 @@ export async function initStore(injectedDb){
           SET harness_session_id = ${entry.id},
               harness_session_kind = ${entry.kind},
               harness_session_history = ${JSON.stringify(history)}
+          WHERE chat_id = ${chatId}
+        `;
+        return entry;
+      },
+
+      /**
+       * Get the persisted harness fork stack for a chat.
+       * @param {ChatRow['chat_id']} chatId
+       * @returns {Promise<HarnessForkStackEntry[]>}
+       */
+      async getHarnessForkStack (chatId) {
+        const { rows: [row] } = await db.sql`SELECT harness_fork_stack FROM chats WHERE chat_id = ${chatId}`;
+        const chat = /** @type {Pick<ChatRow, 'harness_fork_stack'> | undefined} */ (row);
+        if (!chat) return [];
+        return normalizeHarnessForkStack(chat.harness_fork_stack);
+      },
+
+      /**
+       * Push one parent session reference onto the harness fork stack.
+       * @param {ChatRow['chat_id']} chatId
+       * @param {HarnessForkStackEntry} entry
+       * @returns {Promise<void>}
+       */
+      async pushHarnessForkStack (chatId, entry) {
+        const { rows: [row] } = await db.sql`SELECT harness_fork_stack FROM chats WHERE chat_id = ${chatId}`;
+        const chat = /** @type {Pick<ChatRow, 'harness_fork_stack'> | undefined} */ (row);
+        const stack = normalizeHarnessForkStack(chat?.harness_fork_stack);
+        const normalizedEntry = normalizeHarnessForkStackEntry(entry);
+        if (!normalizedEntry) {
+          throw new Error("Invalid harness fork stack entry");
+        }
+        await db.sql`
+          UPDATE chats
+          SET harness_fork_stack = ${JSON.stringify([...stack, normalizedEntry])}
+          WHERE chat_id = ${chatId}
+        `;
+      },
+
+      /**
+       * Pop the most recent parent session reference from the harness fork stack.
+       * @param {ChatRow['chat_id']} chatId
+       * @returns {Promise<HarnessForkStackEntry | null>}
+       */
+      async popHarnessForkStack (chatId) {
+        const { rows: [row] } = await db.sql`SELECT harness_fork_stack FROM chats WHERE chat_id = ${chatId}`;
+        const chat = /** @type {Pick<ChatRow, 'harness_fork_stack'> | undefined} */ (row);
+        const stack = normalizeHarnessForkStack(chat?.harness_fork_stack);
+        const entry = stack.pop() ?? null;
+        await db.sql`
+          UPDATE chats
+          SET harness_fork_stack = ${JSON.stringify(stack)}
           WHERE chat_id = ${chatId}
         `;
         return entry;

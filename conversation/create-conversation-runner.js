@@ -92,6 +92,8 @@ export function createConversationRunner({ store, llmClient, getActionsFn, execu
     archiveHarnessSession,
     getHarnessSessionHistory,
     restoreHarnessSession,
+    pushHarnessForkStack,
+    popHarnessForkStack,
   } = store;
 
   const runCoordinator = createHarnessRunCoordinator();
@@ -401,6 +403,11 @@ export function createConversationRunner({ store, llmClient, getActionsFn, execu
           archive: async (sessionChatId) => archiveSessionWithGeneratedTitle(sessionChatId, chatInfo),
           getHistory: getHarnessSessionHistory,
           restore: restoreHarnessSession,
+        },
+        sessionForkControl: {
+          save: saveHarnessSession,
+          push: pushHarnessForkStack,
+          pop: popHarnessForkStack,
         },
       });
       if (handled) {
