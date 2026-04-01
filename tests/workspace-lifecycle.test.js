@@ -347,6 +347,69 @@ describe("workspace lifecycle", () => {
     assert.equal(branchName, "payments");
   });
 
+  it("creates a multi-word workspace and seeds the first prompt", async () => {
+    const repoRoot = await createRepoFixture();
+    const transportState = createFakeTransport();
+    const handleMessage = await createHandler({ transport: transportState.transport });
+
+    await seedChat("repo-seeded-chat", { harnessCwd: repoRoot });
+
+    const { context, responses } = createChatTurn({
+      chatId: "repo-seeded-chat",
+      content: [{ type: "text", text: "!new multi word branch: investigate duplicate charges" }],
+    });
+    await handleMessage(context);
+
+    const repo = await store.getRepoByRootPath(repoRoot);
+    assert.ok(repo, "repo should be inferred from the root cwd");
+    const workspace = await store.getWorkspaceByName(repo.repo_id, "multi word branch");
+    assert.ok(workspace, "workspace should be created");
+    assert.equal(workspace?.branch, "multi-word-branch");
+    assert.equal(workspace?.base_branch, "master");
+    assert.equal(transportState.createdGroups[0]?.subject, "multi word branch");
+    const workspaceMessages = await store.getMessages(workspace.workspace_chat_id, new Date(0));
+    const userMessages = workspaceMessages
+      .map((row) => row.message_data)
+      .filter((message) => message?.role === "user");
+    assert.ok(
+      userMessages.some((message) =>
+        message.content.some((block) => block.type === "text" && block.text.includes("investigate duplicate charges")),
+      ),
+      "expected the seed prompt to be stored as the first user message in the workspace chat",
+    );
+    assert.ok(responses.some((response) => response.text.includes("Created workspace `multi word branch`.")));
+  });
+
+  it("bases !new from the current workspace branch when run inside a workspace chat", async () => {
+    const repoRoot = await createRepoFixture();
+    const transportState = createFakeTransport();
+    const handleMessage = await createHandler({ transport: transportState.transport });
+
+    await seedChat("repo-parent-chat", { harnessCwd: repoRoot });
+
+    await handleMessage(createChatTurn({
+      chatId: "repo-parent-chat",
+      content: [{ type: "text", text: "!new parent branch" }],
+    }).context);
+
+    const repo = await store.getRepoByRootPath(repoRoot);
+    assert.ok(repo, "repo should be inferred from the root cwd");
+    const parentWorkspace = await store.getWorkspaceByName(repo.repo_id, "parent branch");
+    assert.ok(parentWorkspace, "parent workspace should exist");
+
+    const { context, responses } = createChatTurn({
+      chatId: parentWorkspace.workspace_chat_id,
+      content: [{ type: "text", text: "!new child branch" }],
+    });
+    await handleMessage(context);
+
+    const childWorkspace = await store.getWorkspaceByName(repo.repo_id, "child branch");
+    assert.ok(childWorkspace, "child workspace should be created");
+    assert.equal(childWorkspace?.base_branch, parentWorkspace.branch);
+    assert.equal(childWorkspace?.branch, "child-branch");
+    assert.ok(responses.some((response) => response.text.includes("Created workspace `child branch`.")));
+  });
+
   it("runs !diff, !test, !commit, and !merge successfully", async () => {
     const repoRoot = await createRepoFixture();
     const transportState = createFakeTransport();

@@ -21,9 +21,22 @@ import { resolveOutputVisibility } from "../chat-output-visibility.js";
 import { resolveChatBinding } from "../workspace-resolver.js";
 import { tryHandleWorkspaceCommand } from "../workspace-command-router.js";
 import { createWorkspaceControl } from "../workspace-control.js";
+import { markdownToWhatsApp } from "../message-renderer.js";
+import { formatActivitySummary } from "../tool-presentation-model.js";
+import { formatToolPresentationDisplay, formatToolPresentationSummary } from "../presentation/whatsapp.js";
 
 const log = createLogger("conversation:runner");
 const PRESENCE_LEASE_TTL_MS = 20_000;
+const SEED_SOURCE_PREFIX = /** @type {Record<MessageSource, string>} */ ({
+  llm: "🤖",
+  "tool-call": "🔧",
+  "tool-result": "✅",
+  error: "❌",
+  warning: "⚠️",
+  usage: "📊",
+  memory: "🧠",
+  plain: "",
+});
 
 /**
  * Type guard: checks that an action has a command string.
@@ -64,6 +77,72 @@ function formatAvailableSlashCommands(commands) {
   return commands
     .map((command) => `/${command.name} - ${command.description}`)
     .join("\n");
+}
+
+/**
+ * @param {ToolContentBlock} block
+ * @returns {string}
+ */
+function stringifySeedContentBlock(block) {
+  switch (block.type) {
+    case "text":
+      return block.text;
+    case "markdown":
+      return markdownToWhatsApp(block.text);
+    case "code":
+      return [block.caption, "```", block.code, "```"].filter(Boolean).join("\n");
+    case "diff":
+      return [block.caption, block.diffText ?? "Diff available."].filter(Boolean).join("\n\n");
+    case "image":
+      return block.alt ?? "[image]";
+    case "video":
+      return block.alt ?? "[video]";
+    case "audio":
+      return "[audio]";
+    default:
+      return "";
+  }
+}
+
+/**
+ * @param {SendContent} content
+ * @returns {string}
+ */
+function stringifySeedContent(content) {
+  if (typeof content === "string") {
+    return content;
+  }
+  const blocks = Array.isArray(content) ? content : [content];
+  return blocks
+    .map(stringifySeedContentBlock)
+    .filter(Boolean)
+    .join("\n\n");
+}
+
+/**
+ * @param {OutboundEvent} event
+ * @returns {string}
+ */
+function stringifySeedOutboundEvent(event) {
+  switch (event.kind) {
+    case "content": {
+      const text = stringifySeedContent(event.content);
+      const prefix = SEED_SOURCE_PREFIX[event.source];
+      return prefix && text ? `${prefix} ${text}` : text;
+    }
+    case "tool_call":
+      return `${SEED_SOURCE_PREFIX["tool-call"]} ${formatToolPresentationDisplay(event.presentation) ?? formatToolPresentationSummary(event.presentation)}`.trim();
+    case "tool_activity":
+      return `${SEED_SOURCE_PREFIX["tool-call"]} ${formatActivitySummary(event.activity)}`.trim();
+    case "plan":
+      return `${SEED_SOURCE_PREFIX.llm} *Plan*\n\n${event.text}`.trim();
+    case "file_change":
+      return `${SEED_SOURCE_PREFIX["tool-call"]} ${event.summary ?? `Changed file: ${event.path}`}`.trim();
+    case "usage":
+      return `${SEED_SOURCE_PREFIX.usage} Cost: ${event.cost} | prompt=${event.tokens.prompt} cached=${event.tokens.cached} completion=${event.tokens.completion}`;
+    default:
+      return "";
+  }
 }
 
 /**
@@ -118,6 +197,76 @@ export function createConversationRunner({ store, llmClient, getActionsFn, execu
   const workspaceControl = createWorkspaceControl({ store, transport });
 
   /**
+   * @param {string} chatId
+   * @returns {TurnIO}
+   */
+  function createSeedTurnIo(chatId) {
+    return {
+      getIsAdmin: async () => true,
+      react: async () => {},
+      select: async () => "",
+      selectMany: async () => ({ kind: "cancelled" }),
+      send: async (event) => {
+        const text = stringifySeedOutboundEvent(event).trim();
+        if (text) {
+          await transport?.sendText(chatId, text);
+        }
+        return undefined;
+      },
+      reply: async (event) => {
+        const text = stringifySeedOutboundEvent(event).trim();
+        if (text) {
+          await transport?.sendText(chatId, text);
+        }
+        return undefined;
+      },
+      confirm: async () => false,
+      startPresence: async () => {},
+      keepPresenceAlive: async () => {},
+      endPresence: async () => {},
+    };
+  }
+
+  /**
+   * @param {ChatTurn} turn
+   * @returns {Promise<void>}
+   */
+  async function dispatchTurn(turn) {
+    /** @type {ChatTurn | null} */
+    let nextTurn = turn;
+    while (nextTurn) {
+      nextTurn = await handleSingleMessage(nextTurn);
+    }
+  }
+
+  /**
+   * @param {ChatTurn} sourceTurn
+   * @param {WorkspaceRow} workspace
+   * @param {string} seedPrompt
+   * @returns {Promise<void>}
+   */
+  async function seedWorkspaceFromTurn(sourceTurn, workspace, seedPrompt) {
+    if (!seedPrompt.trim()) {
+      return;
+    }
+    await dispatchTurn({
+      chatId: workspace.workspace_chat_id,
+      senderIds: sourceTurn.senderIds,
+      senderJids: sourceTurn.senderJids,
+      senderName: sourceTurn.senderName,
+      chatName: workspace.workspace_chat_subject,
+      content: [{ type: "text", text: seedPrompt }],
+      timestamp: new Date(),
+      facts: {
+        isGroup: true,
+        addressedToBot: true,
+        repliedToBot: false,
+      },
+      io: createSeedTurnIo(workspace.workspace_chat_id),
+    });
+  }
+
+  /**
    * Archive the active harness session, attaching a generated title when possible.
    * Falls back to a plain archive if title generation fails.
    * @param {string} chatId
@@ -146,6 +295,7 @@ export function createConversationRunner({ store, llmClient, getActionsFn, execu
   /**
    * Handle a `!command` message.
    * @param {{
+   *   turn: ChatTurn,
    *   chatId: string,
    *   senderIds: string[],
    *   content: IncomingContentBlock[],
@@ -158,7 +308,7 @@ export function createConversationRunner({ store, llmClient, getActionsFn, execu
    * }} input
    * @returns {Promise<void>}
    */
-  async function handleCommandMessage({ chatId, senderIds, content, firstBlock, chatInfo, context, actions, actionResolver, resolvedBinding }) {
+  async function handleCommandMessage({ turn, chatId, senderIds, content, firstBlock, chatInfo, context, actions, actionResolver, resolvedBinding }) {
     const inputText = firstBlock.text.slice(1).trim();
     const commandText = inputText.toLowerCase();
 
@@ -167,6 +317,7 @@ export function createConversationRunner({ store, llmClient, getActionsFn, execu
       binding: resolvedBinding,
       inputText,
       workspaceControl,
+      seedWorkspace: async (workspace, seedPrompt) => seedWorkspaceFromTurn(turn, workspace, seedPrompt),
     })) {
       return;
     }
@@ -435,6 +586,7 @@ export function createConversationRunner({ store, llmClient, getActionsFn, execu
 
     if (firstBlock?.text?.startsWith("!")) {
       await handleCommandMessage({
+        turn,
         chatId,
         senderIds,
         content,
@@ -501,11 +653,7 @@ export function createConversationRunner({ store, llmClient, getActionsFn, execu
 
   return {
     async handleMessage(turn) {
-      /** @type {ChatTurn | null} */
-      let nextTurn = turn;
-      while (nextTurn) {
-        nextTurn = await handleSingleMessage(nextTurn);
-      }
+      await dispatchTurn(turn);
     },
   };
 }
