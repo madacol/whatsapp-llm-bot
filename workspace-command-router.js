@@ -164,7 +164,7 @@ export async function tryHandleWorkspaceCommand({ context, binding, inputText, w
       }
 
       if (binding.workspace.status === "busy" && name !== "status") {
-        await replyError(context, "Workspace is busy.\nUse `!cancel` or wait for the current task to finish.");
+        await replyError(context, "Workspace is busy.\nUse `!c` or wait for the current task to finish.");
         return true;
       }
       if (binding.workspace.status === "archived" && name !== "status") {

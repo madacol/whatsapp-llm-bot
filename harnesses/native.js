@@ -292,7 +292,7 @@ async function processLlmResponse({ session, llmConfig, messages, mediaRegistry,
       }
       await session.context.send(contentEvent(
         "warning",
-        `${newSkippedTypes.join(", ")} not supported by this model. Use \`!c media-reader <model>\` to enable a fallback reader.`,
+        `${newSkippedTypes.join(", ")} not supported by this model. Use \`!s media-reader <model>\` to enable a fallback reader.`,
       ));
     }
 

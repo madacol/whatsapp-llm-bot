@@ -12,9 +12,9 @@ import {
 
 export default /** @type {defineAction} */ ((x) => x)({
   name: "chat_settings",
-  command: "c",
+  command: "s",
   description:
-    `Inspect and change chat settings. Use \`!c\`, \`!c <key>\`, \`!c help <key>\`, \`!c <key> <value>\`, or \`!c reset <key>\`. Keys: ${CONFIG_KEYS.join(", ")}.`,
+    `Inspect and change chat settings. Use \`!s\`, \`!s <key>\`, \`!s help <key>\`, \`!s <key> <value>\`, or \`!s reset <key>\`. Keys: ${CONFIG_KEYS.join(", ")}.`,
   parameters: {
     type: "object",
     properties: {
@@ -47,7 +47,7 @@ export default /** @type {defineAction} */ ((x) => x)({
     if (setting === "help") {
       const key = value?.trim();
       if (!key) {
-        return "Usage: !c help <key>";
+        return "Usage: !s help <key>";
       }
       return describeConfigKey(rootDb, chatId, key, { getActions });
     }
@@ -55,7 +55,7 @@ export default /** @type {defineAction} */ ((x) => x)({
     if (setting === "reset") {
       const key = value?.trim();
       if (!key) {
-        return "Usage: !c reset <key>";
+        return "Usage: !s reset <key>";
       }
       const isAdmin = getIsAdmin ? await getIsAdmin() : true;
       if (!isAdmin) {
