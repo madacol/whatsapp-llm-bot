@@ -120,6 +120,21 @@ describe("buildClaudePrompt", () => {
     assert.equal(prompt, `Attached media files:\n- image: ${mediaPath}`);
   });
 
+  it("includes canonical file paths for document-only user turns", () => {
+    const mediaPath = `${"e".repeat(64)}.pdf`;
+    const prompt = buildClaudePrompt([{
+      role: "user",
+      content: [{
+        type: "file",
+        path: mediaPath,
+        mime_type: "application/pdf",
+        file_name: "report.pdf",
+      }],
+    }]);
+
+    assert.equal(prompt, `Attached media files:\n- file: ${mediaPath}`);
+  });
+
   it("keeps user text and appends media paths when both are present", () => {
     const mediaPath = `${"c".repeat(64)}.png`;
     const prompt = buildClaudePrompt([{

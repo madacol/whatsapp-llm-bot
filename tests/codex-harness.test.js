@@ -659,6 +659,76 @@ describe("createCodexHarness", () => {
     assert.deepEqual(result.response, [{ type: "text", text: "ok" }]);
   });
 
+  it("includes canonical file paths in the Codex prompt for document-only turns", async () => {
+    /** @type {string | null} */
+    let seenPrompt = null;
+    const harness = createCodexHarness({
+      startRun: async (input) => {
+        seenPrompt = input.prompt;
+        return {
+          abortController: new AbortController(),
+          done: Promise.resolve({
+            sessionId: null,
+            result: {
+              response: [{ type: "text", text: "ok" }],
+              messages: input.messages,
+              usage: { promptTokens: 0, completionTokens: 0, cachedTokens: 0, cost: 0 },
+            },
+          }),
+        };
+      },
+    });
+
+    const mediaPath = `${"f".repeat(64)}.pdf`;
+    const result = await harness.run({
+      session: {
+        chatId: "codex-chat-file-path",
+        senderIds: [],
+        context: /** @type {ExecuteActionContext} */ ({
+          chatId: "codex-chat-file-path",
+          senderIds: [],
+          content: [],
+          getIsAdmin: async () => true,
+          send: async () => undefined,
+          reply: async () => undefined,
+          reactToMessage: async () => {},
+          select: async () => "",
+          confirm: async () => true,
+        }),
+        addMessage: async () => undefined,
+        updateToolMessage: async () => undefined,
+        harnessSession: null,
+        saveHarnessSession: async () => undefined,
+      },
+      llmConfig: {
+        llmClient: /** @type {LlmClient} */ ({}),
+        chatModel: null,
+        externalInstructions: "",
+        toolRuntime: /** @type {ToolRuntime} */ ({
+          listTools: () => [],
+          getTool: async () => null,
+          executeTool: async () => {
+            throw new Error("executeTool should not be called");
+          },
+        }),
+      },
+      messages: [{
+        role: "user",
+        content: [{
+          type: "file",
+          path: mediaPath,
+          mime_type: "application/pdf",
+          file_name: "report.pdf",
+        }],
+      }],
+      hooks: {},
+      runConfig: undefined,
+    });
+
+    assert.equal(seenPrompt, `Media file available in this request:\n- ${mediaPath}`);
+    assert.deepEqual(result.response, [{ type: "text", text: "ok" }]);
+  });
+
   it("renders canonical images as markdown with generated alt while keeping the media path", async () => {
     const mockServer = await createMockLlmServer();
     try {

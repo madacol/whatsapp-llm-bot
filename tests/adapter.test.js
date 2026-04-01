@@ -9,7 +9,7 @@ process.env.MODEL = "mock-model";
 
 import { createTestDb, seedChat } from "./helpers.js";
 import { setDb } from "../db.js";
-import { readBlockBase64 } from "../media-store.js";
+import { readBlockBase64, readMediaBuffer } from "../media-store.js";
 
 /** @type {typeof import("../whatsapp/inbound/message-content.js").getMessageContent} */
 let getMessageContent;
@@ -224,6 +224,33 @@ describe("getMessageContent", () => {
     );
   });
 
+  it("downloads direct documents into file blocks", async () => {
+    const fakeBuffer = Buffer.from("fake-pdf-data");
+    const mockDownload = async () => fakeBuffer;
+    const msg = /** @type {Partial<BaileysMessage>} */ ({
+      message: {
+        documentMessage: {
+          mimetype: "application/pdf",
+          fileName: "report.pdf",
+          caption: "See attached",
+          url: "https://example.com/report",
+        },
+      },
+    });
+    const { content } = await getMessageContent(msg, mockDownload);
+
+    const fileBlock = /** @type {FileContentBlock | undefined} */ (content.find((b) => b.type === "file"));
+    assert.ok(fileBlock, "Should contain file block");
+    assert.equal(fileBlock.mime_type, "application/pdf");
+    assert.equal(fileBlock.file_name, "report.pdf");
+    assert.match(fileBlock.path, /^[a-f0-9]{64}\.pdf$/);
+    assert.deepEqual(await readMediaBuffer(fileBlock.path), fakeBuffer);
+    assert.ok(
+      content.some((b) => b.type === "text" && b.text === "See attached"),
+      "Should preserve document caption as text",
+    );
+  });
+
   it("extracts quotedSenderId from contextInfo participant", async () => {
     const msg = /** @type {Partial<BaileysMessage>} */ ({
       message: {
@@ -317,6 +344,41 @@ describe("getMessageContent", () => {
     const audioBlock = /** @type {AudioContentBlock} */ (quote.content.find(b => b.type === "audio"));
     assert.ok(audioBlock, "Quote should contain audio block");
     assert.equal(audioBlock.mime_type, "audio/ogg");
+  });
+
+  it("downloads quoted documents into quote blocks", async () => {
+    const fakeBuffer = Buffer.from("fake-doc-data");
+    const mockDownload = async () => fakeBuffer;
+    const msg = /** @type {Partial<BaileysMessage>} */ ({
+      message: {
+        extendedTextMessage: {
+          text: "please review",
+          contextInfo: {
+            quotedMessage: {
+              documentMessage: {
+                mimetype: "application/pdf",
+                fileName: "quoted.pdf",
+                caption: "Quoted document",
+                url: "https://example.com/quoted",
+              },
+            },
+          },
+        },
+      },
+    });
+    const { content } = await getMessageContent(msg, mockDownload);
+
+    const quote = /** @type {QuoteContentBlock} */ (content.find((b) => b.type === "quote"));
+    assert.ok(quote, "Should have quote block");
+    const fileBlock = /** @type {FileContentBlock | undefined} */ (quote.content.find((b) => b.type === "file"));
+    assert.ok(fileBlock, "Quote should contain file block");
+    assert.equal(fileBlock.mime_type, "application/pdf");
+    assert.equal(fileBlock.file_name, "quoted.pdf");
+    assert.deepEqual(await readMediaBuffer(fileBlock.path), fakeBuffer);
+    assert.ok(
+      quote.content.some((b) => b.type === "text" && b.text === "Quoted document"),
+      "Should preserve quoted document caption as text",
+    );
   });
 
   it("falls back to text placeholder when quoted media download fails", async () => {
