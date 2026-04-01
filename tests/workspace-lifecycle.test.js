@@ -206,7 +206,7 @@ describe("workspace lifecycle", () => {
     );
   });
 
-  it("suggests replace or cancel when !new hits an existing workspace", async () => {
+  it("offers replace/new/cancel and reuses the same group on replace", async () => {
     const repoRoot = await createRepoFixture();
     const transportState = createFakeTransport();
     const handleMessage = await createHandler({ transport: transportState.transport });
@@ -218,16 +218,37 @@ describe("workspace lifecycle", () => {
       content: [{ type: "text", text: "!new payments" }],
     }).context);
 
+    const repo = await store.getRepoByRootPath(repoRoot);
+    assert.ok(repo);
+    const originalWorkspace = await store.getWorkspaceByName(repo.repo_id, "payments");
+    assert.ok(originalWorkspace);
+    await fs.writeFile(path.join(originalWorkspace.worktree_path, "replace-marker.txt"), "old workspace\n");
+
     const turn = createChatTurn({
       chatId: "repo-duplicate-chat",
       content: [{ type: "text", text: "!new payments" }],
     });
+    turn.context.io.select = async (question, options) => {
+      turn.responses.push({ type: "select", text: JSON.stringify({ question, options }) });
+      return "replace";
+    };
     await handleMessage(turn.context);
 
     assert.ok(
-      turn.responses.some((response) => response.text.includes("already exists") && response.text.includes("replace") && response.text.includes("cancel")),
-      `expected duplicate !new to suggest replace/cancel, got: ${turn.responses.map((response) => response.text).join(" | ")}`,
+      turn.responses.some((response) =>
+        response.type === "select"
+        && response.text.includes("replace")
+        && response.text.includes("new")
+        && response.text.includes("cancel"),
+      ),
+      `expected duplicate !new to offer replace/new/cancel, got: ${turn.responses.map((response) => response.text).join(" | ")}`,
     );
+    const replacedWorkspace = await store.getWorkspaceByName(repo.repo_id, "payments");
+    assert.ok(replacedWorkspace);
+    assert.equal(replacedWorkspace.workspace_chat_id, originalWorkspace.workspace_chat_id);
+    assert.equal(transportState.createdGroups.length, 1);
+    assert.ok(turn.responses.some((response) => response.text.includes("Replaced workspace `payments`.")));
+    await assert.rejects(() => fs.access(path.join(replacedWorkspace.worktree_path, "replace-marker.txt")));
   });
 
   it("creates a workspace chat, worktree, and branch from !new", async () => {

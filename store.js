@@ -866,6 +866,46 @@ export async function initStore(injectedDb){
       },
 
       /**
+       * Reset a workspace row to point at a freshly recreated worktree while
+       * preserving its chat binding.
+       * @param {{
+       *   workspaceId: string,
+       *   branch: string,
+       *   baseBranch: string,
+       *   worktreePath: string,
+       *   status?: WorkspaceStatus,
+       * }} input
+       * @returns {Promise<WorkspaceRow>}
+       */
+      async resetWorkspace ({
+        workspaceId,
+        branch,
+        baseBranch,
+        worktreePath,
+        status = "ready",
+      }) {
+        const { rows: [row] } = await db.sql`
+          UPDATE workspaces
+          SET
+            branch = ${branch},
+            base_branch = ${baseBranch},
+            worktree_path = ${worktreePath},
+            status = ${status},
+            last_test_status = 'not_run',
+            last_commit_oid = NULL,
+            conflicted_files = '[]'::jsonb,
+            archived_at = NULL
+          WHERE workspace_id = ${workspaceId}
+          RETURNING *
+        `;
+        const workspace = normalizeWorkspaceRow(row);
+        if (!workspace) {
+          throw new Error(`Workspace ${workspaceId} does not exist.`);
+        }
+        return workspace;
+      },
+
+      /**
        * @param {string} chatId
        * @param {string} repoId
        * @returns {Promise<ChatBindingRow>}
