@@ -320,12 +320,14 @@ describe("per-chat model selection", () => {
         { setting: "folder" },
       );
       assert.ok(folderResult.includes(worktreePath), `expected resolved worktree path, got: ${folderResult}`);
+      assert.ok(!folderResult.includes("workspace worktree"), `expected plain path only, got: ${folderResult}`);
 
       const infoResult = await action.action_fn(
         { chatId: "cfg-folder-workspace", rootDb: db, senderIds: ["u1"] },
         { setting: "" },
       );
       assert.ok(infoResult.includes(worktreePath), `expected settings summary to include worktree path, got: ${infoResult}`);
+      assert.ok(!infoResult.includes("workspace worktree"), `expected plain path only, got: ${infoResult}`);
     });
 
     it("shows help text for a friendly key", async () => {
