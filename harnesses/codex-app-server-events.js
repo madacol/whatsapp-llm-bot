@@ -5,8 +5,10 @@ import {
   extractCollabToolOutput,
   extractCommandOutput,
   extractCommandText,
+  extractPlanEntries,
   extractPlanText,
   extractToolResultOutput,
+  normalizePlanStatus,
   normalizeCollabToolName,
 } from "./codex-normalization-helpers.js";
 
@@ -52,15 +54,15 @@ export function normalizeCodexAppServerEvent(message) {
   }
 
   if (method === "turn/plan/updated") {
-    const plan = Array.isArray(params.plan) ? params.plan : [];
-    const lines = plan
-      .filter(isCodexEventRecord)
-      .map((entry) => typeof entry.step === "string" ? entry.step : null)
-      .filter((line) => typeof line === "string" && line.length > 0);
-    if (typeof params.explanation === "string" && params.explanation.length > 0) {
-      lines.unshift(params.explanation);
-    }
-    normalized.planText = lines.join("\n") || undefined;
+    normalized.plan = {
+      explanation: typeof params.explanation === "string" && params.explanation.trim().length > 0
+        ? params.explanation.trim()
+        : null,
+      entries: extractPlanEntries(params.plan).map((entry) => ({
+        text: entry.text,
+        status: normalizePlanStatus(entry.status),
+      })),
+    };
     return normalized;
   }
 
@@ -247,7 +249,17 @@ export function normalizeCodexAppServerEvent(message) {
   }
 
   if (itemType === "plan" && method === "item/completed") {
-    normalized.planText = typeof item.text === "string" ? item.text : extractPlanText(item) ?? undefined;
+    const text = typeof item.text === "string" ? item.text : extractPlanText(item) ?? undefined;
+    if (text) {
+      normalized.plan = {
+        explanation: null,
+        entries: text
+          .split("\n")
+          .map((line) => line.trim())
+          .filter((line) => line.length > 0)
+          .map((line) => ({ text: line, status: "pending" })),
+      };
+    }
     return normalized;
   }
 

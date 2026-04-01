@@ -509,7 +509,13 @@ describe("codex events", () => {
       },
     }), {
       sessionId: null,
-      planText: "step 1\nstep 2",
+      plan: {
+        explanation: null,
+        entries: [
+          { text: "step 1", status: "pending" },
+          { text: "step 2", status: "pending" },
+        ],
+      },
     });
 
     assert.deepEqual(normalizeCodexEvent({
@@ -643,7 +649,13 @@ describe("codex events", () => {
       },
     }), {
       sessionId: "thr_123",
-      planText: "Replanning around user steer.\nRead failing test\nPatch issue",
+      plan: {
+        explanation: "Replanning around user steer.",
+        entries: [
+          { text: "Read failing test", status: "in_progress" },
+          { text: "Patch issue", status: "pending" },
+        ],
+      },
     });
   });
 

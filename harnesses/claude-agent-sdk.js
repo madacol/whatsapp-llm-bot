@@ -443,7 +443,8 @@ export function wrapHooksWithFallbacks(rawHooks) {
       safeHook("onCommand", () => rawHooks.onCommand(event), undefined),
     onFileRead: (/** @type {{ command: string, paths: string[] }} */ event) =>
       safeHook("onFileRead", () => rawHooks.onFileRead(event), undefined),
-    onPlan: (/** @type {string} */ text) => safeHook("onPlan", () => rawHooks.onPlan(text), undefined),
+    onPlan: (/** @type {import("../tool-presentation-model.js").PlanPresentation} */ presentation) =>
+      safeHook("onPlan", () => rawHooks.onPlan(presentation), undefined),
     onFileChange: (/** @type {{
       path: string,
       summary?: string,

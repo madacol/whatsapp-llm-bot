@@ -28,11 +28,11 @@ export function toolActivityEvent(activity) {
 }
 
 /**
- * @param {string} text
+ * @param {import("./tool-presentation-model.js").PlanPresentation} presentation
  * @returns {PlanEvent}
  */
-export function planEvent(text) {
-  return { kind: "plan", text };
+export function planEvent(presentation) {
+  return { kind: "plan", presentation };
 }
 
 /**

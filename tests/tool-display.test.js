@@ -1,6 +1,8 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
+  buildToolPresentation,
+  formatPlanPresentationText,
   formatToolInspectBody,
   formatSdkToolCall,
   formatToolCallDisplay,
@@ -122,7 +124,7 @@ describe("tool display", () => {
           { step: "Ship the fix", status: "completed" },
         ],
       }),
-      "*Plan*  _3 steps_",
+      "*Plan*  _Working on: Patch the formatter_",
     );
   });
 
@@ -134,7 +136,7 @@ describe("tool display", () => {
           { text: "Keep search formatting readable", completed: true },
         ],
       }),
-      "*Plan*  _2 steps_",
+      "*Plan*  _Next: Check the inspect output_",
     );
   });
 
@@ -210,6 +212,30 @@ describe("command inspect formatting", () => {
         "[ ] Run tests",
         "",
         "Plan updated",
+      ].join("\n"),
+    );
+  });
+
+  it("renders plan presentation bodies as explicit checklists", () => {
+    const presentation = buildToolPresentation("update_plan", {
+      explanation: "Tighten the display labels",
+      plan: [
+        { step: "Patch the formatter", status: "in_progress" },
+        { step: "Run tests", status: "pending" },
+        { step: "Ship the fix", status: "completed" },
+      ],
+    }, undefined, undefined, undefined);
+
+    assert.equal(
+      formatPlanPresentationText(presentation),
+      [
+        "*Plan*",
+        "",
+        "_Tighten the display labels_",
+        "",
+        "[~] Patch the formatter",
+        "[ ] Run tests",
+        "[x] Ship the fix",
       ].join("\n"),
     );
   });

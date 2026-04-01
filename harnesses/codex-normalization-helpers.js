@@ -195,3 +195,94 @@ export function extractPlanText(item) {
   }
   return extractCodexText(item);
 }
+
+/**
+ * @param {unknown} status
+ * @returns {"completed" | "in_progress" | "pending" | "unknown"}
+ */
+export function normalizePlanStatus(status) {
+  if (status === "completed") {
+    return "completed";
+  }
+  if (status === "in_progress" || status === "inProgress") {
+    return "in_progress";
+  }
+  if (status === "pending") {
+    return "pending";
+  }
+  return "unknown";
+}
+
+/**
+ * @param {unknown} value
+ * @returns {import("./codex-events.js").CodexPlanEntry[]}
+ */
+export function extractPlanEntries(value) {
+  /** @type {import("./codex-events.js").CodexPlanEntry[]} */
+  const entries = [];
+  if (!Array.isArray(value)) {
+    return entries;
+  }
+
+  for (const entry of value) {
+    if (!isCodexEventRecord(entry)) {
+      continue;
+    }
+    if (typeof entry.step === "string" && entry.step.trim().length > 0) {
+      entries.push({
+        text: entry.step.trim(),
+        status: normalizePlanStatus(entry.status),
+      });
+      continue;
+    }
+    if (typeof entry.text === "string" && entry.text.trim().length > 0 && typeof entry.completed === "boolean") {
+      entries.push({
+        text: entry.text.trim(),
+        status: entry.completed ? "completed" : "pending",
+      });
+    }
+  }
+
+  return entries;
+}
+
+/**
+ * @param {unknown} item
+ * @returns {import("./codex-events.js").CodexPlanState | null}
+ */
+export function extractPlanState(item) {
+  if (!isCodexEventRecord(item)) {
+    return null;
+  }
+
+  const explanation = typeof item.explanation === "string" && item.explanation.trim().length > 0
+    ? item.explanation.trim()
+    : null;
+  const entries = extractPlanEntries(item.plan);
+  if (entries.length > 0) {
+    return { explanation, entries };
+  }
+
+  const itemEntries = extractPlanEntries(item.items);
+  if (itemEntries.length > 0) {
+    return { explanation, entries: itemEntries };
+  }
+
+  const text = extractCodexText(item);
+  if (!text) {
+    return null;
+  }
+  const textEntries = text
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0)
+    .map((line) => ({ text: line, status: /** @type {"pending"} */ ("pending") }));
+  if (textEntries.length === 0) {
+    return null;
+  }
+
+  return {
+    explanation,
+    entries: textEntries,
+  };
+}

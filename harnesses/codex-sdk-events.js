@@ -5,6 +5,7 @@ import {
   extractCollabToolOutput,
   extractCommandOutput,
   extractCommandText,
+  extractPlanState,
   extractPlanText,
   extractToolResultOutput,
   normalizeCollabToolName,
@@ -200,7 +201,7 @@ export function normalizeCodexEvent(event) {
   }
 
   if (eventType === "item.completed" && (itemType.includes("plan") || itemType === "todo_list")) {
-    normalized.planText = extractPlanText(item) ?? undefined;
+    normalized.plan = extractPlanState(item) ?? undefined;
     return normalized;
   }
 

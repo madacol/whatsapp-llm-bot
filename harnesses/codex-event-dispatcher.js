@@ -1,4 +1,4 @@
-import { buildToolPresentation, getToolFlowDescriptor } from "../tool-presentation-model.js";
+import { buildToolPresentation, createPlanPresentationFromState, getToolFlowDescriptor } from "../tool-presentation-model.js";
 import { toolCallUpdate, toolFlowInspectState, toolFlowUpdate, toolInspectState } from "../outbound-events.js";
 import { createCodexReasoningState } from "./codex-reasoning-state.js";
 import { createCodexRunState } from "./codex-run-state.js";
@@ -198,8 +198,8 @@ export function createCodexEventDispatcher(input) {
       }
     }
 
-    if (normalized.planText) {
-      await input.hooks.onPlan(normalized.planText);
+    if (normalized.plan) {
+      await input.hooks.onPlan(createPlanPresentationFromState(normalized.plan));
     }
 
     const fileChanges = normalized.fileChanges ?? (normalized.fileChange ? [normalized.fileChange] : []);
