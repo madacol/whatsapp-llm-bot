@@ -627,6 +627,43 @@ export async function initStore(injectedDb){
       },
 
       /**
+       * Copy user-configurable chat settings into a new chat without carrying
+       * over path bindings or live session state.
+       * @param {string} sourceChatId
+       * @param {string} targetChatId
+       * @returns {Promise<void>}
+       */
+      async copyChatCustomizations (sourceChatId, targetChatId) {
+        await ensureChatExists(sourceChatId);
+        await ensureChatExists(targetChatId);
+        const sourceChat = await this.getChat(sourceChatId);
+        if (!sourceChat) {
+          throw new Error(`Chat ${sourceChatId} does not exist.`);
+        }
+        await db.sql`
+          UPDATE chats
+          SET
+            system_prompt = ${sourceChat.system_prompt},
+            model = ${sourceChat.model},
+            respond_on_any = ${sourceChat.respond_on_any},
+            respond_on_mention = ${sourceChat.respond_on_mention},
+            respond_on_reply = ${sourceChat.respond_on_reply},
+            respond_on = ${sourceChat.respond_on},
+            debug = ${sourceChat.debug},
+            media_to_text_models = ${JSON.stringify(sourceChat.media_to_text_models ?? {})}::jsonb,
+            model_roles = ${JSON.stringify(sourceChat.model_roles ?? {})}::jsonb,
+            memory = ${sourceChat.memory},
+            memory_threshold = ${sourceChat.memory_threshold},
+            enabled_actions = ${JSON.stringify(sourceChat.enabled_actions ?? [])}::jsonb,
+            active_persona = ${sourceChat.active_persona},
+            harness = ${sourceChat.harness},
+            output_visibility = ${JSON.stringify(sourceChat.output_visibility ?? {})}::jsonb,
+            harness_config = ${JSON.stringify(sourceChat.harness_config ?? {})}::jsonb
+          WHERE chat_id = ${targetChatId}
+        `;
+      },
+
+      /**
        * @param {{
        *   name: string,
        *   rootPath: string,
