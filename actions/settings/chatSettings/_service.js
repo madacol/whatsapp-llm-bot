@@ -2,9 +2,11 @@ import { existsSync, readdirSync } from "node:fs";
 import { dirname, basename, resolve } from "node:path";
 import config from "../../../config.js";
 import { validateModel, getModelModalities } from "../../../models-cache.js";
-import { getChatOrThrow } from "../../../store.js";
+import { getChatOrThrow, initStore } from "../../../store.js";
 import { ROLE_DEFINITIONS, resolveModel } from "../../../model-roles.js";
 import { listHarnesses } from "#harnesses";
+import { resolveChatBinding } from "../../../workspace-resolver.js";
+import { getChatWorkDir } from "../../../utils.js";
 import {
   buildOutputVisibilityOverrides,
   OUTPUT_VISIBILITY_FLAGS,
@@ -80,7 +82,7 @@ const SHOW_NONE_OPTION_ID = "none";
  */
 
 /**
- * @typedef {(chat: import("../../../store.js").ChatRow, extra: { getActions?: () => Promise<Action[]> }) => string | Promise<string>} ConfigCurrentFormatter
+ * @typedef {(chat: import("../../../store.js").ChatRow, extra: { rootDb?: PGlite, chatId?: string, getActions?: () => Promise<Action[]> }) => string | Promise<string>} ConfigCurrentFormatter
  */
 
 /**
@@ -226,6 +228,30 @@ function formatReadableList(items) {
     return `${items[0] ?? ""} and ${items[1] ?? ""}`;
   }
   return `${items.slice(0, -1).join(", ")}, and ${items[items.length - 1] ?? ""}`;
+}
+
+/**
+ * @param {PGlite} rootDb
+ * @param {string} chatId
+ * @param {import("../../../store.js").ChatRow} chat
+ * @returns {Promise<string>}
+ */
+async function formatResolvedHarnessFolder(rootDb, chatId, chat) {
+  if (chat.harness_cwd) {
+    return `\`${chat.harness_cwd}\``;
+  }
+
+  const store = await initStore(rootDb);
+  const binding = await resolveChatBinding(store, chatId, chat.harness_cwd);
+  switch (binding.kind) {
+    case "repo":
+      return `repo root (\`${binding.repo.root_path}\`)`;
+    case "workspace":
+      return `workspace worktree (\`${binding.workspace.worktree_path}\`)`;
+    case "unbound":
+    default:
+      return `${CHAT_WORKSPACE_DEFAULT_LABEL} (\`${getChatWorkDir(chatId, chat.harness_cwd)}\`)`;
+  }
 }
 
 /**
@@ -506,7 +532,12 @@ const BASE_CONFIG_KEYS = [
     aliases: ["harness_cwd"],
     examples: ["!c folder /home/mada/project", "!c reset folder"],
     resettable: true,
-    formatCurrent: (chat) => chat.harness_cwd ?? CHAT_WORKSPACE_DEFAULT_LABEL,
+    formatCurrent: (chat, extra) => {
+      if (!extra.rootDb || !extra.chatId) {
+        return chat.harness_cwd ?? CHAT_WORKSPACE_DEFAULT_LABEL;
+      }
+      return formatResolvedHarnessFolder(extra.rootDb, extra.chatId, chat);
+    },
     formatDefault: () => CHAT_WORKSPACE_DEFAULT_LABEL,
     setValue: async ({ rootDb, chatId, value }) => {
       const trimmed = value.trim();
@@ -880,7 +911,7 @@ export function getConfigKeyDefinition(key) {
 /**
  * @param {import("../../../store.js").ChatRow} chat
  * @param {ConfigKeyDefinition} definition
- * @param {{ getActions?: () => Promise<Action[]> }} extra
+ * @param {{ rootDb?: PGlite, chatId?: string, getActions?: () => Promise<Action[]> }} extra
  * @returns {Promise<string>}
  */
 async function formatCurrentValue(chat, definition, extra) {
@@ -961,7 +992,7 @@ export async function getChatSettingsInfo(rootDb, chatId, extra) {
     "",
     "Harness",
     `- harness: ${chat.harness ?? "native"}`,
-    `- folder: ${chat.harness_cwd ?? CHAT_WORKSPACE_DEFAULT_LABEL}`,
+    `- folder: ${await formatResolvedHarnessFolder(rootDb, chatId, chat)}`,
     "",
     "Models",
     `- readers: media=${chat.media_to_text_models?.general ?? "default"}, image=${chat.media_to_text_models?.image ?? "default"}, audio=${chat.media_to_text_models?.audio ?? "default"}, video=${chat.media_to_text_models?.video ?? "default"}`,
@@ -1048,7 +1079,7 @@ export async function describeConfigKey(rootDb, chatId, key, extra) {
   }
 
   const chat = await getChatOrThrow(rootDb, chatId);
-  const current = await formatCurrentValue(chat, definition, extra);
+  const current = await formatCurrentValue(chat, definition, { ...extra, rootDb, chatId });
   const options = getDefinitionOptions(definition);
   const flags = definition.flags ?? [];
   const title = formatSettingTitle(definition.label);
@@ -1131,7 +1162,7 @@ export async function getChatSetting(rootDb, chatId, setting, extra) {
   if (!definition) {
     return `Unknown setting: ${setting}`;
   }
-  const current = await definition.formatCurrent(chat, extra);
+  const current = await definition.formatCurrent(chat, { ...extra, rootDb, chatId });
   const options = getDefinitionOptions(definition);
   const lines = [`${formatSettingTitle(definition.label)}: ${current}`];
   if (options.length > 0) {

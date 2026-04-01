@@ -1,11 +1,18 @@
 import { describe, it, before, after, afterEach } from "node:test";
 import assert from "node:assert/strict";
+import { execFile } from "node:child_process";
 import fs from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
+import { promisify } from "node:util";
 import { createTestDb } from "./helpers.js";
 import config from "../config.js";
 
 const CACHE_PATH = path.resolve("data/models.json");
+const execFileAsync = promisify(execFile);
+
+/** @type {string[]} */
+const tempDirs = [];
 
 /** @type {import("../models-cache.js").OpenRouterModel[]} */
 const fakeModels = [
@@ -19,6 +26,32 @@ async function writeFakeCache() {
   await fs.writeFile(CACHE_PATH, JSON.stringify(fakeModels));
 }
 
+/**
+ * @param {string} cwd
+ * @param {string[]} args
+ * @returns {Promise<void>}
+ */
+async function runGit(cwd, args) {
+  await execFileAsync("git", args, { cwd });
+}
+
+/**
+ * @returns {Promise<{ repoRoot: string, worktreePath: string }>}
+ */
+async function createRepoWithWorkspaceFixture() {
+  const repoRoot = await fs.mkdtemp(path.join(os.tmpdir(), "chat-settings-workspace-"));
+  tempDirs.push(repoRoot);
+  await runGit(repoRoot, ["init", "--initial-branch=master"]);
+  await runGit(repoRoot, ["config", "user.email", "test@example.com"]);
+  await runGit(repoRoot, ["config", "user.name", "Test User"]);
+  await fs.writeFile(path.join(repoRoot, "app.txt"), "base\n");
+  await runGit(repoRoot, ["add", "app.txt"]);
+  await runGit(repoRoot, ["commit", "-m", "Initial commit"]);
+  const worktreePath = path.join(repoRoot, "..", `ws-${path.basename(repoRoot)}`);
+  await runGit(repoRoot, ["worktree", "add", "-b", "ws/settings", worktreePath, "master"]);
+  return { repoRoot, worktreePath };
+}
+
 describe("per-chat model selection", () => {
   /** @type {import("@electric-sql/pglite").PGlite} */
   let db;
@@ -30,6 +63,7 @@ describe("per-chat model selection", () => {
 
   after(async () => {
     await fs.rm(CACHE_PATH, { force: true });
+    await Promise.all(tempDirs.map((dir) => fs.rm(dir, { recursive: true, force: true })));
   });
 
   describe("chat_settings info includes model", () => {
@@ -252,6 +286,48 @@ describe("per-chat model selection", () => {
   });
 
   describe("mobile-first config command semantics", () => {
+    it("shows the resolved workspace folder path when folder uses the workspace default", async () => {
+      const { repoRoot, worktreePath } = await createRepoWithWorkspaceFixture();
+      const { initStore } = await import("../store.js");
+      const store = await initStore(db);
+      await store.createRepo({
+        name: `settings-repo-${Date.now()}`,
+        rootPath: repoRoot,
+        defaultBaseBranch: "master",
+      });
+      await db.sql`
+        INSERT INTO chats(chat_id, harness_cwd)
+        VALUES ('cfg-folder-workspace', NULL)
+        ON CONFLICT DO NOTHING
+      `;
+      const repo = await store.getRepoByRootPath(repoRoot);
+      assert.ok(repo);
+      await store.createWorkspace({
+        repoId: repo.repo_id,
+        name: "settings",
+        branch: "ws/settings",
+        baseBranch: "master",
+        worktreePath,
+        workspaceChatId: "cfg-folder-workspace",
+        status: "ready",
+      });
+
+      const mod = await import("../actions/settings/chatSettings/index.js");
+      const action = mod.default;
+
+      const folderResult = await action.action_fn(
+        { chatId: "cfg-folder-workspace", rootDb: db, senderIds: ["u1"] },
+        { setting: "folder" },
+      );
+      assert.ok(folderResult.includes(worktreePath), `expected resolved worktree path, got: ${folderResult}`);
+
+      const infoResult = await action.action_fn(
+        { chatId: "cfg-folder-workspace", rootDb: db, senderIds: ["u1"] },
+        { setting: "" },
+      );
+      assert.ok(infoResult.includes(worktreePath), `expected settings summary to include worktree path, got: ${infoResult}`);
+    });
+
     it("shows help text for a friendly key", async () => {
       await db.sql`INSERT INTO chats(chat_id, harness_cwd) VALUES ('cfg-help-1', '/tmp') ON CONFLICT DO NOTHING`;
 

@@ -12,6 +12,7 @@ import {
   runWorkspaceVerification,
 } from "./workspace-git.js";
 import { formatWorkspaceStatus, listRepoWorkspaces } from "./workspace-service.js";
+import { errorToString } from "./utils.js";
 
 /**
  * @typedef {import("./store.js").Store} Store
@@ -94,7 +95,7 @@ export function createWorkspaceControl({ store, transport }) {
         ].join("\n");
       } catch (error) {
         await cleanupWorkspaceWorktree(repo, branch, worktreePath);
-        throw error;
+        throw new Error(`WhatsApp group creation failed: ${errorToString(error)}`);
       }
     },
 
