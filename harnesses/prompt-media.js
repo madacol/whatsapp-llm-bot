@@ -1,5 +1,5 @@
+import { hasMediaPath, resolveMediaPath } from "../attachment-paths.js";
 import { getMediaTranslation, resolveMediaModel } from "../media-to-text.js";
-import { hasMediaPath, resolveMediaPath } from "../media-store.js";
 
 /**
  * @param {string} text

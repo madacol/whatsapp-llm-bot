@@ -1,9 +1,10 @@
+import { hasMediaPath } from "./attachment-paths.js";
 import OpenAI from "openai";
 import config from "./config.js";
 import { resolveModel } from "./model-roles.js";
 import { convertAudioToMp3Base64 } from "./audio_conversion.js";
 import { registerMedia, isMediaBlock } from "./message-formatting.js";
-import { blockToDataUrl, ensureMediaPathForBlock, hasMediaPath, readBlockBase64 } from "./media-store.js";
+import { blockToDataUrl, ensureMediaPathForBlock, readBlockBase64 } from "./media-store.js";
 import { createLogger } from "./logger.js";
 
 const log = createLogger("llm");

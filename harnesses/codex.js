@@ -1,9 +1,9 @@
+import { hasMediaPath } from "../attachment-paths.js";
 /**
  * Codex harness — uses the local Codex SDK for stateful agent runs.
  */
 
 import { createLogger } from "../logger.js";
-import { hasMediaPath } from "../media-store.js";
 import { renderContentBlock } from "../message-formatting.js";
 import { getRootDb } from "../db.js";
 import { NO_OP_HOOKS } from "./native.js";

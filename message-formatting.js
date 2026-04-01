@@ -2,14 +2,9 @@
  * Pure functions extracted from index.js for testability.
  */
 
+import { deriveMediaPath, hasInlineMediaData, hasMediaPath, isValidMediaPath } from "./attachment-paths.js";
 import { hydrateHdRef } from "./whatsapp-hd-media.js";
-import {
-  createImageBlockFromPath,
-  deriveMediaPath,
-  hasInlineMediaData,
-  hasMediaPath,
-  isValidMediaPath,
-} from "./media-store.js";
+import { createImageBlockFromPath } from "./media-store.js";
 
 /**
  * Convert a single property schema, replacing custom `type: "image"` with

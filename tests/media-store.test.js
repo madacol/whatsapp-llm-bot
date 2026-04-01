@@ -1,10 +1,9 @@
 import { afterEach, describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { rm } from "node:fs/promises";
+import { isValidMediaPath, resolveMediaPath } from "../attachment-paths.js";
 import {
-  isValidMediaPath,
   readMediaBuffer,
-  resolveMediaPath,
   writeMedia,
 } from "../media-store.js";
 

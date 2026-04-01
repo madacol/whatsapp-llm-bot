@@ -1,6 +1,7 @@
 import { afterEach, describe, it, before } from "node:test";
 import assert from "node:assert/strict";
 import { rm } from "node:fs/promises";
+import { resolveMediaPath } from "../attachment-paths.js";
 import { setDb } from "../db.js";
 import { createMockLlmServer, createTestDb, seedChat, withModelsCache } from "./helpers.js";
 import {
@@ -8,7 +9,7 @@ import {
   createCodexHarness,
 } from "../harnesses/codex.js";
 import { createLlmClient } from "../llm.js";
-import { resolveMediaPath, writeMedia } from "../media-store.js";
+import { writeMedia } from "../media-store.js";
 
 const TEST_CODEX_MODELS = [
   { id: "gpt-5.4", label: "GPT-5.4" },

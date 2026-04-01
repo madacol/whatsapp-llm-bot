@@ -1,11 +1,10 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 
+import { isValidMediaPath, mediaPathToMimeType } from "../../../attachment-paths.js";
 import config from "../../../config.js";
 import {
   createImageBlockFromPath,
-  isValidMediaPath,
-  mediaPathToMimeType,
   readBlockBase64,
   readBlockBuffer,
 } from "../../../media-store.js";
