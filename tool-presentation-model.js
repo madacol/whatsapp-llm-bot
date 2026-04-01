@@ -5,6 +5,8 @@
  * events without deciding how a specific transport should render them.
  */
 
+import { createPlanPresentationFromState, normalizePlanEntryStatus } from "./plan-presentation.js";
+
 /**
  * Shorten an absolute path by replacing the cwd prefix with ".".
  * @param {string} p
@@ -29,13 +31,6 @@ export function shortenPath(p, cwd) {
  */
 
 /**
- * @typedef {{
- *   text: string,
- *   status: "completed" | "in_progress" | "pending" | "unknown",
- * }} PlanEntry
- */
-
-/**
  * @typedef {"bash" | "read" | "grep" | "glob" | "plain" | "web_search" | "open_link" | "find_on_page" | "image_search" | "time" | "weather" | "finance" | "sports_schedule" | "sports_standings"} ToolInspectMode
  */
 
@@ -56,16 +51,6 @@ export function shortenPath(p, cwd) {
  *   inspectMode: ToolInspectMode,
  *   flow?: ToolFlowDescriptor,
  * }} ActivityPresentation
- */
-
-/**
- * @typedef {{
- *   kind: "plan",
- *   toolName: string,
- *   summary: string,
- *   explanation: string | null,
- *   entries: PlanEntry[],
- * }} PlanPresentation
  */
 
 /**
@@ -103,7 +88,7 @@ export function shortenPath(p, cwd) {
  */
 
 /**
- * @typedef {ActivityPresentation | PlanPresentation | BashPresentation | FilePresentation | GenericPresentation} ToolPresentation
+ * @typedef {ActivityPresentation | import("./plan-presentation.js").PlanPresentation | BashPresentation | FilePresentation | GenericPresentation} ToolPresentation
  */
 
 /**
@@ -453,67 +438,11 @@ function getUpdatePlanExplanation(args) {
 }
 
 /**
- * @param {string} text
- * @returns {string}
- */
-function shortenPlanSummaryText(text) {
-  return text.length > 48 ? `${text.slice(0, 48)}…` : text;
-}
-
-/**
- * @param {string | null} explanation
- * @param {PlanEntry[]} entries
- * @returns {string}
- */
-function formatPlanSummary(explanation, entries) {
-  const activeEntry = entries.find((entry) => entry.status === "in_progress");
-  if (activeEntry) {
-    return `*Plan*  _Working on: ${shortenPlanSummaryText(activeEntry.text)}_`;
-  }
-
-  const nextEntry = entries.find((entry) => entry.status === "pending");
-  if (nextEntry) {
-    return `*Plan*  _Next: ${shortenPlanSummaryText(nextEntry.text)}_`;
-  }
-
-  if (entries.length > 0 && entries.every((entry) => entry.status === "completed")) {
-    return `*Plan*  _All ${entries.length} step${entries.length === 1 ? "" : "s"} completed_`;
-  }
-
-  if (entries.length > 0) {
-    return `*Plan*  _${entries.length} step${entries.length === 1 ? "" : "s"}_`;
-  }
-
-  if (explanation) {
-    return `*Plan*  _${shortenPlanSummaryText(explanation)}_`;
-  }
-
-  return "*Plan*";
-}
-
-/**
- * @param {unknown} status
- * @returns {"completed" | "in_progress" | "pending" | "unknown"}
- */
-export function normalizePlanEntryStatus(status) {
-  if (status === "completed") {
-    return "completed";
-  }
-  if (status === "in_progress" || status === "inProgress") {
-    return "in_progress";
-  }
-  if (status === "pending") {
-    return "pending";
-  }
-  return "unknown";
-}
-
-/**
  * @param {Record<string, unknown>} args
- * @returns {PlanEntry[]}
+ * @returns {import("./plan-presentation.js").PlanEntry[]}
  */
 function getUpdatePlanEntries(args) {
-  /** @type {PlanEntry[]} */
+  /** @type {import("./plan-presentation.js").PlanEntry[]} */
   const entries = [];
 
   if (Array.isArray(args.plan)) {
@@ -545,36 +474,8 @@ function getUpdatePlanEntries(args) {
 }
 
 /**
- * @param {{
- *   explanation?: string | null,
- *   entries?: PlanEntry[],
- * }} state
- * @returns {PlanPresentation}
- */
-export function createPlanPresentationFromState(state) {
-  const explanation = typeof state.explanation === "string" && state.explanation.trim()
-    ? state.explanation.trim()
-    : null;
-  const entries = Array.isArray(state.entries)
-    ? state.entries
-      .filter((entry) => typeof entry?.text === "string" && entry.text.trim().length > 0)
-      .map((entry) => ({
-        text: entry.text.trim(),
-        status: normalizePlanEntryStatus(entry.status),
-      }))
-    : [];
-  return {
-    kind: "plan",
-    toolName: "update_plan",
-    summary: formatPlanSummary(explanation, entries),
-    explanation,
-    entries,
-  };
-}
-
-/**
  * @param {Record<string, unknown>} args
- * @returns {PlanPresentation}
+ * @returns {import("./plan-presentation.js").PlanPresentation}
  */
 function createPlanPresentation(args) {
   return createPlanPresentationFromState({

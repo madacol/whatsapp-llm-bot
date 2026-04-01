@@ -1,10 +1,10 @@
 import { generateMessageIDV2, generateWAMessage, generateWAMessageFromContent, proto } from "@whiskeysockets/baileys";
 import { randomBytes } from "node:crypto";
 import { renderBlocks } from "../../message-renderer.js";
+import { formatPlanPresentationText } from "../../plan-presentation.js";
 import { formatToolFlowInspectText, formatToolFlowSummary } from "../../tool-flow-presentation.js";
 import { formatActivitySummary, shortenPath } from "../../tool-presentation-model.js";
 import {
-  formatPlanPresentationText,
   formatToolPresentationDisplay,
   formatToolPresentationInspect,
   formatToolPresentationSummary,

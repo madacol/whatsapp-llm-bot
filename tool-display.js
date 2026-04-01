@@ -11,9 +11,9 @@ import {
   formatActivitySummary,
   shortenPath,
 } from "./tool-presentation-model.js";
+import { formatPlanPresentationText } from "./plan-presentation.js";
 import {
   formatBashCommand,
-  formatPlanPresentationText,
   formatToolPresentationDisplay,
   formatToolPresentationInspect,
   formatToolPresentationSummary,

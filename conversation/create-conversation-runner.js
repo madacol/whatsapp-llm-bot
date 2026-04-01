@@ -22,8 +22,9 @@ import { resolveChatBinding } from "../workspace-resolver.js";
 import { tryHandleWorkspaceCommand } from "../workspace-command-router.js";
 import { createWorkspaceControl } from "../workspace-control.js";
 import { markdownToWhatsApp } from "../message-renderer.js";
+import { formatPlanPresentationText } from "../plan-presentation.js";
 import { formatActivitySummary } from "../tool-presentation-model.js";
-import { formatPlanPresentationText, formatToolPresentationDisplay, formatToolPresentationSummary } from "../presentation/whatsapp.js";
+import { formatToolPresentationDisplay, formatToolPresentationSummary } from "../presentation/whatsapp.js";
 
 const log = createLogger("conversation:runner");
 const PRESENCE_LEASE_TTL_MS = 20_000;

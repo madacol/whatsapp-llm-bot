@@ -3,6 +3,7 @@
  */
 
 import { maxCharsForLineCount } from "../code-image-renderer.js";
+import { formatPlanPresentationInspect } from "../plan-presentation.js";
 import { formatStructuredInspectOutput } from "../tool-inspect-formatters.js";
 import { buildToolPresentation } from "../tool-presentation-model.js";
 
@@ -232,54 +233,6 @@ function formatInspectOutput(text, inspectMode) {
 }
 
 /**
- * @param {import("../tool-presentation-model.js").PlanPresentation} presentation
- * @returns {string[]}
- */
-function buildPlanInspectLines(presentation) {
-  /** @type {string[]} */
-  const lines = [];
-  if (presentation.explanation) {
-    lines.push(`_${presentation.explanation}_`);
-  }
-  for (const entry of presentation.entries) {
-    switch (entry.status) {
-      case "completed":
-        lines.push(`[x] ${entry.text}`);
-        break;
-      case "in_progress":
-        lines.push(`[~] ${entry.text}`);
-        break;
-      case "pending":
-        lines.push(`[ ] ${entry.text}`);
-        break;
-      default:
-        lines.push(`[-] ${entry.text}`);
-        break;
-    }
-  }
-  return lines;
-}
-
-/**
- * @param {import("../tool-presentation-model.js").PlanPresentation} presentation
- * @returns {string}
- */
-export function formatPlanPresentationText(presentation) {
-  const lines = buildPlanInspectLines(presentation);
-  const hasExplanation = typeof presentation.explanation === "string" && presentation.explanation.length > 0;
-  const hasEntries = presentation.entries.length > 0;
-  return lines.length > 0
-    ? [
-      "*Plan*",
-      "",
-      ...lines.slice(0, hasExplanation && hasEntries ? 1 : lines.length),
-      ...(hasExplanation && hasEntries ? [""] : []),
-      ...(hasExplanation && hasEntries ? lines.slice(1) : []),
-    ].join("\n")
-    : "*Plan*";
-}
-
-/**
  * @param {string} command
  * @param {string | undefined} output
  * @param {import("../tool-presentation-model.js").ToolInspectMode} inspectMode
@@ -381,14 +334,7 @@ export function formatToolPresentationInspect(presentation, output) {
         ? formatInspectOutput(output, presentation.inspectMode)
         : "_no output_";
     case "plan": {
-      const lines = buildPlanInspectLines(presentation);
-      const trimmedOutput = typeof output === "string" ? output.trim() : "";
-      const planText = presentation.entries.map((entry) => entry.text).join("\n");
-      const includeOutput = trimmedOutput.length > 0 && trimmedOutput !== planText;
-      if (lines.length === 0) {
-        return includeOutput ? trimmedOutput : null;
-      }
-      return includeOutput ? [...lines, "", trimmedOutput].join("\n") : lines.join("\n");
+      return formatPlanPresentationInspect(presentation, output);
     }
     case "bash":
       return formatCommandInspectText(presentation.command, output, presentation.inspectMode);

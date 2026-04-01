@@ -1,5 +1,6 @@
-import { buildToolPresentation, createPlanPresentationFromState, getToolFlowDescriptor } from "../tool-presentation-model.js";
+import { buildToolPresentation, getToolFlowDescriptor } from "../tool-presentation-model.js";
 import { toolCallUpdate, toolFlowInspectState, toolFlowUpdate, toolInspectState } from "../outbound-events.js";
+import { createPlanPresentationFromState } from "../plan-presentation.js";
 import { createCodexReasoningState } from "./codex-reasoning-state.js";
 import { createCodexRunState } from "./codex-run-state.js";
 import { createCodexSyntheticToolAdapter } from "./codex-synthetic-tools.js";

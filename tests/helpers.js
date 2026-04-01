@@ -4,8 +4,9 @@ import { createServer } from "node:http";
 import { EventEmitter } from "node:events";
 import { PGlite } from "@electric-sql/pglite";
 import { vector } from "@electric-sql/pglite/vector";
+import { formatPlanPresentationText } from "../plan-presentation.js";
 import { formatActivitySummary } from "../tool-presentation-model.js";
-import { formatPlanPresentationText, formatToolPresentationDisplay, formatToolPresentationSummary } from "../presentation/whatsapp.js";
+import { formatToolPresentationDisplay, formatToolPresentationSummary } from "../presentation/whatsapp.js";
 import { initStore } from "../store.js";
 
 const MODELS_CACHE_PATH = path.resolve("data/models.json");
