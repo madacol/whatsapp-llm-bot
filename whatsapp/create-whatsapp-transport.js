@@ -57,6 +57,7 @@ function serializeTransportError(error) {
  *   stop: () => Promise<void>;
  *   sendText: (chatId: string, text: string) => Promise<void>;
  *   createGroup: (subject: string, participants: string[]) => Promise<{ chatId: string, subject: string }>;
+ *   promoteParticipants: (chatId: string, participants: string[]) => Promise<void>;
  *   renameGroup: (chatId: string, subject: string) => Promise<void>;
  *   setAnnouncementOnly: (chatId: string, enabled: boolean) => Promise<void>;
  * }} ChatTransport
@@ -205,6 +206,14 @@ export async function createWhatsAppTransport() {
         chatId: metadata.id,
         subject: typeof metadata.subject === "string" ? metadata.subject : subject,
       };
+    },
+
+    async promoteParticipants(chatId, participants) {
+      const sock = currentSocket;
+      if (!sock) {
+        throw new Error("WhatsApp transport has not been started");
+      }
+      await sock.groupParticipantsUpdate(chatId, participants, "promote");
     },
 
     async renameGroup(chatId, subject) {

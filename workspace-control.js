@@ -77,6 +77,9 @@ export function createWorkspaceControl({ store, transport }) {
       const { branch, worktreePath } = await createWorkspaceWorktree(repo, workspaceName, baseBranch);
       try {
         const group = await transport.createGroup(`ws/${workspaceName}`, participants);
+        if (transport.promoteParticipants) {
+          await transport.promoteParticipants(group.chatId, participants);
+        }
         const workspace = await store.createWorkspace({
           repoId: repo.repo_id,
           name: workspaceName,
@@ -86,6 +89,7 @@ export function createWorkspaceControl({ store, transport }) {
           workspaceChatId: group.chatId,
           status: "ready",
         });
+        await store.setChatEnabled(group.chatId, true);
         await transport.sendText(group.chatId, await formatWorkspaceStatus(workspace));
         return [
           `Created workspace \`${workspace.name}\`.`,
