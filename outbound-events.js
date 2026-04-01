@@ -28,7 +28,7 @@ export function toolActivityEvent(activity) {
 }
 
 /**
- * @param {import("./tool-presentation-model.js").PlanPresentation} presentation
+ * @param {import("./plan-presentation.js").PlanPresentation} presentation
  * @returns {PlanEvent}
  */
 export function planEvent(presentation) {
