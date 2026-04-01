@@ -220,6 +220,52 @@ describe("createConversationRunner with codex harness", () => {
     assert.equal(secondTurn.responses.length, 0);
   });
 
+  it("routes !c to harness cancellation", async () => {
+    await seedChat("conv-codex-cancel", { enabled: true });
+    await db.sql`
+      UPDATE chats
+      SET harness = 'codex',
+          harness_config = '{}'::jsonb
+      WHERE chat_id = 'conv-codex-cancel'
+    `;
+
+    /** @type {string[]} */
+    const cancelledChatIds = [];
+    registerHarness("codex", () => ({
+      getName: () => "codex",
+      getCapabilities: () => ({
+        supportsResume: true,
+        supportsCancel: true,
+        supportsLiveInput: true,
+        supportsApprovals: true,
+        supportsWorkdir: true,
+        supportsSandboxConfig: true,
+        supportsModelSelection: true,
+        supportsReasoningEffort: false,
+        supportsSessionFork: true,
+      }),
+      cancel: (chatId) => {
+        cancelledChatIds.push(typeof chatId === "string" ? chatId : chatId.id);
+        return true;
+      },
+      run: async () => {
+        throw new Error("run should not be called for !c");
+      },
+    }));
+
+    const turn = createChatTurn({
+      chatId: "conv-codex-cancel",
+      content: [{ type: "text", text: "!c" }],
+    });
+    await handleMessage(turn.context);
+
+    assert.deepEqual(cancelledChatIds, ["conv-codex-cancel"]);
+    assert.ok(
+      turn.responses.some((response) => response.text === "Cancelled."),
+      `Expected !c to cancel the active harness run, got: ${turn.responses.map((response) => response.text).join(" | ")}`,
+    );
+  });
+
   it("does not refresh composing before the Codex tool-call display", async () => {
     await seedChat("conv-codex-presence", { enabled: true });
     await db.sql`

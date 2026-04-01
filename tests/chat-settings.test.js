@@ -439,8 +439,8 @@ describe("per-chat model selection", () => {
         { setting: "show", value: "commands off" },
       );
 
-      assert.ok(result.includes("Use `!c show`"), `expected picker guidance, got: ${result}`);
-      assert.ok(result.includes("!c reset show"), `expected reset guidance, got: ${result}`);
+      assert.ok(result.includes("Use `!s show`"), `expected picker guidance, got: ${result}`);
+      assert.ok(result.includes("!s reset show"), `expected reset guidance, got: ${result}`);
 
       const rows = await db.sql`SELECT output_visibility FROM chats WHERE chat_id = 'cfg-show-2'`;
       assert.deepEqual(rows.rows[0]?.output_visibility, {});

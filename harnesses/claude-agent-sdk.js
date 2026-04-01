@@ -986,7 +986,7 @@ export function createClaudeAgentSdkHarness() {
       }
       log.debug(`SDK query done: events=${eventCount} activeTools=${activeTools.size}`);
     } catch (err) {
-      // Don't log user-initiated abort as an error — it's expected from !cancel
+      // Don't log user-initiated abort as an error — it's expected from !c
       if (abortController.signal.aborted && !fatalAbortReason) {
         log.debug("SDK query was cancelled for chat", session.chatId);
       } else if (fatalAbortReason) {
@@ -1012,7 +1012,7 @@ export function createClaudeAgentSdkHarness() {
         }
         let displayMsg = errorMsg;
         if (errorMsg.includes("executable not found") && workdir) {
-          displayMsg += `\n\nHint: The folder setting is "${workdir}" — make sure this path exists. Use \`!c folder <path>\` to fix it or \`!c reset folder\` to use the chat workspace default.`;
+          displayMsg += `\n\nHint: The folder setting is "${workdir}" — make sure this path exists. Use \`!s folder <path>\` to fix it or \`!s reset folder\` to use the chat workspace default.`;
         }
         await hooks.onToolError(displayMsg);
         result.response = buildSdkErrorResponse(displayMsg);

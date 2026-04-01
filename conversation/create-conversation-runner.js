@@ -170,7 +170,7 @@ export function createConversationRunner({ store, llmClient, getActionsFn, execu
       return;
     }
 
-    if (commandText === "cancel") {
+    if (commandText === "c") {
       const { harness } = await resolveConversationHarness(chatInfo);
       if (harness.cancel?.(chatId)) {
         await context.reply(contentEvent("tool-result", "Cancelled."));
@@ -450,7 +450,7 @@ export function createConversationRunner({ store, llmClient, getActionsFn, execu
     const isSlashCommand = firstBlock?.text?.startsWith("/");
     if (isSlashCommand && firstBlock) {
       if (!chatInfo?.is_enabled) {
-        await context.reply(contentEvent("error", "Bot is not enabled in this chat. Use !c enabled on"));
+        await context.reply(contentEvent("error", "Bot is not enabled in this chat. Use !s enabled on"));
         return null;
       }
 

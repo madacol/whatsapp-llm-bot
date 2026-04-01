@@ -310,7 +310,7 @@ const BASE_CONFIG_KEYS = [
     setting: "enabled",
     label: "enabled",
     description: "Turns the bot on or off for this chat.",
-    examples: ["!c enabled on", "!c enabled off"],
+    examples: ["!s enabled on", "!s enabled off"],
     picker: {
       options: BOOL_VALUE_IDS,
       currentId: (chat) => chat.is_enabled ? "on" : "off",
@@ -332,7 +332,7 @@ const BASE_CONFIG_KEYS = [
     setting: "model",
     label: "model",
     description: "Chooses the main chat model for this chat.",
-    examples: ["!c model gpt-5.4", "!c reset model"],
+    examples: ["!s model gpt-5.4", "!s reset model"],
     resettable: true,
     formatCurrent: (chat) => chat.model ?? `${resolveModel("chat")} (default)`,
     formatDefault: () => resolveModel("chat"),
@@ -355,7 +355,7 @@ const BASE_CONFIG_KEYS = [
     label: "prompt",
     description: "Sets the system prompt used to steer replies in this chat.",
     aliases: ["system_prompt"],
-    examples: ["!c prompt Be concise and skeptical.", "!c reset prompt"],
+    examples: ["!s prompt Be concise and skeptical.", "!s reset prompt"],
     resettable: true,
     formatCurrent: (chat) => chat.system_prompt ?? `${config.system_prompt} (default)`,
     formatDefault: () => config.system_prompt,
@@ -373,7 +373,7 @@ const BASE_CONFIG_KEYS = [
     setting: "trigger",
     label: "trigger",
     description: "Controls when the bot responds in the chat.",
-    examples: ["!c trigger mention", "!c trigger mention+reply", "!c trigger any"],
+    examples: ["!s trigger mention", "!s trigger mention+reply", "!s trigger any"],
     picker: {
       options: RESPOND_ON_VALUES,
       currentId: (chat) => chat.respond_on ?? "mention",
@@ -394,7 +394,7 @@ const BASE_CONFIG_KEYS = [
     setting: "memory",
     label: "memory",
     description: "Turns long-term memory on or off for this chat.",
-    examples: ["!c memory on", "!c memory off"],
+    examples: ["!s memory on", "!s memory off"],
     picker: {
       options: BOOL_VALUE_IDS,
       currentId: (chat) => chat.memory ? "on" : "off",
@@ -413,7 +413,7 @@ const BASE_CONFIG_KEYS = [
     label: "threshold",
     description: "Sets the similarity threshold used when recalling memories.",
     aliases: ["memory_threshold"],
-    examples: ["!c threshold 0.7", "!c reset threshold"],
+    examples: ["!s threshold 0.7", "!s reset threshold"],
     resettable: true,
     formatCurrent: (chat) => String(chat.memory_threshold ?? config.memory_threshold),
     formatDefault: () => String(config.memory_threshold),
@@ -436,7 +436,7 @@ const BASE_CONFIG_KEYS = [
     setting: "debug",
     label: "debug",
     description: "Shows extra internal debugging details in this chat.",
-    examples: ["!c debug on", "!c debug off"],
+    examples: ["!s debug on", "!s debug off"],
     picker: {
       options: BOOL_VALUE_IDS,
       currentId: (chat) => chat.debug ? "on" : "off",
@@ -454,7 +454,7 @@ const BASE_CONFIG_KEYS = [
     setting: "harness",
     label: "harness",
     description: "Chooses which harness runs the conversation.",
-    examples: ["!c harness native", "!c harness codex", "!c reset harness"],
+    examples: ["!s harness native", "!s harness codex", "!s reset harness"],
     picker: {
       getOptions: () => listHarnesses(),
       currentId: (chat) => chat.harness ?? "native",
@@ -483,7 +483,7 @@ const BASE_CONFIG_KEYS = [
     label: "show",
     description: "Controls which extra agent progress outputs are shown in chat.",
     aliases: ["output_visibility", "output-visibility"],
-    examples: ["!c show", "!c reset show"],
+    examples: ["!s show", "!s reset show"],
     multiPicker: {
       getOptions: (chat) => getShowMultiPickerOptions(chat),
       currentIds: () => [],
@@ -513,7 +513,7 @@ const BASE_CONFIG_KEYS = [
         return formatOutputVisibilityChanges(chat.output_visibility, nextVisibility);
       }
       if (!areOutputVisibilityKeys(selectedIds)) {
-        return "Use `!c show` to pick visible outputs, or `!c reset show` to restore defaults.";
+        return "Use `!s show` to pick visible outputs, or `!s reset show` to restore defaults.";
       }
       const nextVisibility = toggleOutputVisibilityOverrides(chat.output_visibility, selectedIds);
       await rootDb.sql`
@@ -530,7 +530,7 @@ const BASE_CONFIG_KEYS = [
     label: "folder",
     description: "Sets the working folder used by the coding harness.",
     aliases: ["harness_cwd"],
-    examples: ["!c folder /home/mada/project", "!c reset folder"],
+    examples: ["!s folder /home/mada/project", "!s reset folder"],
     resettable: true,
     formatCurrent: (chat, extra) => {
       if (!extra.rootDb || !extra.chatId) {
@@ -587,7 +587,7 @@ const BASE_CONFIG_KEYS = [
     label: "media-reader",
     description: "Sets the fallback model used to read image, audio, and video inputs.",
     aliases: ["media_to_text_model"],
-    examples: ["!c media-reader openai/gpt-4.1", "!c reset media-reader"],
+    examples: ["!s media-reader openai/gpt-4.1", "!s reset media-reader"],
     resettable: true,
     formatCurrent: (chat) => chat.media_to_text_models?.general ?? "default",
     formatDefault: () => "default",
@@ -627,7 +627,7 @@ const BASE_CONFIG_KEYS = [
     label: "image-reader",
     description: "Sets the model used to read images in this chat.",
     aliases: ["image_to_text_model"],
-    examples: ["!c image-reader openai/gpt-4.1", "!c reset image-reader"],
+    examples: ["!s image-reader openai/gpt-4.1", "!s reset image-reader"],
     resettable: true,
     formatCurrent: (chat) => chat.media_to_text_models?.image ?? "default",
     formatDefault: () => "default",
@@ -667,7 +667,7 @@ const BASE_CONFIG_KEYS = [
     label: "audio-reader",
     description: "Sets the model used to read audio in this chat.",
     aliases: ["audio_to_text_model"],
-    examples: ["!c audio-reader openai/gpt-4.1", "!c reset audio-reader"],
+    examples: ["!s audio-reader openai/gpt-4.1", "!s reset audio-reader"],
     resettable: true,
     formatCurrent: (chat) => chat.media_to_text_models?.audio ?? "default",
     formatDefault: () => "default",
@@ -707,7 +707,7 @@ const BASE_CONFIG_KEYS = [
     label: "video-reader",
     description: "Sets the model used to read videos in this chat.",
     aliases: ["video_to_text_model"],
-    examples: ["!c video-reader openai/gpt-4.1", "!c reset video-reader"],
+    examples: ["!s video-reader openai/gpt-4.1", "!s reset video-reader"],
     resettable: true,
     formatCurrent: (chat) => chat.media_to_text_models?.video ?? "default",
     formatDefault: () => "default",
@@ -747,13 +747,13 @@ const BASE_CONFIG_KEYS = [
     label: "action",
     aliases: ["actions"],
     description: "Enables or disables one opt-in action for this chat.",
-    examples: ["!c action searchWeb on", "!c action searchWeb off"],
+    examples: ["!s action searchWeb on", "!s action searchWeb off"],
     formatCurrent: async (chat, extra) => formatOptInActions(chat.enabled_actions ?? [], extra.getActions),
     formatDefault: () => "all opt-in actions off",
     setValue: async ({ rootDb, chatId, value, extra }) => {
       const parts = value.trim().split(/\s+/);
       if (parts.length < 2) {
-        return "Usage: !c action <action_name> <on|off>";
+        return "Usage: !s action <action_name> <on|off>";
       }
       const actionName = parts[0];
       const actionEnabled = toBool(parts[1]);
@@ -799,7 +799,7 @@ const ROLE_CONFIG_KEYS = Object.keys(ROLE_DEFINITIONS)
     label: roleSettingToFriendlyKey(roleName),
     description: ROLE_DEFINITIONS[roleName].description,
     aliases: [`${roleName}_model`, roleName],
-    examples: [`!c ${roleSettingToFriendlyKey(roleName)} openai/gpt-4.1`, `!c reset ${roleSettingToFriendlyKey(roleName)}`],
+    examples: [`!s ${roleSettingToFriendlyKey(roleName)} openai/gpt-4.1`, `!s reset ${roleSettingToFriendlyKey(roleName)}`],
     resettable: true,
     formatCurrent: (chat) => chat.model_roles?.[roleName] ?? "default",
     formatDefault: () => resolveModel(roleName),
@@ -1002,9 +1002,9 @@ export async function getChatSettingsInfo(rootDb, chatId, extra) {
     `- opt-in actions: ${optInStr}`,
     "",
     "Use",
-    "- `!c <key>` to inspect a setting",
-    "- `!c help <key>` for the full description and examples",
-    "- `!c reset <key>` to revert a resettable setting",
+    "- `!s <key>` to inspect a setting",
+    "- `!s help <key>` for the full description and examples",
+    "- `!s reset <key>` to revert a resettable setting",
   ];
 
   return lines.join("\n");

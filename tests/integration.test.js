@@ -128,9 +128,9 @@ describe("Scenario 1: Enable/disable chat flow", () => {
     await seedChat(chatId);
   });
 
-  it("master user enables chat with !c enabled on", async () => {
+  it("master user enables chat with !s enabled on", async () => {
     const chat = await t.chat(chatId);
-    const r = await chat.send("!c enabled on");
+    const r = await chat.send("!s enabled on");
     assert.ok(r.raw.length > 0, "Bot should respond");
     assert.ok(r.raw.some(x => x.text.toLowerCase().includes("enabled")), "Should confirm enabling");
   });
@@ -142,9 +142,9 @@ describe("Scenario 1: Enable/disable chat flow", () => {
     assert.ok(r.raw.some(x => x.text.includes("Hello from the LLM!")), "Response should include LLM output");
   });
 
-  it("master user disables chat with !c enabled off", async () => {
+  it("master user disables chat with !s enabled off", async () => {
     const chat = await t.chat(chatId);
-    const r = await chat.send("!c enabled off");
+    const r = await chat.send("!s enabled off");
     assert.ok(r.raw.length > 0, "Bot should respond");
     assert.ok(r.raw.some(x => x.text.toLowerCase().includes("disabled")), "Should confirm disabling");
   });
@@ -160,9 +160,9 @@ describe("Scenario 1: Enable/disable chat flow", () => {
 // Scenario 2: Non-master cannot enable / disable
 // ═══════════════════════════════════════════════════════════════════
 describe("Scenario 2: Non-master cannot enable/disable", () => {
-  it("rejects !c enabled from non-master user", async () => {
+  it("rejects !s enabled from non-master user", async () => {
     const chat = await t.chat("s2-chat");
-    const r = await chat.send("!c enabled on", { sender: { id: "non-master-user" } });
+    const r = await chat.send("!s enabled on", { sender: { id: "non-master-user" } });
     assert.ok(r.raw.length > 0, "Bot should respond with error");
     assert.ok(r.raw.some(x => x.text.toLowerCase().includes("master")), "Should mention master permissions");
   });
@@ -203,13 +203,13 @@ describe("Scenario 3b: Clone repository command", () => {
 // Scenario 4: Set and get system prompt
 // ═══════════════════════════════════════════════════════════════════
 describe("Scenario 4: Set and get system prompt", () => {
-  it("sets and retrieves prompt help with !c prompt", async () => {
+  it("sets and retrieves prompt help with !s prompt", async () => {
     const chat = await t.chat("s4-chat", { enabled: true });
 
-    const r1 = await chat.send("!c prompt pirate");
+    const r1 = await chat.send("!s prompt pirate");
     assert.ok(r1.raw.some(x => x.text.includes("pirate")), "Should confirm prompt containing 'pirate'");
 
-    const r2 = await chat.send("!c prompt");
+    const r2 = await chat.send("!s prompt");
     assert.ok(r2.raw.some(x => x.text.includes("pirate")), "Should return prompt containing 'pirate'");
     assert.ok(r2.raw.some(x => x.text.toLowerCase().includes("what it does")), "Should include help text");
   });
@@ -227,14 +227,14 @@ describe("Scenario 5: Set and get model", () => {
     ]));
   });
 
-  it("sets and retrieves model with !c model", async () => {
+  it("sets and retrieves model with !s model", async () => {
     const chat = await t.chat("s5-chat", { enabled: true });
 
-    const r1 = await chat.send("!c model gpt-4.1-mini");
+    const r1 = await chat.send("!s model gpt-4.1-mini");
     assert.ok(r1.raw.some(x => x.text.includes("Model set to")),
       `Should confirm model was set, got: ${JSON.stringify(r1.raw.map(x => x.text))}`);
 
-    const r2 = await chat.send("!c");
+    const r2 = await chat.send("!s");
     assert.ok(r2.raw.some(x => x.text.includes("gpt-4.1-mini")), "Should return model name in info output");
   });
 });
@@ -261,24 +261,24 @@ describe("Scenario 6: New conversation clears history", () => {
 // Scenario 7: Show info
 // ═══════════════════════════════════════════════════════════════════
 describe("Scenario 7: Show info", () => {
-  it("!c shows chat ID, enabled status, and sender info", async () => {
+  it("!s shows chat ID, enabled status, and sender info", async () => {
     const chatId = "s7-chat";
     const chat = await t.chat(chatId, { enabled: true });
-    const r = await chat.send("!c");
+    const r = await chat.send("!s");
     const allText = r.raw.map(x => x.text).join(" ");
     assert.ok(allText.includes(chatId), "Should contain chat ID");
     assert.ok(allText.toLowerCase().includes("enabled"), "Should contain enabled status");
     assert.ok(allText.toLowerCase().includes("sender"), "Should contain sender info");
   });
 
-  it("resets folder with !c reset folder", async () => {
+  it("resets folder with !s reset folder", async () => {
     const chatId = "s7-folder";
     const chat = await t.chat(chatId, { enabled: true });
 
-    const r1 = await chat.send("!c folder /tmp");
+    const r1 = await chat.send("!s folder /tmp");
     assert.ok(r1.raw.some(x => x.text.includes("/tmp")), `Should confirm folder was set, got: ${JSON.stringify(r1.raw.map(x => x.text))}`);
 
-    const r2 = await chat.send("!c reset folder");
+    const r2 = await chat.send("!s reset folder");
     assert.ok(r2.raw.some(x => x.text.toLowerCase().includes("workspace") || x.text.toLowerCase().includes("default")),
       `Should confirm folder reset, got: ${JSON.stringify(r2.raw.map(x => x.text))}`);
   });
