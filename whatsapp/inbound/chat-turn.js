@@ -127,6 +127,18 @@ function extractSenderJids(key) {
 }
 
 /**
+ * Normalize sender JIDs so downstream code can safely reuse them for transport
+ * operations like group creation.
+ * @param {ReturnType<typeof extractSenderJids>} senderJids
+ * @param {import('@whiskeysockets/baileys').WASocket} sock
+ * @returns {Promise<string[]>}
+ */
+async function normalizeSenderJids(senderJids, sock) {
+  const normalized = await Promise.all(senderJids.map((jid) => normalizeChatId(jid, sock)));
+  return [...new Set(normalized)];
+}
+
+/**
  * Convert a Baileys timestamp into a Date.
  * @param {BaileysMessage["messageTimestamp"]} value
  * @returns {Date}
@@ -455,7 +467,7 @@ export async function buildIncomingTurn(
 
   const key = /** @type {BaileysMessage["key"] & { participantLid?: string, participantPid?: string, senderLid?: string, senderPid?: string }} */ (turnMessage.key);
   const senderIds = extractSenderIds(key);
-  const senderJids = extractSenderJids(key);
+  const senderJids = await normalizeSenderJids(extractSenderJids(key), sock);
   const isGroup = chatId.endsWith("@g.us");
   const selfIds = getSelfIds(sock);
   const addressedToBot = detectBotMention(content, selfIds);

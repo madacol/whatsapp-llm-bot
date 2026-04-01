@@ -732,6 +732,47 @@ describe("createTurnIo", () => {
 });
 
 describe("HD receive integration", () => {
+  it("normalizes sender JIDs from LID addressing before exposing the turn", async () => {
+    const rawChatId = "147025689575646@lid";
+    const normalizedChatId = "353833927239@s.whatsapp.net";
+    const confirmRegistry = createConfirmRuntime();
+    const userResponseRegistry = createSelectRuntime();
+    const sock = /** @type {import("@whiskeysockets/baileys").WASocket} */ (/** @type {unknown} */ ({
+      user: { id: "bot@s.whatsapp.net" },
+      signalRepository: {
+        lidMapping: {
+          getPNForLID: async (lid) => lid === rawChatId ? normalizedChatId : null,
+        },
+      },
+      sendPresenceUpdate: async () => {},
+      readMessages: async () => {},
+    }));
+
+    await adaptIncomingMessage(
+      /** @type {BaileysMessage} */ (/** @type {unknown} */ ({
+        key: {
+          remoteJid: rawChatId,
+          fromMe: false,
+          id: "lid-turn-1",
+          senderLid: rawChatId,
+          senderPid: normalizedChatId,
+        },
+        message: {
+          conversation: "!new asd",
+        },
+        messageTimestamp: Math.floor(Date.now() / 1000),
+        pushName: "LID User",
+      })),
+      sock,
+      async (ctx) => {
+        assert.equal(ctx.chatId, normalizedChatId);
+        assert.deepEqual(ctx.senderJids, [normalizedChatId]);
+      },
+      confirmRegistry,
+      userResponseRegistry,
+    );
+  });
+
   it("normalizes HD child chat IDs before resolving the pending parent upgrade", async () => {
     const rawChatId = "12345@lid";
     const normalizedChatId = "12345@s.whatsapp.net";

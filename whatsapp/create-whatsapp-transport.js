@@ -9,6 +9,49 @@ import { createSelectRuntime } from "./runtime/select-runtime.js";
 const log = createLogger("whatsapp");
 
 /**
+ * @param {unknown} value
+ * @returns {value is Record<string, unknown>}
+ */
+function isRecord(value) {
+  return typeof value === "object" && value !== null;
+}
+
+/**
+ * @param {unknown} error
+ * @returns {Record<string, unknown>}
+ */
+function serializeTransportError(error) {
+  if (!isRecord(error)) {
+    return { value: String(error) };
+  }
+
+  /** @type {Record<string, unknown>} */
+  const serialized = {};
+
+  for (const key of Object.getOwnPropertyNames(error)) {
+    serialized[key] = error[key];
+  }
+
+  if (error instanceof Error) {
+    serialized.name = error.name;
+    serialized.message = error.message;
+    serialized.stack = error.stack;
+  }
+
+  if ("data" in error) {
+    serialized.data = error.data;
+  }
+  if ("output" in error && isRecord(error.output)) {
+    serialized.output = error.output;
+  }
+  if ("statusCode" in error) {
+    serialized.statusCode = error.statusCode;
+  }
+
+  return serialized;
+}
+
+/**
  * @typedef {{
  *   start: (onTurn: (turn: ChatTurn) => Promise<void>) => Promise<void>;
  *   stop: () => Promise<void>;
@@ -144,7 +187,17 @@ export async function createWhatsAppTransport() {
       if (!sock) {
         throw new Error("WhatsApp transport has not been started");
       }
-      const metadata = await sock.groupCreate(subject, participants);
+      let metadata;
+      try {
+        metadata = await sock.groupCreate(subject, participants);
+      } catch (error) {
+        log.error("WhatsApp groupCreate failed:", {
+          subject,
+          participants,
+          error: serializeTransportError(error),
+        });
+        throw error;
+      }
       if (typeof metadata.id !== "string") {
         throw new Error("Baileys groupCreate returned no group id.");
       }

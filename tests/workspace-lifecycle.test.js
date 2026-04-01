@@ -75,6 +75,21 @@ function createFakeTransport() {
 }
 
 /**
+ * @param {string} message
+ * @returns {ChatTransport}
+ */
+function createFailingGroupTransport(message) {
+  return {
+    start: async () => {},
+    stop: async () => {},
+    sendText: async () => {},
+    createGroup: async () => {
+      throw new Error(message);
+    },
+  };
+}
+
+/**
  * @param {string} cwd
  * @param {string[]} args
  * @returns {Promise<string>}
@@ -164,6 +179,26 @@ after(async () => {
 });
 
 describe("workspace lifecycle", () => {
+  it("surfaces WhatsApp group creation failures with context", async () => {
+    const repoRoot = await createRepoFixture();
+    const handleMessage = await createHandler({
+      transport: createFailingGroupTransport("bad-request"),
+    });
+
+    await seedChat("repo-create-fail-chat", { harnessCwd: repoRoot });
+
+    const turn = createChatTurn({
+      chatId: "repo-create-fail-chat",
+      content: [{ type: "text", text: "!new asd" }],
+    });
+    await handleMessage(turn.context);
+
+    assert.ok(
+      turn.responses.some((response) => response.text.includes("WhatsApp group creation failed: bad-request")),
+      "expected !new to explain that WhatsApp group creation failed",
+    );
+  });
+
   it("creates a workspace chat, worktree, and branch from !new", async () => {
     const repoRoot = await createRepoFixture();
     const transportState = createFakeTransport();
