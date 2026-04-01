@@ -4,7 +4,7 @@ import { contentEvent } from "./outbound-events.js";
 /**
  * @typedef {{
  *   list: (repo: RepoRow) => Promise<string>;
- *   create: (repo: RepoRow, context: ExecuteActionContext, workspaceName: string, explicitBaseBranch?: string) => Promise<string>;
+ *   create: (repo: RepoRow, context: ExecuteActionContext, workspaceName: string, baseBranch: string) => Promise<{ message: string, workspace: WorkspaceRow | null }>;
  *   status: (workspace: WorkspaceRow) => Promise<string>;
  *   diff: (workspace: WorkspaceRow) => Promise<string>;
  *   test: (workspace: WorkspaceRow) => Promise<string>;
@@ -40,20 +40,26 @@ function parseCommandText(inputText) {
 
 /**
  * @param {string} argsText
- * @returns {{ workspaceName: string, explicitBaseBranch?: string } | null}
+ * @returns {{ workspaceName: string, seedPrompt?: string } | null}
  */
 function parseNewArgs(argsText) {
   const trimmed = argsText.trim();
   if (!trimmed) {
     return null;
   }
-  const match = trimmed.match(/^([A-Za-z0-9_-]+)(?:\s+from\s+(.+))?$/i);
-  if (!match?.[1]) {
+  const separatorIndex = trimmed.indexOf(":");
+  const rawWorkspaceName = separatorIndex === -1
+    ? trimmed
+    : trimmed.slice(0, separatorIndex).trim();
+  if (!rawWorkspaceName) {
     return null;
   }
+  const rawSeedPrompt = separatorIndex === -1
+    ? ""
+    : trimmed.slice(separatorIndex + 1).trim();
   return {
-    workspaceName: match[1],
-    ...(typeof match[2] === "string" && match[2].trim() ? { explicitBaseBranch: match[2].trim() } : {}),
+    workspaceName: rawWorkspaceName,
+    ...(rawSeedPrompt ? { seedPrompt: rawSeedPrompt } : {}),
   };
 }
 
@@ -77,7 +83,7 @@ function isWorkspaceOnlyCommand(loweredCommandText) {
  * @returns {boolean}
  */
 function isRepoOnlyCommand(loweredCommandText) {
-  return loweredCommandText === "list" || loweredCommandText === "new";
+  return loweredCommandText === "list";
 }
 
 /**
@@ -104,10 +110,11 @@ async function replyError(context, message) {
  *   binding: ResolvedChatBinding,
  *   inputText: string,
  *   workspaceControl: WorkspaceControl,
+ *   seedWorkspace?: (workspace: WorkspaceRow, seedPrompt: string) => Promise<void>,
  * }} input
  * @returns {Promise<boolean>}
  */
-export async function tryHandleWorkspaceCommand({ context, binding, inputText, workspaceControl }) {
+export async function tryHandleWorkspaceCommand({ context, binding, inputText, workspaceControl, seedWorkspace }) {
   const { name, argsText, lowered } = parseCommandText(inputText);
 
   if (!name) {
@@ -129,13 +136,14 @@ export async function tryHandleWorkspaceCommand({ context, binding, inputText, w
       if (name === "new") {
         const parsed = parseNewArgs(argsText);
         if (!parsed) {
-          await replyError(context, "Usage: `!new <name>` or `!new <name> from <base>`.");
+          await replyError(context, "Usage: `!new <name>` or `!new <name>: <seed prompt>`.");
           return true;
         }
-        await replyToolResult(
-          context,
-          await workspaceControl.create(binding.repo, context, parsed.workspaceName, parsed.explicitBaseBranch),
-        );
+        const result = await workspaceControl.create(binding.repo, context, parsed.workspaceName, binding.repo.default_base_branch);
+        if (parsed.seedPrompt && result.workspace && seedWorkspace) {
+          await seedWorkspace(result.workspace, parsed.seedPrompt);
+        }
+        await replyToolResult(context, result.message);
         return true;
       }
 
@@ -179,6 +187,19 @@ export async function tryHandleWorkspaceCommand({ context, binding, inputText, w
 
       if (name === "status" && !argsText) {
         await replyToolResult(context, await workspaceControl.status(binding.workspace));
+        return true;
+      }
+      if (name === "new") {
+        const parsed = parseNewArgs(argsText);
+        if (!parsed) {
+          await replyError(context, "Usage: `!new <name>` or `!new <name>: <seed prompt>`.");
+          return true;
+        }
+        const result = await workspaceControl.create(binding.repo, context, parsed.workspaceName, binding.workspace.branch);
+        if (parsed.seedPrompt && result.workspace && seedWorkspace) {
+          await seedWorkspace(result.workspace, parsed.seedPrompt);
+        }
+        await replyToolResult(context, result.message);
         return true;
       }
       if (name === "diff" && !argsText) {

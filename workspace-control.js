@@ -16,6 +16,11 @@ import { errorToString } from "./utils.js";
 
 /**
  * @typedef {import("./store.js").Store} Store
+ *
+ * @typedef {{
+ *   message: string,
+ *   workspace: WorkspaceRow | null,
+ * }} WorkspaceCreationResult
  */
 
 /**
@@ -77,15 +82,15 @@ export function createWorkspaceControl({ store, transport }) {
      * @param {RepoRow} repo
      * @param {ExecuteActionContext} context
      * @param {string} workspaceName
-     * @param {string | undefined} explicitBaseBranch
-     * @returns {Promise<string>}
+     * @param {string} baseBranch
+     * @returns {Promise<WorkspaceCreationResult>}
      */
-    async create(repo, context, workspaceName, explicitBaseBranch) {
+    async create(repo, context, workspaceName, baseBranch) {
       if (!transport?.createGroup) {
         throw new Error("Workspace creation requires transport group creation support.");
       }
       if (!isValidWorkspaceName(workspaceName)) {
-        throw new Error("Workspace name is invalid. Use letters, numbers, `-`, and `_`.");
+        throw new Error("Workspace name is invalid. Use letters, numbers, spaces, `-`, and `_`.");
       }
 
       const existing = await store.getWorkspaceByName(repo.repo_id, workspaceName);
@@ -96,15 +101,17 @@ export function createWorkspaceControl({ store, transport }) {
           { deleteOnSelect: true, cancelIds: ["cancel"] },
         );
         if (choice === "replace") {
-          return this.replace(repo, context, existing, explicitBaseBranch);
+          return this.replace(repo, context, existing, baseBranch);
         }
         if (choice === "new") {
-          return "Use `!new <different-name>` to create another workspace without replacing the current one.";
+          return {
+            message: "Use `!new <different-name>` to create another workspace without replacing the current one.",
+            workspace: null,
+          };
         }
-        return "Workspace creation cancelled.";
+        return { message: "Workspace creation cancelled.", workspace: null };
       }
 
-      const baseBranch = explicitBaseBranch ?? repo.default_base_branch;
       const participants = getInitialWorkspaceParticipants(context);
       const workspaceChatSubject = buildWorkspaceChatSubject(workspaceName, context.chatName);
       if (participants.length === 0) {
@@ -130,12 +137,15 @@ export function createWorkspaceControl({ store, transport }) {
         await store.copyChatCustomizations(context.chatId, group.chatId);
         await store.setChatEnabled(group.chatId, true);
         await transport.sendText(group.chatId, await formatWorkspaceStatus(workspace));
-        return [
-          `Created workspace \`${workspace.name}\`.`,
-          `Branch: \`${workspace.branch}\``,
-          `Base: \`${workspace.base_branch}\``,
-          `Chat: \`${group.subject}\``,
-        ].join("\n");
+        return {
+          message: [
+            `Created workspace \`${workspace.name}\`.`,
+            `Branch: \`${workspace.branch}\``,
+            `Base: \`${workspace.base_branch}\``,
+            `Chat: \`${group.subject}\``,
+          ].join("\n"),
+          workspace,
+        };
       } catch (error) {
         await cleanupWorkspaceWorktree(repo, branch, worktreePath);
         throw new Error(`WhatsApp group creation failed: ${errorToString(error)}`);
@@ -146,14 +156,13 @@ export function createWorkspaceControl({ store, transport }) {
      * @param {RepoRow} repo
      * @param {ExecuteActionContext} context
      * @param {WorkspaceRow} existing
-     * @param {string | undefined} explicitBaseBranch
-     * @returns {Promise<string>}
+     * @param {string} baseBranch
+     * @returns {Promise<WorkspaceCreationResult>}
      */
-    async replace(repo, context, existing, explicitBaseBranch) {
+    async replace(repo, context, existing, baseBranch) {
       if (!transport?.sendText) {
         throw new Error("Workspace replacement requires transport messaging support.");
       }
-      const baseBranch = explicitBaseBranch ?? existing.base_branch;
       const participants = getInitialWorkspaceParticipants(context);
       const workspaceChatSubject = buildWorkspaceChatSubject(existing.name, context.chatName);
 
@@ -182,12 +191,15 @@ export function createWorkspaceControl({ store, transport }) {
         }
       }
       await transport.sendText(existing.workspace_chat_id, await formatWorkspaceStatus(workspace));
-      return [
-        `Replaced workspace \`${workspace.name}\`.`,
-        `Branch: \`${workspace.branch}\``,
-        `Base: \`${workspace.base_branch}\``,
-        `Chat: \`${workspaceChatSubject}\``,
-      ].join("\n");
+      return {
+        message: [
+          `Replaced workspace \`${workspace.name}\`.`,
+          `Branch: \`${workspace.branch}\``,
+          `Base: \`${workspace.base_branch}\``,
+          `Chat: \`${workspaceChatSubject}\``,
+        ].join("\n"),
+        workspace,
+      };
     },
 
     /**

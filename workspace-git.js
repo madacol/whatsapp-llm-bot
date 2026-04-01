@@ -123,7 +123,7 @@ export async function inspectGitWorkspace(cwd) {
  * @returns {boolean}
  */
 export function isValidWorkspaceName(workspaceName) {
-  return /^[A-Za-z0-9_-]+$/.test(workspaceName);
+  return /^[A-Za-z0-9][A-Za-z0-9 _-]*$/.test(workspaceName.trim());
 }
 
 /**
@@ -131,16 +131,64 @@ export function isValidWorkspaceName(workspaceName) {
  * @returns {string}
  */
 export function getWorkspaceBranchName(workspaceName) {
-  return workspaceName;
+  const slug = workspaceName
+    .trim()
+    .toLowerCase()
+    .replace(/[_\s]+/g, "-")
+    .replace(/[^a-z0-9-]/g, "")
+    .replace(/-+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  if (!slug) {
+    throw new Error("Workspace name must contain at least one letter or number.");
+  }
+  return slug;
+}
+
+/**
+ * @param {RepoRow} repo
+ * @param {string} workspaceKey
+ * @returns {string}
+ */
+export function getWorkspacePath(repo, workspaceKey) {
+  return path.resolve(repo.root_path, "..", ".madabot-worktrees", repo.name, workspaceKey);
+}
+
+/**
+ * @param {string} targetPath
+ * @returns {Promise<boolean>}
+ */
+async function pathExists(targetPath) {
+  try {
+    await fs.access(targetPath);
+    return true;
+  } catch (error) {
+    if (/** @type {NodeJS.ErrnoException} */ (error).code === "ENOENT") {
+      return false;
+    }
+    throw error;
+  }
 }
 
 /**
  * @param {RepoRow} repo
  * @param {string} workspaceName
- * @returns {string}
+ * @returns {Promise<{ branch: string, worktreePath: string }>}
  */
-export function getWorkspacePath(repo, workspaceName) {
-  return path.resolve(repo.root_path, "..", ".madabot-worktrees", repo.name, workspaceName);
+async function resolveWorkspaceRef(repo, workspaceName) {
+  const baseKey = getWorkspaceBranchName(workspaceName);
+  let suffix = 1;
+
+  while (true) {
+    const candidateKey = suffix === 1 ? baseKey : `${baseKey}-${suffix}`;
+    const candidatePath = getWorkspacePath(repo, candidateKey);
+    if (!await branchExists(repo.root_path, candidateKey) && !await pathExists(candidatePath)) {
+      return {
+        branch: candidateKey,
+        worktreePath: candidatePath,
+      };
+    }
+    suffix += 1;
+  }
 }
 
 /**
@@ -372,19 +420,14 @@ export async function runWorkspaceVerification(cwd) {
  */
 export async function createWorkspaceWorktree(repo, workspaceName, baseBranch) {
   if (!isValidWorkspaceName(workspaceName)) {
-    throw new Error("Workspace name is invalid. Use letters, numbers, `-`, and `_`.");
+    throw new Error("Workspace name is invalid. Use letters, numbers, spaces, `-`, and `_`.");
   }
   if (!await ensureBranchExists(repo.root_path, baseBranch)) {
     throw new Error(`Base branch \`${baseBranch}\` does not exist.`);
   }
 
-  const branch = getWorkspaceBranchName(workspaceName);
-  const worktreePath = getWorkspacePath(repo, workspaceName);
+  const { branch, worktreePath } = await resolveWorkspaceRef(repo, workspaceName);
   await fs.mkdir(path.dirname(worktreePath), { recursive: true });
-
-  if (await branchExists(repo.root_path, branch)) {
-    throw new Error(`Workspace branch \`${branch}\` already exists.`);
-  }
 
   const addResult = await runGit(repo.root_path, ["worktree", "add", "-b", branch, worktreePath, baseBranch]);
   if (addResult.exitCode !== 0) {
