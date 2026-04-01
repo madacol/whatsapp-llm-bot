@@ -30,6 +30,20 @@ describe("markdownToWhatsApp", () => {
     assert.equal(markdownToWhatsApp("[click](http://x.com)"), "click (http://x.com)");
   });
 
+  it("does not double-wrap local file links whose label is already inline code", () => {
+    assert.equal(
+      markdownToWhatsApp("[`message-renderer.js`](/home/mada/whatsapp-llm-bot/message-renderer.js)"),
+      "`message-renderer.js`",
+    );
+  });
+
+  it("keeps a single inline code wrapper when local file links add line context", () => {
+    assert.equal(
+      markdownToWhatsApp("[`message-renderer.js`](/home/mada/whatsapp-llm-bot/message-renderer.js#L72)"),
+      "`message-renderer.js:72`",
+    );
+  });
+
   it("converts ![alt](url) images before links", () => {
     assert.equal(markdownToWhatsApp("![photo](http://img.png)"), "photo (http://img.png)");
   });
