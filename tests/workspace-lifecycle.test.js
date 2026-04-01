@@ -206,6 +206,30 @@ describe("workspace lifecycle", () => {
     );
   });
 
+  it("suggests replace or cancel when !new hits an existing workspace", async () => {
+    const repoRoot = await createRepoFixture();
+    const transportState = createFakeTransport();
+    const handleMessage = await createHandler({ transport: transportState.transport });
+
+    await seedChat("repo-duplicate-chat", { harnessCwd: repoRoot });
+
+    await handleMessage(createChatTurn({
+      chatId: "repo-duplicate-chat",
+      content: [{ type: "text", text: "!new payments" }],
+    }).context);
+
+    const turn = createChatTurn({
+      chatId: "repo-duplicate-chat",
+      content: [{ type: "text", text: "!new payments" }],
+    });
+    await handleMessage(turn.context);
+
+    assert.ok(
+      turn.responses.some((response) => response.text.includes("already exists") && response.text.includes("replace") && response.text.includes("cancel")),
+      `expected duplicate !new to suggest replace/cancel, got: ${turn.responses.map((response) => response.text).join(" | ")}`,
+    );
+  });
+
   it("creates a workspace chat, worktree, and branch from !new", async () => {
     const repoRoot = await createRepoFixture();
     const transportState = createFakeTransport();
