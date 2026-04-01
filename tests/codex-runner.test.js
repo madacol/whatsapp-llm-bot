@@ -773,10 +773,10 @@ describe("startCodexRun", () => {
     assert.equal(recorded.updates.length, 0);
     assert.equal(recorded.inspects.length, 2);
     assert.equal(recorded.inspects[0]?.kind, "tool");
-    assert.equal(recorded.inspects[0]?.presentation.summary, "*Plan*  _1 step_");
+    assert.equal(recorded.inspects[0]?.presentation.summary, "*Plan*  _All 1 step completed_");
     assert.equal(recorded.inspects[0]?.output, undefined);
     assert.equal(recorded.inspects[1]?.kind, "tool");
-    assert.equal(recorded.inspects[1]?.presentation.summary, "*Plan*  _1 step_");
+    assert.equal(recorded.inspects[1]?.presentation.summary, "*Plan*  _All 1 step completed_");
     assert.equal(recorded.inspects[1]?.output, "Plan updated");
   });
 

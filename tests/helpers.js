@@ -5,7 +5,7 @@ import { EventEmitter } from "node:events";
 import { PGlite } from "@electric-sql/pglite";
 import { vector } from "@electric-sql/pglite/vector";
 import { formatActivitySummary } from "../tool-presentation-model.js";
-import { formatToolPresentationDisplay, formatToolPresentationSummary } from "../presentation/whatsapp.js";
+import { formatPlanPresentationText, formatToolPresentationDisplay, formatToolPresentationSummary } from "../presentation/whatsapp.js";
 import { initStore } from "../store.js";
 
 const MODELS_CACHE_PATH = path.resolve("data/models.json");
@@ -84,7 +84,7 @@ export function createChatTurn(overrides = {}) {
         break;
       case "plan":
         source = "llm";
-        content = [{ type: "markdown", text: `*Plan*\n\n${event.text}` }];
+        content = [{ type: "markdown", text: formatPlanPresentationText(event.presentation) }];
         break;
       case "usage":
         source = "usage";

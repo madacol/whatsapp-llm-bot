@@ -56,6 +56,20 @@ export {
 
 /**
  * @typedef {{
+ *   text: string,
+ *   status: "completed" | "in_progress" | "pending" | "unknown",
+ * }} CodexPlanEntry
+ */
+
+/**
+ * @typedef {{
+ *   explanation: string | null,
+ *   entries: CodexPlanEntry[],
+ * }} CodexPlanState
+ */
+
+/**
+ * @typedef {{
  *   sessionId: string | null,
  *   usage?: HarnessUsage,
  *   failureMessage?: string,
@@ -63,7 +77,7 @@ export {
  *   toolEvent?: CodexToolEvent,
  *   reasoningEvent?: CodexReasoningEvent,
  *   assistantText?: string,
- *   planText?: string,
+ *   plan?: CodexPlanState,
  *   fileChange?: CodexFileChangeEvent,
  *   fileChanges?: CodexFileChangeEvent[],
  * }} NormalizedCodexEvent

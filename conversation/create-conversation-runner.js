@@ -23,7 +23,7 @@ import { tryHandleWorkspaceCommand } from "../workspace-command-router.js";
 import { createWorkspaceControl } from "../workspace-control.js";
 import { markdownToWhatsApp } from "../message-renderer.js";
 import { formatActivitySummary } from "../tool-presentation-model.js";
-import { formatToolPresentationDisplay, formatToolPresentationSummary } from "../presentation/whatsapp.js";
+import { formatPlanPresentationText, formatToolPresentationDisplay, formatToolPresentationSummary } from "../presentation/whatsapp.js";
 
 const log = createLogger("conversation:runner");
 const PRESENCE_LEASE_TTL_MS = 20_000;
@@ -135,7 +135,7 @@ function stringifySeedOutboundEvent(event) {
     case "tool_activity":
       return `${SEED_SOURCE_PREFIX["tool-call"]} ${formatActivitySummary(event.activity)}`.trim();
     case "plan":
-      return `${SEED_SOURCE_PREFIX.llm} *Plan*\n\n${event.text}`.trim();
+      return `${SEED_SOURCE_PREFIX.llm} ${formatPlanPresentationText(event.presentation)}`.trim();
     case "file_change":
       return `${SEED_SOURCE_PREFIX["tool-call"]} ${event.summary ?? `Changed file: ${event.path}`}`.trim();
     case "usage":

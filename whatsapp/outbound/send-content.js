@@ -4,6 +4,7 @@ import { renderBlocks } from "../../message-renderer.js";
 import { formatToolFlowInspectText, formatToolFlowSummary } from "../../tool-flow-presentation.js";
 import { formatActivitySummary, shortenPath } from "../../tool-presentation-model.js";
 import {
+  formatPlanPresentationText,
   formatToolPresentationDisplay,
   formatToolPresentationInspect,
   formatToolPresentationSummary,
@@ -168,7 +169,7 @@ function renderOutboundEvent(event) {
     case "tool_activity":
       return { source: "tool-call", content: formatActivitySummary(event.activity) };
     case "plan":
-      return { source: "llm", content: [{ type: "markdown", text: `*Plan*\n\n${event.text}` }] };
+      return { source: "llm", content: [{ type: "markdown", text: formatPlanPresentationText(event.presentation) }] };
     case "file_change":
       return { source: "tool-call", content: renderFileChangeContent(event) };
     case "usage":

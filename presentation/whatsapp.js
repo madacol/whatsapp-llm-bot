@@ -261,6 +261,25 @@ function buildPlanInspectLines(presentation) {
 }
 
 /**
+ * @param {import("../tool-presentation-model.js").PlanPresentation} presentation
+ * @returns {string}
+ */
+export function formatPlanPresentationText(presentation) {
+  const lines = buildPlanInspectLines(presentation);
+  const hasExplanation = typeof presentation.explanation === "string" && presentation.explanation.length > 0;
+  const hasEntries = presentation.entries.length > 0;
+  return lines.length > 0
+    ? [
+      "*Plan*",
+      "",
+      ...lines.slice(0, hasExplanation && hasEntries ? 1 : lines.length),
+      ...(hasExplanation && hasEntries ? [""] : []),
+      ...(hasExplanation && hasEntries ? lines.slice(1) : []),
+    ].join("\n")
+    : "*Plan*";
+}
+
+/**
  * @param {string} command
  * @param {string | undefined} output
  * @param {import("../tool-presentation-model.js").ToolInspectMode} inspectMode

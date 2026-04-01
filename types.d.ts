@@ -159,7 +159,7 @@ type ToolActivityEvent = {
 
 type PlanEvent = {
   kind: "plan";
-  text: string;
+  presentation: import("./tool-presentation-model.js").PlanPresentation;
 };
 
 type FileChangeEvent = {
@@ -506,7 +506,7 @@ type AgentIOHooks = {
   onToolResult?: (blocks: ToolContentBlock[], toolName: string, permissions: PermissionFlags) => Promise<void>;
   onToolError?: (error: string) => Promise<void>;
   onCommand?: (event: { command: string, status: "started" | "completed" | "failed", output?: string }) => Promise<MessageHandle | void>;
-  onPlan?: (text: string) => Promise<void>;
+  onPlan?: (presentation: import("./tool-presentation-model.js").PlanPresentation) => Promise<void>;
   onFileRead?: (event: { command: string, paths: string[] }) => Promise<void>;
   onFileChange?: (event: {
     path: string,

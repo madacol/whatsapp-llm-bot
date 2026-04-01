@@ -157,8 +157,8 @@ export function buildAgentIoHooks(
       }
       await emitWhileWorking(() => codexDisplayHooks.onFileRead(fileReadEvent));
     },
-    onPlan: async (text) => {
-      await emitWhileWorking(() => context.reply(planEvent(text)));
+    onPlan: async (presentation) => {
+      await emitWhileWorking(() => context.reply(planEvent(presentation)));
     },
     onFileChange: async (fileChangeEvent) => {
       if (visibility.changes) {

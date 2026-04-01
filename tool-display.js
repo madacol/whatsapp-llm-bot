@@ -13,6 +13,7 @@ import {
 } from "./tool-presentation-model.js";
 import {
   formatBashCommand,
+  formatPlanPresentationText,
   formatToolPresentationDisplay,
   formatToolPresentationInspect,
   formatToolPresentationSummary,
@@ -104,6 +105,7 @@ export {
   buildToolPresentation,
   formatActivitySummary,
   formatBashCommand,
+  formatPlanPresentationText,
   formatToolPresentationDisplay,
   formatToolPresentationInspect,
   formatToolPresentationSummary,

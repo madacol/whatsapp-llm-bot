@@ -2,6 +2,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { buildAgentIoHooks } from "../conversation/build-agent-io-hooks.js";
 import { DEFAULT_OUTPUT_VISIBILITY } from "../chat-output-visibility.js";
+import { buildToolPresentation } from "../tool-presentation-model.js";
 
 /**
  * @returns {{
@@ -161,11 +162,21 @@ function createReasoningSubject(visibility = { ...DEFAULT_OUTPUT_VISIBILITY, thi
 describe("buildAgentIoHooks", () => {
   it("maps plan events to an llm reply", async () => {
     const { hooks, sent } = createSubject();
-    await hooks.onPlan?.("Step 1\nStep 2");
+    await hooks.onPlan?.(buildToolPresentation("update_plan", {
+      explanation: "Keep the user informed.",
+      plan: [
+        { step: "Patch the formatter", status: "in_progress" },
+        { step: "Run tests", status: "pending" },
+      ],
+    }, undefined, undefined, undefined));
 
     assert.equal(sent.length, 1);
     assert.equal(sent[0].kind, "reply");
     assert.equal(sent[0].event.kind, "plan");
+    if (sent[0].event.kind !== "plan") {
+      assert.fail("Expected plan event");
+    }
+    assert.equal(sent[0].event.presentation.summary, "*Plan*  _Working on: Patch the formatter_");
   });
 
   it("sends one thinking placeholder and makes it inspectable", async () => {
