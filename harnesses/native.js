@@ -3,6 +3,7 @@
  */
 
 import { sendChatCompletion } from "../llm.js";
+import { formatChatSettingsCommand } from "../chat-commands.js";
 import { createToolMessage, isHtmlContent, errorToString } from "../utils.js";
 import { contentEvent, textUpdate, toolCallUpdate, toolInspectState } from "../outbound-events.js";
 import {
@@ -292,7 +293,7 @@ async function processLlmResponse({ session, llmConfig, messages, mediaRegistry,
       }
       await session.context.send(contentEvent(
         "warning",
-        `${newSkippedTypes.join(", ")} not supported by this model. Use \`!s media-reader <model>\` to enable a fallback reader.`,
+        `${newSkippedTypes.join(", ")} not supported by this model. Use \`${formatChatSettingsCommand("media-reader <model>")}\` to enable a fallback reader.`,
       ));
     }
 

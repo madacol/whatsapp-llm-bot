@@ -1,3 +1,4 @@
+import { CHAT_SETTINGS_COMMAND, formatChatSettingsCommand, formatChatSettingsUsage } from "../../../chat-commands.js";
 import { getChatOrThrow } from "../../../store.js";
 import {
   CONFIG_KEYS,
@@ -12,9 +13,9 @@ import {
 
 export default /** @type {defineAction} */ ((x) => x)({
   name: "chat_settings",
-  command: "s",
+  command: CHAT_SETTINGS_COMMAND,
   description:
-    `Inspect and change chat settings. Use \`!s\`, \`!s <key>\`, \`!s help <key>\`, \`!s <key> <value>\`, or \`!s reset <key>\`. Keys: ${CONFIG_KEYS.join(", ")}.`,
+    `Inspect and change chat settings. Use \`${formatChatSettingsCommand()}\`, \`${formatChatSettingsCommand("<key>")}\`, \`${formatChatSettingsCommand("help <key>")}\`, \`${formatChatSettingsCommand("<key> <value>")}\`, or \`${formatChatSettingsCommand("reset <key>")}\`. Keys: ${CONFIG_KEYS.join(", ")}.`,
   parameters: {
     type: "object",
     properties: {
@@ -47,7 +48,7 @@ export default /** @type {defineAction} */ ((x) => x)({
     if (setting === "help") {
       const key = value?.trim();
       if (!key) {
-        return "Usage: !s help <key>";
+        return formatChatSettingsUsage("help <key>");
       }
       return describeConfigKey(rootDb, chatId, key, { getActions });
     }
@@ -55,7 +56,7 @@ export default /** @type {defineAction} */ ((x) => x)({
     if (setting === "reset") {
       const key = value?.trim();
       if (!key) {
-        return "Usage: !s reset <key>";
+        return formatChatSettingsUsage("reset <key>");
       }
       const isAdmin = getIsAdmin ? await getIsAdmin() : true;
       if (!isAdmin) {
