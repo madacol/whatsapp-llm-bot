@@ -71,6 +71,7 @@ export async function executeAction(actionName, context, params, options = {}) {
     chatId: context.chatId,
     senderIds: context.senderIds,
     content: context.content,
+    workdir: options.workdir ?? null,
     getIsAdmin: context.getIsAdmin,
     db: /** @type {PGlite} */ (/** @type {unknown} */ (undefined)),
     sessionDb: /** @type {PGlite} */ (/** @type {unknown} */ (undefined)),

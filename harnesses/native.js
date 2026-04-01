@@ -8,9 +8,9 @@ import { createToolMessage, isHtmlContent, errorToString } from "../utils.js";
 import { contentEvent, textUpdate, toolCallUpdate, toolInspectState } from "../outbound-events.js";
 import {
   actionsToToolDefinitions,
+  isAttachmentBlock,
   resolveImageArgs,
   registerMedia,
-  isMediaBlock,
   parseStructuredQuestion,
 } from "../message-formatting.js";
 import { getRootDb } from "../db.js";
@@ -203,7 +203,7 @@ async function executeAndStoreTool({
     // Tag media from tool results so subsequent tool calls can reference them
     if (isContentBlocks) {
       for (const block of /** @type {ToolContentBlock[]} */ (result)) {
-        if (isMediaBlock(block)) {
+        if (isAttachmentBlock(block)) {
           registerMedia(mediaRegistry, block);
         }
       }

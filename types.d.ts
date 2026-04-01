@@ -51,6 +51,7 @@ type FileContentBlock = {
   type: "file";
   mime_type?: string;
   file_name?: string;
+  caption?: string;
 } & (StoredMediaFields | InlineMediaFields);
 type CodeContentBlock = {
   type: "code";
@@ -359,6 +360,7 @@ type ActionContext = {
   chatId: string;
   senderIds: string[];
   content: IncomingContentBlock[];
+  workdir?: string | null;
   getIsAdmin: () => Promise<boolean>;
   db: PGlite;
   sessionDb: PGlite;
