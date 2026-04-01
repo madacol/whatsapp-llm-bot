@@ -14,6 +14,7 @@ import { randomUUID } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { formatChatSettingsCommand } from "../chat-commands.js";
 import { hasMediaPath } from "../media-store.js";
 import { renderContentBlock } from "../message-formatting.js";
 import { getRootDb } from "../db.js";
@@ -1012,7 +1013,7 @@ export function createClaudeAgentSdkHarness() {
         }
         let displayMsg = errorMsg;
         if (errorMsg.includes("executable not found") && workdir) {
-          displayMsg += `\n\nHint: The folder setting is "${workdir}" — make sure this path exists. Use \`!s folder <path>\` to fix it or \`!s reset folder\` to use the chat workspace default.`;
+          displayMsg += `\n\nHint: The folder setting is "${workdir}" — make sure this path exists. Use \`${formatChatSettingsCommand("folder <path>")}\` to fix it or \`${formatChatSettingsCommand("reset folder")}\` to use the chat workspace default.`;
         }
         await hooks.onToolError(displayMsg);
         result.response = buildSdkErrorResponse(displayMsg);

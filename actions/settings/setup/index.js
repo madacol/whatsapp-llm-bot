@@ -1,3 +1,4 @@
+import { formatChatSettingsCommand } from "../../../chat-commands.js";
 import { getScopedHarnessConfig, normalizeHarnessConfig } from "../../../harness-config.js";
 import { getChatOrThrow } from "../../../store.js";
 import { getClaudeSdkModels, getCodexAvailableModels, listHarnesses, resolveHarness } from "#harnesses";
@@ -287,7 +288,7 @@ export default /** @type {defineAction} */ ((x) => x)({
       ...applied,
       ...(notes.length > 0 ? ["", ...notes] : []),
       "",
-      "Use `!s` for advanced settings like prompt, readers, folder, and action toggles.",
+      `Use \`${formatChatSettingsCommand()}\` for advanced settings like prompt, readers, folder, and action toggles.`,
       "Use `!clone <repository_url>` to clone a git repository into the current working folder.",
     ].join("\n");
   },
