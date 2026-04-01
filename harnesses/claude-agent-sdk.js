@@ -217,7 +217,7 @@ function collectClaudePromptParts(blocks, textParts, mediaLines) {
       continue;
     }
 
-    if ((block.type === "video" || block.type === "audio") && hasMediaPath(block)) {
+    if ((block.type === "video" || block.type === "audio" || block.type === "file") && hasMediaPath(block)) {
       mediaLines.push(`- ${block.type}: ${block.path}`);
       continue;
     }
@@ -241,7 +241,7 @@ function collectQuotedClaudeMedia(blocks, mediaLines) {
       collectQuotedClaudeMedia(block.content, mediaLines);
       continue;
     }
-    if ((block.type === "image" || block.type === "video" || block.type === "audio") && hasMediaPath(block)) {
+    if ((block.type === "image" || block.type === "video" || block.type === "audio" || block.type === "file") && hasMediaPath(block)) {
       mediaLines.push(`- ${block.type}: ${block.path}`);
     }
   }

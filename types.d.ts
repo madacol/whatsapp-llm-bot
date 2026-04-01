@@ -47,6 +47,11 @@ type AudioContentBlock = {
   type: "audio";
   mime_type?: string;
 } & (StoredMediaFields | InlineMediaFields);
+type FileContentBlock = {
+  type: "file";
+  mime_type?: string;
+  file_name?: string;
+} & (StoredMediaFields | InlineMediaFields);
 type CodeContentBlock = {
   type: "code";
   language?: string;
@@ -92,6 +97,7 @@ type IncomingContentBlock =
   | ImageContentBlock
   | VideoContentBlock
   | AudioContentBlock
+  | FileContentBlock
   | QuoteContentBlock;
 
 type MediaRegistry = Map<string, IncomingContentBlock>;
@@ -425,7 +431,7 @@ type ExtendedActionContext<P extends PermissionFlags> = ActionContext
   & (P["useChatDb"] extends true ? { chatDb: PGlite } : {})
   & (P["useLlm"] extends true ? { callLlm: CallLlm; llmClient: LlmClient } : {});
 
-type ToolContentBlock = TextContentBlock | ImageContentBlock | VideoContentBlock | AudioContentBlock | CodeContentBlock | DiffContentBlock | MarkdownContentBlock;
+type ToolContentBlock = TextContentBlock | ImageContentBlock | VideoContentBlock | AudioContentBlock | FileContentBlock | CodeContentBlock | DiffContentBlock | MarkdownContentBlock;
 
 type SendContent = string | ToolContentBlock | ToolContentBlock[];
 

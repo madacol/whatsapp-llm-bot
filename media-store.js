@@ -3,7 +3,7 @@ import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-const MEDIA_FILE_RE = /^[a-f0-9]{64}\.(?:jpg|jpeg|png|webp|gif|mp4|mov|webm|mp3|wav|ogg|m4a)$/;
+const MEDIA_FILE_RE = /^[a-f0-9]{64}\.[a-z0-9]{1,32}$/;
 const MEDIA_ROOT = fileURLToPath(new URL("./.media/", import.meta.url));
 
 /** @type {Record<string, string>} */
@@ -22,6 +22,11 @@ const MIME_TO_EXT = {
   "audio/ogg": "ogg",
   "audio/mp4": "m4a",
   "audio/m4a": "m4a",
+  "application/pdf": "pdf",
+  "text/plain": "txt",
+  "text/csv": "csv",
+  "application/json": "json",
+  "application/zip": "zip",
 };
 
 /** @type {Record<string, string>} */
@@ -31,23 +36,23 @@ const EXT_TO_MIME = Object.fromEntries(
 
 /**
  * @param {IncomingContentBlock | ToolContentBlock} block
- * @returns {block is ImageContentBlock | VideoContentBlock | AudioContentBlock}
+ * @returns {block is ImageContentBlock | VideoContentBlock | AudioContentBlock | FileContentBlock}
  */
 export function isBinaryMediaBlock(block) {
-  return block.type === "image" || block.type === "video" || block.type === "audio";
+  return block.type === "image" || block.type === "video" || block.type === "audio" || block.type === "file";
 }
 
 /**
- * @param {ImageContentBlock | VideoContentBlock | AudioContentBlock} block
- * @returns {block is (ImageContentBlock | VideoContentBlock | AudioContentBlock) & { path: string }}
+ * @param {ImageContentBlock | VideoContentBlock | AudioContentBlock | FileContentBlock} block
+ * @returns {block is (ImageContentBlock | VideoContentBlock | AudioContentBlock | FileContentBlock) & { path: string }}
  */
 export function hasMediaPath(block) {
   return "path" in block && typeof block.path === "string";
 }
 
 /**
- * @param {ImageContentBlock | VideoContentBlock | AudioContentBlock} block
- * @returns {block is (ImageContentBlock | VideoContentBlock | AudioContentBlock) & { encoding: "base64", data: string }}
+ * @param {ImageContentBlock | VideoContentBlock | AudioContentBlock | FileContentBlock} block
+ * @returns {block is (ImageContentBlock | VideoContentBlock | AudioContentBlock | FileContentBlock) & { encoding: "base64", data: string }}
  */
 export function hasInlineMediaData(block) {
   return "data" in block
@@ -84,17 +89,45 @@ export function resolveMediaPath(mediaPath) {
 }
 
 /**
+ * @param {string | undefined} extension
+ * @returns {string | null}
+ */
+function normalizeExtensionCandidate(extension) {
+  if (!extension) {
+    return null;
+  }
+  const normalized = extension.replace(/^\./, "").trim().toLowerCase();
+  return /^[a-z0-9]{1,32}$/.test(normalized) ? normalized : null;
+}
+
+/**
+ * @param {string | undefined} fileName
+ * @returns {string | null}
+ */
+function extensionFromFileName(fileName) {
+  const baseName = typeof fileName === "string" ? path.basename(fileName) : "";
+  if (!baseName.includes(".")) {
+    return null;
+  }
+  return normalizeExtensionCandidate(baseName.split(".").pop());
+}
+
+/**
  * @param {string | undefined} mimeType
- * @param {"image" | "video" | "audio"} [blockType]
+ * @param {"image" | "video" | "audio" | "file"} [blockType]
+ * @param {string | undefined} [fileName]
  * @returns {string}
  */
-export function mimeTypeToExtension(mimeType, blockType) {
+export function mimeTypeToExtension(mimeType, blockType, fileName) {
   if (mimeType && MIME_TO_EXT[mimeType]) {
     return MIME_TO_EXT[mimeType];
   }
   if (blockType === "image") return "jpg";
   if (blockType === "video") return "mp4";
   if (blockType === "audio") return "mp3";
+  if (blockType === "file") {
+    return extensionFromFileName(fileName) || "bin";
+  }
   throw new Error(`Unsupported media MIME type: ${mimeType ?? "(missing)"}`);
 }
 
@@ -119,12 +152,13 @@ export function hashMediaBuffer(buffer) {
 /**
  * @param {Buffer} buffer
  * @param {string | undefined} mimeType
- * @param {"image" | "video" | "audio"} blockType
+ * @param {"image" | "video" | "audio" | "file"} blockType
+ * @param {string | undefined} [fileName]
  * @returns {string}
  */
-export function deriveMediaPath(buffer, mimeType, blockType) {
+export function deriveMediaPath(buffer, mimeType, blockType, fileName) {
   const sha = hashMediaBuffer(buffer);
-  const ext = mimeTypeToExtension(mimeType, blockType);
+  const ext = mimeTypeToExtension(mimeType, blockType, fileName);
   return `${sha}.${ext}`;
 }
 
@@ -138,11 +172,12 @@ export async function ensureMediaRoot() {
 /**
  * @param {Buffer} buffer
  * @param {string | undefined} mimeType
- * @param {"image" | "video" | "audio"} blockType
+ * @param {"image" | "video" | "audio" | "file"} blockType
+ * @param {string | undefined} [fileName]
  * @returns {Promise<string>}
  */
-export async function writeMedia(buffer, mimeType, blockType) {
-  const mediaPath = deriveMediaPath(buffer, mimeType, blockType);
+export async function writeMedia(buffer, mimeType, blockType, fileName) {
+  const mediaPath = deriveMediaPath(buffer, mimeType, blockType, fileName);
   const absolutePath = resolveMediaPath(mediaPath);
   await ensureMediaRoot();
   try {
@@ -162,7 +197,7 @@ export async function readMediaBuffer(mediaPath) {
 }
 
 /**
- * @param {ImageContentBlock | VideoContentBlock | AudioContentBlock} block
+ * @param {ImageContentBlock | VideoContentBlock | AudioContentBlock | FileContentBlock} block
  * @returns {Promise<Buffer>}
  */
 export async function readBlockBuffer(block) {
@@ -176,7 +211,7 @@ export async function readBlockBuffer(block) {
 }
 
 /**
- * @param {ImageContentBlock | VideoContentBlock | AudioContentBlock} block
+ * @param {ImageContentBlock | VideoContentBlock | AudioContentBlock | FileContentBlock} block
  * @returns {Promise<string>}
  */
 export async function readBlockBase64(block) {
@@ -187,7 +222,7 @@ export async function readBlockBase64(block) {
 }
 
 /**
- * @param {ImageContentBlock | VideoContentBlock | AudioContentBlock} block
+ * @param {ImageContentBlock | VideoContentBlock | AudioContentBlock | FileContentBlock} block
  * @returns {Promise<string>}
  */
 export async function ensureMediaPathForBlock(block) {
@@ -199,8 +234,9 @@ export async function ensureMediaPathForBlock(block) {
     Buffer.from(await readBlockBase64(block), "base64"),
     block.mime_type,
     block.type,
+    "file_name" in block ? block.file_name : undefined,
   );
-  const withPath = /** @type {(ImageContentBlock | VideoContentBlock | AudioContentBlock) & { path?: string }} */ (block);
+  const withPath = /** @type {(ImageContentBlock | VideoContentBlock | AudioContentBlock | FileContentBlock) & { path?: string }} */ (block);
   withPath.path = mediaPath;
   return mediaPath;
 }

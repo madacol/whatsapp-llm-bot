@@ -65,7 +65,7 @@ function collectCodexPromptParts(blocks, textParts, mediaPaths) {
       continue;
     }
 
-    if ((block.type === "video" || block.type === "audio") && hasMediaPath(block)) {
+    if ((block.type === "video" || block.type === "audio" || block.type === "file") && hasMediaPath(block)) {
       mediaPaths.push(block.path);
       continue;
     }
@@ -90,7 +90,7 @@ function collectQuotedMediaPaths(blocks, mediaPaths) {
       collectQuotedMediaPaths(block.content, mediaPaths);
       continue;
     }
-    if ((block.type === "image" || block.type === "video" || block.type === "audio") && hasMediaPath(block)) {
+    if ((block.type === "image" || block.type === "video" || block.type === "audio" || block.type === "file") && hasMediaPath(block)) {
       mediaPaths.push(block.path);
     }
   }

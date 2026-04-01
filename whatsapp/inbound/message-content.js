@@ -41,7 +41,6 @@ function getContextInfo(message) {
 function getTextMessage(message) {
   return message?.conversation
     || message?.extendedTextMessage?.text
-    || message?.documentMessage?.caption
     || undefined;
 }
 
@@ -52,10 +51,11 @@ function getTextMessage(message) {
  * @returns {string | undefined}
  */
 export function getDirectMessageText(baileysMessage) {
-  const { imageMessage, videoMessage } = getDirectMediaMessages(baileysMessage);
+  const { imageMessage, videoMessage, documentMessage } = getDirectMediaMessages(baileysMessage);
   return getTextMessage(baileysMessage.message)
     || imageMessage?.caption
     || videoMessage?.caption
+    || documentMessage?.caption
     || undefined;
 }
 
@@ -86,26 +86,44 @@ function createEmptyMessageContentResult() {
 /**
  * Download media from a Baileys message and return content blocks.
  * @param {BaileysMessage} baileysMessage
- * @param {{ mimetype?: string | null, caption?: string | null }} mediaMessage
- * @param {"image" | "video" | "audio"} type
+ * @param {{ mimetype?: string | null, caption?: string | null, fileName?: string | null, url?: string | null, directPath?: string | null, mediaKey?: Uint8Array | string | null }} mediaMessage
+ * @param {"image" | "video" | "audio" | "file"} type
  * @param {DownloadMediaFn} downloadFn
  * @returns {Promise<IncomingContentBlock[]>}
  */
 async function downloadMediaToBlocks(baileysMessage, mediaMessage, type, downloadFn) {
   /** @type {IncomingContentBlock[]} */
   const blocks = [];
-  const buffer = await downloadFn(baileysMessage, "buffer", {});
   const mimeType = mediaMessage.mimetype;
+  const canDownload = type !== "file"
+    || !!mediaMessage.url
+    || !!mediaMessage.directPath
+    || !!mediaMessage.mediaKey;
 
   if (type === "image" && !mimeType) {
     blocks.push({ type: "text", text: "Error reading image: No mimetype found" });
-  } else {
-    const mediaPath = await writeMedia(buffer, mimeType || undefined, type);
-    blocks.push(/** @type {IncomingContentBlock} */ ({
+  } else if (canDownload) {
+    const buffer = await downloadFn(baileysMessage, "buffer", {});
+    const mediaPath = await writeMedia(
+      buffer,
+      mimeType || undefined,
       type,
-      path: mediaPath,
-      mime_type: mimeType || undefined,
-    }));
+      mediaMessage.fileName || undefined,
+    );
+    if (type === "file") {
+      blocks.push({
+        type: "file",
+        path: mediaPath,
+        mime_type: mimeType || undefined,
+        ...(mediaMessage.fileName ? { file_name: mediaMessage.fileName } : {}),
+      });
+    } else {
+      blocks.push(/** @type {IncomingContentBlock} */ ({
+        type,
+        path: mediaPath,
+        mime_type: mimeType || undefined,
+      }));
+    }
   }
 
   if (mediaMessage.caption) {
@@ -148,10 +166,11 @@ async function extractQuotedContent(contextInfo, downloadFn) {
   const quotedImage = quotedMessage.imageMessage;
   const quotedVideo = quotedMessage.videoMessage || quotedMessage.ptvMessage;
   const quotedAudio = quotedMessage.audioMessage;
-  const quotedMedia = quotedImage || quotedVideo || quotedAudio;
+  const quotedDocument = quotedMessage.documentMessage;
+  const quotedMedia = quotedImage || quotedVideo || quotedAudio || quotedDocument;
 
   if (quotedMedia) {
-    const mediaType = quotedImage ? "image" : quotedAudio ? "audio" : "video";
+    const mediaType = quotedImage ? "image" : quotedAudio ? "audio" : quotedDocument ? "file" : "video";
     try {
       const fakeMessage = /** @type {BaileysMessage} */ ({ message: quotedMessage });
       const mediaBlocks = await downloadMediaToBlocks(fakeMessage, quotedMedia, mediaType, downloadFn);
@@ -176,6 +195,7 @@ async function extractQuotedContent(contextInfo, downloadFn) {
  *   imageMessage: NonNullable<BaileysMessage["message"]>["imageMessage"] | undefined,
  *   videoMessage: NonNullable<BaileysMessage["message"]>["videoMessage"] | NonNullable<BaileysMessage["message"]>["ptvMessage"] | undefined,
  *   audioMessage: NonNullable<BaileysMessage["message"]>["audioMessage"] | undefined,
+ *   documentMessage: NonNullable<BaileysMessage["message"]>["documentMessage"] | undefined,
  * }}
  */
 function getDirectMediaMessages(baileysMessage) {
@@ -184,6 +204,7 @@ function getDirectMediaMessages(baileysMessage) {
     imageMessage: baileysMessage.message?.imageMessage ?? associatedInnerMessage?.imageMessage,
     videoMessage: baileysMessage.message?.videoMessage || baileysMessage.message?.ptvMessage,
     audioMessage: baileysMessage.message?.audioMessage,
+    documentMessage: baileysMessage.message?.documentMessage,
   };
 }
 
@@ -201,7 +222,7 @@ async function extractDirectContent(baileysMessage, downloadFn) {
   /** @type {import("./hd-image-lifecycle.js").HdInboundLifecycle | undefined} */
   let hdLifecycle;
 
-  const { imageMessage, videoMessage, audioMessage } = getDirectMediaMessages(baileysMessage);
+  const { imageMessage, videoMessage, audioMessage, documentMessage } = getDirectMediaMessages(baileysMessage);
 
   if (imageMessage) {
     const finalized = finalizeHdImageResult(await processHdImageMessage(
@@ -220,6 +241,10 @@ async function extractDirectContent(baileysMessage, downloadFn) {
 
   if (audioMessage) {
     content.push(...await downloadMediaToBlocks(baileysMessage, audioMessage, "audio", downloadFn));
+  }
+
+  if (documentMessage) {
+    content.push(...await downloadMediaToBlocks(baileysMessage, documentMessage, "file", downloadFn));
   }
 
   const textMessage = getTextMessage(baileysMessage.message);

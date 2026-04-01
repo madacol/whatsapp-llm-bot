@@ -205,9 +205,18 @@ export function isMediaBlock(block) {
 }
 
 /**
- * Register a media block in the registry.
+ * Check whether a content block is a path-addressable attachment.
+ * @param {IncomingContentBlock | ToolContentBlock} block
+ * @returns {block is ImageContentBlock | VideoContentBlock | AudioContentBlock | FileContentBlock}
+ */
+export function isAttachmentBlock(block) {
+  return isMediaBlock(block) || block.type === "file";
+}
+
+/**
+ * Register an attachment block in the registry.
  * @param {MediaRegistry} registry
- * @param {ImageContentBlock | VideoContentBlock | AudioContentBlock} block
+ * @param {ImageContentBlock | VideoContentBlock | AudioContentBlock | FileContentBlock} block
  * @returns {string} The canonical media path
  */
 export function registerMedia(registry, block) {
@@ -216,7 +225,7 @@ export function registerMedia(registry, block) {
     mediaPath = block.path;
   } else if (hasInlineMediaData(block)) {
     mediaPath = deriveMediaPath(Buffer.from(block.data, "base64"), block.mime_type, block.type);
-    const withPath = /** @type {(ImageContentBlock | VideoContentBlock | AudioContentBlock) & { path?: string }} */ (block);
+    const withPath = /** @type {(ImageContentBlock | VideoContentBlock | AudioContentBlock | FileContentBlock) & { path?: string }} */ (block);
     withPath.path = mediaPath;
   } else {
     throw new Error("Unsupported media block for registry");
@@ -273,12 +282,12 @@ export function prepareMessages(chatMessages) {
     // Scan for media blocks, hydrate HD refs, and register them
     if (messageData.role === "user") {
       for (const block of messageData.content) {
-        if (isMediaBlock(block)) {
+        if (isAttachmentBlock(block)) {
           if (block.type === "image") hydrateHdRef(/** @type {ImageContentBlock} */ (block));
           registerMedia(mediaRegistry, block);
         } else if (block.type === "quote") {
           for (const quoteBlock of block.content) {
-            if (isMediaBlock(quoteBlock)) {
+            if (isAttachmentBlock(quoteBlock)) {
               if (quoteBlock.type === "image") hydrateHdRef(/** @type {ImageContentBlock} */ (quoteBlock));
               registerMedia(mediaRegistry, quoteBlock);
             }
@@ -287,7 +296,7 @@ export function prepareMessages(chatMessages) {
       }
     } else if (messageData.role === "tool") {
       for (const block of messageData.content) {
-        if (isMediaBlock(block)) {
+        if (isAttachmentBlock(block)) {
           if (block.type === "image") hydrateHdRef(/** @type {ImageContentBlock} */ (block));
           registerMedia(mediaRegistry, block);
         }
@@ -316,6 +325,8 @@ export function renderContentBlock(block) {
       return block.alt ? `[Video: ${block.alt}]` : "[Video]";
     case "audio":
       return "[Audio message]";
+    case "file":
+      return block.file_name ? `[File: ${block.file_name}]` : "[File]";
     case "markdown":
       return block.text;
     case "quote": {

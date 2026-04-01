@@ -3,7 +3,7 @@ import config from "./config.js";
 import { resolveModel } from "./model-roles.js";
 import { convertAudioToMp3Base64 } from "./audio_conversion.js";
 import { registerMedia, isMediaBlock } from "./message-formatting.js";
-import { blockToDataUrl, ensureMediaPathForBlock, readBlockBase64 } from "./media-store.js";
+import { blockToDataUrl, ensureMediaPathForBlock, hasMediaPath, readBlockBase64 } from "./media-store.js";
 import { createLogger } from "./logger.js";
 
 const log = createLogger("llm");
@@ -99,6 +99,15 @@ async function tagMedia(parts, registry, originalBlock) {
 }
 
 /**
+ * @param {FileContentBlock} block
+ * @returns {string}
+ */
+function formatFileReference(block) {
+  const label = block.file_name ? `Attached file: ${block.file_name}` : "Attached file";
+  return hasMediaPath(block) ? `${label}\n${block.path}` : label;
+}
+
+/**
  * Format a user message's content blocks into OpenAI content parts.
  * @param {UserMessage} message
  * @param {MediaRegistry} registry
@@ -121,6 +130,9 @@ async function formatUserContent(message, registry) {
               await tagMedia(parts, registry, quoteBlock);
               break;
             }
+            case "file":
+              parts.push({ type: "text", text: `> ${formatFileReference(quoteBlock).replace(/\n/g, "\n> ")}` });
+              break;
           }
         }
         break;
@@ -157,6 +169,9 @@ async function formatUserContent(message, registry) {
         await tagMedia(parts, registry, contentBlock);
         break;
       }
+      case "file":
+        parts.push({ type: "text", text: formatFileReference(contentBlock) });
+        break;
     }
   }
 
@@ -237,6 +252,8 @@ async function formatToolContent(message, registry) {
     } else if (block.type === "video") {
       parts.push(videoUrlPart(await blockToDataUrl(block)));
       await tagMedia(parts, registry, block);
+    } else if (block.type === "file") {
+      parts.push({ type: /** @type {const} */ ("text"), text: formatFileReference(block) });
     } else if (block.type === "code") {
       const fenced = "```" + (block.language || "") + "\n" + block.code + "\n```";
       parts.push({ type: /** @type {const} */ ("text"), text: fenced });
