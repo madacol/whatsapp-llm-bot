@@ -55,7 +55,7 @@ describe("workspace resolver foundation", () => {
 
   it("resolves repo-chat bindings", async () => {
     const repo = await store.createRepo({
-      name: `main-${Date.now()}`,
+      name: "resolver-main",
       rootPath: "/repo/main",
       defaultBaseBranch: "master",
       controlChatId: "repo-chat",
