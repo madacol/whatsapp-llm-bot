@@ -145,12 +145,12 @@ export function hydrateHdRef(block) {
  */
 export async function normalizeChatId(chatId, sock) {
   if (!isLidUser(chatId)) return chatId;
-  const getPNForLID = sock.signalRepository?.lidMapping?.getPNForLID;
-  if (typeof getPNForLID !== "function") {
+  const lidMapping = sock.signalRepository?.lidMapping;
+  if (!lidMapping || typeof lidMapping.getPNForLID !== "function") {
     return chatId;
   }
 
-  const pn = await getPNForLID(chatId);
+  const pn = await lidMapping.getPNForLID(chatId);
   return pn ? jidNormalizedUser(pn) : chatId;
 }
 
