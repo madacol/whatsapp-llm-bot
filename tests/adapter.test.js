@@ -732,6 +732,40 @@ describe("createTurnIo", () => {
 });
 
 describe("HD receive integration", () => {
+  it("keeps LID sender JIDs when signalRepository is unavailable", async () => {
+    const rawChatId = "147025689575646@lid";
+    const confirmRegistry = createConfirmRuntime();
+    const userResponseRegistry = createSelectRuntime();
+    const sock = /** @type {import("@whiskeysockets/baileys").WASocket} */ (/** @type {unknown} */ ({
+      user: { id: "bot@s.whatsapp.net" },
+      sendPresenceUpdate: async () => {},
+      readMessages: async () => {},
+    }));
+
+    await adaptIncomingMessage(
+      /** @type {BaileysMessage} */ (/** @type {unknown} */ ({
+        key: {
+          remoteJid: rawChatId,
+          fromMe: false,
+          id: "lid-turn-no-signal-repository",
+          senderLid: rawChatId,
+        },
+        message: {
+          conversation: "!new asd",
+        },
+        messageTimestamp: Math.floor(Date.now() / 1000),
+        pushName: "LID User",
+      })),
+      sock,
+      async (ctx) => {
+        assert.equal(ctx.chatId, rawChatId);
+        assert.deepEqual(ctx.senderJids, [rawChatId]);
+      },
+      confirmRegistry,
+      userResponseRegistry,
+    );
+  });
+
   it("normalizes sender JIDs from LID addressing before exposing the turn", async () => {
     const rawChatId = "147025689575646@lid";
     const normalizedChatId = "353833927239@s.whatsapp.net";
