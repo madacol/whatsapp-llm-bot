@@ -36,7 +36,7 @@ async function createRepoWithWorktree() {
   await runGit(repoRoot, ["add", "app.txt"]);
   await runGit(repoRoot, ["commit", "-m", "Initial commit"]);
   const worktreePath = path.join(repoRoot, "..", `ws-${path.basename(repoRoot)}`);
-  await runGit(repoRoot, ["worktree", "add", "-b", "ws/payments", worktreePath, "master"]);
+  await runGit(repoRoot, ["worktree", "add", "-b", "payments", worktreePath, "master"]);
   return { repoRoot, worktreePath };
 }
 
@@ -79,7 +79,7 @@ describe("workspace resolver foundation", () => {
     const workspace = await store.createWorkspace({
       repoId: repo.repo_id,
       name: "payments",
-      branch: "ws/payments",
+      branch: "payments",
       baseBranch: "main",
       worktreePath: "/repo/payments/.madabot/worktrees/payments",
       workspaceChatId: "payments-chat",
@@ -105,7 +105,7 @@ describe("workspace resolver foundation", () => {
     const activeWorkspace = await store.createWorkspace({
       repoId: repo.repo_id,
       name: "active",
-      branch: "ws/active",
+      branch: "active",
       baseBranch: "master",
       worktreePath: "/repo/list/.madabot/worktrees/active",
       workspaceChatId: "active-chat",
@@ -114,7 +114,7 @@ describe("workspace resolver foundation", () => {
     const archivedWorkspace = await store.createWorkspace({
       repoId: repo.repo_id,
       name: "archived",
-      branch: "ws/archived",
+      branch: "archived",
       baseBranch: "master",
       worktreePath: "/repo/list/.madabot/worktrees/archived",
       workspaceChatId: "archived-chat",
@@ -151,7 +151,7 @@ describe("workspace resolver foundation", () => {
     const workspace = await store.createWorkspace({
       repoId: repo.repo_id,
       name: "payments",
-      branch: "ws/payments",
+      branch: "payments",
       baseBranch: "master",
       worktreePath,
       workspaceChatId: "ws-chat-bound",

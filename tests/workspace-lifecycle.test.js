@@ -64,7 +64,7 @@ function createFakeTransport() {
       },
       createGroup: async (subject, participants) => {
         groupCounter += 1;
-        const chatId = `${subject}-${instanceId}-${groupCounter}@g.us`;
+        const chatId = `group-${instanceId}-${groupCounter}@g.us`;
         createdGroups.push({ subject, participants, chatId });
         return { chatId, subject };
       },
@@ -210,11 +210,13 @@ describe("workspace lifecycle", () => {
     const repoRoot = await createRepoFixture();
     const transportState = createFakeTransport();
     const handleMessage = await createHandler({ transport: transportState.transport });
+    const repoChatName = "Original Group";
 
     await seedChat("repo-duplicate-chat", { harnessCwd: repoRoot });
 
     await handleMessage(createChatTurn({
       chatId: "repo-duplicate-chat",
+      chatName: repoChatName,
       content: [{ type: "text", text: "!new payments" }],
     }).context);
 
@@ -226,6 +228,7 @@ describe("workspace lifecycle", () => {
 
     const turn = createChatTurn({
       chatId: "repo-duplicate-chat",
+      chatName: repoChatName,
       content: [{ type: "text", text: "!new payments" }],
     });
     turn.context.io.select = async (question, options) => {
@@ -248,7 +251,30 @@ describe("workspace lifecycle", () => {
     assert.equal(replacedWorkspace.workspace_chat_id, originalWorkspace.workspace_chat_id);
     assert.equal(transportState.createdGroups.length, 1);
     assert.ok(turn.responses.some((response) => response.text.includes("Replaced workspace `payments`.")));
+    assert.deepEqual(transportState.renamedGroups, [{
+      chatId: originalWorkspace.workspace_chat_id,
+      subject: "[payments] Original Group",
+    }]);
+    assert.ok(turn.responses.some((response) => response.text.includes("Chat: `[payments] Original Group`")));
     await assert.rejects(() => fs.access(path.join(replacedWorkspace.worktree_path, "replace-marker.txt")));
+  });
+
+  it("uses the repo chat name when naming a new workspace group", async () => {
+    const repoRoot = await createRepoFixture();
+    const transportState = createFakeTransport();
+    const handleMessage = await createHandler({ transport: transportState.transport });
+
+    await seedChat("repo-named-chat", { harnessCwd: repoRoot });
+
+    const { context, responses } = createChatTurn({
+      chatId: "repo-named-chat",
+      chatName: "Original Group",
+      content: [{ type: "text", text: "!new payments" }],
+    });
+    await handleMessage(context);
+
+    assert.equal(transportState.createdGroups[0]?.subject, "[payments] Original Group");
+    assert.ok(responses.some((response) => response.text.includes("Chat: `[payments] Original Group`")));
   });
 
   it("creates a workspace chat, worktree, and branch from !new", async () => {
@@ -285,10 +311,10 @@ describe("workspace lifecycle", () => {
     assert.ok(repo, "repo should be inferred from the root cwd");
     const workspace = await store.getWorkspaceByName(repo.repo_id, "payments");
     assert.ok(workspace, "workspace should be created");
-    assert.equal(workspace?.branch, "ws/payments");
+    assert.equal(workspace?.branch, "payments");
     assert.equal(workspace?.base_branch, "master");
     assert.equal(transportState.createdGroups.length, 1);
-    assert.equal(transportState.createdGroups[0]?.subject, "ws/payments");
+    assert.equal(transportState.createdGroups[0]?.subject, "payments");
     assert.deepEqual(transportState.createdGroups[0]?.participants, ["master-user@s.whatsapp.net"]);
     assert.deepEqual(transportState.promotedParticipants, [{
       chatId: workspace.workspace_chat_id,
@@ -318,7 +344,7 @@ describe("workspace lifecycle", () => {
     assert.ok(responses.some((response) => response.text.includes("Created workspace `payments`.")));
 
     const branchName = (await execFileAsync("git", ["branch", "--show-current"], { cwd: workspace?.worktree_path })).stdout.trim();
-    assert.equal(branchName, "ws/payments");
+    assert.equal(branchName, "payments");
   });
 
   it("runs !diff, !test, !commit, and !merge successfully", async () => {
@@ -359,14 +385,14 @@ describe("workspace lifecycle", () => {
       content: [{ type: "text", text: "!commit Update app" }],
     });
     await handleMessage(turn.context);
-    assert.ok(turn.responses.some((response) => response.text.includes("Committed on `ws/payments`.")));
+    assert.ok(turn.responses.some((response) => response.text.includes("Committed on `payments`.")));
 
     turn = createChatTurn({
       chatId: workspace.workspace_chat_id,
       content: [{ type: "text", text: "!merge" }],
     });
     await handleMessage(turn.context);
-    assert.ok(turn.responses.some((response) => response.text.includes("Merged `ws/payments` into `master`.")));
+    assert.ok(turn.responses.some((response) => response.text.includes("Merged `payments` into `master`.")));
 
     const mergedText = await fs.readFile(path.join(repoRoot, "app.txt"), "utf8");
     assert.equal(mergedText, "workspace change\n");
@@ -459,14 +485,14 @@ describe("workspace lifecycle", () => {
       content: [{ type: "text", text: "!resolve conflicts" }],
     });
     await handleMessage(turn.context);
-    assert.ok(turn.responses.some((response) => response.text.includes("Resolved conflicts in `ws/payments`.")));
+    assert.ok(turn.responses.some((response) => response.text.includes("Resolved conflicts in `payments`.")));
 
     turn = createChatTurn({
       chatId: workspace.workspace_chat_id,
       content: [{ type: "text", text: "!merge" }],
     });
     await handleMessage(turn.context);
-    assert.ok(turn.responses.some((response) => response.text.includes("Merged `ws/payments` into `master`.")));
+    assert.ok(turn.responses.some((response) => response.text.includes("Merged `payments` into `master`.")));
 
     turn = createChatTurn({
       chatId: workspace.workspace_chat_id,
@@ -474,7 +500,7 @@ describe("workspace lifecycle", () => {
     });
     await handleMessage(turn.context);
     assert.ok(turn.responses.some((response) => response.text.includes("Archived workspace `payments`.")));
-    assert.deepEqual(transportState.renamedGroups, [{ chatId: workspace.workspace_chat_id, subject: "ws/payments (archived)" }]);
+    assert.deepEqual(transportState.renamedGroups, [{ chatId: workspace.workspace_chat_id, subject: "payments (archived)" }]);
     assert.deepEqual(transportState.announcementChanges, [{ chatId: workspace.workspace_chat_id, enabled: true }]);
   });
 });
