@@ -430,6 +430,14 @@ export async function sendBlocks(sock, chatId, source, content, options, reactio
           mimetype: instruction.mimetype,
         }, options);
         break;
+      case "file":
+        await sock.sendMessage(chatId, {
+          document: instruction.file,
+          mimetype: instruction.mimetype,
+          fileName: instruction.fileName,
+          ...(instruction.caption && { caption: instruction.caption }),
+        }, options);
+        break;
     }
   }
 

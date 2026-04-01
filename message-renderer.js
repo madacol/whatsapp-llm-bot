@@ -22,6 +22,7 @@ const log = createLogger("message-renderer");
  *   | { kind: "image", image: Buffer, caption?: string, editable: boolean, hd?: boolean }
  *   | { kind: "video", video: Buffer, mimetype: string, caption?: string }
  *   | { kind: "audio", audio: Buffer, mimetype: string }
+ *   | { kind: "file", file: Buffer, mimetype: string, fileName: string, caption?: string }
  * } SendInstruction
  */
 
@@ -292,6 +293,16 @@ export async function renderBlocks(blocks, prefix) {
           kind: "audio",
           audio: await readBlockBuffer(block),
           mimetype: block.mime_type || "audio/mp4",
+        });
+        break;
+
+      case "file":
+        instructions.push({
+          kind: "file",
+          file: await readBlockBuffer(block),
+          mimetype: block.mime_type || "application/octet-stream",
+          fileName: block.file_name || "file",
+          ...(block.caption && { caption: block.caption }),
         });
         break;
     }

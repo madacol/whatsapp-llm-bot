@@ -12,6 +12,7 @@ import {
 
 export {
   deriveMediaPath,
+  fileNameToMimeType,
   hasInlineMediaData,
   hasMediaPath,
   isBinaryMediaBlock,

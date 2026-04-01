@@ -405,6 +405,25 @@ Second block:
   });
 });
 
+describe("sendBlocks – file attachments", () => {
+  it("sends file blocks as WhatsApp documents", async () => {
+    const { sock, sent } = createMockSock();
+
+    await sendBlocks(sock, "test-chat", "tool-result", [{
+      type: "file",
+      encoding: "base64",
+      mime_type: "application/pdf",
+      file_name: "report.pdf",
+      data: Buffer.from("fake-pdf").toString("base64"),
+    }]);
+
+    assert.equal(sent.length, 1);
+    assert.ok(Buffer.isBuffer(sent[0].msg.document), "Document payload should be a Buffer");
+    assert.equal(sent[0].msg.mimetype, "application/pdf");
+    assert.equal(sent[0].msg.fileName, "report.pdf");
+  });
+});
+
 describe("sendBlocks – MessageHandle tracking", () => {
   it("returns handle for text blocks with correct keyId and isImage=false", async () => {
     const { sock } = createMockSock();

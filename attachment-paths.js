@@ -22,8 +22,15 @@ const MIME_TO_EXT = {
   "audio/mp4": "m4a",
   "audio/m4a": "m4a",
   "application/pdf": "pdf",
+  "application/vnd.ms-excel": "xls",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": "xlsx",
+  "application/msword": "doc",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document": "docx",
+  "application/vnd.ms-powerpoint": "ppt",
+  "application/vnd.openxmlformats-officedocument.presentationml.presentation": "pptx",
   "text/plain": "txt",
   "text/csv": "csv",
+  "text/markdown": "md",
   "application/json": "json",
   "application/zip": "zip",
 };
@@ -137,6 +144,16 @@ export function mimeTypeToExtension(mimeType, blockType, fileName) {
  */
 export function mediaPathToMimeType(mediaPath, fallbackMimeType) {
   const ext = validateMediaPath(mediaPath).split(".").at(-1);
+  return (ext && EXT_TO_MIME[ext]) || fallbackMimeType || "application/octet-stream";
+}
+
+/**
+ * @param {string} fileName
+ * @param {string | undefined} fallbackMimeType
+ * @returns {string}
+ */
+export function fileNameToMimeType(fileName, fallbackMimeType) {
+  const ext = normalizeExtensionCandidate(path.extname(fileName));
   return (ext && EXT_TO_MIME[ext]) || fallbackMimeType || "application/octet-stream";
 }
 
