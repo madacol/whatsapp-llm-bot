@@ -48,6 +48,19 @@ function buildDuplicateWorkspaceOptions(workspaceName) {
 }
 
 /**
+ * @param {string} workspaceName
+ * @param {string | undefined} sourceChatName
+ * @returns {string}
+ */
+function buildWorkspaceChatSubject(workspaceName, sourceChatName) {
+  const trimmedChatName = sourceChatName?.trim();
+  if (!trimmedChatName) {
+    return workspaceName;
+  }
+  return `[${workspaceName}] ${trimmedChatName}`;
+}
+
+/**
  * @param {{ store: Store, transport?: ChatTransport }} input
  */
 export function createWorkspaceControl({ store, transport }) {
@@ -93,13 +106,14 @@ export function createWorkspaceControl({ store, transport }) {
 
       const baseBranch = explicitBaseBranch ?? repo.default_base_branch;
       const participants = getInitialWorkspaceParticipants(context);
+      const workspaceChatSubject = buildWorkspaceChatSubject(workspaceName, context.chatName);
       if (participants.length === 0) {
         throw new Error("Could not determine which WhatsApp user to add to the workspace group.");
       }
 
       const { branch, worktreePath } = await createWorkspaceWorktree(repo, workspaceName, baseBranch);
       try {
-        const group = await transport.createGroup(`ws/${workspaceName}`, participants);
+        const group = await transport.createGroup(workspaceChatSubject, participants);
         if (transport.promoteParticipants) {
           await transport.promoteParticipants(group.chatId, participants);
         }
@@ -140,6 +154,7 @@ export function createWorkspaceControl({ store, transport }) {
       }
       const baseBranch = explicitBaseBranch ?? existing.base_branch;
       const participants = getInitialWorkspaceParticipants(context);
+      const workspaceChatSubject = buildWorkspaceChatSubject(existing.name, context.chatName);
 
       await cleanupWorkspaceWorktree(repo, existing.branch, existing.worktree_path);
       const { branch, worktreePath } = await createWorkspaceWorktree(repo, existing.name, baseBranch);
@@ -152,7 +167,7 @@ export function createWorkspaceControl({ store, transport }) {
       await store.copyChatCustomizations(context.chatId, existing.workspace_chat_id);
       await store.setChatEnabled(existing.workspace_chat_id, true);
       if (transport?.renameGroup) {
-        await transport.renameGroup(existing.workspace_chat_id, `ws/${existing.name}`);
+        await transport.renameGroup(existing.workspace_chat_id, workspaceChatSubject);
       }
       if (transport?.setAnnouncementOnly) {
         await transport.setAnnouncementOnly(existing.workspace_chat_id, false);
@@ -169,7 +184,7 @@ export function createWorkspaceControl({ store, transport }) {
         `Replaced workspace \`${workspace.name}\`.`,
         `Branch: \`${workspace.branch}\``,
         `Base: \`${workspace.base_branch}\``,
-        `Chat: \`ws/${workspace.name}\``,
+        `Chat: \`${workspaceChatSubject}\``,
       ].join("\n");
     },
 
@@ -246,7 +261,7 @@ export function createWorkspaceControl({ store, transport }) {
         return `Workspace \`${workspace.name}\` is already archived.`;
       }
       if (transport?.renameGroup) {
-        await transport.renameGroup(workspace.workspace_chat_id, `ws/${workspace.name} (archived)`);
+        await transport.renameGroup(workspace.workspace_chat_id, `${workspace.name} (archived)`);
       }
       if (transport?.setAnnouncementOnly) {
         await transport.setAnnouncementOnly(workspace.workspace_chat_id, true);

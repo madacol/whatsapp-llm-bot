@@ -131,7 +131,7 @@ export function isValidWorkspaceName(workspaceName) {
  * @returns {string}
  */
 export function getWorkspaceBranchName(workspaceName) {
-  return `ws/${workspaceName}`;
+  return workspaceName;
 }
 
 /**

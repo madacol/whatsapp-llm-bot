@@ -332,6 +332,7 @@ type ChatTurn = {
 // Unified context for message handling
 type ExecuteActionContext = {
   chatId: string;
+  chatName?: string;
   senderIds: string[];
   senderJids?: string[];
   content: IncomingContentBlock[];

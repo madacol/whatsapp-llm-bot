@@ -75,7 +75,7 @@ describe("workspace commands", () => {
     await store.createWorkspace({
       repoId: repo.repo_id,
       name: "payments",
-      branch: "ws/payments",
+      branch: "payments",
       baseBranch: "master",
       worktreePath: "/repo/main/.madabot/worktrees/payments",
       workspaceChatId: "ws-payments-chat",
@@ -84,7 +84,7 @@ describe("workspace commands", () => {
     await store.createWorkspace({
       repoId: repo.repo_id,
       name: "auth",
-      branch: "ws/auth",
+      branch: "auth",
       baseBranch: "master",
       worktreePath: "/repo/main/.madabot/worktrees/auth",
       workspaceChatId: "ws-auth-chat",
@@ -118,7 +118,7 @@ describe("workspace commands", () => {
     await store.createWorkspace({
       repoId: repo.repo_id,
       name: "payments",
-      branch: "ws/payments",
+      branch: "payments",
       baseBranch: "master",
       worktreePath: "/repo/status/.madabot/worktrees/payments",
       workspaceChatId: "ws-status-chat",
@@ -133,7 +133,7 @@ describe("workspace commands", () => {
 
     assert.ok(responses.some((response) => response.text.includes("Workspace: payments")));
     assert.ok(responses.some((response) => response.text.includes("Base: master")));
-    assert.ok(responses.some((response) => response.text.includes("Branch: ws/payments")));
+    assert.ok(responses.some((response) => response.text.includes("Branch: payments")));
     assert.ok(responses.some((response) => response.text.includes("Status: ready")));
   });
 
@@ -171,7 +171,7 @@ describe("workspace commands", () => {
     await store.createWorkspace({
       repoId: repo.repo_id,
       name: "payments",
-      branch: "ws/payments",
+      branch: "payments",
       baseBranch: "master",
       worktreePath: "/repo/archive/.madabot/worktrees/payments",
       workspaceChatId: "ws-archive-target",
@@ -203,7 +203,7 @@ describe("workspace commands", () => {
     const workspace = await store.createWorkspace({
       repoId: repo.repo_id,
       name: "payments",
-      branch: "ws/payments",
+      branch: "payments",
       baseBranch: "master",
       worktreePath: "/repo/current-archive/.madabot/worktrees/payments",
       workspaceChatId: "ws-current-archive-chat",
@@ -235,7 +235,7 @@ describe("workspace commands", () => {
     const workspace = await store.createWorkspace({
       repoId: repo.repo_id,
       name: "payments",
-      branch: "ws/payments",
+      branch: "payments",
       baseBranch: "master",
       worktreePath: "/repo/archived/.madabot/worktrees/payments",
       workspaceChatId: "ws-archived-chat",

@@ -10,6 +10,7 @@
 export function createMessageActionContext(turn) {
   return {
     chatId: turn.chatId,
+    chatName: turn.chatName,
     senderIds: turn.senderIds,
     senderJids: turn.senderJids,
     content: turn.content,
