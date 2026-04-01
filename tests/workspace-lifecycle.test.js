@@ -212,6 +212,23 @@ describe("workspace lifecycle", () => {
     const handleMessage = await createHandler({ transport: transportState.transport });
 
     await seedChat("repo-create-chat", { harnessCwd: repoRoot });
+    await db.sql`
+      UPDATE chats
+      SET
+        model = 'openai/gpt-4.1-mini',
+        system_prompt = 'Be concise',
+        respond_on = 'any',
+        debug = true,
+        memory = true,
+        memory_threshold = 0.42,
+        enabled_actions = '["fetch_url"]'::jsonb,
+        model_roles = '{"coding":"openai/gpt-4.1"}'::jsonb,
+        harness = 'codex',
+        output_visibility = '{"thinking":true}'::jsonb,
+        harness_config = '{"codex":{"model":"openai/gpt-4.1","sandboxMode":"workspace-write"}}'::jsonb,
+        media_to_text_models = '{"general":"openai/gpt-4.1-mini","image":"openai/gpt-4.1"}'::jsonb
+      WHERE chat_id = 'repo-create-chat'
+    `;
 
     const { context, responses } = createChatTurn({
       chatId: "repo-create-chat",
@@ -235,6 +252,24 @@ describe("workspace lifecycle", () => {
     assert.ok(transportState.sentTexts[0]?.text.includes("Workspace: payments"));
     const enabledChat = await store.getChat(workspace.workspace_chat_id);
     assert.equal(enabledChat?.is_enabled, true);
+    assert.equal(enabledChat?.model, "openai/gpt-4.1-mini");
+    assert.equal(enabledChat?.system_prompt, "Be concise");
+    assert.equal(enabledChat?.respond_on, "any");
+    assert.equal(enabledChat?.debug, true);
+    assert.equal(enabledChat?.memory, true);
+    assert.equal(enabledChat?.memory_threshold, 0.42);
+    assert.deepEqual(enabledChat?.enabled_actions, ["fetch_url"]);
+    assert.deepEqual(enabledChat?.model_roles, { coding: "openai/gpt-4.1" });
+    assert.equal(enabledChat?.harness, "codex");
+    assert.deepEqual(enabledChat?.output_visibility, { thinking: true });
+    assert.deepEqual(enabledChat?.harness_config, {
+      codex: { model: "openai/gpt-4.1", sandboxMode: "workspace-write" },
+    });
+    assert.deepEqual(enabledChat?.media_to_text_models, {
+      general: "openai/gpt-4.1-mini",
+      image: "openai/gpt-4.1",
+    });
+    assert.equal(enabledChat?.harness_cwd, null);
     assert.ok(responses.some((response) => response.text.includes("Created workspace `payments`.")));
 
     const branchName = (await execFileAsync("git", ["branch", "--show-current"], { cwd: workspace?.worktree_path })).stdout.trim();

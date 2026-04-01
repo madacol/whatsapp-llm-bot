@@ -89,6 +89,7 @@ export function createWorkspaceControl({ store, transport }) {
           workspaceChatId: group.chatId,
           status: "ready",
         });
+        await store.copyChatCustomizations(context.chatId, group.chatId);
         await store.setChatEnabled(group.chatId, true);
         await transport.sendText(group.chatId, await formatWorkspaceStatus(workspace));
         return [
