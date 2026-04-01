@@ -28,6 +28,7 @@ import path from "node:path";
 // The below tests assume we've added: export { extractToolResultText, extractToolResultFromEvent, hasTextField }
 // to harnesses/claude-agent-sdk.js
 
+import { resolveMediaPath } from "../attachment-paths.js";
 import {
   buildClaudePrompt,
   buildClaudeSystemPrompt,
@@ -39,7 +40,6 @@ import {
   hasTextField,
   writeClaudeWorkspaceArtifacts,
 } from "../harnesses/claude-agent-sdk.js";
-import { resolveMediaPath } from "../media-store.js";
 
 describe("createClaudeAgentSdkHarness", () => {
   it("exposes the unified harness contract", async () => {
