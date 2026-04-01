@@ -65,7 +65,10 @@ export function createWorkspaceControl({ store, transport }) {
 
       const existing = await store.getWorkspaceByName(repo.repo_id, workspaceName);
       if (existing) {
-        throw new Error(`Workspace \`${workspaceName}\` already exists.`);
+        throw new Error(
+          `Workspace \`${workspaceName}\` already exists.\n` +
+          "Use `replace` if you want a fresh workspace with that name, or `cancel` to keep the current one.",
+        );
       }
 
       const baseBranch = explicitBaseBranch ?? repo.default_base_branch;
