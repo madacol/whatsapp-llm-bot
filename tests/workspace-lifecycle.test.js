@@ -29,6 +29,7 @@ let tempDirs = [];
  * @returns {Promise<{
  *   transport: ChatTransport,
  *   createdGroups: Array<{ subject: string, participants: string[], chatId: string }>,
+ *   promotedParticipants: Array<{ chatId: string, participants: string[] }>,
  *   sentTexts: Array<{ chatId: string, text: string }>,
  *   renamedGroups: Array<{ chatId: string, subject: string }>,
  *   announcementChanges: Array<{ chatId: string, enabled: boolean }>,
@@ -37,6 +38,8 @@ let tempDirs = [];
 function createFakeTransport() {
   /** @type {Array<{ subject: string, participants: string[], chatId: string }>} */
   const createdGroups = [];
+  /** @type {Array<{ chatId: string, participants: string[] }>} */
+  const promotedParticipants = [];
   /** @type {Array<{ chatId: string, text: string }>} */
   const sentTexts = [];
   /** @type {Array<{ chatId: string, subject: string }>} */
@@ -49,6 +52,7 @@ function createFakeTransport() {
 
   return {
     createdGroups,
+    promotedParticipants,
     sentTexts,
     renamedGroups,
     announcementChanges,
@@ -63,6 +67,9 @@ function createFakeTransport() {
         const chatId = `${subject}-${instanceId}-${groupCounter}@g.us`;
         createdGroups.push({ subject, participants, chatId });
         return { chatId, subject };
+      },
+      promoteParticipants: async (chatId, participants) => {
+        promotedParticipants.push({ chatId, participants });
       },
       renameGroup: async (chatId, subject) => {
         renamedGroups.push({ chatId, subject });
@@ -221,7 +228,13 @@ describe("workspace lifecycle", () => {
     assert.equal(transportState.createdGroups.length, 1);
     assert.equal(transportState.createdGroups[0]?.subject, "ws/payments");
     assert.deepEqual(transportState.createdGroups[0]?.participants, ["master-user@s.whatsapp.net"]);
+    assert.deepEqual(transportState.promotedParticipants, [{
+      chatId: workspace.workspace_chat_id,
+      participants: ["master-user@s.whatsapp.net"],
+    }]);
     assert.ok(transportState.sentTexts[0]?.text.includes("Workspace: payments"));
+    const enabledChat = await store.getChat(workspace.workspace_chat_id);
+    assert.equal(enabledChat?.is_enabled, true);
     assert.ok(responses.some((response) => response.text.includes("Created workspace `payments`.")));
 
     const branchName = (await execFileAsync("git", ["branch", "--show-current"], { cwd: workspace?.worktree_path })).stdout.trim();

@@ -312,6 +312,7 @@ type ChatTransport = {
   stop: () => Promise<void>;
   sendText: (chatId: string, text: string) => Promise<void>;
   createGroup?: (subject: string, participants: string[]) => Promise<{ chatId: string, subject: string }>;
+  promoteParticipants?: (chatId: string, participants: string[]) => Promise<void>;
   renameGroup?: (chatId: string, subject: string) => Promise<void>;
   setAnnouncementOnly?: (chatId: string, enabled: boolean) => Promise<void>;
 };

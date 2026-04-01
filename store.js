@@ -613,6 +613,20 @@ export async function initStore(injectedDb){
       },
 
       /**
+       * @param {string} chatId
+       * @param {boolean} enabled
+       * @returns {Promise<void>}
+       */
+      async setChatEnabled (chatId, enabled) {
+        await ensureChatExists(chatId);
+        await db.sql`
+          UPDATE chats
+          SET is_enabled = ${enabled}
+          WHERE chat_id = ${chatId}
+        `;
+      },
+
+      /**
        * @param {{
        *   name: string,
        *   rootPath: string,
