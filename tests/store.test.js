@@ -50,6 +50,38 @@ describe("store with injected DB", () => {
 
   });
 
+  describe("workspace subject persistence", () => {
+    it("stores and updates the workspace chat subject", async () => {
+      await store.createChat("store-workspace-chat");
+      const repo = await store.createRepo({
+        name: `store-workspace-repo-${Date.now()}`,
+        rootPath: `/repo/store-${Date.now()}`,
+        defaultBaseBranch: "master",
+      });
+      const workspace = await store.createWorkspace({
+        repoId: repo.repo_id,
+        name: "payments",
+        branch: "payments",
+        baseBranch: "master",
+        worktreePath: "/repo/store/payments",
+        workspaceChatId: "store-workspace-chat",
+        workspaceChatSubject: "[payments] Original Group",
+      });
+
+      assert.equal(workspace.workspace_chat_subject, "[payments] Original Group");
+
+      const reset = await store.resetWorkspace({
+        workspaceId: workspace.workspace_id,
+        branch: "payments",
+        baseBranch: "main",
+        worktreePath: "/repo/store/payments-v2",
+        workspaceChatSubject: "[payments] Renamed Group",
+      });
+
+      assert.equal(reset.workspace_chat_subject, "[payments] Renamed Group");
+    });
+  });
+
   describe("getChatOrThrow", () => {
     it("returns the ChatRow for an existing chat", async () => {
       await store.createChat("assert-exists-1");

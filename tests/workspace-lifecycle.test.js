@@ -460,6 +460,7 @@ describe("workspace lifecycle", () => {
 
     await handleMessage(createChatTurn({
       chatId: "repo-resolve-chat",
+      chatName: "Original Group",
       content: [{ type: "text", text: "!new payments" }],
     }).context);
     const repo = await store.getRepoByRootPath(repoRoot);
@@ -500,7 +501,7 @@ describe("workspace lifecycle", () => {
     });
     await handleMessage(turn.context);
     assert.ok(turn.responses.some((response) => response.text.includes("Archived workspace `payments`.")));
-    assert.deepEqual(transportState.renamedGroups, [{ chatId: workspace.workspace_chat_id, subject: "payments (archived)" }]);
+    assert.deepEqual(transportState.renamedGroups, [{ chatId: workspace.workspace_chat_id, subject: "[payments] Original Group (archived)" }]);
     assert.deepEqual(transportState.announcementChanges, [{ chatId: workspace.workspace_chat_id, enabled: true }]);
   });
 });

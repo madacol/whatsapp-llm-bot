@@ -134,6 +134,11 @@ function normalizeWorkspaceRow(raw) {
   }
   const timestamp = normalizeTimestampValue(raw.timestamp);
   const archivedAt = raw.archived_at === null ? null : normalizeTimestampValue(raw.archived_at);
+  const workspaceChatSubject = typeof raw.workspace_chat_subject === "string" && raw.workspace_chat_subject.trim()
+    ? raw.workspace_chat_subject
+    : typeof raw.name === "string"
+      ? raw.name
+      : null;
   const conflictedFiles = Array.isArray(raw.conflicted_files)
     ? raw.conflicted_files.filter((value) => typeof value === "string")
     : [];
@@ -146,6 +151,7 @@ function normalizeWorkspaceRow(raw) {
     || typeof raw.worktree_path !== "string"
     || !isWorkspaceStatus(raw.status)
     || typeof raw.workspace_chat_id !== "string"
+    || typeof workspaceChatSubject !== "string"
     || !isWorkspaceTestStatus(raw.last_test_status)
     || (raw.last_commit_oid !== null && typeof raw.last_commit_oid !== "string")
     || (raw.archived_at !== null && !archivedAt)
@@ -163,6 +169,7 @@ function normalizeWorkspaceRow(raw) {
     worktree_path: raw.worktree_path,
     status: raw.status,
     workspace_chat_id: raw.workspace_chat_id,
+    workspace_chat_subject: workspaceChatSubject,
     last_test_status: raw.last_test_status,
     last_commit_oid: raw.last_commit_oid,
     conflicted_files: conflictedFiles,
@@ -319,6 +326,7 @@ export async function initStore(injectedDb){
             worktree_path TEXT NOT NULL,
             status TEXT NOT NULL DEFAULT 'ready',
             workspace_chat_id VARCHAR(50) NOT NULL REFERENCES chats(chat_id) UNIQUE,
+            workspace_chat_subject TEXT,
             last_test_status TEXT NOT NULL DEFAULT 'not_run',
             last_commit_oid TEXT,
             conflicted_files JSONB NOT NULL DEFAULT '[]',
@@ -388,6 +396,7 @@ export async function initStore(injectedDb){
         db.sql`ALTER TABLE messages ADD COLUMN IF NOT EXISTS exchange_text TEXT`,
         db.sql`ALTER TABLE messages ADD COLUMN IF NOT EXISTS llm_context JSONB`,
         db.sql`ALTER TABLE messages ADD COLUMN IF NOT EXISTS display_key TEXT`,
+        db.sql`ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS workspace_chat_subject TEXT`,
       ]);
 
       // One-time migration: rename content_models → media_to_text_models.
@@ -515,6 +524,7 @@ export async function initStore(injectedDb){
         db.sql`ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS conflicted_files JSONB NOT NULL DEFAULT '[]'`,
         db.sql`ALTER TABLE repos ALTER COLUMN control_chat_id DROP NOT NULL`,
       ]);
+      await db.sql`UPDATE workspaces SET workspace_chat_subject = name WHERE workspace_chat_subject IS NULL`;
       await db.sql`
         CREATE TABLE IF NOT EXISTS memories (
             id SERIAL PRIMARY KEY,
@@ -743,6 +753,7 @@ export async function initStore(injectedDb){
        *   baseBranch: string,
        *   worktreePath: string,
        *   workspaceChatId: string,
+       *   workspaceChatSubject: string,
        *   status?: WorkspaceStatus,
        * }} input
        * @returns {Promise<WorkspaceRow>}
@@ -754,6 +765,7 @@ export async function initStore(injectedDb){
         baseBranch,
         worktreePath,
         workspaceChatId,
+        workspaceChatSubject,
         status = "ready",
       }) {
         await ensureChatExists(workspaceChatId);
@@ -767,7 +779,8 @@ export async function initStore(injectedDb){
             base_branch,
             worktree_path,
             status,
-            workspace_chat_id
+            workspace_chat_id,
+            workspace_chat_subject
           )
           VALUES (
             ${workspaceId},
@@ -777,7 +790,8 @@ export async function initStore(injectedDb){
             ${baseBranch},
             ${worktreePath},
             ${status},
-            ${workspaceChatId}
+            ${workspaceChatId},
+            ${workspaceChatSubject}
           )
           RETURNING *
         `;
@@ -873,6 +887,7 @@ export async function initStore(injectedDb){
        *   branch: string,
        *   baseBranch: string,
        *   worktreePath: string,
+       *   workspaceChatSubject?: string,
        *   status?: WorkspaceStatus,
        * }} input
        * @returns {Promise<WorkspaceRow>}
@@ -882,6 +897,7 @@ export async function initStore(injectedDb){
         branch,
         baseBranch,
         worktreePath,
+        workspaceChatSubject,
         status = "ready",
       }) {
         const { rows: [row] } = await db.sql`
@@ -890,6 +906,7 @@ export async function initStore(injectedDb){
             branch = ${branch},
             base_branch = ${baseBranch},
             worktree_path = ${worktreePath},
+            workspace_chat_subject = COALESCE(${workspaceChatSubject ?? null}, workspace_chat_subject),
             status = ${status},
             last_test_status = 'not_run',
             last_commit_oid = NULL,

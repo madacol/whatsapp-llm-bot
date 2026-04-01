@@ -124,6 +124,7 @@ export function createWorkspaceControl({ store, transport }) {
           baseBranch,
           worktreePath,
           workspaceChatId: group.chatId,
+          workspaceChatSubject,
           status: "ready",
         });
         await store.copyChatCustomizations(context.chatId, group.chatId);
@@ -163,6 +164,7 @@ export function createWorkspaceControl({ store, transport }) {
         branch,
         baseBranch,
         worktreePath,
+        workspaceChatSubject,
       });
       await store.copyChatCustomizations(context.chatId, existing.workspace_chat_id);
       await store.setChatEnabled(existing.workspace_chat_id, true);
@@ -261,7 +263,7 @@ export function createWorkspaceControl({ store, transport }) {
         return `Workspace \`${workspace.name}\` is already archived.`;
       }
       if (transport?.renameGroup) {
-        await transport.renameGroup(workspace.workspace_chat_id, `${workspace.name} (archived)`);
+        await transport.renameGroup(workspace.workspace_chat_id, `${workspace.workspace_chat_subject} (archived)`);
       }
       if (transport?.setAnnouncementOnly) {
         await transport.setAnnouncementOnly(workspace.workspace_chat_id, true);

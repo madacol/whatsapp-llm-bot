@@ -55,7 +55,7 @@ describe("workspace resolver foundation", () => {
 
   it("resolves repo-chat bindings", async () => {
     const repo = await store.createRepo({
-      name: "main",
+      name: `main-${Date.now()}`,
       rootPath: "/repo/main",
       defaultBaseBranch: "master",
       controlChatId: "repo-chat",
@@ -83,6 +83,7 @@ describe("workspace resolver foundation", () => {
       baseBranch: "main",
       worktreePath: "/repo/payments/.madabot/worktrees/payments",
       workspaceChatId: "payments-chat",
+      workspaceChatSubject: "payments",
       status: "ready",
     });
 
@@ -109,6 +110,7 @@ describe("workspace resolver foundation", () => {
       baseBranch: "master",
       worktreePath: "/repo/list/.madabot/worktrees/active",
       workspaceChatId: "active-chat",
+      workspaceChatSubject: "active",
       status: "ready",
     });
     const archivedWorkspace = await store.createWorkspace({
@@ -118,6 +120,7 @@ describe("workspace resolver foundation", () => {
       baseBranch: "master",
       worktreePath: "/repo/list/.madabot/worktrees/archived",
       workspaceChatId: "archived-chat",
+      workspaceChatSubject: "archived",
       status: "archived",
     });
 
@@ -155,6 +158,7 @@ describe("workspace resolver foundation", () => {
       baseBranch: "master",
       worktreePath,
       workspaceChatId: "ws-chat-bound",
+      workspaceChatSubject: "payments",
       status: "ready",
     });
 

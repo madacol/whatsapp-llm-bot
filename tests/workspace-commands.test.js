@@ -79,6 +79,7 @@ describe("workspace commands", () => {
       baseBranch: "master",
       worktreePath: "/repo/main/.madabot/worktrees/payments",
       workspaceChatId: "ws-payments-chat",
+      workspaceChatSubject: "payments",
       status: "ready",
     });
     await store.createWorkspace({
@@ -88,6 +89,7 @@ describe("workspace commands", () => {
       baseBranch: "master",
       worktreePath: "/repo/main/.madabot/worktrees/auth",
       workspaceChatId: "ws-auth-chat",
+      workspaceChatSubject: "auth",
       status: "busy",
     });
 
@@ -122,6 +124,7 @@ describe("workspace commands", () => {
       baseBranch: "master",
       worktreePath: "/repo/status/.madabot/worktrees/payments",
       workspaceChatId: "ws-status-chat",
+      workspaceChatSubject: "payments",
       status: "ready",
     });
 
@@ -175,6 +178,7 @@ describe("workspace commands", () => {
       baseBranch: "master",
       worktreePath: "/repo/archive/.madabot/worktrees/payments",
       workspaceChatId: "ws-archive-target",
+      workspaceChatSubject: "payments",
       status: "ready",
     });
 
@@ -207,6 +211,7 @@ describe("workspace commands", () => {
       baseBranch: "master",
       worktreePath: "/repo/current-archive/.madabot/worktrees/payments",
       workspaceChatId: "ws-current-archive-chat",
+      workspaceChatSubject: "payments",
       status: "ready",
     });
 
@@ -239,6 +244,7 @@ describe("workspace commands", () => {
       baseBranch: "master",
       worktreePath: "/repo/archived/.madabot/worktrees/payments",
       workspaceChatId: "ws-archived-chat",
+      workspaceChatSubject: "payments",
       status: "ready",
     });
     await store.archiveWorkspace(workspace.workspace_id);
