@@ -139,12 +139,13 @@ function formatMarkdownLink(label, target, explicitLine, explicitColumn) {
     return `${label} (${target})${formatExplicitLocationSuffix(explicitLine, explicitColumn)}`;
   }
 
+  const normalizedLabel = stripInlineCodeFence(label);
   const lineNumber = explicitLine ?? getLocalFileLineNumber(target);
-  if (!lineNumber || labelIncludesLineNumber(label, lineNumber)) {
-    return formatInlineCode(label);
+  if (!lineNumber || labelIncludesLineNumber(normalizedLabel, lineNumber)) {
+    return formatInlineCode(normalizedLabel);
   }
 
-  return formatInlineCode(`${label}:${lineNumber}`);
+  return formatInlineCode(`${normalizedLabel}:${lineNumber}`);
 }
 
 /**
@@ -168,6 +169,22 @@ function formatExplicitLocationSuffix(explicitLine, explicitColumn) {
  */
 function formatInlineCode(text) {
   return `\`${text}\``;
+}
+
+/**
+ * Unwrap a markdown inline-code label so local file refs can be normalized
+ * before line metadata is appended and the compact WhatsApp code style is
+ * reapplied exactly once.
+ * @param {string} text
+ * @returns {string}
+ */
+function stripInlineCodeFence(text) {
+  const inlineCodeMatch = text.match(/^(`+)([\s\S]*)\1$/);
+  if (!inlineCodeMatch) {
+    return text;
+  }
+
+  return inlineCodeMatch[2];
 }
 
 /**
