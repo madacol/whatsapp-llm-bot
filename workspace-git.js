@@ -80,6 +80,45 @@ function normalizeWhitespace(value) {
 }
 
 /**
+ * @param {string} cwd
+ * @returns {Promise<{
+ *   rootPath: string,
+ *   kind: "repo" | "workspace",
+ *   branch: string | null,
+ *   commonDir: string,
+ * } | null>}
+ */
+export async function inspectGitWorkspace(cwd) {
+  const rootResult = await runGit(cwd, ["rev-parse", "--show-toplevel"]);
+  if (rootResult.exitCode !== 0) {
+    return null;
+  }
+
+  const gitDirResult = await runGit(cwd, ["rev-parse", "--git-dir"]);
+  const commonDirResult = await runGit(cwd, ["rev-parse", "--git-common-dir"]);
+  const branchResult = await runGit(cwd, ["branch", "--show-current"]);
+  if (gitDirResult.exitCode !== 0 || commonDirResult.exitCode !== 0) {
+    return null;
+  }
+
+  const rootPath = normalizeWhitespace(rootResult.stdout);
+  const resolvedCwd = path.resolve(cwd);
+  if (path.resolve(rootPath) !== resolvedCwd) {
+    return null;
+  }
+
+  const gitDir = path.resolve(cwd, normalizeWhitespace(gitDirResult.stdout));
+  const commonDir = path.resolve(cwd, normalizeWhitespace(commonDirResult.stdout));
+  const branchText = branchResult.exitCode === 0 ? normalizeWhitespace(branchResult.stdout) : "";
+  return {
+    rootPath,
+    kind: gitDir === commonDir ? "repo" : "workspace",
+    branch: branchText || null,
+    commonDir,
+  };
+}
+
+/**
  * @param {string} workspaceName
  * @returns {boolean}
  */

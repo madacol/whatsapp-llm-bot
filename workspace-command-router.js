@@ -2,19 +2,18 @@ import { contentEvent } from "./outbound-events.js";
 
 /**
  * @typedef {{
- *   list: (chatId: string) => Promise<string>;
- *   create: (context: ExecuteActionContext, workspaceName: string, explicitBaseBranch?: string) => Promise<string>;
- *   status: (chatId: string) => Promise<string>;
- *   diff: (chatId: string) => Promise<string>;
- *   test: (chatId: string) => Promise<string>;
- *   commit: (chatId: string, message: string) => Promise<string>;
- *   archiveByName: (repoChatId: string, workspaceName: string) => Promise<string>;
- *   archiveCurrent: (workspaceChatId: string) => Promise<string>;
- *   merge: (workspaceChatId: string) => Promise<string>;
- *   showConflict: (workspaceChatId: string) => Promise<string>;
- *   resolveConflicts: (workspaceChatId: string) => Promise<string>;
- *   abortMerge: (workspaceChatId: string) => Promise<string>;
- *   getState: (workspaceChatId: string) => Promise<{ archived: boolean, conflicted: boolean, busy: boolean }>;
+ *   list: (repo: RepoRow) => Promise<string>;
+ *   create: (repo: RepoRow, context: ExecuteActionContext, workspaceName: string, explicitBaseBranch?: string) => Promise<string>;
+ *   status: (workspace: WorkspaceRow) => Promise<string>;
+ *   diff: (workspace: WorkspaceRow) => Promise<string>;
+ *   test: (workspace: WorkspaceRow) => Promise<string>;
+ *   commit: (workspace: WorkspaceRow, message: string) => Promise<string>;
+ *   archiveByName: (repo: RepoRow, workspaceName: string) => Promise<string>;
+ *   archiveCurrent: (workspace: WorkspaceRow) => Promise<string>;
+ *   merge: (workspace: WorkspaceRow) => Promise<string>;
+ *   showConflict: (workspace: WorkspaceRow) => Promise<string>;
+ *   resolveConflicts: (workspace: WorkspaceRow) => Promise<string>;
+ *   abortMerge: (workspace: WorkspaceRow) => Promise<string>;
  * }} WorkspaceControl
  */
 
@@ -122,7 +121,7 @@ export async function tryHandleWorkspaceCommand({ context, binding, inputText, w
       }
 
       if (name === "list" && !argsText) {
-        await replyToolResult(context, await workspaceControl.list(context.chatId));
+        await replyToolResult(context, await workspaceControl.list(binding.repo));
         return true;
       }
 
@@ -134,7 +133,7 @@ export async function tryHandleWorkspaceCommand({ context, binding, inputText, w
         }
         await replyToolResult(
           context,
-          await workspaceControl.create(context, parsed.workspaceName, parsed.explicitBaseBranch),
+          await workspaceControl.create(binding.repo, context, parsed.workspaceName, parsed.explicitBaseBranch),
         );
         return true;
       }
@@ -151,7 +150,7 @@ export async function tryHandleWorkspaceCommand({ context, binding, inputText, w
           await replyToolResult(context, "Archive cancelled.");
           return true;
         }
-        await replyToolResult(context, await workspaceControl.archiveByName(context.chatId, argsText));
+        await replyToolResult(context, await workspaceControl.archiveByName(binding.repo, argsText));
         return true;
       }
 
@@ -164,50 +163,49 @@ export async function tryHandleWorkspaceCommand({ context, binding, inputText, w
         return true;
       }
 
-      const state = await workspaceControl.getState(context.chatId);
-      if (state.busy && name !== "status") {
+      if (binding.workspace.status === "busy" && name !== "status") {
         await replyError(context, "Workspace is busy.\nUse `!cancel` or wait for the current task to finish.");
         return true;
       }
-      if (state.archived && name !== "status") {
+      if (binding.workspace.status === "archived" && name !== "status") {
         await replyError(context, "This workspace is archived and no longer accepts work.");
         return true;
       }
-      if (state.conflicted && !["status", "show conflict", "resolve conflicts", "abort merge", "archive"].includes(lowered)) {
+      if (binding.workspace.status === "conflicted" && !["status", "show conflict", "resolve conflicts", "abort merge", "archive"].includes(lowered)) {
         await replyError(context, "This workspace has merge conflicts.\nUse `!show conflict`, `!resolve conflicts`, or `!abort merge`.");
         return true;
       }
 
       if (name === "status" && !argsText) {
-        await replyToolResult(context, await workspaceControl.status(context.chatId));
+        await replyToolResult(context, await workspaceControl.status(binding.workspace));
         return true;
       }
       if (name === "diff" && !argsText) {
-        await replyToolResult(context, await workspaceControl.diff(context.chatId));
+        await replyToolResult(context, await workspaceControl.diff(binding.workspace));
         return true;
       }
       if (name === "test" && !argsText) {
-        await replyToolResult(context, await workspaceControl.test(context.chatId));
+        await replyToolResult(context, await workspaceControl.test(binding.workspace));
         return true;
       }
       if (name === "commit") {
-        await replyToolResult(context, await workspaceControl.commit(context.chatId, argsText));
+        await replyToolResult(context, await workspaceControl.commit(binding.workspace, argsText));
         return true;
       }
       if (name === "merge" && !argsText) {
-        await replyToolResult(context, await workspaceControl.merge(context.chatId));
+        await replyToolResult(context, await workspaceControl.merge(binding.workspace));
         return true;
       }
       if (lowered === "show conflict") {
-        await replyToolResult(context, await workspaceControl.showConflict(context.chatId));
+        await replyToolResult(context, await workspaceControl.showConflict(binding.workspace));
         return true;
       }
       if (lowered === "resolve conflicts") {
-        await replyToolResult(context, await workspaceControl.resolveConflicts(context.chatId));
+        await replyToolResult(context, await workspaceControl.resolveConflicts(binding.workspace));
         return true;
       }
       if (lowered === "abort merge") {
-        await replyToolResult(context, await workspaceControl.abortMerge(context.chatId));
+        await replyToolResult(context, await workspaceControl.abortMerge(binding.workspace));
         return true;
       }
       if (name === "archive" && !argsText) {
@@ -218,7 +216,7 @@ export async function tryHandleWorkspaceCommand({ context, binding, inputText, w
           await replyToolResult(context, "Archive cancelled.");
           return true;
         }
-        await replyToolResult(context, await workspaceControl.archiveCurrent(context.chatId));
+        await replyToolResult(context, await workspaceControl.archiveCurrent(binding.workspace));
         return true;
       }
     }

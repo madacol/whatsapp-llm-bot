@@ -1,8 +1,44 @@
-import { before, describe, it } from "node:test";
+import { after, before, describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { execFile } from "node:child_process";
+import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import { promisify } from "node:util";
 import { initStore } from "../store.js";
 import { createTestDb } from "./helpers.js";
 import { resolveChatBinding } from "../workspace-resolver.js";
+
+const execFileAsync = promisify(execFile);
+
+/** @type {string[]} */
+let tempDirs = [];
+
+/**
+ * @param {string} cwd
+ * @param {string[]} args
+ * @returns {Promise<void>}
+ */
+async function runGit(cwd, args) {
+  await execFileAsync("git", args, { cwd });
+}
+
+/**
+ * @returns {Promise<{ repoRoot: string, worktreePath: string }>}
+ */
+async function createRepoWithWorktree() {
+  const repoRoot = await fs.mkdtemp(path.join(os.tmpdir(), "workspace-resolver-"));
+  tempDirs.push(repoRoot);
+  await runGit(repoRoot, ["init", "--initial-branch=master"]);
+  await runGit(repoRoot, ["config", "user.email", "test@example.com"]);
+  await runGit(repoRoot, ["config", "user.name", "Test User"]);
+  await fs.writeFile(path.join(repoRoot, "app.txt"), "base\n");
+  await runGit(repoRoot, ["add", "app.txt"]);
+  await runGit(repoRoot, ["commit", "-m", "Initial commit"]);
+  const worktreePath = path.join(repoRoot, "..", `ws-${path.basename(repoRoot)}`);
+  await runGit(repoRoot, ["worktree", "add", "-b", "ws/payments", worktreePath, "master"]);
+  return { repoRoot, worktreePath };
+}
 
 describe("workspace resolver foundation", () => {
   /** @type {Awaited<ReturnType<typeof initStore>>} */
@@ -11,6 +47,10 @@ describe("workspace resolver foundation", () => {
   before(async () => {
     const db = await createTestDb();
     store = await initStore(db);
+  });
+
+  after(async () => {
+    await Promise.all(tempDirs.map((dir) => fs.rm(dir, { recursive: true, force: true })));
   });
 
   it("resolves repo-chat bindings", async () => {
@@ -86,5 +126,44 @@ describe("workspace resolver foundation", () => {
     const listed = await store.listActiveWorkspaces(repo.repo_id);
 
     assert.deepEqual(listed, [activeWorkspace]);
+  });
+
+  it("infers repo chats from a git root cwd without explicit registration", async () => {
+    const { repoRoot } = await createRepoWithWorktree();
+
+    const resolved = await resolveChatBinding(store, "git-root-chat", repoRoot);
+
+    assert.equal(resolved.kind, "repo");
+    if (resolved.kind !== "repo") {
+      throw new Error("Expected repo binding");
+    }
+    assert.equal(resolved.repo.root_path, repoRoot);
+    assert.equal(resolved.repo.control_chat_id, null);
+  });
+
+  it("infers workspace chats from a worktree cwd when a workspace row exists", async () => {
+    const { repoRoot, worktreePath } = await createRepoWithWorktree();
+    const repo = await store.createRepo({
+      name: `manual-${Date.now()}`,
+      rootPath: repoRoot,
+      defaultBaseBranch: "master",
+    });
+    const workspace = await store.createWorkspace({
+      repoId: repo.repo_id,
+      name: "payments",
+      branch: "ws/payments",
+      baseBranch: "master",
+      worktreePath,
+      workspaceChatId: "ws-chat-bound",
+      status: "ready",
+    });
+
+    const resolved = await resolveChatBinding(store, "worktree-chat", worktreePath);
+
+    assert.deepEqual(resolved, {
+      kind: "workspace",
+      repo,
+      workspace,
+    });
   });
 });

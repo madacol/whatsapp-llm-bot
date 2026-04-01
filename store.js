@@ -109,7 +109,7 @@ function normalizeRepoRow(raw) {
     || typeof raw.name !== "string"
     || typeof raw.root_path !== "string"
     || typeof raw.default_base_branch !== "string"
-    || typeof raw.control_chat_id !== "string"
+    || (raw.control_chat_id !== null && typeof raw.control_chat_id !== "string")
     || !timestamp
   ) {
     return null;
@@ -304,7 +304,7 @@ export async function initStore(injectedDb){
             name TEXT NOT NULL UNIQUE,
             root_path TEXT NOT NULL,
             default_base_branch TEXT NOT NULL,
-            control_chat_id VARCHAR(50) NOT NULL REFERENCES chats(chat_id) UNIQUE,
+            control_chat_id VARCHAR(50) REFERENCES chats(chat_id) UNIQUE,
             timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
     `;
@@ -513,6 +513,7 @@ export async function initStore(injectedDb){
         db.sql`ALTER TABLE messages ADD COLUMN IF NOT EXISTS embedding vector`,
         db.sql`ALTER TABLE messages ADD COLUMN IF NOT EXISTS search_text tsvector`,
         db.sql`ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS conflicted_files JSONB NOT NULL DEFAULT '[]'`,
+        db.sql`ALTER TABLE repos ALTER COLUMN control_chat_id DROP NOT NULL`,
       ]);
       await db.sql`
         CREATE TABLE IF NOT EXISTS memories (
@@ -616,12 +617,14 @@ export async function initStore(injectedDb){
        *   name: string,
        *   rootPath: string,
        *   defaultBaseBranch: string,
-       *   controlChatId: string,
+       *   controlChatId?: string | null,
        * }} input
        * @returns {Promise<RepoRow>}
        */
-      async createRepo ({ name, rootPath, defaultBaseBranch, controlChatId }) {
-        await ensureChatExists(controlChatId);
+      async createRepo ({ name, rootPath, defaultBaseBranch, controlChatId = null }) {
+        if (controlChatId) {
+          await ensureChatExists(controlChatId);
+        }
         const repoId = randomUUID();
         const { rows: [row] } = await db.sql`
           INSERT INTO repos (repo_id, name, root_path, default_base_branch, control_chat_id)
@@ -632,11 +635,13 @@ export async function initStore(injectedDb){
         if (!repo) {
           throw new Error("Failed to normalize repo row");
         }
-        await upsertChatBinding({
-          chatId: controlChatId,
-          bindingKind: "repo",
-          repoId: repo.repo_id,
-        });
+        if (controlChatId) {
+          await upsertChatBinding({
+            chatId: controlChatId,
+            bindingKind: "repo",
+            repoId: repo.repo_id,
+          });
+        }
         return repo;
       },
 
@@ -661,6 +666,19 @@ export async function initStore(injectedDb){
         const { rows: [row] } = await db.sql`
           SELECT * FROM repos
           WHERE control_chat_id = ${chatId}
+          LIMIT 1
+        `;
+        return normalizeRepoRow(row);
+      },
+
+      /**
+       * @param {string} rootPath
+       * @returns {Promise<RepoRow | null>}
+       */
+      async getRepoByRootPath (rootPath) {
+        const { rows: [row] } = await db.sql`
+          SELECT * FROM repos
+          WHERE root_path = ${rootPath}
           LIMIT 1
         `;
         return normalizeRepoRow(row);
@@ -761,6 +779,19 @@ export async function initStore(injectedDb){
           SELECT * FROM workspaces
           WHERE repo_id = ${repoId}
             AND name = ${name}
+          LIMIT 1
+        `;
+        return normalizeWorkspaceRow(row);
+      },
+
+      /**
+       * @param {string} worktreePath
+       * @returns {Promise<WorkspaceRow | null>}
+       */
+      async getWorkspaceByWorktreePath (worktreePath) {
+        const { rows: [row] } = await db.sql`
+          SELECT * FROM workspaces
+          WHERE worktree_path = ${worktreePath}
           LIMIT 1
         `;
         return normalizeWorkspaceRow(row);

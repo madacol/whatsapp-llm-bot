@@ -265,7 +265,7 @@ type RepoRow = {
   name: string;
   root_path: string;
   default_base_branch: string;
-  control_chat_id: string;
+  control_chat_id: string | null;
   timestamp: string;
 };
 
