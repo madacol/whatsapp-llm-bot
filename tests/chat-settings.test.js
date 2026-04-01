@@ -305,10 +305,11 @@ describe("per-chat model selection", () => {
       await store.createWorkspace({
         repoId: repo.repo_id,
         name: "settings",
-        branch: "ws/settings",
+        branch: "settings",
         baseBranch: "master",
         worktreePath,
         workspaceChatId: "cfg-folder-workspace",
+        workspaceChatSubject: "settings",
         status: "ready",
       });
 

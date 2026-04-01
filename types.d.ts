@@ -278,6 +278,7 @@ type WorkspaceRow = {
   worktree_path: string;
   status: WorkspaceStatus;
   workspace_chat_id: string;
+  workspace_chat_subject: string;
   last_test_status: "not_run" | "passed" | "failed";
   last_commit_oid: string | null;
   conflicted_files: string[];
