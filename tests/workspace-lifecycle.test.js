@@ -120,10 +120,14 @@ async function createRepoFixture() {
 
 /**
  * @param {string} chatId
+ * @param {{ harnessCwd?: string }} [options]
  * @returns {Promise<void>}
  */
-async function seedChat(chatId) {
+async function seedChat(chatId, options = {}) {
   await seedChat_(db, chatId, { enabled: true });
+  if (options.harnessCwd) {
+    await db.sql`UPDATE chats SET harness_cwd = ${options.harnessCwd} WHERE chat_id = ${chatId}`;
+  }
 }
 
 /**
@@ -165,13 +169,7 @@ describe("workspace lifecycle", () => {
     const transportState = createFakeTransport();
     const handleMessage = await createHandler({ transport: transportState.transport });
 
-    await seedChat("repo-create-chat");
-    const repo = await store.createRepo({
-      name: `repo-create-${Date.now()}`,
-      rootPath: repoRoot,
-      defaultBaseBranch: "master",
-      controlChatId: "repo-create-chat",
-    });
+    await seedChat("repo-create-chat", { harnessCwd: repoRoot });
 
     const { context, responses } = createChatTurn({
       chatId: "repo-create-chat",
@@ -179,6 +177,8 @@ describe("workspace lifecycle", () => {
     });
     await handleMessage(context);
 
+    const repo = await store.getRepoByRootPath(repoRoot);
+    assert.ok(repo, "repo should be inferred from the root cwd");
     const workspace = await store.getWorkspaceByName(repo.repo_id, "payments");
     assert.ok(workspace, "workspace should be created");
     assert.equal(workspace?.branch, "ws/payments");
@@ -198,19 +198,15 @@ describe("workspace lifecycle", () => {
     const transportState = createFakeTransport();
     const handleMessage = await createHandler({ transport: transportState.transport });
 
-    await seedChat("repo-happy-chat");
-    const repo = await store.createRepo({
-      name: `repo-happy-${Date.now()}`,
-      rootPath: repoRoot,
-      defaultBaseBranch: "master",
-      controlChatId: "repo-happy-chat",
-    });
+    await seedChat("repo-happy-chat", { harnessCwd: repoRoot });
 
     await handleMessage(createChatTurn({
       chatId: "repo-happy-chat",
       content: [{ type: "text", text: "!new payments" }],
     }).context);
 
+    const repo = await store.getRepoByRootPath(repoRoot);
+    assert.ok(repo, "repo should be inferred from the root cwd");
     const workspace = await store.getWorkspaceByName(repo.repo_id, "payments");
     assert.ok(workspace, "workspace should exist after !new");
     await writeTrackedFile(workspace.worktree_path, "workspace change");
@@ -253,18 +249,14 @@ describe("workspace lifecycle", () => {
     const transportState = createFakeTransport();
     const handleMessage = await createHandler({ transport: transportState.transport });
 
-    await seedChat("repo-conflict-chat");
-    const repo = await store.createRepo({
-      name: `repo-conflict-${Date.now()}`,
-      rootPath: repoRoot,
-      defaultBaseBranch: "master",
-      controlChatId: "repo-conflict-chat",
-    });
+    await seedChat("repo-conflict-chat", { harnessCwd: repoRoot });
 
     await handleMessage(createChatTurn({
       chatId: "repo-conflict-chat",
       content: [{ type: "text", text: "!new payments" }],
     }).context);
+    const repo = await store.getRepoByRootPath(repoRoot);
+    assert.ok(repo, "repo should be inferred from the root cwd");
     const workspace = await store.getWorkspaceByName(repo.repo_id, "payments");
     assert.ok(workspace);
 
@@ -310,18 +302,14 @@ describe("workspace lifecycle", () => {
     const transportState = createFakeTransport();
     const handleMessage = await createHandler({ transport: transportState.transport });
 
-    await seedChat("repo-resolve-chat");
-    const repo = await store.createRepo({
-      name: `repo-resolve-${Date.now()}`,
-      rootPath: repoRoot,
-      defaultBaseBranch: "master",
-      controlChatId: "repo-resolve-chat",
-    });
+    await seedChat("repo-resolve-chat", { harnessCwd: repoRoot });
 
     await handleMessage(createChatTurn({
       chatId: "repo-resolve-chat",
       content: [{ type: "text", text: "!new payments" }],
     }).context);
+    const repo = await store.getRepoByRootPath(repoRoot);
+    assert.ok(repo, "repo should be inferred from the root cwd");
     const workspace = await store.getWorkspaceByName(repo.repo_id, "payments");
     assert.ok(workspace);
 

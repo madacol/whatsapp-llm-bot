@@ -400,7 +400,7 @@ export function createConversationRunner({ store, llmClient, getActionsFn, execu
 
     const chatInfo = await getChat(chatId);
     const context = createMessageActionContext(turn);
-    const resolvedBinding = await resolveChatBinding(store, chatId);
+    const resolvedBinding = await resolveChatBinding(store, chatId, chatInfo?.harness_cwd, turn.chatName);
     const { persona, harness } = await resolveConversationHarness(chatInfo);
 
     const globalActions = await getActionsFn();

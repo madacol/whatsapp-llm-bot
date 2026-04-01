@@ -18,32 +18,6 @@ import { formatWorkspaceStatus, listRepoWorkspaces } from "./workspace-service.j
  */
 
 /**
- * @param {Store} store
- * @param {string} chatId
- * @returns {Promise<RepoRow>}
- */
-async function getRepoForControlChatOrThrow(store, chatId) {
-  const repo = await store.getRepoByControlChat(chatId);
-  if (!repo) {
-    throw new Error(`Chat ${chatId} is not bound to a repo.`);
-  }
-  return repo;
-}
-
-/**
- * @param {Store} store
- * @param {string} chatId
- * @returns {Promise<WorkspaceRow>}
- */
-async function getWorkspaceForChatOrThrow(store, chatId) {
-  const workspace = await store.getWorkspaceByChat(chatId);
-  if (!workspace) {
-    throw new Error(`Chat ${chatId} is not bound to a workspace.`);
-  }
-  return workspace;
-}
-
-/**
  * @param {ExecuteActionContext} context
  * @returns {string[]}
  */
@@ -61,33 +35,26 @@ function getInitialWorkspaceParticipants(context) {
 }
 
 /**
- * @param {WorkspaceRow["last_test_status"]} lastTestStatus
- * @returns {string}
- */
-function formatLastTestStatus(lastTestStatus) {
-  return lastTestStatus === "not_run" ? "not run" : lastTestStatus;
-}
-
-/**
  * @param {{ store: Store, transport?: ChatTransport }} input
  */
 export function createWorkspaceControl({ store, transport }) {
   return {
     /**
-     * @param {string} chatId
+     * @param {RepoRow} repo
      * @returns {Promise<string>}
      */
-    async list(chatId) {
-      return listRepoWorkspaces(store, chatId);
+    async list(repo) {
+      return listRepoWorkspaces(store, repo);
     },
 
     /**
+     * @param {RepoRow} repo
      * @param {ExecuteActionContext} context
      * @param {string} workspaceName
      * @param {string | undefined} explicitBaseBranch
      * @returns {Promise<string>}
      */
-    async create(context, workspaceName, explicitBaseBranch) {
+    async create(repo, context, workspaceName, explicitBaseBranch) {
       if (!transport?.createGroup) {
         throw new Error("Workspace creation requires transport group creation support.");
       }
@@ -95,7 +62,6 @@ export function createWorkspaceControl({ store, transport }) {
         throw new Error("Workspace name is invalid. Use letters, numbers, `-`, and `_`.");
       }
 
-      const repo = await getRepoForControlChatOrThrow(store, context.chatId);
       const existing = await store.getWorkspaceByName(repo.repo_id, workspaceName);
       if (existing) {
         throw new Error(`Workspace \`${workspaceName}\` already exists.`);
@@ -119,7 +85,7 @@ export function createWorkspaceControl({ store, transport }) {
           workspaceChatId: group.chatId,
           status: "ready",
         });
-        await transport.sendText(group.chatId, await formatWorkspaceStatus(store, workspace.workspace_chat_id));
+        await transport.sendText(group.chatId, await formatWorkspaceStatus(workspace));
         return [
           `Created workspace \`${workspace.name}\`.`,
           `Branch: \`${workspace.branch}\``,
@@ -133,28 +99,26 @@ export function createWorkspaceControl({ store, transport }) {
     },
 
     /**
-     * @param {string} chatId
+     * @param {WorkspaceRow} workspace
      * @returns {Promise<string>}
      */
-    async status(chatId) {
-      return formatWorkspaceStatus(store, chatId);
+    async status(workspace) {
+      return formatWorkspaceStatus(workspace);
     },
 
     /**
-     * @param {string} chatId
+     * @param {WorkspaceRow} workspace
      * @returns {Promise<string>}
      */
-    async diff(chatId) {
-      const workspace = await getWorkspaceForChatOrThrow(store, chatId);
+    async diff(workspace) {
       return formatDiffSummary(workspace.worktree_path);
     },
 
     /**
-     * @param {string} chatId
+     * @param {WorkspaceRow} workspace
      * @returns {Promise<string>}
      */
-    async test(chatId) {
-      const workspace = await getWorkspaceForChatOrThrow(store, chatId);
+    async test(workspace) {
       await store.setWorkspaceStatus(workspace.workspace_id, "busy");
       try {
         const result = await runWorkspaceVerification(workspace.worktree_path);
@@ -168,12 +132,11 @@ export function createWorkspaceControl({ store, transport }) {
     },
 
     /**
-     * @param {string} chatId
+     * @param {WorkspaceRow} workspace
      * @param {string} message
      * @returns {Promise<string>}
      */
-    async commit(chatId, message) {
-      const workspace = await getWorkspaceForChatOrThrow(store, chatId);
+    async commit(workspace, message) {
       if (!message.trim()) {
         return "Use `!commit <message>`.";
       }
@@ -187,25 +150,23 @@ export function createWorkspaceControl({ store, transport }) {
     },
 
     /**
-     * @param {string} repoChatId
+     * @param {RepoRow} repo
      * @param {string} workspaceName
      * @returns {Promise<string>}
      */
-    async archiveByName(repoChatId, workspaceName) {
-      const repo = await getRepoForControlChatOrThrow(store, repoChatId);
+    async archiveByName(repo, workspaceName) {
       const workspace = await store.getWorkspaceByName(repo.repo_id, workspaceName);
       if (!workspace) {
         throw new Error(`Workspace \`${workspaceName}\` does not exist.`);
       }
-      return this.archiveCurrent(workspace.workspace_chat_id);
+      return this.archiveCurrent(workspace);
     },
 
     /**
-     * @param {string} workspaceChatId
+     * @param {WorkspaceRow} workspace
      * @returns {Promise<string>}
      */
-    async archiveCurrent(workspaceChatId) {
-      const workspace = await getWorkspaceForChatOrThrow(store, workspaceChatId);
+    async archiveCurrent(workspace) {
       if (workspace.status === "archived") {
         return `Workspace \`${workspace.name}\` is already archived.`;
       }
@@ -220,11 +181,10 @@ export function createWorkspaceControl({ store, transport }) {
     },
 
     /**
-     * @param {string} workspaceChatId
+     * @param {WorkspaceRow} workspace
      * @returns {Promise<string>}
      */
-    async merge(workspaceChatId) {
-      const workspace = await getWorkspaceForChatOrThrow(store, workspaceChatId);
+    async merge(workspace) {
       const repo = await store.getRepo(workspace.repo_id);
       if (!repo) {
         throw new Error(`Repo ${workspace.repo_id} does not exist.`);
@@ -258,11 +218,10 @@ export function createWorkspaceControl({ store, transport }) {
     },
 
     /**
-     * @param {string} workspaceChatId
+     * @param {WorkspaceRow} workspace
      * @returns {Promise<string>}
      */
-    async showConflict(workspaceChatId) {
-      const workspace = await getWorkspaceForChatOrThrow(store, workspaceChatId);
+    async showConflict(workspace) {
       const conflictedFiles = workspace.conflicted_files.length > 0
         ? workspace.conflicted_files
         : await listConflictedFiles(workspace.worktree_path);
@@ -279,11 +238,10 @@ export function createWorkspaceControl({ store, transport }) {
     },
 
     /**
-     * @param {string} workspaceChatId
+     * @param {WorkspaceRow} workspace
      * @returns {Promise<string>}
      */
-    async resolveConflicts(workspaceChatId) {
-      const workspace = await getWorkspaceForChatOrThrow(store, workspaceChatId);
+    async resolveConflicts(workspace) {
       await store.setWorkspaceStatus(workspace.workspace_id, "busy", { conflictedFiles: workspace.conflicted_files });
       try {
         const result = await resolveWorkspaceConflictsAutomatically(workspace);
@@ -313,43 +271,13 @@ export function createWorkspaceControl({ store, transport }) {
     },
 
     /**
-     * @param {string} workspaceChatId
+     * @param {WorkspaceRow} workspace
      * @returns {Promise<string>}
      */
-    async abortMerge(workspaceChatId) {
-      const workspace = await getWorkspaceForChatOrThrow(store, workspaceChatId);
+    async abortMerge(workspace) {
       await abortWorkspaceMerge(workspace);
       await store.setWorkspaceStatus(workspace.workspace_id, "ready");
       return `Aborted merge attempt in \`${workspace.branch}\`.`;
-    },
-
-    /**
-     * @param {string} workspaceChatId
-     * @returns {Promise<{ archived: boolean, conflicted: boolean, busy: boolean }>}
-     */
-    async getState(workspaceChatId) {
-      const workspace = await getWorkspaceForChatOrThrow(store, workspaceChatId);
-      return {
-        archived: workspace.status === "archived",
-        conflicted: workspace.status === "conflicted",
-        busy: workspace.status === "busy",
-      };
-    },
-
-    /**
-     * @param {string} workspaceChatId
-     * @returns {Promise<string>}
-     */
-    async statusSummary(workspaceChatId) {
-      const workspace = await getWorkspaceForChatOrThrow(store, workspaceChatId);
-      return [
-        `Workspace: ${workspace.name}`,
-        `Base: ${workspace.base_branch}`,
-        `Branch: ${workspace.branch}`,
-        `Status: ${workspace.status}`,
-        `Last test: ${formatLastTestStatus(workspace.last_test_status)}`,
-        `Last commit: ${workspace.last_commit_oid ?? "none"}`,
-      ].join("\n");
     },
   };
 }
