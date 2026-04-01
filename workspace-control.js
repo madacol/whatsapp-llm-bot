@@ -36,6 +36,18 @@ function getInitialWorkspaceParticipants(context) {
 }
 
 /**
+ * @param {string} workspaceName
+ * @returns {SelectOption[]}
+ */
+function buildDuplicateWorkspaceOptions(workspaceName) {
+  return [
+    { id: "replace", label: `Replace ${workspaceName}` },
+    { id: "new", label: "Pick another name" },
+    { id: "cancel", label: "Cancel" },
+  ];
+}
+
+/**
  * @param {{ store: Store, transport?: ChatTransport }} input
  */
 export function createWorkspaceControl({ store, transport }) {
@@ -65,10 +77,18 @@ export function createWorkspaceControl({ store, transport }) {
 
       const existing = await store.getWorkspaceByName(repo.repo_id, workspaceName);
       if (existing) {
-        throw new Error(
-          `Workspace \`${workspaceName}\` already exists.\n` +
-          "Use `replace` if you want a fresh workspace with that name, or `cancel` to keep the current one.",
+        const choice = await context.select(
+          `Workspace \`${workspaceName}\` already exists. Choose what to do:`,
+          buildDuplicateWorkspaceOptions(workspaceName),
+          { deleteOnSelect: true, cancelIds: ["cancel"] },
         );
+        if (choice === "replace") {
+          return this.replace(repo, context, existing, explicitBaseBranch);
+        }
+        if (choice === "new") {
+          return "Use `!new <different-name>` to create another workspace without replacing the current one.";
+        }
+        return "Workspace creation cancelled.";
       }
 
       const baseBranch = explicitBaseBranch ?? repo.default_base_branch;
@@ -105,6 +125,52 @@ export function createWorkspaceControl({ store, transport }) {
         await cleanupWorkspaceWorktree(repo, branch, worktreePath);
         throw new Error(`WhatsApp group creation failed: ${errorToString(error)}`);
       }
+    },
+
+    /**
+     * @param {RepoRow} repo
+     * @param {ExecuteActionContext} context
+     * @param {WorkspaceRow} existing
+     * @param {string | undefined} explicitBaseBranch
+     * @returns {Promise<string>}
+     */
+    async replace(repo, context, existing, explicitBaseBranch) {
+      if (!transport?.sendText) {
+        throw new Error("Workspace replacement requires transport messaging support.");
+      }
+      const baseBranch = explicitBaseBranch ?? existing.base_branch;
+      const participants = getInitialWorkspaceParticipants(context);
+
+      await cleanupWorkspaceWorktree(repo, existing.branch, existing.worktree_path);
+      const { branch, worktreePath } = await createWorkspaceWorktree(repo, existing.name, baseBranch);
+      const workspace = await store.resetWorkspace({
+        workspaceId: existing.workspace_id,
+        branch,
+        baseBranch,
+        worktreePath,
+      });
+      await store.copyChatCustomizations(context.chatId, existing.workspace_chat_id);
+      await store.setChatEnabled(existing.workspace_chat_id, true);
+      if (transport?.renameGroup) {
+        await transport.renameGroup(existing.workspace_chat_id, `ws/${existing.name}`);
+      }
+      if (transport?.setAnnouncementOnly) {
+        await transport.setAnnouncementOnly(existing.workspace_chat_id, false);
+      }
+      if (transport?.promoteParticipants && participants.length > 0) {
+        try {
+          await transport.promoteParticipants(existing.workspace_chat_id, participants);
+        } catch {
+          // Best effort: the requester may not already be in the existing group.
+        }
+      }
+      await transport.sendText(existing.workspace_chat_id, await formatWorkspaceStatus(workspace));
+      return [
+        `Replaced workspace \`${workspace.name}\`.`,
+        `Branch: \`${workspace.branch}\``,
+        `Base: \`${workspace.base_branch}\``,
+        `Chat: \`ws/${workspace.name}\``,
+      ].join("\n");
     },
 
     /**
