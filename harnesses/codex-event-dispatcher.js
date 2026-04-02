@@ -1,6 +1,7 @@
 import { buildToolPresentation, getToolFlowDescriptor } from "../tool-presentation-model.js";
 import { toolCallUpdate, toolFlowInspectState, toolFlowUpdate, toolInspectState } from "../outbound-events.js";
 import { createPlanPresentationFromState } from "../plan-presentation.js";
+import { createSharedSkillInvocationAdapter } from "../shared-skill-runtime.js";
 import { createCodexReasoningState } from "./codex-reasoning-state.js";
 import { createCodexRunState } from "./codex-run-state.js";
 import { createCodexSyntheticToolAdapter } from "./codex-synthetic-tools.js";
@@ -25,6 +26,7 @@ export function createCodexEventDispatcher(input) {
     onToolCall: input.hooks.onToolCall,
     cwd: input.runConfig?.workdir ?? null,
   });
+  const sharedSkillAdapter = createSharedSkillInvocationAdapter();
   const reasoningState = createCodexReasoningState();
   /** @type {Map<string, { handle?: MessageHandle, presentation: import("../tool-presentation-model.js").ToolPresentation, flowKey?: string }>} */
   const activeTools = new Map();
@@ -193,9 +195,12 @@ export function createCodexEventDispatcher(input) {
 
     if (normalized.assistantText) {
       const suppressAssistantText = await syntheticToolAdapter.handleAssistantText(normalized.assistantText);
-      if (!suppressAssistantText) {
+      const suppressSharedSkill = sharedSkillAdapter.handleText(normalized.assistantText);
+      if (!suppressAssistantText && !suppressSharedSkill) {
         lastAssistantText = normalized.assistantText;
         await input.hooks.onLlmResponse(normalized.assistantText);
+      } else if (suppressSharedSkill) {
+        lastAssistantText = normalized.assistantText;
       }
     }
 
