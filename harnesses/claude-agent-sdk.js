@@ -13,7 +13,7 @@ import { query } from "@anthropic-ai/claude-agent-sdk";
 import { randomUUID } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { mkdir, rm, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { hasMediaPath } from "../attachment-paths.js";
 import { formatChatSettingsCommand } from "../chat-commands.js";
 import { renderContentBlock } from "../message-formatting.js";
@@ -29,6 +29,7 @@ import { getSandboxEscapeRequest } from "./sandbox-approval.js";
 import { requestSandboxEscapeApproval } from "./sandbox-approval-coordinator.js";
 import { buildSdkErrorResponse, clearStaleHarnessSession } from "./harness-run-errors.js";
 import { augmentLatestUserMessageForTextHarness, renderMarkdownImageReference } from "./prompt-media.js";
+import { getSharedSkillActions } from "../shared-skills.js";
 
 const log = createLogger("harness:claude-agent-sdk");
 const HARNESS_NAME = "claude-agent-sdk";
@@ -123,8 +124,8 @@ const EFFORT_LABELS = {
 const FALLBACK_EFFORT_LEVELS = ["low", "medium", "high"];
 
 const MADABOT_WORKSPACE_DIR = ".madabot";
-const CHAT_ACTIONS_JSON_FILE = "chat-actions.json";
-const CHAT_ACTIONS_MARKDOWN_FILE = "chat-actions.md";
+const CLAUDE_SHARED_SKILLS_PLUGIN_DIR = "claude-shared-skills";
+const CLAUDE_SHARED_SKILLS_PLUGIN_NAME = "madabot-shared-skills";
 
 /**
  * Get available effort levels for a specific model.
@@ -291,44 +292,29 @@ export function buildClaudePrompt(messages) {
  * @returns {ClaudeWorkspaceArtifact[]}
  */
 export function buildClaudeWorkspaceArtifacts(toolRuntime) {
-  const chatTools = toolRuntime.listTools().filter((tool) => tool.scope === "chat");
-  if (chatTools.length === 0) {
+  const sharedSkills = getSharedSkillActions(toolRuntime.listTools());
+  if (sharedSkills.length === 0) {
     return [];
   }
 
-  const actions = chatTools.map((tool) => ({
-    name: tool.name,
-    description: tool.description,
-    parameters: tool.parameters,
-  }));
-
-  const jsonContent = JSON.stringify({ version: 1, actions }, null, 2);
-  const markdownContent = [
-    "# Chat Actions",
-    "",
-    "These are chat-scoped actions available in this workspace.",
-    "",
-    ...actions.flatMap((action) => [
-      `## ${action.name}`,
-      "",
-      action.description,
-      "",
-      "```json",
-      JSON.stringify(action.parameters, null, 2),
-      "```",
-      "",
-    ]),
-  ].join("\n");
-
   return [
     {
-      relativePath: `${MADABOT_WORKSPACE_DIR}/${CHAT_ACTIONS_JSON_FILE}`,
-      content: jsonContent,
+      relativePath: `${MADABOT_WORKSPACE_DIR}/${CLAUDE_SHARED_SKILLS_PLUGIN_DIR}/.claude-plugin/plugin.json`,
+      content: JSON.stringify({ name: CLAUDE_SHARED_SKILLS_PLUGIN_NAME }, null, 2),
     },
-    {
-      relativePath: `${MADABOT_WORKSPACE_DIR}/${CHAT_ACTIONS_MARKDOWN_FILE}`,
-      content: markdownContent,
-    },
+    ...sharedSkills.map((tool) => ({
+      relativePath: `${MADABOT_WORKSPACE_DIR}/${CLAUDE_SHARED_SKILLS_PLUGIN_DIR}/skills/${tool.sharedSkill.name}/SKILL.md`,
+      content: [
+        "---",
+        `name: ${tool.sharedSkill.name}`,
+        `description: ${tool.sharedSkill.description?.trim() || tool.description}`,
+        "---",
+        "",
+        `# ${tool.sharedSkill.name}`,
+        "",
+        tool.sharedSkill.instructions.trim(),
+      ].join("\n"),
+    })),
   ];
 }
 
@@ -348,8 +334,27 @@ export async function writeClaudeWorkspaceArtifacts(workdir, toolRuntime) {
 
   await mkdir(madabotDir, { recursive: true });
   await Promise.all(
-    artifacts.map((artifact) => writeFile(join(workdir, artifact.relativePath), artifact.content, "utf8")),
+    artifacts.map(async (artifact) => {
+      const artifactPath = join(workdir, artifact.relativePath);
+      await mkdir(dirname(artifactPath), { recursive: true });
+      await writeFile(artifactPath, artifact.content, "utf8");
+    }),
   );
+}
+
+/**
+ * @param {string} workdir
+ * @param {ToolRuntime} toolRuntime
+ * @returns {import("@anthropic-ai/claude-agent-sdk").SdkPluginConfig[]}
+ */
+function getClaudeWorkspacePlugins(workdir, toolRuntime) {
+  if (buildClaudeWorkspaceArtifacts(toolRuntime).length === 0) {
+    return [];
+  }
+  return [{
+    type: "local",
+    path: join(workdir, MADABOT_WORKSPACE_DIR, CLAUDE_SHARED_SKILLS_PLUGIN_DIR),
+  }];
 }
 
 /**
@@ -825,6 +830,7 @@ export function createClaudeAgentSdkHarness() {
         allowDangerouslySkipPermissions: true,
         persistSession: true,
         abortController,
+        plugins: getClaudeWorkspacePlugins(effectiveWorkdir, llmConfig.toolRuntime),
         ...(systemPrompt ? { systemPrompt } : {}),
         ...(model && { model }),
         ...(reasoningEffort && { effort: reasoningEffort }),

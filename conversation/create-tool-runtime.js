@@ -12,6 +12,7 @@ function toToolDescriptor(action) {
     name: action.name,
     description: action.description,
     instructions: action.instructions,
+    sharedSkill: action.sharedSkill,
     scope: action.scope,
     parameters: action.parameters,
     permissions: action.permissions,
