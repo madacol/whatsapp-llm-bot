@@ -11,6 +11,7 @@ import { renderCodeToImages, renderDiffToImages, renderTableToImages, renderUnif
 import { createLogger } from "./logger.js";
 import { splitEmbeddedMarkdownImages } from "./markdown-embedded-images.js";
 import { readBlockBuffer } from "./media-store.js";
+import { formatPlanStatusSymbol, normalizePlanStatusMarker } from "./plan-status-formatting.js";
 
 const log = createLogger("message-renderer");
 
@@ -139,16 +140,7 @@ function formatWhatsAppIndent(indent) {
  * @returns {string}
  */
 function formatWhatsAppTaskMarker(marker) {
-  switch (marker.toLowerCase()) {
-    case "x":
-      return "✅";
-    case "~":
-      return "⏳";
-    case " ":
-      return "☐";
-    default:
-      return "•";
-  }
+  return formatPlanStatusSymbol(normalizePlanStatusMarker(marker));
 }
 
 /**
