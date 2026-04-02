@@ -29,7 +29,7 @@ import { getSandboxEscapeRequest } from "./sandbox-approval.js";
 import { requestSandboxEscapeApproval } from "./sandbox-approval-coordinator.js";
 import { buildSdkErrorResponse, clearStaleHarnessSession } from "./harness-run-errors.js";
 import { augmentLatestUserMessageForTextHarness, renderMarkdownImageReference } from "./prompt-media.js";
-import { getSharedSkillActions } from "../shared-skills.js";
+import { buildSharedSkillMarkdownDocument, getSharedSkillViews } from "../shared-skills.js";
 import { createSharedSkillInvocationAdapter, executeSharedSkillInvocations } from "../shared-skill-runtime.js";
 
 const log = createLogger("harness:claude-agent-sdk");
@@ -293,7 +293,7 @@ export function buildClaudePrompt(messages) {
  * @returns {ClaudeWorkspaceArtifact[]}
  */
 export function buildClaudeWorkspaceArtifacts(toolRuntime) {
-  const sharedSkills = getSharedSkillActions(toolRuntime.listTools());
+  const sharedSkills = getSharedSkillViews(toolRuntime.listTools());
   if (sharedSkills.length === 0) {
     return [];
   }
@@ -303,18 +303,9 @@ export function buildClaudeWorkspaceArtifacts(toolRuntime) {
       relativePath: `${MADABOT_WORKSPACE_DIR}/${CLAUDE_SHARED_SKILLS_PLUGIN_DIR}/.claude-plugin/plugin.json`,
       content: JSON.stringify({ name: CLAUDE_SHARED_SKILLS_PLUGIN_NAME }, null, 2),
     },
-    ...sharedSkills.map((tool) => ({
-      relativePath: `${MADABOT_WORKSPACE_DIR}/${CLAUDE_SHARED_SKILLS_PLUGIN_DIR}/skills/${tool.sharedSkill.name}/SKILL.md`,
-      content: [
-        "---",
-        `name: ${tool.sharedSkill.name}`,
-        `description: ${tool.sharedSkill.description?.trim() || tool.description}`,
-        "---",
-        "",
-        `# ${tool.sharedSkill.name}`,
-        "",
-        tool.sharedSkill.instructions.trim(),
-      ].join("\n"),
+    ...sharedSkills.map((sharedSkill) => ({
+      relativePath: `${MADABOT_WORKSPACE_DIR}/${CLAUDE_SHARED_SKILLS_PLUGIN_DIR}/skills/${sharedSkill.name}/SKILL.md`,
+      content: buildSharedSkillMarkdownDocument(sharedSkill),
     })),
   ];
 }

@@ -1,6 +1,11 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { buildSharedSkillPrompt, filterHarnessActions } from "../shared-skills.js";
+import {
+  buildSharedSkillMarkdownDocument,
+  buildSharedSkillPrompt,
+  filterHarnessActions,
+  getSharedSkillViews,
+} from "../shared-skills.js";
 import generateImage from "../actions/tools/generateImage/index.js";
 import generateVideo from "../actions/tools/generateVideo/index.js";
 import sendPath from "../actions/tools/sendPath/index.js";
@@ -77,6 +82,64 @@ describe("buildSharedSkillPrompt", () => {
 
   it("returns an empty string when no shared skills exist", () => {
     assert.equal(buildSharedSkillPrompt([]), "");
+  });
+});
+
+describe("getSharedSkillViews", () => {
+  it("normalizes shared skill metadata for downstream renderers", () => {
+    const [skill] = getSharedSkillViews([
+      {
+        name: "send_path",
+        description: "Send a local path back to WhatsApp.",
+        sharedSkill: {
+          name: "send-path",
+          instructions: "  Use workspace-relative paths when possible.  ",
+        },
+        parameters: { type: "object", properties: {} },
+        permissions: {},
+        action_fn: async () => "ok",
+      },
+    ]);
+
+    assert.deepEqual(skill, {
+      actionName: "send_path",
+      name: "send-path",
+      description: "Send a local path back to WhatsApp.",
+      instructions: "Use workspace-relative paths when possible.",
+    });
+  });
+});
+
+describe("buildSharedSkillMarkdownDocument", () => {
+  it("renders Claude skill markdown from the shared normalized view", () => {
+    const [skill] = getSharedSkillViews([
+      {
+        name: "send_path",
+        description: "Send a local path back to WhatsApp.",
+        sharedSkill: {
+          name: "send-path",
+          description: "Return a generated file to the chat.",
+          instructions: "Use workspace-relative paths when possible.",
+        },
+        parameters: { type: "object", properties: {} },
+        permissions: {},
+        action_fn: async () => "ok",
+      },
+    ]);
+
+    assert.equal(
+      buildSharedSkillMarkdownDocument(skill),
+      [
+        "---",
+        "name: send-path",
+        "description: Return a generated file to the chat.",
+        "---",
+        "",
+        "# send-path",
+        "",
+        "Use workspace-relative paths when possible.",
+      ].join("\n"),
+    );
   });
 });
 
