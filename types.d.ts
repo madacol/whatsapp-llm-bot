@@ -326,6 +326,36 @@ type ChatTransport = {
   setAnnouncementOnly?: (chatId: string, enabled: boolean) => Promise<void>;
 };
 
+type WorkspacePresentationPort = {
+  provisionWorkspaceSurface: (input: {
+    workspaceName: string;
+    sourceChatName?: string;
+    requesterJids: string[];
+  }) => Promise<{ surfaceId: string; surfaceName: string }>;
+  reopenWorkspaceSurface: (input: {
+    surfaceId: string;
+    workspaceName: string;
+    sourceChatName?: string;
+    requesterJids: string[];
+  }) => Promise<{ surfaceName: string }>;
+  presentWorkspaceBootstrap: (input: {
+    surfaceId: string;
+    statusText: string;
+  }) => Promise<void>;
+  presentSeedPrompt: (input: {
+    surfaceId: string;
+    promptText: string;
+  }) => Promise<void>;
+  sendWorkspaceEvent: (input: {
+    surfaceId: string;
+    event: OutboundEvent;
+  }) => Promise<MessageHandle | undefined>;
+  archiveWorkspaceSurface: (input: {
+    surfaceId: string;
+    surfaceName: string;
+  }) => Promise<void>;
+};
+
 type ChatTurn = {
   chatId: string;
   senderIds: string[];

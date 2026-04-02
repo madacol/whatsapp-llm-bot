@@ -5,3 +5,4 @@
  * private and tests import them directly from their owning modules.
  */
 export { createWhatsAppTransport, connectToWhatsApp } from "./create-whatsapp-transport.js";
+export { createWhatsAppWorkspacePresenter } from "./workspace-presenter.js";

@@ -104,7 +104,7 @@ async function resolveConversationHarness(chatInfo) {
  *   llmClient: LlmClient,
  *   getActionsFn: typeof import("../actions.js").getActions,
  *   executeActionFn: typeof import("../actions.js").executeAction,
- *   transport?: ChatTransport,
+ *   workspacePresentation?: WorkspacePresentationPort,
  * }} ConversationRunnerDeps
  */
 
@@ -113,7 +113,7 @@ async function resolveConversationHarness(chatInfo) {
  * @param {ConversationRunnerDeps} deps
  * @returns {{ handleMessage: (turn: ChatTurn) => Promise<void> }}
  */
-export function createConversationRunner({ store, llmClient, getActionsFn, executeActionFn, transport }) {
+export function createConversationRunner({ store, llmClient, getActionsFn, executeActionFn, workspacePresentation }) {
   const {
     addMessage,
     updateToolMessage,
@@ -129,7 +129,7 @@ export function createConversationRunner({ store, llmClient, getActionsFn, execu
   } = store;
 
   const runCoordinator = createHarnessRunCoordinator();
-  const workspaceControl = createWorkspaceControl({ store, transport });
+  const workspaceControl = createWorkspaceControl({ store, workspacePresentation });
 
   /**
    * @param {ChatTurn} turn
@@ -154,7 +154,10 @@ export function createConversationRunner({ store, llmClient, getActionsFn, execu
     if (!promptText) {
       return;
     }
-    await transport?.sendText(workspace.workspace_chat_id, promptText);
+    await workspacePresentation?.presentSeedPrompt({
+      surfaceId: workspace.workspace_chat_id,
+      promptText,
+    });
     await dispatchTurn({
       chatId: workspace.workspace_chat_id,
       senderIds: sourceTurn.senderIds,
@@ -168,7 +171,12 @@ export function createConversationRunner({ store, llmClient, getActionsFn, execu
         addressedToBot: true,
         repliedToBot: false,
       },
-      io: createSeedTurnIo({ chatId: workspace.workspace_chat_id, transport }),
+      io: createSeedTurnIo({
+        sendEvent: (event) => workspacePresentation?.sendWorkspaceEvent({
+          surfaceId: workspace.workspace_chat_id,
+          event,
+        }) ?? Promise.resolve(undefined),
+      }),
     });
   }
 
