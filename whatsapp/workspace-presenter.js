@@ -99,82 +99,132 @@ function stringifyEvent(event) {
 /**
  * WhatsApp-specific workspace presentation adapter.
  * It owns the fact that a workspace surface is represented as a group.
- * @param {{ transport: ChatTransport }} input
+ * @param {{
+ *   transport: ChatTransport,
+ *   store: Pick<Awaited<ReturnType<typeof import("../store.js").initStore>>,
+ *     "getWhatsAppRepoPresentation"
+ *     | "getWhatsAppWorkspacePresentation"
+ *     | "saveWhatsAppWorkspacePresentation"
+ *     | "upsertWhatsAppRepoPresentation">,
+ * }} input
  * @returns {WorkspacePresentationPort}
  */
-export function createWhatsAppWorkspacePresenter({ transport }) {
+export function createWhatsAppWorkspacePresenter({ transport, store }) {
   /**
-   * @param {string} surfaceId
+   * @param {string} workspaceId
    * @param {string} text
    * @returns {Promise<void>}
    */
-  async function sendPlainWorkspaceContent(surfaceId, text) {
+  async function sendPlainWorkspaceContent(workspaceId, text) {
     await presenter.sendWorkspaceEvent({
-      surfaceId,
+      workspaceId,
       event: contentEvent("plain", [{ type: "text", text }]),
     });
   }
 
+  /**
+   * @param {string} workspaceId
+   * @returns {Promise<WhatsAppWorkspacePresentationRow>}
+   */
+  async function getWorkspacePresentation(workspaceId) {
+    const presentation = await store.getWhatsAppWorkspacePresentation(workspaceId);
+    if (!presentation) {
+      throw new Error(`WhatsApp presentation for workspace ${workspaceId} does not exist.`);
+    }
+    return presentation;
+  }
+
   /** @type {WorkspacePresentationPort} */
   const presenter = {
-    async provisionWorkspaceSurface({ workspaceName, sourceChatName, requesterJids }) {
+    async ensureWorkspaceVisible({ repoId, workspaceId, workspaceName, sourceChatName, requesterJids }) {
+      const surfaceName = buildWorkspaceSurfaceName(workspaceName, sourceChatName);
+      const existing = await store.getWhatsAppWorkspacePresentation(workspaceId);
+
+      if (existing) {
+        if (transport.renameGroup) {
+          await transport.renameGroup(existing.workspace_chat_id, surfaceName);
+        }
+        if (transport.setAnnouncementOnly) {
+          await transport.setAnnouncementOnly(existing.workspace_chat_id, false);
+        }
+        if (transport.promoteParticipants && requesterJids.length > 0) {
+          try {
+            await transport.promoteParticipants(existing.workspace_chat_id, requesterJids);
+          } catch {
+            // Best effort: the requester may not already be in the existing group.
+          }
+        }
+        await store.saveWhatsAppWorkspacePresentation({
+          repoId,
+          workspaceId,
+          workspaceChatId: existing.workspace_chat_id,
+          workspaceChatSubject: surfaceName,
+          role: existing.role,
+          linkedCommunityChatId: existing.linked_community_chat_id,
+        });
+        return {
+          surfaceId: existing.workspace_chat_id,
+          surfaceName,
+        };
+      }
+
       if (!transport.createGroup) {
         throw new Error("Workspace creation requires workspace surface provisioning support.");
       }
-      const surfaceName = buildWorkspaceSurfaceName(workspaceName, sourceChatName);
       const group = await transport.createGroup(surfaceName, requesterJids);
       if (transport.promoteParticipants && requesterJids.length > 0) {
         await transport.promoteParticipants(group.chatId, requesterJids);
       }
+      const persistedSurfaceName = typeof group.subject === "string" ? group.subject : surfaceName;
+      const repoPresentation = await store.getWhatsAppRepoPresentation(repoId);
+      if (!repoPresentation) {
+        await store.upsertWhatsAppRepoPresentation({
+          repoId,
+          topologyKind: "groups",
+        });
+      }
+      await store.saveWhatsAppWorkspacePresentation({
+        repoId,
+        workspaceId,
+        workspaceChatId: group.chatId,
+        workspaceChatSubject: persistedSurfaceName,
+      });
       return {
         surfaceId: group.chatId,
-        surfaceName: typeof group.subject === "string" ? group.subject : surfaceName,
+        surfaceName: persistedSurfaceName,
       };
     },
 
-    async reopenWorkspaceSurface({ surfaceId, workspaceName, sourceChatName, requesterJids }) {
-      const surfaceName = buildWorkspaceSurfaceName(workspaceName, sourceChatName);
-      if (transport.renameGroup) {
-        await transport.renameGroup(surfaceId, surfaceName);
-      }
-      if (transport.setAnnouncementOnly) {
-        await transport.setAnnouncementOnly(surfaceId, false);
-      }
-      if (transport.promoteParticipants && requesterJids.length > 0) {
-        try {
-          await transport.promoteParticipants(surfaceId, requesterJids);
-        } catch {
-          // Best effort: the requester may not already be in the existing group.
-        }
-      }
-      return { surfaceName };
+    async presentWorkspaceBootstrap({ workspaceId, statusText }) {
+      await sendPlainWorkspaceContent(workspaceId, statusText);
     },
 
-    async presentWorkspaceBootstrap({ surfaceId, statusText }) {
-      await sendPlainWorkspaceContent(surfaceId, statusText);
+    async presentSeedPrompt({ workspaceId, promptText }) {
+      await sendPlainWorkspaceContent(workspaceId, promptText);
     },
 
-    async presentSeedPrompt({ surfaceId, promptText }) {
-      await sendPlainWorkspaceContent(surfaceId, promptText);
-    },
-
-    async sendWorkspaceEvent({ surfaceId, event }) {
+    async sendWorkspaceEvent({ workspaceId, event }) {
+      const presentation = await getWorkspacePresentation(workspaceId);
       if (transport.sendEvent) {
-        return transport.sendEvent(surfaceId, event);
+        return transport.sendEvent(presentation.workspace_chat_id, event);
       }
       const text = stringifyEvent(event).trim();
       if (text) {
-        await transport.sendText(surfaceId, text);
+        await transport.sendText(presentation.workspace_chat_id, text);
       }
       return undefined;
     },
 
-    async archiveWorkspaceSurface({ surfaceId, surfaceName }) {
+    async archiveWorkspaceSurface({ workspaceId }) {
+      const presentation = await getWorkspacePresentation(workspaceId);
       if (transport.renameGroup) {
-        await transport.renameGroup(surfaceId, `${surfaceName} (archived)`);
+        await transport.renameGroup(
+          presentation.workspace_chat_id,
+          `${presentation.workspace_chat_subject} (archived)`,
+        );
       }
       if (transport.setAnnouncementOnly) {
-        await transport.setAnnouncementOnly(surfaceId, true);
+        await transport.setAnnouncementOnly(presentation.workspace_chat_id, true);
       }
     },
   };

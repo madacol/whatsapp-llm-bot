@@ -7,11 +7,11 @@ describe("workspace lifecycle service", () => {
   it("owns create plus seed orchestration as one workspace use case", async () => {
     /** @type {Array<{ repo: RepoRow, context: ExecuteActionContext, workspaceName: string, baseBranch: string }>} */
     const createCalls = [];
-    /** @type {Array<{ surfaceId: string, promptText: string }>} */
+    /** @type {Array<{ workspaceId: string, promptText: string }>} */
     const presentedPrompts = [];
     /** @type {ChatTurn[]} */
     const dispatchedTurns = [];
-    /** @type {Array<{ surfaceId: string, event: OutboundEvent }>} */
+    /** @type {Array<{ workspaceId: string, event: OutboundEvent }>} */
     const workspaceEvents = [];
     /** @type {WorkspaceRow} */
     const workspace = {
@@ -49,10 +49,7 @@ describe("workspace lifecycle service", () => {
         abortMerge: async () => "",
       },
       workspacePresentation: {
-        provisionWorkspaceSurface: async () => {
-          throw new Error("should not be called by the lifecycle service directly");
-        },
-        reopenWorkspaceSurface: async () => {
+        ensureWorkspaceVisible: async () => {
           throw new Error("should not be called by the lifecycle service directly");
         },
         presentWorkspaceBootstrap: async () => {
@@ -114,7 +111,7 @@ describe("workspace lifecycle service", () => {
     assert.equal(result.workspace, workspace);
     assert.equal(createCalls.length, 1);
     assert.deepEqual(presentedPrompts, [{
-      surfaceId: "workspace-chat",
+      workspaceId: "ws-1",
       promptText: "Prompt: Investigate duplicate charges",
     }]);
     assert.equal(dispatchedTurns.length, 1);
@@ -122,7 +119,7 @@ describe("workspace lifecycle service", () => {
     assert.deepEqual(dispatchedTurns[0]?.content, [{ type: "text", text: "Investigate duplicate charges" }]);
     await dispatchedTurns[0]?.io.reply(contentEvent("llm", [{ type: "text", text: "Thinking..." }]));
     assert.deepEqual(workspaceEvents, [{
-      surfaceId: "workspace-chat",
+      workspaceId: "ws-1",
       event: contentEvent("llm", [{ type: "text", text: "Thinking..." }]),
     }]);
   });

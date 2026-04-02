@@ -83,6 +83,22 @@ function isWorkspaceTestStatus(value) {
 
 /**
  * @param {unknown} value
+ * @returns {value is WhatsAppRepoTopologyKind}
+ */
+function isWhatsAppRepoTopologyKind(value) {
+  return value === "groups" || value === "community";
+}
+
+/**
+ * @param {unknown} value
+ * @returns {value is WhatsAppWorkspacePresentationRole}
+ */
+function isWhatsAppWorkspacePresentationRole(value) {
+  return value === "workspace" || value === "main";
+}
+
+/**
+ * @param {unknown} value
  * @returns {string | null}
  */
 function normalizeTimestampValue(value) {
@@ -201,6 +217,64 @@ function normalizeChatBindingRow(raw) {
     binding_kind: raw.binding_kind,
     repo_id: raw.repo_id,
     workspace_id: raw.workspace_id,
+    timestamp,
+  };
+}
+
+/**
+ * @param {unknown} raw
+ * @returns {WhatsAppRepoPresentationRow | null}
+ */
+function normalizeWhatsAppRepoPresentationRow(raw) {
+  if (!isRecord(raw)) {
+    return null;
+  }
+  const timestamp = normalizeTimestampValue(raw.timestamp);
+  if (
+    typeof raw.repo_id !== "string"
+    || !isWhatsAppRepoTopologyKind(raw.topology_kind)
+    || (raw.community_chat_id !== null && typeof raw.community_chat_id !== "string")
+    || (raw.main_workspace_id !== null && typeof raw.main_workspace_id !== "string")
+    || !timestamp
+  ) {
+    return null;
+  }
+  return {
+    repo_id: raw.repo_id,
+    topology_kind: raw.topology_kind,
+    community_chat_id: raw.community_chat_id,
+    main_workspace_id: raw.main_workspace_id,
+    timestamp,
+  };
+}
+
+/**
+ * @param {unknown} raw
+ * @returns {WhatsAppWorkspacePresentationRow | null}
+ */
+function normalizeWhatsAppWorkspacePresentationRow(raw) {
+  if (!isRecord(raw)) {
+    return null;
+  }
+  const timestamp = normalizeTimestampValue(raw.timestamp);
+  if (
+    typeof raw.workspace_id !== "string"
+    || typeof raw.repo_id !== "string"
+    || typeof raw.workspace_chat_id !== "string"
+    || typeof raw.workspace_chat_subject !== "string"
+    || !isWhatsAppWorkspacePresentationRole(raw.role)
+    || (raw.linked_community_chat_id !== null && typeof raw.linked_community_chat_id !== "string")
+    || !timestamp
+  ) {
+    return null;
+  }
+  return {
+    workspace_id: raw.workspace_id,
+    repo_id: raw.repo_id,
+    workspace_chat_id: raw.workspace_chat_id,
+    workspace_chat_subject: raw.workspace_chat_subject,
+    role: raw.role,
+    linked_community_chat_id: raw.linked_community_chat_id,
     timestamp,
   };
 }
@@ -347,6 +421,28 @@ export async function initStore(injectedDb){
     `;
 
     await db.sql`
+        CREATE TABLE IF NOT EXISTS whatsapp_repo_presentations (
+            repo_id TEXT PRIMARY KEY,
+            topology_kind TEXT NOT NULL DEFAULT 'groups',
+            community_chat_id VARCHAR(50) REFERENCES chats(chat_id),
+            main_workspace_id TEXT,
+            timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+    `;
+
+    await db.sql`
+        CREATE TABLE IF NOT EXISTS whatsapp_workspace_presentations (
+            workspace_id TEXT PRIMARY KEY,
+            repo_id TEXT NOT NULL,
+            workspace_chat_id VARCHAR(50) NOT NULL REFERENCES chats(chat_id) UNIQUE,
+            workspace_chat_subject TEXT NOT NULL,
+            role TEXT NOT NULL DEFAULT 'workspace',
+            linked_community_chat_id VARCHAR(50) REFERENCES chats(chat_id),
+            timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+    `;
+
+    await db.sql`
         CREATE TABLE IF NOT EXISTS messages (
             message_id SERIAL PRIMARY KEY,
             chat_id VARCHAR(50) REFERENCES chats(chat_id),
@@ -425,6 +521,36 @@ export async function initStore(injectedDb){
         UPDATE chats SET respond_on = 'mention+reply'
         WHERE respond_on = 'mention' AND respond_on_any IS NOT TRUE
           AND respond_on_reply = true AND respond_on_mention IS NOT FALSE
+      `;
+
+      await db.sql`
+        INSERT INTO whatsapp_repo_presentations (repo_id, topology_kind)
+        SELECT DISTINCT repo_id, 'groups'
+        FROM workspaces
+        ON CONFLICT (repo_id) DO NOTHING
+      `;
+      await db.sql`
+        INSERT INTO whatsapp_workspace_presentations (
+          workspace_id,
+          repo_id,
+          workspace_chat_id,
+          workspace_chat_subject,
+          role,
+          linked_community_chat_id
+        )
+        SELECT
+          workspace_id,
+          repo_id,
+          workspace_chat_id,
+          COALESCE(workspace_chat_subject, name),
+          'workspace',
+          NULL
+        FROM workspaces
+        ON CONFLICT (workspace_id) DO UPDATE
+        SET
+          repo_id = EXCLUDED.repo_id,
+          workspace_chat_id = EXCLUDED.workspace_chat_id,
+          workspace_chat_subject = EXCLUDED.workspace_chat_subject
       `;
 
       // One-time migration: debug_until (timestamp) → debug (boolean).
@@ -560,6 +686,119 @@ export async function initStore(injectedDb){
      */
     async function ensureChatExists(chatId) {
       await db.sql`INSERT INTO chats(chat_id) VALUES (${chatId}) ON CONFLICT (chat_id) DO NOTHING;`;
+    }
+
+    /**
+     * @param {{
+     *   repoId: string,
+     *   topologyKind?: WhatsAppRepoTopologyKind,
+     *   communityChatId?: string | null,
+     *   mainWorkspaceId?: string | null,
+     * }} input
+     * @returns {Promise<WhatsAppRepoPresentationRow>}
+     */
+    async function persistWhatsAppRepoPresentation({
+      repoId,
+      topologyKind = "groups",
+      communityChatId = null,
+      mainWorkspaceId = null,
+    }) {
+      if (communityChatId) {
+        await ensureChatExists(communityChatId);
+      }
+      const { rows: [row] } = await db.sql`
+        INSERT INTO whatsapp_repo_presentations (
+          repo_id,
+          topology_kind,
+          community_chat_id,
+          main_workspace_id
+        )
+        VALUES (
+          ${repoId},
+          ${topologyKind},
+          ${communityChatId},
+          ${mainWorkspaceId}
+        )
+        ON CONFLICT (repo_id) DO UPDATE
+        SET
+          topology_kind = EXCLUDED.topology_kind,
+          community_chat_id = EXCLUDED.community_chat_id,
+          main_workspace_id = EXCLUDED.main_workspace_id
+        RETURNING *
+      `;
+      const presentation = normalizeWhatsAppRepoPresentationRow(row);
+      if (!presentation) {
+        throw new Error(`Failed to normalize WhatsApp repo presentation for ${repoId}.`);
+      }
+      return presentation;
+    }
+
+    /**
+     * @param {string} repoId
+     * @returns {Promise<void>}
+     */
+    async function ensureWhatsAppRepoPresentationExists(repoId) {
+      await db.sql`
+        INSERT INTO whatsapp_repo_presentations (repo_id, topology_kind)
+        VALUES (${repoId}, 'groups')
+        ON CONFLICT (repo_id) DO NOTHING
+      `;
+    }
+
+    /**
+     * @param {{
+     *   repoId: string,
+     *   workspaceId: string,
+     *   workspaceChatId: string,
+     *   workspaceChatSubject: string,
+     *   role?: WhatsAppWorkspacePresentationRole,
+     *   linkedCommunityChatId?: string | null,
+     * }} input
+     * @returns {Promise<WhatsAppWorkspacePresentationRow>}
+     */
+    async function persistWhatsAppWorkspacePresentation({
+      repoId,
+      workspaceId,
+      workspaceChatId,
+      workspaceChatSubject,
+      role = "workspace",
+      linkedCommunityChatId = null,
+    }) {
+      await ensureChatExists(workspaceChatId);
+      if (linkedCommunityChatId) {
+        await ensureChatExists(linkedCommunityChatId);
+      }
+      const { rows: [row] } = await db.sql`
+        INSERT INTO whatsapp_workspace_presentations (
+          workspace_id,
+          repo_id,
+          workspace_chat_id,
+          workspace_chat_subject,
+          role,
+          linked_community_chat_id
+        )
+        VALUES (
+          ${workspaceId},
+          ${repoId},
+          ${workspaceChatId},
+          ${workspaceChatSubject},
+          ${role},
+          ${linkedCommunityChatId}
+        )
+        ON CONFLICT (workspace_id) DO UPDATE
+        SET
+          repo_id = EXCLUDED.repo_id,
+          workspace_chat_id = EXCLUDED.workspace_chat_id,
+          workspace_chat_subject = EXCLUDED.workspace_chat_subject,
+          role = EXCLUDED.role,
+          linked_community_chat_id = EXCLUDED.linked_community_chat_id
+        RETURNING *
+      `;
+      const presentation = normalizeWhatsAppWorkspacePresentationRow(row);
+      if (!presentation) {
+        throw new Error(`Failed to normalize WhatsApp workspace presentation for ${workspaceId}.`);
+      }
+      return presentation;
     }
 
     /**
@@ -747,6 +986,7 @@ export async function initStore(injectedDb){
 
       /**
        * @param {{
+       *   workspaceId?: string,
        *   repoId: string,
        *   name: string,
        *   branch: string,
@@ -759,6 +999,7 @@ export async function initStore(injectedDb){
        * @returns {Promise<WorkspaceRow>}
        */
       async createWorkspace ({
+        workspaceId: providedWorkspaceId,
         repoId,
         name,
         branch,
@@ -769,7 +1010,7 @@ export async function initStore(injectedDb){
         status = "ready",
       }) {
         await ensureChatExists(workspaceChatId);
-        const workspaceId = randomUUID();
+        const workspaceId = providedWorkspaceId ?? randomUUID();
         const { rows: [row] } = await db.sql`
           INSERT INTO workspaces (
             workspace_id,
@@ -804,6 +1045,13 @@ export async function initStore(injectedDb){
           bindingKind: "workspace",
           repoId,
           workspaceId: workspace.workspace_id,
+        });
+        await ensureWhatsAppRepoPresentationExists(repoId);
+        await persistWhatsAppWorkspacePresentation({
+          repoId,
+          workspaceId: workspace.workspace_id,
+          workspaceChatId,
+          workspaceChatSubject,
         });
         return workspace;
       },
@@ -919,6 +1167,12 @@ export async function initStore(injectedDb){
         if (!workspace) {
           throw new Error(`Workspace ${workspaceId} does not exist.`);
         }
+        await persistWhatsAppWorkspacePresentation({
+          repoId: workspace.repo_id,
+          workspaceId: workspace.workspace_id,
+          workspaceChatId: workspace.workspace_chat_id,
+          workspaceChatSubject: workspace.workspace_chat_subject,
+        });
         return workspace;
       },
 
@@ -969,6 +1223,88 @@ export async function initStore(injectedDb){
           LIMIT 1
         `;
         return normalizeChatBindingRow(row);
+      },
+
+      /**
+       * @param {string} repoId
+       * @returns {Promise<WhatsAppRepoPresentationRow | null>}
+       */
+      async getWhatsAppRepoPresentation (repoId) {
+        const { rows: [row] } = await db.sql`
+          SELECT * FROM whatsapp_repo_presentations
+          WHERE repo_id = ${repoId}
+          LIMIT 1
+        `;
+        return normalizeWhatsAppRepoPresentationRow(row);
+      },
+
+      /**
+       * @param {{
+       *   repoId: string,
+       *   topologyKind?: WhatsAppRepoTopologyKind,
+       *   communityChatId?: string | null,
+       *   mainWorkspaceId?: string | null,
+       * }} input
+       * @returns {Promise<WhatsAppRepoPresentationRow>}
+       */
+      async upsertWhatsAppRepoPresentation (input) {
+        return persistWhatsAppRepoPresentation(input);
+      },
+
+      /**
+       * @param {string} workspaceId
+       * @returns {Promise<WhatsAppWorkspacePresentationRow | null>}
+       */
+      async getWhatsAppWorkspacePresentation (workspaceId) {
+        const { rows: [row] } = await db.sql`
+          SELECT * FROM whatsapp_workspace_presentations
+          WHERE workspace_id = ${workspaceId}
+          LIMIT 1
+        `;
+        return normalizeWhatsAppWorkspacePresentationRow(row);
+      },
+
+      /**
+       * @param {string} chatId
+       * @returns {Promise<WhatsAppWorkspacePresentationRow | null>}
+       */
+      async getWhatsAppWorkspacePresentationByChat (chatId) {
+        const { rows: [row] } = await db.sql`
+          SELECT * FROM whatsapp_workspace_presentations
+          WHERE workspace_chat_id = ${chatId}
+          LIMIT 1
+        `;
+        return normalizeWhatsAppWorkspacePresentationRow(row);
+      },
+
+      /**
+       * @param {string} repoId
+       * @returns {Promise<WhatsAppWorkspacePresentationRow[]>}
+       */
+      async listWhatsAppWorkspacePresentations (repoId) {
+        const { rows } = await db.sql`
+          SELECT * FROM whatsapp_workspace_presentations
+          WHERE repo_id = ${repoId}
+          ORDER BY workspace_id
+        `;
+        return rows
+          .map(normalizeWhatsAppWorkspacePresentationRow)
+          .filter(/** @returns {row is WhatsAppWorkspacePresentationRow} */ (row) => row !== null);
+      },
+
+      /**
+       * @param {{
+       *   repoId: string,
+       *   workspaceId: string,
+       *   workspaceChatId: string,
+       *   workspaceChatSubject: string,
+       *   role?: WhatsAppWorkspacePresentationRole,
+       *   linkedCommunityChatId?: string | null,
+       * }} input
+       * @returns {Promise<WhatsAppWorkspacePresentationRow>}
+       */
+      async saveWhatsAppWorkspacePresentation (input) {
+        return persistWhatsAppWorkspacePresentation(input);
       },
 
       /**
