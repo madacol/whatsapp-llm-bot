@@ -29,11 +29,17 @@ import { getSandboxEscapeRequest } from "./sandbox-approval.js";
 import { requestSandboxEscapeApproval } from "./sandbox-approval-coordinator.js";
 import { buildSdkErrorResponse, clearStaleHarnessSession } from "./harness-run-errors.js";
 import { augmentLatestUserMessageForTextHarness, renderMarkdownImageReference } from "./prompt-media.js";
-import { buildSharedSkillMarkdownDocument, getSharedSkillViews } from "../shared-skills.js";
 import { createSharedSkillInvocationAdapter, executeSharedSkillInvocations } from "../shared-skill-runtime.js";
+import {
+  buildClaudeWorkspaceArtifacts,
+  getClaudeWorkspaceArtifactsRootPath,
+  getClaudeWorkspacePluginPath,
+} from "./claude-shared-skill-artifacts.js";
 
 const log = createLogger("harness:claude-agent-sdk");
 const HARNESS_NAME = "claude-agent-sdk";
+
+export { buildClaudeWorkspaceArtifacts } from "./claude-shared-skill-artifacts.js";
 
 /** @type {HarnessCapabilities} */
 const CLAUDE_HARNESS_CAPABILITIES = {
@@ -123,10 +129,6 @@ const EFFORT_LABELS = {
 
 /** @type {string[]} */
 const FALLBACK_EFFORT_LEVELS = ["low", "medium", "high"];
-
-const MADABOT_WORKSPACE_DIR = ".madabot";
-const CLAUDE_SHARED_SKILLS_PLUGIN_DIR = "claude-shared-skills";
-const CLAUDE_SHARED_SKILLS_PLUGIN_NAME = "madabot-shared-skills";
 
 /**
  * Get available effort levels for a specific model.
@@ -282,42 +284,13 @@ export function buildClaudePrompt(messages) {
 }
 
 /**
- * @typedef {{
- *   relativePath: string,
- *   content: string,
- * }} ClaudeWorkspaceArtifact
- */
-
-/**
- * @param {ToolRuntime} toolRuntime
- * @returns {ClaudeWorkspaceArtifact[]}
- */
-export function buildClaudeWorkspaceArtifacts(toolRuntime) {
-  const sharedSkills = getSharedSkillViews(toolRuntime.listTools());
-  if (sharedSkills.length === 0) {
-    return [];
-  }
-
-  return [
-    {
-      relativePath: `${MADABOT_WORKSPACE_DIR}/${CLAUDE_SHARED_SKILLS_PLUGIN_DIR}/.claude-plugin/plugin.json`,
-      content: JSON.stringify({ name: CLAUDE_SHARED_SKILLS_PLUGIN_NAME }, null, 2),
-    },
-    ...sharedSkills.map((sharedSkill) => ({
-      relativePath: `${MADABOT_WORKSPACE_DIR}/${CLAUDE_SHARED_SKILLS_PLUGIN_DIR}/skills/${sharedSkill.name}/SKILL.md`,
-      content: buildSharedSkillMarkdownDocument(sharedSkill),
-    })),
-  ];
-}
-
-/**
  * @param {string} workdir
  * @param {ToolRuntime} toolRuntime
  * @returns {Promise<void>}
  */
 export async function writeClaudeWorkspaceArtifacts(workdir, toolRuntime) {
   const artifacts = buildClaudeWorkspaceArtifacts(toolRuntime);
-  const madabotDir = join(workdir, MADABOT_WORKSPACE_DIR);
+  const madabotDir = getClaudeWorkspaceArtifactsRootPath(workdir);
 
   if (artifacts.length === 0) {
     await rm(madabotDir, { recursive: true, force: true });
@@ -345,7 +318,7 @@ function getClaudeWorkspacePlugins(workdir, toolRuntime) {
   }
   return [{
     type: "local",
-    path: join(workdir, MADABOT_WORKSPACE_DIR, CLAUDE_SHARED_SKILLS_PLUGIN_DIR),
+    path: getClaudeWorkspacePluginPath(workdir),
   }];
 }
 
