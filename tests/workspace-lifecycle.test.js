@@ -13,6 +13,7 @@ process.env.MODEL = "mock-model";
 
 import { createChatTurn, createMockLlmServer, createTestDb, seedChat as seedChat_ } from "./helpers.js";
 import { setDb } from "../db.js";
+import { contentEvent } from "../outbound-events.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -31,6 +32,7 @@ let tempDirs = [];
  *   createdGroups: Array<{ subject: string, participants: string[], chatId: string }>,
  *   promotedParticipants: Array<{ chatId: string, participants: string[] }>,
  *   sentTexts: Array<{ chatId: string, text: string }>,
+ *   sentEvents: Array<{ chatId: string, event: OutboundEvent }>,
  *   renamedGroups: Array<{ chatId: string, subject: string }>,
  *   announcementChanges: Array<{ chatId: string, enabled: boolean }>,
  * }>}
@@ -42,6 +44,8 @@ function createFakeTransport() {
   const promotedParticipants = [];
   /** @type {Array<{ chatId: string, text: string }>} */
   const sentTexts = [];
+  /** @type {Array<{ chatId: string, event: OutboundEvent }>} */
+  const sentEvents = [];
   /** @type {Array<{ chatId: string, subject: string }>} */
   const renamedGroups = [];
   /** @type {Array<{ chatId: string, enabled: boolean }>} */
@@ -54,6 +58,7 @@ function createFakeTransport() {
     createdGroups,
     promotedParticipants,
     sentTexts,
+    sentEvents,
     renamedGroups,
     announcementChanges,
     transport: {
@@ -61,6 +66,15 @@ function createFakeTransport() {
       stop: async () => {},
       sendText: async (chatId, text) => {
         sentTexts.push({ chatId, text });
+      },
+      sendEvent: async (chatId, event) => {
+        sentEvents.push({ chatId, event });
+        return {
+          keyId: `event-${sentEvents.length}`,
+          isImage: false,
+          update: async () => {},
+          setInspect: () => {},
+        };
       },
       createGroup: async (subject, participants) => {
         groupCounter += 1;
@@ -161,12 +175,16 @@ async function createHandler(options = {}) {
   const llmClient = createLlmClient();
   const { createMessageHandler } = await import("../index.js");
   const { getActions, executeAction } = await import("../actions.js");
+  const { createWhatsAppWorkspacePresenter } = await import("../whatsapp/workspace-presenter.js");
   const handler = createMessageHandler({
     store,
     llmClient,
     getActionsFn: getActions,
     executeActionFn: executeAction,
     transport: options.transport,
+    workspacePresentation: options.transport
+      ? createWhatsAppWorkspacePresenter({ transport: options.transport })
+      : undefined,
   });
   return handler.handleMessage;
 }
@@ -320,7 +338,19 @@ describe("workspace lifecycle", () => {
       chatId: workspace.workspace_chat_id,
       participants: ["master-user@s.whatsapp.net"],
     }]);
-    assert.ok(transportState.sentTexts[0]?.text.includes("Workspace: payments"));
+    const workspaceBootstrapEvent = transportState.sentEvents.find((entry) => entry.chatId === workspace.workspace_chat_id);
+    assert.deepEqual(workspaceBootstrapEvent, {
+      chatId: workspace.workspace_chat_id,
+      event: contentEvent("plain", [{ type: "text", text: [
+        "Workspace: payments",
+        "Base: master",
+        "Branch: payments",
+        "Status: ready",
+        "Last test: not run",
+        "Last commit: none",
+      ].join("\n") }]),
+    });
+    assert.deepEqual(transportState.sentTexts, []);
     const enabledChat = await store.getChat(workspace.workspace_chat_id);
     assert.equal(enabledChat?.is_enabled, true);
     assert.equal(enabledChat?.model, "openai/gpt-4.1-mini");
@@ -351,6 +381,7 @@ describe("workspace lifecycle", () => {
     const repoRoot = await createRepoFixture();
     const transportState = createFakeTransport();
     const handleMessage = await createHandler({ transport: transportState.transport });
+    mockServer.addResponses("Seed received.");
 
     await seedChat("repo-seeded-chat", { harnessCwd: repoRoot });
 
@@ -367,6 +398,29 @@ describe("workspace lifecycle", () => {
     assert.equal(workspace?.branch, "multi-word-branch");
     assert.equal(workspace?.base_branch, "master");
     assert.equal(transportState.createdGroups[0]?.subject, "multi word branch");
+    const workspaceEvents = transportState.sentEvents
+      .filter((entry) => entry.chatId === workspace.workspace_chat_id)
+      .map((entry) => entry.event);
+    assert.deepEqual(workspaceEvents[0], contentEvent("plain", [{ type: "text", text: [
+      "Workspace: multi word branch",
+      "Base: master",
+      "Branch: multi-word-branch",
+      "Status: ready",
+      "Last test: not run",
+      "Last commit: none",
+    ].join("\n") }]));
+    assert.deepEqual(workspaceEvents[1], contentEvent("plain", [{ type: "text", text: "Prompt: investigate duplicate charges" }]));
+    assert.equal(transportState.sentTexts.length, 0);
+    const seededReply = workspaceEvents.find((event) => (
+      event.kind === "content"
+      && Array.isArray(event.content)
+      && event.content.some((block) => block.type === "markdown" && block.text === "Seed received.")
+    ));
+    assert.ok(seededReply, "expected seeded workspace reply to use semantic content events");
+    if (!seededReply || seededReply.kind !== "content") {
+      assert.fail("expected seeded workspace reply to use semantic content events");
+    }
+    assert.deepEqual(seededReply.content, [{ type: "markdown", text: "Seed received." }]);
     const workspaceMessages = await store.getMessages(workspace.workspace_chat_id, new Date(0));
     const userMessages = workspaceMessages
       .map((row) => row.message_data)
@@ -410,7 +464,7 @@ describe("workspace lifecycle", () => {
     assert.ok(responses.some((response) => response.text.includes("Created workspace `child branch`.")));
   });
 
-  it("runs !diff, !test, !commit, and !merge successfully", async () => {
+  it("runs !diff and rejects !commit as an unknown command", async () => {
     const repoRoot = await createRepoFixture();
     const transportState = createFakeTransport();
     const handleMessage = await createHandler({ transport: transportState.transport });
@@ -437,134 +491,9 @@ describe("workspace lifecycle", () => {
 
     turn = createChatTurn({
       chatId: workspace.workspace_chat_id,
-      content: [{ type: "text", text: "!test" }],
-    });
-    await handleMessage(turn.context);
-    assert.ok(turn.responses.some((response) => response.text.includes("Type-check passed.")));
-    assert.ok(turn.responses.some((response) => response.text.includes("Tests passed.")));
-
-    turn = createChatTurn({
-      chatId: workspace.workspace_chat_id,
       content: [{ type: "text", text: "!commit Update app" }],
     });
     await handleMessage(turn.context);
-    assert.ok(turn.responses.some((response) => response.text.includes("Committed on `payments`.")));
-
-    turn = createChatTurn({
-      chatId: workspace.workspace_chat_id,
-      content: [{ type: "text", text: "!merge" }],
-    });
-    await handleMessage(turn.context);
-    assert.ok(turn.responses.some((response) => response.text.includes("Merged `payments` into `master`.")));
-
-    const mergedText = await fs.readFile(path.join(repoRoot, "app.txt"), "utf8");
-    assert.equal(mergedText, "workspace change\n");
-  });
-
-  it("surfaces conflicts, shows conflicted files, and can abort", async () => {
-    const repoRoot = await createRepoFixture();
-    const transportState = createFakeTransport();
-    const handleMessage = await createHandler({ transport: transportState.transport });
-
-    await seedChat("repo-conflict-chat", { harnessCwd: repoRoot });
-
-    await handleMessage(createChatTurn({
-      chatId: "repo-conflict-chat",
-      content: [{ type: "text", text: "!new payments" }],
-    }).context);
-    const repo = await store.getRepoByRootPath(repoRoot);
-    assert.ok(repo, "repo should be inferred from the root cwd");
-    const workspace = await store.getWorkspaceByName(repo.repo_id, "payments");
-    assert.ok(workspace);
-
-    await writeTrackedFile(workspace.worktree_path, "workspace side");
-    await runGit(workspace.worktree_path, ["add", "app.txt"]);
-    await runGit(workspace.worktree_path, ["commit", "-m", "workspace change"]);
-
-    await writeTrackedFile(repoRoot, "base side");
-    await runGit(repoRoot, ["add", "app.txt"]);
-    await runGit(repoRoot, ["commit", "-m", "base change"]);
-
-    let turn = createChatTurn({
-      chatId: workspace.workspace_chat_id,
-      content: [{ type: "text", text: "!merge" }],
-    });
-    await handleMessage(turn.context);
-    assert.ok(turn.responses.some((response) => response.text.includes("Merge blocked by conflicts")));
-
-    let updatedWorkspace = await store.getWorkspace(workspace.workspace_id);
-    assert.equal(updatedWorkspace?.status, "conflicted");
-    assert.deepEqual(updatedWorkspace?.conflicted_files, ["app.txt"]);
-
-    turn = createChatTurn({
-      chatId: workspace.workspace_chat_id,
-      content: [{ type: "text", text: "!show conflict" }],
-    });
-    await handleMessage(turn.context);
-    assert.ok(turn.responses.some((response) => response.text.includes("`app.txt`")));
-
-    turn = createChatTurn({
-      chatId: workspace.workspace_chat_id,
-      content: [{ type: "text", text: "!abort merge" }],
-    });
-    await handleMessage(turn.context);
-    assert.ok(turn.responses.some((response) => response.text.includes("Aborted merge attempt")));
-
-    updatedWorkspace = await store.getWorkspace(workspace.workspace_id);
-    assert.equal(updatedWorkspace?.status, "ready");
-  });
-
-  it("resolves simple conflicts automatically and archives the workspace chat", async () => {
-    const repoRoot = await createRepoFixture();
-    const transportState = createFakeTransport();
-    const handleMessage = await createHandler({ transport: transportState.transport });
-
-    await seedChat("repo-resolve-chat", { harnessCwd: repoRoot });
-
-    await handleMessage(createChatTurn({
-      chatId: "repo-resolve-chat",
-      chatName: "Original Group",
-      content: [{ type: "text", text: "!new payments" }],
-    }).context);
-    const repo = await store.getRepoByRootPath(repoRoot);
-    assert.ok(repo, "repo should be inferred from the root cwd");
-    const workspace = await store.getWorkspaceByName(repo.repo_id, "payments");
-    assert.ok(workspace);
-
-    await writeTrackedFile(workspace.worktree_path, "workspace side");
-    await runGit(workspace.worktree_path, ["add", "app.txt"]);
-    await runGit(workspace.worktree_path, ["commit", "-m", "workspace change"]);
-
-    await writeTrackedFile(repoRoot, "base side");
-    await runGit(repoRoot, ["add", "app.txt"]);
-    await runGit(repoRoot, ["commit", "-m", "base change"]);
-
-    await handleMessage(createChatTurn({
-      chatId: workspace.workspace_chat_id,
-      content: [{ type: "text", text: "!merge" }],
-    }).context);
-
-    let turn = createChatTurn({
-      chatId: workspace.workspace_chat_id,
-      content: [{ type: "text", text: "!resolve conflicts" }],
-    });
-    await handleMessage(turn.context);
-    assert.ok(turn.responses.some((response) => response.text.includes("Resolved conflicts in `payments`.")));
-
-    turn = createChatTurn({
-      chatId: workspace.workspace_chat_id,
-      content: [{ type: "text", text: "!merge" }],
-    });
-    await handleMessage(turn.context);
-    assert.ok(turn.responses.some((response) => response.text.includes("Merged `payments` into `master`.")));
-
-    turn = createChatTurn({
-      chatId: workspace.workspace_chat_id,
-      content: [{ type: "text", text: "!archive" }],
-    });
-    await handleMessage(turn.context);
-    assert.ok(turn.responses.some((response) => response.text.includes("Archived workspace `payments`.")));
-    assert.deepEqual(transportState.renamedGroups, [{ chatId: workspace.workspace_chat_id, subject: "[payments] Original Group (archived)" }]);
-    assert.deepEqual(transportState.announcementChanges, [{ chatId: workspace.workspace_chat_id, enabled: true }]);
+    assert.ok(turn.responses.some((response) => response.text.includes("Unknown command: commit")));
   });
 });

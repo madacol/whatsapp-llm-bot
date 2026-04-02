@@ -7,7 +7,7 @@ import fs from "node:fs";
 import { getActions, executeAction } from "./actions.js";
 import config from "./config.js";
 import { createLlmClient } from "./llm.js";
-import { createWhatsAppTransport } from "#whatsapp";
+import { createWhatsAppTransport, createWhatsAppWorkspacePresenter } from "#whatsapp";
 import { startReminderDaemon } from "./reminder-daemon.js";
 import { startModelsCacheDaemon } from "./models-cache.js";
 import { initStore } from "./store.js";
@@ -28,6 +28,7 @@ const log = createLogger("index");
  *   getActionsFn: typeof getActions,
  *   executeActionFn: typeof executeAction,
  *   transport?: ChatTransport,
+ *   workspacePresentation?: WorkspacePresentationPort,
  * }} MessageHandlerDeps
  */
 
@@ -36,13 +37,14 @@ const log = createLogger("index");
  * @param {MessageHandlerDeps} deps
  * @returns {{ handleMessage: (turn: ChatTurn) => Promise<void> }}
  */
-export function createMessageHandler({ store, llmClient, getActionsFn, executeActionFn, transport }) {
+export function createMessageHandler(deps) {
+  const { store, llmClient, getActionsFn, executeActionFn, workspacePresentation } = deps;
   return createConversationRunner({
     store,
     llmClient,
     getActionsFn,
     executeActionFn,
-    transport,
+    workspacePresentation,
   });
 }
 
@@ -79,6 +81,7 @@ if (!process.env.TESTING) {
       await store.closeDb();
       process.exit(1);
     });
+  const workspacePresentation = createWhatsAppWorkspacePresenter({ transport });
 
   const { handleMessage } = createMessageHandler({
     store,
@@ -86,6 +89,7 @@ if (!process.env.TESTING) {
     getActionsFn: getActions,
     executeActionFn: executeAction,
     transport,
+    workspacePresentation,
   });
 
   await startHtmlServer(config.html_server_port, getRootDb());
