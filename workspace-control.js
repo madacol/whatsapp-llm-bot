@@ -114,8 +114,6 @@ export function createWorkspaceControl({ store, workspacePresentation, workspace
           branch,
           baseBranch,
           worktreePath,
-          workspaceChatId: surface.surfaceId,
-          workspaceChatSubject: surface.surfaceName,
           status: "ready",
         });
         await store.copyChatCustomizations(context.chatId, surface.surfaceId);
@@ -165,7 +163,6 @@ export function createWorkspaceControl({ store, workspacePresentation, workspace
         branch,
         baseBranch,
         worktreePath,
-        workspaceChatSubject: surface.surfaceName,
       });
       await store.copyChatCustomizations(context.chatId, surface.surfaceId);
       await store.setChatEnabled(surface.surfaceId, true);

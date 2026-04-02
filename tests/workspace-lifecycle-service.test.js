@@ -21,14 +21,12 @@ describe("workspace lifecycle service", () => {
       branch: "payments",
       base_branch: "main",
       worktree_path: "/repo/.madabot/worktrees/payments",
-      workspace_chat_id: "workspace-chat",
-      workspace_chat_subject: "[payments] Original Group",
       status: "ready",
       last_test_status: "not_run",
       last_commit_oid: null,
       conflicted_files: [],
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
+      archived_at: null,
+      timestamp: new Date().toISOString(),
     };
     const service = createWorkspaceLifecycleService({
       workspaceControl: {
@@ -57,6 +55,13 @@ describe("workspace lifecycle service", () => {
         },
         presentSeedPrompt: async (input) => {
           presentedPrompts.push(input);
+        },
+        getWorkspaceSurface: async ({ workspaceId }) => {
+          assert.equal(workspaceId, "ws-1");
+          return {
+            surfaceId: "workspace-chat",
+            surfaceName: "[payments] Original Group",
+          };
         },
         sendWorkspaceEvent: async (input) => {
           workspaceEvents.push(input);

@@ -167,6 +167,16 @@ async function seedChat(chatId, options = {}) {
 }
 
 /**
+ * @param {string} workspaceId
+ * @returns {Promise<WhatsAppWorkspacePresentationRow>}
+ */
+async function getWorkspaceSurface(workspaceId) {
+  const presentation = await store.getWhatsAppWorkspacePresentation(workspaceId);
+  assert.ok(presentation, `workspace ${workspaceId} should have a WhatsApp presentation`);
+  return presentation;
+}
+
+/**
  * @param {{ transport?: ChatTransport }} [options]
  * @returns {Promise<(msg: ChatTurn) => Promise<void>>}
  */
@@ -272,11 +282,13 @@ describe("workspace lifecycle", () => {
     );
     const replacedWorkspace = await store.getWorkspaceByName(repo.repo_id, "payments");
     assert.ok(replacedWorkspace);
-    assert.equal(replacedWorkspace.workspace_chat_id, originalWorkspace.workspace_chat_id);
+    const originalSurface = await getWorkspaceSurface(originalWorkspace.workspace_id);
+    const replacedSurface = await getWorkspaceSurface(replacedWorkspace.workspace_id);
+    assert.equal(replacedSurface.workspace_chat_id, originalSurface.workspace_chat_id);
     assert.equal(transportState.createdGroups.length, 1);
     assert.ok(turn.responses.some((response) => response.text.includes("Replaced workspace `payments`.")));
     assert.deepEqual(transportState.renamedGroups, [{
-      chatId: originalWorkspace.workspace_chat_id,
+      chatId: originalSurface.workspace_chat_id,
       subject: "[payments] Original Group",
     }]);
     assert.ok(turn.responses.some((response) => response.text.includes("Chat: `[payments] Original Group`")));
@@ -335,18 +347,19 @@ describe("workspace lifecycle", () => {
     assert.ok(repo, "repo should be inferred from the root cwd");
     const workspace = await store.getWorkspaceByName(repo.repo_id, "payments");
     assert.ok(workspace, "workspace should be created");
+    const workspaceSurface = await getWorkspaceSurface(workspace.workspace_id);
     assert.equal(workspace?.branch, "payments");
     assert.equal(workspace?.base_branch, "master");
     assert.equal(transportState.createdGroups.length, 1);
     assert.equal(transportState.createdGroups[0]?.subject, "payments");
     assert.deepEqual(transportState.createdGroups[0]?.participants, ["master-user@s.whatsapp.net"]);
     assert.deepEqual(transportState.promotedParticipants, [{
-      chatId: workspace.workspace_chat_id,
+      chatId: workspaceSurface.workspace_chat_id,
       participants: ["master-user@s.whatsapp.net"],
     }]);
-    const workspaceBootstrapEvent = transportState.sentEvents.find((entry) => entry.chatId === workspace.workspace_chat_id);
+    const workspaceBootstrapEvent = transportState.sentEvents.find((entry) => entry.chatId === workspaceSurface.workspace_chat_id);
     assert.deepEqual(workspaceBootstrapEvent, {
-      chatId: workspace.workspace_chat_id,
+      chatId: workspaceSurface.workspace_chat_id,
       event: contentEvent("plain", [{ type: "text", text: [
         "Workspace: payments",
         "Base: master",
@@ -357,7 +370,7 @@ describe("workspace lifecycle", () => {
       ].join("\n") }]),
     });
     assert.deepEqual(transportState.sentTexts, []);
-    const enabledChat = await store.getChat(workspace.workspace_chat_id);
+    const enabledChat = await store.getChat(workspaceSurface.workspace_chat_id);
     assert.equal(enabledChat?.is_enabled, true);
     assert.equal(enabledChat?.model, "openai/gpt-4.1-mini");
     assert.equal(enabledChat?.system_prompt, "Be concise");
@@ -401,11 +414,12 @@ describe("workspace lifecycle", () => {
     assert.ok(repo, "repo should be inferred from the root cwd");
     const workspace = await store.getWorkspaceByName(repo.repo_id, "multi word branch");
     assert.ok(workspace, "workspace should be created");
+    const workspaceSurface = await getWorkspaceSurface(workspace.workspace_id);
     assert.equal(workspace?.branch, "multi-word-branch");
     assert.equal(workspace?.base_branch, "master");
     assert.equal(transportState.createdGroups[0]?.subject, "multi word branch");
     const workspaceEvents = transportState.sentEvents
-      .filter((entry) => entry.chatId === workspace.workspace_chat_id)
+      .filter((entry) => entry.chatId === workspaceSurface.workspace_chat_id)
       .map((entry) => entry.event);
     assert.deepEqual(workspaceEvents[0], contentEvent("plain", [{ type: "text", text: [
       "Workspace: multi word branch",
@@ -427,7 +441,7 @@ describe("workspace lifecycle", () => {
       assert.fail("expected seeded workspace reply to use semantic content events");
     }
     assert.deepEqual(seededReply.content, [{ type: "markdown", text: "Seed received." }]);
-    const workspaceMessages = await store.getMessages(workspace.workspace_chat_id, new Date(0));
+    const workspaceMessages = await store.getMessages(workspaceSurface.workspace_chat_id, new Date(0));
     const userMessages = workspaceMessages
       .map((row) => row.message_data)
       .filter((message) => message?.role === "user");
@@ -456,9 +470,10 @@ describe("workspace lifecycle", () => {
     assert.ok(repo, "repo should be inferred from the root cwd");
     const parentWorkspace = await store.getWorkspaceByName(repo.repo_id, "parent branch");
     assert.ok(parentWorkspace, "parent workspace should exist");
+    const parentSurface = await getWorkspaceSurface(parentWorkspace.workspace_id);
 
     const { context, responses } = createChatTurn({
-      chatId: parentWorkspace.workspace_chat_id,
+      chatId: parentSurface.workspace_chat_id,
       content: [{ type: "text", text: "!new child branch" }],
     });
     await handleMessage(context);
@@ -486,17 +501,18 @@ describe("workspace lifecycle", () => {
     assert.ok(repo, "repo should be inferred from the root cwd");
     const workspace = await store.getWorkspaceByName(repo.repo_id, "payments");
     assert.ok(workspace, "workspace should exist after !new");
+    const workspaceSurface = await getWorkspaceSurface(workspace.workspace_id);
     await writeTrackedFile(workspace.worktree_path, "workspace change");
 
     let turn = createChatTurn({
-      chatId: workspace.workspace_chat_id,
+      chatId: workspaceSurface.workspace_chat_id,
       content: [{ type: "text", text: "!diff" }],
     });
     await handleMessage(turn.context);
     assert.ok(turn.responses.some((response) => response.text.includes("app.txt")));
 
     turn = createChatTurn({
-      chatId: workspace.workspace_chat_id,
+      chatId: workspaceSurface.workspace_chat_id,
       content: [{ type: "text", text: "!commit Update app" }],
     });
     await handleMessage(turn.context);

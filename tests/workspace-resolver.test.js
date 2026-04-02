@@ -40,6 +40,48 @@ async function createRepoWithWorktree() {
   return { repoRoot, worktreePath };
 }
 
+/**
+ * @param {Awaited<ReturnType<typeof initStore>>} store
+ * @param {{
+ *   repoId: string,
+ *   name: string,
+ *   branch: string,
+ *   baseBranch: string,
+ *   worktreePath: string,
+ *   workspaceChatId: string,
+ *   workspaceChatSubject: string,
+ *   status?: WorkspaceStatus,
+ * }} input
+ * @returns {Promise<WorkspaceRow>}
+ */
+async function createWorkspaceFixture(store, {
+  repoId,
+  name,
+  branch,
+  baseBranch,
+  worktreePath,
+  workspaceChatId,
+  workspaceChatSubject,
+  status,
+}) {
+  const workspaceId = `ws-${repoId}-${name}`.replace(/\s+/g, "-");
+  await store.saveWhatsAppWorkspacePresentation({
+    repoId,
+    workspaceId,
+    workspaceChatId,
+    workspaceChatSubject,
+  });
+  return store.createWorkspace({
+    workspaceId,
+    repoId,
+    name,
+    branch,
+    baseBranch,
+    worktreePath,
+    status,
+  });
+}
+
 describe("workspace resolver foundation", () => {
   /** @type {Awaited<ReturnType<typeof initStore>>} */
   let store;
@@ -79,7 +121,7 @@ describe("workspace resolver foundation", () => {
       defaultBaseBranch: "main",
       controlChatId: "payments-control",
     });
-    const workspace = await store.createWorkspace({
+    const workspace = await createWorkspaceFixture(store, {
       repoId: repo.repo_id,
       name: "payments",
       branch: "payments",
@@ -106,7 +148,7 @@ describe("workspace resolver foundation", () => {
       defaultBaseBranch: "master",
       controlChatId: "list-control",
     });
-    const activeWorkspace = await store.createWorkspace({
+    const activeWorkspace = await createWorkspaceFixture(store, {
       repoId: repo.repo_id,
       name: "active",
       branch: "active",
@@ -116,7 +158,7 @@ describe("workspace resolver foundation", () => {
       workspaceChatSubject: "active",
       status: "ready",
     });
-    const archivedWorkspace = await store.createWorkspace({
+    const archivedWorkspace = await createWorkspaceFixture(store, {
       repoId: repo.repo_id,
       name: "archived",
       branch: "archived",
@@ -154,7 +196,7 @@ describe("workspace resolver foundation", () => {
       rootPath: repoRoot,
       defaultBaseBranch: "master",
     });
-    const workspace = await store.createWorkspace({
+    const workspace = await createWorkspaceFixture(store, {
       repoId: repo.repo_id,
       name: "payments",
       branch: "payments",
