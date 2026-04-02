@@ -51,6 +51,7 @@ export function buildSharedSkillPrompt(actions) {
 
   return [
     "Shared skills available in this chat:",
+    "To invoke a shared skill, respond with exactly one fenced `madabot-skill` JSON block and no extra text.",
     ...sharedSkills.map((action) => {
       const description = action.sharedSkill?.description?.trim() || action.description;
       return `- ${action.sharedSkill.name}: ${description}`;

@@ -30,6 +30,7 @@ import { requestSandboxEscapeApproval } from "./sandbox-approval-coordinator.js"
 import { buildSdkErrorResponse, clearStaleHarnessSession } from "./harness-run-errors.js";
 import { augmentLatestUserMessageForTextHarness, renderMarkdownImageReference } from "./prompt-media.js";
 import { getSharedSkillActions } from "../shared-skills.js";
+import { createSharedSkillInvocationAdapter, executeSharedSkillInvocations } from "../shared-skill-runtime.js";
 
 const log = createLogger("harness:claude-agent-sdk");
 const HARNESS_NAME = "claude-agent-sdk";
@@ -388,6 +389,7 @@ function getClaudeWorkspacePlugins(workdir, toolRuntime) {
  *   hooks: Required<AgentIOHooks>,
  *   session: AgentHarnessParams["session"],
  *   workdir: string | null | undefined,
+ *   sharedSkillAdapter: ReturnType<typeof createSharedSkillInvocationAdapter>,
  * }} SdkEventContext
  */
 
@@ -813,6 +815,16 @@ export function createClaudeAgentSdkHarness() {
 
     /** @type {Map<string, ActiveToolEntry>} */
     const activeTools = new Map();
+    /** @type {SdkEventContext} */
+    const ctx = {
+      result,
+      messages,
+      activeTools,
+      hooks,
+      session,
+      workdir,
+      sharedSkillAdapter: createSharedSkillInvocationAdapter(),
+    };
 
     try {
       await writeClaudeWorkspaceArtifacts(effectiveWorkdir, llmConfig.toolRuntime);
@@ -958,9 +970,6 @@ export function createClaudeAgentSdkHarness() {
           .catch((err) => log.warn("Failed to fetch SDK models:", err));
       }
 
-      /** @type {SdkEventContext} */
-      const ctx = { result, messages, activeTools, hooks, session, workdir };
-
       let eventCount = 0;
 
       for await (const event of q) {
@@ -1047,6 +1056,17 @@ export function createClaudeAgentSdkHarness() {
         prompt: result.usage.promptTokens,
         completion: result.usage.completionTokens,
         cached: result.usage.cachedTokens,
+      });
+    }
+
+    const sharedSkillInvocations = ctx.sharedSkillAdapter.drainInvocations();
+    if (sharedSkillInvocations.length > 0) {
+      result.response = await executeSharedSkillInvocations(sharedSkillInvocations, {
+        toolRuntime: llmConfig.toolRuntime,
+        session,
+        hooks,
+        messages,
+        runConfig,
       });
     }
 
@@ -1241,6 +1261,9 @@ async function handleAssistantEvent(event, ctx) {
       if (block.type === "text") {
         const text = /** @type {string} */ (block.text);
         log.debug(`  block: text len=${text.length} subagent=${isSubagent}`);
+        if (ctx.sharedSkillAdapter.handleText(text)) {
+          continue;
+        }
         const displayText = isSubagent ? `*Agent:* ${text}` : text;
         await ctx.hooks.onLlmResponse(displayText);
         if (!isSubagent) {
@@ -1286,6 +1309,10 @@ async function handleResultEvent(event, ctx) {
 
   if (!event.is_error && "result" in event && typeof event.result === "string") {
     const resultText = event.result;
+    if (ctx.sharedSkillAdapter.handleText(resultText)) {
+      ctx.result.response = [{ type: "text", text: resultText }];
+      return;
+    }
     const lastSent = ctx.result.response[ctx.result.response.length - 1];
     const alreadySent = lastSent?.type === "text"
       && lastSent.text.trim() === resultText.trim();

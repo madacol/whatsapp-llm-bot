@@ -730,6 +730,106 @@ describe("createCodexHarness", () => {
     assert.deepEqual(result.response, [{ type: "text", text: "ok" }]);
   });
 
+  it("executes shared skill invocations returned by Codex", async () => {
+    /** @type {Array<{ name: string, params: Record<string, unknown> }>} */
+    const executed = [];
+    /** @type {ToolContentBlock[][]} */
+    const emittedResults = [];
+    /** @type {LlmChatResponse["toolCalls"][0][]} */
+    const emittedCalls = [];
+    /** @type {Message[]} */
+    const storedMessages = [];
+    const skillText = [
+      "```madabot-skill",
+      "{\"skill\":\"send-path\",\"arguments\":{\"path\":\"./chart.png\"}}",
+      "```",
+    ].join("\n");
+    const returnedBlocks = /** @type {ToolContentBlock[]} */ ([
+      { type: "image", path: "chart.png", mime_type: "image/png" },
+    ]);
+
+    const harness = createCodexHarness({
+      startRun: async () => ({
+        abortController: new AbortController(),
+        done: Promise.resolve({
+          sessionId: null,
+          result: {
+            response: [{ type: "markdown", text: skillText }],
+            messages: [],
+            usage: { promptTokens: 0, completionTokens: 0, cachedTokens: 0, cost: 0 },
+          },
+        }),
+      }),
+    });
+
+    const result = await harness.run({
+      session: {
+        chatId: "codex-chat-shared-skill",
+        senderIds: [],
+        context: /** @type {ExecuteActionContext} */ ({
+          chatId: "codex-chat-shared-skill",
+          senderIds: [],
+          content: [],
+          getIsAdmin: async () => true,
+          send: async () => undefined,
+          reply: async () => undefined,
+          reactToMessage: async () => {},
+          select: async () => "",
+          confirm: async () => true,
+        }),
+        addMessage: async (_chatId, message) => {
+          storedMessages.push(message);
+          return undefined;
+        },
+        updateToolMessage: async () => undefined,
+        harnessSession: null,
+        saveHarnessSession: async () => undefined,
+      },
+      llmConfig: {
+        llmClient: /** @type {LlmClient} */ ({}),
+        chatModel: null,
+        externalInstructions: "",
+        toolRuntime: /** @type {ToolRuntime} */ ({
+          listTools: () => [{
+            name: "send_path",
+            description: "Send a path back to chat.",
+            sharedSkill: {
+              name: "send-path",
+              instructions: "Return a file.",
+            },
+            parameters: { type: "object", properties: {} },
+            permissions: {},
+          }],
+          getTool: async () => null,
+          executeTool: async (toolName, _context, params) => {
+            executed.push({ name: toolName, params });
+            return { result: returnedBlocks, permissions: {} };
+          },
+        }),
+      },
+      messages: [{ role: "user", content: [{ type: "text", text: "send the chart" }] }],
+      hooks: {
+        onToolCall: async (toolCall) => {
+          emittedCalls.push(toolCall);
+          return undefined;
+        },
+        onToolResult: async (blocks) => {
+          emittedResults.push(blocks);
+        },
+      },
+      runConfig: undefined,
+    });
+
+    assert.deepEqual(executed, [{
+      name: "send_path",
+      params: { path: "./chart.png" },
+    }]);
+    assert.equal(emittedCalls[0]?.name, "send_path");
+    assert.deepEqual(emittedResults, [returnedBlocks]);
+    assert.deepEqual(result.response, returnedBlocks);
+    assert.equal(storedMessages[0]?.role, "tool");
+  });
+
   it("renders canonical images as markdown with generated alt while keeping the media path", async () => {
     const mockServer = await createMockLlmServer();
     try {
