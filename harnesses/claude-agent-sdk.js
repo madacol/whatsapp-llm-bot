@@ -13,7 +13,7 @@ import { query } from "@anthropic-ai/claude-agent-sdk";
 import { randomUUID } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { mkdir, rm, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { hasMediaPath } from "../attachment-paths.js";
 import { formatChatSettingsCommand } from "../chat-commands.js";
 import { renderContentBlock } from "../message-formatting.js";
@@ -29,9 +29,17 @@ import { getSandboxEscapeRequest } from "./sandbox-approval.js";
 import { requestSandboxEscapeApproval } from "./sandbox-approval-coordinator.js";
 import { buildSdkErrorResponse, clearStaleHarnessSession } from "./harness-run-errors.js";
 import { augmentLatestUserMessageForTextHarness, renderMarkdownImageReference } from "./prompt-media.js";
+import { createSharedSkillInvocationAdapter, executeSharedSkillInvocations } from "../shared-skill-runtime.js";
+import {
+  buildClaudeWorkspaceArtifacts,
+  getClaudeWorkspaceArtifactsRootPath,
+  getClaudeWorkspacePluginPath,
+} from "./claude-shared-skill-artifacts.js";
 
 const log = createLogger("harness:claude-agent-sdk");
 const HARNESS_NAME = "claude-agent-sdk";
+
+export { buildClaudeWorkspaceArtifacts } from "./claude-shared-skill-artifacts.js";
 
 /** @type {HarnessCapabilities} */
 const CLAUDE_HARNESS_CAPABILITIES = {
@@ -121,10 +129,6 @@ const EFFORT_LABELS = {
 
 /** @type {string[]} */
 const FALLBACK_EFFORT_LEVELS = ["low", "medium", "high"];
-
-const MADABOT_WORKSPACE_DIR = ".madabot";
-const CHAT_ACTIONS_JSON_FILE = "chat-actions.json";
-const CHAT_ACTIONS_MARKDOWN_FILE = "chat-actions.md";
 
 /**
  * Get available effort levels for a specific model.
@@ -280,66 +284,13 @@ export function buildClaudePrompt(messages) {
 }
 
 /**
- * @typedef {{
- *   relativePath: string,
- *   content: string,
- * }} ClaudeWorkspaceArtifact
- */
-
-/**
- * @param {ToolRuntime} toolRuntime
- * @returns {ClaudeWorkspaceArtifact[]}
- */
-export function buildClaudeWorkspaceArtifacts(toolRuntime) {
-  const chatTools = toolRuntime.listTools().filter((tool) => tool.scope === "chat");
-  if (chatTools.length === 0) {
-    return [];
-  }
-
-  const actions = chatTools.map((tool) => ({
-    name: tool.name,
-    description: tool.description,
-    parameters: tool.parameters,
-  }));
-
-  const jsonContent = JSON.stringify({ version: 1, actions }, null, 2);
-  const markdownContent = [
-    "# Chat Actions",
-    "",
-    "These are chat-scoped actions available in this workspace.",
-    "",
-    ...actions.flatMap((action) => [
-      `## ${action.name}`,
-      "",
-      action.description,
-      "",
-      "```json",
-      JSON.stringify(action.parameters, null, 2),
-      "```",
-      "",
-    ]),
-  ].join("\n");
-
-  return [
-    {
-      relativePath: `${MADABOT_WORKSPACE_DIR}/${CHAT_ACTIONS_JSON_FILE}`,
-      content: jsonContent,
-    },
-    {
-      relativePath: `${MADABOT_WORKSPACE_DIR}/${CHAT_ACTIONS_MARKDOWN_FILE}`,
-      content: markdownContent,
-    },
-  ];
-}
-
-/**
  * @param {string} workdir
  * @param {ToolRuntime} toolRuntime
  * @returns {Promise<void>}
  */
 export async function writeClaudeWorkspaceArtifacts(workdir, toolRuntime) {
   const artifacts = buildClaudeWorkspaceArtifacts(toolRuntime);
-  const madabotDir = join(workdir, MADABOT_WORKSPACE_DIR);
+  const madabotDir = getClaudeWorkspaceArtifactsRootPath(workdir);
 
   if (artifacts.length === 0) {
     await rm(madabotDir, { recursive: true, force: true });
@@ -348,8 +299,27 @@ export async function writeClaudeWorkspaceArtifacts(workdir, toolRuntime) {
 
   await mkdir(madabotDir, { recursive: true });
   await Promise.all(
-    artifacts.map((artifact) => writeFile(join(workdir, artifact.relativePath), artifact.content, "utf8")),
+    artifacts.map(async (artifact) => {
+      const artifactPath = join(workdir, artifact.relativePath);
+      await mkdir(dirname(artifactPath), { recursive: true });
+      await writeFile(artifactPath, artifact.content, "utf8");
+    }),
   );
+}
+
+/**
+ * @param {string} workdir
+ * @param {ToolRuntime} toolRuntime
+ * @returns {import("@anthropic-ai/claude-agent-sdk").SdkPluginConfig[]}
+ */
+function getClaudeWorkspacePlugins(workdir, toolRuntime) {
+  if (buildClaudeWorkspaceArtifacts(toolRuntime).length === 0) {
+    return [];
+  }
+  return [{
+    type: "local",
+    path: getClaudeWorkspacePluginPath(workdir),
+  }];
 }
 
 /**
@@ -383,6 +353,7 @@ export async function writeClaudeWorkspaceArtifacts(workdir, toolRuntime) {
  *   hooks: Required<AgentIOHooks>,
  *   session: AgentHarnessParams["session"],
  *   workdir: string | null | undefined,
+ *   sharedSkillAdapter: ReturnType<typeof createSharedSkillInvocationAdapter>,
  * }} SdkEventContext
  */
 
@@ -808,6 +779,16 @@ export function createClaudeAgentSdkHarness() {
 
     /** @type {Map<string, ActiveToolEntry>} */
     const activeTools = new Map();
+    /** @type {SdkEventContext} */
+    const ctx = {
+      result,
+      messages,
+      activeTools,
+      hooks,
+      session,
+      workdir,
+      sharedSkillAdapter: createSharedSkillInvocationAdapter(),
+    };
 
     try {
       await writeClaudeWorkspaceArtifacts(effectiveWorkdir, llmConfig.toolRuntime);
@@ -825,6 +806,7 @@ export function createClaudeAgentSdkHarness() {
         allowDangerouslySkipPermissions: true,
         persistSession: true,
         abortController,
+        plugins: getClaudeWorkspacePlugins(effectiveWorkdir, llmConfig.toolRuntime),
         ...(systemPrompt ? { systemPrompt } : {}),
         ...(model && { model }),
         ...(reasoningEffort && { effort: reasoningEffort }),
@@ -952,9 +934,6 @@ export function createClaudeAgentSdkHarness() {
           .catch((err) => log.warn("Failed to fetch SDK models:", err));
       }
 
-      /** @type {SdkEventContext} */
-      const ctx = { result, messages, activeTools, hooks, session, workdir };
-
       let eventCount = 0;
 
       for await (const event of q) {
@@ -1041,6 +1020,17 @@ export function createClaudeAgentSdkHarness() {
         prompt: result.usage.promptTokens,
         completion: result.usage.completionTokens,
         cached: result.usage.cachedTokens,
+      });
+    }
+
+    const sharedSkillInvocations = ctx.sharedSkillAdapter.drainInvocations();
+    if (sharedSkillInvocations.length > 0) {
+      result.response = await executeSharedSkillInvocations(sharedSkillInvocations, {
+        toolRuntime: llmConfig.toolRuntime,
+        session,
+        hooks,
+        messages,
+        runConfig,
       });
     }
 
@@ -1235,6 +1225,9 @@ async function handleAssistantEvent(event, ctx) {
       if (block.type === "text") {
         const text = /** @type {string} */ (block.text);
         log.debug(`  block: text len=${text.length} subagent=${isSubagent}`);
+        if (ctx.sharedSkillAdapter.handleText(text)) {
+          continue;
+        }
         const displayText = isSubagent ? `*Agent:* ${text}` : text;
         await ctx.hooks.onLlmResponse(displayText);
         if (!isSubagent) {
@@ -1280,6 +1273,10 @@ async function handleResultEvent(event, ctx) {
 
   if (!event.is_error && "result" in event && typeof event.result === "string") {
     const resultText = event.result;
+    if (ctx.sharedSkillAdapter.handleText(resultText)) {
+      ctx.result.response = [{ type: "text", text: resultText }];
+      return;
+    }
     const lastSent = ctx.result.response[ctx.result.response.length - 1];
     const alreadySent = lastSent?.type === "text"
       && lastSent.text.trim() === resultText.trim();
