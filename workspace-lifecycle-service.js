@@ -29,7 +29,7 @@ function formatSeedPromptText(seedPrompt) {
  * `workspaceControl`.
  * @param {{
  *   workspaceControl: Pick<ReturnType<typeof import("./workspace-control.js").createWorkspaceControl>,
- *     "list" | "create" | "status" | "diff" | "test" | "commit" | "archiveByName" | "archiveCurrent" | "merge" | "showConflict" | "resolveConflicts" | "abortMerge">,
+ *     "list" | "create" | "status" | "diff" | "commit" | "archiveByName" | "archiveCurrent">,
  *   workspacePresentation?: WorkspacePresentationPort,
  *   dispatchTurn: (turn: ChatTurn) => Promise<void>,
  * }} input
@@ -39,12 +39,7 @@ export function createWorkspaceLifecycleService({ workspaceControl, workspacePre
     list: workspaceControl.list,
     status: workspaceControl.status,
     diff: workspaceControl.diff,
-    test: workspaceControl.test,
     commit: workspaceControl.commit,
-    merge: workspaceControl.merge,
-    showConflict: workspaceControl.showConflict,
-    resolveConflicts: workspaceControl.resolveConflicts,
-    abortMerge: workspaceControl.abortMerge,
 
     /**
      * @param {{

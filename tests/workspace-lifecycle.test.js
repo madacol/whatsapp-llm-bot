@@ -450,7 +450,7 @@ describe("workspace lifecycle", () => {
     assert.ok(responses.some((response) => response.text.includes("Created workspace `child branch`.")));
   });
 
-  it("runs !diff, !test, !commit, and !merge successfully", async () => {
+  it("runs !diff and !commit successfully", async () => {
     const repoRoot = await createRepoFixture();
     const transportState = createFakeTransport();
     const handleMessage = await createHandler({ transport: transportState.transport });
@@ -477,134 +477,9 @@ describe("workspace lifecycle", () => {
 
     turn = createChatTurn({
       chatId: workspace.workspace_chat_id,
-      content: [{ type: "text", text: "!test" }],
-    });
-    await handleMessage(turn.context);
-    assert.ok(turn.responses.some((response) => response.text.includes("Type-check passed.")));
-    assert.ok(turn.responses.some((response) => response.text.includes("Tests passed.")));
-
-    turn = createChatTurn({
-      chatId: workspace.workspace_chat_id,
       content: [{ type: "text", text: "!commit Update app" }],
     });
     await handleMessage(turn.context);
     assert.ok(turn.responses.some((response) => response.text.includes("Committed on `payments`.")));
-
-    turn = createChatTurn({
-      chatId: workspace.workspace_chat_id,
-      content: [{ type: "text", text: "!merge" }],
-    });
-    await handleMessage(turn.context);
-    assert.ok(turn.responses.some((response) => response.text.includes("Merged `payments` into `master`.")));
-
-    const mergedText = await fs.readFile(path.join(repoRoot, "app.txt"), "utf8");
-    assert.equal(mergedText, "workspace change\n");
-  });
-
-  it("surfaces conflicts, shows conflicted files, and can abort", async () => {
-    const repoRoot = await createRepoFixture();
-    const transportState = createFakeTransport();
-    const handleMessage = await createHandler({ transport: transportState.transport });
-
-    await seedChat("repo-conflict-chat", { harnessCwd: repoRoot });
-
-    await handleMessage(createChatTurn({
-      chatId: "repo-conflict-chat",
-      content: [{ type: "text", text: "!new payments" }],
-    }).context);
-    const repo = await store.getRepoByRootPath(repoRoot);
-    assert.ok(repo, "repo should be inferred from the root cwd");
-    const workspace = await store.getWorkspaceByName(repo.repo_id, "payments");
-    assert.ok(workspace);
-
-    await writeTrackedFile(workspace.worktree_path, "workspace side");
-    await runGit(workspace.worktree_path, ["add", "app.txt"]);
-    await runGit(workspace.worktree_path, ["commit", "-m", "workspace change"]);
-
-    await writeTrackedFile(repoRoot, "base side");
-    await runGit(repoRoot, ["add", "app.txt"]);
-    await runGit(repoRoot, ["commit", "-m", "base change"]);
-
-    let turn = createChatTurn({
-      chatId: workspace.workspace_chat_id,
-      content: [{ type: "text", text: "!merge" }],
-    });
-    await handleMessage(turn.context);
-    assert.ok(turn.responses.some((response) => response.text.includes("Merge blocked by conflicts")));
-
-    let updatedWorkspace = await store.getWorkspace(workspace.workspace_id);
-    assert.equal(updatedWorkspace?.status, "conflicted");
-    assert.deepEqual(updatedWorkspace?.conflicted_files, ["app.txt"]);
-
-    turn = createChatTurn({
-      chatId: workspace.workspace_chat_id,
-      content: [{ type: "text", text: "!show conflict" }],
-    });
-    await handleMessage(turn.context);
-    assert.ok(turn.responses.some((response) => response.text.includes("`app.txt`")));
-
-    turn = createChatTurn({
-      chatId: workspace.workspace_chat_id,
-      content: [{ type: "text", text: "!abort merge" }],
-    });
-    await handleMessage(turn.context);
-    assert.ok(turn.responses.some((response) => response.text.includes("Aborted merge attempt")));
-
-    updatedWorkspace = await store.getWorkspace(workspace.workspace_id);
-    assert.equal(updatedWorkspace?.status, "ready");
-  });
-
-  it("resolves simple conflicts automatically and archives the workspace chat", async () => {
-    const repoRoot = await createRepoFixture();
-    const transportState = createFakeTransport();
-    const handleMessage = await createHandler({ transport: transportState.transport });
-
-    await seedChat("repo-resolve-chat", { harnessCwd: repoRoot });
-
-    await handleMessage(createChatTurn({
-      chatId: "repo-resolve-chat",
-      chatName: "Original Group",
-      content: [{ type: "text", text: "!new payments" }],
-    }).context);
-    const repo = await store.getRepoByRootPath(repoRoot);
-    assert.ok(repo, "repo should be inferred from the root cwd");
-    const workspace = await store.getWorkspaceByName(repo.repo_id, "payments");
-    assert.ok(workspace);
-
-    await writeTrackedFile(workspace.worktree_path, "workspace side");
-    await runGit(workspace.worktree_path, ["add", "app.txt"]);
-    await runGit(workspace.worktree_path, ["commit", "-m", "workspace change"]);
-
-    await writeTrackedFile(repoRoot, "base side");
-    await runGit(repoRoot, ["add", "app.txt"]);
-    await runGit(repoRoot, ["commit", "-m", "base change"]);
-
-    await handleMessage(createChatTurn({
-      chatId: workspace.workspace_chat_id,
-      content: [{ type: "text", text: "!merge" }],
-    }).context);
-
-    let turn = createChatTurn({
-      chatId: workspace.workspace_chat_id,
-      content: [{ type: "text", text: "!resolve conflicts" }],
-    });
-    await handleMessage(turn.context);
-    assert.ok(turn.responses.some((response) => response.text.includes("Resolved conflicts in `payments`.")));
-
-    turn = createChatTurn({
-      chatId: workspace.workspace_chat_id,
-      content: [{ type: "text", text: "!merge" }],
-    });
-    await handleMessage(turn.context);
-    assert.ok(turn.responses.some((response) => response.text.includes("Merged `payments` into `master`.")));
-
-    turn = createChatTurn({
-      chatId: workspace.workspace_chat_id,
-      content: [{ type: "text", text: "!archive" }],
-    });
-    await handleMessage(turn.context);
-    assert.ok(turn.responses.some((response) => response.text.includes("Archived workspace `payments`.")));
-    assert.deepEqual(transportState.renamedGroups, [{ chatId: workspace.workspace_chat_id, subject: "[payments] Original Group (archived)" }]);
-    assert.deepEqual(transportState.announcementChanges, [{ chatId: workspace.workspace_chat_id, enabled: true }]);
   });
 });
