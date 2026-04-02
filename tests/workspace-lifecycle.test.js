@@ -450,7 +450,7 @@ describe("workspace lifecycle", () => {
     assert.ok(responses.some((response) => response.text.includes("Created workspace `child branch`.")));
   });
 
-  it("runs !diff and !commit successfully", async () => {
+  it("runs !diff and rejects !commit as an unknown command", async () => {
     const repoRoot = await createRepoFixture();
     const transportState = createFakeTransport();
     const handleMessage = await createHandler({ transport: transportState.transport });
@@ -480,6 +480,6 @@ describe("workspace lifecycle", () => {
       content: [{ type: "text", text: "!commit Update app" }],
     });
     await handleMessage(turn.context);
-    assert.ok(turn.responses.some((response) => response.text.includes("Committed on `payments`.")));
+    assert.ok(turn.responses.some((response) => response.text.includes("Unknown command: commit")));
   });
 });

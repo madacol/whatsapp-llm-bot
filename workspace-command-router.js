@@ -18,7 +18,6 @@ import { contentEvent } from "./outbound-events.js";
  *   }) => Promise<{ message: string, workspace: WorkspaceRow | null }>;
  *   status: (workspace: WorkspaceRow) => Promise<string>;
  *   diff: (workspace: WorkspaceRow) => Promise<string>;
- *   commit: (workspace: WorkspaceRow, message: string) => Promise<string>;
  *   archiveByName: (repo: RepoRow, workspaceName: string) => Promise<string>;
  *   archiveCurrent: (workspace: WorkspaceRow) => Promise<string>;
  * }} WorkspaceControl
@@ -75,8 +74,7 @@ function parseNewArgs(argsText) {
  */
 function isWorkspaceOnlyCommand(loweredCommandText) {
   return loweredCommandText === "status"
-    || loweredCommandText === "diff"
-    || loweredCommandText === "commit";
+    || loweredCommandText === "diff";
 }
 
 /**
@@ -212,10 +210,6 @@ export async function tryHandleWorkspaceCommand({ context, binding, inputText, w
       }
       if (name === "diff" && !argsText) {
         await replyToolResult(context, await workspaceControl.diff(binding.workspace));
-        return true;
-      }
-      if (name === "commit") {
-        await replyToolResult(context, await workspaceControl.commit(binding.workspace, argsText));
         return true;
       }
       if (name === "archive" && !argsText) {
