@@ -13,6 +13,7 @@ import { createCodexCommandHandler } from "./codex-commands.js";
 import { getCodexAvailableModels } from "./codex-models.js";
 import { augmentLatestUserMessageForTextHarness, renderMarkdownImageReference } from "./prompt-media.js";
 import { buildSdkErrorResponse, clearStaleHarnessSession, getHarnessRunErrorMessage } from "./harness-run-errors.js";
+import { createSharedSkillInvocationAdapter, executeSharedSkillInvocations } from "../shared-skill-runtime.js";
 import {
   getCodexSessionId,
   saveCodexSession,
@@ -300,6 +301,24 @@ export function createCodexHarness(deps = {}) {
 
       if (completed.sessionId && completed.sessionId !== sessionId) {
         await saveCodexSession(session, completed.sessionId);
+      }
+
+      const sharedSkillAdapter = createSharedSkillInvocationAdapter();
+      for (const block of completed.result.response) {
+        if ((block.type === "text" || block.type === "markdown") && typeof block.text === "string") {
+          sharedSkillAdapter.handleText(block.text);
+        }
+      }
+      const sharedSkillInvocations = sharedSkillAdapter.drainInvocations();
+      if (sharedSkillInvocations.length > 0) {
+        const blocks = await executeSharedSkillInvocations(sharedSkillInvocations, {
+          toolRuntime: llmConfig.toolRuntime,
+          session,
+          hooks,
+          messages,
+          runConfig: effectiveRunConfig,
+        });
+        completed.result.response = blocks;
       }
 
       return completed.result;

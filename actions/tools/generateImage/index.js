@@ -38,6 +38,14 @@ export default /** @type {defineAction} */ ((x) => x)({
   command: "imagine",
   description:
     "Generate or edit images using AI. Provide a text prompt to generate an image, or include an image in the message to edit it.",
+  sharedSkill: {
+    name: "generate-image",
+    description: "Generate a new image or edit an existing one and return it to the chat.",
+    instructions: `Use this skill when the user needs a generated image artifact.
+- Provide a clear prompt describing the desired output.
+- Include source images when the user wants an edit rather than a fresh image.
+- The generated result should be returned as an image attachment to the chat.`,
+  },
   parameters: {
     type: "object",
     properties: {
