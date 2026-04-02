@@ -4,7 +4,18 @@ import { contentEvent } from "./outbound-events.js";
 /**
  * @typedef {{
  *   list: (repo: RepoRow) => Promise<string>;
- *   create: (repo: RepoRow, context: ExecuteActionContext, workspaceName: string, baseBranch: string) => Promise<{ message: string, workspace: WorkspaceRow | null }>;
+ *   createWorkspace: (input: {
+ *     repo: RepoRow,
+ *     context: ExecuteActionContext,
+ *     workspaceName: string,
+ *     baseBranch: string,
+ *     seedPrompt?: string,
+ *     sourceTurn: {
+ *       senderIds: string[],
+ *       senderJids?: string[],
+ *       senderName: string,
+ *     },
+ *   }) => Promise<{ message: string, workspace: WorkspaceRow | null }>;
  *   status: (workspace: WorkspaceRow) => Promise<string>;
  *   diff: (workspace: WorkspaceRow) => Promise<string>;
  *   test: (workspace: WorkspaceRow) => Promise<string>;
@@ -110,11 +121,15 @@ async function replyError(context, message) {
  *   binding: ResolvedChatBinding,
  *   inputText: string,
  *   workspaceControl: WorkspaceControl,
- *   seedWorkspace?: (workspace: WorkspaceRow, seedPrompt: string) => Promise<void>,
+ *   seedSourceTurn: {
+ *     senderIds: string[],
+ *     senderJids?: string[],
+ *     senderName: string,
+ *   },
  * }} input
  * @returns {Promise<boolean>}
  */
-export async function tryHandleWorkspaceCommand({ context, binding, inputText, workspaceControl, seedWorkspace }) {
+export async function tryHandleWorkspaceCommand({ context, binding, inputText, workspaceControl, seedSourceTurn }) {
   const { name, argsText, lowered } = parseCommandText(inputText);
 
   if (!name) {
@@ -139,10 +154,14 @@ export async function tryHandleWorkspaceCommand({ context, binding, inputText, w
           await replyError(context, "Usage: `!new <name>` or `!new <name>: <seed prompt>`.");
           return true;
         }
-        const result = await workspaceControl.create(binding.repo, context, parsed.workspaceName, binding.repo.default_base_branch);
-        if (parsed.seedPrompt && result.workspace && seedWorkspace) {
-          await seedWorkspace(result.workspace, parsed.seedPrompt);
-        }
+        const result = await workspaceControl.createWorkspace({
+          repo: binding.repo,
+          context,
+          workspaceName: parsed.workspaceName,
+          baseBranch: binding.repo.default_base_branch,
+          seedPrompt: parsed.seedPrompt,
+          sourceTurn: seedSourceTurn,
+        });
         await replyToolResult(context, result.message);
         return true;
       }
@@ -195,10 +214,14 @@ export async function tryHandleWorkspaceCommand({ context, binding, inputText, w
           await replyError(context, "Usage: `!new <name>` or `!new <name>: <seed prompt>`.");
           return true;
         }
-        const result = await workspaceControl.create(binding.repo, context, parsed.workspaceName, binding.workspace.branch);
-        if (parsed.seedPrompt && result.workspace && seedWorkspace) {
-          await seedWorkspace(result.workspace, parsed.seedPrompt);
-        }
+        const result = await workspaceControl.createWorkspace({
+          repo: binding.repo,
+          context,
+          workspaceName: parsed.workspaceName,
+          baseBranch: binding.workspace.branch,
+          seedPrompt: parsed.seedPrompt,
+          sourceTurn: seedSourceTurn,
+        });
         await replyToolResult(context, result.message);
         return true;
       }

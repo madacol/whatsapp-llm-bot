@@ -21,7 +21,7 @@ import { resolveOutputVisibility } from "../chat-output-visibility.js";
 import { resolveChatBinding } from "../workspace-resolver.js";
 import { tryHandleWorkspaceCommand } from "../workspace-command-router.js";
 import { createWorkspaceControl } from "../workspace-control.js";
-import { createSeedTurnIo } from "./seed-turn-io.js";
+import { createWorkspaceLifecycleService } from "../workspace-lifecycle-service.js";
 
 const log = createLogger("conversation:runner");
 const PRESENCE_LEASE_TTL_MS = 20_000;
@@ -64,20 +64,6 @@ function formatAvailableSlashCommands(commands) {
   return commands
     .map((command) => `/${command.name} - ${command.description}`)
     .join("\n");
-}
-
-/**
- * @param {string} seedPrompt
- * @returns {string}
- */
-function formatSeedPromptText(seedPrompt) {
-  const trimmed = seedPrompt.trim();
-  if (!trimmed) {
-    return "";
-  }
-  return trimmed.includes("\n")
-    ? `Prompt:\n${trimmed}`
-    : `Prompt: ${trimmed}`;
 }
 
 /**
@@ -130,6 +116,11 @@ export function createConversationRunner({ store, llmClient, getActionsFn, execu
 
   const runCoordinator = createHarnessRunCoordinator();
   const workspaceControl = createWorkspaceControl({ store, workspacePresentation });
+  const workspaceLifecycle = createWorkspaceLifecycleService({
+    workspaceControl,
+    workspacePresentation,
+    dispatchTurn,
+  });
 
   /**
    * @param {ChatTurn} turn
@@ -141,43 +132,6 @@ export function createConversationRunner({ store, llmClient, getActionsFn, execu
     while (nextTurn) {
       nextTurn = await handleSingleMessage(nextTurn);
     }
-  }
-
-  /**
-   * @param {ChatTurn} sourceTurn
-   * @param {WorkspaceRow} workspace
-   * @param {string} seedPrompt
-   * @returns {Promise<void>}
-   */
-  async function seedWorkspaceFromTurn(sourceTurn, workspace, seedPrompt) {
-    const promptText = formatSeedPromptText(seedPrompt);
-    if (!promptText) {
-      return;
-    }
-    await workspacePresentation?.presentSeedPrompt({
-      surfaceId: workspace.workspace_chat_id,
-      promptText,
-    });
-    await dispatchTurn({
-      chatId: workspace.workspace_chat_id,
-      senderIds: sourceTurn.senderIds,
-      senderJids: sourceTurn.senderJids,
-      senderName: sourceTurn.senderName,
-      chatName: workspace.workspace_chat_subject,
-      content: [{ type: "text", text: seedPrompt }],
-      timestamp: new Date(),
-      facts: {
-        isGroup: true,
-        addressedToBot: true,
-        repliedToBot: false,
-      },
-      io: createSeedTurnIo({
-        sendEvent: (event) => workspacePresentation?.sendWorkspaceEvent({
-          surfaceId: workspace.workspace_chat_id,
-          event,
-        }) ?? Promise.resolve(undefined),
-      }),
-    });
   }
 
   /**
@@ -230,8 +184,12 @@ export function createConversationRunner({ store, llmClient, getActionsFn, execu
       context,
       binding: resolvedBinding,
       inputText,
-      workspaceControl,
-      seedWorkspace: async (workspace, seedPrompt) => seedWorkspaceFromTurn(turn, workspace, seedPrompt),
+      workspaceControl: workspaceLifecycle,
+      seedSourceTurn: {
+        senderIds: turn.senderIds,
+        senderJids: turn.senderJids,
+        senderName: turn.senderName,
+      },
     })) {
       return;
     }
