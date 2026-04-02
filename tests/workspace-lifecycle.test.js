@@ -1,4 +1,4 @@
-import { after, before, describe, it } from "node:test";
+import { after, afterEach, before, describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import fs from "node:fs/promises";
@@ -171,6 +171,7 @@ async function seedChat(chatId, options = {}) {
  * @returns {Promise<(msg: ChatTurn) => Promise<void>>}
  */
 async function createHandler(options = {}) {
+  process.env.BASE_URL = mockServer.url;
   const { createLlmClient } = await import("../llm.js");
   const llmClient = createLlmClient();
   const { createMessageHandler } = await import("../index.js");
@@ -204,6 +205,11 @@ after(async () => {
 });
 
 describe("workspace lifecycle", () => {
+  afterEach(() => {
+    const pending = mockServer.pendingResponses();
+    assert.equal(pending, 0, `Mock response queue should be empty after each test, but has ${pending} unconsumed response(s).`);
+  });
+
   it("surfaces WhatsApp group creation failures with context", async () => {
     const repoRoot = await createRepoFixture();
     const handleMessage = await createHandler({
