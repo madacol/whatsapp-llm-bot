@@ -4,6 +4,11 @@ import { buildAgentIoHooks } from "../conversation/build-agent-io-hooks.js";
 import { DEFAULT_OUTPUT_VISIBILITY } from "../chat-output-visibility.js";
 import { buildToolPresentation } from "../tool-presentation-model.js";
 
+const VISIBLE_TOOL_OUTPUT = {
+  ...DEFAULT_OUTPUT_VISIBILITY,
+  tools: true,
+};
+
 /**
  * @returns {{
  *   hooks: AgentIOHooks,
@@ -247,7 +252,7 @@ describe("buildAgentIoHooks", () => {
   });
 
   it("refreshes the presence lease for tool-result progress, but not for llm or tool-call display", async () => {
-    const subject = createSubjectWithWorkingSpy();
+    const subject = createSubjectWithWorkingSpy(VISIBLE_TOOL_OUTPUT);
 
     await subject.hooks.onLlmResponse?.("Still working");
     await subject.hooks.onToolCall?.({ id: "tool-1", name: "run_bash", arguments: "{\"command\":\"echo hi\"}" });
@@ -288,7 +293,7 @@ describe("buildAgentIoHooks", () => {
   });
 
   it("maps command start events to a tool-call message", async () => {
-    const { hooks, sent } = createSubject();
+    const { hooks, sent } = createSubject(VISIBLE_TOOL_OUTPUT);
     await hooks.onCommand?.({ command: "npm test", status: "started" });
 
     assert.equal(sent.length, 1);
@@ -499,7 +504,7 @@ describe("buildAgentIoHooks", () => {
   });
 
   it("renders shell commands as bash summaries", async () => {
-    const { hooks, sent } = createSubjectWithCwd("/repo");
+    const { hooks, sent } = createSubjectWithCwd("/repo", VISIBLE_TOOL_OUTPUT);
     await hooks.onCommand?.({ command: "rg -n \"needle\" src", status: "started" });
 
     assert.equal(sent.length, 1);
@@ -513,7 +518,7 @@ describe("buildAgentIoHooks", () => {
   });
 
   it("does not send a separate success message for completed commands", async () => {
-    const { hooks, sent } = createSubject();
+    const { hooks, sent } = createSubject(VISIBLE_TOOL_OUTPUT);
     await hooks.onCommand?.({ command: "pwd", status: "started" });
     await hooks.onCommand?.({ command: "pwd", status: "completed", output: "/repo\n" });
 
@@ -531,7 +536,7 @@ describe("buildAgentIoHooks", () => {
   });
 
   it("maps file reads to a tool-call message", async () => {
-    const { hooks, sent } = createSubject();
+    const { hooks, sent } = createSubject(VISIBLE_TOOL_OUTPUT);
     await hooks.onFileRead?.({ command: "sed -n '1,20p' src/app.js", paths: ["src/app.js"] });
 
     assert.equal(sent.length, 1);
@@ -611,6 +616,7 @@ describe("buildAgentIoHooks", () => {
       async () => {},
       () => {},
       null,
+      VISIBLE_TOOL_OUTPUT,
     );
 
     await hooks.onFileRead?.({
@@ -660,6 +666,7 @@ describe("buildAgentIoHooks", () => {
       async () => {},
       () => {},
       "/repo",
+      VISIBLE_TOOL_OUTPUT,
     );
 
     await hooks.onCommand?.({
@@ -708,6 +715,7 @@ describe("buildAgentIoHooks", () => {
       async () => {},
       () => {},
       "/repo",
+      VISIBLE_TOOL_OUTPUT,
     );
 
     await hooks.onCommand?.({

@@ -410,7 +410,7 @@ describe("per-chat model selection", () => {
     it("describes grouped visibility controls with per-flag defaults", async () => {
       await db.sql`
         INSERT INTO chats(chat_id, output_visibility)
-        VALUES ('cfg-show-1', '{"thinking":true}'::jsonb)
+        VALUES ('cfg-show-1', '{}'::jsonb)
         ON CONFLICT DO NOTHING
       `;
 
@@ -422,7 +422,7 @@ describe("per-chat model selection", () => {
       );
 
       assert.ok(result.includes("*Show*"), `expected setting title, got: ${result}`);
-      assert.ok(result.includes("- Current: tools on, thinking on, changes on"), `expected current summary, got: ${result}`);
+      assert.ok(result.includes("- Current: tools off, thinking on, changes on"), `expected current summary, got: ${result}`);
       assert.ok(result.includes("*Controls*"), `expected controls section, got: ${result}`);
       assert.ok(result.includes("- tools"), `expected tools flag, got: ${result}`);
       assert.ok(result.includes("- thinking"), `expected thinking flag, got: ${result}`);
@@ -467,7 +467,7 @@ describe("per-chat model selection", () => {
             promptText = question;
             pickerOptions = options;
             pickerConfig = config ?? null;
-            return { kind: "selected", ids: ["thinking", "changes"] };
+            return { kind: "selected", ids: ["tools", "changes"] };
           },
         },
         { setting: "show" },
@@ -481,8 +481,8 @@ describe("per-chat model selection", () => {
       assert.deepEqual(
         pickerOptions,
         [
-          { id: "tools", label: "🟢 Hide tool activity" },
-          { id: "thinking", label: "⚪ Show thinking" },
+          { id: "tools", label: "⚪ Show tool activity" },
+          { id: "thinking", label: "🟢 Hide thinking" },
           { id: "changes", label: "🟢 Hide file changes" },
           { id: "none", label: "⚪ Hide all extras" },
         ],
@@ -491,13 +491,13 @@ describe("per-chat model selection", () => {
         deleteOnSelect: true,
         currentIds: [],
       });
-      assert.ok(result.includes("Show thinking"), `expected show summary, got: ${result}`);
+      assert.ok(result.includes("Show tool activity"), `expected show summary, got: ${result}`);
       assert.ok(result.includes("Hide file changes"), `expected hide summary, got: ${result}`);
-      assert.ok(!result.includes("tool activity"), `did not expect unchanged tool summary, got: ${result}`);
+      assert.ok(!result.includes("thinking"), `did not expect unchanged thinking summary, got: ${result}`);
 
       const rows = await db.sql`SELECT output_visibility FROM chats WHERE chat_id = 'cfg-show-3'`;
       assert.deepEqual(rows.rows[0]?.output_visibility, {
-        thinking: true,
+        tools: true,
         changes: false,
       });
     });

@@ -269,6 +269,7 @@ describe("Scenario 7: Show info", () => {
     assert.ok(allText.includes(chatId), "Should contain chat ID");
     assert.ok(allText.toLowerCase().includes("enabled"), "Should contain enabled status");
     assert.ok(allText.toLowerCase().includes("sender"), "Should contain sender info");
+    assert.ok(allText.includes("show: tools off, thinking on, changes on"), `Should contain default show settings, got: ${allText}`);
   });
 
   it("resets folder with !s reset folder", async () => {
@@ -308,7 +309,7 @@ describe("Scenario 7b: Guided setup command", () => {
         selectMany: async (question, options) => {
           questions.push(question);
           responses.push({ type: "selectMany", text: JSON.stringify({ question, options }) });
-          return { kind: "selected", ids: ["thinking", "changes"] };
+          return { kind: "selected", ids: ["changes"] };
         },
       },
     });
@@ -333,7 +334,7 @@ describe("Scenario 7b: Guided setup command", () => {
     assert.equal(chat.respond_on, "mention+reply");
     assert.equal(chat.memory, false);
     assert.equal(chat.debug, false);
-    assert.deepEqual(chat.output_visibility, { thinking: true, changes: false });
+    assert.deepEqual(chat.output_visibility, { changes: false });
     assert.equal(chat.harness, "codex");
     assert.equal(chat.harness_config.codex.model, "gpt-5.4");
   });
@@ -480,7 +481,7 @@ describe("Scenario 11: Group stores messages even when not responding", () => {
 // ═══════════════════════════════════════════════════════════════════
 describe("Scenario 12: Tool call display is always verbose", () => {
   it("shows bold tool name with args even without debug mode", async () => {
-    const chat = await t.chat("s12-verbose", { enabled: true });
+    const chat = await t.chat("s12-verbose", { enabled: true, outputVisibility: { tools: true } });
     const r = await chat.send("Test verbose", {
       llm: [toolCall("run_javascript", { code: "() => 'hello'" }), "Final answer"],
     });
@@ -491,7 +492,7 @@ describe("Scenario 12: Tool call display is always verbose", () => {
   });
 
   it("shows formatted tool call from actionFormatter", async () => {
-    const chat = await t.chat("s12-verbose", { enabled: true });
+    const chat = await t.chat("s12-verbose", { enabled: true, outputVisibility: { tools: true } });
     const r = await chat.send("Show settings", {
       llm: [toolCall("chat_settings", { setting: "model" })],
     });
@@ -633,7 +634,7 @@ describe("HtmlContent via LLM tool call", () => {
   });
 
   it("sends link URL to user when tool returns HtmlContent", async () => {
-    const chat = await t.chat("html-tool-chat", { enabled: true, debug: true });
+    const chat = await t.chat("html-tool-chat", { enabled: true, debug: true, outputVisibility: { tools: true } });
     const r = await chat.send("Generate a report", {
       llm: [
         toolCall("run_javascript", { code: '() => ({ __brand: "html", html: "<h1>Report</h1>", title: "Sales Report" })' }),
