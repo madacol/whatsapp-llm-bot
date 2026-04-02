@@ -184,7 +184,7 @@ async function createHandler(options = {}) {
     executeActionFn: executeAction,
     transport: options.transport,
     workspacePresentation: options.transport
-      ? createWhatsAppWorkspacePresenter({ transport: options.transport })
+      ? createWhatsAppWorkspacePresenter({ transport: options.transport, store })
       : undefined,
   });
   return handler.handleMessage;

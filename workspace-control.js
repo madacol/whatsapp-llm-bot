@@ -2,6 +2,7 @@ import {
   cleanupWorkspaceWorktree,
   isValidWorkspaceName,
 } from "./workspace-git.js";
+import { randomUUID } from "node:crypto";
 import { formatWorkspaceStatus, listRepoWorkspaces } from "./workspace-service.js";
 import { errorToString } from "./utils.js";
 import { createWorkspaceRepoService } from "./workspace-repo-service.js";
@@ -97,13 +98,17 @@ export function createWorkspaceControl({ store, workspacePresentation, workspace
       }
 
       const { branch, worktreePath } = await workspaceRepo.createWorkspaceCheckout(repo, workspaceName, baseBranch);
+      const workspaceId = randomUUID();
       try {
-        const surface = await workspacePresentation.provisionWorkspaceSurface({
+        const surface = await workspacePresentation.ensureWorkspaceVisible({
+          repoId: repo.repo_id,
+          workspaceId,
           workspaceName,
           sourceChatName: context.chatName,
           requesterJids: participants,
         });
         const workspace = await store.createWorkspace({
+          workspaceId,
           repoId: repo.repo_id,
           name: workspaceName,
           branch,
@@ -116,7 +121,7 @@ export function createWorkspaceControl({ store, workspacePresentation, workspace
         await store.copyChatCustomizations(context.chatId, surface.surfaceId);
         await store.setChatEnabled(surface.surfaceId, true);
         await workspacePresentation.presentWorkspaceBootstrap({
-          surfaceId: surface.surfaceId,
+          workspaceId: workspace.workspace_id,
           statusText: await formatWorkspaceStatus(workspace),
         });
         return {
@@ -148,8 +153,9 @@ export function createWorkspaceControl({ store, workspacePresentation, workspace
       const participants = getInitialWorkspaceParticipants(context);
 
       const { branch, worktreePath } = await workspaceRepo.replaceWorkspaceCheckout(repo, existing, baseBranch);
-      const surface = await workspacePresentation.reopenWorkspaceSurface({
-        surfaceId: existing.workspace_chat_id,
+      const surface = await workspacePresentation.ensureWorkspaceVisible({
+        repoId: repo.repo_id,
+        workspaceId: existing.workspace_id,
         workspaceName: existing.name,
         sourceChatName: context.chatName,
         requesterJids: participants,
@@ -161,10 +167,10 @@ export function createWorkspaceControl({ store, workspacePresentation, workspace
         worktreePath,
         workspaceChatSubject: surface.surfaceName,
       });
-      await store.copyChatCustomizations(context.chatId, existing.workspace_chat_id);
-      await store.setChatEnabled(existing.workspace_chat_id, true);
+      await store.copyChatCustomizations(context.chatId, surface.surfaceId);
+      await store.setChatEnabled(surface.surfaceId, true);
       await workspacePresentation.presentWorkspaceBootstrap({
-        surfaceId: existing.workspace_chat_id,
+        workspaceId: workspace.workspace_id,
         statusText: await formatWorkspaceStatus(workspace),
       });
       return {
@@ -217,8 +223,7 @@ export function createWorkspaceControl({ store, workspacePresentation, workspace
       }
       if (workspacePresentation) {
         await workspacePresentation.archiveWorkspaceSurface({
-          surfaceId: workspace.workspace_chat_id,
-          surfaceName: workspace.workspace_chat_subject,
+          workspaceId: workspace.workspace_id,
         });
       }
       await store.archiveWorkspace(workspace.workspace_id);

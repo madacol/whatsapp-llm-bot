@@ -81,7 +81,7 @@ if (!process.env.TESTING) {
       await store.closeDb();
       process.exit(1);
     });
-  const workspacePresentation = createWhatsAppWorkspacePresenter({ transport });
+  const workspacePresentation = createWhatsAppWorkspacePresenter({ transport, store });
 
   const { handleMessage } = createMessageHandler({
     store,

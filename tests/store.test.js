@@ -82,6 +82,71 @@ describe("store with injected DB", () => {
     });
   });
 
+  describe("WhatsApp presentation mappings", () => {
+    it("stores repo and workspace presentation state separately from the workspace row", async () => {
+      await store.createChat("wa-workspace-chat");
+      const repo = await store.createRepo({
+        name: `store-whatsapp-repo-${Date.now()}`,
+        rootPath: `/repo/whatsapp-${Date.now()}`,
+        defaultBaseBranch: "master",
+      });
+
+      await store.upsertWhatsAppRepoPresentation({
+        repoId: repo.repo_id,
+        topologyKind: "groups",
+      });
+
+      await store.saveWhatsAppWorkspacePresentation({
+        repoId: repo.repo_id,
+        workspaceId: "ws-presentation-1",
+        workspaceChatId: "wa-workspace-chat",
+        workspaceChatSubject: "[payments] Original Group",
+      });
+
+      const repoPresentation = await store.getWhatsAppRepoPresentation(repo.repo_id);
+      const workspacePresentation = await store.getWhatsAppWorkspacePresentation("ws-presentation-1");
+      const byChat = await store.getWhatsAppWorkspacePresentationByChat("wa-workspace-chat");
+
+      assert.deepEqual(repoPresentation && {
+        repo_id: repoPresentation.repo_id,
+        topology_kind: repoPresentation.topology_kind,
+        community_chat_id: repoPresentation.community_chat_id,
+        main_workspace_id: repoPresentation.main_workspace_id,
+      }, {
+        repo_id: repo.repo_id,
+        topology_kind: "groups",
+        community_chat_id: null,
+        main_workspace_id: null,
+      });
+      assert.deepEqual(workspacePresentation && {
+        workspace_id: workspacePresentation.workspace_id,
+        repo_id: workspacePresentation.repo_id,
+        workspace_chat_id: workspacePresentation.workspace_chat_id,
+        workspace_chat_subject: workspacePresentation.workspace_chat_subject,
+        role: workspacePresentation.role,
+        linked_community_chat_id: workspacePresentation.linked_community_chat_id,
+      }, {
+        workspace_id: "ws-presentation-1",
+        repo_id: repo.repo_id,
+        workspace_chat_id: "wa-workspace-chat",
+        workspace_chat_subject: "[payments] Original Group",
+        role: "workspace",
+        linked_community_chat_id: null,
+      });
+      assert.deepEqual(byChat && {
+        workspace_id: byChat.workspace_id,
+        repo_id: byChat.repo_id,
+        workspace_chat_id: byChat.workspace_chat_id,
+        workspace_chat_subject: byChat.workspace_chat_subject,
+      }, {
+        workspace_id: "ws-presentation-1",
+        repo_id: repo.repo_id,
+        workspace_chat_id: "wa-workspace-chat",
+        workspace_chat_subject: "[payments] Original Group",
+      });
+    });
+  });
+
   describe("getChatOrThrow", () => {
     it("returns the ChatRow for an existing chat", async () => {
       await store.createChat("assert-exists-1");

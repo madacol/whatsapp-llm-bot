@@ -63,7 +63,7 @@ export function createWorkspaceLifecycleService({ workspaceControl, workspacePre
       }
 
       await workspacePresentation?.presentSeedPrompt({
-        surfaceId: result.workspace.workspace_chat_id,
+        workspaceId: result.workspace.workspace_id,
         promptText,
       });
 
@@ -82,7 +82,7 @@ export function createWorkspaceLifecycleService({ workspaceControl, workspacePre
         },
         io: createSeedTurnIo({
           sendEvent: (event) => workspacePresentation?.sendWorkspaceEvent({
-            surfaceId: result.workspace ? result.workspace.workspace_chat_id : "",
+            workspaceId: result.workspace ? result.workspace.workspace_id : "",
             event,
           }) ?? Promise.resolve(undefined),
         }),

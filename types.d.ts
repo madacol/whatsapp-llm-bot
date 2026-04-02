@@ -266,6 +266,8 @@ type TurnIO = {
 };
 
 type WorkspaceStatus = "ready" | "busy" | "conflicted" | "archived";
+type WhatsAppRepoTopologyKind = "groups" | "community";
+type WhatsAppWorkspacePresentationRole = "workspace" | "main";
 
 type RepoRow = {
   repo_id: string;
@@ -303,6 +305,24 @@ type ChatBindingRow = {
   timestamp: string;
 };
 
+type WhatsAppRepoPresentationRow = {
+  repo_id: string;
+  topology_kind: WhatsAppRepoTopologyKind;
+  community_chat_id: string | null;
+  main_workspace_id: string | null;
+  timestamp: string;
+};
+
+type WhatsAppWorkspacePresentationRow = {
+  workspace_id: string;
+  repo_id: string;
+  workspace_chat_id: string;
+  workspace_chat_subject: string;
+  role: WhatsAppWorkspacePresentationRole;
+  linked_community_chat_id: string | null;
+  timestamp: string;
+};
+
 type ResolvedChatBinding =
   | { kind: "unbound" }
   | { kind: "repo"; repo: RepoRow }
@@ -327,32 +347,27 @@ type ChatTransport = {
 };
 
 type WorkspacePresentationPort = {
-  provisionWorkspaceSurface: (input: {
+  ensureWorkspaceVisible: (input: {
+    repoId: string;
+    workspaceId: string;
     workspaceName: string;
     sourceChatName?: string;
     requesterJids: string[];
   }) => Promise<{ surfaceId: string; surfaceName: string }>;
-  reopenWorkspaceSurface: (input: {
-    surfaceId: string;
-    workspaceName: string;
-    sourceChatName?: string;
-    requesterJids: string[];
-  }) => Promise<{ surfaceName: string }>;
   presentWorkspaceBootstrap: (input: {
-    surfaceId: string;
+    workspaceId: string;
     statusText: string;
   }) => Promise<void>;
   presentSeedPrompt: (input: {
-    surfaceId: string;
+    workspaceId: string;
     promptText: string;
   }) => Promise<void>;
   sendWorkspaceEvent: (input: {
-    surfaceId: string;
+    workspaceId: string;
     event: OutboundEvent;
   }) => Promise<MessageHandle | undefined>;
   archiveWorkspaceSurface: (input: {
-    surfaceId: string;
-    surfaceName: string;
+    workspaceId: string;
   }) => Promise<void>;
 };
 
