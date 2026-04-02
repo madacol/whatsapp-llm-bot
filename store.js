@@ -150,11 +150,6 @@ function normalizeWorkspaceRow(raw) {
   }
   const timestamp = normalizeTimestampValue(raw.timestamp);
   const archivedAt = raw.archived_at === null ? null : normalizeTimestampValue(raw.archived_at);
-  const workspaceChatSubject = typeof raw.workspace_chat_subject === "string" && raw.workspace_chat_subject.trim()
-    ? raw.workspace_chat_subject
-    : typeof raw.name === "string"
-      ? raw.name
-      : null;
   const conflictedFiles = Array.isArray(raw.conflicted_files)
     ? raw.conflicted_files.filter((value) => typeof value === "string")
     : [];
@@ -166,8 +161,6 @@ function normalizeWorkspaceRow(raw) {
     || typeof raw.base_branch !== "string"
     || typeof raw.worktree_path !== "string"
     || !isWorkspaceStatus(raw.status)
-    || typeof raw.workspace_chat_id !== "string"
-    || typeof workspaceChatSubject !== "string"
     || !isWorkspaceTestStatus(raw.last_test_status)
     || (raw.last_commit_oid !== null && typeof raw.last_commit_oid !== "string")
     || (raw.archived_at !== null && !archivedAt)
@@ -184,8 +177,6 @@ function normalizeWorkspaceRow(raw) {
     base_branch: raw.base_branch,
     worktree_path: raw.worktree_path,
     status: raw.status,
-    workspace_chat_id: raw.workspace_chat_id,
-    workspace_chat_subject: workspaceChatSubject,
     last_test_status: raw.last_test_status,
     last_commit_oid: raw.last_commit_oid,
     conflicted_files: conflictedFiles,
@@ -802,6 +793,23 @@ export async function initStore(injectedDb){
     }
 
     /**
+     * @param {string} workspaceId
+     * @returns {Promise<WhatsAppWorkspacePresentationRow>}
+     */
+    async function getRequiredWhatsAppWorkspacePresentation(workspaceId) {
+      const { rows: [row] } = await db.sql`
+        SELECT * FROM whatsapp_workspace_presentations
+        WHERE workspace_id = ${workspaceId}
+        LIMIT 1
+      `;
+      const presentation = normalizeWhatsAppWorkspacePresentationRow(row);
+      if (!presentation) {
+        throw new Error(`WhatsApp workspace presentation for ${workspaceId} does not exist.`);
+      }
+      return presentation;
+    }
+
+    /**
      * @param {{
      *   chatId: string,
      *   bindingKind: ChatBindingKind,
@@ -992,8 +1000,6 @@ export async function initStore(injectedDb){
        *   branch: string,
        *   baseBranch: string,
        *   worktreePath: string,
-       *   workspaceChatId: string,
-       *   workspaceChatSubject: string,
        *   status?: WorkspaceStatus,
        * }} input
        * @returns {Promise<WorkspaceRow>}
@@ -1005,12 +1011,10 @@ export async function initStore(injectedDb){
         branch,
         baseBranch,
         worktreePath,
-        workspaceChatId,
-        workspaceChatSubject,
         status = "ready",
       }) {
-        await ensureChatExists(workspaceChatId);
         const workspaceId = providedWorkspaceId ?? randomUUID();
+        const presentation = await getRequiredWhatsAppWorkspacePresentation(workspaceId);
         const { rows: [row] } = await db.sql`
           INSERT INTO workspaces (
             workspace_id,
@@ -1031,8 +1035,8 @@ export async function initStore(injectedDb){
             ${baseBranch},
             ${worktreePath},
             ${status},
-            ${workspaceChatId},
-            ${workspaceChatSubject}
+            ${presentation.workspace_chat_id},
+            ${presentation.workspace_chat_subject}
           )
           RETURNING *
         `;
@@ -1041,18 +1045,12 @@ export async function initStore(injectedDb){
           throw new Error("Failed to normalize workspace row");
         }
         await upsertChatBinding({
-          chatId: workspaceChatId,
+          chatId: presentation.workspace_chat_id,
           bindingKind: "workspace",
           repoId,
-          workspaceId: workspace.workspace_id,
+          workspaceId,
         });
         await ensureWhatsAppRepoPresentationExists(repoId);
-        await persistWhatsAppWorkspacePresentation({
-          repoId,
-          workspaceId: workspace.workspace_id,
-          workspaceChatId,
-          workspaceChatSubject,
-        });
         return workspace;
       },
 
@@ -1064,19 +1062,6 @@ export async function initStore(injectedDb){
         const { rows: [row] } = await db.sql`
           SELECT * FROM workspaces
           WHERE workspace_id = ${workspaceId}
-          LIMIT 1
-        `;
-        return normalizeWorkspaceRow(row);
-      },
-
-      /**
-       * @param {string} chatId
-       * @returns {Promise<WorkspaceRow | null>}
-       */
-      async getWorkspaceByChat (chatId) {
-        const { rows: [row] } = await db.sql`
-          SELECT * FROM workspaces
-          WHERE workspace_chat_id = ${chatId}
           LIMIT 1
         `;
         return normalizeWorkspaceRow(row);
@@ -1135,7 +1120,6 @@ export async function initStore(injectedDb){
        *   branch: string,
        *   baseBranch: string,
        *   worktreePath: string,
-       *   workspaceChatSubject?: string,
        *   status?: WorkspaceStatus,
        * }} input
        * @returns {Promise<WorkspaceRow>}
@@ -1145,16 +1129,17 @@ export async function initStore(injectedDb){
         branch,
         baseBranch,
         worktreePath,
-        workspaceChatSubject,
         status = "ready",
       }) {
+        const presentation = await getRequiredWhatsAppWorkspacePresentation(workspaceId);
         const { rows: [row] } = await db.sql`
           UPDATE workspaces
           SET
             branch = ${branch},
             base_branch = ${baseBranch},
             worktree_path = ${worktreePath},
-            workspace_chat_subject = COALESCE(${workspaceChatSubject ?? null}, workspace_chat_subject),
+            workspace_chat_id = ${presentation.workspace_chat_id},
+            workspace_chat_subject = ${presentation.workspace_chat_subject},
             status = ${status},
             last_test_status = 'not_run',
             last_commit_oid = NULL,
@@ -1167,12 +1152,6 @@ export async function initStore(injectedDb){
         if (!workspace) {
           throw new Error(`Workspace ${workspaceId} does not exist.`);
         }
-        await persistWhatsAppWorkspacePresentation({
-          repoId: workspace.repo_id,
-          workspaceId: workspace.workspace_id,
-          workspaceChatId: workspace.workspace_chat_id,
-          workspaceChatSubject: workspace.workspace_chat_subject,
-        });
         return workspace;
       },
 

@@ -203,6 +203,14 @@ export function createWhatsAppWorkspacePresenter({ transport, store }) {
       await sendPlainWorkspaceContent(workspaceId, promptText);
     },
 
+    async getWorkspaceSurface({ workspaceId }) {
+      const presentation = await getWorkspacePresentation(workspaceId);
+      return {
+        surfaceId: presentation.workspace_chat_id,
+        surfaceName: presentation.workspace_chat_subject,
+      };
+    },
+
     async sendWorkspaceEvent({ workspaceId, event }) {
       const presentation = await getWorkspacePresentation(workspaceId);
       if (transport.sendEvent) {

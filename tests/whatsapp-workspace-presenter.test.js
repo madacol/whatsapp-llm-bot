@@ -165,6 +165,44 @@ describe("WhatsAppWorkspacePresenter", () => {
     });
   });
 
+  it("resolves a workspace surface from the persisted WhatsApp mapping", async () => {
+    const presenter = createWhatsAppWorkspacePresenter({
+      store: {
+        getWhatsAppRepoPresentation: async () => null,
+        getWhatsAppWorkspacePresentation: async (workspaceId) => {
+          assert.equal(workspaceId, "ws-1");
+          return {
+            workspace_id: "ws-1",
+            repo_id: "repo-1",
+            workspace_chat_id: "workspace-chat",
+            workspace_chat_subject: "[payments] Original Group",
+            role: "workspace",
+            linked_community_chat_id: null,
+            timestamp: new Date().toISOString(),
+          };
+        },
+        saveWhatsAppWorkspacePresentation: async () => {
+          throw new Error("should not write when only resolving a surface");
+        },
+        upsertWhatsAppRepoPresentation: async () => {
+          throw new Error("should not write when only resolving a surface");
+        },
+      },
+      transport: {
+        start: async () => {},
+        stop: async () => {},
+        sendText: async () => {},
+      },
+    });
+
+    const surface = await presenter.getWorkspaceSurface({ workspaceId: "ws-1" });
+
+    assert.deepEqual(surface, {
+      surfaceId: "workspace-chat",
+      surfaceName: "[payments] Original Group",
+    });
+  });
+
   it("delivers semantic workspace events through the adapter transport using workspace identity", async () => {
     /** @type {Array<{ chatId: string, event: OutboundEvent }>} */
     const sentEvents = [];

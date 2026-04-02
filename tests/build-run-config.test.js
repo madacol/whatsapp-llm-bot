@@ -85,8 +85,6 @@ describe("buildRunConfig", () => {
           base_branch: "master",
           worktree_path: "/repo/main/.madabot/worktrees/payments",
           status: "ready",
-          workspace_chat_id: "workspace-chat",
-          workspace_chat_subject: "payments",
           last_test_status: "not_run",
           last_commit_oid: null,
           conflicted_files: [],

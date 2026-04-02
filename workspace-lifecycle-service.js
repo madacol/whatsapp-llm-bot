@@ -67,12 +67,18 @@ export function createWorkspaceLifecycleService({ workspaceControl, workspacePre
         promptText,
       });
 
+      const workspaceSurface = workspacePresentation
+        ? await workspacePresentation.getWorkspaceSurface({
+          workspaceId: result.workspace.workspace_id,
+        })
+        : null;
+
       await dispatchTurn({
-        chatId: result.workspace.workspace_chat_id,
+        chatId: workspaceSurface?.surfaceId ?? context.chatId,
         senderIds: sourceTurn.senderIds,
         senderJids: sourceTurn.senderJids,
         senderName: sourceTurn.senderName,
-        chatName: result.workspace.workspace_chat_subject,
+        chatName: workspaceSurface?.surfaceName,
         content: [{ type: "text", text: seedPrompt }],
         timestamp: new Date(),
         facts: {

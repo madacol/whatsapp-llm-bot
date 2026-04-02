@@ -50,35 +50,53 @@ describe("store with injected DB", () => {
 
   });
 
-  describe("workspace subject persistence", () => {
-    it("stores and updates the workspace chat subject", async () => {
+  describe("workspace persistence", () => {
+    it("stores and updates workspace domain state without exposing WhatsApp surface fields", async () => {
       await store.createChat("store-workspace-chat");
       const repo = await store.createRepo({
         name: `store-workspace-repo-${Date.now()}`,
         rootPath: `/repo/store-${Date.now()}`,
         defaultBaseBranch: "master",
       });
+      await store.saveWhatsAppWorkspacePresentation({
+        repoId: repo.repo_id,
+        workspaceId: "workspace-store-1",
+        workspaceChatId: "store-workspace-chat",
+        workspaceChatSubject: "[payments] Original Group",
+      });
       const workspace = await store.createWorkspace({
+        workspaceId: "workspace-store-1",
         repoId: repo.repo_id,
         name: "payments",
         branch: "payments",
         baseBranch: "master",
         worktreePath: "/repo/store/payments",
-        workspaceChatId: "store-workspace-chat",
-        workspaceChatSubject: "[payments] Original Group",
       });
 
-      assert.equal(workspace.workspace_chat_subject, "[payments] Original Group");
+      assert.deepEqual(workspace, {
+        workspace_id: "workspace-store-1",
+        repo_id: repo.repo_id,
+        name: "payments",
+        branch: "payments",
+        base_branch: "master",
+        worktree_path: "/repo/store/payments",
+        status: "ready",
+        last_test_status: "not_run",
+        last_commit_oid: null,
+        conflicted_files: [],
+        archived_at: null,
+        timestamp: workspace.timestamp,
+      });
 
       const reset = await store.resetWorkspace({
         workspaceId: workspace.workspace_id,
         branch: "payments",
         baseBranch: "main",
         worktreePath: "/repo/store/payments-v2",
-        workspaceChatSubject: "[payments] Renamed Group",
       });
 
-      assert.equal(reset.workspace_chat_subject, "[payments] Renamed Group");
+      assert.equal(reset.base_branch, "main");
+      assert.equal(reset.worktree_path, "/repo/store/payments-v2");
     });
   });
 

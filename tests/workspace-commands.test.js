@@ -55,6 +55,47 @@ async function seedChat(chatId, options = {}) {
   await seedChat_(db, chatId, { enabled: options.enabled ?? true });
 }
 
+/**
+ * @param {{
+ *   repoId: string,
+ *   name: string,
+ *   branch: string,
+ *   baseBranch: string,
+ *   worktreePath: string,
+ *   workspaceChatId: string,
+ *   workspaceChatSubject: string,
+ *   status?: WorkspaceStatus,
+ * }} input
+ * @returns {Promise<WorkspaceRow>}
+ */
+async function createWorkspaceFixture({
+  repoId,
+  name,
+  branch,
+  baseBranch,
+  worktreePath,
+  workspaceChatId,
+  workspaceChatSubject,
+  status,
+}) {
+  const workspaceId = `ws-${repoId}-${name}`.replace(/\s+/g, "-");
+  await store.saveWhatsAppWorkspacePresentation({
+    repoId,
+    workspaceId,
+    workspaceChatId,
+    workspaceChatSubject,
+  });
+  return store.createWorkspace({
+    workspaceId,
+    repoId,
+    name,
+    branch,
+    baseBranch,
+    worktreePath,
+    status,
+  });
+}
+
 describe("workspace commands", () => {
   afterEach(() => {
     const pending = mockServer.pendingResponses();
@@ -72,7 +113,7 @@ describe("workspace commands", () => {
       defaultBaseBranch: "master",
       controlChatId: "repo-list-chat",
     });
-    await store.createWorkspace({
+    await createWorkspaceFixture({
       repoId: repo.repo_id,
       name: "payments",
       branch: "payments",
@@ -82,7 +123,7 @@ describe("workspace commands", () => {
       workspaceChatSubject: "payments",
       status: "ready",
     });
-    await store.createWorkspace({
+    await createWorkspaceFixture({
       repoId: repo.repo_id,
       name: "auth",
       branch: "auth",
@@ -117,7 +158,7 @@ describe("workspace commands", () => {
       defaultBaseBranch: "master",
       controlChatId: "repo-status-chat",
     });
-    await store.createWorkspace({
+    await createWorkspaceFixture({
       repoId: repo.repo_id,
       name: "payments",
       branch: "payments",
@@ -171,7 +212,7 @@ describe("workspace commands", () => {
       defaultBaseBranch: "master",
       controlChatId: "repo-archive-chat",
     });
-    await store.createWorkspace({
+    await createWorkspaceFixture({
       repoId: repo.repo_id,
       name: "payments",
       branch: "payments",
@@ -204,7 +245,7 @@ describe("workspace commands", () => {
       defaultBaseBranch: "master",
       controlChatId: "repo-current-archive-chat",
     });
-    const workspace = await store.createWorkspace({
+    const workspace = await createWorkspaceFixture({
       repoId: repo.repo_id,
       name: "payments",
       branch: "payments",
@@ -237,7 +278,7 @@ describe("workspace commands", () => {
       defaultBaseBranch: "master",
       controlChatId: "repo-archived-chat",
     });
-    const workspace = await store.createWorkspace({
+    const workspace = await createWorkspaceFixture({
       repoId: repo.repo_id,
       name: "payments",
       branch: "payments",
