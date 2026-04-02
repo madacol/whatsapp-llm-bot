@@ -1,6 +1,9 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { buildSharedSkillPrompt, filterHarnessActions } from "../shared-skills.js";
+import generateImage from "../actions/tools/generateImage/index.js";
+import generateVideo from "../actions/tools/generateVideo/index.js";
+import sendPath from "../actions/tools/sendPath/index.js";
 
 describe("filterHarnessActions", () => {
   /** @type {Action[]} */
@@ -73,5 +76,30 @@ describe("buildSharedSkillPrompt", () => {
 
   it("returns an empty string when no shared skills exist", () => {
     assert.equal(buildSharedSkillPrompt([]), "");
+  });
+});
+
+describe("real shared-skill actions", () => {
+  it("keeps only the explicitly shared actions for non-native harnesses", () => {
+    const filtered = filterHarnessActions(
+      [
+        sendPath,
+        generateImage,
+        generateVideo,
+        {
+          name: "restart",
+          description: "Restart the bot.",
+          parameters: { type: "object", properties: {} },
+          permissions: {},
+          action_fn: async () => "ok",
+        },
+      ],
+      "codex",
+    );
+
+    assert.deepEqual(
+      filtered.map((action) => action.name),
+      ["send_path", "generate_image", "generate_video"],
+    );
   });
 });
