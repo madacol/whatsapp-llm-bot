@@ -22,6 +22,7 @@ import { createWorkspaceBindingService } from "../workspace-binding-service.js";
 import { tryHandleWorkspaceCommand } from "../workspace-command-router.js";
 import { createWorkspaceControl } from "../workspace-control.js";
 import { createWorkspaceLifecycleService } from "../workspace-lifecycle-service.js";
+import { tryHandleWhatsAppTestCommand } from "../whatsapp/test-command.js";
 
 const log = createLogger("conversation:runner");
 const PRESENCE_LEASE_TTL_MS = 20_000;
@@ -90,6 +91,7 @@ async function resolveConversationHarness(chatInfo) {
  *   llmClient: LlmClient,
  *   getActionsFn: typeof import("../actions.js").getActions,
  *   executeActionFn: typeof import("../actions.js").executeAction,
+ *   transport?: ChatTransport,
  *   workspacePresentation?: WorkspacePresentationPort,
  * }} ConversationRunnerDeps
  */
@@ -99,7 +101,7 @@ async function resolveConversationHarness(chatInfo) {
  * @param {ConversationRunnerDeps} deps
  * @returns {{ handleMessage: (turn: ChatTurn) => Promise<void> }}
  */
-export function createConversationRunner({ store, llmClient, getActionsFn, executeActionFn, workspacePresentation }) {
+export function createConversationRunner({ store, llmClient, getActionsFn, executeActionFn, transport, workspacePresentation }) {
   const {
     addMessage,
     updateToolMessage,
@@ -191,6 +193,16 @@ export function createConversationRunner({ store, llmClient, getActionsFn, execu
         senderJids: turn.senderJids,
         senderName: turn.senderName,
       },
+    })) {
+      return;
+    }
+
+    if (await tryHandleWhatsAppTestCommand({
+      context,
+      inputText,
+      senderIds: turn.senderIds,
+      senderJids: turn.senderJids,
+      transport,
     })) {
       return;
     }

@@ -1,3 +1,4 @@
+import { appendFile } from "node:fs/promises";
 import { createLogger } from "../logger.js";
 import { sendEvent as sendOutboundEvent } from "./outbound/send-content.js";
 import { adaptIncomingMessage } from "./inbound/chat-turn.js";
@@ -8,6 +9,7 @@ import { createReactionRuntime } from "./runtime/reaction-runtime.js";
 import { createSelectRuntime } from "./runtime/select-runtime.js";
 
 const log = createLogger("whatsapp");
+const WHATSAPP_TEST_LOG_PATH = process.env.WHATSAPP_TEST_LOG_PATH ?? "/tmp/wh.log";
 
 /**
  * @param {unknown} value
@@ -15,6 +17,88 @@ const log = createLogger("whatsapp");
  */
 function isRecord(value) {
   return typeof value === "object" && value !== null;
+}
+
+/**
+ * @param {unknown} value
+ * @returns {value is (...args: unknown[]) => unknown}
+ */
+function isFunction(value) {
+  return typeof value === "function";
+}
+
+/**
+ * @param {unknown} value
+ * @returns {string}
+ */
+function safeSerialize(value) {
+  /** @type {WeakSet<object>} */
+  const seen = new WeakSet();
+  return JSON.stringify(value, (_key, innerValue) => {
+    if (innerValue instanceof Error) {
+      return serializeTransportError(innerValue);
+    }
+    if (typeof Buffer !== "undefined" && Buffer.isBuffer(innerValue)) {
+      return {
+        type: "Buffer",
+        length: innerValue.length,
+        preview: innerValue.toString("base64").slice(0, 64),
+      };
+    }
+    if (typeof innerValue === "object" && innerValue !== null) {
+      if (seen.has(innerValue)) {
+        return "[Circular]";
+      }
+      seen.add(innerValue);
+    }
+    if (typeof innerValue === "bigint") {
+      return String(innerValue);
+    }
+    return innerValue;
+  }, 2);
+}
+
+/**
+ * @param {import("@whiskeysockets/baileys").WASocket} sock
+ * @returns {string[]}
+ */
+function getSocketMethodNames(sock) {
+  /** @type {Set<string>} */
+  const methods = new Set();
+  /** @type {object | null} */
+  let current = sock;
+  while (current && current !== Object.prototype) {
+    for (const name of Object.getOwnPropertyNames(current)) {
+      const candidate = isRecord(current) ? current[name] : undefined;
+      if (isFunction(candidate) && /^(community|group)/.test(name)) {
+        methods.add(name);
+      }
+    }
+    current = Object.getPrototypeOf(current);
+  }
+  return [...methods].sort();
+}
+
+/**
+ * @param {{
+ *   kind: string,
+ *   args?: Record<string, unknown>,
+ *   result?: unknown,
+ *   error?: unknown,
+ *   availableMethods?: string[],
+ * }} entry
+ * @returns {Promise<void>}
+ */
+async function appendWhatsAppTestLog(entry) {
+  const rendered = [
+    `=== ${new Date().toISOString()} ${entry.kind} ===`,
+    entry.availableMethods ? `methods=${safeSerialize(entry.availableMethods)}` : null,
+    entry.args ? `args=${safeSerialize(entry.args)}` : null,
+    entry.result !== undefined ? `result=${safeSerialize(entry.result)}` : null,
+    entry.error !== undefined ? `error=${safeSerialize(serializeTransportError(entry.error))}` : null,
+    "",
+  ].filter((line) => line !== null).join("\n");
+  await appendFile(WHATSAPP_TEST_LOG_PATH, `${rendered}\n`, "utf8");
 }
 
 /**
@@ -62,6 +146,7 @@ function serializeTransportError(error) {
  *   promoteParticipants: (chatId: string, participants: string[]) => Promise<void>;
  *   renameGroup: (chatId: string, subject: string) => Promise<void>;
  *   setAnnouncementOnly: (chatId: string, enabled: boolean) => Promise<void>;
+ *   runWhatsAppTest: (input: WhatsAppTestCommandInput) => Promise<WhatsAppTestResult>;
  * }} ChatTransport
  */
 
@@ -240,6 +325,132 @@ export async function createWhatsAppTransport() {
         throw new Error("WhatsApp transport has not been started");
       }
       await sock.groupSettingUpdate(chatId, enabled ? "announcement" : "not_announcement");
+    },
+
+    async runWhatsAppTest(input) {
+      const sock = currentSocket;
+      if (!sock) {
+        throw new Error("WhatsApp transport has not been started");
+      }
+      const availableMethods = getSocketMethodNames(sock);
+
+      try {
+        switch (input.kind) {
+          case "methods": {
+            await appendWhatsAppTestLog({
+              kind: input.kind,
+              availableMethods,
+              result: { count: availableMethods.length, methods: availableMethods },
+            });
+            return {
+              summary: `Logged ${availableMethods.length} WhatsApp group/community methods to ${WHATSAPP_TEST_LOG_PATH}.`,
+            };
+          }
+          case "community-create": {
+            const result = await sock.communityCreate(input.subject, input.description);
+            await appendWhatsAppTestLog({
+              kind: input.kind,
+              args: input,
+              availableMethods,
+              result,
+            });
+            return {
+              summary: `Logged community creation result for \`${input.subject}\` to ${WHATSAPP_TEST_LOG_PATH}.`,
+            };
+          }
+          case "community-create-group": {
+            const result = await sock.communityCreateGroup(
+              input.subject,
+              input.participants,
+              input.parentCommunityJid,
+            );
+            await appendWhatsAppTestLog({
+              kind: input.kind,
+              args: input,
+              availableMethods,
+              result,
+            });
+            return {
+              summary: `Logged subgroup creation result for \`${input.subject}\` to ${WHATSAPP_TEST_LOG_PATH}.`,
+            };
+          }
+          case "community-link": {
+            const result = await sock.communityLinkGroup(input.groupJid, input.parentCommunityJid);
+            await appendWhatsAppTestLog({
+              kind: input.kind,
+              args: input,
+              availableMethods,
+              result,
+            });
+            return {
+              summary: `Logged community link result for \`${input.groupJid}\` to ${WHATSAPP_TEST_LOG_PATH}.`,
+            };
+          }
+          case "community-metadata": {
+            const result = await sock.communityMetadata(input.jid);
+            await appendWhatsAppTestLog({
+              kind: input.kind,
+              args: input,
+              availableMethods,
+              result,
+            });
+            return {
+              summary: `Logged community metadata for \`${input.jid}\` to ${WHATSAPP_TEST_LOG_PATH}.`,
+            };
+          }
+          case "community-linked": {
+            const result = await sock.communityFetchLinkedGroups(input.jid);
+            await appendWhatsAppTestLog({
+              kind: input.kind,
+              args: input,
+              availableMethods,
+              result,
+            });
+            return {
+              summary: `Logged linked groups for \`${input.jid}\` to ${WHATSAPP_TEST_LOG_PATH}.`,
+            };
+          }
+          case "smoke": {
+            const description = `madabot smoke test ${new Date().toISOString()}`;
+            const communitySubject = `${input.baseSubject} Community`;
+            const subgroupSubject = `${input.baseSubject} Workspace`;
+            const community = await sock.communityCreate(communitySubject, description);
+            if (!community?.id) {
+              throw new Error("communityCreate returned no community id.");
+            }
+            const metadata = await sock.communityMetadata(community.id);
+            const subgroup = await sock.communityCreateGroup(
+              subgroupSubject,
+              input.participants,
+              community.id,
+            );
+            const linked = await sock.communityFetchLinkedGroups(community.id);
+            const result = {
+              community,
+              metadata,
+              subgroup,
+              linked,
+            };
+            await appendWhatsAppTestLog({
+              kind: input.kind,
+              args: input,
+              availableMethods,
+              result,
+            });
+            return {
+              summary: `Logged WhatsApp smoke test artifacts for \`${input.baseSubject}\` to ${WHATSAPP_TEST_LOG_PATH}.`,
+            };
+          }
+        }
+      } catch (error) {
+        await appendWhatsAppTestLog({
+          kind: input.kind,
+          args: input,
+          availableMethods,
+          error,
+        });
+        throw new Error(`WhatsApp test failed. Inspect ${WHATSAPP_TEST_LOG_PATH} for details.`);
+      }
     },
   };
 }

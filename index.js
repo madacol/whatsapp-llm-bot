@@ -38,12 +38,13 @@ const log = createLogger("index");
  * @returns {{ handleMessage: (turn: ChatTurn) => Promise<void> }}
  */
 export function createMessageHandler(deps) {
-  const { store, llmClient, getActionsFn, executeActionFn, workspacePresentation } = deps;
+  const { store, llmClient, getActionsFn, executeActionFn, transport, workspacePresentation } = deps;
   return createConversationRunner({
     store,
     llmClient,
     getActionsFn,
     executeActionFn,
+    transport,
     workspacePresentation,
   });
 }
