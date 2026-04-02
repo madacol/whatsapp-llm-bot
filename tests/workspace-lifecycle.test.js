@@ -351,6 +351,7 @@ describe("workspace lifecycle", () => {
     const repoRoot = await createRepoFixture();
     const transportState = createFakeTransport();
     const handleMessage = await createHandler({ transport: transportState.transport });
+    mockServer.addResponses("Seed received.");
 
     await seedChat("repo-seeded-chat", { harnessCwd: repoRoot });
 
@@ -367,6 +368,19 @@ describe("workspace lifecycle", () => {
     assert.equal(workspace?.branch, "multi-word-branch");
     assert.equal(workspace?.base_branch, "master");
     assert.equal(transportState.createdGroups[0]?.subject, "multi word branch");
+    const workspaceTexts = transportState.sentTexts
+      .filter((entry) => entry.chatId === workspace.workspace_chat_id)
+      .map((entry) => entry.text);
+    assert.equal(workspaceTexts[0], [
+      "Workspace: multi word branch",
+      "Base: master",
+      "Branch: multi-word-branch",
+      "Status: ready",
+      "Last test: not run",
+      "Last commit: none",
+    ].join("\n"));
+    assert.equal(workspaceTexts[1], "Prompt: investigate duplicate charges");
+    assert.equal(workspaceTexts[2], "🤖 Seed received.");
     const workspaceMessages = await store.getMessages(workspace.workspace_chat_id, new Date(0));
     const userMessages = workspaceMessages
       .map((row) => row.message_data)

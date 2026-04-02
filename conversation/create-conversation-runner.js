@@ -147,6 +147,20 @@ function stringifySeedOutboundEvent(event) {
 }
 
 /**
+ * @param {string} seedPrompt
+ * @returns {string}
+ */
+function formatSeedPromptText(seedPrompt) {
+  const trimmed = seedPrompt.trim();
+  if (!trimmed) {
+    return "";
+  }
+  return trimmed.includes("\n")
+    ? `Prompt:\n${trimmed}`
+    : `Prompt: ${trimmed}`;
+}
+
+/**
  * Resolve the persona and harness for the current chat.
  * @param {import("../store.js").ChatRow | undefined} chatInfo
  * @returns {Promise<{ persona: AgentDefinition | null, harness: AgentHarness }>}
@@ -247,9 +261,11 @@ export function createConversationRunner({ store, llmClient, getActionsFn, execu
    * @returns {Promise<void>}
    */
   async function seedWorkspaceFromTurn(sourceTurn, workspace, seedPrompt) {
-    if (!seedPrompt.trim()) {
+    const promptText = formatSeedPromptText(seedPrompt);
+    if (!promptText) {
       return;
     }
+    await transport?.sendText(workspace.workspace_chat_id, promptText);
     await dispatchTurn({
       chatId: workspace.workspace_chat_id,
       senderIds: sourceTurn.senderIds,
