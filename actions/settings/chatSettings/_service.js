@@ -6,7 +6,7 @@ import { validateModel, getModelModalities } from "../../../models-cache.js";
 import { getChatOrThrow, initStore } from "../../../store.js";
 import { ROLE_DEFINITIONS, resolveModel } from "../../../model-roles.js";
 import { listHarnesses } from "#harnesses";
-import { resolveChatBinding } from "../../../workspace-resolver.js";
+import { createWorkspaceBindingService } from "../../../workspace-binding-service.js";
 import { getChatWorkDir } from "../../../utils.js";
 import {
   buildOutputVisibilityOverrides,
@@ -243,7 +243,7 @@ async function formatResolvedHarnessFolder(rootDb, chatId, chat) {
   }
 
   const store = await initStore(rootDb);
-  const binding = await resolveChatBinding(store, chatId, chat.harness_cwd);
+  const binding = await createWorkspaceBindingService(store).resolveChatBinding(chatId, chat.harness_cwd);
   switch (binding.kind) {
     case "repo":
       return `\`${binding.repo.root_path}\``;
