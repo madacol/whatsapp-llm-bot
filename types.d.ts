@@ -319,10 +319,41 @@ type ChatTransport = {
   start: (onTurn: (turn: ChatTurn) => Promise<void>) => Promise<void>;
   stop: () => Promise<void>;
   sendText: (chatId: string, text: string) => Promise<void>;
+  sendEvent?: (chatId: string, event: OutboundEvent) => Promise<MessageHandle | undefined>;
   createGroup?: (subject: string, participants: string[]) => Promise<{ chatId: string, subject: string }>;
   promoteParticipants?: (chatId: string, participants: string[]) => Promise<void>;
   renameGroup?: (chatId: string, subject: string) => Promise<void>;
   setAnnouncementOnly?: (chatId: string, enabled: boolean) => Promise<void>;
+};
+
+type WorkspacePresentationPort = {
+  provisionWorkspaceSurface: (input: {
+    workspaceName: string;
+    sourceChatName?: string;
+    requesterJids: string[];
+  }) => Promise<{ surfaceId: string; surfaceName: string }>;
+  reopenWorkspaceSurface: (input: {
+    surfaceId: string;
+    workspaceName: string;
+    sourceChatName?: string;
+    requesterJids: string[];
+  }) => Promise<{ surfaceName: string }>;
+  presentWorkspaceBootstrap: (input: {
+    surfaceId: string;
+    statusText: string;
+  }) => Promise<void>;
+  presentSeedPrompt: (input: {
+    surfaceId: string;
+    promptText: string;
+  }) => Promise<void>;
+  sendWorkspaceEvent: (input: {
+    surfaceId: string;
+    event: OutboundEvent;
+  }) => Promise<MessageHandle | undefined>;
+  archiveWorkspaceSurface: (input: {
+    surfaceId: string;
+    surfaceName: string;
+  }) => Promise<void>;
 };
 
 type ChatTurn = {

@@ -1,18 +1,10 @@
 import {
-  abortWorkspaceMerge,
   cleanupWorkspaceWorktree,
-  commitWorkspaceChanges,
-  createWorkspaceWorktree,
-  formatDiffSummary,
-  hasUncommittedChanges,
   isValidWorkspaceName,
-  listConflictedFiles,
-  mergeWorkspaceBranch,
-  resolveWorkspaceConflictsAutomatically,
-  runWorkspaceVerification,
 } from "./workspace-git.js";
 import { formatWorkspaceStatus, listRepoWorkspaces } from "./workspace-service.js";
 import { errorToString } from "./utils.js";
+import { createWorkspaceRepoService } from "./workspace-repo-service.js";
 
 /**
  * @typedef {import("./store.js").Store} Store
@@ -53,22 +45,9 @@ function buildDuplicateWorkspaceOptions(workspaceName) {
 }
 
 /**
- * @param {string} workspaceName
- * @param {string | undefined} sourceChatName
- * @returns {string}
+ * @param {{ store: Store, workspacePresentation?: WorkspacePresentationPort, workspaceRepo?: ReturnType<typeof createWorkspaceRepoService> }} input
  */
-function buildWorkspaceChatSubject(workspaceName, sourceChatName) {
-  const trimmedChatName = sourceChatName?.trim();
-  if (!trimmedChatName) {
-    return workspaceName;
-  }
-  return `[${workspaceName}] ${trimmedChatName}`;
-}
-
-/**
- * @param {{ store: Store, transport?: ChatTransport }} input
- */
-export function createWorkspaceControl({ store, transport }) {
+export function createWorkspaceControl({ store, workspacePresentation, workspaceRepo = createWorkspaceRepoService() }) {
   return {
     /**
      * @param {RepoRow} repo
@@ -86,8 +65,8 @@ export function createWorkspaceControl({ store, transport }) {
      * @returns {Promise<WorkspaceCreationResult>}
      */
     async create(repo, context, workspaceName, baseBranch) {
-      if (!transport?.createGroup) {
-        throw new Error("Workspace creation requires transport group creation support.");
+      if (!workspacePresentation) {
+        throw new Error("Workspace creation requires workspace presentation support.");
       }
       if (!isValidWorkspaceName(workspaceName)) {
         throw new Error("Workspace name is invalid. Use letters, numbers, spaces, `-`, and `_`.");
@@ -113,36 +92,39 @@ export function createWorkspaceControl({ store, transport }) {
       }
 
       const participants = getInitialWorkspaceParticipants(context);
-      const workspaceChatSubject = buildWorkspaceChatSubject(workspaceName, context.chatName);
       if (participants.length === 0) {
         throw new Error("Could not determine which WhatsApp user to add to the workspace group.");
       }
 
-      const { branch, worktreePath } = await createWorkspaceWorktree(repo, workspaceName, baseBranch);
+      const { branch, worktreePath } = await workspaceRepo.createWorkspaceCheckout(repo, workspaceName, baseBranch);
       try {
-        const group = await transport.createGroup(workspaceChatSubject, participants);
-        if (transport.promoteParticipants) {
-          await transport.promoteParticipants(group.chatId, participants);
-        }
+        const surface = await workspacePresentation.provisionWorkspaceSurface({
+          workspaceName,
+          sourceChatName: context.chatName,
+          requesterJids: participants,
+        });
         const workspace = await store.createWorkspace({
           repoId: repo.repo_id,
           name: workspaceName,
           branch,
           baseBranch,
           worktreePath,
-          workspaceChatId: group.chatId,
-          workspaceChatSubject,
+          workspaceChatId: surface.surfaceId,
+          workspaceChatSubject: surface.surfaceName,
           status: "ready",
         });
-        await store.copyChatCustomizations(context.chatId, group.chatId);
-        await store.setChatEnabled(group.chatId, true);
-        await transport.sendText(group.chatId, await formatWorkspaceStatus(workspace));
+        await store.copyChatCustomizations(context.chatId, surface.surfaceId);
+        await store.setChatEnabled(surface.surfaceId, true);
+        await workspacePresentation.presentWorkspaceBootstrap({
+          surfaceId: surface.surfaceId,
+          statusText: await formatWorkspaceStatus(workspace),
+        });
         return {
           message: [
             `Created workspace \`${workspace.name}\`.`,
             `Branch: \`${workspace.branch}\``,
             `Base: \`${workspace.base_branch}\``,
-            `Chat: \`${group.subject}\``,
+            `Chat: \`${surface.surfaceName}\``,
           ].join("\n"),
           workspace,
         };
@@ -160,43 +142,37 @@ export function createWorkspaceControl({ store, transport }) {
      * @returns {Promise<WorkspaceCreationResult>}
      */
     async replace(repo, context, existing, baseBranch) {
-      if (!transport?.sendText) {
-        throw new Error("Workspace replacement requires transport messaging support.");
+      if (!workspacePresentation) {
+        throw new Error("Workspace replacement requires workspace presentation support.");
       }
       const participants = getInitialWorkspaceParticipants(context);
-      const workspaceChatSubject = buildWorkspaceChatSubject(existing.name, context.chatName);
 
-      await cleanupWorkspaceWorktree(repo, existing.branch, existing.worktree_path);
-      const { branch, worktreePath } = await createWorkspaceWorktree(repo, existing.name, baseBranch);
+      const { branch, worktreePath } = await workspaceRepo.replaceWorkspaceCheckout(repo, existing, baseBranch);
+      const surface = await workspacePresentation.reopenWorkspaceSurface({
+        surfaceId: existing.workspace_chat_id,
+        workspaceName: existing.name,
+        sourceChatName: context.chatName,
+        requesterJids: participants,
+      });
       const workspace = await store.resetWorkspace({
         workspaceId: existing.workspace_id,
         branch,
         baseBranch,
         worktreePath,
-        workspaceChatSubject,
+        workspaceChatSubject: surface.surfaceName,
       });
       await store.copyChatCustomizations(context.chatId, existing.workspace_chat_id);
       await store.setChatEnabled(existing.workspace_chat_id, true);
-      if (transport?.renameGroup) {
-        await transport.renameGroup(existing.workspace_chat_id, workspaceChatSubject);
-      }
-      if (transport?.setAnnouncementOnly) {
-        await transport.setAnnouncementOnly(existing.workspace_chat_id, false);
-      }
-      if (transport?.promoteParticipants && participants.length > 0) {
-        try {
-          await transport.promoteParticipants(existing.workspace_chat_id, participants);
-        } catch {
-          // Best effort: the requester may not already be in the existing group.
-        }
-      }
-      await transport.sendText(existing.workspace_chat_id, await formatWorkspaceStatus(workspace));
+      await workspacePresentation.presentWorkspaceBootstrap({
+        surfaceId: existing.workspace_chat_id,
+        statusText: await formatWorkspaceStatus(workspace),
+      });
       return {
         message: [
           `Replaced workspace \`${workspace.name}\`.`,
           `Branch: \`${workspace.branch}\``,
           `Base: \`${workspace.base_branch}\``,
-          `Chat: \`${workspaceChatSubject}\``,
+          `Chat: \`${surface.surfaceName}\``,
         ].join("\n"),
         workspace,
       };
@@ -215,42 +191,7 @@ export function createWorkspaceControl({ store, transport }) {
      * @returns {Promise<string>}
      */
     async diff(workspace) {
-      return formatDiffSummary(workspace.worktree_path);
-    },
-
-    /**
-     * @param {WorkspaceRow} workspace
-     * @returns {Promise<string>}
-     */
-    async test(workspace) {
-      await store.setWorkspaceStatus(workspace.workspace_id, "busy");
-      try {
-        const result = await runWorkspaceVerification(workspace.worktree_path);
-        await store.updateWorkspaceLastTestStatus(workspace.workspace_id, result.passed ? "passed" : "failed");
-        await store.setWorkspaceStatus(workspace.workspace_id, "ready");
-        return result.summary;
-      } catch (error) {
-        await store.setWorkspaceStatus(workspace.workspace_id, "ready");
-        throw error;
-      }
-    },
-
-    /**
-     * @param {WorkspaceRow} workspace
-     * @param {string} message
-     * @returns {Promise<string>}
-     */
-    async commit(workspace, message) {
-      if (!message.trim()) {
-        return "Use `!commit <message>`.";
-      }
-      if (!await hasUncommittedChanges(workspace.worktree_path)) {
-        return "Nothing to commit.";
-      }
-      const oid = await commitWorkspaceChanges(workspace.worktree_path, message.trim());
-      await store.updateWorkspaceLastCommitOid(workspace.workspace_id, oid);
-      await store.updateWorkspaceLastTestStatus(workspace.workspace_id, "not_run");
-      return `Committed on \`${workspace.branch}\`.\nCommit: \`${oid} ${message.trim()}\``;
+      return workspaceRepo.diffWorkspace(workspace);
     },
 
     /**
@@ -274,114 +215,14 @@ export function createWorkspaceControl({ store, transport }) {
       if (workspace.status === "archived") {
         return `Workspace \`${workspace.name}\` is already archived.`;
       }
-      if (transport?.renameGroup) {
-        await transport.renameGroup(workspace.workspace_chat_id, `${workspace.workspace_chat_subject} (archived)`);
-      }
-      if (transport?.setAnnouncementOnly) {
-        await transport.setAnnouncementOnly(workspace.workspace_chat_id, true);
+      if (workspacePresentation) {
+        await workspacePresentation.archiveWorkspaceSurface({
+          surfaceId: workspace.workspace_chat_id,
+          surfaceName: workspace.workspace_chat_subject,
+        });
       }
       await store.archiveWorkspace(workspace.workspace_id);
       return `Archived workspace \`${workspace.name}\`.`;
-    },
-
-    /**
-     * @param {WorkspaceRow} workspace
-     * @returns {Promise<string>}
-     */
-    async merge(workspace) {
-      const repo = await store.getRepo(workspace.repo_id);
-      if (!repo) {
-        throw new Error(`Repo ${workspace.repo_id} does not exist.`);
-      }
-      await store.setWorkspaceStatus(workspace.workspace_id, "busy");
-      try {
-        const result = await mergeWorkspaceBranch(repo.root_path, workspace);
-        if (result.kind === "conflicted") {
-          await store.setWorkspaceStatus(workspace.workspace_id, "conflicted", { conflictedFiles: result.files });
-          return [
-            `Merge blocked by conflicts with \`${workspace.base_branch}\`.`,
-            "Conflicted files:",
-            ...result.files.map((file) => `- \`${file}\``),
-            "",
-            "Use `!show conflict`, `!resolve conflicts`, or `!abort merge`.",
-          ].join("\n");
-        }
-        await store.updateWorkspaceLastCommitOid(workspace.workspace_id, result.lastCommitOid);
-        if (result.kind === "blocked") {
-          await store.updateWorkspaceLastTestStatus(workspace.workspace_id, "failed");
-          await store.setWorkspaceStatus(workspace.workspace_id, "ready");
-          return result.summary;
-        }
-        await store.updateWorkspaceLastTestStatus(workspace.workspace_id, "passed");
-        await store.setWorkspaceStatus(workspace.workspace_id, "ready");
-        return `Merged \`${workspace.branch}\` into \`${workspace.base_branch}\`.\n${result.summary}`;
-      } catch (error) {
-        await store.setWorkspaceStatus(workspace.workspace_id, "ready");
-        throw error;
-      }
-    },
-
-    /**
-     * @param {WorkspaceRow} workspace
-     * @returns {Promise<string>}
-     */
-    async showConflict(workspace) {
-      const conflictedFiles = workspace.conflicted_files.length > 0
-        ? workspace.conflicted_files
-        : await listConflictedFiles(workspace.worktree_path);
-      if (conflictedFiles.length === 0) {
-        return "This workspace is not in a conflicted state.";
-      }
-      return [
-        "Conflicts:",
-        ...conflictedFiles.map((file) => `- \`${file}\``),
-        "",
-        `Current branch: \`${workspace.branch}\``,
-        `Base branch: \`${workspace.base_branch}\``,
-      ].join("\n");
-    },
-
-    /**
-     * @param {WorkspaceRow} workspace
-     * @returns {Promise<string>}
-     */
-    async resolveConflicts(workspace) {
-      await store.setWorkspaceStatus(workspace.workspace_id, "busy", { conflictedFiles: workspace.conflicted_files });
-      try {
-        const result = await resolveWorkspaceConflictsAutomatically(workspace);
-        const remaining = await listConflictedFiles(workspace.worktree_path);
-        if (result.lastCommitOid) {
-          await store.updateWorkspaceLastCommitOid(workspace.workspace_id, result.lastCommitOid);
-        }
-        await store.updateWorkspaceLastTestStatus(
-          workspace.workspace_id,
-          result.summary.includes("failed") ? "failed" : "passed",
-        );
-        await store.setWorkspaceStatus(
-          workspace.workspace_id,
-          remaining.length === 0 ? "ready" : "conflicted",
-          { conflictedFiles: remaining },
-        );
-        return result.summary;
-      } catch (error) {
-        const remaining = await listConflictedFiles(workspace.worktree_path);
-        await store.setWorkspaceStatus(
-          workspace.workspace_id,
-          remaining.length === 0 ? "ready" : "conflicted",
-          { conflictedFiles: remaining },
-        );
-        throw error;
-      }
-    },
-
-    /**
-     * @param {WorkspaceRow} workspace
-     * @returns {Promise<string>}
-     */
-    async abortMerge(workspace) {
-      await abortWorkspaceMerge(workspace);
-      await store.setWorkspaceStatus(workspace.workspace_id, "ready");
-      return `Aborted merge attempt in \`${workspace.branch}\`.`;
     },
   };
 }

@@ -18,27 +18,13 @@ import { buildHarnessRunRequest } from "./build-harness-run-request.js";
 import { buildRunConfig } from "./build-run-config.js";
 import { generateSessionTitle } from "./session-title.js";
 import { resolveOutputVisibility } from "../chat-output-visibility.js";
-import { resolveChatBinding } from "../workspace-resolver.js";
+import { createWorkspaceBindingService } from "../workspace-binding-service.js";
 import { tryHandleWorkspaceCommand } from "../workspace-command-router.js";
 import { createWorkspaceControl } from "../workspace-control.js";
-import { markdownToWhatsApp } from "../message-renderer.js";
-import { formatPlanPresentationText } from "../plan-presentation.js";
-import { formatActivitySummary } from "../tool-presentation-model.js";
-import { formatToolPresentationDisplay, formatToolPresentationSummary } from "../presentation/whatsapp.js";
+import { createWorkspaceLifecycleService } from "../workspace-lifecycle-service.js";
 
 const log = createLogger("conversation:runner");
 const PRESENCE_LEASE_TTL_MS = 20_000;
-const SEED_SOURCE_PREFIX = /** @type {Record<MessageSource, string>} */ ({
-  llm: "🤖",
-  "tool-call": "🔧",
-  "tool-result": "✅",
-  error: "❌",
-  warning: "⚠️",
-  usage: "📊",
-  memory: "🧠",
-  plain: "",
-});
-
 /**
  * Type guard: checks that an action has a command string.
  * @param {Action} action
@@ -81,72 +67,6 @@ function formatAvailableSlashCommands(commands) {
 }
 
 /**
- * @param {ToolContentBlock} block
- * @returns {string}
- */
-function stringifySeedContentBlock(block) {
-  switch (block.type) {
-    case "text":
-      return block.text;
-    case "markdown":
-      return markdownToWhatsApp(block.text);
-    case "code":
-      return [block.caption, "```", block.code, "```"].filter(Boolean).join("\n");
-    case "diff":
-      return [block.caption, block.diffText ?? "Diff available."].filter(Boolean).join("\n\n");
-    case "image":
-      return block.alt ?? "[image]";
-    case "video":
-      return block.alt ?? "[video]";
-    case "audio":
-      return "[audio]";
-    default:
-      return "";
-  }
-}
-
-/**
- * @param {SendContent} content
- * @returns {string}
- */
-function stringifySeedContent(content) {
-  if (typeof content === "string") {
-    return content;
-  }
-  const blocks = Array.isArray(content) ? content : [content];
-  return blocks
-    .map(stringifySeedContentBlock)
-    .filter(Boolean)
-    .join("\n\n");
-}
-
-/**
- * @param {OutboundEvent} event
- * @returns {string}
- */
-function stringifySeedOutboundEvent(event) {
-  switch (event.kind) {
-    case "content": {
-      const text = stringifySeedContent(event.content);
-      const prefix = SEED_SOURCE_PREFIX[event.source];
-      return prefix && text ? `${prefix} ${text}` : text;
-    }
-    case "tool_call":
-      return `${SEED_SOURCE_PREFIX["tool-call"]} ${formatToolPresentationDisplay(event.presentation) ?? formatToolPresentationSummary(event.presentation)}`.trim();
-    case "tool_activity":
-      return `${SEED_SOURCE_PREFIX["tool-call"]} ${formatActivitySummary(event.activity)}`.trim();
-    case "plan":
-      return `${SEED_SOURCE_PREFIX.llm} ${formatPlanPresentationText(event.presentation)}`.trim();
-    case "file_change":
-      return `${SEED_SOURCE_PREFIX["tool-call"]} ${event.summary ?? `Changed file: ${event.path}`}`.trim();
-    case "usage":
-      return `${SEED_SOURCE_PREFIX.usage} Cost: ${event.cost} | prompt=${event.tokens.prompt} cached=${event.tokens.cached} completion=${event.tokens.completion}`;
-    default:
-      return "";
-  }
-}
-
-/**
  * Resolve the persona and harness for the current chat.
  * @param {import("../store.js").ChatRow | undefined} chatInfo
  * @returns {Promise<{ persona: AgentDefinition | null, harness: AgentHarness }>}
@@ -170,7 +90,7 @@ async function resolveConversationHarness(chatInfo) {
  *   llmClient: LlmClient,
  *   getActionsFn: typeof import("../actions.js").getActions,
  *   executeActionFn: typeof import("../actions.js").executeAction,
- *   transport?: ChatTransport,
+ *   workspacePresentation?: WorkspacePresentationPort,
  * }} ConversationRunnerDeps
  */
 
@@ -179,7 +99,7 @@ async function resolveConversationHarness(chatInfo) {
  * @param {ConversationRunnerDeps} deps
  * @returns {{ handleMessage: (turn: ChatTurn) => Promise<void> }}
  */
-export function createConversationRunner({ store, llmClient, getActionsFn, executeActionFn, transport }) {
+export function createConversationRunner({ store, llmClient, getActionsFn, executeActionFn, workspacePresentation }) {
   const {
     addMessage,
     updateToolMessage,
@@ -195,38 +115,13 @@ export function createConversationRunner({ store, llmClient, getActionsFn, execu
   } = store;
 
   const runCoordinator = createHarnessRunCoordinator();
-  const workspaceControl = createWorkspaceControl({ store, transport });
-
-  /**
-   * @param {string} chatId
-   * @returns {TurnIO}
-   */
-  function createSeedTurnIo(chatId) {
-    return {
-      getIsAdmin: async () => true,
-      react: async () => {},
-      select: async () => "",
-      selectMany: async () => ({ kind: "cancelled" }),
-      send: async (event) => {
-        const text = stringifySeedOutboundEvent(event).trim();
-        if (text) {
-          await transport?.sendText(chatId, text);
-        }
-        return undefined;
-      },
-      reply: async (event) => {
-        const text = stringifySeedOutboundEvent(event).trim();
-        if (text) {
-          await transport?.sendText(chatId, text);
-        }
-        return undefined;
-      },
-      confirm: async () => false,
-      startPresence: async () => {},
-      keepPresenceAlive: async () => {},
-      endPresence: async () => {},
-    };
-  }
+  const workspaceBinding = createWorkspaceBindingService(store);
+  const workspaceControl = createWorkspaceControl({ store, workspacePresentation });
+  const workspaceLifecycle = createWorkspaceLifecycleService({
+    workspaceControl,
+    workspacePresentation,
+    dispatchTurn,
+  });
 
   /**
    * @param {ChatTurn} turn
@@ -238,33 +133,6 @@ export function createConversationRunner({ store, llmClient, getActionsFn, execu
     while (nextTurn) {
       nextTurn = await handleSingleMessage(nextTurn);
     }
-  }
-
-  /**
-   * @param {ChatTurn} sourceTurn
-   * @param {WorkspaceRow} workspace
-   * @param {string} seedPrompt
-   * @returns {Promise<void>}
-   */
-  async function seedWorkspaceFromTurn(sourceTurn, workspace, seedPrompt) {
-    if (!seedPrompt.trim()) {
-      return;
-    }
-    await dispatchTurn({
-      chatId: workspace.workspace_chat_id,
-      senderIds: sourceTurn.senderIds,
-      senderJids: sourceTurn.senderJids,
-      senderName: sourceTurn.senderName,
-      chatName: workspace.workspace_chat_subject,
-      content: [{ type: "text", text: seedPrompt }],
-      timestamp: new Date(),
-      facts: {
-        isGroup: true,
-        addressedToBot: true,
-        repliedToBot: false,
-      },
-      io: createSeedTurnIo(workspace.workspace_chat_id),
-    });
   }
 
   /**
@@ -317,8 +185,12 @@ export function createConversationRunner({ store, llmClient, getActionsFn, execu
       context,
       binding: resolvedBinding,
       inputText,
-      workspaceControl,
-      seedWorkspace: async (workspace, seedPrompt) => seedWorkspaceFromTurn(turn, workspace, seedPrompt),
+      workspaceControl: workspaceLifecycle,
+      seedSourceTurn: {
+        senderIds: turn.senderIds,
+        senderJids: turn.senderJids,
+        senderName: turn.senderName,
+      },
     })) {
       return;
     }
@@ -553,7 +425,7 @@ export function createConversationRunner({ store, llmClient, getActionsFn, execu
 
     const chatInfo = await getChat(chatId);
     const context = createMessageActionContext(turn);
-    const resolvedBinding = await resolveChatBinding(store, chatId, chatInfo?.harness_cwd, turn.chatName);
+    const resolvedBinding = await workspaceBinding.resolveChatBinding(chatId, chatInfo?.harness_cwd, turn.chatName);
     const { persona, harness } = await resolveConversationHarness(chatInfo);
 
     const globalActions = await getActionsFn();

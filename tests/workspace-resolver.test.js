@@ -7,7 +7,7 @@ import path from "node:path";
 import { promisify } from "node:util";
 import { initStore } from "../store.js";
 import { createTestDb } from "./helpers.js";
-import { resolveChatBinding } from "../workspace-resolver.js";
+import { createWorkspaceBindingService } from "../workspace-binding-service.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -43,10 +43,13 @@ async function createRepoWithWorktree() {
 describe("workspace resolver foundation", () => {
   /** @type {Awaited<ReturnType<typeof initStore>>} */
   let store;
+  /** @type {ReturnType<typeof createWorkspaceBindingService>} */
+  let bindingService;
 
   before(async () => {
     const db = await createTestDb();
     store = await initStore(db);
+    bindingService = createWorkspaceBindingService(store);
   });
 
   after(async () => {
@@ -61,7 +64,7 @@ describe("workspace resolver foundation", () => {
       controlChatId: "repo-chat",
     });
 
-    const resolved = await resolveChatBinding(store, "repo-chat");
+    const resolved = await bindingService.resolveChatBinding("repo-chat");
 
     assert.deepEqual(resolved, {
       kind: "repo",
@@ -87,7 +90,7 @@ describe("workspace resolver foundation", () => {
       status: "ready",
     });
 
-    const resolved = await resolveChatBinding(store, "payments-chat");
+    const resolved = await bindingService.resolveChatBinding("payments-chat");
 
     assert.deepEqual(resolved, {
       kind: "workspace",
@@ -134,7 +137,7 @@ describe("workspace resolver foundation", () => {
   it("infers repo chats from a git root cwd without explicit registration", async () => {
     const { repoRoot } = await createRepoWithWorktree();
 
-    const resolved = await resolveChatBinding(store, "git-root-chat", repoRoot);
+    const resolved = await bindingService.resolveChatBinding("git-root-chat", repoRoot);
 
     assert.equal(resolved.kind, "repo");
     if (resolved.kind !== "repo") {
@@ -162,7 +165,7 @@ describe("workspace resolver foundation", () => {
       status: "ready",
     });
 
-    const resolved = await resolveChatBinding(store, "worktree-chat", worktreePath);
+    const resolved = await bindingService.resolveChatBinding("worktree-chat", worktreePath);
 
     assert.deepEqual(resolved, {
       kind: "workspace",

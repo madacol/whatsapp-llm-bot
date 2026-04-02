@@ -4,17 +4,22 @@ import { contentEvent } from "./outbound-events.js";
 /**
  * @typedef {{
  *   list: (repo: RepoRow) => Promise<string>;
- *   create: (repo: RepoRow, context: ExecuteActionContext, workspaceName: string, baseBranch: string) => Promise<{ message: string, workspace: WorkspaceRow | null }>;
+ *   createWorkspace: (input: {
+ *     repo: RepoRow,
+ *     context: ExecuteActionContext,
+ *     workspaceName: string,
+ *     baseBranch: string,
+ *     seedPrompt?: string,
+ *     sourceTurn: {
+ *       senderIds: string[],
+ *       senderJids?: string[],
+ *       senderName: string,
+ *     },
+ *   }) => Promise<{ message: string, workspace: WorkspaceRow | null }>;
  *   status: (workspace: WorkspaceRow) => Promise<string>;
  *   diff: (workspace: WorkspaceRow) => Promise<string>;
- *   test: (workspace: WorkspaceRow) => Promise<string>;
- *   commit: (workspace: WorkspaceRow, message: string) => Promise<string>;
  *   archiveByName: (repo: RepoRow, workspaceName: string) => Promise<string>;
  *   archiveCurrent: (workspace: WorkspaceRow) => Promise<string>;
- *   merge: (workspace: WorkspaceRow) => Promise<string>;
- *   showConflict: (workspace: WorkspaceRow) => Promise<string>;
- *   resolveConflicts: (workspace: WorkspaceRow) => Promise<string>;
- *   abortMerge: (workspace: WorkspaceRow) => Promise<string>;
  * }} WorkspaceControl
  */
 
@@ -69,13 +74,7 @@ function parseNewArgs(argsText) {
  */
 function isWorkspaceOnlyCommand(loweredCommandText) {
   return loweredCommandText === "status"
-    || loweredCommandText === "diff"
-    || loweredCommandText === "test"
-    || loweredCommandText === "commit"
-    || loweredCommandText === "merge"
-    || loweredCommandText === "show conflict"
-    || loweredCommandText === "resolve conflicts"
-    || loweredCommandText === "abort merge";
+    || loweredCommandText === "diff";
 }
 
 /**
@@ -110,11 +109,15 @@ async function replyError(context, message) {
  *   binding: ResolvedChatBinding,
  *   inputText: string,
  *   workspaceControl: WorkspaceControl,
- *   seedWorkspace?: (workspace: WorkspaceRow, seedPrompt: string) => Promise<void>,
+ *   seedSourceTurn: {
+ *     senderIds: string[],
+ *     senderJids?: string[],
+ *     senderName: string,
+ *   },
  * }} input
  * @returns {Promise<boolean>}
  */
-export async function tryHandleWorkspaceCommand({ context, binding, inputText, workspaceControl, seedWorkspace }) {
+export async function tryHandleWorkspaceCommand({ context, binding, inputText, workspaceControl, seedSourceTurn }) {
   const { name, argsText, lowered } = parseCommandText(inputText);
 
   if (!name) {
@@ -139,10 +142,14 @@ export async function tryHandleWorkspaceCommand({ context, binding, inputText, w
           await replyError(context, "Usage: `!new <name>` or `!new <name>: <seed prompt>`.");
           return true;
         }
-        const result = await workspaceControl.create(binding.repo, context, parsed.workspaceName, binding.repo.default_base_branch);
-        if (parsed.seedPrompt && result.workspace && seedWorkspace) {
-          await seedWorkspace(result.workspace, parsed.seedPrompt);
-        }
+        const result = await workspaceControl.createWorkspace({
+          repo: binding.repo,
+          context,
+          workspaceName: parsed.workspaceName,
+          baseBranch: binding.repo.default_base_branch,
+          seedPrompt: parsed.seedPrompt,
+          sourceTurn: seedSourceTurn,
+        });
         await replyToolResult(context, result.message);
         return true;
       }
@@ -180,11 +187,6 @@ export async function tryHandleWorkspaceCommand({ context, binding, inputText, w
         await replyError(context, "This workspace is archived and no longer accepts work.");
         return true;
       }
-      if (binding.workspace.status === "conflicted" && !["status", "show conflict", "resolve conflicts", "abort merge", "archive"].includes(lowered)) {
-        await replyError(context, "This workspace has merge conflicts.\nUse `!show conflict`, `!resolve conflicts`, or `!abort merge`.");
-        return true;
-      }
-
       if (name === "status" && !argsText) {
         await replyToolResult(context, await workspaceControl.status(binding.workspace));
         return true;
@@ -195,39 +197,19 @@ export async function tryHandleWorkspaceCommand({ context, binding, inputText, w
           await replyError(context, "Usage: `!new <name>` or `!new <name>: <seed prompt>`.");
           return true;
         }
-        const result = await workspaceControl.create(binding.repo, context, parsed.workspaceName, binding.workspace.branch);
-        if (parsed.seedPrompt && result.workspace && seedWorkspace) {
-          await seedWorkspace(result.workspace, parsed.seedPrompt);
-        }
+        const result = await workspaceControl.createWorkspace({
+          repo: binding.repo,
+          context,
+          workspaceName: parsed.workspaceName,
+          baseBranch: binding.workspace.branch,
+          seedPrompt: parsed.seedPrompt,
+          sourceTurn: seedSourceTurn,
+        });
         await replyToolResult(context, result.message);
         return true;
       }
       if (name === "diff" && !argsText) {
         await replyToolResult(context, await workspaceControl.diff(binding.workspace));
-        return true;
-      }
-      if (name === "test" && !argsText) {
-        await replyToolResult(context, await workspaceControl.test(binding.workspace));
-        return true;
-      }
-      if (name === "commit") {
-        await replyToolResult(context, await workspaceControl.commit(binding.workspace, argsText));
-        return true;
-      }
-      if (name === "merge" && !argsText) {
-        await replyToolResult(context, await workspaceControl.merge(binding.workspace));
-        return true;
-      }
-      if (lowered === "show conflict") {
-        await replyToolResult(context, await workspaceControl.showConflict(binding.workspace));
-        return true;
-      }
-      if (lowered === "resolve conflicts") {
-        await replyToolResult(context, await workspaceControl.resolveConflicts(binding.workspace));
-        return true;
-      }
-      if (lowered === "abort merge") {
-        await replyToolResult(context, await workspaceControl.abortMerge(binding.workspace));
         return true;
       }
       if (name === "archive" && !argsText) {

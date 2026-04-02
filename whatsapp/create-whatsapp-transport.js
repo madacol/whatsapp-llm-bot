@@ -1,4 +1,5 @@
 import { createLogger } from "../logger.js";
+import { sendEvent as sendOutboundEvent } from "./outbound/send-content.js";
 import { adaptIncomingMessage } from "./inbound/chat-turn.js";
 import { createWhatsAppConnectionSupervisor } from "./connection-supervisor.js";
 import { classifyIncomingMessageEvent, normalizeReactionEvents } from "./inbound/message-event-classifier.js";
@@ -56,6 +57,7 @@ function serializeTransportError(error) {
  *   start: (onTurn: (turn: ChatTurn) => Promise<void>) => Promise<void>;
  *   stop: () => Promise<void>;
  *   sendText: (chatId: string, text: string) => Promise<void>;
+ *   sendEvent?: (chatId: string, event: OutboundEvent) => Promise<MessageHandle | undefined>;
  *   createGroup: (subject: string, participants: string[]) => Promise<{ chatId: string, subject: string }>;
  *   promoteParticipants: (chatId: string, participants: string[]) => Promise<void>;
  *   renameGroup: (chatId: string, subject: string) => Promise<void>;
@@ -181,6 +183,14 @@ export async function createWhatsAppTransport() {
 
     async sendText(chatId, text) {
       await connectionSupervisor.sendText(chatId, text);
+    },
+
+    async sendEvent(chatId, event) {
+      const sock = currentSocket;
+      if (!sock) {
+        throw new Error("WhatsApp transport has not been started");
+      }
+      return sendOutboundEvent(sock, chatId, event, undefined, reactionRuntime);
     },
 
     async createGroup(subject, participants) {
