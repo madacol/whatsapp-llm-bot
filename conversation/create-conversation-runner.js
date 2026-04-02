@@ -18,7 +18,7 @@ import { buildHarnessRunRequest } from "./build-harness-run-request.js";
 import { buildRunConfig } from "./build-run-config.js";
 import { generateSessionTitle } from "./session-title.js";
 import { resolveOutputVisibility } from "../chat-output-visibility.js";
-import { resolveChatBinding } from "../workspace-resolver.js";
+import { createWorkspaceBindingService } from "../workspace-binding-service.js";
 import { tryHandleWorkspaceCommand } from "../workspace-command-router.js";
 import { createWorkspaceControl } from "../workspace-control.js";
 import { createWorkspaceLifecycleService } from "../workspace-lifecycle-service.js";
@@ -115,6 +115,7 @@ export function createConversationRunner({ store, llmClient, getActionsFn, execu
   } = store;
 
   const runCoordinator = createHarnessRunCoordinator();
+  const workspaceBinding = createWorkspaceBindingService(store);
   const workspaceControl = createWorkspaceControl({ store, workspacePresentation });
   const workspaceLifecycle = createWorkspaceLifecycleService({
     workspaceControl,
@@ -424,7 +425,7 @@ export function createConversationRunner({ store, llmClient, getActionsFn, execu
 
     const chatInfo = await getChat(chatId);
     const context = createMessageActionContext(turn);
-    const resolvedBinding = await resolveChatBinding(store, chatId, chatInfo?.harness_cwd, turn.chatName);
+    const resolvedBinding = await workspaceBinding.resolveChatBinding(chatId, chatInfo?.harness_cwd, turn.chatName);
     const { persona, harness } = await resolveConversationHarness(chatInfo);
 
     const globalActions = await getActionsFn();
