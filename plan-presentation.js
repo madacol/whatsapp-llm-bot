@@ -133,11 +133,31 @@ function buildPlanInspectLines(presentation) {
 }
 
 /**
+ * @param {PlanEntry} entry
+ * @returns {string}
+ */
+function formatPlanMarkdownEntry(entry) {
+  switch (entry.status) {
+    case "completed":
+      return `- [x] ${entry.text}`;
+    case "in_progress":
+      return `- [~] ${entry.text}`;
+    case "pending":
+      return `- [ ] ${entry.text}`;
+    default:
+      return `- ${entry.text}`;
+  }
+}
+
+/**
  * @param {PlanPresentation} presentation
  * @returns {string}
  */
 export function formatPlanPresentationText(presentation) {
-  const lines = buildPlanInspectLines(presentation);
+  const lines = [
+    ...(presentation.explanation ? [`_${presentation.explanation}_`] : []),
+    ...presentation.entries.map(formatPlanMarkdownEntry),
+  ];
   const hasExplanation = typeof presentation.explanation === "string" && presentation.explanation.length > 0;
   const hasEntries = presentation.entries.length > 0;
   return lines.length > 0
