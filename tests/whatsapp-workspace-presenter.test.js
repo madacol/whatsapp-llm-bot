@@ -79,4 +79,45 @@ describe("WhatsAppWorkspacePresenter", () => {
       event: contentEvent("llm", [{ type: "text", text: "Thinking..." }]),
     }]);
   });
+
+  it("delivers bootstrap and seed prompt text through semantic content events", async () => {
+    /** @type {Array<{ chatId: string, text: string }>} */
+    const sentTexts = [];
+    /** @type {Array<{ chatId: string, event: OutboundEvent }>} */
+    const sentEvents = [];
+    const presenter = createWhatsAppWorkspacePresenter({
+      transport: {
+        start: async () => {},
+        stop: async () => {},
+        sendText: async (chatId, text) => {
+          sentTexts.push({ chatId, text });
+        },
+        sendEvent: async (chatId, event) => {
+          sentEvents.push({ chatId, event });
+          return undefined;
+        },
+      },
+    });
+
+    await presenter.presentWorkspaceBootstrap({
+      surfaceId: "workspace-chat",
+      statusText: "Workspace: payments",
+    });
+    await presenter.presentSeedPrompt({
+      surfaceId: "workspace-chat",
+      promptText: "Prompt: investigate duplicate charges",
+    });
+
+    assert.deepEqual(sentTexts, []);
+    assert.deepEqual(sentEvents, [
+      {
+        chatId: "workspace-chat",
+        event: contentEvent("plain", [{ type: "text", text: "Workspace: payments" }]),
+      },
+      {
+        chatId: "workspace-chat",
+        event: contentEvent("plain", [{ type: "text", text: "Prompt: investigate duplicate charges" }]),
+      },
+    ]);
+  });
 });
