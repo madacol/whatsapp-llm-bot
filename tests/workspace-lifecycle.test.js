@@ -31,6 +31,7 @@ let tempDirs = [];
  *   createdGroups: Array<{ subject: string, participants: string[], chatId: string }>,
  *   promotedParticipants: Array<{ chatId: string, participants: string[] }>,
  *   sentTexts: Array<{ chatId: string, text: string }>,
+ *   sentEvents: Array<{ chatId: string, event: OutboundEvent }>,
  *   renamedGroups: Array<{ chatId: string, subject: string }>,
  *   announcementChanges: Array<{ chatId: string, enabled: boolean }>,
  * }>}
@@ -42,6 +43,8 @@ function createFakeTransport() {
   const promotedParticipants = [];
   /** @type {Array<{ chatId: string, text: string }>} */
   const sentTexts = [];
+  /** @type {Array<{ chatId: string, event: OutboundEvent }>} */
+  const sentEvents = [];
   /** @type {Array<{ chatId: string, subject: string }>} */
   const renamedGroups = [];
   /** @type {Array<{ chatId: string, enabled: boolean }>} */
@@ -54,6 +57,7 @@ function createFakeTransport() {
     createdGroups,
     promotedParticipants,
     sentTexts,
+    sentEvents,
     renamedGroups,
     announcementChanges,
     transport: {
@@ -61,6 +65,15 @@ function createFakeTransport() {
       stop: async () => {},
       sendText: async (chatId, text) => {
         sentTexts.push({ chatId, text });
+      },
+      sendEvent: async (chatId, event) => {
+        sentEvents.push({ chatId, event });
+        return {
+          keyId: `event-${sentEvents.length}`,
+          isImage: false,
+          update: async () => {},
+          setInspect: () => {},
+        };
       },
       createGroup: async (subject, participants) => {
         groupCounter += 1;
@@ -380,7 +393,16 @@ describe("workspace lifecycle", () => {
       "Last commit: none",
     ].join("\n"));
     assert.equal(workspaceTexts[1], "Prompt: investigate duplicate charges");
-    assert.equal(workspaceTexts[2], "🤖 Seed received.");
+    const workspaceEvents = transportState.sentEvents
+      .filter((entry) => entry.chatId === workspace.workspace_chat_id)
+      .map((entry) => entry.event);
+    assert.equal(workspaceTexts.length, 2);
+    const seededReply = workspaceEvents.find((event) => event.kind === "content");
+    assert.ok(seededReply, "expected seeded workspace reply to use semantic content events");
+    if (!seededReply || seededReply.kind !== "content") {
+      assert.fail("expected seeded workspace reply to use semantic content events");
+    }
+    assert.deepEqual(seededReply.content, [{ type: "markdown", text: "Seed received." }]);
     const workspaceMessages = await store.getMessages(workspace.workspace_chat_id, new Date(0));
     const userMessages = workspaceMessages
       .map((row) => row.message_data)

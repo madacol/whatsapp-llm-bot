@@ -319,6 +319,7 @@ type ChatTransport = {
   start: (onTurn: (turn: ChatTurn) => Promise<void>) => Promise<void>;
   stop: () => Promise<void>;
   sendText: (chatId: string, text: string) => Promise<void>;
+  sendEvent?: (chatId: string, event: OutboundEvent) => Promise<MessageHandle | undefined>;
   createGroup?: (subject: string, participants: string[]) => Promise<{ chatId: string, subject: string }>;
   promoteParticipants?: (chatId: string, participants: string[]) => Promise<void>;
   renameGroup?: (chatId: string, subject: string) => Promise<void>;
