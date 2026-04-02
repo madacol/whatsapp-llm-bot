@@ -2,6 +2,8 @@
  * Shared semantic plan presentation and rendering helpers.
  */
 
+import { formatPlanStatusToken, normalizePlanEntryStatus } from "./plan-status-formatting.js";
+
 /**
  * @typedef {{
  *   text: string,
@@ -58,22 +60,7 @@ function formatPlanSummary(explanation, entries) {
   return "*Plan*";
 }
 
-/**
- * @param {unknown} status
- * @returns {"completed" | "in_progress" | "pending" | "unknown"}
- */
-export function normalizePlanEntryStatus(status) {
-  if (status === "completed") {
-    return "completed";
-  }
-  if (status === "in_progress" || status === "inProgress") {
-    return "in_progress";
-  }
-  if (status === "pending") {
-    return "pending";
-  }
-  return "unknown";
-}
+export { normalizePlanEntryStatus } from "./plan-status-formatting.js";
 
 /**
  * @param {{
@@ -114,22 +101,19 @@ function buildPlanInspectLines(presentation) {
     lines.push(`_${presentation.explanation}_`);
   }
   for (const entry of presentation.entries) {
-    switch (entry.status) {
-      case "completed":
-        lines.push(`[x] ${entry.text}`);
-        break;
-      case "in_progress":
-        lines.push(`[~] ${entry.text}`);
-        break;
-      case "pending":
-        lines.push(`[ ] ${entry.text}`);
-        break;
-      default:
-        lines.push(`[-] ${entry.text}`);
-        break;
-    }
+    lines.push(`${formatPlanStatusToken(entry.status)} ${entry.text}`);
   }
   return lines;
+}
+
+/**
+ * @param {PlanEntry} entry
+ * @returns {string}
+ */
+function formatPlanMarkdownEntry(entry) {
+  return entry.status === "unknown"
+    ? `- ${entry.text}`
+    : `- ${formatPlanStatusToken(entry.status)} ${entry.text}`;
 }
 
 /**
@@ -137,7 +121,10 @@ function buildPlanInspectLines(presentation) {
  * @returns {string}
  */
 export function formatPlanPresentationText(presentation) {
-  const lines = buildPlanInspectLines(presentation);
+  const lines = [
+    ...(presentation.explanation ? [`_${presentation.explanation}_`] : []),
+    ...presentation.entries.map(formatPlanMarkdownEntry),
+  ];
   const hasExplanation = typeof presentation.explanation === "string" && presentation.explanation.length > 0;
   const hasEntries = presentation.entries.length > 0;
   return lines.length > 0

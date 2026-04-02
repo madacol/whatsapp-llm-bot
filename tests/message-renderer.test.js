@@ -67,6 +67,13 @@ describe("markdownToWhatsApp", () => {
     assert.ok(result.includes("2. second"));
   });
 
+  it("converts markdown task lists into status symbols", () => {
+    assert.equal(
+      markdownToWhatsApp("- [ ] Run tests\n- [~] Patch the formatter\n- [x] Ship the fix"),
+      "☐ Run tests\n⏳ Patch the formatter\n✅ Ship the fix",
+    );
+  });
+
   it("converts horizontal rules to ———", () => {
     assert.equal(markdownToWhatsApp("---"), "———");
     assert.equal(markdownToWhatsApp("***"), "———");
