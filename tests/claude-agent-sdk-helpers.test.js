@@ -172,13 +172,12 @@ describe("buildClaudePrompt", () => {
 });
 
 describe("buildClaudeWorkspaceArtifacts", () => {
-  it("returns no files when there are no chat-scoped actions", () => {
+  it("returns no files when there are no shared skills", () => {
     const artifacts = buildClaudeWorkspaceArtifacts(/** @type {ToolRuntime} */ ({
       listTools: () => [{
         name: "Read",
         description: "Read a file",
         parameters: { type: "object", properties: {} },
-        scope: "global",
       }],
       getTool: async () => null,
       executeTool: async () => ({ result: "", permissions: {} }),
@@ -187,23 +186,26 @@ describe("buildClaudeWorkspaceArtifacts", () => {
     assert.deepEqual(artifacts, []);
   });
 
-  it("builds workspace files for chat-scoped actions only", () => {
+  it("builds a Claude plugin for shared skills only", () => {
     const artifacts = buildClaudeWorkspaceArtifacts(/** @type {ToolRuntime} */ ({
       listTools: () => [
         {
-          name: "remind",
-          description: "Schedule a reminder",
+          name: "send_path",
+          description: "Send a local path back to WhatsApp.",
+          sharedSkill: {
+            name: "send-path",
+            description: "Return a generated file to the chat.",
+            instructions: "Use workspace-relative paths when possible.",
+          },
           parameters: {
             type: "object",
-            properties: { when: { type: "string" } },
+            properties: { path: { type: "string" } },
           },
-          scope: "chat",
         },
         {
           name: "Read",
           description: "Read a file",
           parameters: { type: "object", properties: {} },
-          scope: "global",
         },
       ],
       getTool: async () => null,
@@ -211,36 +213,40 @@ describe("buildClaudeWorkspaceArtifacts", () => {
     }));
 
     assert.equal(artifacts.length, 2);
-    assert.ok(artifacts[0]?.relativePath.endsWith(".madabot/chat-actions.json"));
-    assert.ok(artifacts[1]?.relativePath.endsWith(".madabot/chat-actions.md"));
-    assert.ok(artifacts[0]?.content.includes("\"name\": \"remind\""));
-    assert.ok(!artifacts[0]?.content.includes("\"name\": \"Read\""));
-    assert.ok(artifacts[1]?.content.includes("## remind"));
+    assert.ok(artifacts[0]?.relativePath.endsWith(".madabot/claude-shared-skills/.claude-plugin/plugin.json"));
+    assert.ok(artifacts[1]?.relativePath.endsWith(".madabot/claude-shared-skills/skills/send-path/SKILL.md"));
+    assert.ok(artifacts[0]?.content.includes("\"name\": \"madabot-shared-skills\""));
+    assert.ok(artifacts[1]?.content.includes("name: send-path"));
+    assert.ok(artifacts[1]?.content.includes("Use workspace-relative paths when possible."));
   });
 });
 
 describe("writeClaudeWorkspaceArtifacts", () => {
-  it("writes chat action files into .madabot", async () => {
+  it("writes the shared-skills Claude plugin into .madabot", async () => {
     const workdir = await fs.mkdtemp(path.join(os.tmpdir(), "claude-sdk-artifacts-"));
     await writeClaudeWorkspaceArtifacts(workdir, /** @type {ToolRuntime} */ ({
       listTools: () => [{
-        name: "remind",
-        description: "Schedule a reminder",
+        name: "send_path",
+        description: "Send a local path back to WhatsApp.",
+        sharedSkill: {
+          name: "send-path",
+          description: "Return a generated file to the chat.",
+          instructions: "Use workspace-relative paths when possible.",
+        },
         parameters: {
           type: "object",
-          properties: { when: { type: "string" } },
+          properties: { path: { type: "string" } },
         },
-        scope: "chat",
       }],
       getTool: async () => null,
       executeTool: async () => ({ result: "", permissions: {} }),
     }));
 
-    const jsonText = await fs.readFile(path.join(workdir, ".madabot/chat-actions.json"), "utf8");
-    const markdownText = await fs.readFile(path.join(workdir, ".madabot/chat-actions.md"), "utf8");
+    const manifestText = await fs.readFile(path.join(workdir, ".madabot/claude-shared-skills/.claude-plugin/plugin.json"), "utf8");
+    const skillText = await fs.readFile(path.join(workdir, ".madabot/claude-shared-skills/skills/send-path/SKILL.md"), "utf8");
 
-    assert.ok(jsonText.includes("\"name\": \"remind\""));
-    assert.ok(markdownText.includes("## remind"));
+    assert.ok(manifestText.includes("\"name\": \"madabot-shared-skills\""));
+    assert.ok(skillText.includes("name: send-path"));
   });
 });
 
