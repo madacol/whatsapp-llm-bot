@@ -26,17 +26,9 @@ describe("seed turn io", () => {
     };
 
     const io = createSeedTurnIo({
-      chatId: "workspace-chat",
-      transport: {
-        start: async () => {},
-        stop: async () => {},
-        sendText: async () => {
-          assert.fail("sendText should not be used when transport.sendEvent is available");
-        },
-        sendEvent: async (_chatId, event) => {
-          events.push(event);
-          return handle;
-        },
+      sendEvent: async (event) => {
+        events.push(event);
+        return handle;
       },
     });
 
@@ -67,29 +59,19 @@ describe("seed turn io", () => {
     assert.deepEqual(inspects, [{ kind: "text", text: "full inspect text", persistOnInspect: true }]);
   });
 
-  it("falls back to plain text when the transport does not support semantic events", async () => {
-    /** @type {Array<{ chatId: string, text: string }>} */
-    const sentTexts = [];
+  it("delegates every semantic event through the provided sender", async () => {
+    /** @type {OutboundEvent[]} */
+    const events = [];
     const io = createSeedTurnIo({
-      chatId: "workspace-chat",
-      transport: {
-        start: async () => {},
-        stop: async () => {},
-        sendText: async (chatId, text) => {
-          sentTexts.push({ chatId, text });
-        },
+      sendEvent: async (event) => {
+        events.push(event);
+        return undefined;
       },
     });
 
-    const handle = await io.reply(fileChangeEvent({
-      path: "/repo/app.js",
-      summary: "Changed file",
-    }));
+    const handle = await io.reply(fileChangeEvent({ path: "/repo/app.js", summary: "Changed file" }));
 
     assert.equal(handle, undefined);
-    assert.deepEqual(sentTexts, [{
-      chatId: "workspace-chat",
-      text: "🔧 Changed file",
-    }]);
+    assert.deepEqual(events, [fileChangeEvent({ path: "/repo/app.js", summary: "Changed file" })]);
   });
 });

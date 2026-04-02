@@ -174,12 +174,16 @@ async function createHandler(options = {}) {
   const llmClient = createLlmClient();
   const { createMessageHandler } = await import("../index.js");
   const { getActions, executeAction } = await import("../actions.js");
+  const { createWhatsAppWorkspacePresenter } = await import("../whatsapp/workspace-presenter.js");
   const handler = createMessageHandler({
     store,
     llmClient,
     getActionsFn: getActions,
     executeActionFn: executeAction,
     transport: options.transport,
+    workspacePresentation: options.transport
+      ? createWhatsAppWorkspacePresenter({ transport: options.transport })
+      : undefined,
   });
   return handler.handleMessage;
 }
