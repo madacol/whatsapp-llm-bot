@@ -3,6 +3,7 @@ import { markdownToWhatsApp } from "../message-renderer.js";
 import { formatPlanPresentationText } from "../plan-presentation.js";
 import { formatActivitySummary } from "../tool-presentation-model.js";
 import { formatToolPresentationDisplay, formatToolPresentationSummary } from "../presentation/whatsapp.js";
+import { contentEvent } from "../outbound-events.js";
 
 const SOURCE_PREFIX = /** @type {Record<MessageSource, string>} */ ({
   llm: "🤖",
@@ -102,7 +103,20 @@ function stringifyEvent(event) {
  * @returns {WorkspacePresentationPort}
  */
 export function createWhatsAppWorkspacePresenter({ transport }) {
-  return {
+  /**
+   * @param {string} surfaceId
+   * @param {string} text
+   * @returns {Promise<void>}
+   */
+  async function sendPlainWorkspaceContent(surfaceId, text) {
+    await presenter.sendWorkspaceEvent({
+      surfaceId,
+      event: contentEvent("plain", [{ type: "text", text }]),
+    });
+  }
+
+  /** @type {WorkspacePresentationPort} */
+  const presenter = {
     async provisionWorkspaceSurface({ workspaceName, sourceChatName, requesterJids }) {
       if (!transport.createGroup) {
         throw new Error("Workspace creation requires workspace surface provisioning support.");
@@ -137,11 +151,11 @@ export function createWhatsAppWorkspacePresenter({ transport }) {
     },
 
     async presentWorkspaceBootstrap({ surfaceId, statusText }) {
-      await transport.sendText(surfaceId, statusText);
+      await sendPlainWorkspaceContent(surfaceId, statusText);
     },
 
     async presentSeedPrompt({ surfaceId, promptText }) {
-      await transport.sendText(surfaceId, promptText);
+      await sendPlainWorkspaceContent(surfaceId, promptText);
     },
 
     async sendWorkspaceEvent({ surfaceId, event }) {
@@ -164,4 +178,6 @@ export function createWhatsAppWorkspacePresenter({ transport }) {
       }
     },
   };
+
+  return presenter;
 }

@@ -13,6 +13,7 @@ process.env.MODEL = "mock-model";
 
 import { createChatTurn, createMockLlmServer, createTestDb, seedChat as seedChat_ } from "./helpers.js";
 import { setDb } from "../db.js";
+import { contentEvent } from "../outbound-events.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -337,7 +338,19 @@ describe("workspace lifecycle", () => {
       chatId: workspace.workspace_chat_id,
       participants: ["master-user@s.whatsapp.net"],
     }]);
-    assert.ok(transportState.sentTexts[0]?.text.includes("Workspace: payments"));
+    const workspaceBootstrapEvent = transportState.sentEvents.find((entry) => entry.chatId === workspace.workspace_chat_id);
+    assert.deepEqual(workspaceBootstrapEvent, {
+      chatId: workspace.workspace_chat_id,
+      event: contentEvent("plain", [{ type: "text", text: [
+        "Workspace: payments",
+        "Base: master",
+        "Branch: payments",
+        "Status: ready",
+        "Last test: not run",
+        "Last commit: none",
+      ].join("\n") }]),
+    });
+    assert.deepEqual(transportState.sentTexts, []);
     const enabledChat = await store.getChat(workspace.workspace_chat_id);
     assert.equal(enabledChat?.is_enabled, true);
     assert.equal(enabledChat?.model, "openai/gpt-4.1-mini");
@@ -385,23 +398,24 @@ describe("workspace lifecycle", () => {
     assert.equal(workspace?.branch, "multi-word-branch");
     assert.equal(workspace?.base_branch, "master");
     assert.equal(transportState.createdGroups[0]?.subject, "multi word branch");
-    const workspaceTexts = transportState.sentTexts
+    const workspaceEvents = transportState.sentEvents
       .filter((entry) => entry.chatId === workspace.workspace_chat_id)
-      .map((entry) => entry.text);
-    assert.equal(workspaceTexts[0], [
+      .map((entry) => entry.event);
+    assert.deepEqual(workspaceEvents[0], contentEvent("plain", [{ type: "text", text: [
       "Workspace: multi word branch",
       "Base: master",
       "Branch: multi-word-branch",
       "Status: ready",
       "Last test: not run",
       "Last commit: none",
-    ].join("\n"));
-    assert.equal(workspaceTexts[1], "Prompt: investigate duplicate charges");
-    const workspaceEvents = transportState.sentEvents
-      .filter((entry) => entry.chatId === workspace.workspace_chat_id)
-      .map((entry) => entry.event);
-    assert.equal(workspaceTexts.length, 2);
-    const seededReply = workspaceEvents.find((event) => event.kind === "content");
+    ].join("\n") }]));
+    assert.deepEqual(workspaceEvents[1], contentEvent("plain", [{ type: "text", text: "Prompt: investigate duplicate charges" }]));
+    assert.equal(transportState.sentTexts.length, 0);
+    const seededReply = workspaceEvents.find((event) => (
+      event.kind === "content"
+      && Array.isArray(event.content)
+      && event.content.some((block) => block.type === "markdown" && block.text === "Seed received.")
+    ));
     assert.ok(seededReply, "expected seeded workspace reply to use semantic content events");
     if (!seededReply || seededReply.kind !== "content") {
       assert.fail("expected seeded workspace reply to use semantic content events");
