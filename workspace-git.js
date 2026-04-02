@@ -316,27 +316,6 @@ export async function formatDiffSummary(cwd) {
 }
 
 /**
- * @param {string} cwd
- * @param {string} message
- * @returns {Promise<string>}
- */
-export async function commitWorkspaceChanges(cwd, message) {
-  const addResult = await runGit(cwd, ["add", "-A"]);
-  if (addResult.exitCode !== 0) {
-    throw new Error(commandErrorMessage(addResult, "git add failed."));
-  }
-  const commitResult = await runGit(cwd, ["commit", "-m", message]);
-  if (commitResult.exitCode !== 0) {
-    throw new Error(commandErrorMessage(commitResult, "git commit failed."));
-  }
-  const oid = await getHeadShortOid(cwd);
-  if (!oid) {
-    throw new Error("Commit completed but HEAD oid could not be determined.");
-  }
-  return oid;
-}
-
-/**
  * @param {string} repoRoot
  * @param {string} baseBranch
  * @returns {Promise<void>}
@@ -459,7 +438,7 @@ export async function cleanupWorkspaceWorktree(repo, branch, worktreePath) {
  */
 export async function mergeWorkspaceBranch(repoRoot, workspace) {
   if (await hasUncommittedChanges(workspace.worktree_path)) {
-    throw new Error("Cannot merge with uncommitted changes.\nUse `!commit <message>` first.");
+    throw new Error("Cannot merge with uncommitted changes.\nCommit your changes first.");
   }
 
   const verification = await runWorkspaceVerification(workspace.worktree_path);

@@ -195,26 +195,6 @@ export function createWorkspaceControl({ store, workspacePresentation, workspace
     },
 
     /**
-     * @param {WorkspaceRow} workspace
-     * @param {string} message
-     * @returns {Promise<string>}
-     */
-    async commit(workspace, message) {
-      const result = await workspaceRepo.commitWorkspace(workspace, message);
-      if (!result.startsWith("Committed on")) {
-        return result;
-      }
-      const oidMatch = result.match(/Commit: `([^ ]+)/);
-      const oid = oidMatch?.[1] ?? null;
-      if (!oid) {
-        return result;
-      }
-      await store.updateWorkspaceLastCommitOid(workspace.workspace_id, oid);
-      await store.updateWorkspaceLastTestStatus(workspace.workspace_id, "not_run");
-      return result;
-    },
-
-    /**
      * @param {RepoRow} repo
      * @param {string} workspaceName
      * @returns {Promise<string>}

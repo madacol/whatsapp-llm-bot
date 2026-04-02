@@ -1,9 +1,7 @@
 import {
   cleanupWorkspaceWorktree,
-  commitWorkspaceChanges,
   createWorkspaceWorktree,
   formatDiffSummary,
-  hasUncommittedChanges,
 } from "./workspace-git.js";
 
 /**
@@ -40,22 +38,6 @@ export function createWorkspaceRepoService() {
      */
     diffWorkspace(workspace) {
       return formatDiffSummary(workspace.worktree_path);
-    },
-
-    /**
-     * @param {WorkspaceRow} workspace
-     * @param {string} message
-     * @returns {Promise<string>}
-     */
-    async commitWorkspace(workspace, message) {
-      if (!message.trim()) {
-        return "Use `!commit <message>`.";
-      }
-      if (!await hasUncommittedChanges(workspace.worktree_path)) {
-        return "Nothing to commit.";
-      }
-      const oid = await commitWorkspaceChanges(workspace.worktree_path, message.trim());
-      return `Committed on \`${workspace.branch}\`.\nCommit: \`${oid} ${message.trim()}\``;
     },
   };
 }
