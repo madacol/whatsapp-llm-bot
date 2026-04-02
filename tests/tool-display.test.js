@@ -233,9 +233,9 @@ describe("command inspect formatting", () => {
         "",
         "_Tighten the display labels_",
         "",
-        "[~] Patch the formatter",
-        "[ ] Run tests",
-        "[x] Ship the fix",
+        "- [~] Patch the formatter",
+        "- [ ] Run tests",
+        "- [x] Ship the fix",
       ].join("\n"),
     );
   });

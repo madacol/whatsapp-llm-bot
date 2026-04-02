@@ -98,6 +98,14 @@ export function markdownToWhatsApp(text) {
     (_match, label, target, explicitLine, explicitColumn) => formatMarkdownLink(label, target, explicitLine, explicitColumn),
   );
 
+  // Task list markers at line start, with or without a markdown bullet prefix.
+  // Convert them before generic list handling so plan/task checklists become
+  // compact status lines in WhatsApp.
+  result = result.replace(
+    /^([\t ]*)(?:[-*]\s+)?\[([ xX~])\]\s+(.+)$/gm,
+    (_match, indent, marker, itemText) => formatWhatsAppTaskItem(indent, marker, itemText),
+  );
+
   // Unordered lists: - item or * item → • item (preserve indentation)
   // Use non-breaking spaces (\u00A0) because WhatsApp strips regular leading spaces
   result = result.replace(/^([\t ]*)[-*]\s+/gm, (_match, indent) => {
@@ -115,6 +123,42 @@ export function markdownToWhatsApp(text) {
   result = result.replace(/^(-{3,}|\*{3,}|_{3,})$/gm, "———");
 
   return result;
+}
+
+/**
+ * @param {string} indent
+ * @returns {string}
+ */
+function formatWhatsAppIndent(indent) {
+  const depth = indent ? Math.floor(indent.replace(/\t/g, "  ").length / 2) : 0;
+  return "\u00A0\u00A0".repeat(depth);
+}
+
+/**
+ * @param {string} marker
+ * @returns {string}
+ */
+function formatWhatsAppTaskMarker(marker) {
+  switch (marker.toLowerCase()) {
+    case "x":
+      return "✅";
+    case "~":
+      return "⏳";
+    case " ":
+      return "☐";
+    default:
+      return "•";
+  }
+}
+
+/**
+ * @param {string} indent
+ * @param {string} marker
+ * @param {string} itemText
+ * @returns {string}
+ */
+function formatWhatsAppTaskItem(indent, marker, itemText) {
+  return `${formatWhatsAppIndent(indent)}${formatWhatsAppTaskMarker(marker)} ${itemText}`;
 }
 
 /**
