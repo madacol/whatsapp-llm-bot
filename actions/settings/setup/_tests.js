@@ -37,7 +37,7 @@ export default [
           },
           selectMany: async (question, options) => {
             prompts.push({ question, options });
-            return { kind: "selected", ids: ["thinking", "changes"] };
+            return { kind: "selected", ids: ["changes"] };
           },
         },
         {},
@@ -49,7 +49,6 @@ export default [
       assert.ok(result.includes("mention+reply"), `Expected trigger summary, got: ${result}`);
       assert.ok(result.includes("codex"), `Expected harness summary, got: ${result}`);
       assert.ok(result.includes("gpt-5.4"), `Expected harness model summary, got: ${result}`);
-      assert.ok(result.includes("Show thinking"), `Expected show summary, got: ${result}`);
       assert.ok(result.includes("Hide file changes"), `Expected show summary, got: ${result}`);
       assert.ok(result.includes("!clone"), `Expected clone hint, got: ${result}`);
       assert.ok(!prompts.some((prompt) => prompt.question === "Enable the bot for this chat?"), "wizard should not ask the enable question");
@@ -63,7 +62,7 @@ export default [
       assert.equal(chat.respond_on, "mention+reply");
       assert.equal(chat.memory, false, "setup should no longer modify memory");
       assert.equal(chat.debug, true);
-      assert.deepEqual(chat.output_visibility, { thinking: true, changes: false });
+      assert.deepEqual(chat.output_visibility, { changes: false });
       assert.equal(chat.harness, "codex");
       assert.equal(chat.harness_config.codex.model, "gpt-5.4");
     } finally {

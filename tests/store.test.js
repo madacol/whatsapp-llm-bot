@@ -117,8 +117,6 @@ describe("store with injected DB", () => {
       `;
 
       assert.deepEqual(chat.output_visibility, {
-        tools: false,
-        thinking: true,
         changes: false,
       });
     });

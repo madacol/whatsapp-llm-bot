@@ -330,7 +330,8 @@ describe("createConversationRunner with codex harness", () => {
     await db.sql`
       UPDATE chats
       SET harness = 'codex',
-          harness_config = '{}'::jsonb
+          harness_config = '{}'::jsonb,
+          output_visibility = '{"tools":true}'::jsonb
       WHERE chat_id = 'conv-codex-presence-interleaved'
     `;
 

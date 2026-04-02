@@ -31,13 +31,13 @@ export const OUTPUT_VISIBILITY_FLAGS = Object.freeze([
     key: "tools",
     label: "tools",
     description: "Show tool progress such as shell commands, file reads, and intermediate tool output.",
-    defaultValue: true,
+    defaultValue: false,
   },
   {
     key: "thinking",
     label: "thinking",
     description: "Show reasoning placeholders and inspectable thinking summaries when available.",
-    defaultValue: false,
+    defaultValue: true,
   },
   {
     key: "changes",
@@ -54,8 +54,8 @@ const OUTPUT_VISIBILITY_FLAG_MAP = new Map(
 
 /** @type {OutputVisibility} */
 export const DEFAULT_OUTPUT_VISIBILITY = Object.freeze({
-  tools: true,
-  thinking: false,
+  tools: false,
+  thinking: true,
   changes: true,
 });
 
