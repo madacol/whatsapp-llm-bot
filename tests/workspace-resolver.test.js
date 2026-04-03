@@ -8,6 +8,7 @@ import { promisify } from "node:util";
 import { initStore } from "../store.js";
 import { createTestDb } from "./helpers.js";
 import { createWorkspaceBindingService } from "../workspace-binding-service.js";
+import { getChatWorkDir } from "../utils.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -214,5 +215,40 @@ describe("workspace resolver foundation", () => {
       repo,
       workspace,
     });
+  });
+
+  it("auto-adopts a first-seen group chat as a workspace binding", async () => {
+    const chatId = "resolver-fresh-group-chat";
+    const chatName = "Billing Squad";
+
+    const resolved = await bindingService.resolveChatBinding(chatId, undefined, chatName, true);
+
+    assert.equal(resolved.kind, "workspace");
+    if (resolved.kind !== "workspace") {
+      throw new Error("Expected workspace binding");
+    }
+
+    const expectedRootPath = getChatWorkDir(chatId, undefined, chatName);
+    assert.equal(resolved.repo.root_path, expectedRootPath);
+    assert.equal(resolved.workspace.worktree_path, expectedRootPath);
+    assert.equal(resolved.workspace.name, chatName);
+    assert.equal(resolved.workspace.branch, "master");
+    assert.equal(resolved.workspace.base_branch, "master");
+
+    const binding = await store.getChatBinding(chatId);
+    assert.deepEqual(binding && {
+      bindingKind: binding.binding_kind,
+      repoId: binding.repo_id,
+      workspaceId: binding.workspace_id,
+    }, {
+      bindingKind: "workspace",
+      repoId: resolved.repo.repo_id,
+      workspaceId: resolved.workspace.workspace_id,
+    });
+
+    const presentation = await store.getWhatsAppWorkspacePresentationByChat(chatId);
+    assert.ok(presentation);
+    assert.equal(presentation?.workspace_id, resolved.workspace.workspace_id);
+    assert.equal(presentation?.workspace_chat_subject, chatName);
   });
 });

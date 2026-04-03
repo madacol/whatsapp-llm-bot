@@ -6,3 +6,4 @@
  */
 export { createWhatsAppTransport, connectToWhatsApp } from "./create-whatsapp-transport.js";
 export { createWhatsAppWorkspacePresenter } from "./workspace-presenter.js";
+export { tryHandleWhatsAppTestCommand } from "./test-command.js";
