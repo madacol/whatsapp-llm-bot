@@ -58,6 +58,8 @@ function createFakeTransport() {
   const renamedGroups = [];
   /** @type {Array<{ chatId: string, enabled: boolean }>} */
   const announcementChanges = [];
+  /** @type {Map<string, string>} */
+  const linkedParentsByChatId = new Map();
 
   let groupCounter = 0;
   const instanceId = `${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
@@ -102,10 +104,13 @@ function createFakeTransport() {
         groupCounter += 1;
         const chatId = `group-${instanceId}-${groupCounter}@g.us`;
         createdGroups.push({ subject, participants, chatId });
+        linkedParentsByChatId.set(chatId, parentCommunityChatId);
         return { chatId, subject };
       },
+      getGroupLinkedParent: async (chatId) => linkedParentsByChatId.get(chatId) ?? null,
       linkExistingGroupToCommunity: async (chatId, communityChatId) => {
         linkedGroups.push({ chatId, communityChatId });
+        linkedParentsByChatId.set(chatId, communityChatId);
       },
       promoteParticipants: async (chatId, participants) => {
         promotedParticipants.push({ chatId, participants });

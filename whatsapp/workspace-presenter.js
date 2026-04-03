@@ -95,6 +95,7 @@ function stringifyEvent(event) {
  * community-linked subgroup.
  * @param {{
  *   transport: ChatTransport & {
+ *     getGroupLinkedParent?: (chatId: string) => Promise<string | null>,
  *     linkExistingGroupToCommunity: (chatId: string, communityChatId: string) => Promise<void>,
  *   },
  *   store: Pick<Awaited<ReturnType<typeof import("../store.js").initStore>>,
