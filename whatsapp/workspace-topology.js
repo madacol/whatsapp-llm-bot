@@ -56,7 +56,9 @@ function findWorkspacePresentation(workspaceId, presentations) {
 
 /**
  * @param {{
- *   transport: ChatTransport,
+ *   transport: ChatTransport & {
+ *     linkExistingGroupToCommunity: (chatId: string, communityChatId: string) => Promise<void>,
+ *   },
  *   store: Pick<Awaited<ReturnType<typeof import("../store.js").initStore>>,
  *     "listWhatsAppWorkspacePresentations"
  *     | "saveWhatsAppWorkspacePresentation"
@@ -120,9 +122,6 @@ export function createWhatsAppWorkspaceTopology({ transport, store }) {
       await transport.renameGroup(existingWorkspacePresentation.workspace_chat_id, surfaceName);
     }
     if (existingWorkspacePresentation.linked_community_chat_id !== communityChatId) {
-      if (!transport.linkExistingGroupToCommunity) {
-        throw new Error("Workspace creation requires existing-group community linking support.");
-      }
       await transport.linkExistingGroupToCommunity(
         existingWorkspacePresentation.workspace_chat_id,
         communityChatId,
