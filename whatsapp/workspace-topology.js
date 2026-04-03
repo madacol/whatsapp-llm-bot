@@ -86,6 +86,7 @@ function findWorkspacePresentation(workspaceId, presentations) {
  *     workspaceId: string,
  *     workspaceName: string,
  *     sourceChatName?: string,
+ *     sourceWorkspaceId?: string,
  *     requesterJids: string[],
  *     repoPresentation: WhatsAppProjectPresentationRow | null,
  *   }) => Promise<{ surfaceId: string, surfaceName: string }>,
@@ -315,6 +316,52 @@ export function createWhatsAppWorkspaceTopology({ transport, store }) {
 
   /**
    * @param {{
+   *   existingPresentations: WhatsAppWorkspacePresentationRow[],
+   *   sourceWorkspaceId?: string,
+   * }} input
+   * @returns {Promise<WhatsAppWorkspacePresentationRow | null>}
+   */
+  async function resolveLiveIndependentSourceWorkspacePresentation({
+    existingPresentations,
+    sourceWorkspaceId,
+  }) {
+    if (!sourceWorkspaceId) {
+      return null;
+    }
+    const sourceWorkspacePresentation = findWorkspacePresentation(sourceWorkspaceId, existingPresentations);
+    if (!sourceWorkspacePresentation) {
+      return null;
+    }
+    const liveLinkedCommunityChatId = await getLiveLinkedCommunityChatId(sourceWorkspacePresentation.workspace_chat_id);
+    if (liveLinkedCommunityChatId !== null) {
+      return null;
+    }
+    return sourceWorkspacePresentation;
+  }
+
+  /**
+   * @param {{
+   *   projectId: string,
+   *   existingWorkspacePresentation: WhatsAppWorkspacePresentationRow,
+   * }} input
+   * @returns {Promise<void>}
+   */
+  async function demoteWorkspaceSurfaceFromMain({
+    projectId,
+    existingWorkspacePresentation,
+  }) {
+    await store.saveWhatsAppWorkspacePresentation({
+      projectId,
+      workspaceId: existingWorkspacePresentation.workspace_id,
+      workspaceChatId: existingWorkspacePresentation.workspace_chat_id,
+      workspaceChatSubject: existingWorkspacePresentation.workspace_chat_subject,
+      role: "workspace",
+      linkedCommunityChatId: existingWorkspacePresentation.linked_community_chat_id,
+    });
+  }
+
+  /**
+   * @param {{
    *   projectId: string,
    *   mainWorkspaceId: string,
    *   communityChatId: string,
@@ -370,20 +417,42 @@ export function createWhatsAppWorkspaceTopology({ transport, store }) {
 
     async provisionWorkspaceSurface(input) {
       const existingPresentations = await store.listWhatsAppWorkspacePresentations(input.projectId);
+      const liveIndependentSourceWorkspacePresentation = await resolveLiveIndependentSourceWorkspacePresentation({
+        existingPresentations,
+        sourceWorkspaceId: input.sourceWorkspaceId,
+      });
       if (input.repoPresentation?.topology_kind === "community") {
         if (!input.repoPresentation.community_chat_id) {
           throw new Error(`Community presentation for project ${input.projectId} is missing its community chat id.`);
         }
         let activeCommunityChatId = input.repoPresentation.community_chat_id;
-        if (input.repoPresentation.main_workspace_id) {
+        const selectedMainWorkspaceId = liveIndependentSourceWorkspacePresentation?.workspace_id
+          ?? input.repoPresentation.main_workspace_id;
+        if (selectedMainWorkspaceId) {
           activeCommunityChatId = await ensureCommunityMainWorkspaceSurface({
             projectId: input.projectId,
-            mainWorkspaceId: input.repoPresentation.main_workspace_id,
+            mainWorkspaceId: selectedMainWorkspaceId,
             communityChatId: activeCommunityChatId,
             existingPresentations,
             sourceChatName: input.sourceChatName,
             allowReplacement: true,
           });
+          if (
+            liveIndependentSourceWorkspacePresentation
+            && input.repoPresentation.main_workspace_id
+            && input.repoPresentation.main_workspace_id !== selectedMainWorkspaceId
+          ) {
+            const previousMainWorkspacePresentation = findWorkspacePresentation(
+              input.repoPresentation.main_workspace_id,
+              existingPresentations,
+            );
+            if (previousMainWorkspacePresentation) {
+              await demoteWorkspaceSurfaceFromMain({
+                projectId: input.projectId,
+                existingWorkspacePresentation: previousMainWorkspacePresentation,
+              });
+            }
+          }
         }
         return provisionCommunityWorkspaceSurface({
           projectId: input.projectId,
@@ -402,7 +471,9 @@ export function createWhatsAppWorkspaceTopology({ transport, store }) {
       if (!transport.createCommunity) {
         throw new Error("Workspace creation requires community provisioning support.");
       }
-      const mainWorkspaceId = input.repoPresentation?.main_workspace_id ?? existingPresentations[0]?.workspace_id;
+      const mainWorkspaceId = liveIndependentSourceWorkspacePresentation?.workspace_id
+        ?? input.repoPresentation?.main_workspace_id
+        ?? existingPresentations[0]?.workspace_id;
       if (!mainWorkspaceId) {
         throw new Error(`Could not determine the main workspace for project ${input.projectId}.`);
       }
