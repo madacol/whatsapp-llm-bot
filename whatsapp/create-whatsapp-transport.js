@@ -10,6 +10,7 @@ import { createSelectRuntime } from "./runtime/select-runtime.js";
 
 const log = createLogger("whatsapp");
 const WHATSAPP_TEST_LOG_PATH = process.env.WHATSAPP_TEST_LOG_PATH ?? "/tmp/wh.log";
+const WHATSAPP_TEST_TIMEOUT_MS = Number.parseInt(process.env.WHATSAPP_TEST_TIMEOUT_MS ?? "15000", 10);
 
 /**
  * @param {unknown} value
@@ -82,23 +83,130 @@ function getSocketMethodNames(sock) {
 /**
  * @param {{
  *   kind: string,
+ *   phase?: "started" | "resolved" | "rejected" | "timeout",
  *   args?: Record<string, unknown>,
  *   result?: unknown,
  *   error?: unknown,
  *   availableMethods?: string[],
+ *   meta?: Record<string, unknown>,
  * }} entry
  * @returns {Promise<void>}
  */
 async function appendWhatsAppTestLog(entry) {
   const rendered = [
     `=== ${new Date().toISOString()} ${entry.kind} ===`,
+    entry.phase ? `phase=${entry.phase}` : null,
     entry.availableMethods ? `methods=${safeSerialize(entry.availableMethods)}` : null,
     entry.args ? `args=${safeSerialize(entry.args)}` : null,
+    entry.meta ? `meta=${safeSerialize(entry.meta)}` : null,
     entry.result !== undefined ? `result=${safeSerialize(entry.result)}` : null,
     entry.error !== undefined ? `error=${safeSerialize(serializeTransportError(entry.error))}` : null,
     "",
   ].filter((line) => line !== null).join("\n");
   await appendFile(WHATSAPP_TEST_LOG_PATH, `${rendered}\n`, "utf8");
+}
+
+/**
+ * @param {string} kind
+ * @param {number} timeoutMs
+ * @returns {Error & {
+ *   code: "WHATSAPP_TEST_TIMEOUT",
+ *   kind: string,
+ *   timeoutMs: number,
+ * }}
+ */
+function createWhatsAppTestTimeoutError(kind, timeoutMs) {
+  const error = new Error(`WhatsApp test "${kind}" timed out after ${timeoutMs}ms.`);
+  error.name = "WhatsAppTestTimeoutError";
+  /** @type {"WHATSAPP_TEST_TIMEOUT"} */
+  const code = "WHATSAPP_TEST_TIMEOUT";
+  return Object.assign(error, {
+    code,
+    kind,
+    timeoutMs,
+  });
+}
+
+/**
+ * @param {Promise<unknown>} promise
+ * @param {string} kind
+ * @param {number} timeoutMs
+ * @returns {Promise<unknown>}
+ */
+function withWhatsAppTestTimeout(promise, kind, timeoutMs) {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      reject(createWhatsAppTestTimeoutError(kind, timeoutMs));
+    }, timeoutMs);
+
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (error) => {
+        clearTimeout(timer);
+        reject(error);
+      },
+    );
+  });
+}
+
+/**
+ * @param {{
+ *   kind: string,
+ *   args?: Record<string, unknown>,
+ *   availableMethods: string[],
+ *   execute: () => Promise<unknown>,
+ *   timeoutMs?: number,
+ *   appendLog?: (entry: {
+ *     kind: string,
+ *     phase?: "started" | "resolved" | "rejected" | "timeout",
+ *     args?: Record<string, unknown>,
+ *     result?: unknown,
+ *     error?: unknown,
+ *     availableMethods?: string[],
+ *     meta?: Record<string, unknown>,
+ *   }) => Promise<void>,
+ * }} input
+ * @returns {Promise<unknown>}
+ */
+export async function runLoggedWhatsAppTestOperation(input) {
+  const timeoutMs = input.timeoutMs ?? WHATSAPP_TEST_TIMEOUT_MS;
+  const appendLog = input.appendLog ?? appendWhatsAppTestLog;
+  const startedAt = Date.now();
+
+  await appendLog({
+    kind: input.kind,
+    phase: "started",
+    args: input.args,
+    availableMethods: input.availableMethods,
+    meta: { timeoutMs },
+  });
+
+  try {
+    const result = await withWhatsAppTestTimeout(input.execute(), input.kind, timeoutMs);
+    await appendLog({
+      kind: input.kind,
+      phase: "resolved",
+      args: input.args,
+      availableMethods: input.availableMethods,
+      result,
+      meta: { durationMs: Date.now() - startedAt },
+    });
+    return result;
+  } catch (error) {
+    const phase = isRecord(error) && error.name === "WhatsAppTestTimeoutError" ? "timeout" : "rejected";
+    await appendLog({
+      kind: input.kind,
+      phase,
+      args: input.args,
+      availableMethods: input.availableMethods,
+      error,
+      meta: { durationMs: Date.now() - startedAt },
+    });
+    throw error;
+  }
 }
 
 /**
@@ -337,105 +445,102 @@ export async function createWhatsAppTransport() {
       try {
         switch (input.kind) {
           case "methods": {
-            await appendWhatsAppTestLog({
+            await runLoggedWhatsAppTestOperation({
               kind: input.kind,
+              args: input,
               availableMethods,
-              result: { count: availableMethods.length, methods: availableMethods },
+              execute: async () => ({ count: availableMethods.length, methods: availableMethods }),
             });
             return {
               summary: `Logged ${availableMethods.length} WhatsApp group/community methods to ${WHATSAPP_TEST_LOG_PATH}.`,
             };
           }
           case "community-create": {
-            const result = await sock.communityCreate(input.subject, input.description);
-            await appendWhatsAppTestLog({
+            await runLoggedWhatsAppTestOperation({
               kind: input.kind,
               args: input,
               availableMethods,
-              result,
+              execute: async () => sock.communityCreate(input.subject, input.description),
             });
             return {
               summary: `Logged community creation result for \`${input.subject}\` to ${WHATSAPP_TEST_LOG_PATH}.`,
             };
           }
           case "community-create-group": {
-            const result = await sock.communityCreateGroup(
-              input.subject,
-              input.participants,
-              input.parentCommunityJid,
-            );
-            await appendWhatsAppTestLog({
+            await runLoggedWhatsAppTestOperation({
               kind: input.kind,
               args: input,
               availableMethods,
-              result,
+              execute: async () => sock.communityCreateGroup(
+                input.subject,
+                input.participants,
+                input.parentCommunityJid,
+              ),
             });
             return {
               summary: `Logged subgroup creation result for \`${input.subject}\` to ${WHATSAPP_TEST_LOG_PATH}.`,
             };
           }
           case "community-link": {
-            const result = await sock.communityLinkGroup(input.groupJid, input.parentCommunityJid);
-            await appendWhatsAppTestLog({
+            await runLoggedWhatsAppTestOperation({
               kind: input.kind,
               args: input,
               availableMethods,
-              result,
+              execute: async () => sock.communityLinkGroup(input.groupJid, input.parentCommunityJid),
             });
             return {
               summary: `Logged community link result for \`${input.groupJid}\` to ${WHATSAPP_TEST_LOG_PATH}.`,
             };
           }
           case "community-metadata": {
-            const result = await sock.communityMetadata(input.jid);
-            await appendWhatsAppTestLog({
+            await runLoggedWhatsAppTestOperation({
               kind: input.kind,
               args: input,
               availableMethods,
-              result,
+              execute: async () => sock.communityMetadata(input.jid),
             });
             return {
               summary: `Logged community metadata for \`${input.jid}\` to ${WHATSAPP_TEST_LOG_PATH}.`,
             };
           }
           case "community-linked": {
-            const result = await sock.communityFetchLinkedGroups(input.jid);
-            await appendWhatsAppTestLog({
+            await runLoggedWhatsAppTestOperation({
               kind: input.kind,
               args: input,
               availableMethods,
-              result,
+              execute: async () => sock.communityFetchLinkedGroups(input.jid),
             });
             return {
               summary: `Logged linked groups for \`${input.jid}\` to ${WHATSAPP_TEST_LOG_PATH}.`,
             };
           }
           case "smoke": {
-            const description = `madabot smoke test ${new Date().toISOString()}`;
-            const communitySubject = `${input.baseSubject} Community`;
-            const subgroupSubject = `${input.baseSubject} Workspace`;
-            const community = await sock.communityCreate(communitySubject, description);
-            if (!community?.id) {
-              throw new Error("communityCreate returned no community id.");
-            }
-            const metadata = await sock.communityMetadata(community.id);
-            const subgroup = await sock.communityCreateGroup(
-              subgroupSubject,
-              input.participants,
-              community.id,
-            );
-            const linked = await sock.communityFetchLinkedGroups(community.id);
-            const result = {
-              community,
-              metadata,
-              subgroup,
-              linked,
-            };
-            await appendWhatsAppTestLog({
+            await runLoggedWhatsAppTestOperation({
               kind: input.kind,
               args: input,
               availableMethods,
-              result,
+              execute: async () => {
+                const description = `madabot smoke test ${new Date().toISOString()}`;
+                const communitySubject = `${input.baseSubject} Community`;
+                const subgroupSubject = `${input.baseSubject} Workspace`;
+                const community = await sock.communityCreate(communitySubject, description);
+                if (!community?.id) {
+                  throw new Error("communityCreate returned no community id.");
+                }
+                const metadata = await sock.communityMetadata(community.id);
+                const subgroup = await sock.communityCreateGroup(
+                  subgroupSubject,
+                  input.participants,
+                  community.id,
+                );
+                const linked = await sock.communityFetchLinkedGroups(community.id);
+                return {
+                  community,
+                  metadata,
+                  subgroup,
+                  linked,
+                };
+              },
             });
             return {
               summary: `Logged WhatsApp smoke test artifacts for \`${input.baseSubject}\` to ${WHATSAPP_TEST_LOG_PATH}.`,
