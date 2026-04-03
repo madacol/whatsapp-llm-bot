@@ -6,44 +6,11 @@ import {
 } from "../whatsapp/create-whatsapp-transport.js";
 
 describe("WhatsApp transport community creation", () => {
-  it("returns the created community id directly from the raw query response", async () => {
+  it("returns the created community id from Baileys community metadata", async () => {
     const socket = {
-      query: async () => ({
-        tag: "iq",
-        attrs: {},
-        content: [{
-          tag: "group",
-          attrs: { id: "community-12345" },
-        }],
-      }),
-      communityCreate: async () => {
-        throw new Error("should not fall back to Baileys communityCreate when query is available");
-      },
-    };
-
-    const result = await executeCommunityCreate(socket, "Project Main", "Primary workspace community");
-
-    assert.deepEqual(result, {
-      chatId: "community-12345@g.us",
-      subject: "Project Main",
-    });
-  });
-
-  it("recovers the created community id from participating communities when the query response lacks a group node", async () => {
-    const socket = {
-      query: async () => ({
-        tag: "iq",
-        attrs: {},
-        content: [],
-      }),
-      communityCreate: async () => {
-        throw new Error("should not fall back to Baileys communityCreate when query is available");
-      },
-      communityFetchAllParticipating: async () => ({
-        "community-12345@g.us": {
-          id: "community-12345@g.us",
-          subject: "Project Main",
-        },
+      communityCreate: async () => ({
+        id: "community-12345",
+        subject: "Project Main",
       }),
     };
 
@@ -55,19 +22,23 @@ describe("WhatsApp transport community creation", () => {
     });
   });
 
-  it("returns the created subgroup id directly from the raw query response", async () => {
+  it("throws when Baileys communityCreate returns no community id", async () => {
     const socket = {
-      query: async () => ({
-        tag: "iq",
-        attrs: {},
-        content: [{
-          tag: "group",
-          attrs: { id: "group-12345" },
-        }],
+      communityCreate: async () => ({ subject: "Project Main" }),
+    };
+
+    await assert.rejects(
+      () => executeCommunityCreate(socket, "Project Main", "Primary workspace community"),
+      /Baileys communityCreate returned no community id\./,
+    );
+  });
+
+  it("returns the created subgroup id from Baileys group metadata", async () => {
+    const socket = {
+      communityCreateGroup: async () => ({
+        id: "group-12345",
+        subject: "payments",
       }),
-      communityCreateGroup: async () => {
-        throw new Error("should not fall back to Baileys communityCreateGroup when query is available");
-      },
     };
 
     const result = await executeCommunityCreateGroup(
@@ -81,5 +52,21 @@ describe("WhatsApp transport community creation", () => {
       chatId: "group-12345@g.us",
       subject: "payments",
     });
+  });
+
+  it("throws when Baileys communityCreateGroup returns no group id", async () => {
+    const socket = {
+      communityCreateGroup: async () => ({ subject: "payments" }),
+    };
+
+    await assert.rejects(
+      () => executeCommunityCreateGroup(
+        socket,
+        "payments",
+        ["user@s.whatsapp.net"],
+        "community-12345@g.us",
+      ),
+      /Baileys communityCreateGroup returned no group id\./,
+    );
   });
 });
