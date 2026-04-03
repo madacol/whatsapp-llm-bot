@@ -1,7 +1,7 @@
 import { contentEvent } from "../outbound-events.js";
 
-const TMP_PROBE_GROUP_JID = "120363408886216450@g.us";
-const TMP_PROBE_GROUP_SUBJECT = "[setup] Baby Jarvis dev";
+const TMP_PROBE_GROUP_JID = "120363426153979898@g.us";
+const TMP_PROBE_GROUP_SUBJECT = "probe-external-link-raw";
 
 const TEST_COMMAND_USAGE = [
   "Usage: `!tmp`",
