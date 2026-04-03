@@ -9,6 +9,7 @@ import { contentEvent } from "./outbound-events.js";
  *     context: ExecuteActionContext,
  *     workspaceName: string,
  *     baseBranch: string,
+ *     sourceWorkspaceId?: string,
  *     seedPrompt?: string,
  *     sourceTurn: {
  *       senderIds: string[],
@@ -193,6 +194,7 @@ export async function tryHandleWorkspaceCommand({ context, binding, inputText, w
           context,
           workspaceName: parsed.workspaceName,
           baseBranch: binding.workspace.branch,
+          sourceWorkspaceId: binding.workspace.workspace_id,
           seedPrompt: parsed.seedPrompt,
           sourceTurn: seedSourceTurn,
         });
