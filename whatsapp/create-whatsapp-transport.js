@@ -60,10 +60,21 @@ function normalizeGroupChatId(rawId) {
 export async function executeCommunityCreate(sock, subject, description) {
   const metadata = await sock.communityCreate(subject, description);
   if (!metadata) {
+    log.error("Baileys communityCreate returned empty metadata.", {
+      subject,
+      description,
+      metadata,
+    });
     throw new Error("Baileys communityCreate returned no community id.");
   }
   const chatId = normalizeGroupChatId(metadata.id);
   if (!chatId) {
+    log.error("Baileys communityCreate returned metadata without a usable id.", {
+      subject,
+      description,
+      metadata,
+      metadataKeys: Object.keys(metadata),
+    });
     throw new Error("Baileys communityCreate returned no community id.");
   }
   return {
@@ -83,10 +94,23 @@ export async function executeCommunityCreate(sock, subject, description) {
 export async function executeCommunityCreateGroup(sock, subject, participants, parentCommunityChatId) {
   const metadata = await sock.communityCreateGroup(subject, participants, parentCommunityChatId);
   if (!metadata) {
+    log.error("Baileys communityCreateGroup returned empty metadata.", {
+      subject,
+      participants,
+      parentCommunityChatId,
+      metadata,
+    });
     throw new Error("Baileys communityCreateGroup returned no group id.");
   }
   const chatId = normalizeGroupChatId(metadata.id);
   if (!chatId) {
+    log.error("Baileys communityCreateGroup returned metadata without a usable id.", {
+      subject,
+      participants,
+      parentCommunityChatId,
+      metadata,
+      metadataKeys: Object.keys(metadata),
+    });
     throw new Error("Baileys communityCreateGroup returned no group id.");
   }
   return {
