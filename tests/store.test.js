@@ -59,14 +59,14 @@ describe("store with injected DB", () => {
         defaultBaseBranch: "master",
       });
       await store.saveWhatsAppWorkspacePresentation({
-        repoId: repo.repo_id,
+        projectId: repo.project_id,
         workspaceId: "workspace-store-1",
         workspaceChatId: "store-workspace-chat",
         workspaceChatSubject: "[payments] Original Group",
       });
       const workspace = await store.createWorkspace({
         workspaceId: "workspace-store-1",
-        repoId: repo.repo_id,
+        projectId: repo.project_id,
         name: "payments",
         branch: "payments",
         baseBranch: "master",
@@ -75,7 +75,7 @@ describe("store with injected DB", () => {
 
       assert.deepEqual(workspace, {
         workspace_id: "workspace-store-1",
-        repo_id: repo.repo_id,
+        project_id: repo.project_id,
         name: "payments",
         branch: "payments",
         base_branch: "master",
@@ -110,42 +110,42 @@ describe("store with injected DB", () => {
       });
 
       await store.upsertWhatsAppProjectPresentation({
-        repoId: repo.repo_id,
+        projectId: repo.project_id,
         topologyKind: "groups",
       });
 
       await store.saveWhatsAppWorkspacePresentation({
-        repoId: repo.repo_id,
+        projectId: repo.project_id,
         workspaceId: "ws-presentation-1",
         workspaceChatId: "wa-workspace-chat",
         workspaceChatSubject: "[payments] Original Group",
       });
 
-      const repoPresentation = await store.getWhatsAppProjectPresentation(repo.repo_id);
+      const repoPresentation = await store.getWhatsAppProjectPresentation(repo.project_id);
       const workspacePresentation = await store.getWhatsAppWorkspacePresentation("ws-presentation-1");
       const byChat = await store.getWhatsAppWorkspacePresentationByChat("wa-workspace-chat");
 
       assert.deepEqual(repoPresentation && {
-        repo_id: repoPresentation.repo_id,
+        project_id: repoPresentation.project_id,
         topology_kind: repoPresentation.topology_kind,
         community_chat_id: repoPresentation.community_chat_id,
         main_workspace_id: repoPresentation.main_workspace_id,
       }, {
-        repo_id: repo.repo_id,
+        project_id: repo.project_id,
         topology_kind: "groups",
         community_chat_id: null,
         main_workspace_id: null,
       });
       assert.deepEqual(workspacePresentation && {
         workspace_id: workspacePresentation.workspace_id,
-        repo_id: workspacePresentation.repo_id,
+        project_id: workspacePresentation.project_id,
         workspace_chat_id: workspacePresentation.workspace_chat_id,
         workspace_chat_subject: workspacePresentation.workspace_chat_subject,
         role: workspacePresentation.role,
         linked_community_chat_id: workspacePresentation.linked_community_chat_id,
       }, {
         workspace_id: "ws-presentation-1",
-        repo_id: repo.repo_id,
+        project_id: repo.project_id,
         workspace_chat_id: "wa-workspace-chat",
         workspace_chat_subject: "[payments] Original Group",
         role: "workspace",
@@ -153,12 +153,12 @@ describe("store with injected DB", () => {
       });
       assert.deepEqual(byChat && {
         workspace_id: byChat.workspace_id,
-        repo_id: byChat.repo_id,
+        project_id: byChat.project_id,
         workspace_chat_id: byChat.workspace_chat_id,
         workspace_chat_subject: byChat.workspace_chat_subject,
       }, {
         workspace_id: "ws-presentation-1",
-        repo_id: repo.repo_id,
+        project_id: repo.project_id,
         workspace_chat_id: "wa-workspace-chat",
         workspace_chat_subject: "[payments] Original Group",
       });
@@ -180,33 +180,157 @@ describe("store with injected DB", () => {
 
       assert.deepEqual(binding && {
         binding_kind: binding.binding_kind,
-        repo_id: binding.repo_id,
+        project_id: binding.project_id,
         workspace_id: binding.workspace_id,
       }, {
         binding_kind: "project",
-        repo_id: project.repo_id,
+        project_id: project.project_id,
         workspace_id: null,
       });
     });
 
     it("normalizes legacy repo bindings to project bindings when read", async () => {
       const chatId = `legacy-binding-${Date.now()}`;
-      const repoId = `legacy-project-${Date.now()}`;
+      const projectId = `legacy-project-${Date.now()}`;
       await store.createChat(chatId);
       await db.sql`
-        INSERT INTO repos (repo_id, name, root_path, default_base_branch, control_chat_id)
-        VALUES (${repoId}, ${`legacy-project-${Date.now()}`}, ${`/repo/legacy-${Date.now()}`}, 'main', NULL)
+        INSERT INTO projects (project_id, name, root_path, default_base_branch, control_chat_id)
+        VALUES (${projectId}, ${`legacy-project-${Date.now()}`}, ${`/repo/legacy-${Date.now()}`}, 'main', NULL)
       `;
       await db.sql`
-        INSERT INTO chat_bindings (chat_id, binding_kind, repo_id, workspace_id)
-        VALUES (${chatId}, 'repo', ${repoId}, NULL)
+        INSERT INTO chat_bindings (chat_id, binding_kind, project_id, workspace_id)
+        VALUES (${chatId}, 'repo', ${projectId}, NULL)
       `;
 
       const binding = await store.getChatBinding(chatId);
 
       assert.equal(binding?.binding_kind, "project");
-      assert.equal(binding?.repo_id, repoId);
+      assert.equal(binding?.project_id, projectId);
       assert.equal(binding?.workspace_id, null);
+    });
+
+    it("migrates legacy repo schema tables and ids to the project schema", async () => {
+      const freshDb = new PGlite("memory://", { extensions: { vector } });
+      const projectId = `legacy-project-${Date.now()}`;
+      const workspaceId = `legacy-workspace-${Date.now()}`;
+      await freshDb.sql`
+        CREATE TABLE chats (
+          chat_id VARCHAR(50) PRIMARY KEY,
+          is_enabled BOOLEAN DEFAULT FALSE,
+          system_prompt TEXT,
+          timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+      `;
+      await freshDb.sql`
+        CREATE TABLE repos (
+          repo_id TEXT PRIMARY KEY,
+          name TEXT NOT NULL UNIQUE,
+          root_path TEXT NOT NULL,
+          default_base_branch TEXT NOT NULL,
+          control_chat_id VARCHAR(50),
+          timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+      `;
+      await freshDb.sql`
+        CREATE TABLE workspaces (
+          workspace_id TEXT PRIMARY KEY,
+          repo_id TEXT NOT NULL,
+          name TEXT NOT NULL,
+          branch TEXT NOT NULL,
+          base_branch TEXT NOT NULL,
+          worktree_path TEXT NOT NULL,
+          status TEXT NOT NULL DEFAULT 'ready',
+          workspace_chat_id VARCHAR(50) NOT NULL,
+          workspace_chat_subject TEXT,
+          last_test_status TEXT NOT NULL DEFAULT 'not_run',
+          last_commit_oid TEXT,
+          conflicted_files JSONB NOT NULL DEFAULT '[]',
+          archived_at TIMESTAMP,
+          timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+      `;
+      await freshDb.sql`
+        CREATE TABLE chat_bindings (
+          chat_id VARCHAR(50) PRIMARY KEY,
+          binding_kind TEXT NOT NULL,
+          repo_id TEXT,
+          workspace_id TEXT,
+          timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+      `;
+      await freshDb.sql`
+        CREATE TABLE whatsapp_repo_presentations (
+          repo_id TEXT PRIMARY KEY,
+          topology_kind TEXT NOT NULL DEFAULT 'groups',
+          community_chat_id VARCHAR(50),
+          main_workspace_id TEXT,
+          timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+      `;
+      await freshDb.sql`
+        CREATE TABLE whatsapp_workspace_presentations (
+          workspace_id TEXT PRIMARY KEY,
+          repo_id TEXT NOT NULL,
+          workspace_chat_id VARCHAR(50) NOT NULL,
+          workspace_chat_subject TEXT NOT NULL,
+          role TEXT NOT NULL DEFAULT 'workspace',
+          linked_community_chat_id VARCHAR(50),
+          timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+      `;
+      await freshDb.sql`
+        INSERT INTO chats(chat_id) VALUES ('legacy-project-chat'), ('legacy-workspace-chat')
+      `;
+      await freshDb.sql`
+        INSERT INTO repos (repo_id, name, root_path, default_base_branch, control_chat_id)
+        VALUES (${projectId}, 'legacy-project', '/repo/legacy', 'main', 'legacy-project-chat')
+      `;
+      await freshDb.sql`
+        INSERT INTO workspaces (
+          workspace_id, repo_id, name, branch, base_branch, worktree_path, status, workspace_chat_id, workspace_chat_subject
+        )
+        VALUES (
+          ${workspaceId}, ${projectId}, 'payments', 'payments', 'main', '/repo/legacy/.madabot/worktrees/payments', 'ready',
+          'legacy-workspace-chat', 'payments'
+        )
+      `;
+      await freshDb.sql`
+        INSERT INTO chat_bindings (chat_id, binding_kind, repo_id, workspace_id)
+        VALUES ('legacy-project-chat', 'repo', ${projectId}, NULL)
+      `;
+      await freshDb.sql`
+        INSERT INTO whatsapp_repo_presentations (repo_id, topology_kind, community_chat_id, main_workspace_id)
+        VALUES (${projectId}, 'groups', NULL, ${workspaceId})
+      `;
+      await freshDb.sql`
+        INSERT INTO whatsapp_workspace_presentations (
+          workspace_id, repo_id, workspace_chat_id, workspace_chat_subject, role, linked_community_chat_id
+        )
+        VALUES (${workspaceId}, ${projectId}, 'legacy-workspace-chat', 'payments', 'main', NULL)
+      `;
+
+      const migratedStore = await initStore(freshDb);
+      const tables = await freshDb.sql`
+        SELECT table_name FROM information_schema.tables
+        WHERE table_schema = 'public'
+          AND table_name IN ('repos', 'projects', 'whatsapp_repo_presentations', 'whatsapp_project_presentations')
+        ORDER BY table_name
+      `;
+      const project = await migratedStore.getProject(projectId);
+      const workspace = await migratedStore.getWorkspace(workspaceId);
+      const binding = await migratedStore.getChatBinding("legacy-project-chat");
+      const projectPresentation = await migratedStore.getWhatsAppProjectPresentation(projectId);
+      const workspacePresentation = await migratedStore.getWhatsAppWorkspacePresentation(workspaceId);
+
+      assert.deepEqual(tables.rows.map((row) => row.table_name), ["projects", "whatsapp_project_presentations"]);
+      assert.equal(project?.project_id, projectId);
+      assert.equal(project?.control_chat_id, "legacy-project-chat");
+      assert.equal(workspace?.project_id, projectId);
+      assert.equal(binding?.binding_kind, "project");
+      assert.equal(binding?.project_id, projectId);
+      assert.equal(projectPresentation?.project_id, projectId);
+      assert.equal(projectPresentation?.main_workspace_id, workspaceId);
+      assert.equal(workspacePresentation?.project_id, projectId);
     });
   });
 

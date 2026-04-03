@@ -16,7 +16,7 @@ describe("workspace lifecycle service", () => {
     /** @type {WorkspaceRow} */
     const workspace = {
       workspace_id: "ws-1",
-      repo_id: "repo-1",
+      project_id: "repo-1",
       name: "payments",
       branch: "payments",
       base_branch: "main",
@@ -77,7 +77,7 @@ describe("workspace lifecycle service", () => {
     });
 
     const project = /** @type {ProjectRow} */ ({
-      repo_id: "repo-1",
+      project_id: "repo-1",
       name: "repo",
       root_path: "/repo",
       default_base_branch: "main",

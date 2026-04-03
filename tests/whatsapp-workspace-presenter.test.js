@@ -10,7 +10,7 @@ describe("WhatsAppWorkspacePresenter", () => {
     /** @type {Array<{ chatId: string, participants: string[] }>} */
     const promoted = [];
     /** @type {Array<{
-     *   repoId: string,
+     *   projectId: string,
      *   workspaceId: string,
      *   workspaceChatId: string,
      *   workspaceChatSubject: string,
@@ -19,7 +19,7 @@ describe("WhatsAppWorkspacePresenter", () => {
      * }>} */
     const storedPresentations = [];
     /** @type {Array<{
-     *   repoId: string,
+     *   projectId: string,
      *   topologyKind?: WhatsAppProjectTopologyKind,
      *   communityChatId?: string | null,
      *   mainWorkspaceId?: string | null,
@@ -52,7 +52,7 @@ describe("WhatsAppWorkspacePresenter", () => {
     });
 
     const surface = await presenter.ensureWorkspaceVisible({
-      repoId: "repo-1",
+      projectId: "repo-1",
       workspaceId: "ws-1",
       workspaceName: "payments",
       sourceChatName: "Original Group",
@@ -68,13 +68,13 @@ describe("WhatsAppWorkspacePresenter", () => {
       participants: ["user@s.whatsapp.net"],
     }]);
     assert.deepEqual(storedPresentations, [{
-      repoId: "repo-1",
+      projectId: "repo-1",
       workspaceId: "ws-1",
       workspaceChatId: "workspace-chat",
       workspaceChatSubject: "[payments] Original Group",
     }]);
     assert.deepEqual(storedRepos, [{
-      repoId: "repo-1",
+      projectId: "repo-1",
       topologyKind: "groups",
       mainWorkspaceId: "ws-1",
     }]);
@@ -94,7 +94,7 @@ describe("WhatsAppWorkspacePresenter", () => {
     /** @type {Array<{ chatId: string, communityChatId: string }>} */
     const linkedGroups = [];
     /** @type {Array<{
-     *   repoId: string,
+     *   projectId: string,
      *   workspaceId: string,
      *   workspaceChatId: string,
      *   workspaceChatSubject: string,
@@ -103,7 +103,7 @@ describe("WhatsAppWorkspacePresenter", () => {
      * }>} */
     const storedPresentations = [];
     /** @type {Array<{
-     *   repoId: string,
+     *   projectId: string,
      *   topologyKind?: WhatsAppProjectTopologyKind,
      *   communityChatId?: string | null,
      *   mainWorkspaceId?: string | null,
@@ -112,18 +112,18 @@ describe("WhatsAppWorkspacePresenter", () => {
     const presenter = createWhatsAppWorkspacePresenter({
       store: {
         getWhatsAppProjectPresentation: async () => ({
-          repo_id: "repo-1",
+          project_id: "repo-1",
           topology_kind: "groups",
           community_chat_id: null,
           main_workspace_id: "ws-1",
           timestamp: new Date().toISOString(),
         }),
         getWhatsAppWorkspacePresentation: async () => null,
-        listWhatsAppWorkspacePresentations: async (repoId) => {
-          assert.equal(repoId, "repo-1");
+        listWhatsAppWorkspacePresentations: async (projectId) => {
+          assert.equal(projectId, "repo-1");
           return [{
             workspace_id: "ws-1",
-            repo_id: "repo-1",
+            project_id: "repo-1",
             workspace_chat_id: "flat-chat",
             workspace_chat_subject: "[payments] Original Group",
             role: "workspace",
@@ -163,7 +163,7 @@ describe("WhatsAppWorkspacePresenter", () => {
     });
 
     const surface = await presenter.ensureWorkspaceVisible({
-      repoId: "repo-1",
+      projectId: "repo-1",
       workspaceId: "ws-2",
       workspaceName: "fraud-fix",
       sourceChatName: "Original Group",
@@ -190,14 +190,14 @@ describe("WhatsAppWorkspacePresenter", () => {
       communityChatId: "community-chat",
     }]);
     assert.deepEqual(storedRepos, [{
-      repoId: "repo-1",
+      projectId: "repo-1",
       topologyKind: "community",
       communityChatId: "community-chat",
       mainWorkspaceId: "ws-1",
     }]);
     assert.deepEqual(storedPresentations, [
       {
-        repoId: "repo-1",
+        projectId: "repo-1",
         workspaceId: "ws-1",
         workspaceChatId: "flat-chat",
         workspaceChatSubject: "main",
@@ -205,7 +205,7 @@ describe("WhatsAppWorkspacePresenter", () => {
         linkedCommunityChatId: "community-chat",
       },
       {
-        repoId: "repo-1",
+        projectId: "repo-1",
         workspaceId: "ws-2",
         workspaceChatId: "community-feature-chat",
         workspaceChatSubject: "fraud-fix",
@@ -227,7 +227,7 @@ describe("WhatsAppWorkspacePresenter", () => {
     /** @type {Array<{ chatId: string, communityChatId: string }>} */
     const linkedGroups = [];
     /** @type {Array<{
-     *   repoId: string,
+     *   projectId: string,
      *   workspaceId: string,
      *   workspaceChatId: string,
      *   workspaceChatSubject: string,
@@ -238,7 +238,7 @@ describe("WhatsAppWorkspacePresenter", () => {
     const presenter = createWhatsAppWorkspacePresenter({
       store: {
         getWhatsAppProjectPresentation: async () => ({
-          repo_id: "repo-1",
+          project_id: "repo-1",
           topology_kind: "community",
           community_chat_id: "community-chat",
           main_workspace_id: "ws-1",
@@ -248,7 +248,7 @@ describe("WhatsAppWorkspacePresenter", () => {
         listWhatsAppWorkspacePresentations: async () => ([
           {
             workspace_id: "ws-1",
-            repo_id: "repo-1",
+            project_id: "repo-1",
             workspace_chat_id: "flat-chat",
             workspace_chat_subject: "[payments] Original Group",
             role: "workspace",
@@ -287,7 +287,7 @@ describe("WhatsAppWorkspacePresenter", () => {
     });
 
     const surface = await presenter.ensureWorkspaceVisible({
-      repoId: "repo-1",
+      projectId: "repo-1",
       workspaceId: "ws-3",
       workspaceName: "bugfix",
       sourceChatName: "Original Group",
@@ -309,7 +309,7 @@ describe("WhatsAppWorkspacePresenter", () => {
     }]);
     assert.deepEqual(storedPresentations, [
       {
-        repoId: "repo-1",
+        projectId: "repo-1",
         workspaceId: "ws-1",
         workspaceChatId: "flat-chat",
         workspaceChatSubject: "main",
@@ -317,7 +317,7 @@ describe("WhatsAppWorkspacePresenter", () => {
         linkedCommunityChatId: "community-chat",
       },
       {
-        repoId: "repo-1",
+        projectId: "repo-1",
         workspaceId: "ws-3",
         workspaceChatId: "community-bugfix-chat",
         workspaceChatSubject: "bugfix",
@@ -335,7 +335,7 @@ describe("WhatsAppWorkspacePresenter", () => {
     /** @type {Array<{ subject: string, participants: string[], parentCommunityChatId: string }>} */
     const createdCommunityGroups = [];
     /** @type {Array<{
-     *   repoId: string,
+     *   projectId: string,
      *   workspaceId: string,
      *   workspaceChatId: string,
      *   workspaceChatSubject: string,
@@ -346,7 +346,7 @@ describe("WhatsAppWorkspacePresenter", () => {
     const presenter = createWhatsAppWorkspacePresenter({
       store: {
         getWhatsAppProjectPresentation: async () => ({
-          repo_id: "repo-1",
+          project_id: "repo-1",
           topology_kind: "community",
           community_chat_id: "community-chat",
           main_workspace_id: "ws-1",
@@ -356,7 +356,7 @@ describe("WhatsAppWorkspacePresenter", () => {
         listWhatsAppWorkspacePresentations: async () => ([
           {
             workspace_id: "ws-1",
-            repo_id: "repo-1",
+            project_id: "repo-1",
             workspace_chat_id: "community-main-chat",
             workspace_chat_subject: "main",
             role: "main",
@@ -386,7 +386,7 @@ describe("WhatsAppWorkspacePresenter", () => {
     });
 
     const surface = await presenter.ensureWorkspaceVisible({
-      repoId: "repo-1",
+      projectId: "repo-1",
       workspaceId: "ws-3",
       workspaceName: "bugfix",
       sourceChatName: "Original Group",
@@ -399,7 +399,7 @@ describe("WhatsAppWorkspacePresenter", () => {
       parentCommunityChatId: "community-chat",
     }]);
     assert.deepEqual(storedPresentations, [{
-      repoId: "repo-1",
+      projectId: "repo-1",
       workspaceId: "ws-3",
       workspaceChatId: "community-bugfix-chat",
       workspaceChatSubject: "bugfix",
@@ -420,7 +420,7 @@ describe("WhatsAppWorkspacePresenter", () => {
     /** @type {Array<{ chatId: string, participants: string[] }>} */
     const promoted = [];
     /** @type {Array<{
-     *   repoId: string,
+     *   projectId: string,
      *   workspaceId: string,
      *   workspaceChatId: string,
      *   workspaceChatSubject: string,
@@ -433,7 +433,7 @@ describe("WhatsAppWorkspacePresenter", () => {
         getWhatsAppProjectPresentation: async () => null,
         getWhatsAppWorkspacePresentation: async () => ({
           workspace_id: "ws-1",
-          repo_id: "repo-1",
+          project_id: "repo-1",
           workspace_chat_id: "workspace-chat",
           workspace_chat_subject: "[payments] Old Name",
           role: "workspace",
@@ -463,7 +463,7 @@ describe("WhatsAppWorkspacePresenter", () => {
     });
 
     const surface = await presenter.ensureWorkspaceVisible({
-      repoId: "repo-1",
+      projectId: "repo-1",
       workspaceId: "ws-1",
       workspaceName: "payments",
       sourceChatName: "Original Group",
@@ -483,7 +483,7 @@ describe("WhatsAppWorkspacePresenter", () => {
       participants: ["user@s.whatsapp.net"],
     }]);
     assert.deepEqual(storedPresentations, [{
-      repoId: "repo-1",
+      projectId: "repo-1",
       workspaceId: "ws-1",
       workspaceChatId: "workspace-chat",
       workspaceChatSubject: "[payments] Original Group",
@@ -504,7 +504,7 @@ describe("WhatsAppWorkspacePresenter", () => {
           assert.equal(workspaceId, "ws-1");
           return {
             workspace_id: "ws-1",
-            repo_id: "repo-1",
+            project_id: "repo-1",
             workspace_chat_id: "workspace-chat",
             workspace_chat_subject: "[payments] Original Group",
             role: "workspace",
@@ -552,7 +552,7 @@ describe("WhatsAppWorkspacePresenter", () => {
           assert.equal(workspaceId, "ws-1");
           return {
             workspace_id: "ws-1",
-            repo_id: "repo-1",
+            project_id: "repo-1",
             workspace_chat_id: "workspace-chat",
             workspace_chat_subject: "[payments] Original Group",
             role: "workspace",
@@ -599,7 +599,7 @@ describe("WhatsAppWorkspacePresenter", () => {
         getWhatsAppProjectPresentation: async () => null,
         getWhatsAppWorkspacePresentation: async () => ({
           workspace_id: "ws-1",
-          repo_id: "repo-1",
+          project_id: "repo-1",
           workspace_chat_id: "workspace-chat",
           workspace_chat_subject: "[payments] Original Group",
           role: "workspace",

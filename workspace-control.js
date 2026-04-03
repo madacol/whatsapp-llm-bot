@@ -86,7 +86,7 @@ export function createWorkspaceControl({ store, workspacePresentation, workspace
         throw new Error("Workspace name is invalid. Use letters, numbers, spaces, `-`, and `_`.");
       }
 
-      const existing = await store.getWorkspaceByName(repo.repo_id, workspaceName);
+      const existing = await store.getWorkspaceByName(repo.project_id, workspaceName);
       if (existing) {
         const canReplace = canReplaceWorkspace(repo, existing);
         const choice = await context.select(
@@ -115,7 +115,7 @@ export function createWorkspaceControl({ store, workspacePresentation, workspace
       const workspaceId = randomUUID();
       try {
         const surface = await workspacePresentation.ensureWorkspaceVisible({
-          repoId: repo.repo_id,
+          projectId: repo.project_id,
           workspaceId,
           workspaceName,
           sourceChatName: context.chatName,
@@ -123,7 +123,7 @@ export function createWorkspaceControl({ store, workspacePresentation, workspace
         });
         const workspace = await store.createWorkspace({
           workspaceId,
-          repoId: repo.repo_id,
+          projectId: repo.project_id,
           name: workspaceName,
           branch,
           baseBranch,
@@ -166,7 +166,7 @@ export function createWorkspaceControl({ store, workspacePresentation, workspace
 
       const { branch, worktreePath } = await workspaceRepo.replaceWorkspaceCheckout(repo, existing, baseBranch);
       const surface = await workspacePresentation.ensureWorkspaceVisible({
-        repoId: repo.repo_id,
+        projectId: repo.project_id,
         workspaceId: existing.workspace_id,
         workspaceName: existing.name,
         sourceChatName: context.chatName,
@@ -217,7 +217,7 @@ export function createWorkspaceControl({ store, workspacePresentation, workspace
      * @returns {Promise<string>}
      */
     async archiveByName(repo, workspaceName) {
-      const workspace = await store.getWorkspaceByName(repo.repo_id, workspaceName);
+      const workspace = await store.getWorkspaceByName(repo.project_id, workspaceName);
       if (!workspace) {
         throw new Error(`Workspace \`${workspaceName}\` does not exist.`);
       }

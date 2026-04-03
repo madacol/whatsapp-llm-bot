@@ -303,14 +303,14 @@ describe("per-chat model selection", () => {
       const repo = await store.getProjectByRootPath(repoRoot);
       assert.ok(repo);
       await store.saveWhatsAppWorkspacePresentation({
-        repoId: repo.repo_id,
+        projectId: repo.project_id,
         workspaceId: "cfg-folder-workspace-ws",
         workspaceChatId: "cfg-folder-workspace",
         workspaceChatSubject: "settings",
       });
       await store.createWorkspace({
         workspaceId: "cfg-folder-workspace-ws",
-        repoId: repo.repo_id,
+        projectId: repo.project_id,
         name: "settings",
         branch: "settings",
         baseBranch: "master",

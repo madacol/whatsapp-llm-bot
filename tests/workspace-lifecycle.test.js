@@ -280,7 +280,7 @@ describe("workspace lifecycle", () => {
 
     const repo = await store.getProjectByRootPath(repoRoot);
     assert.ok(repo);
-    const originalWorkspace = await store.getWorkspaceByName(repo.repo_id, "payments");
+    const originalWorkspace = await store.getWorkspaceByName(repo.project_id, "payments");
     assert.ok(originalWorkspace);
     await fs.writeFile(path.join(originalWorkspace.worktree_path, "replace-marker.txt"), "old workspace\n");
 
@@ -304,7 +304,7 @@ describe("workspace lifecycle", () => {
       ),
       `expected duplicate !new to offer replace/new/cancel, got: ${turn.responses.map((response) => response.text).join(" | ")}`,
     );
-    const replacedWorkspace = await store.getWorkspaceByName(repo.repo_id, "payments");
+    const replacedWorkspace = await store.getWorkspaceByName(repo.project_id, "payments");
     assert.ok(replacedWorkspace);
     const originalSurface = await getWorkspaceSurface(originalWorkspace.workspace_id);
     const replacedSurface = await getWorkspaceSurface(replacedWorkspace.workspace_id);
@@ -369,7 +369,7 @@ describe("workspace lifecycle", () => {
 
     const repo = await store.getProjectByRootPath(repoRoot);
     assert.ok(repo, "repo should be inferred from the root cwd");
-    const workspace = await store.getWorkspaceByName(repo.repo_id, "payments");
+    const workspace = await store.getWorkspaceByName(repo.project_id, "payments");
     assert.ok(workspace, "workspace should be created");
     const workspaceSurface = await getWorkspaceSurface(workspace.workspace_id);
     assert.equal(workspace?.branch, "payments");
@@ -436,7 +436,7 @@ describe("workspace lifecycle", () => {
 
     const repo = await store.getProjectByRootPath(repoRoot);
     assert.ok(repo, "repo should be inferred from the root cwd");
-    const workspace = await store.getWorkspaceByName(repo.repo_id, "multi word branch");
+    const workspace = await store.getWorkspaceByName(repo.project_id, "multi word branch");
     assert.ok(workspace, "workspace should be created");
     const workspaceSurface = await getWorkspaceSurface(workspace.workspace_id);
     assert.equal(workspace?.branch, "multi-word-branch");
@@ -492,7 +492,7 @@ describe("workspace lifecycle", () => {
 
     const repo = await store.getProjectByRootPath(repoRoot);
     assert.ok(repo, "repo should be inferred from the root cwd");
-    const parentWorkspace = await store.getWorkspaceByName(repo.repo_id, "parent branch");
+    const parentWorkspace = await store.getWorkspaceByName(repo.project_id, "parent branch");
     assert.ok(parentWorkspace, "parent workspace should exist");
     const parentSurface = await getWorkspaceSurface(parentWorkspace.workspace_id);
 
@@ -502,7 +502,7 @@ describe("workspace lifecycle", () => {
     });
     await handleMessage(context);
 
-    const childWorkspace = await store.getWorkspaceByName(repo.repo_id, "child branch");
+    const childWorkspace = await store.getWorkspaceByName(repo.project_id, "child branch");
     assert.ok(childWorkspace, "child workspace should be created");
     assert.equal(childWorkspace?.base_branch, parentWorkspace.branch);
     assert.equal(childWorkspace?.branch, "child-branch");
@@ -537,7 +537,7 @@ describe("workspace lifecycle", () => {
     assert.equal(originalWorkspace?.branch, "master");
     assert.equal(originalWorkspace?.base_branch, "master");
 
-    const childWorkspace = await store.getWorkspaceByName(repo?.repo_id ?? "", "payments");
+    const childWorkspace = await store.getWorkspaceByName(repo?.project_id ?? "", "payments");
     assert.ok(childWorkspace, "expected the sibling workspace created by !new");
     assert.equal(childWorkspace?.branch, "payments");
     assert.equal(childWorkspace?.base_branch, "master");
@@ -603,7 +603,7 @@ describe("workspace lifecycle", () => {
 
     const repo = await store.getProjectByRootPath(repoRoot);
     assert.ok(repo, "repo should be inferred from the root cwd");
-    const workspace = await store.getWorkspaceByName(repo.repo_id, "payments");
+    const workspace = await store.getWorkspaceByName(repo.project_id, "payments");
     assert.ok(workspace, "workspace should exist after !new");
     const workspaceSurface = await getWorkspaceSurface(workspace.workspace_id);
     await writeTrackedFile(workspace.worktree_path, "workspace change");

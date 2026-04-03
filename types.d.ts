@@ -270,7 +270,7 @@ type WhatsAppProjectTopologyKind = "groups" | "community";
 type WhatsAppWorkspacePresentationRole = "workspace" | "main";
 
 type ProjectRow = {
-  repo_id: string;
+  project_id: string;
   name: string;
   root_path: string;
   default_base_branch: string;
@@ -280,7 +280,7 @@ type ProjectRow = {
 
 type WorkspaceRow = {
   workspace_id: string;
-  repo_id: string;
+  project_id: string;
   name: string;
   branch: string;
   base_branch: string;
@@ -298,13 +298,13 @@ type ChatBindingKind = "project" | "workspace";
 type ChatBindingRow = {
   chat_id: string;
   binding_kind: ChatBindingKind;
-  repo_id: string | null;
+  project_id: string | null;
   workspace_id: string | null;
   timestamp: string;
 };
 
 type WhatsAppProjectPresentationRow = {
-  repo_id: string;
+  project_id: string;
   topology_kind: WhatsAppProjectTopologyKind;
   community_chat_id: string | null;
   main_workspace_id: string | null;
@@ -313,7 +313,7 @@ type WhatsAppProjectPresentationRow = {
 
 type WhatsAppWorkspacePresentationRow = {
   workspace_id: string;
-  repo_id: string;
+  project_id: string;
   workspace_chat_id: string;
   workspace_chat_subject: string;
   role: WhatsAppWorkspacePresentationRole;
@@ -353,7 +353,7 @@ type ChatTransport = {
 
 type WorkspacePresentationPort = {
   ensureWorkspaceVisible: (input: {
-    repoId: string;
+    projectId: string;
     workspaceId: string;
     workspaceName: string;
     sourceChatName?: string;

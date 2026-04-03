@@ -23,7 +23,7 @@ function formatLastTestStatus(lastTestStatus) {
  * @returns {Promise<string>}
  */
 export async function listProjectWorkspaces(store, repo) {
-  const workspaces = await store.listActiveWorkspaces(repo.repo_id);
+  const workspaces = await store.listActiveWorkspaces(repo.project_id);
   if (workspaces.length === 0) {
     return "No active workspaces.\nUse `!new <name>` to create one.";
   }

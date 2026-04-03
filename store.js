@@ -121,7 +121,7 @@ function normalizeProjectRow(raw) {
   }
   const timestamp = normalizeTimestampValue(raw.timestamp);
   if (
-    typeof raw.repo_id !== "string"
+    typeof raw.project_id !== "string"
     || typeof raw.name !== "string"
     || typeof raw.root_path !== "string"
     || typeof raw.default_base_branch !== "string"
@@ -131,7 +131,7 @@ function normalizeProjectRow(raw) {
     return null;
   }
   return {
-    repo_id: raw.repo_id,
+    project_id: raw.project_id,
     name: raw.name,
     root_path: raw.root_path,
     default_base_branch: raw.default_base_branch,
@@ -155,7 +155,7 @@ function normalizeWorkspaceRow(raw) {
     : [];
   if (
     typeof raw.workspace_id !== "string"
-    || typeof raw.repo_id !== "string"
+    || typeof raw.project_id !== "string"
     || typeof raw.name !== "string"
     || typeof raw.branch !== "string"
     || typeof raw.base_branch !== "string"
@@ -171,7 +171,7 @@ function normalizeWorkspaceRow(raw) {
   }
   return {
     workspace_id: raw.workspace_id,
-    repo_id: raw.repo_id,
+    project_id: raw.project_id,
     name: raw.name,
     branch: raw.branch,
     base_branch: raw.base_branch,
@@ -197,7 +197,7 @@ function normalizeChatBindingRow(raw) {
   if (
     typeof raw.chat_id !== "string"
     || (raw.binding_kind !== "repo" && raw.binding_kind !== "project" && raw.binding_kind !== "workspace")
-    || (raw.repo_id !== null && typeof raw.repo_id !== "string")
+    || (raw.project_id !== null && typeof raw.project_id !== "string")
     || (raw.workspace_id !== null && typeof raw.workspace_id !== "string")
     || !timestamp
   ) {
@@ -206,7 +206,7 @@ function normalizeChatBindingRow(raw) {
   return {
     chat_id: raw.chat_id,
     binding_kind: raw.binding_kind === "repo" ? "project" : raw.binding_kind,
-    repo_id: raw.repo_id,
+    project_id: raw.project_id,
     workspace_id: raw.workspace_id,
     timestamp,
   };
@@ -222,7 +222,7 @@ function normalizeWhatsAppProjectPresentationRow(raw) {
   }
   const timestamp = normalizeTimestampValue(raw.timestamp);
   if (
-    typeof raw.repo_id !== "string"
+    typeof raw.project_id !== "string"
     || !isWhatsAppProjectTopologyKind(raw.topology_kind)
     || (raw.community_chat_id !== null && typeof raw.community_chat_id !== "string")
     || (raw.main_workspace_id !== null && typeof raw.main_workspace_id !== "string")
@@ -231,7 +231,7 @@ function normalizeWhatsAppProjectPresentationRow(raw) {
     return null;
   }
   return {
-    repo_id: raw.repo_id,
+    project_id: raw.project_id,
     topology_kind: raw.topology_kind,
     community_chat_id: raw.community_chat_id,
     main_workspace_id: raw.main_workspace_id,
@@ -250,7 +250,7 @@ function normalizeWhatsAppWorkspacePresentationRow(raw) {
   const timestamp = normalizeTimestampValue(raw.timestamp);
   if (
     typeof raw.workspace_id !== "string"
-    || typeof raw.repo_id !== "string"
+    || typeof raw.project_id !== "string"
     || typeof raw.workspace_chat_id !== "string"
     || typeof raw.workspace_chat_subject !== "string"
     || !isWhatsAppWorkspacePresentationRole(raw.role)
@@ -261,7 +261,7 @@ function normalizeWhatsAppWorkspacePresentationRow(raw) {
   }
   return {
     workspace_id: raw.workspace_id,
-    repo_id: raw.repo_id,
+    project_id: raw.project_id,
     workspace_chat_id: raw.workspace_chat_id,
     workspace_chat_subject: raw.workspace_chat_subject,
     role: raw.role,
@@ -370,9 +370,83 @@ export async function initStore(injectedDb){
         );
     `;
 
+    await db.sql`DO $$ BEGIN
+      IF EXISTS (
+        SELECT 1 FROM information_schema.tables
+        WHERE table_schema = 'public' AND table_name = 'repos'
+      ) AND NOT EXISTS (
+        SELECT 1 FROM information_schema.tables
+        WHERE table_schema = 'public' AND table_name = 'projects'
+      ) THEN
+        ALTER TABLE repos RENAME TO projects;
+      END IF;
+
+      IF EXISTS (
+        SELECT 1 FROM information_schema.tables
+        WHERE table_schema = 'public' AND table_name = 'whatsapp_repo_presentations'
+      ) AND NOT EXISTS (
+        SELECT 1 FROM information_schema.tables
+        WHERE table_schema = 'public' AND table_name = 'whatsapp_project_presentations'
+      ) THEN
+        ALTER TABLE whatsapp_repo_presentations RENAME TO whatsapp_project_presentations;
+      END IF;
+    END $$`;
+
+    await db.sql`DO $$ BEGIN
+      IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = 'projects' AND column_name = 'repo_id'
+      ) AND NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = 'projects' AND column_name = 'project_id'
+      ) THEN
+        ALTER TABLE projects RENAME COLUMN repo_id TO project_id;
+      END IF;
+
+      IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = 'workspaces' AND column_name = 'repo_id'
+      ) AND NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = 'workspaces' AND column_name = 'project_id'
+      ) THEN
+        ALTER TABLE workspaces RENAME COLUMN repo_id TO project_id;
+      END IF;
+
+      IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = 'chat_bindings' AND column_name = 'repo_id'
+      ) AND NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = 'chat_bindings' AND column_name = 'project_id'
+      ) THEN
+        ALTER TABLE chat_bindings RENAME COLUMN repo_id TO project_id;
+      END IF;
+
+      IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = 'whatsapp_project_presentations' AND column_name = 'repo_id'
+      ) AND NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = 'whatsapp_project_presentations' AND column_name = 'project_id'
+      ) THEN
+        ALTER TABLE whatsapp_project_presentations RENAME COLUMN repo_id TO project_id;
+      END IF;
+
+      IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = 'whatsapp_workspace_presentations' AND column_name = 'repo_id'
+      ) AND NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = 'whatsapp_workspace_presentations' AND column_name = 'project_id'
+      ) THEN
+        ALTER TABLE whatsapp_workspace_presentations RENAME COLUMN repo_id TO project_id;
+      END IF;
+    END $$`;
+
     await db.sql`
-        CREATE TABLE IF NOT EXISTS repos (
-            repo_id TEXT PRIMARY KEY,
+        CREATE TABLE IF NOT EXISTS projects (
+            project_id TEXT PRIMARY KEY,
             name TEXT NOT NULL UNIQUE,
             root_path TEXT NOT NULL,
             default_base_branch TEXT NOT NULL,
@@ -384,7 +458,7 @@ export async function initStore(injectedDb){
     await db.sql`
         CREATE TABLE IF NOT EXISTS workspaces (
             workspace_id TEXT PRIMARY KEY,
-            repo_id TEXT NOT NULL REFERENCES repos(repo_id),
+            project_id TEXT NOT NULL REFERENCES projects(project_id),
             name TEXT NOT NULL,
             branch TEXT NOT NULL,
             base_branch TEXT NOT NULL,
@@ -397,7 +471,7 @@ export async function initStore(injectedDb){
             conflicted_files JSONB NOT NULL DEFAULT '[]',
             archived_at TIMESTAMP,
             timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            UNIQUE (repo_id, name)
+            UNIQUE (project_id, name)
         );
     `;
 
@@ -405,15 +479,15 @@ export async function initStore(injectedDb){
         CREATE TABLE IF NOT EXISTS chat_bindings (
             chat_id VARCHAR(50) PRIMARY KEY REFERENCES chats(chat_id),
             binding_kind TEXT NOT NULL,
-            repo_id TEXT REFERENCES repos(repo_id),
+            project_id TEXT REFERENCES projects(project_id),
             workspace_id TEXT REFERENCES workspaces(workspace_id) UNIQUE,
             timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
     `;
 
     await db.sql`
-        CREATE TABLE IF NOT EXISTS whatsapp_repo_presentations (
-            repo_id TEXT PRIMARY KEY,
+        CREATE TABLE IF NOT EXISTS whatsapp_project_presentations (
+            project_id TEXT PRIMARY KEY,
             topology_kind TEXT NOT NULL DEFAULT 'groups',
             community_chat_id VARCHAR(50) REFERENCES chats(chat_id),
             main_workspace_id TEXT,
@@ -424,7 +498,7 @@ export async function initStore(injectedDb){
     await db.sql`
         CREATE TABLE IF NOT EXISTS whatsapp_workspace_presentations (
             workspace_id TEXT PRIMARY KEY,
-            repo_id TEXT NOT NULL,
+            project_id TEXT NOT NULL,
             workspace_chat_id VARCHAR(50) NOT NULL REFERENCES chats(chat_id) UNIQUE,
             workspace_chat_subject TEXT NOT NULL,
             role TEXT NOT NULL DEFAULT 'workspace',
@@ -520,15 +594,15 @@ export async function initStore(injectedDb){
       `;
 
       await db.sql`
-        INSERT INTO whatsapp_repo_presentations (repo_id, topology_kind)
-        SELECT DISTINCT repo_id, 'groups'
+        INSERT INTO whatsapp_project_presentations (project_id, topology_kind)
+        SELECT DISTINCT project_id, 'groups'
         FROM workspaces
-        ON CONFLICT (repo_id) DO NOTHING
+        ON CONFLICT (project_id) DO NOTHING
       `;
       await db.sql`
         INSERT INTO whatsapp_workspace_presentations (
           workspace_id,
-          repo_id,
+          project_id,
           workspace_chat_id,
           workspace_chat_subject,
           role,
@@ -536,7 +610,7 @@ export async function initStore(injectedDb){
         )
         SELECT
           workspace_id,
-          repo_id,
+          project_id,
           workspace_chat_id,
           COALESCE(workspace_chat_subject, name),
           'workspace',
@@ -544,7 +618,7 @@ export async function initStore(injectedDb){
         FROM workspaces
         ON CONFLICT (workspace_id) DO UPDATE
         SET
-          repo_id = EXCLUDED.repo_id,
+          project_id = EXCLUDED.project_id,
           workspace_chat_id = EXCLUDED.workspace_chat_id,
           workspace_chat_subject = EXCLUDED.workspace_chat_subject
       `;
@@ -644,7 +718,7 @@ export async function initStore(injectedDb){
         db.sql`ALTER TABLE messages ADD COLUMN IF NOT EXISTS embedding vector`,
         db.sql`ALTER TABLE messages ADD COLUMN IF NOT EXISTS search_text tsvector`,
         db.sql`ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS conflicted_files JSONB NOT NULL DEFAULT '[]'`,
-        db.sql`ALTER TABLE repos ALTER COLUMN control_chat_id DROP NOT NULL`,
+        db.sql`ALTER TABLE projects ALTER COLUMN control_chat_id DROP NOT NULL`,
       ]);
       await db.sql`UPDATE workspaces SET workspace_chat_subject = name WHERE workspace_chat_subject IS NULL`;
       await db.sql`
@@ -686,7 +760,7 @@ export async function initStore(injectedDb){
 
     /**
      * @param {{
-     *   repoId: string,
+     *   projectId: string,
      *   topologyKind?: WhatsAppProjectTopologyKind,
      *   communityChatId?: string | null,
      *   mainWorkspaceId?: string | null,
@@ -694,7 +768,7 @@ export async function initStore(injectedDb){
      * @returns {Promise<WhatsAppProjectPresentationRow>}
      */
     async function persistWhatsAppProjectPresentation({
-      repoId,
+      projectId,
       topologyKind = "groups",
       communityChatId = null,
       mainWorkspaceId = null,
@@ -703,19 +777,19 @@ export async function initStore(injectedDb){
         await ensureChatExists(communityChatId);
       }
       const { rows: [row] } = await db.sql`
-        INSERT INTO whatsapp_repo_presentations (
-          repo_id,
+        INSERT INTO whatsapp_project_presentations (
+          project_id,
           topology_kind,
           community_chat_id,
           main_workspace_id
         )
         VALUES (
-          ${repoId},
+          ${projectId},
           ${topologyKind},
           ${communityChatId},
           ${mainWorkspaceId}
         )
-        ON CONFLICT (repo_id) DO UPDATE
+        ON CONFLICT (project_id) DO UPDATE
         SET
           topology_kind = EXCLUDED.topology_kind,
           community_chat_id = EXCLUDED.community_chat_id,
@@ -724,26 +798,26 @@ export async function initStore(injectedDb){
       `;
       const presentation = normalizeWhatsAppProjectPresentationRow(row);
       if (!presentation) {
-        throw new Error(`Failed to normalize WhatsApp project presentation for ${repoId}.`);
+        throw new Error(`Failed to normalize WhatsApp project presentation for ${projectId}.`);
       }
       return presentation;
     }
 
     /**
-     * @param {string} repoId
+     * @param {string} projectId
      * @returns {Promise<void>}
      */
-    async function ensureWhatsAppProjectPresentationExists(repoId) {
+    async function ensureWhatsAppProjectPresentationExists(projectId) {
       await db.sql`
-        INSERT INTO whatsapp_repo_presentations (repo_id, topology_kind)
-        VALUES (${repoId}, 'groups')
-        ON CONFLICT (repo_id) DO NOTHING
+        INSERT INTO whatsapp_project_presentations (project_id, topology_kind)
+        VALUES (${projectId}, 'groups')
+        ON CONFLICT (project_id) DO NOTHING
       `;
     }
 
     /**
      * @param {{
-     *   repoId: string,
+     *   projectId: string,
      *   workspaceId: string,
      *   workspaceChatId: string,
      *   workspaceChatSubject: string,
@@ -753,7 +827,7 @@ export async function initStore(injectedDb){
      * @returns {Promise<WhatsAppWorkspacePresentationRow>}
      */
     async function persistWhatsAppWorkspacePresentation({
-      repoId,
+      projectId,
       workspaceId,
       workspaceChatId,
       workspaceChatSubject,
@@ -767,7 +841,7 @@ export async function initStore(injectedDb){
       const { rows: [row] } = await db.sql`
         INSERT INTO whatsapp_workspace_presentations (
           workspace_id,
-          repo_id,
+          project_id,
           workspace_chat_id,
           workspace_chat_subject,
           role,
@@ -775,7 +849,7 @@ export async function initStore(injectedDb){
         )
         VALUES (
           ${workspaceId},
-          ${repoId},
+          ${projectId},
           ${workspaceChatId},
           ${workspaceChatSubject},
           ${role},
@@ -783,7 +857,7 @@ export async function initStore(injectedDb){
         )
         ON CONFLICT (workspace_id) DO UPDATE
         SET
-          repo_id = EXCLUDED.repo_id,
+          project_id = EXCLUDED.project_id,
           workspace_chat_id = EXCLUDED.workspace_chat_id,
           workspace_chat_subject = EXCLUDED.workspace_chat_subject,
           role = EXCLUDED.role,
@@ -818,19 +892,19 @@ export async function initStore(injectedDb){
      * @param {{
      *   chatId: string,
      *   bindingKind: ChatBindingKind,
-     *   repoId?: string | null,
+     *   projectId?: string | null,
      *   workspaceId?: string | null,
      * }} input
      * @returns {Promise<ChatBindingRow>}
      */
-    async function upsertChatBinding({ chatId, bindingKind, repoId = null, workspaceId = null }) {
+    async function upsertChatBinding({ chatId, bindingKind, projectId = null, workspaceId = null }) {
       await ensureChatExists(chatId);
       const { rows: [row] } = await db.sql`
-        INSERT INTO chat_bindings (chat_id, binding_kind, repo_id, workspace_id)
-        VALUES (${chatId}, ${bindingKind}, ${repoId}, ${workspaceId})
+        INSERT INTO chat_bindings (chat_id, binding_kind, project_id, workspace_id)
+        VALUES (${chatId}, ${bindingKind}, ${projectId}, ${workspaceId})
         ON CONFLICT (chat_id) DO UPDATE SET
           binding_kind = EXCLUDED.binding_kind,
-          repo_id = EXCLUDED.repo_id,
+          project_id = EXCLUDED.project_id,
           workspace_id = EXCLUDED.workspace_id
         RETURNING *
       `;
@@ -938,10 +1012,10 @@ export async function initStore(injectedDb){
         if (controlChatId) {
           await ensureChatExists(controlChatId);
         }
-        const repoId = randomUUID();
+        const projectId = randomUUID();
         const { rows: [row] } = await db.sql`
-          INSERT INTO repos (repo_id, name, root_path, default_base_branch, control_chat_id)
-          VALUES (${repoId}, ${name}, ${rootPath}, ${defaultBaseBranch}, ${controlChatId})
+          INSERT INTO projects (project_id, name, root_path, default_base_branch, control_chat_id)
+          VALUES (${projectId}, ${name}, ${rootPath}, ${defaultBaseBranch}, ${controlChatId})
           RETURNING *
         `;
         const project = normalizeProjectRow(row);
@@ -952,20 +1026,20 @@ export async function initStore(injectedDb){
           await upsertChatBinding({
             chatId: controlChatId,
             bindingKind: "project",
-            repoId: project.repo_id,
+            projectId: project.project_id,
           });
         }
         return project;
       },
 
       /**
-       * @param {string} repoId
+       * @param {string} projectId
        * @returns {Promise<ProjectRow | null>}
        */
-      async getProject (repoId) {
+      async getProject (projectId) {
         const { rows: [row] } = await db.sql`
-          SELECT * FROM repos
-          WHERE repo_id = ${repoId}
+          SELECT * FROM projects
+          WHERE project_id = ${projectId}
           LIMIT 1
         `;
         return normalizeProjectRow(row);
@@ -977,7 +1051,7 @@ export async function initStore(injectedDb){
        */
       async getProjectByChat (chatId) {
         const { rows: [row] } = await db.sql`
-          SELECT * FROM repos
+          SELECT * FROM projects
           WHERE control_chat_id = ${chatId}
           LIMIT 1
         `;
@@ -990,7 +1064,7 @@ export async function initStore(injectedDb){
        */
       async getProjectByRootPath (rootPath) {
         const { rows: [row] } = await db.sql`
-          SELECT * FROM repos
+          SELECT * FROM projects
           WHERE root_path = ${rootPath}
           LIMIT 1
         `;
@@ -1000,7 +1074,7 @@ export async function initStore(injectedDb){
       /**
        * @param {{
        *   workspaceId?: string,
-       *   repoId: string,
+       *   projectId: string,
        *   name: string,
        *   branch: string,
        *   baseBranch: string,
@@ -1011,7 +1085,7 @@ export async function initStore(injectedDb){
        */
       async createWorkspace ({
         workspaceId: providedWorkspaceId,
-        repoId,
+        projectId,
         name,
         branch,
         baseBranch,
@@ -1023,7 +1097,7 @@ export async function initStore(injectedDb){
         const { rows: [row] } = await db.sql`
           INSERT INTO workspaces (
             workspace_id,
-            repo_id,
+            project_id,
             name,
             branch,
             base_branch,
@@ -1034,7 +1108,7 @@ export async function initStore(injectedDb){
           )
           VALUES (
             ${workspaceId},
-            ${repoId},
+            ${projectId},
             ${name},
             ${branch},
             ${baseBranch},
@@ -1052,10 +1126,10 @@ export async function initStore(injectedDb){
         await upsertChatBinding({
           chatId: presentation.workspace_chat_id,
           bindingKind: "workspace",
-          repoId,
+          projectId,
           workspaceId,
         });
-        await ensureWhatsAppProjectPresentationExists(repoId);
+        await ensureWhatsAppProjectPresentationExists(projectId);
         return workspace;
       },
 
@@ -1073,14 +1147,14 @@ export async function initStore(injectedDb){
       },
 
       /**
-       * @param {string} repoId
+       * @param {string} projectId
        * @param {string} name
        * @returns {Promise<WorkspaceRow | null>}
        */
-      async getWorkspaceByName (repoId, name) {
+      async getWorkspaceByName (projectId, name) {
         const { rows: [row] } = await db.sql`
           SELECT * FROM workspaces
-          WHERE repo_id = ${repoId}
+          WHERE project_id = ${projectId}
             AND name = ${name}
           LIMIT 1
         `;
@@ -1101,13 +1175,13 @@ export async function initStore(injectedDb){
       },
 
       /**
-       * @param {string} repoId
+       * @param {string} projectId
        * @returns {Promise<WorkspaceRow[]>}
        */
-      async listActiveWorkspaces (repoId) {
+      async listActiveWorkspaces (projectId) {
         const { rows } = await db.sql`
           SELECT * FROM workspaces
-          WHERE repo_id = ${repoId}
+          WHERE project_id = ${projectId}
             AND archived_at IS NULL
             AND status <> 'archived'
           ORDER BY name
@@ -1162,14 +1236,14 @@ export async function initStore(injectedDb){
 
       /**
        * @param {string} chatId
-       * @param {string} repoId
+       * @param {string} projectId
        * @returns {Promise<ChatBindingRow>}
        */
-      async bindChatToProject (chatId, repoId) {
+      async bindChatToProject (chatId, projectId) {
         return upsertChatBinding({
           chatId,
           bindingKind: "project",
-          repoId,
+          projectId,
         });
       },
 
@@ -1191,7 +1265,7 @@ export async function initStore(injectedDb){
         return upsertChatBinding({
           chatId,
           bindingKind: "workspace",
-          repoId: workspace.repo_id,
+          projectId: workspace.project_id,
           workspaceId,
         });
       },
@@ -1210,13 +1284,13 @@ export async function initStore(injectedDb){
       },
 
       /**
-       * @param {string} repoId
+       * @param {string} projectId
        * @returns {Promise<WhatsAppProjectPresentationRow | null>}
        */
-      async getWhatsAppProjectPresentation (repoId) {
+      async getWhatsAppProjectPresentation (projectId) {
         const { rows: [row] } = await db.sql`
-          SELECT * FROM whatsapp_repo_presentations
-          WHERE repo_id = ${repoId}
+          SELECT * FROM whatsapp_project_presentations
+          WHERE project_id = ${projectId}
           LIMIT 1
         `;
         return normalizeWhatsAppProjectPresentationRow(row);
@@ -1224,7 +1298,7 @@ export async function initStore(injectedDb){
 
       /**
        * @param {{
-       *   repoId: string,
+       *   projectId: string,
        *   topologyKind?: WhatsAppProjectTopologyKind,
        *   communityChatId?: string | null,
        *   mainWorkspaceId?: string | null,
@@ -1262,13 +1336,13 @@ export async function initStore(injectedDb){
       },
 
       /**
-       * @param {string} repoId
+       * @param {string} projectId
        * @returns {Promise<WhatsAppWorkspacePresentationRow[]>}
        */
-      async listWhatsAppWorkspacePresentations (repoId) {
+      async listWhatsAppWorkspacePresentations (projectId) {
         const { rows } = await db.sql`
           SELECT * FROM whatsapp_workspace_presentations
-          WHERE repo_id = ${repoId}
+          WHERE project_id = ${projectId}
           ORDER BY workspace_id
         `;
         return rows
@@ -1278,7 +1352,7 @@ export async function initStore(injectedDb){
 
       /**
        * @param {{
-       *   repoId: string,
+       *   projectId: string,
        *   workspaceId: string,
        *   workspaceChatId: string,
        *   workspaceChatSubject: string,
