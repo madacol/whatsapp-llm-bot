@@ -244,7 +244,7 @@ describe("workspace lifecycle", () => {
     assert.equal(pending, 0, `Mock response queue should be empty after each test, but has ${pending} unconsumed response(s).`);
   });
 
-  it("surfaces WhatsApp group creation failures with context", async () => {
+  it("surfaces WhatsApp chat creation failures with context", async () => {
     const repoRoot = await createRepoFixture();
     const handleMessage = await createHandler({
       transport: createFailingGroupTransport("bad-request"),
@@ -259,8 +259,8 @@ describe("workspace lifecycle", () => {
     await handleMessage(turn.context);
 
     assert.ok(
-      turn.responses.some((response) => response.text.includes("WhatsApp group creation failed: bad-request")),
-      "expected !new to explain that WhatsApp group creation failed",
+      turn.responses.some((response) => response.text.includes("WhatsApp chat creation failed: bad-request")),
+      "expected !new to explain that WhatsApp chat creation failed",
     );
   });
 
@@ -319,7 +319,7 @@ describe("workspace lifecycle", () => {
     await assert.rejects(() => fs.access(path.join(replacedWorkspace.worktree_path, "replace-marker.txt")));
   });
 
-  it("uses the repo chat name when naming a new workspace group", async () => {
+  it("uses the source chat name when naming a new workspace chat", async () => {
     const repoRoot = await createRepoFixture();
     const transportState = createFakeTransport();
     const handleMessage = await createHandler({ transport: transportState.transport });
@@ -558,6 +558,35 @@ describe("workspace lifecycle", () => {
 
     const currentBranch = (await execFileAsync("git", ["branch", "--show-current"], { cwd: adoptedRootPath })).stdout.trim();
     assert.equal(currentBranch, "master");
+  });
+
+  it("does not offer replace for the primary chat workspace name", async () => {
+    const transportState = createFakeTransport();
+    const handleMessage = await createHandler({ transport: transportState.transport });
+    const chatId = "primary-workspace-chat";
+    const chatName = "Original Group";
+
+    const turn = createChatTurn({
+      chatId,
+      chatName,
+      content: [{ type: "text", text: `!new ${chatName}` }],
+      facts: { isGroup: true },
+    });
+    turn.context.io.select = async (question, options) => {
+      turn.responses.push({ type: "select", text: JSON.stringify({ question, options }) });
+      return "new";
+    };
+    await handleMessage(turn.context);
+
+    const selectResponse = turn.responses.find((response) => response.type === "select");
+    assert.ok(selectResponse, "expected duplicate workspace prompt");
+    assert.ok(!selectResponse?.text.includes("\"replace\""), `expected no replace option, got: ${selectResponse?.text}`);
+    assert.ok(turn.responses.some((response) => response.text.includes("Use `!new <different-name>`")));
+
+    const adoptedRootPath = getChatWorkDir(chatId, undefined, chatName);
+    await fs.access(adoptedRootPath);
+    assert.equal(transportState.createdGroups.length, 0);
+    assert.equal(transportState.createdCommunities.length, 0);
   });
 
   it("runs !diff and rejects !commit as an unknown command", async () => {

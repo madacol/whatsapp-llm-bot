@@ -102,8 +102,8 @@ describe("workspace commands", () => {
     assert.equal(pending, 0, `Mock response queue should be empty after each test, but has ${pending} unconsumed response(s).`);
   });
 
-  it("lists active workspaces from the repo chat", async () => {
-    await seedChat("repo-list-chat");
+  it("lists active workspaces from a workspace chat", async () => {
+    await seedChat("ws-main-chat");
     await seedChat("ws-payments-chat");
     await seedChat("ws-auth-chat");
 
@@ -111,7 +111,16 @@ describe("workspace commands", () => {
       name: "main",
       rootPath: "/repo/main",
       defaultBaseBranch: "master",
-      controlChatId: "repo-list-chat",
+    });
+    await createWorkspaceFixture({
+      repoId: repo.repo_id,
+      name: "main",
+      branch: "master",
+      baseBranch: "master",
+      worktreePath: "/repo/main",
+      workspaceChatId: "ws-main-chat",
+      workspaceChatSubject: "main",
+      status: "ready",
     });
     await createWorkspaceFixture({
       repoId: repo.repo_id,
@@ -135,7 +144,7 @@ describe("workspace commands", () => {
     });
 
     const { context, responses } = createChatTurn({
-      chatId: "repo-list-chat",
+      chatId: "ws-main-chat",
       content: [{ type: "text", text: "!list" }],
     });
     await handleMessage(context);
@@ -202,15 +211,24 @@ describe("workspace commands", () => {
     );
   });
 
-  it("archives the named workspace from the repo chat", async () => {
-    await seedChat("repo-archive-chat");
+  it("archives another workspace by name from a workspace chat", async () => {
+    await seedChat("ws-archive-main");
     await seedChat("ws-archive-target");
 
     const repo = await store.createRepo({
       name: "archive-repo",
       rootPath: "/repo/archive",
       defaultBaseBranch: "master",
-      controlChatId: "repo-archive-chat",
+    });
+    await createWorkspaceFixture({
+      repoId: repo.repo_id,
+      name: "main",
+      branch: "master",
+      baseBranch: "master",
+      worktreePath: "/repo/archive",
+      workspaceChatId: "ws-archive-main",
+      workspaceChatSubject: "main",
+      status: "ready",
     });
     await createWorkspaceFixture({
       repoId: repo.repo_id,
@@ -224,7 +242,7 @@ describe("workspace commands", () => {
     });
 
     const { context, responses } = createChatTurn({
-      chatId: "repo-archive-chat",
+      chatId: "ws-archive-main",
       content: [{ type: "text", text: "!archive payments" }],
     });
     await handleMessage(context);

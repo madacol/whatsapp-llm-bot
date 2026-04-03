@@ -4,6 +4,7 @@ import {
   ensureGitRepoInitialized,
   formatDiffSummary,
 } from "./workspace-git.js";
+import path from "node:path";
 
 /**
  * App-facing seam over git/worktree mechanics for workspace lifecycle flows.
@@ -30,6 +31,10 @@ export function createWorkspaceRepoService() {
      * @returns {Promise<{ branch: string, worktreePath: string }>}
      */
     async replaceWorkspaceCheckout(repo, workspace, baseBranch) {
+      if (path.resolve(workspace.worktree_path) === path.resolve(repo.root_path)) {
+        throw new Error("The primary chat workspace cannot be replaced. Create another workspace with a different name.");
+      }
+      await ensureGitRepoInitialized(repo.root_path, baseBranch);
       await cleanupWorkspaceWorktree(repo, workspace.branch, workspace.worktree_path);
       return createWorkspaceWorktree(repo, workspace.name, baseBranch);
     },
@@ -38,7 +43,8 @@ export function createWorkspaceRepoService() {
      * @param {WorkspaceRow} workspace
      * @returns {Promise<string>}
      */
-    diffWorkspace(workspace) {
+    async diffWorkspace(workspace) {
+      await ensureGitRepoInitialized(workspace.worktree_path, workspace.base_branch);
       return formatDiffSummary(workspace.worktree_path);
     },
   };

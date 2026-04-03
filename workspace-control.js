@@ -3,6 +3,7 @@ import {
   isValidWorkspaceName,
 } from "./workspace-git.js";
 import { randomUUID } from "node:crypto";
+import path from "node:path";
 import { formatWorkspaceStatus, listRepoWorkspaces } from "./workspace-service.js";
 import { errorToString } from "./utils.js";
 import { createWorkspaceRepoService } from "./workspace-repo-service.js";
@@ -35,14 +36,26 @@ function getInitialWorkspaceParticipants(context) {
 
 /**
  * @param {string} workspaceName
+ * @param {{ canReplace: boolean }} input
  * @returns {SelectOption[]}
  */
-function buildDuplicateWorkspaceOptions(workspaceName) {
+function buildDuplicateWorkspaceOptions(workspaceName, { canReplace }) {
   return [
-    { id: "replace", label: `Replace ${workspaceName}` },
+    ...(canReplace ? [{ id: "replace", label: `Replace ${workspaceName}` }] : []),
     { id: "new", label: "Pick another name" },
     { id: "cancel", label: "Cancel" },
   ];
+}
+
+/**
+ * The primary chat workspace points at the project root instead of a disposable
+ * git worktree, so it must never flow through "replace workspace" teardown.
+ * @param {RepoRow} repo
+ * @param {WorkspaceRow} workspace
+ * @returns {boolean}
+ */
+function canReplaceWorkspace(repo, workspace) {
+  return path.resolve(workspace.worktree_path) !== path.resolve(repo.root_path);
 }
 
 /**
@@ -75,12 +88,13 @@ export function createWorkspaceControl({ store, workspacePresentation, workspace
 
       const existing = await store.getWorkspaceByName(repo.repo_id, workspaceName);
       if (existing) {
+        const canReplace = canReplaceWorkspace(repo, existing);
         const choice = await context.select(
           `Workspace \`${workspaceName}\` already exists. Choose what to do:`,
-          buildDuplicateWorkspaceOptions(workspaceName),
+          buildDuplicateWorkspaceOptions(workspaceName, { canReplace }),
           { deleteOnSelect: true, cancelIds: ["cancel"] },
         );
-        if (choice === "replace") {
+        if (choice === "replace" && canReplace) {
           return this.replace(repo, context, existing, baseBranch);
         }
         if (choice === "new") {
@@ -94,7 +108,7 @@ export function createWorkspaceControl({ store, workspacePresentation, workspace
 
       const participants = getInitialWorkspaceParticipants(context);
       if (participants.length === 0) {
-        throw new Error("Could not determine which WhatsApp user to add to the workspace group.");
+        throw new Error("Could not determine which WhatsApp user to add to the workspace chat.");
       }
 
       const { branch, worktreePath } = await workspaceRepo.createWorkspaceCheckout(repo, workspaceName, baseBranch);
@@ -133,7 +147,7 @@ export function createWorkspaceControl({ store, workspacePresentation, workspace
         };
       } catch (error) {
         await cleanupWorkspaceWorktree(repo, branch, worktreePath);
-        throw new Error(`WhatsApp group creation failed: ${errorToString(error)}`);
+        throw new Error(`WhatsApp chat creation failed: ${errorToString(error)}`);
       }
     },
 

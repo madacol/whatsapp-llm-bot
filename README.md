@@ -5,7 +5,12 @@ A whatsapp bot that uses LLMs to generate messages, and `yt-dlp` to download vid
 Available commands:
 - `!video <link>`: downloads the video and re-uploads it into the chat
 - `!audio <link>`: downloads the audio and re-uploads it into the chat
-- `!new`: starts a new conversation with the bot
+- `!new <name>`: creates another workspace chat for the current project
+- `!list`: lists the active workspaces in the current project
+- `!status`: shows the current workspace status
+- `!diff`: shows the current workspace diff
+- `!archive`: archives the current workspace chat
+- `!archive <name>`: archives another workspace in the current project
 
 If no command is given, the AI will handle the response.
 
