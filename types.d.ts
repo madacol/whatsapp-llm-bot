@@ -334,6 +334,7 @@ type TurnFacts = {
 };
 
 type WhatsAppTestCommandInput =
+  | { kind: "tmp"; participants: string[] }
   | { kind: "methods" }
   | { kind: "community-create"; subject: string; description: string }
   | { kind: "community-create-group"; parentCommunityJid: string; subject: string; participants: string[] }

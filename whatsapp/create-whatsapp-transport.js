@@ -346,6 +346,27 @@ export async function executeWhatsAppTestCommand({ sock, input }) {
   switch (input.kind) {
     case "methods":
       return { count: getSocketMethodNames(sock).length, methods: getSocketMethodNames(sock) };
+    case "tmp": {
+      const description = `madabot tmp probe ${new Date().toISOString()}`;
+      const community = await sock.communityCreate("tmp", description);
+      if (!community?.id) {
+        throw new Error("communityCreate returned no community id.");
+      }
+      const createdGroup = await sock.groupCreate("tmp", input.participants);
+      if (!createdGroup?.id) {
+        throw new Error("groupCreate returned no group id.");
+      }
+      const linkProbe = await probeCommunityLink({
+        sock,
+        groupJid: createdGroup.id,
+        parentCommunityJid: community.id,
+      });
+      return {
+        community,
+        createdGroup,
+        ...linkProbe,
+      };
+    }
     case "community-create":
       return sock.communityCreate(input.subject, input.description);
     case "community-create-group":
@@ -718,6 +739,17 @@ export async function createWhatsAppTransport() {
 
       try {
         switch (input.kind) {
+          case "tmp": {
+            await runLoggedWhatsAppTestOperation({
+              kind: input.kind,
+              args: input,
+              availableMethods,
+              execute: () => executeWhatsAppTestCommand({ sock, input }),
+            });
+            return {
+              summary: `Logged temporary community link probe to ${WHATSAPP_TEST_LOG_PATH}.`,
+            };
+          }
           case "methods": {
             await runLoggedWhatsAppTestOperation({
               kind: input.kind,
