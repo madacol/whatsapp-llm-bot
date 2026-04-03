@@ -12,3 +12,23 @@ index eff7a53f0b5958edf5a0ce0eeca1e21c1ff008fb..661be3fa1a35ab161e87c6c5d61480cf
      }
  };
  /**
+diff --git a/lib/Socket/communities.js b/lib/Socket/communities.js
+index f437586f6e6b3f16e0316192bae7fc51d78fded5..9c246db214385c7a053671c4eb7e0686c85c0fca 100644
+--- a/lib/Socket/communities.js
++++ b/lib/Socket/communities.js
+@@ -119,6 +119,7 @@ export const makeCommunitiesSocket = (config) => {
+                     ]
+                 }
+             ]);
++            logger.info({ subject, body, result }, 'communityCreate raw result');
+             return await parseGroupResult(result);
+         },
+         communityCreateGroup: async (subject, participants, parentCommunityJid) => {
+@@ -139,6 +140,7 @@ export const makeCommunitiesSocket = (config) => {
+                     ]
+                 }
+             ]);
++            logger.info({ subject, participants, parentCommunityJid, result }, 'communityCreateGroup raw result');
+             return await parseGroupResult(result);
+         },
+         communityLeave: async (id) => {
