@@ -193,7 +193,6 @@ export function createWhatsAppWorkspacePresenter({ transport, store }) {
         sourceChatName,
         sourceChatId,
         requesterJids,
-        repoPresentation,
       });
     },
 
