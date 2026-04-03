@@ -82,6 +82,14 @@ function hasSocketQuery(sock) {
 
 /**
  * @param {import("@whiskeysockets/baileys").WASocket} sock
+ * @returns {boolean}
+ */
+function hasCommunityLinkGroup(sock) {
+  return "communityLinkGroup" in sock && isFunction(sock.communityLinkGroup);
+}
+
+/**
+ * @param {import("@whiskeysockets/baileys").WASocket} sock
  * @returns {string[]}
  */
 function getSocketMethodNames(sock) {
@@ -259,6 +267,25 @@ function buildCommunityLinkQueryNode(parentCommunityJid, groupJid) {
 }
 
 /**
+ * @param {{
+ *   sock: import("@whiskeysockets/baileys").WASocket,
+ *   groupJid: string,
+ *   parentCommunityJid: string,
+ * }} input
+ * @returns {Promise<unknown>}
+ */
+async function linkGroupToCommunity({ sock, groupJid, parentCommunityJid }) {
+  if (hasCommunityLinkGroup(sock)) {
+    await sock.communityLinkGroup(groupJid, parentCommunityJid);
+    return null;
+  }
+  if (!hasSocketQuery(sock)) {
+    throw new Error("WhatsApp communityLinkGroup and socket query APIs are unavailable in this runtime.");
+  }
+  return sock.query(buildCommunityLinkQueryNode(parentCommunityJid, groupJid));
+}
+
+/**
  * @param {() => Promise<unknown>} execute
  * @returns {Promise<
  *   | { status: "fulfilled", value: unknown }
@@ -296,12 +323,13 @@ async function captureProbeOutcome(execute) {
  * }>}
  */
 async function probeCommunityLink({ sock, groupJid, parentCommunityJid }) {
-  if (!hasSocketQuery(sock)) {
-    throw new Error("WhatsApp socket query API is unavailable in this runtime.");
-  }
-  const rawResponse = await sock.query(buildCommunityLinkQueryNode(parentCommunityJid, groupJid));
+  const rawResponse = await linkGroupToCommunity({ sock, groupJid, parentCommunityJid });
   return {
-    linkResponse: isBinaryNode(rawResponse) ? rawResponse : { rawResponse },
+    linkResponse: rawResponse === null
+      ? null
+      : isBinaryNode(rawResponse)
+        ? rawResponse
+        : { rawResponse },
     groupMetadataAfter: await captureProbeOutcome(() => sock.groupMetadata(groupJid)),
     linkedGroupsAfter: await captureProbeOutcome(() => sock.communityFetchLinkedGroups(parentCommunityJid)),
   };
@@ -641,9 +669,20 @@ export async function createWhatsAppTransport() {
       if (!sock) {
         throw new Error("WhatsApp transport has not been started");
       }
-      throw new Error(
-        `linkExistingGroupToCommunity is not implemented yet for ${chatId} -> ${communityChatId}.`,
-      );
+      try {
+        await linkGroupToCommunity({
+          sock,
+          groupJid: chatId,
+          parentCommunityJid: communityChatId,
+        });
+      } catch (error) {
+        log.error("WhatsApp communityLinkGroup failed:", {
+          chatId,
+          communityChatId,
+          error: serializeTransportError(error),
+        });
+        throw error;
+      }
     },
 
     async promoteParticipants(chatId, participants) {

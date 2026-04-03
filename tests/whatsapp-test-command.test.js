@@ -397,6 +397,63 @@ describe("runLoggedWhatsAppTestOperation", () => {
 });
 
 describe("executeWhatsAppTestCommand", () => {
+  it("prefers the built-in communityLinkGroup method when available", async () => {
+    const { executeWhatsAppTestCommand } = await import("../whatsapp/create-whatsapp-transport.js");
+
+    /** @type {string[]} */
+    const calls = [];
+    /** @type {BaileysSocket & {
+     *   communityLinkGroup: (groupJid: string, parentCommunityJid: string) => Promise<void>;
+     *   groupMetadata: (jid: string) => Promise<{ id: string, linkedParent?: string }>;
+     *   communityFetchLinkedGroups: (jid: string) => Promise<Array<{ id: string, subject: string }>>;
+     * }} */
+    const sock = /** @type {never} */ ({
+      communityLinkGroup: async (groupJid, parentCommunityJid) => {
+        calls.push(`communityLinkGroup:${groupJid}:${parentCommunityJid}`);
+      },
+      groupMetadata: async (jid) => {
+        calls.push(`groupMetadata:${jid}`);
+        return {
+          id: jid,
+          linkedParent: "120363000000000000@g.us",
+        };
+      },
+      communityFetchLinkedGroups: async (jid) => {
+        calls.push(`communityFetchLinkedGroups:${jid}`);
+        return [{ id: "120363999999999999@g.us", subject: "probe-main" }];
+      },
+    });
+
+    const result = await executeWhatsAppTestCommand({
+      sock,
+      input: {
+        kind: "community-link",
+        parentCommunityJid: "120363000000000000@g.us",
+        groupJid: "120363999999999999@g.us",
+      },
+    });
+
+    assert.deepEqual(calls, [
+      "communityLinkGroup:120363999999999999@g.us:120363000000000000@g.us",
+      "groupMetadata:120363999999999999@g.us",
+      "communityFetchLinkedGroups:120363000000000000@g.us",
+    ]);
+    assert.deepEqual(result, {
+      linkResponse: null,
+      groupMetadataAfter: {
+        status: "fulfilled",
+        value: {
+          id: "120363999999999999@g.us",
+          linkedParent: "120363000000000000@g.us",
+        },
+      },
+      linkedGroupsAfter: {
+        status: "fulfilled",
+        value: [{ id: "120363999999999999@g.us", subject: "probe-main" }],
+      },
+    });
+  });
+
   it("creates an external group, links it, and fetches linked groups for community-link-smoke", async () => {
     const { executeWhatsAppTestCommand } = await import("../whatsapp/create-whatsapp-transport.js");
 
