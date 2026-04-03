@@ -119,6 +119,8 @@ describe("WhatsApp test command", () => {
     assert.deepEqual(invocations, [{
       kind: "tmp",
       participants: ["user@s.whatsapp.net"],
+      groupJid: "120363426153979898@g.us",
+      groupSubject: "probe-external-link-raw",
     }]);
     assert.ok(turn.responses.some((response) => response.text.includes("Temporary link probe logged to /tmp/wh.log")));
   });
@@ -429,33 +431,17 @@ describe("runLoggedWhatsAppTestOperation", () => {
 });
 
 describe("executeWhatsAppTestCommand", () => {
-  it("creates a temporary community and external group for the tmp probe", async () => {
+  it("reuses the fixed tmp probe group and community for the tmp probe", async () => {
     const { executeWhatsAppTestCommand } = await import("../whatsapp/create-whatsapp-transport.js");
 
     /** @type {string[]} */
     const calls = [];
     /** @type {BaileysSocket & {
-     *   communityCreate: (subject: string, description: string) => Promise<{ id: string, subject: string }>;
-     *   groupCreate: (subject: string, participants: string[]) => Promise<{ id: string, subject: string }>;
      *   communityLinkGroup: (groupJid: string, parentCommunityJid: string) => Promise<void>;
      *   groupMetadata: (jid: string) => Promise<{ id: string, linkedParent?: string }>;
      *   communityFetchLinkedGroups: (jid: string) => Promise<Array<{ id: string, subject: string }>>;
      * }} */
     const sock = /** @type {never} */ ({
-      communityCreate: async (subject, description) => {
-        calls.push(`communityCreate:${subject}:${description.startsWith("madabot tmp probe ")}`);
-        return {
-          id: "120363000000000000@g.us",
-          subject,
-        };
-      },
-      groupCreate: async (subject, participants) => {
-        calls.push(`groupCreate:${subject}:${participants.join(",")}`);
-        return {
-          id: "120363999999999999@g.us",
-          subject,
-        };
-      },
       communityLinkGroup: async (groupJid, parentCommunityJid) => {
         calls.push(`communityLinkGroup:${groupJid}:${parentCommunityJid}`);
       },
@@ -477,30 +463,30 @@ describe("executeWhatsAppTestCommand", () => {
       input: {
         kind: "tmp",
         participants: ["user@s.whatsapp.net"],
+        groupJid: "120363426153979898@g.us",
+        groupSubject: "probe-external-link-raw",
       },
     });
 
     assert.deepEqual(calls, [
-      "communityCreate:tmp:true",
-      "groupCreate:tmp:user@s.whatsapp.net",
-      "communityLinkGroup:120363999999999999@g.us:120363000000000000@g.us",
-      "groupMetadata:120363999999999999@g.us",
-      "communityFetchLinkedGroups:120363000000000000@g.us",
+      "communityLinkGroup:120363426153979898@g.us:120363408812026899@g.us",
+      "groupMetadata:120363426153979898@g.us",
+      "communityFetchLinkedGroups:120363408812026899@g.us",
     ]);
     assert.deepEqual(result, {
       community: {
-        id: "120363000000000000@g.us",
+        id: "120363408812026899@g.us",
         subject: "tmp",
       },
-      createdGroup: {
-        id: "120363999999999999@g.us",
-        subject: "tmp",
+      reusedGroup: {
+        id: "120363426153979898@g.us",
+        subject: "probe-external-link-raw",
       },
       linkResponse: null,
       groupMetadataAfter: {
         status: "fulfilled",
         value: {
-          id: "120363999999999999@g.us",
+          id: "120363426153979898@g.us",
           linkedParent: "120363000000000000@g.us",
         },
       },

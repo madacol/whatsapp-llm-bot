@@ -473,6 +473,9 @@ export async function createWorkspaceWorktree(repo, workspaceName, baseBranch) {
  * @returns {Promise<void>}
  */
 export async function cleanupWorkspaceWorktree(repo, branch, worktreePath) {
+  if (path.resolve(worktreePath) === path.resolve(repo.root_path)) {
+    throw new Error("Refusing to remove the primary project root as a workspace worktree.");
+  }
   await removeWorktreeIfExists(repo.root_path, worktreePath);
   await deleteBranchIfExists(repo.root_path, branch);
 }

@@ -78,14 +78,6 @@ function isWorkspaceOnlyCommand(loweredCommandText) {
 }
 
 /**
- * @param {string} loweredCommandText
- * @returns {boolean}
- */
-function isRepoOnlyCommand(loweredCommandText) {
-  return loweredCommandText === "list";
-}
-
-/**
  * @param {ExecuteActionContext} context
  * @param {string} message
  * @returns {Promise<void>}
@@ -156,7 +148,7 @@ export async function tryHandleWorkspaceCommand({ context, binding, inputText, w
 
       if (name === "archive") {
         if (!argsText) {
-          await replyError(context, "Use `!archive <name>` in the repo chat.");
+          await replyError(context, "Use `!archive <name>` to archive a specific workspace.");
           return true;
         }
         const confirmed = await context.confirm(
@@ -174,11 +166,6 @@ export async function tryHandleWorkspaceCommand({ context, binding, inputText, w
     }
 
     if (binding.kind === "workspace") {
-      if (isRepoOnlyCommand(lowered) || (name === "archive" && !!argsText)) {
-        await replyError(context, "Repo lifecycle commands must be run inside the repo chat.");
-        return true;
-      }
-
       if (binding.workspace.status === "busy" && name !== "status") {
         await replyError(context, `Workspace is busy.\nUse \`${formatCancelCommand()}\` or wait for the current task to finish.`);
         return true;
@@ -189,6 +176,10 @@ export async function tryHandleWorkspaceCommand({ context, binding, inputText, w
       }
       if (name === "status" && !argsText) {
         await replyToolResult(context, await workspaceControl.status(binding.workspace));
+        return true;
+      }
+      if (name === "list" && !argsText) {
+        await replyToolResult(context, await workspaceControl.list(binding.repo));
         return true;
       }
       if (name === "new") {
@@ -221,6 +212,17 @@ export async function tryHandleWorkspaceCommand({ context, binding, inputText, w
           return true;
         }
         await replyToolResult(context, await workspaceControl.archiveCurrent(binding.workspace));
+        return true;
+      }
+      if (name === "archive" && !!argsText) {
+        const confirmed = await context.confirm(
+          `Archive workspace \`${argsText}\`?\nThis will freeze its workspace chat and stop new work there.`,
+        );
+        if (!confirmed) {
+          await replyToolResult(context, "Archive cancelled.");
+          return true;
+        }
+        await replyToolResult(context, await workspaceControl.archiveByName(binding.repo, argsText));
         return true;
       }
     }
