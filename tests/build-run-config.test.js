@@ -39,15 +39,15 @@ describe("buildRunConfig", () => {
     assert.equal(path.basename(config.workdir ?? ""), "Project Alpha--chat-1");
   });
 
-  it("uses the bound repo root for repo chats", () => {
+  it("uses the bound project root for project chats", () => {
     const config = buildRunConfig(
       "repo-chat",
       undefined,
       "Main Repo",
       undefined,
       {
-        kind: "repo",
-        repo: {
+        kind: "project",
+        project: {
           repo_id: "repo-1",
           name: "main",
           root_path: "/repo/main",
@@ -69,7 +69,7 @@ describe("buildRunConfig", () => {
       undefined,
       {
         kind: "workspace",
-        repo: {
+        project: {
           repo_id: "repo-1",
           name: "main",
           root_path: "/repo/main",

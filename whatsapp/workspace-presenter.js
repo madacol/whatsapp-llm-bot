@@ -98,11 +98,11 @@ function stringifyEvent(event) {
  *     linkExistingGroupToCommunity: (chatId: string, communityChatId: string) => Promise<void>,
  *   },
  *   store: Pick<Awaited<ReturnType<typeof import("../store.js").initStore>>,
- *     "getWhatsAppRepoPresentation"
+ *     "getWhatsAppProjectPresentation"
  *     | "getWhatsAppWorkspacePresentation"
  *     | "listWhatsAppWorkspacePresentations"
  *     | "saveWhatsAppWorkspacePresentation"
- *     | "upsertWhatsAppRepoPresentation">,
+ *     | "upsertWhatsAppProjectPresentation">,
  * }} input
  * @returns {WorkspacePresentationPort}
  */
@@ -136,7 +136,7 @@ export function createWhatsAppWorkspacePresenter({ transport, store }) {
   /** @type {WorkspacePresentationPort} */
   const presenter = {
     async ensureWorkspaceVisible({ repoId, workspaceId, workspaceName, sourceChatName, requesterJids }) {
-      const repoPresentation = await store.getWhatsAppRepoPresentation(repoId);
+      const repoPresentation = await store.getWhatsAppProjectPresentation(repoId);
       const existing = await store.getWhatsAppWorkspacePresentation(workspaceId);
 
       if (existing) {
@@ -146,7 +146,7 @@ export function createWhatsAppWorkspacePresenter({ transport, store }) {
           : existing.linked_community_chat_id;
         if (repoPresentation?.topology_kind === "community" && role === "main") {
           if (!repoPresentation.community_chat_id) {
-            throw new Error(`Community presentation for repo ${repoId} is missing its community chat id.`);
+            throw new Error(`Community presentation for project ${repoId} is missing its community chat id.`);
           }
           return topology.syncMainWorkspaceCommunitySurface({
             repoId,

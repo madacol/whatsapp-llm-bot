@@ -107,7 +107,7 @@ describe("workspace commands", () => {
     await seedChat("ws-payments-chat");
     await seedChat("ws-auth-chat");
 
-    const repo = await store.createRepo({
+    const repo = await store.createProject({
       name: "main",
       rootPath: "/repo/main",
       defaultBaseBranch: "master",
@@ -161,7 +161,7 @@ describe("workspace commands", () => {
     await seedChat("repo-status-chat");
     await seedChat("ws-status-chat");
 
-    const repo = await store.createRepo({
+    const repo = await store.createProject({
       name: "status-repo",
       rootPath: "/repo/status",
       defaultBaseBranch: "master",
@@ -190,9 +190,9 @@ describe("workspace commands", () => {
     assert.ok(responses.some((response) => response.text.includes("Status: ready")));
   });
 
-  it("rejects workspace-only commands in the repo chat", async () => {
+  it("rejects workspace-only commands in the project chat", async () => {
     await seedChat("repo-command-chat");
-    await store.createRepo({
+    await store.createProject({
       name: "repo-command",
       rootPath: "/repo/command",
       defaultBaseBranch: "master",
@@ -207,7 +207,7 @@ describe("workspace commands", () => {
 
     assert.ok(
       responses.some((response) => response.text.includes("Workspace commands must be run inside a workspace chat.")),
-      `Expected repo-chat rejection, got: ${responses.map((response) => response.text).join(" | ")}`,
+      `Expected project-chat rejection, got: ${responses.map((response) => response.text).join(" | ")}`,
     );
   });
 
@@ -215,7 +215,7 @@ describe("workspace commands", () => {
     await seedChat("ws-archive-main");
     await seedChat("ws-archive-target");
 
-    const repo = await store.createRepo({
+    const repo = await store.createProject({
       name: "archive-repo",
       rootPath: "/repo/archive",
       defaultBaseBranch: "master",
@@ -257,7 +257,7 @@ describe("workspace commands", () => {
     await seedChat("repo-current-archive-chat");
     await seedChat("ws-current-archive-chat");
 
-    const repo = await store.createRepo({
+    const repo = await store.createProject({
       name: "current-archive-repo",
       rootPath: "/repo/current-archive",
       defaultBaseBranch: "master",
@@ -290,7 +290,7 @@ describe("workspace commands", () => {
     await seedChat("repo-archived-chat");
     await seedChat("ws-archived-chat");
 
-    const repo = await store.createRepo({
+    const repo = await store.createProject({
       name: "archived-repo",
       rootPath: "/repo/archived",
       defaultBaseBranch: "master",

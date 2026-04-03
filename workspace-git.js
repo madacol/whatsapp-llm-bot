@@ -148,7 +148,7 @@ export function getWorkspaceBranchName(workspaceName) {
 }
 
 /**
- * @param {RepoRow} repo
+ * @param {ProjectRow} repo
  * @param {string} workspaceKey
  * @returns {string}
  */
@@ -173,7 +173,7 @@ async function pathExists(targetPath) {
 }
 
 /**
- * @param {RepoRow} repo
+ * @param {ProjectRow} repo
  * @param {string} workspaceName
  * @returns {Promise<{ branch: string, worktreePath: string }>}
  */
@@ -442,7 +442,7 @@ export async function runWorkspaceVerification(cwd) {
 }
 
 /**
- * @param {RepoRow} repo
+ * @param {ProjectRow} repo
  * @param {string} workspaceName
  * @param {string} baseBranch
  * @returns {Promise<{ branch: string, worktreePath: string }>}
@@ -467,7 +467,7 @@ export async function createWorkspaceWorktree(repo, workspaceName, baseBranch) {
 }
 
 /**
- * @param {RepoRow} repo
+ * @param {ProjectRow} repo
  * @param {string} branch
  * @param {string} worktreePath
  * @returns {Promise<void>}

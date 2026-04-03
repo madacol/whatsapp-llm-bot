@@ -14,7 +14,7 @@ import path from "node:path";
 export function createWorkspaceRepoService() {
   return {
     /**
-     * @param {RepoRow} repo
+     * @param {ProjectRow} repo
      * @param {string} workspaceName
      * @param {string} baseBranch
      * @returns {Promise<{ branch: string, worktreePath: string }>}
@@ -25,7 +25,7 @@ export function createWorkspaceRepoService() {
     },
 
     /**
-     * @param {RepoRow} repo
+     * @param {ProjectRow} repo
      * @param {WorkspaceRow} workspace
      * @param {string} baseBranch
      * @returns {Promise<{ branch: string, worktreePath: string }>}

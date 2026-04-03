@@ -290,7 +290,7 @@ describe("per-chat model selection", () => {
       const { repoRoot, worktreePath } = await createRepoWithWorkspaceFixture();
       const { initStore } = await import("../store.js");
       const store = await initStore(db);
-      await store.createRepo({
+      await store.createProject({
         name: `settings-repo-${Date.now()}`,
         rootPath: repoRoot,
         defaultBaseBranch: "master",
@@ -300,7 +300,7 @@ describe("per-chat model selection", () => {
         VALUES ('cfg-folder-workspace', NULL)
         ON CONFLICT DO NOTHING
       `;
-      const repo = await store.getRepoByRootPath(repoRoot);
+      const repo = await store.getProjectByRootPath(repoRoot);
       assert.ok(repo);
       await store.saveWhatsAppWorkspacePresentation({
         repoId: repo.repo_id,

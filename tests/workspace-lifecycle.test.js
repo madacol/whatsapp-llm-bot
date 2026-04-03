@@ -278,7 +278,7 @@ describe("workspace lifecycle", () => {
       content: [{ type: "text", text: "!new payments" }],
     }).context);
 
-    const repo = await store.getRepoByRootPath(repoRoot);
+    const repo = await store.getProjectByRootPath(repoRoot);
     assert.ok(repo);
     const originalWorkspace = await store.getWorkspaceByName(repo.repo_id, "payments");
     assert.ok(originalWorkspace);
@@ -367,7 +367,7 @@ describe("workspace lifecycle", () => {
     });
     await handleMessage(context);
 
-    const repo = await store.getRepoByRootPath(repoRoot);
+    const repo = await store.getProjectByRootPath(repoRoot);
     assert.ok(repo, "repo should be inferred from the root cwd");
     const workspace = await store.getWorkspaceByName(repo.repo_id, "payments");
     assert.ok(workspace, "workspace should be created");
@@ -434,7 +434,7 @@ describe("workspace lifecycle", () => {
     });
     await handleMessage(context);
 
-    const repo = await store.getRepoByRootPath(repoRoot);
+    const repo = await store.getProjectByRootPath(repoRoot);
     assert.ok(repo, "repo should be inferred from the root cwd");
     const workspace = await store.getWorkspaceByName(repo.repo_id, "multi word branch");
     assert.ok(workspace, "workspace should be created");
@@ -490,7 +490,7 @@ describe("workspace lifecycle", () => {
       content: [{ type: "text", text: "!new parent branch" }],
     }).context);
 
-    const repo = await store.getRepoByRootPath(repoRoot);
+    const repo = await store.getProjectByRootPath(repoRoot);
     assert.ok(repo, "repo should be inferred from the root cwd");
     const parentWorkspace = await store.getWorkspaceByName(repo.repo_id, "parent branch");
     assert.ok(parentWorkspace, "parent workspace should exist");
@@ -524,7 +524,7 @@ describe("workspace lifecycle", () => {
     await handleMessage(context);
 
     const adoptedRootPath = getChatWorkDir(chatId, undefined, chatName);
-    const repo = await store.getRepoByRootPath(adoptedRootPath);
+    const repo = await store.getProjectByRootPath(adoptedRootPath);
     assert.ok(repo, "expected the fresh chat to be adopted into a project");
 
     const originalBinding = await store.getChatBinding(chatId);
@@ -601,7 +601,7 @@ describe("workspace lifecycle", () => {
       content: [{ type: "text", text: "!new payments" }],
     }).context);
 
-    const repo = await store.getRepoByRootPath(repoRoot);
+    const repo = await store.getProjectByRootPath(repoRoot);
     assert.ok(repo, "repo should be inferred from the root cwd");
     const workspace = await store.getWorkspaceByName(repo.repo_id, "payments");
     assert.ok(workspace, "workspace should exist after !new");

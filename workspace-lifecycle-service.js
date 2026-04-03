@@ -42,7 +42,7 @@ export function createWorkspaceLifecycleService({ workspaceControl, workspacePre
 
     /**
      * @param {{
-     *   repo: RepoRow,
+     *   project: ProjectRow,
      *   context: ExecuteActionContext,
      *   workspaceName: string,
      *   baseBranch: string,
@@ -51,8 +51,8 @@ export function createWorkspaceLifecycleService({ workspaceControl, workspacePre
      * }} input
      * @returns {Promise<{ message: string, workspace: WorkspaceRow | null }>}
      */
-    async createWorkspace({ repo, context, workspaceName, baseBranch, seedPrompt, sourceTurn }) {
-      const result = await workspaceControl.create(repo, context, workspaceName, baseBranch);
+    async createWorkspace({ project, context, workspaceName, baseBranch, seedPrompt, sourceTurn }) {
+      const result = await workspaceControl.create(project, context, workspaceName, baseBranch);
       if (!seedPrompt || !result.workspace) {
         return result;
       }
@@ -98,7 +98,7 @@ export function createWorkspaceLifecycleService({ workspaceControl, workspacePre
     },
 
     /**
-     * @param {RepoRow} repo
+     * @param {ProjectRow} repo
      * @param {string} workspaceName
      * @returns {Promise<string>}
      */

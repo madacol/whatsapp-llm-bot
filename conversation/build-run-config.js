@@ -12,8 +12,8 @@ import { getScopedHarnessConfig } from "../harness-config.js";
  */
 export function buildRunConfig(chatId, chatInfo, chatName, harnessName, resolvedBinding) {
   const harnessConfig = getScopedHarnessConfig(chatInfo?.harness_config, harnessName ?? chatInfo?.harness);
-  const workdir = resolvedBinding?.kind === "repo"
-    ? resolvedBinding.repo.root_path
+  const workdir = resolvedBinding?.kind === "project"
+    ? resolvedBinding.project.root_path
     : resolvedBinding?.kind === "workspace"
       ? resolvedBinding.workspace.worktree_path
       : getChatWorkDir(chatId, chatInfo?.harness_cwd, chatName);

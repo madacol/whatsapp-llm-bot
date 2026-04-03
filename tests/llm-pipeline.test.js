@@ -75,9 +75,9 @@ describe("LLM pipeline via createMessageHandler", () => {
     );
   });
 
-  it("allows freeform LLM work in repo chats", async () => {
+  it("allows freeform LLM work in project chats", async () => {
     await seedChat("pipe-repo-chat", { enabled: true });
-    await store.createRepo({
+    await store.createProject({
       name: "pipe-repo",
       rootPath: "/repo/main",
       defaultBaseBranch: "master",
@@ -94,7 +94,7 @@ describe("LLM pipeline via createMessageHandler", () => {
 
     assert.ok(
       responses.some((response) => response.text.includes("Repo chat response!")),
-      `Expected repo-chat LLM response, got: ${responses.map((response) => response.text).join(" | ")}`,
+      `Expected project-chat LLM response, got: ${responses.map((response) => response.text).join(" | ")}`,
     );
     assert.ok(
       mockServer.getRequests().length > requestCountBefore,
