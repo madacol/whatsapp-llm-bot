@@ -830,7 +830,7 @@ describe("WhatsAppWorkspacePresenter", () => {
       requesterJids: ["user@s.whatsapp.net"],
     });
 
-    assert.deepEqual(linkedParentChecks, ["main-chat", "main-chat"]);
+    assert.deepEqual(linkedParentChecks, ["main-chat", "main-chat", "main-chat"]);
     assert.deepEqual(linkedGroups, []);
     assert.deepEqual(createdCommunityGroups, [{
       subject: "bugfix",
@@ -848,6 +848,99 @@ describe("WhatsAppWorkspacePresenter", () => {
     assert.deepEqual(surface, {
       surfaceId: "community-bugfix-chat",
       surfaceName: "bugfix",
+    });
+  });
+
+  it("treats project presentation as a cache hint when the live source chat is already in a community", async () => {
+    /** @type {Array<{ subject: string, participants: string[], parentCommunityChatId: string }>} */
+    const createdCommunityGroups = [];
+    /** @type {Array<{
+     *   projectId: string,
+     *   workspaceId: string,
+     *   workspaceChatId: string,
+     *   workspaceChatSubject: string,
+     *   role?: WhatsAppWorkspacePresentationRole,
+     *   linkedCommunityChatId?: string | null,
+     * }>} */
+    const storedPresentations = [];
+
+    const presenter = createWhatsAppWorkspacePresenter({
+      store: {
+        getWhatsAppProjectPresentation: async () => ({
+          project_id: "repo-1",
+          topology_kind: "groups",
+          community_chat_id: null,
+          main_workspace_id: "ws-1",
+          timestamp: new Date().toISOString(),
+        }),
+        getWhatsAppWorkspacePresentation: async () => null,
+        listWhatsAppWorkspacePresentations: async () => ([
+          {
+            workspace_id: "ws-1",
+            project_id: "repo-1",
+            workspace_chat_id: "main-chat",
+            workspace_chat_subject: "main",
+            role: "main",
+            linked_community_chat_id: "community-chat",
+            timestamp: new Date().toISOString(),
+          },
+        ]),
+        saveWhatsAppWorkspacePresentation: async (input) => {
+          storedPresentations.push(input);
+        },
+        upsertWhatsAppProjectPresentation: async () => {
+          assert.fail("stale project presentation should not force a rewrite when live chat state is already authoritative");
+        },
+      },
+      transport: {
+        start: async () => {},
+        stop: async () => {},
+        sendText: async () => {},
+        createCommunity: async () => {
+          assert.fail("live-linked source chat should not create a replacement community");
+        },
+        createCommunityGroup: async (subject, participants, parentCommunityChatId) => {
+          createdCommunityGroups.push({ subject, participants, parentCommunityChatId });
+          return {
+            chatId: "community-new-chat",
+            subject,
+          };
+        },
+        getGroupLinkedParent: async () => "community-chat",
+        linkExistingGroupToCommunity: async () => {
+          assert.fail("live-linked source chat should not relink the main surface");
+        },
+        renameGroup: async () => {
+          assert.fail("already-normalized main group should not be renamed");
+        },
+      },
+    });
+
+    const surface = await presenter.ensureWorkspaceVisible({
+      projectId: "repo-1",
+      workspaceId: "ws-2",
+      workspaceName: "ops",
+      sourceChatId: "main-chat",
+      sourceChatName: "Original Group",
+      requesterJids: ["user@s.whatsapp.net"],
+    });
+
+    assert.deepEqual(createdCommunityGroups, [{
+      subject: "ops",
+      participants: ["user@s.whatsapp.net"],
+      parentCommunityChatId: "community-chat",
+    }]);
+    assert.deepEqual(storedPresentations, [{
+      projectId: "repo-1",
+      workspaceId: "ws-2",
+      workspaceChatId: "community-new-chat",
+      workspaceChatSubject: "ops",
+      role: "workspace",
+      linkedCommunityChatId: "community-chat",
+    }]);
+    assert.deepEqual(surface, {
+      surfaceId: "community-new-chat",
+      surfaceName: "ops",
     });
   });
 
