@@ -359,6 +359,7 @@ type ChatTransport = {
     participants: string[],
     parentCommunityChatId: string,
   ) => Promise<{ chatId: string, subject: string }>;
+  linkExistingGroupToCommunity?: (chatId: string, communityChatId: string) => Promise<void>;
   promoteParticipants?: (chatId: string, participants: string[]) => Promise<void>;
   renameGroup?: (chatId: string, subject: string) => Promise<void>;
   setAnnouncementOnly?: (chatId: string, enabled: boolean) => Promise<void>;
