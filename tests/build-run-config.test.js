@@ -48,7 +48,7 @@ describe("buildRunConfig", () => {
       {
         kind: "project",
         project: {
-          repo_id: "repo-1",
+          project_id: "repo-1",
           name: "main",
           root_path: "/repo/main",
           default_base_branch: "master",
@@ -70,7 +70,7 @@ describe("buildRunConfig", () => {
       {
         kind: "workspace",
         project: {
-          repo_id: "repo-1",
+          project_id: "repo-1",
           name: "main",
           root_path: "/repo/main",
           default_base_branch: "master",
@@ -79,7 +79,7 @@ describe("buildRunConfig", () => {
         },
         workspace: {
           workspace_id: "workspace-1",
-          repo_id: "repo-1",
+          project_id: "repo-1",
           name: "payments",
           branch: "payments",
           base_branch: "master",

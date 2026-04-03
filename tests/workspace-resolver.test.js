@@ -44,7 +44,7 @@ async function createRepoWithWorktree() {
 /**
  * @param {Awaited<ReturnType<typeof initStore>>} store
  * @param {{
- *   repoId: string,
+ *   projectId: string,
  *   name: string,
  *   branch: string,
  *   baseBranch: string,
@@ -56,7 +56,7 @@ async function createRepoWithWorktree() {
  * @returns {Promise<WorkspaceRow>}
  */
 async function createWorkspaceFixture(store, {
-  repoId,
+  projectId,
   name,
   branch,
   baseBranch,
@@ -65,16 +65,16 @@ async function createWorkspaceFixture(store, {
   workspaceChatSubject,
   status,
 }) {
-  const workspaceId = `ws-${repoId}-${name}`.replace(/\s+/g, "-");
+  const workspaceId = `ws-${projectId}-${name}`.replace(/\s+/g, "-");
   await store.saveWhatsAppWorkspacePresentation({
-    repoId,
+    projectId,
     workspaceId,
     workspaceChatId,
     workspaceChatSubject,
   });
   return store.createWorkspace({
     workspaceId,
-    repoId,
+    projectId,
     name,
     branch,
     baseBranch,
@@ -123,7 +123,7 @@ describe("workspace resolver foundation", () => {
       controlChatId: "payments-control",
     });
     const workspace = await createWorkspaceFixture(store, {
-      repoId: project.repo_id,
+      projectId: project.project_id,
       name: "payments",
       branch: "payments",
       baseBranch: "main",
@@ -150,7 +150,7 @@ describe("workspace resolver foundation", () => {
       controlChatId: "list-control",
     });
     const activeWorkspace = await createWorkspaceFixture(store, {
-      repoId: repo.repo_id,
+      projectId: repo.project_id,
       name: "active",
       branch: "active",
       baseBranch: "master",
@@ -160,7 +160,7 @@ describe("workspace resolver foundation", () => {
       status: "ready",
     });
     const archivedWorkspace = await createWorkspaceFixture(store, {
-      repoId: repo.repo_id,
+      projectId: repo.project_id,
       name: "archived",
       branch: "archived",
       baseBranch: "master",
@@ -172,7 +172,7 @@ describe("workspace resolver foundation", () => {
 
     await store.archiveWorkspace(archivedWorkspace.workspace_id);
 
-    const listed = await store.listActiveWorkspaces(repo.repo_id);
+    const listed = await store.listActiveWorkspaces(repo.project_id);
 
     assert.deepEqual(listed, [activeWorkspace]);
   });
@@ -198,7 +198,7 @@ describe("workspace resolver foundation", () => {
       defaultBaseBranch: "master",
     });
     const workspace = await createWorkspaceFixture(store, {
-      repoId: project.repo_id,
+      projectId: project.project_id,
       name: "payments",
       branch: "payments",
       baseBranch: "master",
@@ -238,11 +238,11 @@ describe("workspace resolver foundation", () => {
     const binding = await store.getChatBinding(chatId);
     assert.deepEqual(binding && {
       bindingKind: binding.binding_kind,
-      repoId: binding.repo_id,
+      projectId: binding.project_id,
       workspaceId: binding.workspace_id,
     }, {
       bindingKind: "workspace",
-      repoId: resolved.project.repo_id,
+      projectId: resolved.project.project_id,
       workspaceId: resolved.workspace.workspace_id,
     });
 

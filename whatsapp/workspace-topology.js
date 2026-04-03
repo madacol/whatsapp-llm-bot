@@ -12,13 +12,13 @@ export function buildWorkspaceSurfaceName(workspaceName, sourceChatName) {
 }
 
 /**
- * @param {string} repoId
+ * @param {string} projectId
  * @param {string | undefined} sourceChatName
  * @returns {string}
  */
-export function buildCommunitySurfaceName(repoId, sourceChatName) {
+export function buildCommunitySurfaceName(projectId, sourceChatName) {
   const trimmedChatName = sourceChatName?.trim();
-  return trimmedChatName || `project-${repoId}`;
+  return trimmedChatName || `project-${projectId}`;
 }
 
 /**
@@ -66,13 +66,13 @@ function findWorkspacePresentation(workspaceId, presentations) {
  * }} input
  * @returns {{
  *   syncMainWorkspaceCommunitySurface: (input: {
- *     repoId: string,
+ *     projectId: string,
  *     workspaceId: string,
  *     existingWorkspacePresentation: WhatsAppWorkspacePresentationRow,
  *     communityChatId: string,
  *   }) => Promise<{ surfaceId: string, surfaceName: string }>,
  *   provisionWorkspaceSurface: (input: {
- *     repoId: string,
+ *     projectId: string,
  *     workspaceId: string,
  *     workspaceName: string,
  *     sourceChatName?: string,
@@ -86,7 +86,7 @@ export function createWhatsAppWorkspaceTopology({ transport, store }) {
    * Normalize the persisted main workspace surface so the original flat group
    * becomes the `main` subgroup inside the community.
    * @param {{
-   *   repoId: string,
+   *   projectId: string,
    *   workspaceId: string,
    *   existingWorkspacePresentation: WhatsAppWorkspacePresentationRow,
    *   communityChatId: string,
@@ -94,7 +94,7 @@ export function createWhatsAppWorkspaceTopology({ transport, store }) {
    * @returns {Promise<{ surfaceId: string, surfaceName: string }>}
    */
   async function adoptExistingWorkspaceSurfaceIntoCommunity({
-    repoId,
+    projectId,
     workspaceId,
     existingWorkspacePresentation,
     communityChatId,
@@ -128,7 +128,7 @@ export function createWhatsAppWorkspaceTopology({ transport, store }) {
       );
     }
     await store.saveWhatsAppWorkspacePresentation({
-      repoId,
+      projectId,
       workspaceId,
       workspaceChatId: existingWorkspacePresentation.workspace_chat_id,
       workspaceChatSubject: surfaceName,
@@ -143,7 +143,7 @@ export function createWhatsAppWorkspaceTopology({ transport, store }) {
 
   /**
    * @param {{
-   *   repoId: string,
+   *   projectId: string,
    *   workspaceId: string,
    *   workspaceName: string,
    *   sourceChatName?: string,
@@ -152,7 +152,7 @@ export function createWhatsAppWorkspaceTopology({ transport, store }) {
    * @returns {Promise<{ surfaceId: string, surfaceName: string }>}
    */
   async function provisionFlatWorkspaceSurface({
-    repoId,
+    projectId,
     workspaceId,
     workspaceName,
     sourceChatName,
@@ -168,12 +168,12 @@ export function createWhatsAppWorkspaceTopology({ transport, store }) {
     }
     const persistedSurfaceName = typeof group.subject === "string" ? group.subject : surfaceName;
     await store.upsertWhatsAppProjectPresentation({
-      repoId,
+      projectId,
       topologyKind: "groups",
       mainWorkspaceId: workspaceId,
     });
     await store.saveWhatsAppWorkspacePresentation({
-      repoId,
+      projectId,
       workspaceId,
       workspaceChatId: group.chatId,
       workspaceChatSubject: persistedSurfaceName,
@@ -186,7 +186,7 @@ export function createWhatsAppWorkspaceTopology({ transport, store }) {
 
   /**
    * @param {{
-   *   repoId: string,
+   *   projectId: string,
    *   workspaceId: string,
    *   workspaceName: string,
    *   requesterJids: string[],
@@ -196,7 +196,7 @@ export function createWhatsAppWorkspaceTopology({ transport, store }) {
    * @returns {Promise<{ surfaceId: string, surfaceName: string }>}
    */
   async function provisionCommunityWorkspaceSurface({
-    repoId,
+    projectId,
     workspaceId,
     workspaceName,
     requesterJids,
@@ -210,7 +210,7 @@ export function createWhatsAppWorkspaceTopology({ transport, store }) {
     const group = await transport.createCommunityGroup(surfaceName, requesterJids, communityChatId);
     const persistedSurfaceName = typeof group.subject === "string" ? group.subject : surfaceName;
     await store.saveWhatsAppWorkspacePresentation({
-      repoId,
+      projectId,
       workspaceId,
       workspaceChatId: group.chatId,
       workspaceChatSubject: persistedSurfaceName,
@@ -225,7 +225,7 @@ export function createWhatsAppWorkspaceTopology({ transport, store }) {
 
   /**
    * @param {{
-   *   repoId: string,
+   *   projectId: string,
    *   mainWorkspaceId: string,
    *   communityChatId: string,
    *   existingPresentations: WhatsAppWorkspacePresentationRow[],
@@ -233,7 +233,7 @@ export function createWhatsAppWorkspaceTopology({ transport, store }) {
    * @returns {Promise<void>}
    */
   async function ensureCommunityMainWorkspaceSurface({
-    repoId,
+    projectId,
     mainWorkspaceId,
     communityChatId,
     existingPresentations,
@@ -243,7 +243,7 @@ export function createWhatsAppWorkspaceTopology({ transport, store }) {
       throw new Error(`Could not find the persisted workspace presentation for main workspace ${mainWorkspaceId}.`);
     }
     await adoptExistingWorkspaceSurfaceIntoCommunity({
-      repoId,
+      projectId,
       workspaceId: mainWorkspaceId,
       existingWorkspacePresentation: mainWorkspacePresentation,
       communityChatId,
@@ -252,13 +252,13 @@ export function createWhatsAppWorkspaceTopology({ transport, store }) {
 
   return {
     async syncMainWorkspaceCommunitySurface({
-      repoId,
+      projectId,
       workspaceId,
       existingWorkspacePresentation,
       communityChatId,
     }) {
       return adoptExistingWorkspaceSurfaceIntoCommunity({
-        repoId,
+        projectId,
         workspaceId,
         existingWorkspacePresentation,
         communityChatId,
@@ -266,21 +266,21 @@ export function createWhatsAppWorkspaceTopology({ transport, store }) {
     },
 
     async provisionWorkspaceSurface(input) {
-      const existingPresentations = await store.listWhatsAppWorkspacePresentations(input.repoId);
+      const existingPresentations = await store.listWhatsAppWorkspacePresentations(input.projectId);
       if (input.repoPresentation?.topology_kind === "community") {
         if (!input.repoPresentation.community_chat_id) {
-          throw new Error(`Community presentation for project ${input.repoId} is missing its community chat id.`);
+          throw new Error(`Community presentation for project ${input.projectId} is missing its community chat id.`);
         }
         if (input.repoPresentation.main_workspace_id) {
           await ensureCommunityMainWorkspaceSurface({
-            repoId: input.repoId,
+            projectId: input.projectId,
             mainWorkspaceId: input.repoPresentation.main_workspace_id,
             communityChatId: input.repoPresentation.community_chat_id,
             existingPresentations,
           });
         }
         return provisionCommunityWorkspaceSurface({
-          repoId: input.repoId,
+          projectId: input.projectId,
           workspaceId: input.workspaceId,
           workspaceName: input.workspaceName,
           requesterJids: input.requesterJids,
@@ -298,27 +298,27 @@ export function createWhatsAppWorkspaceTopology({ transport, store }) {
       }
       const mainWorkspaceId = input.repoPresentation?.main_workspace_id ?? existingPresentations[0]?.workspace_id;
       if (!mainWorkspaceId) {
-        throw new Error(`Could not determine the main workspace for project ${input.repoId}.`);
+        throw new Error(`Could not determine the main workspace for project ${input.projectId}.`);
       }
 
       const community = await transport.createCommunity(
-        buildCommunitySurfaceName(input.repoId, input.sourceChatName),
+        buildCommunitySurfaceName(input.projectId, input.sourceChatName),
         "",
       );
       await ensureCommunityMainWorkspaceSurface({
-        repoId: input.repoId,
+        projectId: input.projectId,
         mainWorkspaceId,
         communityChatId: community.chatId,
         existingPresentations,
       });
       await store.upsertWhatsAppProjectPresentation({
-        repoId: input.repoId,
+        projectId: input.projectId,
         topologyKind: "community",
         communityChatId: community.chatId,
         mainWorkspaceId,
       });
       return provisionCommunityWorkspaceSurface({
-        repoId: input.repoId,
+        projectId: input.projectId,
         workspaceId: input.workspaceId,
         workspaceName: input.workspaceName,
         requesterJids: input.requesterJids,

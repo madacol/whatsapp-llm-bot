@@ -135,8 +135,8 @@ export function createWhatsAppWorkspacePresenter({ transport, store }) {
 
   /** @type {WorkspacePresentationPort} */
   const presenter = {
-    async ensureWorkspaceVisible({ repoId, workspaceId, workspaceName, sourceChatName, requesterJids }) {
-      const repoPresentation = await store.getWhatsAppProjectPresentation(repoId);
+    async ensureWorkspaceVisible({ projectId, workspaceId, workspaceName, sourceChatName, requesterJids }) {
+      const repoPresentation = await store.getWhatsAppProjectPresentation(projectId);
       const existing = await store.getWhatsAppWorkspacePresentation(workspaceId);
 
       if (existing) {
@@ -146,10 +146,10 @@ export function createWhatsAppWorkspacePresenter({ transport, store }) {
           : existing.linked_community_chat_id;
         if (repoPresentation?.topology_kind === "community" && role === "main") {
           if (!repoPresentation.community_chat_id) {
-            throw new Error(`Community presentation for project ${repoId} is missing its community chat id.`);
+            throw new Error(`Community presentation for project ${projectId} is missing its community chat id.`);
           }
           return topology.syncMainWorkspaceCommunitySurface({
-            repoId,
+            projectId,
             workspaceId,
             existingWorkspacePresentation: existing,
             communityChatId: repoPresentation.community_chat_id,
@@ -172,7 +172,7 @@ export function createWhatsAppWorkspacePresenter({ transport, store }) {
           }
         }
         await store.saveWhatsAppWorkspacePresentation({
-          repoId,
+          projectId,
           workspaceId,
           workspaceChatId: existing.workspace_chat_id,
           workspaceChatSubject: surfaceName,
@@ -186,7 +186,7 @@ export function createWhatsAppWorkspacePresenter({ transport, store }) {
       }
 
       return topology.provisionWorkspaceSurface({
-        repoId,
+        projectId,
         workspaceId,
         workspaceName,
         sourceChatName,

@@ -39,11 +39,11 @@ function buildChatWorkspaceName(chatName) {
  *   explicitCwd?: string | null | undefined,
  *   store: {
  *     getProjectByRootPath?: (rootPath: string) => Promise<ProjectRow | null>,
- *     getWorkspaceByName?: (repoId: string, name: string) => Promise<WorkspaceRow | null>,
+ *     getWorkspaceByName?: (projectId: string, name: string) => Promise<WorkspaceRow | null>,
  *     createProject?: (input: { name: string, rootPath: string, defaultBaseBranch: string, controlChatId?: string | null }) => Promise<ProjectRow>,
  *     createWorkspace?: (input: {
  *       workspaceId?: string,
- *       repoId: string,
+ *       projectId: string,
  *       name: string,
  *       branch: string,
  *       baseBranch: string,
@@ -51,7 +51,7 @@ function buildChatWorkspaceName(chatName) {
  *       status?: WorkspaceStatus,
  *     }) => Promise<WorkspaceRow>,
  *     saveWhatsAppWorkspacePresentation?: (input: {
- *       repoId: string,
+ *       projectId: string,
  *       workspaceId: string,
  *       workspaceChatId: string,
  *       workspaceChatSubject: string,
@@ -59,7 +59,7 @@ function buildChatWorkspaceName(chatName) {
  *       linkedCommunityChatId?: string | null,
  *     }) => Promise<WhatsAppWorkspacePresentationRow>,
  *     upsertWhatsAppProjectPresentation?: (input: {
- *       repoId: string,
+ *       projectId: string,
  *       topologyKind?: WhatsAppProjectTopologyKind,
  *       communityChatId?: string | null,
  *       mainWorkspaceId?: string | null,
@@ -91,21 +91,21 @@ async function resolveOrAdoptChatWorkspace({ chatId, chatName, explicitCwd, stor
   }
 
   const workspaceName = buildChatWorkspaceName(chatName);
-  const existingWorkspace = await getWorkspaceByName(project.repo_id, workspaceName);
+  const existingWorkspace = await getWorkspaceByName(project.project_id, workspaceName);
   if (existingWorkspace) {
     return { project, workspace: existingWorkspace };
   }
 
   const workspaceId = chatId;
   await saveWhatsAppWorkspacePresentation({
-    repoId: project.repo_id,
+    projectId: project.project_id,
     workspaceId,
     workspaceChatId: chatId,
     workspaceChatSubject: workspaceName,
   });
   const workspace = await createWorkspace({
     workspaceId,
-    repoId: project.repo_id,
+    projectId: project.project_id,
     name: workspaceName,
     branch: project.default_base_branch,
     baseBranch: project.default_base_branch,
@@ -113,7 +113,7 @@ async function resolveOrAdoptChatWorkspace({ chatId, chatName, explicitCwd, stor
     status: "ready",
   });
   await store.upsertWhatsAppProjectPresentation?.({
-    repoId: project.repo_id,
+    projectId: project.project_id,
     topologyKind: "groups",
     mainWorkspaceId: workspace.workspace_id,
   });
@@ -125,15 +125,15 @@ async function resolveOrAdoptChatWorkspace({ chatId, chatName, explicitCwd, stor
  * chat independent of adapter presentation details.
  * @param {{
  *   getChatBinding: (chatId: string) => Promise<ChatBindingRow | null>,
- *   getProject: (repoId: string) => Promise<ProjectRow | null>,
+ *   getProject: (projectId: string) => Promise<ProjectRow | null>,
  *   getWorkspace: (workspaceId: string) => Promise<WorkspaceRow | null>,
  *   getProjectByRootPath?: (rootPath: string) => Promise<ProjectRow | null>,
  *   getWorkspaceByWorktreePath?: (worktreePath: string) => Promise<WorkspaceRow | null>,
- *   getWorkspaceByName?: (repoId: string, name: string) => Promise<WorkspaceRow | null>,
+ *   getWorkspaceByName?: (projectId: string, name: string) => Promise<WorkspaceRow | null>,
  *   createProject?: (input: { name: string, rootPath: string, defaultBaseBranch: string, controlChatId?: string | null }) => Promise<ProjectRow>,
  *   createWorkspace?: (input: {
  *     workspaceId?: string,
- *     repoId: string,
+ *     projectId: string,
  *     name: string,
  *     branch: string,
  *     baseBranch: string,
@@ -141,7 +141,7 @@ async function resolveOrAdoptChatWorkspace({ chatId, chatName, explicitCwd, stor
  *     status?: WorkspaceStatus,
  *   }) => Promise<WorkspaceRow>,
  *   saveWhatsAppWorkspacePresentation?: (input: {
- *     repoId: string,
+ *     projectId: string,
  *     workspaceId: string,
  *     workspaceChatId: string,
  *     workspaceChatSubject: string,
@@ -149,7 +149,7 @@ async function resolveOrAdoptChatWorkspace({ chatId, chatName, explicitCwd, stor
  *     linkedCommunityChatId?: string | null,
  *   }) => Promise<WhatsAppWorkspacePresentationRow>,
  *   upsertWhatsAppProjectPresentation?: (input: {
- *     repoId: string,
+ *     projectId: string,
  *     topologyKind?: WhatsAppProjectTopologyKind,
  *     communityChatId?: string | null,
  *     mainWorkspaceId?: string | null,
@@ -168,15 +168,15 @@ export function createWorkspaceBindingService(store) {
     async resolveChatBinding(chatId, explicitCwd, chatName, isGroupChat) {
       const binding = await store.getChatBinding(chatId);
       if (binding?.binding_kind === "workspace") {
-        if (!binding.repo_id || !binding.workspace_id) {
-          throw new Error(`Workspace binding for ${chatId} is missing repo_id or workspace_id.`);
+        if (!binding.project_id || !binding.workspace_id) {
+          throw new Error(`Workspace binding for ${chatId} is missing project_id or workspace_id.`);
         }
         const [project, workspace] = await Promise.all([
-          store.getProject(binding.repo_id),
+          store.getProject(binding.project_id),
           store.getWorkspace(binding.workspace_id),
         ]);
         if (!project) {
-          throw new Error(`Project ${binding.repo_id} referenced by chat ${chatId} does not exist.`);
+          throw new Error(`Project ${binding.project_id} referenced by chat ${chatId} does not exist.`);
         }
         if (!workspace) {
           throw new Error(`Workspace ${binding.workspace_id} referenced by chat ${chatId} does not exist.`);
@@ -184,8 +184,8 @@ export function createWorkspaceBindingService(store) {
         return { kind: "workspace", project, workspace };
       }
 
-      if (binding?.binding_kind === "project" && binding.repo_id) {
-        const project = await store.getProject(binding.repo_id);
+      if (binding?.binding_kind === "project" && binding.project_id) {
+        const project = await store.getProject(binding.project_id);
         if (project) {
           return { kind: "project", project };
         }
