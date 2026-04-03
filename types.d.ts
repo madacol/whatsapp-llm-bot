@@ -333,21 +333,6 @@ type TurnFacts = {
   quotedSenderId?: string;
 };
 
-type WhatsAppTestCommandInput =
-  | { kind: "tmp"; participants: string[]; groupJid: string; groupSubject: string }
-  | { kind: "methods" }
-  | { kind: "community-create"; subject: string; description: string }
-  | { kind: "community-create-group"; parentCommunityJid: string; subject: string; participants: string[] }
-  | { kind: "community-link"; parentCommunityJid: string; groupJid: string }
-  | { kind: "community-link-smoke"; parentCommunityJid: string; subject: string; participants: string[] }
-  | { kind: "community-metadata"; jid: string }
-  | { kind: "community-linked"; jid: string }
-  | { kind: "smoke"; baseSubject: string; participants: string[] };
-
-type WhatsAppTestResult = {
-  summary: string;
-};
-
 type ChatTransport = {
   start: (onTurn: (turn: ChatTurn) => Promise<void>) => Promise<void>;
   stop: () => Promise<void>;
@@ -364,7 +349,6 @@ type ChatTransport = {
   promoteParticipants?: (chatId: string, participants: string[]) => Promise<void>;
   renameGroup?: (chatId: string, subject: string) => Promise<void>;
   setAnnouncementOnly?: (chatId: string, enabled: boolean) => Promise<void>;
-  runWhatsAppTest?: (input: WhatsAppTestCommandInput) => Promise<WhatsAppTestResult>;
 };
 
 type WorkspacePresentationPort = {

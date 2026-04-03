@@ -5,7 +5,6 @@ import { getRootDb } from "../db.js";
 import { storeAndLinkHtml } from "../html-store.js";
 import { resolveHarness, resolveHarnessName, createHarnessRunCoordinator } from "#harnesses";
 import { contentEvent } from "../outbound-events.js";
-import { tryHandleWhatsAppTestCommand } from "#whatsapp";
 import {
   shouldRespond,
   formatUserMessage,
@@ -101,7 +100,7 @@ async function resolveConversationHarness(chatInfo) {
  * @param {ConversationRunnerDeps} deps
  * @returns {{ handleMessage: (turn: ChatTurn) => Promise<void> }}
  */
-export function createConversationRunner({ store, llmClient, getActionsFn, executeActionFn, transport, workspacePresentation }) {
+export function createConversationRunner({ store, llmClient, getActionsFn, executeActionFn, workspacePresentation }) {
   const {
     addMessage,
     updateToolMessage,
@@ -193,16 +192,6 @@ export function createConversationRunner({ store, llmClient, getActionsFn, execu
         senderJids: turn.senderJids,
         senderName: turn.senderName,
       },
-    })) {
-      return;
-    }
-
-    if (await tryHandleWhatsAppTestCommand({
-      context,
-      inputText,
-      senderIds: turn.senderIds,
-      senderJids: turn.senderJids,
-      transport,
     })) {
       return;
     }
