@@ -22,6 +22,15 @@ export function buildCommunitySurfaceName(projectId, sourceChatName) {
 }
 
 /**
+ * @param {string} projectId
+ * @param {string | undefined} sourceChatName
+ * @returns {string}
+ */
+export function buildCommunityDescription(projectId, sourceChatName) {
+  return `Workspace hub for ${buildCommunitySurfaceName(projectId, sourceChatName)}.`;
+}
+
+/**
  * @param {string} workspaceName
  * @param {WhatsAppWorkspacePresentationRole} role
  * @returns {string}
@@ -303,7 +312,7 @@ export function createWhatsAppWorkspaceTopology({ transport, store }) {
 
       const community = await transport.createCommunity(
         buildCommunitySurfaceName(input.projectId, input.sourceChatName),
-        "",
+        buildCommunityDescription(input.projectId, input.sourceChatName),
       );
       await ensureCommunityMainWorkspaceSurface({
         projectId: input.projectId,

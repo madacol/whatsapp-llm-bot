@@ -15,6 +15,7 @@ import { createChatTurn, createMockLlmServer, createTestDb, seedChat as seedChat
 import { setDb } from "../db.js";
 import { contentEvent } from "../outbound-events.js";
 import { getChatWorkDir } from "../utils.js";
+import { buildCommunityDescription } from "../whatsapp/workspace-topology.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -544,6 +545,10 @@ describe("workspace lifecycle", () => {
 
     assert.equal(transportState.createdCommunities.length, 1);
     assert.equal(transportState.createdCommunities[0]?.subject, chatName);
+    assert.equal(
+      transportState.createdCommunities[0]?.description,
+      buildCommunityDescription(repo?.project_id ?? "", chatName),
+    );
     assert.equal(transportState.createdGroups.length, 1);
     assert.equal(transportState.createdGroups[0]?.subject, "payments");
     assert.deepEqual(transportState.linkedGroups, [{

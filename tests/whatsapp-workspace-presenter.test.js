@@ -1,6 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { contentEvent } from "../outbound-events.js";
+import { buildCommunityDescription } from "../whatsapp/workspace-topology.js";
 import { createWhatsAppWorkspacePresenter } from "../whatsapp/workspace-presenter.js";
 
 describe("WhatsAppWorkspacePresenter", () => {
@@ -172,7 +173,7 @@ describe("WhatsAppWorkspacePresenter", () => {
 
     assert.deepEqual(createdCommunities, [{
       subject: "Original Group",
-      description: "",
+      description: buildCommunityDescription("repo-1", "Original Group"),
     }]);
     assert.deepEqual(createdCommunityGroups, [
       {
