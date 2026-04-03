@@ -31,6 +31,7 @@ let tempDirs = [];
  *   transport: ChatTransport,
  *   createdGroups: Array<{ subject: string, participants: string[], chatId: string }>,
  *   createdCommunities: Array<{ subject: string, description: string, chatId: string }>,
+ *   linkedGroups: Array<{ chatId: string, communityChatId: string }>,
  *   promotedParticipants: Array<{ chatId: string, participants: string[] }>,
  *   sentTexts: Array<{ chatId: string, text: string }>,
  *   sentEvents: Array<{ chatId: string, event: OutboundEvent }>,
@@ -43,6 +44,8 @@ function createFakeTransport() {
   const createdGroups = [];
   /** @type {Array<{ subject: string, description: string, chatId: string }>} */
   const createdCommunities = [];
+  /** @type {Array<{ chatId: string, communityChatId: string }>} */
+  const linkedGroups = [];
   /** @type {Array<{ chatId: string, participants: string[] }>} */
   const promotedParticipants = [];
   /** @type {Array<{ chatId: string, text: string }>} */
@@ -60,6 +63,7 @@ function createFakeTransport() {
   return {
     createdGroups,
     createdCommunities,
+    linkedGroups,
     promotedParticipants,
     sentTexts,
     sentEvents,
@@ -97,6 +101,9 @@ function createFakeTransport() {
         const chatId = `group-${instanceId}-${groupCounter}@g.us`;
         createdGroups.push({ subject, participants, chatId });
         return { chatId, subject };
+      },
+      linkExistingGroupToCommunity: async (chatId, communityChatId) => {
+        linkedGroups.push({ chatId, communityChatId });
       },
       promoteParticipants: async (chatId, participants) => {
         promotedParticipants.push({ chatId, participants });

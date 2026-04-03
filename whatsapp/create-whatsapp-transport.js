@@ -424,6 +424,7 @@ function serializeTransportError(error) {
  *     participants: string[],
  *     parentCommunityChatId: string,
  *   ) => Promise<{ chatId: string, subject: string }>;
+ *   linkExistingGroupToCommunity?: (chatId: string, communityChatId: string) => Promise<void>;
  *   promoteParticipants: (chatId: string, participants: string[]) => Promise<void>;
  *   renameGroup: (chatId: string, subject: string) => Promise<void>;
  *   setAnnouncementOnly: (chatId: string, enabled: boolean) => Promise<void>;
@@ -633,6 +634,16 @@ export async function createWhatsAppTransport() {
         chatId: metadata.id,
         subject: typeof metadata.subject === "string" ? metadata.subject : subject,
       };
+    },
+
+    async linkExistingGroupToCommunity(chatId, communityChatId) {
+      const sock = currentSocket;
+      if (!sock) {
+        throw new Error("WhatsApp transport has not been started");
+      }
+      throw new Error(
+        `linkExistingGroupToCommunity is not implemented yet for ${chatId} -> ${communityChatId}.`,
+      );
     },
 
     async promoteParticipants(chatId, participants) {

@@ -156,23 +156,64 @@ function stringifyEvent(event) {
  */
 export function createWhatsAppWorkspacePresenter({ transport, store }) {
   /**
-   * Placeholder seam for future support of reusing an existing plain group as the
-   * `main` subgroup inside a community. Current transport probing shows WhatsApp
-   * rejects that link with a server-side 400, so migration creates a fresh
-   * community-native `main` group instead.
+   * Normalize the persisted main workspace surface so the original flat group
+   * becomes the `main` subgroup inside the community.
    * @param {{
+   *   repoId: string,
+   *   workspaceId: string,
    *   existingWorkspacePresentation: WhatsAppWorkspacePresentationRow,
    *   communityChatId: string,
-   * }} _input
-   * @returns {Promise<
-   *   | { kind: "adopted", surfaceId: string, surfaceName: string }
-   *   | { kind: "unsupported", reason: string }
-   * >}
+   * }} input
+   * @returns {Promise<{ surfaceId: string, surfaceName: string }>}
    */
-  async function adoptExistingWorkspaceSurfaceIntoCommunity(_input) {
+  async function adoptExistingWorkspaceSurfaceIntoCommunity({
+    repoId,
+    workspaceId,
+    existingWorkspacePresentation,
+    communityChatId,
+  }) {
+    if (
+      existingWorkspacePresentation.linked_community_chat_id
+      && existingWorkspacePresentation.linked_community_chat_id !== communityChatId
+    ) {
+      throw new Error(
+        `Workspace ${workspaceId} is already linked to community ${existingWorkspacePresentation.linked_community_chat_id}, expected ${communityChatId}.`,
+      );
+    }
+    const surfaceName = buildCommunityWorkspaceSurfaceName(existingWorkspacePresentation.workspace_chat_subject, "main");
+    if (
+      existingWorkspacePresentation.workspace_chat_subject === surfaceName
+      && existingWorkspacePresentation.role === "main"
+      && existingWorkspacePresentation.linked_community_chat_id === communityChatId
+    ) {
+      return {
+        surfaceId: existingWorkspacePresentation.workspace_chat_id,
+        surfaceName,
+      };
+    }
+    if (transport.renameGroup && existingWorkspacePresentation.workspace_chat_subject !== surfaceName) {
+      await transport.renameGroup(existingWorkspacePresentation.workspace_chat_id, surfaceName);
+    }
+    if (existingWorkspacePresentation.linked_community_chat_id !== communityChatId) {
+      if (!transport.linkExistingGroupToCommunity) {
+        throw new Error("Workspace creation requires existing-group community linking support.");
+      }
+      await transport.linkExistingGroupToCommunity(
+        existingWorkspacePresentation.workspace_chat_id,
+        communityChatId,
+      );
+    }
+    await store.saveWhatsAppWorkspacePresentation({
+      repoId,
+      workspaceId,
+      workspaceChatId: existingWorkspacePresentation.workspace_chat_id,
+      workspaceChatSubject: surfaceName,
+      role: "main",
+      linkedCommunityChatId: communityChatId,
+    });
     return {
-      kind: "unsupported",
-      reason: "Linking an existing group into a community is not implemented yet.",
+      surfaceId: existingWorkspacePresentation.workspace_chat_id,
+      surfaceName,
     };
   }
 
@@ -299,6 +340,23 @@ export function createWhatsAppWorkspacePresenter({ transport, store }) {
       if (!input.repoPresentation.community_chat_id) {
         throw new Error(`Community presentation for repo ${input.repoId} is missing its community chat id.`);
       }
+      if (input.repoPresentation.main_workspace_id) {
+        const mainWorkspacePresentation = findWorkspacePresentation(
+          input.repoPresentation.main_workspace_id,
+          existingPresentations,
+        );
+        if (!mainWorkspacePresentation) {
+          throw new Error(
+            `Could not find the persisted workspace presentation for main workspace ${input.repoPresentation.main_workspace_id}.`,
+          );
+        }
+        await adoptExistingWorkspaceSurfaceIntoCommunity({
+          repoId: input.repoId,
+          workspaceId: input.repoPresentation.main_workspace_id,
+          existingWorkspacePresentation: mainWorkspacePresentation,
+          communityChatId: input.repoPresentation.community_chat_id,
+        });
+      }
       return provisionCommunityWorkspaceSurface({
         repoId: input.repoId,
         workspaceId: input.workspaceId,
@@ -326,29 +384,12 @@ export function createWhatsAppWorkspacePresenter({ transport, store }) {
     }
 
     const community = await transport.createCommunity(buildCommunitySurfaceName(input.repoId, input.sourceChatName), "");
-    const adoptedMainSurface = await adoptExistingWorkspaceSurfaceIntoCommunity({
+    await adoptExistingWorkspaceSurfaceIntoCommunity({
+      repoId: input.repoId,
+      workspaceId: mainWorkspaceId,
       existingWorkspacePresentation: mainWorkspacePresentation,
       communityChatId: community.chatId,
     });
-    if (adoptedMainSurface.kind === "adopted") {
-      await store.saveWhatsAppWorkspacePresentation({
-        repoId: input.repoId,
-        workspaceId: mainWorkspaceId,
-        workspaceChatId: adoptedMainSurface.surfaceId,
-        workspaceChatSubject: adoptedMainSurface.surfaceName,
-        role: "main",
-        linkedCommunityChatId: community.chatId,
-      });
-    } else {
-      await provisionCommunityWorkspaceSurface({
-        repoId: input.repoId,
-        workspaceId: mainWorkspaceId,
-        workspaceName: "main",
-        requesterJids: input.requesterJids,
-        communityChatId: community.chatId,
-        role: "main",
-      });
-    }
     await store.upsertWhatsAppRepoPresentation({
       repoId: input.repoId,
       topologyKind: "community",
@@ -376,6 +417,17 @@ export function createWhatsAppWorkspacePresenter({ transport, store }) {
         const linkedCommunityChatId = repoPresentation?.topology_kind === "community"
           ? repoPresentation.community_chat_id
           : existing.linked_community_chat_id;
+        if (repoPresentation?.topology_kind === "community" && role === "main") {
+          if (!repoPresentation.community_chat_id) {
+            throw new Error(`Community presentation for repo ${repoId} is missing its community chat id.`);
+          }
+          return adoptExistingWorkspaceSurfaceIntoCommunity({
+            repoId,
+            workspaceId,
+            existingWorkspacePresentation: existing,
+            communityChatId: repoPresentation.community_chat_id,
+          });
+        }
         const surfaceName = repoPresentation?.topology_kind === "community"
           ? buildCommunityWorkspaceSurfaceName(workspaceName, role)
           : buildWorkspaceSurfaceName(workspaceName, sourceChatName);

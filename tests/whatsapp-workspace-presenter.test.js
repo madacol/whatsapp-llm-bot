@@ -84,11 +84,15 @@ describe("WhatsAppWorkspacePresenter", () => {
     });
   });
 
-  it("upgrades a repo from a flat group to a community on the second workspace and leaves existing-group adoption as a placeholder", async () => {
+  it("upgrades a repo from a flat group to a community on the second workspace by adopting the original group as main", async () => {
     /** @type {Array<{ subject: string, description: string }>} */
     const createdCommunities = [];
     /** @type {Array<{ subject: string, participants: string[], parentCommunityChatId: string }>} */
     const createdCommunityGroups = [];
+    /** @type {Array<{ chatId: string, subject: string }>} */
+    const renamedGroups = [];
+    /** @type {Array<{ chatId: string, communityChatId: string }>} */
+    const linkedGroups = [];
     /** @type {Array<{
      *   repoId: string,
      *   workspaceId: string,
@@ -145,9 +149,15 @@ describe("WhatsAppWorkspacePresenter", () => {
         createCommunityGroup: async (subject, participants, parentCommunityChatId) => {
           createdCommunityGroups.push({ subject, participants, parentCommunityChatId });
           return {
-            chatId: subject === "main" ? "community-main-chat" : "community-feature-chat",
+            chatId: "community-feature-chat",
             subject,
           };
+        },
+        renameGroup: async (chatId, subject) => {
+          renamedGroups.push({ chatId, subject });
+        },
+        linkExistingGroupToCommunity: async (chatId, communityChatId) => {
+          linkedGroups.push({ chatId, communityChatId });
         },
       },
     });
@@ -166,16 +176,19 @@ describe("WhatsAppWorkspacePresenter", () => {
     }]);
     assert.deepEqual(createdCommunityGroups, [
       {
-        subject: "main",
-        participants: ["user@s.whatsapp.net"],
-        parentCommunityChatId: "community-chat",
-      },
-      {
         subject: "fraud-fix",
         participants: ["user@s.whatsapp.net"],
         parentCommunityChatId: "community-chat",
       },
     ]);
+    assert.deepEqual(renamedGroups, [{
+      chatId: "flat-chat",
+      subject: "main",
+    }]);
+    assert.deepEqual(linkedGroups, [{
+      chatId: "flat-chat",
+      communityChatId: "community-chat",
+    }]);
     assert.deepEqual(storedRepos, [{
       repoId: "repo-1",
       topologyKind: "community",
@@ -186,7 +199,7 @@ describe("WhatsAppWorkspacePresenter", () => {
       {
         repoId: "repo-1",
         workspaceId: "ws-1",
-        workspaceChatId: "community-main-chat",
+        workspaceChatId: "flat-chat",
         workspaceChatSubject: "main",
         role: "main",
         linkedCommunityChatId: "community-chat",
@@ -203,6 +216,118 @@ describe("WhatsAppWorkspacePresenter", () => {
     assert.deepEqual(surface, {
       surfaceId: "community-feature-chat",
       surfaceName: "fraud-fix",
+    });
+  });
+
+  it("normalizes an already-community repo by adopting the persisted flat main group before adding another subgroup", async () => {
+    /** @type {Array<{ subject: string, participants: string[], parentCommunityChatId: string }>} */
+    const createdCommunityGroups = [];
+    /** @type {Array<{ chatId: string, subject: string }>} */
+    const renamedGroups = [];
+    /** @type {Array<{ chatId: string, communityChatId: string }>} */
+    const linkedGroups = [];
+    /** @type {Array<{
+     *   repoId: string,
+     *   workspaceId: string,
+     *   workspaceChatId: string,
+     *   workspaceChatSubject: string,
+     *   role?: WhatsAppWorkspacePresentationRole,
+     *   linkedCommunityChatId?: string | null,
+     * }>} */
+    const storedPresentations = [];
+    const presenter = createWhatsAppWorkspacePresenter({
+      store: {
+        getWhatsAppRepoPresentation: async () => ({
+          repo_id: "repo-1",
+          topology_kind: "community",
+          community_chat_id: "community-chat",
+          main_workspace_id: "ws-1",
+          timestamp: new Date().toISOString(),
+        }),
+        getWhatsAppWorkspacePresentation: async () => null,
+        listWhatsAppWorkspacePresentations: async () => ([
+          {
+            workspace_id: "ws-1",
+            repo_id: "repo-1",
+            workspace_chat_id: "flat-chat",
+            workspace_chat_subject: "[payments] Original Group",
+            role: "workspace",
+            linked_community_chat_id: null,
+            timestamp: new Date().toISOString(),
+          },
+        ]),
+        saveWhatsAppWorkspacePresentation: async (input) => {
+          storedPresentations.push(input);
+        },
+        upsertWhatsAppRepoPresentation: async () => {
+          assert.fail("repo topology should not be rewritten when the repo is already community-backed");
+        },
+      },
+      transport: {
+        start: async () => {},
+        stop: async () => {},
+        sendText: async () => {},
+        createCommunity: async () => {
+          assert.fail("community should not be recreated when the repo is already community-backed");
+        },
+        createCommunityGroup: async (subject, participants, parentCommunityChatId) => {
+          createdCommunityGroups.push({ subject, participants, parentCommunityChatId });
+          return {
+            chatId: "community-bugfix-chat",
+            subject,
+          };
+        },
+        renameGroup: async (chatId, subject) => {
+          renamedGroups.push({ chatId, subject });
+        },
+        linkExistingGroupToCommunity: async (chatId, communityChatId) => {
+          linkedGroups.push({ chatId, communityChatId });
+        },
+      },
+    });
+
+    const surface = await presenter.ensureWorkspaceVisible({
+      repoId: "repo-1",
+      workspaceId: "ws-3",
+      workspaceName: "bugfix",
+      sourceChatName: "Original Group",
+      requesterJids: ["user@s.whatsapp.net"],
+    });
+
+    assert.deepEqual(renamedGroups, [{
+      chatId: "flat-chat",
+      subject: "main",
+    }]);
+    assert.deepEqual(linkedGroups, [{
+      chatId: "flat-chat",
+      communityChatId: "community-chat",
+    }]);
+    assert.deepEqual(createdCommunityGroups, [{
+      subject: "bugfix",
+      participants: ["user@s.whatsapp.net"],
+      parentCommunityChatId: "community-chat",
+    }]);
+    assert.deepEqual(storedPresentations, [
+      {
+        repoId: "repo-1",
+        workspaceId: "ws-1",
+        workspaceChatId: "flat-chat",
+        workspaceChatSubject: "main",
+        role: "main",
+        linkedCommunityChatId: "community-chat",
+      },
+      {
+        repoId: "repo-1",
+        workspaceId: "ws-3",
+        workspaceChatId: "community-bugfix-chat",
+        workspaceChatSubject: "bugfix",
+        role: "workspace",
+        linkedCommunityChatId: "community-chat",
+      },
+    ]);
+    assert.deepEqual(surface, {
+      surfaceId: "community-bugfix-chat",
+      surfaceName: "bugfix",
     });
   });
 
