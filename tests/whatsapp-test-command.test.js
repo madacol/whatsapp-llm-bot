@@ -91,6 +91,38 @@ describe("WhatsApp test command", () => {
     assert.ok(turn.responses.some((response) => response.text.includes("Logged methods to /tmp/wh.log")));
   });
 
+  it("runs !tmp through the transport test port with sender participants", async () => {
+    /** @type {WhatsAppTestCommandInput[]} */
+    const invocations = [];
+    const handleMessage = await createHandler({
+      transport: {
+        start: async () => {},
+        stop: async () => {},
+        sendText: async () => {},
+        runWhatsAppTest: async (input) => {
+          invocations.push(input);
+          return { summary: "Temporary link probe logged to /tmp/wh.log" };
+        },
+      },
+    });
+
+    await seedChat("wa-test-tmp");
+
+    const turn = createChatTurn({
+      chatId: "wa-test-tmp",
+      senderIds: ["user"],
+      senderJids: ["user@s.whatsapp.net"],
+      content: [{ type: "text", text: "!tmp" }],
+    });
+    await handleMessage(turn.context);
+
+    assert.deepEqual(invocations, [{
+      kind: "tmp",
+      participants: ["user@s.whatsapp.net"],
+    }]);
+    assert.ok(turn.responses.some((response) => response.text.includes("Temporary link probe logged to /tmp/wh.log")));
+  });
+
   it("runs !test wa smoke with the sender as participant", async () => {
     /** @type {WhatsAppTestCommandInput[]} */
     const invocations = [];
@@ -397,6 +429,88 @@ describe("runLoggedWhatsAppTestOperation", () => {
 });
 
 describe("executeWhatsAppTestCommand", () => {
+  it("creates a temporary community and external group for the tmp probe", async () => {
+    const { executeWhatsAppTestCommand } = await import("../whatsapp/create-whatsapp-transport.js");
+
+    /** @type {string[]} */
+    const calls = [];
+    /** @type {BaileysSocket & {
+     *   communityCreate: (subject: string, description: string) => Promise<{ id: string, subject: string }>;
+     *   groupCreate: (subject: string, participants: string[]) => Promise<{ id: string, subject: string }>;
+     *   communityLinkGroup: (groupJid: string, parentCommunityJid: string) => Promise<void>;
+     *   groupMetadata: (jid: string) => Promise<{ id: string, linkedParent?: string }>;
+     *   communityFetchLinkedGroups: (jid: string) => Promise<Array<{ id: string, subject: string }>>;
+     * }} */
+    const sock = /** @type {never} */ ({
+      communityCreate: async (subject, description) => {
+        calls.push(`communityCreate:${subject}:${description.startsWith("madabot tmp probe ")}`);
+        return {
+          id: "120363000000000000@g.us",
+          subject,
+        };
+      },
+      groupCreate: async (subject, participants) => {
+        calls.push(`groupCreate:${subject}:${participants.join(",")}`);
+        return {
+          id: "120363999999999999@g.us",
+          subject,
+        };
+      },
+      communityLinkGroup: async (groupJid, parentCommunityJid) => {
+        calls.push(`communityLinkGroup:${groupJid}:${parentCommunityJid}`);
+      },
+      groupMetadata: async (jid) => {
+        calls.push(`groupMetadata:${jid}`);
+        return {
+          id: jid,
+          linkedParent: "120363000000000000@g.us",
+        };
+      },
+      communityFetchLinkedGroups: async (jid) => {
+        calls.push(`communityFetchLinkedGroups:${jid}`);
+        return [{ id: "120363999999999999@g.us", subject: "tmp" }];
+      },
+    });
+
+    const result = await executeWhatsAppTestCommand({
+      sock,
+      input: {
+        kind: "tmp",
+        participants: ["user@s.whatsapp.net"],
+      },
+    });
+
+    assert.deepEqual(calls, [
+      "communityCreate:tmp:true",
+      "groupCreate:tmp:user@s.whatsapp.net",
+      "communityLinkGroup:120363999999999999@g.us:120363000000000000@g.us",
+      "groupMetadata:120363999999999999@g.us",
+      "communityFetchLinkedGroups:120363000000000000@g.us",
+    ]);
+    assert.deepEqual(result, {
+      community: {
+        id: "120363000000000000@g.us",
+        subject: "tmp",
+      },
+      createdGroup: {
+        id: "120363999999999999@g.us",
+        subject: "tmp",
+      },
+      linkResponse: null,
+      groupMetadataAfter: {
+        status: "fulfilled",
+        value: {
+          id: "120363999999999999@g.us",
+          linkedParent: "120363000000000000@g.us",
+        },
+      },
+      linkedGroupsAfter: {
+        status: "fulfilled",
+        value: [{ id: "120363999999999999@g.us", subject: "tmp" }],
+      },
+    });
+  });
+
   it("prefers the built-in communityLinkGroup method when available", async () => {
     const { executeWhatsAppTestCommand } = await import("../whatsapp/create-whatsapp-transport.js");
 

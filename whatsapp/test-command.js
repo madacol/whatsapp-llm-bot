@@ -1,6 +1,7 @@
 import { contentEvent } from "../outbound-events.js";
 
 const TEST_COMMAND_USAGE = [
+  "Usage: `!tmp`",
   "Usage: `!test wa methods`",
   "Usage: `!test wa smoke <base subject>`",
   "Usage: `!test wa community-create <subject>` or `!test wa community-create <subject>: <description>`",
@@ -167,6 +168,20 @@ function parseWhatsAppTestArgs(argsText, participants) {
  */
 export async function tryHandleWhatsAppTestCommand({ context, inputText, senderIds, senderJids, transport }) {
   const trimmed = inputText.trim();
+  const participants = getTestParticipants(senderIds, senderJids);
+  if (trimmed === "tmp") {
+    if (!transport?.runWhatsAppTest) {
+      await replyError(context, "WhatsApp test command is unavailable in this runtime.");
+      return true;
+    }
+    const result = await transport.runWhatsAppTest({
+      kind: "tmp",
+      participants,
+    });
+    await replyResult(context, result.summary);
+    return true;
+  }
+
   if (trimmed !== "test" && !trimmed.startsWith("test ")) {
     return false;
   }
@@ -183,7 +198,7 @@ export async function tryHandleWhatsAppTestCommand({ context, inputText, senderI
   }
 
   const argsText = remainder.slice("wa".length).trim();
-  const command = parseWhatsAppTestArgs(argsText, getTestParticipants(senderIds, senderJids));
+  const command = parseWhatsAppTestArgs(argsText, participants);
   if (!command) {
     await replyError(context, TEST_COMMAND_USAGE);
     return true;
