@@ -402,9 +402,12 @@ describe("executeWhatsAppTestCommand", () => {
 
     /** @type {string[]} */
     const calls = [];
+    /** @type {Array<Record<string, unknown>>} */
+    const queries = [];
     /** @type {BaileysSocket & {
      *   groupCreate: (subject: string, participants: string[]) => Promise<{ id: string, subject: string }>;
-     *   communityLinkGroup: (groupJid: string, parentCommunityJid: string) => Promise<void>;
+     *   query: (node: Record<string, unknown>, timeoutMs?: number) => Promise<Record<string, unknown>>;
+     *   groupMetadata: (jid: string) => Promise<{ id: string, linkedParent?: string }>;
      *   communityFetchLinkedGroups: (jid: string) => Promise<Array<{ id: string, subject: string }>>;
      * }} */
     const sock = /** @type {never} */ ({
@@ -415,8 +418,28 @@ describe("executeWhatsAppTestCommand", () => {
           subject,
         };
       },
-      communityLinkGroup: async (groupJid, parentCommunityJid) => {
-        calls.push(`communityLinkGroup:${groupJid}:${parentCommunityJid}`);
+      query: async (node) => {
+        queries.push(node);
+        calls.push("query");
+        return {
+          tag: "iq",
+          attrs: { type: "result" },
+          content: [{
+            tag: "links",
+            attrs: {},
+            content: [{
+              tag: "group",
+              attrs: { jid: "120363999999999999@g.us" },
+            }],
+          }],
+        };
+      },
+      groupMetadata: async (jid) => {
+        calls.push(`groupMetadata:${jid}`);
+        return {
+          id: jid,
+          linkedParent: "120363000000000000@g.us",
+        };
       },
       communityFetchLinkedGroups: async (jid) => {
         calls.push(`communityFetchLinkedGroups:${jid}`);
@@ -436,15 +459,58 @@ describe("executeWhatsAppTestCommand", () => {
 
     assert.deepEqual(calls, [
       "groupCreate:probe-main:user@s.whatsapp.net",
-      "communityLinkGroup:120363999999999999@g.us:120363000000000000@g.us",
+      "query",
+      "groupMetadata:120363999999999999@g.us",
       "communityFetchLinkedGroups:120363000000000000@g.us",
     ]);
+    assert.deepEqual(queries, [{
+      tag: "iq",
+      attrs: {
+        type: "set",
+        xmlns: "w:g2",
+        to: "120363000000000000@g.us",
+      },
+      content: [{
+        tag: "links",
+        attrs: {},
+        content: [{
+          tag: "link",
+          attrs: { link_type: "sub_group" },
+          content: [{
+            tag: "group",
+            attrs: { jid: "120363999999999999@g.us" },
+          }],
+        }],
+      }],
+    }]);
     assert.deepEqual(result, {
       createdGroup: {
         id: "120363999999999999@g.us",
         subject: "probe-main",
       },
-      linkedGroups: [{ id: "120363999999999999@g.us", subject: "probe-main" }],
+      linkResponse: {
+        tag: "iq",
+        attrs: { type: "result" },
+        content: [{
+          tag: "links",
+          attrs: {},
+          content: [{
+            tag: "group",
+            attrs: { jid: "120363999999999999@g.us" },
+          }],
+        }],
+      },
+      groupMetadataAfter: {
+        status: "fulfilled",
+        value: {
+          id: "120363999999999999@g.us",
+          linkedParent: "120363000000000000@g.us",
+        },
+      },
+      linkedGroupsAfter: {
+        status: "fulfilled",
+        value: [{ id: "120363999999999999@g.us", subject: "probe-main" }],
+      },
     });
   });
 });

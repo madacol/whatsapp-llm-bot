@@ -60,6 +60,27 @@ function safeSerialize(value) {
 }
 
 /**
+ * @param {unknown} value
+ * @returns {value is import("@whiskeysockets/baileys").BinaryNode}
+ */
+function isBinaryNode(value) {
+  return isRecord(value) && typeof value.tag === "string" && isRecord(value.attrs);
+}
+
+/**
+ * @param {import("@whiskeysockets/baileys").WASocket} sock
+ * @returns {sock is import("@whiskeysockets/baileys").WASocket & {
+ *   query: (
+ *     node: import("@whiskeysockets/baileys").BinaryNode,
+ *     timeoutMs?: number,
+ *   ) => Promise<unknown>,
+ * }}
+ */
+function hasSocketQuery(sock) {
+  return "query" in sock && isFunction(sock.query);
+}
+
+/**
  * @param {import("@whiskeysockets/baileys").WASocket} sock
  * @returns {string[]}
  */
@@ -210,6 +231,83 @@ export async function runLoggedWhatsAppTestOperation(input) {
 }
 
 /**
+ * @param {string} parentCommunityJid
+ * @param {string} groupJid
+ * @returns {import("@whiskeysockets/baileys").BinaryNode}
+ */
+function buildCommunityLinkQueryNode(parentCommunityJid, groupJid) {
+  return {
+    tag: "iq",
+    attrs: {
+      type: "set",
+      xmlns: "w:g2",
+      to: parentCommunityJid,
+    },
+    content: [{
+      tag: "links",
+      attrs: {},
+      content: [{
+        tag: "link",
+        attrs: { link_type: "sub_group" },
+        content: [{
+          tag: "group",
+          attrs: { jid: groupJid },
+        }],
+      }],
+    }],
+  };
+}
+
+/**
+ * @param {() => Promise<unknown>} execute
+ * @returns {Promise<
+ *   | { status: "fulfilled", value: unknown }
+ *   | { status: "rejected", error: Record<string, unknown> }
+ * >}
+ */
+async function captureProbeOutcome(execute) {
+  try {
+    return {
+      status: "fulfilled",
+      value: await execute(),
+    };
+  } catch (error) {
+    return {
+      status: "rejected",
+      error: serializeTransportError(error),
+    };
+  }
+}
+
+/**
+ * @param {{
+ *   sock: import("@whiskeysockets/baileys").WASocket,
+ *   groupJid: string,
+ *   parentCommunityJid: string,
+ * }} input
+ * @returns {Promise<{
+ *   linkResponse: unknown,
+ *   groupMetadataAfter:
+ *     | { status: "fulfilled", value: unknown }
+ *     | { status: "rejected", error: Record<string, unknown> },
+ *   linkedGroupsAfter:
+ *     | { status: "fulfilled", value: unknown }
+ *     | { status: "rejected", error: Record<string, unknown> },
+ * }>}
+ */
+async function probeCommunityLink({ sock, groupJid, parentCommunityJid }) {
+  if (!hasSocketQuery(sock)) {
+    throw new Error("WhatsApp socket query API is unavailable in this runtime.");
+  }
+  const rawResponse = await sock.query(buildCommunityLinkQueryNode(parentCommunityJid, groupJid));
+  return {
+    linkResponse: isBinaryNode(rawResponse) ? rawResponse : { rawResponse },
+    groupMetadataAfter: await captureProbeOutcome(() => sock.groupMetadata(groupJid)),
+    linkedGroupsAfter: await captureProbeOutcome(() => sock.communityFetchLinkedGroups(parentCommunityJid)),
+  };
+}
+
+/**
  * @param {{
  *   sock: import("@whiskeysockets/baileys").WASocket,
  *   input: WhatsAppTestCommandInput,
@@ -229,17 +327,24 @@ export async function executeWhatsAppTestCommand({ sock, input }) {
         input.parentCommunityJid,
       );
     case "community-link":
-      return sock.communityLinkGroup(input.groupJid, input.parentCommunityJid);
+      return probeCommunityLink({
+        sock,
+        groupJid: input.groupJid,
+        parentCommunityJid: input.parentCommunityJid,
+      });
     case "community-link-smoke": {
       const createdGroup = await sock.groupCreate(input.subject, input.participants);
       if (!createdGroup?.id) {
         throw new Error("groupCreate returned no group id.");
       }
-      await sock.communityLinkGroup(createdGroup.id, input.parentCommunityJid);
-      const linkedGroups = await sock.communityFetchLinkedGroups(input.parentCommunityJid);
+      const linkProbe = await probeCommunityLink({
+        sock,
+        groupJid: createdGroup.id,
+        parentCommunityJid: input.parentCommunityJid,
+      });
       return {
         createdGroup,
-        linkedGroups,
+        ...linkProbe,
       };
     }
     case "community-metadata":
