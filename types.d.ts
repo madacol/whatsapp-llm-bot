@@ -353,6 +353,12 @@ type ChatTransport = {
   sendText: (chatId: string, text: string) => Promise<void>;
   sendEvent?: (chatId: string, event: OutboundEvent) => Promise<MessageHandle | undefined>;
   createGroup?: (subject: string, participants: string[]) => Promise<{ chatId: string, subject: string }>;
+  createCommunity?: (subject: string, description: string) => Promise<{ chatId: string, subject: string }>;
+  createCommunityGroup?: (
+    subject: string,
+    participants: string[],
+    parentCommunityChatId: string,
+  ) => Promise<{ chatId: string, subject: string }>;
   promoteParticipants?: (chatId: string, participants: string[]) => Promise<void>;
   renameGroup?: (chatId: string, subject: string) => Promise<void>;
   setAnnouncementOnly?: (chatId: string, enabled: boolean) => Promise<void>;
