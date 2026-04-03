@@ -4,7 +4,7 @@ import {
 } from "./workspace-git.js";
 import { randomUUID } from "node:crypto";
 import path from "node:path";
-import { formatWorkspaceStatus, listRepoWorkspaces } from "./workspace-service.js";
+import { formatWorkspaceStatus, listProjectWorkspaces } from "./workspace-service.js";
 import { errorToString } from "./utils.js";
 import { createWorkspaceRepoService } from "./workspace-repo-service.js";
 
@@ -50,7 +50,7 @@ function buildDuplicateWorkspaceOptions(workspaceName, { canReplace }) {
 /**
  * The primary chat workspace points at the project root instead of a disposable
  * git worktree, so it must never flow through "replace workspace" teardown.
- * @param {RepoRow} repo
+ * @param {ProjectRow} repo
  * @param {WorkspaceRow} workspace
  * @returns {boolean}
  */
@@ -64,15 +64,15 @@ function canReplaceWorkspace(repo, workspace) {
 export function createWorkspaceControl({ store, workspacePresentation, workspaceRepo = createWorkspaceRepoService() }) {
   return {
     /**
-     * @param {RepoRow} repo
+     * @param {ProjectRow} repo
      * @returns {Promise<string>}
      */
     async list(repo) {
-      return listRepoWorkspaces(store, repo);
+      return listProjectWorkspaces(store, repo);
     },
 
     /**
-     * @param {RepoRow} repo
+     * @param {ProjectRow} repo
      * @param {ExecuteActionContext} context
      * @param {string} workspaceName
      * @param {string} baseBranch
@@ -152,7 +152,7 @@ export function createWorkspaceControl({ store, workspacePresentation, workspace
     },
 
     /**
-     * @param {RepoRow} repo
+     * @param {ProjectRow} repo
      * @param {ExecuteActionContext} context
      * @param {WorkspaceRow} existing
      * @param {string} baseBranch
@@ -212,7 +212,7 @@ export function createWorkspaceControl({ store, workspacePresentation, workspace
     },
 
     /**
-     * @param {RepoRow} repo
+     * @param {ProjectRow} repo
      * @param {string} workspaceName
      * @returns {Promise<string>}
      */

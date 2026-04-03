@@ -5,7 +5,7 @@ import { createWorkspaceLifecycleService } from "../workspace-lifecycle-service.
 
 describe("workspace lifecycle service", () => {
   it("owns create plus seed orchestration as one workspace use case", async () => {
-    /** @type {Array<{ repo: RepoRow, context: ExecuteActionContext, workspaceName: string, baseBranch: string }>} */
+    /** @type {Array<{ project: ProjectRow, context: ExecuteActionContext, workspaceName: string, baseBranch: string }>} */
     const createCalls = [];
     /** @type {Array<{ workspaceId: string, promptText: string }>} */
     const presentedPrompts = [];
@@ -31,8 +31,8 @@ describe("workspace lifecycle service", () => {
     const service = createWorkspaceLifecycleService({
       workspaceControl: {
         list: async () => "",
-        create: async (repo, context, workspaceName, baseBranch) => {
-          createCalls.push({ repo, context, workspaceName, baseBranch });
+        create: async (project, context, workspaceName, baseBranch) => {
+          createCalls.push({ project, context, workspaceName, baseBranch });
           return { message: "Created", workspace };
         },
         status: async () => "",
@@ -76,7 +76,7 @@ describe("workspace lifecycle service", () => {
       },
     });
 
-    const repo = /** @type {RepoRow} */ ({
+    const project = /** @type {ProjectRow} */ ({
       repo_id: "repo-1",
       name: "repo",
       root_path: "/repo",
@@ -101,7 +101,7 @@ describe("workspace lifecycle service", () => {
     });
 
     const result = await service.createWorkspace({
-      repo,
+      project,
       context,
       workspaceName: "payments",
       baseBranch: "main",

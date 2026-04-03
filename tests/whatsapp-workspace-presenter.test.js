@@ -20,20 +20,20 @@ describe("WhatsAppWorkspacePresenter", () => {
     const storedPresentations = [];
     /** @type {Array<{
      *   repoId: string,
-     *   topologyKind?: WhatsAppRepoTopologyKind,
+     *   topologyKind?: WhatsAppProjectTopologyKind,
      *   communityChatId?: string | null,
      *   mainWorkspaceId?: string | null,
      * }>} */
     const storedRepos = [];
     const presenter = createWhatsAppWorkspacePresenter({
       store: {
-        getWhatsAppRepoPresentation: async () => null,
+        getWhatsAppProjectPresentation: async () => null,
         getWhatsAppWorkspacePresentation: async () => null,
         listWhatsAppWorkspacePresentations: async () => [],
         saveWhatsAppWorkspacePresentation: async (input) => {
           storedPresentations.push(input);
         },
-        upsertWhatsAppRepoPresentation: async (input) => {
+        upsertWhatsAppProjectPresentation: async (input) => {
           storedRepos.push(input);
         },
       },
@@ -104,14 +104,14 @@ describe("WhatsAppWorkspacePresenter", () => {
     const storedPresentations = [];
     /** @type {Array<{
      *   repoId: string,
-     *   topologyKind?: WhatsAppRepoTopologyKind,
+     *   topologyKind?: WhatsAppProjectTopologyKind,
      *   communityChatId?: string | null,
      *   mainWorkspaceId?: string | null,
      * }>} */
     const storedRepos = [];
     const presenter = createWhatsAppWorkspacePresenter({
       store: {
-        getWhatsAppRepoPresentation: async () => ({
+        getWhatsAppProjectPresentation: async () => ({
           repo_id: "repo-1",
           topology_kind: "groups",
           community_chat_id: null,
@@ -134,7 +134,7 @@ describe("WhatsAppWorkspacePresenter", () => {
         saveWhatsAppWorkspacePresentation: async (input) => {
           storedPresentations.push(input);
         },
-        upsertWhatsAppRepoPresentation: async (input) => {
+        upsertWhatsAppProjectPresentation: async (input) => {
           storedRepos.push(input);
         },
       },
@@ -237,7 +237,7 @@ describe("WhatsAppWorkspacePresenter", () => {
     const storedPresentations = [];
     const presenter = createWhatsAppWorkspacePresenter({
       store: {
-        getWhatsAppRepoPresentation: async () => ({
+        getWhatsAppProjectPresentation: async () => ({
           repo_id: "repo-1",
           topology_kind: "community",
           community_chat_id: "community-chat",
@@ -259,7 +259,7 @@ describe("WhatsAppWorkspacePresenter", () => {
         saveWhatsAppWorkspacePresentation: async (input) => {
           storedPresentations.push(input);
         },
-        upsertWhatsAppRepoPresentation: async () => {
+        upsertWhatsAppProjectPresentation: async () => {
           assert.fail("repo topology should not be rewritten when the repo is already community-backed");
         },
       },
@@ -345,7 +345,7 @@ describe("WhatsAppWorkspacePresenter", () => {
     const storedPresentations = [];
     const presenter = createWhatsAppWorkspacePresenter({
       store: {
-        getWhatsAppRepoPresentation: async () => ({
+        getWhatsAppProjectPresentation: async () => ({
           repo_id: "repo-1",
           topology_kind: "community",
           community_chat_id: "community-chat",
@@ -367,7 +367,7 @@ describe("WhatsAppWorkspacePresenter", () => {
         saveWhatsAppWorkspacePresentation: async (input) => {
           storedPresentations.push(input);
         },
-        upsertWhatsAppRepoPresentation: async () => {
+        upsertWhatsAppProjectPresentation: async () => {
           assert.fail("repo topology should not be rewritten for later community subgroups");
         },
       },
@@ -430,7 +430,7 @@ describe("WhatsAppWorkspacePresenter", () => {
     const storedPresentations = [];
     const presenter = createWhatsAppWorkspacePresenter({
       store: {
-        getWhatsAppRepoPresentation: async () => null,
+        getWhatsAppProjectPresentation: async () => null,
         getWhatsAppWorkspacePresentation: async () => ({
           workspace_id: "ws-1",
           repo_id: "repo-1",
@@ -444,7 +444,7 @@ describe("WhatsAppWorkspacePresenter", () => {
         saveWhatsAppWorkspacePresentation: async (input) => {
           storedPresentations.push(input);
         },
-        upsertWhatsAppRepoPresentation: async () => {},
+        upsertWhatsAppProjectPresentation: async () => {},
       },
       transport: {
         start: async () => {},
@@ -499,7 +499,7 @@ describe("WhatsAppWorkspacePresenter", () => {
   it("resolves a workspace surface from the persisted WhatsApp mapping", async () => {
     const presenter = createWhatsAppWorkspacePresenter({
       store: {
-        getWhatsAppRepoPresentation: async () => null,
+        getWhatsAppProjectPresentation: async () => null,
         getWhatsAppWorkspacePresentation: async (workspaceId) => {
           assert.equal(workspaceId, "ws-1");
           return {
@@ -516,7 +516,7 @@ describe("WhatsAppWorkspacePresenter", () => {
         saveWhatsAppWorkspacePresentation: async () => {
           throw new Error("should not write when only resolving a surface");
         },
-        upsertWhatsAppRepoPresentation: async () => {
+        upsertWhatsAppProjectPresentation: async () => {
           throw new Error("should not write when only resolving a surface");
         },
       },
@@ -547,7 +547,7 @@ describe("WhatsAppWorkspacePresenter", () => {
     };
     const presenter = createWhatsAppWorkspacePresenter({
       store: {
-        getWhatsAppRepoPresentation: async () => null,
+        getWhatsAppProjectPresentation: async () => null,
         getWhatsAppWorkspacePresentation: async (workspaceId) => {
           assert.equal(workspaceId, "ws-1");
           return {
@@ -562,7 +562,7 @@ describe("WhatsAppWorkspacePresenter", () => {
         },
         listWhatsAppWorkspacePresentations: async () => [],
         saveWhatsAppWorkspacePresentation: async () => {},
-        upsertWhatsAppRepoPresentation: async () => {},
+        upsertWhatsAppProjectPresentation: async () => {},
       },
       transport: {
         start: async () => {},
@@ -596,7 +596,7 @@ describe("WhatsAppWorkspacePresenter", () => {
     const sentEvents = [];
     const presenter = createWhatsAppWorkspacePresenter({
       store: {
-        getWhatsAppRepoPresentation: async () => null,
+        getWhatsAppProjectPresentation: async () => null,
         getWhatsAppWorkspacePresentation: async () => ({
           workspace_id: "ws-1",
           repo_id: "repo-1",
@@ -608,7 +608,7 @@ describe("WhatsAppWorkspacePresenter", () => {
         }),
         listWhatsAppWorkspacePresentations: async () => [],
         saveWhatsAppWorkspacePresentation: async () => {},
-        upsertWhatsAppRepoPresentation: async () => {},
+        upsertWhatsAppProjectPresentation: async () => {},
       },
       transport: {
         start: async () => {},

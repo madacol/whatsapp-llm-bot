@@ -266,10 +266,10 @@ type TurnIO = {
 };
 
 type WorkspaceStatus = "ready" | "busy" | "conflicted" | "archived";
-type WhatsAppRepoTopologyKind = "groups" | "community";
+type WhatsAppProjectTopologyKind = "groups" | "community";
 type WhatsAppWorkspacePresentationRole = "workspace" | "main";
 
-type RepoRow = {
+type ProjectRow = {
   repo_id: string;
   name: string;
   root_path: string;
@@ -293,7 +293,7 @@ type WorkspaceRow = {
   timestamp: string;
 };
 
-type ChatBindingKind = "repo" | "workspace";
+type ChatBindingKind = "project" | "workspace";
 
 type ChatBindingRow = {
   chat_id: string;
@@ -303,9 +303,9 @@ type ChatBindingRow = {
   timestamp: string;
 };
 
-type WhatsAppRepoPresentationRow = {
+type WhatsAppProjectPresentationRow = {
   repo_id: string;
-  topology_kind: WhatsAppRepoTopologyKind;
+  topology_kind: WhatsAppProjectTopologyKind;
   community_chat_id: string | null;
   main_workspace_id: string | null;
   timestamp: string;
@@ -323,8 +323,8 @@ type WhatsAppWorkspacePresentationRow = {
 
 type ResolvedChatBinding =
   | { kind: "unbound" }
-  | { kind: "repo"; repo: RepoRow }
-  | { kind: "workspace"; repo: RepoRow; workspace: WorkspaceRow };
+  | { kind: "project"; project: ProjectRow }
+  | { kind: "workspace"; project: ProjectRow; workspace: WorkspaceRow };
 
 type TurnFacts = {
   isGroup: boolean;

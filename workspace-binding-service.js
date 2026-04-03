@@ -8,7 +8,7 @@ import { inspectGitWorkspace } from "./workspace-git.js";
  * @returns {string}
  */
 function buildRepoName(rootPath) {
-  const base = path.basename(rootPath) || "repo";
+  const base = path.basename(rootPath) || "project";
   const digest = createHash("sha1").update(rootPath).digest("hex").slice(0, 8);
   return `${base}-${digest}`;
 }
@@ -38,9 +38,9 @@ function buildChatWorkspaceName(chatName) {
  *   chatName?: string | null,
  *   explicitCwd?: string | null | undefined,
  *   store: {
- *     getRepoByRootPath?: (rootPath: string) => Promise<RepoRow | null>,
+ *     getProjectByRootPath?: (rootPath: string) => Promise<ProjectRow | null>,
  *     getWorkspaceByName?: (repoId: string, name: string) => Promise<WorkspaceRow | null>,
- *     createRepo?: (input: { name: string, rootPath: string, defaultBaseBranch: string, controlChatId?: string | null }) => Promise<RepoRow>,
+ *     createProject?: (input: { name: string, rootPath: string, defaultBaseBranch: string, controlChatId?: string | null }) => Promise<ProjectRow>,
  *     createWorkspace?: (input: {
  *       workspaceId?: string,
  *       repoId: string,
@@ -58,31 +58,31 @@ function buildChatWorkspaceName(chatName) {
  *       role?: WhatsAppWorkspacePresentationRole,
  *       linkedCommunityChatId?: string | null,
  *     }) => Promise<WhatsAppWorkspacePresentationRow>,
- *     upsertWhatsAppRepoPresentation?: (input: {
+ *     upsertWhatsAppProjectPresentation?: (input: {
  *       repoId: string,
- *       topologyKind?: WhatsAppRepoTopologyKind,
+ *       topologyKind?: WhatsAppProjectTopologyKind,
  *       communityChatId?: string | null,
  *       mainWorkspaceId?: string | null,
- *     }) => Promise<WhatsAppRepoPresentationRow>,
+ *     }) => Promise<WhatsAppProjectPresentationRow>,
  *   },
  * }} input
- * @returns {Promise<{ repo: RepoRow, workspace: WorkspaceRow } | null>}
+ * @returns {Promise<{ project: ProjectRow, workspace: WorkspaceRow } | null>}
  */
 async function resolveOrAdoptChatWorkspace({ chatId, chatName, explicitCwd, store }) {
-  const repoLookup = store.getRepoByRootPath;
-  const createRepo = store.createRepo;
+  const projectLookup = store.getProjectByRootPath;
+  const createProject = store.createProject;
   const createWorkspace = store.createWorkspace;
   const getWorkspaceByName = store.getWorkspaceByName;
   const saveWhatsAppWorkspacePresentation = store.saveWhatsAppWorkspacePresentation;
 
-  if (!repoLookup || !createRepo || !createWorkspace || !getWorkspaceByName || !saveWhatsAppWorkspacePresentation) {
+  if (!projectLookup || !createProject || !createWorkspace || !getWorkspaceByName || !saveWhatsAppWorkspacePresentation) {
     return null;
   }
 
   const rootPath = getChatWorkDir(chatId, explicitCwd, chatName);
-  let repo = await repoLookup(rootPath);
-  if (!repo) {
-    repo = await createRepo({
+  let project = await projectLookup(rootPath);
+  if (!project) {
+    project = await createProject({
       name: buildRepoName(rootPath),
       rootPath,
       defaultBaseBranch: defaultBaseBranch(null),
@@ -91,33 +91,33 @@ async function resolveOrAdoptChatWorkspace({ chatId, chatName, explicitCwd, stor
   }
 
   const workspaceName = buildChatWorkspaceName(chatName);
-  const existingWorkspace = await getWorkspaceByName(repo.repo_id, workspaceName);
+  const existingWorkspace = await getWorkspaceByName(project.repo_id, workspaceName);
   if (existingWorkspace) {
-    return { repo, workspace: existingWorkspace };
+    return { project, workspace: existingWorkspace };
   }
 
   const workspaceId = chatId;
   await saveWhatsAppWorkspacePresentation({
-    repoId: repo.repo_id,
+    repoId: project.repo_id,
     workspaceId,
     workspaceChatId: chatId,
     workspaceChatSubject: workspaceName,
   });
   const workspace = await createWorkspace({
     workspaceId,
-    repoId: repo.repo_id,
+    repoId: project.repo_id,
     name: workspaceName,
-    branch: repo.default_base_branch,
-    baseBranch: repo.default_base_branch,
+    branch: project.default_base_branch,
+    baseBranch: project.default_base_branch,
     worktreePath: rootPath,
     status: "ready",
   });
-  await store.upsertWhatsAppRepoPresentation?.({
-    repoId: repo.repo_id,
+  await store.upsertWhatsAppProjectPresentation?.({
+    repoId: project.repo_id,
     topologyKind: "groups",
     mainWorkspaceId: workspace.workspace_id,
   });
-  return { repo, workspace };
+  return { project, workspace };
 }
 
 /**
@@ -125,12 +125,12 @@ async function resolveOrAdoptChatWorkspace({ chatId, chatName, explicitCwd, stor
  * chat independent of adapter presentation details.
  * @param {{
  *   getChatBinding: (chatId: string) => Promise<ChatBindingRow | null>,
- *   getRepo: (repoId: string) => Promise<RepoRow | null>,
+ *   getProject: (repoId: string) => Promise<ProjectRow | null>,
  *   getWorkspace: (workspaceId: string) => Promise<WorkspaceRow | null>,
- *   getRepoByRootPath?: (rootPath: string) => Promise<RepoRow | null>,
+ *   getProjectByRootPath?: (rootPath: string) => Promise<ProjectRow | null>,
  *   getWorkspaceByWorktreePath?: (worktreePath: string) => Promise<WorkspaceRow | null>,
  *   getWorkspaceByName?: (repoId: string, name: string) => Promise<WorkspaceRow | null>,
- *   createRepo?: (input: { name: string, rootPath: string, defaultBaseBranch: string, controlChatId?: string | null }) => Promise<RepoRow>,
+ *   createProject?: (input: { name: string, rootPath: string, defaultBaseBranch: string, controlChatId?: string | null }) => Promise<ProjectRow>,
  *   createWorkspace?: (input: {
  *     workspaceId?: string,
  *     repoId: string,
@@ -148,12 +148,12 @@ async function resolveOrAdoptChatWorkspace({ chatId, chatName, explicitCwd, stor
  *     role?: WhatsAppWorkspacePresentationRole,
  *     linkedCommunityChatId?: string | null,
  *   }) => Promise<WhatsAppWorkspacePresentationRow>,
- *   upsertWhatsAppRepoPresentation?: (input: {
+ *   upsertWhatsAppProjectPresentation?: (input: {
  *     repoId: string,
- *     topologyKind?: WhatsAppRepoTopologyKind,
+ *     topologyKind?: WhatsAppProjectTopologyKind,
  *     communityChatId?: string | null,
  *     mainWorkspaceId?: string | null,
- *   }) => Promise<WhatsAppRepoPresentationRow>,
+ *   }) => Promise<WhatsAppProjectPresentationRow>,
  * }} store
  */
 export function createWorkspaceBindingService(store) {
@@ -171,23 +171,23 @@ export function createWorkspaceBindingService(store) {
         if (!binding.repo_id || !binding.workspace_id) {
           throw new Error(`Workspace binding for ${chatId} is missing repo_id or workspace_id.`);
         }
-        const [repo, workspace] = await Promise.all([
-          store.getRepo(binding.repo_id),
+        const [project, workspace] = await Promise.all([
+          store.getProject(binding.repo_id),
           store.getWorkspace(binding.workspace_id),
         ]);
-        if (!repo) {
-          throw new Error(`Repo ${binding.repo_id} referenced by chat ${chatId} does not exist.`);
+        if (!project) {
+          throw new Error(`Project ${binding.repo_id} referenced by chat ${chatId} does not exist.`);
         }
         if (!workspace) {
           throw new Error(`Workspace ${binding.workspace_id} referenced by chat ${chatId} does not exist.`);
         }
-        return { kind: "workspace", repo, workspace };
+        return { kind: "workspace", project, workspace };
       }
 
-      if (binding?.binding_kind === "repo" && binding.repo_id) {
-        const repo = await store.getRepo(binding.repo_id);
-        if (repo) {
-          return { kind: "repo", repo };
+      if (binding?.binding_kind === "project" && binding.repo_id) {
+        const project = await store.getProject(binding.repo_id);
+        if (project) {
+          return { kind: "project", project };
         }
       }
 
@@ -206,16 +206,16 @@ export function createWorkspaceBindingService(store) {
         if (!adopted) {
           return { kind: "unbound" };
         }
-        return { kind: "workspace", repo: adopted.repo, workspace: adopted.workspace };
+        return { kind: "workspace", project: adopted.project, workspace: adopted.workspace };
       }
 
       const inferredRepoRoot = inferred.kind === "repo" ? inferred.rootPath : path.dirname(inferred.commonDir);
-      const repoLookup = store.getRepoByRootPath;
-      const createRepo = store.createRepo;
-      let repo = repoLookup ? await repoLookup(inferredRepoRoot) : null;
+      const projectLookup = store.getProjectByRootPath;
+      const createProject = store.createProject;
+      let project = projectLookup ? await projectLookup(inferredRepoRoot) : null;
 
-      if (!repo && createRepo) {
-        repo = await createRepo({
+      if (!project && createProject) {
+        project = await createProject({
           name: buildRepoName(inferredRepoRoot),
           rootPath: inferredRepoRoot,
           defaultBaseBranch: defaultBaseBranch(inferred.branch),
@@ -223,12 +223,12 @@ export function createWorkspaceBindingService(store) {
         });
       }
 
-      if (!repo) {
+      if (!project) {
         return { kind: "unbound" };
       }
 
       if (inferred.kind === "repo") {
-        return { kind: "repo", repo };
+        return { kind: "project", project };
       }
 
       const workspace = store.getWorkspaceByWorktreePath
@@ -238,7 +238,7 @@ export function createWorkspaceBindingService(store) {
         return { kind: "unbound" };
       }
 
-      return { kind: "workspace", repo, workspace };
+      return { kind: "workspace", project, workspace };
     },
   };
 }

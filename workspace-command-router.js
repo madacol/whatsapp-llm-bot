@@ -3,9 +3,9 @@ import { contentEvent } from "./outbound-events.js";
 
 /**
  * @typedef {{
- *   list: (repo: RepoRow) => Promise<string>;
+ *   list: (project: ProjectRow) => Promise<string>;
  *   createWorkspace: (input: {
- *     repo: RepoRow,
+ *     project: ProjectRow,
  *     context: ExecuteActionContext,
  *     workspaceName: string,
  *     baseBranch: string,
@@ -18,7 +18,7 @@ import { contentEvent } from "./outbound-events.js";
  *   }) => Promise<{ message: string, workspace: WorkspaceRow | null }>;
  *   status: (workspace: WorkspaceRow) => Promise<string>;
  *   diff: (workspace: WorkspaceRow) => Promise<string>;
- *   archiveByName: (repo: RepoRow, workspaceName: string) => Promise<string>;
+ *   archiveByName: (project: ProjectRow, workspaceName: string) => Promise<string>;
  *   archiveCurrent: (workspace: WorkspaceRow) => Promise<string>;
  * }} WorkspaceControl
  */
@@ -117,14 +117,14 @@ export async function tryHandleWorkspaceCommand({ context, binding, inputText, w
   }
 
   try {
-    if (binding.kind === "repo") {
+    if (binding.kind === "project") {
       if (isWorkspaceOnlyCommand(lowered)) {
         await replyError(context, "Workspace commands must be run inside a workspace chat.");
         return true;
       }
 
       if (name === "list" && !argsText) {
-        await replyToolResult(context, await workspaceControl.list(binding.repo));
+        await replyToolResult(context, await workspaceControl.list(binding.project));
         return true;
       }
 
@@ -135,10 +135,10 @@ export async function tryHandleWorkspaceCommand({ context, binding, inputText, w
           return true;
         }
         const result = await workspaceControl.createWorkspace({
-          repo: binding.repo,
+          project: binding.project,
           context,
           workspaceName: parsed.workspaceName,
-          baseBranch: binding.repo.default_base_branch,
+          baseBranch: binding.project.default_base_branch,
           seedPrompt: parsed.seedPrompt,
           sourceTurn: seedSourceTurn,
         });
@@ -158,7 +158,7 @@ export async function tryHandleWorkspaceCommand({ context, binding, inputText, w
           await replyToolResult(context, "Archive cancelled.");
           return true;
         }
-        await replyToolResult(context, await workspaceControl.archiveByName(binding.repo, argsText));
+        await replyToolResult(context, await workspaceControl.archiveByName(binding.project, argsText));
         return true;
       }
 
@@ -179,7 +179,7 @@ export async function tryHandleWorkspaceCommand({ context, binding, inputText, w
         return true;
       }
       if (name === "list" && !argsText) {
-        await replyToolResult(context, await workspaceControl.list(binding.repo));
+        await replyToolResult(context, await workspaceControl.list(binding.project));
         return true;
       }
       if (name === "new") {
@@ -189,7 +189,7 @@ export async function tryHandleWorkspaceCommand({ context, binding, inputText, w
           return true;
         }
         const result = await workspaceControl.createWorkspace({
-          repo: binding.repo,
+          project: binding.project,
           context,
           workspaceName: parsed.workspaceName,
           baseBranch: binding.workspace.branch,
@@ -222,7 +222,7 @@ export async function tryHandleWorkspaceCommand({ context, binding, inputText, w
           await replyToolResult(context, "Archive cancelled.");
           return true;
         }
-        await replyToolResult(context, await workspaceControl.archiveByName(binding.repo, argsText));
+        await replyToolResult(context, await workspaceControl.archiveByName(binding.project, argsText));
         return true;
       }
     }

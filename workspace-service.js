@@ -19,10 +19,10 @@ function formatLastTestStatus(lastTestStatus) {
 
 /**
  * @param {Store} store
- * @param {RepoRow} repo
+ * @param {ProjectRow} repo
  * @returns {Promise<string>}
  */
-export async function listRepoWorkspaces(store, repo) {
+export async function listProjectWorkspaces(store, repo) {
   const workspaces = await store.listActiveWorkspaces(repo.repo_id);
   if (workspaces.length === 0) {
     return "No active workspaces.\nUse `!new <name>` to create one.";

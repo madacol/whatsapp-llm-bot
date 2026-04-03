@@ -99,8 +99,8 @@ describe("workspace resolver foundation", () => {
     await Promise.all(tempDirs.map((dir) => fs.rm(dir, { recursive: true, force: true })));
   });
 
-  it("resolves repo-chat bindings", async () => {
-    const repo = await store.createRepo({
+  it("resolves project-chat bindings", async () => {
+    const project = await store.createProject({
       name: "resolver-main",
       rootPath: "/repo/main",
       defaultBaseBranch: "master",
@@ -110,20 +110,20 @@ describe("workspace resolver foundation", () => {
     const resolved = await bindingService.resolveChatBinding("repo-chat");
 
     assert.deepEqual(resolved, {
-      kind: "repo",
-      repo,
+      kind: "project",
+      project,
     });
   });
 
-  it("resolves workspace-chat bindings with repo context", async () => {
-    const repo = await store.createRepo({
+  it("resolves workspace-chat bindings with project context", async () => {
+    const project = await store.createProject({
       name: "payments-repo",
       rootPath: "/repo/payments",
       defaultBaseBranch: "main",
       controlChatId: "payments-control",
     });
     const workspace = await createWorkspaceFixture(store, {
-      repoId: repo.repo_id,
+      repoId: project.repo_id,
       name: "payments",
       branch: "payments",
       baseBranch: "main",
@@ -137,13 +137,13 @@ describe("workspace resolver foundation", () => {
 
     assert.deepEqual(resolved, {
       kind: "workspace",
-      repo,
+      project,
       workspace,
     });
   });
 
   it("lists only active workspaces for a repo", async () => {
-    const repo = await store.createRepo({
+    const repo = await store.createProject({
       name: "list-repo",
       rootPath: "/repo/list",
       defaultBaseBranch: "master",
@@ -177,28 +177,28 @@ describe("workspace resolver foundation", () => {
     assert.deepEqual(listed, [activeWorkspace]);
   });
 
-  it("infers repo chats from a git root cwd without explicit registration", async () => {
+  it("infers project chats from a git root cwd without explicit registration", async () => {
     const { repoRoot } = await createRepoWithWorktree();
 
     const resolved = await bindingService.resolveChatBinding("git-root-chat", repoRoot);
 
-    assert.equal(resolved.kind, "repo");
-    if (resolved.kind !== "repo") {
-      throw new Error("Expected repo binding");
+    assert.equal(resolved.kind, "project");
+    if (resolved.kind !== "project") {
+      throw new Error("Expected project binding");
     }
-    assert.equal(resolved.repo.root_path, repoRoot);
-    assert.equal(resolved.repo.control_chat_id, null);
+    assert.equal(resolved.project.root_path, repoRoot);
+    assert.equal(resolved.project.control_chat_id, null);
   });
 
   it("infers workspace chats from a worktree cwd when a workspace row exists", async () => {
     const { repoRoot, worktreePath } = await createRepoWithWorktree();
-    const repo = await store.createRepo({
+    const project = await store.createProject({
       name: `manual-${Date.now()}`,
       rootPath: repoRoot,
       defaultBaseBranch: "master",
     });
     const workspace = await createWorkspaceFixture(store, {
-      repoId: repo.repo_id,
+      repoId: project.repo_id,
       name: "payments",
       branch: "payments",
       baseBranch: "master",
@@ -212,7 +212,7 @@ describe("workspace resolver foundation", () => {
 
     assert.deepEqual(resolved, {
       kind: "workspace",
-      repo,
+      project,
       workspace,
     });
   });
@@ -229,7 +229,7 @@ describe("workspace resolver foundation", () => {
     }
 
     const expectedRootPath = getChatWorkDir(chatId, undefined, chatName);
-    assert.equal(resolved.repo.root_path, expectedRootPath);
+    assert.equal(resolved.project.root_path, expectedRootPath);
     assert.equal(resolved.workspace.worktree_path, expectedRootPath);
     assert.equal(resolved.workspace.name, chatName);
     assert.equal(resolved.workspace.branch, "master");
@@ -242,7 +242,7 @@ describe("workspace resolver foundation", () => {
       workspaceId: binding.workspace_id,
     }, {
       bindingKind: "workspace",
-      repoId: resolved.repo.repo_id,
+      repoId: resolved.project.repo_id,
       workspaceId: resolved.workspace.workspace_id,
     });
 

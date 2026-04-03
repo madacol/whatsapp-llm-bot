@@ -83,9 +83,9 @@ function isWorkspaceTestStatus(value) {
 
 /**
  * @param {unknown} value
- * @returns {value is WhatsAppRepoTopologyKind}
+ * @returns {value is WhatsAppProjectTopologyKind}
  */
-function isWhatsAppRepoTopologyKind(value) {
+function isWhatsAppProjectTopologyKind(value) {
   return value === "groups" || value === "community";
 }
 
@@ -113,9 +113,9 @@ function normalizeTimestampValue(value) {
 
 /**
  * @param {unknown} raw
- * @returns {RepoRow | null}
+ * @returns {ProjectRow | null}
  */
-function normalizeRepoRow(raw) {
+function normalizeProjectRow(raw) {
   if (!isRecord(raw)) {
     return null;
   }
@@ -196,7 +196,7 @@ function normalizeChatBindingRow(raw) {
   const timestamp = normalizeTimestampValue(raw.timestamp);
   if (
     typeof raw.chat_id !== "string"
-    || (raw.binding_kind !== "repo" && raw.binding_kind !== "workspace")
+    || (raw.binding_kind !== "repo" && raw.binding_kind !== "project" && raw.binding_kind !== "workspace")
     || (raw.repo_id !== null && typeof raw.repo_id !== "string")
     || (raw.workspace_id !== null && typeof raw.workspace_id !== "string")
     || !timestamp
@@ -205,7 +205,7 @@ function normalizeChatBindingRow(raw) {
   }
   return {
     chat_id: raw.chat_id,
-    binding_kind: raw.binding_kind,
+    binding_kind: raw.binding_kind === "repo" ? "project" : raw.binding_kind,
     repo_id: raw.repo_id,
     workspace_id: raw.workspace_id,
     timestamp,
@@ -214,16 +214,16 @@ function normalizeChatBindingRow(raw) {
 
 /**
  * @param {unknown} raw
- * @returns {WhatsAppRepoPresentationRow | null}
+ * @returns {WhatsAppProjectPresentationRow | null}
  */
-function normalizeWhatsAppRepoPresentationRow(raw) {
+function normalizeWhatsAppProjectPresentationRow(raw) {
   if (!isRecord(raw)) {
     return null;
   }
   const timestamp = normalizeTimestampValue(raw.timestamp);
   if (
     typeof raw.repo_id !== "string"
-    || !isWhatsAppRepoTopologyKind(raw.topology_kind)
+    || !isWhatsAppProjectTopologyKind(raw.topology_kind)
     || (raw.community_chat_id !== null && typeof raw.community_chat_id !== "string")
     || (raw.main_workspace_id !== null && typeof raw.main_workspace_id !== "string")
     || !timestamp
@@ -513,6 +513,11 @@ export async function initStore(injectedDb){
         WHERE respond_on = 'mention' AND respond_on_any IS NOT TRUE
           AND respond_on_reply = true AND respond_on_mention IS NOT FALSE
       `;
+      await db.sql`
+        UPDATE chat_bindings
+        SET binding_kind = 'project'
+        WHERE binding_kind = 'repo'
+      `;
 
       await db.sql`
         INSERT INTO whatsapp_repo_presentations (repo_id, topology_kind)
@@ -682,13 +687,13 @@ export async function initStore(injectedDb){
     /**
      * @param {{
      *   repoId: string,
-     *   topologyKind?: WhatsAppRepoTopologyKind,
+     *   topologyKind?: WhatsAppProjectTopologyKind,
      *   communityChatId?: string | null,
      *   mainWorkspaceId?: string | null,
      * }} input
-     * @returns {Promise<WhatsAppRepoPresentationRow>}
+     * @returns {Promise<WhatsAppProjectPresentationRow>}
      */
-    async function persistWhatsAppRepoPresentation({
+    async function persistWhatsAppProjectPresentation({
       repoId,
       topologyKind = "groups",
       communityChatId = null,
@@ -717,9 +722,9 @@ export async function initStore(injectedDb){
           main_workspace_id = EXCLUDED.main_workspace_id
         RETURNING *
       `;
-      const presentation = normalizeWhatsAppRepoPresentationRow(row);
+      const presentation = normalizeWhatsAppProjectPresentationRow(row);
       if (!presentation) {
-        throw new Error(`Failed to normalize WhatsApp repo presentation for ${repoId}.`);
+        throw new Error(`Failed to normalize WhatsApp project presentation for ${repoId}.`);
       }
       return presentation;
     }
@@ -728,7 +733,7 @@ export async function initStore(injectedDb){
      * @param {string} repoId
      * @returns {Promise<void>}
      */
-    async function ensureWhatsAppRepoPresentationExists(repoId) {
+    async function ensureWhatsAppProjectPresentationExists(repoId) {
       await db.sql`
         INSERT INTO whatsapp_repo_presentations (repo_id, topology_kind)
         VALUES (${repoId}, 'groups')
@@ -927,9 +932,9 @@ export async function initStore(injectedDb){
        *   defaultBaseBranch: string,
        *   controlChatId?: string | null,
        * }} input
-       * @returns {Promise<RepoRow>}
+       * @returns {Promise<ProjectRow>}
        */
-      async createRepo ({ name, rootPath, defaultBaseBranch, controlChatId = null }) {
+      async createProject ({ name, rootPath, defaultBaseBranch, controlChatId = null }) {
         if (controlChatId) {
           await ensureChatExists(controlChatId);
         }
@@ -939,57 +944,57 @@ export async function initStore(injectedDb){
           VALUES (${repoId}, ${name}, ${rootPath}, ${defaultBaseBranch}, ${controlChatId})
           RETURNING *
         `;
-        const repo = normalizeRepoRow(row);
-        if (!repo) {
-          throw new Error("Failed to normalize repo row");
+        const project = normalizeProjectRow(row);
+        if (!project) {
+          throw new Error("Failed to normalize project row");
         }
         if (controlChatId) {
           await upsertChatBinding({
             chatId: controlChatId,
-            bindingKind: "repo",
-            repoId: repo.repo_id,
+            bindingKind: "project",
+            repoId: project.repo_id,
           });
         }
-        return repo;
+        return project;
       },
 
       /**
        * @param {string} repoId
-       * @returns {Promise<RepoRow | null>}
+       * @returns {Promise<ProjectRow | null>}
        */
-      async getRepo (repoId) {
+      async getProject (repoId) {
         const { rows: [row] } = await db.sql`
           SELECT * FROM repos
           WHERE repo_id = ${repoId}
           LIMIT 1
         `;
-        return normalizeRepoRow(row);
+        return normalizeProjectRow(row);
       },
 
       /**
        * @param {string} chatId
-       * @returns {Promise<RepoRow | null>}
+       * @returns {Promise<ProjectRow | null>}
        */
-      async getRepoByControlChat (chatId) {
+      async getProjectByChat (chatId) {
         const { rows: [row] } = await db.sql`
           SELECT * FROM repos
           WHERE control_chat_id = ${chatId}
           LIMIT 1
         `;
-        return normalizeRepoRow(row);
+        return normalizeProjectRow(row);
       },
 
       /**
        * @param {string} rootPath
-       * @returns {Promise<RepoRow | null>}
+       * @returns {Promise<ProjectRow | null>}
        */
-      async getRepoByRootPath (rootPath) {
+      async getProjectByRootPath (rootPath) {
         const { rows: [row] } = await db.sql`
           SELECT * FROM repos
           WHERE root_path = ${rootPath}
           LIMIT 1
         `;
-        return normalizeRepoRow(row);
+        return normalizeProjectRow(row);
       },
 
       /**
@@ -1050,7 +1055,7 @@ export async function initStore(injectedDb){
           repoId,
           workspaceId,
         });
-        await ensureWhatsAppRepoPresentationExists(repoId);
+        await ensureWhatsAppProjectPresentationExists(repoId);
         return workspace;
       },
 
@@ -1160,10 +1165,10 @@ export async function initStore(injectedDb){
        * @param {string} repoId
        * @returns {Promise<ChatBindingRow>}
        */
-      async bindChatToRepo (chatId, repoId) {
+      async bindChatToProject (chatId, repoId) {
         return upsertChatBinding({
           chatId,
-          bindingKind: "repo",
+          bindingKind: "project",
           repoId,
         });
       },
@@ -1206,28 +1211,28 @@ export async function initStore(injectedDb){
 
       /**
        * @param {string} repoId
-       * @returns {Promise<WhatsAppRepoPresentationRow | null>}
+       * @returns {Promise<WhatsAppProjectPresentationRow | null>}
        */
-      async getWhatsAppRepoPresentation (repoId) {
+      async getWhatsAppProjectPresentation (repoId) {
         const { rows: [row] } = await db.sql`
           SELECT * FROM whatsapp_repo_presentations
           WHERE repo_id = ${repoId}
           LIMIT 1
         `;
-        return normalizeWhatsAppRepoPresentationRow(row);
+        return normalizeWhatsAppProjectPresentationRow(row);
       },
 
       /**
        * @param {{
        *   repoId: string,
-       *   topologyKind?: WhatsAppRepoTopologyKind,
+       *   topologyKind?: WhatsAppProjectTopologyKind,
        *   communityChatId?: string | null,
        *   mainWorkspaceId?: string | null,
        * }} input
-       * @returns {Promise<WhatsAppRepoPresentationRow>}
+       * @returns {Promise<WhatsAppProjectPresentationRow>}
        */
-      async upsertWhatsAppRepoPresentation (input) {
-        return persistWhatsAppRepoPresentation(input);
+      async upsertWhatsAppProjectPresentation (input) {
+        return persistWhatsAppProjectPresentation(input);
       },
 
       /**

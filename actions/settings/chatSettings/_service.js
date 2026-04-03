@@ -245,8 +245,8 @@ async function formatResolvedHarnessFolder(rootDb, chatId, chat) {
   const store = await initStore(rootDb);
   const binding = await createWorkspaceBindingService(store).resolveChatBinding(chatId, chat.harness_cwd);
   switch (binding.kind) {
-    case "repo":
-      return `\`${binding.repo.root_path}\``;
+    case "project":
+      return `\`${binding.project.root_path}\``;
     case "workspace":
       return `\`${binding.workspace.worktree_path}\``;
     case "unbound":

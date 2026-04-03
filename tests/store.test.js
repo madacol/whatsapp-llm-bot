@@ -53,7 +53,7 @@ describe("store with injected DB", () => {
   describe("workspace persistence", () => {
     it("stores and updates workspace domain state without exposing WhatsApp surface fields", async () => {
       await store.createChat("store-workspace-chat");
-      const repo = await store.createRepo({
+      const repo = await store.createProject({
         name: `store-workspace-repo-${Date.now()}`,
         rootPath: `/repo/store-${Date.now()}`,
         defaultBaseBranch: "master",
@@ -103,13 +103,13 @@ describe("store with injected DB", () => {
   describe("WhatsApp presentation mappings", () => {
     it("stores repo and workspace presentation state separately from the workspace row", async () => {
       await store.createChat("wa-workspace-chat");
-      const repo = await store.createRepo({
+      const repo = await store.createProject({
         name: `store-whatsapp-repo-${Date.now()}`,
         rootPath: `/repo/whatsapp-${Date.now()}`,
         defaultBaseBranch: "master",
       });
 
-      await store.upsertWhatsAppRepoPresentation({
+      await store.upsertWhatsAppProjectPresentation({
         repoId: repo.repo_id,
         topologyKind: "groups",
       });
@@ -121,7 +121,7 @@ describe("store with injected DB", () => {
         workspaceChatSubject: "[payments] Original Group",
       });
 
-      const repoPresentation = await store.getWhatsAppRepoPresentation(repo.repo_id);
+      const repoPresentation = await store.getWhatsAppProjectPresentation(repo.repo_id);
       const workspacePresentation = await store.getWhatsAppWorkspacePresentation("ws-presentation-1");
       const byChat = await store.getWhatsAppWorkspacePresentationByChat("wa-workspace-chat");
 
@@ -162,6 +162,51 @@ describe("store with injected DB", () => {
         workspace_chat_id: "wa-workspace-chat",
         workspace_chat_subject: "[payments] Original Group",
       });
+    });
+  });
+
+  describe("chat bindings", () => {
+    it("stores new control-chat bindings as project bindings", async () => {
+      const chatId = `binding-project-${Date.now()}`;
+      await store.createChat(chatId);
+      const project = await store.createProject({
+        name: `binding-project-${Date.now()}`,
+        rootPath: `/repo/binding-${Date.now()}`,
+        defaultBaseBranch: "main",
+        controlChatId: chatId,
+      });
+
+      const binding = await store.getChatBinding(chatId);
+
+      assert.deepEqual(binding && {
+        binding_kind: binding.binding_kind,
+        repo_id: binding.repo_id,
+        workspace_id: binding.workspace_id,
+      }, {
+        binding_kind: "project",
+        repo_id: project.repo_id,
+        workspace_id: null,
+      });
+    });
+
+    it("normalizes legacy repo bindings to project bindings when read", async () => {
+      const chatId = `legacy-binding-${Date.now()}`;
+      const repoId = `legacy-project-${Date.now()}`;
+      await store.createChat(chatId);
+      await db.sql`
+        INSERT INTO repos (repo_id, name, root_path, default_base_branch, control_chat_id)
+        VALUES (${repoId}, ${`legacy-project-${Date.now()}`}, ${`/repo/legacy-${Date.now()}`}, 'main', NULL)
+      `;
+      await db.sql`
+        INSERT INTO chat_bindings (chat_id, binding_kind, repo_id, workspace_id)
+        VALUES (${chatId}, 'repo', ${repoId}, NULL)
+      `;
+
+      const binding = await store.getChatBinding(chatId);
+
+      assert.equal(binding?.binding_kind, "project");
+      assert.equal(binding?.repo_id, repoId);
+      assert.equal(binding?.workspace_id, null);
     });
   });
 
