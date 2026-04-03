@@ -142,21 +142,19 @@ export function createWhatsAppWorkspacePresenter({ transport, store }) {
 
       if (existing) {
         const role = existing.role ?? resolveWorkspaceRole(repoPresentation, workspaceId);
-        const linkedCommunityChatId = repoPresentation?.topology_kind === "community"
-          ? repoPresentation.community_chat_id
-          : existing.linked_community_chat_id;
-        if (repoPresentation?.topology_kind === "community" && role === "main") {
-          if (!repoPresentation.community_chat_id) {
+        const linkedCommunityChatId = existing.linked_community_chat_id ?? repoPresentation?.community_chat_id ?? null;
+        if (linkedCommunityChatId && role === "main") {
+          if (!linkedCommunityChatId) {
             throw new Error(`Community presentation for project ${projectId} is missing its community chat id.`);
           }
           return topology.syncMainWorkspaceCommunitySurface({
             projectId,
             workspaceId,
             existingWorkspacePresentation: existing,
-            communityChatId: repoPresentation.community_chat_id,
+            communityChatId: linkedCommunityChatId,
           });
         }
-        const surfaceName = repoPresentation?.topology_kind === "community"
+        const surfaceName = linkedCommunityChatId
           ? buildCommunityWorkspaceSurfaceName(workspaceName, role)
           : buildWorkspaceSurfaceName(workspaceName, sourceChatName);
         if (transport.renameGroup) {
