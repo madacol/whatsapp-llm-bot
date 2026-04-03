@@ -263,3 +263,101 @@ describe("WhatsApp test command", () => {
     assert.ok(turn.responses.some((response) => response.text.includes("unavailable in this runtime")));
   });
 });
+
+describe("runLoggedWhatsAppTestOperation", () => {
+  it("logs start and resolution around a completed operation", async () => {
+    const { runLoggedWhatsAppTestOperation } = await import("../whatsapp/create-whatsapp-transport.js");
+
+    /** @type {Array<Record<string, unknown>>} */
+    const entries = [];
+    const result = await runLoggedWhatsAppTestOperation({
+      kind: "community-link",
+      args: {
+        kind: "community-link",
+        parentCommunityJid: "120363000000000000@g.us",
+        groupJid: "120363999999999999@g.us",
+      },
+      availableMethods: ["communityLinkGroup"],
+      timeoutMs: 100,
+      appendLog: async (entry) => {
+        entries.push(entry);
+      },
+      execute: async () => ({ linked: true }),
+    });
+
+    assert.deepEqual(result, { linked: true });
+    assert.equal(entries.length, 2);
+    assert.equal(entries[0]?.phase, "started");
+    assert.equal(entries[1]?.phase, "resolved");
+    assert.deepEqual(entries[1]?.result, { linked: true });
+  });
+
+  it("logs rejection when the operation throws", async () => {
+    const { runLoggedWhatsAppTestOperation } = await import("../whatsapp/create-whatsapp-transport.js");
+
+    /** @type {Array<Record<string, unknown>>} */
+    const entries = [];
+    const failure = new Error("link failed");
+
+    await assert.rejects(
+      () => runLoggedWhatsAppTestOperation({
+        kind: "community-link",
+        args: {
+          kind: "community-link",
+          parentCommunityJid: "120363000000000000@g.us",
+          groupJid: "120363999999999999@g.us",
+        },
+        availableMethods: ["communityLinkGroup"],
+        timeoutMs: 100,
+        appendLog: async (entry) => {
+          entries.push(entry);
+        },
+        execute: async () => {
+          throw failure;
+        },
+      }),
+      /link failed/,
+    );
+
+    assert.equal(entries.length, 2);
+    assert.equal(entries[0]?.phase, "started");
+    assert.equal(entries[1]?.phase, "rejected");
+    assert.equal(
+      /** @type {{ name?: unknown }} */ (entries[1]?.error).name,
+      "Error",
+    );
+  });
+
+  it("logs timeout when the operation never resolves", async () => {
+    const { runLoggedWhatsAppTestOperation } = await import("../whatsapp/create-whatsapp-transport.js");
+
+    /** @type {Array<Record<string, unknown>>} */
+    const entries = [];
+
+    await assert.rejects(
+      () => runLoggedWhatsAppTestOperation({
+        kind: "community-link",
+        args: {
+          kind: "community-link",
+          parentCommunityJid: "120363000000000000@g.us",
+          groupJid: "120363999999999999@g.us",
+        },
+        availableMethods: ["communityLinkGroup"],
+        timeoutMs: 10,
+        appendLog: async (entry) => {
+          entries.push(entry);
+        },
+        execute: async () => new Promise(() => {}),
+      }),
+      /timed out/,
+    );
+
+    assert.equal(entries.length, 2);
+    assert.equal(entries[0]?.phase, "started");
+    assert.equal(entries[1]?.phase, "timeout");
+    assert.equal(
+      /** @type {{ name?: unknown }} */ (entries[1]?.error).name,
+      "WhatsAppTestTimeoutError",
+    );
+  });
+});
