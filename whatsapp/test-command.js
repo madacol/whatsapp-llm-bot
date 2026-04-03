@@ -6,6 +6,7 @@ const TEST_COMMAND_USAGE = [
   "Usage: `!test wa community-create <subject>` or `!test wa community-create <subject>: <description>`",
   "Usage: `!test wa community-create-group <community-jid>: <subject>`",
   "Usage: `!test wa community-link <community-jid> <group-jid>`",
+  "Usage: `!test wa community-link-smoke <community-jid>: <subject>`",
   "Usage: `!test wa community-metadata <jid>`",
   "Usage: `!test wa community-linked <jid>`",
 ].join("\n");
@@ -128,6 +129,19 @@ function parseWhatsAppTestArgs(argsText, participants) {
       kind: "community-link",
       parentCommunityJid,
       groupJid,
+    };
+  }
+  if (trimmed.startsWith("community-link-smoke ")) {
+    const rawArgs = trimmed.slice("community-link-smoke ".length).trim();
+    const parsed = parseColonSeparatedInput(rawArgs);
+    if (!parsed) {
+      return null;
+    }
+    return {
+      kind: "community-link-smoke",
+      parentCommunityJid: parsed.head,
+      subject: parsed.tail,
+      participants,
     };
   }
   if (trimmed.startsWith("community-metadata ")) {

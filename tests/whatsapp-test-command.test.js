@@ -220,6 +220,40 @@ describe("WhatsApp test command", () => {
     assert.ok(turn.responses.some((response) => response.text.includes("Community link logged to /tmp/wh.log")));
   });
 
+  it("parses !test wa community-link-smoke and carries sender participants", async () => {
+    /** @type {WhatsAppTestCommandInput[]} */
+    const invocations = [];
+    const handleMessage = await createHandler({
+      transport: {
+        start: async () => {},
+        stop: async () => {},
+        sendText: async () => {},
+        runWhatsAppTest: async (input) => {
+          invocations.push(input);
+          return { summary: "Community link smoke logged to /tmp/wh.log" };
+        },
+      },
+    });
+
+    await seedChat("wa-test-link-smoke");
+
+    const turn = createChatTurn({
+      chatId: "wa-test-link-smoke",
+      senderIds: ["user"],
+      senderJids: ["user@s.whatsapp.net"],
+      content: [{ type: "text", text: "!test wa community-link-smoke 120363000000000000@g.us: probe-main" }],
+    });
+    await handleMessage(turn.context);
+
+    assert.deepEqual(invocations, [{
+      kind: "community-link-smoke",
+      parentCommunityJid: "120363000000000000@g.us",
+      subject: "probe-main",
+      participants: ["user@s.whatsapp.net"],
+    }]);
+    assert.ok(turn.responses.some((response) => response.text.includes("Community link smoke logged to /tmp/wh.log")));
+  });
+
   it("shows usage when !test wa subcommand is missing", async () => {
     const handleMessage = await createHandler({
       transport: {
@@ -359,5 +393,58 @@ describe("runLoggedWhatsAppTestOperation", () => {
       /** @type {{ name?: unknown }} */ (entries[1]?.error).name,
       "WhatsAppTestTimeoutError",
     );
+  });
+});
+
+describe("executeWhatsAppTestCommand", () => {
+  it("creates an external group, links it, and fetches linked groups for community-link-smoke", async () => {
+    const { executeWhatsAppTestCommand } = await import("../whatsapp/create-whatsapp-transport.js");
+
+    /** @type {string[]} */
+    const calls = [];
+    /** @type {BaileysSocket & {
+     *   groupCreate: (subject: string, participants: string[]) => Promise<{ id: string, subject: string }>;
+     *   communityLinkGroup: (groupJid: string, parentCommunityJid: string) => Promise<void>;
+     *   communityFetchLinkedGroups: (jid: string) => Promise<Array<{ id: string, subject: string }>>;
+     * }} */
+    const sock = /** @type {never} */ ({
+      groupCreate: async (subject, participants) => {
+        calls.push(`groupCreate:${subject}:${participants.join(",")}`);
+        return {
+          id: "120363999999999999@g.us",
+          subject,
+        };
+      },
+      communityLinkGroup: async (groupJid, parentCommunityJid) => {
+        calls.push(`communityLinkGroup:${groupJid}:${parentCommunityJid}`);
+      },
+      communityFetchLinkedGroups: async (jid) => {
+        calls.push(`communityFetchLinkedGroups:${jid}`);
+        return [{ id: "120363999999999999@g.us", subject: "probe-main" }];
+      },
+    });
+
+    const result = await executeWhatsAppTestCommand({
+      sock,
+      input: {
+        kind: "community-link-smoke",
+        parentCommunityJid: "120363000000000000@g.us",
+        subject: "probe-main",
+        participants: ["user@s.whatsapp.net"],
+      },
+    });
+
+    assert.deepEqual(calls, [
+      "groupCreate:probe-main:user@s.whatsapp.net",
+      "communityLinkGroup:120363999999999999@g.us:120363000000000000@g.us",
+      "communityFetchLinkedGroups:120363000000000000@g.us",
+    ]);
+    assert.deepEqual(result, {
+      createdGroup: {
+        id: "120363999999999999@g.us",
+        subject: "probe-main",
+      },
+      linkedGroups: [{ id: "120363999999999999@g.us", subject: "probe-main" }],
+    });
   });
 });
