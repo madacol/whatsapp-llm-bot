@@ -94,7 +94,9 @@ function stringifyEvent(event) {
  * It owns whether a workspace is rendered as a flat group or as a
  * community-linked subgroup.
  * @param {{
- *   transport: ChatTransport,
+ *   transport: ChatTransport & {
+ *     linkExistingGroupToCommunity: (chatId: string, communityChatId: string) => Promise<void>,
+ *   },
  *   store: Pick<Awaited<ReturnType<typeof import("../store.js").initStore>>,
  *     "getWhatsAppRepoPresentation"
  *     | "getWhatsAppWorkspacePresentation"
