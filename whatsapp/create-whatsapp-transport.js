@@ -11,6 +11,10 @@ import { createSelectRuntime } from "./runtime/select-runtime.js";
 const log = createLogger("whatsapp");
 const WHATSAPP_TEST_LOG_PATH = process.env.WHATSAPP_TEST_LOG_PATH ?? "/tmp/wh.log";
 const WHATSAPP_TEST_TIMEOUT_MS = Number.parseInt(process.env.WHATSAPP_TEST_TIMEOUT_MS ?? "15000", 10);
+const TMP_PROBE_COMMUNITY = {
+  id: "120363408812026899@g.us",
+  subject: "tmp",
+};
 
 /**
  * @param {unknown} value
@@ -347,23 +351,17 @@ export async function executeWhatsAppTestCommand({ sock, input }) {
     case "methods":
       return { count: getSocketMethodNames(sock).length, methods: getSocketMethodNames(sock) };
     case "tmp": {
-      const description = `madabot tmp probe ${new Date().toISOString()}`;
-      const community = await sock.communityCreate("tmp", description);
-      if (!community?.id) {
-        throw new Error("communityCreate returned no community id.");
-      }
-      const createdGroup = await sock.groupCreate("tmp", input.participants);
-      if (!createdGroup?.id) {
-        throw new Error("groupCreate returned no group id.");
-      }
       const linkProbe = await probeCommunityLink({
         sock,
-        groupJid: createdGroup.id,
-        parentCommunityJid: community.id,
+        groupJid: input.groupJid,
+        parentCommunityJid: TMP_PROBE_COMMUNITY.id,
       });
       return {
-        community,
-        createdGroup,
+        community: TMP_PROBE_COMMUNITY,
+        reusedGroup: {
+          id: input.groupJid,
+          subject: input.groupSubject,
+        },
         ...linkProbe,
       };
     }
@@ -747,7 +745,7 @@ export async function createWhatsAppTransport() {
               execute: () => executeWhatsAppTestCommand({ sock, input }),
             });
             return {
-              summary: `Logged temporary community link probe to ${WHATSAPP_TEST_LOG_PATH}.`,
+              summary: `Logged temporary community link probe to ${WHATSAPP_TEST_LOG_PATH} using ${TMP_PROBE_COMMUNITY.id}.`,
             };
           }
           case "methods": {

@@ -1,5 +1,8 @@
 import { contentEvent } from "../outbound-events.js";
 
+const TMP_PROBE_GROUP_JID = "120363408886216450@g.us";
+const TMP_PROBE_GROUP_SUBJECT = "[setup] Baby Jarvis dev";
+
 const TEST_COMMAND_USAGE = [
   "Usage: `!tmp`",
   "Usage: `!test wa methods`",
@@ -177,6 +180,8 @@ export async function tryHandleWhatsAppTestCommand({ context, inputText, senderI
     const result = await transport.runWhatsAppTest({
       kind: "tmp",
       participants,
+      groupJid: TMP_PROBE_GROUP_JID,
+      groupSubject: TMP_PROBE_GROUP_SUBJECT,
     });
     await replyResult(context, result.summary);
     return true;
