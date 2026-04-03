@@ -220,6 +220,95 @@ describe("WhatsAppWorkspacePresenter", () => {
     });
   });
 
+  it("links the existing group before renaming it to main during community adoption", async () => {
+    /** @type {string[]} */
+    const operations = [];
+    /** @type {Array<{ chatId: string, communityChatId: string }>} */
+    const linkedGroups = [];
+    /** @type {Array<{ chatId: string, subject: string }>} */
+    const renamedGroups = [];
+    /** @type {Array<{
+     *   projectId: string,
+     *   workspaceId: string,
+     *   workspaceChatId: string,
+     *   workspaceChatSubject: string,
+     *   role?: WhatsAppWorkspacePresentationRole,
+     *   linkedCommunityChatId?: string | null,
+     * }>} */
+    const storedPresentations = [];
+    const presenter = createWhatsAppWorkspacePresenter({
+      store: {
+        getWhatsAppProjectPresentation: async () => ({
+          project_id: "repo-1",
+          topology_kind: "community",
+          community_chat_id: "community-chat",
+          main_workspace_id: "ws-1",
+          timestamp: new Date().toISOString(),
+        }),
+        getWhatsAppWorkspacePresentation: async () => null,
+        listWhatsAppWorkspacePresentations: async () => ([
+          {
+            workspace_id: "ws-1",
+            project_id: "repo-1",
+            workspace_chat_id: "flat-chat",
+            workspace_chat_subject: "[payments] Original Group",
+            role: "workspace",
+            linked_community_chat_id: null,
+            timestamp: new Date().toISOString(),
+          },
+        ]),
+        saveWhatsAppWorkspacePresentation: async (input) => {
+          storedPresentations.push(input);
+        },
+        upsertWhatsAppProjectPresentation: async () => {
+          assert.fail("project presentation should not be rewritten when rename fails");
+        },
+      },
+      transport: {
+        start: async () => {},
+        stop: async () => {},
+        sendText: async () => {},
+        createCommunity: async () => {
+          assert.fail("community should not be recreated for an already-community project");
+        },
+        createCommunityGroup: async () => {
+          assert.fail("new subgroup should not be created when main-group rename fails");
+        },
+        linkExistingGroupToCommunity: async (chatId, communityChatId) => {
+          operations.push("link");
+          linkedGroups.push({ chatId, communityChatId });
+        },
+        renameGroup: async (chatId, subject) => {
+          operations.push("rename");
+          renamedGroups.push({ chatId, subject });
+          throw new Error("rename failed");
+        },
+      },
+    });
+
+    await assert.rejects(
+      presenter.ensureWorkspaceVisible({
+        projectId: "repo-1",
+        workspaceId: "ws-2",
+        workspaceName: "fraud-fix",
+        sourceChatName: "Original Group",
+        requesterJids: ["user@s.whatsapp.net"],
+      }),
+      /rename failed/,
+    );
+
+    assert.deepEqual(operations, ["link", "rename"]);
+    assert.deepEqual(linkedGroups, [{
+      chatId: "flat-chat",
+      communityChatId: "community-chat",
+    }]);
+    assert.deepEqual(renamedGroups, [{
+      chatId: "flat-chat",
+      subject: "main",
+    }]);
+    assert.deepEqual(storedPresentations, []);
+  });
+
   it("normalizes an already-community repo by adopting the persisted flat main group before adding another subgroup", async () => {
     /** @type {Array<{ subject: string, participants: string[], parentCommunityChatId: string }>} */
     const createdCommunityGroups = [];

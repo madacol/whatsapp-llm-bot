@@ -127,14 +127,14 @@ export function createWhatsAppWorkspaceTopology({ transport, store }) {
         surfaceName,
       };
     }
-    if (transport.renameGroup && existingWorkspacePresentation.workspace_chat_subject !== surfaceName) {
-      await transport.renameGroup(existingWorkspacePresentation.workspace_chat_id, surfaceName);
-    }
     if (existingWorkspacePresentation.linked_community_chat_id !== communityChatId) {
       await transport.linkExistingGroupToCommunity(
         existingWorkspacePresentation.workspace_chat_id,
         communityChatId,
       );
+    }
+    if (transport.renameGroup && existingWorkspacePresentation.workspace_chat_subject !== surfaceName) {
+      await transport.renameGroup(existingWorkspacePresentation.workspace_chat_id, surfaceName);
     }
     await store.saveWhatsAppWorkspacePresentation({
       projectId,
