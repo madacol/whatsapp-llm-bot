@@ -30,6 +30,7 @@ let tempDirs = [];
  * @returns {Promise<{
  *   transport: ChatTransport,
  *   createdGroups: Array<{ subject: string, participants: string[], chatId: string }>,
+ *   createdCommunities: Array<{ subject: string, description: string, chatId: string }>,
  *   promotedParticipants: Array<{ chatId: string, participants: string[] }>,
  *   sentTexts: Array<{ chatId: string, text: string }>,
  *   sentEvents: Array<{ chatId: string, event: OutboundEvent }>,
@@ -40,6 +41,8 @@ let tempDirs = [];
 function createFakeTransport() {
   /** @type {Array<{ subject: string, participants: string[], chatId: string }>} */
   const createdGroups = [];
+  /** @type {Array<{ subject: string, description: string, chatId: string }>} */
+  const createdCommunities = [];
   /** @type {Array<{ chatId: string, participants: string[] }>} */
   const promotedParticipants = [];
   /** @type {Array<{ chatId: string, text: string }>} */
@@ -56,6 +59,7 @@ function createFakeTransport() {
 
   return {
     createdGroups,
+    createdCommunities,
     promotedParticipants,
     sentTexts,
     sentEvents,
@@ -77,6 +81,18 @@ function createFakeTransport() {
         };
       },
       createGroup: async (subject, participants) => {
+        groupCounter += 1;
+        const chatId = `group-${instanceId}-${groupCounter}@g.us`;
+        createdGroups.push({ subject, participants, chatId });
+        return { chatId, subject };
+      },
+      createCommunity: async (subject, description) => {
+        groupCounter += 1;
+        const chatId = `community-${instanceId}-${groupCounter}@g.us`;
+        createdCommunities.push({ subject, description, chatId });
+        return { chatId, subject };
+      },
+      createCommunityGroup: async (subject, participants, parentCommunityChatId) => {
         groupCounter += 1;
         const chatId = `group-${instanceId}-${groupCounter}@g.us`;
         createdGroups.push({ subject, participants, chatId });

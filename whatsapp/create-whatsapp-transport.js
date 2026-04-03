@@ -418,6 +418,12 @@ function serializeTransportError(error) {
  *   sendText: (chatId: string, text: string) => Promise<void>;
  *   sendEvent?: (chatId: string, event: OutboundEvent) => Promise<MessageHandle | undefined>;
  *   createGroup: (subject: string, participants: string[]) => Promise<{ chatId: string, subject: string }>;
+ *   createCommunity?: (subject: string, description: string) => Promise<{ chatId: string, subject: string }>;
+ *   createCommunityGroup?: (
+ *     subject: string,
+ *     participants: string[],
+ *     parentCommunityChatId: string,
+ *   ) => Promise<{ chatId: string, subject: string }>;
  *   promoteParticipants: (chatId: string, participants: string[]) => Promise<void>;
  *   renameGroup: (chatId: string, subject: string) => Promise<void>;
  *   setAnnouncementOnly: (chatId: string, enabled: boolean) => Promise<void>;
@@ -571,6 +577,57 @@ export async function createWhatsAppTransport() {
       }
       if (typeof metadata.id !== "string") {
         throw new Error("Baileys groupCreate returned no group id.");
+      }
+      return {
+        chatId: metadata.id,
+        subject: typeof metadata.subject === "string" ? metadata.subject : subject,
+      };
+    },
+
+    async createCommunity(subject, description) {
+      const sock = currentSocket;
+      if (!sock) {
+        throw new Error("WhatsApp transport has not been started");
+      }
+      let metadata;
+      try {
+        metadata = await sock.communityCreate(subject, description);
+      } catch (error) {
+        log.error("WhatsApp communityCreate failed:", {
+          subject,
+          description,
+          error: serializeTransportError(error),
+        });
+        throw error;
+      }
+      if (!metadata || typeof metadata.id !== "string") {
+        throw new Error("Baileys communityCreate returned no community id.");
+      }
+      return {
+        chatId: metadata.id,
+        subject: typeof metadata.subject === "string" ? metadata.subject : subject,
+      };
+    },
+
+    async createCommunityGroup(subject, participants, parentCommunityChatId) {
+      const sock = currentSocket;
+      if (!sock) {
+        throw new Error("WhatsApp transport has not been started");
+      }
+      let metadata;
+      try {
+        metadata = await sock.communityCreateGroup(subject, participants, parentCommunityChatId);
+      } catch (error) {
+        log.error("WhatsApp communityCreateGroup failed:", {
+          subject,
+          participants,
+          parentCommunityChatId,
+          error: serializeTransportError(error),
+        });
+        throw error;
+      }
+      if (!metadata || typeof metadata.id !== "string") {
+        throw new Error("Baileys communityCreateGroup returned no group id.");
       }
       return {
         chatId: metadata.id,
