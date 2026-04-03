@@ -64,6 +64,15 @@ function findWorkspacePresentation(workspaceId, presentations) {
 }
 
 /**
+ * @param {string} chatId
+ * @param {WhatsAppWorkspacePresentationRow[]} presentations
+ * @returns {WhatsAppWorkspacePresentationRow | null}
+ */
+function findWorkspacePresentationByChatId(chatId, presentations) {
+  return presentations.find((presentation) => presentation.workspace_chat_id === chatId) ?? null;
+}
+
+/**
  * @param {{
  *   transport: ChatTransport & {
  *     getGroupLinkedParent?: (chatId: string) => Promise<string | null>,
@@ -86,7 +95,7 @@ function findWorkspacePresentation(workspaceId, presentations) {
  *     workspaceId: string,
  *     workspaceName: string,
  *     sourceChatName?: string,
- *     sourceWorkspaceId?: string,
+ *     sourceChatId?: string,
  *     requesterJids: string[],
  *     repoPresentation: WhatsAppProjectPresentationRow | null,
  *   }) => Promise<{ surfaceId: string, surfaceName: string }>,
@@ -339,7 +348,7 @@ export function createWhatsAppWorkspaceTopology({ transport, store }) {
    * @param {{
    *   existingPresentations: WhatsAppWorkspacePresentationRow[],
    *   persistedMainWorkspaceId?: string | null,
-   *   sourceWorkspaceId?: string,
+   *   sourceChatId?: string,
    * }} input
    * @returns {Promise<{
    *   mainWorkspaceId: string | null,
@@ -349,16 +358,16 @@ export function createWhatsAppWorkspaceTopology({ transport, store }) {
   async function resolveEffectiveMainWorkspaceSelection({
     existingPresentations,
     persistedMainWorkspaceId,
-    sourceWorkspaceId,
+    sourceChatId,
   }) {
     const persistedMainWorkspacePresentation = persistedMainWorkspaceId
       ? findWorkspacePresentation(persistedMainWorkspaceId, existingPresentations)
       : null;
-    if (sourceWorkspaceId) {
-      const sourceWorkspacePresentation = findWorkspacePresentation(sourceWorkspaceId, existingPresentations);
-      if (sourceWorkspacePresentation) {
-        const liveLinkedCommunityChatId = await getLiveLinkedCommunityChatId(sourceWorkspacePresentation.workspace_chat_id);
-        if (liveLinkedCommunityChatId === null) {
+    if (sourceChatId && (persistedMainWorkspacePresentation || existingPresentations.length > 0)) {
+      const liveLinkedCommunityChatId = await getLiveLinkedCommunityChatId(sourceChatId);
+      if (liveLinkedCommunityChatId === null) {
+        const sourceWorkspacePresentation = findWorkspacePresentationByChatId(sourceChatId, existingPresentations);
+        if (sourceWorkspacePresentation) {
           return {
             mainWorkspaceId: sourceWorkspacePresentation.workspace_id,
             previousMainWorkspacePresentation:
@@ -435,7 +444,7 @@ export function createWhatsAppWorkspaceTopology({ transport, store }) {
       const mainWorkspaceSelection = await resolveEffectiveMainWorkspaceSelection({
         existingPresentations,
         persistedMainWorkspaceId: input.repoPresentation?.main_workspace_id,
-        sourceWorkspaceId: input.sourceWorkspaceId,
+        sourceChatId: input.sourceChatId,
       });
       if (input.repoPresentation?.topology_kind === "community") {
         if (!input.repoPresentation.community_chat_id) {

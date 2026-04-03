@@ -76,10 +76,9 @@ export function createWorkspaceControl({ store, workspacePresentation, workspace
      * @param {ExecuteActionContext} context
      * @param {string} workspaceName
      * @param {string} baseBranch
-     * @param {string | undefined} sourceWorkspaceId
      * @returns {Promise<WorkspaceCreationResult>}
      */
-    async create(repo, context, workspaceName, baseBranch, sourceWorkspaceId) {
+    async create(repo, context, workspaceName, baseBranch) {
       if (!workspacePresentation) {
         throw new Error("Workspace creation requires workspace presentation support.");
       }
@@ -120,7 +119,7 @@ export function createWorkspaceControl({ store, workspacePresentation, workspace
           workspaceId,
           workspaceName,
           sourceChatName: context.chatName,
-          sourceWorkspaceId,
+          sourceChatId: context.chatId,
           requesterJids: participants,
         });
         const workspace = await store.createWorkspace({
