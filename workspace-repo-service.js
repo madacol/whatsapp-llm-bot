@@ -1,6 +1,7 @@
 import {
   cleanupWorkspaceWorktree,
   createWorkspaceWorktree,
+  ensureGitRepoInitialized,
   formatDiffSummary,
 } from "./workspace-git.js";
 
@@ -17,7 +18,8 @@ export function createWorkspaceRepoService() {
      * @param {string} baseBranch
      * @returns {Promise<{ branch: string, worktreePath: string }>}
      */
-    createWorkspaceCheckout(repo, workspaceName, baseBranch) {
+    async createWorkspaceCheckout(repo, workspaceName, baseBranch) {
+      await ensureGitRepoInitialized(repo.root_path, baseBranch);
       return createWorkspaceWorktree(repo, workspaceName, baseBranch);
     },
 

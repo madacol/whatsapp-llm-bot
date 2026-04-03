@@ -14,6 +14,7 @@ process.env.MODEL = "mock-model";
 import { createChatTurn, createMockLlmServer, createTestDb, seedChat as seedChat_ } from "./helpers.js";
 import { setDb } from "../db.js";
 import { contentEvent } from "../outbound-events.js";
+import { getChatWorkDir } from "../utils.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -506,6 +507,57 @@ describe("workspace lifecycle", () => {
     assert.equal(childWorkspace?.base_branch, parentWorkspace.branch);
     assert.equal(childWorkspace?.branch, "child-branch");
     assert.ok(responses.some((response) => response.text.includes("Created workspace `child branch`.")));
+  });
+
+  it("auto-adopts a fresh group chat and upgrades to a community on the first !new", async () => {
+    const transportState = createFakeTransport();
+    const handleMessage = await createHandler({ transport: transportState.transport });
+    const chatId = "fresh-group-chat";
+    const chatName = "Original Group";
+
+    const { context, responses } = createChatTurn({
+      chatId,
+      chatName,
+      content: [{ type: "text", text: "!new payments" }],
+      facts: { isGroup: true },
+    });
+    await handleMessage(context);
+
+    const adoptedRootPath = getChatWorkDir(chatId, undefined, chatName);
+    const repo = await store.getRepoByRootPath(adoptedRootPath);
+    assert.ok(repo, "expected the fresh chat to be adopted into a project");
+
+    const originalBinding = await store.getChatBinding(chatId);
+    assert.equal(originalBinding?.binding_kind, "workspace");
+    assert.ok(originalBinding?.workspace_id, "expected the original chat to be bound as a workspace");
+
+    const originalWorkspace = await store.getWorkspace(originalBinding?.workspace_id ?? "");
+    assert.ok(originalWorkspace, "expected the original chat workspace to exist");
+    assert.equal(originalWorkspace?.worktree_path, adoptedRootPath);
+    assert.equal(originalWorkspace?.branch, "master");
+    assert.equal(originalWorkspace?.base_branch, "master");
+
+    const childWorkspace = await store.getWorkspaceByName(repo?.repo_id ?? "", "payments");
+    assert.ok(childWorkspace, "expected the sibling workspace created by !new");
+    assert.equal(childWorkspace?.branch, "payments");
+    assert.equal(childWorkspace?.base_branch, "master");
+
+    assert.equal(transportState.createdCommunities.length, 1);
+    assert.equal(transportState.createdCommunities[0]?.subject, chatName);
+    assert.equal(transportState.createdGroups.length, 1);
+    assert.equal(transportState.createdGroups[0]?.subject, "payments");
+    assert.deepEqual(transportState.linkedGroups, [{
+      chatId,
+      communityChatId: transportState.createdCommunities[0]?.chatId ?? "",
+    }]);
+    assert.deepEqual(transportState.renamedGroups, [{
+      chatId,
+      subject: "main",
+    }]);
+    assert.ok(responses.some((response) => response.text.includes("Created workspace `payments`.")));
+
+    const currentBranch = (await execFileAsync("git", ["branch", "--show-current"], { cwd: adoptedRootPath })).stdout.trim();
+    assert.equal(currentBranch, "master");
   });
 
   it("runs !diff and rejects !commit as an unknown command", async () => {

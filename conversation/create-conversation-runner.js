@@ -5,6 +5,7 @@ import { getRootDb } from "../db.js";
 import { storeAndLinkHtml } from "../html-store.js";
 import { resolveHarness, resolveHarnessName, createHarnessRunCoordinator } from "#harnesses";
 import { contentEvent } from "../outbound-events.js";
+import { tryHandleWhatsAppTestCommand } from "#whatsapp";
 import {
   shouldRespond,
   formatUserMessage,
@@ -22,7 +23,6 @@ import { createWorkspaceBindingService } from "../workspace-binding-service.js";
 import { tryHandleWorkspaceCommand } from "../workspace-command-router.js";
 import { createWorkspaceControl } from "../workspace-control.js";
 import { createWorkspaceLifecycleService } from "../workspace-lifecycle-service.js";
-import { tryHandleWhatsAppTestCommand } from "../whatsapp/test-command.js";
 
 const log = createLogger("conversation:runner");
 const PRESENCE_LEASE_TTL_MS = 20_000;
@@ -437,7 +437,12 @@ export function createConversationRunner({ store, llmClient, getActionsFn, execu
 
     const chatInfo = await getChat(chatId);
     const context = createMessageActionContext(turn);
-    const resolvedBinding = await workspaceBinding.resolveChatBinding(chatId, chatInfo?.harness_cwd, turn.chatName);
+    const resolvedBinding = await workspaceBinding.resolveChatBinding(
+      chatId,
+      chatInfo?.harness_cwd,
+      turn.chatName,
+      turn.facts.isGroup,
+    );
     const { persona, harness } = await resolveConversationHarness(chatInfo);
 
     const globalActions = await getActionsFn();

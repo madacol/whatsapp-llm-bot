@@ -71,6 +71,9 @@ function commandErrorMessage(result, fallback) {
   return result.stderr.trim() || result.stdout.trim() || fallback;
 }
 
+const DEFAULT_GIT_AUTHOR_NAME = "MadaBot";
+const DEFAULT_GIT_AUTHOR_EMAIL = "madabot@local";
+
 /**
  * @param {string} value
  * @returns {string}
@@ -313,6 +316,53 @@ export async function formatDiffSummary(cwd) {
     ...files.map((file) => `- \`${file}\``),
     ...(statText ? ["", "Summary:", statText] : []),
   ].join("\n");
+}
+
+/**
+ * Ensure the project folder is an initialized git repo with a usable base
+ * branch before worktree-based workspace creation begins.
+ * @param {string} repoRoot
+ * @param {string} baseBranch
+ * @returns {Promise<void>}
+ */
+export async function ensureGitRepoInitialized(repoRoot, baseBranch) {
+  await fs.mkdir(repoRoot, { recursive: true });
+
+  const repoCheck = await runGit(repoRoot, ["rev-parse", "--is-inside-work-tree"]);
+  if (repoCheck.exitCode !== 0) {
+    const initResult = await runGit(repoRoot, ["init", `--initial-branch=${baseBranch}`]);
+    if (initResult.exitCode !== 0) {
+      throw new Error(commandErrorMessage(initResult, `Could not initialize git in ${repoRoot}.`));
+    }
+  }
+
+  const headResult = await runGit(repoRoot, ["rev-parse", "--verify", "HEAD"]);
+  if (headResult.exitCode !== 0) {
+    const addResult = await runGit(repoRoot, ["add", "-A"]);
+    if (addResult.exitCode !== 0) {
+      throw new Error(commandErrorMessage(addResult, `Could not stage files in ${repoRoot}.`));
+    }
+    const commitResult = await runGit(repoRoot, [
+      "-c",
+      `user.name=${DEFAULT_GIT_AUTHOR_NAME}`,
+      "-c",
+      `user.email=${DEFAULT_GIT_AUTHOR_EMAIL}`,
+      "commit",
+      "--allow-empty",
+      "-m",
+      "Initialize workspace project",
+    ]);
+    if (commitResult.exitCode !== 0) {
+      throw new Error(commandErrorMessage(commitResult, `Could not create the initial commit in ${repoRoot}.`));
+    }
+  }
+
+  if (!await ensureBranchExists(repoRoot, baseBranch)) {
+    const branchResult = await runGit(repoRoot, ["branch", baseBranch, "HEAD"]);
+    if (branchResult.exitCode !== 0) {
+      throw new Error(commandErrorMessage(branchResult, `Could not create base branch ${baseBranch}.`));
+    }
+  }
 }
 
 /**

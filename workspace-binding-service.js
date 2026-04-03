@@ -22,6 +22,105 @@ function defaultBaseBranch(branch) {
 }
 
 /**
+ * @param {string | null | undefined} chatName
+ * @returns {string}
+ */
+function buildChatWorkspaceName(chatName) {
+  const trimmed = chatName?.trim();
+  return trimmed || "main";
+}
+
+/**
+ * Resolve or create the default workspace that uses the chat's own workdir as
+ * its workspace folder.
+ * @param {{
+ *   chatId: string,
+ *   chatName?: string | null,
+ *   explicitCwd?: string | null | undefined,
+ *   store: {
+ *     getRepoByRootPath?: (rootPath: string) => Promise<RepoRow | null>,
+ *     getWorkspaceByName?: (repoId: string, name: string) => Promise<WorkspaceRow | null>,
+ *     createRepo?: (input: { name: string, rootPath: string, defaultBaseBranch: string, controlChatId?: string | null }) => Promise<RepoRow>,
+ *     createWorkspace?: (input: {
+ *       workspaceId?: string,
+ *       repoId: string,
+ *       name: string,
+ *       branch: string,
+ *       baseBranch: string,
+ *       worktreePath: string,
+ *       status?: WorkspaceStatus,
+ *     }) => Promise<WorkspaceRow>,
+ *     saveWhatsAppWorkspacePresentation?: (input: {
+ *       repoId: string,
+ *       workspaceId: string,
+ *       workspaceChatId: string,
+ *       workspaceChatSubject: string,
+ *       role?: WhatsAppWorkspacePresentationRole,
+ *       linkedCommunityChatId?: string | null,
+ *     }) => Promise<WhatsAppWorkspacePresentationRow>,
+ *     upsertWhatsAppRepoPresentation?: (input: {
+ *       repoId: string,
+ *       topologyKind?: WhatsAppRepoTopologyKind,
+ *       communityChatId?: string | null,
+ *       mainWorkspaceId?: string | null,
+ *     }) => Promise<WhatsAppRepoPresentationRow>,
+ *   },
+ * }} input
+ * @returns {Promise<{ repo: RepoRow, workspace: WorkspaceRow } | null>}
+ */
+async function resolveOrAdoptChatWorkspace({ chatId, chatName, explicitCwd, store }) {
+  const repoLookup = store.getRepoByRootPath;
+  const createRepo = store.createRepo;
+  const createWorkspace = store.createWorkspace;
+  const getWorkspaceByName = store.getWorkspaceByName;
+  const saveWhatsAppWorkspacePresentation = store.saveWhatsAppWorkspacePresentation;
+
+  if (!repoLookup || !createRepo || !createWorkspace || !getWorkspaceByName || !saveWhatsAppWorkspacePresentation) {
+    return null;
+  }
+
+  const rootPath = getChatWorkDir(chatId, explicitCwd, chatName);
+  let repo = await repoLookup(rootPath);
+  if (!repo) {
+    repo = await createRepo({
+      name: buildRepoName(rootPath),
+      rootPath,
+      defaultBaseBranch: defaultBaseBranch(null),
+      controlChatId: null,
+    });
+  }
+
+  const workspaceName = buildChatWorkspaceName(chatName);
+  const existingWorkspace = await getWorkspaceByName(repo.repo_id, workspaceName);
+  if (existingWorkspace) {
+    return { repo, workspace: existingWorkspace };
+  }
+
+  const workspaceId = chatId;
+  await saveWhatsAppWorkspacePresentation({
+    repoId: repo.repo_id,
+    workspaceId,
+    workspaceChatId: chatId,
+    workspaceChatSubject: workspaceName,
+  });
+  const workspace = await createWorkspace({
+    workspaceId,
+    repoId: repo.repo_id,
+    name: workspaceName,
+    branch: repo.default_base_branch,
+    baseBranch: repo.default_base_branch,
+    worktreePath: rootPath,
+    status: "ready",
+  });
+  await store.upsertWhatsAppRepoPresentation?.({
+    repoId: repo.repo_id,
+    topologyKind: "groups",
+    mainWorkspaceId: workspace.workspace_id,
+  });
+  return { repo, workspace };
+}
+
+/**
  * Dedicated app-side binding service for resolving the workspace identity of a
  * chat independent of adapter presentation details.
  * @param {{
@@ -30,7 +129,31 @@ function defaultBaseBranch(branch) {
  *   getWorkspace: (workspaceId: string) => Promise<WorkspaceRow | null>,
  *   getRepoByRootPath?: (rootPath: string) => Promise<RepoRow | null>,
  *   getWorkspaceByWorktreePath?: (worktreePath: string) => Promise<WorkspaceRow | null>,
+ *   getWorkspaceByName?: (repoId: string, name: string) => Promise<WorkspaceRow | null>,
  *   createRepo?: (input: { name: string, rootPath: string, defaultBaseBranch: string, controlChatId?: string | null }) => Promise<RepoRow>,
+ *   createWorkspace?: (input: {
+ *     workspaceId?: string,
+ *     repoId: string,
+ *     name: string,
+ *     branch: string,
+ *     baseBranch: string,
+ *     worktreePath: string,
+ *     status?: WorkspaceStatus,
+ *   }) => Promise<WorkspaceRow>,
+ *   saveWhatsAppWorkspacePresentation?: (input: {
+ *     repoId: string,
+ *     workspaceId: string,
+ *     workspaceChatId: string,
+ *     workspaceChatSubject: string,
+ *     role?: WhatsAppWorkspacePresentationRole,
+ *     linkedCommunityChatId?: string | null,
+ *   }) => Promise<WhatsAppWorkspacePresentationRow>,
+ *   upsertWhatsAppRepoPresentation?: (input: {
+ *     repoId: string,
+ *     topologyKind?: WhatsAppRepoTopologyKind,
+ *     communityChatId?: string | null,
+ *     mainWorkspaceId?: string | null,
+ *   }) => Promise<WhatsAppRepoPresentationRow>,
  * }} store
  */
 export function createWorkspaceBindingService(store) {
@@ -39,9 +162,10 @@ export function createWorkspaceBindingService(store) {
      * @param {string} chatId
      * @param {string | null | undefined} [explicitCwd]
      * @param {string | null | undefined} [chatName]
+     * @param {boolean | null | undefined} [isGroupChat]
      * @returns {Promise<ResolvedChatBinding>}
      */
-    async resolveChatBinding(chatId, explicitCwd, chatName) {
+    async resolveChatBinding(chatId, explicitCwd, chatName, isGroupChat) {
       const binding = await store.getChatBinding(chatId);
       if (binding?.binding_kind === "workspace") {
         if (!binding.repo_id || !binding.workspace_id) {
@@ -70,7 +194,19 @@ export function createWorkspaceBindingService(store) {
       const cwd = getChatWorkDir(chatId, explicitCwd, chatName);
       const inferred = await inspectGitWorkspace(cwd);
       if (!inferred) {
-        return { kind: "unbound" };
+        if (!isGroupChat) {
+          return { kind: "unbound" };
+        }
+        const adopted = await resolveOrAdoptChatWorkspace({
+          chatId,
+          chatName,
+          explicitCwd,
+          store,
+        });
+        if (!adopted) {
+          return { kind: "unbound" };
+        }
+        return { kind: "workspace", repo: adopted.repo, workspace: adopted.workspace };
       }
 
       const inferredRepoRoot = inferred.kind === "repo" ? inferred.rootPath : path.dirname(inferred.commonDir);
