@@ -450,7 +450,7 @@ describe("WhatsAppWorkspacePresenter", () => {
     });
   });
 
-  it("prefers the current live-unlinked workspace over the persisted main workspace when replacing a stale community", async () => {
+  it("prefers the current live-unlinked chat over the persisted main workspace when replacing a stale community", async () => {
     /** @type {Array<{ subject: string, description: string }>} */
     const createdCommunities = [];
     /** @type {Array<{ subject: string, participants: string[], parentCommunityChatId: string }>} */
@@ -548,7 +548,7 @@ describe("WhatsAppWorkspacePresenter", () => {
       workspaceId: "ws-3",
       workspaceName: "qwd",
       sourceChatName: "Baby Jarvis dev",
-      sourceWorkspaceId: "ws-2",
+      sourceChatId: "current-chat",
       requesterJids: ["user@s.whatsapp.net"],
     });
 

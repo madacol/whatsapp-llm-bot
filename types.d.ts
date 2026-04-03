@@ -358,7 +358,7 @@ type WorkspacePresentationPort = {
     workspaceId: string;
     workspaceName: string;
     sourceChatName?: string;
-    sourceWorkspaceId?: string;
+    sourceChatId?: string;
     requesterJids: string[];
   }) => Promise<{ surfaceId: string; surfaceName: string }>;
   presentWorkspaceBootstrap: (input: {

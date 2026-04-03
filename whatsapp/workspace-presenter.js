@@ -136,7 +136,7 @@ export function createWhatsAppWorkspacePresenter({ transport, store }) {
 
   /** @type {WorkspacePresentationPort} */
   const presenter = {
-    async ensureWorkspaceVisible({ projectId, workspaceId, workspaceName, sourceChatName, sourceWorkspaceId, requesterJids }) {
+    async ensureWorkspaceVisible({ projectId, workspaceId, workspaceName, sourceChatName, sourceChatId, requesterJids }) {
       const repoPresentation = await store.getWhatsAppProjectPresentation(projectId);
       const existing = await store.getWhatsAppWorkspacePresentation(workspaceId);
 
@@ -191,7 +191,7 @@ export function createWhatsAppWorkspacePresenter({ transport, store }) {
         workspaceId,
         workspaceName,
         sourceChatName,
-        sourceWorkspaceId,
+        sourceChatId,
         requesterJids,
         repoPresentation,
       });
