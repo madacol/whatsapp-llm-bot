@@ -338,6 +338,7 @@ type WhatsAppTestCommandInput =
   | { kind: "community-create"; subject: string; description: string }
   | { kind: "community-create-group"; parentCommunityJid: string; subject: string; participants: string[] }
   | { kind: "community-link"; parentCommunityJid: string; groupJid: string }
+  | { kind: "community-link-smoke"; parentCommunityJid: string; subject: string; participants: string[] }
   | { kind: "community-metadata"; jid: string }
   | { kind: "community-linked"; jid: string }
   | { kind: "smoke"; baseSubject: string; participants: string[] };

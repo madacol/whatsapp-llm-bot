@@ -210,6 +210,68 @@ export async function runLoggedWhatsAppTestOperation(input) {
 }
 
 /**
+ * @param {{
+ *   sock: import("@whiskeysockets/baileys").WASocket,
+ *   input: WhatsAppTestCommandInput,
+ * }} input
+ * @returns {Promise<unknown>}
+ */
+export async function executeWhatsAppTestCommand({ sock, input }) {
+  switch (input.kind) {
+    case "methods":
+      return { count: getSocketMethodNames(sock).length, methods: getSocketMethodNames(sock) };
+    case "community-create":
+      return sock.communityCreate(input.subject, input.description);
+    case "community-create-group":
+      return sock.communityCreateGroup(
+        input.subject,
+        input.participants,
+        input.parentCommunityJid,
+      );
+    case "community-link":
+      return sock.communityLinkGroup(input.groupJid, input.parentCommunityJid);
+    case "community-link-smoke": {
+      const createdGroup = await sock.groupCreate(input.subject, input.participants);
+      if (!createdGroup?.id) {
+        throw new Error("groupCreate returned no group id.");
+      }
+      await sock.communityLinkGroup(createdGroup.id, input.parentCommunityJid);
+      const linkedGroups = await sock.communityFetchLinkedGroups(input.parentCommunityJid);
+      return {
+        createdGroup,
+        linkedGroups,
+      };
+    }
+    case "community-metadata":
+      return sock.communityMetadata(input.jid);
+    case "community-linked":
+      return sock.communityFetchLinkedGroups(input.jid);
+    case "smoke": {
+      const description = `madabot smoke test ${new Date().toISOString()}`;
+      const communitySubject = `${input.baseSubject} Community`;
+      const subgroupSubject = `${input.baseSubject} Workspace`;
+      const community = await sock.communityCreate(communitySubject, description);
+      if (!community?.id) {
+        throw new Error("communityCreate returned no community id.");
+      }
+      const metadata = await sock.communityMetadata(community.id);
+      const subgroup = await sock.communityCreateGroup(
+        subgroupSubject,
+        input.participants,
+        community.id,
+      );
+      const linked = await sock.communityFetchLinkedGroups(community.id);
+      return {
+        community,
+        metadata,
+        subgroup,
+        linked,
+      };
+    }
+  }
+}
+
+/**
  * @param {unknown} error
  * @returns {Record<string, unknown>}
  */
@@ -449,7 +511,7 @@ export async function createWhatsAppTransport() {
               kind: input.kind,
               args: input,
               availableMethods,
-              execute: async () => ({ count: availableMethods.length, methods: availableMethods }),
+              execute: async () => executeWhatsAppTestCommand({ sock, input }),
             });
             return {
               summary: `Logged ${availableMethods.length} WhatsApp group/community methods to ${WHATSAPP_TEST_LOG_PATH}.`,
@@ -460,7 +522,7 @@ export async function createWhatsAppTransport() {
               kind: input.kind,
               args: input,
               availableMethods,
-              execute: async () => sock.communityCreate(input.subject, input.description),
+              execute: async () => executeWhatsAppTestCommand({ sock, input }),
             });
             return {
               summary: `Logged community creation result for \`${input.subject}\` to ${WHATSAPP_TEST_LOG_PATH}.`,
@@ -471,11 +533,7 @@ export async function createWhatsAppTransport() {
               kind: input.kind,
               args: input,
               availableMethods,
-              execute: async () => sock.communityCreateGroup(
-                input.subject,
-                input.participants,
-                input.parentCommunityJid,
-              ),
+              execute: async () => executeWhatsAppTestCommand({ sock, input }),
             });
             return {
               summary: `Logged subgroup creation result for \`${input.subject}\` to ${WHATSAPP_TEST_LOG_PATH}.`,
@@ -486,10 +544,21 @@ export async function createWhatsAppTransport() {
               kind: input.kind,
               args: input,
               availableMethods,
-              execute: async () => sock.communityLinkGroup(input.groupJid, input.parentCommunityJid),
+              execute: async () => executeWhatsAppTestCommand({ sock, input }),
             });
             return {
               summary: `Logged community link result for \`${input.groupJid}\` to ${WHATSAPP_TEST_LOG_PATH}.`,
+            };
+          }
+          case "community-link-smoke": {
+            await runLoggedWhatsAppTestOperation({
+              kind: input.kind,
+              args: input,
+              availableMethods,
+              execute: async () => executeWhatsAppTestCommand({ sock, input }),
+            });
+            return {
+              summary: `Logged external-group link probe for \`${input.subject}\` to ${WHATSAPP_TEST_LOG_PATH}.`,
             };
           }
           case "community-metadata": {
@@ -497,7 +566,7 @@ export async function createWhatsAppTransport() {
               kind: input.kind,
               args: input,
               availableMethods,
-              execute: async () => sock.communityMetadata(input.jid),
+              execute: async () => executeWhatsAppTestCommand({ sock, input }),
             });
             return {
               summary: `Logged community metadata for \`${input.jid}\` to ${WHATSAPP_TEST_LOG_PATH}.`,
@@ -508,7 +577,7 @@ export async function createWhatsAppTransport() {
               kind: input.kind,
               args: input,
               availableMethods,
-              execute: async () => sock.communityFetchLinkedGroups(input.jid),
+              execute: async () => executeWhatsAppTestCommand({ sock, input }),
             });
             return {
               summary: `Logged linked groups for \`${input.jid}\` to ${WHATSAPP_TEST_LOG_PATH}.`,
@@ -519,28 +588,7 @@ export async function createWhatsAppTransport() {
               kind: input.kind,
               args: input,
               availableMethods,
-              execute: async () => {
-                const description = `madabot smoke test ${new Date().toISOString()}`;
-                const communitySubject = `${input.baseSubject} Community`;
-                const subgroupSubject = `${input.baseSubject} Workspace`;
-                const community = await sock.communityCreate(communitySubject, description);
-                if (!community?.id) {
-                  throw new Error("communityCreate returned no community id.");
-                }
-                const metadata = await sock.communityMetadata(community.id);
-                const subgroup = await sock.communityCreateGroup(
-                  subgroupSubject,
-                  input.participants,
-                  community.id,
-                );
-                const linked = await sock.communityFetchLinkedGroups(community.id);
-                return {
-                  community,
-                  metadata,
-                  subgroup,
-                  linked,
-                };
-              },
+              execute: async () => executeWhatsAppTestCommand({ sock, input }),
             });
             return {
               summary: `Logged WhatsApp smoke test artifacts for \`${input.baseSubject}\` to ${WHATSAPP_TEST_LOG_PATH}.`,
