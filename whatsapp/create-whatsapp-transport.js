@@ -40,17 +40,6 @@ function isFunction(value) {
 }
 
 /**
- * @param {{ query?: unknown }} sock
- * @returns {sock is { query: (
- *   node: import("@whiskeysockets/baileys").BinaryNode,
- *   timeoutMs?: number,
- * ) => Promise<unknown> }}
- */
-function hasSocketQuery(sock) {
-  return "query" in sock && isFunction(sock.query);
-}
-
-/**
  * @param {string | undefined} rawId
  * @returns {string | null}
  */
@@ -115,50 +104,18 @@ function hasCommunityLinkGroup(sock) {
 }
 
 /**
- * @param {string} parentCommunityJid
- * @param {string} groupJid
- * @returns {import("@whiskeysockets/baileys").BinaryNode}
- */
-function buildCommunityLinkQueryNode(parentCommunityJid, groupJid) {
-  return {
-    tag: "iq",
-    attrs: {
-      type: "set",
-      xmlns: "w:g2",
-      to: parentCommunityJid,
-    },
-    content: [{
-      tag: "links",
-      attrs: {},
-      content: [{
-        tag: "link",
-        attrs: { link_type: "sub_group" },
-        content: [{
-          tag: "group",
-          attrs: { jid: groupJid },
-        }],
-      }],
-    }],
-  };
-}
-
-/**
  * @param {{
  *   sock: import("@whiskeysockets/baileys").WASocket,
  *   groupJid: string,
  *   parentCommunityJid: string,
  * }} input
- * @returns {Promise<unknown>}
+ * @returns {Promise<void>}
  */
 async function linkGroupToCommunity({ sock, groupJid, parentCommunityJid }) {
-  if (hasCommunityLinkGroup(sock)) {
-    await sock.communityLinkGroup(groupJid, parentCommunityJid);
-    return null;
+  if (!hasCommunityLinkGroup(sock)) {
+    throw new Error("Baileys communityLinkGroup API is unavailable in this runtime.");
   }
-  if (!hasSocketQuery(sock)) {
-    throw new Error("WhatsApp communityLinkGroup and socket query APIs are unavailable in this runtime.");
-  }
-  return sock.query(buildCommunityLinkQueryNode(parentCommunityJid, groupJid));
+  await sock.communityLinkGroup(groupJid, parentCommunityJid);
 }
 
 /**
