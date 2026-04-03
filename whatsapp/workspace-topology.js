@@ -66,6 +66,7 @@ function findWorkspacePresentation(workspaceId, presentations) {
 /**
  * @param {{
  *   transport: ChatTransport & {
+ *     getGroupLinkedParent?: (chatId: string) => Promise<string | null>,
  *     linkExistingGroupToCommunity: (chatId: string, communityChatId: string) => Promise<void>,
  *   },
  *   store: Pick<Awaited<ReturnType<typeof import("../store.js").initStore>>,
@@ -92,6 +93,48 @@ function findWorkspacePresentation(workspaceId, presentations) {
  */
 export function createWhatsAppWorkspaceTopology({ transport, store }) {
   /**
+   * @param {string} chatId
+   * @returns {Promise<string | null>}
+   */
+  async function getLiveLinkedCommunityChatId(chatId) {
+    if (!transport.getGroupLinkedParent) {
+      throw new Error("Workspace adoption requires live WhatsApp group metadata lookup support.");
+    }
+    return transport.getGroupLinkedParent(chatId);
+  }
+
+  /**
+   * @param {{
+   *   workspaceId: string,
+   *   workspaceChatId: string,
+   *   communityChatId: string,
+   * }} input
+   * @returns {Promise<void>}
+   */
+  async function ensureLiveGroupLink({
+    workspaceId,
+    workspaceChatId,
+    communityChatId,
+  }) {
+    const initialLinkedCommunityChatId = await getLiveLinkedCommunityChatId(workspaceChatId);
+    if (initialLinkedCommunityChatId && initialLinkedCommunityChatId !== communityChatId) {
+      throw new Error(
+        `Workspace ${workspaceId} is already linked to community ${initialLinkedCommunityChatId}, expected ${communityChatId}.`,
+      );
+    }
+    if (initialLinkedCommunityChatId === communityChatId) {
+      return;
+    }
+    await transport.linkExistingGroupToCommunity(workspaceChatId, communityChatId);
+    const linkedCommunityChatIdAfterLink = await getLiveLinkedCommunityChatId(workspaceChatId);
+    if (linkedCommunityChatIdAfterLink !== communityChatId) {
+      throw new Error(
+        `Workspace ${workspaceId} was linked to community ${communityChatId}, but live WhatsApp metadata still reports ${linkedCommunityChatIdAfterLink ?? "no linked community"}.`,
+      );
+    }
+  }
+
+  /**
    * Normalize the persisted main workspace surface so the original flat group
    * becomes the `main` subgroup inside the community.
    * @param {{
@@ -108,15 +151,12 @@ export function createWhatsAppWorkspaceTopology({ transport, store }) {
     existingWorkspacePresentation,
     communityChatId,
   }) {
-    if (
-      existingWorkspacePresentation.linked_community_chat_id
-      && existingWorkspacePresentation.linked_community_chat_id !== communityChatId
-    ) {
-      throw new Error(
-        `Workspace ${workspaceId} is already linked to community ${existingWorkspacePresentation.linked_community_chat_id}, expected ${communityChatId}.`,
-      );
-    }
     const surfaceName = buildCommunityWorkspaceSurfaceName(existingWorkspacePresentation.workspace_chat_subject, "main");
+    await ensureLiveGroupLink({
+      workspaceId,
+      workspaceChatId: existingWorkspacePresentation.workspace_chat_id,
+      communityChatId,
+    });
     if (
       existingWorkspacePresentation.workspace_chat_subject === surfaceName
       && existingWorkspacePresentation.role === "main"
@@ -126,12 +166,6 @@ export function createWhatsAppWorkspaceTopology({ transport, store }) {
         surfaceId: existingWorkspacePresentation.workspace_chat_id,
         surfaceName,
       };
-    }
-    if (existingWorkspacePresentation.linked_community_chat_id !== communityChatId) {
-      await transport.linkExistingGroupToCommunity(
-        existingWorkspacePresentation.workspace_chat_id,
-        communityChatId,
-      );
     }
     if (transport.renameGroup && existingWorkspacePresentation.workspace_chat_subject !== surfaceName) {
       await transport.renameGroup(existingWorkspacePresentation.workspace_chat_id, surfaceName);

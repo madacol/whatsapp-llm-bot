@@ -21,6 +21,10 @@ const log = createLogger("whatsapp");
  *     parentCommunityChatId: string,
  *   ) => Promise<{ id?: string, subject?: string } | null>,
  * }} CommunityCreateGroupSocket
+ *
+ * @typedef {{
+ *   groupMetadata: (chatId: string) => Promise<{ linkedParent?: string | null }>,
+ * }} GroupMetadataSocket
  */
 
 /**
@@ -120,6 +124,25 @@ export async function executeCommunityCreateGroup(sock, subject, participants, p
 }
 
 /**
+ * Read a group's live linked parent via the Baileys metadata API.
+ * @param {GroupMetadataSocket} sock
+ * @param {string} chatId
+ * @returns {Promise<string | null>}
+ */
+export async function executeGroupLinkedParentLookup(sock, chatId) {
+  const metadata = await sock.groupMetadata(chatId);
+  const linkedParent = normalizeGroupChatId(metadata.linkedParent ?? undefined);
+  if (metadata.linkedParent != null && !linkedParent) {
+    log.error("Baileys groupMetadata returned metadata without a usable linked parent.", {
+      chatId,
+      metadata,
+    });
+    throw new Error("Baileys groupMetadata returned an invalid linked parent.");
+  }
+  return linkedParent;
+}
+
+/**
  * @param {import("@whiskeysockets/baileys").WASocket} sock
  * @returns {boolean}
  */
@@ -190,6 +213,7 @@ function serializeTransportError(error) {
  *     participants: string[],
  *     parentCommunityChatId: string,
  *   ) => Promise<{ chatId: string, subject: string }>;
+ *   getGroupLinkedParent: (chatId: string) => Promise<string | null>;
  *   linkExistingGroupToCommunity: (chatId: string, communityChatId: string) => Promise<void>;
  *   promoteParticipants: (chatId: string, participants: string[]) => Promise<void>;
  *   renameGroup: (chatId: string, subject: string) => Promise<void>;
@@ -400,6 +424,22 @@ export async function createWhatsAppTransport() {
         log.error("WhatsApp communityLinkGroup failed:", {
           chatId,
           communityChatId,
+          error: serializeTransportError(error),
+        });
+        throw error;
+      }
+    },
+
+    async getGroupLinkedParent(chatId) {
+      const sock = currentSocket;
+      if (!sock) {
+        throw new Error("WhatsApp transport has not been started");
+      }
+      try {
+        return await executeGroupLinkedParentLookup(sock, chatId);
+      } catch (error) {
+        log.error("WhatsApp groupMetadata lookup failed:", {
+          chatId,
           error: serializeTransportError(error),
         });
         throw error;

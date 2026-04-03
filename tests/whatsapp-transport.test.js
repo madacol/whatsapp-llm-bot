@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   executeCommunityCreate,
   executeCommunityCreateGroup,
+  executeGroupLinkedParentLookup,
 } from "../whatsapp/create-whatsapp-transport.js";
 
 describe("WhatsApp transport community creation", () => {
@@ -68,5 +69,29 @@ describe("WhatsApp transport community creation", () => {
       ),
       /Baileys communityCreateGroup returned no group id\./,
     );
+  });
+
+  it("returns the linked parent from Baileys group metadata", async () => {
+    const socket = {
+      groupMetadata: async () => ({
+        linkedParent: "community-12345",
+      }),
+    };
+
+    const result = await executeGroupLinkedParentLookup(socket, "group-12345@g.us");
+
+    assert.equal(result, "community-12345@g.us");
+  });
+
+  it("returns null when Baileys group metadata has no linked parent", async () => {
+    const socket = {
+      groupMetadata: async () => ({
+        linkedParent: null,
+      }),
+    };
+
+    const result = await executeGroupLinkedParentLookup(socket, "group-12345@g.us");
+
+    assert.equal(result, null);
   });
 });
