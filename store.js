@@ -561,6 +561,15 @@ export async function initStore(injectedDb){
         );
     `;
 
+    await db.sql`
+        CREATE TABLE IF NOT EXISTS whatsapp_outbound_queue (
+            id SERIAL PRIMARY KEY,
+            chat_id VARCHAR(50) NOT NULL,
+            payload_json JSONB NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+    `;
+
     // Add new columns if they don't exist (for existing databases)
     try {
       await Promise.all([
@@ -777,6 +786,7 @@ export async function initStore(injectedDb){
       await db.sql`CREATE INDEX IF NOT EXISTS idx_messages_search_text ON messages USING gin (search_text)`;
       await db.sql`CREATE INDEX IF NOT EXISTS idx_messages_display_key ON messages (chat_id, display_key) WHERE display_key IS NOT NULL`;
       await db.sql`CREATE INDEX IF NOT EXISTS idx_memories_search_text ON memories USING gin (search_text)`;
+      await db.sql`CREATE INDEX IF NOT EXISTS idx_whatsapp_outbound_queue_chat_id_id ON whatsapp_outbound_queue (chat_id, id)`;
       await db.sql`
         CREATE TABLE IF NOT EXISTS agent_runs (
           id SERIAL PRIMARY KEY,

@@ -1,11 +1,15 @@
 import { createLogger } from "../logger.js";
-import { sendEvent as sendOutboundEvent } from "./outbound/send-content.js";
 import { adaptIncomingMessage } from "./inbound/chat-turn.js";
 import { createWhatsAppConnectionSupervisor } from "./connection-supervisor.js";
 import { classifyIncomingMessageEvent, normalizeReactionEvents } from "./inbound/message-event-classifier.js";
 import { createConfirmRuntime } from "./runtime/confirm-runtime.js";
 import { createReactionRuntime } from "./runtime/reaction-runtime.js";
 import { createSelectRuntime } from "./runtime/select-runtime.js";
+import {
+  flushQueuedWhatsAppOutbound,
+  sendOrQueueWhatsAppEvent,
+  sendOrQueueWhatsAppText,
+} from "./outbound/persistent-queue.js";
 
 const log = createLogger("whatsapp");
 
@@ -222,18 +226,30 @@ function serializeTransportError(error) {
  */
 
 /**
+ * @typedef {{
+ *   createConnectionSupervisor?: typeof createWhatsAppConnectionSupervisor,
+ * }} CreateWhatsAppTransportOptions
+ */
+
+/**
  * Create a WhatsApp transport with a minimal app-facing surface.
+ * @param {CreateWhatsAppTransportOptions} [options]
  * @returns {Promise<ChatTransport>}
  */
-export async function createWhatsAppTransport() {
+export async function createWhatsAppTransport(options = {}) {
   const confirmRuntime = createConfirmRuntime();
   const selectRuntime = createSelectRuntime();
   const reactionRuntime = createReactionRuntime();
+  const createConnectionSupervisor = options.createConnectionSupervisor ?? createWhatsAppConnectionSupervisor;
 
   /** @type {(turn: ChatTurn) => Promise<void>} */
   let onTurn = async () => {};
   /** @type {import('@whiskeysockets/baileys').WASocket | null} */
   let currentSocket = null;
+  let started = false;
+  let hasOpenConnection = false;
+  /** @type {Promise<void> | null} */
+  let flushQueuedPromise = null;
 
   /**
    * Clear all transport-owned runtime state and timers.
@@ -241,15 +257,35 @@ export async function createWhatsAppTransport() {
    */
   function clearRuntimeState() {
     currentSocket = null;
+    hasOpenConnection = false;
     confirmRuntime.clear();
     selectRuntime.clear();
     reactionRuntime.clear();
   }
 
-  const connectionSupervisor = await createWhatsAppConnectionSupervisor({
+  const connectionSupervisor = await createConnectionSupervisor({
     onSocketReady: registerHandlers,
     onClearState: clearRuntimeState,
   });
+
+  /**
+   * Replay any durable outbound messages once a live socket is available.
+   * @returns {Promise<void>}
+   */
+  async function flushQueuedOutbound() {
+    if (flushQueuedPromise) {
+      return flushQueuedPromise;
+    }
+
+    flushQueuedPromise = flushQueuedWhatsAppOutbound({
+      getSocket: () => currentSocket,
+      reactionRuntime,
+    }).finally(() => {
+      flushQueuedPromise = null;
+    });
+
+    return flushQueuedPromise;
+  }
 
   /**
    * Register socket handlers on the current socket instance.
@@ -259,6 +295,7 @@ export async function createWhatsAppTransport() {
    */
   function registerHandlers(sock, saveCreds) {
     currentSocket = sock;
+    hasOpenConnection = false;
 
     sock.ev.process(async (events) => {
       if (connectionSupervisor.isStopped()) {
@@ -268,8 +305,13 @@ export async function createWhatsAppTransport() {
       if (events["connection.update"]) {
         if (events["connection.update"].connection === "close" && currentSocket === sock) {
           currentSocket = null;
+          hasOpenConnection = false;
         }
         await connectionSupervisor.handleConnectionUpdate(events["connection.update"], sock);
+        if (events["connection.update"].connection === "open" && currentSocket === sock) {
+          hasOpenConnection = true;
+          await flushQueuedOutbound();
+        }
       }
 
       if (events["creds.update"]) {
@@ -329,24 +371,39 @@ export async function createWhatsAppTransport() {
   return {
     async start(turnHandler) {
       onTurn = turnHandler;
+      started = true;
+      hasOpenConnection = false;
       await connectionSupervisor.start();
     },
 
     async stop() {
+      started = false;
+      hasOpenConnection = false;
       onTurn = async () => {};
       await connectionSupervisor.stop();
     },
 
     async sendText(chatId, text) {
-      await connectionSupervisor.sendText(chatId, text);
+      if (!started) {
+        throw new Error("WhatsApp transport has not been started");
+      }
+      await sendOrQueueWhatsAppText({
+        getSocket: () => hasOpenConnection ? currentSocket : null,
+        chatId,
+        text,
+      });
     },
 
     async sendEvent(chatId, event) {
-      const sock = currentSocket;
-      if (!sock) {
+      if (!started) {
         throw new Error("WhatsApp transport has not been started");
       }
-      return sendOutboundEvent(sock, chatId, event, undefined, reactionRuntime);
+      return sendOrQueueWhatsAppEvent({
+        getSocket: () => hasOpenConnection ? currentSocket : null,
+        chatId,
+        event,
+        reactionRuntime,
+      });
     },
 
     async createGroup(subject, participants) {

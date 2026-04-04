@@ -3,7 +3,7 @@ import { normalizeChatId } from "../../whatsapp-hd-media.js";
 import { classifyIncomingMessageEvent } from "./message-event-classifier.js";
 import { applyHdInboundLifecycle } from "./hd-image-lifecycle.js";
 import { getDirectMessageText, getMessageContent } from "./message-content.js";
-import { sendEvent } from "../outbound/send-content.js";
+import { sendOrQueueWhatsAppEvent } from "../outbound/persistent-queue.js";
 import { createReactionRuntime } from "../runtime/reaction-runtime.js";
 
 const DEFAULT_PRESENCE_LEASE_TTL_MS = 20_000;
@@ -371,18 +371,41 @@ export function createTurnIo({
     void presence.afterOutboundMessage().catch(() => {});
   }
 
+  /**
+   * Resolve the current socket when available, otherwise return null so the
+   * outbound event can be persisted for replay after reconnect.
+   * @returns {import('@whiskeysockets/baileys').WASocket | null}
+   */
+  function getSocketOrNull() {
+    try {
+      return requireSocket();
+    } catch {
+      return null;
+    }
+  }
+
   const select = selectRuntime.createSelect(getSocket ?? sock, chatId);
   const selectMany = selectRuntime.createSelectMany(getSocket ?? sock, chatId);
   const confirm = confirmRuntime.createConfirm(getSocket ?? sock, chatId);
 
   return {
     send: async (event) => {
-      const handle = await sendEvent(requireSocket(), chatId, event, undefined, reactionRuntime);
+      const handle = await sendOrQueueWhatsAppEvent({
+        getSocket: getSocketOrNull,
+        chatId,
+        event,
+        reactionRuntime,
+      });
       refreshComposingAfterOutboundMessage();
       return handle;
     },
     reply: async (event) => {
-      const handle = await sendEvent(requireSocket(), chatId, event, undefined, reactionRuntime);
+      const handle = await sendOrQueueWhatsAppEvent({
+        getSocket: getSocketOrNull,
+        chatId,
+        event,
+        reactionRuntime,
+      });
       refreshComposingAfterOutboundMessage();
       return handle;
     },
