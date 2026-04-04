@@ -10,6 +10,7 @@ import {
   createWhatsAppWorkspaceTopology,
   resolveWorkspaceRole,
 } from "./workspace-topology.js";
+import { readWhatsAppProjectPresentationCache } from "./project-presentation-cache.js";
 
 const SOURCE_PREFIX = /** @type {Record<MessageSource, string>} */ ({
   llm: "🤖",
@@ -137,12 +138,14 @@ export function createWhatsAppWorkspacePresenter({ transport, store }) {
   /** @type {WorkspacePresentationPort} */
   const presenter = {
     async ensureWorkspaceVisible({ projectId, workspaceId, workspaceName, sourceChatName, sourceChatId, requesterJids }) {
-      const projectPresentationCache = await store.getWhatsAppProjectPresentationCache(projectId);
+      const projectPresentation = readWhatsAppProjectPresentationCache(
+        await store.getWhatsAppProjectPresentationCache(projectId),
+      );
       const existing = await store.getWhatsAppWorkspacePresentation(workspaceId);
 
       if (existing) {
-        const role = existing.role ?? resolveWorkspaceRole(projectPresentationCache, workspaceId);
-        const linkedCommunityChatId = existing.linked_community_chat_id ?? projectPresentationCache?.cached_community_chat_id ?? null;
+        const role = existing.role ?? resolveWorkspaceRole(projectPresentation, workspaceId);
+        const linkedCommunityChatId = existing.linked_community_chat_id ?? projectPresentation?.communityChatId ?? null;
         if (linkedCommunityChatId && role === "main") {
           if (!linkedCommunityChatId) {
             throw new Error(`Community presentation for project ${projectId} is missing its community chat id.`);

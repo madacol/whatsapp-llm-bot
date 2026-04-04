@@ -45,15 +45,12 @@ export function buildCommunityWorkspaceSurfaceName(workspaceName, role) {
 }
 
 /**
- * @param {WhatsAppProjectPresentationCacheRow | null} projectPresentationCache
+ * @param {WhatsAppProjectPresentationCacheView | null} projectPresentation
  * @param {string} workspaceId
  * @returns {WhatsAppWorkspacePresentationRole}
  */
-export function resolveWorkspaceRole(projectPresentationCache, workspaceId) {
-  if (
-    projectPresentationCache?.cached_topology_kind === "community"
-    && projectPresentationCache.cached_main_workspace_id === workspaceId
-  ) {
+export function resolveWorkspaceRole(projectPresentation, workspaceId) {
+  if (projectPresentation?.topologyKind === "community" && projectPresentation.mainWorkspaceId === workspaceId) {
     return "main";
   }
   return "workspace";
@@ -95,7 +92,7 @@ export function createWhatsAppWorkspaceTopology({ transport, store }) {
    * @param {{
    *   workspaceId: string,
    *   workspaceChatId: string,
- *   communityChatId: string,
+   *   communityChatId: string,
    * }} input
    * @returns {Promise<void>}
    */
@@ -125,9 +122,9 @@ export function createWhatsAppWorkspaceTopology({ transport, store }) {
   /**
    * @param {{
    *   projectId: string,
- *   mainWorkspaceId: string,
+   *   mainWorkspaceId: string,
    *   mainWorkspaceChatId: string,
- *   communityChatId: string,
+   *   communityChatId: string,
    *   sourceChatName?: string,
    *   allowReplacement?: boolean,
    * }} input
@@ -179,7 +176,7 @@ export function createWhatsAppWorkspaceTopology({ transport, store }) {
    *   workspaceChatSubject: string,
    *   persistedRole?: WhatsAppWorkspacePresentationRole,
    *   persistedLinkedCommunityChatId?: string | null,
- *   communityChatId: string,
+   *   communityChatId: string,
    * }} input
    * @returns {Promise<{ surfaceId: string, surfaceName: string }>}
    */

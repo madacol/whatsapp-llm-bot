@@ -311,6 +311,14 @@ type WhatsAppProjectPresentationCacheRow = {
   timestamp: string;
 };
 
+type WhatsAppProjectPresentationCacheView = {
+  projectId: string;
+  topologyKind: WhatsAppProjectTopologyKind;
+  communityChatId: string | null;
+  mainWorkspaceId: string | null;
+  timestamp: string;
+};
+
 type WhatsAppWorkspacePresentationRow = {
   workspace_id: string;
   project_id: string;
