@@ -30,7 +30,7 @@ function findCachedCommunityChatIdHint(presentations) {
  *     getGroupLinkedParent?: (chatId: string) => Promise<string | null>,
  *   },
  *   store: Pick<Awaited<ReturnType<typeof import("../store.js").initStore>>,
- *     "getWhatsAppProjectPresentation"
+ *     "getWhatsAppProjectPresentationCache"
  *     | "listWhatsAppWorkspacePresentations">,
  * }} input
  * @returns {{
@@ -40,7 +40,7 @@ function findCachedCommunityChatIdHint(presentations) {
  *     sourceChatId?: string,
  *     sourceChatName?: string,
  *   }) => Promise<{
- *     repoPresentationHint: WhatsAppProjectPresentationRow | null,
+ *     projectPresentationCacheHint: WhatsAppProjectPresentationCacheRow | null,
  *     existingPresentations: WhatsAppWorkspacePresentationRow[],
  *     sourceChatLiveCommunityChatId: string | null,
  *     mainWorkspaceLiveCommunityChatId: string | null,
@@ -79,7 +79,7 @@ export function createWhatsAppLiveWorkspaceTopologyResolver({ transport, store }
    *   sourceChatLiveCommunityChatId: string | null,
    * }} input
    * @returns {{
-   *   mainWorkspaceId: string | null,
+ *   mainWorkspaceId: string | null,
    *   previousMainWorkspacePresentation: WhatsAppWorkspacePresentationRow | null,
    *   mainWorkspaceSurface: {
    *     workspaceChatId: string,
@@ -159,19 +159,19 @@ export function createWhatsAppLiveWorkspaceTopologyResolver({ transport, store }
       sourceChatId,
       sourceChatName,
     }) {
-      const [repoPresentationHint, existingPresentations] = await Promise.all([
-        store.getWhatsAppProjectPresentation(projectId),
+      const [projectPresentationCacheHint, existingPresentations] = await Promise.all([
+        store.getWhatsAppProjectPresentationCache(projectId),
         store.listWhatsAppWorkspacePresentations(projectId),
       ]);
       const shouldInspectSourceChatLiveState = Boolean(
-        sourceChatId && (repoPresentationHint || existingPresentations.length > 0),
+        sourceChatId && (projectPresentationCacheHint || existingPresentations.length > 0),
       );
       const sourceChatLiveCommunityChatId = shouldInspectSourceChatLiveState && sourceChatId
         ? await getLiveLinkedCommunityChatId(sourceChatId)
         : null;
       const mainWorkspaceSelection = resolveEffectiveMainWorkspaceSelection({
         existingPresentations,
-        persistedMainWorkspaceId: repoPresentationHint?.main_workspace_id,
+        persistedMainWorkspaceId: projectPresentationCacheHint?.cached_main_workspace_id,
         sourceChatName,
         sourceChatId,
         sourceChatLiveCommunityChatId,
@@ -183,11 +183,11 @@ export function createWhatsAppLiveWorkspaceTopologyResolver({ transport, store }
             : await getLiveLinkedCommunityChatId(mainWorkspaceSelection.mainWorkspaceSurface.workspaceChatId)
         )
         : null;
-      const cachedCommunityChatIdHint = repoPresentationHint?.community_chat_id
+      const cachedCommunityChatIdHint = projectPresentationCacheHint?.cached_community_chat_id
         ?? mainWorkspaceSelection.mainWorkspaceSurface?.persistedLinkedCommunityChatId
         ?? findCachedCommunityChatIdHint(existingPresentations);
       return {
-        repoPresentationHint,
+        projectPresentationCacheHint,
         existingPresentations,
         sourceChatLiveCommunityChatId,
         mainWorkspaceLiveCommunityChatId,

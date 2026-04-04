@@ -21,21 +21,21 @@ describe("WhatsAppWorkspacePresenter", () => {
     const storedPresentations = [];
     /** @type {Array<{
      *   projectId: string,
-     *   topologyKind?: WhatsAppProjectTopologyKind,
-     *   communityChatId?: string | null,
-     *   mainWorkspaceId?: string | null,
+     *   cachedTopologyKind?: WhatsAppProjectTopologyKind,
+     *   cachedCommunityChatId?: string | null,
+     *   cachedMainWorkspaceId?: string | null,
      * }>} */
-    const storedRepos = [];
+    const storedProjectPresentations = [];
     const presenter = createWhatsAppWorkspacePresenter({
       store: {
-        getWhatsAppProjectPresentation: async () => null,
+        getWhatsAppProjectPresentationCache: async () => null,
         getWhatsAppWorkspacePresentation: async () => null,
         listWhatsAppWorkspacePresentations: async () => [],
         saveWhatsAppWorkspacePresentation: async (input) => {
           storedPresentations.push(input);
         },
-        upsertWhatsAppProjectPresentation: async (input) => {
-          storedRepos.push(input);
+        upsertWhatsAppProjectPresentationCache: async (input) => {
+          storedProjectPresentations.push(input);
         },
       },
       transport: {
@@ -74,10 +74,10 @@ describe("WhatsAppWorkspacePresenter", () => {
       workspaceChatId: "workspace-chat",
       workspaceChatSubject: "[payments] Original Group",
     }]);
-    assert.deepEqual(storedRepos, [{
+    assert.deepEqual(storedProjectPresentations, [{
       projectId: "repo-1",
-      topologyKind: "groups",
-      mainWorkspaceId: "ws-1",
+      cachedTopologyKind: "groups",
+      cachedMainWorkspaceId: "ws-1",
     }]);
     assert.deepEqual(surface, {
       surfaceId: "workspace-chat",
@@ -85,7 +85,7 @@ describe("WhatsAppWorkspacePresenter", () => {
     });
   });
 
-  it("upgrades a repo from a flat group to a community on the second workspace by adopting the original group as main", async () => {
+  it("upgrades a project from a flat group to a community on the second workspace by adopting the original group as main", async () => {
     /** @type {Array<{ subject: string, description: string }>} */
     const createdCommunities = [];
     /** @type {Array<{ subject: string, participants: string[], parentCommunityChatId: string }>} */
@@ -105,20 +105,20 @@ describe("WhatsAppWorkspacePresenter", () => {
     const storedPresentations = [];
     /** @type {Array<{
      *   projectId: string,
-     *   topologyKind?: WhatsAppProjectTopologyKind,
-     *   communityChatId?: string | null,
-     *   mainWorkspaceId?: string | null,
+     *   cachedTopologyKind?: WhatsAppProjectTopologyKind,
+     *   cachedCommunityChatId?: string | null,
+     *   cachedMainWorkspaceId?: string | null,
      * }>} */
-    const storedRepos = [];
+    const storedProjectPresentations = [];
     /** @type {string | null} */
     let linkedParent = null;
     const presenter = createWhatsAppWorkspacePresenter({
       store: {
-        getWhatsAppProjectPresentation: async () => ({
+        getWhatsAppProjectPresentationCache: async () => ({
           project_id: "repo-1",
-          topology_kind: "groups",
-          community_chat_id: null,
-          main_workspace_id: "ws-1",
+          cached_topology_kind: "groups",
+          cached_community_chat_id: null,
+          cached_main_workspace_id: "ws-1",
           timestamp: new Date().toISOString(),
         }),
         getWhatsAppWorkspacePresentation: async () => null,
@@ -137,8 +137,8 @@ describe("WhatsAppWorkspacePresenter", () => {
         saveWhatsAppWorkspacePresentation: async (input) => {
           storedPresentations.push(input);
         },
-        upsertWhatsAppProjectPresentation: async (input) => {
-          storedRepos.push(input);
+        upsertWhatsAppProjectPresentationCache: async (input) => {
+          storedProjectPresentations.push(input);
         },
       },
       transport: {
@@ -194,11 +194,11 @@ describe("WhatsAppWorkspacePresenter", () => {
       chatId: "flat-chat",
       communityChatId: "community-chat",
     }]);
-    assert.deepEqual(storedRepos, [{
+    assert.deepEqual(storedProjectPresentations, [{
       projectId: "repo-1",
-      topologyKind: "community",
-      communityChatId: "community-chat",
-      mainWorkspaceId: "ws-1",
+      cachedTopologyKind: "community",
+      cachedCommunityChatId: "community-chat",
+      cachedMainWorkspaceId: "ws-1",
     }]);
     assert.deepEqual(storedPresentations, [
       {
@@ -244,11 +244,11 @@ describe("WhatsAppWorkspacePresenter", () => {
     let linkedParent = null;
     const presenter = createWhatsAppWorkspacePresenter({
       store: {
-        getWhatsAppProjectPresentation: async () => ({
+        getWhatsAppProjectPresentationCache: async () => ({
           project_id: "repo-1",
-          topology_kind: "community",
-          community_chat_id: "community-chat",
-          main_workspace_id: "ws-1",
+          cached_topology_kind: "community",
+          cached_community_chat_id: "community-chat",
+          cached_main_workspace_id: "ws-1",
           timestamp: new Date().toISOString(),
         }),
         getWhatsAppWorkspacePresentation: async () => null,
@@ -266,7 +266,7 @@ describe("WhatsAppWorkspacePresenter", () => {
         saveWhatsAppWorkspacePresentation: async (input) => {
           storedPresentations.push(input);
         },
-        upsertWhatsAppProjectPresentation: async () => {
+        upsertWhatsAppProjectPresentationCache: async () => {
           assert.fail("project presentation should not be rewritten when rename fails");
         },
       },
@@ -334,20 +334,20 @@ describe("WhatsAppWorkspacePresenter", () => {
     const storedPresentations = [];
     /** @type {Array<{
      *   projectId: string,
-     *   topologyKind?: WhatsAppProjectTopologyKind,
-     *   communityChatId?: string | null,
-     *   mainWorkspaceId?: string | null,
+     *   cachedTopologyKind?: WhatsAppProjectTopologyKind,
+     *   cachedCommunityChatId?: string | null,
+     *   cachedMainWorkspaceId?: string | null,
      * }>} */
-    const storedRepos = [];
+    const storedProjectPresentations = [];
     /** @type {string | null} */
     let linkedParent = null;
     const presenter = createWhatsAppWorkspacePresenter({
       store: {
-        getWhatsAppProjectPresentation: async () => ({
+        getWhatsAppProjectPresentationCache: async () => ({
           project_id: "repo-1",
-          topology_kind: "community",
-          community_chat_id: "community-chat",
-          main_workspace_id: "ws-1",
+          cached_topology_kind: "community",
+          cached_community_chat_id: "community-chat",
+          cached_main_workspace_id: "ws-1",
           timestamp: new Date().toISOString(),
         }),
         getWhatsAppWorkspacePresentation: async () => null,
@@ -365,8 +365,8 @@ describe("WhatsAppWorkspacePresenter", () => {
         saveWhatsAppWorkspacePresentation: async (input) => {
           storedPresentations.push(input);
         },
-        upsertWhatsAppProjectPresentation: async (input) => {
-          storedRepos.push(input);
+        upsertWhatsAppProjectPresentationCache: async (input) => {
+          storedProjectPresentations.push(input);
         },
       },
       transport: {
@@ -420,11 +420,11 @@ describe("WhatsAppWorkspacePresenter", () => {
       participants: ["user@s.whatsapp.net"],
       parentCommunityChatId: "replacement-community-chat",
     }]);
-    assert.deepEqual(storedRepos, [{
+    assert.deepEqual(storedProjectPresentations, [{
       projectId: "repo-1",
-      topologyKind: "community",
-      communityChatId: "replacement-community-chat",
-      mainWorkspaceId: "ws-1",
+      cachedTopologyKind: "community",
+      cachedCommunityChatId: "replacement-community-chat",
+      cachedMainWorkspaceId: "ws-1",
     }]);
     assert.deepEqual(storedPresentations, [
       {
@@ -470,11 +470,11 @@ describe("WhatsAppWorkspacePresenter", () => {
     const storedPresentations = [];
     /** @type {Array<{
      *   projectId: string,
-     *   topologyKind?: WhatsAppProjectTopologyKind,
-     *   communityChatId?: string | null,
-     *   mainWorkspaceId?: string | null,
+     *   cachedTopologyKind?: WhatsAppProjectTopologyKind,
+     *   cachedCommunityChatId?: string | null,
+     *   cachedMainWorkspaceId?: string | null,
      * }>} */
-    const storedRepos = [];
+    const storedProjectPresentations = [];
     /** @type {Record<string, string | null>} */
     const linkedParents = {
       "old-main-chat": "community-chat",
@@ -482,11 +482,11 @@ describe("WhatsAppWorkspacePresenter", () => {
     };
     const presenter = createWhatsAppWorkspacePresenter({
       store: {
-        getWhatsAppProjectPresentation: async () => ({
+        getWhatsAppProjectPresentationCache: async () => ({
           project_id: "repo-1",
-          topology_kind: "community",
-          community_chat_id: "community-chat",
-          main_workspace_id: "ws-1",
+          cached_topology_kind: "community",
+          cached_community_chat_id: "community-chat",
+          cached_main_workspace_id: "ws-1",
           timestamp: new Date().toISOString(),
         }),
         getWhatsAppWorkspacePresentation: async () => null,
@@ -513,8 +513,8 @@ describe("WhatsAppWorkspacePresenter", () => {
         saveWhatsAppWorkspacePresentation: async (input) => {
           storedPresentations.push(input);
         },
-        upsertWhatsAppProjectPresentation: async (input) => {
-          storedRepos.push(input);
+        upsertWhatsAppProjectPresentationCache: async (input) => {
+          storedProjectPresentations.push(input);
         },
       },
       transport: {
@@ -569,11 +569,11 @@ describe("WhatsAppWorkspacePresenter", () => {
       participants: ["user@s.whatsapp.net"],
       parentCommunityChatId: "replacement-community-chat",
     }]);
-    assert.deepEqual(storedRepos, [{
+    assert.deepEqual(storedProjectPresentations, [{
       projectId: "repo-1",
-      topologyKind: "community",
-      communityChatId: "replacement-community-chat",
-      mainWorkspaceId: "ws-2",
+      cachedTopologyKind: "community",
+      cachedCommunityChatId: "replacement-community-chat",
+      cachedMainWorkspaceId: "ws-2",
     }]);
     assert.deepEqual(storedPresentations, [
       {
@@ -627,11 +627,11 @@ describe("WhatsAppWorkspacePresenter", () => {
     const storedPresentations = [];
     /** @type {Array<{
      *   projectId: string,
-     *   topologyKind?: WhatsAppProjectTopologyKind,
-     *   communityChatId?: string | null,
-     *   mainWorkspaceId?: string | null,
+     *   cachedTopologyKind?: WhatsAppProjectTopologyKind,
+     *   cachedCommunityChatId?: string | null,
+     *   cachedMainWorkspaceId?: string | null,
      * }>} */
-    const storedRepos = [];
+    const storedProjectPresentations = [];
     /** @type {Record<string, string | null>} */
     const linkedParents = {
       "old-main-chat": "community-chat",
@@ -639,11 +639,11 @@ describe("WhatsAppWorkspacePresenter", () => {
     };
     const presenter = createWhatsAppWorkspacePresenter({
       store: {
-        getWhatsAppProjectPresentation: async () => ({
+        getWhatsAppProjectPresentationCache: async () => ({
           project_id: "repo-1",
-          topology_kind: "community",
-          community_chat_id: "community-chat",
-          main_workspace_id: "ws-1",
+          cached_topology_kind: "community",
+          cached_community_chat_id: "community-chat",
+          cached_main_workspace_id: "ws-1",
           timestamp: new Date().toISOString(),
         }),
         getWhatsAppWorkspacePresentation: async () => null,
@@ -661,8 +661,8 @@ describe("WhatsAppWorkspacePresenter", () => {
         saveWhatsAppWorkspacePresentation: async (input) => {
           storedPresentations.push(input);
         },
-        upsertWhatsAppProjectPresentation: async (input) => {
-          storedRepos.push(input);
+        upsertWhatsAppProjectPresentationCache: async (input) => {
+          storedProjectPresentations.push(input);
         },
       },
       transport: {
@@ -717,11 +717,11 @@ describe("WhatsAppWorkspacePresenter", () => {
       participants: ["user@s.whatsapp.net"],
       parentCommunityChatId: "replacement-community-chat",
     }]);
-    assert.deepEqual(storedRepos, [{
+    assert.deepEqual(storedProjectPresentations, [{
       projectId: "repo-1",
-      topologyKind: "community",
-      communityChatId: "replacement-community-chat",
-      mainWorkspaceId: "ws-1",
+      cachedTopologyKind: "community",
+      cachedCommunityChatId: "replacement-community-chat",
+      cachedMainWorkspaceId: "ws-1",
     }]);
     assert.deepEqual(storedPresentations, [
       {
@@ -768,11 +768,11 @@ describe("WhatsAppWorkspacePresenter", () => {
 
     const presenter = createWhatsAppWorkspacePresenter({
       store: {
-        getWhatsAppProjectPresentation: async () => ({
+        getWhatsAppProjectPresentationCache: async () => ({
           project_id: "repo-1",
-          topology_kind: "community",
-          community_chat_id: "community-chat",
-          main_workspace_id: "ws-1",
+          cached_topology_kind: "community",
+          cached_community_chat_id: "community-chat",
+          cached_main_workspace_id: "ws-1",
           timestamp: new Date().toISOString(),
         }),
         getWhatsAppWorkspacePresentation: async () => null,
@@ -790,8 +790,8 @@ describe("WhatsAppWorkspacePresenter", () => {
         saveWhatsAppWorkspacePresentation: async (input) => {
           storedPresentations.push(input);
         },
-        upsertWhatsAppProjectPresentation: async () => {
-          assert.fail("repo topology should not be rewritten when repairing a stale main-group link");
+        upsertWhatsAppProjectPresentationCache: async () => {
+          assert.fail("project presentation should not be rewritten when repairing a stale main-group link");
         },
       },
       transport: {
@@ -866,11 +866,11 @@ describe("WhatsAppWorkspacePresenter", () => {
 
     const presenter = createWhatsAppWorkspacePresenter({
       store: {
-        getWhatsAppProjectPresentation: async () => ({
+        getWhatsAppProjectPresentationCache: async () => ({
           project_id: "repo-1",
-          topology_kind: "groups",
-          community_chat_id: null,
-          main_workspace_id: "ws-1",
+          cached_topology_kind: "groups",
+          cached_community_chat_id: null,
+          cached_main_workspace_id: "ws-1",
           timestamp: new Date().toISOString(),
         }),
         getWhatsAppWorkspacePresentation: async () => null,
@@ -888,7 +888,7 @@ describe("WhatsAppWorkspacePresenter", () => {
         saveWhatsAppWorkspacePresentation: async (input) => {
           storedPresentations.push(input);
         },
-        upsertWhatsAppProjectPresentation: async () => {
+        upsertWhatsAppProjectPresentationCache: async () => {
           assert.fail("stale project presentation should not force a rewrite when live chat state is already authoritative");
         },
       },
@@ -958,11 +958,11 @@ describe("WhatsAppWorkspacePresenter", () => {
     const storedPresentations = [];
     const presenter = createWhatsAppWorkspacePresenter({
       store: {
-        getWhatsAppProjectPresentation: async () => ({
+        getWhatsAppProjectPresentationCache: async () => ({
           project_id: "repo-1",
-          topology_kind: "community",
-          community_chat_id: "community-chat",
-          main_workspace_id: "ws-1",
+          cached_topology_kind: "community",
+          cached_community_chat_id: "community-chat",
+          cached_main_workspace_id: "ws-1",
           timestamp: new Date().toISOString(),
         }),
         getWhatsAppWorkspacePresentation: async () => null,
@@ -980,8 +980,8 @@ describe("WhatsAppWorkspacePresenter", () => {
         saveWhatsAppWorkspacePresentation: async (input) => {
           storedPresentations.push(input);
         },
-        upsertWhatsAppProjectPresentation: async () => {
-          assert.fail("repo topology should not be rewritten for later community subgroups");
+        upsertWhatsAppProjectPresentationCache: async () => {
+          assert.fail("project presentation should not be rewritten for later community subgroups");
         },
       },
       transport: {
@@ -1044,7 +1044,7 @@ describe("WhatsAppWorkspacePresenter", () => {
     const storedPresentations = [];
     const presenter = createWhatsAppWorkspacePresenter({
       store: {
-        getWhatsAppProjectPresentation: async () => null,
+        getWhatsAppProjectPresentationCache: async () => null,
         getWhatsAppWorkspacePresentation: async () => ({
           workspace_id: "ws-1",
           project_id: "repo-1",
@@ -1058,7 +1058,7 @@ describe("WhatsAppWorkspacePresenter", () => {
         saveWhatsAppWorkspacePresentation: async (input) => {
           storedPresentations.push(input);
         },
-        upsertWhatsAppProjectPresentation: async () => {},
+        upsertWhatsAppProjectPresentationCache: async () => {},
       },
       transport: {
         start: async () => {},
@@ -1113,7 +1113,7 @@ describe("WhatsAppWorkspacePresenter", () => {
   it("resolves a workspace surface from the persisted WhatsApp mapping", async () => {
     const presenter = createWhatsAppWorkspacePresenter({
       store: {
-        getWhatsAppProjectPresentation: async () => null,
+        getWhatsAppProjectPresentationCache: async () => null,
         getWhatsAppWorkspacePresentation: async (workspaceId) => {
           assert.equal(workspaceId, "ws-1");
           return {
@@ -1130,7 +1130,7 @@ describe("WhatsAppWorkspacePresenter", () => {
         saveWhatsAppWorkspacePresentation: async () => {
           throw new Error("should not write when only resolving a surface");
         },
-        upsertWhatsAppProjectPresentation: async () => {
+        upsertWhatsAppProjectPresentationCache: async () => {
           throw new Error("should not write when only resolving a surface");
         },
       },
@@ -1161,7 +1161,7 @@ describe("WhatsAppWorkspacePresenter", () => {
     };
     const presenter = createWhatsAppWorkspacePresenter({
       store: {
-        getWhatsAppProjectPresentation: async () => null,
+        getWhatsAppProjectPresentationCache: async () => null,
         getWhatsAppWorkspacePresentation: async (workspaceId) => {
           assert.equal(workspaceId, "ws-1");
           return {
@@ -1176,7 +1176,7 @@ describe("WhatsAppWorkspacePresenter", () => {
         },
         listWhatsAppWorkspacePresentations: async () => [],
         saveWhatsAppWorkspacePresentation: async () => {},
-        upsertWhatsAppProjectPresentation: async () => {},
+        upsertWhatsAppProjectPresentationCache: async () => {},
       },
       transport: {
         start: async () => {},
@@ -1210,7 +1210,7 @@ describe("WhatsAppWorkspacePresenter", () => {
     const sentEvents = [];
     const presenter = createWhatsAppWorkspacePresenter({
       store: {
-        getWhatsAppProjectPresentation: async () => null,
+        getWhatsAppProjectPresentationCache: async () => null,
         getWhatsAppWorkspacePresentation: async () => ({
           workspace_id: "ws-1",
           project_id: "repo-1",
@@ -1222,7 +1222,7 @@ describe("WhatsAppWorkspacePresenter", () => {
         }),
         listWhatsAppWorkspacePresentations: async () => [],
         saveWhatsAppWorkspacePresentation: async () => {},
-        upsertWhatsAppProjectPresentation: async () => {},
+        upsertWhatsAppProjectPresentationCache: async () => {},
       },
       transport: {
         start: async () => {},

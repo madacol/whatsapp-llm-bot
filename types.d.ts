@@ -303,11 +303,11 @@ type ChatBindingRow = {
   timestamp: string;
 };
 
-type WhatsAppProjectPresentationRow = {
+type WhatsAppProjectPresentationCacheRow = {
   project_id: string;
-  topology_kind: WhatsAppProjectTopologyKind;
-  community_chat_id: string | null;
-  main_workspace_id: string | null;
+  cached_topology_kind: WhatsAppProjectTopologyKind;
+  cached_community_chat_id: string | null;
+  cached_main_workspace_id: string | null;
   timestamp: string;
 };
 
