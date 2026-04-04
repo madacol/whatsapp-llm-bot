@@ -214,27 +214,30 @@ function normalizeChatBindingRow(raw) {
 
 /**
  * @param {unknown} raw
- * @returns {WhatsAppProjectPresentationRow | null}
+ * @returns {WhatsAppProjectPresentationCacheRow | null}
  */
-function normalizeWhatsAppProjectPresentationRow(raw) {
+function normalizeWhatsAppProjectPresentationCacheRow(raw) {
   if (!isRecord(raw)) {
     return null;
   }
+  const cachedTopologyKind = raw.cached_topology_kind ?? raw.topology_kind;
+  const cachedCommunityChatId = raw.cached_community_chat_id ?? raw.community_chat_id ?? null;
+  const cachedMainWorkspaceId = raw.cached_main_workspace_id ?? raw.main_workspace_id ?? null;
   const timestamp = normalizeTimestampValue(raw.timestamp);
   if (
     typeof raw.project_id !== "string"
-    || !isWhatsAppProjectTopologyKind(raw.topology_kind)
-    || (raw.community_chat_id !== null && typeof raw.community_chat_id !== "string")
-    || (raw.main_workspace_id !== null && typeof raw.main_workspace_id !== "string")
+    || !isWhatsAppProjectTopologyKind(cachedTopologyKind)
+    || (cachedCommunityChatId !== null && typeof cachedCommunityChatId !== "string")
+    || (cachedMainWorkspaceId !== null && typeof cachedMainWorkspaceId !== "string")
     || !timestamp
   ) {
     return null;
   }
   return {
     project_id: raw.project_id,
-    topology_kind: raw.topology_kind,
-    community_chat_id: raw.community_chat_id,
-    main_workspace_id: raw.main_workspace_id,
+    cached_topology_kind: cachedTopologyKind,
+    cached_community_chat_id: cachedCommunityChatId,
+    cached_main_workspace_id: cachedMainWorkspaceId,
     timestamp,
   };
 }
@@ -390,6 +393,16 @@ export async function initStore(injectedDb){
       ) THEN
         ALTER TABLE whatsapp_repo_presentations RENAME TO whatsapp_project_presentations;
       END IF;
+
+      IF EXISTS (
+        SELECT 1 FROM information_schema.tables
+        WHERE table_schema = 'public' AND table_name = 'whatsapp_project_presentations'
+      ) AND NOT EXISTS (
+        SELECT 1 FROM information_schema.tables
+        WHERE table_schema = 'public' AND table_name = 'whatsapp_project_presentation_cache'
+      ) THEN
+        ALTER TABLE whatsapp_project_presentations RENAME TO whatsapp_project_presentation_cache;
+      END IF;
     END $$`;
 
     await db.sql`DO $$ BEGIN
@@ -425,12 +438,42 @@ export async function initStore(injectedDb){
 
       IF EXISTS (
         SELECT 1 FROM information_schema.columns
-        WHERE table_schema = 'public' AND table_name = 'whatsapp_project_presentations' AND column_name = 'repo_id'
+        WHERE table_schema = 'public' AND table_name = 'whatsapp_project_presentation_cache' AND column_name = 'repo_id'
       ) AND NOT EXISTS (
         SELECT 1 FROM information_schema.columns
-        WHERE table_schema = 'public' AND table_name = 'whatsapp_project_presentations' AND column_name = 'project_id'
+        WHERE table_schema = 'public' AND table_name = 'whatsapp_project_presentation_cache' AND column_name = 'project_id'
       ) THEN
-        ALTER TABLE whatsapp_project_presentations RENAME COLUMN repo_id TO project_id;
+        ALTER TABLE whatsapp_project_presentation_cache RENAME COLUMN repo_id TO project_id;
+      END IF;
+
+      IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = 'whatsapp_project_presentation_cache' AND column_name = 'topology_kind'
+      ) AND NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = 'whatsapp_project_presentation_cache' AND column_name = 'cached_topology_kind'
+      ) THEN
+        ALTER TABLE whatsapp_project_presentation_cache RENAME COLUMN topology_kind TO cached_topology_kind;
+      END IF;
+
+      IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = 'whatsapp_project_presentation_cache' AND column_name = 'community_chat_id'
+      ) AND NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = 'whatsapp_project_presentation_cache' AND column_name = 'cached_community_chat_id'
+      ) THEN
+        ALTER TABLE whatsapp_project_presentation_cache RENAME COLUMN community_chat_id TO cached_community_chat_id;
+      END IF;
+
+      IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = 'whatsapp_project_presentation_cache' AND column_name = 'main_workspace_id'
+      ) AND NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = 'whatsapp_project_presentation_cache' AND column_name = 'cached_main_workspace_id'
+      ) THEN
+        ALTER TABLE whatsapp_project_presentation_cache RENAME COLUMN main_workspace_id TO cached_main_workspace_id;
       END IF;
 
       IF EXISTS (
@@ -486,11 +529,11 @@ export async function initStore(injectedDb){
     `;
 
     await db.sql`
-        CREATE TABLE IF NOT EXISTS whatsapp_project_presentations (
+        CREATE TABLE IF NOT EXISTS whatsapp_project_presentation_cache (
             project_id TEXT PRIMARY KEY,
-            topology_kind TEXT NOT NULL DEFAULT 'groups',
-            community_chat_id VARCHAR(50) REFERENCES chats(chat_id),
-            main_workspace_id TEXT,
+            cached_topology_kind TEXT NOT NULL DEFAULT 'groups',
+            cached_community_chat_id VARCHAR(50) REFERENCES chats(chat_id),
+            cached_main_workspace_id TEXT,
             timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
     `;
@@ -594,7 +637,7 @@ export async function initStore(injectedDb){
       `;
 
       await db.sql`
-        INSERT INTO whatsapp_project_presentations (project_id, topology_kind)
+        INSERT INTO whatsapp_project_presentation_cache (project_id, cached_topology_kind)
         SELECT DISTINCT project_id, 'groups'
         FROM workspaces
         ON CONFLICT (project_id) DO NOTHING
@@ -761,55 +804,55 @@ export async function initStore(injectedDb){
     /**
      * @param {{
      *   projectId: string,
-     *   topologyKind?: WhatsAppProjectTopologyKind,
-     *   communityChatId?: string | null,
-     *   mainWorkspaceId?: string | null,
+     *   cachedTopologyKind?: WhatsAppProjectTopologyKind,
+     *   cachedCommunityChatId?: string | null,
+     *   cachedMainWorkspaceId?: string | null,
      * }} input
-     * @returns {Promise<WhatsAppProjectPresentationRow>}
+     * @returns {Promise<WhatsAppProjectPresentationCacheRow>}
      */
-    async function persistWhatsAppProjectPresentation({
+    async function persistWhatsAppProjectPresentationCache({
       projectId,
-      topologyKind = "groups",
-      communityChatId = null,
-      mainWorkspaceId = null,
+      cachedTopologyKind = "groups",
+      cachedCommunityChatId = null,
+      cachedMainWorkspaceId = null,
     }) {
-      if (communityChatId) {
-        await ensureChatExists(communityChatId);
+      if (cachedCommunityChatId) {
+        await ensureChatExists(cachedCommunityChatId);
       }
       const { rows: [row] } = await db.sql`
-        INSERT INTO whatsapp_project_presentations (
+        INSERT INTO whatsapp_project_presentation_cache (
           project_id,
-          topology_kind,
-          community_chat_id,
-          main_workspace_id
+          cached_topology_kind,
+          cached_community_chat_id,
+          cached_main_workspace_id
         )
         VALUES (
           ${projectId},
-          ${topologyKind},
-          ${communityChatId},
-          ${mainWorkspaceId}
+          ${cachedTopologyKind},
+          ${cachedCommunityChatId},
+          ${cachedMainWorkspaceId}
         )
         ON CONFLICT (project_id) DO UPDATE
         SET
-          topology_kind = EXCLUDED.topology_kind,
-          community_chat_id = EXCLUDED.community_chat_id,
-          main_workspace_id = EXCLUDED.main_workspace_id
+          cached_topology_kind = EXCLUDED.cached_topology_kind,
+          cached_community_chat_id = EXCLUDED.cached_community_chat_id,
+          cached_main_workspace_id = EXCLUDED.cached_main_workspace_id
         RETURNING *
       `;
-      const presentation = normalizeWhatsAppProjectPresentationRow(row);
-      if (!presentation) {
-        throw new Error(`Failed to normalize WhatsApp project presentation for ${projectId}.`);
+      const projectPresentationCache = normalizeWhatsAppProjectPresentationCacheRow(row);
+      if (!projectPresentationCache) {
+        throw new Error(`Failed to normalize WhatsApp project presentation cache for ${projectId}.`);
       }
-      return presentation;
+      return projectPresentationCache;
     }
 
     /**
      * @param {string} projectId
      * @returns {Promise<void>}
      */
-    async function ensureWhatsAppProjectPresentationExists(projectId) {
+    async function ensureWhatsAppProjectPresentationCacheExists(projectId) {
       await db.sql`
-        INSERT INTO whatsapp_project_presentations (project_id, topology_kind)
+        INSERT INTO whatsapp_project_presentation_cache (project_id, cached_topology_kind)
         VALUES (${projectId}, 'groups')
         ON CONFLICT (project_id) DO NOTHING
       `;
@@ -1129,7 +1172,7 @@ export async function initStore(injectedDb){
           projectId,
           workspaceId,
         });
-        await ensureWhatsAppProjectPresentationExists(projectId);
+        await ensureWhatsAppProjectPresentationCacheExists(projectId);
         return workspace;
       },
 
@@ -1285,28 +1328,28 @@ export async function initStore(injectedDb){
 
       /**
        * @param {string} projectId
-       * @returns {Promise<WhatsAppProjectPresentationRow | null>}
+       * @returns {Promise<WhatsAppProjectPresentationCacheRow | null>}
        */
-      async getWhatsAppProjectPresentation (projectId) {
+      async getWhatsAppProjectPresentationCache (projectId) {
         const { rows: [row] } = await db.sql`
-          SELECT * FROM whatsapp_project_presentations
+          SELECT * FROM whatsapp_project_presentation_cache
           WHERE project_id = ${projectId}
           LIMIT 1
         `;
-        return normalizeWhatsAppProjectPresentationRow(row);
+        return normalizeWhatsAppProjectPresentationCacheRow(row);
       },
 
       /**
        * @param {{
        *   projectId: string,
-       *   topologyKind?: WhatsAppProjectTopologyKind,
-       *   communityChatId?: string | null,
-       *   mainWorkspaceId?: string | null,
+       *   cachedTopologyKind?: WhatsAppProjectTopologyKind,
+       *   cachedCommunityChatId?: string | null,
+       *   cachedMainWorkspaceId?: string | null,
        * }} input
-       * @returns {Promise<WhatsAppProjectPresentationRow>}
+       * @returns {Promise<WhatsAppProjectPresentationCacheRow>}
        */
-      async upsertWhatsAppProjectPresentation (input) {
-        return persistWhatsAppProjectPresentation(input);
+      async upsertWhatsAppProjectPresentationCache (input) {
+        return persistWhatsAppProjectPresentationCache(input);
       },
 
       /**

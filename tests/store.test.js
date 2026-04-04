@@ -101,40 +101,40 @@ describe("store with injected DB", () => {
   });
 
   describe("WhatsApp presentation mappings", () => {
-    it("stores repo and workspace presentation state separately from the workspace row", async () => {
+    it("stores project and workspace presentation state separately from the workspace row", async () => {
       await store.createChat("wa-workspace-chat");
-      const repo = await store.createProject({
+      const project = await store.createProject({
         name: `store-whatsapp-repo-${Date.now()}`,
         rootPath: `/repo/whatsapp-${Date.now()}`,
         defaultBaseBranch: "master",
       });
 
-      await store.upsertWhatsAppProjectPresentation({
-        projectId: repo.project_id,
-        topologyKind: "groups",
+      await store.upsertWhatsAppProjectPresentationCache({
+        projectId: project.project_id,
+        cachedTopologyKind: "groups",
       });
 
       await store.saveWhatsAppWorkspacePresentation({
-        projectId: repo.project_id,
+        projectId: project.project_id,
         workspaceId: "ws-presentation-1",
         workspaceChatId: "wa-workspace-chat",
         workspaceChatSubject: "[payments] Original Group",
       });
 
-      const repoPresentation = await store.getWhatsAppProjectPresentation(repo.project_id);
+      const projectPresentation = await store.getWhatsAppProjectPresentationCache(project.project_id);
       const workspacePresentation = await store.getWhatsAppWorkspacePresentation("ws-presentation-1");
       const byChat = await store.getWhatsAppWorkspacePresentationByChat("wa-workspace-chat");
 
-      assert.deepEqual(repoPresentation && {
-        project_id: repoPresentation.project_id,
-        topology_kind: repoPresentation.topology_kind,
-        community_chat_id: repoPresentation.community_chat_id,
-        main_workspace_id: repoPresentation.main_workspace_id,
+      assert.deepEqual(projectPresentation && {
+        project_id: projectPresentation.project_id,
+        cached_topology_kind: projectPresentation.cached_topology_kind,
+        cached_community_chat_id: projectPresentation.cached_community_chat_id,
+        cached_main_workspace_id: projectPresentation.cached_main_workspace_id,
       }, {
-        project_id: repo.project_id,
-        topology_kind: "groups",
-        community_chat_id: null,
-        main_workspace_id: null,
+        project_id: project.project_id,
+        cached_topology_kind: "groups",
+        cached_community_chat_id: null,
+        cached_main_workspace_id: null,
       });
       assert.deepEqual(workspacePresentation && {
         workspace_id: workspacePresentation.workspace_id,
@@ -145,7 +145,7 @@ describe("store with injected DB", () => {
         linked_community_chat_id: workspacePresentation.linked_community_chat_id,
       }, {
         workspace_id: "ws-presentation-1",
-        project_id: repo.project_id,
+        project_id: project.project_id,
         workspace_chat_id: "wa-workspace-chat",
         workspace_chat_subject: "[payments] Original Group",
         role: "workspace",
@@ -158,7 +158,7 @@ describe("store with injected DB", () => {
         workspace_chat_subject: byChat.workspace_chat_subject,
       }, {
         workspace_id: "ws-presentation-1",
-        project_id: repo.project_id,
+        project_id: project.project_id,
         workspace_chat_id: "wa-workspace-chat",
         workspace_chat_subject: "[payments] Original Group",
       });
@@ -313,23 +313,23 @@ describe("store with injected DB", () => {
       const tables = await freshDb.sql`
         SELECT table_name FROM information_schema.tables
         WHERE table_schema = 'public'
-          AND table_name IN ('repos', 'projects', 'whatsapp_repo_presentations', 'whatsapp_project_presentations')
+          AND table_name IN ('repos', 'projects', 'whatsapp_repo_presentations', 'whatsapp_project_presentations', 'whatsapp_project_presentation_cache')
         ORDER BY table_name
       `;
       const project = await migratedStore.getProject(projectId);
       const workspace = await migratedStore.getWorkspace(workspaceId);
       const binding = await migratedStore.getChatBinding("legacy-project-chat");
-      const projectPresentation = await migratedStore.getWhatsAppProjectPresentation(projectId);
+      const projectPresentation = await migratedStore.getWhatsAppProjectPresentationCache(projectId);
       const workspacePresentation = await migratedStore.getWhatsAppWorkspacePresentation(workspaceId);
 
-      assert.deepEqual(tables.rows.map((row) => row.table_name), ["projects", "whatsapp_project_presentations"]);
+      assert.deepEqual(tables.rows.map((row) => row.table_name), ["projects", "whatsapp_project_presentation_cache"]);
       assert.equal(project?.project_id, projectId);
       assert.equal(project?.control_chat_id, "legacy-project-chat");
       assert.equal(workspace?.project_id, projectId);
       assert.equal(binding?.binding_kind, "project");
       assert.equal(binding?.project_id, projectId);
       assert.equal(projectPresentation?.project_id, projectId);
-      assert.equal(projectPresentation?.main_workspace_id, workspaceId);
+      assert.equal(projectPresentation?.cached_main_workspace_id, workspaceId);
       assert.equal(workspacePresentation?.project_id, projectId);
     });
   });

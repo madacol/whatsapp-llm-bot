@@ -99,11 +99,11 @@ function stringifyEvent(event) {
  *     linkExistingGroupToCommunity: (chatId: string, communityChatId: string) => Promise<void>,
  *   },
  *   store: Pick<Awaited<ReturnType<typeof import("../store.js").initStore>>,
- *     "getWhatsAppProjectPresentation"
+ *     "getWhatsAppProjectPresentationCache"
  *     | "getWhatsAppWorkspacePresentation"
  *     | "listWhatsAppWorkspacePresentations"
  *     | "saveWhatsAppWorkspacePresentation"
- *     | "upsertWhatsAppProjectPresentation">,
+ *     | "upsertWhatsAppProjectPresentationCache">,
  * }} input
  * @returns {WorkspacePresentationPort}
  */
@@ -137,12 +137,12 @@ export function createWhatsAppWorkspacePresenter({ transport, store }) {
   /** @type {WorkspacePresentationPort} */
   const presenter = {
     async ensureWorkspaceVisible({ projectId, workspaceId, workspaceName, sourceChatName, sourceChatId, requesterJids }) {
-      const repoPresentation = await store.getWhatsAppProjectPresentation(projectId);
+      const projectPresentationCache = await store.getWhatsAppProjectPresentationCache(projectId);
       const existing = await store.getWhatsAppWorkspacePresentation(workspaceId);
 
       if (existing) {
-        const role = existing.role ?? resolveWorkspaceRole(repoPresentation, workspaceId);
-        const linkedCommunityChatId = existing.linked_community_chat_id ?? repoPresentation?.community_chat_id ?? null;
+        const role = existing.role ?? resolveWorkspaceRole(projectPresentationCache, workspaceId);
+        const linkedCommunityChatId = existing.linked_community_chat_id ?? projectPresentationCache?.cached_community_chat_id ?? null;
         if (linkedCommunityChatId && role === "main") {
           if (!linkedCommunityChatId) {
             throw new Error(`Community presentation for project ${projectId} is missing its community chat id.`);
