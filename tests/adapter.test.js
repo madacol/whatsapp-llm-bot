@@ -552,6 +552,55 @@ describe("createTurnIo", () => {
     assert.equal(newSocket.sentMessages.length, 1);
   });
 
+  it("queues reply events persistently when the live socket is unavailable", async () => {
+    const chatId = `queued-turn-io-${Date.now()}`;
+    const db = await createTestDb();
+    const io = createTurnIo({
+      sock: createMockSock().sock,
+      getSocket: () => null,
+      chatId,
+      message: /** @type {BaileysMessage} */ ({
+        key: {
+          remoteJid: chatId,
+          fromMe: false,
+          id: "incoming-msg-queued",
+        },
+      }),
+      senderIds: ["sender-1"],
+      isGroup: false,
+      selectRuntime: createSelectRuntime(),
+      confirmRuntime: createConfirmRuntime(),
+      reactionRuntime: createReactionRuntime(),
+    });
+
+    await io.reply({
+      kind: "content",
+      source: "llm",
+      content: "Send later",
+    });
+
+    const { rows } = await db.sql`
+      SELECT chat_id, payload_json
+      FROM whatsapp_outbound_queue
+      WHERE chat_id = ${chatId}
+      ORDER BY id ASC
+    `;
+
+    assert.deepEqual(rows, [{
+      chat_id: chatId,
+      payload_json: {
+        kind: "event",
+        event: {
+          kind: "content",
+          source: "llm",
+          content: "Send later",
+        },
+      },
+    }]);
+
+    await db.sql`DELETE FROM whatsapp_outbound_queue WHERE chat_id = ${chatId}`;
+  });
+
   it("opens a lease, pulses composing on the adapter cadence, then pauses on expiry", async () => {
     /** @type {Array<{ presence: string, chatId: string }>} */
     const presenceUpdates = [];
