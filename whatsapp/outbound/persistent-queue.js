@@ -1,8 +1,10 @@
-import { getRootDb } from "../../db.js";
+import { initStore } from "../../store.js";
 import { createLogger } from "../../logger.js";
 import { sendEvent as sendOutboundEvent } from "./send-content.js";
 
 const log = createLogger("whatsapp");
+/** @type {Promise<import("../../store.js").Store> | null} */
+let storePromise = null;
 
 /**
  * @typedef {{
@@ -228,6 +230,16 @@ function errorMessage(error) {
 }
 
 /**
+ * @returns {Promise<import("../../store.js").Store>}
+ */
+async function getStore() {
+  if (!storePromise) {
+    storePromise = initStore();
+  }
+  return storePromise;
+}
+
+/**
  * @param {unknown} error
  * @returns {boolean}
  */
@@ -245,11 +257,11 @@ export function isRecoverableWhatsAppSendError(error) {
  * @returns {Promise<void>}
  */
 export async function enqueueWhatsAppOutbound(chatId, payload) {
-  const db = getRootDb();
-  await db.sql`
-    INSERT INTO whatsapp_outbound_queue (chat_id, payload_json)
-    VALUES (${chatId}, ${JSON.stringify(payload)}::jsonb)
-  `;
+  const store = await getStore();
+  await store.enqueueWhatsAppOutboundQueueEntry({
+    chatId,
+    payloadJson: payload,
+  });
 }
 
 /**
@@ -257,20 +269,16 @@ export async function enqueueWhatsAppOutbound(chatId, payload) {
  * @returns {Promise<void>}
  */
 async function deleteQueuedWhatsAppOutbound(id) {
-  const db = getRootDb();
-  await db.sql`DELETE FROM whatsapp_outbound_queue WHERE id = ${id}`;
+  const store = await getStore();
+  await store.deleteWhatsAppOutboundQueueEntry(id);
 }
 
 /**
  * @returns {Promise<QueuedWhatsAppOutboundRow[]>}
  */
 async function listQueuedWhatsAppOutbound() {
-  const db = getRootDb();
-  const { rows } = await db.sql`
-    SELECT id, chat_id, payload_json
-    FROM whatsapp_outbound_queue
-    ORDER BY id ASC
-  `;
+  const store = await getStore();
+  const rows = await store.listWhatsAppOutboundQueueEntries();
 
   /** @type {QueuedWhatsAppOutboundRow[]} */
   const normalized = [];
