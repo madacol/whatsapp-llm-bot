@@ -112,6 +112,54 @@ function normalizeTimestampValue(value) {
 }
 
 /**
+ * @typedef {{
+ *   id: number;
+ *   chat_id: string;
+ *   payload_json: unknown;
+ *   created_at?: string;
+ * }} WhatsAppOutboundQueueRow
+ */
+
+/**
+ * @param {unknown} value
+ * @returns {number | null}
+ */
+function normalizeIntegerId(value) {
+  if (typeof value === "number" && Number.isInteger(value)) {
+    return value;
+  }
+  if (typeof value === "string" && /^\d+$/.test(value)) {
+    return Number(value);
+  }
+  return null;
+}
+
+/**
+ * @param {unknown} raw
+ * @returns {WhatsAppOutboundQueueRow | null}
+ */
+function normalizeWhatsAppOutboundQueueRow(raw) {
+  if (!isRecord(raw)) {
+    return null;
+  }
+  const id = normalizeIntegerId(raw.id);
+  const createdAt = raw.created_at === undefined ? undefined : normalizeTimestampValue(raw.created_at);
+  if (
+    id === null
+    || typeof raw.chat_id !== "string"
+    || (raw.created_at !== undefined && !createdAt)
+  ) {
+    return null;
+  }
+  return {
+    id,
+    chat_id: raw.chat_id,
+    payload_json: raw.payload_json,
+    ...(createdAt ? { created_at: createdAt } : {}),
+  };
+}
+
+/**
  * @param {unknown} raw
  * @returns {ProjectRow | null}
  */
@@ -968,6 +1016,49 @@ export async function initStore(injectedDb){
       return binding;
     }
 
+    /**
+     * @param {{
+     *   chatId: string,
+     *   payloadJson: unknown,
+     * }} input
+     * @returns {Promise<WhatsAppOutboundQueueRow>}
+     */
+    async function enqueueWhatsAppOutboundQueueEntry({ chatId, payloadJson }) {
+      await ensureChatExists(chatId);
+      const { rows: [row] } = await db.sql`
+        INSERT INTO whatsapp_outbound_queue (chat_id, payload_json)
+        VALUES (${chatId}, ${JSON.stringify(payloadJson)}::jsonb)
+        RETURNING *
+      `;
+      const queueRow = normalizeWhatsAppOutboundQueueRow(row);
+      if (!queueRow) {
+        throw new Error(`Failed to normalize WhatsApp outbound queue row for ${chatId}.`);
+      }
+      return queueRow;
+    }
+
+    /**
+     * @returns {Promise<WhatsAppOutboundQueueRow[]>}
+     */
+    async function listWhatsAppOutboundQueueEntries() {
+      const { rows } = await db.sql`
+        SELECT *
+        FROM whatsapp_outbound_queue
+        ORDER BY id ASC
+      `;
+      return rows
+        .map(normalizeWhatsAppOutboundQueueRow)
+        .filter(/** @returns {row is WhatsAppOutboundQueueRow} */ (row) => row !== null);
+    }
+
+    /**
+     * @param {number} id
+     * @returns {Promise<void>}
+     */
+    async function deleteWhatsAppOutboundQueueEntry(id) {
+      await db.sql`DELETE FROM whatsapp_outbound_queue WHERE id = ${id}`;
+    }
+
     return {
       /**
       * @param {ChatRow['chat_id']} chatId
@@ -1416,6 +1507,32 @@ export async function initStore(injectedDb){
        */
       async saveWhatsAppWorkspacePresentation (input) {
         return persistWhatsAppWorkspacePresentation(input);
+      },
+
+      /**
+       * @param {{
+       *   chatId: string,
+       *   payloadJson: unknown,
+       * }} input
+       * @returns {Promise<WhatsAppOutboundQueueRow>}
+       */
+      async enqueueWhatsAppOutboundQueueEntry (input) {
+        return enqueueWhatsAppOutboundQueueEntry(input);
+      },
+
+      /**
+       * @returns {Promise<WhatsAppOutboundQueueRow[]>}
+       */
+      async listWhatsAppOutboundQueueEntries () {
+        return listWhatsAppOutboundQueueEntries();
+      },
+
+      /**
+       * @param {number} id
+       * @returns {Promise<void>}
+       */
+      async deleteWhatsAppOutboundQueueEntry (id) {
+        await deleteWhatsAppOutboundQueueEntry(id);
       },
 
       /**
