@@ -46,15 +46,10 @@ describe("buildExternalSystemPrompt", () => {
 });
 
 describe("buildHarnessRunRequest", () => {
-  it("does not append shared skill instructions to Codex external instructions", async () => {
+  it("keeps Codex external instructions limited to the explicit persona prompt", async () => {
     const action = {
       name: "send_path",
       description: "Send a local path back to WhatsApp.",
-      sharedSkill: {
-        name: "send-path",
-        description: "Return a generated file to the chat.",
-        instructions: "Use workspace-relative paths when possible.",
-      },
       parameters: { type: "object", properties: {} },
       permissions: {},
       action_fn: async () => "ok",

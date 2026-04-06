@@ -12,8 +12,6 @@
 import { query } from "@anthropic-ai/claude-agent-sdk";
 import { randomUUID } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
-import { mkdir, rm, writeFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
 import { hasMediaPath } from "../attachment-paths.js";
 import { formatChatSettingsCommand } from "../chat-commands.js";
 import { renderContentBlock } from "../message-formatting.js";
@@ -29,19 +27,11 @@ import { getSandboxEscapeRequest } from "./sandbox-approval.js";
 import { requestSandboxEscapeApproval } from "./sandbox-approval-coordinator.js";
 import { buildSdkErrorResponse, clearStaleHarnessSession } from "./harness-run-errors.js";
 import { augmentLatestUserMessageForTextHarness, renderMarkdownImageReference } from "./prompt-media.js";
-import { createSharedSkillInvocationAdapter, executeSharedSkillInvocations } from "../shared-skill-runtime.js";
-import {
-  buildClaudeWorkspaceArtifacts,
-  getClaudeWorkspaceArtifactsRootPath,
-  getClaudeWorkspacePluginPath,
-} from "./claude-shared-skill-artifacts.js";
+import { createActionRequestRunState, executeQueuedActionRequests } from "../action-request-runtime.js";
+import { ensureClaudeProjectSkillsLink } from "../project-skills.js";
 
 const log = createLogger("harness:claude-agent-sdk");
 const HARNESS_NAME = "claude-agent-sdk";
-
-export { buildClaudeWorkspaceArtifacts } from "./claude-shared-skill-artifacts.js";
-
-const GENERATED_SHARED_SKILLS_STATE_FILE = ".madabot-generated-skills.json";
 
 /** @type {HarnessCapabilities} */
 const CLAUDE_HARNESS_CAPABILITIES = {
@@ -286,76 +276,6 @@ export function buildClaudePrompt(messages) {
 }
 
 /**
- * @param {string} workdir
- * @param {ToolRuntime} toolRuntime
- * @returns {Promise<void>}
- */
-export async function writeClaudeWorkspaceArtifacts(workdir, toolRuntime) {
-  const artifacts = buildClaudeWorkspaceArtifacts(toolRuntime);
-  const artifactsRoot = getClaudeWorkspaceArtifactsRootPath(workdir);
-  const generatedStatePath = join(artifactsRoot, GENERATED_SHARED_SKILLS_STATE_FILE);
-  const pluginMetadataPath = join(artifactsRoot, ".claude-plugin");
-  const skillsRootPath = join(artifactsRoot, "skills");
-  const currentSkillNames = artifacts.flatMap((artifact) => {
-    const match = artifact.relativePath.match(/^[^/]+\/skills\/([^/]+)\/SKILL\.md$/);
-    return match ? [match[1]] : [];
-  });
-  const previousSkillNames = existsSync(generatedStatePath)
-    ? readGeneratedSharedSkillNames(generatedStatePath)
-    : [];
-
-  await rm(pluginMetadataPath, { recursive: true, force: true });
-  await Promise.all(
-    previousSkillNames.map((skillName) => rm(join(skillsRootPath, skillName), { recursive: true, force: true })),
-  );
-  await rm(generatedStatePath, { force: true });
-
-  if (artifacts.length === 0) {
-    return;
-  }
-
-  await mkdir(artifactsRoot, { recursive: true });
-  await Promise.all(
-    artifacts.map(async (artifact) => {
-      const artifactPath = join(workdir, artifact.relativePath);
-      await mkdir(dirname(artifactPath), { recursive: true });
-      await writeFile(artifactPath, artifact.content, "utf8");
-    }),
-  );
-  await writeFile(generatedStatePath, JSON.stringify(currentSkillNames, null, 2), "utf8");
-}
-
-/**
- * @param {string} generatedStatePath
- * @returns {string[]}
- */
-function readGeneratedSharedSkillNames(generatedStatePath) {
-  try {
-    const parsed = JSON.parse(readFileSync(generatedStatePath, "utf8"));
-    return Array.isArray(parsed) && parsed.every((entry) => typeof entry === "string")
-      ? parsed
-      : [];
-  } catch {
-    return [];
-  }
-}
-
-/**
- * @param {string} workdir
- * @param {ToolRuntime} toolRuntime
- * @returns {import("@anthropic-ai/claude-agent-sdk").SdkPluginConfig[]}
- */
-function getClaudeWorkspacePlugins(workdir, toolRuntime) {
-  if (buildClaudeWorkspaceArtifacts(toolRuntime).length === 0) {
-    return [];
-  }
-  return [{
-    type: "local",
-    path: getClaudeWorkspacePluginPath(workdir),
-  }];
-}
-
-/**
  * State for an active SDK query, used for injection and cancellation.
  * `query` is null during setup; messages arriving in that window are buffered
  * in `pendingMessages` and flushed once the query starts.
@@ -386,7 +306,6 @@ function getClaudeWorkspacePlugins(workdir, toolRuntime) {
  *   hooks: Required<AgentIOHooks>,
  *   session: AgentHarnessParams["session"],
  *   workdir: string | null | undefined,
- *   sharedSkillAdapter: ReturnType<typeof createSharedSkillInvocationAdapter>,
  * }} SdkEventContext
  */
 
@@ -790,10 +709,11 @@ export function createClaudeAgentSdkHarness() {
       query: null, abortController, sessionId: "", pendingMessages: [],
     });
 
-      const existingSessionId = getClaudeSessionId(session);
+    const existingSessionId = getClaudeSessionId(session);
 
     const systemPrompt = buildClaudeSystemPrompt(llmConfig.externalInstructions);
     const effectiveWorkdir = workdir ?? process.cwd();
+    const actionRequestState = createActionRequestRunState(effectiveWorkdir);
 
     /** @type {string | null} */
     let resolvedSessionId = null;
@@ -820,11 +740,10 @@ export function createClaudeAgentSdkHarness() {
       hooks,
       session,
       workdir,
-      sharedSkillAdapter: createSharedSkillInvocationAdapter(),
     };
 
     try {
-      await writeClaudeWorkspaceArtifacts(effectiveWorkdir, llmConfig.toolRuntime);
+      await ensureClaudeProjectSkillsLink(effectiveWorkdir);
 
       /** @type {import("@anthropic-ai/claude-agent-sdk").Options} */
       const queryOptions = {
@@ -839,7 +758,7 @@ export function createClaudeAgentSdkHarness() {
         allowDangerouslySkipPermissions: true,
         persistSession: true,
         abortController,
-        plugins: getClaudeWorkspacePlugins(effectiveWorkdir, llmConfig.toolRuntime),
+        env: { ...process.env, ...actionRequestState.env },
         ...(systemPrompt ? { systemPrompt } : {}),
         ...(model && { model }),
         ...(reasoningEffort && { effort: reasoningEffort }),
@@ -1046,44 +965,48 @@ export function createClaudeAgentSdkHarness() {
       }
     }
 
-    // Report usage
-    if (result.usage.promptTokens > 0) {
-      const costStr = result.usage.cost > 0 ? `$${result.usage.cost.toFixed(4)}` : "unknown";
-      await hooks.onUsage(costStr, {
-        prompt: result.usage.promptTokens,
-        completion: result.usage.completionTokens,
-        cached: result.usage.cachedTokens,
-      });
-    }
+    try {
+      // Report usage
+      if (result.usage.promptTokens > 0) {
+        const costStr = result.usage.cost > 0 ? `$${result.usage.cost.toFixed(4)}` : "unknown";
+        await hooks.onUsage(costStr, {
+          prompt: result.usage.promptTokens,
+          completion: result.usage.completionTokens,
+          cached: result.usage.cachedTokens,
+        });
+      }
 
-    const sharedSkillInvocations = ctx.sharedSkillAdapter.drainInvocations();
-    if (sharedSkillInvocations.length > 0) {
-      result.response = await executeSharedSkillInvocations(sharedSkillInvocations, {
+      const queuedBlocks = await executeQueuedActionRequests(actionRequestState.requestsDir, {
         toolRuntime: llmConfig.toolRuntime,
         session,
         hooks,
         messages,
         runConfig,
       });
-    }
-
-    // Store the final response if it wasn't already stored during an "assistant" event.
-    const textBlocks = result.response.filter(b => b.type === "text");
-    if (textBlocks.length > 0) {
-      const lastStored = messages[messages.length - 1];
-      const alreadyStored = lastStored?.role === "assistant"
-        && /** @type {AssistantMessage} */ (lastStored).content.some(
-          b => b.type === "text" && textBlocks.some(tb => /** @type {TextContentBlock} */ (tb).text === /** @type {TextContentBlock} */ (b).text),
-        );
-      if (!alreadyStored) {
-        /** @type {AssistantMessage} */
-        const assistantMessage = { role: "assistant", content: /** @type {TextContentBlock[]} */ (textBlocks) };
-        messages.push(assistantMessage);
-        await session.addMessage(session.chatId, assistantMessage, session.senderIds);
+      if (queuedBlocks.length > 0) {
+        result.response = queuedBlocks;
       }
-    }
 
-    return result;
+      // Store the final response if it wasn't already stored during an "assistant" event.
+      const textBlocks = result.response.filter(b => b.type === "text");
+      if (textBlocks.length > 0) {
+        const lastStored = messages[messages.length - 1];
+        const alreadyStored = lastStored?.role === "assistant"
+          && /** @type {AssistantMessage} */ (lastStored).content.some(
+            b => b.type === "text" && textBlocks.some(tb => /** @type {TextContentBlock} */ (tb).text === /** @type {TextContentBlock} */ (b).text),
+          );
+        if (!alreadyStored) {
+          /** @type {AssistantMessage} */
+          const assistantMessage = { role: "assistant", content: /** @type {TextContentBlock[]} */ (textBlocks) };
+          messages.push(assistantMessage);
+          await session.addMessage(session.chatId, assistantMessage, session.senderIds);
+        }
+      }
+
+      return result;
+    } finally {
+      await actionRequestState.cleanup();
+    }
   }
 }
 
@@ -1258,9 +1181,6 @@ async function handleAssistantEvent(event, ctx) {
       if (block.type === "text") {
         const text = /** @type {string} */ (block.text);
         log.debug(`  block: text len=${text.length} subagent=${isSubagent}`);
-        if (ctx.sharedSkillAdapter.handleText(text)) {
-          continue;
-        }
         const displayText = isSubagent ? `*Agent:* ${text}` : text;
         await ctx.hooks.onLlmResponse(displayText);
         if (!isSubagent) {
@@ -1306,10 +1226,6 @@ async function handleResultEvent(event, ctx) {
 
   if (!event.is_error && "result" in event && typeof event.result === "string") {
     const resultText = event.result;
-    if (ctx.sharedSkillAdapter.handleText(resultText)) {
-      ctx.result.response = [{ type: "text", text: resultText }];
-      return;
-    }
     const lastSent = ctx.result.response[ctx.result.response.length - 1];
     const alreadySent = lastSent?.type === "text"
       && lastSent.text.trim() === resultText.trim();

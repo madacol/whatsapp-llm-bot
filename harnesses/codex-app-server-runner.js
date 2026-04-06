@@ -41,6 +41,7 @@ function isAbortError(error) {
  *   messages: Message[],
  *   sessionId?: string | null,
  *   runConfig?: HarnessRunConfig,
+ *   env?: NodeJS.ProcessEnv,
  *   hooks?: Pick<AgentIOHooks, "onComposing" | "onPaused" | "onReasoning" | "onAskUser" | "onToolCall" | "onCommand" | "onFileRead" | "onPlan" | "onFileChange" | "onLlmResponse" | "onToolError" | "onUsage">,
  *   isAborted?: () => boolean,
  * }} input
@@ -74,6 +75,7 @@ export async function startCodexAppServerRun(input, deps = {}) {
   let turnCompleted = false;
 
   const connection = await openConnection({
+    ...(input.env ? { env: input.env } : {}),
     signal: abortController.signal,
     handleRequest: async (message) => handleCodexAppServerRequest(message, hooks),
   });

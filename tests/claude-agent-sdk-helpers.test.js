@@ -32,13 +32,11 @@ import { resolveMediaPath } from "../attachment-paths.js";
 import {
   buildClaudePrompt,
   buildClaudeSystemPrompt,
-  buildClaudeWorkspaceArtifacts,
   createClaudeAgentSdkHarness,
   extractToolResultText,
   extractToolResultFromEvent,
   handleSandboxEscapeApproval,
   hasTextField,
-  writeClaudeWorkspaceArtifacts,
 } from "../harnesses/claude-agent-sdk.js";
 
 describe("createClaudeAgentSdkHarness", () => {
@@ -168,105 +166,6 @@ describe("buildClaudePrompt", () => {
       prompt,
       `explain\n![Two green iguanas standing upright and leaning against each other.](${mediaFilePath})`,
     );
-  });
-});
-
-describe("buildClaudeWorkspaceArtifacts", () => {
-  it("returns no files when there are no shared skills", () => {
-    const artifacts = buildClaudeWorkspaceArtifacts(/** @type {ToolRuntime} */ ({
-      listTools: () => [{
-        name: "Read",
-        description: "Read a file",
-        parameters: { type: "object", properties: {} },
-      }],
-      getTool: async () => null,
-      executeTool: async () => ({ result: "", permissions: {} }),
-    }));
-
-    assert.deepEqual(artifacts, []);
-  });
-
-  it("builds a Claude plugin for shared skills only", () => {
-    const artifacts = buildClaudeWorkspaceArtifacts(/** @type {ToolRuntime} */ ({
-      listTools: () => [
-        {
-          name: "send_path",
-          description: "Send a local path back to WhatsApp.",
-          sharedSkill: {
-            name: "send-path",
-            description: "Return a generated file to the chat.",
-            instructions: "Use workspace-relative paths when possible.",
-          },
-          parameters: {
-            type: "object",
-            properties: { path: { type: "string" } },
-          },
-        },
-        {
-          name: "Read",
-          description: "Read a file",
-          parameters: { type: "object", properties: {} },
-        },
-      ],
-      getTool: async () => null,
-      executeTool: async () => ({ result: "", permissions: {} }),
-    }));
-
-    assert.equal(artifacts.length, 2);
-    assert.ok(artifacts[0]?.relativePath.endsWith(".agents/.claude-plugin/plugin.json"));
-    assert.ok(artifacts[1]?.relativePath.endsWith(".agents/skills/send-path/SKILL.md"));
-    assert.ok(artifacts[0]?.content.includes("\"name\": \"madabot-shared-skills\""));
-    assert.ok(artifacts[1]?.content.includes("name: send-path"));
-    assert.ok(artifacts[1]?.content.includes("Use workspace-relative paths when possible."));
-  });
-});
-
-describe("writeClaudeWorkspaceArtifacts", () => {
-  it("writes the shared-skills Claude plugin into .agents", async () => {
-    const workdir = await fs.mkdtemp(path.join(os.tmpdir(), "claude-sdk-artifacts-"));
-    await writeClaudeWorkspaceArtifacts(workdir, /** @type {ToolRuntime} */ ({
-      listTools: () => [{
-        name: "send_path",
-        description: "Send a local path back to WhatsApp.",
-        sharedSkill: {
-          name: "send-path",
-          description: "Return a generated file to the chat.",
-          instructions: "Use workspace-relative paths when possible.",
-        },
-        parameters: {
-          type: "object",
-          properties: { path: { type: "string" } },
-        },
-      }],
-      getTool: async () => null,
-      executeTool: async () => ({ result: "", permissions: {} }),
-    }));
-
-    const manifestText = await fs.readFile(path.join(workdir, ".agents/.claude-plugin/plugin.json"), "utf8");
-    const skillText = await fs.readFile(path.join(workdir, ".agents/skills/send-path/SKILL.md"), "utf8");
-
-    assert.ok(manifestText.includes("\"name\": \"madabot-shared-skills\""));
-    assert.ok(skillText.includes("name: send-path"));
-  });
-
-  it("preserves unrelated repo-owned skills when no shared skills are generated", async () => {
-    const workdir = await fs.mkdtemp(path.join(os.tmpdir(), "claude-sdk-artifacts-"));
-    const customSkillPath = path.join(workdir, ".agents/skills/custom/SKILL.md");
-    await fs.mkdir(path.dirname(customSkillPath), { recursive: true });
-    await fs.writeFile(customSkillPath, "---\nname: custom\ndescription: custom\n---\n", "utf8");
-
-    await writeClaudeWorkspaceArtifacts(workdir, /** @type {ToolRuntime} */ ({
-      listTools: () => [{
-        name: "Read",
-        description: "Read a file",
-        parameters: { type: "object", properties: {} },
-      }],
-      getTool: async () => null,
-      executeTool: async () => ({ result: "", permissions: {} }),
-    }));
-
-    const preservedSkillText = await fs.readFile(customSkillPath, "utf8");
-    assert.ok(preservedSkillText.includes("name: custom"));
   });
 });
 

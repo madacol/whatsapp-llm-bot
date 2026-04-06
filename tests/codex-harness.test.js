@@ -1,6 +1,7 @@
 import { afterEach, describe, it, before } from "node:test";
 import assert from "node:assert/strict";
 import { rm } from "node:fs/promises";
+import { ACTION_REQUESTS_ENV_VAR, writeQueuedActionRequest } from "../action-request-runtime.js";
 import { resolveMediaPath } from "../attachment-paths.js";
 import { setDb } from "../db.js";
 import { createMockLlmServer, createTestDb, seedChat, withModelsCache } from "./helpers.js";
@@ -730,7 +731,7 @@ describe("createCodexHarness", () => {
     assert.deepEqual(result.response, [{ type: "text", text: "ok" }]);
   });
 
-  it("executes shared skill invocations returned by Codex", async () => {
+  it("executes queued action requests after the Codex run", async () => {
     /** @type {Array<{ name: string, params: Record<string, unknown> }>} */
     const executed = [];
     /** @type {ToolContentBlock[][]} */
@@ -739,35 +740,40 @@ describe("createCodexHarness", () => {
     const emittedCalls = [];
     /** @type {Message[]} */
     const storedMessages = [];
-    const skillText = [
-      "```madabot-skill",
-      "{\"skill\":\"send-path\",\"arguments\":{\"path\":\"./chart.png\"}}",
-      "```",
-    ].join("\n");
     const returnedBlocks = /** @type {ToolContentBlock[]} */ ([
       { type: "image", path: "chart.png", mime_type: "image/png" },
     ]);
 
     const harness = createCodexHarness({
-      startRun: async () => ({
+      startRun: async (input) => {
+        const requestsDir = input.env?.[ACTION_REQUESTS_ENV_VAR];
+        assert.equal(typeof requestsDir, "string");
+        await writeQueuedActionRequest(requestsDir, {
+          kind: "whatsapp-action-request",
+          action: "send_path",
+          arguments: { path: "./chart.png" },
+          cwd: "/repo",
+        });
+        return {
         abortController: new AbortController(),
         done: Promise.resolve({
           sessionId: null,
           result: {
-            response: [{ type: "markdown", text: skillText }],
+            response: [{ type: "text", text: "queued request" }],
             messages: [],
             usage: { promptTokens: 0, completionTokens: 0, cachedTokens: 0, cost: 0 },
           },
         }),
-      }),
+      };
+      },
     });
 
     const result = await harness.run({
       session: {
-        chatId: "codex-chat-shared-skill",
+        chatId: "codex-chat-queued-action",
         senderIds: [],
         context: /** @type {ExecuteActionContext} */ ({
-          chatId: "codex-chat-shared-skill",
+          chatId: "codex-chat-queued-action",
           senderIds: [],
           content: [],
           getIsAdmin: async () => true,
@@ -793,16 +799,18 @@ describe("createCodexHarness", () => {
           listTools: () => [{
             name: "send_path",
             description: "Send a path back to chat.",
-            sharedSkill: {
-              name: "send-path",
-              instructions: "Return a file.",
-            },
             parameters: { type: "object", properties: {} },
             permissions: {},
           }],
-          getTool: async () => null,
-          executeTool: async (toolName, _context, params) => {
+          getTool: async () => ({
+            name: "send_path",
+            description: "Send a path back to chat.",
+            parameters: { type: "object", properties: {} },
+            permissions: {},
+          }),
+          executeTool: async (toolName, _context, params, options) => {
             executed.push({ name: toolName, params });
+            assert.equal(options.workdir, "/repo");
             return { result: returnedBlocks, permissions: {} };
           },
         }),

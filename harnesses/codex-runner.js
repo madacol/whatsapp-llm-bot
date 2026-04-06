@@ -128,6 +128,21 @@ function formatUsageCost(value) {
 }
 
 /**
+ * @param {NodeJS.ProcessEnv} env
+ * @returns {Record<string, string>}
+ */
+function normalizeCodexEnv(env) {
+  /** @type {Record<string, string>} */
+  const normalized = {};
+  for (const [key, value] of Object.entries(env)) {
+    if (typeof value === "string") {
+      normalized[key] = value;
+    }
+  }
+  return normalized;
+}
+
+/**
  * @param {unknown} error
  * @returns {boolean}
  */
@@ -144,6 +159,7 @@ function isAbortError(error) {
  *   messages: Message[],
  *   sessionId?: string | null,
  *   runConfig?: HarnessRunConfig,
+ *   env?: NodeJS.ProcessEnv,
  *   hooks?: Pick<AgentIOHooks, "onComposing" | "onPaused" | "onReasoning" | "onAskUser" | "onToolCall" | "onCommand" | "onFileRead" | "onPlan" | "onFileChange" | "onLlmResponse" | "onToolError" | "onUsage">,
  *   isAborted?: () => boolean,
  * }} input
@@ -157,7 +173,7 @@ export async function startCodexRun(input, deps = {}) {
   const createCodex = deps.createCodex ?? ((options) => new Codex(options));
   const hooks = { ...DEFAULT_CODEX_RUN_HOOKS, ...input.hooks };
   const abortController = new AbortController();
-  const codex = createCodex({});
+  const codex = createCodex(input.env ? { env: normalizeCodexEnv({ ...process.env, ...input.env }) } : {});
   const done = (async () => {
     /** @type {string | null | undefined} */
     let currentSessionId = input.sessionId;

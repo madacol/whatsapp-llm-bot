@@ -13,7 +13,7 @@ import { createCodexCommandHandler } from "./codex-commands.js";
 import { getCodexAvailableModels } from "./codex-models.js";
 import { augmentLatestUserMessageForTextHarness, renderMarkdownImageReference } from "./prompt-media.js";
 import { buildSdkErrorResponse, clearStaleHarnessSession, getHarnessRunErrorMessage } from "./harness-run-errors.js";
-import { createSharedSkillInvocationAdapter, executeSharedSkillInvocations } from "../shared-skill-runtime.js";
+import { createActionRequestRunState, executeQueuedActionRequests } from "../action-request-runtime.js";
 import {
   getCodexSessionId,
   saveCodexSession,
@@ -275,6 +275,8 @@ export function createCodexHarness(deps = {}) {
 
     const sessionId = getCodexSessionId(session);
     const effectiveRunConfig = await sanitizeRunConfig(session.chatId, runConfig);
+    const effectiveWorkdir = effectiveRunConfig?.workdir ?? process.cwd();
+    const actionRequestState = createActionRequestRunState(effectiveWorkdir);
     /** @type {ActiveCodexRun | null} */
     let activeRun = null;
     try {
@@ -285,6 +287,7 @@ export function createCodexHarness(deps = {}) {
         messages,
         sessionId,
         runConfig: effectiveRunConfig,
+        env: { ...process.env, ...actionRequestState.env },
         hooks,
         isAborted: () => activeRun?.aborted ?? false,
       });
@@ -303,21 +306,15 @@ export function createCodexHarness(deps = {}) {
         await saveCodexSession(session, completed.sessionId);
       }
 
-      const sharedSkillAdapter = createSharedSkillInvocationAdapter();
-      for (const block of completed.result.response) {
-        if ((block.type === "text" || block.type === "markdown") && typeof block.text === "string") {
-          sharedSkillAdapter.handleText(block.text);
-        }
-      }
-      const sharedSkillInvocations = sharedSkillAdapter.drainInvocations();
-      if (sharedSkillInvocations.length > 0) {
-        const blocks = await executeSharedSkillInvocations(sharedSkillInvocations, {
-          toolRuntime: llmConfig.toolRuntime,
-          session,
-          hooks,
-          messages,
-          runConfig: effectiveRunConfig,
-        });
+      const queuedBlocks = await executeQueuedActionRequests(actionRequestState.requestsDir, {
+        toolRuntime: llmConfig.toolRuntime,
+        session,
+        hooks,
+        messages,
+        runConfig: effectiveRunConfig,
+      });
+      if (queuedBlocks.length > 0) {
+        const blocks = queuedBlocks;
         completed.result.response = blocks;
       }
 
@@ -341,6 +338,7 @@ export function createCodexHarness(deps = {}) {
       };
     } finally {
       activeRuns.delete(session.chatId);
+      await actionRequestState.cleanup();
     }
   }
 
