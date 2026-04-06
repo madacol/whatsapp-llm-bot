@@ -76,17 +76,13 @@ function cleanFileChangeSummary(summary, rawPath, displayPath, kind) {
  * @returns {"add" | "delete" | "update" | undefined}
  */
 function inferDisplayedFileChangeKind(event) {
-  if (event.changeKind) {
-    return event.changeKind;
-  }
-
   const diffKind = inferFileChangeKindFromDiff(event.diff);
-  if (diffKind) {
-    return diffKind;
-  }
 
   if (typeof event.oldText === "string" && typeof event.newText === "string") {
     if (event.oldText !== event.newText) {
+      if (event.oldText.length === 0 && event.newText.length > 0 && (event.changeKind === "add" || diffKind === "add")) {
+        return "add";
+      }
       return "update";
     }
   } else if (typeof event.oldText === "string") {
@@ -95,7 +91,31 @@ function inferDisplayedFileChangeKind(event) {
     return "add";
   }
 
-  return event.changeKind;
+  return diffKind ?? event.changeKind;
+}
+
+/**
+ * Render true new-file writes as source code instead of a diff. If we have
+ * prior content, even a stale `add` label should still render as a diff.
+ * @param {FileChangeEvent} event
+ * @param {"add" | "delete" | "update" | undefined} displayKind
+ * @returns {boolean}
+ */
+function shouldRenderFileChangeAsCode(event, displayKind) {
+  if (displayKind !== "add" || typeof event.newText !== "string") {
+    return false;
+  }
+
+  if (typeof event.oldText !== "string") {
+    return true;
+  }
+
+  if (event.oldText.length > 0) {
+    return false;
+  }
+
+  const diffKind = inferFileChangeKindFromDiff(event.diff);
+  return diffKind === "add" || event.changeKind === "add";
 }
 
 /**
@@ -130,17 +150,30 @@ export function renderFileChangeContent(event) {
   const displayPath = shortenPath(event.path, event.cwd ?? null);
   const displayKind = inferDisplayedFileChangeKind(event);
   const cleanedSummary = cleanFileChangeSummary(event.summary, event.path, displayPath, displayKind);
+  const title = displayKind === "add"
+    ? "*File added*"
+    : displayKind === "delete"
+      ? "*File deleted*"
+      : "*File changed*";
+  const captionLines = [`${title}  \`${displayPath}\``];
+  if (cleanedSummary) {
+    captionLines.push(cleanedSummary);
+  }
+
+  if (shouldRenderFileChangeAsCode(event, displayKind)) {
+    const newText = event.newText;
+    if (typeof newText !== "string") {
+      return `Changed file: \`${displayPath}\``;
+    }
+    return [{
+      type: "code",
+      code: newText,
+      language: langFromPath(event.path) || "text",
+      caption: captionLines.join("\n"),
+    }];
+  }
 
   if (event.diff) {
-    const title = displayKind === "add"
-      ? "*File added*"
-      : displayKind === "delete"
-        ? "*File deleted*"
-        : "*File changed*";
-    const captionLines = [`${title}  \`${displayPath}\``];
-    if (cleanedSummary) {
-      captionLines.push(cleanedSummary);
-    }
     return [{
       type: "diff",
       oldStr: event.oldText ?? "",
