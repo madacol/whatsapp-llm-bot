@@ -12,3 +12,4 @@ data/
 .claude/worktrees/
 .bot.pid
 .madabot/
+.agents/.runtime/

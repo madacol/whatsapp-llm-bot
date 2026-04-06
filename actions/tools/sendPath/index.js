@@ -4,16 +4,6 @@ import { resolvePathToContentBlock } from "../../../outbound/path-to-content-blo
 export default /** @type {defineAction} */ ((x) => x)({
   name: "send_path",
   description: "Send a local file or directory path back to WhatsApp. Directories are zipped first.",
-  sharedSkill: {
-    name: "send-path",
-    description: "Return a generated file or folder to the chat by path.",
-    instructions: `Use this skill when you need to return a generated artifact to the chat.
-- Prefer workspace-relative paths when possible.
-- Images are sent as images, audio as audio, video as video.
-- Directories are zipped before sending.
-- Any other file is sent as a generic document.
-- In harnesses that expose the native action runtime, prefer calling \`send_path\` directly.`,
-  },
   parameters: {
     type: "object",
     properties: {

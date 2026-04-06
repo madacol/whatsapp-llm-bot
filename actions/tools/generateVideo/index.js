@@ -133,15 +133,6 @@ export default /** @type {defineAction} */ ((x) => x)({
   name: "generate_video",
   description:
     "Generate a video from a text prompt using AI (fal.ai, configurable model). Optionally include a reference image for image-to-video generation. Supports aspect ratio, duration, and negative prompt parameters.",
-  sharedSkill: {
-    name: "generate-video",
-    description: "Generate a video artifact and return it to the chat.",
-    instructions: `Use this skill when the user needs a generated video artifact.
-- Provide a clear prompt describing the video.
-- Include a reference image when the request is image-to-video.
-- Use aspect ratio, duration, and negative prompt fields when they matter to the request.
-- The generated result should be returned as a video attachment to the chat.`,
-  },
   parameters: {
     type: "object",
     properties: {

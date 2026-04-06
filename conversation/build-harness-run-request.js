@@ -1,6 +1,5 @@
 import config from "../config.js";
 import { resolveChatModel } from "../model-roles.js";
-import { filterHarnessActions } from "../shared-skills.js";
 import { buildRunConfig } from "./build-run-config.js";
 import { buildRunSession } from "./build-run-session.js";
 import { createToolRuntime } from "./create-tool-runtime.js";
@@ -79,7 +78,7 @@ export async function buildHarnessRunRequest({
   const allowedTools = toolNames
     ? actions.filter((action) => toolNames.includes(action.name))
     : actions;
-  const activeTools = filterHarnessActions(allowedTools, harnessName);
+  const activeTools = allowedTools;
 
   /** @param {string} name */
   const resolveTool = async (name) => {
@@ -88,9 +87,6 @@ export async function buildHarnessRunRequest({
       return null;
     }
     if (toolNames && !toolNames.includes(tool.name)) {
-      return null;
-    }
-    if (!filterHarnessActions([tool], harnessName).length) {
       return null;
     }
     return tool;
