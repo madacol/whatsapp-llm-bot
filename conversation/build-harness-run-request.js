@@ -1,6 +1,6 @@
 import config from "../config.js";
 import { resolveChatModel } from "../model-roles.js";
-import { buildSharedSkillPrompt, filterHarnessActions } from "../shared-skills.js";
+import { filterHarnessActions } from "../shared-skills.js";
 import { buildRunConfig } from "./build-run-config.js";
 import { buildRunSession } from "./build-run-session.js";
 import { createToolRuntime } from "./create-tool-runtime.js";
@@ -108,12 +108,6 @@ export async function buildHarnessRunRequest({
     getMessages,
     bufferedTexts,
   });
-  const sharedSkillPrompt = harnessName === "codex"
-    ? buildSharedSkillPrompt(activeTools)
-    : "";
-  const finalExternalInstructions = sharedSkillPrompt
-    ? `${externalInstructions}${externalInstructions ? "\n\n" : ""}${sharedSkillPrompt}`
-    : externalInstructions;
 
   return {
     session: buildRunSession({
@@ -128,7 +122,7 @@ export async function buildHarnessRunRequest({
     llmConfig: {
       llmClient,
       chatModel,
-      externalInstructions: finalExternalInstructions,
+      externalInstructions,
       mediaToTextModels: chatInfo?.media_to_text_models ?? {},
       toolRuntime: createToolRuntime({
         tools: activeTools,
