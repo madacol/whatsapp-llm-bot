@@ -1,8 +1,8 @@
 import { join } from "node:path";
 import { buildSharedSkillMarkdownDocument, getSharedSkillViews } from "../shared-skills.js";
 
-const MADABOT_WORKSPACE_DIR = ".madabot";
-const CLAUDE_SHARED_SKILLS_PLUGIN_DIR = "claude-shared-skills";
+const AGENTS_DIR = ".agents";
+const AGENTS_SKILLS_DIR = "skills";
 const CLAUDE_SHARED_SKILLS_PLUGIN_NAME = "madabot-shared-skills";
 
 /**
@@ -24,11 +24,11 @@ export function buildClaudeWorkspaceArtifacts(toolRuntime) {
 
   return [
     {
-      relativePath: `${MADABOT_WORKSPACE_DIR}/${CLAUDE_SHARED_SKILLS_PLUGIN_DIR}/.claude-plugin/plugin.json`,
+      relativePath: `${AGENTS_DIR}/.claude-plugin/plugin.json`,
       content: JSON.stringify({ name: CLAUDE_SHARED_SKILLS_PLUGIN_NAME }, null, 2),
     },
     ...sharedSkills.map((sharedSkill) => ({
-      relativePath: `${MADABOT_WORKSPACE_DIR}/${CLAUDE_SHARED_SKILLS_PLUGIN_DIR}/skills/${sharedSkill.name}/SKILL.md`,
+      relativePath: `${AGENTS_DIR}/${AGENTS_SKILLS_DIR}/${sharedSkill.name}/SKILL.md`,
       content: buildSharedSkillMarkdownDocument(sharedSkill),
     })),
   ];
@@ -39,7 +39,7 @@ export function buildClaudeWorkspaceArtifacts(toolRuntime) {
  * @returns {string}
  */
 export function getClaudeWorkspaceArtifactsRootPath(workdir) {
-  return join(workdir, MADABOT_WORKSPACE_DIR);
+  return join(workdir, AGENTS_DIR);
 }
 
 /**
@@ -47,5 +47,5 @@ export function getClaudeWorkspaceArtifactsRootPath(workdir) {
  * @returns {string}
  */
 export function getClaudeWorkspacePluginPath(workdir) {
-  return join(workdir, MADABOT_WORKSPACE_DIR, CLAUDE_SHARED_SKILLS_PLUGIN_DIR);
+  return join(workdir, AGENTS_DIR);
 }

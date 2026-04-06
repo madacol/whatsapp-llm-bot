@@ -213,8 +213,8 @@ describe("buildClaudeWorkspaceArtifacts", () => {
     }));
 
     assert.equal(artifacts.length, 2);
-    assert.ok(artifacts[0]?.relativePath.endsWith(".madabot/claude-shared-skills/.claude-plugin/plugin.json"));
-    assert.ok(artifacts[1]?.relativePath.endsWith(".madabot/claude-shared-skills/skills/send-path/SKILL.md"));
+    assert.ok(artifacts[0]?.relativePath.endsWith(".agents/.claude-plugin/plugin.json"));
+    assert.ok(artifacts[1]?.relativePath.endsWith(".agents/skills/send-path/SKILL.md"));
     assert.ok(artifacts[0]?.content.includes("\"name\": \"madabot-shared-skills\""));
     assert.ok(artifacts[1]?.content.includes("name: send-path"));
     assert.ok(artifacts[1]?.content.includes("Use workspace-relative paths when possible."));
@@ -222,7 +222,7 @@ describe("buildClaudeWorkspaceArtifacts", () => {
 });
 
 describe("writeClaudeWorkspaceArtifacts", () => {
-  it("writes the shared-skills Claude plugin into .madabot", async () => {
+  it("writes the shared-skills Claude plugin into .agents", async () => {
     const workdir = await fs.mkdtemp(path.join(os.tmpdir(), "claude-sdk-artifacts-"));
     await writeClaudeWorkspaceArtifacts(workdir, /** @type {ToolRuntime} */ ({
       listTools: () => [{
@@ -242,11 +242,31 @@ describe("writeClaudeWorkspaceArtifacts", () => {
       executeTool: async () => ({ result: "", permissions: {} }),
     }));
 
-    const manifestText = await fs.readFile(path.join(workdir, ".madabot/claude-shared-skills/.claude-plugin/plugin.json"), "utf8");
-    const skillText = await fs.readFile(path.join(workdir, ".madabot/claude-shared-skills/skills/send-path/SKILL.md"), "utf8");
+    const manifestText = await fs.readFile(path.join(workdir, ".agents/.claude-plugin/plugin.json"), "utf8");
+    const skillText = await fs.readFile(path.join(workdir, ".agents/skills/send-path/SKILL.md"), "utf8");
 
     assert.ok(manifestText.includes("\"name\": \"madabot-shared-skills\""));
     assert.ok(skillText.includes("name: send-path"));
+  });
+
+  it("preserves unrelated repo-owned skills when no shared skills are generated", async () => {
+    const workdir = await fs.mkdtemp(path.join(os.tmpdir(), "claude-sdk-artifacts-"));
+    const customSkillPath = path.join(workdir, ".agents/skills/custom/SKILL.md");
+    await fs.mkdir(path.dirname(customSkillPath), { recursive: true });
+    await fs.writeFile(customSkillPath, "---\nname: custom\ndescription: custom\n---\n", "utf8");
+
+    await writeClaudeWorkspaceArtifacts(workdir, /** @type {ToolRuntime} */ ({
+      listTools: () => [{
+        name: "Read",
+        description: "Read a file",
+        parameters: { type: "object", properties: {} },
+      }],
+      getTool: async () => null,
+      executeTool: async () => ({ result: "", permissions: {} }),
+    }));
+
+    const preservedSkillText = await fs.readFile(customSkillPath, "utf8");
+    assert.ok(preservedSkillText.includes("name: custom"));
   });
 });
 
