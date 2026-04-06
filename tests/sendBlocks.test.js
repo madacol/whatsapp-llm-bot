@@ -392,6 +392,52 @@ Second block:
     assert.equal(diffBlock.caption, "*File changed*  `plain.txt`");
   });
 
+  it("renders brand-new file writes as code blocks instead of diffs", () => {
+    const content = renderFileChangeContent({
+      kind: "file_change",
+      path: "/tmp/src/new-file.js",
+      cwd: "/tmp",
+      changeKind: "add",
+      newText: "export const value = 1;\n",
+      diff: [
+        "--- /dev/null",
+        "+++ b/src/new-file.js",
+        "@@ -0,0 +1 @@",
+        "+export const value = 1;",
+      ].join("\n"),
+    });
+
+    assert.ok(Array.isArray(content), "Expected file-change content blocks");
+    const codeBlock = /** @type {CodeContentBlock} */ (content[0]);
+    assert.equal(codeBlock.type, "code");
+    assert.equal(codeBlock.language, "javascript");
+    assert.equal(codeBlock.code, "export const value = 1;\n");
+    assert.equal(codeBlock.caption, "*File added*  `src/new-file.js`");
+  });
+
+  it("renders writes over existing files as diffs even when labeled add", () => {
+    const content = renderFileChangeContent({
+      kind: "file_change",
+      path: "/tmp/src/existing.js",
+      cwd: "/tmp",
+      changeKind: "add",
+      oldText: "export const value = 1;\n",
+      newText: "export const value = 2;\n",
+      diff: [
+        "--- a/src/existing.js",
+        "+++ b/src/existing.js",
+        "@@ -1 +1 @@",
+        "-export const value = 1;",
+        "+export const value = 2;",
+      ].join("\n"),
+    });
+
+    assert.ok(Array.isArray(content), "Expected file-change content blocks");
+    const diffBlock = /** @type {DiffContentBlock} */ (content[0]);
+    assert.equal(diffBlock.type, "diff");
+    assert.equal(diffBlock.caption, "*File changed*  `src/existing.js`");
+  });
+
   it("handles type 'text' without image rendering", async () => {
     const { sock, sent } = createMockSock();
 
