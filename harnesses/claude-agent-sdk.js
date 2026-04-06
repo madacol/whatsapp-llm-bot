@@ -41,6 +41,8 @@ const HARNESS_NAME = "claude-agent-sdk";
 
 export { buildClaudeWorkspaceArtifacts } from "./claude-shared-skill-artifacts.js";
 
+const GENERATED_SHARED_SKILLS_STATE_FILE = ".madabot-generated-skills.json";
+
 /** @type {HarnessCapabilities} */
 const CLAUDE_HARNESS_CAPABILITIES = {
   supportsResume: true,
@@ -290,14 +292,29 @@ export function buildClaudePrompt(messages) {
  */
 export async function writeClaudeWorkspaceArtifacts(workdir, toolRuntime) {
   const artifacts = buildClaudeWorkspaceArtifacts(toolRuntime);
-  const madabotDir = getClaudeWorkspaceArtifactsRootPath(workdir);
+  const artifactsRoot = getClaudeWorkspaceArtifactsRootPath(workdir);
+  const generatedStatePath = join(artifactsRoot, GENERATED_SHARED_SKILLS_STATE_FILE);
+  const pluginMetadataPath = join(artifactsRoot, ".claude-plugin");
+  const skillsRootPath = join(artifactsRoot, "skills");
+  const currentSkillNames = artifacts.flatMap((artifact) => {
+    const match = artifact.relativePath.match(/^[^/]+\/skills\/([^/]+)\/SKILL\.md$/);
+    return match ? [match[1]] : [];
+  });
+  const previousSkillNames = existsSync(generatedStatePath)
+    ? readGeneratedSharedSkillNames(generatedStatePath)
+    : [];
+
+  await rm(pluginMetadataPath, { recursive: true, force: true });
+  await Promise.all(
+    previousSkillNames.map((skillName) => rm(join(skillsRootPath, skillName), { recursive: true, force: true })),
+  );
+  await rm(generatedStatePath, { force: true });
 
   if (artifacts.length === 0) {
-    await rm(madabotDir, { recursive: true, force: true });
     return;
   }
 
-  await mkdir(madabotDir, { recursive: true });
+  await mkdir(artifactsRoot, { recursive: true });
   await Promise.all(
     artifacts.map(async (artifact) => {
       const artifactPath = join(workdir, artifact.relativePath);
@@ -305,6 +322,22 @@ export async function writeClaudeWorkspaceArtifacts(workdir, toolRuntime) {
       await writeFile(artifactPath, artifact.content, "utf8");
     }),
   );
+  await writeFile(generatedStatePath, JSON.stringify(currentSkillNames, null, 2), "utf8");
+}
+
+/**
+ * @param {string} generatedStatePath
+ * @returns {string[]}
+ */
+function readGeneratedSharedSkillNames(generatedStatePath) {
+  try {
+    const parsed = JSON.parse(readFileSync(generatedStatePath, "utf8"));
+    return Array.isArray(parsed) && parsed.every((entry) => typeof entry === "string")
+      ? parsed
+      : [];
+  } catch {
+    return [];
+  }
 }
 
 /**
