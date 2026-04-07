@@ -48,7 +48,6 @@ export async function handleHarnessSessionCommand({ command, chatId, context, ca
       return true;
     }
     case "resume": {
-      await sessionControl.archive(chatId);
       const history = await sessionControl.getHistory(chatId);
       if (history.length === 0) {
         await context.reply(contentEvent("tool-result", "No previous sessions to resume."));
@@ -59,7 +58,7 @@ export async function handleHarnessSessionCommand({ command, chatId, context, ca
       /** @type {SelectOption[]} */
       const selectOptions = [
         ...[...history].reverse().slice(0, 11).map((entry, index) => ({
-          id: String(index),
+          id: entry.id,
           label: formatSessionLabel(entry, index, currentTime),
         })),
         { id: "cancel", label: "Cancel" },
@@ -74,8 +73,8 @@ export async function handleHarnessSessionCommand({ command, chatId, context, ca
         return true;
       }
 
-      const selectedIndex = parseInt(choice, 10);
-      const restored = await sessionControl.restore(chatId, selectedIndex);
+      await sessionControl.archive(chatId);
+      const restored = await sessionControl.restore(chatId, choice);
       if (!restored) {
         await context.reply(contentEvent("tool-result", "Failed to restore session."));
         return true;

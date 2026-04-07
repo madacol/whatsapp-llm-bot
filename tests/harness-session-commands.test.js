@@ -76,7 +76,7 @@ describe("handleHarnessSessionCommand", () => {
     };
     context.select = async (_question, options) => {
       seenOptions = options;
-      return "0";
+      return "sess-newer";
     };
 
     const handled = await handleHarnessSessionCommand({
@@ -102,9 +102,46 @@ describe("handleHarnessSessionCommand", () => {
     });
 
     assert.equal(handled, true);
-    assert.deepEqual(calls, ["archive:chat-1", "restore:chat-1:0"]);
+    assert.deepEqual(calls, ["archive:chat-1", "restore:chat-1:sess-newer"]);
     assert.equal(seenOptions[0]?.label, "Fixing WhatsApp parser (1h ago)");
+    assert.equal(seenOptions[0]?.id, "sess-newer");
     assert.ok(replies[0]?.includes("Session restored"));
     assert.ok(replies[0]?.includes("Fixing WhatsApp parser"));
+  });
+
+  it("does not archive or restore anything when resume selection is cancelled", async () => {
+    /** @type {string[]} */
+    const calls = [];
+    /** @type {string[]} */
+    const replies = [];
+    const context = createContext();
+    context.reply = async (event) => {
+      replies.push(getReplyText(event));
+      return undefined;
+    };
+    context.select = async () => "cancel";
+
+    const handled = await handleHarnessSessionCommand({
+      command: "resume",
+      chatId: "chat-1",
+      context,
+      sessionControl: {
+        archive: async (chatId) => {
+          calls.push(`archive:${chatId}`);
+          return null;
+        },
+        getHistory: async () => [
+          { id: "sess-older", kind: "claude-sdk", cleared_at: "2026-03-19T20:00:00.000Z", title: "Planning refactor" },
+        ],
+        restore: async (chatId, sessionId) => {
+          calls.push(`restore:${chatId}:${sessionId}`);
+          return null;
+        },
+      },
+    });
+
+    assert.equal(handled, true);
+    assert.deepEqual(calls, []);
+    assert.deepEqual(replies, []);
   });
 });
