@@ -151,10 +151,10 @@ export function renderFileChangeContent(event) {
   const displayKind = inferDisplayedFileChangeKind(event);
   const cleanedSummary = cleanFileChangeSummary(event.summary, event.path, displayPath, displayKind);
   const title = displayKind === "add"
-    ? "*File added*"
+    ? "*Add File*"
     : displayKind === "delete"
-      ? "*File deleted*"
-      : "*File changed*";
+      ? "*Delete File*"
+      : "*Update File*";
   const captionLines = [`${title}  \`${displayPath}\``];
   if (cleanedSummary) {
     captionLines.push(cleanedSummary);
