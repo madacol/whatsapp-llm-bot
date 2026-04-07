@@ -140,6 +140,21 @@ function inferFileChangeKindFromDiff(diffText) {
 }
 
 /**
+ * Keep hunk headers visible, but drop file header lines from rendered diffs.
+ * @param {string | undefined} diffText
+ * @returns {string | undefined}
+ */
+function stripUnifiedDiffFileHeaders(diffText) {
+  if (!diffText) {
+    return undefined;
+  }
+
+  const lines = diffText.split("\n");
+  const filtered = lines.filter((line) => !line.startsWith("--- ") && !line.startsWith("+++ "));
+  return filtered.join("\n");
+}
+
+/**
  * @param {FileChangeEvent} event
  * @returns {SendContent}
  */
@@ -175,7 +190,7 @@ export function renderFileChangeContent(event) {
       type: "diff",
       oldStr: event.oldText ?? "",
       newStr: event.newText ?? "",
-      diffText: event.diff,
+      diffText: stripUnifiedDiffFileHeaders(event.diff),
       language: langFromPath(event.path) || "text",
       caption: captionLines.join("\n"),
     }];

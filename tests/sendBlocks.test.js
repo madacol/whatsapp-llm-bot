@@ -381,8 +381,6 @@ Second block:
     const diffBlock = /** @type {DiffContentBlock} */ (content[0]);
     assert.equal(diffBlock.type, "diff");
     assert.equal(diffBlock.diffText, [
-      "--- a/plain.txt",
-      "+++ b/plain.txt",
       "@@ -1,3 +1,3 @@",
       "-before",
       "+after",
@@ -456,6 +454,10 @@ Second block:
     assert.ok(Array.isArray(content), "Expected file-change content blocks");
     const diffBlock = /** @type {DiffContentBlock} */ (content[0]);
     assert.equal(diffBlock.type, "diff");
+    assert.equal(diffBlock.diffText, [
+      "@@ -1 +0,0 @@",
+      "-export const value = 1;",
+    ].join("\n"));
     assert.equal(diffBlock.caption, "*Delete File*  `src/delete-me.js`");
   });
 
