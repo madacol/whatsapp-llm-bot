@@ -186,6 +186,36 @@ describe("createCodexRunState", () => {
     });
   });
 
+  it("normalizes conflicting update events to add when no prior file exists", async () => {
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "codex-run-state-conflicting-update-"));
+    const state = createCodexRunState({ workdir: tempDir });
+    const filePath = path.join(tempDir, "added.txt");
+    await fs.writeFile(filePath, "hello from codex\n", "utf8");
+
+    const calls = await captureDebugLogsAsync(async () => {
+      const enriched = await state.enrichFileChangeEvent({
+        path: "added.txt",
+        summary: "added.txt (update)",
+        kind: "update",
+      });
+
+      assert.deepEqual(enriched, {
+        path: "added.txt",
+        summary: "added.txt (add)",
+        kind: "add",
+        newText: "hello from codex\n",
+        diff: [
+          "--- a/added.txt",
+          "+++ b/added.txt",
+          "@@ -0,0 +1,1 @@",
+          "+hello from codex",
+        ].join("\n"),
+      });
+    });
+
+    assert.equal(calls[0]?.[2]?.diffSource, "filesystem");
+  });
+
   it("computes an update diff for a live SDK file_change without prior commands by using the workspace baseline", async () => {
     const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "codex-run-state-live-update-"));
     const filePath = path.join(tempDir, "notes.txt");
