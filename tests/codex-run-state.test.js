@@ -186,6 +186,46 @@ describe("createCodexRunState", () => {
     });
   });
 
+  it("ignores non-unified patch text from Codex and still classifies a new file as add", async () => {
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "codex-run-state-raw-patch-add-"));
+    const state = createCodexRunState({ workdir: tempDir });
+    const filePath = path.join(tempDir, "added.md");
+    const fileText = [
+      "# Added file",
+      "",
+      "## Bullets",
+      "",
+      "- first",
+      "- second",
+      "",
+    ].join("\n");
+    await fs.writeFile(filePath, fileText, "utf8");
+
+    const enriched = await state.enrichFileChangeEvent({
+      path: "added.md",
+      summary: "added.md",
+      diff: fileText,
+    });
+
+    assert.deepEqual(enriched, {
+      path: "added.md",
+      summary: "added.md",
+      kind: "add",
+      newText: fileText,
+      diff: [
+        "--- a/added.md",
+        "+++ b/added.md",
+        "@@ -0,0 +1,6 @@",
+        "+# Added file",
+        "+",
+        "+## Bullets",
+        "+",
+        "+- first",
+        "+- second",
+      ].join("\n"),
+    });
+  });
+
   it("normalizes conflicting update events to add when no prior file exists", async () => {
     const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "codex-run-state-conflicting-update-"));
     const state = createCodexRunState({ workdir: tempDir });
