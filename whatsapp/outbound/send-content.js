@@ -78,6 +78,10 @@ function cleanFileChangeSummary(summary, rawPath, displayPath, kind) {
 function inferDisplayedFileChangeKind(event) {
   const diffKind = inferFileChangeKindFromDiff(event.diff);
 
+  if (event.changeKind === "add" && typeof event.newText === "string") {
+    return "add";
+  }
+
   if (typeof event.oldText === "string" && typeof event.newText === "string") {
     if (event.oldText !== event.newText) {
       if (event.oldText.length === 0 && event.newText.length > 0 && (event.changeKind === "add" || diffKind === "add")) {
@@ -95,8 +99,8 @@ function inferDisplayedFileChangeKind(event) {
 }
 
 /**
- * Render true new-file writes as source code instead of a diff. If we have
- * prior content, even a stale `add` label should still render as a diff.
+ * Render added files as source code instead of a diff, even when stale
+ * previous text is attached to the event.
  * @param {FileChangeEvent} event
  * @param {"add" | "delete" | "update" | undefined} displayKind
  * @returns {boolean}
@@ -105,17 +109,7 @@ function shouldRenderFileChangeAsCode(event, displayKind) {
   if (displayKind !== "add" || typeof event.newText !== "string") {
     return false;
   }
-
-  if (typeof event.oldText !== "string") {
-    return true;
-  }
-
-  if (event.oldText.length > 0) {
-    return false;
-  }
-
-  const diffKind = inferFileChangeKindFromDiff(event.diff);
-  return diffKind === "add" || event.changeKind === "add";
+  return true;
 }
 
 /**
