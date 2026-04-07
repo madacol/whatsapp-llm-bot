@@ -79,6 +79,9 @@ function inferDisplayedFileChangeKind(event) {
   const diffKind = inferFileChangeKindFromDiff(event.diff);
 
   if (event.changeKind === "add" && typeof event.newText === "string") {
+    if (typeof event.oldText === "string" && event.oldText.length > 0) {
+      return "update";
+    }
     return "add";
   }
 
