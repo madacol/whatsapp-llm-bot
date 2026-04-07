@@ -118,8 +118,10 @@ export function createCodexRunState({ workdir, loadWorkspaceBaseline = loadWorks
     }
     fileSnapshots.set(absolutePath, nextText);
 
-    const diff = fileChange.diff
-      ?? pending?.diff
+    const eventDiff = isUnifiedDiff(fileChange.diff) ? fileChange.diff : undefined;
+    const pendingDiff = isUnifiedDiff(pending?.diff) ? pending?.diff : undefined;
+    const diff = eventDiff
+      ?? pendingDiff
       ?? buildFileDiff(fileChange.path, previousText, nextText);
     const diffContent = diff ? extractUnifiedDiffContent(diff) : null;
     const oldText = previousText ?? diffContent?.oldText;
@@ -129,9 +131,9 @@ export function createCodexRunState({ workdir, loadWorkspaceBaseline = loadWorks
     const reportedKind = fileChange.kind ?? pending?.kind;
     const kind = resolveFileChangeKind(reportedKind, oldText ?? null, newText ?? null);
     const summary = normalizeFileChangeSummary(fileChange.summary, fileChange.path, reportedKind, kind);
-    const diffSource = fileChange.diff
+    const diffSource = eventDiff
       ? "event"
-      : pending?.diff
+      : pendingDiff
         ? "apply_patch"
         : usedWorkspaceBaseline && diff
           ? "workspace_baseline"
@@ -195,6 +197,20 @@ export function createCodexRunState({ workdir, loadWorkspaceBaseline = loadWorks
     const baseline = await workspaceBaselinePromise;
     return baseline.get(absolutePath) ?? null;
   }
+}
+
+/**
+ * @param {string | undefined} diffText
+ * @returns {diffText is string}
+ */
+function isUnifiedDiff(diffText) {
+  if (!diffText) {
+    return false;
+  }
+  const lines = diffText.split("\n");
+  return lines.some((line) => line.startsWith("--- "))
+    && lines.some((line) => line.startsWith("+++ "))
+    && lines.some((line) => line.startsWith("@@"));
 }
 
 /**
@@ -347,6 +363,10 @@ function normalizeFileChangeSummary(summary, path, reportedKind, resolvedKind) {
  * @returns {{ oldText?: string, newText?: string } | null}
  */
 function extractUnifiedDiffContent(diffText) {
+  if (!isUnifiedDiff(diffText)) {
+    return null;
+  }
+
   /** @type {string[]} */
   const oldLines = [];
   /** @type {string[]} */

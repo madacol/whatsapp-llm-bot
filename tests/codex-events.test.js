@@ -565,6 +565,31 @@ describe("codex events", () => {
     });
   });
 
+  it("ignores non-diff patch text when codex emits full file contents for an added file", () => {
+    assert.deepEqual(normalizeCodexEvent({
+      type: "item.completed",
+      item: {
+        type: "file_change",
+        changes: [{ path: "/tmp/lorem-ipsum-note-4.md" }],
+        patch: [
+          "# Lorem Ipsum Note Four",
+          "",
+          "Lorem ipsum dolor sit amet, consectetur adipiscing elit.",
+          "",
+          "## Bullets",
+          "",
+          "- Fusce dapibus",
+        ].join("\n"),
+      },
+    }), {
+      sessionId: null,
+      fileChange: {
+        path: "/tmp/lorem-ipsum-note-4.md",
+        summary: "/tmp/lorem-ipsum-note-4.md",
+      },
+    });
+  });
+
   it("expands multi-file file_change payloads into separate normalized file changes", () => {
     assert.deepEqual(normalizeCodexEvent({
       type: "item.completed",
