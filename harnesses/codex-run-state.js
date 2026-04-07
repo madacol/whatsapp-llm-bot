@@ -307,10 +307,15 @@ function inferFileChangeKind(oldText, newText) {
  * @returns {"add" | "delete" | "update" | undefined}
  */
 function resolveFileChangeKind(reportedKind, oldText, newText) {
+  const inferredKind = inferFileChangeKind(oldText, newText);
+
   if (reportedKind === "add" && oldText != null && oldText.length > 0) {
-    return inferFileChangeKind(oldText, newText) ?? reportedKind;
+    return inferredKind ?? reportedKind;
   }
-  return reportedKind ?? inferFileChangeKind(oldText, newText);
+  if (reportedKind === "update" && inferredKind === "add") {
+    return "add";
+  }
+  return reportedKind ?? inferredKind;
 }
 
 /**
