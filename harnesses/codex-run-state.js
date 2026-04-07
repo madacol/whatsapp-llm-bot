@@ -126,7 +126,9 @@ export function createCodexRunState({ workdir, loadWorkspaceBaseline = loadWorks
     const newText = previousText !== nextText
       ? nextText
       : diffContent?.newText ?? nextText;
-    const kind = resolveFileChangeKind(fileChange.kind ?? pending?.kind, oldText ?? null, newText ?? null);
+    const reportedKind = fileChange.kind ?? pending?.kind;
+    const kind = resolveFileChangeKind(reportedKind, oldText ?? null, newText ?? null);
+    const summary = normalizeFileChangeSummary(fileChange.summary, fileChange.path, reportedKind, kind);
     const diffSource = fileChange.diff
       ? "event"
       : pending?.diff
@@ -139,6 +141,7 @@ export function createCodexRunState({ workdir, loadWorkspaceBaseline = loadWorks
 
     const enriched = {
       ...fileChange,
+      ...(summary !== undefined ? { summary } : {}),
       ...(kind ? { kind } : {}),
       ...(oldText != null ? { oldText } : {}),
       ...(newText != null ? { newText } : {}),
@@ -203,7 +206,7 @@ function shouldUseWorkspaceBaseline(fileChange, pending) {
   if (fileChange.diff || pending?.diff) {
     return false;
   }
-  return fileChange.kind !== "add";
+  return true;
 }
 
 /**
@@ -296,14 +299,40 @@ function inferFileChangeKind(oldText, newText) {
 }
 
 /**
- * Keep the reported kind authoritative and only infer when it is absent.
+ * Keep the reported kind authoritative unless it conflicts with observed
+ * before/after content in a way that would misclassify overwrites as adds.
  * @param {"add" | "delete" | "update" | undefined} reportedKind
  * @param {string | null} oldText
  * @param {string | null} newText
  * @returns {"add" | "delete" | "update" | undefined}
  */
 function resolveFileChangeKind(reportedKind, oldText, newText) {
+  if (reportedKind === "add" && oldText != null && oldText.length > 0) {
+    return inferFileChangeKind(oldText, newText) ?? reportedKind;
+  }
   return reportedKind ?? inferFileChangeKind(oldText, newText);
+}
+
+/**
+ * Rewrite the default "{path} ({kind})" summary when normalization changes the
+ * kind, while preserving any non-default human-authored summary text.
+ * @param {string | undefined} summary
+ * @param {string} path
+ * @param {"add" | "delete" | "update" | undefined} reportedKind
+ * @param {"add" | "delete" | "update" | undefined} resolvedKind
+ * @returns {string | undefined}
+ */
+function normalizeFileChangeSummary(summary, path, reportedKind, resolvedKind) {
+  if (!summary || !reportedKind || !resolvedKind || reportedKind === resolvedKind) {
+    return summary;
+  }
+
+  const defaultSummary = `${path} (${reportedKind})`;
+  if (summary === defaultSummary) {
+    return `${path} (${resolvedKind})`;
+  }
+
+  return summary;
 }
 
 /**

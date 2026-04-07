@@ -163,10 +163,9 @@ describe("createCodexRunState", () => {
 
   it("computes an add diff for a live SDK file_change without prior commands", async () => {
     const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "codex-run-state-live-add-"));
+    const state = createCodexRunState({ workdir: tempDir });
     const filePath = path.join(tempDir, "added.txt");
     await fs.writeFile(filePath, "hello from codex\n", "utf8");
-
-    const state = createCodexRunState({ workdir: tempDir });
     const enriched = await state.enrichFileChangeEvent({
       path: "added.txt",
       summary: "added.txt (add)",
@@ -201,6 +200,41 @@ describe("createCodexRunState", () => {
         path: "notes.txt",
         summary: "notes.txt (update)",
         kind: "update",
+      });
+
+      assert.deepEqual(enriched, {
+        path: "notes.txt",
+        summary: "notes.txt (update)",
+        kind: "update",
+        oldText: "OLD\n",
+        newText: "NEW\n",
+        diff: [
+          "--- a/notes.txt",
+          "+++ b/notes.txt",
+          "@@ -1,1 +1,1 @@",
+          "-OLD",
+          "+NEW",
+        ].join("\n"),
+      });
+    });
+
+    assert.equal(calls[0]?.[2]?.diffSource, "workspace_baseline");
+  });
+
+  it("normalizes conflicting add events to update when prior content exists", async () => {
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "codex-run-state-conflicting-add-"));
+    const filePath = path.join(tempDir, "notes.txt");
+    await fs.writeFile(filePath, "NEW\n", "utf8");
+
+    const calls = await captureDebugLogsAsync(async () => {
+      const state = createCodexRunState({
+        workdir: tempDir,
+        loadWorkspaceBaseline: async () => new Map([[filePath, "OLD\n"]]),
+      });
+      const enriched = await state.enrichFileChangeEvent({
+        path: "notes.txt",
+        summary: "notes.txt (add)",
+        kind: "add",
       });
 
       assert.deepEqual(enriched, {
