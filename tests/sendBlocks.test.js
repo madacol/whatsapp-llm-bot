@@ -415,7 +415,7 @@ Second block:
     assert.equal(codeBlock.caption, "*Add File*  `src/new-file.js`");
   });
 
-  it("renders writes over existing files as diffs even when labeled add", () => {
+  it("renders writes labeled add as code even when stale prior text is present", () => {
     const content = renderFileChangeContent({
       kind: "file_change",
       path: "/tmp/src/existing.js",
@@ -433,9 +433,11 @@ Second block:
     });
 
     assert.ok(Array.isArray(content), "Expected file-change content blocks");
-    const diffBlock = /** @type {DiffContentBlock} */ (content[0]);
-    assert.equal(diffBlock.type, "diff");
-    assert.equal(diffBlock.caption, "*Update File*  `src/existing.js`");
+    const codeBlock = /** @type {CodeContentBlock} */ (content[0]);
+    assert.equal(codeBlock.type, "code");
+    assert.equal(codeBlock.language, "javascript");
+    assert.equal(codeBlock.code, "export const value = 2;\n");
+    assert.equal(codeBlock.caption, "*Add File*  `src/existing.js`");
   });
 
   it("renders deleted files with an explicit delete label", () => {
