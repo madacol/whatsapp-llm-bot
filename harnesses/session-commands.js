@@ -1,6 +1,9 @@
 import { formatRelativeTime } from "../utils.js";
 import { contentEvent } from "../outbound-events.js";
 
+const MAX_RESUME_OPTIONS = 11;
+const RESUME_CANCEL_OPTION_ID = "cancel";
+
 /**
  * @typedef {{
  *   archive: (chatId: string) => Promise<HarnessSessionHistoryEntry | null>;
@@ -19,6 +22,41 @@ function formatSessionLabel(entry, index, now) {
   const ago = formatRelativeTime(now.getTime() - new Date(entry.cleared_at).getTime());
   const baseLabel = entry.title ?? `Session ${index + 1}`;
   return `${baseLabel} (${ago})`;
+}
+
+/**
+ * @param {HarnessSessionHistoryEntry[]} history
+ * @param {Date} now
+ * @returns {SelectOption[]}
+ */
+function buildResumeSelectOptions(history, now) {
+  return [
+    ...[...history].reverse().slice(0, MAX_RESUME_OPTIONS).map((entry, index) => ({
+      id: entry.id,
+      label: formatSessionLabel(entry, index, now),
+    })),
+    { id: RESUME_CANCEL_OPTION_ID, label: "Cancel" },
+  ];
+}
+
+/**
+ * Resolve the selected session ID for /resume. Cancellation and timeout both return null.
+ * @param {ExecuteActionContext} context
+ * @param {HarnessSessionHistoryEntry[]} history
+ * @param {Date} now
+ * @returns {Promise<string | null>}
+ */
+async function selectResumeSessionId(context, history, now) {
+  const choice = await context.select("Which session to resume?", buildResumeSelectOptions(history, now), {
+    deleteOnSelect: true,
+    cancelIds: [RESUME_CANCEL_OPTION_ID],
+  });
+
+  if (!choice || choice === RESUME_CANCEL_OPTION_ID) {
+    return null;
+  }
+
+  return choice;
 }
 
 /**
@@ -54,27 +92,13 @@ export async function handleHarnessSessionCommand({ command, chatId, context, ca
         return true;
       }
       const currentTime = now();
-
-      /** @type {SelectOption[]} */
-      const selectOptions = [
-        ...[...history].reverse().slice(0, 11).map((entry, index) => ({
-          id: entry.id,
-          label: formatSessionLabel(entry, index, currentTime),
-        })),
-        { id: "cancel", label: "Cancel" },
-      ];
-
-      const choice = await context.select("Which session to resume?", selectOptions, {
-        deleteOnSelect: true,
-        cancelIds: ["cancel"],
-      });
-
-      if (!choice || choice === "cancel") {
+      const sessionId = await selectResumeSessionId(context, history, currentTime);
+      if (!sessionId) {
         return true;
       }
 
       await sessionControl.archive(chatId);
-      const restored = await sessionControl.restore(chatId, choice);
+      const restored = await sessionControl.restore(chatId, sessionId);
       if (!restored) {
         await context.reply(contentEvent("tool-result", "Failed to restore session."));
         return true;
