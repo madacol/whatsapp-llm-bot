@@ -12,6 +12,7 @@ import { createCodexSyntheticToolAdapter } from "./codex-synthetic-tools.js";
  *   hooks: Pick<Required<AgentIOHooks>, "onComposing" | "onPaused" | "onReasoning" | "onToolCall" | "onCommand" | "onFileRead" | "onPlan" | "onFileChange" | "onLlmResponse" | "onToolError" | "onUsage">,
  *   runConfig?: HarnessRunConfig,
  *   messages: Message[],
+ *   fileChangeTracker?: ReturnType<typeof import("./codex-file-change-tracker.js").createCodexFileChangeTracker>,
  * }} input
  * @returns {{
  *   result: AgentResult,
@@ -201,6 +202,39 @@ export function createCodexEventDispatcher(input) {
 
     if (normalized.plan) {
       await input.hooks.onPlan(createPlanPresentationFromState(normalized.plan));
+    }
+
+    if (normalized.fileChangeLifecycle) {
+      const lifecycle = normalized.fileChangeLifecycle;
+      if (lifecycle.status === "started") {
+        input.fileChangeTracker?.rememberStarted(lifecycle.itemId, lifecycle.changes);
+        for (const fileChange of lifecycle.changes) {
+          await input.hooks.onFileChange({
+            ...fileChange,
+            itemId: lifecycle.itemId,
+            stage: "proposed",
+          });
+        }
+        return;
+      }
+
+      const tracked = input.fileChangeTracker?.takeCompletion(lifecycle.itemId, lifecycle.changes) ?? {
+        itemId: lifecycle.itemId,
+        changes: lifecycle.changes,
+        decision: null,
+      };
+      if (tracked.decision === "cancel") {
+        return;
+      }
+      for (const fileChange of tracked.changes) {
+        const enrichedFileChange = await runState.enrichFileChangeEvent(fileChange);
+        await input.hooks.onFileChange({
+          ...enrichedFileChange,
+          itemId: lifecycle.itemId,
+          stage: lifecycle.status === "failed" ? "failed" : "applied",
+        });
+      }
+      return;
     }
 
     const fileChanges = normalized.fileChanges ?? (normalized.fileChange ? [normalized.fileChange] : []);

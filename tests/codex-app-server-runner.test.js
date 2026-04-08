@@ -11,6 +11,7 @@ import {
  * @typedef {{
  *   handleRequest?: (message: Record<string, unknown>) => Promise<unknown>,
  *   signal?: AbortSignal,
+ *   notifications?: Array<Record<string, unknown>>,
  * }} OpenConnectionOptions
  */
 
@@ -36,6 +37,17 @@ function createOpenConnectionMock() {
     getHandleRequest: () => handleRequest,
     async openConnection(options = {}) {
       handleRequest = options.handleRequest ?? null;
+      const notifications = options.notifications ?? [{
+        method: "turn/completed",
+        params: {
+          threadId: "thread-1",
+          turn: {
+            id: "turn-1",
+            status: "completed",
+            error: null,
+          },
+        },
+      }];
       return {
         async sendRequest(method, params = {}) {
           sendRequests.push({ method, params });
@@ -48,17 +60,9 @@ function createOpenConnectionMock() {
           return {};
         },
         notifications: (async function* () {
-          yield {
-            method: "turn/completed",
-            params: {
-              threadId: "thread-1",
-              turn: {
-                id: "turn-1",
-                status: "completed",
-                error: null,
-              },
-            },
-          };
+          for (const notification of notifications) {
+            yield notification;
+          }
         })(),
         close: async () => {},
       };
@@ -150,5 +154,172 @@ describe("handleCodexAppServerRequest", () => {
     });
 
     assert.deepEqual(result, { decision: "cancel" });
+  });
+
+  it("auto-allows low-risk tracked file changes without prompting", async () => {
+    const tracker = {
+      get: (itemId) => itemId === "file-1"
+        ? {
+          itemId,
+          decision: null,
+          changes: [{ path: "/repo/src/app.js", summary: "/repo/src/app.js (update)", kind: "update" }],
+        }
+        : null,
+      markDecision: () => {},
+    };
+
+    const result = await handleCodexAppServerRequest({
+      method: "item/fileChange/requestApproval",
+      params: {
+        itemId: "file-1",
+      },
+    }, {
+      onAskUser: async () => {
+        assert.fail("onAskUser should not be called for low-risk tracked file changes");
+      },
+      onFileChange: async () => {
+        assert.fail("onFileChange should not be called when auto-approving");
+      },
+    }, {
+      fileChangeTracker: tracker,
+      runConfig: { workdir: "/repo" },
+    });
+
+    assert.deepEqual(result, { decision: "accept" });
+  });
+
+  it("prompts for risky tracked file changes and emits denied lifecycle events", async () => {
+    /** @type {Array<{ question: string, options: string[], details: string[] | undefined }>} */
+    const prompts = [];
+    /** @type {Array<Record<string, unknown>>} */
+    const deniedEvents = [];
+    const decisions = [];
+    const tracker = {
+      get: (itemId) => itemId === "file-2"
+        ? {
+          itemId,
+          decision: null,
+          changes: [{ path: "/repo/harnesses/codex-app-server-events.js", summary: "sensitive change", kind: "update" }],
+        }
+        : null,
+      markDecision: (itemId, decision) => {
+        decisions.push({ itemId, decision });
+      },
+    };
+
+    const result = await handleCodexAppServerRequest({
+      method: "item/fileChange/requestApproval",
+      params: {
+        itemId: "file-2",
+      },
+    }, {
+      onAskUser: async (question, options, _defaultOption, details) => {
+        prompts.push({ question, options, details });
+        return "❌ Deny";
+      },
+      onFileChange: async (event) => {
+        deniedEvents.push(event);
+      },
+    }, {
+      fileChangeTracker: tracker,
+      runConfig: { workdir: "/repo" },
+    });
+
+    assert.deepEqual(result, { decision: "cancel" });
+    assert.deepEqual(prompts, [{
+      question: "Allow *file changes*?",
+      options: ["✅ Allow", "❌ Deny"],
+      details: ["/repo/harnesses/codex-app-server-events.js"],
+    }]);
+    assert.deepEqual(decisions, [{ itemId: "file-2", decision: "cancel" }]);
+    assert.deepEqual(deniedEvents, [{
+      path: "/repo/harnesses/codex-app-server-events.js",
+      summary: "sensitive change",
+      kind: "update",
+      itemId: "file-2",
+      stage: "denied",
+    }]);
+  });
+});
+
+describe("startCodexAppServerRun file-change lifecycle", () => {
+  it("emits proposed and applied file changes for app-server fileChange items", async () => {
+    const connectionMock = createOpenConnectionMock();
+    /** @type {Array<Record<string, unknown>>} */
+    const fileChanges = [];
+
+    const started = await startCodexAppServerRun({
+      chatId: "chat-1",
+      prompt: "Continue",
+      messages: [{ role: "user", content: [{ type: "text", text: "Continue" }] }],
+      runConfig: {
+        workdir: "/repo",
+      },
+      hooks: {
+        onFileChange: async (event) => {
+          fileChanges.push(event);
+        },
+      },
+    }, {
+      openConnection: (options = {}) => connectionMock.openConnection({
+        ...options,
+        notifications: [
+          {
+            method: "item/started",
+            params: {
+              threadId: "thread-1",
+              item: {
+                id: "file-1",
+                type: "fileChange",
+                changes: [{ path: "/repo/src/app.js", kind: { type: "update", move_path: null } }],
+                status: "inProgress",
+              },
+            },
+          },
+          {
+            method: "item/completed",
+            params: {
+              threadId: "thread-1",
+              item: {
+                id: "file-1",
+                type: "fileChange",
+                changes: [{ path: "/repo/src/app.js", kind: { type: "update", move_path: null } }],
+                status: "completed",
+              },
+            },
+          },
+          {
+            method: "turn/completed",
+            params: {
+              threadId: "thread-1",
+              turn: {
+                id: "turn-1",
+                status: "completed",
+                error: null,
+              },
+            },
+          },
+        ],
+      }),
+    });
+
+    await started.done;
+
+    assert.deepEqual(fileChanges, [
+      {
+        path: "/repo/src/app.js",
+        summary: "/repo/src/app.js (update)",
+        kind: "update",
+        itemId: "file-1",
+        stage: "proposed",
+      },
+      {
+        path: "/repo/src/app.js",
+        summary: "/repo/src/app.js (update)",
+        kind: "update",
+        itemId: "file-1",
+        stage: "applied",
+      },
+    ]);
   });
 });

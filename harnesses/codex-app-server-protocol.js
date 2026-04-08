@@ -1,3 +1,5 @@
+import path from "node:path";
+
 /**
  * App-server protocol shaping for Codex runs.
  *
@@ -57,15 +59,117 @@ function buildApprovalDecision(allowed) {
 }
 
 /**
+ * @param {Record<string, unknown>} params
+ * @returns {string | null}
+ */
+function extractFileChangeItemId(params) {
+  if (typeof params.itemId === "string") {
+    return params.itemId;
+  }
+  const nestedItem = params.item && typeof params.item === "object"
+    ? /** @type {Record<string, unknown>} */ (params.item)
+    : null;
+  if (typeof nestedItem?.id === "string") {
+    return nestedItem.id;
+  }
+  return null;
+}
+
+/**
+ * @param {string} filePath
+ * @param {string | null} workdir
+ * @returns {boolean}
+ */
+function isOutsideWorkdir(filePath, workdir) {
+  if (!workdir || !path.isAbsolute(filePath)) {
+    return false;
+  }
+  const resolvedWorkdir = path.resolve(workdir);
+  const resolvedPath = path.resolve(filePath);
+  return resolvedPath !== resolvedWorkdir
+    && !resolvedPath.startsWith(`${resolvedWorkdir}${path.sep}`);
+}
+
+/**
+ * @param {string} filePath
+ * @param {string | null} workdir
+ * @returns {string}
+ */
+function toPolicyPath(filePath, workdir) {
+  if (!workdir) {
+    return filePath;
+  }
+  const resolvedWorkdir = path.resolve(workdir);
+  const resolvedPath = path.resolve(filePath);
+  if (resolvedPath === resolvedWorkdir) {
+    return ".";
+  }
+  if (resolvedPath.startsWith(`${resolvedWorkdir}${path.sep}`)) {
+    return path.relative(resolvedWorkdir, resolvedPath);
+  }
+  return filePath;
+}
+
+/**
+ * @param {{
+ *   path: string,
+ *   kind?: "add" | "delete" | "update",
+ * }[]} changes
+ * @param {HarnessRunConfig | undefined} runConfig
+ * @returns {boolean}
+ */
+function shouldPromptForFileChanges(changes, runConfig) {
+  const workdir = typeof runConfig?.workdir === "string" ? runConfig.workdir : null;
+  const sensitiveNames = new Set([
+    "package.json",
+    "pnpm-lock.yaml",
+    "package-lock.json",
+    "yarn.lock",
+    "tsconfig.json",
+    "jsconfig.json",
+    ".env",
+    ".env.local",
+  ]);
+
+  return changes.some((change) => {
+    if (change.kind === "delete") {
+      return true;
+    }
+    if (isOutsideWorkdir(change.path, workdir)) {
+      return true;
+    }
+    const policyPath = toPolicyPath(change.path, workdir);
+    if (sensitiveNames.has(path.basename(policyPath))) {
+      return true;
+    }
+    return policyPath.startsWith("harnesses/")
+      || policyPath.startsWith("conversation/")
+      || policyPath.startsWith("whatsapp/outbound/");
+  });
+}
+
+/**
  * @param {Record<string, unknown>} message
- * @param {Pick<Required<AgentIOHooks>, "onAskUser">} hooks
+ * @param {Pick<Required<AgentIOHooks>, "onAskUser"> & Pick<AgentIOHooks, "onFileChange">} hooks
+ * @param {{
+ *   fileChangeTracker?: {
+ *     get: (itemId: string) => {
+ *       itemId: string,
+ *       changes: Array<{ path: string, summary?: string, diff?: string, kind?: "add" | "delete" | "update" }>,
+ *       decision: "accept" | "cancel" | null,
+ *     } | null,
+ *     markDecision: (itemId: string, decision: "accept" | "cancel") => void,
+ *   },
+ *   runConfig?: HarnessRunConfig,
+ * }} [options]
  * @returns {Promise<unknown>}
  */
-export async function handleCodexAppServerRequest(message, hooks) {
+export async function handleCodexAppServerRequest(message, hooks, options = {}) {
   const method = typeof message.method === "string" ? message.method : null;
   const params = message.params && typeof message.params === "object"
     ? /** @type {Record<string, unknown>} */ (message.params)
     : {};
+  const emitFileChange = hooks.onFileChange ?? (async () => {});
   if (!method) {
     return {};
   }
@@ -77,6 +181,30 @@ export async function handleCodexAppServerRequest(message, hooks) {
   }
 
   if (method === "item/fileChange/requestApproval") {
+    const itemId = extractFileChangeItemId(params);
+    const trackedChange = itemId ? options.fileChangeTracker?.get(itemId) ?? null : null;
+    if (trackedChange && trackedChange.changes.length > 0) {
+      const shouldPrompt = shouldPromptForFileChanges(trackedChange.changes, options.runConfig);
+      if (!shouldPrompt) {
+        options.fileChangeTracker?.markDecision(trackedChange.itemId, "accept");
+        return buildApprovalDecision(true);
+      }
+      const details = trackedChange.changes.map((change) => change.path);
+      const choice = await hooks.onAskUser("Allow *file changes*?", ["✅ Allow", "❌ Deny"], undefined, details);
+      const allowed = choice === "✅ Allow";
+      options.fileChangeTracker?.markDecision(trackedChange.itemId, allowed ? "accept" : "cancel");
+      if (!allowed) {
+        for (const change of trackedChange.changes) {
+          await emitFileChange({
+            ...change,
+            itemId: trackedChange.itemId,
+            stage: "denied",
+          });
+        }
+      }
+      return buildApprovalDecision(allowed);
+    }
+
     const choice = await hooks.onAskUser("Allow *file changes*?", ["✅ Allow", "❌ Deny"]);
     return buildApprovalDecision(choice === "✅ Allow");
   }

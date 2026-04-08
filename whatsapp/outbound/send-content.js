@@ -73,6 +73,30 @@ function cleanFileChangeSummary(summary, rawPath, displayPath, kind) {
 
 /**
  * @param {FileChangeEvent} event
+ * @param {"add" | "delete" | "update" | undefined} displayKind
+ * @returns {string}
+ */
+function getFileChangeTitle(event, displayKind) {
+  if (event.stage === "proposed") {
+    return "*Proposed File Change*";
+  }
+  if (event.stage === "denied") {
+    return "*Denied File Change*";
+  }
+  if (event.stage === "failed") {
+    return "*Failed File Change*";
+  }
+  if (displayKind === "add") {
+    return "*Add File*";
+  }
+  if (displayKind === "delete") {
+    return "*Delete File*";
+  }
+  return "*Update File*";
+}
+
+/**
+ * @param {FileChangeEvent} event
  * @returns {"add" | "delete" | "update" | undefined}
  */
 function inferDisplayedFileChangeKind(event) {
@@ -162,11 +186,7 @@ export function renderFileChangeContent(event) {
   const displayPath = shortenPath(event.path, event.cwd ?? null);
   const displayKind = inferDisplayedFileChangeKind(event);
   const cleanedSummary = cleanFileChangeSummary(event.summary, event.path, displayPath, displayKind);
-  const title = displayKind === "add"
-    ? "*Add File*"
-    : displayKind === "delete"
-      ? "*Delete File*"
-      : "*Update File*";
+  const title = getFileChangeTitle(event, displayKind);
   const captionLines = [`${title}  \`${displayPath}\``];
   if (cleanedSummary) {
     captionLines.push(cleanedSummary);
@@ -196,7 +216,7 @@ export function renderFileChangeContent(event) {
     }];
   }
 
-  return cleanedSummary ? `${cleanedSummary}\n\`${displayPath}\`` : `Changed file: \`${displayPath}\``;
+  return cleanedSummary ? `${captionLines.join("\n")}` : `${title}  \`${displayPath}\``;
 }
 
 /**

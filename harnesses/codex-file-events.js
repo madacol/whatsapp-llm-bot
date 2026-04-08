@@ -167,5 +167,11 @@ function extractChangeKind(item) {
   if (item.kind === "add" || item.kind === "delete" || item.kind === "update") {
     return item.kind;
   }
+  if (isCodexEventRecord(item.kind)) {
+    const kindType = item.kind.type;
+    if (kindType === "add" || kindType === "delete" || kindType === "update") {
+      return kindType;
+    }
+  }
   return undefined;
 }

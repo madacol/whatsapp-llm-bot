@@ -481,6 +481,64 @@ describe("codex events", () => {
     });
   });
 
+  it("normalizes app-server file-change lifecycle events", () => {
+    assert.deepEqual(normalizeCodexAppServerEvent({
+      method: "item/started",
+      params: {
+        threadId: "thread-1",
+        item: {
+          id: "file-1",
+          type: "fileChange",
+          changes: [{
+            path: "/tmp/demo.txt",
+            kind: { type: "update", move_path: null },
+            diff: "@@ -1 +1 @@\n-before\n+after\n",
+          }],
+          status: "inProgress",
+        },
+      },
+    }), {
+      sessionId: "thread-1",
+      fileChangeLifecycle: {
+        itemId: "file-1",
+        status: "started",
+        changes: [{
+          path: "/tmp/demo.txt",
+          summary: "/tmp/demo.txt (update)",
+          kind: "update",
+        }],
+      },
+    });
+
+    assert.deepEqual(normalizeCodexAppServerEvent({
+      method: "item/completed",
+      params: {
+        threadId: "thread-1",
+        item: {
+          id: "file-1",
+          type: "fileChange",
+          changes: [{
+            path: "/tmp/demo.txt",
+            kind: { type: "update", move_path: null },
+            diff: "@@ -1 +1 @@\n-before\n+after\n",
+          }],
+          status: "completed",
+        },
+      },
+    }), {
+      sessionId: "thread-1",
+      fileChangeLifecycle: {
+        itemId: "file-1",
+        status: "completed",
+        changes: [{
+          path: "/tmp/demo.txt",
+          summary: "/tmp/demo.txt (update)",
+          kind: "update",
+        }],
+      },
+    });
+  });
+
   it("normalizes nested usage on turn completion", () => {
     assert.deepEqual(normalizeCodexEvent({
       type: "turn.completed",
