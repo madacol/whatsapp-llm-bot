@@ -10,11 +10,15 @@ import path from "node:path";
  * @returns {Promise<{ stdout: string, stderr: string }>}
  */
 function runTrackPurchasesScript(args) {
+  /** @type {NodeJS.ProcessEnv} */
+  const env = { ...process.env };
+  delete env.TESTING;
+
   return new Promise((resolve, reject) => {
     execFile(
       process.execPath,
       ["scripts/track-purchases.js", ...args],
-      { cwd: process.cwd() },
+      { cwd: process.cwd(), env },
       (error, stdout, stderr) => {
         if (error) {
           const wrapped = new Error(stderr || stdout || error.message);
