@@ -2,8 +2,6 @@ import { PGlite } from "@electric-sql/pglite";
 import { vector } from "@electric-sql/pglite/vector";
 import { mkdirSync } from "node:fs";
 
-const BASE_DIR = "./pgdata";
-
 /** @type {Map<string, PGlite>} */
 const dbCache = new Map();
 
@@ -29,7 +27,6 @@ export function setDb(dataDir, instance) {
  */
 export function getDb(dataDir) {
   const isMemory = dataDir.startsWith("memory://");
-  const usesDefaultTestPath = dataDir === BASE_DIR || dataDir.startsWith(`${BASE_DIR}/`);
   const db = dbCache.get(dataDir);
 
   if (db) {
@@ -39,7 +36,7 @@ export function getDb(dataDir) {
   }
 
   // In test mode, reuse a single shared in-memory PGlite to avoid OOM
-  if (process.env.TESTING && (isMemory || usesDefaultTestPath)) {
+  if (process.env.TESTING) {
     if (!sharedTestDb) {
       sharedTestDb = new PGlite("memory://", { extensions: { vector } });
     }
@@ -83,6 +80,8 @@ function resetMemoryDbTimer(dataDir) {
   timer.unref();
   memoryDbTimers.set(dataDir, timer);
 }
+
+const BASE_DIR = "./pgdata";
 
 /**
  * Get the root database (shared across all chats).
