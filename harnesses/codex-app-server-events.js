@@ -263,12 +263,17 @@ export function normalizeCodexAppServerEvent(message) {
     return normalized;
   }
 
-  if (method === "item/completed" && itemType === "fileChange") {
+  if (itemType === "fileChange" && (method === "item/started" || method === "item/completed")) {
+    const itemId = typeof item.id === "string" ? item.id : null;
     const fileChanges = normalizeCodexFileChanges(item);
-    if (fileChanges.length === 1) {
-      normalized.fileChange = fileChanges[0];
-    } else if (fileChanges.length > 1) {
-      normalized.fileChanges = fileChanges;
+    if (itemId && fileChanges.length > 0) {
+      normalized.fileChangeLifecycle = {
+        itemId,
+        status: method === "item/started"
+          ? "started"
+          : item.status === "failed" || item.status === "declined" ? "failed" : "completed",
+        changes: fileChanges,
+      };
     }
     return normalized;
   }

@@ -139,12 +139,14 @@ async function onCommand({ command, status, output }) {
    *   summary?: string,
    *   diff?: string,
    *   kind?: "add" | "delete" | "update",
+   *   itemId?: string,
+   *   stage?: "proposed" | "denied" | "applied" | "failed",
    *   oldText?: string,
    *   newText?: string,
    * }} event
    * @returns {Promise<void>}
    */
-  async function onFileChange({ path, summary, diff, kind, oldText, newText }) {
+  async function onFileChange({ path, summary, diff, kind, itemId, stage, oldText, newText }) {
     if (!visibility.changes) {
       return;
     }
@@ -154,6 +156,8 @@ async function onCommand({ command, status, output }) {
       ...(summary !== undefined && { summary }),
       ...(diff !== undefined && { diff }),
       ...(kind !== undefined && { changeKind: kind }),
+      ...(itemId !== undefined && { itemId }),
+      ...(stage !== undefined && { stage }),
       ...(oldText !== undefined && { oldText }),
       ...(newText !== undefined && { newText }),
       cwd,

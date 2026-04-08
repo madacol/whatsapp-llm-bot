@@ -175,6 +175,8 @@ type FileChangeEvent = {
   summary?: string;
   diff?: string;
   changeKind?: "add" | "delete" | "update";
+  itemId?: string;
+  stage?: "proposed" | "denied" | "applied" | "failed";
   oldText?: string;
   newText?: string;
   cwd?: string | null;
@@ -594,6 +596,8 @@ type AgentIOHooks = {
     summary?: string,
     diff?: string,
     kind?: "add" | "delete" | "update",
+    itemId?: string,
+    stage?: "proposed" | "denied" | "applied" | "failed",
     oldText?: string,
     newText?: string,
   }) => Promise<void>;

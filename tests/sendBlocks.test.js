@@ -461,6 +461,19 @@ Second block:
     assert.equal(diffBlock.caption, "*Delete File*  `src/delete-me.js`");
   });
 
+  it("renders proposed file changes with a lifecycle-specific title even without a diff", () => {
+    const content = renderFileChangeContent({
+      kind: "file_change",
+      path: "/tmp/src/file.js",
+      cwd: "/tmp",
+      stage: "proposed",
+      changeKind: "update",
+      summary: "/tmp/src/file.js (update)",
+    });
+
+    assert.equal(content, "*Proposed File Change*  `src/file.js`");
+  });
+
   it("handles type 'text' without image rendering", async () => {
     const { sock, sent } = createMockSock();
 

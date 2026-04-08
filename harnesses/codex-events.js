@@ -37,9 +37,19 @@ export {
  *   summary?: string,
  *   diff?: string,
  *   kind?: "add" | "delete" | "update",
+ *   itemId?: string,
+ *   stage?: "proposed" | "denied" | "applied" | "failed",
  *   oldText?: string,
  *   newText?: string,
  * }} CodexFileChangeEvent
+ */
+
+/**
+ * @typedef {{
+ *   itemId: string,
+ *   status: "started" | "completed" | "failed",
+ *   changes: CodexFileChangeEvent[],
+ * }} CodexFileChangeLifecycleEvent
  */
 
 /**
@@ -80,5 +90,6 @@ export {
  *   plan?: CodexPlanState,
  *   fileChange?: CodexFileChangeEvent,
  *   fileChanges?: CodexFileChangeEvent[],
+ *   fileChangeLifecycle?: CodexFileChangeLifecycleEvent,
  * }} NormalizedCodexEvent
  */

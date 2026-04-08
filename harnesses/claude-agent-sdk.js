@@ -373,6 +373,8 @@ export function wrapHooksWithFallbacks(rawHooks) {
       summary?: string,
       diff?: string,
       kind?: "add" | "delete" | "update",
+      itemId?: string,
+      stage?: "proposed" | "denied" | "applied" | "failed",
       oldText?: string,
       newText?: string,
     }} */ event) =>

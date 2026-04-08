@@ -3,6 +3,7 @@ import { ReportedHarnessRunError, reportHarnessRunError } from "./harness-run-er
 import { buildCodexTurnInput } from "./codex-runner.js";
 import { openCodexAppServerConnection } from "./codex-app-server-client.js";
 import { createCodexEventDispatcher } from "./codex-event-dispatcher.js";
+import { createCodexFileChangeTracker } from "./codex-file-change-tracker.js";
 import {
   buildCodexAppServerSandboxPolicy,
   handleCodexAppServerRequest,
@@ -62,10 +63,12 @@ export async function startCodexAppServerRun(input, deps = {}) {
   const prompt = buildCodexTurnInput(input.prompt, input.externalInstructions);
   const sandboxPolicy = buildCodexAppServerSandboxPolicy(input.runConfig);
   const approvalPolicy = mapCodexAppServerApprovalPolicy(input.runConfig?.approvalPolicy);
+  const fileChangeTracker = createCodexFileChangeTracker();
   const dispatcher = createCodexEventDispatcher({
     hooks,
     runConfig: input.runConfig,
     messages: input.messages,
+    fileChangeTracker,
   });
 
   /** @type {string | null} */
@@ -77,7 +80,10 @@ export async function startCodexAppServerRun(input, deps = {}) {
   const connection = await openConnection({
     ...(input.env ? { env: input.env } : {}),
     signal: abortController.signal,
-    handleRequest: async (message) => handleCodexAppServerRequest(message, hooks),
+    handleRequest: async (message) => handleCodexAppServerRequest(message, hooks, {
+      fileChangeTracker,
+      runConfig: input.runConfig,
+    }),
   });
 
   const threadRequestParams = {
