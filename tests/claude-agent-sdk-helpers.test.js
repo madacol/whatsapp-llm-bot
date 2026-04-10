@@ -1,4 +1,4 @@
-import { describe, it } from "node:test";
+import { before, describe, it } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import os from "node:os";
@@ -29,6 +29,7 @@ import path from "node:path";
 // to harnesses/claude-agent-sdk.js
 
 import { resolveMediaPath } from "../attachment-paths.js";
+import { setDb } from "../db.js";
 import {
   buildClaudePrompt,
   buildClaudeSystemPrompt,
@@ -38,6 +39,21 @@ import {
   handleSandboxEscapeApproval,
   hasTextField,
 } from "../harnesses/claude-agent-sdk.js";
+import { createTestDb, seedChat } from "./helpers.js";
+
+/**
+ * @param {OutboundEvent} event
+ * @returns {string}
+ */
+function getReplyText(event) {
+  assert.equal(event.kind, "content");
+  return typeof event.content === "string" ? event.content : JSON.stringify(event.content);
+}
+
+before(async () => {
+  const db = await createTestDb();
+  setDb("./pgdata/root", db);
+});
 
 describe("createClaudeAgentSdkHarness", () => {
   it("exposes the unified harness contract", async () => {
@@ -64,6 +80,7 @@ describe("createClaudeAgentSdkHarness", () => {
       { name: "clear", description: "Clear the current harness session" },
       { name: "resume", description: "Restore a previously cleared harness session" },
       { name: "model", description: "Choose or set the Claude SDK model and reasoning effort" },
+      { name: "permissions", description: "Show or set the Claude SDK permissions mode" },
     ]);
   });
 
@@ -86,6 +103,57 @@ describe("createClaudeAgentSdkHarness", () => {
     });
 
     assert.equal(handled, false);
+  });
+
+  it("handles permissions command through a selector and defaults to workspace-write", async () => {
+    const db = await createTestDb();
+    await seedChat(db, "claude-chat-1", { enabled: true });
+    const harness = createClaudeAgentSdkHarness();
+    /** @type {string[]} */
+    const replies = [];
+    /** @type {SelectOption[] | null} */
+    let selectedOptions = null;
+
+    const handled = await harness.handleCommand({
+      chatId: "claude-chat-1",
+      command: "permissions",
+      context: /** @type {ExecuteActionContext} */ ({
+        chatId: "claude-chat-1",
+        senderIds: [],
+        content: [],
+        getIsAdmin: async () => true,
+        send: async () => undefined,
+        reply: async (event) => {
+          replies.push(getReplyText(event));
+          return undefined;
+        },
+        reactToMessage: async () => {},
+        select: async (_question, options) => {
+          selectedOptions = options;
+          return "danger-full-access";
+        },
+        confirm: async () => true,
+      }),
+    });
+
+    const { rows: [chat] } = await db.sql`
+      SELECT harness_config
+      FROM chats
+      WHERE chat_id = 'claude-chat-1'
+    `;
+
+    assert.equal(handled, true);
+    assert.deepEqual(selectedOptions, [
+      { id: "workspace-write", label: "Workspace Write" },
+      { id: "read-only", label: "Read Only" },
+      { id: "danger-full-access", label: "Full Access" },
+    ]);
+    assert.deepEqual(chat?.harness_config, {
+      "claude-agent-sdk": {
+        sandboxMode: "danger-full-access",
+      },
+    });
+    assert.ok(replies.at(-1)?.includes("SDK permissions: `danger-full-access`"));
   });
 });
 
