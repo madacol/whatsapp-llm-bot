@@ -1,5 +1,6 @@
 import { formatChatSettingsCommand } from "../../../chat-commands.js";
 import { getScopedHarnessConfig, normalizeHarnessConfig } from "../../../harness-config.js";
+import { CODEX_SANDBOX_MODES, getEffectiveCodexSandboxMode } from "../../../harnesses/codex-config.js";
 import { getChatOrThrow } from "../../../store.js";
 import { getClaudeSdkModels, getCodexAvailableModels, listHarnesses, resolveHarness } from "#harnesses";
 import {
@@ -23,11 +24,24 @@ import {
  * }} HarnessModelSelection
  */
 
+/**
+ * @typedef {{
+ *   value: NonNullable<HarnessRunConfig["sandboxMode"]>;
+ * }} CodexPermissionsSelection
+ */
+
 /** @type {BasicSetupStep[]} */
 const ALL_SETUP_STEPS = [
   { setting: "trigger", question: "When should the bot reply in group chats?" },
   { setting: "harness", question: "Which harness should power this chat?" },
   { setting: "show", question: "Which extra outputs should stay visible in chat?" },
+];
+
+/** @type {SelectOption[]} */
+const CODEX_PERMISSIONS_OPTIONS = [
+  { id: "workspace-write", label: "Workspace Write" },
+  { id: "read-only", label: "Read Only" },
+  { id: "danger-full-access", label: "Full Access" },
 ];
 
 /**
@@ -117,6 +131,34 @@ function formatHarnessModelSummary(harnessName, modelValue) {
 
 /**
  * @param {import("../../../store.js").ChatRow} chat
+ * @returns {{ options: SelectOption[], currentId: NonNullable<HarnessRunConfig["sandboxMode"]> }}
+ */
+function getCodexPermissionsSelectOptions(chat) {
+  const scopedConfig = getScopedHarnessConfig(chat.harness_config, "codex");
+  return {
+    options: CODEX_PERMISSIONS_OPTIONS,
+    currentId: getEffectiveCodexSandboxMode(scopedConfig),
+  };
+}
+
+/**
+ * @param {NonNullable<HarnessRunConfig["sandboxMode"]>} sandboxMode
+ * @returns {string}
+ */
+function formatCodexPermissionsSummary(sandboxMode) {
+  return `Codex permissions: \`${sandboxMode}\``;
+}
+
+/**
+ * @param {string} value
+ * @returns {value is NonNullable<HarnessRunConfig["sandboxMode"]>}
+ */
+function isCodexPermissionsMode(value) {
+  return CODEX_SANDBOX_MODES.has(/** @type {HarnessRunConfig["sandboxMode"]} */ (value));
+}
+
+/**
+ * @param {import("../../../store.js").ChatRow} chat
  * @param {string} harnessName
  * @param {SelectOption[]} options
  * @returns {string | undefined}
@@ -164,6 +206,30 @@ async function applyHarnessModelSelection(rootDb, chatId, chat, selection) {
   return formatHarnessModelSummary(selection.harness, selection.value);
 }
 
+/**
+ * @param {PGlite} rootDb
+ * @param {string} chatId
+ * @param {import("../../../store.js").ChatRow} chat
+ * @param {CodexPermissionsSelection} selection
+ * @returns {Promise<string>}
+ */
+async function applyCodexPermissionsSelection(rootDb, chatId, chat, selection) {
+  const normalized = normalizeHarnessConfig(chat.harness_config, chat.harness);
+  const rawScoped = normalized.codex;
+  /** @type {Record<string, unknown>} */
+  const scoped = isObjectRecord(rawScoped) ? { ...rawScoped } : {};
+
+  scoped.sandboxMode = selection.value;
+  normalized.codex = scoped;
+
+  await rootDb.sql`
+    UPDATE chats
+    SET harness_config = ${JSON.stringify(normalized)}::jsonb
+    WHERE chat_id = ${chatId}
+  `;
+  return formatCodexPermissionsSummary(selection.value);
+}
+
 export default /** @type {defineAction} */ ((x) => x)({
   name: "setup",
   command: "setup",
@@ -195,6 +261,8 @@ export default /** @type {defineAction} */ ((x) => x)({
     const stagedChanges = [];
     /** @type {HarnessModelSelection | null} */
     let stagedHarnessModel = null;
+    /** @type {CodexPermissionsSelection | null} */
+    let stagedCodexPermissions = null;
     /** @type {string[]} */
     const notes = [];
 
@@ -241,37 +309,64 @@ export default /** @type {defineAction} */ ((x) => x)({
 
       const selectedHarness = selected;
       const harness = resolveHarness(selectedHarness);
-      if (!harness.getCapabilities().supportsModelSelection) {
+      if (harness.getCapabilities().supportsModelSelection) {
+        const modelOptions = await getHarnessModelOptions(selectedHarness);
+        if (modelOptions.length === 0) {
+          notes.push(`No selectable ${selectedHarness} models are currently available, so its /model setting was left unchanged.`);
+        } else {
+          const currentModelId = getCurrentHarnessModelId(chat, selectedHarness, modelOptions);
+          const selectedModel = await select(
+            getHarnessModelQuestion(selectedHarness),
+            modelOptions,
+            { deleteOnSelect: true, ...(currentModelId ? { currentId: currentModelId } : {}) },
+          );
+          if (!selectedModel) {
+            return "Setup cancelled. No changes were made.";
+          }
+
+          stagedHarnessModel = { harness: selectedHarness, value: selectedModel };
+        }
+      } else {
         notes.push(`${selectedHarness} does not expose a configurable /model setting.`);
+      }
+
+      if (selectedHarness !== "codex") {
         continue;
       }
 
-      const modelOptions = await getHarnessModelOptions(selectedHarness);
-      if (modelOptions.length === 0) {
-        notes.push(`No selectable ${selectedHarness} models are currently available, so its /model setting was left unchanged.`);
-        continue;
-      }
-
-      const currentModelId = getCurrentHarnessModelId(chat, selectedHarness, modelOptions);
-      const selectedModel = await select(
-        getHarnessModelQuestion(selectedHarness),
-        modelOptions,
-        { deleteOnSelect: true, ...(currentModelId ? { currentId: currentModelId } : {}) },
+      const codexPermissions = getCodexPermissionsSelectOptions(chat);
+      const selectedPermissions = await select(
+        "Choose Codex permissions",
+        codexPermissions.options,
+        { deleteOnSelect: true, currentId: codexPermissions.currentId },
       );
-      if (!selectedModel) {
+      if (!selectedPermissions) {
         return "Setup cancelled. No changes were made.";
       }
+      if (!isCodexPermissionsMode(selectedPermissions)) {
+        throw new Error(`Unexpected Codex permissions mode: ${selectedPermissions}`);
+      }
 
-      stagedHarnessModel = { harness: selectedHarness, value: selectedModel };
+      stagedCodexPermissions = {
+        value: selectedPermissions,
+      };
     }
 
     /** @type {string[]} */
     const applied = [];
+    /** @type {import("../../../store.js").ChatRow} */
+    let currentChat = chat;
     for (const change of stagedChanges) {
       applied.push(await setConfigValue(rootDb, chatId, change.setting, change.value, { senderIds }));
+      currentChat = await getChatOrThrow(rootDb, chatId);
     }
     if (stagedHarnessModel) {
-      applied.push(await applyHarnessModelSelection(rootDb, chatId, chat, stagedHarnessModel));
+      applied.push(await applyHarnessModelSelection(rootDb, chatId, currentChat, stagedHarnessModel));
+      currentChat = await getChatOrThrow(rootDb, chatId);
+    }
+    if (stagedCodexPermissions) {
+      applied.push(await applyCodexPermissionsSelection(rootDb, chatId, currentChat, stagedCodexPermissions));
+      currentChat = await getChatOrThrow(rootDb, chatId);
     }
 
     if (isMaster(senderIds)) {
