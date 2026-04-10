@@ -104,6 +104,30 @@ describe("buildClaudeSystemPrompt", () => {
 });
 
 describe("buildClaudePrompt", () => {
+  it("removes the generated timestamp prefix from private-chat text prompts", () => {
+    const prompt = buildClaudePrompt([{
+      role: "user",
+      content: [{
+        type: "text",
+        text: "[04/10/2026, 10:51 AM] hello",
+      }],
+    }], false);
+
+    assert.equal(prompt, "hello");
+  });
+
+  it("removes the generated timestamp and sender prefix from group-chat text prompts", () => {
+    const prompt = buildClaudePrompt([{
+      role: "user",
+      content: [{
+        type: "text",
+        text: "[04/10/2026, 10:51 AM] Marco D'Agostini: hello",
+      }],
+    }], true);
+
+    assert.equal(prompt, "hello");
+  });
+
   it("includes canonical media paths for media-only user turns", () => {
     const mediaPath = `${"b".repeat(64)}.jpg`;
     const prompt = buildClaudePrompt([{
@@ -113,7 +137,7 @@ describe("buildClaudePrompt", () => {
         path: mediaPath,
         mime_type: "image/jpeg",
       }],
-    }]);
+    }], false);
 
     assert.equal(prompt, `Attached media files:\n- image: ${mediaPath}`);
   });
@@ -128,7 +152,7 @@ describe("buildClaudePrompt", () => {
         mime_type: "application/pdf",
         file_name: "report.pdf",
       }],
-    }]);
+    }], false);
 
     assert.equal(prompt, `Attached media files:\n- file: ${mediaPath}`);
   });
@@ -141,7 +165,7 @@ describe("buildClaudePrompt", () => {
         { type: "text", text: "Describe this image" },
         { type: "image", path: mediaPath, mime_type: "image/png" },
       ],
-    }]);
+    }], false);
 
     assert.equal(prompt, `Describe this image\n\nAttached media files:\n- image: ${mediaPath}`);
   });
@@ -160,7 +184,7 @@ describe("buildClaudePrompt", () => {
           alt: "Two green iguanas standing upright and leaning against each other.",
         },
       ],
-    }]);
+    }], false);
 
     assert.equal(
       prompt,
