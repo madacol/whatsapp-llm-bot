@@ -14,7 +14,7 @@ import { randomUUID } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { hasMediaPath } from "../attachment-paths.js";
 import { formatChatSettingsCommand } from "../chat-commands.js";
-import { renderContentBlock } from "../message-formatting.js";
+import { renderContentBlock, stripTextHarnessMessagePrefix } from "../message-formatting.js";
 import { getRootDb } from "../db.js";
 import { NO_OP_HOOKS } from "./native.js";
 import { buildToolPresentation } from "../tool-presentation-model.js";
@@ -248,9 +248,10 @@ function collectQuotedClaudeMedia(blocks, mediaLines) {
  * The Claude harness chooses its own text representation, preserving user text
  * and appending canonical media paths when available.
  * @param {Message[]} messages
+ * @param {boolean} isGroupChat
  * @returns {string}
  */
-export function buildClaudePrompt(messages) {
+export function buildClaudePrompt(messages, isGroupChat) {
   for (let i = messages.length - 1; i >= 0; i--) {
     const msg = messages[i];
     if (msg.role !== "user") {
@@ -265,6 +266,7 @@ export function buildClaudePrompt(messages) {
 
     const sections = [];
     if (textParts.length > 0) {
+      textParts[0] = stripTextHarnessMessagePrefix(textParts[0], isGroupChat);
       sections.push(textParts.join("\n"));
     }
     if (mediaLines.length > 0) {
@@ -685,7 +687,10 @@ export function createClaudeAgentSdkHarness() {
     const reasoningEffort = runConfig?.reasoningEffort ?? null;
 
     const promptMessages = await augmentLatestUserMessageForTextHarness(messages, llmConfig, getRootDb());
-    const lastUserText = buildClaudePrompt(promptMessages);
+    const lastUserText = buildClaudePrompt(
+      promptMessages,
+      llmConfig.externalInstructions.includes("You are in a group chat"),
+    );
 
     if (!lastUserText) {
       log.error("No user text found in messages");

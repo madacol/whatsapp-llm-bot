@@ -167,6 +167,30 @@ export function formatUserMessage(firstBlock, isGroup, senderName, time) {
 }
 
 /**
+ * Strip the generated chat prefix that conversation storage adds to the first
+ * user text block before text-only harnesses synthesize their prompt.
+ * The timestamp prefix is removed for both private and group chats. The sender
+ * name segment is removed only for group chats, where it was injected by the
+ * transport formatter.
+ * @param {string} text
+ * @param {boolean} isGroupChat
+ * @returns {string}
+ */
+export function stripTextHarnessMessagePrefix(text, isGroupChat) {
+  const timestampMatch = text.match(/^\[\d{2}\/\d{2}\/\d{4}, \d{1,2}:\d{2}(?:\s?[AP]M)?\]\s/u);
+  if (!timestampMatch) {
+    return text;
+  }
+
+  let strippedText = text.slice(timestampMatch[0].length);
+  if (isGroupChat) {
+    strippedText = strippedText.replace(/^[^:\n]{1,120}:\s/u, "");
+  }
+
+  return strippedText;
+}
+
+/**
  * Parse `!command arg1 arg2` into `{ paramName: value }` based on action parameter schema.
  * @param {string[]} args - The arguments after the command name
  * @param {Action['parameters']} parameters - The action's JSON Schema parameters

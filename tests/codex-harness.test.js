@@ -661,6 +661,138 @@ describe("createCodexHarness", () => {
     assert.deepEqual(result.response, [{ type: "text", text: "ok" }]);
   });
 
+  it("removes the generated timestamp prefix from private-chat Codex prompts", async () => {
+    /** @type {string | null} */
+    let seenPrompt = null;
+    const harness = createCodexHarness({
+      startRun: async (input) => {
+        seenPrompt = input.prompt;
+        return {
+          abortController: new AbortController(),
+          done: Promise.resolve({
+            sessionId: null,
+            result: {
+              response: [{ type: "text", text: "ok" }],
+              messages: input.messages,
+              usage: { promptTokens: 0, completionTokens: 0, cachedTokens: 0, cost: 0 },
+            },
+          }),
+        };
+      },
+    });
+
+    await harness.run({
+      session: {
+        chatId: "codex-chat-private-prefix",
+        senderIds: [],
+        context: /** @type {ExecuteActionContext} */ ({
+          chatId: "codex-chat-private-prefix",
+          senderIds: [],
+          content: [],
+          getIsAdmin: async () => true,
+          send: async () => undefined,
+          reply: async () => undefined,
+          reactToMessage: async () => {},
+          select: async () => "",
+          confirm: async () => true,
+        }),
+        addMessage: async () => undefined,
+        updateToolMessage: async () => undefined,
+        harnessSession: null,
+        saveHarnessSession: async () => undefined,
+      },
+      llmConfig: {
+        llmClient: /** @type {LlmClient} */ ({}),
+        chatModel: null,
+        externalInstructions: "",
+        toolRuntime: /** @type {ToolRuntime} */ ({
+          listTools: () => [],
+          getTool: async () => null,
+          executeTool: async () => {
+            throw new Error("executeTool should not be called");
+          },
+        }),
+      },
+      messages: [{
+        role: "user",
+        content: [{
+          type: "text",
+          text: "[04/10/2026, 10:51 AM] hello",
+        }],
+      }],
+      hooks: {},
+      runConfig: undefined,
+    });
+
+    assert.equal(seenPrompt, "hello");
+  });
+
+  it("removes the generated timestamp and sender prefix from group-chat Codex prompts", async () => {
+    /** @type {string | null} */
+    let seenPrompt = null;
+    const harness = createCodexHarness({
+      startRun: async (input) => {
+        seenPrompt = input.prompt;
+        return {
+          abortController: new AbortController(),
+          done: Promise.resolve({
+            sessionId: null,
+            result: {
+              response: [{ type: "text", text: "ok" }],
+              messages: input.messages,
+              usage: { promptTokens: 0, completionTokens: 0, cachedTokens: 0, cost: 0 },
+            },
+          }),
+        };
+      },
+    });
+
+    await harness.run({
+      session: {
+        chatId: "codex-chat-group-prefix",
+        senderIds: [],
+        context: /** @type {ExecuteActionContext} */ ({
+          chatId: "codex-chat-group-prefix",
+          senderIds: [],
+          content: [],
+          getIsAdmin: async () => true,
+          send: async () => undefined,
+          reply: async () => undefined,
+          reactToMessage: async () => {},
+          select: async () => "",
+          confirm: async () => true,
+        }),
+        addMessage: async () => undefined,
+        updateToolMessage: async () => undefined,
+        harnessSession: null,
+        saveHarnessSession: async () => undefined,
+      },
+      llmConfig: {
+        llmClient: /** @type {LlmClient} */ ({}),
+        chatModel: null,
+        externalInstructions: "You are in a group chat",
+        toolRuntime: /** @type {ToolRuntime} */ ({
+          listTools: () => [],
+          getTool: async () => null,
+          executeTool: async () => {
+            throw new Error("executeTool should not be called");
+          },
+        }),
+      },
+      messages: [{
+        role: "user",
+        content: [{
+          type: "text",
+          text: "[04/10/2026, 10:51 AM] Marco D'Agostini: hello",
+        }],
+      }],
+      hooks: {},
+      runConfig: undefined,
+    });
+
+    assert.equal(seenPrompt, "hello");
+  });
+
   it("includes canonical file paths in the Codex prompt for document-only turns", async () => {
     /** @type {string | null} */
     let seenPrompt = null;
