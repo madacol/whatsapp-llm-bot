@@ -75,6 +75,40 @@ const FALLBACK_MODELS = [
   { value: "claude-haiku-4-5", displayName: "Haiku 4.5", description: "Fastest, lightweight" },
 ];
 
+/** @type {Set<HarnessRunConfig["sandboxMode"]>} */
+const CLAUDE_SANDBOX_MODES = new Set(["read-only", "workspace-write", "danger-full-access"]);
+
+/** @type {NonNullable<HarnessRunConfig["sandboxMode"]>} */
+const DEFAULT_CLAUDE_SANDBOX_MODE = "workspace-write";
+
+/**
+ * @param {Record<string, unknown>} config
+ * @returns {NonNullable<HarnessRunConfig["sandboxMode"]>}
+ */
+function getEffectiveClaudeSandboxMode(config) {
+  if (typeof config.sandboxMode === "string" && CLAUDE_SANDBOX_MODES.has(/** @type {HarnessRunConfig["sandboxMode"]} */ (config.sandboxMode))) {
+    return /** @type {NonNullable<HarnessRunConfig["sandboxMode"]>} */ (config.sandboxMode);
+  }
+  return DEFAULT_CLAUDE_SANDBOX_MODE;
+}
+
+/**
+ * @param {string} value
+ * @returns {NonNullable<HarnessRunConfig["sandboxMode"]> | null}
+ */
+function normalizeClaudePermissionsMode(value) {
+  if (value === "write" || value === "workspace" || value === "workspace-write") {
+    return "workspace-write";
+  }
+  if (value === "readonly" || value === "read-only" || value === "read") {
+    return "read-only";
+  }
+  if (value === "full" || value === "full-access" || value === "danger-full-access") {
+    return "danger-full-access";
+  }
+  return null;
+}
+
 /**
  * Get available models from SDK cache with fallback.
  * @returns {Array<{ value: string, displayName: string, description: string }>}
@@ -169,6 +203,27 @@ export async function handleEffortCommand(chatId, arg) {
     return `SDK effort set to \`${input}\``;
   }
   return `Unknown effort level \`${arg}\`. Use: ${validLevels.join(", ")}`;
+}
+
+/**
+ * Set or clear the Claude SDK permissions mode for a chat.
+ * @param {string} chatId
+ * @param {string} arg
+ * @returns {Promise<string>}
+ */
+export async function handlePermissionsCommand(chatId, arg) {
+  if (arg === "off" || arg === "default" || arg === "none") {
+    await updateHarnessConfig(chatId, HARNESS_NAME, { sandboxMode: null });
+    return `SDK permissions reset to default (\`${DEFAULT_CLAUDE_SANDBOX_MODE}\`).`;
+  }
+
+  const sandboxMode = normalizeClaudePermissionsMode(arg);
+  if (!sandboxMode) {
+    return "Unknown permissions mode `" + arg + "`. Use: workspace-write, read-only, danger-full-access";
+  }
+
+  await updateHarnessConfig(chatId, HARNESS_NAME, { sandboxMode });
+  return `SDK permissions: \`${sandboxMode}\``;
 }
 
 /**
@@ -435,6 +490,34 @@ function getActiveQueryKey(ref) {
  */
 async function handleClaudeHarnessCommand({ chatId, command, context }) {
   const trimmed = command.trim();
+
+  const permissionsMatch = trimmed.match(/^permissions(?:\s+(.+))?$/i);
+  if (permissionsMatch) {
+    const arg = permissionsMatch[1]?.trim() ?? null;
+    if (arg) {
+      await context.reply(contentEvent("tool-result", await handlePermissionsCommand(chatId, arg.toLowerCase())));
+      return true;
+    }
+
+    const harnessConfig = await getHarnessConfig(chatId, HARNESS_NAME);
+    const currentPermissions = getEffectiveClaudeSandboxMode(harnessConfig);
+    /** @type {SelectOption[]} */
+    const permissionOptions = [
+      { id: "workspace-write", label: "Workspace Write" },
+      { id: "read-only", label: "Read Only" },
+      { id: "danger-full-access", label: "Full Access" },
+    ];
+    const permissionChoice = await context.select("Choose SDK permissions", permissionOptions, {
+      currentId: currentPermissions,
+    });
+    if (permissionChoice && permissionChoice !== currentPermissions) {
+      await handlePermissionsCommand(chatId, permissionChoice);
+    }
+    const updatedConfig = await getHarnessConfig(chatId, HARNESS_NAME);
+    await context.reply(contentEvent("tool-result", `SDK permissions: \`${getEffectiveClaudeSandboxMode(updatedConfig)}\``));
+    return true;
+  }
+
   const modelMatch = trimmed.match(/^model(?:\s+(.*))?$/);
   if (!modelMatch) {
     return false;
@@ -549,6 +632,7 @@ export function createClaudeAgentSdkHarness() {
       { name: "clear", description: "Clear the current harness session" },
       { name: "resume", description: "Restore a previously cleared harness session" },
       { name: "model", description: "Choose or set the Claude SDK model and reasoning effort" },
+      { name: "permissions", description: "Show or set the Claude SDK permissions mode" },
     ];
   }
 
