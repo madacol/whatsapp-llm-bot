@@ -73,6 +73,19 @@ export function createProjectStore({
     return binding;
   }
 
+  /**
+   * @param {string} workspaceId
+   * @returns {Promise<WorkspaceRow | null>}
+   */
+  async function getWorkspace(workspaceId) {
+    const { rows: [row] } = await db.sql`
+      SELECT * FROM workspaces
+      WHERE workspace_id = ${workspaceId}
+      LIMIT 1
+    `;
+    return normalizeWorkspaceRow(row);
+  }
+
   return {
     /**
      * @param {{
@@ -217,14 +230,7 @@ export function createProjectStore({
      * @param {string} workspaceId
      * @returns {Promise<WorkspaceRow | null>}
      */
-    async getWorkspace(workspaceId) {
-      const { rows: [row] } = await db.sql`
-        SELECT * FROM workspaces
-        WHERE workspace_id = ${workspaceId}
-        LIMIT 1
-      `;
-      return normalizeWorkspaceRow(row);
-    },
+    getWorkspace,
 
     /**
      * @param {string} projectId
@@ -332,7 +338,7 @@ export function createProjectStore({
      * @returns {Promise<ChatBindingRow>}
      */
     async bindChatToWorkspace(chatId, workspaceId) {
-      const workspace = await this.getWorkspace(workspaceId);
+      const workspace = await getWorkspace(workspaceId);
       if (!workspace) {
         throw new Error(`Workspace ${workspaceId} does not exist.`);
       }

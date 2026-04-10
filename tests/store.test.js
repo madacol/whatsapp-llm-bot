@@ -637,5 +637,43 @@ describe("store with injected DB", () => {
         { id: "sess-parent", kind: "codex", label: "Parent thread" },
       ]);
     });
+
+    it("binds chats to workspaces when the store method is called unbound", async () => {
+      await store.createChat("project-bind-control");
+      await store.createChat("project-bind-workspace-chat");
+
+      const project = await store.createProject({
+        name: `unbound-project-${Date.now()}`,
+        rootPath: `/repo/unbound-${Date.now()}`,
+        defaultBaseBranch: "main",
+        controlChatId: "project-bind-control",
+      });
+      await store.saveWhatsAppWorkspacePresentation({
+        projectId: project.project_id,
+        workspaceId: "project-bind-ws",
+        workspaceChatId: "project-bind-workspace-chat",
+        workspaceChatSubject: "project bind workspace",
+      });
+      const workspace = await store.createWorkspace({
+        workspaceId: "project-bind-ws",
+        projectId: project.project_id,
+        name: "payments",
+        branch: "payments",
+        baseBranch: "main",
+        worktreePath: `/repo/unbound-${Date.now()}/payments`,
+      });
+
+      const { bindChatToWorkspace } = store;
+      const binding = await bindChatToWorkspace("project-bind-workspace-chat", workspace.workspace_id);
+
+      assert.equal(binding.binding_kind, "workspace");
+      assert.equal(binding.project_id, project.project_id);
+      assert.equal(binding.workspace_id, workspace.workspace_id);
+
+      const savedBinding = await store.getChatBinding("project-bind-workspace-chat");
+      assert.equal(savedBinding?.binding_kind, "workspace");
+      assert.equal(savedBinding?.project_id, project.project_id);
+      assert.equal(savedBinding?.workspace_id, workspace.workspace_id);
+    });
   });
 });
