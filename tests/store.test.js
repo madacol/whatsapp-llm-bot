@@ -598,6 +598,25 @@ describe("store with injected DB", () => {
       assert.equal(chat.harness_session_history[0].title, "Debugging payment sync");
     });
 
+    it("archives harness sessions when the store method is called unbound", async () => {
+      await store.createChat("harness-session-unbound");
+      await store.saveHarnessSession("harness-session-unbound", { id: "sess-unbound", kind: "claude-sdk" });
+
+      const { archiveHarnessSession } = store;
+      const archived = await archiveHarnessSession("harness-session-unbound", { title: "Unbound archive" });
+
+      assert.ok(archived);
+      assert.equal(archived.id, "sess-unbound");
+      assert.equal(archived.title, "Unbound archive");
+
+      const chat = await store.getChat("harness-session-unbound");
+      assert.equal(chat.harness_session_id, null);
+      assert.equal(chat.harness_session_kind, null);
+      assert.equal(chat.harness_session_history.length, 1);
+      assert.equal(chat.harness_session_history[0].id, "sess-unbound");
+      assert.equal(chat.harness_session_history[0].title, "Unbound archive");
+    });
+
     it("pushes and pops the harness fork stack", async () => {
       await store.createChat("harness-fork-stack-1");
 

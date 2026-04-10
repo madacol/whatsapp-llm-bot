@@ -35,15 +35,21 @@ import {
  * >}
  */
 export function createChatStore({ db, ensureChatExists }) {
+  /**
+   * @param {ChatRow["chat_id"]} chatId
+   * @returns {Promise<ChatRow | undefined>}
+   */
+  async function getChat(chatId) {
+    const { rows: [row] } = await db.sql`SELECT * FROM chats WHERE chat_id = ${chatId}`;
+    return normalizeChatRow(row) ?? undefined;
+  }
+
   return {
     /**
      * @param {ChatRow["chat_id"]} chatId
      * @returns {Promise<ChatRow | undefined>}
      */
-    async getChat(chatId) {
-      const { rows: [row] } = await db.sql`SELECT * FROM chats WHERE chat_id = ${chatId}`;
-      return normalizeChatRow(row) ?? undefined;
-    },
+    getChat,
 
     /**
      * @param {ChatRow["chat_id"]} chatId
@@ -78,7 +84,7 @@ export function createChatStore({ db, ensureChatExists }) {
       await ensureChatExists(sourceChatId);
       await ensureChatExists(targetChatId);
 
-      const sourceChat = await this.getChat(sourceChatId);
+      const sourceChat = await getChat(sourceChatId);
       if (!sourceChat) {
         throw new Error(`Chat ${sourceChatId} does not exist.`);
       }
@@ -131,7 +137,7 @@ export function createChatStore({ db, ensureChatExists }) {
      */
     async archiveHarnessSession(chatId, options = {}) {
       const maxEntries = options.maxEntries ?? 10;
-      const chat = await this.getChat(chatId);
+      const chat = await getChat(chatId);
       if (!chat?.harness_session_id || !chat.harness_session_kind) {
         return null;
       }
@@ -165,7 +171,7 @@ export function createChatStore({ db, ensureChatExists }) {
      * @returns {Promise<HarnessSessionHistoryEntry[]>}
      */
     async getHarnessSessionHistory(chatId) {
-      const chat = await this.getChat(chatId);
+      const chat = await getChat(chatId);
       if (!chat) {
         return [];
       }
@@ -181,7 +187,7 @@ export function createChatStore({ db, ensureChatExists }) {
      * @returns {Promise<HarnessSessionHistoryEntry | null>}
      */
     async restoreHarnessSession(chatId, indexOrId) {
-      const chat = await this.getChat(chatId);
+      const chat = await getChat(chatId);
       if (!chat) {
         return null;
       }
@@ -216,7 +222,7 @@ export function createChatStore({ db, ensureChatExists }) {
      * @returns {Promise<HarnessForkStackEntry[]>}
      */
     async getHarnessForkStack(chatId) {
-      const chat = await this.getChat(chatId);
+      const chat = await getChat(chatId);
       if (!chat) {
         return [];
       }
@@ -229,7 +235,7 @@ export function createChatStore({ db, ensureChatExists }) {
      * @returns {Promise<void>}
      */
     async pushHarnessForkStack(chatId, entry) {
-      const chat = await this.getChat(chatId);
+      const chat = await getChat(chatId);
       const stack = normalizeHarnessForkStack(chat?.harness_fork_stack);
       const normalizedEntry = normalizeHarnessForkStackEntry(entry);
       if (!normalizedEntry) {
@@ -248,7 +254,7 @@ export function createChatStore({ db, ensureChatExists }) {
      * @returns {Promise<HarnessForkStackEntry | null>}
      */
     async popHarnessForkStack(chatId) {
-      const chat = await this.getChat(chatId);
+      const chat = await getChat(chatId);
       const stack = normalizeHarnessForkStack(chat?.harness_fork_stack);
       const entry = stack.pop() ?? null;
 
