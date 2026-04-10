@@ -10,7 +10,7 @@ const execFile = promisify(execFileCallback);
 
 /** @type {ActionDbTestFn[]} */
 export default [
-  async function clones_repository_into_chat_workdir(action_fn, db) {
+  async function clones_repository_into_chat_workdir_root(action_fn, db) {
     const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "clone-action-"));
     const sourceRepo = path.join(tempDir, "source.git");
     const chatId = "clone-action-chat";
@@ -24,10 +24,11 @@ export default [
     );
 
     const workdir = getChatWorkDir(chatId);
-    const clonedDir = path.join(workdir, "source");
-    const stat = await fs.stat(clonedDir);
+    const gitDir = path.join(workdir, ".git");
+    const stat = await fs.stat(gitDir);
 
     assert.equal(stat.isDirectory(), true);
-    assert.equal(result, `Cloned into \`${clonedDir}\`.`);
+    await assert.rejects(fs.stat(path.join(workdir, "source")));
+    assert.equal(result, `Cloned into \`${workdir}\`.`);
   },
 ];

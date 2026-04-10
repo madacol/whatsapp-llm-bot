@@ -181,7 +181,7 @@ describe("Scenario 3: Unknown command", () => {
 });
 
 describe("Scenario 3b: Clone repository command", () => {
-  it("clones a repository into the chat workdir", async () => {
+  it("clones a repository into the chat workdir root", async () => {
     const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "clone-integration-"));
     const sourceRepo = path.join(tempDir, "source.git");
     const chatId = "s3b-clone-chat";
@@ -190,11 +190,12 @@ describe("Scenario 3b: Clone repository command", () => {
 
     const chat = await t.chat(chatId);
     const r = await chat.send(`!clone ${sourceRepo}`);
-    const clonedDir = path.join(getChatWorkDir(chatId), "source");
-    const stat = await fs.stat(clonedDir);
+    const workdir = getChatWorkDir(chatId);
+    const stat = await fs.stat(path.join(workdir, ".git"));
 
     assert.equal(stat.isDirectory(), true);
-    assert.ok(r.raw.some(x => x.text.includes(`Cloned into \`${clonedDir}\``)),
+    await assert.rejects(fs.stat(path.join(workdir, "source")));
+    assert.ok(r.raw.some(x => x.text.includes(`Cloned into \`${workdir}\``)),
       `Should confirm clone destination, got: ${JSON.stringify(r.raw.map(x => x.text))}`);
   });
 });
