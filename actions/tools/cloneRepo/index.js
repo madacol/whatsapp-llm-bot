@@ -1,5 +1,4 @@
 import { execFile } from "node:child_process";
-import { resolve } from "node:path";
 import { errorToString, getChatWorkDir } from "../../../utils.js";
 
 const CLONE_TIMEOUT_MS = 300_000;
@@ -14,7 +13,7 @@ function runGitClone(repository, cwd) {
   return new Promise((resolveResult, reject) => {
     execFile(
       "git",
-      ["clone", "--", repository],
+      ["clone", "--", repository, "."],
       { cwd, timeout: CLONE_TIMEOUT_MS, maxBuffer: CLONE_MAX_BUFFER },
       (error, stdout, stderr) => {
         if (!error) {
@@ -31,29 +30,16 @@ function runGitClone(repository, cwd) {
   });
 }
 
-/**
- * @param {string} stderr
- * @param {string} cwd
- * @returns {string | null}
- */
-function extractClonedPath(stderr, cwd) {
-  const match = stderr.match(/Cloning into '([^']+)'/);
-  if (!match?.[1]) {
-    return null;
-  }
-  return resolve(cwd, match[1]);
-}
-
 export default /** @type {defineAction} */ ((x) => x)({
   name: "clone_repository",
   command: "clone",
-  description: "Clone a git repository into the current harness working folder.",
+  description: "Clone a git repository into the current harness working directory.",
   parameters: {
     type: "object",
     properties: {
       repository: {
         type: "string",
-        description: "Git repository URL or local path to clone into the current working folder.",
+        description: "Git repository URL or local path to clone into the current working directory.",
       },
     },
     required: ["repository"],
@@ -96,8 +82,7 @@ export default /** @type {defineAction} */ ((x) => x)({
         return `Error: git clone failed in \`${workdir}\`.\n${detail}`;
       }
 
-      const clonedPath = extractClonedPath(result.stderr, workdir) ?? workdir;
-      return `Cloned into \`${clonedPath}\`.`;
+      return `Cloned into \`${workdir}\`.`;
     } catch (error) {
       return `Error: ${errorToString(error)}`;
     }
