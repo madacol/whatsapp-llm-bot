@@ -11,17 +11,16 @@ import { prepareRunMessages } from "./prepare-run-messages.js";
  * harness.
  * @param {AgentDefinition | null} persona
  * @param {import("../store.js").ChatRow | undefined} chatInfo
- * @param {string} systemPromptSuffix
  * @param {string} harnessName
  * @returns {string}
  */
-export function buildExternalSystemPrompt(persona, chatInfo, systemPromptSuffix, harnessName) {
+export function buildExternalSystemPrompt(persona, chatInfo, harnessName) {
   const explicitPrompt = persona?.systemPrompt ?? chatInfo?.system_prompt ?? "";
   if (explicitPrompt) {
-    return `${explicitPrompt}${systemPromptSuffix}`;
+    return explicitPrompt;
   }
   if (harnessName === "native") {
-    return `${config.system_prompt}${systemPromptSuffix}`;
+    return config.system_prompt;
   }
   return "";
 }
@@ -45,7 +44,6 @@ export function buildExternalSystemPrompt(persona, chatInfo, systemPromptSuffix,
  *   updateToolMessage: Session["updateToolMessage"],
  *   saveHarnessSession: import("../store.js").Store["saveHarnessSession"],
  *   hooks: AgentIOHooks,
- *   systemPromptSuffix: string,
  *   harnessName: string,
  *   resolvedBinding?: ResolvedChatBinding,
  *   bufferedTexts?: string[],
@@ -69,7 +67,6 @@ export async function buildHarnessRunRequest({
   updateToolMessage,
   saveHarnessSession,
   hooks,
-  systemPromptSuffix,
   harnessName,
   resolvedBinding,
   bufferedTexts = [],
@@ -93,7 +90,7 @@ export async function buildHarnessRunRequest({
   };
 
   const chatModel = resolveChatModel(persona, chatInfo ?? undefined);
-  const baseExternalInstructions = buildExternalSystemPrompt(persona, chatInfo, systemPromptSuffix, harnessName);
+  const baseExternalInstructions = buildExternalSystemPrompt(persona, chatInfo, harnessName);
   const { externalInstructions, messages, mediaRegistry } = await prepareRunMessages({
     chatId,
     chatInfo,

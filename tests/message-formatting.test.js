@@ -3,7 +3,6 @@ import assert from "node:assert/strict";
 import {
   actionsToToolDefinitions,
   shouldRespond,
-  formatUserMessage,
   parseCommandArgs,
   prepareMessages,
   parseStructuredQuestion,
@@ -147,36 +146,6 @@ describe("shouldRespond", () => {
     assert.equal(shouldRespond(chat, { isGroup: true, addressedToBot: false, repliedToBot: false, quotedSenderId: "other-user" }), false);
     // No mention, no reply → false
     assert.equal(shouldRespond(chat, { isGroup: true, addressedToBot: false, repliedToBot: false }), false);
-  });
-});
-
-// ── formatUserMessage ──
-
-describe("formatUserMessage", () => {
-  it("formats private message with timestamp", () => {
-    const block = /** @type {TextContentBlock} */ ({ type: "text", text: "hello" });
-    const { formattedText, systemPromptSuffix } = formatUserMessage(
-      block, false, "User", "01/01/2025, 12:00",
-    );
-    assert.equal(formattedText, "[01/01/2025, 12:00] hello");
-    assert.equal(systemPromptSuffix, "");
-  });
-
-  it("formats group message with sender name", () => {
-    const block = /** @type {TextContentBlock} */ ({ type: "text", text: "hello" });
-    const { formattedText, systemPromptSuffix } = formatUserMessage(
-      block, true, "Alice", "01/01/2025, 12:00",
-    );
-    assert.equal(formattedText, "[01/01/2025, 12:00] Alice: hello");
-    assert.ok(systemPromptSuffix.includes("group chat"));
-  });
-
-  it("preserves message text because mention stripping happens at the transport seam", () => {
-    const block = /** @type {TextContentBlock} */ ({ type: "text", text: "@bot hello" });
-    const { formattedText } = formatUserMessage(
-      block, true, "Alice", "01/01/2025, 12:00",
-    );
-    assert.equal(formattedText, "[01/01/2025, 12:00] Alice: @bot hello");
   });
 });
 

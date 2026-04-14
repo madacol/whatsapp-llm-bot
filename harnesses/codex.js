@@ -4,7 +4,7 @@ import { hasMediaPath } from "../attachment-paths.js";
  */
 
 import { createLogger } from "../logger.js";
-import { renderContentBlock, stripTextHarnessMessagePrefix } from "../message-formatting.js";
+import { renderContentBlock } from "../message-formatting.js";
 import { getRootDb } from "../db.js";
 import { NO_OP_HOOKS } from "./native.js";
 import { isHandledCodexRunError, startCodexRun } from "./codex-runner.js";
@@ -102,10 +102,9 @@ function collectQuotedMediaPaths(blocks, mediaPaths) {
  * The Codex harness chooses a text-only representation, appending canonical
  * media file paths so the agent can refer to them explicitly.
  * @param {Message[]} messages
- * @param {boolean} isGroupChat
  * @returns {string}
  */
-function buildCodexPrompt(messages, isGroupChat) {
+function buildCodexPrompt(messages) {
   for (let i = messages.length - 1; i >= 0; i--) {
     const msg = messages[i];
     if (msg.role !== "user") {
@@ -120,7 +119,6 @@ function buildCodexPrompt(messages, isGroupChat) {
 
     const sections = [];
     if (textParts.length > 0) {
-      textParts[0] = stripTextHarnessMessagePrefix(textParts[0], isGroupChat);
       sections.push(textParts.join("\n"));
     }
     if (mediaPaths.length > 0) {
@@ -266,10 +264,7 @@ export function createCodexHarness(deps = {}) {
   async function run({ session, llmConfig, messages, hooks: userHooks, runConfig }) {
     const hooks = { ...NO_OP_HOOKS, ...userHooks };
     const promptMessages = await augmentLatestUserMessageForTextHarness(messages, llmConfig, getRootDb());
-    const prompt = buildCodexPrompt(
-      promptMessages,
-      llmConfig.externalInstructions.includes("You are in a group chat"),
-    );
+    const prompt = buildCodexPrompt(promptMessages);
     if (!prompt) {
       return {
         response: [{ type: "text", text: "No input message found." }],

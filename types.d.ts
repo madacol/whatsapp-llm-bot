@@ -107,6 +107,7 @@ type ContentBlock = IncomingContentBlock | ToolCallContentBlock;
 
   type UserMessage = {
     role: "user";
+    senderName?: string;
     content: IncomingContentBlock[];
   };
 

@@ -7,11 +7,10 @@ import { resolveHarness, resolveHarnessName, createHarnessRunCoordinator } from 
 import { contentEvent } from "../outbound-events.js";
 import {
   shouldRespond,
-  formatUserMessage,
   parseCommandArgs,
 } from "../message-formatting.js";
 import { createMessageActionContext } from "../execute-action-context.js";
-import { errorToString, formatTime, isHtmlContent } from "../utils.js";
+import { errorToString, isHtmlContent } from "../utils.js";
 import { createLogger } from "../logger.js";
 import { buildAgentIoHooks } from "./build-agent-io-hooks.js";
 import { buildHarnessRunRequest } from "./build-harness-run-request.js";
@@ -274,27 +273,16 @@ export function createConversationRunner({ store, llmClient, getActionsFn, execu
     resolvedBinding,
   }) {
     const { chatId, senderIds, content, senderName, facts } = turn;
-    const time = formatTime(turn.timestamp);
     const willRespond = isSlashCommand || shouldRespond(chatInfo, facts);
 
-    let systemPromptSuffix = "";
     let userText = firstBlock?.text ?? "";
-    /** @type {IncomingContentBlock[]} */
-    let messageContent = content;
-    if (firstBlock) {
-      const formatted = formatUserMessage(firstBlock, facts.isGroup, senderName, time);
-      systemPromptSuffix = formatted.systemPromptSuffix;
-      userText = formatted.formattedText;
-      const firstBlockIndex = content.indexOf(firstBlock);
-      messageContent = content.map((block, index) => (
-        index === firstBlockIndex
-          ? { ...firstBlock, text: formatted.formattedText }
-          : block
-      ));
-    }
 
     /** @type {UserMessage} */
-    const message = { role: "user", content: messageContent };
+    const message = {
+      role: "user",
+      content,
+      ...(facts.isGroup && senderName ? { senderName } : {}),
+    };
     await addMessage(chatId, message, senderIds);
 
     if (!willRespond) {
@@ -387,7 +375,6 @@ export function createConversationRunner({ store, llmClient, getActionsFn, execu
         updateToolMessage,
         saveHarnessSession,
         hooks,
-        systemPromptSuffix,
         harnessName: harness.getName(),
         resolvedBinding,
         bufferedTexts: runCoordinator.consumeBufferedTexts(chatId),
