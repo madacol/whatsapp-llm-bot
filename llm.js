@@ -114,9 +114,12 @@ function formatFileReference(block) {
  * @param {MediaRegistry} registry
  * @returns {Promise<Array<OpenAI.ChatCompletionContentPart>>}
  */
-async function formatUserContent(message, registry) {
+export async function formatUserContent(message, registry) {
   /** @type {Array<OpenAI.ChatCompletionContentPart>} */
   const parts = [];
+  if (message.senderName) {
+    parts.push({ type: "text", text: `Message from ${message.senderName}` });
+  }
 
   for (const contentBlock of message.content) {
     switch (contentBlock.type) {

@@ -1013,23 +1013,6 @@ describe("image param resolution in tool calls", () => {
 });
 
 // ═══════════════════════════════════════════════════════════════════
-// Scenario: Group chat system prompt suffix
-// ═══════════════════════════════════════════════════════════════════
-describe("Group chat system prompt suffix", () => {
-  it("appends 'You are in a group chat' to system prompt for group messages", async () => {
-    const chat = await t.chat("group-prompt-chat@g.us", { enabled: true });
-    const r = await chat.send("@bot-123 hello", { isGroup: true, llm: ["Hello group!"] });
-
-    const systemMsg = /** @type {any} */ (r.requests[0]).messages.find(m => m.role === "system");
-    const systemText = Array.isArray(systemMsg.content)
-      ? systemMsg.content.map(c => c.text).join("")
-      : systemMsg.content;
-    assert.ok(systemText.includes("You are in a group chat"),
-      `System prompt should contain group chat suffix, got: ${systemText.slice(-100)}`);
-  });
-});
-
-// ═══════════════════════════════════════════════════════════════════
 // Scenario: Quote blocks in LLM context
 // ═══════════════════════════════════════════════════════════════════
 describe("Quote blocks in LLM context", () => {

@@ -9,21 +9,21 @@ import {
 describe("buildExternalSystemPrompt", () => {
   it("keeps the app default prompt for the native harness", () => {
     assert.equal(
-      buildExternalSystemPrompt(null, undefined, "\n\nYou are in a group chat", "native"),
-      `${config.system_prompt}\n\nYou are in a group chat`,
+      buildExternalSystemPrompt(null, undefined, "native"),
+      config.system_prompt,
     );
   });
 
   it("does not add the app default prompt to Codex by default", () => {
     assert.equal(
-      buildExternalSystemPrompt(null, undefined, "\n\nYou are in a group chat", "codex"),
+      buildExternalSystemPrompt(null, undefined, "codex"),
       "",
     );
   });
 
   it("does not add the app default prompt to Claude SDK by default", () => {
     assert.equal(
-      buildExternalSystemPrompt(null, undefined, "\n\nYou are in a group chat", "claude-agent-sdk"),
+      buildExternalSystemPrompt(null, undefined, "claude-agent-sdk"),
       "",
     );
   });
@@ -37,10 +37,9 @@ describe("buildExternalSystemPrompt", () => {
           systemPrompt: "Use the custom persona prompt.",
         }),
         undefined,
-        "\n\nYou are in a group chat",
         "codex",
       ),
-      "Use the custom persona prompt.\n\nYou are in a group chat",
+      "Use the custom persona prompt.",
     );
   });
 });
@@ -88,7 +87,6 @@ describe("buildHarnessRunRequest", () => {
       updateToolMessage: async () => undefined,
       saveHarnessSession: async () => undefined,
       hooks: {},
-      systemPromptSuffix: "",
       harnessName: "codex",
     });
 

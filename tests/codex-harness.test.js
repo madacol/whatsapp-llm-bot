@@ -661,7 +661,7 @@ describe("createCodexHarness", () => {
     assert.deepEqual(result.response, [{ type: "text", text: "ok" }]);
   });
 
-  it("removes the generated timestamp prefix from private-chat Codex prompts", async () => {
+  it("keeps private-chat Codex prompts unchanged", async () => {
     /** @type {string | null} */
     let seenPrompt = null;
     const harness = createCodexHarness({
@@ -717,7 +717,7 @@ describe("createCodexHarness", () => {
         role: "user",
         content: [{
           type: "text",
-          text: "[04/10/2026, 10:51 AM] hello",
+          text: "hello",
         }],
       }],
       hooks: {},
@@ -727,7 +727,7 @@ describe("createCodexHarness", () => {
     assert.equal(seenPrompt, "hello");
   });
 
-  it("removes the generated timestamp and sender prefix from group-chat Codex prompts", async () => {
+  it("ignores sender metadata when building Codex prompts", async () => {
     /** @type {string | null} */
     let seenPrompt = null;
     const harness = createCodexHarness({
@@ -770,7 +770,7 @@ describe("createCodexHarness", () => {
       llmConfig: {
         llmClient: /** @type {LlmClient} */ ({}),
         chatModel: null,
-        externalInstructions: "You are in a group chat",
+        externalInstructions: "",
         toolRuntime: /** @type {ToolRuntime} */ ({
           listTools: () => [],
           getTool: async () => null,
@@ -781,9 +781,10 @@ describe("createCodexHarness", () => {
       },
       messages: [{
         role: "user",
+        senderName: "Marco D'Agostini",
         content: [{
           type: "text",
-          text: "[04/10/2026, 10:51 AM] Marco D'Agostini: hello",
+          text: "hello",
         }],
       }],
       hooks: {},
