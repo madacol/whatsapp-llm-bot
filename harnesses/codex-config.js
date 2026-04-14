@@ -1,13 +1,13 @@
 import { getHarnessConfig, updateHarnessConfig } from "../harness-config.js";
-
-/** @type {Set<HarnessRunConfig["sandboxMode"]>} */
-export const CODEX_SANDBOX_MODES = new Set(["read-only", "workspace-write", "danger-full-access"]);
+export {
+  CODEX_SANDBOX_MODES,
+  DEFAULT_CODEX_SANDBOX_MODE,
+  getEffectiveCodexSandboxMode,
+  normalizeCodexPermissionsMode,
+} from "../harness-config.js";
 
 /** @type {Set<NonNullable<HarnessRunConfig["approvalPolicy"]>>} */
 export const CODEX_APPROVAL_POLICIES = new Set(["untrusted", "on-request", "never"]);
-
-/** @type {NonNullable<HarnessRunConfig["sandboxMode"]>} */
-export const DEFAULT_CODEX_SANDBOX_MODE = "workspace-write";
 
 /**
  * Read the generic harness_config JSONB for a chat.
@@ -27,34 +27,6 @@ export async function getCodexConfig(chatId) {
  */
 export async function updateCodexConfig(chatId, patch) {
   await updateHarnessConfig(chatId, "codex", patch);
-}
-
-/**
- * @param {Record<string, unknown>} config
- * @returns {NonNullable<HarnessRunConfig["sandboxMode"]>}
- */
-export function getEffectiveCodexSandboxMode(config) {
-  if (typeof config.sandboxMode === "string" && CODEX_SANDBOX_MODES.has(/** @type {HarnessRunConfig["sandboxMode"]} */ (config.sandboxMode))) {
-    return /** @type {NonNullable<HarnessRunConfig["sandboxMode"]>} */ (config.sandboxMode);
-  }
-  return DEFAULT_CODEX_SANDBOX_MODE;
-}
-
-/**
- * @param {string} value
- * @returns {NonNullable<HarnessRunConfig["sandboxMode"]> | null}
- */
-export function normalizeCodexPermissionsMode(value) {
-  if (value === "write" || value === "workspace" || value === "workspace-write") {
-    return "workspace-write";
-  }
-  if (value === "readonly" || value === "read-only" || value === "read") {
-    return "read-only";
-  }
-  if (value === "full" || value === "full-access" || value === "danger-full-access") {
-    return "danger-full-access";
-  }
-  return null;
 }
 
 /**

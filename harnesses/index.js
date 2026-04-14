@@ -1,6 +1,7 @@
 export {
   listHarnesses,
   registerHarness,
+  resetHarnessRegistryForTests,
   resolveHarness,
   resolveHarnessName,
   waitForAllHarnesses,

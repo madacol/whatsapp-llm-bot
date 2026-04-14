@@ -295,7 +295,7 @@ describe("Scenario 7b: Guided setup command", () => {
     await seedChat(chatId);
 
     /** @type {string[]} */
-    const selections = ["mention+reply", "codex", "gpt-5.4"];
+    const selections = ["mention+reply", "codex", "gpt-5.4", "workspace-write"];
     /** @type {string[]} */
     const questions = [];
     const { context, responses } = createChatTurn({
@@ -324,6 +324,7 @@ describe("Scenario 7b: Guided setup command", () => {
     assert.ok(allText.includes("mention+reply"), `Expected trigger summary, got: ${allText}`);
     assert.ok(allText.includes("codex"), `Expected harness summary, got: ${allText}`);
     assert.ok(allText.includes("gpt-5.4"), `Expected harness model summary, got: ${allText}`);
+    assert.ok(allText.includes("workspace-write"), `Expected codex permissions summary, got: ${allText}`);
     assert.ok(allText.includes("!clone"), `Expected clone hint, got: ${allText}`);
 
     const { rows: [chat] } = await testDb.sql`
@@ -338,6 +339,7 @@ describe("Scenario 7b: Guided setup command", () => {
     assert.deepEqual(chat.output_visibility, { changes: false });
     assert.equal(chat.harness, "codex");
     assert.equal(chat.harness_config.codex.model, "gpt-5.4");
+    assert.equal(chat.harness_config.codex.sandboxMode, "workspace-write");
   });
 });
 

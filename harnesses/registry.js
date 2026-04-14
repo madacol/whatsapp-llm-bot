@@ -7,9 +7,12 @@ const registry = new Map();
 /** @type {Map<string, AgentHarness>} Singleton cache for stateful harnesses */
 const instances = new Map();
 
-// Register the native harness by default
-registry.set("native", createNativeHarness);
-registry.set("codex", createCodexHarness);
+function registerDefaultHarnesses() {
+  registry.set("native", createNativeHarness);
+  registry.set("codex", createCodexHarness);
+}
+
+registerDefaultHarnesses();
 
 /** @type {HarnessCapabilities} */
 const DEFAULT_HARNESS_CAPABILITIES = {
@@ -73,6 +76,17 @@ function normalizeHarness(name, harness) {
 export function registerHarness(name, factory) {
   registry.set(name, factory);
   instances.delete(name);
+}
+
+/**
+ * Test helper: restore the baseline registry and clear cached singleton instances.
+ * Optional harnesses should be re-registered explicitly by each test that needs them.
+ * @returns {void}
+ */
+export function resetHarnessRegistryForTests() {
+  registry.clear();
+  instances.clear();
+  registerDefaultHarnesses();
 }
 
 /**

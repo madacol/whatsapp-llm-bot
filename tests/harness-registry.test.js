@@ -1,6 +1,16 @@
-import { describe, it } from "node:test";
+import { afterEach, describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { registerHarness, resolveHarness } from "../harnesses/index.js";
+import {
+  registerHarness,
+  registerOptionalHarnesses,
+  resetHarnessRegistryForTests,
+  resolveHarness,
+} from "../harnesses/index.js";
+
+afterEach(async () => {
+  resetHarnessRegistryForTests();
+  await registerOptionalHarnesses();
+});
 
 describe("resolveHarness", () => {
   it("normalizes legacy harness factories to the unified contract", async () => {

@@ -1,6 +1,10 @@
 import { formatChatSettingsCommand } from "../../../chat-commands.js";
-import { getScopedHarnessConfig, normalizeHarnessConfig } from "../../../harness-config.js";
-import { CODEX_SANDBOX_MODES, getEffectiveCodexSandboxMode } from "../../../harnesses/codex-config.js";
+import {
+  CODEX_SANDBOX_MODES,
+  getEffectiveCodexSandboxMode,
+  getScopedHarnessConfig,
+  normalizeHarnessConfig,
+} from "../../../harness-config.js";
 import { getChatOrThrow } from "../../../store.js";
 import { getClaudeSdkModels, getCodexAvailableModels, listHarnesses, resolveHarness } from "#harnesses";
 import {
