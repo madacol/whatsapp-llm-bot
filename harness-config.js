@@ -79,6 +79,40 @@ function classifyLegacyModel(model) {
   return null;
 }
 
+/** @type {Set<HarnessRunConfig["sandboxMode"]>} */
+export const CODEX_SANDBOX_MODES = new Set(["read-only", "workspace-write", "danger-full-access"]);
+
+/** @type {NonNullable<HarnessRunConfig["sandboxMode"]>} */
+export const DEFAULT_CODEX_SANDBOX_MODE = "workspace-write";
+
+/**
+ * @param {Record<string, unknown>} config
+ * @returns {NonNullable<HarnessRunConfig["sandboxMode"]>}
+ */
+export function getEffectiveCodexSandboxMode(config) {
+  if (typeof config.sandboxMode === "string" && CODEX_SANDBOX_MODES.has(/** @type {HarnessRunConfig["sandboxMode"]} */ (config.sandboxMode))) {
+    return /** @type {NonNullable<HarnessRunConfig["sandboxMode"]>} */ (config.sandboxMode);
+  }
+  return DEFAULT_CODEX_SANDBOX_MODE;
+}
+
+/**
+ * @param {string} value
+ * @returns {NonNullable<HarnessRunConfig["sandboxMode"]> | null}
+ */
+export function normalizeCodexPermissionsMode(value) {
+  if (value === "write" || value === "workspace" || value === "workspace-write") {
+    return "workspace-write";
+  }
+  if (value === "readonly" || value === "read-only" || value === "read") {
+    return "read-only";
+  }
+  if (value === "full" || value === "full-access" || value === "danger-full-access") {
+    return "danger-full-access";
+  }
+  return null;
+}
+
 /**
  * Normalize stored harness_config into harness-scoped namespaces.
  * Legacy flat keys are migrated into the most likely harness bucket.
