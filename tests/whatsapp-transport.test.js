@@ -7,14 +7,18 @@ import {
   executeGroupLinkedParentLookup,
 } from "../whatsapp/create-whatsapp-transport.js";
 import { setDb } from "../db.js";
+import { initStore } from "../store.js";
 import { createTestDb } from "./helpers.js";
 
 /** @type {import("@electric-sql/pglite").PGlite | null} */
 let testDb = null;
+/** @type {import("../store.js").Store | null} */
+let testStore = null;
 
 before(async () => {
   testDb = await createTestDb();
   setDb("./pgdata/root", testDb);
+  testStore = await initStore(testDb);
 });
 
 /**
@@ -74,6 +78,7 @@ describe("WhatsApp transport community creation", () => {
         handleConnectionUpdate: async () => {},
         isStopped: () => false,
       }),
+      ...(testStore ? { outboundStore: testStore } : {}),
     });
 
     await transport.start(async () => {});

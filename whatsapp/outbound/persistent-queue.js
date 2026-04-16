@@ -1,3 +1,4 @@
+import { getRootDb } from "../../db.js";
 import { initStore } from "../../store.js";
 import { createLogger } from "../../logger.js";
 import { sendEvent as sendOutboundEvent } from "./send-content.js";
@@ -5,6 +6,8 @@ import { sendEvent as sendOutboundEvent } from "./send-content.js";
 const log = createLogger("whatsapp");
 /** @type {Promise<import("../../store.js").Store> | null} */
 let storePromise = null;
+/** @type {import("@electric-sql/pglite").PGlite | null} */
+let storeDb = null;
 
 /**
  * @typedef {{
@@ -233,8 +236,10 @@ function errorMessage(error) {
  * @returns {Promise<import("../../store.js").Store>}
  */
 async function getStore() {
-  if (!storePromise) {
-    storePromise = initStore();
+  const currentRootDb = getRootDb();
+  if (!storePromise || storeDb !== currentRootDb) {
+    storeDb = currentRootDb;
+    storePromise = initStore(currentRootDb);
   }
   return storePromise;
 }
@@ -254,11 +259,12 @@ export function isRecoverableWhatsAppSendError(error) {
 /**
  * @param {string} chatId
  * @param {WhatsAppOutboundQueuePayload} payload
+ * @param {import("../../store.js").Store} [store]
  * @returns {Promise<void>}
  */
-export async function enqueueWhatsAppOutbound(chatId, payload) {
-  const store = await getStore();
-  await store.enqueueWhatsAppOutboundQueueEntry({
+export async function enqueueWhatsAppOutbound(chatId, payload, store) {
+  const resolvedStore = store ?? await getStore();
+  await resolvedStore.enqueueWhatsAppOutboundQueueEntry({
     chatId,
     payloadJson: payload,
   });
@@ -266,19 +272,21 @@ export async function enqueueWhatsAppOutbound(chatId, payload) {
 
 /**
  * @param {number} id
+ * @param {import("../../store.js").Store} [store]
  * @returns {Promise<void>}
  */
-async function deleteQueuedWhatsAppOutbound(id) {
-  const store = await getStore();
-  await store.deleteWhatsAppOutboundQueueEntry(id);
+async function deleteQueuedWhatsAppOutbound(id, store) {
+  const resolvedStore = store ?? await getStore();
+  await resolvedStore.deleteWhatsAppOutboundQueueEntry(id);
 }
 
 /**
+ * @param {import("../../store.js").Store} [store]
  * @returns {Promise<QueuedWhatsAppOutboundRow[]>}
  */
-async function listQueuedWhatsAppOutbound() {
-  const store = await getStore();
-  const rows = await store.listWhatsAppOutboundQueueEntries();
+async function listQueuedWhatsAppOutbound(store) {
+  const resolvedStore = store ?? await getStore();
+  const rows = await resolvedStore.listWhatsAppOutboundQueueEntries();
 
   /** @type {QueuedWhatsAppOutboundRow[]} */
   const normalized = [];
@@ -288,7 +296,7 @@ async function listQueuedWhatsAppOutbound() {
       const rowId = isRecord(row) ? normalizeRowId(row.id) : null;
       log.error("Dropping malformed WhatsApp outbound queue row.", { row });
       if (rowId !== null) {
-        await deleteQueuedWhatsAppOutbound(rowId);
+        await deleteQueuedWhatsAppOutbound(rowId, resolvedStore);
       }
       continue;
     }
@@ -318,13 +326,14 @@ async function deliverQueuedPayload(sock, chatId, payload, reactionRuntime) {
  *   chatId: string,
  *   event: OutboundEvent,
  *   reactionRuntime?: import("../runtime/reaction-runtime.js").ReactionRuntime,
+ *   store?: import("../../store.js").Store,
  * }} input
  * @returns {Promise<MessageHandle | undefined>}
  */
-export async function sendOrQueueWhatsAppEvent({ getSocket, chatId, event, reactionRuntime }) {
+export async function sendOrQueueWhatsAppEvent({ getSocket, chatId, event, reactionRuntime, store }) {
   const sock = getSocket();
   if (!sock) {
-    await enqueueWhatsAppOutbound(chatId, { kind: "event", event });
+    await enqueueWhatsAppOutbound(chatId, { kind: "event", event }, store);
     return undefined;
   }
 
@@ -334,7 +343,7 @@ export async function sendOrQueueWhatsAppEvent({ getSocket, chatId, event, react
     if (!isRecoverableWhatsAppSendError(error)) {
       throw error;
     }
-    await enqueueWhatsAppOutbound(chatId, { kind: "event", event });
+    await enqueueWhatsAppOutbound(chatId, { kind: "event", event }, store);
     return undefined;
   }
 }
@@ -344,13 +353,14 @@ export async function sendOrQueueWhatsAppEvent({ getSocket, chatId, event, react
  *   getSocket: () => import("@whiskeysockets/baileys").WASocket | null,
  *   chatId: string,
  *   text: string,
+ *   store?: import("../../store.js").Store,
  * }} input
  * @returns {Promise<void>}
  */
-export async function sendOrQueueWhatsAppText({ getSocket, chatId, text }) {
+export async function sendOrQueueWhatsAppText({ getSocket, chatId, text, store }) {
   const sock = getSocket();
   if (!sock) {
-    await enqueueWhatsAppOutbound(chatId, { kind: "text", text });
+    await enqueueWhatsAppOutbound(chatId, { kind: "text", text }, store);
     return;
   }
 
@@ -360,7 +370,7 @@ export async function sendOrQueueWhatsAppText({ getSocket, chatId, text }) {
     if (!isRecoverableWhatsAppSendError(error)) {
       throw error;
     }
-    await enqueueWhatsAppOutbound(chatId, { kind: "text", text });
+    await enqueueWhatsAppOutbound(chatId, { kind: "text", text }, store);
   }
 }
 
@@ -368,11 +378,12 @@ export async function sendOrQueueWhatsAppText({ getSocket, chatId, text }) {
  * @param {{
  *   getSocket: () => import("@whiskeysockets/baileys").WASocket | null,
  *   reactionRuntime?: import("../runtime/reaction-runtime.js").ReactionRuntime,
+ *   store?: import("../../store.js").Store,
  * }} input
  * @returns {Promise<void>}
  */
-export async function flushQueuedWhatsAppOutbound({ getSocket, reactionRuntime }) {
-  const queuedRows = await listQueuedWhatsAppOutbound();
+export async function flushQueuedWhatsAppOutbound({ getSocket, reactionRuntime, store }) {
+  const queuedRows = await listQueuedWhatsAppOutbound(store);
 
   for (const row of queuedRows) {
     const sock = getSocket();
@@ -382,7 +393,7 @@ export async function flushQueuedWhatsAppOutbound({ getSocket, reactionRuntime }
 
     try {
       await deliverQueuedPayload(sock, row.chatId, row.payload, reactionRuntime);
-      await deleteQueuedWhatsAppOutbound(row.id);
+      await deleteQueuedWhatsAppOutbound(row.id, store);
     } catch (error) {
       if (isRecoverableWhatsAppSendError(error)) {
         return;

@@ -228,6 +228,7 @@ function serializeTransportError(error) {
 /**
  * @typedef {{
  *   createConnectionSupervisor?: typeof createWhatsAppConnectionSupervisor,
+ *   outboundStore?: import("../store.js").Store,
  * }} CreateWhatsAppTransportOptions
  */
 
@@ -241,6 +242,7 @@ export async function createWhatsAppTransport(options = {}) {
   const selectRuntime = createSelectRuntime();
   const reactionRuntime = createReactionRuntime();
   const createConnectionSupervisor = options.createConnectionSupervisor ?? createWhatsAppConnectionSupervisor;
+  const outboundStore = options.outboundStore;
 
   /** @type {(turn: ChatTurn) => Promise<void>} */
   let onTurn = async () => {};
@@ -280,6 +282,7 @@ export async function createWhatsAppTransport(options = {}) {
     flushQueuedPromise = flushQueuedWhatsAppOutbound({
       getSocket: () => currentSocket,
       reactionRuntime,
+      ...(outboundStore ? { store: outboundStore } : {}),
     }).finally(() => {
       flushQueuedPromise = null;
     });
@@ -391,6 +394,7 @@ export async function createWhatsAppTransport(options = {}) {
         getSocket: () => hasOpenConnection ? currentSocket : null,
         chatId,
         text,
+        ...(outboundStore ? { store: outboundStore } : {}),
       });
     },
 
@@ -403,6 +407,7 @@ export async function createWhatsAppTransport(options = {}) {
         chatId,
         event,
         reactionRuntime,
+        ...(outboundStore ? { store: outboundStore } : {}),
       });
     },
 
