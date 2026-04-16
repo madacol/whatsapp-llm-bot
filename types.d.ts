@@ -609,7 +609,7 @@ type AgentIOHooks = {
 
 type HarnessSessionRef = {
   id: string;
-  kind: "native" | "claude-sdk" | "codex";
+  kind: "native" | "claude-sdk" | "codex" | "pi";
 };
 
 type HarnessCapabilities = {

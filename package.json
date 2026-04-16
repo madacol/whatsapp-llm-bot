@@ -26,6 +26,7 @@
     "dependencies": {
         "@anthropic-ai/claude-agent-sdk": "^0.2.76",
         "@electric-sql/pglite": "^0.3.3",
+        "@mariozechner/pi-coding-agent": "0.67.3",
         "@mozilla/readability": "^0.6.0",
         "@openai/codex-sdk": "^0.116.0",
         "@resvg/resvg-js": "^2.6.2",
@@ -43,5 +44,11 @@
         "@types/node": "^20.19.0",
         "@types/nodemailer": "^7.0.11",
         "typescript": "^5.8.3"
+    },
+    "pnpm": {
+        "overrides": {
+            "@mariozechner/pi-agent-core": "0.67.3",
+            "@mariozechner/pi-ai": "0.67.3"
+        }
     }
 }

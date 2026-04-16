@@ -1,5 +1,6 @@
 import { createNativeHarness } from "./native.js";
 import { createCodexHarness } from "./codex.js";
+import { createPiHarness } from "./pi.js";
 
 /** @type {Map<string, () => AgentHarness>} */
 const registry = new Map();
@@ -10,6 +11,7 @@ const instances = new Map();
 function registerDefaultHarnesses() {
   registry.set("native", createNativeHarness);
   registry.set("codex", createCodexHarness);
+  registry.set("pi", createPiHarness);
 }
 
 registerDefaultHarnesses();

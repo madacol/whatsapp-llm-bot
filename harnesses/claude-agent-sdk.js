@@ -1230,12 +1230,12 @@ function isSubagentEvent(event) {
 
 /**
  * Build a debug label for an SDK event (used for log.debug tracing).
- * @param {{ type: string, message?: { content?: Array<Record<string, unknown>> } }} event
+ * @param {import("@anthropic-ai/claude-agent-sdk").SDKMessage} event
  * @returns {string}
  */
 function getSdkEventLabel(event) {
   if (event.type === "assistant" && event.message?.content) {
-    const toolBlock = event.message.content.find(b => b.type === "tool_use");
+    const toolBlock = event.message.content.find((block) => block.type === "tool_use");
     if (toolBlock) {
       const input = /** @type {Record<string, unknown>} */ (toolBlock.input ?? {});
       const inputSummary = String(
@@ -1253,7 +1253,7 @@ function getSdkEventLabel(event) {
  * Sub-agent events (parent_tool_use_id != null) are displayed with an "*Agent:*"
  * prefix but not persisted to the conversation history — the SDK manages
  * sub-agent history internally.
- * @param {{ message: { content?: Array<Record<string, unknown>>, usage?: Record<string, number> }, parent_tool_use_id?: string | null }} event
+ * @param {import("@anthropic-ai/claude-agent-sdk").SDKAssistantMessage} event
  * @param {SdkEventContext} ctx
  */
 async function handleAssistantEvent(event, ctx) {

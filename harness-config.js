@@ -1,7 +1,7 @@
 import { getRootDb } from "./db.js";
 
 /**
- * @typedef {"claude-agent-sdk" | "codex" | "native"} SupportedHarnessName
+ * @typedef {"claude-agent-sdk" | "codex" | "native" | "pi"} SupportedHarnessName
  */
 
 /** @type {Set<string>} */
@@ -130,6 +130,7 @@ export function normalizeHarnessConfig(value, currentHarness) {
   if (typeof value.model === "string") {
     const targetHarness = classifyLegacyModel(value.model)
       ?? (currentHarness === "claude-agent-sdk" || currentHarness === "codex"
+        || currentHarness === "pi"
         ? currentHarness
         : null);
     if (targetHarness) {
@@ -141,7 +142,8 @@ export function normalizeHarnessConfig(value, currentHarness) {
   }
 
   if (typeof value.reasoningEffort === "string") {
-    const scoped = ensureScopedConfig(normalized, "claude-agent-sdk");
+    const targetHarness = currentHarness === "pi" ? "pi" : "claude-agent-sdk";
+    const scoped = ensureScopedConfig(normalized, targetHarness);
     if (typeof scoped.reasoningEffort !== "string") {
       scoped.reasoningEffort = value.reasoningEffort;
     }
