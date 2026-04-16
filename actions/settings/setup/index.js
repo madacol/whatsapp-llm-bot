@@ -6,7 +6,7 @@ import {
   normalizeHarnessConfig,
 } from "../../../harness-config.js";
 import { getChatOrThrow } from "../../../store.js";
-import { getClaudeSdkModels, getCodexAvailableModels, listHarnesses, resolveHarness } from "#harnesses";
+import { getClaudeSdkModels, getCodexAvailableModels, getPiAvailableModels, listHarnesses, resolveHarness } from "#harnesses";
 import {
   getMultiSelectableOptions,
   getSelectableOptions,
@@ -95,6 +95,16 @@ async function getHarnessModelOptions(harnessName) {
       { id: "off", label: "Default" },
     ];
   }
+  if (harnessName === "pi") {
+    const availableModels = await getPiAvailableModels();
+    if (availableModels.length === 0) {
+      return [];
+    }
+    return [
+      ...availableModels.map((model) => ({ id: model.id, label: model.label })),
+      { id: "off", label: "Default" },
+    ];
+  }
   return [];
 }
 
@@ -108,6 +118,9 @@ function getHarnessModelQuestion(harnessName) {
   }
   if (harnessName === "codex") {
     return "Choose Codex model";
+  }
+  if (harnessName === "pi") {
+    return "Choose Pi model";
   }
   return "Choose harness model";
 }
@@ -127,6 +140,11 @@ function formatHarnessModelSummary(harnessName, modelValue) {
     return modelValue === "off"
       ? "Codex model reset to default."
       : `Codex model set to \`${modelValue}\``;
+  }
+  if (harnessName === "pi") {
+    return modelValue === "off"
+      ? "Pi model reset to default."
+      : `Pi model set to \`${modelValue}\``;
   }
   return modelValue === "off"
     ? `${harnessName} model reset to default.`

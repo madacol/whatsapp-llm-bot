@@ -51,7 +51,7 @@ function isWhatsAppWorkspacePresentationRole(value) {
  * @returns {value is HarnessSessionRef["kind"]}
  */
 function isHarnessSessionKind(value) {
-  return value === "native" || value === "claude-sdk" || value === "codex";
+  return value === "native" || value === "claude-sdk" || value === "codex" || value === "pi";
 }
 
 /**
