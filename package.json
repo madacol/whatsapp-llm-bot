@@ -34,6 +34,7 @@
         "diff": "^8.0.3",
         "dotenv": "^16.5.0",
         "linkedom": "^0.18.12",
+        "mathjax-full": "^3.2.2",
         "nodemailer": "^8.0.1",
         "openai": "^4.104.0",
         "sharp": "^0.34.5",

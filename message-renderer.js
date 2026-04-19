@@ -9,6 +9,7 @@
 import { basename } from "node:path";
 import { renderCodeToImages, renderDiffToImages, renderTableToImages, renderUnifiedDiffToImages, MIN_LINES_FOR_IMAGE, MIN_ROWS_FOR_TABLE_IMAGE } from "./code-image-renderer.js";
 import { createLogger } from "./logger.js";
+import { splitDisplayMathBlocks } from "./markdown-display-math.js";
 import { splitEmbeddedMarkdownImages } from "./markdown-embedded-images.js";
 import { readBlockBuffer } from "./media-store.js";
 import { formatPlanStatusSymbol, normalizePlanStatusMarker } from "./plan-status-formatting.js";
@@ -472,22 +473,35 @@ async function renderMarkdownBlock(text, prefix, instructions) {
             textBuffer += "\n" + seg.text + "\n";
           }
         } else {
-          const inlineSegments = await splitEmbeddedMarkdownImages(seg.text);
-          for (const inlineSegment of inlineSegments) {
-            if (inlineSegment.kind === "image") {
+          const mathSegments = await splitDisplayMathBlocks(seg.text);
+          for (const mathSegment of mathSegments) {
+            if (mathSegment.kind === "image") {
               flushText();
               instructions.push({
                 kind: "image",
-                image: inlineSegment.image,
-                ...(inlineSegment.caption ? { caption: inlineSegment.caption } : {}),
+                image: mathSegment.image,
                 editable: false,
               });
               continue;
             }
 
-            const converted = markdownToWhatsApp(inlineSegment.text).trim();
-            if (converted) {
-              textBuffer += (textBuffer ? "\n" : "") + converted;
+            const inlineSegments = await splitEmbeddedMarkdownImages(mathSegment.text);
+            for (const inlineSegment of inlineSegments) {
+              if (inlineSegment.kind === "image") {
+                flushText();
+                instructions.push({
+                  kind: "image",
+                  image: inlineSegment.image,
+                  ...(inlineSegment.caption ? { caption: inlineSegment.caption } : {}),
+                  editable: false,
+                });
+                continue;
+              }
+
+              const converted = markdownToWhatsApp(inlineSegment.text).trim();
+              if (converted) {
+                textBuffer += (textBuffer ? "\n" : "") + converted;
+              }
             }
           }
         }
