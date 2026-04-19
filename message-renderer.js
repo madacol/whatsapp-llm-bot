@@ -7,10 +7,11 @@
  */
 
 import { basename } from "node:path";
-import { renderCodeToImages, renderDiffToImages, renderTableToImages, renderUnifiedDiffToImages, MIN_LINES_FOR_IMAGE, MIN_ROWS_FOR_TABLE_IMAGE } from "./code-image-renderer.js";
+import { renderCodeToImages, renderDiffToImages, renderTableToImages, renderUnifiedDiffToImages, MIN_LINES_FOR_IMAGE } from "./code-image-renderer.js";
 import { createLogger } from "./logger.js";
-import { splitDisplayMathBlocks } from "./markdown-display-math.js";
-import { splitEmbeddedMarkdownImages } from "./markdown-embedded-images.js";
+import { renderDisplayMathToImage } from "./math-image-renderer.js";
+import { resolveEmbeddedMarkdownImage } from "./markdown-embedded-images.js";
+import { segmentMarkdown } from "./markdown-segments.js";
 import { readBlockBuffer } from "./media-store.js";
 import { formatPlanStatusSymbol, normalizePlanStatusMarker } from "./plan-status-formatting.js";
 
@@ -348,66 +349,6 @@ export async function renderBlocks(blocks, prefix) {
   return instructions;
 }
 
-/** Regex matching the separator row of a markdown table. */
-const TABLE_SEP_RE = /^\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*$/;
-
-/**
- * Split a text segment into interleaved text and table segments.
- * A markdown table is: header row → separator row → 1+ data rows,
- * where every line contains at least one `|`.
- * @param {string} text
- * @returns {Array<{ kind: "text" | "table", text: string }>}
- */
-export function splitTables(text) {
-  const lines = text.split("\n");
-  /** @type {Array<{ kind: "text" | "table", text: string }>} */
-  const segments = [];
-  /** @type {string[]} */
-  let textLines = [];
-
-  const flushTextLines = () => {
-    if (textLines.length > 0) {
-      segments.push({ kind: "text", text: textLines.join("\n") });
-      textLines = [];
-    }
-  };
-
-  let i = 0;
-  while (i < lines.length) {
-    // Check for table start: line with |, followed by separator line
-    if (
-      i + 2 < lines.length &&
-      lines[i].includes("|") &&
-      TABLE_SEP_RE.test(lines[i + 1])
-    ) {
-      // Collect table lines
-      /** @type {string[]} */
-      const tableLines = [lines[i], lines[i + 1]];
-      let j = i + 2;
-      while (j < lines.length && lines[j].includes("|") && !TABLE_SEP_RE.test(lines[j])) {
-        tableLines.push(lines[j]);
-        j++;
-      }
-
-      const dataRowCount = tableLines.length - 2; // minus header and separator
-      if (dataRowCount >= MIN_ROWS_FOR_TABLE_IMAGE) {
-        flushTextLines();
-        segments.push({ kind: "table", text: tableLines.join("\n") });
-      } else {
-        // Too small for image — keep as text
-        textLines.push(...tableLines);
-      }
-      i = j;
-    } else {
-      textLines.push(lines[i]);
-      i++;
-    }
-  }
-  flushTextLines();
-
-  return segments;
-}
-
 /**
  * Render a markdown block: split into text segments, fenced code blocks,
  * and tables. Render eligible code and tables as images, convert markdown
@@ -417,12 +358,6 @@ export function splitTables(text) {
  * @param {SendInstruction[]} instructions - mutated, appended to
  */
 async function renderMarkdownBlock(text, prefix, instructions) {
-  // Split into text segments and fenced code blocks (not inline code).
-  // Requires newline after opening ``` to distinguish from inline triple backticks.
-  const parts = text.split(/(```\w*\n[\s\S]*?```)/g);
-
-  // Accumulate text segments and non-image code blocks into a single message.
-  // Flush the buffer whenever we hit an image-rendered code block or table.
   let textBuffer = "";
 
   const flushText = () => {
@@ -433,79 +368,104 @@ async function renderMarkdownBlock(text, prefix, instructions) {
     textBuffer = "";
   };
 
-  for (const part of parts) {
-    const codeMatch = part.match(/^```(\w*)\n([\s\S]*?)```$/);
-    if (codeMatch) {
-      const lang = codeMatch[1] || "";
-      const code = codeMatch[2].trimEnd();
-      if (lang && shouldRenderAsImage(lang, code)) {
+  /**
+   * @param {string} fragment
+   * @returns {void}
+   */
+  const appendTextFragment = (fragment) => {
+    const trimmed = fragment.trim();
+    if (trimmed) {
+      textBuffer += (textBuffer ? "\n" : "") + trimmed;
+    }
+  };
+
+  /**
+   * @param {string} markdown
+   * @returns {void}
+   */
+  const appendMarkdownText = (markdown) => {
+    appendTextFragment(markdownToWhatsApp(markdown));
+  };
+
+  for (const segment of segmentMarkdown(text)) {
+    switch (segment.kind) {
+      case "text":
+        appendMarkdownText(segment.text);
+        break;
+
+      case "code_block":
+        if (segment.language && shouldRenderAsImage(segment.language, segment.code)) {
+          flushText();
+          try {
+            const images = await renderCodeToImages(segment.code, segment.language);
+            for (const image of images) {
+              instructions.push({
+                kind: "image",
+                image,
+                ...(segment.language && { caption: segment.language }),
+                editable: false,
+              });
+            }
+          } catch (error) {
+            log.error("Markdown code image rendering failed, falling back to text:", error);
+            appendTextFragment("```\n" + segment.code + "\n```");
+          }
+          break;
+        }
+
+        appendTextFragment("```\n" + segment.code + "\n```");
+        break;
+
+      case "table":
         flushText();
         try {
-          const images = await renderCodeToImages(code, lang);
+          const images = renderTableToImages(segment.text);
           for (const image of images) {
             instructions.push({
               kind: "image",
               image,
-              ...(lang && { caption: lang }),
               editable: false,
             });
           }
-        } catch (err) {
-          log.error("Markdown code image rendering failed, falling back to text:", err);
-          textBuffer += "\n```\n" + code + "\n```\n";
+        } catch (error) {
+          log.error("Table image rendering failed, falling back to text:", error);
+          appendMarkdownText(segment.text);
         }
-      } else {
-        textBuffer += "\n```\n" + code + "\n```\n";
-      }
-    } else {
-      // Process text segment: split out tables, render remaining as WhatsApp text
-      const tableSegments = splitTables(part);
-      for (const seg of tableSegments) {
-        if (seg.kind === "table") {
-          flushText();
-          try {
-            const images = renderTableToImages(seg.text);
-            for (const image of images) {
-              instructions.push({ kind: "image", image, editable: false });
-            }
-          } catch (err) {
-            log.error("Table image rendering failed, falling back to text:", err);
-            textBuffer += "\n" + seg.text + "\n";
-          }
-        } else {
-          const mathSegments = await splitDisplayMathBlocks(seg.text);
-          for (const mathSegment of mathSegments) {
-            if (mathSegment.kind === "image") {
-              flushText();
-              instructions.push({
-                kind: "image",
-                image: mathSegment.image,
-                editable: false,
-              });
-              continue;
-            }
+        break;
 
-            const inlineSegments = await splitEmbeddedMarkdownImages(mathSegment.text);
-            for (const inlineSegment of inlineSegments) {
-              if (inlineSegment.kind === "image") {
-                flushText();
-                instructions.push({
-                  kind: "image",
-                  image: inlineSegment.image,
-                  ...(inlineSegment.caption ? { caption: inlineSegment.caption } : {}),
-                  editable: false,
-                });
-                continue;
-              }
-
-              const converted = markdownToWhatsApp(inlineSegment.text).trim();
-              if (converted) {
-                textBuffer += (textBuffer ? "\n" : "") + converted;
-              }
-            }
-          }
+      case "display_math":
+        flushText();
+        try {
+          instructions.push({
+            kind: "image",
+            image: await renderDisplayMathToImage(segment.tex),
+            editable: false,
+          });
+        } catch (error) {
+          log.error("Display math rendering failed, falling back to text:", error);
+          appendMarkdownText(segment.rawText);
         }
-      }
+        break;
+
+      case "embedded_image":
+        flushText();
+        try {
+          const image = await resolveEmbeddedMarkdownImage(segment.target);
+          if (!image) {
+            appendMarkdownText(segment.rawText);
+            break;
+          }
+          instructions.push({
+            kind: "image",
+            image,
+            ...(segment.caption ? { caption: segment.caption } : {}),
+            editable: false,
+          });
+        } catch (error) {
+          log.error("Embedded markdown image rendering failed, falling back to text:", error);
+          appendMarkdownText(segment.rawText);
+        }
+        break;
     }
   }
   flushText();

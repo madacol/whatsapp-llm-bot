@@ -317,6 +317,51 @@ Second block:
     );
   });
 
+  it("renders mixed markdown segments in order across tables, math, and embedded images", async () => {
+    const { sock, sent } = createMockSock();
+    const imagePath = path.resolve("tests/fixtures/pizza.jpg");
+
+    await sendBlocks(sock, "test-chat", "llm", [{
+      type: "markdown",
+      text: [
+        "Intro",
+        "",
+        "| item | qty |",
+        "| --- | --- |",
+        "| apples | 2 |",
+        "| pears | 3 |",
+        "| plums | 4 |",
+        "",
+        "Between",
+        "",
+        "$$",
+        "R(r)=q\\left(1-e^{-kD_0 10^{-r}}\\right)",
+        "$$",
+        "",
+        "Then image",
+        "",
+        `![Pizza](${imagePath})`,
+        "",
+        "Done",
+      ].join("\n"),
+    }]);
+
+    const imageMessages = sent.filter((entry) => entry.msg.image != null);
+    const textPayloads = sent
+      .filter((entry) => typeof entry.msg.text === "string")
+      .map((entry) => /** @type {string} */ (entry.msg.text));
+
+    assert.equal(imageMessages.length, 3, "Should render table, math, and embedded image as separate images");
+    assert.equal(imageMessages[2].msg.caption, "Pizza", "Embedded markdown image should preserve its alt text as caption");
+    assert.ok(textPayloads.some((text) => text.includes("Intro")), "Should preserve text before the table");
+    assert.ok(textPayloads.some((text) => text.includes("Between")), "Should preserve text between the table and math");
+    assert.ok(textPayloads.some((text) => text.includes("Then image")), "Should preserve text before the embedded image");
+    assert.ok(textPayloads.some((text) => text.includes("Done")), "Should preserve trailing text");
+    assert.ok(textPayloads.every((text) => !text.includes("| item | qty |")), "Should not leak rendered table markdown into text messages");
+    assert.ok(textPayloads.every((text) => !text.includes("R(r)=q\\left")), "Should not leak rendered display math into text messages");
+    assert.ok(textPayloads.every((text) => !text.includes(imagePath)), "Should not leak embedded image paths into text messages");
+  });
+
   it("omits absolute paths when rendering local file links for WhatsApp", async () => {
     const { sock, sent } = createMockSock();
 

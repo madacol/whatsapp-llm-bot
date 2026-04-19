@@ -1,17 +1,14 @@
 import { readFile } from "node:fs/promises";
 import { basename } from "node:path";
 import { Resvg } from "@resvg/resvg-js";
-import { createLogger } from "./logger.js";
-
-const log = createLogger("markdown-embedded-images");
 const EMBEDDED_MARKDOWN_IMAGE_RE = /!\[([^\]]*)\]\(([^)]+)\)/gi;
 const LOCAL_IMAGE_EXTENSIONS = new Set([".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".svg"]);
 
 /**
  * @typedef {
  *   | { kind: "text", text: string }
- *   | { kind: "image", image: Buffer, caption?: string }
- * } MarkdownInlineSegment
+ *   | { kind: "embedded_image", target: string, rawText: string, caption?: string }
+ * } MarkdownEmbeddedImageSegment
  */
 
 /**
@@ -103,7 +100,7 @@ function isLocalImageTarget(target) {
  * @param {string} target
  * @returns {Promise<Buffer | null>}
  */
-async function resolveEmbeddedMarkdownImage(target) {
+export async function resolveEmbeddedMarkdownImage(target) {
   if (isInlineDataUrl(target)) {
     const { mimeType, buffer } = parseDataUrl(target);
     if (!mimeType.startsWith("image/")) {
@@ -123,13 +120,13 @@ async function resolveEmbeddedMarkdownImage(target) {
 
 /**
  * Split a text run into plain text and embedded markdown image segments.
- * `data:image/...` payloads and absolute local image paths are turned into
- * outbound image segments here.
+ * `data:image/...` payloads and absolute local image paths are recognized here,
+ * but resolved into buffers later by the renderer.
  * @param {string} text
- * @returns {Promise<MarkdownInlineSegment[]>}
+ * @returns {MarkdownEmbeddedImageSegment[]}
  */
-export async function splitEmbeddedMarkdownImages(text) {
-  /** @type {MarkdownInlineSegment[]} */
+export function splitEmbeddedMarkdownImages(text) {
+  /** @type {MarkdownEmbeddedImageSegment[]} */
   const segments = [];
   let lastIndex = 0;
 
@@ -143,21 +140,12 @@ export async function splitEmbeddedMarkdownImages(text) {
       segments.push({ kind: "text", text: text.slice(lastIndex, matchIndex) });
     }
 
-    try {
-      const image = await resolveEmbeddedMarkdownImage(target);
-      if (image) {
-        segments.push({
-          kind: "image",
-          image,
-          ...(alt ? { caption: alt } : {}),
-        });
-      } else {
-        segments.push({ kind: "text", text: fullMatch });
-      }
-    } catch (error) {
-      log.error("Embedded markdown image rendering failed, falling back to text:", error);
-      segments.push({ kind: "text", text: fullMatch });
-    }
+    segments.push({
+      kind: "embedded_image",
+      target,
+      rawText: fullMatch,
+      ...(alt ? { caption: alt } : {}),
+    });
 
     lastIndex = matchIndex + fullMatch.length;
   }
