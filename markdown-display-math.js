@@ -1,12 +1,7 @@
-import { createLogger } from "./logger.js";
-import { renderDisplayMathToImage } from "./math-image-renderer.js";
-
-const log = createLogger("markdown-display-math");
-
 /**
  * @typedef {
  *   | { kind: "text", text: string }
- *   | { kind: "image", image: Buffer }
+ *   | { kind: "display_math", tex: string, rawText: string }
  * } MarkdownDisplayMathSegment
  */
 
@@ -54,13 +49,13 @@ function parseSingleLineDisplayMath(line) {
 }
 
 /**
- * Split a markdown text run into plain text and rendered display-math images.
+ * Split a markdown text run into plain text and display-math segments.
  * Only block-style `$$...$$` and `\[...\]` math is supported to avoid false
  * positives with currency and ordinary prose.
  * @param {string} text
- * @returns {Promise<MarkdownDisplayMathSegment[]>}
+ * @returns {MarkdownDisplayMathSegment[]}
  */
-export async function splitDisplayMathBlocks(text) {
+export function splitDisplayMathBlocks(text) {
   const lines = text.split("\n");
   /** @type {MarkdownDisplayMathSegment[]} */
   const segments = [];
@@ -79,15 +74,11 @@ export async function splitDisplayMathBlocks(text) {
     const singleLineMath = parseSingleLineDisplayMath(lines[index]);
     if (singleLineMath) {
       flushText();
-      try {
-        segments.push({
-          kind: "image",
-          image: await renderDisplayMathToImage(singleLineMath.tex),
-        });
-      } catch (error) {
-        log.error("Display math rendering failed, falling back to text:", error);
-        textLines.push(lines[index]);
-      }
+      segments.push({
+        kind: "display_math",
+        tex: singleLineMath.tex,
+        rawText: lines[index],
+      });
       index += singleLineMath.length;
       continue;
     }
@@ -114,18 +105,11 @@ export async function splitDisplayMathBlocks(text) {
     }
 
     flushText();
-
-    try {
-      segments.push({
-        kind: "image",
-        image: await renderDisplayMathToImage(mathLines.join("\n").trim()),
-      });
-    } catch (error) {
-      log.error("Display math rendering failed, falling back to text:", error);
-      textLines.push(lines[index]);
-      textLines.push(...mathLines);
-      textLines.push(lines[closingIndex]);
-    }
+    segments.push({
+      kind: "display_math",
+      tex: mathLines.join("\n").trim(),
+      rawText: lines.slice(index, closingIndex + 1).join("\n"),
+    });
 
     index = closingIndex + 1;
   }
