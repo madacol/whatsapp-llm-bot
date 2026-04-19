@@ -282,6 +282,41 @@ Second block:
     );
   });
 
+  it("renders display math blocks in markdown as WhatsApp images", async () => {
+    const { sock, sent } = createMockSock();
+
+    await sendBlocks(sock, "test-chat", "llm", [{
+      type: "markdown",
+      text: [
+        "Before",
+        "",
+        "$$",
+        "\\text{Risk after cleaning }R(r)=q\\left(1-e^{-kD_0 10^{-r}}\\right)",
+        "$$",
+        "",
+        "After",
+      ].join("\n"),
+    }]);
+
+    const imageMessages = sent.filter((entry) => entry.msg.image != null);
+    const textMessages = sent.filter((entry) => typeof entry.msg.text === "string");
+
+    assert.equal(imageMessages.length, 1, "Should send display math as an image");
+    assert.ok(Buffer.isBuffer(imageMessages[0].msg.image), "Math render should produce a PNG buffer");
+    assert.ok(
+      textMessages.some((entry) => /** @type {string} */ (entry.msg.text).includes("Before")),
+      "Should preserve text before the math block",
+    );
+    assert.ok(
+      textMessages.some((entry) => /** @type {string} */ (entry.msg.text).includes("After")),
+      "Should preserve text after the math block",
+    );
+    assert.ok(
+      textMessages.every((entry) => !/** @type {string} */ (entry.msg.text).includes("\\text{Risk after cleaning }")),
+      "Should not leak raw LaTeX into WhatsApp text messages",
+    );
+  });
+
   it("omits absolute paths when rendering local file links for WhatsApp", async () => {
     const { sock, sent } = createMockSock();
 
