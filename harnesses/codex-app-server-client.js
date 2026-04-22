@@ -222,8 +222,8 @@ export async function openCodexAppServerConnection(options = {}) {
 
   await sendRequest("initialize", {
     clientInfo: {
-      name: "whatsapp-llm-bot",
-      title: "WhatsApp LLM Bot",
+      name: "madabot",
+      title: "Madabot",
       version: "1.0.0",
     },
     capabilities: {

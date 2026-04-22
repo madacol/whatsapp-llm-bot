@@ -95,7 +95,7 @@ describe("startCodexAppServerRun", () => {
         params: {
           cwd: "/repo/project",
           approvalPolicy: "on-request",
-          serviceName: "whatsapp-llm-bot",
+          serviceName: "madabot",
         },
       },
       {
