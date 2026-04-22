@@ -14,18 +14,14 @@ describe("buildExternalSystemPrompt", () => {
     );
   });
 
-  it("does not add the app default prompt to Codex by default", () => {
-    assert.equal(
-      buildExternalSystemPrompt(null, undefined, "codex"),
-      "",
-    );
-  });
-
-  it("does not add the app default prompt to Claude SDK by default", () => {
-    assert.equal(
-      buildExternalSystemPrompt(null, undefined, "claude-agent-sdk"),
-      "",
-    );
+  it("does not add the app default prompt to non-native harnesses by default", () => {
+    for (const harnessName of ["codex", "pi", "claude-agent-sdk"]) {
+      assert.equal(
+        buildExternalSystemPrompt(null, undefined, harnessName),
+        "",
+        `expected ${harnessName} to exclude the app default prompt`,
+      );
+    }
   });
 
   it("still applies explicit chat or persona prompts for SDK harnesses", () => {
