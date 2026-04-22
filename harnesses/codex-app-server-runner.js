@@ -90,7 +90,7 @@ export async function startCodexAppServerRun(input, deps = {}) {
     ...(input.runConfig?.model && { model: input.runConfig.model }),
     ...(input.runConfig?.workdir && { cwd: input.runConfig.workdir }),
     ...(approvalPolicy && { approvalPolicy }),
-    serviceName: "whatsapp-llm-bot",
+    serviceName: "madabot",
   };
 
   try {

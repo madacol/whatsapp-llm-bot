@@ -3,7 +3,7 @@ import { resolvePathToContentBlock } from "../../../outbound/path-to-content-blo
 
 export default /** @type {defineAction} */ ((x) => x)({
   name: "send_path",
-  description: "Send a local file or directory path back to WhatsApp. Directories are zipped first.",
+  description: "Send a local file or directory path back to the user. Directories are zipped first.",
   parameters: {
     type: "object",
     properties: {
@@ -15,10 +15,10 @@ export default /** @type {defineAction} */ ((x) => x)({
     required: ["path"],
   },
   formatToolCall: ({ path: inputPath }) => `Sending ${typeof inputPath === "string" ? path.basename(inputPath) : "path"}`,
-  instructions: `Use send_path when you want to send a generated file or folder back to WhatsApp.
-- Image, audio, and video paths are sent as their native WhatsApp media types.
+  instructions: `Use send_path when you want to send a generated file or folder back to the user.
+- Image, audio, and video paths are sent as native media types.
 - Directories are zipped first and sent as files.
-- Any other file is sent as a generic WhatsApp document.`,
+- Any other file is sent as a generic document.`,
   permissions: {
     requireMaster: true,
     autoExecute: true,
