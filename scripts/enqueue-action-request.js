@@ -3,7 +3,7 @@
 import { ACTION_REQUESTS_ENV_VAR, writeQueuedActionRequest } from "../action-request-runtime.js";
 
 /**
- * @typedef {"send-path" | "generate-image" | "generate-video"} ActionCommand
+ * @typedef {"generate-image" | "generate-video"} ActionCommand
  */
 
 /**
@@ -22,7 +22,7 @@ import { ACTION_REQUESTS_ENV_VAR, writeQueuedActionRequest } from "../action-req
 async function main(argv) {
   const [command, ...args] = argv;
   if (!isActionCommand(command)) {
-    throw new Error("Usage: enqueue-action-request.js <send-path|generate-image|generate-video> [options]");
+    throw new Error("Usage: enqueue-action-request.js <generate-image|generate-video> [options]");
   }
 
   const requestsDir = process.env[ACTION_REQUESTS_ENV_VAR];
@@ -39,7 +39,7 @@ async function main(argv) {
  * @returns {command is ActionCommand}
  */
 function isActionCommand(command) {
-  return command === "send-path" || command === "generate-image" || command === "generate-video";
+  return command === "generate-image" || command === "generate-video";
 }
 
 /**
@@ -50,16 +50,6 @@ function isActionCommand(command) {
  */
 function buildQueuedActionRequest(command, args, cwd) {
   const options = parseOptions(args);
-
-  if (command === "send-path") {
-    const targetPath = requireStringOption(options, "path");
-    return {
-      kind: "whatsapp-action-request",
-      action: "send_path",
-      arguments: { path: targetPath },
-      cwd,
-    };
-  }
 
   if (command === "generate-image") {
     const prompt = requireStringOption(options, "prompt");

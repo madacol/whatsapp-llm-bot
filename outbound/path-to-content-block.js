@@ -95,7 +95,7 @@ async function stageDirectoryAsZip(resolvedPath, displayName, deps) {
   const archive = deps.archiveDirectoryToZip ?? archiveDirectoryToZip;
   const readFilePath = deps.readFilePath ?? readFile;
   const writeStoredMedia = deps.writeStoredMedia ?? writeMedia;
-  const tempDir = await makeTempDir(path.join(os.tmpdir(), "send-path-zip-"));
+  const tempDir = await makeTempDir(path.join(os.tmpdir(), "attachment-zip-"));
   const zipName = `${displayName}.zip`;
   const zipPath = path.join(tempDir, zipName);
 

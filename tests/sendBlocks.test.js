@@ -194,92 +194,64 @@ Second block:
     assert.ok(text.includes("_italic_"), "Italic should be converted to WhatsApp format");
   });
 
-  it("renders embedded markdown data-url images as WhatsApp images", async () => {
+  it("renders explicit markdown attachment directives for relative document paths", async () => {
     const { sock, sent } = createMockSock();
-    const svg = [
-      '<svg xmlns="http://www.w3.org/2000/svg" width="120" height="40">',
-      '<rect width="120" height="40" fill="white"/>',
-      '<text x="10" y="25" font-size="16">Barcode</text>',
-      "</svg>",
-    ].join("");
-    const dataUrl = `data:image/svg+xml;base64,${Buffer.from(svg).toString("base64")}`;
 
     await sendBlocks(sock, "test-chat", "llm", [{
       type: "markdown",
-      text: `Before\n\n![Barcode](${dataUrl})\n\nAfter`,
+      text: [
+        "Before",
+        "",
+        "```attachment",
+        "path: package.json",
+        "caption: Project manifest",
+        "```",
+        "",
+        "After",
+      ].join("\n"),
     }]);
 
-    const imageMessages = sent.filter(s => s.msg.image != null);
-    const textMessages = sent.filter(s => typeof s.msg.text === "string");
+    const documentMessages = sent.filter((entry) => entry.msg.document != null);
+    const textMessages = sent.filter((entry) => typeof entry.msg.text === "string");
 
-    assert.equal(imageMessages.length, 1, "Should send the embedded image as an image message");
-    assert.ok(Buffer.isBuffer(imageMessages[0].msg.image), "Embedded image should be sent as a Buffer");
-    assert.equal(imageMessages[0].msg.caption, "Barcode");
+    assert.equal(documentMessages.length, 1, "Should send one document message for the attachment directive");
+    assert.ok(Buffer.isBuffer(documentMessages[0].msg.document), "Attachment directive should send a document buffer");
+    assert.equal(documentMessages[0].msg.fileName, "package.json");
+    assert.equal(documentMessages[0].msg.caption, "Project manifest");
     assert.ok(
-      textMessages.some(m => /** @type {string} */ (m.msg.text).includes("Before")),
-      "Should preserve text before the embedded image",
+      textMessages.some((entry) => /** @type {string} */ (entry.msg.text).includes("Before")),
+      "Should preserve text before the attachment directive",
     );
     assert.ok(
-      textMessages.some(m => /** @type {string} */ (m.msg.text).includes("After")),
-      "Should preserve text after the embedded image",
+      textMessages.some((entry) => /** @type {string} */ (entry.msg.text).includes("After")),
+      "Should preserve text after the attachment directive",
     );
     assert.ok(
-      textMessages.every(m => !/** @type {string} */ (m.msg.text).includes("data:image")),
-      "Should not leak embedded image data URLs into text messages",
+      textMessages.every((entry) => !/** @type {string} */ (entry.msg.text).includes("path: package.json")),
+      "Should not leak attachment directive contents into text messages",
     );
   });
 
-  it("renders utf8 svg data-url images as WhatsApp images", async () => {
+  it("renders explicit markdown attachment directives for relative image paths", async () => {
     const { sock, sent } = createMockSock();
-    const svg = [
-      "<svg xmlns='http://www.w3.org/2000/svg' width='120' height='40'>",
-      "<rect width='120' height='40' fill='white'/>",
-      "<text x='10' y='25' font-size='16'>Barcode</text>",
-      "</svg>",
-    ].join("");
-    const dataUrl = `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
 
     await sendBlocks(sock, "test-chat", "llm", [{
       type: "markdown",
-      text: `![Barcode](${dataUrl})`,
+      text: [
+        "```attachment",
+        "path: tests/fixtures/pizza.jpg",
+        "caption: Pizza via directive",
+        "```",
+      ].join("\n"),
     }]);
 
-    const imageMessages = sent.filter(s => s.msg.image != null);
-    const textMessages = sent.filter(s => typeof s.msg.text === "string");
+    const imageMessages = sent.filter((entry) => entry.msg.image != null);
+    const textMessages = sent.filter((entry) => typeof entry.msg.text === "string");
 
-    assert.equal(imageMessages.length, 1, "Should send the utf8 SVG as an image message");
-    assert.ok(Buffer.isBuffer(imageMessages[0].msg.image), "UTF-8 SVG should be rasterized into a Buffer");
-    assert.equal(imageMessages[0].msg.caption, "Barcode");
-    assert.equal(textMessages.length, 0, "Should not fall back to a text message for utf8 SVG data URLs");
-  });
-
-  it("renders embedded markdown local image paths as WhatsApp images", async () => {
-    const { sock, sent } = createMockSock();
-    const imagePath = path.resolve("tests/fixtures/pizza.jpg");
-
-    await sendBlocks(sock, "test-chat", "llm", [{
-      type: "markdown",
-      text: `Before\n\n![Pizza](${imagePath})\n\nAfter`,
-    }]);
-
-    const imageMessages = sent.filter(s => s.msg.image != null);
-    const textMessages = sent.filter(s => typeof s.msg.text === "string");
-
-    assert.equal(imageMessages.length, 1, "Should send the embedded local image as an image message");
-    assert.ok(Buffer.isBuffer(imageMessages[0].msg.image), "Embedded local image should be sent as a Buffer");
-    assert.equal(imageMessages[0].msg.caption, "Pizza");
-    assert.ok(
-      textMessages.some(m => /** @type {string} */ (m.msg.text).includes("Before")),
-      "Should preserve text before the embedded local image",
-    );
-    assert.ok(
-      textMessages.some(m => /** @type {string} */ (m.msg.text).includes("After")),
-      "Should preserve text after the embedded local image",
-    );
-    assert.ok(
-      textMessages.every(m => !/** @type {string} */ (m.msg.text).includes(imagePath)),
-      "Should not leak embedded local image paths into text messages",
-    );
+    assert.equal(imageMessages.length, 1, "Should send one image message for an image attachment directive");
+    assert.ok(Buffer.isBuffer(imageMessages[0].msg.image), "Image attachment directive should send an image buffer");
+    assert.equal(imageMessages[0].msg.caption, "Pizza via directive");
+    assert.equal(textMessages.length, 0, "Attachment-only markdown should not fall back to text");
   });
 
   it("renders display math blocks in markdown as WhatsApp images", async () => {
@@ -340,7 +312,10 @@ Second block:
         "",
         "Then image",
         "",
-        `![Pizza](${imagePath})`,
+        "```attachment",
+        "path: tests/fixtures/pizza.jpg",
+        "caption: Pizza",
+        "```",
         "",
         "Done",
       ].join("\n"),

@@ -37,11 +37,11 @@ describe("executeQueuedActionRequests", () => {
   it("executes queued requests in filename order and returns the last tool result", async () => {
     const requestsDir = await fs.mkdtemp(path.join(os.tmpdir(), "action-requests-"));
     await fs.writeFile(
-      path.join(requestsDir, "0001-send.json"),
+      path.join(requestsDir, "0001-generate-video.json"),
       JSON.stringify({
         kind: "whatsapp-action-request",
-        action: "send_path",
-        arguments: { path: "./chart.png" },
+        action: "generate_video",
+        arguments: { prompt: "teaser trailer" },
         cwd: "/repo",
       }, null, 2),
       "utf8",
@@ -68,11 +68,11 @@ describe("executeQueuedActionRequests", () => {
       toolRuntime: /** @type {ToolRuntime} */ ({
         listTools: () => [
           {
-            name: "send_path",
-            description: "Send a path",
+            name: "generate_video",
+            description: "Generate a video",
             parameters: { type: "object", properties: {} },
             permissions: {},
-            formatToolCall: ({ path: filePath }) => `Sending ${typeof filePath === "string" ? filePath : "path"}`,
+            formatToolCall: ({ prompt }) => `Generating ${typeof prompt === "string" ? prompt : "video"}`,
           },
           {
             name: "generate_image",
@@ -82,13 +82,13 @@ describe("executeQueuedActionRequests", () => {
             formatToolCall: ({ prompt }) => `Generating ${typeof prompt === "string" ? prompt : "image"}`,
           },
         ],
-        getTool: async (name) => name === "send_path"
+        getTool: async (name) => name === "generate_video"
           ? {
-            name,
-            description: "Send a path",
+              name,
+            description: "Generate a video",
             parameters: { type: "object", properties: {} },
             permissions: {},
-            formatToolCall: ({ path: filePath }) => `Sending ${typeof filePath === "string" ? filePath : "path"}`,
+            formatToolCall: ({ prompt }) => `Generating ${typeof prompt === "string" ? prompt : "video"}`,
           }
           : {
             name,
@@ -99,8 +99,8 @@ describe("executeQueuedActionRequests", () => {
           },
         executeTool: async (actionName, _context, params, options) => {
           executed.push({ actionName, params, workdir: options.workdir ?? null });
-          if (actionName === "send_path") {
-            return { result: [{ type: "file", path: "chart.png", mime_type: "image/png", file_name: "chart.png" }], permissions: {} };
+          if (actionName === "generate_video") {
+            return { result: [{ type: "text", text: "video generated" }], permissions: {} };
           }
           return { result: [{ type: "text", text: "image generated" }], permissions: {} };
         },
@@ -119,8 +119,8 @@ describe("executeQueuedActionRequests", () => {
 
     assert.deepEqual(executed, [
       {
-        actionName: "send_path",
-        params: { path: "./chart.png" },
+        actionName: "generate_video",
+        params: { prompt: "teaser trailer" },
         workdir: "/repo",
       },
       {

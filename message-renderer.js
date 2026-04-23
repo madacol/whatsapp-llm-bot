@@ -10,9 +10,9 @@ import { basename } from "node:path";
 import { renderCodeToImages, renderDiffToImages, renderTableToImages, renderUnifiedDiffToImages, MIN_LINES_FOR_IMAGE } from "./code-image-renderer.js";
 import { createLogger } from "./logger.js";
 import { renderDisplayMathToImage } from "./math-image-renderer.js";
-import { resolveEmbeddedMarkdownImage } from "./markdown-embedded-images.js";
 import { segmentMarkdown } from "./markdown-segments.js";
 import { readBlockBuffer } from "./media-store.js";
+import { resolvePathToContentBlock } from "./outbound/path-to-content-block.js";
 import { formatPlanStatusSymbol, normalizePlanStatusMarker } from "./plan-status-formatting.js";
 
 const log = createLogger("message-renderer");
@@ -350,6 +350,50 @@ export async function renderBlocks(blocks, prefix) {
 }
 
 /**
+ * @param {ImageContentBlock | VideoContentBlock | AudioContentBlock | FileContentBlock} block
+ * @param {SendInstruction[]} instructions
+ * @param {{ caption?: string }} [options]
+ * @returns {Promise<void>}
+ */
+async function appendAttachmentInstruction(block, instructions, options = {}) {
+  switch (block.type) {
+    case "image":
+      instructions.push({
+        kind: "image",
+        image: await readBlockBuffer(block),
+        ...((options.caption ?? block.alt) ? { caption: options.caption ?? block.alt } : {}),
+        ...(block.quality === "hd" && { hd: true }),
+        editable: false,
+      });
+      return;
+    case "video":
+      instructions.push({
+        kind: "video",
+        video: await readBlockBuffer(block),
+        mimetype: block.mime_type || "video/mp4",
+        ...((options.caption ?? block.alt) ? { caption: options.caption ?? block.alt } : {}),
+      });
+      return;
+    case "audio":
+      instructions.push({
+        kind: "audio",
+        audio: await readBlockBuffer(block),
+        mimetype: block.mime_type || "audio/mp4",
+      });
+      return;
+    case "file":
+      instructions.push({
+        kind: "file",
+        file: await readBlockBuffer(block),
+        mimetype: block.mime_type || "application/octet-stream",
+        fileName: block.file_name || "file",
+        ...((options.caption ?? block.caption) ? { caption: options.caption ?? block.caption } : {}),
+      });
+      return;
+  }
+}
+
+/**
  * Render a markdown block: split into text segments, fenced code blocks,
  * and tables. Render eligible code and tables as images, convert markdown
  * formatting for WhatsApp.
@@ -447,22 +491,15 @@ async function renderMarkdownBlock(text, prefix, instructions) {
         }
         break;
 
-      case "embedded_image":
+      case "attachment_directive":
         flushText();
         try {
-          const image = await resolveEmbeddedMarkdownImage(segment.target);
-          if (!image) {
-            appendMarkdownText(segment.rawText);
-            break;
-          }
-          instructions.push({
-            kind: "image",
-            image,
+          const block = await resolvePathToContentBlock(segment.path);
+          await appendAttachmentInstruction(block, instructions, {
             ...(segment.caption ? { caption: segment.caption } : {}),
-            editable: false,
           });
         } catch (error) {
-          log.error("Embedded markdown image rendering failed, falling back to text:", error);
+          log.error("Attachment directive rendering failed, falling back to text:", error);
           appendMarkdownText(segment.rawText);
         }
         break;
