@@ -14,6 +14,7 @@ import { getCodexAvailableModels } from "./codex-models.js";
 import { augmentLatestUserMessageForTextHarness, renderMarkdownImageReference } from "./prompt-media.js";
 import { buildSdkErrorResponse, clearStaleHarnessSession, getHarnessRunErrorMessage } from "./harness-run-errors.js";
 import { createActionRequestRunState, executeQueuedActionRequests } from "../action-request-runtime.js";
+import { createCodexActionMcpBridge } from "./codex-action-mcp-bridge.js";
 import {
   getCodexSessionId,
   saveCodexSession,
@@ -277,6 +278,12 @@ export function createCodexHarness(deps = {}) {
     const effectiveRunConfig = await sanitizeRunConfig(session.chatId, runConfig);
     const effectiveWorkdir = effectiveRunConfig?.workdir ?? process.cwd();
     const actionRequestState = createActionRequestRunState(effectiveWorkdir);
+    const actionToolBridge = await createCodexActionMcpBridge({
+      toolRuntime: llmConfig.toolRuntime,
+      session,
+      hooks,
+      runConfig: effectiveRunConfig,
+    });
     /** @type {ActiveCodexRun | null} */
     let activeRun = null;
     try {
@@ -287,7 +294,8 @@ export function createCodexHarness(deps = {}) {
         messages,
         sessionId,
         runConfig: effectiveRunConfig,
-        env: { ...process.env, ...actionRequestState.env },
+        env: { ...process.env, ...actionRequestState.env, ...actionToolBridge.env },
+        codexArgs: actionToolBridge.codexArgs,
         hooks,
         isAborted: () => activeRun?.aborted ?? false,
       });
@@ -338,6 +346,7 @@ export function createCodexHarness(deps = {}) {
       };
     } finally {
       activeRuns.delete(session.chatId);
+      await actionToolBridge.close();
       await actionRequestState.cleanup();
     }
   }

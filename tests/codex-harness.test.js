@@ -431,6 +431,103 @@ describe("createCodexHarness", () => {
     }]);
   });
 
+  it("registers the direct send_path MCP bridge for Codex runs", async () => {
+    /** @type {Parameters<NonNullable<Parameters<typeof createCodexHarness>[0]["startRun"]>>[0] | null} */
+    let seenInput = null;
+    const harness = createCodexHarness({
+      getAvailableModels: async () => TEST_CODEX_MODELS,
+      startRun: async (input) => {
+        seenInput = input;
+        return {
+          abortController: new AbortController(),
+          done: Promise.resolve({
+            sessionId: null,
+            result: {
+              response: [{ type: "text", text: "ok" }],
+              messages: input.messages,
+              usage: { promptTokens: 0, completionTokens: 0, cachedTokens: 0, cost: 0 },
+            },
+          }),
+        };
+      },
+    });
+
+    const result = await harness.run({
+      session: {
+        chatId: "codex-chat-direct-send-path",
+        senderIds: ["master-user"],
+        context: /** @type {ExecuteActionContext} */ ({
+          chatId: "codex-chat-direct-send-path",
+          senderIds: ["master-user"],
+          senderJids: ["master-user@s.whatsapp.net"],
+          senderName: "Test User",
+          content: [],
+          getIsAdmin: async () => true,
+          send: async () => undefined,
+          reply: async () => undefined,
+          reactToMessage: async () => {},
+          select: async () => "",
+          confirm: async () => true,
+        }),
+        addMessage: async () => undefined,
+        updateToolMessage: async () => undefined,
+        harnessSession: null,
+        saveHarnessSession: async () => undefined,
+      },
+      llmConfig: {
+        llmClient: /** @type {LlmClient} */ ({}),
+        chatModel: null,
+        externalInstructions: "",
+        toolRuntime: /** @type {ToolRuntime} */ ({
+          listTools: () => [{
+            name: "send_path",
+            description: "Send a local file or directory path back to the user.",
+            instructions: "Use send_path when you want to send a generated file.",
+            parameters: {
+              type: "object",
+              properties: {
+                path: { type: "string" },
+              },
+              required: ["path"],
+            },
+            permissions: { autoExecute: true, autoContinue: true, requireMaster: true },
+          }],
+          getTool: async (name) => name === "send_path"
+            ? {
+              name: "send_path",
+              description: "Send a local file or directory path back to the user.",
+              instructions: "Use send_path when you want to send a generated file.",
+              parameters: {
+                type: "object",
+                properties: {
+                  path: { type: "string" },
+                },
+                required: ["path"],
+              },
+              permissions: { autoExecute: true, autoContinue: true, requireMaster: true },
+            }
+            : null,
+          executeTool: async () => ({
+            result: "ok",
+            permissions: { autoExecute: true, autoContinue: true, requireMaster: true },
+          }),
+        }),
+      },
+      messages: [{ role: "user", content: [{ type: "text", text: "Continue" }] }],
+      hooks: {},
+      runConfig: {
+        workdir: "/repo/project",
+        sandboxMode: "workspace-write",
+      },
+    });
+
+    assert.deepEqual(result.response, [{ type: "text", text: "ok" }]);
+    assert.ok(seenInput);
+    assert.ok(seenInput?.codexArgs?.some((value) => value.includes("mcp_servers.madabot_send_path.command=")));
+    assert.ok(seenInput?.codexArgs?.some((value) => value.includes("mcp_servers.madabot_send_path.args=")));
+    assert.ok(seenInput?.env?.MADABOT_CODEX_ACTION_MCP_SOCKET);
+  });
+
   it("ignores a stale Claude model in the shared chat row before starting Codex", async () => {
     const db = await createTestDb();
     await seedChat(db, "codex-chat-invalid-model", { enabled: true });
