@@ -216,13 +216,6 @@ export function createCodexEventDispatcher(input) {
       const lifecycle = normalized.fileChangeLifecycle;
       if (lifecycle.status === "started") {
         input.fileChangeTracker?.rememberStarted(lifecycle.itemId, lifecycle.changes);
-        for (const fileChange of lifecycle.changes) {
-          await input.hooks.onFileChange({
-            ...fileChange,
-            itemId: lifecycle.itemId,
-            stage: "proposed",
-          });
-        }
         return;
       }
 

@@ -189,6 +189,16 @@ export async function handleCodexAppServerRequest(message, hooks, options = {}) 
         options.fileChangeTracker?.markDecision(trackedChange.itemId, "accept");
         return buildApprovalDecision(true);
       }
+      for (const change of trackedChange.changes) {
+        if (!shouldEmitProposedFileChange(change)) {
+          continue;
+        }
+        await emitFileChange({
+          ...change,
+          itemId: trackedChange.itemId,
+          stage: "proposed",
+        });
+      }
       const details = trackedChange.changes.map((change) => change.path);
       const choice = await hooks.onAskUser("Allow *file changes*?", ["✅ Allow", "❌ Deny"], undefined, details);
       const allowed = choice === "✅ Allow";
@@ -233,4 +243,15 @@ export async function handleCodexAppServerRequest(message, hooks, options = {}) 
   }
 
   return {};
+}
+
+/**
+ * Only show a proposed file-change message when the proposal already carries
+ * renderable diff content. Summary-only proposals add noise without helping
+ * the approval decision.
+ * @param {{ diff?: string }} change
+ * @returns {boolean}
+ */
+function shouldEmitProposedFileChange(change) {
+  return typeof change.diff === "string" && change.diff.length > 0;
 }
