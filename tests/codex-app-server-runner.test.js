@@ -188,7 +188,7 @@ describe("handleCodexAppServerRequest", () => {
     assert.deepEqual(result, { decision: "accept" });
   });
 
-  it("prompts for risky tracked file changes and emits denied lifecycle events", async () => {
+  it("prompts for risky tracked file changes without emitting empty proposed lifecycle events", async () => {
     /** @type {Array<{ question: string, options: string[], details: string[] | undefined }>} */
     const prompts = [];
     /** @type {Array<Record<string, unknown>>} */
@@ -240,10 +240,83 @@ describe("handleCodexAppServerRequest", () => {
       stage: "denied",
     }]);
   });
+
+  it("emits proposed lifecycle events only when a prompted file change already includes a diff", async () => {
+    /** @type {Array<Record<string, unknown>>} */
+    const fileChangeEvents = [];
+    const tracker = {
+      get: (itemId) => itemId === "file-3"
+        ? {
+          itemId,
+          decision: null,
+          changes: [{
+            path: "/repo/harnesses/codex-app-server-events.js",
+            summary: "/repo/harnesses/codex-app-server-events.js (update)",
+            kind: "update",
+            diff: [
+              "--- a/harnesses/codex-app-server-events.js",
+              "+++ b/harnesses/codex-app-server-events.js",
+              "@@ -1 +1 @@",
+              "-old",
+              "+new",
+            ].join("\n"),
+          }],
+        }
+        : null,
+      markDecision: () => {},
+    };
+
+    const result = await handleCodexAppServerRequest({
+      method: "item/fileChange/requestApproval",
+      params: {
+        itemId: "file-3",
+      },
+    }, {
+      onAskUser: async () => "❌ Deny",
+      onFileChange: async (event) => {
+        fileChangeEvents.push(event);
+      },
+    }, {
+      fileChangeTracker: tracker,
+      runConfig: { workdir: "/repo" },
+    });
+
+    assert.deepEqual(result, { decision: "cancel" });
+    assert.deepEqual(fileChangeEvents, [
+      {
+        path: "/repo/harnesses/codex-app-server-events.js",
+        summary: "/repo/harnesses/codex-app-server-events.js (update)",
+        kind: "update",
+        diff: [
+          "--- a/harnesses/codex-app-server-events.js",
+          "+++ b/harnesses/codex-app-server-events.js",
+          "@@ -1 +1 @@",
+          "-old",
+          "+new",
+        ].join("\n"),
+        itemId: "file-3",
+        stage: "proposed",
+      },
+      {
+        path: "/repo/harnesses/codex-app-server-events.js",
+        summary: "/repo/harnesses/codex-app-server-events.js (update)",
+        kind: "update",
+        diff: [
+          "--- a/harnesses/codex-app-server-events.js",
+          "+++ b/harnesses/codex-app-server-events.js",
+          "@@ -1 +1 @@",
+          "-old",
+          "+new",
+        ].join("\n"),
+        itemId: "file-3",
+        stage: "denied",
+      },
+    ]);
+  });
 });
 
 describe("startCodexAppServerRun file-change lifecycle", () => {
-  it("emits proposed and applied file changes for app-server fileChange items", async () => {
+  it("emits only applied file changes for auto-accepted app-server fileChange items", async () => {
     const connectionMock = createOpenConnectionMock();
     /** @type {Array<Record<string, unknown>>} */
     const fileChanges = [];
@@ -305,21 +378,12 @@ describe("startCodexAppServerRun file-change lifecycle", () => {
 
     await started.done;
 
-    assert.deepEqual(fileChanges, [
-      {
-        path: "/repo/src/app.js",
-        summary: "/repo/src/app.js (update)",
-        kind: "update",
-        itemId: "file-1",
-        stage: "proposed",
-      },
-      {
-        path: "/repo/src/app.js",
-        summary: "/repo/src/app.js (update)",
-        kind: "update",
-        itemId: "file-1",
-        stage: "applied",
-      },
-    ]);
+    assert.deepEqual(fileChanges, [{
+      path: "/repo/src/app.js",
+      summary: "/repo/src/app.js (update)",
+      kind: "update",
+      itemId: "file-1",
+      stage: "applied",
+    }]);
   });
 });
