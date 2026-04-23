@@ -342,6 +342,8 @@ type TurnFacts = {
   addressedToBot: boolean;
   repliedToBot: boolean;
   quotedSenderId?: string;
+  quotedSenderJid?: string;
+  quotedSenderName?: string;
 };
 
 type ChatTransport = {
@@ -410,6 +412,10 @@ type ExecuteActionContext = {
   chatName?: string;
   senderIds: string[];
   senderJids?: string[];
+  senderName?: string;
+  quotedSenderId?: string;
+  quotedSenderJid?: string;
+  quotedSenderName?: string;
   content: IncomingContentBlock[];
   getIsAdmin: () => Promise<boolean>;
   send: (event: OutboundEvent) => Promise<MessageHandle | undefined>;
@@ -426,6 +432,11 @@ type ExecuteActionContext = {
 type ActionContext = {
   chatId: string;
   senderIds: string[];
+  senderJids?: string[];
+  senderName?: string;
+  quotedSenderId?: string;
+  quotedSenderJid?: string;
+  quotedSenderName?: string;
   content: IncomingContentBlock[];
   workdir?: string | null;
   getIsAdmin: () => Promise<boolean>;

@@ -314,7 +314,7 @@ describe("group detection", () => {
 // 5. Quote / reply-to extraction
 // ═══════════════════════════════════════════════════════════════════
 describe("quote extraction", () => {
-  it("passes quoted text and quotedSenderId through the adapter", async () => {
+  it("passes current and quoted identity through the adapter", async () => {
     /** @type {ChatTurn | null} */
     let capturedCtx = null;
     const { sock } = createMockBaileysSocket();
@@ -323,6 +323,7 @@ describe("quote extraction", () => {
       createWAMessage({
         text: "What did they say?",
         chatId: "e2e-quote@s.whatsapp.net",
+        senderName: "Current User",
         quotedText: "Original message",
         quotedSenderId: "99999",
       }),
@@ -333,7 +334,9 @@ describe("quote extraction", () => {
     );
 
     assert.ok(capturedCtx, "Handler should have been called");
+    assert.equal(capturedCtx.senderName, "Current User");
     assert.equal(capturedCtx.facts.quotedSenderId, "99999");
+    assert.equal(capturedCtx.facts.quotedSenderJid, "99999@s.whatsapp.net");
 
     const quoteBlock = capturedCtx.content.find(b => b.type === "quote");
     assert.ok(quoteBlock, "Should have a quote content block");

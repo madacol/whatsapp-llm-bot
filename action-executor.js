@@ -70,6 +70,11 @@ export async function executeAction(actionName, context, params, options = {}) {
   const actionContext = {
     chatId: context.chatId,
     senderIds: context.senderIds,
+    senderJids: context.senderJids,
+    senderName: context.senderName,
+    quotedSenderId: context.quotedSenderId,
+    quotedSenderJid: context.quotedSenderJid,
+    quotedSenderName: context.quotedSenderName,
     content: context.content,
     workdir: options.workdir ?? null,
     getIsAdmin: context.getIsAdmin,
