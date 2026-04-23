@@ -1,5 +1,6 @@
+import { failedToolCallUpdate } from "../message-failure-presentation.js";
 import { buildToolPresentation, getToolFlowDescriptor } from "../tool-presentation-model.js";
-import { textUpdate, toolCallUpdate, toolFlowInspectState, toolFlowUpdate, toolInspectState } from "../outbound-events.js";
+import { toolCallUpdate, toolFlowInspectState, toolFlowUpdate, toolInspectState } from "../outbound-events.js";
 import { createPlanPresentationFromState } from "../plan-presentation.js";
 import { createCodexReasoningState } from "./codex-reasoning-state.js";
 import { createCodexRunState } from "./codex-run-state.js";
@@ -43,14 +44,6 @@ export function createCodexEventDispatcher(input) {
   let lastAssistantText = null;
   /** @type {string | null} */
   let failureMessage = null;
-
-  /**
-   * @param {string} summary
-   * @returns {string}
-   */
-  function formatFailedSummary(summary) {
-    return summary.startsWith("❌ ") ? summary : `❌ ${summary}`;
-  }
 
   /**
    * @param {import("./codex-events.js").NormalizedCodexEvent} normalized
@@ -192,7 +185,7 @@ export function createCodexEventDispatcher(input) {
         }
         if (activeTool?.handle && toolEvent.status === "failed") {
           try {
-            await activeTool.handle.update(textUpdate(formatFailedSummary(activeTool.presentation.summary)));
+            await activeTool.handle.update(failedToolCallUpdate(activeTool.presentation));
           } catch {
             // best-effort
           }

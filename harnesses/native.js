@@ -2,6 +2,7 @@
  * Native harness — the original run loop extracted from index.js.
  */
 
+import { formatFailedMessageSummary } from "../message-failure-presentation.js";
 import { sendChatCompletion } from "../llm.js";
 import { formatChatSettingsCommand } from "../chat-commands.js";
 import { createToolMessage, isHtmlContent, errorToString } from "../utils.js";
@@ -83,14 +84,6 @@ async function tryEdit(handle, text, toolName) {
   if (!handle) return;
   try { await handle.update(textUpdate(text)); }
   catch (err) { log.error(`Edit failed for ${toolName}:`, err); }
-}
-
-/**
- * @param {string} summary
- * @returns {string}
- */
-function formatFailedSummary(summary) {
-  return summary.startsWith("❌ ") ? summary : `❌ ${summary}`;
 }
 
 /**
@@ -242,7 +235,7 @@ async function executeAndStoreTool({
     await replaceStub(toolMessage);
     registerInspect(toolMessage);
     if (handle) {
-      await tryEdit(handle, formatFailedSummary(presentation.summary), toolName);
+      await tryEdit(handle, formatFailedMessageSummary(presentation.summary), toolName);
     } else {
       await hooks.onToolError(errorMessage);
     }

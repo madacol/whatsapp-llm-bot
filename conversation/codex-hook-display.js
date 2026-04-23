@@ -1,8 +1,8 @@
 import { buildCommandPresentation, buildMultiReadActivity, buildReadToolPresentation } from "../tool-presentation-model.js";
+import { failedToolCallUpdate } from "../message-failure-presentation.js";
 import {
   contentEvent,
   fileChangeEvent,
-  textUpdate,
   toolActivityEvent,
   toolInspectState,
 } from "../outbound-events.js";
@@ -67,14 +67,6 @@ export function createCodexDisplayHooks({ context, cwd, visibility, displayToolC
   }
 
   /**
-   * @param {string} summary
-   * @returns {string}
-   */
-  function formatFailedSummary(summary) {
-    return summary.startsWith("❌ ") ? summary : `❌ ${summary}`;
-  }
-
-  /**
    * @param {{ command: string, status: "started" | "completed" | "failed", output?: string }} event
    * @returns {Promise<MessageHandle | void>}
    */
@@ -106,7 +98,7 @@ async function onCommand({ command, status, output }) {
 
     if (status === "failed") {
       if (inspectEntry) {
-        await inspectEntry.handle.update(textUpdate(formatFailedSummary(inspectEntry.displayPresentation.summary)));
+        await inspectEntry.handle.update(failedToolCallUpdate(inspectEntry.displayPresentation));
         return;
       }
       const detail = output ? `\n\n${output}` : "";
