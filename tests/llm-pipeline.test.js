@@ -165,8 +165,12 @@ describe("LLM pipeline via createMessageHandler", () => {
     await handleMessage(context);
 
     assert.ok(
-      responses.some(r => r.text.includes("Tool Error") || r.text.includes("intentional")),
-      "Should show error",
+      responses.some((r) => r.type === "edit" && r.text.includes("❌ *run_javascript*")),
+      "Should update the tool-call message with a failure marker",
+    );
+    assert.ok(
+      !responses.some((r) => r.source === "error"),
+      "Should not send a separate error message when the tool-call message exists",
     );
     assert.ok(
       responses.some(r => r.text.includes("try differently")),

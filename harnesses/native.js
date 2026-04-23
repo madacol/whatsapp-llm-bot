@@ -86,6 +86,14 @@ async function tryEdit(handle, text, toolName) {
 }
 
 /**
+ * @param {string} summary
+ * @returns {string}
+ */
+function formatFailedSummary(summary) {
+  return summary.startsWith("❌ ") ? summary : `❌ ${summary}`;
+}
+
+/**
  * Execute a single tool call: run action, store result, edit message in-place.
  * Returns the autoContinue value from the action's permissions.
  * @param {{
@@ -232,9 +240,12 @@ async function executeAndStoreTool({
 
     const toolMessage = createToolMessage(toolCall.id, errorMessage);
     await replaceStub(toolMessage);
-    await tryEdit(handle, `${toolName} — error`, toolName);
     registerInspect(toolMessage);
-    await hooks.onToolError(errorMessage);
+    if (handle) {
+      await tryEdit(handle, formatFailedSummary(presentation.summary), toolName);
+    } else {
+      await hooks.onToolError(errorMessage);
+    }
 
     // Errors always auto-continue for self-correction
     return true;
