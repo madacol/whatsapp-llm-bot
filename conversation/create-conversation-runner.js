@@ -66,6 +66,14 @@ function formatAvailableSlashCommands(commands) {
 }
 
 /**
+ * @param {SendContent} content
+ * @returns {string}
+ */
+function getDeliveredContentSignature(content) {
+  return JSON.stringify(content);
+}
+
+/**
  * Resolve the persona and harness for the current chat.
  * @param {import("../store.js").ChatRow | undefined} chatInfo
  * @returns {Promise<{ persona: AgentDefinition | null, harness: AgentHarness }>}
@@ -330,6 +338,8 @@ export function createConversationRunner({ store, llmClient, getActionsFn, execu
 
     let presenceRefreshVersion = 0;
     let presenceStopped = false;
+    /** @type {Set<string>} */
+    const deliveredContentSignatures = new Set();
 
     /** Refresh the presence lease in the background without delaying the next harness event. */
     const refreshPresenceLease = () => {
@@ -355,6 +365,9 @@ export function createConversationRunner({ store, llmClient, getActionsFn, execu
         refreshPresenceLease,
         runConfig.workdir ?? null,
         resolveOutputVisibility(chatInfo?.output_visibility),
+        (deliveredContent) => {
+          deliveredContentSignatures.add(getDeliveredContentSignature(deliveredContent));
+        },
       );
       runCoordinator.markRunActive(chatId);
 
@@ -380,7 +393,13 @@ export function createConversationRunner({ store, llmClient, getActionsFn, execu
         bufferedTexts: runCoordinator.consumeBufferedTexts(chatId),
       });
 
-      await harness.run(runRequest);
+      const result = await harness.run(runRequest);
+      if (result.response.length > 0) {
+        const responseSignature = getDeliveredContentSignature(result.response);
+        if (!deliveredContentSignatures.has(responseSignature)) {
+          await context.reply(contentEvent("llm", result.response));
+        }
+      }
     } catch (error) {
       log.error("handleLlmMessage failed:", error);
       const errorMessage = errorToString(error);

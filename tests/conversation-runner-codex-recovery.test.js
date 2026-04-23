@@ -266,6 +266,55 @@ describe("createConversationRunner with codex harness", () => {
     );
   });
 
+  it("delivers a final non-text harness response when the harness returns it directly", async () => {
+    await seedChat("conv-codex-final-file", { enabled: true });
+    await db.sql`
+      UPDATE chats
+      SET harness = 'codex',
+          harness_config = '{}'::jsonb
+      WHERE chat_id = 'conv-codex-final-file'
+    `;
+
+    registerHarness("codex", () => ({
+      getName: () => "codex",
+      getCapabilities: () => ({
+        supportsResume: true,
+        supportsCancel: true,
+        supportsLiveInput: true,
+        supportsApprovals: true,
+        supportsWorkdir: true,
+        supportsSandboxConfig: true,
+        supportsModelSelection: true,
+        supportsReasoningEffort: false,
+        supportsSessionFork: true,
+      }),
+      handleCommand: async () => false,
+      listSlashCommands: () => [],
+      run: async () => ({
+        response: [{
+          type: "file",
+          encoding: "base64",
+          mime_type: "text/plain",
+          file_name: "report.txt",
+          data: Buffer.from("report body").toString("base64"),
+        }],
+        messages: [],
+        usage: { promptTokens: 0, completionTokens: 0, cachedTokens: 0, cost: 0 },
+      }),
+    }));
+
+    const turn = createChatTurn({
+      chatId: "conv-codex-final-file",
+      content: [{ type: "text", text: "Send me the generated report" }],
+    });
+    await handleMessage(turn.context);
+
+    assert.ok(
+      turn.responses.some((response) => response.type === "reply" && response.blockType === "file"),
+      `Expected the returned file response to be delivered, got: ${JSON.stringify(turn.responses)}`,
+    );
+  });
+
   it("does not refresh composing before the Codex tool-call display", async () => {
     await seedChat("conv-codex-presence", { enabled: true });
     await db.sql`

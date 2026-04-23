@@ -34,6 +34,7 @@ async function displayToolCall(toolCall, context, actionFormatter, cwd, toolCont
  * @param {() => void} refreshPresenceLease
  * @param {string | null} cwd
  * @param {import("../chat-output-visibility.js").OutputVisibility} [visibility]
+ * @param {(content: SendContent) => void} [recordDeliveredContent]
  * @returns {AgentIOHooks}
  */
 export function buildAgentIoHooks(
@@ -43,6 +44,7 @@ export function buildAgentIoHooks(
   refreshPresenceLease,
   cwd,
   visibility = DEFAULT_OUTPUT_VISIBILITY,
+  recordDeliveredContent,
 ) {
   /**
    * Refresh the transport presence lease after an outbound progress message without
@@ -110,7 +112,10 @@ export function buildAgentIoHooks(
     },
     onLlmResponse: async (text) => {
       await compactToolActivity.close();
-      await context.reply(contentEvent("llm", [{ type: "markdown", text }]));
+      /** @type {ToolContentBlock[]} */
+      const content = [{ type: "markdown", text }];
+      await context.reply(contentEvent("llm", content));
+      recordDeliveredContent?.(content);
     },
     onAskUser: async (question, options, _preamble, descriptions) => {
       /** @type {Map<string, string>} */
@@ -139,6 +144,7 @@ export function buildAgentIoHooks(
         return;
       }
       await emitWhileWorking(() => context.send(contentEvent("tool-result", blocks)));
+      recordDeliveredContent?.(blocks);
     },
     onToolError: async (message) => {
       if (!visibility.tools) {
