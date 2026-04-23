@@ -11,7 +11,23 @@ const COMPACT_TOOL_ACTIVITY_DEBOUNCE_MS = 1000;
  * @returns {string}
  */
 function formatCompactEntry(tool, detail) {
-  return detail ? `🔧 *${tool}*  ${detail}` : `🔧 *${tool}*`;
+  return detail ? `*${tool}*  ${detail}` : `*${tool}*`;
+}
+
+/**
+ * @typedef {{
+ *   id: string,
+ *   summary: string,
+ *   failed: boolean,
+ * }} CompactToolActivityEntry
+ */
+
+/**
+ * @param {CompactToolActivityEntry} entry
+ * @returns {string}
+ */
+function renderCompactEntry(entry) {
+  return `${entry.failed ? "❌" : "🔧"} ${entry.summary}`;
 }
 
 /**
@@ -99,34 +115,42 @@ function formatCompactToolCall(toolCall, actionFormatter, cwd, toolContext) {
  * }} input
  * @returns {{
  *   addCommand: (command: string) => Promise<void>,
- *   addFileRead: (paths: string[]) => Promise<void>,
+ *   completeCommand: (command: string) => Promise<void>,
+ *   failCommand: (command: string) => Promise<boolean>,
+ *   addFileRead: (command: string, paths: string[]) => Promise<void>,
  *   addToolCall: (
  *     toolCall: LlmChatResponse["toolCalls"][0],
  *     actionFormatter?: (params: Record<string, unknown>) => string,
  *     toolContext?: { oldContent?: string },
  *   ) => Promise<void>,
+ *   failMostRecentToolCall: () => Promise<boolean>,
  *   close: () => Promise<void>,
  * }}
  */
 export function createCompactToolActivityFeed({ send, cwd }) {
   /** @type {MessageHandle | null} */
   let handle = null;
-  /** @type {string[]} */
-  let allLines = [];
+  /** @type {CompactToolActivityEntry[]} */
+  let entries = [];
   /** @type {ReturnType<typeof setTimeout> | null} */
   let debounceTimer = null;
+  let nextEntryId = 0;
+  /** @type {Map<string, string[]>} */
+  const pendingCommandEntryIds = new Map();
+  /** @type {string[]} */
+  let pendingToolEntryIds = [];
 
   /**
    * @returns {string}
    */
   function getCompactText() {
-    const hiddenCount = Math.max(0, allLines.length - COMPACT_TOOL_ACTIVITY_LIMIT);
+    const hiddenCount = Math.max(0, entries.length - COMPACT_TOOL_ACTIVITY_LIMIT);
     const visibleLines = hiddenCount > 0
-      ? allLines.slice(-COMPACT_TOOL_ACTIVITY_LIMIT)
-      : allLines;
+      ? entries.slice(-COMPACT_TOOL_ACTIVITY_LIMIT)
+      : entries;
     return [
       ...(hiddenCount > 0 ? [`... +${hiddenCount} earlier tools`] : []),
-      ...visibleLines,
+      ...visibleLines.map(renderCompactEntry),
     ].join("\n");
   }
 
@@ -134,7 +158,7 @@ export function createCompactToolActivityFeed({ send, cwd }) {
    * @returns {string}
    */
   function getFullText() {
-    return allLines.join("\n");
+    return entries.map(renderCompactEntry).join("\n");
   }
 
   /**
@@ -166,11 +190,68 @@ export function createCompactToolActivityFeed({ send, cwd }) {
   }
 
   /**
-   * @param {string} line
    * @returns {Promise<void>}
    */
-  async function addLine(line) {
-    allLines.push(line);
+  async function flushNow() {
+    if (debounceTimer) {
+      clearTimeout(debounceTimer);
+      debounceTimer = null;
+    }
+    if (!handle) {
+      return;
+    }
+    updateInspectState();
+    await handle.update(textUpdate(getCompactText()));
+  }
+
+  /**
+   * @param {string} entryId
+   * @returns {boolean}
+   */
+  function markEntryFailed(entryId) {
+    const entry = entries.find((candidate) => candidate.id === entryId);
+    if (!entry || entry.failed) {
+      return false;
+    }
+    entry.failed = true;
+    return true;
+  }
+
+  /**
+   * @param {Map<string, string[]>} map
+   * @param {string} key
+   * @param {string} entryId
+   * @returns {void}
+   */
+  function rememberPendingEntry(map, key, entryId) {
+    const existing = map.get(key) ?? [];
+    existing.push(entryId);
+    map.set(key, existing);
+  }
+
+  /**
+   * @param {Map<string, string[]>} map
+   * @param {string} key
+   * @returns {string | undefined}
+   */
+  function consumePendingEntry(map, key) {
+    const existing = map.get(key);
+    if (!existing || existing.length === 0) {
+      return undefined;
+    }
+    const entryId = existing.shift();
+    if (existing.length === 0) {
+      map.delete(key);
+    }
+    return entryId;
+  }
+
+  /**
+   * @param {CompactToolActivityEntry} entry
+   * @returns {Promise<void>}
+   */
+  async function addEntry(entry) {
+    entries.push(entry);
 
     if (!handle) {
       handle = await send(contentEvent("plain", getCompactText())) ?? null;
@@ -198,14 +279,61 @@ export function createCompactToolActivityFeed({ send, cwd }) {
     }
 
     handle = null;
-    allLines = [];
+    entries = [];
+    pendingCommandEntryIds.clear();
+    pendingToolEntryIds = [];
   }
 
   return {
-    addCommand: async (command) => addLine(formatCompactCommand(command)),
-    addFileRead: async (paths) => addLine(formatCompactRead(paths)),
-    addToolCall: async (toolCall, actionFormatter, toolContext) =>
-      addLine(formatCompactToolCall(toolCall, actionFormatter, cwd, toolContext)),
+    addCommand: async (command) => {
+      const entryId = `compact-entry-${++nextEntryId}`;
+      rememberPendingEntry(pendingCommandEntryIds, command, entryId);
+      await addEntry({
+        id: entryId,
+        summary: formatCompactCommand(command),
+        failed: false,
+      });
+    },
+    completeCommand: async (command) => {
+      consumePendingEntry(pendingCommandEntryIds, command);
+    },
+    failCommand: async (command) => {
+      const entryId = consumePendingEntry(pendingCommandEntryIds, command);
+      if (!entryId || !markEntryFailed(entryId)) {
+        return false;
+      }
+      await flushNow();
+      return true;
+    },
+    addFileRead: async (command, paths) => {
+      const entryId = `compact-entry-${++nextEntryId}`;
+      rememberPendingEntry(pendingCommandEntryIds, command, entryId);
+      await addEntry({
+        id: entryId,
+        summary: formatCompactRead(paths),
+        failed: false,
+      });
+    },
+    addToolCall: async (toolCall, actionFormatter, toolContext) => {
+      const entryId = `compact-entry-${++nextEntryId}`;
+      pendingToolEntryIds.push(entryId);
+      await addEntry({
+        id: entryId,
+        summary: formatCompactToolCall(toolCall, actionFormatter, cwd, toolContext),
+        failed: false,
+      });
+    },
+    failMostRecentToolCall: async () => {
+      while (pendingToolEntryIds.length > 0) {
+        const entryId = pendingToolEntryIds.pop();
+        if (typeof entryId !== "string" || !markEntryFailed(entryId)) {
+          continue;
+        }
+        await flushNow();
+        return true;
+      }
+      return false;
+    },
     close,
   };
 }

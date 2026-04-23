@@ -925,7 +925,7 @@ describe("Memory: NOT searched when extracted text < 10 chars", () => {
 // Scenario: Tool error → LLM self-correction
 // ═══════════════════════════════════════════════════════════════════
 describe("Tool error → LLM self-correction", () => {
-  it("catches tool error, shows ❌, passes error to LLM, and delivers corrected reply", async () => {
+  it("catches tool error, updates the tool call with ❌, passes error to LLM, and delivers corrected reply", async () => {
     const chat = await t.chat("tool-error-chat", { enabled: true });
 
     const r = await chat.send("Do something", {
@@ -935,10 +935,14 @@ describe("Tool error → LLM self-correction", () => {
       ],
     });
 
-    // Should show error indicator to user
+    // Should update the existing tool-call message instead of sending a new error message
     assert.ok(
-      r.raw.some(x => x.source === "error"),
-      `Should show error indicator, got: ${r.raw.map(x => x.text).join(" | ")}`,
+      r.raw.some((x) => x.text.includes("❌ *nonexistent_action_xyz*")),
+      `Should update tool-call message with a failure marker, got: ${r.raw.map(x => x.text).join(" | ")}`,
+    );
+    assert.ok(
+      !r.raw.some((x) => x.source === "error"),
+      `Should not send a separate error message, got: ${r.raw.map(x => x.text).join(" | ")}`,
     );
 
     // Second LLM request should contain a tool role message with the error

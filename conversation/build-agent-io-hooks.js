@@ -141,18 +141,36 @@ export function buildAgentIoHooks(
       await emitWhileWorking(() => context.send(contentEvent("tool-result", blocks)));
     },
     onToolError: async (message) => {
+      if (!visibility.tools) {
+        const updated = await compactToolActivity.failMostRecentToolCall();
+        if (updated) {
+          return;
+        }
+      }
       await emitWhileWorking(() => context.send(contentEvent("error", message)));
     },
     onCommand: async (commandEvent) => {
-      if (!visibility.tools && commandEvent.status === "started") {
-        await compactToolActivity.addCommand(commandEvent.command);
-        return;
+      if (!visibility.tools) {
+        if (commandEvent.status === "started") {
+          await compactToolActivity.addCommand(commandEvent.command);
+          return;
+        }
+        if (commandEvent.status === "completed") {
+          await compactToolActivity.completeCommand(commandEvent.command);
+          return;
+        }
+        if (commandEvent.status === "failed") {
+          const updated = await compactToolActivity.failCommand(commandEvent.command);
+          if (updated) {
+            return;
+          }
+        }
       }
       await emitWhileWorking(() => codexDisplayHooks.onCommand(commandEvent));
     },
     onFileRead: async (fileReadEvent) => {
       if (!visibility.tools) {
-        await compactToolActivity.addFileRead(fileReadEvent.paths);
+        await compactToolActivity.addFileRead(fileReadEvent.command, fileReadEvent.paths);
         return;
       }
       await emitWhileWorking(() => codexDisplayHooks.onFileRead(fileReadEvent));

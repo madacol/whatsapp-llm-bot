@@ -384,6 +384,44 @@ describe("buildAgentIoHooks", () => {
     });
   });
 
+  it("marks the existing compact command line as failed instead of sending a new error message", async () => {
+    /** @type {Array<{ event: OutboundEvent, kind: "send" | "reply" }>} */
+    const sent = [];
+    /** @type {MessageHandleUpdate[]} */
+    const updates = [];
+    const hooks = buildAgentIoHooks(
+      {
+        send: async (event) => {
+          sent.push({ event, kind: "send" });
+          return {
+            keyId: "compact-tools-failed-command",
+            isImage: false,
+            update: async (update) => { updates.push(structuredClone(update)); },
+            setInspect: () => {},
+          };
+        },
+        reply: async () => undefined,
+        select: async () => "",
+        confirm: async () => true,
+      },
+      async () => {},
+      async () => {},
+      () => {},
+      "/repo",
+      { ...DEFAULT_OUTPUT_VISIBILITY, tools: false },
+    );
+
+    await hooks.onCommand?.({ command: "pnpm test", status: "started" });
+    await hooks.onCommand?.({ command: "pnpm test", status: "failed", output: "boom" });
+
+    assert.equal(sent.length, 1);
+    assert.equal(sent[0]?.event.kind, "content");
+    assert.deepEqual(updates, [{
+      kind: "text",
+      text: "❌ *Bash*  `pnpm test`",
+    }]);
+  });
+
   it("starts a new compact tool message after an llm reply", async () => {
     /** @type {Array<{ event: OutboundEvent, kind: "send" | "reply" }>} */
     const sent = [];
@@ -524,6 +562,57 @@ describe("buildAgentIoHooks", () => {
 
     assert.equal(sent.length, 1);
     assert.equal(sent[0].event.kind, "tool_call");
+  });
+
+  it("updates the existing tool-call message when a visible command fails", async () => {
+    /** @type {Array<{ event: OutboundEvent, kind: "send" | "reply" }>} */
+    const sent = [];
+    /** @type {MessageHandleUpdate[]} */
+    const updates = [];
+    /** @type {MessageInspectState[]} */
+    const inspects = [];
+    const hooks = buildAgentIoHooks(
+      {
+        send: async (event) => {
+          sent.push({ event, kind: "send" });
+          return {
+            keyId: "visible-command-failure",
+            isImage: false,
+            update: async (update) => { updates.push(structuredClone(update)); },
+            setInspect: (inspect) => {
+              if (inspect) {
+                inspects.push(structuredClone(inspect));
+              }
+            },
+          };
+        },
+        reply: async () => undefined,
+        select: async () => "",
+        confirm: async () => true,
+      },
+      async () => {},
+      async () => {},
+      () => {},
+      "/repo",
+      VISIBLE_TOOL_OUTPUT,
+    );
+
+    await hooks.onCommand?.({ command: "pnpm test", status: "started" });
+    await hooks.onCommand?.({ command: "pnpm test", status: "failed", output: "boom" });
+
+    assert.equal(sent.length, 1);
+    assert.deepEqual(updates, [{
+      kind: "text",
+      text: "❌ *Bash*  `pnpm test`",
+    }]);
+    assert.equal(inspects.length, 1);
+    const inspect = inspects[0];
+    assert.ok(inspect && inspect.kind === "tool");
+    if (!inspect || inspect.kind !== "tool") {
+      assert.fail("Expected tool inspect state");
+    }
+    assert.equal(inspect.presentation.summary, "*Bash*  `pnpm test`");
+    assert.equal(inspect.output, "boom");
   });
 
   it("maps file changes to a tool-result message", async () => {
