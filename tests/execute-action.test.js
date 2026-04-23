@@ -61,6 +61,8 @@ function createMockExecuteActionContext(overrides = {}) {
   return {
     chatId: "test-chat",
     senderIds: ["master-user"],
+    senderJids: ["master-user@s.whatsapp.net"],
+    senderName: "Test User",
     content: [],
     getIsAdmin: async () => true,
     send: async (_source, _content) => {},
@@ -305,6 +307,53 @@ describe("executeAction", () => {
       !sent.some((s) => s.includes("hello")),
       `log() should not send messages to chat, got: ${JSON.stringify(sent)}`,
     );
+  });
+
+  it("passes current and quoted identity fields through to actions", async () => {
+    /** @type {{
+     *   senderName?: string,
+     *   senderJids?: string[],
+     *   quotedSenderId?: string,
+     *   quotedSenderJid?: string,
+     *   quotedSenderName?: string,
+     * } | null} */
+    let seenIdentity = null;
+    const resolver = createResolver({
+      test_action: {
+        name: "test_action",
+        description: "test",
+        parameters: { type: "object", properties: {} },
+        permissions: { autoExecute: true },
+        action_fn: async (ctx) => {
+          seenIdentity = {
+            senderName: ctx.senderName,
+            senderJids: ctx.senderJids,
+            quotedSenderId: ctx.quotedSenderId,
+            quotedSenderJid: ctx.quotedSenderJid,
+            quotedSenderName: ctx.quotedSenderName,
+          };
+          return "ok";
+        },
+      },
+    });
+    const ctx = createMockExecuteActionContext({
+      senderName: "Current User",
+      senderJids: ["current-user@s.whatsapp.net"],
+      quotedSenderId: "quoted-user",
+      quotedSenderJid: "quoted-user@s.whatsapp.net",
+      quotedSenderName: "Quoted User",
+    });
+
+    const { result } = await executeAction("test_action", ctx, {}, { actionResolver: resolver });
+
+    assert.equal(result, "ok");
+    assert.deepEqual(seenIdentity, {
+      senderName: "Current User",
+      senderJids: ["current-user@s.whatsapp.net"],
+      quotedSenderId: "quoted-user",
+      quotedSenderJid: "quoted-user@s.whatsapp.net",
+      quotedSenderName: "Quoted User",
+    });
   });
 
   it("provides callLlm when useLlm permission is set and llmClient is provided", async () => {

@@ -14,6 +14,8 @@ const log = createLogger("whatsapp:content");
  * @typedef {{
  *   content: IncomingContentBlock[],
  *   quotedSenderId: string | undefined,
+ *   quotedSenderJid: string | undefined,
+ *   quotedSenderName: string | undefined,
  *   hdLifecycle?: import("./hd-image-lifecycle.js").HdInboundLifecycle,
  * }} MessageContentResult
  */
@@ -79,6 +81,8 @@ function createEmptyMessageContentResult() {
   return {
     content: [],
     quotedSenderId: undefined,
+    quotedSenderJid: undefined,
+    quotedSenderName: undefined,
     hdLifecycle: createEmptyHdInboundLifecycle(),
   };
 }
@@ -136,12 +140,22 @@ async function downloadMediaToBlocks(baileysMessage, mediaMessage, type, downloa
 /**
  * @param {proto.IContextInfo | undefined} contextInfo
  * @param {DownloadMediaFn} downloadFn
- * @returns {Promise<{ quoteBlock: QuoteContentBlock | null, quotedSenderId: string | undefined }>}
+ * @returns {Promise<{
+ *   quoteBlock: QuoteContentBlock | null,
+ *   quotedSenderId: string | undefined,
+ *   quotedSenderJid: string | undefined,
+ *   quotedSenderName: string | undefined,
+ * }>}
  */
 async function extractQuotedContent(contextInfo, downloadFn) {
   const quotedMessage = contextInfo?.quotedMessage;
   if (!quotedMessage) {
-    return { quoteBlock: null, quotedSenderId: undefined };
+    return {
+      quoteBlock: null,
+      quotedSenderId: undefined,
+      quotedSenderJid: undefined,
+      quotedSenderName: undefined,
+    };
   }
 
   /** @type {QuoteContentBlock} */
@@ -150,10 +164,11 @@ async function extractQuotedContent(contextInfo, downloadFn) {
     content: [],
   };
 
-  const rawQuotedSenderId = typeof contextInfo?.participant === "string"
+  const rawQuotedSenderJid = typeof contextInfo?.participant === "string"
     ? contextInfo.participant
     : undefined;
-  const quotedSenderId = rawQuotedSenderId?.split("@")[0];
+  const quotedSenderId = rawQuotedSenderJid?.split("@")[0];
+  const quotedSenderName = undefined;
   if (quotedSenderId) {
     quoteBlock.quotedSenderId = quotedSenderId;
   }
@@ -186,6 +201,8 @@ async function extractQuotedContent(contextInfo, downloadFn) {
   return {
     quoteBlock: quoteBlock.content.length > 0 || quoteBlock.quotedSenderId ? quoteBlock : null,
     quotedSenderId,
+    quotedSenderJid: rawQuotedSenderJid,
+    quotedSenderName,
   };
 }
 
@@ -283,6 +300,8 @@ export async function getMessageContent(baileysMessage, downloadFn = downloadMed
   return {
     content,
     quotedSenderId: quoted.quotedSenderId,
+    quotedSenderJid: quoted.quotedSenderJid,
+    quotedSenderName: quoted.quotedSenderName,
     hdLifecycle: direct.hdLifecycle,
   };
 }

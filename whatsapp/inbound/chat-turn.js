@@ -481,7 +481,13 @@ export async function buildIncomingTurn(
 
   const rawChatId = turnMessage.key.remoteJid || "";
   const chatId = await normalizeChatId(rawChatId, sock);
-  const { content, quotedSenderId, hdLifecycle } = await getMessageContent(turnMessage, downloadFn);
+  const {
+    content,
+    quotedSenderId,
+    quotedSenderJid,
+    quotedSenderName,
+    hdLifecycle,
+  } = await getMessageContent(turnMessage, downloadFn);
   await applyHdInboundLifecycle({ rawChatId, chatId, lifecycle: hdLifecycle });
 
   if (content.length === 0) {
@@ -524,6 +530,8 @@ export async function buildIncomingTurn(
       addressedToBot,
       repliedToBot,
       ...(quotedSenderId && { quotedSenderId }),
+      ...(quotedSenderJid && { quotedSenderJid }),
+      ...(quotedSenderName && { quotedSenderName }),
     },
     io,
   };
