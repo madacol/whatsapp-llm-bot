@@ -81,7 +81,6 @@ function createNotificationQueue() {
 /**
  * @param {{
  *   codexPath?: string,
- *   args?: string[],
  *   handleRequest?: (message: Record<string, unknown>) => Promise<unknown>,
  *   env?: NodeJS.ProcessEnv,
  *   signal?: AbortSignal,
@@ -89,7 +88,7 @@ function createNotificationQueue() {
  * @returns {Promise<AppServerConnection>}
  */
 export async function openCodexAppServerConnection(options = {}) {
-  const proc = spawn(options.codexPath ?? "codex", ["app-server", ...(options.args ?? [])], {
+  const proc = spawn(options.codexPath ?? "codex", ["app-server"], {
     stdio: ["pipe", "pipe", "pipe"],
     ...(options.env ? { env: options.env } : {}),
     ...(options.signal && { signal: options.signal }),

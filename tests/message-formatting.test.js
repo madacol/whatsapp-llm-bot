@@ -7,7 +7,6 @@ import {
   prepareMessages,
   parseStructuredQuestion,
 } from "../message-formatting.js";
-import sendPathAction from "../actions/tools/sendPath/index.js";
 
 // ── actionsToToolDefinitions ──
 
@@ -101,15 +100,6 @@ describe("actionsToToolDefinitions", () => {
     // Should use the original parameters object (no copy needed)
     assert.deepEqual(result[0].function.parameters, actions[0].parameters);
   });
-
-  it("does not leak transport-specific WhatsApp wording in send_path tool metadata", () => {
-    const result = actionsToToolDefinitions([sendPathAction]);
-
-    assert.equal(result[0].function.name, "send_path");
-    assert.ok(!result[0].function.description.includes("WhatsApp"));
-    assert.ok(!sendPathAction.instructions?.includes("WhatsApp"));
-  });
-
 });
 
 // ── shouldRespond ──

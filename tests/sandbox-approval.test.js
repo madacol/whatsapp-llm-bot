@@ -35,24 +35,6 @@ describe("getSandboxEscapeRequest", () => {
     });
   });
 
-  it("flags send_path access outside the workspace", () => {
-    const request = getSandboxEscapeRequest("send_path", {
-      path: "/tmp/out.txt",
-    }, {
-      workdir: "/repo",
-      sandboxMode: "workspace-write",
-    });
-
-    assert.deepEqual(request, {
-      toolName: "send_path",
-      kind: "path",
-      summary: "Access `/tmp/out.txt` outside the workspace `/repo`.",
-      target: "/tmp/out.txt",
-      resolvedTarget: "/tmp/out.txt",
-      workdir: "/repo",
-    });
-  });
-
   it("flags bash commands that traverse outside the workspace", () => {
     const request = getSandboxEscapeRequest("run_bash", {
       command: "cd ../.. && pwd",

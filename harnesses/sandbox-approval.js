@@ -119,7 +119,6 @@ function isFileBoundaryTool(toolName) {
     "read_file",
     "write_file",
     "edit_file",
-    "send_path",
     "Read",
     "Write",
     "Edit",

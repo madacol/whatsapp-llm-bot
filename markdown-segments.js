@@ -1,6 +1,5 @@
 import { MIN_ROWS_FOR_TABLE_IMAGE } from "./code-image-renderer.js";
 import { splitDisplayMathBlocks } from "./markdown-display-math.js";
-import { splitEmbeddedMarkdownImages } from "./markdown-embedded-images.js";
 
 /** Regex matching the separator row of a markdown table. */
 const TABLE_SEP_RE = /^\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*$/;
@@ -11,9 +10,71 @@ const TABLE_SEP_RE = /^\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*$/;
  *   | { kind: "code_block", language: string, code: string }
  *   | { kind: "table", text: string }
  *   | { kind: "display_math", tex: string, rawText: string }
- *   | { kind: "embedded_image", target: string, rawText: string, caption?: string }
+ *   | { kind: "attachment_directive", path: string, rawText: string, caption?: string }
  * } MarkdownSegment
  */
+
+/**
+ * @param {string} value
+ * @returns {string}
+ */
+function normalizeDirectiveValue(value) {
+  const trimmed = value.trim();
+  if (trimmed.length < 2) {
+    return trimmed;
+  }
+  const startsWithQuote = trimmed.startsWith("\"") || trimmed.startsWith("'");
+  const endsWithQuote = trimmed.endsWith("\"") || trimmed.endsWith("'");
+  if (startsWithQuote && endsWithQuote && trimmed[0] === trimmed[trimmed.length - 1]) {
+    return trimmed.slice(1, -1);
+  }
+  return trimmed;
+}
+
+/**
+ * @param {string} code
+ * @param {string} rawText
+ * @returns {MarkdownSegment | null}
+ */
+function parseAttachmentDirective(code, rawText) {
+  /** @type {{ path?: string, caption?: string }} */
+  const parsed = {};
+
+  for (const line of code.split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed) {
+      continue;
+    }
+
+    const match = trimmed.match(/^([a-z_]+)\s*:\s*(.+)$/i);
+    if (!match) {
+      return null;
+    }
+
+    const key = match[1].toLowerCase();
+    const value = normalizeDirectiveValue(match[2]);
+    if (key === "path") {
+      parsed.path = value;
+      continue;
+    }
+    if (key === "caption") {
+      parsed.caption = value;
+      continue;
+    }
+    return null;
+  }
+
+  if (!parsed.path) {
+    return null;
+  }
+
+  return {
+    kind: "attachment_directive",
+    path: parsed.path,
+    rawText,
+    ...(parsed.caption ? { caption: parsed.caption } : {}),
+  };
+}
 
 /**
  * Split a text segment into interleaved text and table segments.
@@ -87,6 +148,14 @@ export function segmentMarkdown(text) {
   for (const part of parts) {
     const codeMatch = part.match(/^```(\w*)\n([\s\S]*?)```$/);
     if (codeMatch) {
+      if ((codeMatch[1] || "").toLowerCase() === "attachment") {
+        const attachmentDirective = parseAttachmentDirective(codeMatch[2].trim(), part);
+        if (attachmentDirective) {
+          segments.push(attachmentDirective);
+          continue;
+        }
+      }
+
       segments.push({
         kind: "code_block",
         language: codeMatch[1] || "",
@@ -108,9 +177,7 @@ export function segmentMarkdown(text) {
           segments.push(mathSegment);
           continue;
         }
-
-        const inlineSegments = splitEmbeddedMarkdownImages(mathSegment.text);
-        segments.push(...inlineSegments);
+        segments.push({ kind: "text", text: mathSegment.text });
       }
     }
   }

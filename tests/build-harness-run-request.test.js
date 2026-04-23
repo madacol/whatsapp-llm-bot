@@ -43,8 +43,8 @@ describe("buildExternalSystemPrompt", () => {
 describe("buildHarnessRunRequest", () => {
   it("keeps Codex external instructions limited to the explicit persona prompt", async () => {
     const action = {
-      name: "send_path",
-      description: "Send a local path back to WhatsApp.",
+      name: "generate_image",
+      description: "Generate an image.",
       parameters: { type: "object", properties: {} },
       permissions: {},
       action_fn: async () => "ok",
@@ -89,7 +89,7 @@ describe("buildHarnessRunRequest", () => {
     assert.equal(request.llmConfig.externalInstructions, "Use the custom persona prompt.");
     assert.deepEqual(
       request.llmConfig.toolRuntime.listTools().map((tool) => tool.name),
-      ["send_path"],
+      ["generate_image"],
     );
   });
 });
