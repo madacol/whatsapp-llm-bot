@@ -9,7 +9,7 @@ import { writeMedia } from "../media-store.js";
 const execFileAsync = promisify(execFile);
 
 const IMAGE_EXTENSIONS = new Set([".jpg", ".jpeg", ".png", ".webp", ".gif"]);
-const AUDIO_EXTENSIONS = new Set([".mp3", ".wav", ".ogg", ".m4a"]);
+const AUDIO_EXTENSIONS = new Set([".mp3", ".ogg", ".m4a"]);
 const VIDEO_EXTENSIONS = new Set([".mp4", ".mov", ".webm"]);
 const OGGS_MAGIC = Buffer.from("OggS", "ascii");
 const OPUS_HEAD_MAGIC = Buffer.from("OpusHead", "ascii");
@@ -70,6 +70,9 @@ function bufferIncludes(haystack, needle) {
  */
 function inferCanonicalAudioMimeType(filePath, buffer) {
   const extension = path.extname(filePath).toLowerCase();
+  if (extension === ".mp3") {
+    return "audio/mpeg";
+  }
   if (extension === ".m4a") {
     return "audio/mp4";
   }

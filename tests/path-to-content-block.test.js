@@ -18,6 +18,13 @@ function createFileDeps(buffer) {
 }
 
 describe("resolvePathToContentBlock", () => {
+  it("normalizes .mp3 attachments to audio/mpeg for outbound sends", async () => {
+    const block = await resolvePathToContentBlock("/repo/clip.mp3", {}, createFileDeps(Buffer.from("mp3-data")));
+
+    assert.equal(block.type, "audio");
+    assert.equal(block.mime_type, "audio/mpeg");
+  });
+
   it("normalizes .m4a attachments to audio/mp4 for outbound sends", async () => {
     const block = await resolvePathToContentBlock("/repo/clip.m4a", {}, createFileDeps(Buffer.from("m4a-data")));
 
@@ -38,5 +45,13 @@ describe("resolvePathToContentBlock", () => {
 
     assert.equal(block.type, "audio");
     assert.equal(block.mime_type, "audio/ogg; codecs=opus");
+  });
+
+  it("treats .wav attachments as files instead of native audio", async () => {
+    const block = await resolvePathToContentBlock("/repo/clip.wav", {}, createFileDeps(Buffer.from("wav-data")));
+
+    assert.equal(block.type, "file");
+    assert.equal(block.mime_type, "audio/wav");
+    assert.equal(block.file_name, "clip.wav");
   });
 });
