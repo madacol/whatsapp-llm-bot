@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { rm } from "node:fs/promises";
 import { isValidMediaPath, resolveMediaPath } from "../attachment-paths.js";
 import {
+  deriveMediaPath,
   readMediaBuffer,
   writeMedia,
 } from "../media-store.js";
@@ -37,5 +38,15 @@ describe("media-store", () => {
     assert.equal(firstPath, secondPath);
     assert.match(firstPath, /^[a-f0-9]{64}\.jpg$/);
     assert.deepEqual(await readMediaBuffer(firstPath), buffer);
+  });
+
+  it("stores Opus-in-Ogg media with an .ogg extension", () => {
+    const mediaPath = deriveMediaPath(
+      Buffer.from("opus-bytes"),
+      "audio/ogg; codecs=opus",
+      "audio",
+    );
+
+    assert.match(mediaPath, /^[a-f0-9]{64}\.ogg$/);
   });
 });

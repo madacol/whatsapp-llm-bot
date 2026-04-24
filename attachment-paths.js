@@ -19,6 +19,7 @@ const MIME_TO_EXT = {
   "audio/wav": "wav",
   "audio/x-wav": "wav",
   "audio/ogg": "ogg",
+  "audio/ogg; codecs=opus": "ogg",
   "audio/mp4": "m4a",
   "audio/m4a": "m4a",
   "application/pdf": "pdf",
@@ -36,8 +37,19 @@ const MIME_TO_EXT = {
 };
 
 /** @type {Record<string, string>} */
-const EXT_TO_MIME = Object.fromEntries(
-  Object.entries(MIME_TO_EXT).map(([mimeType, ext]) => [ext, mimeType]),
+const EXT_TO_MIME = Object.entries(MIME_TO_EXT).reduce(
+  /**
+   * @param {Record<string, string>} map
+   * @param {[string, string]} entry
+   * @returns {Record<string, string>}
+   */
+  (map, [mimeType, ext]) => {
+    if (!(ext in map)) {
+      map[ext] = mimeType;
+    }
+    return map;
+  },
+  {},
 );
 
 /**
