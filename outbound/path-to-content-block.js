@@ -11,6 +11,8 @@ const execFileAsync = promisify(execFile);
 const IMAGE_EXTENSIONS = new Set([".jpg", ".jpeg", ".png", ".webp", ".gif"]);
 const AUDIO_EXTENSIONS = new Set([".mp3", ".wav", ".ogg", ".m4a"]);
 const VIDEO_EXTENSIONS = new Set([".mp4", ".mov", ".webm"]);
+const OGGS_MAGIC = Buffer.from("OggS", "ascii");
+const OPUS_HEAD_MAGIC = Buffer.from("OpusHead", "ascii");
 
 /**
  * @typedef {{
@@ -50,6 +52,31 @@ function classifyFilePath(filePath) {
     return "video";
   }
   return "file";
+}
+
+/**
+ * @param {Buffer} haystack
+ * @param {Buffer} needle
+ * @returns {boolean}
+ */
+function bufferIncludes(haystack, needle) {
+  return haystack.indexOf(needle) !== -1;
+}
+
+/**
+ * @param {string} filePath
+ * @param {Buffer} buffer
+ * @returns {string | undefined}
+ */
+function inferCanonicalAudioMimeType(filePath, buffer) {
+  const extension = path.extname(filePath).toLowerCase();
+  if (extension === ".m4a") {
+    return "audio/mp4";
+  }
+  if (extension === ".ogg" && bufferIncludes(buffer, OGGS_MAGIC) && bufferIncludes(buffer, OPUS_HEAD_MAGIC)) {
+    return "audio/ogg; codecs=opus";
+  }
+  return undefined;
 }
 
 /**
@@ -138,7 +165,9 @@ export async function resolvePathToContentBlock(inputPath, options = {}, deps = 
 
   const buffer = await readFilePath(resolvedPath);
   const kind = classifyFilePath(resolvedPath);
-  const mimeType = fileNameToMimeType(displayName, kind === "file" ? "application/octet-stream" : undefined);
+  const mimeType = kind === "audio"
+    ? inferCanonicalAudioMimeType(resolvedPath, buffer) ?? fileNameToMimeType(displayName, undefined)
+    : fileNameToMimeType(displayName, kind === "file" ? "application/octet-stream" : undefined);
   const storedPath = await writeStoredMedia(buffer, mimeType, kind, displayName);
 
   switch (kind) {
