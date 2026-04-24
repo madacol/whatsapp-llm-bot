@@ -1,5 +1,6 @@
 import { generateMessageIDV2, generateWAMessage, generateWAMessageFromContent, proto } from "@whiskeysockets/baileys";
 import { randomBytes } from "node:crypto";
+import { createLogger } from "../../logger.js";
 import { renderBlocks } from "../../message-renderer.js";
 import { formatPlanPresentationText } from "../../plan-presentation.js";
 import { formatToolFlowInspectText, formatToolFlowSummary } from "../../tool-flow-presentation.js";
@@ -14,6 +15,7 @@ import { sendImageHD } from "../../whatsapp-hd-media.js";
 
 /** Delay between relaying each image in an album so WhatsApp groups them. */
 const ALBUM_RELAY_DELAY_MS = 500;
+const log = createLogger("whatsapp:outbound");
 
 /** @type {Record<MessageSource, string>} */
 const SOURCE_PREFIX = {
@@ -34,6 +36,62 @@ const SOURCE_PREFIX = {
  */
 function prependSourcePrefix(prefix, text) {
   return prefix ? `${prefix} ${text}` : text;
+}
+
+/**
+ * @param {import("../../message-renderer.js").SendInstruction} instruction
+ * @param {string} chatId
+ * @returns {Record<string, unknown>}
+ */
+function summarizeAttachmentInstruction(instruction, chatId) {
+  const summary = {
+    chatId,
+    kind: instruction.kind,
+  };
+
+  switch (instruction.kind) {
+    case "image":
+      return {
+        ...summary,
+        bytes: instruction.image.byteLength,
+        ...(instruction.caption ? { caption: instruction.caption } : {}),
+        ...(instruction.debug ?? {}),
+      };
+    case "video":
+      return {
+        ...summary,
+        bytes: instruction.video.byteLength,
+        mimetype: instruction.mimetype,
+        ...(instruction.caption ? { caption: instruction.caption } : {}),
+        ...(instruction.debug ?? {}),
+      };
+    case "audio":
+      return {
+        ...summary,
+        bytes: instruction.audio.byteLength,
+        mimetype: instruction.mimetype,
+        ...(instruction.debug ?? {}),
+      };
+    case "file":
+      return {
+        ...summary,
+        bytes: instruction.file.byteLength,
+        mimetype: instruction.mimetype,
+        fileName: instruction.fileName,
+        ...(instruction.caption ? { caption: instruction.caption } : {}),
+        ...(instruction.debug ?? {}),
+      };
+    default:
+      return summary;
+  }
+}
+
+/**
+ * @param {unknown} error
+ * @returns {string}
+ */
+function formatErrorMessage(error) {
+  return error instanceof Error ? error.message : String(error);
 }
 
 /**
@@ -459,50 +517,71 @@ export async function sendBlocks(sock, chatId, source, content, options, reactio
     /** @type {import('@whiskeysockets/baileys').WAMessage | undefined} */
     let sent;
 
-    switch (instruction.kind) {
-      case "text":
-        sent = await sock.sendMessage(chatId, { text: instruction.text }, options);
-        if (instruction.editable && sent?.key) {
-          lastSentKey = sent.key;
-          lastSentIsImage = false;
-        }
-        break;
-      case "image":
-        if (instruction.hd) {
-          sent = await sendImageHD(sock, chatId, instruction.image, instruction.caption, options);
-        } else {
+    if (instruction.kind !== "text") {
+      log.info("Sending attachment instruction", summarizeAttachmentInstruction(instruction, chatId));
+    }
+
+    try {
+      switch (instruction.kind) {
+        case "text":
+          sent = await sock.sendMessage(chatId, { text: instruction.text }, options);
+          if (instruction.editable && sent?.key) {
+            lastSentKey = sent.key;
+            lastSentIsImage = false;
+          }
+          break;
+        case "image":
+          if (instruction.hd) {
+            sent = await sendImageHD(sock, chatId, instruction.image, instruction.caption, options);
+          } else {
+            sent = await sock.sendMessage(chatId, {
+              image: instruction.image,
+              ...(instruction.caption && { caption: instruction.caption }),
+            }, options);
+          }
+          if (instruction.editable && sent?.key) {
+            lastSentKey = sent.key;
+            lastSentIsImage = true;
+          }
+          break;
+        case "video":
           sent = await sock.sendMessage(chatId, {
-            image: instruction.image,
+            video: instruction.video,
+            mimetype: instruction.mimetype,
+            jpegThumbnail: "",
             ...(instruction.caption && { caption: instruction.caption }),
           }, options);
-        }
-        if (instruction.editable && sent?.key) {
-          lastSentKey = sent.key;
-          lastSentIsImage = true;
-        }
-        break;
-      case "video":
-        await sock.sendMessage(chatId, {
-          video: instruction.video,
-          mimetype: instruction.mimetype,
-          jpegThumbnail: "",
-          ...(instruction.caption && { caption: instruction.caption }),
-        }, options);
-        break;
-      case "audio":
-        await sock.sendMessage(chatId, {
-          audio: instruction.audio,
-          mimetype: instruction.mimetype,
-        }, options);
-        break;
-      case "file":
-        await sock.sendMessage(chatId, {
-          document: instruction.file,
-          mimetype: instruction.mimetype,
-          fileName: instruction.fileName,
-          ...(instruction.caption && { caption: instruction.caption }),
-        }, options);
-        break;
+          break;
+        case "audio":
+          sent = await sock.sendMessage(chatId, {
+            audio: instruction.audio,
+            mimetype: instruction.mimetype,
+          }, options);
+          break;
+        case "file":
+          sent = await sock.sendMessage(chatId, {
+            document: instruction.file,
+            mimetype: instruction.mimetype,
+            fileName: instruction.fileName,
+            ...(instruction.caption && { caption: instruction.caption }),
+          }, options);
+          break;
+      }
+    } catch (error) {
+      if (instruction.kind !== "text") {
+        log.error("Attachment instruction send failed", {
+          ...summarizeAttachmentInstruction(instruction, chatId),
+          error: formatErrorMessage(error),
+        });
+      }
+      throw error;
+    }
+
+    if (instruction.kind !== "text") {
+      log.info("Sent attachment instruction", {
+        ...summarizeAttachmentInstruction(instruction, chatId),
+        messageId: sent?.key?.id,
+      });
     }
   }
 

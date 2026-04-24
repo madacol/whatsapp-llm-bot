@@ -254,6 +254,83 @@ Second block:
     assert.equal(textMessages.length, 0, "Attachment-only markdown should not fall back to text");
   });
 
+  it("surfaces attachment directive failures as a visible warning instead of silently echoing the directive", async () => {
+    const { sock, sent } = createMockSock();
+
+    await sendBlocks(sock, "test-chat", "llm", [{
+      type: "markdown",
+      text: [
+        "Before",
+        "",
+        "```attachment",
+        "path: artifacts/does-not-exist.wav",
+        "caption: Missing audio",
+        "```",
+        "",
+        "After",
+      ].join("\n"),
+    }]);
+
+    const textMessages = sent.filter((entry) => typeof entry.msg.text === "string");
+    const fullText = textMessages.map((entry) => /** @type {string} */ (entry.msg.text)).join("\n");
+
+    assert.equal(sent.filter((entry) => entry.msg.audio != null || entry.msg.document != null || entry.msg.image != null || entry.msg.video != null).length, 0);
+    assert.ok(fullText.includes("Before"), "Should preserve text before the failed directive");
+    assert.ok(fullText.includes("After"), "Should preserve text after the failed directive");
+    assert.ok(fullText.includes("Attachment send failed"), "Should surface a visible attachment failure warning");
+    assert.ok(fullText.includes("does-not-exist.wav"), "Should identify which attachment failed");
+    assert.ok(!fullText.includes("```attachment"), "Should not leak the raw attachment directive block");
+    assert.ok(!fullText.includes("caption: Missing audio"), "Should not echo directive internals back to chat");
+  });
+
+  it("logs attachment resolution and outbound send attempts for explicit directives", async () => {
+    const { sock } = createMockSock();
+    const originalLevel = process.env.LOG_LEVEL;
+    const originalLog = console.log;
+    const captured = [];
+
+    process.env.LOG_LEVEL = "info";
+    console.log = (...args) => {
+      captured.push(args.map((value) => String(value)).join(" "));
+    };
+
+    try {
+      await sendBlocks(sock, "test-chat", "llm", [{
+        type: "markdown",
+        text: [
+          "```attachment",
+          "path: package.json",
+          "caption: Project manifest",
+          "```",
+        ].join("\n"),
+      }]);
+    } finally {
+      if (originalLevel === undefined) {
+        delete process.env.LOG_LEVEL;
+      } else {
+        process.env.LOG_LEVEL = originalLevel;
+      }
+      console.log = originalLog;
+    }
+
+    assert.ok(
+      captured.some((line) => line.includes("[message-renderer] Resolving attachment directive")),
+      `Expected attachment resolution log. Captured logs:\n${captured.join("\n")}`,
+    );
+    assert.ok(
+      captured.some((line) => line.includes("[message-renderer] Resolved attachment directive")),
+      `Expected attachment resolution success log. Captured logs:\n${captured.join("\n")}`,
+    );
+    assert.ok(
+      captured.some((line) => line.includes("[whatsapp:outbound] Sending attachment instruction")),
+      `Expected outbound attachment send log. Captured logs:\n${captured.join("\n")}`,
+    );
+    assert.ok(
+      captured.some((line) => line.includes("[whatsapp:outbound] Sent attachment instruction")),
+      `Expected outbound attachment success log. Captured logs:\n${captured.join("\n")}`,
+    );
+  });
+
   it("renders display math blocks in markdown as WhatsApp images", async () => {
     const { sock, sent } = createMockSock();
 

@@ -7,6 +7,7 @@
  */
 
 import { basename } from "node:path";
+import { hasMediaPath } from "./attachment-paths.js";
 import { renderCodeToImages, renderDiffToImages, renderTableToImages, renderUnifiedDiffToImages, MIN_LINES_FOR_IMAGE } from "./code-image-renderer.js";
 import { createLogger } from "./logger.js";
 import { renderDisplayMathToImage } from "./math-image-renderer.js";
@@ -18,14 +19,23 @@ import { formatPlanStatusSymbol, normalizePlanStatusMarker } from "./plan-status
 const log = createLogger("message-renderer");
 
 /**
+ * @typedef {{
+ *   sourcePath?: string,
+ *   mediaPath?: string,
+ *   mimeType?: string,
+ *   fileName?: string,
+ * }} AttachmentDebugInfo
+ */
+
+/**
  * A single WhatsApp message to be sent, produced by the rendering pipeline.
  * `editable` flags messages whose key should be tracked for in-place editing.
  * @typedef {
  *   | { kind: "text", text: string, editable: boolean }
- *   | { kind: "image", image: Buffer, caption?: string, editable: boolean, hd?: boolean }
- *   | { kind: "video", video: Buffer, mimetype: string, caption?: string }
- *   | { kind: "audio", audio: Buffer, mimetype: string }
- *   | { kind: "file", file: Buffer, mimetype: string, fileName: string, caption?: string }
+ *   | { kind: "image", image: Buffer, caption?: string, editable: boolean, hd?: boolean, debug?: AttachmentDebugInfo }
+ *   | { kind: "video", video: Buffer, mimetype: string, caption?: string, debug?: AttachmentDebugInfo }
+ *   | { kind: "audio", audio: Buffer, mimetype: string, debug?: AttachmentDebugInfo }
+ *   | { kind: "file", file: Buffer, mimetype: string, fileName: string, caption?: string, debug?: AttachmentDebugInfo }
  * } SendInstruction
  */
 
@@ -65,6 +75,30 @@ export function shouldRenderAsImage(lang, code) {
   if (!CODE_IMAGE_LANGUAGES.has(lang.toLowerCase())) return false;
   const lineCount = code.split("\n").length;
   return lineCount >= MIN_LINES_FOR_IMAGE;
+}
+
+/**
+ * @param {unknown} error
+ * @returns {string}
+ */
+function formatErrorMessage(error) {
+  return error instanceof Error ? error.message : String(error);
+}
+
+/**
+ * @param {ImageContentBlock | VideoContentBlock | AudioContentBlock | FileContentBlock} block
+ * @param {{ sourcePath?: string }} [options]
+ * @returns {AttachmentDebugInfo | undefined}
+ */
+function buildAttachmentDebugInfo(block, options = {}) {
+  const debugInfo = {
+    ...(options.sourcePath ? { sourcePath: options.sourcePath } : {}),
+    ...(hasMediaPath(block) ? { mediaPath: block.path } : {}),
+    ...(block.mime_type ? { mimeType: block.mime_type } : {}),
+    ...("file_name" in block && typeof block.file_name === "string" ? { fileName: block.file_name } : {}),
+  };
+
+  return Object.keys(debugInfo).length > 0 ? debugInfo : undefined;
 }
 
 /**
@@ -313,6 +347,7 @@ export async function renderBlocks(blocks, prefix) {
           image: await readBlockBuffer(block),
           ...(block.alt && { caption: block.alt }),
           ...(block.quality === "hd" && { hd: true }),
+          ...(buildAttachmentDebugInfo(block) ? { debug: buildAttachmentDebugInfo(block) } : {}),
           editable: false,
         });
         break;
@@ -323,6 +358,7 @@ export async function renderBlocks(blocks, prefix) {
           video: await readBlockBuffer(block),
           mimetype: block.mime_type || "video/mp4",
           ...(block.alt && { caption: block.alt }),
+          ...(buildAttachmentDebugInfo(block) ? { debug: buildAttachmentDebugInfo(block) } : {}),
         });
         break;
 
@@ -331,6 +367,7 @@ export async function renderBlocks(blocks, prefix) {
           kind: "audio",
           audio: await readBlockBuffer(block),
           mimetype: block.mime_type || "audio/mp4",
+          ...(buildAttachmentDebugInfo(block) ? { debug: buildAttachmentDebugInfo(block) } : {}),
         });
         break;
 
@@ -341,6 +378,7 @@ export async function renderBlocks(blocks, prefix) {
           mimetype: block.mime_type || "application/octet-stream",
           fileName: block.file_name || "file",
           ...(block.caption && { caption: block.caption }),
+          ...(buildAttachmentDebugInfo(block) ? { debug: buildAttachmentDebugInfo(block) } : {}),
         });
         break;
     }
@@ -352,10 +390,14 @@ export async function renderBlocks(blocks, prefix) {
 /**
  * @param {ImageContentBlock | VideoContentBlock | AudioContentBlock | FileContentBlock} block
  * @param {SendInstruction[]} instructions
- * @param {{ caption?: string }} [options]
+ * @param {{ caption?: string, sourcePath?: string }} [options]
  * @returns {Promise<void>}
  */
 async function appendAttachmentInstruction(block, instructions, options = {}) {
+  const debugInfo = buildAttachmentDebugInfo(block, {
+    ...(options.sourcePath ? { sourcePath: options.sourcePath } : {}),
+  });
+
   switch (block.type) {
     case "image":
       instructions.push({
@@ -363,6 +405,7 @@ async function appendAttachmentInstruction(block, instructions, options = {}) {
         image: await readBlockBuffer(block),
         ...((options.caption ?? block.alt) ? { caption: options.caption ?? block.alt } : {}),
         ...(block.quality === "hd" && { hd: true }),
+        ...(debugInfo ? { debug: debugInfo } : {}),
         editable: false,
       });
       return;
@@ -372,6 +415,7 @@ async function appendAttachmentInstruction(block, instructions, options = {}) {
         video: await readBlockBuffer(block),
         mimetype: block.mime_type || "video/mp4",
         ...((options.caption ?? block.alt) ? { caption: options.caption ?? block.alt } : {}),
+        ...(debugInfo ? { debug: debugInfo } : {}),
       });
       return;
     case "audio":
@@ -379,6 +423,7 @@ async function appendAttachmentInstruction(block, instructions, options = {}) {
         kind: "audio",
         audio: await readBlockBuffer(block),
         mimetype: block.mime_type || "audio/mp4",
+        ...(debugInfo ? { debug: debugInfo } : {}),
       });
       return;
     case "file":
@@ -388,6 +433,7 @@ async function appendAttachmentInstruction(block, instructions, options = {}) {
         mimetype: block.mime_type || "application/octet-stream",
         fileName: block.file_name || "file",
         ...((options.caption ?? block.caption) ? { caption: options.caption ?? block.caption } : {}),
+        ...(debugInfo ? { debug: debugInfo } : {}),
       });
       return;
   }
@@ -494,13 +540,27 @@ async function renderMarkdownBlock(text, prefix, instructions) {
       case "attachment_directive":
         flushText();
         try {
+          log.info("Resolving attachment directive", { path: segment.path });
           const block = await resolvePathToContentBlock(segment.path);
+          log.info("Resolved attachment directive", {
+            path: segment.path,
+            kind: block.type,
+            ...(buildAttachmentDebugInfo(block) ?? {}),
+          });
           await appendAttachmentInstruction(block, instructions, {
             ...(segment.caption ? { caption: segment.caption } : {}),
+            sourcePath: segment.path,
           });
         } catch (error) {
-          log.error("Attachment directive rendering failed, falling back to text:", error);
-          appendMarkdownText(segment.rawText);
+          log.error("Attachment directive rendering failed:", {
+            path: segment.path,
+            error: formatErrorMessage(error),
+          });
+          instructions.push({
+            kind: "text",
+            text: prependSourcePrefix(prefix, `Attachment send failed for \`${segment.path}\`: ${formatErrorMessage(error)}`),
+            editable: false,
+          });
         }
         break;
     }
