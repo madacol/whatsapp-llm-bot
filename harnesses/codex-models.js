@@ -1,21 +1,13 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import { Codex } from "@openai/codex-sdk";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import { createLogger } from "../logger.js";
 
 const log = createLogger("harness:codex-models");
 const CACHE_PATH = path.resolve("data/codex-models.json");
 const REFRESH_INTERVAL_MS = 24 * 60 * 60 * 1000;
-
-/** @type {string[]} */
-const CANDIDATE_MODELS = [
-  "gpt-5.4",
-  "gpt-5.4-mini",
-  "gpt-5-codex",
-  "gpt-5.3-codex",
-  "codex-mini-latest",
-  "gpt-5.4-codex",
-];
+const execFileAsync = promisify(execFile);
 
 /**
  * @typedef {{
@@ -58,26 +50,74 @@ function isCodexModelsCache(value) {
 
 /**
  * @typedef {{
+ *   slug: string,
+ *   display_name: string,
+ *   visibility?: string,
+ * }} RawCodexCatalogModel
+ */
+
+/**
+ * @param {unknown} value
+ * @returns {value is RawCodexCatalogModel}
+ */
+function isRawCodexCatalogModel(value) {
+  if (!isObjectRecord(value)) {
+    return false;
+  }
+  return typeof value.slug === "string"
+    && typeof value.display_name === "string"
+    && (value.visibility === undefined || typeof value.visibility === "string");
+}
+
+/**
+ * @param {unknown} value
+ * @returns {value is { models: RawCodexCatalogModel[] }}
+ */
+function isRawCodexCatalog(value) {
+  if (!isObjectRecord(value)) {
+    return false;
+  }
+  return Array.isArray(value.models) && value.models.every(isRawCodexCatalogModel);
+}
+
+/**
+ * @typedef {{
  *   readFile?: typeof fs.readFile,
  *   writeFile?: typeof fs.writeFile,
  *   mkdir?: typeof fs.mkdir,
  *   stat?: typeof fs.stat,
  *   now?: () => number,
- *   probeModel?: (modelId: string) => Promise<boolean>,
+ *   readModelCatalog?: () => Promise<string>,
  * }} CodexModelDeps
  */
 
 /**
- * @param {string} modelId
- * @returns {string}
+ * @returns {Promise<string>}
  */
-function formatModelLabel(modelId) {
-  if (modelId === "gpt-5.4") return "GPT-5.4";
-  if (modelId === "gpt-5.4-mini") return "GPT-5.4 Mini";
-  if (modelId === "gpt-5-codex") return "GPT-5 Codex";
-  if (modelId === "gpt-5.3-codex") return "GPT-5.3 Codex";
-  if (modelId === "codex-mini-latest") return "Codex Mini Latest";
-  return modelId;
+async function readLiveCodexModelCatalog() {
+  const { stdout } = await execFileAsync("codex", ["debug", "models"], {
+    encoding: "utf8",
+    maxBuffer: 10 * 1024 * 1024,
+  });
+  return stdout;
+}
+
+/**
+ * @param {string} rawCatalog
+ * @returns {Array<{ id: string, label: string }> | null}
+ */
+function parseCodexModelCatalog(rawCatalog) {
+  try {
+    const parsed = JSON.parse(rawCatalog);
+    if (!isRawCodexCatalog(parsed)) {
+      return null;
+    }
+    return parsed.models
+      .filter((model) => model.visibility !== "hide")
+      .map((model) => ({ id: model.slug, label: model.display_name }));
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -126,54 +166,32 @@ async function cacheIsFresh(deps) {
 }
 
 /**
- * @param {string} modelId
- * @returns {Promise<boolean>}
- */
-async function probeCodexModel(modelId) {
-  const codex = new Codex();
-  const thread = codex.startThread({
-    model: modelId,
-    skipGitRepoCheck: true,
-  });
-  try {
-    await thread.run("Reply with ok.");
-    return true;
-  } catch (error) {
-    log.debug(`Codex model probe failed for ${modelId}:`, error);
-    return false;
-  }
-}
-
-/**
  * @param {CodexModelDeps} [deps]
  * @returns {Promise<Array<{ id: string, label: string }>>}
  */
 export async function getCodexAvailableModels(deps = {}) {
   if (await cacheIsFresh(deps)) {
     const cache = await readCache(deps);
-    if (cache && cache.models.length > 0) {
+    if (cache) {
       return cache.models;
     }
   }
 
   const staleCache = await readCache(deps);
-  const probeModel = deps.probeModel ?? probeCodexModel;
-  /** @type {Array<{ id: string, label: string }>} */
-  const availableModels = [];
-
-  for (const modelId of CANDIDATE_MODELS) {
-    if (await probeModel(modelId)) {
-      availableModels.push({ id: modelId, label: formatModelLabel(modelId) });
+  const readModelCatalog = deps.readModelCatalog ?? readLiveCodexModelCatalog;
+  try {
+    const availableModels = parseCodexModelCatalog(await readModelCatalog());
+    if (availableModels) {
+      const checkedAt = new Date(deps.now ? deps.now() : Date.now()).toISOString();
+      await writeCache({ checkedAt, models: availableModels }, deps);
+      return availableModels;
     }
+    log.warn("Codex model catalog had an unexpected shape; falling back to cache.");
+  } catch (error) {
+    log.warn("Failed to load Codex model catalog:", error);
   }
 
-  if (availableModels.length > 0) {
-    const checkedAt = new Date(deps.now ? deps.now() : Date.now()).toISOString();
-    await writeCache({ checkedAt, models: availableModels }, deps);
-    return availableModels;
-  }
-
-  if (staleCache && staleCache.models.length > 0) {
+  if (staleCache) {
     return staleCache.models;
   }
 
