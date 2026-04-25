@@ -32,6 +32,14 @@ export function getHarnessRunErrorMessage(error) {
 
 /**
  * @param {unknown} error
+ * @returns {boolean}
+ */
+export function isTransientHarnessRunError(error) {
+  return getHarnessRunErrorMessage(error).toLowerCase().includes("connection closed");
+}
+
+/**
+ * @param {unknown} error
  * @param {(message: string) => Promise<void>} onToolError
  * @returns {Promise<ReportedHarnessRunError>}
  */
@@ -56,6 +64,7 @@ export function buildSdkErrorResponse(message) {
  * @param {{
  *   existingSessionId: string | null,
  *   resolvedSessionId?: string | null,
+ *   error?: unknown,
  *   clearSession: () => Promise<void>,
  *   log: { warn: (...args: unknown[]) => void, error: (...args: unknown[]) => void },
  *   harnessLabel: string,
@@ -64,6 +73,9 @@ export function buildSdkErrorResponse(message) {
  */
 export async function clearStaleHarnessSession(input) {
   if (!input.existingSessionId || input.resolvedSessionId) {
+    return false;
+  }
+  if (input.error !== undefined && isTransientHarnessRunError(input.error)) {
     return false;
   }
 

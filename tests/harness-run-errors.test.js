@@ -5,6 +5,7 @@ import {
   clearStaleHarnessSession,
   getHarnessRunErrorMessage,
   isReportedHarnessRunError,
+  isTransientHarnessRunError,
   reportHarnessRunError,
 } from "../harnesses/harness-run-errors.js";
 
@@ -93,5 +94,38 @@ describe("clearStaleHarnessSession", () => {
 
     assert.equal(cleared, false);
     assert.deepEqual(calls, []);
+  });
+
+  it("does not clear a saved session for transient connection failures", async () => {
+    /** @type {string[]} */
+    const calls = [];
+    const cleared = await clearStaleHarnessSession({
+      existingSessionId: "sess-123",
+      resolvedSessionId: null,
+      error: new Error("Connection Closed"),
+      clearSession: async () => {
+        calls.push("clear");
+      },
+      log: {
+        warn: (...args) => {
+          calls.push(String(args[0]));
+        },
+        error: (...args) => {
+          calls.push(String(args[0]));
+        },
+      },
+      harnessLabel: "Codex",
+    });
+
+    assert.equal(cleared, false);
+    assert.deepEqual(calls, []);
+  });
+});
+
+describe("isTransientHarnessRunError", () => {
+  it("matches connection closed errors without matching ordinary failures", () => {
+    assert.equal(isTransientHarnessRunError(new Error("Connection Closed")), true);
+    assert.equal(isTransientHarnessRunError(new Error("Codex app-server connection closed.")), true);
+    assert.equal(isTransientHarnessRunError(new Error("invalid session")), false);
   });
 });
