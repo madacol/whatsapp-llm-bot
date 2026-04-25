@@ -27,6 +27,7 @@ const DEFAULT_CODEX_RUN_HOOKS = {
 };
 
 const MAX_STARTUP_RETRIES = 1;
+const INCOMPLETE_TURN_DISCONNECT_MESSAGE = "Codex disconnected while the turn was still in progress. Send a follow-up after a moment to resume the saved thread.";
 
 /**
  * @param {unknown} error
@@ -34,6 +35,117 @@ const MAX_STARTUP_RETRIES = 1;
  */
 function isAbortError(error) {
   return !!error && typeof error === "object" && "name" in error && error.name === "AbortError";
+}
+
+/**
+ * @param {unknown} value
+ * @returns {value is Record<string, unknown>}
+ */
+function isObjectRecord(value) {
+  return !!value && typeof value === "object" && !Array.isArray(value);
+}
+
+/**
+ * @typedef {{
+ *   id: string,
+ *   status: string,
+ *   items: Array<Record<string, unknown>>,
+ * }} PersistedCodexTurn
+ */
+
+/**
+ * @param {unknown} value
+ * @returns {value is PersistedCodexTurn}
+ */
+function isPersistedCodexTurn(value) {
+  return isObjectRecord(value)
+    && typeof value.id === "string"
+    && typeof value.status === "string"
+    && Array.isArray(value.items)
+    && value.items.every(isObjectRecord);
+}
+
+/**
+ * @param {unknown} response
+ * @returns {PersistedCodexTurn[]}
+ */
+function extractPersistedTurns(response) {
+  if (!isObjectRecord(response) || !isObjectRecord(response.thread) || !Array.isArray(response.thread.turns)) {
+    return [];
+  }
+  return response.thread.turns.filter(isPersistedCodexTurn);
+}
+
+/**
+ * @param {PersistedCodexTurn} turn
+ * @returns {string | null}
+ */
+function extractFinalAgentMessage(turn) {
+  /** @type {string | null} */
+  let latestAgentText = null;
+  /** @type {string | null} */
+  let latestFinalText = null;
+  for (const item of turn.items) {
+    if (item.type !== "agentMessage" || typeof item.text !== "string" || item.text.trim().length === 0) {
+      continue;
+    }
+    latestAgentText = item.text;
+    if (item.phase === "final_answer") {
+      latestFinalText = item.text;
+    }
+  }
+  return latestFinalText ?? latestAgentText;
+}
+
+/**
+ * @param {{
+ *   openConnection: typeof openCodexAppServerConnection,
+ *   env?: NodeJS.ProcessEnv,
+ *   abortController: AbortController,
+ *   hooks: Pick<Required<AgentIOHooks>, "onAskUser" | "onFileChange" | "onLlmResponse">,
+ *   fileChangeTracker: ReturnType<typeof createCodexFileChangeTracker>,
+ *   runConfig?: HarnessRunConfig,
+ *   threadId: string,
+ *   turnId: string,
+ *   messages: Message[],
+ *   usage: AgentResult["usage"],
+ * }} input
+ * @returns {Promise<{ result: AgentResult, sessionId: string } | null>}
+ */
+async function recoverCompletedTurn(input) {
+  const connection = await input.openConnection({
+    ...(input.env ? { env: input.env } : {}),
+    signal: input.abortController.signal,
+    handleRequest: async (message) => handleCodexAppServerRequest(message, input.hooks, {
+      fileChangeTracker: input.fileChangeTracker,
+      runConfig: input.runConfig,
+    }),
+  });
+  try {
+    const response = await connection.sendRequest("thread/read", {
+      threadId: input.threadId,
+      includeTurns: true,
+    });
+    const turn = extractPersistedTurns(response).find((candidate) => candidate.id === input.turnId) ?? null;
+    if (turn?.status !== "completed") {
+      return null;
+    }
+    const text = extractFinalAgentMessage(turn);
+    if (!text) {
+      return null;
+    }
+    await input.hooks.onLlmResponse(text);
+    return {
+      sessionId: input.threadId,
+      result: {
+        response: [{ type: "markdown", text }],
+        messages: input.messages,
+        usage: input.usage,
+      },
+    };
+  } finally {
+    await connection.close();
+  }
 }
 
 /**
@@ -142,6 +254,8 @@ export async function startCodexAppServerRun(input, deps = {}) {
   const activeConnection = connection;
 
   const done = (async () => {
+    /** @type {unknown} */
+    let streamError = null;
     try {
       for await (const message of activeConnection.notifications) {
         const normalized = normalizeCodexAppServerEvent(message);
@@ -166,14 +280,40 @@ export async function startCodexAppServerRun(input, deps = {}) {
       if (input.isAborted?.() || isAbortError(error)) {
         return { result: dispatcher.result, sessionId: threadId };
       }
+      streamError = error;
+    } finally {
+      await activeConnection.close();
+    }
+
+    if (!turnCompleted && threadId && turnId && (!streamError || isTransientHarnessRunError(streamError))) {
+      const recovered = await recoverCompletedTurn({
+        openConnection,
+        ...(input.env ? { env: input.env } : {}),
+        abortController,
+        hooks,
+        fileChangeTracker,
+        runConfig: input.runConfig,
+        threadId,
+        turnId,
+        messages: input.messages,
+        usage: dispatcher.result.usage,
+      });
+      if (recovered) {
+        return recovered;
+      }
+      if (!streamError) {
+        await hooks.onToolError(INCOMPLETE_TURN_DISCONNECT_MESSAGE);
+        throw new ReportedHarnessRunError(INCOMPLETE_TURN_DISCONNECT_MESSAGE);
+      }
+    }
+
+    if (streamError) {
       const { failureMessage } = dispatcher.finalize();
       if (failureMessage) {
         await hooks.onToolError(failureMessage);
         throw new ReportedHarnessRunError(failureMessage);
       }
-      throw await reportHarnessRunError(error, hooks.onToolError);
-    } finally {
-      await activeConnection.close();
+      throw await reportHarnessRunError(streamError, hooks.onToolError);
     }
 
     const { result, failureMessage } = dispatcher.finalize();

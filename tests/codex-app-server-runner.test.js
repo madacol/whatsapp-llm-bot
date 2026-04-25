@@ -165,6 +165,172 @@ describe("startCodexAppServerRun", () => {
       },
     ]);
   });
+
+  it("recovers a completed turn from thread history after a mid-run connection close", async () => {
+    /** @type {Array<{ method: string, params: Record<string, unknown> }>} */
+    const sendRequests = [];
+    /** @type {string[]} */
+    const progress = [];
+    let openAttempts = 0;
+
+    const started = await startCodexAppServerRun({
+      chatId: "chat-1",
+      prompt: "Continue",
+      messages: [{ role: "user", content: [{ type: "text", text: "Continue" }] }],
+      hooks: {
+        onLlmResponse: async (text) => {
+          progress.push(text);
+        },
+      },
+    }, {
+      openConnection: async () => {
+        openAttempts += 1;
+        return {
+          async sendRequest(method, params = {}) {
+            sendRequests.push({ method, params });
+            if (method === "thread/start") {
+              return { thread: { id: "thread-1" } };
+            }
+            if (method === "turn/start") {
+              return { turn: { id: "turn-1" } };
+            }
+            if (method === "thread/read") {
+              return {
+                thread: {
+                  id: "thread-1",
+                  turns: [{
+                    id: "turn-1",
+                    status: "completed",
+                    items: [
+                      { type: "agentMessage", text: "Recovered final answer", phase: "final_answer" },
+                    ],
+                  }],
+                },
+              };
+            }
+            return {};
+          },
+          notifications: (async function* () {
+            yield {
+              method: "turn/started",
+              params: {
+                threadId: "thread-1",
+                turn: {
+                  id: "turn-1",
+                  status: "inProgress",
+                  error: null,
+                },
+              },
+            };
+            throw new Error("Connection Closed");
+          })(),
+          close: async () => {},
+        };
+      },
+    });
+
+    const completed = await started.done;
+
+    assert.equal(openAttempts, 2);
+    assert.deepEqual(sendRequests.map((request) => request.method), ["thread/start", "turn/start", "thread/read"]);
+    assert.deepEqual(progress, ["Recovered final answer"]);
+    assert.deepEqual(completed.result.response, [{ type: "markdown", text: "Recovered final answer" }]);
+    assert.equal(completed.sessionId, "thread-1");
+  });
+
+  it("recovers a completed turn from thread history when notifications end before turn completion", async () => {
+    /** @type {Array<{ method: string, params: Record<string, unknown> }>} */
+    const sendRequests = [];
+
+    const started = await startCodexAppServerRun({
+      chatId: "chat-1",
+      prompt: "Continue",
+      messages: [{ role: "user", content: [{ type: "text", text: "Continue" }] }],
+    }, {
+      openConnection: async () => ({
+        async sendRequest(method, params = {}) {
+          sendRequests.push({ method, params });
+          if (method === "thread/start") {
+            return { thread: { id: "thread-1" } };
+          }
+          if (method === "turn/start") {
+            return { turn: { id: "turn-1" } };
+          }
+          if (method === "thread/read") {
+            return {
+              thread: {
+                id: "thread-1",
+                turns: [{
+                  id: "turn-1",
+                  status: "completed",
+                  items: [
+                    { type: "agentMessage", text: "Recovered after silent close", phase: "final_answer" },
+                  ],
+                }],
+              },
+            };
+          }
+          return {};
+        },
+        notifications: (async function* () {})(),
+        close: async () => {},
+      }),
+    });
+
+    const completed = await started.done;
+
+    assert.deepEqual(sendRequests.map((request) => request.method), ["thread/start", "turn/start", "thread/read"]);
+    assert.deepEqual(completed.result.response, [{ type: "markdown", text: "Recovered after silent close" }]);
+    assert.equal(completed.sessionId, "thread-1");
+  });
+
+  it("reports a recoverable interruption when reconnect shows the turn is still running", async () => {
+    /** @type {string[]} */
+    const toolErrors = [];
+
+    const started = await startCodexAppServerRun({
+      chatId: "chat-1",
+      prompt: "Continue",
+      messages: [{ role: "user", content: [{ type: "text", text: "Continue" }] }],
+      hooks: {
+        onToolError: async (message) => {
+          toolErrors.push(message);
+        },
+      },
+    }, {
+      openConnection: async () => ({
+        async sendRequest(method) {
+          if (method === "thread/start") {
+            return { thread: { id: "thread-1" } };
+          }
+          if (method === "turn/start") {
+            return { turn: { id: "turn-1" } };
+          }
+          if (method === "thread/read") {
+            return {
+              thread: {
+                id: "thread-1",
+                turns: [{
+                  id: "turn-1",
+                  status: "inProgress",
+                  items: [],
+                }],
+              },
+            };
+          }
+          return {};
+        },
+        notifications: (async function* () {})(),
+        close: async () => {},
+      }),
+    });
+
+    await assert.rejects(
+      started.done,
+      /Codex disconnected while the turn was still in progress/,
+    );
+    assert.deepEqual(toolErrors, ["Codex disconnected while the turn was still in progress. Send a follow-up after a moment to resume the saved thread."]);
+  });
 });
 
 describe("handleCodexAppServerRequest", () => {
