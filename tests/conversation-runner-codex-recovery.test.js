@@ -134,6 +134,46 @@ describe("createConversationRunner with codex harness", () => {
     assert.deepEqual(seenSessionIds, ["sess-stale", null]);
   });
 
+  it("preserves the saved Codex session after a transient connection close", async () => {
+    await seedChat("conv-codex-connection-closed", { enabled: true });
+    await db.sql`
+      UPDATE chats
+      SET harness = 'codex',
+          harness_config = '{}'::jsonb,
+          harness_session_id = 'sess-active',
+          harness_session_kind = 'codex'
+      WHERE chat_id = 'conv-codex-connection-closed'
+    `;
+
+    /** @type {Array<string | null>} */
+    const seenSessionIds = [];
+    registerHarness("codex", () => createCodexHarness({
+      startRun: async (input) => {
+        seenSessionIds.push(input.sessionId ?? null);
+        return {
+          abortController: new AbortController(),
+          done: Promise.reject(new Error("Connection Closed")),
+        };
+      },
+    }));
+
+    const turn = createChatTurn({
+      chatId: "conv-codex-connection-closed",
+      content: [{ type: "text", text: "Continue the interrupted work" }],
+    });
+    await handleMessage(turn.context);
+
+    assert.ok(
+      turn.responses.some((response) => response.source === "error" && response.text.includes("Connection Closed")),
+      `Expected the transient connection close to be reported, got: ${turn.responses.map((response) => response.text).join(" | ")}`,
+    );
+
+    const chat = await store.getChat("conv-codex-connection-closed");
+    assert.equal(chat?.harness_session_id, "sess-active");
+    assert.equal(chat?.harness_session_kind, "codex");
+    assert.deepEqual(seenSessionIds, ["sess-active"]);
+  });
+
   it("steers follow-up turns into the active Codex run", async () => {
     await seedChat("conv-codex-queue", { enabled: true });
     await db.sql`

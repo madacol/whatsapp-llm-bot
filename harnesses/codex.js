@@ -322,6 +322,7 @@ export function createCodexHarness(deps = {}) {
     } catch (error) {
       await clearStaleHarnessSession({
         existingSessionId: sessionId,
+        error,
         clearSession: async () => saveCodexSession(session, null),
         log,
         harnessLabel: "Codex",

@@ -71,6 +71,58 @@ function createOpenConnectionMock() {
 }
 
 describe("startCodexAppServerRun", () => {
+  it("retries a transient startup connection close before reporting failure", async () => {
+    let openAttempts = 0;
+    /** @type {Array<{ method: string, params: Record<string, unknown> }>} */
+    const sendRequests = [];
+
+    const started = await startCodexAppServerRun({
+      chatId: "chat-1",
+      prompt: "Continue",
+      messages: [{ role: "user", content: [{ type: "text", text: "Continue" }] }],
+      sessionId: "thread-existing",
+    }, {
+      openConnection: async () => {
+        openAttempts += 1;
+        if (openAttempts === 1) {
+          throw new Error("Connection Closed");
+        }
+        return {
+          async sendRequest(method, params = {}) {
+            sendRequests.push({ method, params });
+            if (method === "thread/resume") {
+              return { thread: { id: "thread-existing" } };
+            }
+            if (method === "turn/start") {
+              return { turn: { id: "turn-1" } };
+            }
+            return {};
+          },
+          notifications: (async function* () {
+            yield {
+              method: "turn/completed",
+              params: {
+                threadId: "thread-existing",
+                turn: {
+                  id: "turn-1",
+                  status: "completed",
+                  error: null,
+                },
+              },
+            };
+          })(),
+          close: async () => {},
+        };
+      },
+    });
+
+    const completed = await started.done;
+
+    assert.equal(openAttempts, 2);
+    assert.equal(completed.sessionId, "thread-existing");
+    assert.deepEqual(sendRequests.map((request) => request.method), ["thread/resume", "turn/start"]);
+  });
+
   it("passes on-request approval policy through unchanged", async () => {
     const connectionMock = createOpenConnectionMock();
 

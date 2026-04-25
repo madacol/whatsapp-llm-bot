@@ -1,5 +1,5 @@
 import { normalizeCodexAppServerEvent } from "./codex-app-server-events.js";
-import { ReportedHarnessRunError, reportHarnessRunError } from "./harness-run-errors.js";
+import { ReportedHarnessRunError, isTransientHarnessRunError, reportHarnessRunError } from "./harness-run-errors.js";
 import { buildCodexTurnInput } from "./codex-runner.js";
 import { openCodexAppServerConnection } from "./codex-app-server-client.js";
 import { createCodexEventDispatcher } from "./codex-event-dispatcher.js";
@@ -25,6 +25,8 @@ const DEFAULT_CODEX_RUN_HOOKS = {
   onToolError: async () => {},
   onUsage: async () => {},
 };
+
+const MAX_STARTUP_RETRIES = 1;
 
 /**
  * @param {unknown} error
@@ -77,15 +79,6 @@ export async function startCodexAppServerRun(input, deps = {}) {
   let turnId = null;
   let turnCompleted = false;
 
-  const connection = await openConnection({
-    ...(input.env ? { env: input.env } : {}),
-    signal: abortController.signal,
-    handleRequest: async (message) => handleCodexAppServerRequest(message, hooks, {
-      fileChangeTracker,
-      runConfig: input.runConfig,
-    }),
-  });
-
   const threadRequestParams = {
     ...(input.runConfig?.model && { model: input.runConfig.model }),
     ...(input.runConfig?.workdir && { cwd: input.runConfig.workdir }),
@@ -93,35 +86,64 @@ export async function startCodexAppServerRun(input, deps = {}) {
     serviceName: "madabot",
   };
 
-  try {
-    const threadResult = /** @type {{ thread?: { id?: string } }} */ (
-      await connection.sendRequest(input.sessionId ? "thread/resume" : "thread/start", input.sessionId
-        ? { threadId: input.sessionId, ...threadRequestParams }
-        : threadRequestParams)
-    );
-    if (threadResult.thread?.id) {
-      threadId = threadResult.thread.id;
+  /** @type {Awaited<ReturnType<typeof openConnection>> | null} */
+  let connection = null;
+  for (let attemptIndex = 0; attemptIndex <= MAX_STARTUP_RETRIES; attemptIndex += 1) {
+    let turnStartRequested = false;
+    try {
+      connection = await openConnection({
+        ...(input.env ? { env: input.env } : {}),
+        signal: abortController.signal,
+        handleRequest: async (message) => handleCodexAppServerRequest(message, hooks, {
+          fileChangeTracker,
+          runConfig: input.runConfig,
+        }),
+      });
+
+      const threadResult = /** @type {{ thread?: { id?: string } }} */ (
+        await connection.sendRequest(input.sessionId ? "thread/resume" : "thread/start", input.sessionId
+          ? { threadId: input.sessionId, ...threadRequestParams }
+          : threadRequestParams)
+      );
+      if (threadResult.thread?.id) {
+        threadId = threadResult.thread.id;
+      }
+
+      turnStartRequested = true;
+      const turnResult = /** @type {{ turn?: { id?: string } }} */ (
+        await connection.sendRequest("turn/start", {
+          ...(threadId && { threadId }),
+          input: [{ type: "text", text: prompt }],
+          ...(input.runConfig?.workdir && { cwd: input.runConfig.workdir }),
+          ...(approvalPolicy && { approvalPolicy }),
+          ...(sandboxPolicy && { sandboxPolicy }),
+          ...(input.runConfig?.model && { model: input.runConfig.model }),
+        })
+      );
+      turnId = typeof turnResult.turn?.id === "string" ? turnResult.turn.id : null;
+      break;
+    } catch (error) {
+      await connection?.close();
+      connection = null;
+      const canRetry = !turnStartRequested
+        && attemptIndex < MAX_STARTUP_RETRIES
+        && !abortController.signal.aborted
+        && isTransientHarnessRunError(error);
+      if (canRetry) {
+        continue;
+      }
+      throw error;
     }
-  } catch (error) {
-    await connection.close();
-    throw error;
   }
 
-  const turnResult = /** @type {{ turn?: { id?: string } }} */ (
-    await connection.sendRequest("turn/start", {
-      ...(threadId && { threadId }),
-      input: [{ type: "text", text: prompt }],
-      ...(input.runConfig?.workdir && { cwd: input.runConfig.workdir }),
-      ...(approvalPolicy && { approvalPolicy }),
-      ...(sandboxPolicy && { sandboxPolicy }),
-      ...(input.runConfig?.model && { model: input.runConfig.model }),
-    })
-  );
-  turnId = typeof turnResult.turn?.id === "string" ? turnResult.turn.id : null;
+  if (!connection) {
+    throw new Error("Codex app-server connection was not established.");
+  }
+  const activeConnection = connection;
 
   const done = (async () => {
     try {
-      for await (const message of connection.notifications) {
+      for await (const message of activeConnection.notifications) {
         const normalized = normalizeCodexAppServerEvent(message);
         if (!normalized) {
           continue;
@@ -151,7 +173,7 @@ export async function startCodexAppServerRun(input, deps = {}) {
       }
       throw await reportHarnessRunError(error, hooks.onToolError);
     } finally {
-      await connection.close();
+      await activeConnection.close();
     }
 
     const { result, failureMessage } = dispatcher.finalize();
@@ -179,7 +201,7 @@ export async function startCodexAppServerRun(input, deps = {}) {
       if (!threadId || !turnId || turnCompleted || !text) {
         return false;
       }
-      await connection.sendRequest("turn/steer", {
+      await activeConnection.sendRequest("turn/steer", {
         threadId,
         input: [{ type: "text", text }],
         expectedTurnId: turnId,
@@ -190,7 +212,7 @@ export async function startCodexAppServerRun(input, deps = {}) {
       if (!threadId || !turnId || turnCompleted) {
         return false;
       }
-      await connection.sendRequest("turn/interrupt", {
+      await activeConnection.sendRequest("turn/interrupt", {
         threadId,
         turnId,
       });
