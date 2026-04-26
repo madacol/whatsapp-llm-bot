@@ -5,10 +5,16 @@
 /**
  * @param {MessageSource} source
  * @param {SendContent} content
+ * @param {{ cwd?: string | null }} [options]
  * @returns {ContentEvent}
  */
-export function contentEvent(source, content) {
-  return { kind: "content", source, content };
+export function contentEvent(source, content, options = {}) {
+  return {
+    kind: "content",
+    source,
+    content,
+    ...(options.cwd !== undefined && { cwd: options.cwd }),
+  };
 }
 
 /**

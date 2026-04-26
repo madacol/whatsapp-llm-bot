@@ -114,7 +114,7 @@ export function buildAgentIoHooks(
       await compactToolActivity.close();
       /** @type {ToolContentBlock[]} */
       const content = [{ type: "markdown", text }];
-      await context.reply(contentEvent("llm", content));
+      await context.reply(contentEvent("llm", content, { cwd }));
       recordDeliveredContent?.(content);
     },
     onAskUser: async (question, options, _preamble, descriptions) => {
@@ -143,7 +143,7 @@ export function buildAgentIoHooks(
       if (!visibility.tools) {
         return;
       }
-      await emitWhileWorking(() => context.send(contentEvent("tool-result", blocks)));
+      await emitWhileWorking(() => context.send(contentEvent("tool-result", blocks, { cwd })));
       recordDeliveredContent?.(blocks);
     },
     onToolError: async (message) => {

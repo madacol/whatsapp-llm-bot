@@ -279,12 +279,16 @@ export function renderFileChangeContent(event) {
 
 /**
  * @param {OutboundEvent} event
- * @returns {{ source: MessageSource, content: SendContent } | null}
+ * @returns {{ source: MessageSource, content: SendContent, cwd?: string | null } | null}
  */
 function renderOutboundEvent(event) {
   switch (event.kind) {
     case "content":
-      return { source: event.source, content: event.content };
+      return {
+        source: event.source,
+        content: event.content,
+        ...(event.cwd !== undefined && { cwd: event.cwd }),
+      };
     case "tool_call": {
       const content = formatToolPresentationDisplay(event.presentation) ?? formatToolPresentationSummary(event.presentation);
       return { source: "tool-call", content };
@@ -482,7 +486,9 @@ export async function sendEvent(sock, chatId, event, options, reactionRuntime) {
   if (!rendered) {
     return undefined;
   }
-  return sendBlocks(sock, chatId, rendered.source, rendered.content, options, reactionRuntime, event);
+  return sendBlocks(sock, chatId, rendered.source, rendered.content, options, reactionRuntime, event, {
+    workdir: rendered.cwd ?? null,
+  });
 }
 
 /**
@@ -495,15 +501,16 @@ export async function sendEvent(sock, chatId, event, options, reactionRuntime) {
  * @param {{ quoted?: BaileysMessage } | undefined} options
  * @param {import("../runtime/reaction-runtime.js").ReactionRuntime | undefined} reactionRuntime
  * @param {OutboundEvent | undefined} [event]
+ * @param {{ workdir?: string | null }} [renderOptions]
  * @returns {Promise<MessageHandle | undefined>}
  */
-export async function sendBlocks(sock, chatId, source, content, options, reactionRuntime, event) {
+export async function sendBlocks(sock, chatId, source, content, options, reactionRuntime, event, renderOptions = {}) {
   const prefix = SOURCE_PREFIX[source];
   const blocks = typeof content === "string"
     ? [/** @type {ToolContentBlock} */ ({ type: "text", text: content })]
     : Array.isArray(content) ? content : [content];
 
-  const instructions = await renderBlocks(blocks, prefix);
+  const instructions = await renderBlocks(blocks, prefix, renderOptions);
 
   /** @type {import('@whiskeysockets/baileys').WAMessageKey | undefined} */
   let lastSentKey;

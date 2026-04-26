@@ -1,5 +1,7 @@
 import { describe, it, before } from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 
 process.env.TESTING = "1";
@@ -13,6 +15,8 @@ import { createReactionRuntime } from "../whatsapp/runtime/reaction-runtime.js";
 
 /** @type {typeof import("../whatsapp/outbound/send-content.js").sendBlocks} */
 let sendBlocks;
+/** @type {typeof import("../whatsapp/outbound/send-content.js").sendEvent} */
+let sendEvent;
 /** @type {typeof import("../whatsapp/outbound/send-content.js").editWhatsAppMessage} */
 let editWhatsAppMessage;
 /** @type {typeof import("../whatsapp/outbound/send-content.js").renderFileChangeContent} */
@@ -23,6 +27,7 @@ before(async () => {
   setDb("./pgdata/root", testDb);
   const outbound = await import("../whatsapp/outbound/send-content.js");
   sendBlocks = outbound.sendBlocks;
+  sendEvent = outbound.sendEvent;
   editWhatsAppMessage = outbound.editWhatsAppMessage;
   renderFileChangeContent = outbound.renderFileChangeContent;
 });
@@ -230,6 +235,39 @@ Second block:
       textMessages.every((entry) => !/** @type {string} */ (entry.msg.text).includes("path: package.json")),
       "Should not leak attachment directive contents into text messages",
     );
+  });
+
+  it("resolves markdown attachment directives relative to content event cwd", async () => {
+    const workdir = await fs.mkdtemp(path.join(os.tmpdir(), "attachment-cwd-"));
+    await fs.writeFile(path.join(workdir, "website.json"), JSON.stringify({ title: "Demo" }), "utf8");
+    const { sock, sent } = createMockSock();
+
+    try {
+      await sendEvent(sock, "test-chat", {
+        kind: "content",
+        source: "llm",
+        cwd: workdir,
+        content: [{
+          type: "markdown",
+          text: [
+            "```attachment",
+            "path: website.json",
+            "caption: Website data",
+            "```",
+          ].join("\n"),
+        }],
+      });
+    } finally {
+      await fs.rm(workdir, { recursive: true, force: true });
+    }
+
+    const documentMessages = sent.filter((entry) => entry.msg.document != null);
+    const textMessages = sent.filter((entry) => typeof entry.msg.text === "string");
+
+    assert.equal(documentMessages.length, 1, "Should send one document message for the cwd-relative directive");
+    assert.equal(documentMessages[0].msg.fileName, "website.json");
+    assert.equal(documentMessages[0].msg.caption, "Website data");
+    assert.equal(textMessages.length, 0, "Should not fall back to an attachment failure warning");
   });
 
   it("renders explicit markdown attachment directives for relative image paths", async () => {

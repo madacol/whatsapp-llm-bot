@@ -144,7 +144,9 @@ function isOutboundEvent(value) {
 
   switch (value.kind) {
     case "content":
-      return isMessageSource(value.source) && isSendContent(value.content);
+      return isMessageSource(value.source)
+        && isSendContent(value.content)
+        && (value.cwd === undefined || value.cwd === null || typeof value.cwd === "string");
     case "tool_call":
       return isRecord(value.presentation);
     case "tool_activity":

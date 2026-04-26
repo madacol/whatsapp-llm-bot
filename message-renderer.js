@@ -317,9 +317,10 @@ function labelIncludesLineNumber(label, lineNumber) {
  * Render ToolContentBlocks into transport-agnostic SendInstructions.
  * @param {ToolContentBlock[]} blocks
  * @param {string} prefix - source emoji prefix (e.g. "🤖")
+ * @param {{ workdir?: string | null }} [options]
  * @returns {Promise<SendInstruction[]>}
  */
-export async function renderBlocks(blocks, prefix) {
+export async function renderBlocks(blocks, prefix, options = {}) {
   /** @type {SendInstruction[]} */
   const instructions = [];
 
@@ -330,7 +331,7 @@ export async function renderBlocks(blocks, prefix) {
         break;
 
       case "markdown":
-        await renderMarkdownBlock(block.text, prefix, instructions);
+        await renderMarkdownBlock(block.text, prefix, instructions, options);
         break;
 
       case "code":
@@ -446,8 +447,9 @@ async function appendAttachmentInstruction(block, instructions, options = {}) {
  * @param {string} text
  * @param {string} prefix
  * @param {SendInstruction[]} instructions - mutated, appended to
+ * @param {{ workdir?: string | null }} [options]
  */
-async function renderMarkdownBlock(text, prefix, instructions) {
+async function renderMarkdownBlock(text, prefix, instructions, options = {}) {
   let textBuffer = "";
 
   const flushText = () => {
@@ -541,7 +543,7 @@ async function renderMarkdownBlock(text, prefix, instructions) {
         flushText();
         try {
           log.info("Resolving attachment directive", { path: segment.path });
-          const block = await resolvePathToContentBlock(segment.path);
+          const block = await resolvePathToContentBlock(segment.path, { workdir: options.workdir ?? null });
           log.info("Resolved attachment directive", {
             path: segment.path,
             kind: block.type,
