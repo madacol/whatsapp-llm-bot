@@ -70,6 +70,59 @@ function createOpenConnectionMock() {
   };
 }
 
+/**
+ * @returns {{
+ *   notifications: AsyncGenerator<Record<string, unknown>>,
+ *   push: (notification: Record<string, unknown>) => void,
+ *   end: () => void,
+ * }}
+ */
+function createNotificationController() {
+  /** @type {Record<string, unknown>[]} */
+  const values = [];
+  /** @type {Array<(value: Record<string, unknown> | null) => void>} */
+  const waiters = [];
+  let ended = false;
+
+  /**
+   * @param {Record<string, unknown> | null} value
+   * @returns {void}
+   */
+  function deliver(value) {
+    const waiter = waiters.shift();
+    if (waiter) {
+      waiter(value);
+    } else if (value) {
+      values.push(value);
+    }
+  }
+
+  return {
+    notifications: (async function* () {
+      while (true) {
+        const next = values.shift() ?? (ended ? null : await new Promise((resolve) => {
+          waiters.push(resolve);
+        }));
+        if (!next) {
+          return;
+        }
+        yield next;
+      }
+    })(),
+    push(notification) {
+      if (!ended) {
+        deliver(notification);
+      }
+    },
+    end() {
+      ended = true;
+      while (waiters.length > 0) {
+        waiters.shift()?.(null);
+      }
+    },
+  };
+}
+
 describe("startCodexAppServerRun", () => {
   it("retries a transient startup connection close before reporting failure", async () => {
     let openAttempts = 0;
@@ -330,6 +383,85 @@ describe("startCodexAppServerRun", () => {
       /Codex disconnected while the turn was still in progress/,
     );
     assert.deepEqual(toolErrors, ["Codex disconnected while the turn was still in progress. Send a follow-up after a moment to resume the saved thread."]);
+  });
+
+  it("waits for turn startup before steering early follow-up input", async () => {
+    const notificationController = createNotificationController();
+    /** @type {Array<{ method: string, params: Record<string, unknown> }>} */
+    const sendRequests = [];
+    /** @type {Array<(value: unknown) => void>} */
+    const pendingSteerResolutions = [];
+
+    const started = await startCodexAppServerRun({
+      chatId: "chat-1",
+      prompt: "Continue",
+      messages: [{ role: "user", content: [{ type: "text", text: "Continue" }] }],
+    }, {
+      openConnection: async () => ({
+        async sendRequest(method, params = {}) {
+          sendRequests.push({ method, params });
+          if (method === "thread/start") {
+            return { thread: { id: "thread-1" } };
+          }
+          if (method === "turn/start") {
+            return { turn: { id: "turn-1" } };
+          }
+          if (method === "turn/steer") {
+            return new Promise((resolve) => {
+              pendingSteerResolutions.push(resolve);
+            });
+          }
+          return {};
+        },
+        notifications: notificationController.notifications,
+        close: async () => {},
+      }),
+    });
+
+    const steerPromise = started.steer("Use the newer instruction");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    assert.deepEqual(sendRequests.map((request) => request.method), ["thread/start", "turn/start"]);
+
+    notificationController.push({
+      method: "turn/started",
+      params: {
+        threadId: "thread-1",
+        turn: {
+          id: "turn-1",
+          status: "inProgress",
+          error: null,
+        },
+      },
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    assert.deepEqual(sendRequests.map((request) => request.method), ["thread/start", "turn/start", "turn/steer"]);
+    assert.deepEqual(sendRequests.at(-1), {
+      method: "turn/steer",
+      params: {
+        threadId: "thread-1",
+        input: [{ type: "text", text: "Use the newer instruction" }],
+        expectedTurnId: "turn-1",
+      },
+    });
+
+    pendingSteerResolutions.shift()?.({ turnId: "turn-1" });
+    assert.equal(await steerPromise, true);
+
+    notificationController.push({
+      method: "turn/completed",
+      params: {
+        threadId: "thread-1",
+        turn: {
+          id: "turn-1",
+          status: "completed",
+          error: null,
+        },
+      },
+    });
+    notificationController.end();
+    await started.done;
   });
 });
 

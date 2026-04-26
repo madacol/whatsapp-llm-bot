@@ -27,6 +27,7 @@ const DEFAULT_CODEX_RUN_HOOKS = {
 };
 
 const MAX_STARTUP_RETRIES = 1;
+const TURN_STEER_READY_TIMEOUT_MS = 5_000;
 const INCOMPLETE_TURN_DISCONNECT_MESSAGE = "Codex disconnected while the turn was still in progress. Send a follow-up after a moment to resume the saved thread.";
 
 /**
@@ -190,6 +191,59 @@ export async function startCodexAppServerRun(input, deps = {}) {
   /** @type {string | null} */
   let turnId = null;
   let turnCompleted = false;
+  let turnStarted = false;
+  /** @type {() => void} */
+  let resolveTurnStarted = () => {};
+  /** @type {Promise<void>} */
+  const turnStartedPromise = new Promise((resolve) => {
+    resolveTurnStarted = () => resolve();
+  });
+
+  /**
+   * @returns {void}
+   */
+  function markTurnStarted() {
+    if (turnStarted) {
+      return;
+    }
+    turnStarted = true;
+    resolveTurnStarted();
+  }
+
+  /**
+   * @param {Record<string, unknown>} message
+   * @returns {boolean}
+   */
+  function isCurrentTurnStartedNotification(message) {
+    if (message.method !== "turn/started" || !turnId || !isObjectRecord(message.params)) {
+      return false;
+    }
+    const turn = message.params.turn;
+    return isObjectRecord(turn) && turn.id === turnId;
+  }
+
+  /**
+   * @returns {Promise<boolean>}
+   */
+  async function waitForTurnStarted() {
+    if (turnStarted) {
+      return true;
+    }
+    /** @type {ReturnType<typeof setTimeout> | null} */
+    let timeout = null;
+    try {
+      return await Promise.race([
+        turnStartedPromise.then(() => true),
+        new Promise((resolve) => {
+          timeout = setTimeout(() => resolve(false), TURN_STEER_READY_TIMEOUT_MS);
+        }),
+      ]);
+    } finally {
+      if (timeout) {
+        clearTimeout(timeout);
+      }
+    }
+  }
 
   const threadRequestParams = {
     ...(input.runConfig?.model && { model: input.runConfig.model }),
@@ -267,6 +321,10 @@ export async function startCodexAppServerRun(input, deps = {}) {
           threadId = normalized.sessionId;
         }
 
+        if (isCurrentTurnStartedNotification(message)) {
+          markTurnStarted();
+        }
+
         if (typeof message.method === "string" && message.method === "turn/completed") {
           turnCompleted = true;
         }
@@ -339,6 +397,10 @@ export async function startCodexAppServerRun(input, deps = {}) {
     done,
     steer: async (text) => {
       if (!threadId || !turnId || turnCompleted || !text) {
+        return false;
+      }
+      const canSteer = await waitForTurnStarted();
+      if (!canSteer || turnCompleted) {
         return false;
       }
       await activeConnection.sendRequest("turn/steer", {
