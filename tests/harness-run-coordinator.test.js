@@ -34,7 +34,7 @@ function createTurn(chatId, text) {
 }
 
 describe("createHarnessRunCoordinator", () => {
-  it("buffers messages while a run is pending setup", () => {
+  it("buffers messages while a run is pending setup", async () => {
     /** @type {AgentHarness} */
     const harness = {
       getName: () => "native",
@@ -54,8 +54,8 @@ describe("createHarnessRunCoordinator", () => {
     };
 
     const coordinator = createHarnessRunCoordinator();
-    const started = coordinator.beginRun({ turn: createTurn("chat-1", "first"), userText: "first", harness });
-    const buffered = coordinator.beginRun({ turn: createTurn("chat-1", "second"), userText: "second", harness });
+    const started = await coordinator.beginRun({ turn: createTurn("chat-1", "first"), userText: "first", harness });
+    const buffered = await coordinator.beginRun({ turn: createTurn("chat-1", "second"), userText: "second", harness });
 
     assert.equal(started.status, "started");
     assert.equal(buffered.status, "buffered");
@@ -63,7 +63,7 @@ describe("createHarnessRunCoordinator", () => {
     assert.equal(coordinator.finishRun("chat-1"), null);
   });
 
-  it("injects into an active harness query before starting a second run", () => {
+  it("injects into an active harness query before starting a second run", async () => {
     /** @type {string[]} */
     const injected = [];
     /** @type {AgentHarness} */
@@ -89,9 +89,9 @@ describe("createHarnessRunCoordinator", () => {
     };
 
     const coordinator = createHarnessRunCoordinator();
-    const started = coordinator.beginRun({ turn: createTurn("chat-2", "first"), userText: "first", harness });
+    const started = await coordinator.beginRun({ turn: createTurn("chat-2", "first"), userText: "first", harness });
     coordinator.markRunActive("chat-2");
-    const injectedResult = coordinator.beginRun({ turn: createTurn("chat-2", "follow-up"), userText: "follow-up", harness });
+    const injectedResult = await coordinator.beginRun({ turn: createTurn("chat-2", "follow-up"), userText: "follow-up", harness });
 
     assert.equal(started.status, "started");
     assert.equal(injectedResult.status, "injected");
@@ -99,7 +99,37 @@ describe("createHarnessRunCoordinator", () => {
     assert.equal(coordinator.finishRun("chat-2"), null);
   });
 
-  it("returns the latest buffered turn after a non-live run finishes", () => {
+  it("queues the turn when async live input is unavailable", async () => {
+    /** @type {AgentHarness} */
+    const harness = {
+      getName: () => "codex",
+      getCapabilities: () => ({
+        supportsResume: true,
+        supportsCancel: true,
+        supportsLiveInput: true,
+        supportsApprovals: true,
+        supportsWorkdir: true,
+        supportsSandboxConfig: true,
+        supportsModelSelection: true,
+        supportsReasoningEffort: false,
+        supportsSessionFork: true,
+      }),
+      run: async () => ({ response: [], messages: [], usage: { promptTokens: 0, completionTokens: 0, cachedTokens: 0, cost: 0 } }),
+      handleCommand: async () => false,
+      injectMessage: async () => false,
+    };
+
+    const coordinator = createHarnessRunCoordinator();
+    const started = await coordinator.beginRun({ turn: createTurn("chat-4", "first"), userText: "first", harness });
+    coordinator.markRunActive("chat-4");
+    const buffered = await coordinator.beginRun({ turn: createTurn("chat-4", "follow-up"), userText: "follow-up", harness });
+
+    assert.equal(started.status, "started");
+    assert.equal(buffered.status, "buffered");
+    assert.equal(coordinator.finishRun("chat-4")?.content[0]?.type, "text");
+  });
+
+  it("returns the latest buffered turn after a non-live run finishes", async () => {
     /** @type {AgentHarness} */
     const harness = {
       getName: () => "codex",
@@ -119,9 +149,9 @@ describe("createHarnessRunCoordinator", () => {
     };
 
     const coordinator = createHarnessRunCoordinator();
-    coordinator.beginRun({ turn: createTurn("chat-3", "first"), userText: "first", harness });
+    await coordinator.beginRun({ turn: createTurn("chat-3", "first"), userText: "first", harness });
     coordinator.markRunActive("chat-3");
-    const buffered = coordinator.beginRun({ turn: createTurn("chat-3", "second"), userText: "second", harness });
+    const buffered = await coordinator.beginRun({ turn: createTurn("chat-3", "second"), userText: "second", harness });
 
     assert.equal(buffered.status, "buffered");
     assert.equal(coordinator.consumeBufferedTexts("chat-3").length, 0);
