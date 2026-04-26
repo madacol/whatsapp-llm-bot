@@ -260,6 +260,85 @@ describe("createConversationRunner with codex harness", () => {
     assert.equal(secondTurn.responses.length, 0);
   });
 
+  it("runs a queued follow-up turn when active Codex steering is unavailable", async () => {
+    await seedChat("conv-codex-steer-unavailable", { enabled: true });
+    await db.sql`
+      UPDATE chats
+      SET harness = 'codex',
+          harness_config = '{}'::jsonb
+      WHERE chat_id = 'conv-codex-steer-unavailable'
+    `;
+
+    /** @type {string[]} */
+    const seenPrompts = [];
+    /** @type {() => void} */
+    let releaseFirstRun = () => {};
+    const firstRunReleased = new Promise((resolve) => {
+      releaseFirstRun = resolve;
+    });
+    /** @type {() => void} */
+    let notifyFirstRunStarted = () => {};
+    const firstRunStarted = new Promise((resolve) => {
+      notifyFirstRunStarted = resolve;
+    });
+    let runCount = 0;
+
+    registerHarness("codex", () => createCodexHarness({
+      startRun: async (input) => {
+        runCount += 1;
+        const prompt = getLastUserText(input.messages);
+        seenPrompts.push(prompt);
+
+        return {
+          abortController: new AbortController(),
+          steer: async () => false,
+          done: (async () => {
+            await input.hooks?.onLlmResponse?.(`Response for ${prompt}`);
+            if (runCount === 1) {
+              notifyFirstRunStarted();
+              await firstRunReleased;
+            }
+            return {
+              sessionId: null,
+              result: {
+                response: [{ type: "markdown", text: `Response for ${prompt}` }],
+                messages: input.messages,
+                usage: { promptTokens: 0, completionTokens: 0, cachedTokens: 0, cost: 0 },
+              },
+            };
+          })(),
+        };
+      },
+    }));
+
+    const firstTurn = createChatTurn({
+      chatId: "conv-codex-steer-unavailable",
+      content: [{ type: "text", text: "First unavailable question" }],
+    });
+    const secondTurn = createChatTurn({
+      chatId: "conv-codex-steer-unavailable",
+      content: [{ type: "text", text: "Second unavailable question" }],
+    });
+
+    const firstTurnPromise = handleMessage(firstTurn.context);
+    await firstRunStarted;
+
+    const secondTurnPromise = handleMessage(secondTurn.context);
+    assert.equal(seenPrompts.length, 1);
+
+    releaseFirstRun();
+    await firstTurnPromise;
+    await secondTurnPromise;
+
+    assert.equal(seenPrompts.length, 2);
+    assert.ok(seenPrompts[0]?.includes("First unavailable question"));
+    assert.ok(seenPrompts[1]?.includes("Second unavailable question"));
+    assert.ok(
+      secondTurn.responses.some((response) => response.text.includes("Response for") && response.text.includes("Second unavailable question")),
+      `Expected the second turn to run after steering was unavailable, got: ${secondTurn.responses.map((response) => response.text).join(" | ")}`,
+    );
+  });
+
   it("routes !c to harness cancellation", async () => {
     await seedChat("conv-codex-cancel", { enabled: true });
     await db.sql`

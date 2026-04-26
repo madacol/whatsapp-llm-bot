@@ -15,7 +15,7 @@
  * The coordinator does not execute runs itself; it only mediates lifecycle.
  *
  * @returns {{
- *   beginRun: (input: { turn: ChatTurn, userText: string, harness: AgentHarness }) => HarnessRunDecision,
+ *   beginRun: (input: { turn: ChatTurn, userText: string, harness: AgentHarness }) => Promise<HarnessRunDecision>,
  *   markRunActive: (chatId: string) => void,
  *   consumeBufferedTexts: (chatId: string) => string[],
  *   finishRun: (chatId: string) => ChatTurn | null,
@@ -26,12 +26,18 @@ export function createHarnessRunCoordinator() {
   const pendingRuns = new Map();
 
   return {
-    beginRun({ turn, userText, harness }) {
+    async beginRun({ turn, userText, harness }) {
       const { chatId } = turn;
       const pending = pendingRuns.get(chatId);
       if (pending) {
-        if (pending.isActive && userText && harness.injectMessage?.(chatId, userText)) {
-          return { status: "injected" };
+        if (pending.isActive && userText && harness.injectMessage) {
+          try {
+            if (await harness.injectMessage(chatId, userText)) {
+              return { status: "injected" };
+            }
+          } catch {
+            // Fall through to buffering so the incoming turn is retried after the active run.
+          }
         }
         if (pending.isActive) {
           pending.queuedTurns.push(turn);

@@ -299,7 +299,7 @@ export function createConversationRunner({ store, llmClient, getActionsFn, execu
 
     log.debug("LLM will respond");
 
-    const lifecycleDecision = runCoordinator.beginRun({ turn, userText, harness });
+    const lifecycleDecision = await runCoordinator.beginRun({ turn, userText, harness });
     if (lifecycleDecision.status === "buffered") {
       log.debug("Buffered message for pending harness run on chat", chatId);
       return null;
