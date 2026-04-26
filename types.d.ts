@@ -153,6 +153,7 @@ type ContentEvent = {
   kind: "content";
   source: MessageSource;
   content: SendContent;
+  cwd?: string | null;
 };
 
 type ToolCallEvent = {
