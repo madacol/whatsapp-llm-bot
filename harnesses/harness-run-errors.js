@@ -35,7 +35,11 @@ export function getHarnessRunErrorMessage(error) {
  * @returns {boolean}
  */
 export function isTransientHarnessRunError(error) {
-  return getHarnessRunErrorMessage(error).toLowerCase().includes("connection closed");
+  const message = getHarnessRunErrorMessage(error).toLowerCase();
+  return message.includes("connection closed")
+    || message.includes("rate limit")
+    || message.includes("rate_limit")
+    || message.includes("429");
 }
 
 /**
