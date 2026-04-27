@@ -105,6 +105,82 @@ describe("createClaudeAgentSdkHarness", () => {
     assert.equal(handled, false);
   });
 
+  it("preserves the saved session when the SDK query hits a provider rate limit", async () => {
+    /** @type {Array<HarnessSessionRef | null>} */
+    const savedSessions = [];
+    /** @type {string[]} */
+    const toolErrors = [];
+    const workdir = await fs.mkdtemp(path.join(os.tmpdir(), "claude-rate-limit-"));
+    const harness = createClaudeAgentSdkHarness({
+      query: () => ({
+        supportedModels: async () => [],
+        streamInput: async () => {},
+        [Symbol.asyncIterator]: async function* () {
+          throw new Error("Claude Code returned an error result: API Error: Rate limit reached");
+        },
+      }),
+    });
+
+    try {
+      const result = await harness.run({
+        session: {
+          chatId: "claude-rate-limit-chat",
+          senderIds: ["user-1"],
+          context: /** @type {ExecuteActionContext} */ ({
+            chatId: "claude-rate-limit-chat",
+            senderIds: ["user-1"],
+            content: [],
+            getIsAdmin: async () => true,
+            send: async () => undefined,
+            reply: async () => undefined,
+            reactToMessage: async () => {},
+            select: async () => "",
+            confirm: async () => true,
+          }),
+          addMessage: async () => /** @type {import("../store.js").MessageRow} */ ({
+            message_id: 1,
+            chat_id: "claude-rate-limit-chat",
+            sender_id: "user-1",
+            message_data: { role: "assistant", content: [] },
+            timestamp: new Date().toISOString(),
+            display_key: null,
+          }),
+          updateToolMessage: async () => undefined,
+          harnessSession: { id: "sess-claude-rate-limit", kind: "claude-sdk" },
+          saveHarnessSession: async (_chatId, sessionRef) => {
+            savedSessions.push(sessionRef);
+          },
+        },
+        llmConfig: {
+          llmClient: /** @type {LlmClient} */ ({}),
+          chatModel: null,
+          externalInstructions: "",
+          toolRuntime: /** @type {ToolRuntime} */ ({
+            getTool: async () => null,
+            executeTool: async () => {
+              throw new Error("executeTool should not be called");
+            },
+            listTools: () => [],
+          }),
+        },
+        messages: [{ role: "user", content: [{ type: "text", text: "Do work" }] }],
+        mediaRegistry: new Map(),
+        hooks: {
+          onToolError: async (message) => {
+            toolErrors.push(message);
+          },
+        },
+        runConfig: { workdir },
+      });
+
+      assert.deepEqual(savedSessions, []);
+      assert.ok(toolErrors.some((message) => message.includes("Rate limit reached")));
+      assert.ok(result.response.some((block) => block.type === "text" && block.text.includes("Rate limit reached")));
+    } finally {
+      await fs.rm(workdir, { recursive: true, force: true });
+    }
+  });
+
   it("handles permissions command through a selector and defaults to workspace-write", async () => {
     const db = await createTestDb();
     await seedChat(db, "claude-chat-1", { enabled: true });
