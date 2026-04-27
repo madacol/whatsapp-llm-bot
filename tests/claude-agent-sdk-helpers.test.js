@@ -30,6 +30,7 @@ import path from "node:path";
 
 import { resolveMediaPath } from "../attachment-paths.js";
 import { setDb } from "../db.js";
+import { formatToolCallDisplay } from "../tool-display.js";
 import {
   buildClaudePrompt,
   buildClaudeSystemPrompt,
@@ -176,6 +177,108 @@ describe("createClaudeAgentSdkHarness", () => {
       assert.deepEqual(savedSessions, []);
       assert.ok(toolErrors.some((message) => message.includes("Rate limit reached")));
       assert.ok(result.response.some((block) => block.type === "text" && block.text.includes("Rate limit reached")));
+    } finally {
+      await fs.rm(workdir, { recursive: true, force: true });
+    }
+  });
+
+  it("displays Write tool content when the SDK only provides the ID on the hook input", async () => {
+    /** @type {SendContent[]} */
+    const displays = [];
+    const workdir = await fs.mkdtemp(path.join(os.tmpdir(), "claude-write-display-"));
+    const filePath = path.join(workdir, "sdk-shape.js");
+    const content = "export const sdkShape = 1;\n";
+
+    const harness = createClaudeAgentSdkHarness({
+      query: ({ options }) => ({
+        supportedModels: async () => [],
+        streamInput: async () => {},
+        [Symbol.asyncIterator]: async function* () {
+          const preToolHook = options.hooks?.PreToolUse?.[0]?.hooks[0];
+          assert.equal(typeof preToolHook, "function");
+          await preToolHook({
+            hook_event_name: "PreToolUse",
+            session_id: "sdk-session-1",
+            transcript_path: path.join(workdir, "transcript.jsonl"),
+            cwd: workdir,
+            tool_name: "Write",
+            tool_input: { file_path: filePath, content },
+            tool_use_id: "tool-from-input",
+          }, undefined, { signal: new AbortController().signal });
+          yield {
+            type: "result",
+            subtype: "success",
+            is_error: false,
+            result: "",
+            total_cost_usd: 0,
+            usage: { input_tokens: 0, output_tokens: 0 },
+            session_id: "sdk-session-1",
+          };
+        },
+      }),
+    });
+
+    try {
+      await harness.run({
+        session: {
+          chatId: "claude-write-display-chat",
+          senderIds: ["user-1"],
+          context: /** @type {ExecuteActionContext} */ ({
+            chatId: "claude-write-display-chat",
+            senderIds: ["user-1"],
+            content: [],
+            getIsAdmin: async () => true,
+            send: async () => undefined,
+            reply: async () => undefined,
+            reactToMessage: async () => {},
+            select: async () => "",
+            confirm: async () => true,
+          }),
+          addMessage: async () => /** @type {import("../store.js").MessageRow} */ ({
+            message_id: 1,
+            chat_id: "claude-write-display-chat",
+            sender_id: "user-1",
+            message_data: { role: "assistant", content: [] },
+            timestamp: new Date().toISOString(),
+            display_key: null,
+          }),
+          updateToolMessage: async () => undefined,
+          harnessSession: null,
+          saveHarnessSession: async () => {},
+        },
+        llmConfig: {
+          llmClient: /** @type {LlmClient} */ ({}),
+          chatModel: null,
+          externalInstructions: "",
+          toolRuntime: /** @type {ToolRuntime} */ ({
+            getTool: async () => null,
+            executeTool: async () => {
+              throw new Error("executeTool should not be called");
+            },
+            listTools: () => [],
+          }),
+        },
+        messages: [{ role: "user", content: [{ type: "text", text: "Write the file" }] }],
+        mediaRegistry: new Map(),
+        hooks: {
+          onToolCall: async (toolCall, _formatToolCall, toolContext) => {
+            const display = formatToolCallDisplay(toolCall, undefined, workdir, toolContext);
+            assert.ok(display);
+            displays.push(display);
+            return undefined;
+          },
+        },
+        runConfig: { workdir },
+      });
+
+      assert.equal(displays.length, 1);
+      const display = displays[0];
+      assert.ok(Array.isArray(display));
+      const block = display[0];
+      assert.equal(block?.type, "code");
+      assert.equal(block.code, content);
+      assert.equal(block.language, "javascript");
+      assert.equal(block.caption, "*Write*  `sdk-shape.js`");
     } finally {
       await fs.rm(workdir, { recursive: true, force: true });
     }
