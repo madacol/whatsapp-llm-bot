@@ -581,13 +581,21 @@ async function handleClaudeHarnessCommand({ chatId, command, context }) {
 }
 
 /**
+ * @typedef {{
+ *   query?: typeof query,
+ * }} ClaudeAgentSdkHarnessDeps
+ */
+
+/**
  * Create the Claude Agent SDK harness.
  * Maintains per-chat active query state for message injection and cancellation.
+ * @param {ClaudeAgentSdkHarnessDeps} [deps]
  * @returns {AgentHarness}
  */
-export function createClaudeAgentSdkHarness() {
+export function createClaudeAgentSdkHarness(deps = {}) {
   /** @type {Map<string, ActiveQuery>} */
   const activeQueries = new Map();
+  const queryClaude = deps.query ?? query;
 
   /** Max time (ms) to wait for active queries before force-cancelling them */
   const SHUTDOWN_TIMEOUT_MS = 120_000;
@@ -948,7 +956,7 @@ export function createClaudeAgentSdkHarness() {
         log.info(`Resuming SDK session ${existingSessionId} for chat ${session.chatId}`);
       }
 
-      const q = query({
+      const q = queryClaude({
         prompt: lastUserText,
         options: queryOptions,
       });
@@ -1020,6 +1028,7 @@ export function createClaudeAgentSdkHarness() {
         await clearStaleHarnessSession({
           existingSessionId,
           resolvedSessionId,
+          error: err,
           clearSession: async () => saveClaudeSessionId(session, null),
           log,
           harnessLabel: "Claude SDK",
