@@ -393,6 +393,28 @@ async function safeHook(name, fn, fallback) {
 }
 
 /**
+ * @param {unknown} value
+ * @returns {value is Record<string, unknown>}
+ */
+function isObjectRecord(value) {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/**
+ * @param {import("@anthropic-ai/claude-agent-sdk").PreToolUseHookInput} input
+ * @param {string | undefined} callbackToolUseId
+ * @returns {string | null}
+ */
+function getPreToolUseId(input, callbackToolUseId) {
+  if (typeof callbackToolUseId === "string" && callbackToolUseId) {
+    return callbackToolUseId;
+  }
+  return typeof input.tool_use_id === "string" && input.tool_use_id
+    ? input.tool_use_id
+    : null;
+}
+
+/**
  * Wrap every hook so that a WhatsApp send failure (e.g. "Connection Closed")
  * doesn't kill the entire SDK query loop. Each hook has an explicit fallback
  * matching its return type contract.
@@ -904,7 +926,8 @@ export function createClaudeAgentSdkHarness(deps = {}) {
               /** @type {import("@anthropic-ai/claude-agent-sdk").HookCallback} */
               async (hookInput, toolUseId) => {
                 const input = /** @type {import("@anthropic-ai/claude-agent-sdk").PreToolUseHookInput} */ (hookInput);
-                const toolInput = /** @type {Record<string, unknown>} */ (input.tool_input);
+                const toolInput = isObjectRecord(input.tool_input) ? input.tool_input : {};
+                const resolvedToolUseId = getPreToolUseId(input, toolUseId);
 
                 // Capture file content for display context (Write diffs, Edit line numbers)
                 /** @type {{ oldContent?: string; startLine?: number } | undefined} */
@@ -924,8 +947,8 @@ export function createClaudeAgentSdkHarness(deps = {}) {
                 }
 
                 // Display tool call and store handle for inspect handler
-                if (toolUseId) {
-                  const toolCall = { id: toolUseId, name: input.tool_name, arguments: JSON.stringify(toolInput) };
+                if (resolvedToolUseId) {
+                  const toolCall = { id: resolvedToolUseId, name: input.tool_name, arguments: JSON.stringify(toolInput) };
                   const presentation = buildToolPresentation(
                     input.tool_name,
                     toolInput,
@@ -935,7 +958,7 @@ export function createClaudeAgentSdkHarness(deps = {}) {
                   );
                   /** @type {MessageHandle | undefined} */
                   const handle = await hooks.onToolCall(toolCall, undefined, displayContext) ?? undefined;
-                  activeTools.set(toolUseId, {
+                  activeTools.set(resolvedToolUseId, {
                     handle: handle ?? undefined,
                     toolName: input.tool_name,
                     presentation,
