@@ -1,4 +1,6 @@
 import { createLogger } from "../logger.js";
+import { appendFileSync, existsSync, mkdirSync } from "node:fs";
+import path from "node:path";
 import { adaptIncomingMessage } from "./inbound/chat-turn.js";
 import { createWhatsAppConnectionSupervisor } from "./connection-supervisor.js";
 import { classifyIncomingMessageEvent, normalizeReactionEvents } from "./inbound/message-event-classifier.js";
@@ -12,6 +14,8 @@ import {
 } from "./outbound/persistent-queue.js";
 
 const log = createLogger("whatsapp");
+const WHATSAPP_UPSERT_DIAGNOSTIC_ENABLE_PATH = ".diagnostics/whatsapp-upsert-shape.enabled";
+const WHATSAPP_UPSERT_DIAGNOSTIC_DEFAULT_PATH = ".diagnostics/whatsapp-upsert-shape.jsonl";
 
 /**
  * @typedef {{
@@ -45,6 +49,149 @@ function isRecord(value) {
  */
 function isFunction(value) {
   return typeof value === "function";
+}
+
+/**
+ * @param {unknown} value
+ * @returns {string | number | boolean | null | undefined}
+ */
+function toDiagnosticScalar(value) {
+  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean" || value == null) {
+    return value;
+  }
+  if (typeof value === "bigint") {
+    return value.toString();
+  }
+  if (value instanceof Uint8Array || Buffer.isBuffer(value)) {
+    return `[bytes:${value.byteLength}]`;
+  }
+  if (typeof value === "object" && value !== null && "toString" in value && typeof value.toString === "function") {
+    return value.toString();
+  }
+  return undefined;
+}
+
+/**
+ * @param {import("@whiskeysockets/baileys").proto.IMessageKey | null | undefined} key
+ * @returns {Record<string, unknown> | null}
+ */
+function summarizeMessageKey(key) {
+  if (!key) {
+    return null;
+  }
+  return {
+    remoteJid: key.remoteJid ?? null,
+    fromMe: key.fromMe ?? null,
+    id: key.id ?? null,
+    participant: key.participant ?? null,
+  };
+}
+
+/**
+ * @param {import("@whiskeysockets/baileys").proto.IMessageAssociation | null | undefined} association
+ * @returns {Record<string, unknown> | null}
+ */
+function summarizeMessageAssociation(association) {
+  if (!association) {
+    return null;
+  }
+  return {
+    associationType: association.associationType ?? null,
+    parentMessageKey: summarizeMessageKey(association.parentMessageKey),
+    messageIndex: association.messageIndex ?? null,
+  };
+}
+
+/**
+ * @param {import("@whiskeysockets/baileys").proto.IContextInfo | null | undefined} contextInfo
+ * @returns {Record<string, unknown> | null}
+ */
+function summarizeContextInfo(contextInfo) {
+  if (!contextInfo) {
+    return null;
+  }
+  return {
+    stanzaId: contextInfo.stanzaId ?? null,
+    participant: contextInfo.participant ?? null,
+    remoteJid: contextInfo.remoteJid ?? null,
+    pairedMediaType: contextInfo.pairedMediaType ?? null,
+    quotedMessageTypes: Object.keys(contextInfo.quotedMessage ?? {}),
+  };
+}
+
+/**
+ * Build a compact, JSON-safe diagnostic summary of the Baileys message fields
+ * that define album/media grouping. This intentionally omits media bytes, media
+ * keys, URLs, and direct paths.
+ * @param {BaileysMessage} message
+ * @returns {Record<string, unknown>}
+ */
+export function buildWhatsAppUpsertShapeDiagnostic(message) {
+  const content = message.message;
+  const associatedMessage = content?.associatedChildMessage?.message;
+  return {
+    receivedAt: new Date().toISOString(),
+    key: summarizeMessageKey(message.key),
+    messageTimestamp: toDiagnosticScalar(message.messageTimestamp),
+    messageTypes: Object.keys(content ?? {}),
+    albumMessage: content?.albumMessage
+      ? {
+          expectedImageCount: content.albumMessage.expectedImageCount ?? null,
+          expectedVideoCount: content.albumMessage.expectedVideoCount ?? null,
+          contextInfo: summarizeContextInfo(content.albumMessage.contextInfo),
+        }
+      : null,
+    messageContextInfo: content?.messageContextInfo
+      ? {
+          hasMessageSecret: !!content.messageContextInfo.messageSecret,
+          messageSecretLength: content.messageContextInfo.messageSecret?.length ?? null,
+          messageAssociation: summarizeMessageAssociation(content.messageContextInfo.messageAssociation),
+        }
+      : null,
+    imageMessage: content?.imageMessage
+      ? {
+          mimetype: content.imageMessage.mimetype ?? null,
+          caption: content.imageMessage.caption ?? null,
+          contextInfo: summarizeContextInfo(content.imageMessage.contextInfo),
+        }
+      : null,
+    associatedChildMessageTypes: Object.keys(associatedMessage ?? {}),
+    associatedChildMessageContextInfo: associatedMessage?.messageContextInfo
+      ? {
+          hasMessageSecret: !!associatedMessage.messageContextInfo.messageSecret,
+          messageSecretLength: associatedMessage.messageContextInfo.messageSecret?.length ?? null,
+          messageAssociation: summarizeMessageAssociation(associatedMessage.messageContextInfo.messageAssociation),
+        }
+      : null,
+    associatedChildImageMessage: associatedMessage?.imageMessage
+      ? {
+          mimetype: associatedMessage.imageMessage.mimetype ?? null,
+          caption: associatedMessage.imageMessage.caption ?? null,
+          contextInfo: summarizeContextInfo(associatedMessage.imageMessage.contextInfo),
+        }
+      : null,
+  };
+}
+
+/**
+ * @returns {boolean}
+ */
+function isWhatsAppUpsertDiagnosticEnabled() {
+  return process.env.WHATSAPP_UPSERT_DIAGNOSTIC === "1"
+    || existsSync(WHATSAPP_UPSERT_DIAGNOSTIC_ENABLE_PATH);
+}
+
+/**
+ * @param {BaileysMessage} message
+ * @returns {void}
+ */
+function appendWhatsAppUpsertDiagnostic(message) {
+  if (!isWhatsAppUpsertDiagnosticEnabled()) {
+    return;
+  }
+  const targetPath = process.env.WHATSAPP_UPSERT_DIAGNOSTIC_PATH || WHATSAPP_UPSERT_DIAGNOSTIC_DEFAULT_PATH;
+  mkdirSync(path.dirname(targetPath), { recursive: true });
+  appendFileSync(targetPath, `${JSON.stringify(buildWhatsAppUpsertShapeDiagnostic(message))}\n`);
 }
 
 /**
@@ -325,6 +472,7 @@ export async function createWhatsAppTransport(options = {}) {
         const { messages } = events["messages.upsert"];
         for (const message of messages) {
           if (message.key.fromMe) continue;
+          appendWhatsAppUpsertDiagnostic(message);
 
           const incomingEvent = classifyIncomingMessageEvent(message);
           switch (incomingEvent.kind) {
