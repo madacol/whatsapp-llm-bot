@@ -1,11 +1,78 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { buildWhatsAppUpsertShapeDiagnostic } from "../whatsapp/create-whatsapp-transport.js";
 import {
   classifyIncomingMessageEvent,
   normalizeReactionEvents,
   normalizeUpsertReactionMessage,
 } from "../whatsapp/inbound/message-event-classifier.js";
 import { createReactionRuntime } from "../whatsapp/runtime/reaction-runtime.js";
+
+describe("WhatsApp upsert shape diagnostics", () => {
+  it("summarizes album linkage without media secrets", () => {
+    const diagnostic = buildWhatsAppUpsertShapeDiagnostic(/** @type {BaileysMessage} */ ({
+      key: {
+        remoteJid: "chat@g.us",
+        fromMe: false,
+        id: "child-1",
+        participant: "user@s.whatsapp.net",
+      },
+      messageTimestamp: 1777375800,
+      message: {
+        imageMessage: {
+          mimetype: "image/jpeg",
+          caption: "first image",
+          mediaKey: Buffer.from("secret-media-key"),
+          url: "https://media.example.test/secret",
+          contextInfo: {
+            pairedMediaType: 3,
+          },
+        },
+        messageContextInfo: {
+          messageSecret: Buffer.from("secret"),
+          messageAssociation: {
+            associationType: 1,
+            parentMessageKey: {
+              remoteJid: "chat@g.us",
+              fromMe: false,
+              id: "album-parent",
+            },
+            messageIndex: 2,
+          },
+        },
+      },
+    }));
+
+    assert.deepEqual(diagnostic.messageTypes, ["imageMessage", "messageContextInfo"]);
+    assert.deepEqual(diagnostic.messageContextInfo, {
+      hasMessageSecret: true,
+      messageSecretLength: 6,
+      messageAssociation: {
+        associationType: 1,
+        parentMessageKey: {
+          remoteJid: "chat@g.us",
+          fromMe: false,
+          id: "album-parent",
+          participant: null,
+        },
+        messageIndex: 2,
+      },
+    });
+    assert.deepEqual(diagnostic.imageMessage, {
+      mimetype: "image/jpeg",
+      caption: "first image",
+      contextInfo: {
+        stanzaId: null,
+        participant: null,
+        remoteJid: null,
+        pairedMediaType: 3,
+        quotedMessageTypes: [],
+      },
+    });
+    assert.equal(JSON.stringify(diagnostic).includes("secret-media-key"), false);
+    assert.equal(JSON.stringify(diagnostic).includes("media.example.test"), false);
+  });
+});
 
 describe("message-event-classifier", () => {
   it("extracts reaction-message upserts into runtime reaction events", () => {
