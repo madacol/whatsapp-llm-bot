@@ -1,7 +1,7 @@
 import { createLogger } from "../logger.js";
 import { appendFileSync, existsSync, mkdirSync } from "node:fs";
 import path from "node:path";
-import { adaptIncomingMessage } from "./inbound/chat-turn.js";
+import { adaptIncomingMessage, adaptIncomingMessages } from "./inbound/chat-turn.js";
 import { createWhatsAppConnectionSupervisor } from "./connection-supervisor.js";
 import { classifyIncomingMessageEvent, normalizeReactionEvents } from "./inbound/message-event-classifier.js";
 import { createConfirmRuntime } from "./runtime/confirm-runtime.js";
@@ -16,6 +16,7 @@ import {
 const log = createLogger("whatsapp");
 const WHATSAPP_UPSERT_DIAGNOSTIC_ENABLE_PATH = ".diagnostics/whatsapp-upsert-shape.enabled";
 const WHATSAPP_UPSERT_DIAGNOSTIC_DEFAULT_PATH = ".diagnostics/whatsapp-upsert-shape.jsonl";
+const WHATSAPP_ALBUM_FLUSH_DELAY_MS = 1_200;
 
 /**
  * @typedef {{
@@ -99,6 +100,171 @@ function summarizeMessageAssociation(association) {
     associationType: association.associationType ?? null,
     parentMessageKey: summarizeMessageKey(association.parentMessageKey),
     messageIndex: association.messageIndex ?? null,
+  };
+}
+
+/**
+ * @param {import("@whiskeysockets/baileys").proto.IMessageKey | null | undefined} key
+ * @returns {string | null}
+ */
+function getAlbumBufferKey(key) {
+  if (!key?.remoteJid || !key.id) {
+    return null;
+  }
+  return `${key.remoteJid}:${key.id}`;
+}
+
+/**
+ * @param {BaileysMessage} message
+ * @returns {number | null}
+ */
+function getAlbumExpectedMediaCount(message) {
+  const albumMessage = message.message?.albumMessage;
+  if (!albumMessage) {
+    return null;
+  }
+  const expectedImages = Number(albumMessage.expectedImageCount ?? 0);
+  const expectedVideos = Number(albumMessage.expectedVideoCount ?? 0);
+  const expectedTotal = expectedImages + expectedVideos;
+  return expectedTotal > 0 ? expectedTotal : null;
+}
+
+/**
+ * @param {BaileysMessage} message
+ * @returns {string | null}
+ */
+function getAlbumParentBufferKey(message) {
+  const association = message.message?.messageContextInfo?.messageAssociation;
+  const parentKey = association?.parentMessageKey;
+  return getAlbumBufferKey(parentKey);
+}
+
+/**
+ * @param {BaileysMessage} message
+ * @returns {boolean}
+ */
+function isAlbumMediaChild(message) {
+  return !!getAlbumParentBufferKey(message)
+    && !!(message.message?.imageMessage || message.message?.videoMessage || message.message?.ptvMessage);
+}
+
+/**
+ * @param {{
+ *   flushDelayMs?: number,
+ *   handleAlbumMessages: (messages: BaileysMessage[]) => Promise<void>,
+ * }} input
+ * @returns {{
+ *   handle: (message: BaileysMessage) => Promise<boolean>,
+ *   flushAll: () => Promise<void>,
+ * }}
+ */
+export function createWhatsAppAlbumCoordinator({ flushDelayMs = WHATSAPP_ALBUM_FLUSH_DELAY_MS, handleAlbumMessages }) {
+  /** @type {Map<string, {
+   *   expectedCount: number | null,
+   *   children: BaileysMessage[],
+   *   childIds: Set<string>,
+   *   timer: ReturnType<typeof setTimeout> | null,
+   *   flushing: Promise<void> | null,
+   * }>} */
+  const pendingAlbums = new Map();
+
+  /**
+   * @param {string} albumKey
+   */
+  function ensureAlbum(albumKey) {
+    let album = pendingAlbums.get(albumKey);
+    if (!album) {
+      album = {
+        expectedCount: null,
+        children: [],
+        childIds: new Set(),
+        timer: null,
+        flushing: null,
+      };
+      pendingAlbums.set(albumKey, album);
+    }
+    return album;
+  }
+
+  /**
+   * @param {string} albumKey
+   */
+  function scheduleFlush(albumKey) {
+    const album = pendingAlbums.get(albumKey);
+    if (!album || album.timer) {
+      return;
+    }
+    album.timer = setTimeout(() => {
+      void flushAlbum(albumKey).catch((error) => {
+        log.error("Error processing WhatsApp album:", error);
+      });
+    }, flushDelayMs);
+  }
+
+  /**
+   * @param {string} albumKey
+   * @returns {Promise<void>}
+   */
+  async function flushAlbum(albumKey) {
+    const album = pendingAlbums.get(albumKey);
+    if (!album) {
+      return;
+    }
+    if (album.flushing) {
+      await album.flushing;
+      return;
+    }
+    if (album.timer) {
+      clearTimeout(album.timer);
+      album.timer = null;
+    }
+    pendingAlbums.delete(albumKey);
+
+    album.flushing = (async () => {
+      if (album.children.length > 0) {
+        await handleAlbumMessages(album.children);
+      }
+    })();
+    await album.flushing;
+  }
+
+  return {
+    handle: async (message) => {
+      const albumKey = getAlbumBufferKey(message.key);
+      const expectedCount = getAlbumExpectedMediaCount(message);
+      if (albumKey && expectedCount !== null) {
+        const album = ensureAlbum(albumKey);
+        album.expectedCount = expectedCount;
+        if (album.children.length >= expectedCount) {
+          await flushAlbum(albumKey);
+        } else {
+          scheduleFlush(albumKey);
+        }
+        return true;
+      }
+
+      if (!isAlbumMediaChild(message)) {
+        return false;
+      }
+
+      const parentAlbumKey = /** @type {string} */ (getAlbumParentBufferKey(message));
+      const album = ensureAlbum(parentAlbumKey);
+      const childId = message.key.id || `${album.children.length}`;
+      if (!album.childIds.has(childId)) {
+        album.childIds.add(childId);
+        album.children.push(message);
+      }
+
+      if (album.expectedCount !== null && album.children.length >= album.expectedCount) {
+        await flushAlbum(parentAlbumKey);
+      } else {
+        scheduleFlush(parentAlbumKey);
+      }
+      return true;
+    },
+    flushAll: async () => {
+      await Promise.all([...pendingAlbums.keys()].map((albumKey) => flushAlbum(albumKey)));
+    },
   };
 }
 
@@ -446,6 +612,20 @@ export async function createWhatsAppTransport(options = {}) {
   function registerHandlers(sock, saveCreds) {
     currentSocket = sock;
     hasOpenConnection = false;
+    const albumCoordinator = createWhatsAppAlbumCoordinator({
+      handleAlbumMessages: async (albumMessages) => {
+        await adaptIncomingMessages(
+          albumMessages,
+          sock,
+          onTurn,
+          confirmRuntime,
+          selectRuntime,
+          reactionRuntime,
+          undefined,
+          { getSocket: () => currentSocket },
+        );
+      },
+    });
 
     sock.ev.process(async (events) => {
       if (connectionSupervisor.isStopped()) {
@@ -495,6 +675,9 @@ export async function createWhatsAppTransport(options = {}) {
               }
               continue;
             case "turn":
+              if (await albumCoordinator.handle(incomingEvent.message)) {
+                continue;
+              }
               await adaptIncomingMessage(
                 incomingEvent.message,
                 sock,

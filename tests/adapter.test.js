@@ -24,6 +24,8 @@ let createReactionRuntime;
 
 /** @type {typeof import("../whatsapp/inbound/chat-turn.js").adaptIncomingMessage} */
 let adaptIncomingMessage;
+/** @type {typeof import("../whatsapp/inbound/chat-turn.js").adaptIncomingMessages} */
+let adaptIncomingMessages;
 /** @type {typeof import("../whatsapp/inbound/chat-turn.js").createTurnIo} */
 let createTurnIo;
 
@@ -36,7 +38,7 @@ before(async () => {
   ({ createConfirmRuntime } = await import("../whatsapp/runtime/confirm-runtime.js"));
   ({ createSelectRuntime } = await import("../whatsapp/runtime/select-runtime.js"));
   ({ createReactionRuntime } = await import("../whatsapp/runtime/reaction-runtime.js"));
-  ({ adaptIncomingMessage, createTurnIo } = await import("../whatsapp/inbound/chat-turn.js"));
+  ({ adaptIncomingMessage, adaptIncomingMessages, createTurnIo } = await import("../whatsapp/inbound/chat-turn.js"));
 });
 
 /**
@@ -484,6 +486,77 @@ describe("getMessageContent", () => {
     assert.equal(resolvedHd.mime_type, "image/jpeg");
     assert.equal(await readBlockBase64(resolvedHd), Buffer.from("hd-child-1").toString("base64"));
     assert.equal(await withTimeout(secondImage.getHd ?? Promise.resolve(null), 50), "timeout");
+  });
+});
+
+describe("adaptIncomingMessages", () => {
+  it("merges album child images into one app turn", async () => {
+    const chatId = "album-chat@g.us";
+    const sock = /** @type {import("@whiskeysockets/baileys").WASocket} */ (/** @type {unknown} */ ({
+      user: { id: "bot@s.whatsapp.net" },
+      groupMetadata: async () => ({ subject: "Album Chat" }),
+      signalRepository: {
+        lidMapping: {
+          getPNForLID: async () => null,
+        },
+      },
+      sendPresenceUpdate: async () => {},
+    }));
+    const confirmRegistry = createConfirmRuntime();
+    const selectRegistry = createSelectRuntime();
+    const mockDownload = async (/** @type {BaileysMessage} */ message) => Buffer.from(message.key.id);
+    /** @type {ChatTurn | null} */
+    let receivedTurn = null;
+
+    await adaptIncomingMessages(
+      ["image-1", "image-2", "image-3", "image-4"].map((id) => /** @type {BaileysMessage} */ ({
+        key: {
+          remoteJid: chatId,
+          fromMe: false,
+          id,
+          participant: "user@s.whatsapp.net",
+        },
+        messageTimestamp: 1777467488,
+        pushName: "Album Sender",
+        message: {
+          imageMessage: {
+            mimetype: "image/jpeg",
+            url: `https://example.test/${id}.jpg`,
+            mediaKey: Buffer.from(`key-${id}`),
+            contextInfo: {
+              pairedMediaType: proto.ContextInfo.PairedMediaType.SD_IMAGE_PARENT,
+            },
+          },
+          messageContextInfo: {
+            messageAssociation: {
+              associationType: 1,
+              parentMessageKey: {
+                remoteJid: chatId,
+                fromMe: true,
+                id: "album-parent",
+              },
+            },
+          },
+        },
+      })),
+      sock,
+      async (turn) => {
+        receivedTurn = turn;
+      },
+      confirmRegistry,
+      selectRegistry,
+      undefined,
+      mockDownload,
+    );
+
+    assert.ok(receivedTurn);
+    const imageBlocks = receivedTurn.content.filter((block) => block.type === "image");
+    assert.equal(imageBlocks.length, 4);
+    assert.equal(receivedTurn.chatId, chatId);
+    assert.deepEqual(
+      await Promise.all(imageBlocks.map((block) => readMediaBuffer(block.path))),
+      ["image-1", "image-2", "image-3", "image-4"].map((id) => Buffer.from(id)),
+    );
   });
 });
 

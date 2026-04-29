@@ -1,6 +1,9 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { buildWhatsAppUpsertShapeDiagnostic } from "../whatsapp/create-whatsapp-transport.js";
+import {
+  buildWhatsAppUpsertShapeDiagnostic,
+  createWhatsAppAlbumCoordinator,
+} from "../whatsapp/create-whatsapp-transport.js";
 import {
   classifyIncomingMessageEvent,
   normalizeReactionEvents,
@@ -71,6 +74,87 @@ describe("WhatsApp upsert shape diagnostics", () => {
     });
     assert.equal(JSON.stringify(diagnostic).includes("secret-media-key"), false);
     assert.equal(JSON.stringify(diagnostic).includes("media.example.test"), false);
+  });
+});
+
+describe("WhatsApp album coordinator", () => {
+  it("buffers album children and flushes them together when the expected count arrives", async () => {
+    /** @type {BaileysMessage[][]} */
+    const flushedAlbums = [];
+    const coordinator = createWhatsAppAlbumCoordinator({
+      flushDelayMs: 10_000,
+      handleAlbumMessages: async (messages) => {
+        flushedAlbums.push(messages);
+      },
+    });
+    const chatId = "chat@g.us";
+    const parentId = "album-parent";
+
+    assert.equal(await coordinator.handle(/** @type {BaileysMessage} */ ({
+      key: {
+        remoteJid: chatId,
+        fromMe: false,
+        id: parentId,
+      },
+      message: {
+        albumMessage: {
+          expectedImageCount: 4,
+          expectedVideoCount: 0,
+        },
+      },
+    })), true);
+
+    for (const childId of ["image-1", "image-2", "image-3", "image-4"]) {
+      assert.equal(await coordinator.handle(/** @type {BaileysMessage} */ ({
+        key: {
+          remoteJid: chatId,
+          fromMe: false,
+          id: childId,
+        },
+        message: {
+          imageMessage: {
+            mimetype: "image/jpeg",
+          },
+          messageContextInfo: {
+            messageAssociation: {
+              associationType: 1,
+              parentMessageKey: {
+                remoteJid: chatId,
+                fromMe: true,
+                id: parentId,
+              },
+            },
+          },
+        },
+      })), true);
+    }
+
+    assert.equal(flushedAlbums.length, 1);
+    assert.deepEqual(flushedAlbums[0].map((message) => message.key.id), [
+      "image-1",
+      "image-2",
+      "image-3",
+      "image-4",
+    ]);
+  });
+
+  it("does not consume ordinary messages", async () => {
+    const coordinator = createWhatsAppAlbumCoordinator({
+      handleAlbumMessages: async () => {
+        assert.fail("ordinary messages should not flush as albums");
+      },
+    });
+
+    assert.equal(await coordinator.handle(/** @type {BaileysMessage} */ ({
+      key: {
+        remoteJid: "chat@g.us",
+        fromMe: false,
+        id: "plain-message",
+      },
+      message: {
+        conversation: "hello",
+      },
+    })), false);
   });
 });
 

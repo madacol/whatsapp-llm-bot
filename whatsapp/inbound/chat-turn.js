@@ -577,3 +577,69 @@ export async function adaptIncomingMessage(
 
   await messageHandler(turn);
 }
+
+/**
+ * Adapt multiple Baileys messages from one transport-level user action and
+ * invoke the app-level turn handler once with their content merged in arrival
+ * order.
+ * @param {BaileysMessage[]} baileysMessages
+ * @param {import('@whiskeysockets/baileys').WASocket} sock
+ * @param {(message: ChatTurn) => Promise<void>} messageHandler
+ * @param {import("../runtime/confirm-runtime.js").ConfirmRuntime} confirmRuntime
+ * @param {import("../runtime/select-runtime.js").SelectRuntime} selectRuntime
+ * @param {import("../runtime/reaction-runtime.js").ReactionRuntime} reactionRuntime
+ * @param {(msg: BaileysMessage, type: "buffer", opts: {}) => Promise<Buffer>} [downloadFn]
+ * @param {{ getSocket?: () => import('@whiskeysockets/baileys').WASocket | null } | undefined} [ioOptions]
+ * @returns {Promise<void>}
+ */
+export async function adaptIncomingMessages(
+  baileysMessages,
+  sock,
+  messageHandler,
+  confirmRuntime,
+  selectRuntime,
+  reactionRuntime = createReactionRuntime(),
+  downloadFn = downloadMediaMessage,
+  ioOptions,
+) {
+  /** @type {ChatTurn[]} */
+  const turns = [];
+  for (const baileysMessage of baileysMessages) {
+    const turn = await buildIncomingTurn(
+      baileysMessage,
+      sock,
+      confirmRuntime,
+      selectRuntime,
+      reactionRuntime,
+      downloadFn,
+      ioOptions,
+    );
+    if (turn) {
+      turns.push(turn);
+    }
+  }
+
+  if (turns.length === 0) {
+    return;
+  }
+
+  if (turns.length === 1) {
+    await messageHandler(turns[0]);
+    return;
+  }
+
+  const firstTurn = turns[0];
+  /** @type {ChatTurn} */
+  const combinedTurn = {
+    ...firstTurn,
+    content: turns.flatMap((turn) => turn.content),
+    timestamp: new Date(Math.min(...turns.map((turn) => turn.timestamp.getTime()))),
+    facts: {
+      ...firstTurn.facts,
+      addressedToBot: turns.some((turn) => turn.facts.addressedToBot),
+      repliedToBot: turns.some((turn) => turn.facts.repliedToBot),
+    },
+  };
+
+  await messageHandler(combinedTurn);
+}
