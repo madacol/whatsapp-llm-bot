@@ -118,8 +118,8 @@ export function createCodexRunState({ workdir, loadWorkspaceBaseline = loadWorks
     }
     fileSnapshots.set(absolutePath, nextText);
 
-    const eventDiff = isUnifiedDiff(fileChange.diff) ? fileChange.diff : undefined;
-    const pendingDiff = isUnifiedDiff(pending?.diff) ? pending?.diff : undefined;
+    const eventDiff = isParseableDiff(fileChange.diff) ? fileChange.diff : undefined;
+    const pendingDiff = isParseableDiff(pending?.diff) ? pending?.diff : undefined;
     const diff = eventDiff
       ?? pendingDiff
       ?? buildFileDiff(fileChange.path, previousText, nextText);
@@ -200,17 +200,16 @@ export function createCodexRunState({ workdir, loadWorkspaceBaseline = loadWorks
 }
 
 /**
+ * Codex App Server can emit file changes as hunk-only diffs without file
+ * headers. Those still carry enough old/new text to classify updates.
  * @param {string | undefined} diffText
  * @returns {diffText is string}
  */
-function isUnifiedDiff(diffText) {
+function isParseableDiff(diffText) {
   if (!diffText) {
     return false;
   }
-  const lines = diffText.split("\n");
-  return lines.some((line) => line.startsWith("--- "))
-    && lines.some((line) => line.startsWith("+++ "))
-    && lines.some((line) => line.startsWith("@@"));
+  return diffText.split("\n").some((line) => line.startsWith("@@"));
 }
 
 /**
@@ -219,7 +218,7 @@ function isUnifiedDiff(diffText) {
  * @returns {boolean}
  */
 function shouldUseWorkspaceBaseline(fileChange, pending) {
-  if (fileChange.diff || pending?.diff) {
+  if (isParseableDiff(fileChange.diff) || isParseableDiff(pending?.diff)) {
     return false;
   }
   return true;
@@ -363,7 +362,7 @@ function normalizeFileChangeSummary(summary, path, reportedKind, resolvedKind) {
  * @returns {{ oldText?: string, newText?: string } | null}
  */
 function extractUnifiedDiffContent(diffText) {
-  if (!isUnifiedDiff(diffText)) {
+  if (!isParseableDiff(diffText)) {
     return null;
   }
 

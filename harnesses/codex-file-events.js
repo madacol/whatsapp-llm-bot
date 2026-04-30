@@ -135,7 +135,7 @@ function extractTopLevelChangeDiff(item) {
 
   for (const key of ["patch", "diff", "unified_diff"]) {
     const diffText = extractCodexText(item[key]);
-    if (diffText && looksLikeUnifiedDiff(diffText)) {
+    if (diffText && looksLikeDiff(diffText)) {
       return diffText;
     }
   }
@@ -144,16 +144,13 @@ function extractTopLevelChangeDiff(item) {
 
 /**
  * Codex sometimes sends full file contents in `patch` for adds instead of a
- * unified diff. Only treat the field as a diff when the payload actually has
- * diff markers.
+ * unified diff. App Server fileChange events can also send hunk-only diffs
+ * without file headers, so accept payloads with a hunk marker.
  * @param {string} text
  * @returns {boolean}
  */
-function looksLikeUnifiedDiff(text) {
-  const lines = text.split("\n");
-  return lines.some((line) => line.startsWith("--- "))
-    && lines.some((line) => line.startsWith("+++ "))
-    && lines.some((line) => line.startsWith("@@"));
+function looksLikeDiff(text) {
+  return text.split("\n").some((line) => line.startsWith("@@"));
 }
 
 /**

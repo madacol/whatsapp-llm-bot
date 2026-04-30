@@ -291,6 +291,45 @@ describe("createCodexRunState", () => {
     assert.equal(calls[0]?.[2]?.diffSource, "workspace_baseline");
   });
 
+  it("classifies raw update events with preserved hunk-only diffs as updates without a workspace baseline", async () => {
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "codex-run-state-hunk-update-"));
+    const outsideDir = await fs.mkdtemp(path.join(os.tmpdir(), "codex-run-state-hunk-outside-"));
+    const filePath = path.join(outsideDir, "existing.js");
+    await fs.writeFile(filePath, "export const value = 2;\n", "utf8");
+
+    const calls = await captureDebugLogsAsync(async () => {
+      const state = createCodexRunState({
+        workdir: tempDir,
+        loadWorkspaceBaseline: async () => new Map(),
+      });
+      const enriched = await state.enrichFileChangeEvent({
+        path: filePath,
+        summary: `${filePath} (update)`,
+        kind: "update",
+        diff: [
+          "@@ -1,1 +1,1 @@",
+          "-export const value = 1;",
+          "+export const value = 2;",
+        ].join("\n"),
+      });
+
+      assert.deepEqual(enriched, {
+        path: filePath,
+        summary: `${filePath} (update)`,
+        kind: "update",
+        oldText: "export const value = 1;\n",
+        newText: "export const value = 2;\n",
+        diff: [
+          "@@ -1,1 +1,1 @@",
+          "-export const value = 1;",
+          "+export const value = 2;",
+        ].join("\n"),
+      });
+    });
+
+    assert.equal(calls[0]?.[2]?.diffSource, "event");
+  });
+
   it("normalizes conflicting add events to update when prior content exists", async () => {
     const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "codex-run-state-conflicting-add-"));
     const filePath = path.join(tempDir, "notes.txt");

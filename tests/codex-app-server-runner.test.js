@@ -736,4 +736,84 @@ describe("startCodexAppServerRun file-change lifecycle", () => {
       stage: "applied",
     }]);
   });
+
+  it("keeps hunk-only app-server update diffs as update file changes", async () => {
+    const connectionMock = createOpenConnectionMock();
+    /** @type {Array<Record<string, unknown>>} */
+    const fileChanges = [];
+    const filePath = "/outside/repo/tests/codex-run-state.test.js";
+    const diff = [
+      "@@ -1,1 +1,1 @@",
+      "-old test name",
+      "+new test name",
+    ].join("\n");
+
+    const started = await startCodexAppServerRun({
+      chatId: "chat-1",
+      prompt: "Continue",
+      messages: [{ role: "user", content: [{ type: "text", text: "Continue" }] }],
+      runConfig: {
+        workdir: "/chat/workspace",
+      },
+      hooks: {
+        onFileChange: async (event) => {
+          fileChanges.push(event);
+        },
+      },
+    }, {
+      openConnection: (options = {}) => connectionMock.openConnection({
+        ...options,
+        notifications: [
+          {
+            method: "item/started",
+            params: {
+              threadId: "thread-1",
+              item: {
+                id: "file-1",
+                type: "fileChange",
+                changes: [{ path: filePath, kind: { type: "update", move_path: null }, diff }],
+                status: "inProgress",
+              },
+            },
+          },
+          {
+            method: "item/completed",
+            params: {
+              threadId: "thread-1",
+              item: {
+                id: "file-1",
+                type: "fileChange",
+                changes: [{ path: filePath, kind: { type: "update", move_path: null }, diff }],
+                status: "completed",
+              },
+            },
+          },
+          {
+            method: "turn/completed",
+            params: {
+              threadId: "thread-1",
+              turn: {
+                id: "turn-1",
+                status: "completed",
+                error: null,
+              },
+            },
+          },
+        ],
+      }),
+    });
+
+    await started.done;
+
+    assert.deepEqual(fileChanges, [{
+      path: filePath,
+      summary: `${filePath} (update)`,
+      kind: "update",
+      diff,
+      oldText: "old test name\n",
+      newText: "new test name\n",
+      itemId: "file-1",
+      stage: "applied",
+    }]);
+  });
 });
