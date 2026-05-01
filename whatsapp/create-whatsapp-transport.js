@@ -17,7 +17,7 @@ const log = createLogger("whatsapp");
 const WHATSAPP_UPSERT_DIAGNOSTIC_ENABLE_PATH = ".diagnostics/whatsapp-upsert-shape.enabled";
 const WHATSAPP_UPSERT_DIAGNOSTIC_DEFAULT_PATH = ".diagnostics/whatsapp-upsert-shape.jsonl";
 const WHATSAPP_ALBUM_FLUSH_DELAY_MS = 1_200;
-const WHATSAPP_TURN_COALESCE_DELAY_MS = 75;
+const WHATSAPP_TURN_COALESCE_DELAY_MS = 250;
 
 /**
  * @typedef {{
