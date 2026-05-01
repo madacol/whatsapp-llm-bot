@@ -334,6 +334,60 @@ describe("createClaudeAgentSdkHarness", () => {
     });
     assert.ok(replies.at(-1)?.includes("SDK permissions: `danger-full-access`"));
   });
+
+  it("loads fresh SDK models every time the model selector opens", async () => {
+    const db = await createTestDb();
+    await seedChat(db, "claude-model-chat", { enabled: true });
+    /** @type {Array<{ question: string, options: SelectOption[] }>} */
+    const selections = [];
+    let queryCount = 0;
+    const harness = createClaudeAgentSdkHarness({
+      query: () => {
+        queryCount++;
+        const suffix = String(queryCount);
+        return {
+          supportedModels: async () => [
+            {
+              value: `fresh-${suffix}`,
+              displayName: `Fresh ${suffix}`,
+              description: `Fresh model ${suffix}`,
+              supportsEffort: true,
+              supportedEffortLevels: ["low", "xhigh"],
+              supportsAdaptiveThinking: true,
+            },
+          ],
+          close: () => {},
+          [Symbol.asyncIterator]: async function* () {},
+        };
+      },
+    });
+
+    /** @type {ExecuteActionContext} */
+    const context = {
+      chatId: "claude-model-chat",
+      senderIds: [],
+      content: [],
+      getIsAdmin: async () => true,
+      send: async () => undefined,
+      reply: async () => undefined,
+      reactToMessage: async () => {},
+      select: async (question, options) => {
+        selections.push({ question, options });
+        return "";
+      },
+      confirm: async () => true,
+    };
+
+    assert.equal(await harness.handleCommand({ chatId: "claude-model-chat", command: "model", context }), true);
+    assert.equal(await harness.handleCommand({ chatId: "claude-model-chat", command: "model", context }), true);
+
+    assert.equal(queryCount, 2);
+    const modelSelections = selections.filter((selection) => selection.question === "Choose SDK model");
+    assert.equal(modelSelections[0]?.options[0]?.id, "fresh-1");
+    assert.equal(modelSelections[0]?.options[0]?.label, "Fresh 1 — Fresh model 1");
+    assert.equal(modelSelections[1]?.options[0]?.id, "fresh-2");
+    assert.equal(modelSelections[1]?.options[0]?.label, "Fresh 2 — Fresh model 2");
+  });
 });
 
 describe("buildClaudeSystemPrompt", () => {
