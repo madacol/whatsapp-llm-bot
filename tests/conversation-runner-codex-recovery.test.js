@@ -1,5 +1,6 @@
 import { describe, it, before, afterEach } from "node:test";
 import assert from "node:assert/strict";
+import { setTimeout as delay } from "node:timers/promises";
 
 process.env.TESTING = "1";
 process.env.MASTER_ID = "master-user";
@@ -260,7 +261,7 @@ describe("createConversationRunner with codex harness", () => {
     assert.equal(secondTurn.responses.length, 0);
   });
 
-  it("runs a queued follow-up turn when active Codex steering is unavailable", async () => {
+  it("retries Codex steering for active follow-ups instead of running a second turn", async () => {
     await seedChat("conv-codex-steer-unavailable", { enabled: true });
     await db.sql`
       UPDATE chats
@@ -271,6 +272,8 @@ describe("createConversationRunner with codex harness", () => {
 
     /** @type {string[]} */
     const seenPrompts = [];
+    /** @type {string[]} */
+    const steeredPrompts = [];
     /** @type {() => void} */
     let releaseFirstRun = () => {};
     const firstRunReleased = new Promise((resolve) => {
@@ -282,6 +285,7 @@ describe("createConversationRunner with codex harness", () => {
       notifyFirstRunStarted = resolve;
     });
     let runCount = 0;
+    let steeringReady = false;
 
     registerHarness("codex", () => createCodexHarness({
       startRun: async (input) => {
@@ -291,7 +295,13 @@ describe("createConversationRunner with codex harness", () => {
 
         return {
           abortController: new AbortController(),
-          steer: async () => false,
+          steer: async (text) => {
+            if (!steeringReady) {
+              return false;
+            }
+            steeredPrompts.push(text);
+            return true;
+          },
           done: (async () => {
             await input.hooks?.onLlmResponse?.(`Response for ${prompt}`);
             if (runCount === 1) {
@@ -325,18 +335,18 @@ describe("createConversationRunner with codex harness", () => {
 
     const secondTurnPromise = handleMessage(secondTurn.context);
     assert.equal(seenPrompts.length, 1);
+    await secondTurnPromise;
+    steeringReady = true;
+    await delay(75);
 
     releaseFirstRun();
     await firstTurnPromise;
-    await secondTurnPromise;
 
-    assert.equal(seenPrompts.length, 2);
+    assert.equal(seenPrompts.length, 1);
     assert.ok(seenPrompts[0]?.includes("First unavailable question"));
-    assert.ok(seenPrompts[1]?.includes("Second unavailable question"));
-    assert.ok(
-      secondTurn.responses.some((response) => response.text.includes("Response for") && response.text.includes("Second unavailable question")),
-      `Expected the second turn to run after steering was unavailable, got: ${secondTurn.responses.map((response) => response.text).join(" | ")}`,
-    );
+    assert.equal(steeredPrompts.length, 1);
+    assert.ok(steeredPrompts[0]?.includes("Second unavailable question"));
+    assert.equal(secondTurn.responses.length, 0);
   });
 
   it("routes !c to harness cancellation", async () => {

@@ -1,5 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { setTimeout as delay } from "node:timers/promises";
 import { createHarnessRunCoordinator } from "../harnesses/run-coordinator.js";
 
 /**
@@ -99,7 +100,10 @@ describe("createHarnessRunCoordinator", () => {
     assert.equal(coordinator.finishRun("chat-2"), null);
   });
 
-  it("queues the turn when async live input is unavailable", async () => {
+  it("retries active live input instead of queueing a second turn when the harness is not ready yet", async () => {
+    /** @type {string[]} */
+    const injected = [];
+    let ready = false;
     /** @type {AgentHarness} */
     const harness = {
       getName: () => "codex",
@@ -116,17 +120,26 @@ describe("createHarnessRunCoordinator", () => {
       }),
       run: async () => ({ response: [], messages: [], usage: { promptTokens: 0, completionTokens: 0, cachedTokens: 0, cost: 0 } }),
       handleCommand: async () => false,
-      injectMessage: async () => false,
+      injectMessage: async (_chatId, text) => {
+        if (!ready) {
+          return false;
+        }
+        injected.push(text);
+        return true;
+      },
     };
 
-    const coordinator = createHarnessRunCoordinator();
+    const coordinator = createHarnessRunCoordinator({ liveInputRetryDelayMs: 1 });
     const started = await coordinator.beginRun({ turn: createTurn("chat-4", "first"), userText: "first", harness });
     coordinator.markRunActive("chat-4");
-    const buffered = await coordinator.beginRun({ turn: createTurn("chat-4", "follow-up"), userText: "follow-up", harness });
+    const followUp = await coordinator.beginRun({ turn: createTurn("chat-4", "follow-up"), userText: "follow-up", harness });
+    ready = true;
+    await delay(10);
 
     assert.equal(started.status, "started");
-    assert.equal(buffered.status, "buffered");
-    assert.equal(coordinator.finishRun("chat-4")?.content[0]?.type, "text");
+    assert.equal(followUp.status, "injected");
+    assert.deepEqual(injected, ["follow-up"]);
+    assert.equal(coordinator.finishRun("chat-4"), null);
   });
 
   it("returns the latest buffered turn after a non-live run finishes", async () => {
