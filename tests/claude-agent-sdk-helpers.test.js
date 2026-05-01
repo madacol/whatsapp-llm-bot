@@ -387,7 +387,7 @@ describe("buildClaudePrompt", () => {
       }],
     }]);
 
-    assert.equal(prompt, `Attached media files:\n- image: ${mediaPath}`);
+    assert.equal(prompt, `Attached media files:\n- image (mime: image/jpeg): ${resolveMediaPath(mediaPath)} (canonical: ${mediaPath})`);
   });
 
   it("includes canonical file paths for document-only user turns", () => {
@@ -402,7 +402,7 @@ describe("buildClaudePrompt", () => {
       }],
     }]);
 
-    assert.equal(prompt, `Attached media files:\n- file: ${mediaPath}`);
+    assert.equal(prompt, `Attached media files:\n- file (name: report.pdf, mime: application/pdf): ${resolveMediaPath(mediaPath)} (canonical: ${mediaPath})`);
   });
 
   it("keeps user text and appends media paths when both are present", () => {
@@ -415,7 +415,7 @@ describe("buildClaudePrompt", () => {
       ],
     }]);
 
-    assert.equal(prompt, `Describe this image\n\nAttached media files:\n- image: ${mediaPath}`);
+    assert.equal(prompt, `Describe this image\n\nAttached media files:\n- image (mime: image/png): ${resolveMediaPath(mediaPath)} (canonical: ${mediaPath})`);
   });
 
   it("renders images with alt text as markdown while keeping the media path", () => {

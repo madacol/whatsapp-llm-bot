@@ -166,7 +166,8 @@ export function createWorkspaceBindingService(store) {
      * @returns {Promise<ResolvedChatBinding>}
      */
     async resolveChatBinding(chatId, explicitCwd, chatName, isGroupChat) {
-      const binding = await store.getChatBinding(chatId);
+      const hasExplicitCwd = typeof explicitCwd === "string" && explicitCwd.trim().length > 0;
+      const binding = hasExplicitCwd ? null : await store.getChatBinding(chatId);
       if (binding?.binding_kind === "workspace") {
         if (!binding.project_id || !binding.workspace_id) {
           throw new Error(`Workspace binding for ${chatId} is missing project_id or workspace_id.`);

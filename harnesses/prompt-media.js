@@ -2,6 +2,14 @@ import { hasMediaPath, resolveMediaPath } from "../attachment-paths.js";
 import { getMediaTranslation, resolveMediaModel } from "../media-to-text.js";
 
 /**
+ * @param {string} value
+ * @returns {string}
+ */
+function singleLine(value) {
+  return value.replace(/\s+/g, " ").trim();
+}
+
+/**
  * @param {string} text
  * @returns {string}
  */
@@ -22,6 +30,29 @@ export function renderMarkdownImageReference(block) {
     return null;
   }
   return `![${escapeMarkdownImageAlt(block.alt)}](${resolveMediaPath(block.path)})`;
+}
+
+/**
+ * Render a text-first harness attachment reference. The canonical media path is
+ * useful for bot-native tools, while the filesystem path is what coding agents
+ * can actually read with their file tools.
+ * @param {ImageContentBlock | VideoContentBlock | AudioContentBlock | FileContentBlock} block
+ * @returns {string | null}
+ */
+export function renderPromptMediaReference(block) {
+  if (!hasMediaPath(block)) {
+    return null;
+  }
+  /** @type {string[]} */
+  const metadata = [];
+  if ("file_name" in block && typeof block.file_name === "string" && block.file_name.trim()) {
+    metadata.push(`name: ${singleLine(block.file_name)}`);
+  }
+  if (typeof block.mime_type === "string" && block.mime_type.trim()) {
+    metadata.push(`mime: ${singleLine(block.mime_type)}`);
+  }
+  const suffix = metadata.length > 0 ? ` (${metadata.join(", ")})` : "";
+  return `- ${block.type}${suffix}: ${resolveMediaPath(block.path)} (canonical: ${block.path})`;
 }
 
 /**

@@ -117,6 +117,7 @@ export function formatSandboxEscapeConfirmMessage(request) {
 function isFileBoundaryTool(toolName) {
   return new Set([
     "read_file",
+    "extract_pdf",
     "write_file",
     "edit_file",
     "Read",

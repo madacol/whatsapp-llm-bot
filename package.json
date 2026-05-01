@@ -28,6 +28,7 @@
         "@electric-sql/pglite": "^0.3.3",
         "@mariozechner/pi-coding-agent": "0.67.3",
         "@mozilla/readability": "^0.6.0",
+        "@napi-rs/canvas": "^0.1.100",
         "@openai/codex-sdk": "^0.116.0",
         "@resvg/resvg-js": "^2.6.2",
         "@whiskeysockets/baileys": "7.0.0-rc.9",
@@ -37,6 +38,7 @@
         "mathjax-full": "^3.2.2",
         "nodemailer": "^8.0.1",
         "openai": "^4.104.0",
+        "pdfjs-dist": "^4.10.38",
         "sharp": "^0.34.5",
         "shiki": "^4.0.1",
         "turndown": "^7.2.2"

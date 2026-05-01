@@ -5,7 +5,7 @@ import { renderContentBlock } from "../message-formatting.js";
 import { getRootDb } from "../db.js";
 import { NO_OP_HOOKS } from "./native.js";
 import { buildSdkErrorResponse, clearStaleHarnessSession, getHarnessRunErrorMessage } from "./harness-run-errors.js";
-import { augmentLatestUserMessageForTextHarness, renderMarkdownImageReference } from "./prompt-media.js";
+import { augmentLatestUserMessageForTextHarness, renderMarkdownImageReference, renderPromptMediaReference } from "./prompt-media.js";
 import { handleHarnessSessionCommand } from "./session-commands.js";
 import { openPiRpcConnection } from "./pi-rpc-client.js";
 import { getPiConfig, getPiSessionPath, savePiSession, updatePiConfig } from "./pi-config.js";
@@ -69,17 +69,17 @@ function isObjectRecord(value) {
 /**
  * @param {Array<IncomingContentBlock | ToolContentBlock>} blocks
  * @param {string[]} textParts
- * @param {string[]} mediaPaths
+ * @param {string[]} mediaLines
  * @returns {void}
  */
-function collectPiPromptParts(blocks, textParts, mediaPaths) {
+function collectPiPromptParts(blocks, textParts, mediaLines) {
   for (const block of blocks) {
     if (block.type === "quote") {
       const renderedQuote = renderContentBlock(block);
       if (renderedQuote) {
         textParts.push(renderedQuote);
       }
-      collectQuotedPiMediaPaths(block.content, mediaPaths);
+      collectQuotedPiMediaLines(block.content, mediaLines);
       continue;
     }
 
@@ -89,12 +89,18 @@ function collectPiPromptParts(blocks, textParts, mediaPaths) {
         textParts.push(markdownImage);
         continue;
       }
-      mediaPaths.push(block.path);
+      const mediaLine = renderPromptMediaReference(block);
+      if (mediaLine) {
+        mediaLines.push(mediaLine);
+      }
       continue;
     }
 
     if ((block.type === "video" || block.type === "audio" || block.type === "file") && hasMediaPath(block)) {
-      mediaPaths.push(block.path);
+      const mediaLine = renderPromptMediaReference(block);
+      if (mediaLine) {
+        mediaLines.push(mediaLine);
+      }
       continue;
     }
 
@@ -107,17 +113,20 @@ function collectPiPromptParts(blocks, textParts, mediaPaths) {
 
 /**
  * @param {IncomingContentBlock[]} blocks
- * @param {string[]} mediaPaths
+ * @param {string[]} mediaLines
  * @returns {void}
  */
-function collectQuotedPiMediaPaths(blocks, mediaPaths) {
+function collectQuotedPiMediaLines(blocks, mediaLines) {
   for (const block of blocks) {
     if (block.type === "quote") {
-      collectQuotedPiMediaPaths(block.content, mediaPaths);
+      collectQuotedPiMediaLines(block.content, mediaLines);
       continue;
     }
     if ((block.type === "image" || block.type === "video" || block.type === "audio" || block.type === "file") && hasMediaPath(block)) {
-      mediaPaths.push(block.path);
+      const mediaLine = renderPromptMediaReference(block);
+      if (mediaLine) {
+        mediaLines.push(mediaLine);
+      }
     }
   }
 }
@@ -136,18 +145,18 @@ export function buildPiPrompt(messages) {
     /** @type {string[]} */
     const textParts = [];
     /** @type {string[]} */
-    const mediaPaths = [];
-    collectPiPromptParts(message.content, textParts, mediaPaths);
+    const mediaLines = [];
+    collectPiPromptParts(message.content, textParts, mediaLines);
 
     const sections = [];
     if (textParts.length > 0) {
       sections.push(textParts.join("\n"));
     }
-    if (mediaPaths.length > 0) {
-      const heading = mediaPaths.length === 1
+    if (mediaLines.length > 0) {
+      const heading = mediaLines.length === 1
         ? "Media file available in this request:"
         : "Media files available in this request:";
-      sections.push(`${heading}\n${mediaPaths.map((mediaPath) => `- ${mediaPath}`).join("\n")}`);
+      sections.push(`${heading}\n${mediaLines.join("\n")}`);
     }
     return sections.join("\n\n");
   }
