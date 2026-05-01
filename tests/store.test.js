@@ -475,6 +475,25 @@ describe("store with injected DB", () => {
       assert.equal(messages.length, 1);
       assert.equal(messages[0].message_data.content[0].text, "after clear");
     });
+
+    it("stores tool output that contains a virtual module NUL byte", async () => {
+      await store.createChat("msg-test-nul-tool-output");
+
+      /** @type {ToolMessage} */
+      const msg = {
+        role: "tool",
+        tool_id: "call_vite",
+        content: [{ type: "text", text: 'RollupError: "\0virtual:$env/static/private"' }],
+      };
+      await store.addMessage("msg-test-nul-tool-output", msg, ["bot"]);
+
+      const messages = await store.getMessages("msg-test-nul-tool-output");
+      assert.equal(messages.length, 1);
+      assert.equal(
+        /** @type {ToolMessage} */ (messages[0].message_data).content[0].text,
+        'RollupError: "\\0virtual:$env/static/private"',
+      );
+    });
   });
 
   describe("updateToolMessage", () => {
