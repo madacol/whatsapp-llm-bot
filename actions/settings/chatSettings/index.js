@@ -2,6 +2,7 @@ import { CHAT_SETTINGS_COMMAND, formatChatSettingsCommand, formatChatSettingsUsa
 import { getChatOrThrow } from "../../../store.js";
 import {
   CONFIG_KEYS,
+  CONFIG_KEY_INPUTS,
   describeConfigKey,
   getConfigKeyDefinition,
   getChatSettingsInfo,
@@ -21,7 +22,7 @@ export default /** @type {defineAction} */ ((x) => x)({
     properties: {
       setting: {
         type: "string",
-        enum: ["help", "list", "reset", ...CONFIG_KEYS],
+        enum: ["help", "list", "reset", ...CONFIG_KEY_INPUTS],
         description: "The config key to inspect or set, or the verb `help` / `reset`",
       },
       value: {

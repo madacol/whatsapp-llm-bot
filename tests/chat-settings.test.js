@@ -283,10 +283,66 @@ describe("per-chat model selection", () => {
         config.MASTER_IDs = originalMaster;
       }
     });
+
+    it("shows local and remote enable commands in disabled chat info", async () => {
+      await db.sql`INSERT INTO chats(chat_id, is_enabled) VALUES ('disabled-info-chat', false) ON CONFLICT DO NOTHING`;
+
+      const mod = await import("../actions/settings/chatSettings/index.js");
+      const action = mod.default;
+      const result = await action.action_fn(
+        { chatId: "disabled-info-chat", rootDb: db, senderIds: ["u1"] },
+        { setting: "" },
+      );
+
+      assert.ok(result.includes("enabled: off"), `expected disabled status, got: ${result}`);
+      assert.ok(result.includes("!s enabled on`"), `expected local enable command, got: ${result}`);
+      assert.ok(result.includes("!s enabled on disabled-info-chat"), `expected remote enable command, got: ${result}`);
+    });
+
+    it("master can enable another chat by target chat id", async () => {
+      await db.sql`INSERT INTO chats(chat_id) VALUES ('admin-chat') ON CONFLICT DO NOTHING`;
+      const originalMaster = config.MASTER_IDs;
+      config.MASTER_IDs = ["master-user"];
+      try {
+        const mod = await import("../actions/settings/chatSettings/index.js");
+        const action = mod.default;
+        const result = await action.action_fn(
+          { chatId: "admin-chat", rootDb: db, senderIds: ["master-user"] },
+          { setting: "enabled", value: "on remote-chat@s.whatsapp.net" },
+        );
+        assert.ok(result.includes("remote-chat@s.whatsapp.net"), `expected target chat in response, got: ${result}`);
+
+        const { rows: [chat] } = await db.sql`SELECT is_enabled FROM chats WHERE chat_id = 'remote-chat@s.whatsapp.net'`;
+        assert.equal(chat.is_enabled, true);
+      } finally {
+        config.MASTER_IDs = originalMaster;
+      }
+    });
+
+    it("master can disable another chat with chat id before the value", async () => {
+      await db.sql`INSERT INTO chats(chat_id) VALUES ('admin-chat') ON CONFLICT DO NOTHING`;
+      await db.sql`INSERT INTO chats(chat_id, is_enabled) VALUES ('remote-off@g.us', true) ON CONFLICT DO NOTHING`;
+      const originalMaster = config.MASTER_IDs;
+      config.MASTER_IDs = ["master-user"];
+      try {
+        const mod = await import("../actions/settings/chatSettings/index.js");
+        const action = mod.default;
+        const result = await action.action_fn(
+          { chatId: "admin-chat", rootDb: db, senderIds: ["master-user"] },
+          { setting: "enabled", value: "remote-off@g.us off" },
+        );
+        assert.ok(result.includes("remote-off@g.us"), `expected target chat in response, got: ${result}`);
+
+        const { rows: [chat] } = await db.sql`SELECT is_enabled FROM chats WHERE chat_id = 'remote-off@g.us'`;
+        assert.equal(chat.is_enabled, false);
+      } finally {
+        config.MASTER_IDs = originalMaster;
+      }
+    });
   });
 
   describe("mobile-first config command semantics", () => {
-    it("shows the resolved workspace folder path when folder uses the workspace default", async () => {
+    it("shows the resolved workspace path when workspace uses the chat default", async () => {
       const { repoRoot, worktreePath } = await createRepoWithWorkspaceFixture();
       const { initStore } = await import("../store.js");
       const store = await initStore(db);
@@ -321,12 +377,12 @@ describe("per-chat model selection", () => {
       const mod = await import("../actions/settings/chatSettings/index.js");
       const action = mod.default;
 
-      const folderResult = await action.action_fn(
+      const workspaceResult = await action.action_fn(
         { chatId: "cfg-folder-workspace", rootDb: db, senderIds: ["u1"] },
-        { setting: "folder" },
+        { setting: "workspace" },
       );
-      assert.ok(folderResult.includes(worktreePath), `expected resolved worktree path, got: ${folderResult}`);
-      assert.ok(!folderResult.includes("workspace worktree"), `expected plain path only, got: ${folderResult}`);
+      assert.ok(workspaceResult.includes(worktreePath), `expected resolved worktree path, got: ${workspaceResult}`);
+      assert.ok(!workspaceResult.includes("workspace worktree"), `expected plain path only, got: ${workspaceResult}`);
 
       const infoResult = await action.action_fn(
         { chatId: "cfg-folder-workspace", rootDb: db, senderIds: ["u1"] },
@@ -336,20 +392,34 @@ describe("per-chat model selection", () => {
       assert.ok(!infoResult.includes("workspace worktree"), `expected plain path only, got: ${infoResult}`);
     });
 
-    it("shows help text for a friendly key", async () => {
+    it("shows help text for the workspace key", async () => {
       await db.sql`INSERT INTO chats(chat_id, harness_cwd) VALUES ('cfg-help-1', '/tmp') ON CONFLICT DO NOTHING`;
 
       const mod = await import("../actions/settings/chatSettings/index.js");
       const action = mod.default;
       const result = await action.action_fn(
         { chatId: "cfg-help-1", rootDb: db, senderIds: ["u1"] },
-        { setting: "folder" },
+        { setting: "workspace" },
       );
 
-      assert.ok(result.includes("folder"), `expected setting title, got: ${result}`);
+      assert.ok(result.includes("Workspace"), `expected setting title, got: ${result}`);
       assert.ok(result.includes("/tmp"), `expected current value, got: ${result}`);
       assert.ok(result.toLowerCase().includes("what it does"), `expected description section, got: ${result}`);
       assert.ok(result.toLowerCase().includes("examples"), `expected examples section, got: ${result}`);
+    });
+
+    it("keeps folder as an alias for workspace", async () => {
+      await db.sql`INSERT INTO chats(chat_id, harness_cwd) VALUES ('cfg-folder-alias', '/tmp') ON CONFLICT DO NOTHING`;
+
+      const mod = await import("../actions/settings/chatSettings/index.js");
+      const action = mod.default;
+      const result = await action.action_fn(
+        { chatId: "cfg-folder-alias", rootDb: db, senderIds: ["u1"] },
+        { setting: "folder" },
+      );
+
+      assert.ok(result.includes("Workspace"), `expected workspace setting title through folder alias, got: ${result}`);
+      assert.ok(result.includes("/tmp"), `expected current value, got: ${result}`);
     });
 
     it("formats harness help as sectioned bullet points", async () => {

@@ -115,6 +115,26 @@ describe("workspace resolver foundation", () => {
     });
   });
 
+  it("lets explicit folder settings bypass existing chat bindings", async () => {
+    await store.createProject({
+      name: "folder-override-bound-project",
+      rootPath: "/repo/folder-override-bound",
+      defaultBaseBranch: "master",
+      controlChatId: "folder-override-chat",
+    });
+    const explicitFolder = await fs.mkdtemp(path.join(os.tmpdir(), "folder-override-"));
+    tempDirs.push(explicitFolder);
+
+    const resolved = await bindingService.resolveChatBinding(
+      "folder-override-chat",
+      explicitFolder,
+      "Folder Override",
+      false,
+    );
+
+    assert.deepEqual(resolved, { kind: "unbound" });
+  });
+
   it("resolves workspace-chat bindings with project context", async () => {
     const project = await store.createProject({
       name: "payments-repo",

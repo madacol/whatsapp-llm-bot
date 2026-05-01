@@ -26,7 +26,7 @@ import { handleHarnessSessionCommand } from "./session-commands.js";
 import { getSandboxEscapeRequest } from "./sandbox-approval.js";
 import { requestSandboxEscapeApproval } from "./sandbox-approval-coordinator.js";
 import { buildSdkErrorResponse, clearStaleHarnessSession } from "./harness-run-errors.js";
-import { augmentLatestUserMessageForTextHarness, renderMarkdownImageReference } from "./prompt-media.js";
+import { augmentLatestUserMessageForTextHarness, renderMarkdownImageReference, renderPromptMediaReference } from "./prompt-media.js";
 import { createActionRequestRunState, executeQueuedActionRequests } from "../action-request-runtime.js";
 import { ensureClaudeProjectSkillsLink } from "../project-skills.js";
 
@@ -264,12 +264,18 @@ function collectClaudePromptParts(blocks, textParts, mediaLines) {
         textParts.push(markdownImage);
         continue;
       }
-      mediaLines.push(`- ${block.type}: ${block.path}`);
+      const mediaLine = renderPromptMediaReference(block);
+      if (mediaLine) {
+        mediaLines.push(mediaLine);
+      }
       continue;
     }
 
     if ((block.type === "video" || block.type === "audio" || block.type === "file") && hasMediaPath(block)) {
-      mediaLines.push(`- ${block.type}: ${block.path}`);
+      const mediaLine = renderPromptMediaReference(block);
+      if (mediaLine) {
+        mediaLines.push(mediaLine);
+      }
       continue;
     }
 
@@ -293,7 +299,10 @@ function collectQuotedClaudeMedia(blocks, mediaLines) {
       continue;
     }
     if ((block.type === "image" || block.type === "video" || block.type === "audio" || block.type === "file") && hasMediaPath(block)) {
-      mediaLines.push(`- ${block.type}: ${block.path}`);
+      const mediaLine = renderPromptMediaReference(block);
+      if (mediaLine) {
+        mediaLines.push(mediaLine);
+      }
     }
   }
 }

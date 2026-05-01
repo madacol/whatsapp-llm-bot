@@ -237,7 +237,7 @@ function formatReadableList(items) {
  * @param {import("../../../store.js").ChatRow} chat
  * @returns {Promise<string>}
  */
-async function formatResolvedHarnessFolder(rootDb, chatId, chat) {
+async function formatResolvedWorkspacePath(rootDb, chatId, chat) {
   if (chat.harness_cwd) {
     return `\`${chat.harness_cwd}\``;
   }
@@ -310,8 +310,12 @@ const BASE_CONFIG_KEYS = [
     key: "enabled",
     setting: "enabled",
     label: "enabled",
-    description: "Turns the bot on or off for this chat.",
-    examples: [formatChatSettingsCommand("enabled on"), formatChatSettingsCommand("enabled off")],
+    description: "Turns the bot on or off for this chat. Master users can add a target chat ID to change another chat from here.",
+    examples: [
+      formatChatSettingsCommand("enabled on"),
+      formatChatSettingsCommand("enabled off"),
+      formatChatSettingsCommand("enabled on 584146747205@s.whatsapp.net"),
+    ],
     picker: {
       options: BOOL_VALUE_IDS,
       currentId: (chat) => chat.is_enabled ? "on" : "off",
@@ -323,9 +327,16 @@ const BASE_CONFIG_KEYS = [
       if (!isMaster(senderIds)) {
         return "Only master users can change the enabled setting.";
       }
-      const enabled = toBool(value);
-      await rootDb.sql`UPDATE chats SET is_enabled = ${enabled} WHERE chat_id = ${chatId}`;
-      return `Bot ${enabled ? "enabled" : "disabled"}.`;
+      const { enabled, targetChatId } = parseEnabledValue(value, chatId);
+      await rootDb.sql`
+        INSERT INTO chats(chat_id, is_enabled)
+        VALUES (${targetChatId}, ${enabled})
+        ON CONFLICT (chat_id)
+        DO UPDATE SET is_enabled = ${enabled}
+      `;
+      return targetChatId === chatId
+        ? `Bot ${enabled ? "enabled" : "disabled"}.`
+        : `Bot ${enabled ? "enabled" : "disabled"} for chat \`${targetChatId}\`.`;
     },
   }),
   createConfigKeyDefinition({
@@ -526,18 +537,22 @@ const BASE_CONFIG_KEYS = [
     },
   }),
   createConfigKeyDefinition({
-    key: "folder",
+    key: "workspace",
     setting: "harness_cwd",
-    label: "folder",
-    description: "Sets the working folder used by the coding harness.",
-    aliases: ["harness_cwd"],
-    examples: [formatChatSettingsCommand("folder /home/mada/project"), formatChatSettingsCommand("reset folder")],
+    label: "workspace",
+    description: "Sets the active workspace path for this chat. Harnesses run here, and workspace commands resolve project/worktree metadata from this path.",
+    aliases: ["folder", "harness_cwd"],
+    examples: [
+      formatChatSettingsCommand("workspace /home/mada/project"),
+      formatChatSettingsCommand("reset workspace"),
+      formatChatSettingsCommand("folder /home/mada/project"),
+    ],
     resettable: true,
     formatCurrent: (chat, extra) => {
       if (!extra.rootDb || !extra.chatId) {
         return chat.harness_cwd ?? CHAT_WORKSPACE_DEFAULT_LABEL;
       }
-      return formatResolvedHarnessFolder(extra.rootDb, extra.chatId, chat);
+      return formatResolvedWorkspacePath(extra.rootDb, extra.chatId, chat);
     },
     formatDefault: () => CHAT_WORKSPACE_DEFAULT_LABEL,
     setValue: async ({ rootDb, chatId, value }) => {
@@ -578,8 +593,8 @@ const BASE_CONFIG_KEYS = [
 
       await rootDb.sql`UPDATE chats SET harness_cwd = ${cwdValue} WHERE chat_id = ${chatId}`;
       return cwdValue
-        ? `Harness folder set to \`${cwdValue}\``
-        : `Harness folder cleared; using ${CHAT_WORKSPACE_DEFAULT_LABEL}.`;
+        ? `Workspace path set to \`${cwdValue}\``
+        : `Workspace path cleared; using ${CHAT_WORKSPACE_DEFAULT_LABEL}.`;
     },
   }),
   createConfigKeyDefinition({
@@ -855,6 +870,9 @@ const CONFIG_SETTING_MAP = new Map(
 );
 
 export const CONFIG_KEYS = CONFIG_KEY_DEFINITIONS.map((definition) => definition.key);
+export const CONFIG_KEY_INPUTS = [...new Set(
+  CONFIG_KEY_DEFINITIONS.flatMap((definition) => [definition.key, ...(definition.aliases ?? [])]),
+)];
 
 /**
  * Parse a string-or-boolean to a boolean.
@@ -872,6 +890,37 @@ function toBool(/** @type {unknown} */ raw) {
   throw new Error(
     `Invalid boolean value "${raw}". Must be one of: on, off, true, false, yes, no, enabled, disabled.`,
   );
+}
+
+/**
+ * Parse `enabled` values. Supports both:
+ * - `on`
+ * - `on <chatId>`
+ * - `<chatId> on`
+ * @param {string} rawValue
+ * @param {string} currentChatId
+ * @returns {{ enabled: boolean, targetChatId: string }}
+ */
+function parseEnabledValue(rawValue, currentChatId) {
+  const parts = rawValue.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) {
+    throw new Error("Missing enabled value. Use `on` or `off`.");
+  }
+  if (parts.length === 1) {
+    return { enabled: toBool(parts[0]), targetChatId: currentChatId };
+  }
+  if (parts.length === 2) {
+    try {
+      return { enabled: toBool(parts[0]), targetChatId: parts[1] };
+    } catch (firstError) {
+      try {
+        return { enabled: toBool(parts[1]), targetChatId: parts[0] };
+      } catch {
+        throw firstError;
+      }
+    }
+  }
+  throw new Error("Use `enabled on`, `enabled off`, `enabled on <chatId>`, or `enabled <chatId> on`.");
 }
 
 /**
@@ -986,6 +1035,12 @@ export async function getChatSettingsInfo(rootDb, chatId, extra) {
     "",
     "Core",
     `- enabled: ${chat.is_enabled ? "on" : "off"}`,
+    ...(!chat.is_enabled
+      ? [
+        `- enable here: \`${formatChatSettingsCommand("enabled on")}\``,
+        `- enable from another chat: \`${formatChatSettingsCommand(`enabled on ${chatId}`)}\``,
+      ]
+      : []),
     `- model: ${chat.model ?? `${resolveModel("chat")} (default)`}`,
     `- prompt: ${chat.system_prompt ? "custom" : "default"}`,
     `- trigger: ${chat.respond_on ?? "mention"}`,
@@ -996,7 +1051,7 @@ export async function getChatSettingsInfo(rootDb, chatId, extra) {
     "",
     "Harness",
     `- harness: ${chat.harness ?? "native"}`,
-    `- folder: ${await formatResolvedHarnessFolder(rootDb, chatId, chat)}`,
+    `- workspace: ${await formatResolvedWorkspacePath(rootDb, chatId, chat)}`,
     "",
     "Models",
     `- readers: media=${chat.media_to_text_models?.general ?? "default"}, image=${chat.media_to_text_models?.image ?? "default"}, audio=${chat.media_to_text_models?.audio ?? "default"}, video=${chat.media_to_text_models?.video ?? "default"}`,

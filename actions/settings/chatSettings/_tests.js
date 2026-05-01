@@ -355,6 +355,22 @@ export default [
         config.MASTER_IDs = originalMaster;
       }
     },
+    async function enables_other_chat_as_master(action_fn, db) {
+      await db.sql`INSERT INTO chats(chat_id) VALUES ('cs-admin-chat') ON CONFLICT DO NOTHING`;
+      const originalMaster = config.MASTER_IDs;
+      config.MASTER_IDs = ["master-user"];
+      try {
+        const result = await action_fn(
+          { chatId: "cs-admin-chat", rootDb: db, senderIds: ["master-user"] },
+          { setting: "enabled", value: "true cs-target-chat@g.us" },
+        );
+        assert.ok(result.includes("cs-target-chat@g.us"), `Expected target chat in response, got: ${result}`);
+        const { rows: [chat] } = await db.sql`SELECT is_enabled FROM chats WHERE chat_id = 'cs-target-chat@g.us'`;
+        assert.equal(chat.is_enabled, true);
+      } finally {
+        config.MASTER_IDs = originalMaster;
+      }
+    },
     async function disables_chat_as_master(action_fn, db) {
       await db.sql`INSERT INTO chats(chat_id, is_enabled) VALUES ('cs-en-2', true) ON CONFLICT DO NOTHING`;
       const originalMaster = config.MASTER_IDs;

@@ -405,7 +405,7 @@ export default /** @type {defineAction} */ ((x) => x)({
       ...applied,
       ...(notes.length > 0 ? ["", ...notes] : []),
       "",
-      `Use \`${formatChatSettingsCommand()}\` for advanced settings like prompt, readers, folder, and action toggles.`,
+      `Use \`${formatChatSettingsCommand()}\` for advanced settings like prompt, readers, workspace, and action toggles.`,
       "Use `!clone <repository_url>` to clone a git repository into the current working directory.",
     ].join("\n");
   },

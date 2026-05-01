@@ -97,6 +97,72 @@ describe("buildRunConfig", () => {
     assert.equal(config.workdir, "/repo/main/.madabot/worktrees/payments");
   });
 
+  it("uses explicit harness_cwd over project bindings", () => {
+    const config = buildRunConfig(
+      "repo-chat-with-folder",
+      /** @type {import("../store.js").ChatRow} */ ({
+        chat_id: "repo-chat-with-folder",
+        harness_cwd: "/explicit/folder",
+        harness_config: {},
+      }),
+      "Main Repo",
+      undefined,
+      {
+        kind: "project",
+        project: {
+          project_id: "repo-1",
+          name: "main",
+          root_path: "/repo/main",
+          default_base_branch: "master",
+          control_chat_id: "repo-chat-with-folder",
+          timestamp: new Date().toISOString(),
+        },
+      },
+    );
+
+    assert.equal(config.workdir, "/explicit/folder");
+  });
+
+  it("uses explicit harness_cwd over workspace bindings", () => {
+    const config = buildRunConfig(
+      "workspace-chat-with-folder",
+      /** @type {import("../store.js").ChatRow} */ ({
+        chat_id: "workspace-chat-with-folder",
+        harness_cwd: "/explicit/worktree",
+        harness_config: {},
+      }),
+      "ws/payments",
+      undefined,
+      {
+        kind: "workspace",
+        project: {
+          project_id: "repo-1",
+          name: "main",
+          root_path: "/repo/main",
+          default_base_branch: "master",
+          control_chat_id: "repo-chat",
+          timestamp: new Date().toISOString(),
+        },
+        workspace: {
+          workspace_id: "workspace-1",
+          project_id: "repo-1",
+          name: "payments",
+          branch: "payments",
+          base_branch: "master",
+          worktree_path: "/repo/main/.madabot/worktrees/payments",
+          status: "ready",
+          last_test_status: "not_run",
+          last_commit_oid: null,
+          conflicted_files: [],
+          archived_at: null,
+          timestamp: new Date().toISOString(),
+        },
+      },
+    );
+
+    assert.equal(config.workdir, "/explicit/worktree");
+  });
+
   it("reads the active harness namespace instead of a shared model field", () => {
     const config = buildRunConfig("chat-1", /** @type {import("../store.js").ChatRow} */ ({
       chat_id: "chat-1",

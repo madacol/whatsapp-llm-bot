@@ -2,7 +2,7 @@ import { afterEach, describe, it, before } from "node:test";
 import assert from "node:assert/strict";
 import { rm } from "node:fs/promises";
 import { ACTION_REQUESTS_ENV_VAR, writeQueuedActionRequest } from "../action-request-runtime.js";
-import { resolveMediaPath } from "../attachment-paths.js";
+import { ATTACHMENT_ROOT, resolveMediaPath } from "../attachment-paths.js";
 import { setDb } from "../db.js";
 import { createMockLlmServer, createTestDb, seedChat, withModelsCache } from "./helpers.js";
 import {
@@ -657,7 +657,7 @@ describe("createCodexHarness", () => {
       runConfig: undefined,
     });
 
-    assert.equal(seenPrompt, `Media file available in this request:\n- ${mediaPath}`);
+    assert.equal(seenPrompt, `Media file available in this request:\n- image (mime: image/jpeg): ${resolveMediaPath(mediaPath)} (canonical: ${mediaPath})`);
     assert.deepEqual(result.response, [{ type: "text", text: "ok" }]);
   });
 
@@ -860,8 +860,77 @@ describe("createCodexHarness", () => {
       runConfig: undefined,
     });
 
-    assert.equal(seenPrompt, `Media file available in this request:\n- ${mediaPath}`);
+    assert.equal(seenPrompt, `Media file available in this request:\n- file (name: report.pdf, mime: application/pdf): ${resolveMediaPath(mediaPath)} (canonical: ${mediaPath})`);
     assert.deepEqual(result.response, [{ type: "text", text: "ok" }]);
+  });
+
+  it("allows Codex to read the shared attachment directory when media is present", async () => {
+    /** @type {HarnessRunConfig | undefined} */
+    let seenRunConfig;
+    const harness = createCodexHarness({
+      startRun: async (input) => {
+        seenRunConfig = input.runConfig;
+        return {
+          abortController: new AbortController(),
+          done: Promise.resolve({
+            sessionId: null,
+            result: {
+              response: [{ type: "text", text: "ok" }],
+              messages: input.messages,
+              usage: { promptTokens: 0, completionTokens: 0, cachedTokens: 0, cost: 0 },
+            },
+          }),
+        };
+      },
+    });
+
+    const mediaPath = `${"a".repeat(64)}.pdf`;
+    await harness.run({
+      session: {
+        chatId: "codex-chat-file-readable",
+        senderIds: [],
+        context: /** @type {ExecuteActionContext} */ ({
+          chatId: "codex-chat-file-readable",
+          senderIds: [],
+          content: [],
+          getIsAdmin: async () => true,
+          send: async () => undefined,
+          reply: async () => undefined,
+          reactToMessage: async () => {},
+          select: async () => "",
+          confirm: async () => true,
+        }),
+        addMessage: async () => undefined,
+        updateToolMessage: async () => undefined,
+        harnessSession: null,
+        saveHarnessSession: async () => undefined,
+      },
+      llmConfig: {
+        llmClient: /** @type {LlmClient} */ ({}),
+        chatModel: null,
+        externalInstructions: "",
+        toolRuntime: /** @type {ToolRuntime} */ ({
+          listTools: () => [],
+          getTool: async () => null,
+          executeTool: async () => {
+            throw new Error("executeTool should not be called");
+          },
+        }),
+      },
+      messages: [{
+        role: "user",
+        content: [{
+          type: "file",
+          path: mediaPath,
+          mime_type: "application/pdf",
+          file_name: "report.pdf",
+        }],
+      }],
+      hooks: {},
+      runConfig: { workdir: "/tmp/workspace", sandboxMode: "workspace-write", additionalDirectories: ["/tmp/extra"] },
+    });
+
+    assert.deepEqual(seenRunConfig?.additionalDirectories, ["/tmp/extra", ATTACHMENT_ROOT]);
   });
 
   it("executes queued action requests after the Codex run", async () => {
