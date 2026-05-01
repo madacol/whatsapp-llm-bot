@@ -284,6 +284,111 @@ describe("createClaudeAgentSdkHarness", () => {
     }
   });
 
+  it("displays Edit tool calls as diff blocks from the SDK hook input", async () => {
+    /** @type {SendContent[]} */
+    const displays = [];
+    const workdir = await fs.mkdtemp(path.join(os.tmpdir(), "claude-edit-display-"));
+    const filePath = path.join(workdir, "package.json");
+    const oldString = "\"version\": \"1.0.0\"";
+    const newString = "\"version\": \"1.0.1\"";
+    await fs.writeFile(filePath, `{\n  ${oldString}\n}\n`, "utf8");
+
+    const harness = createClaudeAgentSdkHarness({
+      query: ({ options }) => ({
+        supportedModels: async () => [],
+        streamInput: async () => {},
+        [Symbol.asyncIterator]: async function* () {
+          const preToolHook = options.hooks?.PreToolUse?.[0]?.hooks[0];
+          assert.equal(typeof preToolHook, "function");
+          await preToolHook({
+            hook_event_name: "PreToolUse",
+            session_id: "sdk-session-edit",
+            transcript_path: path.join(workdir, "transcript.jsonl"),
+            cwd: workdir,
+            tool_name: "Edit",
+            tool_input: { file_path: filePath, old_string: oldString, new_string: newString },
+            tool_use_id: "edit-tool",
+          }, undefined, { signal: new AbortController().signal });
+          yield {
+            type: "result",
+            subtype: "success",
+            is_error: false,
+            result: "",
+            total_cost_usd: 0,
+            usage: { input_tokens: 0, output_tokens: 0 },
+            session_id: "sdk-session-edit",
+          };
+        },
+      }),
+    });
+
+    try {
+      await harness.run({
+        session: {
+          chatId: "claude-edit-display-chat",
+          senderIds: ["user-1"],
+          context: /** @type {ExecuteActionContext} */ ({
+            chatId: "claude-edit-display-chat",
+            senderIds: ["user-1"],
+            content: [],
+            getIsAdmin: async () => true,
+            send: async () => undefined,
+            reply: async () => undefined,
+            reactToMessage: async () => {},
+            select: async () => "",
+            confirm: async () => true,
+          }),
+          addMessage: async () => /** @type {import("../store.js").MessageRow} */ ({
+            message_id: 1,
+            chat_id: "claude-edit-display-chat",
+            sender_id: "user-1",
+            message_data: { role: "assistant", content: [] },
+            timestamp: new Date().toISOString(),
+            display_key: null,
+          }),
+          updateToolMessage: async () => undefined,
+          harnessSession: null,
+          saveHarnessSession: async () => {},
+        },
+        llmConfig: {
+          llmClient: /** @type {LlmClient} */ ({}),
+          chatModel: null,
+          externalInstructions: "",
+          toolRuntime: /** @type {ToolRuntime} */ ({
+            getTool: async () => null,
+            executeTool: async () => {
+              throw new Error("executeTool should not be called");
+            },
+            listTools: () => [],
+          }),
+        },
+        messages: [{ role: "user", content: [{ type: "text", text: "Edit the file" }] }],
+        mediaRegistry: new Map(),
+        hooks: {
+          onToolCall: async (toolCall, _formatToolCall, toolContext) => {
+            const display = formatToolCallDisplay(toolCall, undefined, workdir, toolContext);
+            assert.ok(display);
+            displays.push(display);
+            return undefined;
+          },
+        },
+        runConfig: { workdir },
+      });
+
+      assert.equal(displays.length, 1);
+      const display = displays[0];
+      assert.ok(Array.isArray(display));
+      const block = display[0];
+      assert.equal(block?.type, "diff");
+      assert.equal(block.oldStr, oldString);
+      assert.equal(block.newStr, newString);
+      assert.equal(block.language, "json");
+      assert.equal(block.caption, "*Edit*  `package.json`  _L2_");
+    } finally {
+      await fs.rm(workdir, { recursive: true, force: true });
+    }
+  });
+
   it("handles permissions command through a selector and defaults to workspace-write", async () => {
     const db = await createTestDb();
     await seedChat(db, "claude-chat-1", { enabled: true });

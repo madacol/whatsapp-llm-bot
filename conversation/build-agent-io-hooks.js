@@ -6,12 +6,33 @@ import { DEFAULT_OUTPUT_VISIBILITY } from "../chat-output-visibility.js";
 import { createCompactToolActivityFeed } from "./compact-tool-activity.js";
 
 /**
+ * File-mutating tool calls are part of change visibility, not just generic
+ * tool progress. Keep them renderable when `tools` is compacted but `changes`
+ * remains enabled.
+ * @param {LlmChatResponse["toolCalls"][0]} toolCall
+ * @param {((params: Record<string, unknown>) => string) | undefined} actionFormatter
+ * @param {string | null | undefined} cwd
+ * @param {{ oldContent?: string; startLine?: number } | undefined} toolContext
+ * @returns {boolean}
+ */
+function shouldDisplayToolCallAsChange(toolCall, actionFormatter, cwd, toolContext) {
+  const presentation = buildToolPresentation(
+    toolCall.name,
+    parseToolArgs(toolCall.arguments),
+    actionFormatter,
+    cwd ?? null,
+    toolContext,
+  );
+  return presentation.kind === "file";
+}
+
+/**
  * Display a tool call to the user using the formatter shared across harnesses.
  * @param {LlmChatResponse["toolCalls"][0]} toolCall
  * @param {Pick<ExecuteActionContext, "send">} context
  * @param {((params: Record<string, unknown>) => string) | undefined} actionFormatter
  * @param {string | null | undefined} cwd
- * @param {{ oldContent?: string } | undefined} toolContext
+ * @param {{ oldContent?: string; startLine?: number } | undefined} toolContext
  * @returns {Promise<MessageHandle | undefined>}
  */
 async function displayToolCall(toolCall, context, actionFormatter, cwd, toolContext) {
@@ -134,6 +155,9 @@ export function buildAgentIoHooks(
     },
     onToolCall: async (toolCall, formatToolCall, toolContext) => {
       if (!visibility.tools) {
+        if (visibility.changes && shouldDisplayToolCallAsChange(toolCall, formatToolCall, cwd, toolContext)) {
+          return displayToolCall(toolCall, context, formatToolCall, cwd, toolContext);
+        }
         await compactToolActivity.addToolCall(toolCall, formatToolCall, toolContext);
         return undefined;
       }
