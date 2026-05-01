@@ -9,17 +9,23 @@ import path from "node:path";
  * @returns {string | null}
  */
 export function findEscapedShellTarget(command, workdir) {
-  const cdMatch = command.match(/(?:^|[;&|]\s*|\s)cd\s+(?<target>"[^"]+"|'[^']+'|`[^`]+`|[^\s;&|]+)/);
-  const cdTarget = stripShellQuotes(cdMatch?.groups?.target ?? null);
-  if (cdTarget && resolvesOutsideWorkspace(cdTarget, workdir)) {
-    return cdTarget;
+  const words = splitShellWords(command);
+  for (let index = 0; index < words.length - 1; index += 1) {
+    if (words[index] !== "cd") {
+      continue;
+    }
+    const cdTarget = words[index + 1];
+    if (cdTarget && resolvesOutsideWorkspace(cdTarget, workdir)) {
+      return cdTarget;
+    }
   }
 
-  const pathMatches = command.matchAll(/(?:^|[;&|]\s*|\s)(?<target>~\/[^\s;&|]*|\/[^\s;&|]*|\.\.\/[^\s;&|]*|\.\.(?:$|(?=[\s;&|])))/g);
-  for (const match of pathMatches) {
-    const candidate = stripShellQuotes(match.groups?.target ?? null);
-    if (candidate && resolvesOutsideWorkspace(candidate, workdir)) {
-      return candidate;
+  for (const word of words) {
+    if (!isBoundaryPathReference(word)) {
+      continue;
+    }
+    if (resolvesOutsideWorkspace(word, workdir)) {
+      return word;
     }
   }
 
@@ -27,26 +33,70 @@ export function findEscapedShellTarget(command, workdir) {
 }
 
 /**
- * @param {string | null} value
- * @returns {string | null}
+ * Split enough shell syntax to identify path tokens without treating
+ * backslash-escaped spaces as argument separators.
+ * @param {string} command
+ * @returns {string[]}
  */
-function stripShellQuotes(value) {
-  if (!value) {
-    return null;
+function splitShellWords(command) {
+  /** @type {string[]} */
+  const words = [];
+  let current = "";
+  /** @type {"'" | "\"" | "`" | null} */
+  let quote = null;
+
+  for (let index = 0; index < command.length; index += 1) {
+    const char = command[index];
+
+    if (quote) {
+      if (char === quote) {
+        quote = null;
+      } else if (char === "\\" && quote !== "'" && index + 1 < command.length) {
+        current += command[index + 1];
+        index += 1;
+      } else {
+        current += char;
+      }
+      continue;
+    }
+
+    if (char === "'" || char === "\"" || char === "`") {
+      quote = char;
+      continue;
+    }
+
+    if (char === "\\" && index + 1 < command.length) {
+      current += command[index + 1];
+      index += 1;
+      continue;
+    }
+
+    if (/\s/.test(char) || char === ";" || char === "&" || char === "|") {
+      if (current) {
+        words.push(current);
+        current = "";
+      }
+      continue;
+    }
+
+    current += char;
   }
 
-  const trimmed = value.trim();
-  if (!trimmed) {
-    return null;
+  if (current) {
+    words.push(current);
   }
+  return words;
+}
 
-  const firstChar = trimmed[0];
-  const lastChar = trimmed.at(-1);
-  if ((firstChar === "\"" || firstChar === "'" || firstChar === "`") && firstChar === lastChar) {
-    return trimmed.slice(1, -1);
-  }
-
-  return trimmed;
+/**
+ * @param {string} value
+ * @returns {boolean}
+ */
+function isBoundaryPathReference(value) {
+  return value.startsWith("~/")
+    || value.startsWith("/")
+    || value.startsWith("../")
+    || value === "..";
 }
 
 /**

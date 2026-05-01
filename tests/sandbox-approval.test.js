@@ -65,6 +65,17 @@ describe("getSandboxEscapeRequest", () => {
     assert.equal(request, null);
   });
 
+  it("allows shell commands in workspaces with backslash-escaped spaces", () => {
+    const request = getSandboxEscapeRequest("Bash", {
+      command: "cd /home/mada/chat-workspaces/Get\\ Bookmarklets--120363427701541991@g.us && pnpm run build:vite",
+    }, {
+      workdir: "/home/mada/chat-workspaces/Get Bookmarklets--120363427701541991@g.us",
+      sandboxMode: "workspace-write",
+    });
+
+    assert.equal(request, null);
+  });
+
   it("does not flag paths when full access is enabled", () => {
     const request = getSandboxEscapeRequest("edit_file", {
       file_path: "/tmp/out.txt",
