@@ -506,6 +506,7 @@ describe("codex events", () => {
           path: "/tmp/demo.txt",
           summary: "/tmp/demo.txt (update)",
           kind: "update",
+          diff: "@@ -1 +1 @@\n-before\n+after\n",
         }],
       },
     });
@@ -534,6 +535,7 @@ describe("codex events", () => {
           path: "/tmp/demo.txt",
           summary: "/tmp/demo.txt (update)",
           kind: "update",
+          diff: "@@ -1 +1 @@\n-before\n+after\n",
         }],
       },
     });
