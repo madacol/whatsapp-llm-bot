@@ -1,5 +1,6 @@
 import { before, describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { setTimeout as delay } from "node:timers/promises";
 import {
   createWhatsAppTransport,
   executeCommunityCreate,
@@ -8,7 +9,7 @@ import {
 } from "../whatsapp/create-whatsapp-transport.js";
 import { setDb } from "../db.js";
 import { initStore } from "../store.js";
-import { createTestDb } from "./helpers.js";
+import { createTestDb, createWAMessage } from "./helpers.js";
 
 /** @type {import("@electric-sql/pglite").PGlite | null} */
 let testDb = null;
@@ -41,6 +42,60 @@ async function getQueuedRows(db, chatId) {
 }
 
 describe("WhatsApp transport community creation", () => {
+  it("coalesces rapid same-chat turn messages before invoking the app handler", async () => {
+    /** @type {((events: Partial<import("@whiskeysockets/baileys").BaileysEventMap>) => Promise<void>) | null} */
+    let processEvents = null;
+    /** @type {ChatTurn[]} */
+    const turns = [];
+    const socket = /** @type {import("@whiskeysockets/baileys").WASocket} */ (/** @type {unknown} */ ({
+      user: { id: "bot-phone-id:0@s.whatsapp.net", lid: "bot-lid-id:0@lid" },
+      ev: {
+        process(handler) {
+          processEvents = handler;
+        },
+      },
+      sendPresenceUpdate: async () => {},
+    }));
+
+    const transport = await createWhatsAppTransport({
+      inboundCoalesceDelayMs: 5,
+      createConnectionSupervisor: async ({ onSocketReady }) => ({
+        start: async () => {
+          onSocketReady(socket, async () => {});
+        },
+        stop: async () => {},
+        sendText: async () => {},
+        handleConnectionUpdate: async () => {},
+        isStopped: () => false,
+      }),
+    });
+
+    await transport.start(async (turn) => {
+      turns.push(turn);
+    });
+
+    if (!processEvents) {
+      throw new Error("Expected connection event processor to be registered");
+    }
+
+    await processEvents({
+      "messages.upsert": {
+        type: "notify",
+        messages: [
+          createWAMessage({ text: "first", senderId: "rapid-user" }),
+          createWAMessage({ text: "second", senderId: "rapid-user" }),
+        ],
+      },
+    });
+    await delay(25);
+
+    assert.equal(turns.length, 1);
+    assert.deepEqual(
+      turns[0].content.filter((block) => block.type === "text").map((block) => block.text),
+      ["first", "second"],
+    );
+  });
+
   it("replays queued outbound events when the connection opens again", async () => {
     if (!testDb) {
       throw new Error("Expected test DB to be initialized");
