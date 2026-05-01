@@ -349,6 +349,32 @@ describe("buildAgentIoHooks", () => {
     }]);
   });
 
+  it("renders edit diffs even when generic tool progress is compacted", async () => {
+    const { hooks, sent } = createSubjectWithCwd("/repo", {
+      ...DEFAULT_OUTPUT_VISIBILITY,
+      tools: false,
+      changes: true,
+    });
+
+    await hooks.onToolCall?.({
+      id: "edit-1",
+      name: "Edit",
+      arguments: JSON.stringify({
+        file_path: "/repo/package.json",
+        old_string: "\"version\": \"1.0.0\"",
+        new_string: "\"version\": \"1.0.1\"",
+      }),
+    });
+
+    assert.equal(sent.length, 1);
+    assert.equal(sent[0]?.event.kind, "tool_call");
+    if (sent[0]?.event.kind !== "tool_call") {
+      assert.fail("Expected edit tool call to bypass compact text");
+    }
+    assert.equal(sent[0].event.presentation.kind, "file");
+    assert.equal(sent[0].event.presentation.toolName, "Edit");
+  });
+
   it("keeps only the last 3 compact tool entries when visibility disables tools", async () => {
     /** @type {MessageHandleUpdate[]} */
     const updates = [];
