@@ -5,6 +5,7 @@ export const PI_REASONING_LEVELS = {
   low: "low",
   medium: "medium",
   high: "high",
+  xhigh: "xhigh",
   max: "xhigh",
 };
 

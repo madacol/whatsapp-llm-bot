@@ -80,8 +80,9 @@ function getHarnessSelectOptions(chat) {
  */
 async function getHarnessModelOptions(harnessName) {
   if (harnessName === "claude-agent-sdk") {
+    const availableModels = await getClaudeSdkModels();
     return [
-      ...getClaudeSdkModels().map((model) => ({ id: model.value, label: model.displayName })),
+      ...availableModels.map((model) => ({ id: model.value, label: model.displayName })),
       { id: "off", label: "Default" },
     ];
   }

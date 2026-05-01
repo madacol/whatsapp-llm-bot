@@ -62,19 +62,6 @@ const AUTO_APPROVED_TOOLS = new Set([
   "TodoWrite", "EnterWorktree", "ToolSearch", "Skill",
 ]);
 
-// ── Cached SDK model list ──────────────────────────────────────────────
-
-/** @type {import("@anthropic-ai/claude-agent-sdk").ModelInfo[] | null} */
-let cachedModels = null;
-
-
-/** @type {Array<{ value: string, displayName: string, description: string }>} */
-const FALLBACK_MODELS = [
-  { value: "claude-sonnet-4-6", displayName: "Sonnet 4.6", description: "Fast, balanced" },
-  { value: "claude-opus-4-6", displayName: "Opus 4.6", description: "Most capable" },
-  { value: "claude-haiku-4-5", displayName: "Haiku 4.5", description: "Fastest, lightweight" },
-];
-
 /** @type {Set<HarnessRunConfig["sandboxMode"]>} */
 const CLAUDE_SANDBOX_MODES = new Set(["read-only", "workspace-write", "danger-full-access"]);
 
@@ -110,29 +97,18 @@ function normalizeClaudePermissionsMode(value) {
 }
 
 /**
- * Get available models from SDK cache with fallback.
- * @returns {Array<{ value: string, displayName: string, description: string }>}
- */
-export function getModels() {
-  if (cachedModels && cachedModels.length > 0) {
-    return cachedModels.map((m) => ({ value: m.value, displayName: m.displayName, description: m.description }));
-  }
-  return FALLBACK_MODELS;
-}
-
-/**
  * Set or clear the SDK model for a chat. Returns a confirmation string.
  * @param {string} chatId
  * @param {string} arg - model name/alias, or "off"/"default"/"none" to clear
+ * @param {import("@anthropic-ai/claude-agent-sdk").ModelInfo[]} models
  * @returns {Promise<string>}
  */
-export async function handleModelCommand(chatId, arg) {
+export async function handleModelCommand(chatId, arg, models) {
   if (arg === "off" || arg === "default" || arg === "none") {
     await updateHarnessConfig(chatId, HARNESS_NAME, { model: null });
     return "SDK model reset to default.";
   }
 
-  const models = getModels();
   const input = arg.toLowerCase();
   const match = models.find(
     (m) => m.value === input || m.value.includes(input) || m.displayName.toLowerCase() === input,
@@ -150,38 +126,28 @@ const EFFORT_LABELS = {
   low: "Low — fast, minimal thinking",
   medium: "Medium — balanced",
   high: "High — deep reasoning (default)",
+  xhigh: "Extra High — deeper reasoning",
   max: "Max — maximum effort",
 };
 
-/** @type {string[]} */
-const FALLBACK_EFFORT_LEVELS = ["low", "medium", "high"];
-
 /**
  * Get available effort levels for a specific model.
- * Uses SDK metadata when available, falls back to low/medium/high.
+ * Uses fresh SDK metadata from the same model list shown in the selector.
  * @param {string | null} modelValue - the harness-config model value, or null for default
+ * @param {import("@anthropic-ai/claude-agent-sdk").ModelInfo[]} models
  * @returns {Array<{ value: string, label: string }>}
  */
-export function getEffortLevels(modelValue) {
-  /** @type {string[]} */
-  let levels = FALLBACK_EFFORT_LEVELS;
-  if (cachedModels && modelValue) {
-    const model = cachedModels.find((m) => m.value === modelValue);
-    if (model?.supportedEffortLevels?.length) {
-      levels = model.supportedEffortLevels;
-    } else if (model && !model.supportsEffort) {
-      return [];
-    }
-  } else if (cachedModels && !modelValue) {
-    // Default model — find it in the cache
-    const defaultModel = cachedModels.find((m) => m.value.includes("sonnet"));
-    if (defaultModel?.supportedEffortLevels?.length) {
-      levels = defaultModel.supportedEffortLevels;
-    } else if (defaultModel && !defaultModel.supportsEffort) {
-      return [];
-    }
+export function getEffortLevels(modelValue, models) {
+  const model = modelValue
+    ? models.find((m) => m.value === modelValue)
+    : models.find((m) => m.value === "default") ?? models[0];
+  if (!model || !model.supportsEffort) {
+    return [];
   }
-  return levels.map((v) => ({ value: v, label: EFFORT_LABELS[v] ?? v }));
+  if (!model.supportedEffortLevels?.length) {
+    return [];
+  }
+  return model.supportedEffortLevels.map((v) => ({ value: v, label: EFFORT_LABELS[v] ?? v }));
 }
 
 /**
@@ -197,7 +163,7 @@ export async function handleEffortCommand(chatId, arg) {
   }
 
   const input = arg.toLowerCase();
-  const validLevels = ["low", "medium", "high", "max"];
+  const validLevels = ["low", "medium", "high", "xhigh", "max"];
   if (validLevels.includes(input)) {
     await updateHarnessConfig(chatId, HARNESS_NAME, { reasoningEffort: input });
     return `SDK effort set to \`${input}\``;
@@ -224,6 +190,45 @@ export async function handlePermissionsCommand(chatId, arg) {
 
   await updateHarnessConfig(chatId, HARNESS_NAME, { sandboxMode });
   return `SDK permissions: \`${sandboxMode}\``;
+}
+
+/**
+ * @returns {AsyncGenerator<never, void, unknown>}
+ */
+async function* emptySdkPrompt() {}
+
+/**
+ * Read Claude SDK model metadata from a fresh SDK initialization.
+ * @param {typeof query} queryClaude
+ * @returns {Promise<import("@anthropic-ai/claude-agent-sdk").ModelInfo[]>}
+ */
+async function loadFreshSdkModels(queryClaude) {
+  const q = queryClaude({
+    prompt: emptySdkPrompt(),
+    options: {
+      cwd: process.cwd(),
+      tools: [],
+      persistSession: false,
+      permissionMode: "dontAsk",
+      env: {
+        ...process.env,
+        CLAUDE_AGENT_SDK_CLIENT_APP: "whatsapp-llm-bot/model-command",
+      },
+    },
+  });
+  try {
+    return await q.supportedModels();
+  } finally {
+    q.close();
+  }
+}
+
+/**
+ * Get available Claude SDK models from a fresh SDK initialization.
+ * @returns {Promise<import("@anthropic-ai/claude-agent-sdk").ModelInfo[]>}
+ */
+export async function getModels() {
+  return loadFreshSdkModels(query);
 }
 
 /**
@@ -515,9 +520,10 @@ function getActiveQueryKey(ref) {
  * Handle Claude-specific slash commands.
  * Returns true when the command was consumed by this harness.
  * @param {HarnessCommandContext} input
+ * @param {typeof query} queryClaude
  * @returns {Promise<boolean>}
  */
-async function handleClaudeHarnessCommand({ chatId, command, context }) {
+async function handleClaudeHarnessCommand({ chatId, command, context }, queryClaude) {
   const trimmed = command.trim();
 
   const permissionsMatch = trimmed.match(/^permissions(?:\s+(.+))?$/i);
@@ -555,14 +561,26 @@ async function handleClaudeHarnessCommand({ chatId, command, context }) {
   const arg = modelMatch[1]?.trim() || null;
   if (arg) {
     const effortMatch = arg.match(/^effort\s+(.+)$/i);
-    const result = effortMatch
-      ? await handleEffortCommand(chatId, effortMatch[1].trim())
-      : await handleModelCommand(chatId, arg);
+    let result;
+    try {
+      result = effortMatch
+        ? await handleEffortCommand(chatId, effortMatch[1].trim())
+        : await handleModelCommand(chatId, arg, await loadFreshSdkModels(queryClaude));
+    } catch (err) {
+      result = `Failed to load SDK models: ${errorToString(err)}`;
+    }
     await context.reply(contentEvent("tool-result", result));
     return true;
   }
 
-  const models = getModels();
+  /** @type {import("@anthropic-ai/claude-agent-sdk").ModelInfo[]} */
+  let models;
+  try {
+    models = await loadFreshSdkModels(queryClaude);
+  } catch (err) {
+    await context.reply(contentEvent("tool-result", `Failed to load SDK models: ${errorToString(err)}`));
+    return true;
+  }
   const harnessConfig = await getHarnessConfig(chatId, HARNESS_NAME);
   const currentModel = typeof harnessConfig.model === "string" ? harnessConfig.model : null;
   const currentEffort = typeof harnessConfig.reasoningEffort === "string" ? harnessConfig.reasoningEffort : null;
@@ -573,7 +591,7 @@ async function handleClaudeHarnessCommand({ chatId, command, context }) {
       id: m.value,
       label: `${m.displayName} — ${m.description}`,
     })),
-    { id: "off", label: "Default (Sonnet)" },
+    { id: "off", label: "SDK default" },
   ];
 
   const modelChoice = await context.select("Choose SDK model", modelSelectOptions, {
@@ -583,11 +601,11 @@ async function handleClaudeHarnessCommand({ chatId, command, context }) {
   /** @type {string | null} */
   let resolvedModelValue = currentModel;
   if (modelChoice && modelChoice !== currentModel) {
-    await handleModelCommand(chatId, modelChoice);
+    await handleModelCommand(chatId, modelChoice, models);
     resolvedModelValue = modelChoice === "off" ? null : modelChoice;
   }
 
-  const efforts = getEffortLevels(resolvedModelValue);
+  const efforts = getEffortLevels(resolvedModelValue, models);
   if (efforts.length > 0) {
     /** @type {SelectOption[]} */
     const effortSelectOptions = [
@@ -605,7 +623,7 @@ async function handleClaudeHarnessCommand({ chatId, command, context }) {
   }
 
   const updatedConfig = await getHarnessConfig(chatId, HARNESS_NAME);
-  const finalModel = typeof updatedConfig.model === "string" ? updatedConfig.model : "default (Sonnet)";
+  const finalModel = typeof updatedConfig.model === "string" ? updatedConfig.model : "SDK default";
   const finalEffort = typeof updatedConfig.reasoningEffort === "string" ? updatedConfig.reasoningEffort : "default (high)";
   await context.reply(contentEvent("tool-result", `SDK model: \`${finalModel}\`\nSDK effort: \`${finalEffort}\``));
   return true;
@@ -658,7 +676,7 @@ export function createClaudeAgentSdkHarness(deps = {}) {
     if (handledSessionCommand) {
       return true;
     }
-    return handleClaudeHarnessCommand(input);
+    return handleClaudeHarnessCommand(input, queryClaude);
   }
 
   /**
@@ -1003,13 +1021,6 @@ export function createClaudeAgentSdkHarness(deps = {}) {
       for (const text of buffered) {
         log.debug(`Flushing buffered message for chat ${session.chatId}: "${text.slice(0, 80)}"`);
         injectMessage(session.chatId, text);
-      }
-
-      // Cache available models on first query (non-blocking)
-      if (!cachedModels) {
-        q.supportedModels()
-          .then((models) => { cachedModels = models; })
-          .catch((err) => log.warn("Failed to fetch SDK models:", err));
       }
 
       let eventCount = 0;
