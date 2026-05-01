@@ -1,7 +1,7 @@
 import { createLogger } from "../logger.js";
 import { appendFileSync, existsSync, mkdirSync } from "node:fs";
 import path from "node:path";
-import { adaptIncomingMessage, adaptIncomingMessages } from "./inbound/chat-turn.js";
+import { adaptIncomingMessages } from "./inbound/chat-turn.js";
 import { createWhatsAppConnectionSupervisor } from "./connection-supervisor.js";
 import { classifyIncomingMessageEvent, normalizeReactionEvents } from "./inbound/message-event-classifier.js";
 import { createConfirmRuntime } from "./runtime/confirm-runtime.js";
@@ -17,6 +17,7 @@ const log = createLogger("whatsapp");
 const WHATSAPP_UPSERT_DIAGNOSTIC_ENABLE_PATH = ".diagnostics/whatsapp-upsert-shape.enabled";
 const WHATSAPP_UPSERT_DIAGNOSTIC_DEFAULT_PATH = ".diagnostics/whatsapp-upsert-shape.jsonl";
 const WHATSAPP_ALBUM_FLUSH_DELAY_MS = 1_200;
+const WHATSAPP_TURN_COALESCE_DELAY_MS = 75;
 
 /**
  * @typedef {{
@@ -264,6 +265,112 @@ export function createWhatsAppAlbumCoordinator({ flushDelayMs = WHATSAPP_ALBUM_F
     },
     flushAll: async () => {
       await Promise.all([...pendingAlbums.keys()].map((albumKey) => flushAlbum(albumKey)));
+    },
+  };
+}
+
+/**
+ * @param {BaileysMessage} message
+ * @returns {string}
+ */
+function getTurnCoalesceKey(message) {
+  return message.key.remoteJid || "unknown-chat";
+}
+
+/**
+ * Coalesce rapid same-chat turn messages before handing them to the app layer.
+ * The quiet-window is deliberately transport-scoped: after the batch is flushed,
+ * later messages are left for the normal active-run injection path.
+ * @param {{
+ *   flushDelayMs?: number,
+ *   handleMessages: (messages: BaileysMessage[]) => Promise<void>,
+ * }} input
+ * @returns {{
+ *   handle: (message: BaileysMessage) => void,
+ *   flushAll: () => Promise<void>,
+ * }}
+ */
+export function createWhatsAppTurnCoalescer({ flushDelayMs = WHATSAPP_TURN_COALESCE_DELAY_MS, handleMessages }) {
+  /** @type {Map<string, {
+   *   messages: BaileysMessage[],
+   *   timer: ReturnType<typeof setTimeout> | null,
+   *   flushing: Promise<void> | null,
+   * }>} */
+  const pendingTurns = new Map();
+
+  /**
+   * @param {string} chatKey
+   */
+  function ensureBatch(chatKey) {
+    let batch = pendingTurns.get(chatKey);
+    if (!batch) {
+      batch = {
+        messages: [],
+        timer: null,
+        flushing: null,
+      };
+      pendingTurns.set(chatKey, batch);
+    }
+    return batch;
+  }
+
+  /**
+   * @param {string} chatKey
+   * @returns {Promise<void>}
+   */
+  async function flushBatch(chatKey) {
+    const batch = pendingTurns.get(chatKey);
+    if (!batch) {
+      return;
+    }
+    if (batch.flushing) {
+      await batch.flushing;
+      return;
+    }
+    if (batch.timer) {
+      clearTimeout(batch.timer);
+      batch.timer = null;
+    }
+    pendingTurns.delete(chatKey);
+
+    const messages = [...batch.messages];
+    batch.messages.length = 0;
+    if (messages.length === 0) {
+      return;
+    }
+
+    batch.flushing = handleMessages(messages);
+    await batch.flushing;
+  }
+
+  /**
+   * @param {string} chatKey
+   */
+  function scheduleFlush(chatKey) {
+    const batch = pendingTurns.get(chatKey);
+    if (!batch) {
+      return;
+    }
+    if (batch.timer) {
+      clearTimeout(batch.timer);
+      batch.timer = null;
+    }
+    batch.timer = setTimeout(() => {
+      void flushBatch(chatKey).catch((error) => {
+        log.error("Error processing coalesced WhatsApp turns:", error);
+      });
+    }, flushDelayMs);
+  }
+
+  return {
+    handle: (message) => {
+      const chatKey = getTurnCoalesceKey(message);
+      const batch = ensureBatch(chatKey);
+      batch.messages.push(message);
+      scheduleFlush(chatKey);
+    },
+    flushAll: async () => {
+      await Promise.all([...pendingTurns.keys()].map((chatKey) => flushBatch(chatKey)));
     },
   };
 }
@@ -542,6 +649,7 @@ function serializeTransportError(error) {
  * @typedef {{
  *   createConnectionSupervisor?: typeof createWhatsAppConnectionSupervisor,
  *   outboundStore?: import("../store.js").Store,
+ *   inboundCoalesceDelayMs?: number,
  * }} CreateWhatsAppTransportOptions
  */
 
@@ -612,6 +720,21 @@ export async function createWhatsAppTransport(options = {}) {
   function registerHandlers(sock, saveCreds) {
     currentSocket = sock;
     hasOpenConnection = false;
+    const turnCoalescer = createWhatsAppTurnCoalescer({
+      flushDelayMs: options.inboundCoalesceDelayMs,
+      handleMessages: async (messages) => {
+        await adaptIncomingMessages(
+          messages,
+          sock,
+          onTurn,
+          confirmRuntime,
+          selectRuntime,
+          reactionRuntime,
+          undefined,
+          { getSocket: () => currentSocket },
+        );
+      },
+    });
     const albumCoordinator = createWhatsAppAlbumCoordinator({
       handleAlbumMessages: async (albumMessages) => {
         await adaptIncomingMessages(
@@ -636,6 +759,7 @@ export async function createWhatsAppTransport(options = {}) {
         if (events["connection.update"].connection === "close" && currentSocket === sock) {
           currentSocket = null;
           hasOpenConnection = false;
+          await turnCoalescer.flushAll();
         }
         await connectionSupervisor.handleConnectionUpdate(events["connection.update"], sock);
         if (events["connection.update"].connection === "open" && currentSocket === sock) {
@@ -678,16 +802,7 @@ export async function createWhatsAppTransport(options = {}) {
               if (await albumCoordinator.handle(incomingEvent.message)) {
                 continue;
               }
-              await adaptIncomingMessage(
-                incomingEvent.message,
-                sock,
-                onTurn,
-                confirmRuntime,
-                selectRuntime,
-                reactionRuntime,
-                undefined,
-                { getSocket: () => currentSocket },
-              );
+              turnCoalescer.handle(incomingEvent.message);
               continue;
             default:
               continue;
