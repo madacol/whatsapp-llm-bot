@@ -31,6 +31,16 @@ describe("findEscapedShellTarget", () => {
     );
   });
 
+  it("does not split backslash-escaped spaces in workspace paths", () => {
+    assert.equal(
+      findEscapedShellTarget(
+        "cd /home/mada/chat-workspaces/Get\\ Bookmarklets--120363427701541991@g.us && pnpm run build:vite",
+        "/home/mada/chat-workspaces/Get Bookmarklets--120363427701541991@g.us",
+      ),
+      null,
+    );
+  });
+
   it("treats home-directory targets as outside the workspace", () => {
     assert.equal(
       findEscapedShellTarget("cat ~/notes.txt", "/repo/project"),
