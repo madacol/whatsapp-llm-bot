@@ -12,6 +12,8 @@
 ## Testing
 - Apply red/green TDD
 - Tests should catch regressions, not mirror implementation. Ask: "if this test fails, what real bug did it catch?" If there's no clear answer, skip the test
-- For behavioral changes (bug fixes, new features), write a failing test first, then implement. For refactors and trivial changes, existing tests passing is sufficient
+- For bug fixes and new features, write a failing test first when the behavior is non-trivial and not already covered. For removals, use removal-driven testing: identify existing coverage, remove the behavior, verify that coverage fails, then delete or update the obsolete tests
+- When removing a behavior or feature, first find the tests that currently cover that behavior. Remove the feature, then run those tests and confirm they fail for the expected reason. If the relevant tests do not fail, pause: either the behavior was not actually removed, the wrong tests were identified, or coverage is missing. Only then delete or update the obsolete tests to match the removal
+- Do not add new absence tests for removed behavior by default. Add one only when the absence itself is an important long-term invariant, such as safety, permissions, data loss prevention, or when the user explicitly asks for that protection
 - Prefer integration tests for glue code, unit tests for pure functions with edge cases. Test at the boundary where bugs would be noticed
 - Save tests output to a temporary file so you can grep|head|tail later because the output is usually long
