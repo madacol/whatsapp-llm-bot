@@ -33,6 +33,32 @@ import {
  * }} CodexPermissionsSelection
  */
 
+/**
+ * @typedef {{
+ *   setting: BasicSetupStep["setting"];
+ *   value: string;
+ * }} StagedConfigChange
+ */
+
+/**
+ * @typedef {{
+ *   kind: "selected";
+ *   stagedChanges: StagedConfigChange[];
+ *   stagedHarnessModel: HarnessModelSelection | null;
+ *   stagedCodexPermissions: CodexPermissionsSelection | null;
+ *   notes: string[];
+ * }} SelectedSetupResult
+ */
+
+/** @typedef {SelectedSetupResult | { kind: "cancelled" }} SetupSelectionResult */
+
+/**
+ * @typedef {{
+ *   applied: string[];
+ *   notes: string[];
+ * }} AppliedSetupResult
+ */
+
 /** @type {BasicSetupStep[]} */
 const ALL_SETUP_STEPS = [
   { setting: "trigger", question: "When should the bot reply in group chats?" },
@@ -52,13 +78,6 @@ const CODEX_PERMISSIONS_OPTIONS = [
  */
 function isObjectRecord(value) {
   return !!value && typeof value === "object" && !Array.isArray(value);
-}
-
-/**
- * @returns {BasicSetupStep[]}
- */
-function getSetupSteps() {
-  return ALL_SETUP_STEPS;
 }
 
 /**
@@ -251,6 +270,136 @@ async function applyCodexPermissionsSelection(rootDb, chatId, chat, selection) {
   return formatCodexPermissionsSummary(selection.value);
 }
 
+/**
+ * @param {import("../../../store.js").ChatRow} chat
+ * @param {TurnIO["select"]} select
+ * @returns {Promise<SetupSelectionResult>}
+ */
+async function collectSetupSelections(chat, select) {
+  /** @type {StagedConfigChange[]} */
+  const stagedChanges = [];
+  /** @type {HarnessModelSelection | null} */
+  let stagedHarnessModel = null;
+  /** @type {CodexPermissionsSelection | null} */
+  let stagedCodexPermissions = null;
+  /** @type {string[]} */
+  const notes = [];
+
+  for (const step of ALL_SETUP_STEPS) {
+    const selectable = step.setting === "harness"
+      ? getHarnessSelectOptions(chat)
+      : getSelectableOptions(step.setting, chat);
+    if (!selectable) {
+      continue;
+    }
+
+    const selected = await select(
+      step.question,
+      selectable.options,
+      { deleteOnSelect: true, currentId: selectable.currentId },
+    );
+    if (!selected) {
+      return { kind: "cancelled" };
+    }
+
+    stagedChanges.push({ setting: step.setting, value: selected });
+
+    if (step.setting !== "harness") {
+      continue;
+    }
+
+    const selectedHarness = selected;
+    const harness = resolveHarness(selectedHarness);
+    if (harness.getCapabilities().supportsModelSelection) {
+      const modelOptions = await getHarnessModelOptions(selectedHarness);
+      if (modelOptions.length === 0) {
+        notes.push(`No selectable ${selectedHarness} models are currently available, so its /model setting was left unchanged.`);
+      } else {
+        const currentModelId = getCurrentHarnessModelId(chat, selectedHarness, modelOptions);
+        const selectedModel = await select(
+          getHarnessModelQuestion(selectedHarness),
+          modelOptions,
+          { deleteOnSelect: true, ...(currentModelId ? { currentId: currentModelId } : {}) },
+        );
+        if (!selectedModel) {
+          return { kind: "cancelled" };
+        }
+
+        stagedHarnessModel = { harness: selectedHarness, value: selectedModel };
+      }
+    } else {
+      notes.push(`${selectedHarness} does not expose a configurable /model setting.`);
+    }
+
+    if (selectedHarness !== "codex") {
+      continue;
+    }
+
+    const codexPermissions = getCodexPermissionsSelectOptions(chat);
+    const selectedPermissions = await select(
+      "Choose Codex permissions",
+      codexPermissions.options,
+      { deleteOnSelect: true, currentId: codexPermissions.currentId },
+    );
+    if (!selectedPermissions) {
+      return { kind: "cancelled" };
+    }
+    if (!isCodexPermissionsMode(selectedPermissions)) {
+      throw new Error(`Unexpected Codex permissions mode: ${selectedPermissions}`);
+    }
+
+    stagedCodexPermissions = {
+      value: selectedPermissions,
+    };
+  }
+
+  return {
+    kind: "selected",
+    stagedChanges,
+    stagedHarnessModel,
+    stagedCodexPermissions,
+    notes,
+  };
+}
+
+/**
+ * @param {PGlite} rootDb
+ * @param {string} chatId
+ * @param {import("../../../store.js").ChatRow} chat
+ * @param {string[]} senderIds
+ * @param {SelectedSetupResult} selections
+ * @returns {Promise<AppliedSetupResult>}
+ */
+async function applySetupSelections(rootDb, chatId, chat, senderIds, selections) {
+  /** @type {string[]} */
+  const applied = [];
+  const notes = [...selections.notes];
+  /** @type {import("../../../store.js").ChatRow} */
+  let currentChat = chat;
+
+  for (const change of selections.stagedChanges) {
+    applied.push(await setConfigValue(rootDb, chatId, change.setting, change.value, { senderIds }));
+    currentChat = await getChatOrThrow(rootDb, chatId);
+  }
+  if (selections.stagedHarnessModel) {
+    applied.push(await applyHarnessModelSelection(rootDb, chatId, currentChat, selections.stagedHarnessModel));
+    currentChat = await getChatOrThrow(rootDb, chatId);
+  }
+  if (selections.stagedCodexPermissions) {
+    applied.push(await applyCodexPermissionsSelection(rootDb, chatId, currentChat, selections.stagedCodexPermissions));
+  }
+
+  if (isMaster(senderIds)) {
+    if (!chat.is_enabled) {
+      applied.push(await setConfigValue(rootDb, chatId, "enabled", "on", { senderIds }));
+    }
+  } else {
+    notes.push("Enabled setting was skipped because only master users can change it.");
+  }
+
+  return { applied, notes };
+}
+
 export default /** @type {defineAction} */ ((x) => x)({
   name: "setup",
   command: "setup",
@@ -272,113 +421,11 @@ export default /** @type {defineAction} */ ((x) => x)({
    */
   action_fn: async function ({ chatId, rootDb, senderIds, select }, _params) {
     const chat = await getChatOrThrow(rootDb, chatId);
-    const steps = getSetupSteps();
-
-    if (steps.length === 0) {
-      return "No setup steps are available for this chat.";
+    const selections = await collectSetupSelections(chat, select);
+    if (selections.kind === "cancelled") {
+      return "Setup cancelled. No changes were made.";
     }
-
-    /** @type {Array<{ setting: BasicSetupStep['setting'], value: string }>} */
-    const stagedChanges = [];
-    /** @type {HarnessModelSelection | null} */
-    let stagedHarnessModel = null;
-    /** @type {CodexPermissionsSelection | null} */
-    let stagedCodexPermissions = null;
-    /** @type {string[]} */
-    const notes = [];
-
-    for (const step of steps) {
-      const selectable = step.setting === "harness"
-        ? getHarnessSelectOptions(chat)
-        : getSelectableOptions(step.setting, chat);
-      if (!selectable) {
-        continue;
-      }
-
-      const selected = await select(
-        step.question,
-        selectable.options,
-        { deleteOnSelect: true, currentId: selectable.currentId },
-      );
-      if (!selected) {
-        return "Setup cancelled. No changes were made.";
-      }
-
-      stagedChanges.push({ setting: step.setting, value: selected });
-
-      if (step.setting !== "harness") {
-        continue;
-      }
-
-      const selectedHarness = selected;
-      const harness = resolveHarness(selectedHarness);
-      if (harness.getCapabilities().supportsModelSelection) {
-        const modelOptions = await getHarnessModelOptions(selectedHarness);
-        if (modelOptions.length === 0) {
-          notes.push(`No selectable ${selectedHarness} models are currently available, so its /model setting was left unchanged.`);
-        } else {
-          const currentModelId = getCurrentHarnessModelId(chat, selectedHarness, modelOptions);
-          const selectedModel = await select(
-            getHarnessModelQuestion(selectedHarness),
-            modelOptions,
-            { deleteOnSelect: true, ...(currentModelId ? { currentId: currentModelId } : {}) },
-          );
-          if (!selectedModel) {
-            return "Setup cancelled. No changes were made.";
-          }
-
-          stagedHarnessModel = { harness: selectedHarness, value: selectedModel };
-        }
-      } else {
-        notes.push(`${selectedHarness} does not expose a configurable /model setting.`);
-      }
-
-      if (selectedHarness !== "codex") {
-        continue;
-      }
-
-      const codexPermissions = getCodexPermissionsSelectOptions(chat);
-      const selectedPermissions = await select(
-        "Choose Codex permissions",
-        codexPermissions.options,
-        { deleteOnSelect: true, currentId: codexPermissions.currentId },
-      );
-      if (!selectedPermissions) {
-        return "Setup cancelled. No changes were made.";
-      }
-      if (!isCodexPermissionsMode(selectedPermissions)) {
-        throw new Error(`Unexpected Codex permissions mode: ${selectedPermissions}`);
-      }
-
-      stagedCodexPermissions = {
-        value: selectedPermissions,
-      };
-    }
-
-    /** @type {string[]} */
-    const applied = [];
-    /** @type {import("../../../store.js").ChatRow} */
-    let currentChat = chat;
-    for (const change of stagedChanges) {
-      applied.push(await setConfigValue(rootDb, chatId, change.setting, change.value, { senderIds }));
-      currentChat = await getChatOrThrow(rootDb, chatId);
-    }
-    if (stagedHarnessModel) {
-      applied.push(await applyHarnessModelSelection(rootDb, chatId, currentChat, stagedHarnessModel));
-      currentChat = await getChatOrThrow(rootDb, chatId);
-    }
-    if (stagedCodexPermissions) {
-      applied.push(await applyCodexPermissionsSelection(rootDb, chatId, currentChat, stagedCodexPermissions));
-      currentChat = await getChatOrThrow(rootDb, chatId);
-    }
-
-    if (isMaster(senderIds)) {
-      if (!chat.is_enabled) {
-        applied.push(await setConfigValue(rootDb, chatId, "enabled", "on", { senderIds }));
-      }
-    } else {
-      notes.push("Enabled setting was skipped because only master users can change it.");
-    }
+    const { applied, notes } = await applySetupSelections(rootDb, chatId, chat, senderIds, selections);
 
     return [
       "Basic setup complete.",

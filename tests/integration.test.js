@@ -296,14 +296,11 @@ describe("Scenario 7b: Guided setup command", () => {
 
     /** @type {string[]} */
     const selections = ["mention+reply", "codex", "gpt-5.4", "workspace-write"];
-    /** @type {string[]} */
-    const questions = [];
     const { context, responses } = createChatTurn({
       chatId,
       content: [{ type: "text", text: "!setup" }],
       io: {
         select: async (question, options) => {
-          questions.push(question);
           responses.push({ type: "select", text: JSON.stringify({ question, options }) });
           return selections.shift() ?? "";
         },

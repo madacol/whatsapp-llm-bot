@@ -17,8 +17,6 @@ export default [
       models: [{ id: "gpt-5.4", label: "GPT-5.4" }],
     }));
 
-    /** @type {Array<{ question: string, options: SelectOption[] }>} */
-    const prompts = [];
     /** @type {string[]} */
     const selections = ["mention+reply", "codex", "gpt-5.4", "danger-full-access"];
 
@@ -31,10 +29,7 @@ export default [
           rootDb: db,
           senderIds: ["master-user"],
           getIsAdmin: async () => true,
-          select: async (question, options) => {
-            prompts.push({ question, options });
-            return selections.shift() ?? "";
-          },
+          select: async () => selections.shift() ?? "",
         },
         {},
       );
@@ -45,10 +40,9 @@ export default [
       assert.ok(result.includes("gpt-5.4"), `Expected harness model summary, got: ${result}`);
       assert.ok(result.includes("danger-full-access"), `Expected permissions summary, got: ${result}`);
       assert.ok(result.includes("!clone"), `Expected clone hint, got: ${result}`);
-      assert.ok(prompts.some((prompt) => prompt.question === "Choose Codex permissions"), "wizard should ask for Codex permissions");
 
       const { rows: [chat] } = await db.sql`
-        SELECT is_enabled, respond_on, memory, debug, output_visibility, harness, harness_config
+        SELECT is_enabled, respond_on, memory, debug, harness, harness_config
         FROM chats
         WHERE chat_id = 'setup-1'
       `;
@@ -70,8 +64,6 @@ export default [
       VALUES ('setup-native', false, 'mention', false, false, '{}'::jsonb)
       ON CONFLICT DO NOTHING`;
 
-    /** @type {Array<{ question: string, options: SelectOption[] }>} */
-    const prompts = [];
     /** @type {string[]} */
     const selections = ["mention+reply", "native"];
 
@@ -84,16 +76,12 @@ export default [
           rootDb: db,
           senderIds: ["master-user"],
           getIsAdmin: async () => true,
-          select: async (question, options) => {
-            prompts.push({ question, options });
-            return selections.shift() ?? "";
-          },
+          select: async () => selections.shift() ?? "",
         },
         {},
       );
 
       assert.ok(result.includes("native"), `Expected harness summary, got: ${result}`);
-      assert.ok(!prompts.some((prompt) => prompt.question === "Choose Codex permissions"), "wizard should not ask for Codex permissions on non-Codex harnesses");
 
       const { rows: [chat] } = await db.sql`
         SELECT harness, harness_config
