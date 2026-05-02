@@ -13,3 +13,4 @@ data/
 .bot.pid
 .madabot/
 .agents/.runtime/
+.diagnostics/
