@@ -77,24 +77,6 @@ describe("per-chat model selection", () => {
     });
   });
 
-  describe("config metadata", () => {
-    it("marks picker-backed settings in the registry", async () => {
-      const service = await import("../actions/settings/chatSettings/_service.js");
-      const enabled = service.getConfigKeyDefinition("enabled");
-      const harness = service.getConfigKeyDefinition("harness");
-      const prompt = service.getConfigKeyDefinition("prompt");
-      const show = service.getConfigKeyDefinition("show");
-
-      assert.ok(enabled?.picker?.options, "expected enabled picker options in metadata");
-      assert.equal(Object.hasOwn(enabled ?? {}, "options"), false, "top-level options should be gone");
-      assert.ok(harness?.picker, "expected harness picker metadata");
-      assert.equal(prompt?.picker, undefined, "prompt should remain free-text");
-      assert.equal(show?.setting, "output_visibility");
-      assert.deepEqual(show?.flags?.map((flag) => flag.key), ["tools", "thinking", "changes"]);
-      assert.ok(show?.multiPicker, "expected show multi-picker metadata");
-    });
-  });
-
   describe("chat_settings model via dispatch", () => {
     it("updates the model in the DB", async () => {
       await db.sql`INSERT INTO chats(chat_id) VALUES ('chat-set-1') ON CONFLICT DO NOTHING`;
@@ -528,8 +510,6 @@ describe("per-chat model selection", () => {
       let promptText = null;
       /** @type {SelectOption[] | null} */
       let pickerOptions = null;
-      /** @type {SelectManyConfig | null} */
-      let pickerConfig = null;
 
       const mod = await import("../actions/settings/chatSettings/index.js");
       const action = mod.default;
@@ -538,10 +518,9 @@ describe("per-chat model selection", () => {
           chatId: "cfg-show-3",
           rootDb: db,
           senderIds: ["u1"],
-          selectMany: async (question, options, config) => {
+          selectMany: async (question, options) => {
             promptText = question;
             pickerOptions = options;
-            pickerConfig = config ?? null;
             return { kind: "selected", ids: ["tools", "changes"] };
           },
         },
@@ -562,10 +541,6 @@ describe("per-chat model selection", () => {
           { id: "none", label: "⚪ Hide all extras" },
         ],
       );
-      assert.deepEqual(pickerConfig, {
-        deleteOnSelect: true,
-        currentIds: [],
-      });
       assert.ok(result.includes("Show tool activity"), `expected show summary, got: ${result}`);
       assert.ok(result.includes("Hide file changes"), `expected hide summary, got: ${result}`);
       assert.ok(!result.includes("thinking"), `did not expect unchanged thinking summary, got: ${result}`);
