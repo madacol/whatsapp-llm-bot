@@ -35,22 +35,21 @@ export default [
             prompts.push({ question, options });
             return selections.shift() ?? "";
           },
-          selectMany: async (question, options) => {
-            prompts.push({ question, options });
-            return { kind: "selected", ids: ["changes"] };
+          selectMany: async (question) => {
+            throw new Error(`setup should not show multi-select settings; got ${question}`);
           },
         },
         {},
       );
 
-      assert.equal(prompts.length, 5, "wizard should skip the enable prompt and ask the remaining setup questions plus Codex permissions");
+      assert.equal(prompts.length, 4, "wizard should ask trigger, harness, model, and Codex permissions only");
       assert.equal(prompts[0]?.question, "When should the bot reply in group chats?");
       assert.ok(result.includes("enabled"), `Expected enabled summary, got: ${result}`);
       assert.ok(result.includes("mention+reply"), `Expected trigger summary, got: ${result}`);
       assert.ok(result.includes("codex"), `Expected harness summary, got: ${result}`);
       assert.ok(result.includes("gpt-5.4"), `Expected harness model summary, got: ${result}`);
       assert.ok(result.includes("danger-full-access"), `Expected permissions summary, got: ${result}`);
-      assert.ok(result.includes("Hide file changes"), `Expected show summary, got: ${result}`);
+      assert.ok(!result.includes("Hide file changes"), `Did not expect show summary, got: ${result}`);
       assert.ok(result.includes("!clone"), `Expected clone hint, got: ${result}`);
       assert.ok(!prompts.some((prompt) => prompt.question === "Enable the bot for this chat?"), "wizard should not ask the enable question");
       assert.ok(prompts.some((prompt) => prompt.question === "Choose Codex permissions"), "wizard should ask for Codex permissions");
@@ -64,7 +63,7 @@ export default [
       assert.equal(chat.respond_on, "mention+reply");
       assert.equal(chat.memory, false, "setup should no longer modify memory");
       assert.equal(chat.debug, true);
-      assert.deepEqual(chat.output_visibility, { changes: false });
+      assert.deepEqual(chat.output_visibility, {});
       assert.equal(chat.harness, "codex");
       assert.equal(chat.harness_config.codex.model, "gpt-5.4");
       assert.equal(chat.harness_config.codex.sandboxMode, "danger-full-access");
@@ -74,9 +73,9 @@ export default [
     }
   },
 
-  async function keeps_setup_running_when_show_step_is_unchanged(action_fn, db) {
+  async function leaves_show_setting_out_of_setup(action_fn, db) {
     await db.sql`INSERT INTO chats(chat_id, is_enabled, respond_on, memory, debug, output_visibility)
-      VALUES ('setup-3', false, 'mention', false, false, '{}'::jsonb)
+      VALUES ('setup-3', false, 'mention', false, false, '{"tools": true, "changes": false}'::jsonb)
       ON CONFLICT DO NOTHING`;
 
     await fs.mkdir(path.dirname(CODEX_CACHE_PATH), { recursive: true });
@@ -98,7 +97,9 @@ export default [
           senderIds: ["master-user"],
           getIsAdmin: async () => true,
           select: async () => selections.shift() ?? "",
-          selectMany: async () => ({ kind: "unchanged" }),
+          selectMany: async (question) => {
+            throw new Error(`setup should not show multi-select settings; got ${question}`);
+          },
         },
         {},
       );
@@ -113,7 +114,7 @@ export default [
         FROM chats
         WHERE chat_id = 'setup-3'
       `;
-      assert.deepEqual(chat.output_visibility, {});
+      assert.deepEqual(chat.output_visibility, { tools: true, changes: false });
       assert.equal(chat.harness, "codex");
       assert.equal(chat.harness_config.codex.model, "gpt-5.4");
       assert.equal(chat.harness_config.codex.sandboxMode, "workspace-write");
@@ -146,9 +147,8 @@ export default [
             prompts.push({ question, options });
             return selections.shift() ?? "";
           },
-          selectMany: async (question, options) => {
-            prompts.push({ question, options });
-            return { kind: "unchanged" };
+          selectMany: async (question) => {
+            throw new Error(`setup should not show multi-select settings; got ${question}`);
           },
         },
         {},
