@@ -8,7 +8,6 @@ import {
 import { getChatOrThrow } from "../../../store.js";
 import { getClaudeSdkModels, getCodexAvailableModels, getPiAvailableModels, listHarnesses, resolveHarness } from "#harnesses";
 import {
-  getMultiSelectableOptions,
   getSelectableOptions,
   isMaster,
   setConfigValue,
@@ -16,7 +15,7 @@ import {
 
 /**
  * @typedef {{
- *   setting: "enabled" | "trigger" | "harness" | "show";
+ *   setting: "trigger" | "harness";
  *   question: string;
  * }} BasicSetupStep
  */
@@ -38,7 +37,6 @@ import {
 const ALL_SETUP_STEPS = [
   { setting: "trigger", question: "When should the bot reply in group chats?" },
   { setting: "harness", question: "Which harness should power this chat?" },
-  { setting: "show", question: "Which extra outputs should stay visible in chat?" },
 ];
 
 /** @type {SelectOption[]} */
@@ -272,7 +270,7 @@ export default /** @type {defineAction} */ ((x) => x)({
    * @param {ExtendedActionContext<{autoExecute: true, useRootDb: true, requireAdmin: true}>} context
    * @param {Record<string, never>} _params
    */
-  action_fn: async function ({ chatId, rootDb, senderIds, select, selectMany }, _params) {
+  action_fn: async function ({ chatId, rootDb, senderIds, select }, _params) {
     const chat = await getChatOrThrow(rootDb, chatId);
     const steps = getSetupSteps();
 
@@ -290,24 +288,6 @@ export default /** @type {defineAction} */ ((x) => x)({
     const notes = [];
 
     for (const step of steps) {
-      const multiSelectable = getMultiSelectableOptions(step.setting, chat);
-      if (multiSelectable && typeof selectMany === "function") {
-        const selection = await selectMany(
-          step.question,
-          multiSelectable.options,
-          { deleteOnSelect: true, currentIds: multiSelectable.currentIds },
-        );
-        if (selection.kind === "cancelled") {
-          return "Setup cancelled. No changes were made.";
-        }
-        if (selection.kind === "unchanged") {
-          continue;
-        }
-
-        stagedChanges.push({ setting: step.setting, value: selection.ids.join(" ") });
-        continue;
-      }
-
       const selectable = step.setting === "harness"
         ? getHarnessSelectOptions(chat)
         : getSelectableOptions(step.setting, chat);
