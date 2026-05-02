@@ -144,6 +144,80 @@ function createMockSock() {
   };
 }
 
+/**
+ * @param {ReturnType<typeof createMockSock>["sentMessages"]} sentMessages
+ * @param {string} question
+ */
+function assertConfirmPoll(sentMessages, question) {
+  assert.equal(sentMessages.length, 1, "confirm() should send one poll prompt");
+  assert.deepEqual(sentMessages[0]?.msg.poll, {
+    name: question,
+    values: ["Confirm", "Cancel ❌"],
+    selectableCount: 1,
+  });
+}
+
+/**
+ * @param {unknown[]} reactions
+ * @param {string} message
+ */
+function assertNoReactionMarkers(reactions, message) {
+  assert.deepEqual(reactions, [], message);
+}
+
+/**
+ * @param {{
+ *   messageId: string;
+ *   defaultLeaseTtlMs: number;
+ *   pulseIntervalMs: number;
+ * }} params
+ * @returns {{
+ *   io: ReturnType<typeof createTurnIo>;
+ *   presenceUpdates: Array<{ presence: string, chatId: string }>;
+ *   sentMessages: Array<{ chatId: string, msg: Record<string, unknown>, options?: Record<string, unknown> }>;
+ *   selectRuntime: ReturnType<typeof createSelectRuntime>;
+ *   confirmRuntime: ReturnType<typeof createConfirmRuntime>;
+ * }}
+ */
+function createPresenceTurnIo({ messageId, defaultLeaseTtlMs, pulseIntervalMs }) {
+  /** @type {Array<{ presence: string, chatId: string }>} */
+  const presenceUpdates = [];
+  /** @type {Array<{ chatId: string, msg: Record<string, unknown>, options?: Record<string, unknown> }>} */
+  const sentMessages = [];
+  const selectRuntime = createSelectRuntime();
+  const confirmRuntime = createConfirmRuntime();
+  const io = createTurnIo({
+    sock: /** @type {import("@whiskeysockets/baileys").WASocket} */ (/** @type {unknown} */ ({
+      sendMessage: async (chatId, msg, options) => {
+        sentMessages.push({ chatId, msg, options });
+        return { key: { id: `sent-${chatId}`, remoteJid: chatId } };
+      },
+      sendPresenceUpdate: async (presence, chatId) => {
+        presenceUpdates.push({ presence, chatId });
+      },
+    })),
+    chatId: "presence-chat",
+    message: /** @type {BaileysMessage} */ ({
+      key: {
+        remoteJid: "presence-chat",
+        fromMe: false,
+        id: messageId,
+      },
+    }),
+    senderIds: ["sender-1"],
+    isGroup: false,
+    selectRuntime,
+    confirmRuntime,
+    reactionRuntime: createReactionRuntime(),
+    presenceConfig: {
+      defaultLeaseTtlMs,
+      pulseIntervalMs,
+    },
+  });
+
+  return { io, presenceUpdates, sentMessages, selectRuntime, confirmRuntime };
+}
+
 describe("getMessageContent", () => {
   it("extracts quoted message with reply text", async () => {
     const msg = /** @type {Partial<BaileysMessage>} */ ({
@@ -675,32 +749,10 @@ describe("createTurnIo", () => {
   });
 
   it("opens a lease, pulses composing on the adapter cadence, then pauses on expiry", async () => {
-    /** @type {Array<{ presence: string, chatId: string }>} */
-    const presenceUpdates = [];
-    const io = createTurnIo({
-      sock: /** @type {import("@whiskeysockets/baileys").WASocket} */ (/** @type {unknown} */ ({
-        sendMessage: async () => ({ key: { id: "sent-1", remoteJid: "presence-chat" } }),
-        sendPresenceUpdate: async (presence, chatId) => {
-          presenceUpdates.push({ presence, chatId });
-        },
-      })),
-      chatId: "presence-chat",
-      message: /** @type {BaileysMessage} */ ({
-        key: {
-          remoteJid: "presence-chat",
-          fromMe: false,
-          id: "incoming-msg-3",
-        },
-      }),
-      senderIds: ["sender-1"],
-      isGroup: false,
-      selectRuntime: createSelectRuntime(),
-      confirmRuntime: createConfirmRuntime(),
-      reactionRuntime: createReactionRuntime(),
-      presenceConfig: {
-        defaultLeaseTtlMs: 20,
-        pulseIntervalMs: 5,
-      },
+    const { io, presenceUpdates } = createPresenceTurnIo({
+      messageId: "incoming-msg-3",
+      defaultLeaseTtlMs: 20,
+      pulseIntervalMs: 5,
     });
 
     await io.startPresence(18);
@@ -718,32 +770,10 @@ describe("createTurnIo", () => {
   });
 
   it("treats keepAlive as a lease refresh when active and as a new lease when inactive", async () => {
-    /** @type {Array<{ presence: string, chatId: string }>} */
-    const presenceUpdates = [];
-    const io = createTurnIo({
-      sock: /** @type {import("@whiskeysockets/baileys").WASocket} */ (/** @type {unknown} */ ({
-        sendMessage: async () => ({ key: { id: "sent-2", remoteJid: "presence-chat" } }),
-        sendPresenceUpdate: async (presence, chatId) => {
-          presenceUpdates.push({ presence, chatId });
-        },
-      })),
-      chatId: "presence-chat",
-      message: /** @type {BaileysMessage} */ ({
-        key: {
-          remoteJid: "presence-chat",
-          fromMe: false,
-          id: "incoming-msg-4",
-        },
-      }),
-      senderIds: ["sender-1"],
-      isGroup: false,
-      selectRuntime: createSelectRuntime(),
-      confirmRuntime: createConfirmRuntime(),
-      reactionRuntime: createReactionRuntime(),
-      presenceConfig: {
-        defaultLeaseTtlMs: 20,
-        pulseIntervalMs: 50,
-      },
+    const { io, presenceUpdates } = createPresenceTurnIo({
+      messageId: "incoming-msg-4",
+      defaultLeaseTtlMs: 20,
+      pulseIntervalMs: 50,
     });
 
     await io.startPresence(20);
@@ -772,37 +802,10 @@ describe("createTurnIo", () => {
   });
 
   it("re-sends composing after outbound messages while the lease is active", async () => {
-    /** @type {Array<{ presence: string, chatId: string }>} */
-    const presenceUpdates = [];
-    /** @type {Array<{ chatId: string, msg: Record<string, unknown>, options?: Record<string, unknown> }>} */
-    const sentMessages = [];
-    const io = createTurnIo({
-      sock: /** @type {import("@whiskeysockets/baileys").WASocket} */ (/** @type {unknown} */ ({
-        sendMessage: async (chatId, msg, options) => {
-          sentMessages.push({ chatId, msg, options });
-          return { key: { id: "sent-3", remoteJid: chatId } };
-        },
-        sendPresenceUpdate: async (presence, chatId) => {
-          presenceUpdates.push({ presence, chatId });
-        },
-      })),
-      chatId: "presence-chat",
-      message: /** @type {BaileysMessage} */ ({
-        key: {
-          remoteJid: "presence-chat",
-          fromMe: false,
-          id: "incoming-msg-5",
-        },
-      }),
-      senderIds: ["sender-1"],
-      isGroup: false,
-      selectRuntime: createSelectRuntime(),
-      confirmRuntime: createConfirmRuntime(),
-      reactionRuntime: createReactionRuntime(),
-      presenceConfig: {
-        defaultLeaseTtlMs: 50,
-        pulseIntervalMs: 500,
-      },
+    const { io, presenceUpdates, sentMessages } = createPresenceTurnIo({
+      messageId: "incoming-msg-5",
+      defaultLeaseTtlMs: 50,
+      pulseIntervalMs: 500,
     });
 
     await io.startPresence(50);
@@ -825,33 +828,10 @@ describe("createTurnIo", () => {
   });
 
   it("ends the active lease before select prompts", async () => {
-    /** @type {Array<{ presence: string, chatId: string }>} */
-    const presenceUpdates = [];
-    const selectRuntime = createSelectRuntime();
-    const io = createTurnIo({
-      sock: /** @type {import("@whiskeysockets/baileys").WASocket} */ (/** @type {unknown} */ ({
-        sendMessage: async (chatId) => ({ key: { id: `sent-${chatId}`, remoteJid: chatId } }),
-        sendPresenceUpdate: async (presence, chatId) => {
-          presenceUpdates.push({ presence, chatId });
-        },
-      })),
-      chatId: "presence-chat",
-      message: /** @type {BaileysMessage} */ ({
-        key: {
-          remoteJid: "presence-chat",
-          fromMe: false,
-          id: "incoming-msg-6",
-        },
-      }),
-      senderIds: ["sender-1"],
-      isGroup: false,
-      selectRuntime,
-      confirmRuntime: createConfirmRuntime(),
-      reactionRuntime: createReactionRuntime(),
-      presenceConfig: {
-        defaultLeaseTtlMs: 50,
-        pulseIntervalMs: 5,
-      },
+    const { io, presenceUpdates, selectRuntime } = createPresenceTurnIo({
+      messageId: "incoming-msg-6",
+      defaultLeaseTtlMs: 50,
+      pulseIntervalMs: 5,
     });
 
     await io.startPresence(50);
@@ -870,33 +850,10 @@ describe("createTurnIo", () => {
   });
 
   it("ends the active lease before confirm prompts", async () => {
-    /** @type {Array<{ presence: string, chatId: string }>} */
-    const presenceUpdates = [];
-    const confirmRuntime = createConfirmRuntime();
-    const io = createTurnIo({
-      sock: /** @type {import("@whiskeysockets/baileys").WASocket} */ (/** @type {unknown} */ ({
-        sendMessage: async (chatId) => ({ key: { id: `sent-${chatId}`, remoteJid: chatId } }),
-        sendPresenceUpdate: async (presence, chatId) => {
-          presenceUpdates.push({ presence, chatId });
-        },
-      })),
-      chatId: "presence-chat",
-      message: /** @type {BaileysMessage} */ ({
-        key: {
-          remoteJid: "presence-chat",
-          fromMe: false,
-          id: "incoming-msg-7",
-        },
-      }),
-      senderIds: ["sender-1"],
-      isGroup: false,
-      selectRuntime: createSelectRuntime(),
-      confirmRuntime,
-      reactionRuntime: createReactionRuntime(),
-      presenceConfig: {
-        defaultLeaseTtlMs: 50,
-        pulseIntervalMs: 5,
-      },
+    const { io, presenceUpdates, confirmRuntime } = createPresenceTurnIo({
+      messageId: "incoming-msg-7",
+      defaultLeaseTtlMs: 50,
+      pulseIntervalMs: 5,
     });
 
     await io.startPresence(50);
@@ -1192,13 +1149,8 @@ describe("createConfirmRuntime", () => {
     const promise = confirm("Confirm this?");
     await new Promise(r => setTimeout(r, 10));
 
-    assert.equal(sentMessages.length, 1, "confirm() should send one poll prompt");
-    assert.deepEqual(sentMessages[0]?.msg.poll, {
-      name: "Confirm this?",
-      values: ["Confirm", "Cancel ❌"],
-      selectableCount: 1,
-    });
-    assert.equal(reactions.length, 0, "confirm() should not use reaction status markers");
+    assertConfirmPoll(sentMessages, "Confirm this?");
+    assertNoReactionMarkers(reactions, "confirm() should not use reaction status markers");
 
     emitPollVote("msg-0", ["Confirm"]);
 
@@ -1217,7 +1169,7 @@ describe("createConfirmRuntime", () => {
 
     const result = await promise;
     assert.equal(result, false);
-    assert.equal(reactions.length, 0, "cancel should not add reaction side effects");
+    assertNoReactionMarkers(reactions, "cancel should not add reaction side effects");
   });
 
   it("does not send any reaction markers while pending", async () => {
@@ -1227,7 +1179,7 @@ describe("createConfirmRuntime", () => {
     const promise = confirm("Confirm this?");
     await new Promise(r => setTimeout(r, 10));
 
-    assert.equal(reactions.length, 0, "poll-backed confirm should not send pending reactions");
+    assertNoReactionMarkers(reactions, "poll-backed confirm should not send pending reactions");
 
     emitPollVote("msg-0", ["Confirm"]);
     await promise;
@@ -1245,7 +1197,7 @@ describe("createConfirmRuntime", () => {
     promise.then(() => { resolved = true; });
     await new Promise(r => setTimeout(r, 200));
     assert.equal(resolved, false, "Promise should not auto-resolve");
-    assert.equal(reactions.length, 0, "pending confirm should still avoid reaction side effects");
+    assertNoReactionMarkers(reactions, "pending confirm should still avoid reaction side effects");
 
     // Clean up
     emitPollVote("msg-0", ["Confirm"]);
@@ -1349,12 +1301,7 @@ describe("createConfirmRuntime", () => {
     await new Promise((resolve) => setTimeout(resolve, 10));
 
     assert.equal(oldSocket.sentMessages.length, 0);
-    assert.equal(newSocket.sentMessages.length, 1);
-    assert.deepEqual(newSocket.sentMessages[0]?.msg.poll, {
-      name: "Confirm this?",
-      values: ["Confirm", "Cancel ❌"],
-      selectableCount: 1,
-    });
+    assertConfirmPoll(newSocket.sentMessages, "Confirm this?");
 
     oldSocket.registry.handlePollVote({
       chatId: "test-chat",

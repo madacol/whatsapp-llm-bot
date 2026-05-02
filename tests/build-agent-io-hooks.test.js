@@ -164,6 +164,17 @@ function createReasoningSubject(visibility = { ...DEFAULT_OUTPUT_VISIBILITY, thi
   return { hooks, sent, reasoningUpdates, reasoningInspects };
 }
 
+/**
+ * @param {Array<{ event: OutboundEvent, kind: "send" | "reply" }>} sent
+ * @param {"send" | "reply"} messageKind
+ * @param {OutboundEvent["kind"]} eventKind
+ */
+function assertSingleSentEvent(sent, messageKind, eventKind) {
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0]?.kind, messageKind);
+  assert.equal(sent[0]?.event.kind, eventKind);
+}
+
 describe("buildAgentIoHooks", () => {
   it("maps plan events to an llm reply", async () => {
     const { hooks, sent } = createSubject();
@@ -175,9 +186,7 @@ describe("buildAgentIoHooks", () => {
       ],
     }, undefined, undefined, undefined));
 
-    assert.equal(sent.length, 1);
-    assert.equal(sent[0].kind, "reply");
-    assert.equal(sent[0].event.kind, "plan");
+    assertSingleSentEvent(sent, "reply", "plan");
     if (sent[0].event.kind !== "plan") {
       assert.fail("Expected plan event");
     }
@@ -296,9 +305,7 @@ describe("buildAgentIoHooks", () => {
     const { hooks, sent } = createSubject(VISIBLE_TOOL_OUTPUT);
     await hooks.onCommand?.({ command: "npm test", status: "started" });
 
-    assert.equal(sent.length, 1);
-    assert.equal(sent[0].kind, "send");
-    assert.equal(sent[0].event.kind, "tool_call");
+    assertSingleSentEvent(sent, "send", "tool_call");
   });
 
   it("shows one debounced compact tool summary when visibility disables tools", async () => {
@@ -645,18 +652,14 @@ describe("buildAgentIoHooks", () => {
     const { hooks, sent } = createSubject();
     await hooks.onFileChange?.({ path: "/tmp/file.js", summary: "Updated file" });
 
-    assert.equal(sent.length, 1);
-    assert.equal(sent[0].kind, "send");
-    assert.equal(sent[0].event.kind, "file_change");
+    assertSingleSentEvent(sent, "send", "file_change");
   });
 
   it("maps file reads to a tool-call message", async () => {
     const { hooks, sent } = createSubject(VISIBLE_TOOL_OUTPUT);
     await hooks.onFileRead?.({ command: "sed -n '1,20p' src/app.js", paths: ["src/app.js"] });
 
-    assert.equal(sent.length, 1);
-    assert.equal(sent[0].kind, "send");
-    assert.equal(sent[0].event.kind, "tool_call");
+    assertSingleSentEvent(sent, "send", "tool_call");
     if (sent[0].event.kind !== "tool_call") {
       assert.fail("Expected tool_call event");
     }
@@ -673,9 +676,7 @@ describe("buildAgentIoHooks", () => {
       diff: ["--- a/file.js", "+++ b/file.js", "@@ -1 +1 @@", "-old", "+new"].join("\n"),
     });
 
-    assert.equal(sent.length, 1);
-    assert.equal(sent[0].kind, "send");
-    assert.equal(sent[0].event.kind, "file_change");
+    assertSingleSentEvent(sent, "send", "file_change");
     if (sent[0].event.kind !== "file_change") {
       assert.fail("Expected file_change event");
     }
