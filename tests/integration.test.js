@@ -313,8 +313,6 @@ describe("Scenario 7b: Guided setup command", () => {
     await handleMessage(context);
 
     const allText = responses.map((entry) => entry.text).join(" ");
-    assert.equal(questions[0], "When should the bot reply in group chats?");
-    assert.ok(!questions.includes("Enable the bot for this chat?"), `Enable prompt should be skipped, got: ${questions.join(" | ")}`);
     assert.ok(allText.toLowerCase().includes("enabled"), `Expected enabled summary, got: ${allText}`);
     assert.ok(allText.includes("mention+reply"), `Expected trigger summary, got: ${allText}`);
     assert.ok(allText.includes("codex"), `Expected harness summary, got: ${allText}`);

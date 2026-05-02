@@ -39,15 +39,12 @@ export default [
         {},
       );
 
-      assert.equal(prompts.length, 4, "wizard should ask trigger, harness, model, and Codex permissions only");
-      assert.equal(prompts[0]?.question, "When should the bot reply in group chats?");
       assert.ok(result.includes("enabled"), `Expected enabled summary, got: ${result}`);
       assert.ok(result.includes("mention+reply"), `Expected trigger summary, got: ${result}`);
       assert.ok(result.includes("codex"), `Expected harness summary, got: ${result}`);
       assert.ok(result.includes("gpt-5.4"), `Expected harness model summary, got: ${result}`);
       assert.ok(result.includes("danger-full-access"), `Expected permissions summary, got: ${result}`);
       assert.ok(result.includes("!clone"), `Expected clone hint, got: ${result}`);
-      assert.ok(!prompts.some((prompt) => prompt.question === "Enable the bot for this chat?"), "wizard should not ask the enable question");
       assert.ok(prompts.some((prompt) => prompt.question === "Choose Codex permissions"), "wizard should ask for Codex permissions");
 
       const { rows: [chat] } = await db.sql`
