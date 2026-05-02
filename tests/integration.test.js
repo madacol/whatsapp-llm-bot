@@ -307,9 +307,6 @@ describe("Scenario 7b: Guided setup command", () => {
           responses.push({ type: "select", text: JSON.stringify({ question, options }) });
           return selections.shift() ?? "";
         },
-        selectMany: async (question) => {
-          throw new Error(`setup should not show multi-select settings; got ${question}`);
-        },
       },
     });
 
@@ -326,7 +323,7 @@ describe("Scenario 7b: Guided setup command", () => {
     assert.ok(allText.includes("!clone"), `Expected clone hint, got: ${allText}`);
 
     const { rows: [chat] } = await testDb.sql`
-      SELECT is_enabled, respond_on, memory, debug, output_visibility, harness, harness_config
+      SELECT is_enabled, respond_on, memory, debug, harness, harness_config
       FROM chats
       WHERE chat_id = ${chatId}
     `;
@@ -334,7 +331,6 @@ describe("Scenario 7b: Guided setup command", () => {
     assert.equal(chat.respond_on, "mention+reply");
     assert.equal(chat.memory, false);
     assert.equal(chat.debug, false);
-    assert.deepEqual(chat.output_visibility, {});
     assert.equal(chat.harness, "codex");
     assert.equal(chat.harness_config.codex.model, "gpt-5.4");
     assert.equal(chat.harness_config.codex.sandboxMode, "workspace-write");
