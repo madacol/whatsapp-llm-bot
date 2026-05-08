@@ -261,7 +261,7 @@ export default /** @type {defineAction} */ ((x) => x)({
       test_name: {
         type: "string",
         description:
-          "Kebab-case descriptive name for the test (e.g. 'should-call-extract-for-receipt')",
+          "Kebab-case descriptive name for the test (e.g. 'should-answer-with-cited-context')",
       },
       description: {
         type: "string",

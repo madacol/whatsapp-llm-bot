@@ -4,7 +4,7 @@ import { readBlockBuffer, writeMedia } from "../../../media-store.js";
 export default /** @type {defineAction} */ ((x) => x)({
   name: "zoom_image",
   description:
-    "Crop a region of an image to zoom in on details like small text in receipts or documents. Uses percentage-based coordinates (0-100).",
+    "Crop a region of an image to zoom in on details like small text in documents. Uses percentage-based coordinates (0-100).",
   parameters: {
     type: "object",
     properties: {

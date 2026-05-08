@@ -7,7 +7,7 @@
  *   - Are non-deterministic
  *
  * Run via: pnpm test:prompts
- * Filter: ACTION=track_purchases pnpm test:prompts
+ * Filter: ACTION=generate_image pnpm test:prompts
  * Never included in: pnpm test
  */
 
