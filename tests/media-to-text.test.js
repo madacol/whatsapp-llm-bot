@@ -402,7 +402,7 @@ describe("media-to-text", () => {
           architecture: { input_modalities: ["text", "image"] },
         },
       ], async () => {
-        mockServer.addResponses("The receipt shows milk at €1.50");
+        mockServer.addResponses("The label shows milk at €1.50");
 
         /** @type {MessageRow[]} */
         const messages = [
@@ -433,12 +433,12 @@ describe("media-to-text", () => {
             message_data: {
               role: "user",
               content: [
-                { type: "text", text: "how much did I spend on milk?" },
+                { type: "text", text: "what does the label say about milk?" },
                 {
                   type: "image",
                   encoding: "base64",
                   mime_type: "image/png",
-                  data: "receiptdata",
+                  data: "labeldata",
                 },
               ],
             },
@@ -465,7 +465,7 @@ describe("media-to-text", () => {
         // Prior conversation should appear as context
         const allText = JSON.stringify(reqMessages);
         assert.ok(allText.includes("hola que tal"), "Should include prior user message");
-        assert.ok(allText.includes("how much did I spend on milk"), "Should include current user text");
+        assert.ok(allText.includes("what does the label say about milk"), "Should include current user text");
       });
     });
 

@@ -304,12 +304,12 @@ export default [
       assert.ok(result.includes("image"), "should include media type");
     },
     async function info_shows_enabled_opt_in_actions(action_fn, db) {
-      await db.sql`INSERT INTO chats(chat_id, enabled_actions) VALUES ('cs-info-8', '["track_purchases"]'::jsonb) ON CONFLICT DO NOTHING`;
+      await db.sql`INSERT INTO chats(chat_id, enabled_actions) VALUES ('cs-info-8', '["test_opt"]'::jsonb) ON CONFLICT DO NOTHING`;
       const result = await action_fn(
         { chatId: "cs-info-8", rootDb: db, senderIds: ["u1"], getIsAdmin: async () => false },
         { setting: "" },
       );
-      assert.ok(result.includes("track_purchases"), "should include enabled opt-in action");
+      assert.ok(result.includes("test_opt"), "should include enabled opt-in action");
     },
     async function info_shows_none_when_no_opt_in_actions(action_fn, db) {
       await db.sql`INSERT INTO chats(chat_id) VALUES ('cs-info-9') ON CONFLICT DO NOTHING`;
@@ -512,12 +512,12 @@ export default [
       assert.ok(result.includes("Usage"));
     },
     async function gets_enabled_actions_list(action_fn, db) {
-      await db.sql`INSERT INTO chats(chat_id, enabled_actions) VALUES ('cs-act-7', '["track_purchases"]'::jsonb) ON CONFLICT DO NOTHING`;
+      await db.sql`INSERT INTO chats(chat_id, enabled_actions) VALUES ('cs-act-7', '["test_opt"]'::jsonb) ON CONFLICT DO NOTHING`;
       const result = await action_fn(
         { chatId: "cs-act-7", rootDb: db },
         { setting: "action" },
       );
-      assert.ok(result.includes("track_purchases"));
+      assert.ok(result.includes("test_opt"));
     },
 
     // ── model role settings (coding_model, smart_model, etc.) ──

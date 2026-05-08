@@ -590,25 +590,6 @@ describe("Scenario 11: getMessageContent extraction", () => {
 });
 
 // ═══════════════════════════════════════════════════════════════════
-// Scenario: Opt-in actions filtered out unless enabled
-// ═══════════════════════════════════════════════════════════════════
-describe("Opt-in action filtering", () => {
-  it("opt-in action command fails when not enabled for chat", async () => {
-    const chat = await t.chat("opt-in-chat", { enabled: true });
-    const r = await chat.send("!compras history");
-    assert.ok(r.raw.some(x => x.text.toLowerCase().includes("unknown command")),
-      `Should reject opt-in command, got: ${JSON.stringify(r.raw.map(x => x.text))}`);
-  });
-
-  it("opt-in action works after enabling it", async () => {
-    const chat = await t.chat("opt-in-chat", { enabled: true, enabledActions: ["track_purchases"] });
-    const r = await chat.send("!compras history");
-    assert.ok(!r.raw.some(x => x.text.toLowerCase().includes("unknown command")),
-      `Should recognize opt-in command after enabling, got: ${JSON.stringify(r.raw.map(x => x.text))}`);
-  });
-});
-
-// ═══════════════════════════════════════════════════════════════════
 // Scenario: HtmlContent from LLM tool call sends link URL
 // ═══════════════════════════════════════════════════════════════════
 describe("HtmlContent via LLM tool call", () => {
@@ -1023,27 +1004,6 @@ describe("Quote blocks in LLM context", () => {
     const userContent = JSON.stringify(userMsg.content);
     assert.ok(userContent.includes("> Original quoted message"),
       `User message should contain '> ' prefixed quoted text, got: ${userContent}`);
-  });
-});
-
-// ═══════════════════════════════════════════════════════════════════
-// Scenario: enabled_actions filtering for LLM tool calls
-// ═══════════════════════════════════════════════════════════════════
-describe("enabled_actions filtering for LLM tool calls", () => {
-  it("LLM tools list excludes opt-in actions unless enabled", async () => {
-    const chatWithout = await t.chat("ea-without-chat", { enabled: true });
-    const chatWith = await t.chat("ea-with-chat", { enabled: true, enabledActions: ["track_purchases"] });
-
-    const r1 = await chatWithout.send("Hello", { llm: ["No tracking here."] });
-    const r2 = await chatWith.send("Hello", { llm: ["Tracking enabled!"] });
-
-    const toolNames1 = (/** @type {any} */ (r1.requests[0]).tools || []).map(x => x.function?.name);
-    const toolNames2 = (/** @type {any} */ (r2.requests[0]).tools || []).map(x => x.function?.name);
-
-    assert.ok(!toolNames1.includes("track_purchases"),
-      `Chat without enabled_actions should NOT have track_purchases, got: ${toolNames1.join(", ")}`);
-    assert.ok(toolNames2.includes("track_purchases"),
-      `Chat with enabled_actions should have track_purchases, got: ${toolNames2.join(", ")}`);
   });
 });
 
