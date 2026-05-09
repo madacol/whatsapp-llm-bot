@@ -4,6 +4,7 @@ import { formatPlanPresentationText } from "../plan-presentation.js";
 import { formatActivitySummary } from "../tool-presentation-model.js";
 import { formatToolPresentationDisplay, formatToolPresentationSummary } from "../presentation/whatsapp.js";
 import { contentEvent } from "../outbound-events.js";
+import { formatUsageEventText } from "../usage-formatting.js";
 import {
   buildCommunityWorkspaceSurfaceName,
   buildWorkspaceSurfaceName,
@@ -84,7 +85,7 @@ function stringifyEvent(event) {
       return `${SOURCE_PREFIX["tool-call"]} ${stringifyContent(rendered)}`.trim();
     }
     case "usage":
-      return `${SOURCE_PREFIX.usage} Cost: ${event.cost} | prompt=${event.tokens.prompt} cached=${event.tokens.cached} completion=${event.tokens.completion}`;
+      return `${SOURCE_PREFIX.usage} ${formatUsageEventText(event)}`;
     default:
       return "";
   }

@@ -42,6 +42,32 @@ function resolveCodexUsageRecord(value) {
 }
 
 /**
+ * @param {Record<string, unknown> | null | undefined} record
+ * @param {string[]} keys
+ * @returns {number | undefined}
+ */
+function readNumberField(record, keys) {
+  for (const key of keys) {
+    const value = record?.[key];
+    if (typeof value === "number") {
+      return value;
+    }
+  }
+  return undefined;
+}
+
+/**
+ * @param {unknown} value
+ * @returns {Record<string, unknown> | null}
+ */
+function resolveCodexTokenUsageRecord(value) {
+  if (!isCodexEventRecord(value)) {
+    return null;
+  }
+  return isCodexEventRecord(value.tokenUsage) ? value.tokenUsage : value;
+}
+
+/**
  * Normalize Codex usage counters from SDK or app-server payloads.
  * `fallback` lets callers preserve support for older flat top-level fields.
  * @param {unknown} value
@@ -50,40 +76,35 @@ function resolveCodexUsageRecord(value) {
  */
 export function normalizeCodexUsage(value, fallback) {
   const usage = resolveCodexUsageRecord(value);
+  const tokenUsage = resolveCodexTokenUsageRecord(value);
   const fallbackRecord = isCodexEventRecord(fallback) ? fallback : null;
 
-  const promptTokens = typeof usage?.input_tokens === "number"
-    ? usage.input_tokens
-    : typeof usage?.inputTokens === "number"
-      ? usage.inputTokens
-      : typeof fallbackRecord?.input_tokens === "number"
-        ? fallbackRecord.input_tokens
-        : typeof fallbackRecord?.inputTokens === "number" ? fallbackRecord.inputTokens : 0;
+  const promptTokens = readNumberField(usage, ["input_tokens", "inputTokens"])
+    ?? readNumberField(fallbackRecord, ["input_tokens", "inputTokens"])
+    ?? 0;
+  const completionTokens = readNumberField(usage, ["output_tokens", "outputTokens"])
+    ?? readNumberField(fallbackRecord, ["output_tokens", "outputTokens"])
+    ?? 0;
+  const cachedTokens = readNumberField(usage, ["cached_input_tokens", "cachedInputTokens"])
+    ?? readNumberField(fallbackRecord, ["cached_input_tokens", "cachedInputTokens"])
+    ?? 0;
 
-  const completionTokens = typeof usage?.output_tokens === "number"
-    ? usage.output_tokens
-    : typeof usage?.outputTokens === "number"
-      ? usage.outputTokens
-      : typeof fallbackRecord?.output_tokens === "number"
-        ? fallbackRecord.output_tokens
-        : typeof fallbackRecord?.outputTokens === "number" ? fallbackRecord.outputTokens : 0;
-
-  const cachedTokens = typeof usage?.cached_input_tokens === "number"
-    ? usage.cached_input_tokens
-    : typeof usage?.cachedInputTokens === "number"
-      ? usage.cachedInputTokens
-      : typeof fallbackRecord?.cached_input_tokens === "number"
-        ? fallbackRecord.cached_input_tokens
-        : typeof fallbackRecord?.cachedInputTokens === "number" ? fallbackRecord.cachedInputTokens : 0;
-
-  const cost = typeof usage?.cost === "number"
-    ? usage.cost
-    : typeof fallbackRecord?.cost === "number" ? fallbackRecord.cost : 0;
+  const totalTokens = readNumberField(usage, ["total_tokens", "totalTokens"])
+    ?? readNumberField(tokenUsage, ["total_tokens", "totalTokens"])
+    ?? readNumberField(fallbackRecord, ["total_tokens", "totalTokens"]);
+  const reasoningTokens = readNumberField(usage, ["reasoning_output_tokens", "reasoningOutputTokens"])
+    ?? readNumberField(fallbackRecord, ["reasoning_output_tokens", "reasoningOutputTokens"]);
+  const contextWindow = readNumberField(tokenUsage, ["model_context_window", "modelContextWindow"])
+    ?? readNumberField(fallbackRecord, ["model_context_window", "modelContextWindow"]);
+  const cost = readNumberField(usage, ["cost"]) ?? readNumberField(fallbackRecord, ["cost"]) ?? 0;
 
   return {
     promptTokens,
     completionTokens,
     cachedTokens,
+    ...(totalTokens !== undefined && { totalTokens }),
+    ...(reasoningTokens !== undefined && { reasoningTokens }),
+    ...(contextWindow !== undefined && { contextWindow }),
     cost,
   };
 }

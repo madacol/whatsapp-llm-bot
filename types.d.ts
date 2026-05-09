@@ -187,11 +187,16 @@ type FileChangeEvent = {
 type UsageEvent = {
   kind: "usage";
   cost: string;
-  tokens: {
-    prompt: number;
-    completion: number;
-    cached: number;
-  };
+  tokens: UsageTokens;
+};
+
+type UsageTokens = {
+  prompt: number;
+  completion: number;
+  cached: number;
+  total?: number;
+  reasoning?: number;
+  contextWindow?: number;
 };
 
 type OutboundEvent =
@@ -616,7 +621,7 @@ type AgentIOHooks = {
   }) => Promise<void>;
   onContinuePrompt?: () => Promise<boolean>;
   onDepthLimit?: () => Promise<boolean>;
-  onUsage?: (cost: string, tokens: { prompt: number; completion: number; cached: number }) => Promise<void>;
+  onUsage?: (cost: string, tokens: UsageTokens) => Promise<void>;
 };
 
 type HarnessSessionRef = {
@@ -640,6 +645,9 @@ type HarnessUsage = {
   promptTokens: number;
   completionTokens: number;
   cachedTokens: number;
+  totalTokens?: number;
+  reasoningTokens?: number;
+  contextWindow?: number;
   cost: number;
 };
 

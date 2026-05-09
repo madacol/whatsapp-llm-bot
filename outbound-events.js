@@ -72,7 +72,7 @@ export function fileChangeEvent(input) {
 
 /**
  * @param {string} cost
- * @param {{ prompt: number, completion: number, cached: number }} tokens
+ * @param {UsageTokens} tokens
  * @returns {UsageEvent}
  */
 export function usageEvent(cost, tokens) {

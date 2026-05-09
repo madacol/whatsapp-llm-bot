@@ -308,6 +308,9 @@ async function runCodexAttempt(input) {
       prompt: result.usage.promptTokens,
       completion: result.usage.completionTokens,
       cached: result.usage.cachedTokens,
+      ...(result.usage.totalTokens !== undefined && { total: result.usage.totalTokens }),
+      ...(result.usage.reasoningTokens !== undefined && { reasoning: result.usage.reasoningTokens }),
+      ...(result.usage.contextWindow !== undefined && { contextWindow: result.usage.contextWindow }),
     });
   }
 
