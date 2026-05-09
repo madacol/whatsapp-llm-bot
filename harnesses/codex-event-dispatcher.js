@@ -2,6 +2,7 @@ import { failedToolCallUpdate } from "../message-failure-presentation.js";
 import { buildToolPresentation, getToolFlowDescriptor } from "../tool-presentation-model.js";
 import { toolCallUpdate, toolFlowInspectState, toolFlowUpdate, toolInspectState } from "../outbound-events.js";
 import { createPlanPresentationFromState } from "../plan-presentation.js";
+import { estimateCodexUsageCost } from "./codex-usage-cost.js";
 import { createCodexReasoningState } from "./codex-reasoning-state.js";
 import { createCodexRunState } from "./codex-run-state.js";
 import { createCodexSyntheticToolAdapter } from "./codex-synthetic-tools.js";
@@ -51,7 +52,13 @@ export function createCodexEventDispatcher(input) {
    */
   async function handleNormalized(normalized) {
     if (normalized.usage) {
-      result.usage = normalized.usage;
+      const estimatedCost = normalized.usage.cost > 0
+        ? normalized.usage.cost
+        : estimateCodexUsageCost(input.runConfig?.model, normalized.usage);
+      result.usage = {
+        ...normalized.usage,
+        cost: estimatedCost ?? normalized.usage.cost,
+      };
     }
 
     if (normalized.failureMessage) {

@@ -299,10 +299,10 @@ describe("startCodexRun", () => {
       promptTokens: 11,
       completionTokens: 7,
       cachedTokens: 3,
-      cost: 0,
+      cost: 0.00012575,
     });
     assert.deepEqual(usageEvents, [{
-      cost: "0.000000",
+      cost: "0.000126",
       tokens: { prompt: 11, completion: 7, cached: 3 },
     }]);
   });

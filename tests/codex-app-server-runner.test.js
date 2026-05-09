@@ -124,6 +124,73 @@ function createNotificationController() {
 }
 
 describe("startCodexAppServerRun", () => {
+  it("estimates Codex app-server usage cost from token usage updates", async () => {
+    const connectionMock = createOpenConnectionMock();
+    /** @type {Array<{ cost: string, tokens: { prompt: number, completion: number, cached: number } }>} */
+    const usageEvents = [];
+
+    const started = await startCodexAppServerRun({
+      chatId: "chat-usage",
+      prompt: "Continue",
+      messages: [{ role: "user", content: [{ type: "text", text: "Continue" }] }],
+      runConfig: {
+        model: "gpt-5.3-codex",
+      },
+      hooks: {
+        onUsage: async (cost, tokens) => {
+          usageEvents.push({ cost, tokens });
+        },
+      },
+    }, {
+      openConnection: (options = {}) => connectionMock.openConnection({
+        ...options,
+        notifications: [
+          {
+            method: "thread/tokenUsage/updated",
+            params: {
+              threadId: "thread-1",
+              turnId: "turn-1",
+              tokenUsage: {
+                total: {
+                  totalTokens: 114772,
+                  inputTokens: 114529,
+                  cachedInputTokens: 111488,
+                  outputTokens: 243,
+                  reasoningOutputTokens: 12,
+                },
+                modelContextWindow: 400000,
+              },
+            },
+          },
+          {
+            method: "turn/completed",
+            params: {
+              threadId: "thread-1",
+              turn: {
+                id: "turn-1",
+                status: "completed",
+                error: null,
+              },
+            },
+          },
+        ],
+      }),
+    });
+
+    const completed = await started.done;
+
+    assert.deepEqual(completed.result.usage, {
+      promptTokens: 114529,
+      completionTokens: 243,
+      cachedTokens: 111488,
+      cost: 0.02823415,
+    });
+    assert.deepEqual(usageEvents, [{
+      cost: "0.028234",
+      tokens: { prompt: 114529, completion: 243, cached: 111488 },
+    }]);
+  });
+
   it("retries a transient startup connection close before reporting failure", async () => {
     let openAttempts = 0;
     /** @type {Array<{ method: string, params: Record<string, unknown> }>} */
