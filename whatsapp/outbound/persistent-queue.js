@@ -166,7 +166,10 @@ function isOutboundEvent(value) {
         && isRecord(value.tokens)
         && typeof value.tokens.prompt === "number"
         && typeof value.tokens.completion === "number"
-        && typeof value.tokens.cached === "number";
+        && typeof value.tokens.cached === "number"
+        && (value.tokens.total === undefined || typeof value.tokens.total === "number")
+        && (value.tokens.reasoning === undefined || typeof value.tokens.reasoning === "number")
+        && (value.tokens.contextWindow === undefined || typeof value.tokens.contextWindow === "number");
     default:
       return false;
   }

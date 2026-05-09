@@ -774,6 +774,9 @@ describe("codex events", () => {
         promptTokens: 12227,
         completionTokens: 19,
         cachedTokens: 9600,
+        totalTokens: 12246,
+        reasoningTokens: 12,
+        contextWindow: 258400,
         cost: 0,
       },
     });

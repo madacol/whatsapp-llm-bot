@@ -7,6 +7,7 @@ import { vector } from "@electric-sql/pglite/vector";
 import { formatPlanPresentationText } from "../plan-presentation.js";
 import { formatActivitySummary } from "../tool-presentation-model.js";
 import { formatToolPresentationDisplay, formatToolPresentationSummary } from "../presentation/whatsapp.js";
+import { formatUsageEventText } from "../usage-formatting.js";
 import { initStore } from "../store.js";
 
 const MODELS_CACHE_PATH = path.resolve("data/models.json");
@@ -89,7 +90,7 @@ export function createChatTurn(overrides = {}) {
         break;
       case "usage":
         source = "usage";
-        content = `Cost: ${event.cost} | prompt=${event.tokens.prompt} cached=${event.tokens.cached} completion=${event.tokens.completion}`;
+        content = formatUsageEventText(event);
         break;
       case "file_change":
         source = "tool-call";

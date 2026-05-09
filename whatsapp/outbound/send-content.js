@@ -5,6 +5,7 @@ import { renderBlocks } from "../../message-renderer.js";
 import { formatPlanPresentationText } from "../../plan-presentation.js";
 import { formatToolFlowInspectText, formatToolFlowSummary } from "../../tool-flow-presentation.js";
 import { formatActivitySummary, shortenPath } from "../../tool-presentation-model.js";
+import { formatUsageEventText } from "../../usage-formatting.js";
 import {
   formatToolPresentationDisplay,
   formatToolPresentationInspect,
@@ -302,7 +303,7 @@ function renderOutboundEvent(event) {
     case "usage":
       return {
         source: "usage",
-        content: `Cost: ${event.cost} | prompt=${event.tokens.prompt} cached=${event.tokens.cached} completion=${event.tokens.completion}`,
+        content: formatUsageEventText(event),
       };
     default:
       return null;

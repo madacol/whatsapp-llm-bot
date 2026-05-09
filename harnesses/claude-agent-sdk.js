@@ -472,7 +472,7 @@ export function wrapHooksWithFallbacks(rawHooks) {
       safeHook("onFileChange", () => rawHooks.onFileChange(event), undefined),
     onContinuePrompt: () => safeHook("onContinuePrompt", () => rawHooks.onContinuePrompt(), true),
     onDepthLimit: () => safeHook("onDepthLimit", () => rawHooks.onDepthLimit(), false),
-    onUsage: (/** @type {string} */ cost, /** @type {{ prompt: number; completion: number; cached: number }} */ tokens) =>
+    onUsage: (/** @type {string} */ cost, /** @type {UsageTokens} */ tokens) =>
       safeHook("onUsage", () => rawHooks.onUsage(cost, tokens), undefined),
   };
 }

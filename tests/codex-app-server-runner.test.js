@@ -126,7 +126,7 @@ function createNotificationController() {
 describe("startCodexAppServerRun", () => {
   it("estimates Codex app-server usage cost from token usage updates", async () => {
     const connectionMock = createOpenConnectionMock();
-    /** @type {Array<{ cost: string, tokens: { prompt: number, completion: number, cached: number } }>} */
+    /** @type {Array<{ cost: string, tokens: UsageTokens }>} */
     const usageEvents = [];
 
     const started = await startCodexAppServerRun({
@@ -183,11 +183,21 @@ describe("startCodexAppServerRun", () => {
       promptTokens: 114529,
       completionTokens: 243,
       cachedTokens: 111488,
+      totalTokens: 114772,
+      reasoningTokens: 12,
+      contextWindow: 400000,
       cost: 0.02823415,
     });
     assert.deepEqual(usageEvents, [{
       cost: "0.028234",
-      tokens: { prompt: 114529, completion: 243, cached: 111488 },
+      tokens: {
+        prompt: 114529,
+        completion: 243,
+        cached: 111488,
+        total: 114772,
+        reasoning: 12,
+        contextWindow: 400000,
+      },
     }]);
   });
 
