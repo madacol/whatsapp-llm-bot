@@ -18,6 +18,35 @@ function createFileDeps(buffer) {
 }
 
 describe("resolvePathToContentBlock", () => {
+  it("rasterizes .svg attachments to PNG image blocks", async () => {
+    const svg = Buffer.from([
+      '<svg xmlns="http://www.w3.org/2000/svg" width="12" height="8">',
+      '<rect width="12" height="8" fill="#0f766e"/>',
+      "</svg>",
+    ].join(""));
+    /** @type {{ buffer: Buffer, mimeType: string | undefined, blockType: "image" | "video" | "audio" | "file", fileName: string | undefined } | null} */
+    let stored = null;
+    const block = await resolvePathToContentBlock("/repo/badge.svg", {}, {
+      statPath: async () => ({
+        isDirectory: () => false,
+        isFile: () => true,
+      }),
+      readFilePath: async () => svg,
+      writeStoredMedia: async (buffer, mimeType, blockType, fileName) => {
+        stored = { buffer, mimeType, blockType, fileName };
+        return "a".repeat(64) + ".png";
+      },
+    });
+
+    assert.equal(block.type, "image");
+    assert.equal(block.mime_type, "image/png");
+    assert.equal(block.path.endsWith(".png"), true);
+    assert.equal(stored?.mimeType, "image/png");
+    assert.equal(stored?.blockType, "image");
+    assert.equal(stored?.fileName, "badge.png");
+    assert.deepEqual(stored?.buffer.subarray(0, 8), Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
+  });
+
   it("normalizes .mp3 attachments to audio/mpeg for outbound sends", async () => {
     const block = await resolvePathToContentBlock("/repo/clip.mp3", {}, createFileDeps(Buffer.from("mp3-data")));
 
