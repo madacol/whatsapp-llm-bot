@@ -1,9 +1,10 @@
 import {
-  CODEX_APPROVAL_POLICIES,
   CODEX_SANDBOX_MODES,
   DEFAULT_CODEX_SANDBOX_MODE,
+  getCodexApprovalPolicyOptions,
   getCodexConfig,
   getEffectiveCodexSandboxMode,
+  isCodexApprovalPolicy,
   normalizeCodexPermissionsMode,
   updateCodexConfig,
 } from "./codex-config.js";
@@ -18,6 +19,7 @@ import { errorToString } from "../utils.js";
  *   cancelActiveQuery: (chatId: string | HarnessSessionRef) => boolean,
  *   readThread?: (threadId: string, includeTurns: boolean) => Promise<{ thread?: { id?: string, preview?: string, turns?: Array<{ status?: string, items?: Array<{ type?: string, content?: Array<{ type?: string, text?: string }> }> }> } }>,
  *   forkThread?: (threadId: string) => Promise<{ thread?: { id?: string } }>,
+ *   getApprovalPolicyOptions?: () => Promise<NonNullable<HarnessRunConfig["approvalPolicy"]>[]>,
  * }} CodexCommandDeps
  */
 
@@ -274,13 +276,27 @@ async function handleCodexHarnessCommand(input, deps) {
 
   const approvalMatch = trimmed.match(/^(?:approval|approvals)(?:\s+(.+))?$/i);
   if (approvalMatch) {
+    const approvalPolicyOptions = await getAvailableApprovalPolicyOptions(deps);
     const arg = approvalMatch[1]?.trim() ?? null;
     if (arg) {
-      await input.context.reply(contentEvent("tool-result", await handleApprovalCommand(input.chatId, arg.toLowerCase())));
+      await input.context.reply(contentEvent("tool-result", await handleApprovalCommand(input.chatId, arg.toLowerCase(), approvalPolicyOptions)));
       return true;
     }
     const config = await getCodexConfig(input.chatId);
-    const approvalPolicy = typeof config.approvalPolicy === "string" ? config.approvalPolicy : "default";
+    const currentPolicy = isCodexApprovalPolicy(config.approvalPolicy) ? config.approvalPolicy : "off";
+    /** @type {SelectOption[]} */
+    const approvalSelectOptions = [
+      ...approvalPolicyOptions.map((option) => ({ id: option, label: option })),
+      { id: "off", label: "Default" },
+    ];
+    const approvalChoice = await input.context.select("Choose Codex approval policy", approvalSelectOptions, {
+      currentId: currentPolicy,
+    });
+    if (approvalChoice && approvalChoice !== currentPolicy) {
+      await handleApprovalCommand(input.chatId, approvalChoice, approvalPolicyOptions);
+    }
+    const updatedConfig = await getCodexConfig(input.chatId);
+    const approvalPolicy = isCodexApprovalPolicy(updatedConfig.approvalPolicy) ? updatedConfig.approvalPolicy : "default";
     await input.context.reply(contentEvent("tool-result", `Codex approval policy: \`${approvalPolicy}\``));
     return true;
   }
@@ -362,17 +378,30 @@ async function handlePermissionsCommand(chatId, arg) {
 }
 
 /**
+ * @param {CodexCommandDeps} deps
+ * @returns {Promise<NonNullable<HarnessRunConfig["approvalPolicy"]>[]>}
+ */
+async function getAvailableApprovalPolicyOptions(deps) {
+  const options = deps.getApprovalPolicyOptions
+    ? await deps.getApprovalPolicyOptions()
+    : await getCodexApprovalPolicyOptions();
+  const filtered = options.filter(isCodexApprovalPolicy);
+  return filtered.length > 0 ? [...new Set(filtered)] : ["untrusted", "on-request", "never"];
+}
+
+/**
  * @param {string} chatId
  * @param {string} arg
+ * @param {NonNullable<HarnessRunConfig["approvalPolicy"]>[]} availablePolicies
  * @returns {Promise<string>}
  */
-async function handleApprovalCommand(chatId, arg) {
+async function handleApprovalCommand(chatId, arg, availablePolicies) {
   if (arg === "off" || arg === "default" || arg === "none") {
     await updateCodexConfig(chatId, { approvalPolicy: null });
     return "Codex approval policy reset to default.";
   }
-  if (!CODEX_APPROVAL_POLICIES.has(/** @type {NonNullable<HarnessRunConfig["approvalPolicy"]>} */ (arg))) {
-    return `Unknown approval policy \`${arg}\`. Use: ${[...CODEX_APPROVAL_POLICIES].join(", ")}`;
+  if (!isCodexApprovalPolicy(arg) || !availablePolicies.includes(arg)) {
+    return `Unknown approval policy \`${arg}\`. Use: ${availablePolicies.join(", ")}`;
   }
   await updateCodexConfig(chatId, { approvalPolicy: arg });
   return `Codex approval policy set to \`${arg}\``;
