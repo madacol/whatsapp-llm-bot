@@ -3,12 +3,14 @@ import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
+import { Resvg } from "@resvg/resvg-js";
 import { fileNameToMimeType } from "../attachment-paths.js";
 import { writeMedia } from "../media-store.js";
 
 const execFileAsync = promisify(execFile);
 
 const IMAGE_EXTENSIONS = new Set([".jpg", ".jpeg", ".png", ".webp", ".gif"]);
+const SVG_EXTENSION = ".svg";
 const AUDIO_EXTENSIONS = new Set([".mp3", ".ogg", ".m4a"]);
 const VIDEO_EXTENSIONS = new Set([".mp4", ".mov", ".webm"]);
 const OGGS_MAGIC = Buffer.from("OggS", "ascii");
@@ -80,6 +82,24 @@ function inferCanonicalAudioMimeType(filePath, buffer) {
     return "audio/ogg; codecs=opus";
   }
   return undefined;
+}
+
+/**
+ * @param {string} displayName
+ * @returns {string}
+ */
+function pngNameFromSvgName(displayName) {
+  const baseName = path.basename(displayName, path.extname(displayName)) || "image";
+  return `${baseName}.png`;
+}
+
+/**
+ * @param {Buffer} svgBuffer
+ * @returns {Buffer}
+ */
+function rasterizeSvgToPng(svgBuffer) {
+  const rendered = new Resvg(svgBuffer.toString("utf8")).render();
+  return Buffer.from(rendered.asPng());
 }
 
 /**
@@ -167,6 +187,12 @@ export async function resolvePathToContentBlock(inputPath, options = {}, deps = 
   }
 
   const buffer = await readFilePath(resolvedPath);
+  if (path.extname(resolvedPath).toLowerCase() === SVG_EXTENSION) {
+    const pngBuffer = rasterizeSvgToPng(buffer);
+    const storedPath = await writeStoredMedia(pngBuffer, "image/png", "image", pngNameFromSvgName(displayName));
+    return { type: "image", path: storedPath, mime_type: "image/png" };
+  }
+
   const kind = classifyFilePath(resolvedPath);
   const mimeType = kind === "audio"
     ? inferCanonicalAudioMimeType(resolvedPath, buffer) ?? fileNameToMimeType(displayName, undefined)
