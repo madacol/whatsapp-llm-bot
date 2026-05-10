@@ -40,6 +40,8 @@ export function mapCodexAppServerApprovalPolicy(approvalPolicy) {
   switch (approvalPolicy) {
     case "never":
       return "never";
+    case "on-failure":
+      return "on-failure";
     case "on-request":
       return "on-request";
     case "untrusted":

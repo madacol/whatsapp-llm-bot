@@ -212,6 +212,7 @@ function isLegacyClaudeModel(model) {
  *   }>,
  *   readThread?: Parameters<typeof createCodexCommandHandler>[0]["readThread"],
  *   forkThread?: Parameters<typeof createCodexCommandHandler>[0]["forkThread"],
+ *   getApprovalPolicyOptions?: Parameters<typeof createCodexCommandHandler>[0]["getApprovalPolicyOptions"],
  * }} CodexHarnessDeps
  */
 
@@ -230,6 +231,7 @@ export function createCodexHarness(deps = {}) {
     cancelActiveQuery: cancel,
     readThread: deps.readThread,
     forkThread: deps.forkThread,
+    getApprovalPolicyOptions: deps.getApprovalPolicyOptions,
   });
 
   return {

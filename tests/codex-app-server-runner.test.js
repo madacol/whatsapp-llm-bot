@@ -296,6 +296,10 @@ describe("startCodexAppServerRun", () => {
     ]);
   });
 
+  it("passes on-failure approval policy through unchanged", () => {
+    assert.equal(mapCodexAppServerApprovalPolicy("on-failure"), "on-failure");
+  });
+
   it("recovers a completed turn from thread history after a mid-run connection close", async () => {
     /** @type {Array<{ method: string, params: Record<string, unknown> }>} */
     const sendRequests = [];

@@ -107,6 +107,89 @@ describe("createCodexHarness", () => {
     assert.ok(replies[0]?.includes("Codex model set"));
   });
 
+  it("loads approval policy picker options on demand", async () => {
+    const db = await createTestDb();
+    await seedChat(db, "codex-approval-picker", { enabled: true });
+    /** @type {SelectOption[] | null} */
+    let seenOptions = null;
+    const harness = createCodexHarness({
+      getApprovalPolicyOptions: async () => ["untrusted", "on-failure", "on-request", "never"],
+    });
+    /** @type {string[]} */
+    const replies = [];
+
+    const handled = await harness.handleCommand({
+      chatId: "codex-approval-picker",
+      command: "approval",
+      context: /** @type {ExecuteActionContext} */ ({
+        chatId: "codex-approval-picker",
+        senderIds: [],
+        content: [],
+        getIsAdmin: async () => true,
+        send: async () => undefined,
+        reply: async (event) => {
+          replies.push(getReplyText(event));
+          return undefined;
+        },
+        reactToMessage: async () => {},
+        select: async (_question, options) => {
+          seenOptions = options;
+          return "on-failure";
+        },
+        confirm: async () => true,
+      }),
+    });
+
+    assert.equal(handled, true);
+    assert.deepEqual(seenOptions, [
+      { id: "untrusted", label: "untrusted" },
+      { id: "on-failure", label: "on-failure" },
+      { id: "on-request", label: "on-request" },
+      { id: "never", label: "never" },
+      { id: "off", label: "Default" },
+    ]);
+    assert.ok(replies[0]?.includes("Codex approval policy: `on-failure`"));
+
+    const { rows: [chat] } = await db.sql`
+      SELECT harness_config
+      FROM chats
+      WHERE chat_id = 'codex-approval-picker'
+    `;
+    assert.equal(chat.harness_config.codex.approvalPolicy, "on-failure");
+  });
+
+  it("validates approval policy arguments against on-demand options", async () => {
+    const db = await createTestDb();
+    await seedChat(db, "codex-approval-arg", { enabled: true });
+    const harness = createCodexHarness({
+      getApprovalPolicyOptions: async () => ["untrusted", "on-request"],
+    });
+    /** @type {string[]} */
+    const replies = [];
+
+    const handled = await harness.handleCommand({
+      chatId: "codex-approval-arg",
+      command: "approval never",
+      context: /** @type {ExecuteActionContext} */ ({
+        chatId: "codex-approval-arg",
+        senderIds: [],
+        content: [],
+        getIsAdmin: async () => true,
+        send: async () => undefined,
+        reply: async (event) => {
+          replies.push(getReplyText(event));
+          return undefined;
+        },
+        reactToMessage: async () => {},
+        select: async () => "",
+        confirm: async () => true,
+      }),
+    });
+
+    assert.equal(handled, true);
+    assert.ok(replies[0]?.includes("Unknown approval policy `never`. Use: untrusted, on-request"));
+  });
+
   it("forks the active Codex session and switches the saved session id", async () => {
     const harness = createCodexHarness({
       getAvailableModels: async () => TEST_CODEX_MODELS,
