@@ -63,6 +63,30 @@ export function createCodexEventDispatcher(input) {
   }
 
   /**
+   * @param {unknown} value
+   * @returns {value is Record<string, unknown>}
+   */
+  function isRecord(value) {
+    return !!value && typeof value === "object" && !Array.isArray(value);
+  }
+
+  /**
+   * @param {string | undefined} text
+   * @returns {Record<string, unknown> | null}
+   */
+  function parseJsonObject(text) {
+    if (typeof text !== "string" || text.trim().length === 0) {
+      return null;
+    }
+    try {
+      const parsed = JSON.parse(text);
+      return isRecord(parsed) ? parsed : null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
    * @param {import("./codex-events.js").CodexThreadEvent} threadEvent
    * @returns {void}
    */
@@ -92,6 +116,56 @@ export function createCodexEventDispatcher(input) {
         });
       }
     }
+  }
+
+  /**
+   * Standard Codex tool output reports spawned agents as
+   * `{ agent_id, nickname }` instead of collab `receiver_thread_ids`.
+   * @param {import("./codex-events.js").CodexToolEvent} toolEvent
+   * @returns {void}
+   */
+  function rememberStandardSpawnedAgent(toolEvent) {
+    if (toolEvent.name !== "spawn_agent" || toolEvent.status !== "completed") {
+      return;
+    }
+    const output = parseJsonObject(toolEvent.output);
+    const threadId = typeof output?.agent_id === "string" ? output.agent_id : null;
+    if (!threadId || subagentThreads.has(threadId)) {
+      return;
+    }
+    const agentNickname = typeof output?.nickname === "string" ? output.nickname : undefined;
+    subagentThreads.set(threadId, {
+      source: "subagent",
+      threadId,
+      ...(agentNickname !== undefined && { agentNickname }),
+    });
+  }
+
+  /**
+   * Standard Codex `wait_agent` output reports final messages as
+   * `{ status: { [threadId]: { completed: text } } }`.
+   * @param {import("./codex-events.js").CodexToolEvent} toolEvent
+   * @returns {import("./codex-events.js").CodexSubagentResponseEvent[]}
+   */
+  function extractStandardWaitAgentResponses(toolEvent) {
+    if (toolEvent.name !== "wait_agent" || toolEvent.status !== "completed") {
+      return [];
+    }
+    const output = parseJsonObject(toolEvent.output);
+    const status = isRecord(output?.status) ? output.status : null;
+    if (!status) {
+      return [];
+    }
+
+    /** @type {import("./codex-events.js").CodexSubagentResponseEvent[]} */
+    const responses = [];
+    for (const [threadId, state] of Object.entries(status)) {
+      if (!isRecord(state) || typeof state.completed !== "string" || state.completed.length === 0) {
+        continue;
+      }
+      responses.push({ threadId, text: state.completed });
+    }
+    return responses;
   }
 
   /**
@@ -154,6 +228,7 @@ export function createCodexEventDispatcher(input) {
     if (normalized.toolEvent) {
       const toolEvent = normalized.toolEvent;
       rememberSpawnedReceiverThreads(toolEvent);
+      rememberStandardSpawnedAgent(toolEvent);
       const currentPresentation = buildToolPresentation(
         toolEvent.name,
         toolEvent.arguments,
@@ -270,6 +345,10 @@ export function createCodexEventDispatcher(input) {
         if (activeTool) {
           activeTools.delete(toolEvent.id);
         }
+      }
+
+      for (const response of extractStandardWaitAgentResponses(toolEvent)) {
+        await emitSubagentResponse(response);
       }
     }
 

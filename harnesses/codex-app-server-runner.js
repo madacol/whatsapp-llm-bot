@@ -99,6 +99,28 @@ function extractFinalAgentMessage(turn) {
 }
 
 /**
+ * The chat session must remain pinned to the parent thread that started the
+ * turn. Sub-agent notifications carry their own thread ids and must not become
+ * the resumable chat session.
+ * @param {string | null} currentThreadId
+ * @param {import("./codex-events.js").NormalizedCodexEvent} normalized
+ * @returns {string | null}
+ */
+function resolveSessionThreadId(currentThreadId, normalized) {
+  const nextThreadId = normalized.sessionId;
+  if (!nextThreadId) {
+    return currentThreadId;
+  }
+  if (normalized.threadEvent?.kind === "subagent") {
+    return currentThreadId;
+  }
+  if (currentThreadId && nextThreadId !== currentThreadId) {
+    return currentThreadId;
+  }
+  return nextThreadId;
+}
+
+/**
  * @param {{
  *   openConnection: typeof openCodexAppServerConnection,
  *   env?: NodeJS.ProcessEnv,
@@ -317,9 +339,7 @@ export async function startCodexAppServerRun(input, deps = {}) {
           continue;
         }
 
-        if (normalized.sessionId) {
-          threadId = normalized.sessionId;
-        }
+        threadId = resolveSessionThreadId(threadId, normalized);
 
         if (isCurrentTurnStartedNotification(message)) {
           markTurnStarted();
