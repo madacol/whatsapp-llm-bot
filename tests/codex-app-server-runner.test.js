@@ -381,6 +381,7 @@ describe("startCodexAppServerRun", () => {
     const completed = await started.done;
 
     assert.equal(completed.sessionId, "thread-parent");
+    assert.deepEqual(completed.result.response, []);
     assert.deepEqual(responses, [{
       text: "SUBAGENT_QUICK_DEMO: hello from sub-agent visibility.",
       metadata: {

@@ -378,7 +378,6 @@ export function createCodexEventDispatcher(input) {
     if (normalized.assistantText) {
       const suppressAssistantText = await syntheticToolAdapter.handleAssistantText(normalized.assistantText);
       if (!suppressAssistantText) {
-        lastAssistantText = normalized.assistantText;
         const metadata = normalized.sessionId ? subagentThreads.get(normalized.sessionId) : undefined;
         if (metadata?.source === "subagent") {
           await emitSubagentResponse({
@@ -386,6 +385,7 @@ export function createCodexEventDispatcher(input) {
             text: normalized.assistantText,
           });
         } else {
+          lastAssistantText = normalized.assistantText;
           await input.hooks.onLlmResponse(normalized.assistantText, metadata);
         }
       }
