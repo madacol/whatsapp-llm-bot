@@ -219,10 +219,10 @@ export function normalizeCodexAppServerEvent(message) {
     return normalized;
   }
 
-  if (itemType === "mcpToolCall" || itemType === "dynamicToolCall" || itemType === "collabToolCall") {
+  if (itemType === "mcpToolCall" || itemType === "dynamicToolCall" || itemType === "collabToolCall" || itemType === "collabAgentToolCall") {
     const id = typeof item.id === "string" ? item.id : null;
     const name = typeof item.tool === "string"
-      ? itemType === "collabToolCall" ? normalizeCollabToolName(item.tool) : item.tool
+      ? itemType === "collabToolCall" || itemType === "collabAgentToolCall" ? normalizeCollabToolName(item.tool) : item.tool
       : null;
     if (id && name) {
       const output = itemType === "dynamicToolCall"
@@ -234,6 +234,7 @@ export function normalizeCodexAppServerEvent(message) {
         id,
         name,
         arguments: itemType === "collabToolCall"
+          || itemType === "collabAgentToolCall"
           ? extractCollabToolArguments(item)
           : isCodexEventRecord(item.arguments) ? item.arguments : {},
         status: method === "item/started"
@@ -243,7 +244,7 @@ export function normalizeCodexAppServerEvent(message) {
             : "completed",
         ...(output ? { output } : {}),
       };
-      if (itemType === "collabToolCall") {
+      if (itemType === "collabToolCall" || itemType === "collabAgentToolCall") {
         const subagentResponses = extractCollabSubagentResponses(item);
         if (subagentResponses.length > 0) {
           normalized.subagentResponses = subagentResponses;

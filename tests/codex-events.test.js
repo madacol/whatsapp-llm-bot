@@ -285,6 +285,39 @@ describe("codex events", () => {
     });
   });
 
+  it("normalizes current SDK-style collab agent tool calls", () => {
+    assert.deepEqual(normalizeCodexEvent({
+      type: "item.completed",
+      item: {
+        id: "item_3",
+        type: "collabAgentToolCall",
+        tool: "wait",
+        receiverThreadIds: ["thread-2"],
+        agentsStates: {
+          "thread-2": {
+            status: "completed",
+            message: "agent-probe-ok",
+          },
+        },
+        status: "completed",
+      },
+    }), {
+      sessionId: null,
+      toolEvent: {
+        id: "item_3",
+        name: "wait_agent",
+        arguments: {
+          receiver_thread_ids: ["thread-2"],
+        },
+        status: "completed",
+      },
+      subagentResponses: [{
+        threadId: "thread-2",
+        text: "agent-probe-ok",
+      }],
+    });
+  });
+
   it("normalizes todo_list items as update_plan tool activity", () => {
     assert.deepEqual(normalizeCodexEvent({
       type: "item.started",
@@ -867,6 +900,42 @@ describe("codex events", () => {
       subagentResponses: [{
         threadId: "thread-2",
         text: "agent-probe-ok",
+      }],
+    });
+  });
+
+  it("normalizes current Codex App Server collab agent tool calls", () => {
+    assert.deepEqual(normalizeCodexAppServerEvent({
+      method: "item/completed",
+      params: {
+        threadId: "thread-parent",
+        item: {
+          id: "item_3",
+          type: "collabAgentToolCall",
+          tool: "spawnAgent",
+          receiverThreadIds: ["thread-child"],
+          agentsStates: {
+            "thread-child": {
+              status: "completed",
+              message: "SUBAGENT_QUICK_DEMO: hello from sub-agent visibility.",
+            },
+          },
+          status: "completed",
+        },
+      },
+    }), {
+      sessionId: "thread-parent",
+      toolEvent: {
+        id: "item_3",
+        name: "spawn_agent",
+        arguments: {
+          receiver_thread_ids: ["thread-child"],
+        },
+        status: "completed",
+      },
+      subagentResponses: [{
+        threadId: "thread-child",
+        text: "SUBAGENT_QUICK_DEMO: hello from sub-agent visibility.",
       }],
     });
   });

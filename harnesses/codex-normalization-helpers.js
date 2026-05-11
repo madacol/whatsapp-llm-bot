@@ -168,8 +168,16 @@ export function extractCollabSubagentResponses(states) {
  */
 export function normalizeCollabToolName(toolName) {
   switch (toolName) {
+    case "spawnAgent":
+      return "spawn_agent";
+    case "sendInput":
+      return "send_input";
+    case "resumeAgent":
+      return "resume_agent";
     case "wait":
       return "wait_agent";
+    case "closeAgent":
+      return "close_agent";
     default:
       return toolName;
   }
@@ -189,10 +197,9 @@ export function extractCollabToolArguments(item) {
   if (Array.isArray(item.receiver_thread_ids) && item.receiver_thread_ids.length > 0) {
     args.receiver_thread_ids = item.receiver_thread_ids;
   }
-  if (Array.isArray(item.agents_states) && item.agents_states.length > 0) {
-    args.agents_states = item.agents_states;
+  if (Array.isArray(item.receiverThreadIds) && item.receiverThreadIds.length > 0) {
+    args.receiver_thread_ids = item.receiverThreadIds;
   }
-
   return args;
 }
 

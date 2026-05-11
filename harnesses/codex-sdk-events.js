@@ -193,7 +193,7 @@ export function normalizeCodexEvent(event) {
     return normalized;
   }
 
-  if (itemType === "collab_tool_call") {
+  if (itemType === "collab_tool_call" || itemType === "collabAgentToolCall") {
     const id = typeof item.id === "string" ? item.id : null;
     const name = typeof item.tool === "string" ? normalizeCollabToolName(item.tool) : null;
     if (id && name) {
@@ -207,7 +207,7 @@ export function normalizeCodexEvent(event) {
             ? "failed"
             : "completed",
       };
-      const subagentResponses = extractCollabSubagentResponses(item.agents_states);
+      const subagentResponses = extractCollabSubagentResponses(item);
       if (subagentResponses.length > 0) {
         normalized.subagentResponses = subagentResponses;
       }
