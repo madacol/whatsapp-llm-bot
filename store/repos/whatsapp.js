@@ -1,6 +1,5 @@
 import {
   normalizeWhatsAppOutboundQueueRow,
-  normalizeWhatsAppProjectPresentationCacheRow,
   normalizeWhatsAppWorkspacePresentationRow,
 } from "../normalizers.js";
 
@@ -17,13 +16,6 @@ import {
  * Internal WhatsApp persistence helpers shared by other repos.
  * @param {WhatsAppStoreDeps} deps
  * @returns {{
- *   persistWhatsAppProjectPresentationCache: (input: {
- *     projectId: string,
- *     cachedTopologyKind?: WhatsAppProjectTopologyKind,
- *     cachedCommunityChatId?: string | null,
- *     cachedMainWorkspaceId?: string | null,
- *   }) => Promise<WhatsAppProjectPresentationCacheRow>;
- *   ensureWhatsAppProjectPresentationCacheExists: (projectId: string) => Promise<void>;
  *   persistWhatsAppWorkspacePresentation: (input: {
  *     projectId: string,
  *     workspaceId: string,
@@ -43,64 +35,6 @@ import {
  */
 export function createWhatsAppStoreInternals({ db, ensureChatExists }) {
   return {
-    /**
-     * @param {{
-     *   projectId: string,
-     *   cachedTopologyKind?: WhatsAppProjectTopologyKind,
-     *   cachedCommunityChatId?: string | null,
-     *   cachedMainWorkspaceId?: string | null,
-     * }} input
-     * @returns {Promise<WhatsAppProjectPresentationCacheRow>}
-     */
-    async persistWhatsAppProjectPresentationCache({
-      projectId,
-      cachedTopologyKind = "groups",
-      cachedCommunityChatId = null,
-      cachedMainWorkspaceId = null,
-    }) {
-      if (cachedCommunityChatId) {
-        await ensureChatExists(cachedCommunityChatId);
-      }
-
-      const { rows: [row] } = await db.sql`
-        INSERT INTO whatsapp_project_presentation_cache (
-          project_id,
-          cached_topology_kind,
-          cached_community_chat_id,
-          cached_main_workspace_id
-        )
-        VALUES (
-          ${projectId},
-          ${cachedTopologyKind},
-          ${cachedCommunityChatId},
-          ${cachedMainWorkspaceId}
-        )
-        ON CONFLICT (project_id) DO UPDATE
-        SET
-          cached_topology_kind = EXCLUDED.cached_topology_kind,
-          cached_community_chat_id = EXCLUDED.cached_community_chat_id,
-          cached_main_workspace_id = EXCLUDED.cached_main_workspace_id
-        RETURNING *
-      `;
-      const cacheRow = normalizeWhatsAppProjectPresentationCacheRow(row);
-      if (!cacheRow) {
-        throw new Error(`Failed to normalize WhatsApp project presentation cache for ${projectId}.`);
-      }
-      return cacheRow;
-    },
-
-    /**
-     * @param {string} projectId
-     * @returns {Promise<void>}
-     */
-    async ensureWhatsAppProjectPresentationCacheExists(projectId) {
-      await db.sql`
-        INSERT INTO whatsapp_project_presentation_cache (project_id, cached_topology_kind)
-        VALUES (${projectId}, 'groups')
-        ON CONFLICT (project_id) DO NOTHING
-      `;
-    },
-
     /**
      * @param {{
      *   projectId: string,
@@ -226,9 +160,7 @@ export function createWhatsAppStoreInternals({ db, ensureChatExists }) {
  * @param {ReturnType<typeof createWhatsAppStoreInternals>} internals
  * @param {PGlite} db
  * @returns {Pick<Store,
- *   "getWhatsAppProjectPresentationCache"
- *   | "upsertWhatsAppProjectPresentationCache"
- *   | "getWhatsAppWorkspacePresentation"
+ *   "getWhatsAppWorkspacePresentation"
  *   | "getWhatsAppWorkspacePresentationByChat"
  *   | "listWhatsAppWorkspacePresentations"
  *   | "saveWhatsAppWorkspacePresentation"
@@ -239,32 +171,6 @@ export function createWhatsAppStoreInternals({ db, ensureChatExists }) {
  */
 export function createWhatsAppStore(internals, db) {
   return {
-    /**
-     * @param {string} projectId
-     * @returns {Promise<WhatsAppProjectPresentationCacheRow | null>}
-     */
-    async getWhatsAppProjectPresentationCache(projectId) {
-      const { rows: [row] } = await db.sql`
-        SELECT * FROM whatsapp_project_presentation_cache
-        WHERE project_id = ${projectId}
-        LIMIT 1
-      `;
-      return normalizeWhatsAppProjectPresentationCacheRow(row);
-    },
-
-    /**
-     * @param {{
-     *   projectId: string,
-     *   cachedTopologyKind?: WhatsAppProjectTopologyKind,
-     *   cachedCommunityChatId?: string | null,
-     *   cachedMainWorkspaceId?: string | null,
-     * }} input
-     * @returns {Promise<WhatsAppProjectPresentationCacheRow>}
-     */
-    async upsertWhatsAppProjectPresentationCache(input) {
-      return internals.persistWhatsAppProjectPresentationCache(input);
-    },
-
     /**
      * @param {string} workspaceId
      * @returns {Promise<WhatsAppWorkspacePresentationRow | null>}

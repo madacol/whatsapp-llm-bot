@@ -124,13 +124,6 @@ export async function getChatOrThrow(db, chatId) {
  *   bindChatToProject: (chatId: string, projectId: string) => Promise<ChatBindingRow>;
  *   bindChatToWorkspace: (chatId: string, workspaceId: string) => Promise<ChatBindingRow>;
  *   getChatBinding: (chatId: string) => Promise<ChatBindingRow | null>;
- *   getWhatsAppProjectPresentationCache: (projectId: string) => Promise<WhatsAppProjectPresentationCacheRow | null>;
- *   upsertWhatsAppProjectPresentationCache: (input: {
- *     projectId: string,
- *     cachedTopologyKind?: WhatsAppProjectTopologyKind,
- *     cachedCommunityChatId?: string | null,
- *     cachedMainWorkspaceId?: string | null,
- *   }) => Promise<WhatsAppProjectPresentationCacheRow>;
  *   getWhatsAppWorkspacePresentation: (workspaceId: string) => Promise<WhatsAppWorkspacePresentationRow | null>;
  *   getWhatsAppWorkspacePresentationByChat: (chatId: string) => Promise<WhatsAppWorkspacePresentationRow | null>;
  *   listWhatsAppWorkspacePresentations: (projectId: string) => Promise<WhatsAppWorkspacePresentationRow[]>;
@@ -190,7 +183,6 @@ export async function initStore(injectedDb) {
   const projectStore = createProjectStore({
     db,
     ensureChatExists,
-    ensureWhatsAppProjectPresentationCacheExists: whatsappInternals.ensureWhatsAppProjectPresentationCacheExists,
     getRequiredWhatsAppWorkspacePresentation: whatsappInternals.getRequiredWhatsAppWorkspacePresentation,
   });
 

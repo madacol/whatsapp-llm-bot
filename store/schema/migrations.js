@@ -22,25 +22,6 @@ export async function runStoreMigrations(db) {
         ALTER TABLE repos RENAME TO projects;
       END IF;
 
-      IF EXISTS (
-        SELECT 1 FROM information_schema.tables
-        WHERE table_schema = 'public' AND table_name = 'whatsapp_repo_presentations'
-      ) AND NOT EXISTS (
-        SELECT 1 FROM information_schema.tables
-        WHERE table_schema = 'public' AND table_name = 'whatsapp_project_presentations'
-      ) THEN
-        ALTER TABLE whatsapp_repo_presentations RENAME TO whatsapp_project_presentations;
-      END IF;
-
-      IF EXISTS (
-        SELECT 1 FROM information_schema.tables
-        WHERE table_schema = 'public' AND table_name = 'whatsapp_project_presentations'
-      ) AND NOT EXISTS (
-        SELECT 1 FROM information_schema.tables
-        WHERE table_schema = 'public' AND table_name = 'whatsapp_project_presentation_cache'
-      ) THEN
-        ALTER TABLE whatsapp_project_presentations RENAME TO whatsapp_project_presentation_cache;
-      END IF;
     END $$`;
 
     await db.sql`DO $$ BEGIN
@@ -72,46 +53,6 @@ export async function runStoreMigrations(db) {
         WHERE table_schema = 'public' AND table_name = 'chat_bindings' AND column_name = 'project_id'
       ) THEN
         ALTER TABLE chat_bindings RENAME COLUMN repo_id TO project_id;
-      END IF;
-
-      IF EXISTS (
-        SELECT 1 FROM information_schema.columns
-        WHERE table_schema = 'public' AND table_name = 'whatsapp_project_presentation_cache' AND column_name = 'repo_id'
-      ) AND NOT EXISTS (
-        SELECT 1 FROM information_schema.columns
-        WHERE table_schema = 'public' AND table_name = 'whatsapp_project_presentation_cache' AND column_name = 'project_id'
-      ) THEN
-        ALTER TABLE whatsapp_project_presentation_cache RENAME COLUMN repo_id TO project_id;
-      END IF;
-
-      IF EXISTS (
-        SELECT 1 FROM information_schema.columns
-        WHERE table_schema = 'public' AND table_name = 'whatsapp_project_presentation_cache' AND column_name = 'topology_kind'
-      ) AND NOT EXISTS (
-        SELECT 1 FROM information_schema.columns
-        WHERE table_schema = 'public' AND table_name = 'whatsapp_project_presentation_cache' AND column_name = 'cached_topology_kind'
-      ) THEN
-        ALTER TABLE whatsapp_project_presentation_cache RENAME COLUMN topology_kind TO cached_topology_kind;
-      END IF;
-
-      IF EXISTS (
-        SELECT 1 FROM information_schema.columns
-        WHERE table_schema = 'public' AND table_name = 'whatsapp_project_presentation_cache' AND column_name = 'community_chat_id'
-      ) AND NOT EXISTS (
-        SELECT 1 FROM information_schema.columns
-        WHERE table_schema = 'public' AND table_name = 'whatsapp_project_presentation_cache' AND column_name = 'cached_community_chat_id'
-      ) THEN
-        ALTER TABLE whatsapp_project_presentation_cache RENAME COLUMN community_chat_id TO cached_community_chat_id;
-      END IF;
-
-      IF EXISTS (
-        SELECT 1 FROM information_schema.columns
-        WHERE table_schema = 'public' AND table_name = 'whatsapp_project_presentation_cache' AND column_name = 'main_workspace_id'
-      ) AND NOT EXISTS (
-        SELECT 1 FROM information_schema.columns
-        WHERE table_schema = 'public' AND table_name = 'whatsapp_project_presentation_cache' AND column_name = 'cached_main_workspace_id'
-      ) THEN
-        ALTER TABLE whatsapp_project_presentation_cache RENAME COLUMN main_workspace_id TO cached_main_workspace_id;
       END IF;
 
       IF EXISTS (
@@ -162,16 +103,6 @@ export async function runStoreMigrations(db) {
         binding_kind TEXT NOT NULL,
         project_id TEXT REFERENCES projects(project_id),
         workspace_id TEXT REFERENCES workspaces(workspace_id) UNIQUE,
-        timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-      );
-    `;
-
-    await db.sql`
-      CREATE TABLE IF NOT EXISTS whatsapp_project_presentation_cache (
-        project_id TEXT PRIMARY KEY,
-        cached_topology_kind TEXT NOT NULL DEFAULT 'groups',
-        cached_community_chat_id VARCHAR(50) REFERENCES chats(chat_id),
-        cached_main_workspace_id TEXT,
         timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
     `;
@@ -276,12 +207,6 @@ export async function runStoreMigrations(db) {
       WHERE binding_kind = 'repo'
     `;
 
-    await db.sql`
-      INSERT INTO whatsapp_project_presentation_cache (project_id, cached_topology_kind)
-      SELECT DISTINCT project_id, 'groups'
-      FROM workspaces
-      ON CONFLICT (project_id) DO NOTHING
-    `;
     await db.sql`
       INSERT INTO whatsapp_workspace_presentations (
         workspace_id,
@@ -421,6 +346,9 @@ export async function runStoreMigrations(db) {
       db.sql`ALTER TABLE projects ALTER COLUMN control_chat_id DROP NOT NULL`,
       db.sql`ALTER TABLE projects DROP CONSTRAINT IF EXISTS projects_name_key`,
       db.sql`ALTER TABLE projects DROP CONSTRAINT IF EXISTS repos_name_key`,
+      db.sql`DROP TABLE IF EXISTS whatsapp_project_presentation_cache`,
+      db.sql`DROP TABLE IF EXISTS whatsapp_project_presentations`,
+      db.sql`DROP TABLE IF EXISTS whatsapp_repo_presentations`,
     ]);
     await db.sql`UPDATE workspaces SET workspace_chat_subject = name WHERE workspace_chat_subject IS NULL`;
     await db.sql`
