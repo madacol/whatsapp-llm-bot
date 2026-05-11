@@ -34,6 +34,8 @@ export function createCodexEventDispatcher(input) {
   const reasoningState = createCodexReasoningState();
   /** @type {Map<string, { handle?: MessageHandle, presentation: import("../tool-presentation-model.js").ToolPresentation, flowKey?: string }>} */
   const activeTools = new Map();
+  /** @type {Map<string, string[]>} */
+  const activeToolIdsByCorrelationKey = new Map();
   /** @type {Map<string, { handle?: MessageHandle, state: import("../tool-flow-presentation.js").ToolFlowState }>} */
   const activeFlows = new Map();
   /** @type {Map<string, LlmResponseMetadata>} */
@@ -87,6 +89,65 @@ export function createCodexEventDispatcher(input) {
     } catch {
       return null;
     }
+  }
+
+  /**
+   * Some Codex transports report the started and completed records for the
+   * same tool with different item ids. Correlate by the semantic call shape so
+   * completion updates the visible started message instead of rendering a
+   * second identical tool line.
+   * @param {import("./codex-events.js").CodexToolEvent} toolEvent
+   * @returns {string}
+   */
+  function getToolCorrelationKey(toolEvent) {
+    return `${toolEvent.name}:${JSON.stringify(toolEvent.arguments)}`;
+  }
+
+  /**
+   * @param {import("./codex-events.js").CodexToolEvent} toolEvent
+   * @returns {void}
+   */
+  function rememberActiveToolCorrelation(toolEvent) {
+    const key = getToolCorrelationKey(toolEvent);
+    const ids = activeToolIdsByCorrelationKey.get(key) ?? [];
+    ids.push(toolEvent.id);
+    activeToolIdsByCorrelationKey.set(key, ids);
+  }
+
+  /**
+   * @param {import("./codex-events.js").CodexToolEvent} toolEvent
+   * @returns {string | undefined}
+   */
+  function consumeActiveToolCorrelation(toolEvent) {
+    const key = getToolCorrelationKey(toolEvent);
+    const ids = activeToolIdsByCorrelationKey.get(key);
+    if (!ids || ids.length === 0) {
+      return undefined;
+    }
+    const id = ids.shift();
+    if (ids.length === 0) {
+      activeToolIdsByCorrelationKey.delete(key);
+    }
+    return id;
+  }
+
+  /**
+   * @param {import("./codex-events.js").CodexToolEvent} toolEvent
+   * @param {string} id
+   * @returns {void}
+   */
+  function forgetActiveToolCorrelation(toolEvent, id) {
+    const key = getToolCorrelationKey(toolEvent);
+    const ids = activeToolIdsByCorrelationKey.get(key);
+    if (!ids) {
+      return;
+    }
+    const nextIds = ids.filter((candidate) => candidate !== id);
+    if (nextIds.length === 0) {
+      activeToolIdsByCorrelationKey.delete(key);
+      return;
+    }
+    activeToolIdsByCorrelationKey.set(key, nextIds);
   }
 
   /**
@@ -325,11 +386,26 @@ export function createCodexEventDispatcher(input) {
             handle,
             presentation: currentPresentation,
           });
+          rememberActiveToolCorrelation(toolEvent);
         }
         await input.hooks.onPaused();
         await input.hooks.onComposing();
       } else {
-        let activeTool = activeTools.get(toolEvent.id);
+        let activeToolId = toolEvent.id;
+        let activeTool = activeTools.get(activeToolId);
+        if (activeTool) {
+          forgetActiveToolCorrelation(toolEvent, activeToolId);
+        }
+        if (!activeTool) {
+          const correlatedToolId = consumeActiveToolCorrelation(toolEvent);
+          if (correlatedToolId) {
+            const correlatedTool = activeTools.get(correlatedToolId);
+            if (correlatedTool) {
+              activeToolId = correlatedToolId;
+              activeTool = correlatedTool;
+            }
+          }
+        }
         if (!activeTool) {
           const toolCall = {
             id: toolEvent.id,
@@ -360,7 +436,7 @@ export function createCodexEventDispatcher(input) {
           }
         }
         if (activeTool) {
-          activeTools.delete(toolEvent.id);
+          activeTools.delete(activeToolId);
         }
       }
 
