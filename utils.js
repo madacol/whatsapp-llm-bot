@@ -1,12 +1,14 @@
 import {
   existsSync,
+  lstatSync,
   mkdirSync,
   mkdtempSync,
+  readlinkSync,
   rmSync,
   symlinkSync,
 } from "node:fs";
 import { homedir, tmpdir } from "node:os";
-import { resolve } from "node:path";
+import { dirname, resolve } from "node:path";
 import { ensureChatDirs, getChatRootDir, getChatWorkspaceDir } from "./chat-paths.js";
 import config from "./config.js";
 import { formatCommandInspectText as formatWhatsappCommandInspectText } from "./presentation/whatsapp.js";
@@ -69,17 +71,38 @@ function sanitizeWorkspaceName(chatName) {
 }
 
 /**
- * Build the preferred workspace directory name for a chat.
- * The raw chat ID stays in the suffix so the path remains stable and unique.
+ * Build a collision-safe readable workspace link name.
  * @param {string} chatId
  * @param {string | null | undefined} chatName
+ * @param {string} linksDir
+ * @param {string} targetPath
  * @returns {string}
  */
-function getWorkspaceDirName(chatId, chatName) {
+function getWorkspaceLinkName(chatId, chatName, linksDir, targetPath) {
   const sanitizedChatName = sanitizeWorkspaceName(chatName);
-  return sanitizedChatName
-    ? `${sanitizedChatName}${WORKSPACE_NAME_DELIMITER}${chatId}`
-    : chatId;
+  if (!sanitizedChatName) return chatId;
+
+  const preferredName = sanitizedChatName;
+  const preferredPath = resolve(linksDir, preferredName);
+  if (!existsSync(preferredPath) || isSymlinkTo(preferredPath, targetPath)) {
+    return preferredName;
+  }
+
+  return `${sanitizedChatName}${WORKSPACE_NAME_DELIMITER}${chatId}`;
+}
+
+/**
+ * @param {string} linkPath
+ * @param {string} targetPath
+ * @returns {boolean}
+ */
+function isSymlinkTo(linkPath, targetPath) {
+  try {
+    if (!lstatSync(linkPath).isSymbolicLink()) return false;
+    return resolve(dirname(linkPath), readlinkSync(linkPath)) === targetPath;
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -114,7 +137,7 @@ export function getChatWorkDir(chatId, explicitCwd, chatName) {
   mkdirSync(getChatRootDir(chatId), { recursive: true });
   ensureChatDirs(chatId);
 
-  const linkPath = resolve(workspacesDir, getWorkspaceDirName(chatId, chatName));
+  const linkPath = resolve(workspacesDir, getWorkspaceLinkName(chatId, chatName, workspacesDir, workspaceDir));
   createDirectorySymlinkIfMissing(linkPath, workspaceDir);
   return workspaceDir;
 }

@@ -60,7 +60,7 @@ describe("getChatWorkDir", () => {
   it("uses the chat ID as the canonical chat folder", async () => {
     const chatId = "12345@g.us";
     const workdir = getChatWorkDir(chatId, undefined, "Family / Planning: 2026");
-    const readableLink = path.join(tempWorkspacesDir, "Family Planning 2026--12345@g.us");
+    const readableLink = path.join(tempWorkspacesDir, "Family Planning 2026");
 
     assert.equal(workdir, path.join(tempChatDir, chatId, "workspace"));
     assert.ok(fs.existsSync(workdir));
@@ -75,6 +75,19 @@ describe("getChatWorkDir", () => {
     assert.ok(fs.existsSync(getChatEtcDir(chatId)));
     assert.equal((await fsp.lstat(readableLink)).isSymbolicLink(), true);
     assert.equal(path.resolve(tempWorkspacesDir, await fsp.readlink(readableLink)), workdir);
+  });
+
+  it("adds the chat ID to the readable link only when the chat name conflicts", async () => {
+    const existingTarget = path.join(tempChatDir, "existing-chat", "workspace");
+    await fsp.mkdir(existingTarget, { recursive: true });
+    await fsp.symlink(existingTarget, path.join(tempWorkspacesDir, "Family Chat"), "dir");
+
+    const workdir = getChatWorkDir("12345@g.us", undefined, "Family Chat");
+    const fallbackLink = path.join(tempWorkspacesDir, "Family Chat--12345@g.us");
+
+    assert.equal(workdir, path.join(tempChatDir, "12345@g.us", "workspace"));
+    assert.equal((await fsp.lstat(fallbackLink)).isSymbolicLink(), true);
+    assert.equal(path.resolve(tempWorkspacesDir, await fsp.readlink(fallbackLink)), workdir);
   });
 
   it("returns the canonical workspace even when the current call has no chat name", async () => {
