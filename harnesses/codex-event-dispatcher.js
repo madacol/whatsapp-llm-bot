@@ -139,11 +139,13 @@ export function createCodexEventDispatcher(input) {
     }
     const output = parseJsonObject(toolEvent.output);
     const threadId = typeof output?.agent_id === "string" ? output.agent_id : null;
-    if (!threadId || subagentThreads.has(threadId)) {
+    if (!threadId) {
       return;
     }
     const agentNickname = typeof output?.nickname === "string" ? output.nickname : undefined;
+    const existing = subagentThreads.get(threadId);
     subagentThreads.set(threadId, {
+      ...existing,
       source: "subagent",
       threadId,
       ...(agentNickname !== undefined && { agentNickname }),
