@@ -308,6 +308,91 @@ describe("startCodexAppServerRun", () => {
     assert.equal(completed.sessionId, "thread-parent");
   });
 
+  it("routes lower-case sub-agent child messages with sub-agent metadata", async () => {
+    /** @type {Array<{ text: string, metadata?: LlmResponseMetadata }>} */
+    const responses = [];
+
+    const started = await startCodexAppServerRun({
+      chatId: "chat-1",
+      prompt: "Continue",
+      messages: [{ role: "user", content: [{ type: "text", text: "Continue" }] }],
+      sessionId: "thread-parent",
+      hooks: {
+        onLlmResponse: async (text, metadata) => {
+          responses.push({ text, ...(metadata !== undefined && { metadata }) });
+        },
+      },
+    }, {
+      openConnection: async () => ({
+        async sendRequest(method) {
+          if (method === "thread/resume") {
+            return { thread: { id: "thread-parent" } };
+          }
+          if (method === "turn/start") {
+            return { turn: { id: "turn-1" } };
+          }
+          return {};
+        },
+        notifications: (async function* () {
+          yield {
+            method: "thread/started",
+            params: {
+              thread: {
+                id: "thread-child",
+                source: {
+                  subagent: {
+                    thread_spawn: {
+                      parent_thread_id: "thread-parent",
+                      agent_nickname: "Bernoulli",
+                      agent_role: "default",
+                    },
+                  },
+                },
+              },
+            },
+          };
+          yield {
+            method: "item/completed",
+            params: {
+              threadId: "thread-child",
+              item: {
+                id: "item-child-message",
+                type: "agentMessage",
+                text: "SUBAGENT_QUICK_DEMO: hello from sub-agent visibility.",
+              },
+            },
+          };
+          yield {
+            method: "turn/completed",
+            params: {
+              threadId: "thread-parent",
+              turn: {
+                id: "turn-1",
+                status: "completed",
+                error: null,
+              },
+            },
+          };
+        })(),
+        close: async () => {},
+      }),
+    });
+
+    const completed = await started.done;
+
+    assert.equal(completed.sessionId, "thread-parent");
+    assert.deepEqual(responses, [{
+      text: "SUBAGENT_QUICK_DEMO: hello from sub-agent visibility.",
+      metadata: {
+        source: "subagent",
+        threadId: "thread-child",
+        parentThreadId: "thread-parent",
+        agentNickname: "Bernoulli",
+        agentRole: "default",
+      },
+    }]);
+  });
+
   it("passes on-request approval policy through unchanged", async () => {
     const connectionMock = createOpenConnectionMock();
 

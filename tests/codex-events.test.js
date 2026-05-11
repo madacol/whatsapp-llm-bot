@@ -12,6 +12,7 @@ describe("codex events", () => {
     assert.equal(extractCodexSessionId({ thread_id: "thread-1" }), "thread-1");
     assert.equal(extractCodexSessionId({ session_id: "session-1" }), "session-1");
     assert.equal(extractCodexSessionId({ item: { thread: { id: "thread-2" } } }), "thread-2");
+    assert.equal(extractCodexSessionId({ type: "session_meta", payload: { id: "thread-3" } }), "thread-3");
   });
 
   it("extracts nested text from event payloads", () => {
@@ -116,6 +117,33 @@ describe("codex events", () => {
         arguments: { message: "hello" },
         status: "completed",
         output: "agent-pass-2",
+      },
+    });
+  });
+
+  it("normalizes SDK session metadata for lower-case sub-agent sources", () => {
+    assert.deepEqual(normalizeCodexEvent({
+      type: "session_meta",
+      payload: {
+        id: "thread-child",
+        source: {
+          subagent: {
+            thread_spawn: {
+              parent_thread_id: "thread-parent",
+              agent_nickname: "Bernoulli",
+              agent_role: "default",
+            },
+          },
+        },
+      },
+    }), {
+      sessionId: "thread-child",
+      threadEvent: {
+        id: "thread-child",
+        kind: "subagent",
+        parentThreadId: "thread-parent",
+        agentNickname: "Bernoulli",
+        agentRole: "default",
       },
     });
   });
@@ -774,6 +802,37 @@ describe("codex events", () => {
         parentThreadId: "thread-parent",
         agentNickname: "Mill",
         agentRole: "worker",
+      },
+    });
+  });
+
+  it("normalizes lower-case Codex App Server sub-agent thread sources from session metadata", () => {
+    assert.deepEqual(normalizeCodexAppServerEvent({
+      method: "thread/started",
+      params: {
+        thread: {
+          id: "thread-child",
+          source: {
+            subagent: {
+              thread_spawn: {
+                parent_thread_id: "thread-parent",
+                depth: 1,
+                agent_path: null,
+                agent_nickname: "Bernoulli",
+                agent_role: "default",
+              },
+            },
+          },
+        },
+      },
+    }), {
+      sessionId: "thread-child",
+      threadEvent: {
+        id: "thread-child",
+        kind: "subagent",
+        parentThreadId: "thread-parent",
+        agentNickname: "Bernoulli",
+        agentRole: "default",
       },
     });
   });

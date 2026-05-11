@@ -20,6 +20,9 @@ export function extractCodexSessionId(event) {
   if (!isCodexEventRecord(event)) {
     return null;
   }
+  if (isCodexEventRecord(event.payload) && typeof event.payload.id === "string") {
+    return event.payload.id;
+  }
   if (typeof event.thread_id === "string") {
     return event.thread_id;
   }
@@ -36,6 +39,38 @@ export function extractCodexSessionId(event) {
     return event.item.thread.id;
   }
   return null;
+}
+
+/**
+ * @param {unknown} source
+ * @returns {Record<string, unknown> | null}
+ */
+function extractSubagentSource(source) {
+  if (!isCodexEventRecord(source)) {
+    return null;
+  }
+  const subagent = source.subagent ?? source.subAgent;
+  return isCodexEventRecord(subagent) ? subagent : null;
+}
+
+/**
+ * @param {Record<string, unknown>} payload
+ * @returns {import("./codex-events.js").CodexThreadEvent | null}
+ */
+function extractSessionMetaSubagentThreadEvent(payload) {
+  const id = typeof payload.id === "string" ? payload.id : null;
+  const subagent = extractSubagentSource(payload.source);
+  const threadSpawn = isCodexEventRecord(subagent?.thread_spawn) ? subagent.thread_spawn : null;
+  if (!id || !threadSpawn) {
+    return null;
+  }
+  return {
+    id,
+    kind: "subagent",
+    ...(typeof threadSpawn.parent_thread_id === "string" && { parentThreadId: threadSpawn.parent_thread_id }),
+    ...(typeof threadSpawn.agent_nickname === "string" && { agentNickname: threadSpawn.agent_nickname }),
+    ...(typeof threadSpawn.agent_role === "string" && { agentRole: threadSpawn.agent_role }),
+  };
 }
 
 /**
@@ -57,6 +92,14 @@ export function normalizeCodexEvent(event) {
   const eventType = typeof event.type === "string" ? event.type : null;
   const item = isCodexEventRecord(event.item) ? event.item : null;
   const itemType = item && typeof item.type === "string" ? item.type : null;
+
+  if (eventType === "session_meta" && isCodexEventRecord(event.payload)) {
+    const threadEvent = extractSessionMetaSubagentThreadEvent(event.payload);
+    if (threadEvent) {
+      normalized.threadEvent = threadEvent;
+    }
+    return normalized;
+  }
 
   if (eventType === "turn.completed") {
     normalized.usage = normalizeCodexUsage(event, event);
