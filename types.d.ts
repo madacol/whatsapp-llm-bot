@@ -374,6 +374,7 @@ type ChatTransport = {
 type WorkspacePresentationPort = {
   ensureWorkspaceVisible: (input: {
     projectId: string;
+    projectName: string;
     workspaceId: string;
     workspaceName: string;
     sourceChatName?: string;

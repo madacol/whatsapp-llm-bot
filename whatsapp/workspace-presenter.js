@@ -6,12 +6,9 @@ import { formatToolPresentationDisplay, formatToolPresentationSummary } from "..
 import { contentEvent } from "../outbound-events.js";
 import { formatUsageEventText } from "../usage-formatting.js";
 import {
-  buildCommunityWorkspaceSurfaceName,
   buildWorkspaceSurfaceName,
   createWhatsAppWorkspaceTopology,
-  resolveWorkspaceRole,
 } from "./workspace-topology.js";
-import { readWhatsAppProjectPresentationCache } from "./project-presentation-cache.js";
 
 const SOURCE_PREFIX = /** @type {Record<MessageSource, string>} */ ({
   llm: "🤖",
@@ -96,16 +93,10 @@ function stringifyEvent(event) {
  * It owns whether a workspace is rendered as a flat group or as a
  * community-linked subgroup.
  * @param {{
- *   transport: ChatTransport & {
- *     getGroupLinkedParent?: (chatId: string) => Promise<string | null>,
- *     linkExistingGroupToCommunity: (chatId: string, communityChatId: string) => Promise<void>,
- *   },
+ *   transport: ChatTransport,
  *   store: Pick<Awaited<ReturnType<typeof import("../store.js").initStore>>,
- *     "getWhatsAppProjectPresentationCache"
- *     | "getWhatsAppWorkspacePresentation"
- *     | "listWhatsAppWorkspacePresentations"
- *     | "saveWhatsAppWorkspacePresentation"
- *     | "upsertWhatsAppProjectPresentationCache">,
+ *     "getWhatsAppWorkspacePresentation"
+ *     | "saveWhatsAppWorkspacePresentation">,
  * }} input
  * @returns {WorkspacePresentationPort}
  */
@@ -138,29 +129,22 @@ export function createWhatsAppWorkspacePresenter({ transport, store }) {
 
   /** @type {WorkspacePresentationPort} */
   const presenter = {
-    async ensureWorkspaceVisible({ projectId, workspaceId, workspaceName, sourceChatName, sourceChatId, requesterJids }) {
-      const projectPresentation = readWhatsAppProjectPresentationCache(
-        await store.getWhatsAppProjectPresentationCache(projectId),
-      );
+    async ensureWorkspaceVisible({ projectId, projectName, workspaceId, workspaceName, sourceChatId, requesterJids }) {
       const existing = await store.getWhatsAppWorkspacePresentation(workspaceId);
 
       if (existing) {
-        const role = existing.role ?? resolveWorkspaceRole(projectPresentation, workspaceId);
-        const linkedCommunityChatId = existing.linked_community_chat_id ?? projectPresentation?.communityChatId ?? null;
+        const role = existing.role ?? /** @type {WhatsAppWorkspacePresentationRole} */ ("workspace");
+        const linkedCommunityChatId = existing.linked_community_chat_id ?? null;
         if (linkedCommunityChatId && role === "main") {
-          if (!linkedCommunityChatId) {
-            throw new Error(`Community presentation for project ${projectId} is missing its community chat id.`);
-          }
           return topology.syncMainWorkspaceCommunitySurface({
             projectId,
+            projectName,
             workspaceId,
             existingWorkspacePresentation: existing,
             communityChatId: linkedCommunityChatId,
           });
         }
-        const surfaceName = linkedCommunityChatId
-          ? buildCommunityWorkspaceSurfaceName(workspaceName, role)
-          : buildWorkspaceSurfaceName(workspaceName, sourceChatName);
+        const surfaceName = buildWorkspaceSurfaceName(projectName, workspaceName, { projectId, role });
         if (transport.renameGroup) {
           await transport.renameGroup(existing.workspace_chat_id, surfaceName);
         }
@@ -190,9 +174,9 @@ export function createWhatsAppWorkspacePresenter({ transport, store }) {
 
       return topology.provisionWorkspaceSurface({
         projectId,
+        projectName,
         workspaceId,
         workspaceName,
-        sourceChatName,
         sourceChatId,
         requesterJids,
       });

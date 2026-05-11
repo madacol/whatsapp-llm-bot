@@ -1,82 +1,59 @@
-import { createWhatsAppLiveWorkspaceTopologyResolver } from "./live-workspace-topology-resolver.js";
-
 /**
- * @param {string} workspaceName
- * @param {string | undefined} sourceChatName
+ * @param {string} value
  * @returns {string}
  */
-export function buildWorkspaceSurfaceName(workspaceName, sourceChatName) {
-  const trimmedChatName = sourceChatName?.trim();
-  if (!trimmedChatName) {
-    return workspaceName;
-  }
-  return `[${workspaceName}] ${trimmedChatName}`;
+function normalizeTitlePart(value) {
+  return value.trim().replace(/\s+/g, " ");
 }
 
 /**
+ * @param {string} projectName
  * @param {string} projectId
- * @param {string | undefined} sourceChatName
  * @returns {string}
  */
-export function buildCommunitySurfaceName(projectId, sourceChatName) {
-  const trimmedChatName = sourceChatName?.trim();
-  return trimmedChatName || `project-${projectId}`;
-}
-
-/**
- * @param {string} projectId
- * @param {string | undefined} sourceChatName
- * @returns {string}
- */
-export function buildCommunityDescription(projectId, sourceChatName) {
-  return `Workspace hub for ${buildCommunitySurfaceName(projectId, sourceChatName)}.`;
+function resolveProjectTitle(projectName, projectId) {
+  return normalizeTitlePart(projectName) || normalizeTitlePart(projectId) || "project";
 }
 
 /**
  * @param {string} workspaceName
- * @param {WhatsAppWorkspacePresentationRole} role
- * @returns {string}
+ * @returns {boolean}
  */
-export function buildCommunityWorkspaceSurfaceName(workspaceName, role) {
-  if (role === "main") {
-    return "main";
-  }
-  return workspaceName;
+function isMainWorkspaceName(workspaceName) {
+  return normalizeTitlePart(workspaceName).toLowerCase() === "main";
 }
 
 /**
- * @param {WhatsAppProjectPresentationCacheView | null} projectPresentation
- * @param {string} workspaceId
- * @returns {WhatsAppWorkspacePresentationRole}
+ * @param {string} projectName
+ * @param {string} workspaceName
+ * @param {{ projectId?: string, role?: WhatsAppWorkspacePresentationRole }} [options]
+ * @returns {string}
  */
-export function resolveWorkspaceRole(projectPresentation, workspaceId) {
-  if (projectPresentation?.topologyKind === "community" && projectPresentation.mainWorkspaceId === workspaceId) {
-    return "main";
+export function buildWorkspaceSurfaceName(projectName, workspaceName, options = {}) {
+  const projectTitle = resolveProjectTitle(projectName, options.projectId ?? "");
+  if (options.role === "main" || isMainWorkspaceName(workspaceName)) {
+    return projectTitle;
   }
-  return "workspace";
+  return `${projectTitle} - ${normalizeTitlePart(workspaceName) || "workspace"}`;
 }
 
 /**
  * @param {{
- *   transport: ChatTransport & {
- *     getGroupLinkedParent?: (chatId: string) => Promise<string | null>,
- *     linkExistingGroupToCommunity: (chatId: string, communityChatId: string) => Promise<void>,
- *   },
+ *   transport: ChatTransport,
  *   store: Pick<Awaited<ReturnType<typeof import("../store.js").initStore>>,
- *     "getWhatsAppProjectPresentationCache"
- *     | "listWhatsAppWorkspacePresentations"
- *     | "saveWhatsAppWorkspacePresentation"
- *     | "upsertWhatsAppProjectPresentationCache">,
+ *     "saveWhatsAppWorkspacePresentation">,
  * }} input
  * @returns {{
  *   syncMainWorkspaceCommunitySurface: (input: {
  *     projectId: string,
+ *     projectName: string,
  *     workspaceId: string,
  *     existingWorkspacePresentation: WhatsAppWorkspacePresentationRow,
  *     communityChatId: string,
  *   }) => Promise<{ surfaceId: string, surfaceName: string }>,
  *   provisionWorkspaceSurface: (input: {
  *     projectId: string,
+ *     projectName: string,
  *     workspaceId: string,
  *     workspaceName: string,
  *     sourceChatName?: string,
@@ -86,209 +63,67 @@ export function resolveWorkspaceRole(projectPresentation, workspaceId) {
  * }}
  */
 export function createWhatsAppWorkspaceTopology({ transport, store }) {
-  const liveTopologyResolver = createWhatsAppLiveWorkspaceTopologyResolver({ transport, store });
-
   /**
-   * @param {{
-   *   workspaceId: string,
-   *   workspaceChatId: string,
-   *   communityChatId: string,
-   * }} input
-   * @returns {Promise<void>}
+   * @param {string | undefined} sourceChatId
+   * @returns {Promise<string | null>}
    */
-  async function ensureLiveGroupLink({
-    workspaceId,
-    workspaceChatId,
-    communityChatId,
-  }) {
-    const initialLinkedCommunityChatId = await liveTopologyResolver.getLiveLinkedCommunityChatId(workspaceChatId);
-    if (initialLinkedCommunityChatId && initialLinkedCommunityChatId !== communityChatId) {
-      throw new Error(
-        `Workspace ${workspaceId} is already linked to community ${initialLinkedCommunityChatId}, expected ${communityChatId}.`,
-      );
+  async function resolveSourceCommunityChatId(sourceChatId) {
+    if (!sourceChatId || !transport.getGroupLinkedParent) {
+      return null;
     }
-    if (initialLinkedCommunityChatId === communityChatId) {
-      return;
-    }
-    await transport.linkExistingGroupToCommunity(workspaceChatId, communityChatId);
-    const linkedCommunityChatIdAfterLink = await liveTopologyResolver.getLiveLinkedCommunityChatId(workspaceChatId);
-    if (linkedCommunityChatIdAfterLink !== communityChatId) {
-      throw new Error(
-        `Workspace ${workspaceId} was linked to community ${communityChatId}, but live WhatsApp metadata still reports ${linkedCommunityChatIdAfterLink ?? "no linked community"}.`,
-      );
-    }
+    return transport.getGroupLinkedParent(sourceChatId);
   }
 
   /**
    * @param {{
    *   projectId: string,
-   *   mainWorkspaceId: string,
-   *   mainWorkspaceChatId: string,
-   *   communityChatId: string,
-   *   sourceChatName?: string,
-   *   allowReplacement?: boolean,
-   * }} input
-   * @returns {Promise<string>}
-   */
-  async function resolveActiveCommunityChatIdForMainWorkspace({
-    projectId,
-    mainWorkspaceId,
-    mainWorkspaceChatId,
-    communityChatId,
-    sourceChatName,
-    allowReplacement,
-  }) {
-    const liveLinkedCommunityChatId = await liveTopologyResolver.getLiveLinkedCommunityChatId(mainWorkspaceChatId);
-    if (liveLinkedCommunityChatId === communityChatId) {
-      return communityChatId;
-    }
-    if (liveLinkedCommunityChatId) {
-      throw new Error(
-        `Workspace ${mainWorkspaceId} is already linked to community ${liveLinkedCommunityChatId}, expected ${communityChatId}.`,
-      );
-    }
-    if (!allowReplacement) {
-      return communityChatId;
-    }
-    if (!transport.createCommunity) {
-      throw new Error("Workspace adoption requires community provisioning support.");
-    }
-    const replacementCommunity = await transport.createCommunity(
-      buildCommunitySurfaceName(projectId, sourceChatName),
-      buildCommunityDescription(projectId, sourceChatName),
-    );
-    await store.upsertWhatsAppProjectPresentationCache({
-      projectId,
-      cachedTopologyKind: "community",
-      cachedCommunityChatId: replacementCommunity.chatId,
-      cachedMainWorkspaceId: mainWorkspaceId,
-    });
-    return replacementCommunity.chatId;
-  }
-
-  /**
-   * Normalize the chosen main workspace surface so the original flat group
-   * becomes the `main` subgroup inside the community.
-   * @param {{
-   *   projectId: string,
-   *   workspaceId: string,
-   *   workspaceChatId: string,
-   *   workspaceChatSubject: string,
-   *   persistedRole?: WhatsAppWorkspacePresentationRole,
-   *   persistedLinkedCommunityChatId?: string | null,
-   *   communityChatId: string,
-   * }} input
-   * @returns {Promise<{ surfaceId: string, surfaceName: string }>}
-   */
-  async function adoptWorkspaceSurfaceIntoCommunity({
-    projectId,
-    workspaceId,
-    workspaceChatId,
-    workspaceChatSubject,
-    persistedRole,
-    persistedLinkedCommunityChatId,
-    communityChatId,
-  }) {
-    const surfaceName = buildCommunityWorkspaceSurfaceName(workspaceChatSubject, "main");
-    await ensureLiveGroupLink({
-      workspaceId,
-      workspaceChatId,
-      communityChatId,
-    });
-    if (
-      workspaceChatSubject === surfaceName
-      && persistedRole === "main"
-      && persistedLinkedCommunityChatId === communityChatId
-    ) {
-      return {
-        surfaceId: workspaceChatId,
-        surfaceName,
-      };
-    }
-    if (transport.renameGroup && workspaceChatSubject !== surfaceName) {
-      await transport.renameGroup(workspaceChatId, surfaceName);
-    }
-    await store.saveWhatsAppWorkspacePresentation({
-      projectId,
-      workspaceId,
-      workspaceChatId,
-      workspaceChatSubject: surfaceName,
-      role: "main",
-      linkedCommunityChatId: communityChatId,
-    });
-    return {
-      surfaceId: workspaceChatId,
-      surfaceName,
-    };
-  }
-
-  /**
-   * @param {{
-   *   projectId: string,
+   *   projectName: string,
    *   workspaceId: string,
    *   workspaceName: string,
-   *   sourceChatName?: string,
    *   requesterJids: string[],
+   *   communityChatId: string | null,
    * }} input
    * @returns {Promise<{ surfaceId: string, surfaceName: string }>}
    */
-  async function provisionFlatWorkspaceSurface({
+  async function provisionSurface({
     projectId,
+    projectName,
     workspaceId,
     workspaceName,
-    sourceChatName,
     requesterJids,
+    communityChatId,
   }) {
+    const role = /** @type {WhatsAppWorkspacePresentationRole} */ (
+      isMainWorkspaceName(workspaceName) ? "main" : "workspace"
+    );
+    const surfaceName = buildWorkspaceSurfaceName(projectName, workspaceName, { projectId, role });
+    if (communityChatId) {
+      if (!transport.createCommunityGroup) {
+        throw new Error("Workspace creation inside an existing community requires community subgroup provisioning support.");
+      }
+      const group = await transport.createCommunityGroup(surfaceName, requesterJids, communityChatId);
+      const persistedSurfaceName = typeof group.subject === "string" ? group.subject : surfaceName;
+      await store.saveWhatsAppWorkspacePresentation({
+        projectId,
+        workspaceId,
+        workspaceChatId: group.chatId,
+        workspaceChatSubject: persistedSurfaceName,
+        role,
+        linkedCommunityChatId: communityChatId,
+      });
+      return {
+        surfaceId: group.chatId,
+        surfaceName: persistedSurfaceName,
+      };
+    }
+
     if (!transport.createGroup) {
       throw new Error("Workspace creation requires workspace surface provisioning support.");
     }
-    const surfaceName = buildWorkspaceSurfaceName(workspaceName, sourceChatName);
     const group = await transport.createGroup(surfaceName, requesterJids);
     if (transport.promoteParticipants && requesterJids.length > 0) {
       await transport.promoteParticipants(group.chatId, requesterJids);
     }
-    const persistedSurfaceName = typeof group.subject === "string" ? group.subject : surfaceName;
-    await store.upsertWhatsAppProjectPresentationCache({
-      projectId,
-      cachedTopologyKind: "groups",
-      cachedMainWorkspaceId: workspaceId,
-    });
-    await store.saveWhatsAppWorkspacePresentation({
-      projectId,
-      workspaceId,
-      workspaceChatId: group.chatId,
-      workspaceChatSubject: persistedSurfaceName,
-    });
-    return {
-      surfaceId: group.chatId,
-      surfaceName: persistedSurfaceName,
-    };
-  }
-
-  /**
-   * @param {{
-   *   projectId: string,
-   *   workspaceId: string,
-   *   workspaceName: string,
-   *   requesterJids: string[],
- *   communityChatId: string,
-   *   role: WhatsAppWorkspacePresentationRole,
-   * }} input
-   * @returns {Promise<{ surfaceId: string, surfaceName: string }>}
-   */
-  async function provisionCommunityWorkspaceSurface({
-    projectId,
-    workspaceId,
-    workspaceName,
-    requesterJids,
-    communityChatId,
-    role,
-  }) {
-    if (!transport.createCommunityGroup) {
-      throw new Error("Workspace creation requires community subgroup provisioning support.");
-    }
-    const surfaceName = buildCommunityWorkspaceSurfaceName(workspaceName, role);
-    const group = await transport.createCommunityGroup(surfaceName, requesterJids, communityChatId);
     const persistedSurfaceName = typeof group.subject === "string" ? group.subject : surfaceName;
     await store.saveWhatsAppWorkspacePresentation({
       projectId,
@@ -296,7 +131,7 @@ export function createWhatsAppWorkspaceTopology({ transport, store }) {
       workspaceChatId: group.chatId,
       workspaceChatSubject: persistedSurfaceName,
       role,
-      linkedCommunityChatId: communityChatId,
+      linkedCommunityChatId: null,
     });
     return {
       surfaceId: group.chatId,
@@ -304,192 +139,41 @@ export function createWhatsAppWorkspaceTopology({ transport, store }) {
     };
   }
 
-  /**
-   * @param {{
-   *   projectId: string,
-   *   existingWorkspacePresentation: WhatsAppWorkspacePresentationRow,
-   * }} input
-   * @returns {Promise<void>}
-   */
-  async function demoteWorkspaceSurfaceFromMain({
-    projectId,
-    existingWorkspacePresentation,
-  }) {
-    await store.saveWhatsAppWorkspacePresentation({
-      projectId,
-      workspaceId: existingWorkspacePresentation.workspace_id,
-      workspaceChatId: existingWorkspacePresentation.workspace_chat_id,
-      workspaceChatSubject: existingWorkspacePresentation.workspace_chat_subject,
-      role: "workspace",
-      linkedCommunityChatId: existingWorkspacePresentation.linked_community_chat_id,
-    });
-  }
-
-  /**
-   * @param {{
-   *   projectId: string,
- *   mainWorkspaceId: string,
-   *   mainWorkspaceSurface: {
-   *     workspaceChatId: string,
-   *     workspaceChatSubject: string,
-   *     persistedRole?: WhatsAppWorkspacePresentationRole,
-   *     persistedLinkedCommunityChatId?: string | null,
-   *   },
- *   communityChatId: string,
-   *   sourceChatName?: string,
-   *   allowReplacement?: boolean,
-   * }} input
-   * @returns {Promise<string>}
-   */
-  async function ensureCommunityMainWorkspaceSurface({
-    projectId,
-    mainWorkspaceId,
-    mainWorkspaceSurface,
-    communityChatId,
-    sourceChatName,
-    allowReplacement = false,
-  }) {
-    const activeCommunityChatId = await resolveActiveCommunityChatIdForMainWorkspace({
-      projectId,
-      mainWorkspaceId,
-      mainWorkspaceChatId: mainWorkspaceSurface.workspaceChatId,
-      communityChatId,
-      sourceChatName,
-      allowReplacement,
-    });
-    await adoptWorkspaceSurfaceIntoCommunity({
-      projectId,
-      workspaceId: mainWorkspaceId,
-      workspaceChatId: mainWorkspaceSurface.workspaceChatId,
-      workspaceChatSubject: mainWorkspaceSurface.workspaceChatSubject,
-      persistedRole: mainWorkspaceSurface.persistedRole,
-      persistedLinkedCommunityChatId: mainWorkspaceSurface.persistedLinkedCommunityChatId,
-      communityChatId: activeCommunityChatId,
-    });
-    return activeCommunityChatId;
-  }
-
   return {
     async syncMainWorkspaceCommunitySurface({
       projectId,
+      projectName,
       workspaceId,
       existingWorkspacePresentation,
       communityChatId,
     }) {
-      return adoptWorkspaceSurfaceIntoCommunity({
+      const surfaceName = buildWorkspaceSurfaceName(projectName, "main", { projectId, role: "main" });
+      if (transport.renameGroup && existingWorkspacePresentation.workspace_chat_subject !== surfaceName) {
+        await transport.renameGroup(existingWorkspacePresentation.workspace_chat_id, surfaceName);
+      }
+      await store.saveWhatsAppWorkspacePresentation({
         projectId,
         workspaceId,
         workspaceChatId: existingWorkspacePresentation.workspace_chat_id,
-        workspaceChatSubject: existingWorkspacePresentation.workspace_chat_subject,
-        persistedRole: existingWorkspacePresentation.role,
-        persistedLinkedCommunityChatId: existingWorkspacePresentation.linked_community_chat_id,
-        communityChatId,
+        workspaceChatSubject: surfaceName,
+        role: "main",
+        linkedCommunityChatId: communityChatId,
       });
+      return {
+        surfaceId: existingWorkspacePresentation.workspace_chat_id,
+        surfaceName,
+      };
     },
 
     async provisionWorkspaceSurface(input) {
-      const provisioningTopology = await liveTopologyResolver.resolveProvisioningTopology({
+      const communityChatId = await resolveSourceCommunityChatId(input.sourceChatId);
+      return provisionSurface({
         projectId: input.projectId,
-        sourceChatId: input.sourceChatId,
-        sourceChatName: input.sourceChatName,
-      });
-      const {
-        existingPresentations,
-        sourceChatLiveCommunityChatId,
-        mainWorkspaceLiveCommunityChatId,
-        cachedCommunityChatIdHint,
-        mainWorkspaceSelection,
-      } = provisioningTopology;
-
-      if (existingPresentations.length === 0) {
-        return provisionFlatWorkspaceSurface(input);
-      }
-
-      const mainWorkspaceId = mainWorkspaceSelection.mainWorkspaceId;
-      const mainWorkspaceSurface = mainWorkspaceSelection.mainWorkspaceSurface;
-      if (!mainWorkspaceId || !mainWorkspaceSurface) {
-        throw new Error(`Could not determine the main workspace for project ${input.projectId}.`);
-      }
-      const activeLiveCommunityChatId = sourceChatLiveCommunityChatId ?? mainWorkspaceLiveCommunityChatId;
-
-      if (activeLiveCommunityChatId) {
-        const syncedCommunityChatId = await ensureCommunityMainWorkspaceSurface({
-          projectId: input.projectId,
-          mainWorkspaceId,
-          mainWorkspaceSurface,
-          communityChatId: activeLiveCommunityChatId,
-          sourceChatName: input.sourceChatName,
-          allowReplacement: false,
-        });
-        if (mainWorkspaceSelection.previousMainWorkspacePresentation) {
-          await demoteWorkspaceSurfaceFromMain({
-            projectId: input.projectId,
-            existingWorkspacePresentation: mainWorkspaceSelection.previousMainWorkspacePresentation,
-          });
-        }
-        return provisionCommunityWorkspaceSurface({
-          projectId: input.projectId,
-          workspaceId: input.workspaceId,
-          workspaceName: input.workspaceName,
-          requesterJids: input.requesterJids,
-          communityChatId: syncedCommunityChatId,
-          role: "workspace",
-        });
-      }
-
-      if (cachedCommunityChatIdHint) {
-        const replacementCommunityChatId = await ensureCommunityMainWorkspaceSurface({
-          projectId: input.projectId,
-          mainWorkspaceId,
-          mainWorkspaceSurface,
-          communityChatId: cachedCommunityChatIdHint,
-          sourceChatName: input.sourceChatName,
-          allowReplacement: true,
-        });
-        if (mainWorkspaceSelection.previousMainWorkspacePresentation) {
-          await demoteWorkspaceSurfaceFromMain({
-            projectId: input.projectId,
-            existingWorkspacePresentation: mainWorkspaceSelection.previousMainWorkspacePresentation,
-          });
-        }
-        return provisionCommunityWorkspaceSurface({
-          projectId: input.projectId,
-          workspaceId: input.workspaceId,
-          workspaceName: input.workspaceName,
-          requesterJids: input.requesterJids,
-          communityChatId: replacementCommunityChatId,
-          role: "workspace",
-        });
-      }
-
-      if (!transport.createCommunity) {
-        throw new Error("Workspace creation requires community provisioning support.");
-      }
-      const community = await transport.createCommunity(
-        buildCommunitySurfaceName(input.projectId, input.sourceChatName),
-        buildCommunityDescription(input.projectId, input.sourceChatName),
-      );
-      const activeCommunityChatId = await ensureCommunityMainWorkspaceSurface({
-        projectId: input.projectId,
-        mainWorkspaceId,
-        mainWorkspaceSurface,
-        communityChatId: community.chatId,
-        sourceChatName: input.sourceChatName,
-        allowReplacement: false,
-      });
-      await store.upsertWhatsAppProjectPresentationCache({
-        projectId: input.projectId,
-        cachedTopologyKind: "community",
-        cachedCommunityChatId: activeCommunityChatId,
-        cachedMainWorkspaceId: mainWorkspaceId,
-      });
-      return provisionCommunityWorkspaceSurface({
-        projectId: input.projectId,
+        projectName: input.projectName,
         workspaceId: input.workspaceId,
         workspaceName: input.workspaceName,
         requesterJids: input.requesterJids,
-        communityChatId: activeCommunityChatId,
-        role: "workspace",
+        communityChatId,
       });
     },
   };

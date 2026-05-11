@@ -128,7 +128,7 @@ export async function runStoreMigrations(db) {
     await db.sql`
       CREATE TABLE IF NOT EXISTS projects (
         project_id TEXT PRIMARY KEY,
-        name TEXT NOT NULL UNIQUE,
+        name TEXT NOT NULL,
         root_path TEXT NOT NULL,
         default_base_branch TEXT NOT NULL,
         control_chat_id VARCHAR(50) REFERENCES chats(chat_id) UNIQUE,
@@ -419,6 +419,8 @@ export async function runStoreMigrations(db) {
       db.sql`ALTER TABLE messages ADD COLUMN IF NOT EXISTS search_text tsvector`,
       db.sql`ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS conflicted_files JSONB NOT NULL DEFAULT '[]'`,
       db.sql`ALTER TABLE projects ALTER COLUMN control_chat_id DROP NOT NULL`,
+      db.sql`ALTER TABLE projects DROP CONSTRAINT IF EXISTS projects_name_key`,
+      db.sql`ALTER TABLE projects DROP CONSTRAINT IF EXISTS repos_name_key`,
     ]);
     await db.sql`UPDATE workspaces SET workspace_chat_subject = name WHERE workspace_chat_subject IS NULL`;
     await db.sql`

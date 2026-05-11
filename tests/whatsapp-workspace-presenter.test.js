@@ -1,51 +1,65 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { contentEvent } from "../outbound-events.js";
-import { buildCommunityDescription } from "../whatsapp/workspace-topology.js";
 import { createWhatsAppWorkspacePresenter } from "../whatsapp/workspace-presenter.js";
 
+/**
+ * @param {{
+ *   existingPresentation?: WhatsAppWorkspacePresentationRow | null,
+ *   existingPresentations?: WhatsAppWorkspacePresentationRow[],
+ *   onSave?: (input: Parameters<WorkspacePresentationPort["ensureWorkspaceVisible"]>[0]) => void,
+ * }} [options]
+ */
+function createStore(options = {}) {
+  /** @type {Array<{
+   *   projectId: string,
+   *   workspaceId: string,
+   *   workspaceChatId: string,
+   *   workspaceChatSubject: string,
+   *   role?: WhatsAppWorkspacePresentationRole,
+   *   linkedCommunityChatId?: string | null,
+   * }>} */
+  const storedPresentations = [];
+  return {
+    storedPresentations,
+    store: {
+      getWhatsAppProjectPresentationCache: async () => null,
+      getWhatsAppWorkspacePresentation: async () => options.existingPresentation ?? null,
+      listWhatsAppWorkspacePresentations: async () => options.existingPresentations ?? [],
+      saveWhatsAppWorkspacePresentation: async (input) => {
+        storedPresentations.push(input);
+      },
+      upsertWhatsAppProjectPresentationCache: async () => {
+        assert.fail("workspace presentation should not rewrite project topology cache");
+      },
+    },
+  };
+}
+
 describe("WhatsAppWorkspacePresenter", () => {
-  it("ensures a workspace surface as a named group, persists the mapping, and promotes requesters", async () => {
+  it("creates standalone workspace groups with project-qualified titles", async () => {
     /** @type {Array<{ subject: string, participants: string[] }>} */
-    const created = [];
+    const createdGroups = [];
     /** @type {Array<{ chatId: string, participants: string[] }>} */
     const promoted = [];
-    /** @type {Array<{
-     *   projectId: string,
-     *   workspaceId: string,
-     *   workspaceChatId: string,
-     *   workspaceChatSubject: string,
-     *   role?: WhatsAppWorkspacePresentationRole,
-     *   linkedCommunityChatId?: string | null,
-     * }>} */
-    const storedPresentations = [];
-    /** @type {Array<{
-     *   projectId: string,
-     *   cachedTopologyKind?: WhatsAppProjectTopologyKind,
-     *   cachedCommunityChatId?: string | null,
-     *   cachedMainWorkspaceId?: string | null,
-     * }>} */
-    const storedProjectPresentations = [];
+    const storeState = createStore();
     const presenter = createWhatsAppWorkspacePresenter({
-      store: {
-        getWhatsAppProjectPresentationCache: async () => null,
-        getWhatsAppWorkspacePresentation: async () => null,
-        listWhatsAppWorkspacePresentations: async () => [],
-        saveWhatsAppWorkspacePresentation: async (input) => {
-          storedPresentations.push(input);
-        },
-        upsertWhatsAppProjectPresentationCache: async (input) => {
-          storedProjectPresentations.push(input);
-        },
-      },
+      store: storeState.store,
       transport: {
         start: async () => {},
         stop: async () => {},
         sendText: async () => {},
         createGroup: async (subject, participants) => {
-          created.push({ subject, participants });
+          createdGroups.push({ subject, participants });
           return { chatId: "workspace-chat", subject };
         },
+        createCommunity: async () => {
+          assert.fail("workspace creation should not create WhatsApp communities");
+        },
+        createCommunityGroup: async () => {
+          assert.fail("standalone source chats should create standalone groups");
+        },
+        getGroupLinkedParent: async () => null,
         promoteParticipants: async (chatId, participants) => {
           promoted.push({ chatId, participants });
         },
@@ -53,1013 +67,185 @@ describe("WhatsAppWorkspacePresenter", () => {
     });
 
     const surface = await presenter.ensureWorkspaceVisible({
-      projectId: "repo-1",
+      projectId: "project-1",
+      projectName: "Checkout",
       workspaceId: "ws-1",
       workspaceName: "payments",
+      sourceChatId: "source-chat",
       sourceChatName: "Original Group",
       requesterJids: ["user@s.whatsapp.net"],
     });
 
-    assert.deepEqual(created, [{
-      subject: "[payments] Original Group",
+    assert.deepEqual(createdGroups, [{
+      subject: "Checkout - payments",
       participants: ["user@s.whatsapp.net"],
     }]);
     assert.deepEqual(promoted, [{
       chatId: "workspace-chat",
       participants: ["user@s.whatsapp.net"],
     }]);
-    assert.deepEqual(storedPresentations, [{
-      projectId: "repo-1",
+    assert.deepEqual(storeState.storedPresentations, [{
+      projectId: "project-1",
       workspaceId: "ws-1",
       workspaceChatId: "workspace-chat",
-      workspaceChatSubject: "[payments] Original Group",
-    }]);
-    assert.deepEqual(storedProjectPresentations, [{
-      projectId: "repo-1",
-      cachedTopologyKind: "groups",
-      cachedMainWorkspaceId: "ws-1",
+      workspaceChatSubject: "Checkout - payments",
+      role: "workspace",
+      linkedCommunityChatId: null,
     }]);
     assert.deepEqual(surface, {
       surfaceId: "workspace-chat",
-      surfaceName: "[payments] Original Group",
+      surfaceName: "Checkout - payments",
     });
   });
 
-  it("upgrades a project from a flat group to a community on the second workspace by adopting the original group as main", async () => {
-    /** @type {Array<{ subject: string, description: string }>} */
-    const createdCommunities = [];
+  it("creates new workspaces inside the source chat community when one exists", async () => {
     /** @type {Array<{ subject: string, participants: string[], parentCommunityChatId: string }>} */
     const createdCommunityGroups = [];
-    /** @type {Array<{ chatId: string, subject: string }>} */
-    const renamedGroups = [];
-    /** @type {Array<{ chatId: string, communityChatId: string }>} */
-    const linkedGroups = [];
-    /** @type {Array<{
-     *   projectId: string,
-     *   workspaceId: string,
-     *   workspaceChatId: string,
-     *   workspaceChatSubject: string,
-     *   role?: WhatsAppWorkspacePresentationRole,
-     *   linkedCommunityChatId?: string | null,
-     * }>} */
-    const storedPresentations = [];
-    /** @type {Array<{
-     *   projectId: string,
-     *   cachedTopologyKind?: WhatsAppProjectTopologyKind,
-     *   cachedCommunityChatId?: string | null,
-     *   cachedMainWorkspaceId?: string | null,
-     * }>} */
-    const storedProjectPresentations = [];
-    /** @type {string | null} */
-    let linkedParent = null;
+    const storeState = createStore();
     const presenter = createWhatsAppWorkspacePresenter({
-      store: {
-        getWhatsAppProjectPresentationCache: async () => ({
-          project_id: "repo-1",
-          cached_topology_kind: "groups",
-          cached_community_chat_id: null,
-          cached_main_workspace_id: "ws-1",
-          timestamp: new Date().toISOString(),
-        }),
-        getWhatsAppWorkspacePresentation: async () => null,
-        listWhatsAppWorkspacePresentations: async (projectId) => {
-          assert.equal(projectId, "repo-1");
-          return [{
-            workspace_id: "ws-1",
-            project_id: "repo-1",
-            workspace_chat_id: "flat-chat",
-            workspace_chat_subject: "[payments] Original Group",
-            role: "workspace",
-            linked_community_chat_id: null,
-            timestamp: new Date().toISOString(),
-          }];
-        },
-        saveWhatsAppWorkspacePresentation: async (input) => {
-          storedPresentations.push(input);
-        },
-        upsertWhatsAppProjectPresentationCache: async (input) => {
-          storedProjectPresentations.push(input);
-        },
-      },
+      store: storeState.store,
       transport: {
         start: async () => {},
         stop: async () => {},
         sendText: async () => {},
-        createCommunity: async (subject, description) => {
-          createdCommunities.push({ subject, description });
-          return { chatId: "community-chat", subject };
+        createGroup: async () => {
+          assert.fail("linked source chats should create community groups");
         },
-        createCommunityGroup: async (subject, participants, parentCommunityChatId) => {
-          createdCommunityGroups.push({ subject, participants, parentCommunityChatId });
-          return {
-            chatId: "community-feature-chat",
-            subject,
-          };
-        },
-        getGroupLinkedParent: async () => linkedParent,
-        renameGroup: async (chatId, subject) => {
-          renamedGroups.push({ chatId, subject });
-        },
-        linkExistingGroupToCommunity: async (chatId, communityChatId) => {
-          linkedGroups.push({ chatId, communityChatId });
-          linkedParent = communityChatId;
-        },
-      },
-    });
-
-    const surface = await presenter.ensureWorkspaceVisible({
-      projectId: "repo-1",
-      workspaceId: "ws-2",
-      workspaceName: "fraud-fix",
-      sourceChatName: "Original Group",
-      requesterJids: ["user@s.whatsapp.net"],
-    });
-
-    assert.deepEqual(createdCommunities, [{
-      subject: "Original Group",
-      description: buildCommunityDescription("repo-1", "Original Group"),
-    }]);
-    assert.deepEqual(createdCommunityGroups, [
-      {
-        subject: "fraud-fix",
-        participants: ["user@s.whatsapp.net"],
-        parentCommunityChatId: "community-chat",
-      },
-    ]);
-    assert.deepEqual(renamedGroups, [{
-      chatId: "flat-chat",
-      subject: "main",
-    }]);
-    assert.deepEqual(linkedGroups, [{
-      chatId: "flat-chat",
-      communityChatId: "community-chat",
-    }]);
-    assert.deepEqual(storedProjectPresentations, [{
-      projectId: "repo-1",
-      cachedTopologyKind: "community",
-      cachedCommunityChatId: "community-chat",
-      cachedMainWorkspaceId: "ws-1",
-    }]);
-    assert.deepEqual(storedPresentations, [
-      {
-        projectId: "repo-1",
-        workspaceId: "ws-1",
-        workspaceChatId: "flat-chat",
-        workspaceChatSubject: "main",
-        role: "main",
-        linkedCommunityChatId: "community-chat",
-      },
-      {
-        projectId: "repo-1",
-        workspaceId: "ws-2",
-        workspaceChatId: "community-feature-chat",
-        workspaceChatSubject: "fraud-fix",
-        role: "workspace",
-        linkedCommunityChatId: "community-chat",
-      },
-    ]);
-    assert.deepEqual(surface, {
-      surfaceId: "community-feature-chat",
-      surfaceName: "fraud-fix",
-    });
-  });
-
-  it("links the existing group before renaming it to main during community adoption", async () => {
-    /** @type {string[]} */
-    const operations = [];
-    /** @type {Array<{ chatId: string, communityChatId: string }>} */
-    const linkedGroups = [];
-    /** @type {Array<{ chatId: string, subject: string }>} */
-    const renamedGroups = [];
-    /** @type {Array<{
-     *   projectId: string,
-     *   workspaceId: string,
-     *   workspaceChatId: string,
-     *   workspaceChatSubject: string,
-     *   role?: WhatsAppWorkspacePresentationRole,
-     *   linkedCommunityChatId?: string | null,
-     * }>} */
-    const storedPresentations = [];
-    /** @type {string | null} */
-    let linkedParent = null;
-    const presenter = createWhatsAppWorkspacePresenter({
-      store: {
-        getWhatsAppProjectPresentationCache: async () => ({
-          project_id: "repo-1",
-          cached_topology_kind: "community",
-          cached_community_chat_id: "community-chat",
-          cached_main_workspace_id: "ws-1",
-          timestamp: new Date().toISOString(),
-        }),
-        getWhatsAppWorkspacePresentation: async () => null,
-        listWhatsAppWorkspacePresentations: async () => ([
-          {
-            workspace_id: "ws-1",
-            project_id: "repo-1",
-            workspace_chat_id: "flat-chat",
-            workspace_chat_subject: "[payments] Original Group",
-            role: "workspace",
-            linked_community_chat_id: null,
-            timestamp: new Date().toISOString(),
-          },
-        ]),
-        saveWhatsAppWorkspacePresentation: async (input) => {
-          storedPresentations.push(input);
-        },
-        upsertWhatsAppProjectPresentationCache: async () => {
-          assert.fail("project presentation should not be rewritten when rename fails");
-        },
-      },
-      transport: {
-        start: async () => {},
-        stop: async () => {},
-        sendText: async () => {},
         createCommunity: async () => {
-          assert.fail("community should not be recreated for an already-community project");
-        },
-        createCommunityGroup: async () => {
-          assert.fail("new subgroup should not be created when main-group rename fails");
-        },
-        getGroupLinkedParent: async () => "community-chat",
-        linkExistingGroupToCommunity: async (chatId, communityChatId) => {
-          operations.push("link");
-          linkedGroups.push({ chatId, communityChatId });
-          linkedParent = communityChatId;
-        },
-        renameGroup: async (chatId, subject) => {
-          operations.push("rename");
-          renamedGroups.push({ chatId, subject });
-          throw new Error("rename failed");
-        },
-      },
-    });
-
-    await assert.rejects(
-      presenter.ensureWorkspaceVisible({
-        projectId: "repo-1",
-        workspaceId: "ws-2",
-        workspaceName: "fraud-fix",
-        sourceChatName: "Original Group",
-        requesterJids: ["user@s.whatsapp.net"],
-      }),
-      /rename failed/,
-    );
-
-    assert.deepEqual(operations, ["rename"]);
-    assert.deepEqual(linkedGroups, []);
-    assert.deepEqual(renamedGroups, [{
-      chatId: "flat-chat",
-      subject: "main",
-    }]);
-    assert.deepEqual(storedPresentations, []);
-  });
-
-  it("replaces a stale community when the persisted main group is not live-linked before adding another subgroup", async () => {
-    /** @type {Array<{ subject: string, description: string }>} */
-    const createdCommunities = [];
-    /** @type {Array<{ subject: string, participants: string[], parentCommunityChatId: string }>} */
-    const createdCommunityGroups = [];
-    /** @type {Array<{ chatId: string, subject: string }>} */
-    const renamedGroups = [];
-    /** @type {Array<{ chatId: string, communityChatId: string }>} */
-    const linkedGroups = [];
-    /** @type {Array<{
-     *   projectId: string,
-     *   workspaceId: string,
-     *   workspaceChatId: string,
-     *   workspaceChatSubject: string,
-     *   role?: WhatsAppWorkspacePresentationRole,
-     *   linkedCommunityChatId?: string | null,
-     * }>} */
-    const storedPresentations = [];
-    /** @type {Array<{
-     *   projectId: string,
-     *   cachedTopologyKind?: WhatsAppProjectTopologyKind,
-     *   cachedCommunityChatId?: string | null,
-     *   cachedMainWorkspaceId?: string | null,
-     * }>} */
-    const storedProjectPresentations = [];
-    /** @type {string | null} */
-    let linkedParent = null;
-    const presenter = createWhatsAppWorkspacePresenter({
-      store: {
-        getWhatsAppProjectPresentationCache: async () => ({
-          project_id: "repo-1",
-          cached_topology_kind: "community",
-          cached_community_chat_id: "community-chat",
-          cached_main_workspace_id: "ws-1",
-          timestamp: new Date().toISOString(),
-        }),
-        getWhatsAppWorkspacePresentation: async () => null,
-        listWhatsAppWorkspacePresentations: async () => ([
-          {
-            workspace_id: "ws-1",
-            project_id: "repo-1",
-            workspace_chat_id: "flat-chat",
-            workspace_chat_subject: "[payments] Original Group",
-            role: "workspace",
-            linked_community_chat_id: null,
-            timestamp: new Date().toISOString(),
-          },
-        ]),
-        saveWhatsAppWorkspacePresentation: async (input) => {
-          storedPresentations.push(input);
-        },
-        upsertWhatsAppProjectPresentationCache: async (input) => {
-          storedProjectPresentations.push(input);
-        },
-      },
-      transport: {
-        start: async () => {},
-        stop: async () => {},
-        sendText: async () => {},
-        createCommunity: async (subject, description) => {
-          createdCommunities.push({ subject, description });
-          return { chatId: "replacement-community-chat", subject };
+          assert.fail("workspace creation should not create WhatsApp communities");
         },
         createCommunityGroup: async (subject, participants, parentCommunityChatId) => {
           createdCommunityGroups.push({ subject, participants, parentCommunityChatId });
-          return {
-            chatId: "community-bugfix-chat",
-            subject,
-          };
-        },
-        getGroupLinkedParent: async () => linkedParent,
-        renameGroup: async (chatId, subject) => {
-          renamedGroups.push({ chatId, subject });
-        },
-        linkExistingGroupToCommunity: async (chatId, communityChatId) => {
-          linkedGroups.push({ chatId, communityChatId });
-          linkedParent = communityChatId;
-        },
-      },
-    });
-
-    const surface = await presenter.ensureWorkspaceVisible({
-      projectId: "repo-1",
-      workspaceId: "ws-3",
-      workspaceName: "bugfix",
-      sourceChatName: "Original Group",
-      requesterJids: ["user@s.whatsapp.net"],
-    });
-
-    assert.deepEqual(createdCommunities, [{
-      subject: "Original Group",
-      description: buildCommunityDescription("repo-1", "Original Group"),
-    }]);
-    assert.deepEqual(renamedGroups, [{
-      chatId: "flat-chat",
-      subject: "main",
-    }]);
-    assert.deepEqual(linkedGroups, [{
-      chatId: "flat-chat",
-      communityChatId: "replacement-community-chat",
-    }]);
-    assert.deepEqual(createdCommunityGroups, [{
-      subject: "bugfix",
-      participants: ["user@s.whatsapp.net"],
-      parentCommunityChatId: "replacement-community-chat",
-    }]);
-    assert.deepEqual(storedProjectPresentations, [{
-      projectId: "repo-1",
-      cachedTopologyKind: "community",
-      cachedCommunityChatId: "replacement-community-chat",
-      cachedMainWorkspaceId: "ws-1",
-    }]);
-    assert.deepEqual(storedPresentations, [
-      {
-        projectId: "repo-1",
-        workspaceId: "ws-1",
-        workspaceChatId: "flat-chat",
-        workspaceChatSubject: "main",
-        role: "main",
-        linkedCommunityChatId: "replacement-community-chat",
-      },
-      {
-        projectId: "repo-1",
-        workspaceId: "ws-3",
-        workspaceChatId: "community-bugfix-chat",
-        workspaceChatSubject: "bugfix",
-        role: "workspace",
-        linkedCommunityChatId: "replacement-community-chat",
-      },
-    ]);
-    assert.deepEqual(surface, {
-      surfaceId: "community-bugfix-chat",
-      surfaceName: "bugfix",
-    });
-  });
-
-  it("prefers the current live-unlinked chat over the persisted main workspace when replacing a stale community", async () => {
-    /** @type {Array<{ subject: string, description: string }>} */
-    const createdCommunities = [];
-    /** @type {Array<{ subject: string, participants: string[], parentCommunityChatId: string }>} */
-    const createdCommunityGroups = [];
-    /** @type {Array<{ chatId: string, subject: string }>} */
-    const renamedGroups = [];
-    /** @type {Array<{ chatId: string, communityChatId: string }>} */
-    const linkedGroups = [];
-    /** @type {Array<{
-     *   projectId: string,
-     *   workspaceId: string,
-     *   workspaceChatId: string,
-     *   workspaceChatSubject: string,
-     *   role?: WhatsAppWorkspacePresentationRole,
-     *   linkedCommunityChatId?: string | null,
-     * }>} */
-    const storedPresentations = [];
-    /** @type {Array<{
-     *   projectId: string,
-     *   cachedTopologyKind?: WhatsAppProjectTopologyKind,
-     *   cachedCommunityChatId?: string | null,
-     *   cachedMainWorkspaceId?: string | null,
-     * }>} */
-    const storedProjectPresentations = [];
-    /** @type {Record<string, string | null>} */
-    const linkedParents = {
-      "old-main-chat": "community-chat",
-      "current-chat": null,
-    };
-    const presenter = createWhatsAppWorkspacePresenter({
-      store: {
-        getWhatsAppProjectPresentationCache: async () => ({
-          project_id: "repo-1",
-          cached_topology_kind: "community",
-          cached_community_chat_id: "community-chat",
-          cached_main_workspace_id: "ws-1",
-          timestamp: new Date().toISOString(),
-        }),
-        getWhatsAppWorkspacePresentation: async () => null,
-        listWhatsAppWorkspacePresentations: async () => ([
-          {
-            workspace_id: "ws-1",
-            project_id: "repo-1",
-            workspace_chat_id: "old-main-chat",
-            workspace_chat_subject: "main",
-            role: "main",
-            linked_community_chat_id: "community-chat",
-            timestamp: new Date().toISOString(),
-          },
-          {
-            workspace_id: "ws-2",
-            project_id: "repo-1",
-            workspace_chat_id: "current-chat",
-            workspace_chat_subject: "[setup] Baby Jarvis dev",
-            role: "workspace",
-            linked_community_chat_id: null,
-            timestamp: new Date().toISOString(),
-          },
-        ]),
-        saveWhatsAppWorkspacePresentation: async (input) => {
-          storedPresentations.push(input);
-        },
-        upsertWhatsAppProjectPresentationCache: async (input) => {
-          storedProjectPresentations.push(input);
-        },
-      },
-      transport: {
-        start: async () => {},
-        stop: async () => {},
-        sendText: async () => {},
-        createCommunity: async (subject, description) => {
-          createdCommunities.push({ subject, description });
-          return { chatId: "replacement-community-chat", subject };
-        },
-        createCommunityGroup: async (subject, participants, parentCommunityChatId) => {
-          createdCommunityGroups.push({ subject, participants, parentCommunityChatId });
-          return {
-            chatId: "community-qwd-chat",
-            subject,
-          };
-        },
-        getGroupLinkedParent: async (chatId) => linkedParents[chatId] ?? null,
-        renameGroup: async (chatId, subject) => {
-          renamedGroups.push({ chatId, subject });
-        },
-        linkExistingGroupToCommunity: async (chatId, communityChatId) => {
-          linkedGroups.push({ chatId, communityChatId });
-          linkedParents[chatId] = communityChatId;
-        },
-      },
-    });
-
-    const surface = await presenter.ensureWorkspaceVisible({
-      projectId: "repo-1",
-      workspaceId: "ws-3",
-      workspaceName: "qwd",
-      sourceChatName: "Baby Jarvis dev",
-      sourceChatId: "current-chat",
-      requesterJids: ["user@s.whatsapp.net"],
-    });
-
-    assert.deepEqual(createdCommunities, [{
-      subject: "Baby Jarvis dev",
-      description: buildCommunityDescription("repo-1", "Baby Jarvis dev"),
-    }]);
-    assert.deepEqual(renamedGroups, [{
-      chatId: "current-chat",
-      subject: "main",
-    }]);
-    assert.deepEqual(linkedGroups, [{
-      chatId: "current-chat",
-      communityChatId: "replacement-community-chat",
-    }]);
-    assert.deepEqual(createdCommunityGroups, [{
-      subject: "qwd",
-      participants: ["user@s.whatsapp.net"],
-      parentCommunityChatId: "replacement-community-chat",
-    }]);
-    assert.deepEqual(storedProjectPresentations, [{
-      projectId: "repo-1",
-      cachedTopologyKind: "community",
-      cachedCommunityChatId: "replacement-community-chat",
-      cachedMainWorkspaceId: "ws-2",
-    }]);
-    assert.deepEqual(storedPresentations, [
-      {
-        projectId: "repo-1",
-        workspaceId: "ws-2",
-        workspaceChatId: "current-chat",
-        workspaceChatSubject: "main",
-        role: "main",
-        linkedCommunityChatId: "replacement-community-chat",
-      },
-      {
-        projectId: "repo-1",
-        workspaceId: "ws-1",
-        workspaceChatId: "old-main-chat",
-        workspaceChatSubject: "main",
-        role: "workspace",
-        linkedCommunityChatId: "community-chat",
-      },
-      {
-        projectId: "repo-1",
-        workspaceId: "ws-3",
-        workspaceChatId: "community-qwd-chat",
-        workspaceChatSubject: "qwd",
-        role: "workspace",
-        linkedCommunityChatId: "replacement-community-chat",
-      },
-    ]);
-    assert.deepEqual(surface, {
-      surfaceId: "community-qwd-chat",
-      surfaceName: "qwd",
-    });
-  });
-
-  it("adopts an unmapped live-standalone current chat as the main surface before replacing a stale community", async () => {
-    /** @type {Array<{ subject: string, description: string }>} */
-    const createdCommunities = [];
-    /** @type {Array<{ subject: string, participants: string[], parentCommunityChatId: string }>} */
-    const createdCommunityGroups = [];
-    /** @type {Array<{ chatId: string, subject: string }>} */
-    const renamedGroups = [];
-    /** @type {Array<{ chatId: string, communityChatId: string }>} */
-    const linkedGroups = [];
-    /** @type {Array<{
-     *   projectId: string,
-     *   workspaceId: string,
-     *   workspaceChatId: string,
-     *   workspaceChatSubject: string,
-     *   role?: WhatsAppWorkspacePresentationRole,
-     *   linkedCommunityChatId?: string | null,
-     * }>} */
-    const storedPresentations = [];
-    /** @type {Array<{
-     *   projectId: string,
-     *   cachedTopologyKind?: WhatsAppProjectTopologyKind,
-     *   cachedCommunityChatId?: string | null,
-     *   cachedMainWorkspaceId?: string | null,
-     * }>} */
-    const storedProjectPresentations = [];
-    /** @type {Record<string, string | null>} */
-    const linkedParents = {
-      "old-main-chat": "community-chat",
-      "current-chat": null,
-    };
-    const presenter = createWhatsAppWorkspacePresenter({
-      store: {
-        getWhatsAppProjectPresentationCache: async () => ({
-          project_id: "repo-1",
-          cached_topology_kind: "community",
-          cached_community_chat_id: "community-chat",
-          cached_main_workspace_id: "ws-1",
-          timestamp: new Date().toISOString(),
-        }),
-        getWhatsAppWorkspacePresentation: async () => null,
-        listWhatsAppWorkspacePresentations: async () => ([
-          {
-            workspace_id: "ws-1",
-            project_id: "repo-1",
-            workspace_chat_id: "old-main-chat",
-            workspace_chat_subject: "main",
-            role: "main",
-            linked_community_chat_id: "community-chat",
-            timestamp: new Date().toISOString(),
-          },
-        ]),
-        saveWhatsAppWorkspacePresentation: async (input) => {
-          storedPresentations.push(input);
-        },
-        upsertWhatsAppProjectPresentationCache: async (input) => {
-          storedProjectPresentations.push(input);
-        },
-      },
-      transport: {
-        start: async () => {},
-        stop: async () => {},
-        sendText: async () => {},
-        createCommunity: async (subject, description) => {
-          createdCommunities.push({ subject, description });
-          return { chatId: "replacement-community-chat", subject };
-        },
-        createCommunityGroup: async (subject, participants, parentCommunityChatId) => {
-          createdCommunityGroups.push({ subject, participants, parentCommunityChatId });
-          return {
-            chatId: "community-ddd-chat",
-            subject,
-          };
-        },
-        getGroupLinkedParent: async (chatId) => linkedParents[chatId] ?? null,
-        renameGroup: async (chatId, subject) => {
-          renamedGroups.push({ chatId, subject });
-        },
-        linkExistingGroupToCommunity: async (chatId, communityChatId) => {
-          linkedGroups.push({ chatId, communityChatId });
-          linkedParents[chatId] = communityChatId;
-        },
-      },
-    });
-
-    const surface = await presenter.ensureWorkspaceVisible({
-      projectId: "repo-1",
-      workspaceId: "ws-3",
-      workspaceName: "ddd",
-      sourceChatId: "current-chat",
-      sourceChatName: "Baby Jarvis dev",
-      requesterJids: ["user@s.whatsapp.net"],
-    });
-
-    assert.deepEqual(createdCommunities, [{
-      subject: "Baby Jarvis dev",
-      description: buildCommunityDescription("repo-1", "Baby Jarvis dev"),
-    }]);
-    assert.deepEqual(renamedGroups, [{
-      chatId: "current-chat",
-      subject: "main",
-    }]);
-    assert.deepEqual(linkedGroups, [{
-      chatId: "current-chat",
-      communityChatId: "replacement-community-chat",
-    }]);
-    assert.deepEqual(createdCommunityGroups, [{
-      subject: "ddd",
-      participants: ["user@s.whatsapp.net"],
-      parentCommunityChatId: "replacement-community-chat",
-    }]);
-    assert.deepEqual(storedProjectPresentations, [{
-      projectId: "repo-1",
-      cachedTopologyKind: "community",
-      cachedCommunityChatId: "replacement-community-chat",
-      cachedMainWorkspaceId: "ws-1",
-    }]);
-    assert.deepEqual(storedPresentations, [
-      {
-        projectId: "repo-1",
-        workspaceId: "ws-1",
-        workspaceChatId: "current-chat",
-        workspaceChatSubject: "main",
-        role: "main",
-        linkedCommunityChatId: "replacement-community-chat",
-      },
-      {
-        projectId: "repo-1",
-        workspaceId: "ws-3",
-        workspaceChatId: "community-ddd-chat",
-        workspaceChatSubject: "ddd",
-        role: "workspace",
-        linkedCommunityChatId: "replacement-community-chat",
-      },
-    ]);
-    assert.deepEqual(surface, {
-      surfaceId: "community-ddd-chat",
-      surfaceName: "ddd",
-    });
-  });
-
-  it("uses live WhatsApp metadata to skip relinking an already-linked main group before adding another subgroup", async () => {
-    /** @type {string[]} */
-    const linkedParentChecks = [];
-    /** @type {Array<{ chatId: string, communityChatId: string }>} */
-    const linkedGroups = [];
-    /** @type {Array<{ subject: string, participants: string[], parentCommunityChatId: string }>} */
-    const createdCommunityGroups = [];
-    /** @type {Array<{
-     *   projectId: string,
-     *   workspaceId: string,
-     *   workspaceChatId: string,
-     *   workspaceChatSubject: string,
-     *   role?: WhatsAppWorkspacePresentationRole,
-     *   linkedCommunityChatId?: string | null,
-     * }>} */
-    const storedPresentations = [];
-    /** @type {string | null} */
-    let linkedParent = null;
-
-    const presenter = createWhatsAppWorkspacePresenter({
-      store: {
-        getWhatsAppProjectPresentationCache: async () => ({
-          project_id: "repo-1",
-          cached_topology_kind: "community",
-          cached_community_chat_id: "community-chat",
-          cached_main_workspace_id: "ws-1",
-          timestamp: new Date().toISOString(),
-        }),
-        getWhatsAppWorkspacePresentation: async () => null,
-        listWhatsAppWorkspacePresentations: async () => ([
-          {
-            workspace_id: "ws-1",
-            project_id: "repo-1",
-            workspace_chat_id: "main-chat",
-            workspace_chat_subject: "main",
-            role: "main",
-            linked_community_chat_id: "community-chat",
-            timestamp: new Date().toISOString(),
-          },
-        ]),
-        saveWhatsAppWorkspacePresentation: async (input) => {
-          storedPresentations.push(input);
-        },
-        upsertWhatsAppProjectPresentationCache: async () => {
-          assert.fail("project presentation should not be rewritten when repairing a stale main-group link");
-        },
-      },
-      transport: {
-        start: async () => {},
-        stop: async () => {},
-        sendText: async () => {},
-        createCommunity: async () => {
-          assert.fail("community should not be recreated for an already-live-linked main group");
-        },
-        createCommunityGroup: async (subject, participants, parentCommunityChatId) => {
-          createdCommunityGroups.push({ subject, participants, parentCommunityChatId });
-          return {
-            chatId: "community-bugfix-chat",
-            subject,
-          };
+          return { chatId: "workspace-chat", subject };
         },
         getGroupLinkedParent: async (chatId) => {
-          linkedParentChecks.push(chatId);
+          assert.equal(chatId, "source-chat");
           return "community-chat";
         },
-        linkExistingGroupToCommunity: async (chatId, communityChatId) => {
-          linkedGroups.push({ chatId, communityChatId });
-          linkedParent = communityChatId;
-        },
-        renameGroup: async () => {
-          assert.fail("main group should not be renamed when it is already named main");
-        },
-      },
-    });
-
-    const surface = await presenter.ensureWorkspaceVisible({
-      projectId: "repo-1",
-      workspaceId: "ws-3",
-      workspaceName: "bugfix",
-      sourceChatName: "Original Group",
-      requesterJids: ["user@s.whatsapp.net"],
-    });
-
-    assert.deepEqual(linkedParentChecks, ["main-chat", "main-chat", "main-chat"]);
-    assert.deepEqual(linkedGroups, []);
-    assert.deepEqual(createdCommunityGroups, [{
-      subject: "bugfix",
-      participants: ["user@s.whatsapp.net"],
-      parentCommunityChatId: "community-chat",
-    }]);
-    assert.deepEqual(storedPresentations, [{
-      projectId: "repo-1",
-      workspaceId: "ws-3",
-      workspaceChatId: "community-bugfix-chat",
-      workspaceChatSubject: "bugfix",
-      role: "workspace",
-      linkedCommunityChatId: "community-chat",
-    }]);
-    assert.deepEqual(surface, {
-      surfaceId: "community-bugfix-chat",
-      surfaceName: "bugfix",
-    });
-  });
-
-  it("treats project presentation as a cache hint when the live source chat is already in a community", async () => {
-    /** @type {Array<{ subject: string, participants: string[], parentCommunityChatId: string }>} */
-    const createdCommunityGroups = [];
-    /** @type {Array<{
-     *   projectId: string,
-     *   workspaceId: string,
-     *   workspaceChatId: string,
-     *   workspaceChatSubject: string,
-     *   role?: WhatsAppWorkspacePresentationRole,
-     *   linkedCommunityChatId?: string | null,
-     * }>} */
-    const storedPresentations = [];
-
-    const presenter = createWhatsAppWorkspacePresenter({
-      store: {
-        getWhatsAppProjectPresentationCache: async () => ({
-          project_id: "repo-1",
-          cached_topology_kind: "groups",
-          cached_community_chat_id: null,
-          cached_main_workspace_id: "ws-1",
-          timestamp: new Date().toISOString(),
-        }),
-        getWhatsAppWorkspacePresentation: async () => null,
-        listWhatsAppWorkspacePresentations: async () => ([
-          {
-            workspace_id: "ws-1",
-            project_id: "repo-1",
-            workspace_chat_id: "main-chat",
-            workspace_chat_subject: "main",
-            role: "main",
-            linked_community_chat_id: "community-chat",
-            timestamp: new Date().toISOString(),
-          },
-        ]),
-        saveWhatsAppWorkspacePresentation: async (input) => {
-          storedPresentations.push(input);
-        },
-        upsertWhatsAppProjectPresentationCache: async () => {
-          assert.fail("stale project presentation should not force a rewrite when live chat state is already authoritative");
-        },
-      },
-      transport: {
-        start: async () => {},
-        stop: async () => {},
-        sendText: async () => {},
-        createCommunity: async () => {
-          assert.fail("live-linked source chat should not create a replacement community");
-        },
-        createCommunityGroup: async (subject, participants, parentCommunityChatId) => {
-          createdCommunityGroups.push({ subject, participants, parentCommunityChatId });
-          return {
-            chatId: "community-new-chat",
-            subject,
-          };
-        },
-        getGroupLinkedParent: async () => "community-chat",
         linkExistingGroupToCommunity: async () => {
-          assert.fail("live-linked source chat should not relink the main surface");
-        },
-        renameGroup: async () => {
-          assert.fail("already-normalized main group should not be renamed");
+          assert.fail("workspace creation should not link existing groups into communities");
         },
       },
     });
 
     const surface = await presenter.ensureWorkspaceVisible({
-      projectId: "repo-1",
+      projectId: "project-1",
+      projectName: "Checkout",
       workspaceId: "ws-2",
-      workspaceName: "ops",
-      sourceChatId: "main-chat",
-      sourceChatName: "Original Group",
+      workspaceName: "fraud-fix",
+      sourceChatId: "source-chat",
       requesterJids: ["user@s.whatsapp.net"],
     });
 
     assert.deepEqual(createdCommunityGroups, [{
-      subject: "ops",
+      subject: "Checkout - fraud-fix",
       participants: ["user@s.whatsapp.net"],
       parentCommunityChatId: "community-chat",
     }]);
-    assert.deepEqual(storedPresentations, [{
-      projectId: "repo-1",
+    assert.deepEqual(storeState.storedPresentations, [{
+      projectId: "project-1",
       workspaceId: "ws-2",
-      workspaceChatId: "community-new-chat",
-      workspaceChatSubject: "ops",
+      workspaceChatId: "workspace-chat",
+      workspaceChatSubject: "Checkout - fraud-fix",
       role: "workspace",
       linkedCommunityChatId: "community-chat",
     }]);
     assert.deepEqual(surface, {
-      surfaceId: "community-new-chat",
-      surfaceName: "ops",
+      surfaceId: "workspace-chat",
+      surfaceName: "Checkout - fraud-fix",
     });
   });
 
-  it("adds later workspaces directly as community subgroups", async () => {
-    /** @type {Array<{ subject: string, participants: string[], parentCommunityChatId: string }>} */
-    const createdCommunityGroups = [];
-    /** @type {Array<{
-     *   projectId: string,
-     *   workspaceId: string,
-     *   workspaceChatId: string,
-     *   workspaceChatSubject: string,
-     *   role?: WhatsAppWorkspacePresentationRole,
-     *   linkedCommunityChatId?: string | null,
-     * }>} */
-    const storedPresentations = [];
+  it("ignores cached project community state when the source chat is standalone", async () => {
+    /** @type {Array<{ subject: string, participants: string[] }>} */
+    const createdGroups = [];
+    const storeState = createStore({
+      existingPresentations: [{
+        workspace_id: "ws-main",
+        project_id: "project-1",
+        workspace_chat_id: "other-chat",
+        workspace_chat_subject: "Checkout",
+        role: "main",
+        linked_community_chat_id: "other-community",
+        timestamp: new Date().toISOString(),
+      }],
+    });
+    storeState.store.getWhatsAppProjectPresentationCache = async () => ({
+      project_id: "project-1",
+      cached_topology_kind: "community",
+      cached_community_chat_id: "other-community",
+      cached_main_workspace_id: "ws-main",
+      timestamp: new Date().toISOString(),
+    });
+
     const presenter = createWhatsAppWorkspacePresenter({
-      store: {
-        getWhatsAppProjectPresentationCache: async () => ({
-          project_id: "repo-1",
-          cached_topology_kind: "community",
-          cached_community_chat_id: "community-chat",
-          cached_main_workspace_id: "ws-1",
-          timestamp: new Date().toISOString(),
-        }),
-        getWhatsAppWorkspacePresentation: async () => null,
-        listWhatsAppWorkspacePresentations: async () => ([
-          {
-            workspace_id: "ws-1",
-            project_id: "repo-1",
-            workspace_chat_id: "community-main-chat",
-            workspace_chat_subject: "main",
-            role: "main",
-            linked_community_chat_id: "community-chat",
-            timestamp: new Date().toISOString(),
-          },
-        ]),
-        saveWhatsAppWorkspacePresentation: async (input) => {
-          storedPresentations.push(input);
-        },
-        upsertWhatsAppProjectPresentationCache: async () => {
-          assert.fail("project presentation should not be rewritten for later community subgroups");
-        },
-      },
+      store: storeState.store,
       transport: {
         start: async () => {},
         stop: async () => {},
         sendText: async () => {},
-        getGroupLinkedParent: async () => "community-chat",
-        createCommunityGroup: async (subject, participants, parentCommunityChatId) => {
-          createdCommunityGroups.push({ subject, participants, parentCommunityChatId });
-          return {
-            chatId: "community-bugfix-chat",
-            subject,
-          };
+        createGroup: async (subject, participants) => {
+          createdGroups.push({ subject, participants });
+          return { chatId: "workspace-chat", subject };
+        },
+        createCommunity: async () => {
+          assert.fail("stale project cache should not create a replacement community");
+        },
+        createCommunityGroup: async () => {
+          assert.fail("source chat live state is standalone, so this must be a normal group");
+        },
+        getGroupLinkedParent: async (chatId) => {
+          assert.equal(chatId, "source-chat");
+          return null;
         },
       },
     });
 
     const surface = await presenter.ensureWorkspaceVisible({
-      projectId: "repo-1",
+      projectId: "project-1",
+      projectName: "Checkout",
       workspaceId: "ws-3",
       workspaceName: "bugfix",
-      sourceChatName: "Original Group",
+      sourceChatId: "source-chat",
       requesterJids: ["user@s.whatsapp.net"],
     });
 
-    assert.deepEqual(createdCommunityGroups, [{
-      subject: "bugfix",
+    assert.deepEqual(createdGroups, [{
+      subject: "Checkout - bugfix",
       participants: ["user@s.whatsapp.net"],
-      parentCommunityChatId: "community-chat",
     }]);
-    assert.deepEqual(storedPresentations, [{
-      projectId: "repo-1",
+    assert.deepEqual(storeState.storedPresentations, [{
+      projectId: "project-1",
       workspaceId: "ws-3",
-      workspaceChatId: "community-bugfix-chat",
-      workspaceChatSubject: "bugfix",
+      workspaceChatId: "workspace-chat",
+      workspaceChatSubject: "Checkout - bugfix",
       role: "workspace",
-      linkedCommunityChatId: "community-chat",
+      linkedCommunityChatId: null,
     }]);
     assert.deepEqual(surface, {
-      surfaceId: "community-bugfix-chat",
-      surfaceName: "bugfix",
+      surfaceId: "workspace-chat",
+      surfaceName: "Checkout - bugfix",
     });
   });
 
-  it("reuses an existing workspace surface and refreshes its metadata", async () => {
+  it("uses only the project name for main workspace surfaces", async () => {
     /** @type {Array<{ chatId: string, subject: string }>} */
     const renamed = [];
     /** @type {Array<{ chatId: string, enabled: boolean }>} */
     const announcementChanges = [];
-    /** @type {Array<{ chatId: string, participants: string[] }>} */
-    const promoted = [];
-    /** @type {Array<{
-     *   projectId: string,
-     *   workspaceId: string,
-     *   workspaceChatId: string,
-     *   workspaceChatSubject: string,
-     *   role?: WhatsAppWorkspacePresentationRole,
-     *   linkedCommunityChatId?: string | null,
-     * }>} */
-    const storedPresentations = [];
-    const presenter = createWhatsAppWorkspacePresenter({
-      store: {
-        getWhatsAppProjectPresentationCache: async () => null,
-        getWhatsAppWorkspacePresentation: async () => ({
-          workspace_id: "ws-1",
-          project_id: "repo-1",
-          workspace_chat_id: "workspace-chat",
-          workspace_chat_subject: "[payments] Old Name",
-          role: "workspace",
-          linked_community_chat_id: null,
-          timestamp: new Date().toISOString(),
-        }),
-        listWhatsAppWorkspacePresentations: async () => [],
-        saveWhatsAppWorkspacePresentation: async (input) => {
-          storedPresentations.push(input);
-        },
-        upsertWhatsAppProjectPresentationCache: async () => {},
+    const storeState = createStore({
+      existingPresentation: {
+        workspace_id: "ws-main",
+        project_id: "project-1",
+        workspace_chat_id: "main-chat",
+        workspace_chat_subject: "main",
+        role: "main",
+        linked_community_chat_id: null,
+        timestamp: new Date().toISOString(),
       },
+    });
+    const presenter = createWhatsAppWorkspacePresenter({
+      store: storeState.store,
       transport: {
         start: async () => {},
         stop: async () => {},
@@ -1070,43 +256,36 @@ describe("WhatsAppWorkspacePresenter", () => {
         setAnnouncementOnly: async (chatId, enabled) => {
           announcementChanges.push({ chatId, enabled });
         },
-        promoteParticipants: async (chatId, participants) => {
-          promoted.push({ chatId, participants });
-        },
       },
     });
 
     const surface = await presenter.ensureWorkspaceVisible({
-      projectId: "repo-1",
-      workspaceId: "ws-1",
-      workspaceName: "payments",
-      sourceChatName: "Original Group",
-      requesterJids: ["user@s.whatsapp.net"],
+      projectId: "project-1",
+      projectName: "Checkout",
+      workspaceId: "ws-main",
+      workspaceName: "main",
+      requesterJids: [],
     });
 
     assert.deepEqual(renamed, [{
-      chatId: "workspace-chat",
-      subject: "[payments] Original Group",
+      chatId: "main-chat",
+      subject: "Checkout",
     }]);
     assert.deepEqual(announcementChanges, [{
-      chatId: "workspace-chat",
+      chatId: "main-chat",
       enabled: false,
     }]);
-    assert.deepEqual(promoted, [{
-      chatId: "workspace-chat",
-      participants: ["user@s.whatsapp.net"],
-    }]);
-    assert.deepEqual(storedPresentations, [{
-      projectId: "repo-1",
-      workspaceId: "ws-1",
-      workspaceChatId: "workspace-chat",
-      workspaceChatSubject: "[payments] Original Group",
-      role: "workspace",
+    assert.deepEqual(storeState.storedPresentations, [{
+      projectId: "project-1",
+      workspaceId: "ws-main",
+      workspaceChatId: "main-chat",
+      workspaceChatSubject: "Checkout",
+      role: "main",
       linkedCommunityChatId: null,
     }]);
     assert.deepEqual(surface, {
-      surfaceId: "workspace-chat",
-      surfaceName: "[payments] Original Group",
+      surfaceId: "main-chat",
+      surfaceName: "Checkout",
     });
   });
 
@@ -1118,9 +297,9 @@ describe("WhatsAppWorkspacePresenter", () => {
           assert.equal(workspaceId, "ws-1");
           return {
             workspace_id: "ws-1",
-            project_id: "repo-1",
+            project_id: "project-1",
             workspace_chat_id: "workspace-chat",
-            workspace_chat_subject: "[payments] Original Group",
+            workspace_chat_subject: "Checkout - payments",
             role: "workspace",
             linked_community_chat_id: null,
             timestamp: new Date().toISOString(),
@@ -1145,7 +324,7 @@ describe("WhatsAppWorkspacePresenter", () => {
 
     assert.deepEqual(surface, {
       surfaceId: "workspace-chat",
-      surfaceName: "[payments] Original Group",
+      surfaceName: "Checkout - payments",
     });
   });
 
@@ -1166,9 +345,9 @@ describe("WhatsAppWorkspacePresenter", () => {
           assert.equal(workspaceId, "ws-1");
           return {
             workspace_id: "ws-1",
-            project_id: "repo-1",
+            project_id: "project-1",
             workspace_chat_id: "workspace-chat",
-            workspace_chat_subject: "[payments] Original Group",
+            workspace_chat_subject: "Checkout - payments",
             role: "workspace",
             linked_community_chat_id: null,
             timestamp: new Date().toISOString(),
@@ -1213,9 +392,9 @@ describe("WhatsAppWorkspacePresenter", () => {
         getWhatsAppProjectPresentationCache: async () => null,
         getWhatsAppWorkspacePresentation: async () => ({
           workspace_id: "ws-1",
-          project_id: "repo-1",
+          project_id: "project-1",
           workspace_chat_id: "workspace-chat",
-          workspace_chat_subject: "[payments] Original Group",
+          workspace_chat_subject: "Checkout - payments",
           role: "workspace",
           linked_community_chat_id: null,
           timestamp: new Date().toISOString(),
