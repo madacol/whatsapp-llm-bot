@@ -249,8 +249,11 @@ describe("codex events", () => {
         name: "wait_agent",
         arguments: { receiver_thread_ids: ["thread-2"] },
         status: "completed",
-        output: "agent-probe-ok",
       },
+      subagentResponses: [{
+        threadId: "thread-2",
+        text: "agent-probe-ok",
+      }],
     });
   });
 
@@ -772,6 +775,40 @@ describe("codex events", () => {
         agentNickname: "Mill",
         agentRole: "worker",
       },
+    });
+  });
+
+  it("normalizes Codex App Server collab messages as sub-agent responses", () => {
+    assert.deepEqual(normalizeCodexAppServerEvent({
+      method: "item/completed",
+      params: {
+        threadId: "thread-parent",
+        item: {
+          id: "item_2",
+          type: "collabToolCall",
+          tool: "wait",
+          receiver_thread_ids: ["thread-2"],
+          agentsStates: {
+            "thread-2": {
+              status: "completed",
+              message: "agent-probe-ok",
+            },
+          },
+          status: "completed",
+        },
+      },
+    }), {
+      sessionId: "thread-parent",
+      toolEvent: {
+        id: "item_2",
+        name: "wait_agent",
+        arguments: { receiver_thread_ids: ["thread-2"] },
+        status: "completed",
+      },
+      subagentResponses: [{
+        threadId: "thread-2",
+        text: "agent-probe-ok",
+      }],
     });
   });
 

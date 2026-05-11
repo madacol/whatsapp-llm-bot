@@ -35,6 +35,8 @@ export function createCodexEventDispatcher(input) {
   const activeFlows = new Map();
   /** @type {Map<string, LlmResponseMetadata>} */
   const subagentThreads = new Map();
+  /** @type {Set<string>} */
+  const deliveredSubagentResponses = new Set();
 
   /** @type {AgentResult} */
   const result = {
@@ -90,6 +92,23 @@ export function createCodexEventDispatcher(input) {
         });
       }
     }
+  }
+
+  /**
+   * @param {import("./codex-events.js").CodexSubagentResponseEvent} response
+   * @returns {Promise<void>}
+   */
+  async function emitSubagentResponse(response) {
+    /** @type {LlmResponseMetadata} */
+    const metadata = response.threadId
+      ? subagentThreads.get(response.threadId) ?? { source: "subagent", threadId: response.threadId }
+      : { source: "subagent" };
+    const dedupeKey = `${metadata.threadId ?? ""}\u0000${response.text}`;
+    if (deliveredSubagentResponses.has(dedupeKey)) {
+      return;
+    }
+    deliveredSubagentResponses.add(dedupeKey);
+    await input.hooks.onLlmResponse(response.text, metadata);
   }
 
   /**
@@ -258,12 +277,23 @@ export function createCodexEventDispatcher(input) {
       await input.hooks.onReasoning(reasoningState.apply(normalized.reasoningEvent));
     }
 
+    for (const response of normalized.subagentResponses ?? []) {
+      await emitSubagentResponse(response);
+    }
+
     if (normalized.assistantText) {
       const suppressAssistantText = await syntheticToolAdapter.handleAssistantText(normalized.assistantText);
       if (!suppressAssistantText) {
         lastAssistantText = normalized.assistantText;
         const metadata = normalized.sessionId ? subagentThreads.get(normalized.sessionId) : undefined;
-        await input.hooks.onLlmResponse(normalized.assistantText, metadata);
+        if (metadata?.source === "subagent") {
+          await emitSubagentResponse({
+            ...(metadata.threadId !== undefined && { threadId: metadata.threadId }),
+            text: normalized.assistantText,
+          });
+        } else {
+          await input.hooks.onLlmResponse(normalized.assistantText, metadata);
+        }
       }
     }
 

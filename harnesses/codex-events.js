@@ -86,6 +86,7 @@ export {
  *   threadEvent?: CodexThreadEvent,
  *   commandEvent?: CodexCommandEvent,
  *   toolEvent?: CodexToolEvent,
+ *   subagentResponses?: CodexSubagentResponseEvent[],
  *   reasoningEvent?: CodexReasoningEvent,
  *   assistantText?: string,
  *   plan?: CodexPlanState,
@@ -103,4 +104,11 @@ export {
  *   agentNickname?: string,
  *   agentRole?: string,
  * }} CodexThreadEvent
+ */
+
+/**
+ * @typedef {{
+ *   threadId?: string,
+ *   text: string,
+ * }} CodexSubagentResponseEvent
  */
