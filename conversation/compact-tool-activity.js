@@ -18,6 +18,7 @@ function formatCompactEntry(tool, detail) {
  * @typedef {{
  *   id: string,
  *   summary: string,
+ *   completed: boolean,
  *   failed: boolean,
  * }} CompactToolActivityEntry
  */
@@ -27,7 +28,8 @@ function formatCompactEntry(tool, detail) {
  * @returns {string}
  */
 function renderCompactEntry(entry) {
-  return `${entry.failed ? "❌" : "🔧"} ${entry.summary}`;
+  const icon = entry.failed ? "❌" : entry.completed ? "✅" : "🔧";
+  return `${icon} ${entry.summary}`;
 }
 
 /**
@@ -123,6 +125,7 @@ function formatCompactToolCall(toolCall, actionFormatter, cwd, toolContext) {
  *     actionFormatter?: (params: Record<string, unknown>) => string,
  *     toolContext?: { oldContent?: string },
  *   ) => Promise<void>,
+ *   completeToolCall: (toolCall: LlmChatResponse["toolCalls"][0]) => Promise<boolean>,
  *   failMostRecentToolCall: () => Promise<boolean>,
  *   close: () => Promise<void>,
  * }}
@@ -139,6 +142,8 @@ export function createCompactToolActivityFeed({ send, cwd }) {
   const pendingCommandEntryIds = new Map();
   /** @type {string[]} */
   let pendingToolEntryIds = [];
+  /** @type {Map<string, string>} */
+  const pendingToolEntryIdsByToolId = new Map();
 
   /**
    * @returns {string}
@@ -218,6 +223,32 @@ export function createCompactToolActivityFeed({ send, cwd }) {
   }
 
   /**
+   * @param {string} entryId
+   * @returns {boolean}
+   */
+  function markEntryCompleted(entryId) {
+    const entry = entries.find((candidate) => candidate.id === entryId);
+    if (!entry || entry.completed || entry.failed) {
+      return false;
+    }
+    entry.completed = true;
+    return true;
+  }
+
+  /**
+   * @param {string} entryId
+   * @returns {void}
+   */
+  function forgetPendingToolEntry(entryId) {
+    pendingToolEntryIds = pendingToolEntryIds.filter((candidate) => candidate !== entryId);
+    for (const [toolId, candidateEntryId] of pendingToolEntryIdsByToolId.entries()) {
+      if (candidateEntryId === entryId) {
+        pendingToolEntryIdsByToolId.delete(toolId);
+      }
+    }
+  }
+
+  /**
    * @param {Map<string, string[]>} map
    * @param {string} key
    * @param {string} entryId
@@ -282,6 +313,7 @@ export function createCompactToolActivityFeed({ send, cwd }) {
     entries = [];
     pendingCommandEntryIds.clear();
     pendingToolEntryIds = [];
+    pendingToolEntryIdsByToolId.clear();
   }
 
   return {
@@ -291,6 +323,7 @@ export function createCompactToolActivityFeed({ send, cwd }) {
       await addEntry({
         id: entryId,
         summary: formatCompactCommand(command),
+        completed: false,
         failed: false,
       });
     },
@@ -311,17 +344,29 @@ export function createCompactToolActivityFeed({ send, cwd }) {
       await addEntry({
         id: entryId,
         summary: formatCompactRead(paths),
+        completed: false,
         failed: false,
       });
     },
     addToolCall: async (toolCall, actionFormatter, toolContext) => {
       const entryId = `compact-entry-${++nextEntryId}`;
       pendingToolEntryIds.push(entryId);
+      pendingToolEntryIdsByToolId.set(toolCall.id, entryId);
       await addEntry({
         id: entryId,
         summary: formatCompactToolCall(toolCall, actionFormatter, cwd, toolContext),
+        completed: false,
         failed: false,
       });
+    },
+    completeToolCall: async (toolCall) => {
+      const entryId = pendingToolEntryIdsByToolId.get(toolCall.id);
+      if (!entryId || !markEntryCompleted(entryId)) {
+        return false;
+      }
+      forgetPendingToolEntry(entryId);
+      await flushNow();
+      return true;
     },
     failMostRecentToolCall: async () => {
       while (pendingToolEntryIds.length > 0) {
@@ -329,6 +374,7 @@ export function createCompactToolActivityFeed({ send, cwd }) {
         if (typeof entryId !== "string" || !markEntryFailed(entryId)) {
           continue;
         }
+        forgetPendingToolEntry(entryId);
         await flushNow();
         return true;
       }

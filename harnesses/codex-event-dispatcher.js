@@ -14,7 +14,7 @@ const log = createLogger("harness:codex-events");
  * Shared semantic dispatcher for normalized Codex events, independent of the
  * underlying transport (SDK exec or App Server).
  * @param {{
- *   hooks: Pick<Required<AgentIOHooks>, "onComposing" | "onPaused" | "onReasoning" | "onToolCall" | "onCommand" | "onFileRead" | "onPlan" | "onFileChange" | "onLlmResponse" | "onToolError" | "onUsage">,
+ *   hooks: Pick<Required<AgentIOHooks>, "onComposing" | "onPaused" | "onReasoning" | "onToolCall" | "onToolComplete" | "onCommand" | "onFileRead" | "onPlan" | "onFileChange" | "onLlmResponse" | "onToolError" | "onUsage">,
  *   runConfig?: HarnessRunConfig,
  *   messages: Message[],
  *   fileChangeTracker?: ReturnType<typeof import("./codex-file-change-tracker.js").createCodexFileChangeTracker>,
@@ -427,6 +427,13 @@ export function createCodexEventDispatcher(input) {
         }
         if (activeTool?.handle && toolEvent.output) {
           activeTool.handle.setInspect(toolInspectState(activeTool.presentation, toolEvent.output));
+        }
+        if (activeTool && toolEvent.status === "completed") {
+          await input.hooks.onToolComplete({
+            id: activeToolId,
+            name: toolEvent.name,
+            arguments: JSON.stringify(toolEvent.arguments),
+          });
         }
         if (activeTool?.handle && toolEvent.status === "failed") {
           try {
