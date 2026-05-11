@@ -83,6 +83,7 @@ export {
  *   sessionId: string | null,
  *   usage?: HarnessUsage,
  *   failureMessage?: string,
+ *   threadEvent?: CodexThreadEvent,
  *   commandEvent?: CodexCommandEvent,
  *   toolEvent?: CodexToolEvent,
  *   reasoningEvent?: CodexReasoningEvent,
@@ -92,4 +93,14 @@ export {
  *   fileChanges?: CodexFileChangeEvent[],
  *   fileChangeLifecycle?: CodexFileChangeLifecycleEvent,
  * }} NormalizedCodexEvent
+ */
+
+/**
+ * @typedef {{
+ *   id: string,
+ *   kind: "subagent",
+ *   parentThreadId?: string,
+ *   agentNickname?: string,
+ *   agentRole?: string,
+ * }} CodexThreadEvent
  */

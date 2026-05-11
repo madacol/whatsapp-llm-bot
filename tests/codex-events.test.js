@@ -744,6 +744,37 @@ describe("codex events", () => {
     });
   });
 
+  it("normalizes Codex App Server sub-agent thread starts", () => {
+    assert.deepEqual(normalizeCodexAppServerEvent({
+      method: "thread/started",
+      params: {
+        thread: {
+          id: "thread-child",
+          source: {
+            subAgent: {
+              thread_spawn: {
+                parent_thread_id: "thread-parent",
+                depth: 1,
+                agent_path: null,
+                agent_nickname: "Mill",
+                agent_role: "worker",
+              },
+            },
+          },
+        },
+      },
+    }), {
+      sessionId: "thread-child",
+      threadEvent: {
+        id: "thread-child",
+        kind: "subagent",
+        parentThreadId: "thread-parent",
+        agentNickname: "Mill",
+        agentRole: "worker",
+      },
+    });
+  });
+
   it("normalizes Codex App Server nested token usage updates", () => {
     assert.deepEqual(normalizeCodexAppServerEvent({
       method: "thread/tokenUsage/updated",

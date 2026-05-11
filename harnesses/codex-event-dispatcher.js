@@ -33,6 +33,8 @@ export function createCodexEventDispatcher(input) {
   const activeTools = new Map();
   /** @type {Map<string, { handle?: MessageHandle, state: import("../tool-flow-presentation.js").ToolFlowState }>} */
   const activeFlows = new Map();
+  /** @type {Map<string, LlmResponseMetadata>} */
+  const subagentThreads = new Map();
 
   /** @type {AgentResult} */
   const result = {
@@ -45,6 +47,50 @@ export function createCodexEventDispatcher(input) {
   let lastAssistantText = null;
   /** @type {string | null} */
   let failureMessage = null;
+
+  /**
+   * @param {Record<string, unknown>} args
+   * @returns {string[]}
+   */
+  function getReceiverThreadIds(args) {
+    const value = args.receiver_thread_ids;
+    if (!Array.isArray(value)) {
+      return [];
+    }
+    return value.filter((entry) => typeof entry === "string");
+  }
+
+  /**
+   * @param {import("./codex-events.js").CodexThreadEvent} threadEvent
+   * @returns {void}
+   */
+  function rememberSubagentThread(threadEvent) {
+    subagentThreads.set(threadEvent.id, {
+      source: "subagent",
+      threadId: threadEvent.id,
+      ...(threadEvent.parentThreadId !== undefined && { parentThreadId: threadEvent.parentThreadId }),
+      ...(threadEvent.agentNickname !== undefined && { agentNickname: threadEvent.agentNickname }),
+      ...(threadEvent.agentRole !== undefined && { agentRole: threadEvent.agentRole }),
+    });
+  }
+
+  /**
+   * @param {import("./codex-events.js").CodexToolEvent} toolEvent
+   * @returns {void}
+   */
+  function rememberSpawnedReceiverThreads(toolEvent) {
+    if (toolEvent.name !== "spawn_agent" || toolEvent.status !== "completed") {
+      return;
+    }
+    for (const threadId of getReceiverThreadIds(toolEvent.arguments)) {
+      if (!subagentThreads.has(threadId)) {
+        subagentThreads.set(threadId, {
+          source: "subagent",
+          threadId,
+        });
+      }
+    }
+  }
 
   /**
    * @param {import("./codex-events.js").NormalizedCodexEvent} normalized
@@ -63,6 +109,10 @@ export function createCodexEventDispatcher(input) {
 
     if (normalized.failureMessage) {
       failureMessage = normalized.failureMessage;
+    }
+
+    if (normalized.threadEvent?.kind === "subagent") {
+      rememberSubagentThread(normalized.threadEvent);
     }
 
     if (normalized.commandEvent) {
@@ -84,6 +134,7 @@ export function createCodexEventDispatcher(input) {
 
     if (normalized.toolEvent) {
       const toolEvent = normalized.toolEvent;
+      rememberSpawnedReceiverThreads(toolEvent);
       const currentPresentation = buildToolPresentation(
         toolEvent.name,
         toolEvent.arguments,
@@ -211,7 +262,8 @@ export function createCodexEventDispatcher(input) {
       const suppressAssistantText = await syntheticToolAdapter.handleAssistantText(normalized.assistantText);
       if (!suppressAssistantText) {
         lastAssistantText = normalized.assistantText;
-        await input.hooks.onLlmResponse(normalized.assistantText);
+        const metadata = normalized.sessionId ? subagentThreads.get(normalized.sessionId) : undefined;
+        await input.hooks.onLlmResponse(normalized.assistantText, metadata);
       }
     }
 

@@ -13,6 +13,35 @@ import {
 } from "./codex-normalization-helpers.js";
 
 /**
+ * @param {Record<string, unknown>} thread
+ * @returns {import("./codex-events.js").CodexThreadEvent | null}
+ */
+function extractSubagentThreadEvent(thread) {
+  const id = typeof thread.id === "string" ? thread.id : null;
+  if (!id || !isCodexEventRecord(thread.source)) {
+    return null;
+  }
+
+  const subAgent = thread.source.subAgent;
+  if (!isCodexEventRecord(subAgent)) {
+    return null;
+  }
+
+  const threadSpawn = subAgent.thread_spawn;
+  if (!isCodexEventRecord(threadSpawn)) {
+    return null;
+  }
+
+  return {
+    id,
+    kind: "subagent",
+    ...(typeof threadSpawn.parent_thread_id === "string" && { parentThreadId: threadSpawn.parent_thread_id }),
+    ...(typeof threadSpawn.agent_nickname === "string" && { agentNickname: threadSpawn.agent_nickname }),
+    ...(typeof threadSpawn.agent_role === "string" && { agentRole: threadSpawn.agent_role }),
+  };
+}
+
+/**
  * Normalize a Codex App Server JSON-RPC message into the semantic event shape
  * used by the harness wrapper.
  * @param {unknown} message
@@ -40,6 +69,17 @@ export function normalizeCodexAppServerEvent(message) {
 
   if (method === "error") {
     normalized.failureMessage = extractCodexText(params.error) ?? extractCodexText(params) ?? "Codex run failed.";
+    return normalized;
+  }
+
+  if (method === "thread/started") {
+    const thread = isCodexEventRecord(params.thread) ? params.thread : null;
+    if (thread) {
+      const threadEvent = extractSubagentThreadEvent(thread);
+      if (threadEvent) {
+        normalized.threadEvent = threadEvent;
+      }
+    }
     return normalized;
   }
 

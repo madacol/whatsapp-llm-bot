@@ -31,6 +31,18 @@ const SOURCE_PREFIX = {
 };
 
 /**
+ * @param {SubagentMessageEvent} event
+ * @returns {SendContent}
+ */
+function renderSubagentMessageContent(event) {
+  const title = event.agentNickname
+    ? `**Sub-agent ${event.agentNickname}**`
+    : "**Sub-agent**";
+  const detail = event.agentRole ? `_${event.agentRole}_` : "";
+  return [{ type: "markdown", text: [`🧩 ${title}`, detail, event.text].filter(Boolean).join("\n") }];
+}
+
+/**
  * @param {string} prefix
  * @param {string} text
  * @returns {string}
@@ -304,6 +316,11 @@ function renderOutboundEvent(event) {
       return {
         source: "usage",
         content: formatUsageEventText(event),
+      };
+    case "subagent_message":
+      return {
+        source: "plain",
+        content: renderSubagentMessageContent(event),
       };
     default:
       return null;
