@@ -1,5 +1,3 @@
-import { spawn } from "node:child_process";
-
 const RESTART_DELAY_MS = 750;
 
 /**
@@ -12,11 +10,9 @@ function defineLocalAction(action) {
 }
 
 /**
- * @typedef {(command: string, args: string[], options: {
- *   detached: true,
- *   stdio: "ignore",
- *   env: NodeJS.ProcessEnv,
- * }) => { unref: () => void }} RestartSpawnFn
+ * @typedef {{ unref: () => void }} RestartTimer
+ * @typedef {(pid: number, signal: NodeJS.Signals) => void} RestartKillFn
+ * @typedef {(callback: () => void, delayMs: number) => RestartTimer} RestartSetTimeoutFn
  */
 
 /**
@@ -25,7 +21,8 @@ function defineLocalAction(action) {
  * @param {{
  *   pid?: number,
  *   delayMs?: number,
- *   spawnFn?: RestartSpawnFn,
+ *   killFn?: RestartKillFn,
+ *   setTimeoutFn?: RestartSetTimeoutFn,
  * }} [options]
  * @returns {void}
  */
@@ -33,33 +30,17 @@ export function scheduleRestart(options = {}) {
   const {
     pid = process.pid,
     delayMs = RESTART_DELAY_MS,
-    spawnFn = spawn,
+    killFn = process.kill,
+    setTimeoutFn = setTimeout,
   } = options;
 
-  const child = spawnFn(process.execPath, [
-    "-e",
-    [
-      "const pid = Number(process.env.BOT_RESTART_PID);",
-      "const delay = Number(process.env.BOT_RESTART_DELAY_MS);",
-      "setTimeout(() => {",
-      "  if (!Number.isInteger(pid) || pid <= 0) process.exit(1);",
-      "  try {",
-      "    process.kill(pid, 'SIGTERM');",
-      "  } catch (error) {",
-      "    if (!error || error.code !== 'ESRCH') throw error;",
-      "  }",
-      "}, Number.isFinite(delay) && delay >= 0 ? delay : 750);",
-    ].join("\n"),
-  ], {
-    detached: true,
-    stdio: "ignore",
-    env: {
-      ...process.env,
-      BOT_RESTART_PID: String(pid),
-      BOT_RESTART_DELAY_MS: String(delayMs),
-    },
-  });
-  child.unref();
+  const timer = setTimeoutFn(() => {
+    if (!Number.isInteger(pid) || pid <= 0) {
+      throw new Error(`Invalid restart PID: ${pid}`);
+    }
+    killFn(pid, "SIGTERM");
+  }, Number.isFinite(delayMs) && delayMs >= 0 ? delayMs : RESTART_DELAY_MS);
+  timer.unref();
 }
 
 /**
