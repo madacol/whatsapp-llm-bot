@@ -162,6 +162,72 @@ describe("createCodexEventDispatcher", () => {
     }]);
   });
 
+  it("correlates completed tool events with started tools when ids change", async () => {
+    /** @type {LlmChatResponse["toolCalls"]} */
+    const toolCalls = [];
+    /** @type {MessageInspectState[]} */
+    const inspects = [];
+    const dispatcher = createCodexEventDispatcher({
+      messages: [],
+      hooks: {
+        onComposing: async () => {},
+        onPaused: async () => {},
+        onReasoning: async () => {},
+        onToolCall: async (toolCall) => {
+          toolCalls.push(toolCall);
+          return {
+            keyId: "tool-message",
+            isImage: false,
+            update: async () => {},
+            setInspect: (inspect) => {
+              if (inspect) {
+                inspects.push(structuredClone(inspect));
+              }
+            },
+          };
+        },
+        onCommand: async () => {},
+        onFileRead: async () => {},
+        onPlan: async () => {},
+        onFileChange: async () => {},
+        onToolError: async () => {},
+        onUsage: async () => {},
+        onLlmResponse: async () => {},
+      },
+    });
+
+    await dispatcher.handleNormalized({
+      sessionId: "thread-parent",
+      toolEvent: {
+        id: "tool-start",
+        name: "spawn_agent",
+        arguments: { message: "hello" },
+        status: "started",
+      },
+    });
+    await dispatcher.handleNormalized({
+      sessionId: "thread-parent",
+      toolEvent: {
+        id: "tool-complete",
+        name: "spawn_agent",
+        arguments: { message: "hello" },
+        status: "completed",
+        output: JSON.stringify({
+          agent_id: "thread-child",
+          nickname: "Raman",
+        }),
+      },
+    });
+
+    assert.equal(toolCalls.length, 1);
+    assert.equal(toolCalls[0]?.id, "tool-start");
+    assert.equal(inspects.at(-1)?.kind, "tool");
+    assert.equal(inspects.at(-1)?.output, JSON.stringify({
+      agent_id: "thread-child",
+      nickname: "Raman",
+    }));
+  });
+
   it("enriches an already-known sub-agent thread with standard spawn_agent nickname output", async () => {
     const { dispatcher, llmResponses } = createSubject();
 
