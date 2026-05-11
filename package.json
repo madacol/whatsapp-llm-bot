@@ -13,8 +13,8 @@
     },
     "scripts": {
         "dev": "node --max-old-space-size=2560 --watch index.js",
-        "start": "while node --max-old-space-size=2560 index.js; do sleep 1; done",
-        "restart": "kill $(cat .bot.pid)",
+        "start": "while true; do node --max-old-space-size=2560 index.js; code=$?; if [ \"$code\" -eq 0 ] || [ \"$code\" -eq 137 ] || [ \"$code\" -eq 143 ]; then sleep 1; else exit \"$code\"; fi; done",
+        "restart": "if test -f .bot.pid; then kill -TERM $(cat .bot.pid); else echo 'No .bot.pid found'; fi",
         "test": "node scripts/test-runner.js",
         "test:watch": "node scripts/test-runner.js --watch",
         "test:prompts": "node --test tests/*.prompt-test.js",
