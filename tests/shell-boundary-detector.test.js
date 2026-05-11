@@ -34,8 +34,8 @@ describe("findEscapedShellTarget", () => {
   it("does not split backslash-escaped spaces in workspace paths", () => {
     assert.equal(
       findEscapedShellTarget(
-        "cd /home/mada/chat-workspaces/Get\\ Bookmarklets--120363427701541991@g.us && pnpm run build:vite",
-        "/home/mada/chat-workspaces/Get Bookmarklets--120363427701541991@g.us",
+        "cd /home/mada/chat-workspaces/Get\\ Bookmarklets && pnpm run build:vite",
+        "/home/mada/chat-workspaces/Get Bookmarklets",
       ),
       null,
     );

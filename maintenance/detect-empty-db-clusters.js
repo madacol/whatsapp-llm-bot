@@ -1,9 +1,14 @@
 #!/usr/bin/env node
 
 import { PGlite } from "@electric-sql/pglite";
-import { access, readdir, stat } from "node:fs/promises";
+import { access, readdir, realpath, stat } from "node:fs/promises";
+import { homedir } from "node:os";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
+
+const DEFAULT_CHAT_DIR = path.resolve(homedir(), "chat");
+const DEFAULT_LEGACY_PGDATA_DIR = path.resolve(process.cwd(), "pgdata");
 
 /**
  * @typedef EmptyDbReport
@@ -31,7 +36,9 @@ import { parseArgs } from "node:util";
 
 /**
  * @typedef ScanOptions
- * @property {string} baseDir
+ * @property {string | null} baseDir
+ * @property {string} chatDir
+ * @property {string} legacyPgdataDir
  * @property {boolean} includeRoot
  * @property {boolean} help
  * @property {boolean} json
@@ -51,19 +58,23 @@ function toDisplayPath(targetPath) {
 function printHelp() {
   console.log(`Usage: node maintenance/detect-empty-db-clusters.js [options]
 
-Scan PGlite/Postgres cluster roots under pgdata/ and classify them as empty,
-non-empty, or errored.
+Scan PGlite/Postgres cluster roots under the canonical chat layout plus legacy
+pgdata/ storage and classify them as empty, non-empty, or errored.
 
 Options:
-  --base-dir <path>   Base directory to scan. Default: pgdata
-  --include-root      Include pgdata/root in the scan
-  --paths-only        Print only empty DB cluster paths
-  --json              Print the full result as JSON
-  --progress          Print CHECKING lines to stderr while scanning
-  --help              Show this help text
+  --base-dir <path>       Scan only this base directory recursively
+  --chat-dir <path>       Canonical chat directory. Default: ~/chat
+  --legacy-pgdata-dir <path>
+                          Legacy pgdata directory. Default: pgdata
+  --include-root          Include pgdata/root in the scan
+  --paths-only            Print only empty DB cluster paths
+  --json                  Print the full result as JSON
+  --progress              Print CHECKING lines to stderr while scanning
+  --help                  Show this help text
 
 Examples:
   node maintenance/detect-empty-db-clusters.js
+  node maintenance/detect-empty-db-clusters.js --chat-dir ~/chat
   node maintenance/detect-empty-db-clusters.js --progress
   node maintenance/detect-empty-db-clusters.js --paths-only
   node maintenance/detect-empty-db-clusters.js --json
@@ -79,7 +90,14 @@ function parseCliArgs() {
     options: {
       "base-dir": {
         type: "string",
-        default: "pgdata",
+      },
+      "chat-dir": {
+        type: "string",
+        default: DEFAULT_CHAT_DIR,
+      },
+      "legacy-pgdata-dir": {
+        type: "string",
+        default: DEFAULT_LEGACY_PGDATA_DIR,
       },
       "include-root": {
         type: "boolean",
@@ -105,6 +123,8 @@ function parseCliArgs() {
   });
 
   const baseDir = parsed.values["base-dir"];
+  const chatDir = parsed.values["chat-dir"];
+  const legacyPgdataDir = parsed.values["legacy-pgdata-dir"];
   const includeRoot = parsed.values["include-root"];
   const help = parsed.values.help;
   const json = parsed.values.json;
@@ -116,13 +136,42 @@ function parseCliArgs() {
   }
 
   return {
-    baseDir: path.resolve(process.cwd(), baseDir),
+    baseDir: typeof baseDir === "string" ? path.resolve(process.cwd(), baseDir) : null,
+    chatDir: path.resolve(process.cwd(), chatDir),
+    legacyPgdataDir: path.resolve(process.cwd(), legacyPgdataDir),
     includeRoot,
     help,
     json,
     pathsOnly,
     progress,
   };
+}
+
+/**
+ * @param {string} targetPath
+ * @returns {Promise<boolean>}
+ */
+async function pathExists(targetPath) {
+  try {
+    await access(targetPath);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * @param {string} targetPath
+ * @returns {Promise<boolean>}
+ */
+async function isClusterRoot(targetPath) {
+  try {
+    const entries = await readdir(targetPath, { withFileTypes: true });
+    const entryNames = new Set(entries.map((entry) => entry.name));
+    return entryNames.has("PG_VERSION") && entryNames.has("global");
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -161,6 +210,119 @@ async function findClusterRoots(baseDir) {
 
   roots.sort((left, right) => left.localeCompare(right));
   return roots;
+}
+
+/**
+ * @param {string} chatDir
+ * @returns {Promise<string[]>}
+ */
+async function findCanonicalChatClusterRoots(chatDir) {
+  if (!await pathExists(chatDir)) {
+    return [];
+  }
+
+  /** @type {string[]} */
+  const roots = [];
+  const chatEntries = await readdir(chatDir, { withFileTypes: true });
+  for (const chatEntry of chatEntries) {
+    if (!chatEntry.isDirectory()) {
+      continue;
+    }
+
+    const chatRoot = path.join(chatDir, chatEntry.name);
+    const pgdataPath = path.join(chatRoot, "pgdata");
+    if (await isClusterRoot(pgdataPath)) {
+      roots.push(pgdataPath);
+    }
+
+    const actionsPath = path.join(chatRoot, "actions");
+    if (!await pathExists(actionsPath)) {
+      continue;
+    }
+
+    const actionEntries = await readdir(actionsPath, { withFileTypes: true });
+    for (const actionEntry of actionEntries) {
+      const actionPath = path.join(actionsPath, actionEntry.name);
+      if (await isClusterRoot(actionPath)) {
+        roots.push(actionPath);
+      }
+    }
+  }
+
+  return roots;
+}
+
+/**
+ * @param {string[]} roots
+ * @returns {Promise<string[]>}
+ */
+async function dedupeRootsByRealPath(roots) {
+  /** @type {Map<string, string>} */
+  const uniqueRoots = new Map();
+  for (const root of roots) {
+    let resolvedRoot = path.resolve(root);
+    try {
+      resolvedRoot = await realpath(root);
+    } catch {
+      // Keep the lexical path when a root disappears during a maintenance scan.
+    }
+    if (!uniqueRoots.has(resolvedRoot)) {
+      uniqueRoots.set(resolvedRoot, root);
+    }
+  }
+
+  return [...uniqueRoots.values()].sort((left, right) => left.localeCompare(right));
+}
+
+/**
+ * @param {Pick<ScanOptions, "baseDir" | "chatDir" | "legacyPgdataDir" | "includeRoot">} options
+ * @returns {Promise<string[]>}
+ */
+export async function collectClusterRoots(options) {
+  /** @type {string[]} */
+  const roots = [];
+
+  if (options.baseDir) {
+    roots.push(...await findClusterRoots(options.baseDir));
+  } else {
+    roots.push(...await findCanonicalChatClusterRoots(options.chatDir));
+    if (await pathExists(options.legacyPgdataDir)) {
+      roots.push(...await findClusterRoots(options.legacyPgdataDir));
+    }
+  }
+
+  const uniqueRoots = await dedupeRootsByRealPath(roots);
+  if (options.includeRoot) {
+    return uniqueRoots;
+  }
+
+  const rootDbPaths = options.baseDir
+    ? [path.join(options.baseDir, "root")]
+    : [path.join(options.legacyPgdataDir, "root")];
+  const rootDbRealPaths = await Promise.all(rootDbPaths.map(async (rootDbPath) => {
+    try {
+      return await realpath(rootDbPath);
+    } catch {
+      return path.resolve(rootDbPath);
+    }
+  }));
+  const excludedRootDbs = new Set(rootDbRealPaths);
+
+  /** @type {string[]} */
+  const filteredRoots = [];
+  for (const root of uniqueRoots) {
+    let resolvedRoot = path.resolve(root);
+    try {
+      resolvedRoot = await realpath(root);
+    } catch {
+      // Keep the lexical path when a root disappears during a maintenance scan.
+    }
+    if (!excludedRootDbs.has(resolvedRoot)) {
+      filteredRoots.push(root);
+    }
+  }
+
+  return filteredRoots;
 }
 
 /**
@@ -280,11 +442,7 @@ async function classifyClusterRoot(root) {
  * }>}
  */
 async function scanClusters(options) {
-  const rootClusters = await findClusterRoots(options.baseDir);
-  const rootDbPath = path.join(options.baseDir, "root");
-  const scannedRoots = options.includeRoot
-    ? rootClusters
-    : rootClusters.filter((root) => root !== rootDbPath);
+  const scannedRoots = await collectClusterRoots(options);
 
   /** @type {EmptyDbReport[]} */
   const empty = [];
@@ -408,4 +566,6 @@ async function main() {
   printTextSummary(summary);
 }
 
-await main();
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  await main();
+}
