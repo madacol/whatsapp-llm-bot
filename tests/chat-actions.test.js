@@ -1,24 +1,41 @@
-import { describe, it, before } from "node:test";
+import { after, before, describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { PGlite } from "@electric-sql/pglite";
+import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import {
   ensureChatActionsSchema,
   saveChatAction,
   readChatAction,
+  deleteChatAction,
   getChatActions,
   getChatAction,
   ALLOWED_CHAT_PERMISSIONS,
 } from "../actions.js";
-import { setDb } from "../db.js";
+import { getActionDb } from "../db.js";
 
 /** @type {PGlite} */
 let db;
+/** @type {string | undefined} */
+let originalChatDir;
+/** @type {string} */
+let tempChatDir;
 
 before(async () => {
-  db = new PGlite("memory://");
-  // Point the DB cache at our test db for the chat action paths
-  setDb("./pgdata/test-chat-id/create_action", db);
+  originalChatDir = process.env.CHAT_DIR;
+  tempChatDir = await fs.mkdtemp(path.join(os.tmpdir(), "chat-actions-"));
+  process.env.CHAT_DIR = tempChatDir;
+  db = getActionDb("test-chat-id", "create_action");
   await ensureChatActionsSchema(db);
+});
+
+after(async () => {
+  if (originalChatDir === undefined) {
+    delete process.env.CHAT_DIR;
+  } else {
+    process.env.CHAT_DIR = originalChatDir;
+  }
+  await fs.rm(tempChatDir, { recursive: true, force: true });
 });
 
 describe("saveChatAction / readChatAction", () => {
@@ -27,6 +44,7 @@ describe("saveChatAction / readChatAction", () => {
     await saveChatAction(db, "upsert_test", "// v2");
     const code = await readChatAction(db, "upsert_test");
     assert.equal(code, "// v2");
+    await deleteChatAction(db, "upsert_test");
   });
 
 });

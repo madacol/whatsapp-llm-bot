@@ -6,23 +6,43 @@ import os from "node:os";
 import path from "node:path";
 import { homedir } from "node:os";
 import { getChatWorkDir } from "../utils.js";
+import {
+  getChatActionDbDir,
+  getChatActionsDir,
+  getChatEtcDir,
+  getChatPgDataDir,
+  getChatRootDir,
+  getChatWorkspaceDir,
+} from "../chat-paths.js";
 
 describe("getChatWorkDir", () => {
+  /** @type {string | undefined} */
+  let originalChatDir;
   /** @type {string | undefined} */
   let originalWorkspacesDir;
   /** @type {string | undefined} */
   let originalTesting;
   /** @type {string} */
-  let tempDir;
+  let tempChatDir;
+  /** @type {string} */
+  let tempWorkspacesDir;
 
   beforeEach(async () => {
+    originalChatDir = process.env.CHAT_DIR;
     originalWorkspacesDir = process.env.WORKSPACES_DIR;
     originalTesting = process.env.TESTING;
-    tempDir = await fsp.mkdtemp(path.join(os.tmpdir(), "chat-workspaces-"));
-    process.env.WORKSPACES_DIR = tempDir;
+    tempChatDir = await fsp.mkdtemp(path.join(os.tmpdir(), "chat-root-"));
+    tempWorkspacesDir = await fsp.mkdtemp(path.join(os.tmpdir(), "chat-workspaces-"));
+    process.env.CHAT_DIR = tempChatDir;
+    process.env.WORKSPACES_DIR = tempWorkspacesDir;
   });
 
   afterEach(async () => {
+    if (originalChatDir === undefined) {
+      delete process.env.CHAT_DIR;
+    } else {
+      process.env.CHAT_DIR = originalChatDir;
+    }
     if (originalWorkspacesDir === undefined) {
       delete process.env.WORKSPACES_DIR;
     } else {
@@ -33,44 +53,48 @@ describe("getChatWorkDir", () => {
     } else {
       process.env.TESTING = originalTesting;
     }
-    await fsp.rm(tempDir, { recursive: true, force: true });
+    await fsp.rm(tempChatDir, { recursive: true, force: true });
+    await fsp.rm(tempWorkspacesDir, { recursive: true, force: true });
   });
 
-  it("starts the default workspace folder with a sanitized chat name", () => {
-    const workdir = getChatWorkDir("12345@g.us", undefined, "Family / Planning: 2026");
+  it("uses the chat ID as the canonical chat folder", async () => {
+    const chatId = "12345@g.us";
+    const workdir = getChatWorkDir(chatId, undefined, "Family / Planning: 2026");
+    const readableLink = path.join(tempWorkspacesDir, "Family Planning 2026--12345@g.us");
 
-    assert.equal(path.basename(workdir), "Family Planning 2026--12345@g.us");
+    assert.equal(workdir, path.join(tempChatDir, chatId, "workspace"));
     assert.ok(fs.existsSync(workdir));
+    assert.equal(getChatRootDir(chatId), path.join(tempChatDir, chatId));
+    assert.equal(getChatWorkspaceDir(chatId), path.join(tempChatDir, chatId, "workspace"));
+    assert.equal(getChatPgDataDir(chatId), path.join(tempChatDir, chatId, "pgdata"));
+    assert.equal(getChatActionsDir(chatId), path.join(tempChatDir, chatId, "actions"));
+    assert.equal(getChatActionDbDir(chatId, "create_action"), path.join(tempChatDir, chatId, "actions", "create_action"));
+    assert.equal(getChatEtcDir(chatId), path.join(tempChatDir, chatId, "etc"));
+    assert.ok(fs.existsSync(getChatPgDataDir(chatId)));
+    assert.ok(fs.existsSync(getChatActionsDir(chatId)));
+    assert.ok(fs.existsSync(getChatEtcDir(chatId)));
+    assert.equal((await fsp.lstat(readableLink)).isSymbolicLink(), true);
+    assert.equal(path.resolve(tempWorkspacesDir, await fsp.readlink(readableLink)), workdir);
   });
 
-  it("migrates a legacy chatId-only workspace to the named folder", async () => {
-    const legacyDir = path.join(tempDir, "12345@g.us");
-    await fsp.mkdir(legacyDir, { recursive: true });
-    await fsp.writeFile(path.join(legacyDir, "notes.txt"), "existing workspace");
+  it("returns the canonical workspace even when the current call has no chat name", async () => {
+    const namedWorkdir = getChatWorkDir("12345@g.us", undefined, "Family Chat");
+    const unnamedWorkdir = getChatWorkDir("12345@g.us");
+    const chatIdLink = path.join(tempWorkspacesDir, "12345@g.us");
 
-    const workdir = getChatWorkDir("12345@g.us", undefined, "Family Chat");
-
-    assert.equal(path.basename(workdir), "Family Chat--12345@g.us");
-    assert.equal(fs.existsSync(legacyDir), false);
-    assert.equal(await fsp.readFile(path.join(workdir, "notes.txt"), "utf8"), "existing workspace");
+    assert.equal(unnamedWorkdir, namedWorkdir);
+    assert.equal((await fsp.lstat(chatIdLink)).isSymbolicLink(), true);
+    assert.equal(path.resolve(tempWorkspacesDir, await fsp.readlink(chatIdLink)), namedWorkdir);
   });
 
-  it("reuses an existing named workspace even when the current call has no chat name", async () => {
-    const namedDir = path.join(tempDir, "Family Chat--12345@g.us");
-    await fsp.mkdir(namedDir, { recursive: true });
-
-    const workdir = getChatWorkDir("12345@g.us");
-
-    assert.equal(workdir, namedDir);
-  });
-
-  it("keeps test workspaces out of the real home directory by default", () => {
+  it("keeps test chat folders out of the real home directory by default", () => {
+    delete process.env.CHAT_DIR;
     delete process.env.WORKSPACES_DIR;
     process.env.TESTING = "1";
 
     const workdir = getChatWorkDir("test-chat");
 
-    assert.ok(workdir.startsWith(path.join(os.tmpdir(), "whatsapp-llm-bot-workspaces-")));
-    assert.equal(workdir.startsWith(path.join(homedir(), "chat-workspaces")), false);
+    assert.ok(workdir.startsWith(path.join(os.tmpdir(), "whatsapp-llm-bot-chat-")));
+    assert.equal(workdir.startsWith(path.join(homedir(), "chat")), false);
   });
 });

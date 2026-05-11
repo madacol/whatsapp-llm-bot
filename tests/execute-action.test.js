@@ -9,6 +9,7 @@ process.env.MODEL = "mock-model";
 import config from "../config.js";
 import { createTestDb } from "./helpers.js";
 import { setDb } from "../db.js";
+import { getChatActionDbDir } from "../chat-paths.js";
 
 /** @type {typeof import("../actions.js").executeAction} */
 let executeAction;
@@ -29,7 +30,7 @@ before(async () => {
     "db_action", "llm_action",
   ];
   for (const name of actionNames) {
-    setDb(`./pgdata/test-chat/${name}`, testDb);
+    setDb(getChatActionDbDir("test-chat", name), testDb);
   }
 
   const mod = await import("../actions.js");

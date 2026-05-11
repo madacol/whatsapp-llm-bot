@@ -1,6 +1,13 @@
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, renameSync, rmSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  symlinkSync,
+} from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { resolve } from "node:path";
+import { ensureChatDirs, getChatRootDir, getChatWorkspaceDir } from "./chat-paths.js";
 import config from "./config.js";
 import { formatCommandInspectText as formatWhatsappCommandInspectText } from "./presentation/whatsapp.js";
 
@@ -76,28 +83,20 @@ function getWorkspaceDirName(chatId, chatName) {
 }
 
 /**
- * Reuse an already-named workspace so callers without chat metadata still land
- * in the same directory as the main chat run.
- * @param {string} workspacesDir
- * @param {string} chatId
- * @returns {string | null}
+ * @param {string} linkPath
+ * @param {string} targetPath
+ * @returns {void}
  */
-function findNamedWorkspaceDir(workspacesDir, chatId) {
-  const suffix = `${WORKSPACE_NAME_DELIMITER}${chatId}`;
-  if (!existsSync(workspacesDir)) return null;
-  for (const entry of readdirSync(workspacesDir, { withFileTypes: true })) {
-    if (entry.isDirectory() && entry.name.endsWith(suffix)) {
-      return resolve(workspacesDir, entry.name);
-    }
-  }
-  return null;
+function createDirectorySymlinkIfMissing(linkPath, targetPath) {
+  if (linkPath === targetPath) return;
+  if (existsSync(linkPath)) return;
+  symlinkSync(targetPath, linkPath, "dir");
 }
 
 /**
- * Return (and lazily create) a unique working directory for a chat.
- * Falls back to `explicitCwd` when set, otherwise
- * `~/chat-workspaces/<chat-name>--<chatId>/` when a title is available or
- * `~/chat-workspaces/<chatId>/` as a fallback.
+ * Return (and lazily create) the canonical working directory for a chat.
+ * Falls back to `explicitCwd` when set, otherwise `~/chat/<chatId>/workspace`.
+ * Human-friendly names are represented as symlinks under `~/chat-workspaces`.
  *
  * The directory is outside the bot's project tree so the SDK treats each
  * workspace as an independent project root (no inherited CLAUDE.md).
@@ -111,19 +110,13 @@ export function getChatWorkDir(chatId, explicitCwd, chatName) {
   const workspacesDir = getWorkspacesDir();
   mkdirSync(workspacesDir, { recursive: true });
 
-  const existingNamedDir = findNamedWorkspaceDir(workspacesDir, chatId);
-  if (existingNamedDir) return existingNamedDir;
+  const workspaceDir = getChatWorkspaceDir(chatId);
+  mkdirSync(getChatRootDir(chatId), { recursive: true });
+  ensureChatDirs(chatId);
 
-  const legacyDir = resolve(workspacesDir, chatId);
-  const dir = resolve(workspacesDir, getWorkspaceDirName(chatId, chatName));
-
-  if (dir !== legacyDir && existsSync(legacyDir) && !existsSync(dir)) {
-    renameSync(legacyDir, dir);
-    return dir;
-  }
-
-  mkdirSync(dir, { recursive: true });
-  return dir;
+  const linkPath = resolve(workspacesDir, getWorkspaceDirName(chatId, chatName));
+  createDirectorySymlinkIfMissing(linkPath, workspaceDir);
+  return workspaceDir;
 }
 
 /**

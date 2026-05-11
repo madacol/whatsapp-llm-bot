@@ -44,5 +44,6 @@ export default {
   get smtp_pass() { return process.env.SMTP_PASS || ""; },
   get alert_email() { return process.env.ALERT_EMAIL || ""; },
 
+  get chat_dir() { return process.env.CHAT_DIR || ""; },
   get workspaces_dir() { return process.env.WORKSPACES_DIR || ""; },
 };
