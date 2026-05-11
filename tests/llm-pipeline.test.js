@@ -52,6 +52,19 @@ after(async () => {
 /** @param {string} chatId @param {{enabled?: boolean, systemPrompt?: string | null, model?: string | null}} [options] */
 const seedChat = (chatId, options) => seedChat_(db, chatId, options);
 
+/**
+ * @param {Message[]} messages
+ * @returns {string}
+ */
+function getLastUserText(messages) {
+  const lastMessage = messages.at(-1);
+  assert.ok(lastMessage, "Expected a final message");
+  assert.equal(lastMessage.role, "user");
+  const textBlock = lastMessage.content.find((block) => block.type === "text");
+  assert.ok(textBlock, "Expected the last user message to include text");
+  return textBlock.text;
+}
+
 describe("LLM pipeline via createMessageHandler", () => {
   afterEach(() => {
     const pending = mockServer.pendingResponses();
@@ -332,8 +345,9 @@ describe("LLM pipeline via createMessageHandler", () => {
     assert.equal(summaryRequest.model, "mock-fast-model");
   });
 
-  it("returns available slash commands when a slash command is not handled", async () => {
+  it("sends unknown slash commands through the regular LLM path", async () => {
     await seedChat("pipe-slash-unknown", { enabled: true });
+    mockServer.addResponses("Checked status through the harness.");
 
     const requestCountBefore = mockServer.getRequests().length;
     const { context, responses } = createChatTurn({
@@ -343,18 +357,11 @@ describe("LLM pipeline via createMessageHandler", () => {
     await handleMessage(context);
 
     assert.ok(
-      responses.some((response) => response.text.includes("Available slash commands")),
-      `Expected available slash commands reply, got: ${responses.map((response) => response.text).join(" | ")}`,
+      responses.some((response) => response.text.includes("Checked status through the harness.")),
+      `Expected regular LLM reply, got: ${responses.map((response) => response.text).join(" | ")}`,
     );
-    assert.ok(
-      responses.some((response) => response.text.includes("/clear") && response.text.includes("/resume")),
-      `Expected native slash command list, got: ${responses.map((response) => response.text).join(" | ")}`,
-    );
-    assert.equal(
-      mockServer.getRequests().length,
-      requestCountBefore,
-      "Unknown slash commands should not fall through to the regular LLM path",
-    );
+    assert.equal(mockServer.getRequests().length, requestCountBefore + 1);
+    assert.equal(getLastUserText(mockServer.getRequests().at(-1).messages), "/status");
   });
 
   it("recall_history stores full result in DB", async () => {

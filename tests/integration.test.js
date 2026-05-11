@@ -270,7 +270,7 @@ describe("Scenario 7: Show info", () => {
     assert.ok(allText.includes(chatId), "Should contain chat ID");
     assert.ok(allText.toLowerCase().includes("enabled"), "Should contain enabled status");
     assert.ok(allText.toLowerCase().includes("sender"), "Should contain sender info");
-    assert.ok(allText.includes("show: tools off, thinking on, changes on"), `Should contain default show settings, got: ${allText}`);
+    assert.ok(allText.includes("show: tools off, thinking on, changes on, subagents on"), `Should contain default show settings, got: ${allText}`);
   });
 
   it("resets folder with !s reset folder", async () => {

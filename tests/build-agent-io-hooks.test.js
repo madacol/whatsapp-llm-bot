@@ -215,6 +215,18 @@ describe("buildAgentIoHooks", () => {
     });
   });
 
+  it("suppresses sub-agent llm responses when sub-agent visibility is off", async () => {
+    const { hooks, sent } = createSubject({ ...DEFAULT_OUTPUT_VISIBILITY, subagents: false });
+
+    await hooks.onLlmResponse?.("Hidden sub-agent update", {
+      source: "subagent",
+      threadId: "thread-child",
+      agentNickname: "Mill",
+    });
+
+    assert.equal(sent.length, 0);
+  });
+
   it("sends one thinking placeholder and makes it inspectable", async () => {
     const subject = createReasoningSubject();
 

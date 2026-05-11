@@ -56,16 +56,6 @@ function isArchivedWorkspaceCodingRequest(binding, firstBlock) {
 }
 
 /**
- * @param {SlashCommandDescriptor[]} commands
- * @returns {string}
- */
-function formatAvailableSlashCommands(commands) {
-  return commands
-    .map((command) => `/${command.name} - ${command.description}`)
-    .join("\n");
-}
-
-/**
  * @param {SendContent} content
  * @returns {string}
  */
@@ -513,13 +503,7 @@ export function createConversationRunner({ store, llmClient, getActionsFn, execu
         return null;
       }
 
-      const availableSlashCommands = harness.listSlashCommands();
-      const slashCommandName = firstBlock.text.split(/\s+/, 1)[0] ?? "/";
-      await context.reply(contentEvent(
-        "tool-result",
-        `Unknown slash command: ${slashCommandName}\nAvailable slash commands:\n${formatAvailableSlashCommands(availableSlashCommands)}`,
-      ));
-      return null;
+      log.debug("Slash command not handled by harness; continuing through normal LLM path", slashCommand);
     }
 
     return handleLlmMessage({

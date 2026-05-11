@@ -479,11 +479,12 @@ describe("per-chat model selection", () => {
       );
 
       assert.ok(result.includes("*Show*"), `expected setting title, got: ${result}`);
-      assert.ok(result.includes("- Current: tools off, thinking on, changes on"), `expected current summary, got: ${result}`);
+      assert.ok(result.includes("- Current: tools off, thinking on, changes on, subagents on"), `expected current summary, got: ${result}`);
       assert.ok(result.includes("*Controls*"), `expected controls section, got: ${result}`);
       assert.ok(result.includes("- tools"), `expected tools flag, got: ${result}`);
       assert.ok(result.includes("- thinking"), `expected thinking flag, got: ${result}`);
       assert.ok(result.includes("- changes"), `expected changes flag, got: ${result}`);
+      assert.ok(result.includes("- subagents"), `expected subagents flag, got: ${result}`);
     });
 
     it("does not accept text subcommands for show anymore", async () => {
@@ -538,6 +539,7 @@ describe("per-chat model selection", () => {
           { id: "tools", label: "⚪ Show tool activity" },
           { id: "thinking", label: "🟢 Hide thinking" },
           { id: "changes", label: "🟢 Hide file changes" },
+          { id: "subagents", label: "🟢 Hide sub-agent output" },
           { id: "none", label: "⚪ Hide all extras" },
         ],
       );

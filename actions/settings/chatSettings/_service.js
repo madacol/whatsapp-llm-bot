@@ -175,6 +175,8 @@ function getShowPickerSubject(key) {
       return "thinking";
     case "changes":
       return "file changes";
+    case "subagents":
+      return "sub-agent output";
   }
 }
 
