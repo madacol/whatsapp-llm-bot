@@ -12,7 +12,8 @@ import {
   getChatAction,
   ALLOWED_CHAT_PERMISSIONS,
 } from "../actions.js";
-import { getActionDb } from "../db.js";
+import { getActionDb, setDb } from "../db.js";
+import { getChatActionDbDir } from "../chat-paths.js";
 
 /** @type {PGlite} */
 let db;
@@ -127,6 +128,20 @@ export default {
 
   it("returns null for nonexistent action", async () => {
     const action = await getChatAction("test-chat-id", "does_not_exist");
+    assert.equal(action, null);
+  });
+
+  it("returns null when the chat action DB cannot be read", async () => {
+    const brokenChatId = "broken-chat-action-db";
+    const failingDb = /** @type {PGlite} */ ({
+      sql() {
+        throw new Error("db down");
+      },
+    });
+    setDb(getChatActionDbDir(brokenChatId, "create_action"), failingDb);
+
+    const action = await getChatAction(brokenChatId, "restart");
+
     assert.equal(action, null);
   });
 });
