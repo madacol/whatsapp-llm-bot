@@ -117,4 +117,48 @@ describe("createCodexEventDispatcher", () => {
       },
     }]);
   });
+
+  it("emits standard spawn_agent/wait_agent completed statuses as sub-agent output", async () => {
+    const { dispatcher, llmResponses } = createSubject();
+
+    await dispatcher.handleNormalized({
+      sessionId: "thread-parent",
+      toolEvent: {
+        id: "tool-spawn",
+        name: "spawn_agent",
+        arguments: {},
+        status: "completed",
+        output: JSON.stringify({
+          agent_id: "thread-child",
+          nickname: "Kierkegaard",
+        }),
+      },
+    });
+    await dispatcher.handleNormalized({
+      sessionId: "thread-parent",
+      toolEvent: {
+        id: "tool-wait",
+        name: "wait_agent",
+        arguments: {},
+        status: "completed",
+        output: JSON.stringify({
+          status: {
+            "thread-child": {
+              completed: "SUBAGENT_VISUAL_TEST: hello from a spawned sub-agent.",
+            },
+          },
+          timed_out: false,
+        }),
+      },
+    });
+
+    assert.deepEqual(llmResponses, [{
+      text: "SUBAGENT_VISUAL_TEST: hello from a spawned sub-agent.",
+      metadata: {
+        source: "subagent",
+        threadId: "thread-child",
+        agentNickname: "Kierkegaard",
+      },
+    }]);
+  });
 });

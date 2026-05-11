@@ -253,6 +253,61 @@ describe("startCodexAppServerRun", () => {
     assert.deepEqual(sendRequests.map((request) => request.method), ["thread/resume", "turn/start"]);
   });
 
+  it("keeps the parent session when app server reports a sub-agent thread start", async () => {
+    const started = await startCodexAppServerRun({
+      chatId: "chat-1",
+      prompt: "Continue",
+      messages: [{ role: "user", content: [{ type: "text", text: "Continue" }] }],
+      sessionId: "thread-parent",
+    }, {
+      openConnection: async () => ({
+        async sendRequest(method) {
+          if (method === "thread/resume") {
+            return { thread: { id: "thread-parent" } };
+          }
+          if (method === "turn/start") {
+            return { turn: { id: "turn-1" } };
+          }
+          return {};
+        },
+        notifications: (async function* () {
+          yield {
+            method: "thread/started",
+            params: {
+              thread: {
+                id: "thread-child",
+                source: {
+                  subAgent: {
+                    thread_spawn: {
+                      parent_thread_id: "thread-parent",
+                      agent_nickname: "Kierkegaard",
+                    },
+                  },
+                },
+              },
+            },
+          };
+          yield {
+            method: "turn/completed",
+            params: {
+              threadId: "thread-child",
+              turn: {
+                id: "turn-1",
+                status: "completed",
+                error: null,
+              },
+            },
+          };
+        })(),
+        close: async () => {},
+      }),
+    });
+
+    const completed = await started.done;
+
+    assert.equal(completed.sessionId, "thread-parent");
+  });
+
   it("passes on-request approval policy through unchanged", async () => {
     const connectionMock = createOpenConnectionMock();
 
