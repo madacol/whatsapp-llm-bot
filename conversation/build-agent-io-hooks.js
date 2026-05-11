@@ -136,6 +136,10 @@ export function buildAgentIoHooks(
       /** @type {ToolContentBlock[]} */
       const content = [{ type: "markdown", text }];
       if (metadata?.source === "subagent") {
+        if (!visibility.subagents) {
+          recordDeliveredContent?.(content);
+          return;
+        }
         await context.reply(subagentMessageEvent({
           text,
           ...(metadata.threadId !== undefined && { threadId: metadata.threadId }),

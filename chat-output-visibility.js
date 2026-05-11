@@ -3,18 +3,20 @@
  */
 
 /**
- * @typedef {"tools" | "thinking" | "changes"} OutputVisibilityKey
+ * @typedef {"tools" | "thinking" | "changes" | "subagents"} OutputVisibilityKey
  *
  * @typedef {{
  *   thinking?: boolean;
  *   tools?: boolean;
  *   changes?: boolean;
+ *   subagents?: boolean;
  * }} OutputVisibilityOverrides
  *
  * @typedef {{
  *   tools: boolean;
  *   thinking: boolean;
  *   changes: boolean;
+ *   subagents: boolean;
  * }} OutputVisibility
  *
  * @typedef {{
@@ -45,6 +47,12 @@ export const OUTPUT_VISIBILITY_FLAGS = Object.freeze([
     description: "Show file changes and diff-style output from edits.",
     defaultValue: true,
   },
+  {
+    key: "subagents",
+    label: "subagents",
+    description: "Show final responses from spawned sub-agents.",
+    defaultValue: true,
+  },
 ]);
 
 /** @type {ReadonlyMap<OutputVisibilityKey, OutputVisibilityFlagDefinition>} */
@@ -57,6 +65,7 @@ export const DEFAULT_OUTPUT_VISIBILITY = Object.freeze({
   tools: false,
   thinking: true,
   changes: true,
+  subagents: true,
 });
 
 /**
@@ -124,6 +133,11 @@ export function normalizeOutputVisibility(raw) {
   const changes = raw.changes;
   if (typeof changes === "boolean") {
     normalized.changes = changes;
+  }
+
+  const subagents = raw.subagents;
+  if (typeof subagents === "boolean") {
+    normalized.subagents = subagents;
   }
   return normalized;
 }
