@@ -1,6 +1,6 @@
 import { MAX_TOOL_CALL_DEPTH, parseToolArgs } from "#harnesses";
 import { buildToolPresentation } from "../tool-presentation-model.js";
-import { contentEvent, planEvent, reasoningInspectState, textUpdate, toolCallEvent, usageEvent } from "../outbound-events.js";
+import { contentEvent, planEvent, reasoningInspectState, subagentMessageEvent, textUpdate, toolCallEvent, usageEvent } from "../outbound-events.js";
 import { createCodexDisplayHooks } from "./codex-hook-display.js";
 import { DEFAULT_OUTPUT_VISIBILITY } from "../chat-output-visibility.js";
 import { createCompactToolActivityFeed } from "./compact-tool-activity.js";
@@ -131,10 +131,21 @@ export function buildAgentIoHooks(
         await emitWhileWorking(() => reasoningHandle ? reasoningHandle.update(textUpdate("Thought")) : Promise.resolve());
       }
     },
-    onLlmResponse: async (text) => {
+    onLlmResponse: async (text, metadata) => {
       await compactToolActivity.close();
       /** @type {ToolContentBlock[]} */
       const content = [{ type: "markdown", text }];
+      if (metadata?.source === "subagent") {
+        await context.reply(subagentMessageEvent({
+          text,
+          ...(metadata.threadId !== undefined && { threadId: metadata.threadId }),
+          ...(metadata.parentThreadId !== undefined && { parentThreadId: metadata.parentThreadId }),
+          ...(metadata.agentNickname !== undefined && { agentNickname: metadata.agentNickname }),
+          ...(metadata.agentRole !== undefined && { agentRole: metadata.agentRole }),
+        }));
+        recordDeliveredContent?.(content);
+        return;
+      }
       await context.reply(contentEvent("llm", content, { cwd }));
       recordDeliveredContent?.(content);
     },

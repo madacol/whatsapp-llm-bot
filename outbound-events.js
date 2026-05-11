@@ -80,6 +80,27 @@ export function usageEvent(cost, tokens) {
 }
 
 /**
+ * @param {{
+ *   text: string,
+ *   threadId?: string,
+ *   parentThreadId?: string,
+ *   agentNickname?: string,
+ *   agentRole?: string,
+ * }} input
+ * @returns {SubagentMessageEvent}
+ */
+export function subagentMessageEvent(input) {
+  return {
+    kind: "subagent_message",
+    text: input.text,
+    ...(input.threadId !== undefined && { threadId: input.threadId }),
+    ...(input.parentThreadId !== undefined && { parentThreadId: input.parentThreadId }),
+    ...(input.agentNickname !== undefined && { agentNickname: input.agentNickname }),
+    ...(input.agentRole !== undefined && { agentRole: input.agentRole }),
+  };
+}
+
+/**
  * @param {import("./tool-presentation-model.js").ToolPresentation} presentation
  * @returns {MessageHandleUpdate}
  */

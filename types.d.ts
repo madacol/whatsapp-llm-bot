@@ -190,6 +190,15 @@ type UsageEvent = {
   tokens: UsageTokens;
 };
 
+type SubagentMessageEvent = {
+  kind: "subagent_message";
+  text: string;
+  threadId?: string;
+  parentThreadId?: string;
+  agentNickname?: string;
+  agentRole?: string;
+};
+
 type UsageTokens = {
   prompt: number;
   completion: number;
@@ -205,6 +214,7 @@ type OutboundEvent =
   | ToolActivityEvent
   | PlanEvent
   | FileChangeEvent
+  | SubagentMessageEvent
   | UsageEvent;
 
 type MessageHandleUpdate =
@@ -584,7 +594,7 @@ type AgentIOHooks = {
     text?: string,
     hasEncryptedContent?: boolean,
   }) => Promise<void>;
-  onLlmResponse?: (text: string) => Promise<void>;
+  onLlmResponse?: (text: string, metadata?: LlmResponseMetadata) => Promise<void>;
   /** Present a structured question to the user and wait for their response. Returns the chosen option text. */
   onAskUser?: (question: string, options: string[], preamble?: string, descriptions?: string[]) => Promise<string>;
   onToolCall?: (toolCall: LlmChatResponse['toolCalls'][0], formatToolCall?: (params: Record<string, any>) => string, context?: { oldContent?: string }) => Promise<MessageHandle | void>;
@@ -606,6 +616,14 @@ type AgentIOHooks = {
   onContinuePrompt?: () => Promise<boolean>;
   onDepthLimit?: () => Promise<boolean>;
   onUsage?: (cost: string, tokens: UsageTokens) => Promise<void>;
+};
+
+type LlmResponseMetadata = {
+  source?: "llm" | "subagent";
+  threadId?: string;
+  parentThreadId?: string;
+  agentNickname?: string;
+  agentRole?: string;
 };
 
 type HarnessSessionRef = {

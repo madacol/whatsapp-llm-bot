@@ -161,6 +161,12 @@ function isOutboundEvent(value) {
         && (value.oldText === undefined || typeof value.oldText === "string")
         && (value.newText === undefined || typeof value.newText === "string")
         && (value.cwd === undefined || value.cwd === null || typeof value.cwd === "string");
+    case "subagent_message":
+      return typeof value.text === "string"
+        && (value.threadId === undefined || typeof value.threadId === "string")
+        && (value.parentThreadId === undefined || typeof value.parentThreadId === "string")
+        && (value.agentNickname === undefined || typeof value.agentNickname === "string")
+        && (value.agentRole === undefined || typeof value.agentRole === "string");
     case "usage":
       return typeof value.cost === "string"
         && isRecord(value.tokens)

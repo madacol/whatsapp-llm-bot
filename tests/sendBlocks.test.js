@@ -67,6 +67,25 @@ function createMockSock() {
   return { sock, sent, relayed };
 }
 
+describe("sendEvent – sub-agent messages", () => {
+  it("renders sub-agent messages with their own header", async () => {
+    const { sock, sent } = createMockSock();
+
+    await sendEvent(sock, "test-chat", {
+      kind: "subagent_message",
+      text: "SUBAGENT_VISIBLE_TEST: hello from the spawned sub-agent.",
+      agentNickname: "Mill",
+      agentRole: "worker",
+    });
+
+    assert.equal(sent.length, 1);
+    assert.equal(
+      sent[0]?.msg.text,
+      "🧩 *Sub-agent Mill*\n_worker_\nSUBAGENT_VISIBLE_TEST: hello from the spawned sub-agent.",
+    );
+  });
+});
+
 describe("sendBlocks – markdown with code", () => {
   it("renders code blocks inside markdown as images", async () => {
     const { sock, sent } = createMockSock();

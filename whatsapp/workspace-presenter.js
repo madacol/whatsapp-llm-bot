@@ -59,6 +59,18 @@ function stringifyContent(content) {
 }
 
 /**
+ * @param {SubagentMessageEvent} event
+ * @returns {string}
+ */
+function stringifySubagentMessage(event) {
+  const title = event.agentNickname
+    ? `*Sub-agent ${event.agentNickname}*`
+    : "*Sub-agent*";
+  const detail = event.agentRole ? `_${event.agentRole}_` : "";
+  return [`🧩 ${title}`, detail, event.text].filter(Boolean).join("\n");
+}
+
+/**
  * Best-effort textual fallback when a transport does not support semantic
  * workspace events directly.
  * @param {OutboundEvent} event
@@ -83,6 +95,8 @@ function stringifyEvent(event) {
     }
     case "usage":
       return `${SOURCE_PREFIX.usage} ${formatUsageEventText(event)}`;
+    case "subagent_message":
+      return stringifySubagentMessage(event);
     default:
       return "";
   }

@@ -193,6 +193,28 @@ describe("buildAgentIoHooks", () => {
     assert.equal(sent[0].event.presentation.summary, "*Plan*  _Working on: Patch the formatter_");
   });
 
+  it("maps sub-agent llm responses to subagent_message events", async () => {
+    const { hooks, sent } = createSubject();
+
+    await hooks.onLlmResponse?.("SUBAGENT_VISIBLE_TEST: hello from the spawned sub-agent.", {
+      source: "subagent",
+      threadId: "thread-child",
+      parentThreadId: "thread-parent",
+      agentNickname: "Mill",
+      agentRole: "worker",
+    });
+
+    assertSingleSentEvent(sent, "reply", "subagent_message");
+    assert.deepEqual(sent[0]?.event, {
+      kind: "subagent_message",
+      text: "SUBAGENT_VISIBLE_TEST: hello from the spawned sub-agent.",
+      threadId: "thread-child",
+      parentThreadId: "thread-parent",
+      agentNickname: "Mill",
+      agentRole: "worker",
+    });
+  });
+
   it("sends one thinking placeholder and makes it inspectable", async () => {
     const subject = createReasoningSubject();
 
