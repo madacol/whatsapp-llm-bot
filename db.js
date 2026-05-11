@@ -1,6 +1,7 @@
 import { PGlite } from "@electric-sql/pglite";
 import { vector } from "@electric-sql/pglite/vector";
 import { mkdirSync } from "node:fs";
+import { getChatActionDbDir, getChatPgDataDir } from "./chat-paths.js";
 
 /** @type {Map<string, PGlite>} */
 const dbCache = new Map();
@@ -97,7 +98,7 @@ export function getRootDb() {
  * @returns {PGlite}
  */
 export function getChatDb(chatId) {
-  return getDb(`${BASE_DIR}/${chatId}`);
+  return getDb(getChatPgDataDir(chatId));
 }
 
 /**
@@ -107,7 +108,7 @@ export function getChatDb(chatId) {
  * @returns {PGlite}
  */
 export function getActionDb(chatId, actionName) {
-  return getDb(`${BASE_DIR}/${chatId}/${actionName}`);
+  return getDb(getChatActionDbDir(chatId, actionName));
 }
 
 /**

@@ -7,23 +7,36 @@ import { buildRunConfig } from "../conversation/build-run-config.js";
 
 describe("buildRunConfig", () => {
   /** @type {string | undefined} */
+  let originalChatDir;
+  /** @type {string | undefined} */
   let originalWorkspacesDir;
   /** @type {string} */
-  let tempDir;
+  let tempChatDir;
+  /** @type {string} */
+  let tempWorkspacesDir;
 
   beforeEach(async () => {
+    originalChatDir = process.env.CHAT_DIR;
     originalWorkspacesDir = process.env.WORKSPACES_DIR;
-    tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "build-run-config-"));
-    process.env.WORKSPACES_DIR = tempDir;
+    tempChatDir = await fs.mkdtemp(path.join(os.tmpdir(), "build-run-config-chat-"));
+    tempWorkspacesDir = await fs.mkdtemp(path.join(os.tmpdir(), "build-run-config-workspaces-"));
+    process.env.CHAT_DIR = tempChatDir;
+    process.env.WORKSPACES_DIR = tempWorkspacesDir;
   });
 
   afterEach(async () => {
+    if (originalChatDir === undefined) {
+      delete process.env.CHAT_DIR;
+    } else {
+      process.env.CHAT_DIR = originalChatDir;
+    }
     if (originalWorkspacesDir === undefined) {
       delete process.env.WORKSPACES_DIR;
     } else {
       process.env.WORKSPACES_DIR = originalWorkspacesDir;
     }
-    await fs.rm(tempDir, { recursive: true, force: true });
+    await fs.rm(tempChatDir, { recursive: true, force: true });
+    await fs.rm(tempWorkspacesDir, { recursive: true, force: true });
   });
 
   it("defaults sandbox mode to workspace-write", () => {
@@ -33,10 +46,10 @@ describe("buildRunConfig", () => {
     assert.equal(typeof config.workdir, "string");
   });
 
-  it("uses the chat name when building the default workspace path", () => {
+  it("uses the chat ID as the canonical workspace path", () => {
     const config = buildRunConfig("chat-1", undefined, "Project Alpha");
 
-    assert.equal(path.basename(config.workdir ?? ""), "Project Alpha--chat-1");
+    assert.equal(config.workdir, path.join(tempChatDir, "chat-1", "workspace"));
   });
 
   it("uses the bound project root for project chats", () => {
