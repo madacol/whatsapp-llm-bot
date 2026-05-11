@@ -67,9 +67,9 @@ describe("getSandboxEscapeRequest", () => {
 
   it("allows shell commands in workspaces with backslash-escaped spaces", () => {
     const request = getSandboxEscapeRequest("Bash", {
-      command: "cd /home/mada/chat-workspaces/Get\\ Bookmarklets--120363427701541991@g.us && pnpm run build:vite",
+      command: "cd /home/mada/chat-workspaces/Get\\ Bookmarklets && pnpm run build:vite",
     }, {
-      workdir: "/home/mada/chat-workspaces/Get Bookmarklets--120363427701541991@g.us",
+      workdir: "/home/mada/chat-workspaces/Get Bookmarklets",
       sandboxMode: "workspace-write",
     });
 
