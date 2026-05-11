@@ -394,6 +394,203 @@ describe("startCodexAppServerRun", () => {
     }]);
   });
 
+  it("reads sub-agent thread metadata before emitting collab sub-agent responses", async () => {
+    /** @type {Array<{ text: string, metadata?: LlmResponseMetadata }>} */
+    const responses = [];
+
+    const started = await startCodexAppServerRun({
+      chatId: "chat-1",
+      prompt: "Continue",
+      messages: [{ role: "user", content: [{ type: "text", text: "Continue" }] }],
+      sessionId: "thread-parent",
+      hooks: {
+        onLlmResponse: async (text, metadata) => {
+          responses.push({ text, ...(metadata !== undefined && { metadata }) });
+        },
+      },
+    }, {
+      openConnection: async () => ({
+        async sendRequest(method, params) {
+          if (method === "thread/resume") {
+            return { thread: { id: "thread-parent" } };
+          }
+          if (method === "turn/start") {
+            return { turn: { id: "turn-1" } };
+          }
+          if (method === "thread/read" && params?.threadId === "thread-child") {
+            return {
+              thread: {
+                id: "thread-child",
+                agentNickname: "Heisenberg",
+                agentRole: "default",
+                source: {
+                  subAgent: {
+                    thread_spawn: {
+                      parent_thread_id: "thread-parent",
+                      agent_nickname: "Heisenberg",
+                      agent_role: "default",
+                    },
+                  },
+                },
+              },
+            };
+          }
+          return {};
+        },
+        notifications: (async function* () {
+          yield {
+            method: "item/completed",
+            params: {
+              threadId: "thread-parent",
+              item: {
+                id: "item-wait",
+                type: "collabAgentToolCall",
+                tool: "wait",
+                receiverThreadIds: ["thread-child"],
+                agentsStates: {
+                  "thread-child": {
+                    status: "completed",
+                    message: "SUBAGENT_NICKNAME_VERIFY: hello from named sub-agent",
+                  },
+                },
+                status: "completed",
+              },
+            },
+          };
+          yield {
+            method: "turn/completed",
+            params: {
+              threadId: "thread-parent",
+              turn: {
+                id: "turn-1",
+                status: "completed",
+                error: null,
+              },
+            },
+          };
+        })(),
+        close: async () => {},
+      }),
+    });
+
+    await started.done;
+
+    assert.deepEqual(responses, [{
+      text: "SUBAGENT_NICKNAME_VERIFY: hello from named sub-agent",
+      metadata: {
+        source: "subagent",
+        threadId: "thread-child",
+        parentThreadId: "thread-parent",
+        agentNickname: "Heisenberg",
+        agentRole: "default",
+      },
+    }]);
+  });
+
+  it("reads sub-agent thread metadata before emitting child thread agent messages", async () => {
+    /** @type {Array<{ text: string, metadata?: LlmResponseMetadata }>} */
+    const responses = [];
+
+    const started = await startCodexAppServerRun({
+      chatId: "chat-1",
+      prompt: "Continue",
+      messages: [{ role: "user", content: [{ type: "text", text: "Continue" }] }],
+      sessionId: "thread-parent",
+      hooks: {
+        onLlmResponse: async (text, metadata) => {
+          responses.push({ text, ...(metadata !== undefined && { metadata }) });
+        },
+      },
+    }, {
+      openConnection: async () => ({
+        async sendRequest(method, params) {
+          if (method === "thread/resume") {
+            return { thread: { id: "thread-parent" } };
+          }
+          if (method === "turn/start") {
+            return { turn: { id: "turn-1" } };
+          }
+          if (method === "thread/read" && params?.threadId === "thread-child") {
+            return {
+              thread: {
+                id: "thread-child",
+                agentNickname: "Planck",
+                agentRole: "default",
+                source: {
+                  subAgent: {
+                    thread_spawn: {
+                      parent_thread_id: "thread-parent",
+                      agent_nickname: "Planck",
+                      agent_role: "default",
+                    },
+                  },
+                },
+              },
+            };
+          }
+          return {};
+        },
+        notifications: (async function* () {
+          yield {
+            method: "item/completed",
+            params: {
+              threadId: "thread-parent",
+              item: {
+                id: "item-spawn",
+                type: "collabAgentToolCall",
+                tool: "spawnAgent",
+                receiverThreadIds: ["thread-child"],
+                agentsStates: {
+                  "thread-child": {
+                    status: "running",
+                    message: null,
+                  },
+                },
+                status: "completed",
+              },
+            },
+          };
+          yield {
+            method: "item/completed",
+            params: {
+              threadId: "thread-child",
+              item: {
+                id: "item-child-message",
+                type: "agentMessage",
+                text: "SUBAGENT_HEADER_LIVE_PROOF: hello from sub-agent.",
+              },
+            },
+          };
+          yield {
+            method: "turn/completed",
+            params: {
+              threadId: "thread-parent",
+              turn: {
+                id: "turn-1",
+                status: "completed",
+                error: null,
+              },
+            },
+          };
+        })(),
+        close: async () => {},
+      }),
+    });
+
+    await started.done;
+
+    assert.deepEqual(responses, [{
+      text: "SUBAGENT_HEADER_LIVE_PROOF: hello from sub-agent.",
+      metadata: {
+        source: "subagent",
+        threadId: "thread-child",
+        parentThreadId: "thread-parent",
+        agentNickname: "Planck",
+        agentRole: "default",
+      },
+    }]);
+  });
+
   it("passes on-request approval policy through unchanged", async () => {
     const connectionMock = createOpenConnectionMock();
 

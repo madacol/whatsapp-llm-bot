@@ -67,6 +67,66 @@ function isPersistedCodexTurn(value) {
 }
 
 /**
+ * @param {unknown} source
+ * @returns {Record<string, unknown> | null}
+ */
+function extractSubagentSource(source) {
+  if (!isObjectRecord(source)) {
+    return null;
+  }
+  const subagent = source.subagent ?? source.subAgent;
+  return isObjectRecord(subagent) ? subagent : null;
+}
+
+/**
+ * @param {unknown} response
+ * @param {string} fallbackThreadId
+ * @returns {import("./codex-events.js").CodexThreadEvent | null}
+ */
+function extractReadThreadSubagentEvent(response, fallbackThreadId) {
+  if (!isObjectRecord(response) || !isObjectRecord(response.thread)) {
+    return null;
+  }
+  const thread = response.thread;
+  const id = typeof thread.id === "string" ? thread.id : fallbackThreadId;
+  const subagent = extractSubagentSource(thread.source);
+  const threadSpawn = isObjectRecord(subagent?.thread_spawn) ? subagent.thread_spawn : null;
+  const agentNickname = typeof thread.agentNickname === "string"
+    ? thread.agentNickname
+    : typeof threadSpawn?.agent_nickname === "string" ? threadSpawn.agent_nickname : undefined;
+  const agentRole = typeof thread.agentRole === "string"
+    ? thread.agentRole
+    : typeof threadSpawn?.agent_role === "string" ? threadSpawn.agent_role : undefined;
+  const parentThreadId = typeof threadSpawn?.parent_thread_id === "string" ? threadSpawn.parent_thread_id : undefined;
+
+  if (!agentNickname && !agentRole && !parentThreadId) {
+    return null;
+  }
+
+  return {
+    id,
+    kind: "subagent",
+    ...(parentThreadId !== undefined && { parentThreadId }),
+    ...(agentNickname !== undefined && { agentNickname }),
+    ...(agentRole !== undefined && { agentRole }),
+  };
+}
+
+/**
+ * @param {import("./codex-events.js").CodexToolEvent | undefined} toolEvent
+ * @returns {string[]}
+ */
+function extractSpawnedReceiverThreadIds(toolEvent) {
+  if (!toolEvent || toolEvent.name !== "spawn_agent" || toolEvent.status !== "completed") {
+    return [];
+  }
+  const receiverThreadIds = toolEvent.arguments.receiver_thread_ids;
+  return Array.isArray(receiverThreadIds)
+    ? receiverThreadIds.filter((threadId) => typeof threadId === "string")
+    : [];
+}
+
+/**
  * @param {unknown} response
  * @returns {PersistedCodexTurn[]}
  */
@@ -214,6 +274,12 @@ export async function startCodexAppServerRun(input, deps = {}) {
   let turnId = null;
   let turnCompleted = false;
   let turnStarted = false;
+  /** @type {Map<string, import("./codex-events.js").CodexThreadEvent | null>} */
+  const readSubagentThreadEvents = new Map();
+  /** @type {Set<string>} */
+  const dispatchedSubagentThreadEvents = new Set();
+  /** @type {Set<string>} */
+  const spawnedReceiverThreadIds = new Set();
   /** @type {() => void} */
   let resolveTurnStarted = () => {};
   /** @type {Promise<void>} */
@@ -265,6 +331,41 @@ export async function startCodexAppServerRun(input, deps = {}) {
         clearTimeout(timeout);
       }
     }
+  }
+
+  /**
+   * @param {string} subagentThreadId
+   * @returns {Promise<import("./codex-events.js").CodexThreadEvent | null>}
+   */
+  async function readSubagentThreadEvent(subagentThreadId) {
+    if (readSubagentThreadEvents.has(subagentThreadId)) {
+      return readSubagentThreadEvents.get(subagentThreadId) ?? null;
+    }
+    try {
+      const response = await activeConnection.sendRequest("thread/read", { threadId: subagentThreadId });
+      const threadEvent = extractReadThreadSubagentEvent(response, subagentThreadId);
+      readSubagentThreadEvents.set(subagentThreadId, threadEvent);
+      return threadEvent;
+    } catch {
+      readSubagentThreadEvents.set(subagentThreadId, null);
+      return null;
+    }
+  }
+
+  /**
+   * @param {string} subagentThreadId
+   * @returns {Promise<void>}
+   */
+  async function dispatchReadSubagentThreadEvent(subagentThreadId) {
+    const threadEvent = await readSubagentThreadEvent(subagentThreadId);
+    if (!threadEvent || dispatchedSubagentThreadEvents.has(threadEvent.id)) {
+      return;
+    }
+    dispatchedSubagentThreadEvents.add(threadEvent.id);
+    await dispatcher.handleNormalized({
+      sessionId: threadEvent.id,
+      threadEvent,
+    });
   }
 
   const threadRequestParams = {
@@ -347,6 +448,22 @@ export async function startCodexAppServerRun(input, deps = {}) {
 
         if (typeof message.method === "string" && message.method === "turn/completed") {
           turnCompleted = true;
+        }
+        if (normalized.threadEvent?.kind === "subagent") {
+          readSubagentThreadEvents.set(normalized.threadEvent.id, normalized.threadEvent);
+          dispatchedSubagentThreadEvents.add(normalized.threadEvent.id);
+        }
+        for (const threadId of extractSpawnedReceiverThreadIds(normalized.toolEvent)) {
+          spawnedReceiverThreadIds.add(threadId);
+        }
+        if (normalized.sessionId && spawnedReceiverThreadIds.has(normalized.sessionId)) {
+          await dispatchReadSubagentThreadEvent(normalized.sessionId);
+        }
+        for (const response of normalized.subagentResponses ?? []) {
+          if (!response.threadId) {
+            continue;
+          }
+          await dispatchReadSubagentThreadEvent(response.threadId);
         }
         await dispatcher.handleNormalized(normalized);
 
