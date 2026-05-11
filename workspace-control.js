@@ -86,6 +86,7 @@ export function createWorkspaceControl({ store, workspacePresentation, workspace
     const { branch, worktreePath } = await workspaceRepo.replaceWorkspaceCheckout(repo, existing, baseBranch);
     const surface = await workspacePresentation.ensureWorkspaceVisible({
       projectId: repo.project_id,
+      projectName: repo.name,
       workspaceId: existing.workspace_id,
       workspaceName: existing.name,
       sourceChatName: context.chatName,
@@ -159,6 +160,7 @@ export function createWorkspaceControl({ store, workspacePresentation, workspace
     try {
       const surface = await workspacePresentation.ensureWorkspaceVisible({
         projectId: repo.project_id,
+        projectName: repo.name,
         workspaceId,
         workspaceName,
         sourceChatName: context.chatName,

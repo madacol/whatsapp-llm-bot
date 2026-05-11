@@ -15,7 +15,6 @@ import { createChatTurn, createMockLlmServer, createTestDb, seedChat as seedChat
 import { setDb } from "../db.js";
 import { contentEvent } from "../outbound-events.js";
 import { getChatWorkDir } from "../utils.js";
-import { buildCommunityDescription } from "../whatsapp/workspace-topology.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -319,13 +318,13 @@ describe("workspace lifecycle", () => {
     assert.ok(turn.responses.some((response) => response.text.includes("Replaced workspace `payments`.")));
     assert.deepEqual(transportState.renamedGroups, [{
       chatId: originalSurface.workspace_chat_id,
-      subject: "[payments] Original Group",
+      subject: "Original Group - payments",
     }]);
-    assert.ok(turn.responses.some((response) => response.text.includes("Chat: `[payments] Original Group`")));
+    assert.ok(turn.responses.some((response) => response.text.includes("Chat: `Original Group - payments`")));
     await assert.rejects(() => fs.access(path.join(replacedWorkspace.worktree_path, "replace-marker.txt")));
   });
 
-  it("uses the source chat name when naming a new workspace chat", async () => {
+  it("uses the project name captured from the source chat when naming a new workspace chat", async () => {
     const repoRoot = await createRepoFixture();
     const transportState = createFakeTransport();
     const handleMessage = await createHandler({ transport: transportState.transport });
@@ -339,8 +338,10 @@ describe("workspace lifecycle", () => {
     });
     await handleMessage(context);
 
-    assert.equal(transportState.createdGroups[0]?.subject, "[payments] Original Group");
-    assert.ok(responses.some((response) => response.text.includes("Chat: `[payments] Original Group`")));
+    const repo = await store.getProjectByRootPath(repoRoot);
+    assert.equal(repo?.name, "Original Group");
+    assert.equal(transportState.createdGroups[0]?.subject, "Original Group - payments");
+    assert.ok(responses.some((response) => response.text.includes("Chat: `Original Group - payments`")));
   });
 
   it("creates a workspace chat, worktree, and branch from !new", async () => {
@@ -381,7 +382,7 @@ describe("workspace lifecycle", () => {
     assert.equal(workspace?.branch, "payments");
     assert.equal(workspace?.base_branch, "master");
     assert.equal(transportState.createdGroups.length, 1);
-    assert.equal(transportState.createdGroups[0]?.subject, "payments");
+    assert.equal(transportState.createdGroups[0]?.subject, `${repo.name} - payments`);
     assert.deepEqual(transportState.createdGroups[0]?.participants, ["master-user@s.whatsapp.net"]);
     assert.deepEqual(transportState.promotedParticipants, [{
       chatId: workspaceSurface.workspace_chat_id,
@@ -447,7 +448,7 @@ describe("workspace lifecycle", () => {
     const workspaceSurface = await getWorkspaceSurface(workspace.workspace_id);
     assert.equal(workspace?.branch, "multi-word-branch");
     assert.equal(workspace?.base_branch, "master");
-    assert.equal(transportState.createdGroups[0]?.subject, "multi word branch");
+    assert.equal(transportState.createdGroups[0]?.subject, `${repo.name} - multi word branch`);
     const workspaceEvents = transportState.sentEvents
       .filter((entry) => entry.chatId === workspaceSurface.workspace_chat_id)
       .map((entry) => entry.event);
@@ -515,7 +516,7 @@ describe("workspace lifecycle", () => {
     assert.ok(responses.some((response) => response.text.includes("Created workspace `child branch`.")));
   });
 
-  it("auto-adopts a fresh group chat and upgrades to a community on the first !new", async () => {
+  it("auto-adopts a fresh group chat and creates a standalone sibling group on the first !new", async () => {
     const transportState = createFakeTransport();
     const handleMessage = await createHandler({ transport: transportState.transport });
     const chatId = "fresh-group-chat";
@@ -532,6 +533,7 @@ describe("workspace lifecycle", () => {
     const adoptedRootPath = getChatWorkDir(chatId, undefined, chatName);
     const repo = await store.getProjectByRootPath(adoptedRootPath);
     assert.ok(repo, "expected the fresh chat to be adopted into a project");
+    assert.equal(repo?.name, chatName);
 
     const originalBinding = await store.getChatBinding(chatId);
     assert.equal(originalBinding?.binding_kind, "workspace");
@@ -548,22 +550,11 @@ describe("workspace lifecycle", () => {
     assert.equal(childWorkspace?.branch, "payments");
     assert.equal(childWorkspace?.base_branch, "master");
 
-    assert.equal(transportState.createdCommunities.length, 1);
-    assert.equal(transportState.createdCommunities[0]?.subject, chatName);
-    assert.equal(
-      transportState.createdCommunities[0]?.description,
-      buildCommunityDescription(repo?.project_id ?? "", chatName),
-    );
+    assert.equal(transportState.createdCommunities.length, 0);
     assert.equal(transportState.createdGroups.length, 1);
-    assert.equal(transportState.createdGroups[0]?.subject, "payments");
-    assert.deepEqual(transportState.linkedGroups, [{
-      chatId,
-      communityChatId: transportState.createdCommunities[0]?.chatId ?? "",
-    }]);
-    assert.deepEqual(transportState.renamedGroups, [{
-      chatId,
-      subject: "main",
-    }]);
+    assert.equal(transportState.createdGroups[0]?.subject, "Original Group - payments");
+    assert.deepEqual(transportState.linkedGroups, []);
+    assert.deepEqual(transportState.renamedGroups, []);
     assert.ok(responses.some((response) => response.text.includes("Created workspace `payments`.")));
 
     const currentBranch = (await execFileAsync("git", ["branch", "--show-current"], { cwd: adoptedRootPath })).stdout.trim();

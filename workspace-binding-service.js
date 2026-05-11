@@ -14,6 +14,16 @@ function buildRepoName(rootPath) {
 }
 
 /**
+ * @param {string | null | undefined} chatName
+ * @param {string} rootPath
+ * @returns {string}
+ */
+function buildProjectName(chatName, rootPath) {
+  const trimmedChatName = chatName?.trim();
+  return trimmedChatName || buildRepoName(rootPath);
+}
+
+/**
  * @param {string | null} branch
  * @returns {string}
  */
@@ -83,7 +93,7 @@ async function resolveOrAdoptChatWorkspace({ chatId, chatName, explicitCwd, stor
   let project = await projectLookup(rootPath);
   if (!project) {
     project = await createProject({
-      name: buildRepoName(rootPath),
+      name: buildProjectName(chatName, rootPath),
       rootPath,
       defaultBaseBranch: defaultBaseBranch(null),
       controlChatId: null,
@@ -217,7 +227,7 @@ export function createWorkspaceBindingService(store) {
 
       if (!project && createProject) {
         project = await createProject({
-          name: buildRepoName(inferredRepoRoot),
+          name: buildProjectName(chatName, inferredRepoRoot),
           rootPath: inferredRepoRoot,
           defaultBaseBranch: defaultBaseBranch(inferred.branch),
           controlChatId: null,
