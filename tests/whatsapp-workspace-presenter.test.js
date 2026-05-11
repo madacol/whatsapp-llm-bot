@@ -6,8 +6,6 @@ import { createWhatsAppWorkspacePresenter } from "../whatsapp/workspace-presente
 /**
  * @param {{
  *   existingPresentation?: WhatsAppWorkspacePresentationRow | null,
- *   existingPresentations?: WhatsAppWorkspacePresentationRow[],
- *   onSave?: (input: Parameters<WorkspacePresentationPort["ensureWorkspaceVisible"]>[0]) => void,
  * }} [options]
  */
 function createStore(options = {}) {
@@ -23,14 +21,9 @@ function createStore(options = {}) {
   return {
     storedPresentations,
     store: {
-      getWhatsAppProjectPresentationCache: async () => null,
       getWhatsAppWorkspacePresentation: async () => options.existingPresentation ?? null,
-      listWhatsAppWorkspacePresentations: async () => options.existingPresentations ?? [],
       saveWhatsAppWorkspacePresentation: async (input) => {
         storedPresentations.push(input);
-      },
-      upsertWhatsAppProjectPresentationCache: async () => {
-        assert.fail("workspace presentation should not rewrite project topology cache");
       },
     },
   };
@@ -156,27 +149,10 @@ describe("WhatsAppWorkspacePresenter", () => {
     });
   });
 
-  it("ignores cached project community state when the source chat is standalone", async () => {
+  it("ignores unrelated workspace community state when the source chat is standalone", async () => {
     /** @type {Array<{ subject: string, participants: string[] }>} */
     const createdGroups = [];
-    const storeState = createStore({
-      existingPresentations: [{
-        workspace_id: "ws-main",
-        project_id: "project-1",
-        workspace_chat_id: "other-chat",
-        workspace_chat_subject: "Checkout",
-        role: "main",
-        linked_community_chat_id: "other-community",
-        timestamp: new Date().toISOString(),
-      }],
-    });
-    storeState.store.getWhatsAppProjectPresentationCache = async () => ({
-      project_id: "project-1",
-      cached_topology_kind: "community",
-      cached_community_chat_id: "other-community",
-      cached_main_workspace_id: "ws-main",
-      timestamp: new Date().toISOString(),
-    });
+    const storeState = createStore();
 
     const presenter = createWhatsAppWorkspacePresenter({
       store: storeState.store,
@@ -189,7 +165,7 @@ describe("WhatsAppWorkspacePresenter", () => {
           return { chatId: "workspace-chat", subject };
         },
         createCommunity: async () => {
-          assert.fail("stale project cache should not create a replacement community");
+          assert.fail("unrelated community state should not create a replacement community");
         },
         createCommunityGroup: async () => {
           assert.fail("source chat live state is standalone, so this must be a normal group");
@@ -292,7 +268,6 @@ describe("WhatsAppWorkspacePresenter", () => {
   it("resolves a workspace surface from the persisted WhatsApp mapping", async () => {
     const presenter = createWhatsAppWorkspacePresenter({
       store: {
-        getWhatsAppProjectPresentationCache: async () => null,
         getWhatsAppWorkspacePresentation: async (workspaceId) => {
           assert.equal(workspaceId, "ws-1");
           return {
@@ -305,11 +280,7 @@ describe("WhatsAppWorkspacePresenter", () => {
             timestamp: new Date().toISOString(),
           };
         },
-        listWhatsAppWorkspacePresentations: async () => [],
         saveWhatsAppWorkspacePresentation: async () => {
-          throw new Error("should not write when only resolving a surface");
-        },
-        upsertWhatsAppProjectPresentationCache: async () => {
           throw new Error("should not write when only resolving a surface");
         },
       },
@@ -340,7 +311,6 @@ describe("WhatsAppWorkspacePresenter", () => {
     };
     const presenter = createWhatsAppWorkspacePresenter({
       store: {
-        getWhatsAppProjectPresentationCache: async () => null,
         getWhatsAppWorkspacePresentation: async (workspaceId) => {
           assert.equal(workspaceId, "ws-1");
           return {
@@ -353,9 +323,7 @@ describe("WhatsAppWorkspacePresenter", () => {
             timestamp: new Date().toISOString(),
           };
         },
-        listWhatsAppWorkspacePresentations: async () => [],
         saveWhatsAppWorkspacePresentation: async () => {},
-        upsertWhatsAppProjectPresentationCache: async () => {},
       },
       transport: {
         start: async () => {},
@@ -389,7 +357,6 @@ describe("WhatsAppWorkspacePresenter", () => {
     const sentEvents = [];
     const presenter = createWhatsAppWorkspacePresenter({
       store: {
-        getWhatsAppProjectPresentationCache: async () => null,
         getWhatsAppWorkspacePresentation: async () => ({
           workspace_id: "ws-1",
           project_id: "project-1",
@@ -399,9 +366,7 @@ describe("WhatsAppWorkspacePresenter", () => {
           linked_community_chat_id: null,
           timestamp: new Date().toISOString(),
         }),
-        listWhatsAppWorkspacePresentations: async () => [],
         saveWhatsAppWorkspacePresentation: async () => {},
-        upsertWhatsAppProjectPresentationCache: async () => {},
       },
       transport: {
         start: async () => {},

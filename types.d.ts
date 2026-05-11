@@ -275,7 +275,6 @@ type TurnIO = {
 };
 
 type WorkspaceStatus = "ready" | "busy" | "conflicted" | "archived";
-type WhatsAppProjectTopologyKind = "groups" | "community";
 type WhatsAppWorkspacePresentationRole = "workspace" | "main";
 
 type ProjectRow = {
@@ -309,22 +308,6 @@ type ChatBindingRow = {
   binding_kind: ChatBindingKind;
   project_id: string | null;
   workspace_id: string | null;
-  timestamp: string;
-};
-
-type WhatsAppProjectPresentationCacheRow = {
-  project_id: string;
-  cached_topology_kind: WhatsAppProjectTopologyKind;
-  cached_community_chat_id: string | null;
-  cached_main_workspace_id: string | null;
-  timestamp: string;
-};
-
-type WhatsAppProjectPresentationCacheView = {
-  projectId: string;
-  topologyKind: WhatsAppProjectTopologyKind;
-  communityChatId: string | null;
-  mainWorkspaceId: string | null;
   timestamp: string;
 };
 

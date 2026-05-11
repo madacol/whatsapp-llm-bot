@@ -32,14 +32,6 @@ function isWorkspaceTestStatus(value) {
 
 /**
  * @param {unknown} value
- * @returns {value is WhatsAppProjectTopologyKind}
- */
-function isWhatsAppProjectTopologyKind(value) {
-  return value === "groups" || value === "community";
-}
-
-/**
- * @param {unknown} value
  * @returns {value is WhatsAppWorkspacePresentationRole}
  */
 function isWhatsAppWorkspacePresentationRole(value) {
@@ -290,38 +282,6 @@ export function normalizeChatBindingRow(raw) {
     binding_kind: raw.binding_kind === "repo" ? "project" : raw.binding_kind,
     project_id: raw.project_id,
     workspace_id: raw.workspace_id,
-    timestamp,
-  };
-}
-
-/**
- * @param {unknown} raw
- * @returns {WhatsAppProjectPresentationCacheRow | null}
- */
-export function normalizeWhatsAppProjectPresentationCacheRow(raw) {
-  if (!isRecord(raw)) {
-    return null;
-  }
-
-  const cachedTopologyKind = raw.cached_topology_kind ?? raw.topology_kind;
-  const cachedCommunityChatId = raw.cached_community_chat_id ?? raw.community_chat_id ?? null;
-  const cachedMainWorkspaceId = raw.cached_main_workspace_id ?? raw.main_workspace_id ?? null;
-  const timestamp = normalizeTimestampValue(raw.timestamp);
-  if (
-    typeof raw.project_id !== "string"
-    || !isWhatsAppProjectTopologyKind(cachedTopologyKind)
-    || (cachedCommunityChatId !== null && typeof cachedCommunityChatId !== "string")
-    || (cachedMainWorkspaceId !== null && typeof cachedMainWorkspaceId !== "string")
-    || !timestamp
-  ) {
-    return null;
-  }
-
-  return {
-    project_id: raw.project_id,
-    cached_topology_kind: cachedTopologyKind,
-    cached_community_chat_id: cachedCommunityChatId,
-    cached_main_workspace_id: cachedMainWorkspaceId,
     timestamp,
   };
 }

@@ -11,7 +11,6 @@ import {
  * @typedef {{
  *   db: PGlite;
  *   ensureChatExists: (chatId: string) => Promise<void>;
- *   ensureWhatsAppProjectPresentationCacheExists: (projectId: string) => Promise<void>;
  *   getRequiredWhatsAppWorkspacePresentation: (workspaceId: string) => Promise<WhatsAppWorkspacePresentationRow>;
  * }} ProjectStoreDeps
  */
@@ -42,7 +41,6 @@ import {
 export function createProjectStore({
   db,
   ensureChatExists,
-  ensureWhatsAppProjectPresentationCacheExists,
   getRequiredWhatsAppWorkspacePresentation,
 }) {
   /**
@@ -222,7 +220,6 @@ export function createProjectStore({
         projectId,
         workspaceId,
       });
-      await ensureWhatsAppProjectPresentationCacheExists(projectId);
       return workspace;
     },
 

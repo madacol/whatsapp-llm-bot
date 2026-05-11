@@ -68,12 +68,6 @@ function buildChatWorkspaceName(chatName) {
  *       role?: WhatsAppWorkspacePresentationRole,
  *       linkedCommunityChatId?: string | null,
  *     }) => Promise<WhatsAppWorkspacePresentationRow>,
- *     upsertWhatsAppProjectPresentationCache?: (input: {
- *       projectId: string,
- *       cachedTopologyKind?: WhatsAppProjectTopologyKind,
- *       cachedCommunityChatId?: string | null,
- *       cachedMainWorkspaceId?: string | null,
- *     }) => Promise<WhatsAppProjectPresentationCacheRow>,
  *   },
  * }} input
  * @returns {Promise<{ project: ProjectRow, workspace: WorkspaceRow } | null>}
@@ -122,11 +116,6 @@ async function resolveOrAdoptChatWorkspace({ chatId, chatName, explicitCwd, stor
     worktreePath: rootPath,
     status: "ready",
   });
-  await store.upsertWhatsAppProjectPresentationCache?.({
-    projectId: project.project_id,
-    cachedTopologyKind: "groups",
-    cachedMainWorkspaceId: workspace.workspace_id,
-  });
   return { project, workspace };
 }
 
@@ -158,12 +147,6 @@ async function resolveOrAdoptChatWorkspace({ chatId, chatName, explicitCwd, stor
  *     role?: WhatsAppWorkspacePresentationRole,
  *     linkedCommunityChatId?: string | null,
  *   }) => Promise<WhatsAppWorkspacePresentationRow>,
- *   upsertWhatsAppProjectPresentationCache?: (input: {
- *     projectId: string,
- *     cachedTopologyKind?: WhatsAppProjectTopologyKind,
- *     cachedCommunityChatId?: string | null,
- *     cachedMainWorkspaceId?: string | null,
- *   }) => Promise<WhatsAppProjectPresentationCacheRow>,
  * }} store
  */
 export function createWorkspaceBindingService(store) {
