@@ -1,14 +1,6 @@
 import assert from "node:assert/strict";
 import { createRestartAction, scheduleRestart } from "./index.js";
 
-/**
- * @typedef {{
- *   command: string,
- *   args: string[],
- *   options: { detached: true, stdio: "ignore", env: NodeJS.ProcessEnv },
- * }} SpawnCall
- */
-
 /** @type {ActionTestFn} */
 async function action_is_defined(action_fn) {
   assert.equal(typeof action_fn, "function");
@@ -46,16 +38,21 @@ async function restart_returns_before_stopping_the_process(_action_fn, db) {
 }
 
 /** @type {ActionTestFn} */
-async function scheduler_uses_detached_delayed_sigterm() {
-  /** @type {SpawnCall[]} */
-  const spawnCalls = [];
+async function scheduler_uses_delayed_sigterm() {
+  /** @type {{ pid: number, signal: NodeJS.Signals }[]} */
+  const killCalls = [];
+  let scheduledDelay = null;
   let unrefCalled = false;
 
   scheduleRestart({
     pid: 1234,
     delayMs: 25,
-    spawnFn(command, args, options) {
-      spawnCalls.push({ command, args, options });
+    killFn(pid, signal) {
+      killCalls.push({ pid, signal });
+    },
+    setTimeoutFn(callback, delayMs) {
+      scheduledDelay = delayMs;
+      callback();
       return {
         unref() {
           unrefCalled = true;
@@ -64,15 +61,8 @@ async function scheduler_uses_detached_delayed_sigterm() {
     },
   });
 
-  assert.equal(spawnCalls.length, 1);
-  const spawnCall = spawnCalls[0];
-  assert.ok(spawnCall, "restart helper was not spawned");
-  assert.equal(spawnCall.command, process.execPath);
-  assert.equal(spawnCall.options.detached, true);
-  assert.equal(spawnCall.options.stdio, "ignore");
-  assert.equal(spawnCall.options.env.BOT_RESTART_PID, "1234");
-  assert.equal(spawnCall.options.env.BOT_RESTART_DELAY_MS, "25");
-  assert.match(spawnCall.args.join("\n"), /SIGTERM/);
+  assert.equal(scheduledDelay, 25);
+  assert.deepEqual(killCalls, [{ pid: 1234, signal: "SIGTERM" }]);
   assert.equal(unrefCalled, true);
 }
 
@@ -80,5 +70,5 @@ async function scheduler_uses_detached_delayed_sigterm() {
 export default [
   action_is_defined,
   restart_returns_before_stopping_the_process,
-  scheduler_uses_detached_delayed_sigterm,
+  scheduler_uses_delayed_sigterm,
 ];
