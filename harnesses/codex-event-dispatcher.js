@@ -2,10 +2,13 @@ import { failedToolCallUpdate } from "../message-failure-presentation.js";
 import { buildToolPresentation, getToolFlowDescriptor } from "../tool-presentation-model.js";
 import { toolCallUpdate, toolFlowInspectState, toolFlowUpdate, toolInspectState } from "../outbound-events.js";
 import { createPlanPresentationFromState } from "../plan-presentation.js";
+import { createLogger } from "../logger.js";
 import { estimateCodexUsageCost } from "./codex-usage-cost.js";
 import { createCodexReasoningState } from "./codex-reasoning-state.js";
 import { createCodexRunState } from "./codex-run-state.js";
 import { createCodexSyntheticToolAdapter } from "./codex-synthetic-tools.js";
+
+const log = createLogger("harness:codex-events");
 
 /**
  * Shared semantic dispatcher for normalized Codex events, independent of the
@@ -98,6 +101,12 @@ export function createCodexEventDispatcher(input) {
       ...(threadEvent.agentNickname !== undefined && { agentNickname: threadEvent.agentNickname }),
       ...(threadEvent.agentRole !== undefined && { agentRole: threadEvent.agentRole }),
     });
+    log.info("registered sub-agent thread", {
+      threadId: threadEvent.id,
+      parentThreadId: threadEvent.parentThreadId ?? null,
+      agentNickname: threadEvent.agentNickname ?? null,
+      agentRole: threadEvent.agentRole ?? null,
+    });
   }
 
   /**
@@ -182,6 +191,12 @@ export function createCodexEventDispatcher(input) {
       return;
     }
     deliveredSubagentResponses.add(dedupeKey);
+    log.info("emitting sub-agent response", {
+      threadId: metadata.threadId ?? null,
+      parentThreadId: metadata.parentThreadId ?? null,
+      agentNickname: metadata.agentNickname ?? null,
+      textLength: response.text.length,
+    });
     await input.hooks.onLlmResponse(response.text, metadata);
   }
 

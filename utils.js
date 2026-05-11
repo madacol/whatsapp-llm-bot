@@ -218,10 +218,38 @@ export function formatCommandInspectText(command, output, toolName) {
 }
 
 /**
+ * Check whether a value is a plain object record.
+ * @param {unknown} value
+ * @returns {value is Record<string, unknown>}
+ */
+function isRecord(value) {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/**
  * Extract a human-readable message from an unknown error value.
  * @param {unknown} err
  * @returns {string}
  */
 export function errorToString(err) {
-  return err instanceof Error ? err.message : String(err);
+  if (err instanceof Error) {
+    return err.message;
+  }
+  if (typeof err === "string") {
+    return err;
+  }
+  if (isRecord(err) && typeof err.message === "string") {
+    return err.message;
+  }
+  if (isRecord(err)) {
+    try {
+      const serialized = JSON.stringify(err);
+      if (serialized) {
+        return serialized;
+      }
+    } catch {
+      // Fall through to String for cyclic or otherwise unserializable values.
+    }
+  }
+  return String(err);
 }

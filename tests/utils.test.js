@@ -5,7 +5,7 @@ import fsp from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { homedir } from "node:os";
-import { getChatWorkDir } from "../utils.js";
+import { errorToString, getChatWorkDir } from "../utils.js";
 import {
   getChatActionDbDir,
   getChatActionsDir,
@@ -109,5 +109,19 @@ describe("getChatWorkDir", () => {
 
     assert.ok(workdir.startsWith(path.join(os.tmpdir(), "whatsapp-llm-bot-chat-")));
     assert.equal(workdir.startsWith(path.join(homedir(), "chat")), false);
+  });
+});
+
+describe("errorToString", () => {
+  it("uses Error messages directly", () => {
+    assert.equal(errorToString(new Error("boom")), "boom");
+  });
+
+  it("uses object message fields when present", () => {
+    assert.equal(errorToString({ message: "structured failure", code: "E_FAIL" }), "structured failure");
+  });
+
+  it("serializes plain object errors instead of returning [object Object]", () => {
+    assert.equal(errorToString({ code: "E_FAIL", detail: "bad input" }), '{"code":"E_FAIL","detail":"bad input"}');
   });
 });

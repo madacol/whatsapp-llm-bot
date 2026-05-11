@@ -22,7 +22,7 @@ function extractSubagentThreadEvent(thread) {
     return null;
   }
 
-  const subAgent = thread.source.subAgent;
+  const subAgent = thread.source.subAgent ?? thread.source.subagent;
   if (!isCodexEventRecord(subAgent)) {
     return null;
   }
