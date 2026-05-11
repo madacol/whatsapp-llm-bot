@@ -151,8 +151,8 @@ async function importChatAction(chatId, name, code) {
  * @returns {Promise<AppAction[]>}
  */
 export async function getChatActions(chatId) {
-  const db = getActionDb(chatId, "create_action");
   try {
+    const db = getActionDb(chatId, "create_action");
     await ensureChatActionsSchema(db);
     const { rows } = await db.sql`SELECT name, code FROM chat_actions`;
     /** @type {AppAction[]} */
@@ -181,10 +181,15 @@ export async function getChatActions(chatId) {
  * @returns {Promise<AppAction | null>}
  */
 export async function getChatAction(chatId, actionName) {
-  const db = getActionDb(chatId, "create_action");
-  const code = await readChatAction(db, actionName);
-  if (!code) {
+  try {
+    const db = getActionDb(chatId, "create_action");
+    const code = await readChatAction(db, actionName);
+    if (!code) {
+      return null;
+    }
+    return importChatAction(chatId, actionName, code);
+  } catch (error) {
+    log.error(`Error loading chat action "${actionName}" for ${chatId}:`, error);
     return null;
   }
-  return importChatAction(chatId, actionName, code);
 }
