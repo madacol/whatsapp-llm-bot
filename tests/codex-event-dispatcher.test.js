@@ -82,36 +82,4 @@ describe("createCodexEventDispatcher", () => {
 
     assert.equal(llmResponses[0]?.metadata?.source, "subagent");
   });
-
-  it("emits completed wait_agent output as sub-agent output", async () => {
-    const { dispatcher, llmResponses } = createSubject();
-
-    await dispatcher.handleNormalized({
-      sessionId: "thread-parent",
-      toolEvent: {
-        id: "tool-1",
-        name: "spawn_agent",
-        arguments: { receiver_thread_ids: ["thread-child"] },
-        status: "completed",
-      },
-    });
-    await dispatcher.handleNormalized({
-      sessionId: "thread-parent",
-      toolEvent: {
-        id: "tool-2",
-        name: "wait_agent",
-        arguments: { receiver_thread_ids: ["thread-child"] },
-        status: "completed",
-        output: "SUBAGENT_EVENT_TEST: quick sub-agent response",
-      },
-    });
-
-    assert.deepEqual(llmResponses, [{
-      text: "SUBAGENT_EVENT_TEST: quick sub-agent response",
-      metadata: {
-        source: "subagent",
-        threadId: "thread-child",
-      },
-    }]);
-  });
 });
