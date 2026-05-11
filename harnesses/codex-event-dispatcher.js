@@ -382,12 +382,12 @@ export function createCodexEventDispatcher(input) {
           } catch {
             // best-effort
           }
-          activeTools.set(toolEvent.id, {
-            handle,
-            presentation: currentPresentation,
-          });
-          rememberActiveToolCorrelation(toolEvent);
         }
+        activeTools.set(toolEvent.id, {
+          ...(handle ? { handle } : {}),
+          presentation: currentPresentation,
+        });
+        rememberActiveToolCorrelation(toolEvent);
         await input.hooks.onPaused();
         await input.hooks.onComposing();
       } else {

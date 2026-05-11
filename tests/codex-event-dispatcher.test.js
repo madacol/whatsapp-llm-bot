@@ -228,6 +228,59 @@ describe("createCodexEventDispatcher", () => {
     }));
   });
 
+  it("does not redisplay a completed tool when the started tool has no handle", async () => {
+    /** @type {LlmChatResponse["toolCalls"]} */
+    const toolCalls = [];
+    const dispatcher = createCodexEventDispatcher({
+      messages: [],
+      hooks: {
+        onComposing: async () => {},
+        onPaused: async () => {},
+        onReasoning: async () => {},
+        onToolCall: async (toolCall) => {
+          toolCalls.push(toolCall);
+          return undefined;
+        },
+        onCommand: async () => {},
+        onFileRead: async () => {},
+        onPlan: async () => {},
+        onFileChange: async () => {},
+        onToolError: async () => {},
+        onUsage: async () => {},
+        onLlmResponse: async () => {},
+      },
+    });
+
+    await dispatcher.handleNormalized({
+      sessionId: "thread-parent",
+      toolEvent: {
+        id: "tool-start",
+        name: "spawn_agent",
+        arguments: { message: "hello" },
+        status: "started",
+      },
+    });
+    await dispatcher.handleNormalized({
+      sessionId: "thread-parent",
+      toolEvent: {
+        id: "tool-complete",
+        name: "spawn_agent",
+        arguments: { message: "hello" },
+        status: "completed",
+        output: JSON.stringify({
+          agent_id: "thread-child",
+          nickname: "Kuhn",
+        }),
+      },
+    });
+
+    assert.deepEqual(toolCalls, [{
+      id: "tool-start",
+      name: "spawn_agent",
+      arguments: JSON.stringify({ message: "hello" }),
+    }]);
+  });
+
   it("enriches an already-known sub-agent thread with standard spawn_agent nickname output", async () => {
     const { dispatcher, llmResponses } = createSubject();
 
