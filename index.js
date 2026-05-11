@@ -71,9 +71,16 @@ if (!process.env.TESTING) {
     } catch { /* not running, ok */ }
   }
   fs.writeFileSync(pidFile, process.pid.toString());
-  for (const sig of ["exit", "SIGINT", "SIGTERM"]) {
-    process.on(sig, () => { try { fs.unlinkSync(pidFile); } catch {} });
+  function cleanupPidFile() {
+    try {
+      if (fs.existsSync(pidFile) && fs.readFileSync(pidFile, "utf-8").trim() === String(process.pid)) {
+        fs.unlinkSync(pidFile);
+      }
+    } catch {
+      // Nothing useful to do during process shutdown.
+    }
   }
+  process.on("exit", cleanupPidFile);
 
   const store = await initStore();
   const llmClient = createLlmClient();
