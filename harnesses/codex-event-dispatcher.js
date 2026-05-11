@@ -35,8 +35,6 @@ export function createCodexEventDispatcher(input) {
   const activeFlows = new Map();
   /** @type {Map<string, LlmResponseMetadata>} */
   const subagentThreads = new Map();
-  /** @type {Set<string>} */
-  const deliveredSubagentMessages = new Set();
 
   /** @type {AgentResult} */
   const result = {
@@ -92,60 +90,6 @@ export function createCodexEventDispatcher(input) {
         });
       }
     }
-  }
-
-  /**
-   * @param {string} text
-   * @param {LlmResponseMetadata} metadata
-   * @returns {string}
-   */
-  function getSubagentMessageKey(text, metadata) {
-    return `${metadata.threadId ?? ""}\u0000${text}`;
-  }
-
-  /**
-   * @param {string} text
-   * @param {LlmResponseMetadata} metadata
-   * @returns {Promise<boolean>}
-   */
-  async function emitSubagentResponse(text, metadata) {
-    const key = getSubagentMessageKey(text, metadata);
-    if (deliveredSubagentMessages.has(key)) {
-      return false;
-    }
-    deliveredSubagentMessages.add(key);
-    await input.hooks.onLlmResponse(text, metadata);
-    return true;
-  }
-
-  /**
-   * Codex `collab_tool_call` wait completions carry sub-agent final messages in
-   * `agents_states[threadId].message` instead of as child-thread assistant text.
-   * @param {import("./codex-events.js").CodexToolEvent} toolEvent
-   * @returns {{ text: string, metadata: LlmResponseMetadata } | null}
-   */
-  function getSubagentResponseFromWaitTool(toolEvent) {
-    if (toolEvent.name !== "wait_agent" || toolEvent.status !== "completed") {
-      return null;
-    }
-    const text = typeof toolEvent.output === "string" ? toolEvent.output.trim() : "";
-    if (!text) {
-      return null;
-    }
-
-    const receiverThreadIds = getReceiverThreadIds(toolEvent.arguments);
-    if (receiverThreadIds.length === 1) {
-      const threadId = receiverThreadIds[0];
-      return {
-        text,
-        metadata: subagentThreads.get(threadId) ?? { source: "subagent", threadId },
-      };
-    }
-
-    return {
-      text,
-      metadata: { source: "subagent" },
-    };
   }
 
   /**
@@ -310,13 +254,6 @@ export function createCodexEventDispatcher(input) {
       }
     }
 
-    if (normalized.toolEvent) {
-      const subagentResponse = getSubagentResponseFromWaitTool(normalized.toolEvent);
-      if (subagentResponse) {
-        await emitSubagentResponse(subagentResponse.text, subagentResponse.metadata);
-      }
-    }
-
     if (normalized.reasoningEvent) {
       await input.hooks.onReasoning(reasoningState.apply(normalized.reasoningEvent));
     }
@@ -326,11 +263,7 @@ export function createCodexEventDispatcher(input) {
       if (!suppressAssistantText) {
         lastAssistantText = normalized.assistantText;
         const metadata = normalized.sessionId ? subagentThreads.get(normalized.sessionId) : undefined;
-        if (metadata?.source === "subagent") {
-          await emitSubagentResponse(normalized.assistantText, metadata);
-        } else {
-          await input.hooks.onLlmResponse(normalized.assistantText, metadata);
-        }
+        await input.hooks.onLlmResponse(normalized.assistantText, metadata);
       }
     }
 
