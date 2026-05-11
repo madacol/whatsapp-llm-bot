@@ -18,6 +18,7 @@ function createSubject() {
       onPaused: async () => {},
       onReasoning: async () => {},
       onToolCall: async () => {},
+      onToolComplete: async () => {},
       onCommand: async () => {},
       onFileRead: async () => {},
       onPlan: async () => {},
@@ -165,6 +166,8 @@ describe("createCodexEventDispatcher", () => {
   it("correlates completed tool events with started tools when ids change", async () => {
     /** @type {LlmChatResponse["toolCalls"]} */
     const toolCalls = [];
+    /** @type {LlmChatResponse["toolCalls"]} */
+    const completedToolCalls = [];
     /** @type {MessageInspectState[]} */
     const inspects = [];
     const dispatcher = createCodexEventDispatcher({
@@ -185,6 +188,9 @@ describe("createCodexEventDispatcher", () => {
               }
             },
           };
+        },
+        onToolComplete: async (toolCall) => {
+          completedToolCalls.push(toolCall);
         },
         onCommand: async () => {},
         onFileRead: async () => {},
@@ -221,6 +227,8 @@ describe("createCodexEventDispatcher", () => {
 
     assert.equal(toolCalls.length, 1);
     assert.equal(toolCalls[0]?.id, "tool-start");
+    assert.equal(completedToolCalls.length, 1);
+    assert.equal(completedToolCalls[0]?.id, "tool-start");
     assert.equal(inspects.at(-1)?.kind, "tool");
     assert.equal(inspects.at(-1)?.output, JSON.stringify({
       agent_id: "thread-child",
@@ -231,6 +239,8 @@ describe("createCodexEventDispatcher", () => {
   it("does not redisplay a completed tool when the started tool has no handle", async () => {
     /** @type {LlmChatResponse["toolCalls"]} */
     const toolCalls = [];
+    /** @type {LlmChatResponse["toolCalls"]} */
+    const completedToolCalls = [];
     const dispatcher = createCodexEventDispatcher({
       messages: [],
       hooks: {
@@ -240,6 +250,9 @@ describe("createCodexEventDispatcher", () => {
         onToolCall: async (toolCall) => {
           toolCalls.push(toolCall);
           return undefined;
+        },
+        onToolComplete: async (toolCall) => {
+          completedToolCalls.push(toolCall);
         },
         onCommand: async () => {},
         onFileRead: async () => {},
@@ -275,6 +288,11 @@ describe("createCodexEventDispatcher", () => {
     });
 
     assert.deepEqual(toolCalls, [{
+      id: "tool-start",
+      name: "spawn_agent",
+      arguments: JSON.stringify({ message: "hello" }),
+    }]);
+    assert.deepEqual(completedToolCalls, [{
       id: "tool-start",
       name: "spawn_agent",
       arguments: JSON.stringify({ message: "hello" }),

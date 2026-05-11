@@ -49,6 +49,7 @@ export const NO_OP_HOOKS = {
   onLlmResponse: async () => {},
   onAskUser: async () => "",
   onToolCall: async () => {},
+  onToolComplete: async () => {},
   onToolResult: async (_blocks, _name, _perms) => {},
   onToolError: async () => {},
   onCommand: async () => {},

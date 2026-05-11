@@ -450,6 +450,8 @@ export function wrapHooksWithFallbacks(rawHooks) {
       /** @type {{ oldContent?: string } | undefined} */ toolContext,
     ) =>
       safeHook("onToolCall", () => rawHooks.onToolCall(toolCall, formatToolCall, toolContext), undefined),
+    onToolComplete: (/** @type {LlmChatResponse['toolCalls'][0]} */ toolCall) =>
+      safeHook("onToolComplete", () => rawHooks.onToolComplete(toolCall), undefined),
     onToolResult: (/** @type {ToolContentBlock[]} */ blocks, /** @type {string} */ toolName, /** @type {PermissionFlags} */ permissions) =>
       safeHook("onToolResult", () => rawHooks.onToolResult(blocks, toolName, permissions), undefined),
     onToolError: (/** @type {string} */ error) => safeHook("onToolError", () => rawHooks.onToolError(error), undefined),

@@ -390,6 +390,42 @@ describe("buildAgentIoHooks", () => {
     }]);
   });
 
+  it("edits compact tool summaries when a tool completes", async () => {
+    /** @type {MessageHandleUpdate[]} */
+    const updates = [];
+    const hooks = buildAgentIoHooks(
+      {
+        send: async () => ({
+          keyId: "compact-tools-complete",
+          isImage: false,
+          update: async (update) => { updates.push(update); },
+          setInspect: () => {},
+        }),
+        reply: async () => undefined,
+        select: async () => "",
+        confirm: async () => true,
+      },
+      async () => {},
+      async () => {},
+      () => {},
+      "/repo",
+      { ...DEFAULT_OUTPUT_VISIBILITY, tools: false },
+    );
+
+    const toolCall = {
+      id: "tool-complete-1",
+      name: "spawn_agent",
+      arguments: JSON.stringify({ message: "hello" }),
+    };
+    await hooks.onToolCall?.(toolCall);
+    await hooks.onToolComplete?.(toolCall);
+
+    assert.deepEqual(updates.at(-1), {
+      kind: "text",
+      text: "✅ *Start Agent*  _hello_",
+    });
+  });
+
   it("renders edit diffs even when generic tool progress is compacted", async () => {
     const { hooks, sent } = createSubjectWithCwd("/repo", {
       ...DEFAULT_OUTPUT_VISIBILITY,

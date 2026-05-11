@@ -13,13 +13,14 @@ import { createCodexEventDispatcher } from "./codex-event-dispatcher.js";
 
 const log = createLogger("harness:codex-runner");
 
-/** @type {Pick<Required<AgentIOHooks>, "onComposing" | "onPaused" | "onReasoning" | "onAskUser" | "onToolCall" | "onCommand" | "onFileRead" | "onPlan" | "onFileChange" | "onLlmResponse" | "onToolError" | "onUsage">} */
+/** @type {Pick<Required<AgentIOHooks>, "onComposing" | "onPaused" | "onReasoning" | "onAskUser" | "onToolCall" | "onToolComplete" | "onCommand" | "onFileRead" | "onPlan" | "onFileChange" | "onLlmResponse" | "onToolError" | "onUsage">} */
 const DEFAULT_CODEX_RUN_HOOKS = {
   onComposing: async () => {},
   onPaused: async () => {},
   onReasoning: async () => {},
   onAskUser: async () => "",
   onToolCall: async () => {},
+  onToolComplete: async () => {},
   onCommand: async () => {},
   onFileRead: async () => {},
   onPlan: async () => {},
@@ -160,7 +161,7 @@ function isAbortError(error) {
  *   sessionId?: string | null,
  *   runConfig?: HarnessRunConfig,
  *   env?: NodeJS.ProcessEnv,
- *   hooks?: Pick<AgentIOHooks, "onComposing" | "onPaused" | "onReasoning" | "onAskUser" | "onToolCall" | "onCommand" | "onFileRead" | "onPlan" | "onFileChange" | "onLlmResponse" | "onToolError" | "onUsage">,
+ *   hooks?: Pick<AgentIOHooks, "onComposing" | "onPaused" | "onReasoning" | "onAskUser" | "onToolCall" | "onToolComplete" | "onCommand" | "onFileRead" | "onPlan" | "onFileChange" | "onLlmResponse" | "onToolError" | "onUsage">,
  *   isAborted?: () => boolean,
  * }} input
  * @param {CodexRunnerDeps} [deps]
@@ -235,7 +236,7 @@ export async function startCodexRun(input, deps = {}) {
  *   messages: Message[],
  *   sessionId: string | null,
  *   runConfig?: HarnessRunConfig,
- *   hooks: Pick<Required<AgentIOHooks>, "onComposing" | "onPaused" | "onReasoning" | "onAskUser" | "onToolCall" | "onCommand" | "onFileRead" | "onPlan" | "onFileChange" | "onLlmResponse" | "onToolError" | "onUsage">,
+ *   hooks: Pick<Required<AgentIOHooks>, "onComposing" | "onPaused" | "onReasoning" | "onAskUser" | "onToolCall" | "onToolComplete" | "onCommand" | "onFileRead" | "onPlan" | "onFileChange" | "onLlmResponse" | "onToolError" | "onUsage">,
  *   isAborted?: () => boolean,
  *   codex: CodexClientLike,
  *   abortController: AbortController,

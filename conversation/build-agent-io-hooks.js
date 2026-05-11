@@ -178,6 +178,11 @@ export function buildAgentIoHooks(
       }
       return displayToolCall(toolCall, context, formatToolCall, cwd, toolContext);
     },
+    onToolComplete: async (toolCall) => {
+      if (!visibility.tools) {
+        await compactToolActivity.completeToolCall(toolCall);
+      }
+    },
     onToolResult: async (blocks) => {
       if (!visibility.tools) {
         return;
