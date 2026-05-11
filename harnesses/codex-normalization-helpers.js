@@ -124,21 +124,42 @@ function serializeStructuredToolResult(value) {
 }
 
 /**
- * Extract text from collab tool state when possible.
- * @param {unknown} states
- * @returns {string | undefined}
+ * @param {unknown} value
+ * @returns {Record<string, unknown> | null}
  */
-export function extractCollabToolOutput(states) {
-  if (!isCodexEventRecord(states)) {
-    return undefined;
+function getCollabStatesRecord(value) {
+  if (!isCodexEventRecord(value)) {
+    return null;
+  }
+  if (isCodexEventRecord(value.agents_states)) {
+    return value.agents_states;
+  }
+  if (isCodexEventRecord(value.agentsStates)) {
+    return value.agentsStates;
+  }
+  return value;
+}
+
+/**
+ * Extract completed sub-agent messages from Codex collab agent state.
+ * @param {unknown} states
+ * @returns {import("./codex-events.js").CodexSubagentResponseEvent[]}
+ */
+export function extractCollabSubagentResponses(states) {
+  const stateRecord = getCollabStatesRecord(states);
+  if (!stateRecord) {
+    return [];
   }
 
-  const messages = Object.values(states)
-    .filter(isCodexEventRecord)
-    .map((state) => typeof state.message === "string" ? state.message : null)
-    .filter((message) => typeof message === "string" && message.length > 0);
-
-  return messages.length > 0 ? messages.join("\n") : undefined;
+  /** @type {import("./codex-events.js").CodexSubagentResponseEvent[]} */
+  const responses = [];
+  for (const [threadId, state] of Object.entries(stateRecord)) {
+    if (!isCodexEventRecord(state) || typeof state.message !== "string" || state.message.length === 0) {
+      continue;
+    }
+    responses.push({ threadId, text: state.message });
+  }
+  return responses;
 }
 
 /**

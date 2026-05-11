@@ -2,7 +2,7 @@ import { normalizeCodexFileChanges } from "./codex-file-events.js";
 import { extractCodexReasoningParts, extractCodexText, isCodexEventRecord, normalizeCodexUsage } from "./codex-event-utils.js";
 import {
   extractCollabToolArguments,
-  extractCollabToolOutput,
+  extractCollabSubagentResponses,
   extractCommandOutput,
   extractCommandText,
   extractPlanState,
@@ -154,7 +154,6 @@ export function normalizeCodexEvent(event) {
     const id = typeof item.id === "string" ? item.id : null;
     const name = typeof item.tool === "string" ? normalizeCollabToolName(item.tool) : null;
     if (id && name) {
-      const output = extractCollabToolOutput(item.agents_states);
       normalized.toolEvent = {
         id,
         name,
@@ -164,8 +163,11 @@ export function normalizeCodexEvent(event) {
           : eventType === "item.failed"
             ? "failed"
             : "completed",
-        ...(output ? { output } : {}),
       };
+      const subagentResponses = extractCollabSubagentResponses(item.agents_states);
+      if (subagentResponses.length > 0) {
+        normalized.subagentResponses = subagentResponses;
+      }
     }
     return normalized;
   }

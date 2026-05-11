@@ -2,7 +2,7 @@ import { normalizeCodexFileChanges } from "./codex-file-events.js";
 import { extractCodexReasoningParts, extractCodexText, isCodexEventRecord, normalizeCodexUsage } from "./codex-event-utils.js";
 import {
   extractCollabToolArguments,
-  extractCollabToolOutput,
+  extractCollabSubagentResponses,
   extractCommandOutput,
   extractCommandText,
   extractPlanEntries,
@@ -225,11 +225,11 @@ export function normalizeCodexAppServerEvent(message) {
       ? itemType === "collabToolCall" ? normalizeCollabToolName(item.tool) : item.tool
       : null;
     if (id && name) {
-      const output = itemType === "collabToolCall"
-        ? extractCollabToolOutput(item)
-        : itemType === "dynamicToolCall"
-          ? extractCodexText(item.contentItems) ?? extractCodexText(item.success) ?? undefined
-          : extractToolResultOutput(item.result) ?? extractCodexText(item.error) ?? undefined;
+      const output = itemType === "dynamicToolCall"
+        ? extractCodexText(item.contentItems) ?? extractCodexText(item.success) ?? undefined
+        : itemType === "mcpToolCall"
+          ? extractToolResultOutput(item.result) ?? extractCodexText(item.error) ?? undefined
+          : undefined;
       normalized.toolEvent = {
         id,
         name,
@@ -243,6 +243,12 @@ export function normalizeCodexAppServerEvent(message) {
             : "completed",
         ...(output ? { output } : {}),
       };
+      if (itemType === "collabToolCall") {
+        const subagentResponses = extractCollabSubagentResponses(item);
+        if (subagentResponses.length > 0) {
+          normalized.subagentResponses = subagentResponses;
+        }
+      }
     }
     return normalized;
   }
