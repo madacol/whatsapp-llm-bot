@@ -34,10 +34,27 @@ describe("action test_functions", () => {
       await t.test(name, async (t2) => {
         for (const fn of test_functions) {
           await t2.test(fn.name || "anonymous test", async () => {
-            await fn(action_fn, db);
+            await fn(createActionFnWithDbRoles(action_fn), db);
           });
         }
       });
     }
   });
 });
+
+/**
+ * The action unit fixtures use one shared test DB as both the root catalog DB
+ * and the current chat DB. Production code receives those as separate semantic
+ * roles from executeAction().
+ * @param {Function} actionFn
+ * @returns {Function}
+ */
+function createActionFnWithDbRoles(actionFn) {
+  return (context, params) => actionFn({
+    chatDb: db,
+    rootDb: db,
+    ...context,
+    chatDb: context.chatDb ?? db,
+    rootDb: context.rootDb ?? db,
+  }, params);
+}

@@ -30,20 +30,18 @@ export default /** @type {defineAction} */ ((x) => x)({
   permissions: {
     autoExecute: true,
     autoContinue: true,
-    useRootDb: true,
     useChatDb: true,
     useLlm: true,
   },
   /** @param {{content?: string}} params */
   formatToolCall: ({ content }) => `Remembering "${content}"`,
-  action_fn: async function ({ chatId, chatDb, rootDb, llmClient, confirm }, params) {
-    const db = chatDb ?? rootDb;
+  action_fn: async function ({ chatId, chatDb, llmClient, confirm }, params) {
     const content = params.content?.trim();
     if (!content) {
       return "Cannot save empty content. Please provide a note to remember.";
     }
 
-    const existing = await findMemories(db, llmClient, chatId, content, {
+    const existing = await findMemories(chatDb, llmClient, chatId, content, {
       limit: 1,
       minSimilarity: 0.85,
     });
@@ -59,7 +57,7 @@ export default /** @type {defineAction} */ ((x) => x)({
       }
     }
 
-    const id = await saveMemory(db, llmClient, chatId, content);
+    const id = await saveMemory(chatDb, llmClient, chatId, content);
     return `Memory saved (id: ${id}).`;
   },
 });

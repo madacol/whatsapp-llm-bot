@@ -28,17 +28,15 @@ export default /** @type {defineAction} */ ((x) => x)({
   permissions: {
     autoExecute: true,
     autoContinue: true,
-    useRootDb: true,
     useChatDb: true,
     useLlm: true,
   },
-  action_fn: async function ({ chatId, chatDb, rootDb, llmClient }, params) {
-    const db = chatDb ?? rootDb;
+  action_fn: async function ({ chatId, chatDb, llmClient }, params) {
     const subcommand = params.subcommand || "list";
 
     switch (subcommand) {
       case "list": {
-        const memories = await listMemories(db, chatId);
+        const memories = await listMemories(chatDb, chatId);
         if (memories.length === 0) {
           return "No memories saved for this chat.";
         }
@@ -57,7 +55,7 @@ export default /** @type {defineAction} */ ((x) => x)({
         if (!idStr || isNaN(id) || !Number.isInteger(id)) {
           return "Invalid memory ID. Usage: !memories delete <id>";
         }
-        const deleted = await deleteMemory(db, chatId, id);
+        const deleted = await deleteMemory(chatDb, chatId, id);
         if (!deleted) {
           return `Memory #${id} not found in this chat.`;
         }
@@ -69,7 +67,7 @@ export default /** @type {defineAction} */ ((x) => x)({
         if (!query) {
           return "Please provide a search query. Usage: !memories search <query>";
         }
-        const results = await findMemories(db, llmClient, chatId, query, { minSimilarity: 0 });
+        const results = await findMemories(chatDb, llmClient, chatId, query, { minSimilarity: 0 });
         if (results.length === 0) {
           return "No memories found matching your query.";
         }

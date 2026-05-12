@@ -1,5 +1,5 @@
 /**
- * Create the minimal root schema required before legacy migrations can run.
+ * Create the minimal root schema required before root migrations can run.
  * @param {PGlite} db
  * @returns {Promise<void>}
  */

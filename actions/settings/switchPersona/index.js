@@ -20,17 +20,16 @@ export default /** @type {defineAction} */ ((x) => x)({
     autoExecute: true,
     requireAdmin: true,
     useRootDb: true,
-    useChatDb: true,
   },
   /** @param {{name?: string}} params */
   formatToolCall: ({ name }) => name ? `Switching to "${name}"` : "Showing persona",
   /**
-   * @param {ExtendedActionContext<{autoExecute: true, requireAdmin: true, useRootDb: true, useChatDb: true}>} context
+   * @param {ExtendedActionContext<{autoExecute: true, requireAdmin: true, useRootDb: true}>} context
    * @param {{ name?: string }} params
    */
   action_fn: async function (context, params) {
-    const { chatDb, rootDb, chatId } = context;
-    const chat = await getChatOrThrow(chatDb ?? rootDb, chatId);
+    const { rootDb, chatId } = context;
+    const chat = await getChatOrThrow(rootDb, chatId);
 
     // No argument: show current persona + list available
     if (!params.name) {

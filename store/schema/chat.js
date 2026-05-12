@@ -85,15 +85,6 @@ export async function ensureChatStoreSchema(db) {
     )
   `;
 
-  await db.sql`
-    CREATE TABLE IF NOT EXISTS html_pages (
-      id UUID PRIMARY KEY,
-      html TEXT NOT NULL,
-      title TEXT,
-      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    )
-  `;
-
   await db.sql`CREATE INDEX IF NOT EXISTS idx_messages_search_text ON messages USING gin (search_text)`;
   await db.sql`CREATE INDEX IF NOT EXISTS idx_messages_display_key ON messages (chat_id, display_key) WHERE display_key IS NOT NULL`;
   await db.sql`CREATE INDEX IF NOT EXISTS idx_memories_search_text ON memories USING gin (search_text)`;

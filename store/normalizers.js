@@ -269,7 +269,7 @@ export function normalizeChatBindingRow(raw) {
   const timestamp = normalizeTimestampValue(raw.timestamp);
   if (
     typeof raw.chat_id !== "string"
-    || (raw.binding_kind !== "repo" && raw.binding_kind !== "project" && raw.binding_kind !== "workspace")
+    || (raw.binding_kind !== "project" && raw.binding_kind !== "workspace")
     || (raw.project_id !== null && typeof raw.project_id !== "string")
     || (raw.workspace_id !== null && typeof raw.workspace_id !== "string")
     || !timestamp
@@ -279,7 +279,7 @@ export function normalizeChatBindingRow(raw) {
 
   return {
     chat_id: raw.chat_id,
-    binding_kind: raw.binding_kind === "repo" ? "project" : raw.binding_kind,
+    binding_kind: raw.binding_kind,
     project_id: raw.project_id,
     workspace_id: raw.workspace_id,
     timestamp,

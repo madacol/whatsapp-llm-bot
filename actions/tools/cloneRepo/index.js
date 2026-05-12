@@ -50,7 +50,6 @@ export default /** @type {defineAction} */ ((x) => x)({
     autoExecute: true,
     autoContinue: true,
     useRootDb: true,
-    useChatDb: true,
   },
   /**
    * @param {{ repository?: string }} params
@@ -58,18 +57,17 @@ export default /** @type {defineAction} */ ((x) => x)({
    */
   formatToolCall: ({ repository }) => repository ? `Cloning ${repository}` : "Cloning repository",
   /**
-   * @param {ExtendedActionContext<{ requireAdmin: true, autoExecute: true, autoContinue: true, useRootDb: true, useChatDb: true }>} context
+   * @param {ExtendedActionContext<{ requireAdmin: true, autoExecute: true, autoContinue: true, useRootDb: true }>} context
    * @param {{ repository?: string }} params
    * @returns {Promise<string>}
    */
-  action_fn: async function ({ chatId, chatDb, rootDb }, { repository }) {
+  action_fn: async function ({ chatId, rootDb }, { repository }) {
     const trimmedRepository = repository?.trim();
     if (!trimmedRepository) {
       return "Usage: !clone <repository_url>";
     }
 
-    const db = chatDb ?? rootDb;
-    const chat = await getChatOrThrow(db, chatId);
+    const chat = await getChatOrThrow(rootDb, chatId);
     const configuredCwd = chat.harness_cwd;
     const workdir = getChatWorkDir(chatId, configuredCwd);
 

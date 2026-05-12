@@ -594,7 +594,7 @@ describe("HtmlContent via LLM tool call", () => {
   let htmlPort;
 
   before(async () => {
-    htmlPort = await startHtmlServer(0, testDb);
+    htmlPort = await startHtmlServer(0);
     process.env.HTML_SERVER_BASE_URL = `http://127.0.0.1:${htmlPort}`;
   });
 
@@ -613,7 +613,7 @@ describe("HtmlContent via LLM tool call", () => {
     });
 
     // Link appears as an edit on the tool-call message (edit-in-place)
-    const linkResponse = r.raw.find(x => x.text.includes("/page/"));
+    const linkResponse = r.raw.find(x => x.text.includes("/html/"));
     assert.ok(linkResponse, `Should have a page link (via edit or send), got: ${r.raw.map(x => x.text).join(" | ")}`);
     assert.ok(linkResponse.text.includes("Sales Report"), `Link text should include the title, got: ${linkResponse.text}`);
 
@@ -634,7 +634,7 @@ describe("HtmlContent via !command", () => {
   let htmlPort;
 
   before(async () => {
-    htmlPort = await startHtmlServer(0, testDb);
+    htmlPort = await startHtmlServer(0);
     process.env.HTML_SERVER_BASE_URL = `http://127.0.0.1:${htmlPort}`;
   });
 
@@ -646,7 +646,7 @@ describe("HtmlContent via !command", () => {
   it("sends link URL when !js returns HtmlContent", async () => {
     const chat = await t.chat("html-cmd-chat", { enabled: true });
     const r = await chat.send('!js () => ({ __brand: "html", html: "<p>Hello</p>", title: "Test" })');
-    const linkResponse = r.raw.find(x => x.text.includes("/page/"));
+    const linkResponse = r.raw.find(x => x.text.includes("/html/"));
     assert.ok(linkResponse, `Should send a page link, got: ${r.raw.map(x => x.text).join(" | ")}`);
     assert.ok(linkResponse.text.includes("Test"), `Link text should include the title, got: ${linkResponse.text}`);
   });
