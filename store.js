@@ -1,5 +1,6 @@
 import { getChatDb, getRootDb } from "./db.js";
 import { createLogger } from "./logger.js";
+import { ensureChatConfig, mirrorChatConfigToDb, readChatConfig } from "./chat-config.js";
 import { normalizeChatRow } from "./store/normalizers.js";
 import { createChatStore } from "./store/repos/chats.js";
 import { createMessageStore } from "./store/repos/messages.js";
@@ -76,11 +77,16 @@ const log = createLogger("store");
  * @returns {Promise<ChatRow>}
  */
 export async function getChatOrThrow(db, chatId) {
+  const configChat = await readChatConfig(chatId);
+  if (configChat) {
+    return configChat;
+  }
   const { rows: [row] } = await db.sql`SELECT * FROM chats WHERE chat_id = ${chatId}`;
   const chat = normalizeChatRow(row);
   if (!chat) {
     throw new Error(`Chat ${chatId} does not exist.`);
   }
+  await ensureChatConfig(chatId, chat);
   return chat;
 }
 
@@ -197,6 +203,9 @@ export async function initStore(injectedDb, options = {}) {
     await db.sql`INSERT INTO chats(chat_id) VALUES (${chatId}) ON CONFLICT (chat_id) DO NOTHING;`;
     const chatDb = await getInitializedChatDb(chatId);
     await chatDb.sql`INSERT INTO chats(chat_id) VALUES (${chatId}) ON CONFLICT (chat_id) DO NOTHING;`;
+    const { rows: [legacyRow] } = await chatDb.sql`SELECT * FROM chats WHERE chat_id = ${chatId}`;
+    const chat = await ensureChatConfig(chatId, legacyRow ?? undefined);
+    await mirrorChatConfigToDb(chatDb, chat);
   }
 
   /**

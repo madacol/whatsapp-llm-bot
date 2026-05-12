@@ -4,6 +4,12 @@ import {
   normalizeHarnessForkStackEntry,
   normalizeHarnessSessionHistory,
 } from "../normalizers.js";
+import {
+  ensureChatConfig,
+  mirrorChatConfigToDb,
+  readChatConfig,
+  updateChatConfig,
+} from "../../chat-config.js";
 
 /** @typedef {import("../../store.js").Store} Store */
 /** @typedef {import("../../store.js").ChatRow} ChatRow */
@@ -40,9 +46,18 @@ export function createChatStore({ getChatDb, ensureChatExists }) {
    * @returns {Promise<ChatRow | undefined>}
    */
   async function getChat(chatId) {
+    const configChat = await readChatConfig(chatId);
+    if (configChat) {
+      return configChat;
+    }
     const db = await getChatDb(chatId);
     const { rows: [row] } = await db.sql`SELECT * FROM chats WHERE chat_id = ${chatId}`;
-    return normalizeChatRow(row) ?? undefined;
+    const chat = normalizeChatRow(row);
+    if (!chat) {
+      return undefined;
+    }
+    await ensureChatConfig(chatId, chat);
+    return chat;
   }
 
   return {
@@ -68,11 +83,8 @@ export function createChatStore({ getChatDb, ensureChatExists }) {
     async setChatEnabled(chatId, enabled) {
       await ensureChatExists(chatId);
       const db = await getChatDb(chatId);
-      await db.sql`
-        UPDATE chats
-        SET is_enabled = ${enabled}
-        WHERE chat_id = ${chatId}
-      `;
+      const chat = await updateChatConfig(chatId, (current) => ({ ...current, is_enabled: enabled }));
+      await mirrorChatConfigToDb(db, chat);
     },
 
     /**
@@ -92,27 +104,26 @@ export function createChatStore({ getChatDb, ensureChatExists }) {
       }
 
       const db = await getChatDb(targetChatId);
-      await db.sql`
-        UPDATE chats
-        SET
-          system_prompt = ${sourceChat.system_prompt},
-          model = ${sourceChat.model},
-          respond_on_any = ${sourceChat.respond_on_any},
-          respond_on_mention = ${sourceChat.respond_on_mention},
-          respond_on_reply = ${sourceChat.respond_on_reply},
-          respond_on = ${sourceChat.respond_on},
-          debug = ${sourceChat.debug},
-          media_to_text_models = ${JSON.stringify(sourceChat.media_to_text_models ?? {})}::jsonb,
-          model_roles = ${JSON.stringify(sourceChat.model_roles ?? {})}::jsonb,
-          memory = ${sourceChat.memory},
-          memory_threshold = ${sourceChat.memory_threshold},
-          enabled_actions = ${JSON.stringify(sourceChat.enabled_actions ?? [])}::jsonb,
-          active_persona = ${sourceChat.active_persona},
-          harness = ${sourceChat.harness},
-          output_visibility = ${JSON.stringify(sourceChat.output_visibility ?? {})}::jsonb,
-          harness_config = ${JSON.stringify(sourceChat.harness_config ?? {})}::jsonb
-        WHERE chat_id = ${targetChatId}
-      `;
+      const chat = await updateChatConfig(targetChatId, (current) => ({
+        ...current,
+        system_prompt: sourceChat.system_prompt,
+        model: sourceChat.model,
+        respond_on_any: sourceChat.respond_on_any,
+        respond_on_mention: sourceChat.respond_on_mention,
+        respond_on_reply: sourceChat.respond_on_reply,
+        respond_on: sourceChat.respond_on,
+        debug: sourceChat.debug,
+        media_to_text_models: sourceChat.media_to_text_models ?? {},
+        model_roles: sourceChat.model_roles ?? {},
+        memory: sourceChat.memory,
+        memory_threshold: sourceChat.memory_threshold,
+        enabled_actions: sourceChat.enabled_actions ?? [],
+        active_persona: sourceChat.active_persona,
+        harness: sourceChat.harness,
+        output_visibility: sourceChat.output_visibility ?? {},
+        harness_config: sourceChat.harness_config ?? {},
+      }));
+      await mirrorChatConfigToDb(db, chat);
     },
 
     /**
@@ -123,12 +134,12 @@ export function createChatStore({ getChatDb, ensureChatExists }) {
      */
     async saveHarnessSession(chatId, session) {
       const db = await getChatDb(chatId);
-      await db.sql`
-        UPDATE chats
-        SET harness_session_id = ${session?.id ?? null},
-            harness_session_kind = ${session?.kind ?? null}
-        WHERE chat_id = ${chatId}
-      `;
+      const chat = await updateChatConfig(chatId, (current) => ({
+        ...current,
+        harness_session_id: session?.id ?? null,
+        harness_session_kind: session?.kind ?? null,
+      }));
+      await mirrorChatConfigToDb(db, chat);
     },
 
     /**
@@ -161,13 +172,13 @@ export function createChatStore({ getChatDb, ensureChatExists }) {
       const updated = [...history, entry].slice(-maxEntries);
 
       const db = await getChatDb(chatId);
-      await db.sql`
-        UPDATE chats
-        SET harness_session_history = ${JSON.stringify(updated)},
-            harness_session_id = NULL,
-            harness_session_kind = NULL
-        WHERE chat_id = ${chatId}
-      `;
+      const updatedChat = await updateChatConfig(chatId, (current) => ({
+        ...current,
+        harness_session_history: updated,
+        harness_session_id: null,
+        harness_session_kind: null,
+      }));
+      await mirrorChatConfigToDb(db, updatedChat);
       return entry;
     },
 
@@ -213,13 +224,13 @@ export function createChatStore({ getChatDb, ensureChatExists }) {
       history.splice(index, 1);
 
       const db = await getChatDb(chatId);
-      await db.sql`
-        UPDATE chats
-        SET harness_session_id = ${entry.id},
-            harness_session_kind = ${entry.kind},
-            harness_session_history = ${JSON.stringify(history)}
-        WHERE chat_id = ${chatId}
-      `;
+      const updatedChat = await updateChatConfig(chatId, (current) => ({
+        ...current,
+        harness_session_id: entry.id,
+        harness_session_kind: entry.kind,
+        harness_session_history: history,
+      }));
+      await mirrorChatConfigToDb(db, updatedChat);
       return entry;
     },
 
@@ -249,11 +260,11 @@ export function createChatStore({ getChatDb, ensureChatExists }) {
       }
 
       const db = await getChatDb(chatId);
-      await db.sql`
-        UPDATE chats
-        SET harness_fork_stack = ${JSON.stringify([...stack, normalizedEntry])}
-        WHERE chat_id = ${chatId}
-      `;
+      const updatedChat = await updateChatConfig(chatId, (current) => ({
+        ...current,
+        harness_fork_stack: [...stack, normalizedEntry],
+      }));
+      await mirrorChatConfigToDb(db, updatedChat);
     },
 
     /**
@@ -266,11 +277,11 @@ export function createChatStore({ getChatDb, ensureChatExists }) {
       const entry = stack.pop() ?? null;
 
       const db = await getChatDb(chatId);
-      await db.sql`
-        UPDATE chats
-        SET harness_fork_stack = ${JSON.stringify(stack)}
-        WHERE chat_id = ${chatId}
-      `;
+      const updatedChat = await updateChatConfig(chatId, (current) => ({
+        ...current,
+        harness_fork_stack: stack,
+      }));
+      await mirrorChatConfigToDb(db, updatedChat);
       return entry;
     },
   };

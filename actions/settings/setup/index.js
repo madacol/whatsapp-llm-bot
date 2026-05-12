@@ -7,6 +7,7 @@ import {
 } from "../../../harness-config.js";
 import { getChatOrThrow } from "../../../store.js";
 import { getChatDb } from "../../../db.js";
+import { mirrorChatConfigToDb, updateChatConfig } from "../../../chat-config.js";
 import { getClaudeSdkModels, getCodexAvailableModels, getPiAvailableModels, listHarnesses, resolveHarness } from "#harnesses";
 import {
   getSelectableOptions,
@@ -239,11 +240,8 @@ async function applyHarnessModelSelection(rootDb, chatId, chat, selection) {
     normalized[selection.harness] = scoped;
   }
 
-  await rootDb.sql`
-    UPDATE chats
-    SET harness_config = ${JSON.stringify(normalized)}::jsonb
-    WHERE chat_id = ${chatId}
-  `;
+  const updated = await updateChatConfig(chatId, (current) => ({ ...current, harness_config: normalized }), chat);
+  await mirrorChatConfigToDb(rootDb, updated);
   return formatHarnessModelSummary(selection.harness, selection.value);
 }
 
@@ -263,11 +261,8 @@ async function applyCodexPermissionsSelection(rootDb, chatId, chat, selection) {
   scoped.sandboxMode = selection.value;
   normalized.codex = scoped;
 
-  await rootDb.sql`
-    UPDATE chats
-    SET harness_config = ${JSON.stringify(normalized)}::jsonb
-    WHERE chat_id = ${chatId}
-  `;
+  const updated = await updateChatConfig(chatId, (current) => ({ ...current, harness_config: normalized }), chat);
+  await mirrorChatConfigToDb(rootDb, updated);
   return formatCodexPermissionsSummary(selection.value);
 }
 

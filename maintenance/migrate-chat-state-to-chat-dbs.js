@@ -7,6 +7,7 @@ import { resolve } from "node:path";
 import { bootstrapStoreSchema } from "../store/schema/bootstrap.js";
 import { ensureChatStoreSchema } from "../store/schema/chat.js";
 import { runStoreMigrations } from "../store/schema/migrations.js";
+import { writeChatConfig } from "../chat-config.js";
 
 const CHAT_SCOPED_TABLES = [
   { table: "messages", key: "message_id" },
@@ -174,6 +175,7 @@ async function copyChatSettings(sourceDb, targetDb, chatId) {
   );
   if (rows.length === 0) {
     await targetDb.sql`INSERT INTO chats(chat_id) VALUES (${chatId}) ON CONFLICT (chat_id) DO NOTHING`;
+    await writeChatConfig(chatId, { chat_id: chatId });
     return 0;
   }
 
@@ -182,6 +184,7 @@ async function copyChatSettings(sourceDb, targetDb, chatId) {
     [chatId],
   );
   const row = mergeChatSettingsRow(rows[0], existingTargetRow, columns);
+  await writeChatConfig(chatId, row);
 
   const placeholders = columns.map((_, index) => `$${index + 1}`).join(", ");
   const updateColumns = columns.filter((column) => column !== "chat_id");

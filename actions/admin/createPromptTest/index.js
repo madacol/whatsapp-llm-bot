@@ -9,6 +9,7 @@ import {
   readBlockBuffer,
 } from "../../../media-store.js";
 import { actionsToToolDefinitions } from "../../../message-formatting.js";
+import { getChatOrThrow } from "../../../store.js";
 import { checkAssertion } from "../../../tests/prompt-regressions/assertions.js";
 
 /** @typedef {import("../../../tests/prompt-regressions/assertions.js").TestAssertion} TestAssertion */
@@ -313,11 +314,9 @@ export default /** @type {defineAction} */ ((x) => x)({
       /** @type {string} */
       let systemPrompt = config.system_prompt;
       try {
-        const { rows } = await db.sql`
-          SELECT system_prompt FROM chats WHERE chat_id = ${chatId}
-        `;
-        if (rows[0]?.system_prompt) {
-          systemPrompt = /** @type {string} */ (rows[0].system_prompt);
+        const chat = await getChatOrThrow(db, chatId);
+        if (chat.system_prompt) {
+          systemPrompt = chat.system_prompt;
         }
       } catch {
         // fall through to config default
