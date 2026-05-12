@@ -4,31 +4,12 @@ import { join } from "node:path";
 import config from "./config.js";
 import { getChatRootDir } from "./chat-paths.js";
 
-const UNSAFE_HTML_PATTERNS = [
-  /<\s*script\b/i,
-  /\son[a-z]+\s*=/i,
-  /javascript\s*:/i,
-];
-
 /**
  * @param {string} value
  * @returns {string}
  */
 function escapeHtml(value) {
   return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-}
-
-/**
- * @param {string} html
- * @returns {string | null}
- */
-export function getUnsafeHtmlReason(html) {
-  for (const pattern of UNSAFE_HTML_PATTERNS) {
-    if (pattern.test(html)) {
-      return "HTML pages must be static: script tags, inline event handlers, and javascript: URLs are not allowed.";
-    }
-  }
-  return null;
 }
 
 /**
@@ -56,10 +37,6 @@ export function getHtmlPagePath(chatId, hash) {
  * @returns {Promise<string>} SHA-256 hash of the stored page file.
  */
 export async function storePage(chatId, html, title) {
-  const unsafeReason = getUnsafeHtmlReason(html);
-  if (unsafeReason) {
-    throw new Error(unsafeReason);
-  }
   const titleTag = title ? `<title>${escapeHtml(title)}</title>` : "";
   const trimmedHtml = html.trim();
   const isFullDocument = /^\s*(?:<!doctype\s+html[^>]*>\s*)?<html[\s>]/i.test(trimmedHtml);

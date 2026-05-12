@@ -27,31 +27,25 @@ async function stores_html_file_and_returns_link(action_fn) {
 /**
  * @param {Function} action_fn
  */
-async function rejects_script_html(action_fn) {
-  await assertRejects(
-    () => action_fn({ chatId: "expose-html-bad" }, { html: "<script>alert(1)</script>" }),
-    "static",
+async function stores_script_html(action_fn) {
+  const result = await action_fn(
+    { chatId: "expose-html-script" },
+    { html: "<button onclick=\"document.body.dataset.clicked='1'\">Run</button><script>document.body.dataset.ready='1'</script>" },
   );
-}
-
-/**
- * @param {() => Promise<unknown>} fn
- * @param {string} expected
- */
-async function assertRejects(fn, expected) {
-  try {
-    await fn();
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    if (!message.includes(expected)) {
-      throw new Error(`Expected error containing ${expected}, got ${message}`);
-    }
-    return;
+  if (typeof result !== "string") {
+    throw new Error(`Expected page link, got ${String(result)}`);
   }
-  throw new Error("Expected function to reject.");
+  const hash = result.match(/\/html\/([0-9a-f]{64})\.html/)?.[1];
+  if (!hash) {
+    throw new Error(`Expected page hash in link, got ${result}`);
+  }
+  const html = await getPage("expose-html-script", hash);
+  if (!html?.includes("<script>document.body.dataset.ready='1'</script>")) {
+    throw new Error(`Expected stored script HTML, got ${html}`);
+  }
 }
 
 export default [
   stores_html_file_and_returns_link,
-  rejects_script_html,
+  stores_script_html,
 ];
