@@ -9,7 +9,6 @@ import { errorToString, getChatWorkDir } from "../utils.js";
 import {
   getChatActionDbDir,
   getChatActionsDir,
-  getChatEtcDir,
   getChatPgDataDir,
   getChatRootDir,
   getChatWorkspaceDir,
@@ -69,10 +68,9 @@ describe("getChatWorkDir", () => {
     assert.equal(getChatPgDataDir(chatId), path.join(tempChatDir, chatId, "pgdata"));
     assert.equal(getChatActionsDir(chatId), path.join(tempChatDir, chatId, "actions"));
     assert.equal(getChatActionDbDir(chatId, "create_action"), path.join(tempChatDir, chatId, "actions", "create_action"));
-    assert.equal(getChatEtcDir(chatId), path.join(tempChatDir, chatId, "etc"));
     assert.ok(fs.existsSync(getChatPgDataDir(chatId)));
     assert.ok(fs.existsSync(getChatActionsDir(chatId)));
-    assert.ok(fs.existsSync(getChatEtcDir(chatId)));
+    assert.equal(fs.existsSync(path.join(tempChatDir, chatId, "etc")), false);
     assert.equal((await fsp.lstat(readableLink)).isSymbolicLink(), true);
     assert.equal(path.resolve(tempWorkspacesDir, await fsp.readlink(readableLink)), workdir);
   });
