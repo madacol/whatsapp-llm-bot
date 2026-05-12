@@ -1,9 +1,11 @@
 import { describe, it, before } from "node:test";
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import { PGlite } from "@electric-sql/pglite";
 import { vector } from "@electric-sql/pglite/vector";
 import { initStore, getChatOrThrow } from "../store.js";
 import { createTestDb } from "./helpers.js";
+import { getChatConfigPath } from "../chat-config.js";
 
 describe("store with injected DB", () => {
   /** @type {import("@electric-sql/pglite").PGlite} */
@@ -75,6 +77,16 @@ describe("store with injected DB", () => {
       const { rows: rootEnabled } = await rootDb.sql`SELECT is_enabled FROM chats WHERE chat_id = 'isolated-a'`;
       assert.equal(rootMessages[0].count, 0);
       assert.equal(rootEnabled[0].is_enabled, false);
+    });
+
+    it("persists one-row chat settings to the chat config file", async () => {
+      const chatId = `config-backed-${Date.now()}`;
+      await store.createChat(chatId);
+      await store.setChatEnabled(chatId, true);
+
+      const rawConfig = JSON.parse(await readFile(getChatConfigPath(chatId), "utf8"));
+      assert.equal(rawConfig.chat_id, chatId);
+      assert.equal(rawConfig.is_enabled, true);
     });
 
   });

@@ -73,6 +73,7 @@ async function main() {
     defaultTestFiles: listDefaultTestFiles(),
     watch,
   }), {
+    env: { ...process.env, TESTING: process.env.TESTING ?? "1" },
     stdio: "inherit",
   });
 

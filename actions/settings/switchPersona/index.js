@@ -1,5 +1,6 @@
 import { getAgents, getAgent } from "../../../agents.js";
 import { getChatOrThrow } from "../../../store.js";
+import { mirrorChatConfigToDb, updateChatConfig } from "../../../chat-config.js";
 
 export default /** @type {defineAction} */ ((x) => x)({
   name: "switch_persona",
@@ -45,10 +46,8 @@ export default /** @type {defineAction} */ ((x) => x)({
 
     // Deactivate
     if (params.name === "off" || params.name === "none") {
-      await db.query(
-        `UPDATE chats SET active_persona = NULL WHERE chat_id = $1`,
-        [chatId],
-      );
+      const updated = await updateChatConfig(chatId, (current) => ({ ...current, active_persona: null }), chat);
+      await mirrorChatConfigToDb(db, updated);
       return "Persona deactivated. Using default system prompt.";
     }
 
@@ -60,10 +59,8 @@ export default /** @type {defineAction} */ ((x) => x)({
       return `Agent "${params.name}" not found. Available: ${available}`;
     }
 
-    await db.query(
-      `UPDATE chats SET active_persona = $1 WHERE chat_id = $2`,
-      [agent.name, chatId],
-    );
+    const updated = await updateChatConfig(chatId, (current) => ({ ...current, active_persona: agent.name }), chat);
+    await mirrorChatConfigToDb(db, updated);
 
     return `Persona activated: *${agent.name}*\n${agent.description}`;
   },

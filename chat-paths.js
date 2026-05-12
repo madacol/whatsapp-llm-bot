@@ -35,7 +35,7 @@ export function getChatBaseDir() {
   if (config.chat_dir) {
     return resolve(config.chat_dir);
   }
-  if (process.env.TESTING) {
+  if (process.env.TESTING || process.env.NODE_TEST_CONTEXT) {
     return getTestingChatDir();
   }
   return DEFAULT_CHAT_DIR;

@@ -1,5 +1,6 @@
 import { getChatDb } from "./db.js";
 import { ensureChatStoreSchema } from "./store/schema/chat.js";
+import { ensureChatConfig, mirrorChatConfigToDb, readChatConfig, updateChatConfig } from "./chat-config.js";
 
 /**
  * @typedef {"claude-agent-sdk" | "codex" | "native" | "pi"} SupportedHarnessName
@@ -183,14 +184,28 @@ export function getScopedHarnessConfig(value, harnessName) {
 
 /**
  * @param {string} chatId
+ * @param {PGlite} db
+ * @returns {Promise<import("./store.js").ChatRow>}
+ */
+async function getChatConfigForHarness(chatId, db) {
+  const fileConfig = await readChatConfig(chatId);
+  if (fileConfig) {
+    return fileConfig;
+  }
+  const { rows: [row] } = await db.sql`SELECT * FROM chats WHERE chat_id = ${chatId}`;
+  return ensureChatConfig(chatId, row ?? undefined);
+}
+
+/**
+ * @param {string} chatId
  * @param {string} harnessName
  * @returns {Promise<Record<string, unknown>>}
  */
 export async function getHarnessConfig(chatId, harnessName) {
   const db = getChatDb(chatId);
   await ensureChatStoreSchema(db);
-  const { rows: [row] } = await db.sql`SELECT harness_config, harness FROM chats WHERE chat_id = ${chatId}`;
-  return getScopedHarnessConfig(row?.harness_config, harnessName || row?.harness);
+  const chat = await getChatConfigForHarness(chatId, db);
+  return getScopedHarnessConfig(chat.harness_config, harnessName || chat.harness);
 }
 
 /**
@@ -204,8 +219,8 @@ export async function getHarnessConfig(chatId, harnessName) {
 export async function updateHarnessConfig(chatId, harnessName, patch) {
   const db = getChatDb(chatId);
   await ensureChatStoreSchema(db);
-  const { rows: [row] } = await db.sql`SELECT harness_config, harness FROM chats WHERE chat_id = ${chatId}`;
-  const root = normalizeHarnessConfig(row?.harness_config, row?.harness);
+  const chat = await getChatConfigForHarness(chatId, db);
+  const root = normalizeHarnessConfig(chat.harness_config, chat.harness);
   const scoped = ensureScopedConfig(root, harnessName);
   for (const [key, value] of Object.entries(patch)) {
     if (value == null) {
@@ -217,5 +232,6 @@ export async function updateHarnessConfig(chatId, harnessName, patch) {
   if (Object.keys(scoped).length === 0) {
     delete root[harnessName];
   }
-  await db.sql`UPDATE chats SET harness_config = ${JSON.stringify(root)} WHERE chat_id = ${chatId}`;
+  const updated = await updateChatConfig(chatId, (current) => ({ ...current, harness_config: root }));
+  await mirrorChatConfigToDb(db, updated);
 }

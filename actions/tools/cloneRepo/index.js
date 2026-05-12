@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import { getChatOrThrow } from "../../../store.js";
 import { errorToString, getChatWorkDir } from "../../../utils.js";
 
 const CLONE_TIMEOUT_MS = 300_000;
@@ -68,13 +69,8 @@ export default /** @type {defineAction} */ ((x) => x)({
     }
 
     const db = chatDb ?? rootDb;
-    const { rows } = await db.sql`
-      SELECT harness_cwd
-      FROM chats
-      WHERE chat_id = ${chatId}
-      LIMIT 1
-    `;
-    const configuredCwd = typeof rows[0]?.harness_cwd === "string" ? rows[0].harness_cwd : null;
+    const chat = await getChatOrThrow(db, chatId);
+    const configuredCwd = chat.harness_cwd;
     const workdir = getChatWorkDir(chatId, configuredCwd);
 
     try {
