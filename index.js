@@ -15,6 +15,8 @@ import { startHtmlServer, stopHtmlServer } from "./html-server.js";
 import { registerOptionalHarnesses, waitForAllHarnesses } from "#harnesses";
 import { createLogger } from "./logger.js";
 import { createConversationRunner } from "./conversation/create-conversation-runner.js";
+import { getDbCachePaths, getDbCacheSize } from "./db.js";
+import { startProcessDiagnostics } from "./process-diagnostics.js";
 
 const log = createLogger("index");
 const SHUTDOWN_FORCE_EXIT_MS = 10_000;
@@ -110,11 +112,17 @@ if (!process.env.TESTING) {
 
   const stopReminders = startReminderDaemon(transport.sendText);
   const stopModelsCache = startModelsCacheDaemon();
+  const stopProcessDiagnostics = startProcessDiagnostics({
+    log,
+    getDbCacheSize,
+    getDbCachePaths,
+  });
 
   async function cleanup() {
     try {
       stopReminders();
       stopModelsCache();
+      stopProcessDiagnostics();
       const waitedOn = await waitForAllHarnesses();
       if (waitedOn.length > 0) {
         log.info(`Shutdown waited on ${waitedOn.length} chat(s): ${waitedOn.join(", ")}`);
