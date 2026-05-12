@@ -2,6 +2,10 @@ import { PGlite } from "@electric-sql/pglite";
 import { vector } from "@electric-sql/pglite/vector";
 import { mkdirSync } from "node:fs";
 import { getChatActionDbDir, getChatPgDataDir } from "./chat-paths.js";
+import { createLogger } from "./logger.js";
+import { createProcessDiagnosticSnapshot, formatProcessDiagnosticSnapshot } from "./process-diagnostics.js";
+
+const log = createLogger("db");
 
 /** @type {Map<string, PGlite>} */
 const dbCache = new Map();
@@ -13,6 +17,7 @@ const memoryDbTimers = new Map();
 
 /** @type {PGlite | null} */
 let sharedTestDb = null;
+let nextDbCacheDiagnosticSize = 10;
 
 /**
  * @param {string} dataDir
@@ -57,11 +62,26 @@ export function getDb(dataDir) {
 
   const createdDb = new PGlite(dataDir, { extensions: { vector } });
   dbCache.set(dataDir, createdDb);
+  logDbCacheGrowth();
 
   // Auto-close in-memory DBs after inactivity to free ~20MB each
   if (isMemory) resetMemoryDbTimer(dataDir);
 
   return createdDb;
+}
+
+function logDbCacheGrowth() {
+  if (process.env.TESTING) return;
+  const shouldLogEveryOpen = process.env.DB_DIAGNOSTICS === "1";
+  if (!shouldLogEveryOpen && dbCache.size < nextDbCacheDiagnosticSize) return;
+  while (nextDbCacheDiagnosticSize <= dbCache.size) {
+    nextDbCacheDiagnosticSize += 10;
+  }
+  const snapshot = createProcessDiagnosticSnapshot({
+    dbCacheSize: dbCache.size,
+    dbCachePaths: [...dbCache.keys()],
+  });
+  log.warn("PGlite cache growth:", formatProcessDiagnosticSnapshot(snapshot));
 }
 
 /**
@@ -142,6 +162,7 @@ export async function closeAllDbs() {
 
   const entries = [...dbCache.entries()];
   dbCache.clear();
+  nextDbCacheDiagnosticSize = 10;
   for (const [, db] of entries) {
     try {
       await db.close();
