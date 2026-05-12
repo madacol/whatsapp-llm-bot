@@ -23,7 +23,6 @@ import { buildToolPresentation } from "../tool-presentation-model.js";
 import { createLogger } from "../logger.js";
 import { handleHarnessSessionCommand } from "./session-commands.js";
 import { convertUnsupportedMedia } from "../media-to-text.js";
-import { ensureChatStoreSchema } from "../store/schema/chat.js";
 
 const log = createLogger("harness:native");
 
@@ -178,9 +177,7 @@ async function executeAndStoreTool({
 
     // HTML content → store page, edit message with link
     if (isHtmlContent(result)) {
-      const chatDb = getChatDb(chatId);
-      await ensureChatStoreSchema(chatDb);
-      const linkText = await storeAndLinkHtml(chatDb, chatId, result);
+      const linkText = await storeAndLinkHtml(chatId, result);
 
       const toolMessage = createToolMessage(toolCall.id, linkText);
       await replaceStub(toolMessage);

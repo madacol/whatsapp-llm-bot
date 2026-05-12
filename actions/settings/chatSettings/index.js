@@ -41,13 +41,11 @@ export default /** @type {defineAction} */ ((x) => x)({
     autoExecute: true,
     autoContinue: true,
     useRootDb: true,
-    useChatDb: true,
   },
-  action_fn: async function ({ chatId, rootDb, chatDb, senderIds, getActions, getIsAdmin, select, selectMany }, { setting, value }) {
-    const db = chatDb ?? rootDb;
-    const serviceExtra = { senderIds, getActions, rootDb, getChatDb: chatDb ? getChatDb : undefined };
+  action_fn: async function ({ chatId, rootDb, senderIds, getActions, getIsAdmin, select, selectMany }, { setting, value }) {
+    const serviceExtra = { senderIds, getActions, rootDb, getChatDb };
     if (!setting || setting === "list") {
-      return getChatSettingsInfo(db, chatId, serviceExtra);
+      return getChatSettingsInfo(rootDb, chatId, serviceExtra);
     }
 
     if (setting === "help") {
@@ -55,7 +53,7 @@ export default /** @type {defineAction} */ ((x) => x)({
       if (!key) {
         return formatChatSettingsUsage("help <key>");
       }
-      return describeConfigKey(db, chatId, key, { getActions, rootDb, getChatDb });
+      return describeConfigKey(rootDb, chatId, key, { getActions, rootDb, getChatDb });
     }
 
     if (setting === "reset") {
@@ -67,7 +65,7 @@ export default /** @type {defineAction} */ ((x) => x)({
       if (!isAdmin) {
         return "Only admins can change settings.";
       }
-      return resetConfigValue(db, chatId, key, serviceExtra);
+      return resetConfigValue(rootDb, chatId, key, serviceExtra);
     }
 
     if (value === undefined || value === null) {
@@ -75,10 +73,10 @@ export default /** @type {defineAction} */ ((x) => x)({
       if (!definition) {
         return `Unknown config key \`${setting}\`.\nAvailable keys: ${CONFIG_KEYS.join(", ")}`;
       }
-      const chat = await getChatOrThrow(db, chatId);
+      const chat = await getChatOrThrow(rootDb, chatId);
       const multiSelectable = getMultiSelectableOptions(definition, chat);
       if (multiSelectable && typeof selectMany === "function") {
-        const helpText = await describeConfigKey(db, chatId, setting, { getActions, compact: true, rootDb, getChatDb });
+        const helpText = await describeConfigKey(rootDb, chatId, setting, { getActions, compact: true, rootDb, getChatDb });
         const selection = await selectMany(
           helpText,
           multiSelectable.options,
@@ -94,11 +92,11 @@ export default /** @type {defineAction} */ ((x) => x)({
         if (!isAdmin) {
           return "Only admins can change settings.";
         }
-        return setConfigValue(db, chatId, setting, selection.ids.join(" "), serviceExtra);
+        return setConfigValue(rootDb, chatId, setting, selection.ids.join(" "), serviceExtra);
       }
       const selectable = getSelectableOptions(definition, chat);
       if (selectable && typeof select === "function") {
-        const helpText = await describeConfigKey(db, chatId, setting, { getActions, compact: true, rootDb, getChatDb });
+        const helpText = await describeConfigKey(rootDb, chatId, setting, { getActions, compact: true, rootDb, getChatDb });
         const chosen = await select(
           helpText,
           selectable.options,
@@ -109,11 +107,11 @@ export default /** @type {defineAction} */ ((x) => x)({
           if (!isAdmin) {
             return "Only admins can change settings.";
           }
-          return setConfigValue(db, chatId, setting, chosen, serviceExtra);
+          return setConfigValue(rootDb, chatId, setting, chosen, serviceExtra);
         }
         return helpText;
       }
-      return describeConfigKey(db, chatId, setting, { getActions, rootDb, getChatDb });
+      return describeConfigKey(rootDb, chatId, setting, { getActions, rootDb, getChatDb });
     }
 
     const isAdmin = getIsAdmin ? await getIsAdmin() : true;
@@ -121,6 +119,6 @@ export default /** @type {defineAction} */ ((x) => x)({
       return "Only admins can change settings.";
     }
 
-    return setConfigValue(db, chatId, setting, String(value), serviceExtra);
+    return setConfigValue(rootDb, chatId, setting, String(value), serviceExtra);
   },
 });

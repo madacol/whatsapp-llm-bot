@@ -5,6 +5,7 @@ import assert from "node:assert/strict";
 import { PGlite } from "@electric-sql/pglite";
 import { vector } from "@electric-sql/pglite/vector";
 import { initStore } from "../store.js";
+import { ensureChatStoreSchema } from "../store/schema/chat.js";
 import {
   extractTextFromMessage,
   generateEmbedding,
@@ -23,19 +24,7 @@ let store;
 before(async () => {
   db = new PGlite("memory://", { extensions: { vector } });
   store = await initStore(db);
-
-  // Create memories table (will be in store.js after Phase 1A merge)
-  await db.sql`
-    CREATE TABLE IF NOT EXISTS memories (
-      id SERIAL PRIMARY KEY,
-      chat_id VARCHAR(50) REFERENCES chats(chat_id),
-      content TEXT NOT NULL,
-      embedding vector,
-      search_text tsvector,
-      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    )
-  `;
-  await db.sql`CREATE INDEX IF NOT EXISTS idx_memories_search_text ON memories USING gin (search_text)`;
+  await ensureChatStoreSchema(db);
 });
 
 // ═══════════════════════════════════════════════════════════════════

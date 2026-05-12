@@ -2,29 +2,25 @@ process.env.TESTING = "1";
 
 import { describe, it, before, after } from "node:test";
 import assert from "node:assert/strict";
-import { PGlite } from "@electric-sql/pglite";
 import { storePage } from "../html-store.js";
 import { startHtmlServer, stopHtmlServer } from "../html-server.js";
 
 describe("html-server", () => {
-  /** @type {PGlite} */
-  let db;
   /** @type {number} */
   let assignedPort;
+  const chatId = "html-server-test";
 
   before(async () => {
-    db = new PGlite("memory://");
-    assignedPort = await startHtmlServer(0, db);
+    assignedPort = await startHtmlServer(0);
   });
 
   after(async () => {
     await stopHtmlServer();
-    await db.close();
   });
 
-  it("serves stored HTML at GET /page/:id (200)", async () => {
-    const id = await storePage(db, "<h1>Test</h1>", "Test Page");
-    const res = await fetch(`http://127.0.0.1:${assignedPort}/page/${id}`);
+  it("serves stored HTML at GET /chat/:chatId/html/:id.html (200)", async () => {
+    const hash = await storePage(chatId, "<h1>Test</h1>", "Test Page");
+    const res = await fetch(`http://127.0.0.1:${assignedPort}/chat/${encodeURIComponent(chatId)}/html/${hash}.html`);
 
     assert.equal(res.status, 200);
     assert.equal(res.headers.get("content-type"), "text/html; charset=utf-8");
@@ -34,7 +30,7 @@ describe("html-server", () => {
   });
 
   it("returns 404 for unknown ID", async () => {
-    const res = await fetch(`http://127.0.0.1:${assignedPort}/page/00000000-0000-0000-0000-000000000000`);
+    const res = await fetch(`http://127.0.0.1:${assignedPort}/chat/${encodeURIComponent(chatId)}/html/${"0".repeat(64)}.html`);
     assert.equal(res.status, 404);
   });
 
@@ -46,9 +42,9 @@ describe("html-server", () => {
   it("stopHtmlServer closes cleanly", async () => {
     await stopHtmlServer();
     // Starting again should work fine
-    assignedPort = await startHtmlServer(0, db);
-    const id = await storePage(db, "<p>After restart</p>");
-    const res = await fetch(`http://127.0.0.1:${assignedPort}/page/${id}`);
+    assignedPort = await startHtmlServer(0);
+    const hash = await storePage(chatId, "<p>After restart</p>");
+    const res = await fetch(`http://127.0.0.1:${assignedPort}/chat/${encodeURIComponent(chatId)}/html/${hash}.html`);
     assert.equal(res.status, 200);
   });
 });

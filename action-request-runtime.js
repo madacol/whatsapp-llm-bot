@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { createImageBlockFromPath, mediaPathToMimeType } from "./media-store.js";
@@ -110,9 +110,11 @@ export async function executeQueuedActionRequests(requestsDir, input) {
  */
 export async function writeQueuedActionRequest(requestsDir, request) {
   await mkdir(requestsDir, { recursive: true });
-  const fileName = `${Date.now()}-${randomUUID()}.json`;
+  const requestJson = JSON.stringify(request, null, 2);
+  const requestHash = createHash("sha256").update(requestJson).digest("hex");
+  const fileName = `${Date.now()}-${process.hrtime.bigint()}-${requestHash}.json`;
   const requestPath = path.join(requestsDir, fileName);
-  await writeFile(requestPath, JSON.stringify(request, null, 2), "utf8");
+  await writeFile(requestPath, requestJson, "utf8");
   return requestPath;
 }
 
