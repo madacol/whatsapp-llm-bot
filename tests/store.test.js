@@ -18,7 +18,7 @@ describe("store with injected DB", () => {
     store = await initStore(db);
   });
 
-  it("does not create module-owned tables (reminders, media_to_text_cache)", async () => {
+  it("does not create chat-owned or module-owned tables in the root DB", async () => {
     // Use a fresh DB to avoid pollution from other test files sharing createTestDb()
     const freshDb = new PGlite("memory://", { extensions: { vector } });
     await initStore(freshDb);
@@ -28,8 +28,9 @@ describe("store with injected DB", () => {
       ORDER BY table_name
     `;
     const tableNames = rows.map(r => r.table_name);
-    assert.ok(!tableNames.includes("reminders"), `initStore() should not create 'reminders' table, got: ${tableNames}`);
-    assert.ok(!tableNames.includes("media_to_text_cache"), `initStore() should not create 'media_to_text_cache' table, got: ${tableNames}`);
+    for (const tableName of ["messages", "memories", "reminders", "usage_logs", "agent_runs", "whatsapp_outbound_queue", "html_pages", "media_to_text_cache"]) {
+      assert.ok(!tableNames.includes(tableName), `initStore() should not create '${tableName}' table in root, got: ${tableNames}`);
+    }
   });
 
   it("keeps fresh chat schemas catalog-only", async () => {
@@ -41,16 +42,6 @@ describe("store with injected DB", () => {
       ORDER BY ordinal_position
     `;
     assert.deepEqual(rows.map((row) => row.column_name), ["chat_id", "timestamp"]);
-  });
-
-  it("memories table is created by initStore", async () => {
-    const freshDb = new PGlite("memory://", { extensions: { vector } });
-    await initStore(freshDb);
-    const { rows } = await freshDb.sql`
-      SELECT table_name FROM information_schema.tables
-      WHERE table_schema = 'public' AND table_name = 'memories'
-    `;
-    assert.equal(rows.length, 1, "memories table should exist");
   });
 
   describe("createChat / getChat", () => {
@@ -84,9 +75,12 @@ describe("store with injected DB", () => {
       assert.equal((await isolatedStore.getMessages("isolated-a")).length, 1);
       assert.equal((await isolatedStore.getMessages("isolated-b")).length, 0);
 
-      const { rows: rootMessages } = await rootDb.sql`SELECT count(*)::int AS count FROM messages`;
+      const { rows: rootMessageTables } = await rootDb.sql`
+        SELECT table_name FROM information_schema.tables
+        WHERE table_schema = 'public' AND table_name = 'messages'
+      `;
       const { rows: rootCatalog } = await rootDb.sql`SELECT chat_id FROM chats WHERE chat_id = 'isolated-a'`;
-      assert.equal(rootMessages[0].count, 0);
+      assert.equal(rootMessageTables.length, 0);
       assert.equal(rootCatalog[0].chat_id, "isolated-a");
     });
 
