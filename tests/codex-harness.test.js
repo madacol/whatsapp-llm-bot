@@ -11,6 +11,7 @@ import {
 } from "../harnesses/codex.js";
 import { createLlmClient } from "../llm.js";
 import { writeMedia } from "../media-store.js";
+import { readChatConfig, writeChatConfig } from "../chat-config.js";
 
 const TEST_CODEX_MODELS = [
   { id: "gpt-5.4", label: "GPT-5.4" },
@@ -150,11 +151,7 @@ describe("createCodexHarness", () => {
     ]);
     assert.ok(replies[0]?.includes("Codex approval policy: `on-failure`"));
 
-    const { rows: [chat] } = await db.sql`
-      SELECT harness_config
-      FROM chats
-      WHERE chat_id = 'codex-approval-picker'
-    `;
+    const chat = await readChatConfig("codex-approval-picker");
     assert.equal(chat.harness_config.codex.approvalPolicy, "on-failure");
   });
 
@@ -517,12 +514,12 @@ describe("createCodexHarness", () => {
   it("ignores a stale Claude model in the shared chat row before starting Codex", async () => {
     const db = await createTestDb();
     await seedChat(db, "codex-chat-invalid-model", { enabled: true });
-    await db.sql`
-      UPDATE chats
-      SET harness = 'codex',
-          harness_config = '{"model":"sonnet","sandboxMode":"danger-full-access"}'::jsonb
-      WHERE chat_id = 'codex-chat-invalid-model'
-    `;
+    await writeChatConfig("codex-chat-invalid-model", {
+      chat_id: "codex-chat-invalid-model",
+      is_enabled: true,
+      harness: "codex",
+      harness_config: { model: "sonnet", sandboxMode: "danger-full-access" },
+    });
 
     /** @type {HarnessRunConfig | undefined} */
     let seenRunConfig;
@@ -587,11 +584,7 @@ describe("createCodexHarness", () => {
     assert.equal(seenRunConfig?.sandboxMode, "danger-full-access");
     assert.deepEqual(result.response, [{ type: "text", text: "ok" }]);
 
-    const { rows: [chat] } = await db.sql`
-      SELECT harness_config
-      FROM chats
-      WHERE chat_id = 'codex-chat-invalid-model'
-    `;
+    const chat = await readChatConfig("codex-chat-invalid-model");
     assert.deepEqual(chat.harness_config, {
       codex: {
         sandboxMode: "danger-full-access",

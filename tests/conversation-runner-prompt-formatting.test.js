@@ -6,6 +6,7 @@ process.env.MASTER_ID = "master-user";
 
 import { createChatTurn, createTestDb, seedChat as seedChat_ } from "./helpers.js";
 import { setDb } from "../db.js";
+import { updateChatConfig } from "../chat-config.js";
 
 /** @type {import("@electric-sql/pglite").PGlite} */
 let db;
@@ -50,12 +51,11 @@ const seedChat = (chatId, options) => seedChat_(db, chatId, options);
 describe("createConversationRunner prompt formatting", () => {
   it("stores raw group text, carries sender metadata, and omits the group-chat cue", async () => {
     await seedChat("conv-prompt-group", { enabled: true });
-    await db.sql`
-      UPDATE chats
-      SET harness = 'codex',
-          harness_config = '{}'::jsonb
-      WHERE chat_id = 'conv-prompt-group'
-    `;
+    await updateChatConfig("conv-prompt-group", (current) => ({
+      ...current,
+      harness: "codex",
+      harness_config: {},
+    }));
 
     /** @type {Message[] | null} */
     let seenMessages = null;

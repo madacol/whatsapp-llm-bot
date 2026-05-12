@@ -15,6 +15,7 @@ import { createChatTurn, createMockLlmServer, createTestDb, seedChat as seedChat
 import { setDb } from "../db.js";
 import { contentEvent } from "../outbound-events.js";
 import { getChatWorkDir } from "../utils.js";
+import { updateChatConfig } from "../chat-config.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -191,7 +192,7 @@ async function createRepoFixture() {
 async function seedChat(chatId, options = {}) {
   await seedChat_(db, chatId, { enabled: true });
   if (options.harnessCwd) {
-    await db.sql`UPDATE chats SET harness_cwd = ${options.harnessCwd} WHERE chat_id = ${chatId}`;
+    await updateChatConfig(chatId, (current) => ({ ...current, harness_cwd: options.harnessCwd ?? null }));
   }
 }
 
@@ -350,23 +351,21 @@ describe("workspace lifecycle", () => {
     const handleMessage = await createHandler({ transport: transportState.transport });
 
     await seedChat("repo-create-chat", { harnessCwd: repoRoot });
-    await db.sql`
-      UPDATE chats
-      SET
-        model = 'openai/gpt-4.1-mini',
-        system_prompt = 'Be concise',
-        respond_on = 'any',
-        debug = true,
-        memory = true,
-        memory_threshold = 0.42,
-        enabled_actions = '["fetch_url"]'::jsonb,
-        model_roles = '{"coding":"openai/gpt-4.1"}'::jsonb,
-        harness = 'codex',
-        output_visibility = '{"thinking":true}'::jsonb,
-        harness_config = '{"codex":{"model":"openai/gpt-4.1","sandboxMode":"workspace-write"}}'::jsonb,
-        media_to_text_models = '{"general":"openai/gpt-4.1-mini","image":"openai/gpt-4.1"}'::jsonb
-      WHERE chat_id = 'repo-create-chat'
-    `;
+    await updateChatConfig("repo-create-chat", (current) => ({
+      ...current,
+      model: "openai/gpt-4.1-mini",
+      system_prompt: "Be concise",
+      respond_on: "any",
+      debug: true,
+      memory: true,
+      memory_threshold: 0.42,
+      enabled_actions: ["fetch_url"],
+      model_roles: { coding: "openai/gpt-4.1" },
+      harness: "codex",
+      output_visibility: { thinking: true },
+      harness_config: { codex: { model: "openai/gpt-4.1", sandboxMode: "workspace-write" } },
+      media_to_text_models: { general: "openai/gpt-4.1-mini", image: "openai/gpt-4.1" },
+    }));
 
     const { context, responses } = createChatTurn({
       chatId: "repo-create-chat",

@@ -1,6 +1,27 @@
 import assert from "node:assert/strict";
 import config from "../../../config.js";
 import { withModelsCache } from "../../../tests/helpers.js";
+import { readChatConfig, writeChatConfig } from "../../../chat-config.js";
+
+/**
+ * @param {import("@electric-sql/pglite").PGlite} db
+ * @param {string} chatId
+ * @param {Record<string, unknown>} [settings]
+ */
+async function seedConfigChat(db, chatId, settings = {}) {
+  await db.sql`INSERT INTO chats(chat_id) VALUES (${chatId}) ON CONFLICT DO NOTHING`;
+  await writeChatConfig(chatId, { chat_id: chatId, ...settings });
+}
+
+/**
+ * @param {string} chatId
+ * @returns {Promise<import("../../../store.js").ChatRow>}
+ */
+async function readRequiredConfig(chatId) {
+  const chat = await readChatConfig(chatId);
+  assert.ok(chat, `expected config for ${chatId}`);
+  return chat;
+}
 
 /** @type {ActionDbTestFn[]} */
 export default [
@@ -9,28 +30,28 @@ export default [
       await withModelsCache([
         { id: "openai/gpt-4o", name: "GPT-4o", context_length: 128000, pricing: { prompt: "0.000005", completion: "0.000015" } },
       ], async () => {
-        await db.sql`INSERT INTO chats(chat_id) VALUES ('cs-model-1') ON CONFLICT DO NOTHING`;
+        await seedConfigChat(db, "cs-model-1");
         const result = await action_fn(
           { chatId: "cs-model-1", rootDb: db },
           { setting: "model", value: "openai/gpt-4o" },
         );
         assert.ok(result.includes("openai/gpt-4o"));
-        const { rows: [chat] } = await db.sql`SELECT model FROM chats WHERE chat_id = 'cs-model-1'`;
+        const chat = await readRequiredConfig("cs-model-1");
         assert.equal(chat.model, "openai/gpt-4o");
       });
     },
     async function reverts_model_to_default(action_fn, db) {
-      await db.sql`INSERT INTO chats(chat_id, model) VALUES ('cs-model-2', 'gpt-4o') ON CONFLICT DO NOTHING`;
+      await seedConfigChat(db, "cs-model-2", { model: "gpt-4o" });
       const result = await action_fn(
         { chatId: "cs-model-2", rootDb: db },
         { setting: "model", value: "" },
       );
       assert.ok(result.includes("default"));
-      const { rows: [chat] } = await db.sql`SELECT model FROM chats WHERE chat_id = 'cs-model-2'`;
+      const chat = await readRequiredConfig("cs-model-2");
       assert.equal(chat.model, null);
     },
     async function gets_model_value(action_fn, db) {
-      await db.sql`INSERT INTO chats(chat_id, model) VALUES ('cs-model-3', 'custom/m') ON CONFLICT DO NOTHING`;
+      await seedConfigChat(db, "cs-model-3", { model: "custom/m" });
       const result = await action_fn(
         { chatId: "cs-model-3", rootDb: db },
         { setting: "model" },
@@ -38,7 +59,7 @@ export default [
       assert.ok(result.includes("custom/m"));
     },
     async function gets_default_model(action_fn, db) {
-      await db.sql`INSERT INTO chats(chat_id) VALUES ('cs-model-4') ON CONFLICT DO NOTHING`;
+      await seedConfigChat(db, "cs-model-4");
       const result = await action_fn(
         { chatId: "cs-model-4", rootDb: db },
         { setting: "model" },
@@ -48,27 +69,27 @@ export default [
 
     // ── system_prompt ──
     async function sets_system_prompt(action_fn, db) {
-      await db.sql`INSERT INTO chats(chat_id) VALUES ('cs-prompt-1') ON CONFLICT DO NOTHING`;
+      await seedConfigChat(db, "cs-prompt-1");
       const result = await action_fn(
         { chatId: "cs-prompt-1", rootDb: db },
         { setting: "system_prompt", value: "Be a pirate" },
       );
       assert.ok(result.includes("pirate"));
-      const { rows: [chat] } = await db.sql`SELECT system_prompt FROM chats WHERE chat_id = 'cs-prompt-1'`;
+      const chat = await readRequiredConfig("cs-prompt-1");
       assert.equal(chat.system_prompt, "Be a pirate");
     },
     async function clears_system_prompt(action_fn, db) {
-      await db.sql`INSERT INTO chats(chat_id, system_prompt) VALUES ('cs-prompt-2', 'old') ON CONFLICT DO NOTHING`;
+      await seedConfigChat(db, "cs-prompt-2", { system_prompt: "old" });
       const result = await action_fn(
         { chatId: "cs-prompt-2", rootDb: db },
         { setting: "system_prompt", value: "  " },
       );
       assert.ok(result.toLowerCase().includes("clear") || result.toLowerCase().includes("default"));
-      const { rows: [chat] } = await db.sql`SELECT system_prompt FROM chats WHERE chat_id = 'cs-prompt-2'`;
+      const chat = await readRequiredConfig("cs-prompt-2");
       assert.equal(chat.system_prompt, null);
     },
     async function gets_custom_prompt(action_fn, db) {
-      await db.sql`INSERT INTO chats(chat_id, system_prompt) VALUES ('cs-prompt-3', 'custom prompt') ON CONFLICT DO NOTHING`;
+      await seedConfigChat(db, "cs-prompt-3", { system_prompt: "custom prompt" });
       const result = await action_fn(
         { chatId: "cs-prompt-3", rootDb: db },
         { setting: "system_prompt" },
@@ -76,7 +97,7 @@ export default [
       assert.ok(result.includes("custom prompt"));
     },
     async function gets_default_prompt(action_fn, db) {
-      await db.sql`INSERT INTO chats(chat_id) VALUES ('cs-prompt-4') ON CONFLICT DO NOTHING`;
+      await seedConfigChat(db, "cs-prompt-4");
       const result = await action_fn(
         { chatId: "cs-prompt-4", rootDb: db },
         { setting: "system_prompt" },
@@ -86,39 +107,39 @@ export default [
 
     // ── memory ──
     async function enables_memory(action_fn, db) {
-      await db.sql`INSERT INTO chats(chat_id) VALUES ('cs-mem-1') ON CONFLICT DO NOTHING`;
+      await seedConfigChat(db, "cs-mem-1");
       const result = await action_fn(
         { chatId: "cs-mem-1", rootDb: db },
         { setting: "memory", value: "true" },
       );
-      const { rows: [chat] } = await db.sql`SELECT memory FROM chats WHERE chat_id = 'cs-mem-1'`;
+      const chat = await readRequiredConfig("cs-mem-1");
       assert.equal(chat.memory, true);
       assert.ok(result.toLowerCase().includes("enabled"));
     },
     async function disables_memory(action_fn, db) {
-      await db.sql`INSERT INTO chats(chat_id, memory) VALUES ('cs-mem-2', true) ON CONFLICT DO NOTHING`;
+      await seedConfigChat(db, "cs-mem-2", { memory: true });
       const result = await action_fn(
         { chatId: "cs-mem-2", rootDb: db },
         { setting: "memory", value: "false" },
       );
-      const { rows: [chat] } = await db.sql`SELECT memory FROM chats WHERE chat_id = 'cs-mem-2'`;
+      const chat = await readRequiredConfig("cs-mem-2");
       assert.equal(chat.memory, false);
       assert.ok(result.toLowerCase().includes("disabled"));
     },
 
     // ── memory_threshold ──
     async function sets_memory_threshold(action_fn, db) {
-      await db.sql`INSERT INTO chats(chat_id) VALUES ('cs-thresh-1') ON CONFLICT DO NOTHING`;
+      await seedConfigChat(db, "cs-thresh-1");
       const result = await action_fn(
         { chatId: "cs-thresh-1", rootDb: db },
         { setting: "memory_threshold", value: "0.5" },
       );
-      const { rows: [chat] } = await db.sql`SELECT memory_threshold FROM chats WHERE chat_id = 'cs-thresh-1'`;
+      const chat = await readRequiredConfig("cs-thresh-1");
       assert.equal(chat.memory_threshold, 0.5);
       assert.ok(result.includes("0.5"));
     },
     async function rejects_out_of_range_threshold(action_fn, db) {
-      await db.sql`INSERT INTO chats(chat_id) VALUES ('cs-thresh-2') ON CONFLICT DO NOTHING`;
+      await seedConfigChat(db, "cs-thresh-2");
       await assert.rejects(
         async () => action_fn({ chatId: "cs-thresh-2", rootDb: db }, { setting: "memory_threshold", value: "1.5" }),
       );
@@ -126,17 +147,17 @@ export default [
 
     // ── trigger (respond_on) ──
     async function sets_trigger(action_fn, db) {
-      await db.sql`INSERT INTO chats(chat_id) VALUES ('cs-resp-1') ON CONFLICT DO NOTHING`;
+      await seedConfigChat(db, "cs-resp-1");
       const result = await action_fn(
         { chatId: "cs-resp-1", rootDb: db },
         { setting: "trigger", value: "mention+reply" },
       );
       assert.ok(result.includes("mention+reply"));
-      const { rows: [chat] } = await db.sql`SELECT respond_on FROM chats WHERE chat_id = 'cs-resp-1'`;
+      const chat = await readRequiredConfig("cs-resp-1");
       assert.equal(chat.respond_on, "mention+reply");
     },
     async function rejects_invalid_trigger(action_fn, db) {
-      await db.sql`INSERT INTO chats(chat_id) VALUES ('cs-resp-2') ON CONFLICT DO NOTHING`;
+      await seedConfigChat(db, "cs-resp-2");
       const result = await action_fn(
         { chatId: "cs-resp-2", rootDb: db },
         { setting: "trigger", value: "invalid" },
@@ -155,13 +176,13 @@ export default [
           architecture: { input_modalities: ["text", "image"] },
         },
       ], async () => {
-        await db.sql`INSERT INTO chats(chat_id) VALUES ('cs-cm-1') ON CONFLICT DO NOTHING`;
+        await seedConfigChat(db, "cs-cm-1");
         const result = await action_fn(
           { chatId: "cs-cm-1", rootDb: db },
           { setting: "image_to_text_model", value: "openai/gpt-4o" },
         );
         assert.ok(result.includes("image"));
-        const { rows: [chat] } = await db.sql`SELECT media_to_text_models FROM chats WHERE chat_id = 'cs-cm-1'`;
+        const chat = await readRequiredConfig("cs-cm-1");
         assert.equal(chat.media_to_text_models.image, "openai/gpt-4o");
       });
     },
@@ -175,7 +196,7 @@ export default [
           architecture: { input_modalities: ["text"] },
         },
       ], async () => {
-        await db.sql`INSERT INTO chats(chat_id) VALUES ('cs-cm-2') ON CONFLICT DO NOTHING`;
+        await seedConfigChat(db, "cs-cm-2");
         const result = await action_fn(
           { chatId: "cs-cm-2", rootDb: db },
           { setting: "image_to_text_model", value: "text-only/model" },
@@ -195,13 +216,13 @@ export default [
           architecture: { input_modalities: ["text", "image"] },
         },
       ], async () => {
-        await db.sql`INSERT INTO chats(chat_id) VALUES ('cs-mtt-1') ON CONFLICT DO NOTHING`;
+        await seedConfigChat(db, "cs-mtt-1");
         const result = await action_fn(
           { chatId: "cs-mtt-1", rootDb: db },
           { setting: "media_to_text_model", value: "openai/gpt-4o" },
         );
         assert.ok(result.includes("media-to-text model"));
-        const { rows: [chat] } = await db.sql`SELECT media_to_text_models FROM chats WHERE chat_id = 'cs-mtt-1'`;
+        const chat = await readRequiredConfig("cs-mtt-1");
         assert.equal(chat.media_to_text_models.general, "openai/gpt-4o");
       });
     },
@@ -215,7 +236,7 @@ export default [
           architecture: { input_modalities: ["text"] },
         },
       ], async () => {
-        await db.sql`INSERT INTO chats(chat_id) VALUES ('cs-mtt-2') ON CONFLICT DO NOTHING`;
+        await seedConfigChat(db, "cs-mtt-2");
         const result = await action_fn(
           { chatId: "cs-mtt-2", rootDb: db },
           { setting: "media_to_text_model", value: "text-only/model" },
@@ -224,8 +245,7 @@ export default [
       });
     },
     async function gets_general_media_to_text_model(action_fn, db) {
-      await db.sql`INSERT INTO chats(chat_id) VALUES ('cs-mtt-3') ON CONFLICT DO NOTHING`;
-      await db.sql`UPDATE chats SET media_to_text_models = '{"general":"openai/gpt-4o"}'::jsonb WHERE chat_id = 'cs-mtt-3'`;
+      await seedConfigChat(db, "cs-mtt-3", { media_to_text_models: { general: "openai/gpt-4o" } });
       const result = await action_fn(
         { chatId: "cs-mtt-3", rootDb: db },
         { setting: "media_to_text_model" },
@@ -235,7 +255,7 @@ export default [
 
     // ── info summary when no setting provided ──
     async function shows_full_info_when_no_setting(action_fn, db) {
-      await db.sql`INSERT INTO chats(chat_id, is_enabled) VALUES ('cs-info-1', true) ON CONFLICT DO NOTHING`;
+      await seedConfigChat(db, "cs-info-1", { is_enabled: true });
       const result = await action_fn(
         {
           chatId: "cs-info-1",
@@ -250,7 +270,7 @@ export default [
       assert.ok(result.includes("user-1"), "should include sender");
     },
     async function info_shows_model_and_default_label(action_fn, db) {
-      await db.sql`INSERT INTO chats(chat_id) VALUES ('cs-info-2') ON CONFLICT DO NOTHING`;
+      await seedConfigChat(db, "cs-info-2");
       const result = await action_fn(
         { chatId: "cs-info-2", rootDb: db, senderIds: ["u1"], getIsAdmin: async () => false },
         { setting: "" },
@@ -259,7 +279,7 @@ export default [
       assert.ok(result.includes("default"), "should indicate default");
     },
     async function info_shows_custom_model(action_fn, db) {
-      await db.sql`INSERT INTO chats(chat_id, model) VALUES ('cs-info-3', 'custom/model') ON CONFLICT DO NOTHING`;
+      await seedConfigChat(db, "cs-info-3", { model: "custom/model" });
       const result = await action_fn(
         { chatId: "cs-info-3", rootDb: db, senderIds: ["u1"], getIsAdmin: async () => false },
         { setting: "" },
@@ -267,8 +287,7 @@ export default [
       assert.ok(result.includes("custom/model"));
     },
     async function info_shows_respond_on(action_fn, db) {
-      await db.sql`INSERT INTO chats(chat_id, respond_on)
-        VALUES ('cs-info-4', 'mention+reply') ON CONFLICT DO NOTHING`;
+      await seedConfigChat(db, "cs-info-4", { respond_on: "mention+reply" });
       const result = await action_fn(
         { chatId: "cs-info-4", rootDb: db, senderIds: ["u1"], getIsAdmin: async () => false },
         { setting: "" },
@@ -276,7 +295,7 @@ export default [
       assert.ok(result.includes("mention+reply"), "should include respond_on value");
     },
     async function info_shows_memory_settings(action_fn, db) {
-      await db.sql`INSERT INTO chats(chat_id, memory, memory_threshold) VALUES ('cs-info-5', true, 0.5) ON CONFLICT DO NOTHING`;
+      await seedConfigChat(db, "cs-info-5", { memory: true, memory_threshold: 0.5 });
       const result = await action_fn(
         { chatId: "cs-info-5", rootDb: db, senderIds: ["u1"], getIsAdmin: async () => false },
         { setting: "" },
@@ -285,7 +304,7 @@ export default [
       assert.ok(result.includes("0.5"), "should include threshold");
     },
     async function info_shows_debug_status(action_fn, db) {
-      await db.sql`INSERT INTO chats(chat_id, debug) VALUES ('cs-info-6', TRUE) ON CONFLICT DO NOTHING`;
+      await seedConfigChat(db, "cs-info-6", { debug: true });
       const result = await action_fn(
         { chatId: "cs-info-6", rootDb: db, senderIds: ["u1"], getIsAdmin: async () => false },
         { setting: "" },
@@ -294,8 +313,7 @@ export default [
       assert.ok(result.toLowerCase().includes("on"), "should show debug is on");
     },
     async function info_shows_media_to_text_models(action_fn, db) {
-      await db.sql`INSERT INTO chats(chat_id) VALUES ('cs-info-7') ON CONFLICT DO NOTHING`;
-      await db.sql`UPDATE chats SET media_to_text_models = '{"image":"openai/gpt-4o"}'::jsonb WHERE chat_id = 'cs-info-7'`;
+      await seedConfigChat(db, "cs-info-7", { media_to_text_models: { image: "openai/gpt-4o" } });
       const result = await action_fn(
         { chatId: "cs-info-7", rootDb: db, senderIds: ["u1"], getIsAdmin: async () => false },
         { setting: "" },
@@ -304,7 +322,7 @@ export default [
       assert.ok(result.includes("image"), "should include media type");
     },
     async function info_shows_enabled_opt_in_actions(action_fn, db) {
-      await db.sql`INSERT INTO chats(chat_id, enabled_actions) VALUES ('cs-info-8', '["test_opt"]'::jsonb) ON CONFLICT DO NOTHING`;
+      await seedConfigChat(db, "cs-info-8", { enabled_actions: ["test_opt"] });
       const result = await action_fn(
         { chatId: "cs-info-8", rootDb: db, senderIds: ["u1"], getIsAdmin: async () => false },
         { setting: "" },
@@ -312,7 +330,7 @@ export default [
       assert.ok(result.includes("test_opt"), "should include enabled opt-in action");
     },
     async function info_shows_none_when_no_opt_in_actions(action_fn, db) {
-      await db.sql`INSERT INTO chats(chat_id) VALUES ('cs-info-9') ON CONFLICT DO NOTHING`;
+      await seedConfigChat(db, "cs-info-9");
       const result = await action_fn(
         { chatId: "cs-info-9", rootDb: db, senderIds: ["u1"], getIsAdmin: async () => false },
         { setting: "" },
@@ -322,7 +340,7 @@ export default [
 
     // ── admin check for writes ──
     async function rejects_set_from_non_admin(action_fn, db) {
-      await db.sql`INSERT INTO chats(chat_id) VALUES ('cs-admin-1') ON CONFLICT DO NOTHING`;
+      await seedConfigChat(db, "cs-admin-1");
       const result = await action_fn(
         { chatId: "cs-admin-1", rootDb: db, getIsAdmin: async () => false },
         { setting: "memory", value: "true" },
@@ -330,7 +348,7 @@ export default [
       assert.ok(result.includes("admin"), "should mention admin requirement");
     },
     async function allows_get_from_non_admin(action_fn, db) {
-      await db.sql`INSERT INTO chats(chat_id) VALUES ('cs-admin-2') ON CONFLICT DO NOTHING`;
+      await seedConfigChat(db, "cs-admin-2");
       const result = await action_fn(
         { chatId: "cs-admin-2", rootDb: db, getIsAdmin: async () => false },
         { setting: "memory" },
@@ -340,7 +358,7 @@ export default [
 
     // ── enabled (requires master) ──
     async function enables_chat_as_master(action_fn, db) {
-      await db.sql`INSERT INTO chats(chat_id) VALUES ('cs-en-1') ON CONFLICT DO NOTHING`;
+      await seedConfigChat(db, "cs-en-1");
       const originalMaster = config.MASTER_IDs;
       config.MASTER_IDs = ["master-user"];
       try {
@@ -349,14 +367,14 @@ export default [
           { setting: "enabled", value: "true" },
         );
         assert.ok(result.includes("enabled"));
-        const { rows: [chat] } = await db.sql`SELECT is_enabled FROM chats WHERE chat_id = 'cs-en-1'`;
+        const chat = await readRequiredConfig("cs-en-1");
         assert.equal(chat.is_enabled, true);
       } finally {
         config.MASTER_IDs = originalMaster;
       }
     },
     async function enables_other_chat_as_master(action_fn, db) {
-      await db.sql`INSERT INTO chats(chat_id) VALUES ('cs-admin-chat') ON CONFLICT DO NOTHING`;
+      await seedConfigChat(db, "cs-admin-chat");
       const originalMaster = config.MASTER_IDs;
       config.MASTER_IDs = ["master-user"];
       try {
@@ -365,14 +383,14 @@ export default [
           { setting: "enabled", value: "true cs-target-chat@g.us" },
         );
         assert.ok(result.includes("cs-target-chat@g.us"), `Expected target chat in response, got: ${result}`);
-        const { rows: [chat] } = await db.sql`SELECT is_enabled FROM chats WHERE chat_id = 'cs-target-chat@g.us'`;
+        const chat = await readRequiredConfig("cs-target-chat@g.us");
         assert.equal(chat.is_enabled, true);
       } finally {
         config.MASTER_IDs = originalMaster;
       }
     },
     async function disables_chat_as_master(action_fn, db) {
-      await db.sql`INSERT INTO chats(chat_id, is_enabled) VALUES ('cs-en-2', true) ON CONFLICT DO NOTHING`;
+      await seedConfigChat(db, "cs-en-2", { is_enabled: true });
       const originalMaster = config.MASTER_IDs;
       config.MASTER_IDs = ["master-user"];
       try {
@@ -381,14 +399,14 @@ export default [
           { setting: "enabled", value: "false" },
         );
         assert.ok(result.includes("disabled"));
-        const { rows: [chat] } = await db.sql`SELECT is_enabled FROM chats WHERE chat_id = 'cs-en-2'`;
+        const chat = await readRequiredConfig("cs-en-2");
         assert.equal(chat.is_enabled, false);
       } finally {
         config.MASTER_IDs = originalMaster;
       }
     },
     async function rejects_enabled_from_non_master(action_fn, db) {
-      await db.sql`INSERT INTO chats(chat_id) VALUES ('cs-en-3') ON CONFLICT DO NOTHING`;
+      await seedConfigChat(db, "cs-en-3");
       const originalMaster = config.MASTER_IDs;
       config.MASTER_IDs = ["master-user"];
       try {
@@ -402,7 +420,7 @@ export default [
       }
     },
     async function gets_enabled_status(action_fn, db) {
-      await db.sql`INSERT INTO chats(chat_id, is_enabled) VALUES ('cs-en-4', true) ON CONFLICT DO NOTHING`;
+      await seedConfigChat(db, "cs-en-4", { is_enabled: true });
       const result = await action_fn(
         { chatId: "cs-en-4", rootDb: db },
         { setting: "enabled" },
@@ -412,29 +430,29 @@ export default [
 
     // ── debug ──
     async function enables_debug_on(action_fn, db) {
-      await db.sql`INSERT INTO chats(chat_id) VALUES ('cs-dbg-1') ON CONFLICT DO NOTHING`;
+      await seedConfigChat(db, "cs-dbg-1");
       const result = await action_fn(
         { chatId: "cs-dbg-1", rootDb: db },
         { setting: "debug", value: "on" },
       );
       assert.ok(result.toLowerCase().includes("on"));
 
-      const { rows: [chat] } = await db.sql`SELECT debug FROM chats WHERE chat_id = 'cs-dbg-1'`;
+      const chat = await readRequiredConfig("cs-dbg-1");
       assert.equal(chat.debug, true);
     },
     async function disables_debug_with_off(action_fn, db) {
-      await db.sql`INSERT INTO chats(chat_id, debug) VALUES ('cs-dbg-2', TRUE) ON CONFLICT DO NOTHING`;
+      await seedConfigChat(db, "cs-dbg-2", { debug: true });
       const result = await action_fn(
         { chatId: "cs-dbg-2", rootDb: db },
         { setting: "debug", value: "off" },
       );
       assert.ok(result.toLowerCase().includes("off"));
 
-      const { rows: [chat] } = await db.sql`SELECT debug FROM chats WHERE chat_id = 'cs-dbg-2'`;
+      const chat = await readRequiredConfig("cs-dbg-2");
       assert.equal(chat.debug, false);
     },
     async function gets_debug_status(action_fn, db) {
-      await db.sql`INSERT INTO chats(chat_id, debug) VALUES ('cs-dbg-3', TRUE) ON CONFLICT DO NOTHING`;
+      await seedConfigChat(db, "cs-dbg-3", { debug: true });
       const result = await action_fn(
         { chatId: "cs-dbg-3", rootDb: db },
         { setting: "debug" },
@@ -445,7 +463,7 @@ export default [
 
     // ── actions (opt-in) ──
     async function enables_opt_in_action(action_fn, db) {
-      await db.sql`INSERT INTO chats(chat_id) VALUES ('cs-act-1') ON CONFLICT DO NOTHING`;
+      await seedConfigChat(db, "cs-act-1");
       const mockGetActions = async () => /** @type {Action[]} */ ([
         { name: "test_opt", optIn: true },
       ]);
@@ -454,11 +472,11 @@ export default [
         { setting: "actions", value: "test_opt true" },
       );
       assert.ok(result.includes("enabled"));
-      const { rows: [chat] } = await db.sql`SELECT enabled_actions FROM chats WHERE chat_id = 'cs-act-1'`;
+      const chat = await readRequiredConfig("cs-act-1");
       assert.ok(chat.enabled_actions.includes("test_opt"));
     },
     async function disables_opt_in_action(action_fn, db) {
-      await db.sql`INSERT INTO chats(chat_id, enabled_actions) VALUES ('cs-act-2', '["test_opt"]'::jsonb) ON CONFLICT DO NOTHING`;
+      await seedConfigChat(db, "cs-act-2", { enabled_actions: ["test_opt"] });
       const mockGetActions = async () => /** @type {Action[]} */ ([
         { name: "test_opt", optIn: true },
       ]);
@@ -467,11 +485,11 @@ export default [
         { setting: "actions", value: "test_opt false" },
       );
       assert.ok(result.includes("disabled"));
-      const { rows: [chat] } = await db.sql`SELECT enabled_actions FROM chats WHERE chat_id = 'cs-act-2'`;
+      const chat = await readRequiredConfig("cs-act-2");
       assert.ok(!chat.enabled_actions.includes("test_opt"));
     },
     async function rejects_non_opt_in_action(action_fn, db) {
-      await db.sql`INSERT INTO chats(chat_id) VALUES ('cs-act-3') ON CONFLICT DO NOTHING`;
+      await seedConfigChat(db, "cs-act-3");
       const mockGetActions = async () => /** @type {Action[]} */ ([
         { name: "regular_action" },
       ]);
@@ -482,7 +500,7 @@ export default [
       assert.ok(result.includes("not an opt-in action"));
     },
     async function rejects_unknown_action(action_fn, db) {
-      await db.sql`INSERT INTO chats(chat_id) VALUES ('cs-act-4') ON CONFLICT DO NOTHING`;
+      await seedConfigChat(db, "cs-act-4");
       const mockGetActions = async () => /** @type {Action[]} */ ([]);
       const result = await action_fn(
         { chatId: "cs-act-4", rootDb: db, getActions: mockGetActions },
@@ -491,7 +509,7 @@ export default [
       assert.ok(result.includes("not found"));
     },
     async function does_not_duplicate_on_double_enable(action_fn, db) {
-      await db.sql`INSERT INTO chats(chat_id, enabled_actions) VALUES ('cs-act-5', '["test_opt"]'::jsonb) ON CONFLICT DO NOTHING`;
+      await seedConfigChat(db, "cs-act-5", { enabled_actions: ["test_opt"] });
       const mockGetActions = async () => /** @type {Action[]} */ ([
         { name: "test_opt", optIn: true },
       ]);
@@ -499,12 +517,12 @@ export default [
         { chatId: "cs-act-5", rootDb: db, getActions: mockGetActions },
         { setting: "actions", value: "test_opt true" },
       );
-      const { rows: [chat] } = await db.sql`SELECT enabled_actions FROM chats WHERE chat_id = 'cs-act-5'`;
+      const chat = await readRequiredConfig("cs-act-5");
       const count = chat.enabled_actions.filter(/** @param {string} a */ (a) => a === "test_opt").length;
       assert.equal(count, 1);
     },
     async function shows_action_usage_when_missing_args(action_fn, db) {
-      await db.sql`INSERT INTO chats(chat_id) VALUES ('cs-act-6') ON CONFLICT DO NOTHING`;
+      await seedConfigChat(db, "cs-act-6");
       const result = await action_fn(
         { chatId: "cs-act-6", rootDb: db, getActions: async () => [] },
         { setting: "actions", value: "just_one_arg" },
@@ -512,7 +530,7 @@ export default [
       assert.ok(result.includes("Usage"));
     },
     async function gets_enabled_actions_list(action_fn, db) {
-      await db.sql`INSERT INTO chats(chat_id, enabled_actions) VALUES ('cs-act-7', '["test_opt"]'::jsonb) ON CONFLICT DO NOTHING`;
+      await seedConfigChat(db, "cs-act-7", { enabled_actions: ["test_opt"] });
       const result = await action_fn(
         { chatId: "cs-act-7", rootDb: db },
         { setting: "action" },
@@ -525,19 +543,18 @@ export default [
       await withModelsCache([
         { id: "deepseek/coder", name: "Deepseek Coder", context_length: 128000, pricing: { prompt: "0.000005", completion: "0.000015" } },
       ], async () => {
-        await db.sql`INSERT INTO chats(chat_id) VALUES ('cs-role-1') ON CONFLICT DO NOTHING`;
+        await seedConfigChat(db, "cs-role-1");
         const result = await action_fn(
           { chatId: "cs-role-1", rootDb: db },
           { setting: "coding_model", value: "deepseek/coder" },
         );
         assert.ok(result.includes("deepseek/coder"));
-        const { rows: [chat] } = await db.sql`SELECT model_roles FROM chats WHERE chat_id = 'cs-role-1'`;
+        const chat = await readRequiredConfig("cs-role-1");
         assert.equal(chat.model_roles.coding, "deepseek/coder");
       });
     },
     async function gets_coding_model(action_fn, db) {
-      await db.sql`INSERT INTO chats(chat_id) VALUES ('cs-role-2') ON CONFLICT DO NOTHING`;
-      await db.sql`UPDATE chats SET model_roles = '{"coding":"deepseek/coder"}'::jsonb WHERE chat_id = 'cs-role-2'`;
+      await seedConfigChat(db, "cs-role-2", { model_roles: { coding: "deepseek/coder" } });
       const result = await action_fn(
         { chatId: "cs-role-2", rootDb: db },
         { setting: "coding_model" },
@@ -545,7 +562,7 @@ export default [
       assert.ok(result.includes("deepseek/coder"));
     },
     async function gets_default_coding_model(action_fn, db) {
-      await db.sql`INSERT INTO chats(chat_id) VALUES ('cs-role-3') ON CONFLICT DO NOTHING`;
+      await seedConfigChat(db, "cs-role-3");
       const result = await action_fn(
         { chatId: "cs-role-3", rootDb: db },
         { setting: "coding_model" },
@@ -553,33 +570,32 @@ export default [
       assert.ok(result.includes("not set") || result.includes("default"));
     },
     async function clears_coding_model(action_fn, db) {
-      await db.sql`INSERT INTO chats(chat_id) VALUES ('cs-role-4') ON CONFLICT DO NOTHING`;
-      await db.sql`UPDATE chats SET model_roles = '{"coding":"deepseek/coder"}'::jsonb WHERE chat_id = 'cs-role-4'`;
+      await seedConfigChat(db, "cs-role-4", { model_roles: { coding: "deepseek/coder" } });
       const result = await action_fn(
         { chatId: "cs-role-4", rootDb: db },
         { setting: "coding_model", value: "" },
       );
       assert.ok(result.includes("cleared") || result.includes("reverted") || result.includes("default"));
-      const { rows: [chat] } = await db.sql`SELECT model_roles FROM chats WHERE chat_id = 'cs-role-4'`;
+      const chat = await readRequiredConfig("cs-role-4");
       assert.equal(chat.model_roles.coding, undefined);
     },
     async function sets_image_generation_model(action_fn, db) {
       await withModelsCache([
         { id: "dalle-3", name: "DALL-E 3", context_length: 4096, pricing: { prompt: "0.000005", completion: "0.000015" } },
       ], async () => {
-        await db.sql`INSERT INTO chats(chat_id) VALUES ('cs-role-5') ON CONFLICT DO NOTHING`;
+        await seedConfigChat(db, "cs-role-5");
         const result = await action_fn(
           { chatId: "cs-role-5", rootDb: db },
           { setting: "image_generation_model", value: "dalle-3" },
         );
         assert.ok(result.includes("dalle-3"));
-        const { rows: [chat] } = await db.sql`SELECT model_roles FROM chats WHERE chat_id = 'cs-role-5'`;
+        const chat = await readRequiredConfig("cs-role-5");
         assert.equal(chat.model_roles.image_generation, "dalle-3");
       });
     },
     async function rejects_invalid_role_model(action_fn, db) {
       await withModelsCache([], async () => {
-        await db.sql`INSERT INTO chats(chat_id) VALUES ('cs-role-6') ON CONFLICT DO NOTHING`;
+        await seedConfigChat(db, "cs-role-6");
         const result = await action_fn(
           { chatId: "cs-role-6", rootDb: db },
           { setting: "coding_model", value: "nonexistent/model" },
@@ -589,18 +605,18 @@ export default [
     },
     // ── harness_cwd ──
     async function rejects_nonexistent_harness_cwd(action_fn, db) {
-      await db.sql`INSERT INTO chats(chat_id) VALUES ('cs-cwd-1') ON CONFLICT DO NOTHING`;
+      await seedConfigChat(db, "cs-cwd-1");
       const result = await action_fn(
         { chatId: "cs-cwd-1", rootDb: db },
         { setting: "harness_cwd", value: "/home/mada/totally_nonexistent_path_xyz" },
       );
       assert.ok(result.includes("does not exist"), `Expected rejection, got: ${result}`);
       // Should not have been saved
-      const { rows: [chat] } = await db.sql`SELECT harness_cwd FROM chats WHERE chat_id = 'cs-cwd-1'`;
+      const chat = await readRequiredConfig("cs-cwd-1");
       assert.equal(chat.harness_cwd, null);
     },
     async function suggests_similar_paths_for_bad_cwd(action_fn, db) {
-      await db.sql`INSERT INTO chats(chat_id) VALUES ('cs-cwd-2') ON CONFLICT DO NOTHING`;
+      await seedConfigChat(db, "cs-cwd-2");
       // /home exists and has subdirectories, so suggestions should appear
       const result = await action_fn(
         { chatId: "cs-cwd-2", rootDb: db },
@@ -610,29 +626,28 @@ export default [
       assert.ok(result.includes("Did you mean"), `Expected suggestions, got: ${result}`);
     },
     async function accepts_valid_harness_cwd(action_fn, db) {
-      await db.sql`INSERT INTO chats(chat_id) VALUES ('cs-cwd-3') ON CONFLICT DO NOTHING`;
+      await seedConfigChat(db, "cs-cwd-3");
       const result = await action_fn(
         { chatId: "cs-cwd-3", rootDb: db },
         { setting: "harness_cwd", value: "/tmp" },
       );
       assert.ok(result.includes("set to"), `Expected success, got: ${result}`);
-      const { rows: [chat] } = await db.sql`SELECT harness_cwd FROM chats WHERE chat_id = 'cs-cwd-3'`;
+      const chat = await readRequiredConfig("cs-cwd-3");
       assert.equal(chat.harness_cwd, "/tmp");
     },
     async function clears_harness_cwd(action_fn, db) {
-      await db.sql`INSERT INTO chats(chat_id, harness_cwd) VALUES ('cs-cwd-4', '/tmp') ON CONFLICT DO NOTHING`;
+      await seedConfigChat(db, "cs-cwd-4", { harness_cwd: "/tmp" });
       const result = await action_fn(
         { chatId: "cs-cwd-4", rootDb: db },
         { setting: "harness_cwd", value: "" },
       );
       assert.ok(result.includes("cleared"), `Expected cleared, got: ${result}`);
-      const { rows: [chat] } = await db.sql`SELECT harness_cwd FROM chats WHERE chat_id = 'cs-cwd-4'`;
+      const chat = await readRequiredConfig("cs-cwd-4");
       assert.equal(chat.harness_cwd, null);
     },
 
     async function info_shows_role_overrides(action_fn, db) {
-      await db.sql`INSERT INTO chats(chat_id) VALUES ('cs-role-7') ON CONFLICT DO NOTHING`;
-      await db.sql`UPDATE chats SET model_roles = '{"coding":"deepseek/coder","fast":"gpt-4o-mini"}'::jsonb WHERE chat_id = 'cs-role-7'`;
+      await seedConfigChat(db, "cs-role-7", { model_roles: { coding: "deepseek/coder", fast: "gpt-4o-mini" } });
       const result = await action_fn(
         { chatId: "cs-role-7", rootDb: db, senderIds: ["u1"], getIsAdmin: async () => false },
         { setting: "" },

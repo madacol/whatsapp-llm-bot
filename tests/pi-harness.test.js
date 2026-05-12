@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { setDb } from "../db.js";
 import { createTestDb, seedChat } from "./helpers.js";
 import { createPiHarness } from "../harnesses/pi.js";
+import { readChatConfig } from "../chat-config.js";
 
 /**
  * @param {OutboundEvent} event
@@ -77,14 +78,10 @@ describe("createPiHarness", () => {
       }),
     });
 
-    const { rows: [chat] } = await db.sql`
-      SELECT harness_config
-      FROM chats
-      WHERE chat_id = 'pi-chat-1'
-    `;
+    const chat = await readChatConfig("pi-chat-1");
 
     assert.equal(handled, true);
-    assert.deepEqual(chat?.harness_config, {
+    assert.deepEqual(chat.harness_config, {
       pi: {
         model: "google/gemini-2.5-pro",
       },

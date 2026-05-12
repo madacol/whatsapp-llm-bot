@@ -11,6 +11,7 @@ import { createTestDb } from "./helpers.js";
 import config from "../config.js";
 import { initStore } from "../store.js";
 import { setConfigValue } from "../actions/settings/chatSettings/_service.js";
+import { readChatConfig, writeChatConfig } from "../chat-config.js";
 
 const CACHE_PATH = path.resolve("data/models.json");
 const execFileAsync = promisify(execFile);
@@ -65,6 +66,12 @@ describe("per-chat model selection", () => {
     await writeFakeCache();
   });
 
+  /** @param {string} chatId @param {Record<string, unknown>} [settings] */
+  async function seedConfigChat(chatId, settings = {}) {
+    await db.sql`INSERT INTO chats(chat_id) VALUES (${chatId}) ON CONFLICT DO NOTHING`;
+    await writeChatConfig(chatId, { chat_id: chatId, ...settings });
+  }
+
   after(async () => {
     await fs.rm(CACHE_PATH, { force: true });
     await Promise.all(tempDirs.map((dir) => fs.rm(dir, { recursive: true, force: true })));
@@ -82,8 +89,8 @@ describe("per-chat model selection", () => {
   });
 
   describe("chat_settings model via dispatch", () => {
-    it("updates the model in the DB", async () => {
-      await db.sql`INSERT INTO chats(chat_id) VALUES ('chat-set-1') ON CONFLICT DO NOTHING`;
+    it("updates the model in the config file", async () => {
+      await seedConfigChat("chat-set-1");
 
       const mod = await import("../actions/settings/chatSettings/index.js");
       const action = mod.default;
@@ -93,12 +100,12 @@ describe("per-chat model selection", () => {
       );
       assert.ok(result.includes("openai/gpt-4.1-mini"));
 
-      const { rows: [chat] } = await db.sql`SELECT model FROM chats WHERE chat_id = 'chat-set-1'`;
+      const chat = await readChatConfig("chat-set-1");
       assert.equal(chat.model, "openai/gpt-4.1-mini");
     });
 
     it("reverts to default when given empty string", async () => {
-      await db.sql`INSERT INTO chats(chat_id, model) VALUES ('chat-set-2', 'some-model') ON CONFLICT DO NOTHING`;
+      await seedConfigChat("chat-set-2", { model: "some-model" });
 
       const mod = await import("../actions/settings/chatSettings/index.js");
       const action = mod.default;
@@ -108,12 +115,12 @@ describe("per-chat model selection", () => {
       );
       assert.ok(result.includes("default"));
 
-      const { rows: [chat] } = await db.sql`SELECT model FROM chats WHERE chat_id = 'chat-set-2'`;
+      const chat = await readChatConfig("chat-set-2");
       assert.equal(chat.model, null);
     });
 
     it("rejects invalid model with suggestions", async () => {
-      await db.sql`INSERT INTO chats(chat_id) VALUES ('chat-set-3') ON CONFLICT DO NOTHING`;
+      await seedConfigChat("chat-set-3");
 
       const mod = await import("../actions/settings/chatSettings/index.js");
       const action = mod.default;
@@ -124,12 +131,12 @@ describe("per-chat model selection", () => {
       assert.ok(typeof result === "string");
       assert.ok(result.includes("not found"));
 
-      const { rows: [chat] } = await db.sql`SELECT model FROM chats WHERE chat_id = 'chat-set-3'`;
+      const chat = await readChatConfig("chat-set-3");
       assert.equal(chat.model, null);
     });
 
     it("suggests close matches for partial model names", async () => {
-      await db.sql`INSERT INTO chats(chat_id) VALUES ('chat-set-4') ON CONFLICT DO NOTHING`;
+      await seedConfigChat("chat-set-4");
 
       const mod = await import("../actions/settings/chatSettings/index.js");
       const action = mod.default;
@@ -154,7 +161,7 @@ describe("per-chat model selection", () => {
 
   describe("toBool accepts 'on'/'off' for boolean settings", () => {
     it("'on' enables memory", async () => {
-      await db.sql`INSERT INTO chats(chat_id, memory) VALUES ('mem-on-1', false) ON CONFLICT DO NOTHING`;
+      await seedConfigChat("mem-on-1", { memory: false });
 
       const mod = await import("../actions/settings/chatSettings/index.js");
       const action = mod.default;
@@ -164,12 +171,12 @@ describe("per-chat model selection", () => {
       );
       assert.ok(result.includes("enabled"), `expected 'enabled' in: ${result}`);
 
-      const { rows: [chat] } = await db.sql`SELECT memory FROM chats WHERE chat_id = 'mem-on-1'`;
+      const chat = await readChatConfig("mem-on-1");
       assert.equal(chat.memory, true);
     });
 
     it("'off' disables memory", async () => {
-      await db.sql`INSERT INTO chats(chat_id, memory) VALUES ('mem-off-1', true) ON CONFLICT DO NOTHING`;
+      await seedConfigChat("mem-off-1", { memory: true });
 
       const mod = await import("../actions/settings/chatSettings/index.js");
       const action = mod.default;
@@ -179,12 +186,12 @@ describe("per-chat model selection", () => {
       );
       assert.ok(result.includes("disabled"), `expected 'disabled' in: ${result}`);
 
-      const { rows: [chat] } = await db.sql`SELECT memory FROM chats WHERE chat_id = 'mem-off-1'`;
+      const chat = await readChatConfig("mem-off-1");
       assert.equal(chat.memory, false);
     });
 
     it("'true' still works", async () => {
-      await db.sql`INSERT INTO chats(chat_id, memory) VALUES ('mem-true-1', false) ON CONFLICT DO NOTHING`;
+      await seedConfigChat("mem-true-1", { memory: false });
 
       const mod = await import("../actions/settings/chatSettings/index.js");
       const action = mod.default;
@@ -196,7 +203,7 @@ describe("per-chat model selection", () => {
     });
 
     it("throws on unrecognized boolean value", async () => {
-      await db.sql`INSERT INTO chats(chat_id) VALUES ('mem-bad-1') ON CONFLICT DO NOTHING`;
+      await seedConfigChat("mem-bad-1");
 
       const mod = await import("../actions/settings/chatSettings/index.js");
       const action = mod.default;
@@ -212,7 +219,7 @@ describe("per-chat model selection", () => {
 
   describe("debug 'on' enables debug", () => {
     it("'on' enables debug", async () => {
-      await db.sql`INSERT INTO chats(chat_id) VALUES ('dbg-on-1') ON CONFLICT DO NOTHING`;
+      await seedConfigChat("dbg-on-1");
 
       const mod = await import("../actions/settings/chatSettings/index.js");
       const action = mod.default;
@@ -222,14 +229,14 @@ describe("per-chat model selection", () => {
       );
       assert.ok(result.includes("Debug on"), `expected 'Debug on' in: ${result}`);
 
-      const { rows: [chat] } = await db.sql`SELECT debug FROM chats WHERE chat_id = 'dbg-on-1'`;
+      const chat = await readChatConfig("dbg-on-1");
       assert.equal(chat.debug, true, "debug should be true");
     });
   });
 
   describe("enabled setting accepts 'enabled'/'disabled'", () => {
     it("'enabled' enables the bot", async () => {
-      await db.sql`INSERT INTO chats(chat_id, is_enabled) VALUES ('en-1', false) ON CONFLICT DO NOTHING`;
+      await seedConfigChat("en-1", { is_enabled: false });
 
       const originalMaster = config.MASTER_IDs;
       config.MASTER_IDs = ["master-user"];
@@ -242,7 +249,7 @@ describe("per-chat model selection", () => {
         );
         assert.ok(result.includes("enabled"), `expected 'enabled' in: ${result}`);
 
-        const { rows: [chat] } = await db.sql`SELECT is_enabled FROM chats WHERE chat_id = 'en-1'`;
+        const chat = await readChatConfig("en-1");
         assert.equal(chat.is_enabled, true);
       } finally {
         config.MASTER_IDs = originalMaster;
@@ -250,7 +257,7 @@ describe("per-chat model selection", () => {
     });
 
     it("'disabled' disables the bot", async () => {
-      await db.sql`INSERT INTO chats(chat_id, is_enabled) VALUES ('en-2', true) ON CONFLICT DO NOTHING`;
+      await seedConfigChat("en-2", { is_enabled: true });
 
       const originalMaster = config.MASTER_IDs;
       config.MASTER_IDs = ["master-user"];
@@ -263,7 +270,7 @@ describe("per-chat model selection", () => {
         );
         assert.ok(result.includes("disabled"), `expected 'disabled' in: ${result}`);
 
-        const { rows: [chat] } = await db.sql`SELECT is_enabled FROM chats WHERE chat_id = 'en-2'`;
+        const chat = await readChatConfig("en-2");
         assert.equal(chat.is_enabled, false);
       } finally {
         config.MASTER_IDs = originalMaster;
@@ -271,7 +278,7 @@ describe("per-chat model selection", () => {
     });
 
     it("shows local and remote enable commands in disabled chat info", async () => {
-      await db.sql`INSERT INTO chats(chat_id, is_enabled) VALUES ('disabled-info-chat', false) ON CONFLICT DO NOTHING`;
+      await seedConfigChat("disabled-info-chat", { is_enabled: false });
 
       const mod = await import("../actions/settings/chatSettings/index.js");
       const action = mod.default;
@@ -286,7 +293,7 @@ describe("per-chat model selection", () => {
     });
 
     it("master can enable another chat by target chat id", async () => {
-      await db.sql`INSERT INTO chats(chat_id) VALUES ('admin-chat') ON CONFLICT DO NOTHING`;
+      await seedConfigChat("admin-chat");
       const originalMaster = config.MASTER_IDs;
       config.MASTER_IDs = ["master-user"];
       try {
@@ -298,7 +305,7 @@ describe("per-chat model selection", () => {
         );
         assert.ok(result.includes("remote-chat@s.whatsapp.net"), `expected target chat in response, got: ${result}`);
 
-        const { rows: [chat] } = await db.sql`SELECT is_enabled FROM chats WHERE chat_id = 'remote-chat@s.whatsapp.net'`;
+        const chat = await readChatConfig("remote-chat@s.whatsapp.net");
         assert.equal(chat.is_enabled, true);
       } finally {
         config.MASTER_IDs = originalMaster;
@@ -331,14 +338,11 @@ describe("per-chat model selection", () => {
           { senderIds: ["master-user"], rootDb, getChatDb: resolveChatDb },
         );
 
-        const targetDb = resolveChatDb("remote-isolated@g.us");
         const { rows: [rootChat] } = await rootDb.sql`
-          SELECT is_enabled FROM chats WHERE chat_id = 'remote-isolated@g.us'
+          SELECT chat_id FROM chats WHERE chat_id = 'remote-isolated@g.us'
         `;
-        const { rows: [targetChat] } = await targetDb.sql`
-          SELECT is_enabled FROM chats WHERE chat_id = 'remote-isolated@g.us'
-        `;
-        assert.equal(rootChat.is_enabled, false);
+        const targetChat = await readChatConfig("remote-isolated@g.us");
+        assert.equal(rootChat.chat_id, "remote-isolated@g.us");
         assert.equal(targetChat.is_enabled, true);
       } finally {
         config.MASTER_IDs = originalMaster;
@@ -346,8 +350,8 @@ describe("per-chat model selection", () => {
     });
 
     it("master can disable another chat with chat id before the value", async () => {
-      await db.sql`INSERT INTO chats(chat_id) VALUES ('admin-chat') ON CONFLICT DO NOTHING`;
-      await db.sql`INSERT INTO chats(chat_id, is_enabled) VALUES ('remote-off@g.us', true) ON CONFLICT DO NOTHING`;
+      await seedConfigChat("admin-chat");
+      await seedConfigChat("remote-off@g.us", { is_enabled: true });
       const originalMaster = config.MASTER_IDs;
       config.MASTER_IDs = ["master-user"];
       try {
@@ -359,7 +363,7 @@ describe("per-chat model selection", () => {
         );
         assert.ok(result.includes("remote-off@g.us"), `expected target chat in response, got: ${result}`);
 
-        const { rows: [chat] } = await db.sql`SELECT is_enabled FROM chats WHERE chat_id = 'remote-off@g.us'`;
+        const chat = await readChatConfig("remote-off@g.us");
         assert.equal(chat.is_enabled, false);
       } finally {
         config.MASTER_IDs = originalMaster;
@@ -377,11 +381,7 @@ describe("per-chat model selection", () => {
         rootPath: repoRoot,
         defaultBaseBranch: "master",
       });
-      await db.sql`
-        INSERT INTO chats(chat_id, harness_cwd)
-        VALUES ('cfg-folder-workspace', NULL)
-        ON CONFLICT DO NOTHING
-      `;
+      await seedConfigChat("cfg-folder-workspace", { harness_cwd: null });
       const repo = await store.getProjectByRootPath(repoRoot);
       assert.ok(repo);
       await store.saveWhatsAppWorkspacePresentation({
@@ -419,7 +419,7 @@ describe("per-chat model selection", () => {
     });
 
     it("shows help text for the workspace key", async () => {
-      await db.sql`INSERT INTO chats(chat_id, harness_cwd) VALUES ('cfg-help-1', '/tmp') ON CONFLICT DO NOTHING`;
+      await seedConfigChat("cfg-help-1", { harness_cwd: "/tmp" });
 
       const mod = await import("../actions/settings/chatSettings/index.js");
       const action = mod.default;
@@ -435,7 +435,7 @@ describe("per-chat model selection", () => {
     });
 
     it("keeps folder as an alias for workspace", async () => {
-      await db.sql`INSERT INTO chats(chat_id, harness_cwd) VALUES ('cfg-folder-alias', '/tmp') ON CONFLICT DO NOTHING`;
+      await seedConfigChat("cfg-folder-alias", { harness_cwd: "/tmp" });
 
       const mod = await import("../actions/settings/chatSettings/index.js");
       const action = mod.default;
@@ -449,7 +449,7 @@ describe("per-chat model selection", () => {
     });
 
     it("formats harness help as sectioned bullet points", async () => {
-      await db.sql`INSERT INTO chats(chat_id, harness) VALUES ('cfg-help-2', 'codex') ON CONFLICT DO NOTHING`;
+      await seedConfigChat("cfg-help-2", { harness: "codex" });
 
       const mod = await import("../actions/settings/chatSettings/index.js");
       const action = mod.default;
@@ -466,7 +466,7 @@ describe("per-chat model selection", () => {
     });
 
     it("keeps picker prompts compact for selectable settings", async () => {
-      await db.sql`INSERT INTO chats(chat_id, harness) VALUES ('cfg-help-3', 'codex') ON CONFLICT DO NOTHING`;
+      await seedConfigChat("cfg-help-3", { harness: "codex" });
 
       /** @type {string | null} */
       let promptText = null;
@@ -493,7 +493,7 @@ describe("per-chat model selection", () => {
     });
 
     it("resets a friendly key through the reset verb", async () => {
-      await db.sql`INSERT INTO chats(chat_id, harness_cwd) VALUES ('cfg-reset-1', '/tmp') ON CONFLICT DO NOTHING`;
+      await seedConfigChat("cfg-reset-1", { harness_cwd: "/tmp" });
 
       const mod = await import("../actions/settings/chatSettings/index.js");
       const action = mod.default;
@@ -504,16 +504,12 @@ describe("per-chat model selection", () => {
 
       assert.ok(result.toLowerCase().includes("default") || result.toLowerCase().includes("workspace"), `expected reset confirmation, got: ${result}`);
 
-      const { rows: [chat] } = await db.sql`SELECT harness_cwd FROM chats WHERE chat_id = 'cfg-reset-1'`;
+      const chat = await readChatConfig("cfg-reset-1");
       assert.equal(chat.harness_cwd, null);
     });
 
     it("describes grouped visibility controls with per-flag defaults", async () => {
-      await db.sql`
-        INSERT INTO chats(chat_id, output_visibility)
-        VALUES ('cfg-show-1', '{}'::jsonb)
-        ON CONFLICT DO NOTHING
-      `;
+      await seedConfigChat("cfg-show-1", { output_visibility: {} });
 
       const mod = await import("../actions/settings/chatSettings/index.js");
       const action = mod.default;
@@ -532,7 +528,7 @@ describe("per-chat model selection", () => {
     });
 
     it("does not accept text subcommands for show anymore", async () => {
-      await db.sql`INSERT INTO chats(chat_id) VALUES ('cfg-show-2') ON CONFLICT DO NOTHING`;
+      await seedConfigChat("cfg-show-2");
 
       const mod = await import("../actions/settings/chatSettings/index.js");
       const action = mod.default;
@@ -544,12 +540,12 @@ describe("per-chat model selection", () => {
       assert.ok(result.includes("Use `!s show`"), `expected picker guidance, got: ${result}`);
       assert.ok(result.includes("!s reset show"), `expected reset guidance, got: ${result}`);
 
-      const rows = await db.sql`SELECT output_visibility FROM chats WHERE chat_id = 'cfg-show-2'`;
-      assert.deepEqual(rows.rows[0]?.output_visibility, {});
+      const chat = await readChatConfig("cfg-show-2");
+      assert.deepEqual(chat.output_visibility, {});
     });
 
     it("uses a multi-select picker for show and stores the selected outputs", async () => {
-      await db.sql`INSERT INTO chats(chat_id) VALUES ('cfg-show-3') ON CONFLICT DO NOTHING`;
+      await seedConfigChat("cfg-show-3");
 
       /** @type {string | null} */
       let promptText = null;
@@ -591,15 +587,15 @@ describe("per-chat model selection", () => {
       assert.ok(result.includes("Hide file changes"), `expected hide summary, got: ${result}`);
       assert.ok(!result.includes("thinking"), `did not expect unchanged thinking summary, got: ${result}`);
 
-      const rows = await db.sql`SELECT output_visibility FROM chats WHERE chat_id = 'cfg-show-3'`;
-      assert.deepEqual(rows.rows[0]?.output_visibility, {
+      const chat = await readChatConfig("cfg-show-3");
+      assert.deepEqual(chat.output_visibility, {
         tools: true,
         changes: false,
       });
     });
 
     it("treats an empty multi-select result as a no-op for show", async () => {
-      await db.sql`INSERT INTO chats(chat_id) VALUES ('cfg-show-4') ON CONFLICT DO NOTHING`;
+      await seedConfigChat("cfg-show-4");
 
       const mod = await import("../actions/settings/chatSettings/index.js");
       const action = mod.default;
@@ -615,8 +611,8 @@ describe("per-chat model selection", () => {
 
       assert.equal(result, "");
 
-      const rows = await db.sql`SELECT output_visibility FROM chats WHERE chat_id = 'cfg-show-4'`;
-      assert.deepEqual(rows.rows[0]?.output_visibility, {});
+      const chat = await readChatConfig("cfg-show-4");
+      assert.deepEqual(chat.output_visibility, {});
     });
   });
 

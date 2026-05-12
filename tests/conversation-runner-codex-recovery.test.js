@@ -7,6 +7,7 @@ process.env.MASTER_ID = "master-user";
 
 import { createChatTurn, createTestDb, seedChat as seedChat_ } from "./helpers.js";
 import { setDb } from "../db.js";
+import { updateChatConfig } from "../chat-config.js";
 
 /** @type {import("@electric-sql/pglite").PGlite} */
 let db;
@@ -49,6 +50,20 @@ afterEach(() => {
 const seedChat = (chatId, options) => seedChat_(db, chatId, options);
 
 /**
+ * @param {string} chatId
+ * @param {Record<string, unknown>} [settings]
+ * @returns {Promise<void>}
+ */
+async function configureCodexChat(chatId, settings = {}) {
+  await updateChatConfig(chatId, (current) => ({
+    ...current,
+    harness: "codex",
+    harness_config: {},
+    ...settings,
+  }));
+}
+
+/**
  * @param {Message[]} messages
  * @returns {string}
  */
@@ -64,14 +79,10 @@ function getLastUserText(messages) {
 describe("createConversationRunner with codex harness", () => {
   it("shows a startup failure, clears the stale session, and recovers on the next turn", async () => {
     await seedChat("conv-codex-recover", { enabled: true });
-    await db.sql`
-      UPDATE chats
-      SET harness = 'codex',
-          harness_config = '{}'::jsonb,
-          harness_session_id = 'sess-stale',
-          harness_session_kind = 'codex'
-      WHERE chat_id = 'conv-codex-recover'
-    `;
+    await configureCodexChat("conv-codex-recover", {
+      harness_session_id: "sess-stale",
+      harness_session_kind: "codex",
+    });
 
     /** @type {Array<string | null>} */
     const seenSessionIds = [];
@@ -137,14 +148,10 @@ describe("createConversationRunner with codex harness", () => {
 
   it("preserves the saved Codex session after a transient connection close", async () => {
     await seedChat("conv-codex-connection-closed", { enabled: true });
-    await db.sql`
-      UPDATE chats
-      SET harness = 'codex',
-          harness_config = '{}'::jsonb,
-          harness_session_id = 'sess-active',
-          harness_session_kind = 'codex'
-      WHERE chat_id = 'conv-codex-connection-closed'
-    `;
+    await configureCodexChat("conv-codex-connection-closed", {
+      harness_session_id: "sess-active",
+      harness_session_kind: "codex",
+    });
 
     /** @type {Array<string | null>} */
     const seenSessionIds = [];
@@ -177,12 +184,7 @@ describe("createConversationRunner with codex harness", () => {
 
   it("steers follow-up turns into the active Codex run", async () => {
     await seedChat("conv-codex-queue", { enabled: true });
-    await db.sql`
-      UPDATE chats
-      SET harness = 'codex',
-          harness_config = '{}'::jsonb
-      WHERE chat_id = 'conv-codex-queue'
-    `;
+    await configureCodexChat("conv-codex-queue");
 
     /** @type {string[]} */
     const seenPrompts = [];
@@ -263,12 +265,7 @@ describe("createConversationRunner with codex harness", () => {
 
   it("retries Codex steering for active follow-ups instead of running a second turn", async () => {
     await seedChat("conv-codex-steer-unavailable", { enabled: true });
-    await db.sql`
-      UPDATE chats
-      SET harness = 'codex',
-          harness_config = '{}'::jsonb
-      WHERE chat_id = 'conv-codex-steer-unavailable'
-    `;
+    await configureCodexChat("conv-codex-steer-unavailable");
 
     /** @type {string[]} */
     const seenPrompts = [];
@@ -351,12 +348,7 @@ describe("createConversationRunner with codex harness", () => {
 
   it("routes !c to harness cancellation", async () => {
     await seedChat("conv-codex-cancel", { enabled: true });
-    await db.sql`
-      UPDATE chats
-      SET harness = 'codex',
-          harness_config = '{}'::jsonb
-      WHERE chat_id = 'conv-codex-cancel'
-    `;
+    await configureCodexChat("conv-codex-cancel");
 
     /** @type {string[]} */
     const cancelledChatIds = [];
@@ -397,12 +389,7 @@ describe("createConversationRunner with codex harness", () => {
 
   it("delivers a final non-text harness response when the harness returns it directly", async () => {
     await seedChat("conv-codex-final-file", { enabled: true });
-    await db.sql`
-      UPDATE chats
-      SET harness = 'codex',
-          harness_config = '{}'::jsonb
-      WHERE chat_id = 'conv-codex-final-file'
-    `;
+    await configureCodexChat("conv-codex-final-file");
 
     registerHarness("codex", () => ({
       getName: () => "codex",
@@ -446,12 +433,7 @@ describe("createConversationRunner with codex harness", () => {
 
   it("does not refresh composing before the Codex tool-call display", async () => {
     await seedChat("conv-codex-presence", { enabled: true });
-    await db.sql`
-      UPDATE chats
-      SET harness = 'codex',
-          harness_config = '{}'::jsonb
-      WHERE chat_id = 'conv-codex-presence'
-    `;
+    await configureCodexChat("conv-codex-presence");
 
     registerHarness("codex", () => createCodexHarness({
       startRun: async (input) => ({
@@ -505,13 +487,9 @@ describe("createConversationRunner with codex harness", () => {
 
   it("shows interleaved llm progress milliseconds after the last visible message", async () => {
     await seedChat("conv-codex-presence-interleaved", { enabled: true });
-    await db.sql`
-      UPDATE chats
-      SET harness = 'codex',
-          harness_config = '{}'::jsonb,
-          output_visibility = '{"tools":true}'::jsonb
-      WHERE chat_id = 'conv-codex-presence-interleaved'
-    `;
+    await configureCodexChat("conv-codex-presence-interleaved", {
+      output_visibility: { tools: true },
+    });
 
     const maxProgressDelayMs = 120;
 

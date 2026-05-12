@@ -22,6 +22,7 @@ import { setDb } from "../db.js";
 import { startHtmlServer, stopHtmlServer } from "../html-server.js";
 import config from "../config.js";
 import { getChatWorkDir } from "../utils.js";
+import { readChatConfig, updateChatConfig } from "../chat-config.js";
 
 const execFile = promisify(execFileCallback);
 
@@ -317,11 +318,7 @@ describe("Scenario 7b: Guided setup command", () => {
     assert.ok(allText.includes("workspace-write"), `Expected codex permissions summary, got: ${allText}`);
     assert.ok(allText.includes("!clone"), `Expected clone hint, got: ${allText}`);
 
-    const { rows: [chat] } = await testDb.sql`
-      SELECT is_enabled, respond_on, memory, debug, harness, harness_config
-      FROM chats
-      WHERE chat_id = ${chatId}
-    `;
+    const chat = await readChatConfig(chatId);
     assert.equal(chat.is_enabled, true);
     assert.equal(chat.respond_on, "mention+reply");
     assert.equal(chat.memory, false);
@@ -807,7 +804,11 @@ describe("Memory: injected into system prompt", () => {
   before(async () => {
     // Pre-insert a memory with embedding so the vector similarity path finds it
     await seedChat(chatId, { enabled: true });
-    await testDb.sql`UPDATE chats SET memory = true, memory_threshold = -2 WHERE chat_id = ${chatId}`;
+    await updateChatConfig(chatId, (current) => ({
+      ...current,
+      memory: true,
+      memory_threshold: -2,
+    }));
     await testDb.sql`
       INSERT INTO memories (chat_id, content, embedding, search_text)
       VALUES (${chatId}, 'User prefers dark mode', ${JSON.stringify([1, 0, 0])}::vector, to_tsvector('english', 'User prefers dark mode'))
@@ -838,7 +839,10 @@ describe("Memory: NOT injected when memory is disabled", () => {
 
   before(async () => {
     await seedChat(chatId, { enabled: true });
-    await testDb.sql`UPDATE chats SET memory_threshold = -2 WHERE chat_id = ${chatId}`;
+    await updateChatConfig(chatId, (current) => ({
+      ...current,
+      memory_threshold: -2,
+    }));
     await testDb.sql`
       INSERT INTO memories (chat_id, content, embedding, search_text)
       VALUES (${chatId}, 'User prefers light mode', ${JSON.stringify([1, 0, 0])}::vector, to_tsvector('english', 'User prefers light mode'))
@@ -867,7 +871,11 @@ describe("Memory: NOT searched when extracted text < 10 chars", () => {
 
   before(async () => {
     await seedChat(chatId, { enabled: true });
-    await testDb.sql`UPDATE chats SET memory = true, memory_threshold = -2 WHERE chat_id = ${chatId}`;
+    await updateChatConfig(chatId, (current) => ({
+      ...current,
+      memory: true,
+      memory_threshold: -2,
+    }));
     await testDb.sql`
       INSERT INTO memories (chat_id, content, embedding, search_text)
       VALUES (${chatId}, 'User likes brevity', ${JSON.stringify([1, 0, 0])}::vector, to_tsvector('english', 'User likes brevity'))
@@ -1015,7 +1023,11 @@ describe("memory_threshold filters low-relevance memories", () => {
 
   before(async () => {
     await seedChat(chatId, { enabled: true });
-    await testDb.sql`UPDATE chats SET memory = true, memory_threshold = 0.99 WHERE chat_id = ${chatId}`;
+    await updateChatConfig(chatId, (current) => ({
+      ...current,
+      memory: true,
+      memory_threshold: 0.99,
+    }));
     await testDb.sql`
       INSERT INTO memories (chat_id, content, embedding, search_text)
       VALUES (${chatId}, 'User loves hiking', ${JSON.stringify([1, 0, 0])}::vector, to_tsvector('english', 'User loves hiking'))

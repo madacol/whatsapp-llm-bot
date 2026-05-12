@@ -1,7 +1,7 @@
-import { getChatDb, getRootDb } from "./db.js";
+import { getChatDb, getRootDb, setDb } from "./db.js";
 import { createLogger } from "./logger.js";
-import { ensureChatConfig, mirrorChatConfigToDb, readChatConfig } from "./chat-config.js";
-import { normalizeChatRow } from "./store/normalizers.js";
+import { ensureChatConfig, readChatConfig } from "./chat-config.js";
+import { getChatPgDataDir } from "./chat-paths.js";
 import { createChatStore } from "./store/repos/chats.js";
 import { createMessageStore } from "./store/repos/messages.js";
 import { createProjectStore } from "./store/repos/projects.js";
@@ -72,22 +72,20 @@ const log = createLogger("store");
 
 /**
  * Returns the ChatRow for the given chat, or throws if it does not exist.
- * @param {PGlite} db
+ * @param {PGlite} _db
  * @param {string} chatId
  * @returns {Promise<ChatRow>}
  */
-export async function getChatOrThrow(db, chatId) {
+export async function getChatOrThrow(_db, chatId) {
   const configChat = await readChatConfig(chatId);
   if (configChat) {
     return configChat;
   }
-  const { rows: [row] } = await db.sql`SELECT * FROM chats WHERE chat_id = ${chatId}`;
-  const chat = normalizeChatRow(row);
-  if (!chat) {
-    throw new Error(`Chat ${chatId} does not exist.`);
+  const { rows } = await _db.sql`SELECT chat_id FROM chats WHERE chat_id = ${chatId}`;
+  if (rows.length > 0) {
+    return ensureChatConfig(chatId);
   }
-  await ensureChatConfig(chatId, chat);
-  return chat;
+  throw new Error(`Chat ${chatId} does not exist.`);
 }
 
 /**
@@ -202,10 +200,11 @@ export async function initStore(injectedDb, options = {}) {
   async function ensureChatExists(chatId) {
     await db.sql`INSERT INTO chats(chat_id) VALUES (${chatId}) ON CONFLICT (chat_id) DO NOTHING;`;
     const chatDb = await getInitializedChatDb(chatId);
+    if (injectedDb && !options.getChatDb) {
+      setDb(getChatPgDataDir(chatId), chatDb);
+    }
     await chatDb.sql`INSERT INTO chats(chat_id) VALUES (${chatId}) ON CONFLICT (chat_id) DO NOTHING;`;
-    const { rows: [legacyRow] } = await chatDb.sql`SELECT * FROM chats WHERE chat_id = ${chatId}`;
-    const chat = await ensureChatConfig(chatId, legacyRow ?? undefined);
-    await mirrorChatConfigToDb(chatDb, chat);
+    await ensureChatConfig(chatId);
   }
 
   /**
@@ -218,7 +217,7 @@ export async function initStore(injectedDb, options = {}) {
       .filter(/** @returns {value is string} */ (value) => typeof value === "string");
   }
 
-  const chatStore = createChatStore({ getChatDb: getInitializedChatDb, ensureChatExists });
+  const chatStore = createChatStore({ ensureChatExists });
   const messageStore = createMessageStore({ getChatDb: getInitializedChatDb });
   const whatsappInternals = createWhatsAppStoreInternals({
     db,

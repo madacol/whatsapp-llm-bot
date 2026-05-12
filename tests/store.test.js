@@ -74,9 +74,9 @@ describe("store with injected DB", () => {
       assert.equal((await isolatedStore.getMessages("isolated-b")).length, 0);
 
       const { rows: rootMessages } = await rootDb.sql`SELECT count(*)::int AS count FROM messages`;
-      const { rows: rootEnabled } = await rootDb.sql`SELECT is_enabled FROM chats WHERE chat_id = 'isolated-a'`;
+      const { rows: rootCatalog } = await rootDb.sql`SELECT chat_id FROM chats WHERE chat_id = 'isolated-a'`;
       assert.equal(rootMessages[0].count, 0);
-      assert.equal(rootEnabled[0].is_enabled, false);
+      assert.equal(rootCatalog[0].chat_id, "isolated-a");
     });
 
     it("persists one-row chat settings to the chat config file", async () => {
