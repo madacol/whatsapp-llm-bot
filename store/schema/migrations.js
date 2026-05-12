@@ -137,37 +137,7 @@ export async function runStoreMigrations(db) {
       );
     `;
 
-    await db.sql`
-      CREATE TABLE IF NOT EXISTS messages (
-        message_id SERIAL PRIMARY KEY,
-        chat_id VARCHAR(50) REFERENCES chats(chat_id),
-        sender_id VARCHAR(50),
-        message_data JSONB,
-        timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        cleared_at TIMESTAMP
-      );
-    `;
-
-    await db.sql`
-      CREATE TABLE IF NOT EXISTS whatsapp_outbound_queue (
-        id SERIAL PRIMARY KEY,
-        chat_id VARCHAR(50) NOT NULL,
-        payload_json JSONB NOT NULL,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-      );
-    `;
-
     await Promise.all([
-      db.sql`ALTER TABLE messages ADD COLUMN IF NOT EXISTS message_data JSONB`,
-      db.sql`ALTER TABLE messages ADD COLUMN IF NOT EXISTS cleared_at TIMESTAMP`,
-      db.sql`ALTER TABLE messages DROP COLUMN IF EXISTS message_type`,
-      db.sql`ALTER TABLE messages DROP COLUMN IF EXISTS tool_call_id`,
-      db.sql`ALTER TABLE messages DROP COLUMN IF EXISTS tool_name`,
-      db.sql`ALTER TABLE messages DROP COLUMN IF EXISTS tool_args`,
-      db.sql`ALTER TABLE messages DROP COLUMN IF EXISTS content`,
-      db.sql`ALTER TABLE messages ADD COLUMN IF NOT EXISTS exchange_text TEXT`,
-      db.sql`ALTER TABLE messages ADD COLUMN IF NOT EXISTS llm_context JSONB`,
-      db.sql`ALTER TABLE messages ADD COLUMN IF NOT EXISTS display_key TEXT`,
       db.sql`ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS workspace_chat_subject TEXT`,
     ]);
 
@@ -338,8 +308,6 @@ export async function runStoreMigrations(db) {
 
     await db.sql`CREATE EXTENSION IF NOT EXISTS vector`;
     await Promise.all([
-      db.sql`ALTER TABLE messages ADD COLUMN IF NOT EXISTS embedding vector`,
-      db.sql`ALTER TABLE messages ADD COLUMN IF NOT EXISTS search_text tsvector`,
       db.sql`ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS conflicted_files JSONB NOT NULL DEFAULT '[]'`,
       db.sql`ALTER TABLE projects ALTER COLUMN control_chat_id DROP NOT NULL`,
       db.sql`ALTER TABLE projects DROP CONSTRAINT IF EXISTS projects_name_key`,
@@ -349,31 +317,6 @@ export async function runStoreMigrations(db) {
       db.sql`DROP TABLE IF EXISTS whatsapp_repo_presentations`,
     ]);
     await db.sql`UPDATE workspaces SET workspace_chat_subject = name WHERE workspace_chat_subject IS NULL`;
-    await db.sql`
-      CREATE TABLE IF NOT EXISTS memories (
-        id SERIAL PRIMARY KEY,
-        chat_id VARCHAR(50) REFERENCES chats(chat_id),
-        content TEXT NOT NULL,
-        embedding vector,
-        search_text tsvector,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-      )
-    `;
-    await db.sql`CREATE INDEX IF NOT EXISTS idx_messages_search_text ON messages USING gin (search_text)`;
-    await db.sql`CREATE INDEX IF NOT EXISTS idx_messages_display_key ON messages (chat_id, display_key) WHERE display_key IS NOT NULL`;
-    await db.sql`CREATE INDEX IF NOT EXISTS idx_memories_search_text ON memories USING gin (search_text)`;
-    await db.sql`CREATE INDEX IF NOT EXISTS idx_whatsapp_outbound_queue_chat_id_id ON whatsapp_outbound_queue (chat_id, id)`;
-    await db.sql`
-      CREATE TABLE IF NOT EXISTS agent_runs (
-        id SERIAL PRIMARY KEY,
-        chat_id VARCHAR(50) REFERENCES chats(chat_id),
-        parent_tool_call_id TEXT,
-        agent_name TEXT NOT NULL,
-        messages JSONB NOT NULL,
-        usage JSONB,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-      )
-    `;
   } catch (error) {
     log.error("⚠️ SCHEMA MIGRATION FAILED — the database may be in an inconsistent state!", error);
     log.error("⚠️ Review the error above and fix manually if needed. The bot will continue but may malfunction.");

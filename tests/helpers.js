@@ -9,6 +9,7 @@ import { formatActivitySummary } from "../tool-presentation-model.js";
 import { formatToolPresentationDisplay, formatToolPresentationSummary } from "../presentation/whatsapp.js";
 import { formatUsageEventText } from "../usage-formatting.js";
 import { initStore } from "../store.js";
+import { ensureChatStoreSchema } from "../store/schema/chat.js";
 import { readChatConfig, updateChatConfig, writeChatConfig } from "../chat-config.js";
 
 const MODELS_CACHE_PATH = path.resolve("data/models.json");
@@ -218,6 +219,7 @@ export async function createTestDb() {
   if (sharedTestDb) return sharedTestDb;
   const db = new PGlite("memory://", { extensions: { vector } });
   await initStore(db);
+  await ensureChatStoreSchema(db);
   sharedTestDb = db;
   return db;
 }
