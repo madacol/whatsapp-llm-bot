@@ -18,6 +18,7 @@ import { setDb } from "../db.js";
 import { adaptIncomingMessage } from "../whatsapp/inbound/chat-turn.js";
 import { createConfirmRuntime } from "../whatsapp/runtime/confirm-runtime.js";
 import { createSelectRuntime } from "../whatsapp/runtime/select-runtime.js";
+import { updateChatConfig } from "../chat-config.js";
 
 const testConfirmRegistry = createConfirmRuntime();
 const testUserResponseRegistry = createSelectRuntime();
@@ -211,7 +212,7 @@ describe("message filtering", () => {
   it("drops group text messages prefixed with // before they reach the app", async () => {
     const chatId = "e2e-ignore-text@g.us";
     await seedChat(testDb, chatId, { enabled: true });
-    await testDb.sql`UPDATE chats SET respond_on = 'any' WHERE chat_id = ${chatId}`;
+    await updateChatConfig(chatId, (current) => ({ ...current, respond_on: "any" }));
 
     mockServer.clearRequests();
     const { sock, getSentMessages } = createMockBaileysSocket();
@@ -240,7 +241,7 @@ describe("message filtering", () => {
   it("drops media captions prefixed with // before downloading or storing media", async () => {
     const chatId = "e2e-ignore-caption@g.us";
     await seedChat(testDb, chatId, { enabled: true });
-    await testDb.sql`UPDATE chats SET respond_on = 'any' WHERE chat_id = ${chatId}`;
+    await updateChatConfig(chatId, (current) => ({ ...current, respond_on: "any" }));
 
     let downloadCalled = false;
     const { sock, getSentMessages } = createMockBaileysSocket();

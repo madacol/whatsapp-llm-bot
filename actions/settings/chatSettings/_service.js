@@ -8,8 +8,7 @@ import { ROLE_DEFINITIONS, resolveModel } from "../../../model-roles.js";
 import { listHarnesses } from "#harnesses";
 import { createWorkspaceBindingService } from "../../../workspace-binding-service.js";
 import { getChatWorkDir } from "../../../utils.js";
-import { ensureChatStoreSchema } from "../../../store/schema/chat.js";
-import { mirrorChatConfigToDb, updateChatConfig } from "../../../chat-config.js";
+import { updateChatConfig } from "../../../chat-config.js";
 import {
   buildOutputVisibilityOverrides,
   OUTPUT_VISIBILITY_FLAGS,
@@ -309,16 +308,12 @@ function createConfigKeyDefinition(definition) {
 }
 
 /**
- * @param {PGlite} db
  * @param {string} chatId
  * @param {Record<string, unknown>} patch
  * @returns {Promise<import("../../../store.js").ChatRow>}
  */
-async function updateChatSettingsFile(db, chatId, patch) {
-  await ensureChatStoreSchema(db);
-  const chat = await updateChatConfig(chatId, (current) => ({ ...current, ...patch }));
-  await mirrorChatConfigToDb(db, chat);
-  return chat;
+async function updateChatSettingsFile(chatId, patch) {
+  return updateChatConfig(chatId, (current) => ({ ...current, ...patch }));
 }
 
 /** @type {ConfigKeyDefinition[]} */
@@ -352,7 +347,7 @@ const BASE_CONFIG_KEYS = [
       if (rootCatalogDb !== targetDb) {
         await rootCatalogDb.sql`INSERT INTO chats(chat_id) VALUES (${targetChatId}) ON CONFLICT (chat_id) DO NOTHING`;
       }
-      await updateChatSettingsFile(targetDb, targetChatId, { is_enabled: enabled });
+      await updateChatSettingsFile(targetChatId, { is_enabled: enabled });
       return targetChatId === chatId
         ? `Bot ${enabled ? "enabled" : "disabled"}.`
         : `Bot ${enabled ? "enabled" : "disabled"} for chat \`${targetChatId}\`.`;
@@ -367,14 +362,14 @@ const BASE_CONFIG_KEYS = [
     resettable: true,
     formatCurrent: (chat) => chat.model ?? `${resolveModel("chat")} (default)`,
     formatDefault: () => resolveModel("chat"),
-    setValue: async ({ rootDb, chatId, value }) => {
+    setValue: async ({ chatId, value }) => {
       const trimmed = value.trim();
       const modelValue = trimmed.length === 0 ? null : trimmed;
       if (modelValue) {
         const error = await validateModel(modelValue);
         if (error) return error;
       }
-      await updateChatSettingsFile(rootDb, chatId, { model: modelValue });
+      await updateChatSettingsFile(chatId, { model: modelValue });
       return modelValue
         ? `Model set to \`${modelValue}\``
         : `Model reverted to default (\`${resolveModel("chat")}\`)`;
@@ -390,10 +385,10 @@ const BASE_CONFIG_KEYS = [
     resettable: true,
     formatCurrent: (chat) => chat.system_prompt ?? `${config.system_prompt} (default)`,
     formatDefault: () => config.system_prompt,
-    setValue: async ({ rootDb, chatId, value }) => {
+    setValue: async ({ chatId, value }) => {
       const trimmed = value.trim();
       const newPrompt = trimmed.length === 0 ? null : trimmed;
-      await updateChatSettingsFile(rootDb, chatId, { system_prompt: newPrompt });
+      await updateChatSettingsFile(chatId, { system_prompt: newPrompt });
       return newPrompt === null
         ? "Prompt cleared, using default."
         : `Prompt set to: ${trimmed}`;
@@ -411,12 +406,12 @@ const BASE_CONFIG_KEYS = [
     },
     formatCurrent: (chat) => chat.respond_on ?? "mention",
     formatDefault: () => "mention",
-    setValue: async ({ rootDb, chatId, value }) => {
+    setValue: async ({ chatId, value }) => {
       const trimmed = value.trim().toLowerCase();
       if (!RESPOND_ON_VALUES.includes(trimmed)) {
         return `Invalid value. Must be one of: ${RESPOND_ON_VALUES.join(", ")}`;
       }
-      await updateChatSettingsFile(rootDb, chatId, { respond_on: trimmed });
+      await updateChatSettingsFile(chatId, { respond_on: trimmed });
       return `Trigger: ${trimmed}`;
     },
   }),
@@ -432,9 +427,9 @@ const BASE_CONFIG_KEYS = [
     },
     formatCurrent: (chat) => formatBoolValue(chat.memory),
     formatDefault: () => "off",
-    setValue: async ({ rootDb, chatId, value }) => {
+    setValue: async ({ chatId, value }) => {
       const enabled = toBool(value);
-      await updateChatSettingsFile(rootDb, chatId, { memory: enabled });
+      await updateChatSettingsFile(chatId, { memory: enabled });
       return `Long-term memory ${enabled ? "enabled" : "disabled"} for this chat.`;
     },
   }),
@@ -448,17 +443,17 @@ const BASE_CONFIG_KEYS = [
     resettable: true,
     formatCurrent: (chat) => String(chat.memory_threshold ?? config.memory_threshold),
     formatDefault: () => String(config.memory_threshold),
-    setValue: async ({ rootDb, chatId, value }) => {
+    setValue: async ({ chatId, value }) => {
       const trimmed = value.trim();
       if (trimmed.length === 0) {
-        await updateChatSettingsFile(rootDb, chatId, { memory_threshold: null });
+        await updateChatSettingsFile(chatId, { memory_threshold: null });
         return `Memory threshold reset to default (${config.memory_threshold}).`;
       }
       const threshold = parseFloat(trimmed);
       if (isNaN(threshold) || threshold < 0 || threshold > 1) {
         throw new Error("Threshold must be a number between 0 and 1.");
       }
-      await updateChatSettingsFile(rootDb, chatId, { memory_threshold: threshold });
+      await updateChatSettingsFile(chatId, { memory_threshold: threshold });
       return `Memory similarity threshold set to ${threshold} for this chat.`;
     },
   }),
@@ -474,9 +469,9 @@ const BASE_CONFIG_KEYS = [
     },
     formatCurrent: (chat) => formatBoolValue(chat.debug),
     formatDefault: () => "off",
-    setValue: async ({ rootDb, chatId, value }) => {
+    setValue: async ({ chatId, value }) => {
       const enabled = toBool(value);
-      await updateChatSettingsFile(rootDb, chatId, { debug: enabled });
+      await updateChatSettingsFile(chatId, { debug: enabled });
       return `Debug ${enabled ? "on" : "off"}.`;
     },
   }),
@@ -493,10 +488,10 @@ const BASE_CONFIG_KEYS = [
     resettable: true,
     formatCurrent: (chat) => chat.harness ?? "native",
     formatDefault: () => "native",
-    setValue: async ({ rootDb, chatId, value }) => {
+    setValue: async ({ chatId, value }) => {
       const trimmed = value.trim();
       if (trimmed.length === 0) {
-        await updateChatSettingsFile(rootDb, chatId, { harness: null });
+        await updateChatSettingsFile(chatId, { harness: null });
         return "Harness reset to `native`.";
       }
       const available = listHarnesses();
@@ -504,7 +499,7 @@ const BASE_CONFIG_KEYS = [
         return `Unknown harness \`${trimmed}\`. Available: ${available.join(", ")}`;
       }
       const harnessValue = trimmed === "native" ? null : trimmed;
-      await updateChatSettingsFile(rootDb, chatId, { harness: harnessValue });
+      await updateChatSettingsFile(chatId, { harness: harnessValue });
       return `Harness set to \`${trimmed}\``;
     },
   }),
@@ -523,10 +518,10 @@ const BASE_CONFIG_KEYS = [
     resettable: true,
     formatCurrent: (chat) => formatOutputVisibility(chat.output_visibility),
     formatDefault: () => formatOutputVisibilityDefault(),
-    setValue: async ({ rootDb, chatId, chat, value }) => {
+    setValue: async ({ chatId, chat, value }) => {
       const trimmed = value.trim();
       if (trimmed.length === 0) {
-        await updateChatSettingsFile(rootDb, chatId, { output_visibility: {} });
+        await updateChatSettingsFile(chatId, { output_visibility: {} });
         return `Show reset to defaults (${formatOutputVisibilityDefault()}).`;
       }
 
@@ -536,14 +531,14 @@ const BASE_CONFIG_KEYS = [
           return "Choose `none` by itself to hide all extra outputs.";
         }
         const nextVisibility = buildOutputVisibilityOverrides([]);
-        await updateChatSettingsFile(rootDb, chatId, { output_visibility: nextVisibility });
+        await updateChatSettingsFile(chatId, { output_visibility: nextVisibility });
         return formatOutputVisibilityChanges(chat.output_visibility, nextVisibility);
       }
       if (!areOutputVisibilityKeys(selectedIds)) {
         return `Use \`${formatChatSettingsCommand("show")}\` to pick visible outputs, or \`${formatChatSettingsCommand("reset show")}\` to restore defaults.`;
       }
       const nextVisibility = toggleOutputVisibilityOverrides(chat.output_visibility, selectedIds);
-      await updateChatSettingsFile(rootDb, chatId, { output_visibility: nextVisibility });
+      await updateChatSettingsFile(chatId, { output_visibility: nextVisibility });
       return formatOutputVisibilityChanges(chat.output_visibility, nextVisibility);
     },
   }),
@@ -566,7 +561,7 @@ const BASE_CONFIG_KEYS = [
       return formatResolvedWorkspacePath(extra.rootDb, extra.chatId, chat);
     },
     formatDefault: () => CHAT_WORKSPACE_DEFAULT_LABEL,
-    setValue: async ({ rootDb, chatId, value }) => {
+    setValue: async ({ chatId, value }) => {
       const trimmed = value.trim();
       const cwdValue = trimmed.length === 0 ? null : trimmed;
 
@@ -602,7 +597,7 @@ const BASE_CONFIG_KEYS = [
         return msg;
       }
 
-      await updateChatSettingsFile(rootDb, chatId, { harness_cwd: cwdValue });
+      await updateChatSettingsFile(chatId, { harness_cwd: cwdValue });
       return cwdValue
         ? `Workspace path set to \`${cwdValue}\``
         : `Workspace path cleared; using ${CHAT_WORKSPACE_DEFAULT_LABEL}.`;
@@ -618,12 +613,12 @@ const BASE_CONFIG_KEYS = [
     resettable: true,
     formatCurrent: (chat) => chat.media_to_text_models?.general ?? "default",
     formatDefault: () => "default",
-    setValue: async ({ rootDb, chatId, chat, value }) => {
+    setValue: async ({ chatId, chat, value }) => {
       const trimmed = value.trim();
       const currentModels = { ...(chat.media_to_text_models ?? {}) };
       if (trimmed.length === 0) {
         delete currentModels.general;
-        await updateChatSettingsFile(rootDb, chatId, { media_to_text_models: currentModels });
+        await updateChatSettingsFile(chatId, { media_to_text_models: currentModels });
         return "media-reader reset to default.";
       }
 
@@ -636,7 +631,7 @@ const BASE_CONFIG_KEYS = [
       }
 
       currentModels.general = trimmed;
-      await updateChatSettingsFile(rootDb, chatId, { media_to_text_models: currentModels });
+      await updateChatSettingsFile(chatId, { media_to_text_models: currentModels });
       return `media-to-text model set to \`${trimmed}\``;
     },
   }),
@@ -650,12 +645,12 @@ const BASE_CONFIG_KEYS = [
     resettable: true,
     formatCurrent: (chat) => chat.media_to_text_models?.image ?? "default",
     formatDefault: () => "default",
-    setValue: async ({ rootDb, chatId, chat, value }) => {
+    setValue: async ({ chatId, chat, value }) => {
       const trimmed = value.trim();
       const currentModels = { ...(chat.media_to_text_models ?? {}) };
       if (trimmed.length === 0) {
         delete currentModels.image;
-        await updateChatSettingsFile(rootDb, chatId, { media_to_text_models: currentModels });
+        await updateChatSettingsFile(chatId, { media_to_text_models: currentModels });
         return "image-reader reset to default.";
       }
 
@@ -668,7 +663,7 @@ const BASE_CONFIG_KEYS = [
       }
 
       currentModels.image = trimmed;
-      await updateChatSettingsFile(rootDb, chatId, { media_to_text_models: currentModels });
+      await updateChatSettingsFile(chatId, { media_to_text_models: currentModels });
       return `image-to-text model set to \`${trimmed}\``;
     },
   }),
@@ -682,12 +677,12 @@ const BASE_CONFIG_KEYS = [
     resettable: true,
     formatCurrent: (chat) => chat.media_to_text_models?.audio ?? "default",
     formatDefault: () => "default",
-    setValue: async ({ rootDb, chatId, chat, value }) => {
+    setValue: async ({ chatId, chat, value }) => {
       const trimmed = value.trim();
       const currentModels = { ...(chat.media_to_text_models ?? {}) };
       if (trimmed.length === 0) {
         delete currentModels.audio;
-        await updateChatSettingsFile(rootDb, chatId, { media_to_text_models: currentModels });
+        await updateChatSettingsFile(chatId, { media_to_text_models: currentModels });
         return "audio-reader reset to default.";
       }
 
@@ -700,7 +695,7 @@ const BASE_CONFIG_KEYS = [
       }
 
       currentModels.audio = trimmed;
-      await updateChatSettingsFile(rootDb, chatId, { media_to_text_models: currentModels });
+      await updateChatSettingsFile(chatId, { media_to_text_models: currentModels });
       return `audio-to-text model set to \`${trimmed}\``;
     },
   }),
@@ -714,12 +709,12 @@ const BASE_CONFIG_KEYS = [
     resettable: true,
     formatCurrent: (chat) => chat.media_to_text_models?.video ?? "default",
     formatDefault: () => "default",
-    setValue: async ({ rootDb, chatId, chat, value }) => {
+    setValue: async ({ chatId, chat, value }) => {
       const trimmed = value.trim();
       const currentModels = { ...(chat.media_to_text_models ?? {}) };
       if (trimmed.length === 0) {
         delete currentModels.video;
-        await updateChatSettingsFile(rootDb, chatId, { media_to_text_models: currentModels });
+        await updateChatSettingsFile(chatId, { media_to_text_models: currentModels });
         return "video-reader reset to default.";
       }
 
@@ -732,7 +727,7 @@ const BASE_CONFIG_KEYS = [
       }
 
       currentModels.video = trimmed;
-      await updateChatSettingsFile(rootDb, chatId, { media_to_text_models: currentModels });
+      await updateChatSettingsFile(chatId, { media_to_text_models: currentModels });
       return `video-to-text model set to \`${trimmed}\``;
     },
   }),
@@ -745,7 +740,7 @@ const BASE_CONFIG_KEYS = [
     examples: [formatChatSettingsCommand("action searchWeb on"), formatChatSettingsCommand("action searchWeb off")],
     formatCurrent: async (chat, extra) => formatOptInActions(chat.enabled_actions ?? [], extra.getActions),
     formatDefault: () => "all opt-in actions off",
-    setValue: async ({ rootDb, chatId, chat, value, extra }) => {
+    setValue: async ({ chatId, chat, value, extra }) => {
       const parts = value.trim().split(/\s+/);
       if (parts.length < 2) {
         return formatChatSettingsUsage("action <action_name> <on|off>");
@@ -778,7 +773,7 @@ const BASE_CONFIG_KEYS = [
         updated = currentActions.filter((a) => a !== actionName);
       }
 
-      await updateChatSettingsFile(rootDb, chatId, { enabled_actions: updated });
+      await updateChatSettingsFile(chatId, { enabled_actions: updated });
       return `Action \`${actionName}\` ${actionEnabled ? "enabled" : "disabled"} for this chat.`;
     },
   }),
@@ -800,12 +795,12 @@ const ROLE_CONFIG_KEYS = Object.keys(ROLE_DEFINITIONS)
     resettable: true,
     formatCurrent: (chat) => chat.model_roles?.[roleName] ?? "default",
     formatDefault: () => resolveModel(roleName),
-    setValue: async ({ rootDb, chatId, chat, value }) => {
+    setValue: async ({ chatId, chat, value }) => {
       const trimmed = value.trim();
       if (trimmed.length === 0) {
         const currentRoles = { ...(chat.model_roles ?? {}) };
         delete currentRoles[roleName];
-        await updateChatSettingsFile(rootDb, chatId, { model_roles: currentRoles });
+        await updateChatSettingsFile(chatId, { model_roles: currentRoles });
         const def = ROLE_DEFINITIONS[roleName];
         const defaultVal = /** @type {string} */ (config[def.configKey]);
         return defaultVal
@@ -818,7 +813,7 @@ const ROLE_CONFIG_KEYS = Object.keys(ROLE_DEFINITIONS)
 
       const currentRoles = { ...(chat.model_roles ?? {}) };
       currentRoles[roleName] = trimmed;
-      await updateChatSettingsFile(rootDb, chatId, { model_roles: currentRoles });
+      await updateChatSettingsFile(chatId, { model_roles: currentRoles });
       return `${roleName} model set to \`${trimmed}\``;
     },
   }));

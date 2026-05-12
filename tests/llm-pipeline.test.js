@@ -9,6 +9,7 @@ process.env.MODEL = "mock-model";
 import { PGlite } from "@electric-sql/pglite";
 import { createMockLlmServer, createChatTurn, createTestDb, seedChat as seedChat_, withModelsCache } from "./helpers.js";
 import { setDb } from "../db.js";
+import { readChatConfig, updateChatConfig } from "../chat-config.js";
 
 /** @type {PGlite} */
 let db;
@@ -259,12 +260,11 @@ describe("LLM pipeline via createMessageHandler", () => {
 
   it("delegates harness-owned slash commands through handleCommand", async () => {
     await seedChat("pipe-slash-1", { enabled: true });
-    await db.sql`
-      UPDATE chats
-      SET harness = 'claude-agent-sdk',
-          harness_config = '{"model":"claude-sonnet-4-6","reasoningEffort":"medium"}'::jsonb
-      WHERE chat_id = 'pipe-slash-1'
-    `;
+    await updateChatConfig("pipe-slash-1", (current) => ({
+      ...current,
+      harness: "claude-agent-sdk",
+      harness_config: { "claude-agent-sdk": { model: "claude-sonnet-4-6", reasoningEffort: "medium" } },
+    }));
 
     const { context, responses } = createChatTurn({
       chatId: "pipe-slash-1",
@@ -280,12 +280,11 @@ describe("LLM pipeline via createMessageHandler", () => {
 
   it("delegates codex harness commands through handleCommand", async () => {
     await seedChat("pipe-slash-codex", { enabled: true });
-    await db.sql`
-      UPDATE chats
-      SET harness = 'codex',
-          harness_config = '{}'::jsonb
-      WHERE chat_id = 'pipe-slash-codex'
-    `;
+    await updateChatConfig("pipe-slash-codex", (current) => ({
+      ...current,
+      harness: "codex",
+      harness_config: {},
+    }));
 
     const { context, responses } = createChatTurn({
       chatId: "pipe-slash-codex",
@@ -301,15 +300,14 @@ describe("LLM pipeline via createMessageHandler", () => {
 
   it("clears harness sessions through the active harness command surface", async () => {
     await seedChat("pipe-slash-clear", { enabled: true });
-    await db.sql`
-      UPDATE chats
-      SET harness = 'native',
-          model_roles = '{"fast":"mock-fast-model"}'::jsonb,
-          harness_session_id = 'sess-clear-1',
-          harness_session_kind = 'native',
-          harness_session_history = '[]'::jsonb
-      WHERE chat_id = 'pipe-slash-clear'
-    `;
+    await updateChatConfig("pipe-slash-clear", (current) => ({
+      ...current,
+      harness: "native",
+      model_roles: { fast: "mock-fast-model" },
+      harness_session_id: "sess-clear-1",
+      harness_session_kind: "native",
+      harness_session_history: [],
+    }));
     await db.sql`
       INSERT INTO messages(chat_id, sender_id, message_data)
       VALUES
@@ -329,11 +327,8 @@ describe("LLM pipeline via createMessageHandler", () => {
       "Expected /clear to be handled via the active harness",
     );
 
-    const { rows: [chat] } = await db.sql`
-      SELECT harness_session_id, harness_session_kind, harness_session_history
-      FROM chats
-      WHERE chat_id = 'pipe-slash-clear'
-    `;
+    const chat = await readChatConfig("pipe-slash-clear");
+    assert.ok(chat, "expected chat config");
     assert.equal(chat.harness_session_id, null);
     assert.equal(chat.harness_session_kind, null);
     assert.equal(chat.harness_session_history.length, 1);

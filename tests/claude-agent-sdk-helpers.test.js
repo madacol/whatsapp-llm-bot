@@ -41,6 +41,7 @@ import {
   hasTextField,
 } from "../harnesses/claude-agent-sdk.js";
 import { createTestDb, seedChat } from "./helpers.js";
+import { readChatConfig } from "../chat-config.js";
 
 /**
  * @param {OutboundEvent} event
@@ -420,11 +421,7 @@ describe("createClaudeAgentSdkHarness", () => {
       }),
     });
 
-    const { rows: [chat] } = await db.sql`
-      SELECT harness_config
-      FROM chats
-      WHERE chat_id = 'claude-chat-1'
-    `;
+    const chat = await readChatConfig("claude-chat-1");
 
     assert.equal(handled, true);
     assert.deepEqual(selectedOptions, [
@@ -432,7 +429,7 @@ describe("createClaudeAgentSdkHarness", () => {
       { id: "read-only", label: "Read Only" },
       { id: "danger-full-access", label: "Full Access" },
     ]);
-    assert.deepEqual(chat?.harness_config, {
+    assert.deepEqual(chat.harness_config, {
       "claude-agent-sdk": {
         sandboxMode: "danger-full-access",
       },

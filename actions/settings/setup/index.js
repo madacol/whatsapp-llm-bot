@@ -7,7 +7,7 @@ import {
 } from "../../../harness-config.js";
 import { getChatOrThrow } from "../../../store.js";
 import { getChatDb } from "../../../db.js";
-import { mirrorChatConfigToDb, updateChatConfig } from "../../../chat-config.js";
+import { updateChatConfig } from "../../../chat-config.js";
 import { getClaudeSdkModels, getCodexAvailableModels, getPiAvailableModels, listHarnesses, resolveHarness } from "#harnesses";
 import {
   getSelectableOptions,
@@ -216,13 +216,12 @@ function getCurrentHarnessModelId(chat, harnessName, options) {
 }
 
 /**
- * @param {PGlite} rootDb
  * @param {string} chatId
  * @param {import("../../../store.js").ChatRow} chat
  * @param {HarnessModelSelection} selection
  * @returns {Promise<string>}
  */
-async function applyHarnessModelSelection(rootDb, chatId, chat, selection) {
+async function applyHarnessModelSelection(chatId, chat, selection) {
   const normalized = normalizeHarnessConfig(chat.harness_config, chat.harness);
   const rawScoped = normalized[selection.harness];
   /** @type {Record<string, unknown>} */
@@ -240,19 +239,17 @@ async function applyHarnessModelSelection(rootDb, chatId, chat, selection) {
     normalized[selection.harness] = scoped;
   }
 
-  const updated = await updateChatConfig(chatId, (current) => ({ ...current, harness_config: normalized }), chat);
-  await mirrorChatConfigToDb(rootDb, updated);
+  await updateChatConfig(chatId, (current) => ({ ...current, harness_config: normalized }), chat);
   return formatHarnessModelSummary(selection.harness, selection.value);
 }
 
 /**
- * @param {PGlite} rootDb
  * @param {string} chatId
  * @param {import("../../../store.js").ChatRow} chat
  * @param {CodexPermissionsSelection} selection
  * @returns {Promise<string>}
  */
-async function applyCodexPermissionsSelection(rootDb, chatId, chat, selection) {
+async function applyCodexPermissionsSelection(chatId, chat, selection) {
   const normalized = normalizeHarnessConfig(chat.harness_config, chat.harness);
   const rawScoped = normalized.codex;
   /** @type {Record<string, unknown>} */
@@ -261,8 +258,7 @@ async function applyCodexPermissionsSelection(rootDb, chatId, chat, selection) {
   scoped.sandboxMode = selection.value;
   normalized.codex = scoped;
 
-  const updated = await updateChatConfig(chatId, (current) => ({ ...current, harness_config: normalized }), chat);
-  await mirrorChatConfigToDb(rootDb, updated);
+  await updateChatConfig(chatId, (current) => ({ ...current, harness_config: normalized }), chat);
   return formatCodexPermissionsSummary(selection.value);
 }
 
@@ -378,11 +374,11 @@ async function applySetupSelections(rootDb, chatId, chat, senderIds, selections)
     currentChat = await getChatOrThrow(rootDb, chatId);
   }
   if (selections.stagedHarnessModel) {
-    applied.push(await applyHarnessModelSelection(rootDb, chatId, currentChat, selections.stagedHarnessModel));
+    applied.push(await applyHarnessModelSelection(chatId, currentChat, selections.stagedHarnessModel));
     currentChat = await getChatOrThrow(rootDb, chatId);
   }
   if (selections.stagedCodexPermissions) {
-    applied.push(await applyCodexPermissionsSelection(rootDb, chatId, currentChat, selections.stagedCodexPermissions));
+    applied.push(await applyCodexPermissionsSelection(chatId, currentChat, selections.stagedCodexPermissions));
   }
 
   if (isMaster(senderIds)) {

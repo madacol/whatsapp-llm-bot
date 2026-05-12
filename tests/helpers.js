@@ -9,6 +9,7 @@ import { formatActivitySummary } from "../tool-presentation-model.js";
 import { formatToolPresentationDisplay, formatToolPresentationSummary } from "../presentation/whatsapp.js";
 import { formatUsageEventText } from "../usage-formatting.js";
 import { initStore } from "../store.js";
+import { readChatConfig, updateChatConfig, writeChatConfig } from "../chat-config.js";
 
 const MODELS_CACHE_PATH = path.resolve("data/models.json");
 
@@ -19,11 +20,26 @@ const MODELS_CACHE_PATH = path.resolve("data/models.json");
  * @param {{enabled?: boolean, systemPrompt?: string | null, model?: string | null}} [options]
  */
 export async function seedChat(db, chatId, options = {}) {
-  const enabled = options.enabled ?? false;
-  const systemPrompt = options.systemPrompt ?? null;
-  const model = options.model ?? null;
-  await db.sql`INSERT INTO chats(chat_id, is_enabled, system_prompt, model)
-    VALUES (${chatId}, ${enabled}, ${systemPrompt}, ${model})
+  const existingConfig = await readChatConfig(chatId);
+  const explicitConfig = {
+    ...(options.enabled !== undefined ? { is_enabled: options.enabled } : {}),
+    ...(options.systemPrompt !== undefined ? { system_prompt: options.systemPrompt } : {}),
+    ...(options.model !== undefined ? { model: options.model } : {}),
+  };
+  if (existingConfig) {
+    if (Object.keys(explicitConfig).length > 0) {
+      await updateChatConfig(chatId, (current) => ({ ...current, ...explicitConfig }));
+    }
+  } else {
+    await writeChatConfig(chatId, {
+      chat_id: chatId,
+      is_enabled: options.enabled ?? false,
+      system_prompt: options.systemPrompt ?? null,
+      model: options.model ?? null,
+    });
+  }
+  await db.sql`INSERT INTO chats(chat_id)
+    VALUES (${chatId})
     ON CONFLICT (chat_id) DO NOTHING`;
 }
 
@@ -435,33 +451,19 @@ export function createTestHarness({ mockServer, handleMessage, testDb }) {
     const { enabled, systemPrompt, model, ...rest } = config;
     await seedChat(testDb, chatId, { enabled, systemPrompt, model });
 
-    // Build dynamic UPDATE for remaining config fields
-    /** @type {string[]} */
-    const setClauses = [];
-    /** @type {unknown[]} */
-    const values = [chatId];
-
-    /** @param {string} col @param {unknown} val */
-    const addCol = (col, val) => {
-      values.push(val);
-      setClauses.push(`${col} = $${values.length}`);
-    };
-
-    if (rest.debug != null) addCol("debug", rest.debug);
-    if (rest.memory != null) addCol("memory", rest.memory);
-    if (rest.memoryThreshold !== undefined) addCol("memory_threshold", rest.memoryThreshold);
-    if (rest.respondOn != null) addCol("respond_on", rest.respondOn);
-    if (rest.enabledActions != null) addCol("enabled_actions", JSON.stringify(rest.enabledActions));
-    if (rest.persona !== undefined) addCol("active_persona", rest.persona);
-    if (rest.modelRoles != null) addCol("model_roles", JSON.stringify(rest.modelRoles));
-    if (rest.mediaToTextModels != null) addCol("media_to_text_models", JSON.stringify(rest.mediaToTextModels));
-    if (rest.outputVisibility != null) addCol("output_visibility", JSON.stringify(rest.outputVisibility));
-
-    if (setClauses.length > 0) {
-      await testDb.query(
-        `UPDATE chats SET ${setClauses.join(", ")} WHERE chat_id = $1`,
-        values,
-      );
+    if (Object.keys(rest).length > 0) {
+      await updateChatConfig(chatId, (current) => ({
+        ...current,
+        ...(rest.debug != null ? { debug: rest.debug } : {}),
+        ...(rest.memory != null ? { memory: rest.memory } : {}),
+        ...(rest.memoryThreshold !== undefined ? { memory_threshold: rest.memoryThreshold } : {}),
+        ...(rest.respondOn != null ? { respond_on: rest.respondOn } : {}),
+        ...(rest.enabledActions != null ? { enabled_actions: rest.enabledActions } : {}),
+        ...(rest.persona !== undefined ? { active_persona: rest.persona } : {}),
+        ...(rest.modelRoles != null ? { model_roles: rest.modelRoles } : {}),
+        ...(rest.mediaToTextModels != null ? { media_to_text_models: rest.mediaToTextModels } : {}),
+        ...(rest.outputVisibility != null ? { output_visibility: rest.outputVisibility } : {}),
+      }));
     }
 
     return { send: makeSend(chatId) };
