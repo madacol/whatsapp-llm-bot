@@ -9,32 +9,6 @@ export async function ensureChatStoreSchema(db) {
   await db.sql`
     CREATE TABLE IF NOT EXISTS chats (
       chat_id VARCHAR(50) PRIMARY KEY,
-      is_enabled BOOLEAN DEFAULT FALSE,
-      system_prompt TEXT,
-      model TEXT,
-      respond_on_any BOOLEAN DEFAULT FALSE,
-      respond_on_mention BOOLEAN DEFAULT TRUE,
-      respond_on_reply BOOLEAN DEFAULT FALSE,
-      respond_on TEXT DEFAULT 'mention',
-      debug BOOLEAN DEFAULT FALSE,
-      media_to_text_models JSONB DEFAULT '{}',
-      memory BOOLEAN DEFAULT FALSE,
-      memory_threshold REAL,
-      enabled_actions JSONB DEFAULT '[]',
-      model_roles JSONB DEFAULT '{}',
-      active_persona TEXT,
-      harness TEXT,
-      harness_cwd TEXT,
-      output_visibility JSONB DEFAULT '{}',
-      harness_config JSONB DEFAULT '{}',
-      harness_session_id TEXT,
-      harness_session_kind TEXT,
-      harness_session_history JSONB DEFAULT '[]',
-      harness_fork_stack JSONB DEFAULT '[]',
-      sdk_model TEXT,
-      sdk_effort TEXT,
-      sdk_session_id TEXT,
-      sdk_session_history JSONB DEFAULT '[]',
       timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
   `;

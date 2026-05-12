@@ -5,6 +5,24 @@ import { createLogger } from "../../logger.js";
 const log = createLogger("store:migrations");
 
 /**
+ * @param {PGlite} db
+ * @param {string} table
+ * @param {string[]} columns
+ * @returns {Promise<boolean>}
+ */
+async function tableHasColumns(db, table, columns) {
+  const { rows } = await db.query(
+    `SELECT column_name
+     FROM information_schema.columns
+     WHERE table_schema = 'public'
+       AND table_name = $1
+       AND column_name = ANY($2)`,
+    [table, columns],
+  );
+  return new Set(rows.map((row) => row.column_name)).size === columns.length;
+}
+
+/**
  * Run schema migrations and data repairs for the root store database.
  * @param {PGlite} db
  * @returns {Promise<void>}
@@ -140,12 +158,6 @@ export async function runStoreMigrations(db) {
     `;
 
     await Promise.all([
-      db.sql`ALTER TABLE chats ADD COLUMN IF NOT EXISTS is_enabled BOOLEAN DEFAULT FALSE`,
-      db.sql`ALTER TABLE chats ADD COLUMN IF NOT EXISTS system_prompt TEXT`,
-      db.sql`ALTER TABLE chats ADD COLUMN IF NOT EXISTS model TEXT`,
-      db.sql`ALTER TABLE chats ADD COLUMN IF NOT EXISTS respond_on_any BOOLEAN DEFAULT FALSE`,
-      db.sql`ALTER TABLE chats ADD COLUMN IF NOT EXISTS respond_on_mention BOOLEAN DEFAULT TRUE`,
-      db.sql`ALTER TABLE chats ADD COLUMN IF NOT EXISTS respond_on_reply BOOLEAN DEFAULT FALSE`,
       db.sql`ALTER TABLE messages ADD COLUMN IF NOT EXISTS message_data JSONB`,
       db.sql`ALTER TABLE messages ADD COLUMN IF NOT EXISTS cleared_at TIMESTAMP`,
       db.sql`ALTER TABLE messages DROP COLUMN IF EXISTS message_type`,
@@ -153,26 +165,6 @@ export async function runStoreMigrations(db) {
       db.sql`ALTER TABLE messages DROP COLUMN IF EXISTS tool_name`,
       db.sql`ALTER TABLE messages DROP COLUMN IF EXISTS tool_args`,
       db.sql`ALTER TABLE messages DROP COLUMN IF EXISTS content`,
-      db.sql`ALTER TABLE chats ADD COLUMN IF NOT EXISTS debug BOOLEAN DEFAULT FALSE`,
-      db.sql`ALTER TABLE chats ADD COLUMN IF NOT EXISTS content_models JSONB DEFAULT '{}'`,
-      db.sql`ALTER TABLE chats ADD COLUMN IF NOT EXISTS memory BOOLEAN DEFAULT FALSE`,
-      db.sql`ALTER TABLE chats ADD COLUMN IF NOT EXISTS memory_threshold REAL`,
-      db.sql`ALTER TABLE chats ADD COLUMN IF NOT EXISTS respond_on TEXT DEFAULT 'mention'`,
-      db.sql`ALTER TABLE chats ADD COLUMN IF NOT EXISTS enabled_actions JSONB DEFAULT '[]'`,
-      db.sql`ALTER TABLE chats ADD COLUMN IF NOT EXISTS model_roles JSONB DEFAULT '{}'`,
-      db.sql`ALTER TABLE chats ADD COLUMN IF NOT EXISTS active_persona TEXT`,
-      db.sql`ALTER TABLE chats ADD COLUMN IF NOT EXISTS harness TEXT`,
-      db.sql`ALTER TABLE chats ADD COLUMN IF NOT EXISTS harness_cwd TEXT`,
-      db.sql`ALTER TABLE chats ADD COLUMN IF NOT EXISTS output_visibility JSONB DEFAULT '{}'`,
-      db.sql`ALTER TABLE chats ADD COLUMN IF NOT EXISTS harness_config JSONB DEFAULT '{}'`,
-      db.sql`ALTER TABLE chats ADD COLUMN IF NOT EXISTS harness_session_id TEXT`,
-      db.sql`ALTER TABLE chats ADD COLUMN IF NOT EXISTS harness_session_kind TEXT`,
-      db.sql`ALTER TABLE chats ADD COLUMN IF NOT EXISTS harness_session_history JSONB DEFAULT '[]'`,
-      db.sql`ALTER TABLE chats ADD COLUMN IF NOT EXISTS harness_fork_stack JSONB DEFAULT '[]'`,
-      db.sql`ALTER TABLE chats ADD COLUMN IF NOT EXISTS sdk_model TEXT`,
-      db.sql`ALTER TABLE chats ADD COLUMN IF NOT EXISTS sdk_effort TEXT`,
-      db.sql`ALTER TABLE chats ADD COLUMN IF NOT EXISTS sdk_session_id TEXT`,
-      db.sql`ALTER TABLE chats ADD COLUMN IF NOT EXISTS sdk_session_history JSONB DEFAULT '[]'`,
       db.sql`ALTER TABLE messages ADD COLUMN IF NOT EXISTS exchange_text TEXT`,
       db.sql`ALTER TABLE messages ADD COLUMN IF NOT EXISTS llm_context JSONB`,
       db.sql`ALTER TABLE messages ADD COLUMN IF NOT EXISTS display_key TEXT`,
@@ -190,17 +182,18 @@ export async function runStoreMigrations(db) {
         ALTER TABLE chats DROP COLUMN content_models;
       END IF;
     END $$`;
-    await db.sql`ALTER TABLE chats ADD COLUMN IF NOT EXISTS media_to_text_models JSONB DEFAULT '{}'`;
 
-    await db.sql`
-      UPDATE chats SET respond_on = 'any'
-      WHERE respond_on = 'mention' AND respond_on_any = true
-    `;
-    await db.sql`
-      UPDATE chats SET respond_on = 'mention+reply'
-      WHERE respond_on = 'mention' AND respond_on_any IS NOT TRUE
-        AND respond_on_reply = true AND respond_on_mention IS NOT FALSE
-    `;
+    if (await tableHasColumns(db, "chats", ["respond_on", "respond_on_any", "respond_on_reply", "respond_on_mention"])) {
+      await db.sql`
+        UPDATE chats SET respond_on = 'any'
+        WHERE respond_on = 'mention' AND respond_on_any = true
+      `;
+      await db.sql`
+        UPDATE chats SET respond_on = 'mention+reply'
+        WHERE respond_on = 'mention' AND respond_on_any IS NOT TRUE
+          AND respond_on_reply = true AND respond_on_mention IS NOT FALSE
+      `;
+    }
     await db.sql`
       UPDATE chat_bindings
       SET binding_kind = 'project'
@@ -233,29 +226,34 @@ export async function runStoreMigrations(db) {
 
     await db.sql`DO $$ BEGIN
       IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='chats' AND column_name='debug_until') THEN
+        ALTER TABLE chats ADD COLUMN IF NOT EXISTS debug BOOLEAN DEFAULT FALSE;
         UPDATE chats SET debug = TRUE WHERE debug_until IS NOT NULL AND debug_until > NOW();
         ALTER TABLE chats DROP COLUMN debug_until;
       END IF;
     END $$`;
 
-    await db.sql`
-      UPDATE chats
-      SET harness_config = jsonb_strip_nulls(jsonb_build_object(
-        'model', sdk_model,
-        'reasoningEffort', sdk_effort
-      ))
-      WHERE (harness_config IS NULL OR harness_config = '{}'::jsonb)
-        AND (sdk_model IS NOT NULL OR sdk_effort IS NOT NULL)
-    `;
-    await db.sql`
-      UPDATE chats
-      SET harness_session_id = sdk_session_id,
-          harness_session_kind = 'claude-sdk'
-      WHERE harness_session_id IS NULL
-        AND sdk_session_id IS NOT NULL
-    `;
+    if (await tableHasColumns(db, "chats", ["harness_config", "sdk_model", "sdk_effort"])) {
+      await db.sql`
+        UPDATE chats
+        SET harness_config = jsonb_strip_nulls(jsonb_build_object(
+          'model', sdk_model,
+          'reasoningEffort', sdk_effort
+        ))
+        WHERE (harness_config IS NULL OR harness_config = '{}'::jsonb)
+          AND (sdk_model IS NOT NULL OR sdk_effort IS NOT NULL)
+      `;
+    }
+    if (await tableHasColumns(db, "chats", ["harness_session_id", "harness_session_kind", "sdk_session_id"])) {
+      await db.sql`
+        UPDATE chats
+        SET harness_session_id = sdk_session_id,
+            harness_session_kind = 'claude-sdk'
+        WHERE harness_session_id IS NULL
+          AND sdk_session_id IS NOT NULL
+      `;
+    }
 
-    {
+    if (await tableHasColumns(db, "chats", ["chat_id", "harness", "harness_config"])) {
       const { rows } = await db.sql`
         SELECT chat_id, harness, harness_config
         FROM chats
@@ -273,7 +271,7 @@ export async function runStoreMigrations(db) {
       }
     }
 
-    {
+    if (await tableHasColumns(db, "chats", ["chat_id", "output_visibility"])) {
       const { rows } = await db.sql`
         SELECT chat_id, output_visibility
         FROM chats
@@ -291,7 +289,7 @@ export async function runStoreMigrations(db) {
       }
     }
 
-    {
+    if (await tableHasColumns(db, "chats", ["chat_id", "sdk_session_history", "harness_session_history"])) {
       const { rows } = await db.sql`
         SELECT chat_id, sdk_session_history, harness_session_history
         FROM chats

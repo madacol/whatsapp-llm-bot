@@ -7,7 +7,7 @@ import { resolve } from "node:path";
 import { bootstrapStoreSchema } from "../store/schema/bootstrap.js";
 import { ensureChatStoreSchema } from "../store/schema/chat.js";
 import { runStoreMigrations } from "../store/schema/migrations.js";
-import { writeChatConfig } from "../chat-config.js";
+import { readChatConfig, writeChatConfig } from "../chat-config.js";
 
 const CHAT_SCOPED_TABLES = [
   { table: "messages", key: "message_id" },
@@ -161,14 +161,11 @@ async function copyChatSettings(sourceDb, targetDb, chatId) {
   }
 
   const sourceColumns = await getColumns(sourceDb, "chats");
-  const targetColumns = await getColumns(targetDb, "chats");
-  const targetColumnSet = new Set(targetColumns);
-  const columns = sourceColumns.filter((column) => targetColumnSet.has(column));
-  if (!columns.includes("chat_id")) {
+  if (!sourceColumns.includes("chat_id")) {
     throw new Error("chats table is missing chat_id.");
   }
 
-  const columnSql = columns.map(quoteIdent).join(", ");
+  const columnSql = sourceColumns.map(quoteIdent).join(", ");
   const { rows } = await sourceDb.query(
     `SELECT ${columnSql} FROM chats WHERE chat_id = $1`,
     [chatId],
@@ -179,24 +176,11 @@ async function copyChatSettings(sourceDb, targetDb, chatId) {
     return 0;
   }
 
-  const { rows: [existingTargetRow] } = await targetDb.query(
-    `SELECT ${columnSql} FROM chats WHERE chat_id = $1`,
-    [chatId],
-  );
-  const row = mergeChatSettingsRow(rows[0], existingTargetRow, columns);
+  const existingConfig = await readChatConfig(chatId) ?? undefined;
+  const row = mergeChatSettingsRow(rows[0], existingConfig, sourceColumns);
   await writeChatConfig(chatId, row);
 
-  const placeholders = columns.map((_, index) => `$${index + 1}`).join(", ");
-  const updateColumns = columns.filter((column) => column !== "chat_id");
-  const updateSql = updateColumns.length > 0
-    ? `DO UPDATE SET ${updateColumns.map((column) => `${quoteIdent(column)} = EXCLUDED.${quoteIdent(column)}`).join(", ")}`
-    : "DO NOTHING";
-  await targetDb.query(
-    `INSERT INTO chats (${columnSql})
-     VALUES (${placeholders})
-     ON CONFLICT (chat_id) ${updateSql}`,
-    columns.map((column) => row[column]),
-  );
+  await targetDb.sql`INSERT INTO chats(chat_id) VALUES (${chatId}) ON CONFLICT (chat_id) DO NOTHING`;
   return 1;
 }
 
