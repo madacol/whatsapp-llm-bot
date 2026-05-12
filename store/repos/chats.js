@@ -12,7 +12,7 @@ import {
 
 /**
  * @typedef {{
- *   db: PGlite;
+ *   getChatDb: (chatId: string) => Promise<PGlite>;
  *   ensureChatExists: (chatId: string) => Promise<void>;
  * }} ChatStoreDeps
  */
@@ -34,12 +34,13 @@ import {
  *   | "popHarnessForkStack"
  * >}
  */
-export function createChatStore({ db, ensureChatExists }) {
+export function createChatStore({ getChatDb, ensureChatExists }) {
   /**
    * @param {ChatRow["chat_id"]} chatId
    * @returns {Promise<ChatRow | undefined>}
    */
   async function getChat(chatId) {
+    const db = await getChatDb(chatId);
     const { rows: [row] } = await db.sql`SELECT * FROM chats WHERE chat_id = ${chatId}`;
     return normalizeChatRow(row) ?? undefined;
   }
@@ -66,6 +67,7 @@ export function createChatStore({ db, ensureChatExists }) {
      */
     async setChatEnabled(chatId, enabled) {
       await ensureChatExists(chatId);
+      const db = await getChatDb(chatId);
       await db.sql`
         UPDATE chats
         SET is_enabled = ${enabled}
@@ -89,6 +91,7 @@ export function createChatStore({ db, ensureChatExists }) {
         throw new Error(`Chat ${sourceChatId} does not exist.`);
       }
 
+      const db = await getChatDb(targetChatId);
       await db.sql`
         UPDATE chats
         SET
@@ -119,6 +122,7 @@ export function createChatStore({ db, ensureChatExists }) {
      * @returns {Promise<void>}
      */
     async saveHarnessSession(chatId, session) {
+      const db = await getChatDb(chatId);
       await db.sql`
         UPDATE chats
         SET harness_session_id = ${session?.id ?? null},
@@ -156,6 +160,7 @@ export function createChatStore({ db, ensureChatExists }) {
       };
       const updated = [...history, entry].slice(-maxEntries);
 
+      const db = await getChatDb(chatId);
       await db.sql`
         UPDATE chats
         SET harness_session_history = ${JSON.stringify(updated)},
@@ -207,6 +212,7 @@ export function createChatStore({ db, ensureChatExists }) {
       const entry = history[index];
       history.splice(index, 1);
 
+      const db = await getChatDb(chatId);
       await db.sql`
         UPDATE chats
         SET harness_session_id = ${entry.id},
@@ -242,6 +248,7 @@ export function createChatStore({ db, ensureChatExists }) {
         throw new Error("Invalid harness fork stack entry");
       }
 
+      const db = await getChatDb(chatId);
       await db.sql`
         UPDATE chats
         SET harness_fork_stack = ${JSON.stringify([...stack, normalizedEntry])}
@@ -258,6 +265,7 @@ export function createChatStore({ db, ensureChatExists }) {
       const stack = normalizeHarnessForkStack(chat?.harness_fork_stack);
       const entry = stack.pop() ?? null;
 
+      const db = await getChatDb(chatId);
       await db.sql`
         UPDATE chats
         SET harness_fork_stack = ${JSON.stringify(stack)}

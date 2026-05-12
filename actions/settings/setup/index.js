@@ -6,6 +6,7 @@ import {
   normalizeHarnessConfig,
 } from "../../../harness-config.js";
 import { getChatOrThrow } from "../../../store.js";
+import { getChatDb } from "../../../db.js";
 import { getClaudeSdkModels, getCodexAvailableModels, getPiAvailableModels, listHarnesses, resolveHarness } from "#harnesses";
 import {
   getSelectableOptions,
@@ -378,7 +379,7 @@ async function applySetupSelections(rootDb, chatId, chat, senderIds, selections)
   let currentChat = chat;
 
   for (const change of selections.stagedChanges) {
-    applied.push(await setConfigValue(rootDb, chatId, change.setting, change.value, { senderIds }));
+    applied.push(await setConfigValue(rootDb, chatId, change.setting, change.value, { senderIds, getChatDb }));
     currentChat = await getChatOrThrow(rootDb, chatId);
   }
   if (selections.stagedHarnessModel) {
@@ -391,7 +392,7 @@ async function applySetupSelections(rootDb, chatId, chat, senderIds, selections)
 
   if (isMaster(senderIds)) {
     if (!chat.is_enabled) {
-      applied.push(await setConfigValue(rootDb, chatId, "enabled", "on", { senderIds }));
+      applied.push(await setConfigValue(rootDb, chatId, "enabled", "on", { senderIds, getChatDb }));
     }
   } else {
     notes.push("Enabled setting was skipped because only master users can change it.");
@@ -413,19 +414,21 @@ export default /** @type {defineAction} */ ((x) => x)({
   permissions: {
     autoExecute: true,
     useRootDb: true,
+    useChatDb: true,
     requireAdmin: true,
   },
   /**
-   * @param {ExtendedActionContext<{autoExecute: true, useRootDb: true, requireAdmin: true}>} context
+   * @param {ExtendedActionContext<{autoExecute: true, useRootDb: true, useChatDb: true, requireAdmin: true}>} context
    * @param {Record<string, never>} _params
    */
-  action_fn: async function ({ chatId, rootDb, senderIds, select }, _params) {
-    const chat = await getChatOrThrow(rootDb, chatId);
+  action_fn: async function ({ chatId, chatDb, rootDb, senderIds, select }, _params) {
+    const db = chatDb ?? rootDb;
+    const chat = await getChatOrThrow(db, chatId);
     const selections = await collectSetupSelections(chat, select);
     if (selections.kind === "cancelled") {
       return "Setup cancelled. No changes were made.";
     }
-    const { applied, notes } = await applySetupSelections(rootDb, chatId, chat, senderIds, selections);
+    const { applied, notes } = await applySetupSelections(db, chatId, chat, senderIds, selections);
 
     return [
       "Basic setup complete.",

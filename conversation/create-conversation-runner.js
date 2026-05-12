@@ -1,7 +1,7 @@
 import { CANCEL_COMMAND, formatChatSettingsCommand } from "../chat-commands.js";
 import { getChatAction, getChatActions, getAction } from "../actions.js";
 import { getAgent } from "../agents.js";
-import { getRootDb } from "../db.js";
+import { getChatDb } from "../db.js";
 import { storeAndLinkHtml } from "../html-store.js";
 import { resolveHarness, resolveHarnessName, createHarnessRunCoordinator } from "#harnesses";
 import { contentEvent } from "../outbound-events.js";
@@ -21,6 +21,7 @@ import { createWorkspaceBindingService } from "../workspace-binding-service.js";
 import { tryHandleWorkspaceCommand } from "../workspace-command-router.js";
 import { createWorkspaceControl } from "../workspace-control.js";
 import { createWorkspaceLifecycleService } from "../workspace-lifecycle-service.js";
+import { ensureChatStoreSchema } from "../store/schema/chat.js";
 
 const log = createLogger("conversation:runner");
 const PRESENCE_LEASE_TTL_MS = 20_000;
@@ -227,7 +228,9 @@ export function createConversationRunner({ store, llmClient, getActionsFn, execu
       const { result } = await executeActionFn(action.name, context, params, { actionResolver, llmClient });
 
       if (isHtmlContent(result)) {
-        const linkText = await storeAndLinkHtml(getRootDb(), result);
+        const chatDb = getChatDb(chatId);
+        await ensureChatStoreSchema(chatDb);
+        const linkText = await storeAndLinkHtml(chatDb, chatId, result);
         await context.reply(contentEvent("tool-result", linkText));
       } else if (typeof result === "string") {
         await context.reply(contentEvent("tool-result", result));

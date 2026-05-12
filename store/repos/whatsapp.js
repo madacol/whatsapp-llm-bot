@@ -8,6 +8,8 @@ import {
 /**
  * @typedef {{
  *   db: PGlite;
+ *   getChatDb: (chatId: string) => Promise<PGlite>;
+ *   listChatIds: () => Promise<string[]>;
  *   ensureChatExists: (chatId: string) => Promise<void>;
  * }} WhatsAppStoreDeps
  */
@@ -30,10 +32,10 @@ import {
  *     payloadJson: unknown,
  *   }) => Promise<import("../../store.js").WhatsAppOutboundQueueRow>;
  *   listWhatsAppOutboundQueueEntries: () => Promise<import("../../store.js").WhatsAppOutboundQueueRow[]>;
- *   deleteWhatsAppOutboundQueueEntry: (id: number) => Promise<void>;
+ *   deleteWhatsAppOutboundQueueEntry: (chatId: string, id: number) => Promise<void>;
  * }}
  */
-export function createWhatsAppStoreInternals({ db, ensureChatExists }) {
+export function createWhatsAppStoreInternals({ db, getChatDb, listChatIds, ensureChatExists }) {
   return {
     /**
      * @param {{
@@ -118,8 +120,9 @@ export function createWhatsAppStoreInternals({ db, ensureChatExists }) {
      */
     async enqueueWhatsAppOutboundQueueEntry({ chatId, payloadJson }) {
       await ensureChatExists(chatId);
+      const chatDb = await getChatDb(chatId);
 
-      const { rows: [row] } = await db.sql`
+      const { rows: [row] } = await chatDb.sql`
         INSERT INTO whatsapp_outbound_queue (chat_id, payload_json)
         VALUES (${chatId}, ${JSON.stringify(payloadJson)}::jsonb)
         RETURNING *
@@ -135,22 +138,36 @@ export function createWhatsAppStoreInternals({ db, ensureChatExists }) {
      * @returns {Promise<import("../../store.js").WhatsAppOutboundQueueRow[]>}
      */
     async listWhatsAppOutboundQueueEntries() {
-      const { rows } = await db.sql`
-        SELECT *
-        FROM whatsapp_outbound_queue
-        ORDER BY id ASC
-      `;
-      return rows
-        .map(normalizeWhatsAppOutboundQueueRow)
-        .filter(/** @returns {row is import("../../store.js").WhatsAppOutboundQueueRow} */ (row) => row !== null);
+      /** @type {import("../../store.js").WhatsAppOutboundQueueRow[]} */
+      const queued = [];
+      /** @type {WeakSet<PGlite>} */
+      const seenDbs = new WeakSet();
+      for (const chatId of await listChatIds()) {
+        const chatDb = await getChatDb(chatId);
+        if (seenDbs.has(chatDb)) {
+          continue;
+        }
+        seenDbs.add(chatDb);
+        const { rows } = await chatDb.sql`
+          SELECT *
+          FROM whatsapp_outbound_queue
+          ORDER BY id ASC
+        `;
+        queued.push(...rows
+          .map(normalizeWhatsAppOutboundQueueRow)
+          .filter(/** @returns {row is import("../../store.js").WhatsAppOutboundQueueRow} */ (row) => row !== null));
+      }
+      return queued.sort((a, b) => a.id - b.id);
     },
 
     /**
+     * @param {string} chatId
      * @param {number} id
      * @returns {Promise<void>}
      */
-    async deleteWhatsAppOutboundQueueEntry(id) {
-      await db.sql`DELETE FROM whatsapp_outbound_queue WHERE id = ${id}`;
+    async deleteWhatsAppOutboundQueueEntry(chatId, id) {
+      const chatDb = await getChatDb(chatId);
+      await chatDb.sql`DELETE FROM whatsapp_outbound_queue WHERE id = ${id}`;
     },
   };
 }
@@ -246,11 +263,12 @@ export function createWhatsAppStore(internals, db) {
     },
 
     /**
+     * @param {string} chatId
      * @param {number} id
      * @returns {Promise<void>}
      */
-    async deleteWhatsAppOutboundQueueEntry(id) {
-      await internals.deleteWhatsAppOutboundQueueEntry(id);
+    async deleteWhatsAppOutboundQueueEntry(chatId, id) {
+      await internals.deleteWhatsAppOutboundQueueEntry(chatId, id);
     },
   };
 }

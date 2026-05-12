@@ -1,4 +1,5 @@
-import { getRootDb } from "./db.js";
+import { getChatDb } from "./db.js";
+import { ensureChatStoreSchema } from "./store/schema/chat.js";
 
 /**
  * @typedef {"claude-agent-sdk" | "codex" | "native" | "pi"} SupportedHarnessName
@@ -186,7 +187,8 @@ export function getScopedHarnessConfig(value, harnessName) {
  * @returns {Promise<Record<string, unknown>>}
  */
 export async function getHarnessConfig(chatId, harnessName) {
-  const db = getRootDb();
+  const db = getChatDb(chatId);
+  await ensureChatStoreSchema(db);
   const { rows: [row] } = await db.sql`SELECT harness_config, harness FROM chats WHERE chat_id = ${chatId}`;
   return getScopedHarnessConfig(row?.harness_config, harnessName || row?.harness);
 }
@@ -200,7 +202,8 @@ export async function getHarnessConfig(chatId, harnessName) {
  * @returns {Promise<void>}
  */
 export async function updateHarnessConfig(chatId, harnessName, patch) {
-  const db = getRootDb();
+  const db = getChatDb(chatId);
+  await ensureChatStoreSchema(db);
   const { rows: [row] } = await db.sql`SELECT harness_config, harness FROM chats WHERE chat_id = ${chatId}`;
   const root = normalizeHarnessConfig(row?.harness_config, row?.harness);
   const scoped = ensureScopedConfig(root, harnessName);

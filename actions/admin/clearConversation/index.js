@@ -14,9 +14,11 @@ export default /** @type {defineAction} */ ((x) => x)({
     autoExecute: true,
     autoContinue: true,
     useRootDb: true,
+    useChatDb: true,
   },
-  action_fn: async function ({ chatId, rootDb }) {
-    await rootDb.sql`UPDATE messages SET cleared_at = NOW() WHERE chat_id = ${chatId} AND cleared_at IS NULL`;
+  action_fn: async function ({ chatId, chatDb, rootDb }) {
+    const db = chatDb ?? rootDb;
+    await db.sql`UPDATE messages SET cleared_at = NOW() WHERE chat_id = ${chatId} AND cleared_at IS NULL`;
     return "🗑️ Conversation history cleared!";
   },
 });

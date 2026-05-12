@@ -29,8 +29,10 @@ export default /** @type {defineAction} */ ((x) => x)({
     autoExecute: true,
     autoContinue: true,
     useRootDb: true,
+    useChatDb: true,
   },
-  action_fn: async function ({ chatId, rootDb }, params) {
+  action_fn: async function ({ chatId, chatDb, rootDb }, params) {
+    const db = chatDb ?? rootDb;
     const since = params.since;
     if (!since || isNaN(new Date(since).getTime())) {
       return "Invalid timestamp for 'since': " + since + ". Please use an ISO 8601 timestamp (e.g. 2025-01-15T10:00:00Z).";
@@ -42,7 +44,7 @@ export default /** @type {defineAction} */ ((x) => x)({
     const limit = params.limit || 50;
 
     const { rows } = until
-      ? await rootDb.sql`
+      ? await db.sql`
           SELECT sender_id, message_data, timestamp
           FROM messages
           WHERE chat_id = ${chatId}
@@ -51,7 +53,7 @@ export default /** @type {defineAction} */ ((x) => x)({
           ORDER BY timestamp ASC
           LIMIT ${limit}
         `
-      : await rootDb.sql`
+      : await db.sql`
           SELECT sender_id, message_data, timestamp
           FROM messages
           WHERE chat_id = ${chatId}

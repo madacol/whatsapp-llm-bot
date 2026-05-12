@@ -60,15 +60,17 @@ export default /** @type {defineAction} */ ((x) => x)({
     autoExecute: true,
     autoContinue: true,
     useRootDb: true,
+    useChatDb: true,
   },
   /**
-   * @param {ExtendedActionContext<{autoExecute: true, autoContinue: true, useRootDb: true}>} context
+   * @param {ExtendedActionContext<{autoExecute: true, autoContinue: true, useRootDb: true, useChatDb: true}>} context
    * @param {{action: "set"|"list"|"cancel", reminder_text?: string, remind_at?: string, reminder_id?: string}} params
    */
   action_fn: async function (context, params) {
-    const { rootDb, chatId } = context;
+    const { chatDb, rootDb, chatId } = context;
+    const db = chatDb ?? rootDb;
 
-    await ensureSchema(rootDb);
+    await ensureSchema(db);
 
     if (params.action === "set") {
       if (!params.reminder_text) {
@@ -86,7 +88,7 @@ export default /** @type {defineAction} */ ((x) => x)({
         return "The reminder time must be in the future.";
       }
 
-      const { rows } = await rootDb.sql`
+      const { rows } = await db.sql`
         INSERT INTO reminders (chat_id, reminder_text, remind_at)
         VALUES (${chatId}, ${params.reminder_text}, ${remindAt.toISOString()})
         RETURNING id
@@ -95,7 +97,7 @@ export default /** @type {defineAction} */ ((x) => x)({
       return `Reminder #${rows[0].id}: "${params.reminder_text}" at ${formatTime(remindAt)}`;
 
     } else if (params.action === "list") {
-      const { rows } = await rootDb.sql`
+      const { rows } = await db.sql`
         SELECT id, reminder_text, remind_at
         FROM reminders
         WHERE chat_id = ${chatId} AND delivered = FALSE
@@ -117,7 +119,7 @@ export default /** @type {defineAction} */ ((x) => x)({
         return "Please specify the reminder ID to cancel (reminder_id).";
       }
 
-      const { rows } = await rootDb.sql`
+      const { rows } = await db.sql`
         DELETE FROM reminders
         WHERE id = ${Number(params.reminder_id)} AND chat_id = ${chatId}
         RETURNING id

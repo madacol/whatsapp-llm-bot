@@ -1,5 +1,5 @@
 import config from "../config.js";
-import { getRootDb } from "../db.js";
+import { getChatDb } from "../db.js";
 import { contentEvent } from "../outbound-events.js";
 import {
   extractTextFromMessage,
@@ -9,6 +9,7 @@ import {
 import { prepareMessages } from "../message-formatting.js";
 import { reattachHdDeferreds } from "../whatsapp-hd-media.js";
 import { createLogger } from "../logger.js";
+import { ensureChatStoreSchema } from "../store/schema/chat.js";
 
 const log = createLogger("conversation:prepare-run-messages");
 
@@ -32,7 +33,9 @@ async function searchAndAppendMemories({ chatId, chatInfo, message, llmClient, e
 
   try {
     const threshold = chatInfo?.memory_threshold ?? config.memory_threshold;
-    const similar = await findMemories(getRootDb(), llmClient, chatId, currentText, { minSimilarity: threshold });
+    const chatDb = getChatDb(chatId);
+    await ensureChatStoreSchema(chatDb);
+    const similar = await findMemories(chatDb, llmClient, chatId, currentText, { minSimilarity: threshold });
     log.debug(`[memory] query="${currentText.slice(0, 80)}" found=${similar.length} threshold=${threshold}`);
 
     if (similar.length === 0) {

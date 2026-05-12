@@ -80,10 +80,12 @@ export default /** @type {defineAction} */ ((x) => x)({
     autoExecute: true,
     autoContinue: true,
     useRootDb: true,
+    useChatDb: true,
   },
-  action_fn: async function ({ chatId, rootDb }, params) {
+  action_fn: async function ({ chatId, chatDb, rootDb }, params) {
+    const db = chatDb ?? rootDb;
     const limit = params.limit || 20;
-    const { rows } = await rootDb.sql`
+    const { rows } = await db.sql`
       SELECT message_id, sender_id, message_data, timestamp
       FROM messages
       WHERE chat_id = ${chatId}

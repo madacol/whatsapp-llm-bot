@@ -1,17 +1,17 @@
-import { getRootDb } from "./db.js";
-import { ensureSchema } from "./actions/tools/reminders/index.js";
+import { getChatDb, getRootDb } from "./db.js";
 import { createDaemon } from "./daemon.js";
 import { createLogger } from "./logger.js";
+import { ensureChatStoreSchema } from "./store/schema/chat.js";
 
 const log = createLogger("reminder-daemon");
 
 /**
- * Poll for due reminders and deliver them.
+ * Poll one chat DB for due reminders and deliver them.
  * Exported separately for testing.
  * @param {PGlite} db
  * @param {(chatId: string, text: string) => Promise<void>} sendToChat
  */
-export async function pollReminders(db, sendToChat) {
+export async function pollChatReminders(db, sendToChat) {
   const { rows } = await db.sql`
     SELECT id, chat_id, reminder_text, remind_at
     FROM reminders
@@ -29,6 +29,28 @@ export async function pollReminders(db, sendToChat) {
   }
 }
 
+/**
+ * Poll all registered chat DBs for due reminders.
+ * @param {PGlite} rootDb
+ * @param {(chatId: string, text: string) => Promise<void>} sendToChat
+ * @returns {Promise<void>}
+ */
+export async function pollReminders(rootDb, sendToChat) {
+  const { rows } = await rootDb.sql`SELECT chat_id FROM chats ORDER BY chat_id`;
+  if (rows.length === 0) {
+    await pollChatReminders(rootDb, sendToChat);
+    return;
+  }
+  for (const row of rows) {
+    if (typeof row.chat_id !== "string") {
+      continue;
+    }
+    const chatDb = getChatDb(row.chat_id);
+    await ensureChatStoreSchema(chatDb);
+    await pollChatReminders(chatDb, sendToChat);
+  }
+}
+
 const POLL_INTERVAL_MS = 30_000;
 
 /**
@@ -40,7 +62,7 @@ export function startReminderDaemon(sendToChat) {
   const db = getRootDb();
 
   return createDaemon({
-    init: () => ensureSchema(db),
+    init: async () => {},
     poll: () => pollReminders(db, sendToChat),
     intervalMs: POLL_INTERVAL_MS,
     label: "Reminder daemon",

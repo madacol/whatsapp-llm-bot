@@ -14,7 +14,7 @@ import {
   registerMedia,
   parseStructuredQuestion,
 } from "../message-formatting.js";
-import { getRootDb } from "../db.js";
+import { getChatDb } from "../db.js";
 import { storeLlmContext } from "../context-log.js";
 import { existsSync, readFileSync } from "node:fs";
 import { storeAndLinkHtml } from "../html-store.js";
@@ -23,6 +23,7 @@ import { buildToolPresentation } from "../tool-presentation-model.js";
 import { createLogger } from "../logger.js";
 import { handleHarnessSessionCommand } from "./session-commands.js";
 import { convertUnsupportedMedia } from "../media-to-text.js";
+import { ensureChatStoreSchema } from "../store/schema/chat.js";
 
 const log = createLogger("harness:native");
 
@@ -177,7 +178,9 @@ async function executeAndStoreTool({
 
     // HTML content → store page, edit message with link
     if (isHtmlContent(result)) {
-      const linkText = await storeAndLinkHtml(getRootDb(), result);
+      const chatDb = getChatDb(chatId);
+      await ensureChatStoreSchema(chatDb);
+      const linkText = await storeAndLinkHtml(chatDb, chatId, result);
 
       const toolMessage = createToolMessage(toolCall.id, linkText);
       await replaceStub(toolMessage);
@@ -288,7 +291,7 @@ async function processLlmResponse({ session, llmConfig, messages, mediaRegistry,
       chatModel,
       llmConfig.mediaToTextModels ?? {},
       llmClient,
-      getRootDb(),
+      getChatDb(chatId),
     );
 
     const newSkippedTypes = [...skippedTypes].filter((type) => !warnedUnsupportedTypes.has(type));
@@ -314,7 +317,7 @@ async function processLlmResponse({ session, llmConfig, messages, mediaRegistry,
       const { promptTokens: prompt, completionTokens: completion, cachedTokens: cached } = response.usage;
       const cost = await resolveCost(response.usage.cost, chatModel, prompt, completion);
       log.info(`[LLM usage] prompt=${prompt} cached=${cached} completion=${completion} cost=${cost} model=${chatModel}`);
-      recordUsage(getRootDb(), { chatId, model: chatModel, promptTokens: prompt, completionTokens: completion, cachedTokens: cached, cost })
+      recordUsage(getChatDb(chatId), { chatId, model: chatModel, promptTokens: prompt, completionTokens: completion, cachedTokens: cached, cost })
         .catch(err => log.error("[LLM usage] failed to persist:", err));
       result.usage.promptTokens += prompt;
       result.usage.completionTokens += completion;
@@ -368,7 +371,7 @@ async function processLlmResponse({ session, llmConfig, messages, mediaRegistry,
       messages.push(assistantMessage);
       const storedAssistant = await addMessage(chatId, assistantMessage, senderIds);
       if (depth === 0) {
-        storeLlmContext(getRootDb(), storedAssistant.message_id, chatModel, effectiveSystemPrompt, messages, tools);
+        storeLlmContext(getChatDb(chatId), storedAssistant.message_id, chatModel, effectiveSystemPrompt, messages, tools);
       }
       return result;
     }
@@ -391,7 +394,7 @@ async function processLlmResponse({ session, llmConfig, messages, mediaRegistry,
     messages.push(assistantMessage);
     const storedAssistantWithTools = await addMessage(chatId, assistantMessage, senderIds);
     if (depth === 0) {
-      storeLlmContext(getRootDb(), storedAssistantWithTools.message_id, chatModel, effectiveSystemPrompt, messages, tools);
+      storeLlmContext(getChatDb(chatId), storedAssistantWithTools.message_id, chatModel, effectiveSystemPrompt, messages, tools);
     }
 
     // Insert stubs for each tool call (timestamps anchored to assistant message)

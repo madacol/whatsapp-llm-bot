@@ -5,8 +5,12 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
+import { PGlite } from "@electric-sql/pglite";
+import { vector } from "@electric-sql/pglite/vector";
 import { createTestDb } from "./helpers.js";
 import config from "../config.js";
+import { initStore } from "../store.js";
+import { setConfigValue } from "../actions/settings/chatSettings/_service.js";
 
 const CACHE_PATH = path.resolve("data/models.json");
 const execFileAsync = promisify(execFile);
@@ -296,6 +300,46 @@ describe("per-chat model selection", () => {
 
         const { rows: [chat] } = await db.sql`SELECT is_enabled FROM chats WHERE chat_id = 'remote-chat@s.whatsapp.net'`;
         assert.equal(chat.is_enabled, true);
+      } finally {
+        config.MASTER_IDs = originalMaster;
+      }
+    });
+
+    it("registers remote enabled chats in root while storing settings in the target chat DB", async () => {
+      const rootDb = new PGlite("memory://", { extensions: { vector } });
+      /** @type {Map<string, PGlite>} */
+      const chatDbs = new Map();
+      /** @param {string} chatId */
+      const resolveChatDb = (chatId) => {
+        const existing = chatDbs.get(chatId);
+        if (existing) return existing;
+        const created = new PGlite("memory://", { extensions: { vector } });
+        chatDbs.set(chatId, created);
+        return created;
+      };
+      const store = await initStore(rootDb, { getChatDb: resolveChatDb });
+      await store.createChat("admin-chat-isolated");
+
+      const originalMaster = config.MASTER_IDs;
+      config.MASTER_IDs = ["master-user"];
+      try {
+        await setConfigValue(
+          resolveChatDb("admin-chat-isolated"),
+          "admin-chat-isolated",
+          "enabled",
+          "on remote-isolated@g.us",
+          { senderIds: ["master-user"], rootDb, getChatDb: resolveChatDb },
+        );
+
+        const targetDb = resolveChatDb("remote-isolated@g.us");
+        const { rows: [rootChat] } = await rootDb.sql`
+          SELECT is_enabled FROM chats WHERE chat_id = 'remote-isolated@g.us'
+        `;
+        const { rows: [targetChat] } = await targetDb.sql`
+          SELECT is_enabled FROM chats WHERE chat_id = 'remote-isolated@g.us'
+        `;
+        assert.equal(rootChat.is_enabled, false);
+        assert.equal(targetChat.is_enabled, true);
       } finally {
         config.MASTER_IDs = originalMaster;
       }

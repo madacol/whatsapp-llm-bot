@@ -287,15 +287,17 @@ export default /** @type {defineAction} */ ((x) => x)({
     autoExecute: true,
     autoContinue: true,
     useRootDb: true,
+    useChatDb: true,
     useLlm: true,
     requireMaster: true,
   },
   /**
-   * @param {ExtendedActionContext<{ useRootDb: true, useLlm: true, requireMaster: true, autoExecute: true, autoContinue: true }>} context
+   * @param {ExtendedActionContext<{ useRootDb: true, useChatDb: true, useLlm: true, requireMaster: true, autoExecute: true, autoContinue: true }>} context
    * @param {{ test_name: string, description: string, messages: string, assertion: string }} params
    */
   action_fn: async function (context, params) {
-    const { chatId, rootDb, callLlm, confirm, log } = context;
+    const { chatId, chatDb, rootDb, callLlm, confirm, log } = context;
+    const db = chatDb ?? rootDb;
 
     // Step 2: Parse and validate parameters
     const assertionResult = parseAssertion(params.assertion);
@@ -311,7 +313,7 @@ export default /** @type {defineAction} */ ((x) => x)({
       /** @type {string} */
       let systemPrompt = config.system_prompt;
       try {
-        const { rows } = await rootDb.sql`
+        const { rows } = await db.sql`
           SELECT system_prompt FROM chats WHERE chat_id = ${chatId}
         `;
         if (rows[0]?.system_prompt) {
