@@ -2,10 +2,11 @@ import { resolveHarness, resolveHarnessName } from "#harnesses";
 import { getActions, getAction, getChatAction, executeAction } from "./actions.js";
 import { createSilentActionContext } from "./execute-action-context.js";
 import { resolveChatModel } from "./model-roles.js";
-import { getRootDb } from "./db.js";
+import { getChatDb } from "./db.js";
 import { createLogger } from "./logger.js";
 import { getChatWorkDir } from "./utils.js";
 import { createToolRuntime } from "./conversation/create-tool-runtime.js";
+import { ensureChatStoreSchema } from "./store/schema/chat.js";
 
 const log = createLogger("agent-runner");
 
@@ -145,10 +146,11 @@ export async function runAgent(options) {
   // Persist the run to agent_runs table
   if (parentToolCallId) {
     try {
-      const rootDb = getRootDb();
+      const chatDb = getChatDb(chatId);
+      await ensureChatStoreSchema(chatDb);
       const messagesJson = JSON.stringify(result.messages);
       const usageJson = JSON.stringify(result.usage);
-      await rootDb.sql`INSERT INTO agent_runs (chat_id, parent_tool_call_id, agent_name, messages, usage)
+      await chatDb.sql`INSERT INTO agent_runs (chat_id, parent_tool_call_id, agent_name, messages, usage)
          VALUES (${chatId}, ${parentToolCallId}, ${agent.name}, ${messagesJson}, ${usageJson})`;
     } catch (err) {
       log.error("Failed to persist agent run:", err);

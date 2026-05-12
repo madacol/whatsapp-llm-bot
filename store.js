@@ -1,4 +1,4 @@
-import { getRootDb } from "./db.js";
+import { getChatDb, getRootDb } from "./db.js";
 import { createLogger } from "./logger.js";
 import { normalizeChatRow } from "./store/normalizers.js";
 import { createChatStore } from "./store/repos/chats.js";
@@ -6,6 +6,7 @@ import { createMessageStore } from "./store/repos/messages.js";
 import { createProjectStore } from "./store/repos/projects.js";
 import { createWhatsAppStore, createWhatsAppStoreInternals } from "./store/repos/whatsapp.js";
 import { bootstrapStoreSchema } from "./store/schema/bootstrap.js";
+import { ensureChatStoreSchema } from "./store/schema/chat.js";
 import { runStoreMigrations } from "./store/schema/migrations.js";
 
 const log = createLogger("store");
@@ -85,8 +86,12 @@ export async function getChatOrThrow(db, chatId) {
 
 /**
  * @param {PGlite} [injectedDb]
+ * @param {{
+ *   getChatDb?: (chatId: string) => PGlite,
+ * }} [options]
  * @returns {Promise<{
  *   getChat: (chatId: ChatRow["chat_id"]) => Promise<ChatRow | undefined>;
+ *   listChatIds: () => Promise<string[]>;
  *   closeDb: () => Promise<void>;
  *   getMessages: (chatId: MessageRow["chat_id"], since?: Date, limit?: number) => Promise<MessageRow[]>;
  *   createChat: (chatId: ChatRow["chat_id"]) => Promise<void>;
@@ -140,7 +145,7 @@ export async function getChatOrThrow(db, chatId) {
  *     payloadJson: unknown,
  *   }) => Promise<WhatsAppOutboundQueueRow>;
  *   listWhatsAppOutboundQueueEntries: () => Promise<WhatsAppOutboundQueueRow[]>;
- *   deleteWhatsAppOutboundQueueEntry: (id: number) => Promise<void>;
+ *   deleteWhatsAppOutboundQueueEntry: (chatId: string, id: number) => Promise<void>;
  *   archiveWorkspace: (workspaceId: string) => Promise<WorkspaceRow | null>;
  *   setWorkspaceStatus: (workspaceId: string, status: WorkspaceStatus, options?: { conflictedFiles?: string[] }) => Promise<WorkspaceRow | null>;
  *   updateWorkspaceLastTestStatus: (workspaceId: string, lastTestStatus: WorkspaceRow["last_test_status"]) => Promise<WorkspaceRow | null>;
@@ -162,11 +167,27 @@ export async function getChatOrThrow(db, chatId) {
  *   popHarnessForkStack: (chatId: ChatRow["chat_id"]) => Promise<HarnessForkStackEntry | null>;
  * }>}
  */
-export async function initStore(injectedDb) {
+export async function initStore(injectedDb, options = {}) {
   const db = injectedDb || getRootDb();
+  const resolveChatDb = options.getChatDb ?? (injectedDb ? () => injectedDb : getChatDb);
+  /** @type {WeakSet<PGlite>} */
+  const initializedChatDbs = new WeakSet();
 
   await bootstrapStoreSchema(db);
   await runStoreMigrations(db);
+
+  /**
+   * @param {string} chatId
+   * @returns {Promise<PGlite>}
+   */
+  async function getInitializedChatDb(chatId) {
+    const chatDb = resolveChatDb(chatId);
+    if (!initializedChatDbs.has(chatDb)) {
+      await ensureChatStoreSchema(chatDb);
+      initializedChatDbs.add(chatDb);
+    }
+    return chatDb;
+  }
 
   /**
    * @param {string} chatId
@@ -174,11 +195,28 @@ export async function initStore(injectedDb) {
    */
   async function ensureChatExists(chatId) {
     await db.sql`INSERT INTO chats(chat_id) VALUES (${chatId}) ON CONFLICT (chat_id) DO NOTHING;`;
+    const chatDb = await getInitializedChatDb(chatId);
+    await chatDb.sql`INSERT INTO chats(chat_id) VALUES (${chatId}) ON CONFLICT (chat_id) DO NOTHING;`;
   }
 
-  const chatStore = createChatStore({ db, ensureChatExists });
-  const messageStore = createMessageStore({ db });
-  const whatsappInternals = createWhatsAppStoreInternals({ db, ensureChatExists });
+  /**
+   * @returns {Promise<string[]>}
+   */
+  async function listChatIds() {
+    const { rows } = await db.sql`SELECT chat_id FROM chats ORDER BY chat_id`;
+    return rows
+      .map((row) => row.chat_id)
+      .filter(/** @returns {value is string} */ (value) => typeof value === "string");
+  }
+
+  const chatStore = createChatStore({ getChatDb: getInitializedChatDb, ensureChatExists });
+  const messageStore = createMessageStore({ getChatDb: getInitializedChatDb });
+  const whatsappInternals = createWhatsAppStoreInternals({
+    db,
+    getChatDb: getInitializedChatDb,
+    listChatIds,
+    ensureChatExists,
+  });
   const whatsappStore = createWhatsAppStore(whatsappInternals, db);
   const projectStore = createProjectStore({
     db,
@@ -188,6 +226,7 @@ export async function initStore(injectedDb) {
 
   return {
     ...chatStore,
+    listChatIds,
 
     async closeDb() {
       log.info("Closing database...");

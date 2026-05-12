@@ -7,9 +7,10 @@ import {
   proto,
 } from "@whiskeysockets/baileys";
 import { randomBytes } from "node:crypto";
-import { getRootDb } from "./db.js";
+import { getChatDb } from "./db.js";
 import { createLogger } from "./logger.js";
 import { writeMedia } from "./media-store.js";
+import { ensureChatStoreSchema } from "./store/schema/chat.js";
 
 const log = createLogger("whatsapp-hd-media");
 
@@ -176,7 +177,8 @@ function getHdParentMessageId(baileysMessage) {
 export async function updateStoredHdRef(chatId, parentMessageId, ref) {
   if (!parentMessageId) return;
   try {
-    const db = getRootDb();
+    const db = getChatDb(chatId);
+    await ensureChatStoreSchema(db);
     const { rows } = await db.query(
       `SELECT message_id, message_data FROM messages
        WHERE chat_id = $1

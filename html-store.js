@@ -46,13 +46,14 @@ export async function storePage(db, html, title) {
 /**
  * Store an HTML page and return a display link (with optional title prefix).
  * @param {PGlite} db
+ * @param {string} chatId
  * @param {HtmlContent} htmlContent
  * @returns {Promise<string>} Link text like "Title: http://…/page/uuid" or just the URL
  */
-export async function storeAndLinkHtml(db, htmlContent) {
+export async function storeAndLinkHtml(db, chatId, htmlContent) {
   const pageId = await storePage(db, htmlContent.html, htmlContent.title);
   const baseUrl = config.html_server_base_url || `http://localhost:${config.html_server_port}`;
-  const pageUrl = `${baseUrl}/page/${pageId}`;
+  const pageUrl = `${baseUrl}/chat/${encodeURIComponent(chatId)}/page/${pageId}`;
   return htmlContent.title ? `${htmlContent.title}: ${pageUrl}` : pageUrl;
 }
 

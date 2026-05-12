@@ -13,9 +13,11 @@ export default /** @type {defineAction} */ ((x) => x)({
     autoExecute: true,
     autoContinue: true,
     useRootDb: true,
+    useChatDb: true,
   },
-  action_fn: async function ({ chatId, rootDb }) {
-    const { rows } = await rootDb.sql`
+  action_fn: async function ({ chatId, chatDb, rootDb }) {
+    const db = chatDb ?? rootDb;
+    const { rows } = await db.sql`
       SELECT llm_context FROM messages
       WHERE chat_id = ${chatId} AND llm_context IS NOT NULL
       ORDER BY timestamp DESC LIMIT 1

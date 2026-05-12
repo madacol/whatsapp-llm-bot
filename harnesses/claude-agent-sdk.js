@@ -15,7 +15,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { hasMediaPath } from "../attachment-paths.js";
 import { formatChatSettingsCommand } from "../chat-commands.js";
 import { renderContentBlock } from "../message-formatting.js";
-import { getRootDb } from "../db.js";
+import { getChatDb } from "../db.js";
 import { NO_OP_HOOKS } from "./native.js";
 import { buildToolPresentation } from "../tool-presentation-model.js";
 import { createLogger } from "../logger.js";
@@ -827,7 +827,7 @@ export function createClaudeAgentSdkHarness(deps = {}) {
     const model = runConfig?.model ?? null;
     const reasoningEffort = runConfig?.reasoningEffort ?? null;
 
-    const promptMessages = await augmentLatestUserMessageForTextHarness(messages, llmConfig, getRootDb());
+    const promptMessages = await augmentLatestUserMessageForTextHarness(messages, llmConfig, getChatDb(session.chatId));
     const lastUserText = buildClaudePrompt(promptMessages);
 
     if (!lastUserText) {

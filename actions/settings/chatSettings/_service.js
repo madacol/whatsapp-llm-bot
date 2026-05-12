@@ -8,6 +8,7 @@ import { ROLE_DEFINITIONS, resolveModel } from "../../../model-roles.js";
 import { listHarnesses } from "#harnesses";
 import { createWorkspaceBindingService } from "../../../workspace-binding-service.js";
 import { getChatWorkDir } from "../../../utils.js";
+import { ensureChatStoreSchema } from "../../../store/schema/chat.js";
 import {
   buildOutputVisibilityOverrides,
   OUTPUT_VISIBILITY_FLAGS,
@@ -78,12 +79,12 @@ const SHOW_NONE_OPTION_ID = "none";
  *   chatId: string;
  *   chat: import("../../../store.js").ChatRow;
  *   value: string;
- *   extra: { senderIds?: string[], getActions?: () => Promise<Action[]> };
+ *   extra: { senderIds?: string[], getActions?: () => Promise<Action[]>, rootDb?: PGlite, getChatDb?: (chatId: string) => PGlite };
  * }} ConfigSetContext
  */
 
 /**
- * @typedef {(chat: import("../../../store.js").ChatRow, extra: { rootDb?: PGlite, chatId?: string, getActions?: () => Promise<Action[]> }) => string | Promise<string>} ConfigCurrentFormatter
+ * @typedef {(chat: import("../../../store.js").ChatRow, extra: { rootDb?: PGlite, chatId?: string, getActions?: () => Promise<Action[]>, getChatDb?: (chatId: string) => PGlite }) => string | Promise<string>} ConfigCurrentFormatter
  */
 
 /**
@@ -330,7 +331,15 @@ const BASE_CONFIG_KEYS = [
         return "Only master users can change the enabled setting.";
       }
       const { enabled, targetChatId } = parseEnabledValue(value, chatId);
-      await rootDb.sql`
+      const targetDb = targetChatId === chatId
+        ? rootDb
+        : extra.getChatDb?.(targetChatId) ?? rootDb;
+      const rootCatalogDb = extra.rootDb ?? rootDb;
+      if (rootCatalogDb !== targetDb) {
+        await rootCatalogDb.sql`INSERT INTO chats(chat_id) VALUES (${targetChatId}) ON CONFLICT (chat_id) DO NOTHING`;
+      }
+      await ensureChatStoreSchema(targetDb);
+      await targetDb.sql`
         INSERT INTO chats(chat_id, is_enabled)
         VALUES (${targetChatId}, ${enabled})
         ON CONFLICT (chat_id)
@@ -966,7 +975,7 @@ export function getConfigKeyDefinition(key) {
 /**
  * @param {import("../../../store.js").ChatRow} chat
  * @param {ConfigKeyDefinition} definition
- * @param {{ rootDb?: PGlite, chatId?: string, getActions?: () => Promise<Action[]> }} extra
+ * @param {{ rootDb?: PGlite, chatId?: string, getActions?: () => Promise<Action[]>, getChatDb?: (chatId: string) => PGlite }} extra
  * @returns {Promise<string>}
  */
 async function formatCurrentValue(chat, definition, extra) {
@@ -1014,7 +1023,7 @@ function getDefinitionMultiOptions(definition, chat) {
  * Show a full summary of all chat settings.
  * @param {PGlite} rootDb
  * @param {string} chatId
- * @param {{ senderIds?: string[], getActions?: () => Promise<Action[]> }} extra
+ * @param {{ senderIds?: string[], getActions?: () => Promise<Action[]>, rootDb?: PGlite, getChatDb?: (chatId: string) => PGlite }} extra
  * @returns {Promise<string>}
  */
 export async function getChatSettingsInfo(rootDb, chatId, extra) {
@@ -1053,7 +1062,7 @@ export async function getChatSettingsInfo(rootDb, chatId, extra) {
     "",
     "Harness",
     `- harness: ${chat.harness ?? "native"}`,
-    `- workspace: ${await formatResolvedWorkspacePath(rootDb, chatId, chat)}`,
+    `- workspace: ${await formatResolvedWorkspacePath(extra.rootDb ?? rootDb, chatId, chat)}`,
     "",
     "Models",
     `- readers: media=${chat.media_to_text_models?.general ?? "default"}, image=${chat.media_to_text_models?.image ?? "default"}, audio=${chat.media_to_text_models?.audio ?? "default"}, video=${chat.media_to_text_models?.video ?? "default"}`,
@@ -1126,7 +1135,7 @@ export function getMultiSelectableOptions(config, chat) {
  * @param {PGlite} rootDb
  * @param {string} chatId
  * @param {string} key
- * @param {{ getActions?: () => Promise<Action[]>, compact?: boolean }} extra
+ * @param {{ getActions?: () => Promise<Action[]>, compact?: boolean, rootDb?: PGlite, getChatDb?: (chatId: string) => PGlite }} extra
  * @returns {Promise<string>}
  */
 export async function describeConfigKey(rootDb, chatId, key, extra) {
@@ -1140,7 +1149,7 @@ export async function describeConfigKey(rootDb, chatId, key, extra) {
   }
 
   const chat = await getChatOrThrow(rootDb, chatId);
-  const current = await formatCurrentValue(chat, definition, { ...extra, rootDb, chatId });
+  const current = await formatCurrentValue(chat, definition, { ...extra, rootDb: extra.rootDb ?? rootDb, chatId });
   const options = getDefinitionOptions(definition);
   const flags = definition.flags ?? [];
   const title = formatSettingTitle(definition.label);
@@ -1178,7 +1187,7 @@ export async function describeConfigKey(rootDb, chatId, key, extra) {
  * @param {string} chatId
  * @param {string} key
  * @param {string} value
- * @param {{ senderIds?: string[], getActions?: () => Promise<Action[]> }} extra
+ * @param {{ senderIds?: string[], getActions?: () => Promise<Action[]>, rootDb?: PGlite, getChatDb?: (chatId: string) => PGlite }} extra
  * @returns {Promise<string>}
  */
 export async function setConfigValue(rootDb, chatId, key, value, extra) {
@@ -1195,7 +1204,7 @@ export async function setConfigValue(rootDb, chatId, key, value, extra) {
  * @param {PGlite} rootDb
  * @param {string} chatId
  * @param {string} key
- * @param {{ senderIds?: string[], getActions?: () => Promise<Action[]> }} extra
+ * @param {{ senderIds?: string[], getActions?: () => Promise<Action[]>, rootDb?: PGlite, getChatDb?: (chatId: string) => PGlite }} extra
  * @returns {Promise<string>}
  */
 export async function resetConfigValue(rootDb, chatId, key, extra) {
@@ -1214,7 +1223,7 @@ export async function resetConfigValue(rootDb, chatId, key, extra) {
  * @param {PGlite} rootDb
  * @param {string} chatId
  * @param {string} setting
- * @param {{ getActions?: () => Promise<Action[]> }} extra
+ * @param {{ getActions?: () => Promise<Action[]>, rootDb?: PGlite, getChatDb?: (chatId: string) => PGlite }} extra
  * @returns {Promise<string>}
  */
 export async function getChatSetting(rootDb, chatId, setting, extra) {
@@ -1223,7 +1232,7 @@ export async function getChatSetting(rootDb, chatId, setting, extra) {
   if (!definition) {
     return `Unknown setting: ${setting}`;
   }
-  const current = await definition.formatCurrent(chat, { ...extra, rootDb, chatId });
+  const current = await definition.formatCurrent(chat, { ...extra, rootDb: extra.rootDb ?? rootDb, chatId });
   const options = getDefinitionOptions(definition);
   const lines = [`${formatSettingTitle(definition.label)}: ${current}`];
   if (options.length > 0) {
@@ -1237,7 +1246,7 @@ export async function getChatSetting(rootDb, chatId, setting, extra) {
  * @param {string} chatId
  * @param {string} setting
  * @param {string} value
- * @param {{ senderIds?: string[], getActions?: () => Promise<Action[]> }} extra
+ * @param {{ senderIds?: string[], getActions?: () => Promise<Action[]>, rootDb?: PGlite, getChatDb?: (chatId: string) => PGlite }} extra
  * @returns {Promise<string>}
  */
 export async function setChatSetting(rootDb, chatId, setting, value, extra) {

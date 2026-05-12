@@ -2,7 +2,7 @@ import { hasMediaPath } from "../attachment-paths.js";
 import { contentEvent } from "../outbound-events.js";
 import { createLogger } from "../logger.js";
 import { renderContentBlock } from "../message-formatting.js";
-import { getRootDb } from "../db.js";
+import { getChatDb } from "../db.js";
 import { NO_OP_HOOKS } from "./native.js";
 import { buildSdkErrorResponse, clearStaleHarnessSession, getHarnessRunErrorMessage } from "./harness-run-errors.js";
 import { augmentLatestUserMessageForTextHarness, renderMarkdownImageReference, renderPromptMediaReference } from "./prompt-media.js";
@@ -533,7 +533,7 @@ export function createPiHarness(deps = {}) {
    */
   async function run({ session, llmConfig, messages, hooks: userHooks, runConfig }) {
     const hooks = { ...NO_OP_HOOKS, ...userHooks };
-    const promptMessages = await augmentLatestUserMessageForTextHarness(messages, llmConfig, getRootDb());
+    const promptMessages = await augmentLatestUserMessageForTextHarness(messages, llmConfig, getChatDb(session.chatId));
     const prompt = buildPiPrompt(promptMessages);
     if (!prompt) {
       return {

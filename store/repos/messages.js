@@ -7,7 +7,7 @@ const POSTGRES_UNSUPPORTED_NUL = /\u0000/g;
 
 /**
  * @typedef {{
- *   db: PGlite;
+ *   getChatDb: (chatId: string) => Promise<PGlite>;
  * }} MessageStoreDeps
  */
 
@@ -16,7 +16,7 @@ const POSTGRES_UNSUPPORTED_NUL = /\u0000/g;
  * @param {MessageStoreDeps} deps
  * @returns {Pick<Store, "getMessages" | "addMessage" | "updateToolMessage" | "getMessageByDisplayKey">}
  */
-export function createMessageStore({ db }) {
+export function createMessageStore({ getChatDb }) {
   return {
     /**
      * Returns messages in DESC order (newest first); callers reverse for chronological use.
@@ -26,6 +26,7 @@ export function createMessageStore({ db }) {
      * @returns {Promise<MessageRow[]>}
      */
     async getMessages(chatId, since = new Date(Date.now() - 8 * 60 * 60 * 1000), limit = 300) {
+      const db = await getChatDb(chatId);
       const { rows } = await db.sql`
         SELECT * FROM messages
         WHERE chat_id = ${chatId}
@@ -47,6 +48,7 @@ export function createMessageStore({ db }) {
      * @returns {Promise<MessageRow>}
      */
     async addMessage(chatId, messageData, senderIds = null, displayKey = null) {
+      const db = await getChatDb(chatId);
       const sanitizedMessageData = sanitizeMessageDataForJsonb(messageData);
       const { rows: [row] } = await db.sql`
         INSERT INTO messages(chat_id, sender_id, message_data, display_key)
@@ -67,6 +69,7 @@ export function createMessageStore({ db }) {
      * @returns {Promise<MessageRow | null>}
      */
     async updateToolMessage(chatId, toolCallId, messageData) {
+      const db = await getChatDb(chatId);
       const sanitizedMessageData = sanitizeToolMessageForJsonb(messageData);
       const { rows: [row] } = await db.sql`
         UPDATE messages
@@ -85,6 +88,7 @@ export function createMessageStore({ db }) {
      * @returns {Promise<MessageRow | null>}
      */
     async getMessageByDisplayKey(chatId, displayKey) {
+      const db = await getChatDb(chatId);
       const { rows: [row] } = await db.sql`
         SELECT * FROM messages
         WHERE chat_id = ${chatId}

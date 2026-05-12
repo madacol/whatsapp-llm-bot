@@ -49,6 +49,7 @@ export default /** @type {defineAction} */ ((x) => x)({
     autoExecute: true,
     autoContinue: true,
     useRootDb: true,
+    useChatDb: true,
   },
   /**
    * @param {{ repository?: string }} params
@@ -56,17 +57,18 @@ export default /** @type {defineAction} */ ((x) => x)({
    */
   formatToolCall: ({ repository }) => repository ? `Cloning ${repository}` : "Cloning repository",
   /**
-   * @param {ExtendedActionContext<{ requireAdmin: true, autoExecute: true, autoContinue: true, useRootDb: true }>} context
+   * @param {ExtendedActionContext<{ requireAdmin: true, autoExecute: true, autoContinue: true, useRootDb: true, useChatDb: true }>} context
    * @param {{ repository?: string }} params
    * @returns {Promise<string>}
    */
-  action_fn: async function ({ chatId, rootDb }, { repository }) {
+  action_fn: async function ({ chatId, chatDb, rootDb }, { repository }) {
     const trimmedRepository = repository?.trim();
     if (!trimmedRepository) {
       return "Usage: !clone <repository_url>";
     }
 
-    const { rows } = await rootDb.sql`
+    const db = chatDb ?? rootDb;
+    const { rows } = await db.sql`
       SELECT harness_cwd
       FROM chats
       WHERE chat_id = ${chatId}

@@ -13,7 +13,7 @@ export default [
   async function clones_repository_into_chat_workdir_root(action_fn, db) {
     const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "clone-action-"));
     const sourceRepo = path.join(tempDir, "source.git");
-    const chatId = "clone-action-chat";
+    const chatId = `clone-action-chat-${path.basename(tempDir)}`;
 
     await execFile("git", ["init", "--bare", sourceRepo]);
     await db.sql`INSERT INTO chats(chat_id) VALUES (${chatId}) ON CONFLICT DO NOTHING`;

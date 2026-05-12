@@ -5,7 +5,7 @@ import { ATTACHMENT_ROOT, hasMediaPath } from "../attachment-paths.js";
 
 import { createLogger } from "../logger.js";
 import { renderContentBlock } from "../message-formatting.js";
-import { getRootDb } from "../db.js";
+import { getChatDb } from "../db.js";
 import { NO_OP_HOOKS } from "./native.js";
 import { isHandledCodexRunError, startCodexRun } from "./codex-runner.js";
 import { startCodexAppServerRun } from "./codex-app-server-runner.js";
@@ -312,7 +312,7 @@ export function createCodexHarness(deps = {}) {
    */
   async function run({ session, llmConfig, messages, hooks: userHooks, runConfig }) {
     const hooks = { ...NO_OP_HOOKS, ...userHooks };
-    const promptMessages = await augmentLatestUserMessageForTextHarness(messages, llmConfig, getRootDb());
+    const promptMessages = await augmentLatestUserMessageForTextHarness(messages, llmConfig, getChatDb(session.chatId));
     const prompt = buildCodexPrompt(promptMessages);
     if (!prompt) {
       return {

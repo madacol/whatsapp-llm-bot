@@ -19,16 +19,18 @@ export default /** @type {defineAction} */ ((x) => x)({
     autoExecute: true,
     requireAdmin: true,
     useRootDb: true,
+    useChatDb: true,
   },
   /** @param {{name?: string}} params */
   formatToolCall: ({ name }) => name ? `Switching to "${name}"` : "Showing persona",
   /**
-   * @param {ExtendedActionContext<{autoExecute: true, requireAdmin: true, useRootDb: true}>} context
+   * @param {ExtendedActionContext<{autoExecute: true, requireAdmin: true, useRootDb: true, useChatDb: true}>} context
    * @param {{ name?: string }} params
    */
   action_fn: async function (context, params) {
-    const { rootDb, chatId } = context;
-    const chat = await getChatOrThrow(rootDb, chatId);
+    const { chatDb, rootDb, chatId } = context;
+    const db = chatDb ?? rootDb;
+    const chat = await getChatOrThrow(db, chatId);
 
     // No argument: show current persona + list available
     if (!params.name) {
@@ -43,7 +45,7 @@ export default /** @type {defineAction} */ ((x) => x)({
 
     // Deactivate
     if (params.name === "off" || params.name === "none") {
-      await rootDb.query(
+      await db.query(
         `UPDATE chats SET active_persona = NULL WHERE chat_id = $1`,
         [chatId],
       );
@@ -58,7 +60,7 @@ export default /** @type {defineAction} */ ((x) => x)({
       return `Agent "${params.name}" not found. Available: ${available}`;
     }
 
-    await rootDb.query(
+    await db.query(
       `UPDATE chats SET active_persona = $1 WHERE chat_id = $2`,
       [agent.name, chatId],
     );

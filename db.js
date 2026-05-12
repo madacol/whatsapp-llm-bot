@@ -38,6 +38,11 @@ export function getDb(dataDir) {
 
   // In test mode, reuse a single shared in-memory PGlite to avoid OOM
   if (process.env.TESTING) {
+    const injectedRootDb = dbCache.get(`${BASE_DIR}/root`);
+    if (injectedRootDb) {
+      dbCache.set(dataDir, injectedRootDb);
+      return injectedRootDb;
+    }
     if (!sharedTestDb) {
       sharedTestDb = new PGlite("memory://", { extensions: { vector } });
     }

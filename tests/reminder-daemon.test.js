@@ -1,7 +1,7 @@
 import { describe, it, before } from "node:test";
 import assert from "node:assert/strict";
 import { PGlite } from "@electric-sql/pglite";
-import { pollReminders } from "../reminder-daemon.js";
+import { pollChatReminders } from "../reminder-daemon.js";
 import { ensureSchema } from "../actions/tools/reminders/index.js";
 import { createTestDb } from "./helpers.js";
 
@@ -25,7 +25,7 @@ describe("reminder daemon", () => {
 
     /** @type {Array<{chatId: string, text: string}>} */
     const sent = [];
-    await pollReminders(db, async (chatId, text) => sent.push({ chatId, text }));
+    await pollChatReminders(db, async (chatId, text) => sent.push({ chatId, text }));
 
     // Only the due reminder should fire
     assert.equal(sent.length, 1);
@@ -46,7 +46,7 @@ describe("reminder daemon", () => {
     await db.sql`INSERT INTO reminders (chat_id, reminder_text, remind_at) VALUES ('r-fail', 'will fail', ${past})`;
 
     const sendToChat = async () => { throw new Error("network down"); };
-    await pollReminders(db, sendToChat);
+    await pollChatReminders(db, sendToChat);
 
     const { rows: [row] } = await db.sql`SELECT delivered FROM reminders WHERE chat_id = 'r-fail'`;
     assert.equal(row.delivered, false);
@@ -67,7 +67,7 @@ describe("reminder daemon", () => {
       called.push(chatId);
       if (chatId === "r-fail-first") throw new Error("boom");
     };
-    await pollReminders(db, sendToChat);
+    await pollChatReminders(db, sendToChat);
 
     assert.ok(called.includes("r-fail-first"), "should attempt the failing reminder");
     assert.ok(called.includes("r-ok-second"), "should attempt the succeeding reminder");

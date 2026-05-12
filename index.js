@@ -11,7 +11,6 @@ import { createWhatsAppTransport, createWhatsAppWorkspacePresenter } from "#what
 import { startReminderDaemon } from "./reminder-daemon.js";
 import { startModelsCacheDaemon } from "./models-cache.js";
 import { initStore } from "./store.js";
-import { getRootDb } from "./db.js";
 import { startHtmlServer, stopHtmlServer } from "./html-server.js";
 import { registerOptionalHarnesses, waitForAllHarnesses } from "#harnesses";
 import { createLogger } from "./logger.js";
@@ -101,7 +100,7 @@ if (!process.env.TESTING) {
     workspacePresentation,
   });
 
-  await startHtmlServer(config.html_server_port, getRootDb());
+  await startHtmlServer(config.html_server_port);
 
   await transport.start(handleMessage).catch(async (error) => {
     log.error("Initialization error:", error);

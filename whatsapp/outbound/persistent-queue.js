@@ -282,13 +282,14 @@ export async function enqueueWhatsAppOutbound(chatId, payload, store) {
 }
 
 /**
+ * @param {string} chatId
  * @param {number} id
  * @param {import("../../store.js").Store} [store]
  * @returns {Promise<void>}
  */
-async function deleteQueuedWhatsAppOutbound(id, store) {
+async function deleteQueuedWhatsAppOutbound(chatId, id, store) {
   const resolvedStore = store ?? await getStore();
-  await resolvedStore.deleteWhatsAppOutboundQueueEntry(id);
+  await resolvedStore.deleteWhatsAppOutboundQueueEntry(chatId, id);
 }
 
 /**
@@ -307,7 +308,10 @@ async function listQueuedWhatsAppOutbound(store) {
       const rowId = isRecord(row) ? normalizeRowId(row.id) : null;
       log.error("Dropping malformed WhatsApp outbound queue row.", { row });
       if (rowId !== null) {
-        await deleteQueuedWhatsAppOutbound(rowId, resolvedStore);
+        const rowChatId = isRecord(row) && typeof row.chat_id === "string" ? row.chat_id : "";
+        if (rowChatId) {
+          await deleteQueuedWhatsAppOutbound(rowChatId, rowId, resolvedStore);
+        }
       }
       continue;
     }
@@ -404,7 +408,7 @@ export async function flushQueuedWhatsAppOutbound({ getSocket, reactionRuntime, 
 
     try {
       await deliverQueuedPayload(sock, row.chatId, row.payload, reactionRuntime);
-      await deleteQueuedWhatsAppOutbound(row.id, store);
+      await deleteQueuedWhatsAppOutbound(row.chatId, row.id, store);
     } catch (error) {
       if (isRecoverableWhatsAppSendError(error)) {
         return;
@@ -415,7 +419,7 @@ export async function flushQueuedWhatsAppOutbound({ getSocket, reactionRuntime, 
         chatId: row.chatId,
         error,
       });
-      await deleteQueuedWhatsAppOutbound(row.id);
+      await deleteQueuedWhatsAppOutbound(row.chatId, row.id);
     }
   }
 }

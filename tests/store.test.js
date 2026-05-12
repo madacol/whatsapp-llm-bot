@@ -48,6 +48,35 @@ describe("store with injected DB", () => {
       assert.deepEqual(chat.model_roles, {});
     });
 
+    it("stores chat settings and messages in the per-chat DB, not root", async () => {
+      const rootDb = new PGlite("memory://", { extensions: { vector } });
+      const chatDbs = new Map();
+      /** @param {string} chatId */
+      const resolveChatDb = (chatId) => {
+        const existing = chatDbs.get(chatId);
+        if (existing) return existing;
+        const created = new PGlite("memory://", { extensions: { vector } });
+        chatDbs.set(chatId, created);
+        return created;
+      };
+
+      const isolatedStore = await initStore(rootDb, { getChatDb: resolveChatDb });
+      await isolatedStore.createChat("isolated-a");
+      await isolatedStore.createChat("isolated-b");
+      await isolatedStore.setChatEnabled("isolated-a", true);
+      await isolatedStore.addMessage("isolated-a", { role: "user", content: [{ type: "text", text: "hello a" }] });
+
+      assert.equal((await isolatedStore.getChat("isolated-a"))?.is_enabled, true);
+      assert.equal((await isolatedStore.getChat("isolated-b"))?.is_enabled, false);
+      assert.equal((await isolatedStore.getMessages("isolated-a")).length, 1);
+      assert.equal((await isolatedStore.getMessages("isolated-b")).length, 0);
+
+      const { rows: rootMessages } = await rootDb.sql`SELECT count(*)::int AS count FROM messages`;
+      const { rows: rootEnabled } = await rootDb.sql`SELECT is_enabled FROM chats WHERE chat_id = 'isolated-a'`;
+      assert.equal(rootMessages[0].count, 0);
+      assert.equal(rootEnabled[0].is_enabled, false);
+    });
+
   });
 
   describe("workspace persistence", () => {
