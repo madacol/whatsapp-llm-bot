@@ -3,15 +3,15 @@ import { storeAndLinkHtml } from "../../../html-store.js";
 export default /** @type {defineAction} */ ((x) => x)({
   name: "expose_html",
   description:
-    "Expose static, harmless HTML as a browser-viewable page and return a link. Use this for reports, dashboards, tables, diagrams, previews, or other rich visual artifacts.",
+    "Expose HTML as a browser-viewable page and return a link. Use this for reports, dashboards, tables, diagrams, previews, or other rich visual artifacts.",
   instructions:
-    "Pass complete static HTML for a page body or full document. Do not include scripts, inline event handlers, or javascript: URLs. CSS is fine. The HTML is stored as a file in the current chat folder and served as a static page.",
+    "Pass complete HTML for a page body or full document. CSS and JavaScript are allowed. The HTML is stored as a file in the current chat folder and served as a static page.",
   parameters: {
     type: "object",
     properties: {
       html: {
         type: "string",
-        description: "Static HTML to expose. Scripts, inline event handlers, and javascript: URLs are rejected.",
+        description: "HTML to expose. CSS and JavaScript are allowed.",
       },
       title: {
         type: "string",
