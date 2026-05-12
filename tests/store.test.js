@@ -32,6 +32,17 @@ describe("store with injected DB", () => {
     assert.ok(!tableNames.includes("media_to_text_cache"), `initStore() should not create 'media_to_text_cache' table, got: ${tableNames}`);
   });
 
+  it("keeps fresh chat schemas catalog-only", async () => {
+    const freshDb = new PGlite("memory://", { extensions: { vector } });
+    await initStore(freshDb);
+    const { rows } = await freshDb.sql`
+      SELECT column_name FROM information_schema.columns
+      WHERE table_schema = 'public' AND table_name = 'chats'
+      ORDER BY ordinal_position
+    `;
+    assert.deepEqual(rows.map((row) => row.column_name), ["chat_id", "timestamp"]);
+  });
+
   it("memories table is created by initStore", async () => {
     const freshDb = new PGlite("memory://", { extensions: { vector } });
     await initStore(freshDb);
@@ -373,6 +384,7 @@ describe("store with injected DB", () => {
     it("migrates legacy output visibility keys to the unified tools flag", async () => {
       const freshDb = new PGlite("memory://", { extensions: { vector } });
       await initStore(freshDb);
+      await freshDb.sql`ALTER TABLE chats ADD COLUMN output_visibility JSONB DEFAULT '{}'`;
       await freshDb.sql`
         INSERT INTO chats(chat_id, output_visibility)
         VALUES (
