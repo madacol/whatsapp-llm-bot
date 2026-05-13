@@ -81,11 +81,25 @@ export async function getChatOrThrow(_db, chatId) {
   if (configChat) {
     return configChat;
   }
-  const { rows } = await _db.sql`SELECT chat_id FROM chats WHERE chat_id = ${chatId}`;
-  if (rows.length > 0) {
-    return ensureChatConfig(chatId);
+  const legacySeed = await readRootChatConfigSeed(_db, chatId);
+  if (legacySeed) {
+    return ensureChatConfig(chatId, legacySeed);
   }
   throw new Error(`Chat ${chatId} does not exist.`);
+}
+
+/**
+ * Read an existing root `chats` row as a seed for the config-file-backed chat
+ * store. Older DBs still carry user settings in this row; new DBs only have
+ * `chat_id` and `timestamp`, which normalize to defaults.
+ * @param {PGlite} db
+ * @param {string} chatId
+ * @returns {Promise<Record<string, unknown> | null>}
+ */
+async function readRootChatConfigSeed(db, chatId) {
+  const { rows } = await db.sql`SELECT * FROM chats WHERE chat_id = ${chatId}`;
+  const row = rows[0];
+  return row && typeof row === "object" ? /** @type {Record<string, unknown>} */ (row) : null;
 }
 
 /**
@@ -179,6 +193,7 @@ export async function initStore(injectedDb, options = {}) {
 
   await bootstrapStoreSchema(db);
   await runStoreMigrations(db);
+  await backfillChatConfigsFromRootRows(db);
 
   /**
    * @param {string} chatId
@@ -204,7 +219,7 @@ export async function initStore(injectedDb, options = {}) {
       setDb(getChatPgDataDir(chatId), chatDb);
     }
     await chatDb.sql`INSERT INTO chats(chat_id) VALUES (${chatId}) ON CONFLICT (chat_id) DO NOTHING;`;
-    await ensureChatConfig(chatId);
+    await ensureChatConfig(chatId, await readRootChatConfigSeed(db, chatId) ?? undefined);
   }
 
   /**
@@ -246,6 +261,22 @@ export async function initStore(injectedDb, options = {}) {
     ...whatsappStore,
     ...messageStore,
   };
+}
+
+/**
+ * Backfill missing config files from root chat rows. This is intentionally
+ * non-destructive: existing config files remain authoritative.
+ * @param {PGlite} db
+ * @returns {Promise<void>}
+ */
+async function backfillChatConfigsFromRootRows(db) {
+  const { rows } = await db.sql`SELECT * FROM chats`;
+  for (const row of rows) {
+    if (!row || typeof row !== "object" || typeof row.chat_id !== "string") {
+      continue;
+    }
+    await ensureChatConfig(row.chat_id, /** @type {Record<string, unknown>} */ (row));
+  }
 }
 
 /** @typedef {Awaited<ReturnType<typeof initStore>>} Store */
