@@ -222,7 +222,6 @@ export function createConnectionSupervisor(options, deps) {
 
       if (connection === "close") {
         const statusCode = getDisconnectStatusCode(lastDisconnect);
-        logger.info("Connection closed due to ", lastDisconnect?.error, ", status code:", statusCode);
 
         if (deps.requiresAuthReset(lastDisconnect) && !sessionResetInProgress) {
           sessionResetInProgress = true;

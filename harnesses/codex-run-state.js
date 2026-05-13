@@ -1,10 +1,8 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { createTwoFilesPatch } from "diff";
-import { createLogger } from "../logger.js";
 import { analyzeCodexCommand } from "./codex-command-semantics.js";
 
-const log = createLogger("harness:codex-run-state");
 const WORKSPACE_BASELINE_MAX_BYTES = 256 * 1024;
 const WORKSPACE_BASELINE_SKIPPED_DIRS = new Set([".git", "node_modules"]);
 
@@ -108,12 +106,10 @@ export function createCodexRunState({ workdir, loadWorkspaceBaseline = loadWorks
       ? fileSnapshots.get(absolutePath) ?? null
       : null;
     const nextText = await readOptionalText(absolutePath);
-    let usedWorkspaceBaseline = false;
     if (previousText == null && shouldUseWorkspaceBaseline(fileChange, pending)) {
       const baselineText = await readWorkspaceBaselineText(absolutePath);
       if (baselineText != null) {
         previousText = baselineText;
-        usedWorkspaceBaseline = true;
       }
     }
     fileSnapshots.set(absolutePath, nextText);
@@ -131,16 +127,6 @@ export function createCodexRunState({ workdir, loadWorkspaceBaseline = loadWorks
     const reportedKind = fileChange.kind ?? pending?.kind;
     const kind = resolveFileChangeKind(reportedKind, oldText ?? null, newText ?? null);
     const summary = normalizeFileChangeSummary(fileChange.summary, fileChange.path, reportedKind, kind);
-    const diffSource = eventDiff
-      ? "event"
-      : pendingDiff
-        ? "apply_patch"
-        : usedWorkspaceBaseline && diff
-          ? "workspace_baseline"
-        : diff
-          ? "filesystem"
-          : "none";
-
     const enriched = {
       ...fileChange,
       ...(summary !== undefined ? { summary } : {}),
@@ -149,15 +135,6 @@ export function createCodexRunState({ workdir, loadWorkspaceBaseline = loadWorks
       ...(newText != null ? { newText } : {}),
       ...(diff ? { diff } : {}),
     };
-    log.debug("Enriched Codex file change", {
-      diffSource,
-      input: fileChange,
-      pending,
-      previousText,
-      nextText,
-      usedWorkspaceBaseline,
-      output: enriched,
-    });
     return enriched;
   }
 
