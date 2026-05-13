@@ -94,6 +94,68 @@ describe("store with injected DB", () => {
       assert.equal(rawConfig.is_enabled, true);
     });
 
+    it("backfills missing chat config files from legacy root chat settings", async () => {
+      const legacyDb = new PGlite("memory://", { extensions: { vector } });
+      const chatId = `legacy-config-${Date.now()}`;
+      await legacyDb.sql`
+        CREATE TABLE chats (
+          chat_id VARCHAR(50) PRIMARY KEY,
+          is_enabled BOOLEAN NOT NULL DEFAULT false,
+          system_prompt TEXT,
+          model TEXT,
+          respond_on_any BOOLEAN NOT NULL DEFAULT false,
+          respond_on_mention BOOLEAN NOT NULL DEFAULT true,
+          respond_on_reply BOOLEAN NOT NULL DEFAULT false,
+          respond_on TEXT NOT NULL DEFAULT 'mention',
+          debug BOOLEAN NOT NULL DEFAULT false,
+          media_to_text_models JSONB NOT NULL DEFAULT '{}',
+          memory BOOLEAN NOT NULL DEFAULT false,
+          memory_threshold REAL,
+          enabled_actions JSONB NOT NULL DEFAULT '[]',
+          model_roles JSONB NOT NULL DEFAULT '{}',
+          active_persona TEXT,
+          harness TEXT,
+          harness_cwd TEXT,
+          output_visibility JSONB NOT NULL DEFAULT '{}',
+          harness_config JSONB NOT NULL DEFAULT '{}',
+          harness_session_id TEXT,
+          harness_session_kind TEXT,
+          harness_session_history JSONB NOT NULL DEFAULT '[]',
+          harness_fork_stack JSONB NOT NULL DEFAULT '[]',
+          timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+      `;
+      await legacyDb.sql`
+        INSERT INTO chats (
+          chat_id,
+          is_enabled,
+          respond_on,
+          harness,
+          harness_config,
+          model_roles
+        ) VALUES (
+          ${chatId},
+          true,
+          'any',
+          'codex',
+          ${{ codex: { model: "gpt-5.5", sandboxMode: "danger-full-access" } }},
+          ${{ coding: "gpt-5.5" }}
+        )
+      `;
+
+      const recoveredStore = await initStore(legacyDb);
+      const chat = await recoveredStore.getChat(chatId);
+      const rawConfig = JSON.parse(await readFile(getChatConfigPath(chatId), "utf8"));
+
+      assert.equal(chat?.is_enabled, true);
+      assert.equal(chat?.respond_on, "any");
+      assert.equal(chat?.harness, "codex");
+      assert.deepEqual(chat?.harness_config, { codex: { model: "gpt-5.5", sandboxMode: "danger-full-access" } });
+      assert.equal(chat?.model_roles.coding, "gpt-5.5");
+      assert.equal(rawConfig.is_enabled, true);
+      assert.equal(rawConfig.harness, "codex");
+    });
+
   });
 
   describe("workspace persistence", () => {
