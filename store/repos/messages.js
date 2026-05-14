@@ -1,5 +1,4 @@
 import { normalizeMessageRow } from "../normalizers.js";
-import { isSqliteDb } from "../../sqlite-db.js";
 
 /** @typedef {import("../../store.js").Store} Store */
 /** @typedef {import("../../store.js").MessageRow} MessageRow */
@@ -8,7 +7,7 @@ const POSTGRES_UNSUPPORTED_NUL = /\u0000/g;
 
 /**
  * @typedef {{
- *   getChatDb: (chatId: string) => Promise<PGlite | import("../../sqlite-db.js").SqliteDb>;
+ *   getChatDb: (chatId: string) => Promise<import("../../sqlite-db.js").SqliteDb>;
  * }} MessageStoreDeps
  */
 
@@ -32,8 +31,8 @@ export function createMessageStore({ getChatDb }) {
         SELECT * FROM messages
         WHERE chat_id = ${chatId}
           AND cleared_at IS NULL
-          AND timestamp >= ${since}
-        ORDER BY timestamp DESC
+          AND datetime(timestamp) >= datetime(${since})
+        ORDER BY datetime(timestamp) DESC, message_id DESC
         LIMIT ${limit}
       `;
       return rows
@@ -72,23 +71,12 @@ export function createMessageStore({ getChatDb }) {
     async updateToolMessage(chatId, toolCallId, messageData) {
       const db = await getChatDb(chatId);
       const sanitizedMessageData = sanitizeToolMessageForJsonb(messageData);
-      if (isSqliteDb(db)) {
-        const { rows: [row] } = await db.sql`
-          UPDATE messages
-          SET message_data = ${sanitizedMessageData}
-          WHERE chat_id = ${chatId}
-            AND json_extract(message_data, '$.role') = 'tool'
-            AND json_extract(message_data, '$.tool_id') = ${toolCallId}
-          RETURNING *
-        `;
-        return normalizeMessageRow(row);
-      }
       const { rows: [row] } = await db.sql`
         UPDATE messages
         SET message_data = ${sanitizedMessageData}
         WHERE chat_id = ${chatId}
-          AND message_data->>'role' = 'tool'
-          AND message_data->>'tool_id' = ${toolCallId}
+          AND json_extract(message_data, '$.role') = 'tool'
+          AND json_extract(message_data, '$.tool_id') = ${toolCallId}
         RETURNING *
       `;
       return normalizeMessageRow(row);

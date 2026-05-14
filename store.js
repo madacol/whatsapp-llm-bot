@@ -1,8 +1,6 @@
-import { getChatDb, getRootDb, setDb } from "./db.js";
+import { getChatDb, getRootDb } from "./db.js";
 import { createLogger } from "./logger.js";
 import { ensureChatConfig, readChatConfig } from "./chat-config.js";
-import { getChatPgDataDir } from "./chat-paths.js";
-import { isSqliteDb } from "./sqlite-db.js";
 import { createChatStore } from "./store/repos/chats.js";
 import { createMessageStore } from "./store/repos/messages.js";
 import { createProjectStore } from "./store/repos/projects.js";
@@ -73,7 +71,7 @@ const log = createLogger("store");
 
 /**
  * Returns the ChatRow for the given chat, or throws if it does not exist.
- * @param {PGlite} _db
+ * @param {import("./sqlite-db.js").SqliteDb} _db
  * @param {string} chatId
  * @returns {Promise<ChatRow>}
  */
@@ -86,9 +84,9 @@ export async function getChatOrThrow(_db, chatId) {
 }
 
 /**
- * @param {PGlite} [injectedDb]
+ * @param {import("./sqlite-db.js").SqliteDb} [injectedDb]
  * @param {{
- *   getChatDb?: (chatId: string) => PGlite | import("./sqlite-db.js").SqliteDb,
+ *   getChatDb?: (chatId: string) => import("./sqlite-db.js").SqliteDb,
  * }} [options]
  * @returns {Promise<{
  *   getChat: (chatId: ChatRow["chat_id"]) => Promise<ChatRow | undefined>;
@@ -171,7 +169,7 @@ export async function getChatOrThrow(_db, chatId) {
 export async function initStore(injectedDb, options = {}) {
   const db = injectedDb || getRootDb();
   const resolveChatDb = options.getChatDb ?? (injectedDb ? () => injectedDb : getChatDb);
-  /** @type {WeakSet<PGlite | import("./sqlite-db.js").SqliteDb>} */
+  /** @type {WeakSet<import("./sqlite-db.js").SqliteDb>} */
   const initializedChatDbs = new WeakSet();
 
   await bootstrapStoreSchema(db);
@@ -179,7 +177,7 @@ export async function initStore(injectedDb, options = {}) {
 
   /**
    * @param {string} chatId
-   * @returns {Promise<PGlite | import("./sqlite-db.js").SqliteDb>}
+   * @returns {Promise<import("./sqlite-db.js").SqliteDb>}
    */
   async function getInitializedChatDb(chatId) {
     const chatDb = resolveChatDb(chatId);
@@ -197,9 +195,6 @@ export async function initStore(injectedDb, options = {}) {
   async function ensureChatExists(chatId) {
     await db.sql`INSERT INTO chats(chat_id) VALUES (${chatId}) ON CONFLICT (chat_id) DO NOTHING;`;
     const chatDb = await getInitializedChatDb(chatId);
-    if (injectedDb && !options.getChatDb && !isSqliteDb(chatDb)) {
-      setDb(getChatPgDataDir(chatId), chatDb);
-    }
     await chatDb.sql`INSERT INTO chats(chat_id) VALUES (${chatId}) ON CONFLICT (chat_id) DO NOTHING;`;
     await ensureChatConfig(chatId);
   }

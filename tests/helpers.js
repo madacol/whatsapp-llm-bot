@@ -2,8 +2,6 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { createServer } from "node:http";
 import { EventEmitter } from "node:events";
-import { PGlite } from "@electric-sql/pglite";
-import { vector } from "@electric-sql/pglite/vector";
 import { formatPlanPresentationText } from "../plan-presentation.js";
 import { formatActivitySummary } from "../tool-presentation-model.js";
 import { formatToolPresentationDisplay, formatToolPresentationSummary } from "../presentation/whatsapp.js";
@@ -13,12 +11,13 @@ import { ensureChatStoreSchema } from "../store/schema/chat.js";
 import { readChatConfig, updateChatConfig, writeChatConfig } from "../chat-config.js";
 import { setDb } from "../db.js";
 import { getChatSqlitePath } from "../chat-paths.js";
+import { SqliteDb } from "../sqlite-db.js";
 
 const MODELS_CACHE_PATH = path.resolve("data/models.json");
 
 /**
  * Pre-create a chat row in the test DB.
- * @param {PGlite} db
+ * @param {import("../sqlite-db.js").SqliteDb} db
  * @param {string} chatId
  * @param {{enabled?: boolean, systemPrompt?: string | null, model?: string | null}} [options]
  */
@@ -211,16 +210,16 @@ export function createChatTurn(overrides = {}) {
   return { context, responses };
 }
 
-/** @type {PGlite | null} */
+/** @type {import("../sqlite-db.js").SqliteDb | null} */
 let sharedTestDb = null;
 
 /**
- * Create (or return cached) in-memory PGlite with the full app schema.
- * @returns {Promise<PGlite>}
+ * Create (or return cached) in-memory SQLite with the full app schema.
+ * @returns {Promise<import("../sqlite-db.js").SqliteDb>}
  */
 export async function createTestDb() {
   if (sharedTestDb) return sharedTestDb;
-  const db = new PGlite("memory://", { extensions: { vector } });
+  const db = new SqliteDb(":memory:");
   await initStore(db);
   await ensureChatStoreSchema(db);
   sharedTestDb = db;
@@ -441,7 +440,7 @@ export function toolCall(name, args) {
  * @param {{
  *   mockServer: Awaited<ReturnType<typeof createMockLlmServer>>;
  *   handleMessage: (msg: ChatTurn) => Promise<void>;
- *   testDb: import("@electric-sql/pglite").PGlite;
+ *   testDb: import("../sqlite-db.js").SqliteDb;
  * }} deps
  * @returns {{ chat: (chatId: string, config?: ChatConfig) => Promise<TestChat> }}
  */

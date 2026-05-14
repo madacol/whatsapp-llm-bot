@@ -5,8 +5,8 @@ export default [
 async function lists_all_memories_for_chat(action_fn, db) {
       await db.sql`INSERT INTO chats(chat_id) VALUES ('act-mem-list-1') ON CONFLICT DO NOTHING`;
       await db.sql`DELETE FROM memories WHERE chat_id = 'act-mem-list-1'`;
-      await db.sql`INSERT INTO memories (chat_id, content, search_text) VALUES ('act-mem-list-1', 'User likes cats', to_tsvector('english', 'User likes cats'))`;
-      await db.sql`INSERT INTO memories (chat_id, content, search_text) VALUES ('act-mem-list-1', 'User birthday March 5', to_tsvector('english', 'User birthday March 5'))`;
+      await db.sql`INSERT INTO memories (chat_id, content, search_text) VALUES ('act-mem-list-1', 'User likes cats', 'User likes cats')`;
+      await db.sql`INSERT INTO memories (chat_id, content, search_text) VALUES ('act-mem-list-1', 'User birthday March 5', 'User birthday March 5')`;
 
       const mockClient = /** @type {LlmClient} */ (/** @type {unknown} */ ({
         embeddings: { create: async () => ({ data: [{ embedding: [0.1, 0.2, 0.3] }] }) },
@@ -45,7 +45,7 @@ async function lists_all_memories_for_chat(action_fn, db) {
       await db.sql`DELETE FROM memories WHERE chat_id = 'act-mem-del-1'`;
       const { rows: [{ id }] } = await db.sql`
         INSERT INTO memories (chat_id, content, search_text)
-        VALUES ('act-mem-del-1', 'To delete', to_tsvector('english', 'To delete'))
+        VALUES ('act-mem-del-1', 'To delete', 'To delete')
         RETURNING id
       `;
 
@@ -101,9 +101,9 @@ async function lists_all_memories_for_chat(action_fn, db) {
       await db.sql`INSERT INTO chats(chat_id) VALUES ('act-mem-search-1') ON CONFLICT DO NOTHING`;
       await db.sql`DELETE FROM memories WHERE chat_id = 'act-mem-search-1'`;
       await db.sql`INSERT INTO memories (chat_id, content, search_text)
-        VALUES ('act-mem-search-1', 'User likes cats and kittens', to_tsvector('english', 'User likes cats and kittens'))`;
+        VALUES ('act-mem-search-1', 'User likes cats and kittens', 'User likes cats and kittens')`;
       await db.sql`INSERT INTO memories (chat_id, content, search_text)
-        VALUES ('act-mem-search-1', 'User birthday is March 5', to_tsvector('english', 'User birthday is March 5'))`;
+        VALUES ('act-mem-search-1', 'User birthday is March 5', 'User birthday is March 5')`;
 
       // Use a failing embedding client to force FTS path
       const mockClient = /** @type {LlmClient} */ (/** @type {unknown} */ ({

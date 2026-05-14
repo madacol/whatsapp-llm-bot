@@ -43,20 +43,20 @@ export default /** @type {defineAction} */ ((x) => x)({
 
     const { rows } = until
       ? await chatDb.sql`
-          SELECT sender_id, message_data, timestamp
+          SELECT message_id, sender_id, message_data, timestamp
           FROM messages
           WHERE chat_id = ${chatId}
-            AND timestamp >= ${since}
-            AND timestamp <= ${until}
-          ORDER BY timestamp ASC
+            AND datetime(timestamp) >= datetime(${since})
+            AND datetime(timestamp) <= datetime(${until})
+          ORDER BY datetime(timestamp) ASC, message_id ASC
           LIMIT ${limit}
         `
       : await chatDb.sql`
-          SELECT sender_id, message_data, timestamp
+          SELECT message_id, sender_id, message_data, timestamp
           FROM messages
           WHERE chat_id = ${chatId}
-            AND timestamp >= ${since}
-          ORDER BY timestamp ASC
+            AND datetime(timestamp) >= datetime(${since})
+          ORDER BY datetime(timestamp) ASC, message_id ASC
           LIMIT ${limit}
         `;
 
@@ -66,10 +66,10 @@ export default /** @type {defineAction} */ ((x) => x)({
 
     const lines = rows.map((row) => {
       const msg = row.message_data;
-      const ts = row.timestamp
+      const ts = typeof row.timestamp === "string" || row.timestamp instanceof Date
         ? new Date(row.timestamp).toISOString().replace("T", " ").replace(/\.\d+Z$/, "Z")
         : "";
-      if (!msg || typeof msg !== "object" || !Array.isArray(msg.content)) {
+      if (!isStoredMessage(msg)) {
         return `[${ts}] ${JSON.stringify(msg)}`;
       }
       const textParts = [];
@@ -87,3 +87,15 @@ export default /** @type {defineAction} */ ((x) => x)({
     return `Recalled ${rows.length} messages since ${since}:\n\n${lines.join("\n")}`;
   },
 });
+
+/**
+ * @param {unknown} value
+ * @returns {value is { role: string, content: Array<Record<string, unknown>> }}
+ */
+function isStoredMessage(value) {
+  return value !== null
+    && typeof value === "object"
+    && !Array.isArray(value)
+    && typeof /** @type {{ role?: unknown }} */ (value).role === "string"
+    && Array.isArray(/** @type {{ content?: unknown }} */ (value).content);
+}

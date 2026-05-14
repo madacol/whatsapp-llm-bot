@@ -230,7 +230,7 @@ describe("message filtering", () => {
       testUserResponseRegistry,
     );
 
-    const { rows } = await testDb.sql`SELECT COUNT(*)::int AS count FROM messages WHERE chat_id = ${chatId}`;
+    const { rows } = await testDb.sql`SELECT COUNT(*) AS count FROM messages WHERE chat_id = ${chatId}`;
     const messageCount = /** @type {{ count: number }} */ (rows[0]).count;
 
     assert.equal(messageCount, 0, "Ignored messages should not be persisted");
@@ -264,7 +264,7 @@ describe("message filtering", () => {
       },
     );
 
-    const { rows } = await testDb.sql`SELECT COUNT(*)::int AS count FROM messages WHERE chat_id = ${chatId}`;
+    const { rows } = await testDb.sql`SELECT COUNT(*) AS count FROM messages WHERE chat_id = ${chatId}`;
     const messageCount = /** @type {{ count: number }} */ (rows[0]).count;
 
     assert.equal(downloadCalled, false, "Ignored captions should short-circuit before media download");

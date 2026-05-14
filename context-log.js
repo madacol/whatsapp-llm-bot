@@ -2,7 +2,6 @@
  * Debug tool: stores and cleans up LLM request context snapshots.
  */
 import { createLogger } from "./logger.js";
-import { isSqliteDb } from "./sqlite-db.js";
 
 const log = createLogger("context-log");
 
@@ -41,7 +40,7 @@ export function sanitizeMessagesForLog(messages) {
  * Callers may fire-and-forget (no await), but internally the queries are
  * properly awaited so references to `messages` are released promptly
  * rather than being pinned by unresolved promise chains.
- * @param {PGlite | import("./sqlite-db.js").SqliteDb} db
+ * @param {import("./sqlite-db.js").SqliteDb} db
  * @param {number} messageId
  * @param {string} model
  * @param {string} systemPrompt
@@ -62,15 +61,9 @@ export async function storeLlmContext(db, messageId, model, systemPrompt, messag
     log.warn("Failed to store LLM context:", err);
   }
   try {
-    if (isSqliteDb(db)) {
-      await db.sql`UPDATE messages SET llm_context = NULL
-        WHERE llm_context IS NOT NULL
-        AND timestamp < datetime('now', '-1 hour')`;
-    } else {
-      await db.sql`UPDATE messages SET llm_context = NULL
-        WHERE llm_context IS NOT NULL
-        AND timestamp < NOW() - INTERVAL '1 hour'`;
-    }
+    await db.sql`UPDATE messages SET llm_context = NULL
+      WHERE llm_context IS NOT NULL
+      AND timestamp < datetime('now', '-1 hour')`;
   } catch (err) {
     log.warn("Failed to clean up old LLM contexts:", err);
   }

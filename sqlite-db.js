@@ -8,6 +8,7 @@ const JSON_COLUMNS = new Set([
   "messages",
   "usage",
   "payload_json",
+  "conflicted_files",
 ]);
 
 const BOOLEAN_COLUMNS = new Set([
@@ -65,8 +66,17 @@ export class SqliteDb {
   async query(statement, values = []) {
     const normalizedStatement = normalizeStatement(statement);
     const prepared = this.db.prepare(normalizedStatement);
-    const rows = prepared.all(...values.map(serializeValue));
-    return { rows: rows.map(deserializeRow) };
+    const serializedValues = values.map(serializeValue);
+    try {
+      const rows = prepared.all(...serializedValues);
+      return { rows: rows.map(deserializeRow) };
+    } catch (error) {
+      if (!isNoRowsStatementError(error)) {
+        throw error;
+      }
+      prepared.run(...serializedValues);
+      return { rows: [] };
+    }
   }
 
   /**
@@ -141,6 +151,18 @@ function parseJsonColumn(value) {
   } catch {
     return value;
   }
+}
+
+/**
+ * Node's SQLite API separates statements that return rows from statements
+ * that only report changes. Preserve this project's PGlite-like facade by
+ * falling back to `run()` for DDL and non-returning mutations.
+ * @param {unknown} error
+ * @returns {boolean}
+ */
+function isNoRowsStatementError(error) {
+  return error instanceof Error
+    && /does not return data|Use run\(\)/i.test(error.message);
 }
 
 /**

@@ -1,14 +1,13 @@
 import { describe, it, before } from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
-import { PGlite } from "@electric-sql/pglite";
-import { vector } from "@electric-sql/pglite/vector";
 import { initStore, getChatOrThrow } from "../store.js";
 import { createTestDb } from "./helpers.js";
 import { getChatConfigPath } from "../chat-config.js";
+import { SqliteDb } from "../sqlite-db.js";
 
 describe("store with injected DB", () => {
-  /** @type {import("@electric-sql/pglite").PGlite} */
+  /** @type {import("../sqlite-db.js").SqliteDb} */
   let db;
   /** @type {Awaited<ReturnType<typeof initStore>>} */
   let store;
@@ -20,28 +19,24 @@ describe("store with injected DB", () => {
 
   it("does not create chat-owned or module-owned tables in the root DB", async () => {
     // Use a fresh DB to avoid pollution from other test files sharing createTestDb()
-    const freshDb = new PGlite("memory://", { extensions: { vector } });
+    const freshDb = new SqliteDb(":memory:");
     await initStore(freshDb);
     const { rows } = await freshDb.sql`
-      SELECT table_name FROM information_schema.tables
-      WHERE table_schema = 'public'
-      ORDER BY table_name
+      SELECT name FROM sqlite_master
+      WHERE type = 'table'
+      ORDER BY name
     `;
-    const tableNames = rows.map(r => r.table_name);
+    const tableNames = rows.map(r => r.name);
     for (const tableName of ["messages", "memories", "reminders", "usage_logs", "agent_runs", "whatsapp_outbound_queue", "html_pages", "media_to_text_cache"]) {
       assert.ok(!tableNames.includes(tableName), `initStore() should not create '${tableName}' table in root, got: ${tableNames}`);
     }
   });
 
   it("keeps fresh chat schemas catalog-only", async () => {
-    const freshDb = new PGlite("memory://", { extensions: { vector } });
+    const freshDb = new SqliteDb(":memory:");
     await initStore(freshDb);
-    const { rows } = await freshDb.sql`
-      SELECT column_name FROM information_schema.columns
-      WHERE table_schema = 'public' AND table_name = 'chats'
-      ORDER BY ordinal_position
-    `;
-    assert.deepEqual(rows.map((row) => row.column_name), ["chat_id", "timestamp"]);
+    const { rows } = await freshDb.query("PRAGMA table_info(chats)");
+    assert.deepEqual(rows.map((row) => row.name), ["chat_id", "timestamp"]);
   });
 
   describe("createChat / getChat", () => {
@@ -53,13 +48,13 @@ describe("store with injected DB", () => {
     });
 
     it("stores chat settings and messages in the per-chat DB, not root", async () => {
-      const rootDb = new PGlite("memory://", { extensions: { vector } });
+      const rootDb = new SqliteDb(":memory:");
       const chatDbs = new Map();
       /** @param {string} chatId */
       const resolveChatDb = (chatId) => {
         const existing = chatDbs.get(chatId);
         if (existing) return existing;
-        const created = new PGlite("memory://", { extensions: { vector } });
+        const created = new SqliteDb(":memory:");
         chatDbs.set(chatId, created);
         return created;
       };
@@ -76,8 +71,8 @@ describe("store with injected DB", () => {
       assert.equal((await isolatedStore.getMessages("isolated-b")).length, 0);
 
       const { rows: rootMessageTables } = await rootDb.sql`
-        SELECT table_name FROM information_schema.tables
-        WHERE table_schema = 'public' AND table_name = 'messages'
+        SELECT name FROM sqlite_master
+        WHERE type = 'table' AND name = 'messages'
       `;
       const { rows: rootCatalog } = await rootDb.sql`SELECT chat_id FROM chats WHERE chat_id = 'isolated-a'`;
       assert.equal(rootMessageTables.length, 0);
@@ -95,7 +90,7 @@ describe("store with injected DB", () => {
     });
 
     it("does not recover missing chat config files from legacy root chat settings at runtime", async () => {
-      const legacyDb = new PGlite("memory://", { extensions: { vector } });
+      const legacyDb = new SqliteDb(":memory:");
       const chatId = `legacy-config-${Date.now()}`;
       await legacyDb.sql`
         CREATE TABLE chats (
@@ -360,7 +355,7 @@ describe("store with injected DB", () => {
       const values = Array.from({ length: 305 }, (_, i) =>
         `('msg-test-time-3', 's1', '{"role":"user","content":[{"type":"text","text":"m${i}"}]}', '${oneHourAgo}')`
       ).join(",");
-      await db.exec(`INSERT INTO messages(chat_id, sender_id, message_data, timestamp) VALUES ${values}`);
+      await db.query(`INSERT INTO messages(chat_id, sender_id, message_data, timestamp) VALUES ${values}`);
 
       const messages = await store.getMessages("msg-test-time-3");
       assert.equal(messages.length, 300, "should cap at 300 messages");
@@ -390,7 +385,7 @@ describe("store with injected DB", () => {
       const msg2 = { role: "user", content: [{ type: "text", text: "after clear" }] };
       await store.addMessage("msg-test-cleared", msg1, ["s1"]);
       // Mark existing messages as cleared
-      await db.sql`UPDATE messages SET cleared_at = NOW() WHERE chat_id = 'msg-test-cleared'`;
+      await db.sql`UPDATE messages SET cleared_at = CURRENT_TIMESTAMP WHERE chat_id = 'msg-test-cleared'`;
       await store.addMessage("msg-test-cleared", msg2, ["s1"]);
 
       const messages = await store.getMessages("msg-test-cleared");

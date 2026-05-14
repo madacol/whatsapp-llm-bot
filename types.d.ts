@@ -12,8 +12,7 @@ declare module "node:sqlite" {
   }
 }
 
-type PGlite = import("@electric-sql/pglite").PGlite;
-type ChatDb = PGlite | import("./sqlite-db.js").SqliteDb;
+type ChatDb = import("./sqlite-db.js").SqliteDb;
 
 // Baileys types
 type BaileysMessage = import("@whiskeysockets/baileys").WAMessage;
@@ -522,7 +521,7 @@ type CallLlm = {
 
 // Build action context types dynamically based on permissions
 type ExtendedActionContext<P extends PermissionFlags> = ActionContext
-  & (P["useRootDb"] extends true ? { rootDb: PGlite } : {})
+  & (P["useRootDb"] extends true ? { rootDb: ChatDb } : {})
   & (P["useChatDb"] extends true ? { chatDb: ChatDb } : {})
   & (P["useLlm"] extends true ? { callLlm: CallLlm; llmClient: LlmClient } : {});
 
@@ -835,7 +834,7 @@ declare function isHtmlContent(value: unknown): value is HtmlContent;
 /* Test callback types — used by _tests.js and _test-prompts.js */
 
 /** Full action context with all permission extensions enabled. */
-type FullActionContext = ActionContext & { rootDb: PGlite; chatDb: ChatDb; callLlm: CallLlm; llmClient: LlmClient };
+type FullActionContext = ActionContext & { rootDb: ChatDb; chatDb: ChatDb; callLlm: CallLlm; llmClient: LlmClient };
 
 /** action_fn as seen by tests — accepts partial context (duck typing). */
 type ActionParamValue = string | number | boolean | null | IncomingContentBlock | IncomingContentBlock[];
@@ -850,7 +849,7 @@ type TestActionFn = (
 type ActionTestFn = (action_fn: TestActionFn) => Promise<void>;
 
 /** Standard _tests.js callback: receives action_fn + db. */
-type ActionDbTestFn = (action_fn: TestActionFn, db: PGlite) => Promise<void>;
+type ActionDbTestFn = (action_fn: TestActionFn, db: ChatDb) => Promise<void>;
 
 /** Prompt test callback: receives callLlm + readFixture + prompt. */
 type PromptTestFn = (

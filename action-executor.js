@@ -66,7 +66,7 @@ export async function executeAction(actionName, context, params, options = {}) {
     throw new Error(`Action "${actionName}" requires master permissions`);
   }
 
-  /** @type {ActionContext & Partial<{ chatDb: PGlite, rootDb: PGlite, callLlm: CallLlm, llmClient: LlmClient }>} */
+  /** @type {ActionContext & Partial<{ chatDb: ChatDb, rootDb: ChatDb, callLlm: CallLlm, llmClient: LlmClient }>} */
   const actionContext = {
     chatId: context.chatId,
     senderIds: context.senderIds,

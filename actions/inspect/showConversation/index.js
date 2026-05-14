@@ -61,6 +61,18 @@ function formatTimestamp(ts) {
   return `${month}/${day} ${hours}:${minutes}`;
 }
 
+/**
+ * @param {unknown} value
+ * @returns {value is { role: string, content: Array<Record<string, unknown>>, tool_id?: string }}
+ */
+function isDisplayMessage(value) {
+  return value !== null
+    && typeof value === "object"
+    && !Array.isArray(value)
+    && typeof /** @type {{ role?: unknown }} */ (value).role === "string"
+    && Array.isArray(/** @type {{ content?: unknown }} */ (value).content);
+}
+
 export default /** @type {defineAction} */ ((x) => x)({
   name: "show_conversation",
   command: "history",
@@ -101,8 +113,8 @@ export default /** @type {defineAction} */ ((x) => x)({
 
     const lines = rows.map((row) => {
       const msg = row.message_data;
-      const ts = row.timestamp ? formatTimestamp(row.timestamp) : "";
-      const body = (msg && typeof msg === "object" && Array.isArray(msg.content))
+      const ts = typeof row.timestamp === "string" || row.timestamp instanceof Date ? formatTimestamp(row.timestamp) : "";
+      const body = isDisplayMessage(msg)
         ? formatMessage(msg)
         : JSON.stringify(msg);
       return `${ts}\n${body}`;

@@ -4,7 +4,7 @@ const log = createLogger("store:migrations");
 
 /**
  * Create and repair the current root store schema.
- * @param {PGlite} db
+ * @param {import("../../sqlite-db.js").SqliteDb} db
  * @returns {Promise<void>}
  */
 export async function runStoreMigrations(db) {
@@ -33,7 +33,7 @@ export async function runStoreMigrations(db) {
         workspace_chat_subject TEXT,
         last_test_status TEXT NOT NULL DEFAULT 'not_run',
         last_commit_oid TEXT,
-        conflicted_files JSONB NOT NULL DEFAULT '[]',
+        conflicted_files TEXT NOT NULL DEFAULT '[]',
         archived_at TIMESTAMP,
         timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         UNIQUE (project_id, name)
@@ -62,15 +62,27 @@ export async function runStoreMigrations(db) {
       );
     `;
 
-    await Promise.all([
-      db.sql`ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS workspace_chat_subject TEXT`,
-      db.sql`ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS conflicted_files JSONB NOT NULL DEFAULT '[]'`,
-      db.sql`ALTER TABLE projects ALTER COLUMN control_chat_id DROP NOT NULL`,
-    ]);
+    await addColumnIfMissing(db, "workspaces", "workspace_chat_subject", "workspace_chat_subject TEXT");
+    await addColumnIfMissing(db, "workspaces", "conflicted_files", "conflicted_files TEXT NOT NULL DEFAULT '[]'");
 
     await db.sql`UPDATE workspaces SET workspace_chat_subject = name WHERE workspace_chat_subject IS NULL`;
   } catch (error) {
     log.error("⚠️ SCHEMA MIGRATION FAILED — the database may be in an inconsistent state!", error);
     log.error("⚠️ Review the error above and fix manually if needed. The bot will continue but may malfunction.");
+  }
+}
+
+/**
+ * @param {import("../../sqlite-db.js").SqliteDb} db
+ * @param {string} tableName
+ * @param {string} columnName
+ * @param {string} columnDefinition
+ * @returns {Promise<void>}
+ */
+async function addColumnIfMissing(db, tableName, columnName, columnDefinition) {
+  const { rows } = await db.query(`PRAGMA table_info(${tableName})`);
+  const hasColumn = rows.some((row) => row.name === columnName);
+  if (!hasColumn) {
+    await db.query(`ALTER TABLE ${tableName} ADD COLUMN ${columnDefinition}`);
   }
 }

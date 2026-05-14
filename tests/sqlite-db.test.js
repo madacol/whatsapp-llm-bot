@@ -1,7 +1,5 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { PGlite } from "@electric-sql/pglite";
-import { vector } from "@electric-sql/pglite/vector";
 import { SqliteDb } from "../sqlite-db.js";
 import { initStore } from "../store.js";
 import { ensureChatStoreSchema } from "../store/schema/chat.js";
@@ -33,7 +31,7 @@ describe("SqliteDb chat storage", () => {
   });
 
   it("returns same-day messages inserted with SQLite default timestamps", async () => {
-    const rootDb = new PGlite("memory://", { extensions: { vector } });
+    const rootDb = new SqliteDb(":memory:");
     const chatDb = new SqliteDb(":memory:");
     try {
       const store = await initStore(rootDb, { getChatDb: () => chatDb });

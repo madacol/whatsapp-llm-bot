@@ -6,12 +6,11 @@ process.env.MASTER_ID = "master-user";
 process.env.LLM_API_KEY = "test-key";
 process.env.MODEL = "mock-model";
 
-import { PGlite } from "@electric-sql/pglite";
 import { createMockLlmServer, createChatTurn, createTestDb, seedChat as seedChat_, withModelsCache } from "./helpers.js";
 import { setDb } from "../db.js";
 import { readChatConfig, updateChatConfig } from "../chat-config.js";
 
-/** @type {PGlite} */
+/** @type {import("../sqlite-db.js").SqliteDb} */
 let db;
 /** @type {Awaited<ReturnType<typeof import("../store.js").initStore>>} */
 let store;
@@ -398,7 +397,7 @@ describe("LLM pipeline via createMessageHandler", () => {
     const { rows: toolRows } = await db.sql`
       SELECT message_data FROM messages
       WHERE chat_id = 'pipe-recall'
-        AND message_data::jsonb->>'role' = 'tool'`;
+        AND json_extract(message_data, '$.role') = 'tool'`;
     assert.equal(toolRows.length, 1, "Tool result should be stored in DB");
     const resultData = toolRows[0].message_data;
     assert.ok(resultData.content[0].text.includes("Recalled"), "Should contain full recall result");

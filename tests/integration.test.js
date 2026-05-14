@@ -811,7 +811,7 @@ describe("Memory: injected into system prompt", () => {
     }));
     await testDb.sql`
       INSERT INTO memories (chat_id, content, embedding, search_text)
-      VALUES (${chatId}, 'User prefers dark mode', ${JSON.stringify([1, 0, 0])}::vector, to_tsvector('english', 'User prefers dark mode'))
+      VALUES (${chatId}, 'User prefers dark mode', ${JSON.stringify([1, 0, 0])}, 'User prefers dark mode')
     `;
   });
 
@@ -845,7 +845,7 @@ describe("Memory: NOT injected when memory is disabled", () => {
     }));
     await testDb.sql`
       INSERT INTO memories (chat_id, content, embedding, search_text)
-      VALUES (${chatId}, 'User prefers light mode', ${JSON.stringify([1, 0, 0])}::vector, to_tsvector('english', 'User prefers light mode'))
+      VALUES (${chatId}, 'User prefers light mode', ${JSON.stringify([1, 0, 0])}, 'User prefers light mode')
     `;
   });
 
@@ -878,7 +878,7 @@ describe("Memory: NOT searched when extracted text < 10 chars", () => {
     }));
     await testDb.sql`
       INSERT INTO memories (chat_id, content, embedding, search_text)
-      VALUES (${chatId}, 'User likes brevity', ${JSON.stringify([1, 0, 0])}::vector, to_tsvector('english', 'User likes brevity'))
+      VALUES (${chatId}, 'User likes brevity', ${JSON.stringify([1, 0, 0])}, 'User likes brevity')
     `;
   });
 
@@ -1030,7 +1030,7 @@ describe("memory_threshold filters low-relevance memories", () => {
     }));
     await testDb.sql`
       INSERT INTO memories (chat_id, content, embedding, search_text)
-      VALUES (${chatId}, 'User loves hiking', ${JSON.stringify([1, 0, 0])}::vector, to_tsvector('english', 'User loves hiking'))
+      VALUES (${chatId}, 'User loves hiking', ${JSON.stringify([1, 0, 0])}, 'User loves hiking')
     `;
   });
 
@@ -1111,7 +1111,7 @@ describe("storeLlmContext only at depth 0", () => {
       SELECT message_data, llm_context
       FROM messages
       WHERE chat_id = ${chatId}
-        AND message_data->>'role' = 'assistant'
+        AND json_extract(message_data, '$.role') = 'assistant'
       ORDER BY message_id ASC
     `;
 

@@ -1,6 +1,6 @@
 /**
  * Create the minimal root schema required before root migrations can run.
- * @param {PGlite} db
+ * @param {import("../../sqlite-db.js").SqliteDb} db
  * @returns {Promise<void>}
  */
 export async function bootstrapStoreSchema(db) {

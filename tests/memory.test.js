@@ -2,10 +2,9 @@ process.env.TESTING = "1";
 
 import { describe, it, before } from "node:test";
 import assert from "node:assert/strict";
-import { PGlite } from "@electric-sql/pglite";
-import { vector } from "@electric-sql/pglite/vector";
 import { initStore } from "../store.js";
 import { ensureChatStoreSchema } from "../store/schema/chat.js";
+import { SqliteDb } from "../sqlite-db.js";
 import {
   extractTextFromMessage,
   generateEmbedding,
@@ -16,13 +15,13 @@ import {
   formatMemoriesContext,
 } from "../memory.js";
 
-/** @type {PGlite} */
+/** @type {import("../sqlite-db.js").SqliteDb} */
 let db;
 /** @type {Awaited<ReturnType<typeof initStore>>} */
 let store;
 
 before(async () => {
-  db = new PGlite("memory://", { extensions: { vector } });
+  db = new SqliteDb(":memory:");
   store = await initStore(db);
   await ensureChatStoreSchema(db);
 });
@@ -194,7 +193,7 @@ describe("findMemories", () => {
       const emb = fakeEmbedding(i);
       await db.sql`
         INSERT INTO memories (chat_id, content, embedding, search_text)
-        VALUES (${chatId}, ${memories[i]}, ${JSON.stringify(emb)}::vector, to_tsvector('english', ${memories[i]}))
+        VALUES (${chatId}, ${memories[i]}, ${JSON.stringify(emb)}, ${memories[i]})
       `;
     }
   });
@@ -224,7 +223,7 @@ describe("findMemories", () => {
     await store.createChat("mem-find-other");
     await db.sql`
       INSERT INTO memories (chat_id, content, embedding, search_text)
-      VALUES ('mem-find-other', 'Other chat memory', ${JSON.stringify(fakeEmbedding(0))}::vector, to_tsvector('english', 'Other chat memory'))
+      VALUES ('mem-find-other', 'Other chat memory', ${JSON.stringify(fakeEmbedding(0))}, 'Other chat memory')
     `;
 
     const mockClient = /** @type {LlmClient} */ (/** @type {unknown} */ ({
@@ -253,7 +252,7 @@ describe("findMemories", () => {
     for (let i = 0; i < 5; i++) {
       await db.sql`
         INSERT INTO memories (chat_id, content, search_text)
-        VALUES ('mem-find-limit', ${'Memory number ' + i + ' about testing limits for real'}, to_tsvector('english', ${'Memory number ' + i + ' about testing limits for real'}))
+        VALUES ('mem-find-limit', ${'Memory number ' + i + ' about testing limits for real'}, ${'Memory number ' + i + ' about testing limits for real'})
       `;
     }
 
@@ -283,9 +282,9 @@ describe("listMemories", () => {
   it("returns all memories for a chat ordered by created_at DESC", async () => {
     await store.createChat("mem-list-1");
     // Insert with staggered timestamps
-    await db.sql`INSERT INTO memories (chat_id, content, search_text, created_at) VALUES ('mem-list-1', 'First memory', to_tsvector('english', 'First memory'), '2025-01-01 10:00:00')`;
-    await db.sql`INSERT INTO memories (chat_id, content, search_text, created_at) VALUES ('mem-list-1', 'Second memory', to_tsvector('english', 'Second memory'), '2025-01-02 10:00:00')`;
-    await db.sql`INSERT INTO memories (chat_id, content, search_text, created_at) VALUES ('mem-list-1', 'Third memory', to_tsvector('english', 'Third memory'), '2025-01-03 10:00:00')`;
+    await db.sql`INSERT INTO memories (chat_id, content, search_text, created_at) VALUES ('mem-list-1', 'First memory', 'First memory', '2025-01-01 10:00:00')`;
+    await db.sql`INSERT INTO memories (chat_id, content, search_text, created_at) VALUES ('mem-list-1', 'Second memory', 'Second memory', '2025-01-02 10:00:00')`;
+    await db.sql`INSERT INTO memories (chat_id, content, search_text, created_at) VALUES ('mem-list-1', 'Third memory', 'Third memory', '2025-01-03 10:00:00')`;
 
     const results = await listMemories(db, "mem-list-1");
     assert.equal(results.length, 3);
@@ -302,7 +301,7 @@ describe("listMemories", () => {
   it("does not return memories from other chats", async () => {
     await store.createChat("mem-list-a");
     await store.createChat("mem-list-b");
-    await db.sql`INSERT INTO memories (chat_id, content, search_text) VALUES ('mem-list-a', 'Chat A memory', to_tsvector('english', 'Chat A memory'))`;
+    await db.sql`INSERT INTO memories (chat_id, content, search_text) VALUES ('mem-list-a', 'Chat A memory', 'Chat A memory')`;
 
     const results = await listMemories(db, "mem-list-b");
     assert.deepEqual(results, []);
@@ -317,7 +316,7 @@ describe("deleteMemory", () => {
     await store.createChat("mem-del-1");
     const { rows: [{ id }] } = await db.sql`
       INSERT INTO memories (chat_id, content, search_text)
-      VALUES ('mem-del-1', 'To be deleted', to_tsvector('english', 'To be deleted'))
+      VALUES ('mem-del-1', 'To be deleted', 'To be deleted')
       RETURNING id
     `;
 
@@ -339,7 +338,7 @@ describe("deleteMemory", () => {
     await store.createChat("mem-del-b");
     const { rows: [{ id }] } = await db.sql`
       INSERT INTO memories (chat_id, content, search_text)
-      VALUES ('mem-del-a', 'Chat A only', to_tsvector('english', 'Chat A only'))
+      VALUES ('mem-del-a', 'Chat A only', 'Chat A only')
       RETURNING id
     `;
 

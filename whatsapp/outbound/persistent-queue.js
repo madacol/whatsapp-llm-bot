@@ -6,7 +6,7 @@ import { sendEvent as sendOutboundEvent } from "./send-content.js";
 const log = createLogger("whatsapp");
 /** @type {Promise<import("../../store.js").Store> | null} */
 let storePromise = null;
-/** @type {import("@electric-sql/pglite").PGlite | null} */
+/** @type {ChatDb | null} */
 let storeDb = null;
 
 /**
