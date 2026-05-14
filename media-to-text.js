@@ -3,6 +3,7 @@ import config from "./config.js";
 import { sendSimpleChatCompletion } from "./llm.js";
 import { hashMediaBlock } from "./media-store.js";
 import { isMediaBlock } from "./message-formatting.js";
+import { contentHasContextResetCommand } from "./conversation/context-boundary.js";
 
 /**
  * Create the media_to_text_cache table (and rename from old name if needed).
@@ -56,6 +57,16 @@ const DESCRIPTION_LABELS = {
   audio: "Audio description",
   video: "Video description",
 };
+
+const MEDIA_TO_TEXT_CACHE_NAMESPACE = "context-boundary-v1";
+
+/**
+ * @param {string} modelId
+ * @returns {string}
+ */
+function mediaTranslationCacheModelId(modelId) {
+  return `${MEDIA_TO_TEXT_CACHE_NAMESPACE}:${modelId}`;
+}
 
 /**
  * @typedef {import("./store.js").MessageRow} MessageRow
@@ -139,10 +150,11 @@ export async function getMediaTranslation({
 }) {
   await init(db);
   const hash = (await hashMediaBlock(/** @type {ImageContentBlock | AudioContentBlock | VideoContentBlock} */ (block))).slice(0, 16);
+  const cacheModelId = mediaTranslationCacheModelId(modelId);
 
   // Check cache
   const { rows } =
-    await db.sql`SELECT translation FROM media_to_text_cache WHERE content_hash = ${hash} AND model_id = ${modelId}`;
+    await db.sql`SELECT translation FROM media_to_text_cache WHERE content_hash = ${hash} AND model_id = ${cacheModelId}`;
 
   /** @type {string} */
   let translation;
@@ -171,7 +183,7 @@ export async function getMediaTranslation({
 
     // Cache the translation
     await db.sql`INSERT INTO media_to_text_cache (content_hash, model_id, translation)
-      VALUES (${hash}, ${modelId}, ${translation})
+      VALUES (${hash}, ${cacheModelId}, ${translation})
       ON CONFLICT (content_hash, model_id) DO NOTHING`;
   }
 
@@ -216,7 +228,15 @@ async function translateMediaBlock(block, contentType, modelId, llmClient, db, c
 function buildContextMessages(messages, upToIndex) {
   /** @type {ChatMessage[]} */
   const contextMessages = [];
+  let startIndex = 0;
   for (let j = 0; j < upToIndex; j++) {
+    const prev = messages[j];
+    if (prev.message_data && contentHasContextResetCommand(prev.message_data.content)) {
+      startIndex = j + 1;
+    }
+  }
+
+  for (let j = startIndex; j < upToIndex; j++) {
     const prev = messages[j];
     if (!prev.message_data) continue;
     const role = prev.message_data.role;

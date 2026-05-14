@@ -1,4 +1,5 @@
 import { hasMediaPath, resolveMediaPath } from "../attachment-paths.js";
+import { contentHasContextResetCommand } from "../conversation/context-boundary.js";
 import { getMediaTranslation, resolveMediaModel } from "../media-to-text.js";
 
 /**
@@ -75,7 +76,15 @@ function extractTopLevelText(blocks) {
 function buildPromptContextMessages(messages, upToIndex) {
   /** @type {ChatMessage[]} */
   const contextMessages = [];
+  let startIndex = 0;
   for (let i = 0; i < upToIndex; i++) {
+    const message = messages[i];
+    if (contentHasContextResetCommand(message.content)) {
+      startIndex = i + 1;
+    }
+  }
+
+  for (let i = startIndex; i < upToIndex; i++) {
     const message = messages[i];
     if (message.role !== "user" && message.role !== "assistant") {
       continue;
