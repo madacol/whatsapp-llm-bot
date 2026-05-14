@@ -695,6 +695,7 @@ type HarnessRunConfig = {
   reasoningEffort?: 'low' | 'medium' | 'high' | 'xhigh' | 'max' | null;
   sandboxMode?: 'read-only' | 'workspace-write' | 'danger-full-access' | null;
   approvalPolicy?: 'untrusted' | 'on-failure' | 'on-request' | 'never' | null;
+  approvalsReviewer?: 'user' | 'auto_review' | 'guardian_subagent' | null;
   additionalDirectories?: string[] | null;
 };
 

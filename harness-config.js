@@ -10,6 +10,7 @@ const LEGACY_FLAT_CONFIG_KEYS = new Set([
   "reasoningEffort",
   "sandboxMode",
   "approvalPolicy",
+  "approvalsReviewer",
 ]);
 
 /**

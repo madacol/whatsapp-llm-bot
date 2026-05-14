@@ -602,6 +602,7 @@ describe("startCodexAppServerRun", () => {
         workdir: "/repo/project",
         sandboxMode: "workspace-write",
         approvalPolicy: "on-request",
+        approvalsReviewer: "auto_review",
       },
     }, {
       openConnection: connectionMock.openConnection,
@@ -615,6 +616,7 @@ describe("startCodexAppServerRun", () => {
         params: {
           cwd: "/repo/project",
           approvalPolicy: "on-request",
+          approvalsReviewer: "auto_review",
           serviceName: "madabot",
         },
       },
@@ -625,6 +627,7 @@ describe("startCodexAppServerRun", () => {
           input: [{ type: "text", text: "Continue" }],
           cwd: "/repo/project",
           approvalPolicy: mapCodexAppServerApprovalPolicy("on-request"),
+          approvalsReviewer: "auto_review",
           sandboxPolicy: buildCodexAppServerSandboxPolicy({
             workdir: "/repo/project",
             sandboxMode: "workspace-write",

@@ -412,6 +412,8 @@ describe("createCodexHarness", () => {
     await seedChat(db, "codex-chat-3", { enabled: true });
     const harness = createCodexHarness({
       getAvailableModels: async () => TEST_CODEX_MODELS,
+      getSandboxModeOptions: async () => ["workspace-write", "read-only", "danger-full-access"],
+      getApprovalsReviewerOptions: async () => ["user", "auto_review"],
     });
     /** @type {string[]} */
     const replies = [];
@@ -442,11 +444,49 @@ describe("createCodexHarness", () => {
 
     assert.equal(handled, true);
     assert.deepEqual(selectedOptions, [
-      { id: "workspace-write", label: "Workspace Write" },
-      { id: "read-only", label: "Read Only" },
-      { id: "danger-full-access", label: "Full Access" },
+      { id: "workspace-write", label: "Sandbox: Workspace Write" },
+      { id: "read-only", label: "Sandbox: Read Only" },
+      { id: "danger-full-access", label: "Sandbox: Danger Full Access" },
+      { id: "user", label: "Reviewer: User" },
+      { id: "auto_review", label: "Reviewer: Auto Review" },
     ]);
-    assert.ok(replies.at(-1)?.includes("Codex permissions: `danger-full-access`"));
+    assert.ok(replies.at(-1)?.includes("Codex permissions: sandbox `danger-full-access`, reviewer `default`"));
+  });
+
+  it("sets approval reviewer through the permissions selector", async () => {
+    const db = await createTestDb();
+    await seedChat(db, "codex-chat-reviewer", { enabled: true });
+    const harness = createCodexHarness({
+      getAvailableModels: async () => TEST_CODEX_MODELS,
+      getSandboxModeOptions: async () => ["workspace-write"],
+      getApprovalsReviewerOptions: async () => ["user", "auto_review"],
+    });
+    /** @type {string[]} */
+    const replies = [];
+
+    const handled = await harness.handleCommand({
+      chatId: "codex-chat-reviewer",
+      command: "permissions",
+      context: /** @type {ExecuteActionContext} */ ({
+        chatId: "codex-chat-reviewer",
+        senderIds: [],
+        content: [],
+        getIsAdmin: async () => true,
+        send: async () => undefined,
+        reply: async (event) => {
+          replies.push(getReplyText(event));
+          return undefined;
+        },
+        reactToMessage: async () => {},
+        select: async () => "auto_review",
+        confirm: async () => true,
+      }),
+    });
+
+    assert.equal(handled, true);
+    const chat = await readChatConfig("codex-chat-reviewer");
+    assert.equal(chat.harness_config.codex.approvalsReviewer, "auto_review");
+    assert.ok(replies.at(-1)?.includes("Codex permissions: sandbox `workspace-write`, reviewer `auto_review`"));
   });
 
   it("clears the saved Codex session and returns an SDK error response when a resumed run fails", async () => {
