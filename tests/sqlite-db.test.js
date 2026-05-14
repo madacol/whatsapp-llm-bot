@@ -1,6 +1,9 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { PGlite } from "@electric-sql/pglite";
+import { vector } from "@electric-sql/pglite/vector";
 import { SqliteDb } from "../sqlite-db.js";
+import { initStore } from "../store.js";
 import { ensureChatStoreSchema } from "../store/schema/chat.js";
 
 describe("SqliteDb chat storage", () => {
@@ -26,6 +29,30 @@ describe("SqliteDb chat storage", () => {
       });
     } finally {
       await db.close();
+    }
+  });
+
+  it("returns same-day messages inserted with SQLite default timestamps", async () => {
+    const rootDb = new PGlite("memory://", { extensions: { vector } });
+    const chatDb = new SqliteDb(":memory:");
+    try {
+      const store = await initStore(rootDb, { getChatDb: () => chatDb });
+      await store.createChat("sqlite-chat");
+      await store.addMessage("sqlite-chat", {
+        role: "user",
+        content: [{ type: "text", text: "visible same-day message" }],
+      });
+
+      const messages = await store.getMessages("sqlite-chat", new Date(Date.now() - 8 * 60 * 60 * 1000));
+
+      assert.equal(messages.length, 1);
+      assert.deepEqual(messages[0].message_data, {
+        role: "user",
+        content: [{ type: "text", text: "visible same-day message" }],
+      });
+    } finally {
+      await chatDb.close();
+      await rootDb.close();
     }
   });
 });

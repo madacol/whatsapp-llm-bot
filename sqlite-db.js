@@ -91,7 +91,7 @@ export function isSqliteDb(db) {
  */
 function serializeValue(value) {
   if (value instanceof Date) {
-    return value.toISOString();
+    return formatSqliteTimestamp(value);
   }
   if (typeof value === "boolean") {
     return value ? 1 : 0;
@@ -100,6 +100,16 @@ function serializeValue(value) {
     return JSON.stringify(value);
   }
   return value;
+}
+
+/**
+ * Format Date parameters the same way SQLite's CURRENT_TIMESTAMP default does
+ * so TEXT timestamp comparisons stay lexically sortable.
+ * @param {Date} value
+ * @returns {string}
+ */
+function formatSqliteTimestamp(value) {
+  return value.toISOString().slice(0, 19).replace("T", " ");
 }
 
 /**
