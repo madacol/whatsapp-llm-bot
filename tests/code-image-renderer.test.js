@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   renderCodeToImages,
   renderDiffToImages,
+  renderTableToImages,
   renderUnifiedDiffToImages,
   maxCharsForLineCount,
   wrapAnnotatedLinesForDisplay,
@@ -166,6 +167,25 @@ describe("code-image-renderer", () => {
       const code = Array.from({ length: 60 }, () => wideLine).join("\n");
       const images = await renderCodeToImages(code, "text");
       assert.ok(images.length >= 3, `expected wrapped wide code to split across multiple images, got ${images.length}`);
+    });
+  });
+
+  describe("renderTableToImages", () => {
+    it("wraps wide markdown table cells instead of creating an excessively wide image", () => {
+      const table = [
+        "| App | Creator / Publisher | Open source? |",
+        "| :--- | :--- | :--- |",
+        "| **Sky Map** | Originally Google engineers; now maintained as the **Sky Map Team** | **Yes**. Open sourced in 2012, Apache 2.0 license. GitHub: https://github.com/sky-map-team/stardroid |",
+        "| **Stellarium Mobile** | **Noctua Software / Stellarium Labs**, by Fabien & Guillaume Chereau | **Mixed/unclear for mobile**. The desktop Stellarium project is open source, but the current Android app is a commercial mobile app by Noctua. I'd treat the Android app itself as not clearly fully open source. |",
+        "| **Star Walk 2** | **Vito Technology** | **No**, proprietary/commercial app. |",
+      ].join("\n");
+
+      const images = renderTableToImages(table);
+      assert.equal(images.length, 1, "the sample table should fit in one readable image");
+
+      const { width, height } = getPngDimensions(images[0]);
+      assert.ok(width <= 760, `expected table image width to stay bounded, got ${width}px`);
+      assert.ok(height >= 240, `expected wrapped table image to grow taller, got ${height}px`);
     });
   });
 
