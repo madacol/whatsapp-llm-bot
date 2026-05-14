@@ -1,14 +1,17 @@
 import { PGlite } from "@electric-sql/pglite";
 import { vector } from "@electric-sql/pglite/vector";
 import { mkdirSync } from "node:fs";
-import { getChatActionDbDir, getChatPgDataDir } from "./chat-paths.js";
+import { getChatActionSqlitePath, getChatSqlitePath } from "./chat-paths.js";
 import { createLogger } from "./logger.js";
 import { createProcessDiagnosticSnapshot, formatProcessDiagnosticSnapshot } from "./process-diagnostics.js";
+import { SqliteDb } from "./sqlite-db.js";
 
 const log = createLogger("db");
 
 /** @type {Map<string, PGlite>} */
 const dbCache = new Map();
+/** @type {Map<string, SqliteDb>} */
+const sqliteDbCache = new Map();
 
 /** Auto-close timers for in-memory DBs (evicted after MEMORY_DB_TTL_MS of inactivity) */
 const MEMORY_DB_TTL_MS = 10_000;
@@ -25,6 +28,14 @@ let nextDbCacheDiagnosticSize = 10;
  */
 export function setDb(dataDir, instance) {
   dbCache.set(dataDir, instance);
+}
+
+/**
+ * @param {string} filename
+ * @param {SqliteDb} instance
+ */
+export function setSqliteDb(filename, instance) {
+  sqliteDbCache.set(filename, instance);
 }
 
 /**
@@ -70,18 +81,34 @@ export function getDb(dataDir) {
   return createdDb;
 }
 
+/**
+ * @param {string} filename
+ * @returns {SqliteDb}
+ */
+export function getSqliteDb(filename) {
+  const cached = sqliteDbCache.get(filename);
+  if (cached) {
+    return cached;
+  }
+  const db = new SqliteDb(filename);
+  sqliteDbCache.set(filename, db);
+  logDbCacheGrowth();
+  return db;
+}
+
 function logDbCacheGrowth() {
   if (process.env.TESTING) return;
   const shouldLogEveryOpen = process.env.DB_DIAGNOSTICS === "1";
-  if (!shouldLogEveryOpen && dbCache.size < nextDbCacheDiagnosticSize) return;
-  while (nextDbCacheDiagnosticSize <= dbCache.size) {
+  const cacheSize = getDbCacheSize();
+  if (!shouldLogEveryOpen && cacheSize < nextDbCacheDiagnosticSize) return;
+  while (nextDbCacheDiagnosticSize <= cacheSize) {
     nextDbCacheDiagnosticSize += 10;
   }
   const snapshot = createProcessDiagnosticSnapshot({
-    dbCacheSize: dbCache.size,
-    dbCachePaths: [...dbCache.keys()],
+    dbCacheSize: cacheSize,
+    dbCachePaths: getDbCachePaths(),
   });
-  log.warn("PGlite cache growth:", formatProcessDiagnosticSnapshot(snapshot));
+  log.warn("database cache growth:", formatProcessDiagnosticSnapshot(snapshot));
 }
 
 /**
@@ -120,20 +147,26 @@ export function getRootDb() {
 /**
  * Get a chat-scoped database.
  * @param {string} chatId
- * @returns {PGlite}
+ * @returns {SqliteDb | PGlite}
  */
 export function getChatDb(chatId) {
-  return getDb(getChatPgDataDir(chatId));
+  if (process.env.TESTING || process.env.NODE_TEST_CONTEXT) {
+    return getDb(getChatSqlitePath(chatId));
+  }
+  return getSqliteDb(getChatSqlitePath(chatId));
 }
 
 /**
  * Get an action-scoped database (per chat, per action).
  * @param {string} chatId
  * @param {string} actionName
- * @returns {PGlite}
+ * @returns {SqliteDb | PGlite}
  */
 export function getActionDb(chatId, actionName) {
-  return getDb(getChatActionDbDir(chatId, actionName));
+  if (process.env.TESTING || process.env.NODE_TEST_CONTEXT) {
+    return getDb(getChatActionSqlitePath(chatId, actionName));
+  }
+  return getSqliteDb(getChatActionSqlitePath(chatId, actionName));
 }
 
 /**
@@ -141,7 +174,7 @@ export function getActionDb(chatId, actionName) {
  * @returns {number}
  */
 export function getDbCacheSize() {
-  return dbCache.size;
+  return dbCache.size + sqliteDbCache.size;
 }
 
 /**
@@ -149,7 +182,7 @@ export function getDbCacheSize() {
  * @returns {string[]}
  */
 export function getDbCachePaths() {
-  return [...dbCache.keys()];
+  return [...dbCache.keys(), ...sqliteDbCache.keys()];
 }
 
 /**
@@ -161,9 +194,18 @@ export async function closeAllDbs() {
   memoryDbTimers.clear();
 
   const entries = [...dbCache.entries()];
+  const sqliteEntries = [...sqliteDbCache.entries()];
   dbCache.clear();
+  sqliteDbCache.clear();
   nextDbCacheDiagnosticSize = 10;
   for (const [, db] of entries) {
+    try {
+      await db.close();
+    } catch {
+      // already closed
+    }
+  }
+  for (const [, db] of sqliteEntries) {
     try {
       await db.close();
     } catch {

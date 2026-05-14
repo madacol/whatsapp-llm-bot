@@ -12,9 +12,9 @@ const log = createLogger("action-executor");
 /**
  * Define a lazy DB property on an object. The DB instance is only created when
  * first accessed, then the property is replaced with the resolved value.
- * @param {Record<string, any>} obj
+ * @param {Record<string, unknown>} obj
  * @param {string} prop
- * @param {() => import("@electric-sql/pglite").PGlite} factory
+ * @param {() => ChatDb} factory
  * @returns {void}
  */
 function defineLazyDb(obj, prop, factory) {
@@ -78,8 +78,8 @@ export async function executeAction(actionName, context, params, options = {}) {
     content: context.content,
     workdir: options.workdir ?? null,
     getIsAdmin: context.getIsAdmin,
-    db: /** @type {PGlite} */ (/** @type {unknown} */ (undefined)),
-    sessionDb: /** @type {PGlite} */ (/** @type {unknown} */ (undefined)),
+    db: /** @type {ChatDb} */ (/** @type {unknown} */ (undefined)),
+    sessionDb: /** @type {ChatDb} */ (/** @type {unknown} */ (undefined)),
     getActions,
     log: async (...args) => {
       const message = args.join(" ");

@@ -10,6 +10,7 @@ import { randomBytes } from "node:crypto";
 import { getChatDb } from "./db.js";
 import { createLogger } from "./logger.js";
 import { writeMedia } from "./media-store.js";
+import { isSqliteDb } from "./sqlite-db.js";
 import { ensureChatStoreSchema } from "./store/schema/chat.js";
 
 const log = createLogger("whatsapp-hd-media");
@@ -179,19 +180,33 @@ export async function updateStoredHdRef(chatId, parentMessageId, ref) {
   try {
     const db = getChatDb(chatId);
     await ensureChatStoreSchema(db);
-    const { rows } = await db.query(
-      `SELECT message_id, message_data FROM messages
-       WHERE chat_id = $1
-         AND message_data->>'role' = 'user'
-         AND EXISTS (
-           SELECT 1
-           FROM jsonb_array_elements(message_data->'content') AS block
-           WHERE block->>'type' = 'image'
-             AND block->>'_hdParentMessageId' = $2
-         )
-       ORDER BY timestamp DESC LIMIT 1`,
-      [chatId, parentMessageId],
-    );
+    const { rows } = isSqliteDb(db)
+      ? await db.query(
+        `SELECT message_id, message_data FROM messages
+         WHERE chat_id = $1
+           AND json_extract(message_data, '$.role') = 'user'
+           AND EXISTS (
+             SELECT 1
+             FROM json_each(message_data, '$.content') AS block
+             WHERE json_extract(block.value, '$.type') = 'image'
+               AND json_extract(block.value, '$._hdParentMessageId') = $2
+           )
+         ORDER BY timestamp DESC LIMIT 1`,
+        [chatId, parentMessageId],
+      )
+      : await db.query(
+        `SELECT message_id, message_data FROM messages
+         WHERE chat_id = $1
+           AND message_data->>'role' = 'user'
+           AND EXISTS (
+             SELECT 1
+             FROM jsonb_array_elements(message_data->'content') AS block
+             WHERE block->>'type' = 'image'
+               AND block->>'_hdParentMessageId' = $2
+           )
+         ORDER BY timestamp DESC LIMIT 1`,
+        [chatId, parentMessageId],
+      );
     if (rows.length === 0) return;
 
     const row = /** @type {{ message_id: number, message_data: UserMessage }} */ (rows[0]);

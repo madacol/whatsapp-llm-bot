@@ -93,7 +93,7 @@ function buildPromptContextMessages(messages, upToIndex) {
  * @typedef {{
  *   llmClient: LlmClient,
  *   mediaToTextModels?: { image?: string, audio?: string, video?: string, general?: string },
- *   db: PGlite,
+ *   db: ChatDb,
  *   contextMessages: ChatMessage[],
  *   currentText: string,
  * }} PromptMediaAugmentInput
@@ -181,7 +181,7 @@ async function augmentBlocks(blocks, input) {
  * attached only in the derived message copy.
  * @param {Message[]} messages
  * @param {Pick<LlmConfig, "llmClient" | "mediaToTextModels">} llmConfig
- * @param {PGlite} db
+ * @param {ChatDb} db
  * @returns {Promise<Message[]>}
  */
 export async function augmentLatestUserMessageForTextHarness(messages, llmConfig, db) {

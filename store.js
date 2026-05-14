@@ -2,6 +2,7 @@ import { getChatDb, getRootDb, setDb } from "./db.js";
 import { createLogger } from "./logger.js";
 import { ensureChatConfig, readChatConfig } from "./chat-config.js";
 import { getChatPgDataDir } from "./chat-paths.js";
+import { isSqliteDb } from "./sqlite-db.js";
 import { createChatStore } from "./store/repos/chats.js";
 import { createMessageStore } from "./store/repos/messages.js";
 import { createProjectStore } from "./store/repos/projects.js";
@@ -81,31 +82,13 @@ export async function getChatOrThrow(_db, chatId) {
   if (configChat) {
     return configChat;
   }
-  const legacySeed = await readRootChatConfigSeed(_db, chatId);
-  if (legacySeed) {
-    return ensureChatConfig(chatId, legacySeed);
-  }
   throw new Error(`Chat ${chatId} does not exist.`);
-}
-
-/**
- * Read an existing root `chats` row as a seed for the config-file-backed chat
- * store. Older DBs still carry user settings in this row; new DBs only have
- * `chat_id` and `timestamp`, which normalize to defaults.
- * @param {PGlite} db
- * @param {string} chatId
- * @returns {Promise<Record<string, unknown> | null>}
- */
-async function readRootChatConfigSeed(db, chatId) {
-  const { rows } = await db.sql`SELECT * FROM chats WHERE chat_id = ${chatId}`;
-  const row = rows[0];
-  return row && typeof row === "object" ? /** @type {Record<string, unknown>} */ (row) : null;
 }
 
 /**
  * @param {PGlite} [injectedDb]
  * @param {{
- *   getChatDb?: (chatId: string) => PGlite,
+ *   getChatDb?: (chatId: string) => PGlite | import("./sqlite-db.js").SqliteDb,
  * }} [options]
  * @returns {Promise<{
  *   getChat: (chatId: ChatRow["chat_id"]) => Promise<ChatRow | undefined>;
@@ -188,16 +171,15 @@ async function readRootChatConfigSeed(db, chatId) {
 export async function initStore(injectedDb, options = {}) {
   const db = injectedDb || getRootDb();
   const resolveChatDb = options.getChatDb ?? (injectedDb ? () => injectedDb : getChatDb);
-  /** @type {WeakSet<PGlite>} */
+  /** @type {WeakSet<PGlite | import("./sqlite-db.js").SqliteDb>} */
   const initializedChatDbs = new WeakSet();
 
   await bootstrapStoreSchema(db);
   await runStoreMigrations(db);
-  await backfillChatConfigsFromRootRows(db);
 
   /**
    * @param {string} chatId
-   * @returns {Promise<PGlite>}
+   * @returns {Promise<PGlite | import("./sqlite-db.js").SqliteDb>}
    */
   async function getInitializedChatDb(chatId) {
     const chatDb = resolveChatDb(chatId);
@@ -215,11 +197,11 @@ export async function initStore(injectedDb, options = {}) {
   async function ensureChatExists(chatId) {
     await db.sql`INSERT INTO chats(chat_id) VALUES (${chatId}) ON CONFLICT (chat_id) DO NOTHING;`;
     const chatDb = await getInitializedChatDb(chatId);
-    if (injectedDb && !options.getChatDb) {
+    if (injectedDb && !options.getChatDb && !isSqliteDb(chatDb)) {
       setDb(getChatPgDataDir(chatId), chatDb);
     }
     await chatDb.sql`INSERT INTO chats(chat_id) VALUES (${chatId}) ON CONFLICT (chat_id) DO NOTHING;`;
-    await ensureChatConfig(chatId, await readRootChatConfigSeed(db, chatId) ?? undefined);
+    await ensureChatConfig(chatId);
   }
 
   /**
@@ -261,22 +243,6 @@ export async function initStore(injectedDb, options = {}) {
     ...whatsappStore,
     ...messageStore,
   };
-}
-
-/**
- * Backfill missing config files from root chat rows. This is intentionally
- * non-destructive: existing config files remain authoritative.
- * @param {PGlite} db
- * @returns {Promise<void>}
- */
-async function backfillChatConfigsFromRootRows(db) {
-  const { rows } = await db.sql`SELECT * FROM chats`;
-  for (const row of rows) {
-    if (!row || typeof row !== "object" || typeof row.chat_id !== "string") {
-      continue;
-    }
-    await ensureChatConfig(row.chat_id, /** @type {Record<string, unknown>} */ (row));
-  }
 }
 
 /** @typedef {Awaited<ReturnType<typeof initStore>>} Store */

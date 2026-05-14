@@ -5,6 +5,7 @@ import path from "node:path";
 import { execFile as execFileCallback } from "node:child_process";
 import { promisify } from "node:util";
 import { getChatWorkDir } from "../../../utils.js";
+import { ensureChatConfig } from "../../../chat-config.js";
 
 const execFile = promisify(execFileCallback);
 
@@ -17,6 +18,7 @@ export default [
 
     await execFile("git", ["init", "--bare", sourceRepo]);
     await db.sql`INSERT INTO chats(chat_id) VALUES (${chatId}) ON CONFLICT DO NOTHING`;
+    await ensureChatConfig(chatId);
 
     const result = await action_fn(
       { chatId, rootDb: db },

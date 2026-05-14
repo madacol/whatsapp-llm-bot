@@ -1,4 +1,19 @@
+declare module "node:sqlite" {
+  export class DatabaseSync {
+    constructor(filename: string);
+    exec(sql: string): void;
+    prepare(sql: string): StatementSync;
+    close(): void;
+  }
+
+  export class StatementSync {
+    all(...values: unknown[]): Record<string, unknown>[];
+    run(...values: unknown[]): { lastInsertRowid: number | bigint; changes: number };
+  }
+}
+
 type PGlite = import("@electric-sql/pglite").PGlite;
+type ChatDb = PGlite | import("./sqlite-db.js").SqliteDb;
 
 // Baileys types
 type BaileysMessage = import("@whiskeysockets/baileys").WAMessage;
@@ -440,8 +455,8 @@ type ActionContext = {
   content: IncomingContentBlock[];
   workdir?: string | null;
   getIsAdmin: () => Promise<boolean>;
-  db: PGlite;
-  sessionDb: PGlite;
+  db: ChatDb;
+  sessionDb: ChatDb;
   getActions: () => Promise<Action[]>;
   log: (...args: any[]) => Promise<string>;
   send: (message: SendContent) => Promise<void>; // Header already baked in
@@ -508,7 +523,7 @@ type CallLlm = {
 // Build action context types dynamically based on permissions
 type ExtendedActionContext<P extends PermissionFlags> = ActionContext
   & (P["useRootDb"] extends true ? { rootDb: PGlite } : {})
-  & (P["useChatDb"] extends true ? { chatDb: PGlite } : {})
+  & (P["useChatDb"] extends true ? { chatDb: ChatDb } : {})
   & (P["useLlm"] extends true ? { callLlm: CallLlm; llmClient: LlmClient } : {});
 
 type ToolContentBlock = TextContentBlock | ImageContentBlock | VideoContentBlock | AudioContentBlock | FileContentBlock | CodeContentBlock | DiffContentBlock | MarkdownContentBlock;
@@ -820,7 +835,7 @@ declare function isHtmlContent(value: unknown): value is HtmlContent;
 /* Test callback types — used by _tests.js and _test-prompts.js */
 
 /** Full action context with all permission extensions enabled. */
-type FullActionContext = ActionContext & { rootDb: PGlite; chatDb: PGlite; callLlm: CallLlm; llmClient: LlmClient };
+type FullActionContext = ActionContext & { rootDb: PGlite; chatDb: ChatDb; callLlm: CallLlm; llmClient: LlmClient };
 
 /** action_fn as seen by tests — accepts partial context (duck typing). */
 type ActionParamValue = string | number | boolean | null | IncomingContentBlock | IncomingContentBlock[];

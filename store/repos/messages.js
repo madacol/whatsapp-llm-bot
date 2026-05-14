@@ -1,4 +1,5 @@
 import { normalizeMessageRow } from "../normalizers.js";
+import { isSqliteDb } from "../../sqlite-db.js";
 
 /** @typedef {import("../../store.js").Store} Store */
 /** @typedef {import("../../store.js").MessageRow} MessageRow */
@@ -7,7 +8,7 @@ const POSTGRES_UNSUPPORTED_NUL = /\u0000/g;
 
 /**
  * @typedef {{
- *   getChatDb: (chatId: string) => Promise<PGlite>;
+ *   getChatDb: (chatId: string) => Promise<PGlite | import("../../sqlite-db.js").SqliteDb>;
  * }} MessageStoreDeps
  */
 
@@ -71,6 +72,17 @@ export function createMessageStore({ getChatDb }) {
     async updateToolMessage(chatId, toolCallId, messageData) {
       const db = await getChatDb(chatId);
       const sanitizedMessageData = sanitizeToolMessageForJsonb(messageData);
+      if (isSqliteDb(db)) {
+        const { rows: [row] } = await db.sql`
+          UPDATE messages
+          SET message_data = ${sanitizedMessageData}
+          WHERE chat_id = ${chatId}
+            AND json_extract(message_data, '$.role') = 'tool'
+            AND json_extract(message_data, '$.tool_id') = ${toolCallId}
+          RETURNING *
+        `;
+        return normalizeMessageRow(row);
+      }
       const { rows: [row] } = await db.sql`
         UPDATE messages
         SET message_data = ${sanitizedMessageData}

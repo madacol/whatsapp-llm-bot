@@ -2,13 +2,14 @@ import {
   normalizeWhatsAppOutboundQueueRow,
   normalizeWhatsAppWorkspacePresentationRow,
 } from "../normalizers.js";
+import { isSqliteDb } from "../../sqlite-db.js";
 
 /** @typedef {import("../../store.js").Store} Store */
 
 /**
  * @typedef {{
  *   db: PGlite;
- *   getChatDb: (chatId: string) => Promise<PGlite>;
+ *   getChatDb: (chatId: string) => Promise<PGlite | import("../../sqlite-db.js").SqliteDb>;
  *   listChatIds: () => Promise<string[]>;
  *   ensureChatExists: (chatId: string) => Promise<void>;
  * }} WhatsAppStoreDeps
@@ -124,7 +125,7 @@ export function createWhatsAppStoreInternals({ db, getChatDb, listChatIds, ensur
 
       const { rows: [row] } = await chatDb.sql`
         INSERT INTO whatsapp_outbound_queue (chat_id, payload_json)
-        VALUES (${chatId}, ${JSON.stringify(payloadJson)}::jsonb)
+        VALUES (${chatId}, ${isSqliteDb(chatDb) ? payloadJson : JSON.stringify(payloadJson)})
         RETURNING *
       `;
       const queueRow = normalizeWhatsAppOutboundQueueRow(row);
@@ -140,7 +141,7 @@ export function createWhatsAppStoreInternals({ db, getChatDb, listChatIds, ensur
     async listWhatsAppOutboundQueueEntries() {
       /** @type {import("../../store.js").WhatsAppOutboundQueueRow[]} */
       const queued = [];
-      /** @type {WeakSet<PGlite>} */
+      /** @type {WeakSet<PGlite | import("../../sqlite-db.js").SqliteDb>} */
       const seenDbs = new WeakSet();
       for (const chatId of await listChatIds()) {
         const chatDb = await getChatDb(chatId);

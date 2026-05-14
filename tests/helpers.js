@@ -11,6 +11,8 @@ import { formatUsageEventText } from "../usage-formatting.js";
 import { initStore } from "../store.js";
 import { ensureChatStoreSchema } from "../store/schema/chat.js";
 import { readChatConfig, updateChatConfig, writeChatConfig } from "../chat-config.js";
+import { setDb } from "../db.js";
+import { getChatSqlitePath } from "../chat-paths.js";
 
 const MODELS_CACHE_PATH = path.resolve("data/models.json");
 
@@ -42,6 +44,7 @@ export async function seedChat(db, chatId, options = {}) {
   await db.sql`INSERT INTO chats(chat_id)
     VALUES (${chatId})
     ON CONFLICT (chat_id) DO NOTHING`;
+  setDb(getChatSqlitePath(chatId), db);
 }
 
 /**
