@@ -261,6 +261,9 @@ export async function startCodexAppServerRun(input, deps = {}) {
   const prompt = buildCodexTurnInput(input.prompt, input.externalInstructions);
   const sandboxPolicy = buildCodexAppServerSandboxPolicy(input.runConfig);
   const approvalPolicy = mapCodexAppServerApprovalPolicy(input.runConfig?.approvalPolicy);
+  const approvalsReviewer = typeof input.runConfig?.approvalsReviewer === "string"
+    ? input.runConfig.approvalsReviewer
+    : undefined;
   const fileChangeTracker = createCodexFileChangeTracker();
   const dispatcher = createCodexEventDispatcher({
     hooks,
@@ -373,6 +376,7 @@ export async function startCodexAppServerRun(input, deps = {}) {
     ...(input.runConfig?.model && { model: input.runConfig.model }),
     ...(input.runConfig?.workdir && { cwd: input.runConfig.workdir }),
     ...(approvalPolicy && { approvalPolicy }),
+    ...(approvalsReviewer && { approvalsReviewer }),
     serviceName: "madabot",
   };
 
@@ -406,6 +410,7 @@ export async function startCodexAppServerRun(input, deps = {}) {
           input: [{ type: "text", text: prompt }],
           ...(input.runConfig?.workdir && { cwd: input.runConfig.workdir }),
           ...(approvalPolicy && { approvalPolicy }),
+          ...(approvalsReviewer && { approvalsReviewer }),
           ...(sandboxPolicy && { sandboxPolicy }),
           ...(input.runConfig?.model && { model: input.runConfig.model }),
         })

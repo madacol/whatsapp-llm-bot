@@ -182,13 +182,14 @@ describe("buildRunConfig", () => {
       harness: "codex",
       harness_cwd: null,
       harness_config: {
-        codex: { model: "gpt-5.4", sandboxMode: "danger-full-access" },
+        codex: { model: "gpt-5.4", sandboxMode: "danger-full-access", approvalsReviewer: "auto_review" },
         "claude-agent-sdk": { model: "claude-sonnet-4-6", reasoningEffort: "medium" },
       },
     }), "Project Alpha", "codex");
 
     assert.equal(config.model, "gpt-5.4");
     assert.equal(config.sandboxMode, "danger-full-access");
+    assert.equal(config.approvalsReviewer, "auto_review");
     assert.equal(config.reasoningEffort, undefined);
   });
 

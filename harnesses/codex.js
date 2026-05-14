@@ -213,6 +213,8 @@ function isLegacyClaudeModel(model) {
  *   readThread?: Parameters<typeof createCodexCommandHandler>[0]["readThread"],
  *   forkThread?: Parameters<typeof createCodexCommandHandler>[0]["forkThread"],
  *   getApprovalPolicyOptions?: Parameters<typeof createCodexCommandHandler>[0]["getApprovalPolicyOptions"],
+ *   getSandboxModeOptions?: Parameters<typeof createCodexCommandHandler>[0]["getSandboxModeOptions"],
+ *   getApprovalsReviewerOptions?: Parameters<typeof createCodexCommandHandler>[0]["getApprovalsReviewerOptions"],
  * }} CodexHarnessDeps
  */
 
@@ -232,6 +234,8 @@ export function createCodexHarness(deps = {}) {
     readThread: deps.readThread,
     forkThread: deps.forkThread,
     getApprovalPolicyOptions: deps.getApprovalPolicyOptions,
+    getSandboxModeOptions: deps.getSandboxModeOptions,
+    getApprovalsReviewerOptions: deps.getApprovalsReviewerOptions,
   });
 
   return {

@@ -2,6 +2,8 @@ import {
   CODEX_SANDBOX_MODES,
   DEFAULT_CODEX_SANDBOX_MODE,
   getCodexApprovalPolicyOptions,
+  getCodexApprovalsReviewerOptions,
+  getCodexSandboxModeOptions,
   getCodexConfig,
   getEffectiveCodexSandboxMode,
   isCodexApprovalPolicy,
@@ -20,6 +22,8 @@ import { errorToString } from "../utils.js";
  *   readThread?: (threadId: string, includeTurns: boolean) => Promise<{ thread?: { id?: string, preview?: string, turns?: Array<{ status?: string, items?: Array<{ type?: string, content?: Array<{ type?: string, text?: string }> }> }> } }>,
  *   forkThread?: (threadId: string) => Promise<{ thread?: { id?: string } }>,
  *   getApprovalPolicyOptions?: () => Promise<NonNullable<HarnessRunConfig["approvalPolicy"]>[]>,
+ *   getSandboxModeOptions?: () => Promise<NonNullable<HarnessRunConfig["sandboxMode"]>[]>,
+ *   getApprovalsReviewerOptions?: () => Promise<NonNullable<HarnessRunConfig["approvalsReviewer"]>[]>,
  * }} CodexCommandDeps
  */
 
@@ -251,26 +255,28 @@ async function handleCodexHarnessCommand(input, deps) {
   const permissionsMatch = trimmed.match(/^permissions(?:\s+(.+))?$/i);
   if (permissionsMatch) {
     const arg = permissionsMatch[1]?.trim() ?? null;
+    const availablePermissions = await getAvailablePermissionsOptions(deps);
     if (arg) {
-      await input.context.reply(contentEvent("tool-result", await handlePermissionsCommand(input.chatId, arg.toLowerCase())));
+      await input.context.reply(contentEvent("tool-result", await handlePermissionsCommand(input.chatId, arg.toLowerCase(), availablePermissions)));
       return true;
     }
     const config = await getCodexConfig(input.chatId);
     const currentPermissions = getEffectiveCodexSandboxMode(config);
     /** @type {SelectOption[]} */
-    const permissionOptions = [
-      { id: "workspace-write", label: "Workspace Write" },
-      { id: "read-only", label: "Read Only" },
-      { id: "danger-full-access", label: "Full Access" },
-    ];
+    const permissionOptions = availablePermissions.map((option) => ({
+      id: option.value,
+      label: option.kind === "reviewer"
+        ? `Reviewer: ${formatCodexOptionLabel(option.value)}`
+        : `Sandbox: ${formatCodexOptionLabel(option.value)}`,
+    }));
     const permissionChoice = await input.context.select("Choose Codex permissions", permissionOptions, {
-      currentId: currentPermissions,
+      currentId: getCurrentPermissionSelectId(config, currentPermissions, availablePermissions),
     });
     if (permissionChoice && permissionChoice !== currentPermissions) {
-      await handlePermissionsCommand(input.chatId, permissionChoice);
+      await handlePermissionsCommand(input.chatId, permissionChoice, availablePermissions);
     }
     const updatedConfig = await getCodexConfig(input.chatId);
-    await input.context.reply(contentEvent("tool-result", `Codex permissions: \`${getEffectiveCodexSandboxMode(updatedConfig)}\``));
+    await input.context.reply(contentEvent("tool-result", formatCodexPermissionsSummary(updatedConfig)));
     return true;
   }
 
@@ -360,21 +366,109 @@ async function handleSandboxCommand(chatId, arg) {
 }
 
 /**
+ * @param {string} value
+ * @returns {string}
+ */
+function formatCodexOptionLabel(value) {
+  return value
+    .split(/[-_]/)
+    .filter(Boolean)
+    .map((part) => part.slice(0, 1).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
+/**
+ * @param {string} value
+ * @returns {string}
+ */
+function normalizeCodexApprovalsReviewerInput(value) {
+  return value.trim().toLowerCase().replace(/[\s-]+/g, "_");
+}
+
+/**
+ * @param {Record<string, unknown>} config
+ * @returns {string}
+ */
+function formatCodexPermissionsSummary(config) {
+  const sandboxMode = getEffectiveCodexSandboxMode(config);
+  const approvalsReviewer = typeof config.approvalsReviewer === "string"
+    ? config.approvalsReviewer
+    : "default";
+  return `Codex permissions: sandbox \`${sandboxMode}\`, reviewer \`${approvalsReviewer}\``;
+}
+
+/**
+ * @param {CodexCommandDeps} deps
+ * @returns {Promise<Array<{ kind: "sandbox", value: NonNullable<HarnessRunConfig["sandboxMode"]> } | { kind: "reviewer", value: NonNullable<HarnessRunConfig["approvalsReviewer"]> }>>}
+ */
+async function getAvailablePermissionsOptions(deps) {
+  const sandboxOptions = deps.getSandboxModeOptions
+    ? await deps.getSandboxModeOptions()
+    : await getCodexSandboxModeOptions();
+  const reviewerOptions = deps.getApprovalsReviewerOptions
+    ? await deps.getApprovalsReviewerOptions()
+    : await getCodexApprovalsReviewerOptions();
+  return [
+    ...sandboxOptions.map((value) => /** @type {{ kind: "sandbox", value: NonNullable<HarnessRunConfig["sandboxMode"]> }} */ ({ kind: "sandbox", value })),
+    ...reviewerOptions.map((value) => /** @type {{ kind: "reviewer", value: NonNullable<HarnessRunConfig["approvalsReviewer"]> }} */ ({ kind: "reviewer", value })),
+  ];
+}
+
+/**
+ * @param {Record<string, unknown>} config
+ * @param {NonNullable<HarnessRunConfig["sandboxMode"]>} currentSandboxMode
+ * @param {Awaited<ReturnType<typeof getAvailablePermissionsOptions>>} availablePermissions
+ * @returns {string}
+ */
+function getCurrentPermissionSelectId(config, currentSandboxMode, availablePermissions) {
+  const approvalsReviewer = typeof config.approvalsReviewer === "string"
+    ? config.approvalsReviewer
+    : null;
+  if (approvalsReviewer && availablePermissions.some((option) => option.kind === "reviewer" && option.value === approvalsReviewer)) {
+    return approvalsReviewer;
+  }
+  return currentSandboxMode;
+}
+
+/**
+ * @param {string} value
+ * @param {Awaited<ReturnType<typeof getAvailablePermissionsOptions>>} availablePermissions
+ * @returns {{ kind: "sandbox", value: NonNullable<HarnessRunConfig["sandboxMode"]> } | { kind: "reviewer", value: NonNullable<HarnessRunConfig["approvalsReviewer"]> } | null}
+ */
+function findAvailablePermissionOption(value, availablePermissions) {
+  const sandboxMode = normalizeCodexPermissionsMode(value);
+  if (sandboxMode && availablePermissions.some((option) => option.kind === "sandbox" && option.value === sandboxMode)) {
+    return { kind: "sandbox", value: sandboxMode };
+  }
+  const approvalsReviewer = normalizeCodexApprovalsReviewerInput(value);
+  const reviewerOption = availablePermissions.find((option) => option.kind === "reviewer" && option.value === approvalsReviewer);
+  return reviewerOption?.kind === "reviewer" ? { kind: "reviewer", value: reviewerOption.value } : null;
+}
+
+/**
  * @param {string} chatId
  * @param {string} arg
+ * @param {Awaited<ReturnType<typeof getAvailablePermissionsOptions>>} availablePermissions
  * @returns {Promise<string>}
  */
-async function handlePermissionsCommand(chatId, arg) {
+async function handlePermissionsCommand(chatId, arg, availablePermissions = []) {
   if (arg === "off" || arg === "default" || arg === "none") {
-    await updateCodexConfig(chatId, { sandboxMode: null });
+    await updateCodexConfig(chatId, { sandboxMode: null, approvalsReviewer: null });
     return `Codex permissions reset to project default (\`${DEFAULT_CODEX_SANDBOX_MODE}\`).`;
   }
-  const sandboxMode = normalizeCodexPermissionsMode(arg);
-  if (!sandboxMode) {
-    return `Unknown permissions mode \`${arg}\`. Use: workspace-write, read-only, danger-full-access`;
+  const option = findAvailablePermissionOption(arg, availablePermissions.length > 0
+    ? availablePermissions
+    : [...CODEX_SANDBOX_MODES].map((value) => /** @type {{ kind: "sandbox", value: NonNullable<HarnessRunConfig["sandboxMode"]> }} */ ({ kind: "sandbox", value })));
+  if (!option) {
+    const availableValues = availablePermissions.map((permission) => permission.value).join(", ");
+    return `Unknown permissions mode \`${arg}\`. Use: ${availableValues || [...CODEX_SANDBOX_MODES].join(", ")}`;
   }
-  await updateCodexConfig(chatId, { sandboxMode });
-  return `Codex permissions: \`${sandboxMode}\``;
+  if (option.kind === "reviewer") {
+    await updateCodexConfig(chatId, { approvalsReviewer: option.value });
+    return `Codex permissions reviewer: \`${option.value}\``;
+  }
+  await updateCodexConfig(chatId, { sandboxMode: option.value });
+  return `Codex permissions: \`${option.value}\``;
 }
 
 /**

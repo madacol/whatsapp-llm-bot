@@ -41,5 +41,6 @@ export function buildRunConfig(chatId, chatInfo, chatName, harnessName, resolved
     // without requiring per-chat sandbox setup.
     sandboxMode: /** @type {HarnessRunConfig["sandboxMode"]} */ (typeof harnessConfig.sandboxMode === "string" ? harnessConfig.sandboxMode : "workspace-write"),
     approvalPolicy: /** @type {HarnessRunConfig["approvalPolicy"]} */ (typeof harnessConfig.approvalPolicy === "string" ? harnessConfig.approvalPolicy : undefined),
+    approvalsReviewer: /** @type {HarnessRunConfig["approvalsReviewer"]} */ (typeof harnessConfig.approvalsReviewer === "string" ? harnessConfig.approvalsReviewer : undefined),
   };
 }
