@@ -187,6 +187,51 @@ describe("code-image-renderer", () => {
       assert.ok(width <= 760, `expected table image width to stay bounded, got ${width}px`);
       assert.ok(height >= 240, `expected wrapped table image to grow taller, got ${height}px`);
     });
+
+    it("splits many long columns into multiple readable image groups", () => {
+      const headers = Array.from({ length: 9 }, (_value, index) => `Column ${index + 1}`);
+      const longCells = headers.map((_header, index) => {
+        const prefix = index === headers.length - 1 ? "This is a final very long line" : "This is another very long line";
+        return `${prefix} that should be wrapped if the table is too wide for the screen and it should be readable and not too wide.`;
+      });
+      const table = [
+        `| ${headers.join(" | ")} |`,
+        `| ${headers.map(() => "---").join(" | ")} |`,
+        `| ${longCells.join(" | ")} |`,
+      ].join("\n");
+
+      const images = renderTableToImages(table);
+      assert.equal(images.length, 3, "nine long columns should split into three image groups");
+
+      const dimensions = images.map(getPngDimensions);
+      for (const { width } of dimensions) {
+        assert.ok(width <= 760, `expected split table image width to stay bounded, got ${width}px`);
+      }
+      assert.ok(
+        dimensions.some(({ height }) => height >= 180),
+        `expected at least one split table image to grow from wrapped cells, got ${JSON.stringify(dimensions)}`,
+      );
+      for (const { height } of dimensions) {
+        assert.ok(height >= 100, `expected split table image to keep readable row height, got ${height}px`);
+      }
+    });
+
+    it("splits a 100-row table into multiple vertical images", () => {
+      const table = [
+        "| Row | Column 1 | Column 2 | Column 3 |",
+        "| --- | --- | --- | --- |",
+        ...Array.from({ length: 100 }, (_value, index) => `| ${index + 1} | Value 1 | Value 2 | Value 3 |`),
+      ].join("\n");
+
+      const images = renderTableToImages(table);
+      assert.equal(images.length, 2, "100 compact rows should split into two vertical images");
+
+      for (const image of images) {
+        const { width, height } = getPngDimensions(image);
+        assert.ok(width <= 760, `expected 100-row table image width to stay bounded, got ${width}px`);
+        assert.ok(height <= 2200, `expected vertical chunks to respect height cap, got ${height}px`);
+      }
+    });
   });
 
   describe("formatBashCommand", () => {

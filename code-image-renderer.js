@@ -84,6 +84,7 @@ const BOLD_FONT_PATH = "/usr/share/fonts/truetype/dejavu/DejaVuSansMono-Bold.ttf
 export const MIN_ROWS_FOR_TABLE_IMAGE = 3;
 const TABLE_IMAGE_WIDTH_CAP = 760;
 const TABLE_MIN_COL_WIDTH = 64;
+const TABLE_MIN_READABLE_COL_WIDTH = 160;
 const TABLE_MAX_CHUNK_HEIGHT = 2200;
 
 /**
@@ -439,13 +440,13 @@ function wrapTableCellText(text, maxChars) {
 }
 
 /**
- * Allocate table column widths within a readable image width cap.
+ * Estimate unconstrained table column widths from normalized cell text.
  * @param {string[]} headers
  * @param {string[][]} rows
  * @returns {number[]}
  */
-function computeTableColumnWidths(headers, rows) {
-  const desiredWidths = headers.map((h, i) => {
+function computeDesiredTableColumnWidths(headers, rows) {
+  return headers.map((h, i) => {
     let maxLen = normalizeTableCellText(h).length;
     for (const row of rows) {
       const cellLength = normalizeTableCellText(row[i] ?? "").length;
@@ -453,6 +454,16 @@ function computeTableColumnWidths(headers, rows) {
     }
     return Math.max(TABLE_MIN_COL_WIDTH, maxLen * CHAR_WIDTH + TABLE_CELL_PADDING_H * 2);
   });
+}
+
+/**
+ * Allocate table column widths within a readable image width cap.
+ * @param {string[]} headers
+ * @param {string[][]} rows
+ * @returns {number[]}
+ */
+function computeTableColumnWidths(headers, rows) {
+  const desiredWidths = computeDesiredTableColumnWidths(headers, rows);
 
   const maxContentWidth = TABLE_IMAGE_WIDTH_CAP - PADDING * 2;
   const desiredTotal = desiredWidths.reduce((a, b) => a + b, 0);
@@ -467,6 +478,34 @@ function computeTableColumnWidths(headers, rows) {
     const flex = Math.max(0, width - TABLE_MIN_COL_WIDTH);
     return Math.floor(TABLE_MIN_COL_WIDTH + flexibleBudget * (flex / flexibleTotal));
   });
+}
+
+/**
+ * Split very wide tables into column groups so individual cells remain readable
+ * instead of shrinking every column into word-by-word wrapping.
+ * @param {string[]} headers
+ * @param {string[][]} rows
+ * @returns {number[][]}
+ */
+function splitTableColumnIndexes(headers, rows) {
+  const desiredWidths = computeDesiredTableColumnWidths(headers, rows);
+  const maxContentWidth = TABLE_IMAGE_WIDTH_CAP - PADDING * 2;
+  const desiredTotal = desiredWidths.reduce((a, b) => a + b, 0);
+  if (desiredTotal <= maxContentWidth) {
+    return [headers.map((_header, index) => index)];
+  }
+
+  const maxColumnsPerReadableChunk = Math.max(1, Math.floor(maxContentWidth / TABLE_MIN_READABLE_COL_WIDTH));
+  if (headers.length <= maxColumnsPerReadableChunk) {
+    return [headers.map((_header, index) => index)];
+  }
+
+  /** @type {number[][]} */
+  const chunks = [];
+  for (let index = 0; index < headers.length; index += maxColumnsPerReadableChunk) {
+    chunks.push(headers.slice(index, index + maxColumnsPerReadableChunk).map((_header, offset) => index + offset));
+  }
+  return chunks;
 }
 
 /**
@@ -487,15 +526,13 @@ function layoutTableRow(cells, colWidths) {
 }
 
 /**
- * Render a markdown table as a styled PNG image.
- * Uses the same dark theme as code blocks, with grid lines and header styling.
- * @param {string} markdownTable
+ * Render one vertical row-chunked table image set for the given columns.
+ * @param {string[]} headers
+ * @param {ColumnAlignment[]} alignments
+ * @param {string[][]} rows
  * @returns {Buffer[]}
  */
-export function renderTableToImages(markdownTable) {
-  const { headers, alignments, rows } = parseMarkdownTable(markdownTable);
-  if (headers.length === 0 || rows.length === 0) return [];
-
+function renderTableColumnGroupToImages(headers, alignments, rows) {
   // ── measure column widths ─────────────────────────────────────────
   const maxPixels = 12_500_000;
   const MAX_LINES_PER_CHUNK = 100;
@@ -620,6 +657,27 @@ export function renderTableToImages(markdownTable) {
     images.push(Buffer.from(pngData.asPng()));
   }
 
+  return images;
+}
+
+/**
+ * Render a markdown table as a styled PNG image.
+ * Uses the same dark theme as code blocks, with grid lines and header styling.
+ * @param {string} markdownTable
+ * @returns {Buffer[]}
+ */
+export function renderTableToImages(markdownTable) {
+  const { headers, alignments, rows } = parseMarkdownTable(markdownTable);
+  if (headers.length === 0 || rows.length === 0) return [];
+
+  /** @type {Buffer[]} */
+  const images = [];
+  for (const columnIndexes of splitTableColumnIndexes(headers, rows)) {
+    const columnHeaders = columnIndexes.map(index => headers[index] ?? "");
+    const columnAlignments = columnIndexes.map(index => alignments[index] ?? "left");
+    const columnRows = rows.map(row => columnIndexes.map(index => row[index] ?? ""));
+    images.push(...renderTableColumnGroupToImages(columnHeaders, columnAlignments, columnRows));
+  }
   return images;
 }
 
