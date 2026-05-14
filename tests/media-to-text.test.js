@@ -1,5 +1,6 @@
 import { describe, it, before, after, afterEach } from "node:test";
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { createTestDb, createMockLlmServer, withModelsCache } from "./helpers.js";
 import { createLlmClient } from "../llm.js";
 import config from "../config.js";
@@ -252,6 +253,72 @@ describe("media-to-text", () => {
       });
     });
 
+    it("does not reuse cache entries from the pre-boundary prompt namespace", async () => {
+      const { convertUnsupportedMedia, ensureMediaToTextSchema } = await import(
+        "../media-to-text.js"
+      );
+
+      const models = [
+        {
+          id: "text-only/model",
+          name: "Text Only",
+          context_length: 4096,
+          pricing: { prompt: "0.000001", completion: "0.000001" },
+          architecture: { input_modalities: ["text"] },
+        },
+        {
+          id: "vision/model",
+          name: "Vision",
+          context_length: 4096,
+          pricing: { prompt: "0.000001", completion: "0.000001" },
+          architecture: { input_modalities: ["text", "image"] },
+        },
+      ];
+
+      await withModelsCache(models, async () => {
+        const imageData = Buffer.from("old-cache-image-data").toString("base64");
+        const oldContentHash = createHash("sha256").update(Buffer.from(imageData, "base64")).digest("hex").slice(0, 16);
+        await ensureMediaToTextSchema(db);
+        await db.sql`INSERT INTO media_to_text_cache (content_hash, model_id, translation)
+          VALUES (${oldContentHash}, ${"vision/model"}, ${"Stale pre-boundary description"})`;
+
+        mockServer.addResponses("Fresh post-boundary description");
+
+        /** @type {MessageRow[]} */
+        const messages = [
+          {
+            message_id: 1,
+            chat_id: "test",
+            sender_id: "user1",
+            message_data: {
+              role: "user",
+              content: [
+                {
+                  type: "image",
+                  encoding: "base64",
+                  mime_type: "image/png",
+                  data: imageData,
+                },
+              ],
+            },
+            timestamp: new Date(),
+          },
+        ];
+
+        const result = await convertUnsupportedMedia(
+          messages,
+          "text-only/model",
+          { image: "vision/model" },
+          llmClient,
+          db,
+        );
+
+        const text = result.messages[0].message_data.content[0].text;
+        assert.ok(text.includes("Fresh post-boundary description"), `Should bypass stale cache entry, got: ${text}`);
+        assert.ok(!text.includes("Stale pre-boundary description"));
+      });
+    });
+
     it("skips unsupported content when no media-to-text model is configured", async () => {
       const { convertUnsupportedMedia } = await import(
         "../media-to-text.js"
@@ -466,6 +533,99 @@ describe("media-to-text", () => {
         const allText = JSON.stringify(reqMessages);
         assert.ok(allText.includes("hola que tal"), "Should include prior user message");
         assert.ok(allText.includes("what does the label say about milk"), "Should include current user text");
+      });
+    });
+
+    it("does not include media-to-text context before a clear command", async () => {
+      const { convertUnsupportedMedia } = await import(
+        "../media-to-text.js"
+      );
+
+      await withModelsCache([
+        {
+          id: "text-only/model",
+          name: "Text Only",
+          context_length: 4096,
+          pricing: { prompt: "0.000001", completion: "0.000001" },
+          architecture: { input_modalities: ["text"] },
+        },
+        {
+          id: "vision/model",
+          name: "Vision",
+          context_length: 4096,
+          pricing: { prompt: "0.000001", completion: "0.000001" },
+          architecture: { input_modalities: ["text", "image"] },
+        },
+      ], async () => {
+        mockServer.addResponses("Fresh table screenshot description");
+
+        /** @type {MessageRow[]} */
+        const messages = [
+          {
+            message_id: 1,
+            chat_id: "test",
+            sender_id: "user1",
+            message_data: {
+              role: "user",
+              content: [{ type: "text", text: "Old context about .git-local and purchase-manager." }],
+            },
+            timestamp: new Date(),
+          },
+          {
+            message_id: 2,
+            chat_id: "test",
+            sender_id: "user1",
+            message_data: {
+              role: "user",
+              content: [{ type: "text", text: "/clear" }],
+            },
+            timestamp: new Date(),
+          },
+          {
+            message_id: 3,
+            chat_id: "test",
+            sender_id: "user1",
+            message_data: {
+              role: "user",
+              content: [{ type: "text", text: "New context about markdown table rendering." }],
+            },
+            timestamp: new Date(),
+          },
+          {
+            message_id: 4,
+            chat_id: "test",
+            sender_id: "user1",
+            message_data: {
+              role: "user",
+              content: [
+                { type: "text", text: "What does this screenshot show?" },
+                {
+                  type: "image",
+                  encoding: "base64",
+                  mime_type: "image/png",
+                  data: "table-screenshot-data",
+                },
+              ],
+            },
+            timestamp: new Date(),
+          },
+        ];
+
+        const requestsBefore = mockServer.getRequests().length;
+        await convertUnsupportedMedia(
+          messages,
+          "text-only/model",
+          { image: "vision/model" },
+          llmClient,
+          db,
+        );
+
+        const translationRequest = mockServer.getRequests()[requestsBefore];
+        const allText = JSON.stringify(translationRequest.messages);
+        assert.ok(allText.includes("New context about markdown table rendering."), "Should keep context after /clear");
+        assert.ok(allText.includes("What does this screenshot show?"), "Should include current user text");
+        assert.ok(!allText.includes(".git-local"), "Should drop context before /clear");
+        assert.ok(!allText.includes("purchase-manager"), "Should drop old context before /clear");
       });
     });
 
