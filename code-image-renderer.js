@@ -77,11 +77,21 @@ const DIFF_DEL_GUTTER = "#f8514980";
 // Table rendering constants
 const TABLE_HEADER_BG = "#161b22";
 const TABLE_CELL_PADDING_H = 12;
-const TABLE_CELL_PADDING_V = 4;
+const TABLE_CELL_PADDING_V = 6;
 const TABLE_BORDER_COLOR = "#30363d";
 const TEXT_COLOR = "#e6edf3";
 const BOLD_FONT_PATH = "/usr/share/fonts/truetype/dejavu/DejaVuSansMono-Bold.ttf";
 export const MIN_ROWS_FOR_TABLE_IMAGE = 3;
+const TABLE_IMAGE_WIDTH_CAP = 760;
+const TABLE_MIN_COL_WIDTH = 64;
+const TABLE_MAX_CHUNK_HEIGHT = 2200;
+
+/**
+ * @typedef {{
+ *   cells: string[][],
+ *   height: number,
+ * }} TableRowLayout
+ */
 
 /** @type {Awaited<ReturnType<typeof createHighlighter>> | null} */
 let highlighter = null;
@@ -365,6 +375,118 @@ function parseMarkdownTable(markdown) {
 }
 
 /**
+ * Normalize markdown cell text for an image table. The image renderer owns the
+ * visual presentation, so common emphasis markers should not be shown literally.
+ * @param {string} text
+ * @returns {string}
+ */
+function normalizeTableCellText(text) {
+  return text
+    .replace(/\\([\\`*_{}\[\]()#+\-.!|>])/g, "$1")
+    .replace(/\*\*([^*]+)\*\*/g, "$1")
+    .replace(/__([^_]+)__/g, "$1")
+    .replace(/(?<!\*)\*(?!\*)([^*]+)(?<!\*)\*(?!\*)/g, "$1")
+    .replace(/(?<!_)_(?!_)([^_]+)(?<!_)_(?!_)/g, "$1")
+    .replace(/`([^`]+)`/g, "$1");
+}
+
+/**
+ * Wrap display text into lines that fit a table cell.
+ * @param {string} text
+ * @param {number} maxChars
+ * @returns {string[]}
+ */
+function wrapTableCellText(text, maxChars) {
+  const normalized = normalizeTableCellText(text).replace(/\s+/g, " ").trim();
+  if (!normalized) return [""];
+
+  /** @type {string[]} */
+  const lines = [];
+  let current = "";
+
+  /**
+   * @param {string} line
+   * @returns {void}
+   */
+  const pushHardWrappedToken = (line) => {
+    for (let index = 0; index < line.length; index += maxChars) {
+      lines.push(line.slice(index, index + maxChars));
+    }
+  };
+
+  for (const word of normalized.split(" ")) {
+    if (word.length > maxChars) {
+      if (current) {
+        lines.push(current);
+        current = "";
+      }
+      pushHardWrappedToken(word);
+      continue;
+    }
+
+    const next = current ? `${current} ${word}` : word;
+    if (next.length <= maxChars) {
+      current = next;
+      continue;
+    }
+
+    if (current) lines.push(current);
+    current = word;
+  }
+
+  if (current) lines.push(current);
+  return lines.length ? lines : [""];
+}
+
+/**
+ * Allocate table column widths within a readable image width cap.
+ * @param {string[]} headers
+ * @param {string[][]} rows
+ * @returns {number[]}
+ */
+function computeTableColumnWidths(headers, rows) {
+  const desiredWidths = headers.map((h, i) => {
+    let maxLen = normalizeTableCellText(h).length;
+    for (const row of rows) {
+      const cellLength = normalizeTableCellText(row[i] ?? "").length;
+      if (cellLength > maxLen) maxLen = cellLength;
+    }
+    return Math.max(TABLE_MIN_COL_WIDTH, maxLen * CHAR_WIDTH + TABLE_CELL_PADDING_H * 2);
+  });
+
+  const maxContentWidth = TABLE_IMAGE_WIDTH_CAP - PADDING * 2;
+  const desiredTotal = desiredWidths.reduce((a, b) => a + b, 0);
+  if (desiredTotal <= maxContentWidth) return desiredWidths;
+
+  const minTotal = TABLE_MIN_COL_WIDTH * headers.length;
+  if (minTotal >= maxContentWidth) return desiredWidths.map(() => TABLE_MIN_COL_WIDTH);
+
+  const flexibleTotal = desiredWidths.reduce((total, width) => total + Math.max(0, width - TABLE_MIN_COL_WIDTH), 0);
+  const flexibleBudget = maxContentWidth - minTotal;
+  return desiredWidths.map(width => {
+    const flex = Math.max(0, width - TABLE_MIN_COL_WIDTH);
+    return Math.floor(TABLE_MIN_COL_WIDTH + flexibleBudget * (flex / flexibleTotal));
+  });
+}
+
+/**
+ * @param {string[]} cells
+ * @param {number[]} colWidths
+ * @returns {TableRowLayout}
+ */
+function layoutTableRow(cells, colWidths) {
+  const wrappedCells = cells.map((cell, col) => {
+    const maxChars = Math.max(1, Math.floor((colWidths[col] - TABLE_CELL_PADDING_H * 2) / CHAR_WIDTH));
+    return wrapTableCellText(cell ?? "", maxChars);
+  });
+  const lineCount = Math.max(1, ...wrappedCells.map(lines => lines.length));
+  return {
+    cells: wrappedCells,
+    height: lineCount * LINE_HEIGHT + TABLE_CELL_PADDING_V * 2,
+  };
+}
+
+/**
  * Render a markdown table as a styled PNG image.
  * Uses the same dark theme as code blocks, with grid lines and header styling.
  * @param {string} markdownTable
@@ -375,79 +497,62 @@ export function renderTableToImages(markdownTable) {
   if (headers.length === 0 || rows.length === 0) return [];
 
   // ── measure column widths ─────────────────────────────────────────
-  const MAX_SVG_WIDTH = 4000;
-  const MAX_PIXELS = 12_500_000;
+  const maxPixels = 12_500_000;
   const MAX_LINES_PER_CHUNK = 100;
 
-  /** @type {number[]} */
-  const colWidths = headers.map((h, i) => {
-    let maxLen = h.length;
-    for (const row of rows) {
-      if (row[i].length > maxLen) maxLen = row[i].length;
-    }
-    return maxLen * CHAR_WIDTH + TABLE_CELL_PADDING_H * 2;
-  });
-
-  // Enforce minimum column width
-  const MIN_COL_WIDTH = 50;
-  for (let i = 0; i < colWidths.length; i++) {
-    if (colWidths[i] < MIN_COL_WIDTH) colWidths[i] = MIN_COL_WIDTH;
-  }
-
+  const colWidths = computeTableColumnWidths(headers, rows);
   const tableContentWidth = colWidths.reduce((a, b) => a + b, 0);
-  const svgWidth = Math.min(tableContentWidth + PADDING * 2, MAX_SVG_WIDTH);
-
-  // Scale columns if table is too wide
-  if (tableContentWidth + PADDING * 2 > MAX_SVG_WIDTH) {
-    const scale = (MAX_SVG_WIDTH - PADDING * 2) / tableContentWidth;
-    for (let i = 0; i < colWidths.length; i++) {
-      colWidths[i] = Math.max(MIN_COL_WIDTH, Math.floor(colWidths[i] * scale));
-    }
-  }
-
-  // ── chunk rows ────────────────────────────────────────────────────
-  const rowHeight = LINE_HEIGHT + TABLE_CELL_PADDING_V;
-  const maxRowsPerChunk = Math.min(
-    MAX_LINES_PER_CHUNK,
-    Math.max(10, Math.floor((MAX_PIXELS / svgWidth - PADDING * 2) / rowHeight) - 1),
+  const svgWidth = tableContentWidth + PADDING * 2;
+  const maxChunkHeight = Math.max(
+    LINE_HEIGHT + PADDING * 2,
+    Math.min(TABLE_MAX_CHUNK_HEIGHT, Math.floor(maxPixels / svgWidth)),
   );
 
-  /** @type {string[][][]} */
+  const headerLayout = layoutTableRow(headers, colWidths);
+  const rowLayouts = rows.map(row => layoutTableRow(row, colWidths));
+
+  // ── chunk rows ────────────────────────────────────────────────────
+  /** @type {TableRowLayout[][]} */
   const chunks = [];
-  for (let i = 0; i < rows.length; i += maxRowsPerChunk) {
-    chunks.push(rows.slice(i, i + maxRowsPerChunk));
+  /** @type {TableRowLayout[]} */
+  let currentChunk = [];
+  let currentHeight = PADDING * 2 + headerLayout.height;
+  for (const rowLayout of rowLayouts) {
+    const wouldExceedHeight = currentHeight + rowLayout.height > maxChunkHeight;
+    const wouldExceedRows = currentChunk.length >= MAX_LINES_PER_CHUNK;
+    if (currentChunk.length > 0 && (wouldExceedHeight || wouldExceedRows)) {
+      chunks.push(currentChunk);
+      currentChunk = [];
+      currentHeight = PADDING * 2 + headerLayout.height;
+    }
+    currentChunk.push(rowLayout);
+    currentHeight += rowLayout.height;
   }
+  if (currentChunk.length > 0) chunks.push(currentChunk);
 
   /** @type {Buffer[]} */
   const images = [];
 
   for (const chunk of chunks) {
-    const totalRows = 1 + chunk.length; // header + data rows
-    const svgHeight = totalRows * rowHeight + PADDING * 2;
+    const svgHeight = PADDING * 2 + headerLayout.height + chunk.reduce((total, row) => total + row.height, 0);
 
     let svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${svgWidth}" height="${svgHeight}">`;
     svg += `<rect width="100%" height="100%" fill="${BG_COLOR}" rx="8"/>`;
 
     /**
      * Draw a row of text cells.
-     * @param {string[]} cells
-     * @param {number} rowIdx — 0-based row index in this chunk (0 = header)
+     * @param {TableRowLayout} row
+     * @param {number} y
      * @param {boolean} isHeader
      */
-    const drawRow = (cells, rowIdx, isHeader) => {
-      const y = PADDING + rowIdx * rowHeight;
-      const textY = y + rowHeight - TABLE_CELL_PADDING_V - 2;
-
+    const drawRow = (row, y, isHeader) => {
       // Header background
       if (isHeader) {
-        svg += `<rect x="${PADDING}" y="${y}" width="${svgWidth - PADDING * 2}" height="${rowHeight}" fill="${TABLE_HEADER_BG}"/>`;
+        svg += `<rect x="${PADDING}" y="${y}" width="${svgWidth - PADDING * 2}" height="${row.height}" fill="${TABLE_HEADER_BG}"/>`;
       }
 
       let x = PADDING;
       for (let col = 0; col < headers.length; col++) {
-        const cellText = (cells[col] ?? "").slice(0, Math.floor((colWidths[col] - TABLE_CELL_PADDING_H * 2) / CHAR_WIDTH));
-        const truncated = cellText.length < (cells[col] ?? "").length;
-        const display = truncated ? cellText.slice(0, -1) + "…" : cellText;
         const align = alignments[col] ?? "left";
 
         let textX;
@@ -465,27 +570,34 @@ export function renderTableToImages(markdownTable) {
         }
 
         const weight = isHeader ? ` font-weight="bold"` : "";
-        svg += `<text x="${textX}" y="${textY}" font-family="${FONT_FAMILY}" font-size="${FONT_SIZE}" fill="${TEXT_COLOR}" text-anchor="${anchor}"${weight} xml:space="preserve">${escapeXml(display)}</text>`;
+        const cellLines = row.cells[col] ?? [""];
+        for (let lineIndex = 0; lineIndex < cellLines.length; lineIndex++) {
+          const textY = y + TABLE_CELL_PADDING_V + (lineIndex + 1) * LINE_HEIGHT - 4;
+          svg += `<text x="${textX}" y="${textY}" font-family="${FONT_FAMILY}" font-size="${FONT_SIZE}" fill="${TEXT_COLOR}" text-anchor="${anchor}"${weight} xml:space="preserve">${escapeXml(cellLines[lineIndex])}</text>`;
+        }
 
         x += colWidths[col];
       }
     };
 
     // Draw header
-    drawRow(headers, 0, true);
+    let y = PADDING;
+    drawRow(headerLayout, y, true);
 
     // Header separator (thicker)
-    const sepY = PADDING + rowHeight;
+    y += headerLayout.height;
+    const sepY = y;
     svg += `<line x1="${PADDING}" y1="${sepY}" x2="${svgWidth - PADDING}" y2="${sepY}" stroke="${TABLE_BORDER_COLOR}" stroke-width="2"/>`;
 
     // Draw data rows
     for (let r = 0; r < chunk.length; r++) {
-      drawRow(chunk[r], r + 1, false);
+      const row = chunk[r];
+      drawRow(row, y, false);
+      y += row.height;
 
       // Row separator
       if (r < chunk.length - 1) {
-        const lineY = PADDING + (r + 2) * rowHeight;
-        svg += `<line x1="${PADDING}" y1="${lineY}" x2="${svgWidth - PADDING}" y2="${lineY}" stroke="${TABLE_BORDER_COLOR}" stroke-width="1"/>`;
+        svg += `<line x1="${PADDING}" y1="${y}" x2="${svgWidth - PADDING}" y2="${y}" stroke="${TABLE_BORDER_COLOR}" stroke-width="1"/>`;
       }
     }
 
@@ -493,7 +605,7 @@ export function renderTableToImages(markdownTable) {
     let vx = PADDING;
     for (let col = 0; col < headers.length - 1; col++) {
       vx += colWidths[col];
-      svg += `<line x1="${vx}" y1="${PADDING}" x2="${vx}" y2="${PADDING + totalRows * rowHeight}" stroke="${TABLE_BORDER_COLOR}" stroke-width="1"/>`;
+      svg += `<line x1="${vx}" y1="${PADDING}" x2="${vx}" y2="${svgHeight - PADDING}" stroke="${TABLE_BORDER_COLOR}" stroke-width="1"/>`;
     }
 
     svg += `</svg>`;
