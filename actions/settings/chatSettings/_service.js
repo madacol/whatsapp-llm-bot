@@ -79,12 +79,12 @@ const SHOW_NONE_OPTION_ID = "none";
  *   chatId: string;
  *   chat: import("../../../store.js").ChatRow;
  *   value: string;
- *   extra: { senderIds?: string[], getActions?: () => Promise<Action[]>, rootDb?: PGlite, getChatDb?: (chatId: string) => PGlite };
+ *   extra: { senderIds?: string[], getActions?: () => Promise<Action[]>, rootDb?: PGlite, getChatDb?: (chatId: string) => ChatDb };
  * }} ConfigSetContext
  */
 
 /**
- * @typedef {(chat: import("../../../store.js").ChatRow, extra: { rootDb?: PGlite, chatId?: string, getActions?: () => Promise<Action[]>, getChatDb?: (chatId: string) => PGlite }) => string | Promise<string>} ConfigCurrentFormatter
+ * @typedef {(chat: import("../../../store.js").ChatRow, extra: { rootDb?: PGlite, chatId?: string, getActions?: () => Promise<Action[]>, getChatDb?: (chatId: string) => ChatDb }) => string | Promise<string>} ConfigCurrentFormatter
  */
 
 /**
@@ -929,7 +929,7 @@ export function getConfigKeyDefinition(key) {
 /**
  * @param {import("../../../store.js").ChatRow} chat
  * @param {ConfigKeyDefinition} definition
- * @param {{ rootDb?: PGlite, chatId?: string, getActions?: () => Promise<Action[]>, getChatDb?: (chatId: string) => PGlite }} extra
+ * @param {{ rootDb?: PGlite, chatId?: string, getActions?: () => Promise<Action[]>, getChatDb?: (chatId: string) => ChatDb }} extra
  * @returns {Promise<string>}
  */
 async function formatCurrentValue(chat, definition, extra) {
@@ -977,7 +977,7 @@ function getDefinitionMultiOptions(definition, chat) {
  * Show a full summary of all chat settings.
  * @param {PGlite} rootDb
  * @param {string} chatId
- * @param {{ senderIds?: string[], getActions?: () => Promise<Action[]>, rootDb?: PGlite, getChatDb?: (chatId: string) => PGlite }} extra
+ * @param {{ senderIds?: string[], getActions?: () => Promise<Action[]>, rootDb?: PGlite, getChatDb?: (chatId: string) => ChatDb }} extra
  * @returns {Promise<string>}
  */
 export async function getChatSettingsInfo(rootDb, chatId, extra) {
@@ -1089,7 +1089,7 @@ export function getMultiSelectableOptions(config, chat) {
  * @param {PGlite} rootDb
  * @param {string} chatId
  * @param {string} key
- * @param {{ getActions?: () => Promise<Action[]>, compact?: boolean, rootDb?: PGlite, getChatDb?: (chatId: string) => PGlite }} extra
+ * @param {{ getActions?: () => Promise<Action[]>, compact?: boolean, rootDb?: PGlite, getChatDb?: (chatId: string) => ChatDb }} extra
  * @returns {Promise<string>}
  */
 export async function describeConfigKey(rootDb, chatId, key, extra) {
@@ -1141,7 +1141,7 @@ export async function describeConfigKey(rootDb, chatId, key, extra) {
  * @param {string} chatId
  * @param {string} key
  * @param {string} value
- * @param {{ senderIds?: string[], getActions?: () => Promise<Action[]>, rootDb?: PGlite, getChatDb?: (chatId: string) => PGlite }} extra
+ * @param {{ senderIds?: string[], getActions?: () => Promise<Action[]>, rootDb?: PGlite, getChatDb?: (chatId: string) => ChatDb }} extra
  * @returns {Promise<string>}
  */
 export async function setConfigValue(rootDb, chatId, key, value, extra) {
@@ -1158,7 +1158,7 @@ export async function setConfigValue(rootDb, chatId, key, value, extra) {
  * @param {PGlite} rootDb
  * @param {string} chatId
  * @param {string} key
- * @param {{ senderIds?: string[], getActions?: () => Promise<Action[]>, rootDb?: PGlite, getChatDb?: (chatId: string) => PGlite }} extra
+ * @param {{ senderIds?: string[], getActions?: () => Promise<Action[]>, rootDb?: PGlite, getChatDb?: (chatId: string) => ChatDb }} extra
  * @returns {Promise<string>}
  */
 export async function resetConfigValue(rootDb, chatId, key, extra) {
@@ -1177,7 +1177,7 @@ export async function resetConfigValue(rootDb, chatId, key, extra) {
  * @param {PGlite} rootDb
  * @param {string} chatId
  * @param {string} setting
- * @param {{ getActions?: () => Promise<Action[]>, rootDb?: PGlite, getChatDb?: (chatId: string) => PGlite }} extra
+ * @param {{ getActions?: () => Promise<Action[]>, rootDb?: PGlite, getChatDb?: (chatId: string) => ChatDb }} extra
  * @returns {Promise<string>}
  */
 export async function getChatSetting(rootDb, chatId, setting, extra) {
@@ -1200,7 +1200,7 @@ export async function getChatSetting(rootDb, chatId, setting, extra) {
  * @param {string} chatId
  * @param {string} setting
  * @param {string} value
- * @param {{ senderIds?: string[], getActions?: () => Promise<Action[]>, rootDb?: PGlite, getChatDb?: (chatId: string) => PGlite }} extra
+ * @param {{ senderIds?: string[], getActions?: () => Promise<Action[]>, rootDb?: PGlite, getChatDb?: (chatId: string) => ChatDb }} extra
  * @returns {Promise<string>}
  */
 export async function setChatSetting(rootDb, chatId, setting, value, extra) {

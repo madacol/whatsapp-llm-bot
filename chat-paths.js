@@ -69,6 +69,14 @@ export function getChatPgDataDir(chatId) {
  * @param {string} chatId
  * @returns {string}
  */
+export function getChatSqlitePath(chatId) {
+  return resolve(getChatRootDir(chatId), "chat.sqlite");
+}
+
+/**
+ * @param {string} chatId
+ * @returns {string}
+ */
 export function getChatActionsDir(chatId) {
   return resolve(getChatRootDir(chatId), "actions");
 }
@@ -83,12 +91,20 @@ export function getChatActionDbDir(chatId, actionName) {
 }
 
 /**
+ * @param {string} chatId
+ * @param {string} actionName
+ * @returns {string}
+ */
+export function getChatActionSqlitePath(chatId, actionName) {
+  return resolve(getChatActionDbDir(chatId, actionName), "action.sqlite");
+}
+
+/**
  * Ensure the standard per-chat directory skeleton exists.
  * @param {string} chatId
  * @returns {void}
  */
 export function ensureChatDirs(chatId) {
   mkdirSync(getChatWorkspaceDir(chatId), { recursive: true });
-  mkdirSync(getChatPgDataDir(chatId), { recursive: true });
   mkdirSync(getChatActionsDir(chatId), { recursive: true });
 }

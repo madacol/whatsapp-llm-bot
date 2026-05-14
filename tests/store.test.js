@@ -94,7 +94,7 @@ describe("store with injected DB", () => {
       assert.equal(rawConfig.is_enabled, true);
     });
 
-    it("backfills missing chat config files from legacy root chat settings", async () => {
+    it("does not recover missing chat config files from legacy root chat settings at runtime", async () => {
       const legacyDb = new PGlite("memory://", { extensions: { vector } });
       const chatId = `legacy-config-${Date.now()}`;
       await legacyDb.sql`
@@ -145,15 +145,12 @@ describe("store with injected DB", () => {
 
       const recoveredStore = await initStore(legacyDb);
       const chat = await recoveredStore.getChat(chatId);
-      const rawConfig = JSON.parse(await readFile(getChatConfigPath(chatId), "utf8"));
 
-      assert.equal(chat?.is_enabled, true);
-      assert.equal(chat?.respond_on, "any");
-      assert.equal(chat?.harness, "codex");
-      assert.deepEqual(chat?.harness_config, { codex: { model: "gpt-5.5", sandboxMode: "danger-full-access" } });
-      assert.equal(chat?.model_roles.coding, "gpt-5.5");
-      assert.equal(rawConfig.is_enabled, true);
-      assert.equal(rawConfig.harness, "codex");
+      assert.equal(chat, undefined);
+      await assert.rejects(
+        () => readFile(getChatConfigPath(chatId), "utf8"),
+        /ENOENT/,
+      );
     });
 
   });

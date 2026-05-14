@@ -1,4 +1,6 @@
 
+import { isSqliteDb } from "../../../sqlite-db.js";
+
 export default /** @type {defineAction} */ ((x) => x)({
   name: "clear_conversation",
   command: "clear",
@@ -16,7 +18,11 @@ export default /** @type {defineAction} */ ((x) => x)({
     useChatDb: true,
   },
   action_fn: async function ({ chatId, chatDb }) {
-    await chatDb.sql`UPDATE messages SET cleared_at = NOW() WHERE chat_id = ${chatId} AND cleared_at IS NULL`;
+    if (isSqliteDb(chatDb)) {
+      await chatDb.sql`UPDATE messages SET cleared_at = ${new Date().toISOString()} WHERE chat_id = ${chatId} AND cleared_at IS NULL`;
+    } else {
+      await chatDb.sql`UPDATE messages SET cleared_at = NOW() WHERE chat_id = ${chatId} AND cleared_at IS NULL`;
+    }
     return "🗑️ Conversation history cleared!";
   },
 });

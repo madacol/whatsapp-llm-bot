@@ -3,13 +3,24 @@ import config from "./config.js";
 import { sendSimpleChatCompletion } from "./llm.js";
 import { hashMediaBlock } from "./media-store.js";
 import { isMediaBlock } from "./message-formatting.js";
+import { isSqliteDb } from "./sqlite-db.js";
 
 /**
  * Create the media_to_text_cache table (and rename from old name if needed).
- * @param {PGlite} db
+ * @param {ChatDb} db
  */
 export async function ensureMediaToTextSchema(db) {
-  await db.sql`ALTER TABLE IF EXISTS content_translations RENAME TO media_to_text_cache`;
+  if (isSqliteDb(db)) {
+    const { rows } = await db.sql`
+      SELECT name FROM sqlite_master
+      WHERE type = 'table' AND name = 'content_translations'
+    `;
+    if (rows.length > 0) {
+      await db.sql`ALTER TABLE content_translations RENAME TO media_to_text_cache`;
+    }
+  } else {
+    await db.sql`ALTER TABLE IF EXISTS content_translations RENAME TO media_to_text_cache`;
+  }
   await db.sql`
     CREATE TABLE IF NOT EXISTS media_to_text_cache (
       content_hash VARCHAR(16) NOT NULL,
@@ -21,12 +32,12 @@ export async function ensureMediaToTextSchema(db) {
   `;
 }
 
-/** @type {WeakSet<PGlite>} */
+/** @type {WeakSet<ChatDb>} */
 const initialized = new WeakSet();
 
 /**
  * Lazy-init schema (once per db instance).
- * @param {PGlite} db
+ * @param {ChatDb} db
  */
 async function init(db) {
   if (initialized.has(db)) return;
@@ -116,7 +127,7 @@ export function resolveMediaModel(contentType, mediaToTextModels) {
  *   contentType: "image" | "audio" | "video",
  *   modelId: string,
  *   llmClient: LlmClient,
- *   db: PGlite,
+ *   db: ChatDb,
  *   contextMessages: ChatMessage[],
  *   currentText: string,
  * }} input
@@ -179,7 +190,7 @@ export async function getMediaTranslation({
  * @param {"image" | "audio" | "video"} contentType
  * @param {string} modelId - The media-to-text model to use
  * @param {LlmClient} llmClient
- * @param {PGlite} db
+ * @param {ChatDb} db
  * @param {ChatMessage[]} contextMessages - Preceding conversation for richer prompts
  * @param {string} currentText - Text from the current message for context
  * @returns {Promise<TextContentBlock>}
@@ -235,7 +246,7 @@ function buildContextMessages(messages, upToIndex) {
  * @param {string} targetModelId
  * @param {{ image?: string, audio?: string, video?: string, general?: string }} mediaToTextModels
  * @param {LlmClient} llmClient
- * @param {PGlite} db
+ * @param {ChatDb} db
  * @returns {Promise<MediaToTextResult>}
  */
 export async function convertUnsupportedMedia(

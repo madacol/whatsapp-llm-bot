@@ -1,9 +1,25 @@
 
+import { isSqliteDb } from "../../../sqlite-db.js";
+
 /**
  * Ensure the reminders schema exists.
- * @param {PGlite} db
+ * @param {PGlite | import("../../../sqlite-db.js").SqliteDb} db
  */
 export async function ensureSchema(db) {
+  if (isSqliteDb(db)) {
+    await db.sql`
+      CREATE TABLE IF NOT EXISTS reminders (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        chat_id TEXT NOT NULL,
+        reminder_text TEXT NOT NULL,
+        remind_at TEXT NOT NULL,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        delivered INTEGER DEFAULT 0
+      )
+    `;
+    return;
+  }
+
   await db.sql`
     CREATE TABLE IF NOT EXISTS reminders (
       id SERIAL PRIMARY KEY,
@@ -98,7 +114,7 @@ export default /** @type {defineAction} */ ((x) => x)({
       const { rows } = await chatDb.sql`
         SELECT id, reminder_text, remind_at
         FROM reminders
-        WHERE chat_id = ${chatId} AND delivered = FALSE
+        WHERE chat_id = ${chatId} AND delivered = ${false}
         ORDER BY remind_at ASC
       `;
 

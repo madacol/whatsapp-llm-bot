@@ -9,8 +9,8 @@ import { errorToString, getChatWorkDir } from "../utils.js";
 import {
   getChatActionDbDir,
   getChatActionsDir,
-  getChatPgDataDir,
   getChatRootDir,
+  getChatSqlitePath,
   getChatWorkspaceDir,
 } from "../chat-paths.js";
 
@@ -65,10 +65,9 @@ describe("getChatWorkDir", () => {
     assert.ok(fs.existsSync(workdir));
     assert.equal(getChatRootDir(chatId), path.join(tempChatDir, chatId));
     assert.equal(getChatWorkspaceDir(chatId), path.join(tempChatDir, chatId, "workspace"));
-    assert.equal(getChatPgDataDir(chatId), path.join(tempChatDir, chatId, "pgdata"));
+    assert.equal(getChatSqlitePath(chatId), path.join(tempChatDir, chatId, "chat.sqlite"));
     assert.equal(getChatActionsDir(chatId), path.join(tempChatDir, chatId, "actions"));
     assert.equal(getChatActionDbDir(chatId, "create_action"), path.join(tempChatDir, chatId, "actions", "create_action"));
-    assert.ok(fs.existsSync(getChatPgDataDir(chatId)));
     assert.ok(fs.existsSync(getChatActionsDir(chatId)));
     assert.equal(fs.existsSync(path.join(tempChatDir, chatId, "etc")), false);
     assert.equal((await fsp.lstat(readableLink)).isSymbolicLink(), true);
