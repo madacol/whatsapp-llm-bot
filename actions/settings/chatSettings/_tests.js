@@ -4,7 +4,7 @@ import { withModelsCache } from "../../../tests/helpers.js";
 import { readChatConfig, writeChatConfig } from "../../../chat-config.js";
 
 /**
- * @param {import("@electric-sql/pglite").PGlite} db
+ * @param {ChatDb} db
  * @param {string} chatId
  * @param {Record<string, unknown>} [settings]
  */

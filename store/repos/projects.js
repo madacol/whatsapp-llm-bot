@@ -9,7 +9,7 @@ import {
 
 /**
  * @typedef {{
- *   db: PGlite;
+ *   db: import("../../sqlite-db.js").SqliteDb;
  *   ensureChatExists: (chatId: string) => Promise<void>;
  *   getRequiredWhatsAppWorkspacePresentation: (workspaceId: string) => Promise<WhatsAppWorkspacePresentationRow>;
  * }} ProjectStoreDeps
@@ -304,7 +304,7 @@ export function createProjectStore({
           status = ${status},
           last_test_status = 'not_run',
           last_commit_oid = NULL,
-          conflicted_files = '[]'::jsonb,
+          conflicted_files = ${[]},
           archived_at = NULL
         WHERE workspace_id = ${workspaceId}
         RETURNING *
@@ -369,7 +369,7 @@ export function createProjectStore({
       const { rows: [row] } = await db.sql`
         UPDATE workspaces
         SET status = 'archived',
-            conflicted_files = '[]'::jsonb,
+            conflicted_files = ${[]},
             archived_at = COALESCE(archived_at, CURRENT_TIMESTAMP)
         WHERE workspace_id = ${workspaceId}
         RETURNING *
@@ -388,7 +388,7 @@ export function createProjectStore({
       const { rows: [row] } = await db.sql`
         UPDATE workspaces
         SET status = ${status},
-            conflicted_files = ${JSON.stringify(conflictedFiles)}::jsonb
+            conflicted_files = ${conflictedFiles}
         WHERE workspace_id = ${workspaceId}
         RETURNING *
       `;

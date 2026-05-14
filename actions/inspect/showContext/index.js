@@ -25,7 +25,10 @@ export default /** @type {defineAction} */ ((x) => x)({
       return "No context found. Send a message to the bot first, then try again within 1 hour.";
     }
 
-    const ctx = rows[0].llm_context;
+    const ctx = normalizeLlmContext(rows[0].llm_context);
+    if (!ctx) {
+      return "No readable context found for the most recent bot response.";
+    }
 
     /** @type {string[]} */
     const parts = [];
@@ -41,7 +44,8 @@ export default /** @type {defineAction} */ ((x) => x)({
       /** @type {Record<string, number>} */
       const counts = {};
       for (const msg of ctx.messages) {
-        counts[msg.role] = (counts[msg.role] || 0) + 1;
+        const role = typeof msg.role === "string" ? msg.role : "unknown";
+        counts[role] = (counts[role] || 0) + 1;
       }
       const summary = Object.entries(counts).map(([role, count]) => `${role}: ${count}`).join(", ");
       parts.push("");
@@ -53,12 +57,14 @@ export default /** @type {defineAction} */ ((x) => x)({
           : Array.isArray(msg.content)
             ? msg.content.map(formatContentPart).join(" ")
             : "";
-        const toolInfo = msg.tool_calls
-          ? " → " + msg.tool_calls.map((/** @type {{function: {name: string}}} */ t) => t.function.name).join(", ")
+        const toolCalls = Array.isArray(msg.tool_calls) ? msg.tool_calls.map(getToolCallName).filter(Boolean) : [];
+        const toolInfo = toolCalls.length > 0
+          ? " → " + toolCalls.join(", ")
           : "";
-        const toolId = msg.tool_call_id ? ` [${msg.tool_call_id.slice(-6)}]` : "";
+        const toolId = typeof msg.tool_call_id === "string" ? ` [${msg.tool_call_id.slice(-6)}]` : "";
         const truncated = content.length > 300 ? content.slice(0, 300) + "…" : content;
-        parts.push(`  [${msg.role}${toolId}] ${truncated}${toolInfo}`);
+        const role = typeof msg.role === "string" ? msg.role : "unknown";
+        parts.push(`  [${role}${toolId}] ${truncated}${toolInfo}`);
       }
     }
 
@@ -70,6 +76,56 @@ export default /** @type {defineAction} */ ((x) => x)({
     return parts.join("\n");
   },
 });
+
+/**
+ * @typedef {{
+ *   model: string;
+ *   system_prompt: string;
+ *   messages?: Array<Record<string, unknown>>;
+ *   tools?: string[];
+ * }} StoredLlmContext
+ */
+
+/**
+ * @param {unknown} value
+ * @returns {value is Record<string, unknown>}
+ */
+function isRecord(value) {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+/**
+ * @param {unknown} value
+ * @returns {StoredLlmContext | null}
+ */
+function normalizeLlmContext(value) {
+  if (!isRecord(value) || typeof value.model !== "string" || typeof value.system_prompt !== "string") {
+    return null;
+  }
+  const messages = Array.isArray(value.messages)
+    ? value.messages.filter(isRecord)
+    : undefined;
+  const tools = Array.isArray(value.tools)
+    ? value.tools.filter((tool) => typeof tool === "string")
+    : undefined;
+  return {
+    model: value.model,
+    system_prompt: value.system_prompt,
+    ...(messages ? { messages } : {}),
+    ...(tools ? { tools } : {}),
+  };
+}
+
+/**
+ * @param {unknown} value
+ * @returns {string | null}
+ */
+function getToolCallName(value) {
+  if (!isRecord(value) || !isRecord(value.function) || typeof value.function.name !== "string") {
+    return null;
+  }
+  return value.function.name;
+}
 
 /**
  * Format a content part for display.

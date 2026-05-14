@@ -1,5 +1,4 @@
 import { getCachedModels } from "./models-cache.js";
-import { isSqliteDb } from "./sqlite-db.js";
 
 /**
  * Estimate cost using cached model pricing from OpenRouter.
@@ -30,51 +29,31 @@ export async function resolveCost(nativeCost, model, promptTokens, completionTok
   return estimateCost(model, promptTokens, completionTokens);
 }
 
-/**
- * @typedef {import("@electric-sql/pglite").PGlite} PGlite
- */
-
-/** @type {WeakSet<PGlite | import("./sqlite-db.js").SqliteDb>} */
+/** @type {WeakSet<import("./sqlite-db.js").SqliteDb>} */
 const initialized = new WeakSet();
 
 /**
  * Ensure the usage_logs table exists.
- * @param {PGlite | import("./sqlite-db.js").SqliteDb} db
+ * @param {import("./sqlite-db.js").SqliteDb} db
  */
 async function ensureSchema(db) {
-  if (isSqliteDb(db)) {
-    await db.sql`
-      CREATE TABLE IF NOT EXISTS usage_logs (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        chat_id TEXT NOT NULL,
-        model TEXT NOT NULL,
-        prompt_tokens INTEGER NOT NULL,
-        completion_tokens INTEGER NOT NULL,
-        cached_tokens INTEGER NOT NULL DEFAULT 0,
-        cost REAL,
-        created_at TEXT DEFAULT CURRENT_TIMESTAMP
-      )
-    `;
-    return;
-  }
-
   await db.sql`
     CREATE TABLE IF NOT EXISTS usage_logs (
-      id SERIAL PRIMARY KEY,
-      chat_id VARCHAR(50) NOT NULL,
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      chat_id TEXT NOT NULL,
       model TEXT NOT NULL,
       prompt_tokens INTEGER NOT NULL,
       completion_tokens INTEGER NOT NULL,
       cached_tokens INTEGER NOT NULL DEFAULT 0,
-      cost DOUBLE PRECISION,
-      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      cost REAL,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP
     )
   `;
 }
 
 /**
  * Lazy-init schema (once per db instance).
- * @param {PGlite | import("./sqlite-db.js").SqliteDb} db
+ * @param {import("./sqlite-db.js").SqliteDb} db
  */
 async function init(db) {
   if (initialized.has(db)) return;
@@ -95,7 +74,7 @@ async function init(db) {
 
 /**
  * Record an LLM usage entry.
- * @param {PGlite | import("./sqlite-db.js").SqliteDb} db
+ * @param {import("./sqlite-db.js").SqliteDb} db
  * @param {UsageRecord} record
  */
 export async function recordUsage(db, record) {

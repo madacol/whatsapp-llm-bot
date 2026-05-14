@@ -1,6 +1,3 @@
-import { PGlite } from "@electric-sql/pglite";
-import { vector } from "@electric-sql/pglite/vector";
-import { mkdirSync } from "node:fs";
 import { getChatActionSqlitePath, getChatSqlitePath } from "./chat-paths.js";
 import { createLogger } from "./logger.js";
 import { createProcessDiagnosticSnapshot, formatProcessDiagnosticSnapshot } from "./process-diagnostics.js";
@@ -8,8 +5,6 @@ import { SqliteDb } from "./sqlite-db.js";
 
 const log = createLogger("db");
 
-/** @type {Map<string, PGlite>} */
-const dbCache = new Map();
 /** @type {Map<string, SqliteDb>} */
 const sqliteDbCache = new Map();
 
@@ -18,16 +13,14 @@ const MEMORY_DB_TTL_MS = 10_000;
 /** @type {Map<string, ReturnType<typeof setTimeout>>} */
 const memoryDbTimers = new Map();
 
-/** @type {PGlite | null} */
-let sharedTestDb = null;
 let nextDbCacheDiagnosticSize = 10;
 
 /**
- * @param {string} dataDir
- * @param {PGlite} instance
+ * @param {string} key
+ * @param {SqliteDb} instance
  */
-export function setDb(dataDir, instance) {
-  dbCache.set(dataDir, instance);
+export function setDb(key, instance) {
+  sqliteDbCache.set(key, instance);
 }
 
 /**
@@ -39,44 +32,25 @@ export function setSqliteDb(filename, instance) {
 }
 
 /**
- * @param {string} dataDir
- * @returns {PGlite}
+ * Compatibility entrypoint for older callers that requested a database by
+ * logical data directory. New code should prefer the explicit root/chat/action
+ * helpers below.
+ * @param {string} key
+ * @returns {SqliteDb}
  */
-export function getDb(dataDir) {
-  const isMemory = dataDir.startsWith("memory://");
-  const db = dbCache.get(dataDir);
-
-  if (db) {
-    // Reset expiry timer on access for in-memory DBs
-    if (isMemory) resetMemoryDbTimer(dataDir);
-    return db;
+export function getDb(key) {
+  const isMemory = key.startsWith("memory://");
+  const cached = sqliteDbCache.get(key);
+  if (cached) {
+    if (isMemory) resetMemoryDbTimer(key);
+    return cached;
   }
 
-  // In test mode, reuse a single shared in-memory PGlite to avoid OOM
-  if (process.env.TESTING) {
-    const injectedRootDb = dbCache.get(`${BASE_DIR}/root`);
-    if (injectedRootDb) {
-      dbCache.set(dataDir, injectedRootDb);
-      return injectedRootDb;
-    }
-    if (!sharedTestDb) {
-      sharedTestDb = new PGlite("memory://", { extensions: { vector } });
-    }
-    dbCache.set(dataDir, sharedTestDb);
-    return sharedTestDb;
-  }
-
-  // Ensure parent directories exist for file-based databases
-  if (!isMemory) {
-    mkdirSync(dataDir, { recursive: true });
-  }
-
-  const createdDb = new PGlite(dataDir, { extensions: { vector } });
-  dbCache.set(dataDir, createdDb);
+  const createdDb = new SqliteDb(isMemory ? ":memory:" : sqliteFilenameForKey(key));
+  sqliteDbCache.set(key, createdDb);
   logDbCacheGrowth();
 
-  // Auto-close in-memory DBs after inactivity to free ~20MB each
-  if (isMemory) resetMemoryDbTimer(dataDir);
+  if (isMemory) resetMemoryDbTimer(key);
 
   return createdDb;
 }
@@ -122,9 +96,9 @@ function resetMemoryDbTimer(dataDir) {
 
   const timer = setTimeout(async () => {
     memoryDbTimers.delete(dataDir);
-    const db = dbCache.get(dataDir);
+    const db = sqliteDbCache.get(dataDir);
     if (db) {
-      dbCache.delete(dataDir);
+      sqliteDbCache.delete(dataDir);
       try { await db.close(); } catch { /* already closed */ }
     }
   }, MEMORY_DB_TTL_MS);
@@ -135,24 +109,33 @@ function resetMemoryDbTimer(dataDir) {
 }
 
 const BASE_DIR = "./pgdata";
+const ROOT_DB_KEY = `${BASE_DIR}/root`;
+const ROOT_SQLITE_PATH = `${BASE_DIR}/root.sqlite`;
+
+/**
+ * @param {string} key
+ * @returns {string}
+ */
+function sqliteFilenameForKey(key) {
+  return key.endsWith(".sqlite") ? key : `${key}.sqlite`;
+}
 
 /**
  * Get the root database (shared across all chats).
- * @returns {PGlite}
+ * @returns {SqliteDb}
  */
 export function getRootDb() {
-  return getDb(`${BASE_DIR}/root`);
+  const injected = sqliteDbCache.get(ROOT_DB_KEY);
+  if (injected) return injected;
+  return getSqliteDb(ROOT_SQLITE_PATH);
 }
 
 /**
  * Get a chat-scoped database.
  * @param {string} chatId
- * @returns {SqliteDb | PGlite}
+ * @returns {SqliteDb}
  */
 export function getChatDb(chatId) {
-  if (process.env.TESTING || process.env.NODE_TEST_CONTEXT) {
-    return getDb(getChatSqlitePath(chatId));
-  }
   return getSqliteDb(getChatSqlitePath(chatId));
 }
 
@@ -160,21 +143,18 @@ export function getChatDb(chatId) {
  * Get an action-scoped database (per chat, per action).
  * @param {string} chatId
  * @param {string} actionName
- * @returns {SqliteDb | PGlite}
+ * @returns {SqliteDb}
  */
 export function getActionDb(chatId, actionName) {
-  if (process.env.TESTING || process.env.NODE_TEST_CONTEXT) {
-    return getDb(getChatActionSqlitePath(chatId, actionName));
-  }
   return getSqliteDb(getChatActionSqlitePath(chatId, actionName));
 }
 
 /**
- * Get the number of open PGlite instances.
+ * Get the number of open database instances.
  * @returns {number}
  */
 export function getDbCacheSize() {
-  return dbCache.size + sqliteDbCache.size;
+  return sqliteDbCache.size;
 }
 
 /**
@@ -182,29 +162,20 @@ export function getDbCacheSize() {
  * @returns {string[]}
  */
 export function getDbCachePaths() {
-  return [...dbCache.keys(), ...sqliteDbCache.keys()];
+  return [...sqliteDbCache.keys()];
 }
 
 /**
- * Close all cached PGlite instances and clear the cache.
+ * Close all cached database instances and clear the cache.
  */
 export async function closeAllDbs() {
   // Cancel all expiry timers
   for (const timer of memoryDbTimers.values()) clearTimeout(timer);
   memoryDbTimers.clear();
 
-  const entries = [...dbCache.entries()];
   const sqliteEntries = [...sqliteDbCache.entries()];
-  dbCache.clear();
   sqliteDbCache.clear();
   nextDbCacheDiagnosticSize = 10;
-  for (const [, db] of entries) {
-    try {
-      await db.close();
-    } catch {
-      // already closed
-    }
-  }
   for (const [, db] of sqliteEntries) {
     try {
       await db.close();

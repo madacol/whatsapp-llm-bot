@@ -107,14 +107,14 @@ export default /** @type {defineAction} */ ((x) => x)({
     autoContinue: true,   // continue LLM processing after
     requireAdmin: true,   // requires group admin
     requireMaster: true,  // requires MASTER_ID
-    useChatDb: true,      // adds chatDb (PGlite) to context
-    useRootDb: true,      // adds rootDb (PGlite) to context
+    useChatDb: true,      // adds chatDb (ChatDb) to context
+    useRootDb: true,      // adds rootDb (ChatDb) to context
     useLlm: true,         // adds callLlm(prompt, options?) to context
   },
   test_functions: [
     // REQUIRED — at least one test function
     // Signature: async function descriptive_snake_case_name(action_fn, db)
-    // Use _db if db is unused. Tests run against a real PGlite instance.
+    // Use _db if db is unused. Tests run against a real ChatDb instance.
   ],
   /** @param {ActionContext} context  @param {{ paramName: string }} params */
   action_fn: async function (context, params) {

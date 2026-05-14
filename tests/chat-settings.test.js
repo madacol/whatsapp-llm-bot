@@ -5,13 +5,12 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
-import { PGlite } from "@electric-sql/pglite";
-import { vector } from "@electric-sql/pglite/vector";
 import { createTestDb } from "./helpers.js";
 import config from "../config.js";
 import { initStore } from "../store.js";
 import { setConfigValue } from "../actions/settings/chatSettings/_service.js";
 import { readChatConfig, writeChatConfig } from "../chat-config.js";
+import { SqliteDb } from "../sqlite-db.js";
 
 const CACHE_PATH = path.resolve("data/models.json");
 const execFileAsync = promisify(execFile);
@@ -58,7 +57,7 @@ async function createRepoWithWorkspaceFixture() {
 }
 
 describe("per-chat model selection", () => {
-  /** @type {import("@electric-sql/pglite").PGlite} */
+  /** @type {import("../sqlite-db.js").SqliteDb} */
   let db;
 
   before(async () => {
@@ -313,14 +312,14 @@ describe("per-chat model selection", () => {
     });
 
     it("registers remote enabled chats in root while storing settings in the target chat DB", async () => {
-      const rootDb = new PGlite("memory://", { extensions: { vector } });
-      /** @type {Map<string, PGlite>} */
+      const rootDb = new SqliteDb(":memory:");
+      /** @type {Map<string, import("../sqlite-db.js").SqliteDb>} */
       const chatDbs = new Map();
       /** @param {string} chatId */
       const resolveChatDb = (chatId) => {
         const existing = chatDbs.get(chatId);
         if (existing) return existing;
-        const created = new PGlite("memory://", { extensions: { vector } });
+        const created = new SqliteDb(":memory:");
         chatDbs.set(chatId, created);
         return created;
       };

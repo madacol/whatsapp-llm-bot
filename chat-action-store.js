@@ -4,7 +4,6 @@ import os from "node:os";
 import crypto from "node:crypto";
 import { getActionDb } from "./db.js";
 import { createLogger } from "./logger.js";
-import { isSqliteDb } from "./sqlite-db.js";
 
 const log = createLogger("chat-action-store");
 
@@ -18,51 +17,35 @@ export const ALLOWED_CHAT_PERMISSIONS = new Set([
 
 /**
  * Ensure the chat_actions table exists.
- * @param {PGlite | import("./sqlite-db.js").SqliteDb} db
+ * @param {import("./sqlite-db.js").SqliteDb} db
  * @returns {Promise<void>}
  */
 export async function ensureChatActionsSchema(db) {
-  if (isSqliteDb(db)) {
-    await db.sql`
-      CREATE TABLE IF NOT EXISTS chat_actions (
-        name TEXT PRIMARY KEY,
-        code TEXT NOT NULL,
-        created_at TEXT DEFAULT CURRENT_TIMESTAMP
-      )
-    `;
-    return;
-  }
-
   await db.sql`
     CREATE TABLE IF NOT EXISTS chat_actions (
       name TEXT PRIMARY KEY,
       code TEXT NOT NULL,
-      created_at TIMESTAMP DEFAULT NOW()
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP
     )
   `;
 }
 
 /**
  * Upsert a chat action into the DB.
- * @param {PGlite | import("./sqlite-db.js").SqliteDb} db
+ * @param {import("./sqlite-db.js").SqliteDb} db
  * @param {string} name
  * @param {string} code
  * @returns {Promise<void>}
  */
 export async function saveChatAction(db, name, code) {
   await ensureChatActionsSchema(db);
-  if (isSqliteDb(db)) {
-    await db.sql`INSERT INTO chat_actions (name, code) VALUES (${name}, ${code})
-       ON CONFLICT (name) DO UPDATE SET code = ${code}, created_at = CURRENT_TIMESTAMP`;
-    return;
-  }
   await db.sql`INSERT INTO chat_actions (name, code) VALUES (${name}, ${code})
-     ON CONFLICT (name) DO UPDATE SET code = ${code}, created_at = NOW()`;
+     ON CONFLICT (name) DO UPDATE SET code = ${code}, created_at = CURRENT_TIMESTAMP`;
 }
 
 /**
  * Read a chat action's code from the DB.
- * @param {PGlite | import("./sqlite-db.js").SqliteDb} db
+ * @param {import("./sqlite-db.js").SqliteDb} db
  * @param {string} name
  * @returns {Promise<string | null>}
  */
@@ -74,7 +57,7 @@ export async function readChatAction(db, name) {
 
 /**
  * Delete a chat action from the DB.
- * @param {PGlite | import("./sqlite-db.js").SqliteDb} db
+ * @param {import("./sqlite-db.js").SqliteDb} db
  * @param {string} name
  * @returns {Promise<void>}
  */

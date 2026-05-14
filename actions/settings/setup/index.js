@@ -355,7 +355,7 @@ async function collectSetupSelections(chat, select) {
 }
 
 /**
- * @param {PGlite} rootDb
+ * @param {ChatDb} rootDb
  * @param {string} chatId
  * @param {import("../../../store.js").ChatRow} chat
  * @param {string[]} senderIds

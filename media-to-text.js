@@ -3,23 +3,18 @@ import config from "./config.js";
 import { sendSimpleChatCompletion } from "./llm.js";
 import { hashMediaBlock } from "./media-store.js";
 import { isMediaBlock } from "./message-formatting.js";
-import { isSqliteDb } from "./sqlite-db.js";
 
 /**
  * Create the media_to_text_cache table (and rename from old name if needed).
  * @param {ChatDb} db
  */
 export async function ensureMediaToTextSchema(db) {
-  if (isSqliteDb(db)) {
-    const { rows } = await db.sql`
-      SELECT name FROM sqlite_master
-      WHERE type = 'table' AND name = 'content_translations'
-    `;
-    if (rows.length > 0) {
-      await db.sql`ALTER TABLE content_translations RENAME TO media_to_text_cache`;
-    }
-  } else {
-    await db.sql`ALTER TABLE IF EXISTS content_translations RENAME TO media_to_text_cache`;
+  const { rows } = await db.sql`
+    SELECT name FROM sqlite_master
+    WHERE type = 'table' AND name = 'content_translations'
+  `;
+  if (rows.length > 0) {
+    await db.sql`ALTER TABLE content_translations RENAME TO media_to_text_cache`;
   }
   await db.sql`
     CREATE TABLE IF NOT EXISTS media_to_text_cache (

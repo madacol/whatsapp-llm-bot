@@ -1,11 +1,10 @@
 import { describe, it, before } from "node:test";
 import assert from "node:assert/strict";
-import { PGlite } from "@electric-sql/pglite";
 import { pollChatReminders } from "../reminder-daemon.js";
 import { ensureSchema } from "../actions/tools/reminders/index.js";
 import { createTestDb } from "./helpers.js";
 
-/** @type {PGlite} */
+/** @type {import("../sqlite-db.js").SqliteDb} */
 let db;
 
 before(async () => {

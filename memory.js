@@ -1,12 +1,11 @@
 import { resolveModel } from "./model-roles.js";
 import { createEmbedding } from "./llm.js";
 import { createLogger } from "./logger.js";
-import { isSqliteDb } from "./sqlite-db.js";
 
 const log = createLogger("memory");
 
 /**
- * Extract plain text from a Message JSONB object.
+ * Extract plain text from a Message object.
  * @param {Message} messageData
  * @returns {string}
  */
@@ -67,7 +66,7 @@ export async function generateEmbedding(llmClient, text) {
 /**
  * Save a free-text memory note for a chat.
  * Generates an embedding if possible, always stores search_text for FTS fallback.
- * @param {PGlite | import("./sqlite-db.js").SqliteDb} db
+ * @param {import("./sqlite-db.js").SqliteDb} db
  * @param {LlmClient} llmClient
  * @param {string} chatId
  * @param {string} content
@@ -76,27 +75,9 @@ export async function generateEmbedding(llmClient, text) {
 export async function saveMemory(db, llmClient, chatId, content) {
   const embedding = await generateEmbedding(llmClient, content);
 
-  if (isSqliteDb(db)) {
-    const { rows: [row] } = await db.sql`
-      INSERT INTO memories (chat_id, content, embedding, search_text)
-      VALUES (${chatId}, ${content}, ${embedding ? JSON.stringify(embedding) : null}, ${content})
-      RETURNING id
-    `;
-    return /** @type {number} */ (row.id);
-  }
-
-  if (embedding) {
-    const { rows: [row] } = await db.sql`
-      INSERT INTO memories (chat_id, content, embedding, search_text)
-      VALUES (${chatId}, ${content}, ${JSON.stringify(embedding)}::vector, to_tsvector('english', ${content}))
-      RETURNING id
-    `;
-    return /** @type {number} */ (row.id);
-  }
-
   const { rows: [row] } = await db.sql`
-    INSERT INTO memories (chat_id, content, search_text)
-    VALUES (${chatId}, ${content}, to_tsvector('english', ${content}))
+    INSERT INTO memories (chat_id, content, embedding, search_text)
+    VALUES (${chatId}, ${content}, ${embedding ? JSON.stringify(embedding) : null}, ${content})
     RETURNING id
   `;
   return /** @type {number} */ (row.id);
@@ -111,7 +92,7 @@ export async function saveMemory(db, llmClient, chatId, content) {
 
 /**
  * Find memories relevant to a query using embedding similarity, falling back to FTS.
- * @param {PGlite | import("./sqlite-db.js").SqliteDb} db
+ * @param {import("./sqlite-db.js").SqliteDb} db
  * @param {LlmClient} llmClient
  * @param {string} chatId
  * @param {string} queryText
@@ -122,60 +103,25 @@ export async function findMemories(db, llmClient, chatId, queryText, options = {
   const { limit = 5, minSimilarity = 0.3 } = options;
   const queryEmbedding = await generateEmbedding(llmClient, queryText);
 
-  if (isSqliteDb(db)) {
-    if (queryEmbedding) {
-      const { rows } = await db.sql`
-        SELECT id, chat_id, content, embedding, search_text, created_at
-        FROM memories
-        WHERE chat_id = ${chatId} AND embedding IS NOT NULL
-      `;
-      return rows
-        .map((row) => toMemorySimilarityRow(row, queryEmbedding))
-        .filter(/** @returns {row is MemoryRow & { similarity: number }} */ (row) => row !== null && row.similarity >= minSimilarity)
-        .sort((a, b) => b.similarity - a.similarity)
-        .slice(0, limit);
-    }
-
-    const scoredRows = await findMemoriesByText(db, chatId, queryText, limit);
-    return scoredRows;
-  }
-
   if (queryEmbedding) {
-    const embeddingStr = JSON.stringify(queryEmbedding);
     const { rows } = await db.sql`
-      SELECT id, chat_id, content, embedding, search_text, created_at,
-        1 - (embedding <=> ${embeddingStr}::vector) AS similarity
+      SELECT id, chat_id, content, embedding, search_text, created_at
       FROM memories
       WHERE chat_id = ${chatId} AND embedding IS NOT NULL
-      ORDER BY embedding <=> ${embeddingStr}::vector
-      LIMIT ${limit}
     `;
-    return /** @type {(MemoryRow & { similarity: number })[]} */ (
-      rows.filter(r => Number(r.similarity) >= minSimilarity)
-    );
+    return rows
+      .map((row) => toMemorySimilarityRow(row, queryEmbedding))
+      .filter(/** @returns {row is MemoryRow & { similarity: number }} */ (row) => row !== null && row.similarity >= minSimilarity)
+      .sort((a, b) => b.similarity - a.similarity)
+      .slice(0, limit);
   }
 
-  // FTS fallback
-  const words = queryText.split(/\s+/).filter(w => w.length > 0);
-  if (words.length === 0) return [];
-  const tsquery = words.map(w => w.replace(/[^a-zA-Z0-9]/g, "")).filter(Boolean).join(" | ");
-  if (!tsquery) return [];
-
-  const { rows } = await db.sql`
-    SELECT id, chat_id, content, embedding, search_text, created_at,
-      ts_rank(search_text, to_tsquery('english', ${tsquery})) AS similarity
-    FROM memories
-    WHERE chat_id = ${chatId} AND search_text IS NOT NULL
-      AND search_text @@ to_tsquery('english', ${tsquery})
-    ORDER BY ts_rank(search_text, to_tsquery('english', ${tsquery})) DESC
-    LIMIT ${limit}
-  `;
-  return /** @type {(MemoryRow & { similarity: number })[]} */ (rows);
+  return findMemoriesByText(db, chatId, queryText, limit);
 }
 
 /**
  * List all memories for a chat, newest first.
- * @param {PGlite | import("./sqlite-db.js").SqliteDb} db
+ * @param {import("./sqlite-db.js").SqliteDb} db
  * @param {string} chatId
  * @returns {Promise<MemoryRow[]>}
  */
@@ -190,7 +136,7 @@ export async function listMemories(db, chatId) {
 
 /**
  * Delete a specific memory by id, scoped to chat.
- * @param {PGlite | import("./sqlite-db.js").SqliteDb} db
+ * @param {import("./sqlite-db.js").SqliteDb} db
  * @param {string} chatId
  * @param {number} memoryId
  * @returns {Promise<boolean>} true if a row was deleted
@@ -260,7 +206,7 @@ function cosineSimilarity(a, b) {
 }
 
 /**
- * @param {PGlite | import("./sqlite-db.js").SqliteDb} db
+ * @param {import("./sqlite-db.js").SqliteDb} db
  * @param {string} chatId
  * @param {string} queryText
  * @param {number} limit

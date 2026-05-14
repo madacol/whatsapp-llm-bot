@@ -40,7 +40,7 @@ export default [
     const result = await action_fn(
       {
         chatId: "test-chat",
-        rootDb: /** @type {PGlite} */ (/** @type {unknown} */ ({})),
+        rootDb: /** @type {ChatDb} */ (/** @type {unknown} */ ({})),
         callLlm: /** @type {CallLlm} */ (/** @type {unknown} */ (() => {})),
         confirm: async () => true,
         log: async () => "",
@@ -64,7 +64,7 @@ export default [
     const result = await action_fn(
       {
         chatId: "test-chat",
-        rootDb: /** @type {PGlite} */ (/** @type {unknown} */ ({})),
+        rootDb: /** @type {ChatDb} */ (/** @type {unknown} */ ({})),
         callLlm: /** @type {CallLlm} */ (/** @type {unknown} */ (() => {})),
         confirm: async () => true,
         log: async () => "",
@@ -88,7 +88,7 @@ export default [
     const result = await action_fn(
       {
         chatId: "test-chat",
-        rootDb: /** @type {PGlite} */ (/** @type {unknown} */ ({})),
+        rootDb: /** @type {ChatDb} */ (/** @type {unknown} */ ({})),
         callLlm: /** @type {CallLlm} */ (/** @type {unknown} */ (() => {})),
         confirm: async () => true,
         log: async () => "",
