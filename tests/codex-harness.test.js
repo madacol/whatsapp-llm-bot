@@ -417,8 +417,8 @@ describe("createCodexHarness", () => {
     });
     /** @type {string[]} */
     const replies = [];
-    /** @type {SelectOption[] | null} */
-    let selectedOptions = null;
+    /** @type {Array<{ question: string, options: SelectOption[] }>} */
+    const selections = [];
 
     const handled = await harness.handleCommand({
       chatId: "codex-chat-3",
@@ -434,21 +434,33 @@ describe("createCodexHarness", () => {
           return undefined;
         },
         reactToMessage: async () => {},
-        select: async (_question, options) => {
-          selectedOptions = options;
-          return "danger-full-access";
+        select: async (question, options) => {
+          selections.push({ question, options });
+          return question.includes("sandbox") ? "danger-full-access" : "off";
         },
         confirm: async () => true,
       }),
     });
 
     assert.equal(handled, true);
-    assert.deepEqual(selectedOptions, [
-      { id: "workspace-write", label: "Sandbox: Workspace Write" },
-      { id: "read-only", label: "Sandbox: Read Only" },
-      { id: "danger-full-access", label: "Sandbox: Danger Full Access" },
-      { id: "user", label: "Reviewer: User" },
-      { id: "auto_review", label: "Reviewer: Auto Review" },
+    assert.deepEqual(selections, [
+      {
+        question: "Choose Codex sandbox mode",
+        options: [
+          { id: "workspace-write", label: "workspace-write" },
+          { id: "read-only", label: "read-only" },
+          { id: "danger-full-access", label: "danger-full-access" },
+          { id: "off", label: "Default" },
+        ],
+      },
+      {
+        question: "Choose Codex approvals reviewer",
+        options: [
+          { id: "user", label: "user" },
+          { id: "auto_review", label: "auto_review" },
+          { id: "off", label: "Default" },
+        ],
+      },
     ]);
     assert.ok(replies.at(-1)?.includes("Codex permissions: sandbox `danger-full-access`, reviewer `default`"));
   });
@@ -463,6 +475,8 @@ describe("createCodexHarness", () => {
     });
     /** @type {string[]} */
     const replies = [];
+    /** @type {string[]} */
+    const questions = [];
 
     const handled = await harness.handleCommand({
       chatId: "codex-chat-reviewer",
@@ -478,12 +492,16 @@ describe("createCodexHarness", () => {
           return undefined;
         },
         reactToMessage: async () => {},
-        select: async () => "auto_review",
+        select: async (question) => {
+          questions.push(question);
+          return question.includes("sandbox") ? "workspace-write" : "auto_review";
+        },
         confirm: async () => true,
       }),
     });
 
     assert.equal(handled, true);
+    assert.deepEqual(questions, ["Choose Codex sandbox mode", "Choose Codex approvals reviewer"]);
     const chat = await readChatConfig("codex-chat-reviewer");
     assert.equal(chat.harness_config.codex.approvalsReviewer, "auto_review");
     assert.ok(replies.at(-1)?.includes("Codex permissions: sandbox `workspace-write`, reviewer `auto_review`"));
