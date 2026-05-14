@@ -216,7 +216,7 @@ describe("code-image-renderer", () => {
       }
     });
 
-    it("splits a 100-row table into multiple vertical images", () => {
+    it("splits a 100-row table into preview-friendly vertical images", () => {
       const table = [
         "| Row | Column 1 | Column 2 | Column 3 |",
         "| --- | --- | --- | --- |",
@@ -224,12 +224,12 @@ describe("code-image-renderer", () => {
       ].join("\n");
 
       const images = renderTableToImages(table);
-      assert.equal(images.length, 2, "100 compact rows should split into two vertical images");
+      assert.ok(images.length > 2, `100 compact rows should split into preview-friendly chunks, got ${images.length}`);
 
       for (const image of images) {
         const { width, height } = getPngDimensions(image);
         assert.ok(width <= 760, `expected 100-row table image width to stay bounded, got ${width}px`);
-        assert.ok(height <= 2200, `expected vertical chunks to respect height cap, got ${height}px`);
+        assert.ok(height <= width * 2, `expected vertical chunks to respect preview aspect ratio, got ${width}x${height}`);
       }
     });
   });

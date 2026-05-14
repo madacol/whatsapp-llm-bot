@@ -86,6 +86,7 @@ const TABLE_IMAGE_WIDTH_CAP = 760;
 const TABLE_MIN_COL_WIDTH = 64;
 const TABLE_MIN_READABLE_COL_WIDTH = 160;
 const TABLE_MAX_CHUNK_HEIGHT = 2200;
+const TABLE_MAX_PREVIEW_ASPECT_RATIO = 2;
 
 /**
  * @typedef {{
@@ -540,13 +541,19 @@ function renderTableColumnGroupToImages(headers, alignments, rows) {
   const colWidths = computeTableColumnWidths(headers, rows);
   const tableContentWidth = colWidths.reduce((a, b) => a + b, 0);
   const svgWidth = tableContentWidth + PADDING * 2;
-  const maxChunkHeight = Math.max(
-    LINE_HEIGHT + PADDING * 2,
-    Math.min(TABLE_MAX_CHUNK_HEIGHT, Math.floor(maxPixels / svgWidth)),
-  );
 
   const headerLayout = layoutTableRow(headers, colWidths);
   const rowLayouts = rows.map(row => layoutTableRow(row, colWidths));
+  const shortestRowHeight = Math.min(...rowLayouts.map(row => row.height));
+  const minimumChunkHeight = PADDING * 2 + headerLayout.height + shortestRowHeight;
+  const maxChunkHeight = Math.max(
+    minimumChunkHeight,
+    Math.min(
+      TABLE_MAX_CHUNK_HEIGHT,
+      Math.floor(maxPixels / svgWidth),
+      Math.floor(svgWidth * TABLE_MAX_PREVIEW_ASPECT_RATIO),
+    ),
+  );
 
   // ── chunk rows ────────────────────────────────────────────────────
   /** @type {TableRowLayout[][]} */
