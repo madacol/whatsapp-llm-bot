@@ -4,6 +4,9 @@ import { sendSimpleChatCompletion } from "./llm.js";
 import { hashMediaBlock } from "./media-store.js";
 import { isMediaBlock } from "./message-formatting.js";
 import { contentHasContextResetCommand } from "./conversation/context-boundary.js";
+import { createLogger } from "./logger.js";
+
+const log = createLogger("media-to-text");
 
 /**
  * Create the media_to_text_cache table (and rename from old name if needed).
@@ -180,6 +183,14 @@ export async function getMediaTranslation({
     ];
 
     translation = await sendSimpleChatCompletion(llmClient, modelId, llmMessages) || `[Failed to describe ${contentType}]`;
+
+    if (contentType === "audio") {
+      log.info("[media-to-text] generated audio transcription", {
+        hash,
+        modelId,
+        text: translation,
+      });
+    }
 
     // Cache the translation
     await db.sql`INSERT INTO media_to_text_cache (content_hash, model_id, translation)
