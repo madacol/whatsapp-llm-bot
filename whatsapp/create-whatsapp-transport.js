@@ -12,6 +12,7 @@ import {
   sendOrQueueWhatsAppEvent,
   sendOrQueueWhatsAppText,
 } from "./outbound/persistent-queue.js";
+import { editWhatsAppMessage } from "./outbound/send-content.js";
 
 const log = createLogger("whatsapp");
 const WHATSAPP_UPSERT_DIAGNOSTIC_ENABLE_PATH = ".diagnostics/whatsapp-upsert-shape.enabled";
@@ -630,6 +631,7 @@ function serializeTransportError(error) {
  *   stop: () => Promise<void>;
  *   sendText: (chatId: string, text: string) => Promise<void>;
  *   sendEvent?: (chatId: string, event: OutboundEvent) => Promise<MessageHandle | undefined>;
+ *   editMessage?: (input: { chatId: string, keyId: string, text: string, isImage?: boolean }) => Promise<void>;
  *   createGroup: (subject: string, participants: string[]) => Promise<{ chatId: string, subject: string }>;
  *   createCommunity?: (subject: string, description: string) => Promise<{ chatId: string, subject: string }>;
  *   createCommunityGroup?: (
@@ -650,6 +652,11 @@ function serializeTransportError(error) {
  *   createConnectionSupervisor?: typeof createWhatsAppConnectionSupervisor,
  *   outboundStore?: import("../store.js").Store,
  *   inboundCoalesceDelayMs?: number,
+ *   onConnectionOpen?: (transport: {
+ *     editMessage: (input: { chatId: string, keyId: string, text: string, isImage?: boolean }) => Promise<void>,
+ *     sendText: (chatId: string, text: string) => Promise<void>,
+ *     recoverQueuedMessage: (input: { chatId: string, queueId: number }) => MessageHandle | undefined,
+ *   }) => Promise<void>,
  * }} CreateWhatsAppTransportOptions
  */
 
@@ -673,6 +680,8 @@ export async function createWhatsAppTransport(options = {}) {
   let hasOpenConnection = false;
   /** @type {Promise<void> | null} */
   let flushQueuedPromise = null;
+  /** @type {Map<string, MessageHandle | undefined>} */
+  const recentlyDeliveredQueuedHandles = new Map();
 
   /**
    * Clear all transport-owned runtime state and timers.
@@ -700,11 +709,16 @@ export async function createWhatsAppTransport(options = {}) {
       return flushQueuedPromise;
     }
 
-    flushQueuedPromise = flushQueuedWhatsAppOutbound({
-      getSocket: () => currentSocket,
-      reactionRuntime,
-      ...(outboundStore ? { store: outboundStore } : {}),
-    }).finally(() => {
+    flushQueuedPromise = (async () => {
+      const deliveredRows = await flushQueuedWhatsAppOutbound({
+        getSocket: () => currentSocket,
+        reactionRuntime,
+        ...(outboundStore ? { store: outboundStore } : {}),
+      });
+      for (const row of deliveredRows) {
+        recentlyDeliveredQueuedHandles.set(`${row.chatId}:${row.queueId}`, row.handle);
+      }
+    })().finally(() => {
       flushQueuedPromise = null;
     });
 
@@ -719,6 +733,46 @@ export async function createWhatsAppTransport(options = {}) {
    */
   function getOpenSocket() {
     return hasOpenConnection ? currentSocket : null;
+  }
+
+  /**
+   * Edit a previously sent outbound message once the connection is open.
+   * @param {{ chatId: string, keyId: string, text: string, isImage?: boolean }} input
+   * @returns {Promise<void>}
+   */
+  async function editMessage({ chatId, keyId, text, isImage = false }) {
+    const sock = getOpenSocket();
+    if (!sock) {
+      throw new Error("WhatsApp socket is not connected");
+    }
+    await editWhatsAppMessage(sock, chatId, { remoteJid: chatId, fromMe: true, id: keyId }, text, isImage);
+  }
+
+  /**
+   * @param {string} chatId
+   * @param {string} text
+   * @returns {Promise<void>}
+   */
+  async function sendText(chatId, text) {
+    if (!started) {
+      throw new Error("WhatsApp transport has not been started");
+    }
+    await sendOrQueueWhatsAppText({
+      getSocket: getOpenSocket,
+      chatId,
+      text,
+      ...(outboundStore ? { store: outboundStore } : {}),
+    });
+  }
+
+  /**
+   * Recover the sent handle produced when a durable outbound queue row flushed
+   * before the current startup hook ran.
+   * @param {{ chatId: string, queueId: number }} input
+   * @returns {MessageHandle | undefined}
+   */
+  function recoverQueuedMessage({ chatId, queueId }) {
+    return recentlyDeliveredQueuedHandles.get(`${chatId}:${queueId}`);
   }
 
   /**
@@ -775,6 +829,13 @@ export async function createWhatsAppTransport(options = {}) {
         if (events["connection.update"].connection === "open" && currentSocket === sock) {
           hasOpenConnection = true;
           await flushQueuedOutbound();
+          if (options.onConnectionOpen) {
+            try {
+              await options.onConnectionOpen({ editMessage, sendText, recoverQueuedMessage });
+            } catch (error) {
+              log.error("Error running WhatsApp connection-open hook:", error);
+            }
+          }
         }
       }
 
@@ -842,17 +903,9 @@ export async function createWhatsAppTransport(options = {}) {
       await connectionSupervisor.stop();
     },
 
-    async sendText(chatId, text) {
-      if (!started) {
-        throw new Error("WhatsApp transport has not been started");
-      }
-      await sendOrQueueWhatsAppText({
-        getSocket: getOpenSocket,
-        chatId,
-        text,
-        ...(outboundStore ? { store: outboundStore } : {}),
-      });
-    },
+    sendText,
+
+    editMessage,
 
     async sendEvent(chatId, event) {
       if (!started) {

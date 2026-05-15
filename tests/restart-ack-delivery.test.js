@@ -1,0 +1,203 @@
+import { describe, it } from "node:test";
+import assert from "node:assert/strict";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import { deliverPendingRestartAck } from "../actions/admin/restart/_restart-ack-delivery.js";
+import { createRestartAckStore } from "../actions/admin/restart/_restart-ack-store.js";
+
+describe("restart acknowledgement delivery", () => {
+  it("edits the persisted restart acknowledgement message after startup", async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), "restart-ack-"));
+    const storePath = path.join(dir, "ack.json");
+    const store = createRestartAckStore(storePath);
+    /** @type {Array<{ chatId: string, keyId: string, text: string, isImage?: boolean }>} */
+    const edits = [];
+    /** @type {Array<{ chatId: string, text: string }>} */
+    const sent = [];
+
+    try {
+      await store.save({
+        chatId: "chat-1@g.us",
+        requestedAt: "2026-05-15T19:00:00.000Z",
+        oldPid: 123,
+        keyId: "message-key-1",
+        isImage: false,
+      });
+
+      await deliverPendingRestartAck({
+        store,
+        editMessage: async (input) => {
+          edits.push(input);
+        },
+        sendText: async (chatId, text) => {
+          sent.push({ chatId, text });
+        },
+      });
+
+      assert.deepEqual(edits, [{
+        chatId: "chat-1@g.us",
+        keyId: "message-key-1",
+        text: "Restarted.",
+        isImage: false,
+      }]);
+      assert.deepEqual(sent, []);
+      assert.equal(await store.read(), null);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("sends a new restarted message when the persisted marker has no message key", async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), "restart-ack-"));
+    const storePath = path.join(dir, "ack.json");
+    const store = createRestartAckStore(storePath);
+    /** @type {Array<{ chatId: string, keyId: string, text: string, isImage?: boolean }>} */
+    const edits = [];
+    /** @type {Array<{ chatId: string, text: string }>} */
+    const sent = [];
+
+    try {
+      await store.save({
+        chatId: "chat-2@g.us",
+        requestedAt: "2026-05-15T19:00:00.000Z",
+        oldPid: 123,
+      });
+
+      await deliverPendingRestartAck({
+        store,
+        editMessage: async (input) => {
+          edits.push(input);
+        },
+        sendText: async (chatId, text) => {
+          sent.push({ chatId, text });
+        },
+      });
+
+      assert.deepEqual(edits, []);
+      assert.deepEqual(sent, [{ chatId: "chat-2@g.us", text: "Restarted." }]);
+      assert.equal(await store.read(), null);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("recovers the message key from a flushed queue row before editing", async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), "restart-ack-"));
+    const storePath = path.join(dir, "ack.json");
+    const store = createRestartAckStore(storePath);
+    /** @type {Array<{ chatId: string, keyId: string, text: string, isImage?: boolean }>} */
+    const edits = [];
+    /** @type {Array<{ chatId: string, text: string }>} */
+    const sent = [];
+
+    try {
+      await store.save({
+        chatId: "chat-queued@g.us",
+        requestedAt: "2026-05-15T19:00:00.000Z",
+        oldPid: 123,
+        queueId: 44,
+      });
+
+      await deliverPendingRestartAck({
+        store,
+        editMessage: async (input) => {
+          edits.push(input);
+        },
+        sendText: async (chatId, text) => {
+          sent.push({ chatId, text });
+        },
+        recoverQueuedMessage: ({ chatId, queueId }) => {
+          assert.equal(chatId, "chat-queued@g.us");
+          assert.equal(queueId, 44);
+          return {
+            keyId: "recovered-message-key",
+            isImage: false,
+            deliveryStatus: "sent",
+            waitUntilSent: async function () {
+              return this;
+            },
+            update: async () => {},
+            setInspect: () => {},
+          };
+        },
+      });
+
+      assert.deepEqual(edits, [{
+        chatId: "chat-queued@g.us",
+        keyId: "recovered-message-key",
+        text: "Restarted.",
+        isImage: false,
+      }]);
+      assert.deepEqual(sent, []);
+      assert.equal(await store.read(), null);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps the marker when a queued acknowledgement has not flushed yet", async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), "restart-ack-"));
+    const storePath = path.join(dir, "ack.json");
+    const store = createRestartAckStore(storePath);
+    /** @type {Array<{ chatId: string, text: string }>} */
+    const sent = [];
+
+    try {
+      await store.save({
+        chatId: "chat-pending@g.us",
+        requestedAt: "2026-05-15T19:00:00.000Z",
+        oldPid: 123,
+        queueId: 45,
+      });
+
+      await deliverPendingRestartAck({
+        store,
+        editMessage: async () => {
+          throw new Error("edit should not run without a key");
+        },
+        sendText: async (chatId, text) => {
+          sent.push({ chatId, text });
+        },
+        recoverQueuedMessage: () => undefined,
+      });
+
+      assert.deepEqual(sent, []);
+      const persisted = await store.read();
+      assert.equal(persisted?.queueId, 45);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("leaves the marker in place when post-startup delivery fails", async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), "restart-ack-"));
+    const storePath = path.join(dir, "ack.json");
+    const store = createRestartAckStore(storePath);
+
+    try {
+      await store.save({
+        chatId: "chat-3@g.us",
+        requestedAt: "2026-05-15T19:00:00.000Z",
+        oldPid: 123,
+        keyId: "message-key-3",
+      });
+
+      await assert.rejects(
+        () => deliverPendingRestartAck({
+          store,
+          editMessage: async () => {
+            throw new Error("Connection Closed");
+          },
+          sendText: async () => {},
+        }),
+        /Connection Closed/,
+      );
+
+      const persisted = JSON.parse(await readFile(storePath, "utf8"));
+      assert.equal(persisted.keyId, "message-key-3");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+});

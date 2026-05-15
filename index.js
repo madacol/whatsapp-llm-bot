@@ -17,6 +17,8 @@ import { createLogger } from "./logger.js";
 import { createConversationRunner } from "./conversation/create-conversation-runner.js";
 import { getDbCachePaths, getDbCacheSize } from "./db.js";
 import { startProcessDiagnostics } from "./process-diagnostics.js";
+import { deliverPendingRestartAck } from "./actions/admin/restart/_restart-ack-delivery.js";
+import { createRestartAckStore } from "./actions/admin/restart/_restart-ack-store.js";
 
 const log = createLogger("index");
 const SHUTDOWN_FORCE_EXIT_MS = 10_000;
@@ -86,7 +88,12 @@ if (!process.env.TESTING) {
 
   const store = await initStore();
   const llmClient = createLlmClient();
-  const transport = await createWhatsAppTransport().catch(async (error) => {
+  const restartAckStore = createRestartAckStore();
+  const transport = await createWhatsAppTransport({
+    onConnectionOpen: async ({ editMessage, sendText, recoverQueuedMessage }) => {
+      await deliverPendingRestartAck({ store: restartAckStore, editMessage, sendText, recoverQueuedMessage });
+    },
+  }).catch(async (error) => {
       log.error("Initialization error:", error);
       await store.closeDb();
       process.exit(1);

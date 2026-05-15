@@ -242,6 +242,92 @@ describe("WhatsApp transport community creation", () => {
     assert.equal((await getQueuedRows(testDb, chatId)).length, 0);
   });
 
+  it("runs connection-open hooks after queued outbound messages are flushed", async () => {
+    if (!testDb) {
+      throw new Error("Expected test DB to be initialized");
+    }
+
+    const chatId = `restart-open-hook-${Date.now()}`;
+    /** @type {((events: Partial<import("@whiskeysockets/baileys").BaileysEventMap>) => Promise<void>) | null} */
+    let processEvents = null;
+    /** @type {Array<{ chatId: string, message: Record<string, unknown> }>} */
+    const sentMessages = [];
+    /** @type {string[]} */
+    const hookObservations = [];
+    /** @type {number | undefined} */
+    let queuedAckId;
+
+    const socket = /** @type {import("@whiskeysockets/baileys").WASocket} */ (/** @type {unknown} */ ({
+      ev: {
+        process(handler) {
+          processEvents = handler;
+        },
+      },
+      sendMessage: async (targetChatId, message) => {
+        sentMessages.push({ chatId: targetChatId, message });
+        return { key: { id: `sent-${sentMessages.length}`, remoteJid: targetChatId } };
+      },
+    }));
+
+    const transport = await createWhatsAppTransport({
+      createConnectionSupervisor: async ({ onSocketReady }) => ({
+        start: async () => {
+          onSocketReady(socket, async () => {});
+        },
+        stop: async () => {},
+        sendText: async () => {},
+        handleConnectionUpdate: async () => {},
+        isStopped: () => false,
+      }),
+      onConnectionOpen: async ({ editMessage, recoverQueuedMessage }) => {
+        hookObservations.push(`sent:${sentMessages.length}`);
+        if (!queuedAckId) {
+          throw new Error("Expected queued handle id before connection open");
+        }
+        const recoveredHandle = recoverQueuedMessage({ chatId, queueId: queuedAckId });
+        assert.equal(recoveredHandle?.keyId, "sent-1");
+        await editMessage({
+          chatId,
+          keyId: "restart-ack-key",
+          text: "Restarted.",
+        });
+      },
+      ...(testStore ? { outboundStore: testStore } : {}),
+    });
+
+    await transport.start(async () => {});
+    const queuedHandle = await transport.sendEvent?.(chatId, {
+      kind: "content",
+      source: "llm",
+      content: "queued before open hook",
+    });
+    queuedAckId = queuedHandle?.queueId;
+
+    if (!processEvents) {
+      throw new Error("Expected connection event processor to be registered");
+    }
+    await processEvents({
+      "connection.update": {
+        connection: "open",
+      },
+    });
+
+    assert.deepEqual(hookObservations, ["sent:1"]);
+    assert.deepEqual(sentMessages, [
+      {
+        chatId,
+        message: { text: "🤖 queued before open hook" },
+      },
+      {
+        chatId,
+        message: {
+          text: "Restarted.",
+          edit: { remoteJid: chatId, fromMe: true, id: "restart-ack-key" },
+        },
+      },
+    ]);
+  });
+
   it("queues turn replies while the socket exists but the connection is not open yet", async () => {
     if (!testDb) {
       throw new Error("Expected test DB to be initialized");

@@ -14,3 +14,4 @@ data/
 .madabot/
 .agents/.runtime/
 .diagnostics/
+.state/

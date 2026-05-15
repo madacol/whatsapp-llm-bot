@@ -1,3 +1,5 @@
+import { createRestartAckStore } from "./_restart-ack-store.js";
+
 const RESTART_DELAY_MS = 750;
 const RESTART_ACK_TIMEOUT_MS = 10_000;
 
@@ -46,9 +48,10 @@ export function scheduleRestart(options = {}) {
 
 /**
  * @param {() => void} [restartScheduler]
+ * @param {import("./_restart-ack-store.js").RestartAckStore} [restartAckStore]
  * @returns {Action}
  */
-export function createRestartAction(restartScheduler = scheduleRestart) {
+export function createRestartAction(restartScheduler = scheduleRestart, restartAckStore = createRestartAckStore()) {
   return defineLocalAction({
   name: "restart",
   command: "restart",
@@ -64,12 +67,28 @@ export function createRestartAction(restartScheduler = scheduleRestart) {
     autoExecute: true,
     autoContinue: false,
   },
-  action_fn: async function () {
+  action_fn: async function (context) {
     return {
       result: "Restart signal sent.",
       autoContinue: false,
       afterResponse: async ({ handle } = {}) => {
-        await handle?.waitUntilSent?.({ timeoutMs: RESTART_ACK_TIMEOUT_MS });
+        await restartAckStore.save({
+          chatId: context.chatId,
+          requestedAt: new Date().toISOString(),
+          oldPid: process.pid,
+          ...(handle?.queueId ? { queueId: handle.queueId } : {}),
+        });
+        const sentHandle = await handle?.waitUntilSent?.({ timeoutMs: RESTART_ACK_TIMEOUT_MS });
+        if (sentHandle?.keyId) {
+          await restartAckStore.save({
+            chatId: context.chatId,
+            requestedAt: new Date().toISOString(),
+            oldPid: process.pid,
+            keyId: sentHandle.keyId,
+            isImage: sentHandle.isImage === true,
+            ...(handle?.queueId ? { queueId: handle.queueId } : {}),
+          });
+        }
         restartScheduler();
       },
     };

@@ -27,6 +27,12 @@ const queuedHandleResolvers = new Map();
  *   chatId: string;
  *   payload: WhatsAppOutboundQueuePayload;
  * }} QueuedWhatsAppOutboundRow
+ *
+ * @typedef {{
+ *   chatId: string;
+ *   queueId: number;
+ *   handle: MessageHandle | undefined;
+ * }} DeliveredWhatsAppOutboundRow
  */
 
 /**
@@ -486,24 +492,27 @@ export async function sendOrQueueWhatsAppText({ getSocket, chatId, text, store }
  *   reactionRuntime?: import("../runtime/reaction-runtime.js").ReactionRuntime,
  *   store?: import("../../store.js").Store,
  * }} input
- * @returns {Promise<void>}
+ * @returns {Promise<DeliveredWhatsAppOutboundRow[]>}
  */
 export async function flushQueuedWhatsAppOutbound({ getSocket, reactionRuntime, store }) {
   const queuedRows = await listQueuedWhatsAppOutbound(store);
+  /** @type {DeliveredWhatsAppOutboundRow[]} */
+  const deliveredRows = [];
 
   for (const row of queuedRows) {
     const sock = getSocket();
     if (!sock) {
-      return;
+      return deliveredRows;
     }
 
     try {
       const handle = await deliverQueuedPayload(sock, row.chatId, row.payload, reactionRuntime);
       resolveQueuedHandle(row.chatId, row.id, handle);
+      deliveredRows.push({ chatId: row.chatId, queueId: row.id, handle });
       await deleteQueuedWhatsAppOutbound(row.chatId, row.id, store);
     } catch (error) {
       if (isRecoverableWhatsAppSendError(error)) {
-        return;
+        return deliveredRows;
       }
 
       log.error("Dropping unrecoverable WhatsApp outbound queue row.", {
@@ -514,4 +523,6 @@ export async function flushQueuedWhatsAppOutbound({ getSocket, reactionRuntime, 
       await deleteQueuedWhatsAppOutbound(row.chatId, row.id);
     }
   }
+
+  return deliveredRows;
 }

@@ -367,6 +367,7 @@ type ChatTransport = {
   stop: () => Promise<void>;
   sendText: (chatId: string, text: string) => Promise<void>;
   sendEvent?: (chatId: string, event: OutboundEvent) => Promise<MessageHandle | undefined>;
+  editMessage?: (input: { chatId: string; keyId: string; text: string; isImage?: boolean }) => Promise<void>;
   createGroup?: (subject: string, participants: string[]) => Promise<{ chatId: string, subject: string }>;
   createCommunity?: (subject: string, description: string) => Promise<{ chatId: string, subject: string }>;
   createCommunityGroup?: (

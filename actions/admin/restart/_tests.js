@@ -1,6 +1,20 @@
 import assert from "node:assert/strict";
 import { createRestartAction, scheduleRestart } from "./index.js";
 
+/**
+ * @param {import("./_restart-ack-store.js").RestartAckRecord[]} [savedRecords]
+ * @returns {import("./_restart-ack-store.js").RestartAckStore}
+ */
+function createMemoryRestartAckStore(savedRecords = []) {
+  return {
+    save: async (record) => {
+      savedRecords.push(record);
+    },
+    read: async () => savedRecords.at(-1) ?? null,
+    clear: async () => {},
+  };
+}
+
 /** @type {ActionTestFn} */
 async function action_is_defined(action_fn) {
   assert.equal(typeof action_fn, "function");
@@ -9,9 +23,12 @@ async function action_is_defined(action_fn) {
 /** @type {ActionDbTestFn} */
 async function restart_returns_before_stopping_the_process(_action_fn, db) {
   let scheduled = 0;
-  const action = createRestartAction(() => {
-    scheduled += 1;
-  });
+  const action = createRestartAction(
+    () => {
+      scheduled += 1;
+    },
+    createMemoryRestartAckStore(),
+  );
 
   const result = await action.action_fn({
     chatId: "test-chat",
@@ -51,9 +68,12 @@ async function restart_waits_for_queued_ack_before_stopping(_action_fn, db) {
       resolve(undefined);
     };
   });
-  const action = createRestartAction(() => {
-    scheduled += 1;
-  });
+  const action = createRestartAction(
+    () => {
+      scheduled += 1;
+    },
+    createMemoryRestartAckStore(),
+  );
 
   const result = await action.action_fn({
     chatId: "test-chat",
@@ -81,6 +101,7 @@ async function restart_waits_for_queued_ack_before_stopping(_action_fn, db) {
       keyId: undefined,
       isImage: false,
       deliveryStatus: "queued",
+      queueId: 42,
       waitUntilSent: async () => {
         await ackSent;
         return undefined;
@@ -95,6 +116,113 @@ async function restart_waits_for_queued_ack_before_stopping(_action_fn, db) {
   releaseAck();
   await afterResponse;
   assert.equal(scheduled, 1);
+}
+
+/** @type {ActionDbTestFn} */
+async function restart_persists_queue_id_for_unsent_ack_before_stopping(_action_fn, db) {
+  /** @type {import("./_restart-ack-store.js").RestartAckRecord[]} */
+  const savedRecords = [];
+  let scheduled = 0;
+  const action = createRestartAction(
+    () => {
+      scheduled += 1;
+    },
+    createMemoryRestartAckStore(savedRecords),
+  );
+
+  const result = await action.action_fn({
+    chatId: "restart-queued-chat",
+    senderIds: ["test-sender"],
+    content: [],
+    getIsAdmin: async () => true,
+    db,
+    sessionDb: db,
+    getActions: async () => [],
+    log: async () => "",
+    send: async () => {},
+    reply: async () => {},
+    reactToMessage: async () => {},
+    select: async () => "",
+    confirm: async () => true,
+    resolveModel: () => "test-model",
+  }, {});
+
+  if (typeof result !== "object" || result === null || Array.isArray(result) || !("afterResponse" in result)) {
+    throw new Error("Expected restart action to return an afterResponse hook");
+  }
+
+  await result.afterResponse?.({
+    handle: {
+      keyId: undefined,
+      isImage: false,
+      deliveryStatus: "queued",
+      queueId: 77,
+      waitUntilSent: async () => undefined,
+      update: async () => {},
+      setInspect: () => {},
+    },
+  });
+
+  assert.equal(scheduled, 1);
+  assert.equal(savedRecords.length, 1);
+  assert.equal(savedRecords[0].chatId, "restart-queued-chat");
+  assert.equal(savedRecords[0].queueId, 77);
+  assert.equal(savedRecords[0].keyId, undefined);
+}
+
+/** @type {ActionDbTestFn} */
+async function restart_persists_sent_ack_key_before_stopping(_action_fn, db) {
+  /** @type {import("./_restart-ack-store.js").RestartAckRecord[]} */
+  const savedRecords = [];
+  let scheduled = 0;
+  const action = createRestartAction(
+    () => {
+      scheduled += 1;
+    },
+    createMemoryRestartAckStore(savedRecords),
+  );
+
+  const result = await action.action_fn({
+    chatId: "restart-chat",
+    senderIds: ["test-sender"],
+    content: [],
+    getIsAdmin: async () => true,
+    db,
+    sessionDb: db,
+    getActions: async () => [],
+    log: async () => "",
+    send: async () => {},
+    reply: async () => {},
+    reactToMessage: async () => {},
+    select: async () => "",
+    confirm: async () => true,
+    resolveModel: () => "test-model",
+  }, {});
+
+  if (typeof result !== "object" || result === null || Array.isArray(result) || !("afterResponse" in result)) {
+    throw new Error("Expected restart action to return an afterResponse hook");
+  }
+
+  await result.afterResponse?.({
+    handle: {
+      keyId: "ack-message-id",
+      isImage: false,
+      deliveryStatus: "sent",
+      waitUntilSent: async function () {
+        return this;
+      },
+      update: async () => {},
+      setInspect: () => {},
+    },
+  });
+
+  assert.equal(scheduled, 1);
+  assert.equal(savedRecords.length, 2);
+  assert.deepEqual(savedRecords[0].chatId, "restart-chat");
+  assert.equal(savedRecords[0].keyId, undefined);
+  assert.deepEqual(savedRecords[1].chatId, "restart-chat");
+  assert.equal(savedRecords[1].keyId, "ack-message-id");
+  assert.equal(savedRecords[1].isImage, false);
 }
 
 /** @type {ActionTestFn} */
@@ -131,5 +259,7 @@ export default [
   action_is_defined,
   restart_returns_before_stopping_the_process,
   restart_waits_for_queued_ack_before_stopping,
+  restart_persists_queue_id_for_unsent_ack_before_stopping,
+  restart_persists_sent_ack_key_before_stopping,
   scheduler_uses_delayed_sigterm,
 ];
