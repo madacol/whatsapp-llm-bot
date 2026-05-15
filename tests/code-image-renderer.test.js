@@ -6,6 +6,7 @@ import {
   renderTableToImages,
   renderUnifiedDiffToImages,
   maxCharsForLineCount,
+  normalizeTableCellTextForDisplay,
   wrapAnnotatedLinesForDisplay,
 } from "../code-image-renderer.js";
 import { formatBashCommand } from "../tool-display.js";
@@ -171,6 +172,17 @@ describe("code-image-renderer", () => {
   });
 
   describe("renderTableToImages", () => {
+    it("preserves underscores inside identifier-like table cell text", () => {
+      assert.equal(
+        normalizeTableCellTextForDisplay("`READY_FOR_REVIEW_WITH_EXTENDED_METADATA_001`"),
+        "READY_FOR_REVIEW_WITH_EXTENDED_METADATA_001",
+      );
+      assert.equal(
+        normalizeTableCellTextForDisplay("_italic_ READY_FOR_REVIEW"),
+        "italic READY_FOR_REVIEW",
+      );
+    });
+
     it("wraps wide markdown table cells instead of creating an excessively wide image", () => {
       const table = [
         "| App | Creator / Publisher | Open source? |",

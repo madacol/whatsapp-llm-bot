@@ -382,13 +382,13 @@ function parseMarkdownTable(markdown) {
  * @param {string} text
  * @returns {string}
  */
-function normalizeTableCellText(text) {
+export function normalizeTableCellTextForDisplay(text) {
   return text
     .replace(/\\([\\`*_{}\[\]()#+\-.!|>])/g, "$1")
     .replace(/\*\*([^*]+)\*\*/g, "$1")
     .replace(/__([^_]+)__/g, "$1")
     .replace(/(?<!\*)\*(?!\*)([^*]+)(?<!\*)\*(?!\*)/g, "$1")
-    .replace(/(?<!_)_(?!_)([^_]+)(?<!_)_(?!_)/g, "$1")
+    .replace(/(^|[^\w])_([^_\s](?:[^_]*?[^_\s])?)_(?=$|[^\w])/g, "$1$2")
     .replace(/`([^`]+)`/g, "$1");
 }
 
@@ -399,7 +399,7 @@ function normalizeTableCellText(text) {
  * @returns {string[]}
  */
 function wrapTableCellText(text, maxChars) {
-  const normalized = normalizeTableCellText(text).replace(/\s+/g, " ").trim();
+  const normalized = normalizeTableCellTextForDisplay(text).replace(/\s+/g, " ").trim();
   if (!normalized) return [""];
 
   /** @type {string[]} */
@@ -448,9 +448,9 @@ function wrapTableCellText(text, maxChars) {
  */
 function computeDesiredTableColumnWidths(headers, rows) {
   return headers.map((h, i) => {
-    let maxLen = normalizeTableCellText(h).length;
+    let maxLen = normalizeTableCellTextForDisplay(h).length;
     for (const row of rows) {
-      const cellLength = normalizeTableCellText(row[i] ?? "").length;
+      const cellLength = normalizeTableCellTextForDisplay(row[i] ?? "").length;
       if (cellLength > maxLen) maxLen = cellLength;
     }
     return Math.max(TABLE_MIN_COL_WIDTH, maxLen * CHAR_WIDTH + TABLE_CELL_PADDING_H * 2);
