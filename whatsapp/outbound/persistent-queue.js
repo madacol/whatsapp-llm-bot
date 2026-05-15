@@ -8,6 +8,8 @@ const log = createLogger("whatsapp");
 let storePromise = null;
 /** @type {ChatDb | null} */
 let storeDb = null;
+/** @type {Map<string, Array<(handle: MessageHandle | undefined) => void>>} */
+const queuedHandleResolvers = new Map();
 
 /**
  * @typedef {{
@@ -273,14 +275,101 @@ export function isRecoverableWhatsAppSendError(error) {
  * @param {string} chatId
  * @param {WhatsAppOutboundQueuePayload} payload
  * @param {import("../../store.js").Store} [store]
- * @returns {Promise<void>}
+ * @returns {Promise<import("../../store.js").WhatsAppOutboundQueueRow>}
  */
 export async function enqueueWhatsAppOutbound(chatId, payload, store) {
   const resolvedStore = store ?? await getStore();
-  await resolvedStore.enqueueWhatsAppOutboundQueueEntry({
+  return resolvedStore.enqueueWhatsAppOutboundQueueEntry({
     chatId,
     payloadJson: payload,
   });
+}
+
+/**
+ * @param {string} chatId
+ * @param {number} queueId
+ * @returns {string}
+ */
+function queuedHandleKey(chatId, queueId) {
+  return `${chatId}:${queueId}`;
+}
+
+/**
+ * @param {string} chatId
+ * @param {number} queueId
+ * @param {MessageHandle | undefined} handle
+ * @returns {void}
+ */
+function resolveQueuedHandle(chatId, queueId, handle) {
+  const key = queuedHandleKey(chatId, queueId);
+  const resolvers = queuedHandleResolvers.get(key);
+  if (!resolvers) {
+    return;
+  }
+  queuedHandleResolvers.delete(key);
+  for (const resolve of resolvers) {
+    resolve(handle);
+  }
+}
+
+/**
+ * @param {string} chatId
+ * @param {number} queueId
+ * @returns {Promise<MessageHandle | undefined>}
+ */
+function waitForQueuedHandle(chatId, queueId) {
+  return new Promise((resolve) => {
+    const key = queuedHandleKey(chatId, queueId);
+    const resolvers = queuedHandleResolvers.get(key) ?? [];
+    resolvers.push(resolve);
+    queuedHandleResolvers.set(key, resolvers);
+  });
+}
+
+/**
+ * @param {string} chatId
+ * @param {number} queueId
+ * @returns {MessageHandle}
+ */
+function createQueuedMessageHandle(chatId, queueId) {
+  /** @type {MessageInspectState | null} */
+  let inspectState = null;
+  const sentPromise = waitForQueuedHandle(chatId, queueId);
+
+  /**
+   * @param {{ timeoutMs?: number }} [options]
+   * @returns {Promise<MessageHandle | undefined>}
+   */
+  async function waitUntilSent(options = {}) {
+    if (!options.timeoutMs) {
+      return sentPromise;
+    }
+    return Promise.race([
+      sentPromise,
+      new Promise((resolve) => setTimeout(() => resolve(undefined), options.timeoutMs)),
+    ]);
+  }
+
+  return {
+    keyId: undefined,
+    isImage: false,
+    deliveryStatus: "queued",
+    queueId,
+    waitUntilSent,
+    update: async (update) => {
+      const sentHandle = await waitUntilSent();
+      if (!sentHandle) {
+        return;
+      }
+      await sentHandle.update(update);
+    },
+    setInspect: (inspect) => {
+      inspectState = inspect;
+      void waitUntilSent().then((sentHandle) => {
+        sentHandle?.setInspect(inspectState);
+      });
+    },
+  };
 }
 
 /**
@@ -350,8 +439,8 @@ async function deliverQueuedPayload(sock, chatId, payload, reactionRuntime) {
 export async function sendOrQueueWhatsAppEvent({ getSocket, chatId, event, reactionRuntime, store }) {
   const sock = getSocket();
   if (!sock) {
-    await enqueueWhatsAppOutbound(chatId, { kind: "event", event }, store);
-    return undefined;
+    const row = await enqueueWhatsAppOutbound(chatId, { kind: "event", event }, store);
+    return createQueuedMessageHandle(chatId, row.id);
   }
 
   try {
@@ -360,8 +449,8 @@ export async function sendOrQueueWhatsAppEvent({ getSocket, chatId, event, react
     if (!isRecoverableWhatsAppSendError(error)) {
       throw error;
     }
-    await enqueueWhatsAppOutbound(chatId, { kind: "event", event }, store);
-    return undefined;
+    const row = await enqueueWhatsAppOutbound(chatId, { kind: "event", event }, store);
+    return createQueuedMessageHandle(chatId, row.id);
   }
 }
 
@@ -409,7 +498,8 @@ export async function flushQueuedWhatsAppOutbound({ getSocket, reactionRuntime, 
     }
 
     try {
-      await deliverQueuedPayload(sock, row.chatId, row.payload, reactionRuntime);
+      const handle = await deliverQueuedPayload(sock, row.chatId, row.payload, reactionRuntime);
+      resolveQueuedHandle(row.chatId, row.id, handle);
       await deleteQueuedWhatsAppOutbound(row.chatId, row.id, store);
     } catch (error) {
       if (isRecoverableWhatsAppSendError(error)) {

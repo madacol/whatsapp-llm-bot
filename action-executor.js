@@ -40,7 +40,7 @@ function defineLazyDb(obj, prop, factory) {
  * @param {ExecuteActionContext} context
  * @param {{} } params
  * @param {ExecuteActionOptions} [options]
- * @returns {Promise<{ result: ActionResultValue, permissions: Action["permissions"], afterResponse?: () => void | Promise<void> }>}
+ * @returns {Promise<{ result: ActionResultValue, permissions: Action["permissions"], afterResponse?: (input?: { handle?: MessageHandle }) => void | Promise<void> }>}
  */
 export async function executeAction(actionName, context, params, options = {}) {
   const {

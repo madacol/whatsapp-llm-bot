@@ -674,6 +674,8 @@ export async function sendBlocks(sock, chatId, source, content, options, reactio
   const handle = {
     keyId,
     isImage,
+    deliveryStatus: "sent",
+    waitUntilSent: async () => handle,
     update: async (update) => {
       const text = persistInspectText && inspectState?.kind === "text" && inspectState.persistOnInspect
         ? formatInspectEditText("", inspectState.text)

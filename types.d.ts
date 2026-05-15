@@ -246,6 +246,9 @@ type MessageInspectState =
 type MessageHandle = {
   readonly keyId: string | undefined;
   readonly isImage: boolean;
+  readonly deliveryStatus?: "sent" | "queued";
+  readonly queueId?: number;
+  waitUntilSent?: (options?: { timeoutMs?: number }) => Promise<MessageHandle | undefined>;
   update: (update: MessageHandleUpdate) => Promise<void>;
   setInspect: (inspect: MessageInspectState | null) => void;
 };
@@ -549,7 +552,7 @@ type ActionResultValue = string | {} | HtmlContent | ToolContentBlock[];
 type ActionResult = {
   result: ActionResultValue;
   autoContinue?: boolean;
-  afterResponse?: () => void | Promise<void>;
+  afterResponse?: (input?: { handle?: MessageHandle }) => void | Promise<void>;
 };
 
 type Action<P extends PermissionFlags = PermissionFlags> = {
@@ -797,7 +800,7 @@ type ToolRuntime = {
     context: ExecuteActionContext,
     params: {},
     options?: ExecuteToolOptions,
-  ) => Promise<{ result: ActionResultValue, permissions: PermissionFlags, afterResponse?: () => void | Promise<void> }>;
+  ) => Promise<{ result: ActionResultValue, permissions: PermissionFlags, afterResponse?: (input?: { handle?: MessageHandle }) => void | Promise<void> }>;
 };
 
 type Session = {

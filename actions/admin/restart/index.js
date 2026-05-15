@@ -1,4 +1,5 @@
 const RESTART_DELAY_MS = 750;
+const RESTART_ACK_TIMEOUT_MS = 10_000;
 
 /**
  * @template {Action} T
@@ -67,7 +68,10 @@ export function createRestartAction(restartScheduler = scheduleRestart) {
     return {
       result: "Restart signal sent.",
       autoContinue: false,
-      afterResponse: restartScheduler,
+      afterResponse: async ({ handle } = {}) => {
+        await handle?.waitUntilSent?.({ timeoutMs: RESTART_ACK_TIMEOUT_MS });
+        restartScheduler();
+      },
     };
   },
   });

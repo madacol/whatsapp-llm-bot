@@ -175,7 +175,7 @@ async function executeAndStoreTool({
 
     const result = functionResponse.result;
     const finishToolCall = async () => {
-      await functionResponse.afterResponse?.();
+      await functionResponse.afterResponse?.({ handle: handle ?? undefined });
       return !!functionResponse.permissions.autoContinue;
     };
 
