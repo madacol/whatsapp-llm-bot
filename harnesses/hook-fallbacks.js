@@ -10,7 +10,10 @@ const log = createLogger("harness:hook-fallbacks");
  */
 function logSuppressedHookError(hookName, err) {
   const msg = errorToString(err);
-  const isConnectionErr = msg.includes("Connection Closed") || msg.includes("Connection was lost");
+  const isConnectionErr = msg.includes("Connection Closed")
+    || msg.includes("Connection Terminated")
+    || msg.includes("Connection was lost")
+    || msg.trim() === "1006";
   if (isConnectionErr) {
     log.warn(`Hook "${hookName}" failed (suppressed):`, msg);
   } else {

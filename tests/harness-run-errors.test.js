@@ -121,6 +121,31 @@ describe("clearStaleHarnessSession", () => {
     assert.deepEqual(calls, []);
   });
 
+  it("does not clear a saved session for websocket abnormal closures", async () => {
+    /** @type {string[]} */
+    const calls = [];
+    const cleared = await clearStaleHarnessSession({
+      existingSessionId: "sess-123",
+      resolvedSessionId: null,
+      error: new Error("1006"),
+      clearSession: async () => {
+        calls.push("clear");
+      },
+      log: {
+        warn: (...args) => {
+          calls.push(String(args[0]));
+        },
+        error: (...args) => {
+          calls.push(String(args[0]));
+        },
+      },
+      harnessLabel: "Codex",
+    });
+
+    assert.equal(cleared, false);
+    assert.deepEqual(calls, []);
+  });
+
   it("does not clear a saved session for provider rate limits", async () => {
     /** @type {string[]} */
     const calls = [];
@@ -151,6 +176,8 @@ describe("isTransientHarnessRunError", () => {
   it("matches recoverable provider errors without matching ordinary failures", () => {
     assert.equal(isTransientHarnessRunError(new Error("Connection Closed")), true);
     assert.equal(isTransientHarnessRunError(new Error("Codex app-server connection closed.")), true);
+    assert.equal(isTransientHarnessRunError(new Error("Connection Terminated")), true);
+    assert.equal(isTransientHarnessRunError(new Error("1006")), true);
     assert.equal(isTransientHarnessRunError(new Error("API Error: Rate limit reached")), true);
     assert.equal(isTransientHarnessRunError(new Error("429: rate_limit_exceeded")), true);
     assert.equal(isTransientHarnessRunError(new Error("invalid session")), false);

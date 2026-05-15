@@ -164,6 +164,79 @@ describe("WhatsApp transport community creation", () => {
     assert.equal((await getQueuedRows(testDb, chatId)).length, 0);
   });
 
+  it("queues outbound events after websocket abnormal closure send failures", async () => {
+    if (!testDb) {
+      throw new Error("Expected test DB to be initialized");
+    }
+
+    const chatId = `queued-1006-${Date.now()}`;
+    /** @type {((events: Partial<import("@whiskeysockets/baileys").BaileysEventMap>) => Promise<void>) | null} */
+    let processEvents = null;
+    /** @type {Array<{ chatId: string, message: Record<string, unknown> }>} */
+    const sentMessages = [];
+    let failSends = true;
+
+    const socket = /** @type {import("@whiskeysockets/baileys").WASocket} */ (/** @type {unknown} */ ({
+      ev: {
+        process(handler) {
+          processEvents = handler;
+        },
+      },
+      sendMessage: async (targetChatId, message) => {
+        if (failSends) {
+          throw new Error("1006");
+        }
+        sentMessages.push({ chatId: targetChatId, message });
+        return { key: { id: `sent-${sentMessages.length}`, remoteJid: targetChatId } };
+      },
+    }));
+
+    const transport = await createWhatsAppTransport({
+      createConnectionSupervisor: async ({ onSocketReady }) => ({
+        start: async () => {
+          onSocketReady(socket, async () => {});
+        },
+        stop: async () => {},
+        sendText: async () => {},
+        handleConnectionUpdate: async () => {},
+        isStopped: () => false,
+      }),
+      ...(testStore ? { outboundStore: testStore } : {}),
+    });
+
+    await transport.start(async () => {});
+    if (!processEvents) {
+      throw new Error("Expected connection event processor to be registered");
+    }
+    await processEvents({
+      "connection.update": {
+        connection: "open",
+      },
+    });
+
+    await transport.sendEvent?.(chatId, {
+      kind: "content",
+      source: "llm",
+      content: "queued after 1006",
+    });
+
+    assert.equal(sentMessages.length, 0);
+    assert.equal((await getQueuedRows(testDb, chatId)).length, 1);
+
+    failSends = false;
+    await processEvents({
+      "connection.update": {
+        connection: "open",
+      },
+    });
+
+    assert.deepEqual(sentMessages, [{
+      chatId,
+      message: { text: "🤖 queued after 1006" },
+    }]);
+    assert.equal((await getQueuedRows(testDb, chatId)).length, 0);
+  });
+
   it("queues turn replies while the socket exists but the connection is not open yet", async () => {
     if (!testDb) {
       throw new Error("Expected test DB to be initialized");
