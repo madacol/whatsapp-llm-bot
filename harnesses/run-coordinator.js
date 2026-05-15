@@ -40,6 +40,7 @@
  *
  * @returns {{
  *   beginRun: (input: { turn: ChatTurn, userText: string, harness: AgentHarness }) => Promise<HarnessRunDecision>,
+ *   hasPendingRun: (chatId: string) => boolean,
  *   markRunActive: (chatId: string) => void,
  *   consumeBufferedTexts: (chatId: string) => string[],
  *   finishRun: (chatId: string) => ChatTurn | null,
@@ -173,6 +174,10 @@ export function createHarnessRunCoordinator(options = {}) {
         isActive: false,
       });
       return { status: "started" };
+    },
+
+    hasPendingRun(chatId) {
+      return pendingRuns.has(chatId);
     },
 
     markRunActive(chatId) {

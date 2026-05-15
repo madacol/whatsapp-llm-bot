@@ -886,10 +886,15 @@ describe("Memory: NOT searched when extracted text < 10 chars", () => {
     const chat = await t.chat(chatId);
     const r = await chat.send(
       { image: "aGVsbG8=", mime: "image/jpeg" },
-      { llm: ["I see an image!"] },
+      { llm: ["Image description fallback", "I see an image!"] },
     );
 
-    const systemMsg = /** @type {any} */ (r.requests[0]).messages.find(m => m.role === "system");
+    const mainRequest = r.requests.find((request) => {
+      const messages = /** @type {{ messages?: Array<{ role?: string }> }} */ (request).messages;
+      return Array.isArray(messages) && messages.some((message) => message.role === "system");
+    });
+    assert.ok(mainRequest, "Should have a main LLM request");
+    const systemMsg = /** @type {{ messages: Array<{ role?: string, content?: unknown }> }} */ (mainRequest).messages.find((message) => message.role === "system");
     assert.ok(systemMsg, "Should have a system message");
     const systemText = Array.isArray(systemMsg.content)
       ? systemMsg.content.map(c => c.text).join("")

@@ -15,11 +15,13 @@ import { buildAgentIoHooks } from "./build-agent-io-hooks.js";
 import { buildHarnessRunRequest } from "./build-harness-run-request.js";
 import { buildRunConfig } from "./build-run-config.js";
 import { generateSessionTitle } from "./session-title.js";
+import { getChatDb } from "../db.js";
 import { resolveOutputVisibility } from "../chat-output-visibility.js";
 import { createWorkspaceBindingService } from "../workspace-binding-service.js";
 import { tryHandleWorkspaceCommand } from "../workspace-command-router.js";
 import { createWorkspaceControl } from "../workspace-control.js";
 import { createWorkspaceLifecycleService } from "../workspace-lifecycle-service.js";
+import { buildLiveInputText } from "./live-input-text.js";
 
 const log = createLogger("conversation:runner");
 const PRESENCE_LEASE_TTL_MS = 20_000;
@@ -60,6 +62,25 @@ function isArchivedWorkspaceCodingRequest(binding, firstBlock) {
  */
 function getDeliveredContentSignature(content) {
   return JSON.stringify(content);
+}
+
+/**
+ * @param {IncomingContentBlock[]} content
+ * @returns {boolean}
+ */
+function hasNonTextContent(content) {
+  return content.some((block) => block.type !== "text");
+}
+
+/**
+ * @param {IncomingContentBlock[]} content
+ * @returns {string}
+ */
+function getTopLevelText(content) {
+  return content
+    .filter(isTextBlock)
+    .map((block) => block.text)
+    .join("\n");
 }
 
 /**
@@ -119,6 +140,29 @@ export function createConversationRunner({ store, llmClient, getActionsFn, execu
     workspacePresentation,
     dispatchTurn,
   });
+
+  /**
+   * Build the text passed into a live harness turn. Idle first turns avoid this
+   * path so media transcription does not delay marking a new run as pending.
+   * @param {{
+   *   chatId: string,
+   *   chatInfo: import("../store.js").ChatRow | undefined,
+   *   content: IncomingContentBlock[],
+   * }} input
+   * @returns {Promise<string>}
+   */
+  async function buildPendingRunInputText({ chatId, chatInfo, content }) {
+    if (!hasNonTextContent(content)) {
+      return getTopLevelText(content);
+    }
+
+    return buildLiveInputText({
+      content,
+      llmClient,
+      mediaToTextModels: chatInfo?.media_to_text_models ?? {},
+      db: getChatDb(chatId),
+    });
+  }
 
   /**
    * @param {ChatTurn} turn
@@ -249,21 +293,19 @@ export function createConversationRunner({ store, llmClient, getActionsFn, execu
    *   context: ExecuteActionContext,
    *   actions: Action[],
    *   actionResolver: (name: string) => Promise<AppAction | null>,
- *   firstBlock: TextContentBlock | undefined,
- *   persona: AgentDefinition | null,
- *   harness: AgentHarness,
- *   isSlashCommand?: boolean,
- *   resolvedBinding: ResolvedChatBinding,
- * }} input
- * @returns {Promise<ChatTurn | null>}
- */
+   *   persona: AgentDefinition | null,
+   *   harness: AgentHarness,
+   *   isSlashCommand?: boolean,
+   *   resolvedBinding: ResolvedChatBinding,
+   * }} input
+   * @returns {Promise<ChatTurn | null>}
+   */
   async function handleLlmMessage({
     turn,
     chatInfo,
     context,
     actions,
     actionResolver,
-    firstBlock,
     persona,
     harness,
     isSlashCommand,
@@ -271,8 +313,6 @@ export function createConversationRunner({ store, llmClient, getActionsFn, execu
   }) {
     const { chatId, senderIds, content, senderName, facts } = turn;
     const willRespond = isSlashCommand || shouldRespond(chatInfo, facts);
-
-    let userText = firstBlock?.text ?? "";
 
     /** @type {UserMessage} */
     const message = {
@@ -288,6 +328,9 @@ export function createConversationRunner({ store, llmClient, getActionsFn, execu
 
     log.debug("LLM will respond");
 
+    const userText = runCoordinator.hasPendingRun(chatId)
+      ? await buildPendingRunInputText({ chatId, chatInfo, content })
+      : getTopLevelText(content);
     const lifecycleDecision = await runCoordinator.beginRun({ turn, userText, harness });
     if (lifecycleDecision.status === "buffered") {
       log.debug("Buffered message for pending harness run on chat", chatId);
@@ -511,7 +554,6 @@ export function createConversationRunner({ store, llmClient, getActionsFn, execu
       context,
       actions,
       actionResolver,
-      firstBlock,
       persona,
       harness,
       isSlashCommand: !!isSlashCommand,

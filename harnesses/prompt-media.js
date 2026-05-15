@@ -1,5 +1,6 @@
 import { hasMediaPath, resolveMediaPath } from "../attachment-paths.js";
 import { contentHasContextResetCommand } from "../conversation/context-boundary.js";
+import { renderContentBlock } from "../message-formatting.js";
 import { getMediaTranslation, resolveMediaModel } from "../media-to-text.js";
 
 /**
@@ -65,6 +66,101 @@ function extractTopLevelText(blocks) {
     .filter(/** @returns {block is TextContentBlock} */ (block) => block.type === "text")
     .map((block) => block.text)
     .join("\n");
+}
+
+/**
+ * Collect canonical media paths from quoted content without duplicating the
+ * quoted text that `renderContentBlock()` already produced.
+ * @param {IncomingContentBlock[]} blocks
+ * @param {string[]} mediaLines
+ * @returns {void}
+ */
+function collectQuotedMediaLines(blocks, mediaLines) {
+  for (const block of blocks) {
+    if (block.type === "quote") {
+      collectQuotedMediaLines(block.content, mediaLines);
+      continue;
+    }
+    if ((block.type === "image" || block.type === "video" || block.type === "audio" || block.type === "file") && hasMediaPath(block)) {
+      const mediaLine = renderPromptMediaReference(block);
+      if (mediaLine) {
+        mediaLines.push(mediaLine);
+      }
+    }
+  }
+}
+
+/**
+ * Collect plain-text content and canonical media paths from a content block list.
+ * Text-first harnesses represent media as explicit file references in the
+ * synthesized prompt rather than as multimodal inputs.
+ * @param {Array<IncomingContentBlock | ToolContentBlock>} blocks
+ * @param {string[]} textParts
+ * @param {string[]} mediaLines
+ * @returns {void}
+ */
+function collectTextHarnessPromptParts(blocks, textParts, mediaLines) {
+  for (const block of blocks) {
+    if (block.type === "quote") {
+      const renderedQuote = renderContentBlock(block);
+      if (renderedQuote) {
+        textParts.push(renderedQuote);
+      }
+      collectQuotedMediaLines(block.content, mediaLines);
+      continue;
+    }
+
+    if (block.type === "image" && hasMediaPath(block)) {
+      const markdownImage = renderMarkdownImageReference(block);
+      if (markdownImage) {
+        textParts.push(markdownImage);
+        continue;
+      }
+      const mediaLine = renderPromptMediaReference(block);
+      if (mediaLine) {
+        mediaLines.push(mediaLine);
+      }
+      continue;
+    }
+
+    if ((block.type === "video" || block.type === "audio" || block.type === "file") && hasMediaPath(block)) {
+      const mediaLine = renderPromptMediaReference(block);
+      if (mediaLine) {
+        mediaLines.push(mediaLine);
+      }
+      continue;
+    }
+
+    const rendered = renderContentBlock(block);
+    if (rendered) {
+      textParts.push(rendered);
+    }
+  }
+}
+
+/**
+ * Build the text prompt that a text-first harness should see for one user turn.
+ * @param {Array<IncomingContentBlock | ToolContentBlock>} blocks
+ * @returns {string}
+ */
+export function buildTextHarnessPromptFromBlocks(blocks) {
+  /** @type {string[]} */
+  const textParts = [];
+  /** @type {string[]} */
+  const mediaLines = [];
+  collectTextHarnessPromptParts(blocks, textParts, mediaLines);
+
+  const sections = [];
+  if (textParts.length > 0) {
+    sections.push(textParts.join("\n"));
+  }
+  if (mediaLines.length > 0) {
+    const heading = mediaLines.length === 1
+      ? "Media file available in this request:"
+      : "Media files available in this request:";
+    sections.push(`${heading}\n${mediaLines.join("\n")}`);
+  }
+  return sections.join("\n\n");
 }
 
 /**
@@ -185,6 +281,25 @@ async function augmentBlocks(blocks, input) {
 }
 
 /**
+ * Create an ephemeral prompt-ready view of arbitrary incoming content blocks
+ * for text-first harnesses.
+ * @param {IncomingContentBlock[]} blocks
+ * @param {Pick<LlmConfig, "llmClient" | "mediaToTextModels">} llmConfig
+ * @param {ChatDb} db
+ * @param {{ contextMessages?: ChatMessage[], currentText?: string }} [options]
+ * @returns {Promise<{ blocks: IncomingContentBlock[], changed: boolean }>}
+ */
+export async function augmentContentBlocksForTextHarness(blocks, llmConfig, db, options = {}) {
+  return augmentBlocks(blocks, {
+    llmClient: llmConfig.llmClient,
+    mediaToTextModels: llmConfig.mediaToTextModels,
+    db,
+    contextMessages: options.contextMessages ?? [],
+    currentText: options.currentText ?? extractTopLevelText(blocks),
+  });
+}
+
+/**
  * Create an ephemeral prompt-ready view of the latest user message for
  * text-first harnesses. Canonical media blocks are preserved; generated alt is
  * attached only in the derived message copy.
@@ -208,10 +323,7 @@ export async function augmentLatestUserMessageForTextHarness(messages, llmConfig
   const message = /** @type {UserMessage} */ (messages[userIndex]);
   const currentText = extractTopLevelText(message.content);
   const contextMessages = buildPromptContextMessages(messages, userIndex);
-  const augmented = await augmentBlocks(message.content, {
-    llmClient: llmConfig.llmClient,
-    mediaToTextModels: llmConfig.mediaToTextModels,
-    db,
+  const augmented = await augmentContentBlocksForTextHarness(message.content, llmConfig, db, {
     contextMessages,
     currentText,
   });
