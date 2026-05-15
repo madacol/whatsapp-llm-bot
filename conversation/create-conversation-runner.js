@@ -269,17 +269,19 @@ export function createConversationRunner({ store, llmClient, getActionsFn, execu
     try {
       const { result, afterResponse } = await executeActionFn(action.name, context, params, { actionResolver, llmClient });
 
+      /** @type {MessageHandle | undefined} */
+      let responseHandle;
       if (isHtmlContent(result)) {
         const linkText = await storeAndLinkHtml(chatId, result);
-        await context.reply(contentEvent("tool-result", linkText));
+        responseHandle = await context.reply(contentEvent("tool-result", linkText));
       } else if (typeof result === "string") {
-        await context.reply(contentEvent("tool-result", result));
+        responseHandle = await context.reply(contentEvent("tool-result", result));
       } else if (Array.isArray(result)) {
-        await context.reply(contentEvent("tool-result", /** @type {ToolContentBlock[]} */ (result)));
+        responseHandle = await context.reply(contentEvent("tool-result", /** @type {ToolContentBlock[]} */ (result)));
       } else {
-        await context.reply(contentEvent("tool-result", JSON.stringify(result, null, 2)));
+        responseHandle = await context.reply(contentEvent("tool-result", JSON.stringify(result, null, 2)));
       }
-      await afterResponse?.();
+      await afterResponse?.({ handle: responseHandle });
     } catch (error) {
       log.error("Error executing command:", error);
       await context.reply(contentEvent("error", `Error: ${errorToString(error)}`));

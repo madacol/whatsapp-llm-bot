@@ -138,12 +138,14 @@ describe("WhatsApp transport community creation", () => {
     });
 
     await transport.start(async () => {});
-    await transport.sendEvent?.(chatId, {
+    const queuedHandle = await transport.sendEvent?.(chatId, {
       kind: "content",
       source: "llm",
       content: "queued on disconnect",
     });
 
+    assert.equal(queuedHandle?.deliveryStatus, "queued");
+    assert.equal(typeof queuedHandle?.waitUntilSent, "function");
     assert.equal(sentMessages.length, 0);
     assert.equal((await getQueuedRows(testDb, chatId)).length, 1);
 
@@ -161,6 +163,9 @@ describe("WhatsApp transport community creation", () => {
       chatId,
       message: { text: "🤖 queued on disconnect" },
     }]);
+    const sentHandle = await queuedHandle?.waitUntilSent?.({ timeoutMs: 10 });
+    assert.equal(sentHandle?.deliveryStatus, "sent");
+    assert.equal(sentHandle?.keyId, "sent-1");
     assert.equal((await getQueuedRows(testDb, chatId)).length, 0);
   });
 
