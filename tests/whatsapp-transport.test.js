@@ -10,6 +10,7 @@ import {
 import { setDb } from "../db.js";
 import { initStore } from "../store.js";
 import { createTestDb, createWAMessage } from "./helpers.js";
+import { contentEvent } from "../outbound-events.js";
 
 /** @type {import("@electric-sql/pglite").PGlite | null} */
 let testDb = null;
@@ -159,6 +160,92 @@ describe("WhatsApp transport community creation", () => {
     assert.deepEqual(sentMessages, [{
       chatId,
       message: { text: "🤖 queued on disconnect" },
+    }]);
+    assert.equal((await getQueuedRows(testDb, chatId)).length, 0);
+  });
+
+  it("queues turn replies while the socket exists but the connection is not open yet", async () => {
+    if (!testDb) {
+      throw new Error("Expected test DB to be initialized");
+    }
+
+    const chatId = `queued-before-open-${Date.now()}`;
+    /** @type {((events: Partial<import("@whiskeysockets/baileys").BaileysEventMap>) => Promise<void>) | null} */
+    let processEvents = null;
+    /** @type {Array<{ chatId: string, message: Record<string, unknown> }>} */
+    const sentMessages = [];
+    /** @type {() => void} */
+    let resolveReplyHandled = () => {};
+    const replyHandled = new Promise((resolve) => {
+      resolveReplyHandled = resolve;
+    });
+
+    const socket = /** @type {import("@whiskeysockets/baileys").WASocket} */ (/** @type {unknown} */ ({
+      user: { id: "bot-phone-id:0@s.whatsapp.net", lid: "bot-lid-id:0@lid" },
+      ev: {
+        process(handler) {
+          processEvents = handler;
+        },
+      },
+      sendMessage: async (targetChatId, message) => {
+        sentMessages.push({ chatId: targetChatId, message });
+        return { key: { id: `sent-${sentMessages.length}`, remoteJid: targetChatId } };
+      },
+      sendPresenceUpdate: async () => {},
+    }));
+
+    const transport = await createWhatsAppTransport({
+      inboundCoalesceDelayMs: 5,
+      createConnectionSupervisor: async ({ onSocketReady }) => ({
+        start: async () => {
+          onSocketReady(socket, async () => {});
+        },
+        stop: async () => {},
+        sendText: async () => {},
+        handleConnectionUpdate: async () => {},
+        isStopped: () => false,
+      }),
+      ...(testStore ? { outboundStore: testStore } : {}),
+    });
+
+    await transport.start(async (turn) => {
+      try {
+        await turn.io.reply(contentEvent("llm", "queued while opening"));
+      } finally {
+        resolveReplyHandled();
+      }
+    });
+
+    if (!processEvents) {
+      throw new Error("Expected connection event processor to be registered");
+    }
+
+    await processEvents({
+      "messages.upsert": {
+        type: "notify",
+        messages: [
+          createWAMessage({
+            text: "reply before open",
+            senderId: "early-user",
+            chatId,
+          }),
+        ],
+      },
+    });
+    await replyHandled;
+
+    assert.equal(sentMessages.length, 0);
+    assert.equal((await getQueuedRows(testDb, chatId)).length, 1);
+
+    await processEvents({
+      "connection.update": {
+        connection: "open",
+      },
+    });
+
+    assert.deepEqual(sentMessages, [{
+      chatId,
+      message: { text: "🤖 queued while opening" },
     }]);
     assert.equal((await getQueuedRows(testDb, chatId)).length, 0);
   });
