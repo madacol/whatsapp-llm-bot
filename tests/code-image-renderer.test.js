@@ -6,7 +6,8 @@ import {
   renderTableToImages,
   renderUnifiedDiffToImages,
   maxCharsForLineCount,
-  normalizeTableCellTextForDisplay,
+  parseTableCellMarkdown,
+  tableTextRunsToPlainText,
   wrapAnnotatedLinesForDisplay,
 } from "../code-image-renderer.js";
 import { formatBashCommand } from "../tool-display.js";
@@ -172,15 +173,23 @@ describe("code-image-renderer", () => {
   });
 
   describe("renderTableToImages", () => {
-    it("preserves underscores inside identifier-like table cell text", () => {
+    it("parses inline markdown while preserving underscores inside identifiers", () => {
+      const codeRuns = parseTableCellMarkdown("`READY_FOR_REVIEW_WITH_EXTENDED_METADATA_001`");
       assert.equal(
-        normalizeTableCellTextForDisplay("`READY_FOR_REVIEW_WITH_EXTENDED_METADATA_001`"),
+        tableTextRunsToPlainText(codeRuns),
         "READY_FOR_REVIEW_WITH_EXTENDED_METADATA_001",
       );
+      assert.equal(codeRuns.length, 1);
+      assert.equal(codeRuns[0].code, true);
+
+      const mixedRuns = parseTableCellMarkdown("_italic_ READY_FOR_REVIEW **bold**");
       assert.equal(
-        normalizeTableCellTextForDisplay("_italic_ READY_FOR_REVIEW"),
-        "italic READY_FOR_REVIEW",
+        tableTextRunsToPlainText(mixedRuns),
+        "italic READY_FOR_REVIEW bold",
       );
+      assert.ok(mixedRuns.some(run => run.text === "italic" && run.italic));
+      assert.ok(mixedRuns.some(run => run.text.includes("READY_FOR_REVIEW") && !run.italic && !run.bold));
+      assert.ok(mixedRuns.some(run => run.text === "bold" && run.bold));
     });
 
     it("wraps wide markdown table cells instead of creating an excessively wide image", () => {
