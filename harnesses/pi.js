@@ -5,6 +5,7 @@ import { renderContentBlock } from "../message-formatting.js";
 import { getChatDb } from "../db.js";
 import { NO_OP_HOOKS } from "./native.js";
 import { buildSdkErrorResponse, clearStaleHarnessSession, getHarnessRunErrorMessage } from "./harness-run-errors.js";
+import { wrapHooksWithFallbacks } from "./hook-fallbacks.js";
 import { augmentLatestUserMessageForTextHarness, renderMarkdownImageReference, renderPromptMediaReference } from "./prompt-media.js";
 import { handleHarnessSessionCommand } from "./session-commands.js";
 import { openPiRpcConnection } from "./pi-rpc-client.js";
@@ -532,7 +533,7 @@ export function createPiHarness(deps = {}) {
    * @returns {Promise<AgentResult>}
    */
   async function run({ session, llmConfig, messages, hooks: userHooks, runConfig }) {
-    const hooks = { ...NO_OP_HOOKS, ...userHooks };
+    const hooks = wrapHooksWithFallbacks({ ...NO_OP_HOOKS, ...userHooks });
     const promptMessages = await augmentLatestUserMessageForTextHarness(messages, llmConfig, getChatDb(session.chatId));
     const prompt = buildPiPrompt(promptMessages);
     if (!prompt) {
