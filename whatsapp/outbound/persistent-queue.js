@@ -262,7 +262,9 @@ async function getStore() {
 export function isRecoverableWhatsAppSendError(error) {
   const message = errorMessage(error);
   return message.includes("Connection Closed")
+    || message.includes("Connection Terminated")
     || message.includes("Connection was lost")
+    || message.trim() === "1006"
     || message.includes("WhatsApp socket is not connected")
     || message.includes("WhatsApp transport has not been started");
 }
