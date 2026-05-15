@@ -49,6 +49,49 @@ afterEach(() => {
 const seedChat = (chatId, options) => seedChat_(db, chatId, options);
 
 describe("createConversationRunner prompt formatting", () => {
+  it("runs command afterResponse hooks only after the command reply resolves", async () => {
+    await seedChat("conv-command-after-response", { enabled: true });
+    const { createConversationRunner } = await import("../conversation/create-conversation-runner.js");
+    /** @type {string[]} */
+    const phases = [];
+    const runner = createConversationRunner({
+      store,
+      llmClient: /** @type {LlmClient} */ ({}),
+      getActionsFn: async () => [{
+        name: "restart",
+        command: "restart",
+        description: "Restart the bot process",
+        parameters: { type: "object", properties: {} },
+        permissions: { autoExecute: true, requireMaster: true },
+        action_fn: async () => "unused",
+      }],
+      executeActionFn: async () => ({
+        result: "Restart signal sent.",
+        permissions: {},
+        afterResponse: () => {
+          phases.push("after-response");
+        },
+      }),
+    });
+
+    const turn = createChatTurn({
+      chatId: "conv-command-after-response",
+      content: [{ type: "text", text: "!restart" }],
+      io: {
+        reply: async () => {
+          phases.push("reply-start");
+          await new Promise((resolve) => setTimeout(resolve, 10));
+          phases.push("reply-done");
+          return undefined;
+        },
+      },
+    });
+
+    await runner.handleMessage(turn.context);
+
+    assert.deepEqual(phases, ["reply-start", "reply-done", "after-response"]);
+  });
+
   it("stores raw group text, carries sender metadata, and omits the group-chat cue", async () => {
     await seedChat("conv-prompt-group", { enabled: true });
     await updateChatConfig("conv-prompt-group", (current) => ({

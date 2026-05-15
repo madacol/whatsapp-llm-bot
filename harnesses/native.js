@@ -174,6 +174,10 @@ async function executeAndStoreTool({
     log.debug("response", functionResponse);
 
     const result = functionResponse.result;
+    const finishToolCall = async () => {
+      await functionResponse.afterResponse?.();
+      return !!functionResponse.permissions.autoContinue;
+    };
 
     // HTML content → store page, edit message with link
     if (isHtmlContent(result)) {
@@ -184,7 +188,7 @@ async function executeAndStoreTool({
       await tryEdit(handle, linkText, toolName);
       registerInspect(toolMessage);
 
-      return !!functionResponse.permissions.autoContinue;
+      return finishToolCall();
     }
 
     const isContentBlocks = Array.isArray(result)
@@ -227,7 +231,7 @@ async function executeAndStoreTool({
       }
     }
 
-    return functionResponse.permissions.autoContinue;
+    return finishToolCall();
   } catch (error) {
     log.error("Error executing tool:", error);
     const errorMessage = `Error executing ${toolName}: ${errorToString(error)}`;

@@ -549,6 +549,7 @@ type ActionResultValue = string | {} | HtmlContent | ToolContentBlock[];
 type ActionResult = {
   result: ActionResultValue;
   autoContinue?: boolean;
+  afterResponse?: () => void | Promise<void>;
 };
 
 type Action<P extends PermissionFlags = PermissionFlags> = {
@@ -796,7 +797,7 @@ type ToolRuntime = {
     context: ExecuteActionContext,
     params: {},
     options?: ExecuteToolOptions,
-  ) => Promise<{ result: ActionResultValue, permissions: PermissionFlags }>;
+  ) => Promise<{ result: ActionResultValue, permissions: PermissionFlags, afterResponse?: () => void | Promise<void> }>;
 };
 
 type Session = {

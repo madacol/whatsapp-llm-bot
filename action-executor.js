@@ -40,7 +40,7 @@ function defineLazyDb(obj, prop, factory) {
  * @param {ExecuteActionContext} context
  * @param {{} } params
  * @param {ExecuteActionOptions} [options]
- * @returns {Promise<{ result: ActionResultValue, permissions: Action["permissions"] }>}
+ * @returns {Promise<{ result: ActionResultValue, permissions: Action["permissions"], afterResponse?: () => void | Promise<void> }>}
  */
 export async function executeAction(actionName, context, params, options = {}) {
   const {
@@ -158,7 +158,11 @@ export async function executeAction(actionName, context, params, options = {}) {
       ? { ...action.permissions, autoContinue: actionResult.autoContinue }
       : action.permissions;
 
-    return { result: actionResult.result, permissions };
+    return {
+      result: actionResult.result,
+      permissions,
+      ...(actionResult.afterResponse ? { afterResponse: actionResult.afterResponse } : {}),
+    };
   } catch (error) {
     log.error(`Error executing action ${actionName}:`, error);
     throw error;

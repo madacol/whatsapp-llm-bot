@@ -410,6 +410,38 @@ describe("executeAction", () => {
     assert.equal(permissions.autoContinue, false);
   });
 
+  it("passes afterResponse hooks through without running them", async () => {
+    let hookCalls = 0;
+    const resolver = createResolver({
+      restart_like_action: {
+        name: "restart_like_action",
+        description: "returns a post-response hook",
+        parameters: { type: "object", properties: {} },
+        permissions: { autoExecute: true },
+        action_fn: async () => ({
+          result: "scheduled",
+          afterResponse: () => {
+            hookCalls += 1;
+          },
+        }),
+      },
+    });
+
+    const { result, afterResponse } = await executeAction(
+      "restart_like_action",
+      createMockExecuteActionContext(),
+      {},
+      { actionResolver: resolver },
+    );
+
+    assert.equal(result, "scheduled");
+    assert.equal(hookCalls, 0);
+    assert.equal(typeof afterResponse, "function");
+
+    await afterResponse?.();
+    assert.equal(hookCalls, 1);
+  });
+
   it("does not override autoContinue for plain string results", async () => {
     const resolver = createResolver({
       test_action: {
