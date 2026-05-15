@@ -712,6 +712,16 @@ export async function createWhatsAppTransport(options = {}) {
   }
 
   /**
+   * Resolve the socket only after Baileys reports the connection as open.
+   * A registered socket can still be in initial sync, where outbound sends can
+   * fail with "Precondition Required" / "Connection Closed".
+   * @returns {import('@whiskeysockets/baileys').WASocket | null}
+   */
+  function getOpenSocket() {
+    return hasOpenConnection ? currentSocket : null;
+  }
+
+  /**
    * Register socket handlers on the current socket instance.
    * @param {import('@whiskeysockets/baileys').WASocket} sock
    * @param {() => Promise<void>} saveCreds
@@ -731,7 +741,7 @@ export async function createWhatsAppTransport(options = {}) {
           selectRuntime,
           reactionRuntime,
           undefined,
-          { getSocket: () => currentSocket },
+          { getSocket: getOpenSocket },
         );
       },
     });
@@ -745,7 +755,7 @@ export async function createWhatsAppTransport(options = {}) {
           selectRuntime,
           reactionRuntime,
           undefined,
-          { getSocket: () => currentSocket },
+          { getSocket: getOpenSocket },
         );
       },
     });
@@ -837,7 +847,7 @@ export async function createWhatsAppTransport(options = {}) {
         throw new Error("WhatsApp transport has not been started");
       }
       await sendOrQueueWhatsAppText({
-        getSocket: () => hasOpenConnection ? currentSocket : null,
+        getSocket: getOpenSocket,
         chatId,
         text,
         ...(outboundStore ? { store: outboundStore } : {}),
@@ -849,7 +859,7 @@ export async function createWhatsAppTransport(options = {}) {
         throw new Error("WhatsApp transport has not been started");
       }
       return sendOrQueueWhatsAppEvent({
-        getSocket: () => hasOpenConnection ? currentSocket : null,
+        getSocket: getOpenSocket,
         chatId,
         event,
         reactionRuntime,
