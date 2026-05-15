@@ -4,14 +4,13 @@ import { ATTACHMENT_ROOT, hasMediaPath } from "../attachment-paths.js";
  */
 
 import { createLogger } from "../logger.js";
-import { renderContentBlock } from "../message-formatting.js";
 import { getChatDb } from "../db.js";
 import { NO_OP_HOOKS } from "./native.js";
 import { isHandledCodexRunError, startCodexRun } from "./codex-runner.js";
 import { startCodexAppServerRun } from "./codex-app-server-runner.js";
 import { createCodexCommandHandler } from "./codex-commands.js";
 import { getCodexAvailableModels } from "./codex-models.js";
-import { augmentLatestUserMessageForTextHarness, renderMarkdownImageReference, renderPromptMediaReference } from "./prompt-media.js";
+import { augmentLatestUserMessageForTextHarness, buildTextHarnessPromptFromBlocks } from "./prompt-media.js";
 import { buildSdkErrorResponse, clearStaleHarnessSession, getHarnessRunErrorMessage } from "./harness-run-errors.js";
 import { wrapHooksWithFallbacks } from "./hook-fallbacks.js";
 import { createActionRequestRunState, executeQueuedActionRequests } from "../action-request-runtime.js";
@@ -36,76 +35,6 @@ const CODEX_HARNESS_CAPABILITIES = {
   supportsReasoningEffort: false,
   supportsSessionFork: true,
 };
-
-/**
- * Collect plain-text content and canonical media paths from a content block list.
- * Codex is text-first, so media is represented as explicit file references in
- * the synthesized prompt rather than as multimodal inputs.
- * @param {Array<IncomingContentBlock | ToolContentBlock>} blocks
- * @param {string[]} textParts
- * @param {string[]} mediaLines
- * @returns {void}
- */
-function collectCodexPromptParts(blocks, textParts, mediaLines) {
-  for (const block of blocks) {
-    if (block.type === "quote") {
-      const renderedQuote = renderContentBlock(block);
-      if (renderedQuote) {
-        textParts.push(renderedQuote);
-      }
-      collectQuotedMediaLines(block.content, mediaLines);
-      continue;
-    }
-
-    if (block.type === "image" && hasMediaPath(block)) {
-      const markdownImage = renderMarkdownImageReference(block);
-      if (markdownImage) {
-        textParts.push(markdownImage);
-        continue;
-      }
-      const mediaLine = renderPromptMediaReference(block);
-      if (mediaLine) {
-        mediaLines.push(mediaLine);
-      }
-      continue;
-    }
-
-    if ((block.type === "video" || block.type === "audio" || block.type === "file") && hasMediaPath(block)) {
-      const mediaLine = renderPromptMediaReference(block);
-      if (mediaLine) {
-        mediaLines.push(mediaLine);
-      }
-      continue;
-    }
-
-    const rendered = renderContentBlock(block);
-    if (rendered) {
-      textParts.push(rendered);
-    }
-  }
-}
-
-/**
- * Collect canonical media paths from quoted content without duplicating the
- * quoted text that `renderContentBlock()` already produced.
- * @param {IncomingContentBlock[]} blocks
- * @param {string[]} mediaLines
- * @returns {void}
- */
-function collectQuotedMediaLines(blocks, mediaLines) {
-  for (const block of blocks) {
-    if (block.type === "quote") {
-      collectQuotedMediaLines(block.content, mediaLines);
-      continue;
-    }
-    if ((block.type === "image" || block.type === "video" || block.type === "audio" || block.type === "file") && hasMediaPath(block)) {
-      const mediaLine = renderPromptMediaReference(block);
-      if (mediaLine) {
-        mediaLines.push(mediaLine);
-      }
-    }
-  }
-}
 
 /**
  * @param {Message[]} messages
@@ -158,24 +87,7 @@ function buildCodexPrompt(messages) {
     if (msg.role !== "user") {
       continue;
     }
-
-    /** @type {string[]} */
-    const textParts = [];
-    /** @type {string[]} */
-    const mediaLines = [];
-    collectCodexPromptParts(msg.content, textParts, mediaLines);
-
-    const sections = [];
-    if (textParts.length > 0) {
-      sections.push(textParts.join("\n"));
-    }
-    if (mediaLines.length > 0) {
-      const heading = mediaLines.length === 1
-        ? "Media file available in this request:"
-        : "Media files available in this request:";
-      sections.push(`${heading}\n${mediaLines.join("\n")}`);
-    }
-    return sections.join("\n\n");
+    return buildTextHarnessPromptFromBlocks(msg.content);
   }
   return "";
 }

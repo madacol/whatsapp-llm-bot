@@ -1,4 +1,4 @@
-import { describe, it, before, afterEach } from "node:test";
+import { describe, it, before, after, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { setTimeout as delay } from "node:timers/promises";
 
@@ -6,6 +6,8 @@ process.env.TESTING = "1";
 process.env.MASTER_ID = "master-user";
 
 import { createChatTurn, createTestDb, seedChat as seedChat_ } from "./helpers.js";
+import { createLlmClient } from "../llm.js";
+import { writeMedia } from "../media-store.js";
 import { setDb } from "../db.js";
 import { updateChatConfig } from "../chat-config.js";
 
@@ -19,10 +21,20 @@ let handleMessage;
 let registerHarness;
 /** @type {typeof import("../harnesses/codex.js").createCodexHarness} */
 let createCodexHarness;
+/** @type {Awaited<ReturnType<typeof import("./helpers.js").createMockLlmServer>>} */
+let mockServer;
+/** @type {LlmClient} */
+let llmClient;
 
 before(async () => {
   db = await createTestDb();
   setDb("./pgdata/root", db);
+  const { createMockLlmServer } = await import("./helpers.js");
+  mockServer = await createMockLlmServer();
+  llmClient = createLlmClient({
+    apiKey: "test-key",
+    baseURL: mockServer.url,
+  });
 
   const { initStore } = await import("../store.js");
   store = await initStore(db);
@@ -33,7 +45,7 @@ before(async () => {
 
   const runner = createConversationRunner({
     store,
-    llmClient: /** @type {LlmClient} */ ({}),
+    llmClient,
     getActionsFn: async () => [],
     executeActionFn: async () => {
       throw new Error("executeAction should not be called");
@@ -44,6 +56,11 @@ before(async () => {
 
 afterEach(() => {
   registerHarness("codex", createCodexHarness);
+  mockServer.clearRequests();
+});
+
+after(async () => {
+  await mockServer.close();
 });
 
 /** @param {string} chatId @param {{enabled?: boolean, systemPrompt?: string | null, model?: string | null}} [options] */
@@ -343,6 +360,96 @@ describe("createConversationRunner with codex harness", () => {
     assert.ok(seenPrompts[0]?.includes("First unavailable question"));
     assert.equal(steeredPrompts.length, 1);
     assert.ok(steeredPrompts[0]?.includes("Second unavailable question"));
+    assert.equal(secondTurn.responses.length, 0);
+  });
+
+  it("transcribes and steers audio-only follow-ups into an active Codex run", async () => {
+    await seedChat("conv-codex-audio-steer", { enabled: true });
+    await configureCodexChat("conv-codex-audio-steer", {
+      media_to_text_models: { audio: "audio/model" },
+    });
+    mockServer.addResponses("Audio says to inspect the active turn injection path.");
+
+    /** @type {string[]} */
+    const seenPrompts = [];
+    /** @type {string[]} */
+    const steeredPrompts = [];
+    /** @type {() => void} */
+    let releaseFirstRun = () => {};
+    const firstRunReleased = new Promise((resolve) => {
+      releaseFirstRun = resolve;
+    });
+    /** @type {() => void} */
+    let notifyFirstRunStarted = () => {};
+    const firstRunStarted = new Promise((resolve) => {
+      notifyFirstRunStarted = resolve;
+    });
+    let runCount = 0;
+
+    registerHarness("codex", () => createCodexHarness({
+      startRun: async (input) => {
+        runCount += 1;
+        const prompt = getLastUserText(input.messages);
+        seenPrompts.push(prompt);
+
+        return {
+          abortController: new AbortController(),
+          steer: async (text) => {
+            steeredPrompts.push(text);
+            return true;
+          },
+          done: (async () => {
+            await input.hooks?.onLlmResponse?.(`Response for ${prompt}`);
+            if (runCount === 1) {
+              notifyFirstRunStarted();
+              await firstRunReleased;
+            }
+            return {
+              sessionId: null,
+              result: {
+                response: [{ type: "markdown", text: `Response for ${prompt}` }],
+                messages: input.messages,
+                usage: { promptTokens: 0, completionTokens: 0, cachedTokens: 0, cost: 0 },
+              },
+            };
+          })(),
+        };
+      },
+    }));
+
+    const firstTurn = createChatTurn({
+      chatId: "conv-codex-audio-steer",
+      content: [{ type: "text", text: "First audio steering question" }],
+    });
+    const audioPath = await writeMedia(
+      Buffer.from("audio bytes"),
+      "audio/mp3",
+      "audio",
+    );
+    const secondTurn = createChatTurn({
+      chatId: "conv-codex-audio-steer",
+      content: [{
+        type: "audio",
+        mime_type: "audio/mp3",
+        path: audioPath,
+      }],
+    });
+
+    const firstTurnPromise = handleMessage(firstTurn.context);
+    try {
+      await firstRunStarted;
+
+      await handleMessage(secondTurn.context);
+      assert.equal(seenPrompts.length, 1);
+      assert.equal(steeredPrompts.length, 1);
+      assert.ok(steeredPrompts[0]?.includes("[Audio description: Audio says to inspect the active turn injection path.]"));
+      assert.ok(steeredPrompts[0]?.includes("Media file available in this request:"));
+    } finally {
+      releaseFirstRun();
+      await firstTurnPromise;
+    }
+
+    assert.equal(seenPrompts.length, 1);
     assert.equal(secondTurn.responses.length, 0);
   });
 
