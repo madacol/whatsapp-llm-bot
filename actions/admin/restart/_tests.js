@@ -30,10 +30,15 @@ async function restart_returns_before_stopping_the_process(_action_fn, db) {
     resolveModel: () => "test-model",
   }, {});
 
-  assert.deepEqual(result, {
-    result: "Restart signal sent.",
-    autoContinue: false,
-  });
+  if (typeof result !== "object" || result === null || Array.isArray(result) || !("result" in result)) {
+    throw new Error("Expected restart action to return an ActionResult object");
+  }
+  assert.equal(result.result, "Restart signal sent.");
+  assert.equal(result.autoContinue, false);
+  assert.equal(typeof result.afterResponse, "function");
+  assert.equal(scheduled, 0);
+
+  await result.afterResponse?.();
   assert.equal(scheduled, 1);
 }
 

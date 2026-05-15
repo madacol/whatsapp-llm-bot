@@ -64,10 +64,10 @@ export function createRestartAction(restartScheduler = scheduleRestart) {
     autoContinue: false,
   },
   action_fn: async function () {
-    restartScheduler();
     return {
       result: "Restart signal sent.",
       autoContinue: false,
+      afterResponse: restartScheduler,
     };
   },
   });

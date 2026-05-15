@@ -267,7 +267,7 @@ export function createConversationRunner({ store, llmClient, getActionsFn, execu
     log.debug("executing", action.name, params);
 
     try {
-      const { result } = await executeActionFn(action.name, context, params, { actionResolver, llmClient });
+      const { result, afterResponse } = await executeActionFn(action.name, context, params, { actionResolver, llmClient });
 
       if (isHtmlContent(result)) {
         const linkText = await storeAndLinkHtml(chatId, result);
@@ -279,6 +279,7 @@ export function createConversationRunner({ store, llmClient, getActionsFn, execu
       } else {
         await context.reply(contentEvent("tool-result", JSON.stringify(result, null, 2)));
       }
+      await afterResponse?.();
     } catch (error) {
       log.error("Error executing command:", error);
       await context.reply(contentEvent("error", `Error: ${errorToString(error)}`));
