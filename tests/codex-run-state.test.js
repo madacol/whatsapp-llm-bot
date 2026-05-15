@@ -219,6 +219,35 @@ describe("createCodexRunState", () => {
     });
   });
 
+  it("ignores a stale first-observation baseline that already contains a new file", async () => {
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "codex-run-state-stale-baseline-add-"));
+    const filePath = path.join(tempDir, "added.txt");
+    await fs.writeFile(filePath, "created during baseline scan\n", "utf8");
+
+    const state = createCodexRunState({
+      workdir: tempDir,
+      loadWorkspaceBaseline: async () => new Map([[filePath, "created during baseline scan\n"]]),
+    });
+    const enriched = await state.enrichFileChangeEvent({
+      path: "added.txt",
+      summary: "added.txt (add)",
+      kind: "add",
+    });
+
+    assert.deepEqual(enriched, {
+      path: "added.txt",
+      summary: "added.txt (add)",
+      kind: "add",
+      newText: "created during baseline scan\n",
+      diff: [
+        "--- a/added.txt",
+        "+++ b/added.txt",
+        "@@ -0,0 +1,1 @@",
+        "+created during baseline scan",
+      ].join("\n"),
+    });
+  });
+
   it("computes an update diff for a live SDK file_change without prior commands by using the workspace baseline", async () => {
     const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "codex-run-state-live-update-"));
     const filePath = path.join(tempDir, "notes.txt");

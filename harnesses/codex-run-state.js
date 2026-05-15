@@ -102,13 +102,20 @@ export function createCodexRunState({ workdir, loadWorkspaceBaseline = loadWorks
       pendingFileDiffs.delete(absolutePath);
     }
 
-    let previousText = fileSnapshots.has(absolutePath)
+    const hadSnapshot = fileSnapshots.has(absolutePath);
+    let previousText = hadSnapshot
       ? fileSnapshots.get(absolutePath) ?? null
       : null;
     const nextText = await readOptionalText(absolutePath);
     if (previousText == null && shouldUseWorkspaceBaseline(fileChange, pending)) {
       const baselineText = await readWorkspaceBaselineText(absolutePath);
-      if (baselineText != null) {
+      if (baselineText != null && !isStaleFirstObservationBaseline({
+        baselineText,
+        nextText,
+        hadSnapshot,
+        fileChange,
+        pending,
+      })) {
         previousText = baselineText;
       }
     }
@@ -199,6 +206,28 @@ function shouldUseWorkspaceBaseline(fileChange, pending) {
     return false;
   }
   return true;
+}
+
+/**
+ * The workspace baseline is captured asynchronously at run-state creation.
+ * If a new file appears before that scan reaches its directory, the baseline
+ * can accidentally include the post-change contents. Treat that exact first
+ * observation as no baseline so add/update normalization remains deterministic.
+ * @param {{
+ *   baselineText: string,
+ *   nextText: string | null,
+ *   hadSnapshot: boolean,
+ *   fileChange: { diff?: string },
+ *   pending: { diff?: string } | undefined,
+ * }} input
+ * @returns {boolean}
+ */
+function isStaleFirstObservationBaseline({ baselineText, nextText, hadSnapshot, fileChange, pending }) {
+  return !hadSnapshot
+    && nextText != null
+    && baselineText === nextText
+    && !isParseableDiff(fileChange.diff)
+    && !isParseableDiff(pending?.diff);
 }
 
 /**
