@@ -80,7 +80,10 @@ const TABLE_CELL_PADDING_H = 12;
 const TABLE_CELL_PADDING_V = 6;
 const TABLE_BORDER_COLOR = "#30363d";
 const TEXT_COLOR = "#e6edf3";
+const CODE_TEXT_COLOR = "#d2a8ff";
 const BOLD_FONT_PATH = "/usr/share/fonts/truetype/dejavu/DejaVuSansMono-Bold.ttf";
+const ITALIC_FONT_PATH = "/usr/share/fonts/truetype/liberation/LiberationMono-Italic.ttf";
+const BOLD_ITALIC_FONT_PATH = "/usr/share/fonts/truetype/liberation/LiberationMono-BoldItalic.ttf";
 export const MIN_ROWS_FOR_TABLE_IMAGE = 3;
 const TABLE_IMAGE_WIDTH_CAP = 760;
 const TABLE_MIN_COL_WIDTH = 64;
@@ -90,9 +93,22 @@ const TABLE_MAX_PREVIEW_ASPECT_RATIO = 2;
 
 /**
  * @typedef {{
- *   cells: string[][],
+ *   cells: TableTextRun[][][],
  *   height: number,
  * }} TableRowLayout
+ */
+
+/**
+ * @typedef {{
+ *   text: string,
+ *   bold?: boolean,
+ *   italic?: boolean,
+ *   code?: boolean,
+ * }} TableTextRun
+ */
+
+/**
+ * @typedef {{ bold: boolean, italic: boolean, code: boolean }} TableTextStyle
  */
 
 /** @type {Awaited<ReturnType<typeof createHighlighter>> | null} */
@@ -377,67 +393,328 @@ function parseMarkdownTable(markdown) {
 }
 
 /**
- * Normalize markdown cell text for an image table. The image renderer owns the
- * visual presentation, so common emphasis markers should not be shown literally.
- * @param {string} text
- * @returns {string}
+ * @param {string | undefined} char
+ * @returns {boolean}
  */
-export function normalizeTableCellTextForDisplay(text) {
-  return text
-    .replace(/\\([\\`*_{}\[\]()#+\-.!|>])/g, "$1")
-    .replace(/\*\*([^*]+)\*\*/g, "$1")
-    .replace(/__([^_]+)__/g, "$1")
-    .replace(/(?<!\*)\*(?!\*)([^*]+)(?<!\*)\*(?!\*)/g, "$1")
-    .replace(/(^|[^\w])_([^_\s](?:[^_]*?[^_\s])?)_(?=$|[^\w])/g, "$1$2")
-    .replace(/`([^`]+)`/g, "$1");
+function isWordChar(char) {
+  return typeof char === "string" && /[A-Za-z0-9]/.test(char);
 }
 
 /**
- * Wrap display text into lines that fit a table cell.
  * @param {string} text
- * @param {number} maxChars
- * @returns {string[]}
+ * @param {number} index
+ * @param {number} length
+ * @returns {boolean}
  */
-function wrapTableCellText(text, maxChars) {
-  const normalized = normalizeTableCellTextForDisplay(text).replace(/\s+/g, " ").trim();
-  if (!normalized) return [""];
+function canOpenUnderscoreDelimiter(text, index, length) {
+  return !isWordChar(text[index - 1]) && !/\s/.test(text[index + length] ?? "");
+}
 
-  /** @type {string[]} */
-  const lines = [];
-  let current = "";
+/**
+ * @param {string} text
+ * @param {number} index
+ * @param {number} length
+ * @returns {boolean}
+ */
+function canCloseUnderscoreDelimiter(text, index, length) {
+  return !/\s/.test(text[index - 1] ?? "") && !isWordChar(text[index + length]);
+}
 
-  /**
-   * @param {string} line
-   * @returns {void}
-   */
-  const pushHardWrappedToken = (line) => {
-    for (let index = 0; index < line.length; index += maxChars) {
-      lines.push(line.slice(index, index + maxChars));
+/**
+ * @param {string} text
+ * @param {number} index
+ * @param {number} length
+ * @returns {boolean}
+ */
+function canOpenAsteriskDelimiter(text, index, length) {
+  return !/\s/.test(text[index + length] ?? "");
+}
+
+/**
+ * @param {string} text
+ * @param {number} index
+ * @returns {boolean}
+ */
+function canCloseAsteriskDelimiter(text, index) {
+  return !/\s/.test(text[index - 1] ?? "");
+}
+
+/**
+ * @param {TableTextStyle} style
+ * @returns {TableTextStyle}
+ */
+function cloneTableTextStyle(style) {
+  return { bold: style.bold, italic: style.italic, code: style.code };
+}
+
+/**
+ * @param {TableTextRun[]} runs
+ * @param {string} text
+ * @param {TableTextStyle} style
+ * @returns {void}
+ */
+function pushTableTextRun(runs, text, style) {
+  if (!text) return;
+  const previous = runs[runs.length - 1];
+  if (
+    previous
+    && Boolean(previous.bold) === style.bold
+    && Boolean(previous.italic) === style.italic
+    && Boolean(previous.code) === style.code
+  ) {
+    previous.text += text;
+    return;
+  }
+  runs.push({
+    text,
+    ...(style.bold ? { bold: true } : {}),
+    ...(style.italic ? { italic: true } : {}),
+    ...(style.code ? { code: true } : {}),
+  });
+}
+
+/**
+ * @param {string} text
+ * @param {string} delimiter
+ * @param {number} fromIndex
+ * @returns {number}
+ */
+function findUnescapedDelimiter(text, delimiter, fromIndex) {
+  for (let index = fromIndex; index < text.length; index++) {
+    if (text[index] === "\\") {
+      index += 1;
+      continue;
     }
+    if (text.startsWith(delimiter, index)) {
+      return index;
+    }
+  }
+  return -1;
+}
+
+/**
+ * @param {string} text
+ * @param {string} delimiter
+ * @param {number} fromIndex
+ * @returns {number}
+ */
+function findClosingEmphasisDelimiter(text, delimiter, fromIndex) {
+  for (let index = fromIndex; index < text.length; index++) {
+    if (text[index] === "\\") {
+      index += 1;
+      continue;
+    }
+    if (!text.startsWith(delimiter, index)) {
+      continue;
+    }
+    if (delimiter.startsWith("_") && !canCloseUnderscoreDelimiter(text, index, delimiter.length)) {
+      continue;
+    }
+    if (delimiter.startsWith("*") && !canCloseAsteriskDelimiter(text, index)) {
+      continue;
+    }
+    return index;
+  }
+  return -1;
+}
+
+/**
+ * Parse the small inline Markdown subset supported inside rendered table cells.
+ * @param {string} text
+ * @param {Partial<TableTextStyle>} [baseStyle]
+ * @returns {TableTextRun[]}
+ */
+export function parseTableCellMarkdown(text, baseStyle = {}) {
+  /** @type {TableTextRun[]} */
+  const runs = [];
+  const style = {
+    bold: Boolean(baseStyle.bold),
+    italic: Boolean(baseStyle.italic),
+    code: Boolean(baseStyle.code),
+  };
+  let buffer = "";
+  let index = 0;
+
+  const flush = () => {
+    pushTableTextRun(runs, buffer, style);
+    buffer = "";
   };
 
-  for (const word of normalized.split(" ")) {
-    if (word.length > maxChars) {
-      if (current) {
-        lines.push(current);
-        current = "";
+  while (index < text.length) {
+    const char = text[index];
+
+    if (char === "\\" && index + 1 < text.length) {
+      buffer += text[index + 1];
+      index += 2;
+      continue;
+    }
+
+    if (char === "`") {
+      const closeIndex = findUnescapedDelimiter(text, "`", index + 1);
+      if (closeIndex !== -1) {
+        flush();
+        pushTableTextRun(runs, text.slice(index + 1, closeIndex), { ...cloneTableTextStyle(style), code: true });
+        index = closeIndex + 1;
+        continue;
       }
-      pushHardWrappedToken(word);
-      continue;
     }
 
-    const next = current ? `${current} ${word}` : word;
-    if (next.length <= maxChars) {
-      current = next;
-      continue;
-    }
+    /** @type {Array<{ delimiter: string, styleKey: "bold" | "italic" }>} */
+    const delimiterCandidates = [
+      { delimiter: "**", styleKey: "bold" },
+      { delimiter: "__", styleKey: "bold" },
+      { delimiter: "*", styleKey: "italic" },
+      { delimiter: "_", styleKey: "italic" },
+    ];
 
-    if (current) lines.push(current);
-    current = word;
+    let matched = false;
+    for (const candidate of delimiterCandidates) {
+      const { delimiter, styleKey } = candidate;
+      if (!text.startsWith(delimiter, index)) continue;
+      if (delimiter.startsWith("_") && !canOpenUnderscoreDelimiter(text, index, delimiter.length)) continue;
+      if (delimiter.startsWith("*") && !canOpenAsteriskDelimiter(text, index, delimiter.length)) continue;
+
+      const closeIndex = findClosingEmphasisDelimiter(text, delimiter, index + delimiter.length);
+      if (closeIndex === -1) continue;
+
+      flush();
+      const nestedStyle = { ...cloneTableTextStyle(style), [styleKey]: true };
+      for (const run of parseTableCellMarkdown(text.slice(index + delimiter.length, closeIndex), nestedStyle)) {
+        pushTableTextRun(runs, run.text, {
+          bold: Boolean(run.bold),
+          italic: Boolean(run.italic),
+          code: Boolean(run.code),
+        });
+      }
+      index = closeIndex + delimiter.length;
+      matched = true;
+      break;
+    }
+    if (matched) continue;
+
+    buffer += char;
+    index += 1;
   }
 
-  if (current) lines.push(current);
-  return lines.length ? lines : [""];
+  flush();
+  return runs;
+}
+
+/**
+ * @param {TableTextRun[]} runs
+ * @returns {string}
+ */
+export function tableTextRunsToPlainText(runs) {
+  return runs.map(run => run.text).join("");
+}
+
+/**
+ * @typedef {TableTextStyle & { char: string }} StyledTableChar
+ */
+
+/**
+ * @param {TableTextRun[]} runs
+ * @returns {StyledTableChar[]}
+ */
+function tableRunsToStyledChars(runs) {
+  /** @type {StyledTableChar[]} */
+  const chars = [];
+  for (const run of runs) {
+    for (const char of run.text.replace(/\s+/g, " ")) {
+      chars.push({
+        char,
+        bold: Boolean(run.bold),
+        italic: Boolean(run.italic),
+        code: Boolean(run.code),
+      });
+    }
+  }
+  return chars;
+}
+
+/**
+ * @param {StyledTableChar[]} chars
+ * @returns {TableTextRun[]}
+ */
+function styledCharsToTableRuns(chars) {
+  /** @type {TableTextRun[]} */
+  const runs = [];
+  for (const item of chars) {
+    pushTableTextRun(runs, item.char, item);
+  }
+  return runs.length ? runs : [{ text: "" }];
+}
+
+/**
+ * @param {StyledTableChar[]} chars
+ * @returns {StyledTableChar[]}
+ */
+function trimStyledTableChars(chars) {
+  let start = 0;
+  let end = chars.length;
+  while (start < end && chars[start].char === " ") start += 1;
+  while (end > start && chars[end - 1].char === " ") end -= 1;
+  return chars.slice(start, end);
+}
+
+/**
+ * @param {StyledTableChar[]} chars
+ * @returns {number}
+ */
+function findLastTableCharBreakIndex(chars) {
+  for (let index = chars.length - 1; index >= 0; index--) {
+    if (chars[index].char === " ") return index;
+  }
+  return -1;
+}
+
+/**
+ * Wrap display text runs into lines that fit a table cell.
+ * @param {string} text
+ * @param {number} maxChars
+ * @returns {TableTextRun[][]}
+ */
+function wrapTableCellText(text, maxChars) {
+  const chars = trimStyledTableChars(tableRunsToStyledChars(parseTableCellMarkdown(text)));
+  if (chars.length === 0) return [[{ text: "" }]];
+
+  /** @type {TableTextRun[][]} */
+  const lines = [];
+  /** @type {StyledTableChar[]} */
+  let current = [];
+  let lastBreakIndex = -1;
+
+  /**
+   * @param {StyledTableChar[]} lineChars
+   * @returns {void}
+   */
+  const pushLine = (lineChars) => {
+    lines.push(styledCharsToTableRuns(trimStyledTableChars(lineChars)));
+  };
+
+  for (const char of chars) {
+    current.push(char);
+    if (char.char === " ") {
+      lastBreakIndex = current.length - 1;
+    }
+    if (current.length <= maxChars) {
+      continue;
+    }
+
+    if (lastBreakIndex > 0) {
+      pushLine(current.slice(0, lastBreakIndex));
+      current = trimStyledTableChars(current.slice(lastBreakIndex + 1));
+      lastBreakIndex = findLastTableCharBreakIndex(current);
+      continue;
+    }
+
+    pushLine(current.slice(0, maxChars));
+    current = trimStyledTableChars(current.slice(maxChars));
+    lastBreakIndex = findLastTableCharBreakIndex(current);
+  }
+
+  if (current.length > 0) pushLine(current);
+  return lines.length ? lines : [[{ text: "" }]];
 }
 
 /**
@@ -448,9 +725,9 @@ function wrapTableCellText(text, maxChars) {
  */
 function computeDesiredTableColumnWidths(headers, rows) {
   return headers.map((h, i) => {
-    let maxLen = normalizeTableCellTextForDisplay(h).length;
+    let maxLen = tableTextRunsToPlainText(parseTableCellMarkdown(h)).length;
     for (const row of rows) {
-      const cellLength = normalizeTableCellTextForDisplay(row[i] ?? "").length;
+      const cellLength = tableTextRunsToPlainText(parseTableCellMarkdown(row[i] ?? "")).length;
       if (cellLength > maxLen) maxLen = cellLength;
     }
     return Math.max(TABLE_MIN_COL_WIDTH, maxLen * CHAR_WIDTH + TABLE_CELL_PADDING_H * 2);
@@ -613,11 +890,17 @@ function renderTableColumnGroupToImages(headers, alignments, rows) {
           anchor = "start";
         }
 
-        const weight = isHeader ? ` font-weight="bold"` : "";
-        const cellLines = row.cells[col] ?? [""];
+        const cellLines = row.cells[col] ?? [[{ text: "" }]];
         for (let lineIndex = 0; lineIndex < cellLines.length; lineIndex++) {
           const textY = y + TABLE_CELL_PADDING_V + (lineIndex + 1) * LINE_HEIGHT - 4;
-          svg += `<text x="${textX}" y="${textY}" font-family="${FONT_FAMILY}" font-size="${FONT_SIZE}" fill="${TEXT_COLOR}" text-anchor="${anchor}"${weight} xml:space="preserve">${escapeXml(cellLines[lineIndex])}</text>`;
+          svg += `<text x="${textX}" y="${textY}" font-family="${FONT_FAMILY}" font-size="${FONT_SIZE}" fill="${TEXT_COLOR}" text-anchor="${anchor}" xml:space="preserve">`;
+          for (const run of cellLines[lineIndex]) {
+            const runWeight = isHeader || run.bold ? ` font-weight="bold"` : "";
+            const runStyle = run.italic ? ` font-style="italic"` : "";
+            const runFill = run.code ? CODE_TEXT_COLOR : TEXT_COLOR;
+            svg += `<tspan fill="${runFill}"${runWeight}${runStyle}>${escapeXml(run.text)}</tspan>`;
+          }
+          svg += `</text>`;
         }
 
         x += colWidths[col];
@@ -656,7 +939,7 @@ function renderTableColumnGroupToImages(headers, alignments, rows) {
 
     const resvg = new Resvg(svg, {
       font: {
-        fontFiles: [FONT_PATH, BOLD_FONT_PATH],
+        fontFiles: [FONT_PATH, BOLD_FONT_PATH, ITALIC_FONT_PATH, BOLD_ITALIC_FONT_PATH],
         loadSystemFonts: false,
       },
     });
