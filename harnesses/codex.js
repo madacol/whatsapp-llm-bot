@@ -13,6 +13,7 @@ import { createCodexCommandHandler } from "./codex-commands.js";
 import { getCodexAvailableModels } from "./codex-models.js";
 import { augmentLatestUserMessageForTextHarness, renderMarkdownImageReference, renderPromptMediaReference } from "./prompt-media.js";
 import { buildSdkErrorResponse, clearStaleHarnessSession, getHarnessRunErrorMessage } from "./harness-run-errors.js";
+import { wrapHooksWithFallbacks } from "./hook-fallbacks.js";
 import { createActionRequestRunState, executeQueuedActionRequests } from "../action-request-runtime.js";
 import {
   getCodexSessionId,
@@ -315,7 +316,7 @@ export function createCodexHarness(deps = {}) {
    * @returns {Promise<AgentResult>}
    */
   async function run({ session, llmConfig, messages, hooks: userHooks, runConfig }) {
-    const hooks = { ...NO_OP_HOOKS, ...userHooks };
+    const hooks = wrapHooksWithFallbacks({ ...NO_OP_HOOKS, ...userHooks });
     const promptMessages = await augmentLatestUserMessageForTextHarness(messages, llmConfig, getChatDb(session.chatId));
     const prompt = buildCodexPrompt(promptMessages);
     if (!prompt) {

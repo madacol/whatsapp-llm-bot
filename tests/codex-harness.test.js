@@ -569,6 +569,67 @@ describe("createCodexHarness", () => {
     }]);
   });
 
+  it("suppresses transient outbound hook failures while a Codex run continues", async () => {
+    const harness = createCodexHarness({
+      startRun: async (input) => {
+        await input.hooks.onLlmResponse("partial progress");
+        return {
+          abortController: new AbortController(),
+          done: Promise.resolve({
+            sessionId: null,
+            result: {
+              response: [{ type: "text", text: "finished" }],
+              messages: input.messages,
+              usage: { promptTokens: 0, completionTokens: 0, cachedTokens: 0, cost: 0 },
+            },
+          }),
+        };
+      },
+    });
+
+    const result = await harness.run({
+      session: {
+        chatId: "codex-chat-hook-close",
+        senderIds: [],
+        context: /** @type {ExecuteActionContext} */ ({
+          chatId: "codex-chat-hook-close",
+          senderIds: [],
+          content: [],
+          getIsAdmin: async () => true,
+          send: async () => undefined,
+          reply: async () => undefined,
+          reactToMessage: async () => {},
+          select: async () => "",
+          confirm: async () => true,
+        }),
+        addMessage: async () => undefined,
+        updateToolMessage: async () => undefined,
+        harnessSession: null,
+        saveHarnessSession: async () => undefined,
+      },
+      llmConfig: {
+        llmClient: /** @type {LlmClient} */ ({}),
+        chatModel: null,
+        externalInstructions: "",
+        toolRuntime: /** @type {ToolRuntime} */ ({
+          getTool: async () => null,
+          executeTool: async () => {
+            throw new Error("executeTool should not be called");
+          },
+        }),
+      },
+      messages: [{ role: "user", content: [{ type: "text", text: "Continue" }] }],
+      hooks: {
+        onLlmResponse: async () => {
+          throw new Error("Connection Closed");
+        },
+      },
+      runConfig: undefined,
+    });
+
+    assert.deepEqual(result.response, [{ type: "text", text: "finished" }]);
+  });
+
   it("ignores a stale Claude model in the shared chat row before starting Codex", async () => {
     const db = await createTestDb();
     await seedChat(db, "codex-chat-invalid-model", { enabled: true });
@@ -1161,7 +1222,7 @@ describe("createCodexHarness", () => {
           emittedResults.push(blocks);
         },
       },
-      runConfig: undefined,
+      runConfig: { workdir: "/tmp/whatsapp-llm-bot-queued-action-test" },
     });
 
     assert.deepEqual(executed, [{
