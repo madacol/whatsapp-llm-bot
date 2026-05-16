@@ -36,7 +36,9 @@ export default [
     }));
 
     /** @type {string[]} */
-    const selections = ["mention+reply", "codex", "gpt-5.4", "danger-full-access"];
+    const selections = ["mention+reply", "codex", "gpt-5.4"];
+    /** @type {string[]} */
+    const questions = [];
 
     const originalMaster = config.MASTER_IDs;
     config.MASTER_IDs = ["master-user"];
@@ -47,7 +49,10 @@ export default [
           rootDb: db,
           senderIds: ["master-user"],
           getIsAdmin: async () => true,
-          select: async () => selections.shift() ?? "",
+          select: async (question) => {
+            questions.push(question);
+            return selections.shift() ?? "";
+          },
         },
         {},
       );
@@ -56,8 +61,13 @@ export default [
       assert.ok(result.includes("mention+reply"), `Expected trigger summary, got: ${result}`);
       assert.ok(result.includes("codex"), `Expected harness summary, got: ${result}`);
       assert.ok(result.includes("gpt-5.4"), `Expected harness model summary, got: ${result}`);
-      assert.ok(result.includes("danger-full-access"), `Expected permissions summary, got: ${result}`);
+      assert.ok(result.includes("auto_review"), `Expected approvals reviewer summary, got: ${result}`);
       assert.ok(result.includes("!clone"), `Expected clone hint, got: ${result}`);
+      assert.deepEqual(questions, [
+        "When should the bot reply in group chats?",
+        "Which harness should power this chat?",
+        "Choose Codex model",
+      ]);
 
       const chat = await readRequiredConfig("setup-1");
       const codexConfig = getScopedHarnessConfig(chat.harness_config, "codex");
@@ -67,7 +77,8 @@ export default [
       assert.equal(chat.debug, true);
       assert.equal(chat.harness, "codex");
       assert.equal(codexConfig.model, "gpt-5.4");
-      assert.equal(codexConfig.sandboxMode, "danger-full-access");
+      assert.equal(codexConfig.sandboxMode, undefined);
+      assert.equal(codexConfig.approvalsReviewer, "auto_review");
     } finally {
       config.MASTER_IDs = originalMaster;
       await fs.rm(CODEX_CACHE_PATH, { force: true });

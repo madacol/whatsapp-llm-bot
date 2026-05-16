@@ -1,7 +1,5 @@
 import { formatChatSettingsCommand } from "../../../chat-commands.js";
 import {
-  CODEX_SANDBOX_MODES,
-  getEffectiveCodexSandboxMode,
   getScopedHarnessConfig,
   normalizeHarnessConfig,
 } from "../../../harness-config.js";
@@ -31,8 +29,8 @@ import {
 
 /**
  * @typedef {{
- *   value: NonNullable<HarnessRunConfig["sandboxMode"]>;
- * }} CodexPermissionsSelection
+ *   approvalsReviewer: NonNullable<HarnessRunConfig["approvalsReviewer"]>;
+ * }} CodexSetupDefaults
  */
 
 /**
@@ -47,7 +45,7 @@ import {
  *   kind: "selected";
  *   stagedChanges: StagedConfigChange[];
  *   stagedHarnessModel: HarnessModelSelection | null;
- *   stagedCodexPermissions: CodexPermissionsSelection | null;
+ *   stagedCodexDefaults: CodexSetupDefaults | null;
  *   notes: string[];
  * }} SelectedSetupResult
  */
@@ -67,12 +65,7 @@ const ALL_SETUP_STEPS = [
   { setting: "harness", question: "Which harness should power this chat?" },
 ];
 
-/** @type {SelectOption[]} */
-const CODEX_PERMISSIONS_OPTIONS = [
-  { id: "workspace-write", label: "Workspace Write" },
-  { id: "read-only", label: "Read Only" },
-  { id: "danger-full-access", label: "Full Access" },
-];
+const DEFAULT_CODEX_APPROVALS_REVIEWER = "auto_review";
 
 /**
  * @param {unknown} value
@@ -172,31 +165,11 @@ function formatHarnessModelSummary(harnessName, modelValue) {
 }
 
 /**
- * @param {import("../../../store.js").ChatRow} chat
- * @returns {{ options: SelectOption[], currentId: NonNullable<HarnessRunConfig["sandboxMode"]> }}
- */
-function getCodexPermissionsSelectOptions(chat) {
-  const scopedConfig = getScopedHarnessConfig(chat.harness_config, "codex");
-  return {
-    options: CODEX_PERMISSIONS_OPTIONS,
-    currentId: getEffectiveCodexSandboxMode(scopedConfig),
-  };
-}
-
-/**
- * @param {NonNullable<HarnessRunConfig["sandboxMode"]>} sandboxMode
+ * @param {NonNullable<HarnessRunConfig["approvalsReviewer"]>} approvalsReviewer
  * @returns {string}
  */
-function formatCodexPermissionsSummary(sandboxMode) {
-  return `Codex permissions: \`${sandboxMode}\``;
-}
-
-/**
- * @param {string} value
- * @returns {value is NonNullable<HarnessRunConfig["sandboxMode"]>}
- */
-function isCodexPermissionsMode(value) {
-  return CODEX_SANDBOX_MODES.has(/** @type {HarnessRunConfig["sandboxMode"]} */ (value));
+function formatCodexDefaultsSummary(approvalsReviewer) {
+  return `Codex approvals reviewer: \`${approvalsReviewer}\``;
 }
 
 /**
@@ -246,20 +219,20 @@ async function applyHarnessModelSelection(chatId, chat, selection) {
 /**
  * @param {string} chatId
  * @param {import("../../../store.js").ChatRow} chat
- * @param {CodexPermissionsSelection} selection
+ * @param {CodexSetupDefaults} defaults
  * @returns {Promise<string>}
  */
-async function applyCodexPermissionsSelection(chatId, chat, selection) {
+async function applyCodexSetupDefaults(chatId, chat, defaults) {
   const normalized = normalizeHarnessConfig(chat.harness_config, chat.harness);
   const rawScoped = normalized.codex;
   /** @type {Record<string, unknown>} */
   const scoped = isObjectRecord(rawScoped) ? { ...rawScoped } : {};
 
-  scoped.sandboxMode = selection.value;
+  scoped.approvalsReviewer = defaults.approvalsReviewer;
   normalized.codex = scoped;
 
   await updateChatConfig(chatId, (current) => ({ ...current, harness_config: normalized }), chat);
-  return formatCodexPermissionsSummary(selection.value);
+  return formatCodexDefaultsSummary(defaults.approvalsReviewer);
 }
 
 /**
@@ -272,8 +245,8 @@ async function collectSetupSelections(chat, select) {
   const stagedChanges = [];
   /** @type {HarnessModelSelection | null} */
   let stagedHarnessModel = null;
-  /** @type {CodexPermissionsSelection | null} */
-  let stagedCodexPermissions = null;
+  /** @type {CodexSetupDefaults | null} */
+  let stagedCodexDefaults = null;
   /** @type {string[]} */
   const notes = [];
 
@@ -327,21 +300,8 @@ async function collectSetupSelections(chat, select) {
       continue;
     }
 
-    const codexPermissions = getCodexPermissionsSelectOptions(chat);
-    const selectedPermissions = await select(
-      "Choose Codex permissions",
-      codexPermissions.options,
-      { deleteOnSelect: true, currentId: codexPermissions.currentId },
-    );
-    if (!selectedPermissions) {
-      return { kind: "cancelled" };
-    }
-    if (!isCodexPermissionsMode(selectedPermissions)) {
-      throw new Error(`Unexpected Codex permissions mode: ${selectedPermissions}`);
-    }
-
-    stagedCodexPermissions = {
-      value: selectedPermissions,
+    stagedCodexDefaults = {
+      approvalsReviewer: DEFAULT_CODEX_APPROVALS_REVIEWER,
     };
   }
 
@@ -349,7 +309,7 @@ async function collectSetupSelections(chat, select) {
     kind: "selected",
     stagedChanges,
     stagedHarnessModel,
-    stagedCodexPermissions,
+    stagedCodexDefaults,
     notes,
   };
 }
@@ -377,8 +337,8 @@ async function applySetupSelections(rootDb, chatId, chat, senderIds, selections)
     applied.push(await applyHarnessModelSelection(chatId, currentChat, selections.stagedHarnessModel));
     currentChat = await getChatOrThrow(rootDb, chatId);
   }
-  if (selections.stagedCodexPermissions) {
-    applied.push(await applyCodexPermissionsSelection(chatId, currentChat, selections.stagedCodexPermissions));
+  if (selections.stagedCodexDefaults) {
+    applied.push(await applyCodexSetupDefaults(chatId, currentChat, selections.stagedCodexDefaults));
   }
 
   if (isMaster(senderIds)) {
