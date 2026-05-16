@@ -296,7 +296,7 @@ describe("Scenario 7b: Guided setup command", () => {
     await seedChat(chatId);
 
     /** @type {string[]} */
-    const selections = ["mention+reply", "codex", "gpt-5.4", "workspace-write"];
+    const selections = ["mention+reply", "codex", "gpt-5.4"];
     const { context, responses } = createChatTurn({
       chatId,
       content: [{ type: "text", text: "!setup" }],
@@ -315,7 +315,7 @@ describe("Scenario 7b: Guided setup command", () => {
     assert.ok(allText.includes("mention+reply"), `Expected trigger summary, got: ${allText}`);
     assert.ok(allText.includes("codex"), `Expected harness summary, got: ${allText}`);
     assert.ok(allText.includes("gpt-5.4"), `Expected harness model summary, got: ${allText}`);
-    assert.ok(allText.includes("workspace-write"), `Expected codex permissions summary, got: ${allText}`);
+    assert.ok(allText.includes("auto_review"), `Expected codex approvals reviewer summary, got: ${allText}`);
     assert.ok(allText.includes("!clone"), `Expected clone hint, got: ${allText}`);
 
     const chat = await readChatConfig(chatId);
@@ -325,7 +325,8 @@ describe("Scenario 7b: Guided setup command", () => {
     assert.equal(chat.debug, false);
     assert.equal(chat.harness, "codex");
     assert.equal(chat.harness_config.codex.model, "gpt-5.4");
-    assert.equal(chat.harness_config.codex.sandboxMode, "workspace-write");
+    assert.equal(chat.harness_config.codex.sandboxMode, undefined);
+    assert.equal(chat.harness_config.codex.approvalsReviewer, "auto_review");
   });
 });
 
