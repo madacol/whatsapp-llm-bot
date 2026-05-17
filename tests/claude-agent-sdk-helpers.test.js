@@ -183,6 +183,93 @@ describe("createClaudeAgentSdkHarness", () => {
     }
   });
 
+  it("clears a resumed session when the SDK internal stream closes", async () => {
+    /** @type {Array<HarnessSessionRef | null>} */
+    const savedSessions = [];
+    /** @type {string[]} */
+    const toolErrors = [];
+    const workdir = await fs.mkdtemp(path.join(os.tmpdir(), "claude-stream-closed-"));
+    const harness = createClaudeAgentSdkHarness({
+      query: ({ options }) => ({
+        supportedModels: async () => [],
+        streamInput: async () => {},
+        [Symbol.asyncIterator]: async function* () {
+          yield {
+            type: "assistant",
+            parent_tool_use_id: null,
+            session_id: "sess-stream-closed",
+            message: {
+              role: "assistant",
+              content: [],
+              usage: { input_tokens: 1, output_tokens: 0 },
+            },
+          };
+          options.stderr?.("Error in hook callback hook_0:\nerror: Stream closed");
+          throw new Error("Stream closed");
+        },
+      }),
+    });
+
+    try {
+      const result = await harness.run({
+        session: {
+          chatId: "claude-stream-closed-chat",
+          senderIds: ["user-1"],
+          context: /** @type {ExecuteActionContext} */ ({
+            chatId: "claude-stream-closed-chat",
+            senderIds: ["user-1"],
+            content: [],
+            getIsAdmin: async () => true,
+            send: async () => undefined,
+            reply: async () => undefined,
+            reactToMessage: async () => {},
+            select: async () => "",
+            confirm: async () => true,
+          }),
+          addMessage: async () => /** @type {import("../store.js").MessageRow} */ ({
+            message_id: 1,
+            chat_id: "claude-stream-closed-chat",
+            sender_id: "user-1",
+            message_data: { role: "assistant", content: [] },
+            timestamp: new Date().toISOString(),
+            display_key: null,
+          }),
+          updateToolMessage: async () => undefined,
+          harnessSession: { id: "sess-stream-closed", kind: "claude-sdk" },
+          saveHarnessSession: async (_chatId, sessionRef) => {
+            savedSessions.push(sessionRef);
+          },
+        },
+        llmConfig: {
+          llmClient: /** @type {LlmClient} */ ({}),
+          chatModel: null,
+          externalInstructions: "",
+          toolRuntime: /** @type {ToolRuntime} */ ({
+            getTool: async () => null,
+            executeTool: async () => {
+              throw new Error("executeTool should not be called");
+            },
+            listTools: () => [],
+          }),
+        },
+        messages: [{ role: "user", content: [{ type: "text", text: "Continue" }] }],
+        mediaRegistry: new Map(),
+        hooks: {
+          onToolError: async (message) => {
+            toolErrors.push(message);
+          },
+        },
+        runConfig: { workdir },
+      });
+
+      assert.deepEqual(savedSessions, [null]);
+      assert.deepEqual(toolErrors, ["SDK internal stream closed — session needs restart"]);
+      assert.deepEqual(result.response, []);
+    } finally {
+      await fs.rm(workdir, { recursive: true, force: true });
+    }
+  });
+
   it("displays Write tool content when the SDK only provides the ID on the hook input", async () => {
     /** @type {SendContent[]} */
     const displays = [];

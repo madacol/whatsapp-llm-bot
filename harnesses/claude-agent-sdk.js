@@ -788,6 +788,7 @@ export function createClaudeAgentSdkHarness(deps = {}) {
 
     /** @type {string | null} Set when we auto-abort due to a fatal SDK error */
     let fatalAbortReason = null;
+    let shouldPersistResolvedSession = true;
 
     // Ring buffer: only keep the last N stderr lines (up to MAX_STDERR_BYTES total)
     // for error diagnostics. The SDK subprocess runs with --verbose, producing
@@ -986,8 +987,13 @@ export function createClaudeAgentSdkHarness(deps = {}) {
         log.debug("SDK query was cancelled for chat", session.chatId);
       } else if (fatalAbortReason) {
         log.error("SDK query aborted due to fatal error:", fatalAbortReason);
+        shouldPersistResolvedSession = false;
+        if (existingSessionId) {
+          log.warn(`Claude SDK stream closed for saved session ${existingSessionId}; clearing persisted session`);
+          await saveClaudeSessionId(session, null);
+        }
         await hooks.onToolError(fatalAbortReason);
-        result.response = [{ type: "text", text: fatalAbortReason }];
+        result.response = [];
       } else {
         const errorMsg = errorToString(err);
 
@@ -1018,7 +1024,7 @@ export function createClaudeAgentSdkHarness(deps = {}) {
 
       // Persist the SDK session ID so the next message can resume the conversation.
       // Save when: we got a session ID AND it differs from what was stored.
-      if (resolvedSessionId && resolvedSessionId !== existingSessionId) {
+      if (shouldPersistResolvedSession && resolvedSessionId && resolvedSessionId !== existingSessionId) {
         try {
           await saveClaudeSessionId(session, resolvedSessionId);
           log.info(`Saved SDK session ${resolvedSessionId} for chat ${session.chatId}`);
