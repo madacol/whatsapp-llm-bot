@@ -696,6 +696,7 @@ type AppAgent = AgentDefinition & { fileName: string };
 
 type HarnessRunConfig = {
   workdir?: string | null;
+  harnessInstanceId?: string | null;
   model?: string | null;
   reasoningEffort?: 'low' | 'medium' | 'high' | 'xhigh' | 'max' | null;
   sandboxMode?: 'read-only' | 'workspace-write' | 'danger-full-access' | null;

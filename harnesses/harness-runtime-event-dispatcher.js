@@ -1,5 +1,7 @@
 import { toolInspectState } from "../outbound-events.js";
 import { buildToolPresentation } from "../tool-presentation-model.js";
+import { createLogger } from "../logger.js";
+import { getHarnessRawEventLoggerFromEnv } from "./raw-event-log.js";
 
 /**
  * @typedef {import("./harness-runtime-events.js").HarnessRuntimeEvent} HarnessRuntimeEvent
@@ -7,7 +9,10 @@ import { buildToolPresentation } from "../tool-presentation-model.js";
  * @typedef {import("./harness-runtime-events.js").HarnessRuntimeTool} HarnessRuntimeTool
  * @typedef {import("./harness-runtime-events.js").HarnessRuntimeUsage} HarnessRuntimeUsage
  * @typedef {import("./harness-runtime-events.js").HarnessRuntimeToolEvent} HarnessRuntimeToolEvent
+ * @typedef {import("./raw-event-log.js").HarnessRawEventLogger} HarnessRawEventLogger
  */
+
+const log = createLogger("harness:runtime-events");
 
 /**
  * @type {Pick<Required<AgentIOHooks>, "onComposing" | "onPaused" | "onReasoning" | "onToolCall" | "onLlmResponse" | "onUsage">}
@@ -63,6 +68,7 @@ function buildRuntimeToolPresentation(tool, workdir) {
  *   hooks?: Pick<AgentIOHooks, "onComposing" | "onPaused" | "onReasoning" | "onToolCall" | "onLlmResponse" | "onUsage">,
  *   workdir?: string | null,
  *   emitUsage?: boolean,
+ *   rawEventLogger?: HarnessRawEventLogger | null,
  * }} input
  * @returns {{
  *   result: AgentResult,
@@ -71,6 +77,7 @@ function buildRuntimeToolPresentation(tool, workdir) {
  */
 export function createHarnessRuntimeEventDispatcher(input) {
   const hooks = { ...DEFAULT_RUNTIME_EVENT_HOOKS, ...input.hooks };
+  const rawEventLogger = input.rawEventLogger ?? getHarnessRawEventLoggerFromEnv();
   /** @type {Map<string, { handle?: MessageHandle, presentation: import("../tool-presentation-model.js").ToolPresentation }>} */
   const activeTools = new Map();
 
@@ -141,7 +148,27 @@ export function createHarnessRuntimeEventDispatcher(input) {
    * @param {HarnessRuntimeEvent} event
    * @returns {Promise<void>}
    */
+  async function captureRawEvent(event) {
+    if (!rawEventLogger || !event.raw) {
+      return;
+    }
+    try {
+      await rawEventLogger.write({
+        provider: event.provider,
+        type: event.type,
+        raw: event.raw,
+      });
+    } catch (error) {
+      log.warn("Failed to capture raw harness runtime event:", error);
+    }
+  }
+
+  /**
+   * @param {HarnessRuntimeEvent} event
+   * @returns {Promise<void>}
+   */
   async function handleEvent(event) {
+    await captureRawEvent(event);
     switch (event.type) {
       case "reasoning.started":
       case "reasoning.updated":

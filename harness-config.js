@@ -13,6 +13,10 @@ const LEGACY_FLAT_CONFIG_KEYS = new Set([
   "approvalsReviewer",
 ]);
 
+export const DEFAULT_HARNESS_INSTANCE_ID = "default";
+export const HARNESS_INSTANCES_CONFIG_KEY = "harnessInstances";
+export const ACTIVE_HARNESS_INSTANCES_CONFIG_KEY = "activeHarnessInstances";
+
 /**
  * @param {unknown} value
  * @returns {value is Record<string, unknown>}
@@ -41,6 +45,53 @@ function ensureScopedConfig(root, harnessName) {
  * @param {Record<string, unknown>} root
  * @returns {Record<string, unknown>}
  */
+function ensureHarnessInstancesRoot(root) {
+  const existing = root[HARNESS_INSTANCES_CONFIG_KEY];
+  if (isObjectRecord(existing)) {
+    return existing;
+  }
+  /** @type {Record<string, unknown>} */
+  const created = {};
+  root[HARNESS_INSTANCES_CONFIG_KEY] = created;
+  return created;
+}
+
+/**
+ * @param {Record<string, unknown>} root
+ * @returns {Record<string, unknown>}
+ */
+function ensureActiveHarnessInstancesRoot(root) {
+  const existing = root[ACTIVE_HARNESS_INSTANCES_CONFIG_KEY];
+  if (isObjectRecord(existing)) {
+    return existing;
+  }
+  /** @type {Record<string, unknown>} */
+  const created = {};
+  root[ACTIVE_HARNESS_INSTANCES_CONFIG_KEY] = created;
+  return created;
+}
+
+/**
+ * @param {Record<string, unknown>} root
+ * @param {string} harnessName
+ * @returns {Record<string, unknown>}
+ */
+function ensureHarnessInstanceGroup(root, harnessName) {
+  const instancesRoot = ensureHarnessInstancesRoot(root);
+  const existing = instancesRoot[harnessName];
+  if (isObjectRecord(existing)) {
+    return existing;
+  }
+  /** @type {Record<string, unknown>} */
+  const created = {};
+  instancesRoot[harnessName] = created;
+  return created;
+}
+
+/**
+ * @param {Record<string, unknown>} root
+ * @returns {Record<string, unknown>}
+ */
 function cloneNonLegacyEntries(root) {
   /** @type {Record<string, unknown>} */
   const cloned = {};
@@ -51,6 +102,18 @@ function cloneNonLegacyEntries(root) {
     cloned[key] = isObjectRecord(value) ? { ...value } : value;
   }
   return cloned;
+}
+
+/**
+ * @param {unknown} value
+ * @returns {string | null}
+ */
+function normalizeHarnessInstanceId(value) {
+  if (typeof value !== "string") {
+    return null;
+  }
+  const trimmed = value.trim();
+  return trimmed ? trimmed : null;
 }
 
 /**
@@ -182,6 +245,43 @@ export function getScopedHarnessConfig(value, harnessName) {
 }
 
 /**
+ * Resolve the selected provider instance and its isolated config. The legacy
+ * harness namespace is the `default` provider instance for that harness.
+ * @param {unknown} value
+ * @param {string | null | undefined} harnessName
+ * @returns {{ instanceId: string, config: Record<string, unknown> }}
+ */
+export function getHarnessInstanceConfig(value, harnessName) {
+  const normalized = normalizeHarnessConfig(value, harnessName);
+  if (!harnessName) {
+    return { instanceId: DEFAULT_HARNESS_INSTANCE_ID, config: {} };
+  }
+
+  const activeInstances = normalized[ACTIVE_HARNESS_INSTANCES_CONFIG_KEY];
+  const activeInstanceId = isObjectRecord(activeInstances)
+    ? normalizeHarnessInstanceId(activeInstances[harnessName])
+    : null;
+
+  if (!activeInstanceId || activeInstanceId === DEFAULT_HARNESS_INSTANCE_ID) {
+    return {
+      instanceId: DEFAULT_HARNESS_INSTANCE_ID,
+      config: getScopedHarnessConfig(normalized, harnessName),
+    };
+  }
+
+  const instancesRoot = normalized[HARNESS_INSTANCES_CONFIG_KEY];
+  const harnessInstances = isObjectRecord(instancesRoot) ? instancesRoot[harnessName] : null;
+  const instanceConfig = isObjectRecord(harnessInstances)
+    ? harnessInstances[activeInstanceId]
+    : null;
+
+  return {
+    instanceId: activeInstanceId,
+    config: isObjectRecord(instanceConfig) ? { ...instanceConfig } : {},
+  };
+}
+
+/**
  * @param {string} chatId
  * @param {string} harnessName
  * @returns {Promise<Record<string, unknown>>}
@@ -213,5 +313,78 @@ export async function updateHarnessConfig(chatId, harnessName, patch) {
   if (Object.keys(scoped).length === 0) {
     delete root[harnessName];
   }
+  await updateChatConfig(chatId, (current) => ({ ...current, harness_config: root }));
+}
+
+/**
+ * Select the provider instance to use for future runs of this harness.
+ * Passing null/undefined/default clears the selection back to the legacy
+ * harness namespace.
+ * @param {string} chatId
+ * @param {string} harnessName
+ * @param {string | null | undefined} instanceId
+ * @returns {Promise<void>}
+ */
+export async function setActiveHarnessInstance(chatId, harnessName, instanceId) {
+  const chat = await ensureChatConfig(chatId);
+  const root = normalizeHarnessConfig(chat.harness_config, chat.harness);
+  const activeInstances = ensureActiveHarnessInstancesRoot(root);
+  const normalizedInstanceId = normalizeHarnessInstanceId(instanceId);
+  if (!normalizedInstanceId || normalizedInstanceId === DEFAULT_HARNESS_INSTANCE_ID) {
+    delete activeInstances[harnessName];
+  } else {
+    activeInstances[harnessName] = normalizedInstanceId;
+  }
+  if (Object.keys(activeInstances).length === 0) {
+    delete root[ACTIVE_HARNESS_INSTANCES_CONFIG_KEY];
+  }
+  await updateChatConfig(chatId, (current) => ({ ...current, harness_config: root }));
+}
+
+/**
+ * Update an isolated provider instance config. The default instance delegates
+ * to the legacy scoped harness config for backwards compatibility.
+ * @param {string} chatId
+ * @param {string} harnessName
+ * @param {string} instanceId
+ * @param {Record<string, unknown>} patch
+ * @returns {Promise<void>}
+ */
+export async function updateHarnessInstanceConfig(chatId, harnessName, instanceId, patch) {
+  const normalizedInstanceId = normalizeHarnessInstanceId(instanceId) ?? DEFAULT_HARNESS_INSTANCE_ID;
+  if (normalizedInstanceId === DEFAULT_HARNESS_INSTANCE_ID) {
+    await updateHarnessConfig(chatId, harnessName, patch);
+    return;
+  }
+
+  const chat = await ensureChatConfig(chatId);
+  const root = normalizeHarnessConfig(chat.harness_config, chat.harness);
+  const harnessInstances = ensureHarnessInstanceGroup(root, harnessName);
+  const existing = harnessInstances[normalizedInstanceId];
+  /** @type {Record<string, unknown>} */
+  const config = isObjectRecord(existing) ? { ...existing } : {};
+  for (const [key, value] of Object.entries(patch)) {
+    if (value == null) {
+      delete config[key];
+    } else {
+      config[key] = value;
+    }
+  }
+  if (Object.keys(config).length === 0) {
+    delete harnessInstances[normalizedInstanceId];
+  } else {
+    harnessInstances[normalizedInstanceId] = config;
+  }
+
+  const instancesRoot = root[HARNESS_INSTANCES_CONFIG_KEY];
+  if (isObjectRecord(instancesRoot)) {
+    if (Object.keys(harnessInstances).length === 0) {
+      delete instancesRoot[harnessName];
+    }
+    if (Object.keys(instancesRoot).length === 0) {
+      delete root[HARNESS_INSTANCES_CONFIG_KEY];
+    }
+  }
+
   await updateChatConfig(chatId, (current) => ({ ...current, harness_config: root }));
 }
