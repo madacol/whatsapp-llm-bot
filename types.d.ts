@@ -732,6 +732,39 @@ type AgentHarnessParams = {
   runConfig?: HarnessRunConfig;
 };
 
+type HarnessRuntimeSession = {
+  chatId: string;
+  harnessName: string;
+  instanceId: string;
+  continuationKey: string;
+  status: "ready" | "running" | "stopped";
+  workdir?: string | null;
+  model?: string | null;
+  resumeCursor?: string | null;
+};
+
+type HarnessAdapterCreateInput = {
+  name: string;
+  instanceId: string;
+  continuationKey: string;
+};
+
+type HarnessAdapter = {
+  startSession: (input: {
+    chatId: string;
+    runConfig?: HarnessRunConfig;
+    resumeCursor?: string | null;
+  }) => Promise<HarnessRuntimeSession>;
+  sendTurn: (input: { params: AgentHarnessParams }) => Promise<AgentResult>;
+  interruptTurn: (input: { chatId: string }) => Promise<boolean>;
+  injectMessage: (chatId: string | HarnessSessionRef, text: string) => Promise<boolean>;
+  stopSession: (chatId: string | HarnessSessionRef) => Promise<boolean>;
+  listSessions: () => HarnessRuntimeSession[];
+  readThread: (sessionId: string) => Promise<null>;
+  rollbackThread: (sessionId: string, numTurns: number) => Promise<null>;
+  streamEvents: AsyncIterable<never>;
+};
+
 type HarnessCommandContext = {
   chatId: string;
   chatInfo?: import("./store.js").ChatRow;
@@ -766,6 +799,8 @@ type AgentHarness = {
   cancel?: (chatId: string | HarnessSessionRef) => boolean | Promise<boolean>;
   /** Wait for all active queries to finish. Returns chat IDs that were waited on. */
   waitForIdle?: () => Promise<string[]>;
+  /** Optional provider-native adapter; registry falls back to a legacy wrapper. */
+  createAdapter?: (input: HarnessAdapterCreateInput) => HarnessAdapter;
 };
 
 /**

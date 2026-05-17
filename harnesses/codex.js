@@ -155,6 +155,13 @@ export function createCodexHarness(deps = {}) {
     getSandboxModeOptions: deps.getSandboxModeOptions,
     getApprovalsReviewerOptions: deps.getApprovalsReviewerOptions,
   });
+  /** @type {Map<string, HarnessRuntimeSession>} */
+  const adapterSessions = new Map();
+  const adapter = createAdapter({
+    name: "codex",
+    instanceId: "default",
+    continuationKey: "codex:instance:default",
+  });
 
   return {
     getName: () => "codex",
@@ -165,7 +172,72 @@ export function createCodexHarness(deps = {}) {
     injectMessage,
     cancel,
     waitForIdle,
+    createAdapter,
   };
+
+  /**
+   * @returns {AsyncIterable<never>}
+   */
+  function emptyEventStream() {
+    return {
+      async *[Symbol.asyncIterator]() {},
+    };
+  }
+
+  /**
+   * @param {HarnessAdapterCreateInput} input
+   * @returns {HarnessAdapter}
+   */
+  function createAdapter(input) {
+    const instanceContinuationKey = input.continuationKey;
+    const instanceId = input.instanceId;
+    const harnessName = input.name;
+    return {
+      async startSession({ chatId, runConfig, resumeCursor }) {
+        /** @type {HarnessRuntimeSession} */
+        const session = {
+          chatId,
+          harnessName,
+          instanceId,
+          continuationKey: instanceContinuationKey,
+          status: "ready",
+          workdir: runConfig?.workdir ?? null,
+          model: runConfig?.model ?? null,
+          ...(resumeCursor ? { resumeCursor } : {}),
+        };
+        adapterSessions.set(chatId, session);
+        return session;
+      },
+      async sendTurn({ params }) {
+        return runCodexTurn(params, {
+          instanceId,
+          harnessName,
+          continuationKey: instanceContinuationKey,
+        });
+      },
+      async interruptTurn({ chatId }) {
+        return cancel(chatId);
+      },
+      async injectMessage(chatId, text) {
+        return activeSessions.injectMessage(chatId, text);
+      },
+      async stopSession(chatId) {
+        const key = typeof chatId === "string" ? chatId : chatId.id;
+        adapterSessions.delete(key);
+        return cancel(chatId);
+      },
+      listSessions() {
+        return [...adapterSessions.values()];
+      },
+      async readThread(_sessionId) {
+        return null;
+      },
+      async rollbackThread(_sessionId, _numTurns) {
+        return null;
+      },
+      streamEvents: emptyEventStream(),
+    };
+  }
 
   /**
    * @param {string | HarnessSessionRef} chatId
@@ -211,7 +283,16 @@ export function createCodexHarness(deps = {}) {
    * @param {AgentHarnessParams} params
    * @returns {Promise<AgentResult>}
    */
-  async function run({ session, llmConfig, messages, hooks: userHooks, runConfig }) {
+  async function run(params) {
+    return adapter.sendTurn({ params });
+  }
+
+  /**
+   * @param {AgentHarnessParams} params
+   * @param {{ instanceId: string, harnessName: string, continuationKey: string }} adapterIdentity
+   * @returns {Promise<AgentResult>}
+   */
+  async function runCodexTurn({ session, llmConfig, messages, hooks: userHooks, runConfig }, adapterIdentity) {
     const hooks = wrapHooksWithFallbacks({ ...NO_OP_HOOKS, ...userHooks });
     const promptMessages = await augmentLatestUserMessageForTextHarness(messages, llmConfig, getChatDb(session.chatId));
     const prompt = buildCodexPrompt(promptMessages);
@@ -232,6 +313,17 @@ export function createCodexHarness(deps = {}) {
     const actionRequestState = createActionRequestRunState(effectiveWorkdir);
     /** @type {ActiveCodexRun | null} */
     let activeRun = null;
+    const existingAdapterSession = adapterSessions.get(session.chatId);
+    adapterSessions.set(session.chatId, {
+      chatId: session.chatId,
+      harnessName: adapterIdentity.harnessName,
+      instanceId: adapterIdentity.instanceId,
+      continuationKey: adapterIdentity.continuationKey,
+      status: "running",
+      workdir: effectiveRunConfig?.workdir ?? null,
+      model: effectiveRunConfig?.model ?? null,
+      ...(sessionId ? { resumeCursor: sessionId } : {}),
+    });
     try {
       const started = await beginRun({
         chatId: session.chatId,
@@ -258,6 +350,16 @@ export function createCodexHarness(deps = {}) {
       if (completed.sessionId && completed.sessionId !== sessionId) {
         await saveCodexSession(session, completed.sessionId);
       }
+      adapterSessions.set(session.chatId, {
+        ...(adapterSessions.get(session.chatId) ?? existingAdapterSession ?? {
+          chatId: session.chatId,
+          harnessName: adapterIdentity.harnessName,
+          instanceId: adapterIdentity.instanceId,
+          continuationKey: adapterIdentity.continuationKey,
+        }),
+        status: "ready",
+        resumeCursor: completed.sessionId ?? sessionId ?? null,
+      });
 
       const queuedBlocks = await executeQueuedActionRequests(actionRequestState.requestsDir, {
         toolRuntime: llmConfig.toolRuntime,
@@ -273,6 +375,10 @@ export function createCodexHarness(deps = {}) {
 
       return completed.result;
     } catch (error) {
+      const current = adapterSessions.get(session.chatId);
+      if (current) {
+        adapterSessions.set(session.chatId, { ...current, status: "stopped" });
+      }
       await clearStaleHarnessSession({
         existingSessionId: sessionId,
         error,

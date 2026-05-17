@@ -2,7 +2,7 @@ import { CANCEL_COMMAND, formatChatSettingsCommand } from "../chat-commands.js";
 import { getChatAction, getChatActions, getAction } from "../actions.js";
 import { getAgent } from "../agents.js";
 import { storeAndLinkHtml } from "../html-store.js";
-import { resolveHarness, resolveHarnessName, createHarnessRunCoordinator, getHarnessSessionDirectory } from "#harnesses";
+import { resolveHarnessInstance, resolveHarnessName, createHarnessRunCoordinator, getHarnessSessionDirectory } from "#harnesses";
 import { getHarnessInstanceConfig } from "../harness-config.js";
 import { contentEvent } from "../outbound-events.js";
 import {
@@ -104,7 +104,7 @@ function getTopLevelText(content) {
 /**
  * Resolve the persona and harness for the current chat.
  * @param {import("../store.js").ChatRow | undefined} chatInfo
- * @returns {Promise<{ persona: AgentDefinition | null, harness: AgentHarness }>}
+ * @returns {Promise<{ persona: AgentDefinition | null, harness: AgentHarness, harnessInstance: ReturnType<typeof resolveHarnessInstance> }>}
  */
 async function resolveConversationHarness(chatInfo) {
   const persona = chatInfo?.active_persona
@@ -115,9 +115,11 @@ async function resolveConversationHarness(chatInfo) {
     chatInfo?.harness_config,
     harnessName,
   );
+  const harnessInstance = resolveHarnessInstance(harnessName, { instanceId, config: harnessConfig });
   return {
     persona,
-    harness: resolveHarness(harnessName, { instanceId, config: harnessConfig }),
+    harness: harnessInstance.harness,
+    harnessInstance,
   };
 }
 
@@ -321,6 +323,7 @@ export function createConversationRunner({ store, llmClient, getActionsFn, execu
    *   actionResolver: (name: string) => Promise<AppAction | null>,
    *   persona: AgentDefinition | null,
    *   harness: AgentHarness,
+   *   harnessInstance: ReturnType<typeof resolveHarnessInstance>,
    *   isSlashCommand?: boolean,
    *   resolvedBinding: ResolvedChatBinding,
    * }} input
@@ -334,6 +337,7 @@ export function createConversationRunner({ store, llmClient, getActionsFn, execu
     actionResolver,
     persona,
     harness,
+    harnessInstance,
     isSlashCommand,
     resolvedBinding,
   }) {
@@ -426,7 +430,7 @@ export function createConversationRunner({ store, llmClient, getActionsFn, execu
         harnessSessionDirectory.upsert({
           chatId,
           harnessName: harness.getName(),
-          instanceId: runConfig.harnessInstanceId ?? "default",
+          instanceId: harnessInstance.instanceId,
           status,
           resumeCursor: currentResumeCursor,
           runtimeMode: runConfig.sandboxMode ?? null,
@@ -483,7 +487,7 @@ export function createConversationRunner({ store, llmClient, getActionsFn, execu
         bufferedTexts: runCoordinator.consumeBufferedTexts(chatId),
       });
 
-      const result = await harness.run(runRequest);
+      const result = await harnessInstance.adapter.sendTurn({ params: runRequest });
       upsertSessionBinding("ready", undefined);
       if (result.response.length > 0) {
         const responseSignature = getDeliveredContentSignature(result.response);
@@ -533,7 +537,7 @@ export function createConversationRunner({ store, llmClient, getActionsFn, execu
       turn.chatName,
       turn.facts.isGroup,
     );
-    const { persona, harness } = await resolveConversationHarness(chatInfo);
+    const { persona, harness, harnessInstance } = await resolveConversationHarness(chatInfo);
 
     const globalActions = await getActionsFn();
     const chatActions = await getChatActions(chatId);
@@ -619,6 +623,7 @@ export function createConversationRunner({ store, llmClient, getActionsFn, execu
       actionResolver,
       persona,
       harness,
+      harnessInstance,
       isSlashCommand: !!isSlashCommand,
       resolvedBinding,
     });
