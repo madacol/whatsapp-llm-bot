@@ -62,6 +62,7 @@ function buildRuntimeToolPresentation(tool, workdir) {
  *   messages: Message[],
  *   hooks?: Pick<AgentIOHooks, "onComposing" | "onPaused" | "onReasoning" | "onToolCall" | "onLlmResponse" | "onUsage">,
  *   workdir?: string | null,
+ *   emitUsage?: boolean,
  * }} input
  * @returns {{
  *   result: AgentResult,
@@ -82,12 +83,23 @@ export function createHarnessRuntimeEventDispatcher(input) {
 
   /**
    * @param {HarnessRuntimeUsage} usage
+   * @param {"replace" | "add"} mode
    * @returns {Promise<void>}
    */
-  async function updateUsage(usage) {
-    result.usage = usage;
-    if (usage.promptTokens > 0 || usage.completionTokens > 0 || usage.cachedTokens > 0) {
-      await hooks.onUsage(formatUsageCost(usage), toUsageTokens(usage));
+  async function updateUsage(usage, mode) {
+    result.usage = mode === "add"
+      ? {
+          promptTokens: result.usage.promptTokens + usage.promptTokens,
+          completionTokens: result.usage.completionTokens + usage.completionTokens,
+          cachedTokens: result.usage.cachedTokens + usage.cachedTokens,
+          cost: result.usage.cost + usage.cost,
+          ...(usage.totalTokens !== undefined ? { totalTokens: usage.totalTokens } : {}),
+          ...(usage.reasoningTokens !== undefined ? { reasoningTokens: usage.reasoningTokens } : {}),
+          ...(usage.contextWindow !== undefined ? { contextWindow: usage.contextWindow } : {}),
+        }
+      : usage;
+    if (input.emitUsage !== false && (usage.promptTokens > 0 || usage.completionTokens > 0 || usage.cachedTokens > 0)) {
+      await hooks.onUsage(formatUsageCost(result.usage), toUsageTokens(result.usage));
     }
   }
 
@@ -150,14 +162,20 @@ export function createHarnessRuntimeEventDispatcher(input) {
         handleToolProgress(event);
         return;
       case "assistant.completed":
-        result.response = [{ type: event.contentType, text: event.text }];
-        await hooks.onLlmResponse(event.text);
+        if (event.responseMode === "append") {
+          result.response.push({ type: event.contentType, text: event.text });
+        } else if (event.responseMode !== "none") {
+          result.response = [{ type: event.contentType, text: event.text }];
+        }
+        if (event.notify !== false) {
+          await hooks.onLlmResponse(event.displayText ?? event.text);
+        }
         if (event.usage) {
-          await updateUsage(event.usage);
+          await updateUsage(event.usage, event.usageMode ?? "replace");
         }
         return;
       case "usage.updated":
-        await updateUsage(event.usage);
+        await updateUsage(event.usage, "replace");
         return;
       default: {
         /** @type {never} */

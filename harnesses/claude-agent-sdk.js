@@ -30,6 +30,13 @@ import { augmentLatestUserMessageForTextHarness, renderMarkdownImageReference, r
 import { createActionRequestRunState, executeQueuedActionRequests } from "../action-request-runtime.js";
 import { ensureClaudeProjectSkillsLink } from "../project-skills.js";
 import { wrapHooksWithFallbacks } from "./hook-fallbacks.js";
+import { createHarnessRuntimeEventDispatcher } from "./harness-runtime-event-dispatcher.js";
+import {
+  getClaudeSdkEventLabel,
+  isClaudeSubagentEvent,
+  normalizeClaudeAssistantEvent,
+  normalizeClaudeResultEvent,
+} from "./claude-runtime-events.js";
 export { wrapHooksWithFallbacks } from "./hook-fallbacks.js";
 
 const log = createLogger("harness:claude-agent-sdk");
@@ -377,6 +384,7 @@ export function buildClaudePrompt(messages) {
  *   hooks: Required<AgentIOHooks>,
  *   session: AgentHarnessParams["session"],
  *   workdir: string | null | undefined,
+ *   runtimeDispatcher: ReturnType<typeof createHarnessRuntimeEventDispatcher>,
  * }} SdkEventContext
  */
 
@@ -762,12 +770,14 @@ export function createClaudeAgentSdkHarness(deps = {}) {
       };
     }
 
-    /** @type {AgentResult} */
-    const result = {
-      response: [],
+    const runtimeDispatcher = createHarnessRuntimeEventDispatcher({
+      provider: "claude-agent-sdk",
       messages,
-      usage: { promptTokens: 0, completionTokens: 0, cachedTokens: 0, cost: 0 },
-    };
+      hooks,
+      workdir,
+      emitUsage: false,
+    });
+    const result = runtimeDispatcher.result;
 
     const abortController = new AbortController();
 
@@ -809,6 +819,7 @@ export function createClaudeAgentSdkHarness(deps = {}) {
       hooks,
       session,
       workdir,
+      runtimeDispatcher,
     };
 
     try {
@@ -955,7 +966,7 @@ export function createClaudeAgentSdkHarness(deps = {}) {
         eventCount++;
 
         // Log event with tool context for tracing what the SDK is doing.
-        log.debug(`SDK event: ${getSdkEventLabel(event)}`);
+        log.debug(`SDK event: ${getClaudeSdkEventLabel(event)}`);
 
         // Always capture the latest session_id from events.
         if ("session_id" in event && typeof event.session_id === "string") {
@@ -1203,36 +1214,6 @@ export function extractToolResultText(result) {
 // ── SDK event handlers ──────────────────────────────────────────────────
 
 /**
- * Check whether an SDK event originates from a sub-agent.
- * Sub-agent events have a non-null `parent_tool_use_id` pointing
- * to the Agent tool call that spawned them.
- * @param {{ parent_tool_use_id?: string | null }} event
- * @returns {boolean}
- */
-function isSubagentEvent(event) {
-  return event.parent_tool_use_id != null;
-}
-
-/**
- * Build a debug label for an SDK event (used for log.debug tracing).
- * @param {import("@anthropic-ai/claude-agent-sdk").SDKMessage} event
- * @returns {string}
- */
-function getSdkEventLabel(event) {
-  if (event.type === "assistant" && event.message?.content) {
-    const toolBlock = event.message.content.find((block) => block.type === "tool_use");
-    if (toolBlock) {
-      const input = /** @type {Record<string, unknown>} */ (toolBlock.input ?? {});
-      const inputSummary = String(
-        input.command ?? input.file_path ?? input.pattern ?? input.query ?? input.prompt ?? input.description ?? ""
-      ).slice(0, 80);
-      return `tool_use:${toolBlock.name}(${inputSummary})`;
-    }
-  }
-  return event.type;
-}
-
-/**
  * Handle an SDK "assistant" event: dispatch text/tool blocks to hooks and persist.
  *
  * Sub-agent events (parent_tool_use_id != null) are displayed with an "*Agent:*"
@@ -1242,48 +1223,19 @@ function getSdkEventLabel(event) {
  * @param {SdkEventContext} ctx
  */
 async function handleAssistantEvent(event, ctx) {
-  const isSubagent = isSubagentEvent(event);
-  const betaMessage = event.message;
-  if (betaMessage.content) {
-    /** @type {(TextContentBlock | ToolCallContentBlock)[]} */
-    const storedBlocks = [];
-
-    for (const block of betaMessage.content) {
-      if (block.type === "text") {
-        const text = /** @type {string} */ (block.text);
-        log.debug(`  block: text len=${text.length} subagent=${isSubagent}`);
-        const displayText = isSubagent ? `*Agent:* ${text}` : text;
-        await ctx.hooks.onLlmResponse(displayText);
-        if (!isSubagent) {
-          ctx.result.response.push({ type: "text", text });
-        }
-        storedBlocks.push({ type: "text", text });
-      } else if (block.type === "tool_use") {
-        const name = /** @type {string} */ (block.name);
-        const id = /** @type {string} */ (block.id);
-        log.debug(`  block: tool_use ${name} subagent=${isSubagent}`);
-        // Display + activeTools entry already handled by PreToolUse hook
-        storedBlocks.push({
-          type: "tool",
-          tool_id: id,
-          name,
-          arguments: JSON.stringify(block.input),
-        });
-      }
+  const normalized = normalizeClaudeAssistantEvent(event);
+  for (const runtimeEvent of normalized.runtimeEvents) {
+    if (runtimeEvent.text) {
+      log.debug(`  block: text len=${runtimeEvent.text.length} subagent=${!normalized.shouldPersist}`);
     }
-
-    // Only persist main-agent messages to conversation history
-    if (!isSubagent && storedBlocks.length > 0) {
-      /** @type {AssistantMessage} */
-      const assistantMsg = { role: "assistant", content: storedBlocks };
-      ctx.messages.push(assistantMsg);
-      await ctx.session.addMessage(ctx.session.chatId, assistantMsg, ctx.session.senderIds);
-    }
+    await ctx.runtimeDispatcher.handleEvent(runtimeEvent);
   }
-  if (betaMessage.usage) {
-    ctx.result.usage.promptTokens += betaMessage.usage.input_tokens ?? 0;
-    ctx.result.usage.completionTokens += betaMessage.usage.output_tokens ?? 0;
-    ctx.result.usage.cachedTokens += /** @type {SdkUsageWithCache} */ (betaMessage.usage).cache_read_input_tokens ?? 0;
+
+  if (normalized.shouldPersist) {
+    /** @type {AssistantMessage} */
+    const assistantMsg = { role: "assistant", content: normalized.storedBlocks };
+    ctx.messages.push(assistantMsg);
+    await ctx.session.addMessage(ctx.session.chatId, assistantMsg, ctx.session.senderIds);
   }
 }
 
@@ -1295,32 +1247,22 @@ async function handleAssistantEvent(event, ctx) {
 async function handleResultEvent(event, ctx) {
   log.debug(`SDK result: subtype=${event.subtype}, is_error=${event.is_error}, has_result=${"result" in event}, responseBlocks=${ctx.result.response.length}`);
 
-  if (!event.is_error && "result" in event && typeof event.result === "string") {
-    const resultText = event.result;
+  const normalized = normalizeClaudeResultEvent(event);
+  if (normalized.runtimeEvent) {
+    const resultText = normalized.runtimeEvent.text;
     const lastSent = ctx.result.response[ctx.result.response.length - 1];
     const alreadySent = lastSent?.type === "text"
       && lastSent.text.trim() === resultText.trim();
     log.debug(`SDK result text: len=${resultText.length}, alreadySent=${alreadySent}`);
-    ctx.result.response = [{ type: "text", text: resultText }];
-    if (!alreadySent && resultText.trim()) {
-      await ctx.hooks.onLlmResponse(resultText);
-    }
-  }
-  if (event.usage) {
-    ctx.result.usage.promptTokens = event.usage.input_tokens ?? ctx.result.usage.promptTokens;
-    ctx.result.usage.completionTokens = event.usage.output_tokens ?? ctx.result.usage.completionTokens;
-    ctx.result.usage.cachedTokens = /** @type {SdkUsageWithCache} */ (event.usage).cache_read_input_tokens ?? ctx.result.usage.cachedTokens;
-  }
-  if (typeof event.total_cost_usd === "number") {
-    ctx.result.usage.cost = event.total_cost_usd;
+    await ctx.runtimeDispatcher.handleEvent({
+      ...normalized.runtimeEvent,
+      notify: !alreadySent && resultText.trim().length > 0,
+    });
   }
 
-  if (event.is_error) {
-    const errors = /** @type {import("@anthropic-ai/claude-agent-sdk").SDKResultError} */ (event).errors;
-    log.error("SDK query ended with error:", errors);
-    if (errors?.length > 0) {
-      await ctx.hooks.onToolError(errors.join("; "));
-    }
+  if (normalized.errorMessages.length > 0) {
+    log.error("SDK query ended with error:", normalized.errorMessages);
+    await ctx.hooks.onToolError(normalized.errorMessages.join("; "));
   }
 }
 
@@ -1336,7 +1278,7 @@ async function handleResultEvent(event, ctx) {
  * @param {SdkEventContext} ctx
  */
 async function handleUserEvent(event, ctx) {
-  const isSubagent = isSubagentEvent(event);
+  const isSubagent = isClaudeSubagentEvent(event);
   const { toolUseId: resolvedToolUseId, resultText } = extractToolResultFromEvent(event);
 
   if (!resolvedToolUseId) return;
