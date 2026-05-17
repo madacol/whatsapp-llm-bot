@@ -15,7 +15,7 @@ import { getHarnessRawEventLoggerFromEnv } from "./raw-event-log.js";
 const log = createLogger("harness:runtime-events");
 
 /**
- * @type {Pick<Required<AgentIOHooks>, "onComposing" | "onPaused" | "onReasoning" | "onToolCall" | "onLlmResponse" | "onUsage">}
+ * @type {Pick<Required<AgentIOHooks>, "onComposing" | "onPaused" | "onReasoning" | "onToolCall" | "onLlmResponse" | "onFileChange" | "onUsage">}
  */
 const DEFAULT_RUNTIME_EVENT_HOOKS = {
   onComposing: async () => {},
@@ -23,6 +23,7 @@ const DEFAULT_RUNTIME_EVENT_HOOKS = {
   onReasoning: async () => {},
   onToolCall: async () => {},
   onLlmResponse: async () => {},
+  onFileChange: async () => {},
   onUsage: async () => {},
 };
 
@@ -65,7 +66,7 @@ function buildRuntimeToolPresentation(tool, workdir) {
  * @param {{
  *   provider: HarnessRuntimeProvider,
  *   messages: Message[],
- *   hooks?: Pick<AgentIOHooks, "onComposing" | "onPaused" | "onReasoning" | "onToolCall" | "onLlmResponse" | "onUsage">,
+ *   hooks?: Pick<AgentIOHooks, "onComposing" | "onPaused" | "onReasoning" | "onToolCall" | "onLlmResponse" | "onFileChange" | "onUsage">,
  *   workdir?: string | null,
  *   emitUsage?: boolean,
  *   rawEventLogger?: HarnessRawEventLogger | null,
@@ -203,6 +204,19 @@ export function createHarnessRuntimeEventDispatcher(input) {
         return;
       case "usage.updated":
         await updateUsage(event.usage, "replace");
+        return;
+      case "session.started":
+      case "session.updated":
+      case "session.stopped":
+      case "turn.started":
+      case "turn.completed":
+      case "request.opened":
+      case "request.resolved":
+      case "user-input.requested":
+      case "user-input.resolved":
+        return;
+      case "file-change.completed":
+        await hooks.onFileChange(event.change);
         return;
       default: {
         /** @type {never} */

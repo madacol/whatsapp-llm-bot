@@ -200,4 +200,72 @@ describe("createHarnessRuntimeEventDispatcher", () => {
       await fs.rm(tempDir, { recursive: true, force: true });
     }
   });
+
+  it("accepts session, turn, request, user-input, and file-change runtime events", async () => {
+    /** @type {Array<Record<string, unknown>>} */
+    const fileChanges = [];
+    const dispatcher = createHarnessRuntimeEventDispatcher({
+      provider: "codex",
+      messages: [],
+      hooks: {
+        onFileChange: async (event) => {
+          fileChanges.push(event);
+        },
+      },
+    });
+
+    await dispatcher.handleEvent({
+      type: "session.started",
+      provider: "codex",
+      session: {
+        chatId: "chat-1",
+        harnessName: "codex",
+        instanceId: "work",
+        status: "ready",
+      },
+    });
+    await dispatcher.handleEvent({
+      type: "turn.started",
+      provider: "codex",
+      turn: { id: "turn-1", chatId: "chat-1" },
+    });
+    await dispatcher.handleEvent({
+      type: "request.opened",
+      provider: "codex",
+      request: {
+        id: "approval-1",
+        kind: "command",
+        summary: "Run tests",
+      },
+    });
+    await dispatcher.handleEvent({
+      type: "user-input.requested",
+      provider: "codex",
+      request: {
+        id: "question-1",
+        questions: [{ id: "q1", question: "Which branch?", options: [] }],
+      },
+    });
+    await dispatcher.handleEvent({
+      type: "file-change.completed",
+      provider: "codex",
+      change: {
+        path: "/repo/app.js",
+        summary: "Updated app",
+        kind: "update",
+      },
+    });
+    await dispatcher.handleEvent({
+      type: "turn.completed",
+      provider: "codex",
+      turn: { id: "turn-1", chatId: "chat-1", status: "completed" },
+    });
+
+    assert.deepEqual(fileChanges, [{
+      path: "/repo/app.js",
+      summary: "Updated app",
+      kind: "update",
+    }]);
+    assert.deepEqual(dispatcher.result.response, []);
+  });
 });

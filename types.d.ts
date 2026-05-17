@@ -661,6 +661,9 @@ type HarnessCapabilities = {
   supportsModelSelection: boolean;
   supportsReasoningEffort: boolean;
   supportsSessionFork: boolean;
+  sessionModelSwitch?: "in-session" | "unsupported";
+  supportsRollback?: boolean;
+  supportsUserInputRequests?: boolean;
 };
 
 type HarnessUsage = {

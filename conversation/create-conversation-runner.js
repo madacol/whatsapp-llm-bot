@@ -2,7 +2,8 @@ import { CANCEL_COMMAND, formatChatSettingsCommand } from "../chat-commands.js";
 import { getChatAction, getChatActions, getAction } from "../actions.js";
 import { getAgent } from "../agents.js";
 import { storeAndLinkHtml } from "../html-store.js";
-import { resolveHarness, resolveHarnessName, createHarnessRunCoordinator } from "#harnesses";
+import { resolveHarness, resolveHarnessName, createHarnessRunCoordinator, getHarnessSessionDirectory } from "#harnesses";
+import { getHarnessInstanceConfig } from "../harness-config.js";
 import { contentEvent } from "../outbound-events.js";
 import {
   shouldRespond,
@@ -110,9 +111,13 @@ async function resolveConversationHarness(chatInfo) {
     ? await getAgent(chatInfo.active_persona)
     : null;
   const harnessName = resolveHarnessName(persona, chatInfo);
+  const { instanceId, config: harnessConfig } = getHarnessInstanceConfig(
+    chatInfo?.harness_config,
+    harnessName,
+  );
   return {
     persona,
-    harness: resolveHarness(harnessName),
+    harness: resolveHarness(harnessName, { instanceId, config: harnessConfig }),
   };
 }
 
@@ -150,6 +155,7 @@ export function createConversationRunner({ store, llmClient, getActionsFn, execu
   } = store;
 
   const runCoordinator = createHarnessRunCoordinator();
+  const harnessSessionDirectory = getHarnessSessionDirectory();
   const workspaceBinding = createWorkspaceBindingService(store);
   const workspaceControl = createWorkspaceControl({ store, workspacePresentation });
   const workspaceLifecycle = createWorkspaceLifecycleService({
@@ -410,6 +416,29 @@ export function createConversationRunner({ store, llmClient, getActionsFn, execu
     let nextTurn = null;
     try {
       const runConfig = buildRunConfig(chatId, chatInfo, turn.chatName, harness.getName(), resolvedBinding);
+      let currentResumeCursor = chatInfo?.harness_session_kind === harness.getName()
+        ? chatInfo.harness_session_id
+        : null;
+      const upsertSessionBinding = (/** @type {"running" | "ready" | "stopped" | "error"} */ status, /** @type {string | null | undefined} */ resumeCursor) => {
+        if (resumeCursor !== undefined) {
+          currentResumeCursor = resumeCursor;
+        }
+        harnessSessionDirectory.upsert({
+          chatId,
+          harnessName: harness.getName(),
+          instanceId: runConfig.harnessInstanceId ?? "default",
+          status,
+          resumeCursor: currentResumeCursor,
+          runtimeMode: runConfig.sandboxMode ?? null,
+          runtimePayload: {
+            workdir: runConfig.workdir ?? null,
+            model: runConfig.model ?? null,
+            reasoningEffort: runConfig.reasoningEffort ?? null,
+            approvalPolicy: runConfig.approvalPolicy ?? null,
+            approvalsReviewer: runConfig.approvalsReviewer ?? null,
+          },
+        });
+      };
       const hooks = buildAgentIoHooks(
         context,
         keepPresenceAlive,
@@ -422,6 +451,15 @@ export function createConversationRunner({ store, llmClient, getActionsFn, execu
         },
       );
       runCoordinator.markRunActive(chatId);
+      upsertSessionBinding("running", undefined);
+
+      /** @type {import("../store.js").Store["saveHarnessSession"]} */
+      const saveHarnessSessionAndBinding = async (sessionChatId, sessionRef) => {
+        await saveHarnessSession(sessionChatId, sessionRef);
+        if (sessionChatId === chatId) {
+          upsertSessionBinding(sessionRef ? "ready" : "stopped", sessionRef?.id ?? null);
+        }
+      };
 
       const runRequest = await buildHarnessRunRequest({
         chatId,
@@ -438,7 +476,7 @@ export function createConversationRunner({ store, llmClient, getActionsFn, execu
         executeActionFn,
         addMessage,
         updateToolMessage,
-        saveHarnessSession,
+        saveHarnessSession: saveHarnessSessionAndBinding,
         hooks,
         harnessName: harness.getName(),
         resolvedBinding,
@@ -446,6 +484,7 @@ export function createConversationRunner({ store, llmClient, getActionsFn, execu
       });
 
       const result = await harness.run(runRequest);
+      upsertSessionBinding("ready", undefined);
       if (result.response.length > 0) {
         const responseSignature = getDeliveredContentSignature(result.response);
         if (!deliveredContentSignatures.has(responseSignature)) {
@@ -453,6 +492,10 @@ export function createConversationRunner({ store, llmClient, getActionsFn, execu
         }
       }
     } catch (error) {
+      const binding = harnessSessionDirectory.getBinding(chatId);
+      if (binding) {
+        harnessSessionDirectory.upsert({ ...binding, status: "error" });
+      }
       log.error("handleLlmMessage failed:", error);
       const errorMessage = errorToString(error);
       try {

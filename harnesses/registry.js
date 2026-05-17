@@ -1,8 +1,46 @@
 import { createNativeHarness } from "./native.js";
 import { createCodexHarness } from "./codex.js";
 import { createPiHarness } from "./pi.js";
+import { createHarnessAdapterFromHarness } from "./adapter.js";
 
-/** @type {Map<string, () => AgentHarness>} */
+/**
+ * @typedef {{
+ *   name: string,
+ *   instanceId: string,
+ *   config: Record<string, unknown>,
+ * }} HarnessDriverCreateInput
+ */
+
+/**
+ * @typedef {() => AgentHarness} HarnessDriverFactory
+ */
+
+/**
+ * @typedef {(input: HarnessDriverCreateInput) => AgentHarness} HarnessInstanceFactory
+ */
+
+/**
+ * @typedef {HarnessCapabilities & {
+ *   sessionModelSwitch: "in-session" | "unsupported",
+ *   supportsRollback: boolean,
+ *   supportsUserInputRequests: boolean,
+ * }} NormalizedHarnessCapabilities
+ */
+
+/**
+ * @typedef {{
+ *   name: string,
+ *   instanceId: string,
+ *   displayName: string,
+ *   supportsInstances: boolean,
+ *   continuationKey: string,
+ *   capabilities: NormalizedHarnessCapabilities,
+ *   harness: AgentHarness,
+ *   adapter: ReturnType<typeof createHarnessAdapterFromHarness>,
+ * }} HarnessInstance
+ */
+
+/** @type {Map<string, HarnessDriverFactory>} */
 const registry = new Map();
 
 /**
@@ -23,6 +61,7 @@ const registry = new Map();
  *   supportsInstances?: boolean,
  *   docsUrl?: string,
  *   statusUrl?: string,
+ *   createInstance?: HarnessInstanceFactory,
  *   getStatus?: () => Promise<HarnessDriverStatus> | HarnessDriverStatus,
  * }} HarnessDriverOptions
  */
@@ -40,7 +79,7 @@ const registry = new Map();
 /** @type {Map<string, HarnessDriverOptions>} */
 const driverOptions = new Map();
 
-/** @type {Map<string, AgentHarness>} Singleton cache for stateful harnesses */
+/** @type {Map<string, HarnessInstance>} Singleton cache for stateful harness instances */
 const instances = new Map();
 
 /**
@@ -110,6 +149,13 @@ const DEFAULT_HARNESS_CAPABILITIES = {
   supportsSessionFork: false,
 };
 
+/** @type {Pick<NormalizedHarnessCapabilities, "sessionModelSwitch" | "supportsRollback" | "supportsUserInputRequests">} */
+const DEFAULT_HARNESS_SEAM_CAPABILITIES = {
+  sessionModelSwitch: "in-session",
+  supportsRollback: false,
+  supportsUserInputRequests: false,
+};
+
 /**
  * @param {AgentHarness | null | undefined} harness
  * @returns {harness is AgentHarness & { processLlmResponse: (params: AgentHarnessParams) => Promise<AgentResult> }}
@@ -152,9 +198,94 @@ function normalizeHarness(name, harness) {
 }
 
 /**
+ * @param {string | null | undefined} instanceId
+ * @returns {string}
+ */
+function normalizeInstanceId(instanceId) {
+  const trimmed = instanceId?.trim();
+  return trimmed ? trimmed : "default";
+}
+
+/**
+ * @param {string} name
+ * @param {string} instanceId
+ * @returns {string}
+ */
+function buildInstanceCacheKey(name, instanceId) {
+  return `${name}\u0000${instanceId}`;
+}
+
+/**
+ * @param {AgentHarness} harness
+ * @returns {NormalizedHarnessCapabilities}
+ */
+function normalizeCapabilities(harness) {
+  return {
+    ...DEFAULT_HARNESS_CAPABILITIES,
+    ...DEFAULT_HARNESS_SEAM_CAPABILITIES,
+    ...harness.getCapabilities(),
+  };
+}
+
+/**
+ * @param {string} name
+ * @param {string} instanceId
+ * @returns {string}
+ */
+function buildContinuationKey(name, instanceId) {
+  return `${name}:instance:${instanceId}`;
+}
+
+/**
+ * @param {string} name
+ * @param {{ instanceId?: string | null, config?: Record<string, unknown> }} [options]
+ * @returns {HarnessInstance}
+ */
+export function resolveHarnessInstance(name, options = {}) {
+  const key = name ?? "native";
+  const driverOptionsForName = normalizeDriverOptions(key, driverOptions.get(key));
+  const instanceId = driverOptionsForName.supportsInstances
+    ? normalizeInstanceId(options.instanceId)
+    : "default";
+  const cacheKey = buildInstanceCacheKey(key, instanceId);
+  const cached = instances.get(cacheKey);
+  if (cached) return cached;
+
+  const factory = registry.get(key);
+  const createInstance = driverOptionsForName.createInstance;
+  const harness = normalizeHarness(
+    key,
+    createInstance
+      ? createInstance({ name: key, instanceId, config: options.config ?? {} })
+      : factory
+      ? factory()
+      : createNativeHarness(),
+  );
+  const capabilities = normalizeCapabilities(harness);
+  const continuationKey = buildContinuationKey(key, instanceId);
+  const instance = {
+    name: key,
+    instanceId,
+    displayName: driverOptionsForName.displayName,
+    supportsInstances: driverOptionsForName.supportsInstances,
+    continuationKey,
+    capabilities,
+    harness,
+    adapter: createHarnessAdapterFromHarness({
+      harness,
+      name: key,
+      instanceId,
+      continuationKey,
+    }),
+  };
+  instances.set(cacheKey, instance);
+  return instance;
+}
+
+/**
  * Register a harness factory under a name.
  * @param {string} name
- * @param {() => AgentHarness} factory
+ * @param {HarnessDriverFactory} factory
  */
 export function registerHarness(name, factory) {
   registerHarnessDriver(name, factory);
@@ -163,14 +294,18 @@ export function registerHarness(name, factory) {
 /**
  * Register a harness driver under a name with optional metadata and status.
  * @param {string} name
- * @param {() => AgentHarness} factory
+ * @param {HarnessDriverFactory} factory
  * @param {HarnessDriverOptions} [options]
  * @returns {void}
  */
 export function registerHarnessDriver(name, factory, options = {}) {
   registry.set(name, factory);
   driverOptions.set(name, normalizeDriverOptions(name, options));
-  instances.delete(name);
+  for (const cacheKey of [...instances.keys()]) {
+    if (cacheKey === name || cacheKey.startsWith(`${name}\u0000`)) {
+      instances.delete(cacheKey);
+    }
+  }
 }
 
 /**
@@ -189,17 +324,11 @@ export function resetHarnessRegistryForTests() {
  * Resolve a harness by name. Falls back to native if not found.
  * Returns a cached singleton so stateful harnesses preserve their per-chat active state.
  * @param {string} [name]
+ * @param {{ instanceId?: string | null, config?: Record<string, unknown> }} [options]
  * @returns {AgentHarness}
  */
-export function resolveHarness(name) {
-  const key = name ?? "native";
-  const cached = instances.get(key);
-  if (cached) return cached;
-
-  const factory = registry.get(key);
-  const harness = normalizeHarness(key, factory ? factory() : createNativeHarness());
-  instances.set(key, harness);
-  return harness;
+export function resolveHarness(name, options = {}) {
+  return resolveHarnessInstance(name ?? "native", options).harness;
 }
 
 /**
@@ -216,6 +345,21 @@ export function listHarnesses() {
  */
 export function listHarnessDrivers() {
   return [...registry.keys()].map(getDriverDescriptor);
+}
+
+/**
+ * List materialized harness instances.
+ * @returns {Array<Pick<HarnessInstance, "name" | "instanceId" | "displayName" | "supportsInstances" | "continuationKey" | "capabilities">>}
+ */
+export function listHarnessInstances() {
+  return [...instances.values()].map((instance) => ({
+    name: instance.name,
+    instanceId: instance.instanceId,
+    displayName: instance.displayName,
+    supportsInstances: instance.supportsInstances,
+    continuationKey: instance.continuationKey,
+    capabilities: instance.capabilities,
+  }));
 }
 
 /**
@@ -275,8 +419,9 @@ export function resolveHarnessName(persona, chatInfo) {
 export async function waitForAllHarnesses() {
   const results = await Promise.all(
     [...instances.values()]
-      .filter((h) => typeof h.waitForIdle === "function")
-      .map((h) => /** @type {() => Promise<string[]>} */ (h.waitForIdle)()),
+      .map((instance) => instance.harness)
+      .filter((harness) => typeof harness.waitForIdle === "function")
+      .map((harness) => /** @type {() => Promise<string[]>} */ (harness.waitForIdle)()),
   );
   return results.flat();
 }
