@@ -14,6 +14,7 @@ import { augmentLatestUserMessageForTextHarness, buildTextHarnessPromptFromBlock
 import { buildSdkErrorResponse, clearStaleHarnessSession, getHarnessRunErrorMessage } from "./harness-run-errors.js";
 import { wrapHooksWithFallbacks } from "./hook-fallbacks.js";
 import { createActionRequestRunState, executeQueuedActionRequests } from "../action-request-runtime.js";
+import { createActiveSessionDirectory } from "./active-session-directory.js";
 import {
   getCodexSessionId,
   saveCodexSession,
@@ -137,8 +138,12 @@ function isLegacyClaudeModel(model) {
  * @returns {AgentHarness}
  */
 export function createCodexHarness(deps = {}) {
-  /** @type {Map<string, ActiveCodexRun>} */
-  const activeRuns = new Map();
+  const activeSessions = createActiveSessionDirectory({
+    label: "Codex",
+    onInterruptError: (error) => {
+      log.warn("Codex interrupt failed, falling back to abort:", error);
+    },
+  });
   const loadAvailableModels = deps.getAvailableModels ?? getCodexAvailableModels;
   const beginRun = deps.startRun ?? startCodexAppServerRun;
   const handleCommand = createCodexCommandHandler({
@@ -168,12 +173,7 @@ export function createCodexHarness(deps = {}) {
    * @returns {Promise<boolean>}
    */
   async function injectMessage(chatId, text) {
-    const key = typeof chatId === "string" ? chatId : chatId.id;
-    const active = activeRuns.get(key);
-    if (!active?.steer || !text) {
-      return false;
-    }
-    return !!(await active.steer(text));
+    return activeSessions.injectMessage(chatId, text);
   }
 
   /**
@@ -181,21 +181,7 @@ export function createCodexHarness(deps = {}) {
    * @returns {boolean}
    */
   function cancel(chatId) {
-    const key = typeof chatId === "string" ? chatId : chatId.id;
-    const active = activeRuns.get(key);
-    if (!active) {
-      return false;
-    }
-    active.aborted = true;
-    if (active.interrupt) {
-      void Promise.resolve(active.interrupt()).catch((error) => {
-        log.warn("Codex interrupt failed, falling back to abort:", error);
-        active.abortController.abort();
-      });
-      return true;
-    }
-    active.abortController.abort();
-    return true;
+    return activeSessions.cancel(chatId);
   }
 
   /**
@@ -218,9 +204,7 @@ export function createCodexHarness(deps = {}) {
    * @returns {Promise<string[]>}
    */
   async function waitForIdle() {
-    const chatIds = [...activeRuns.keys()];
-    await Promise.allSettled(chatIds.map((chatId) => activeRuns.get(chatId)?.done));
-    return chatIds;
+    return activeSessions.waitForIdle();
   }
 
   /**
@@ -267,7 +251,7 @@ export function createCodexHarness(deps = {}) {
         ...(started.interrupt && { interrupt: started.interrupt }),
         aborted: false,
       };
-      activeRuns.set(session.chatId, activeRun);
+      activeSessions.register(session.chatId, activeRun);
 
       const completed = await started.done;
 
@@ -307,7 +291,9 @@ export function createCodexHarness(deps = {}) {
         usage: { promptTokens: 0, completionTokens: 0, cachedTokens: 0, cost: 0 },
       };
     } finally {
-      activeRuns.delete(session.chatId);
+      if (activeRun) {
+        activeSessions.unregister(session.chatId, activeRun);
+      }
       await actionRequestState.cleanup();
     }
   }
