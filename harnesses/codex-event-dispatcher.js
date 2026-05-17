@@ -3,10 +3,14 @@ import { buildToolPresentation, getToolFlowDescriptor } from "../tool-presentati
 import { toolCallUpdate, toolFlowInspectState, toolFlowUpdate, toolInspectState } from "../outbound-events.js";
 import { createPlanPresentationFromState } from "../plan-presentation.js";
 import { createLogger } from "../logger.js";
-import { estimateCodexUsageCost } from "./codex-usage-cost.js";
+import { createHarnessRuntimeEventDispatcher } from "./harness-runtime-event-dispatcher.js";
 import { createCodexReasoningState } from "./codex-reasoning-state.js";
 import { createCodexRunState } from "./codex-run-state.js";
 import { createCodexSyntheticToolAdapter } from "./codex-synthetic-tools.js";
+import {
+  normalizeCodexAssistantRuntimeEvent,
+  normalizeCodexUsageRuntimeEvent,
+} from "./codex-runtime-events.js";
 
 const log = createLogger("harness:codex-events");
 
@@ -42,13 +46,14 @@ export function createCodexEventDispatcher(input) {
   const subagentThreads = new Map();
   /** @type {Set<string>} */
   const deliveredSubagentResponses = new Set();
-
-  /** @type {AgentResult} */
-  const result = {
-    response: [],
+  const runtimeDispatcher = createHarnessRuntimeEventDispatcher({
+    provider: "codex",
     messages: input.messages,
-    usage: { promptTokens: 0, completionTokens: 0, cachedTokens: 0, cost: 0 },
-  };
+    hooks: input.hooks,
+    workdir: input.runConfig?.workdir ?? null,
+    emitUsage: false,
+  });
+  const result = runtimeDispatcher.result;
 
   /** @type {string | null} */
   let lastAssistantText = null;
@@ -269,13 +274,10 @@ export function createCodexEventDispatcher(input) {
    */
   async function handleNormalized(normalized) {
     if (normalized.usage) {
-      const estimatedCost = normalized.usage.cost > 0
-        ? normalized.usage.cost
-        : estimateCodexUsageCost(input.runConfig?.model, normalized.usage);
-      result.usage = {
-        ...normalized.usage,
-        cost: estimatedCost ?? normalized.usage.cost,
-      };
+      await runtimeDispatcher.handleEvent(normalizeCodexUsageRuntimeEvent({
+        usage: normalized.usage,
+        runConfig: input.runConfig,
+      }));
     }
 
     if (normalized.failureMessage) {
@@ -471,7 +473,7 @@ export function createCodexEventDispatcher(input) {
           });
         } else {
           lastAssistantText = normalized.assistantText;
-          await input.hooks.onLlmResponse(normalized.assistantText, metadata);
+          await runtimeDispatcher.handleEvent(normalizeCodexAssistantRuntimeEvent(normalized.assistantText));
         }
       }
     }
