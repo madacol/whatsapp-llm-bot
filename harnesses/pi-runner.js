@@ -1,8 +1,8 @@
 import { createLogger } from "../logger.js";
-import { toolInspectState } from "../outbound-events.js";
-import { buildToolPresentation } from "../tool-presentation-model.js";
 import { openPiRpcConnection } from "./pi-rpc-client.js";
 import { toPiThinkingLevel } from "./pi-config.js";
+import { createHarnessRuntimeEventDispatcher } from "./harness-runtime-event-dispatcher.js";
+import { normalizePiRuntimeEvents, getResponseData } from "./pi-runtime-events.js";
 
 const log = createLogger("harness:pi-runner");
 
@@ -16,15 +16,6 @@ const DEFAULT_PI_RUN_HOOKS = {
   onToolError: async () => {},
   onUsage: async () => {},
 };
-
-/**
- * @typedef {{
- *   id: string,
- *   name: string,
- *   presentation: import("../tool-presentation-model.js").ToolPresentation,
- *   handle?: MessageHandle,
- * }} ActivePiTool
- */
 
 /**
  * @typedef {{
@@ -69,17 +60,6 @@ export function buildPiTurnInput(prompt, externalInstructions) {
     "User request:",
     trimmedPrompt,
   ].join("\n");
-}
-
-/**
- * @param {Record<string, unknown>} response
- * @returns {Record<string, unknown>}
- */
-function getResponseData(response) {
-  if (!isObjectRecord(response.data)) {
-    return {};
-  }
-  return response.data;
 }
 
 /**
@@ -154,98 +134,12 @@ export function resolvePiModelSelection(value, models) {
 }
 
 /**
- * @param {Record<string, unknown>} message
- * @returns {string | null}
- */
-function extractAssistantText(message) {
-  if (!isObjectRecord(message) || !Array.isArray(message.content)) {
-    return null;
-  }
-  const parts = message.content
-    .filter((entry) => isObjectRecord(entry) && entry.type === "text" && typeof entry.text === "string")
-    .map((entry) => /** @type {string} */ (entry.text));
-  const text = parts.join("").trim();
-  return text || null;
-}
-
-/**
- * @param {Record<string, unknown>} message
- * @returns {{ promptTokens: number, completionTokens: number, cachedTokens: number, cost: number }}
- */
-function extractAssistantUsage(message) {
-  if (!isObjectRecord(message.usage)) {
-    return {
-      promptTokens: 0,
-      completionTokens: 0,
-      cachedTokens: 0,
-      cost: 0,
-    };
-  }
-  const usage = message.usage;
-  const cost = isObjectRecord(usage.cost) && typeof usage.cost.total === "number" ? usage.cost.total : 0;
-  return {
-    promptTokens: typeof usage.input === "number" ? usage.input : 0,
-    completionTokens: typeof usage.output === "number" ? usage.output : 0,
-    cachedTokens: typeof usage.cacheRead === "number" ? usage.cacheRead : 0,
-    cost,
-  };
-}
-
-/**
  * @param {Record<string, unknown>} event
  * @returns {string | null}
  */
 function extractSessionPath(event) {
   const data = getResponseData(event);
   return typeof data.sessionFile === "string" ? data.sessionFile : null;
-}
-
-/**
- * @param {Record<string, unknown>} event
- * @returns {string | null}
- */
-function extractThinkingText(event) {
-  if (!isObjectRecord(event.message) || !Array.isArray(event.message.content)) {
-    return null;
-  }
-  const content = event.message.content;
-  const parts = content
-    .filter((entry) => isObjectRecord(entry) && entry.type === "thinking" && typeof entry.thinking === "string")
-    .map((entry) => /** @type {string} */ (entry.thinking));
-  const text = parts.join("\n").trim();
-  return text || null;
-}
-
-/**
- * @param {Record<string, unknown>} result
- * @returns {string | undefined}
- */
-function extractToolResultText(result) {
-  if (!isObjectRecord(result) || !Array.isArray(result.content)) {
-    return undefined;
-  }
-  const text = result.content
-    .filter((entry) => isObjectRecord(entry) && entry.type === "text" && typeof entry.text === "string")
-    .map((entry) => /** @type {string} */ (entry.text))
-    .join("\n")
-    .trim();
-  return text || undefined;
-}
-
-/**
- * @param {Record<string, unknown>} event
- * @returns {{ id: string, name: string, args: Record<string, unknown> } | null}
- */
-function extractToolStart(event) {
-  if (typeof event.toolCallId !== "string" || typeof event.toolName !== "string") {
-    return null;
-  }
-  const args = isObjectRecord(event.args) ? event.args : {};
-  return {
-    id: event.toolCallId,
-    name: event.toolName,
-    args,
-  };
 }
 
 /**
@@ -283,13 +177,12 @@ export async function startPiRpcRun(input, deps = {}) {
   const hooks = { ...DEFAULT_PI_RUN_HOOKS, ...input.hooks };
   const abortController = new AbortController();
   const prompt = buildPiTurnInput(input.prompt, input.externalInstructions);
-  const activeTools = new Map();
-  /** @type {AgentResult} */
-  const result = {
-    response: [],
+  const dispatcher = createHarnessRuntimeEventDispatcher({
+    provider: "pi",
     messages: input.messages,
-    usage: { promptTokens: 0, completionTokens: 0, cachedTokens: 0, cost: 0 },
-  };
+    hooks,
+    workdir: input.runConfig?.workdir ?? null,
+  });
   /** @type {string | null} */
   let sessionPath = input.sessionPath ?? null;
   let agentCompleted = false;
@@ -356,98 +249,13 @@ export async function startPiRpcRun(input, deps = {}) {
   const done = (async () => {
     try {
       for await (const event of connection.notifications) {
-        if (event.type === "message_update" && isObjectRecord(event.assistantMessageEvent)) {
-          const assistantMessageEvent = event.assistantMessageEvent;
-          if (
-            (assistantMessageEvent.type === "thinking_start"
-              || assistantMessageEvent.type === "thinking_delta"
-              || assistantMessageEvent.type === "thinking_end")
-          ) {
-            const thinkingText = extractThinkingText(event);
-            if (thinkingText) {
-              await hooks.onReasoning({
-                status: assistantMessageEvent.type === "thinking_end"
-                  ? "completed"
-                  : assistantMessageEvent.type === "thinking_start"
-                    ? "started"
-                    : "updated",
-                summaryParts: [],
-                contentParts: [thinkingText],
-                text: thinkingText,
-              });
-            }
-          }
-        }
-
-        if (event.type === "tool_execution_start") {
-          const toolStart = extractToolStart(event);
-          if (toolStart) {
-            const toolCall = {
-              id: toolStart.id,
-              name: toolStart.name,
-              arguments: JSON.stringify(toolStart.args),
-            };
-            const handle = await hooks.onToolCall(toolCall) ?? undefined;
-            activeTools.set(toolStart.id, {
-              id: toolStart.id,
-              name: toolStart.name,
-              presentation: buildToolPresentation(toolStart.name, toolStart.args, undefined, input.runConfig?.workdir ?? null, undefined),
-              ...(handle ? { handle } : {}),
-            });
-            await hooks.onPaused();
-            await hooks.onComposing();
-          }
-          continue;
-        }
-
-        if (event.type === "tool_execution_update" && typeof event.toolCallId === "string") {
-          const activeTool = activeTools.get(event.toolCallId);
-          if (activeTool?.handle && isObjectRecord(event.partialResult)) {
-            activeTool.handle.setInspect(
-              toolInspectState(activeTool.presentation, extractToolResultText(event.partialResult)),
-            );
-          }
-          continue;
-        }
-
-        if (event.type === "tool_execution_end" && typeof event.toolCallId === "string") {
-          const activeTool = activeTools.get(event.toolCallId);
-          if (activeTool?.handle && isObjectRecord(event.result)) {
-            activeTool.handle.setInspect(
-              toolInspectState(activeTool.presentation, extractToolResultText(event.result)),
-            );
-          }
-          activeTools.delete(event.toolCallId);
-          continue;
+        const runtimeEvents = normalizePiRuntimeEvents(event);
+        for (const runtimeEvent of runtimeEvents) {
+          await dispatcher.handleEvent(runtimeEvent);
         }
 
         if (event.type === "agent_end") {
           agentCompleted = true;
-          const messages = isRecordArray(event.messages) ? event.messages : [];
-          for (let i = messages.length - 1; i >= 0; i -= 1) {
-            const message = messages[i];
-            if (message.role !== "assistant") {
-              continue;
-            }
-            const text = extractAssistantText(message);
-            if (text) {
-              result.response = [{ type: "markdown", text }];
-              await hooks.onLlmResponse(text);
-            }
-            result.usage = extractAssistantUsage(message);
-            if (
-              result.usage.promptTokens > 0
-              || result.usage.completionTokens > 0
-              || result.usage.cachedTokens > 0
-            ) {
-              await hooks.onUsage(result.usage.cost.toFixed(6), {
-                prompt: result.usage.promptTokens,
-                completion: result.usage.completionTokens,
-                cached: result.usage.cachedTokens,
-              });
-            }
-            break;
-          }
           break;
         }
       }
@@ -455,10 +263,10 @@ export async function startPiRpcRun(input, deps = {}) {
       const stateResponse = await sendRequest({ type: "get_state" });
       assertSuccessfulResponse(stateResponse, "get_state");
       sessionPath = extractSessionPath(stateResponse);
-      return { result, sessionPath };
+      return { result: dispatcher.result, sessionPath };
     } catch (error) {
       if (input.isAborted?.() || abortController.signal.aborted) {
-        return { result, sessionPath };
+        return { result: dispatcher.result, sessionPath };
       }
       log.error("Pi run failed:", error);
       throw error;
