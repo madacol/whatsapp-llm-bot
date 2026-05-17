@@ -538,6 +538,40 @@ describe("createConversationRunner with codex harness", () => {
     );
   });
 
+  it("does not duplicate a streamed final response returned as a text block", async () => {
+    await seedChat("conv-codex-final-text-dedupe", { enabled: true });
+    await configureCodexChat("conv-codex-final-text-dedupe");
+
+    registerHarness("codex", () => createCodexHarness({
+      startRun: async (input) => ({
+        abortController: new AbortController(),
+        done: (async () => {
+          await input.hooks?.onLlmResponse?.("Final answer");
+          return {
+            sessionId: null,
+            result: {
+              response: [{ type: "text", text: "Final answer" }],
+              messages: input.messages,
+              usage: { promptTokens: 0, completionTokens: 0, cachedTokens: 0, cost: 0 },
+            },
+          };
+        })(),
+      }),
+    }));
+
+    const turn = createChatTurn({
+      chatId: "conv-codex-final-text-dedupe",
+      content: [{ type: "text", text: "Return a final answer" }],
+    });
+    await handleMessage(turn.context);
+
+    assert.equal(
+      turn.responses.filter((response) => response.text.includes("Final answer")).length,
+      1,
+      `Expected the final answer once, got: ${turn.responses.map((response) => response.text).join(" | ")}`,
+    );
+  });
+
   it("does not refresh composing before the Codex tool-call display", async () => {
     await seedChat("conv-codex-presence", { enabled: true });
     await configureCodexChat("conv-codex-presence");
