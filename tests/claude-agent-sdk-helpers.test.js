@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
 
 // These are module-internal functions — import the module and test via
 // the public function that uses them (extractToolResultText is not exported).
@@ -268,6 +269,93 @@ describe("createClaudeAgentSdkHarness", () => {
     } finally {
       await fs.rm(workdir, { recursive: true, force: true });
     }
+  });
+
+  it("finishes the run when the SDK emits an error result event", async () => {
+    /** @type {string[]} */
+    const toolErrors = [];
+    const harness = createClaudeAgentSdkHarness({
+      query: () => ({
+        supportedModels: async () => [],
+        streamInput: async () => {},
+        [Symbol.asyncIterator]: () => {
+          let nextCalls = 0;
+          return {
+            next: async () => {
+              nextCalls += 1;
+              if (nextCalls === 1) {
+                return {
+                  done: false,
+                  value: {
+                    type: "result",
+                    subtype: "error_max_turns",
+                    is_error: true,
+                    errors: ["Reached maximum number of turns (50)"],
+                    session_id: "sess-max-turns",
+                  },
+                };
+              }
+              await new Promise(() => {});
+              return { done: true, value: undefined };
+            },
+          };
+        },
+      }),
+    });
+
+    const result = await Promise.race([
+      harness.run({
+        session: {
+          chatId: "claude-max-turns-chat",
+          senderIds: ["user-1"],
+          context: /** @type {ExecuteActionContext} */ ({
+            chatId: "claude-max-turns-chat",
+            senderIds: ["user-1"],
+            content: [],
+            getIsAdmin: async () => true,
+            send: async () => undefined,
+            reply: async () => undefined,
+            reactToMessage: async () => {},
+            select: async () => "",
+            confirm: async () => true,
+          }),
+          addMessage: async () => /** @type {import("../store.js").MessageRow} */ ({
+            message_id: 1,
+            chat_id: "claude-max-turns-chat",
+            sender_id: "user-1",
+            message_data: { role: "assistant", content: [] },
+            timestamp: new Date().toISOString(),
+            display_key: null,
+          }),
+          updateToolMessage: async () => undefined,
+          harnessSession: null,
+          saveHarnessSession: async () => {},
+        },
+        llmConfig: {
+          llmClient: /** @type {LlmClient} */ ({}),
+          chatModel: null,
+          externalInstructions: "",
+          toolRuntime: /** @type {ToolRuntime} */ ({
+            getTool: async () => null,
+            executeTool: async () => {
+              throw new Error("executeTool should not be called");
+            },
+            listTools: () => [],
+          }),
+        },
+        messages: [{ role: "user", content: [{ type: "text", text: "Continue" }] }],
+        mediaRegistry: new Map(),
+        hooks: {
+          onToolError: async (message) => {
+            toolErrors.push(message);
+          },
+        },
+      }),
+      delay(100).then(() => "timeout"),
+    ]);
+
+    assert.notEqual(result, "timeout");
+    assert.deepEqual(toolErrors, ["Reached maximum number of turns (50)"]);
   });
 
   it("displays Write tool content when the SDK only provides the ID on the hook input", async () => {

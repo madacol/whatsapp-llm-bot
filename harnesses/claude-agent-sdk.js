@@ -975,10 +975,12 @@ export function createClaudeAgentSdkHarness(deps = {}) {
           default: break;
         }
 
-        // Re-send composing before the next slow await (LLM call or tool execution)
-        if (event.type !== "result") {
-          await hooks.onComposing();
+        if (event.type === "result") {
+          break;
         }
+
+        // Re-send composing before the next slow await (LLM call or tool execution)
+        await hooks.onComposing();
       }
       log.debug(`SDK query done: events=${eventCount} activeTools=${activeTools.size}`);
     } catch (err) {
