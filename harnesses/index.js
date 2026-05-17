@@ -1,5 +1,6 @@
 export {
   getHarnessDriverStatus,
+  listHarnessInstances,
   listHarnesses,
   listHarnessDrivers,
   listHarnessDriverStatuses,
@@ -7,9 +8,12 @@ export {
   registerHarnessDriver,
   resetHarnessRegistryForTests,
   resolveHarness,
+  resolveHarnessInstance,
   resolveHarnessName,
   waitForAllHarnesses,
 } from "./registry.js";
+export { createHarnessAdapterFromHarness } from "./adapter.js";
+export { createHarnessSessionDirectory, getHarnessSessionDirectory } from "./session-directory.js";
 export { registerOptionalHarnesses } from "./optional-registration.js";
 export { confirmHarnessSandboxEscape } from "./public-sandbox.js";
 export { getModels as getClaudeSdkModels } from "./claude-agent-sdk.js";
