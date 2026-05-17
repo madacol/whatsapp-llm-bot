@@ -1,6 +1,6 @@
 import { createLogger } from "../logger.js";
 import { errorToString } from "../utils.js";
-import { registerHarness } from "./registry.js";
+import { registerHarnessDriver } from "./registry.js";
 
 const log = createLogger("harnesses");
 
@@ -12,7 +12,12 @@ const log = createLogger("harnesses");
 export async function registerOptionalHarnesses() {
   try {
     const { createClaudeAgentSdkHarness } = await import("./claude-agent-sdk.js");
-    registerHarness("claude-agent-sdk", createClaudeAgentSdkHarness);
+    registerHarnessDriver("claude-agent-sdk", createClaudeAgentSdkHarness, {
+      displayName: "Claude Agent SDK",
+      supportsInstances: true,
+      docsUrl: "https://docs.anthropic.com/en/docs/claude-code/sdk/sdk-overview",
+      statusUrl: "https://status.anthropic.com/",
+    });
   } catch (error) {
     const message = errorToString(error);
     if (message.includes("Cannot find") || message.includes("MODULE_NOT_FOUND")) {

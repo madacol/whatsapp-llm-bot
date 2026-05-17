@@ -193,6 +193,32 @@ describe("buildRunConfig", () => {
     assert.equal(config.reasoningEffort, undefined);
   });
 
+  it("uses the active provider instance config when one is selected", () => {
+    const config = buildRunConfig("chat-1", /** @type {import("../store.js").ChatRow} */ ({
+      chat_id: "chat-1",
+      harness: "codex",
+      harness_cwd: null,
+      harness_config: {
+        codex: { model: "gpt-5.4", sandboxMode: "workspace-write" },
+        activeHarnessInstances: { codex: "readonly-review" },
+        harnessInstances: {
+          codex: {
+            "readonly-review": {
+              model: "gpt-5.4-mini",
+              sandboxMode: "read-only",
+              approvalPolicy: "on-request",
+            },
+          },
+        },
+      },
+    }), "Project Alpha", "codex");
+
+    assert.equal(config.harnessInstanceId, "readonly-review");
+    assert.equal(config.model, "gpt-5.4-mini");
+    assert.equal(config.sandboxMode, "read-only");
+    assert.equal(config.approvalPolicy, "on-request");
+  });
+
   it("does not leak a legacy Claude model into Codex runs", () => {
     const codexConfig = buildRunConfig("chat-1", /** @type {import("../store.js").ChatRow} */ ({
       chat_id: "chat-1",

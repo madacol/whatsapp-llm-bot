@@ -1,5 +1,5 @@
 import { getChatWorkDir } from "../utils.js";
-import { getScopedHarnessConfig } from "../harness-config.js";
+import { getHarnessInstanceConfig } from "../harness-config.js";
 
 /**
  * @param {string} chatId
@@ -31,10 +31,14 @@ function resolveRunWorkdir(chatId, chatInfo, chatName, resolvedBinding) {
  * @returns {HarnessRunConfig}
  */
 export function buildRunConfig(chatId, chatInfo, chatName, harnessName, resolvedBinding) {
-  const harnessConfig = getScopedHarnessConfig(chatInfo?.harness_config, harnessName ?? chatInfo?.harness);
+  const { instanceId, config: harnessConfig } = getHarnessInstanceConfig(
+    chatInfo?.harness_config,
+    harnessName ?? chatInfo?.harness,
+  );
   const workdir = resolveRunWorkdir(chatId, chatInfo, chatName, resolvedBinding);
   return {
     workdir,
+    harnessInstanceId: instanceId,
     model: typeof harnessConfig.model === "string" ? harnessConfig.model : undefined,
     reasoningEffort: /** @type {HarnessRunConfig["reasoningEffort"]} */ (typeof harnessConfig.reasoningEffort === "string" ? harnessConfig.reasoningEffort : undefined),
     // Project workspaces are writable by default so coding harnesses can edit files

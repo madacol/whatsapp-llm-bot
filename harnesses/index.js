@@ -1,6 +1,10 @@
 export {
+  getHarnessDriverStatus,
   listHarnesses,
+  listHarnessDrivers,
+  listHarnessDriverStatuses,
   registerHarness,
+  registerHarnessDriver,
   resetHarnessRegistryForTests,
   resolveHarness,
   resolveHarnessName,

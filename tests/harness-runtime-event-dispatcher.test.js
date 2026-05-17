@@ -1,6 +1,10 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import { createHarnessRuntimeEventDispatcher } from "../harnesses/harness-runtime-event-dispatcher.js";
+import { createNdjsonRawEventLogger } from "../harnesses/raw-event-log.js";
 
 describe("createHarnessRuntimeEventDispatcher", () => {
   it("projects canonical runtime events into hooks and result state", async () => {
@@ -157,5 +161,43 @@ describe("createHarnessRuntimeEventDispatcher", () => {
       inspectStates.at(-1)?.kind === "tool" ? inspectStates.at(-1)?.output : null,
       "final",
     );
+  });
+
+  it("captures raw provider events as replayable ndjson without changing hook projection", async () => {
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "raw-runtime-events-"));
+    const logPath = path.join(tempDir, "events.ndjson");
+    /** @type {string[]} */
+    const responses = [];
+    try {
+      const dispatcher = createHarnessRuntimeEventDispatcher({
+        provider: "codex",
+        messages: [],
+        rawEventLogger: createNdjsonRawEventLogger(logPath),
+        hooks: {
+          onLlmResponse: async (text) => {
+            responses.push(text);
+          },
+        },
+      });
+
+      await dispatcher.handleEvent({
+        type: "assistant.completed",
+        provider: "codex",
+        text: "Done.",
+        contentType: "markdown",
+        raw: { msg: { type: "agent_message_delta", delta: "Done." } },
+      });
+
+      const lines = (await fs.readFile(logPath, "utf8")).trim().split("\n");
+      assert.equal(lines.length, 1);
+      assert.deepEqual(JSON.parse(lines[0]), {
+        provider: "codex",
+        type: "assistant.completed",
+        raw: { msg: { type: "agent_message_delta", delta: "Done." } },
+      });
+      assert.deepEqual(responses, ["Done."]);
+    } finally {
+      await fs.rm(tempDir, { recursive: true, force: true });
+    }
   });
 });
