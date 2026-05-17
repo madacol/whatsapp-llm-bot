@@ -11,6 +11,7 @@ import { handleHarnessSessionCommand } from "./session-commands.js";
 import { openPiRpcConnection } from "./pi-rpc-client.js";
 import { getPiConfig, getPiSessionPath, savePiSession, updatePiConfig } from "./pi-config.js";
 import { startPiRpcRun } from "./pi-runner.js";
+import { createActiveSessionDirectory } from "./active-session-directory.js";
 
 const log = createLogger("harness:pi");
 
@@ -314,8 +315,12 @@ export async function getPiAvailableModels() {
  * @returns {AgentHarness}
  */
 export function createPiHarness(deps = {}) {
-  /** @type {Map<string, ActivePiRun>} */
-  const activeRuns = new Map();
+  const activeSessions = createActiveSessionDirectory({
+    label: "Pi",
+    onInterruptError: (error) => {
+      log.warn("Pi abort failed, falling back to process abort:", error);
+    },
+  });
   const loadAvailableModels = deps.getAvailableModels ?? getPiAvailableModels;
   const beginRun = deps.startRun ?? startPiRpcRun;
   const loadForkMessages = deps.getForkMessages ?? getPiForkMessages;
@@ -338,12 +343,7 @@ export function createPiHarness(deps = {}) {
    * @returns {Promise<boolean>}
    */
   async function injectMessage(chatId, text) {
-    const key = typeof chatId === "string" ? chatId : chatId.id;
-    const active = activeRuns.get(key);
-    if (!active?.steer || !text) {
-      return false;
-    }
-    return !!(await active.steer(text));
+    return activeSessions.injectMessage(chatId, text);
   }
 
   /**
@@ -351,21 +351,7 @@ export function createPiHarness(deps = {}) {
    * @returns {boolean}
    */
   function cancel(chatId) {
-    const key = typeof chatId === "string" ? chatId : chatId.id;
-    const active = activeRuns.get(key);
-    if (!active) {
-      return false;
-    }
-    active.aborted = true;
-    if (active.interrupt) {
-      void Promise.resolve(active.interrupt()).catch((error) => {
-        log.warn("Pi abort failed, falling back to process abort:", error);
-        active.abortController.abort();
-      });
-      return true;
-    }
-    active.abortController.abort();
-    return true;
+    return activeSessions.cancel(chatId);
   }
 
   /**
@@ -386,9 +372,7 @@ export function createPiHarness(deps = {}) {
    * @returns {Promise<string[]>}
    */
   async function waitForIdle() {
-    const chatIds = [...activeRuns.keys()];
-    await Promise.allSettled(chatIds.map((chatId) => activeRuns.get(chatId)?.done));
-    return chatIds;
+    return activeSessions.waitForIdle();
   }
 
   /**
@@ -567,7 +551,7 @@ export function createPiHarness(deps = {}) {
         ...(started.interrupt ? { interrupt: started.interrupt } : {}),
         aborted: false,
       };
-      activeRuns.set(session.chatId, activeRun);
+      activeSessions.register(session.chatId, activeRun);
 
       const completed = await started.done;
 
@@ -591,7 +575,9 @@ export function createPiHarness(deps = {}) {
         usage: { promptTokens: 0, completionTokens: 0, cachedTokens: 0, cost: 0 },
       };
     } finally {
-      activeRuns.delete(session.chatId);
+      if (activeRun) {
+        activeSessions.unregister(session.chatId, activeRun);
+      }
     }
   }
 }
