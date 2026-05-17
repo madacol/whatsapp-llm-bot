@@ -29,6 +29,7 @@ function normalizeSessionKey(key) {
  *   register: (key: string | HarnessSessionRef, handle: ActiveHarnessSessionHandle) => void,
  *   unregister: (key: string | HarnessSessionRef, handle?: ActiveHarnessSessionHandle) => void,
  *   get: (key: string | HarnessSessionRef) => ActiveHarnessSessionHandle | undefined,
+ *   listKeys: () => string[],
  *   injectMessage: (key: string | HarnessSessionRef, text: string) => Promise<boolean>,
  *   cancel: (key: string | HarnessSessionRef) => boolean,
  *   waitForIdle: () => Promise<string[]>,
@@ -58,6 +59,9 @@ export function createActiveSessionDirectory(options) {
       activeSessions.delete(normalizedKey);
     },
     get,
+    listKeys() {
+      return [...activeSessions.keys()];
+    },
     async injectMessage(key, text) {
       const active = get(key);
       if (!active?.steer || !text) {

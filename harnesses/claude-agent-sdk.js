@@ -31,6 +31,7 @@ import { createActionRequestRunState, executeQueuedActionRequests } from "../act
 import { ensureClaudeProjectSkillsLink } from "../project-skills.js";
 import { wrapHooksWithFallbacks } from "./hook-fallbacks.js";
 import { createHarnessRuntimeEventDispatcher } from "./harness-runtime-event-dispatcher.js";
+import { createActiveSessionDirectory } from "./active-session-directory.js";
 import {
   getClaudeSdkEventLabel,
   isClaudeSubagentEvent,
@@ -362,6 +363,11 @@ export function buildClaudePrompt(messages) {
  *   abortController: AbortController;
  *   sessionId: string;
  *   pendingMessages: string[];
+ *   done: Promise<unknown>;
+ *   resolveDone: () => void;
+ *   aborted: boolean;
+ *   steer: (text: string) => boolean;
+ *   interrupt: () => boolean;
  * }} ActiveQuery
  */
 
@@ -575,9 +581,10 @@ async function handleClaudeHarnessCommand({ chatId, command, context }, queryCla
  * @returns {AgentHarness}
  */
 export function createClaudeAgentSdkHarness(deps = {}) {
-  /** @type {Map<string, ActiveQuery>} */
-  const activeQueries = new Map();
   const queryClaude = deps.query ?? query;
+  const activeQueries = createActiveSessionDirectory({
+    label: "Claude SDK",
+  });
 
   /** Max time (ms) to wait for active queries before force-cancelling them */
   const SHUTDOWN_TIMEOUT_MS = 120_000;
@@ -659,9 +666,9 @@ export function createClaudeAgentSdkHarness(deps = {}) {
    * @returns {Promise<string[]>} chat IDs that were waited on
    */
   function waitForIdle() {
-    if (activeQueries.size === 0) return Promise.resolve([]);
+    if (activeQueries.listKeys().length === 0) return Promise.resolve([]);
 
-    const chatIds = [...activeQueries.keys()];
+    const chatIds = activeQueries.listKeys();
     log.info(`Waiting for ${chatIds.length} active query(ies) to finish: ${chatIds.join(", ")}`);
 
     // Notify each active query that a restart is pending
@@ -676,7 +683,7 @@ export function createClaudeAgentSdkHarness(deps = {}) {
     return new Promise((resolve) => {
       const timeout = setTimeout(() => {
         clearInterval(interval);
-        const remaining = [...activeQueries.keys()];
+        const remaining = activeQueries.listKeys();
         log.warn(`Shutdown timeout (${SHUTDOWN_TIMEOUT_MS}ms) — force-cancelling ${remaining.length} query(ies): ${remaining.join(", ")}`);
         for (const chatId of remaining) {
           cancel(chatId);
@@ -685,7 +692,7 @@ export function createClaudeAgentSdkHarness(deps = {}) {
       }, SHUTDOWN_TIMEOUT_MS);
 
       const interval = setInterval(() => {
-        if (activeQueries.size === 0) {
+        if (activeQueries.listKeys().length === 0) {
           clearInterval(interval);
           clearTimeout(timeout);
           log.info("All queries finished, ready to shut down.");
@@ -699,37 +706,11 @@ export function createClaudeAgentSdkHarness(deps = {}) {
    * Inject a follow-up user message into a running query for the given chat.
    * @param {string | HarnessSessionRef} chatId
    * @param {string} text
-   * @returns {boolean} true if injected, false if no active query
+   * @returns {Promise<boolean>} true if injected, false if no active query
    */
-  function injectMessage(chatId, text) {
+  async function injectMessage(chatId, text) {
     const activeQueryKey = getActiveQueryKey(chatId);
-    const active = activeQueries.get(activeQueryKey);
-    if (!active) return false;
-
-    // If the query hasn't started yet (still in setup), buffer the message
-    if (!active.query) {
-      active.pendingMessages.push(text);
-      log.debug(`Buffered message for pending query on chat ${activeQueryKey}: "${text.slice(0, 80)}"`);
-      return true;
-    }
-
-    /** @type {import("@anthropic-ai/claude-agent-sdk").SDKUserMessage} */
-    const sdkMessage = {
-      type: "user",
-      message: { role: "user", content: text },
-      parent_tool_use_id: null,
-      session_id: active.sessionId,
-    };
-
-    // streamInput expects an AsyncIterable — wrap in an async generator
-    active.query.streamInput((async function* () {
-      yield sdkMessage;
-    })()).catch(err => {
-      log.error("Failed to inject message into active query:", err);
-    });
-
-    log.debug(`Injected message into active query for chat ${activeQueryKey}: "${text.slice(0, 80)}"`);
-    return true;
+    return activeQueries.injectMessage(activeQueryKey, text);
   }
 
   /**
@@ -739,12 +720,8 @@ export function createClaudeAgentSdkHarness(deps = {}) {
    */
   function cancel(chatId) {
     const activeQueryKey = getActiveQueryKey(chatId);
-    const active = activeQueries.get(activeQueryKey);
-    if (!active) return false;
-
     log.debug(`Cancelling active query for chat ${activeQueryKey}`);
-    active.abortController.abort();
-    return true;
+    return activeQueries.cancel(activeQueryKey);
   }
 
   /**
@@ -780,12 +757,56 @@ export function createClaudeAgentSdkHarness(deps = {}) {
     const result = runtimeDispatcher.result;
 
     const abortController = new AbortController();
+    /** @type {() => void} */
+    let resolveActiveDone = () => {};
+    const activeDone = new Promise((resolve) => {
+      resolveActiveDone = () => resolve(undefined);
+    });
+    /** @type {ActiveQuery} */
+    const activeQuery = {
+      query: null,
+      abortController,
+      sessionId: "",
+      pendingMessages: [],
+      done: activeDone,
+      resolveDone: resolveActiveDone,
+      aborted: false,
+      steer: (text) => {
+        if (!text) {
+          return false;
+        }
+        if (!activeQuery.query) {
+          activeQuery.pendingMessages.push(text);
+          log.debug(`Buffered message for pending query on chat ${session.chatId}: "${text.slice(0, 80)}"`);
+          return true;
+        }
+
+        /** @type {import("@anthropic-ai/claude-agent-sdk").SDKUserMessage} */
+        const sdkMessage = {
+          type: "user",
+          message: { role: "user", content: text },
+          parent_tool_use_id: null,
+          session_id: activeQuery.sessionId,
+        };
+
+        activeQuery.query.streamInput((async function* () {
+          yield sdkMessage;
+        })()).catch(err => {
+          log.error("Failed to inject message into active query:", err);
+        });
+
+        log.debug(`Injected message into active query for chat ${session.chatId}: "${text.slice(0, 80)}"`);
+        return true;
+      },
+      interrupt: () => {
+        abortController.abort();
+        return true;
+      },
+    };
 
     // Register early so messages arriving during setup get buffered
     // instead of spawning a parallel query (fixes race condition).
-    activeQueries.set(session.chatId, {
-      query: null, abortController, sessionId: "", pendingMessages: [],
-    });
+    activeQueries.register(session.chatId, activeQuery);
 
     const existingSessionId = getClaudeSessionId(session);
 
@@ -950,9 +971,10 @@ export function createClaudeAgentSdkHarness(deps = {}) {
 
       // Promote the placeholder with the real query object and flush buffered messages
       const sessionId = existingSessionId ?? randomUUID();
-      const pending = activeQueries.get(session.chatId);
-      const buffered = pending?.pendingMessages ?? [];
-      activeQueries.set(session.chatId, { query: q, abortController, sessionId, pendingMessages: [] });
+      const buffered = activeQuery.pendingMessages;
+      activeQuery.query = q;
+      activeQuery.sessionId = sessionId;
+      activeQuery.pendingMessages = [];
 
       // Flush any messages that arrived during setup
       for (const text of buffered) {
@@ -972,8 +994,7 @@ export function createClaudeAgentSdkHarness(deps = {}) {
         if ("session_id" in event && typeof event.session_id === "string") {
           if (resolvedSessionId !== event.session_id) {
             resolvedSessionId = event.session_id;
-            const active = activeQueries.get(session.chatId);
-            if (active) active.sessionId = resolvedSessionId;
+            activeQuery.sessionId = resolvedSessionId;
           }
         }
 
@@ -1033,7 +1054,8 @@ export function createClaudeAgentSdkHarness(deps = {}) {
         result.response = buildSdkErrorResponse(displayMsg);
       }
     } finally {
-      activeQueries.delete(session.chatId);
+      activeQueries.unregister(session.chatId, activeQuery);
+      activeQuery.resolveDone();
 
       // Persist the SDK session ID so the next message can resume the conversation.
       // Save when: we got a session ID AND it differs from what was stored.
