@@ -29,6 +29,7 @@ describe("createActiveSessionDirectory", () => {
     };
 
     directory.register("chat-1", handle);
+    assert.deepEqual(directory.listKeys(), ["chat-1"]);
 
     assert.equal(await directory.injectMessage("chat-1", "follow up"), true);
     assert.deepEqual(steered, ["follow up"]);
