@@ -19,4 +19,10 @@ describe("process diagnostics", () => {
       "pid=123 uptime=45s db_cache_size=12 paths=/chat/a/pgdata,/chat/b/pgdata",
     );
   });
+
+  it("does not expose a periodic process diagnostics logger", async () => {
+    const diagnostics = await import("../process-diagnostics.js");
+
+    assert.equal("startProcessDiagnostics" in diagnostics, false);
+  });
 });

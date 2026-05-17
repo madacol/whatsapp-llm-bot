@@ -1,5 +1,3 @@
-const DEFAULT_INTERVAL_MS = 60_000;
-
 /**
  * @typedef {{
  *   pid: number,
@@ -7,12 +5,6 @@ const DEFAULT_INTERVAL_MS = 60_000;
  *   dbCacheSize: number,
  *   dbCachePaths: string[],
  * }} ProcessDiagnosticSnapshot
- *
- * @typedef {{
- *   info: (...args: unknown[]) => void,
- *   warn: (...args: unknown[]) => void,
- *   error: (...args: unknown[]) => void,
- * }} DiagnosticLogger
  */
 
 /**
@@ -41,34 +33,5 @@ export function createProcessDiagnosticSnapshot(params) {
     uptimeSeconds: params.uptime?.() ?? process.uptime(),
     dbCacheSize: params.dbCacheSize,
     dbCachePaths: params.dbCachePaths,
-  };
-}
-
-/**
- * @param {{
- *   log: DiagnosticLogger,
- *   getDbCacheSize: () => number,
- *   getDbCachePaths: () => string[],
- *   intervalMs?: number,
- * }} params
- * @returns {() => void}
- */
-export function startProcessDiagnostics(params) {
-  const envIntervalMs = Number(process.env.PROCESS_DIAGNOSTICS_INTERVAL_MS);
-  const intervalMs = params.intervalMs ?? (Number.isFinite(envIntervalMs) && envIntervalMs > 0 ? envIntervalMs : DEFAULT_INTERVAL_MS);
-  const logSnapshot = () => {
-    const snapshot = createProcessDiagnosticSnapshot({
-      dbCacheSize: params.getDbCacheSize(),
-      dbCachePaths: params.getDbCachePaths(),
-    });
-    params.log.info("process diagnostics:", formatProcessDiagnosticSnapshot(snapshot));
-  };
-
-  logSnapshot();
-  const timer = setInterval(logSnapshot, intervalMs);
-  timer.unref();
-  return () => {
-    clearInterval(timer);
-    logSnapshot();
   };
 }
