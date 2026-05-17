@@ -77,6 +77,107 @@ describe("createCodexHarness", () => {
     ]);
   });
 
+  it("exposes a Codex-native adapter that runs turns through Codex plumbing", async () => {
+    /** @type {Array<{ chatId: string, prompt: string, sessionId?: string | null, runConfig?: HarnessRunConfig }>} */
+    const starts = [];
+    const harness = createCodexHarness({
+      startRun: async (input) => {
+        starts.push({
+          chatId: input.chatId,
+          prompt: input.prompt,
+          sessionId: input.sessionId,
+          runConfig: input.runConfig,
+        });
+        return {
+          abortController: new AbortController(),
+          done: Promise.resolve({
+            sessionId: "codex-thread-1",
+            result: {
+              response: [{ type: "text", text: "adapter ok" }],
+              messages: input.messages,
+              usage: { promptTokens: 1, completionTokens: 1, cachedTokens: 0, cost: 0 },
+            },
+          }),
+        };
+      },
+    });
+    assert.equal(typeof harness.createAdapter, "function");
+    const adapter = harness.createAdapter({
+      name: "codex",
+      instanceId: "work",
+      continuationKey: "codex:instance:work",
+    });
+
+    const started = await adapter.startSession({
+      chatId: "codex-adapter-chat",
+      runConfig: { workdir: "/repo", model: "gpt-5.4" },
+      resumeCursor: "codex-thread-0",
+    });
+    assert.equal(started.instanceId, "work");
+    assert.equal(started.resumeCursor, "codex-thread-0");
+
+    /** @type {HarnessSessionRef | null} */
+    let savedSession = null;
+    const result = await adapter.sendTurn({
+      params: {
+        session: {
+          chatId: "codex-adapter-chat",
+          senderIds: [],
+          context: /** @type {ExecuteActionContext} */ ({
+            chatId: "codex-adapter-chat",
+            senderIds: [],
+            content: [],
+            getIsAdmin: async () => true,
+            send: async () => undefined,
+            reply: async () => undefined,
+            reactToMessage: async () => {},
+            select: async () => "",
+            confirm: async () => true,
+          }),
+          addMessage: async () => undefined,
+          updateToolMessage: async () => undefined,
+          harnessSession: { id: "codex-thread-0", kind: "codex" },
+          saveHarnessSession: async (_chatId, session) => {
+            savedSession = session;
+          },
+        },
+        llmConfig: {
+          llmClient: /** @type {LlmClient} */ ({}),
+          chatModel: null,
+          externalInstructions: "",
+          toolRuntime: /** @type {ToolRuntime} */ ({
+            getTool: async () => null,
+            executeTool: async () => {
+              throw new Error("executeTool should not be called");
+            },
+          }),
+        },
+        messages: [{ role: "user", content: [{ type: "text", text: "Use adapter" }] }],
+        hooks: {},
+        runConfig: { workdir: "/repo", model: "gpt-5.4" },
+      },
+    });
+
+    assert.deepEqual(result.response, [{ type: "text", text: "adapter ok" }]);
+    assert.deepEqual(savedSession, { id: "codex-thread-1", kind: "codex" });
+    assert.deepEqual(starts, [{
+      chatId: "codex-adapter-chat",
+      prompt: "Use adapter",
+      sessionId: "codex-thread-0",
+      runConfig: { workdir: "/repo", model: "gpt-5.4" },
+    }]);
+    assert.deepEqual(adapter.listSessions(), [{
+      chatId: "codex-adapter-chat",
+      harnessName: "codex",
+      instanceId: "work",
+      continuationKey: "codex:instance:work",
+      status: "ready",
+      workdir: "/repo",
+      model: "gpt-5.4",
+      resumeCursor: "codex-thread-1",
+    }]);
+  });
+
   it("handles codex-owned model command", async () => {
     const db = await createTestDb();
     await seedChat(db, "codex-chat-1", { enabled: true });

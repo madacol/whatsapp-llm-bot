@@ -271,12 +271,14 @@ export function resolveHarnessInstance(name, options = {}) {
     continuationKey,
     capabilities,
     harness,
-    adapter: createHarnessAdapterFromHarness({
-      harness,
-      name: key,
-      instanceId,
-      continuationKey,
-    }),
+    adapter: harness.createAdapter
+      ? harness.createAdapter({ name: key, instanceId, continuationKey })
+      : createHarnessAdapterFromHarness({
+          harness,
+          name: key,
+          instanceId,
+          continuationKey,
+        }),
   };
   instances.set(cacheKey, instance);
   return instance;
