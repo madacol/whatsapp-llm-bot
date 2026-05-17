@@ -57,10 +57,27 @@ function isArchivedWorkspaceCodingRequest(binding, firstBlock) {
 }
 
 /**
+ * @param {ToolContentBlock} block
+ * @returns {ToolContentBlock | { type: "textual", text: string }}
+ */
+function normalizeDeliveredContentBlock(block) {
+  if ((block.type === "text" || block.type === "markdown") && typeof block.text === "string") {
+    return { type: "textual", text: block.text };
+  }
+  return block;
+}
+
+/**
  * @param {SendContent} content
  * @returns {string}
  */
 function getDeliveredContentSignature(content) {
+  if (Array.isArray(content)) {
+    return JSON.stringify(content.map(normalizeDeliveredContentBlock));
+  }
+  if (typeof content === "object" && content !== null) {
+    return JSON.stringify(normalizeDeliveredContentBlock(content));
+  }
   return JSON.stringify(content);
 }
 
