@@ -49,8 +49,12 @@
  *   type: "assistant.completed",
  *   provider: HarnessRuntimeProvider,
  *   text: string,
+ *   displayText?: string,
  *   contentType: "text" | "markdown",
+ *   responseMode?: "replace" | "append" | "none",
+ *   notify?: boolean,
  *   usage?: HarnessRuntimeUsage,
+ *   usageMode?: "replace" | "add",
  *   raw?: Record<string, unknown>,
  * }} HarnessRuntimeAssistantCompletedEvent
  */
