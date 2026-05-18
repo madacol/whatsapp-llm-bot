@@ -6,7 +6,7 @@ import { buildToolPresentation } from "../tool-presentation-model.js";
 
 const VISIBLE_TOOL_OUTPUT = {
   ...DEFAULT_OUTPUT_VISIBILITY,
-  tools: true,
+  toolDetails: true,
 };
 
 /**
@@ -342,7 +342,7 @@ describe("buildAgentIoHooks", () => {
     assertSingleSentEvent(sent, "send", "tool_call");
   });
 
-  it("shows one debounced compact tool summary when visibility disables tools", async () => {
+  it("shows one debounced compact tool summary when visibility disables full tool details", async () => {
     /** @type {Array<{ event: OutboundEvent, kind: "send" | "reply" }>} */
     const sent = [];
     /** @type {MessageHandleUpdate[]} */
@@ -366,7 +366,7 @@ describe("buildAgentIoHooks", () => {
       async () => {},
       () => {},
       "/repo",
-      { ...DEFAULT_OUTPUT_VISIBILITY, tools: false },
+      { ...DEFAULT_OUTPUT_VISIBILITY, toolDetails: false },
     );
 
     await hooks.onFileRead?.({ command: "sed -n '1,20p' src/app.js", paths: ["src/app.js"] });
@@ -393,7 +393,7 @@ describe("buildAgentIoHooks", () => {
   it("shows full multiline bash commands in compact tool summaries", async () => {
     const { hooks, sent } = createSubjectWithCwd("/repo", {
       ...DEFAULT_OUTPUT_VISIBILITY,
-      tools: false,
+      toolDetails: false,
     });
 
     const command = "python3 - <<'PY'\nprint('hello')\nPY";
@@ -429,7 +429,7 @@ describe("buildAgentIoHooks", () => {
       async () => {},
       () => {},
       "/repo",
-      { ...DEFAULT_OUTPUT_VISIBILITY, tools: false },
+      { ...DEFAULT_OUTPUT_VISIBILITY, toolDetails: false },
     );
 
     const toolCall = {
@@ -449,7 +449,7 @@ describe("buildAgentIoHooks", () => {
   it("renders edit diffs even when generic tool progress is compacted", async () => {
     const { hooks, sent } = createSubjectWithCwd("/repo", {
       ...DEFAULT_OUTPUT_VISIBILITY,
-      tools: false,
+      toolDetails: false,
       changes: true,
     });
 
@@ -472,7 +472,7 @@ describe("buildAgentIoHooks", () => {
     assert.equal(sent[0].event.presentation.toolName, "Edit");
   });
 
-  it("keeps only the last 3 compact tool entries when visibility disables tools", async () => {
+  it("keeps only the last 3 compact tool entries when visibility disables full tool details", async () => {
     /** @type {MessageHandleUpdate[]} */
     const updates = [];
     const hooks = buildAgentIoHooks(
@@ -491,7 +491,7 @@ describe("buildAgentIoHooks", () => {
       async () => {},
       () => {},
       "/repo",
-      { ...DEFAULT_OUTPUT_VISIBILITY, tools: false },
+      { ...DEFAULT_OUTPUT_VISIBILITY, toolDetails: false },
     );
 
     await hooks.onCommand?.({ command: "pwd", status: "started" });
@@ -531,7 +531,7 @@ describe("buildAgentIoHooks", () => {
       async () => {},
       () => {},
       "/repo",
-      { ...DEFAULT_OUTPUT_VISIBILITY, tools: false },
+      { ...DEFAULT_OUTPUT_VISIBILITY, toolDetails: false },
     );
 
     await hooks.onCommand?.({ command: "pnpm test", status: "started" });
@@ -574,7 +574,7 @@ describe("buildAgentIoHooks", () => {
       async () => {},
       () => {},
       "/repo",
-      { ...DEFAULT_OUTPUT_VISIBILITY, tools: false },
+      { ...DEFAULT_OUTPUT_VISIBILITY, toolDetails: false },
     );
 
     await hooks.onCommand?.({ command: "pwd", status: "started" });
@@ -624,7 +624,7 @@ describe("buildAgentIoHooks", () => {
       async () => {},
       () => {},
       "/repo",
-      { ...DEFAULT_OUTPUT_VISIBILITY, tools: false },
+      { ...DEFAULT_OUTPUT_VISIBILITY, toolDetails: false },
     );
 
     await hooks.onCommand?.({ command: "pwd", status: "started" });
@@ -648,8 +648,8 @@ describe("buildAgentIoHooks", () => {
     assert.deepEqual(handleUpdates[2], []);
   });
 
-  it("suppresses tool result progress events when visibility disables tools", async () => {
-    const { hooks, sent } = createSubject({ ...DEFAULT_OUTPUT_VISIBILITY, tools: false });
+  it("suppresses tool result progress events when visibility disables full tool details", async () => {
+    const { hooks, sent } = createSubject({ ...DEFAULT_OUTPUT_VISIBILITY, toolDetails: false });
 
     await hooks.onToolResult?.([{ type: "text", text: "Intermediate tool output" }]);
 

@@ -271,7 +271,7 @@ describe("Scenario 7: Show info", () => {
     assert.ok(allText.includes(chatId), "Should contain chat ID");
     assert.ok(allText.toLowerCase().includes("enabled"), "Should contain enabled status");
     assert.ok(allText.toLowerCase().includes("sender"), "Should contain sender info");
-    assert.ok(allText.includes("show: tools off, thinking on, changes on, subagents on"), `Should contain default show settings, got: ${allText}`);
+    assert.ok(allText.includes("show: tool details off, thinking on, changes on, subagents on"), `Should contain default show settings, got: ${allText}`);
   });
 
   it("resets folder with !s reset folder", async () => {
@@ -471,7 +471,7 @@ describe("Scenario 11: Group stores messages even when not responding", () => {
 // ═══════════════════════════════════════════════════════════════════
 describe("Scenario 12: Tool call display is always verbose", () => {
   it("shows bold tool name with args even without debug mode", async () => {
-    const chat = await t.chat("s12-verbose", { enabled: true, outputVisibility: { tools: true } });
+    const chat = await t.chat("s12-verbose", { enabled: true, outputVisibility: { toolDetails: true } });
     const r = await chat.send("Test verbose", {
       llm: [toolCall("run_javascript", { code: "() => 'hello'" }), "Final answer"],
     });
@@ -482,7 +482,7 @@ describe("Scenario 12: Tool call display is always verbose", () => {
   });
 
   it("shows formatted tool call from actionFormatter", async () => {
-    const chat = await t.chat("s12-verbose", { enabled: true, outputVisibility: { tools: true } });
+    const chat = await t.chat("s12-verbose", { enabled: true, outputVisibility: { toolDetails: true } });
     const r = await chat.send("Show settings", {
       llm: [toolCall("chat_settings", { setting: "model" })],
     });
@@ -504,7 +504,7 @@ describe("Scenario 12: Tool call display is always verbose", () => {
   it("shows a compact tool summary when show overrides disable full tool activity", async () => {
     const chat = await t.chat("s12-show-off", {
       enabled: true,
-      outputVisibility: { tools: false },
+      outputVisibility: { toolDetails: false },
     });
     const r = await chat.send("Test hidden progress", {
       llm: [toolCall("run_javascript", { code: "() => 'hello'" }), "Final answer"],
@@ -605,7 +605,7 @@ describe("HtmlContent via LLM tool call", () => {
   });
 
   it("sends link URL to user when tool returns HtmlContent", async () => {
-    const chat = await t.chat("html-tool-chat", { enabled: true, debug: true, outputVisibility: { tools: true } });
+    const chat = await t.chat("html-tool-chat", { enabled: true, debug: true, outputVisibility: { toolDetails: true } });
     const r = await chat.send("Generate a report", {
       llm: [
         toolCall("run_javascript", { code: '() => ({ __brand: "html", html: "<h1>Report</h1>", title: "Sales Report" })' }),
