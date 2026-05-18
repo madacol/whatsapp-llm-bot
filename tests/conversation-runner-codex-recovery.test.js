@@ -629,7 +629,7 @@ describe("createConversationRunner with codex harness", () => {
   it("shows interleaved llm progress milliseconds after the last visible message", async () => {
     await seedChat("conv-codex-presence-interleaved", { enabled: true });
     await configureCodexChat("conv-codex-presence-interleaved", {
-      output_visibility: { tools: true },
+      output_visibility: { toolDetails: true },
     });
 
     const maxProgressDelayMs = 120;

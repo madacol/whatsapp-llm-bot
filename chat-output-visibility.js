@@ -3,17 +3,19 @@
  */
 
 /**
- * @typedef {"tools" | "thinking" | "changes" | "subagents"} OutputVisibilityKey
+ * @typedef {"toolDetails" | "thinking" | "changes" | "subagents"} OutputVisibilityKey
  *
  * @typedef {{
- *   thinking?: boolean;
+ *   toolDetails?: boolean;
  *   tools?: boolean;
+ *   commands?: boolean;
+ *   thinking?: boolean;
  *   changes?: boolean;
  *   subagents?: boolean;
  * }} OutputVisibilityOverrides
  *
  * @typedef {{
- *   tools: boolean;
+ *   toolDetails: boolean;
  *   thinking: boolean;
  *   changes: boolean;
  *   subagents: boolean;
@@ -30,9 +32,9 @@
 /** @type {readonly OutputVisibilityFlagDefinition[]} */
 export const OUTPUT_VISIBILITY_FLAGS = Object.freeze([
   {
-    key: "tools",
-    label: "tools",
-    description: "Show tool progress such as shell commands, file reads, and intermediate tool output.",
+    key: "toolDetails",
+    label: "tool details",
+    description: "Show full tool progress details such as shell commands, file reads, and intermediate tool output. When off, compact tool activity is still shown.",
     defaultValue: false,
   },
   {
@@ -62,7 +64,7 @@ const OUTPUT_VISIBILITY_FLAG_MAP = new Map(
 
 /** @type {OutputVisibility} */
 export const DEFAULT_OUTPUT_VISIBILITY = Object.freeze({
-  tools: false,
+  toolDetails: false,
   thinking: true,
   changes: true,
   subagents: true,
@@ -77,28 +79,35 @@ function isRecord(value) {
 }
 
 /**
- * Legacy rows may contain both `commands` and `tools`.
- * Since the new `tools` flag now covers both buckets, merge conservatively so
- * we do not re-enable progress the user had explicitly hidden.
+ * Legacy rows may contain `commands` or `tools`; current rows use
+ * `toolDetails`. Merge conservatively so we do not re-enable full progress
+ * details the user had explicitly hidden.
  * @param {Record<string, unknown>} raw
  * @returns {boolean | undefined}
  */
-function normalizeToolVisibilityValue(raw) {
+function normalizeToolDetailsVisibilityValue(raw) {
+  const toolDetails = raw.toolDetails;
   const tools = raw.tools;
   const commands = raw.commands;
+  const hasToolDetails = typeof toolDetails === "boolean";
   const hasTools = typeof tools === "boolean";
   const hasCommands = typeof commands === "boolean";
+  /** @type {boolean[]} */
+  const values = [];
 
-  if (hasTools && hasCommands) {
-    return tools && commands;
+  if (hasToolDetails) {
+    values.push(toolDetails);
   }
   if (hasTools) {
-    return tools;
+    values.push(tools);
   }
   if (hasCommands) {
-    return commands;
+    values.push(commands);
   }
-  return undefined;
+  if (values.length === 0) {
+    return undefined;
+  }
+  return values.every(Boolean);
 }
 
 /**
@@ -120,9 +129,9 @@ export function normalizeOutputVisibility(raw) {
 
   /** @type {OutputVisibilityOverrides} */
   const normalized = {};
-  const tools = normalizeToolVisibilityValue(raw);
-  if (typeof tools === "boolean") {
-    normalized.tools = tools;
+  const toolDetails = normalizeToolDetailsVisibilityValue(raw);
+  if (typeof toolDetails === "boolean") {
+    normalized.toolDetails = toolDetails;
   }
 
   const thinking = raw.thinking;

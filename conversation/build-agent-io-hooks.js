@@ -6,9 +6,9 @@ import { DEFAULT_OUTPUT_VISIBILITY } from "../chat-output-visibility.js";
 import { createCompactToolActivityFeed } from "./compact-tool-activity.js";
 
 /**
- * File-mutating tool calls are part of change visibility, not just generic
- * tool progress. Keep them renderable when `tools` is compacted but `changes`
- * remains enabled.
+ * File-mutating tool calls are part of change visibility, not just full tool
+ * detail progress. Keep them renderable when `toolDetails` is compacted but
+ * `changes` remains enabled.
  * @param {LlmChatResponse["toolCalls"][0]} toolCall
  * @param {((params: Record<string, unknown>) => string) | undefined} actionFormatter
  * @param {string | null | undefined} cwd
@@ -169,7 +169,7 @@ export function buildAgentIoHooks(
       return labelMap.get(choice) ?? choice;
     },
     onToolCall: async (toolCall, formatToolCall, toolContext) => {
-      if (!visibility.tools) {
+      if (!visibility.toolDetails) {
         if (visibility.changes && shouldDisplayToolCallAsChange(toolCall, formatToolCall, cwd, toolContext)) {
           return displayToolCall(toolCall, context, formatToolCall, cwd, toolContext);
         }
@@ -179,19 +179,19 @@ export function buildAgentIoHooks(
       return displayToolCall(toolCall, context, formatToolCall, cwd, toolContext);
     },
     onToolComplete: async (toolCall) => {
-      if (!visibility.tools) {
+      if (!visibility.toolDetails) {
         await compactToolActivity.completeToolCall(toolCall);
       }
     },
     onToolResult: async (blocks) => {
-      if (!visibility.tools) {
+      if (!visibility.toolDetails) {
         return;
       }
       await emitWhileWorking(() => context.send(contentEvent("tool-result", blocks, { cwd })));
       recordDeliveredContent?.(blocks);
     },
     onToolError: async (message) => {
-      if (!visibility.tools) {
+      if (!visibility.toolDetails) {
         const updated = await compactToolActivity.failMostRecentToolCall();
         if (updated) {
           return;
@@ -200,7 +200,7 @@ export function buildAgentIoHooks(
       await emitWhileWorking(() => context.send(contentEvent("error", message)));
     },
     onCommand: async (commandEvent) => {
-      if (!visibility.tools) {
+      if (!visibility.toolDetails) {
         if (commandEvent.status === "started") {
           await compactToolActivity.addCommand(commandEvent.command);
           return;
@@ -219,7 +219,7 @@ export function buildAgentIoHooks(
       await emitWhileWorking(() => codexDisplayHooks.onCommand(commandEvent));
     },
     onFileRead: async (fileReadEvent) => {
-      if (!visibility.tools) {
+      if (!visibility.toolDetails) {
         await compactToolActivity.addFileRead(fileReadEvent.command, fileReadEvent.paths);
         return;
       }
