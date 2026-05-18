@@ -390,6 +390,26 @@ describe("buildAgentIoHooks", () => {
     }]);
   });
 
+  it("shows full multiline bash commands in compact tool summaries", async () => {
+    const { hooks, sent } = createSubjectWithCwd("/repo", {
+      ...DEFAULT_OUTPUT_VISIBILITY,
+      tools: false,
+    });
+
+    const command = "python3 - <<'PY'\nprint('hello')\nPY";
+    await hooks.onCommand?.({ command, status: "started" });
+
+    assert.equal(sent.length, 1);
+    assert.equal(sent[0]?.event.kind, "content");
+    if (sent[0]?.event.kind !== "content") {
+      assert.fail("Expected compact content event");
+    }
+    assert.equal(
+      sent[0].event.content,
+      "🔧 *Bash*\n```bash\npython3 - <<'PY'\nprint('hello')\nPY\n```",
+    );
+  });
+
   it("edits compact tool summaries when a tool completes", async () => {
     /** @type {MessageHandleUpdate[]} */
     const updates = [];

@@ -11,7 +11,10 @@ const COMPACT_TOOL_ACTIVITY_DEBOUNCE_MS = 1000;
  * @returns {string}
  */
 function formatCompactEntry(tool, detail) {
-  return detail ? `*${tool}*  ${detail}` : `*${tool}*`;
+  if (!detail) {
+    return `*${tool}*`;
+  }
+  return detail.startsWith("\n") ? `*${tool}*${detail}` : `*${tool}*  ${detail}`;
 }
 
 /**
@@ -37,15 +40,14 @@ function renderCompactEntry(entry) {
  * @returns {string}
  */
 function formatCompactCommand(command) {
-  const lines = command
-    .split("\n")
-    .map((line) => line.trim())
-    .filter((line) => line.length > 0);
-  const firstLine = lines[0] ?? "";
-  if (!firstLine) {
+  const trimmedCommand = command.trim();
+  if (!trimmedCommand) {
     return formatCompactEntry("Bash");
   }
-  return formatCompactEntry("Bash", `\`${firstLine}\``);
+  if (trimmedCommand.includes("\n")) {
+    return formatCompactEntry("Bash", `\n\`\`\`bash\n${trimmedCommand}\n\`\`\``);
+  }
+  return formatCompactEntry("Bash", `\`${trimmedCommand}\``);
 }
 
 /**
