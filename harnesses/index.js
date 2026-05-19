@@ -6,6 +6,7 @@ export {
   listHarnessDriverStatuses,
   registerHarness,
   registerHarnessDriver,
+  reconcileHarnessInstances,
   resetHarnessRegistryForTests,
   resolveHarness,
   resolveHarnessInstance,

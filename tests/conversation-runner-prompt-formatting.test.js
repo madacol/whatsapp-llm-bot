@@ -16,6 +16,8 @@ let store;
 let handleMessage;
 /** @type {typeof import("../harnesses/index.js").registerHarness} */
 let registerHarness;
+/** @type {typeof import("../harnesses/index.js").registerHarnessDriver} */
+let registerHarnessDriver;
 /** @type {typeof import("../harnesses/codex.js").createCodexHarness} */
 let createCodexHarness;
 
@@ -27,7 +29,7 @@ before(async () => {
   store = await initStore(db);
 
   const { createConversationRunner } = await import("../conversation/create-conversation-runner.js");
-  ({ registerHarness } = await import("../harnesses/index.js"));
+  ({ registerHarness, registerHarnessDriver } = await import("../harnesses/index.js"));
   ({ createCodexHarness } = await import("../harnesses/codex.js"));
 
   const runner = createConversationRunner({
@@ -38,6 +40,7 @@ before(async () => {
       throw new Error("executeAction should not be called");
     },
   });
+
   handleMessage = runner.handleMessage;
 });
 
@@ -49,6 +52,93 @@ afterEach(() => {
 const seedChat = (chatId, options) => seedChat_(db, chatId, options);
 
 describe("createConversationRunner prompt formatting", () => {
+  it("starts the selected harness adapter session before sending the turn", async () => {
+    await seedChat("conv-adapter-session-start", { enabled: true });
+    await updateChatConfig("conv-adapter-session-start", (current) => ({
+      ...current,
+      harness: "adapter-lifecycle",
+      harness_config: {
+        activeHarnessInstances: { "adapter-lifecycle": "work" },
+        harnessInstances: {
+          "adapter-lifecycle": {
+            work: { model: "model-a" },
+          },
+        },
+      },
+    }));
+
+    /** @type {string[]} */
+    const phases = [];
+    registerHarnessDriver("adapter-lifecycle", () => ({
+      getName: () => "adapter-lifecycle",
+      getCapabilities: () => ({
+        supportsResume: true,
+        supportsCancel: false,
+        supportsLiveInput: false,
+        supportsApprovals: false,
+        supportsWorkdir: true,
+        supportsSandboxConfig: false,
+        supportsModelSelection: true,
+        supportsReasoningEffort: false,
+        supportsSessionFork: false,
+      }),
+      async run() {
+        phases.push("legacy-run");
+        return {
+          response: [{ type: "text", text: "ok" }],
+          messages: [],
+          usage: { promptTokens: 0, completionTokens: 0, cachedTokens: 0, cost: 0 },
+        };
+      },
+      handleCommand: async () => false,
+      listSlashCommands: () => [],
+      createAdapter() {
+        return {
+          async startSession(input) {
+            phases.push(`start:${input.chatId}:${input.runConfig?.model ?? ""}`);
+            return {
+              chatId: input.chatId,
+              harnessName: "adapter-lifecycle",
+              instanceId: "work",
+              continuationKey: "adapter-lifecycle:instance:work",
+              status: "ready",
+              model: input.runConfig?.model ?? null,
+              resumeCursor: input.resumeCursor ?? null,
+            };
+          },
+          async sendTurn(input) {
+            phases.push("send");
+            assert.ok("params" in input, "current runner should preserve the compatibility path");
+            return {
+              response: [{ type: "text", text: "ok" }],
+              messages: input.params.messages,
+              usage: { promptTokens: 0, completionTokens: 0, cachedTokens: 0, cost: 0 },
+            };
+          },
+          interruptTurn: async () => false,
+          injectMessage: async () => false,
+          stopSession: async () => false,
+          listSessions: () => [],
+          readThread: async () => null,
+          rollbackThread: async () => null,
+          streamEvents: {
+            async *[Symbol.asyncIterator]() {},
+          },
+        };
+      },
+    }), {
+      supportsInstances: true,
+    });
+
+    const turn = createChatTurn({
+      chatId: "conv-adapter-session-start",
+      content: [{ type: "text", text: "hello" }],
+    });
+    await handleMessage(turn.context);
+
+    assert.deepEqual(phases, ["start:conv-adapter-session-start:model-a", "send"]);
+  });
+
   it("runs command afterResponse hooks only after the command reply resolves", async () => {
     await seedChat("conv-command-after-response", { enabled: true });
     const { createConversationRunner } = await import("../conversation/create-conversation-runner.js");
