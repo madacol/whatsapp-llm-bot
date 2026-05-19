@@ -448,7 +448,7 @@ export function createCodexHarness(deps = {}) {
   }
 
   /**
-   * @param {HarnessSemanticTurnInput} turn
+   * @param {HarnessTurnInput} turn
    * @param {{
    *   instanceId: string,
    *   harnessName: string,

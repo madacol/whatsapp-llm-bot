@@ -26,7 +26,108 @@ export function buildExternalSystemPrompt(persona, chatInfo, harnessName) {
 }
 
 /**
- * Build the full harness run request for a chat turn.
+ * Prepare the provider/app-visible conversation input shared by the legacy app
+ * runner contract and the semantic provider adapter contract.
+ * @param {{
+ *   chatId: string,
+ *   chatInfo: import("../store.js").ChatRow | undefined,
+ *   context: ExecuteActionContext,
+ *   message: UserMessage,
+ *   persona: AgentDefinition | null,
+ *   llmClient: LlmClient,
+ *   getMessages: import("../store.js").Store["getMessages"],
+ *   harnessName: string,
+ *   bufferedTexts?: string[],
+ * }} input
+ * @returns {Promise<{
+ *   chatModel: string,
+ *   externalInstructions: string,
+ *   messages: Message[],
+ *   mediaRegistry: MediaRegistry,
+ * }>}
+ */
+async function prepareHarnessConversationInput({
+  chatId,
+  chatInfo,
+  context,
+  message,
+  persona,
+  llmClient,
+  getMessages,
+  harnessName,
+  bufferedTexts = [],
+}) {
+  const chatModel = resolveChatModel(persona, chatInfo ?? undefined);
+  const baseExternalInstructions = buildExternalSystemPrompt(persona, chatInfo, harnessName);
+  const { externalInstructions, messages, mediaRegistry } = await prepareRunMessages({
+    chatId,
+    chatInfo,
+    message,
+    llmClient,
+    baseExternalInstructions,
+    context,
+    getMessages,
+    bufferedTexts,
+  });
+
+  return {
+    chatModel,
+    externalInstructions,
+    messages,
+    mediaRegistry,
+  };
+}
+
+/**
+ * Build the semantic provider turn input for a chat turn.
+ * @param {{
+ *   chatId: string,
+ *   chatInfo: import("../store.js").ChatRow | undefined,
+ *   context: ExecuteActionContext,
+ *   message: UserMessage,
+ *   persona: AgentDefinition | null,
+ *   llmClient: LlmClient,
+ *   getMessages: import("../store.js").Store["getMessages"],
+ *   harnessName: string,
+ *   runConfig: HarnessRunConfig,
+ *   bufferedTexts?: string[],
+ * }} input
+ * @returns {Promise<HarnessTurnInput>}
+ */
+export async function buildHarnessTurnInput({
+  chatId,
+  chatInfo,
+  context,
+  message,
+  persona,
+  llmClient,
+  getMessages,
+  harnessName,
+  runConfig,
+  bufferedTexts = [],
+}) {
+  const { externalInstructions, messages } = await prepareHarnessConversationInput({
+    chatId,
+    chatInfo,
+    context,
+    message,
+    persona,
+    llmClient,
+    getMessages,
+    harnessName,
+    bufferedTexts,
+  });
+
+  return {
+    chatId,
+    messages,
+    externalInstructions,
+    runConfig,
+  };
+}
+
+/**
+ * Build the full legacy harness run request for a chat turn.
  * @param {{
  *   chatId: string,
  *   senderIds: string[],
@@ -89,16 +190,15 @@ export async function buildHarnessRunRequest({
     return tool;
   };
 
-  const chatModel = resolveChatModel(persona, chatInfo ?? undefined);
-  const baseExternalInstructions = buildExternalSystemPrompt(persona, chatInfo, harnessName);
-  const { externalInstructions, messages, mediaRegistry } = await prepareRunMessages({
+  const { chatModel, externalInstructions, messages, mediaRegistry } = await prepareHarnessConversationInput({
     chatId,
     chatInfo,
-    message,
-    llmClient,
-    baseExternalInstructions,
     context,
+    message,
+    persona,
+    llmClient,
     getMessages,
+    harnessName,
     bufferedTexts,
   });
 

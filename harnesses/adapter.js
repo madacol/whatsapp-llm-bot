@@ -45,7 +45,7 @@
 /**
  * @typedef {{
  *   startSession: (input: HarnessStartSessionInput) => Promise<HarnessRuntimeSession>,
- *   sendTurn: (input: HarnessSemanticTurnInput) => Promise<AgentResult>,
+ *   sendTurn: (input: HarnessTurnInput) => Promise<AgentResult>,
  *   interruptTurn: (input: HarnessInterruptInput) => Promise<boolean>,
  *   injectMessage: (chatId: string | HarnessSessionRef, text: string) => Promise<boolean>,
  *   stopSession: (chatId: string | HarnessSessionRef) => Promise<boolean>,
@@ -119,7 +119,7 @@ export function createHarnessEventStreamController(provider) {
 }
 
 /**
- * @param {HarnessSemanticTurnInput} turn
+ * @param {HarnessTurnInput} turn
  * @returns {AgentHarnessParams}
  */
 function buildLegacyParamsFromSemanticTurn(turn) {
