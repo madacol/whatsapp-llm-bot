@@ -81,8 +81,11 @@ function isObjectRecord(value) {
  */
 function getHarnessSelectOptions(chat) {
   return {
-    options: listHarnesses().map((harnessName) => ({ id: harnessName, label: harnessName })),
-    currentId: chat.harness ?? "native",
+    options: [
+      { id: "app", label: "app" },
+      ...listHarnesses().map((harnessName) => ({ id: harnessName, label: harnessName })),
+    ],
+    currentId: chat.harness ?? "app",
   };
 }
 
@@ -274,6 +277,9 @@ async function collectSetupSelections(chat, select) {
     }
 
     const selectedHarness = selected;
+    if (selectedHarness === "app") {
+      continue;
+    }
     const harness = resolveHarness(selectedHarness);
     if (harness.getCapabilities().supportsModelSelection) {
       const modelOptions = await getHarnessModelOptions(selectedHarness);

@@ -1,7 +1,7 @@
 import { ensureChatConfig, updateChatConfig } from "./chat-config.js";
 
 /**
- * @typedef {"claude-agent-sdk" | "codex" | "native" | "pi"} SupportedHarnessName
+ * @typedef {"claude-agent-sdk" | "codex" | "pi"} SupportedHarnessName
  */
 
 /** @type {Set<string>} */

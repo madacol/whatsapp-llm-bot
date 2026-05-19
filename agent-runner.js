@@ -1,4 +1,4 @@
-import { resolveHarness, resolveHarnessName } from "#harnesses";
+import { createNativeHarness, resolveHarness, resolveHarnessName } from "#harnesses";
 import { getActions, getAction, getChatAction, executeAction } from "./actions.js";
 import { createSilentActionContext } from "./execute-action-context.js";
 import { resolveChatModel } from "./model-roles.js";
@@ -128,7 +128,8 @@ export async function runAgent(options) {
   /** @type {MediaRegistry} */
   const mediaRegistry = new Map();
 
-  const harness = resolveHarness(resolveHarnessName(agent, null));
+  const harnessName = resolveHarnessName(agent, null);
+  const harness = harnessName ? resolveHarness(harnessName) : createNativeHarness();
 
   const result = await harness.run({
     session,

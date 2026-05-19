@@ -1,4 +1,3 @@
-import { createNativeHarness } from "./native.js";
 import { createCodexHarness } from "./codex.js";
 import { createPiHarness } from "./pi.js";
 import { createHarnessAdapterFromHarness } from "./adapter.js";
@@ -186,13 +185,6 @@ function getDriverDescriptor(name) {
 
 function registerDefaultHarnesses() {
   registerHarnessDriver({
-    name: "native",
-    displayName: "Native Tools",
-    supportsInstances: false,
-    createInstance: () => ({ harness: createNativeHarness() }),
-    getStatus: () => ({ availability: "available", checkedAt: getCheckedAt() }),
-  });
-  registerHarnessDriver({
     name: "codex",
     displayName: "Codex",
     supportsInstances: true,
@@ -370,7 +362,7 @@ async function disposeHarnessInstance(instance) {
  * @returns {HarnessInstance}
  */
 export function resolveHarnessInstance(name, options = {}) {
-  const key = name ?? "native";
+  const key = name;
   const driver = drivers.get(key);
   const driverIsRegistered = !!driver;
   const instanceId = driver?.supportsInstances || !driverIsRegistered
@@ -548,14 +540,14 @@ export function resetHarnessRegistryForTests() {
 }
 
 /**
- * Resolve a harness by name. Falls back to native if not found.
+ * Resolve a registered provider harness by name.
  * Returns a cached singleton so stateful harnesses preserve their per-chat active state.
- * @param {string} [name]
+ * @param {string} name
  * @param {{ instanceId?: string | null, config?: Record<string, unknown> }} [options]
  * @returns {AgentHarness}
  */
 export function resolveHarness(name, options = {}) {
-  return resolveHarnessInstance(name ?? "native", options).harness;
+  return resolveHarnessInstance(name, options).harness;
 }
 
 /**
@@ -633,10 +625,10 @@ export async function listHarnessDriverStatuses() {
  * Determine the harness name from a persona/agent and chat config.
  * @param {AgentDefinition | null | undefined} persona
  * @param {{ harness?: string | null } | null | undefined} chatInfo
- * @returns {string}
+ * @returns {string | null}
  */
 export function resolveHarnessName(persona, chatInfo) {
-  return persona?.harness ?? chatInfo?.harness ?? "native";
+  return persona?.harness ?? chatInfo?.harness ?? null;
 }
 
 /**

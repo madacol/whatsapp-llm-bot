@@ -55,7 +55,7 @@ describe("harness driver registry", () => {
   it("lists default driver metadata separately from harness instances", () => {
     const drivers = listHarnessDrivers();
     const defaultDrivers = drivers
-      .filter((driver) => ["native", "codex", "pi"].includes(driver.name))
+      .filter((driver) => ["codex", "pi"].includes(driver.name))
       .map((driver) => ({
         name: driver.name,
         displayName: driver.displayName,
@@ -65,7 +65,6 @@ describe("harness driver registry", () => {
     assert.deepEqual(
       defaultDrivers,
       [
-        { name: "native", displayName: "Native Tools", supportsInstances: false },
         { name: "codex", displayName: "Codex", supportsInstances: true },
         { name: "pi", displayName: "Pi", supportsInstances: true },
       ],
