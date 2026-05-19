@@ -1,4 +1,4 @@
-import { MAX_TOOL_CALL_DEPTH, parseToolArgs } from "#harnesses";
+import { MAX_TOOL_CALL_DEPTH, parseToolArgs } from "../agent-io-defaults.js";
 import { buildToolPresentation } from "../tool-presentation-model.js";
 import { contentEvent, planEvent, reasoningInspectState, subagentMessageEvent, textUpdate, toolCallEvent, usageEvent } from "../outbound-events.js";
 import { createCodexDisplayHooks } from "./codex-hook-display.js";

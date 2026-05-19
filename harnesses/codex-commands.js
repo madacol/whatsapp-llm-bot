@@ -12,7 +12,7 @@ import {
 } from "./codex-config.js";
 import { openCodexAppServerConnection } from "./codex-app-server-client.js";
 import { contentEvent } from "../outbound-events.js";
-import { handleHarnessSessionCommand } from "./session-commands.js";
+import { handleSessionControlCommand } from "../session-control-commands.js";
 import { errorToString } from "../utils.js";
 
 /**
@@ -143,7 +143,7 @@ export function createCodexCommandHandler(deps) {
 async function handleCodexHarnessCommand(input, deps) {
   const loadThread = deps.readThread ?? readCodexThread;
   const createFork = deps.forkThread ?? forkCodexThread;
-  const handledSessionCommand = await handleHarnessSessionCommand({
+  const handledSessionCommand = await handleSessionControlCommand({
     command: input.command,
     chatId: input.chatId,
     context: input.context,

@@ -1,5 +1,5 @@
-import { formatRelativeTime } from "../utils.js";
-import { contentEvent } from "../outbound-events.js";
+import { formatRelativeTime } from "./utils.js";
+import { contentEvent } from "./outbound-events.js";
 
 const MAX_RESUME_OPTIONS = 11;
 const RESUME_CANCEL_OPTION_ID = "cancel";
@@ -9,7 +9,7 @@ const RESUME_CANCEL_OPTION_ID = "cancel";
  *   archive: (chatId: string) => Promise<HarnessSessionHistoryEntry | null>;
  *   getHistory: (chatId: string) => Promise<HarnessSessionHistoryEntry[]>;
  *   restore: (chatId: string, indexOrId: number | string) => Promise<HarnessSessionHistoryEntry | null>;
- * }} HarnessSessionControl
+ * }} SessionControl
  */
 
 /**
@@ -60,19 +60,19 @@ async function selectResumeSessionId(context, history, now) {
 }
 
 /**
- * Handle generic harness session commands such as /clear and /resume.
+ * Handle generic session commands such as /clear and /resume.
  * Returns true when the command was consumed.
  * @param {{
  *   command: string;
  *   chatId: string;
  *   context: ExecuteActionContext;
  *   cancelActiveQuery?: () => Promise<boolean> | boolean;
- *   sessionControl?: HarnessSessionControl;
+ *   sessionControl?: SessionControl;
  *   now?: () => Date;
  * }} input
  * @returns {Promise<boolean>}
  */
-export async function handleHarnessSessionCommand({ command, chatId, context, cancelActiveQuery, sessionControl, now = () => new Date() }) {
+export async function handleSessionControlCommand({ command, chatId, context, cancelActiveQuery, sessionControl, now = () => new Date() }) {
   if (!sessionControl) {
     return false;
   }

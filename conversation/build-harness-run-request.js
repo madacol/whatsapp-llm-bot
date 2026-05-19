@@ -19,7 +19,7 @@ export function buildExternalSystemPrompt(persona, chatInfo, harnessName) {
   if (explicitPrompt) {
     return explicitPrompt;
   }
-  if (harnessName === "native") {
+  if (harnessName === "app") {
     return config.system_prompt;
   }
   return "";

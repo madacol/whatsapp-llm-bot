@@ -16,7 +16,7 @@ describe("getHarnessInstanceConfig", () => {
           },
         },
       },
-    }, "native");
+    }, "pi");
 
     assert.deepEqual(resolved, {
       driver: "codex",

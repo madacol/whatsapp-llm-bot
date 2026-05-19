@@ -1,12 +1,12 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { createNativeHarness } from "../harnesses/native.js";
+import { createAppRunner } from "../conversation/app-runner.js";
 
-describe("createNativeHarness", () => {
+describe("createAppRunner", () => {
   it("exposes the unified harness contract", async () => {
-    const harness = createNativeHarness();
+    const harness = createAppRunner();
 
-    assert.equal(harness.getName?.(), "native");
+    assert.equal(harness.getName?.(), "app");
     assert.equal(typeof harness.getCapabilities, "function");
     assert.equal(typeof harness.run, "function");
     assert.equal(typeof harness.handleCommand, "function");
@@ -25,8 +25,8 @@ describe("createNativeHarness", () => {
       supportsSessionFork: false,
     });
     assert.deepEqual(harness.listSlashCommands?.(), [
-      { name: "clear", description: "Clear the current harness session" },
-      { name: "resume", description: "Restore a previously cleared harness session" },
+      { name: "clear", description: "Clear the current app session" },
+      { name: "resume", description: "Restore a previously cleared app session" },
     ]);
 
     const handled = await harness.handleCommand?.({

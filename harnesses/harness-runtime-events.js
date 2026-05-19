@@ -1,5 +1,5 @@
 /**
- * @typedef {"native" | "claude-agent-sdk" | "codex" | "pi" | string} HarnessRuntimeProvider
+ * @typedef {"app" | "claude-agent-sdk" | "codex" | "pi" | string} HarnessRuntimeProvider
  */
 
 /**

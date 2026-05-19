@@ -259,7 +259,7 @@ describe("resolveHarness", () => {
     assert.deepEqual(disposed, ["work:a"]);
   });
 
-  it("surfaces unknown harness instance envelopes as unavailable without constructing native fallback", () => {
+  it("surfaces unknown harness instance envelopes as unavailable without constructing an app fallback", () => {
     const instance = resolveHarnessInstance("missing-driver", {
       instanceId: "from-config",
       config: { model: "ignored" },

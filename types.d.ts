@@ -562,7 +562,7 @@ type Action<P extends PermissionFlags = PermissionFlags> = {
   description: string;
   /** Detailed usage instructions injected into the system prompt only after the action is first called in a turn. */
   instructions?: string;
-  /** Optional shared skill metadata for non-native harness exposure. */
+  /** Optional shared skill metadata for provider harness exposure. */
   sharedSkill?: SharedSkill;
   scope?: "chat" | "global";
   optIn?: true; // When true, action is only available in chats that explicitly enable it
