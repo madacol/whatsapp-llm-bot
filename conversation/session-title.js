@@ -1,6 +1,8 @@
 import { sendSimpleChatCompletion } from "../llm.js";
 import { renderContentBlock } from "../message-formatting.js";
 import { resolveModel } from "../model-roles.js";
+import { getHarnessInstanceConfig } from "../harness-config.js";
+import { resolveHarnessInstance } from "#harnesses";
 
 const MAX_TITLE_MESSAGES = 12;
 const MAX_TRANSCRIPT_CHARS = 4000;
@@ -100,6 +102,42 @@ export function normalizeSessionTitle(raw) {
 }
 
 /**
+ * @param {{
+ *   chatInfo: import("../store.js").ChatRow | undefined,
+ *   transcript: string,
+ *   messages: Message[],
+ * }} input
+ * @returns {Promise<string | null>}
+ */
+async function generateTitleWithHarnessInstance(input) {
+  const harnessName = input.chatInfo?.harness;
+  if (!harnessName) {
+    return null;
+  }
+  const { instanceId, config, displayName } = getHarnessInstanceConfig(
+    input.chatInfo?.harness_config,
+    harnessName,
+  );
+  const instance = resolveHarnessInstance(harnessName, { instanceId, config, displayName });
+  const generate = instance.textGeneration?.generateSessionTitle;
+  if (!generate) {
+    return null;
+  }
+  try {
+    const generated = await generate({
+      transcript: input.transcript,
+      messages: input.messages,
+      chatInfo: input.chatInfo,
+    });
+    return normalizeSessionTitle(
+      typeof generated === "object" && generated !== null ? generated.title ?? null : generated,
+    );
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Generate a short human-readable title for the active session.
  * @param {{
  *   llmClient: LlmClient,
@@ -112,6 +150,15 @@ export async function generateSessionTitle({ llmClient, chatInfo, messageRows })
   const transcript = buildSessionTitleTranscript(messageRows);
   if (!transcript) {
     return null;
+  }
+
+  const harnessTitle = await generateTitleWithHarnessInstance({
+    chatInfo,
+    transcript,
+    messages: messageRows.map((row) => row.message_data),
+  });
+  if (harnessTitle) {
+    return harnessTitle;
   }
 
   const model = resolveModel("fast", chatInfo);

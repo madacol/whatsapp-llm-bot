@@ -208,7 +208,11 @@ export function createCodexHarness(deps = {}) {
         adapterSessions.set(chatId, session);
         return session;
       },
-      async sendTurn({ params }) {
+      async sendTurn(request) {
+        if (!("params" in request)) {
+          throw new Error("Codex adapter requires compatibility params until semantic Codex turns are implemented.");
+        }
+        const { params } = request;
         return runCodexTurn(params, {
           instanceId,
           harnessName,

@@ -12,6 +12,7 @@ import {
   resetHarnessRegistryForTests,
   resolveHarness,
   resolveHarnessInstance,
+  reconcileHarnessInstances,
 } from "../harnesses/index.js";
 
 afterEach(async () => {
@@ -197,6 +198,102 @@ describe("resolveHarness", () => {
     );
   });
 
+  it("rebuilds only changed harness instances during reconciliation", async () => {
+    /** @type {string[]} */
+    const created = [];
+    /** @type {string[]} */
+    const disposed = [];
+    registerHarnessDriver("reconcile-test", () => {
+      assert.fail("Instance-aware test driver should use createInstance.");
+    }, {
+      displayName: "Reconcile Test",
+      supportsInstances: true,
+      createInstance(input) {
+        const marker = typeof input.config.marker === "string" ? input.config.marker : "none";
+        created.push(`${input.instanceId}:${marker}`);
+        return {
+          getName: () => "reconcile-test",
+          getCapabilities: () => ({
+            supportsResume: false,
+            supportsCancel: false,
+            supportsLiveInput: false,
+            supportsApprovals: false,
+            supportsWorkdir: false,
+            supportsSandboxConfig: false,
+            supportsModelSelection: false,
+            supportsReasoningEffort: false,
+            supportsSessionFork: false,
+          }),
+          async run() {
+            return {
+              response: [],
+              messages: [],
+              usage: { promptTokens: 0, completionTokens: 0, cachedTokens: 0, cost: 0 },
+            };
+          },
+          handleCommand: async () => false,
+          listSlashCommands: () => [],
+          dispose: async () => {
+            disposed.push(`${input.instanceId}:${marker}`);
+          },
+        };
+      },
+    });
+
+    resolveHarnessInstance("reconcile-test", { instanceId: "work", config: { marker: "a" } });
+    resolveHarnessInstance("reconcile-test", { instanceId: "personal", config: { marker: "x" } });
+
+    await reconcileHarnessInstances([
+      {
+        name: "reconcile-test",
+        instanceId: "work",
+        config: { marker: "b" },
+      },
+      {
+        name: "reconcile-test",
+        instanceId: "personal",
+        config: { marker: "x" },
+      },
+    ]);
+
+    const work = resolveHarnessInstance("reconcile-test", { instanceId: "work", config: { marker: "b" } });
+    const personal = resolveHarnessInstance("reconcile-test", { instanceId: "personal", config: { marker: "x" } });
+
+    assert.equal(work.instanceId, "work");
+    assert.equal(personal.instanceId, "personal");
+    assert.deepEqual(created, ["work:a", "personal:x", "work:b"]);
+    assert.deepEqual(disposed, ["work:a"]);
+  });
+
+  it("surfaces unknown harness instance envelopes as unavailable without constructing native fallback", () => {
+    const instance = resolveHarnessInstance("missing-driver", {
+      instanceId: "from-config",
+      config: { model: "ignored" },
+      displayName: "Missing Driver",
+    });
+
+    assert.equal(instance.name, "missing-driver");
+    assert.equal(instance.instanceId, "from-config");
+    assert.equal(instance.displayName, "Missing Driver");
+    assert.equal(instance.available, false);
+    assert.equal(instance.status.availability, "unavailable");
+    assert.match(instance.status.message ?? "", /not registered/);
+    assert.deepEqual(instance.capabilities, {
+      supportsResume: false,
+      supportsCancel: false,
+      supportsLiveInput: false,
+      supportsApprovals: false,
+      supportsWorkdir: false,
+      supportsSandboxConfig: false,
+      supportsModelSelection: false,
+      supportsReasoningEffort: false,
+      supportsSessionFork: false,
+      sessionModelSwitch: "in-session",
+      supportsRollback: false,
+      supportsUserInputRequests: false,
+    });
+  });
+
   it("routes non-instanced drivers to the default instance", () => {
     let createCount = 0;
     registerHarnessDriver("single-test", () => {
@@ -284,6 +381,97 @@ describe("resolveHarness", () => {
     });
     assert.equal(await adapter.injectMessage("chat-1", "yes"), true);
     assert.equal(await adapter.interruptTurn({ chatId: "chat-1" }), true);
+  });
+
+  it("accepts semantic turn input through the adapter compatibility bridge", async () => {
+    /** @type {AgentHarness} */
+    const harness = {
+      getName: () => "semantic-adapter-test",
+      getCapabilities: () => ({
+        supportsResume: false,
+        supportsCancel: false,
+        supportsLiveInput: false,
+        supportsApprovals: false,
+        supportsWorkdir: false,
+        supportsSandboxConfig: false,
+        supportsModelSelection: false,
+        supportsReasoningEffort: false,
+        supportsSessionFork: false,
+      }),
+      async run(params) {
+        assert.equal(params.session.chatId, "semantic-chat");
+        assert.deepEqual(params.messages, [
+          { role: "user", content: [{ type: "text", text: "semantic input" }] },
+        ]);
+        return {
+          response: [{ type: "text", text: "ok" }],
+          messages: params.messages,
+          usage: { promptTokens: 1, completionTokens: 1, cachedTokens: 0, cost: 0 },
+        };
+      },
+      handleCommand: async () => false,
+      listSlashCommands: () => [],
+    };
+    const adapter = createHarnessAdapterFromHarness({
+      harness,
+      name: "semantic-adapter-test",
+      instanceId: "default",
+      continuationKey: "semantic-adapter-test:instance:default",
+    });
+
+    const result = await adapter.sendTurn({
+      turn: {
+        chatId: "semantic-chat",
+        input: "semantic input",
+        runConfig: { model: "model-a" },
+      },
+    });
+
+    assert.deepEqual(result.response, [{ type: "text", text: "ok" }]);
+  });
+
+  it("exposes a provider-instance text generation hook", async () => {
+    registerHarnessDriver("text-generation-test", () => {
+      assert.fail("Instance-aware test driver should use createInstance.");
+    }, {
+      supportsInstances: true,
+      createInstance() {
+        return {
+          getName: () => "text-generation-test",
+          getCapabilities: () => ({
+            supportsResume: false,
+            supportsCancel: false,
+            supportsLiveInput: false,
+            supportsApprovals: false,
+            supportsWorkdir: false,
+            supportsSandboxConfig: false,
+            supportsModelSelection: false,
+            supportsReasoningEffort: false,
+            supportsSessionFork: false,
+          }),
+          async run() {
+            return {
+              response: [],
+              messages: [],
+              usage: { promptTokens: 0, completionTokens: 0, cachedTokens: 0, cost: 0 },
+            };
+          },
+          handleCommand: async () => false,
+          listSlashCommands: () => [],
+          textGeneration: {
+            generateSessionTitle: async () => ({ title: "Provider Title" }),
+          },
+        };
+      },
+    });
+
+    const instance = resolveHarnessInstance("text-generation-test", { instanceId: "work" });
+
+    assert.equal(await instance.textGeneration?.generateSessionTitle?.({
+      transcript: "User: hello",
+      messages: [],
+      chatInfo: undefined,
+    }), "Provider Title");
   });
 });
 

@@ -737,10 +737,18 @@ type HarnessRuntimeSession = {
   harnessName: string;
   instanceId: string;
   continuationKey: string;
-  status: "ready" | "running" | "stopped";
+  status: "starting" | "ready" | "running" | "stopped" | "error";
   workdir?: string | null;
   model?: string | null;
   resumeCursor?: string | null;
+};
+
+type HarnessSemanticTurnInput = {
+  chatId: string;
+  input?: string;
+  messages?: Message[];
+  attachments?: IncomingContentBlock[];
+  runConfig?: HarnessRunConfig;
 };
 
 type HarnessAdapterCreateInput = {
@@ -755,14 +763,14 @@ type HarnessAdapter = {
     runConfig?: HarnessRunConfig;
     resumeCursor?: string | null;
   }) => Promise<HarnessRuntimeSession>;
-  sendTurn: (input: { params: AgentHarnessParams }) => Promise<AgentResult>;
+  sendTurn: (input: { params: AgentHarnessParams } | { turn: HarnessSemanticTurnInput }) => Promise<AgentResult>;
   interruptTurn: (input: { chatId: string }) => Promise<boolean>;
   injectMessage: (chatId: string | HarnessSessionRef, text: string) => Promise<boolean>;
   stopSession: (chatId: string | HarnessSessionRef) => Promise<boolean>;
   listSessions: () => HarnessRuntimeSession[];
   readThread: (sessionId: string) => Promise<null>;
   rollbackThread: (sessionId: string, numTurns: number) => Promise<null>;
-  streamEvents: AsyncIterable<never>;
+  streamEvents: AsyncIterable<{ type: string; provider: string } & Record<string, unknown>>;
 };
 
 type HarnessCommandContext = {
@@ -801,6 +809,16 @@ type AgentHarness = {
   waitForIdle?: () => Promise<string[]>;
   /** Optional provider-native adapter; registry falls back to a legacy wrapper. */
   createAdapter?: (input: HarnessAdapterCreateInput) => HarnessAdapter;
+  /** Optional lifecycle cleanup for instance-owned resources. */
+  dispose?: () => void | Promise<void>;
+  /** Optional provider-backed text generation helpers. */
+  textGeneration?: {
+    generateSessionTitle?: (input: {
+      transcript: string;
+      messages: Message[];
+      chatInfo?: import("./store.js").ChatRow;
+    }) => string | null | { title?: string | null } | Promise<string | null | { title?: string | null }>;
+  };
 };
 
 /**

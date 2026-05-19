@@ -219,6 +219,33 @@ describe("buildRunConfig", () => {
     assert.equal(config.approvalPolicy, "on-request");
   });
 
+  it("reads canonical provider instance envelopes keyed by instance id", () => {
+    const config = buildRunConfig("chat-1", /** @type {import("../store.js").ChatRow} */ ({
+      chat_id: "chat-1",
+      harness: "codex",
+      harness_cwd: null,
+      harness_config: {
+        activeHarnessInstanceId: "codex-work",
+        harnessInstances: {
+          "codex-work": {
+            driver: "codex",
+            displayName: "Codex Work",
+            config: {
+              model: "gpt-5.4-mini",
+              sandboxMode: "read-only",
+              approvalPolicy: "on-request",
+            },
+          },
+        },
+      },
+    }), "Project Alpha", "codex");
+
+    assert.equal(config.harnessInstanceId, "codex-work");
+    assert.equal(config.model, "gpt-5.4-mini");
+    assert.equal(config.sandboxMode, "read-only");
+    assert.equal(config.approvalPolicy, "on-request");
+  });
+
   it("does not leak a legacy Claude model into Codex runs", () => {
     const codexConfig = buildRunConfig("chat-1", /** @type {import("../store.js").ChatRow} */ ({
       chat_id: "chat-1",

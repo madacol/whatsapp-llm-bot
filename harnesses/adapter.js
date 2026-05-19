@@ -12,7 +12,7 @@
  *   harnessName: string,
  *   instanceId: string,
  *   continuationKey: string,
- *   status: "ready" | "running" | "stopped",
+ *   status: "starting" | "ready" | "running" | "stopped" | "error",
  *   workdir?: string | null,
  *   model?: string | null,
  *   resumeCursor?: string | null,
@@ -30,6 +30,8 @@
 /**
  * @typedef {{
  *   params: AgentHarnessParams,
+ * } | {
+ *   turn: HarnessSemanticTurnInput,
  * }} HarnessSendTurnInput
  */
 
@@ -58,16 +60,127 @@
  *   listSessions: () => HarnessRuntimeSession[],
  *   readThread: (sessionId: string) => Promise<null>,
  *   rollbackThread: (sessionId: string, numTurns: number) => Promise<null>,
- *   streamEvents: AsyncIterable<never>,
+ *   streamEvents: AsyncIterable<{ type: string, provider: string } & Record<string, unknown>>,
  * }} HarnessAdapter
  */
 
 /**
- * @returns {AsyncIterable<never>}
+ * @param {string} provider
+ * @returns {{
+ *   emit: (event: { type: string, provider?: string } & Record<string, unknown>) => void,
+ *   stream: AsyncIterable<{ type: string, provider: string } & Record<string, unknown>>,
+ * }}
  */
-function emptyEventStream() {
+function createEventStreamController(provider) {
+  /** @type {Set<(event: { type: string, provider: string } & Record<string, unknown>) => void>} */
+  const listeners = new Set();
   return {
-    async *[Symbol.asyncIterator]() {},
+    emit(event) {
+      const normalized = {
+        ...event,
+        provider: event.provider ?? provider,
+      };
+      for (const listener of listeners) {
+        listener(normalized);
+      }
+    },
+    stream: {
+      async *[Symbol.asyncIterator]() {
+        /** @type {Array<{ type: string, provider: string } & Record<string, unknown>>} */
+        const queue = [];
+        /** @type {(() => void) | null} */
+        let notify = null;
+        const listener = (/** @type {{ type: string, provider: string } & Record<string, unknown>} */ event) => {
+          queue.push(event);
+          notify?.();
+          notify = null;
+        };
+        listeners.add(listener);
+        try {
+          while (true) {
+            if (queue.length === 0) {
+              await new Promise((resolve) => {
+                notify = () => resolve(undefined);
+              });
+            }
+            while (queue.length > 0) {
+              const event = queue.shift();
+              if (event) {
+                yield event;
+              }
+            }
+          }
+        } finally {
+          listeners.delete(listener);
+        }
+      },
+    },
+  };
+}
+
+/**
+ * @param {HarnessSemanticTurnInput} turn
+ * @returns {AgentHarnessParams}
+ */
+function buildLegacyParamsFromSemanticTurn(turn) {
+  const now = new Date();
+  /**
+   * @param {Message} messageData
+   * @returns {import("../store.js").MessageRow}
+   */
+  const makeMessageRow = (messageData) => ({
+    message_id: 0,
+    chat_id: turn.chatId,
+    sender_id: "",
+    message_data: messageData,
+    timestamp: now,
+    display_key: null,
+  });
+  const messages = turn.messages ?? [
+    {
+      role: "user",
+      content: turn.input
+        ? [{ type: "text", text: turn.input }]
+        : [],
+    },
+  ];
+  return {
+    session: {
+      chatId: turn.chatId,
+      senderIds: [],
+      context: /** @type {ExecuteActionContext} */ ({
+        chatId: turn.chatId,
+        senderIds: [],
+        content: [],
+        getIsAdmin: async () => true,
+        send: async () => undefined,
+        reply: async () => undefined,
+        reactToMessage: async () => {},
+        select: async () => "",
+        confirm: async () => true,
+      }),
+      addMessage: async (_chatId, messageData) => makeMessageRow(messageData),
+      updateToolMessage: async (_chatId, _toolCallId, messageData) => makeMessageRow(messageData),
+      harnessSession: null,
+      saveHarnessSession: async () => undefined,
+    },
+    llmConfig: {
+      llmClient: /** @type {LlmClient} */ ({}),
+      chatModel: "",
+      externalInstructions: "",
+      mediaToTextModels: {},
+      toolRuntime: {
+        listTools: () => [],
+        getTool: async () => null,
+        executeTool: async () => {
+          throw new Error("Semantic harness adapter bridge cannot execute app tools.");
+        },
+      },
+    },
+    messages,
+    mediaRegistry: new Map(),
+    hooks: {},
+    runConfig: turn.runConfig,
   };
 }
 
@@ -78,6 +191,7 @@ function emptyEventStream() {
 export function createHarnessAdapterFromHarness(input) {
   /** @type {Map<string, HarnessRuntimeSession>} */
   const sessions = new Map();
+  const events = createEventStreamController(input.name);
 
   return {
     async startSession({ chatId, runConfig, resumeCursor }) {
@@ -93,19 +207,36 @@ export function createHarnessAdapterFromHarness(input) {
         ...(resumeCursor ? { resumeCursor } : {}),
       };
       sessions.set(chatId, session);
+      events.emit({ type: "session.started", session });
       return session;
     },
-    async sendTurn({ params }) {
+    async sendTurn(request) {
+      const params = "params" in request
+        ? request.params
+        : buildLegacyParamsFromSemanticTurn(request.turn);
       const session = sessions.get(params.session.chatId);
       if (session) {
-        sessions.set(params.session.chatId, { ...session, status: "running" });
+        const running = /** @type {HarnessRuntimeSession} */ ({ ...session, status: "running" });
+        sessions.set(params.session.chatId, running);
+        events.emit({ type: "session.updated", session: running });
       }
       try {
-        return await input.harness.run(params);
+        events.emit({
+          type: "turn.started",
+          turn: { id: params.session.chatId, chatId: params.session.chatId, status: "started" },
+        });
+        const result = await input.harness.run(params);
+        events.emit({
+          type: "turn.completed",
+          turn: { id: params.session.chatId, chatId: params.session.chatId, status: "completed" },
+        });
+        return result;
       } finally {
         const current = sessions.get(params.session.chatId);
         if (current) {
-          sessions.set(params.session.chatId, { ...current, status: "ready" });
+          const ready = /** @type {HarnessRuntimeSession} */ ({ ...current, status: "ready" });
+          sessions.set(params.session.chatId, ready);
+          events.emit({ type: "session.updated", session: ready });
         }
       }
     },
@@ -118,6 +249,16 @@ export function createHarnessAdapterFromHarness(input) {
     async stopSession(chatId) {
       const key = typeof chatId === "string" ? chatId : chatId.id;
       sessions.delete(key);
+      events.emit({
+        type: "session.stopped",
+        session: {
+          chatId: key,
+          harnessName: input.name,
+          instanceId: input.instanceId,
+          continuationKey: input.continuationKey,
+          status: "stopped",
+        },
+      });
       return !!(await input.harness.cancel?.(chatId));
     },
     listSessions() {
@@ -129,6 +270,6 @@ export function createHarnessAdapterFromHarness(input) {
     async rollbackThread(_sessionId, _numTurns) {
       return null;
     },
-    streamEvents: emptyEventStream(),
+    streamEvents: events.stream,
   };
 }
