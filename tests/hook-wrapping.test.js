@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { NO_OP_HOOKS } from "../harnesses/native.js";
+import { NO_OP_HOOKS } from "../agent-io-defaults.js";
 import { wrapHooksWithFallbacks } from "../harnesses/claude-agent-sdk.js";
 
 describe("wrapHooksWithFallbacks", () => {

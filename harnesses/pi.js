@@ -3,11 +3,11 @@ import { contentEvent } from "../outbound-events.js";
 import { createLogger } from "../logger.js";
 import { renderContentBlock } from "../message-formatting.js";
 import { getChatDb } from "../db.js";
-import { NO_OP_HOOKS } from "./native.js";
+import { NO_OP_HOOKS } from "../agent-io-defaults.js";
 import { buildSdkErrorResponse, clearStaleHarnessSession, getHarnessRunErrorMessage } from "./harness-run-errors.js";
 import { wrapHooksWithFallbacks } from "./hook-fallbacks.js";
 import { augmentLatestUserMessageForTextHarness, renderMarkdownImageReference, renderPromptMediaReference } from "./prompt-media.js";
-import { handleHarnessSessionCommand } from "./session-commands.js";
+import { handleSessionControlCommand } from "../session-control-commands.js";
 import { openPiRpcConnection } from "./pi-rpc-client.js";
 import { getPiConfig, getPiSessionPath, savePiSession, updatePiConfig } from "./pi-config.js";
 import { startPiRpcRun } from "./pi-runner.js";
@@ -380,7 +380,7 @@ export function createPiHarness(deps = {}) {
    * @returns {Promise<boolean>}
    */
   async function handleCommand(input) {
-    const handledSessionCommand = await handleHarnessSessionCommand({
+    const handledSessionCommand = await handleSessionControlCommand({
       command: input.command,
       chatId: input.chatId,
       context: input.context,

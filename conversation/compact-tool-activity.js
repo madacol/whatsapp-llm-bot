@@ -1,4 +1,4 @@
-import { parseToolArgs } from "#harnesses";
+import { parseToolArgs } from "../agent-io-defaults.js";
 import { buildToolPresentation } from "../tool-presentation-model.js";
 import { contentEvent, textUpdate } from "../outbound-events.js";
 

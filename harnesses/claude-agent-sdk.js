@@ -16,13 +16,13 @@ import { hasMediaPath } from "../attachment-paths.js";
 import { formatChatSettingsCommand } from "../chat-commands.js";
 import { renderContentBlock } from "../message-formatting.js";
 import { getChatDb } from "../db.js";
-import { NO_OP_HOOKS } from "./native.js";
+import { NO_OP_HOOKS } from "../agent-io-defaults.js";
 import { buildToolPresentation } from "../tool-presentation-model.js";
 import { createLogger } from "../logger.js";
 import { createToolMessage, errorToString } from "../utils.js";
 import { contentEvent, toolInspectState } from "../outbound-events.js";
 import { getHarnessConfig, updateHarnessConfig } from "../harness-config.js";
-import { handleHarnessSessionCommand } from "./session-commands.js";
+import { handleSessionControlCommand } from "../session-control-commands.js";
 import { getSandboxEscapeRequest } from "./sandbox-approval.js";
 import { requestSandboxEscapeApproval } from "./sandbox-approval-coordinator.js";
 import { buildSdkErrorResponse, clearStaleHarnessSession } from "./harness-run-errors.js";
@@ -606,7 +606,7 @@ export function createClaudeAgentSdkHarness(deps = {}) {
    * @returns {Promise<boolean>}
    */
   async function handleCommand(input) {
-    const handledSessionCommand = await handleHarnessSessionCommand({
+    const handledSessionCommand = await handleSessionControlCommand({
       command: input.command,
       chatId: input.chatId,
       context: input.context,

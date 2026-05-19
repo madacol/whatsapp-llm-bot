@@ -8,8 +8,8 @@ import {
   resolveHarnessName,
   createHarnessRunCoordinator,
   getHarnessSessionDirectory,
-  createNativeHarness,
 } from "#harnesses";
+import { createAppRunner } from "./app-runner.js";
 import { getHarnessInstanceConfig } from "../harness-config.js";
 import { contentEvent } from "../outbound-events.js";
 import {
@@ -121,7 +121,7 @@ async function resolveConversationHarness(chatInfo) {
   if (!selectedHarnessName) {
     return {
       persona,
-      harness: createNativeHarness(),
+      harness: createAppRunner(),
       harnessInstance: null,
     };
   }

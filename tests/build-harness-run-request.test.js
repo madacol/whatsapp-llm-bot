@@ -7,14 +7,14 @@ import {
 } from "../conversation/build-harness-run-request.js";
 
 describe("buildExternalSystemPrompt", () => {
-  it("keeps the app default prompt for the native harness", () => {
+  it("keeps the app default prompt for the app runner", () => {
     assert.equal(
-      buildExternalSystemPrompt(null, undefined, "native"),
+      buildExternalSystemPrompt(null, undefined, "app"),
       config.system_prompt,
     );
   });
 
-  it("does not add the app default prompt to non-native harnesses by default", () => {
+  it("does not add the app default prompt to provider harnesses by default", () => {
     for (const harnessName of ["codex", "pi", "claude-agent-sdk"]) {
       assert.equal(
         buildExternalSystemPrompt(null, undefined, harnessName),

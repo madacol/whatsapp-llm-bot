@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { handleHarnessSessionCommand } from "../harnesses/session-commands.js";
+import { handleSessionControlCommand } from "../session-control-commands.js";
 
 /**
  * @returns {ExecuteActionContext}
@@ -28,7 +28,7 @@ function getReplyText(event) {
   return typeof event.content === "string" ? event.content : JSON.stringify(event.content);
 }
 
-describe("handleHarnessSessionCommand", () => {
+describe("handleSessionControlCommand", () => {
   it("clears the active session through session control primitives", async () => {
     /** @type {string[]} */
     const calls = [];
@@ -40,7 +40,7 @@ describe("handleHarnessSessionCommand", () => {
       return undefined;
     };
 
-    const handled = await handleHarnessSessionCommand({
+    const handled = await handleSessionControlCommand({
       command: "clear",
       chatId: "chat-1",
       context,
@@ -79,7 +79,7 @@ describe("handleHarnessSessionCommand", () => {
       return "sess-newer";
     };
 
-    const handled = await handleHarnessSessionCommand({
+    const handled = await handleSessionControlCommand({
       command: "resume",
       chatId: "chat-1",
       context,
@@ -121,7 +121,7 @@ describe("handleHarnessSessionCommand", () => {
     };
     context.select = async () => "cancel";
 
-    const handled = await handleHarnessSessionCommand({
+    const handled = await handleSessionControlCommand({
       command: "resume",
       chatId: "chat-1",
       context,

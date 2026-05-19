@@ -5,7 +5,7 @@ import { ATTACHMENT_ROOT, hasMediaPath } from "../attachment-paths.js";
 
 import { createLogger } from "../logger.js";
 import { getChatDb } from "../db.js";
-import { NO_OP_HOOKS } from "./native.js";
+import { NO_OP_HOOKS } from "../agent-io-defaults.js";
 import { isHandledCodexRunError, startCodexRun } from "./codex-runner.js";
 import { startCodexAppServerRun } from "./codex-app-server-runner.js";
 import { createCodexCommandHandler } from "./codex-commands.js";

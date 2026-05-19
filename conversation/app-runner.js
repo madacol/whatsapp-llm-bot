@@ -1,5 +1,5 @@
 /**
- * Native harness — the original run loop extracted from index.js.
+ * App runner — the default LLM/tool loop owned by conversation orchestration.
  */
 
 import { formatFailedMessageSummary } from "../message-failure-presentation.js";
@@ -21,15 +21,14 @@ import { storeAndLinkHtml } from "../html-store.js";
 import { recordUsage, resolveCost } from "../usage-tracker.js";
 import { buildToolPresentation } from "../tool-presentation-model.js";
 import { createLogger } from "../logger.js";
-import { handleHarnessSessionCommand } from "./session-commands.js";
+import { handleSessionControlCommand } from "../session-control-commands.js";
 import { convertUnsupportedMedia } from "../media-to-text.js";
+import { MAX_TOOL_CALL_DEPTH, NO_OP_HOOKS, parseToolArgs } from "../agent-io-defaults.js";
 
-const log = createLogger("harness:native");
-
-export const MAX_TOOL_CALL_DEPTH = 10;
+const log = createLogger("conversation:app-runner");
 
 /** @type {HarnessCapabilities} */
-const NATIVE_HARNESS_CAPABILITIES = {
+const APP_RUNNER_CAPABILITIES = {
   supportsResume: false,
   supportsCancel: false,
   supportsLiveInput: false,
@@ -40,40 +39,6 @@ const NATIVE_HARNESS_CAPABILITIES = {
   supportsReasoningEffort: false,
   supportsSessionFork: false,
 };
-
-/** @type {Required<AgentIOHooks>} */
-export const NO_OP_HOOKS = {
-  onComposing: async () => {},
-  onPaused: async () => {},
-  onReasoning: async () => {},
-  onLlmResponse: async () => {},
-  onAskUser: async () => "",
-  onToolCall: async () => {},
-  onToolComplete: async () => {},
-  onToolResult: async (_blocks, _name, _perms) => {},
-  onToolError: async () => {},
-  onCommand: async () => {},
-  onFileRead: async () => {},
-  onPlan: async () => {},
-  onFileChange: async () => {},
-  onContinuePrompt: async () => true,
-  onDepthLimit: async () => false,
-  onUsage: async () => {},
-};
-
-/**
- * Parse tool call arguments from JSON string, with error fallback.
- * @param {string} argsString
- * @returns {Record<string, unknown>}
- */
-export function parseToolArgs(argsString) {
-  try {
-    return JSON.parse(argsString || "{}");
-  } catch {
-    log.error("Failed to parse tool call arguments:", argsString);
-    return {};
-  }
-}
 
 /**
  * Try to edit the tool-call message in-place; swallow errors.
@@ -450,7 +415,7 @@ async function processLlmResponse({ session, llmConfig, messages, mediaRegistry,
 }
 
 /**
- * Run a native harness turn through the unified harness contract.
+ * Run an app turn through the unified harness contract.
  * @param {AgentHarnessParams} params
  * @returns {Promise<AgentResult>}
  */
@@ -459,12 +424,12 @@ async function run(params) {
 }
 
 /**
- * Native does not currently own any slash commands.
+ * The app runner owns generic session commands for the default chat path.
  * @param {HarnessCommandContext} input
  * @returns {Promise<boolean>}
  */
 async function handleCommand(input) {
-  return handleHarnessSessionCommand({
+  return handleSessionControlCommand({
     command: input.command,
     chatId: input.chatId,
     context: input.context,
@@ -477,19 +442,19 @@ async function handleCommand(input) {
  */
 function listSlashCommands() {
   return [
-    { name: "clear", description: "Clear the current harness session" },
-    { name: "resume", description: "Restore a previously cleared harness session" },
+    { name: "clear", description: "Clear the current app session" },
+    { name: "resume", description: "Restore a previously cleared app session" },
   ];
 }
 
 /**
- * Create the native harness.
+ * Create the default app runner.
  * @returns {AgentHarness}
  */
-export function createNativeHarness() {
+export function createAppRunner() {
   return {
-    getName: () => "native",
-    getCapabilities: () => NATIVE_HARNESS_CAPABILITIES,
+    getName: () => "app",
+    getCapabilities: () => APP_RUNNER_CAPABILITIES,
     run,
     handleCommand,
     listSlashCommands,
