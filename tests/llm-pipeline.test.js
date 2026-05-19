@@ -301,7 +301,7 @@ describe("LLM pipeline via createMessageHandler", () => {
     await seedChat("pipe-slash-clear", { enabled: true });
     await updateChatConfig("pipe-slash-clear", (current) => ({
       ...current,
-      harness: "native",
+      harness: null,
       model_roles: { fast: "mock-fast-model" },
       harness_session_id: "sess-clear-1",
       harness_session_kind: "native",

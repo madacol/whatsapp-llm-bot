@@ -8,6 +8,7 @@ import {
   resolveHarnessName,
   createHarnessRunCoordinator,
   getHarnessSessionDirectory,
+  createNativeHarness,
 } from "#harnesses";
 import { getHarnessInstanceConfig } from "../harness-config.js";
 import { contentEvent } from "../outbound-events.js";
@@ -110,13 +111,20 @@ function getTopLevelText(content) {
 /**
  * Resolve the persona and harness for the current chat.
  * @param {import("../store.js").ChatRow | undefined} chatInfo
- * @returns {Promise<{ persona: AgentDefinition | null, harness: AgentHarness, harnessInstance: ReturnType<typeof resolveHarnessInstance> }>}
+ * @returns {Promise<{ persona: AgentDefinition | null, harness: AgentHarness, harnessInstance: ReturnType<typeof resolveHarnessInstance> | null }>}
  */
 async function resolveConversationHarness(chatInfo) {
   const persona = chatInfo?.active_persona
     ? await getAgent(chatInfo.active_persona)
     : null;
   const selectedHarnessName = resolveHarnessName(persona, chatInfo);
+  if (!selectedHarnessName) {
+    return {
+      persona,
+      harness: createNativeHarness(),
+      harnessInstance: null,
+    };
+  }
   const { driver, instanceId, config: harnessConfig, displayName } = getHarnessInstanceConfig(
     chatInfo?.harness_config,
     selectedHarnessName,
@@ -334,7 +342,7 @@ export function createConversationRunner({ store, llmClient, getActionsFn, execu
    *   actionResolver: (name: string) => Promise<AppAction | null>,
    *   persona: AgentDefinition | null,
    *   harness: AgentHarness,
-   *   harnessInstance: ReturnType<typeof resolveHarnessInstance>,
+   *   harnessInstance: ReturnType<typeof resolveHarnessInstance> | null,
    *   isSlashCommand?: boolean,
    *   resolvedBinding: ResolvedChatBinding,
    * }} input
@@ -434,13 +442,18 @@ export function createConversationRunner({ store, llmClient, getActionsFn, execu
       let currentResumeCursor = chatInfo?.harness_session_kind === harness.getName()
         ? chatInfo.harness_session_id
         : null;
-      const startedAdapterSession = await harnessInstance.adapter.startSession({
-        chatId,
-        runConfig,
-        resumeCursor: currentResumeCursor,
-      });
-      currentResumeCursor = startedAdapterSession.resumeCursor ?? currentResumeCursor;
+      if (harnessInstance) {
+        const startedAdapterSession = await harnessInstance.adapter.startSession({
+          chatId,
+          runConfig,
+          resumeCursor: currentResumeCursor,
+        });
+        currentResumeCursor = startedAdapterSession.resumeCursor ?? currentResumeCursor;
+      }
       const upsertSessionBinding = (/** @type {"running" | "ready" | "stopped" | "error"} */ status, /** @type {string | null | undefined} */ resumeCursor) => {
+        if (!harnessInstance) {
+          return;
+        }
         if (resumeCursor !== undefined) {
           currentResumeCursor = resumeCursor;
         }
@@ -505,7 +518,7 @@ export function createConversationRunner({ store, llmClient, getActionsFn, execu
       });
 
       const runWithRuntimeEvents = async () => {
-        if (harness.getName() === "native") {
+        if (!harnessInstance) {
           return harness.run(runRequest);
         }
 
