@@ -505,8 +505,8 @@ export function createConversationRunner({ store, llmClient, getActionsFn, execu
       });
 
       const runWithRuntimeEvents = async () => {
-        if (!harnessInstance.adapter.supportsSemanticTurns) {
-          return harnessInstance.adapter.sendTurn({ params: runRequest });
+        if (harness.getName() === "native") {
+          return harness.run(runRequest);
         }
 
         const runtimeDispatcher = createHarnessRuntimeEventDispatcher({
@@ -532,13 +532,11 @@ export function createConversationRunner({ store, llmClient, getActionsFn, execu
         });
         try {
           const result = await harnessInstance.adapter.sendTurn({
-            turn: {
-              chatId,
-              messages: runRequest.messages,
-              externalInstructions: runRequest.llmConfig.externalInstructions,
-              runConfig,
-              resumeCursor: currentResumeCursor,
-            },
+            chatId,
+            messages: runRequest.messages,
+            externalInstructions: runRequest.llmConfig.externalInstructions,
+            runConfig,
+            resumeCursor: currentResumeCursor,
           });
           await Promise.allSettled([...pendingEventHandlers]);
           const activeSession = harnessInstance.adapter

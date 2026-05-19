@@ -123,10 +123,11 @@ describe("createConversationRunner prompt formatting", () => {
               },
               async sendTurn(input) {
                 phases.push("send");
-                assert.ok("params" in input, "current runner should preserve the compatibility path");
+                assert.equal(input.chatId, "conv-adapter-session-start");
+                assert.ok(input.messages?.some((message) => message.role === "user"));
                 return {
                   response: [{ type: "text", text: "ok" }],
-                  messages: input.params.messages,
+                  messages: input.messages ?? [],
                   usage: { promptTokens: 0, completionTokens: 0, cachedTokens: 0, cost: 0 },
                 };
               },
@@ -192,7 +193,6 @@ describe("createConversationRunner prompt formatting", () => {
           listSlashCommands: () => [],
           createAdapter() {
             return {
-              supportsSemanticTurns: true,
               async startSession(input) {
                 phases.push("start");
                 return {
@@ -206,9 +206,8 @@ describe("createConversationRunner prompt formatting", () => {
               },
               async sendTurn(input) {
                 phases.push("semantic-send");
-                assert.ok("turn" in input, "Expected semantic turn input");
-                assert.equal(input.turn.chatId, "conv-semantic-events");
-                assert.ok(input.turn.messages?.some((message) => message.role === "user"));
+                assert.equal(input.chatId, "conv-semantic-events");
+                assert.ok(input.messages?.some((message) => message.role === "user"));
                 for (const subscriber of subscribers) {
                   await subscriber({
                     type: "assistant.completed",
@@ -220,7 +219,7 @@ describe("createConversationRunner prompt formatting", () => {
                 }
                 return {
                   response: [{ type: "text", text: "fallback response" }],
-                  messages: input.turn.messages ?? [],
+                  messages: input.messages ?? [],
                   usage: { promptTokens: 0, completionTokens: 0, cachedTokens: 0, cost: 0 },
                 };
               },
