@@ -17,8 +17,8 @@ let db;
 let store;
 /** @type {(msg: ChatTurn) => Promise<void>} */
 let handleMessage;
-/** @type {typeof import("../harnesses/index.js").registerHarness} */
-let registerHarness;
+/** @type {typeof import("../harnesses/index.js").registerHarnessDriver} */
+let registerHarnessDriver;
 /** @type {typeof import("../harnesses/codex.js").createCodexHarness} */
 let createCodexHarness;
 /** @type {Awaited<ReturnType<typeof import("./helpers.js").createMockLlmServer>>} */
@@ -40,7 +40,7 @@ before(async () => {
   store = await initStore(db);
 
   const { createConversationRunner } = await import("../conversation/create-conversation-runner.js");
-  ({ registerHarness } = await import("../harnesses/index.js"));
+  ({ registerHarnessDriver } = await import("../harnesses/index.js"));
   ({ createCodexHarness } = await import("../harnesses/codex.js"));
 
   const runner = createConversationRunner({
@@ -55,7 +55,7 @@ before(async () => {
 });
 
 afterEach(() => {
-  registerHarness("codex", createCodexHarness);
+  registerCodexHarness(createCodexHarness);
   mockServer.clearRequests();
 });
 
@@ -65,6 +65,19 @@ after(async () => {
 
 /** @param {string} chatId @param {{enabled?: boolean, systemPrompt?: string | null, model?: string | null}} [options] */
 const seedChat = (chatId, options) => seedChat_(db, chatId, options);
+
+/**
+ * @param {() => AgentHarness} createHarness
+ * @returns {void}
+ */
+function registerCodexHarness(createHarness) {
+  registerHarnessDriver({
+    name: "codex",
+    displayName: "Codex",
+    supportsInstances: true,
+    createInstance: () => ({ harness: createHarness() }),
+  });
+}
 
 /**
  * @param {string} chatId
@@ -104,7 +117,7 @@ describe("createConversationRunner with codex harness", () => {
     /** @type {Array<string | null>} */
     const seenSessionIds = [];
     let attemptCount = 0;
-    registerHarness("codex", () => createCodexHarness({
+    registerCodexHarness(() => createCodexHarness({
       startRun: async (input) => {
         seenSessionIds.push(input.sessionId ?? null);
         attemptCount += 1;
@@ -172,7 +185,7 @@ describe("createConversationRunner with codex harness", () => {
 
     /** @type {Array<string | null>} */
     const seenSessionIds = [];
-    registerHarness("codex", () => createCodexHarness({
+    registerCodexHarness(() => createCodexHarness({
       startRun: async (input) => {
         seenSessionIds.push(input.sessionId ?? null);
         return {
@@ -219,7 +232,7 @@ describe("createConversationRunner with codex harness", () => {
     });
     let runCount = 0;
 
-    registerHarness("codex", () => createCodexHarness({
+    registerCodexHarness(() => createCodexHarness({
       startRun: async (input) => {
         runCount += 1;
         const prompt = getLastUserText(input.messages);
@@ -301,7 +314,7 @@ describe("createConversationRunner with codex harness", () => {
     let runCount = 0;
     let steeringReady = false;
 
-    registerHarness("codex", () => createCodexHarness({
+    registerCodexHarness(() => createCodexHarness({
       startRun: async (input) => {
         runCount += 1;
         const prompt = getLastUserText(input.messages);
@@ -386,7 +399,7 @@ describe("createConversationRunner with codex harness", () => {
     });
     let runCount = 0;
 
-    registerHarness("codex", () => createCodexHarness({
+    registerCodexHarness(() => createCodexHarness({
       startRun: async (input) => {
         runCount += 1;
         const prompt = getLastUserText(input.messages);
@@ -459,7 +472,7 @@ describe("createConversationRunner with codex harness", () => {
 
     /** @type {string[]} */
     const cancelledChatIds = [];
-    registerHarness("codex", () => ({
+    registerCodexHarness(() => ({
       getName: () => "codex",
       getCapabilities: () => ({
         supportsResume: true,
@@ -498,7 +511,7 @@ describe("createConversationRunner with codex harness", () => {
     await seedChat("conv-codex-final-file", { enabled: true });
     await configureCodexChat("conv-codex-final-file");
 
-    registerHarness("codex", () => ({
+    registerCodexHarness(() => ({
       getName: () => "codex",
       getCapabilities: () => ({
         supportsResume: true,
@@ -542,7 +555,7 @@ describe("createConversationRunner with codex harness", () => {
     await seedChat("conv-codex-final-text-dedupe", { enabled: true });
     await configureCodexChat("conv-codex-final-text-dedupe");
 
-    registerHarness("codex", () => createCodexHarness({
+    registerCodexHarness(() => createCodexHarness({
       startRun: async (input) => ({
         abortController: new AbortController(),
         done: (async () => {
@@ -576,7 +589,7 @@ describe("createConversationRunner with codex harness", () => {
     await seedChat("conv-codex-presence", { enabled: true });
     await configureCodexChat("conv-codex-presence");
 
-    registerHarness("codex", () => createCodexHarness({
+    registerCodexHarness(() => createCodexHarness({
       startRun: async (input) => ({
         abortController: new AbortController(),
         done: (async () => {
@@ -634,7 +647,7 @@ describe("createConversationRunner with codex harness", () => {
 
     const maxProgressDelayMs = 120;
 
-    registerHarness("codex", () => createCodexHarness({
+    registerCodexHarness(() => createCodexHarness({
       startRun: async (input) => ({
         abortController: new AbortController(),
         done: (async () => {

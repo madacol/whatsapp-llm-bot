@@ -6,7 +6,6 @@ import {
   getHarnessDriverStatus,
   listHarnessInstances,
   listHarnessDrivers,
-  registerHarness,
   registerHarnessDriver,
   registerOptionalHarnesses,
   resetHarnessRegistryForTests,
@@ -19,6 +18,38 @@ afterEach(async () => {
   resetHarnessRegistryForTests();
   await registerOptionalHarnesses();
 });
+
+/**
+ * @param {string} name
+ * @param {Partial<AgentHarness>} [overrides]
+ * @returns {AgentHarness}
+ */
+function createTestHarness(name, overrides = {}) {
+  return {
+    getName: () => name,
+    getCapabilities: () => ({
+      supportsResume: false,
+      supportsCancel: false,
+      supportsLiveInput: false,
+      supportsApprovals: false,
+      supportsWorkdir: false,
+      supportsSandboxConfig: false,
+      supportsModelSelection: false,
+      supportsReasoningEffort: false,
+      supportsSessionFork: false,
+    }),
+    async run() {
+      return {
+        response: [],
+        messages: [],
+        usage: { promptTokens: 0, completionTokens: 0, cachedTokens: 0, cost: 0 },
+      };
+    },
+    handleCommand: async () => false,
+    listSlashCommands: () => [],
+    ...overrides,
+  };
+}
 
 describe("harness driver registry", () => {
   it("lists default driver metadata separately from harness instances", () => {
@@ -42,31 +73,15 @@ describe("harness driver registry", () => {
   });
 
   it("reads provider status through the driver seam", async () => {
-    registerHarnessDriver("status-test", () => ({
-      getName: () => "status-test",
-      getCapabilities: () => ({
-        supportsResume: false,
-        supportsCancel: false,
-        supportsLiveInput: false,
-        supportsApprovals: false,
-        supportsWorkdir: false,
-        supportsSandboxConfig: false,
-        supportsModelSelection: false,
-        supportsReasoningEffort: false,
-        supportsSessionFork: false,
-      }),
-      async run() {
-        return {
-          response: [],
-          messages: [],
-          usage: { promptTokens: 0, completionTokens: 0, cachedTokens: 0, cost: 0 },
-        };
-      },
-      handleCommand: async () => false,
-      listSlashCommands: () => [],
-    }), {
+    registerHarnessDriver({
+      name: "status-test",
       displayName: "Status Test",
       supportsInstances: true,
+      createInstance() {
+        return {
+          harness: createTestHarness("status-test"),
+        };
+      },
       async getStatus() {
         return {
           availability: "maintenance",
@@ -88,29 +103,39 @@ describe("harness driver registry", () => {
 });
 
 describe("resolveHarness", () => {
-  it("normalizes legacy harness factories to the unified contract", async () => {
-    registerHarness("legacy-test", () => ({
-      /**
-       * @param {AgentHarnessParams} _params
-       * @returns {Promise<AgentResult>}
-       */
-      async processLlmResponse(_params) {
+  it("registers drivers as value objects that materialize instance bundles", async () => {
+    registerHarnessDriver({
+      name: "bundle-test",
+      displayName: "Bundle Test",
+      supportsInstances: true,
+      createInstance(input) {
         return {
-          response: [],
-          messages: [],
-          usage: { promptTokens: 0, completionTokens: 0, cachedTokens: 0, cost: 0 },
+          status: { availability: "available", checkedAt: "2026-05-19T00:00:00.000Z" },
+          harness: createTestHarness(input.name),
+          textGeneration: {
+            generateSessionTitle: async () => ({ title: `title:${input.instanceId}` }),
+          },
         };
       },
-    }));
+    });
 
-    const harness = resolveHarness("legacy-test");
+    const instance = resolveHarnessInstance("bundle-test", { instanceId: "work" });
+    const harness = resolveHarness("bundle-test", { instanceId: "work" });
 
-    assert.equal(harness.getName(), "legacy-test");
+    assert.equal(instance.name, "bundle-test");
+    assert.equal(instance.instanceId, "work");
+    assert.equal(instance.status.availability, "available");
+    assert.equal(harness.getName(), "bundle-test");
     assert.equal(typeof harness.getCapabilities, "function");
     assert.equal(typeof harness.run, "function");
     assert.equal(typeof harness.handleCommand, "function");
     assert.equal(typeof harness.listSlashCommands, "function");
     assert.deepEqual(harness.listSlashCommands(), []);
+    assert.equal(await instance.textGeneration?.generateSessionTitle?.({
+      transcript: "User: hello",
+      messages: [],
+      chatInfo: undefined,
+    }), "title:work");
     assert.equal(await harness.handleCommand({
       chatId: "chat-1",
       command: "noop",
@@ -131,37 +156,28 @@ describe("resolveHarness", () => {
   it("materializes isolated harness instances from one driver", async () => {
     /** @type {string[]} */
     const created = [];
-    registerHarnessDriver("instance-test", () => {
-      assert.fail("Instance-aware test driver should use createInstance.");
-    }, {
+    registerHarnessDriver({
+      name: "instance-test",
       displayName: "Instance Test",
       supportsInstances: true,
       createInstance(input) {
         created.push(input.instanceId);
         return {
-          getName: () => "instance-test",
-          getCapabilities: () => ({
-            supportsResume: true,
-            supportsCancel: true,
-            supportsLiveInput: false,
-            supportsApprovals: false,
-            supportsWorkdir: true,
-            supportsSandboxConfig: false,
-            supportsModelSelection: true,
-            supportsReasoningEffort: false,
-            supportsSessionFork: false,
-            sessionModelSwitch: "unsupported",
-            supportsRollback: true,
+          harness: createTestHarness("instance-test", {
+            getCapabilities: () => ({
+              supportsResume: true,
+              supportsCancel: true,
+              supportsLiveInput: false,
+              supportsApprovals: false,
+              supportsWorkdir: true,
+              supportsSandboxConfig: false,
+              supportsModelSelection: true,
+              supportsReasoningEffort: false,
+              supportsSessionFork: false,
+              sessionModelSwitch: "unsupported",
+              supportsRollback: true,
+            }),
           }),
-          async run() {
-            return {
-              response: [],
-              messages: [],
-              usage: { promptTokens: 0, completionTokens: 0, cachedTokens: 0, cost: 0 },
-            };
-          },
-          handleCommand: async () => false,
-          listSlashCommands: () => [],
         };
       },
     });
@@ -203,36 +219,15 @@ describe("resolveHarness", () => {
     const created = [];
     /** @type {string[]} */
     const disposed = [];
-    registerHarnessDriver("reconcile-test", () => {
-      assert.fail("Instance-aware test driver should use createInstance.");
-    }, {
+    registerHarnessDriver({
+      name: "reconcile-test",
       displayName: "Reconcile Test",
       supportsInstances: true,
       createInstance(input) {
         const marker = typeof input.config.marker === "string" ? input.config.marker : "none";
         created.push(`${input.instanceId}:${marker}`);
         return {
-          getName: () => "reconcile-test",
-          getCapabilities: () => ({
-            supportsResume: false,
-            supportsCancel: false,
-            supportsLiveInput: false,
-            supportsApprovals: false,
-            supportsWorkdir: false,
-            supportsSandboxConfig: false,
-            supportsModelSelection: false,
-            supportsReasoningEffort: false,
-            supportsSessionFork: false,
-          }),
-          async run() {
-            return {
-              response: [],
-              messages: [],
-              usage: { promptTokens: 0, completionTokens: 0, cachedTokens: 0, cost: 0 },
-            };
-          },
-          handleCommand: async () => false,
-          listSlashCommands: () => [],
+          harness: createTestHarness("reconcile-test"),
           dispose: async () => {
             disposed.push(`${input.instanceId}:${marker}`);
           },
@@ -296,38 +291,20 @@ describe("resolveHarness", () => {
 
   it("routes non-instanced drivers to the default instance", () => {
     let createCount = 0;
-    registerHarnessDriver("single-test", () => {
-      createCount += 1;
-      return {
-        getName: () => "single-test",
-        getCapabilities: () => ({
-          supportsResume: false,
-          supportsCancel: false,
-          supportsLiveInput: false,
-          supportsApprovals: false,
-          supportsWorkdir: false,
-          supportsSandboxConfig: false,
-          supportsModelSelection: false,
-          supportsReasoningEffort: false,
-          supportsSessionFork: false,
-        }),
-        async run() {
-          return {
-            response: [],
-            messages: [],
-            usage: { promptTokens: 0, completionTokens: 0, cachedTokens: 0, cost: 0 },
-          };
-        },
-        handleCommand: async () => false,
-        listSlashCommands: () => [],
-      };
-    }, { supportsInstances: false });
+    registerHarnessDriver({
+      name: "single-test",
+      supportsInstances: false,
+      createInstance() {
+        createCount += 1;
+        return { harness: createTestHarness("single-test") };
+      },
+    });
 
     const first = resolveHarnessInstance("single-test", { instanceId: "ignored" });
     const second = resolveHarnessInstance("single-test", { instanceId: "other" });
 
-    assert.equal(first.instanceId, "default");
-    assert.equal(second.instanceId, "default");
+    assert.equal(first.instanceId, "single-test");
+    assert.equal(second.instanceId, "single-test");
     assert.equal(first.harness, second.harness);
     assert.equal(createCount, 1);
   });
@@ -431,33 +408,12 @@ describe("resolveHarness", () => {
   });
 
   it("exposes a provider-instance text generation hook", async () => {
-    registerHarnessDriver("text-generation-test", () => {
-      assert.fail("Instance-aware test driver should use createInstance.");
-    }, {
+    registerHarnessDriver({
+      name: "text-generation-test",
       supportsInstances: true,
       createInstance() {
         return {
-          getName: () => "text-generation-test",
-          getCapabilities: () => ({
-            supportsResume: false,
-            supportsCancel: false,
-            supportsLiveInput: false,
-            supportsApprovals: false,
-            supportsWorkdir: false,
-            supportsSandboxConfig: false,
-            supportsModelSelection: false,
-            supportsReasoningEffort: false,
-            supportsSessionFork: false,
-          }),
-          async run() {
-            return {
-              response: [],
-              messages: [],
-              usage: { promptTokens: 0, completionTokens: 0, cachedTokens: 0, cost: 0 },
-            };
-          },
-          handleCommand: async () => false,
-          listSlashCommands: () => [],
+          harness: createTestHarness("text-generation-test"),
           textGeneration: {
             generateSessionTitle: async () => ({ title: "Provider Title" }),
           },

@@ -110,14 +110,15 @@ export function normalizeSessionTitle(raw) {
  * @returns {Promise<string | null>}
  */
 async function generateTitleWithHarnessInstance(input) {
-  const harnessName = input.chatInfo?.harness;
-  if (!harnessName) {
+  const selectedHarnessName = input.chatInfo?.harness;
+  if (!selectedHarnessName) {
     return null;
   }
-  const { instanceId, config, displayName } = getHarnessInstanceConfig(
+  const { driver, instanceId, config, displayName } = getHarnessInstanceConfig(
     input.chatInfo?.harness_config,
-    harnessName,
+    selectedHarnessName,
   );
+  const harnessName = driver ?? selectedHarnessName;
   const instance = resolveHarnessInstance(harnessName, { instanceId, config, displayName });
   const generate = instance.textGeneration?.generateSessionTitle;
   if (!generate) {

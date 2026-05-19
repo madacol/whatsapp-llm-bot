@@ -12,11 +12,13 @@ const log = createLogger("harnesses");
 export async function registerOptionalHarnesses() {
   try {
     const { createClaudeAgentSdkHarness } = await import("./claude-agent-sdk.js");
-    registerHarnessDriver("claude-agent-sdk", createClaudeAgentSdkHarness, {
+    registerHarnessDriver({
+      name: "claude-agent-sdk",
       displayName: "Claude Agent SDK",
       supportsInstances: true,
       docsUrl: "https://docs.anthropic.com/en/docs/claude-code/sdk/sdk-overview",
       statusUrl: "https://status.anthropic.com/",
+      createInstance: () => ({ harness: createClaudeAgentSdkHarness() }),
     });
   } catch (error) {
     const message = errorToString(error);

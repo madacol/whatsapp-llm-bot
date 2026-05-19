@@ -118,6 +118,14 @@ function normalizeHarnessInstanceId(value) {
 }
 
 /**
+ * @param {string | null | undefined} harnessName
+ * @returns {string}
+ */
+function defaultInstanceIdForDriver(harnessName) {
+  return harnessName?.trim() || DEFAULT_HARNESS_INSTANCE_ID;
+}
+
+/**
  * @param {Record<string, unknown>} envelope
  * @returns {Record<string, unknown>}
  */
@@ -259,16 +267,17 @@ export function getScopedHarnessConfig(value, harnessName) {
 }
 
 /**
- * Resolve the selected provider instance and its isolated config. The legacy
- * harness namespace is the `default` provider instance for that harness.
+ * Resolve the selected provider instance and its isolated config. Canonical
+ * envelopes route by instance id and carry the driver kind; legacy scoped
+ * harness config falls back to an instance id matching the driver kind.
  * @param {unknown} value
  * @param {string | null | undefined} harnessName
- * @returns {{ instanceId: string, config: Record<string, unknown>, displayName?: string }}
+ * @returns {{ driver: string | null, instanceId: string, config: Record<string, unknown>, displayName?: string }}
  */
 export function getHarnessInstanceConfig(value, harnessName) {
   const normalized = normalizeHarnessConfig(value, harnessName);
   if (!harnessName) {
-    return { instanceId: DEFAULT_HARNESS_INSTANCE_ID, config: {} };
+    return { driver: null, instanceId: DEFAULT_HARNESS_INSTANCE_ID, config: {} };
   }
 
   const canonicalActiveInstanceId = normalizeHarnessInstanceId(
@@ -278,16 +287,15 @@ export function getHarnessInstanceConfig(value, harnessName) {
   if (canonicalActiveInstanceId && isObjectRecord(instancesRoot)) {
     const canonicalInstance = instancesRoot[canonicalActiveInstanceId];
     if (isObjectRecord(canonicalInstance)) {
-      const driver = typeof canonicalInstance.driver === "string" ? canonicalInstance.driver : null;
-      if (!driver || driver === harnessName) {
-        return {
-          instanceId: canonicalActiveInstanceId,
-          config: readCanonicalInstanceConfig(canonicalInstance),
-          ...(typeof canonicalInstance.displayName === "string"
-            ? { displayName: canonicalInstance.displayName }
-            : {}),
-        };
-      }
+      const driver = typeof canonicalInstance.driver === "string" ? canonicalInstance.driver : harnessName;
+      return {
+        driver,
+        instanceId: canonicalActiveInstanceId,
+        config: readCanonicalInstanceConfig(canonicalInstance),
+        ...(typeof canonicalInstance.displayName === "string"
+          ? { displayName: canonicalInstance.displayName }
+          : {}),
+      };
     }
   }
 
@@ -298,7 +306,8 @@ export function getHarnessInstanceConfig(value, harnessName) {
 
   if (!activeInstanceId || activeInstanceId === DEFAULT_HARNESS_INSTANCE_ID) {
     return {
-      instanceId: DEFAULT_HARNESS_INSTANCE_ID,
+      driver: harnessName,
+      instanceId: defaultInstanceIdForDriver(harnessName),
       config: getScopedHarnessConfig(normalized, harnessName),
     };
   }
@@ -309,6 +318,7 @@ export function getHarnessInstanceConfig(value, harnessName) {
     : null;
 
   return {
+    driver: harnessName,
     instanceId: activeInstanceId,
     config: isObjectRecord(instanceConfig) ? { ...instanceConfig } : {},
   };
