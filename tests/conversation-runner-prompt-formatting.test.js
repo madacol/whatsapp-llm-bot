@@ -139,6 +139,112 @@ describe("createConversationRunner prompt formatting", () => {
     assert.deepEqual(phases, ["start:conv-adapter-session-start:model-a", "send"]);
   });
 
+  it("uses semantic adapter turns and presents runtime events outside the harness", async () => {
+    await seedChat("conv-semantic-events", { enabled: true });
+    await updateChatConfig("conv-semantic-events", (current) => ({
+      ...current,
+      harness: "semantic-events",
+      harness_config: {},
+    }));
+
+    /** @type {Array<({ type: string, provider: string } & Record<string, unknown>) => void | Promise<void>>} */
+    const subscribers = [];
+    /** @type {string[]} */
+    const phases = [];
+    /** @type {SendContent[]} */
+    const replies = [];
+    registerHarnessDriver("semantic-events", () => ({
+      getName: () => "semantic-events",
+      getCapabilities: () => ({
+        supportsResume: true,
+        supportsCancel: false,
+        supportsLiveInput: false,
+        supportsApprovals: false,
+        supportsWorkdir: true,
+        supportsSandboxConfig: false,
+        supportsModelSelection: true,
+        supportsReasoningEffort: false,
+        supportsSessionFork: false,
+      }),
+      async run() {
+        assert.fail("semantic adapter should not use legacy run");
+      },
+      handleCommand: async () => false,
+      listSlashCommands: () => [],
+      createAdapter() {
+        return {
+          supportsSemanticTurns: true,
+          async startSession(input) {
+            phases.push("start");
+            return {
+              chatId: input.chatId,
+              harnessName: "semantic-events",
+              instanceId: "default",
+              continuationKey: "semantic-events:instance:default",
+              status: "ready",
+              resumeCursor: null,
+            };
+          },
+          async sendTurn(input) {
+            phases.push("semantic-send");
+            assert.ok("turn" in input, "Expected semantic turn input");
+            assert.equal(input.turn.chatId, "conv-semantic-events");
+            assert.ok(input.turn.messages?.some((message) => message.role === "user"));
+            for (const subscriber of subscribers) {
+              await subscriber({
+                type: "assistant.completed",
+                provider: "semantic-events",
+                text: "event response",
+                contentType: "text",
+                responseMode: "replace",
+              });
+            }
+            return {
+              response: [{ type: "text", text: "fallback response" }],
+              messages: input.turn.messages ?? [],
+              usage: { promptTokens: 0, completionTokens: 0, cachedTokens: 0, cost: 0 },
+            };
+          },
+          interruptTurn: async () => false,
+          injectMessage: async () => false,
+          stopSession: async () => false,
+          listSessions: () => [],
+          readThread: async () => null,
+          rollbackThread: async () => null,
+          streamEvents: {
+            async *[Symbol.asyncIterator]() {},
+          },
+          subscribeEvents(handler) {
+            subscribers.push(handler);
+            return () => {
+              const index = subscribers.indexOf(handler);
+              if (index >= 0) {
+                subscribers.splice(index, 1);
+              }
+            };
+          },
+        };
+      },
+    }));
+
+    const turn = createChatTurn({
+      chatId: "conv-semantic-events",
+      content: [{ type: "text", text: "hello" }],
+      io: {
+        reply: async (event) => {
+          if (event.kind === "content") {
+            replies.push(event.content);
+          }
+          return undefined;
+        },
+      },
+    });
+    await handleMessage(turn.context);
+
+    assert.deepEqual(phases, ["start", "semantic-send"]);
+    assert.deepEqual(replies, [[{ type: "markdown", text: "event response" }]]);
+  });
+
   it("runs command afterResponse hooks only after the command reply resolves", async () => {
     await seedChat("conv-command-after-response", { enabled: true });
     const { createConversationRunner } = await import("../conversation/create-conversation-runner.js");

@@ -15,6 +15,7 @@ import { buildSdkErrorResponse, clearStaleHarnessSession, getHarnessRunErrorMess
 import { wrapHooksWithFallbacks } from "./hook-fallbacks.js";
 import { createActionRequestRunState, executeQueuedActionRequests } from "../action-request-runtime.js";
 import { createActiveSessionDirectory } from "./active-session-directory.js";
+import { createHarnessEventStreamController } from "./adapter.js";
 import {
   getCodexSessionId,
   saveCodexSession,
@@ -36,6 +37,161 @@ const CODEX_HARNESS_CAPABILITIES = {
   supportsReasoningEffort: false,
   supportsSessionFork: true,
 };
+
+/**
+ * @param {string | undefined} input
+ * @param {Message[] | undefined} messages
+ * @returns {{ prompt: string, messages: Message[] }}
+ */
+function buildSemanticCodexPrompt(input, messages) {
+  if (messages?.length) {
+    return {
+      prompt: input?.trim() || buildCodexPrompt(messages),
+      messages,
+    };
+  }
+  /** @type {UserMessage} */
+  const message = {
+    role: "user",
+    content: input?.trim()
+      ? [{ type: "text", text: input }]
+      : [],
+  };
+  return {
+    prompt: input?.trim() ?? "",
+    messages: [message],
+  };
+}
+
+/**
+ * @param {string} rawArguments
+ * @returns {Record<string, unknown>}
+ */
+function parseRuntimeToolArguments(rawArguments) {
+  try {
+    const parsed = JSON.parse(rawArguments || "{}");
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? parsed
+      : {};
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * @param {ToolContentBlock[]} blocks
+ * @returns {string}
+ */
+function summarizeToolBlocks(blocks) {
+  return blocks
+    .map((block) => ("text" in block && typeof block.text === "string" ? block.text : `[${block.type}]`))
+    .join("\n");
+}
+
+/**
+ * @param {ReturnType<typeof createHarnessEventStreamController>} events
+ * @returns {AgentIOHooks}
+ */
+function createCodexEventHooks(events) {
+  /** @type {Map<string, { id: string, name: string, arguments: Record<string, unknown> }>} */
+  const activeTools = new Map();
+
+  /**
+   * @param {string} toolName
+   * @returns {{ id: string, name: string, arguments: Record<string, unknown> }}
+   */
+  function takeActiveTool(toolName) {
+    const matching = [...activeTools.values()].find((tool) => tool.name === toolName);
+    const tool = matching ?? activeTools.values().next().value ?? {
+      id: `codex-tool:${Date.now()}`,
+      name: toolName,
+      arguments: {},
+    };
+    activeTools.delete(tool.id);
+    return tool;
+  }
+
+  return wrapHooksWithFallbacks({
+    ...NO_OP_HOOKS,
+    async onReasoning(event) {
+      events.emit({
+        type: event.status === "completed" ? "reasoning.completed" : event.status === "started" ? "reasoning.started" : "reasoning.updated",
+        status: event.status,
+        text: event.text ?? event.contentParts.join(""),
+        summaryParts: event.summaryParts,
+        contentParts: event.contentParts,
+      });
+    },
+    async onLlmResponse(text) {
+      events.emit({
+        type: "assistant.completed",
+        text,
+        displayText: text,
+        contentType: "markdown",
+        responseMode: "replace",
+      });
+    },
+    async onUsage(cost, tokens) {
+      events.emit({
+        type: "usage.updated",
+        usage: {
+          promptTokens: tokens.prompt,
+          completionTokens: tokens.completion,
+          cachedTokens: tokens.cached,
+          cost: Number.parseFloat(cost) || 0,
+          ...(tokens.total !== undefined ? { totalTokens: tokens.total } : {}),
+          ...(tokens.reasoning !== undefined ? { reasoningTokens: tokens.reasoning } : {}),
+          ...(tokens.contextWindow !== undefined ? { contextWindow: tokens.contextWindow } : {}),
+        },
+      });
+    },
+    async onFileChange(change) {
+      events.emit({ type: "file-change.completed", change });
+    },
+    async onToolCall(toolCall) {
+      const tool = {
+        id: toolCall.id,
+        name: toolCall.name,
+        arguments: parseRuntimeToolArguments(toolCall.arguments),
+      };
+      activeTools.set(tool.id, tool);
+      events.emit({
+        type: "tool.started",
+        tool,
+      });
+    },
+    async onToolComplete(toolCall) {
+      const tool = takeActiveTool(toolCall.name);
+      events.emit({
+        type: "tool.completed",
+        tool,
+      });
+    },
+    async onToolResult(blocks, toolName, permissions) {
+      const tool = takeActiveTool(toolName);
+      events.emit({
+        type: "tool.completed",
+        tool: {
+          ...tool,
+          output: summarizeToolBlocks(blocks),
+          outputBlocks: blocks,
+          permissions,
+        },
+      });
+    },
+    async onToolError(error) {
+      events.emit({
+        type: "tool.failed",
+        tool: {
+          id: `codex-error:${Date.now()}`,
+          name: "codex",
+          arguments: {},
+          output: error,
+        },
+      });
+    },
+  });
+}
 
 /**
  * @param {Message[]} messages
@@ -176,15 +332,6 @@ export function createCodexHarness(deps = {}) {
   };
 
   /**
-   * @returns {AsyncIterable<never>}
-   */
-  function emptyEventStream() {
-    return {
-      async *[Symbol.asyncIterator]() {},
-    };
-  }
-
-  /**
    * @param {HarnessAdapterCreateInput} input
    * @returns {HarnessAdapter}
    */
@@ -192,7 +339,9 @@ export function createCodexHarness(deps = {}) {
     const instanceContinuationKey = input.continuationKey;
     const instanceId = input.instanceId;
     const harnessName = input.name;
+    const events = createHarnessEventStreamController(harnessName);
     return {
+      supportsSemanticTurns: true,
       async startSession({ chatId, runConfig, resumeCursor }) {
         /** @type {HarnessRuntimeSession} */
         const session = {
@@ -206,11 +355,17 @@ export function createCodexHarness(deps = {}) {
           ...(resumeCursor ? { resumeCursor } : {}),
         };
         adapterSessions.set(chatId, session);
+        events.emit({ type: "session.started", session });
         return session;
       },
       async sendTurn(request) {
-        if (!("params" in request)) {
-          throw new Error("Codex adapter requires compatibility params until semantic Codex turns are implemented.");
+        if ("turn" in request) {
+          return runCodexSemanticTurn(request.turn, {
+            instanceId,
+            harnessName,
+            continuationKey: instanceContinuationKey,
+            events,
+          });
         }
         const { params } = request;
         return runCodexTurn(params, {
@@ -228,6 +383,16 @@ export function createCodexHarness(deps = {}) {
       async stopSession(chatId) {
         const key = typeof chatId === "string" ? chatId : chatId.id;
         adapterSessions.delete(key);
+        events.emit({
+          type: "session.stopped",
+          session: {
+            chatId: key,
+            harnessName,
+            instanceId,
+            continuationKey: instanceContinuationKey,
+            status: "stopped",
+          },
+        });
         return cancel(chatId);
       },
       listSessions() {
@@ -239,7 +404,8 @@ export function createCodexHarness(deps = {}) {
       async rollbackThread(_sessionId, _numTurns) {
         return null;
       },
-      streamEvents: emptyEventStream(),
+      streamEvents: events.stream,
+      subscribeEvents: events.subscribe,
     };
   }
 
@@ -289,6 +455,140 @@ export function createCodexHarness(deps = {}) {
    */
   async function run(params) {
     return adapter.sendTurn({ params });
+  }
+
+  /**
+   * @param {HarnessSemanticTurnInput} turn
+   * @param {{
+   *   instanceId: string,
+   *   harnessName: string,
+   *   continuationKey: string,
+   *   events: ReturnType<typeof createHarnessEventStreamController>,
+   * }} adapterIdentity
+   * @returns {Promise<AgentResult>}
+   */
+  async function runCodexSemanticTurn(turn, adapterIdentity) {
+    const semanticPrompt = buildSemanticCodexPrompt(turn.input, turn.messages);
+    const { prompt, messages } = semanticPrompt;
+    if (!prompt) {
+      return {
+        response: [{ type: "text", text: "No input message found." }],
+        messages,
+        usage: { promptTokens: 0, completionTokens: 0, cachedTokens: 0, cost: 0 },
+      };
+    }
+
+    const existingAdapterSession = adapterSessions.get(turn.chatId);
+    const sessionId = turn.resumeCursor ?? existingAdapterSession?.resumeCursor ?? null;
+    const effectiveRunConfig = addAttachmentRootToRunConfig(
+      await sanitizeRunConfig(turn.chatId, turn.runConfig),
+      messages,
+    );
+    /** @type {ActiveCodexRun | null} */
+    let activeRun = null;
+    adapterSessions.set(turn.chatId, {
+      chatId: turn.chatId,
+      harnessName: adapterIdentity.harnessName,
+      instanceId: adapterIdentity.instanceId,
+      continuationKey: adapterIdentity.continuationKey,
+      status: "running",
+      workdir: effectiveRunConfig?.workdir ?? null,
+      model: effectiveRunConfig?.model ?? null,
+      ...(sessionId ? { resumeCursor: sessionId } : {}),
+    });
+    const runningSession = adapterSessions.get(turn.chatId);
+    if (runningSession) {
+      adapterIdentity.events.emit({ type: "session.updated", session: runningSession });
+    }
+    adapterIdentity.events.emit({
+      type: "turn.started",
+      turn: { id: turn.chatId, chatId: turn.chatId, status: "started" },
+    });
+    const hooks = createCodexEventHooks(adapterIdentity.events);
+    try {
+      const started = await beginRun({
+        chatId: turn.chatId,
+        prompt,
+        externalInstructions: turn.externalInstructions,
+        messages,
+        sessionId,
+        runConfig: effectiveRunConfig,
+        hooks,
+        isAborted: () => activeRun?.aborted ?? false,
+      });
+      activeRun = {
+        abortController: started.abortController,
+        done: started.done,
+        ...(started.steer && { steer: started.steer }),
+        ...(started.interrupt && { interrupt: started.interrupt }),
+        aborted: false,
+      };
+      activeSessions.register(turn.chatId, activeRun);
+
+      const completed = await started.done;
+      const readySession = {
+        ...(adapterSessions.get(turn.chatId) ?? existingAdapterSession ?? {
+          chatId: turn.chatId,
+          harnessName: adapterIdentity.harnessName,
+          instanceId: adapterIdentity.instanceId,
+          continuationKey: adapterIdentity.continuationKey,
+        }),
+        status: "ready",
+        resumeCursor: completed.sessionId ?? sessionId ?? null,
+      };
+      adapterSessions.set(turn.chatId, /** @type {HarnessRuntimeSession} */ (readySession));
+      adapterIdentity.events.emit({ type: "session.updated", session: readySession });
+      adapterIdentity.events.emit({
+        type: "turn.completed",
+        turn: { id: turn.chatId, chatId: turn.chatId, status: "completed" },
+      });
+      return completed.result;
+    } catch (error) {
+      const current = adapterSessions.get(turn.chatId);
+      if (current) {
+        const stopped = /** @type {HarnessRuntimeSession} */ ({ ...current, status: "stopped" });
+        adapterSessions.set(turn.chatId, stopped);
+        adapterIdentity.events.emit({ type: "session.updated", session: stopped });
+      }
+      await clearStaleHarnessSession({
+        existingSessionId: sessionId,
+        error,
+        clearSession: async () => {
+          const latest = adapterSessions.get(turn.chatId);
+          const cleared = /** @type {HarnessRuntimeSession} */ ({
+            ...(latest ?? {
+              chatId: turn.chatId,
+              harnessName: adapterIdentity.harnessName,
+              instanceId: adapterIdentity.instanceId,
+              continuationKey: adapterIdentity.continuationKey,
+            }),
+            status: "stopped",
+            resumeCursor: null,
+          });
+          adapterSessions.set(turn.chatId, cleared);
+          adapterIdentity.events.emit({ type: "session.updated", session: cleared });
+        },
+        log,
+        harnessLabel: "Codex",
+      });
+      const errorMessage = getHarnessRunErrorMessage(error);
+      if (!isHandledCodexRunError(error)) {
+        await hooks.onToolError?.(errorMessage);
+      }
+      adapterIdentity.events.emit({
+        type: "turn.completed",
+        turn: { id: turn.chatId, chatId: turn.chatId, status: "failed" },
+      });
+      return {
+        response: buildSdkErrorResponse(errorMessage),
+        messages,
+        usage: { promptTokens: 0, completionTokens: 0, cachedTokens: 0, cost: 0 },
+      };
+    } finally {
+      if (activeRun) {
+        activeSessions.unregister(turn.chatId, activeRun);
+      }
+    }
   }
 
   /**

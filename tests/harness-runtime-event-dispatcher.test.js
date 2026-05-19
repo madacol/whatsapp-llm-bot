@@ -153,8 +153,8 @@ describe("createHarnessRuntimeEventDispatcher", () => {
       name: "Read",
       arguments: JSON.stringify({ file_path: "README.md" }),
     }]);
-    assert.equal(pausedCount, 1);
-    assert.equal(composingCount, 1);
+    assert.equal(pausedCount, 0);
+    assert.equal(composingCount, 0);
     assert.equal(inspectStates.length, 2);
     assert.equal(inspectStates.at(-1)?.kind, "tool");
     assert.equal(

@@ -52,6 +52,7 @@
 
 /**
  * @typedef {{
+ *   supportsSemanticTurns?: boolean,
  *   startSession: (input: HarnessStartSessionInput) => Promise<HarnessRuntimeSession>,
  *   sendTurn: (input: HarnessSendTurnInput) => Promise<AgentResult>,
  *   interruptTurn: (input: HarnessInterruptInput) => Promise<boolean>,
@@ -61,6 +62,7 @@
  *   readThread: (sessionId: string) => Promise<null>,
  *   rollbackThread: (sessionId: string, numTurns: number) => Promise<null>,
  *   streamEvents: AsyncIterable<{ type: string, provider: string } & Record<string, unknown>>,
+ *   subscribeEvents?: (handler: (event: { type: string, provider: string } & Record<string, unknown>) => void | Promise<void>) => () => void,
  * }} HarnessAdapter
  */
 
@@ -68,11 +70,12 @@
  * @param {string} provider
  * @returns {{
  *   emit: (event: { type: string, provider?: string } & Record<string, unknown>) => void,
+ *   subscribe: (handler: (event: { type: string, provider: string } & Record<string, unknown>) => void | Promise<void>) => () => void,
  *   stream: AsyncIterable<{ type: string, provider: string } & Record<string, unknown>>,
  * }}
  */
-function createEventStreamController(provider) {
-  /** @type {Set<(event: { type: string, provider: string } & Record<string, unknown>) => void>} */
+export function createHarnessEventStreamController(provider) {
+  /** @type {Set<(event: { type: string, provider: string } & Record<string, unknown>) => void | Promise<void>>} */
   const listeners = new Set();
   return {
     emit(event) {
@@ -81,8 +84,14 @@ function createEventStreamController(provider) {
         provider: event.provider ?? provider,
       };
       for (const listener of listeners) {
-        listener(normalized);
+        void listener(normalized);
       }
+    },
+    subscribe(handler) {
+      listeners.add(handler);
+      return () => {
+        listeners.delete(handler);
+      };
     },
     stream: {
       async *[Symbol.asyncIterator]() {
@@ -191,7 +200,7 @@ function buildLegacyParamsFromSemanticTurn(turn) {
 export function createHarnessAdapterFromHarness(input) {
   /** @type {Map<string, HarnessRuntimeSession>} */
   const sessions = new Map();
-  const events = createEventStreamController(input.name);
+  const events = createHarnessEventStreamController(input.name);
 
   return {
     async startSession({ chatId, runConfig, resumeCursor }) {
@@ -271,5 +280,6 @@ export function createHarnessAdapterFromHarness(input) {
       return null;
     },
     streamEvents: events.stream,
+    subscribeEvents: events.subscribe,
   };
 }

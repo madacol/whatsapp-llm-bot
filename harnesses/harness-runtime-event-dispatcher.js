@@ -15,16 +15,19 @@ import { getHarnessRawEventLoggerFromEnv } from "./raw-event-log.js";
 const log = createLogger("harness:runtime-events");
 
 /**
- * @type {Pick<Required<AgentIOHooks>, "onComposing" | "onPaused" | "onReasoning" | "onToolCall" | "onLlmResponse" | "onFileChange" | "onUsage">}
+ * @type {Pick<Required<AgentIOHooks>, "onComposing" | "onPaused" | "onReasoning" | "onToolCall" | "onToolComplete" | "onToolResult" | "onLlmResponse" | "onFileChange" | "onUsage" | "onToolError">}
  */
 const DEFAULT_RUNTIME_EVENT_HOOKS = {
   onComposing: async () => {},
   onPaused: async () => {},
   onReasoning: async () => {},
   onToolCall: async () => {},
+  onToolComplete: async () => {},
+  onToolResult: async () => {},
   onLlmResponse: async () => {},
   onFileChange: async () => {},
   onUsage: async () => {},
+  onToolError: async () => {},
 };
 
 /**
@@ -66,7 +69,7 @@ function buildRuntimeToolPresentation(tool, workdir) {
  * @param {{
  *   provider: HarnessRuntimeProvider,
  *   messages: Message[],
- *   hooks?: Pick<AgentIOHooks, "onComposing" | "onPaused" | "onReasoning" | "onToolCall" | "onLlmResponse" | "onFileChange" | "onUsage">,
+ *   hooks?: Pick<AgentIOHooks, "onComposing" | "onPaused" | "onReasoning" | "onToolCall" | "onToolComplete" | "onToolResult" | "onLlmResponse" | "onFileChange" | "onUsage" | "onToolError">,
  *   workdir?: string | null,
  *   emitUsage?: boolean,
  *   rawEventLogger?: HarnessRawEventLogger | null,
@@ -127,20 +130,32 @@ export function createHarnessRuntimeEventDispatcher(input) {
       ...(handle ? { handle } : {}),
       presentation,
     });
-    await hooks.onPaused();
-    await hooks.onComposing();
   }
 
   /**
    * @param {HarnessRuntimeToolEvent} event
-   * @returns {void}
+   * @returns {Promise<void>}
    */
-  function handleToolProgress(event) {
+  async function handleToolProgress(event) {
     const active = activeTools.get(event.tool.id);
     if (active?.handle) {
       active.handle.setInspect(toolInspectState(active.presentation, event.tool.output));
     }
-    if (event.type === "tool.completed" || event.type === "tool.failed") {
+    if (event.type === "tool.completed") {
+      await hooks.onToolComplete({
+        id: event.tool.id,
+        name: event.tool.name,
+        arguments: JSON.stringify(event.tool.arguments),
+      });
+      if (event.tool.outputBlocks) {
+        await hooks.onToolResult(event.tool.outputBlocks, event.tool.name, event.tool.permissions ?? {});
+      }
+      activeTools.delete(event.tool.id);
+    }
+    if (event.type === "tool.failed") {
+      if (event.tool.output) {
+        await hooks.onToolError(event.tool.output);
+      }
       activeTools.delete(event.tool.id);
     }
   }
@@ -187,7 +202,7 @@ export function createHarnessRuntimeEventDispatcher(input) {
       case "tool.updated":
       case "tool.completed":
       case "tool.failed":
-        handleToolProgress(event);
+        await handleToolProgress(event);
         return;
       case "assistant.completed":
         if (event.responseMode === "append") {

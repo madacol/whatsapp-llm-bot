@@ -20,6 +20,8 @@
  *   name: string,
  *   arguments: Record<string, unknown>,
  *   output?: string,
+ *   outputBlocks?: ToolContentBlock[],
+ *   permissions?: PermissionFlags,
  * }} HarnessRuntimeTool
  */
 
@@ -31,6 +33,7 @@
  *   status: "starting" | "ready" | "running" | "stopped" | "error",
  *   workdir?: string | null,
  *   model?: string | null,
+ *   resumeCursor?: string | null,
  * }} HarnessRuntimeSession
  */
 
