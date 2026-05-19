@@ -333,6 +333,234 @@ export function createConversationRunner({ store, llmClient, getActionsFn, execu
   }
 
   /**
+   * Run a built request through either the app runner or a provider adapter.
+   * Provider adapters emit runtime events separately, so those events are
+   * merged back into the returned result when they produced user-visible text.
+   * @param {{
+   *   chatId: string,
+   *   harness: AgentHarness,
+   *   harnessInstance: ReturnType<typeof resolveHarnessInstance> | null,
+   *   hooks: AgentIOHooks,
+   *   runConfig: HarnessRunConfig,
+   *   runRequest: AgentHarnessParams,
+   *   getResumeCursor: () => string | null,
+   *   saveHarnessSessionAndBinding: import("../store.js").Store["saveHarnessSession"],
+   * }} input
+   * @returns {Promise<AgentResult>}
+   */
+  async function runHarnessRequestWithRuntimeEvents({
+    chatId,
+    harness,
+    harnessInstance,
+    hooks,
+    runConfig,
+    runRequest,
+    getResumeCursor,
+    saveHarnessSessionAndBinding,
+  }) {
+    if (!harnessInstance) {
+      return harness.run(runRequest);
+    }
+
+    const runtimeDispatcher = createHarnessRuntimeEventDispatcher({
+      provider: harness.getName(),
+      messages: runRequest.messages,
+      hooks,
+      workdir: runConfig.workdir ?? null,
+    });
+    /** @type {Set<Promise<void>>} */
+    const pendingEventHandlers = new Set();
+    const unsubscribe = harnessInstance.adapter.subscribeEvents?.((event) => {
+      /** @type {Promise<void>} */
+      let pending;
+      pending = runtimeDispatcher
+        .handleEvent(/** @type {Parameters<typeof runtimeDispatcher.handleEvent>[0]} */ (event))
+        .catch((error) => {
+          log.warn("Failed to handle harness runtime event:", error);
+        })
+        .finally(() => {
+          pendingEventHandlers.delete(pending);
+        });
+      pendingEventHandlers.add(pending);
+    });
+    try {
+      const result = await harnessInstance.adapter.sendTurn({
+        chatId,
+        messages: runRequest.messages,
+        externalInstructions: runRequest.llmConfig.externalInstructions,
+        runConfig,
+        resumeCursor: getResumeCursor(),
+      });
+      await Promise.allSettled([...pendingEventHandlers]);
+      const activeSession = harnessInstance.adapter
+        .listSessions()
+        .find((session) => session.chatId === chatId);
+      const currentResumeCursor = getResumeCursor();
+      if (activeSession?.resumeCursor) {
+        await saveHarnessSessionAndBinding(chatId, {
+          id: activeSession.resumeCursor,
+          kind: /** @type {HarnessSessionRef["kind"]} */ (harness.getName()),
+        });
+      } else if (currentResumeCursor && activeSession && ["stopped", "error"].includes(activeSession.status)) {
+        await saveHarnessSessionAndBinding(chatId, null);
+      }
+      if (runtimeDispatcher.result.response.length === 0) {
+        return result;
+      }
+      const runtimeUsage = runtimeDispatcher.result.usage;
+      const hasRuntimeUsage = runtimeUsage.promptTokens > 0
+        || runtimeUsage.completionTokens > 0
+        || runtimeUsage.cachedTokens > 0
+        || runtimeUsage.cost > 0;
+      return {
+        ...result,
+        response: runtimeDispatcher.result.response,
+        usage: hasRuntimeUsage ? runtimeUsage : result.usage,
+      };
+    } finally {
+      unsubscribe?.();
+    }
+  }
+
+  /**
+   * Execute the selected app runner/provider harness for one chat turn.
+   * @param {{
+   *   turn: ChatTurn,
+   *   chatInfo: import("../store.js").ChatRow | undefined,
+   *   context: ExecuteActionContext,
+   *   message: UserMessage,
+   *   persona: AgentDefinition | null,
+   *   actions: Action[],
+   *   actionResolver: (name: string) => Promise<AppAction | null>,
+   *   harness: AgentHarness,
+   *   harnessInstance: ReturnType<typeof resolveHarnessInstance> | null,
+   *   resolvedBinding: ResolvedChatBinding,
+   *   keepPresenceAlive: () => Promise<void>,
+   *   endPresence: () => Promise<void>,
+   *   refreshPresenceLease: () => void,
+   * }} input
+   * @returns {Promise<{ result: AgentResult, deliveredContentSignatures: Set<string> }>}
+   */
+  async function runResolvedHarnessTurn({
+    turn,
+    chatInfo,
+    context,
+    message,
+    persona,
+    actions,
+    actionResolver,
+    harness,
+    harnessInstance,
+    resolvedBinding,
+    keepPresenceAlive,
+    endPresence,
+    refreshPresenceLease,
+  }) {
+    const { chatId, senderIds } = turn;
+    const runConfig = buildRunConfig(chatId, chatInfo, turn.chatName, harness.getName(), resolvedBinding);
+    let currentResumeCursor = chatInfo?.harness_session_kind === harness.getName()
+      ? chatInfo.harness_session_id
+      : null;
+    if (harnessInstance) {
+      const startedAdapterSession = await harnessInstance.adapter.startSession({
+        chatId,
+        runConfig,
+        resumeCursor: currentResumeCursor,
+      });
+      currentResumeCursor = startedAdapterSession.resumeCursor ?? currentResumeCursor;
+    }
+
+    /**
+     * @param {"running" | "ready" | "stopped" | "error"} status
+     * @param {string | null | undefined} resumeCursor
+     * @returns {void}
+     */
+    const upsertSessionBinding = (status, resumeCursor) => {
+      if (!harnessInstance) {
+        return;
+      }
+      if (resumeCursor !== undefined) {
+        currentResumeCursor = resumeCursor;
+      }
+      harnessSessionDirectory.upsert({
+        chatId,
+        harnessName: harness.getName(),
+        instanceId: harnessInstance.instanceId,
+        status,
+        resumeCursor: currentResumeCursor,
+        runtimeMode: runConfig.sandboxMode ?? null,
+        runtimePayload: {
+          workdir: runConfig.workdir ?? null,
+          model: runConfig.model ?? null,
+          reasoningEffort: runConfig.reasoningEffort ?? null,
+          approvalPolicy: runConfig.approvalPolicy ?? null,
+          approvalsReviewer: runConfig.approvalsReviewer ?? null,
+        },
+      });
+    };
+
+    /** @type {Set<string>} */
+    const deliveredContentSignatures = new Set();
+    const hooks = buildAgentIoHooks(
+      context,
+      keepPresenceAlive,
+      endPresence,
+      refreshPresenceLease,
+      runConfig.workdir ?? null,
+      resolveOutputVisibility(chatInfo?.output_visibility),
+      (deliveredContent) => {
+        deliveredContentSignatures.add(getDeliveredContentSignature(deliveredContent));
+      },
+    );
+    runCoordinator.markRunActive(chatId);
+    upsertSessionBinding("running", undefined);
+
+    /** @type {import("../store.js").Store["saveHarnessSession"]} */
+    const saveHarnessSessionAndBinding = async (sessionChatId, sessionRef) => {
+      await saveHarnessSession(sessionChatId, sessionRef);
+      if (sessionChatId === chatId) {
+        upsertSessionBinding(sessionRef ? "ready" : "stopped", sessionRef?.id ?? null);
+      }
+    };
+
+    const runRequest = await buildHarnessRunRequest({
+      chatId,
+      senderIds,
+      chatInfo,
+      chatName: turn.chatName,
+      context,
+      message,
+      persona,
+      actions,
+      actionResolver,
+      llmClient,
+      getMessages,
+      executeActionFn,
+      addMessage,
+      updateToolMessage,
+      saveHarnessSession: saveHarnessSessionAndBinding,
+      hooks,
+      harnessName: harness.getName(),
+      resolvedBinding,
+      bufferedTexts: runCoordinator.consumeBufferedTexts(chatId),
+    });
+
+    const result = await runHarnessRequestWithRuntimeEvents({
+      chatId,
+      harness,
+      harnessInstance,
+      hooks,
+      runConfig,
+      runRequest,
+      getResumeCursor: () => currentResumeCursor,
+      saveHarnessSessionAndBinding,
+    });
+    upsertSessionBinding("ready", undefined);
+
+    return { result, deliveredContentSignatures };
+  }
+
+  /**
    * Handle a regular (non-command) message by delegating to the selected harness.
    * @param {{
    *   turn: ChatTurn,
@@ -419,9 +647,6 @@ export function createConversationRunner({ store, llmClient, getActionsFn, execu
 
     let presenceRefreshVersion = 0;
     let presenceStopped = false;
-    /** @type {Set<string>} */
-    const deliveredContentSignatures = new Set();
-
     /** Refresh the presence lease in the background without delaying the next harness event. */
     const refreshPresenceLease = () => {
       const refreshVersion = ++presenceRefreshVersion;
@@ -438,151 +663,21 @@ export function createConversationRunner({ store, llmClient, getActionsFn, execu
     /** @type {ChatTurn | null} */
     let nextTurn = null;
     try {
-      const runConfig = buildRunConfig(chatId, chatInfo, turn.chatName, harness.getName(), resolvedBinding);
-      let currentResumeCursor = chatInfo?.harness_session_kind === harness.getName()
-        ? chatInfo.harness_session_id
-        : null;
-      if (harnessInstance) {
-        const startedAdapterSession = await harnessInstance.adapter.startSession({
-          chatId,
-          runConfig,
-          resumeCursor: currentResumeCursor,
-        });
-        currentResumeCursor = startedAdapterSession.resumeCursor ?? currentResumeCursor;
-      }
-      const upsertSessionBinding = (/** @type {"running" | "ready" | "stopped" | "error"} */ status, /** @type {string | null | undefined} */ resumeCursor) => {
-        if (!harnessInstance) {
-          return;
-        }
-        if (resumeCursor !== undefined) {
-          currentResumeCursor = resumeCursor;
-        }
-        harnessSessionDirectory.upsert({
-          chatId,
-          harnessName: harness.getName(),
-          instanceId: harnessInstance.instanceId,
-          status,
-          resumeCursor: currentResumeCursor,
-          runtimeMode: runConfig.sandboxMode ?? null,
-          runtimePayload: {
-            workdir: runConfig.workdir ?? null,
-            model: runConfig.model ?? null,
-            reasoningEffort: runConfig.reasoningEffort ?? null,
-            approvalPolicy: runConfig.approvalPolicy ?? null,
-            approvalsReviewer: runConfig.approvalsReviewer ?? null,
-          },
-        });
-      };
-      const hooks = buildAgentIoHooks(
-        context,
-        keepPresenceAlive,
-        endPresence,
-        refreshPresenceLease,
-        runConfig.workdir ?? null,
-        resolveOutputVisibility(chatInfo?.output_visibility),
-        (deliveredContent) => {
-          deliveredContentSignatures.add(getDeliveredContentSignature(deliveredContent));
-        },
-      );
-      runCoordinator.markRunActive(chatId);
-      upsertSessionBinding("running", undefined);
-
-      /** @type {import("../store.js").Store["saveHarnessSession"]} */
-      const saveHarnessSessionAndBinding = async (sessionChatId, sessionRef) => {
-        await saveHarnessSession(sessionChatId, sessionRef);
-        if (sessionChatId === chatId) {
-          upsertSessionBinding(sessionRef ? "ready" : "stopped", sessionRef?.id ?? null);
-        }
-      };
-
-      const runRequest = await buildHarnessRunRequest({
-        chatId,
-        senderIds,
+      const { result, deliveredContentSignatures } = await runResolvedHarnessTurn({
+        turn,
         chatInfo,
-        chatName: turn.chatName,
         context,
         message,
         persona,
         actions,
         actionResolver,
-        llmClient,
-        getMessages,
-        executeActionFn,
-        addMessage,
-        updateToolMessage,
-        saveHarnessSession: saveHarnessSessionAndBinding,
-        hooks,
-        harnessName: harness.getName(),
+        harness,
+        harnessInstance,
         resolvedBinding,
-        bufferedTexts: runCoordinator.consumeBufferedTexts(chatId),
+        keepPresenceAlive,
+        endPresence,
+        refreshPresenceLease,
       });
-
-      const runWithRuntimeEvents = async () => {
-        if (!harnessInstance) {
-          return harness.run(runRequest);
-        }
-
-        const runtimeDispatcher = createHarnessRuntimeEventDispatcher({
-          provider: harness.getName(),
-          messages: runRequest.messages,
-          hooks,
-          workdir: runConfig.workdir ?? null,
-        });
-        /** @type {Set<Promise<void>>} */
-        const pendingEventHandlers = new Set();
-        const unsubscribe = harnessInstance.adapter.subscribeEvents?.((event) => {
-          /** @type {Promise<void>} */
-          let pending;
-          pending = runtimeDispatcher
-            .handleEvent(/** @type {Parameters<typeof runtimeDispatcher.handleEvent>[0]} */ (event))
-            .catch((error) => {
-              log.warn("Failed to handle harness runtime event:", error);
-            })
-            .finally(() => {
-              pendingEventHandlers.delete(pending);
-            });
-          pendingEventHandlers.add(pending);
-        });
-        try {
-          const result = await harnessInstance.adapter.sendTurn({
-            chatId,
-            messages: runRequest.messages,
-            externalInstructions: runRequest.llmConfig.externalInstructions,
-            runConfig,
-            resumeCursor: currentResumeCursor,
-          });
-          await Promise.allSettled([...pendingEventHandlers]);
-          const activeSession = harnessInstance.adapter
-            .listSessions()
-            .find((session) => session.chatId === chatId);
-          if (activeSession?.resumeCursor) {
-            await saveHarnessSessionAndBinding(chatId, {
-              id: activeSession.resumeCursor,
-              kind: /** @type {HarnessSessionRef["kind"]} */ (harness.getName()),
-            });
-          } else if (currentResumeCursor && activeSession && ["stopped", "error"].includes(activeSession.status)) {
-            await saveHarnessSessionAndBinding(chatId, null);
-          }
-          if (runtimeDispatcher.result.response.length === 0) {
-            return result;
-          }
-          const runtimeUsage = runtimeDispatcher.result.usage;
-          const hasRuntimeUsage = runtimeUsage.promptTokens > 0
-            || runtimeUsage.completionTokens > 0
-            || runtimeUsage.cachedTokens > 0
-            || runtimeUsage.cost > 0;
-          return {
-            ...result,
-            response: runtimeDispatcher.result.response,
-            usage: hasRuntimeUsage ? runtimeUsage : result.usage,
-          };
-        } finally {
-          unsubscribe?.();
-        }
-      };
-
-      const result = await runWithRuntimeEvents();
-      upsertSessionBinding("ready", undefined);
       if (result.response.length > 0) {
         const responseSignature = getDeliveredContentSignature(result.response);
         if (!deliveredContentSignatures.has(responseSignature)) {
