@@ -116,11 +116,12 @@ async function resolveConversationHarness(chatInfo) {
   const persona = chatInfo?.active_persona
     ? await getAgent(chatInfo.active_persona)
     : null;
-  const harnessName = resolveHarnessName(persona, chatInfo);
-  const { instanceId, config: harnessConfig, displayName } = getHarnessInstanceConfig(
+  const selectedHarnessName = resolveHarnessName(persona, chatInfo);
+  const { driver, instanceId, config: harnessConfig, displayName } = getHarnessInstanceConfig(
     chatInfo?.harness_config,
-    harnessName,
+    selectedHarnessName,
   );
+  const harnessName = driver ?? selectedHarnessName;
   const harnessInstance = resolveHarnessInstance(harnessName, {
     instanceId,
     config: harnessConfig,

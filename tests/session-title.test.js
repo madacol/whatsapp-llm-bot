@@ -9,33 +9,34 @@ import {
 describe("generateSessionTitle", () => {
   it("uses the active harness instance text generator when available", async () => {
     resetHarnessRegistryForTests();
-    registerHarnessDriver("title-test", () => {
-      assert.fail("Instance-aware test driver should use createInstance.");
-    }, {
+    registerHarnessDriver({
+      name: "title-test",
       supportsInstances: true,
       createInstance() {
         return {
-          getName: () => "title-test",
-          getCapabilities: () => ({
-            supportsResume: false,
-            supportsCancel: false,
-            supportsLiveInput: false,
-            supportsApprovals: false,
-            supportsWorkdir: false,
-            supportsSandboxConfig: false,
-            supportsModelSelection: false,
-            supportsReasoningEffort: false,
-            supportsSessionFork: false,
-          }),
-          async run() {
-            return {
-              response: [],
-              messages: [],
-              usage: { promptTokens: 0, completionTokens: 0, cachedTokens: 0, cost: 0 },
-            };
+          harness: {
+            getName: () => "title-test",
+            getCapabilities: () => ({
+              supportsResume: false,
+              supportsCancel: false,
+              supportsLiveInput: false,
+              supportsApprovals: false,
+              supportsWorkdir: false,
+              supportsSandboxConfig: false,
+              supportsModelSelection: false,
+              supportsReasoningEffort: false,
+              supportsSessionFork: false,
+            }),
+            async run() {
+              return {
+                response: [],
+                messages: [],
+                usage: { promptTokens: 0, completionTokens: 0, cachedTokens: 0, cost: 0 },
+              };
+            },
+            handleCommand: async () => false,
+            listSlashCommands: () => [],
           },
-          handleCommand: async () => false,
-          listSlashCommands: () => [],
           textGeneration: {
             generateSessionTitle: async ({ transcript }) => {
               assert.match(transcript, /User: Debug checkout flow/);

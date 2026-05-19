@@ -7,17 +7,24 @@ import { createHarnessAdapterFromHarness } from "./adapter.js";
  * @typedef {{
  *   name: string,
  *   instanceId: string,
+ *   continuationKey: string,
  *   config: Record<string, unknown>,
  *   displayName?: string,
  * }} HarnessDriverCreateInput
  */
 
 /**
- * @typedef {() => AgentHarness} HarnessDriverFactory
+ * @typedef {{
+ *   harness: AgentHarness,
+ *   status?: HarnessDriverStatus,
+ *   adapter?: ReturnType<typeof createHarnessAdapterFromHarness>,
+ *   textGeneration?: AgentHarness["textGeneration"],
+ *   dispose?: () => void | Promise<void>,
+ * }} HarnessInstanceBundle
  */
 
 /**
- * @typedef {(input: HarnessDriverCreateInput) => AgentHarness} HarnessInstanceFactory
+ * @typedef {(input: HarnessDriverCreateInput) => HarnessInstanceBundle} HarnessInstanceFactory
  */
 
 /**
@@ -41,11 +48,9 @@ import { createHarnessAdapterFromHarness } from "./adapter.js";
  *   textGeneration?: AgentHarness["textGeneration"],
  *   harness: AgentHarness,
  *   adapter: ReturnType<typeof createHarnessAdapterFromHarness>,
+ *   dispose?: () => void | Promise<void>,
  * }} HarnessInstance
  */
-
-/** @type {Map<string, HarnessDriverFactory>} */
-const registry = new Map();
 
 /**
  * @typedef {"available" | "unavailable" | "unknown" | "maintenance"} HarnessDriverAvailability
@@ -61,15 +66,16 @@ const registry = new Map();
 
 /**
  * @typedef {{
+ *   name: string,
  *   displayName?: string,
  *   supportsInstances?: boolean,
  *   docsUrl?: string,
  *   statusUrl?: string,
- *   createInstance?: HarnessInstanceFactory,
+ *   createInstance: HarnessInstanceFactory,
  *   configSchema?: (config: Record<string, unknown>) => Record<string, unknown>,
  *   defaultConfig?: () => Record<string, unknown>,
  *   getStatus?: () => Promise<HarnessDriverStatus> | HarnessDriverStatus,
- * }} HarnessDriverOptions
+ * }} HarnessDriver
  */
 
 /**
@@ -82,8 +88,8 @@ const registry = new Map();
  * }} HarnessDriverDescriptor
  */
 
-/** @type {Map<string, HarnessDriverOptions>} */
-const driverOptions = new Map();
+/** @type {Map<string, Required<Pick<HarnessDriver, "displayName" | "supportsInstances">> & HarnessDriver>} */
+const drivers = new Map();
 
 /** @type {Map<string, HarnessInstance>} Singleton cache for stateful harness instances */
 const instances = new Map();
@@ -93,14 +99,15 @@ const instanceConfigSignatures = new Map();
 
 /**
  * @param {string} name
- * @param {HarnessDriverOptions} [options]
- * @returns {Required<Pick<HarnessDriverOptions, "displayName" | "supportsInstances">> & HarnessDriverOptions}
+ * @param {Omit<HarnessDriver, "name"> & { name?: string }} driver
+ * @returns {Required<Pick<HarnessDriver, "displayName" | "supportsInstances">> & HarnessDriver}
  */
-function normalizeDriverOptions(name, options = {}) {
+function normalizeDriver(name, driver) {
   return {
-    ...options,
-    displayName: options.displayName ?? name,
-    supportsInstances: options.supportsInstances ?? false,
+    ...driver,
+    name,
+    displayName: driver.displayName ?? name,
+    supportsInstances: driver.supportsInstances ?? false,
   };
 }
 
@@ -139,16 +146,16 @@ function stableConfigSignature(config) {
 }
 
 /**
- * @param {HarnessDriverOptions} options
+ * @param {HarnessDriver} driver
  * @param {Record<string, unknown> | undefined} config
  * @returns {Record<string, unknown>}
  */
-function decodeHarnessInstanceConfig(options, config) {
-  const baseConfig = config ?? options.defaultConfig?.() ?? {};
-  if (!options.configSchema) {
+function decodeHarnessInstanceConfig(driver, config) {
+  const baseConfig = config ?? driver.defaultConfig?.() ?? {};
+  if (!driver.configSchema) {
     return { ...baseConfig };
   }
-  return options.configSchema(baseConfig);
+  return driver.configSchema(baseConfig);
 }
 
 /**
@@ -163,30 +170,40 @@ function getCheckedAt() {
  * @returns {HarnessDriverDescriptor}
  */
 function getDriverDescriptor(name) {
-  const options = normalizeDriverOptions(name, driverOptions.get(name));
+  const driver = drivers.get(name) ?? normalizeDriver(name, {
+    createInstance() {
+      return { harness: createUnavailableHarness(name, { availability: "unavailable" }) };
+    },
+  });
   return {
     name,
-    displayName: options.displayName,
-    supportsInstances: options.supportsInstances,
-    ...(options.docsUrl ? { docsUrl: options.docsUrl } : {}),
-    ...(options.statusUrl ? { statusUrl: options.statusUrl } : {}),
+    displayName: driver.displayName,
+    supportsInstances: driver.supportsInstances,
+    ...(driver.docsUrl ? { docsUrl: driver.docsUrl } : {}),
+    ...(driver.statusUrl ? { statusUrl: driver.statusUrl } : {}),
   };
 }
 
 function registerDefaultHarnesses() {
-  registerHarnessDriver("native", createNativeHarness, {
+  registerHarnessDriver({
+    name: "native",
     displayName: "Native Tools",
     supportsInstances: false,
+    createInstance: () => ({ harness: createNativeHarness() }),
     getStatus: () => ({ availability: "available", checkedAt: getCheckedAt() }),
   });
-  registerHarnessDriver("codex", createCodexHarness, {
+  registerHarnessDriver({
+    name: "codex",
     displayName: "Codex",
     supportsInstances: true,
     docsUrl: "https://developers.openai.com/codex",
+    createInstance: () => ({ harness: createCodexHarness() }),
   });
-  registerHarnessDriver("pi", createPiHarness, {
+  registerHarnessDriver({
+    name: "pi",
     displayName: "Pi",
     supportsInstances: true,
+    createInstance: () => ({ harness: createPiHarness() }),
   });
 }
 
@@ -255,20 +272,21 @@ function normalizeHarness(name, harness) {
 
 /**
  * @param {string | null | undefined} instanceId
+ * @param {string} fallback
  * @returns {string}
  */
-function normalizeInstanceId(instanceId) {
+function normalizeInstanceId(instanceId, fallback = "default") {
   const trimmed = instanceId?.trim();
-  return trimmed ? trimmed : "default";
+  return trimmed ? trimmed : fallback;
 }
 
 /**
- * @param {string} name
+ * @param {string} _name
  * @param {string} instanceId
  * @returns {string}
  */
-function buildInstanceCacheKey(name, instanceId) {
-  return `${name}\u0000${instanceId}`;
+function buildInstanceCacheKey(_name, instanceId) {
+  return instanceId;
 }
 
 /**
@@ -333,6 +351,10 @@ function normalizeTextGeneration(textGeneration) {
  * @returns {Promise<void>}
  */
 async function disposeHarnessInstance(instance) {
+  if (typeof instance.dispose === "function") {
+    await instance.dispose();
+    return;
+  }
   if (typeof instance.harness.dispose === "function") {
     await instance.harness.dispose();
     return;
@@ -349,13 +371,15 @@ async function disposeHarnessInstance(instance) {
  */
 export function resolveHarnessInstance(name, options = {}) {
   const key = name ?? "native";
-  const driverOptionsForName = normalizeDriverOptions(key, driverOptions.get(key));
-  const driverIsRegistered = registry.has(key) || !!driverOptionsForName.createInstance;
-  const instanceId = driverOptionsForName.supportsInstances || !driverIsRegistered
-    ? normalizeInstanceId(options.instanceId)
-    : "default";
+  const driver = drivers.get(key);
+  const driverIsRegistered = !!driver;
+  const instanceId = driver?.supportsInstances || !driverIsRegistered
+    ? normalizeInstanceId(options.instanceId, key)
+    : key;
   const cacheKey = buildInstanceCacheKey(key, instanceId);
-  const decodedConfig = decodeHarnessInstanceConfig(driverOptionsForName, options.config);
+  const decodedConfig = driver
+    ? decodeHarnessInstanceConfig(driver, options.config)
+    : { ...(options.config ?? {}) };
   const configSignature = stableConfigSignature({
     config: decodedConfig,
     displayName: options.displayName ?? null,
@@ -368,10 +392,8 @@ export function resolveHarnessInstance(name, options = {}) {
     instanceConfigSignatures.delete(cacheKey);
   }
 
-  const factory = registry.get(key);
-  const createInstance = driverOptionsForName.createInstance;
   const continuationKey = buildContinuationKey(key, instanceId);
-  if (!factory && !createInstance) {
+  if (!driver) {
     /** @type {HarnessDriverStatus} */
     const status = {
       availability: "unavailable",
@@ -383,7 +405,7 @@ export function resolveHarnessInstance(name, options = {}) {
     const instance = {
       name: key,
       instanceId,
-      displayName: options.displayName ?? driverOptionsForName.displayName,
+      displayName: options.displayName ?? key,
       supportsInstances: true,
       continuationKey,
       capabilities,
@@ -401,39 +423,41 @@ export function resolveHarnessInstance(name, options = {}) {
     instanceConfigSignatures.set(cacheKey, configSignature);
     return instance;
   }
-  const harness = normalizeHarness(
-    key,
-    createInstance
-      ? createInstance({ name: key, instanceId, config: decodedConfig, displayName: options.displayName })
-      : factory
-      ? factory()
-      : createNativeHarness(),
-  );
+
+  const bundle = driver.createInstance({
+    name: key,
+    instanceId,
+    continuationKey,
+    config: decodedConfig,
+    displayName: options.displayName,
+  });
+  const harness = normalizeHarness(key, bundle.harness);
   const capabilities = normalizeCapabilities(harness);
   /** @type {HarnessDriverStatus} */
-  const status = {
+  const status = bundle.status ?? {
     availability: "available",
     checkedAt: getCheckedAt(),
   };
   const instance = {
     name: key,
     instanceId,
-    displayName: options.displayName ?? driverOptionsForName.displayName,
-    supportsInstances: driverOptionsForName.supportsInstances,
+    displayName: options.displayName ?? driver.displayName,
+    supportsInstances: driver.supportsInstances,
     continuationKey,
     capabilities,
-    available: true,
+    available: status.availability !== "unavailable",
     status,
-    textGeneration: normalizeTextGeneration(harness.textGeneration),
+    textGeneration: normalizeTextGeneration(bundle.textGeneration ?? harness.textGeneration),
     harness,
-    adapter: harness.createAdapter
+    adapter: bundle.adapter ?? (harness.createAdapter
       ? harness.createAdapter({ name: key, instanceId, continuationKey })
       : createHarnessAdapterFromHarness({
           harness,
           name: key,
           instanceId,
           continuationKey,
-        }),
+        })),
+    dispose: bundle.dispose,
   };
   instances.set(cacheKey, instance);
   instanceConfigSignatures.set(cacheKey, configSignature);
@@ -441,30 +465,16 @@ export function resolveHarnessInstance(name, options = {}) {
 }
 
 /**
- * Register a harness factory under a name.
- * @param {string} name
- * @param {HarnessDriverFactory} factory
- */
-export function registerHarness(name, factory) {
-  registerHarnessDriver(name, factory);
-}
-
-/**
- * Register a harness driver under a name with optional metadata and status.
- * @param {string} name
- * @param {HarnessDriverFactory} factory
- * @param {HarnessDriverOptions} [options]
+ * Register a harness driver value object.
+ * @param {HarnessDriver} driver
  * @returns {void}
  */
-export function registerHarnessDriver(name, factory, options = {}) {
-  registry.set(name, factory);
-  driverOptions.set(name, normalizeDriverOptions(name, options));
-  for (const cacheKey of [...instances.keys()]) {
-    if (cacheKey === name || cacheKey.startsWith(`${name}\u0000`)) {
-      const instance = instances.get(cacheKey);
-      if (instance) {
-        void disposeHarnessInstance(instance);
-      }
+export function registerHarnessDriver(driver) {
+  const normalized = normalizeDriver(driver.name, driver);
+  drivers.set(normalized.name, normalized);
+  for (const [cacheKey, instance] of [...instances.entries()]) {
+    if (instance.name === normalized.name) {
+      void disposeHarnessInstance(instance);
       instances.delete(cacheKey);
       instanceConfigSignatures.delete(cacheKey);
     }
@@ -482,14 +492,16 @@ export async function reconcileHarnessInstances(desired) {
   const desiredNames = new Set(desired.map((entry) => entry.name));
   const desiredKeys = new Set();
   for (const entry of desired) {
-    const options = normalizeDriverOptions(entry.name, driverOptions.get(entry.name));
-    const driverIsRegistered = registry.has(entry.name) || !!options.createInstance;
-    const instanceId = options.supportsInstances || !driverIsRegistered
-      ? normalizeInstanceId(entry.instanceId)
-      : "default";
+    const driver = drivers.get(entry.name);
+    const driverIsRegistered = !!driver;
+    const instanceId = driver?.supportsInstances || !driverIsRegistered
+      ? normalizeInstanceId(entry.instanceId, entry.name)
+      : entry.name;
     const cacheKey = buildInstanceCacheKey(entry.name, instanceId);
     desiredKeys.add(cacheKey);
-    const decodedConfig = decodeHarnessInstanceConfig(options, entry.config);
+    const decodedConfig = driver
+      ? decodeHarnessInstanceConfig(driver, entry.config)
+      : { ...(entry.config ?? {}) };
     const nextSignature = stableConfigSignature({
       config: decodedConfig,
       displayName: entry.displayName ?? null,
@@ -526,8 +538,7 @@ export async function reconcileHarnessInstances(desired) {
  * @returns {void}
  */
 export function resetHarnessRegistryForTests() {
-  registry.clear();
-  driverOptions.clear();
+  drivers.clear();
   for (const instance of instances.values()) {
     void disposeHarnessInstance(instance);
   }
@@ -552,7 +563,7 @@ export function resolveHarness(name, options = {}) {
  * @returns {string[]}
  */
 export function listHarnesses() {
-  return [...registry.keys()];
+  return [...drivers.keys()];
 }
 
 /**
@@ -560,7 +571,7 @@ export function listHarnesses() {
  * @returns {HarnessDriverDescriptor[]}
  */
 export function listHarnessDrivers() {
-  return [...registry.keys()].map(getDriverDescriptor);
+  return [...drivers.keys()].map(getDriverDescriptor);
 }
 
 /**
@@ -585,8 +596,8 @@ export function listHarnessInstances() {
  */
 export async function getHarnessDriverStatus(name) {
   const descriptor = getDriverDescriptor(name);
-  const options = driverOptions.get(name);
-  if (!registry.has(name) || !options) {
+  const driver = drivers.get(name);
+  if (!driver) {
     return {
       ...descriptor,
       availability: "unavailable",
@@ -594,7 +605,7 @@ export async function getHarnessDriverStatus(name) {
       checkedAt: getCheckedAt(),
     };
   }
-  if (!options.getStatus) {
+  if (!driver.getStatus) {
     return {
       ...descriptor,
       availability: "unknown",
@@ -602,7 +613,7 @@ export async function getHarnessDriverStatus(name) {
       checkedAt: getCheckedAt(),
     };
   }
-  const status = await options.getStatus();
+  const status = await driver.getStatus();
   return {
     ...descriptor,
     ...status,

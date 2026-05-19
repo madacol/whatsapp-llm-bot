@@ -14,8 +14,6 @@ let db;
 let store;
 /** @type {(msg: ChatTurn) => Promise<void>} */
 let handleMessage;
-/** @type {typeof import("../harnesses/index.js").registerHarness} */
-let registerHarness;
 /** @type {typeof import("../harnesses/index.js").registerHarnessDriver} */
 let registerHarnessDriver;
 /** @type {typeof import("../harnesses/codex.js").createCodexHarness} */
@@ -29,7 +27,7 @@ before(async () => {
   store = await initStore(db);
 
   const { createConversationRunner } = await import("../conversation/create-conversation-runner.js");
-  ({ registerHarness, registerHarnessDriver } = await import("../harnesses/index.js"));
+  ({ registerHarnessDriver } = await import("../harnesses/index.js"));
   ({ createCodexHarness } = await import("../harnesses/codex.js"));
 
   const runner = createConversationRunner({
@@ -45,11 +43,24 @@ before(async () => {
 });
 
 afterEach(() => {
-  registerHarness("codex", createCodexHarness);
+  registerCodexHarness(createCodexHarness);
 });
 
 /** @param {string} chatId @param {{enabled?: boolean, systemPrompt?: string | null, model?: string | null}} [options] */
 const seedChat = (chatId, options) => seedChat_(db, chatId, options);
+
+/**
+ * @param {() => AgentHarness} createHarness
+ * @returns {void}
+ */
+function registerCodexHarness(createHarness) {
+  registerHarnessDriver({
+    name: "codex",
+    displayName: "Codex",
+    supportsInstances: true,
+    createInstance: () => ({ harness: createHarness() }),
+  });
+}
 
 describe("createConversationRunner prompt formatting", () => {
   it("starts the selected harness adapter session before sending the turn", async () => {
@@ -69,65 +80,69 @@ describe("createConversationRunner prompt formatting", () => {
 
     /** @type {string[]} */
     const phases = [];
-    registerHarnessDriver("adapter-lifecycle", () => ({
-      getName: () => "adapter-lifecycle",
-      getCapabilities: () => ({
-        supportsResume: true,
-        supportsCancel: false,
-        supportsLiveInput: false,
-        supportsApprovals: false,
-        supportsWorkdir: true,
-        supportsSandboxConfig: false,
-        supportsModelSelection: true,
-        supportsReasoningEffort: false,
-        supportsSessionFork: false,
-      }),
-      async run() {
-        phases.push("legacy-run");
-        return {
-          response: [{ type: "text", text: "ok" }],
-          messages: [],
-          usage: { promptTokens: 0, completionTokens: 0, cachedTokens: 0, cost: 0 },
-        };
-      },
-      handleCommand: async () => false,
-      listSlashCommands: () => [],
-      createAdapter() {
-        return {
-          async startSession(input) {
-            phases.push(`start:${input.chatId}:${input.runConfig?.model ?? ""}`);
-            return {
-              chatId: input.chatId,
-              harnessName: "adapter-lifecycle",
-              instanceId: "work",
-              continuationKey: "adapter-lifecycle:instance:work",
-              status: "ready",
-              model: input.runConfig?.model ?? null,
-              resumeCursor: input.resumeCursor ?? null,
-            };
-          },
-          async sendTurn(input) {
-            phases.push("send");
-            assert.ok("params" in input, "current runner should preserve the compatibility path");
+    registerHarnessDriver({
+      name: "adapter-lifecycle",
+      supportsInstances: true,
+      createInstance: () => ({
+        harness: {
+          getName: () => "adapter-lifecycle",
+          getCapabilities: () => ({
+            supportsResume: true,
+            supportsCancel: false,
+            supportsLiveInput: false,
+            supportsApprovals: false,
+            supportsWorkdir: true,
+            supportsSandboxConfig: false,
+            supportsModelSelection: true,
+            supportsReasoningEffort: false,
+            supportsSessionFork: false,
+          }),
+          async run() {
+            phases.push("legacy-run");
             return {
               response: [{ type: "text", text: "ok" }],
-              messages: input.params.messages,
+              messages: [],
               usage: { promptTokens: 0, completionTokens: 0, cachedTokens: 0, cost: 0 },
             };
           },
-          interruptTurn: async () => false,
-          injectMessage: async () => false,
-          stopSession: async () => false,
-          listSessions: () => [],
-          readThread: async () => null,
-          rollbackThread: async () => null,
-          streamEvents: {
-            async *[Symbol.asyncIterator]() {},
+          handleCommand: async () => false,
+          listSlashCommands: () => [],
+          createAdapter() {
+            return {
+              async startSession(input) {
+                phases.push(`start:${input.chatId}:${input.runConfig?.model ?? ""}`);
+                return {
+                  chatId: input.chatId,
+                  harnessName: "adapter-lifecycle",
+                  instanceId: "work",
+                  continuationKey: "adapter-lifecycle:instance:work",
+                  status: "ready",
+                  model: input.runConfig?.model ?? null,
+                  resumeCursor: input.resumeCursor ?? null,
+                };
+              },
+              async sendTurn(input) {
+                phases.push("send");
+                assert.ok("params" in input, "current runner should preserve the compatibility path");
+                return {
+                  response: [{ type: "text", text: "ok" }],
+                  messages: input.params.messages,
+                  usage: { promptTokens: 0, completionTokens: 0, cachedTokens: 0, cost: 0 },
+                };
+              },
+              interruptTurn: async () => false,
+              injectMessage: async () => false,
+              stopSession: async () => false,
+              listSessions: () => [],
+              readThread: async () => null,
+              rollbackThread: async () => null,
+              streamEvents: {
+                async *[Symbol.asyncIterator]() {},
+              },
+            };
           },
-        };
-      },
-    }), {
-      supportsInstances: true,
+        },
+      }),
     });
 
     const turn = createChatTurn({
@@ -153,79 +168,85 @@ describe("createConversationRunner prompt formatting", () => {
     const phases = [];
     /** @type {SendContent[]} */
     const replies = [];
-    registerHarnessDriver("semantic-events", () => ({
-      getName: () => "semantic-events",
-      getCapabilities: () => ({
-        supportsResume: true,
-        supportsCancel: false,
-        supportsLiveInput: false,
-        supportsApprovals: false,
-        supportsWorkdir: true,
-        supportsSandboxConfig: false,
-        supportsModelSelection: true,
-        supportsReasoningEffort: false,
-        supportsSessionFork: false,
+    registerHarnessDriver({
+      name: "semantic-events",
+      supportsInstances: true,
+      createInstance: () => ({
+        harness: {
+          getName: () => "semantic-events",
+          getCapabilities: () => ({
+            supportsResume: true,
+            supportsCancel: false,
+            supportsLiveInput: false,
+            supportsApprovals: false,
+            supportsWorkdir: true,
+            supportsSandboxConfig: false,
+            supportsModelSelection: true,
+            supportsReasoningEffort: false,
+            supportsSessionFork: false,
+          }),
+          async run() {
+            assert.fail("semantic adapter should not use legacy run");
+          },
+          handleCommand: async () => false,
+          listSlashCommands: () => [],
+          createAdapter() {
+            return {
+              supportsSemanticTurns: true,
+              async startSession(input) {
+                phases.push("start");
+                return {
+                  chatId: input.chatId,
+                  harnessName: "semantic-events",
+                  instanceId: "semantic-events",
+                  continuationKey: "semantic-events:instance:semantic-events",
+                  status: "ready",
+                  resumeCursor: null,
+                };
+              },
+              async sendTurn(input) {
+                phases.push("semantic-send");
+                assert.ok("turn" in input, "Expected semantic turn input");
+                assert.equal(input.turn.chatId, "conv-semantic-events");
+                assert.ok(input.turn.messages?.some((message) => message.role === "user"));
+                for (const subscriber of subscribers) {
+                  await subscriber({
+                    type: "assistant.completed",
+                    provider: "semantic-events",
+                    text: "event response",
+                    contentType: "text",
+                    responseMode: "replace",
+                  });
+                }
+                return {
+                  response: [{ type: "text", text: "fallback response" }],
+                  messages: input.turn.messages ?? [],
+                  usage: { promptTokens: 0, completionTokens: 0, cachedTokens: 0, cost: 0 },
+                };
+              },
+              interruptTurn: async () => false,
+              injectMessage: async () => false,
+              stopSession: async () => false,
+              listSessions: () => [],
+              readThread: async () => null,
+              rollbackThread: async () => null,
+              streamEvents: {
+                async *[Symbol.asyncIterator]() {},
+              },
+              subscribeEvents(handler) {
+                subscribers.push(handler);
+                return () => {
+                  const index = subscribers.indexOf(handler);
+                  if (index >= 0) {
+                    subscribers.splice(index, 1);
+                  }
+                };
+              },
+            };
+          },
+        },
       }),
-      async run() {
-        assert.fail("semantic adapter should not use legacy run");
-      },
-      handleCommand: async () => false,
-      listSlashCommands: () => [],
-      createAdapter() {
-        return {
-          supportsSemanticTurns: true,
-          async startSession(input) {
-            phases.push("start");
-            return {
-              chatId: input.chatId,
-              harnessName: "semantic-events",
-              instanceId: "default",
-              continuationKey: "semantic-events:instance:default",
-              status: "ready",
-              resumeCursor: null,
-            };
-          },
-          async sendTurn(input) {
-            phases.push("semantic-send");
-            assert.ok("turn" in input, "Expected semantic turn input");
-            assert.equal(input.turn.chatId, "conv-semantic-events");
-            assert.ok(input.turn.messages?.some((message) => message.role === "user"));
-            for (const subscriber of subscribers) {
-              await subscriber({
-                type: "assistant.completed",
-                provider: "semantic-events",
-                text: "event response",
-                contentType: "text",
-                responseMode: "replace",
-              });
-            }
-            return {
-              response: [{ type: "text", text: "fallback response" }],
-              messages: input.turn.messages ?? [],
-              usage: { promptTokens: 0, completionTokens: 0, cachedTokens: 0, cost: 0 },
-            };
-          },
-          interruptTurn: async () => false,
-          injectMessage: async () => false,
-          stopSession: async () => false,
-          listSessions: () => [],
-          readThread: async () => null,
-          rollbackThread: async () => null,
-          streamEvents: {
-            async *[Symbol.asyncIterator]() {},
-          },
-          subscribeEvents(handler) {
-            subscribers.push(handler);
-            return () => {
-              const index = subscribers.indexOf(handler);
-              if (index >= 0) {
-                subscribers.splice(index, 1);
-              }
-            };
-          },
-        };
-      },
-    }));
+    });
 
     const turn = createChatTurn({
       chatId: "conv-semantic-events",
@@ -301,7 +322,7 @@ describe("createConversationRunner prompt formatting", () => {
     /** @type {string | null} */
     let seenExternalInstructions = null;
 
-    registerHarness("codex", () => createCodexHarness({
+    registerCodexHarness(() => createCodexHarness({
       startRun: async (input) => {
         seenMessages = input.messages;
         seenExternalInstructions = input.externalInstructions ?? null;
