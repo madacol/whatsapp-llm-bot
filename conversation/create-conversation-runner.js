@@ -2,7 +2,13 @@ import { CANCEL_COMMAND, formatChatSettingsCommand } from "../chat-commands.js";
 import { getChatAction, getChatActions, getAction } from "../actions.js";
 import { getAgent } from "../agents.js";
 import { storeAndLinkHtml } from "../html-store.js";
-import { resolveHarnessInstance, resolveHarnessName, createHarnessRunCoordinator, getHarnessSessionDirectory } from "#harnesses";
+import {
+  createHarnessRuntimeEventDispatcher,
+  resolveHarnessInstance,
+  resolveHarnessName,
+  createHarnessRunCoordinator,
+  getHarnessSessionDirectory,
+} from "#harnesses";
 import { getHarnessInstanceConfig } from "../harness-config.js";
 import { contentEvent } from "../outbound-events.js";
 import {
@@ -497,7 +503,73 @@ export function createConversationRunner({ store, llmClient, getActionsFn, execu
         bufferedTexts: runCoordinator.consumeBufferedTexts(chatId),
       });
 
-      const result = await harnessInstance.adapter.sendTurn({ params: runRequest });
+      const runWithRuntimeEvents = async () => {
+        if (!harnessInstance.adapter.supportsSemanticTurns) {
+          return harnessInstance.adapter.sendTurn({ params: runRequest });
+        }
+
+        const runtimeDispatcher = createHarnessRuntimeEventDispatcher({
+          provider: harness.getName(),
+          messages: runRequest.messages,
+          hooks,
+          workdir: runConfig.workdir ?? null,
+        });
+        /** @type {Set<Promise<void>>} */
+        const pendingEventHandlers = new Set();
+        const unsubscribe = harnessInstance.adapter.subscribeEvents?.((event) => {
+          /** @type {Promise<void>} */
+          let pending;
+          pending = runtimeDispatcher
+            .handleEvent(/** @type {Parameters<typeof runtimeDispatcher.handleEvent>[0]} */ (event))
+            .catch((error) => {
+              log.warn("Failed to handle harness runtime event:", error);
+            })
+            .finally(() => {
+              pendingEventHandlers.delete(pending);
+            });
+          pendingEventHandlers.add(pending);
+        });
+        try {
+          const result = await harnessInstance.adapter.sendTurn({
+            turn: {
+              chatId,
+              messages: runRequest.messages,
+              externalInstructions: runRequest.llmConfig.externalInstructions,
+              runConfig,
+              resumeCursor: currentResumeCursor,
+            },
+          });
+          await Promise.allSettled([...pendingEventHandlers]);
+          const activeSession = harnessInstance.adapter
+            .listSessions()
+            .find((session) => session.chatId === chatId);
+          if (activeSession?.resumeCursor) {
+            await saveHarnessSessionAndBinding(chatId, {
+              id: activeSession.resumeCursor,
+              kind: /** @type {HarnessSessionRef["kind"]} */ (harness.getName()),
+            });
+          } else if (currentResumeCursor && activeSession && ["stopped", "error"].includes(activeSession.status)) {
+            await saveHarnessSessionAndBinding(chatId, null);
+          }
+          if (runtimeDispatcher.result.response.length === 0) {
+            return result;
+          }
+          const runtimeUsage = runtimeDispatcher.result.usage;
+          const hasRuntimeUsage = runtimeUsage.promptTokens > 0
+            || runtimeUsage.completionTokens > 0
+            || runtimeUsage.cachedTokens > 0
+            || runtimeUsage.cost > 0;
+          return {
+            ...result,
+            response: runtimeDispatcher.result.response,
+            usage: hasRuntimeUsage ? runtimeUsage : result.usage,
+          };
+        } finally {
+          unsubscribe?.();
+        }
+      };
+
+      const result = await runWithRuntimeEvents();
       upsertSessionBinding("ready", undefined);
       if (result.response.length > 0) {
         const responseSignature = getDeliveredContentSignature(result.response);

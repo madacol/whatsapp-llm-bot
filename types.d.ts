@@ -748,6 +748,8 @@ type HarnessSemanticTurnInput = {
   input?: string;
   messages?: Message[];
   attachments?: IncomingContentBlock[];
+  externalInstructions?: string;
+  resumeCursor?: string | null;
   runConfig?: HarnessRunConfig;
 };
 
@@ -758,6 +760,7 @@ type HarnessAdapterCreateInput = {
 };
 
 type HarnessAdapter = {
+  supportsSemanticTurns?: boolean;
   startSession: (input: {
     chatId: string;
     runConfig?: HarnessRunConfig;
@@ -771,6 +774,7 @@ type HarnessAdapter = {
   readThread: (sessionId: string) => Promise<null>;
   rollbackThread: (sessionId: string, numTurns: number) => Promise<null>;
   streamEvents: AsyncIterable<{ type: string; provider: string } & Record<string, unknown>>;
+  subscribeEvents?: (handler: (event: { type: string; provider: string } & Record<string, unknown>) => void | Promise<void>) => () => void;
 };
 
 type HarnessCommandContext = {

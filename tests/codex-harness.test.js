@@ -178,6 +178,79 @@ describe("createCodexHarness", () => {
     }]);
   });
 
+  it("runs semantic adapter turns through Codex and emits runtime events", async () => {
+    /** @type {string[]} */
+    const events = [];
+    const harness = createCodexHarness({
+      getAvailableModels: async () => TEST_CODEX_MODELS,
+      startRun: async (input) => {
+        assert.equal(input.chatId, "codex-semantic-chat");
+        assert.equal(input.prompt, "Use semantic Codex");
+        assert.equal(input.sessionId, "codex-thread-0");
+        assert.equal(input.externalInstructions, "Be concise");
+        await input.hooks?.onLlmResponse?.("semantic ok");
+        await input.hooks?.onUsage?.("0.000001", {
+          prompt: 2,
+          completion: 3,
+          cached: 1,
+        });
+        return {
+          abortController: new AbortController(),
+          done: Promise.resolve({
+            sessionId: "codex-thread-1",
+            result: {
+              response: [{ type: "text", text: "semantic ok" }],
+              messages: input.messages,
+              usage: { promptTokens: 2, completionTokens: 3, cachedTokens: 1, cost: 0.000001 },
+            },
+          }),
+        };
+      },
+    });
+    const adapter = harness.createAdapter?.({
+      name: "codex",
+      instanceId: "work",
+      continuationKey: "codex:instance:work",
+    });
+    assert.ok(adapter, "Expected Codex adapter");
+    assert.equal(adapter.supportsSemanticTurns, true);
+    const unsubscribe = adapter.subscribeEvents?.((event) => {
+      events.push(event.type);
+    });
+
+    await adapter.startSession({
+      chatId: "codex-semantic-chat",
+      runConfig: { workdir: "/repo", model: "gpt-5.4" },
+      resumeCursor: "codex-thread-0",
+    });
+    const result = await adapter.sendTurn({
+      turn: {
+        chatId: "codex-semantic-chat",
+        input: "Use semantic Codex",
+        externalInstructions: "Be concise",
+        runConfig: { workdir: "/repo", model: "gpt-5.4" },
+      },
+    });
+    unsubscribe?.();
+
+    assert.deepEqual(result.response, [{ type: "text", text: "semantic ok" }]);
+    assert.deepEqual(adapter.listSessions(), [{
+      chatId: "codex-semantic-chat",
+      harnessName: "codex",
+      instanceId: "work",
+      continuationKey: "codex:instance:work",
+      status: "ready",
+      workdir: "/repo",
+      model: "gpt-5.4",
+      resumeCursor: "codex-thread-1",
+    }]);
+    assert.ok(events.includes("session.started"));
+    assert.ok(events.includes("turn.started"));
+    assert.ok(events.includes("assistant.completed"));
+    assert.ok(events.includes("usage.updated"));
+    assert.ok(events.includes("turn.completed"));
+  });
+
   it("handles codex-owned model command", async () => {
     const db = await createTestDb();
     await seedChat(db, "codex-chat-1", { enabled: true });
