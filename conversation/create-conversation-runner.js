@@ -20,7 +20,7 @@ import { createMessageActionContext } from "../execute-action-context.js";
 import { errorToString, isHtmlContent } from "../utils.js";
 import { createLogger } from "../logger.js";
 import { buildAgentIoHooks } from "./build-agent-io-hooks.js";
-import { buildHarnessRunRequest } from "./build-harness-run-request.js";
+import { buildHarnessRunRequest, buildHarnessTurnInput } from "./build-harness-run-request.js";
 import { buildRunConfig } from "./build-run-config.js";
 import { generateSessionTitle } from "./session-title.js";
 import { getChatDb } from "../db.js";
@@ -333,38 +333,34 @@ export function createConversationRunner({ store, llmClient, getActionsFn, execu
   }
 
   /**
-   * Run a built request through either the app runner or a provider adapter.
-   * Provider adapters emit runtime events separately, so those events are
-   * merged back into the returned result when they produced user-visible text.
+   * Run a semantic provider turn through the selected adapter. Provider adapters
+   * emit runtime events separately, so those events are merged back into the
+   * returned result when they produced user-visible text.
    * @param {{
    *   chatId: string,
    *   harness: AgentHarness,
-   *   harnessInstance: ReturnType<typeof resolveHarnessInstance> | null,
+   *   harnessInstance: ReturnType<typeof resolveHarnessInstance>,
    *   hooks: AgentIOHooks,
    *   runConfig: HarnessRunConfig,
-   *   runRequest: AgentHarnessParams,
+   *   turnInput: HarnessTurnInput,
    *   getResumeCursor: () => string | null,
    *   saveHarnessSessionAndBinding: import("../store.js").Store["saveHarnessSession"],
    * }} input
    * @returns {Promise<AgentResult>}
    */
-  async function runHarnessRequestWithRuntimeEvents({
+  async function runProviderTurnWithRuntimeEvents({
     chatId,
     harness,
     harnessInstance,
     hooks,
     runConfig,
-    runRequest,
+    turnInput,
     getResumeCursor,
     saveHarnessSessionAndBinding,
   }) {
-    if (!harnessInstance) {
-      return harness.run(runRequest);
-    }
-
     const runtimeDispatcher = createHarnessRuntimeEventDispatcher({
       provider: harness.getName(),
-      messages: runRequest.messages,
+      messages: turnInput.messages ?? [],
       hooks,
       workdir: runConfig.workdir ?? null,
     });
@@ -385,10 +381,9 @@ export function createConversationRunner({ store, llmClient, getActionsFn, execu
     });
     try {
       const result = await harnessInstance.adapter.sendTurn({
+        ...turnInput,
         chatId,
-        messages: runRequest.messages,
-        externalInstructions: runRequest.llmConfig.externalInstructions,
-        runConfig,
+        runConfig: turnInput.runConfig ?? runConfig,
         resumeCursor: getResumeCursor(),
       });
       await Promise.allSettled([...pendingEventHandlers]);
@@ -523,38 +518,50 @@ export function createConversationRunner({ store, llmClient, getActionsFn, execu
       }
     };
 
-    const runRequest = await buildHarnessRunRequest({
-      chatId,
-      senderIds,
-      chatInfo,
-      chatName: turn.chatName,
-      context,
-      message,
-      persona,
-      actions,
-      actionResolver,
-      llmClient,
-      getMessages,
-      executeActionFn,
-      addMessage,
-      updateToolMessage,
-      saveHarnessSession: saveHarnessSessionAndBinding,
-      hooks,
-      harnessName: harness.getName(),
-      resolvedBinding,
-      bufferedTexts: runCoordinator.consumeBufferedTexts(chatId),
-    });
-
-    const result = await runHarnessRequestWithRuntimeEvents({
-      chatId,
-      harness,
-      harnessInstance,
-      hooks,
-      runConfig,
-      runRequest,
-      getResumeCursor: () => currentResumeCursor,
-      saveHarnessSessionAndBinding,
-    });
+    const bufferedTexts = runCoordinator.consumeBufferedTexts(chatId);
+    const result = harnessInstance
+      ? await runProviderTurnWithRuntimeEvents({
+          chatId,
+          harness,
+          harnessInstance,
+          hooks,
+          runConfig,
+          turnInput: await buildHarnessTurnInput({
+            chatId,
+            chatInfo,
+            context,
+            message,
+            persona,
+            llmClient,
+            getMessages,
+            harnessName: harness.getName(),
+            runConfig,
+            bufferedTexts,
+          }),
+          getResumeCursor: () => currentResumeCursor,
+          saveHarnessSessionAndBinding,
+        })
+      : await harness.run(await buildHarnessRunRequest({
+          chatId,
+          senderIds,
+          chatInfo,
+          chatName: turn.chatName,
+          context,
+          message,
+          persona,
+          actions,
+          actionResolver,
+          llmClient,
+          getMessages,
+          executeActionFn,
+          addMessage,
+          updateToolMessage,
+          saveHarnessSession: saveHarnessSessionAndBinding,
+          hooks,
+          harnessName: harness.getName(),
+          resolvedBinding,
+          bufferedTexts,
+        }));
     upsertSessionBinding("ready", undefined);
 
     return { result, deliveredContentSignatures };
