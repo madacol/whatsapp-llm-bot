@@ -116,50 +116,13 @@ describe("createCodexHarness", () => {
     assert.equal(started.instanceId, "work");
     assert.equal(started.resumeCursor, "codex-thread-0");
 
-    /** @type {HarnessSessionRef | null} */
-    let savedSession = null;
     const result = await adapter.sendTurn({
-      params: {
-        session: {
-          chatId: "codex-adapter-chat",
-          senderIds: [],
-          context: /** @type {ExecuteActionContext} */ ({
-            chatId: "codex-adapter-chat",
-            senderIds: [],
-            content: [],
-            getIsAdmin: async () => true,
-            send: async () => undefined,
-            reply: async () => undefined,
-            reactToMessage: async () => {},
-            select: async () => "",
-            confirm: async () => true,
-          }),
-          addMessage: async () => undefined,
-          updateToolMessage: async () => undefined,
-          harnessSession: { id: "codex-thread-0", kind: "codex" },
-          saveHarnessSession: async (_chatId, session) => {
-            savedSession = session;
-          },
-        },
-        llmConfig: {
-          llmClient: /** @type {LlmClient} */ ({}),
-          chatModel: null,
-          externalInstructions: "",
-          toolRuntime: /** @type {ToolRuntime} */ ({
-            getTool: async () => null,
-            executeTool: async () => {
-              throw new Error("executeTool should not be called");
-            },
-          }),
-        },
-        messages: [{ role: "user", content: [{ type: "text", text: "Use adapter" }] }],
-        hooks: {},
-        runConfig: { workdir: "/repo", model: "gpt-5.4" },
-      },
+      chatId: "codex-adapter-chat",
+      messages: [{ role: "user", content: [{ type: "text", text: "Use adapter" }] }],
+      runConfig: { workdir: "/repo", model: "gpt-5.4" },
     });
 
     assert.deepEqual(result.response, [{ type: "text", text: "adapter ok" }]);
-    assert.deepEqual(savedSession, { id: "codex-thread-1", kind: "codex" });
     assert.deepEqual(starts, [{
       chatId: "codex-adapter-chat",
       prompt: "Use adapter",
@@ -213,7 +176,6 @@ describe("createCodexHarness", () => {
       continuationKey: "codex:instance:work",
     });
     assert.ok(adapter, "Expected Codex adapter");
-    assert.equal(adapter.supportsSemanticTurns, true);
     const unsubscribe = adapter.subscribeEvents?.((event) => {
       events.push(event.type);
     });
@@ -224,12 +186,10 @@ describe("createCodexHarness", () => {
       resumeCursor: "codex-thread-0",
     });
     const result = await adapter.sendTurn({
-      turn: {
-        chatId: "codex-semantic-chat",
-        input: "Use semantic Codex",
-        externalInstructions: "Be concise",
-        runConfig: { workdir: "/repo", model: "gpt-5.4" },
-      },
+      chatId: "codex-semantic-chat",
+      input: "Use semantic Codex",
+      externalInstructions: "Be concise",
+      runConfig: { workdir: "/repo", model: "gpt-5.4" },
     });
     unsubscribe?.();
 

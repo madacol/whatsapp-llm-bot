@@ -760,13 +760,12 @@ type HarnessAdapterCreateInput = {
 };
 
 type HarnessAdapter = {
-  supportsSemanticTurns?: boolean;
   startSession: (input: {
     chatId: string;
     runConfig?: HarnessRunConfig;
     resumeCursor?: string | null;
   }) => Promise<HarnessRuntimeSession>;
-  sendTurn: (input: { params: AgentHarnessParams } | { turn: HarnessSemanticTurnInput }) => Promise<AgentResult>;
+  sendTurn: (input: HarnessSemanticTurnInput) => Promise<AgentResult>;
   interruptTurn: (input: { chatId: string }) => Promise<boolean>;
   injectMessage: (chatId: string | HarnessSessionRef, text: string) => Promise<boolean>;
   stopSession: (chatId: string | HarnessSessionRef) => Promise<boolean>;

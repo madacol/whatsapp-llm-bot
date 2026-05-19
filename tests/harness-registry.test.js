@@ -397,11 +397,9 @@ describe("resolveHarness", () => {
     });
 
     const result = await adapter.sendTurn({
-      turn: {
-        chatId: "semantic-chat",
-        input: "semantic input",
-        runConfig: { model: "model-a" },
-      },
+      chatId: "semantic-chat",
+      input: "semantic input",
+      runConfig: { model: "model-a" },
     });
 
     assert.deepEqual(result.response, [{ type: "text", text: "ok" }]);

@@ -313,11 +313,6 @@ export function createCodexHarness(deps = {}) {
   });
   /** @type {Map<string, HarnessRuntimeSession>} */
   const adapterSessions = new Map();
-  const adapter = createAdapter({
-    name: "codex",
-    instanceId: "default",
-    continuationKey: "codex:instance:default",
-  });
 
   return {
     getName: () => "codex",
@@ -341,7 +336,6 @@ export function createCodexHarness(deps = {}) {
     const harnessName = input.name;
     const events = createHarnessEventStreamController(harnessName);
     return {
-      supportsSemanticTurns: true,
       async startSession({ chatId, runConfig, resumeCursor }) {
         /** @type {HarnessRuntimeSession} */
         const session = {
@@ -358,20 +352,12 @@ export function createCodexHarness(deps = {}) {
         events.emit({ type: "session.started", session });
         return session;
       },
-      async sendTurn(request) {
-        if ("turn" in request) {
-          return runCodexSemanticTurn(request.turn, {
-            instanceId,
-            harnessName,
-            continuationKey: instanceContinuationKey,
-            events,
-          });
-        }
-        const { params } = request;
-        return runCodexTurn(params, {
+      async sendTurn(turn) {
+        return runCodexSemanticTurn(turn, {
           instanceId,
           harnessName,
           continuationKey: instanceContinuationKey,
+          events,
         });
       },
       async interruptTurn({ chatId }) {
@@ -454,7 +440,11 @@ export function createCodexHarness(deps = {}) {
    * @returns {Promise<AgentResult>}
    */
   async function run(params) {
-    return adapter.sendTurn({ params });
+    return runCodexTurn(params, {
+      instanceId: "codex",
+      harnessName: "codex",
+      continuationKey: "codex:instance:codex",
+    });
   }
 
   /**

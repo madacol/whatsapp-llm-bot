@@ -1,9 +1,9 @@
 /**
- * Narrow adapter facade over the legacy AgentHarness contract.
+ * Semantic adapter facade over the legacy AgentHarness contract.
  *
  * Provider-specific implementations can grow into this shape incrementally.
- * Existing harnesses are wrapped so callers can start depending on the
- * session/turn seam without forcing a provider rewrite in the same migration.
+ * Existing harnesses are wrapped at the registry boundary so callers depend on
+ * session/turn semantics instead of app-shaped harness parameters.
  */
 
 /**
@@ -29,14 +29,6 @@
 
 /**
  * @typedef {{
- *   params: AgentHarnessParams,
- * } | {
- *   turn: HarnessSemanticTurnInput,
- * }} HarnessSendTurnInput
- */
-
-/**
- * @typedef {{
  *   chatId: string,
  * }} HarnessInterruptInput
  */
@@ -52,9 +44,8 @@
 
 /**
  * @typedef {{
- *   supportsSemanticTurns?: boolean,
  *   startSession: (input: HarnessStartSessionInput) => Promise<HarnessRuntimeSession>,
- *   sendTurn: (input: HarnessSendTurnInput) => Promise<AgentResult>,
+ *   sendTurn: (input: HarnessSemanticTurnInput) => Promise<AgentResult>,
  *   interruptTurn: (input: HarnessInterruptInput) => Promise<boolean>,
  *   injectMessage: (chatId: string | HarnessSessionRef, text: string) => Promise<boolean>,
  *   stopSession: (chatId: string | HarnessSessionRef) => Promise<boolean>,
@@ -219,10 +210,8 @@ export function createHarnessAdapterFromHarness(input) {
       events.emit({ type: "session.started", session });
       return session;
     },
-    async sendTurn(request) {
-      const params = "params" in request
-        ? request.params
-        : buildLegacyParamsFromSemanticTurn(request.turn);
+    async sendTurn(turn) {
+      const params = buildLegacyParamsFromSemanticTurn(turn);
       const session = sessions.get(params.session.chatId);
       if (session) {
         const running = /** @type {HarnessRuntimeSession} */ ({ ...session, status: "running" });
