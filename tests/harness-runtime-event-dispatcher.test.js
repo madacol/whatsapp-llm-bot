@@ -163,6 +163,67 @@ describe("createHarnessRuntimeEventDispatcher", () => {
     );
   });
 
+  it("projects command and file-read runtime events into progress hooks", async () => {
+    /** @type {Array<{ command: string, status: "started" | "completed" | "failed", output?: string }>} */
+    const commands = [];
+    /** @type {Array<{ command: string, paths: string[] }>} */
+    const fileReads = [];
+    const dispatcher = createHarnessRuntimeEventDispatcher({
+      provider: "codex",
+      messages: [],
+      hooks: {
+        onCommand: async (event) => {
+          commands.push(event);
+        },
+        onFileRead: async (event) => {
+          fileReads.push(event);
+        },
+      },
+    });
+
+    await dispatcher.handleEvent({
+      type: "file-read.started",
+      provider: "codex",
+      fileRead: {
+        command: "sed -n '1,20p' src/app.js",
+        paths: ["src/app.js"],
+      },
+    });
+    await dispatcher.handleEvent({
+      type: "command.started",
+      provider: "codex",
+      command: {
+        command: "pnpm type-check",
+        status: "started",
+      },
+    });
+    await dispatcher.handleEvent({
+      type: "command.completed",
+      provider: "codex",
+      command: {
+        command: "pnpm type-check",
+        status: "completed",
+        output: "ok",
+      },
+    });
+
+    assert.deepEqual(fileReads, [{
+      command: "sed -n '1,20p' src/app.js",
+      paths: ["src/app.js"],
+    }]);
+    assert.deepEqual(commands, [
+      {
+        command: "pnpm type-check",
+        status: "started",
+      },
+      {
+        command: "pnpm type-check",
+        status: "completed",
+        output: "ok",
+      },
+    ]);
+  });
+
   it("captures raw provider events as replayable ndjson without changing hook projection", async () => {
     const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "raw-runtime-events-"));
     const logPath = path.join(tempDir, "events.ndjson");

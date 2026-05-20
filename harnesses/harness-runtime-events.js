@@ -129,6 +129,24 @@
 
 /**
  * @typedef {{
+ *   type: "command.started" | "command.completed" | "command.failed",
+ *   provider: HarnessRuntimeProvider,
+ *   command: Parameters<Required<AgentIOHooks>["onCommand"]>[0],
+ *   raw?: Record<string, unknown>,
+ * }} HarnessRuntimeCommandEvent
+ */
+
+/**
+ * @typedef {{
+ *   type: "file-read.started",
+ *   provider: HarnessRuntimeProvider,
+ *   fileRead: Parameters<Required<AgentIOHooks>["onFileRead"]>[0],
+ *   raw?: Record<string, unknown>,
+ * }} HarnessRuntimeFileReadEvent
+ */
+
+/**
+ * @typedef {{
  *   type: "assistant.completed",
  *   provider: HarnessRuntimeProvider,
  *   text: string,
@@ -160,6 +178,8 @@
  *   | HarnessRuntimeFileChangeEvent
  *   | HarnessRuntimeReasoningEvent
  *   | HarnessRuntimeToolEvent
+ *   | HarnessRuntimeCommandEvent
+ *   | HarnessRuntimeFileReadEvent
  *   | HarnessRuntimeAssistantCompletedEvent
  *   | HarnessRuntimeUsageEvent
  * )} HarnessRuntimeEvent

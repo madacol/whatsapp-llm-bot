@@ -15,7 +15,7 @@ import { getHarnessRawEventLoggerFromEnv } from "./raw-event-log.js";
 const log = createLogger("harness:runtime-events");
 
 /**
- * @type {Pick<Required<AgentIOHooks>, "onComposing" | "onPaused" | "onReasoning" | "onToolCall" | "onToolComplete" | "onToolResult" | "onLlmResponse" | "onFileChange" | "onUsage" | "onToolError">}
+ * @type {Pick<Required<AgentIOHooks>, "onComposing" | "onPaused" | "onReasoning" | "onToolCall" | "onToolComplete" | "onToolResult" | "onLlmResponse" | "onFileChange" | "onUsage" | "onToolError" | "onCommand" | "onFileRead">}
  */
 const DEFAULT_RUNTIME_EVENT_HOOKS = {
   onComposing: async () => {},
@@ -28,6 +28,8 @@ const DEFAULT_RUNTIME_EVENT_HOOKS = {
   onFileChange: async () => {},
   onUsage: async () => {},
   onToolError: async () => {},
+  onCommand: async () => {},
+  onFileRead: async () => {},
 };
 
 /**
@@ -69,7 +71,7 @@ function buildRuntimeToolPresentation(tool, workdir) {
  * @param {{
  *   provider: HarnessRuntimeProvider,
  *   messages: Message[],
- *   hooks?: Pick<AgentIOHooks, "onComposing" | "onPaused" | "onReasoning" | "onToolCall" | "onToolComplete" | "onToolResult" | "onLlmResponse" | "onFileChange" | "onUsage" | "onToolError">,
+ *   hooks?: Pick<AgentIOHooks, "onComposing" | "onPaused" | "onReasoning" | "onToolCall" | "onToolComplete" | "onToolResult" | "onLlmResponse" | "onFileChange" | "onUsage" | "onToolError" | "onCommand" | "onFileRead">,
  *   workdir?: string | null,
  *   emitUsage?: boolean,
  *   rawEventLogger?: HarnessRawEventLogger | null,
@@ -203,6 +205,14 @@ export function createHarnessRuntimeEventDispatcher(input) {
       case "tool.completed":
       case "tool.failed":
         await handleToolProgress(event);
+        return;
+      case "command.started":
+      case "command.completed":
+      case "command.failed":
+        await hooks.onCommand(event.command);
+        return;
+      case "file-read.started":
+        await hooks.onFileRead(event.fileRead);
         return;
       case "assistant.completed":
         if (event.responseMode === "append") {

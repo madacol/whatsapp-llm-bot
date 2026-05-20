@@ -151,6 +151,14 @@ describe("createCodexHarness", () => {
         assert.equal(input.prompt, "Use semantic Codex");
         assert.equal(input.sessionId, "codex-thread-0");
         assert.equal(input.externalInstructions, "Be concise");
+        await input.hooks?.onFileRead?.({
+          command: "sed -n '1,20p' src/app.js",
+          paths: ["src/app.js"],
+        });
+        await input.hooks?.onCommand?.({
+          command: "pnpm type-check",
+          status: "started",
+        });
         await input.hooks?.onLlmResponse?.("semantic ok");
         await input.hooks?.onUsage?.("0.000001", {
           prompt: 2,
@@ -206,6 +214,8 @@ describe("createCodexHarness", () => {
     }]);
     assert.ok(events.includes("session.started"));
     assert.ok(events.includes("turn.started"));
+    assert.ok(events.includes("file-read.started"));
+    assert.ok(events.includes("command.started"));
     assert.ok(events.includes("assistant.completed"));
     assert.ok(events.includes("usage.updated"));
     assert.ok(events.includes("turn.completed"));
