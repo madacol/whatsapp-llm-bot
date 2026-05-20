@@ -466,6 +466,52 @@ describe("createConversationRunner with codex harness", () => {
     assert.equal(secondTurn.responses.length, 0);
   });
 
+  it("transcribes audio-only first turns before starting a Codex run", async () => {
+    await seedChat("conv-codex-audio-first-turn", { enabled: true });
+    await configureCodexChat("conv-codex-audio-first-turn", {
+      media_to_text_models: { audio: "audio/model" },
+    });
+    mockServer.addResponses("Audio asks for the current status.");
+
+    /** @type {string[]} */
+    const seenPrompts = [];
+    registerCodexHarness(() => createCodexHarness({
+      startRun: async (input) => {
+        seenPrompts.push(input.prompt);
+        return {
+          abortController: new AbortController(),
+          done: Promise.resolve({
+            sessionId: null,
+            result: {
+              response: [{ type: "markdown", text: "ok" }],
+              messages: input.messages,
+              usage: { promptTokens: 0, completionTokens: 0, cachedTokens: 0, cost: 0 },
+            },
+          }),
+        };
+      },
+    }));
+
+    const audioPath = await writeMedia(
+      Buffer.from("first turn audio bytes"),
+      "audio/mp3",
+      "audio",
+    );
+    const turn = createChatTurn({
+      chatId: "conv-codex-audio-first-turn",
+      content: [{
+        type: "audio",
+        mime_type: "audio/mp3",
+        path: audioPath,
+      }],
+    });
+    await handleMessage(turn.context);
+
+    assert.equal(seenPrompts.length, 1);
+    assert.ok(seenPrompts[0]?.includes("[Audio description: Audio asks for the current status.]"));
+    assert.ok(seenPrompts[0]?.includes("Media file available in this request:"));
+  });
+
   it("routes !c to harness cancellation", async () => {
     await seedChat("conv-codex-cancel", { enabled: true });
     await configureCodexChat("conv-codex-cancel");

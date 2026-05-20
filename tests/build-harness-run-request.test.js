@@ -85,10 +85,12 @@ describe("buildHarnessRunRequest", () => {
     assert.deepEqual(Object.keys(turn).sort(), [
       "chatId",
       "externalInstructions",
+      "input",
       "messages",
       "runConfig",
     ]);
     assert.equal(turn.chatId, "provider-chat");
+    assert.equal(turn.input, "hello provider");
     assert.equal(turn.externalInstructions, "Use the provider prompt.");
     assert.deepEqual(turn.messages.at(-1), {
       role: "user",

@@ -4,6 +4,8 @@ import { buildRunConfig } from "./build-run-config.js";
 import { buildRunSession } from "./build-run-session.js";
 import { createToolRuntime } from "./create-tool-runtime.js";
 import { prepareRunMessages } from "./prepare-run-messages.js";
+import { buildLiveInputText } from "./live-input-text.js";
+import { getChatDb } from "../db.js";
 
 /**
  * Build the external system instructions supplied by persona/chat settings and
@@ -79,6 +81,20 @@ async function prepareHarnessConversationInput({
 }
 
 /**
+ * @param {Message[]} messages
+ * @returns {IncomingContentBlock[]}
+ */
+function getLatestUserContent(messages) {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (message.role === "user") {
+      return message.content;
+    }
+  }
+  return [];
+}
+
+/**
  * Build the semantic provider turn input for a chat turn.
  * @param {{
  *   chatId: string,
@@ -120,6 +136,12 @@ export async function buildHarnessTurnInput({
 
   return {
     chatId,
+    input: await buildLiveInputText({
+      content: getLatestUserContent(messages),
+      llmClient,
+      mediaToTextModels: chatInfo?.media_to_text_models ?? {},
+      db: getChatDb(chatId),
+    }),
     messages,
     externalInstructions,
     runConfig,
