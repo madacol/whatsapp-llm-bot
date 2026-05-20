@@ -179,7 +179,7 @@ function buildLegacyParamsFromSemanticTurn(turn) {
     },
     messages,
     mediaRegistry: new Map(),
-    hooks: {},
+    hooks: turn.hooks ?? {},
     runConfig: turn.runConfig,
   };
 }

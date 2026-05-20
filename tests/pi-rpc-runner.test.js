@@ -215,4 +215,66 @@ describe("startPiRpcRun", () => {
       cost: 0.123,
     });
   });
+
+  it("remembers Pi tool start args for end events that omit args", async () => {
+    const connectionMock = createOpenConnectionMock();
+    /** @type {Array<Parameters<Required<AgentIOHooks>["onFileChange"]>[0]>} */
+    const fileChanges = [];
+
+    const started = await startPiRpcRun({
+      chatId: "pi-chat-tools",
+      prompt: "Edit a file",
+      messages: [{ role: "user", content: [{ type: "text", text: "Edit a file" }] }],
+      hooks: {
+        onFileChange: async (event) => {
+          fileChanges.push(event);
+        },
+      },
+    }, {
+      openConnection: (options = {}) => connectionMock.openConnection({
+        ...options,
+        notifications: [
+          {
+            type: "tool_execution_start",
+            toolCallId: "edit-1",
+            toolName: "edit",
+            args: {
+              path: "src/app.js",
+              edits: [{ oldText: "const value = 1;\n", newText: "const value = 2;\n" }],
+            },
+          },
+          {
+            type: "tool_execution_end",
+            toolCallId: "edit-1",
+            toolName: "edit",
+            result: {
+              content: [{ type: "text", text: "Edited src/app.js" }],
+              details: {
+                diff: ["--- a/src/app.js", "+++ b/src/app.js", "@@ -1 +1 @@", "-const value = 1;", "+const value = 2;"].join("\n"),
+              },
+            },
+            isError: false,
+          },
+          {
+            type: "agent_end",
+            messages: [{
+              role: "assistant",
+              content: [{ type: "text", text: "Done." }],
+            }],
+          },
+        ],
+      }),
+    });
+
+    await started.done;
+
+    assert.deepEqual(fileChanges, [{
+      path: "src/app.js",
+      summary: "src/app.js (update)",
+      kind: "update",
+      diff: ["--- a/src/app.js", "+++ b/src/app.js", "@@ -1 +1 @@", "-const value = 1;", "+const value = 2;"].join("\n"),
+      oldText: "const value = 1;\n",
+      newText: "const value = 2;\n",
+    }]);
+  });
 });

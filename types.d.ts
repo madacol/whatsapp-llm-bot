@@ -751,6 +751,7 @@ type HarnessTurnInput = {
   externalInstructions?: string;
   resumeCursor?: string | null;
   runConfig?: HarnessRunConfig;
+  hooks?: AgentIOHooks;
 };
 
 type HarnessAdapterCreateInput = {
