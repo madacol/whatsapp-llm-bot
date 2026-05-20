@@ -390,6 +390,50 @@ describe("buildAgentIoHooks", () => {
     }]);
   });
 
+  it("stores read command output on compact file-read inspect state", async () => {
+    /** @type {MessageInspectState[]} */
+    const inspects = [];
+    const hooks = buildAgentIoHooks(
+      {
+        send: async () => ({
+          keyId: "compact-read-output",
+          isImage: false,
+          update: async () => {},
+          setInspect: (inspect) => { if (inspect) inspects.push(inspect); },
+        }),
+        reply: async () => undefined,
+        select: async () => "",
+        confirm: async () => true,
+      },
+      async () => {},
+      async () => {},
+      () => {},
+      "/repo",
+      { ...DEFAULT_OUTPUT_VISIBILITY, toolDetails: false },
+    );
+
+    const command = "sed -n '1,20p' src/app.js";
+    await hooks.onFileRead?.({ command, paths: ["src/app.js"] });
+    await hooks.onCommand?.({
+      command,
+      status: "completed",
+      output: "  1→ const value = 1;\n  2→ const value = 2;",
+    });
+
+    const inspect = inspects.at(-1);
+    assert.ok(inspect && inspect.kind === "text");
+    assert.equal(
+      inspect?.kind === "text" ? inspect.text : "",
+      [
+        "✅ *Read*  `src/app.js`",
+        "```",
+        "  1→ const value = 1;",
+        "  2→ const value = 2;",
+        "```",
+      ].join("\n"),
+    );
+  });
+
   it("shows full multiline bash commands in compact tool summaries", async () => {
     const { hooks, sent } = createSubjectWithCwd("/repo", {
       ...DEFAULT_OUTPUT_VISIBILITY,
