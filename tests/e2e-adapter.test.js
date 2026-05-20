@@ -141,6 +141,10 @@ describe("compact tool progress edits", () => {
       sentMessages.some((entry) => typeof entry.msg.text === "string" && entry.msg.text.includes("Final answer after the tool.")),
       `Expected final assistant answer, got ${JSON.stringify(sentMessages)}`,
     );
+    assert.ok(
+      sentMessages.some((entry) => typeof entry.msg.text === "string" && entry.msg.text.includes("Cost:")),
+      `Expected final usage cost, got ${JSON.stringify(sentMessages)}`,
+    );
   });
 });
 
