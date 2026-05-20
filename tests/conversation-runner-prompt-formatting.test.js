@@ -265,6 +265,64 @@ describe("createConversationRunner prompt formatting", () => {
     assert.deepEqual(replies, [[{ type: "markdown", text: "event response" }]]);
   });
 
+  it("presents Codex semantic adapter Read and Shell progress through the conversation runner", async () => {
+    await seedChat("conv-codex-runtime-progress", { enabled: true });
+    await updateChatConfig("conv-codex-runtime-progress", (current) => ({
+      ...current,
+      harness: "codex",
+      harness_config: {},
+    }));
+
+    registerCodexHarness(() => createCodexHarness({
+      startRun: async (input) => {
+        const readCommand = "sed -n '1,20p' src/app.js";
+        await input.hooks?.onFileRead?.({
+          command: readCommand,
+          paths: ["src/app.js"],
+        });
+        await input.hooks?.onCommand?.({
+          command: readCommand,
+          status: "completed",
+          output: "  1→ const value = 1;",
+        });
+        await input.hooks?.onCommand?.({
+          command: "pnpm type-check",
+          status: "started",
+        });
+        await input.hooks?.onLlmResponse?.("done");
+        return {
+          abortController: new AbortController(),
+          done: Promise.resolve({
+            sessionId: null,
+            result: {
+              response: [{ type: "text", text: "done" }],
+              messages: input.messages,
+              usage: { promptTokens: 0, completionTokens: 0, cachedTokens: 0, cost: 0 },
+            },
+          }),
+        };
+      },
+    }));
+
+    const turn = createChatTurn({
+      chatId: "conv-codex-runtime-progress",
+      content: [{ type: "text", text: "hello" }],
+    });
+    await handleMessage(turn.context);
+
+    const progressTexts = turn.responses
+      .filter((response) => response.source === "plain")
+      .map((response) => response.text);
+    assert.ok(
+      progressTexts.some((text) => text.includes("*Read*  `src/app.js`")),
+      `expected Read progress, got: ${JSON.stringify(progressTexts)}`,
+    );
+    assert.ok(
+      progressTexts.some((text) => text.includes("*Shell*  `pnpm type-check`")),
+      `expected Shell progress, got: ${JSON.stringify(progressTexts)}`,
+    );
+  });
+
   it("runs command afterResponse hooks only after the command reply resolves", async () => {
     await seedChat("conv-command-after-response", { enabled: true });
     const { createConversationRunner } = await import("../conversation/create-conversation-runner.js");
