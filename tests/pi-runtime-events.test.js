@@ -255,8 +255,8 @@ describe("normalizePiRuntimeEvents", () => {
         provider: "pi",
         change: {
           path: "generated.txt",
-          summary: "generated.txt (update)",
-          kind: "update",
+          summary: "generated.txt (add)",
+          kind: "add",
           newText: "generated smoke content",
         },
         raw: {

@@ -1,6 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { startPiRpcRun } from "../harnesses/pi-runner.js";
+import { createRuntimeHookRecorder } from "./harness-runtime-contract-helpers.js";
 
 /**
  * @typedef {{
@@ -218,18 +219,13 @@ describe("startPiRpcRun", () => {
 
   it("remembers Pi tool start args for end events that omit args", async () => {
     const connectionMock = createOpenConnectionMock();
-    /** @type {Array<Parameters<Required<AgentIOHooks>["onFileChange"]>[0]>} */
-    const fileChanges = [];
+    const runtime = createRuntimeHookRecorder();
 
     const started = await startPiRpcRun({
       chatId: "pi-chat-tools",
       prompt: "Edit a file",
       messages: [{ role: "user", content: [{ type: "text", text: "Edit a file" }] }],
-      hooks: {
-        onFileChange: async (event) => {
-          fileChanges.push(event);
-        },
-      },
+      hooks: runtime.hooks,
     }, {
       openConnection: (options = {}) => connectionMock.openConnection({
         ...options,
@@ -268,7 +264,7 @@ describe("startPiRpcRun", () => {
 
     await started.done;
 
-    assert.deepEqual(fileChanges, [{
+    assert.deepEqual(runtime.fileChanges, [{
       path: "src/app.js",
       summary: "src/app.js (update)",
       kind: "update",
@@ -280,23 +276,13 @@ describe("startPiRpcRun", () => {
 
   it("projects smoke-confirmed write changes and failed bash output when end events omit args", async () => {
     const connectionMock = createOpenConnectionMock();
-    /** @type {Array<Parameters<Required<AgentIOHooks>["onFileChange"]>[0]>} */
-    const fileChanges = [];
-    /** @type {string[]} */
-    const toolErrors = [];
+    const runtime = createRuntimeHookRecorder();
 
     const started = await startPiRpcRun({
       chatId: "pi-chat-smoke-shapes",
       prompt: "Write a file and run a failing command",
       messages: [{ role: "user", content: [{ type: "text", text: "Write a file and run a failing command" }] }],
-      hooks: {
-        onFileChange: async (event) => {
-          fileChanges.push(event);
-        },
-        onToolError: async (message) => {
-          toolErrors.push(message);
-        },
-      },
+      hooks: runtime.hooks,
     }, {
       openConnection: (options = {}) => connectionMock.openConnection({
         ...options,
@@ -349,13 +335,13 @@ describe("startPiRpcRun", () => {
 
     await started.done;
 
-    assert.deepEqual(fileChanges, [{
+    assert.deepEqual(runtime.fileChanges, [{
       path: "generated.txt",
-      summary: "generated.txt (update)",
-      kind: "update",
+      summary: "generated.txt (add)",
+      kind: "add",
       newText: "generated smoke content",
     }]);
-    assert.deepEqual(toolErrors, [
+    assert.deepEqual(runtime.toolErrors, [
       "cat: missing-file-for-rpc-smoke: No such file or directory\n\n\nCommand exited with code 1",
     ]);
   });

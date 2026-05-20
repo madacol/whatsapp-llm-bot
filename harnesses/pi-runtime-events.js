@@ -186,6 +186,19 @@ function extractPiEditTexts(args) {
 /**
  * @param {string} name
  * @param {Record<string, unknown>} args
+ * @param {Record<string, unknown>} details
+ * @returns {"add" | "update"}
+ */
+function inferPiFileChangeKind(name, args, details) {
+  if (name === "write" && typeof args.content === "string" && typeof details.diff !== "string") {
+    return "add";
+  }
+  return "update";
+}
+
+/**
+ * @param {string} name
+ * @param {Record<string, unknown>} args
  * @param {Record<string, unknown>} event
  * @returns {HarnessRuntimeEvent[]}
  */
@@ -195,7 +208,7 @@ function normalizePiFileChangeEvents(name, args, event) {
   }
   const result = isObjectRecord(event.result) ? event.result : {};
   const details = isObjectRecord(result.details) ? result.details : {};
-  const kind = "update";
+  const kind = inferPiFileChangeKind(name, args, details);
   return [{
     type: "file-change.completed",
     provider: "pi",

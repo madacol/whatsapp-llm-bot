@@ -16,6 +16,7 @@ import { setDb } from "../db.js";
 import { contentEvent } from "../outbound-events.js";
 import { getChatWorkDir } from "../utils.js";
 import { updateChatConfig } from "../chat-config.js";
+import { getChatSqlitePath } from "../chat-paths.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -64,6 +65,15 @@ function createFakeTransport() {
   let groupCounter = 0;
   const instanceId = `${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
 
+  /**
+   * Conversation code uses getChatDb(chatId) directly, so test-created chats
+   * need their chat sqlite path mapped to the shared in-memory DB.
+   * @param {string} chatId
+   */
+  function registerCreatedChatDb(chatId) {
+    setDb(getChatSqlitePath(chatId), db);
+  }
+
   return {
     createdGroups,
     createdCommunities,
@@ -91,18 +101,21 @@ function createFakeTransport() {
       createGroup: async (subject, participants) => {
         groupCounter += 1;
         const chatId = `group-${instanceId}-${groupCounter}@g.us`;
+        registerCreatedChatDb(chatId);
         createdGroups.push({ subject, participants, chatId });
         return { chatId, subject };
       },
       createCommunity: async (subject, description) => {
         groupCounter += 1;
         const chatId = `community-${instanceId}-${groupCounter}@g.us`;
+        registerCreatedChatDb(chatId);
         createdCommunities.push({ subject, description, chatId });
         return { chatId, subject };
       },
       createCommunityGroup: async (subject, participants, parentCommunityChatId) => {
         groupCounter += 1;
         const chatId = `group-${instanceId}-${groupCounter}@g.us`;
+        registerCreatedChatDb(chatId);
         createdGroups.push({ subject, participants, chatId });
         linkedParentsByChatId.set(chatId, parentCommunityChatId);
         return { chatId, subject };
