@@ -6,15 +6,24 @@ import { normalizePiRuntimeEvents, getResponseData } from "./pi-runtime-events.j
 
 const log = createLogger("harness:pi-runner");
 
-/** @type {Pick<Required<AgentIOHooks>, "onComposing" | "onPaused" | "onReasoning" | "onToolCall" | "onLlmResponse" | "onToolError" | "onUsage">} */
+/**
+ * @typedef {Pick<AgentIOHooks, "onComposing" | "onPaused" | "onReasoning" | "onToolCall" | "onToolComplete" | "onToolResult" | "onLlmResponse" | "onFileChange" | "onUsage" | "onToolError" | "onCommand" | "onFileRead">} PiRunHooks
+ */
+
+/** @type {Required<PiRunHooks>} */
 const DEFAULT_PI_RUN_HOOKS = {
   onComposing: async () => {},
   onPaused: async () => {},
   onReasoning: async () => {},
   onToolCall: async () => {},
+  onToolComplete: async () => {},
+  onToolResult: async () => {},
   onLlmResponse: async () => {},
+  onFileChange: async () => {},
   onToolError: async () => {},
   onUsage: async () => {},
+  onCommand: async () => {},
+  onFileRead: async () => {},
 };
 
 /**
@@ -151,6 +160,49 @@ function buildRequestId(id) {
 }
 
 /**
+ * Pi RPC commonly sends tool args on start/update events but omits them on
+ * end events. Keep the latest start args available through completion.
+ * @returns {{ enrich: (event: Record<string, unknown>) => Record<string, unknown> }}
+ */
+function createPiToolCallTracker() {
+  /** @type {Map<string, { toolName: string, args: Record<string, unknown> }>} */
+  const activeToolCalls = new Map();
+
+  return {
+    enrich(rawEvent) {
+      let event = rawEvent;
+      if (
+        event.type === "tool_execution_start"
+        && typeof event.toolCallId === "string"
+        && typeof event.toolName === "string"
+      ) {
+        activeToolCalls.set(event.toolCallId, {
+          toolName: event.toolName,
+          args: isObjectRecord(event.args) ? event.args : {},
+        });
+      } else if (
+        (event.type === "tool_execution_update" || event.type === "tool_execution_end")
+        && typeof event.toolCallId === "string"
+      ) {
+        const toolCallId = event.toolCallId;
+        const activeTool = activeToolCalls.get(toolCallId);
+        if (activeTool) {
+          event = {
+            ...event,
+            toolName: typeof event.toolName === "string" ? event.toolName : activeTool.toolName,
+            args: isObjectRecord(event.args) ? event.args : activeTool.args,
+          };
+        }
+        if (event.type === "tool_execution_end") {
+          activeToolCalls.delete(toolCallId);
+        }
+      }
+      return event;
+    },
+  };
+}
+
+/**
  * @param {{
  *   chatId: string,
  *   prompt: string,
@@ -159,7 +211,7 @@ function buildRequestId(id) {
  *   sessionPath?: string | null,
  *   runConfig?: HarnessRunConfig,
  *   env?: NodeJS.ProcessEnv,
- *   hooks?: Pick<AgentIOHooks, "onComposing" | "onPaused" | "onReasoning" | "onToolCall" | "onLlmResponse" | "onToolError" | "onUsage">,
+ *   hooks?: PiRunHooks,
  *   isAborted?: () => boolean,
  * }} input
  * @param {{
@@ -187,8 +239,7 @@ export async function startPiRpcRun(input, deps = {}) {
   let sessionPath = input.sessionPath ?? null;
   let agentCompleted = false;
   let requestSequence = 1;
-  /** @type {Map<string, { toolName: string, args: Record<string, unknown> }>} */
-  const activeToolCalls = new Map();
+  const toolCallTracker = createPiToolCallTracker();
 
   const connection = await openConnection({
     ...(input.runConfig?.workdir ? { cwd: input.runConfig.workdir } : {}),
@@ -251,33 +302,7 @@ export async function startPiRpcRun(input, deps = {}) {
   const done = (async () => {
     try {
       for await (const rawEvent of connection.notifications) {
-        let event = rawEvent;
-        if (
-          event.type === "tool_execution_start"
-          && typeof event.toolCallId === "string"
-          && typeof event.toolName === "string"
-        ) {
-          activeToolCalls.set(event.toolCallId, {
-            toolName: event.toolName,
-            args: isObjectRecord(event.args) ? event.args : {},
-          });
-        } else if (
-          (event.type === "tool_execution_update" || event.type === "tool_execution_end")
-          && typeof event.toolCallId === "string"
-        ) {
-          const toolCallId = event.toolCallId;
-          const activeTool = activeToolCalls.get(toolCallId);
-          if (activeTool) {
-            event = {
-              ...event,
-              toolName: typeof event.toolName === "string" ? event.toolName : activeTool.toolName,
-              args: isObjectRecord(event.args) ? event.args : activeTool.args,
-            };
-          }
-          if (event.type === "tool_execution_end") {
-            activeToolCalls.delete(toolCallId);
-          }
-        }
+        const event = toolCallTracker.enrich(rawEvent);
         const runtimeEvents = normalizePiRuntimeEvents(event);
         for (const runtimeEvent of runtimeEvents) {
           await dispatcher.handleEvent(runtimeEvent);

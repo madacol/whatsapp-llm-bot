@@ -16,6 +16,8 @@
         "start": "while true; do node --max-old-space-size=2560 index.js; code=$?; echo \"[process-supervisor] node exited with code $code\"; if [ \"$code\" -eq 0 ] || [ \"$code\" -eq 137 ] || [ \"$code\" -eq 143 ]; then sleep 1; else exit \"$code\"; fi; done",
         "restart": "if test -f .bot.pid; then kill -TERM $(cat .bot.pid); else echo 'No .bot.pid found'; fi",
         "test": "node scripts/test-runner.js",
+        "test:fast": "node scripts/test-runner.js --fast",
+        "test:rendering": "node scripts/test-runner.js --rendering",
         "test:watch": "node scripts/test-runner.js --watch",
         "test:prompts": "node --test tests/*.prompt-test.js",
         "type-check": "npx tsc --noEmit --project jsconfig.json",

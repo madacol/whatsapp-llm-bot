@@ -3,6 +3,10 @@ import { spawn } from "node:child_process";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 
+const RENDERING_HEAVY_TEST_FILES = new Set([
+  "tests/code-image-renderer.test.js",
+]);
+
 /**
  * @param {string} arg
  * @returns {boolean}
@@ -32,6 +36,20 @@ export function listDefaultTestFiles(testDir = "tests") {
 }
 
 /**
+ * @param {string[]} files
+ * @param {"all" | "fast" | "rendering"} mode
+ * @returns {string[]}
+ */
+export function filterDefaultTestFiles(files, mode) {
+  if (mode === "all") {
+    return files;
+  }
+  return files.filter((file) => mode === "rendering"
+    ? RENDERING_HEAVY_TEST_FILES.has(file)
+    : !RENDERING_HEAVY_TEST_FILES.has(file));
+}
+
+/**
  * @param {string[]} cliArgs
  * @param {{ defaultTestFiles: string[], watch?: boolean }} options
  * @returns {string[]}
@@ -49,18 +67,35 @@ export function buildNodeTestArgs(cliArgs, options) {
 
 /**
  * @param {string[]} argv
- * @returns {{ watch: boolean, cliArgs: string[] }}
+ * @returns {{ watch: boolean, mode: "all" | "fast" | "rendering", cliArgs: string[] }}
  */
 function parseRunnerArgs(argv) {
-  if (argv[0] === "--watch") {
-    return {
-      watch: true,
-      cliArgs: argv.slice(1),
-    };
+  let watch = false;
+  /** @type {"all" | "fast" | "rendering"} */
+  let mode = "all";
+  /** @type {string[]} */
+  const cliArgs = [];
+
+  for (const arg of argv) {
+    if (arg === "--watch") {
+      watch = true;
+      continue;
+    }
+    if (arg === "--fast") {
+      mode = "fast";
+      continue;
+    }
+    if (arg === "--rendering") {
+      mode = "rendering";
+      continue;
+    }
+    cliArgs.push(arg);
   }
+
   return {
-    watch: false,
-    cliArgs: argv,
+    watch,
+    mode,
+    cliArgs,
   };
 }
 
@@ -68,9 +103,9 @@ function parseRunnerArgs(argv) {
  * @returns {Promise<void>}
  */
 async function main() {
-  const { watch, cliArgs } = parseRunnerArgs(process.argv.slice(2));
+  const { watch, mode, cliArgs } = parseRunnerArgs(process.argv.slice(2));
   const child = spawn(process.execPath, buildNodeTestArgs(cliArgs, {
-    defaultTestFiles: listDefaultTestFiles(),
+    defaultTestFiles: filterDefaultTestFiles(listDefaultTestFiles(), mode),
     watch,
   }), {
     env: { ...process.env, TESTING: process.env.TESTING ?? "1" },

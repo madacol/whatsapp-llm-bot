@@ -2,6 +2,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
   buildNodeTestArgs,
+  filterDefaultTestFiles,
   isExplicitTestTarget,
 } from "../scripts/test-runner.js";
 
@@ -52,6 +53,36 @@ describe("buildNodeTestArgs", () => {
       "--experimental-test-isolation=none",
       "--watch",
       "tests/a.test.js",
+    ]);
+  });
+});
+
+describe("filterDefaultTestFiles", () => {
+  it("keeps all default files in all mode", () => {
+    assert.deepEqual(filterDefaultTestFiles([
+      "tests/a.test.js",
+      "tests/code-image-renderer.test.js",
+    ], "all"), [
+      "tests/a.test.js",
+      "tests/code-image-renderer.test.js",
+    ]);
+  });
+
+  it("excludes rendering-heavy tests in fast mode", () => {
+    assert.deepEqual(filterDefaultTestFiles([
+      "tests/a.test.js",
+      "tests/code-image-renderer.test.js",
+    ], "fast"), [
+      "tests/a.test.js",
+    ]);
+  });
+
+  it("keeps only rendering-heavy tests in rendering mode", () => {
+    assert.deepEqual(filterDefaultTestFiles([
+      "tests/a.test.js",
+      "tests/code-image-renderer.test.js",
+    ], "rendering"), [
+      "tests/code-image-renderer.test.js",
     ]);
   });
 });

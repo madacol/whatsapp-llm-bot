@@ -586,9 +586,19 @@ export function createTestHarness({ mockServer, handleMessage, testDb }) {
 
 /**
  * @typedef {{
+ *   chatId: string;
+ *   msg: Record<string, unknown>;
+ *   options?: Record<string, unknown>;
+ * }} RelayedSocketMessage
+ */
+
+/**
+ * @typedef {{
  *   sock: BaileysSocket;
  *   getSentMessages: () => SentSocketMessage[];
+ *   getRelayedMessages: () => RelayedSocketMessage[];
  *   getTextMessages: () => string[];
+ *   getRenderedMessages: () => string[];
  *   getReactions: () => Array<{ text: string; key: Record<string, unknown> }>;
  *   getPresenceUpdates: () => Array<{ presence: string; chatId: string }>;
  *   emitReaction: (key: { id: string; remoteJid: string }, reaction: { text: string }) => void;
@@ -619,11 +629,21 @@ export function createMockBaileysSocket(options = {}) {
 
   /** @type {SentSocketMessage[]} */
   let sentMessages = [];
+  /** @type {RelayedSocketMessage[]} */
+  let relayedMessages = [];
   /** @type {Array<{ text: string; key: Record<string, unknown> }>} */
   let reactions = [];
   /** @type {Array<{ presence: string; chatId: string }>} */
   let presenceUpdates = [];
   let msgCounter = 0;
+
+  /**
+   * @param {unknown} value
+   * @returns {value is Record<string, unknown>}
+   */
+  function isObject(value) {
+    return !!value && typeof value === "object" && !Array.isArray(value);
+  }
 
   const sock = /** @type {BaileysSocket} */ (/** @type {unknown} */ ({
     user: { id: `${selfId}:0@s.whatsapp.net`, lid: `${selfLid}:0@lid`, name: selfName },
@@ -642,6 +662,15 @@ export function createMockBaileysSocket(options = {}) {
       sentMessages.push({ chatId, msg, options: opts });
       return { key };
     },
+    /** @param {string} chatId @param {Record<string, unknown>} msg @param {Record<string, unknown>} [opts] */
+    relayMessage: async (chatId, msg, opts) => {
+      relayedMessages.push({ chatId, msg, options: opts });
+    },
+    waUploadToServer: async () => ({
+      mediaUrl: "https://example.test/media",
+      directPath: "/mock-media",
+      mediaKey: Buffer.from("mock-media-key"),
+    }),
     /** @param {string} presence @param {string} chatId */
     sendPresenceUpdate: async (presence, chatId) => {
       presenceUpdates.push({ presence, chatId });
@@ -657,9 +686,25 @@ export function createMockBaileysSocket(options = {}) {
   return {
     sock,
     getSentMessages: () => sentMessages,
+    getRelayedMessages: () => relayedMessages,
     getTextMessages: () => sentMessages
       .filter(m => typeof m.msg.text === "string")
       .map(m => /** @type {string} */ (m.msg.text)),
+    getRenderedMessages: () => {
+      const sent = sentMessages.flatMap((entry) => {
+        if (typeof entry.msg.text === "string") return [entry.msg.text];
+        if (typeof entry.msg.caption === "string") return [entry.msg.caption];
+        return [];
+      });
+      const relayed = relayedMessages.flatMap((entry) => {
+        const imageMessage = isObject(entry.msg.imageMessage) ? entry.msg.imageMessage : null;
+        const videoMessage = isObject(entry.msg.videoMessage) ? entry.msg.videoMessage : null;
+        const documentMessage = isObject(entry.msg.documentMessage) ? entry.msg.documentMessage : null;
+        const caption = imageMessage?.caption ?? videoMessage?.caption ?? documentMessage?.caption;
+        return typeof caption === "string" ? [caption] : [];
+      });
+      return [...sent, ...relayed];
+    },
     getReactions: () => reactions,
     getPresenceUpdates: () => presenceUpdates,
     emitReaction: (key, reaction) => {
@@ -667,6 +712,7 @@ export function createMockBaileysSocket(options = {}) {
     },
     clearCaptures: () => {
       sentMessages = [];
+      relayedMessages = [];
       reactions = [];
       presenceUpdates = [];
     },
