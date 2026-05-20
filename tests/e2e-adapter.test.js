@@ -386,6 +386,51 @@ describe("Pi RPC runtime events", () => {
                   isError: false,
                 };
                 yield {
+                  type: "tool_execution_start",
+                  toolCallId: "write-1",
+                  toolName: "write",
+                  args: {
+                    path: "generated.txt",
+                    content: "generated smoke content",
+                  },
+                };
+                yield {
+                  type: "tool_execution_end",
+                  toolCallId: "write-1",
+                  toolName: "write",
+                  result: { content: [{ type: "text", text: "Successfully wrote 23 bytes to generated.txt" }] },
+                  isError: false,
+                };
+                yield {
+                  type: "tool_execution_start",
+                  toolCallId: "bash-fail-1",
+                  toolName: "bash",
+                  args: { command: "cat missing-file-for-rpc-smoke" },
+                };
+                yield {
+                  type: "tool_execution_update",
+                  toolCallId: "bash-fail-1",
+                  toolName: "bash",
+                  args: { command: "cat missing-file-for-rpc-smoke" },
+                  partialResult: {
+                    content: [{ type: "text", text: "cat: missing-file-for-rpc-smoke: No such file or directory\n" }],
+                    details: {},
+                  },
+                };
+                yield {
+                  type: "tool_execution_end",
+                  toolCallId: "bash-fail-1",
+                  toolName: "bash",
+                  result: {
+                    content: [{
+                      type: "text",
+                      text: "cat: missing-file-for-rpc-smoke: No such file or directory\n\n\nCommand exited with code 1",
+                    }],
+                    details: {},
+                  },
+                  isError: true,
+                };
+                yield {
                   type: "agent_end",
                   messages: [{
                     role: "assistant",
@@ -415,7 +460,7 @@ describe("Pi RPC runtime events", () => {
     }));
   });
 
-  it("projects Pi RPC read, bash, file, answer, and usage events to WhatsApp messages", async () => {
+  it("projects Pi RPC read, bash, file, error, answer, and usage events to WhatsApp messages", async () => {
     const { sock, getSentMessages } = createMockBaileysSocket();
 
     await adaptIncomingMessage(
@@ -434,6 +479,7 @@ describe("Pi RPC runtime events", () => {
     assert.ok(textMessages.some((text) => text.includes("*Read*  `README.md`")), `Expected Pi read progress, got ${JSON.stringify(textMessages)}`);
     assert.ok(textMessages.some((text) => text.includes("*Shell*  `pwd`")), `Expected Pi bash progress, got ${JSON.stringify(textMessages)}`);
     assert.ok(textMessages.some((text) => text.includes("*Update File*  `src/app.js`")), `Expected Pi file change, got ${JSON.stringify(textMessages)}`);
+    assert.ok(textMessages.some((text) => text.includes("missing-file-for-rpc-smoke") || text.includes("Command exited with code 1")), `Expected Pi failed bash output, got ${JSON.stringify(textMessages)}`);
     assert.ok(textMessages.some((text) => text.includes("Pi RPC answer.")), `Expected Pi answer, got ${JSON.stringify(textMessages)}`);
     assert.ok(textMessages.some((text) => text.includes("Cost: 0.002500")), `Expected Pi usage cost, got ${JSON.stringify(textMessages)}`);
   });

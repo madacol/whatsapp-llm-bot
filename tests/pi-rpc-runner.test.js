@@ -277,4 +277,86 @@ describe("startPiRpcRun", () => {
       newText: "const value = 2;\n",
     }]);
   });
+
+  it("projects smoke-confirmed write changes and failed bash output when end events omit args", async () => {
+    const connectionMock = createOpenConnectionMock();
+    /** @type {Array<Parameters<Required<AgentIOHooks>["onFileChange"]>[0]>} */
+    const fileChanges = [];
+    /** @type {string[]} */
+    const toolErrors = [];
+
+    const started = await startPiRpcRun({
+      chatId: "pi-chat-smoke-shapes",
+      prompt: "Write a file and run a failing command",
+      messages: [{ role: "user", content: [{ type: "text", text: "Write a file and run a failing command" }] }],
+      hooks: {
+        onFileChange: async (event) => {
+          fileChanges.push(event);
+        },
+        onToolError: async (message) => {
+          toolErrors.push(message);
+        },
+      },
+    }, {
+      openConnection: (options = {}) => connectionMock.openConnection({
+        ...options,
+        notifications: [
+          {
+            type: "tool_execution_start",
+            toolCallId: "write-1",
+            toolName: "write",
+            args: {
+              path: "generated.txt",
+              content: "generated smoke content",
+            },
+          },
+          {
+            type: "tool_execution_end",
+            toolCallId: "write-1",
+            toolName: "write",
+            result: { content: [{ type: "text", text: "Successfully wrote 23 bytes to generated.txt" }] },
+            isError: false,
+          },
+          {
+            type: "tool_execution_start",
+            toolCallId: "bash-1",
+            toolName: "bash",
+            args: { command: "cat missing-file-for-rpc-smoke" },
+          },
+          {
+            type: "tool_execution_end",
+            toolCallId: "bash-1",
+            toolName: "bash",
+            result: {
+              content: [{
+                type: "text",
+                text: "cat: missing-file-for-rpc-smoke: No such file or directory\n\n\nCommand exited with code 1",
+              }],
+              details: {},
+            },
+            isError: true,
+          },
+          {
+            type: "agent_end",
+            messages: [{
+              role: "assistant",
+              content: [{ type: "text", text: "Done." }],
+            }],
+          },
+        ],
+      }),
+    });
+
+    await started.done;
+
+    assert.deepEqual(fileChanges, [{
+      path: "generated.txt",
+      summary: "generated.txt (update)",
+      kind: "update",
+      newText: "generated smoke content",
+    }]);
+    assert.deepEqual(toolErrors, [
+      "cat: missing-file-for-rpc-smoke: No such file or directory\n\n\nCommand exited with code 1",
+    ]);
+  });
 });
