@@ -190,6 +190,20 @@ function createCodexEventHooks(events) {
         },
       });
     },
+    async onCommand(event) {
+      events.emit({
+        type: event.status === "completed"
+          ? "command.completed"
+          : event.status === "failed" ? "command.failed" : "command.started",
+        command: event,
+      });
+    },
+    async onFileRead(event) {
+      events.emit({
+        type: "file-read.started",
+        fileRead: event,
+      });
+    },
   });
 }
 
