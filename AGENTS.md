@@ -2,7 +2,7 @@
 
 - Use JSDoc types and precise narrowing; avoid weak casts.
 - Keep subsystem seams small, semantic, and explicit.
-- For non-trivial work, state the high-level direction before implementing.
+- When a request is vague or ambiguous, ask for clarification instead of assuming.
 - Do not bypass seams, add special cases, or cut corners without confirming.
 - When external payload shape matters, inspect a real payload before designing around it.
 - For behavior changes, use red/green TDD, then `pnpm type-check`, test, and commit.
