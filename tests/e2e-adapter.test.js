@@ -13,6 +13,7 @@ import {
   createWAMessage,
   createTestDb,
   seedChat,
+  toolCall,
 } from "./helpers.js";
 import { setDb } from "../db.js";
 import { adaptIncomingMessage } from "../whatsapp/inbound/chat-turn.js";
@@ -91,6 +92,54 @@ describe("basic text message", () => {
     assert.ok(
       texts.some(t => t.includes("Hello from LLM!")),
       `Expected LLM response in socket output, got: ${JSON.stringify(texts)}`,
+    );
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════
+// 1b. Compact tool progress edits through the transport boundary
+// ═══════════════════════════════════════════════════════════════════
+describe("compact tool progress edits", () => {
+  const senderId = "e2e-compact-user";
+  const chatId = `${senderId}@s.whatsapp.net`;
+
+  before(async () => {
+    await seedChat(testDb, chatId, { enabled: true });
+    await updateChatConfig(chatId, (current) => ({
+      ...current,
+      output_visibility: { toolDetails: false },
+    }));
+  });
+
+  it("updates the compact tool message instead of sending repeated standalone progress messages", async () => {
+    mockServer.addResponses(
+      toolCall("run_javascript", { code: "() => 'hello'" }),
+      "Final answer after the tool.",
+    );
+
+    const { sock, getSentMessages } = createMockBaileysSocket();
+    const msg = createWAMessage({ text: "Run a tool", senderId });
+
+    await adaptIncomingMessage(msg, sock, handleMessage, testConfirmRegistry, testUserResponseRegistry);
+
+    const sentMessages = getSentMessages();
+    const compactMessages = sentMessages.filter((entry) => (
+      typeof entry.msg.text === "string"
+      && entry.msg.text.includes("*run_javascript*")
+    ));
+    const compactSends = compactMessages.filter((entry) => !("edit" in entry.msg));
+    const compactEdits = compactMessages.filter((entry) => "edit" in entry.msg);
+
+    assert.equal(compactSends.length, 1, `Expected one compact progress send, got ${JSON.stringify(compactMessages)}`);
+    assert.ok(compactEdits.length >= 1, `Expected compact progress to be edited, got ${JSON.stringify(compactMessages)}`);
+    assert.deepEqual(
+      compactEdits.map((entry) => entry.msg.edit),
+      compactEdits.map(() => ({ id: "sent-msg-0", remoteJid: chatId })),
+      "Compact progress edits should target the first compact message key",
+    );
+    assert.ok(
+      sentMessages.some((entry) => typeof entry.msg.text === "string" && entry.msg.text.includes("Final answer after the tool.")),
+      `Expected final assistant answer, got ${JSON.stringify(sentMessages)}`,
     );
   });
 });

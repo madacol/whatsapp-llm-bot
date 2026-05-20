@@ -153,6 +153,7 @@ async function executeAndStoreTool({
       await tryEdit(handle, linkText, toolName);
       registerInspect(toolMessage);
 
+      await hooks.onToolComplete(toolCall);
       return finishToolCall();
     }
 
@@ -196,6 +197,7 @@ async function executeAndStoreTool({
       }
     }
 
+    await hooks.onToolComplete(toolCall);
     return finishToolCall();
   } catch (error) {
     log.error("Error executing tool:", error);
