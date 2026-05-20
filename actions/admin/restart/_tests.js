@@ -15,6 +15,29 @@ function createMemoryRestartAckStore(savedRecords = []) {
   };
 }
 
+/**
+ * @param {ChatDb} db
+ * @returns {ActionContext}
+ */
+function createActionContext(db) {
+  return {
+    chatId: "test-chat",
+    senderIds: ["test-sender"],
+    content: [],
+    getIsAdmin: async () => true,
+    db,
+    sessionDb: db,
+    getActions: async () => [],
+    log: async () => "",
+    send: async () => {},
+    reply: async () => {},
+    reactToMessage: async () => {},
+    select: async () => "",
+    confirm: async () => true,
+    resolveModel: () => "test-model",
+  };
+}
+
 /** @type {ActionTestFn} */
 async function action_is_defined(action_fn) {
   assert.equal(typeof action_fn, "function");
@@ -30,22 +53,7 @@ async function restart_returns_before_stopping_the_process(_action_fn, db) {
     createMemoryRestartAckStore(),
   );
 
-  const result = await action.action_fn({
-    chatId: "test-chat",
-    senderIds: ["test-sender"],
-    content: [],
-    getIsAdmin: async () => true,
-    db,
-    sessionDb: db,
-    getActions: async () => [],
-    log: async () => "",
-    send: async () => {},
-    reply: async () => {},
-    reactToMessage: async () => {},
-    select: async () => "",
-    confirm: async () => true,
-    resolveModel: () => "test-model",
-  }, {});
+  const result = await action.action_fn(createActionContext(db), {});
 
   if (typeof result !== "object" || result === null || Array.isArray(result) || !("result" in result)) {
     throw new Error("Expected restart action to return an ActionResult object");
@@ -75,22 +83,7 @@ async function restart_waits_for_queued_ack_before_stopping(_action_fn, db) {
     createMemoryRestartAckStore(),
   );
 
-  const result = await action.action_fn({
-    chatId: "test-chat",
-    senderIds: ["test-sender"],
-    content: [],
-    getIsAdmin: async () => true,
-    db,
-    sessionDb: db,
-    getActions: async () => [],
-    log: async () => "",
-    send: async () => {},
-    reply: async () => {},
-    reactToMessage: async () => {},
-    select: async () => "",
-    confirm: async () => true,
-    resolveModel: () => "test-model",
-  }, {});
+  const result = await action.action_fn(createActionContext(db), {});
 
   if (typeof result !== "object" || result === null || Array.isArray(result) || !("afterResponse" in result)) {
     throw new Error("Expected restart action to return an afterResponse hook");
@@ -130,22 +123,7 @@ async function restart_persists_queue_id_for_unsent_ack_before_stopping(_action_
     createMemoryRestartAckStore(savedRecords),
   );
 
-  const result = await action.action_fn({
-    chatId: "restart-queued-chat",
-    senderIds: ["test-sender"],
-    content: [],
-    getIsAdmin: async () => true,
-    db,
-    sessionDb: db,
-    getActions: async () => [],
-    log: async () => "",
-    send: async () => {},
-    reply: async () => {},
-    reactToMessage: async () => {},
-    select: async () => "",
-    confirm: async () => true,
-    resolveModel: () => "test-model",
-  }, {});
+  const result = await action.action_fn({ ...createActionContext(db), chatId: "restart-queued-chat" }, {});
 
   if (typeof result !== "object" || result === null || Array.isArray(result) || !("afterResponse" in result)) {
     throw new Error("Expected restart action to return an afterResponse hook");
@@ -182,22 +160,7 @@ async function restart_persists_sent_ack_key_before_stopping(_action_fn, db) {
     createMemoryRestartAckStore(savedRecords),
   );
 
-  const result = await action.action_fn({
-    chatId: "restart-chat",
-    senderIds: ["test-sender"],
-    content: [],
-    getIsAdmin: async () => true,
-    db,
-    sessionDb: db,
-    getActions: async () => [],
-    log: async () => "",
-    send: async () => {},
-    reply: async () => {},
-    reactToMessage: async () => {},
-    select: async () => "",
-    confirm: async () => true,
-    resolveModel: () => "test-model",
-  }, {});
+  const result = await action.action_fn({ ...createActionContext(db), chatId: "restart-chat" }, {});
 
   if (typeof result !== "object" || result === null || Array.isArray(result) || !("afterResponse" in result)) {
     throw new Error("Expected restart action to return an afterResponse hook");
@@ -223,6 +186,86 @@ async function restart_persists_sent_ack_key_before_stopping(_action_fn, db) {
   assert.deepEqual(savedRecords[1].chatId, "restart-chat");
   assert.equal(savedRecords[1].keyId, "ack-message-id");
   assert.equal(savedRecords[1].isImage, false);
+}
+
+/** @type {ActionDbTestFn} */
+async function restart_waits_for_active_turns_before_scheduling(_action_fn, db) {
+  let scheduled = 0;
+  let waited = false;
+  /** @type {string[]} */
+  const updates = [];
+  const action = createRestartAction(
+    () => {
+      scheduled += 1;
+    },
+    createMemoryRestartAckStore(),
+    {
+      listActiveTurns: () => [{ chatId: "active-chat", label: "codex" }],
+      waitForIdle: async () => {
+        assert.equal(scheduled, 0);
+        waited = true;
+        return [{ chatId: "active-chat", label: "codex" }];
+      },
+    },
+  );
+
+  const result = await action.action_fn(createActionContext(db), {});
+  if (typeof result !== "object" || result === null || Array.isArray(result) || !("afterResponse" in result)) {
+    throw new Error("Expected restart action to return an afterResponse hook");
+  }
+
+  await result.afterResponse?.({
+    handle: {
+      keyId: "ack-message-id",
+      isImage: false,
+      deliveryStatus: "sent",
+      waitUntilSent: async function () {
+        return this;
+      },
+      update: async (update) => {
+        if (update.kind === "text") {
+          updates.push(update.text);
+        }
+      },
+      setInspect: () => {},
+    },
+  });
+
+  assert.equal(waited, true);
+  assert.equal(scheduled, 1);
+  assert.deepEqual(updates, ["Restart queued; waiting for 1 active turn to finish."]);
+}
+
+/** @type {ActionDbTestFn} */
+async function restart_force_records_active_turns_without_waiting(_action_fn, db) {
+  /** @type {import("./_restart-ack-store.js").RestartAckRecord[]} */
+  const savedRecords = [];
+  let scheduled = 0;
+  const action = createRestartAction(
+    () => {
+      scheduled += 1;
+    },
+    createMemoryRestartAckStore(savedRecords),
+    {
+      listActiveTurns: () => [{ chatId: "active-chat", label: "codex" }],
+      waitForIdle: async () => {
+        throw new Error("Forced restart should not wait for active turns");
+      },
+    },
+  );
+
+  const result = await action.action_fn(createActionContext(db), { mode: "--force" });
+  if (typeof result !== "object" || result === null || Array.isArray(result) || !("afterResponse" in result)) {
+    throw new Error("Expected restart action to return an afterResponse hook");
+  }
+
+  await result.afterResponse?.();
+
+  assert.equal(scheduled, 1);
+  assert.deepEqual(savedRecords.at(-1)?.interruptedTurns, [{
+    chatId: "active-chat",
+    label: "codex",
+  }]);
 }
 
 /** @type {ActionTestFn} */
@@ -261,5 +304,7 @@ export default [
   restart_waits_for_queued_ack_before_stopping,
   restart_persists_queue_id_for_unsent_ack_before_stopping,
   restart_persists_sent_ack_key_before_stopping,
+  restart_waits_for_active_turns_before_scheduling,
+  restart_force_records_active_turns_without_waiting,
   scheduler_uses_delayed_sigterm,
 ];

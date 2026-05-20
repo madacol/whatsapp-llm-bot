@@ -366,6 +366,41 @@ describe("createConversationRunner prompt formatting", () => {
     assert.deepEqual(phases, ["reply-start", "reply-done", "after-response"]);
   });
 
+  it("queues incoming messages without processing while restart is waiting", async () => {
+    const { createConversationRunner } = await import("../conversation/create-conversation-runner.js");
+    /** @type {ChatTurn[]} */
+    const queuedTurns = [];
+    const runner = createConversationRunner({
+      store,
+      llmClient: /** @type {LlmClient} */ ({}),
+      getActionsFn: async () => {
+        throw new Error("Restart-waiting messages should not load actions");
+      },
+      executeActionFn: async () => {
+        throw new Error("Restart-waiting messages should not execute actions");
+      },
+      restartGate: {
+        isWaiting: () => true,
+        beginWaiting: () => {},
+        queueTurn: (turn) => {
+          queuedTurns.push(turn);
+        },
+        drainQueuedTurns: () => [],
+        reset: () => {},
+      },
+    });
+
+    const turn = createChatTurn({
+      chatId: "conv-restart-waiting",
+      content: [{ type: "text", text: "run something new" }],
+    });
+    await runner.handleMessage(turn.context);
+
+    assert.equal(queuedTurns.length, 1);
+    assert.equal(queuedTurns[0]?.chatId, "conv-restart-waiting");
+    assert.deepEqual(turn.responses, []);
+  });
+
   it("stores raw group text, carries sender metadata, and omits the group-chat cue", async () => {
     await seedChat("conv-prompt-group", { enabled: true });
     await updateChatConfig("conv-prompt-group", (current) => ({

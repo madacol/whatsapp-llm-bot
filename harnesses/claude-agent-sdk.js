@@ -597,6 +597,7 @@ export function createClaudeAgentSdkHarness(deps = {}) {
     listSlashCommands,
     injectMessage,
     cancel,
+    listActiveSessions,
     waitForIdle,
   };
 
@@ -700,6 +701,13 @@ export function createClaudeAgentSdkHarness(deps = {}) {
         }
       }, 200);
     });
+  }
+
+  /**
+   * @returns {string[]}
+   */
+  function listActiveSessions() {
+    return activeQueries.listActiveSessions();
   }
 
   /**

@@ -82,6 +82,53 @@ describe("restart acknowledgement delivery", () => {
     }
   });
 
+  it("reports active turns that were force-interrupted by restart", async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), "restart-ack-"));
+    const storePath = path.join(dir, "ack.json");
+    const store = createRestartAckStore(storePath);
+    /** @type {Array<{ chatId: string, keyId: string, text: string, isImage?: boolean }>} */
+    const edits = [];
+    /** @type {Array<{ chatId: string, text: string }>} */
+    const sent = [];
+
+    try {
+      await store.save({
+        chatId: "restart-chat@g.us",
+        requestedAt: "2026-05-15T19:00:00.000Z",
+        oldPid: 123,
+        keyId: "message-key-1",
+        interruptedTurns: [{
+          chatId: "active-chat@g.us",
+          label: "codex",
+        }],
+      });
+
+      await deliverPendingRestartAck({
+        store,
+        editMessage: async (input) => {
+          edits.push(input);
+        },
+        sendText: async (chatId, text) => {
+          sent.push({ chatId, text });
+        },
+      });
+
+      assert.deepEqual(edits, [{
+        chatId: "restart-chat@g.us",
+        keyId: "message-key-1",
+        text: "Restarted.",
+        isImage: false,
+      }]);
+      assert.deepEqual(sent, [{
+        chatId: "active-chat@g.us",
+        text: "Previous codex turn was interrupted by restart before it completed. No final result was produced.",
+      }]);
+      assert.equal(await store.read(), null);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   it("recovers the message key from a flushed queue row before editing", async () => {
     const dir = await mkdtemp(path.join(os.tmpdir(), "restart-ack-"));
     const storePath = path.join(dir, "ack.json");

@@ -334,6 +334,7 @@ export function createPiHarness(deps = {}) {
     listSlashCommands,
     injectMessage,
     cancel,
+    listActiveSessions,
     waitForIdle,
   };
 
@@ -352,6 +353,13 @@ export function createPiHarness(deps = {}) {
    */
   function cancel(chatId) {
     return activeSessions.cancel(chatId);
+  }
+
+  /**
+   * @returns {string[]}
+   */
+  function listActiveSessions() {
+    return activeSessions.listActiveSessions();
   }
 
   /**
