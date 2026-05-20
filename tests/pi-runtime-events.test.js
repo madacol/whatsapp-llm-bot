@@ -212,4 +212,168 @@ describe("normalizePiRuntimeEvents", () => {
       },
     ]);
   });
+
+  it("normalizes smoke-confirmed Pi write completions and failing bash events", () => {
+    assert.deepEqual(normalizePiRuntimeEvents({
+      type: "tool_execution_end",
+      toolCallId: "write-1",
+      toolName: "write",
+      args: {
+        path: "generated.txt",
+        content: "generated smoke content",
+      },
+      result: { content: [{ type: "text", text: "Successfully wrote 23 bytes to generated.txt" }] },
+      isError: false,
+    }), [
+      {
+        type: "tool.completed",
+        provider: "pi",
+        tool: {
+          id: "write-1",
+          name: "Write",
+          arguments: {
+            path: "generated.txt",
+            content: "generated smoke content",
+            file_path: "generated.txt",
+          },
+          output: "Successfully wrote 23 bytes to generated.txt",
+        },
+        raw: {
+          type: "tool_execution_end",
+          toolCallId: "write-1",
+          toolName: "write",
+          args: {
+            path: "generated.txt",
+            content: "generated smoke content",
+          },
+          result: { content: [{ type: "text", text: "Successfully wrote 23 bytes to generated.txt" }] },
+          isError: false,
+        },
+      },
+      {
+        type: "file-change.completed",
+        provider: "pi",
+        change: {
+          path: "generated.txt",
+          summary: "generated.txt (update)",
+          kind: "update",
+          newText: "generated smoke content",
+        },
+        raw: {
+          type: "tool_execution_end",
+          toolCallId: "write-1",
+          toolName: "write",
+          args: {
+            path: "generated.txt",
+            content: "generated smoke content",
+          },
+          result: { content: [{ type: "text", text: "Successfully wrote 23 bytes to generated.txt" }] },
+          isError: false,
+        },
+      },
+    ]);
+
+    assert.deepEqual(normalizePiRuntimeEvents({
+      type: "tool_execution_end",
+      toolCallId: "bash-1",
+      toolName: "bash",
+      args: { command: "cat missing-file-for-rpc-smoke" },
+      result: {
+        content: [{
+          type: "text",
+          text: "cat: missing-file-for-rpc-smoke: No such file or directory\n\n\nCommand exited with code 1",
+        }],
+        details: {},
+      },
+      isError: true,
+    }), [{
+      type: "tool.failed",
+      provider: "pi",
+      tool: {
+        id: "bash-1",
+        name: "Bash",
+        arguments: { command: "cat missing-file-for-rpc-smoke" },
+        output: "cat: missing-file-for-rpc-smoke: No such file or directory\n\n\nCommand exited with code 1",
+      },
+      raw: {
+        type: "tool_execution_end",
+        toolCallId: "bash-1",
+        toolName: "bash",
+        args: { command: "cat missing-file-for-rpc-smoke" },
+        result: {
+          content: [{
+            type: "text",
+            text: "cat: missing-file-for-rpc-smoke: No such file or directory\n\n\nCommand exited with code 1",
+          }],
+          details: {},
+        },
+        isError: true,
+      },
+    }]);
+  });
+
+  it("normalizes direct Pi search and list tool names when the RPC emits them", () => {
+    assert.deepEqual(normalizePiRuntimeEvents({
+      type: "tool_execution_start",
+      toolCallId: "grep-1",
+      toolName: "grep",
+      args: { pattern: "needle_rpc_smoke", path: "." },
+    }), [{
+      type: "tool.started",
+      provider: "pi",
+      tool: {
+        id: "grep-1",
+        name: "Grep",
+        arguments: { pattern: "needle_rpc_smoke", path: "." },
+      },
+      raw: {
+        type: "tool_execution_start",
+        toolCallId: "grep-1",
+        toolName: "grep",
+        args: { pattern: "needle_rpc_smoke", path: "." },
+      },
+    }]);
+
+    assert.deepEqual(normalizePiRuntimeEvents({
+      type: "tool_execution_start",
+      toolCallId: "find-1",
+      toolName: "find",
+      args: { pattern: "*.target", path: "." },
+    }), [{
+      type: "tool.started",
+      provider: "pi",
+      tool: {
+        id: "find-1",
+        name: "Glob",
+        arguments: { pattern: "*.target", path: "." },
+      },
+      raw: {
+        type: "tool_execution_start",
+        toolCallId: "find-1",
+        toolName: "find",
+        args: { pattern: "*.target", path: "." },
+      },
+    }]);
+
+    assert.deepEqual(normalizePiRuntimeEvents({
+      type: "tool_execution_start",
+      toolCallId: "ls-1",
+      toolName: "ls",
+      args: { path: "." },
+    }), [{
+      type: "tool.started",
+      provider: "pi",
+      tool: {
+        id: "ls-1",
+        name: "Glob",
+        arguments: { pattern: "*", path: "." },
+      },
+      raw: {
+        type: "tool_execution_start",
+        toolCallId: "ls-1",
+        toolName: "ls",
+        args: { path: "." },
+      },
+    }]);
+  });
 });
