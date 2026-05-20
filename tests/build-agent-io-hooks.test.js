@@ -386,7 +386,7 @@ describe("buildAgentIoHooks", () => {
 
     assert.deepEqual(updates, [{
       kind: "text",
-      text: "🔧 *Read*  `src/app.js`\n🔧 *Bash*  `pnpm type-check`\n🔧 *Bash*  `git diff`",
+      text: "🔧 *Read*  `src/app.js`\n🔧 *Shell*  `pnpm type-check`\n🔧 *Shell*  `git diff`",
     }]);
   });
 
@@ -450,7 +450,7 @@ describe("buildAgentIoHooks", () => {
     }
     assert.equal(
       sent[0].event.content,
-      "🔧 *Bash*\n```bash\npython3 - <<'PY'\nprint('hello')\nPY\n```",
+      "🔧 *Shell*\n```\npython3 - <<'PY'\nprint('hello')\nPY\n```",
     );
   });
 
@@ -547,7 +547,7 @@ describe("buildAgentIoHooks", () => {
 
     assert.deepEqual(updates[updates.length - 1], {
       kind: "text",
-      text: "... +1 earlier tools\n🔧 *Bash*  `pnpm type-check`\n🔧 *Read*  `src/app.js`\n🔧 *Bash*  `git diff`",
+      text: "... +1 earlier tools\n🔧 *Shell*  `pnpm type-check`\n🔧 *Read*  `src/app.js`\n🔧 *Shell*  `git diff`",
     });
   });
 
@@ -585,7 +585,7 @@ describe("buildAgentIoHooks", () => {
     assert.equal(sent[0]?.event.kind, "content");
     assert.deepEqual(updates, [{
       kind: "text",
-      text: "❌ *Bash*  `pnpm test`",
+      text: "❌ *Shell*  `pnpm test`",
     }]);
   });
 
@@ -634,10 +634,10 @@ describe("buildAgentIoHooks", () => {
       assert.fail("Expected a new compact content event after llm reply");
     }
     assert.equal(sent[2].event.source, "plain");
-    assert.equal(sent[2].event.content, "🔧 *Bash*  `git diff`");
+    assert.equal(sent[2].event.content, "🔧 *Shell*  `git diff`");
     assert.deepEqual(handleUpdates[0], [{
       kind: "text",
-      text: "🔧 *Bash*  `pwd`\n🔧 *Bash*  `pnpm type-check`",
+      text: "🔧 *Shell*  `pwd`\n🔧 *Shell*  `pnpm type-check`",
     }]);
     assert.deepEqual(handleUpdates[1], []);
   });
@@ -684,10 +684,10 @@ describe("buildAgentIoHooks", () => {
       assert.fail("Expected a new compact content event after file change");
     }
     assert.equal(sent[2].event.source, "plain");
-    assert.equal(sent[2].event.content, "🔧 *Bash*  `ls`");
+    assert.equal(sent[2].event.content, "🔧 *Shell*  `ls`");
     assert.deepEqual(handleUpdates[0], [{
       kind: "text",
-      text: "🔧 *Bash*  `pwd`\n🔧 *Bash*  `git diff`",
+      text: "🔧 *Shell*  `pwd`\n🔧 *Shell*  `git diff`",
     }]);
     assert.deepEqual(handleUpdates[2], []);
   });
