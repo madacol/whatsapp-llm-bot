@@ -644,3 +644,20 @@ export async function waitForAllHarnesses() {
   );
   return results.flat();
 }
+
+/**
+ * List active harness sessions without waiting for them to finish.
+ * @returns {Array<{ chatId: string, label: string }>}
+ */
+export function listActiveHarnessSessions() {
+  return [...instances.values()]
+    .flatMap((instance) => {
+      if (typeof instance.harness.listActiveSessions !== "function") {
+        return [];
+      }
+      return instance.harness.listActiveSessions().map((chatId) => ({
+        chatId,
+        label: instance.displayName ?? instance.name,
+      }));
+    });
+}

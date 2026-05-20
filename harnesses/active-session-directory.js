@@ -32,6 +32,7 @@ function normalizeSessionKey(key) {
  *   listKeys: () => string[],
  *   injectMessage: (key: string | HarnessSessionRef, text: string) => Promise<boolean>,
  *   cancel: (key: string | HarnessSessionRef) => boolean,
+ *   listActiveSessions: () => string[],
  *   waitForIdle: () => Promise<string[]>,
  * }}
  */
@@ -60,6 +61,9 @@ export function createActiveSessionDirectory(options) {
     },
     get,
     listKeys() {
+      return [...activeSessions.keys()];
+    },
+    listActiveSessions() {
       return [...activeSessions.keys()];
     },
     async injectMessage(key, text) {

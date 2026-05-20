@@ -30,6 +30,7 @@ import { tryHandleWorkspaceCommand } from "../workspace-command-router.js";
 import { createWorkspaceControl } from "../workspace-control.js";
 import { createWorkspaceLifecycleService } from "../workspace-lifecycle-service.js";
 import { buildLiveInputText } from "./live-input-text.js";
+import { defaultRestartGate } from "../restart-gate.js";
 
 const log = createLogger("conversation:runner");
 const PRESENCE_LEASE_TTL_MS = 20_000;
@@ -152,6 +153,7 @@ async function resolveConversationHarness(chatInfo) {
  *   executeActionFn: typeof import("../actions.js").executeAction,
  *   transport?: ChatTransport,
  *   workspacePresentation?: WorkspacePresentationPort,
+ *   restartGate?: import("../restart-gate.js").RestartGate,
  * }} ConversationRunnerDeps
  */
 
@@ -160,7 +162,7 @@ async function resolveConversationHarness(chatInfo) {
  * @param {ConversationRunnerDeps} deps
  * @returns {{ handleMessage: (turn: ChatTurn) => Promise<void> }}
  */
-export function createConversationRunner({ store, llmClient, getActionsFn, executeActionFn, workspacePresentation }) {
+export function createConversationRunner({ store, llmClient, getActionsFn, executeActionFn, workspacePresentation, restartGate = defaultRestartGate }) {
   const {
     addMessage,
     updateToolMessage,
@@ -828,6 +830,11 @@ export function createConversationRunner({ store, llmClient, getActionsFn, execu
 
   return {
     async handleMessage(turn) {
+      if (restartGate.isWaiting()) {
+        restartGate.queueTurn(turn);
+        log.debug("Queued incoming message while restart is waiting", turn.chatId);
+        return;
+      }
       await dispatchTurn(turn);
     },
   };

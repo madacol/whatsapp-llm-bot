@@ -336,6 +336,7 @@ export function createCodexHarness(deps = {}) {
     listSlashCommands,
     injectMessage,
     cancel,
+    listActiveSessions,
     waitForIdle,
     createAdapter,
   };
@@ -424,6 +425,13 @@ export function createCodexHarness(deps = {}) {
    */
   function cancel(chatId) {
     return activeSessions.cancel(chatId);
+  }
+
+  /**
+   * @returns {string[]}
+   */
+  function listActiveSessions() {
+    return activeSessions.listActiveSessions();
   }
 
   /**

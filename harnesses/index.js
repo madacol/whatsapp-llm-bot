@@ -1,6 +1,7 @@
 export {
   getHarnessDriverStatus,
   listHarnessInstances,
+  listActiveHarnessSessions,
   listHarnesses,
   listHarnessDrivers,
   listHarnessDriverStatuses,

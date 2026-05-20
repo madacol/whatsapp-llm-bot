@@ -808,6 +808,8 @@ type AgentHarness = {
   injectMessage?: (chatId: string | HarnessSessionRef, text: string) => boolean | Promise<boolean>;
   /** Cancel the active query for this chat. Returns true if cancelled. */
   cancel?: (chatId: string | HarnessSessionRef) => boolean | Promise<boolean>;
+  /** List active chat/session IDs without waiting. */
+  listActiveSessions?: () => string[];
   /** Wait for all active queries to finish. Returns chat IDs that were waited on. */
   waitForIdle?: () => Promise<string[]>;
   /** Optional provider-native adapter; registry falls back to a legacy wrapper. */

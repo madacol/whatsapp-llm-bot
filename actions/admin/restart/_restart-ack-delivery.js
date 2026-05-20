@@ -1,6 +1,15 @@
 const RESTARTED_TEXT = "Restarted.";
 
 /**
+ * @param {import("./_restart-ack-store.js").RestartInterruptedTurn} turn
+ * @returns {string}
+ */
+function formatInterruptedTurnMessage(turn) {
+  const label = turn.label ? `${turn.label} ` : "";
+  return `Previous ${label}turn was interrupted by restart before it completed. No final result was produced.`;
+}
+
+/**
  * Deliver the pending post-restart acknowledgement, if one exists.
  * @param {{
  *   store: import("./_restart-ack-store.js").RestartAckStore,
@@ -35,6 +44,9 @@ export async function deliverPendingRestartAck({ store, editMessage, sendText, r
     return;
   } else {
     await sendText(record.chatId, RESTARTED_TEXT);
+  }
+  for (const turn of record.interruptedTurns ?? []) {
+    await sendText(turn.chatId, formatInterruptedTurnMessage(turn));
   }
   await store.clear();
 }
