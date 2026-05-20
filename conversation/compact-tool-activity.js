@@ -81,12 +81,12 @@ function formatReadInspectDetail(output) {
 function formatCompactCommand(command) {
   const trimmedCommand = command.trim();
   if (!trimmedCommand) {
-    return formatCompactEntry("Bash");
+    return formatCompactEntry("Shell");
   }
   if (trimmedCommand.includes("\n")) {
-    return formatCompactEntry("Bash", `\n\`\`\`bash\n${trimmedCommand}\n\`\`\``);
+    return formatCompactEntry("Shell", `\n\`\`\`\n${trimmedCommand}\n\`\`\``);
   }
-  return formatCompactEntry("Bash", `\`${trimmedCommand}\``);
+  return formatCompactEntry("Shell", `\`${trimmedCommand}\``);
 }
 
 /**
