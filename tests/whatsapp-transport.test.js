@@ -10,7 +10,7 @@ import {
 import { setDb } from "../db.js";
 import { initStore } from "../store.js";
 import { createTestDb, createWAMessage } from "./helpers.js";
-import { contentEvent } from "../outbound-events.js";
+import { contentEvent, textUpdate } from "../outbound-events.js";
 
 /** @type {import("@electric-sql/pglite").PGlite | null} */
 let testDb = null;
@@ -167,6 +167,78 @@ describe("WhatsApp transport community creation", () => {
     assert.equal(sentHandle?.deliveryStatus, "sent");
     assert.equal(sentHandle?.keyId, "sent-1");
     assert.equal((await getQueuedRows(testDb, chatId)).length, 0);
+  });
+
+  it("applies queued handle updates to the sent message after reconnect", async () => {
+    if (!testDb) {
+      throw new Error("Expected test DB to be initialized");
+    }
+
+    const chatId = `queued-update-${Date.now()}`;
+    /** @type {((events: Partial<import("@whiskeysockets/baileys").BaileysEventMap>) => Promise<void>) | null} */
+    let processEvents = null;
+    /** @type {Array<{ chatId: string, message: Record<string, unknown> }>} */
+    const sentMessages = [];
+    let failSends = true;
+
+    const socket = /** @type {import("@whiskeysockets/baileys").WASocket} */ (/** @type {unknown} */ ({
+      ev: {
+        process(handler) {
+          processEvents = handler;
+        },
+      },
+      sendMessage: async (targetChatId, message) => {
+        if (failSends) {
+          throw new Error("Connection Closed");
+        }
+        sentMessages.push({ chatId: targetChatId, message });
+        return { key: { id: `sent-${sentMessages.length}`, remoteJid: targetChatId } };
+      },
+    }));
+
+    const transport = await createWhatsAppTransport({
+      createConnectionSupervisor: async ({ onSocketReady }) => ({
+        start: async () => {
+          onSocketReady(socket, async () => {});
+        },
+        stop: async () => {},
+        sendText: async () => {},
+        handleConnectionUpdate: async () => {},
+        isStopped: () => false,
+      }),
+      ...(testStore ? { outboundStore: testStore } : {}),
+    });
+
+    await transport.start(async () => {});
+    const queuedHandle = await transport.sendEvent?.(chatId, contentEvent("llm", "queued before edit"));
+    assert.equal(queuedHandle?.deliveryStatus, "queued");
+
+    const updatePromise = queuedHandle?.update(textUpdate("queued after edit"));
+
+    failSends = false;
+    if (!processEvents) {
+      throw new Error("Expected connection event processor to be registered");
+    }
+    await processEvents({
+      "connection.update": {
+        connection: "open",
+      },
+    });
+    await updatePromise;
+
+    assert.deepEqual(sentMessages, [
+      {
+        chatId,
+        message: { text: "🤖 queued before edit" },
+      },
+      {
+        chatId,
+        message: {
+          text: "🤖 queued after edit",
+          edit: { id: "sent-1", remoteJid: chatId },
+        },
+      },
+    ]);
   });
 
   it("queues outbound events after websocket abnormal closure send failures", async () => {

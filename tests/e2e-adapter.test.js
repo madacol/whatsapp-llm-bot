@@ -149,6 +149,246 @@ describe("compact tool progress edits", () => {
 });
 
 // ═══════════════════════════════════════════════════════════════════
+// 1c. Provider runtime events through the full WhatsApp transport boundary
+// ═══════════════════════════════════════════════════════════════════
+describe("provider runtime events", () => {
+  const senderId = "e2e-provider-user";
+  const chatId = `${senderId}@s.whatsapp.net`;
+  const harnessName = "e2e-runtime-events";
+
+  before(async () => {
+    const { registerHarnessDriver } = await import("../harnesses/index.js");
+    registerHarnessDriver({
+      name: harnessName,
+      supportsInstances: true,
+      createInstance: () => ({
+        harness: {
+          getName: () => harnessName,
+          getCapabilities: () => ({
+            supportsResume: true,
+            supportsCancel: false,
+            supportsLiveInput: false,
+            supportsApprovals: false,
+            supportsWorkdir: true,
+            supportsSandboxConfig: false,
+            supportsModelSelection: false,
+            supportsReasoningEffort: false,
+            supportsSessionFork: false,
+          }),
+          run: async () => {
+            throw new Error("provider runtime e2e should use the semantic adapter");
+          },
+          handleCommand: async () => false,
+          listSlashCommands: () => [],
+          createAdapter: ({ name, instanceId, continuationKey }) => {
+            /** @type {Set<(event: { type: string, provider: string } & Record<string, unknown>) => void | Promise<void>>} */
+            const subscribers = new Set();
+            return {
+              startSession: async (input) => ({
+                chatId: input.chatId,
+                harnessName: name,
+                instanceId,
+                continuationKey,
+                status: "ready",
+                resumeCursor: null,
+              }),
+              sendTurn: async (input) => {
+                for (const subscriber of subscribers) {
+                  await subscriber({
+                    type: "file-read.started",
+                    provider: name,
+                    fileRead: {
+                      command: "sed -n '1,5p' package.json",
+                      paths: ["package.json"],
+                    },
+                  });
+                  await subscriber({
+                    type: "command.started",
+                    provider: name,
+                    command: {
+                      command: "pnpm type-check",
+                      status: "started",
+                    },
+                  });
+                  await subscriber({
+                    type: "command.completed",
+                    provider: name,
+                    command: {
+                      command: "pnpm type-check",
+                      status: "completed",
+                      output: "ok",
+                    },
+                  });
+                  await subscriber({
+                    type: "assistant.completed",
+                    provider: name,
+                    text: "Provider runtime answer.",
+                    contentType: "markdown",
+                    usage: {
+                      promptTokens: 12,
+                      completionTokens: 3,
+                      cachedTokens: 2,
+                      cost: 0.0042,
+                    },
+                  });
+                }
+                return {
+                  response: [{ type: "markdown", text: "legacy fallback should not display" }],
+                  messages: input.messages ?? [],
+                  usage: { promptTokens: 0, completionTokens: 0, cachedTokens: 0, cost: 0 },
+                };
+              },
+              interruptTurn: async () => false,
+              injectMessage: async () => false,
+              stopSession: async () => false,
+              listSessions: () => [],
+              readThread: async () => null,
+              rollbackThread: async () => null,
+              streamEvents: {
+                async *[Symbol.asyncIterator]() {},
+              },
+              subscribeEvents: (handler) => {
+                subscribers.add(handler);
+                return () => {
+                  subscribers.delete(handler);
+                };
+              },
+            };
+          },
+        },
+      }),
+    });
+
+    await seedChat(testDb, chatId, { enabled: true });
+    await updateChatConfig(chatId, (current) => ({
+      ...current,
+      harness: harnessName,
+      output_visibility: { toolDetails: false },
+    }));
+  });
+
+  it("projects provider runtime progress, answer, and usage to WhatsApp messages", async () => {
+    const { sock, getSentMessages } = createMockBaileysSocket();
+
+    await adaptIncomingMessage(
+      createWAMessage({ text: "Use provider runtime events", senderId }),
+      sock,
+      handleMessage,
+      testConfirmRegistry,
+      testUserResponseRegistry,
+    );
+
+    const sentMessages = getSentMessages();
+    const textMessages = sentMessages
+      .map((entry) => typeof entry.msg.text === "string" ? entry.msg.text : "")
+      .filter(Boolean);
+    const compactMessages = sentMessages.filter((entry) => (
+      typeof entry.msg.text === "string"
+      && (entry.msg.text.includes("*Read*") || entry.msg.text.includes("*Shell*"))
+    ));
+
+    assert.ok(textMessages.some((text) => text.includes("Provider runtime answer.")), `Expected provider answer, got ${JSON.stringify(textMessages)}`);
+    assert.ok(textMessages.some((text) => text.includes("Cost: 0.004200")), `Expected provider usage cost, got ${JSON.stringify(textMessages)}`);
+    assert.equal(compactMessages.filter((entry) => !("edit" in entry.msg)).length, 1, `Expected one compact progress send, got ${JSON.stringify(compactMessages)}`);
+    assert.ok(compactMessages.some((entry) => "edit" in entry.msg), `Expected compact progress edits, got ${JSON.stringify(compactMessages)}`);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════
+// 1d. WhatsApp audio through media-to-text into provider input
+// ═══════════════════════════════════════════════════════════════════
+describe("audio media-to-text provider input", () => {
+  const senderId = "e2e-audio-user";
+  const chatId = `${senderId}@s.whatsapp.net`;
+  const harnessName = "e2e-audio-provider";
+  /** @type {string[]} */
+  const capturedInputs = [];
+
+  before(async () => {
+    const { registerHarnessDriver } = await import("../harnesses/index.js");
+    registerHarnessDriver({
+      name: harnessName,
+      supportsInstances: true,
+      createInstance: () => ({
+        harness: {
+          getName: () => harnessName,
+          getCapabilities: () => ({
+            supportsResume: true,
+            supportsCancel: false,
+            supportsLiveInput: false,
+            supportsApprovals: false,
+            supportsWorkdir: true,
+            supportsSandboxConfig: false,
+            supportsModelSelection: false,
+            supportsReasoningEffort: false,
+            supportsSessionFork: false,
+          }),
+          run: async () => {
+            throw new Error("audio provider e2e should use the semantic adapter");
+          },
+          handleCommand: async () => false,
+          listSlashCommands: () => [],
+          createAdapter: ({ name, instanceId, continuationKey }) => ({
+            startSession: async (input) => ({
+              chatId: input.chatId,
+              harnessName: name,
+              instanceId,
+              continuationKey,
+              status: "ready",
+              resumeCursor: null,
+            }),
+            sendTurn: async (input) => {
+              capturedInputs.push(input.input ?? "");
+              return {
+                response: [{ type: "markdown", text: "Audio provider response." }],
+                messages: input.messages ?? [],
+                usage: { promptTokens: 0, completionTokens: 0, cachedTokens: 0, cost: 0 },
+              };
+            },
+            interruptTurn: async () => false,
+            injectMessage: async () => false,
+            stopSession: async () => false,
+            listSessions: () => [],
+            readThread: async () => null,
+            rollbackThread: async () => null,
+            streamEvents: {
+              async *[Symbol.asyncIterator]() {},
+            },
+          }),
+        },
+      }),
+    });
+
+    await seedChat(testDb, chatId, { enabled: true });
+    await updateChatConfig(chatId, (current) => ({
+      ...current,
+      harness: harnessName,
+      media_to_text_models: { audio: "audio/model" },
+    }));
+  });
+
+  it("transcribes incoming WhatsApp audio before sending the provider turn", async () => {
+    capturedInputs.length = 0;
+    mockServer.addResponses("Audio asks for the current status.");
+
+    const { sock } = createMockBaileysSocket();
+    await adaptIncomingMessage(
+      createWAMessage({ audio: { mimetype: "audio/mp3" }, senderId }),
+      sock,
+      handleMessage,
+      testConfirmRegistry,
+      testUserResponseRegistry,
+      undefined,
+      async () => Buffer.from("e2e audio bytes"),
+    );
+
+    assert.equal(capturedInputs.length, 1);
+    assert.ok(capturedInputs[0]?.includes("[Audio description: Audio asks for the current status.]"), capturedInputs[0]);
+    assert.ok(capturedInputs[0]?.includes("Media file available in this request:"), capturedInputs[0]);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════
 // 2. Sender ID extraction (phone + LID)
 // ═══════════════════════════════════════════════════════════════════
 describe("sender ID extraction", () => {

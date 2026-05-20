@@ -366,18 +366,19 @@ export function createConversationRunner({ store, llmClient, getActionsFn, execu
     });
     /** @type {Set<Promise<void>>} */
     const pendingEventHandlers = new Set();
+    let eventChain = Promise.resolve();
     const unsubscribe = harnessInstance.adapter.subscribeEvents?.((event) => {
       /** @type {Promise<void>} */
-      let pending;
-      pending = runtimeDispatcher
-        .handleEvent(/** @type {Parameters<typeof runtimeDispatcher.handleEvent>[0]} */ (event))
+      const pending = eventChain
+        .then(() => runtimeDispatcher.handleEvent(/** @type {Parameters<typeof runtimeDispatcher.handleEvent>[0]} */ (event)))
         .catch((error) => {
           log.warn("Failed to handle harness runtime event:", error);
-        })
-        .finally(() => {
-          pendingEventHandlers.delete(pending);
         });
+      eventChain = pending.then(() => undefined, () => undefined);
       pendingEventHandlers.add(pending);
+      pending.finally(() => {
+        pendingEventHandlers.delete(pending);
+      });
     });
     try {
       const result = await harnessInstance.adapter.sendTurn({
