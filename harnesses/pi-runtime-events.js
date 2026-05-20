@@ -113,6 +113,105 @@ function extractToolStart(event) {
 }
 
 /**
+ * Pi RPC emits built-in names in lowercase with Pi-native argument names.
+ * Normalize those to the display-oriented names used by the app hooks.
+ * @param {string} name
+ * @param {Record<string, unknown>} args
+ * @returns {{ name: string, args: Record<string, unknown> }}
+ */
+function normalizePiToolForDisplay(name, args) {
+  switch (name) {
+    case "read":
+      return {
+        name: "Read",
+        args: {
+          ...args,
+          ...(typeof args.path === "string" ? { file_path: args.path } : {}),
+        },
+      };
+    case "bash":
+      return { name: "Bash", args };
+    case "edit": {
+      const firstEdit = Array.isArray(args.edits) && isObjectRecord(args.edits[0]) ? args.edits[0] : {};
+      return {
+        name: "Edit",
+        args: {
+          ...args,
+          ...(typeof args.path === "string" ? { file_path: args.path } : {}),
+          ...(typeof firstEdit.oldText === "string" ? { old_string: firstEdit.oldText } : {}),
+          ...(typeof firstEdit.newText === "string" ? { new_string: firstEdit.newText } : {}),
+        },
+      };
+    }
+    case "write":
+      return {
+        name: "Write",
+        args: {
+          ...args,
+          ...(typeof args.path === "string" ? { file_path: args.path } : {}),
+        },
+      };
+    case "grep":
+      return { name: "Grep", args };
+    case "find":
+      return { name: "Glob", args };
+    case "ls":
+      return {
+        name: "Glob",
+        args: {
+          pattern: "*",
+          ...args,
+        },
+      };
+    default:
+      return { name, args };
+  }
+}
+
+/**
+ * @param {Record<string, unknown>} args
+ * @returns {{ oldText?: string, newText?: string }}
+ */
+function extractPiEditTexts(args) {
+  if (!Array.isArray(args.edits) || args.edits.length !== 1 || !isObjectRecord(args.edits[0])) {
+    return {};
+  }
+  const edit = args.edits[0];
+  return {
+    ...(typeof edit.oldText === "string" ? { oldText: edit.oldText } : {}),
+    ...(typeof edit.newText === "string" ? { newText: edit.newText } : {}),
+  };
+}
+
+/**
+ * @param {string} name
+ * @param {Record<string, unknown>} args
+ * @param {Record<string, unknown>} event
+ * @returns {HarnessRuntimeEvent[]}
+ */
+function normalizePiFileChangeEvents(name, args, event) {
+  if ((name !== "edit" && name !== "write") || typeof args.path !== "string") {
+    return [];
+  }
+  const result = isObjectRecord(event.result) ? event.result : {};
+  const details = isObjectRecord(result.details) ? result.details : {};
+  const kind = "update";
+  return [{
+    type: "file-change.completed",
+    provider: "pi",
+    change: {
+      path: args.path,
+      summary: `${args.path} (${kind})`,
+      kind,
+      ...(typeof details.diff === "string" ? { diff: details.diff } : {}),
+      ...(name === "edit" ? extractPiEditTexts(args) : {}),
+      ...(name === "write" && typeof args.content === "string" ? { newText: args.content } : {}),
+    },
+    raw: event,
+  }];
+}
+
+/**
  * @param {Record<string, unknown>} event
  * @returns {Array<Record<string, unknown>>}
  */
@@ -183,26 +282,29 @@ export function normalizePiRuntimeEvents(event) {
     if (!toolStart) {
       return [];
     }
+    const displayTool = normalizePiToolForDisplay(toolStart.name, toolStart.args);
     return [{
       type: "tool.started",
       provider: "pi",
       tool: {
         id: toolStart.id,
-        name: toolStart.name,
-        arguments: toolStart.args,
+        name: displayTool.name,
+        arguments: displayTool.args,
       },
       raw: event,
     }];
   }
 
   if (event.type === "tool_execution_update" && typeof event.toolCallId === "string") {
+    const rawName = typeof event.toolName === "string" ? event.toolName : "tool";
+    const displayTool = normalizePiToolForDisplay(rawName, isObjectRecord(event.args) ? event.args : {});
     return [{
       type: "tool.updated",
       provider: "pi",
       tool: {
         id: event.toolCallId,
-        name: typeof event.toolName === "string" ? event.toolName : "tool",
-        arguments: isObjectRecord(event.args) ? event.args : {},
+        name: displayTool.name,
+        arguments: displayTool.args,
         output: isObjectRecord(event.partialResult) ? extractToolResultText(event.partialResult) : undefined,
       },
       raw: event,
@@ -210,17 +312,27 @@ export function normalizePiRuntimeEvents(event) {
   }
 
   if (event.type === "tool_execution_end" && typeof event.toolCallId === "string") {
-    return [{
-      type: "tool.completed",
+    const rawName = typeof event.toolName === "string" ? event.toolName : "tool";
+    const rawArgs = isObjectRecord(event.args) ? event.args : {};
+    const displayTool = normalizePiToolForDisplay(rawName, rawArgs);
+    const toolEvent = {
+      type: event.isError === true ? "tool.failed" : "tool.completed",
       provider: "pi",
       tool: {
         id: event.toolCallId,
-        name: typeof event.toolName === "string" ? event.toolName : "tool",
-        arguments: isObjectRecord(event.args) ? event.args : {},
+        name: displayTool.name,
+        arguments: displayTool.args,
         output: isObjectRecord(event.result) ? extractToolResultText(event.result) : undefined,
       },
       raw: event,
-    }];
+    };
+    if (event.isError === true) {
+      return [/** @type {HarnessRuntimeEvent} */ (toolEvent)];
+    }
+    return [
+      /** @type {HarnessRuntimeEvent} */ (toolEvent),
+      ...normalizePiFileChangeEvents(rawName, rawArgs, event),
+    ];
   }
 
   if (event.type === "agent_end") {

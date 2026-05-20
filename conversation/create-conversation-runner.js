@@ -388,6 +388,7 @@ export function createConversationRunner({ store, llmClient, getActionsFn, execu
         chatId,
         runConfig: turnInput.runConfig ?? runConfig,
         resumeCursor: getResumeCursor(),
+        hooks,
       });
       await Promise.allSettled([...pendingEventHandlers]);
       const activeSession = harnessInstance.adapter

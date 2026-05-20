@@ -85,4 +85,131 @@ describe("normalizePiRuntimeEvents", () => {
       },
     }]);
   });
+
+  it("normalizes Pi RPC lowercase built-in tools and file changes", () => {
+    assert.deepEqual(normalizePiRuntimeEvents({
+      type: "tool_execution_start",
+      toolCallId: "read-1",
+      toolName: "read",
+      args: { path: "README.md", offset: 1, limit: 20 },
+    }), [{
+      type: "tool.started",
+      provider: "pi",
+      tool: {
+        id: "read-1",
+        name: "Read",
+        arguments: { path: "README.md", offset: 1, limit: 20, file_path: "README.md" },
+      },
+      raw: {
+        type: "tool_execution_start",
+        toolCallId: "read-1",
+        toolName: "read",
+        args: { path: "README.md", offset: 1, limit: 20 },
+      },
+    }]);
+
+    assert.deepEqual(normalizePiRuntimeEvents({
+      type: "tool_execution_end",
+      toolCallId: "bash-1",
+      toolName: "bash",
+      args: { command: "pwd" },
+      result: { content: [{ type: "text", text: "/repo\n" }] },
+      isError: false,
+    }), [{
+      type: "tool.completed",
+      provider: "pi",
+      tool: {
+        id: "bash-1",
+        name: "Bash",
+        arguments: { command: "pwd" },
+        output: "/repo",
+      },
+      raw: {
+        type: "tool_execution_end",
+        toolCallId: "bash-1",
+        toolName: "bash",
+        args: { command: "pwd" },
+        result: { content: [{ type: "text", text: "/repo\n" }] },
+        isError: false,
+      },
+    }]);
+
+    assert.deepEqual(normalizePiRuntimeEvents({
+      type: "tool_execution_end",
+      toolCallId: "edit-1",
+      toolName: "edit",
+      args: {
+        path: "src/app.js",
+        edits: [{ oldText: "const value = 1;\n", newText: "const value = 2;\n" }],
+      },
+      result: {
+        content: [{ type: "text", text: "Edited src/app.js" }],
+        details: {
+          diff: ["--- a/src/app.js", "+++ b/src/app.js", "@@ -1 +1 @@", "-const value = 1;", "+const value = 2;"].join("\n"),
+        },
+      },
+      isError: false,
+    }), [
+      {
+        type: "tool.completed",
+        provider: "pi",
+        tool: {
+          id: "edit-1",
+          name: "Edit",
+          arguments: {
+            path: "src/app.js",
+            edits: [{ oldText: "const value = 1;\n", newText: "const value = 2;\n" }],
+            file_path: "src/app.js",
+            old_string: "const value = 1;\n",
+            new_string: "const value = 2;\n",
+          },
+          output: "Edited src/app.js",
+        },
+        raw: {
+          type: "tool_execution_end",
+          toolCallId: "edit-1",
+          toolName: "edit",
+          args: {
+            path: "src/app.js",
+            edits: [{ oldText: "const value = 1;\n", newText: "const value = 2;\n" }],
+          },
+          result: {
+            content: [{ type: "text", text: "Edited src/app.js" }],
+            details: {
+              diff: ["--- a/src/app.js", "+++ b/src/app.js", "@@ -1 +1 @@", "-const value = 1;", "+const value = 2;"].join("\n"),
+            },
+          },
+          isError: false,
+        },
+      },
+      {
+        type: "file-change.completed",
+        provider: "pi",
+        change: {
+          path: "src/app.js",
+          summary: "src/app.js (update)",
+          kind: "update",
+          diff: ["--- a/src/app.js", "+++ b/src/app.js", "@@ -1 +1 @@", "-const value = 1;", "+const value = 2;"].join("\n"),
+          oldText: "const value = 1;\n",
+          newText: "const value = 2;\n",
+        },
+        raw: {
+          type: "tool_execution_end",
+          toolCallId: "edit-1",
+          toolName: "edit",
+          args: {
+            path: "src/app.js",
+            edits: [{ oldText: "const value = 1;\n", newText: "const value = 2;\n" }],
+          },
+          result: {
+            content: [{ type: "text", text: "Edited src/app.js" }],
+            details: {
+              diff: ["--- a/src/app.js", "+++ b/src/app.js", "@@ -1 +1 @@", "-const value = 1;", "+const value = 2;"].join("\n"),
+            },
+          },
+          isError: false,
+        },
+      },
+    ]);
+  });
 });

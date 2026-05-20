@@ -295,7 +295,152 @@ describe("provider runtime events", () => {
 });
 
 // ═══════════════════════════════════════════════════════════════════
-// 1d. WhatsApp audio through media-to-text into provider input
+// 1d. Pi RPC events through the full WhatsApp transport boundary
+// ═══════════════════════════════════════════════════════════════════
+describe("Pi RPC runtime events", () => {
+  const senderId = "e2e-pi-rpc-user";
+  const chatId = `${senderId}@s.whatsapp.net`;
+
+  before(async () => {
+    const { registerHarnessDriver } = await import("../harnesses/index.js");
+    const { createPiHarness } = await import("../harnesses/pi.js");
+    const { startPiRpcRun } = await import("../harnesses/pi-runner.js");
+
+    registerHarnessDriver({
+      name: "pi",
+      displayName: "Pi",
+      supportsInstances: true,
+      createInstance: () => ({
+        harness: createPiHarness({
+          startRun: (input) => startPiRpcRun(input, {
+            openConnection: async () => ({
+              sendRequest: async (message) => {
+                if (message.type === "get_state") {
+                  return {
+                    id: message.id,
+                    type: "response",
+                    command: "get_state",
+                    success: true,
+                    data: {
+                      sessionFile: "/tmp/pi-rpc-e2e-session.jsonl",
+                      sessionId: "pi-rpc-e2e",
+                      isStreaming: false,
+                    },
+                  };
+                }
+                return {
+                  id: message.id,
+                  type: "response",
+                  command: typeof message.type === "string" ? message.type : "unknown",
+                  success: true,
+                };
+              },
+              notifications: (async function* () {
+                yield {
+                  type: "tool_execution_start",
+                  toolCallId: "read-1",
+                  toolName: "read",
+                  args: { path: "README.md" },
+                };
+                yield {
+                  type: "tool_execution_end",
+                  toolCallId: "read-1",
+                  toolName: "read",
+                  result: { content: [{ type: "text", text: "# Project\n" }] },
+                  isError: false,
+                };
+                yield {
+                  type: "tool_execution_start",
+                  toolCallId: "bash-1",
+                  toolName: "bash",
+                  args: { command: "pwd" },
+                };
+                yield {
+                  type: "tool_execution_update",
+                  toolCallId: "bash-1",
+                  toolName: "bash",
+                  args: { command: "pwd" },
+                  partialResult: { content: [{ type: "text", text: "/repo\n" }] },
+                };
+                yield {
+                  type: "tool_execution_end",
+                  toolCallId: "bash-1",
+                  toolName: "bash",
+                  result: { content: [{ type: "text", text: "/repo\n" }] },
+                  isError: false,
+                };
+                yield {
+                  type: "tool_execution_start",
+                  toolCallId: "edit-1",
+                  toolName: "edit",
+                  args: {
+                    path: "src/app.js",
+                    edits: [{ oldText: "const value = 1;\n", newText: "const value = 2;\n" }],
+                  },
+                };
+                yield {
+                  type: "tool_execution_end",
+                  toolCallId: "edit-1",
+                  toolName: "edit",
+                  result: { content: [{ type: "text", text: "Edited src/app.js" }] },
+                  isError: false,
+                };
+                yield {
+                  type: "agent_end",
+                  messages: [{
+                    role: "assistant",
+                    content: [{ type: "text", text: "Pi RPC answer." }],
+                    usage: {
+                      input: 20,
+                      output: 5,
+                      cacheRead: 3,
+                      cost: { total: 0.0025 },
+                    },
+                  }],
+                };
+              })(),
+              close: async () => {},
+            }),
+          }),
+          getAvailableModels: async () => [],
+        }),
+      }),
+    });
+
+    await seedChat(testDb, chatId, { enabled: true });
+    await updateChatConfig(chatId, (current) => ({
+      ...current,
+      harness: "pi",
+      output_visibility: { toolDetails: false },
+    }));
+  });
+
+  it("projects Pi RPC read, bash, file, answer, and usage events to WhatsApp messages", async () => {
+    const { sock, getSentMessages } = createMockBaileysSocket();
+
+    await adaptIncomingMessage(
+      createWAMessage({ text: "Use Pi RPC", senderId }),
+      sock,
+      handleMessage,
+      testConfirmRegistry,
+      testUserResponseRegistry,
+    );
+
+    const sentMessages = getSentMessages();
+    const textMessages = sentMessages
+      .map((entry) => typeof entry.msg.text === "string" ? entry.msg.text : "")
+      .filter(Boolean);
+
+    assert.ok(textMessages.some((text) => text.includes("*Read*  `README.md`")), `Expected Pi read progress, got ${JSON.stringify(textMessages)}`);
+    assert.ok(textMessages.some((text) => text.includes("*Shell*  `pwd`")), `Expected Pi bash progress, got ${JSON.stringify(textMessages)}`);
+    assert.ok(textMessages.some((text) => text.includes("*Update File*  `src/app.js`")), `Expected Pi file change, got ${JSON.stringify(textMessages)}`);
+    assert.ok(textMessages.some((text) => text.includes("Pi RPC answer.")), `Expected Pi answer, got ${JSON.stringify(textMessages)}`);
+    assert.ok(textMessages.some((text) => text.includes("Cost: 0.002500")), `Expected Pi usage cost, got ${JSON.stringify(textMessages)}`);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════
+// 1e. WhatsApp audio through media-to-text into provider input
 // ═══════════════════════════════════════════════════════════════════
 describe("audio media-to-text provider input", () => {
   const senderId = "e2e-audio-user";

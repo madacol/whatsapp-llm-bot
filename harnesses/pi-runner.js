@@ -187,6 +187,8 @@ export async function startPiRpcRun(input, deps = {}) {
   let sessionPath = input.sessionPath ?? null;
   let agentCompleted = false;
   let requestSequence = 1;
+  /** @type {Map<string, { toolName: string, args: Record<string, unknown> }>} */
+  const activeToolCalls = new Map();
 
   const connection = await openConnection({
     ...(input.runConfig?.workdir ? { cwd: input.runConfig.workdir } : {}),
@@ -248,7 +250,34 @@ export async function startPiRpcRun(input, deps = {}) {
 
   const done = (async () => {
     try {
-      for await (const event of connection.notifications) {
+      for await (const rawEvent of connection.notifications) {
+        let event = rawEvent;
+        if (
+          event.type === "tool_execution_start"
+          && typeof event.toolCallId === "string"
+          && typeof event.toolName === "string"
+        ) {
+          activeToolCalls.set(event.toolCallId, {
+            toolName: event.toolName,
+            args: isObjectRecord(event.args) ? event.args : {},
+          });
+        } else if (
+          (event.type === "tool_execution_update" || event.type === "tool_execution_end")
+          && typeof event.toolCallId === "string"
+        ) {
+          const toolCallId = event.toolCallId;
+          const activeTool = activeToolCalls.get(toolCallId);
+          if (activeTool) {
+            event = {
+              ...event,
+              toolName: typeof event.toolName === "string" ? event.toolName : activeTool.toolName,
+              args: isObjectRecord(event.args) ? event.args : activeTool.args,
+            };
+          }
+          if (event.type === "tool_execution_end") {
+            activeToolCalls.delete(toolCallId);
+          }
+        }
         const runtimeEvents = normalizePiRuntimeEvents(event);
         for (const runtimeEvent of runtimeEvents) {
           await dispatcher.handleEvent(runtimeEvent);
