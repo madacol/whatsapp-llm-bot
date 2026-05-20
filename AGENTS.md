@@ -1,20 +1,12 @@
 # Rules
 
-- Use JSDoc for all type annotations
-- Avoid weak typing like `@type {any|unknown}` casts. Use proper type guards and narrowing instead. Aspire to have strong and precise types everywhere
-- Before making a non-trivial change, start with a very high-level plan, give the user a chance to redirect, then expand into detailed steps, edge cases, and execution only after the direction is clear
-- Before adding special cases to bypass a seam, make sure the user has confirmed
-- After making a change that can affect runtime behavior, `pnpm type-check`, then test and then commit!. For docs-only or instruction-only changes, skip code verification and just commit. Then if there's any refactor worth doing, explain why and how it can be done
-- When refactoring, identify the main seams between subsystems and reduce each seam to a small semantic boundary
-- Before cutting corners, ask yourself why do you need to do this, and what needs to be done to avoid this. If you still think cutting this corner is still the best course of action, explain thoroughly to the user and let them decide how to continue with the plan
-- When implementation depends on an external payload or event format from an LLM API, WhatsApp/Baileys, an SDK, or an app server, make an empirical request first and inspect the full real response before proposing the plan. Do not rely on docs, assumptions, or partial samples when that format is a key dependency
-
-## Testing
-- Apply red/green TDD
-- Tests should catch regressions, not mirror implementation. Ask: "if this test fails, what real bug did it catch?" If there's no clear answer, skip the test
-- For bug fixes and new features, write a failing test first when the behavior is non-trivial and not already covered. For removals, use removal-driven testing: identify existing coverage, remove the behavior, verify that coverage fails, then delete or update the obsolete tests
-- For bugs or features that cross subsystem seams, make the regression test reflect the behavior the user cares about by naming the start seam and end seam first. Inject or observe the signal at the start seam, assert the guarantee at the end seam, and only then add narrower seam/unit tests when they clarify edge cases, document a contract, or make failures easier to diagnose. Do not replace a useful start-to-end seam test with seam-only tests when the bug can live in the wiring between those seams.
-- When removing a behavior or feature, first find the tests that currently cover that behavior. Remove the feature, then run those tests and confirm they fail for the expected reason. If the relevant tests do not fail, pause: either the behavior was not actually removed, the wrong tests were identified, or coverage is missing. Only then delete or update the obsolete tests to match the removal
-- Do not add new absence tests for removed behavior by default. Add one only when the absence itself is an important long-term invariant, such as safety, permissions, data loss prevention, or when the user explicitly asks for that protection
-- Prefer integration tests for glue code, unit tests for pure functions with edge cases. Test at the boundary where bugs would be noticed
-- Save tests output to a temporary file so you can grep|head|tail later because the output is usually long
+- Use JSDoc types and precise narrowing; avoid weak casts.
+- Keep subsystem seams small, semantic, and explicit.
+- For non-trivial work, state the high-level direction before implementing.
+- Do not bypass seams, add special cases, or cut corners without confirming.
+- When external payload shape matters, inspect a real payload before designing around it.
+- For behavior changes, use red/green TDD, then `pnpm type-check`, test, and commit.
+- Tests should prove user-valued behavior, not mirror implementation.
+- For cross-seam behavior, test from the relevant start seam to the relevant end seam before adding narrower tests.
+- For removals, prove the old behavior was covered and fails when removed before updating tests.
+- For docs-only or instruction-only changes, skip code verification and commit.
