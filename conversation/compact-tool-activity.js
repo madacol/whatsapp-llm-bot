@@ -4,8 +4,6 @@ import { contentEvent, textUpdate } from "../outbound-events.js";
 
 const COMPACT_TOOL_ACTIVITY_LIMIT = 3;
 const COMPACT_TOOL_ACTIVITY_DEBOUNCE_MS = 1000;
-const COMPACT_READ_PREVIEW_LINE_LIMIT = 8;
-const COMPACT_READ_PREVIEW_CHAR_LIMIT = 1200;
 
 /**
  * @param {string} tool
@@ -46,32 +44,6 @@ function renderCompactEntry(entry) {
 function renderInspectEntry(entry) {
   const summary = renderCompactEntry(entry);
   return entry.inspectDetail ? `${summary}\n${entry.inspectDetail}` : summary;
-}
-
-/**
- * @param {string | undefined} output
- * @returns {string | undefined}
- */
-function formatReadInspectDetail(output) {
-  const trimmed = output?.trimEnd();
-  if (!trimmed) {
-    return undefined;
-  }
-
-  const lines = trimmed.split("\n");
-  const visibleLines = lines.slice(0, COMPACT_READ_PREVIEW_LINE_LIMIT);
-  let preview = visibleLines.join("\n");
-  if (preview.length > COMPACT_READ_PREVIEW_CHAR_LIMIT) {
-    preview = preview.slice(0, COMPACT_READ_PREVIEW_CHAR_LIMIT).trimEnd();
-  }
-  const hiddenLineCount = Math.max(0, lines.length - visibleLines.length);
-  if (hiddenLineCount > 0) {
-    preview += `\n... +${hiddenLineCount} more lines`;
-  } else if (preview.length < trimmed.length) {
-    preview += "\n...";
-  }
-
-  return `\`\`\`\n${preview.replaceAll("```", "'''")}\n\`\`\``;
 }
 
 /**
@@ -158,7 +130,7 @@ function formatCompactToolCall(toolCall, actionFormatter, cwd, toolContext) {
  * }} input
  * @returns {{
  *   addCommand: (command: string) => Promise<void>,
- *   completeCommand: (command: string, output?: string) => Promise<void>,
+ *   completeCommand: (command: string) => Promise<void>,
  *   failCommand: (command: string) => Promise<boolean>,
  *   addFileRead: (command: string, paths: string[]) => Promise<void>,
  *   addToolCall: (
@@ -265,16 +237,12 @@ export function createCompactToolActivityFeed({ send, cwd }) {
 
   /**
    * @param {string} entryId
-   * @param {string | undefined} [output]
    * @returns {boolean}
    */
-  function markEntryCompleted(entryId, output) {
+  function markEntryCompleted(entryId) {
     const entry = entries.find((candidate) => candidate.id === entryId);
     if (!entry || entry.completed || entry.failed) {
       return false;
-    }
-    if (entry.kind === "read") {
-      entry.inspectDetail = formatReadInspectDetail(output);
     }
     entry.completed = true;
     return true;
@@ -373,9 +341,9 @@ export function createCompactToolActivityFeed({ send, cwd }) {
         failed: false,
       });
     },
-    completeCommand: async (command, output) => {
+    completeCommand: async (command) => {
       const entryId = consumePendingEntry(pendingCommandEntryIds, command);
-      if (!entryId || !markEntryCompleted(entryId, output)) {
+      if (!entryId || !markEntryCompleted(entryId)) {
         return;
       }
       await flushNow();
