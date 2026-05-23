@@ -90,9 +90,10 @@ function summarizeToolBlocks(blocks) {
 
 /**
  * @param {ReturnType<typeof createHarnessEventStreamController>} events
+ * @param {string} chatId
  * @returns {AgentIOHooks}
  */
-function createCodexEventHooks(events) {
+function createCodexEventHooks(events, chatId) {
   /** @type {Map<string, { id: string, name: string, arguments: Record<string, unknown> }>} */
   const activeTools = new Map();
 
@@ -115,6 +116,7 @@ function createCodexEventHooks(events) {
     ...NO_OP_HOOKS,
     async onReasoning(event) {
       events.emit({
+        chatId,
         type: event.status === "completed" ? "reasoning.completed" : event.status === "started" ? "reasoning.started" : "reasoning.updated",
         status: event.status,
         text: event.text ?? event.contentParts.join(""),
@@ -124,6 +126,7 @@ function createCodexEventHooks(events) {
     },
     async onLlmResponse(text) {
       events.emit({
+        chatId,
         type: "assistant.completed",
         text,
         displayText: text,
@@ -133,6 +136,7 @@ function createCodexEventHooks(events) {
     },
     async onUsage(cost, tokens) {
       events.emit({
+        chatId,
         type: "usage.updated",
         usage: {
           promptTokens: tokens.prompt,
@@ -146,7 +150,7 @@ function createCodexEventHooks(events) {
       });
     },
     async onFileChange(change) {
-      events.emit({ type: "file-change.completed", change });
+      events.emit({ chatId, type: "file-change.completed", change });
     },
     async onToolCall(toolCall) {
       const tool = {
@@ -156,6 +160,7 @@ function createCodexEventHooks(events) {
       };
       activeTools.set(tool.id, tool);
       events.emit({
+        chatId,
         type: "tool.started",
         tool,
       });
@@ -163,6 +168,7 @@ function createCodexEventHooks(events) {
     async onToolComplete(toolCall) {
       const tool = takeActiveTool(toolCall.name);
       events.emit({
+        chatId,
         type: "tool.completed",
         tool,
       });
@@ -170,6 +176,7 @@ function createCodexEventHooks(events) {
     async onToolResult(blocks, toolName, permissions) {
       const tool = takeActiveTool(toolName);
       events.emit({
+        chatId,
         type: "tool.completed",
         tool: {
           ...tool,
@@ -181,6 +188,7 @@ function createCodexEventHooks(events) {
     },
     async onToolError(error) {
       events.emit({
+        chatId,
         type: "tool.failed",
         tool: {
           id: `codex-error:${Date.now()}`,
@@ -192,6 +200,7 @@ function createCodexEventHooks(events) {
     },
     async onCommand(event) {
       events.emit({
+        chatId,
         type: event.status === "completed"
           ? "command.completed"
           : event.status === "failed" ? "command.failed" : "command.started",
@@ -200,6 +209,7 @@ function createCodexEventHooks(events) {
     },
     async onFileRead(event) {
       events.emit({
+        chatId,
         type: "file-read.started",
         fileRead: event,
       });
@@ -516,7 +526,7 @@ export function createCodexHarness(deps = {}) {
       type: "turn.started",
       turn: { id: turn.chatId, chatId: turn.chatId, status: "started" },
     });
-    const hooks = createCodexEventHooks(adapterIdentity.events);
+    const hooks = createCodexEventHooks(adapterIdentity.events, turn.chatId);
     try {
       const started = await beginRun({
         chatId: turn.chatId,

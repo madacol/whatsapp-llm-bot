@@ -265,6 +265,145 @@ describe("createConversationRunner prompt formatting", () => {
     assert.deepEqual(replies, [[{ type: "markdown", text: "event response" }]]);
   });
 
+  it("routes concurrent scoped provider runtime events only to their originating chat", async () => {
+    const harnessName = "semantic-events-concurrent";
+    const chatA = "conv-semantic-concurrent-a";
+    const chatB = "conv-semantic-concurrent-b";
+    await seedChat(chatA, { enabled: true });
+    await seedChat(chatB, { enabled: true });
+    await updateChatConfig(chatA, (current) => ({
+      ...current,
+      harness: harnessName,
+      harness_config: {},
+    }));
+    await updateChatConfig(chatB, (current) => ({
+      ...current,
+      harness: harnessName,
+      harness_config: {},
+    }));
+
+    /** @type {Array<({ type: string, provider: string, chatId?: string } & Record<string, unknown>) => void | Promise<void>>} */
+    const subscribers = [];
+    let startedTurns = 0;
+    /** @type {() => void} */
+    let releaseBothTurns = () => {};
+    const bothTurnsStarted = new Promise((resolve) => {
+      releaseBothTurns = resolve;
+    });
+
+    registerHarnessDriver({
+      name: harnessName,
+      supportsInstances: true,
+      createInstance: () => ({
+        harness: {
+          getName: () => harnessName,
+          getCapabilities: () => ({
+            supportsResume: true,
+            supportsCancel: false,
+            supportsLiveInput: false,
+            supportsApprovals: false,
+            supportsWorkdir: true,
+            supportsSandboxConfig: false,
+            supportsModelSelection: true,
+            supportsReasoningEffort: false,
+            supportsSessionFork: false,
+          }),
+          async run() {
+            assert.fail("semantic adapter should not use legacy run");
+          },
+          handleCommand: async () => false,
+          listSlashCommands: () => [],
+          createAdapter() {
+            return {
+              async startSession(input) {
+                return {
+                  chatId: input.chatId,
+                  harnessName,
+                  instanceId: harnessName,
+                  continuationKey: `${harnessName}:instance:${harnessName}`,
+                  status: "ready",
+                  resumeCursor: null,
+                };
+              },
+              async sendTurn(input) {
+                startedTurns += 1;
+                if (startedTurns === 2) {
+                  releaseBothTurns();
+                } else {
+                  await bothTurnsStarted;
+                }
+                for (const subscriber of subscribers) {
+                  await subscriber({
+                    chatId: input.chatId,
+                    type: "assistant.completed",
+                    provider: harnessName,
+                    text: `event response for ${input.chatId}`,
+                    contentType: "text",
+                    responseMode: "replace",
+                  });
+                }
+                return {
+                  response: [{ type: "text", text: `fallback for ${input.chatId}` }],
+                  messages: input.messages ?? [],
+                  usage: { promptTokens: 0, completionTokens: 0, cachedTokens: 0, cost: 0 },
+                };
+              },
+              interruptTurn: async () => false,
+              injectMessage: async () => false,
+              stopSession: async () => false,
+              listSessions: () => [],
+              readThread: async () => null,
+              rollbackThread: async () => null,
+              streamEvents: {
+                async *[Symbol.asyncIterator]() {},
+              },
+              subscribeEvents(handler) {
+                subscribers.push(handler);
+                return () => {
+                  const index = subscribers.indexOf(handler);
+                  if (index >= 0) {
+                    subscribers.splice(index, 1);
+                  }
+                };
+              },
+            };
+          },
+        },
+      }),
+    });
+
+    const turnA = createChatTurn({
+      chatId: chatA,
+      content: [{ type: "text", text: "hello from A" }],
+    });
+    const turnB = createChatTurn({
+      chatId: chatB,
+      content: [{ type: "text", text: "hello from B" }],
+    });
+
+    await Promise.all([
+      handleMessage(turnA.context),
+      handleMessage(turnB.context),
+    ]);
+
+    assert.ok(
+      turnA.responses.some((response) => response.text === `event response for ${chatA}`),
+      `Expected chat A to receive its own event, got ${JSON.stringify(turnA.responses)}`,
+    );
+    assert.ok(
+      !turnA.responses.some((response) => response.text === `event response for ${chatB}`),
+      `Expected chat A not to receive chat B's event, got ${JSON.stringify(turnA.responses)}`,
+    );
+    assert.ok(
+      turnB.responses.some((response) => response.text === `event response for ${chatB}`),
+      `Expected chat B to receive its own event, got ${JSON.stringify(turnB.responses)}`,
+    );
+    assert.ok(
+      !turnB.responses.some((response) => response.text === `event response for ${chatA}`),
+      `Expected chat B not to receive chat A's event, got ${JSON.stringify(turnB.responses)}`,
+    );
+  });
+
   it("presents Codex semantic adapter Read and Shell progress through the conversation runner", async () => {
     await seedChat("conv-codex-runtime-progress", { enabled: true });
     await updateChatConfig("conv-codex-runtime-progress", (current) => ({
