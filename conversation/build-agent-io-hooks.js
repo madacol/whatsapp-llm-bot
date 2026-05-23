@@ -206,7 +206,7 @@ export function buildAgentIoHooks(
           return;
         }
         if (commandEvent.status === "completed") {
-          await compactToolActivity.completeCommand(commandEvent.command, commandEvent.output);
+          await compactToolActivity.completeCommand(commandEvent.command);
           return;
         }
         if (commandEvent.status === "failed") {

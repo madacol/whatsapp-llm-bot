@@ -390,7 +390,7 @@ describe("buildAgentIoHooks", () => {
     }]);
   });
 
-  it("stores read command output on compact file-read inspect state", async () => {
+  it("omits read command output from compact file-read inspect state", async () => {
     /** @type {MessageInspectState[]} */
     const inspects = [];
     const hooks = buildAgentIoHooks(
@@ -424,13 +424,7 @@ describe("buildAgentIoHooks", () => {
     assert.ok(inspect && inspect.kind === "text");
     assert.equal(
       inspect?.kind === "text" ? inspect.text : "",
-      [
-        "✅ *Read*  `src/app.js`",
-        "```",
-        "  1→ const value = 1;",
-        "  2→ const value = 2;",
-        "```",
-      ].join("\n"),
+      "✅ *Read*  `src/app.js`",
     );
   });
 
