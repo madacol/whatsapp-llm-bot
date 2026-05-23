@@ -91,6 +91,44 @@ function getDeliveredContentSignature(content) {
 }
 
 /**
+ * @param {unknown} value
+ * @returns {value is Record<string, unknown>}
+ */
+function isRecord(value) {
+  return typeof value === "object" && value !== null;
+}
+
+/**
+ * Extract the chat route from a provider runtime event when the adapter exposes
+ * one. Older adapters may emit unscoped single-turn events; those remain
+ * accepted for compatibility.
+ * @param {Record<string, unknown>} event
+ * @returns {string | null}
+ */
+function getHarnessRuntimeEventChatId(event) {
+  if (typeof event.chatId === "string") {
+    return event.chatId;
+  }
+  if (isRecord(event.session) && typeof event.session.chatId === "string") {
+    return event.session.chatId;
+  }
+  if (isRecord(event.turn) && typeof event.turn.chatId === "string") {
+    return event.turn.chatId;
+  }
+  return null;
+}
+
+/**
+ * @param {Record<string, unknown>} event
+ * @param {string} chatId
+ * @returns {boolean}
+ */
+function isHarnessRuntimeEventForChat(event, chatId) {
+  const eventChatId = getHarnessRuntimeEventChatId(event);
+  return eventChatId === null || eventChatId === chatId;
+}
+
+/**
  * @param {IncomingContentBlock[]} content
  * @returns {boolean}
  */
@@ -370,6 +408,9 @@ export function createConversationRunner({ store, llmClient, getActionsFn, execu
     const pendingEventHandlers = new Set();
     let eventChain = Promise.resolve();
     const unsubscribe = harnessInstance.adapter.subscribeEvents?.((event) => {
+      if (!isHarnessRuntimeEventForChat(event, chatId)) {
+        return;
+      }
       /** @type {Promise<void>} */
       const pending = eventChain
         .then(() => runtimeDispatcher.handleEvent(/** @type {Parameters<typeof runtimeDispatcher.handleEvent>[0]} */ (event)))

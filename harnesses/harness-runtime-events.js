@@ -63,6 +63,7 @@
 
 /**
  * @typedef {{
+ *   chatId?: string,
  *   type: "session.started" | "session.updated" | "session.stopped",
  *   provider: HarnessRuntimeProvider,
  *   session: HarnessRuntimeSession,
@@ -72,6 +73,7 @@
 
 /**
  * @typedef {{
+ *   chatId?: string,
  *   type: "turn.started" | "turn.completed",
  *   provider: HarnessRuntimeProvider,
  *   turn: HarnessRuntimeTurn,
@@ -81,6 +83,7 @@
 
 /**
  * @typedef {{
+ *   chatId?: string,
  *   type: "request.opened" | "request.resolved",
  *   provider: HarnessRuntimeProvider,
  *   request: HarnessRuntimeRequest,
@@ -90,6 +93,7 @@
 
 /**
  * @typedef {{
+ *   chatId?: string,
  *   type: "user-input.requested" | "user-input.resolved",
  *   provider: HarnessRuntimeProvider,
  *   request: HarnessRuntimeUserInputRequest,
@@ -99,6 +103,7 @@
 
 /**
  * @typedef {{
+ *   chatId?: string,
  *   type: "file-change.completed",
  *   provider: HarnessRuntimeProvider,
  *   change: Parameters<Required<AgentIOHooks>["onFileChange"]>[0],
@@ -108,6 +113,7 @@
 
 /**
  * @typedef {{
+ *   chatId?: string,
  *   type: "reasoning.started" | "reasoning.updated" | "reasoning.completed",
  *   provider: HarnessRuntimeProvider,
  *   status: "started" | "updated" | "completed",
@@ -120,6 +126,7 @@
 
 /**
  * @typedef {{
+ *   chatId?: string,
  *   type: "tool.started" | "tool.updated" | "tool.completed" | "tool.failed",
  *   provider: HarnessRuntimeProvider,
  *   tool: HarnessRuntimeTool,
@@ -129,6 +136,7 @@
 
 /**
  * @typedef {{
+ *   chatId?: string,
  *   type: "command.started" | "command.completed" | "command.failed",
  *   provider: HarnessRuntimeProvider,
  *   command: Parameters<Required<AgentIOHooks>["onCommand"]>[0],
@@ -138,6 +146,7 @@
 
 /**
  * @typedef {{
+ *   chatId?: string,
  *   type: "file-read.started",
  *   provider: HarnessRuntimeProvider,
  *   fileRead: Parameters<Required<AgentIOHooks>["onFileRead"]>[0],
@@ -147,6 +156,7 @@
 
 /**
  * @typedef {{
+ *   chatId?: string,
  *   type: "assistant.completed",
  *   provider: HarnessRuntimeProvider,
  *   text: string,
@@ -162,6 +172,7 @@
 
 /**
  * @typedef {{
+ *   chatId?: string,
  *   type: "usage.updated",
  *   provider: HarnessRuntimeProvider,
  *   usage: HarnessRuntimeUsage,
