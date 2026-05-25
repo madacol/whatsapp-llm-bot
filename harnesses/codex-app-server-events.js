@@ -42,6 +42,21 @@ function extractSubagentThreadEvent(thread) {
 }
 
 /**
+ * @param {string | undefined} savedPath
+ * @returns {string}
+ */
+function inferImageMimeType(savedPath) {
+  const lowerPath = savedPath?.toLowerCase() ?? "";
+  if (lowerPath.endsWith(".jpg") || lowerPath.endsWith(".jpeg")) {
+    return "image/jpeg";
+  }
+  if (lowerPath.endsWith(".webp")) {
+    return "image/webp";
+  }
+  return "image/png";
+}
+
+/**
  * Normalize a Codex App Server JSON-RPC message into the semantic event shape
  * used by the harness wrapper.
  * @param {unknown} message
@@ -210,6 +225,19 @@ export function normalizeCodexAppServerEvent(message) {
         summarySnapshot: extractCodexReasoningParts(item.summary),
         contentSnapshot: extractCodexReasoningParts(item.content),
       };
+    }
+    return normalized;
+  }
+
+  if (itemType === "imageGeneration" && method === "item/completed") {
+    const result = typeof item.result === "string" && item.result.length > 0 ? item.result : null;
+    if (result) {
+      normalized.contentBlocks = [{
+        type: "image",
+        mime_type: inferImageMimeType(typeof item.savedPath === "string" ? item.savedPath : undefined),
+        encoding: "base64",
+        data: result,
+      }];
     }
     return normalized;
   }
