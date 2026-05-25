@@ -15,10 +15,38 @@ import {
 const log = createLogger("harness:codex-events");
 
 /**
+ * @param {ToolContentBlock} block
+ * @returns {string}
+ */
+function contentBlockSignature(block) {
+  return JSON.stringify(block);
+}
+
+/**
+ * @param {ToolContentBlock[]} first
+ * @param {ToolContentBlock[]} second
+ * @returns {ToolContentBlock[]}
+ */
+function appendUniqueContentBlocks(first, second) {
+  const seen = new Set();
+  /** @type {ToolContentBlock[]} */
+  const merged = [];
+  for (const block of [...first, ...second]) {
+    const signature = contentBlockSignature(block);
+    if (seen.has(signature)) {
+      continue;
+    }
+    seen.add(signature);
+    merged.push(block);
+  }
+  return merged;
+}
+
+/**
  * Shared semantic dispatcher for normalized Codex events, independent of the
  * underlying transport (SDK exec or App Server).
  * @param {{
- *   hooks: Pick<Required<AgentIOHooks>, "onComposing" | "onPaused" | "onReasoning" | "onToolCall" | "onToolComplete" | "onCommand" | "onFileRead" | "onPlan" | "onFileChange" | "onLlmResponse" | "onToolError" | "onUsage">,
+ *   hooks: Pick<Required<AgentIOHooks>, "onComposing" | "onPaused" | "onReasoning" | "onToolCall" | "onToolComplete" | "onToolResult" | "onCommand" | "onFileRead" | "onPlan" | "onFileChange" | "onLlmResponse" | "onToolError" | "onUsage">,
  *   runConfig?: HarnessRunConfig,
  *   messages: Message[],
  *   fileChangeTracker?: ReturnType<typeof import("./codex-file-change-tracker.js").createCodexFileChangeTracker>,
@@ -46,6 +74,8 @@ export function createCodexEventDispatcher(input) {
   const subagentThreads = new Map();
   /** @type {Set<string>} */
   const deliveredSubagentResponses = new Set();
+  /** @type {ToolContentBlock[]} */
+  const providerContentBlocks = [];
   const runtimeDispatcher = createHarnessRuntimeEventDispatcher({
     provider: "codex",
     messages: input.messages,
@@ -458,6 +488,12 @@ export function createCodexEventDispatcher(input) {
       await input.hooks.onReasoning(reasoningState.apply(normalized.reasoningEvent));
     }
 
+    if (normalized.contentBlocks && normalized.contentBlocks.length > 0) {
+      providerContentBlocks.push(...normalized.contentBlocks);
+      result.response = [...providerContentBlocks];
+      await input.hooks.onToolResult(normalized.contentBlocks, "content", {});
+    }
+
     for (const response of normalized.subagentResponses ?? []) {
       await emitSubagentResponse(response);
     }
@@ -519,7 +555,12 @@ export function createCodexEventDispatcher(input) {
     result,
     handleNormalized,
     finalize() {
-      if (lastAssistantText) {
+      if (providerContentBlocks.length > 0) {
+        result.response = appendUniqueContentBlocks(
+          providerContentBlocks,
+          lastAssistantText ? [{ type: "markdown", text: lastAssistantText }] : [],
+        );
+      } else if (lastAssistantText) {
         result.response = [{ type: "markdown", text: lastAssistantText }];
       }
       return { result, failureMessage };

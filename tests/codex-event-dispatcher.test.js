@@ -6,11 +6,14 @@ import { createCodexEventDispatcher } from "../harnesses/codex-event-dispatcher.
  * @returns {{
  *   dispatcher: ReturnType<typeof createCodexEventDispatcher>,
  *   llmResponses: Array<{ text: string, metadata?: LlmResponseMetadata }>,
+ *   toolResults: ToolContentBlock[][],
  * }}
  */
 function createSubject() {
   /** @type {Array<{ text: string, metadata?: LlmResponseMetadata }>} */
   const llmResponses = [];
+  /** @type {ToolContentBlock[][]} */
+  const toolResults = [];
   const dispatcher = createCodexEventDispatcher({
     messages: [],
     hooks: {
@@ -25,12 +28,15 @@ function createSubject() {
       onFileChange: async () => {},
       onToolError: async () => {},
       onUsage: async () => {},
+      onToolResult: async (blocks) => {
+        toolResults.push(blocks);
+      },
       onLlmResponse: async (text, metadata) => {
         llmResponses.push({ text, ...(metadata ? { metadata } : {}) });
       },
     },
   });
-  return { dispatcher, llmResponses };
+  return { dispatcher, llmResponses, toolResults };
 }
 
 describe("createCodexEventDispatcher", () => {
@@ -117,6 +123,32 @@ describe("createCodexEventDispatcher", () => {
         threadId: "thread-child",
       },
     }]);
+  });
+
+  it("preserves provider content blocks alongside assistant text", async () => {
+    const { dispatcher, llmResponses, toolResults } = createSubject();
+    const imageBlock = /** @type {ToolContentBlock} */ ({
+      type: "image",
+      mime_type: "image/png",
+      encoding: "base64",
+      data: "iVBORw0KGgo=",
+    });
+
+    await dispatcher.handleNormalized({
+      sessionId: "thread-parent",
+      contentBlocks: [imageBlock],
+    });
+    await dispatcher.handleNormalized({
+      sessionId: "thread-parent",
+      assistantText: "Generated a tiny blue square.",
+    });
+
+    assert.deepEqual(toolResults, [[imageBlock]]);
+    assert.deepEqual(llmResponses, [{ text: "Generated a tiny blue square." }]);
+    assert.deepEqual(dispatcher.finalize().result.response, [
+      imageBlock,
+      { type: "markdown", text: "Generated a tiny blue square." },
+    ]);
   });
 
   it("emits standard spawn_agent/wait_agent completed statuses as sub-agent output", async () => {

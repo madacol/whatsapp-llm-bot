@@ -491,6 +491,30 @@ describe("codex events", () => {
     });
   });
 
+  it("normalizes app-server image output as generic content blocks", () => {
+    assert.deepEqual(normalizeCodexAppServerEvent({
+      method: "item/completed",
+      params: {
+        threadId: "thread-1",
+        item: {
+          id: "ig_1",
+          type: "imageGeneration",
+          status: "generating",
+          result: "iVBORw0KGgo=",
+          savedPath: "/home/mada/.codex/generated_images/thread-1/ig_1.png",
+        },
+      },
+    }), {
+      sessionId: "thread-1",
+      contentBlocks: [{
+        type: "image",
+        mime_type: "image/png",
+        encoding: "base64",
+        data: "iVBORw0KGgo=",
+      }],
+    });
+  });
+
   it("strips shell wrappers from command displays", () => {
     assert.deepEqual(normalizeCodexEvent({
       type: "item.started",

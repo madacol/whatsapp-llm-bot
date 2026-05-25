@@ -795,4 +795,47 @@ describe("createConversationRunner with codex harness", () => {
       `Expected interleaved dummy progress and tool output, got: ${responseTexts.join(" | ")}`,
     );
   });
+
+  it("keeps codex media output and text progress in the final chat response", async () => {
+    await seedChat("conv-codex-media-final", { enabled: true });
+    await configureCodexChat("conv-codex-media-final");
+
+    const imageBlock = /** @type {ToolContentBlock} */ ({
+      type: "image",
+      mime_type: "image/png",
+      encoding: "base64",
+      data: "iVBORw0KGgo=",
+    });
+
+    registerCodexHarness(() => createCodexHarness({
+      startRun: async (input) => ({
+        abortController: new AbortController(),
+        done: (async () => {
+          await input.hooks?.onLlmResponse?.("Generated a tiny blue square.");
+          return {
+            sessionId: null,
+            result: {
+              response: [imageBlock],
+              messages: input.messages,
+              usage: { promptTokens: 0, completionTokens: 0, cachedTokens: 0, cost: 0 },
+            },
+          };
+        })(),
+      }),
+    }));
+
+    const turn = createChatTurn({
+      chatId: "conv-codex-media-final",
+      content: [{ type: "text", text: "Make an image" }],
+    });
+    await handleMessage(turn.context);
+
+    assert.deepEqual(
+      turn.responses.filter((response) => response.type === "reply" && response.source === "llm"),
+      [
+        { type: "reply", text: "Generated a tiny blue square.", source: "llm", blockType: "markdown" },
+        { type: "reply", text: "", source: "llm", blockType: "image" },
+      ],
+    );
+  });
 });

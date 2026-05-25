@@ -155,7 +155,7 @@ describe("createConversationRunner prompt formatting", () => {
     assert.deepEqual(phases, ["start:conv-adapter-session-start:model-a", "send"]);
   });
 
-  it("uses semantic adapter turns and presents runtime events outside the harness", async () => {
+  it("uses semantic adapter turns and presents runtime events alongside returned content", async () => {
     await seedChat("conv-semantic-events", { enabled: true });
     await updateChatConfig("conv-semantic-events", (current) => ({
       ...current,
@@ -262,7 +262,10 @@ describe("createConversationRunner prompt formatting", () => {
     await handleMessage(turn.context);
 
     assert.deepEqual(phases, ["start", "semantic-send"]);
-    assert.deepEqual(replies, [[{ type: "markdown", text: "event response" }]]);
+    assert.deepEqual(replies, [
+      [{ type: "markdown", text: "event response" }],
+      [{ type: "text", text: "fallback response" }],
+    ]);
   });
 
   it("routes concurrent scoped provider runtime events only to their originating chat", async () => {

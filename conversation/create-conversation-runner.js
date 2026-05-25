@@ -91,6 +91,50 @@ function getDeliveredContentSignature(content) {
 }
 
 /**
+ * @param {ToolContentBlock[]} first
+ * @param {ToolContentBlock[]} second
+ * @returns {ToolContentBlock[]}
+ */
+function appendUniqueContentBlocks(first, second) {
+  const seen = new Set();
+  /** @type {ToolContentBlock[]} */
+  const merged = [];
+  for (const block of [...first, ...second]) {
+    const signature = getDeliveredContentSignature(block);
+    if (seen.has(signature)) {
+      continue;
+    }
+    seen.add(signature);
+    merged.push(block);
+  }
+  return merged;
+}
+
+/**
+ * @param {Set<string>} signatures
+ * @param {SendContent} content
+ * @returns {void}
+ */
+function addDeliveredContentSignatures(signatures, content) {
+  signatures.add(getDeliveredContentSignature(content));
+  const blocks = Array.isArray(content) ? content
+    : typeof content === "object" && content !== null ? [content]
+      : [];
+  for (const block of blocks) {
+    signatures.add(getDeliveredContentSignature(block));
+  }
+}
+
+/**
+ * @param {ToolContentBlock[]} blocks
+ * @param {Set<string>} deliveredContentSignatures
+ * @returns {ToolContentBlock[]}
+ */
+function filterUndeliveredContentBlocks(blocks, deliveredContentSignatures) {
+  return blocks.filter((block) => !deliveredContentSignatures.has(getDeliveredContentSignature(block)));
+}
+
+/**
  * @param {unknown} value
  * @returns {value is Record<string, unknown>}
  */
@@ -444,17 +488,15 @@ export function createConversationRunner({ store, llmClient, getActionsFn, execu
       } else if (currentResumeCursor && activeSession && ["stopped", "error"].includes(activeSession.status)) {
         await saveHarnessSessionAndBinding(chatId, null);
       }
-      if (runtimeDispatcher.result.response.length === 0) {
-        return result;
-      }
       const runtimeUsage = runtimeDispatcher.result.usage;
       const hasRuntimeUsage = runtimeUsage.promptTokens > 0
         || runtimeUsage.completionTokens > 0
         || runtimeUsage.cachedTokens > 0
         || runtimeUsage.cost > 0;
+      const mergedResponse = appendUniqueContentBlocks(runtimeDispatcher.result.response, result.response);
       return {
         ...result,
-        response: runtimeDispatcher.result.response,
+        response: mergedResponse,
         usage: hasRuntimeUsage ? runtimeUsage : result.usage,
       };
     } finally {
@@ -549,7 +591,7 @@ export function createConversationRunner({ store, llmClient, getActionsFn, execu
       runConfig.workdir ?? null,
       resolveOutputVisibility(chatInfo?.output_visibility),
       (deliveredContent) => {
-        deliveredContentSignatures.add(getDeliveredContentSignature(deliveredContent));
+        addDeliveredContentSignatures(deliveredContentSignatures, deliveredContent);
       },
     );
     runCoordinator.markRunActive(chatId);
@@ -733,7 +775,10 @@ export function createConversationRunner({ store, llmClient, getActionsFn, execu
       if (result.response.length > 0) {
         const responseSignature = getDeliveredContentSignature(result.response);
         if (!deliveredContentSignatures.has(responseSignature)) {
-          await context.reply(contentEvent("llm", result.response));
+          const undeliveredResponse = filterUndeliveredContentBlocks(result.response, deliveredContentSignatures);
+          if (undeliveredResponse.length > 0) {
+            await context.reply(contentEvent("llm", undeliveredResponse));
+          }
         }
       }
     } catch (error) {

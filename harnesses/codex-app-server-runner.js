@@ -10,7 +10,7 @@ import {
   mapCodexAppServerApprovalPolicy,
 } from "./codex-app-server-protocol.js";
 
-/** @type {Pick<Required<AgentIOHooks>, "onComposing" | "onPaused" | "onReasoning" | "onAskUser" | "onToolCall" | "onToolComplete" | "onCommand" | "onFileRead" | "onPlan" | "onFileChange" | "onLlmResponse" | "onToolError" | "onUsage">} */
+/** @type {Pick<Required<AgentIOHooks>, "onComposing" | "onPaused" | "onReasoning" | "onAskUser" | "onToolCall" | "onToolComplete" | "onToolResult" | "onCommand" | "onFileRead" | "onPlan" | "onFileChange" | "onLlmResponse" | "onToolError" | "onUsage">} */
 const DEFAULT_CODEX_RUN_HOOKS = {
   onComposing: async () => {},
   onPaused: async () => {},
@@ -18,6 +18,7 @@ const DEFAULT_CODEX_RUN_HOOKS = {
   onAskUser: async () => "",
   onToolCall: async () => {},
   onToolComplete: async () => {},
+  onToolResult: async () => {},
   onCommand: async () => {},
   onFileRead: async () => {},
   onPlan: async () => {},
@@ -241,7 +242,7 @@ async function recoverCompletedTurn(input) {
  *   sessionId?: string | null,
  *   runConfig?: HarnessRunConfig,
  *   env?: NodeJS.ProcessEnv,
- *   hooks?: Pick<AgentIOHooks, "onComposing" | "onPaused" | "onReasoning" | "onAskUser" | "onToolCall" | "onToolComplete" | "onCommand" | "onFileRead" | "onPlan" | "onFileChange" | "onLlmResponse" | "onToolError" | "onUsage">,
+ *   hooks?: Pick<AgentIOHooks, "onComposing" | "onPaused" | "onReasoning" | "onAskUser" | "onToolCall" | "onToolComplete" | "onToolResult" | "onCommand" | "onFileRead" | "onPlan" | "onFileChange" | "onLlmResponse" | "onToolError" | "onUsage">,
  *   isAborted?: () => boolean,
  * }} input
  * @param {{

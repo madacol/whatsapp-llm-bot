@@ -89,6 +89,7 @@ export {
  *   subagentResponses?: CodexSubagentResponseEvent[],
  *   reasoningEvent?: CodexReasoningEvent,
  *   assistantText?: string,
+ *   contentBlocks?: ToolContentBlock[],
  *   plan?: CodexPlanState,
  *   fileChange?: CodexFileChangeEvent,
  *   fileChanges?: CodexFileChangeEvent[],
