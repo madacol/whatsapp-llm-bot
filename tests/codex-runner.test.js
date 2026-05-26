@@ -697,7 +697,9 @@ describe("startCodexRun", () => {
       name: "spawn_agent",
       arguments: JSON.stringify({ message: "hello" }),
     }]);
-    assert.equal(recorded.updates.length, 0);
+    assert.equal(recorded.updates.length, 1);
+    assert.equal(recorded.updates[0]?.kind, "tool_call");
+    assert.equal(recorded.updates[0]?.presentation.summary, "*Start Agent*  _hello_");
     assert.equal(recorded.inspects.length, 2);
     assert.equal(recorded.inspects[0]?.kind, "tool");
     assert.equal(recorded.inspects[0]?.presentation.summary, "*Start Agent*  _hello_");
@@ -770,7 +772,9 @@ describe("startCodexRun", () => {
     });
 
     await started.done;
-    assert.equal(recorded.updates.length, 0);
+    assert.equal(recorded.updates.length, 1);
+    assert.equal(recorded.updates[0]?.kind, "tool_call");
+    assert.equal(recorded.updates[0]?.presentation.summary, "*Plan*  _All 1 step completed_");
     assert.equal(recorded.inspects.length, 2);
     assert.equal(recorded.inspects[0]?.kind, "tool");
     assert.equal(recorded.inspects[0]?.presentation.summary, "*Plan*  _All 1 step completed_");
@@ -930,7 +934,9 @@ describe("startCodexRun", () => {
     });
 
     await started.done;
-    assert.equal(recorded.updates.length, 0);
+    assert.equal(recorded.updates.length, 1);
+    assert.equal(recorded.updates[0]?.kind, "tool_call");
+    assert.equal(recorded.updates[0]?.presentation.summary, "*Quote*  `AMD`");
     assert.equal(recorded.inspects.length, 2);
     assert.equal(recorded.inspects[0]?.kind, "tool");
     assert.equal(recorded.inspects[0]?.presentation.summary, "*Quote*  `AMD`");

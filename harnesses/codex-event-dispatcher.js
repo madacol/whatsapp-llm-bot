@@ -449,9 +449,16 @@ export function createCodexEventDispatcher(input) {
             activeTool = { handle, presentation: currentPresentation };
           }
         }
-        if (activeTool?.handle && activeTool.presentation.summary !== currentPresentation.summary) {
+        if (
+          activeTool?.handle
+          && (
+            activeTool.presentation.summary !== currentPresentation.summary
+            || toolEvent.status === "completed"
+          )
+        ) {
+          const handle = activeTool.handle;
           try {
-            await activeTool.handle.update(toolCallUpdate(currentPresentation));
+            await handle.update(toolCallUpdate(currentPresentation));
           } catch {
             // best-effort
           }
