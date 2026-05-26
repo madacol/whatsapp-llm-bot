@@ -46,57 +46,63 @@ describe("ACP harness", () => {
     }
   });
 
-  it("forks Codex sessions through the ACP session/fork RFD", async () => {
-    const harness = createAcpHarness({
-      name: "codex",
-      config: {
-        command: process.execPath,
-        args: [path.join(__dirname, "fixtures", "acp-mock-agent.js")],
-      },
-    });
-    /** @type {HarnessSessionRef | null} */
-    let saved = null;
-    /** @type {HarnessForkStackEntry[]} */
-    const pushed = [];
-    /** @type {string[]} */
-    const replies = [];
+  it("forks provider sessions through the ACP session/fork RFD", async () => {
+    for (const [name, kind, label] of [
+      ["codex", "codex", "Codex"],
+      ["claude-agent-sdk", "claude-sdk", "Claude"],
+      ["pi", "pi", "Pi"],
+    ]) {
+      const harness = createAcpHarness({
+        name,
+        config: {
+          command: process.execPath,
+          args: [path.join(__dirname, "fixtures", "acp-mock-agent.js")],
+        },
+      });
+      /** @type {HarnessSessionRef | null} */
+      let saved = null;
+      /** @type {HarnessForkStackEntry[]} */
+      const pushed = [];
+      /** @type {string[]} */
+      const replies = [];
 
-    const handled = await harness.handleCommand({
-      chatId: "chat-1",
-      command: "fork",
-      chatInfo: {
-        chat_id: "chat-1",
-        harness_session_kind: "codex",
-        harness_session_id: "mock-session-1",
-      },
-      context: /** @type {ExecuteActionContext} */ ({
-        chatId: "chat-1",
-        senderIds: [],
-        content: [],
-        getIsAdmin: async () => true,
-        send: async () => undefined,
-        reply: async (event) => {
-          replies.push(event.kind === "content" && typeof event.content === "string" ? event.content : JSON.stringify(event));
+      const handled = await harness.handleCommand({
+        chatId: `${name}-chat`,
+        command: "fork",
+        chatInfo: {
+          chat_id: `${name}-chat`,
+          harness_session_kind: kind,
+          harness_session_id: "mock-session-1",
         },
-        reactToMessage: async () => {},
-        select: async () => "",
-        confirm: async () => true,
-      }),
-      sessionForkControl: {
-        getHistory: async () => [],
-        save: async (_chatId, session) => {
-          saved = session;
+        context: /** @type {ExecuteActionContext} */ ({
+          chatId: `${name}-chat`,
+          senderIds: [],
+          content: [],
+          getIsAdmin: async () => true,
+          send: async () => undefined,
+          reply: async (event) => {
+            replies.push(event.kind === "content" && typeof event.content === "string" ? event.content : JSON.stringify(event));
+          },
+          reactToMessage: async () => {},
+          select: async () => "",
+          confirm: async () => true,
+        }),
+        sessionForkControl: {
+          getHistory: async () => [],
+          save: async (_chatId, session) => {
+            saved = session;
+          },
+          push: async (_chatId, entry) => {
+            pushed.push(entry);
+          },
+          pop: async () => null,
         },
-        push: async (_chatId, entry) => {
-          pushed.push(entry);
-        },
-        pop: async () => null,
-      },
-    });
+      });
 
-    assert.equal(handled, true);
-    assert.deepEqual(saved, { id: "mock-session-fork", kind: "codex" });
-    assert.deepEqual(pushed, [{ id: "mock-session-1", kind: "codex", label: "ACP session" }]);
-    assert.match(replies[0] ?? "", /Forked: ACP session/);
+      assert.equal(handled, true);
+      assert.deepEqual(saved, { id: "mock-session-fork", kind });
+      assert.deepEqual(pushed, [{ id: "mock-session-1", kind, label: `${label} ACP session` }]);
+      assert.match(replies[0] ?? "", new RegExp(`Forked ${label} ACP session`));
+    }
   });
 });

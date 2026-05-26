@@ -272,7 +272,7 @@ describe("LLM pipeline via createMessageHandler", () => {
     await handleMessage(context);
 
     assert.ok(
-      responses.some(r => r.text.includes("SDK model reset to default.")),
+      responses.some(r => r.text.includes("Claude model reset to default.")),
       "Expected slash command to be delegated to the active harness",
     );
   });

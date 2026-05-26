@@ -94,7 +94,14 @@ for await (const line of rl) {
       update: {
         sessionUpdate: "agent_message_chunk",
         content: { type: "text", text: "Subagent result." },
-        _meta: { claudeCode: { parentToolUseId: "toolu-task-1" } },
+        _meta: {
+          madabot: {
+            subagent: {
+              threadId: "toolu-task-1",
+              agentNickname: "Reviewer",
+            },
+          },
+        },
       },
     });
     notify("session/update", {

@@ -61,12 +61,26 @@ function normalizeToolStatus(value) {
 
 /**
  * @param {Record<string, unknown>} update
- * @returns {string | null}
+ * @returns {LlmResponseMetadata | null}
  */
-function extractClaudeParentToolUseId(update) {
+function extractMadabotSubagentMetadata(update) {
   const meta = isRecord(update._meta) ? update._meta : null;
-  const claudeCode = isRecord(meta?.claudeCode) ? meta.claudeCode : null;
-  return stringOrNull(claudeCode?.parentToolUseId);
+  const madabot = isRecord(meta?.madabot) ? meta.madabot : null;
+  const subagent = isRecord(madabot?.subagent) ? madabot.subagent : null;
+  if (!subagent) {
+    return null;
+  }
+  const threadId = stringOrNull(subagent.threadId);
+  const parentThreadId = stringOrNull(subagent.parentThreadId);
+  const agentNickname = stringOrNull(subagent.agentNickname);
+  const agentRole = stringOrNull(subagent.agentRole);
+  return {
+    source: "subagent",
+    ...(threadId ? { threadId } : {}),
+    ...(parentThreadId ? { parentThreadId } : {}),
+    ...(agentNickname ? { agentNickname } : {}),
+    ...(agentRole ? { agentRole } : {}),
+  };
 }
 
 /**
@@ -214,16 +228,13 @@ export function normalizeAcpSessionUpdate(raw) {
     if (!text) {
       return [];
     }
-    const parentToolUseId = extractClaudeParentToolUseId(update);
-    if (parentToolUseId) {
+    const subagentMetadata = extractMadabotSubagentMetadata(update);
+    if (subagentMetadata) {
       return [{
         type: "subagent.completed",
         provider: "acp",
         text,
-        metadata: {
-          source: "subagent",
-          threadId: parentToolUseId,
-        },
+        metadata: subagentMetadata,
         raw,
       }];
     }

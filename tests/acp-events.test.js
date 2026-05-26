@@ -101,17 +101,13 @@ describe("ACP event normalization", () => {
     }]);
   });
 
-  it("normalizes Claude ACP subagent messages and ACP diff content", () => {
+  it("normalizes Madabot ACP subagent messages and ACP diff content", () => {
     assert.deepEqual(normalizeAcpSessionUpdate({
       sessionId: "s1",
       update: {
         sessionUpdate: "agent_message_chunk",
         content: { type: "text", text: "The migration has a rollback bug." },
-        _meta: {
-          claudeCode: {
-            parentToolUseId: "toolu-task-1",
-          },
-        },
+        _meta: { madabot: { subagent: { threadId: "toolu-task-1", agentNickname: "Reviewer" } } },
       },
     }), [{
       type: "subagent.completed",
@@ -120,17 +116,14 @@ describe("ACP event normalization", () => {
       metadata: {
         source: "subagent",
         threadId: "toolu-task-1",
+        agentNickname: "Reviewer",
       },
       raw: {
         sessionId: "s1",
         update: {
           sessionUpdate: "agent_message_chunk",
           content: { type: "text", text: "The migration has a rollback bug." },
-          _meta: {
-            claudeCode: {
-              parentToolUseId: "toolu-task-1",
-            },
-          },
+          _meta: { madabot: { subagent: { threadId: "toolu-task-1", agentNickname: "Reviewer" } } },
         },
       },
     }]);

@@ -101,6 +101,20 @@ function buildCapabilityErrorDetails(capabilities) {
 }
 
 /**
+ * @param {Record<string, unknown>} capabilities
+ * @returns {void}
+ */
+function assertRequiredAcpCapabilities(capabilities) {
+  const missing = [];
+  if (!hasSessionCapability(capabilities, "resume")) missing.push("session.resume");
+  if (!hasSessionCapability(capabilities, "fork")) missing.push("session.fork");
+  if (!hasSessionCapability(capabilities, "steer")) missing.push("session.steer");
+  if (missing.length > 0) {
+    throw new Error(`ACP agent is missing required Madabot capabilities: ${missing.join(", ")}. Details: ${JSON.stringify(buildCapabilityErrorDetails(capabilities))}`);
+  }
+}
+
+/**
  * @param {string} prompt
  * @returns {Array<{ type: "text", text: string }>}
  */
@@ -224,10 +238,8 @@ async function openInitializedAcpConnection(input) {
  */
 export async function forkAcpSession(input) {
   const { connection, capabilities } = await openInitializedAcpConnection(input);
+  assertRequiredAcpCapabilities(capabilities);
   try {
-    if (!hasSessionCapability(capabilities, "fork")) {
-      throw new Error(`ACP agent does not advertise required session fork capability: ${JSON.stringify(buildCapabilityErrorDetails(capabilities))}`);
-    }
     const forked = await connection.sendRequest("session/fork", {
       sessionId: input.sessionId,
       ...buildSessionParams(input.runConfig),
@@ -254,6 +266,7 @@ export async function startAcpRun(input) {
     workdir: input.runConfig?.workdir ?? null,
   });
   const { connection, capabilities } = await openInitializedAcpConnection(input);
+  assertRequiredAcpCapabilities(capabilities);
   let sessionId = input.sessionId ?? null;
   let promptCompleted = false;
   /** @type {void | (() => void)} */
