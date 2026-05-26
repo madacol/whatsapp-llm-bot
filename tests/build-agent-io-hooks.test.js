@@ -140,7 +140,7 @@ function createReasoningSubject(visibility = { ...DEFAULT_OUTPUT_VISIBILITY, thi
       reply: async (event) => {
         sent.push({ event, kind: "reply" });
         return {
-          keyId: "reasoning-msg-1",
+          transportHandleId: "reasoning-msg-1",
           update: async (update) => {
             reasoningUpdates.push(structuredClone(update));
           },
@@ -351,7 +351,7 @@ describe("buildAgentIoHooks", () => {
         send: async (event) => {
           sent.push({ event, kind: "send" });
           return {
-            keyId: "compact-tools-1",
+            transportHandleId: "compact-tools-1",
             update: async (update) => { updates.push(update); },
             setInspect: () => {},
           };
@@ -394,7 +394,7 @@ describe("buildAgentIoHooks", () => {
     const hooks = buildAgentIoHooks(
       {
         send: async () => ({
-          keyId: "compact-read-output",
+          transportHandleId: "compact-read-output",
           update: async () => {},
           setInspect: (inspect) => { if (inspect) inspects.push(inspect); },
         }),
@@ -451,7 +451,7 @@ describe("buildAgentIoHooks", () => {
     const hooks = buildAgentIoHooks(
       {
         send: async () => ({
-          keyId: "compact-tools-complete",
+          transportHandleId: "compact-tools-complete",
           update: async (update) => { updates.push(update); },
           setInspect: () => {},
         }),
@@ -512,7 +512,7 @@ describe("buildAgentIoHooks", () => {
     const hooks = buildAgentIoHooks(
       {
         send: async () => ({
-          keyId: "compact-tools-2",
+          transportHandleId: "compact-tools-2",
           update: async (update) => { updates.push(update); },
           setInspect: () => {},
         }),
@@ -550,7 +550,7 @@ describe("buildAgentIoHooks", () => {
         send: async (event) => {
           sent.push({ event, kind: "send" });
           return {
-            keyId: "compact-tools-failed-command",
+            transportHandleId: "compact-tools-failed-command",
             update: async (update) => { updates.push(structuredClone(update)); },
             setInspect: () => {},
           };
@@ -589,7 +589,7 @@ describe("buildAgentIoHooks", () => {
           const updates = [];
           handleUpdates.push(updates);
           return {
-            keyId: `compact-tools-${handleUpdates.length}`,
+            transportHandleId: `compact-tools-${handleUpdates.length}`,
             update: async (update) => { updates.push(structuredClone(update)); },
             setInspect: () => {},
           };
@@ -641,7 +641,7 @@ describe("buildAgentIoHooks", () => {
           const updates = [];
           handleUpdates.push(updates);
           return {
-            keyId: `compact-tools-${handleUpdates.length}`,
+            transportHandleId: `compact-tools-${handleUpdates.length}`,
             update: async (update) => { updates.push(structuredClone(update)); },
             setInspect: () => {},
           };
@@ -729,7 +729,7 @@ describe("buildAgentIoHooks", () => {
         send: async (event) => {
           sent.push({ event, kind: "send" });
           return {
-            keyId: "visible-command-failure",
+            transportHandleId: "visible-command-failure",
             update: async (update) => { updates.push(structuredClone(update)); },
             setInspect: (inspect) => {
               if (inspect) {
@@ -835,7 +835,7 @@ describe("buildAgentIoHooks", () => {
             updates: [],
           };
           const handle = /** @type {MessageHandle} */ ({
-            keyId: `handle-${handles.length + 1}`,
+            transportHandleId: `handle-${handles.length + 1}`,
             update: async (update) => { entry.updates.push(update); },
             setInspect: (inspect) => { if (inspect) entry.inspects.push(inspect); },
           });
@@ -884,7 +884,7 @@ describe("buildAgentIoHooks", () => {
             inspects: [],
           };
           const handle = /** @type {MessageHandle} */ ({
-            keyId: `handle-${handles.length + 1}`,
+            transportHandleId: `handle-${handles.length + 1}`,
             update: async () => {},
             setInspect: (inspect) => { if (inspect) entry.inspects.push(inspect); },
           });
@@ -932,7 +932,7 @@ describe("buildAgentIoHooks", () => {
             inspects: [],
           };
           const handle = /** @type {MessageHandle} */ ({
-            keyId: `handle-${handles.length + 1}`,
+            transportHandleId: `handle-${handles.length + 1}`,
             update: async () => {},
             setInspect: (inspect) => { if (inspect) entry.inspects.push(inspect); },
           });

@@ -1,4 +1,5 @@
 import {
+  normalizeWhatsAppEditHandleRow,
   normalizeWhatsAppOutboundQueueRow,
   normalizeWhatsAppWorkspacePresentationRow,
 } from "../normalizers.js";
@@ -33,6 +34,16 @@ import {
  *   }) => Promise<import("../../store.js").WhatsAppOutboundQueueRow>;
  *   listWhatsAppOutboundQueueEntries: () => Promise<import("../../store.js").WhatsAppOutboundQueueRow[]>;
  *   deleteWhatsAppOutboundQueueEntry: (chatId: string, id: number) => Promise<void>;
+ *   saveWhatsAppEditHandle: (input: {
+ *     id: string,
+ *     chatId: string,
+ *     messageKeyJson: unknown,
+ *     messageKind: "text" | "image",
+ *     createdAt: string,
+ *     expiresAt: string,
+ *   }) => Promise<import("../../store.js").WhatsAppEditHandleRow>;
+ *   getWhatsAppEditHandle: (id: string) => Promise<import("../../store.js").WhatsAppEditHandleRow | null>;
+ *   deleteExpiredWhatsAppEditHandles: (now: string) => Promise<void>;
  * }}
  */
 export function createWhatsAppStoreInternals({ db, getChatDb, listChatIds, ensureChatExists }) {
@@ -169,6 +180,74 @@ export function createWhatsAppStoreInternals({ db, getChatDb, listChatIds, ensur
       const chatDb = await getChatDb(chatId);
       await chatDb.sql`DELETE FROM whatsapp_outbound_queue WHERE id = ${id}`;
     },
+
+    /**
+     * @param {{
+     *   id: string,
+     *   chatId: string,
+     *   messageKeyJson: unknown,
+     *   messageKind: "text" | "image",
+     *   createdAt: string,
+     *   expiresAt: string,
+     * }} input
+     * @returns {Promise<import("../../store.js").WhatsAppEditHandleRow>}
+     */
+    async saveWhatsAppEditHandle({ id, chatId, messageKeyJson, messageKind, createdAt, expiresAt }) {
+      await ensureChatExists(chatId);
+      const { rows: [row] } = await db.sql`
+        INSERT INTO whatsapp_edit_handles (
+          id,
+          chat_id,
+          message_key_json,
+          message_kind,
+          created_at,
+          expires_at
+        )
+        VALUES (
+          ${id},
+          ${chatId},
+          ${messageKeyJson},
+          ${messageKind},
+          ${createdAt},
+          ${expiresAt}
+        )
+        ON CONFLICT (id) DO UPDATE
+        SET
+          chat_id = EXCLUDED.chat_id,
+          message_key_json = EXCLUDED.message_key_json,
+          message_kind = EXCLUDED.message_kind,
+          created_at = EXCLUDED.created_at,
+          expires_at = EXCLUDED.expires_at
+        RETURNING *
+      `;
+      const handle = normalizeWhatsAppEditHandleRow(row);
+      if (!handle) {
+        throw new Error(`Failed to normalize WhatsApp edit handle ${id}.`);
+      }
+      return handle;
+    },
+
+    /**
+     * @param {string} id
+     * @returns {Promise<import("../../store.js").WhatsAppEditHandleRow | null>}
+     */
+    async getWhatsAppEditHandle(id) {
+      const { rows: [row] } = await db.sql`
+        SELECT *
+        FROM whatsapp_edit_handles
+        WHERE id = ${id}
+        LIMIT 1
+      `;
+      return normalizeWhatsAppEditHandleRow(row);
+    },
+
+    /**
+     * @param {string} now
+     * @returns {Promise<void>}
+     */
+    async deleteExpiredWhatsAppEditHandles(now) {
+      await db.sql`DELETE FROM whatsapp_edit_handles WHERE expires_at <= ${now}`;
+    },
   };
 }
 
@@ -184,6 +263,9 @@ export function createWhatsAppStoreInternals({ db, getChatDb, listChatIds, ensur
  *   | "enqueueWhatsAppOutboundQueueEntry"
  *   | "listWhatsAppOutboundQueueEntries"
  *   | "deleteWhatsAppOutboundQueueEntry"
+ *   | "saveWhatsAppEditHandle"
+ *   | "getWhatsAppEditHandle"
+ *   | "deleteExpiredWhatsAppEditHandles"
  * >}
  */
 export function createWhatsAppStore(internals, db) {
@@ -269,6 +351,37 @@ export function createWhatsAppStore(internals, db) {
      */
     async deleteWhatsAppOutboundQueueEntry(chatId, id) {
       await internals.deleteWhatsAppOutboundQueueEntry(chatId, id);
+    },
+
+    /**
+     * @param {{
+     *   id: string,
+     *   chatId: string,
+     *   messageKeyJson: unknown,
+     *   messageKind: "text" | "image",
+     *   createdAt: string,
+     *   expiresAt: string,
+     * }} input
+     * @returns {Promise<import("../../store.js").WhatsAppEditHandleRow>}
+     */
+    async saveWhatsAppEditHandle(input) {
+      return internals.saveWhatsAppEditHandle(input);
+    },
+
+    /**
+     * @param {string} id
+     * @returns {Promise<import("../../store.js").WhatsAppEditHandleRow | null>}
+     */
+    async getWhatsAppEditHandle(id) {
+      return internals.getWhatsAppEditHandle(id);
+    },
+
+    /**
+     * @param {string} now
+     * @returns {Promise<void>}
+     */
+    async deleteExpiredWhatsAppEditHandles(now) {
+      await internals.deleteExpiredWhatsAppEditHandles(now);
     },
   };
 }

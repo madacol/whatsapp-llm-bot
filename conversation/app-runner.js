@@ -369,7 +369,7 @@ async function processLlmResponse({ session, llmConfig, messages, mediaRegistry,
     for (const toolCall of response.toolCalls) {
       const stub = createToolMessage(toolCall.id, `[executing ${toolCall.name}...]`);
       const state = toolCallState.get(toolCall.id);
-      await addMessage(chatId, stub, senderIds, state?.handle?.keyId);
+      await addMessage(chatId, stub, senderIds, state?.handle?.transportHandleId);
       messages.push(stub);
     }
 

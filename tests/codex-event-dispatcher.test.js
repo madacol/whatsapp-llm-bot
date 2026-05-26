@@ -176,7 +176,7 @@ describe("createCodexEventDispatcher", () => {
         onToolCall: async (toolCall) => {
           toolCalls.push(toolCall);
           return {
-            keyId: "image-gen-tool-message",
+            transportHandleId: "image-gen-tool-message",
             update: async (update) => {
               updates.push(update);
             },
@@ -294,7 +294,7 @@ describe("createCodexEventDispatcher", () => {
         onToolCall: async (toolCall) => {
           toolCalls.push(toolCall);
           return {
-            keyId: "tool-message",
+            transportHandleId: "tool-message",
             update: async () => {},
             setInspect: (inspect) => {
               if (inspect) {

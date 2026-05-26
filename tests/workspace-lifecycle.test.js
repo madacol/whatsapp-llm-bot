@@ -92,7 +92,7 @@ function createFakeTransport() {
       sendEvent: async (chatId, event) => {
         sentEvents.push({ chatId, event });
         return {
-          keyId: `event-${sentEvents.length}`,
+          transportHandleId: `event-${sentEvents.length}`,
           update: async () => {},
           setInspect: () => {},
         };

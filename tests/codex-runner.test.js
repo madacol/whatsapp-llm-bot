@@ -7,14 +7,14 @@ import { buildCodexThreadOptions, buildCodexTurnInput, startCodexRun } from "../
 import { formatToolFlowSummary } from "../tool-flow-presentation.js";
 
 /**
- * @param {string} keyId
+ * @param {string} transportHandleId
  * @returns {{
  *   handle: MessageHandle,
  *   updates: MessageHandleUpdate[],
  *   inspects: Array<MessageInspectState | null>,
  * }}
  */
-function createRecordedHandle(keyId) {
+function createRecordedHandle(transportHandleId) {
   /** @type {MessageHandleUpdate[]} */
   const updates = [];
   /** @type {Array<MessageInspectState | null>} */
@@ -24,7 +24,7 @@ function createRecordedHandle(keyId) {
     updates,
     inspects,
     handle: {
-      keyId,
+      transportHandleId,
       update: async (update) => {
         updates.push(structuredClone(update));
       },

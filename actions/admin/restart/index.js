@@ -141,13 +141,12 @@ export function createRestartAction(
           ...(interruptedTurns.length > 0 ? { interruptedTurns } : {}),
         });
         const sentHandle = await handle?.waitUntilSent?.({ timeoutMs: RESTART_ACK_TIMEOUT_MS });
-        if (sentHandle?.keyId) {
+        if (sentHandle?.transportHandleId) {
           await restartAckStore.save({
             chatId: context.chatId,
             requestedAt: new Date().toISOString(),
             oldPid: process.pid,
-            ...(sentHandle.editToken !== undefined ? { editToken: sentHandle.editToken } : {}),
-            keyId: sentHandle.keyId,
+            ...(sentHandle.transportHandleId ? { transportHandleId: sentHandle.transportHandleId } : {}),
             ...(handle?.queueId ? { queueId: handle.queueId } : {}),
             ...(interruptedTurns.length > 0 ? { interruptedTurns } : {}),
           });

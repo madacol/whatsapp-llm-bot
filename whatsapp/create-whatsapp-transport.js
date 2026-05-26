@@ -12,7 +12,7 @@ import {
   sendOrQueueWhatsAppEvent,
   sendOrQueueWhatsAppText,
 } from "./outbound/persistent-queue.js";
-import { editWhatsAppMessage } from "./outbound/send-content.js";
+import { editWhatsAppMessageByHandle } from "./outbound/send-content.js";
 
 const log = createLogger("whatsapp");
 const WHATSAPP_UPSERT_DIAGNOSTIC_ENABLE_PATH = ".diagnostics/whatsapp-upsert-shape.enabled";
@@ -631,7 +631,7 @@ function serializeTransportError(error) {
  *   stop: () => Promise<void>;
  *   sendText: (chatId: string, text: string) => Promise<void>;
  *   sendEvent?: (chatId: string, event: OutboundEvent) => Promise<MessageHandle | undefined>;
- *   editMessage?: (input: { chatId: string, text: string, keyId?: string, editToken?: unknown }) => Promise<void>;
+ *   editMessage?: (input: { transportHandleId: string, text: string }) => Promise<void>;
  *   createGroup: (subject: string, participants: string[]) => Promise<{ chatId: string, subject: string }>;
  *   createCommunity?: (subject: string, description: string) => Promise<{ chatId: string, subject: string }>;
  *   createCommunityGroup?: (
@@ -653,7 +653,7 @@ function serializeTransportError(error) {
  *   outboundStore?: import("../store.js").Store,
  *   inboundCoalesceDelayMs?: number,
  *   onConnectionOpen?: (transport: {
- *     editMessage: (input: { chatId: string, text: string, keyId?: string, editToken?: unknown }) => Promise<void>,
+ *     editMessage: (input: { transportHandleId: string, text: string }) => Promise<void>,
  *     sendText: (chatId: string, text: string) => Promise<void>,
  *     recoverQueuedMessage: (input: { chatId: string, queueId: number }) => MessageHandle | undefined,
  *   }) => Promise<void>,
@@ -737,17 +737,16 @@ export async function createWhatsAppTransport(options = {}) {
 
   /**
    * Edit a previously sent outbound message once the connection is open.
-   * @param {{ chatId: string, text: string, keyId?: string, editToken?: unknown }} input
+   * @param {{ transportHandleId: string, text: string }} input
    * @returns {Promise<void>}
    */
-  async function editMessage({ chatId, keyId, text, editToken }) {
+  async function editMessage({ transportHandleId, text }) {
     const sock = getOpenSocket();
     if (!sock) {
       throw new Error("WhatsApp socket is not connected");
     }
-    await editWhatsAppMessage(sock, chatId, text, {
-      token: editToken,
-      fallbackKeyId: keyId,
+    await editWhatsAppMessageByHandle(sock, transportHandleId, text, {
+      ...(outboundStore ? { store: outboundStore } : {}),
     });
   }
 

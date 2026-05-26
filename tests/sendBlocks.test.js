@@ -19,6 +19,8 @@ let sendBlocks;
 let sendEvent;
 /** @type {typeof import("../whatsapp/outbound/send-content.js").editWhatsAppMessage} */
 let editWhatsAppMessage;
+/** @type {typeof import("../whatsapp/outbound/send-content.js").editWhatsAppMessageByHandle} */
+let editWhatsAppMessageByHandle;
 /** @type {typeof import("../whatsapp/outbound/send-content.js").renderFileChangeContent} */
 let renderFileChangeContent;
 
@@ -29,6 +31,7 @@ before(async () => {
   sendBlocks = outbound.sendBlocks;
   sendEvent = outbound.sendEvent;
   editWhatsAppMessage = outbound.editWhatsAppMessage;
+  editWhatsAppMessageByHandle = outbound.editWhatsAppMessageByHandle;
   renderFileChangeContent = outbound.renderFileChangeContent;
 });
 
@@ -696,7 +699,7 @@ describe("sendBlocks – file attachments", () => {
 });
 
 describe("sendBlocks – MessageHandle tracking", () => {
-  it("returns handle for text blocks with correct keyId and an edit token", async () => {
+  it("returns handle for text blocks with a transport handle id", async () => {
     const { sock } = createMockSock();
 
     const handle = await sendBlocks(sock, "test-chat", "llm", [
@@ -707,11 +710,10 @@ describe("sendBlocks – MessageHandle tracking", () => {
     assert.equal(typeof handle, "object", "Handle should be an object");
     assert.equal(typeof handle.update, "function", "Handle should have update method");
     assert.equal(typeof handle.setInspect, "function", "Handle should have setInspect method");
-    assert.equal(handle.keyId, "msg-1");
-    assert.ok(handle.editToken, "Handle should carry an opaque edit token");
+    assert.equal(typeof handle.transportHandleId, "string");
   });
 
-  it("returns handle for code image blocks with an edit token", async () => {
+  it("returns handle for code image blocks with a transport handle id", async () => {
     const { sock } = createMockSock();
 
     // 6-line JS code will trigger image rendering
@@ -721,7 +723,7 @@ describe("sendBlocks – MessageHandle tracking", () => {
     ]);
 
     assert.ok(handle, "Should return a handle for code images");
-    assert.ok(handle.editToken, "Image handle should carry an opaque edit token");
+    assert.equal(typeof handle.transportHandleId, "string");
   });
 
   it("tracks the last editable message when multiple blocks are sent", async () => {
@@ -733,8 +735,7 @@ describe("sendBlocks – MessageHandle tracking", () => {
     ]);
 
     assert.ok(handle, "Should return a handle");
-    // msg-2 because the second text message is the last editable one
-    assert.equal(handle.keyId, "msg-2");
+    assert.equal(typeof handle.transportHandleId, "string");
   });
 
   it("returns undefined when no editable messages are sent", async () => {
@@ -825,7 +826,7 @@ describe("sendBlocks – tool-call → edit pipeline", () => {
     ]);
 
     assert.ok(handle, "Should return a handle");
-    assert.ok(handle.editToken, "Text message handle should have an edit token");
+    assert.equal(typeof handle.transportHandleId, "string");
     assert.equal(calls.length, 1, "Should have sent 1 message");
 
     // Step 2: Simulate progress update (tool still running)
@@ -860,7 +861,7 @@ describe("sendBlocks – tool-call → edit pipeline", () => {
     ]);
 
     assert.ok(handle, "Should return a handle for code image");
-    assert.ok(handle.editToken, "Code image handle should have an edit token");
+    assert.equal(typeof handle.transportHandleId, "string");
 
     const initialCallCount = calls.length;
 
@@ -1067,11 +1068,8 @@ describe("sendBlocks – tool-call → edit pipeline", () => {
     const key = { id: "msg-xyz", remoteJid: "chat-1" };
 
     await editWhatsAppMessage(sock, "chat-1", "new caption", {
-      token: {
-        transport: "whatsapp",
-        messageKind: "image",
-        key,
-      },
+      messageKey: key,
+      messageKind: "image",
     });
 
     assert.equal(calls.length, 1);
@@ -1086,5 +1084,28 @@ describe("sendBlocks – tool-call → edit pipeline", () => {
     // Check additionalAttributes
     const opts = /** @type {{ additionalAttributes: Record<string, string> }} */ (calls[0].args[2]);
     assert.equal(opts.additionalAttributes.edit, "1", "Should have edit='1' attribute");
+  });
+
+  it("editWhatsAppMessageByHandle sends a new message when the WhatsApp edit handle is expired", async () => {
+    const { sock, calls } = createCaptureSock();
+    const now = new Date("2026-05-26T12:15:00.000Z");
+
+    await editWhatsAppMessageByHandle(sock, "expired-handle", "Restarted.", {
+      now,
+      store: /** @type {import("../store.js").Store} */ ({
+        getWhatsAppEditHandle: async () => ({
+          id: "expired-handle",
+          chat_id: "chat-1",
+          message_key_json: { id: "msg-old", remoteJid: "chat-1" },
+          message_kind: "text",
+          created_at: "2026-05-26T12:00:00.000Z",
+          expires_at: "2026-05-26T12:14:00.000Z",
+        }),
+      }),
+    });
+
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].method, "sendMessage");
+    assert.deepEqual(calls[0].args.slice(0, 2), ["chat-1", { text: "Restarted." }]);
   });
 });

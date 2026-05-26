@@ -1,6 +1,9 @@
 import { before, describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { setTimeout as delay } from "node:timers/promises";
+import { mkdtemp, rm } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import {
   createWhatsAppTransport,
   executeCommunityCreate,
@@ -11,6 +14,9 @@ import { setDb } from "../db.js";
 import { initStore } from "../store.js";
 import { createTestDb, createWAMessage } from "./helpers.js";
 import { contentEvent, textUpdate } from "../outbound-events.js";
+import { createRestartAction } from "../actions/admin/restart/index.js";
+import { createRestartAckStore } from "../actions/admin/restart/_restart-ack-store.js";
+import { deliverPendingRestartAck } from "../actions/admin/restart/_restart-ack-delivery.js";
 
 /** @type {import("@electric-sql/pglite").PGlite | null} */
 let testDb = null;
@@ -165,7 +171,7 @@ describe("WhatsApp transport community creation", () => {
     }]);
     const sentHandle = await queuedHandle?.waitUntilSent?.({ timeoutMs: 10 });
     assert.equal(sentHandle?.deliveryStatus, "sent");
-    assert.equal(sentHandle?.keyId, "sent-1");
+    assert.equal(typeof sentHandle?.transportHandleId, "string");
     assert.equal((await getQueuedRows(testDb, chatId)).length, 0);
   });
 
@@ -357,10 +363,9 @@ describe("WhatsApp transport community creation", () => {
           throw new Error("Expected queued handle id before connection open");
         }
         const recoveredHandle = recoverQueuedMessage({ chatId, queueId: queuedAckId });
-        assert.equal(recoveredHandle?.keyId, "sent-1");
+        assert.equal(typeof recoveredHandle?.transportHandleId, "string");
         await editMessage({
-          chatId,
-          keyId: "restart-ack-key",
+          transportHandleId: recoveredHandle.transportHandleId,
           text: "Restarted.",
         });
       },
@@ -394,10 +399,146 @@ describe("WhatsApp transport community creation", () => {
         chatId,
         message: {
           text: "Restarted.",
-          edit: { remoteJid: chatId, fromMe: true, id: "restart-ack-key" },
+          edit: { id: "sent-1", remoteJid: chatId },
         },
       },
     ]);
+  });
+
+  it("edits the restart acknowledgement through a transport-owned durable handle", async () => {
+    if (!testDb || !testStore) {
+      throw new Error("Expected test DB and store to be initialized");
+    }
+
+    const dir = await mkdtemp(path.join(os.tmpdir(), "restart-transport-"));
+    const restartAckStore = createRestartAckStore(path.join(dir, "ack.json"));
+    const chatId = `restart-e2e-${Date.now()}`;
+    /** @type {((events: Partial<import("@whiskeysockets/baileys").BaileysEventMap>) => Promise<void>) | null} */
+    let processEvents = null;
+    /** @type {Array<{ chatId: string, message: Record<string, unknown> }>} */
+    const sentMessages = [];
+
+    const socket = /** @type {import("@whiskeysockets/baileys").WASocket} */ (/** @type {unknown} */ ({
+      ev: {
+        process(handler) {
+          processEvents = handler;
+        },
+      },
+      sendMessage: async (targetChatId, message) => {
+        sentMessages.push({ chatId: targetChatId, message });
+        return { key: { id: `sent-${sentMessages.length}`, remoteJid: targetChatId } };
+      },
+    }));
+
+    try {
+      const firstTransport = await createWhatsAppTransport({
+        createConnectionSupervisor: async ({ onSocketReady }) => ({
+          start: async () => {
+            onSocketReady(socket, async () => {});
+          },
+          stop: async () => {},
+          sendText: async () => {},
+          handleConnectionUpdate: async () => {},
+          isStopped: () => false,
+        }),
+        outboundStore: testStore,
+      });
+
+      await firstTransport.start(async () => {});
+      if (!processEvents) {
+        throw new Error("Expected connection event processor to be registered");
+      }
+      await processEvents({ "connection.update": { connection: "open" } });
+
+      const restartingHandle = await firstTransport.sendEvent?.(
+        chatId,
+        contentEvent("llm", "Restarting..."),
+      );
+      assert.equal(typeof restartingHandle?.transportHandleId, "string");
+
+      let scheduled = 0;
+      const restartAction = createRestartAction(
+        () => {
+          scheduled += 1;
+        },
+        restartAckStore,
+        {
+          listActiveTurns: () => [],
+          waitForIdle: async () => [],
+        },
+      );
+      const result = await restartAction.action_fn({
+        chatId,
+        senderIds: ["master-user"],
+        content: [],
+        getIsAdmin: async () => true,
+        db: testDb,
+        sessionDb: testDb,
+        getActions: async () => [],
+        log: async () => "",
+        send: async () => {},
+        reply: async () => {},
+        reactToMessage: async () => {},
+        select: async () => "",
+        confirm: async () => true,
+        resolveModel: () => "test-model",
+      }, {});
+
+      if (typeof result !== "object" || result === null || Array.isArray(result) || !("afterResponse" in result)) {
+        throw new Error("Expected restart action to return an afterResponse hook");
+      }
+      await result.afterResponse?.({ handle: restartingHandle });
+      assert.equal(scheduled, 1);
+
+      const pendingAck = await restartAckStore.read();
+      assert.equal(typeof pendingAck?.transportHandleId, "string");
+      assert.ok(await testStore.getWhatsAppEditHandle(pendingAck.transportHandleId));
+
+      const secondTransport = await createWhatsAppTransport({
+        createConnectionSupervisor: async ({ onSocketReady }) => ({
+          start: async () => {
+            onSocketReady(socket, async () => {});
+          },
+          stop: async () => {},
+          sendText: async () => {},
+          handleConnectionUpdate: async () => {},
+          isStopped: () => false,
+        }),
+        onConnectionOpen: async ({ editMessage, sendText, recoverQueuedMessage }) => {
+          await deliverPendingRestartAck({
+            store: restartAckStore,
+            editMessage,
+            sendText,
+            recoverQueuedMessage,
+          });
+        },
+        outboundStore: testStore,
+      });
+
+      processEvents = null;
+      await secondTransport.start(async () => {});
+      if (!processEvents) {
+        throw new Error("Expected second connection event processor to be registered");
+      }
+      await processEvents({ "connection.update": { connection: "open" } });
+
+      assert.deepEqual(sentMessages, [
+        {
+          chatId,
+          message: { text: "🤖 Restarting..." },
+        },
+        {
+          chatId,
+          message: {
+            text: "Restarted.",
+            edit: { id: "sent-1", remoteJid: chatId },
+          },
+        },
+      ]);
+      assert.equal(await restartAckStore.read(), null);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 
   it("queues turn replies while the socket exists but the connection is not open yet", async () => {

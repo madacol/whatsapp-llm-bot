@@ -16,7 +16,10 @@ import { sendImageHD } from "../../whatsapp-hd-media.js";
 
 /** Delay between relaying each image in an album so WhatsApp groups them. */
 const ALBUM_RELAY_DELAY_MS = 500;
+const WHATSAPP_EDIT_HANDLE_TTL_MS = 14 * 60 * 1000;
 const log = createLogger("whatsapp:outbound");
+/** @type {Map<string, WhatsAppEditHandleRecord>} */
+const inMemoryEditHandles = new Map();
 
 /** @type {Record<MessageSource, string>} */
 const SOURCE_PREFIX = {
@@ -39,48 +42,148 @@ function isRecord(value) {
 }
 
 /**
- * @param {import('@whiskeysockets/baileys').WAMessageKey} key
- * @param {"text" | "image"} messageKind
- * @returns {Record<string, unknown>}
+ * @typedef {{
+ *   id: string,
+ *   chatId: string,
+ *   messageKey: import('@whiskeysockets/baileys').WAMessageKey,
+ *   messageKind: "text" | "image",
+ *   createdAt: string,
+ *   expiresAt: string,
+ * }} WhatsAppEditHandleRecord
  */
-function createWhatsAppEditToken(key, messageKind) {
+
+/**
+ * @param {import('@whiskeysockets/baileys').WAMessageKey} key
+ * @returns {import('@whiskeysockets/baileys').WAMessageKey}
+ */
+function serializeWhatsAppMessageKey(key) {
   return {
-    transport: "whatsapp",
-    messageKind,
-    key: {
-      ...(typeof key.remoteJid === "string" ? { remoteJid: key.remoteJid } : {}),
-      ...(typeof key.id === "string" ? { id: key.id } : {}),
-      ...(typeof key.fromMe === "boolean" ? { fromMe: key.fromMe } : {}),
-    },
+    ...(typeof key.remoteJid === "string" ? { remoteJid: key.remoteJid } : {}),
+    ...(typeof key.id === "string" ? { id: key.id } : {}),
+    ...(typeof key.fromMe === "boolean" ? { fromMe: key.fromMe } : {}),
   };
 }
 
 /**
- * @param {unknown} token
- * @param {{ chatId: string, fallbackKeyId?: string }} fallback
- * @returns {{ key: import('@whiskeysockets/baileys').WAMessageKey, messageKind: "text" | "image" } | null}
+ * @param {unknown} value
+ * @returns {import('@whiskeysockets/baileys').WAMessageKey | null}
  */
-function resolveWhatsAppEditTarget(token, fallback) {
-  if (isRecord(token) && token.transport === "whatsapp" && isRecord(token.key)) {
-    const messageKind = token.messageKind === "image" ? "image" : "text";
-    const key = token.key;
-    const id = typeof key.id === "string" ? key.id : null;
-    if (id) {
-      return {
-        key: {
-          remoteJid: typeof key.remoteJid === "string" ? key.remoteJid : fallback.chatId,
-          ...(typeof key.fromMe === "boolean" ? { fromMe: key.fromMe } : {}),
-          id,
-        },
-        messageKind,
-      };
-    }
-  }
-  if (!fallback.fallbackKeyId) {
+function parseWhatsAppMessageKey(value) {
+  if (!isRecord(value) || typeof value.id !== "string") {
     return null;
   }
   return {
-    key: { remoteJid: fallback.chatId, fromMe: true, id: fallback.fallbackKeyId },
+    ...(typeof value.remoteJid === "string" ? { remoteJid: value.remoteJid } : {}),
+    ...(typeof value.fromMe === "boolean" ? { fromMe: value.fromMe } : {}),
+    id: value.id,
+  };
+}
+
+/**
+ * @param {import("../../store.js").WhatsAppEditHandleRow} row
+ * @returns {WhatsAppEditHandleRecord | null}
+ */
+function editHandleRecordFromRow(row) {
+  const messageKey = parseWhatsAppMessageKey(row.message_key_json);
+  if (!messageKey) {
+    return null;
+  }
+  return {
+    id: row.id,
+    chatId: row.chat_id,
+    messageKey,
+    messageKind: row.message_kind,
+    createdAt: row.created_at,
+    expiresAt: row.expires_at,
+  };
+}
+
+/**
+ * @param {string} chatId
+ * @param {import('@whiskeysockets/baileys').WAMessageKey} key
+ * @param {"text" | "image"} messageKind
+ * @param {Date} [now]
+ * @returns {WhatsAppEditHandleRecord}
+ */
+function createWhatsAppEditHandleRecord(chatId, key, messageKind, now = new Date()) {
+  const createdAt = now.toISOString();
+  const expiresAt = new Date(now.getTime() + WHATSAPP_EDIT_HANDLE_TTL_MS).toISOString();
+  return {
+    id: `wa-edit-${randomBytes(16).toString("hex")}`,
+    chatId,
+    messageKey: serializeWhatsAppMessageKey(key),
+    messageKind,
+    createdAt,
+    expiresAt,
+  };
+}
+
+/**
+ * @param {WhatsAppEditHandleRecord} record
+ * @param {import("../../store.js").Store | undefined} store
+ * @returns {Promise<void>}
+ */
+async function rememberWhatsAppEditHandle(record, store) {
+  inMemoryEditHandles.set(record.id, record);
+  if (!store) {
+    return;
+  }
+  await store.saveWhatsAppEditHandle({
+    id: record.id,
+    chatId: record.chatId,
+    messageKeyJson: record.messageKey,
+    messageKind: record.messageKind,
+    createdAt: record.createdAt,
+    expiresAt: record.expiresAt,
+  });
+  await store.deleteExpiredWhatsAppEditHandles(new Date().toISOString());
+}
+
+/**
+ * @param {string} transportHandleId
+ * @param {import("../../store.js").Store | undefined} store
+ * @returns {Promise<WhatsAppEditHandleRecord | null>}
+ */
+async function resolveWhatsAppEditHandle(transportHandleId, store) {
+  const row = store ? await store.getWhatsAppEditHandle(transportHandleId) : null;
+  const record = row ? editHandleRecordFromRow(row) : null;
+  if (record) {
+    inMemoryEditHandles.set(record.id, record);
+    return record;
+  }
+  return inMemoryEditHandles.get(transportHandleId) ?? null;
+}
+
+/**
+ * @param {WhatsAppEditHandleRecord} record
+ * @param {Date} [now]
+ * @returns {boolean}
+ */
+function isExpiredWhatsAppEditHandle(record, now = new Date()) {
+  return Date.parse(record.expiresAt) <= now.getTime();
+}
+
+/**
+ * @param {{ messageKey?: import('@whiskeysockets/baileys').WAMessageKey, messageKind?: "text" | "image", fallbackKeyId?: string }} target
+ * @param {{ chatId: string }} fallback
+ * @returns {{ key: import('@whiskeysockets/baileys').WAMessageKey, messageKind: "text" | "image" } | null}
+ */
+function resolveWhatsAppEditTarget(target, fallback) {
+  if (target.messageKey?.id) {
+    return {
+      key: {
+        remoteJid: typeof target.messageKey.remoteJid === "string" ? target.messageKey.remoteJid : fallback.chatId,
+        ...(typeof target.messageKey.fromMe === "boolean" ? { fromMe: target.messageKey.fromMe } : {}),
+        id: target.messageKey.id,
+      },
+      messageKind: target.messageKind ?? "text",
+    };
+  }
+  if (!target.fallbackKeyId) {
+    return null;
+  }
+  return {
+    key: { remoteJid: fallback.chatId, fromMe: true, id: target.fallbackKeyId },
     messageKind: "text",
   };
 }
@@ -525,16 +628,13 @@ export async function sendAlbum(sock, chatId, items, options) {
  * @param {import('@whiskeysockets/baileys').WASocket} sock
  * @param {string} jid
  * @param {string} newText
- * @param {{ token?: unknown, fallbackKeyId?: string }} target
+ * @param {{ messageKey?: import('@whiskeysockets/baileys').WAMessageKey, messageKind?: "text" | "image", fallbackKeyId?: string }} target
  * @returns {Promise<void>}
  */
 export async function editWhatsAppMessage(sock, jid, newText, target) {
-  const resolved = resolveWhatsAppEditTarget(target.token, {
-    chatId: jid,
-    ...(target.fallbackKeyId ? { fallbackKeyId: target.fallbackKeyId } : {}),
-  });
+  const resolved = resolveWhatsAppEditTarget(target, { chatId: jid });
   if (!resolved) {
-    throw new Error("Cannot edit WhatsApp message without an edit token or key id.");
+    throw new Error("Cannot edit WhatsApp message without an edit target.");
   }
   if (resolved.messageKind === "image") {
     await sock.relayMessage(jid, {
@@ -551,6 +651,30 @@ export async function editWhatsAppMessage(sock, jid, newText, target) {
 }
 
 /**
+ * Edit through a WhatsApp-owned durable handle. Expired handles fall back to a
+ * fresh message because recipients will ignore stale WhatsApp edit attempts.
+ * @param {import('@whiskeysockets/baileys').WASocket} sock
+ * @param {string} transportHandleId
+ * @param {string} newText
+ * @param {{ store?: import("../../store.js").Store, now?: Date }} [options]
+ * @returns {Promise<void>}
+ */
+export async function editWhatsAppMessageByHandle(sock, transportHandleId, newText, options = {}) {
+  const record = await resolveWhatsAppEditHandle(transportHandleId, options.store);
+  if (!record) {
+    throw new Error(`WhatsApp edit handle ${transportHandleId} was not found.`);
+  }
+  if (isExpiredWhatsAppEditHandle(record, options.now)) {
+    await sock.sendMessage(record.chatId, { text: newText });
+    return;
+  }
+  await editWhatsAppMessage(sock, record.chatId, newText, {
+    messageKey: record.messageKey,
+    messageKind: record.messageKind,
+  });
+}
+
+/**
  * Dispatch a semantic outbound event as WhatsApp messages.
  * Returns a MessageHandle for the last editable message sent (if any).
  * @param {import('@whiskeysockets/baileys').WASocket} sock
@@ -558,15 +682,17 @@ export async function editWhatsAppMessage(sock, jid, newText, target) {
  * @param {OutboundEvent} event
  * @param {{ quoted?: BaileysMessage } | undefined} options
  * @param {import("../runtime/reaction-runtime.js").ReactionRuntime | undefined} reactionRuntime
+ * @param {{ editHandleStore?: import("../../store.js").Store }} [sendOptions]
  * @returns {Promise<MessageHandle | undefined>}
  */
-export async function sendEvent(sock, chatId, event, options, reactionRuntime) {
+export async function sendEvent(sock, chatId, event, options, reactionRuntime, sendOptions = {}) {
   const rendered = renderOutboundEvent(event);
   if (!rendered) {
     return undefined;
   }
   return sendBlocks(sock, chatId, rendered.source, rendered.content, options, reactionRuntime, event, {
     workdir: rendered.cwd ?? null,
+    editHandleStore: sendOptions.editHandleStore,
   });
 }
 
@@ -580,7 +706,7 @@ export async function sendEvent(sock, chatId, event, options, reactionRuntime) {
  * @param {{ quoted?: BaileysMessage } | undefined} options
  * @param {import("../runtime/reaction-runtime.js").ReactionRuntime | undefined} reactionRuntime
  * @param {OutboundEvent | undefined} [event]
- * @param {{ workdir?: string | null }} [renderOptions]
+ * @param {{ workdir?: string | null, editHandleStore?: import("../../store.js").Store }} [renderOptions]
  * @returns {Promise<MessageHandle | undefined>}
  */
 export async function sendBlocks(sock, chatId, source, content, options, reactionRuntime, event, renderOptions = {}) {
@@ -724,8 +850,9 @@ export async function sendBlocks(sock, chatId, source, content, options, reactio
 
   const editKey = lastSentKey;
   const isImage = lastSentIsImage;
-  const keyId = editKey.id ?? undefined;
-  const editToken = createWhatsAppEditToken(editKey, isImage ? "image" : "text");
+  const editHandle = createWhatsAppEditHandleRecord(chatId, editKey, isImage ? "image" : "text");
+  await rememberWhatsAppEditHandle(editHandle, renderOptions.editHandleStore);
+  const transportHandleId = editHandle.id;
   /** @type {MessageInspectState | null} */
   let inspectState = event?.kind === "tool_call"
     ? { kind: "tool", presentation: event.presentation }
@@ -734,23 +861,27 @@ export async function sendBlocks(sock, chatId, source, content, options, reactio
 
   /** @type {MessageHandle} */
   const handle = {
-    keyId,
-    editToken,
+    transportHandleId,
     deliveryStatus: "sent",
     waitUntilSent: async () => handle,
     update: async (update) => {
       const text = persistInspectText && inspectState?.kind === "text" && inspectState.persistOnInspect
         ? formatInspectEditText("", inspectState.text)
         : summarizeHandleUpdate(update);
-      await editWhatsAppMessage(sock, chatId, prependSourcePrefix(prefix, text), { token: editToken });
+      await editWhatsAppMessageByHandle(
+        sock,
+        transportHandleId,
+        prependSourcePrefix(prefix, text),
+        { store: renderOptions.editHandleStore },
+      );
     },
     setInspect: (inspect) => {
       inspectState = inspect;
     },
   };
 
-  if (keyId && reactionRuntime) {
-    reactionRuntime.subscribe(keyId, (emoji) => {
+  if (editKey.id && reactionRuntime) {
+    reactionRuntime.subscribe(editKey.id, (emoji) => {
       if (!emoji.startsWith("👁") || !inspectState) {
         return;
       }
@@ -760,7 +891,7 @@ export async function sendBlocks(sock, chatId, source, content, options, reactio
           sock,
           chatId,
           prependSourcePrefix(prefix, formatInspectEditText("", inspectState.text)),
-          { token: editToken },
+          { messageKey: editHandle.messageKey, messageKind: editHandle.messageKind },
         );
         return;
       }
@@ -769,7 +900,7 @@ export async function sendBlocks(sock, chatId, source, content, options, reactio
         sock,
         chatId,
         prependSourcePrefix(prefix, formatInspectEditText(inspect.summary, inspect.text)),
-        { token: editToken },
+        { messageKey: editHandle.messageKey, messageKind: editHandle.messageKind },
       );
     });
   }

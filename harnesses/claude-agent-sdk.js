@@ -1321,7 +1321,7 @@ async function handleUserEvent(event, ctx) {
     if (!isSubagent) {
       ctx.messages.push(toolMsg);
     }
-    await ctx.session.addMessage(ctx.session.chatId, toolMsg, ctx.session.senderIds, active?.handle?.keyId);
+    await ctx.session.addMessage(ctx.session.chatId, toolMsg, ctx.session.senderIds, active?.handle?.transportHandleId);
 
     // Register 👁 react-to-inspect on the tool-call message handle
     if (active?.handle) {
