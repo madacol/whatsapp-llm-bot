@@ -108,7 +108,6 @@ describe("createHarnessRuntimeEventDispatcher", () => {
           toolCalls.push(toolCall);
           return {
             keyId: "msg-1",
-            isImage: false,
             update: async () => {},
             setInspect: (state) => {
               inspectStates.push(state);

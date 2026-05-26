@@ -31,6 +31,61 @@ const SOURCE_PREFIX = {
 };
 
 /**
+ * @param {unknown} value
+ * @returns {value is Record<string, unknown>}
+ */
+function isRecord(value) {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/**
+ * @param {import('@whiskeysockets/baileys').WAMessageKey} key
+ * @param {"text" | "image"} messageKind
+ * @returns {Record<string, unknown>}
+ */
+function createWhatsAppEditToken(key, messageKind) {
+  return {
+    transport: "whatsapp",
+    messageKind,
+    key: {
+      ...(typeof key.remoteJid === "string" ? { remoteJid: key.remoteJid } : {}),
+      ...(typeof key.id === "string" ? { id: key.id } : {}),
+      ...(typeof key.fromMe === "boolean" ? { fromMe: key.fromMe } : {}),
+    },
+  };
+}
+
+/**
+ * @param {unknown} token
+ * @param {{ chatId: string, fallbackKeyId?: string }} fallback
+ * @returns {{ key: import('@whiskeysockets/baileys').WAMessageKey, messageKind: "text" | "image" } | null}
+ */
+function resolveWhatsAppEditTarget(token, fallback) {
+  if (isRecord(token) && token.transport === "whatsapp" && isRecord(token.key)) {
+    const messageKind = token.messageKind === "image" ? "image" : "text";
+    const key = token.key;
+    const id = typeof key.id === "string" ? key.id : null;
+    if (id) {
+      return {
+        key: {
+          remoteJid: typeof key.remoteJid === "string" ? key.remoteJid : fallback.chatId,
+          ...(typeof key.fromMe === "boolean" ? { fromMe: key.fromMe } : {}),
+          id,
+        },
+        messageKind,
+      };
+    }
+  }
+  if (!fallback.fallbackKeyId) {
+    return null;
+  }
+  return {
+    key: { remoteJid: fallback.chatId, fromMe: true, id: fallback.fallbackKeyId },
+    messageKind: "text",
+  };
+}
+
+/**
  * @param {SubagentMessageEvent} event
  * @returns {SendContent}
  */
@@ -469,16 +524,22 @@ export async function sendAlbum(sock, chatId, items, options) {
  * Edit a previously sent WhatsApp message.
  * @param {import('@whiskeysockets/baileys').WASocket} sock
  * @param {string} jid
- * @param {import('@whiskeysockets/baileys').WAMessageKey} key
  * @param {string} newText
- * @param {boolean} isImage
+ * @param {{ token?: unknown, fallbackKeyId?: string }} target
  * @returns {Promise<void>}
  */
-export async function editWhatsAppMessage(sock, jid, key, newText, isImage) {
-  if (isImage) {
+export async function editWhatsAppMessage(sock, jid, newText, target) {
+  const resolved = resolveWhatsAppEditTarget(target.token, {
+    chatId: jid,
+    ...(target.fallbackKeyId ? { fallbackKeyId: target.fallbackKeyId } : {}),
+  });
+  if (!resolved) {
+    throw new Error("Cannot edit WhatsApp message without an edit token or key id.");
+  }
+  if (resolved.messageKind === "image") {
     await sock.relayMessage(jid, {
       protocolMessage: {
-        key,
+        key: resolved.key,
         type: proto.Message.ProtocolMessage.Type.MESSAGE_EDIT,
         editedMessage: { imageMessage: { caption: newText } },
       },
@@ -486,7 +547,7 @@ export async function editWhatsAppMessage(sock, jid, key, newText, isImage) {
     return;
   }
 
-  await sock.sendMessage(jid, { text: newText, edit: key });
+  await sock.sendMessage(jid, { text: newText, edit: resolved.key });
 }
 
 /**
@@ -664,6 +725,7 @@ export async function sendBlocks(sock, chatId, source, content, options, reactio
   const editKey = lastSentKey;
   const isImage = lastSentIsImage;
   const keyId = editKey.id ?? undefined;
+  const editToken = createWhatsAppEditToken(editKey, isImage ? "image" : "text");
   /** @type {MessageInspectState | null} */
   let inspectState = event?.kind === "tool_call"
     ? { kind: "tool", presentation: event.presentation }
@@ -673,14 +735,14 @@ export async function sendBlocks(sock, chatId, source, content, options, reactio
   /** @type {MessageHandle} */
   const handle = {
     keyId,
-    isImage,
+    editToken,
     deliveryStatus: "sent",
     waitUntilSent: async () => handle,
     update: async (update) => {
       const text = persistInspectText && inspectState?.kind === "text" && inspectState.persistOnInspect
         ? formatInspectEditText("", inspectState.text)
         : summarizeHandleUpdate(update);
-      await editWhatsAppMessage(sock, chatId, editKey, prependSourcePrefix(prefix, text), isImage);
+      await editWhatsAppMessage(sock, chatId, prependSourcePrefix(prefix, text), { token: editToken });
     },
     setInspect: (inspect) => {
       inspectState = inspect;
@@ -697,9 +759,8 @@ export async function sendBlocks(sock, chatId, source, content, options, reactio
         void editWhatsAppMessage(
           sock,
           chatId,
-          editKey,
           prependSourcePrefix(prefix, formatInspectEditText("", inspectState.text)),
-          isImage,
+          { token: editToken },
         );
         return;
       }
@@ -707,9 +768,8 @@ export async function sendBlocks(sock, chatId, source, content, options, reactio
       void editWhatsAppMessage(
         sock,
         chatId,
-        editKey,
         prependSourcePrefix(prefix, formatInspectEditText(inspect.summary, inspect.text)),
-        isImage,
+        { token: editToken },
       );
     });
   }

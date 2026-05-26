@@ -305,7 +305,6 @@ describe("WhatsAppWorkspacePresenter", () => {
     /** @type {MessageHandle} */
     const handle = {
       keyId: "workspace-msg-1",
-      isImage: false,
       update: async () => {},
       setInspect: () => {},
     };

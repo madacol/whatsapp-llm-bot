@@ -14,7 +14,6 @@ describe("seed turn io", () => {
     /** @type {MessageHandle} */
     const handle = {
       keyId: "seed-msg-1",
-      isImage: false,
       update: async (update) => {
         updates.push(update);
       },

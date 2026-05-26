@@ -696,7 +696,7 @@ describe("sendBlocks – file attachments", () => {
 });
 
 describe("sendBlocks – MessageHandle tracking", () => {
-  it("returns handle for text blocks with correct keyId and isImage=false", async () => {
+  it("returns handle for text blocks with correct keyId and an edit token", async () => {
     const { sock } = createMockSock();
 
     const handle = await sendBlocks(sock, "test-chat", "llm", [
@@ -708,10 +708,10 @@ describe("sendBlocks – MessageHandle tracking", () => {
     assert.equal(typeof handle.update, "function", "Handle should have update method");
     assert.equal(typeof handle.setInspect, "function", "Handle should have setInspect method");
     assert.equal(handle.keyId, "msg-1");
-    assert.equal(handle.isImage, false);
+    assert.ok(handle.editToken, "Handle should carry an opaque edit token");
   });
 
-  it("returns handle for code image blocks with isImage=true", async () => {
+  it("returns handle for code image blocks with an edit token", async () => {
     const { sock } = createMockSock();
 
     // 6-line JS code will trigger image rendering
@@ -721,7 +721,7 @@ describe("sendBlocks – MessageHandle tracking", () => {
     ]);
 
     assert.ok(handle, "Should return a handle for code images");
-    assert.equal(handle.isImage, true);
+    assert.ok(handle.editToken, "Image handle should carry an opaque edit token");
   });
 
   it("tracks the last editable message when multiple blocks are sent", async () => {
@@ -825,7 +825,7 @@ describe("sendBlocks – tool-call → edit pipeline", () => {
     ]);
 
     assert.ok(handle, "Should return a handle");
-    assert.equal(handle.isImage, false, "Text message handle should not be image");
+    assert.ok(handle.editToken, "Text message handle should have an edit token");
     assert.equal(calls.length, 1, "Should have sent 1 message");
 
     // Step 2: Simulate progress update (tool still running)
@@ -860,7 +860,7 @@ describe("sendBlocks – tool-call → edit pipeline", () => {
     ]);
 
     assert.ok(handle, "Should return a handle for code image");
-    assert.equal(handle.isImage, true, "Code image handle should be marked as image");
+    assert.ok(handle.editToken, "Code image handle should have an edit token");
 
     const initialCallCount = calls.length;
 
@@ -1053,20 +1053,26 @@ describe("sendBlocks – tool-call → edit pipeline", () => {
     const { sock, calls } = createCaptureSock();
     const key = { id: "msg-abc", remoteJid: "chat-1" };
 
-    await editWhatsAppMessage(sock, "chat-1", key, "updated text", false);
+    await editWhatsAppMessage(sock, "chat-1", "updated text", { fallbackKeyId: key.id });
 
     assert.equal(calls.length, 1);
     assert.equal(calls[0].method, "sendMessage");
     const msg = /** @type {Record<string, unknown>} */ (calls[0].args[1]);
     assert.equal(msg.text, "updated text");
-    assert.deepEqual(msg.edit, key);
+    assert.deepEqual(msg.edit, { id: "msg-abc", remoteJid: "chat-1", fromMe: true });
   });
 
   it("editWhatsAppMessage directly: image path uses relayMessage with protocolMessage", async () => {
     const { sock, calls } = createCaptureSock();
     const key = { id: "msg-xyz", remoteJid: "chat-1" };
 
-    await editWhatsAppMessage(sock, "chat-1", key, "new caption", true);
+    await editWhatsAppMessage(sock, "chat-1", "new caption", {
+      token: {
+        transport: "whatsapp",
+        messageKind: "image",
+        key,
+      },
+    });
 
     assert.equal(calls.length, 1);
     assert.equal(calls[0].method, "relayMessage");

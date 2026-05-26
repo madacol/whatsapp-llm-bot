@@ -133,7 +133,10 @@ export function createChatTurn(overrides = {}) {
     /** @type {MessageHandle} */
     const handle = {
       keyId: `mock-key-${responses.length}`,
-      isImage: blocks.some(b => b.type === "image" || b.type === "code" || b.type === "diff"),
+      editToken: {
+        transport: "test",
+        messageKind: blocks.some(b => b.type === "image" || b.type === "code" || b.type === "diff") ? "image" : "text",
+      },
       update: async (update) => {
         const text = update.kind === "text"
           ? update.text

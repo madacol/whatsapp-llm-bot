@@ -11,7 +11,7 @@ describe("restart acknowledgement delivery", () => {
     const dir = await mkdtemp(path.join(os.tmpdir(), "restart-ack-"));
     const storePath = path.join(dir, "ack.json");
     const store = createRestartAckStore(storePath);
-    /** @type {Array<{ chatId: string, keyId: string, text: string, isImage?: boolean }>} */
+    /** @type {Array<{ chatId: string, text: string, keyId?: string, editToken?: unknown }>} */
     const edits = [];
     /** @type {Array<{ chatId: string, text: string }>} */
     const sent = [];
@@ -22,7 +22,6 @@ describe("restart acknowledgement delivery", () => {
         requestedAt: "2026-05-15T19:00:00.000Z",
         oldPid: 123,
         keyId: "message-key-1",
-        isImage: false,
       });
 
       await deliverPendingRestartAck({
@@ -39,7 +38,6 @@ describe("restart acknowledgement delivery", () => {
         chatId: "chat-1@g.us",
         keyId: "message-key-1",
         text: "Restarted.",
-        isImage: false,
       }]);
       assert.deepEqual(sent, []);
       assert.equal(await store.read(), null);
@@ -52,7 +50,7 @@ describe("restart acknowledgement delivery", () => {
     const dir = await mkdtemp(path.join(os.tmpdir(), "restart-ack-"));
     const storePath = path.join(dir, "ack.json");
     const store = createRestartAckStore(storePath);
-    /** @type {Array<{ chatId: string, keyId: string, text: string, isImage?: boolean }>} */
+    /** @type {Array<{ chatId: string, text: string, keyId?: string, editToken?: unknown }>} */
     const edits = [];
     /** @type {Array<{ chatId: string, text: string }>} */
     const sent = [];
@@ -86,7 +84,7 @@ describe("restart acknowledgement delivery", () => {
     const dir = await mkdtemp(path.join(os.tmpdir(), "restart-ack-"));
     const storePath = path.join(dir, "ack.json");
     const store = createRestartAckStore(storePath);
-    /** @type {Array<{ chatId: string, keyId: string, text: string, isImage?: boolean }>} */
+    /** @type {Array<{ chatId: string, text: string, keyId?: string, editToken?: unknown }>} */
     const edits = [];
     /** @type {Array<{ chatId: string, text: string }>} */
     const sent = [];
@@ -117,7 +115,6 @@ describe("restart acknowledgement delivery", () => {
         chatId: "restart-chat@g.us",
         keyId: "message-key-1",
         text: "Restarted.",
-        isImage: false,
       }]);
       assert.deepEqual(sent, [{
         chatId: "active-chat@g.us",
@@ -133,7 +130,7 @@ describe("restart acknowledgement delivery", () => {
     const dir = await mkdtemp(path.join(os.tmpdir(), "restart-ack-"));
     const storePath = path.join(dir, "ack.json");
     const store = createRestartAckStore(storePath);
-    /** @type {Array<{ chatId: string, keyId: string, text: string, isImage?: boolean }>} */
+    /** @type {Array<{ chatId: string, text: string, keyId?: string, editToken?: unknown }>} */
     const edits = [];
     /** @type {Array<{ chatId: string, text: string }>} */
     const sent = [];
@@ -159,7 +156,7 @@ describe("restart acknowledgement delivery", () => {
           assert.equal(queueId, 44);
           return {
             keyId: "recovered-message-key",
-            isImage: false,
+            editToken: { transport: "test", keyId: "recovered-message-key" },
             deliveryStatus: "sent",
             waitUntilSent: async function () {
               return this;
@@ -172,9 +169,9 @@ describe("restart acknowledgement delivery", () => {
 
       assert.deepEqual(edits, [{
         chatId: "chat-queued@g.us",
-        keyId: "recovered-message-key",
         text: "Restarted.",
-        isImage: false,
+        editToken: { transport: "test", keyId: "recovered-message-key" },
+        keyId: "recovered-message-key",
       }]);
       assert.deepEqual(sent, []);
       assert.equal(await store.read(), null);

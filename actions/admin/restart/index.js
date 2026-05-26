@@ -146,8 +146,8 @@ export function createRestartAction(
             chatId: context.chatId,
             requestedAt: new Date().toISOString(),
             oldPid: process.pid,
+            ...(sentHandle.editToken !== undefined ? { editToken: sentHandle.editToken } : {}),
             keyId: sentHandle.keyId,
-            isImage: sentHandle.isImage === true,
             ...(handle?.queueId ? { queueId: handle.queueId } : {}),
             ...(interruptedTurns.length > 0 ? { interruptedTurns } : {}),
           });

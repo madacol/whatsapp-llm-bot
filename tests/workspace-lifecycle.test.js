@@ -93,7 +93,6 @@ function createFakeTransport() {
         sentEvents.push({ chatId, event });
         return {
           keyId: `event-${sentEvents.length}`,
-          isImage: false,
           update: async () => {},
           setInspect: () => {},
         };

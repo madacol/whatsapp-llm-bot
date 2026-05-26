@@ -141,7 +141,6 @@ function createReasoningSubject(visibility = { ...DEFAULT_OUTPUT_VISIBILITY, thi
         sent.push({ event, kind: "reply" });
         return {
           keyId: "reasoning-msg-1",
-          isImage: false,
           update: async (update) => {
             reasoningUpdates.push(structuredClone(update));
           },
@@ -353,7 +352,6 @@ describe("buildAgentIoHooks", () => {
           sent.push({ event, kind: "send" });
           return {
             keyId: "compact-tools-1",
-            isImage: false,
             update: async (update) => { updates.push(update); },
             setInspect: () => {},
           };
@@ -397,7 +395,6 @@ describe("buildAgentIoHooks", () => {
       {
         send: async () => ({
           keyId: "compact-read-output",
-          isImage: false,
           update: async () => {},
           setInspect: (inspect) => { if (inspect) inspects.push(inspect); },
         }),
@@ -455,7 +452,6 @@ describe("buildAgentIoHooks", () => {
       {
         send: async () => ({
           keyId: "compact-tools-complete",
-          isImage: false,
           update: async (update) => { updates.push(update); },
           setInspect: () => {},
         }),
@@ -517,7 +513,6 @@ describe("buildAgentIoHooks", () => {
       {
         send: async () => ({
           keyId: "compact-tools-2",
-          isImage: false,
           update: async (update) => { updates.push(update); },
           setInspect: () => {},
         }),
@@ -556,7 +551,6 @@ describe("buildAgentIoHooks", () => {
           sent.push({ event, kind: "send" });
           return {
             keyId: "compact-tools-failed-command",
-            isImage: false,
             update: async (update) => { updates.push(structuredClone(update)); },
             setInspect: () => {},
           };
@@ -596,7 +590,6 @@ describe("buildAgentIoHooks", () => {
           handleUpdates.push(updates);
           return {
             keyId: `compact-tools-${handleUpdates.length}`,
-            isImage: false,
             update: async (update) => { updates.push(structuredClone(update)); },
             setInspect: () => {},
           };
@@ -649,7 +642,6 @@ describe("buildAgentIoHooks", () => {
           handleUpdates.push(updates);
           return {
             keyId: `compact-tools-${handleUpdates.length}`,
-            isImage: false,
             update: async (update) => { updates.push(structuredClone(update)); },
             setInspect: () => {},
           };
@@ -738,7 +730,6 @@ describe("buildAgentIoHooks", () => {
           sent.push({ event, kind: "send" });
           return {
             keyId: "visible-command-failure",
-            isImage: false,
             update: async (update) => { updates.push(structuredClone(update)); },
             setInspect: (inspect) => {
               if (inspect) {
@@ -845,7 +836,6 @@ describe("buildAgentIoHooks", () => {
           };
           const handle = /** @type {MessageHandle} */ ({
             keyId: `handle-${handles.length + 1}`,
-            isImage: false,
             update: async (update) => { entry.updates.push(update); },
             setInspect: (inspect) => { if (inspect) entry.inspects.push(inspect); },
           });
@@ -895,7 +885,6 @@ describe("buildAgentIoHooks", () => {
           };
           const handle = /** @type {MessageHandle} */ ({
             keyId: `handle-${handles.length + 1}`,
-            isImage: false,
             update: async () => {},
             setInspect: (inspect) => { if (inspect) entry.inspects.push(inspect); },
           });
@@ -944,7 +933,6 @@ describe("buildAgentIoHooks", () => {
           };
           const handle = /** @type {MessageHandle} */ ({
             keyId: `handle-${handles.length + 1}`,
-            isImage: false,
             update: async () => {},
             setInspect: (inspect) => { if (inspect) entry.inspects.push(inspect); },
           });
