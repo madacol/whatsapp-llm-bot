@@ -107,7 +107,7 @@ describe("createHarnessRuntimeEventDispatcher", () => {
         onToolCall: async (toolCall) => {
           toolCalls.push(toolCall);
           return {
-            keyId: "msg-1",
+            transportHandleId: "msg-1",
             update: async () => {},
             setInspect: (state) => {
               inspectStates.push(state);

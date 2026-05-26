@@ -91,7 +91,6 @@ async function restart_waits_for_queued_ack_before_stopping(_action_fn, db) {
 
   const afterResponse = result.afterResponse?.({
     handle: {
-      keyId: undefined,
       deliveryStatus: "queued",
       queueId: 42,
       waitUntilSent: async () => {
@@ -130,7 +129,6 @@ async function restart_persists_queue_id_for_unsent_ack_before_stopping(_action_
 
   await result.afterResponse?.({
     handle: {
-      keyId: undefined,
       deliveryStatus: "queued",
       queueId: 77,
       waitUntilSent: async () => undefined,
@@ -143,11 +141,11 @@ async function restart_persists_queue_id_for_unsent_ack_before_stopping(_action_
   assert.equal(savedRecords.length, 1);
   assert.equal(savedRecords[0].chatId, "restart-queued-chat");
   assert.equal(savedRecords[0].queueId, 77);
-  assert.equal(savedRecords[0].keyId, undefined);
+  assert.equal(savedRecords[0].transportHandleId, undefined);
 }
 
 /** @type {ActionDbTestFn} */
-async function restart_persists_sent_ack_key_before_stopping(_action_fn, db) {
+async function restart_persists_sent_ack_transport_handle_before_stopping(_action_fn, db) {
   /** @type {import("./_restart-ack-store.js").RestartAckRecord[]} */
   const savedRecords = [];
   let scheduled = 0;
@@ -166,8 +164,7 @@ async function restart_persists_sent_ack_key_before_stopping(_action_fn, db) {
 
   await result.afterResponse?.({
     handle: {
-      keyId: "ack-message-id",
-      editToken: { transport: "test", keyId: "ack-message-id" },
+      transportHandleId: "ack-transport-handle",
       deliveryStatus: "sent",
       waitUntilSent: async function () {
         return this;
@@ -180,10 +177,9 @@ async function restart_persists_sent_ack_key_before_stopping(_action_fn, db) {
   assert.equal(scheduled, 1);
   assert.equal(savedRecords.length, 2);
   assert.deepEqual(savedRecords[0].chatId, "restart-chat");
-  assert.equal(savedRecords[0].keyId, undefined);
+  assert.equal(savedRecords[0].transportHandleId, undefined);
   assert.deepEqual(savedRecords[1].chatId, "restart-chat");
-  assert.equal(savedRecords[1].keyId, "ack-message-id");
-  assert.deepEqual(savedRecords[1].editToken, { transport: "test", keyId: "ack-message-id" });
+  assert.equal(savedRecords[1].transportHandleId, "ack-transport-handle");
 }
 
 /** @type {ActionDbTestFn} */
@@ -214,7 +210,7 @@ async function restart_waits_for_active_turns_before_scheduling(_action_fn, db) 
 
   await result.afterResponse?.({
     handle: {
-      keyId: "ack-message-id",
+      transportHandleId: "active-turn-ack-handle",
       deliveryStatus: "sent",
       waitUntilSent: async function () {
         return this;
@@ -300,7 +296,7 @@ export default [
   restart_returns_before_stopping_the_process,
   restart_waits_for_queued_ack_before_stopping,
   restart_persists_queue_id_for_unsent_ack_before_stopping,
-  restart_persists_sent_ack_key_before_stopping,
+  restart_persists_sent_ack_transport_handle_before_stopping,
   restart_waits_for_active_turns_before_scheduling,
   restart_force_records_active_turns_without_waiting,
   scheduler_uses_delayed_sigterm,

@@ -13,7 +13,7 @@ describe("seed turn io", () => {
     const inspects = [];
     /** @type {MessageHandle} */
     const handle = {
-      keyId: "seed-msg-1",
+      transportHandleId: "seed-msg-1",
       update: async (update) => {
         updates.push(update);
       },

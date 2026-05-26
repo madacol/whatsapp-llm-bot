@@ -11,7 +11,7 @@ describe("restart acknowledgement delivery", () => {
     const dir = await mkdtemp(path.join(os.tmpdir(), "restart-ack-"));
     const storePath = path.join(dir, "ack.json");
     const store = createRestartAckStore(storePath);
-    /** @type {Array<{ chatId: string, text: string, keyId?: string, editToken?: unknown }>} */
+    /** @type {Array<{ transportHandleId: string, text: string }>} */
     const edits = [];
     /** @type {Array<{ chatId: string, text: string }>} */
     const sent = [];
@@ -21,7 +21,7 @@ describe("restart acknowledgement delivery", () => {
         chatId: "chat-1@g.us",
         requestedAt: "2026-05-15T19:00:00.000Z",
         oldPid: 123,
-        keyId: "message-key-1",
+        transportHandleId: "whatsapp-handle-1",
       });
 
       await deliverPendingRestartAck({
@@ -35,8 +35,7 @@ describe("restart acknowledgement delivery", () => {
       });
 
       assert.deepEqual(edits, [{
-        chatId: "chat-1@g.us",
-        keyId: "message-key-1",
+        transportHandleId: "whatsapp-handle-1",
         text: "Restarted.",
       }]);
       assert.deepEqual(sent, []);
@@ -50,7 +49,7 @@ describe("restart acknowledgement delivery", () => {
     const dir = await mkdtemp(path.join(os.tmpdir(), "restart-ack-"));
     const storePath = path.join(dir, "ack.json");
     const store = createRestartAckStore(storePath);
-    /** @type {Array<{ chatId: string, text: string, keyId?: string, editToken?: unknown }>} */
+    /** @type {Array<{ transportHandleId: string, text: string }>} */
     const edits = [];
     /** @type {Array<{ chatId: string, text: string }>} */
     const sent = [];
@@ -84,7 +83,7 @@ describe("restart acknowledgement delivery", () => {
     const dir = await mkdtemp(path.join(os.tmpdir(), "restart-ack-"));
     const storePath = path.join(dir, "ack.json");
     const store = createRestartAckStore(storePath);
-    /** @type {Array<{ chatId: string, text: string, keyId?: string, editToken?: unknown }>} */
+    /** @type {Array<{ transportHandleId: string, text: string }>} */
     const edits = [];
     /** @type {Array<{ chatId: string, text: string }>} */
     const sent = [];
@@ -94,7 +93,7 @@ describe("restart acknowledgement delivery", () => {
         chatId: "restart-chat@g.us",
         requestedAt: "2026-05-15T19:00:00.000Z",
         oldPid: 123,
-        keyId: "message-key-1",
+        transportHandleId: "restart-handle-1",
         interruptedTurns: [{
           chatId: "active-chat@g.us",
           label: "codex",
@@ -112,8 +111,7 @@ describe("restart acknowledgement delivery", () => {
       });
 
       assert.deepEqual(edits, [{
-        chatId: "restart-chat@g.us",
-        keyId: "message-key-1",
+        transportHandleId: "restart-handle-1",
         text: "Restarted.",
       }]);
       assert.deepEqual(sent, [{
@@ -130,7 +128,7 @@ describe("restart acknowledgement delivery", () => {
     const dir = await mkdtemp(path.join(os.tmpdir(), "restart-ack-"));
     const storePath = path.join(dir, "ack.json");
     const store = createRestartAckStore(storePath);
-    /** @type {Array<{ chatId: string, text: string, keyId?: string, editToken?: unknown }>} */
+    /** @type {Array<{ transportHandleId: string, text: string }>} */
     const edits = [];
     /** @type {Array<{ chatId: string, text: string }>} */
     const sent = [];
@@ -155,8 +153,7 @@ describe("restart acknowledgement delivery", () => {
           assert.equal(chatId, "chat-queued@g.us");
           assert.equal(queueId, 44);
           return {
-            keyId: "recovered-message-key",
-            editToken: { transport: "test", keyId: "recovered-message-key" },
+            transportHandleId: "recovered-transport-handle",
             deliveryStatus: "sent",
             waitUntilSent: async function () {
               return this;
@@ -168,10 +165,8 @@ describe("restart acknowledgement delivery", () => {
       });
 
       assert.deepEqual(edits, [{
-        chatId: "chat-queued@g.us",
         text: "Restarted.",
-        editToken: { transport: "test", keyId: "recovered-message-key" },
-        keyId: "recovered-message-key",
+        transportHandleId: "recovered-transport-handle",
       }]);
       assert.deepEqual(sent, []);
       assert.equal(await store.read(), null);
@@ -224,7 +219,7 @@ describe("restart acknowledgement delivery", () => {
         chatId: "chat-3@g.us",
         requestedAt: "2026-05-15T19:00:00.000Z",
         oldPid: 123,
-        keyId: "message-key-3",
+        transportHandleId: "failed-handle-3",
       });
 
       await assert.rejects(
@@ -239,7 +234,7 @@ describe("restart acknowledgement delivery", () => {
       );
 
       const persisted = JSON.parse(await readFile(storePath, "utf8"));
-      assert.equal(persisted.keyId, "message-key-3");
+      assert.equal(persisted.transportHandleId, "failed-handle-3");
     } finally {
       await rm(dir, { recursive: true, force: true });
     }

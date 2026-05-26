@@ -67,6 +67,15 @@ const log = createLogger("store");
  *   payload_json: unknown;
  *   created_at?: string;
  * }} WhatsAppOutboundQueueRow
+ *
+ * @typedef {{
+ *   id: string;
+ *   chat_id: string;
+ *   message_key_json: unknown;
+ *   message_kind: "text" | "image";
+ *   created_at: string;
+ *   expires_at: string;
+ * }} WhatsAppEditHandleRow
  */
 
 /**
@@ -145,6 +154,16 @@ export async function getChatOrThrow(_db, chatId) {
  *   }) => Promise<WhatsAppOutboundQueueRow>;
  *   listWhatsAppOutboundQueueEntries: () => Promise<WhatsAppOutboundQueueRow[]>;
  *   deleteWhatsAppOutboundQueueEntry: (chatId: string, id: number) => Promise<void>;
+ *   saveWhatsAppEditHandle: (input: {
+ *     id: string,
+ *     chatId: string,
+ *     messageKeyJson: unknown,
+ *     messageKind: "text" | "image",
+ *     createdAt: string,
+ *     expiresAt: string,
+ *   }) => Promise<WhatsAppEditHandleRow>;
+ *   getWhatsAppEditHandle: (id: string) => Promise<WhatsAppEditHandleRow | null>;
+ *   deleteExpiredWhatsAppEditHandles: (now: string) => Promise<void>;
  *   archiveWorkspace: (workspaceId: string) => Promise<WorkspaceRow | null>;
  *   setWorkspaceStatus: (workspaceId: string, status: WorkspaceStatus, options?: { conflictedFiles?: string[] }) => Promise<WorkspaceRow | null>;
  *   updateWorkspaceLastTestStatus: (workspaceId: string, lastTestStatus: WorkspaceRow["last_test_status"]) => Promise<WorkspaceRow | null>;

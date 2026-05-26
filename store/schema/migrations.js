@@ -62,6 +62,22 @@ export async function runStoreMigrations(db) {
       );
     `;
 
+    await db.sql`
+      CREATE TABLE IF NOT EXISTS whatsapp_edit_handles (
+        id TEXT PRIMARY KEY,
+        chat_id VARCHAR(50) NOT NULL REFERENCES chats(chat_id),
+        message_key_json TEXT NOT NULL,
+        message_kind TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        expires_at TEXT NOT NULL
+      );
+    `;
+
+    await db.sql`
+      CREATE INDEX IF NOT EXISTS idx_whatsapp_edit_handles_expires_at
+      ON whatsapp_edit_handles (expires_at);
+    `;
+
     await addColumnIfMissing(db, "workspaces", "workspace_chat_subject", "workspace_chat_subject TEXT");
     await addColumnIfMissing(db, "workspaces", "conflicted_files", "conflicted_files TEXT NOT NULL DEFAULT '[]'");
 

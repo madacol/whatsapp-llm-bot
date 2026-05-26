@@ -304,7 +304,7 @@ describe("WhatsAppWorkspacePresenter", () => {
     const sentEvents = [];
     /** @type {MessageHandle} */
     const handle = {
-      keyId: "workspace-msg-1",
+      transportHandleId: "workspace-msg-1",
       update: async () => {},
       setInspect: () => {},
     };

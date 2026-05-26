@@ -40,6 +40,14 @@ function isWhatsAppWorkspacePresentationRole(value) {
 
 /**
  * @param {unknown} value
+ * @returns {value is import("../store.js").WhatsAppEditHandleRow["message_kind"]}
+ */
+function isWhatsAppEditMessageKind(value) {
+  return value === "text" || value === "image";
+}
+
+/**
+ * @param {unknown} value
  * @returns {value is HarnessSessionRef["kind"]}
  */
 function isHarnessSessionKind(value) {
@@ -178,6 +186,37 @@ export function normalizeWhatsAppOutboundQueueRow(raw) {
     chat_id: raw.chat_id,
     payload_json: raw.payload_json,
     ...(createdAt ? { created_at: createdAt } : {}),
+  };
+}
+
+/**
+ * @param {unknown} raw
+ * @returns {import("../store.js").WhatsAppEditHandleRow | null}
+ */
+export function normalizeWhatsAppEditHandleRow(raw) {
+  if (!isRecord(raw)) {
+    return null;
+  }
+
+  const createdAt = normalizeTimestampValue(raw.created_at);
+  const expiresAt = normalizeTimestampValue(raw.expires_at);
+  if (
+    typeof raw.id !== "string"
+    || typeof raw.chat_id !== "string"
+    || !isWhatsAppEditMessageKind(raw.message_kind)
+    || !createdAt
+    || !expiresAt
+  ) {
+    return null;
+  }
+
+  return {
+    id: raw.id,
+    chat_id: raw.chat_id,
+    message_key_json: raw.message_key_json,
+    message_kind: raw.message_kind,
+    created_at: createdAt,
+    expires_at: expiresAt,
   };
 }
 

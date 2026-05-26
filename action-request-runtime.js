@@ -95,7 +95,7 @@ export async function executeQueuedActionRequests(requestsDir, input) {
       input.session.chatId,
       toolMessage,
       input.session.senderIds,
-      handle?.keyId,
+      handle?.transportHandleId,
     );
     await input.hooks.onToolResult?.(blocks, tool.name, actionResult.permissions);
   }

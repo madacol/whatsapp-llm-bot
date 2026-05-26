@@ -357,7 +357,6 @@ function createQueuedMessageHandle(chatId, queueId) {
   }
 
   return {
-    keyId: undefined,
     deliveryStatus: "queued",
     queueId,
     waitUntilSent,
@@ -421,14 +420,15 @@ async function listQueuedWhatsAppOutbound(store) {
  * @param {string} chatId
  * @param {WhatsAppOutboundQueuePayload} payload
  * @param {import("../runtime/reaction-runtime.js").ReactionRuntime | undefined} reactionRuntime
+ * @param {import("../../store.js").Store | undefined} store
  * @returns {Promise<MessageHandle | undefined>}
  */
-async function deliverQueuedPayload(sock, chatId, payload, reactionRuntime) {
+async function deliverQueuedPayload(sock, chatId, payload, reactionRuntime, store) {
   if (payload.kind === "text") {
     await sock.sendMessage(chatId, { text: payload.text });
     return undefined;
   }
-  return sendOutboundEvent(sock, chatId, payload.event, undefined, reactionRuntime);
+  return sendOutboundEvent(sock, chatId, payload.event, undefined, reactionRuntime, { editHandleStore: store });
 }
 
 /**
@@ -449,7 +449,7 @@ export async function sendOrQueueWhatsAppEvent({ getSocket, chatId, event, react
   }
 
   try {
-    return await sendOutboundEvent(sock, chatId, event, undefined, reactionRuntime);
+    return await sendOutboundEvent(sock, chatId, event, undefined, reactionRuntime, { editHandleStore: store });
   } catch (error) {
     if (!isRecoverableWhatsAppSendError(error)) {
       throw error;
@@ -505,7 +505,7 @@ export async function flushQueuedWhatsAppOutbound({ getSocket, reactionRuntime, 
     }
 
     try {
-      const handle = await deliverQueuedPayload(sock, row.chatId, row.payload, reactionRuntime);
+      const handle = await deliverQueuedPayload(sock, row.chatId, row.payload, reactionRuntime, store);
       resolveQueuedHandle(row.chatId, row.id, handle);
       deliveredRows.push({ chatId: row.chatId, queueId: row.id, handle });
       await deleteQueuedWhatsAppOutbound(row.chatId, row.id, store);

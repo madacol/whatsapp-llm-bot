@@ -12,7 +12,7 @@ const DEFAULT_RESTART_ACK_PATH = ".state/restart-ack.json";
  * @typedef {{
  *   chatId: string,
  *   requestedAt: string,
- *   editToken?: unknown,
+ *   transportHandleId?: string,
  *   oldPid: number,
  *   keyId?: string,
  *   isImage?: boolean,
@@ -66,7 +66,7 @@ function parseRestartAckRecord(value) {
   if (!isRecord(value)) {
     return null;
   }
-  const { chatId, requestedAt, oldPid, editToken, keyId, isImage, queueId, interruptedTurns } = value;
+  const { chatId, requestedAt, oldPid, transportHandleId, keyId, isImage, queueId, interruptedTurns } = value;
   if (typeof chatId !== "string" || chatId.length === 0) {
     return null;
   }
@@ -74,6 +74,9 @@ function parseRestartAckRecord(value) {
     return null;
   }
   if (typeof oldPid !== "number" || !Number.isInteger(oldPid) || oldPid <= 0) {
+    return null;
+  }
+  if (transportHandleId !== undefined && typeof transportHandleId !== "string") {
     return null;
   }
   if (keyId !== undefined && typeof keyId !== "string") {
@@ -90,7 +93,7 @@ function parseRestartAckRecord(value) {
     chatId,
     requestedAt,
     oldPid,
-    ...(editToken !== undefined ? { editToken } : {}),
+    ...(transportHandleId ? { transportHandleId } : {}),
     ...(keyId ? { keyId } : {}),
     ...(typeof isImage === "boolean" ? { isImage } : {}),
     ...(typeof queueId === "number" ? { queueId } : {}),

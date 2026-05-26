@@ -17,7 +17,7 @@ describe("store with injected DB", () => {
     store = await initStore(db);
   });
 
-  it("does not create chat-owned or module-owned tables in the root DB", async () => {
+  it("does not create chat-owned tables in the root DB", async () => {
     // Use a fresh DB to avoid pollution from other test files sharing createTestDb()
     const freshDb = new SqliteDb(":memory:");
     await initStore(freshDb);
@@ -30,6 +30,7 @@ describe("store with injected DB", () => {
     for (const tableName of ["messages", "memories", "reminders", "usage_logs", "agent_runs", "whatsapp_outbound_queue", "html_pages", "media_to_text_cache"]) {
       assert.ok(!tableNames.includes(tableName), `initStore() should not create '${tableName}' table in root, got: ${tableNames}`);
     }
+    assert.ok(tableNames.includes("whatsapp_edit_handles"), "global WhatsApp edit handles should live in the root DB");
   });
 
   it("keeps fresh chat schemas catalog-only", async () => {
