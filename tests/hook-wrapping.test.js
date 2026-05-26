@@ -81,6 +81,19 @@ describe("wrapHooksWithFallbacks", () => {
     await hooks.onLlmResponse("hello");
   });
 
+  it("onLlmResponse passes response metadata through", async () => {
+    /** @type {unknown[]} */
+    let captured = [];
+    const hooks = wrapHooksWithFallbacks({
+      ...NO_OP_HOOKS,
+      onLlmResponse: async (text, metadata) => {
+        captured = [text, metadata];
+      },
+    });
+    await hooks.onLlmResponse("hello", { source: "subagent", threadId: "toolu-1" });
+    assert.deepEqual(captured, ["hello", { source: "subagent", threadId: "toolu-1" }]);
+  });
+
   it("onToolError suppresses error without crashing", async () => {
     const hooks = wrapHooksWithFallbacks({
       ...NO_OP_HOOKS,

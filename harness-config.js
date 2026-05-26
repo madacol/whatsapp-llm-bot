@@ -215,8 +215,7 @@ export function normalizeHarnessConfig(value, currentHarness) {
 
   if (typeof value.model === "string") {
     const targetHarness = classifyLegacyModel(value.model)
-      ?? (currentHarness === "claude-agent-sdk" || currentHarness === "codex"
-        || currentHarness === "pi"
+      ?? (currentHarness === "claude-agent-sdk" || currentHarness === "codex" || currentHarness === "pi"
         ? currentHarness
         : null);
     if (targetHarness) {

@@ -62,6 +62,7 @@ const SHOW_NONE_OPTION_ID = "none";
  *   currentId: (chat: import("../../../store.js").ChatRow) => string;
  *   options?: readonly string[];
  *   getOptions?: () => readonly string[];
+ *   alwaysSelect?: boolean;
  * }} ConfigPickerDefinition
  */
 
@@ -484,6 +485,7 @@ const BASE_CONFIG_KEYS = [
     picker: {
       getOptions: () => ["app", ...listHarnesses()],
       currentId: (chat) => chat.harness ?? "app",
+      alwaysSelect: true,
     },
     resettable: true,
     formatCurrent: (chat) => chat.harness ?? "app",
@@ -1039,7 +1041,8 @@ export async function getChatSettingsInfo(rootDb, chatId, extra) {
 
 /**
  * Return selectable options and the current value id for settings with fewer
- * than 5 fixed choices. Returns `null` if the setting is free-text.
+ * than 5 fixed choices, or settings that opt into selection. Returns `null`
+ * if the setting is free-text.
  *
  * @param {string | ConfigKeyDefinition} config
  * @param {import("../../../store.js").ChatRow} chat
@@ -1052,7 +1055,7 @@ export function getSelectableOptions(config, chat) {
   }
 
   const optionIds = getDefinitionOptions(definition);
-  if (optionIds.length === 0 || optionIds.length >= 5) {
+  if (optionIds.length === 0 || (optionIds.length >= 5 && definition.picker.alwaysSelect !== true)) {
     return null;
   }
 

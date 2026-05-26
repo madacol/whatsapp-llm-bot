@@ -1,5 +1,7 @@
 import { afterEach, describe, it } from "node:test";
 import assert from "node:assert/strict";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   createHarnessAdapterFromHarness,
   getHarnessSessionDirectory,
@@ -13,6 +15,8 @@ import {
   resolveHarnessInstance,
   reconcileHarnessInstances,
 } from "../harnesses/index.js";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 afterEach(async () => {
   resetHarnessRegistryForTests();
@@ -69,6 +73,43 @@ describe("harness driver registry", () => {
         { name: "pi", displayName: "Pi", supportsInstances: true },
       ],
     );
+  });
+
+  it("runs the production codex driver through ACP", async () => {
+    const instance = resolveHarnessInstance("codex", {
+      instanceId: "acp-work",
+      config: {
+        command: process.execPath,
+        args: [path.join(__dirname, "fixtures", "acp-mock-agent.js")],
+      },
+    });
+
+    assert.equal(instance.harness.getName(), "codex");
+    assert.equal(instance.capabilities.supportsSessionFork, true);
+    assert.equal(instance.capabilities.supportsLiveInput, true);
+
+    /** @type {string[]} */
+    const eventTypes = [];
+    const unsubscribe = instance.adapter.subscribeEvents?.((event) => {
+      eventTypes.push(event.type);
+    });
+    try {
+      await instance.adapter.startSession({ chatId: "codex-acp-chat" });
+      const result = await instance.adapter.sendTurn({
+        chatId: "codex-acp-chat",
+        input: "Run ACP Codex",
+        messages: [{ role: "user", content: [{ type: "text", text: "Run ACP Codex" }] }],
+      });
+
+      assert.deepEqual(result.response, [{ type: "markdown", text: "Main result." }]);
+      assert.equal(instance.adapter.listSessions()[0]?.resumeCursor, "mock-session-1");
+      assert.ok(eventTypes.includes("plan.updated"));
+      assert.ok(eventTypes.includes("subagent.completed"));
+      assert.ok(eventTypes.includes("file-change.completed"));
+      assert.ok(eventTypes.includes("usage.updated"));
+    } finally {
+      unsubscribe?.();
+    }
   });
 
   it("reads provider status through the driver seam", async () => {

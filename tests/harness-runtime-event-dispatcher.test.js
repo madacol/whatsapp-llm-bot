@@ -328,4 +328,57 @@ describe("createHarnessRuntimeEventDispatcher", () => {
     }]);
     assert.deepEqual(dispatcher.result.response, []);
   });
+
+  it("projects plan and subagent runtime events into chat hooks", async () => {
+    /** @type {Array<import("../plan-presentation.js").PlanPresentation>} */
+    const plans = [];
+    /** @type {Array<{ text: string, metadata?: LlmResponseMetadata }>} */
+    const responses = [];
+    const dispatcher = createHarnessRuntimeEventDispatcher({
+      provider: "acp",
+      messages: [],
+      hooks: {
+        onPlan: async (presentation) => {
+          plans.push(presentation);
+        },
+        onLlmResponse: async (text, metadata) => {
+          responses.push({ text, ...(metadata ? { metadata } : {}) });
+        },
+      },
+    });
+
+    await dispatcher.handleEvent({
+      type: "plan.updated",
+      provider: "acp",
+      plan: {
+        explanation: "Ship ACP",
+        entries: [
+          { text: "Wire runtime events", status: "completed" },
+          { text: "Handle subagents", status: "in_progress" },
+        ],
+      },
+    });
+    await dispatcher.handleEvent({
+      type: "subagent.completed",
+      provider: "acp",
+      text: "Subagent found the bug.",
+      metadata: {
+        source: "subagent",
+        threadId: "toolu-task-1",
+        agentRole: "code-reviewer",
+      },
+    });
+
+    assert.equal(plans.length, 1);
+    assert.equal(plans[0]?.summary, "*Plan*  _Working on: Handle subagents_");
+    assert.deepEqual(responses, [{
+      text: "Subagent found the bug.",
+      metadata: {
+        source: "subagent",
+        threadId: "toolu-task-1",
+        agentRole: "code-reviewer",
+      },
+    }]);
+    assert.deepEqual(dispatcher.result.response, []);
+  });
 });
