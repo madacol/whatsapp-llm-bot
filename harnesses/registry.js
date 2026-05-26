@@ -1,4 +1,3 @@
-import { createPiHarness } from "./pi.js";
 import { createHarnessAdapterFromHarness } from "./adapter.js";
 import { createAcpHarness, normalizeAcpHarnessConfig } from "./acp.js";
 
@@ -196,7 +195,9 @@ function registerDefaultHarnesses() {
     name: "pi",
     displayName: "Pi",
     supportsInstances: true,
-    createInstance: () => ({ harness: createPiHarness() }),
+    docsUrl: "https://agentclientprotocol.com/overview/agents",
+    configSchema: (config) => normalizeAcpHarnessConfig(config, "pi-acp"),
+    createInstance: ({ config }) => ({ harness: createAcpHarness({ name: "pi", config, defaultCommand: "pi-acp" }) }),
   });
 }
 

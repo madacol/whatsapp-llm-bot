@@ -112,6 +112,30 @@ describe("harness driver registry", () => {
     }
   });
 
+  it("runs the production Claude and Pi drivers through ACP", async () => {
+    await registerOptionalHarnesses();
+
+    for (const name of ["claude-agent-sdk", "pi"]) {
+      const instance = resolveHarnessInstance(name, {
+        instanceId: `${name}-acp-work`,
+        config: {
+          command: process.execPath,
+          args: [path.join(__dirname, "fixtures", "acp-mock-agent.js")],
+        },
+      });
+
+      assert.equal(instance.harness.getName(), name);
+      const result = await instance.adapter.sendTurn({
+        chatId: `${name}-chat`,
+        input: `Run ${name} through ACP`,
+        messages: [{ role: "user", content: [{ type: "text", text: `Run ${name} through ACP` }] }],
+      });
+
+      assert.deepEqual(result.response, [{ type: "markdown", text: "Main result." }]);
+      assert.equal(instance.adapter.listSessions()[0]?.resumeCursor, "mock-session-1");
+    }
+  });
+
   it("reads provider status through the driver seam", async () => {
     registerHarnessDriver({
       name: "status-test",
