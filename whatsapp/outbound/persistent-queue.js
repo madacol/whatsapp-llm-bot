@@ -358,7 +358,6 @@ function createQueuedMessageHandle(chatId, queueId) {
 
   return {
     keyId: undefined,
-    isImage: false,
     deliveryStatus: "queued",
     queueId,
     waitUntilSent,

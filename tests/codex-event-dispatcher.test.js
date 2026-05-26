@@ -177,7 +177,6 @@ describe("createCodexEventDispatcher", () => {
           toolCalls.push(toolCall);
           return {
             keyId: "image-gen-tool-message",
-            isImage: false,
             update: async (update) => {
               updates.push(update);
             },
@@ -296,7 +295,6 @@ describe("createCodexEventDispatcher", () => {
           toolCalls.push(toolCall);
           return {
             keyId: "tool-message",
-            isImage: false,
             update: async () => {},
             setInspect: (inspect) => {
               if (inspect) {

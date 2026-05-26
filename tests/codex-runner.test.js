@@ -25,7 +25,6 @@ function createRecordedHandle(keyId) {
     inspects,
     handle: {
       keyId,
-      isImage: false,
       update: async (update) => {
         updates.push(structuredClone(update));
       },

@@ -13,7 +13,7 @@ function formatInterruptedTurnMessage(turn) {
  * Deliver the pending post-restart acknowledgement, if one exists.
  * @param {{
  *   store: import("./_restart-ack-store.js").RestartAckStore,
- *   editMessage: (input: { chatId: string, keyId: string, text: string, isImage?: boolean }) => Promise<void>,
+ *   editMessage: (input: { chatId: string, text: string, keyId?: string, editToken?: unknown }) => Promise<void>,
  *   sendText: (chatId: string, text: string) => Promise<void>,
  *   recoverQueuedMessage?: (input: { chatId: string, queueId: number }) => MessageHandle | undefined,
  * }} input
@@ -30,15 +30,15 @@ export async function deliverPendingRestartAck({ store, editMessage, sendText, r
     : typeof record.queueId === "number"
       ? recoverQueuedMessage?.({ chatId: record.chatId, queueId: record.queueId })
       : undefined;
+  const editToken = record.editToken ?? recoveredHandle?.editToken;
   const keyId = record.keyId ?? recoveredHandle?.keyId;
-  const isImage = record.keyId ? record.isImage === true : recoveredHandle?.isImage === true;
 
-  if (keyId) {
+  if (editToken !== undefined || keyId) {
     await editMessage({
       chatId: record.chatId,
-      keyId,
       text: RESTARTED_TEXT,
-      isImage,
+      ...(editToken !== undefined ? { editToken } : {}),
+      ...(keyId ? { keyId } : {}),
     });
   } else if (record.queueId) {
     return;

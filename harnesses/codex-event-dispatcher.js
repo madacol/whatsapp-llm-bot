@@ -3,6 +3,7 @@ import { buildToolPresentation, getToolFlowDescriptor } from "../tool-presentati
 import { toolCallUpdate, toolFlowInspectState, toolFlowUpdate, toolInspectState } from "../outbound-events.js";
 import { createPlanPresentationFromState } from "../plan-presentation.js";
 import { createLogger } from "../logger.js";
+import { appendUniqueContentBlocks } from "../content-signature.js";
 import { createHarnessRuntimeEventDispatcher } from "./harness-runtime-event-dispatcher.js";
 import { createCodexReasoningState } from "./codex-reasoning-state.js";
 import { createCodexRunState } from "./codex-run-state.js";
@@ -13,34 +14,6 @@ import {
 } from "./codex-runtime-events.js";
 
 const log = createLogger("harness:codex-events");
-
-/**
- * @param {ToolContentBlock} block
- * @returns {string}
- */
-function contentBlockSignature(block) {
-  return JSON.stringify(block);
-}
-
-/**
- * @param {ToolContentBlock[]} first
- * @param {ToolContentBlock[]} second
- * @returns {ToolContentBlock[]}
- */
-function appendUniqueContentBlocks(first, second) {
-  const seen = new Set();
-  /** @type {ToolContentBlock[]} */
-  const merged = [];
-  for (const block of [...first, ...second]) {
-    const signature = contentBlockSignature(block);
-    if (seen.has(signature)) {
-      continue;
-    }
-    seen.add(signature);
-    merged.push(block);
-  }
-  return merged;
-}
 
 /**
  * Shared semantic dispatcher for normalized Codex events, independent of the
@@ -183,6 +156,128 @@ export function createCodexEventDispatcher(input) {
       return;
     }
     activeToolIdsByCorrelationKey.set(key, nextIds);
+  }
+
+  /**
+   * @param {import("./codex-events.js").CodexToolEvent} toolEvent
+   * @returns {{ id: string, name: string, arguments: string }}
+   */
+  function serializeToolCall(toolEvent) {
+    return {
+      id: toolEvent.id,
+      name: toolEvent.name,
+      arguments: JSON.stringify(toolEvent.arguments),
+    };
+  }
+
+  /**
+   * @param {import("./codex-events.js").CodexToolEvent} toolEvent
+   * @returns {{ id: string, activeTool: { handle?: MessageHandle, presentation: import("../tool-presentation-model.js").ToolPresentation, flowKey?: string } } | null}
+   */
+  function takeActiveToolForCompletion(toolEvent) {
+    const directTool = activeTools.get(toolEvent.id);
+    if (directTool) {
+      forgetActiveToolCorrelation(toolEvent, toolEvent.id);
+      return { id: toolEvent.id, activeTool: directTool };
+    }
+
+    const correlatedToolId = consumeActiveToolCorrelation(toolEvent);
+    if (!correlatedToolId) {
+      return null;
+    }
+    const correlatedTool = activeTools.get(correlatedToolId);
+    return correlatedTool ? { id: correlatedToolId, activeTool: correlatedTool } : null;
+  }
+
+  /**
+   * @param {import("./codex-events.js").CodexToolEvent} toolEvent
+   * @param {import("../tool-presentation-model.js").ToolPresentation} currentPresentation
+   * @returns {Promise<{ handle?: MessageHandle, presentation: import("../tool-presentation-model.js").ToolPresentation } | null>}
+   */
+  async function createSyntheticStartedTool(toolEvent, currentPresentation) {
+    const handle = await input.hooks.onToolCall(serializeToolCall(toolEvent));
+    return handle ? { handle, presentation: currentPresentation } : null;
+  }
+
+  /**
+   * @param {{ handle?: MessageHandle, presentation: import("../tool-presentation-model.js").ToolPresentation }} activeTool
+   * @param {import("./codex-events.js").CodexToolEvent} toolEvent
+   * @param {import("../tool-presentation-model.js").ToolPresentation} currentPresentation
+   * @returns {Promise<void>}
+   */
+  async function updateCompletedToolHandle(activeTool, toolEvent, currentPresentation) {
+    if (
+      activeTool.handle
+      && (
+        activeTool.presentation.summary !== currentPresentation.summary
+        || toolEvent.status === "completed"
+      )
+    ) {
+      try {
+        await activeTool.handle.update(toolCallUpdate(currentPresentation));
+      } catch {
+        // best-effort
+      }
+      activeTool.presentation = currentPresentation;
+    }
+
+    if (activeTool.handle && toolEvent.output) {
+      activeTool.handle.setInspect(toolInspectState(activeTool.presentation, toolEvent.output));
+    }
+
+    if (activeTool.handle && toolEvent.status === "failed") {
+      try {
+        await activeTool.handle.update(failedToolCallUpdate(activeTool.presentation));
+      } catch {
+        // best-effort
+      }
+    }
+  }
+
+  /**
+   * @param {import("./codex-events.js").CodexToolEvent} toolEvent
+   * @param {import("../tool-presentation-model.js").ToolPresentation} currentPresentation
+   * @returns {Promise<void>}
+   */
+  async function startUngroupedTool(toolEvent, currentPresentation) {
+    const handle = await input.hooks.onToolCall(serializeToolCall(toolEvent));
+    if (handle) {
+      try {
+        handle.setInspect(toolInspectState(currentPresentation));
+      } catch {
+        // best-effort
+      }
+    }
+    activeTools.set(toolEvent.id, {
+      ...(handle ? { handle } : {}),
+      presentation: currentPresentation,
+    });
+    rememberActiveToolCorrelation(toolEvent);
+    await input.hooks.onPaused();
+    await input.hooks.onComposing();
+  }
+
+  /**
+   * @param {import("./codex-events.js").CodexToolEvent} toolEvent
+   * @param {import("../tool-presentation-model.js").ToolPresentation} currentPresentation
+   * @returns {Promise<void>}
+   */
+  async function completeUngroupedTool(toolEvent, currentPresentation) {
+    const tracked = takeActiveToolForCompletion(toolEvent);
+    const activeToolId = tracked?.id ?? toolEvent.id;
+    const activeTool = tracked?.activeTool ?? await createSyntheticStartedTool(toolEvent, currentPresentation);
+    if (!activeTool) {
+      return;
+    }
+
+    await updateCompletedToolHandle(activeTool, toolEvent, currentPresentation);
+    if (toolEvent.status === "completed") {
+      await input.hooks.onToolComplete({
+        ...serializeToolCall(toolEvent),
+        id: activeToolId,
+      });
+    }
+    activeTools.delete(activeToolId);
   }
 
   /**
@@ -350,12 +445,7 @@ export function createCodexEventDispatcher(input) {
       if (flow) {
         let activeFlow = activeFlows.get(flow.groupKey);
         if (!activeFlow) {
-          const toolCall = {
-            id: toolEvent.id,
-            name: toolEvent.name,
-            arguments: JSON.stringify(toolEvent.arguments),
-          };
-          const handle = await input.hooks.onToolCall(toolCall) ?? undefined;
+          const handle = await input.hooks.onToolCall(serializeToolCall(toolEvent)) ?? undefined;
           activeFlow = {
             handle,
             state: { title: flow.groupTitle, steps: [] },
@@ -402,88 +492,9 @@ export function createCodexEventDispatcher(input) {
           activeTools.delete(toolEvent.id);
         }
       } else if (toolEvent.status === "started") {
-        const toolCall = {
-          id: toolEvent.id,
-          name: toolEvent.name,
-          arguments: JSON.stringify(toolEvent.arguments),
-        };
-        const handle = await input.hooks.onToolCall(toolCall);
-        if (handle) {
-          try {
-            handle.setInspect(toolInspectState(currentPresentation));
-          } catch {
-            // best-effort
-          }
-        }
-        activeTools.set(toolEvent.id, {
-          ...(handle ? { handle } : {}),
-          presentation: currentPresentation,
-        });
-        rememberActiveToolCorrelation(toolEvent);
-        await input.hooks.onPaused();
-        await input.hooks.onComposing();
+        await startUngroupedTool(toolEvent, currentPresentation);
       } else {
-        let activeToolId = toolEvent.id;
-        let activeTool = activeTools.get(activeToolId);
-        if (activeTool) {
-          forgetActiveToolCorrelation(toolEvent, activeToolId);
-        }
-        if (!activeTool) {
-          const correlatedToolId = consumeActiveToolCorrelation(toolEvent);
-          if (correlatedToolId) {
-            const correlatedTool = activeTools.get(correlatedToolId);
-            if (correlatedTool) {
-              activeToolId = correlatedToolId;
-              activeTool = correlatedTool;
-            }
-          }
-        }
-        if (!activeTool) {
-          const toolCall = {
-            id: toolEvent.id,
-            name: toolEvent.name,
-            arguments: JSON.stringify(toolEvent.arguments),
-          };
-          const handle = await input.hooks.onToolCall(toolCall);
-          if (handle) {
-            activeTool = { handle, presentation: currentPresentation };
-          }
-        }
-        if (
-          activeTool?.handle
-          && (
-            activeTool.presentation.summary !== currentPresentation.summary
-            || toolEvent.status === "completed"
-          )
-        ) {
-          const handle = activeTool.handle;
-          try {
-            await handle.update(toolCallUpdate(currentPresentation));
-          } catch {
-            // best-effort
-          }
-          activeTool.presentation = currentPresentation;
-        }
-        if (activeTool?.handle && toolEvent.output) {
-          activeTool.handle.setInspect(toolInspectState(activeTool.presentation, toolEvent.output));
-        }
-        if (activeTool && toolEvent.status === "completed") {
-          await input.hooks.onToolComplete({
-            id: activeToolId,
-            name: toolEvent.name,
-            arguments: JSON.stringify(toolEvent.arguments),
-          });
-        }
-        if (activeTool?.handle && toolEvent.status === "failed") {
-          try {
-            await activeTool.handle.update(failedToolCallUpdate(activeTool.presentation));
-          } catch {
-            // best-effort
-          }
-        }
-        if (activeTool) {
-          activeTools.delete(activeToolId);
-        }
+        await completeUngroupedTool(toolEvent, currentPresentation);
       }
 
       for (const response of extractStandardWaitAgentResponses(toolEvent)) {

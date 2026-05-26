@@ -12,12 +12,16 @@ const DEFAULT_RESTART_ACK_PATH = ".state/restart-ack.json";
  * @typedef {{
  *   chatId: string,
  *   requestedAt: string,
+ *   editToken?: unknown,
  *   oldPid: number,
  *   keyId?: string,
  *   isImage?: boolean,
  *   queueId?: number,
  *   interruptedTurns?: RestartInterruptedTurn[],
  * }} RestartAckRecord
+ *
+ * `keyId` and `isImage` are legacy fields kept so pending acknowledgements
+ * written by older builds can still be delivered after restart.
  *
  * @typedef {{
  *   save: (record: RestartAckRecord) => Promise<void>,
@@ -62,7 +66,7 @@ function parseRestartAckRecord(value) {
   if (!isRecord(value)) {
     return null;
   }
-  const { chatId, requestedAt, oldPid, keyId, isImage, queueId, interruptedTurns } = value;
+  const { chatId, requestedAt, oldPid, editToken, keyId, isImage, queueId, interruptedTurns } = value;
   if (typeof chatId !== "string" || chatId.length === 0) {
     return null;
   }
@@ -86,6 +90,7 @@ function parseRestartAckRecord(value) {
     chatId,
     requestedAt,
     oldPid,
+    ...(editToken !== undefined ? { editToken } : {}),
     ...(keyId ? { keyId } : {}),
     ...(typeof isImage === "boolean" ? { isImage } : {}),
     ...(typeof queueId === "number" ? { queueId } : {}),

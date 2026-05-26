@@ -92,7 +92,6 @@ async function restart_waits_for_queued_ack_before_stopping(_action_fn, db) {
   const afterResponse = result.afterResponse?.({
     handle: {
       keyId: undefined,
-      isImage: false,
       deliveryStatus: "queued",
       queueId: 42,
       waitUntilSent: async () => {
@@ -132,7 +131,6 @@ async function restart_persists_queue_id_for_unsent_ack_before_stopping(_action_
   await result.afterResponse?.({
     handle: {
       keyId: undefined,
-      isImage: false,
       deliveryStatus: "queued",
       queueId: 77,
       waitUntilSent: async () => undefined,
@@ -169,7 +167,7 @@ async function restart_persists_sent_ack_key_before_stopping(_action_fn, db) {
   await result.afterResponse?.({
     handle: {
       keyId: "ack-message-id",
-      isImage: false,
+      editToken: { transport: "test", keyId: "ack-message-id" },
       deliveryStatus: "sent",
       waitUntilSent: async function () {
         return this;
@@ -185,7 +183,7 @@ async function restart_persists_sent_ack_key_before_stopping(_action_fn, db) {
   assert.equal(savedRecords[0].keyId, undefined);
   assert.deepEqual(savedRecords[1].chatId, "restart-chat");
   assert.equal(savedRecords[1].keyId, "ack-message-id");
-  assert.equal(savedRecords[1].isImage, false);
+  assert.deepEqual(savedRecords[1].editToken, { transport: "test", keyId: "ack-message-id" });
 }
 
 /** @type {ActionDbTestFn} */
@@ -217,7 +215,6 @@ async function restart_waits_for_active_turns_before_scheduling(_action_fn, db) 
   await result.afterResponse?.({
     handle: {
       keyId: "ack-message-id",
-      isImage: false,
       deliveryStatus: "sent",
       waitUntilSent: async function () {
         return this;

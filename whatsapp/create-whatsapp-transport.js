@@ -631,7 +631,7 @@ function serializeTransportError(error) {
  *   stop: () => Promise<void>;
  *   sendText: (chatId: string, text: string) => Promise<void>;
  *   sendEvent?: (chatId: string, event: OutboundEvent) => Promise<MessageHandle | undefined>;
- *   editMessage?: (input: { chatId: string, keyId: string, text: string, isImage?: boolean }) => Promise<void>;
+ *   editMessage?: (input: { chatId: string, text: string, keyId?: string, editToken?: unknown }) => Promise<void>;
  *   createGroup: (subject: string, participants: string[]) => Promise<{ chatId: string, subject: string }>;
  *   createCommunity?: (subject: string, description: string) => Promise<{ chatId: string, subject: string }>;
  *   createCommunityGroup?: (
@@ -653,7 +653,7 @@ function serializeTransportError(error) {
  *   outboundStore?: import("../store.js").Store,
  *   inboundCoalesceDelayMs?: number,
  *   onConnectionOpen?: (transport: {
- *     editMessage: (input: { chatId: string, keyId: string, text: string, isImage?: boolean }) => Promise<void>,
+ *     editMessage: (input: { chatId: string, text: string, keyId?: string, editToken?: unknown }) => Promise<void>,
  *     sendText: (chatId: string, text: string) => Promise<void>,
  *     recoverQueuedMessage: (input: { chatId: string, queueId: number }) => MessageHandle | undefined,
  *   }) => Promise<void>,
@@ -737,15 +737,18 @@ export async function createWhatsAppTransport(options = {}) {
 
   /**
    * Edit a previously sent outbound message once the connection is open.
-   * @param {{ chatId: string, keyId: string, text: string, isImage?: boolean }} input
+   * @param {{ chatId: string, text: string, keyId?: string, editToken?: unknown }} input
    * @returns {Promise<void>}
    */
-  async function editMessage({ chatId, keyId, text, isImage = false }) {
+  async function editMessage({ chatId, keyId, text, editToken }) {
     const sock = getOpenSocket();
     if (!sock) {
       throw new Error("WhatsApp socket is not connected");
     }
-    await editWhatsAppMessage(sock, chatId, { remoteJid: chatId, fromMe: true, id: keyId }, text, isImage);
+    await editWhatsAppMessage(sock, chatId, text, {
+      token: editToken,
+      fallbackKeyId: keyId,
+    });
   }
 
   /**

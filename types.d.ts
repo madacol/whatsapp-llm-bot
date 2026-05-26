@@ -245,7 +245,7 @@ type MessageInspectState =
 /** Handle to a sent message, providing semantic lifecycle control. */
 type MessageHandle = {
   readonly keyId: string | undefined;
-  readonly isImage: boolean;
+  readonly editToken?: unknown;
   readonly deliveryStatus?: "sent" | "queued";
   readonly queueId?: number;
   waitUntilSent?: (options?: { timeoutMs?: number }) => Promise<MessageHandle | undefined>;
@@ -367,7 +367,7 @@ type ChatTransport = {
   stop: () => Promise<void>;
   sendText: (chatId: string, text: string) => Promise<void>;
   sendEvent?: (chatId: string, event: OutboundEvent) => Promise<MessageHandle | undefined>;
-  editMessage?: (input: { chatId: string; keyId: string; text: string; isImage?: boolean }) => Promise<void>;
+  editMessage?: (input: { chatId: string; text: string; keyId?: string; editToken?: unknown }) => Promise<void>;
   createGroup?: (subject: string, participants: string[]) => Promise<{ chatId: string, subject: string }>;
   createCommunity?: (subject: string, description: string) => Promise<{ chatId: string, subject: string }>;
   createCommunityGroup?: (
