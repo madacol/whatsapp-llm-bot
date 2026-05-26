@@ -49,6 +49,53 @@ function isObjectRecord(value) {
 }
 
 /**
+ * @param {import("./codex-events.js").NormalizedCodexEvent} normalized
+ * @returns {boolean}
+ */
+function hasSemanticNormalizedField(normalized) {
+  return Object.entries(normalized).some(([key, value]) => (
+    key !== "sessionId"
+    && value !== undefined
+    && value !== null
+    && (!Array.isArray(value) || value.length > 0)
+  ));
+}
+
+/**
+ * @param {Record<string, unknown>} message
+ * @returns {Record<string, unknown>}
+ */
+function summarizeUnhandledAppServerEvent(message) {
+  const params = isObjectRecord(message.params) ? message.params : {};
+  const item = isObjectRecord(params.item) ? params.item : null;
+  const turn = isObjectRecord(params.turn) ? params.turn : null;
+  const thread = isObjectRecord(params.thread) ? params.thread : null;
+  const threadStatus = isObjectRecord(thread?.status) ? thread.status : null;
+  return {
+    ...(typeof message.method === "string" && { method: message.method }),
+    ...(typeof params.threadId === "string" && { threadId: params.threadId }),
+    ...(typeof params.turnId === "string" && { turnId: params.turnId }),
+    ...(typeof item?.id === "string" && { itemId: item.id }),
+    ...(typeof item?.type === "string" && { itemType: item.type }),
+    ...(typeof item?.status === "string"
+      ? { status: item.status }
+      : typeof params.status === "string"
+        ? { status: params.status }
+        : typeof turn?.status === "string"
+          ? { status: turn.status }
+          : typeof threadStatus?.type === "string" ? { status: threadStatus.type } : {}),
+  };
+}
+
+/**
+ * @param {Record<string, unknown>} message
+ * @returns {boolean}
+ */
+function isInternallyHandledAppServerEvent(message) {
+  return message.method === "turn/started" || message.method === "turn/completed";
+}
+
+/**
  * @typedef {{
  *   id: string,
  *   status: string,
@@ -444,7 +491,17 @@ export async function startCodexAppServerRun(input, deps = {}) {
       for await (const message of activeConnection.notifications) {
         const normalized = normalizeCodexAppServerEvent(message);
         if (!normalized) {
+          if (isObjectRecord(message) && !isInternallyHandledAppServerEvent(message)) {
+            console.log("[codex:app-server] Unhandled event", summarizeUnhandledAppServerEvent(message));
+          }
           continue;
+        }
+        if (
+          isObjectRecord(message)
+          && !isInternallyHandledAppServerEvent(message)
+          && !hasSemanticNormalizedField(normalized)
+        ) {
+          console.log("[codex:app-server] Unhandled event", summarizeUnhandledAppServerEvent(message));
         }
 
         threadId = resolveSessionThreadId(threadId, normalized);

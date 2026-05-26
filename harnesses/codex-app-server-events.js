@@ -229,7 +229,19 @@ export function normalizeCodexAppServerEvent(message) {
     return normalized;
   }
 
-  if (itemType === "imageGeneration" && method === "item/completed") {
+  if (itemType === "imageGeneration" && (method === "item/started" || method === "item/completed")) {
+    const id = typeof item.id === "string" ? item.id : null;
+    if (id) {
+      normalized.toolEvent = {
+        id,
+        name: "image_gen",
+        arguments: {},
+        status: method === "item/started" ? "started" : "completed",
+      };
+    }
+    if (method === "item/started") {
+      return normalized;
+    }
     const result = typeof item.result === "string" && item.result.length > 0 ? item.result : null;
     if (result) {
       normalized.contentBlocks = [{
