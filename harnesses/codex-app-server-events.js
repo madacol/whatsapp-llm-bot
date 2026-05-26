@@ -57,6 +57,66 @@ function inferImageMimeType(savedPath) {
 }
 
 /**
+ * @param {import("./codex-events.js").NormalizedCodexEvent} normalized
+ * @returns {boolean}
+ */
+function hasSemanticNormalizedField(normalized) {
+  return Object.entries(normalized).some(([key, value]) => (
+    key !== "sessionId"
+    && value !== undefined
+    && value !== null
+    && (!Array.isArray(value) || value.length > 0)
+  ));
+}
+
+/**
+ * @param {Record<string, unknown>} message
+ * @returns {Record<string, unknown>}
+ */
+function summarizeAppServerEvent(message) {
+  const params = isCodexEventRecord(message.params) ? message.params : {};
+  const item = isCodexEventRecord(params.item) ? params.item : null;
+  const turn = isCodexEventRecord(params.turn) ? params.turn : null;
+  const thread = isCodexEventRecord(params.thread) ? params.thread : null;
+  const threadStatus = isCodexEventRecord(thread?.status) ? thread.status : null;
+  return {
+    ...(typeof message.method === "string" && { method: message.method }),
+    ...(typeof params.threadId === "string" && { threadId: params.threadId }),
+    ...(typeof params.turnId === "string" && { turnId: params.turnId }),
+    ...(typeof item?.id === "string" && { itemId: item.id }),
+    ...(typeof item?.type === "string" && { itemType: item.type }),
+    ...(typeof item?.status === "string"
+      ? { status: item.status }
+      : typeof params.status === "string"
+        ? { status: params.status }
+        : typeof turn?.status === "string"
+          ? { status: turn.status }
+          : typeof threadStatus?.type === "string" ? { status: threadStatus.type } : {}),
+  };
+}
+
+/**
+ * @param {unknown} message
+ * @returns {Record<string, unknown>}
+ */
+function summarizeInvalidAppServerEvent(message) {
+  if (isCodexEventRecord(message)) {
+    return summarizeAppServerEvent(message);
+  }
+  return {
+    messageType: Array.isArray(message) ? "array" : typeof message,
+  };
+}
+
+/**
+ * @param {Record<string, unknown>} message
+ * @returns {boolean}
+ */
+function isInternallyHandledAppServerEvent(message) {
+  return message.method === "turn/started" || message.method === "turn/completed";
+}
+
+/**
  * Normalize a Codex App Server JSON-RPC message into the semantic event shape
  * used by the harness wrapper.
  * @param {unknown} message
@@ -366,4 +426,36 @@ export function normalizeCodexAppServerEvent(message) {
   }
 
   return normalized;
+}
+
+/**
+ * Decode a Codex App Server notification at the protocol seam.
+ * @param {unknown} message
+ * @returns {import("./codex-events.js").CodexAppServerNotificationDecode}
+ */
+export function decodeCodexAppServerNotification(message) {
+  const normalized = normalizeCodexAppServerEvent(message);
+  if (!isCodexEventRecord(message) || !normalized) {
+    return {
+      kind: "invalid",
+      summary: summarizeInvalidAppServerEvent(message),
+    };
+  }
+  if (hasSemanticNormalizedField(normalized)) {
+    return {
+      kind: "semantic",
+      event: normalized,
+    };
+  }
+  if (isInternallyHandledAppServerEvent(message)) {
+    return {
+      kind: "ignored",
+      reason: "turn-lifecycle",
+      event: normalized,
+    };
+  }
+  return {
+    kind: "unknown",
+    summary: summarizeAppServerEvent(message),
+  };
 }
