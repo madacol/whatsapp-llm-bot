@@ -151,6 +151,90 @@ describe("createCodexEventDispatcher", () => {
     ]);
   });
 
+  it("updates the started tool handle on completion while emitting image content separately", async () => {
+    /** @type {LlmChatResponse["toolCalls"]} */
+    const toolCalls = [];
+    /** @type {LlmChatResponse["toolCalls"]} */
+    const completedToolCalls = [];
+    /** @type {MessageHandleUpdate[]} */
+    const updates = [];
+    /** @type {ToolContentBlock[][]} */
+    const toolResults = [];
+    const imageBlock = /** @type {ToolContentBlock} */ ({
+      type: "image",
+      mime_type: "image/png",
+      encoding: "base64",
+      data: "iVBORw0KGgo=",
+    });
+
+    const dispatcher = createCodexEventDispatcher({
+      messages: [],
+      hooks: {
+        onComposing: async () => {},
+        onPaused: async () => {},
+        onReasoning: async () => {},
+        onToolCall: async (toolCall) => {
+          toolCalls.push(toolCall);
+          return {
+            keyId: "image-gen-tool-message",
+            isImage: false,
+            update: async (update) => {
+              updates.push(update);
+            },
+            setInspect: async () => {},
+          };
+        },
+        onToolComplete: async (toolCall) => {
+          completedToolCalls.push(toolCall);
+        },
+        onToolResult: async (blocks) => {
+          toolResults.push(blocks);
+        },
+        onCommand: async () => {},
+        onFileRead: async () => {},
+        onPlan: async () => {},
+        onFileChange: async () => {},
+        onToolError: async () => {},
+        onUsage: async () => {},
+        onLlmResponse: async () => {},
+      },
+    });
+
+    await dispatcher.handleNormalized({
+      sessionId: "thread-parent",
+      toolEvent: {
+        id: "ig_1",
+        name: "image_gen",
+        arguments: {},
+        status: "started",
+      },
+    });
+    await dispatcher.handleNormalized({
+      sessionId: "thread-parent",
+      toolEvent: {
+        id: "ig_1",
+        name: "image_gen",
+        arguments: {},
+        status: "completed",
+      },
+      contentBlocks: [imageBlock],
+    });
+
+    assert.deepEqual(toolCalls, [{
+      id: "ig_1",
+      name: "image_gen",
+      arguments: "{}",
+    }]);
+    assert.deepEqual(completedToolCalls, [{
+      id: "ig_1",
+      name: "image_gen",
+      arguments: "{}",
+    }]);
+    assert.equal(updates.length, 1);
+    assert.equal(updates[0]?.kind, "tool_call");
+    assert.deepEqual(toolResults, [[imageBlock]]);
+  });
+
   it("emits standard spawn_agent/wait_agent completed statuses as sub-agent output", async () => {
     const { dispatcher, llmResponses } = createSubject();
 
