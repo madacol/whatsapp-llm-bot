@@ -124,6 +124,154 @@ function createNotificationController() {
 }
 
 describe("startCodexAppServerRun", () => {
+  it("emits image generation lifecycle events and final image content from app-server notifications", async () => {
+    const connectionMock = createOpenConnectionMock();
+    /** @type {Array<{ id: string, name: string, arguments: string }>} */
+    const toolCalls = [];
+    /** @type {Array<{ id: string, name: string, arguments: string }>} */
+    const toolCompletes = [];
+    /** @type {ToolContentBlock[][]} */
+    const toolResults = [];
+
+    const started = await startCodexAppServerRun({
+      chatId: "chat-image-gen",
+      prompt: "Generate an image",
+      messages: [{ role: "user", content: [{ type: "text", text: "Generate an image" }] }],
+      hooks: {
+        onToolCall: async (toolCall) => {
+          toolCalls.push(toolCall);
+        },
+        onToolComplete: async (toolCall) => {
+          toolCompletes.push(toolCall);
+        },
+        onToolResult: async (blocks) => {
+          toolResults.push(blocks);
+        },
+      },
+    }, {
+      openConnection: (options = {}) => connectionMock.openConnection({
+        ...options,
+        notifications: [
+          {
+            method: "item/started",
+            params: {
+              threadId: "thread-1",
+              item: {
+                id: "ig_1",
+                type: "imageGeneration",
+                status: "in_progress",
+                revisedPrompt: null,
+                result: "",
+              },
+            },
+          },
+          {
+            method: "item/completed",
+            params: {
+              threadId: "thread-1",
+              item: {
+                id: "ig_1",
+                type: "imageGeneration",
+                status: "generating",
+                result: "iVBORw0KGgo=",
+                savedPath: "/home/mada/.codex/generated_images/thread-1/ig_1.png",
+              },
+            },
+          },
+          {
+            method: "turn/completed",
+            params: {
+              threadId: "thread-1",
+              turn: {
+                id: "turn-1",
+                status: "completed",
+                error: null,
+              },
+            },
+          },
+        ],
+      }),
+    });
+
+    const completed = await started.done;
+    const imageBlock = /** @type {ToolContentBlock} */ ({
+      type: "image",
+      mime_type: "image/png",
+      encoding: "base64",
+      data: "iVBORw0KGgo=",
+    });
+
+    assert.deepEqual(toolCalls, [{
+      id: "ig_1",
+      name: "image_gen",
+      arguments: "{}",
+    }]);
+    assert.deepEqual(toolCompletes, [{
+      id: "ig_1",
+      name: "image_gen",
+      arguments: "{}",
+    }]);
+    assert.deepEqual(toolResults, [[imageBlock]]);
+    assert.deepEqual(completed.result.response, [imageBlock]);
+  });
+
+  it("logs app-server notifications that have no semantic handler", async () => {
+    const connectionMock = createOpenConnectionMock();
+    /** @type {unknown[][]} */
+    const logs = [];
+    const originalLog = console.log;
+    console.log = (...args) => {
+      logs.push(args);
+    };
+
+    try {
+      const started = await startCodexAppServerRun({
+        chatId: "chat-unhandled",
+        prompt: "Continue",
+        messages: [{ role: "user", content: [{ type: "text", text: "Continue" }] }],
+      }, {
+        openConnection: (options = {}) => connectionMock.openConnection({
+          ...options,
+          notifications: [
+            {
+              method: "mcpServer/startupStatus/updated",
+              params: {
+                threadId: "thread-1",
+                serverName: "filesystem",
+                status: "ready",
+              },
+            },
+            {
+              method: "turn/completed",
+              params: {
+                threadId: "thread-1",
+                turn: {
+                  id: "turn-1",
+                  status: "completed",
+                  error: null,
+                },
+              },
+            },
+          ],
+        }),
+      });
+
+      await started.done;
+    } finally {
+      console.log = originalLog;
+    }
+
+    assert.ok(logs.some(([message, details]) => (
+      message === "[codex:app-server] Unhandled event"
+      && typeof details === "object"
+      && details !== null
+      && "method" in details
+      && details.method === "mcpServer/startupStatus/updated"
+      && "status" in details
+      && details.status === "ready"
+    )), `Expected unhandled app-server event log, got ${JSON.stringify(logs)}`);
+  });
+
   it("estimates Codex app-server usage cost from token usage updates", async () => {
     const connectionMock = createOpenConnectionMock();
     /** @type {Array<{ cost: string, tokens: UsageTokens }>} */

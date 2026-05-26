@@ -491,7 +491,29 @@ describe("codex events", () => {
     });
   });
 
-  it("normalizes app-server image output as generic content blocks", () => {
+  it("normalizes app-server image generation lifecycle and output", () => {
+    assert.deepEqual(normalizeCodexAppServerEvent({
+      method: "item/started",
+      params: {
+        threadId: "thread-1",
+        item: {
+          id: "ig_1",
+          type: "imageGeneration",
+          status: "in_progress",
+          revisedPrompt: null,
+          result: "",
+        },
+      },
+    }), {
+      sessionId: "thread-1",
+      toolEvent: {
+        id: "ig_1",
+        name: "image_gen",
+        arguments: {},
+        status: "started",
+      },
+    });
+
     assert.deepEqual(normalizeCodexAppServerEvent({
       method: "item/completed",
       params: {
@@ -506,6 +528,12 @@ describe("codex events", () => {
       },
     }), {
       sessionId: "thread-1",
+      toolEvent: {
+        id: "ig_1",
+        name: "image_gen",
+        arguments: {},
+        status: "completed",
+      },
       contentBlocks: [{
         type: "image",
         mime_type: "image/png",
