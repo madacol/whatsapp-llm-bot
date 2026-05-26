@@ -51,7 +51,8 @@ export function wrapHooksWithFallbacks(rawHooks) {
     onPaused: () => safeHook("onPaused", () => rawHooks.onPaused(), undefined),
     onReasoning: (/** @type {{ status: "started" | "updated" | "completed", itemId?: string, summaryParts: string[], contentParts: string[], text?: string, hasEncryptedContent?: boolean }} */ event) =>
       safeHook("onReasoning", () => rawHooks.onReasoning(event), undefined),
-    onLlmResponse: (/** @type {string} */ text) => safeHook("onLlmResponse", () => rawHooks.onLlmResponse(text), undefined),
+    onLlmResponse: (/** @type {string} */ text, /** @type {LlmResponseMetadata | undefined} */ metadata) =>
+      safeHook("onLlmResponse", () => rawHooks.onLlmResponse(text, metadata), undefined),
     onAskUser: (/** @type {string} */ question, /** @type {string[]} */ options, /** @type {string | undefined} */ preamble, /** @type {string[] | undefined} */ descriptions) =>
       safeHook("onAskUser", () => rawHooks.onAskUser(question, options, preamble, descriptions), ""),
     onToolCall: (

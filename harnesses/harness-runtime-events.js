@@ -173,6 +173,30 @@
 /**
  * @typedef {{
  *   chatId?: string,
+ *   type: "subagent.completed",
+ *   provider: HarnessRuntimeProvider,
+ *   text: string,
+ *   metadata?: LlmResponseMetadata,
+ *   raw?: Record<string, unknown>,
+ * }} HarnessRuntimeSubagentCompletedEvent
+ */
+
+/**
+ * @typedef {{
+ *   chatId?: string,
+ *   type: "plan.updated",
+ *   provider: HarnessRuntimeProvider,
+ *   plan: {
+ *     explanation?: string | null,
+ *     entries: Array<{ text: string, status: "completed" | "in_progress" | "pending" | "unknown" }>,
+ *   },
+ *   raw?: Record<string, unknown>,
+ * }} HarnessRuntimePlanUpdatedEvent
+ */
+
+/**
+ * @typedef {{
+ *   chatId?: string,
  *   type: "usage.updated",
  *   provider: HarnessRuntimeProvider,
  *   usage: HarnessRuntimeUsage,
@@ -192,6 +216,8 @@
  *   | HarnessRuntimeCommandEvent
  *   | HarnessRuntimeFileReadEvent
  *   | HarnessRuntimeAssistantCompletedEvent
+ *   | HarnessRuntimeSubagentCompletedEvent
+ *   | HarnessRuntimePlanUpdatedEvent
  *   | HarnessRuntimeUsageEvent
  * )} HarnessRuntimeEvent
  */

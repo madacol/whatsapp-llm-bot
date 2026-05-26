@@ -1,6 +1,6 @@
-import { createCodexHarness } from "./codex.js";
 import { createPiHarness } from "./pi.js";
 import { createHarnessAdapterFromHarness } from "./adapter.js";
+import { createAcpHarness, normalizeAcpHarnessConfig } from "./acp.js";
 
 /**
  * @typedef {{
@@ -188,8 +188,9 @@ function registerDefaultHarnesses() {
     name: "codex",
     displayName: "Codex",
     supportsInstances: true,
-    docsUrl: "https://developers.openai.com/codex",
-    createInstance: () => ({ harness: createCodexHarness() }),
+    docsUrl: "https://github.com/zed-industries/codex-acp",
+    configSchema: (config) => normalizeAcpHarnessConfig(config, "codex-acp"),
+    createInstance: ({ config }) => ({ harness: createAcpHarness({ name: "codex", config, defaultCommand: "codex-acp" }) }),
   });
   registerHarnessDriver({
     name: "pi",

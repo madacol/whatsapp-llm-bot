@@ -2,6 +2,7 @@ import { toolInspectState } from "../outbound-events.js";
 import { buildToolPresentation } from "../tool-presentation-model.js";
 import { createLogger } from "../logger.js";
 import { getHarnessRawEventLoggerFromEnv } from "./raw-event-log.js";
+import { createPlanPresentationFromState } from "../plan-presentation.js";
 
 /**
  * @typedef {import("./harness-runtime-events.js").HarnessRuntimeEvent} HarnessRuntimeEvent
@@ -15,7 +16,7 @@ import { getHarnessRawEventLoggerFromEnv } from "./raw-event-log.js";
 const log = createLogger("harness:runtime-events");
 
 /**
- * @type {Pick<Required<AgentIOHooks>, "onComposing" | "onPaused" | "onReasoning" | "onToolCall" | "onToolComplete" | "onToolResult" | "onLlmResponse" | "onFileChange" | "onUsage" | "onToolError" | "onCommand" | "onFileRead">}
+ * @type {Pick<Required<AgentIOHooks>, "onComposing" | "onPaused" | "onReasoning" | "onToolCall" | "onToolComplete" | "onToolResult" | "onLlmResponse" | "onFileChange" | "onUsage" | "onToolError" | "onCommand" | "onFileRead" | "onPlan">}
  */
 const DEFAULT_RUNTIME_EVENT_HOOKS = {
   onComposing: async () => {},
@@ -30,6 +31,7 @@ const DEFAULT_RUNTIME_EVENT_HOOKS = {
   onToolError: async () => {},
   onCommand: async () => {},
   onFileRead: async () => {},
+  onPlan: async () => {},
 };
 
 /**
@@ -71,7 +73,7 @@ function buildRuntimeToolPresentation(tool, workdir) {
  * @param {{
  *   provider: HarnessRuntimeProvider,
  *   messages: Message[],
- *   hooks?: Pick<AgentIOHooks, "onComposing" | "onPaused" | "onReasoning" | "onToolCall" | "onToolComplete" | "onToolResult" | "onLlmResponse" | "onFileChange" | "onUsage" | "onToolError" | "onCommand" | "onFileRead">,
+ *   hooks?: Pick<AgentIOHooks, "onComposing" | "onPaused" | "onReasoning" | "onToolCall" | "onToolComplete" | "onToolResult" | "onLlmResponse" | "onFileChange" | "onUsage" | "onToolError" | "onCommand" | "onFileRead" | "onPlan">,
  *   workdir?: string | null,
  *   emitUsage?: boolean,
  *   rawEventLogger?: HarnessRawEventLogger | null,
@@ -226,6 +228,15 @@ export function createHarnessRuntimeEventDispatcher(input) {
         if (event.usage) {
           await updateUsage(event.usage, event.usageMode ?? "replace");
         }
+        return;
+      case "subagent.completed":
+        await hooks.onLlmResponse(event.text, {
+          source: "subagent",
+          ...(event.metadata ?? {}),
+        });
+        return;
+      case "plan.updated":
+        await hooks.onPlan(createPlanPresentationFromState(event.plan));
         return;
       case "usage.updated":
         await updateUsage(event.usage, "replace");
