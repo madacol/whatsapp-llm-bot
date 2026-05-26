@@ -9,7 +9,7 @@ import { registerHarnessDriver } from "./registry.js";
 export async function registerOptionalHarnesses() {
   registerHarnessDriver({
     name: "claude-agent-sdk",
-    displayName: "Claude ACP",
+    displayName: "Claude",
     supportsInstances: true,
     docsUrl: "https://github.com/zed-industries/claude-code-acp",
     statusUrl: "https://status.anthropic.com/",
