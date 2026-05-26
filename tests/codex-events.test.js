@@ -1,6 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
+  decodeCodexAppServerNotification,
   extractCodexSessionId,
   extractCodexText,
   normalizeCodexAppServerEvent,
@@ -540,6 +541,65 @@ describe("codex events", () => {
         encoding: "base64",
         data: "iVBORw0KGgo=",
       }],
+    });
+  });
+
+  it("classifies app-server notifications at the seam", () => {
+    assert.deepEqual(decodeCodexAppServerNotification({
+      method: "turn/completed",
+      params: {
+        threadId: "thread-1",
+        turn: {
+          id: "turn-1",
+          status: "completed",
+          error: null,
+        },
+      },
+    }), {
+      kind: "ignored",
+      reason: "turn-lifecycle",
+      event: {
+        sessionId: "thread-1",
+      },
+    });
+
+    assert.deepEqual(decodeCodexAppServerNotification({
+      method: "mcpServer/startupStatus/updated",
+      params: {
+        threadId: "thread-1",
+        serverName: "filesystem",
+        status: "ready",
+      },
+    }), {
+      kind: "unknown",
+      summary: {
+        method: "mcpServer/startupStatus/updated",
+        threadId: "thread-1",
+        status: "ready",
+      },
+    });
+
+    assert.deepEqual(decodeCodexAppServerNotification({
+      method: "item/started",
+      params: {
+        threadId: "thread-1",
+        item: {
+          id: "ig_1",
+          type: "imageGeneration",
+          status: "in_progress",
+        },
+      },
+    }), {
+      kind: "semantic",
+      event: {
+        sessionId: "thread-1",
+        toolEvent: {
+          id: "ig_1",
+          name: "image_gen",
+          arguments: {},
+          status: "started",
+        },
+      },
     });
   });
 

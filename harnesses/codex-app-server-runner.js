@@ -1,4 +1,4 @@
-import { normalizeCodexAppServerEvent } from "./codex-app-server-events.js";
+import { decodeCodexAppServerNotification } from "./codex-app-server-events.js";
 import { ReportedHarnessRunError, isTransientHarnessRunError, reportHarnessRunError } from "./harness-run-errors.js";
 import { buildCodexTurnInput } from "./codex-runner.js";
 import { openCodexAppServerConnection } from "./codex-app-server-client.js";
@@ -46,53 +46,6 @@ function isAbortError(error) {
  */
 function isObjectRecord(value) {
   return !!value && typeof value === "object" && !Array.isArray(value);
-}
-
-/**
- * @param {import("./codex-events.js").NormalizedCodexEvent} normalized
- * @returns {boolean}
- */
-function hasSemanticNormalizedField(normalized) {
-  return Object.entries(normalized).some(([key, value]) => (
-    key !== "sessionId"
-    && value !== undefined
-    && value !== null
-    && (!Array.isArray(value) || value.length > 0)
-  ));
-}
-
-/**
- * @param {Record<string, unknown>} message
- * @returns {Record<string, unknown>}
- */
-function summarizeUnhandledAppServerEvent(message) {
-  const params = isObjectRecord(message.params) ? message.params : {};
-  const item = isObjectRecord(params.item) ? params.item : null;
-  const turn = isObjectRecord(params.turn) ? params.turn : null;
-  const thread = isObjectRecord(params.thread) ? params.thread : null;
-  const threadStatus = isObjectRecord(thread?.status) ? thread.status : null;
-  return {
-    ...(typeof message.method === "string" && { method: message.method }),
-    ...(typeof params.threadId === "string" && { threadId: params.threadId }),
-    ...(typeof params.turnId === "string" && { turnId: params.turnId }),
-    ...(typeof item?.id === "string" && { itemId: item.id }),
-    ...(typeof item?.type === "string" && { itemType: item.type }),
-    ...(typeof item?.status === "string"
-      ? { status: item.status }
-      : typeof params.status === "string"
-        ? { status: params.status }
-        : typeof turn?.status === "string"
-          ? { status: turn.status }
-          : typeof threadStatus?.type === "string" ? { status: threadStatus.type } : {}),
-  };
-}
-
-/**
- * @param {Record<string, unknown>} message
- * @returns {boolean}
- */
-function isInternallyHandledAppServerEvent(message) {
-  return message.method === "turn/started" || message.method === "turn/completed";
 }
 
 /**
@@ -489,20 +442,12 @@ export async function startCodexAppServerRun(input, deps = {}) {
     let streamError = null;
     try {
       for await (const message of activeConnection.notifications) {
-        const normalized = normalizeCodexAppServerEvent(message);
-        if (!normalized) {
-          if (isObjectRecord(message) && !isInternallyHandledAppServerEvent(message)) {
-            console.log("[codex:app-server] Unhandled event", summarizeUnhandledAppServerEvent(message));
-          }
+        const decoded = decodeCodexAppServerNotification(message);
+        if (decoded.kind === "unknown" || decoded.kind === "invalid") {
+          console.log("[codex:app-server] Unhandled event", decoded.summary);
           continue;
         }
-        if (
-          isObjectRecord(message)
-          && !isInternallyHandledAppServerEvent(message)
-          && !hasSemanticNormalizedField(normalized)
-        ) {
-          console.log("[codex:app-server] Unhandled event", summarizeUnhandledAppServerEvent(message));
-        }
+        const normalized = decoded.event;
 
         threadId = resolveSessionThreadId(threadId, normalized);
 
@@ -512,6 +457,12 @@ export async function startCodexAppServerRun(input, deps = {}) {
 
         if (typeof message.method === "string" && message.method === "turn/completed") {
           turnCompleted = true;
+        }
+        if (decoded.kind === "ignored") {
+          if (turnCompleted) {
+            break;
+          }
+          continue;
         }
         if (normalized.threadEvent?.kind === "subagent") {
           readSubagentThreadEvents.set(normalized.threadEvent.id, normalized.threadEvent);

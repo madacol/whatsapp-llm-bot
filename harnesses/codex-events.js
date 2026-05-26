@@ -7,7 +7,7 @@
  */
 
 export { extractCodexText } from "./codex-event-utils.js";
-export { normalizeCodexAppServerEvent } from "./codex-app-server-events.js";
+export { decodeCodexAppServerNotification, normalizeCodexAppServerEvent } from "./codex-app-server-events.js";
 export {
   extractCodexSessionId,
   normalizeCodexEvent,
@@ -95,6 +95,23 @@ export {
  *   fileChanges?: CodexFileChangeEvent[],
  *   fileChangeLifecycle?: CodexFileChangeLifecycleEvent,
  * }} NormalizedCodexEvent
+ */
+
+/**
+ * @typedef {{
+ *   kind: "semantic",
+ *   event: NormalizedCodexEvent,
+ * } | {
+ *   kind: "ignored",
+ *   reason: "turn-lifecycle",
+ *   event: NormalizedCodexEvent,
+ * } | {
+ *   kind: "unknown",
+ *   summary: Record<string, unknown>,
+ * } | {
+ *   kind: "invalid",
+ *   summary: Record<string, unknown>,
+ * }} CodexAppServerNotificationDecode
  */
 
 /**
