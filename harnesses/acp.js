@@ -1,4 +1,5 @@
 import { createHarnessEventStreamController } from "./adapter.js";
+import { deriveAcpHarnessCapabilities, hasAcpSessionCapability } from "./acp-capabilities.js";
 import { forkAcpSession, readAcpSession, rollbackAcpSession, startAcpRun } from "./acp-runner.js";
 import { buildTextHarnessPromptFromBlocks } from "./prompt-media.js";
 import { updateActiveHarnessConfig, getActiveHarnessConfig } from "../harness-config.js";
@@ -89,14 +90,33 @@ function extractRequestResponseText(response) {
 }
 
 /**
- * @param {Record<string, unknown> | undefined} capabilities
- * @param {string} name
- * @returns {boolean}
+ * @param {{ steer?: (text: string) => Promise<boolean>, setMode?: (mode: string) => Promise<boolean> }} active
+ * @param {{
+ *   connection: Awaited<ReturnType<typeof import("./acp-client.js").openAcpConnection>>,
+ *   sessionId: string | null,
+ *   capabilities: Record<string, unknown>,
+ * }} input
+ * @returns {() => void}
  */
-function hasAcpSessionCapability(capabilities, name) {
-  const sessionCapabilities = isRecord(capabilities?.sessionCapabilities) ? capabilities.sessionCapabilities : null;
-  const rfdSessionCapabilities = isRecord(capabilities?.session) ? capabilities.session : null;
-  return isRecord(sessionCapabilities?.[name]) || isRecord(rfdSessionCapabilities?.[name]);
+function installActiveAcpRunControls(active, input) {
+  active.steer = async (text) => {
+    if (!input.sessionId || !hasAcpSessionCapability(input.capabilities, "steer")) {
+      return false;
+    }
+    await input.connection.sendRequest("session/steer", { sessionId: input.sessionId, text });
+    return true;
+  };
+  active.setMode = async (mode) => {
+    if (!input.sessionId) {
+      return false;
+    }
+    await input.connection.sendRequest("session/set_config_option", { sessionId: input.sessionId, configId: "mode", value: mode });
+    return true;
+  };
+  return () => {
+    delete active.steer;
+    delete active.setMode;
+  };
 }
 
 /**
@@ -152,24 +172,7 @@ export function createAcpHarness(options = {}) {
             if (!active) {
               return undefined;
             }
-            active.steer = async (text) => {
-              if (!sessionId || !hasAcpSessionCapability(capabilities, "steer")) {
-                return false;
-              }
-              await connection.sendRequest("session/steer", { sessionId, text });
-              return true;
-            };
-            active.setMode = async (mode) => {
-              if (!sessionId) {
-                return false;
-              }
-              await connection.sendRequest("session/set_config_option", { sessionId, configId: "mode", value: mode });
-              return true;
-            };
-            return () => {
-              delete active.steer;
-              delete active.setMode;
-            };
+            return installActiveAcpRunControls(active, { connection, sessionId, capabilities });
           },
           requestDecision: createActiveRequestDecision("__legacy__"),
         });
@@ -251,24 +254,7 @@ export function createAcpHarness(options = {}) {
                 if (!active) {
                   return undefined;
                 }
-                active.steer = async (text) => {
-                  if (!sessionId || !hasAcpSessionCapability(capabilities, "steer")) {
-                    return false;
-                  }
-                  await connection.sendRequest("session/steer", { sessionId, text });
-                  return true;
-                };
-                active.setMode = async (mode) => {
-                  if (!sessionId) {
-                    return false;
-                  }
-                  await connection.sendRequest("session/set_config_option", { sessionId, configId: "mode", value: mode });
-                  return true;
-                };
-                return () => {
-                  delete active.steer;
-                  delete active.setMode;
-                };
+                return installActiveAcpRunControls(active, { connection, sessionId, capabilities });
               },
               requestDecision: createActiveRequestDecision(turn.chatId),
               emitEvent: (event) => events.emit({ ...event, chatId: turn.chatId }),
@@ -277,6 +263,7 @@ export function createAcpHarness(options = {}) {
               ...running,
               status: "ready",
               resumeCursor: completed.sessionId ?? sessionId ?? null,
+              capabilities: deriveAcpHarnessCapabilities(ACP_HARNESS_CAPABILITIES, completed.capabilities),
             });
             sessions.set(turn.chatId, ready);
             if (ready.resumeCursor) {

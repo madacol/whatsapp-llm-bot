@@ -752,6 +752,7 @@ type HarnessRuntimeSession = {
   workdir?: string | null;
   model?: string | null;
   resumeCursor?: string | null;
+  capabilities?: HarnessCapabilities;
 };
 
 type HarnessTurnInput = {

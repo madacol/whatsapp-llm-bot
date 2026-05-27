@@ -34,6 +34,7 @@
  *   workdir?: string | null,
  *   model?: string | null,
  *   resumeCursor?: string | null,
+ *   capabilities?: HarnessCapabilities,
  * }} HarnessRuntimeSession
  */
 
