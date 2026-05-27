@@ -10,6 +10,7 @@ import {
   resolveAcpFileChangePath,
   snapshotAcpWorkdir,
 } from "./acp-file-changes.js";
+import { createAcpExtensionRouter } from "./acp-extension-router.js";
 import { buildUnifiedFileDiff } from "./file-change-utils.js";
 import { createHarnessRuntimeEventDispatcher } from "./harness-runtime-event-dispatcher.js";
 import { getSandboxEscapeRequest } from "./sandbox-approval.js";
@@ -29,6 +30,9 @@ import { requestSandboxEscapeApproval } from "./sandbox-approval-coordinator.js"
  *   emitEvent?: (event: import("./harness-runtime-events.js").HarnessRuntimeEvent) => void,
  *   dispatchRuntimeEventsToHooks?: boolean,
  *   requestDecision?: (request: { id: string, title: string, labels: string[], descriptions: string[] }) => Promise<string | null>,
+ *   userInputDecision?: (request: import("./harness-runtime-events.js").HarnessRuntimeUserInputRequest) => Promise<unknown>,
+ *   extensionRequestHandlers?: Map<string, (message: Record<string, unknown>) => Promise<unknown> | unknown>,
+ *   extensionNotificationHandlers?: Map<string, (message: Record<string, unknown>) => Promise<void> | void>,
  *   onActiveRun?: (run: { connection: Awaited<ReturnType<typeof openAcpConnection>>, sessionId: string | null, capabilities: Record<string, unknown> }) => void | (() => void),
  * }} AcpRunInput
  */
@@ -159,6 +163,10 @@ function buildClientCapabilities() {
       writeTextFile: true,
     },
     terminal: true,
+    elicitation: {
+      form: {},
+      url: {},
+    },
     sessionCapabilities: {
       resume: {},
       fork: {},
@@ -276,45 +284,34 @@ async function assertSandboxAccess(input) {
  *   runConfig?: HarnessRunConfig,
  *   emitRuntimeEvent: (event: import("./harness-runtime-events.js").HarnessRuntimeEvent) => Promise<void>,
  *   requestDecision?: (request: { id: string, title: string, labels: string[], descriptions: string[] }) => Promise<string | null>,
+ *   userInputDecision?: (request: import("./harness-runtime-events.js").HarnessRuntimeUserInputRequest) => Promise<unknown>,
+ *   extensionRequestHandlers?: Map<string, (message: Record<string, unknown>) => Promise<unknown> | unknown>,
+ *   extensionNotificationHandlers?: Map<string, (message: Record<string, unknown>) => Promise<void> | void>,
  * }} options
  */
 function createAcpClientRequestHandler(options) {
   const terminals = createAcpTerminalManager(options);
+  /** @type {Map<string, (message: Record<string, unknown>) => Promise<unknown> | unknown>} */
+  const requestHandlers = new Map([
+    ["session/request_permission", (message) => handleAcpPermissionRequest(message, options)],
+    ["elicitation/create", (message) => handleAcpElicitationCreate(message, options)],
+    ["fs/read_text_file", (message) => handleAcpReadTextFile(message, options)],
+    ["fs/write_text_file", (message) => handleAcpWriteTextFile(message, options)],
+    ["terminal/create", (message) => terminals.create(message)],
+    ["terminal/output", (message) => terminals.output(message)],
+    ["terminal/wait_for_exit", (message) => terminals.waitForExit(message)],
+    ["terminal/kill", (message) => terminals.kill(message)],
+    ["terminal/release", (message) => terminals.release(message)],
+    ...(options.extensionRequestHandlers ? [...options.extensionRequestHandlers.entries()] : []),
+  ]);
+  const router = createAcpExtensionRouter({
+    requestHandlers,
+    notificationHandlers: options.extensionNotificationHandlers,
+    emitRuntimeEvent: options.emitRuntimeEvent,
+    createRawPayload: createAcpRawPayload,
+  });
   return async (/** @type {Record<string, unknown>} */ message) => {
-    if (message.method === "session/request_permission") {
-      return handleAcpPermissionRequest(message, options);
-    }
-    if (message.method === "fs/read_text_file") {
-      return handleAcpReadTextFile(message, options);
-    }
-    if (message.method === "fs/write_text_file") {
-      return handleAcpWriteTextFile(message, options);
-    }
-    if (message.method === "terminal/create") {
-      return terminals.create(message);
-    }
-    if (message.method === "terminal/output") {
-      return terminals.output(message);
-    }
-    if (message.method === "terminal/wait_for_exit") {
-      return terminals.waitForExit(message);
-    }
-    if (message.method === "terminal/kill") {
-      return terminals.kill(message);
-    }
-    if (message.method === "terminal/release") {
-      return terminals.release(message);
-    }
-    if (typeof message.method === "string") {
-      await options.emitRuntimeEvent({
-        type: "extension.request",
-        provider: "acp",
-        method: message.method,
-        payload: message.params,
-        raw: createAcpRawPayload(message.method, message.params),
-      });
-    }
-    return {};
+    return router.handleRequest(message);
   };
 }
 
@@ -373,6 +370,189 @@ async function handleAcpPermissionRequest(message, options) {
     raw: createAcpRawPayload("session/request_permission", { optionId }),
   });
   return optionId ? { outcome: { outcome: "selected", optionId } } : { outcome: { outcome: "cancelled" } };
+}
+
+/**
+ * @param {unknown} value
+ * @returns {string}
+ */
+function labelFromSchemaValue(value) {
+  if (typeof value === "string") return value;
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  return JSON.stringify(value);
+}
+
+/**
+ * @param {Record<string, unknown>} schema
+ * @returns {Array<{ label: string, value: unknown, description?: string }>}
+ */
+function enumOptionsFromSchema(schema) {
+  if (Array.isArray(schema.oneOf)) {
+    return schema.oneOf.filter(isRecord)
+      .filter((item) => "const" in item)
+      .map((item) => ({
+        label: typeof item.title === "string" ? item.title : labelFromSchemaValue(item.const),
+        value: item.const,
+        ...(typeof item.description === "string" ? { description: item.description } : {}),
+      }));
+  }
+  if (Array.isArray(schema.anyOf)) {
+    return schema.anyOf.filter(isRecord)
+      .filter((item) => "const" in item)
+      .map((item) => ({
+        label: typeof item.title === "string" ? item.title : labelFromSchemaValue(item.const),
+        value: item.const,
+        ...(typeof item.description === "string" ? { description: item.description } : {}),
+      }));
+  }
+  if (Array.isArray(schema.enum)) {
+    return schema.enum.map((value) => ({ label: labelFromSchemaValue(value), value }));
+  }
+  if (schema.type === "boolean") {
+    return [
+      { label: "Yes", value: true },
+      { label: "No", value: false },
+    ];
+  }
+  return [];
+}
+
+/**
+ * @param {Record<string, unknown>} schema
+ * @returns {Array<{ id: string, question: string, options: Array<{ label: string, description?: string }>, values: Map<string, unknown>, defaultValue?: unknown }>}
+ */
+function buildElicitationQuestions(schema) {
+  const properties = isRecord(schema.properties) ? schema.properties : {};
+  const questions = [];
+  for (const [id, rawProperty] of Object.entries(properties)) {
+    if (!isRecord(rawProperty)) {
+      continue;
+    }
+    const options = enumOptionsFromSchema(rawProperty);
+    const values = new Map();
+    const promptOptions = options.length > 0
+      ? options.map((option) => {
+          values.set(option.label, option.value);
+          return {
+            label: option.label,
+            ...(option.description ? { description: option.description } : {}),
+          };
+        })
+      : [{ label: "Use default" }, { label: "Decline" }];
+    const question = typeof rawProperty.title === "string" && rawProperty.title.trim()
+      ? rawProperty.title.trim()
+      : id;
+    questions.push({
+      id,
+      question,
+      options: promptOptions,
+      values,
+      ...("default" in rawProperty ? { defaultValue: rawProperty.default } : {}),
+    });
+  }
+  return questions;
+}
+
+/**
+ * @param {unknown} response
+ * @param {Array<{ id: string }>} questions
+ * @returns {{ action: "accept", content: Record<string, unknown> } | { action: "decline" } | { action: "cancel" } | null}
+ */
+function normalizeExternalElicitationResponse(response, questions) {
+  if (isRecord(response) && typeof response.action === "string") {
+    if (response.action === "decline" || response.action === "cancel") {
+      return { action: response.action };
+    }
+    if (response.action === "accept") {
+      return { action: "accept", content: isRecord(response.content) ? response.content : {} };
+    }
+  }
+  if (isRecord(response)) {
+    return { action: "accept", content: response };
+  }
+  if (questions.length === 1 && response !== undefined && response !== null) {
+    return { action: "accept", content: { [questions[0].id]: response } };
+  }
+  return null;
+}
+
+/**
+ * @param {Record<string, unknown>} message
+ * @param {{
+ *   hooks: Pick<Required<AgentIOHooks>, "onAskUser">,
+ *   emitRuntimeEvent: (event: import("./harness-runtime-events.js").HarnessRuntimeEvent) => Promise<void>,
+ *   userInputDecision?: (request: import("./harness-runtime-events.js").HarnessRuntimeUserInputRequest) => Promise<unknown>,
+ * }} options
+ * @returns {Promise<{ action: "accept", content?: Record<string, unknown> } | { action: "decline" } | { action: "cancel" }>}
+ */
+async function handleAcpElicitationCreate(message, options) {
+  const params = paramsRecord(message.params);
+  const id = typeof message.id === "number" || typeof message.id === "string"
+    ? `acp-user-input:${message.id}`
+    : `acp-user-input:${Date.now()}`;
+  const mode = typeof params.mode === "string" ? params.mode : "form";
+  const messageText = typeof params.message === "string" && params.message.trim()
+    ? params.message.trim()
+    : "The agent needs input.";
+  const questions = mode === "url"
+    ? [{
+        id: typeof params.elicitationId === "string" ? params.elicitationId : "url",
+        question: messageText,
+        options: [
+          { label: "Open/continue" },
+          { label: "Decline" },
+        ],
+        values: new Map([["Open/continue", true], ["Decline", false]]),
+      }]
+    : buildElicitationQuestions(isRecord(params.requestedSchema) ? params.requestedSchema : {});
+  const runtimeRequest = {
+    id,
+    questions: questions.map((question) => ({
+      id: question.id,
+      question: question.question,
+      options: question.options,
+    })),
+  };
+  await options.emitRuntimeEvent({
+    type: "user-input.requested",
+    provider: "acp",
+    request: runtimeRequest,
+    raw: createAcpRawPayload("elicitation/create", message.params),
+  });
+  const askViaHooks = async () => {
+    /** @type {Record<string, unknown>} */
+    const content = {};
+    for (const question of questions) {
+      const labels = question.options.map((option) => option.label);
+      const descriptions = question.options.map((option) => option.description ?? "");
+      const choice = await options.hooks.onAskUser(question.question || messageText, labels, messageText, descriptions);
+      if (!choice || choice === "Decline") {
+        return /** @type {{ action: "decline" }} */ ({ action: "decline" });
+      }
+      if (question.values.has(choice)) {
+        content[question.id] = question.values.get(choice);
+      } else if ("defaultValue" in question) {
+        content[question.id] = question.defaultValue;
+      } else {
+        content[question.id] = choice;
+      }
+    }
+    return /** @type {{ action: "accept", content: Record<string, unknown> }} */ ({ action: "accept", content });
+  };
+  const hookDecision = askViaHooks();
+  const externalDecision = options.userInputDecision?.(runtimeRequest)
+    .then((response) => normalizeExternalElicitationResponse(response, questions))
+    .then((response) => response ?? hookDecision);
+  const decision = await (externalDecision
+    ? Promise.race([externalDecision, hookDecision])
+    : hookDecision);
+  await options.emitRuntimeEvent({
+    type: "user-input.resolved",
+    provider: "acp",
+    request: runtimeRequest,
+    raw: createAcpRawPayload("elicitation/create", decision),
+  });
+  return decision;
 }
 
 /**
@@ -733,6 +913,7 @@ async function applySessionConfigOptions(input) {
   if (!input.sessionId) {
     return;
   }
+  const customConfigValues = isRecord(input.runConfig?.configValues) ? input.runConfig.configValues : {};
   const targets = [
     { category: /** @type {"model"} */ ("model"), desired: input.runConfig?.model ?? null },
     { category: /** @type {"mode"} */ ("mode"), desired: input.runConfig?.mode ?? null },
@@ -755,6 +936,90 @@ async function applySessionConfigOptions(input) {
       configId: option.id,
       value,
     });
+  }
+  for (const [configId, desired] of Object.entries(customConfigValues)) {
+    if (desired === null || desired === undefined) {
+      continue;
+    }
+    const option = input.configOptions.find((candidate) => candidate.id === configId);
+    if (!option || typeof option.id !== "string") {
+      continue;
+    }
+    const value = typeof desired === "boolean" ? desired : resolveConfigValue(option, String(desired));
+    if (value === null || value === option.currentValue) {
+      continue;
+    }
+    await input.connection.sendRequest("session/set_config_option", {
+      sessionId: input.sessionId,
+      configId: option.id,
+      value,
+    });
+  }
+}
+
+/**
+ * @param {Record<string, unknown>[]} options
+ * @returns {Record<string, unknown>[]}
+ */
+function normalizeConfigOptions(options) {
+  return options
+    .filter((option) => typeof option.id === "string" && typeof option.name === "string")
+    .filter((option) => option.type === "select" || option.type === "boolean" || Array.isArray(option.options));
+}
+
+/**
+ * @param {AcpForkInput} input
+ * @returns {Promise<Record<string, unknown>[]>}
+ */
+export async function getAcpSessionConfigOptions(input) {
+  const { connection, capabilities } = await openInitializedAcpConnection(input, async () => ({}));
+  try {
+    let opened;
+    if (hasAcpSessionCapability(capabilities, "resume")) {
+      opened = await connection.sendRequest("session/resume", {
+        sessionId: input.sessionId,
+        ...buildSessionParams(input.runConfig),
+      });
+    } else if (supportsAcpLoadSession(capabilities)) {
+      opened = await connection.sendRequest("session/load", {
+        sessionId: input.sessionId,
+        ...buildSessionParams(input.runConfig),
+      });
+    } else {
+      return [];
+    }
+    return normalizeConfigOptions(extractConfigOptions(opened));
+  } finally {
+    await connection.close();
+  }
+}
+
+/**
+ * @param {AcpForkInput & { configId: string, value: string | boolean }} input
+ * @returns {Promise<Record<string, unknown>[]>}
+ */
+export async function setAcpSessionConfigOption(input) {
+  const { connection, capabilities } = await openInitializedAcpConnection(input, async () => ({}));
+  try {
+    if (hasAcpSessionCapability(capabilities, "resume")) {
+      await connection.sendRequest("session/resume", {
+        sessionId: input.sessionId,
+        ...buildSessionParams(input.runConfig),
+      });
+    } else if (supportsAcpLoadSession(capabilities)) {
+      await connection.sendRequest("session/load", {
+        sessionId: input.sessionId,
+        ...buildSessionParams(input.runConfig),
+      });
+    }
+    const result = await connection.sendRequest("session/set_config_option", {
+      sessionId: input.sessionId,
+      configId: input.configId,
+      value: input.value,
+    });
+    return normalizeConfigOptions(extractConfigOptions(result));
+  } finally {
+    await connection.close();
   }
 }
 
@@ -907,6 +1172,9 @@ export async function startAcpRun(input) {
     runConfig: input.runConfig,
     emitRuntimeEvent,
     requestDecision: input.requestDecision,
+    userInputDecision: input.userInputDecision,
+    extensionRequestHandlers: input.extensionRequestHandlers,
+    extensionNotificationHandlers: input.extensionNotificationHandlers,
   });
   const { connection, capabilities } = await openInitializedAcpConnection(input, handleRequest);
   let sessionId = input.sessionId ?? null;
@@ -917,18 +1185,16 @@ export async function startAcpRun(input) {
   /** @type {void | (() => void)} */
   let unregisterActiveRun = undefined;
 
+  const extensionRouter = createAcpExtensionRouter({
+    notificationHandlers: input.extensionNotificationHandlers,
+    emitRuntimeEvent,
+    createRawPayload: createAcpRawPayload,
+  });
+
   const notificationsDone = (async () => {
     for await (const message of connection.notifications) {
       if (message.method !== "session/update" || !isRecord(message.params)) {
-        if (typeof message.method === "string") {
-          await emitRuntimeEvent({
-            type: "extension.notification",
-            provider: "acp",
-            method: message.method,
-            payload: message.params,
-            raw: createAcpRawPayload(message.method, message.params),
-          });
-        }
+        await extensionRouter.handleNotification(message);
         continue;
       }
       const events = runtimeModel.acceptSessionUpdate(message.params);

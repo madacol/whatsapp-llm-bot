@@ -16,7 +16,7 @@ describe("buildExternalSystemPrompt", () => {
   });
 
   it("does not add the app default prompt to provider harnesses by default", () => {
-    for (const harnessName of ["codex", "pi", "claude-agent-sdk"]) {
+    for (const harnessName of ["codex", "pi", "claude"]) {
       assert.equal(
         buildExternalSystemPrompt(null, undefined, harnessName),
         "",

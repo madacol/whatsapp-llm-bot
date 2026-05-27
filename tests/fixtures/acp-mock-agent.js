@@ -174,7 +174,7 @@ async function handleMessage(message) {
   }
   if (message.method === "session/set_config_option") {
     configSelections[message.params?.configId] = message.params?.value;
-    send({ id: message.id, result: {} });
+    send({ id: message.id, result: { configOptions: buildConfigOptions() } });
     return;
   }
   if (message.method === "session/fork") {
@@ -208,6 +208,8 @@ async function handleMessage(message) {
 
 const promptScenarios = [
   { match: "permission", handle: handlePermissionPrompt },
+  { match: "elicitation", handle: handleElicitationPrompt },
+  { match: "unknown extension", handle: handleUnknownExtensionPrompt },
   { match: "terminal", handle: handleTerminalPrompt },
   { match: "fs write", handle: handleFsWritePrompt },
   { match: "fs update", handle: handleFsUpdatePrompt },
@@ -330,6 +332,48 @@ async function handlePermissionPrompt(message) {
     ],
   });
   notifyText(JSON.stringify(permission));
+  endPrompt(message);
+}
+
+/**
+ * @param {Record<string, unknown>} message
+ * @returns {Promise<void>}
+ */
+async function handleElicitationPrompt(message) {
+  const response = await request("elicitation/create", {
+    sessionId,
+    mode: "form",
+    message: "Choose a migration strategy",
+    requestedSchema: {
+      type: "object",
+      properties: {
+        strategy: {
+          type: "string",
+          title: "Migration Strategy",
+          oneOf: [
+            { const: "conservative", title: "Conservative" },
+            { const: "complete", title: "Complete" },
+          ],
+          default: "complete",
+        },
+      },
+      required: ["strategy"],
+    },
+  });
+  notifyText(JSON.stringify(response));
+  endPrompt(message);
+}
+
+/**
+ * @param {Record<string, unknown>} message
+ * @returns {Promise<void>}
+ */
+async function handleUnknownExtensionPrompt(message) {
+  const response = await request("madabot/unknown", {
+    sessionId,
+    value: true,
+  });
+  notifyText(JSON.stringify(response));
   endPrompt(message);
 }
 

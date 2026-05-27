@@ -183,7 +183,7 @@ function classifyLegacyModel(model) {
     || normalized === "haiku"
     || normalized.startsWith("claude")
   ) {
-    return "claude-agent-sdk";
+    return "claude";
   }
   if (
     normalized.includes("codex")
@@ -245,7 +245,7 @@ export function normalizeHarnessConfig(value, currentHarness) {
 
   if (typeof value.model === "string") {
     const targetHarness = classifyLegacyModel(value.model)
-      ?? (currentHarness === "claude-agent-sdk" || currentHarness === "codex" || currentHarness === "pi"
+      ?? (currentHarness === "claude" || currentHarness === "codex" || currentHarness === "pi"
         ? currentHarness
         : null);
     if (targetHarness) {
@@ -267,7 +267,7 @@ export function normalizeHarnessConfig(value, currentHarness) {
   }
 
   if (typeof value.reasoningEffort === "string") {
-    const targetHarness = currentHarness === "pi" ? "pi" : "claude-agent-sdk";
+    const targetHarness = currentHarness === "pi" ? "pi" : "claude";
     const scoped = ensureScopedConfig(normalized, targetHarness);
     if (typeof scoped.reasoningEffort !== "string") {
       scoped.reasoningEffort = value.reasoningEffort;

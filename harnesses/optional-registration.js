@@ -7,11 +7,11 @@ import { registerAcpAgentDriver } from "./registry.js";
  */
 export async function registerOptionalHarnesses() {
   registerAcpAgentDriver({
-    name: "claude-agent-sdk",
+    name: "claude",
     displayName: "Claude",
     command: "claude-code-acp",
     docsUrl: "https://github.com/zed-industries/claude-code-acp",
     statusUrl: "https://status.anthropic.com/",
-    sessionKind: "claude-sdk",
+    sessionKind: "claude",
   });
 }

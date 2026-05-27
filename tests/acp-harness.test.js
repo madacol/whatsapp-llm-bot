@@ -52,7 +52,7 @@ describe("ACP harness", () => {
   it("forks provider sessions through the ACP session/fork RFD", async () => {
     for (const [name, kind, label] of [
       ["codex", "codex", "Codex"],
-      ["claude-agent-sdk", "claude-sdk", "Claude"],
+      ["claude", "claude", "Claude"],
       ["pi", "pi", "Pi"],
     ]) {
       const harness = createAcpHarness({
@@ -310,6 +310,94 @@ describe("ACP harness", () => {
     }
   });
 
+  it("bridges ACP elicitation requests to user input choices", async () => {
+    const harness = createAcpHarness({
+      config: {
+        command: process.execPath,
+        args: [path.join(__dirname, "fixtures", "acp-mock-agent.js")],
+      },
+    });
+    const adapter = harness.createAdapter?.({
+      name: "acp",
+      instanceId: "test",
+      continuationKey: "acp:test",
+    });
+    assert.ok(adapter);
+
+    /** @type {Array<Record<string, unknown>>} */
+    const events = [];
+    const unsubscribe = adapter.subscribeEvents?.((event) => {
+      events.push(event);
+    });
+    try {
+      await adapter.startSession({ chatId: "elicitation-chat" });
+      const result = await adapter.sendTurn({
+        chatId: "elicitation-chat",
+        input: "elicitation",
+        messages: [{ role: "user", content: [{ type: "text", text: "elicitation" }] }],
+        hooks: {
+          onAskUser: async (_question, options) => options.includes("Complete") ? "Complete" : options[0] ?? "",
+        },
+      });
+
+      assert.deepEqual(result.response, [{
+        type: "markdown",
+        text: "{\"action\":\"accept\",\"content\":{\"strategy\":\"complete\"}}",
+      }]);
+      assert.ok(events.some((event) => event.type === "user-input.requested"));
+      assert.ok(events.some((event) => event.type === "user-input.resolved"));
+    } finally {
+      unsubscribe?.();
+    }
+  });
+
+  it("allows adapter callers to resolve ACP elicitation requests by request id", async () => {
+    const harness = createAcpHarness({
+      config: {
+        command: process.execPath,
+        args: [path.join(__dirname, "fixtures", "acp-mock-agent.js")],
+      },
+    });
+    const adapter = harness.createAdapter?.({
+      name: "acp",
+      instanceId: "test",
+      continuationKey: "acp:test",
+    });
+    assert.ok(adapter);
+
+    const unsubscribe = adapter.subscribeEvents?.((event) => {
+      if (event.type === "user-input.requested" && event.request && typeof event.request === "object" && "id" in event.request && typeof event.request.id === "string") {
+        setTimeout(() => {
+          void adapter.respondToUserInput(event.request.id, {
+            action: "accept",
+            content: { strategy: "conservative" },
+          });
+        }, 0);
+      }
+    });
+    try {
+      await adapter.startSession({ chatId: "elicitation-chat-adapter" });
+      const result = await adapter.sendTurn({
+        chatId: "elicitation-chat-adapter",
+        input: "elicitation",
+        messages: [{ role: "user", content: [{ type: "text", text: "elicitation" }] }],
+        hooks: {
+          onAskUser: async () => {
+            await new Promise((resolve) => setTimeout(resolve, 50));
+            return "Complete";
+          },
+        },
+      });
+
+      assert.deepEqual(result.response, [{
+        type: "markdown",
+        text: "{\"action\":\"accept\",\"content\":{\"strategy\":\"conservative\"}}",
+      }]);
+    } finally {
+      unsubscribe?.();
+    }
+  });
+
   it("executes ACP terminal requests and emits command events", async () => {
     const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "acp-terminal-"));
     const harness = createAcpHarness({
@@ -342,6 +430,40 @@ describe("ACP harness", () => {
       assert.deepEqual(result.response, [{ type: "markdown", text: "terminal ok" }]);
       assert.ok(events.some((event) => event.type === "command.started"));
       assert.ok(events.some((event) => event.type === "command.completed"));
+    } finally {
+      unsubscribe?.();
+    }
+  });
+
+  it("surfaces unknown ACP extension requests and returns method-not-found", async () => {
+    const harness = createAcpHarness({
+      config: {
+        command: process.execPath,
+        args: [path.join(__dirname, "fixtures", "acp-mock-agent.js")],
+      },
+    });
+    const adapter = harness.createAdapter?.({
+      name: "acp",
+      instanceId: "test",
+      continuationKey: "acp:test",
+    });
+    assert.ok(adapter);
+
+    /** @type {Array<Record<string, unknown>>} */
+    const events = [];
+    const unsubscribe = adapter.subscribeEvents?.((event) => {
+      events.push(event);
+    });
+    try {
+      await adapter.startSession({ chatId: "extension-chat" });
+      const result = await adapter.sendTurn({
+        chatId: "extension-chat",
+        input: "unknown extension",
+        messages: [{ role: "user", content: [{ type: "text", text: "unknown extension" }] }],
+      });
+
+      assert.match(result.response[0]?.text ?? "", /Unsupported ACP client request method: madabot\/unknown/);
+      assert.ok(events.some((event) => event.type === "extension.request" && event.method === "madabot/unknown"));
     } finally {
       unsubscribe?.();
     }
@@ -547,6 +669,31 @@ describe("ACP harness", () => {
     });
 
     assert.deepEqual(result.response, [{ type: "markdown", text: "model=model-a mode=plan effort=high" }]);
+  });
+
+  it("applies arbitrary ACP config values from run config", async () => {
+    const harness = createAcpHarness({
+      config: {
+        command: process.execPath,
+        args: [path.join(__dirname, "fixtures", "acp-mock-agent.js")],
+      },
+    });
+    const adapter = harness.createAdapter?.({
+      name: "acp",
+      instanceId: "test",
+      continuationKey: "acp:test",
+    });
+    assert.ok(adapter);
+
+    await adapter.startSession({ chatId: "generic-config-chat", runConfig: { configValues: { "reasoning-effort": "low" } } });
+    const result = await adapter.sendTurn({
+      chatId: "generic-config-chat",
+      input: "config",
+      messages: [{ role: "user", content: [{ type: "text", text: "config" }] }],
+      runConfig: { configValues: { "reasoning-effort": "low" } },
+    });
+
+    assert.deepEqual(result.response, [{ type: "markdown", text: "model=default mode=code effort=low" }]);
   });
 
   it("exposes ACP read and rollback RFDs through the adapter", async () => {

@@ -1,6 +1,13 @@
 import { createHarnessEventStreamController } from "./adapter.js";
 import { deriveAcpHarnessCapabilities, hasAcpSessionCapability } from "./acp-capabilities.js";
-import { forkAcpSession, readAcpSession, rollbackAcpSession, startAcpRun } from "./acp-runner.js";
+import {
+  forkAcpSession,
+  getAcpSessionConfigOptions,
+  readAcpSession,
+  rollbackAcpSession,
+  setAcpSessionConfigOption,
+  startAcpRun,
+} from "./acp-runner.js";
 import { buildTextHarnessPromptFromBlocks } from "./prompt-media.js";
 import { updateActiveHarnessConfig, getActiveHarnessConfig } from "../harness-config.js";
 import { contentEvent } from "../outbound-events.js";
@@ -175,6 +182,7 @@ export function createAcpHarness(options = {}) {
             return installActiveAcpRunControls(active, { connection, sessionId, capabilities });
           },
           requestDecision: createActiveRequestDecision("__legacy__"),
+          userInputDecision: createActiveUserInputDecision("__legacy__"),
         });
         return completed.result;
       } finally {
@@ -257,6 +265,7 @@ export function createAcpHarness(options = {}) {
                 return installActiveAcpRunControls(active, { connection, sessionId, capabilities });
               },
               requestDecision: createActiveRequestDecision(turn.chatId),
+              userInputDecision: createActiveUserInputDecision(turn.chatId),
               emitEvent: (event) => events.emit({ ...event, chatId: turn.chatId }),
             });
             const ready = /** @type {HarnessRuntimeSession} */ ({
@@ -408,6 +417,21 @@ export function createAcpHarness(options = {}) {
   }
 
   /**
+   * @param {string} chatId
+   * @returns {(request: import("./harness-runtime-events.js").HarnessRuntimeUserInputRequest) => Promise<unknown>}
+   */
+  function createActiveUserInputDecision(chatId) {
+    return async (request) => new Promise((resolve) => {
+      const active = activeRuns.get(chatId);
+      if (!active?.pendingUserInputs) {
+        resolve(null);
+        return;
+      }
+      active.pendingUserInputs.set(request.id, resolve);
+    });
+  }
+
+  /**
    * @returns {SlashCommandDescriptor[]}
    */
   function listSlashCommands() {
@@ -416,6 +440,7 @@ export function createAcpHarness(options = {}) {
       { name: "resume", description: "Restore a previously cleared harness session" },
       { name: "fork", description: `Fork the current ${label} ACP session` },
       { name: "back", description: `Return to the previous ${label} ACP fork parent` },
+      { name: "config", description: `Show or set ${label} ACP config options` },
       { name: "mode", description: `Show or set the ${label} ACP mode` },
       { name: "model", description: `Choose or set the ${label} model` },
       { name: "sandbox", description: "Alias of /permissions" },
@@ -423,6 +448,77 @@ export function createAcpHarness(options = {}) {
       { name: "approval", description: `Show or set the ${label} approval policy` },
     ];
   }
+}
+
+/**
+ * @param {Record<string, unknown>} option
+ * @returns {Array<{ id: string, label: string, description?: string }>}
+ */
+function configOptionValues(option) {
+  if (option.type === "boolean") {
+    return [
+      { id: "true", label: "true" },
+      { id: "false", label: "false" },
+    ];
+  }
+  if (!Array.isArray(option.options)) {
+    return [];
+  }
+  return option.options
+    .filter(isRecord)
+    .map((value) => ({
+      id: typeof value.value === "string" ? value.value : String(value.value ?? ""),
+      label: typeof value.name === "string" ? value.name : String(value.value ?? ""),
+      ...(typeof value.description === "string" ? { description: value.description } : {}),
+    }))
+    .filter((value) => value.id.length > 0);
+}
+
+/**
+ * @param {Record<string, unknown>} option
+ * @returns {string}
+ */
+function formatConfigOption(option) {
+  const id = typeof option.id === "string" ? option.id : "";
+  const name = typeof option.name === "string" ? option.name : id;
+  const current = typeof option.currentValue === "string" || typeof option.currentValue === "boolean"
+    ? String(option.currentValue)
+    : "default";
+  const category = typeof option.category === "string" ? ` (${option.category})` : "";
+  return `- \`${id}\` ${name}${category}: \`${current}\``;
+}
+
+/**
+ * @param {Record<string, unknown>} option
+ * @param {string} desired
+ * @returns {string | boolean | null}
+ */
+function resolveCommandConfigValue(option, desired) {
+  const normalized = desired.trim().toLowerCase();
+  if (option.type === "boolean") {
+    if (["true", "yes", "on", "1"].includes(normalized)) return true;
+    if (["false", "no", "off", "0"].includes(normalized)) return false;
+  }
+  const values = configOptionValues(option);
+  const match = values.find((value) => value.id.toLowerCase() === normalized)
+    ?? values.find((value) => value.label.toLowerCase() === normalized);
+  return match?.id ?? null;
+}
+
+/**
+ * @param {Record<string, unknown>} config
+ * @param {string} configId
+ * @param {string | boolean} value
+ * @returns {Record<string, unknown>}
+ */
+function buildConfigValuesPatch(config, configId, value) {
+  const existing = isRecord(config.configValues) ? config.configValues : {};
+  return {
+    configValues: {
+      ...existing,
+      [configId]: value,
+    },
+  };
 }
 
 /**
@@ -488,6 +584,62 @@ function createGenericAcpCommandHandler(options) {
       }
       await input.sessionForkControl.save(input.chatId, { id: parent.id, kind: parent.kind });
       await input.context.reply(contentEvent("tool-result", `Returned to previous ${options.label} ACP session${parent.label ? `: ${parent.label}` : ""}.`));
+      return true;
+    }
+
+    const configMatch = trimmed.match(/^config(?:\s+(\S+)(?:\s+(.+))?)?$/i);
+    if (configMatch) {
+      const currentSessionId = input.chatInfo?.harness_session_id ?? null;
+      if (!currentSessionId) {
+        await input.context.reply(contentEvent("tool-result", `Start a ${options.label} ACP session before using /config.`));
+        return true;
+      }
+      const configOptions = await getAcpSessionConfigOptions({
+        ...options.commandSpec,
+        sessionId: currentSessionId,
+      });
+      if (configOptions.length === 0) {
+        await input.context.reply(contentEvent("tool-result", `${options.label} did not expose ACP config options for this session.`));
+        return true;
+      }
+      const configId = configMatch[1]?.trim() ?? null;
+      const rawValue = configMatch[2]?.trim() ?? null;
+      if (!configId) {
+        await input.context.reply(contentEvent("tool-result", `${options.label} config:\n${configOptions.map(formatConfigOption).join("\n")}`));
+        return true;
+      }
+      const option = configOptions.find((candidate) => candidate.id === configId);
+      if (!option || typeof option.id !== "string") {
+        await input.context.reply(contentEvent("tool-result", `Unknown ${options.label} config option: \`${configId}\``));
+        return true;
+      }
+      let value = rawValue ? resolveCommandConfigValue(option, rawValue) : null;
+      if (value === null) {
+        const values = configOptionValues(option);
+        if (values.length === 0) {
+          await input.context.reply(contentEvent("tool-result", `Config option \`${configId}\` cannot be set interactively.`));
+          return true;
+        }
+        const selected = await input.context.select(`Choose ${option.name ?? configId}`, values, {
+          deleteOnSelect: true,
+          currentId: typeof option.currentValue === "string" ? option.currentValue : undefined,
+        });
+        value = resolveCommandConfigValue(option, selected);
+      }
+      if (value === null) {
+        await input.context.reply(contentEvent("tool-result", `Unknown value for \`${configId}\`.`));
+        return true;
+      }
+      const updatedOptions = await setAcpSessionConfigOption({
+        ...options.commandSpec,
+        sessionId: currentSessionId,
+        configId: option.id,
+        value,
+      });
+      const activeConfig = await getActiveHarnessConfig(input.chatId, options.harnessName);
+      await updateActiveHarnessConfig(input.chatId, options.harnessName, buildConfigValuesPatch(activeConfig, option.id, value));
+      const updated = updatedOptions.find((candidate) => candidate.id === option.id) ?? { ...option, currentValue: value };
+      await input.context.reply(contentEvent("tool-result", `${options.label} config updated:\n${formatConfigOption(updated)}`));
       return true;
     }
 

@@ -41,7 +41,6 @@ const seedChat = (chatId, options) => seedChat_(testDb, chatId, options);
 describe("integration", { concurrency: 1 }, () => {
 
 const CACHE_PATH = path.resolve("data/models.json");
-const CODEX_CACHE_PATH = path.resolve("data/codex-models.json");
 
 before(async () => {
   // 0. Seed models cache so setModel validation passes
@@ -49,10 +48,6 @@ before(async () => {
   await fs.writeFile(CACHE_PATH, JSON.stringify([
     { id: "gpt-4.1-mini", name: "GPT-4.1 Mini", context_length: 128000, pricing: { prompt: "0.000001", completion: "0.000003" } },
   ]));
-  await fs.writeFile(CODEX_CACHE_PATH, JSON.stringify({
-    checkedAt: new Date().toISOString(),
-    models: [{ id: "gpt-5.4", label: "GPT-5.4" }],
-  }));
 
   // 1. In-memory DB → seed the cache so initStore() uses it
   testDb = await createTestDb();
@@ -84,7 +79,6 @@ let t;
 after(async () => {
   await mockServer?.close();
   await fs.rm(CACHE_PATH, { force: true });
-  await fs.rm(CODEX_CACHE_PATH, { force: true });
 });
 
 // ═══════════════════════════════════════════════════════════════════
@@ -296,7 +290,7 @@ describe("Scenario 7b: Guided setup command", () => {
     await seedChat(chatId);
 
     /** @type {string[]} */
-    const selections = ["mention+reply", "codex", "gpt-5.4"];
+    const selections = ["mention+reply", "codex"];
     const { context, responses } = createChatTurn({
       chatId,
       content: [{ type: "text", text: "!setup" }],
@@ -314,8 +308,7 @@ describe("Scenario 7b: Guided setup command", () => {
     assert.ok(allText.toLowerCase().includes("enabled"), `Expected enabled summary, got: ${allText}`);
     assert.ok(allText.includes("mention+reply"), `Expected trigger summary, got: ${allText}`);
     assert.ok(allText.includes("codex"), `Expected harness summary, got: ${allText}`);
-    assert.ok(allText.includes("gpt-5.4"), `Expected harness model summary, got: ${allText}`);
-    assert.ok(allText.includes("auto_review"), `Expected codex approvals reviewer summary, got: ${allText}`);
+    assert.ok(allText.includes("Use /config after starting codex"), `Expected ACP config hint, got: ${allText}`);
     assert.ok(allText.includes("!clone"), `Expected clone hint, got: ${allText}`);
 
     const chat = await readChatConfig(chatId);
@@ -324,9 +317,7 @@ describe("Scenario 7b: Guided setup command", () => {
     assert.equal(chat.memory, false);
     assert.equal(chat.debug, false);
     assert.equal(chat.harness, "codex");
-    assert.equal(chat.harness_config.codex.model, "gpt-5.4");
-    assert.equal(chat.harness_config.codex.sandboxMode, undefined);
-    assert.equal(chat.harness_config.codex.approvalsReviewer, "auto_review");
+    assert.deepEqual(chat.harness_config, {});
   });
 });
 

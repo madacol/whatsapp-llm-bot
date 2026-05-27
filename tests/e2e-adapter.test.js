@@ -405,10 +405,120 @@ describe("ACP file changes through WhatsApp transport", () => {
 });
 
 // ═══════════════════════════════════════════════════════════════════
-// 1e. Pi RPC events through the full WhatsApp transport boundary
+// 1e. ACP non-file workflows through the full WhatsApp transport boundary
+// ═══════════════════════════════════════════════════════════════════
+describe("ACP runtime events through WhatsApp transport", () => {
+  const harnessName = "e2e-acp-runtime";
+  let nextSender = 0;
+
+  async function registerRuntimeHarness() {
+    const { registerHarnessDriver } = await import("../harnesses/index.js");
+    const { createAcpHarness } = await import("../harnesses/acp.js");
+    registerHarnessDriver({
+      name: harnessName,
+      supportsInstances: true,
+      createInstance: () => ({
+        harness: createAcpHarness({
+          name: harnessName,
+          config: {
+            command: process.execPath,
+            args: [path.resolve("tests", "fixtures", "acp-mock-agent.js")],
+          },
+        }),
+      }),
+    });
+  }
+
+  before(async () => {
+    await registerRuntimeHarness();
+  });
+
+  /**
+   * @param {string} prompt
+   * @param {{ pollChoice?: string }} [options]
+   * @returns {Promise<{ rendered: string[], sentMessages: ReturnType<ReturnType<typeof createMockBaileysSocket>["getSentMessages"]> }>}
+   */
+  async function runAcpPrompt(prompt, options = {}) {
+    await registerRuntimeHarness();
+    const senderId = `e2e-acp-runtime-${nextSender++}`;
+    const chatId = `${senderId}@s.whatsapp.net`;
+    const workdir = await fs.mkdtemp(path.join(os.tmpdir(), "e2e-acp-runtime-"));
+    await seedChat(testDb, chatId, { enabled: true });
+    await updateChatConfig(chatId, (current) => ({
+      ...current,
+      harness: harnessName,
+      harness_cwd: workdir,
+      output_visibility: { thinking: true, changes: true, toolDetails: true, usage: true, subagents: true },
+    }));
+
+    const captures = createMockBaileysSocket();
+    const turn = adaptIncomingMessage(
+      createWAMessage({ text: prompt, senderId }),
+      captures.sock,
+      handleMessage,
+      testConfirmRegistry,
+      testUserResponseRegistry,
+    );
+    if (options.pollChoice) {
+      for (let attempt = 0; attempt < 50; attempt += 1) {
+        const poll = captures.getSentMessages().find((entry) => entry.msg.poll);
+        if (poll && poll.msg.poll && typeof poll.msg.poll === "object" && Array.isArray(/** @type {{ values?: unknown }} */ (poll.msg.poll).values)) {
+          testUserResponseRegistry.handlePollVote({
+            chatId,
+            pollMsgId: "sent-msg-0",
+            selectedOptions: [options.pollChoice],
+          });
+          break;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+    }
+    await turn;
+    return {
+      rendered: captures.getRenderedMessages(),
+      sentMessages: captures.getSentMessages(),
+    };
+  }
+
+  it("renders assistant, subagent, plan, tool, file-change, and usage events distinctly", async () => {
+    const { rendered } = await runAcpPrompt("Run the mock");
+
+    assert.ok(rendered.some((text) => text.includes("Main result.")), `Expected assistant output, got ${JSON.stringify(rendered)}`);
+    assert.ok(rendered.some((text) => text.includes("Subagent result.")), `Expected subagent output, got ${JSON.stringify(rendered)}`);
+    assert.ok(rendered.some((text) => text.includes("Mock ACP work")), `Expected plan output, got ${JSON.stringify(rendered)}`);
+    assert.ok(rendered.some((text) => text.includes("Review mock code") || text.includes("*Task*")), `Expected tool output, got ${JSON.stringify(rendered)}`);
+    assert.ok(rendered.some((text) => text.includes("*Update File*") && text.includes("mock.txt")), `Expected file-change output, got ${JSON.stringify(rendered)}`);
+    assert.ok(rendered.some((text) => text.includes("Cost:")), `Expected usage output, got ${JSON.stringify(rendered)}`);
+  });
+
+  it("renders ACP terminal command output through command transport messages", async () => {
+    const { rendered } = await runAcpPrompt("terminal", { pollChoice: "✅ Allow" });
+
+    assert.ok(rendered.some((text) => text.includes("*Shell*") || text.includes("terminal ok")), `Expected command output, got ${JSON.stringify(rendered)}`);
+  });
+
+  it("resolves ACP permission polls and preserves the final response", async () => {
+    const { rendered, sentMessages } = await runAcpPrompt("permission", { pollChoice: "Allow once" });
+    const poll = sentMessages.find((entry) => entry.msg.poll);
+
+    assert.ok(poll, "Expected permission poll to be sent");
+    assert.ok(rendered.some((text) => text.includes("\"optionId\":\"allow-once\"")), `Expected permission result, got ${JSON.stringify(rendered)}`);
+  });
+
+  it("resolves ACP elicitation polls and preserves the final response", async () => {
+    const { rendered, sentMessages } = await runAcpPrompt("elicitation", { pollChoice: "Complete" });
+    const poll = sentMessages.find((entry) => entry.msg.poll);
+
+    assert.ok(poll, "Expected elicitation poll to be sent");
+    assert.ok(rendered.some((text) => text.includes("\"strategy\":\"complete\"")), `Expected elicitation result, got ${JSON.stringify(rendered)}`);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════
+// 1f. Pi RPC events through the full WhatsApp transport boundary
 // ═══════════════════════════════════════════════════════════════════
 // ═══════════════════════════════════════════════════════════════════
-// 1f. WhatsApp audio through media-to-text into provider input
+// 1g. WhatsApp audio through media-to-text into provider input
 // ═══════════════════════════════════════════════════════════════════
 describe("audio media-to-text provider input", () => {
   const senderId = "e2e-audio-user";
