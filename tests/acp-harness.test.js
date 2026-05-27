@@ -234,7 +234,7 @@ describe("ACP harness", () => {
     }
   });
 
-  it("emits file changes for ACP fs writes and direct adapter writes without diffs", async () => {
+  it("emits file changes for ACP fs writes and direct adapter writes with transport-ready diffs", async () => {
     for (const prompt of ["fs write", "direct write"]) {
       const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), `acp-${prompt.replace(" ", "-")}-`));
       const harness = createAcpHarness({
@@ -266,7 +266,57 @@ describe("ACP harness", () => {
 
         const fileChanges = events.filter((event) => event.type === "file-change.completed");
         assert.equal(fileChanges.length, 1);
-        assert.ok(String(fileChanges[0]?.change?.path ?? "").startsWith(tempDir));
+        const change = /** @type {{ path?: unknown, kind?: unknown, newText?: unknown, diff?: unknown }} */ (fileChanges[0]?.change ?? {});
+        assert.ok(String(change.path ?? "").startsWith(tempDir));
+        assert.equal(change.kind, "add");
+        assert.equal(typeof change.newText, "string");
+        assert.match(String(change.diff ?? ""), /--- \/dev\/null/);
+      } finally {
+        unsubscribe?.();
+      }
+    }
+  });
+
+  it("preserves ACP diff-only file change kinds and unified diffs", async () => {
+    for (const [prompt, expectedKind, expectedPath] of [
+      ["diff only add", "add", "diff-only-add.js"],
+      ["diff only update", "update", "diff-only-update.js"],
+      ["diff only delete", "delete", "diff-only-delete.js"],
+    ]) {
+      const harness = createAcpHarness({
+        config: {
+          command: process.execPath,
+          args: [path.join(__dirname, "fixtures", "acp-mock-agent.js")],
+        },
+      });
+      const adapter = harness.createAdapter?.({
+        name: "acp",
+        instanceId: "test",
+        continuationKey: `acp:${prompt}`,
+      });
+      assert.ok(adapter);
+
+      /** @type {Array<Record<string, unknown>>} */
+      const events = [];
+      const unsubscribe = adapter.subscribeEvents?.((event) => {
+        events.push(event);
+      });
+      try {
+        await adapter.startSession({ chatId: `${prompt}-chat` });
+        await adapter.sendTurn({
+          chatId: `${prompt}-chat`,
+          input: prompt,
+          messages: [{ role: "user", content: [{ type: "text", text: prompt }] }],
+        });
+
+        const fileChanges = events.filter((event) => event.type === "file-change.completed");
+        assert.equal(fileChanges.length, 1);
+        const change = /** @type {{ path?: unknown, kind?: unknown, diff?: unknown, oldText?: unknown, newText?: unknown }} */ (fileChanges[0]?.change ?? {});
+        assert.equal(change.path, expectedPath);
+        assert.equal(change.kind, expectedKind);
+        assert.equal(typeof change.diff, "string");
+        assert.equal(change.oldText, undefined);
+        assert.equal(change.newText, undefined);
       } finally {
         unsubscribe?.();
       }

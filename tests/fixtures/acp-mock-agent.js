@@ -262,6 +262,23 @@ async function handlePrompt(message) {
     send({ id: message.id, result: { sessionId, stopReason: "end_turn" } });
     return;
   }
+  if (prompt.includes("fs update")) {
+    const filePath = `${process.cwd()}/acp-fs-update.txt`;
+    await request("fs/write_text_file", {
+      sessionId,
+      path: filePath,
+      content: "new content through acp fs\n",
+    });
+    notify("session/update", {
+      sessionId,
+      update: {
+        sessionUpdate: "agent_message_chunk",
+        content: { type: "text", text: "fs update done" },
+      },
+    });
+    send({ id: message.id, result: { sessionId, stopReason: "end_turn" } });
+    return;
+  }
   if (prompt.includes("direct write")) {
     await import("node:fs/promises").then((fs) => fs.writeFile(`${process.cwd()}/direct-write.txt`, "direct write", "utf8"));
     notify("session/update", {
@@ -269,6 +286,109 @@ async function handlePrompt(message) {
       update: {
         sessionUpdate: "agent_message_chunk",
         content: { type: "text", text: "direct write done" },
+      },
+    });
+    send({ id: message.id, result: { sessionId, stopReason: "end_turn" } });
+    return;
+  }
+  if (prompt.includes("direct delete")) {
+    await import("node:fs/promises").then((fs) => fs.unlink(`${process.cwd()}/direct-delete.txt`));
+    notify("session/update", {
+      sessionId,
+      update: {
+        sessionUpdate: "agent_message_chunk",
+        content: { type: "text", text: "direct delete done" },
+      },
+    });
+    send({ id: message.id, result: { sessionId, stopReason: "end_turn" } });
+    return;
+  }
+  if (prompt.includes("diff only update")) {
+    notify("session/update", {
+      sessionId,
+      update: {
+        sessionUpdate: "tool_call_update",
+        toolCallId: "diff-only-update",
+        title: "Edited diff-only-update.js",
+        status: "completed",
+        content: [{
+          type: "diff",
+          path: "diff-only-update.js",
+          diff: [
+            "--- a/diff-only-update.js",
+            "+++ b/diff-only-update.js",
+            "@@ -1 +1 @@",
+            "-export const value = 1;",
+            "+export const value = 2;",
+          ].join("\n"),
+        }],
+      },
+    });
+    notify("session/update", {
+      sessionId,
+      update: {
+        sessionUpdate: "agent_message_chunk",
+        content: { type: "text", text: "diff only update done" },
+      },
+    });
+    send({ id: message.id, result: { sessionId, stopReason: "end_turn" } });
+    return;
+  }
+  if (prompt.includes("diff only add")) {
+    notify("session/update", {
+      sessionId,
+      update: {
+        sessionUpdate: "tool_call_update",
+        toolCallId: "diff-only-add",
+        title: "Added diff-only-add.js",
+        status: "completed",
+        content: [{
+          type: "diff",
+          path: "diff-only-add.js",
+          diff: [
+            "--- /dev/null",
+            "+++ b/diff-only-add.js",
+            "@@ -0,0 +1 @@",
+            "+export const value = 1;",
+          ].join("\n"),
+        }],
+      },
+    });
+    notify("session/update", {
+      sessionId,
+      update: {
+        sessionUpdate: "agent_message_chunk",
+        content: { type: "text", text: "diff only add done" },
+      },
+    });
+    send({ id: message.id, result: { sessionId, stopReason: "end_turn" } });
+    return;
+  }
+  if (prompt.includes("diff only delete")) {
+    notify("session/update", {
+      sessionId,
+      update: {
+        sessionUpdate: "tool_call_update",
+        toolCallId: "diff-only-delete",
+        title: "Deleted diff-only-delete.js",
+        status: "completed",
+        content: [{
+          type: "diff",
+          path: "diff-only-delete.js",
+          diff: [
+            "--- a/diff-only-delete.js",
+            "+++ /dev/null",
+            "@@ -1 +0,0 @@",
+            "-export const value = 1;",
+          ].join("\n"),
+        }],
+      },
+    });
+    notify("session/update", {
+      sessionId,
+      update: {
+        sessionUpdate: "agent_message_chunk",
+        content: { type: "text", text: "diff only delete done" },
       },
     });
     send({ id: message.id, result: { sessionId, stopReason: "end_turn" } });

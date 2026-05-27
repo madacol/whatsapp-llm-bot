@@ -6,6 +6,7 @@ process.env.MODEL = "mock-model";
 import { describe, it, before, after } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import {
   createMockLlmServer,
@@ -295,10 +296,113 @@ describe("provider runtime events", () => {
 });
 
 // ═══════════════════════════════════════════════════════════════════
-// 1d. Pi RPC events through the full WhatsApp transport boundary
+// 1d. ACP file-change parity through the full WhatsApp transport boundary
+// ═══════════════════════════════════════════════════════════════════
+describe("ACP file changes through WhatsApp transport", () => {
+  const harnessName = "e2e-acp-file-changes";
+  let nextSender = 0;
+
+  before(async () => {
+    const { registerHarnessDriver } = await import("../harnesses/index.js");
+    const { createAcpHarness } = await import("../harnesses/acp.js");
+    registerHarnessDriver({
+      name: harnessName,
+      supportsInstances: true,
+      createInstance: () => ({
+        harness: createAcpHarness({
+          name: harnessName,
+          config: {
+            command: process.execPath,
+            args: [path.resolve("tests", "fixtures", "acp-mock-agent.js")],
+          },
+        }),
+      }),
+    });
+  });
+
+  /**
+   * @param {string} prompt
+   * @param {(workdir: string) => Promise<void>} [setup]
+   * @returns {Promise<{ rendered: string[], sentMessages: ReturnType<ReturnType<typeof createMockBaileysSocket>["getSentMessages"]> }>}
+   */
+  async function runAcpPrompt(prompt, setup) {
+    const senderId = `e2e-acp-files-${nextSender++}`;
+    const chatId = `${senderId}@s.whatsapp.net`;
+    const workdir = await fs.mkdtemp(path.join(os.tmpdir(), "e2e-acp-files-"));
+    await setup?.(workdir);
+    await seedChat(testDb, chatId, { enabled: true });
+    await updateChatConfig(chatId, (current) => ({
+      ...current,
+      harness: harnessName,
+      harness_cwd: workdir,
+      output_visibility: { changes: true, toolDetails: false },
+    }));
+
+    const captures = createMockBaileysSocket();
+    await adaptIncomingMessage(
+      createWAMessage({ text: prompt, senderId }),
+      captures.sock,
+      handleMessage,
+      testConfirmRegistry,
+      testUserResponseRegistry,
+    );
+
+    return {
+      rendered: captures.getRenderedMessages(),
+      sentMessages: captures.getSentMessages(),
+    };
+  }
+
+  /**
+   * @param {string[]} rendered
+   * @param {string} title
+   * @param {string} fileName
+   */
+  function assertOneFileChange(rendered, title, fileName) {
+    const matches = rendered.filter((text) => text.includes(title) && text.includes(`\`${fileName}\``));
+    assert.equal(matches.length, 1, `Expected one ${title} caption for ${fileName}, got ${JSON.stringify(rendered)}`);
+  }
+
+  it("sends ACP adds, updates, deletes, and unified diffs with the expected transport labels", async () => {
+    const add = await runAcpPrompt("fs write");
+    assertOneFileChange(add.rendered, "*Add File*", "acp-fs-write.txt");
+
+    const update = await runAcpPrompt("fs update", async (workdir) => {
+      await fs.writeFile(path.join(workdir, "acp-fs-update.txt"), "old content through acp fs\n", "utf8");
+    });
+    assertOneFileChange(update.rendered, "*Update File*", "acp-fs-update.txt");
+
+    const deleted = await runAcpPrompt("direct delete", async (workdir) => {
+      await fs.writeFile(path.join(workdir, "direct-delete.txt"), "delete me\n", "utf8");
+    });
+    assertOneFileChange(deleted.rendered, "*Delete File*", "direct-delete.txt");
+
+    const diffAdd = await runAcpPrompt("diff only add");
+    assertOneFileChange(diffAdd.rendered, "*Add File*", "diff-only-add.js");
+
+    const diffUpdate = await runAcpPrompt("diff only update");
+    assertOneFileChange(diffUpdate.rendered, "*Update File*", "diff-only-update.js");
+
+    const diffDelete = await runAcpPrompt("diff only delete");
+    assertOneFileChange(diffDelete.rendered, "*Delete File*", "diff-only-delete.js");
+
+    const fileChangeImages = [
+      ...add.sentMessages,
+      ...update.sentMessages,
+      ...deleted.sentMessages,
+      ...diffAdd.sentMessages,
+      ...diffUpdate.sentMessages,
+      ...diffDelete.sentMessages,
+    ].filter((entry) => Buffer.isBuffer(entry.msg.image) && typeof entry.msg.caption === "string");
+    assert.ok(fileChangeImages.length >= 6, `Expected file changes to render as sendable image content, got ${JSON.stringify(fileChangeImages)}`);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════
+// 1e. Pi RPC events through the full WhatsApp transport boundary
 // ═══════════════════════════════════════════════════════════════════
 // ═══════════════════════════════════════════════════════════════════
-// 1e. WhatsApp audio through media-to-text into provider input
+// 1f. WhatsApp audio through media-to-text into provider input
 // ═══════════════════════════════════════════════════════════════════
 describe("audio media-to-text provider input", () => {
   const senderId = "e2e-audio-user";
