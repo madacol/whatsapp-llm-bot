@@ -87,5 +87,7 @@ export function wrapHooksWithFallbacks(rawHooks) {
     onDepthLimit: () => safeHook("onDepthLimit", () => rawHooks.onDepthLimit(), false),
     onUsage: (/** @type {string} */ cost, /** @type {UsageTokens} */ tokens) =>
       safeHook("onUsage", () => rawHooks.onUsage(cost, tokens), undefined),
+    onRuntimeEvent: (/** @type {import("./harness-runtime-events.js").HarnessRuntimeEvent} */ event) =>
+      safeHook("onRuntimeEvent", () => rawHooks.onRuntimeEvent(event), undefined),
   };
 }

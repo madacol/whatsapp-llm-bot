@@ -461,11 +461,13 @@ describe("ACP runtime events through WhatsApp transport", () => {
     );
     if (options.pollChoice) {
       for (let attempt = 0; attempt < 50; attempt += 1) {
-        const poll = captures.getSentMessages().find((entry) => entry.msg.poll);
+        const sentMessages = captures.getSentMessages();
+        const pollIndex = sentMessages.findIndex((entry) => entry.msg.poll);
+        const poll = pollIndex >= 0 ? sentMessages[pollIndex] : undefined;
         if (poll && poll.msg.poll && typeof poll.msg.poll === "object" && Array.isArray(/** @type {{ values?: unknown }} */ (poll.msg.poll).values)) {
           testUserResponseRegistry.handlePollVote({
             chatId,
-            pollMsgId: "sent-msg-0",
+            pollMsgId: `sent-msg-${pollIndex}`,
             selectedOptions: [options.pollChoice],
           });
           break;

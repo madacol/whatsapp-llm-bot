@@ -401,10 +401,15 @@ describe("createHarnessRuntimeEventDispatcher", () => {
   it("accepts session, turn, request, user-input, and file-change runtime events", async () => {
     /** @type {Array<Record<string, unknown>>} */
     const fileChanges = [];
+    /** @type {string[]} */
+    const runtimeEvents = [];
     const dispatcher = createHarnessRuntimeEventDispatcher({
       provider: "codex",
       messages: [],
       hooks: {
+        onRuntimeEvent: async (event) => {
+          runtimeEvents.push(event.type);
+        },
         onFileChange: async (event) => {
           fileChanges.push(event);
         },
@@ -457,12 +462,32 @@ describe("createHarnessRuntimeEventDispatcher", () => {
       provider: "codex",
       turn: { id: "turn-1", chatId: "chat-1", status: "completed" },
     });
+    await dispatcher.handleEvent({
+      type: "extension.notification",
+      provider: "codex",
+      method: "madabot/example",
+      payload: { ok: true },
+    });
+    await dispatcher.handleEvent({
+      type: "runtime.warning",
+      provider: "codex",
+      message: "provider reported a warning",
+    });
 
     assert.deepEqual(fileChanges, [{
       path: "/repo/app.js",
       summary: "Updated app",
       kind: "update",
     }]);
+    assert.deepEqual(runtimeEvents, [
+      "session.started",
+      "turn.started",
+      "request.opened",
+      "user-input.requested",
+      "turn.completed",
+      "extension.notification",
+      "runtime.warning",
+    ]);
     assert.deepEqual(dispatcher.result.response, []);
   });
 

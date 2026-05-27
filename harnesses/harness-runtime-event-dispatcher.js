@@ -17,7 +17,7 @@ import { normalizeHarnessRuntimeEvent } from "./harness-runtime-events.js";
 const log = createLogger("harness:runtime-events");
 
 /**
- * @type {Pick<Required<AgentIOHooks>, "onComposing" | "onPaused" | "onReasoning" | "onToolCall" | "onToolComplete" | "onToolResult" | "onLlmResponse" | "onFileChange" | "onUsage" | "onToolError" | "onCommand" | "onFileRead" | "onPlan">}
+ * @type {Pick<Required<AgentIOHooks>, "onComposing" | "onPaused" | "onReasoning" | "onToolCall" | "onToolComplete" | "onToolResult" | "onLlmResponse" | "onFileChange" | "onUsage" | "onToolError" | "onCommand" | "onFileRead" | "onPlan" | "onRuntimeEvent">}
  */
 const DEFAULT_RUNTIME_EVENT_HOOKS = {
   onComposing: async () => {},
@@ -33,6 +33,7 @@ const DEFAULT_RUNTIME_EVENT_HOOKS = {
   onCommand: async () => {},
   onFileRead: async () => {},
   onPlan: async () => {},
+  onRuntimeEvent: async () => {},
 };
 
 /**
@@ -74,7 +75,7 @@ function buildRuntimeToolPresentation(tool, workdir) {
  * @param {{
  *   provider: HarnessRuntimeProvider,
  *   messages: Message[],
- *   hooks?: Pick<AgentIOHooks, "onComposing" | "onPaused" | "onReasoning" | "onToolCall" | "onToolComplete" | "onToolResult" | "onLlmResponse" | "onFileChange" | "onUsage" | "onToolError" | "onCommand" | "onFileRead" | "onPlan">,
+ *   hooks?: Pick<AgentIOHooks, "onComposing" | "onPaused" | "onReasoning" | "onToolCall" | "onToolComplete" | "onToolResult" | "onLlmResponse" | "onFileChange" | "onUsage" | "onToolError" | "onCommand" | "onFileRead" | "onPlan" | "onRuntimeEvent">,
  *   workdir?: string | null,
  *   emitUsage?: boolean,
  *   rawEventLogger?: HarnessRawEventLogger | null,
@@ -394,6 +395,7 @@ export function createHarnessRuntimeEventDispatcher(input) {
       case "user-input.resolved":
       case "item.started":
       case "item.updated":
+        await hooks.onRuntimeEvent(normalizedEvent);
         return;
       case "item.completed":
         if (normalizedEvent.item.kind === "assistant") {
@@ -406,10 +408,13 @@ export function createHarnessRuntimeEventDispatcher(input) {
               streamStatus: "final",
             });
           }
+        } else {
+          await hooks.onRuntimeEvent(normalizedEvent);
         }
         return;
       case "extension.notification":
       case "extension.request":
+        await hooks.onRuntimeEvent(normalizedEvent);
         return;
       case "file-change.completed":
         await hooks.onFileChange(normalizedEvent.change);
@@ -418,6 +423,7 @@ export function createHarnessRuntimeEventDispatcher(input) {
       case "config.warning":
       case "runtime.warning":
       case "runtime.error":
+        await hooks.onRuntimeEvent(normalizedEvent);
         return;
       default: {
         /** @type {never} */

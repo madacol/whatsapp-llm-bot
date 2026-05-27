@@ -22,6 +22,7 @@ export const NO_OP_HOOKS = {
   onContinuePrompt: async () => true,
   onDepthLimit: async () => false,
   onUsage: async () => {},
+  onRuntimeEvent: async () => {},
 };
 
 /**

@@ -639,6 +639,7 @@ type AgentIOHooks = {
   onContinuePrompt?: () => Promise<boolean>;
   onDepthLimit?: () => Promise<boolean>;
   onUsage?: (cost: string, tokens: UsageTokens) => Promise<void>;
+  onRuntimeEvent?: (event: import("./harnesses/harness-runtime-events.js").HarnessRuntimeEvent) => Promise<void>;
 };
 
 type LlmResponseMetadata = {
