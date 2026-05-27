@@ -36,6 +36,20 @@ const CACHE_PATH = path.resolve("data/models.json");
 
 // ── Full e2e: WAMessage → adapter → handleMessage → mock LLM → socket output ──
 
+/**
+ * @param {ReturnType<ReturnType<typeof createMockBaileysSocket>["getRelayedMessages"]>} relayedMessages
+ * @returns {Array<{ chatId: string, key: unknown, text: string }>}
+ */
+function getRelayedTextEdits(relayedMessages) {
+  return relayedMessages.flatMap((entry) => {
+    const protocol = /** @type {Record<string, unknown> | undefined} */ (entry.msg.protocolMessage);
+    const edited = /** @type {Record<string, unknown> | undefined} */ (protocol?.editedMessage);
+    return typeof edited?.conversation === "string"
+      ? [{ chatId: entry.chatId, key: protocol?.key, text: edited.conversation }]
+      : [];
+  });
+}
+
 describe("e2e adapter", { concurrency: 1 }, () => {
 
 before(async () => {
@@ -118,7 +132,7 @@ describe("compact tool progress edits", () => {
       "Final answer after the tool.",
     );
 
-    const { sock, getSentMessages } = createMockBaileysSocket();
+    const { sock, getSentMessages, getRelayedMessages } = createMockBaileysSocket();
     const msg = createWAMessage({ text: "Run a tool", senderId });
 
     await adaptIncomingMessage(msg, sock, handleMessage, testConfirmRegistry, testUserResponseRegistry);
@@ -129,12 +143,13 @@ describe("compact tool progress edits", () => {
       && entry.msg.text.includes("*run_javascript*")
     ));
     const compactSends = compactMessages.filter((entry) => !("edit" in entry.msg));
-    const compactEdits = compactMessages.filter((entry) => "edit" in entry.msg);
+    const compactEdits = getRelayedTextEdits(getRelayedMessages())
+      .filter((entry) => entry.text.includes("*run_javascript*"));
 
     assert.equal(compactSends.length, 1, `Expected one compact progress send, got ${JSON.stringify(compactMessages)}`);
-    assert.ok(compactEdits.length >= 1, `Expected compact progress to be edited, got ${JSON.stringify(compactMessages)}`);
+    assert.ok(compactEdits.length >= 1, `Expected compact progress to be edited, got ${JSON.stringify(getRelayedMessages())}`);
     assert.deepEqual(
-      compactEdits.map((entry) => entry.msg.edit),
+      compactEdits.map((entry) => entry.key),
       compactEdits.map(() => ({ id: "sent-msg-0", remoteJid: chatId })),
       "Compact progress edits should target the first compact message key",
     );
@@ -269,7 +284,7 @@ describe("provider runtime events", () => {
   });
 
   it("projects provider runtime progress, answer, and usage to WhatsApp messages", async () => {
-    const { sock, getSentMessages } = createMockBaileysSocket();
+    const { sock, getSentMessages, getRelayedMessages } = createMockBaileysSocket();
 
     await adaptIncomingMessage(
       createWAMessage({ text: "Use provider runtime events", senderId }),
@@ -287,11 +302,13 @@ describe("provider runtime events", () => {
       typeof entry.msg.text === "string"
       && (entry.msg.text.includes("*Read*") || entry.msg.text.includes("*Shell*"))
     ));
+    const compactEdits = getRelayedTextEdits(getRelayedMessages())
+      .filter((entry) => entry.text.includes("*Read*") || entry.text.includes("*Shell*"));
 
     assert.ok(textMessages.some((text) => text.includes("Provider runtime answer.")), `Expected provider answer, got ${JSON.stringify(textMessages)}`);
     assert.ok(textMessages.some((text) => text.includes("Cost: 0.004200")), `Expected provider usage cost, got ${JSON.stringify(textMessages)}`);
-    assert.equal(compactMessages.filter((entry) => !("edit" in entry.msg)).length, 1, `Expected one compact progress send, got ${JSON.stringify(compactMessages)}`);
-    assert.ok(compactMessages.some((entry) => "edit" in entry.msg), `Expected compact progress edits, got ${JSON.stringify(compactMessages)}`);
+    assert.equal(compactMessages.length, 1, `Expected one compact progress send, got ${JSON.stringify(compactMessages)}`);
+    assert.ok(compactEdits.length >= 1, `Expected compact progress edits, got ${JSON.stringify(getRelayedMessages())}`);
   });
 });
 

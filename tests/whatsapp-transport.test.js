@@ -49,6 +49,25 @@ async function getQueuedRows(db, chatId) {
   }));
 }
 
+/**
+ * @param {Array<{ chatId: string, message: Record<string, unknown>, options: Record<string, unknown> }>} relayedMessages
+ * @param {string} chatId
+ * @param {Record<string, unknown>} key
+ * @param {string} text
+ * @returns {void}
+ */
+function assertSingleTextEdit(relayedMessages, chatId, key, text) {
+  assert.equal(relayedMessages.length, 1);
+  assert.equal(relayedMessages[0]?.chatId, chatId);
+  assert.deepEqual(relayedMessages[0]?.options, { additionalAttributes: { edit: "1" } });
+  const message = relayedMessages[0]?.message ?? {};
+  const protocol = /** @type {Record<string, unknown>} */ (message.protocolMessage);
+  assert.ok(protocol, "Expected protocolMessage edit");
+  assert.deepEqual(protocol.key, key);
+  assert.equal(typeof protocol.type, "number");
+  assert.deepEqual(protocol.editedMessage, { conversation: text });
+}
+
 describe("WhatsApp transport community creation", () => {
   it("buffers streamed LLM chunks in WhatsApp until completion", async () => {
     const chatId = `stream-buffer-${Date.now()}`;
@@ -232,6 +251,8 @@ describe("WhatsApp transport community creation", () => {
     let processEvents = null;
     /** @type {Array<{ chatId: string, message: Record<string, unknown> }>} */
     const sentMessages = [];
+    /** @type {Array<{ chatId: string, message: Record<string, unknown>, options: Record<string, unknown> }>} */
+    const relayedMessages = [];
     let failSends = true;
 
     const socket = /** @type {import("@whiskeysockets/baileys").WASocket} */ (/** @type {unknown} */ ({
@@ -246,6 +267,9 @@ describe("WhatsApp transport community creation", () => {
         }
         sentMessages.push({ chatId: targetChatId, message });
         return { key: { id: `sent-${sentMessages.length}`, remoteJid: targetChatId } };
+      },
+      relayMessage: async (targetChatId, message, options) => {
+        relayedMessages.push({ chatId: targetChatId, message, options });
       },
     }));
 
@@ -284,14 +308,13 @@ describe("WhatsApp transport community creation", () => {
         chatId,
         message: { text: "🤖 queued before edit" },
       },
-      {
-        chatId,
-        message: {
-          text: "🤖 queued after edit",
-          edit: { id: "sent-1", remoteJid: chatId },
-        },
-      },
     ]);
+    assertSingleTextEdit(
+      relayedMessages,
+      chatId,
+      { id: "sent-1", remoteJid: chatId },
+      "🤖 queued after edit",
+    );
   });
 
   it("queues outbound events after websocket abnormal closure send failures", async () => {
@@ -377,6 +400,8 @@ describe("WhatsApp transport community creation", () => {
     let processEvents = null;
     /** @type {Array<{ chatId: string, message: Record<string, unknown> }>} */
     const sentMessages = [];
+    /** @type {Array<{ chatId: string, message: Record<string, unknown>, options: Record<string, unknown> }>} */
+    const relayedMessages = [];
     /** @type {string[]} */
     const hookObservations = [];
     /** @type {number | undefined} */
@@ -391,6 +416,9 @@ describe("WhatsApp transport community creation", () => {
       sendMessage: async (targetChatId, message) => {
         sentMessages.push({ chatId: targetChatId, message });
         return { key: { id: `sent-${sentMessages.length}`, remoteJid: targetChatId } };
+      },
+      relayMessage: async (targetChatId, message, options) => {
+        relayedMessages.push({ chatId: targetChatId, message, options });
       },
     }));
 
@@ -442,14 +470,13 @@ describe("WhatsApp transport community creation", () => {
         chatId,
         message: { text: "🤖 queued before open hook" },
       },
-      {
-        chatId,
-        message: {
-          text: "Restarted.",
-          edit: { id: "sent-1", remoteJid: chatId },
-        },
-      },
     ]);
+    assertSingleTextEdit(
+      relayedMessages,
+      chatId,
+      { id: "sent-1", remoteJid: chatId },
+      "Restarted.",
+    );
   });
 
   it("edits the restart acknowledgement through a transport-owned durable handle", async () => {
@@ -464,6 +491,8 @@ describe("WhatsApp transport community creation", () => {
     let processEvents = null;
     /** @type {Array<{ chatId: string, message: Record<string, unknown> }>} */
     const sentMessages = [];
+    /** @type {Array<{ chatId: string, message: Record<string, unknown>, options: Record<string, unknown> }>} */
+    const relayedMessages = [];
 
     const socket = /** @type {import("@whiskeysockets/baileys").WASocket} */ (/** @type {unknown} */ ({
       ev: {
@@ -474,6 +503,9 @@ describe("WhatsApp transport community creation", () => {
       sendMessage: async (targetChatId, message) => {
         sentMessages.push({ chatId: targetChatId, message });
         return { key: { id: `sent-${sentMessages.length}`, remoteJid: targetChatId } };
+      },
+      relayMessage: async (targetChatId, message, options) => {
+        relayedMessages.push({ chatId: targetChatId, message, options });
       },
     }));
 
@@ -574,14 +606,13 @@ describe("WhatsApp transport community creation", () => {
           chatId,
           message: { text: "🤖 Restarting..." },
         },
-        {
-          chatId,
-          message: {
-            text: "Restarted.",
-            edit: { id: "sent-1", remoteJid: chatId },
-          },
-        },
       ]);
+      assertSingleTextEdit(
+        relayedMessages,
+        chatId,
+        { id: "sent-1", remoteJid: chatId },
+        "Restarted.",
+      );
       assert.equal(await restartAckStore.read(), null);
     } finally {
       await rm(dir, { recursive: true, force: true });

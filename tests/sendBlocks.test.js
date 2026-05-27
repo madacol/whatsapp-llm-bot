@@ -70,6 +70,29 @@ function createMockSock() {
   return { sock, sent, relayed };
 }
 
+/**
+ * @param {Record<string, unknown>} relayMessage
+ * @returns {string}
+ */
+function getTextFromProtocolEdit(relayMessage) {
+  const protocol = /** @type {Record<string, unknown>} */ (relayMessage.protocolMessage);
+  assert.ok(protocol, "Expected protocolMessage edit");
+  const edited = /** @type {Record<string, unknown>} */ (protocol.editedMessage);
+  assert.ok(edited, "Expected editedMessage");
+  assert.equal(typeof edited.conversation, "string");
+  return edited.conversation;
+}
+
+/**
+ * @param {{ method: string, args: unknown[] } | undefined} call
+ * @returns {string}
+ */
+function getTextFromRelayEditCall(call) {
+  assert.ok(call, "Expected relay edit call");
+  assert.equal(call.method, "relayMessage");
+  return getTextFromProtocolEdit(/** @type {Record<string, unknown>} */ (call.args[1]));
+}
+
 describe("sendEvent – sub-agent messages", () => {
   it("renders sub-agent messages with their own header", async () => {
     const { sock, sent } = createMockSock();
@@ -749,14 +772,7 @@ describe("sendBlocks – MessageHandle tracking", () => {
   });
 
   it("handle.update calls editWhatsAppMessage when invoked", async () => {
-    /** @type {Array<{ chatId: string; msg: Record<string, unknown>; opts?: Record<string, unknown> }>} */
-    const sent = [];
-    const sock = {
-      sendMessage: async (/** @type {string} */ chatId, /** @type {Record<string, unknown>} */ msg, /** @type {Record<string, unknown>} */ opts) => {
-        sent.push({ chatId, msg, opts });
-        return { key: { id: `msg-${sent.length}`, remoteJid: chatId } };
-      },
-    };
+    const { sock, sent, relayed } = createMockSock();
 
     const handle = await sendBlocks(sock, "test-chat", "llm", [
       { type: "text", text: "original" },
@@ -765,11 +781,11 @@ describe("sendBlocks – MessageHandle tracking", () => {
     assert.ok(handle);
     await handle.update({ kind: "text", text: "updated" });
 
-    // The update call should be the second sendMessage (first was the original)
-    const editCall = sent[1];
-    assert.ok(editCall, "Handle.update should have sent an edit");
+    assert.equal(sent.length, 1, "Handle.update should not send a fresh text message");
+    assert.equal(relayed.length, 1, "Handle.update should have relayed an edit");
+    const editText = getTextFromProtocolEdit(relayed[0].msg);
     assert.ok(
-      typeof editCall.msg.text === "string" && editCall.msg.text.includes("updated"),
+      editText.includes("updated"),
       "Edit should contain the new text",
     );
   });
@@ -817,7 +833,7 @@ describe("sendBlocks – tool-call → edit pipeline", () => {
     return { sock, calls };
   }
 
-  it("text tool-call: send → progress update → final update uses sendMessage with edit key", async () => {
+  it("text tool-call: send → progress update → final update uses protocol edits", async () => {
     const { sock, calls } = createCaptureSock();
 
     // Step 1: Send initial tool-call message
@@ -834,20 +850,19 @@ describe("sendBlocks – tool-call → edit pipeline", () => {
     assert.equal(calls.length, 2, "Should have 2 calls after progress update");
 
     const progressCall = calls[1];
-    assert.equal(progressCall.method, "sendMessage", "Progress update should use sendMessage");
-    const progressMsg = /** @type {Record<string, unknown>} */ (progressCall.args[1]);
-    assert.ok(typeof progressMsg.text === "string" && progressMsg.text.includes("Read (3s…)"), "Progress text should be in edit");
-    assert.ok(progressMsg.edit != null, "Should include edit key for in-place update");
+    const progressText = getTextFromRelayEditCall(progressCall);
+    assert.ok(progressText.includes("Read (3s…)"), "Progress text should be in edit");
 
     // Step 3: Simulate final result
     await handle.update({ kind: "text", text: "Read · file.js (42 lines)" });
     assert.equal(calls.length, 3, "Should have 3 calls after final update");
 
     const finalCall = calls[2];
-    const finalMsg = /** @type {Record<string, unknown>} */ (finalCall.args[1]);
-    assert.ok(typeof finalMsg.text === "string" && finalMsg.text.includes("Read · file.js"), "Final text should be in edit");
-    // The edit key should reference the original message
-    const editKey = /** @type {{ id: string }} */ (finalMsg.edit);
+    const finalText = getTextFromRelayEditCall(finalCall);
+    assert.ok(finalText.includes("Read · file.js"), "Final text should be in edit");
+    const finalRelayMsg = /** @type {Record<string, unknown>} */ (finalCall.args[1]);
+    const protocol = /** @type {Record<string, unknown>} */ (finalRelayMsg.protocolMessage);
+    const editKey = /** @type {{ id: string }} */ (protocol.key);
     assert.equal(editKey.id, "msg-1", "Edit key should reference the original message");
   });
 
@@ -889,8 +904,7 @@ describe("sendBlocks – tool-call → edit pipeline", () => {
     assert.ok(handle);
     await handle.update({ kind: "text", text: "done" });
 
-    const editMsg = /** @type {Record<string, unknown>} */ (calls[1].args[1]);
-    const editText = /** @type {string} */ (editMsg.text);
+    const editText = getTextFromRelayEditCall(calls[1]);
     // "tool-call" prefix is "🔧"
     assert.ok(editText.startsWith("🔧"), `Edit text should start with tool-call prefix, got: ${editText}`);
     assert.ok(editText.includes("done"), "Edit text should contain new content");
@@ -909,8 +923,7 @@ describe("sendBlocks – tool-call → edit pipeline", () => {
 
     await handle.update({ kind: "text", text: "🔧Read `src/app.js`\n🔧Bash `git diff`" });
 
-    const editMsg = /** @type {Record<string, unknown>} */ (calls[1].args[1]);
-    assert.equal(editMsg.text, "🔧Read `src/app.js`\n🔧Bash `git diff`");
+    assert.equal(getTextFromRelayEditCall(calls[1]), "🔧Read `src/app.js`\n🔧Bash `git diff`");
   });
 
   it("persists full plain-text inspect output after 👁 reactions", async () => {
@@ -942,9 +955,8 @@ describe("sendBlocks – tool-call → edit pipeline", () => {
       senderId: "user-1",
     }]);
 
-    const inspectMsg = /** @type {Record<string, unknown>} */ (calls[1].args[1]);
     assert.equal(
-      inspectMsg.text,
+      getTextFromRelayEditCall(calls[1]),
       "🔧 *Read*  `src/app.js`\n🔧 *Bash*  `pnpm type-check`",
     );
 
@@ -962,9 +974,8 @@ describe("sendBlocks – tool-call → edit pipeline", () => {
       text: "... +1 earlier tools\n🔧 *Bash*  `pnpm type-check`\n🔧 *Bash*  `git diff`",
     });
 
-    const persistedEditMsg = /** @type {Record<string, unknown>} */ (calls[2].args[1]);
     assert.equal(
-      persistedEditMsg.text,
+      getTextFromRelayEditCall(calls[2]),
       "🔧 *Read*  `src/app.js`\n🔧 *Bash*  `pnpm type-check`\n🔧 *Bash*  `git diff`",
     );
   });
@@ -999,21 +1010,19 @@ describe("sendBlocks – tool-call → edit pipeline", () => {
       senderId: "user-1",
     }]);
 
-    const inspectMsg = /** @type {Record<string, unknown>} */ (calls[1].args[1]);
-    assert.equal(typeof inspectMsg.text, "string");
-    assert.ok(inspectMsg.text.startsWith("🔧 *Bash*  `command 000`"));
-    assert.ok(inspectMsg.text.includes("_… truncated ("));
-    assert.ok(inspectMsg.text.length < longInspectText.length);
+    const inspectText = getTextFromRelayEditCall(calls[1]);
+    assert.ok(inspectText.startsWith("🔧 *Bash*  `command 000`"));
+    assert.ok(inspectText.includes("_… truncated ("));
+    assert.ok(inspectText.length < longInspectText.length);
 
     await handle.update({
       kind: "text",
       text: "... +217 earlier tools\n🔧 *Bash*  `command 217`\n🔧 *Bash*  `command 218`\n🔧 *Bash*  `command 219`",
     });
 
-    const persistedEditMsg = /** @type {Record<string, unknown>} */ (calls[2].args[1]);
-    assert.equal(typeof persistedEditMsg.text, "string");
-    assert.ok(persistedEditMsg.text.includes("_… truncated ("));
-    assert.ok(persistedEditMsg.text.length < longInspectText.length);
+    const persistedEditText = getTextFromRelayEditCall(calls[2]);
+    assert.ok(persistedEditText.includes("_… truncated ("));
+    assert.ok(persistedEditText.length < longInspectText.length);
   });
 
   it("formats reasoning inspect text when the user reacts with 👁", async () => {
@@ -1044,23 +1053,27 @@ describe("sendBlocks – tool-call → edit pipeline", () => {
 
     assert.equal(calls.length, 2, "Expected one initial send and one inspect edit");
     const inspectCall = calls[1];
-    assert.equal(inspectCall.method, "sendMessage");
-    const inspectMsg = /** @type {Record<string, unknown>} */ (inspectCall.args[1]);
-    assert.ok(typeof inspectMsg.text === "string" && inspectMsg.text.includes("*Thinking*"));
-    assert.ok(typeof inspectMsg.text === "string" && inspectMsg.text.includes("Inspect the file, then patch the bug."));
+    const inspectText = getTextFromRelayEditCall(inspectCall);
+    assert.ok(inspectText.includes("*Thinking*"));
+    assert.ok(inspectText.includes("Inspect the file, then patch the bug."));
   });
 
-  it("editWhatsAppMessage directly: text path sends edit key", async () => {
+  it("editWhatsAppMessage directly: text path uses relayMessage with protocolMessage", async () => {
     const { sock, calls } = createCaptureSock();
     const key = { id: "msg-abc", remoteJid: "chat-1" };
 
     await editWhatsAppMessage(sock, "chat-1", "updated text", { fallbackKeyId: key.id });
 
     assert.equal(calls.length, 1);
-    assert.equal(calls[0].method, "sendMessage");
-    const msg = /** @type {Record<string, unknown>} */ (calls[0].args[1]);
-    assert.equal(msg.text, "updated text");
-    assert.deepEqual(msg.edit, { id: "msg-abc", remoteJid: "chat-1", fromMe: true });
+    assert.equal(calls[0].method, "relayMessage");
+    const relayMsg = /** @type {Record<string, unknown>} */ (calls[0].args[1]);
+    const proto = /** @type {Record<string, unknown>} */ (relayMsg.protocolMessage);
+    assert.ok(proto, "Should have protocolMessage");
+    assert.deepEqual(proto.key, { id: "msg-abc", remoteJid: "chat-1", fromMe: true });
+    const edited = /** @type {Record<string, unknown>} */ (proto.editedMessage);
+    assert.equal(edited.conversation, "updated text");
+    const opts = /** @type {{ additionalAttributes: Record<string, string> }} */ (calls[0].args[2]);
+    assert.equal(opts.additionalAttributes.edit, "1", "Should have edit='1' attribute");
   });
 
   it("editWhatsAppMessage directly: image path uses relayMessage with protocolMessage", async () => {
