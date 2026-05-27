@@ -711,6 +711,7 @@ type HarnessRunConfig = {
   workdir?: string | null;
   harnessInstanceId?: string | null;
   model?: string | null;
+  mode?: string | null;
   reasoningEffort?: 'low' | 'medium' | 'high' | 'xhigh' | 'max' | null;
   sandboxMode?: 'read-only' | 'workspace-write' | 'danger-full-access' | null;
   approvalPolicy?: 'untrusted' | 'on-failure' | 'on-request' | 'never' | null;
@@ -778,8 +779,12 @@ type HarnessAdapter = {
   }) => Promise<HarnessRuntimeSession>;
   sendTurn: (input: HarnessTurnInput) => Promise<AgentResult>;
   interruptTurn: (input: { chatId: string }) => Promise<boolean>;
+  respondToRequest: (requestId: string, response: unknown) => Promise<boolean>;
+  respondToUserInput: (requestId: string, response: unknown) => Promise<boolean>;
   injectMessage: (chatId: string | HarnessSessionRef, text: string) => Promise<boolean>;
   stopSession: (chatId: string | HarnessSessionRef) => Promise<boolean>;
+  hasSession: (chatId: string | HarnessSessionRef) => boolean;
+  stopAll: () => Promise<void>;
   listSessions: () => HarnessRuntimeSession[];
   readThread: (sessionId: string) => Promise<unknown | null>;
   rollbackThread: (sessionId: string, numTurns: number) => Promise<unknown | null>;

@@ -388,6 +388,12 @@ export function createCodexHarness(deps = {}) {
       async interruptTurn({ chatId }) {
         return cancel(chatId);
       },
+      async respondToRequest() {
+        return false;
+      },
+      async respondToUserInput() {
+        return false;
+      },
       async injectMessage(chatId, text) {
         return activeSessions.injectMessage(chatId, text);
       },
@@ -405,6 +411,16 @@ export function createCodexHarness(deps = {}) {
           },
         });
         return cancel(chatId);
+      },
+      hasSession(chatId) {
+        const key = typeof chatId === "string" ? chatId : chatId.id;
+        return adapterSessions.has(key);
+      },
+      async stopAll() {
+        for (const session of adapterSessions.values()) {
+          cancel(session.chatId);
+        }
+        adapterSessions.clear();
       },
       listSessions() {
         return [...adapterSessions.values()];

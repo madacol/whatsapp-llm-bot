@@ -47,8 +47,12 @@
  *   startSession: (input: HarnessStartSessionInput) => Promise<HarnessRuntimeSession>,
  *   sendTurn: (input: HarnessTurnInput) => Promise<AgentResult>,
  *   interruptTurn: (input: HarnessInterruptInput) => Promise<boolean>,
+ *   respondToRequest: (requestId: string, response: unknown) => Promise<boolean>,
+ *   respondToUserInput: (requestId: string, response: unknown) => Promise<boolean>,
  *   injectMessage: (chatId: string | HarnessSessionRef, text: string) => Promise<boolean>,
  *   stopSession: (chatId: string | HarnessSessionRef) => Promise<boolean>,
+ *   hasSession: (chatId: string | HarnessSessionRef) => boolean,
+ *   stopAll: () => Promise<void>,
  *   listSessions: () => HarnessRuntimeSession[],
  *   readThread: (sessionId: string) => Promise<unknown | null>,
  *   rollbackThread: (sessionId: string, numTurns: number) => Promise<unknown | null>,
@@ -241,6 +245,12 @@ export function createHarnessAdapterFromHarness(input) {
     async interruptTurn({ chatId }) {
       return !!(await input.harness.cancel?.(chatId));
     },
+    async respondToRequest() {
+      return false;
+    },
+    async respondToUserInput() {
+      return false;
+    },
     async injectMessage(chatId, text) {
       return !!(await input.harness.injectMessage?.(chatId, text));
     },
@@ -258,6 +268,17 @@ export function createHarnessAdapterFromHarness(input) {
         },
       });
       return !!(await input.harness.cancel?.(chatId));
+    },
+    hasSession(chatId) {
+      const key = typeof chatId === "string" ? chatId : chatId.id;
+      return sessions.has(key);
+    },
+    async stopAll() {
+      const keys = [...sessions.keys()];
+      sessions.clear();
+      for (const key of keys) {
+        await input.harness.cancel?.(key);
+      }
     },
     listSessions() {
       return [...sessions.values()];

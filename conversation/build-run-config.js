@@ -40,6 +40,7 @@ export function buildRunConfig(chatId, chatInfo, chatName, harnessName, resolved
     workdir,
     harnessInstanceId: instanceId,
     model: typeof harnessConfig.model === "string" ? harnessConfig.model : undefined,
+    mode: typeof harnessConfig.mode === "string" ? harnessConfig.mode : undefined,
     reasoningEffort: /** @type {HarnessRunConfig["reasoningEffort"]} */ (typeof harnessConfig.reasoningEffort === "string" ? harnessConfig.reasoningEffort : undefined),
     // Project workspaces are writable by default so coding harnesses can edit files
     // without requiring per-chat sandbox setup.

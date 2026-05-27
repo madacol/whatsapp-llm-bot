@@ -2,7 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { spawn } from "node:child_process";
 import { openAcpConnection } from "./acp-client.js";
-import { normalizeAcpSessionUpdate, normalizeAcpUsage } from "./acp-events.js";
+import { createAcpRawPayload, createAcpRuntimeModel, normalizeAcpUsage } from "./acp-events.js";
 import { createHarnessRuntimeEventDispatcher } from "./harness-runtime-event-dispatcher.js";
 import { getSandboxEscapeRequest } from "./sandbox-approval.js";
 import { requestSandboxEscapeApproval } from "./sandbox-approval-coordinator.js";
@@ -19,6 +19,7 @@ import { requestSandboxEscapeApproval } from "./sandbox-approval-coordinator.js"
  *   env?: NodeJS.ProcessEnv,
  *   signal?: AbortSignal,
  *   emitEvent?: (event: import("./harness-runtime-events.js").HarnessRuntimeEvent) => void,
+ *   requestDecision?: (request: { id: string, title: string, labels: string[], descriptions: string[] }) => Promise<string | null>,
  *   onActiveRun?: (run: { connection: Awaited<ReturnType<typeof openAcpConnection>>, sessionId: string | null, capabilities: Record<string, unknown> }) => void | (() => void),
  * }} AcpRunInput
  */
@@ -313,13 +314,14 @@ async function assertSandboxAccess(input) {
  *   hooks: Pick<Required<AgentIOHooks>, "onAskUser">,
  *   runConfig?: HarnessRunConfig,
  *   emitRuntimeEvent: (event: import("./harness-runtime-events.js").HarnessRuntimeEvent) => Promise<void>,
+ *   requestDecision?: (request: { id: string, title: string, labels: string[], descriptions: string[] }) => Promise<string | null>,
  * }} options
  */
 function createAcpClientRequestHandler(options) {
   const terminals = createAcpTerminalManager(options);
   return async (/** @type {Record<string, unknown>} */ message) => {
     if (message.method === "session/request_permission") {
-      return handleAcpPermissionRequest(message, options.hooks);
+      return handleAcpPermissionRequest(message, options);
     }
     if (message.method === "fs/read_text_file") {
       return handleAcpReadTextFile(message, options);
@@ -342,32 +344,73 @@ function createAcpClientRequestHandler(options) {
     if (message.method === "terminal/release") {
       return terminals.release(message);
     }
+    if (typeof message.method === "string") {
+      await options.emitRuntimeEvent({
+        type: "extension.request",
+        provider: "acp",
+        method: message.method,
+        payload: message.params,
+        raw: createAcpRawPayload(message.method, message.params),
+      });
+    }
     return {};
   };
 }
 
 /**
  * @param {Record<string, unknown>} message
- * @param {Pick<Required<AgentIOHooks>, "onAskUser">} hooks
+ * @param {{
+ *   hooks: Pick<Required<AgentIOHooks>, "onAskUser">,
+ *   emitRuntimeEvent: (event: import("./harness-runtime-events.js").HarnessRuntimeEvent) => Promise<void>,
+ *   requestDecision?: (request: { id: string, title: string, labels: string[], descriptions: string[] }) => Promise<string | null>,
+ * }} options
  * @returns {Promise<{ outcome: { outcome: "selected", optionId: string } | { outcome: "cancelled" } }>}
  */
-async function handleAcpPermissionRequest(message, hooks) {
+async function handleAcpPermissionRequest(message, options) {
   const params = paramsRecord(message.params);
   const toolCall = isRecord(params.toolCall) ? params.toolCall : {};
-  const options = Array.isArray(params.options) ? params.options.filter(isRecord) : [];
-  if (options.length === 0) {
+  const requestOptions = Array.isArray(params.options) ? params.options.filter(isRecord) : [];
+  if (requestOptions.length === 0) {
     return { outcome: { outcome: "cancelled" } };
   }
-  const labels = options.map((option) => typeof option.name === "string" ? option.name : String(option.optionId ?? "Option"));
-  const descriptions = options.map((option) => typeof option.kind === "string" ? option.kind : "");
+  const labels = requestOptions.map((option) => typeof option.name === "string" ? option.name : String(option.optionId ?? "Option"));
+  const descriptions = requestOptions.map((option) => typeof option.kind === "string" ? option.kind : "");
   const title = typeof toolCall.title === "string" && toolCall.title.trim()
     ? toolCall.title.trim()
     : "tool call";
-  const choice = await hooks.onAskUser(`Allow *${title}*?`, labels, undefined, descriptions);
-  const selected = options.find((option, index) => choice === labels[index] || choice === option.optionId)
-    ?? options.find((option) => option.kind === "reject_once" || option.kind === "reject_always")
-    ?? options[0];
+  const id = typeof message.id === "number" || typeof message.id === "string"
+    ? `acp-request:${message.id}`
+    : `acp-request:${Date.now()}`;
+  await options.emitRuntimeEvent({
+    type: "request.opened",
+    provider: "acp",
+    request: {
+      id,
+      kind: "tool-user-input",
+      summary: title,
+      detail: labels.join(", "),
+    },
+    raw: createAcpRawPayload("session/request_permission", message.params),
+  });
+  const hookDecision = options.hooks.onAskUser(`Allow *${title}*?`, labels, undefined, descriptions);
+  const externalDecision = options.requestDecision?.({ id, title, labels, descriptions });
+  const choice = await (externalDecision
+    ? Promise.race([externalDecision, hookDecision])
+    : hookDecision);
+  const selected = requestOptions.find((option, index) => choice === labels[index] || choice === option.optionId)
+    ?? requestOptions.find((option) => option.kind === "reject_once" || option.kind === "reject_always")
+    ?? requestOptions[0];
   const optionId = typeof selected?.optionId === "string" ? selected.optionId : null;
+  await options.emitRuntimeEvent({
+    type: "request.resolved",
+    provider: "acp",
+    request: {
+      id,
+      kind: "tool-user-input",
+      summary: optionId ? `selected:${optionId}` : "cancelled",
+    },
+    raw: createAcpRawPayload("session/request_permission", { optionId }),
+  });
   return optionId ? { outcome: { outcome: "selected", optionId } } : { outcome: { outcome: "cancelled" } };
 }
 
@@ -679,7 +722,7 @@ function flattenSelectOptions(option) {
 
 /**
  * @param {Record<string, unknown>[]} options
- * @param {"model" | "thought_level"} category
+ * @param {"model" | "thought_level" | "mode"} category
  * @returns {Record<string, unknown> | null}
  */
 function findConfigOption(options, category) {
@@ -687,7 +730,9 @@ function findConfigOption(options, category) {
   if (categoryMatch) {
     return categoryMatch;
   }
-  const fallbackNames = category === "model" ? ["model"] : ["effort", "reasoning", "thought"];
+  const fallbackNames = category === "model"
+    ? ["model"]
+    : category === "mode" ? ["mode"] : ["effort", "reasoning", "thought"];
   return options.find((option) => {
     const id = typeof option.id === "string" ? option.id.toLowerCase() : "";
     const name = typeof option.name === "string" ? option.name.toLowerCase() : "";
@@ -698,14 +743,18 @@ function findConfigOption(options, category) {
 /**
  * @param {Record<string, unknown>} option
  * @param {string} desired
- * @returns {string | null}
+ * @returns {string | boolean | null}
  */
 function resolveConfigValue(option, desired) {
   const normalizedDesired = desired.trim().toLowerCase();
+  if (option.type === "boolean") {
+    if (["true", "yes", "on", "1"].includes(normalizedDesired)) return true;
+    if (["false", "no", "off", "0"].includes(normalizedDesired)) return false;
+  }
   const values = flattenSelectOptions(option);
   const match = values.find((value) => value.value.toLowerCase() === normalizedDesired)
     ?? values.find((value) => value.name.toLowerCase() === normalizedDesired);
-  return match?.value ?? null;
+  return match?.value ?? (values.length === 0 ? desired : null);
 }
 
 /**
@@ -723,6 +772,7 @@ async function applySessionConfigOptions(input) {
   }
   const targets = [
     { category: /** @type {"model"} */ ("model"), desired: input.runConfig?.model ?? null },
+    { category: /** @type {"mode"} */ ("mode"), desired: input.runConfig?.mode ?? null },
     { category: /** @type {"thought_level"} */ ("thought_level"), desired: input.runConfig?.reasoningEffort ?? null },
   ];
   for (const target of targets) {
@@ -734,7 +784,7 @@ async function applySessionConfigOptions(input) {
       continue;
     }
     const value = resolveConfigValue(option, target.desired);
-    if (!value || value === option.currentValue) {
+    if (value === null || value === option.currentValue) {
       continue;
     }
     await input.connection.sendRequest("session/set_config_option", {
@@ -979,6 +1029,7 @@ export async function startAcpRun(input) {
   });
   /** @type {Set<string>} */
   const emittedFileChangePaths = new Set();
+  const runtimeModel = createAcpRuntimeModel();
   const emitRuntimeEvent = async (/** @type {import("./harness-runtime-events.js").HarnessRuntimeEvent} */ event) => {
     if (event.type === "file-change.completed") {
       emittedFileChangePaths.add(path.resolve(input.runConfig?.workdir ?? process.cwd(), event.change.path));
@@ -990,6 +1041,7 @@ export async function startAcpRun(input) {
     hooks,
     runConfig: input.runConfig,
     emitRuntimeEvent,
+    requestDecision: input.requestDecision,
   });
   const beforeSnapshot = await snapshotWorkdir(input.runConfig?.workdir);
   const { connection, capabilities } = await openInitializedAcpConnection(input, handleRequest);
@@ -1005,9 +1057,18 @@ export async function startAcpRun(input) {
   const notificationsDone = (async () => {
     for await (const message of connection.notifications) {
       if (message.method !== "session/update" || !isRecord(message.params)) {
+        if (typeof message.method === "string") {
+          await emitRuntimeEvent({
+            type: "extension.notification",
+            provider: "acp",
+            method: message.method,
+            payload: message.params,
+            raw: createAcpRawPayload(message.method, message.params),
+          });
+        }
         continue;
       }
-      const events = normalizeAcpSessionUpdate(message.params);
+      const events = runtimeModel.acceptSessionUpdate(message.params);
       for (const event of events) {
         await emitRuntimeEvent(event);
       }
@@ -1047,6 +1108,9 @@ export async function startAcpRun(input) {
     await connection.close();
     connectionClosed = true;
     await notificationsDone.catch(() => {});
+    for (const event of runtimeModel.flushAssistantSegment()) {
+      await emitRuntimeEvent(event);
+    }
     const afterSnapshot = await snapshotWorkdir(input.runConfig?.workdir);
     await emitSnapshotFileChanges({
       before: beforeSnapshot,
@@ -1064,6 +1128,9 @@ export async function startAcpRun(input) {
     if (!connectionClosed) {
       await connection.close();
       await notificationsDone.catch(() => {});
+      for (const event of runtimeModel.flushAssistantSegment()) {
+        await emitRuntimeEvent(event);
+      }
     }
     if (!promptCompleted && !runtimeDispatcher.result.response.length) {
       runtimeDispatcher.result.response = [];

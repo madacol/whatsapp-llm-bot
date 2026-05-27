@@ -69,6 +69,26 @@ function resolveAcpCommand(config, defaultCommand) {
 }
 
 /**
+ * @param {unknown} response
+ * @returns {string | null}
+ */
+function extractRequestResponseText(response) {
+  if (typeof response === "string") {
+    return response;
+  }
+  if (!isRecord(response)) {
+    return null;
+  }
+  for (const key of ["optionId", "label", "value", "selected"]) {
+    const value = response[key];
+    if (typeof value === "string") {
+      return value;
+    }
+  }
+  return null;
+}
+
+/**
  * @param {{
  *   name?: string,
  *   label?: string,
@@ -84,7 +104,7 @@ export function createAcpHarness(options = {}) {
   const sessionKind = options.sessionKind ?? "native";
   const config = options.config ?? {};
   const commandSpec = resolveAcpCommand(config, options.defaultCommand);
-  /** @type {Map<string, { abortController: AbortController, steer?: (text: string) => Promise<boolean> }>} */
+  /** @type {Map<string, { abortController: AbortController, steer?: (text: string) => Promise<boolean>, setMode?: (mode: string) => Promise<boolean>, pendingRequests?: Map<string, (value: string | null) => void>, pendingUserInputs?: Map<string, (value: unknown) => void> }>} */
   const activeRuns = new Map();
   const commandHandler = createGenericAcpCommandHandler({
     harnessName: name,
@@ -107,7 +127,7 @@ export function createAcpHarness(options = {}) {
         };
       }
       const abortController = new AbortController();
-      activeRuns.set("__legacy__", { abortController });
+      activeRuns.set("__legacy__", { abortController, pendingRequests: new Map(), pendingUserInputs: new Map() });
       try {
         const completed = await startAcpRun({
           ...commandSpec,
@@ -128,10 +148,19 @@ export function createAcpHarness(options = {}) {
               await connection.sendRequest("session/steer", { sessionId, text });
               return true;
             };
+            active.setMode = async (mode) => {
+              if (!sessionId) {
+                return false;
+              }
+              await connection.sendRequest("session/set_config_option", { sessionId, configId: "mode", value: mode });
+              return true;
+            };
             return () => {
               delete active.steer;
+              delete active.setMode;
             };
           },
+          requestDecision: createActiveRequestDecision("__legacy__"),
         });
         return completed.result;
       } finally {
@@ -195,7 +224,7 @@ export function createAcpHarness(options = {}) {
             turn: { id: turn.chatId, chatId: turn.chatId, status: "started" },
           });
           const abortController = new AbortController();
-          activeRuns.set(turn.chatId, { abortController });
+          activeRuns.set(turn.chatId, { abortController, pendingRequests: new Map(), pendingUserInputs: new Map() });
           try {
             const completed = await startAcpRun({
               ...commandSpec,
@@ -217,10 +246,19 @@ export function createAcpHarness(options = {}) {
                   await connection.sendRequest("session/steer", { sessionId, text });
                   return true;
                 };
+                active.setMode = async (mode) => {
+                  if (!sessionId) {
+                    return false;
+                  }
+                  await connection.sendRequest("session/set_config_option", { sessionId, configId: "mode", value: mode });
+                  return true;
+                };
                 return () => {
                   delete active.steer;
+                  delete active.setMode;
                 };
               },
+              requestDecision: createActiveRequestDecision(turn.chatId),
               emitEvent: (event) => events.emit({ ...event, chatId: turn.chatId }),
             });
             const ready = /** @type {HarnessRuntimeSession} */ ({
@@ -252,6 +290,40 @@ export function createAcpHarness(options = {}) {
           activeRuns.delete(chatId);
           return true;
         },
+        /**
+         * @param {string} requestId
+         * @param {unknown} response
+         * @returns {Promise<boolean>}
+         */
+        async respondToRequest(requestId, response) {
+          for (const active of activeRuns.values()) {
+            const resolve = active.pendingRequests?.get(requestId);
+            if (!resolve) {
+              continue;
+            }
+            active.pendingRequests?.delete(requestId);
+            resolve(extractRequestResponseText(response));
+            return true;
+          }
+          return false;
+        },
+        /**
+         * @param {string} requestId
+         * @param {unknown} response
+         * @returns {Promise<boolean>}
+         */
+        async respondToUserInput(requestId, response) {
+          for (const active of activeRuns.values()) {
+            const resolve = active.pendingUserInputs?.get(requestId);
+            if (!resolve) {
+              continue;
+            }
+            active.pendingUserInputs?.delete(requestId);
+            resolve(response);
+            return true;
+          }
+          return false;
+        },
         async injectMessage(chatId, text) {
           const key = typeof chatId === "string" ? chatId : chatId.id;
           const active = activeRuns.get(key);
@@ -267,7 +339,24 @@ export function createAcpHarness(options = {}) {
         async stopSession(chatId) {
           const key = typeof chatId === "string" ? chatId : chatId.id;
           sessions.delete(key);
+          activeRuns.get(key)?.abortController.abort();
+          activeRuns.delete(key);
           return true;
+        },
+        /**
+         * @param {string | HarnessSessionRef} chatId
+         * @returns {boolean}
+         */
+        hasSession(chatId) {
+          const key = typeof chatId === "string" ? chatId : chatId.id;
+          return sessions.has(key);
+        },
+        async stopAll() {
+          for (const active of activeRuns.values()) {
+            active.abortController.abort();
+          }
+          activeRuns.clear();
+          sessions.clear();
         },
         listSessions: () => [...sessions.values()],
         readThread: async (sessionId) => readAcpSession({
@@ -305,6 +394,21 @@ export function createAcpHarness(options = {}) {
   }
 
   /**
+   * @param {string} chatId
+   * @returns {(request: { id: string }) => Promise<string | null>}
+   */
+  function createActiveRequestDecision(chatId) {
+    return async (request) => new Promise((resolve) => {
+      const active = activeRuns.get(chatId);
+      if (!active?.pendingRequests) {
+        resolve(null);
+        return;
+      }
+      active.pendingRequests.set(request.id, resolve);
+    });
+  }
+
+  /**
    * @returns {SlashCommandDescriptor[]}
    */
   function listSlashCommands() {
@@ -313,6 +417,7 @@ export function createAcpHarness(options = {}) {
       { name: "resume", description: "Restore a previously cleared harness session" },
       { name: "fork", description: `Fork the current ${label} ACP session` },
       { name: "back", description: `Return to the previous ${label} ACP fork parent` },
+      { name: "mode", description: `Show or set the ${label} ACP mode` },
       { name: "model", description: `Choose or set the ${label} model` },
       { name: "sandbox", description: "Alias of /permissions" },
       { name: "permissions", description: `Show or set the ${label} permissions mode` },
@@ -384,6 +489,26 @@ function createGenericAcpCommandHandler(options) {
       }
       await input.sessionForkControl.save(input.chatId, { id: parent.id, kind: parent.kind });
       await input.context.reply(contentEvent("tool-result", `Returned to previous ${options.label} ACP session${parent.label ? `: ${parent.label}` : ""}.`));
+      return true;
+    }
+
+    const modeMatch = trimmed.match(/^mode(?:\s+(.+))?$/i);
+    if (modeMatch) {
+      const arg = modeMatch[1]?.trim() ?? null;
+      if (!arg) {
+        const config = await getActiveHarnessConfig(input.chatId, options.harnessName);
+        const mode = typeof config.mode === "string" ? config.mode : "default";
+        await input.context.reply(contentEvent("tool-result", `${options.label} mode: \`${mode}\``));
+        return true;
+      }
+      const lowered = arg.toLowerCase();
+      if (lowered === "off" || lowered === "default" || lowered === "none") {
+        await updateActiveHarnessConfig(input.chatId, options.harnessName, { mode: null });
+        await input.context.reply(contentEvent("tool-result", `${options.label} mode reset to default.`));
+        return true;
+      }
+      await updateActiveHarnessConfig(input.chatId, options.harnessName, { mode: arg });
+      await input.context.reply(contentEvent("tool-result", `${options.label} mode set to \`${arg}\``));
       return true;
     }
 

@@ -7,6 +7,7 @@ import { ensureChatConfig, updateChatConfig } from "./chat-config.js";
 /** @type {Set<string>} */
 const LEGACY_FLAT_CONFIG_KEYS = new Set([
   "model",
+  "mode",
   "reasoningEffort",
   "sandboxMode",
   "approvalPolicy",
@@ -251,6 +252,16 @@ export function normalizeHarnessConfig(value, currentHarness) {
       const scoped = ensureScopedConfig(normalized, targetHarness);
       if (typeof scoped.model !== "string") {
         scoped.model = value.model;
+      }
+    }
+  }
+
+  if (typeof value.mode === "string") {
+    const targetHarness = currentHarness ?? null;
+    if (targetHarness) {
+      const scoped = ensureScopedConfig(normalized, targetHarness);
+      if (typeof scoped.mode !== "string") {
+        scoped.mode = value.mode;
       }
     }
   }

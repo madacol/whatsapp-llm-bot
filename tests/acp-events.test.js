@@ -1,32 +1,29 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { normalizeAcpSessionUpdate } from "../harnesses/acp-events.js";
+import { createAcpRuntimeModel, normalizeAcpSessionUpdate } from "../harnesses/acp-events.js";
 
 describe("ACP event normalization", () => {
   it("normalizes assistant text, plans, and tool lifecycle updates", () => {
-    assert.deepEqual(normalizeAcpSessionUpdate({
+    const assistantEvents = normalizeAcpSessionUpdate({
       sessionId: "s1",
       update: {
         sessionUpdate: "agent_message_chunk",
         content: { type: "text", text: "Done." },
       },
-    }), [{
-      type: "assistant.completed",
-      provider: "acp",
-      text: "Done.",
-      displayText: "Done.",
-      contentType: "markdown",
-      responseMode: "append",
-      raw: {
-        sessionId: "s1",
-        update: {
-          sessionUpdate: "agent_message_chunk",
-          content: { type: "text", text: "Done." },
-        },
+    });
+    assert.deepEqual(assistantEvents.map((event) => event.type), ["item.started", "content.delta"]);
+    assert.equal(assistantEvents[1]?.provider, "acp");
+    assert.equal(assistantEvents[1]?.text, "Done.");
+    assert.equal(assistantEvents[1]?.contentType, "markdown");
+    assert.deepEqual(assistantEvents[1]?.raw?.payload, {
+      sessionId: "s1",
+      update: {
+        sessionUpdate: "agent_message_chunk",
+        content: { type: "text", text: "Done." },
       },
-    }]);
+    });
 
-    assert.deepEqual(normalizeAcpSessionUpdate({
+    const planEvents = normalizeAcpSessionUpdate({
       sessionId: "s1",
       update: {
         sessionUpdate: "plan",
@@ -35,7 +32,8 @@ describe("ACP event normalization", () => {
           { content: "Patch ACP", status: "in_progress" },
         ],
       },
-    }), [{
+    });
+    assert.deepEqual(planEvents, [{
       type: "plan.updated",
       provider: "acp",
       plan: {
@@ -46,13 +44,17 @@ describe("ACP event normalization", () => {
         ],
       },
       raw: {
-        sessionId: "s1",
-        update: {
-          sessionUpdate: "plan",
-          entries: [
-            { content: "Read code", status: "completed" },
-            { content: "Patch ACP", status: "in_progress" },
-          ],
+        source: "acp.jsonrpc",
+        method: "session/update",
+        payload: {
+          sessionId: "s1",
+          update: {
+            sessionUpdate: "plan",
+            entries: [
+              { content: "Read code", status: "completed" },
+              { content: "Patch ACP", status: "in_progress" },
+            ],
+          },
         },
       },
     }]);
@@ -85,17 +87,21 @@ describe("ACP event normalization", () => {
         },
       },
       raw: {
-        sessionId: "s1",
-        update: {
-          sessionUpdate: "tool_call",
-          toolCallId: "toolu-1",
-          title: "Review the database layer",
-          kind: "think",
-          rawInput: {
-            prompt: "Audit migrations",
-            subagent_type: "code-reviewer",
+        source: "acp.jsonrpc",
+        method: "session/update",
+        payload: {
+          sessionId: "s1",
+          update: {
+            sessionUpdate: "tool_call",
+            toolCallId: "toolu-1",
+            title: "Review the database layer",
+            kind: "think",
+            rawInput: {
+              prompt: "Audit migrations",
+              subagent_type: "code-reviewer",
+            },
+            status: "in_progress",
           },
-          status: "in_progress",
         },
       },
     }]);
@@ -119,11 +125,15 @@ describe("ACP event normalization", () => {
         agentNickname: "Reviewer",
       },
       raw: {
-        sessionId: "s1",
-        update: {
-          sessionUpdate: "agent_message_chunk",
-          content: { type: "text", text: "The migration has a rollback bug." },
-          _meta: { madabot: { subagent: { threadId: "toolu-task-1", agentNickname: "Reviewer" } } },
+        source: "acp.jsonrpc",
+        method: "session/update",
+        payload: {
+          sessionId: "s1",
+          update: {
+            sessionUpdate: "agent_message_chunk",
+            content: { type: "text", text: "The migration has a rollback bug." },
+            _meta: { madabot: { subagent: { threadId: "toolu-task-1", agentNickname: "Reviewer" } } },
+          },
         },
       },
     }]);
@@ -152,18 +162,22 @@ describe("ACP event normalization", () => {
         output: "app.js",
       },
       raw: {
-        sessionId: "s1",
-        update: {
-          sessionUpdate: "tool_call_update",
-          toolCallId: "edit-1",
-          title: "Edited app.js",
-          status: "completed",
-          content: [{
-            type: "diff",
-            path: "app.js",
-            oldText: "old",
-            newText: "new",
-          }],
+        source: "acp.jsonrpc",
+        method: "session/update",
+        payload: {
+          sessionId: "s1",
+          update: {
+            sessionUpdate: "tool_call_update",
+            toolCallId: "edit-1",
+            title: "Edited app.js",
+            status: "completed",
+            content: [{
+              type: "diff",
+              path: "app.js",
+              oldText: "old",
+              newText: "new",
+            }],
+          },
         },
       },
     }, {
@@ -177,18 +191,22 @@ describe("ACP event normalization", () => {
         newText: "new",
       },
       raw: {
-        sessionId: "s1",
-        update: {
-          sessionUpdate: "tool_call_update",
-          toolCallId: "edit-1",
-          title: "Edited app.js",
-          status: "completed",
-          content: [{
-            type: "diff",
-            path: "app.js",
-            oldText: "old",
-            newText: "new",
-          }],
+        source: "acp.jsonrpc",
+        method: "session/update",
+        payload: {
+          sessionId: "s1",
+          update: {
+            sessionUpdate: "tool_call_update",
+            toolCallId: "edit-1",
+            title: "Edited app.js",
+            status: "completed",
+            content: [{
+              type: "diff",
+              path: "app.js",
+              oldText: "old",
+              newText: "new",
+            }],
+          },
         },
       },
     }]);
@@ -214,14 +232,47 @@ describe("ACP event normalization", () => {
         contextWindow: 200,
       },
       raw: {
-        sessionId: "s1",
-        update: {
-          sessionUpdate: "usage_update",
-          used: 53,
-          size: 200,
-          cost: { amount: 0.045, currency: "USD" },
+        source: "acp.jsonrpc",
+        method: "session/update",
+        payload: {
+          sessionId: "s1",
+          update: {
+            sessionUpdate: "usage_update",
+            used: 53,
+            size: 200,
+            cost: { amount: 0.045, currency: "USD" },
+          },
         },
       },
     }]);
+  });
+
+  it("merges partial ACP tool updates before emitting completed tools", () => {
+    const model = createAcpRuntimeModel();
+    model.acceptSessionUpdate({
+      sessionId: "s1",
+      update: {
+        sessionUpdate: "tool_call",
+        toolCallId: "edit-2",
+        title: "Edit app.js",
+        rawInput: { path: "app.js" },
+        status: "in_progress",
+      },
+    });
+    const completed = model.acceptSessionUpdate({
+      sessionId: "s1",
+      update: {
+        sessionUpdate: "tool_call_update",
+        toolCallId: "edit-2",
+        status: "completed",
+        content: [{ type: "text", text: "ok" }],
+      },
+    });
+    assert.deepEqual(completed[0]?.tool, {
+      id: "edit-2",
+      name: "Edit app.js",
+      arguments: { path: "app.js" },
+      output: "ok",
+    });
   });
 });

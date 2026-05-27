@@ -11,7 +11,7 @@ let sessionId = null;
 let nextRequestId = 1000;
 /** @type {Map<number, (value: unknown) => void>} */
 const pendingRequests = new Map();
-/** @type {Record<string, string>} */
+/** @type {Record<string, string | boolean>} */
 const configSelections = {};
 
 /**
@@ -90,6 +90,17 @@ function buildConfigOptions() {
         { value: "low", name: "Low" },
         { value: "medium", name: "Medium" },
         { value: "high", name: "High" },
+      ],
+    },
+    {
+      type: "select",
+      id: "mode",
+      name: "Mode",
+      category: "mode",
+      currentValue: configSelections.mode ?? "code",
+      options: [
+        { value: "code", name: "Code" },
+        { value: "plan", name: "Plan" },
       ],
     },
   ];
@@ -270,7 +281,7 @@ async function handlePrompt(message) {
         sessionUpdate: "agent_message_chunk",
         content: {
           type: "text",
-          text: `model=${configSelections.model ?? "default"} effort=${configSelections["reasoning-effort"] ?? "medium"}`,
+          text: `model=${configSelections.model ?? "default"} mode=${configSelections.mode ?? "code"} effort=${configSelections["reasoning-effort"] ?? "medium"}`,
         },
       },
     });

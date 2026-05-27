@@ -229,6 +229,12 @@ export function createHarnessRuntimeEventDispatcher(input) {
           await updateUsage(event.usage, event.usageMode ?? "replace");
         }
         return;
+      case "content.delta":
+        result.response.push({ type: event.contentType, text: event.text });
+        if (event.notify !== false) {
+          await hooks.onLlmResponse(event.displayText ?? event.text);
+        }
+        return;
       case "subagent.completed":
         await hooks.onLlmResponse(event.text, {
           source: "subagent",
@@ -250,6 +256,11 @@ export function createHarnessRuntimeEventDispatcher(input) {
       case "request.resolved":
       case "user-input.requested":
       case "user-input.resolved":
+      case "item.started":
+      case "item.updated":
+      case "item.completed":
+      case "extension.notification":
+      case "extension.request":
         return;
       case "file-change.completed":
         await hooks.onFileChange(event.change);
