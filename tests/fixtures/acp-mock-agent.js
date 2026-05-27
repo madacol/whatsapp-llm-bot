@@ -6,8 +6,12 @@ const rl = readline.createInterface({
   crlfDelay: Infinity,
 });
 
+const minimalCapabilities = process.argv.includes("--minimal-capabilities");
+
 /** @type {string | null} */
 let sessionId = null;
+/** @type {string | null} */
+let lastSessionOpenMethod = null;
 let nextRequestId = 1000;
 /** @type {Map<number, (value: unknown) => void>} */
 const pendingRequests = new Map();
@@ -119,40 +123,51 @@ async function handleMessage(message) {
       id: message.id,
       result: {
         protocolVersion: 1,
-        agentCapabilities: {
-          loadSession: true,
-          sessionCapabilities: {
-            resume: {},
-            fork: {},
-            steer: {},
-          },
-          session: {
-            fork: {},
-          },
-          _meta: {
-            madabot: {
+        agentCapabilities: minimalCapabilities
+          ? {
+              loadSession: true,
               sessionCapabilities: {
-                read: {},
-                rollback: {},
+                list: {},
+                close: {},
+              },
+            }
+          : {
+              loadSession: true,
+              sessionCapabilities: {
+                resume: {},
+                fork: {},
+                steer: {},
+              },
+              session: {
+                fork: {},
+              },
+              _meta: {
+                madabot: {
+                  sessionCapabilities: {
+                    read: {},
+                    rollback: {},
+                  },
+                },
               },
             },
-          },
-        },
       },
     });
     return;
   }
   if (message.method === "session/new") {
+    lastSessionOpenMethod = "session/new";
     sessionId = "mock-session-1";
     send({ id: message.id, result: { sessionId, configOptions: buildConfigOptions() } });
     return;
   }
   if (message.method === "session/load") {
+    lastSessionOpenMethod = "session/load";
     sessionId = message.params?.sessionId ?? "mock-session-1";
     send({ id: message.id, result: { sessionId, configOptions: buildConfigOptions() } });
     return;
   }
   if (message.method === "session/resume") {
+    lastSessionOpenMethod = "session/resume";
     sessionId = message.params?.sessionId ?? "mock-session-1";
     send({ id: message.id, result: { sessionId, configOptions: buildConfigOptions() } });
     return;
@@ -394,6 +409,61 @@ async function handlePrompt(message) {
     send({ id: message.id, result: { sessionId, stopReason: "end_turn" } });
     return;
   }
+  if (prompt.includes("mislabel existing add")) {
+    const filePath = `${process.cwd()}/existing-mislabel.js`;
+    await import("node:fs/promises").then((fs) => fs.writeFile(filePath, "export const value = 2;\n", "utf8"));
+    notify("session/update", {
+      sessionId,
+      update: {
+        sessionUpdate: "tool_call_update",
+        toolCallId: "mislabel-existing-add",
+        title: `Edit ${filePath}`,
+        status: "completed",
+        content: [{
+          type: "diff",
+          path: filePath,
+          newText: "export const value = 2;\n",
+        }],
+      },
+    });
+    notify("session/update", {
+      sessionId,
+      update: {
+        sessionUpdate: "agent_message_chunk",
+        content: { type: "text", text: "mislabel existing add done" },
+      },
+    });
+    send({ id: message.id, result: { sessionId, stopReason: "end_turn" } });
+    return;
+  }
+  if (prompt.includes("old new no diff")) {
+    const filePath = `${process.cwd()}/existing-no-diff.js`;
+    await import("node:fs/promises").then((fs) => fs.writeFile(filePath, "export const value = 2;\n", "utf8"));
+    notify("session/update", {
+      sessionId,
+      update: {
+        sessionUpdate: "tool_call_update",
+        toolCallId: "old-new-no-diff",
+        title: `Edit ${filePath}`,
+        status: "completed",
+        content: [{
+          type: "diff",
+          path: filePath,
+          oldText: "export const value = 1;\n",
+          newText: "export const value = 2;\n",
+        }],
+      },
+    });
+    notify("session/update", {
+      sessionId,
+      update: {
+        sessionUpdate: "agent_message_chunk",
+        content: { type: "text", text: "old new no diff done" },
+      },
+    });
+    send({ id: message.id, result: { sessionId, stopReason: "end_turn" } });
+    return;
+  }
   if (prompt.includes("config")) {
     notify("session/update", {
       sessionId,
@@ -403,6 +473,17 @@ async function handlePrompt(message) {
           type: "text",
           text: `model=${configSelections.model ?? "default"} mode=${configSelections.mode ?? "code"} effort=${configSelections["reasoning-effort"] ?? "medium"}`,
         },
+      },
+    });
+    send({ id: message.id, result: { sessionId, stopReason: "end_turn" } });
+    return;
+  }
+  if (prompt.includes("session method")) {
+    notify("session/update", {
+      sessionId,
+      update: {
+        sessionUpdate: "agent_message_chunk",
+        content: { type: "text", text: lastSessionOpenMethod ?? "unknown" },
       },
     });
     send({ id: message.id, result: { sessionId, stopReason: "end_turn" } });

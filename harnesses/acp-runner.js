@@ -148,20 +148,6 @@ function buildCapabilityErrorDetails(capabilities) {
 }
 
 /**
- * @param {Record<string, unknown>} capabilities
- * @returns {void}
- */
-function assertRequiredAcpCapabilities(capabilities) {
-  const missing = [];
-  if (!hasSessionCapability(capabilities, "resume")) missing.push("session.resume");
-  if (!hasSessionCapability(capabilities, "fork")) missing.push("session.fork");
-  if (!hasSessionCapability(capabilities, "steer")) missing.push("session.steer");
-  if (missing.length > 0) {
-    throw new Error(`ACP agent is missing required Madabot capabilities: ${missing.join(", ")}. Details: ${JSON.stringify(buildCapabilityErrorDetails(capabilities))}`);
-  }
-}
-
-/**
  * @param {string} prompt
  * @returns {Array<{ type: "text", text: string }>}
  */
@@ -853,6 +839,57 @@ async function collectSnapshotFiles(currentPath, snapshot) {
 }
 
 /**
+ * @param {string | null | undefined} workdir
+ * @param {string} filePath
+ * @returns {string}
+ */
+function resolveFileChangePath(workdir, filePath) {
+  return path.resolve(workdir ?? process.cwd(), filePath);
+}
+
+/**
+ * @param {import("./harness-runtime-events.js").HarnessRuntimeEvent} event
+ * @param {Map<string, string> | null} beforeSnapshot
+ * @param {string | null | undefined} workdir
+ * @returns {import("./harness-runtime-events.js").HarnessRuntimeEvent}
+ */
+function reconcileFileChangeWithBaseline(event, beforeSnapshot, workdir) {
+  if (event.type !== "file-change.completed" || !beforeSnapshot) {
+    return event;
+  }
+  const resolvedPath = resolveFileChangePath(workdir, event.change.path);
+  const baselineText = beforeSnapshot.get(resolvedPath);
+  if (baselineText === undefined) {
+    return event;
+  }
+  const missingOldText = event.change.oldText === undefined;
+  const mislabeledAdd = event.change.kind === "add";
+  const oldText = missingOldText ? baselineText : event.change.oldText;
+  const newText = event.change.kind === "delete" ? undefined : event.change.newText;
+  const needsDiff = event.change.diff === undefined
+    && (event.change.kind === "delete" || typeof newText === "string");
+  if (!missingOldText && !mislabeledAdd && !needsDiff) {
+    return event;
+  }
+
+  const correctedKind = event.change.kind === "delete" ? "delete" : "update";
+  const diff = event.change.diff ?? buildUnifiedFileDiff(
+    resolvedPath,
+    oldText,
+    newText,
+  );
+  return {
+    ...event,
+    change: {
+      ...event.change,
+      kind: correctedKind,
+      oldText,
+      ...(diff ? { diff } : {}),
+    },
+  };
+}
+
+/**
  * @param {{
  *   before: Map<string, string> | null,
  *   after: Map<string, string> | null,
@@ -969,8 +1006,10 @@ async function openInitializedAcpConnection(input, handleRequest = async () => (
  */
 export async function forkAcpSession(input) {
   const { connection, capabilities } = await openInitializedAcpConnection(input, async () => ({}));
-  assertRequiredAcpCapabilities(capabilities);
   try {
+    if (!hasSessionCapability(capabilities, "fork")) {
+      throw new Error("ACP agent does not advertise session/fork capability.");
+    }
     const forked = await connection.sendRequest("session/fork", {
       sessionId: input.sessionId,
       ...buildSessionParams(input.runConfig),
@@ -1038,15 +1077,17 @@ export async function startAcpRun(input) {
     hooks: runtimeHooks,
     workdir: input.runConfig?.workdir ?? null,
   });
+  const beforeSnapshot = await snapshotWorkdir(input.runConfig?.workdir);
   /** @type {Set<string>} */
   const emittedFileChangePaths = new Set();
   const runtimeModel = createAcpRuntimeModel();
   const emitRuntimeEvent = async (/** @type {import("./harness-runtime-events.js").HarnessRuntimeEvent} */ event) => {
-    if (event.type === "file-change.completed") {
-      emittedFileChangePaths.add(path.resolve(input.runConfig?.workdir ?? process.cwd(), event.change.path));
+    const reconciled = reconcileFileChangeWithBaseline(event, beforeSnapshot, input.runConfig?.workdir);
+    if (reconciled.type === "file-change.completed") {
+      emittedFileChangePaths.add(resolveFileChangePath(input.runConfig?.workdir, reconciled.change.path));
     }
-    input.emitEvent?.(event);
-    await runtimeDispatcher.handleEvent(event);
+    input.emitEvent?.(reconciled);
+    await runtimeDispatcher.handleEvent(reconciled);
   };
   const handleRequest = createAcpClientRequestHandler({
     hooks,
@@ -1054,9 +1095,7 @@ export async function startAcpRun(input) {
     emitRuntimeEvent,
     requestDecision: input.requestDecision,
   });
-  const beforeSnapshot = await snapshotWorkdir(input.runConfig?.workdir);
   const { connection, capabilities } = await openInitializedAcpConnection(input, handleRequest);
-  assertRequiredAcpCapabilities(capabilities);
   let sessionId = input.sessionId ?? null;
   let promptCompleted = false;
   let connectionClosed = false;
@@ -1096,7 +1135,12 @@ export async function startAcpRun(input) {
         sessionId = readSessionId(resumed) ?? sessionId;
         configOptions = extractConfigOptions(resumed);
       } else if (supportsLoadSession(capabilities)) {
-        throw new Error("ACP agent supports session/load but not session/resume. Refusing to replay prior turns into chat output; enable the ACP session-resume RFD/capability in the adapter.");
+        const loaded = await connection.sendRequest("session/load", {
+          sessionId,
+          ...buildSessionParams(input.runConfig),
+        });
+        sessionId = readSessionId(loaded) ?? sessionId;
+        configOptions = extractConfigOptions(loaded);
       } else {
         throw new Error(`ACP agent does not advertise required session resume capability: ${JSON.stringify(buildCapabilityErrorDetails(capabilities))}`);
       }

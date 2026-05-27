@@ -372,6 +372,11 @@ describe("ACP file changes through WhatsApp transport", () => {
     });
     assertOneFileChange(update.rendered, "*Update File*", "acp-fs-update.txt");
 
+    const correctedUpdate = await runAcpPrompt("mislabel existing add", async (workdir) => {
+      await fs.writeFile(path.join(workdir, "existing-mislabel.js"), "export const value = 1;\n", "utf8");
+    });
+    assertOneFileChange(correctedUpdate.rendered, "*Update File*", "existing-mislabel.js");
+
     const deleted = await runAcpPrompt("direct delete", async (workdir) => {
       await fs.writeFile(path.join(workdir, "direct-delete.txt"), "delete me\n", "utf8");
     });
@@ -389,12 +394,13 @@ describe("ACP file changes through WhatsApp transport", () => {
     const fileChangeImages = [
       ...add.sentMessages,
       ...update.sentMessages,
+      ...correctedUpdate.sentMessages,
       ...deleted.sentMessages,
       ...diffAdd.sentMessages,
       ...diffUpdate.sentMessages,
       ...diffDelete.sentMessages,
     ].filter((entry) => Buffer.isBuffer(entry.msg.image) && typeof entry.msg.caption === "string");
-    assert.ok(fileChangeImages.length >= 6, `Expected file changes to render as sendable image content, got ${JSON.stringify(fileChangeImages)}`);
+    assert.ok(fileChangeImages.length >= 7, `Expected file changes to render as sendable image content, got ${JSON.stringify(fileChangeImages)}`);
   });
 });
 

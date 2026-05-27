@@ -16,7 +16,8 @@ behaviors users depend on.
 
 - Do not preserve provider-specific internal event shapes.
 - Do not reimplement Codex/Pi/Claude private protocols under ACP.
-- Do not weaken required ACP capabilities for resume, fork, and steer.
+- Do not reject otherwise usable ACP agents at startup only because they lack
+  optional extension capabilities such as fork or steer.
 - Do not make subagent semantics broader until ACP standardizes a shape beyond
   the current metadata convention.
 - Do not make ACP processes long-lived across turns unless a real current agent
@@ -135,6 +136,8 @@ Create end-to-end tests for:
 - direct write detected by snapshot
 - delete detected by snapshot
 - no duplicate output when diff/fs and snapshot both see the same file
+- provider-reported file add for a path that existed at run start, corrected to
+  update before transport rendering
 
 These tests should assert final outbound/file-rendering behavior, not just
 runtime events.
@@ -249,11 +252,18 @@ Implemented on `acp-migration`:
   diff headers.
 - ACP client fs writes and snapshot fallback now attach unified diffs when
   before/after text is available.
+- ACP provider file-change events are reconciled against the run-start
+  workspace snapshot before they enter the transport stream, so official
+  adapters that report an existing-file overwrite as an add are corrected to an
+  update with old text and a diff.
+- ACP provider file-change events that include old/new text but omit the unified
+  diff are enriched with a generated diff before transport rendering.
 - ACP adapter mode emits canonical runtime events without also dispatching those
   events directly to chat hooks, preventing duplicate transport messages.
 - Transport-level ACP file-change tests cover fs add, fs update, snapshot delete,
-  diff-only add, diff-only update, and diff-only delete, and assert the actual
-  WhatsApp send output classification.
+  misreported existing-file add corrected to update, diff-only add, diff-only
+  update, and diff-only delete, and assert the actual WhatsApp send output
+  classification.
 
 Still needed:
 

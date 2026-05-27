@@ -111,6 +111,106 @@ describe("ACP harness", () => {
     }
   });
 
+  it("runs ACP agents that only advertise the standard loadSession capability", async () => {
+    const harness = createAcpHarness({
+      config: {
+        command: process.execPath,
+        args: [path.join(__dirname, "fixtures", "acp-mock-agent.js"), "--minimal-capabilities"],
+      },
+    });
+    const adapter = harness.createAdapter?.({
+      name: "acp",
+      instanceId: "test",
+      continuationKey: "acp:minimal",
+    });
+    assert.ok(adapter);
+
+    await adapter.startSession({ chatId: "minimal-chat" });
+    const result = await adapter.sendTurn({
+      chatId: "minimal-chat",
+      input: "session method",
+      messages: [{ role: "user", content: [{ type: "text", text: "session method" }] }],
+    });
+
+    assert.deepEqual(result.response, [{ type: "markdown", text: "session/new" }]);
+    assert.equal(adapter.listSessions()[0]?.resumeCursor, "mock-session-1");
+  });
+
+  it("resumes loadSession-only ACP agents with session/load", async () => {
+    const harness = createAcpHarness({
+      config: {
+        command: process.execPath,
+        args: [path.join(__dirname, "fixtures", "acp-mock-agent.js"), "--minimal-capabilities"],
+      },
+    });
+    const adapter = harness.createAdapter?.({
+      name: "acp",
+      instanceId: "test",
+      continuationKey: "acp:minimal-resume",
+    });
+    assert.ok(adapter);
+
+    await adapter.startSession({ chatId: "minimal-resume-chat", resumeCursor: "existing-session" });
+    const result = await adapter.sendTurn({
+      chatId: "minimal-resume-chat",
+      input: "session method",
+      messages: [{ role: "user", content: [{ type: "text", text: "session method" }] }],
+    });
+
+    assert.deepEqual(result.response, [{ type: "markdown", text: "session/load" }]);
+    assert.equal(adapter.listSessions()[0]?.resumeCursor, "existing-session");
+  });
+
+  it("reports fork as unavailable when an ACP agent does not advertise session/fork", async () => {
+    const harness = createAcpHarness({
+      name: "codex",
+      label: "Codex",
+      sessionKind: "codex",
+      config: {
+        command: process.execPath,
+        args: [path.join(__dirname, "fixtures", "acp-mock-agent.js"), "--minimal-capabilities"],
+      },
+    });
+    /** @type {string[]} */
+    const replies = [];
+
+    const handled = await harness.handleCommand({
+      chatId: "minimal-fork-chat",
+      command: "fork",
+      chatInfo: {
+        chat_id: "minimal-fork-chat",
+        harness_session_kind: "codex",
+        harness_session_id: "mock-session-1",
+      },
+      context: /** @type {ExecuteActionContext} */ ({
+        chatId: "minimal-fork-chat",
+        senderIds: [],
+        content: [],
+        getIsAdmin: async () => true,
+        send: async () => undefined,
+        reply: async (event) => {
+          replies.push(event.kind === "content" && typeof event.content === "string" ? event.content : JSON.stringify(event));
+        },
+        reactToMessage: async () => {},
+        select: async () => "",
+        confirm: async () => true,
+      }),
+      sessionForkControl: {
+        getHistory: async () => [],
+        save: async () => {
+          throw new Error("fork should not save without provider support");
+        },
+        push: async () => {
+          throw new Error("fork should not push without provider support");
+        },
+        pop: async () => null,
+      },
+    });
+
+    assert.equal(handled, true);
+    assert.match(replies[0] ?? "", /Codex ACP fork failed: ACP agent does not advertise session\/fork capability\./);
+  });
+
   it("bridges ACP permission requests to chat-facing choices", async () => {
     const harness = createAcpHarness({
       config: {
@@ -320,6 +420,94 @@ describe("ACP harness", () => {
       } finally {
         unsubscribe?.();
       }
+    }
+  });
+
+  it("corrects provider add events for files that existed at run start", async () => {
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "acp-mislabel-existing-"));
+    await fs.writeFile(path.join(tempDir, "existing-mislabel.js"), "export const value = 1;\n", "utf8");
+    const harness = createAcpHarness({
+      config: {
+        command: process.execPath,
+        args: [path.join(__dirname, "fixtures", "acp-mock-agent.js")],
+      },
+    });
+    const adapter = harness.createAdapter?.({
+      name: "acp",
+      instanceId: "test",
+      continuationKey: "acp:mislabel-existing-add",
+    });
+    assert.ok(adapter);
+
+    /** @type {Array<Record<string, unknown>>} */
+    const events = [];
+    const unsubscribe = adapter.subscribeEvents?.((event) => {
+      events.push(event);
+    });
+    try {
+      await adapter.startSession({ chatId: "mislabel-existing-chat", runConfig: { workdir: tempDir } });
+      await adapter.sendTurn({
+        chatId: "mislabel-existing-chat",
+        input: "mislabel existing add",
+        messages: [{ role: "user", content: [{ type: "text", text: "mislabel existing add" }] }],
+        runConfig: { workdir: tempDir },
+      });
+
+      const fileChanges = events.filter((event) => event.type === "file-change.completed");
+      assert.equal(fileChanges.length, 1);
+      const change = /** @type {{ path?: unknown, kind?: unknown, diff?: unknown, oldText?: unknown, newText?: unknown }} */ (fileChanges[0]?.change ?? {});
+      assert.equal(change.path, path.join(tempDir, "existing-mislabel.js"));
+      assert.equal(change.kind, "update");
+      assert.equal(change.oldText, "export const value = 1;\n");
+      assert.equal(change.newText, "export const value = 2;\n");
+      assert.match(String(change.diff ?? ""), /-export const value = 1;/);
+      assert.match(String(change.diff ?? ""), /\+export const value = 2;/);
+    } finally {
+      unsubscribe?.();
+    }
+  });
+
+  it("adds transport-ready diffs when ACP providers send old/new text without a diff", async () => {
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "acp-old-new-no-diff-"));
+    await fs.writeFile(path.join(tempDir, "existing-no-diff.js"), "export const value = 1;\n", "utf8");
+    const harness = createAcpHarness({
+      config: {
+        command: process.execPath,
+        args: [path.join(__dirname, "fixtures", "acp-mock-agent.js")],
+      },
+    });
+    const adapter = harness.createAdapter?.({
+      name: "acp",
+      instanceId: "test",
+      continuationKey: "acp:old-new-no-diff",
+    });
+    assert.ok(adapter);
+
+    /** @type {Array<Record<string, unknown>>} */
+    const events = [];
+    const unsubscribe = adapter.subscribeEvents?.((event) => {
+      events.push(event);
+    });
+    try {
+      await adapter.startSession({ chatId: "old-new-no-diff-chat", runConfig: { workdir: tempDir } });
+      await adapter.sendTurn({
+        chatId: "old-new-no-diff-chat",
+        input: "old new no diff",
+        messages: [{ role: "user", content: [{ type: "text", text: "old new no diff" }] }],
+        runConfig: { workdir: tempDir },
+      });
+
+      const fileChanges = events.filter((event) => event.type === "file-change.completed");
+      assert.equal(fileChanges.length, 1);
+      const change = /** @type {{ path?: unknown, kind?: unknown, diff?: unknown, oldText?: unknown, newText?: unknown }} */ (fileChanges[0]?.change ?? {});
+      assert.equal(change.path, path.join(tempDir, "existing-no-diff.js"));
+      assert.equal(change.kind, "update");
+      assert.equal(change.oldText, "export const value = 1;\n");
+      assert.equal(change.newText, "export const value = 2;\n");
+      assert.match(String(change.diff ?? ""), /-export const value = 1;/);
+      assert.match(String(change.diff ?? ""), /\+export const value = 2;/);
+    } finally {
+      unsubscribe?.();
     }
   });
 

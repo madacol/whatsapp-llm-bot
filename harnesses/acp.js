@@ -89,6 +89,17 @@ function extractRequestResponseText(response) {
 }
 
 /**
+ * @param {Record<string, unknown> | undefined} capabilities
+ * @param {string} name
+ * @returns {boolean}
+ */
+function hasAcpSessionCapability(capabilities, name) {
+  const sessionCapabilities = isRecord(capabilities?.sessionCapabilities) ? capabilities.sessionCapabilities : null;
+  const rfdSessionCapabilities = isRecord(capabilities?.session) ? capabilities.session : null;
+  return isRecord(sessionCapabilities?.[name]) || isRecord(rfdSessionCapabilities?.[name]);
+}
+
+/**
  * @param {{
  *   name?: string,
  *   label?: string,
@@ -136,13 +147,13 @@ export function createAcpHarness(options = {}) {
           runConfig,
           hooks,
           signal: abortController.signal,
-          onActiveRun: ({ connection, sessionId }) => {
+          onActiveRun: ({ connection, sessionId, capabilities }) => {
             const active = activeRuns.get("__legacy__");
             if (!active) {
               return undefined;
             }
             active.steer = async (text) => {
-              if (!sessionId) {
+              if (!sessionId || !hasAcpSessionCapability(capabilities, "steer")) {
                 return false;
               }
               await connection.sendRequest("session/steer", { sessionId, text });
@@ -235,13 +246,13 @@ export function createAcpHarness(options = {}) {
               hooks: turn.hooks,
               dispatchRuntimeEventsToHooks: false,
               signal: abortController.signal,
-              onActiveRun: ({ connection, sessionId }) => {
+              onActiveRun: ({ connection, sessionId, capabilities }) => {
                 const active = activeRuns.get(turn.chatId);
                 if (!active) {
                   return undefined;
                 }
                 active.steer = async (text) => {
-                  if (!sessionId) {
+                  if (!sessionId || !hasAcpSessionCapability(capabilities, "steer")) {
                     return false;
                   }
                   await connection.sendRequest("session/steer", { sessionId, text });
