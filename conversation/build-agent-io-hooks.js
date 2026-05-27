@@ -127,6 +127,21 @@ function formatRuntimeEvent(event) {
 }
 
 /**
+ * ACP adapters may emit an empty placeholder tool call named "Editing files"
+ * before the actual file-change events. The file-change renderer carries the
+ * useful user-facing detail, so keep this transport-only placeholder out of chat.
+ * @param {LlmChatResponse["toolCalls"][0]} toolCall
+ * @returns {boolean}
+ */
+function isNoopEditingFilesToolCall(toolCall) {
+  if (toolCall.name !== "Editing files") {
+    return false;
+  }
+  const args = parseToolArgs(toolCall.arguments);
+  return Object.keys(args).length === 0;
+}
+
+/**
  * Build the AgentIOHooks wiring from a message context.
  * @param {Pick<ExecuteActionContext, "send" | "reply" | "select" | "confirm">} context
  * @param {() => Promise<void>} keepPresenceAlive
@@ -259,6 +274,9 @@ export function buildAgentIoHooks(
       return labelMap.get(choice) ?? choice;
     },
     onToolCall: async (toolCall, formatToolCall, toolContext) => {
+      if (isNoopEditingFilesToolCall(toolCall)) {
+        return undefined;
+      }
       if (!visibility.toolDetails) {
         if (visibility.changes && shouldDisplayToolCallAsChange(toolCall, formatToolCall, cwd, toolContext)) {
           return displayToolCall(toolCall, context, formatToolCall, cwd, toolContext);

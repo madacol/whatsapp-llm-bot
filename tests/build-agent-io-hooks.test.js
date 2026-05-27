@@ -423,6 +423,16 @@ describe("buildAgentIoHooks", () => {
     }]);
   });
 
+  it("suppresses no-op ACP editing-files placeholder tool calls", async () => {
+    const { hooks, sent } = createSubject({ ...DEFAULT_OUTPUT_VISIBILITY, toolDetails: false });
+
+    const toolCall = { id: "acp-editing-files", name: "Editing files", arguments: "{}" };
+    await hooks.onToolCall?.(toolCall);
+    await hooks.onToolComplete?.(toolCall);
+
+    assert.deepEqual(sent, []);
+  });
+
   it("ignores duplicate compact command start events while the command is pending", async () => {
     /** @type {Array<{ event: OutboundEvent, kind: "send" | "reply" }>} */
     const sent = [];
