@@ -766,6 +766,7 @@ type HarnessRuntimeSession = {
 
 type HarnessTurnInput = {
   chatId: string;
+  turnId?: string;
   input?: string;
   messages?: Message[];
   attachments?: IncomingContentBlock[];

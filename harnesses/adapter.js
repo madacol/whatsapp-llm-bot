@@ -221,22 +221,25 @@ export function createHarnessAdapterFromHarness(input) {
       return session;
     },
     async sendTurn(turn) {
+      const turnId = turn.turnId ?? turn.chatId;
       const params = buildLegacyParamsFromSemanticTurn(turn);
       const session = sessions.get(params.session.chatId);
       if (session) {
         const running = /** @type {HarnessRuntimeSession} */ ({ ...session, status: "running" });
         sessions.set(params.session.chatId, running);
-        events.emit({ type: "session.updated", session: running });
+        events.emit({ type: "session.updated", turnId, session: running });
       }
       try {
         events.emit({
           type: "turn.started",
-          turn: { id: params.session.chatId, chatId: params.session.chatId, status: "started" },
+          turnId,
+          turn: { id: turnId, chatId: params.session.chatId, status: "started" },
         });
         const result = await input.harness.run(params);
         events.emit({
           type: "turn.completed",
-          turn: { id: params.session.chatId, chatId: params.session.chatId, status: "completed" },
+          turnId,
+          turn: { id: turnId, chatId: params.session.chatId, status: "completed" },
         });
         return result;
       } finally {
@@ -244,7 +247,7 @@ export function createHarnessAdapterFromHarness(input) {
         if (current) {
           const ready = /** @type {HarnessRuntimeSession} */ ({ ...current, status: "ready" });
           sessions.set(params.session.chatId, ready);
-          events.emit({ type: "session.updated", session: ready });
+          events.emit({ type: "session.updated", turnId, session: ready });
         }
       }
     },

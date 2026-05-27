@@ -239,6 +239,7 @@ export function createAcpHarness(options = {}) {
           return session;
         },
         async sendTurn(turn) {
+          const turnId = turn.turnId ?? turn.chatId;
           const prompt = turn.input?.trim() || buildPrompt(turn.messages ?? []);
           if (!prompt) {
             return {
@@ -262,11 +263,12 @@ export function createAcpHarness(options = {}) {
             ...(sessionId ? { resumeCursor: sessionId } : {}),
           });
           sessions.set(turn.chatId, running);
-          events.emit({ chatId: turn.chatId, type: "session.updated", session: running });
+          events.emit({ chatId: turn.chatId, type: "session.updated", turnId, session: running });
           events.emit({
             chatId: turn.chatId,
             type: "turn.started",
-            turn: { id: turn.chatId, chatId: turn.chatId, status: "started" },
+            turnId,
+            turn: { id: turnId, chatId: turn.chatId, status: "started" },
           });
           const abortController = new AbortController();
           activeRuns.set(turn.chatId, { abortController, pendingRequests: new Map(), pendingUserInputs: new Map() });
@@ -289,7 +291,7 @@ export function createAcpHarness(options = {}) {
               },
               requestDecision: createActiveRequestDecision(turn.chatId),
               userInputDecision: createActiveUserInputDecision(turn.chatId),
-              emitEvent: (event) => events.emit({ ...event, chatId: turn.chatId }),
+              emitEvent: (event) => events.emit({ ...event, chatId: turn.chatId, turnId }),
             });
             const ready = /** @type {HarnessRuntimeSession} */ ({
               ...running,
@@ -301,11 +303,12 @@ export function createAcpHarness(options = {}) {
             if (ready.resumeCursor) {
               sessionRunConfigs.set(ready.resumeCursor, turn.runConfig);
             }
-            events.emit({ chatId: turn.chatId, type: "session.updated", session: ready });
+            events.emit({ chatId: turn.chatId, type: "session.updated", turnId, session: ready });
             events.emit({
               chatId: turn.chatId,
               type: "turn.completed",
-              turn: { id: turn.chatId, chatId: turn.chatId, status: "completed" },
+              turnId,
+              turn: { id: turnId, chatId: turn.chatId, status: "completed" },
             });
             return completed.result;
           } finally {

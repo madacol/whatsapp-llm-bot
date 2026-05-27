@@ -19,6 +19,8 @@
  *   pendingLiveInputs: PendingLiveInput[];
  *   liveInputRetryTimer: ReturnType<typeof setTimeout> | null;
  *   isActive: boolean;
+ *   harness: AgentHarness;
+ *   ownerKey: string | null;
  * }} PendingRunState
  */
 
@@ -39,7 +41,7 @@
  * The coordinator does not execute runs itself; it only mediates lifecycle.
  *
  * @returns {{
- *   beginRun: (input: { turn: ChatTurn, userText: string, harness: AgentHarness }) => Promise<HarnessRunDecision>,
+ *   beginRun: (input: { turn: ChatTurn, userText: string, harness?: AgentHarness | null, ownerKey?: string | null }) => Promise<HarnessRunDecision>,
  *   hasPendingRun: (chatId: string) => boolean,
  *   markRunActive: (chatId: string) => void,
  *   consumeBufferedTexts: (chatId: string) => string[],
@@ -143,22 +145,23 @@ export function createHarnessRunCoordinator(options = {}) {
   }
 
   return {
-    async beginRun({ turn, userText, harness }) {
+    async beginRun({ turn, userText, harness, ownerKey = null }) {
       const { chatId } = turn;
       const pending = pendingRuns.get(chatId);
       if (pending) {
-        if (pending.isActive && userText && canInjectLiveInput(harness)) {
-          if (await tryInjectLiveInput(chatId, userText, harness)) {
+        const sameOwner = !ownerKey || !pending.ownerKey || ownerKey === pending.ownerKey;
+        if (pending.isActive && sameOwner && userText && canInjectLiveInput(pending.harness)) {
+          if (await tryInjectLiveInput(chatId, userText, pending.harness)) {
             return { status: "injected" };
           }
-          queueLiveInputRetry(chatId, pending, userText, harness);
+          queueLiveInputRetry(chatId, pending, userText, pending.harness);
           return { status: "injected" };
         }
         if (pending.isActive) {
           pending.queuedTurns.push(turn);
           return { status: "buffered" };
         }
-        if (userText) {
+        if (sameOwner && userText) {
           pending.bufferedTexts.push(userText);
         } else {
           pending.queuedTurns.push(turn);
@@ -166,12 +169,17 @@ export function createHarnessRunCoordinator(options = {}) {
         return { status: "buffered" };
       }
 
+      if (!harness) {
+        throw new Error("Harness is required to start a run.");
+      }
       pendingRuns.set(chatId, {
         bufferedTexts: [],
         queuedTurns: [],
         pendingLiveInputs: [],
         liveInputRetryTimer: null,
         isActive: false,
+        harness,
+        ownerKey,
       });
       return { status: "started" };
     },
