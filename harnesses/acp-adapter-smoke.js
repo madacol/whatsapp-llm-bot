@@ -26,12 +26,19 @@ function record(value) {
  * @returns {Promise<unknown>}
  */
 function withTimeout(promise, label, timeoutMs) {
+  /** @type {NodeJS.Timeout | undefined} */
+  let timer;
   return Promise.race([
     promise,
     new Promise((_, reject) => {
-      setTimeout(() => reject(new Error(`${label} timed out after ${timeoutMs}ms`)), timeoutMs);
+      timer = setTimeout(() => reject(new Error(`${label} timed out after ${timeoutMs}ms`)), timeoutMs);
+      timer.unref?.();
     }),
-  ]);
+  ]).finally(() => {
+    if (timer) {
+      clearTimeout(timer);
+    }
+  });
 }
 
 /**
@@ -144,6 +151,24 @@ async function smokeDefinition(definition, options) {
   } finally {
     await connection?.close().catch(() => {});
     await smokeEnv.cleanup();
+    await removeTempTree(workdir);
+  }
+}
+
+/**
+ * @param {string} dir
+ * @returns {Promise<void>}
+ */
+async function removeTempTree(dir) {
+  try {
+    await fs.rm(dir, {
+      recursive: true,
+      force: true,
+      maxRetries: 10,
+      retryDelay: 100,
+    });
+  } catch {
+    // Disposable smoke-test state must not mask the adapter result.
   }
 }
 
@@ -176,7 +201,7 @@ async function prepareCodexSmokeEnv(env) {
   return {
     env,
     cleanup: async () => {
-      await fs.rm(codexHome, { recursive: true, force: true });
+      await removeTempTree(codexHome);
     },
   };
 }
@@ -200,7 +225,7 @@ async function preparePiSmokeEnv(env) {
   return {
     env,
     cleanup: async () => {
-      await fs.rm(piHome, { recursive: true, force: true });
+      await removeTempTree(piHome);
     },
   };
 }
