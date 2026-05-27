@@ -65,3 +65,14 @@ pnpm exec node scripts/acp-adapter-smoke.js codex --prompt
 These smokes use temporary workdirs and do not modify the repository. They may
 require normal provider authentication and filesystem access outside strict test
 sandboxes.
+
+For Codex, the smoke runner also creates a disposable `CODEX_HOME` under `/tmp`
+and copies only top-level auth/config identity files from the real Codex home.
+That lets the real Codex app server write its sqlite state, model cache, and
+system-skill metadata without mutating `~/.codex` or failing when the caller's
+home directory is read-only.
+
+For Pi, the smoke runner creates a disposable `HOME`, `PI_CODING_AGENT_DIR`,
+and `PI_CODING_AGENT_SESSION_DIR` under `/tmp`, copying only top-level
+`~/.pi/agent` auth/config files. This keeps `pi-acp`'s session map and Pi's
+session files out of the real home directory for repeatable smoke runs.
