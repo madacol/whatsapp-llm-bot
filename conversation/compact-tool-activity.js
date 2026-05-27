@@ -276,6 +276,16 @@ export function createCompactToolActivityFeed({ send, cwd }) {
   /**
    * @param {Map<string, string[]>} map
    * @param {string} key
+   * @returns {boolean}
+   */
+  function hasPendingEntry(map, key) {
+    const existing = map.get(key);
+    return Array.isArray(existing) && existing.length > 0;
+  }
+
+  /**
+   * @param {Map<string, string[]>} map
+   * @param {string} key
    * @returns {string | undefined}
    */
   function consumePendingEntry(map, key) {
@@ -331,6 +341,9 @@ export function createCompactToolActivityFeed({ send, cwd }) {
 
   return {
     addCommand: async (command) => {
+      if (hasPendingEntry(pendingCommandEntryIds, command)) {
+        return;
+      }
       const entryId = `compact-entry-${++nextEntryId}`;
       rememberPendingEntry(pendingCommandEntryIds, command, entryId);
       await addEntry({
@@ -357,6 +370,9 @@ export function createCompactToolActivityFeed({ send, cwd }) {
       return true;
     },
     addFileRead: async (command, paths) => {
+      if (hasPendingEntry(pendingCommandEntryIds, command)) {
+        return;
+      }
       const entryId = `compact-entry-${++nextEntryId}`;
       rememberPendingEntry(pendingCommandEntryIds, command, entryId);
       await addEntry({
@@ -368,6 +384,9 @@ export function createCompactToolActivityFeed({ send, cwd }) {
       });
     },
     addToolCall: async (toolCall, actionFormatter, toolContext) => {
+      if (pendingToolEntryIdsByToolId.has(toolCall.id)) {
+        return;
+      }
       const entryId = `compact-entry-${++nextEntryId}`;
       pendingToolEntryIds.push(entryId);
       pendingToolEntryIdsByToolId.set(toolCall.id, entryId);

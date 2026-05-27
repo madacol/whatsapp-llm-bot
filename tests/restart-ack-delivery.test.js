@@ -79,6 +79,38 @@ describe("restart acknowledgement delivery", () => {
     }
   });
 
+  it("falls back to a new restarted message when the persisted edit handle is gone", async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), "restart-ack-"));
+    const storePath = path.join(dir, "ack.json");
+    const store = createRestartAckStore(storePath);
+    /** @type {Array<{ chatId: string, text: string }>} */
+    const sent = [];
+
+    try {
+      await store.save({
+        chatId: "chat-lost-handle@g.us",
+        requestedAt: "2026-05-15T19:00:00.000Z",
+        oldPid: 123,
+        transportHandleId: "wa-edit-missing",
+      });
+
+      await deliverPendingRestartAck({
+        store,
+        editMessage: async ({ transportHandleId }) => {
+          throw new Error(`WhatsApp edit handle ${transportHandleId} was not found.`);
+        },
+        sendText: async (chatId, text) => {
+          sent.push({ chatId, text });
+        },
+      });
+
+      assert.deepEqual(sent, [{ chatId: "chat-lost-handle@g.us", text: "Restarted." }]);
+      assert.equal(await store.read(), null);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   it("reports active turns that were force-interrupted by restart", async () => {
     const dir = await mkdtemp(path.join(os.tmpdir(), "restart-ack-"));
     const storePath = path.join(dir, "ack.json");

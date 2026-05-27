@@ -10,6 +10,15 @@ function formatInterruptedTurnMessage(turn) {
 }
 
 /**
+ * @param {unknown} error
+ * @returns {boolean}
+ */
+function isMissingEditHandleError(error) {
+  return error instanceof Error
+    && /^WhatsApp edit handle .+ was not found\.$/.test(error.message);
+}
+
+/**
  * Deliver the pending post-restart acknowledgement, if one exists.
  * @param {{
  *   store: import("./_restart-ack-store.js").RestartAckStore,
@@ -33,10 +42,17 @@ export async function deliverPendingRestartAck({ store, editMessage, sendText, r
   const transportHandleId = record.transportHandleId ?? recoveredHandle?.transportHandleId;
 
   if (transportHandleId) {
-    await editMessage({
-      transportHandleId,
-      text: RESTARTED_TEXT,
-    });
+    try {
+      await editMessage({
+        transportHandleId,
+        text: RESTARTED_TEXT,
+      });
+    } catch (error) {
+      if (!isMissingEditHandleError(error)) {
+        throw error;
+      }
+      await sendText(record.chatId, RESTARTED_TEXT);
+    }
   } else if (record.queueId) {
     return;
   } else {
