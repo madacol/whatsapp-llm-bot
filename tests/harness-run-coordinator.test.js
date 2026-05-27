@@ -100,6 +100,63 @@ describe("createHarnessRunCoordinator", () => {
     assert.equal(coordinator.finishRun("chat-2"), null);
   });
 
+  it("buffers a follow-up for the next turn when the selected harness owner changes mid-run", async () => {
+    /** @type {string[]} */
+    const firstInjected = [];
+    /** @type {string[]} */
+    const secondInjected = [];
+    /** @type {AgentHarness} */
+    const firstHarness = {
+      getName: () => "codex",
+      getCapabilities: () => ({
+        supportsResume: true,
+        supportsCancel: true,
+        supportsLiveInput: true,
+        supportsApprovals: true,
+        supportsWorkdir: true,
+        supportsSandboxConfig: true,
+        supportsModelSelection: true,
+        supportsReasoningEffort: false,
+        supportsSessionFork: false,
+      }),
+      run: async () => ({ response: [], messages: [], usage: { promptTokens: 0, completionTokens: 0, cachedTokens: 0, cost: 0 } }),
+      handleCommand: async () => false,
+      injectMessage: (_chatId, text) => {
+        firstInjected.push(text);
+        return true;
+      },
+    };
+    /** @type {AgentHarness} */
+    const secondHarness = {
+      ...firstHarness,
+      injectMessage: (_chatId, text) => {
+        secondInjected.push(text);
+        return true;
+      },
+    };
+
+    const coordinator = createHarnessRunCoordinator();
+    const started = await coordinator.beginRun({
+      turn: createTurn("chat-owner", "first"),
+      userText: "first",
+      harness: firstHarness,
+      ownerKey: "codex:work:model-a",
+    });
+    coordinator.markRunActive("chat-owner");
+    const buffered = await coordinator.beginRun({
+      turn: createTurn("chat-owner", "follow-up"),
+      userText: "follow-up",
+      harness: secondHarness,
+      ownerKey: "cursor:personal:model-b",
+    });
+
+    assert.equal(started.status, "started");
+    assert.equal(buffered.status, "buffered");
+    assert.deepEqual(firstInjected, []);
+    assert.deepEqual(secondInjected, []);
+    assert.equal(coordinator.finishRun("chat-owner")?.content[0]?.type, "text");
+  });
+
   it("retries active live input instead of queueing a second turn when the harness is not ready yet", async () => {
     /** @type {string[]} */
     const injected = [];

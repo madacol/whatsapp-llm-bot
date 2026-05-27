@@ -103,6 +103,32 @@ function createCodexHarness(options = {}) {
   };
 }
 
+/**
+ * @returns {{ promise: Promise<void>, resolve: () => void }}
+ */
+function createDeferredVoid() {
+  /** @type {() => void} */
+  let resolve = () => {};
+  const promise = new Promise((resolvePromise) => {
+    resolve = () => resolvePromise(undefined);
+  });
+  return { promise, resolve };
+}
+
+/**
+ * @param {() => boolean} predicate
+ * @returns {Promise<void>}
+ */
+async function waitUntil(predicate) {
+  for (let attempt = 0; attempt < 50; attempt += 1) {
+    if (predicate()) {
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  assert.fail("Timed out waiting for condition");
+}
+
 describe("createConversationRunner prompt formatting", () => {
   it("starts the selected harness adapter session before sending the turn", async () => {
     await seedChat("conv-adapter-session-start", { enabled: true });
@@ -251,6 +277,29 @@ describe("createConversationRunner prompt formatting", () => {
                 assert.ok(input.messages?.some((message) => message.role === "user"));
                 for (const subscriber of subscribers) {
                   await subscriber({
+                    chatId: input.chatId,
+                    turnId: "stale-turn",
+                    providerInstanceId: "semantic-events",
+                    type: "assistant.completed",
+                    provider: "semantic-events",
+                    text: "stale turn response",
+                    contentType: "text",
+                    responseMode: "replace",
+                  });
+                  await subscriber({
+                    chatId: input.chatId,
+                    turnId: input.turnId,
+                    providerInstanceId: "other-instance",
+                    type: "assistant.completed",
+                    provider: "semantic-events",
+                    text: "wrong instance response",
+                    contentType: "text",
+                    responseMode: "replace",
+                  });
+                  await subscriber({
+                    chatId: input.chatId,
+                    turnId: input.turnId,
+                    providerInstanceId: "semantic-events",
                     type: "assistant.completed",
                     provider: "semantic-events",
                     text: "event response",
@@ -307,6 +356,8 @@ describe("createConversationRunner prompt formatting", () => {
       [{ type: "markdown", text: "event response" }],
       [{ type: "text", text: "fallback response" }],
     ]);
+    assert.ok(!replies.some((reply) => JSON.stringify(reply).includes("stale turn response")));
+    assert.ok(!replies.some((reply) => JSON.stringify(reply).includes("wrong instance response")));
   });
 
   it("routes concurrent scoped provider runtime events only to their originating chat", async () => {
@@ -504,6 +555,97 @@ describe("createConversationRunner prompt formatting", () => {
       progressTexts.some((text) => text.includes("*Shell*  `pnpm type-check`")),
       `expected Shell progress, got: ${JSON.stringify(progressTexts)}`,
     );
+  });
+
+  it("defers a selected harness instance change until the active turn finishes", async () => {
+    const chatId = "conv-harness-switch-mid-turn";
+    const harnessName = "adapter-lifecycle";
+    await seedChat(chatId, { enabled: true });
+    await updateChatConfig(chatId, (current) => ({
+      ...current,
+      harness: harnessName,
+      harness_config: {
+        activeHarnessInstances: { [harnessName]: "work" },
+        harnessInstances: {
+          [harnessName]: {
+            work: { model: "model-a" },
+            personal: { model: "model-b" },
+          },
+        },
+      },
+    }));
+
+    const releaseFirstRun = createDeferredVoid();
+    /** @type {string[]} */
+    const phases = [];
+    registerHarnessDriver({
+      name: harnessName,
+      supportsInstances: true,
+      createInstance: ({ instanceId }) => {
+        phases.push(`create:${instanceId}`);
+        const harness = createCodexHarness({
+          startRun: async (input) => ({
+            abortController: new AbortController(),
+            done: (async () => {
+              phases.push(`run:${instanceId}`);
+              if (instanceId === "work") {
+                await releaseFirstRun.promise;
+              }
+              return {
+                result: {
+                  response: [{ type: "text", text: `ok:${instanceId}` }],
+                  messages: input.messages,
+                  usage: { promptTokens: 0, completionTokens: 0, cachedTokens: 0, cost: 0 },
+                },
+              };
+            })(),
+          }),
+        });
+        return {
+          harness,
+          dispose: async () => {
+            phases.push(`dispose:${instanceId}`);
+          },
+        };
+      },
+    });
+
+    const firstTurn = createChatTurn({
+      chatId,
+      content: [{ type: "text", text: "first" }],
+    });
+    const firstHandled = handleMessage(firstTurn.context);
+    await waitUntil(() => phases.includes("run:work"));
+
+    await updateChatConfig(chatId, (current) => ({
+      ...current,
+      harness: harnessName,
+      harness_config: {
+        activeHarnessInstances: { [harnessName]: "personal" },
+        harnessInstances: {
+          [harnessName]: {
+            work: { model: "model-a" },
+            personal: { model: "model-b" },
+          },
+        },
+      },
+    }));
+
+    const secondTurn = createChatTurn({
+      chatId,
+      content: [{ type: "text", text: "second" }],
+    });
+    await handleMessage(secondTurn.context);
+
+    assert.deepEqual(phases, ["create:work", "run:work"]);
+
+    releaseFirstRun.resolve();
+    await firstHandled;
+    await waitUntil(() => phases.includes("run:personal"));
+
+    assert.ok(phases.includes("create:personal"), `expected personal instance after first run, got ${JSON.stringify(phases)}`);
+    assert.ok(phases.includes("run:personal"), `expected buffered turn to run on personal instance, got ${JSON.stringify(phases)}`);
+    assert.ok(phases.indexOf("create:personal") > phases.indexOf("run:work"));
   });
 
   it("runs command afterResponse hooks only after the command reply resolves", async () => {
