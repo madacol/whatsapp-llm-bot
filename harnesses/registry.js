@@ -1,5 +1,9 @@
 import { createHarnessAdapterFromHarness } from "./adapter.js";
-import { createAcpHarness, normalizeAcpHarnessConfig } from "./acp.js";
+import {
+  BUILT_IN_ACP_AGENT_DEFINITIONS,
+  createAcpAgentDriver,
+  readAcpAgentDefinitionsFromEnv,
+} from "./acp-agents.js";
 
 /**
  * @typedef {{
@@ -183,22 +187,12 @@ function getDriverDescriptor(name) {
 }
 
 function registerDefaultHarnesses() {
-  registerHarnessDriver({
-    name: "codex",
-    displayName: "Codex",
-    supportsInstances: true,
-    docsUrl: "https://github.com/zed-industries/codex-acp",
-    configSchema: (config) => normalizeAcpHarnessConfig(config, "codex-acp"),
-    createInstance: ({ config }) => ({ harness: createAcpHarness({ name: "codex", config, defaultCommand: "codex-acp" }) }),
-  });
-  registerHarnessDriver({
-    name: "pi",
-    displayName: "Pi",
-    supportsInstances: true,
-    docsUrl: "https://agentclientprotocol.com/overview/agents",
-    configSchema: (config) => normalizeAcpHarnessConfig(config, "pi-acp"),
-    createInstance: ({ config }) => ({ harness: createAcpHarness({ name: "pi", config, defaultCommand: "pi-acp" }) }),
-  });
+  for (const definition of BUILT_IN_ACP_AGENT_DEFINITIONS) {
+    registerHarnessDriver(createAcpAgentDriver(definition));
+  }
+  for (const definition of readAcpAgentDefinitionsFromEnv()) {
+    registerHarnessDriver(createAcpAgentDriver(definition));
+  }
 }
 
 registerDefaultHarnesses();
@@ -472,6 +466,26 @@ export function registerHarnessDriver(driver) {
       instances.delete(cacheKey);
       instanceConfigSignatures.delete(cacheKey);
     }
+  }
+}
+
+/**
+ * Register an ACP-backed harness driver from a provider definition.
+ * @param {AcpAgentDefinition} definition
+ * @returns {void}
+ */
+export function registerAcpAgentDriver(definition) {
+  registerHarnessDriver(createAcpAgentDriver(definition));
+}
+
+/**
+ * Register multiple ACP-backed harness drivers from provider definitions.
+ * @param {AcpAgentDefinition[]} definitions
+ * @returns {void}
+ */
+export function registerAcpAgentDrivers(definitions) {
+  for (const definition of definitions) {
+    registerAcpAgentDriver(definition);
   }
 }
 

@@ -647,7 +647,7 @@ type LlmResponseMetadata = {
 
 type HarnessSessionRef = {
   id: string;
-  kind: "native" | "claude-sdk" | "codex" | "pi";
+  kind: string;
 };
 
 type HarnessCapabilities = {
@@ -663,6 +663,17 @@ type HarnessCapabilities = {
   sessionModelSwitch?: "in-session" | "unsupported";
   supportsRollback?: boolean;
   supportsUserInputRequests?: boolean;
+};
+
+type AcpAgentDefinition = {
+  name: string;
+  displayName?: string;
+  command: string;
+  args?: string[];
+  docsUrl?: string;
+  statusUrl?: string;
+  supportsInstances?: boolean;
+  sessionKind?: HarnessSessionRef["kind"];
 };
 
 type HarnessUsage = {

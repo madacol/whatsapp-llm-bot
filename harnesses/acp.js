@@ -1,7 +1,7 @@
 import { createHarnessEventStreamController } from "./adapter.js";
 import { forkAcpSession, startAcpRun } from "./acp-runner.js";
 import { buildTextHarnessPromptFromBlocks } from "./prompt-media.js";
-import { updateHarnessConfig, getHarnessConfig } from "../harness-config.js";
+import { updateActiveHarnessConfig, getActiveHarnessConfig } from "../harness-config.js";
 import { contentEvent } from "../outbound-events.js";
 import { handleSessionControlCommand } from "../session-control-commands.js";
 
@@ -69,6 +69,8 @@ function resolveAcpCommand(config, defaultCommand) {
 /**
  * @param {{
  *   name?: string,
+ *   label?: string,
+ *   sessionKind?: HarnessSessionRef["kind"],
  *   config?: Record<string, unknown>,
  *   defaultCommand?: string,
  * }} [options]
@@ -76,13 +78,16 @@ function resolveAcpCommand(config, defaultCommand) {
  */
 export function createAcpHarness(options = {}) {
   const name = options.name ?? "acp";
+  const label = options.label ?? name;
+  const sessionKind = options.sessionKind ?? "native";
   const config = options.config ?? {};
   const commandSpec = resolveAcpCommand(config, options.defaultCommand);
   /** @type {Map<string, { abortController: AbortController, steer?: (text: string) => Promise<boolean> }>} */
   const activeRuns = new Map();
   const commandHandler = createGenericAcpCommandHandler({
     harnessName: name,
-    label: getHarnessDisplayLabel(name),
+    label,
+    sessionKind,
     commandSpec,
     cancelActiveQuery: cancel,
   });
@@ -289,42 +294,21 @@ export function createAcpHarness(options = {}) {
     return [
       { name: "clear", description: "Clear the current harness session" },
       { name: "resume", description: "Restore a previously cleared harness session" },
-      { name: "fork", description: `Fork the current ${getHarnessDisplayLabel(name)} ACP session` },
-      { name: "back", description: `Return to the previous ${getHarnessDisplayLabel(name)} ACP fork parent` },
-      { name: "model", description: `Choose or set the ${getHarnessDisplayLabel(name)} model` },
+      { name: "fork", description: `Fork the current ${label} ACP session` },
+      { name: "back", description: `Return to the previous ${label} ACP fork parent` },
+      { name: "model", description: `Choose or set the ${label} model` },
       { name: "sandbox", description: "Alias of /permissions" },
-      { name: "permissions", description: `Show or set the ${getHarnessDisplayLabel(name)} permissions mode` },
-      { name: "approval", description: `Show or set the ${getHarnessDisplayLabel(name)} approval policy` },
+      { name: "permissions", description: `Show or set the ${label} permissions mode` },
+      { name: "approval", description: `Show or set the ${label} approval policy` },
     ];
   }
-}
-
-/**
- * @param {string} harnessName
- * @returns {string}
- */
-function getHarnessDisplayLabel(harnessName) {
-  if (harnessName === "codex") return "Codex";
-  if (harnessName === "claude-agent-sdk") return "Claude";
-  if (harnessName === "pi") return "Pi";
-  return "ACP";
-}
-
-/**
- * @param {string} harnessName
- * @returns {HarnessSessionRef["kind"]}
- */
-function getHarnessSessionKind(harnessName) {
-  if (harnessName === "claude-agent-sdk") return "claude-sdk";
-  if (harnessName === "codex") return "codex";
-  if (harnessName === "pi") return "pi";
-  return "native";
 }
 
 /**
  * @param {{
  *   harnessName: string,
  *   label: string,
+ *   sessionKind: HarnessSessionRef["kind"],
  *   commandSpec: { command: string, args: string[] },
  *   cancelActiveQuery: (chatId: string | HarnessSessionRef) => boolean,
  * }} options
@@ -346,7 +330,7 @@ function createGenericAcpCommandHandler(options) {
     const trimmed = input.command.trim();
     if (/^fork$/i.test(trimmed)) {
       const currentSessionId = input.chatInfo?.harness_session_id ?? null;
-      const currentKind = input.chatInfo?.harness_session_kind ?? getHarnessSessionKind(options.harnessName);
+      const currentKind = input.chatInfo?.harness_session_kind ?? options.sessionKind;
       if (!currentSessionId || !input.sessionForkControl) {
         await input.context.reply(contentEvent("tool-result", `Can't fork yet. Start a ${options.label} ACP session first.`));
         return true;
@@ -390,7 +374,7 @@ function createGenericAcpCommandHandler(options) {
     if (modelMatch) {
       const arg = modelMatch[1]?.trim() ?? null;
       if (!arg) {
-        const config = await getHarnessConfig(input.chatId, options.harnessName);
+        const config = await getActiveHarnessConfig(input.chatId, options.harnessName);
         const model = typeof config.model === "string" ? config.model : "default";
         const effort = typeof config.reasoningEffort === "string" ? config.reasoningEffort : "default";
         await input.context.reply(contentEvent("tool-result", `${options.label} model: \`${model}\`\n${options.label} effort: \`${effort}\``));
@@ -400,21 +384,21 @@ function createGenericAcpCommandHandler(options) {
       if (effortMatch) {
         const effort = effortMatch[1].trim().toLowerCase();
         if (effort === "off" || effort === "default" || effort === "none") {
-          await updateHarnessConfig(input.chatId, options.harnessName, { reasoningEffort: null });
+          await updateActiveHarnessConfig(input.chatId, options.harnessName, { reasoningEffort: null });
           await input.context.reply(contentEvent("tool-result", `${options.label} effort reset to default.`));
           return true;
         }
-        await updateHarnessConfig(input.chatId, options.harnessName, { reasoningEffort: effort });
+        await updateActiveHarnessConfig(input.chatId, options.harnessName, { reasoningEffort: effort });
         await input.context.reply(contentEvent("tool-result", `${options.label} effort set to \`${effort}\``));
         return true;
       }
       const model = arg.toLowerCase();
       if (model === "off" || model === "default" || model === "none") {
-        await updateHarnessConfig(input.chatId, options.harnessName, { model: null });
+        await updateActiveHarnessConfig(input.chatId, options.harnessName, { model: null });
         await input.context.reply(contentEvent("tool-result", `${options.label} model reset to default.`));
         return true;
       }
-      await updateHarnessConfig(input.chatId, options.harnessName, { model });
+      await updateActiveHarnessConfig(input.chatId, options.harnessName, { model });
       await input.context.reply(contentEvent("tool-result", `${options.label} model set to \`${model}\``));
       return true;
     }
@@ -424,15 +408,15 @@ function createGenericAcpCommandHandler(options) {
       const arg = permissionsMatch[1]?.trim().toLowerCase() ?? null;
       if (arg) {
         if (arg === "off" || arg === "default" || arg === "none") {
-          await updateHarnessConfig(input.chatId, options.harnessName, { sandboxMode: null });
+          await updateActiveHarnessConfig(input.chatId, options.harnessName, { sandboxMode: null });
           await input.context.reply(contentEvent("tool-result", `${options.label} permissions reset to default.`));
           return true;
         }
-        await updateHarnessConfig(input.chatId, options.harnessName, { sandboxMode: arg });
+        await updateActiveHarnessConfig(input.chatId, options.harnessName, { sandboxMode: arg });
         await input.context.reply(contentEvent("tool-result", `${options.label} permissions set to \`${arg}\``));
         return true;
       }
-      const config = await getHarnessConfig(input.chatId, options.harnessName);
+      const config = await getActiveHarnessConfig(input.chatId, options.harnessName);
       const permissions = typeof config.sandboxMode === "string" ? config.sandboxMode : "default";
       await input.context.reply(contentEvent("tool-result", `${options.label} permissions: \`${permissions}\``));
       return true;
@@ -443,15 +427,15 @@ function createGenericAcpCommandHandler(options) {
       const arg = approvalMatch[1]?.trim().toLowerCase() ?? null;
       if (arg) {
         if (arg === "off" || arg === "default" || arg === "none") {
-          await updateHarnessConfig(input.chatId, options.harnessName, { approvalPolicy: null });
+          await updateActiveHarnessConfig(input.chatId, options.harnessName, { approvalPolicy: null });
           await input.context.reply(contentEvent("tool-result", `${options.label} approval policy reset to default.`));
           return true;
         }
-        await updateHarnessConfig(input.chatId, options.harnessName, { approvalPolicy: arg });
+        await updateActiveHarnessConfig(input.chatId, options.harnessName, { approvalPolicy: arg });
         await input.context.reply(contentEvent("tool-result", `${options.label} approval policy set to \`${arg}\``));
         return true;
       }
-      const config = await getHarnessConfig(input.chatId, options.harnessName);
+      const config = await getActiveHarnessConfig(input.chatId, options.harnessName);
       const approval = typeof config.approvalPolicy === "string" ? config.approvalPolicy : "default";
       await input.context.reply(contentEvent("tool-result", `${options.label} approval policy: \`${approval}\``));
       return true;

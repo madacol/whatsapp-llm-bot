@@ -54,6 +54,8 @@ describe("ACP harness", () => {
     ]) {
       const harness = createAcpHarness({
         name,
+        label,
+        sessionKind: kind,
         config: {
           command: process.execPath,
           args: [path.join(__dirname, "fixtures", "acp-mock-agent.js")],
