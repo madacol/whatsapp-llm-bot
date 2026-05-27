@@ -218,7 +218,9 @@ export function createAcpHarness(options = {}) {
       const sessions = new Map();
       /** @type {Map<string, HarnessRunConfig | undefined>} */
       const sessionRunConfigs = new Map();
-      const events = createHarnessEventStreamController(name);
+      const events = createHarnessEventStreamController(name, {
+        providerInstanceId: input.instanceId,
+      });
       return {
         async startSession({ chatId, runConfig, resumeCursor }) {
           /** @type {HarnessRuntimeSession} */

@@ -5,6 +5,9 @@ import path from "node:path";
  * @typedef {{
  *   provider: import("./harness-runtime-events.js").HarnessRuntimeProvider,
  *   type: string,
+ *   eventId?: string,
+ *   createdAt?: string,
+ *   providerInstanceId?: string,
  *   raw: Record<string, unknown>,
  * }} HarnessRawEventLogEntry
  */
@@ -49,4 +52,3 @@ export function getHarnessRawEventLoggerFromEnv(env = process.env) {
   cachedEnvLogger = { filePath, logger: createNdjsonRawEventLogger(filePath) };
   return cachedEnvLogger.logger;
 }
-

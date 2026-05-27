@@ -50,6 +50,21 @@ function stringOrNull(value) {
 }
 
 /**
+ * @param {Record<string, unknown>} value
+ * @param {string[]} keys
+ * @returns {string | undefined}
+ */
+function firstString(value, keys) {
+  for (const key of keys) {
+    const text = stringOrNull(value[key]);
+    if (text) {
+      return text;
+    }
+  }
+  return undefined;
+}
+
+/**
  * @param {unknown} value
  * @returns {"completed" | "in_progress" | "pending" | "unknown"}
  */
@@ -456,6 +471,45 @@ export function createAcpRuntimeModel() {
         type: "usage.updated",
         provider: "acp",
         usage: normalizeAcpUsage(update),
+        raw: eventRaw,
+      }];
+    }
+
+    if (update.sessionUpdate === "model_rerouted" || update.sessionUpdate === "model-rerouted") {
+      return [...prefix, {
+        type: "model.rerouted",
+        provider: "acp",
+        ...(firstString(update, ["fromModel", "from_model", "from"]) ? { fromModel: firstString(update, ["fromModel", "from_model", "from"]) } : {}),
+        ...(firstString(update, ["toModel", "to_model", "to"]) ? { toModel: firstString(update, ["toModel", "to_model", "to"]) } : {}),
+        ...(firstString(update, ["reason", "message"]) ? { reason: firstString(update, ["reason", "message"]) } : {}),
+        raw: eventRaw,
+      }];
+    }
+
+    if (update.sessionUpdate === "config_warning" || update.sessionUpdate === "config-warning") {
+      return [...prefix, {
+        type: "config.warning",
+        provider: "acp",
+        ...(firstString(update, ["summary", "message"]) ? { summary: firstString(update, ["summary", "message"]) } : {}),
+        ...(firstString(update, ["details", "detail"]) ? { details: firstString(update, ["details", "detail"]) } : {}),
+        ...(firstString(update, ["path"]) ? { path: firstString(update, ["path"]) } : {}),
+        raw: eventRaw,
+      }];
+    }
+
+    if (
+      update.sessionUpdate === "runtime_error" ||
+      update.sessionUpdate === "runtime-error" ||
+      update.sessionUpdate === "runtime_warning" ||
+      update.sessionUpdate === "runtime-warning"
+    ) {
+      const isError = update.sessionUpdate === "runtime_error" || update.sessionUpdate === "runtime-error";
+      return [...prefix, {
+        type: isError ? "runtime.error" : "runtime.warning",
+        provider: "acp",
+        ...(firstString(update, ["message", "summary"]) ? { message: firstString(update, ["message", "summary"]) } : {}),
+        ...(firstString(update, ["details", "detail"]) ? { details: firstString(update, ["details", "detail"]) } : {}),
+        ...(isError ? { class: "provider_error" } : {}),
         raw: eventRaw,
       }];
     }

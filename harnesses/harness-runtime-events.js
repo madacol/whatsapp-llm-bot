@@ -4,6 +4,34 @@
 
 /**
  * @typedef {{
+ *   providerTurnId?: string,
+ *   providerItemId?: string,
+ *   providerRequestId?: string,
+ * }} HarnessRuntimeProviderRefs
+ */
+
+/**
+ * @typedef {{
+ *   source?: "acp.jsonrpc" | "codex.app-server.notification" | "codex.app-server.request" | "claude.sdk.message" | "pi.sdk.message" | string,
+ *   method?: string,
+ *   messageType?: string,
+ *   payload?: unknown,
+ * } & Record<string, unknown>} HarnessRuntimeRawEvent
+ */
+
+/**
+ * @typedef {{
+ *   eventId?: string,
+ *   createdAt?: string,
+ *   providerInstanceId?: string,
+ *   turnId?: string,
+ *   requestId?: string,
+ *   providerRefs?: HarnessRuntimeProviderRefs,
+ * }} HarnessRuntimeEventEnvelope
+ */
+
+/**
+ * @typedef {{
  *   promptTokens: number,
  *   completionTokens: number,
  *   cachedTokens: number,
@@ -76,8 +104,8 @@
  *   type: "session.started" | "session.updated" | "session.stopped",
  *   provider: HarnessRuntimeProvider,
  *   session: HarnessRuntimeSession,
- *   raw?: Record<string, unknown>,
- * }} HarnessRuntimeSessionEvent
+ *   raw?: HarnessRuntimeRawEvent,
+ * } & HarnessRuntimeEventEnvelope} HarnessRuntimeSessionEvent
  */
 
 /**
@@ -86,8 +114,8 @@
  *   type: "turn.started" | "turn.completed",
  *   provider: HarnessRuntimeProvider,
  *   turn: HarnessRuntimeTurn,
- *   raw?: Record<string, unknown>,
- * }} HarnessRuntimeTurnEvent
+ *   raw?: HarnessRuntimeRawEvent,
+ * } & HarnessRuntimeEventEnvelope} HarnessRuntimeTurnEvent
  */
 
 /**
@@ -96,8 +124,8 @@
  *   type: "request.opened" | "request.resolved",
  *   provider: HarnessRuntimeProvider,
  *   request: HarnessRuntimeRequest,
- *   raw?: Record<string, unknown>,
- * }} HarnessRuntimeRequestEvent
+ *   raw?: HarnessRuntimeRawEvent,
+ * } & HarnessRuntimeEventEnvelope} HarnessRuntimeRequestEvent
  */
 
 /**
@@ -106,8 +134,8 @@
  *   type: "user-input.requested" | "user-input.resolved",
  *   provider: HarnessRuntimeProvider,
  *   request: HarnessRuntimeUserInputRequest,
- *   raw?: Record<string, unknown>,
- * }} HarnessRuntimeUserInputEvent
+ *   raw?: HarnessRuntimeRawEvent,
+ * } & HarnessRuntimeEventEnvelope} HarnessRuntimeUserInputEvent
  */
 
 /**
@@ -116,8 +144,8 @@
  *   type: "item.started" | "item.updated" | "item.completed",
  *   provider: HarnessRuntimeProvider,
  *   item: HarnessRuntimeItem,
- *   raw?: Record<string, unknown>,
- * }} HarnessRuntimeItemEvent
+ *   raw?: HarnessRuntimeRawEvent,
+ * } & HarnessRuntimeEventEnvelope} HarnessRuntimeItemEvent
  */
 
 /**
@@ -130,8 +158,8 @@
  *   displayText?: string,
  *   contentType: "text" | "markdown",
  *   notify?: boolean,
- *   raw?: Record<string, unknown>,
- * }} HarnessRuntimeContentDeltaEvent
+ *   raw?: HarnessRuntimeRawEvent,
+ * } & HarnessRuntimeEventEnvelope} HarnessRuntimeContentDeltaEvent
  */
 
 /**
@@ -141,8 +169,8 @@
  *   provider: HarnessRuntimeProvider,
  *   method: string,
  *   payload: unknown,
- *   raw?: Record<string, unknown>,
- * }} HarnessRuntimeExtensionEvent
+ *   raw?: HarnessRuntimeRawEvent,
+ * } & HarnessRuntimeEventEnvelope} HarnessRuntimeExtensionEvent
  */
 
 /**
@@ -151,8 +179,8 @@
  *   type: "file-change.completed",
  *   provider: HarnessRuntimeProvider,
  *   change: Parameters<Required<AgentIOHooks>["onFileChange"]>[0],
- *   raw?: Record<string, unknown>,
- * }} HarnessRuntimeFileChangeEvent
+ *   raw?: HarnessRuntimeRawEvent,
+ * } & HarnessRuntimeEventEnvelope} HarnessRuntimeFileChangeEvent
  */
 
 /**
@@ -164,8 +192,8 @@
  *   text: string,
  *   summaryParts?: string[],
  *   contentParts?: string[],
- *   raw?: Record<string, unknown>,
- * }} HarnessRuntimeReasoningEvent
+ *   raw?: HarnessRuntimeRawEvent,
+ * } & HarnessRuntimeEventEnvelope} HarnessRuntimeReasoningEvent
  */
 
 /**
@@ -174,8 +202,8 @@
  *   type: "tool.started" | "tool.updated" | "tool.completed" | "tool.failed",
  *   provider: HarnessRuntimeProvider,
  *   tool: HarnessRuntimeTool,
- *   raw?: Record<string, unknown>,
- * }} HarnessRuntimeToolEvent
+ *   raw?: HarnessRuntimeRawEvent,
+ * } & HarnessRuntimeEventEnvelope} HarnessRuntimeToolEvent
  */
 
 /**
@@ -184,8 +212,8 @@
  *   type: "command.started" | "command.completed" | "command.failed",
  *   provider: HarnessRuntimeProvider,
  *   command: Parameters<Required<AgentIOHooks>["onCommand"]>[0],
- *   raw?: Record<string, unknown>,
- * }} HarnessRuntimeCommandEvent
+ *   raw?: HarnessRuntimeRawEvent,
+ * } & HarnessRuntimeEventEnvelope} HarnessRuntimeCommandEvent
  */
 
 /**
@@ -194,8 +222,8 @@
  *   type: "file-read.started",
  *   provider: HarnessRuntimeProvider,
  *   fileRead: Parameters<Required<AgentIOHooks>["onFileRead"]>[0],
- *   raw?: Record<string, unknown>,
- * }} HarnessRuntimeFileReadEvent
+ *   raw?: HarnessRuntimeRawEvent,
+ * } & HarnessRuntimeEventEnvelope} HarnessRuntimeFileReadEvent
  */
 
 /**
@@ -210,8 +238,8 @@
  *   notify?: boolean,
  *   usage?: HarnessRuntimeUsage,
  *   usageMode?: "replace" | "add",
- *   raw?: Record<string, unknown>,
- * }} HarnessRuntimeAssistantCompletedEvent
+ *   raw?: HarnessRuntimeRawEvent,
+ * } & HarnessRuntimeEventEnvelope} HarnessRuntimeAssistantCompletedEvent
  */
 
 /**
@@ -221,8 +249,8 @@
  *   provider: HarnessRuntimeProvider,
  *   text: string,
  *   metadata?: LlmResponseMetadata,
- *   raw?: Record<string, unknown>,
- * }} HarnessRuntimeSubagentCompletedEvent
+ *   raw?: HarnessRuntimeRawEvent,
+ * } & HarnessRuntimeEventEnvelope} HarnessRuntimeSubagentCompletedEvent
  */
 
 /**
@@ -234,8 +262,8 @@
  *     explanation?: string | null,
  *     entries: Array<{ text: string, status: "completed" | "in_progress" | "pending" | "unknown" }>,
  *   },
- *   raw?: Record<string, unknown>,
- * }} HarnessRuntimePlanUpdatedEvent
+ *   raw?: HarnessRuntimeRawEvent,
+ * } & HarnessRuntimeEventEnvelope} HarnessRuntimePlanUpdatedEvent
  */
 
 /**
@@ -244,8 +272,34 @@
  *   type: "usage.updated",
  *   provider: HarnessRuntimeProvider,
  *   usage: HarnessRuntimeUsage,
- *   raw?: Record<string, unknown>,
- * }} HarnessRuntimeUsageEvent
+ *   raw?: HarnessRuntimeRawEvent,
+ * } & HarnessRuntimeEventEnvelope} HarnessRuntimeUsageEvent
+ */
+
+/**
+ * @typedef {{
+ *   chatId?: string,
+ *   type: "model.rerouted",
+ *   provider: HarnessRuntimeProvider,
+ *   fromModel?: string,
+ *   toModel?: string,
+ *   reason?: string,
+ *   raw?: HarnessRuntimeRawEvent,
+ * } & HarnessRuntimeEventEnvelope} HarnessRuntimeModelReroutedEvent
+ */
+
+/**
+ * @typedef {{
+ *   chatId?: string,
+ *   type: "config.warning" | "runtime.warning" | "runtime.error",
+ *   provider: HarnessRuntimeProvider,
+ *   summary?: string,
+ *   message?: string,
+ *   details?: string,
+ *   path?: string,
+ *   class?: "provider_error" | "transport_error" | "permission_error" | "validation_error" | "unknown",
+ *   raw?: HarnessRuntimeRawEvent,
+ * } & HarnessRuntimeEventEnvelope} HarnessRuntimeDiagnosticEvent
  */
 
 /**
@@ -266,7 +320,79 @@
  *   | HarnessRuntimeSubagentCompletedEvent
  *   | HarnessRuntimePlanUpdatedEvent
  *   | HarnessRuntimeUsageEvent
+ *   | HarnessRuntimeModelReroutedEvent
+ *   | HarnessRuntimeDiagnosticEvent
  * )} HarnessRuntimeEvent
  */
 
-export {};
+let nextRuntimeEventId = 1;
+
+/**
+ * @returns {string}
+ */
+function createRuntimeEventId() {
+  const id = nextRuntimeEventId;
+  nextRuntimeEventId += 1;
+  return `harness-event-${id}`;
+}
+
+/**
+ * @param {unknown} value
+ * @returns {value is Record<string, unknown>}
+ */
+function isRecord(value) {
+  return !!value && typeof value === "object" && !Array.isArray(value);
+}
+
+/**
+ * @param {Record<string, unknown> | undefined} raw
+ * @returns {HarnessRuntimeRawEvent | undefined}
+ */
+function normalizeRawEvent(raw) {
+  if (!raw) {
+    return undefined;
+  }
+  if ("source" in raw || "method" in raw || "payload" in raw || "messageType" in raw) {
+    return /** @type {HarnessRuntimeRawEvent} */ ({ ...raw });
+  }
+  return {
+    source: "unknown",
+    payload: raw,
+  };
+}
+
+/**
+ * Normalize provider events at the boundary so subscribers can rely on routing
+ * and debugging metadata even when individual adapters emit lean events.
+ * @template {HarnessRuntimeEvent | ({ type: string, provider: string } & Record<string, unknown>)} T
+ * @param {T} event
+ * @param {Partial<HarnessRuntimeEventEnvelope> & { raw?: Record<string, unknown> }} [defaults]
+ * @returns {T & Required<Pick<HarnessRuntimeEventEnvelope, "eventId" | "createdAt">>}
+ */
+export function normalizeHarnessRuntimeEvent(event, defaults = {}) {
+  const raw = isRecord(event.raw)
+    ? normalizeRawEvent(event.raw)
+    : normalizeRawEvent(defaults.raw);
+  return /** @type {T & Required<Pick<HarnessRuntimeEventEnvelope, "eventId" | "createdAt">>} */ ({
+    ...event,
+    eventId: typeof event.eventId === "string"
+      ? event.eventId
+      : typeof defaults.eventId === "string" ? defaults.eventId : createRuntimeEventId(),
+    createdAt: typeof event.createdAt === "string"
+      ? event.createdAt
+      : typeof defaults.createdAt === "string" ? defaults.createdAt : new Date().toISOString(),
+    ...(typeof event.providerInstanceId === "string"
+      ? { providerInstanceId: event.providerInstanceId }
+      : typeof defaults.providerInstanceId === "string" ? { providerInstanceId: defaults.providerInstanceId } : {}),
+    ...(typeof event.turnId === "string"
+      ? { turnId: event.turnId }
+      : typeof defaults.turnId === "string" ? { turnId: defaults.turnId } : {}),
+    ...(typeof event.requestId === "string"
+      ? { requestId: event.requestId }
+      : typeof defaults.requestId === "string" ? { requestId: defaults.requestId } : {}),
+    ...(event.providerRefs
+      ? { providerRefs: event.providerRefs }
+      : defaults.providerRefs ? { providerRefs: defaults.providerRefs } : {}),
+    ...(raw ? { raw } : {}),
+  });
+}

@@ -269,6 +269,74 @@ describe("ACP event normalization", () => {
     });
   });
 
+  it("normalizes provider-native warnings, model reroutes, and runtime errors", () => {
+    assert.deepEqual(normalizeAcpSessionUpdate({
+      sessionId: "s1",
+      update: {
+        sessionUpdate: "config_warning",
+        summary: "Invalid MCP server",
+        details: "Missing command",
+        path: "/repo/.codex/config.toml",
+      },
+    }), [{
+      type: "config.warning",
+      provider: "acp",
+      summary: "Invalid MCP server",
+      details: "Missing command",
+      path: "/repo/.codex/config.toml",
+      raw: {
+        source: "acp.jsonrpc",
+        method: "session/update",
+        payload: {
+          sessionId: "s1",
+          update: {
+            sessionUpdate: "config_warning",
+            summary: "Invalid MCP server",
+            details: "Missing command",
+            path: "/repo/.codex/config.toml",
+          },
+        },
+      },
+    }]);
+
+    assert.deepEqual(normalizeAcpSessionUpdate({
+      sessionId: "s1",
+      update: {
+        sessionUpdate: "model_rerouted",
+        fromModel: "gpt-5.4",
+        toModel: "gpt-5.4-mini",
+        reason: "capacity",
+      },
+    })[0], {
+      type: "model.rerouted",
+      provider: "acp",
+      fromModel: "gpt-5.4",
+      toModel: "gpt-5.4-mini",
+      reason: "capacity",
+      raw: {
+        source: "acp.jsonrpc",
+        method: "session/update",
+        payload: {
+          sessionId: "s1",
+          update: {
+            sessionUpdate: "model_rerouted",
+            fromModel: "gpt-5.4",
+            toModel: "gpt-5.4-mini",
+            reason: "capacity",
+          },
+        },
+      },
+    });
+
+    assert.equal(normalizeAcpSessionUpdate({
+      sessionId: "s1",
+      update: {
+        sessionUpdate: "runtime_error",
+        message: "Provider exited",
+      },
+    })[0]?.type, "runtime.error");
+  });
+
   it("merges partial ACP tool updates before emitting completed tools", () => {
     const model = createAcpRuntimeModel();
     model.acceptSessionUpdate({

@@ -3,6 +3,7 @@ import { buildToolPresentation, getToolFlowDescriptor } from "../tool-presentati
 import { createLogger } from "../logger.js";
 import { getHarnessRawEventLoggerFromEnv } from "./raw-event-log.js";
 import { createPlanPresentationFromState } from "../plan-presentation.js";
+import { normalizeHarnessRuntimeEvent } from "./harness-runtime-events.js";
 
 /**
  * @typedef {import("./harness-runtime-events.js").HarnessRuntimeEvent} HarnessRuntimeEvent
@@ -304,6 +305,9 @@ export function createHarnessRuntimeEventDispatcher(input) {
       await rawEventLogger.write({
         provider: event.provider,
         type: event.type,
+        ...(event.eventId ? { eventId: event.eventId } : {}),
+        ...(event.createdAt ? { createdAt: event.createdAt } : {}),
+        ...(event.providerInstanceId ? { providerInstanceId: event.providerInstanceId } : {}),
         raw: event.raw,
       });
     } catch (error) {
@@ -316,67 +320,68 @@ export function createHarnessRuntimeEventDispatcher(input) {
    * @returns {Promise<void>}
    */
   async function handleEvent(event) {
-    await captureRawEvent(event);
-    switch (event.type) {
+    const normalizedEvent = normalizeHarnessRuntimeEvent(event);
+    await captureRawEvent(normalizedEvent);
+    switch (normalizedEvent.type) {
       case "reasoning.started":
       case "reasoning.updated":
       case "reasoning.completed":
         await hooks.onReasoning({
-          status: event.status,
-          summaryParts: event.summaryParts ?? [],
-          contentParts: event.contentParts ?? [event.text],
-          text: event.text,
+          status: normalizedEvent.status,
+          summaryParts: normalizedEvent.summaryParts ?? [],
+          contentParts: normalizedEvent.contentParts ?? [normalizedEvent.text],
+          text: normalizedEvent.text,
         });
         return;
       case "tool.started":
-        await handleToolStarted(event);
+        await handleToolStarted(normalizedEvent);
         return;
       case "tool.updated":
       case "tool.completed":
       case "tool.failed":
-        await handleToolProgress(event);
+        await handleToolProgress(normalizedEvent);
         return;
       case "command.started":
       case "command.completed":
       case "command.failed":
-        await hooks.onCommand(event.command);
+        await hooks.onCommand(normalizedEvent.command);
         return;
       case "file-read.started":
-        await hooks.onFileRead(event.fileRead);
+        await hooks.onFileRead(normalizedEvent.fileRead);
         return;
       case "assistant.completed":
-        if (event.responseMode === "append") {
-          result.response.push({ type: event.contentType, text: event.text });
-        } else if (event.responseMode !== "none") {
-          result.response = [{ type: event.contentType, text: event.text }];
+        if (normalizedEvent.responseMode === "append") {
+          result.response.push({ type: normalizedEvent.contentType, text: normalizedEvent.text });
+        } else if (normalizedEvent.responseMode !== "none") {
+          result.response = [{ type: normalizedEvent.contentType, text: normalizedEvent.text }];
         }
-        if (event.notify !== false) {
-          await hooks.onLlmResponse(event.displayText ?? event.text);
+        if (normalizedEvent.notify !== false) {
+          await hooks.onLlmResponse(normalizedEvent.displayText ?? normalizedEvent.text);
         }
-        if (event.usage) {
-          await updateUsage(event.usage, event.usageMode ?? "replace");
+        if (normalizedEvent.usage) {
+          await updateUsage(normalizedEvent.usage, normalizedEvent.usageMode ?? "replace");
         }
         return;
       case "content.delta":
-        if (event.notify !== false) {
-          await hooks.onLlmResponse(event.displayText ?? event.text, {
+        if (normalizedEvent.notify !== false) {
+          await hooks.onLlmResponse(normalizedEvent.displayText ?? normalizedEvent.text, {
             source: "llm",
-            streamId: event.itemId,
+            streamId: normalizedEvent.itemId,
             streamStatus: "partial",
           });
         }
         return;
       case "subagent.completed":
-        await hooks.onLlmResponse(event.text, {
+        await hooks.onLlmResponse(normalizedEvent.text, {
           source: "subagent",
-          ...(event.metadata ?? {}),
+          ...(normalizedEvent.metadata ?? {}),
         });
         return;
       case "plan.updated":
-        await hooks.onPlan(createPlanPresentationFromState(event.plan));
+        await hooks.onPlan(createPlanPresentationFromState(normalizedEvent.plan));
         return;
       case "usage.updated":
-        await updateUsage(event.usage, "replace");
+        await updateUsage(normalizedEvent.usage, "replace");
         return;
       case "session.started":
       case "session.updated":
@@ -391,13 +396,13 @@ export function createHarnessRuntimeEventDispatcher(input) {
       case "item.updated":
         return;
       case "item.completed":
-        if (event.item.kind === "assistant") {
-          const text = event.item.text ?? "";
+        if (normalizedEvent.item.kind === "assistant") {
+          const text = normalizedEvent.item.text ?? "";
           result.response = [{ type: "markdown", text }];
           if (text) {
             await hooks.onLlmResponse(text, {
               source: "llm",
-              streamId: event.item.id,
+              streamId: normalizedEvent.item.id,
               streamStatus: "final",
             });
           }
@@ -407,11 +412,16 @@ export function createHarnessRuntimeEventDispatcher(input) {
       case "extension.request":
         return;
       case "file-change.completed":
-        await hooks.onFileChange(event.change);
+        await hooks.onFileChange(normalizedEvent.change);
+        return;
+      case "model.rerouted":
+      case "config.warning":
+      case "runtime.warning":
+      case "runtime.error":
         return;
       default: {
         /** @type {never} */
-        const exhaustive = event;
+        const exhaustive = normalizedEvent;
         throw new Error(`Unsupported harness runtime event: ${JSON.stringify(exhaustive)}`);
       }
     }
