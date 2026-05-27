@@ -4,10 +4,10 @@ export {
   listActiveHarnessSessions,
   listHarnesses,
   listHarnessDrivers,
-	  listHarnessDriverStatuses,
-	  registerAcpAgentDriver,
-	  registerAcpAgentDrivers,
-	  registerHarnessDriver,
+  listHarnessDriverStatuses,
+  registerAcpAgentDriver,
+  registerAcpAgentDrivers,
+  registerHarnessDriver,
   reconcileHarnessInstances,
   resetHarnessRegistryForTests,
   resolveHarness,
@@ -15,6 +15,7 @@ export {
   resolveHarnessName,
   waitForAllHarnesses,
 } from "./registry.js";
+export { runAcpAdapterSmoke } from "./acp-adapter-smoke.js";
 export { createHarnessAdapterFromHarness } from "./adapter.js";
 export { createHarnessRuntimeEventDispatcher } from "./harness-runtime-event-dispatcher.js";
 export { createHarnessSessionDirectory, getHarnessSessionDirectory } from "./session-directory.js";

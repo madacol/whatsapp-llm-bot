@@ -676,6 +676,7 @@ type AcpAgentDefinition = {
   displayName?: string;
   command: string;
   args?: string[];
+  env?: Record<string, string>;
   docsUrl?: string;
   statusUrl?: string;
   supportsInstances?: boolean;

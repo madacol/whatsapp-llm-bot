@@ -1,6 +1,10 @@
 import { createAcpHarness, normalizeAcpHarnessConfig } from "./acp.js";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 const ACP_AGENT_ENV_KEY = "MADABOT_ACP_AGENTS_JSON";
+const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const LOCAL_PI_COMMAND = path.join(REPO_ROOT, "node_modules", ".bin", process.platform === "win32" ? "pi.cmd" : "pi");
 
 /**
  * @typedef {{
@@ -47,9 +51,20 @@ export const BUILT_IN_ACP_AGENT_DEFINITIONS = [
     sessionKind: "codex",
   },
   {
+    name: "claude",
+    displayName: "Claude",
+    command: "claude-agent-acp",
+    docsUrl: "https://github.com/agentclientprotocol/claude-agent-acp",
+    statusUrl: "https://status.anthropic.com/",
+    sessionKind: "claude",
+  },
+  {
     name: "pi",
     displayName: "Pi",
     command: "pi-acp",
+    env: {
+      PI_ACP_PI_COMMAND: LOCAL_PI_COMMAND,
+    },
     docsUrl: "https://github.com/svkozak/pi-acp",
     sessionKind: "pi",
   },
@@ -71,6 +86,24 @@ function normalizeArgs(value) {
   return Array.isArray(value)
     ? value.filter((entry) => typeof entry === "string")
     : [];
+}
+
+/**
+ * @param {unknown} value
+ * @returns {Record<string, string> | undefined}
+ */
+function normalizeEnv(value) {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+  /** @type {Record<string, string>} */
+  const env = {};
+  for (const [key, raw] of Object.entries(value)) {
+    if (typeof raw === "string") {
+      env[key] = raw;
+    }
+  }
+  return Object.keys(env).length > 0 ? env : undefined;
 }
 
 /**
@@ -109,11 +142,13 @@ export function normalizeAcpAgentDefinition(value) {
     : name;
   const command = requireNonEmptyString(value.command, "command");
   const sessionKind = normalizeSessionKind(value.sessionKind);
+  const env = normalizeEnv(value.env);
   return {
     name,
     displayName,
     command,
     args: normalizeArgs(value.args),
+    ...(env ? { env } : {}),
     ...(typeof value.docsUrl === "string" && value.docsUrl.trim()
       ? { docsUrl: value.docsUrl.trim() }
       : {}),
@@ -176,11 +211,15 @@ export function createAcpAgentDriver(definition) {
       if (!Array.isArray(config.args) && agent.args?.length) {
         normalized.args = [...agent.args];
       }
+      if (!isRecord(config.env) && agent.env) {
+        normalized.env = { ...agent.env };
+      }
       return normalized;
     },
     defaultConfig: () => ({
       command: agent.command,
       args: [...(agent.args ?? [])],
+      ...(agent.env ? { env: { ...agent.env } } : {}),
     }),
     createInstance: ({ config, displayName }) => ({
       harness: createAcpHarness({
