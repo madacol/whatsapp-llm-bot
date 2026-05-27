@@ -322,6 +322,7 @@ function createPresenceLeaseController({
  *   selectRuntime: import("../runtime/select-runtime.js").SelectRuntime;
  *   confirmRuntime: import("../runtime/confirm-runtime.js").ConfirmRuntime;
  *   reactionRuntime: import("../runtime/reaction-runtime.js").ReactionRuntime;
+ *   outboundStore?: import("../../store.js").Store;
  *   presenceConfig?: {
  *     defaultLeaseTtlMs?: number,
  *     pulseIntervalMs?: number,
@@ -339,6 +340,7 @@ export function createTurnIo({
   selectRuntime,
   confirmRuntime,
   reactionRuntime,
+  outboundStore,
   presenceConfig,
 }) {
   /**
@@ -395,6 +397,7 @@ export function createTurnIo({
         chatId,
         event,
         reactionRuntime,
+        ...(outboundStore ? { store: outboundStore } : {}),
       });
       refreshComposingAfterOutboundMessage();
       return handle;
@@ -405,6 +408,7 @@ export function createTurnIo({
         chatId,
         event,
         reactionRuntime,
+        ...(outboundStore ? { store: outboundStore } : {}),
       });
       refreshComposingAfterOutboundMessage();
       return handle;
@@ -458,7 +462,7 @@ export function createTurnIo({
  * @param {import("../runtime/select-runtime.js").SelectRuntime} selectRuntime
  * @param {import("../runtime/reaction-runtime.js").ReactionRuntime} reactionRuntime
  * @param {(msg: BaileysMessage, type: "buffer", opts: {}) => Promise<Buffer>} [downloadFn]
- * @param {{ getSocket?: () => import('@whiskeysockets/baileys').WASocket | null } | undefined} [ioOptions]
+ * @param {{ getSocket?: () => import('@whiskeysockets/baileys').WASocket | null, outboundStore?: import("../../store.js").Store } | undefined} [ioOptions]
  * @returns {Promise<ChatTurn | null>}
  */
 export async function buildIncomingTurn(
@@ -514,6 +518,7 @@ export async function buildIncomingTurn(
     selectRuntime,
     confirmRuntime,
     reactionRuntime,
+    outboundStore: ioOptions?.outboundStore,
   });
 
   /** @type {ChatTurn} */
@@ -548,7 +553,7 @@ export async function buildIncomingTurn(
  * @param {import("../runtime/select-runtime.js").SelectRuntime} selectRuntime
  * @param {import("../runtime/reaction-runtime.js").ReactionRuntime} reactionRuntime
  * @param {(msg: BaileysMessage, type: "buffer", opts: {}) => Promise<Buffer>} [downloadFn]
- * @param {{ getSocket?: () => import('@whiskeysockets/baileys').WASocket | null } | undefined} [ioOptions]
+ * @param {{ getSocket?: () => import('@whiskeysockets/baileys').WASocket | null, outboundStore?: import("../../store.js").Store } | undefined} [ioOptions]
  * @returns {Promise<void>}
  */
 export async function adaptIncomingMessage(
@@ -589,7 +594,7 @@ export async function adaptIncomingMessage(
  * @param {import("../runtime/select-runtime.js").SelectRuntime} selectRuntime
  * @param {import("../runtime/reaction-runtime.js").ReactionRuntime} reactionRuntime
  * @param {(msg: BaileysMessage, type: "buffer", opts: {}) => Promise<Buffer>} [downloadFn]
- * @param {{ getSocket?: () => import('@whiskeysockets/baileys').WASocket | null } | undefined} [ioOptions]
+ * @param {{ getSocket?: () => import('@whiskeysockets/baileys').WASocket | null, outboundStore?: import("../../store.js").Store } | undefined} [ioOptions]
  * @returns {Promise<void>}
  */
 export async function adaptIncomingMessages(

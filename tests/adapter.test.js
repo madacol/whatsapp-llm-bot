@@ -9,6 +9,7 @@ process.env.MODEL = "mock-model";
 
 import { createTestDb, seedChat } from "./helpers.js";
 import { setDb } from "../db.js";
+import { initStore } from "../store.js";
 import { readBlockBase64, readMediaBuffer } from "../media-store.js";
 
 /** @type {typeof import("../whatsapp/inbound/message-content.js").getMessageContent} */
@@ -697,6 +698,41 @@ describe("createTurnIo", () => {
 
     assert.equal(oldSocket.sentMessages.length, 0);
     assert.equal(newSocket.sentMessages.length, 1);
+  });
+
+  it("persists inbound reply edit handles in the outbound store", async () => {
+    const chatId = `durable-turn-io-${Date.now()}`;
+    const db = await createTestDb();
+    const store = await initStore(db);
+    const { sock, registry } = createMockSock();
+    const io = createTurnIo({
+      sock,
+      chatId,
+      message: /** @type {BaileysMessage} */ ({
+        key: {
+          remoteJid: chatId,
+          fromMe: false,
+          id: "incoming-msg-durable",
+        },
+      }),
+      senderIds: ["sender-1"],
+      isGroup: false,
+      selectRuntime: createSelectRuntime(),
+      confirmRuntime: registry,
+      reactionRuntime: createReactionRuntime(),
+      outboundStore: store,
+    });
+
+    const handle = await io.reply({
+      kind: "content",
+      source: "tool-result",
+      content: "Restart signal sent.",
+    });
+
+    assert.equal(typeof handle?.transportHandleId, "string");
+    const persisted = await store.getWhatsAppEditHandle(handle.transportHandleId);
+    assert.equal(persisted?.chat_id, chatId);
+    assert.equal(persisted?.message_kind, "text");
   });
 
   it("queues reply events persistently when the live socket is unavailable", async () => {
