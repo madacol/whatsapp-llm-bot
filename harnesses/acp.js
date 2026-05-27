@@ -233,6 +233,7 @@ export function createAcpHarness(options = {}) {
               sessionId,
               runConfig: turn.runConfig,
               hooks: turn.hooks,
+              dispatchRuntimeEventsToHooks: false,
               signal: abortController.signal,
               onActiveRun: ({ connection, sessionId }) => {
                 const active = activeRuns.get(turn.chatId);

@@ -1,3 +1,5 @@
+import { inferFileChangeKindFromUnifiedDiff, isFileChangeKind } from "./file-change-utils.js";
+
 /**
  * ACP runtime model.
  *
@@ -199,10 +201,18 @@ export function normalizeAcpUsage(usage) {
 function makeFileChangeEvent(block, toolCall, raw) {
   const oldText = typeof block.oldText === "string" ? block.oldText : undefined;
   const newText = typeof block.newText === "string" ? block.newText : undefined;
+  const diff = typeof block.diff === "string"
+    ? block.diff
+    : typeof block.diffText === "string" ? block.diffText : undefined;
+  const diffKind = inferFileChangeKindFromUnifiedDiff(diff);
   /** @type {"add" | "delete" | "update"} */
-  const kind = oldText === undefined || oldText === null
-    ? "add"
-    : newText === undefined || newText === null ? "delete" : "update";
+  const kind = isFileChangeKind(block.kind)
+    ? block.kind
+    : oldText === undefined && newText === undefined
+      ? diffKind ?? "update"
+      : oldText === undefined
+        ? "add"
+        : newText === undefined ? "delete" : "update";
   return {
     type: "file-change.completed",
     provider: "acp",
@@ -210,6 +220,7 @@ function makeFileChangeEvent(block, toolCall, raw) {
       path: /** @type {string} */ (block.path),
       kind,
       ...(typeof toolCall.title === "string" ? { summary: toolCall.title } : {}),
+      ...(diff !== undefined ? { diff } : {}),
       ...(oldText !== undefined ? { oldText } : {}),
       ...(newText !== undefined ? { newText } : {}),
     },

@@ -3,6 +3,7 @@ import path from "node:path";
 import { spawn } from "node:child_process";
 import { openAcpConnection } from "./acp-client.js";
 import { createAcpRawPayload, createAcpRuntimeModel, normalizeAcpUsage } from "./acp-events.js";
+import { buildUnifiedFileDiff } from "./file-change-utils.js";
 import { createHarnessRuntimeEventDispatcher } from "./harness-runtime-event-dispatcher.js";
 import { getSandboxEscapeRequest } from "./sandbox-approval.js";
 import { requestSandboxEscapeApproval } from "./sandbox-approval-coordinator.js";
@@ -19,6 +20,7 @@ import { requestSandboxEscapeApproval } from "./sandbox-approval-coordinator.js"
  *   env?: NodeJS.ProcessEnv,
  *   signal?: AbortSignal,
  *   emitEvent?: (event: import("./harness-runtime-events.js").HarnessRuntimeEvent) => void,
+ *   dispatchRuntimeEventsToHooks?: boolean,
  *   requestDecision?: (request: { id: string, title: string, labels: string[], descriptions: string[] }) => Promise<string | null>,
  *   onActiveRun?: (run: { connection: Awaited<ReturnType<typeof openAcpConnection>>, sessionId: string | null, capabilities: Record<string, unknown> }) => void | (() => void),
  * }} AcpRunInput
@@ -486,6 +488,7 @@ async function handleAcpWriteTextFile(message, options) {
   }
   await fs.mkdir(path.dirname(params.path), { recursive: true });
   await fs.writeFile(params.path, params.content, "utf8");
+  const diff = buildUnifiedFileDiff(params.path, oldText, params.content);
   await options.emitRuntimeEvent({
     type: "file-change.completed",
     provider: "acp",
@@ -493,6 +496,7 @@ async function handleAcpWriteTextFile(message, options) {
       path: params.path,
       summary: "ACP file write",
       kind: oldText === undefined ? "add" : "update",
+      ...(diff ? { diff } : {}),
       ...(oldText !== undefined ? { oldText } : {}),
       newText: params.content,
     },
@@ -869,6 +873,7 @@ async function emitSnapshotFileChanges(input) {
     if (oldText === newText) {
       continue;
     }
+    const diff = buildUnifiedFileDiff(filePath, oldText, newText);
     await input.emitRuntimeEvent({
       type: "file-change.completed",
       provider: "acp",
@@ -876,6 +881,7 @@ async function emitSnapshotFileChanges(input) {
         path: filePath,
         summary: "ACP file change",
         kind: oldText === undefined ? "add" : "update",
+        ...(diff ? { diff } : {}),
         ...(oldText !== undefined ? { oldText } : {}),
         newText,
       },
@@ -886,6 +892,7 @@ async function emitSnapshotFileChanges(input) {
     if (input.emittedPaths.has(filePath) || input.after.has(filePath)) {
       continue;
     }
+    const diff = buildUnifiedFileDiff(filePath, oldText, undefined);
     await input.emitRuntimeEvent({
       type: "file-change.completed",
       provider: "acp",
@@ -893,6 +900,7 @@ async function emitSnapshotFileChanges(input) {
         path: filePath,
         summary: "ACP file delete",
         kind: "delete",
+        ...(diff ? { diff } : {}),
         oldText,
       },
       raw: { source: "workdir-snapshot" },
@@ -1021,10 +1029,13 @@ export async function rollbackAcpSession(input) {
  */
 export async function startAcpRun(input) {
   const hooks = { ...DEFAULT_ACP_HOOKS, ...input.hooks };
+  const runtimeHooks = input.dispatchRuntimeEventsToHooks === false
+    ? {}
+    : input.hooks ?? {};
   const runtimeDispatcher = createHarnessRuntimeEventDispatcher({
     provider: "acp",
     messages: input.messages ?? [],
-    hooks,
+    hooks: runtimeHooks,
     workdir: input.runConfig?.workdir ?? null,
   });
   /** @type {Set<string>} */
