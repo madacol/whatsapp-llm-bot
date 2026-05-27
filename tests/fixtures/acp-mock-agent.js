@@ -206,6 +206,22 @@ async function handleMessage(message) {
   send({ id: message.id, result: {} });
 }
 
+const promptScenarios = [
+  { match: "permission", handle: handlePermissionPrompt },
+  { match: "terminal", handle: handleTerminalPrompt },
+  { match: "fs write", handle: handleFsWritePrompt },
+  { match: "fs update", handle: handleFsUpdatePrompt },
+  { match: "direct write", handle: handleDirectWritePrompt },
+  { match: "direct delete", handle: handleDirectDeletePrompt },
+  { match: "diff only update", handle: handleDiffOnlyUpdatePrompt },
+  { match: "diff only add", handle: handleDiffOnlyAddPrompt },
+  { match: "diff only delete", handle: handleDiffOnlyDeletePrompt },
+  { match: "mislabel existing add", handle: handleMislabelExistingAddPrompt },
+  { match: "old new no diff", handle: handleOldNewNoDiffPrompt },
+  { match: "config", handle: handleConfigPrompt },
+  { match: "session method", handle: handleSessionMethodPrompt },
+];
+
 /**
  * @param {Record<string, unknown>} message
  * @returns {Promise<void>}
@@ -214,279 +230,9 @@ async function handlePrompt(message) {
   const prompt = Array.isArray(message.params?.prompt)
     ? message.params.prompt.map((block) => block?.text).filter(Boolean).join("\n")
     : "";
-  if (prompt.includes("permission")) {
-    const permission = await request("session/request_permission", {
-      sessionId,
-      toolCall: {
-        toolCallId: "perm-1",
-        title: "Sensitive mock operation",
-        status: "pending",
-      },
-      options: [
-        { optionId: "allow-once", name: "Allow once", kind: "allow_once" },
-        { optionId: "reject-once", name: "Reject once", kind: "reject_once" },
-      ],
-    });
-    notify("session/update", {
-      sessionId,
-      update: {
-        sessionUpdate: "agent_message_chunk",
-        content: { type: "text", text: JSON.stringify(permission) },
-      },
-    });
-    send({ id: message.id, result: { sessionId, stopReason: "end_turn" } });
-    return;
-  }
-  if (prompt.includes("terminal")) {
-    const created = /** @type {{ terminalId?: string }} */ (await request("terminal/create", {
-      sessionId,
-      command: process.execPath,
-      args: ["-e", "process.stdout.write('terminal ok')"],
-      cwd: process.cwd(),
-      outputByteLimit: 10000,
-    }));
-    if (created.terminalId) {
-      await request("terminal/wait_for_exit", { sessionId, terminalId: created.terminalId });
-      const output = /** @type {{ output?: string }} */ (await request("terminal/output", { sessionId, terminalId: created.terminalId }));
-      await request("terminal/release", { sessionId, terminalId: created.terminalId });
-      notify("session/update", {
-        sessionId,
-        update: {
-          sessionUpdate: "agent_message_chunk",
-          content: { type: "text", text: output.output ?? "" },
-        },
-      });
-    }
-    send({ id: message.id, result: { sessionId, stopReason: "end_turn" } });
-    return;
-  }
-  if (prompt.includes("fs write")) {
-    const filePath = `${process.cwd()}/acp-fs-write.txt`;
-    await request("fs/write_text_file", {
-      sessionId,
-      path: filePath,
-      content: "written through acp fs",
-    });
-    notify("session/update", {
-      sessionId,
-      update: {
-        sessionUpdate: "agent_message_chunk",
-        content: { type: "text", text: "fs write done" },
-      },
-    });
-    send({ id: message.id, result: { sessionId, stopReason: "end_turn" } });
-    return;
-  }
-  if (prompt.includes("fs update")) {
-    const filePath = `${process.cwd()}/acp-fs-update.txt`;
-    await request("fs/write_text_file", {
-      sessionId,
-      path: filePath,
-      content: "new content through acp fs\n",
-    });
-    notify("session/update", {
-      sessionId,
-      update: {
-        sessionUpdate: "agent_message_chunk",
-        content: { type: "text", text: "fs update done" },
-      },
-    });
-    send({ id: message.id, result: { sessionId, stopReason: "end_turn" } });
-    return;
-  }
-  if (prompt.includes("direct write")) {
-    await import("node:fs/promises").then((fs) => fs.writeFile(`${process.cwd()}/direct-write.txt`, "direct write", "utf8"));
-    notify("session/update", {
-      sessionId,
-      update: {
-        sessionUpdate: "agent_message_chunk",
-        content: { type: "text", text: "direct write done" },
-      },
-    });
-    send({ id: message.id, result: { sessionId, stopReason: "end_turn" } });
-    return;
-  }
-  if (prompt.includes("direct delete")) {
-    await import("node:fs/promises").then((fs) => fs.unlink(`${process.cwd()}/direct-delete.txt`));
-    notify("session/update", {
-      sessionId,
-      update: {
-        sessionUpdate: "agent_message_chunk",
-        content: { type: "text", text: "direct delete done" },
-      },
-    });
-    send({ id: message.id, result: { sessionId, stopReason: "end_turn" } });
-    return;
-  }
-  if (prompt.includes("diff only update")) {
-    notify("session/update", {
-      sessionId,
-      update: {
-        sessionUpdate: "tool_call_update",
-        toolCallId: "diff-only-update",
-        title: "Edited diff-only-update.js",
-        status: "completed",
-        content: [{
-          type: "diff",
-          path: "diff-only-update.js",
-          diff: [
-            "--- a/diff-only-update.js",
-            "+++ b/diff-only-update.js",
-            "@@ -1 +1 @@",
-            "-export const value = 1;",
-            "+export const value = 2;",
-          ].join("\n"),
-        }],
-      },
-    });
-    notify("session/update", {
-      sessionId,
-      update: {
-        sessionUpdate: "agent_message_chunk",
-        content: { type: "text", text: "diff only update done" },
-      },
-    });
-    send({ id: message.id, result: { sessionId, stopReason: "end_turn" } });
-    return;
-  }
-  if (prompt.includes("diff only add")) {
-    notify("session/update", {
-      sessionId,
-      update: {
-        sessionUpdate: "tool_call_update",
-        toolCallId: "diff-only-add",
-        title: "Added diff-only-add.js",
-        status: "completed",
-        content: [{
-          type: "diff",
-          path: "diff-only-add.js",
-          diff: [
-            "--- /dev/null",
-            "+++ b/diff-only-add.js",
-            "@@ -0,0 +1 @@",
-            "+export const value = 1;",
-          ].join("\n"),
-        }],
-      },
-    });
-    notify("session/update", {
-      sessionId,
-      update: {
-        sessionUpdate: "agent_message_chunk",
-        content: { type: "text", text: "diff only add done" },
-      },
-    });
-    send({ id: message.id, result: { sessionId, stopReason: "end_turn" } });
-    return;
-  }
-  if (prompt.includes("diff only delete")) {
-    notify("session/update", {
-      sessionId,
-      update: {
-        sessionUpdate: "tool_call_update",
-        toolCallId: "diff-only-delete",
-        title: "Deleted diff-only-delete.js",
-        status: "completed",
-        content: [{
-          type: "diff",
-          path: "diff-only-delete.js",
-          diff: [
-            "--- a/diff-only-delete.js",
-            "+++ /dev/null",
-            "@@ -1 +0,0 @@",
-            "-export const value = 1;",
-          ].join("\n"),
-        }],
-      },
-    });
-    notify("session/update", {
-      sessionId,
-      update: {
-        sessionUpdate: "agent_message_chunk",
-        content: { type: "text", text: "diff only delete done" },
-      },
-    });
-    send({ id: message.id, result: { sessionId, stopReason: "end_turn" } });
-    return;
-  }
-  if (prompt.includes("mislabel existing add")) {
-    const filePath = `${process.cwd()}/existing-mislabel.js`;
-    await import("node:fs/promises").then((fs) => fs.writeFile(filePath, "export const value = 2;\n", "utf8"));
-    notify("session/update", {
-      sessionId,
-      update: {
-        sessionUpdate: "tool_call_update",
-        toolCallId: "mislabel-existing-add",
-        title: `Edit ${filePath}`,
-        status: "completed",
-        content: [{
-          type: "diff",
-          path: filePath,
-          newText: "export const value = 2;\n",
-        }],
-      },
-    });
-    notify("session/update", {
-      sessionId,
-      update: {
-        sessionUpdate: "agent_message_chunk",
-        content: { type: "text", text: "mislabel existing add done" },
-      },
-    });
-    send({ id: message.id, result: { sessionId, stopReason: "end_turn" } });
-    return;
-  }
-  if (prompt.includes("old new no diff")) {
-    const filePath = `${process.cwd()}/existing-no-diff.js`;
-    await import("node:fs/promises").then((fs) => fs.writeFile(filePath, "export const value = 2;\n", "utf8"));
-    notify("session/update", {
-      sessionId,
-      update: {
-        sessionUpdate: "tool_call_update",
-        toolCallId: "old-new-no-diff",
-        title: `Edit ${filePath}`,
-        status: "completed",
-        content: [{
-          type: "diff",
-          path: filePath,
-          oldText: "export const value = 1;\n",
-          newText: "export const value = 2;\n",
-        }],
-      },
-    });
-    notify("session/update", {
-      sessionId,
-      update: {
-        sessionUpdate: "agent_message_chunk",
-        content: { type: "text", text: "old new no diff done" },
-      },
-    });
-    send({ id: message.id, result: { sessionId, stopReason: "end_turn" } });
-    return;
-  }
-  if (prompt.includes("config")) {
-    notify("session/update", {
-      sessionId,
-      update: {
-        sessionUpdate: "agent_message_chunk",
-        content: {
-          type: "text",
-          text: `model=${configSelections.model ?? "default"} mode=${configSelections.mode ?? "code"} effort=${configSelections["reasoning-effort"] ?? "medium"}`,
-        },
-      },
-    });
-    send({ id: message.id, result: { sessionId, stopReason: "end_turn" } });
-    return;
-  }
-  if (prompt.includes("session method")) {
-    notify("session/update", {
-      sessionId,
-      update: {
-        sessionUpdate: "agent_message_chunk",
-        content: { type: "text", text: lastSessionOpenMethod ?? "unknown" },
-      },
-    });
-    send({ id: message.id, result: { sessionId, stopReason: "end_turn" } });
+  const scenario = promptScenarios.find((entry) => prompt.includes(entry.match));
+  if (scenario) {
+    await scenario.handle(message);
     return;
   }
   const sid = sessionId ?? "mock-session-1";
@@ -564,6 +310,201 @@ async function handlePrompt(message) {
       },
     },
   });
+}
+
+/**
+ * @param {Record<string, unknown>} message
+ * @returns {Promise<void>}
+ */
+async function handlePermissionPrompt(message) {
+  const permission = await request("session/request_permission", {
+    sessionId,
+    toolCall: {
+      toolCallId: "perm-1",
+      title: "Sensitive mock operation",
+      status: "pending",
+    },
+    options: [
+      { optionId: "allow-once", name: "Allow once", kind: "allow_once" },
+      { optionId: "reject-once", name: "Reject once", kind: "reject_once" },
+    ],
+  });
+  notifyText(JSON.stringify(permission));
+  endPrompt(message);
+}
+
+/**
+ * @param {Record<string, unknown>} message
+ * @returns {Promise<void>}
+ */
+async function handleTerminalPrompt(message) {
+  const created = /** @type {{ terminalId?: string }} */ (await request("terminal/create", {
+    sessionId,
+    command: process.execPath,
+    args: ["-e", "process.stdout.write('terminal ok')"],
+    cwd: process.cwd(),
+    outputByteLimit: 10000,
+  }));
+  if (created.terminalId) {
+    await request("terminal/wait_for_exit", { sessionId, terminalId: created.terminalId });
+    const output = /** @type {{ output?: string }} */ (await request("terminal/output", { sessionId, terminalId: created.terminalId }));
+    await request("terminal/release", { sessionId, terminalId: created.terminalId });
+    notifyText(output.output ?? "");
+  }
+  endPrompt(message);
+}
+
+/** @param {Record<string, unknown>} message */
+async function handleFsWritePrompt(message) {
+  await request("fs/write_text_file", {
+    sessionId,
+    path: `${process.cwd()}/acp-fs-write.txt`,
+    content: "written through acp fs",
+  });
+  notifyText("fs write done");
+  endPrompt(message);
+}
+
+/** @param {Record<string, unknown>} message */
+async function handleFsUpdatePrompt(message) {
+  await request("fs/write_text_file", {
+    sessionId,
+    path: `${process.cwd()}/acp-fs-update.txt`,
+    content: "new content through acp fs\n",
+  });
+  notifyText("fs update done");
+  endPrompt(message);
+}
+
+/** @param {Record<string, unknown>} message */
+async function handleDirectWritePrompt(message) {
+  await import("node:fs/promises").then((fs) => fs.writeFile(`${process.cwd()}/direct-write.txt`, "direct write", "utf8"));
+  notifyText("direct write done");
+  endPrompt(message);
+}
+
+/** @param {Record<string, unknown>} message */
+async function handleDirectDeletePrompt(message) {
+  await import("node:fs/promises").then((fs) => fs.unlink(`${process.cwd()}/direct-delete.txt`));
+  notifyText("direct delete done");
+  endPrompt(message);
+}
+
+/** @param {Record<string, unknown>} message */
+async function handleDiffOnlyUpdatePrompt(message) {
+  notifyDiff("diff-only-update", "Edited diff-only-update.js", "diff-only-update.js", [
+    "--- a/diff-only-update.js",
+    "+++ b/diff-only-update.js",
+    "@@ -1 +1 @@",
+    "-export const value = 1;",
+    "+export const value = 2;",
+  ].join("\n"));
+  notifyText("diff only update done");
+  endPrompt(message);
+}
+
+/** @param {Record<string, unknown>} message */
+async function handleDiffOnlyAddPrompt(message) {
+  notifyDiff("diff-only-add", "Added diff-only-add.js", "diff-only-add.js", [
+    "--- /dev/null",
+    "+++ b/diff-only-add.js",
+    "@@ -0,0 +1 @@",
+    "+export const value = 1;",
+  ].join("\n"));
+  notifyText("diff only add done");
+  endPrompt(message);
+}
+
+/** @param {Record<string, unknown>} message */
+async function handleDiffOnlyDeletePrompt(message) {
+  notifyDiff("diff-only-delete", "Deleted diff-only-delete.js", "diff-only-delete.js", [
+    "--- a/diff-only-delete.js",
+    "+++ /dev/null",
+    "@@ -1 +0,0 @@",
+    "-export const value = 1;",
+  ].join("\n"));
+  notifyText("diff only delete done");
+  endPrompt(message);
+}
+
+/** @param {Record<string, unknown>} message */
+async function handleMislabelExistingAddPrompt(message) {
+  const filePath = `${process.cwd()}/existing-mislabel.js`;
+  await import("node:fs/promises").then((fs) => fs.writeFile(filePath, "export const value = 2;\n", "utf8"));
+  notifyDiff("mislabel-existing-add", `Edit ${filePath}`, filePath, undefined, {
+    newText: "export const value = 2;\n",
+  });
+  notifyText("mislabel existing add done");
+  endPrompt(message);
+}
+
+/** @param {Record<string, unknown>} message */
+async function handleOldNewNoDiffPrompt(message) {
+  const filePath = `${process.cwd()}/existing-no-diff.js`;
+  await import("node:fs/promises").then((fs) => fs.writeFile(filePath, "export const value = 2;\n", "utf8"));
+  notifyDiff("old-new-no-diff", `Edit ${filePath}`, filePath, undefined, {
+    oldText: "export const value = 1;\n",
+    newText: "export const value = 2;\n",
+  });
+  notifyText("old new no diff done");
+  endPrompt(message);
+}
+
+/** @param {Record<string, unknown>} message */
+async function handleConfigPrompt(message) {
+  notifyText(`model=${configSelections.model ?? "default"} mode=${configSelections.mode ?? "code"} effort=${configSelections["reasoning-effort"] ?? "medium"}`);
+  endPrompt(message);
+}
+
+/** @param {Record<string, unknown>} message */
+async function handleSessionMethodPrompt(message) {
+  notifyText(lastSessionOpenMethod ?? "unknown");
+  endPrompt(message);
+}
+
+/**
+ * @param {string} text
+ */
+function notifyText(text) {
+  notify("session/update", {
+    sessionId,
+    update: {
+      sessionUpdate: "agent_message_chunk",
+      content: { type: "text", text },
+    },
+  });
+}
+
+/**
+ * @param {string} toolCallId
+ * @param {string} title
+ * @param {string} filePath
+ * @param {string | undefined} diff
+ * @param {{ oldText?: string, newText?: string }} [text]
+ */
+function notifyDiff(toolCallId, title, filePath, diff, text = {}) {
+  notify("session/update", {
+    sessionId,
+    update: {
+      sessionUpdate: "tool_call_update",
+      toolCallId,
+      title,
+      status: "completed",
+      content: [{
+        type: "diff",
+        path: filePath,
+        ...(diff ? { diff } : {}),
+        ...text,
+      }],
+    },
+  });
+}
+
+/**
+ * @param {Record<string, unknown>} message
+ */
+function endPrompt(message) {
+  send({ id: message.id, result: { sessionId, stopReason: "end_turn" } });
 }
 
 for await (const line of rl) {

@@ -134,6 +134,19 @@ describe("ACP harness", () => {
 
     assert.deepEqual(result.response, [{ type: "markdown", text: "session/new" }]);
     assert.equal(adapter.listSessions()[0]?.resumeCursor, "mock-session-1");
+    assert.deepEqual(adapter.listSessions()[0]?.capabilities, {
+      supportsResume: true,
+      supportsCancel: true,
+      supportsLiveInput: false,
+      supportsApprovals: true,
+      supportsWorkdir: true,
+      supportsSandboxConfig: true,
+      supportsModelSelection: true,
+      supportsReasoningEffort: true,
+      supportsSessionFork: false,
+      supportsRollback: false,
+      supportsUserInputRequests: true,
+    });
   });
 
   it("resumes loadSession-only ACP agents with session/load", async () => {

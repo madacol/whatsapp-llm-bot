@@ -2,7 +2,14 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { spawn } from "node:child_process";
 import { openAcpConnection } from "./acp-client.js";
+import { hasAcpSessionCapability, hasMadabotAcpSessionCapability, supportsAcpLoadSession } from "./acp-capabilities.js";
 import { createAcpRawPayload, createAcpRuntimeModel, normalizeAcpUsage } from "./acp-events.js";
+import {
+  emitAcpSnapshotFileChanges,
+  reconcileAcpFileChangeWithBaseline,
+  resolveAcpFileChangePath,
+  snapshotAcpWorkdir,
+} from "./acp-file-changes.js";
 import { buildUnifiedFileDiff } from "./file-change-utils.js";
 import { createHarnessRuntimeEventDispatcher } from "./harness-runtime-event-dispatcher.js";
 import { getSandboxEscapeRequest } from "./sandbox-approval.js";
@@ -53,9 +60,6 @@ const DEFAULT_ACP_HOOKS = {
   onAskUser: async () => "",
 };
 
-const MAX_SNAPSHOT_FILE_BYTES = 1024 * 1024;
-const SNAPSHOT_EXCLUDED_DIRS = new Set([".git", "node_modules", ".media", "coverage", "dist", "build"]);
-
 /**
  * @param {unknown} value
  * @returns {value is Record<string, unknown>}
@@ -98,37 +102,6 @@ function readAgentCapabilities(initializeResult) {
  */
 function paramsRecord(value) {
   return isRecord(value) ? value : {};
-}
-
-/**
- * @param {Record<string, unknown>} capabilities
- * @param {string} name
- * @returns {boolean}
- */
-function hasSessionCapability(capabilities, name) {
-  const sessionCapabilities = isRecord(capabilities.sessionCapabilities) ? capabilities.sessionCapabilities : null;
-  const rfdSessionCapabilities = isRecord(capabilities.session) ? capabilities.session : null;
-  return isRecord(sessionCapabilities?.[name]) || isRecord(rfdSessionCapabilities?.[name]);
-}
-
-/**
- * @param {Record<string, unknown>} capabilities
- * @param {string} name
- * @returns {boolean}
- */
-function hasMadabotSessionCapability(capabilities, name) {
-  const meta = isRecord(capabilities._meta) ? capabilities._meta : null;
-  const madabot = isRecord(meta?.madabot) ? meta.madabot : null;
-  const session = isRecord(madabot?.sessionCapabilities) ? madabot.sessionCapabilities : null;
-  return session?.[name] === true || isRecord(session?.[name]);
-}
-
-/**
- * @param {Record<string, unknown>} capabilities
- * @returns {boolean}
- */
-function supportsLoadSession(capabilities) {
-  return capabilities.loadSession === true;
 }
 
 /**
@@ -786,166 +759,6 @@ async function applySessionConfigOptions(input) {
 }
 
 /**
- * @param {string | null | undefined} workdir
- * @returns {Promise<Map<string, string> | null>}
- */
-async function snapshotWorkdir(workdir) {
-  if (typeof workdir !== "string" || !workdir.trim()) {
-    return null;
-  }
-  const root = path.resolve(workdir);
-  /** @type {Map<string, string>} */
-  const snapshot = new Map();
-  await collectSnapshotFiles(root, snapshot);
-  return snapshot;
-}
-
-/**
- * @param {string} currentPath
- * @param {Map<string, string>} snapshot
- * @returns {Promise<void>}
- */
-async function collectSnapshotFiles(currentPath, snapshot) {
-  let entries;
-  try {
-    entries = await fs.readdir(currentPath, { withFileTypes: true });
-  } catch {
-    return;
-  }
-  for (const entry of entries) {
-    if (entry.isDirectory()) {
-      if (!SNAPSHOT_EXCLUDED_DIRS.has(entry.name)) {
-        await collectSnapshotFiles(path.join(currentPath, entry.name), snapshot);
-      }
-      continue;
-    }
-    if (!entry.isFile()) {
-      continue;
-    }
-    const filePath = path.join(currentPath, entry.name);
-    try {
-      const stat = await fs.stat(filePath);
-      if (stat.size > MAX_SNAPSHOT_FILE_BYTES) {
-        continue;
-      }
-      const content = await fs.readFile(filePath, "utf8");
-      if (!content.includes("\0")) {
-        snapshot.set(filePath, content);
-      }
-    } catch {
-      // Snapshotting is a best-effort display fallback.
-    }
-  }
-}
-
-/**
- * @param {string | null | undefined} workdir
- * @param {string} filePath
- * @returns {string}
- */
-function resolveFileChangePath(workdir, filePath) {
-  return path.resolve(workdir ?? process.cwd(), filePath);
-}
-
-/**
- * @param {import("./harness-runtime-events.js").HarnessRuntimeEvent} event
- * @param {Map<string, string> | null} beforeSnapshot
- * @param {string | null | undefined} workdir
- * @returns {import("./harness-runtime-events.js").HarnessRuntimeEvent}
- */
-function reconcileFileChangeWithBaseline(event, beforeSnapshot, workdir) {
-  if (event.type !== "file-change.completed" || !beforeSnapshot) {
-    return event;
-  }
-  const resolvedPath = resolveFileChangePath(workdir, event.change.path);
-  const baselineText = beforeSnapshot.get(resolvedPath);
-  if (baselineText === undefined) {
-    return event;
-  }
-  const missingOldText = event.change.oldText === undefined;
-  const mislabeledAdd = event.change.kind === "add";
-  const oldText = missingOldText ? baselineText : event.change.oldText;
-  const newText = event.change.kind === "delete" ? undefined : event.change.newText;
-  const needsDiff = event.change.diff === undefined
-    && (event.change.kind === "delete" || typeof newText === "string");
-  if (!missingOldText && !mislabeledAdd && !needsDiff) {
-    return event;
-  }
-
-  const correctedKind = event.change.kind === "delete" ? "delete" : "update";
-  const diff = event.change.diff ?? buildUnifiedFileDiff(
-    resolvedPath,
-    oldText,
-    newText,
-  );
-  return {
-    ...event,
-    change: {
-      ...event.change,
-      kind: correctedKind,
-      oldText,
-      ...(diff ? { diff } : {}),
-    },
-  };
-}
-
-/**
- * @param {{
- *   before: Map<string, string> | null,
- *   after: Map<string, string> | null,
- *   emittedPaths: Set<string>,
- *   emitRuntimeEvent: (event: import("./harness-runtime-events.js").HarnessRuntimeEvent) => Promise<void>,
- * }} input
- * @returns {Promise<void>}
- */
-async function emitSnapshotFileChanges(input) {
-  if (!input.before || !input.after) {
-    return;
-  }
-  for (const [filePath, newText] of input.after) {
-    if (input.emittedPaths.has(filePath)) {
-      continue;
-    }
-    const oldText = input.before.get(filePath);
-    if (oldText === newText) {
-      continue;
-    }
-    const diff = buildUnifiedFileDiff(filePath, oldText, newText);
-    await input.emitRuntimeEvent({
-      type: "file-change.completed",
-      provider: "acp",
-      change: {
-        path: filePath,
-        summary: "ACP file change",
-        kind: oldText === undefined ? "add" : "update",
-        ...(diff ? { diff } : {}),
-        ...(oldText !== undefined ? { oldText } : {}),
-        newText,
-      },
-      raw: { source: "workdir-snapshot" },
-    });
-  }
-  for (const [filePath, oldText] of input.before) {
-    if (input.emittedPaths.has(filePath) || input.after.has(filePath)) {
-      continue;
-    }
-    const diff = buildUnifiedFileDiff(filePath, oldText, undefined);
-    await input.emitRuntimeEvent({
-      type: "file-change.completed",
-      provider: "acp",
-      change: {
-        path: filePath,
-        summary: "ACP file delete",
-        kind: "delete",
-        ...(diff ? { diff } : {}),
-        oldText,
-      },
-      raw: { source: "workdir-snapshot" },
-    });
-  }
-}
-
-/**
  * @param {AcpRunInput} input
  * @param {ReturnType<typeof createHarnessRuntimeEventDispatcher>} runtimeDispatcher
  * @param {unknown} promptResult
@@ -1007,7 +820,7 @@ async function openInitializedAcpConnection(input, handleRequest = async () => (
 export async function forkAcpSession(input) {
   const { connection, capabilities } = await openInitializedAcpConnection(input, async () => ({}));
   try {
-    if (!hasSessionCapability(capabilities, "fork")) {
+    if (!hasAcpSessionCapability(capabilities, "fork")) {
       throw new Error("ACP agent does not advertise session/fork capability.");
     }
     const forked = await connection.sendRequest("session/fork", {
@@ -1031,7 +844,7 @@ export async function forkAcpSession(input) {
 export async function readAcpSession(input) {
   const { connection, capabilities } = await openInitializedAcpConnection(input, async () => ({}));
   try {
-    if (!hasSessionCapability(capabilities, "read") && !hasMadabotSessionCapability(capabilities, "read")) {
+    if (!hasAcpSessionCapability(capabilities, "read") && !hasMadabotAcpSessionCapability(capabilities, "read")) {
       return null;
     }
     return await connection.sendRequest("session/read", {
@@ -1050,7 +863,7 @@ export async function readAcpSession(input) {
 export async function rollbackAcpSession(input) {
   const { connection, capabilities } = await openInitializedAcpConnection(input, async () => ({}));
   try {
-    if (!hasSessionCapability(capabilities, "rollback") && !hasMadabotSessionCapability(capabilities, "rollback")) {
+    if (!hasAcpSessionCapability(capabilities, "rollback") && !hasMadabotAcpSessionCapability(capabilities, "rollback")) {
       return null;
     }
     return await connection.sendRequest("session/rollback", {
@@ -1064,7 +877,7 @@ export async function rollbackAcpSession(input) {
 
 /**
  * @param {AcpRunInput} input
- * @returns {Promise<{ result: AgentResult, sessionId: string | null }>}
+ * @returns {Promise<{ result: AgentResult, sessionId: string | null, capabilities: Record<string, unknown> }>}
  */
 export async function startAcpRun(input) {
   const hooks = { ...DEFAULT_ACP_HOOKS, ...input.hooks };
@@ -1077,14 +890,14 @@ export async function startAcpRun(input) {
     hooks: runtimeHooks,
     workdir: input.runConfig?.workdir ?? null,
   });
-  const beforeSnapshot = await snapshotWorkdir(input.runConfig?.workdir);
+  const beforeSnapshot = await snapshotAcpWorkdir(input.runConfig?.workdir);
   /** @type {Set<string>} */
   const emittedFileChangePaths = new Set();
   const runtimeModel = createAcpRuntimeModel();
   const emitRuntimeEvent = async (/** @type {import("./harness-runtime-events.js").HarnessRuntimeEvent} */ event) => {
-    const reconciled = reconcileFileChangeWithBaseline(event, beforeSnapshot, input.runConfig?.workdir);
+    const reconciled = reconcileAcpFileChangeWithBaseline(event, beforeSnapshot, input.runConfig?.workdir);
     if (reconciled.type === "file-change.completed") {
-      emittedFileChangePaths.add(resolveFileChangePath(input.runConfig?.workdir, reconciled.change.path));
+      emittedFileChangePaths.add(resolveAcpFileChangePath(input.runConfig?.workdir, reconciled.change.path));
     }
     input.emitEvent?.(reconciled);
     await runtimeDispatcher.handleEvent(reconciled);
@@ -1127,14 +940,14 @@ export async function startAcpRun(input) {
 
   try {
     if (sessionId) {
-      if (hasSessionCapability(capabilities, "resume")) {
+      if (hasAcpSessionCapability(capabilities, "resume")) {
         const resumed = await connection.sendRequest("session/resume", {
           sessionId,
           ...buildSessionParams(input.runConfig),
         });
         sessionId = readSessionId(resumed) ?? sessionId;
         configOptions = extractConfigOptions(resumed);
-      } else if (supportsLoadSession(capabilities)) {
+      } else if (supportsAcpLoadSession(capabilities)) {
         const loaded = await connection.sendRequest("session/load", {
           sessionId,
           ...buildSessionParams(input.runConfig),
@@ -1166,8 +979,8 @@ export async function startAcpRun(input) {
     for (const event of runtimeModel.flushAssistantSegment()) {
       await emitRuntimeEvent(event);
     }
-    const afterSnapshot = await snapshotWorkdir(input.runConfig?.workdir);
-    await emitSnapshotFileChanges({
+    const afterSnapshot = await snapshotAcpWorkdir(input.runConfig?.workdir);
+    await emitAcpSnapshotFileChanges({
       before: beforeSnapshot,
       after: afterSnapshot,
       emittedPaths: emittedFileChangePaths,
@@ -1177,6 +990,7 @@ export async function startAcpRun(input) {
     return {
       result: runtimeDispatcher.result,
       sessionId,
+      capabilities,
     };
   } finally {
     unregisterActiveRun?.();
