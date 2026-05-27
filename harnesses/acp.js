@@ -2,6 +2,7 @@ import { createHarnessEventStreamController } from "./adapter.js";
 import { deriveAcpHarnessCapabilities, hasAcpSessionCapability } from "./acp-capabilities.js";
 import {
   forkAcpSession,
+  getAcpInitialSessionConfigOptions,
   getAcpSessionConfigOptions,
   readAcpSession,
   rollbackAcpSession,
@@ -475,6 +476,37 @@ function configOptionValues(option) {
 }
 
 /**
+ * @param {Record<string, unknown>[]} options
+ * @param {"model" | "thought_level" | "mode"} category
+ * @returns {Record<string, unknown> | null}
+ */
+function findConfigOptionByCategory(options, category) {
+  const categoryMatch = options.find((option) => option.category === category);
+  if (categoryMatch) {
+    return categoryMatch;
+  }
+  const fallbackNames = category === "model"
+    ? ["model"]
+    : category === "mode" ? ["mode"] : ["effort", "reasoning", "thought"];
+  return options.find((option) => {
+    const id = typeof option.id === "string" ? option.id.toLowerCase() : "";
+    const name = typeof option.name === "string" ? option.name.toLowerCase() : "";
+    return fallbackNames.some((candidate) => id.includes(candidate) || name.includes(candidate));
+  }) ?? null;
+}
+
+/**
+ * @param {string | null} sessionId
+ * @param {{ command: string, args: string[] }} commandSpec
+ * @returns {Promise<Record<string, unknown>[]>}
+ */
+async function loadAcpCommandConfigOptions(sessionId, commandSpec) {
+  return sessionId
+    ? getAcpSessionConfigOptions({ ...commandSpec, sessionId })
+    : getAcpInitialSessionConfigOptions(commandSpec);
+}
+
+/**
  * @param {Record<string, unknown>} option
  * @returns {string}
  */
@@ -508,7 +540,7 @@ function resolveCommandConfigValue(option, desired) {
 /**
  * @param {Record<string, unknown>} config
  * @param {string} configId
- * @param {string | boolean} value
+ * @param {string | boolean | null} value
  * @returns {Record<string, unknown>}
  */
 function buildConfigValuesPatch(config, configId, value) {
@@ -519,6 +551,34 @@ function buildConfigValuesPatch(config, configId, value) {
       [configId]: value,
     },
   };
+}
+
+/**
+ * @param {{
+ *   input: HarnessCommandContext,
+ *   options: { harnessName: string, label: string, commandSpec: { command: string, args: string[] } },
+ *   configId: string,
+ *   value: string | boolean | null,
+ *   currentSessionId: string | null,
+ * }} params
+ * @returns {Promise<Record<string, unknown>[]>}
+ */
+async function persistAcpCommandConfigValue(params) {
+  const activeConfig = await getActiveHarnessConfig(params.input.chatId, params.options.harnessName);
+  await updateActiveHarnessConfig(
+    params.input.chatId,
+    params.options.harnessName,
+    buildConfigValuesPatch(activeConfig, params.configId, params.value),
+  );
+  if (!params.currentSessionId || params.value === null) {
+    return [];
+  }
+  return setAcpSessionConfigOption({
+    ...params.options.commandSpec,
+    sessionId: params.currentSessionId,
+    configId: params.configId,
+    value: params.value,
+  });
 }
 
 /**
@@ -590,14 +650,7 @@ function createGenericAcpCommandHandler(options) {
     const configMatch = trimmed.match(/^config(?:\s+(\S+)(?:\s+(.+))?)?$/i);
     if (configMatch) {
       const currentSessionId = input.chatInfo?.harness_session_id ?? null;
-      if (!currentSessionId) {
-        await input.context.reply(contentEvent("tool-result", `Start a ${options.label} ACP session before using /config.`));
-        return true;
-      }
-      const configOptions = await getAcpSessionConfigOptions({
-        ...options.commandSpec,
-        sessionId: currentSessionId,
-      });
+      const configOptions = await loadAcpCommandConfigOptions(currentSessionId, options.commandSpec);
       if (configOptions.length === 0) {
         await input.context.reply(contentEvent("tool-result", `${options.label} did not expose ACP config options for this session.`));
         return true;
@@ -630,14 +683,13 @@ function createGenericAcpCommandHandler(options) {
         await input.context.reply(contentEvent("tool-result", `Unknown value for \`${configId}\`.`));
         return true;
       }
-      const updatedOptions = await setAcpSessionConfigOption({
-        ...options.commandSpec,
-        sessionId: currentSessionId,
+      const updatedOptions = await persistAcpCommandConfigValue({
+        input,
+        options,
         configId: option.id,
         value,
+        currentSessionId,
       });
-      const activeConfig = await getActiveHarnessConfig(input.chatId, options.harnessName);
-      await updateActiveHarnessConfig(input.chatId, options.harnessName, buildConfigValuesPatch(activeConfig, option.id, value));
       const updated = updatedOptions.find((candidate) => candidate.id === option.id) ?? { ...option, currentValue: value };
       await input.context.reply(contentEvent("tool-result", `${options.label} config updated:\n${formatConfigOption(updated)}`));
       return true;
@@ -666,10 +718,36 @@ function createGenericAcpCommandHandler(options) {
     const modelMatch = trimmed.match(/^model(?:\s+(.+))?$/i);
     if (modelMatch) {
       const arg = modelMatch[1]?.trim() ?? null;
+      const currentSessionId = input.chatInfo?.harness_session_id ?? null;
+      const configOptions = await loadAcpCommandConfigOptions(currentSessionId, options.commandSpec).catch(() => []);
+      const modelOption = findConfigOptionByCategory(configOptions, "model");
       if (!arg) {
         const config = await getActiveHarnessConfig(input.chatId, options.harnessName);
         const model = typeof config.model === "string" ? config.model : "default";
         const effort = typeof config.reasoningEffort === "string" ? config.reasoningEffort : "default";
+        const values = modelOption ? configOptionValues(modelOption) : [];
+        if (values.length > 0 && typeof modelOption?.id === "string") {
+          const selected = await input.context.select(`Choose ${options.label} model`, values, {
+            deleteOnSelect: true,
+            currentId: model,
+          });
+          const value = resolveCommandConfigValue(modelOption, selected);
+          if (value !== null) {
+            await persistAcpCommandConfigValue({
+              input,
+              options,
+              configId: modelOption.id,
+              value,
+              currentSessionId,
+            });
+            await updateActiveHarnessConfig(input.chatId, options.harnessName, {
+              model: value === "default" ? null : String(value),
+            });
+          }
+          const updated = await getActiveHarnessConfig(input.chatId, options.harnessName);
+          await input.context.reply(contentEvent("tool-result", `${options.label} model: \`${typeof updated.model === "string" ? updated.model : "default"}\`\n${options.label} effort: \`${effort}\``));
+          return true;
+        }
         await input.context.reply(contentEvent("tool-result", `${options.label} model: \`${model}\`\n${options.label} effort: \`${effort}\``));
         return true;
       }
@@ -687,8 +765,34 @@ function createGenericAcpCommandHandler(options) {
       }
       const modelReset = arg.toLowerCase();
       if (modelReset === "off" || modelReset === "default" || modelReset === "none") {
+        if (modelOption && typeof modelOption.id === "string") {
+          await persistAcpCommandConfigValue({
+            input,
+            options,
+            configId: modelOption.id,
+            value: null,
+            currentSessionId,
+          });
+        }
         await updateActiveHarnessConfig(input.chatId, options.harnessName, { model: null });
         await input.context.reply(contentEvent("tool-result", `${options.label} model reset to default.`));
+        return true;
+      }
+      if (modelOption && typeof modelOption.id === "string") {
+        const value = resolveCommandConfigValue(modelOption, arg);
+        if (value === null) {
+          await input.context.reply(contentEvent("tool-result", `Unknown ${options.label} model \`${arg}\`.`));
+          return true;
+        }
+        await persistAcpCommandConfigValue({
+          input,
+          options,
+          configId: modelOption.id,
+          value,
+          currentSessionId,
+        });
+        await updateActiveHarnessConfig(input.chatId, options.harnessName, { model: String(value) });
+        await input.context.reply(contentEvent("tool-result", `${options.label} model set to \`${value}\``));
         return true;
       }
       await updateActiveHarnessConfig(input.chatId, options.harnessName, { model: arg });
@@ -705,13 +809,32 @@ function createGenericAcpCommandHandler(options) {
           await input.context.reply(contentEvent("tool-result", `${options.label} permissions reset to default.`));
           return true;
         }
-        await updateActiveHarnessConfig(input.chatId, options.harnessName, { sandboxMode: arg });
-        await input.context.reply(contentEvent("tool-result", `${options.label} permissions set to \`${arg}\``));
+        const normalized = arg === "write" || arg === "workspace" ? "workspace-write"
+          : arg === "readonly" || arg === "read" ? "read-only"
+            : arg === "full" || arg === "full-access" ? "danger-full-access" : arg;
+        if (!["read-only", "workspace-write", "danger-full-access"].includes(normalized)) {
+          await input.context.reply(contentEvent("tool-result", `Unknown ${options.label} permissions mode \`${arg}\`. Use: read-only, workspace-write, danger-full-access.`));
+          return true;
+        }
+        await updateActiveHarnessConfig(input.chatId, options.harnessName, { sandboxMode: normalized });
+        await input.context.reply(contentEvent("tool-result", `${options.label} permissions set to \`${normalized}\``));
         return true;
       }
       const config = await getActiveHarnessConfig(input.chatId, options.harnessName);
       const permissions = typeof config.sandboxMode === "string" ? config.sandboxMode : "default";
-      await input.context.reply(contentEvent("tool-result", `${options.label} permissions: \`${permissions}\``));
+      const selected = await input.context.select(`Choose ${options.label} permissions`, [
+        { id: "workspace-write", label: "Workspace Write" },
+        { id: "read-only", label: "Read Only" },
+        { id: "danger-full-access", label: "Full Access" },
+        { id: "off", label: "Default" },
+      ], { deleteOnSelect: true, currentId: permissions });
+      if (selected) {
+        await updateActiveHarnessConfig(input.chatId, options.harnessName, {
+          sandboxMode: selected === "off" ? null : selected,
+        });
+      }
+      const updated = await getActiveHarnessConfig(input.chatId, options.harnessName);
+      await input.context.reply(contentEvent("tool-result", `${options.label} permissions: \`${typeof updated.sandboxMode === "string" ? updated.sandboxMode : "default"}\``));
       return true;
     }
 
@@ -724,13 +847,30 @@ function createGenericAcpCommandHandler(options) {
           await input.context.reply(contentEvent("tool-result", `${options.label} approval policy reset to default.`));
           return true;
         }
+        if (!["untrusted", "on-failure", "on-request", "never"].includes(arg)) {
+          await input.context.reply(contentEvent("tool-result", `Unknown ${options.label} approval policy \`${arg}\`. Use: untrusted, on-failure, on-request, never.`));
+          return true;
+        }
         await updateActiveHarnessConfig(input.chatId, options.harnessName, { approvalPolicy: arg });
         await input.context.reply(contentEvent("tool-result", `${options.label} approval policy set to \`${arg}\``));
         return true;
       }
       const config = await getActiveHarnessConfig(input.chatId, options.harnessName);
       const approval = typeof config.approvalPolicy === "string" ? config.approvalPolicy : "default";
-      await input.context.reply(contentEvent("tool-result", `${options.label} approval policy: \`${approval}\``));
+      const selected = await input.context.select(`Choose ${options.label} approval policy`, [
+        { id: "on-request", label: "On Request" },
+        { id: "on-failure", label: "On Failure" },
+        { id: "untrusted", label: "Untrusted" },
+        { id: "never", label: "Never" },
+        { id: "off", label: "Default" },
+      ], { deleteOnSelect: true, currentId: approval });
+      if (selected) {
+        await updateActiveHarnessConfig(input.chatId, options.harnessName, {
+          approvalPolicy: selected === "off" ? null : selected,
+        });
+      }
+      const updated = await getActiveHarnessConfig(input.chatId, options.harnessName);
+      await input.context.reply(contentEvent("tool-result", `${options.label} approval policy: \`${typeof updated.approvalPolicy === "string" ? updated.approvalPolicy : "default"}\``));
       return true;
     }
 

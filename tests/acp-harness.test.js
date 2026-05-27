@@ -512,6 +512,93 @@ describe("ACP harness", () => {
     }
   });
 
+  it("reverts denied protected direct writes before transport file-change delivery", async () => {
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "acp-protected-direct-"));
+    const harness = createAcpHarness({
+      config: {
+        command: process.execPath,
+        args: [path.join(__dirname, "fixtures", "acp-mock-agent.js")],
+      },
+    });
+    const adapter = harness.createAdapter?.({
+      name: "acp",
+      instanceId: "test",
+      continuationKey: "acp:test",
+    });
+    assert.ok(adapter);
+
+    /** @type {Array<Record<string, unknown>>} */
+    const events = [];
+    const unsubscribe = adapter.subscribeEvents?.((event) => {
+      events.push(event);
+    });
+    try {
+      await adapter.startSession({
+        chatId: "protected-direct-chat",
+        runConfig: { workdir: tempDir, protectedPaths: ["direct-write.txt"] },
+      });
+      await adapter.sendTurn({
+        chatId: "protected-direct-chat",
+        input: "direct write",
+        messages: [{ role: "user", content: [{ type: "text", text: "direct write" }] }],
+        runConfig: { workdir: tempDir, protectedPaths: ["direct-write.txt"] },
+        hooks: {
+          onAskUser: async () => "Deny",
+        },
+      });
+
+      await assert.rejects(fs.readFile(path.join(tempDir, "direct-write.txt"), "utf8"));
+      assert.equal(events.some((event) => event.type === "file-change.completed"), false);
+      assert.ok(events.some((event) => event.type === "tool.failed"));
+    } finally {
+      unsubscribe?.();
+      await fs.rm(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it("allows approved protected ACP fs writes and emits the file change", async () => {
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "acp-protected-fs-"));
+    const harness = createAcpHarness({
+      config: {
+        command: process.execPath,
+        args: [path.join(__dirname, "fixtures", "acp-mock-agent.js")],
+      },
+    });
+    const adapter = harness.createAdapter?.({
+      name: "acp",
+      instanceId: "test",
+      continuationKey: "acp:test",
+    });
+    assert.ok(adapter);
+
+    /** @type {Array<Record<string, unknown>>} */
+    const events = [];
+    const unsubscribe = adapter.subscribeEvents?.((event) => {
+      events.push(event);
+    });
+    try {
+      await adapter.startSession({
+        chatId: "protected-fs-chat",
+        runConfig: { workdir: tempDir, protectedPaths: ["acp-fs-write.txt"] },
+      });
+      await adapter.sendTurn({
+        chatId: "protected-fs-chat",
+        input: "fs write",
+        messages: [{ role: "user", content: [{ type: "text", text: "fs write" }] }],
+        runConfig: { workdir: tempDir, protectedPaths: ["acp-fs-write.txt"] },
+        hooks: {
+          onAskUser: async () => "Allow once",
+        },
+      });
+
+      assert.equal(await fs.readFile(path.join(tempDir, "acp-fs-write.txt"), "utf8"), "written through acp fs");
+      assert.equal(events.filter((event) => event.type === "file-change.completed").length, 1);
+    } finally {
+      unsubscribe?.();
+      await fs.rm(tempDir, { recursive: true, force: true });
+    }
+  });
+
   it("preserves ACP diff-only file change kinds and unified diffs", async () => {
     for (const [prompt, expectedKind, expectedPath] of [
       ["diff only add", "add", "diff-only-add.js"],
