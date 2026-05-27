@@ -50,8 +50,8 @@
  *   injectMessage: (chatId: string | HarnessSessionRef, text: string) => Promise<boolean>,
  *   stopSession: (chatId: string | HarnessSessionRef) => Promise<boolean>,
  *   listSessions: () => HarnessRuntimeSession[],
- *   readThread: (sessionId: string) => Promise<null>,
- *   rollbackThread: (sessionId: string, numTurns: number) => Promise<null>,
+ *   readThread: (sessionId: string) => Promise<unknown | null>,
+ *   rollbackThread: (sessionId: string, numTurns: number) => Promise<unknown | null>,
  *   streamEvents: AsyncIterable<{ type: string, provider: string } & Record<string, unknown>>,
  *   subscribeEvents?: (handler: (event: { type: string, provider: string } & Record<string, unknown>) => void | Promise<void>) => () => void,
  * }} HarnessAdapter

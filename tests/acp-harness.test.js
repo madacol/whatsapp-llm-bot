@@ -1,5 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createAcpHarness } from "../harnesses/acp.js";
@@ -106,5 +108,177 @@ describe("ACP harness", () => {
       assert.deepEqual(pushed, [{ id: "mock-session-1", kind, label: `${label} ACP session` }]);
       assert.match(replies[0] ?? "", new RegExp(`Forked ${label} ACP session`));
     }
+  });
+
+  it("bridges ACP permission requests to chat-facing choices", async () => {
+    const harness = createAcpHarness({
+      config: {
+        command: process.execPath,
+        args: [path.join(__dirname, "fixtures", "acp-mock-agent.js")],
+      },
+    });
+    const adapter = harness.createAdapter?.({
+      name: "acp",
+      instanceId: "test",
+      continuationKey: "acp:test",
+    });
+    assert.ok(adapter);
+
+    /** @type {Array<{ question: string, options: string[], descriptions?: string[] }>} */
+    const prompts = [];
+    await adapter.startSession({ chatId: "permission-chat" });
+    const result = await adapter.sendTurn({
+      chatId: "permission-chat",
+      input: "permission",
+      messages: [{ role: "user", content: [{ type: "text", text: "permission" }] }],
+      hooks: {
+        onAskUser: async (question, options, _preamble, descriptions) => {
+          prompts.push({ question, options, descriptions });
+          return "Allow once";
+        },
+      },
+    });
+
+    assert.equal(prompts[0]?.question, "Allow *Sensitive mock operation*?");
+    assert.deepEqual(prompts[0]?.options, ["Allow once", "Reject once"]);
+    assert.deepEqual(result.response, [{
+      type: "markdown",
+      text: "{\"outcome\":{\"outcome\":\"selected\",\"optionId\":\"allow-once\"}}",
+    }]);
+  });
+
+  it("executes ACP terminal requests and emits command events", async () => {
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "acp-terminal-"));
+    const harness = createAcpHarness({
+      config: {
+        command: process.execPath,
+        args: [path.join(__dirname, "fixtures", "acp-mock-agent.js")],
+      },
+    });
+    const adapter = harness.createAdapter?.({
+      name: "acp",
+      instanceId: "test",
+      continuationKey: "acp:test",
+    });
+    assert.ok(adapter);
+
+    /** @type {Array<Record<string, unknown>>} */
+    const events = [];
+    const unsubscribe = adapter.subscribeEvents?.((event) => {
+      events.push(event);
+    });
+    try {
+      await adapter.startSession({ chatId: "terminal-chat", runConfig: { workdir: tempDir } });
+      const result = await adapter.sendTurn({
+        chatId: "terminal-chat",
+        input: "terminal",
+        messages: [{ role: "user", content: [{ type: "text", text: "terminal" }] }],
+        runConfig: { workdir: tempDir },
+      });
+
+      assert.deepEqual(result.response, [{ type: "markdown", text: "terminal ok" }]);
+      assert.ok(events.some((event) => event.type === "command.started"));
+      assert.ok(events.some((event) => event.type === "command.completed"));
+    } finally {
+      unsubscribe?.();
+    }
+  });
+
+  it("emits file changes for ACP fs writes and direct adapter writes without diffs", async () => {
+    for (const prompt of ["fs write", "direct write"]) {
+      const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), `acp-${prompt.replace(" ", "-")}-`));
+      const harness = createAcpHarness({
+        config: {
+          command: process.execPath,
+          args: [path.join(__dirname, "fixtures", "acp-mock-agent.js")],
+        },
+      });
+      const adapter = harness.createAdapter?.({
+        name: "acp",
+        instanceId: "test",
+        continuationKey: "acp:test",
+      });
+      assert.ok(adapter);
+
+      /** @type {Array<Record<string, unknown>>} */
+      const events = [];
+      const unsubscribe = adapter.subscribeEvents?.((event) => {
+        events.push(event);
+      });
+      try {
+        await adapter.startSession({ chatId: `${prompt}-chat`, runConfig: { workdir: tempDir } });
+        await adapter.sendTurn({
+          chatId: `${prompt}-chat`,
+          input: prompt,
+          messages: [{ role: "user", content: [{ type: "text", text: prompt }] }],
+          runConfig: { workdir: tempDir },
+        });
+
+        const fileChanges = events.filter((event) => event.type === "file-change.completed");
+        assert.equal(fileChanges.length, 1);
+        assert.ok(String(fileChanges[0]?.change?.path ?? "").startsWith(tempDir));
+      } finally {
+        unsubscribe?.();
+      }
+    }
+  });
+
+  it("applies ACP session config options for model and reasoning effort", async () => {
+    const harness = createAcpHarness({
+      config: {
+        command: process.execPath,
+        args: [path.join(__dirname, "fixtures", "acp-mock-agent.js")],
+      },
+    });
+    const adapter = harness.createAdapter?.({
+      name: "acp",
+      instanceId: "test",
+      continuationKey: "acp:test",
+    });
+    assert.ok(adapter);
+
+    await adapter.startSession({ chatId: "config-chat", runConfig: { model: "model-a", reasoningEffort: "high" } });
+    const result = await adapter.sendTurn({
+      chatId: "config-chat",
+      input: "config",
+      messages: [{ role: "user", content: [{ type: "text", text: "config" }] }],
+      runConfig: { model: "model-a", reasoningEffort: "high" },
+    });
+
+    assert.deepEqual(result.response, [{ type: "markdown", text: "model=model-a effort=high" }]);
+  });
+
+  it("exposes ACP read and rollback RFDs through the adapter", async () => {
+    const harness = createAcpHarness({
+      config: {
+        command: process.execPath,
+        args: [path.join(__dirname, "fixtures", "acp-mock-agent.js")],
+      },
+    });
+    const adapter = harness.createAdapter?.({
+      name: "acp",
+      instanceId: "test",
+      continuationKey: "acp:test",
+    });
+    assert.ok(adapter);
+
+    await adapter.startSession({ chatId: "rfd-chat" });
+    await adapter.sendTurn({
+      chatId: "rfd-chat",
+      input: "Run the mock",
+      messages: [{ role: "user", content: [{ type: "text", text: "Run the mock" }] }],
+    });
+
+    assert.deepEqual(await adapter.readThread("mock-session-1"), {
+      thread: {
+        id: "mock-session-1",
+        preview: "Mock thread",
+        turns: [{ status: "completed", items: [] }],
+      },
+    });
+    assert.deepEqual(await adapter.rollbackThread("mock-session-1", 2), {
+      sessionId: "mock-session-1",
+      rolledBackTurns: 2,
+    });
   });
 });

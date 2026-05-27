@@ -1,5 +1,5 @@
 import { createHarnessEventStreamController } from "./adapter.js";
-import { forkAcpSession, startAcpRun } from "./acp-runner.js";
+import { forkAcpSession, readAcpSession, rollbackAcpSession, startAcpRun } from "./acp-runner.js";
 import { buildTextHarnessPromptFromBlocks } from "./prompt-media.js";
 import { updateActiveHarnessConfig, getActiveHarnessConfig } from "../harness-config.js";
 import { contentEvent } from "../outbound-events.js";
@@ -14,8 +14,10 @@ const ACP_HARNESS_CAPABILITIES = {
   supportsWorkdir: true,
   supportsSandboxConfig: true,
   supportsModelSelection: true,
-  supportsReasoningEffort: false,
+  supportsReasoningEffort: true,
   supportsSessionFork: true,
+  supportsRollback: true,
+  supportsUserInputRequests: true,
 };
 
 /**
@@ -142,6 +144,8 @@ export function createAcpHarness(options = {}) {
     createAdapter(input) {
       /** @type {Map<string, HarnessRuntimeSession>} */
       const sessions = new Map();
+      /** @type {Map<string, HarnessRunConfig | undefined>} */
+      const sessionRunConfigs = new Map();
       const events = createHarnessEventStreamController(name);
       return {
         async startSession({ chatId, runConfig, resumeCursor }) {
@@ -225,6 +229,9 @@ export function createAcpHarness(options = {}) {
               resumeCursor: completed.sessionId ?? sessionId ?? null,
             });
             sessions.set(turn.chatId, ready);
+            if (ready.resumeCursor) {
+              sessionRunConfigs.set(ready.resumeCursor, turn.runConfig);
+            }
             events.emit({ chatId: turn.chatId, type: "session.updated", session: ready });
             events.emit({
               chatId: turn.chatId,
@@ -263,8 +270,18 @@ export function createAcpHarness(options = {}) {
           return true;
         },
         listSessions: () => [...sessions.values()],
-        readThread: async () => null,
-        rollbackThread: async () => null,
+        readThread: async (sessionId) => readAcpSession({
+          ...commandSpec,
+          sessionId,
+          includeTurns: true,
+          runConfig: sessionRunConfigs.get(sessionId),
+        }),
+        rollbackThread: async (sessionId, numTurns) => rollbackAcpSession({
+          ...commandSpec,
+          sessionId,
+          numTurns,
+          runConfig: sessionRunConfigs.get(sessionId),
+        }),
         streamEvents: events.stream,
         subscribeEvents: events.subscribe,
       };
@@ -392,14 +409,14 @@ function createGenericAcpCommandHandler(options) {
         await input.context.reply(contentEvent("tool-result", `${options.label} effort set to \`${effort}\``));
         return true;
       }
-      const model = arg.toLowerCase();
-      if (model === "off" || model === "default" || model === "none") {
+      const modelReset = arg.toLowerCase();
+      if (modelReset === "off" || modelReset === "default" || modelReset === "none") {
         await updateActiveHarnessConfig(input.chatId, options.harnessName, { model: null });
         await input.context.reply(contentEvent("tool-result", `${options.label} model reset to default.`));
         return true;
       }
-      await updateActiveHarnessConfig(input.chatId, options.harnessName, { model });
-      await input.context.reply(contentEvent("tool-result", `${options.label} model set to \`${model}\``));
+      await updateActiveHarnessConfig(input.chatId, options.harnessName, { model: arg });
+      await input.context.reply(contentEvent("tool-result", `${options.label} model set to \`${arg}\``));
       return true;
     }
 
