@@ -100,7 +100,7 @@ describe("createHarnessRunCoordinator", () => {
     assert.equal(coordinator.finishRun("chat-2"), null);
   });
 
-  it("buffers a follow-up for the next turn when the selected harness owner changes mid-run", async () => {
+  it("injects active follow-up text into the original harness when the selected owner changes mid-run", async () => {
     /** @type {string[]} */
     const firstInjected = [];
     /** @type {string[]} */
@@ -143,7 +143,7 @@ describe("createHarnessRunCoordinator", () => {
       ownerKey: "codex:work:model-a",
     });
     coordinator.markRunActive("chat-owner");
-    const buffered = await coordinator.beginRun({
+    const injectedResult = await coordinator.beginRun({
       turn: createTurn("chat-owner", "follow-up"),
       userText: "follow-up",
       harness: secondHarness,
@@ -151,10 +151,10 @@ describe("createHarnessRunCoordinator", () => {
     });
 
     assert.equal(started.status, "started");
-    assert.equal(buffered.status, "buffered");
-    assert.deepEqual(firstInjected, []);
+    assert.equal(injectedResult.status, "injected");
+    assert.deepEqual(firstInjected, ["follow-up"]);
     assert.deepEqual(secondInjected, []);
-    assert.equal(coordinator.finishRun("chat-owner")?.content[0]?.type, "text");
+    assert.equal(coordinator.finishRun("chat-owner"), null);
   });
 
   it("retries active live input instead of queueing a second turn when the harness is not ready yet", async () => {
