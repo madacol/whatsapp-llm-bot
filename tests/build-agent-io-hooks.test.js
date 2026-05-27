@@ -175,6 +175,41 @@ function assertSingleSentEvent(sent, messageKind, eventKind) {
 }
 
 describe("buildAgentIoHooks", () => {
+  it("sends generic runtime events through semantic content transport", async () => {
+    const { hooks, sent } = createSubject(VISIBLE_TOOL_OUTPUT);
+
+    await hooks.onRuntimeEvent?.({
+      type: "extension.notification",
+      provider: "acp",
+      method: "madabot/example",
+      payload: { ok: true },
+    });
+    await hooks.onRuntimeEvent?.({
+      type: "runtime.warning",
+      provider: "acp",
+      message: "provider warning",
+    });
+
+    assert.deepEqual(sent, [
+      {
+        kind: "send",
+        event: {
+          kind: "content",
+          source: "plain",
+          content: "acp extension notification: madabot/example\n{\"ok\":true}",
+        },
+      },
+      {
+        kind: "send",
+        event: {
+          kind: "content",
+          source: "warning",
+          content: "provider warning",
+        },
+      },
+    ]);
+  });
+
   it("maps plan events to an llm reply", async () => {
     const { hooks, sent } = createSubject();
     await hooks.onPlan?.(buildToolPresentation("update_plan", {
