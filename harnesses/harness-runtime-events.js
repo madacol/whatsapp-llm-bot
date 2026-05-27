@@ -57,6 +57,14 @@
 /**
  * @typedef {{
  *   id: string,
+ *   kind: "assistant" | "reasoning" | "tool" | "file" | "unknown",
+ *   text?: string,
+ * }} HarnessRuntimeItem
+ */
+
+/**
+ * @typedef {{
+ *   id: string,
  *   questions: Array<{ id: string, question: string, options: Array<{ label: string, description?: string }> }>,
  * }} HarnessRuntimeUserInputRequest
  */
@@ -99,6 +107,41 @@
  *   request: HarnessRuntimeUserInputRequest,
  *   raw?: Record<string, unknown>,
  * }} HarnessRuntimeUserInputEvent
+ */
+
+/**
+ * @typedef {{
+ *   chatId?: string,
+ *   type: "item.started" | "item.updated" | "item.completed",
+ *   provider: HarnessRuntimeProvider,
+ *   item: HarnessRuntimeItem,
+ *   raw?: Record<string, unknown>,
+ * }} HarnessRuntimeItemEvent
+ */
+
+/**
+ * @typedef {{
+ *   chatId?: string,
+ *   type: "content.delta",
+ *   provider: HarnessRuntimeProvider,
+ *   itemId: string,
+ *   text: string,
+ *   displayText?: string,
+ *   contentType: "text" | "markdown",
+ *   notify?: boolean,
+ *   raw?: Record<string, unknown>,
+ * }} HarnessRuntimeContentDeltaEvent
+ */
+
+/**
+ * @typedef {{
+ *   chatId?: string,
+ *   type: "extension.notification" | "extension.request",
+ *   provider: HarnessRuntimeProvider,
+ *   method: string,
+ *   payload: unknown,
+ *   raw?: Record<string, unknown>,
+ * }} HarnessRuntimeExtensionEvent
  */
 
 /**
@@ -210,6 +253,9 @@
  *   | HarnessRuntimeTurnEvent
  *   | HarnessRuntimeRequestEvent
  *   | HarnessRuntimeUserInputEvent
+ *   | HarnessRuntimeItemEvent
+ *   | HarnessRuntimeContentDeltaEvent
+ *   | HarnessRuntimeExtensionEvent
  *   | HarnessRuntimeFileChangeEvent
  *   | HarnessRuntimeReasoningEvent
  *   | HarnessRuntimeToolEvent
