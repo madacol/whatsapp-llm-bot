@@ -388,6 +388,52 @@ describe("buildAgentIoHooks", () => {
     }]);
   });
 
+  it("ignores duplicate compact command start events while the command is pending", async () => {
+    /** @type {Array<{ event: OutboundEvent, kind: "send" | "reply" }>} */
+    const sent = [];
+    /** @type {MessageHandleUpdate[]} */
+    const updates = [];
+    const hooks = buildAgentIoHooks(
+      {
+        send: async (event) => {
+          sent.push({ event, kind: "send" });
+          return {
+            transportHandleId: "compact-tools-dedupe",
+            update: async (update) => { updates.push(update); },
+            setInspect: () => {},
+          };
+        },
+        reply: async () => undefined,
+        select: async () => "",
+        confirm: async () => true,
+      },
+      async () => {},
+      async () => {},
+      () => {},
+      "/repo",
+      { ...DEFAULT_OUTPUT_VISIBILITY, toolDetails: false },
+    );
+
+    await hooks.onCommand?.({ command: "pnpm test", status: "started" });
+    await hooks.onCommand?.({ command: "pnpm test", status: "started" });
+    await hooks.onCommand?.({ command: "pnpm test", status: "started" });
+    await new Promise((resolve) => setTimeout(resolve, 1100));
+
+    assert.equal(sent.length, 1);
+    assert.equal(updates.length, 0);
+    assert.equal(sent[0]?.event.kind, "content");
+    if (sent[0]?.event.kind !== "content") {
+      assert.fail("Expected compact content event");
+    }
+    assert.equal(sent[0].event.content, "🔧 *Shell*  `pnpm test`");
+
+    await hooks.onCommand?.({ command: "pnpm test", status: "completed" });
+    assert.deepEqual(updates, [{
+      kind: "text",
+      text: "✅ *Shell*  `pnpm test`",
+    }]);
+  });
+
   it("omits read command output from compact file-read inspect state", async () => {
     /** @type {MessageInspectState[]} */
     const inspects = [];
