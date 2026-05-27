@@ -162,6 +162,101 @@ describe("createHarnessRuntimeEventDispatcher", () => {
     );
   });
 
+  it("forwards assistant stream chunks semantically and finalizes on item completion", async () => {
+    /** @type {Array<{ text: string, metadata?: LlmResponseMetadata }>} */
+    const responses = [];
+    const dispatcher = createHarnessRuntimeEventDispatcher({
+      provider: "acp",
+      messages: [],
+      hooks: {
+        onLlmResponse: async (text, metadata) => {
+          responses.push({ text, metadata });
+        },
+      },
+    });
+
+    await dispatcher.handleEvent({
+      type: "content.delta",
+      provider: "acp",
+      itemId: "assistant-1",
+      text: "Hel",
+      contentType: "markdown",
+    });
+    await dispatcher.handleEvent({
+      type: "content.delta",
+      provider: "acp",
+      itemId: "assistant-1",
+      text: "lo",
+      contentType: "markdown",
+    });
+    assert.deepEqual(responses.map((entry) => [entry.text, entry.metadata?.streamStatus]), [
+      ["Hel", "partial"],
+      ["lo", "partial"],
+    ]);
+
+    await dispatcher.handleEvent({
+      type: "item.completed",
+      provider: "acp",
+      item: {
+        id: "assistant-1",
+        kind: "assistant",
+        text: "Hello",
+      },
+    });
+    assert.equal(responses.at(-1)?.text, "Hello");
+    assert.equal(responses.at(-1)?.metadata?.streamStatus, "final");
+    assert.deepEqual(dispatcher.result.response, [{ type: "markdown", text: "Hello" }]);
+  });
+
+  it("groups flow tools and keeps inspect state on the grouped handle", async () => {
+    /** @type {Array<Record<string, unknown>>} */
+    const toolCalls = [];
+    /** @type {MessageHandleUpdate[]} */
+    const updates = [];
+    /** @type {MessageInspectState[]} */
+    const inspectStates = [];
+    const dispatcher = createHarnessRuntimeEventDispatcher({
+      provider: "acp",
+      messages: [],
+      hooks: {
+        onToolCall: async (toolCall) => {
+          toolCalls.push(toolCall);
+          return {
+            update: async (update) => {
+              updates.push(update);
+            },
+            setInspect: (state) => {
+              inspectStates.push(state);
+            },
+          };
+        },
+      },
+    });
+
+    await dispatcher.handleEvent({
+      type: "tool.started",
+      provider: "acp",
+      tool: {
+        id: "web-1",
+        name: "search_query",
+        arguments: { q: "ACP protocol" },
+      },
+    });
+    await dispatcher.handleEvent({
+      type: "tool.started",
+      provider: "acp",
+      tool: {
+        id: "web-2",
+        name: "open",
+        arguments: { ref_id: "https://agentclientprotocol.com" },
+      },
+    });
+
+    assert.equal(toolCalls.length, 1);
+    assert.equal(updates.at(-1)?.kind, "tool_flow");
+    assert.equal(inspectStates.at(-1)?.kind, "tool_flow");
+  });
+
   it("projects command and file-read runtime events into progress hooks", async () => {
     /** @type {Array<{ command: string, status: "started" | "completed" | "failed", output?: string }>} */
     const commands = [];

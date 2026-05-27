@@ -168,6 +168,10 @@ type ContentEvent = {
   source: MessageSource;
   content: SendContent;
   cwd?: string | null;
+  stream?: {
+    id: string;
+    status: "partial" | "final";
+  };
 };
 
 type ToolCallEvent = {
@@ -639,6 +643,8 @@ type AgentIOHooks = {
 
 type LlmResponseMetadata = {
   source?: "llm" | "subagent";
+  streamId?: string;
+  streamStatus?: "partial" | "final";
   threadId?: string;
   parentThreadId?: string;
   agentNickname?: string;

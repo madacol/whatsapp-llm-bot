@@ -1,5 +1,5 @@
-import { toolInspectState } from "../outbound-events.js";
-import { buildToolPresentation } from "../tool-presentation-model.js";
+import { toolFlowInspectState, toolFlowUpdate, toolInspectState } from "../outbound-events.js";
+import { buildToolPresentation, getToolFlowDescriptor } from "../tool-presentation-model.js";
 import { createLogger } from "../logger.js";
 import { getHarnessRawEventLoggerFromEnv } from "./raw-event-log.js";
 import { createPlanPresentationFromState } from "../plan-presentation.js";
@@ -88,6 +88,12 @@ export function createHarnessRuntimeEventDispatcher(input) {
   const rawEventLogger = input.rawEventLogger ?? getHarnessRawEventLoggerFromEnv();
   /** @type {Map<string, { handle?: MessageHandle, presentation: import("../tool-presentation-model.js").ToolPresentation }>} */
   const activeTools = new Map();
+  /** @type {Map<string, { handle?: MessageHandle, state: import("../tool-flow-presentation.js").ToolFlowState }>} */
+  const activeFlows = new Map();
+  /** @type {Map<string, LlmResponseMetadata>} */
+  const subagentThreads = new Map();
+  /** @type {Set<string>} */
+  const deliveredSubagentResponses = new Set();
 
   /** @type {AgentResult} */
   const result = {
@@ -119,16 +125,121 @@ export function createHarnessRuntimeEventDispatcher(input) {
   }
 
   /**
+   * @param {HarnessRuntimeTool} tool
+   * @returns {void}
+   */
+  function rememberSpawnedSubagent(tool) {
+    if (tool.name !== "spawn_agent" || typeof tool.output !== "string") {
+      return;
+    }
+    let parsed;
+    try {
+      parsed = JSON.parse(tool.output);
+    } catch {
+      return;
+    }
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return;
+    }
+    const record = /** @type {Record<string, unknown>} */ (parsed);
+    const threadId = typeof record.agent_id === "string"
+      ? record.agent_id
+      : typeof record.threadId === "string" ? record.threadId : null;
+    if (!threadId) {
+      return;
+    }
+    subagentThreads.set(threadId, {
+      source: "subagent",
+      threadId,
+      ...(typeof record.nickname === "string" ? { agentNickname: record.nickname } : {}),
+    });
+  }
+
+  /**
+   * @param {HarnessRuntimeTool} tool
+   * @returns {Array<{ threadId: string, text: string }>}
+   */
+  function extractWaitAgentResponses(tool) {
+    if (tool.name !== "wait_agent" || typeof tool.output !== "string") {
+      return [];
+    }
+    let parsed;
+    try {
+      parsed = JSON.parse(tool.output);
+    } catch {
+      return [];
+    }
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return [];
+    }
+    const status = /** @type {Record<string, unknown>} */ (parsed).status;
+    if (!status || typeof status !== "object" || Array.isArray(status)) {
+      return [];
+    }
+    /** @type {Array<{ threadId: string, text: string }>} */
+    const responses = [];
+    for (const [threadId, state] of Object.entries(/** @type {Record<string, unknown>} */ (status))) {
+      if (!state || typeof state !== "object" || Array.isArray(state)) {
+        continue;
+      }
+      const text = /** @type {Record<string, unknown>} */ (state).completed;
+      if (typeof text === "string" && text.length > 0) {
+        responses.push({ threadId, text });
+      }
+    }
+    return responses;
+  }
+
+  /**
+   * @param {{ threadId?: string, text: string }} response
+   * @returns {Promise<void>}
+   */
+  async function emitSubagentResponse(response) {
+    /** @type {LlmResponseMetadata} */
+    const metadata = response.threadId
+      ? subagentThreads.get(response.threadId) ?? { source: "subagent", threadId: response.threadId }
+      : { source: "subagent" };
+    const dedupeKey = `${metadata.threadId ?? ""}\u0000${response.text}`;
+    if (deliveredSubagentResponses.has(dedupeKey)) {
+      return;
+    }
+    deliveredSubagentResponses.add(dedupeKey);
+    await hooks.onLlmResponse(response.text, metadata);
+  }
+
+  /**
    * @param {HarnessRuntimeToolEvent} event
    * @returns {Promise<void>}
    */
   async function handleToolStarted(event) {
     const presentation = buildRuntimeToolPresentation(event.tool, input.workdir);
+    const flow = getToolFlowDescriptor(presentation);
     const toolCall = {
       id: event.tool.id,
       name: event.tool.name,
       arguments: JSON.stringify(event.tool.arguments),
     };
+    if (flow) {
+      let activeFlow = activeFlows.get(flow.groupKey);
+      if (!activeFlow) {
+        const handle = await hooks.onToolCall(toolCall) ?? undefined;
+        activeFlow = {
+          ...(handle ? { handle } : {}),
+          state: { title: flow.groupTitle, steps: [] },
+        };
+        activeFlows.set(flow.groupKey, activeFlow);
+      }
+      activeFlow.state.steps.push({ id: event.tool.id, presentation });
+      if (activeFlow.handle) {
+        await activeFlow.handle.update(toolFlowUpdate(activeFlow.state));
+        activeFlow.handle.setInspect(toolFlowInspectState(activeFlow.state));
+      }
+      activeTools.set(event.tool.id, {
+        ...(activeFlow.handle ? { handle: activeFlow.handle } : {}),
+        presentation,
+      });
+      return;
+    }
     const handle = await hooks.onToolCall(toolCall) ?? undefined;
     activeTools.set(event.tool.id, {
       ...(handle ? { handle } : {}),
@@ -142,10 +253,24 @@ export function createHarnessRuntimeEventDispatcher(input) {
    */
   async function handleToolProgress(event) {
     const active = activeTools.get(event.tool.id);
-    if (active?.handle) {
-      active.handle.setInspect(toolInspectState(active.presentation, event.tool.output));
+    const presentation = buildRuntimeToolPresentation(event.tool, input.workdir);
+    const flow = getToolFlowDescriptor(presentation);
+    if (flow) {
+      const activeFlow = activeFlows.get(flow.groupKey);
+      const step = activeFlow?.state.steps.find((candidate) => candidate.id === event.tool.id);
+      if (step) {
+        step.presentation = presentation;
+        step.output = event.tool.output;
+      }
+      if (activeFlow?.handle) {
+        activeFlow.handle.setInspect(toolFlowInspectState(activeFlow.state));
+      }
+    }
+    if (!flow && active?.handle) {
+      active.handle.setInspect(toolInspectState(presentation, event.tool.output));
     }
     if (event.type === "tool.completed") {
+      rememberSpawnedSubagent(event.tool);
       await hooks.onToolComplete({
         id: event.tool.id,
         name: event.tool.name,
@@ -155,6 +280,9 @@ export function createHarnessRuntimeEventDispatcher(input) {
         await hooks.onToolResult(event.tool.outputBlocks, event.tool.name, event.tool.permissions ?? {});
       }
       activeTools.delete(event.tool.id);
+      for (const response of extractWaitAgentResponses(event.tool)) {
+        await emitSubagentResponse(response);
+      }
     }
     if (event.type === "tool.failed") {
       if (event.tool.output) {
@@ -230,9 +358,12 @@ export function createHarnessRuntimeEventDispatcher(input) {
         }
         return;
       case "content.delta":
-        result.response.push({ type: event.contentType, text: event.text });
         if (event.notify !== false) {
-          await hooks.onLlmResponse(event.displayText ?? event.text);
+          await hooks.onLlmResponse(event.displayText ?? event.text, {
+            source: "llm",
+            streamId: event.itemId,
+            streamStatus: "partial",
+          });
         }
         return;
       case "subagent.completed":
@@ -258,7 +389,20 @@ export function createHarnessRuntimeEventDispatcher(input) {
       case "user-input.resolved":
       case "item.started":
       case "item.updated":
+        return;
       case "item.completed":
+        if (event.item.kind === "assistant") {
+          const text = event.item.text ?? "";
+          result.response = [{ type: "markdown", text }];
+          if (text) {
+            await hooks.onLlmResponse(text, {
+              source: "llm",
+              streamId: event.item.id,
+              streamStatus: "final",
+            });
+          }
+        }
+        return;
       case "extension.notification":
       case "extension.request":
         return;

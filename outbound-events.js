@@ -5,7 +5,7 @@
 /**
  * @param {MessageSource} source
  * @param {SendContent} content
- * @param {{ cwd?: string | null }} [options]
+ * @param {{ cwd?: string | null, stream?: ContentEvent["stream"] }} [options]
  * @returns {ContentEvent}
  */
 export function contentEvent(source, content, options = {}) {
@@ -14,6 +14,7 @@ export function contentEvent(source, content, options = {}) {
     source,
     content,
     ...(options.cwd !== undefined && { cwd: options.cwd }),
+    ...(options.stream !== undefined && { stream: options.stream }),
   };
 }
 

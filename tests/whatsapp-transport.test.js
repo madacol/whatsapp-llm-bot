@@ -17,6 +17,7 @@ import { contentEvent, textUpdate } from "../outbound-events.js";
 import { createRestartAction } from "../actions/admin/restart/index.js";
 import { createRestartAckStore } from "../actions/admin/restart/_restart-ack-store.js";
 import { deliverPendingRestartAck } from "../actions/admin/restart/_restart-ack-delivery.js";
+import { sendOrQueueWhatsAppEvent } from "../whatsapp/outbound/persistent-queue.js";
 
 /** @type {import("@electric-sql/pglite").PGlite | null} */
 let testDb = null;
@@ -49,6 +50,52 @@ async function getQueuedRows(db, chatId) {
 }
 
 describe("WhatsApp transport community creation", () => {
+  it("buffers streamed LLM chunks in WhatsApp until completion", async () => {
+    const chatId = `stream-buffer-${Date.now()}`;
+    /** @type {Array<{ chatId: string, message: Record<string, unknown> }>} */
+    const sentMessages = [];
+    const socket = /** @type {import("@whiskeysockets/baileys").WASocket} */ (/** @type {unknown} */ ({
+      sendMessage: async (targetChatId, message) => {
+        sentMessages.push({ chatId: targetChatId, message });
+        return { key: { id: `sent-${sentMessages.length}`, remoteJid: targetChatId } };
+      },
+    }));
+    await sendOrQueueWhatsAppEvent({
+      getSocket: () => socket,
+      chatId,
+      event: contentEvent("llm", [{ type: "markdown", text: "Hel" }], {
+        stream: { id: "assistant-1", status: "partial" },
+      }),
+    });
+    await sendOrQueueWhatsAppEvent({
+      getSocket: () => socket,
+      chatId,
+      event: contentEvent("llm", [{ type: "markdown", text: "lo" }], {
+        stream: { id: "assistant-1", status: "partial" },
+      }),
+    });
+    await sendOrQueueWhatsAppEvent({
+      getSocket: () => socket,
+      chatId,
+      event: contentEvent("llm", [{ type: "markdown", text: " wor" }], {
+        stream: { id: "assistant-1", status: "partial" },
+      }),
+    });
+    assert.deepEqual(sentMessages, []);
+
+    await sendOrQueueWhatsAppEvent({
+      getSocket: () => socket,
+      chatId,
+      event: contentEvent("llm", [{ type: "markdown", text: "Hello world" }], {
+        stream: { id: "assistant-1", status: "final" },
+      }),
+    });
+    assert.deepEqual(sentMessages, [{
+      chatId,
+      message: { text: "🤖 Hello world" },
+    }]);
+  });
+
   it("coalesces rapid same-chat turn messages before invoking the app handler", async () => {
     /** @type {((events: Partial<import("@whiskeysockets/baileys").BaileysEventMap>) => Promise<void>) | null} */
     let processEvents = null;

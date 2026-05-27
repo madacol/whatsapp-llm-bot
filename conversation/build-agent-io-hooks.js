@@ -150,6 +150,17 @@ export function buildAgentIoHooks(
         recordDeliveredContent?.(content);
         return;
       }
+      if (metadata?.streamId) {
+        await context.reply(contentEvent("llm", content, {
+          cwd,
+          stream: {
+            id: metadata.streamId,
+            status: metadata.streamStatus ?? "partial",
+          },
+        }));
+        recordDeliveredContent?.(content);
+        return;
+      }
       await context.reply(contentEvent("llm", content, { cwd }));
       recordDeliveredContent?.(content);
     },
