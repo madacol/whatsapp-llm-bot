@@ -10,6 +10,8 @@ let storePromise = null;
 let storeDb = null;
 /** @type {Map<string, Array<(handle: MessageHandle | undefined) => void>>} */
 const queuedHandleResolvers = new Map();
+/** @type {Map<string, { text: string }>} */
+const streamStates = new Map();
 
 /**
  * @typedef {{
@@ -41,6 +43,73 @@ const queuedHandleResolvers = new Map();
  */
 function isRecord(value) {
   return typeof value === "object" && value !== null;
+}
+
+/**
+ * @param {ContentEvent} event
+ * @returns {string}
+ */
+function extractStreamText(event) {
+  const content = event.content;
+  if (typeof content === "string") {
+    return content;
+  }
+  const blocks = Array.isArray(content) ? content : [content];
+  return blocks
+    .map((block) => {
+      if (block && typeof block === "object" && "text" in block && typeof block.text === "string") {
+        return block.text;
+      }
+      return "";
+    })
+    .join("");
+}
+
+/**
+ * @param {ContentEvent} event
+ * @param {string} text
+ * @returns {ContentEvent}
+ */
+function withStreamText(event, text) {
+  const { stream: _stream, ...rest } = event;
+  return {
+    ...rest,
+    content: [{ type: "markdown", text }],
+  };
+}
+
+/**
+ * @param {string} chatId
+ * @param {string} streamId
+ * @returns {string}
+ */
+function streamKey(chatId, streamId) {
+  return `${chatId}\u0000${streamId}`;
+}
+
+/**
+ * @param {string} chatId
+ * @param {ContentEvent} event
+ * @returns {ContentEvent | undefined}
+ */
+function bufferStreamEvent(chatId, event) {
+  if (!event.stream) {
+    return event;
+  }
+  const key = streamKey(chatId, event.stream.id);
+  const state = streamStates.get(key) ?? { text: "" };
+  const eventText = extractStreamText(event);
+  state.text = event.stream.status === "final"
+    ? eventText || state.text
+    : `${state.text}${eventText}`;
+  streamStates.set(key, state);
+
+  if (event.stream.status !== "final") {
+    return undefined;
+  }
+
+  streamStates.delete(key);
+  return withStreamText(event, state.text);
 }
 
 /**
@@ -154,7 +223,15 @@ function isOutboundEvent(value) {
     case "content":
       return isMessageSource(value.source)
         && isSendContent(value.content)
-        && (value.cwd === undefined || value.cwd === null || typeof value.cwd === "string");
+        && (value.cwd === undefined || value.cwd === null || typeof value.cwd === "string")
+        && (
+          value.stream === undefined
+          || (
+            isRecord(value.stream)
+            && typeof value.stream.id === "string"
+            && (value.stream.status === "partial" || value.stream.status === "final")
+          )
+        );
     case "tool_call":
       return isRecord(value.presentation);
     case "tool_activity":
@@ -442,6 +519,14 @@ async function deliverQueuedPayload(sock, chatId, payload, reactionRuntime, stor
  * @returns {Promise<MessageHandle | undefined>}
  */
 export async function sendOrQueueWhatsAppEvent({ getSocket, chatId, event, reactionRuntime, store }) {
+  if (event.kind === "content" && event.stream) {
+    const bufferedEvent = bufferStreamEvent(chatId, event);
+    if (!bufferedEvent) {
+      return undefined;
+    }
+    event = bufferedEvent;
+  }
+
   const sock = getSocket();
   if (!sock) {
     const row = await enqueueWhatsAppOutbound(chatId, { kind: "event", event }, store);
