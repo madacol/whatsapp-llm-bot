@@ -388,6 +388,68 @@ describe("resolveHarness", () => {
     assert.deepEqual(disposed, ["work:a"]);
   });
 
+  it("awaits stale instance disposal before replacing a changed instance", async () => {
+    /** @type {string[]} */
+    const calls = [];
+    registerHarnessDriver({
+      name: "lifecycle-test",
+      supportsInstances: true,
+      createInstance(input) {
+        const marker = typeof input.config.marker === "string" ? input.config.marker : "none";
+        calls.push(`create:${marker}`);
+        return {
+          harness: createTestHarness("lifecycle-test"),
+          dispose: async () => {
+            calls.push(`dispose:start:${marker}`);
+            await Promise.resolve();
+            calls.push(`dispose:done:${marker}`);
+          },
+        };
+      },
+    });
+
+    resolveHarnessInstance("lifecycle-test", { instanceId: "work", config: { marker: "a" } });
+    await reconcileHarnessInstances([
+      { name: "lifecycle-test", instanceId: "work", config: { marker: "b" } },
+    ]);
+
+    assert.deepEqual(calls, [
+      "create:a",
+      "dispose:start:a",
+      "dispose:done:a",
+      "create:b",
+    ]);
+  });
+
+  it("downgrades invalid harness config into an unavailable instance status", () => {
+    registerHarnessDriver({
+      name: "schema-test",
+      displayName: "Schema Test",
+      supportsInstances: true,
+      configSchema(config) {
+        if (typeof config.command !== "string") {
+          throw new Error("command must be a string");
+        }
+        return config;
+      },
+      createInstance() {
+        return {
+          harness: createTestHarness("schema-test"),
+        };
+      },
+    });
+
+    const instance = resolveHarnessInstance("schema-test", {
+      instanceId: "work",
+      config: { command: 42 },
+    });
+
+    assert.equal(instance.available, false);
+    assert.equal(instance.status.availability, "unavailable");
+    assert.match(instance.status.message ?? "", /Invalid config/);
+    assert.match(instance.status.message ?? "", /command must be a string/);
+  });
+
   it("surfaces unknown harness instance envelopes as unavailable without constructing an app fallback", () => {
     const instance = resolveHarnessInstance("missing-driver", {
       instanceId: "from-config",
@@ -580,9 +642,46 @@ describe("harness session directory", () => {
       resumeCursor: "thread-1",
       runtimeMode: "workspace-write",
       runtimePayload: { model: "gpt-5.4", workdir: "/repo" },
+      activeTurnId: null,
+      lastRuntimeEvent: null,
+      lastRuntimeEventAt: null,
       updatedAt: directory.getBinding("chat-1")?.updatedAt,
     });
     assert.equal(directory.getHarness("chat-1"), "codex");
     assert.equal(directory.resolveRoutableSession("chat-1")?.instanceId, "work");
+  });
+
+  it("recovers persisted cwd, model, active turn, and last runtime event from bindings", () => {
+    const directory = getHarnessSessionDirectory();
+    directory.clear();
+
+    directory.upsert({
+      chatId: "chat-2",
+      harnessName: "codex",
+      instanceId: "codex-work",
+      status: "running",
+      resumeCursor: "thread-2",
+      runtimeMode: "workspace-write",
+      runtimePayload: {
+        workdir: "/repo",
+        model: "gpt-5.4",
+        activeTurnId: "turn-7",
+        lastRuntimeEvent: "turn.started",
+        lastRuntimeEventAt: "2026-05-27T00:00:00.000Z",
+      },
+    });
+
+    assert.deepEqual(directory.resolveRecoveryState("chat-2"), {
+      chatId: "chat-2",
+      harnessName: "codex",
+      instanceId: "codex-work",
+      resumeCursor: "thread-2",
+      runtimeMode: "workspace-write",
+      workdir: "/repo",
+      model: "gpt-5.4",
+      activeTurnId: "turn-7",
+      lastRuntimeEvent: "turn.started",
+      lastRuntimeEventAt: "2026-05-27T00:00:00.000Z",
+    });
   });
 });

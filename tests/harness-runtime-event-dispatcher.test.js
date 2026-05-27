@@ -4,9 +4,47 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { createHarnessRuntimeEventDispatcher } from "../harnesses/harness-runtime-event-dispatcher.js";
+import { normalizeHarnessRuntimeEvent } from "../harnesses/harness-runtime-events.js";
 import { createNdjsonRawEventLogger } from "../harnesses/raw-event-log.js";
 
 describe("createHarnessRuntimeEventDispatcher", () => {
+  it("adds stable runtime metadata without discarding provider raw references", () => {
+    const event = normalizeHarnessRuntimeEvent({
+      type: "content.delta",
+      provider: "codex",
+      providerInstanceId: "codex-work",
+      chatId: "chat-1",
+      itemId: "assistant-1",
+      text: "Done",
+      contentType: "markdown",
+      raw: {
+        source: "acp.jsonrpc",
+        method: "session/update",
+        payload: { sequence: 1 },
+      },
+    }, {
+      eventId: "evt-test",
+      createdAt: "2026-05-27T00:00:00.000Z",
+      providerRefs: {
+        providerTurnId: "provider-turn-1",
+        providerItemId: "provider-item-1",
+      },
+    });
+
+    assert.equal(event.eventId, "evt-test");
+    assert.equal(event.createdAt, "2026-05-27T00:00:00.000Z");
+    assert.equal(event.providerInstanceId, "codex-work");
+    assert.deepEqual(event.providerRefs, {
+      providerTurnId: "provider-turn-1",
+      providerItemId: "provider-item-1",
+    });
+    assert.deepEqual(event.raw, {
+      source: "acp.jsonrpc",
+      method: "session/update",
+      payload: { sequence: 1 },
+    });
+  });
+
   it("projects canonical runtime events into hooks and result state", async () => {
     /** @type {Array<Record<string, unknown>>} */
     const reasoningEvents = [];
@@ -345,10 +383,14 @@ describe("createHarnessRuntimeEventDispatcher", () => {
 
       const lines = (await fs.readFile(logPath, "utf8")).trim().split("\n");
       assert.equal(lines.length, 1);
-      assert.deepEqual(JSON.parse(lines[0]), {
-        provider: "codex",
-        type: "assistant.completed",
-        raw: { msg: { type: "agent_message_delta", delta: "Done." } },
+      const logged = JSON.parse(lines[0]);
+      assert.equal(logged.provider, "codex");
+      assert.equal(logged.type, "assistant.completed");
+      assert.match(logged.eventId, /^harness-event-/);
+      assert.equal(typeof logged.createdAt, "string");
+      assert.deepEqual(logged.raw, {
+        source: "unknown",
+        payload: { msg: { type: "agent_message_delta", delta: "Done." } },
       });
       assert.deepEqual(responses, ["Done."]);
     } finally {

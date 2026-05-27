@@ -1,3 +1,5 @@
+import { normalizeHarnessRuntimeEvent } from "./harness-runtime-events.js";
+
 /**
  * Semantic adapter facade over the legacy AgentHarness contract.
  *
@@ -64,21 +66,22 @@
 
 /**
  * @param {string} provider
+ * @param {Partial<import("./harness-runtime-events.js").HarnessRuntimeEventEnvelope>} [defaults]
  * @returns {{
  *   emit: (event: { type: string, provider?: string } & Record<string, unknown>) => void,
  *   subscribe: (handler: (event: { type: string, provider: string } & Record<string, unknown>) => void | Promise<void>) => () => void,
  *   stream: AsyncIterable<{ type: string, provider: string } & Record<string, unknown>>,
  * }}
  */
-export function createHarnessEventStreamController(provider) {
+export function createHarnessEventStreamController(provider, defaults = {}) {
   /** @type {Set<(event: { type: string, provider: string } & Record<string, unknown>) => void | Promise<void>>} */
   const listeners = new Set();
   return {
     emit(event) {
-      const normalized = {
+      const normalized = normalizeHarnessRuntimeEvent({
         ...event,
         provider: event.provider ?? provider,
-      };
+      }, defaults);
       for (const listener of listeners) {
         void listener(normalized);
       }
@@ -196,7 +199,9 @@ function buildLegacyParamsFromSemanticTurn(turn) {
 export function createHarnessAdapterFromHarness(input) {
   /** @type {Map<string, HarnessRuntimeSession>} */
   const sessions = new Map();
-  const events = createHarnessEventStreamController(input.name);
+  const events = createHarnessEventStreamController(input.name, {
+    providerInstanceId: input.instanceId,
+  });
 
   return {
     async startSession({ chatId, runConfig, resumeCursor }) {

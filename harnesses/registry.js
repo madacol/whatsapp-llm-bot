@@ -150,14 +150,39 @@ function stableConfigSignature(config) {
 /**
  * @param {HarnessDriver} driver
  * @param {Record<string, unknown> | undefined} config
- * @returns {Record<string, unknown>}
+ * @returns {{ ok: true, config: Record<string, unknown> } | { ok: false, status: HarnessDriverStatus, config: Record<string, unknown> }}
  */
 function decodeHarnessInstanceConfig(driver, config) {
   const baseConfig = config ?? driver.defaultConfig?.() ?? {};
   if (!driver.configSchema) {
-    return { ...baseConfig };
+    return { ok: true, config: { ...baseConfig } };
   }
-  return driver.configSchema(baseConfig);
+  try {
+    return { ok: true, config: driver.configSchema(baseConfig) };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return {
+      ok: false,
+      config: { ...baseConfig },
+      status: {
+        availability: "unavailable",
+        message: `Invalid config for harness driver "${driver.name}": ${message}`,
+        checkedAt: getCheckedAt(),
+      },
+    };
+  }
+}
+
+/**
+ * @param {HarnessDriver | undefined} driver
+ * @param {Record<string, unknown> | undefined} config
+ * @returns {{ ok: true, config: Record<string, unknown> } | { ok: false, status: HarnessDriverStatus, config: Record<string, unknown> }}
+ */
+function decodeHarnessInstanceConfigForDriver(driver, config) {
+  if (driver) {
+    return decodeHarnessInstanceConfig(driver, config);
+  }
+  return { ok: true, config: { ...(config ?? {}) } };
 }
 
 /**
@@ -316,6 +341,39 @@ function createUnavailableHarness(name, status) {
 }
 
 /**
+ * @param {{
+ *   name: string,
+ *   instanceId: string,
+ *   displayName: string,
+ *   supportsInstances: boolean,
+ *   continuationKey: string,
+ *   status: HarnessDriverStatus,
+ * }} input
+ * @returns {HarnessInstance}
+ */
+function createUnavailableHarnessInstance(input) {
+  const harness = normalizeHarness(input.name, createUnavailableHarness(input.name, input.status));
+  const capabilities = normalizeCapabilities(harness);
+  return {
+    name: input.name,
+    instanceId: input.instanceId,
+    displayName: input.displayName,
+    supportsInstances: input.supportsInstances,
+    continuationKey: input.continuationKey,
+    capabilities,
+    available: false,
+    status: input.status,
+    harness,
+    adapter: createHarnessAdapterFromHarness({
+      harness,
+      name: input.name,
+      instanceId: input.instanceId,
+      continuationKey: input.continuationKey,
+    }),
+  };
+}
+
+/**
  * @param {AgentHarness["textGeneration"] | undefined} textGeneration
  * @returns {AgentHarness["textGeneration"] | undefined}
  */
@@ -365,12 +423,12 @@ export function resolveHarnessInstance(name, options = {}) {
     ? normalizeInstanceId(options.instanceId, key)
     : key;
   const cacheKey = buildInstanceCacheKey(key, instanceId);
-  const decodedConfig = driver
-    ? decodeHarnessInstanceConfig(driver, options.config)
-    : { ...(options.config ?? {}) };
+  const decoded = decodeHarnessInstanceConfigForDriver(driver, options.config);
+  const decodedConfig = decoded.config;
   const configSignature = stableConfigSignature({
     config: decodedConfig,
     displayName: options.displayName ?? null,
+    status: decoded.ok ? null : decoded.status.message ?? null,
   });
   const cached = instances.get(cacheKey);
   if (cached && instanceConfigSignatures.get(cacheKey) === configSignature) return cached;
@@ -388,25 +446,27 @@ export function resolveHarnessInstance(name, options = {}) {
       message: `Harness driver "${key}" is not registered in this build.`,
       checkedAt: getCheckedAt(),
     };
-    const harness = normalizeHarness(key, createUnavailableHarness(key, status));
-    const capabilities = normalizeCapabilities(harness);
-    const instance = {
+    const instance = createUnavailableHarnessInstance({
       name: key,
       instanceId,
       displayName: options.displayName ?? key,
       supportsInstances: true,
       continuationKey,
-      capabilities,
-      available: false,
       status,
-      harness,
-      adapter: createHarnessAdapterFromHarness({
-        harness,
-        name: key,
-        instanceId,
-        continuationKey,
-      }),
-    };
+    });
+    instances.set(cacheKey, instance);
+    instanceConfigSignatures.set(cacheKey, configSignature);
+    return instance;
+  }
+  if (!decoded.ok) {
+    const instance = createUnavailableHarnessInstance({
+      name: key,
+      instanceId,
+      displayName: options.displayName ?? driver.displayName,
+      supportsInstances: driver.supportsInstances,
+      continuationKey,
+      status: decoded.status,
+    });
     instances.set(cacheKey, instance);
     instanceConfigSignatures.set(cacheKey, configSignature);
     return instance;
@@ -507,12 +567,11 @@ export async function reconcileHarnessInstances(desired) {
       : entry.name;
     const cacheKey = buildInstanceCacheKey(entry.name, instanceId);
     desiredKeys.add(cacheKey);
-    const decodedConfig = driver
-      ? decodeHarnessInstanceConfig(driver, entry.config)
-      : { ...(entry.config ?? {}) };
+    const decoded = decodeHarnessInstanceConfigForDriver(driver, entry.config);
     const nextSignature = stableConfigSignature({
-      config: decodedConfig,
+      config: decoded.config,
       displayName: entry.displayName ?? null,
+      status: decoded.ok ? null : decoded.status.message ?? null,
     });
     const cached = instances.get(cacheKey);
     if (cached && instanceConfigSignatures.get(cacheKey) !== nextSignature) {
