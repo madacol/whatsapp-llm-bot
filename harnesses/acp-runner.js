@@ -15,6 +15,7 @@ import { buildUnifiedFileDiff } from "./file-change-utils.js";
 import { createHarnessRuntimeEventDispatcher } from "./harness-runtime-event-dispatcher.js";
 import { getSandboxEscapeRequest } from "./sandbox-approval.js";
 import { requestSandboxEscapeApproval } from "./sandbox-approval-coordinator.js";
+import { matchProtectedPath, requestProtectedPathApproval, restoreProtectedPath } from "./protected-paths.js";
 
 /**
  * @typedef {{
@@ -148,6 +149,7 @@ function buildSessionParams(runConfig) {
         ...(runConfig?.approvalPolicy ? { approvalPolicy: runConfig.approvalPolicy } : {}),
         ...(runConfig?.approvalsReviewer ? { approvalsReviewer: runConfig.approvalsReviewer } : {}),
         ...(runConfig?.additionalDirectories ? { additionalDirectories: runConfig.additionalDirectories } : {}),
+        ...(runConfig?.protectedPaths ? { protectedPaths: runConfig.protectedPaths } : {}),
       },
     },
   };
@@ -287,6 +289,7 @@ async function assertSandboxAccess(input) {
  *   userInputDecision?: (request: import("./harness-runtime-events.js").HarnessRuntimeUserInputRequest) => Promise<unknown>,
  *   extensionRequestHandlers?: Map<string, (message: Record<string, unknown>) => Promise<unknown> | unknown>,
  *   extensionNotificationHandlers?: Map<string, (message: Record<string, unknown>) => Promise<void> | void>,
+ *   approvedProtectedPaths?: Set<string>,
  * }} options
  */
 function createAcpClientRequestHandler(options) {
@@ -594,6 +597,7 @@ async function handleAcpReadTextFile(message, options) {
  *   hooks: Pick<Required<AgentIOHooks>, "onAskUser">,
  *   runConfig?: HarnessRunConfig,
  *   emitRuntimeEvent: (event: import("./harness-runtime-events.js").HarnessRuntimeEvent) => Promise<void>,
+ *   approvedProtectedPaths?: Set<string>,
  * }} options
  * @returns {Promise<Record<string, never>>}
  */
@@ -613,6 +617,18 @@ async function handleAcpWriteTextFile(message, options) {
     cwd,
     hooks: options.hooks,
   });
+  const protectedApproval = await requestProtectedPathApproval({
+    runConfig: options.runConfig,
+    filePath: params.path,
+    action: "ACP file write",
+    hooks: options.hooks,
+  });
+  if (!protectedApproval.allowed) {
+    throw new Error(`User denied protected path change for ${protectedApproval.match.relativePath}.`);
+  }
+  if (protectedApproval.match.protected) {
+    options.approvedProtectedPaths?.add(protectedApproval.match.resolvedPath);
+  }
   if (options.runConfig?.sandboxMode === "read-only") {
     const choice = await options.hooks.onAskUser("Allow *file write*?", ["✅ Allow", "❌ Deny"], undefined, [params.path]);
     if (choice === "❌ Deny" || !choice) {
@@ -995,6 +1011,26 @@ export async function getAcpSessionConfigOptions(input) {
 }
 
 /**
+ * @param {{
+ *   command: string,
+ *   args?: string[],
+ *   runConfig?: HarnessRunConfig,
+ *   env?: NodeJS.ProcessEnv,
+ *   signal?: AbortSignal,
+ * }} input
+ * @returns {Promise<Record<string, unknown>[]>}
+ */
+export async function getAcpInitialSessionConfigOptions(input) {
+  const { connection } = await openInitializedAcpConnection(input, async () => ({}));
+  try {
+    const opened = await connection.sendRequest("session/new", buildSessionParams(input.runConfig));
+    return normalizeConfigOptions(extractConfigOptions(opened));
+  } finally {
+    await connection.close();
+  }
+}
+
+/**
  * @param {AcpForkInput & { configId: string, value: string | boolean }} input
  * @returns {Promise<Record<string, unknown>[]>}
  */
@@ -1158,9 +1194,52 @@ export async function startAcpRun(input) {
   const beforeSnapshot = await snapshotAcpWorkdir(input.runConfig?.workdir);
   /** @type {Set<string>} */
   const emittedFileChangePaths = new Set();
+  /** @type {Set<string>} */
+  const approvedProtectedPaths = new Set();
   const runtimeModel = createAcpRuntimeModel();
   const emitRuntimeEvent = async (/** @type {import("./harness-runtime-events.js").HarnessRuntimeEvent} */ event) => {
     const reconciled = reconcileAcpFileChangeWithBaseline(event, beforeSnapshot, input.runConfig?.workdir);
+    if (reconciled.type === "file-change.completed") {
+      const protectedMatch = matchProtectedPath(input.runConfig, reconciled.change.path);
+      if (protectedMatch.protected && approvedProtectedPaths.has(protectedMatch.resolvedPath)) {
+        emittedFileChangePaths.add(resolveAcpFileChangePath(input.runConfig?.workdir, reconciled.change.path));
+        input.emitEvent?.(reconciled);
+        await runtimeDispatcher.handleEvent(reconciled);
+        return;
+      }
+      const protectedApproval = await requestProtectedPathApproval({
+        runConfig: input.runConfig,
+        filePath: reconciled.change.path,
+        action: "ACP file change",
+        hooks,
+      });
+      if (protectedApproval.match.protected && !protectedApproval.allowed) {
+        await restoreProtectedPath({
+          resolvedPath: protectedApproval.match.resolvedPath,
+          oldText: reconciled.change.oldText,
+          hadOldText: reconciled.change.oldText !== undefined,
+        });
+        const message = `Protected path change reverted: ${protectedApproval.match.relativePath}`;
+        /** @type {import("./harness-runtime-events.js").HarnessRuntimeEvent} */
+        const failureEvent = {
+          type: "tool.failed",
+          provider: "acp",
+          tool: {
+            id: `protected-path:${protectedApproval.match.relativePath}`,
+            name: "protected_path",
+            arguments: { path: protectedApproval.match.relativePath },
+            output: message,
+          },
+          raw: reconciled.raw,
+        };
+        input.emitEvent?.(failureEvent);
+        await runtimeDispatcher.handleEvent(failureEvent);
+        return;
+      }
+      if (protectedApproval.match.protected) {
+        approvedProtectedPaths.add(protectedApproval.match.resolvedPath);
+      }
+    }
     if (reconciled.type === "file-change.completed") {
       emittedFileChangePaths.add(resolveAcpFileChangePath(input.runConfig?.workdir, reconciled.change.path));
     }
@@ -1175,6 +1254,7 @@ export async function startAcpRun(input) {
     userInputDecision: input.userInputDecision,
     extensionRequestHandlers: input.extensionRequestHandlers,
     extensionNotificationHandlers: input.extensionNotificationHandlers,
+    approvedProtectedPaths,
   });
   const { connection, capabilities } = await openInitializedAcpConnection(input, handleRequest);
   let sessionId = input.sessionId ?? null;

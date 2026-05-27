@@ -246,6 +246,21 @@ describe("buildRunConfig", () => {
     assert.equal(config.approvalPolicy, "on-request");
   });
 
+  it("passes protected path policies from harness config", () => {
+    const config = buildRunConfig("chat-1", /** @type {import("../store.js").ChatRow} */ ({
+      chat_id: "chat-1",
+      harness: "codex",
+      harness_cwd: null,
+      harness_config: {
+        codex: {
+          protectedPaths: ["package.json", "migrations/**", ""],
+        },
+      },
+    }), "Project Alpha", "codex");
+
+    assert.deepEqual(config.protectedPaths, ["package.json", "migrations/**"]);
+  });
+
   it("does not leak a legacy Claude model into Codex runs", () => {
     const codexConfig = buildRunConfig("chat-1", /** @type {import("../store.js").ChatRow} */ ({
       chat_id: "chat-1",

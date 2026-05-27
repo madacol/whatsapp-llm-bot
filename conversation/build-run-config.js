@@ -22,6 +22,21 @@ function resolveRunWorkdir(chatId, chatInfo, chatName, resolvedBinding) {
 }
 
 /**
+ * @param {unknown} value
+ * @returns {string[] | undefined}
+ */
+function normalizeStringList(value) {
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+  const normalized = value
+    .filter((entry) => typeof entry === "string")
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+  return normalized.length > 0 ? normalized : undefined;
+}
+
+/**
  * Build the harness run config from chat settings.
  * @param {string} chatId
  * @param {import("../store.js").ChatRow | undefined} chatInfo
@@ -39,6 +54,7 @@ export function buildRunConfig(chatId, chatInfo, chatName, harnessName, resolved
     ? /** @type {Record<string, string | boolean | null>} */ (harnessConfig.configValues)
     : undefined;
   const workdir = resolveRunWorkdir(chatId, chatInfo, chatName, resolvedBinding);
+  const protectedPaths = normalizeStringList(harnessConfig.protectedPaths);
   return {
     workdir,
     harnessInstanceId: instanceId,
@@ -50,6 +66,7 @@ export function buildRunConfig(chatId, chatInfo, chatName, harnessName, resolved
     sandboxMode: /** @type {HarnessRunConfig["sandboxMode"]} */ (typeof harnessConfig.sandboxMode === "string" ? harnessConfig.sandboxMode : "workspace-write"),
     approvalPolicy: /** @type {HarnessRunConfig["approvalPolicy"]} */ (typeof harnessConfig.approvalPolicy === "string" ? harnessConfig.approvalPolicy : undefined),
     approvalsReviewer: /** @type {HarnessRunConfig["approvalsReviewer"]} */ (typeof harnessConfig.approvalsReviewer === "string" ? harnessConfig.approvalsReviewer : undefined),
+    ...(protectedPaths ? { protectedPaths } : {}),
     ...(configValues ? { configValues } : {}),
   };
 }
