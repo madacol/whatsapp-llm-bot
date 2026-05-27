@@ -150,7 +150,7 @@ export function createHarnessRunCoordinator(options = {}) {
       const pending = pendingRuns.get(chatId);
       if (pending) {
         const sameOwner = !ownerKey || !pending.ownerKey || ownerKey === pending.ownerKey;
-        if (pending.isActive && sameOwner && userText && canInjectLiveInput(pending.harness)) {
+        if (pending.isActive && userText && canInjectLiveInput(pending.harness)) {
           if (await tryInjectLiveInput(chatId, userText, pending.harness)) {
             return { status: "injected" };
           }

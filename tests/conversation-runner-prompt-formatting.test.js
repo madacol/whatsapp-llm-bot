@@ -66,6 +66,7 @@ function registerCodexHarness(createHarness) {
  *     externalInstructions?: string,
  *     hooks?: AgentIOHooks,
  *   }) => Promise<{ abortController: AbortController, done: Promise<{ result: AgentResult }> }>,
+ *   injectMessage?: AgentHarness["injectMessage"],
  * }} [options]
  * @returns {AgentHarness}
  */
@@ -99,6 +100,7 @@ function createCodexHarness(options = {}) {
       };
     },
     handleCommand: async () => false,
+    injectMessage: options.injectMessage,
     listSlashCommands: () => [],
   };
 }
@@ -557,7 +559,7 @@ describe("createConversationRunner prompt formatting", () => {
     );
   });
 
-  it("defers a selected harness instance change until the active turn finishes", async () => {
+  it("injects into the active harness and defers a selected instance change until the turn finishes", async () => {
     const chatId = "conv-harness-switch-mid-turn";
     const harnessName = "adapter-lifecycle";
     await seedChat(chatId, { enabled: true });
@@ -578,6 +580,8 @@ describe("createConversationRunner prompt formatting", () => {
     const releaseFirstRun = createDeferredVoid();
     /** @type {string[]} */
     const phases = [];
+    /** @type {string[]} */
+    const injectedTexts = [];
     registerHarnessDriver({
       name: harnessName,
       supportsInstances: true,
@@ -600,6 +604,10 @@ describe("createConversationRunner prompt formatting", () => {
               };
             })(),
           }),
+          injectMessage: (_chatId, text) => {
+            injectedTexts.push(`${instanceId}:${text}`);
+            return true;
+          },
         });
         return {
           harness,
@@ -638,13 +646,21 @@ describe("createConversationRunner prompt formatting", () => {
     await handleMessage(secondTurn.context);
 
     assert.deepEqual(phases, ["create:work", "run:work"]);
+    assert.deepEqual(injectedTexts, ["work:second"]);
 
     releaseFirstRun.resolve();
     await firstHandled;
+    assert.ok(!phases.includes("create:personal"), `did not expect personal instance before a new post-turn message, got ${JSON.stringify(phases)}`);
+
+    const thirdTurn = createChatTurn({
+      chatId,
+      content: [{ type: "text", text: "third" }],
+    });
+    await handleMessage(thirdTurn.context);
     await waitUntil(() => phases.includes("run:personal"));
 
-    assert.ok(phases.includes("create:personal"), `expected personal instance after first run, got ${JSON.stringify(phases)}`);
-    assert.ok(phases.includes("run:personal"), `expected buffered turn to run on personal instance, got ${JSON.stringify(phases)}`);
+    assert.ok(phases.includes("create:personal"), `expected personal instance after a post-turn message, got ${JSON.stringify(phases)}`);
+    assert.ok(phases.includes("run:personal"), `expected post-turn message to run on personal instance, got ${JSON.stringify(phases)}`);
     assert.ok(phases.indexOf("create:personal") > phases.indexOf("run:work"));
   });
 
