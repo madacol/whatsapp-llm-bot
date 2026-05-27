@@ -1,7 +1,7 @@
 import { ensureChatConfig, updateChatConfig } from "./chat-config.js";
 
 /**
- * @typedef {"claude-agent-sdk" | "codex" | "pi"} SupportedHarnessName
+ * @typedef {string} SupportedHarnessName
  */
 
 /** @type {Set<string>} */
@@ -136,6 +136,35 @@ function readCanonicalInstanceConfig(envelope) {
   }
   const { driver: _driver, displayName: _displayName, accentColor: _accentColor, environment: _environment, enabled: _enabled, ...legacyConfig } = envelope;
   return legacyConfig;
+}
+
+/**
+ * @param {Record<string, unknown>} normalized
+ * @param {string | null | undefined} harnessName
+ * @returns {{ envelope: Record<string, unknown>, instanceId: string } | null}
+ */
+function findActiveCanonicalHarnessInstance(normalized, harnessName) {
+  if (!harnessName) {
+    return null;
+  }
+  const activeInstanceId = normalizeHarnessInstanceId(
+    normalized[ACTIVE_HARNESS_INSTANCE_ID_CONFIG_KEY],
+  );
+  const instancesRoot = normalized[HARNESS_INSTANCES_CONFIG_KEY];
+  if (!activeInstanceId || !isObjectRecord(instancesRoot)) {
+    return null;
+  }
+  const envelope = instancesRoot[activeInstanceId];
+  if (!isObjectRecord(envelope)) {
+    return null;
+  }
+  const driver = typeof envelope.driver === "string" && envelope.driver.trim()
+    ? envelope.driver.trim()
+    : harnessName;
+  if (driver !== harnessName) {
+    return null;
+  }
+  return { envelope, instanceId: activeInstanceId };
 }
 
 /**
@@ -334,6 +363,24 @@ export async function getHarnessConfig(chatId, harnessName) {
 }
 
 /**
+ * Read the selected harness config. Canonical instance envelopes win over the
+ * legacy driver-scoped namespace so commands mutate the same instance that the
+ * runner resolves.
+ * @param {string} chatId
+ * @param {string} harnessName
+ * @returns {Promise<Record<string, unknown>>}
+ */
+export async function getActiveHarnessConfig(chatId, harnessName) {
+  const chat = await ensureChatConfig(chatId);
+  const normalized = normalizeHarnessConfig(chat.harness_config, chat.harness);
+  const canonical = findActiveCanonicalHarnessInstance(normalized, harnessName || chat.harness);
+  if (canonical) {
+    return readCanonicalInstanceConfig(canonical.envelope);
+  }
+  return getScopedHarnessConfig(normalized, harnessName || chat.harness);
+}
+
+/**
  * Update the scoped harness configuration for a chat.
  * Null/undefined values remove keys from that harness namespace.
  * @param {string} chatId
@@ -356,6 +403,38 @@ export async function updateHarnessConfig(chatId, harnessName, patch) {
     delete root[harnessName];
   }
   await updateChatConfig(chatId, (current) => ({ ...current, harness_config: root }));
+}
+
+/**
+ * Update the selected harness config. Canonical instance envelopes win over the
+ * legacy driver-scoped namespace so provider commands are instance-aware.
+ * @param {string} chatId
+ * @param {string} harnessName
+ * @param {Record<string, unknown>} patch
+ * @returns {Promise<void>}
+ */
+export async function updateActiveHarnessConfig(chatId, harnessName, patch) {
+  const chat = await ensureChatConfig(chatId);
+  const root = normalizeHarnessConfig(chat.harness_config, chat.harness);
+  const canonical = findActiveCanonicalHarnessInstance(root, harnessName || chat.harness);
+  if (canonical) {
+    const nextConfig = readCanonicalInstanceConfig(canonical.envelope);
+    for (const [key, value] of Object.entries(patch)) {
+      if (value == null) {
+        delete nextConfig[key];
+      } else {
+        nextConfig[key] = value;
+      }
+    }
+    if (Object.keys(nextConfig).length === 0) {
+      delete canonical.envelope.config;
+    } else {
+      canonical.envelope.config = nextConfig;
+    }
+    await updateChatConfig(chatId, (current) => ({ ...current, harness_config: root }));
+    return;
+  }
+  await updateHarnessConfig(chatId, harnessName, patch);
 }
 
 /**

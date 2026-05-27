@@ -5,10 +5,11 @@ import { fileURLToPath } from "node:url";
 import {
   createHarnessAdapterFromHarness,
   getHarnessSessionDirectory,
-  getHarnessDriverStatus,
-  listHarnessInstances,
-  listHarnessDrivers,
-  registerHarnessDriver,
+	  getHarnessDriverStatus,
+	  listHarnessInstances,
+	  listHarnessDrivers,
+	  registerAcpAgentDriver,
+	  registerHarnessDriver,
   registerOptionalHarnesses,
   resetHarnessRegistryForTests,
   resolveHarness,
@@ -133,6 +134,69 @@ describe("harness driver registry", () => {
 
       assert.deepEqual(result.response, [{ type: "markdown", text: "Main result." }]);
       assert.equal(instance.adapter.listSessions()[0]?.resumeCursor, "mock-session-1");
+    }
+  });
+
+  it("registers a new ACP agent from one provider definition", async () => {
+    registerAcpAgentDriver({
+      name: "cursor",
+      displayName: "Cursor",
+      command: process.execPath,
+      args: [path.join(__dirname, "fixtures", "acp-mock-agent.js")],
+      sessionKind: "cursor",
+    });
+
+    const instance = resolveHarnessInstance("cursor", { instanceId: "cursor-work" });
+
+    assert.equal(instance.name, "cursor");
+    assert.equal(instance.displayName, "Cursor");
+    assert.equal(instance.harness.getName(), "cursor");
+    assert.equal(instance.capabilities.supportsSessionFork, true);
+
+    const result = await instance.adapter.sendTurn({
+      chatId: "cursor-acp-chat",
+      input: "Run Cursor ACP",
+      messages: [{ role: "user", content: [{ type: "text", text: "Run Cursor ACP" }] }],
+    });
+
+    assert.deepEqual(result.response, [{ type: "markdown", text: "Main result." }]);
+    assert.equal(instance.adapter.listSessions()[0]?.resumeCursor, "mock-session-1");
+    assert.ok(
+      instance.harness.listSlashCommands().some((command) => command.description.includes("Cursor")),
+      "Expected generic ACP slash commands to use the agent display label",
+    );
+  });
+
+  it("registers extra ACP agents from MADABOT_ACP_AGENTS_JSON", async () => {
+    const previous = process.env.MADABOT_ACP_AGENTS_JSON;
+    process.env.MADABOT_ACP_AGENTS_JSON = JSON.stringify([{
+      name: "env-agent",
+      displayName: "Env Agent",
+      command: process.execPath,
+      args: [path.join(__dirname, "fixtures", "acp-mock-agent.js")],
+      sessionKind: "env-agent",
+    }]);
+    try {
+      resetHarnessRegistryForTests();
+      const drivers = listHarnessDrivers();
+      assert.ok(drivers.some((driver) => driver.name === "env-agent" && driver.displayName === "Env Agent"));
+
+      const instance = resolveHarnessInstance("env-agent", { instanceId: "env-agent-work" });
+      const result = await instance.adapter.sendTurn({
+        chatId: "env-agent-chat",
+        input: "Run env ACP",
+        messages: [{ role: "user", content: [{ type: "text", text: "Run env ACP" }] }],
+      });
+
+      assert.deepEqual(result.response, [{ type: "markdown", text: "Main result." }]);
+    } finally {
+      if (previous === undefined) {
+        delete process.env.MADABOT_ACP_AGENTS_JSON;
+      } else {
+        process.env.MADABOT_ACP_AGENTS_JSON = previous;
+      }
+      resetHarnessRegistryForTests();
+      await registerOptionalHarnesses();
     }
   });
 
