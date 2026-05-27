@@ -9,8 +9,8 @@ export async function registerOptionalHarnesses() {
   registerAcpAgentDriver({
     name: "claude",
     displayName: "Claude",
-    command: "claude-code-acp",
-    docsUrl: "https://github.com/zed-industries/claude-code-acp",
+    command: "claude-agent-acp",
+    docsUrl: "https://github.com/agentclientprotocol/claude-agent-acp",
     statusUrl: "https://status.anthropic.com/",
     sessionKind: "claude",
   });

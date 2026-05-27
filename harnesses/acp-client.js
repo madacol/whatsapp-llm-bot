@@ -1,8 +1,13 @@
 import { spawn } from "node:child_process";
+import fs from "node:fs";
+import path from "node:path";
 import readline from "node:readline";
+import { fileURLToPath } from "node:url";
 import { createLogger } from "../logger.js";
 
 const log = createLogger("harness:acp");
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const REPO_ROOT = path.resolve(__dirname, "..");
 
 /**
  * @typedef {{ resolve: (value: unknown) => void, reject: (error: Error) => void }} PendingRequest
@@ -111,11 +116,24 @@ function jsonRpcErrorCode(error) {
 }
 
 /**
+ * @param {string} command
+ * @returns {string}
+ */
+function resolveAcpCommandPath(command) {
+  if (path.isAbsolute(command) || command.includes("/") || command.includes("\\")) {
+    return command;
+  }
+  const binName = process.platform === "win32" ? `${command}.cmd` : command;
+  const localBin = path.join(REPO_ROOT, "node_modules", ".bin", binName);
+  return fs.existsSync(localBin) ? localBin : command;
+}
+
+/**
  * @param {OpenAcpConnectionOptions} options
  * @returns {Promise<AcpConnection>}
  */
 export async function openAcpConnection(options) {
-  const proc = spawn(options.command, options.args ?? [], {
+  const proc = spawn(resolveAcpCommandPath(options.command), options.args ?? [], {
     stdio: ["pipe", "pipe", "pipe"],
     ...(options.cwd ? { cwd: options.cwd } : {}),
     ...(options.env ? { env: options.env } : {}),

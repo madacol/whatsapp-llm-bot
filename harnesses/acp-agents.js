@@ -43,14 +43,14 @@ export const BUILT_IN_ACP_AGENT_DEFINITIONS = [
     name: "codex",
     displayName: "Codex",
     command: "codex-acp",
-    docsUrl: "https://github.com/zed-industries/codex-acp",
+    docsUrl: "https://github.com/agentclientprotocol/codex-acp",
     sessionKind: "codex",
   },
   {
     name: "pi",
     displayName: "Pi",
     command: "pi-acp",
-    docsUrl: "https://agentclientprotocol.com/overview/agents",
+    docsUrl: "https://github.com/svkozak/pi-acp",
     sessionKind: "pi",
   },
 ];
