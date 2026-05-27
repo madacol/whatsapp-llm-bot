@@ -647,7 +647,13 @@ export async function editWhatsAppMessage(sock, jid, newText, target) {
     return;
   }
 
-  await sock.sendMessage(jid, { text: newText, edit: resolved.key });
+  await sock.relayMessage(jid, {
+    protocolMessage: {
+      key: resolved.key,
+      type: proto.Message.ProtocolMessage.Type.MESSAGE_EDIT,
+      editedMessage: { conversation: newText },
+    },
+  }, { additionalAttributes: { edit: "1" } });
 }
 
 /**
