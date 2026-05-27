@@ -228,6 +228,7 @@ describe("ACP event normalization", () => {
         promptTokens: 0,
         completionTokens: 0,
         cachedTokens: 0,
+        totalTokens: 53,
         cost: 0.045,
         contextWindow: 200,
       },
@@ -245,6 +246,27 @@ describe("ACP event normalization", () => {
         },
       },
     }]);
+  });
+
+  it("normalizes Codex ACP camelCase prompt usage", () => {
+    assert.deepEqual(normalizeAcpSessionUpdate({
+      sessionId: "s1",
+      update: {
+        sessionUpdate: "usage_update",
+        totalTokens: 14775,
+        inputTokens: 3617,
+        cachedReadTokens: 11136,
+        outputTokens: 22,
+        thoughtTokens: 12,
+      },
+    })[0]?.usage, {
+      promptTokens: 3617,
+      completionTokens: 22,
+      cachedTokens: 11136,
+      cost: 0,
+      totalTokens: 14775,
+      reasoningTokens: 12,
+    });
   });
 
   it("merges partial ACP tool updates before emitting completed tools", () => {

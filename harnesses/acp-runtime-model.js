@@ -174,20 +174,35 @@ function numberOrUndefined(value) {
 }
 
 /**
+ * @param {Record<string, unknown>} value
+ * @param {string[]} keys
+ * @returns {number | undefined}
+ */
+function firstNumber(value, keys) {
+  for (const key of keys) {
+    const number = numberOrUndefined(value[key]);
+    if (number !== undefined) {
+      return number;
+    }
+  }
+  return undefined;
+}
+
+/**
  * @param {Record<string, unknown>} usage
  * @returns {import("./harness-runtime-events.js").HarnessRuntimeUsage}
  */
 export function normalizeAcpUsage(usage) {
-  const cachedRead = numberOrUndefined(usage.cached_read_tokens) ?? 0;
-  const cachedWrite = numberOrUndefined(usage.cached_write_tokens) ?? 0;
+  const cachedRead = firstNumber(usage, ["cached_read_tokens", "cachedReadTokens", "cachedRead"]) ?? 0;
+  const cachedWrite = firstNumber(usage, ["cached_write_tokens", "cachedWriteTokens", "cachedWrite"]) ?? 0;
   const cost = isRecord(usage.cost) ? numberOrUndefined(usage.cost.amount) : numberOrUndefined(usage.cost);
   return {
-    promptTokens: numberOrUndefined(usage.input_tokens) ?? numberOrUndefined(usage.promptTokens) ?? 0,
-    completionTokens: numberOrUndefined(usage.output_tokens) ?? numberOrUndefined(usage.completionTokens) ?? 0,
-    cachedTokens: numberOrUndefined(usage.cachedTokens) ?? cachedRead + cachedWrite,
+    promptTokens: firstNumber(usage, ["input_tokens", "inputTokens", "promptTokens"]) ?? 0,
+    completionTokens: firstNumber(usage, ["output_tokens", "outputTokens", "completionTokens"]) ?? 0,
+    cachedTokens: firstNumber(usage, ["cached_tokens", "cachedTokens", "cachedInputTokens"]) ?? cachedRead + cachedWrite,
     cost: cost ?? 0,
-    ...(numberOrUndefined(usage.total_tokens) !== undefined ? { totalTokens: numberOrUndefined(usage.total_tokens) } : {}),
-    ...(numberOrUndefined(usage.thought_tokens) !== undefined ? { reasoningTokens: numberOrUndefined(usage.thought_tokens) } : {}),
+    ...(firstNumber(usage, ["total_tokens", "totalTokens", "used"]) !== undefined ? { totalTokens: firstNumber(usage, ["total_tokens", "totalTokens", "used"]) } : {}),
+    ...(firstNumber(usage, ["thought_tokens", "thoughtTokens", "reasoningTokens", "reasoningOutputTokens"]) !== undefined ? { reasoningTokens: firstNumber(usage, ["thought_tokens", "thoughtTokens", "reasoningTokens", "reasoningOutputTokens"]) } : {}),
     ...(numberOrUndefined(usage.size) !== undefined ? { contextWindow: numberOrUndefined(usage.size) } : {}),
   };
 }
