@@ -48,6 +48,24 @@ function normalizeArgs(value) {
 }
 
 /**
+ * @param {unknown} value
+ * @returns {NodeJS.ProcessEnv | undefined}
+ */
+function normalizeEnv(value) {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+  /** @type {NodeJS.ProcessEnv} */
+  const env = {};
+  for (const [key, raw] of Object.entries(value)) {
+    if (typeof raw === "string") {
+      env[key] = raw;
+    }
+  }
+  return Object.keys(env).length > 0 ? env : undefined;
+}
+
+/**
  * @param {Message[]} messages
  * @returns {string}
  */
@@ -62,7 +80,7 @@ function buildPrompt(messages) {
 /**
  * @param {Record<string, unknown>} config
  * @param {string | undefined} defaultCommand
- * @returns {{ command: string, args: string[] }}
+ * @returns {{ command: string, args: string[], env?: NodeJS.ProcessEnv }}
  */
 function resolveAcpCommand(config, defaultCommand) {
   const command = typeof config.command === "string" && config.command.trim()
@@ -71,9 +89,11 @@ function resolveAcpCommand(config, defaultCommand) {
   if (!command) {
     throw new Error("ACP harness requires a command in harness instance config.");
   }
+  const env = normalizeEnv(config.env);
   return {
     command,
     args: normalizeArgs(config.args),
+    ...(env ? { env: { ...process.env, ...env } } : {}),
   };
 }
 
@@ -889,5 +909,11 @@ export function normalizeAcpHarnessConfig(config, defaultCommand) {
     normalized.command = defaultCommand;
   }
   normalized.args = normalizeArgs(normalized.args);
+  const env = normalizeEnv(normalized.env);
+  if (env) {
+    normalized.env = env;
+  } else {
+    delete normalized.env;
+  }
   return normalized;
 }
