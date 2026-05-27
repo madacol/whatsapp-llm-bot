@@ -88,6 +88,7 @@ if (!process.env.TESTING) {
   const llmClient = createLlmClient();
   const restartAckStore = createRestartAckStore();
   const transport = await createWhatsAppTransport({
+    outboundStore: store,
     onConnectionOpen: async ({ editMessage, sendText, recoverQueuedMessage }) => {
       await deliverPendingRestartAck({ store: restartAckStore, editMessage, sendText, recoverQueuedMessage });
     },

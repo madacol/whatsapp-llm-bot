@@ -797,7 +797,10 @@ export async function createWhatsAppTransport(options = {}) {
           selectRuntime,
           reactionRuntime,
           undefined,
-          { getSocket: getOpenSocket },
+          {
+            getSocket: getOpenSocket,
+            ...(outboundStore ? { outboundStore } : {}),
+          },
         );
       },
     });
@@ -811,7 +814,10 @@ export async function createWhatsAppTransport(options = {}) {
           selectRuntime,
           reactionRuntime,
           undefined,
-          { getSocket: getOpenSocket },
+          {
+            getSocket: getOpenSocket,
+            ...(outboundStore ? { outboundStore } : {}),
+          },
         );
       },
     });
