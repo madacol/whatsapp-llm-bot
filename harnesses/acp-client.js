@@ -129,6 +129,32 @@ function resolveAcpCommandPath(command) {
 }
 
 /**
+ * @param {import("node:child_process").ChildProcess} proc
+ * @param {number} timeoutMs
+ * @returns {Promise<void>}
+ */
+function waitForProcessExit(proc, timeoutMs) {
+  if (proc.exitCode !== null || proc.signalCode !== null) {
+    return Promise.resolve();
+  }
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => {
+      try {
+        proc.kill("SIGKILL");
+      } catch {
+        // best-effort shutdown
+      }
+      resolve();
+    }, timeoutMs);
+    timer.unref?.();
+    proc.once("exit", () => {
+      clearTimeout(timer);
+      resolve();
+    });
+  });
+}
+
+/**
  * @param {OpenAcpConnectionOptions} options
  * @returns {Promise<AcpConnection>}
  */
@@ -264,6 +290,7 @@ export async function openAcpConnection(options) {
         // best-effort cleanup
       }
       queue.end();
+      await waitForProcessExit(proc, 2_000);
       await readLoop.catch(() => {});
     },
   };

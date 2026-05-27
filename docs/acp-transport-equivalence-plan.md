@@ -264,10 +264,25 @@ Implemented on `acp-migration`:
   misreported existing-file add corrected to update, diff-only add, diff-only
   update, and diff-only delete, and assert the actual WhatsApp send output
   classification.
+- Transport-level ACP runtime tests cover assistant, subagent, plan, tool,
+  file-change, usage, terminal command, permission, and elicitation/user-input
+  output through the WhatsApp boundary.
+- Generic ACP user-input handling is bridged through `user-input.requested` and
+  `user-input.resolved`, with direct request-id resolution available to adapter
+  callers.
+- Generic ACP `/config` support lists and sets provider `configOptions`;
+  `/model` and run config model/mode/reasoning values are applied through
+  `session/set_config_option` where the provider exposes matching options.
+- ACP extension traffic is routed through an explicit request/notification
+  router. Known handlers can be registered per agent, unknown notifications are
+  surfaced as runtime events, and unknown requests return JSON-RPC
+  method-not-found errors.
+- Unknown slash commands that are not handled by the client or harness continue
+  through the normal agent path.
+- Real adapter initialize/session smokes pass for the built-in Codex, Claude,
+  and Pi ACP agents. A real Codex prompt smoke also passes.
 
-Still needed:
+Remaining follow-up:
 
-- generic ACP user-input handling
-- generic ACP config UI
-- explicit ACP extension router
-- broader transport equivalence coverage for the remaining non-file workflows
+- Keep adding real-provider prompt smoke coverage as supported adapters expose
+  stable non-interactive prompt behavior for more scenarios.
