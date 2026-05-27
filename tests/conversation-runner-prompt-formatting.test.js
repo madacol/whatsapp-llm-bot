@@ -16,8 +16,6 @@ let store;
 let handleMessage;
 /** @type {typeof import("../harnesses/index.js").registerHarnessDriver} */
 let registerHarnessDriver;
-/** @type {typeof import("../harnesses/codex.js").createCodexHarness} */
-let createCodexHarness;
 
 before(async () => {
   db = await createTestDb();
@@ -28,7 +26,6 @@ before(async () => {
 
   const { createConversationRunner } = await import("../conversation/create-conversation-runner.js");
   ({ registerHarnessDriver } = await import("../harnesses/index.js"));
-  ({ createCodexHarness } = await import("../harnesses/codex.js"));
 
   const runner = createConversationRunner({
     store,
@@ -60,6 +57,50 @@ function registerCodexHarness(createHarness) {
     supportsInstances: true,
     createInstance: () => ({ harness: createHarness() }),
   });
+}
+
+/**
+ * @param {{
+ *   startRun?: (input: {
+ *     messages: Message[],
+ *     externalInstructions?: string,
+ *     hooks?: AgentIOHooks,
+ *   }) => Promise<{ abortController: AbortController, done: Promise<{ result: AgentResult }> }>,
+ * }} [options]
+ * @returns {AgentHarness}
+ */
+function createCodexHarness(options = {}) {
+  return {
+    getName: () => "codex",
+    getCapabilities: () => ({
+      supportsResume: true,
+      supportsCancel: true,
+      supportsLiveInput: true,
+      supportsApprovals: true,
+      supportsWorkdir: true,
+      supportsSandboxConfig: true,
+      supportsModelSelection: true,
+      supportsReasoningEffort: true,
+      supportsSessionFork: true,
+    }),
+    async run(params) {
+      const run = await options.startRun?.({
+        messages: params.messages,
+        externalInstructions: params.llmConfig.externalInstructions,
+        hooks: params.hooks,
+      });
+      if (run) {
+        return (await run.done).result;
+      }
+      return {
+        response: [{ type: "text", text: "ok" }],
+        messages: params.messages,
+        usage: { promptTokens: 0, completionTokens: 0, cachedTokens: 0, cost: 0 },
+      };
+    },
+    handleCommand: async () => false,
+    listSlashCommands: () => [],
+  };
 }
 
 describe("createConversationRunner prompt formatting", () => {

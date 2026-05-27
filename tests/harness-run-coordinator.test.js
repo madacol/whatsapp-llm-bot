@@ -69,7 +69,7 @@ describe("createHarnessRunCoordinator", () => {
     const injected = [];
     /** @type {AgentHarness} */
     const harness = {
-      getName: () => "claude-agent-sdk",
+      getName: () => "claude",
       getCapabilities: () => ({
         supportsResume: true,
         supportsCancel: true,

@@ -261,8 +261,8 @@ describe("LLM pipeline via createMessageHandler", () => {
     await seedChat("pipe-slash-1", { enabled: true });
     await updateChatConfig("pipe-slash-1", (current) => ({
       ...current,
-      harness: "claude-agent-sdk",
-      harness_config: { "claude-agent-sdk": { model: "claude-sonnet-4-6", reasoningEffort: "medium" } },
+      harness: "claude",
+      harness_config: { claude: { model: "claude-sonnet-4-6", reasoningEffort: "medium" } },
     }));
 
     const { context, responses } = createChatTurn({

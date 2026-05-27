@@ -183,7 +183,7 @@ describe("buildRunConfig", () => {
       harness_cwd: null,
       harness_config: {
         codex: { model: "gpt-5.4", sandboxMode: "danger-full-access", approvalsReviewer: "auto_review" },
-        "claude-agent-sdk": { model: "claude-sonnet-4-6", reasoningEffort: "medium" },
+        claude: { model: "claude-sonnet-4-6", reasoningEffort: "medium" },
       },
     }), "Project Alpha", "codex");
 
@@ -258,7 +258,7 @@ describe("buildRunConfig", () => {
       harness: "codex",
       harness_cwd: null,
       harness_config: { model: "sonnet" },
-    }), "Project Alpha", "claude-agent-sdk");
+    }), "Project Alpha", "claude");
 
     assert.equal(codexConfig.model, undefined);
     assert.equal(claudeConfig.model, "sonnet");

@@ -116,7 +116,7 @@ describe("harness driver registry", () => {
   it("runs the production Claude and Pi drivers through ACP", async () => {
     await registerOptionalHarnesses();
 
-    for (const name of ["claude-agent-sdk", "pi"]) {
+    for (const name of ["claude", "pi"]) {
       const instance = resolveHarnessInstance(name, {
         instanceId: `${name}-acp-work`,
         config: {

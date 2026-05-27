@@ -1,12 +1,7 @@
 import { formatChatSettingsCommand } from "../../../chat-commands.js";
-import {
-  getScopedHarnessConfig,
-  normalizeHarnessConfig,
-} from "../../../harness-config.js";
 import { getChatOrThrow } from "../../../store.js";
 import { getChatDb } from "../../../db.js";
-import { updateChatConfig } from "../../../chat-config.js";
-import { getClaudeSdkModels, getCodexAvailableModels, getPiAvailableModels, listHarnesses, resolveHarness } from "#harnesses";
+import { listHarnesses } from "#harnesses";
 import {
   getSelectableOptions,
   isMaster,
@@ -22,19 +17,6 @@ import {
 
 /**
  * @typedef {{
- *   harness: string;
- *   value: string;
- * }} HarnessModelSelection
- */
-
-/**
- * @typedef {{
- *   approvalsReviewer: NonNullable<HarnessRunConfig["approvalsReviewer"]>;
- * }} CodexSetupDefaults
- */
-
-/**
- * @typedef {{
  *   setting: BasicSetupStep["setting"];
  *   value: string;
  * }} StagedConfigChange
@@ -44,8 +26,6 @@ import {
  * @typedef {{
  *   kind: "selected";
  *   stagedChanges: StagedConfigChange[];
- *   stagedHarnessModel: HarnessModelSelection | null;
- *   stagedCodexDefaults: CodexSetupDefaults | null;
  *   notes: string[];
  * }} SelectedSetupResult
  */
@@ -65,16 +45,6 @@ const ALL_SETUP_STEPS = [
   { setting: "harness", question: "Which harness should power this chat?" },
 ];
 
-const DEFAULT_CODEX_APPROVALS_REVIEWER = "auto_review";
-
-/**
- * @param {unknown} value
- * @returns {value is Record<string, unknown>}
- */
-function isObjectRecord(value) {
-  return !!value && typeof value === "object" && !Array.isArray(value);
-}
-
 /**
  * @param {import("../../../store.js").ChatRow} chat
  * @returns {{ options: SelectOption[], currentId: string }}
@@ -90,155 +60,6 @@ function getHarnessSelectOptions(chat) {
 }
 
 /**
- * @param {string} harnessName
- * @returns {Promise<SelectOption[]>}
- */
-async function getHarnessModelOptions(harnessName) {
-  if (harnessName === "claude-agent-sdk") {
-    const availableModels = await getClaudeSdkModels();
-    return [
-      ...availableModels.map((model) => ({ id: model.value, label: model.displayName })),
-      { id: "off", label: "Default" },
-    ];
-  }
-  if (harnessName === "codex") {
-    const availableModels = await getCodexAvailableModels();
-    if (availableModels.length === 0) {
-      return [];
-    }
-    return [
-      ...availableModels.map((model) => ({ id: model.id, label: model.label })),
-      { id: "off", label: "Default" },
-    ];
-  }
-  if (harnessName === "pi") {
-    const availableModels = await getPiAvailableModels();
-    if (availableModels.length === 0) {
-      return [];
-    }
-    return [
-      ...availableModels.map((model) => ({ id: model.id, label: model.label })),
-      { id: "off", label: "Default" },
-    ];
-  }
-  return [];
-}
-
-/**
- * @param {string} harnessName
- * @returns {string}
- */
-function getHarnessModelQuestion(harnessName) {
-  if (harnessName === "claude-agent-sdk") {
-    return "Choose Claude SDK model";
-  }
-  if (harnessName === "codex") {
-    return "Choose Codex model";
-  }
-  if (harnessName === "pi") {
-    return "Choose Pi model";
-  }
-  return "Choose harness model";
-}
-
-/**
- * @param {string} harnessName
- * @param {string} modelValue
- * @returns {string}
- */
-function formatHarnessModelSummary(harnessName, modelValue) {
-  if (harnessName === "claude-agent-sdk") {
-    return modelValue === "off"
-      ? "SDK model reset to default."
-      : `SDK model set to \`${modelValue}\``;
-  }
-  if (harnessName === "codex") {
-    return modelValue === "off"
-      ? "Codex model reset to default."
-      : `Codex model set to \`${modelValue}\``;
-  }
-  if (harnessName === "pi") {
-    return modelValue === "off"
-      ? "Pi model reset to default."
-      : `Pi model set to \`${modelValue}\``;
-  }
-  return modelValue === "off"
-    ? `${harnessName} model reset to default.`
-    : `${harnessName} model set to \`${modelValue}\``;
-}
-
-/**
- * @param {NonNullable<HarnessRunConfig["approvalsReviewer"]>} approvalsReviewer
- * @returns {string}
- */
-function formatCodexDefaultsSummary(approvalsReviewer) {
-  return `Codex approvals reviewer: \`${approvalsReviewer}\``;
-}
-
-/**
- * @param {import("../../../store.js").ChatRow} chat
- * @param {string} harnessName
- * @param {SelectOption[]} options
- * @returns {string | undefined}
- */
-function getCurrentHarnessModelId(chat, harnessName, options) {
-  const scopedConfig = getScopedHarnessConfig(chat.harness_config, harnessName);
-  const currentModel = typeof scopedConfig.model === "string" ? scopedConfig.model : undefined;
-  if (!currentModel) {
-    return undefined;
-  }
-  const optionIds = new Set(options.map((option) => typeof option === "string" ? option : option.id));
-  return optionIds.has(currentModel) ? currentModel : undefined;
-}
-
-/**
- * @param {string} chatId
- * @param {import("../../../store.js").ChatRow} chat
- * @param {HarnessModelSelection} selection
- * @returns {Promise<string>}
- */
-async function applyHarnessModelSelection(chatId, chat, selection) {
-  const normalized = normalizeHarnessConfig(chat.harness_config, chat.harness);
-  const rawScoped = normalized[selection.harness];
-  /** @type {Record<string, unknown>} */
-  const scoped = isObjectRecord(rawScoped) ? { ...rawScoped } : {};
-
-  if (selection.value === "off") {
-    delete scoped.model;
-  } else {
-    scoped.model = selection.value;
-  }
-
-  if (Object.keys(scoped).length === 0) {
-    delete normalized[selection.harness];
-  } else {
-    normalized[selection.harness] = scoped;
-  }
-
-  await updateChatConfig(chatId, (current) => ({ ...current, harness_config: normalized }), chat);
-  return formatHarnessModelSummary(selection.harness, selection.value);
-}
-
-/**
- * @param {string} chatId
- * @param {import("../../../store.js").ChatRow} chat
- * @param {CodexSetupDefaults} defaults
- * @returns {Promise<string>}
- */
-async function applyCodexSetupDefaults(chatId, chat, defaults) {
-  const normalized = normalizeHarnessConfig(chat.harness_config, chat.harness);
-  const rawScoped = normalized.codex;
-  /** @type {Record<string, unknown>} */
-  const scoped = isObjectRecord(rawScoped) ? { ...rawScoped } : {};
-
-  scoped.approvalsReviewer = defaults.approvalsReviewer;
-  normalized.codex = scoped;
-
-  await updateChatConfig(chatId, (current) => ({ ...current, harness_config: normalized }), chat);
-  return formatCodexDefaultsSummary(defaults.approvalsReviewer);
-}
-
-/**
  * @param {import("../../../store.js").ChatRow} chat
  * @param {TurnIO["select"]} select
  * @returns {Promise<SetupSelectionResult>}
@@ -246,10 +67,6 @@ async function applyCodexSetupDefaults(chatId, chat, defaults) {
 async function collectSetupSelections(chat, select) {
   /** @type {StagedConfigChange[]} */
   const stagedChanges = [];
-  /** @type {HarnessModelSelection | null} */
-  let stagedHarnessModel = null;
-  /** @type {CodexSetupDefaults | null} */
-  let stagedCodexDefaults = null;
   /** @type {string[]} */
   const notes = [];
 
@@ -276,46 +93,12 @@ async function collectSetupSelections(chat, select) {
       continue;
     }
 
-    const selectedHarness = selected;
-    if (selectedHarness === "app") {
-      continue;
-    }
-    const harness = resolveHarness(selectedHarness);
-    if (harness.getCapabilities().supportsModelSelection) {
-      const modelOptions = await getHarnessModelOptions(selectedHarness);
-      if (modelOptions.length === 0) {
-        notes.push(`No selectable ${selectedHarness} models are currently available, so its /model setting was left unchanged.`);
-      } else {
-        const currentModelId = getCurrentHarnessModelId(chat, selectedHarness, modelOptions);
-        const selectedModel = await select(
-          getHarnessModelQuestion(selectedHarness),
-          modelOptions,
-          { deleteOnSelect: true, ...(currentModelId ? { currentId: currentModelId } : {}) },
-        );
-        if (!selectedModel) {
-          return { kind: "cancelled" };
-        }
-
-        stagedHarnessModel = { harness: selectedHarness, value: selectedModel };
-      }
-    } else {
-      notes.push(`${selectedHarness} does not expose a configurable /model setting.`);
-    }
-
-    if (selectedHarness !== "codex") {
-      continue;
-    }
-
-    stagedCodexDefaults = {
-      approvalsReviewer: DEFAULT_CODEX_APPROVALS_REVIEWER,
-    };
+    notes.push(`Use /config after starting ${selected} to choose ACP-native model, mode, and reasoning options.`);
   }
 
   return {
     kind: "selected",
     stagedChanges,
-    stagedHarnessModel,
-    stagedCodexDefaults,
     notes,
   };
 }
@@ -332,21 +115,10 @@ async function applySetupSelections(rootDb, chatId, chat, senderIds, selections)
   /** @type {string[]} */
   const applied = [];
   const notes = [...selections.notes];
-  /** @type {import("../../../store.js").ChatRow} */
-  let currentChat = chat;
 
   for (const change of selections.stagedChanges) {
     applied.push(await setConfigValue(rootDb, chatId, change.setting, change.value, { senderIds, getChatDb }));
-    currentChat = await getChatOrThrow(rootDb, chatId);
   }
-  if (selections.stagedHarnessModel) {
-    applied.push(await applyHarnessModelSelection(chatId, currentChat, selections.stagedHarnessModel));
-    currentChat = await getChatOrThrow(rootDb, chatId);
-  }
-  if (selections.stagedCodexDefaults) {
-    applied.push(await applyCodexSetupDefaults(chatId, currentChat, selections.stagedCodexDefaults));
-  }
-
   if (isMaster(senderIds)) {
     if (!chat.is_enabled) {
       applied.push(await setConfigValue(rootDb, chatId, "enabled", "on", { senderIds, getChatDb }));

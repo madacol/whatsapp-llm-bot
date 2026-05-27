@@ -1,5 +1,5 @@
 /**
- * @typedef {"app" | "claude-agent-sdk" | "codex" | "pi" | string} HarnessRuntimeProvider
+ * @typedef {"app" | "claude" | "codex" | "pi" | string} HarnessRuntimeProvider
  */
 
 /**

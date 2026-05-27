@@ -35,6 +35,9 @@ export function buildRunConfig(chatId, chatInfo, chatName, harnessName, resolved
     chatInfo?.harness_config,
     harnessName ?? chatInfo?.harness,
   );
+  const configValues = harnessConfig.configValues && typeof harnessConfig.configValues === "object" && !Array.isArray(harnessConfig.configValues)
+    ? /** @type {Record<string, string | boolean | null>} */ (harnessConfig.configValues)
+    : undefined;
   const workdir = resolveRunWorkdir(chatId, chatInfo, chatName, resolvedBinding);
   return {
     workdir,
@@ -47,5 +50,6 @@ export function buildRunConfig(chatId, chatInfo, chatName, harnessName, resolved
     sandboxMode: /** @type {HarnessRunConfig["sandboxMode"]} */ (typeof harnessConfig.sandboxMode === "string" ? harnessConfig.sandboxMode : "workspace-write"),
     approvalPolicy: /** @type {HarnessRunConfig["approvalPolicy"]} */ (typeof harnessConfig.approvalPolicy === "string" ? harnessConfig.approvalPolicy : undefined),
     approvalsReviewer: /** @type {HarnessRunConfig["approvalsReviewer"]} */ (typeof harnessConfig.approvalsReviewer === "string" ? harnessConfig.approvalsReviewer : undefined),
+    ...(configValues ? { configValues } : {}),
   };
 }

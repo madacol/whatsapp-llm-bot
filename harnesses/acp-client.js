@@ -100,6 +100,17 @@ function jsonRpcErrorMessage(error) {
 }
 
 /**
+ * @param {unknown} error
+ * @returns {number}
+ */
+function jsonRpcErrorCode(error) {
+  if (error && typeof error === "object" && "code" in error && typeof error.code === "number") {
+    return error.code;
+  }
+  return -32000;
+}
+
+/**
  * @param {OpenAcpConnectionOptions} options
  * @returns {Promise<AcpConnection>}
  */
@@ -190,7 +201,7 @@ export async function openAcpConnection(options) {
             send({ id: message.id, result: result ?? {} });
           } catch (error) {
             const errorMessage = error instanceof Error ? error.message : String(error);
-            send({ id: message.id, error: { code: -32000, message: errorMessage } });
+            send({ id: message.id, error: { code: jsonRpcErrorCode(error), message: errorMessage } });
           }
           continue;
         }
