@@ -173,7 +173,7 @@ function resolveWhatsAppEditTarget(target, fallback) {
     return {
       key: {
         remoteJid: typeof target.messageKey.remoteJid === "string" ? target.messageKey.remoteJid : fallback.chatId,
-        ...(typeof target.messageKey.fromMe === "boolean" ? { fromMe: target.messageKey.fromMe } : {}),
+        fromMe: true,
         id: target.messageKey.id,
       },
       messageKind: target.messageKind ?? "text",
@@ -647,13 +647,7 @@ export async function editWhatsAppMessage(sock, jid, newText, target) {
     return;
   }
 
-  await sock.relayMessage(jid, {
-    protocolMessage: {
-      key: resolved.key,
-      type: proto.Message.ProtocolMessage.Type.MESSAGE_EDIT,
-      editedMessage: { conversation: newText },
-    },
-  }, { additionalAttributes: { edit: "1" } });
+  await sock.sendMessage(jid, { text: newText, edit: resolved.key });
 }
 
 /**
