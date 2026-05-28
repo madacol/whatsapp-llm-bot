@@ -45,7 +45,7 @@ describe("restart acknowledgement delivery", () => {
     }
   });
 
-  it("sends a new restarted message when the persisted marker has no message key", async () => {
+  it("does not send a duplicate restarted message when the persisted marker has no editable handle", async () => {
     const dir = await mkdtemp(path.join(os.tmpdir(), "restart-ack-"));
     const storePath = path.join(dir, "ack.json");
     const store = createRestartAckStore(storePath);
@@ -72,14 +72,15 @@ describe("restart acknowledgement delivery", () => {
       });
 
       assert.deepEqual(edits, []);
-      assert.deepEqual(sent, [{ chatId: "chat-2@g.us", text: "Restarted." }]);
-      assert.equal(await store.read(), null);
+      assert.deepEqual(sent, []);
+      const persisted = await store.read();
+      assert.equal(persisted?.chatId, "chat-2@g.us");
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
   });
 
-  it("falls back to a new restarted message when the persisted edit handle is gone", async () => {
+  it("does not send a duplicate restarted message when the persisted edit handle is gone", async () => {
     const dir = await mkdtemp(path.join(os.tmpdir(), "restart-ack-"));
     const storePath = path.join(dir, "ack.json");
     const store = createRestartAckStore(storePath);
@@ -104,8 +105,9 @@ describe("restart acknowledgement delivery", () => {
         },
       });
 
-      assert.deepEqual(sent, [{ chatId: "chat-lost-handle@g.us", text: "Restarted." }]);
-      assert.equal(await store.read(), null);
+      assert.deepEqual(sent, []);
+      const persisted = await store.read();
+      assert.equal(persisted?.transportHandleId, "wa-edit-missing");
     } finally {
       await rm(dir, { recursive: true, force: true });
     }

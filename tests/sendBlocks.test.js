@@ -1079,26 +1079,27 @@ describe("sendBlocks – tool-call → edit pipeline", () => {
     assert.equal(opts.additionalAttributes.edit, "1", "Should have edit='1' attribute");
   });
 
-  it("editWhatsAppMessageByHandle sends a new message when the WhatsApp edit handle is expired", async () => {
+  it("editWhatsAppMessageByHandle rejects when the WhatsApp edit handle is expired", async () => {
     const { sock, calls } = createCaptureSock();
     const now = new Date("2026-05-26T12:15:00.000Z");
 
-    await editWhatsAppMessageByHandle(sock, "expired-handle", "Restarted.", {
-      now,
-      store: /** @type {import("../store.js").Store} */ ({
-        getWhatsAppEditHandle: async () => ({
-          id: "expired-handle",
-          chat_id: "chat-1",
-          message_key_json: { id: "msg-old", remoteJid: "chat-1" },
-          message_kind: "text",
-          created_at: "2026-05-26T12:00:00.000Z",
-          expires_at: "2026-05-26T12:14:00.000Z",
+    await assert.rejects(
+      () => editWhatsAppMessageByHandle(sock, "expired-handle", "Restarted.", {
+        now,
+        store: /** @type {import("../store.js").Store} */ ({
+          getWhatsAppEditHandle: async () => ({
+            id: "expired-handle",
+            chat_id: "chat-1",
+            message_key_json: { id: "msg-old", remoteJid: "chat-1" },
+            message_kind: "text",
+            created_at: "2026-05-26T12:00:00.000Z",
+            expires_at: "2026-05-26T12:14:00.000Z",
+          }),
         }),
       }),
-    });
+      /WhatsApp edit handle expired-handle expired\./,
+    );
 
-    assert.equal(calls.length, 1);
-    assert.equal(calls[0].method, "sendMessage");
-    assert.deepEqual(calls[0].args.slice(0, 2), ["chat-1", { text: "Restarted." }]);
+    assert.equal(calls.length, 0);
   });
 });
