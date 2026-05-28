@@ -8,6 +8,7 @@ import { createLogger } from "../logger.js";
 const log = createLogger("harness:acp");
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "..");
+const ACP_STDERR_LOG_ENV = "MADABOT_ACP_STDERR_LOG";
 
 /**
  * @typedef {{ resolve: (value: unknown) => void, reject: (error: Error) => void }} PendingRequest
@@ -155,6 +156,14 @@ function waitForProcessExit(proc, timeoutMs) {
 }
 
 /**
+ * @param {NodeJS.ProcessEnv} [env]
+ * @returns {boolean}
+ */
+function shouldLogAcpChildStderr(env = process.env) {
+  return env[ACP_STDERR_LOG_ENV] === "1";
+}
+
+/**
  * @param {OpenAcpConnectionOptions} options
  * @returns {Promise<AcpConnection>}
  */
@@ -174,7 +183,13 @@ export async function openAcpConnection(options) {
 
   proc.stderr.setEncoding("utf8");
   proc.stderr.on("data", (chunk) => {
-    log.debug("[acp stderr]", String(chunk).trimEnd());
+    if (!shouldLogAcpChildStderr()) {
+      return;
+    }
+    const text = String(chunk).trimEnd();
+    if (text) {
+      log.debug("[acp stderr]", text);
+    }
   });
 
   const rl = readline.createInterface({
