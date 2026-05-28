@@ -102,7 +102,7 @@ export function subagentMessageEvent(input) {
 }
 
 /**
- * @param {import("./harnesses/harness-runtime-events.js").HarnessRuntimeEvent} event
+ * @param {RuntimeEventOutboundEvent["event"]} event
  * @returns {RuntimeEventOutboundEvent}
  */
 export function runtimeEvent(event) {
