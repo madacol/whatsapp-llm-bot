@@ -16,9 +16,12 @@ function formatInterruptedTurnMessage(turn) {
  * @param {unknown} error
  * @returns {boolean}
  */
-function isMissingEditHandleError(error) {
+function isUnavailableEditHandleError(error) {
   return error instanceof Error
-    && /^WhatsApp edit handle .+ was not found\.$/.test(error.message);
+    && (
+      /^WhatsApp edit handle .+ was not found\.$/.test(error.message)
+      || /^WhatsApp edit handle .+ expired\.$/.test(error.message)
+    );
 }
 
 /**
@@ -51,10 +54,10 @@ export async function deliverPendingRestartAck({ store, editMessage, sendText, r
         text: RESTARTED_TEXT,
       });
     } catch (error) {
-      if (!isMissingEditHandleError(error)) {
+      if (!isUnavailableEditHandleError(error)) {
         throw error;
       }
-      log.warn("Sending fallback restart acknowledgement because the WhatsApp edit handle is gone.", {
+      log.warn("Sending fallback restart acknowledgement because the WhatsApp edit handle is unavailable.", {
         chatId: record.chatId,
         transportHandleId,
       });
