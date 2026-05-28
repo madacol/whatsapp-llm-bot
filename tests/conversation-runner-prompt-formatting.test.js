@@ -664,6 +664,106 @@ describe("createConversationRunner prompt formatting", () => {
     assert.ok(phases.indexOf("create:personal") > phases.indexOf("run:work"));
   });
 
+  it("injects mid-turn messages through the active semantic adapter", async () => {
+    const chatId = "conv-adapter-live-input";
+    const harnessName = "adapter-live-input";
+    await seedChat(chatId, { enabled: true });
+    await updateChatConfig(chatId, (current) => ({
+      ...current,
+      harness: harnessName,
+      harness_config: {},
+    }));
+
+    const releaseFirstRun = createDeferredVoid();
+    /** @type {string[]} */
+    const phases = [];
+    /** @type {string[]} */
+    const injectedTexts = [];
+    registerHarnessDriver({
+      name: harnessName,
+      supportsInstances: true,
+      createInstance: ({ instanceId, continuationKey }) => ({
+        harness: {
+          getName: () => harnessName,
+          getCapabilities: () => ({
+            supportsResume: true,
+            supportsCancel: true,
+            supportsLiveInput: true,
+            supportsApprovals: false,
+            supportsWorkdir: true,
+            supportsSandboxConfig: false,
+            supportsModelSelection: false,
+            supportsReasoningEffort: false,
+            supportsSessionFork: false,
+          }),
+          async run() {
+            assert.fail("semantic adapter should not use legacy run");
+          },
+          handleCommand: async () => false,
+          listSlashCommands: () => [],
+          createAdapter() {
+            return {
+              async startSession(input) {
+                phases.push("start");
+                return {
+                  chatId: input.chatId,
+                  harnessName,
+                  instanceId,
+                  continuationKey,
+                  status: "ready",
+                  resumeCursor: input.resumeCursor ?? null,
+                };
+              },
+              async sendTurn(input) {
+                phases.push("send");
+                assert.equal(input.chatId, chatId);
+                await releaseFirstRun.promise;
+                return {
+                  response: [{ type: "text", text: "ok" }],
+                  messages: input.messages ?? [],
+                  usage: { promptTokens: 0, completionTokens: 0, cachedTokens: 0, cost: 0 },
+                };
+              },
+              interruptTurn: async () => false,
+              injectMessage: async (_chatId, text) => {
+                phases.push("inject");
+                injectedTexts.push(text);
+                return true;
+              },
+              stopSession: async () => false,
+              listSessions: () => [],
+              readThread: async () => null,
+              rollbackThread: async () => null,
+              streamEvents: {
+                async *[Symbol.asyncIterator]() {},
+              },
+              subscribeEvents: () => () => {},
+            };
+          },
+        },
+      }),
+    });
+
+    const firstTurn = createChatTurn({
+      chatId,
+      content: [{ type: "text", text: "first" }],
+    });
+    const firstHandled = handleMessage(firstTurn.context);
+    await waitUntil(() => phases.includes("send"));
+
+    const secondTurn = createChatTurn({
+      chatId,
+      content: [{ type: "text", text: "second" }],
+    });
+    await handleMessage(secondTurn.context);
+
+    assert.deepEqual(injectedTexts, ["second"]);
+    assert.deepEqual(phases, ["start", "send", "inject"]);
+
+    releaseFirstRun.resolve();
+    await firstHandled;
+  });
+
   it("runs command afterResponse hooks only after the command reply resolves", async () => {
     await seedChat("conv-command-after-response", { enabled: true });
     const { createConversationRunner } = await import("../conversation/create-conversation-runner.js");

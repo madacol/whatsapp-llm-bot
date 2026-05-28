@@ -292,6 +292,28 @@ function resolveConversationHarnessFromSelection(selection) {
 }
 
 /**
+ * Pick the live-input surface for a run. Semantic adapters own provider-native
+ * turn state, so adapter-backed harnesses must inject through the adapter
+ * rather than the legacy harness facade.
+ * @param {AgentHarness} harness
+ * @param {ReturnType<typeof resolveHarnessInstance> | null} harnessInstance
+ * @returns {{ supportsLiveInput: boolean, injectMessage?: AgentHarness["injectMessage"] }}
+ */
+function resolveLiveInputTarget(harness, harnessInstance) {
+  const supportsLiveInput = harness.getCapabilities().supportsLiveInput;
+  if (supportsLiveInput && harnessInstance?.adapter) {
+    return {
+      supportsLiveInput,
+      injectMessage: harnessInstance.adapter.injectMessage.bind(harnessInstance.adapter),
+    };
+  }
+  return {
+    supportsLiveInput,
+    injectMessage: harness.injectMessage,
+  };
+}
+
+/**
  * @typedef {import("../store.js").Store} Store
  *
  * @typedef {{
@@ -786,6 +808,7 @@ export function createConversationRunner({ store, llmClient, getActionsFn, execu
       turn,
       userText,
       harness,
+      liveInputTarget: resolveLiveInputTarget(harness, harnessInstance),
       ownerKey: harnessOwnerKey,
     });
     if (lifecycleDecision.status === "buffered") {
