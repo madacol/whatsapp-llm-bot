@@ -565,6 +565,56 @@ describe("getMessageContent", () => {
 });
 
 describe("adaptIncomingMessages", () => {
+  it("keeps command messages separate from coalesced text turns", async () => {
+    const chatId = "command-batch-chat@g.us";
+    const sock = /** @type {import("@whiskeysockets/baileys").WASocket} */ (/** @type {unknown} */ ({
+      user: { id: "bot@s.whatsapp.net" },
+      groupMetadata: async () => ({ subject: "Command Batch Chat" }),
+      signalRepository: {
+        lidMapping: {
+          getPNForLID: async () => null,
+        },
+      },
+      sendPresenceUpdate: async () => {},
+    }));
+    const confirmRegistry = createConfirmRuntime();
+    const selectRegistry = createSelectRuntime();
+    /** @type {ChatTurn[]} */
+    const receivedTurns = [];
+
+    await adaptIncomingMessages(
+      ["check logs", "check logs", "!s"].map((text, index) => /** @type {BaileysMessage} */ ({
+        key: {
+          remoteJid: chatId,
+          fromMe: false,
+          id: `batched-${index}`,
+          participant: "user@s.whatsapp.net",
+        },
+        messageTimestamp: 1777467488 + index,
+        pushName: "Command Sender",
+        message: {
+          conversation: text,
+        },
+      })),
+      sock,
+      async (turn) => {
+        receivedTurns.push(turn);
+      },
+      confirmRegistry,
+      selectRegistry,
+    );
+
+    assert.equal(receivedTurns.length, 2);
+    assert.deepEqual(
+      receivedTurns[0].content.filter((block) => block.type === "text").map((block) => block.text),
+      ["check logs", "check logs"],
+    );
+    assert.deepEqual(
+      receivedTurns[1].content.filter((block) => block.type === "text").map((block) => block.text),
+      ["!s"],
+    );
+  });
+
   it("merges album child images into one app turn", async () => {
     const chatId = "album-chat@g.us";
     const sock = /** @type {import("@whiskeysockets/baileys").WASocket} */ (/** @type {unknown} */ ({
