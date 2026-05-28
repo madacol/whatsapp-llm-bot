@@ -1,7 +1,11 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import {
   emitAcpSnapshotFileChanges,
+  isAcpFileChangeIgnored,
   reconcileAcpFileChangeWithBaseline,
   resolveAcpFileChangePath,
 } from "../harnesses/acp-file-changes.js";
@@ -96,5 +100,21 @@ describe("ACP file changes", () => {
       [deletedPath, "delete"],
     ]);
     assert.ok(changes.every((change) => typeof change.diff === "string"));
+  });
+
+  it("detects ignored ACP file changes from runtime-state path patterns", async () => {
+    const workdir = await fs.mkdtemp(path.join(os.tmpdir(), "acp-ignore-"));
+
+    assert.equal(
+      isAcpFileChangeIgnored(
+        { workdir, ignoredFileChangePaths: ["auth_info_baileys/**"] },
+        path.join(workdir, "auth_info_baileys/sender-key-test.json"),
+      ),
+      true,
+    );
+    assert.equal(
+      isAcpFileChangeIgnored({ workdir, ignoredFileChangePaths: ["auth_info_baileys/**"] }, path.join(workdir, "src/app.js")),
+      false,
+    );
   });
 });

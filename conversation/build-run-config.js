@@ -55,6 +55,7 @@ export function buildRunConfig(chatId, chatInfo, chatName, harnessName, resolved
     : undefined;
   const workdir = resolveRunWorkdir(chatId, chatInfo, chatName, resolvedBinding);
   const protectedPaths = normalizeStringList(harnessConfig.protectedPaths);
+  const ignoredFileChangePaths = normalizeStringList(harnessConfig.ignoredFileChangePaths);
   return {
     workdir,
     harnessInstanceId: instanceId,
@@ -67,6 +68,7 @@ export function buildRunConfig(chatId, chatInfo, chatName, harnessName, resolved
     approvalPolicy: /** @type {HarnessRunConfig["approvalPolicy"]} */ (typeof harnessConfig.approvalPolicy === "string" ? harnessConfig.approvalPolicy : undefined),
     approvalsReviewer: /** @type {HarnessRunConfig["approvalsReviewer"]} */ (typeof harnessConfig.approvalsReviewer === "string" ? harnessConfig.approvalsReviewer : undefined),
     ...(protectedPaths ? { protectedPaths } : {}),
+    ...(ignoredFileChangePaths ? { ignoredFileChangePaths } : {}),
     ...(configValues ? { configValues } : {}),
   };
 }

@@ -261,6 +261,21 @@ describe("buildRunConfig", () => {
     assert.deepEqual(config.protectedPaths, ["package.json", "migrations/**"]);
   });
 
+  it("passes ignored file-change policies from harness config", () => {
+    const config = buildRunConfig("chat-1", /** @type {import("../store.js").ChatRow} */ ({
+      chat_id: "chat-1",
+      harness: "codex",
+      harness_cwd: null,
+      harness_config: {
+        codex: {
+          ignoredFileChangePaths: ["auth_info_baileys/**", "", "pgdata/**"],
+        },
+      },
+    }), "Project Alpha", "codex");
+
+    assert.deepEqual(config.ignoredFileChangePaths, ["auth_info_baileys/**", "pgdata/**"]);
+  });
+
   it("does not leak a legacy Claude model into Codex runs", () => {
     const codexConfig = buildRunConfig("chat-1", /** @type {import("../store.js").ChatRow} */ ({
       chat_id: "chat-1",

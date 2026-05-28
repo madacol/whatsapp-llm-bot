@@ -4,6 +4,17 @@ import { buildUnifiedFileDiff } from "./file-change-utils.js";
 
 const MAX_SNAPSHOT_FILE_BYTES = 1024 * 1024;
 const SNAPSHOT_EXCLUDED_DIRS = new Set([".git", "node_modules", ".media", "coverage", "dist", "build"]);
+const DEFAULT_IGNORED_FILE_CHANGE_PATHS = [
+  ".agents/.runtime/**",
+  ".diagnostics/**",
+  ".madabot/**",
+  ".media/**",
+  ".state/**",
+  ".wwebjs_auth/**",
+  ".wwebjs_cache/**",
+  "auth_info_baileys/**",
+  "pgdata/**",
+];
 
 /**
  * @param {string | null | undefined} workdir
@@ -27,6 +38,75 @@ export async function snapshotAcpWorkdir(workdir) {
  */
 export function resolveAcpFileChangePath(workdir, filePath) {
   return path.resolve(workdir ?? process.cwd(), filePath);
+}
+
+/**
+ * @param {string} value
+ * @returns {string}
+ */
+function normalizeSlashes(value) {
+  return value.replace(/\\/g, "/");
+}
+
+/**
+ * @param {string} pattern
+ * @returns {RegExp}
+ */
+function globToRegExp(pattern) {
+  const normalized = normalizeSlashes(pattern.trim()).replace(/^\/+/, "");
+  let source = "";
+  for (let index = 0; index < normalized.length; index += 1) {
+    const char = normalized[index];
+    const next = normalized[index + 1];
+    if (char === "*" && next === "*") {
+      source += ".*";
+      index += 1;
+      continue;
+    }
+    if (char === "*") {
+      source += "[^/]*";
+      continue;
+    }
+    if (char === "?") {
+      source += "[^/]";
+      continue;
+    }
+    source += char.replace(/[|\\{}()[\]^$+?.]/g, "\\$&");
+  }
+  return new RegExp(`^${source}(?:/.*)?$`);
+}
+
+/**
+ * @param {unknown} value
+ * @returns {string[]}
+ */
+function normalizePatternList(value) {
+  return Array.isArray(value)
+    ? value.filter((entry) => typeof entry === "string" && entry.trim()).map((entry) => entry.trim())
+    : [];
+}
+
+/**
+ * @param {HarnessRunConfig | undefined} runConfig
+ * @param {string} filePath
+ * @returns {boolean}
+ */
+export function isAcpFileChangeIgnored(runConfig, filePath) {
+  const patterns = [
+    ...DEFAULT_IGNORED_FILE_CHANGE_PATHS,
+    ...normalizePatternList(runConfig?.ignoredFileChangePaths),
+  ];
+  if (patterns.length === 0) {
+    return false;
+  }
+  const root = path.resolve(runConfig?.workdir ?? process.cwd());
+  const resolvedPath = resolveAcpFileChangePath(root, filePath);
+  const relativePath = path.relative(root, resolvedPath);
+  if (!relativePath || relativePath.startsWith("..") || path.isAbsolute(relativePath)) {
+    return false;
+  }
+  const normalizedRelativePath = normalizeSlashes(relativePath);
+  return patterns.some((pattern) => globToRegExp(pattern).test(normalizedRelativePath));
 }
 
 /**
