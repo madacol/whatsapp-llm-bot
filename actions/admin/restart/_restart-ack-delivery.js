@@ -31,10 +31,11 @@ function isUnavailableEditHandleError(error) {
  *   editMessage: (input: { transportHandleId: string, text: string }) => Promise<void>,
  *   sendText: (chatId: string, text: string) => Promise<void>,
  *   recoverQueuedMessage?: (input: { chatId: string, queueId: number }) => MessageHandle | undefined,
+ *   phase?: "beforeQueueFlush" | "afterQueueFlush",
  * }} input
  * @returns {Promise<void>}
  */
-export async function deliverPendingRestartAck({ store, editMessage, sendText, recoverQueuedMessage }) {
+export async function deliverPendingRestartAck({ store, editMessage, sendText, recoverQueuedMessage, phase }) {
   const record = await store.read();
   if (!record) {
     return;
@@ -46,6 +47,10 @@ export async function deliverPendingRestartAck({ store, editMessage, sendText, r
       ? recoverQueuedMessage?.({ chatId: record.chatId, queueId: record.queueId })
       : undefined;
   const transportHandleId = record.transportHandleId ?? recoveredHandle?.transportHandleId;
+
+  if (!transportHandleId && phase === "beforeQueueFlush" && typeof record.queueId === "number") {
+    return;
+  }
 
   if (transportHandleId) {
     try {

@@ -89,8 +89,8 @@ if (!process.env.TESTING) {
   const restartAckStore = createRestartAckStore();
   const transport = await createWhatsAppTransport({
     outboundStore: store,
-    onConnectionOpen: async ({ editMessage, sendText, recoverQueuedMessage }) => {
-      await deliverPendingRestartAck({ store: restartAckStore, editMessage, sendText, recoverQueuedMessage });
+    onConnectionOpen: async ({ editMessage, sendText, recoverQueuedMessage, phase }) => {
+      await deliverPendingRestartAck({ store: restartAckStore, editMessage, sendText, recoverQueuedMessage, phase });
     },
   }).catch(async (error) => {
       log.error("Initialization error:", error);
