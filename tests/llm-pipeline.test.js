@@ -7,6 +7,7 @@ process.env.LLM_API_KEY = "test-key";
 process.env.MODEL = "mock-model";
 
 import { createChatTurn, createMockLlmServer, createTestDb, seedChat as seedChat_ } from "./helpers.js";
+import { createAcpTestHarnessState, registerAcpTestHarness } from "./acp-test-harness.js";
 import { setDb } from "../db.js";
 import { updateChatConfig } from "../chat-config.js";
 
@@ -18,73 +19,26 @@ let store;
 let mockServer;
 /** @type {(msg: ChatTurn) => Promise<void>} */
 let handleMessage;
-/** @type {HarnessTurnInput[]} */
-let capturedTurns = [];
 
 const HARNESS_NAME = "pipeline-acp";
+const pipelineHarnessState = createAcpTestHarnessState();
+const capturedTurns = pipelineHarnessState.turns;
 
 async function registerPipelineHarness() {
-  const { registerHarnessDriver } = await import("../harnesses/index.js");
-  registerHarnessDriver({
+  registerAcpTestHarness({
     name: HARNESS_NAME,
-    supportsInstances: true,
-    createInstance: () => ({
-      harness: {
-        getName: () => HARNESS_NAME,
-        getCapabilities: () => ({
-          supportsResume: true,
-          supportsCancel: false,
-          supportsLiveInput: false,
-          supportsApprovals: false,
-          supportsWorkdir: true,
-          supportsSandboxConfig: false,
-          supportsModelSelection: false,
-          supportsReasoningEffort: false,
-          supportsSessionFork: false,
-        }),
-        run: async () => {
-          throw new Error("pipeline tests must use the semantic ACP adapter");
-        },
-        handleCommand: async () => false,
-        listSlashCommands: () => [],
-        createAdapter: ({ name, instanceId, continuationKey }) => ({
-          startSession: async (input) => ({
-            chatId: input.chatId,
-            harnessName: name,
-            instanceId,
-            continuationKey,
-            status: "ready",
-            workdir: input.runConfig?.workdir ?? null,
-            model: input.runConfig?.model ?? null,
-            resumeCursor: input.resumeCursor ?? null,
-          }),
-          sendTurn: async (input) => {
-            capturedTurns.push(input);
-            if (input.input?.includes("Trigger provider error")) {
-              throw new Error("Provider failed intentionally");
-            }
-            return {
-              response: [{ type: "markdown", text: `ACP response: ${input.input ?? ""}` }],
-              messages: input.messages ?? [],
-              usage: { promptTokens: 10, completionTokens: 5, cachedTokens: 8, cost: 0.001 },
-            };
-          },
-          interruptTurn: async () => false,
-          respondToRequest: async () => false,
-          respondToUserInput: async () => false,
-          injectMessage: async () => false,
-          stopSession: async () => false,
-          hasSession: () => false,
-          stopAll: async () => {},
-          listSessions: () => [],
-          readThread: async () => null,
-          rollbackThread: async () => null,
-          streamEvents: {
-            async *[Symbol.asyncIterator]() {},
-          },
-        }),
-      },
-    }),
+    state: pipelineHarnessState,
+    errorMessage: "pipeline tests must use the semantic ACP adapter",
+    onSendTurn: (input) => {
+      if (input.input?.includes("Trigger provider error")) {
+        throw new Error("Provider failed intentionally");
+      }
+      return {
+        response: [{ type: "markdown", text: `ACP response: ${input.input ?? ""}` }],
+        messages: input.messages ?? [],
+        usage: { promptTokens: 10, completionTokens: 5, cachedTokens: 8, cost: 0.001 },
+      };
+    },
   });
 }
 
@@ -119,7 +73,7 @@ after(async () => {
 });
 
 afterEach(() => {
-  capturedTurns = [];
+  pipelineHarnessState.reset();
   assert.equal(mockServer.pendingResponses(), 0);
 });
 

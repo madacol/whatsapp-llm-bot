@@ -13,6 +13,7 @@ import {
   createTestDb,
   seedChat as seedChat_,
 } from "./helpers.js";
+import { createAcpTestHarnessState, registerAcpTestHarness } from "./acp-test-harness.js";
 import { setDb } from "../db.js";
 import config from "../config.js";
 import { readChatConfig, updateChatConfig } from "../chat-config.js";
@@ -23,11 +24,11 @@ let mockServer;
 let handleMessage;
 /** @type {import("@electric-sql/pglite").PGlite} */
 let testDb;
-/** @type {HarnessTurnInput[]} */
-let capturedTurns = [];
 
 const CACHE_PATH = path.resolve("data/models.json");
 const HARNESS_NAME = "integration-acp";
+const integrationHarnessState = createAcpTestHarnessState();
+const capturedTurns = integrationHarnessState.turns;
 
 /** @param {string} chatId @param {{enabled?: boolean, systemPrompt?: string | null, model?: string | null}} [options] */
 const seedChat = (chatId, options) => seedChat_(testDb, chatId, options);
@@ -42,63 +43,14 @@ async function seedAcpChat(chatId, options = {}) {
 }
 
 async function registerIntegrationHarness() {
-  const { registerHarnessDriver } = await import("../harnesses/index.js");
-  registerHarnessDriver({
+  registerAcpTestHarness({
     name: HARNESS_NAME,
-    supportsInstances: true,
-    createInstance: () => ({
-      harness: {
-        getName: () => HARNESS_NAME,
-        getCapabilities: () => ({
-          supportsResume: true,
-          supportsCancel: false,
-          supportsLiveInput: false,
-          supportsApprovals: false,
-          supportsWorkdir: true,
-          supportsSandboxConfig: false,
-          supportsModelSelection: false,
-          supportsReasoningEffort: false,
-          supportsSessionFork: false,
-        }),
-        run: async () => {
-          throw new Error("integration tests must use the semantic ACP adapter");
-        },
-        handleCommand: async () => false,
-        listSlashCommands: () => [],
-        createAdapter: ({ name, instanceId, continuationKey }) => ({
-          startSession: async (input) => ({
-            chatId: input.chatId,
-            harnessName: name,
-            instanceId,
-            continuationKey,
-            status: "ready",
-            workdir: input.runConfig?.workdir ?? null,
-            model: input.runConfig?.model ?? null,
-            resumeCursor: input.resumeCursor ?? null,
-          }),
-          sendTurn: async (input) => {
-            capturedTurns.push(input);
-            return {
-              response: [{ type: "markdown", text: `ACP integration response: ${input.input ?? ""}` }],
-              messages: input.messages ?? [],
-              usage: { promptTokens: 10, completionTokens: 5, cachedTokens: 2, cost: 0.001 },
-            };
-          },
-          interruptTurn: async () => false,
-          respondToRequest: async () => false,
-          respondToUserInput: async () => false,
-          injectMessage: async () => false,
-          stopSession: async () => false,
-          hasSession: () => false,
-          stopAll: async () => {},
-          listSessions: () => [],
-          readThread: async () => null,
-          rollbackThread: async () => null,
-          streamEvents: {
-            async *[Symbol.asyncIterator]() {},
-          },
-        }),
-      },
+    state: integrationHarnessState,
+    errorMessage: "integration tests must use the semantic ACP adapter",
+    onSendTurn: (input) => ({
+      response: [{ type: "markdown", text: `ACP integration response: ${input.input ?? ""}` }],
+      messages: input.messages ?? [],
+      usage: { promptTokens: 10, completionTokens: 5, cachedTokens: 2, cost: 0.001 },
     }),
   });
 }
@@ -134,7 +86,7 @@ before(async () => {
 });
 
 afterEach(() => {
-  capturedTurns = [];
+  integrationHarnessState.reset();
   assert.equal(mockServer.pendingResponses(), 0);
 });
 
