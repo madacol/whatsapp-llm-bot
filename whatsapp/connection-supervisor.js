@@ -82,29 +82,17 @@ function printQrCode(qr) {
 }
 
 /**
- * Build the WASocket config from auth state.
- * @param {Awaited<ReturnType<typeof useMultiFileAuthState>>["state"]} auth
- * @param {[number, number, number]} version
- * @returns {Parameters<typeof makeWASocket>[0]}
- */
-export function createSocketConfig(auth, version) {
-  return {
-    version,
-    auth,
-    browser: Browsers.ubuntu("Chrome"),
-    syncFullHistory: false,
-    shouldSyncHistoryMessage: () => false,
-  };
-}
-
-/**
  * Build a WASocket instance from auth state.
  * @param {Awaited<ReturnType<typeof useMultiFileAuthState>>["state"]} auth
  * @param {[number, number, number]} version
  * @returns {import("@whiskeysockets/baileys").WASocket}
  */
 function createSocket(auth, version) {
-  return makeWASocket(createSocketConfig(auth, version));
+  return makeWASocket({
+    version,
+    auth,
+    browser: Browsers.ubuntu("Chrome"),
+  });
 }
 
 /**
