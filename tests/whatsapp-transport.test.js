@@ -485,7 +485,10 @@ describe("WhatsApp transport community creation", () => {
         handleConnectionUpdate: async () => {},
         isStopped: () => false,
       }),
-      onConnectionOpen: async ({ editMessage, recoverQueuedMessage }) => {
+      onConnectionOpen: async ({ editMessage, recoverQueuedMessage, phase }) => {
+        if (phase !== "afterQueueFlush") {
+          return;
+        }
         hookObservations.push(`sent:${sentMessages.length}`);
         if (!queuedAckId) {
           throw new Error("Expected queued handle id before connection open");
@@ -531,6 +534,89 @@ describe("WhatsApp transport community creation", () => {
         },
       },
     ]);
+  });
+
+  it("runs connection-open hooks before unrelated queued outbound flushes can stall", async () => {
+    if (!testDb || !testStore) {
+      throw new Error("Expected test DB and store to be initialized");
+    }
+
+    const chatId = `restart-open-hook-priority-${Date.now()}`;
+    /** @type {((events: Partial<import("@whiskeysockets/baileys").BaileysEventMap>) => Promise<void>) | null} */
+    let processEvents = null;
+    /** @type {Array<{ chatId: string, message: Record<string, unknown> }>} */
+    const sentMessages = [];
+    /** @type {string[]} */
+    const hookPhases = [];
+    /** @type {() => void} */
+    let releaseQueuedSend = () => {};
+    const queuedSendWait = new Promise((resolve) => {
+      releaseQueuedSend = () => resolve(undefined);
+    });
+
+    await testStore.enqueueWhatsAppOutboundQueueEntry({
+      chatId,
+      payloadJson: {
+        kind: "event",
+        event: contentEvent("llm", "queued unrelated output"),
+      },
+    });
+
+    const socket = /** @type {import("@whiskeysockets/baileys").WASocket} */ (/** @type {unknown} */ ({
+      ev: {
+        process(handler) {
+          processEvents = handler;
+        },
+      },
+      sendMessage: async (targetChatId, message) => {
+        if (message.text === "🤖 queued unrelated output") {
+          await queuedSendWait;
+        }
+        sentMessages.push({ chatId: targetChatId, message });
+        return { key: { id: `sent-${sentMessages.length}`, remoteJid: targetChatId } };
+      },
+    }));
+
+    const transport = await createWhatsAppTransport({
+      createConnectionSupervisor: async ({ onSocketReady }) => ({
+        start: async () => {
+          onSocketReady(socket, async () => {});
+        },
+        stop: async () => {},
+        sendText: async () => {},
+        handleConnectionUpdate: async () => {},
+        isStopped: () => false,
+      }),
+      onConnectionOpen: async ({ phase }) => {
+        hookPhases.push(phase);
+      },
+      outboundStore: testStore,
+    });
+
+    await transport.start(async () => {});
+    if (!processEvents) {
+      throw new Error("Expected connection event processor to be registered");
+    }
+    const openPromise = processEvents({
+      "connection.update": {
+        connection: "open",
+      },
+    });
+
+    await Promise.resolve();
+    await Promise.resolve();
+
+    assert.deepEqual(hookPhases, ["beforeQueueFlush"]);
+    assert.deepEqual(sentMessages, []);
+
+    releaseQueuedSend();
+    await openPromise;
+
+    assert.deepEqual(hookPhases, ["beforeQueueFlush", "afterQueueFlush"]);
+    assert.deepEqual(sentMessages, [{
+      chatId,
+      message: { text: "🤖 queued unrelated output" },
+    }]);
   });
 
   it("edits the restart acknowledgement through a transport-owned durable handle", async () => {

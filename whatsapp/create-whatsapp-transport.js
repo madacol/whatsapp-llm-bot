@@ -656,6 +656,7 @@ function serializeTransportError(error) {
  *     editMessage: (input: { transportHandleId: string, text: string }) => Promise<void>,
  *     sendText: (chatId: string, text: string) => Promise<void>,
  *     recoverQueuedMessage: (input: { chatId: string, queueId: number }) => MessageHandle | undefined,
+ *     phase: "beforeQueueFlush" | "afterQueueFlush",
  *   }) => Promise<void>,
  * }} CreateWhatsAppTransportOptions
  */
@@ -778,6 +779,21 @@ export async function createWhatsAppTransport(options = {}) {
   }
 
   /**
+   * @param {"beforeQueueFlush" | "afterQueueFlush"} phase
+   * @returns {Promise<void>}
+   */
+  async function runConnectionOpenHook(phase) {
+    if (!options.onConnectionOpen) {
+      return;
+    }
+    try {
+      await options.onConnectionOpen({ editMessage, sendText, recoverQueuedMessage, phase });
+    } catch (error) {
+      log.error("Error running WhatsApp connection-open hook:", error);
+    }
+  }
+
+  /**
    * Register socket handlers on the current socket instance.
    * @param {import('@whiskeysockets/baileys').WASocket} sock
    * @param {() => Promise<void>} saveCreds
@@ -836,14 +852,9 @@ export async function createWhatsAppTransport(options = {}) {
         await connectionSupervisor.handleConnectionUpdate(events["connection.update"], sock);
         if (events["connection.update"].connection === "open" && currentSocket === sock) {
           hasOpenConnection = true;
+          await runConnectionOpenHook("beforeQueueFlush");
           await flushQueuedOutbound();
-          if (options.onConnectionOpen) {
-            try {
-              await options.onConnectionOpen({ editMessage, sendText, recoverQueuedMessage });
-            } catch (error) {
-              log.error("Error running WhatsApp connection-open hook:", error);
-            }
-          }
+          await runConnectionOpenHook("afterQueueFlush");
         }
       }
 

@@ -82,6 +82,45 @@ describe("restart acknowledgement delivery", () => {
     }
   });
 
+  it("defers queued-only restart acknowledgements before the outbound queue has flushed", async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), "restart-ack-"));
+    const storePath = path.join(dir, "ack.json");
+    const store = createRestartAckStore(storePath);
+    /** @type {Array<{ chatId: string, text: string }>} */
+    const sent = [];
+
+    try {
+      await store.save({
+        chatId: "chat-queued-before-flush@g.us",
+        requestedAt: "2026-05-15T19:00:00.000Z",
+        oldPid: 123,
+        queueId: 88,
+      });
+
+      await deliverPendingRestartAck({
+        store,
+        phase: "beforeQueueFlush",
+        editMessage: async () => {
+          throw new Error("edit should not be attempted before queue recovery");
+        },
+        sendText: async (chatId, text) => {
+          sent.push({ chatId, text });
+        },
+        recoverQueuedMessage: () => undefined,
+      });
+
+      assert.deepEqual(sent, []);
+      assert.deepEqual(await store.read(), {
+        chatId: "chat-queued-before-flush@g.us",
+        requestedAt: "2026-05-15T19:00:00.000Z",
+        oldPid: 123,
+        queueId: 88,
+      });
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   it("falls back to sending restarted when the persisted edit handle is gone", async () => {
     const dir = await mkdtemp(path.join(os.tmpdir(), "restart-ack-"));
     const storePath = path.join(dir, "ack.json");
