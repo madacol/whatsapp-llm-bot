@@ -15,6 +15,7 @@ import {
   createTestDb,
   seedChat,
 } from "./helpers.js";
+import { registerAcpTestHarness, ZERO_USAGE } from "./acp-test-harness.js";
 import { setDb } from "../db.js";
 import { adaptIncomingMessage } from "../whatsapp/inbound/chat-turn.js";
 import { createConfirmRuntime } from "../whatsapp/runtime/confirm-runtime.js";
@@ -110,106 +111,49 @@ describe("provider runtime events", () => {
   const harnessName = "e2e-runtime-events";
 
   before(async () => {
-    const { registerHarnessDriver } = await import("../harnesses/index.js");
-    registerHarnessDriver({
+    registerAcpTestHarness({
       name: harnessName,
-      supportsInstances: true,
-      createInstance: () => ({
-        harness: {
-          getName: () => harnessName,
-          getCapabilities: () => ({
-            supportsResume: true,
-            supportsCancel: false,
-            supportsLiveInput: false,
-            supportsApprovals: false,
-            supportsWorkdir: true,
-            supportsSandboxConfig: false,
-            supportsModelSelection: false,
-            supportsReasoningEffort: false,
-            supportsSessionFork: false,
-          }),
-          run: async () => {
-            throw new Error("provider runtime e2e should use the semantic adapter");
+      errorMessage: "provider runtime e2e should use the semantic adapter",
+      onSendTurn: async (input, { emitRuntimeEvent }) => {
+        await emitRuntimeEvent({
+          type: "file-read.started",
+          fileRead: {
+            command: "sed -n '1,5p' package.json",
+            paths: ["package.json"],
           },
-          handleCommand: async () => false,
-          listSlashCommands: () => [],
-          createAdapter: ({ name, instanceId, continuationKey }) => {
-            /** @type {Set<(event: { type: string, provider: string } & Record<string, unknown>) => void | Promise<void>>} */
-            const subscribers = new Set();
-            return {
-              startSession: async (input) => ({
-                chatId: input.chatId,
-                harnessName: name,
-                instanceId,
-                continuationKey,
-                status: "ready",
-                resumeCursor: null,
-              }),
-              sendTurn: async (input) => {
-                for (const subscriber of subscribers) {
-                  await subscriber({
-                    type: "file-read.started",
-                    provider: name,
-                    fileRead: {
-                      command: "sed -n '1,5p' package.json",
-                      paths: ["package.json"],
-                    },
-                  });
-                  await subscriber({
-                    type: "command.started",
-                    provider: name,
-                    command: {
-                      command: "pnpm type-check",
-                      status: "started",
-                    },
-                  });
-                  await subscriber({
-                    type: "command.completed",
-                    provider: name,
-                    command: {
-                      command: "pnpm type-check",
-                      status: "completed",
-                      output: "ok",
-                    },
-                  });
-                  await subscriber({
-                    type: "assistant.completed",
-                    provider: name,
-                    text: "Provider runtime answer.",
-                    contentType: "markdown",
-                    usage: {
-                      promptTokens: 12,
-                      completionTokens: 3,
-                      cachedTokens: 2,
-                      cost: 0.0042,
-                    },
-                  });
-                }
-                return {
-                  response: [{ type: "markdown", text: "legacy fallback should not display" }],
-                  messages: input.messages ?? [],
-                  usage: { promptTokens: 0, completionTokens: 0, cachedTokens: 0, cost: 0 },
-                };
-              },
-              interruptTurn: async () => false,
-              injectMessage: async () => false,
-              stopSession: async () => false,
-              listSessions: () => [],
-              readThread: async () => null,
-              rollbackThread: async () => null,
-              streamEvents: {
-                async *[Symbol.asyncIterator]() {},
-              },
-              subscribeEvents: (handler) => {
-                subscribers.add(handler);
-                return () => {
-                  subscribers.delete(handler);
-                };
-              },
-            };
+        });
+        await emitRuntimeEvent({
+          type: "command.started",
+          command: {
+            command: "pnpm type-check",
+            status: "started",
           },
-        },
-      }),
+        });
+        await emitRuntimeEvent({
+          type: "command.completed",
+          command: {
+            command: "pnpm type-check",
+            status: "completed",
+            output: "ok",
+          },
+        });
+        await emitRuntimeEvent({
+          type: "assistant.completed",
+          text: "Provider runtime answer.",
+          contentType: "markdown",
+          usage: {
+            promptTokens: 12,
+            completionTokens: 3,
+            cachedTokens: 2,
+            cost: 0.0042,
+          },
+        });
+        return {
+          response: [{ type: "markdown", text: "legacy fallback should not display" }],
+          messages: input.messages ?? [],
+          usage: ZERO_USAGE,
+        };
+      },
     });
 
     await seedChat(testDb, chatId, { enabled: true });
@@ -482,58 +426,17 @@ describe("audio media-to-text provider input", () => {
   const capturedInputs = [];
 
   before(async () => {
-    const { registerHarnessDriver } = await import("../harnesses/index.js");
-    registerHarnessDriver({
+    registerAcpTestHarness({
       name: harnessName,
-      supportsInstances: true,
-      createInstance: () => ({
-        harness: {
-          getName: () => harnessName,
-          getCapabilities: () => ({
-            supportsResume: true,
-            supportsCancel: false,
-            supportsLiveInput: false,
-            supportsApprovals: false,
-            supportsWorkdir: true,
-            supportsSandboxConfig: false,
-            supportsModelSelection: false,
-            supportsReasoningEffort: false,
-            supportsSessionFork: false,
-          }),
-          run: async () => {
-            throw new Error("audio provider e2e should use the semantic adapter");
-          },
-          handleCommand: async () => false,
-          listSlashCommands: () => [],
-          createAdapter: ({ name, instanceId, continuationKey }) => ({
-            startSession: async (input) => ({
-              chatId: input.chatId,
-              harnessName: name,
-              instanceId,
-              continuationKey,
-              status: "ready",
-              resumeCursor: null,
-            }),
-            sendTurn: async (input) => {
-              capturedInputs.push(input.input ?? "");
-              return {
-                response: [{ type: "markdown", text: "Audio provider response." }],
-                messages: input.messages ?? [],
-                usage: { promptTokens: 0, completionTokens: 0, cachedTokens: 0, cost: 0 },
-              };
-            },
-            interruptTurn: async () => false,
-            injectMessage: async () => false,
-            stopSession: async () => false,
-            listSessions: () => [],
-            readThread: async () => null,
-            rollbackThread: async () => null,
-            streamEvents: {
-              async *[Symbol.asyncIterator]() {},
-            },
-          }),
-        },
-      }),
+      errorMessage: "audio provider e2e should use the semantic adapter",
+      onSendTurn: (input) => {
+        capturedInputs.push(input.input ?? "");
+        return {
+          response: [{ type: "markdown", text: "Audio provider response." }],
+          messages: input.messages ?? [],
+          usage: ZERO_USAGE,
+        };
+      },
     });
 
     await seedChat(testDb, chatId, { enabled: true });
@@ -884,54 +787,13 @@ describe("presence updates", () => {
   const harnessName = "e2e-presence-provider";
 
   before(async () => {
-    const { registerHarnessDriver } = await import("../harnesses/index.js");
-    registerHarnessDriver({
+    registerAcpTestHarness({
       name: harnessName,
-      supportsInstances: true,
-      createInstance: () => ({
-        harness: {
-          getName: () => harnessName,
-          getCapabilities: () => ({
-            supportsResume: true,
-            supportsCancel: false,
-            supportsLiveInput: false,
-            supportsApprovals: false,
-            supportsWorkdir: true,
-            supportsSandboxConfig: false,
-            supportsModelSelection: false,
-            supportsReasoningEffort: false,
-            supportsSessionFork: false,
-          }),
-          run: async () => {
-            throw new Error("presence e2e should use the semantic adapter");
-          },
-          handleCommand: async () => false,
-          listSlashCommands: () => [],
-          createAdapter: ({ name, instanceId, continuationKey }) => ({
-            startSession: async (input) => ({
-              chatId: input.chatId,
-              harnessName: name,
-              instanceId,
-              continuationKey,
-              status: "ready",
-              resumeCursor: null,
-            }),
-            sendTurn: async (input) => ({
-              response: [{ type: "markdown", text: "Presence provider response." }],
-              messages: input.messages ?? [],
-              usage: { promptTokens: 0, completionTokens: 0, cachedTokens: 0, cost: 0 },
-            }),
-            interruptTurn: async () => false,
-            injectMessage: async () => false,
-            stopSession: async () => false,
-            listSessions: () => [],
-            readThread: async () => null,
-            rollbackThread: async () => null,
-            streamEvents: {
-              async *[Symbol.asyncIterator]() {},
-            },
-          }),
-        },
+      errorMessage: "presence e2e should use the semantic adapter",
+      onSendTurn: (input) => ({
+        response: [{ type: "markdown", text: "Presence provider response." }],
+        messages: input.messages ?? [],
+        usage: ZERO_USAGE,
       }),
     });
   });
@@ -1033,41 +895,12 @@ describe("markdown code renders as image in socket output", () => {
   const harnessName = "e2e-markdown-provider";
 
   before(async () => {
-    const { registerHarnessDriver } = await import("../harnesses/index.js");
-    registerHarnessDriver({
+    registerAcpTestHarness({
       name: harnessName,
-      supportsInstances: true,
-      createInstance: () => ({
-        harness: {
-          getName: () => harnessName,
-          getCapabilities: () => ({
-            supportsResume: true,
-            supportsCancel: false,
-            supportsLiveInput: false,
-            supportsApprovals: false,
-            supportsWorkdir: true,
-            supportsSandboxConfig: false,
-            supportsModelSelection: false,
-            supportsReasoningEffort: false,
-            supportsSessionFork: false,
-          }),
-          run: async () => {
-            throw new Error("markdown e2e should use the semantic adapter");
-          },
-          handleCommand: async () => false,
-          listSlashCommands: () => [],
-          createAdapter: ({ name, instanceId, continuationKey }) => ({
-            startSession: async (input) => ({
-              chatId: input.chatId,
-              harnessName: name,
-              instanceId,
-              continuationKey,
-              status: "ready",
-              resumeCursor: null,
-            }),
-            sendTurn: async (input) => {
-              const responseText = input.input?.includes("Show me code")
-                ? `Here is a snippet:
+      errorMessage: "markdown e2e should use the semantic adapter",
+      onSendTurn: (input) => {
+        const responseText = input.input?.includes("Show me code")
+          ? `Here is a snippet:
 
 \`\`\`javascript
 function greet(name) {
@@ -1079,25 +912,13 @@ greet("world");
 \`\`\`
 
 Hope that helps!`
-                : "Just **bold** and _italic_ text, no code.";
-              return {
-                response: [{ type: "markdown", text: responseText }],
-                messages: input.messages ?? [],
-                usage: { promptTokens: 0, completionTokens: 0, cachedTokens: 0, cost: 0 },
-              };
-            },
-            interruptTurn: async () => false,
-            injectMessage: async () => false,
-            stopSession: async () => false,
-            listSessions: () => [],
-            readThread: async () => null,
-            rollbackThread: async () => null,
-            streamEvents: {
-              async *[Symbol.asyncIterator]() {},
-            },
-          }),
-        },
-      }),
+          : "Just **bold** and _italic_ text, no code.";
+        return {
+          response: [{ type: "markdown", text: responseText }],
+          messages: input.messages ?? [],
+          usage: ZERO_USAGE,
+        };
+      },
     });
     await seedChat(testDb, chatId, { enabled: true });
     await updateChatConfig(chatId, (current) => ({ ...current, harness: harnessName }));

@@ -12,6 +12,7 @@ process.env.LLM_API_KEY = "test-key";
 process.env.MODEL = "mock-model";
 
 import { createChatTurn, createMockLlmServer, createTestDb, seedChat as seedChat_ } from "./helpers.js";
+import { createAcpTestHarnessState, registerAcpTestHarness } from "./acp-test-harness.js";
 import { setDb } from "../db.js";
 import { contentEvent } from "../outbound-events.js";
 import { getChatWorkDir } from "../utils.js";
@@ -28,69 +29,20 @@ let store;
 let mockServer;
 /** @type {string[]} */
 let tempDirs = [];
-/** @type {HarnessTurnInput[]} */
-let capturedHarnessTurns = [];
 
 const WORKSPACE_HARNESS_NAME = "workspace-lifecycle-acp";
+const workspaceHarnessState = createAcpTestHarnessState();
+const capturedHarnessTurns = workspaceHarnessState.turns;
 
 async function registerWorkspaceHarness() {
-  const { registerHarnessDriver } = await import("../harnesses/index.js");
-  registerHarnessDriver({
+  registerAcpTestHarness({
     name: WORKSPACE_HARNESS_NAME,
-    supportsInstances: true,
-    createInstance: () => ({
-      harness: {
-        getName: () => WORKSPACE_HARNESS_NAME,
-        getCapabilities: () => ({
-          supportsResume: true,
-          supportsCancel: false,
-          supportsLiveInput: false,
-          supportsApprovals: false,
-          supportsWorkdir: true,
-          supportsSandboxConfig: false,
-          supportsModelSelection: false,
-          supportsReasoningEffort: false,
-          supportsSessionFork: false,
-        }),
-        run: async () => {
-          throw new Error("workspace lifecycle tests must use the semantic ACP adapter");
-        },
-        handleCommand: async () => false,
-        listSlashCommands: () => [],
-        createAdapter: ({ name, instanceId, continuationKey }) => ({
-          startSession: async (input) => ({
-            chatId: input.chatId,
-            harnessName: name,
-            instanceId,
-            continuationKey,
-            status: "ready",
-            workdir: input.runConfig?.workdir ?? null,
-            model: input.runConfig?.model ?? null,
-            resumeCursor: input.resumeCursor ?? null,
-          }),
-          sendTurn: async (input) => {
-            capturedHarnessTurns.push(input);
-            return {
-              response: [{ type: "markdown", text: "Seed received." }],
-              messages: input.messages ?? [],
-              usage: { promptTokens: 10, completionTokens: 5, cachedTokens: 0, cost: 0 },
-            };
-          },
-          interruptTurn: async () => false,
-          respondToRequest: async () => false,
-          respondToUserInput: async () => false,
-          injectMessage: async () => false,
-          stopSession: async () => false,
-          hasSession: () => false,
-          stopAll: async () => {},
-          listSessions: () => [],
-          readThread: async () => null,
-          rollbackThread: async () => null,
-          streamEvents: {
-            async *[Symbol.asyncIterator]() {},
-          },
-        }),
-      },
+    state: workspaceHarnessState,
+    errorMessage: "workspace lifecycle tests must use the semantic ACP adapter",
+    onSendTurn: (input) => ({
+      response: [{ type: "markdown", text: "Seed received." }],
+      messages: input.messages ?? [],
+      usage: { promptTokens: 10, completionTokens: 5, cachedTokens: 0, cost: 0 },
     }),
   });
 }
@@ -328,7 +280,7 @@ after(async () => {
 
 describe("workspace lifecycle", () => {
   afterEach(() => {
-    capturedHarnessTurns = [];
+    workspaceHarnessState.reset();
     const pending = mockServer.pendingResponses();
     assert.equal(pending, 0, `Mock response queue should be empty after each test, but has ${pending} unconsumed response(s).`);
   });
