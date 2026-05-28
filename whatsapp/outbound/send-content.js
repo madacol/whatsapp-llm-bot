@@ -651,8 +651,7 @@ export async function editWhatsAppMessage(sock, jid, newText, target) {
 }
 
 /**
- * Edit through a WhatsApp-owned durable handle. Expired handles fall back to a
- * fresh message because recipients will ignore stale WhatsApp edit attempts.
+ * Edit through a WhatsApp-owned durable handle.
  * @param {import('@whiskeysockets/baileys').WASocket} sock
  * @param {string} transportHandleId
  * @param {string} newText
@@ -665,8 +664,7 @@ export async function editWhatsAppMessageByHandle(sock, transportHandleId, newTe
     throw new Error(`WhatsApp edit handle ${transportHandleId} was not found.`);
   }
   if (isExpiredWhatsAppEditHandle(record, options.now)) {
-    await sock.sendMessage(record.chatId, { text: newText });
-    return;
+    throw new Error(`WhatsApp edit handle ${transportHandleId} expired.`);
   }
   await editWhatsAppMessage(sock, record.chatId, newText, {
     messageKey: record.messageKey,

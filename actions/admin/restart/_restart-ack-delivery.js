@@ -1,4 +1,7 @@
+import { createLogger } from "../../../logger.js";
+
 const RESTARTED_TEXT = "Restarted.";
+const log = createLogger("restart");
 
 /**
  * @param {import("./_restart-ack-store.js").RestartInterruptedTurn} turn
@@ -51,12 +54,19 @@ export async function deliverPendingRestartAck({ store, editMessage, sendText, r
       if (!isMissingEditHandleError(error)) {
         throw error;
       }
-      await sendText(record.chatId, RESTARTED_TEXT);
+      log.warn("Skipping duplicate restart acknowledgement because the WhatsApp edit handle is gone.", {
+        chatId: record.chatId,
+        transportHandleId,
+      });
+      return;
     }
   } else if (record.queueId) {
     return;
   } else {
-    await sendText(record.chatId, RESTARTED_TEXT);
+    log.warn("Skipping duplicate restart acknowledgement because no editable message handle was persisted.", {
+      chatId: record.chatId,
+    });
+    return;
   }
   for (const turn of record.interruptedTurns ?? []) {
     await sendText(turn.chatId, formatInterruptedTurnMessage(turn));
