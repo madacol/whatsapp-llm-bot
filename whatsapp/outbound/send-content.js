@@ -71,6 +71,13 @@ function serializeWhatsAppMessageKey(key) {
  * @returns {import('@whiskeysockets/baileys').WAMessageKey | null}
  */
 function parseWhatsAppMessageKey(value) {
+  if (typeof value === "string") {
+    try {
+      return parseWhatsAppMessageKey(JSON.parse(value));
+    } catch {
+      return null;
+    }
+  }
   if (!isRecord(value) || typeof value.id !== "string") {
     return null;
   }
