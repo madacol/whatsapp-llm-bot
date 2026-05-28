@@ -51,11 +51,8 @@ const ALL_SETUP_STEPS = [
  */
 function getHarnessSelectOptions(chat) {
   return {
-    options: [
-      { id: "app", label: "app" },
-      ...listHarnesses().map((harnessName) => ({ id: harnessName, label: harnessName })),
-    ],
-    currentId: chat.harness ?? "app",
+    options: listHarnesses().map((harnessName) => ({ id: harnessName, label: harnessName })),
+    currentId: chat.harness ?? "",
   };
 }
 

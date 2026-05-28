@@ -1,9 +1,9 @@
-import { createHarnessAdapterFromHarness } from "./adapter.js";
 import {
   BUILT_IN_ACP_AGENT_DEFINITIONS,
   createAcpAgentDriver,
   readAcpAgentDefinitionsFromEnv,
 } from "./acp-agents.js";
+import config from "../config.js";
 
 /**
  * @typedef {{
@@ -19,7 +19,7 @@ import {
  * @typedef {{
  *   harness: AgentHarness,
  *   status?: HarnessDriverStatus,
- *   adapter?: ReturnType<typeof createHarnessAdapterFromHarness>,
+ *   adapter?: HarnessAdapter,
  *   textGeneration?: AgentHarness["textGeneration"],
  *   dispose?: () => void | Promise<void>,
  * }} HarnessInstanceBundle
@@ -49,7 +49,7 @@ import {
  *   status: HarnessDriverStatus,
  *   textGeneration?: AgentHarness["textGeneration"],
  *   harness: AgentHarness,
- *   adapter: ReturnType<typeof createHarnessAdapterFromHarness>,
+ *   adapter: HarnessAdapter | null,
  *   dispose?: () => void | Promise<void>,
  * }} HarnessInstance
  */
@@ -243,19 +243,7 @@ const DEFAULT_HARNESS_SEAM_CAPABILITIES = {
 };
 
 /**
- * @param {AgentHarness | null | undefined} harness
- * @returns {harness is AgentHarness & { processLlmResponse: (params: AgentHarnessParams) => Promise<AgentResult> }}
- */
-function hasLegacyRun(harness) {
-  return !!harness
-    && typeof harness === "object"
-    && "processLlmResponse" in harness
-    && typeof harness.processLlmResponse === "function";
-}
-
-/**
- * Normalize a harness to the unified contract so callers don't need to carry
- * compatibility branches.
+ * Normalize optional harness methods so callers can rely on a small contract.
  * @param {string} name
  * @param {AgentHarness} harness
  * @returns {AgentHarness}
@@ -265,13 +253,9 @@ function normalizeHarness(name, harness) {
   const getCapabilities = harness.getCapabilities ?? (() => DEFAULT_HARNESS_CAPABILITIES);
   const handleCommand = harness.handleCommand ?? (async () => false);
   const listSlashCommands = harness.listSlashCommands ?? (() => []);
-  const run = harness.run ?? (
-    hasLegacyRun(harness)
-      ? harness.processLlmResponse.bind(harness)
-      : async () => {
-          throw new Error(`Harness "${name}" does not implement run()`);
-        }
-  );
+  const run = harness.run ?? (async () => {
+    throw new Error(`Harness "${name}" does not implement run()`);
+  });
 
   return {
     ...harness,
@@ -364,12 +348,7 @@ function createUnavailableHarnessInstance(input) {
     available: false,
     status: input.status,
     harness,
-    adapter: createHarnessAdapterFromHarness({
-      harness,
-      name: input.name,
-      instanceId: input.instanceId,
-      continuationKey: input.continuationKey,
-    }),
+    adapter: null,
   };
 }
 
@@ -481,9 +460,16 @@ export function resolveHarnessInstance(name, options = {}) {
   });
   const harness = normalizeHarness(key, bundle.harness);
   const capabilities = normalizeCapabilities(harness);
+  const adapter = bundle.adapter ?? harness.createAdapter?.({ name: key, instanceId, continuationKey }) ?? null;
   /** @type {HarnessDriverStatus} */
-  const status = bundle.status ?? {
+  const baseStatus = bundle.status ?? {
     availability: "available",
+    checkedAt: getCheckedAt(),
+  };
+  /** @type {HarnessDriverStatus} */
+  const status = adapter ? baseStatus : {
+    availability: "unavailable",
+    message: `Harness driver "${key}" did not provide a semantic adapter.`,
     checkedAt: getCheckedAt(),
   };
   const instance = {
@@ -497,14 +483,7 @@ export function resolveHarnessInstance(name, options = {}) {
     status,
     textGeneration: normalizeTextGeneration(bundle.textGeneration ?? harness.textGeneration),
     harness,
-    adapter: bundle.adapter ?? (harness.createAdapter
-      ? harness.createAdapter({ name: key, instanceId, continuationKey })
-      : createHarnessAdapterFromHarness({
-          harness,
-          name: key,
-          instanceId,
-          continuationKey,
-        })),
+    adapter,
     dispose: bundle.dispose,
   };
   instances.set(cacheKey, instance);
@@ -703,7 +682,12 @@ export async function listHarnessDriverStatuses() {
  * @returns {string | null}
  */
 export function resolveHarnessName(persona, chatInfo) {
-  return persona?.harness ?? chatInfo?.harness ?? null;
+  const harnessName = persona?.harness ?? chatInfo?.harness ?? null;
+  if (harnessName && harnessName !== "app") {
+    return harnessName;
+  }
+  const defaultHarness = config.default_harness.trim();
+  return defaultHarness || null;
 }
 
 /**

@@ -84,24 +84,65 @@ function createCodexHarness(options = {}) {
       supportsReasoningEffort: true,
       supportsSessionFork: true,
     }),
-    async run(params) {
-      const run = await options.startRun?.({
-        messages: params.messages,
-        externalInstructions: params.llmConfig.externalInstructions,
-        hooks: params.hooks,
-      });
-      if (run) {
-        return (await run.done).result;
-      }
-      return {
-        response: [{ type: "text", text: "ok" }],
-        messages: params.messages,
-        usage: { promptTokens: 0, completionTokens: 0, cachedTokens: 0, cost: 0 },
-      };
+    async run() {
+      assert.fail("codex test harness should use the semantic adapter");
     },
     handleCommand: async () => false,
-    injectMessage: options.injectMessage,
     listSlashCommands: () => [],
+    createAdapter({ name, instanceId, continuationKey }) {
+      /** @type {Map<string, HarnessRuntimeSession>} */
+      const sessions = new Map();
+      return {
+        async startSession(input) {
+          const session = {
+            chatId: input.chatId,
+            harnessName: name,
+            instanceId,
+            continuationKey,
+            status: "ready",
+            workdir: input.runConfig?.workdir ?? null,
+            model: input.runConfig?.model ?? null,
+            resumeCursor: input.resumeCursor ?? null,
+          };
+          sessions.set(input.chatId, /** @type {HarnessRuntimeSession} */ (session));
+          return /** @type {HarnessRuntimeSession} */ (session);
+        },
+        async sendTurn(input) {
+          const run = await options.startRun?.({
+            messages: input.messages ?? [],
+            externalInstructions: input.externalInstructions,
+            hooks: input.hooks,
+          });
+          if (run) {
+            return (await run.done).result;
+          }
+          return {
+            response: [{ type: "text", text: "ok" }],
+            messages: input.messages ?? [],
+            usage: { promptTokens: 0, completionTokens: 0, cachedTokens: 0, cost: 0 },
+          };
+        },
+        interruptTurn: async () => false,
+        respondToRequest: async () => false,
+        respondToUserInput: async () => false,
+        injectMessage: async (chatId, text) => !!(await options.injectMessage?.(chatId, text)),
+        stopSession: async (chatId) => {
+          sessions.delete(typeof chatId === "string" ? chatId : chatId.id);
+          return true;
+        },
+        hasSession: (chatId) => sessions.has(typeof chatId === "string" ? chatId : chatId.id),
+        stopAll: async () => {
+          sessions.clear();
+        },
+        listSessions: () => [...sessions.values()],
+        readThread: async () => null,
+        rollbackThread: async () => null,
+        streamEvents: {
+          async *[Symbol.asyncIterator]() {},
+        },
+        subscribeEvents: () => () => {},
+      };
+    },
   };
 }
 

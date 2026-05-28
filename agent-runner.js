@@ -1,5 +1,4 @@
 import { resolveHarness, resolveHarnessName } from "#harnesses";
-import { createAppRunner } from "./conversation/app-runner.js";
 import { getActions, getAction, getChatAction, executeAction } from "./actions.js";
 import { createSilentActionContext } from "./execute-action-context.js";
 import { resolveChatModel } from "./model-roles.js";
@@ -130,9 +129,10 @@ export async function runAgent(options) {
   const mediaRegistry = new Map();
 
   const harnessName = resolveHarnessName(agent, null);
-  const harness = harnessName ? resolveHarness(harnessName) : createAppRunner();
-
-  const result = await harness.run({
+  if (!harnessName) {
+    throw new Error(`Agent "${agent.name}" must select an ACP harness.`);
+  }
+  const appTurn = {
     session,
     llmConfig,
     messages,
@@ -143,7 +143,8 @@ export async function runAgent(options) {
     runConfig: {
       workdir: getChatWorkDir(session.chatId),
     },
-  });
+  };
+  const result = await resolveHarness(harnessName).run(appTurn);
 
   // Persist the run to agent_runs table
   if (parentToolCallId) {

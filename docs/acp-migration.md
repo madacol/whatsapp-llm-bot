@@ -11,6 +11,12 @@ The built-in ACP drivers are:
 - `claude` via `claude-agent-acp`
 - `pi` via `pi-acp`
 
+Chats without an explicit harness use the central `DEFAULT_HARNESS` setting,
+falling back to `codex` when unset. `MADABOT_DEFAULT_HARNESS` is also accepted
+as an alias. Set the value to another registered ACP agent name to change the
+global default, or set it to an empty string to require each chat or persona to
+select a harness explicitly. The old app loop is not a valid harness provider.
+
 The Pi ACP adapter requires the underlying `pi` executable. The project pins
 `@earendil-works/pi-coding-agent`, which provides `node_modules/.bin/pi`, and
 the built-in Pi driver passes that path to `pi-acp` with `PI_ACP_PI_COMMAND`.
