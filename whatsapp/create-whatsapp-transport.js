@@ -794,6 +794,22 @@ export async function createWhatsAppTransport(options = {}) {
   }
 
   /**
+   * Replay durable outbound work after the Baileys open event without blocking
+   * Baileys' own initial-sync event processor. Sends attempted during
+   * AwaitingInitialSync can wait on Baileys internals for a long time; keeping
+   * that wait out of sock.ev.process lets inbound buffering flush on schedule.
+   * @returns {void}
+   */
+  function scheduleConnectionOpenWork() {
+    void (async () => {
+      await flushQueuedOutbound();
+      await runConnectionOpenHook("afterQueueFlush");
+    })().catch((error) => {
+      log.error("Error running WhatsApp connection-open work:", error);
+    });
+  }
+
+  /**
    * Register socket handlers on the current socket instance.
    * @param {import('@whiskeysockets/baileys').WASocket} sock
    * @param {() => Promise<void>} saveCreds
@@ -852,9 +868,7 @@ export async function createWhatsAppTransport(options = {}) {
         await connectionSupervisor.handleConnectionUpdate(events["connection.update"], sock);
         if (events["connection.update"].connection === "open" && currentSocket === sock) {
           hasOpenConnection = true;
-          await runConnectionOpenHook("beforeQueueFlush");
-          await flushQueuedOutbound();
-          await runConnectionOpenHook("afterQueueFlush");
+          scheduleConnectionOpenWork();
         }
       }
 

@@ -60,6 +60,12 @@ function createBaileysGroupMetadataAttrsError() {
   return error;
 }
 
+async function waitForTransportBackgroundWork() {
+  for (let i = 0; i < 5; i += 1) {
+    await delay(0);
+  }
+}
+
 describe("WhatsApp transport community creation", () => {
   it("buffers streamed LLM chunks in WhatsApp until completion", async () => {
     const chatId = `stream-buffer-${Date.now()}`;
@@ -222,6 +228,7 @@ describe("WhatsApp transport community creation", () => {
         connection: "open",
       },
     });
+    await waitForTransportBackgroundWork();
 
     assert.deepEqual(sentMessages, [{
       chatId,
@@ -370,6 +377,7 @@ describe("WhatsApp transport community creation", () => {
         connection: "open",
       },
     });
+    await waitForTransportBackgroundWork();
 
     assert.deepEqual(sentMessages, [{
       chatId,
@@ -440,6 +448,7 @@ describe("WhatsApp transport community creation", () => {
         connection: "open",
       },
     });
+    await waitForTransportBackgroundWork();
 
     assert.deepEqual(sentMessages, [{
       chatId,
@@ -519,6 +528,7 @@ describe("WhatsApp transport community creation", () => {
         connection: "open",
       },
     });
+    await waitForTransportBackgroundWork();
 
     assert.deepEqual(hookObservations, ["sent:1"]);
     assert.deepEqual(sentMessages, [
@@ -536,7 +546,7 @@ describe("WhatsApp transport community creation", () => {
     ]);
   });
 
-  it("runs connection-open hooks before unrelated queued outbound flushes can stall", async () => {
+  it("runs connection-open hooks after queued outbound flushes complete", async () => {
     if (!testDb || !testStore) {
       throw new Error("Expected test DB and store to be initialized");
     }
@@ -597,22 +607,27 @@ describe("WhatsApp transport community creation", () => {
     if (!processEvents) {
       throw new Error("Expected connection event processor to be registered");
     }
+    let openResolved = false;
     const openPromise = processEvents({
       "connection.update": {
         connection: "open",
       },
+    }).then(() => {
+      openResolved = true;
     });
 
     await Promise.resolve();
     await Promise.resolve();
 
-    assert.deepEqual(hookPhases, ["beforeQueueFlush"]);
+    assert.equal(openResolved, true);
+    assert.deepEqual(hookPhases, []);
     assert.deepEqual(sentMessages, []);
 
     releaseQueuedSend();
     await openPromise;
+    await waitForTransportBackgroundWork();
 
-    assert.deepEqual(hookPhases, ["beforeQueueFlush", "afterQueueFlush"]);
+    assert.deepEqual(hookPhases, ["afterQueueFlush"]);
     assert.deepEqual(sentMessages, [{
       chatId,
       message: { text: "🤖 queued unrelated output" },
@@ -735,6 +750,7 @@ describe("WhatsApp transport community creation", () => {
         throw new Error("Expected second connection event processor to be registered");
       }
       await processEvents({ "connection.update": { connection: "open" } });
+      await waitForTransportBackgroundWork();
 
       assert.deepEqual(sentMessages, [
         {
@@ -833,6 +849,7 @@ describe("WhatsApp transport community creation", () => {
         connection: "open",
       },
     });
+    await waitForTransportBackgroundWork();
 
     assert.deepEqual(sentMessages, [{
       chatId,
