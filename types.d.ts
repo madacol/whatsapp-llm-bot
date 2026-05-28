@@ -726,6 +726,7 @@ type HarnessRunConfig = {
   approvalsReviewer?: 'user' | 'auto_review' | 'guardian_subagent' | null;
   additionalDirectories?: string[] | null;
   protectedPaths?: string[] | null;
+  ignoredFileChangePaths?: string[] | null;
   configValues?: Record<string, string | boolean | null>;
 };
 

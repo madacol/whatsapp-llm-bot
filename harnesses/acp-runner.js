@@ -6,6 +6,7 @@ import { hasAcpSessionCapability, hasMadabotAcpSessionCapability, supportsAcpLoa
 import { createAcpRawPayload, createAcpRuntimeModel, normalizeAcpUsage } from "./acp-events.js";
 import {
   emitAcpSnapshotFileChanges,
+  isAcpFileChangeIgnored,
   reconcileAcpFileChangeWithBaseline,
   resolveAcpFileChangePath,
   snapshotAcpWorkdir,
@@ -1203,6 +1204,9 @@ export async function startAcpRun(input) {
       const protectedMatch = matchProtectedPath(input.runConfig, reconciled.change.path);
       if (protectedMatch.protected && approvedProtectedPaths.has(protectedMatch.resolvedPath)) {
         emittedFileChangePaths.add(resolveAcpFileChangePath(input.runConfig?.workdir, reconciled.change.path));
+        if (isAcpFileChangeIgnored(input.runConfig, reconciled.change.path)) {
+          return;
+        }
         input.emitEvent?.(reconciled);
         await runtimeDispatcher.handleEvent(reconciled);
         return;
@@ -1242,6 +1246,9 @@ export async function startAcpRun(input) {
     }
     if (reconciled.type === "file-change.completed") {
       emittedFileChangePaths.add(resolveAcpFileChangePath(input.runConfig?.workdir, reconciled.change.path));
+      if (isAcpFileChangeIgnored(input.runConfig, reconciled.change.path)) {
+        return;
+      }
     }
     input.emitEvent?.(reconciled);
     await runtimeDispatcher.handleEvent(reconciled);

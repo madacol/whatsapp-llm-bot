@@ -218,6 +218,7 @@ const promptScenarios = [
   { match: "diff only update", handle: handleDiffOnlyUpdatePrompt },
   { match: "diff only add", handle: handleDiffOnlyAddPrompt },
   { match: "diff only delete", handle: handleDiffOnlyDeletePrompt },
+  { match: "ignored file change", handle: handleIgnoredFileChangePrompt },
   { match: "mislabel existing add", handle: handleMislabelExistingAddPrompt },
   { match: "old new no diff", handle: handleOldNewNoDiffPrompt },
   { match: "config", handle: handleConfigPrompt },
@@ -468,6 +469,18 @@ async function handleDiffOnlyDeletePrompt(message) {
     "-export const value = 1;",
   ].join("\n"));
   notifyText("diff only delete done");
+  endPrompt(message);
+}
+
+/** @param {Record<string, unknown>} message */
+async function handleIgnoredFileChangePrompt(message) {
+  notifyDiff("ignored-file-change", "Updated ignored auth state", "auth_info_baileys/sender-key-test.json", [
+    "--- /dev/null",
+    "+++ b/auth_info_baileys/sender-key-test.json",
+    "@@ -0,0 +1 @@",
+    "+{}",
+  ].join("\n"));
+  notifyText("ignored file change done");
   endPrompt(message);
 }
 

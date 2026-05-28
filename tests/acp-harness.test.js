@@ -1,12 +1,15 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { execFile } from "node:child_process";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { promisify } from "node:util";
 import { createAcpHarness } from "../harnesses/acp.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const execFileAsync = promisify(execFile);
 
 describe("ACP harness", () => {
   it("runs an ACP stdio agent and emits canonical runtime events", async () => {
@@ -642,6 +645,126 @@ describe("ACP harness", () => {
       } finally {
         unsubscribe?.();
       }
+    }
+  });
+
+  it("does not emit ACP file changes for configured ignored runtime-state paths", async () => {
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "acp-ignored-file-change-"));
+    const harness = createAcpHarness({
+      config: {
+        command: process.execPath,
+        args: [path.join(__dirname, "fixtures", "acp-mock-agent.js")],
+      },
+    });
+    const adapter = harness.createAdapter?.({
+      name: "acp",
+      instanceId: "test",
+      continuationKey: "acp:ignored-file-change",
+    });
+    assert.ok(adapter);
+
+    /** @type {Array<Record<string, unknown>>} */
+    const events = [];
+    const unsubscribe = adapter.subscribeEvents?.((event) => {
+      events.push(event);
+    });
+    try {
+      await adapter.startSession({ chatId: "ignored-file-change-chat", runConfig: { workdir: tempDir } });
+      const result = await adapter.sendTurn({
+        chatId: "ignored-file-change-chat",
+        input: "ignored file change",
+        messages: [{ role: "user", content: [{ type: "text", text: "ignored file change" }] }],
+        runConfig: { workdir: tempDir, ignoredFileChangePaths: ["auth_info_baileys/**"] },
+      });
+
+      assert.deepEqual(result.response, [{ type: "markdown", text: "ignored file change done" }]);
+      assert.equal(events.some((event) => event.type === "file-change.completed"), false);
+    } finally {
+      unsubscribe?.();
+    }
+  });
+
+  it("still emits ACP file changes that are only gitignored", async () => {
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "acp-gitignored-file-change-"));
+    await execFileAsync("git", ["init"], { cwd: tempDir });
+    await fs.writeFile(path.join(tempDir, ".gitignore"), "diff-only-add.js\n", "utf8");
+    const harness = createAcpHarness({
+      config: {
+        command: process.execPath,
+        args: [path.join(__dirname, "fixtures", "acp-mock-agent.js")],
+      },
+    });
+    const adapter = harness.createAdapter?.({
+      name: "acp",
+      instanceId: "test",
+      continuationKey: "acp:gitignored-file-change",
+    });
+    assert.ok(adapter);
+
+    /** @type {Array<Record<string, unknown>>} */
+    const events = [];
+    const unsubscribe = adapter.subscribeEvents?.((event) => {
+      events.push(event);
+    });
+    try {
+      await adapter.startSession({ chatId: "gitignored-file-change-chat", runConfig: { workdir: tempDir } });
+      await adapter.sendTurn({
+        chatId: "gitignored-file-change-chat",
+        input: "diff only add",
+        messages: [{ role: "user", content: [{ type: "text", text: "diff only add" }] }],
+        runConfig: { workdir: tempDir },
+      });
+
+      const fileChanges = events.filter((event) => event.type === "file-change.completed");
+      assert.equal(fileChanges.length, 1);
+      assert.equal(/** @type {{ change?: { path?: unknown } }} */ (fileChanges[0]).change?.path, "diff-only-add.js");
+    } finally {
+      unsubscribe?.();
+    }
+  });
+
+  it("still enforces protected paths before suppressing ignored ACP file changes", async () => {
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "acp-ignored-protected-"));
+    const harness = createAcpHarness({
+      config: {
+        command: process.execPath,
+        args: [path.join(__dirname, "fixtures", "acp-mock-agent.js")],
+      },
+    });
+    const adapter = harness.createAdapter?.({
+      name: "acp",
+      instanceId: "test",
+      continuationKey: "acp:ignored-protected",
+    });
+    assert.ok(adapter);
+
+    /** @type {Array<Record<string, unknown>>} */
+    const events = [];
+    const unsubscribe = adapter.subscribeEvents?.((event) => {
+      events.push(event);
+    });
+    try {
+      const runConfig = {
+        workdir: tempDir,
+        protectedPaths: ["direct-write.txt"],
+        ignoredFileChangePaths: ["direct-write.txt"],
+      };
+      await adapter.startSession({ chatId: "ignored-protected-chat", runConfig });
+      await adapter.sendTurn({
+        chatId: "ignored-protected-chat",
+        input: "direct write",
+        messages: [{ role: "user", content: [{ type: "text", text: "direct write" }] }],
+        runConfig,
+        hooks: {
+          onAskUser: async () => "Deny",
+        },
+      });
+
+      await assert.rejects(fs.readFile(path.join(tempDir, "direct-write.txt"), "utf8"));
+      assert.equal(events.some((event) => event.type === "file-change.completed"), false);
+      assert.ok(events.some((event) => event.type === "tool.failed"));
+    } finally {
+      unsubscribe?.();
     }
   });
 
