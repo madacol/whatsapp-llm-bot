@@ -584,6 +584,73 @@ export async function adaptIncomingMessage(
 }
 
 /**
+ * @param {ChatTurn} turn
+ * @returns {string | null}
+ */
+function getFirstText(turn) {
+  const firstTextBlock = turn.content.find((block) => block.type === "text");
+  return firstTextBlock?.type === "text" ? firstTextBlock.text : null;
+}
+
+/**
+ * Commands must keep their original message boundary. If a Baileys flush
+ * delivers "text, text, !command" together, merging them would hide the
+ * command from the app command router because it only inspects the first text.
+ * @param {ChatTurn} turn
+ * @returns {boolean}
+ */
+function isCommandBoundaryTurn(turn) {
+  const text = getFirstText(turn);
+  return !!text && (text.startsWith("!") || text.startsWith("/"));
+}
+
+/**
+ * @param {ChatTurn[]} turns
+ * @returns {ChatTurn}
+ */
+function mergeTurns(turns) {
+  const firstTurn = turns[0];
+  if (!firstTurn) {
+    throw new Error("Cannot merge an empty turn batch.");
+  }
+  return {
+    ...firstTurn,
+    content: turns.flatMap((turn) => turn.content),
+    timestamp: new Date(Math.min(...turns.map((turn) => turn.timestamp.getTime()))),
+    facts: {
+      ...firstTurn.facts,
+      addressedToBot: turns.some((turn) => turn.facts.addressedToBot),
+      repliedToBot: turns.some((turn) => turn.facts.repliedToBot),
+    },
+  };
+}
+
+/**
+ * @param {ChatTurn[]} turns
+ * @returns {ChatTurn[][]}
+ */
+function splitTurnsAtCommandBoundaries(turns) {
+  /** @type {ChatTurn[][]} */
+  const groups = [];
+  /** @type {ChatTurn[]} */
+  let current = [];
+
+  for (const turn of turns) {
+    const currentHasCommand = current.some(isCommandBoundaryTurn);
+    if (current.length > 0 && (currentHasCommand || isCommandBoundaryTurn(turn))) {
+      groups.push(current);
+      current = [];
+    }
+    current.push(turn);
+  }
+
+  if (current.length > 0) {
+    groups.push(current);
+  }
+  return groups;
+}
+
+/**
  * Adapt multiple Baileys messages from one transport-level user action and
  * invoke the app-level turn handler once with their content merged in arrival
  * order.
@@ -633,18 +700,7 @@ export async function adaptIncomingMessages(
     return;
   }
 
-  const firstTurn = turns[0];
-  /** @type {ChatTurn} */
-  const combinedTurn = {
-    ...firstTurn,
-    content: turns.flatMap((turn) => turn.content),
-    timestamp: new Date(Math.min(...turns.map((turn) => turn.timestamp.getTime()))),
-    facts: {
-      ...firstTurn.facts,
-      addressedToBot: turns.some((turn) => turn.facts.addressedToBot),
-      repliedToBot: turns.some((turn) => turn.facts.repliedToBot),
-    },
-  };
-
-  await messageHandler(combinedTurn);
+  for (const group of splitTurnsAtCommandBoundaries(turns)) {
+    await messageHandler(group.length === 1 ? group[0] : mergeTurns(group));
+  }
 }
