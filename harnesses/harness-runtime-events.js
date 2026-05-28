@@ -1,5 +1,5 @@
 /**
- * @typedef {"app" | "claude" | "codex" | "pi" | string} HarnessRuntimeProvider
+ * @typedef {"claude" | "codex" | "pi" | string} HarnessRuntimeProvider
  */
 
 /**

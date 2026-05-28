@@ -79,7 +79,7 @@ export default [
     });
 
     /** @type {string[]} */
-    const selections = ["mention+reply", "app"];
+    const selections = ["mention+reply", "claude"];
 
     const originalMaster = config.MASTER_IDs;
     config.MASTER_IDs = ["master-user"];
@@ -95,10 +95,10 @@ export default [
         {},
       );
 
-      assert.ok(result.includes("app"), `Expected harness summary, got: ${result}`);
+      assert.ok(result.includes("claude"), `Expected harness summary, got: ${result}`);
 
       const chat = await readRequiredConfig("setup-native");
-      assert.equal(chat.harness, null);
+      assert.equal(chat.harness, "claude");
       assert.deepEqual(chat.harness_config ?? {}, {});
     } finally {
       config.MASTER_IDs = originalMaster;

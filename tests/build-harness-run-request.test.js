@@ -1,6 +1,5 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import config from "../config.js";
 import {
   buildExternalSystemPrompt,
   buildHarnessTurnInput,
@@ -8,13 +7,6 @@ import {
 } from "../conversation/build-harness-run-request.js";
 
 describe("buildExternalSystemPrompt", () => {
-  it("keeps the app default prompt for the app runner", () => {
-    assert.equal(
-      buildExternalSystemPrompt(null, undefined, "app"),
-      config.system_prompt,
-    );
-  });
-
   it("does not add the app default prompt to provider harnesses by default", () => {
     for (const harnessName of ["codex", "pi", "claude"]) {
       assert.equal(

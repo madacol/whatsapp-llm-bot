@@ -26,7 +26,6 @@
  *   pendingLiveInputs: PendingLiveInput[];
  *   liveInputRetryTimer: ReturnType<typeof setTimeout> | null;
  *   isActive: boolean;
- *   harness: AgentHarness;
  *   liveInputTarget: LiveInputTarget;
  *   ownerKey: string | null;
  * }} PendingRunState
@@ -49,7 +48,7 @@
  * The coordinator does not execute runs itself; it only mediates lifecycle.
  *
  * @returns {{
- *   beginRun: (input: { turn: ChatTurn, userText: string, harness?: AgentHarness | null, liveInputTarget?: LiveInputTarget | null, ownerKey?: string | null }) => Promise<HarnessRunDecision>,
+ *   beginRun: (input: { turn: ChatTurn, userText: string, liveInputTarget?: LiveInputTarget | null, ownerKey?: string | null }) => Promise<HarnessRunDecision>,
  *   hasPendingRun: (chatId: string) => boolean,
  *   markRunActive: (chatId: string) => void,
  *   consumeBufferedTexts: (chatId: string) => string[],
@@ -61,17 +60,6 @@ export function createHarnessRunCoordinator(options = {}) {
   const liveInputRetryDelayMs = options.liveInputRetryDelayMs ?? 50;
   /** @type {Map<string, PendingRunState>} */
   const pendingRuns = new Map();
-
-  /**
-   * @param {AgentHarness} harness
-   * @returns {LiveInputTarget}
-   */
-  function liveInputTargetFromHarness(harness) {
-    return {
-      supportsLiveInput: harness.getCapabilities().supportsLiveInput,
-      injectMessage: harness.injectMessage,
-    };
-  }
 
   /**
    * @param {LiveInputTarget} target
@@ -164,7 +152,7 @@ export function createHarnessRunCoordinator(options = {}) {
   }
 
   return {
-    async beginRun({ turn, userText, harness, liveInputTarget, ownerKey = null }) {
+    async beginRun({ turn, userText, liveInputTarget, ownerKey = null }) {
       const { chatId } = turn;
       const pending = pendingRuns.get(chatId);
       if (pending) {
@@ -188,8 +176,8 @@ export function createHarnessRunCoordinator(options = {}) {
         return { status: "buffered" };
       }
 
-      if (!harness) {
-        throw new Error("Harness is required to start a run.");
+      if (!liveInputTarget) {
+        throw new Error("Live input target is required to start a run.");
       }
       pendingRuns.set(chatId, {
         bufferedTexts: [],
@@ -197,8 +185,7 @@ export function createHarnessRunCoordinator(options = {}) {
         pendingLiveInputs: [],
         liveInputRetryTimer: null,
         isActive: false,
-        harness,
-        liveInputTarget: liveInputTarget ?? liveInputTargetFromHarness(harness),
+        liveInputTarget,
         ownerKey,
       });
       return { status: "started" };

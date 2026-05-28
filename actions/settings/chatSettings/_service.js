@@ -480,29 +480,25 @@ const BASE_CONFIG_KEYS = [
     key: "harness",
     setting: "harness",
     label: "harness",
-    description: "Chooses which harness runs the conversation.",
-    examples: [formatChatSettingsCommand("harness app"), formatChatSettingsCommand("harness codex"), formatChatSettingsCommand("reset harness")],
+    description: "Chooses which ACP harness runs the conversation.",
+    examples: [formatChatSettingsCommand("harness codex"), formatChatSettingsCommand("reset harness")],
     picker: {
-      getOptions: () => ["app", ...listHarnesses()],
-      currentId: (chat) => chat.harness ?? "app",
+      getOptions: () => listHarnesses(),
+      currentId: (chat) => chat.harness ?? config.default_harness,
       alwaysSelect: true,
     },
     resettable: true,
-    formatCurrent: (chat) => chat.harness ?? "app",
-    formatDefault: () => "app",
+    formatCurrent: (chat) => chat.harness ?? `default (${config.default_harness || "none"})`,
+    formatDefault: () => config.default_harness || "none",
     setValue: async ({ chatId, value }) => {
       const trimmed = value.trim();
       if (trimmed.length === 0) {
         await updateChatSettingsFile(chatId, { harness: null });
-        return "Harness reset to `app`.";
+        return `Harness reset. This chat will use the central default (${config.default_harness || "none"}).`;
       }
       const available = listHarnesses();
-      if (trimmed === "app") {
-        await updateChatSettingsFile(chatId, { harness: null });
-        return "Harness set to `app`";
-      }
       if (!available.includes(trimmed)) {
-        return `Unknown harness \`${trimmed}\`. Available: app, ${available.join(", ")}`;
+        return `Unknown harness \`${trimmed}\`. Available: ${available.join(", ")}`;
       }
       await updateChatSettingsFile(chatId, { harness: trimmed });
       return `Harness set to \`${trimmed}\``;
@@ -1020,7 +1016,7 @@ export async function getChatSettingsInfo(rootDb, chatId, extra) {
     `- show: ${formatOutputVisibility(chat.output_visibility)}`,
     "",
     "Harness",
-    `- harness: ${chat.harness ?? "app"}`,
+    `- harness: ${chat.harness ?? `default (${config.default_harness || "none"})`}`,
     `- workspace: ${await formatResolvedWorkspacePath(extra.rootDb ?? rootDb, chatId, chat)}`,
     "",
     "Models",

@@ -36,27 +36,13 @@ function createTurn(chatId, text) {
 
 describe("createHarnessRunCoordinator", () => {
   it("buffers messages while a run is pending setup", async () => {
-    /** @type {AgentHarness} */
-    const harness = {
-      getName: () => "native",
-      getCapabilities: () => ({
-        supportsResume: false,
-        supportsCancel: false,
-        supportsLiveInput: false,
-        supportsApprovals: false,
-        supportsWorkdir: false,
-        supportsSandboxConfig: false,
-        supportsModelSelection: false,
-        supportsReasoningEffort: false,
-        supportsSessionFork: false,
-      }),
-      run: async () => ({ response: [], messages: [], usage: { promptTokens: 0, completionTokens: 0, cachedTokens: 0, cost: 0 } }),
-      handleCommand: async () => false,
-    };
-
     const coordinator = createHarnessRunCoordinator();
-    const started = await coordinator.beginRun({ turn: createTurn("chat-1", "first"), userText: "first", harness });
-    const buffered = await coordinator.beginRun({ turn: createTurn("chat-1", "second"), userText: "second", harness });
+    const started = await coordinator.beginRun({
+      turn: createTurn("chat-1", "first"),
+      userText: "first",
+      liveInputTarget: { supportsLiveInput: false },
+    });
+    const buffered = await coordinator.beginRun({ turn: createTurn("chat-1", "second"), userText: "second" });
 
     assert.equal(started.status, "started");
     assert.equal(buffered.status, "buffered");
@@ -64,25 +50,11 @@ describe("createHarnessRunCoordinator", () => {
     assert.equal(coordinator.finishRun("chat-1"), null);
   });
 
-  it("injects into an active harness query before starting a second run", async () => {
+  it("injects into an active adapter query before starting a second run", async () => {
     /** @type {string[]} */
     const injected = [];
-    /** @type {AgentHarness} */
-    const harness = {
-      getName: () => "claude",
-      getCapabilities: () => ({
-        supportsResume: true,
-        supportsCancel: true,
-        supportsLiveInput: true,
-        supportsApprovals: true,
-        supportsWorkdir: true,
-        supportsSandboxConfig: false,
-        supportsModelSelection: true,
-        supportsReasoningEffort: true,
-        supportsSessionFork: false,
-      }),
-      run: async () => ({ response: [], messages: [], usage: { promptTokens: 0, completionTokens: 0, cachedTokens: 0, cost: 0 } }),
-      handleCommand: async () => false,
+    const liveInputTarget = {
+      supportsLiveInput: true,
       injectMessage: (chatId, text) => {
         injected.push(`${typeof chatId === "string" ? chatId : chatId.id}:${text}`);
         return true;
@@ -90,9 +62,13 @@ describe("createHarnessRunCoordinator", () => {
     };
 
     const coordinator = createHarnessRunCoordinator();
-    const started = await coordinator.beginRun({ turn: createTurn("chat-2", "first"), userText: "first", harness });
+    const started = await coordinator.beginRun({
+      turn: createTurn("chat-2", "first"),
+      userText: "first",
+      liveInputTarget,
+    });
     coordinator.markRunActive("chat-2");
-    const injectedResult = await coordinator.beginRun({ turn: createTurn("chat-2", "follow-up"), userText: "follow-up", harness });
+    const injectedResult = await coordinator.beginRun({ turn: createTurn("chat-2", "follow-up"), userText: "follow-up" });
 
     assert.equal(started.status, "started");
     assert.equal(injectedResult.status, "injected");
@@ -100,35 +76,20 @@ describe("createHarnessRunCoordinator", () => {
     assert.equal(coordinator.finishRun("chat-2"), null);
   });
 
-  it("injects active follow-up text into the original harness when the selected owner changes mid-run", async () => {
+  it("injects active follow-up text into the original adapter target when the selected owner changes mid-run", async () => {
     /** @type {string[]} */
     const firstInjected = [];
     /** @type {string[]} */
     const secondInjected = [];
-    /** @type {AgentHarness} */
-    const firstHarness = {
-      getName: () => "codex",
-      getCapabilities: () => ({
-        supportsResume: true,
-        supportsCancel: true,
-        supportsLiveInput: true,
-        supportsApprovals: true,
-        supportsWorkdir: true,
-        supportsSandboxConfig: true,
-        supportsModelSelection: true,
-        supportsReasoningEffort: false,
-        supportsSessionFork: false,
-      }),
-      run: async () => ({ response: [], messages: [], usage: { promptTokens: 0, completionTokens: 0, cachedTokens: 0, cost: 0 } }),
-      handleCommand: async () => false,
+    const firstTarget = {
+      supportsLiveInput: true,
       injectMessage: (_chatId, text) => {
         firstInjected.push(text);
         return true;
       },
     };
-    /** @type {AgentHarness} */
-    const secondHarness = {
-      ...firstHarness,
+    const secondTarget = {
+      supportsLiveInput: true,
       injectMessage: (_chatId, text) => {
         secondInjected.push(text);
         return true;
@@ -139,14 +100,14 @@ describe("createHarnessRunCoordinator", () => {
     const started = await coordinator.beginRun({
       turn: createTurn("chat-owner", "first"),
       userText: "first",
-      harness: firstHarness,
+      liveInputTarget: firstTarget,
       ownerKey: "codex:work:model-a",
     });
     coordinator.markRunActive("chat-owner");
     const injectedResult = await coordinator.beginRun({
       turn: createTurn("chat-owner", "follow-up"),
       userText: "follow-up",
-      harness: secondHarness,
+      liveInputTarget: secondTarget,
       ownerKey: "cursor:personal:model-b",
     });
 
@@ -161,22 +122,8 @@ describe("createHarnessRunCoordinator", () => {
     /** @type {string[]} */
     const injected = [];
     let ready = false;
-    /** @type {AgentHarness} */
-    const harness = {
-      getName: () => "codex",
-      getCapabilities: () => ({
-        supportsResume: true,
-        supportsCancel: true,
-        supportsLiveInput: true,
-        supportsApprovals: true,
-        supportsWorkdir: true,
-        supportsSandboxConfig: true,
-        supportsModelSelection: true,
-        supportsReasoningEffort: false,
-        supportsSessionFork: true,
-      }),
-      run: async () => ({ response: [], messages: [], usage: { promptTokens: 0, completionTokens: 0, cachedTokens: 0, cost: 0 } }),
-      handleCommand: async () => false,
+    const liveInputTarget = {
+      supportsLiveInput: true,
       injectMessage: async (_chatId, text) => {
         if (!ready) {
           return false;
@@ -187,9 +134,13 @@ describe("createHarnessRunCoordinator", () => {
     };
 
     const coordinator = createHarnessRunCoordinator({ liveInputRetryDelayMs: 1 });
-    const started = await coordinator.beginRun({ turn: createTurn("chat-4", "first"), userText: "first", harness });
+    const started = await coordinator.beginRun({
+      turn: createTurn("chat-4", "first"),
+      userText: "first",
+      liveInputTarget,
+    });
     coordinator.markRunActive("chat-4");
-    const followUp = await coordinator.beginRun({ turn: createTurn("chat-4", "follow-up"), userText: "follow-up", harness });
+    const followUp = await coordinator.beginRun({ turn: createTurn("chat-4", "follow-up"), userText: "follow-up" });
     ready = true;
     await delay(10);
 
@@ -200,28 +151,14 @@ describe("createHarnessRunCoordinator", () => {
   });
 
   it("returns the latest buffered turn after a non-live run finishes", async () => {
-    /** @type {AgentHarness} */
-    const harness = {
-      getName: () => "codex",
-      getCapabilities: () => ({
-        supportsResume: true,
-        supportsCancel: true,
-        supportsLiveInput: false,
-        supportsApprovals: true,
-        supportsWorkdir: true,
-        supportsSandboxConfig: true,
-        supportsModelSelection: true,
-        supportsReasoningEffort: false,
-        supportsSessionFork: false,
-      }),
-      run: async () => ({ response: [], messages: [], usage: { promptTokens: 0, completionTokens: 0, cachedTokens: 0, cost: 0 } }),
-      handleCommand: async () => false,
-    };
-
     const coordinator = createHarnessRunCoordinator();
-    await coordinator.beginRun({ turn: createTurn("chat-3", "first"), userText: "first", harness });
+    await coordinator.beginRun({
+      turn: createTurn("chat-3", "first"),
+      userText: "first",
+      liveInputTarget: { supportsLiveInput: false },
+    });
     coordinator.markRunActive("chat-3");
-    const buffered = await coordinator.beginRun({ turn: createTurn("chat-3", "second"), userText: "second", harness });
+    const buffered = await coordinator.beginRun({ turn: createTurn("chat-3", "second"), userText: "second" });
 
     assert.equal(buffered.status, "buffered");
     assert.equal(coordinator.consumeBufferedTexts("chat-3").length, 0);

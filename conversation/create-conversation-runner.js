@@ -9,7 +9,6 @@ import {
   createHarnessRunCoordinator,
   getHarnessSessionDirectory,
 } from "#harnesses";
-import { createAppRunner } from "./app-runner.js";
 import { getHarnessInstanceConfig } from "../harness-config.js";
 import { contentEvent } from "../outbound-events.js";
 import {
@@ -21,7 +20,7 @@ import { errorToString, isHtmlContent } from "../utils.js";
 import { createLogger } from "../logger.js";
 import { appendUniqueContentBlocks, getDeliveredContentSignature } from "../content-signature.js";
 import { buildAgentIoHooks } from "./build-agent-io-hooks.js";
-import { buildHarnessRunRequest, buildHarnessTurnInput } from "./build-harness-run-request.js";
+import { buildHarnessTurnInput } from "./build-harness-run-request.js";
 import { buildRunConfig } from "./build-run-config.js";
 import { generateSessionTitle } from "./session-title.js";
 import { getChatDb } from "../db.js";
@@ -35,6 +34,7 @@ import { defaultRestartGate } from "../restart-gate.js";
 
 const log = createLogger("conversation:runner");
 const PRESENCE_LEASE_TTL_MS = 20_000;
+const NO_LIVE_INPUT_TARGET = Object.freeze({ supportsLiveInput: false });
 /**
  * Type guard: checks that an action has a command string.
  * @param {Action} action
@@ -269,13 +269,13 @@ async function resolveConversationHarnessSelection(chatInfo) {
 
 /**
  * @param {Awaited<ReturnType<typeof resolveConversationHarnessSelection>>} selection
- * @returns {{ persona: AgentDefinition | null, harness: AgentHarness, harnessInstance: ReturnType<typeof resolveHarnessInstance> | null }}
+ * @returns {{ persona: AgentDefinition | null, harness: AgentHarness | null, harnessInstance: ReturnType<typeof resolveHarnessInstance> | null }}
  */
 function resolveConversationHarnessFromSelection(selection) {
   if (!selection.harnessName) {
     return {
       persona: selection.persona,
-      harness: createAppRunner(),
+      harness: null,
       harnessInstance: null,
     };
   }
@@ -293,23 +293,17 @@ function resolveConversationHarnessFromSelection(selection) {
 
 /**
  * Pick the live-input surface for a run. Semantic adapters own provider-native
- * turn state, so adapter-backed harnesses must inject through the adapter
- * rather than the legacy harness facade.
- * @param {AgentHarness} harness
+ * turn state, so provider live input must inject through the adapter.
  * @param {ReturnType<typeof resolveHarnessInstance> | null} harnessInstance
  * @returns {{ supportsLiveInput: boolean, injectMessage?: AgentHarness["injectMessage"] }}
  */
-function resolveLiveInputTarget(harness, harnessInstance) {
-  const supportsLiveInput = harness.getCapabilities().supportsLiveInput;
-  if (supportsLiveInput && harnessInstance?.adapter) {
-    return {
-      supportsLiveInput,
-      injectMessage: harnessInstance.adapter.injectMessage.bind(harnessInstance.adapter),
-    };
+function resolveProviderLiveInputTarget(harnessInstance) {
+  if (!harnessInstance?.adapter || !harnessInstance.capabilities.supportsLiveInput) {
+    return NO_LIVE_INPUT_TARGET;
   }
   return {
-    supportsLiveInput,
-    injectMessage: harness.injectMessage,
+    supportsLiveInput: true,
+    injectMessage: harnessInstance.adapter.injectMessage.bind(harnessInstance.adapter),
   };
 }
 
@@ -335,7 +329,6 @@ function resolveLiveInputTarget(harness, harnessInstance) {
 export function createConversationRunner({ store, llmClient, getActionsFn, executeActionFn, workspacePresentation, restartGate = defaultRestartGate }) {
   const {
     addMessage,
-    updateToolMessage,
     createChat,
     getChat,
     getMessages,
@@ -456,7 +449,7 @@ export function createConversationRunner({ store, llmClient, getActionsFn, execu
     if (commandText === CANCEL_COMMAND) {
       const selection = await resolveConversationHarnessSelection(chatInfo);
       const { harness } = resolveConversationHarnessFromSelection(selection);
-      if (harness.cancel?.(chatId)) {
+      if (harness?.cancel?.(chatId)) {
         await context.reply(contentEvent("tool-result", "Cancelled."));
       } else {
         await context.reply(contentEvent("tool-result", "Nothing to cancel."));
@@ -534,6 +527,10 @@ export function createConversationRunner({ store, llmClient, getActionsFn, execu
     getResumeCursor,
     saveHarnessSessionAndBinding,
   }) {
+    const adapter = harnessInstance.adapter;
+    if (!adapter) {
+      throw new Error(`Harness instance "${harnessInstance.name}" does not have a semantic adapter.`);
+    }
     const runtimeDispatcher = createHarnessRuntimeEventDispatcher({
       provider: harness.getName(),
       messages: turnInput.messages ?? [],
@@ -543,7 +540,7 @@ export function createConversationRunner({ store, llmClient, getActionsFn, execu
     /** @type {Set<Promise<void>>} */
     const pendingEventHandlers = new Set();
     let eventChain = Promise.resolve();
-    const unsubscribe = harnessInstance.adapter.subscribeEvents?.((event) => {
+    const unsubscribe = adapter.subscribeEvents?.((event) => {
       if (!isHarnessRuntimeEventForActiveProviderTurn(event, {
         chatId,
         turnId,
@@ -564,7 +561,7 @@ export function createConversationRunner({ store, llmClient, getActionsFn, execu
       });
     });
     try {
-      const result = await harnessInstance.adapter.sendTurn({
+      const result = await adapter.sendTurn({
         ...turnInput,
         chatId,
         turnId,
@@ -573,7 +570,7 @@ export function createConversationRunner({ store, llmClient, getActionsFn, execu
         hooks,
       });
       await Promise.allSettled([...pendingEventHandlers]);
-      const activeSession = harnessInstance.adapter
+      const activeSession = adapter
         .listSessions()
         .find((session) => session.chatId === chatId);
       const currentResumeCursor = getResumeCursor();
@@ -602,15 +599,13 @@ export function createConversationRunner({ store, llmClient, getActionsFn, execu
   }
 
   /**
-   * Execute the selected app runner/provider harness for one chat turn.
+   * Execute the selected ACP provider for one chat turn.
    * @param {{
    *   turn: ChatTurn,
    *   chatInfo: import("../store.js").ChatRow | undefined,
    *   context: ExecuteActionContext,
    *   message: UserMessage,
    *   persona: AgentDefinition | null,
-   *   actions: Action[],
-   *   actionResolver: (name: string) => Promise<AppAction | null>,
    *   harness: AgentHarness,
    *   harnessInstance: ReturnType<typeof resolveHarnessInstance> | null,
    *   resolvedBinding: ResolvedChatBinding,
@@ -626,8 +621,6 @@ export function createConversationRunner({ store, llmClient, getActionsFn, execu
     context,
     message,
     persona,
-    actions,
-    actionResolver,
     harness,
     harnessInstance,
     resolvedBinding,
@@ -635,13 +628,14 @@ export function createConversationRunner({ store, llmClient, getActionsFn, execu
     endPresence,
     refreshPresenceLease,
   }) {
-    const { chatId, senderIds } = turn;
-    const runConfig = buildRunConfig(chatId, chatInfo, turn.chatName, harness.getName(), resolvedBinding);
+    const { chatId } = turn;
+    const harnessName = harness.getName();
+    const runConfig = buildRunConfig(chatId, chatInfo, turn.chatName, harnessName, resolvedBinding);
     const turnId = createHarnessRuntimeTurnId(chatId, ++harnessRuntimeTurnSequence);
-    let currentResumeCursor = chatInfo?.harness_session_kind === harness.getName()
+    let currentResumeCursor = chatInfo?.harness_session_kind === harnessName
       ? chatInfo.harness_session_id
       : null;
-    if (harnessInstance) {
+    if (harnessInstance?.adapter) {
       const startedAdapterSession = await harnessInstance.adapter.startSession({
         chatId,
         runConfig,
@@ -664,7 +658,7 @@ export function createConversationRunner({ store, llmClient, getActionsFn, execu
       }
       harnessSessionDirectory.upsert({
         chatId,
-        harnessName: harness.getName(),
+        harnessName,
         instanceId: harnessInstance.instanceId,
         status,
         activeTurnId: status === "running" ? turnId : null,
@@ -705,50 +699,40 @@ export function createConversationRunner({ store, llmClient, getActionsFn, execu
     };
 
     const bufferedTexts = runCoordinator.consumeBufferedTexts(chatId);
-    const result = harnessInstance
-      ? await runProviderTurnWithRuntimeEvents({
-          chatId,
-          harness,
-          harnessInstance,
-          hooks,
-          runConfig,
-          turnInput: await buildHarnessTurnInput({
-            chatId,
-            chatInfo,
-            context,
-            message,
-            persona,
-            llmClient,
-            getMessages,
-            harnessName: harness.getName(),
-            runConfig,
-            bufferedTexts,
-          }),
-          turnId,
-          getResumeCursor: () => currentResumeCursor,
-          saveHarnessSessionAndBinding,
-        })
-      : await harness.run(await buildHarnessRunRequest({
-          chatId,
-          senderIds,
-          chatInfo,
-          chatName: turn.chatName,
-          context,
-          message,
-          persona,
-          actions,
-          actionResolver,
-          llmClient,
-          getMessages,
-          executeActionFn,
-          addMessage,
-          updateToolMessage,
-          saveHarnessSession: saveHarnessSessionAndBinding,
-          hooks,
-          harnessName: harness.getName(),
-          resolvedBinding,
-          bufferedTexts,
-        }));
+    if (!harnessInstance?.adapter) {
+      const messageText = harnessInstance?.status.message
+        ?? `Harness driver "${harnessName}" is unavailable.`;
+      return {
+        result: {
+          response: [{ type: "text", text: messageText }],
+          messages: [message],
+          usage: { promptTokens: 0, completionTokens: 0, cachedTokens: 0, cost: 0 },
+        },
+        deliveredContentSignatures,
+      };
+    }
+    const result = await runProviderTurnWithRuntimeEvents({
+      chatId,
+      harness,
+      harnessInstance,
+      hooks,
+      runConfig,
+      turnInput: await buildHarnessTurnInput({
+        chatId,
+        chatInfo,
+        context,
+        message,
+        persona,
+        llmClient,
+        getMessages,
+        harnessName,
+        runConfig,
+        bufferedTexts,
+      }),
+      turnId,
+      getResumeCursor: () => currentResumeCursor,
+      saveHarnessSessionAndBinding,
+    });
     upsertSessionBinding("ready", undefined);
 
     return { result, deliveredContentSignatures };
@@ -760,10 +744,8 @@ export function createConversationRunner({ store, llmClient, getActionsFn, execu
    *   turn: ChatTurn,
    *   chatInfo: import("../store.js").ChatRow | undefined,
    *   context: ExecuteActionContext,
-   *   actions: Action[],
-   *   actionResolver: (name: string) => Promise<AppAction | null>,
    *   persona: AgentDefinition | null,
-   *   harness: AgentHarness,
+   *   harness: AgentHarness | null,
    *   harnessInstance: ReturnType<typeof resolveHarnessInstance> | null,
    *   harnessOwnerKey: string,
    *   isSlashCommand?: boolean,
@@ -775,8 +757,6 @@ export function createConversationRunner({ store, llmClient, getActionsFn, execu
     turn,
     chatInfo,
     context,
-    actions,
-    actionResolver,
     persona,
     harness,
     harnessInstance,
@@ -801,14 +781,21 @@ export function createConversationRunner({ store, llmClient, getActionsFn, execu
 
     log.debug("LLM will respond");
 
+    if (!harness) {
+      await context.reply(contentEvent(
+        "error",
+        "No ACP harness is selected for this chat and the central default is disabled. Set one with `!s harness codex`.",
+      ));
+      return null;
+    }
+
     const userText = runCoordinator.hasPendingRun(chatId)
       ? await buildPendingRunInputText({ chatId, chatInfo, content })
       : getTopLevelText(content);
     const lifecycleDecision = await runCoordinator.beginRun({
       turn,
       userText,
-      harness,
-      liveInputTarget: resolveLiveInputTarget(harness, harnessInstance),
+      liveInputTarget: resolveProviderLiveInputTarget(harnessInstance),
       ownerKey: harnessOwnerKey,
     });
     if (lifecycleDecision.status === "buffered") {
@@ -871,8 +858,6 @@ export function createConversationRunner({ store, llmClient, getActionsFn, execu
         context,
         message,
         persona,
-        actions,
-        actionResolver,
         harness,
         harnessInstance,
         resolvedBinding,
@@ -1012,7 +997,8 @@ export function createConversationRunner({ store, llmClient, getActionsFn, execu
       }
 
       const slashCommand = firstBlock.text.slice(1).trim().toLowerCase();
-      const handled = await harness.handleCommand({
+      /** @type {HarnessCommandContext} */
+      const commandInput = {
         chatId,
         chatInfo,
         context,
@@ -1027,7 +1013,10 @@ export function createConversationRunner({ store, llmClient, getActionsFn, execu
           push: pushHarnessForkStack,
           pop: popHarnessForkStack,
         },
-      });
+      };
+      const handled = harness
+        ? await harness.handleCommand(commandInput)
+        : false;
       if (handled) {
         return null;
       }
@@ -1039,8 +1028,6 @@ export function createConversationRunner({ store, llmClient, getActionsFn, execu
       turn,
       chatInfo,
       context,
-      actions,
-      actionResolver,
       persona,
       harness,
       harnessInstance,

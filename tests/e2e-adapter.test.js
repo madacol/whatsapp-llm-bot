@@ -14,7 +14,6 @@ import {
   createWAMessage,
   createTestDb,
   seedChat,
-  toolCall,
 } from "./helpers.js";
 import { setDb } from "../db.js";
 import { adaptIncomingMessage } from "../whatsapp/inbound/chat-turn.js";
@@ -70,9 +69,9 @@ after(async () => {
 });
 
 // ═══════════════════════════════════════════════════════════════════
-// 1. Basic text message through the full pipeline
+// 1. No harness selected
 // ═══════════════════════════════════════════════════════════════════
-describe("basic text message", () => {
+describe("no selected ACP harness", () => {
   // senderId "e2e-user" → chatId "e2e-user@s.whatsapp.net"
   const senderId = "e2e-user";
   const chatId = `${senderId}@s.whatsapp.net`;
@@ -81,70 +80,23 @@ describe("basic text message", () => {
     await seedChat(testDb, chatId, { enabled: true });
   });
 
-  it("sends a WAMessage through adapter → handleMessage → LLM → socket response", async () => {
-    mockServer.addResponses("Hello from LLM!");
-
+  it("does not fall back to the legacy app loop when the central default is disabled", async () => {
+    const savedDefaultHarness = process.env.DEFAULT_HARNESS;
+    process.env.DEFAULT_HARNESS = "";
     const { sock, getTextMessages } = createMockBaileysSocket();
     const msg = createWAMessage({ text: "Hey there", senderId });
 
-    await adaptIncomingMessage(msg, sock, handleMessage, testConfirmRegistry, testUserResponseRegistry);
+    try {
+      await adaptIncomingMessage(msg, sock, handleMessage, testConfirmRegistry, testUserResponseRegistry);
+    } finally {
+      if (savedDefaultHarness === undefined) delete process.env.DEFAULT_HARNESS;
+      else process.env.DEFAULT_HARNESS = savedDefaultHarness;
+    }
 
     const texts = getTextMessages();
     assert.ok(
-      texts.some(t => t.includes("Hello from LLM!")),
-      `Expected LLM response in socket output, got: ${JSON.stringify(texts)}`,
-    );
-  });
-});
-
-// ═══════════════════════════════════════════════════════════════════
-// 1b. Compact tool progress edits through the transport boundary
-// ═══════════════════════════════════════════════════════════════════
-describe("compact tool progress edits", () => {
-  const senderId = "e2e-compact-user";
-  const chatId = `${senderId}@s.whatsapp.net`;
-
-  before(async () => {
-    await seedChat(testDb, chatId, { enabled: true });
-    await updateChatConfig(chatId, (current) => ({
-      ...current,
-      output_visibility: { toolDetails: false },
-    }));
-  });
-
-  it("updates the compact tool message instead of sending repeated standalone progress messages", async () => {
-    mockServer.addResponses(
-      toolCall("run_javascript", { code: "() => 'hello'" }),
-      "Final answer after the tool.",
-    );
-
-    const { sock, getSentMessages } = createMockBaileysSocket();
-    const msg = createWAMessage({ text: "Run a tool", senderId });
-
-    await adaptIncomingMessage(msg, sock, handleMessage, testConfirmRegistry, testUserResponseRegistry);
-
-    const sentMessages = getSentMessages();
-    const compactMessages = sentMessages.filter((entry) => (
-      typeof entry.msg.text === "string"
-      && entry.msg.text.includes("*run_javascript*")
-    ));
-    const compactSends = compactMessages.filter((entry) => !("edit" in entry.msg));
-    const compactEdits = compactMessages.filter((entry) => "edit" in entry.msg);
-
-    assert.equal(compactSends.length, 1, `Expected one compact progress send, got ${JSON.stringify(compactMessages)}`);
-    assert.ok(compactEdits.length >= 1, `Expected compact progress to be edited, got ${JSON.stringify(compactMessages)}`);
-    assert.deepEqual(
-      compactEdits.map((entry) => entry.msg.edit),
-      compactEdits.map(() => ({ id: "sent-msg-0", remoteJid: chatId, fromMe: true })),
-      "Compact progress edits should target the first compact message key",
-    );
-    assert.ok(
-      sentMessages.some((entry) => typeof entry.msg.text === "string" && entry.msg.text.includes("Final answer after the tool.")),
-      `Expected final assistant answer, got ${JSON.stringify(sentMessages)}`,
-    );
-    assert.ok(
-      sentMessages.some((entry) => typeof entry.msg.text === "string" && entry.msg.text.includes("Cost:")),
-      `Expected final usage cost, got ${JSON.stringify(sentMessages)}`,
+      texts.some(t => t.includes("No ACP harness is selected")),
+      `Expected no-harness error in socket output, got: ${JSON.stringify(texts)}`,
     );
   });
 });
@@ -897,67 +849,28 @@ describe("command through adapter", () => {
     );
   });
 
-  it("bot responds to subsequent message after enabling", async () => {
-    mockServer.addResponses("Hello via adapter!");
-
+  it("enabled chats still require an explicit or central ACP harness", async () => {
+    const savedDefaultHarness = process.env.DEFAULT_HARNESS;
+    process.env.DEFAULT_HARNESS = "";
     const { sock, getTextMessages } = createMockBaileysSocket();
 
-    await adaptIncomingMessage(
-      createWAMessage({ text: "Hey" }),
-      sock,
-      handleMessage,
-      testConfirmRegistry,
-      testUserResponseRegistry,
-    );
+    try {
+      await adaptIncomingMessage(
+        createWAMessage({ text: "Hey" }),
+        sock,
+        handleMessage,
+        testConfirmRegistry,
+        testUserResponseRegistry,
+      );
+    } finally {
+      if (savedDefaultHarness === undefined) delete process.env.DEFAULT_HARNESS;
+      else process.env.DEFAULT_HARNESS = savedDefaultHarness;
+    }
 
     const texts = getTextMessages();
     assert.ok(
-      texts.some(t => t.includes("Hello via adapter!")),
-      `Expected LLM response, got: ${JSON.stringify(texts)}`,
-    );
-  });
-});
-
-// ═══════════════════════════════════════════════════════════════════
-// 7. Tool call through full pipeline with socket output
-// ═══════════════════════════════════════════════════════════════════
-describe("tool call through adapter", () => {
-  const senderId = "e2e-tool-user";
-  const chatId = `${senderId}@s.whatsapp.net`;
-
-  before(async () => {
-    await seedChat(testDb, chatId, { enabled: true });
-  });
-
-  it("executes tool call and returns final response via socket", async () => {
-    mockServer.addResponses(
-      {
-        tool_calls: [{
-          id: "call_e2e_001",
-          type: "function",
-          function: {
-            name: "run_javascript",
-            arguments: JSON.stringify({ code: "() => 'e2e-result'" }),
-          },
-        }],
-      },
-      "The result is e2e-result",
-    );
-
-    const { sock, getTextMessages } = createMockBaileysSocket();
-
-    await adaptIncomingMessage(
-      createWAMessage({ text: "Run some code", senderId }),
-      sock,
-      handleMessage,
-      testConfirmRegistry,
-      testUserResponseRegistry,
-    );
-
-    const texts = getTextMessages();
-    assert.ok(
-      texts.some(t => t.includes("The result is e2e-result")),
-      `Expected final LLM reply, got: ${JSON.stringify(texts)}`,
+      texts.some(t => t.includes("No ACP harness is selected")),
+      `Expected no-harness error, got: ${JSON.stringify(texts)}`,
     );
   });
 });
@@ -968,11 +881,65 @@ describe("tool call through adapter", () => {
 describe("presence updates", () => {
   // Use default senderId (master-user) so chatId = master-user@s.whatsapp.net
   const chatId = "master-user@s.whatsapp.net";
+  const harnessName = "e2e-presence-provider";
+
+  before(async () => {
+    const { registerHarnessDriver } = await import("../harnesses/index.js");
+    registerHarnessDriver({
+      name: harnessName,
+      supportsInstances: true,
+      createInstance: () => ({
+        harness: {
+          getName: () => harnessName,
+          getCapabilities: () => ({
+            supportsResume: true,
+            supportsCancel: false,
+            supportsLiveInput: false,
+            supportsApprovals: false,
+            supportsWorkdir: true,
+            supportsSandboxConfig: false,
+            supportsModelSelection: false,
+            supportsReasoningEffort: false,
+            supportsSessionFork: false,
+          }),
+          run: async () => {
+            throw new Error("presence e2e should use the semantic adapter");
+          },
+          handleCommand: async () => false,
+          listSlashCommands: () => [],
+          createAdapter: ({ name, instanceId, continuationKey }) => ({
+            startSession: async (input) => ({
+              chatId: input.chatId,
+              harnessName: name,
+              instanceId,
+              continuationKey,
+              status: "ready",
+              resumeCursor: null,
+            }),
+            sendTurn: async (input) => ({
+              response: [{ type: "markdown", text: "Presence provider response." }],
+              messages: input.messages ?? [],
+              usage: { promptTokens: 0, completionTokens: 0, cachedTokens: 0, cost: 0 },
+            }),
+            interruptTurn: async () => false,
+            injectMessage: async () => false,
+            stopSession: async () => false,
+            listSessions: () => [],
+            readThread: async () => null,
+            rollbackThread: async () => null,
+            streamEvents: {
+              async *[Symbol.asyncIterator]() {},
+            },
+          }),
+        },
+      }),
+    });
+  });
 
   it("sends composing and paused presence updates via socket", async () => {
     // Chat was already enabled by the command test above; ensure it exists
     await seedChat(testDb, chatId, { enabled: true });
-    mockServer.addResponses("done");
+    await updateChatConfig(chatId, (current) => ({ ...current, harness: harnessName }));
 
     const { sock, getPresenceUpdates } = createMockBaileysSocket();
 
@@ -1063,13 +1030,44 @@ describe("bot mention detection", () => {
 describe("markdown code renders as image in socket output", () => {
   const senderId = "e2e-md-code";
   const chatId = `${senderId}@s.whatsapp.net`;
+  const harnessName = "e2e-markdown-provider";
 
   before(async () => {
-    await seedChat(testDb, chatId, { enabled: true });
-  });
-
-  it("LLM markdown with code block produces [text, image, text] on socket", async () => {
-    const llmResponse = `Here is a snippet:
+    const { registerHarnessDriver } = await import("../harnesses/index.js");
+    registerHarnessDriver({
+      name: harnessName,
+      supportsInstances: true,
+      createInstance: () => ({
+        harness: {
+          getName: () => harnessName,
+          getCapabilities: () => ({
+            supportsResume: true,
+            supportsCancel: false,
+            supportsLiveInput: false,
+            supportsApprovals: false,
+            supportsWorkdir: true,
+            supportsSandboxConfig: false,
+            supportsModelSelection: false,
+            supportsReasoningEffort: false,
+            supportsSessionFork: false,
+          }),
+          run: async () => {
+            throw new Error("markdown e2e should use the semantic adapter");
+          },
+          handleCommand: async () => false,
+          listSlashCommands: () => [],
+          createAdapter: ({ name, instanceId, continuationKey }) => ({
+            startSession: async (input) => ({
+              chatId: input.chatId,
+              harnessName: name,
+              instanceId,
+              continuationKey,
+              status: "ready",
+              resumeCursor: null,
+            }),
+            sendTurn: async (input) => {
+              const responseText = input.input?.includes("Show me code")
+                ? `Here is a snippet:
 
 \`\`\`javascript
 function greet(name) {
@@ -1080,8 +1078,32 @@ function greet(name) {
 greet("world");
 \`\`\`
 
-Hope that helps!`;
-    mockServer.addResponses(llmResponse);
+Hope that helps!`
+                : "Just **bold** and _italic_ text, no code.";
+              return {
+                response: [{ type: "markdown", text: responseText }],
+                messages: input.messages ?? [],
+                usage: { promptTokens: 0, completionTokens: 0, cachedTokens: 0, cost: 0 },
+              };
+            },
+            interruptTurn: async () => false,
+            injectMessage: async () => false,
+            stopSession: async () => false,
+            listSessions: () => [],
+            readThread: async () => null,
+            rollbackThread: async () => null,
+            streamEvents: {
+              async *[Symbol.asyncIterator]() {},
+            },
+          }),
+        },
+      }),
+    });
+    await seedChat(testDb, chatId, { enabled: true });
+    await updateChatConfig(chatId, (current) => ({ ...current, harness: harnessName }));
+  });
+
+  it("provider markdown with code block produces [text, image, text] on socket", async () => {
 
     const { sock, getSentMessages } = createMockBaileysSocket();
 
@@ -1138,9 +1160,7 @@ Hope that helps!`;
     );
   });
 
-  it("LLM markdown without code block sends only text (no images)", async () => {
-    mockServer.addResponses("Just **bold** and _italic_ text, no code.");
-
+  it("provider markdown without code block sends only text (no images)", async () => {
     const { sock, getSentMessages } = createMockBaileysSocket();
 
     await adaptIncomingMessage(

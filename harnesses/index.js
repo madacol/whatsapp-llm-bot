@@ -16,7 +16,6 @@ export {
   waitForAllHarnesses,
 } from "./registry.js";
 export { runAcpAdapterSmoke } from "./acp-adapter-smoke.js";
-export { createHarnessAdapterFromHarness } from "./adapter.js";
 export { createHarnessRuntimeEventDispatcher } from "./harness-runtime-event-dispatcher.js";
 export { createHarnessSessionDirectory, getHarnessSessionDirectory } from "./session-directory.js";
 export { registerOptionalHarnesses } from "./optional-registration.js";

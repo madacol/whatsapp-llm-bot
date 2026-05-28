@@ -847,7 +847,7 @@ type AgentHarness = {
   listActiveSessions?: () => string[];
   /** Wait for all active queries to finish. Returns chat IDs that were waited on. */
   waitForIdle?: () => Promise<string[]>;
-  /** Optional provider-native adapter; registry falls back to a legacy wrapper. */
+  /** Required for chat-visible provider turns; missing adapters make the driver unavailable. */
   createAdapter?: (input: HarnessAdapterCreateInput) => HarnessAdapter;
   /** Optional lifecycle cleanup for instance-owned resources. */
   dispose?: () => void | Promise<void>;
@@ -872,7 +872,7 @@ type SdkUsageWithCache = {
   cache_creation_input_tokens?: number;
 };
 
-/* processLlmResponse types */
+/* Harness turn support types */
 
 type ExecuteActionOptions = {
   toolCallId?: string | null;

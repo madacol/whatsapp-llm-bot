@@ -3,26 +3,81 @@ import assert from "node:assert/strict";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
-  createHarnessAdapterFromHarness,
   getHarnessSessionDirectory,
-	  getHarnessDriverStatus,
-	  listHarnessInstances,
-	  listHarnessDrivers,
-	  registerAcpAgentDriver,
-	  registerHarnessDriver,
+  getHarnessDriverStatus,
+  listHarnessInstances,
+  listHarnessDrivers,
+  registerAcpAgentDriver,
+  registerHarnessDriver,
   registerOptionalHarnesses,
   resetHarnessRegistryForTests,
   resolveHarness,
+  resolveHarnessName,
   resolveHarnessInstance,
   reconcileHarnessInstances,
 } from "../harnesses/index.js";
+import config from "../config.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 afterEach(async () => {
+  delete process.env.DEFAULT_HARNESS;
+  delete process.env.MADABOT_DEFAULT_HARNESS;
   resetHarnessRegistryForTests();
   await registerOptionalHarnesses();
 });
+
+/**
+ * @param {string} name
+ * @param {string} instanceId
+ * @param {string} continuationKey
+ * @returns {HarnessAdapter}
+ */
+function createTestAdapter(name, instanceId, continuationKey) {
+  /** @type {Map<string, HarnessRuntimeSession>} */
+  const sessions = new Map();
+  return {
+    async startSession(input) {
+      const session = {
+        chatId: input.chatId,
+        harnessName: name,
+        instanceId,
+        continuationKey,
+        status: "ready",
+        workdir: input.runConfig?.workdir ?? null,
+        model: input.runConfig?.model ?? null,
+        resumeCursor: input.resumeCursor ?? null,
+      };
+      sessions.set(input.chatId, /** @type {HarnessRuntimeSession} */ (session));
+      return /** @type {HarnessRuntimeSession} */ (session);
+    },
+    async sendTurn(input) {
+      return {
+        response: [],
+        messages: input.messages ?? [],
+        usage: { promptTokens: 0, completionTokens: 0, cachedTokens: 0, cost: 0 },
+      };
+    },
+    interruptTurn: async () => false,
+    respondToRequest: async () => false,
+    respondToUserInput: async () => false,
+    injectMessage: async () => false,
+    stopSession: async (chatId) => {
+      sessions.delete(typeof chatId === "string" ? chatId : chatId.id);
+      return true;
+    },
+    hasSession: (chatId) => sessions.has(typeof chatId === "string" ? chatId : chatId.id),
+    stopAll: async () => {
+      sessions.clear();
+    },
+    listSessions: () => [...sessions.values()],
+    readThread: async () => null,
+    rollbackThread: async () => null,
+    streamEvents: {
+      async *[Symbol.asyncIterator]() {},
+    },
+  };
+}
 
 /**
  * @param {string} name
@@ -52,6 +107,7 @@ function createTestHarness(name, overrides = {}) {
     },
     handleCommand: async () => false,
     listSlashCommands: () => [],
+    createAdapter: ({ name: adapterName, instanceId, continuationKey }) => createTestAdapter(adapterName, instanceId, continuationKey),
     ...overrides,
   };
 }
@@ -499,100 +555,24 @@ describe("resolveHarness", () => {
     assert.equal(createCount, 1);
   });
 
-  it("exposes an adapter facade for legacy harnesses", async () => {
-    /** @type {AgentHarness} */
-    const harness = {
-      getName: () => "adapter-test",
-      getCapabilities: () => ({
-        supportsResume: true,
-        supportsCancel: true,
-        supportsLiveInput: true,
-        supportsApprovals: false,
-        supportsWorkdir: true,
-        supportsSandboxConfig: false,
-        supportsModelSelection: true,
-        supportsReasoningEffort: false,
-        supportsSessionFork: false,
+  it("marks drivers without a semantic adapter unavailable", () => {
+    registerHarnessDriver({
+      name: "legacy-no-adapter",
+      supportsInstances: true,
+      createInstance: () => ({
+        harness: {
+          ...createTestHarness("legacy-no-adapter"),
+          createAdapter: undefined,
+        },
       }),
-      async run(params) {
-        return {
-          response: [{ type: "text", text: params.messages.length.toString() }],
-          messages: params.messages,
-          usage: { promptTokens: 1, completionTokens: 2, cachedTokens: 0, cost: 0 },
-        };
-      },
-      handleCommand: async () => false,
-      listSlashCommands: () => [],
-      injectMessage: async (_chatId, text) => text === "yes",
-      cancel: () => true,
-    };
-    const adapter = createHarnessAdapterFromHarness({
-      harness,
-      name: "adapter-test",
-      instanceId: "work",
-      continuationKey: "adapter-test:instance:work",
     });
 
-    const session = await adapter.startSession({
-      chatId: "chat-1",
-      runConfig: { workdir: "/repo", model: "model-a" },
-    });
-    assert.deepEqual(session, {
-      chatId: "chat-1",
-      harnessName: "adapter-test",
-      instanceId: "work",
-      continuationKey: "adapter-test:instance:work",
-      status: "ready",
-      workdir: "/repo",
-      model: "model-a",
-    });
-    assert.equal(await adapter.injectMessage("chat-1", "yes"), true);
-    assert.equal(await adapter.interruptTurn({ chatId: "chat-1" }), true);
-  });
+    const instance = resolveHarnessInstance("legacy-no-adapter", { instanceId: "work" });
 
-  it("accepts semantic turn input through the adapter compatibility bridge", async () => {
-    /** @type {AgentHarness} */
-    const harness = {
-      getName: () => "semantic-adapter-test",
-      getCapabilities: () => ({
-        supportsResume: false,
-        supportsCancel: false,
-        supportsLiveInput: false,
-        supportsApprovals: false,
-        supportsWorkdir: false,
-        supportsSandboxConfig: false,
-        supportsModelSelection: false,
-        supportsReasoningEffort: false,
-        supportsSessionFork: false,
-      }),
-      async run(params) {
-        assert.equal(params.session.chatId, "semantic-chat");
-        assert.deepEqual(params.messages, [
-          { role: "user", content: [{ type: "text", text: "semantic input" }] },
-        ]);
-        return {
-          response: [{ type: "text", text: "ok" }],
-          messages: params.messages,
-          usage: { promptTokens: 1, completionTokens: 1, cachedTokens: 0, cost: 0 },
-        };
-      },
-      handleCommand: async () => false,
-      listSlashCommands: () => [],
-    };
-    const adapter = createHarnessAdapterFromHarness({
-      harness,
-      name: "semantic-adapter-test",
-      instanceId: "default",
-      continuationKey: "semantic-adapter-test:instance:default",
-    });
-
-    const result = await adapter.sendTurn({
-      chatId: "semantic-chat",
-      input: "semantic input",
-      runConfig: { model: "model-a" },
-    });
-
-    assert.deepEqual(result.response, [{ type: "text", text: "ok" }]);
+    assert.equal(instance.available, false);
+    assert.equal(instance.adapter, null);
+    assert.equal(instance.status.availability, "unavailable");
+    assert.match(instance.status.message ?? "", /did not provide a semantic adapter/);
   });
 
   it("exposes a provider-instance text generation hook", async () => {
@@ -683,5 +663,29 @@ describe("harness session directory", () => {
       lastRuntimeEvent: "turn.started",
       lastRuntimeEventAt: "2026-05-27T00:00:00.000Z",
     });
+  });
+});
+
+describe("resolveHarnessName", () => {
+  it("uses codex as the central default when no chat or persona harness is selected", () => {
+    assert.equal(resolveHarnessName(null, null), "codex");
+  });
+
+  it("allows the central default harness to be changed", () => {
+    config.default_harness = "claude";
+
+    assert.equal(resolveHarnessName(null, null), "claude");
+  });
+
+  it("treats stored app as default selection instead of a provider", () => {
+    config.default_harness = "pi";
+
+    assert.equal(resolveHarnessName(null, { harness: "app" }), "pi");
+  });
+
+  it("can disable the central default", () => {
+    config.default_harness = "";
+
+    assert.equal(resolveHarnessName(null, null), null);
   });
 });

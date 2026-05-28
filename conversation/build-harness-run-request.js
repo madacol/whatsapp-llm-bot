@@ -1,4 +1,3 @@
-import config from "../config.js";
 import { resolveChatModel } from "../model-roles.js";
 import { buildRunConfig } from "./build-run-config.js";
 import { buildRunSession } from "./build-run-session.js";
@@ -13,23 +12,19 @@ import { getChatDb } from "../db.js";
  * harness.
  * @param {AgentDefinition | null} persona
  * @param {import("../store.js").ChatRow | undefined} chatInfo
- * @param {string} harnessName
+ * @param {string} _harnessName
  * @returns {string}
  */
-export function buildExternalSystemPrompt(persona, chatInfo, harnessName) {
+export function buildExternalSystemPrompt(persona, chatInfo, _harnessName) {
   const explicitPrompt = persona?.systemPrompt ?? chatInfo?.system_prompt ?? "";
   if (explicitPrompt) {
     return explicitPrompt;
-  }
-  if (harnessName === "app") {
-    return config.system_prompt;
   }
   return "";
 }
 
 /**
- * Prepare the provider/app-visible conversation input shared by the legacy app
- * runner contract and the semantic provider adapter contract.
+ * Prepare provider-visible conversation input shared by turn request builders.
  * @param {{
  *   chatId: string,
  *   chatInfo: import("../store.js").ChatRow | undefined,
@@ -149,7 +144,7 @@ export async function buildHarnessTurnInput({
 }
 
 /**
- * Build the full legacy harness run request for a chat turn.
+ * Build the full harness run request for a chat turn.
  * @param {{
  *   chatId: string,
  *   senderIds: string[],
