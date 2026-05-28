@@ -175,7 +175,43 @@ function assertSingleSentEvent(sent, messageKind, eventKind) {
 }
 
 describe("buildAgentIoHooks", () => {
-  it("sends generic runtime events through semantic content transport", async () => {
+  it("forwards generic runtime events as semantic outbound events", async () => {
+    const { hooks, sent } = createSubject(VISIBLE_TOOL_OUTPUT);
+
+    const notification = /** @type {import("../harnesses/harness-runtime-events.js").HarnessRuntimeEvent} */ ({
+      type: "extension.notification",
+      provider: "acp",
+      method: "madabot/example",
+      payload: { ok: true },
+    });
+    const warning = /** @type {import("../harnesses/harness-runtime-events.js").HarnessRuntimeEvent} */ ({
+      type: "runtime.warning",
+      provider: "acp",
+      message: "provider warning",
+    });
+
+    await hooks.onRuntimeEvent?.(notification);
+    await hooks.onRuntimeEvent?.(warning);
+
+    assert.deepEqual(sent, [
+      {
+        kind: "send",
+        event: {
+          kind: "runtime_event",
+          event: notification,
+        },
+      },
+      {
+        kind: "send",
+        event: {
+          kind: "runtime_event",
+          event: warning,
+        },
+      },
+    ]);
+  });
+
+  it("does not format generic runtime events before the transport", async () => {
     const { hooks, sent } = createSubject(VISIBLE_TOOL_OUTPUT);
 
     await hooks.onRuntimeEvent?.({
@@ -190,24 +226,7 @@ describe("buildAgentIoHooks", () => {
       message: "provider warning",
     });
 
-    assert.deepEqual(sent, [
-      {
-        kind: "send",
-        event: {
-          kind: "content",
-          source: "plain",
-          content: "acp extension notification: madabot/example\n{\"ok\":true}",
-        },
-      },
-      {
-        kind: "send",
-        event: {
-          kind: "content",
-          source: "warning",
-          content: "provider warning",
-        },
-      },
-    ]);
+    assert.equal(sent.every((entry) => entry.event.kind === "runtime_event"), true);
   });
 
   it("maps plan events to an llm reply", async () => {

@@ -1,6 +1,6 @@
 import { MAX_TOOL_CALL_DEPTH, parseToolArgs } from "../agent-io-defaults.js";
 import { buildToolPresentation } from "../tool-presentation-model.js";
-import { contentEvent, planEvent, reasoningInspectState, subagentMessageEvent, textUpdate, toolCallEvent, usageEvent } from "../outbound-events.js";
+import { contentEvent, planEvent, reasoningInspectState, runtimeEvent, subagentMessageEvent, textUpdate, toolCallEvent, usageEvent } from "../outbound-events.js";
 import { createCodexDisplayHooks } from "./codex-hook-display.js";
 import { DEFAULT_OUTPUT_VISIBILITY } from "../chat-output-visibility.js";
 import { createCompactToolActivityFeed } from "./compact-tool-activity.js";
@@ -45,85 +45,6 @@ async function displayToolCall(toolCall, context, actionFormatter, cwd, toolCont
       toolContext,
     ),
   ));
-}
-
-/**
- * @param {unknown} value
- * @returns {string}
- */
-function formatRuntimePayload(value) {
-  if (value === undefined) {
-    return "";
-  }
-  if (typeof value === "string") {
-    return value;
-  }
-  try {
-    return JSON.stringify(value);
-  } catch {
-    return String(value);
-  }
-}
-
-/**
- * @param {Parameters<Required<AgentIOHooks>["onRuntimeEvent"]>[0]} event
- * @returns {{ source: MessageSource, text: string }}
- */
-function formatRuntimeEvent(event) {
-  const provider = event.provider || "provider";
-  switch (event.type) {
-    case "session.started":
-    case "session.updated":
-    case "session.stopped":
-      return { source: "plain", text: `${provider} session ${event.session.status}` };
-    case "turn.started":
-    case "turn.completed":
-      return { source: "plain", text: `${provider} turn ${event.turn.status ?? event.type.split(".")[1]}` };
-    case "request.opened":
-    case "request.resolved":
-      return {
-        source: "plain",
-        text: `${provider} request ${event.type.split(".")[1]}: ${event.request.summary ?? event.request.detail ?? event.request.kind}`,
-      };
-    case "user-input.requested":
-    case "user-input.resolved": {
-      const questions = event.request.questions.map((question) => question.question).filter(Boolean).join("; ");
-      return { source: "plain", text: `${provider} user input ${event.type.split(".")[1]}${questions ? `: ${questions}` : ""}` };
-    }
-    case "item.started":
-    case "item.updated":
-    case "item.completed":
-      return {
-        source: "plain",
-        text: `${provider} ${event.item.kind} item ${event.type.split(".")[1]}${event.item.text ? `: ${event.item.text}` : ""}`,
-      };
-    case "extension.notification":
-    case "extension.request": {
-      const payload = formatRuntimePayload(event.payload);
-      return {
-        source: "plain",
-        text: `${provider} ${event.type.replace(".", " ")}: ${event.method}${payload ? `\n${payload}` : ""}`,
-      };
-    }
-    case "model.rerouted":
-      return {
-        source: "plain",
-        text: `${provider} model rerouted: ${event.fromModel ?? "default"} -> ${event.toModel ?? "default"}${event.reason ? `\n${event.reason}` : ""}`,
-      };
-    case "config.warning":
-    case "runtime.warning":
-      return {
-        source: "warning",
-        text: event.summary ?? event.message ?? event.details ?? `${provider} ${event.type}`,
-      };
-    case "runtime.error":
-      return {
-        source: "error",
-        text: event.summary ?? event.message ?? event.details ?? `${provider} runtime error`,
-      };
-    default:
-      return { source: "plain", text: `${provider} ${event.type}` };
-  }
 }
 
 /**
@@ -348,8 +269,7 @@ export function buildAgentIoHooks(
     ),
     onUsage: async (cost, tokens) => { await context.send(usageEvent(cost, tokens)); },
     onRuntimeEvent: async (event) => {
-      const formatted = formatRuntimeEvent(event);
-      await emitWhileWorking(() => context.send(contentEvent(formatted.source, formatted.text)));
+      await emitWhileWorking(() => context.send(runtimeEvent(event)));
     },
   };
 }

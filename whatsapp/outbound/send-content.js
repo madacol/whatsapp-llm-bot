@@ -20,6 +20,8 @@ const WHATSAPP_EDIT_HANDLE_TTL_MS = 14 * 60 * 1000;
 const log = createLogger("whatsapp:outbound");
 /** @type {Map<string, WhatsAppEditHandleRecord>} */
 const inMemoryEditHandles = new Map();
+/** @type {Map<string, { handle?: MessageHandle, entries: Array<{ icon: string, provider: string, summary: string, detail?: string }> }>} */
+const runtimeStatusByChat = new Map();
 
 /** @type {Record<MessageSource, string>} */
 const SOURCE_PREFIX = {
@@ -198,6 +200,159 @@ function renderSubagentMessageContent(event) {
     : "**Sub-agent**";
   const detail = event.agentRole ? `_${event.agentRole}_` : "";
   return [{ type: "markdown", text: [`🧩 ${title}`, detail, event.text].filter(Boolean).join("\n") }];
+}
+
+/**
+ * @param {unknown} value
+ * @returns {string}
+ */
+function formatRuntimePayload(value) {
+  if (value === undefined) {
+    return "";
+  }
+  if (typeof value === "string") {
+    return value;
+  }
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
+}
+
+/**
+ * @param {string | undefined} provider
+ * @returns {string}
+ */
+function formatRuntimeProvider(provider) {
+  const normalized = provider?.trim();
+  return normalized ? normalized.toUpperCase() : "Provider";
+}
+
+/**
+ * @param {RuntimeEventOutboundEvent["event"]} event
+ * @returns {{ kind: "compact" | "error", icon: string, provider: string, summary: string, detail?: string, closesStatus?: boolean }}
+ */
+function formatRuntimeEventPresentation(event) {
+  const provider = formatRuntimeProvider(event.provider);
+  switch (event.type) {
+    case "session.started":
+    case "session.updated":
+    case "session.stopped":
+      return {
+        kind: "compact",
+        icon: "🔄",
+        provider,
+        summary: `session ${event.session.status}`,
+        closesStatus: event.type === "session.stopped",
+      };
+    case "turn.started":
+    case "turn.completed":
+      return {
+        kind: "compact",
+        icon: "🔄",
+        provider,
+        summary: `turn ${event.turn.status ?? event.type.split(".")[1]}`,
+        closesStatus: event.type === "turn.completed",
+      };
+    case "request.opened":
+    case "request.resolved":
+      return {
+        kind: "compact",
+        icon: "🔄",
+        provider,
+        summary: `request ${event.type.split(".")[1]}: ${event.request.summary ?? event.request.kind}`,
+        ...(event.request.detail ? { detail: event.request.detail } : {}),
+      };
+    case "user-input.requested":
+    case "user-input.resolved": {
+      const questions = event.request.questions.map((question) => question.question).filter(Boolean).join("; ");
+      return {
+        kind: "compact",
+        icon: "🔄",
+        provider,
+        summary: `user input ${event.type.split(".")[1]}${questions ? `: ${questions}` : ""}`,
+      };
+    }
+    case "item.started":
+    case "item.updated":
+    case "item.completed":
+      return {
+        kind: "compact",
+        icon: "🔄",
+        provider,
+        summary: `${event.item.kind} item ${event.type.split(".")[1]}`,
+        ...(event.item.text ? { detail: event.item.text } : {}),
+      };
+    case "extension.notification":
+    case "extension.request": {
+      const payload = formatRuntimePayload(event.payload);
+      return {
+        kind: "compact",
+        icon: "🔄",
+        provider,
+        summary: `${event.type.replace(".", " ")}: ${event.method}`,
+        ...(payload ? { detail: payload } : {}),
+      };
+    }
+    case "model.rerouted":
+      return {
+        kind: "compact",
+        icon: "🔄",
+        provider,
+        summary: `model rerouted: ${event.fromModel ?? "default"} -> ${event.toModel ?? "default"}`,
+        ...(event.reason ? { detail: event.reason } : {}),
+      };
+    case "config.warning":
+    case "runtime.warning":
+      return {
+        kind: "compact",
+        icon: "⚠️",
+        provider,
+        summary: event.summary ?? event.message ?? `${provider} ${event.type}`,
+        ...(event.details ? { detail: event.details } : {}),
+      };
+    case "runtime.error":
+      return {
+        kind: "error",
+        icon: "❌",
+        provider,
+        summary: event.summary ?? event.message ?? event.details ?? `${provider} runtime error`,
+      };
+    default:
+      return {
+        kind: "compact",
+        icon: "🔄",
+        provider,
+        summary: `${provider} ${event.type}`,
+      };
+  }
+}
+
+/**
+ * @param {{ entries: Array<{ icon: string, provider: string, summary: string, detail?: string }> }} state
+ * @returns {string}
+ */
+function renderRuntimeStatusText(state) {
+  const hiddenCount = Math.max(0, state.entries.length - 3);
+  const visibleEntries = hiddenCount > 0 ? state.entries.slice(-3) : state.entries;
+  return [
+    ...(hiddenCount > 0 ? [`... +${hiddenCount} earlier events`] : []),
+    ...visibleEntries.map((entry) => `${entry.icon} *${entry.provider}*  ${entry.summary}`),
+  ].join("\n");
+}
+
+/**
+ * @param {{ entries: Array<{ icon: string, provider: string, summary: string, detail?: string }> }} state
+ * @returns {string}
+ */
+function renderRuntimeStatusInspectText(state) {
+  return state.entries
+    .map((entry) => {
+      const summary = `${entry.icon} *${entry.provider}*  ${entry.summary}`;
+      return entry.detail ? `${summary}\n${entry.detail}` : summary;
+    })
+    .join("\n");
 }
 
 /**
@@ -486,6 +641,50 @@ function renderOutboundEvent(event) {
 }
 
 /**
+ * @param {import('@whiskeysockets/baileys').WASocket} sock
+ * @param {string} chatId
+ * @param {RuntimeEventOutboundEvent} event
+ * @param {{ quoted?: BaileysMessage } | undefined} options
+ * @param {import("../runtime/reaction-runtime.js").ReactionRuntime | undefined} reactionRuntime
+ * @param {{ editHandleStore?: import("../../store.js").Store }} [sendOptions]
+ * @returns {Promise<MessageHandle | undefined>}
+ */
+async function sendRuntimeEvent(sock, chatId, event, options, reactionRuntime, sendOptions = {}) {
+  const presentation = formatRuntimeEventPresentation(event.event);
+  if (presentation.kind === "error") {
+    return sendBlocks(sock, chatId, "error", presentation.summary, options, reactionRuntime, event, {
+      editHandleStore: sendOptions.editHandleStore,
+    });
+  }
+
+  const state = runtimeStatusByChat.get(chatId) ?? { entries: [] };
+  state.entries.push({
+    icon: presentation.icon,
+    provider: presentation.provider,
+    summary: presentation.summary,
+    ...(presentation.detail ? { detail: presentation.detail } : {}),
+  });
+  runtimeStatusByChat.set(chatId, state);
+  const text = renderRuntimeStatusText(state);
+  if (!state.handle) {
+    state.handle = await sendBlocks(sock, chatId, "plain", text, options, reactionRuntime, event, {
+      editHandleStore: sendOptions.editHandleStore,
+    });
+  } else {
+    await state.handle.update({ kind: "text", text });
+  }
+  state.handle?.setInspect({
+    kind: "text",
+    text: renderRuntimeStatusInspectText(state),
+    persistOnInspect: true,
+  });
+  if (presentation.closesStatus) {
+    runtimeStatusByChat.delete(chatId);
+  }
+  return state.handle;
+}
+
+/**
  * @param {MessageHandleUpdate} update
  * @returns {string}
  */
@@ -684,6 +883,9 @@ export async function editWhatsAppMessageByHandle(sock, transportHandleId, newTe
  * @returns {Promise<MessageHandle | undefined>}
  */
 export async function sendEvent(sock, chatId, event, options, reactionRuntime, sendOptions = {}) {
+  if (event.kind === "runtime_event") {
+    return sendRuntimeEvent(sock, chatId, event, options, reactionRuntime, sendOptions);
+  }
   const rendered = renderOutboundEvent(event);
   if (!rendered) {
     return undefined;

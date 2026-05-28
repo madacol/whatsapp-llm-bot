@@ -89,6 +89,54 @@ describe("sendEvent – sub-agent messages", () => {
   });
 });
 
+describe("sendEvent – runtime events", () => {
+  it("folds generic runtime events into one editable WhatsApp status", async () => {
+    const { sock, sent } = createMockSock();
+
+    await sendEvent(sock, "runtime-chat", {
+      kind: "runtime_event",
+      event: {
+        type: "session.started",
+        provider: "acp",
+        session: { id: "session-1", status: "running" },
+      },
+    });
+    await sendEvent(sock, "runtime-chat", {
+      kind: "runtime_event",
+      event: {
+        type: "extension.notification",
+        provider: "acp",
+        method: "madabot/example",
+        payload: { ok: true },
+      },
+    });
+
+    assert.equal(sent.length, 2);
+    assert.equal(sent[0]?.msg.text, "🔄 *ACP*  session running");
+    assert.deepEqual(sent[1]?.msg, {
+      text: "🔄 *ACP*  session running\n🔄 *ACP*  extension notification: madabot/example",
+      edit: { id: "msg-1", remoteJid: "runtime-chat", fromMe: true },
+    });
+  });
+
+  it("renders runtime errors as standalone error messages", async () => {
+    const { sock, sent } = createMockSock();
+
+    await sendEvent(sock, "runtime-error-chat", {
+      kind: "runtime_event",
+      event: {
+        type: "runtime.error",
+        provider: "acp",
+        message: "Provider crashed",
+      },
+    });
+
+    assert.deepEqual(sent.map((entry) => entry.msg), [
+      { text: "❌ Provider crashed" },
+    ]);
+  });
+});
+
 describe("sendBlocks – markdown with code", () => {
   it("renders code blocks inside markdown as images", async () => {
     const { sock, sent } = createMockSock();
