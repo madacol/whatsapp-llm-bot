@@ -3,6 +3,7 @@
  */
 
 import fs from "node:fs";
+import { setTimeout as delay } from "node:timers/promises";
 
 import { getActions, executeAction } from "./actions.js";
 import config from "./config.js";
@@ -51,6 +52,46 @@ export function createMessageHandler(deps) {
   });
 }
 
+/**
+ * Wait until a PID disappears without monopolizing the event loop.
+ *
+ * @param {number} pid
+ * @param {{
+ *   timeoutMs?: number,
+ *   pollIntervalMs?: number,
+ *   killFn?: typeof process.kill,
+ *   nowFn?: () => number,
+ *   sleepFn?: (ms: number) => Promise<void>,
+ * }} [options]
+ * @returns {Promise<boolean>} true when the process exits before timeout
+ */
+export async function waitForPidExit(pid, options = {}) {
+  const {
+    timeoutMs = 125_000,
+    pollIntervalMs = 250,
+    killFn = process.kill,
+    nowFn = Date.now,
+    sleepFn = delay,
+  } = options;
+  const deadline = nowFn() + timeoutMs;
+
+  while (nowFn() < deadline) {
+    try {
+      killFn(pid, 0);
+    } catch {
+      return true;
+    }
+
+    const remainingMs = deadline - nowFn();
+    if (remainingMs <= 0) {
+      break;
+    }
+    await sleepFn(Math.min(pollIntervalMs, remainingMs));
+  }
+
+  return false;
+}
+
 // ── Default initialization (production) ──
 
 // Register optional harnesses
@@ -66,10 +107,7 @@ if (!process.env.TESTING) {
       log.info(`Killing previous instance (PID ${oldPid})...`);
       process.kill(oldPid, "SIGTERM");
       // Wait for graceful shutdown (active queries get 2min to finish)
-      const start = Date.now();
-      while (Date.now() - start < 125_000) {
-        try { process.kill(oldPid, 0); } catch { break; }
-      }
+      await waitForPidExit(oldPid);
     } catch { /* not running, ok */ }
   }
   fs.writeFileSync(pidFile, process.pid.toString());
