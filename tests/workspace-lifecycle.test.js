@@ -28,6 +28,72 @@ let store;
 let mockServer;
 /** @type {string[]} */
 let tempDirs = [];
+/** @type {HarnessTurnInput[]} */
+let capturedHarnessTurns = [];
+
+const WORKSPACE_HARNESS_NAME = "workspace-lifecycle-acp";
+
+async function registerWorkspaceHarness() {
+  const { registerHarnessDriver } = await import("../harnesses/index.js");
+  registerHarnessDriver({
+    name: WORKSPACE_HARNESS_NAME,
+    supportsInstances: true,
+    createInstance: () => ({
+      harness: {
+        getName: () => WORKSPACE_HARNESS_NAME,
+        getCapabilities: () => ({
+          supportsResume: true,
+          supportsCancel: false,
+          supportsLiveInput: false,
+          supportsApprovals: false,
+          supportsWorkdir: true,
+          supportsSandboxConfig: false,
+          supportsModelSelection: false,
+          supportsReasoningEffort: false,
+          supportsSessionFork: false,
+        }),
+        run: async () => {
+          throw new Error("workspace lifecycle tests must use the semantic ACP adapter");
+        },
+        handleCommand: async () => false,
+        listSlashCommands: () => [],
+        createAdapter: ({ name, instanceId, continuationKey }) => ({
+          startSession: async (input) => ({
+            chatId: input.chatId,
+            harnessName: name,
+            instanceId,
+            continuationKey,
+            status: "ready",
+            workdir: input.runConfig?.workdir ?? null,
+            model: input.runConfig?.model ?? null,
+            resumeCursor: input.resumeCursor ?? null,
+          }),
+          sendTurn: async (input) => {
+            capturedHarnessTurns.push(input);
+            return {
+              response: [{ type: "markdown", text: "Seed received." }],
+              messages: input.messages ?? [],
+              usage: { promptTokens: 10, completionTokens: 5, cachedTokens: 0, cost: 0 },
+            };
+          },
+          interruptTurn: async () => false,
+          respondToRequest: async () => false,
+          respondToUserInput: async () => false,
+          injectMessage: async () => false,
+          stopSession: async () => false,
+          hasSession: () => false,
+          stopAll: async () => {},
+          listSessions: () => [],
+          readThread: async () => null,
+          rollbackThread: async () => null,
+          streamEvents: {
+            async *[Symbol.asyncIterator]() {},
+          },
+        }),
+      },
+    }),
+  });
+}
 
 /**
  * @returns {Promise<{
@@ -202,10 +268,13 @@ async function createRepoFixture() {
  * @returns {Promise<void>}
  */
 async function seedChat(chatId, options = {}) {
+  await registerWorkspaceHarness();
   await seedChat_(db, chatId, { enabled: true });
-  if (options.harnessCwd) {
-    await updateChatConfig(chatId, (current) => ({ ...current, harness_cwd: options.harnessCwd ?? null }));
-  }
+  await updateChatConfig(chatId, (current) => ({
+    ...current,
+    harness: WORKSPACE_HARNESS_NAME,
+    harness_cwd: options.harnessCwd ?? null,
+  }));
 }
 
 /**
@@ -247,6 +316,7 @@ before(async () => {
   setDb("./pgdata/root", db);
   mockServer = await createMockLlmServer();
   process.env.BASE_URL = mockServer.url;
+  await registerWorkspaceHarness();
   const { initStore } = await import("../store.js");
   store = await initStore(db);
 });
@@ -258,6 +328,7 @@ after(async () => {
 
 describe("workspace lifecycle", () => {
   afterEach(() => {
+    capturedHarnessTurns = [];
     const pending = mockServer.pendingResponses();
     assert.equal(pending, 0, `Mock response queue should be empty after each test, but has ${pending} unconsumed response(s).`);
   });
@@ -442,7 +513,6 @@ describe("workspace lifecycle", () => {
     const repoRoot = await createRepoFixture();
     const transportState = createFakeTransport();
     const handleMessage = await createHandler({ transport: transportState.transport });
-    mockServer.addResponses("Seed received.");
 
     await seedChat("repo-seeded-chat", { harnessCwd: repoRoot });
 
@@ -473,6 +543,9 @@ describe("workspace lifecycle", () => {
     ].join("\n") }]));
     assert.deepEqual(workspaceEvents[1], contentEvent("plain", [{ type: "text", text: "Prompt: investigate duplicate charges" }]));
     assert.equal(transportState.sentTexts.length, 0);
+    assert.equal(capturedHarnessTurns.length, 1);
+    assert.equal(capturedHarnessTurns[0].input, "investigate duplicate charges");
+    assert.equal(capturedHarnessTurns[0].runConfig?.workdir, workspace.worktree_path);
     const seededReply = workspaceEvents.find((event) => (
       event.kind === "content"
       && Array.isArray(event.content)

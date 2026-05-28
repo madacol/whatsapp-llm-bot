@@ -460,7 +460,8 @@ describe("per-chat model selection", () => {
       assert.ok(result.includes("*Harness*"), `expected titled header, got: ${result}`);
       assert.ok(result.includes("- Current: codex"), `expected current bullet, got: ${result}`);
       assert.ok(result.includes("*Options*"), `expected options section, got: ${result}`);
-      assert.ok(result.includes("- app"), `expected app option bullet, got: ${result}`);
+      assert.ok(!result.includes("- app"), `expected no legacy app option bullet, got: ${result}`);
+      assert.ok(result.includes("- codex"), `expected codex option bullet, got: ${result}`);
       assert.ok(result.includes("*Examples*"), `expected examples section, got: ${result}`);
     });
 
