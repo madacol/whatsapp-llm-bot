@@ -54,19 +54,18 @@ export async function deliverPendingRestartAck({ store, editMessage, sendText, r
       if (!isMissingEditHandleError(error)) {
         throw error;
       }
-      log.warn("Skipping duplicate restart acknowledgement because the WhatsApp edit handle is gone.", {
+      log.warn("Sending fallback restart acknowledgement because the WhatsApp edit handle is gone.", {
         chatId: record.chatId,
         transportHandleId,
       });
-      return;
+      await sendText(record.chatId, RESTARTED_TEXT);
     }
-  } else if (record.queueId) {
-    return;
   } else {
-    log.warn("Skipping duplicate restart acknowledgement because no editable message handle was persisted.", {
+    log.warn("Sending fallback restart acknowledgement because no editable message handle was available.", {
       chatId: record.chatId,
+      ...(record.queueId ? { queueId: record.queueId } : {}),
     });
-    return;
+    await sendText(record.chatId, RESTARTED_TEXT);
   }
   for (const turn of record.interruptedTurns ?? []) {
     await sendText(turn.chatId, formatInterruptedTurnMessage(turn));

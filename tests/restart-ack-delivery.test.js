@@ -45,7 +45,7 @@ describe("restart acknowledgement delivery", () => {
     }
   });
 
-  it("does not send a duplicate restarted message when the persisted marker has no editable handle", async () => {
+  it("falls back to sending restarted when the persisted marker has no editable handle", async () => {
     const dir = await mkdtemp(path.join(os.tmpdir(), "restart-ack-"));
     const storePath = path.join(dir, "ack.json");
     const store = createRestartAckStore(storePath);
@@ -72,15 +72,17 @@ describe("restart acknowledgement delivery", () => {
       });
 
       assert.deepEqual(edits, []);
-      assert.deepEqual(sent, []);
-      const persisted = await store.read();
-      assert.equal(persisted?.chatId, "chat-2@g.us");
+      assert.deepEqual(sent, [{
+        chatId: "chat-2@g.us",
+        text: "Restarted.",
+      }]);
+      assert.equal(await store.read(), null);
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
   });
 
-  it("does not send a duplicate restarted message when the persisted edit handle is gone", async () => {
+  it("falls back to sending restarted when the persisted edit handle is gone", async () => {
     const dir = await mkdtemp(path.join(os.tmpdir(), "restart-ack-"));
     const storePath = path.join(dir, "ack.json");
     const store = createRestartAckStore(storePath);
@@ -105,9 +107,11 @@ describe("restart acknowledgement delivery", () => {
         },
       });
 
-      assert.deepEqual(sent, []);
-      const persisted = await store.read();
-      assert.equal(persisted?.transportHandleId, "wa-edit-missing");
+      assert.deepEqual(sent, [{
+        chatId: "chat-lost-handle@g.us",
+        text: "Restarted.",
+      }]);
+      assert.equal(await store.read(), null);
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
@@ -209,7 +213,7 @@ describe("restart acknowledgement delivery", () => {
     }
   });
 
-  it("keeps the marker when a queued acknowledgement has not flushed yet", async () => {
+  it("falls back to sending restarted when a queued acknowledgement cannot be recovered", async () => {
     const dir = await mkdtemp(path.join(os.tmpdir(), "restart-ack-"));
     const storePath = path.join(dir, "ack.json");
     const store = createRestartAckStore(storePath);
@@ -235,9 +239,11 @@ describe("restart acknowledgement delivery", () => {
         recoverQueuedMessage: () => undefined,
       });
 
-      assert.deepEqual(sent, []);
-      const persisted = await store.read();
-      assert.equal(persisted?.queueId, 45);
+      assert.deepEqual(sent, [{
+        chatId: "chat-pending@g.us",
+        text: "Restarted.",
+      }]);
+      assert.equal(await store.read(), null);
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
