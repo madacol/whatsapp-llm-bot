@@ -1150,4 +1150,28 @@ describe("sendBlocks – tool-call → edit pipeline", () => {
 
     assert.equal(calls.length, 0);
   });
+
+  it("editWhatsAppMessageByHandle reads persisted JSON string message keys", async () => {
+    const { sock, calls } = createCaptureSock();
+
+    await editWhatsAppMessageByHandle(sock, "persisted-handle", "Restarted.", {
+      now: new Date("2026-05-26T12:05:00.000Z"),
+      store: /** @type {import("../store.js").Store} */ ({
+        getWhatsAppEditHandle: async () => ({
+          id: "persisted-handle",
+          chat_id: "chat-1",
+          message_key_json: JSON.stringify({ id: "msg-persisted", remoteJid: "chat-1", fromMe: true }),
+          message_kind: "text",
+          created_at: "2026-05-26T12:00:00.000Z",
+          expires_at: "2026-05-26T12:14:00.000Z",
+        }),
+      }),
+    });
+
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].method, "sendMessage");
+    const msg = /** @type {Record<string, unknown>} */ (calls[0].args[1]);
+    assert.equal(msg.text, "Restarted.");
+    assert.deepEqual(msg.edit, { id: "msg-persisted", remoteJid: "chat-1", fromMe: true });
+  });
 });
