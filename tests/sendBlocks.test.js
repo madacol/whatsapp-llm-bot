@@ -119,6 +119,57 @@ describe("sendEvent – runtime events", () => {
     });
   });
 
+  it("starts a fresh runtime status message when the previous edit handle expired", async () => {
+    const { sock, sent } = createMockSock();
+    /** @type {import("../store.js").WhatsAppEditHandleRow | null} */
+    let savedHandle = null;
+    const expiredAt = "2000-01-01T00:00:00.000Z";
+    const store = {
+      saveWhatsAppEditHandle: async (/** @type {Parameters<import("../store.js").Store["saveWhatsAppEditHandle"]>[0]} */ input) => {
+        savedHandle = {
+          id: input.id,
+          chat_id: input.chatId,
+          message_key_json: input.messageKeyJson,
+          message_kind: input.messageKind,
+          created_at: input.createdAt,
+          expires_at: input.expiresAt,
+        };
+        return savedHandle;
+      },
+      getWhatsAppEditHandle: async () => savedHandle ? { ...savedHandle, expires_at: expiredAt } : null,
+      deleteExpiredWhatsAppEditHandles: async () => {},
+    };
+
+    await sendEvent(sock, "runtime-expired-chat", {
+      kind: "runtime_event",
+      event: {
+        type: "session.started",
+        provider: "acp",
+        session: { id: "session-1", status: "running" },
+      },
+    }, undefined, undefined, {
+      editHandleStore: /** @type {import("../store.js").Store} */ (/** @type {unknown} */ (store)),
+    });
+
+    await sendEvent(sock, "runtime-expired-chat", {
+      kind: "runtime_event",
+      event: {
+        type: "extension.notification",
+        provider: "acp",
+        method: "madabot/example",
+        payload: { ok: true },
+      },
+    }, undefined, undefined, {
+      editHandleStore: /** @type {import("../store.js").Store} */ (/** @type {unknown} */ (store)),
+    });
+
+    assert.equal(sent.length, 2);
+    assert.equal(sent[0]?.msg.text, "🔄 *ACP*  session running");
+    assert.deepEqual(sent[1]?.msg, {
+      text: "🔄 *ACP*  session running\n🔄 *ACP*  extension notification: madabot/example",
+    });
+  });
+
   it("renders runtime errors as standalone error messages", async () => {
     const { sock, sent } = createMockSock();
 

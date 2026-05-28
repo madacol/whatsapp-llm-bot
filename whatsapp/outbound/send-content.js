@@ -678,7 +678,16 @@ async function sendRuntimeEvent(sock, chatId, event, options, reactionRuntime, s
       editHandleStore: sendOptions.editHandleStore,
     });
   } else {
-    await state.handle.update({ kind: "text", text });
+    try {
+      await state.handle.update({ kind: "text", text });
+    } catch (error) {
+      if (!isStaleWhatsAppEditHandleError(error)) {
+        throw error;
+      }
+      state.handle = await sendBlocks(sock, chatId, "plain", text, options, reactionRuntime, event, {
+        editHandleStore: sendOptions.editHandleStore,
+      });
+    }
   }
   state.handle?.setInspect({
     kind: "text",
@@ -689,6 +698,17 @@ async function sendRuntimeEvent(sock, chatId, event, options, reactionRuntime, s
     runtimeStatusByChat.delete(chatId);
   }
   return state.handle;
+}
+
+/**
+ * @param {unknown} error
+ * @returns {boolean}
+ */
+function isStaleWhatsAppEditHandleError(error) {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+  return /^WhatsApp edit handle .+ (expired|was not found)\.$/.test(error.message);
 }
 
 /**
