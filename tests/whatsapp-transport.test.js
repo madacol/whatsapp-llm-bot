@@ -49,6 +49,17 @@ async function getQueuedRows(db, chatId) {
   }));
 }
 
+function createBaileysGroupMetadataAttrsError() {
+  const error = new TypeError("Cannot read properties of undefined (reading 'attrs')");
+  error.stack = [
+    `${error.name}: ${error.message}`,
+    "    at extractGroupMetadata (node_modules/@whiskeysockets/baileys/lib/Socket/groups.js:286:27)",
+    "    at groupMetadata (node_modules/@whiskeysockets/baileys/lib/Socket/groups.js:20:16)",
+    "    at async node_modules/@whiskeysockets/baileys/lib/Socket/messages-send.js:479:41",
+  ].join("\n");
+  return error;
+}
+
 describe("WhatsApp transport community creation", () => {
   it("buffers streamed LLM chunks in WhatsApp until completion", async () => {
     const chatId = `stream-buffer-${Date.now()}`;
@@ -363,6 +374,76 @@ describe("WhatsApp transport community creation", () => {
     assert.deepEqual(sentMessages, [{
       chatId,
       message: { text: "🤖 queued after 1006" },
+    }]);
+    assert.equal((await getQueuedRows(testDb, chatId)).length, 0);
+  });
+
+  it("keeps queued outbound rows when Baileys group metadata is unavailable during reconnect", async () => {
+    if (!testDb) {
+      throw new Error("Expected test DB to be initialized");
+    }
+
+    const chatId = `queued-group-metadata-${Date.now()}@g.us`;
+    /** @type {((events: Partial<import("@whiskeysockets/baileys").BaileysEventMap>) => Promise<void>) | null} */
+    let processEvents = null;
+    /** @type {Array<{ chatId: string, message: Record<string, unknown> }>} */
+    const sentMessages = [];
+    let failSends = true;
+
+    const socket = /** @type {import("@whiskeysockets/baileys").WASocket} */ (/** @type {unknown} */ ({
+      ev: {
+        process(handler) {
+          processEvents = handler;
+        },
+      },
+      sendMessage: async (targetChatId, message) => {
+        if (failSends) {
+          throw createBaileysGroupMetadataAttrsError();
+        }
+        sentMessages.push({ chatId: targetChatId, message });
+        return { key: { id: `sent-${sentMessages.length}`, remoteJid: targetChatId } };
+      },
+    }));
+
+    const transport = await createWhatsAppTransport({
+      createConnectionSupervisor: async ({ onSocketReady }) => ({
+        start: async () => {
+          onSocketReady(socket, async () => {});
+        },
+        stop: async () => {},
+        sendText: async () => {},
+        handleConnectionUpdate: async () => {},
+        isStopped: () => false,
+      }),
+      ...(testStore ? { outboundStore: testStore } : {}),
+    });
+
+    await transport.start(async () => {});
+    await transport.sendEvent?.(chatId, contentEvent("llm", "queued during reconnect"));
+    assert.equal((await getQueuedRows(testDb, chatId)).length, 1);
+
+    if (!processEvents) {
+      throw new Error("Expected connection event processor to be registered");
+    }
+    await processEvents({
+      "connection.update": {
+        connection: "open",
+      },
+    });
+
+    assert.equal(sentMessages.length, 0);
+    assert.equal((await getQueuedRows(testDb, chatId)).length, 1);
+
+    failSends = false;
+    await processEvents({
+      "connection.update": {
+        connection: "open",
+      },
+    });
+
+    assert.deepEqual(sentMessages, [{
+      chatId,
+      message: { text: "🤖 queued during reconnect" },
     }]);
     assert.equal((await getQueuedRows(testDb, chatId)).length, 0);
   });

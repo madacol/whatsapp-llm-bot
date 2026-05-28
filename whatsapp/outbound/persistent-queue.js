@@ -329,6 +329,14 @@ function errorMessage(error) {
 }
 
 /**
+ * @param {unknown} error
+ * @returns {string}
+ */
+function errorStack(error) {
+  return error instanceof Error && typeof error.stack === "string" ? error.stack : "";
+}
+
+/**
  * @returns {Promise<import("../../store.js").Store>}
  */
 async function getStore() {
@@ -346,12 +354,16 @@ async function getStore() {
  */
 export function isRecoverableWhatsAppSendError(error) {
   const message = errorMessage(error);
+  const stack = errorStack(error);
   return message.includes("Connection Closed")
     || message.includes("Connection Terminated")
     || message.includes("Connection was lost")
     || message.trim() === "1006"
     || message.includes("WhatsApp socket is not connected")
-    || message.includes("WhatsApp transport has not been started");
+    || message.includes("WhatsApp transport has not been started")
+    || (message.includes("Cannot read properties of undefined (reading 'attrs')")
+      && stack.includes("@whiskeysockets/baileys")
+      && stack.includes("/Socket/groups.js"));
 }
 
 /**
