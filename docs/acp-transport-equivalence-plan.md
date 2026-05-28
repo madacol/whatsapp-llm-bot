@@ -47,6 +47,41 @@ Equivalent means:
 - ACP chunking differences do not alter the final WhatsApp experience beyond
   acceptable streaming granularity.
 
+## WhatsApp Presentation Policy
+
+ACP/harness code should forward canonical runtime events to the transport. It
+must not decide chat visibility for generic provider lifecycle events by
+formatting them into plain content messages before the WhatsApp boundary.
+
+Existing Codex-equivalent event categories keep the master presentation:
+
+- assistant output renders as an LLM message
+- reasoning renders as the existing thinking placeholder with inspect detail
+- tool calls, shell commands, and file reads render as the existing full tool
+  cards or compact tool status depending on chat visibility settings
+- file changes render through the existing file-change card/diff path
+- plans render through the existing plan message
+- subagent output renders through the existing subagent message path
+- usage renders as a final turn usage message instead of arbitrary lifecycle
+  spam
+- errors that correspond to existing tool/runtime failures remain visible error
+  messages
+
+ACP-native events that do not map to an existing Codex presentation are still
+sent to WhatsApp as `runtime_event` outbound events. The WhatsApp presentation
+layer decides how to display them:
+
+- generic session, turn, request, user-input, item, extension, model-reroute,
+  and warning events are folded into one editable ACP status message per chat
+- the status message keeps only the latest visible entries in the chat bubble
+  and stores the full event detail in inspect text
+- `turn.completed` and `session.stopped` close the current ACP status so the
+  next turn starts a fresh status message
+- `runtime.error` renders as a standalone error message
+
+This keeps the transport fully informed while preventing every provider-native
+event from becoming an independent WhatsApp message.
+
 ## Test Strategy
 
 ### 1. Build Transport-Level Golden Scenarios

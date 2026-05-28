@@ -217,6 +217,11 @@ type SubagentMessageEvent = {
   agentRole?: string;
 };
 
+type RuntimeEventOutboundEvent = {
+  kind: "runtime_event";
+  event: import("./harnesses/harness-runtime-events.js").HarnessRuntimeEvent;
+};
+
 type UsageTokens = {
   prompt: number;
   completion: number;
@@ -233,6 +238,7 @@ type OutboundEvent =
   | PlanEvent
   | FileChangeEvent
   | SubagentMessageEvent
+  | RuntimeEventOutboundEvent
   | UsageEvent;
 
 type MessageHandleUpdate =
