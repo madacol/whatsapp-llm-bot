@@ -634,6 +634,85 @@ describe("WhatsApp transport community creation", () => {
     }]);
   });
 
+  it("waits for Baileys initial-sync buffering to drain before queued outbound replay", async () => {
+    if (!testDb || !testStore) {
+      throw new Error("Expected test DB and store to be initialized");
+    }
+
+    const chatId = `restart-open-buffering-${Date.now()}`;
+    /** @type {((events: Partial<import("@whiskeysockets/baileys").BaileysEventMap>) => Promise<void>) | null} */
+    let processEvents = null;
+    /** @type {Array<{ chatId: string, message: Record<string, unknown> }>} */
+    const sentMessages = [];
+    /** @type {string[]} */
+    const hookPhases = [];
+    let buffering = true;
+
+    await testStore.enqueueWhatsAppOutboundQueueEntry({
+      chatId,
+      payloadJson: {
+        kind: "event",
+        event: contentEvent("llm", "queued while initial sync is buffering"),
+      },
+    });
+
+    const socket = /** @type {import("@whiskeysockets/baileys").WASocket} */ (/** @type {unknown} */ ({
+      ev: {
+        process(handler) {
+          processEvents = handler;
+        },
+        isBuffering() {
+          return buffering;
+        },
+      },
+      sendMessage: async (targetChatId, message) => {
+        sentMessages.push({ chatId: targetChatId, message });
+        return { key: { id: `sent-${sentMessages.length}`, remoteJid: targetChatId } };
+      },
+    }));
+
+    const transport = await createWhatsAppTransport({
+      createConnectionSupervisor: async ({ onSocketReady }) => ({
+        start: async () => {
+          onSocketReady(socket, async () => {});
+        },
+        stop: async () => {},
+        sendText: async () => {},
+        handleConnectionUpdate: async () => {},
+        isStopped: () => false,
+      }),
+      onConnectionOpen: async ({ phase }) => {
+        hookPhases.push(phase);
+      },
+      outboundStore: testStore,
+    });
+
+    await transport.start(async () => {});
+    if (!processEvents) {
+      throw new Error("Expected connection event processor to be registered");
+    }
+
+    await processEvents({
+      "connection.update": {
+        connection: "open",
+      },
+    });
+    await waitForTransportBackgroundWork();
+
+    assert.deepEqual(sentMessages, []);
+    assert.deepEqual(hookPhases, []);
+
+    buffering = false;
+    await delay(150);
+    await waitForTransportBackgroundWork();
+
+    assert.deepEqual(hookPhases, ["afterQueueFlush"]);
+    assert.deepEqual(sentMessages, [{
+      chatId,
+      message: { text: "🤖 queued while initial sync is buffering" },
+    }]);
+  });
+
   it("edits the restart acknowledgement through a transport-owned durable handle", async () => {
     if (!testDb || !testStore) {
       throw new Error("Expected test DB and store to be initialized");

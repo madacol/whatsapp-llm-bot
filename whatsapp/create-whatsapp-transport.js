@@ -794,14 +794,49 @@ export async function createWhatsAppTransport(options = {}) {
   }
 
   /**
+   * @param {unknown} value
+   * @returns {value is { isBuffering: () => boolean }}
+   */
+  function hasBufferingState(value) {
+    return typeof value === "object"
+      && value !== null
+      && "isBuffering" in value
+      && typeof value.isBuffering === "function";
+  }
+
+  /**
+   * Baileys emits `connection: open` before its initial-sync event buffer has
+   * necessarily flushed. Outbound sends during that window can block inside
+   * Baileys until the connection times out, delaying inbound delivery.
+   * @param {import("@whiskeysockets/baileys").WASocket} sock
+   * @returns {Promise<boolean>}
+   */
+  async function waitForEventBufferToDrain(sock) {
+    const eventBuffer = sock.ev;
+    if (!hasBufferingState(eventBuffer)) {
+      return true;
+    }
+
+    while (currentSocket === sock && hasOpenConnection && eventBuffer.isBuffering()) {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+
+    return currentSocket === sock && hasOpenConnection;
+  }
+
+  /**
    * Replay durable outbound work after the Baileys open event without blocking
    * Baileys' own initial-sync event processor. Sends attempted during
    * AwaitingInitialSync can wait on Baileys internals for a long time; keeping
    * that wait out of sock.ev.process lets inbound buffering flush on schedule.
+   * @param {import("@whiskeysockets/baileys").WASocket} sock
    * @returns {void}
    */
-  function scheduleConnectionOpenWork() {
+  function scheduleConnectionOpenWork(sock) {
     void (async () => {
+      if (!await waitForEventBufferToDrain(sock)) {
+        return;
+      }
       await flushQueuedOutbound();
       await runConnectionOpenHook("afterQueueFlush");
     })().catch((error) => {
@@ -868,7 +903,7 @@ export async function createWhatsAppTransport(options = {}) {
         await connectionSupervisor.handleConnectionUpdate(events["connection.update"], sock);
         if (events["connection.update"].connection === "open" && currentSocket === sock) {
           hasOpenConnection = true;
-          scheduleConnectionOpenWork();
+          scheduleConnectionOpenWork(sock);
         }
       }
 
