@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { createConnectionSupervisor } from "../whatsapp/connection-supervisor.js";
+import { createConnectionSupervisor, createSocketConfig } from "../whatsapp/connection-supervisor.js";
 
 /**
  * @typedef {{
@@ -54,6 +54,18 @@ function createMockSocket() {
 }
 
 describe("createConnectionSupervisor", () => {
+  it("disables Baileys history sync so live inbound commands are not buffered on reconnect", () => {
+    const config = createSocketConfig(
+      /** @type {Awaited<ReturnType<typeof import("@whiskeysockets/baileys").useMultiFileAuthState>>["state"]} */ (
+        /** @type {unknown} */ ({})
+      ),
+      [1, 2, 3],
+    );
+
+    assert.equal(config.syncFullHistory, false);
+    assert.equal(config.shouldSyncHistoryMessage?.({}), false);
+  });
+
   it("reconnects after non-auth disconnects", async () => {
     /** @type {MockSocket[]} */
     const sockets = [];
