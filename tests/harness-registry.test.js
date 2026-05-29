@@ -143,7 +143,7 @@ describe("harness driver registry", () => {
 
     assert.equal(instance.harness.getName(), "codex");
     assert.equal(instance.capabilities.supportsSessionFork, true);
-    assert.equal(instance.capabilities.supportsLiveInput, false);
+    assert.equal(instance.capabilities.supportsLiveInput, true);
 
     /** @type {string[]} */
     const eventTypes = [];
