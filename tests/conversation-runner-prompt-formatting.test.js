@@ -67,6 +67,7 @@ function registerCodexHarness(createHarness) {
  *     hooks?: AgentIOHooks,
  *   }) => Promise<{ abortController: AbortController, done: Promise<{ result: AgentResult }> }>,
  *   injectMessage?: AgentHarness["injectMessage"],
+ *   supportsLiveInput?: boolean,
  * }} [options]
  * @returns {AgentHarness}
  */
@@ -76,7 +77,7 @@ function createCodexHarness(options = {}) {
     getCapabilities: () => ({
       supportsResume: true,
       supportsCancel: true,
-      supportsLiveInput: true,
+      supportsLiveInput: options.supportsLiveInput ?? true,
       supportsApprovals: true,
       supportsWorkdir: true,
       supportsSandboxConfig: true,
@@ -703,6 +704,78 @@ describe("createConversationRunner prompt formatting", () => {
     assert.ok(phases.includes("create:personal"), `expected personal instance after a post-turn message, got ${JSON.stringify(phases)}`);
     assert.ok(phases.includes("run:personal"), `expected post-turn message to run on personal instance, got ${JSON.stringify(phases)}`);
     assert.ok(phases.indexOf("create:personal") > phases.indexOf("run:work"));
+  });
+
+  it("queues mid-turn messages for adapters without answerable live input", async () => {
+    const chatId = "conv-adapter-no-live-input";
+    const harnessName = "adapter-no-live-input";
+    await seedChat(chatId, { enabled: true });
+    await updateChatConfig(chatId, (current) => ({
+      ...current,
+      harness: harnessName,
+      harness_config: {},
+    }));
+
+    const releaseFirstRun = createDeferredVoid();
+    /** @type {string[]} */
+    const sentInputs = [];
+    registerHarnessDriver({
+      name: harnessName,
+      supportsInstances: true,
+      createInstance: () => ({
+        harness: createCodexHarness({
+          supportsLiveInput: false,
+          startRun: async (input) => {
+            const latestUserText = [...input.messages]
+              .reverse()
+              .find((message) => message.role === "user")
+              ?.content.find((block) => block.type === "text")
+              ?.text ?? "";
+            sentInputs.push(latestUserText);
+            return {
+              abortController: new AbortController(),
+              done: (async () => {
+                if (latestUserText === "first") {
+                  await releaseFirstRun.promise;
+                }
+                return {
+                  result: {
+                    response: [{ type: "text", text: `ok:${latestUserText}` }],
+                    messages: input.messages,
+                    usage: { promptTokens: 0, completionTokens: 0, cachedTokens: 0, cost: 0 },
+                  },
+                };
+              })(),
+            };
+          },
+          injectMessage: async () => {
+            assert.fail("non-live adapters must not receive injected user messages");
+          },
+        }),
+      }),
+    });
+
+    const firstTurn = createChatTurn({
+      chatId,
+      content: [{ type: "text", text: "first" }],
+    });
+    const firstHandled = handleMessage(firstTurn.context);
+    await waitUntil(() => sentInputs.includes("first"));
+
+    const secondTurn = createChatTurn({
+      chatId,
+      content: [{ type: "text", text: "second" }],
+    });
+    await handleMessage(secondTurn.context);
+
+    assert.deepEqual(sentInputs, ["first"]);
+    assert.ok(!secondTurn.responses.some((response) => response.text === "ok:second"));
+
+    releaseFirstRun.resolve();
+    await firstHandled;
+
+    assert.deepEqual(sentInputs, ["first", "second"]);
+    assert.ok(secondTurn.responses.some((response) => response.text === "ok:second"));
   });
 
   it("injects mid-turn messages through the active semantic adapter", async () => {
