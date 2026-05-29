@@ -18,7 +18,7 @@ import { handleSessionControlCommand } from "../session-control-commands.js";
 const ACP_HARNESS_CAPABILITIES = {
   supportsResume: true,
   supportsCancel: true,
-  supportsLiveInput: false,
+  supportsLiveInput: true,
   supportsApprovals: true,
   supportsWorkdir: true,
   supportsSandboxConfig: true,

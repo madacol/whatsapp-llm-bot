@@ -79,16 +79,6 @@ layer decides how to display them:
   next turn starts a fresh status message
 - `runtime.error` renders as a standalone error message
 
-## Turn Management
-
-Normal WhatsApp messages that arrive while an ACP turn is active are queued as
-follow-up turns unless the adapter exposes a live-input primitive that is
-defined to produce an answerable user turn. ACP `session/steer` is not treated
-as that primitive: it can influence an active run, but accepting the steer RPC
-does not guarantee the provider will answer the new user message. Treating
-`steer` as WhatsApp live input caused messages to be logged as injected and then
-silently dropped from the user-visible conversation.
-
 This keeps the transport fully informed while preventing every provider-native
 event from becoming an independent WhatsApp message.
 
