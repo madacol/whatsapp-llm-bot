@@ -25,6 +25,7 @@ describe("ACP harness", () => {
       continuationKey: "acp:test",
     });
     assert.ok(adapter);
+    assert.equal(harness.getCapabilities().supportsLiveInput, false);
 
     /** @type {Array<Record<string, unknown>>} */
     const events = [];
@@ -41,6 +42,7 @@ describe("ACP harness", () => {
 
       assert.deepEqual(result.response, [{ type: "markdown", text: "Main result." }]);
       assert.equal(adapter.listSessions()[0]?.resumeCursor, "mock-session-1");
+      assert.equal(adapter.listSessions()[0]?.capabilities?.supportsLiveInput, false);
       assert.ok(events.some((event) => event.type === "plan.updated"));
       assert.ok(events.some((event) => event.type === "subagent.completed"));
       assert.ok(events.some((event) => event.type === "file-change.completed"));
