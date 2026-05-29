@@ -55,6 +55,10 @@
         "overrides": {
             "@mariozechner/pi-agent-core": "0.67.3",
             "@mariozechner/pi-ai": "0.67.3"
+        },
+        "patchedDependencies": {
+            "@whiskeysockets/baileys@7.0.0-rc.9": "patches/@whiskeysockets__baileys@7.0.0-rc.9.patch",
+            "@agentclientprotocol/codex-acp@0.0.44": "patches/@agentclientprotocol__codex-acp@0.0.44.patch"
         }
     }
 }
