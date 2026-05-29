@@ -9,6 +9,7 @@ import {
   reconcileAcpFileChangeWithBaseline,
   resolveAcpFileChangePath,
 } from "../harnesses/acp-file-changes.js";
+import { isRuntimeStateSnapshotPath } from "../snapshot-file-policy.js";
 
 describe("ACP file changes", () => {
   it("resolves provider paths against the run workdir", () => {
@@ -116,5 +117,13 @@ describe("ACP file changes", () => {
       isAcpFileChangeIgnored({ workdir, ignoredFileChangePaths: ["auth_info_baileys/**"] }, path.join(workdir, "src/app.js")),
       false,
     );
+  });
+
+  it("classifies ACP runtime-state paths independently of WhatsApp presentation", () => {
+    assert.equal(isRuntimeStateSnapshotPath("auth_info_baileys/sender-key-test.json"), true);
+    assert.equal(isRuntimeStateSnapshotPath("/home/mada/whatsapp-llm-bot/pgdata/root.sqlite"), true);
+    assert.equal(isRuntimeStateSnapshotPath("/home/mada/whatsapp-llm-bot/.media/file.jpg"), true);
+    assert.equal(isRuntimeStateSnapshotPath("/tmp/acp-workdir/src/app.js"), false);
+    assert.equal(isRuntimeStateSnapshotPath("src/app.js"), false);
   });
 });

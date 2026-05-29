@@ -1,5 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
+import { isRuntimeStateSnapshotPath } from "../snapshot-file-policy.js";
 import { buildUnifiedFileDiff } from "./file-change-utils.js";
 
 const MAX_SNAPSHOT_FILE_BYTES = 1024 * 1024;
@@ -92,6 +93,9 @@ function normalizePatternList(value) {
  * @returns {boolean}
  */
 export function isAcpFileChangeIgnored(runConfig, filePath) {
+  if (isRuntimeStateSnapshotPath(filePath)) {
+    return true;
+  }
   const patterns = [
     ...DEFAULT_IGNORED_FILE_CHANGE_PATHS,
     ...normalizePatternList(runConfig?.ignoredFileChangePaths),
