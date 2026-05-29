@@ -532,7 +532,7 @@ describe("WhatsApp transport community creation", () => {
     assert.equal((await getQueuedRows(testDb, chatId)).length, 0);
   });
 
-  it("quarantines row-specific replay failures without blocking later high-priority rows", async () => {
+  it("quarantines row-specific replay failures without blocking later FIFO rows", async () => {
     if (!testDb || !testStore) {
       throw new Error("Expected test DB and store to be initialized");
     }
@@ -679,37 +679,6 @@ describe("WhatsApp transport community creation", () => {
     assert.equal((await getDeadLetterRows(testDb, chatId)).length, 0);
   });
 
-  it("does not send or queue ignored runtime-state file changes", async () => {
-    if (!testDb || !testStore) {
-      throw new Error("Expected test DB and store to be initialized");
-    }
-
-    const chatId = `ignored-runtime-state-${Date.now()}`;
-    /** @type {Array<{ chatId: string, message: Record<string, unknown> }>} */
-    const sentMessages = [];
-    const socket = /** @type {import("@whiskeysockets/baileys").WASocket} */ (/** @type {unknown} */ ({
-      sendMessage: async (targetChatId, message) => {
-        sentMessages.push({ chatId: targetChatId, message });
-        return { key: { id: `sent-${sentMessages.length}`, remoteJid: targetChatId } };
-      },
-    }));
-
-    const handle = await sendOrQueueWhatsAppEvent({
-      getSocket: () => socket,
-      chatId,
-      event: {
-        kind: "file_change",
-        path: "/home/mada/whatsapp-llm-bot/auth_info_baileys/sender-key-test.json",
-        summary: "ACP file change",
-      },
-      store: testStore,
-    });
-
-    assert.equal(handle, undefined);
-    assert.deepEqual(sentMessages, []);
-    assert.equal((await getQueuedRows(testDb, chatId)).length, 0);
-  });
-
   it("runs connection-open hooks after queued outbound messages are flushed", async () => {
     if (!testDb) {
       throw new Error("Expected test DB to be initialized");
@@ -804,7 +773,7 @@ describe("WhatsApp transport community creation", () => {
       throw new Error("Expected test DB and store to be initialized");
     }
 
-    const chatId = `restart-open-hook-priority-${Date.now()}`;
+    const chatId = `restart-open-hook-fifo-${Date.now()}`;
     /** @type {((events: Partial<import("@whiskeysockets/baileys").BaileysEventMap>) => Promise<void>) | null} */
     let processEvents = null;
     /** @type {Array<{ chatId: string, message: Record<string, unknown> }>} */

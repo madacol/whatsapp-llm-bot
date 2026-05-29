@@ -2,12 +2,7 @@ import { getRootDb } from "../../db.js";
 import { initStore } from "../../store.js";
 import { createLogger } from "../../logger.js";
 import { sendEvent as sendOutboundEvent } from "./send-content.js";
-import {
-  classifyUnreplayableOutboundEvent,
-  getOutboundQueuePersistDelayMs,
-  getOutboundQueuePriority,
-  toReplayableOutboundEvent,
-} from "../../whatsapp-outbound-event-policy.js";
+import { getOutboundQueuePersistDelayMs } from "../../whatsapp-outbound-queue-config.js";
 
 const log = createLogger("whatsapp");
 /** @type {Promise<import("../../store.js").Store> | null} */
@@ -406,32 +401,11 @@ async function wait(ms) {
  * @returns {Promise<import("../../store.js").WhatsAppOutboundQueueRow>}
  */
 export async function enqueueWhatsAppOutbound(chatId, payload, store) {
-  if (payload.kind === "event") {
-    const replayableEvent = toReplayableOutboundEvent(payload.event);
-    if (!replayableEvent) {
-      return createSkippedQueueRow(chatId, payload);
-    }
-    payload = { kind: "event", event: replayableEvent };
-  }
   const resolvedStore = store ?? await getStore();
   return resolvedStore.enqueueWhatsAppOutboundQueueEntry({
     chatId,
     payloadJson: payload,
   });
-}
-
-/**
- * @param {string} chatId
- * @param {WhatsAppOutboundQueuePayload} payload
- * @returns {import("../../store.js").WhatsAppOutboundQueueRow}
- */
-function createSkippedQueueRow(chatId, payload) {
-  return {
-    id: 0,
-    chat_id: chatId,
-    payload_json: payload,
-    created_at: new Date().toISOString(),
-  };
 }
 
 /**
@@ -568,22 +542,9 @@ async function listQueuedWhatsAppOutbound(store) {
       }
       continue;
     }
-    if (normalizedRow.payload.kind === "event") {
-      const unreplayableReason = classifyUnreplayableOutboundEvent(normalizedRow.payload.event);
-      if (unreplayableReason) {
-        await resolvedStore.quarantineWhatsAppOutboundQueueEntry({
-          row,
-          reason: unreplayableReason,
-        });
-        continue;
-      }
-    }
     normalized.push(normalizedRow);
   }
-  return normalized.sort((a, b) => {
-    const priorityDifference = getOutboundQueuePriority(a.payload) - getOutboundQueuePriority(b.payload);
-    return priorityDifference || a.id - b.id;
-  });
+  return normalized;
 }
 
 /**
@@ -613,12 +574,6 @@ async function deliverQueuedPayload(sock, chatId, payload, reactionRuntime, stor
  * @returns {Promise<MessageHandle | undefined>}
  */
 export async function sendOrQueueWhatsAppEvent({ getSocket, chatId, event, reactionRuntime, store }) {
-  const replayableEvent = toReplayableOutboundEvent(event);
-  if (!replayableEvent) {
-    return undefined;
-  }
-  event = replayableEvent;
-
   if (event.kind === "content" && event.stream) {
     const bufferedEvent = bufferStreamEvent(chatId, event);
     if (!bufferedEvent) {

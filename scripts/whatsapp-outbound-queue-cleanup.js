@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { DatabaseSync } from "node:sqlite";
-import { classifyUnreplayableOutboundEvent } from "../whatsapp-outbound-event-policy.js";
+import { isRuntimeStateSnapshotPath } from "../snapshot-file-policy.js";
 
 /**
  * @typedef {{
@@ -97,9 +97,15 @@ function classifyRow(row) {
   if (payload.kind === "text") {
     return null;
   }
-  const reason = classifyUnreplayableOutboundEvent(payload.event);
-  if (reason) {
-    return { payload, reason };
+  if (!isRecord(payload.event)) {
+    return { payload, reason: "event is not an object" };
+  }
+  if (
+    payload.event.kind === "file_change"
+    && typeof payload.event.path === "string"
+    && isRuntimeStateSnapshotPath(payload.event.path)
+  ) {
+    return { payload, reason: "ignored runtime-state file change" };
   }
   if (isTransientStatusEvent(payload.event)) {
     return { payload, reason: "transient presentation status" };
