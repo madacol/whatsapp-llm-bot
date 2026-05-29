@@ -34,6 +34,10 @@ import {
  *   }) => Promise<import("../../store.js").WhatsAppOutboundQueueRow>;
  *   listWhatsAppOutboundQueueEntries: () => Promise<import("../../store.js").WhatsAppOutboundQueueRow[]>;
  *   deleteWhatsAppOutboundQueueEntry: (chatId: string, id: number) => Promise<void>;
+ *   quarantineWhatsAppOutboundQueueEntry: (input: {
+ *     row: import("../../store.js").WhatsAppOutboundQueueRow,
+ *     reason: string,
+ *   }) => Promise<void>;
  *   saveWhatsAppEditHandle: (input: {
  *     id: string,
  *     chatId: string,
@@ -183,6 +187,28 @@ export function createWhatsAppStoreInternals({ db, getChatDb, listChatIds, ensur
 
     /**
      * @param {{
+     *   row: import("../../store.js").WhatsAppOutboundQueueRow,
+     *   reason: string,
+     * }} input
+     * @returns {Promise<void>}
+     */
+    async quarantineWhatsAppOutboundQueueEntry({ row, reason }) {
+      const chatDb = await getChatDb(row.chat_id);
+      await chatDb.sql`
+        INSERT INTO whatsapp_outbound_dead_letter (
+          original_queue_id,
+          chat_id,
+          payload_json,
+          reason,
+          created_at
+        )
+        VALUES (${row.id}, ${row.chat_id}, ${row.payload_json}, ${reason}, ${row.created_at ?? null})
+      `;
+      await chatDb.sql`DELETE FROM whatsapp_outbound_queue WHERE id = ${row.id}`;
+    },
+
+    /**
+     * @param {{
      *   id: string,
      *   chatId: string,
      *   messageKeyJson: unknown,
@@ -263,6 +289,7 @@ export function createWhatsAppStoreInternals({ db, getChatDb, listChatIds, ensur
  *   | "enqueueWhatsAppOutboundQueueEntry"
  *   | "listWhatsAppOutboundQueueEntries"
  *   | "deleteWhatsAppOutboundQueueEntry"
+ *   | "quarantineWhatsAppOutboundQueueEntry"
  *   | "saveWhatsAppEditHandle"
  *   | "getWhatsAppEditHandle"
  *   | "deleteExpiredWhatsAppEditHandles"
@@ -351,6 +378,17 @@ export function createWhatsAppStore(internals, db) {
      */
     async deleteWhatsAppOutboundQueueEntry(chatId, id) {
       await internals.deleteWhatsAppOutboundQueueEntry(chatId, id);
+    },
+
+    /**
+     * @param {{
+     *   row: import("../../store.js").WhatsAppOutboundQueueRow,
+     *   reason: string,
+     * }} input
+     * @returns {Promise<void>}
+     */
+    async quarantineWhatsAppOutboundQueueEntry(input) {
+      await internals.quarantineWhatsAppOutboundQueueEntry(input);
     },
 
     /**

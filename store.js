@@ -154,6 +154,10 @@ export async function getChatOrThrow(_db, chatId) {
  *   }) => Promise<WhatsAppOutboundQueueRow>;
  *   listWhatsAppOutboundQueueEntries: () => Promise<WhatsAppOutboundQueueRow[]>;
  *   deleteWhatsAppOutboundQueueEntry: (chatId: string, id: number) => Promise<void>;
+ *   quarantineWhatsAppOutboundQueueEntry: (input: {
+ *     row: WhatsAppOutboundQueueRow,
+ *     reason: string,
+ *   }) => Promise<void>;
  *   saveWhatsAppEditHandle: (input: {
  *     id: string,
  *     chatId: string,

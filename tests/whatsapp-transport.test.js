@@ -1,4 +1,4 @@
-import { before, describe, it } from "node:test";
+import { after, before, describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { setTimeout as delay } from "node:timers/promises";
 import { mkdtemp, rm } from "node:fs/promises";
@@ -23,11 +23,21 @@ import { sendOrQueueWhatsAppEvent } from "../whatsapp/outbound/persistent-queue.
 let testDb = null;
 /** @type {import("../store.js").Store | null} */
 let testStore = null;
+const originalOutboundQueuePersistDelayMs = process.env.MADABOT_OUTBOUND_QUEUE_PERSIST_DELAY_MS;
 
 before(async () => {
+  process.env.MADABOT_OUTBOUND_QUEUE_PERSIST_DELAY_MS = "0";
   testDb = await createTestDb();
   setDb("./pgdata/root", testDb);
   testStore = await initStore(testDb);
+});
+
+after(() => {
+  if (originalOutboundQueuePersistDelayMs === undefined) {
+    delete process.env.MADABOT_OUTBOUND_QUEUE_PERSIST_DELAY_MS;
+  } else {
+    process.env.MADABOT_OUTBOUND_QUEUE_PERSIST_DELAY_MS = originalOutboundQueuePersistDelayMs;
+  }
 });
 
 /**
@@ -46,6 +56,25 @@ async function getQueuedRows(db, chatId) {
     id: Number(row.id),
     chat_id: String(row.chat_id),
     payload_json: row.payload_json,
+  }));
+}
+
+/**
+ * @param {import("@electric-sql/pglite").PGlite} db
+ * @param {string} chatId
+ * @returns {Promise<Array<{ original_queue_id: number, chat_id: string, reason: string }>>}
+ */
+async function getDeadLetterRows(db, chatId) {
+  const { rows } = await db.sql`
+    SELECT original_queue_id, chat_id, reason
+    FROM whatsapp_outbound_dead_letter
+    WHERE chat_id = ${chatId}
+    ORDER BY id ASC
+  `;
+  return rows.map((row) => ({
+    original_queue_id: Number(row.original_queue_id),
+    chat_id: String(row.chat_id),
+    reason: String(row.reason),
   }));
 }
 
@@ -386,7 +415,52 @@ describe("WhatsApp transport community creation", () => {
     assert.equal((await getQueuedRows(testDb, chatId)).length, 0);
   });
 
-  it("keeps queued outbound rows when Baileys group metadata is unavailable during reconnect", async () => {
+  it("delays durable queue writes and retries if the socket recovers during the debounce window", async () => {
+    if (!testDb || !testStore) {
+      throw new Error("Expected test DB and store to be initialized");
+    }
+
+    const previousDelay = process.env.MADABOT_OUTBOUND_QUEUE_PERSIST_DELAY_MS;
+    process.env.MADABOT_OUTBOUND_QUEUE_PERSIST_DELAY_MS = "30";
+    try {
+      const chatId = `debounced-queue-${Date.now()}`;
+      /** @type {Array<{ chatId: string, message: Record<string, unknown> }>} */
+      const sentMessages = [];
+      let liveSocket = /** @type {import("@whiskeysockets/baileys").WASocket | null} */ (null);
+      const socket = /** @type {import("@whiskeysockets/baileys").WASocket} */ (/** @type {unknown} */ ({
+        sendMessage: async (targetChatId, message) => {
+          sentMessages.push({ chatId: targetChatId, message });
+          return { key: { id: `sent-${sentMessages.length}`, remoteJid: targetChatId } };
+        },
+      }));
+
+      const sendPromise = sendOrQueueWhatsAppEvent({
+        getSocket: () => liveSocket,
+        chatId,
+        event: contentEvent("llm", "send after quick reconnect"),
+        store: testStore,
+      });
+
+      assert.equal((await getQueuedRows(testDb, chatId)).length, 0);
+      liveSocket = socket;
+      const handle = await sendPromise;
+
+      assert.equal(handle?.deliveryStatus, "sent");
+      assert.deepEqual(sentMessages, [{
+        chatId,
+        message: { text: "🤖 send after quick reconnect" },
+      }]);
+      assert.equal((await getQueuedRows(testDb, chatId)).length, 0);
+    } finally {
+      if (previousDelay === undefined) {
+        delete process.env.MADABOT_OUTBOUND_QUEUE_PERSIST_DELAY_MS;
+      } else {
+        process.env.MADABOT_OUTBOUND_QUEUE_PERSIST_DELAY_MS = previousDelay;
+      }
+    }
+  });
+
+  it("keeps queued outbound rows when the connection is lost during reconnect", async () => {
     if (!testDb) {
       throw new Error("Expected test DB to be initialized");
     }
@@ -406,7 +480,7 @@ describe("WhatsApp transport community creation", () => {
       },
       sendMessage: async (targetChatId, message) => {
         if (failSends) {
-          throw createBaileysGroupMetadataAttrsError();
+          throw new Error("Connection was lost");
         }
         sentMessages.push({ chatId: targetChatId, message });
         return { key: { id: `sent-${sentMessages.length}`, remoteJid: targetChatId } };
@@ -438,6 +512,7 @@ describe("WhatsApp transport community creation", () => {
         connection: "open",
       },
     });
+    await waitForTransportBackgroundWork();
 
     assert.equal(sentMessages.length, 0);
     assert.equal((await getQueuedRows(testDb, chatId)).length, 1);
@@ -454,6 +529,184 @@ describe("WhatsApp transport community creation", () => {
       chatId,
       message: { text: "🤖 queued during reconnect" },
     }]);
+    assert.equal((await getQueuedRows(testDb, chatId)).length, 0);
+  });
+
+  it("quarantines row-specific replay failures without blocking later high-priority rows", async () => {
+    if (!testDb || !testStore) {
+      throw new Error("Expected test DB and store to be initialized");
+    }
+
+    const chatId = `quarantine-${Date.now()}@g.us`;
+    /** @type {((events: Partial<import("@whiskeysockets/baileys").BaileysEventMap>) => Promise<void>) | null} */
+    let processEvents = null;
+    /** @type {Array<{ chatId: string, message: Record<string, unknown> }>} */
+    const sentMessages = [];
+    let failMetadataRow = true;
+
+    await testStore.enqueueWhatsAppOutboundQueueEntry({
+      chatId,
+      payloadJson: {
+        kind: "event",
+        event: contentEvent("llm", "old blocked answer"),
+      },
+    });
+    await testStore.enqueueWhatsAppOutboundQueueEntry({
+      chatId,
+      payloadJson: {
+        kind: "event",
+        event: contentEvent("tool-result", "Restart signal sent."),
+      },
+    });
+
+    const socket = /** @type {import("@whiskeysockets/baileys").WASocket} */ (/** @type {unknown} */ ({
+      ev: {
+        process(handler) {
+          processEvents = handler;
+        },
+      },
+      sendMessage: async (targetChatId, message) => {
+        if (message.text === "🤖 old blocked answer" && failMetadataRow) {
+          failMetadataRow = false;
+          throw createBaileysGroupMetadataAttrsError();
+        }
+        sentMessages.push({ chatId: targetChatId, message });
+        return { key: { id: `sent-${sentMessages.length}`, remoteJid: targetChatId } };
+      },
+    }));
+
+    const transport = await createWhatsAppTransport({
+      createConnectionSupervisor: async ({ onSocketReady }) => ({
+        start: async () => {
+          onSocketReady(socket, async () => {});
+        },
+        stop: async () => {},
+        sendText: async () => {},
+        handleConnectionUpdate: async () => {},
+        isStopped: () => false,
+      }),
+      outboundStore: testStore,
+    });
+
+    await transport.start(async () => {});
+    if (!processEvents) {
+      throw new Error("Expected connection event processor to be registered");
+    }
+    await processEvents({
+      "connection.update": {
+        connection: "open",
+      },
+    });
+    await waitForTransportBackgroundWork();
+
+    assert.deepEqual(sentMessages, [{
+      chatId,
+      message: { text: "✅ Restart signal sent." },
+    }]);
+    assert.equal((await getQueuedRows(testDb, chatId)).length, 0);
+    const deadLetters = await getDeadLetterRows(testDb, chatId);
+    assert.equal(deadLetters.length, 1);
+    assert.match(deadLetters[0].reason, /attrs/);
+  });
+
+  it("replays queued runtime events instead of treating them as malformed", async () => {
+    if (!testDb || !testStore) {
+      throw new Error("Expected test DB and store to be initialized");
+    }
+
+    const chatId = `runtime-replay-${Date.now()}`;
+    /** @type {((events: Partial<import("@whiskeysockets/baileys").BaileysEventMap>) => Promise<void>) | null} */
+    let processEvents = null;
+    /** @type {Array<{ chatId: string, message: Record<string, unknown> }>} */
+    const sentMessages = [];
+
+    await testStore.enqueueWhatsAppOutboundQueueEntry({
+      chatId,
+      payloadJson: {
+        kind: "event",
+        event: {
+          kind: "runtime_event",
+          event: {
+            type: "turn.completed",
+            provider: "codex",
+            turn: { status: "completed" },
+          },
+        },
+      },
+    });
+
+    const socket = /** @type {import("@whiskeysockets/baileys").WASocket} */ (/** @type {unknown} */ ({
+      ev: {
+        process(handler) {
+          processEvents = handler;
+        },
+      },
+      sendMessage: async (targetChatId, message) => {
+        sentMessages.push({ chatId: targetChatId, message });
+        return { key: { id: `sent-${sentMessages.length}`, remoteJid: targetChatId } };
+      },
+    }));
+
+    const transport = await createWhatsAppTransport({
+      createConnectionSupervisor: async ({ onSocketReady }) => ({
+        start: async () => {
+          onSocketReady(socket, async () => {});
+        },
+        stop: async () => {},
+        sendText: async () => {},
+        handleConnectionUpdate: async () => {},
+        isStopped: () => false,
+      }),
+      outboundStore: testStore,
+    });
+
+    await transport.start(async () => {});
+    if (!processEvents) {
+      throw new Error("Expected connection event processor to be registered");
+    }
+    await processEvents({
+      "connection.update": {
+        connection: "open",
+      },
+    });
+    await waitForTransportBackgroundWork();
+
+    assert.deepEqual(sentMessages, [{
+      chatId,
+      message: { text: "🔄 *CODEX*  turn completed" },
+    }]);
+    assert.equal((await getQueuedRows(testDb, chatId)).length, 0);
+    assert.equal((await getDeadLetterRows(testDb, chatId)).length, 0);
+  });
+
+  it("does not send or queue ignored runtime-state file changes", async () => {
+    if (!testDb || !testStore) {
+      throw new Error("Expected test DB and store to be initialized");
+    }
+
+    const chatId = `ignored-runtime-state-${Date.now()}`;
+    /** @type {Array<{ chatId: string, message: Record<string, unknown> }>} */
+    const sentMessages = [];
+    const socket = /** @type {import("@whiskeysockets/baileys").WASocket} */ (/** @type {unknown} */ ({
+      sendMessage: async (targetChatId, message) => {
+        sentMessages.push({ chatId: targetChatId, message });
+        return { key: { id: `sent-${sentMessages.length}`, remoteJid: targetChatId } };
+      },
+    }));
+
+    const handle = await sendOrQueueWhatsAppEvent({
+      getSocket: () => socket,
+      chatId,
+      event: {
+        kind: "file_change",
+        path: "/home/mada/whatsapp-llm-bot/auth_info_baileys/sender-key-test.json",
+        summary: "ACP file change",
+      },
+      store: testStore,
+    });
+
+    assert.equal(handle, undefined);
+    assert.deepEqual(sentMessages, []);
     assert.equal((await getQueuedRows(testDb, chatId)).length, 0);
   });
 
