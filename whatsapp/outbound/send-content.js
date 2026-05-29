@@ -6,6 +6,7 @@ import { formatPlanPresentationText } from "../../plan-presentation.js";
 import { formatToolFlowInspectText, formatToolFlowSummary } from "../../tool-flow-presentation.js";
 import { formatActivitySummary, shortenPath } from "../../tool-presentation-model.js";
 import { formatUsageEventText } from "../../usage-formatting.js";
+import { isIgnoredRuntimeStateFileChange } from "../../whatsapp-outbound-event-policy.js";
 import {
   formatToolPresentationDisplay,
   formatToolPresentationInspect,
@@ -910,6 +911,9 @@ export async function editWhatsAppMessageByHandle(sock, transportHandleId, newTe
  * @returns {Promise<MessageHandle | undefined>}
  */
 export async function sendEvent(sock, chatId, event, options, reactionRuntime, sendOptions = {}) {
+  if (isIgnoredRuntimeStateFileChange(event)) {
+    return undefined;
+  }
   if (event.kind === "runtime_event") {
     return sendRuntimeEvent(sock, chatId, event, options, reactionRuntime, sendOptions);
   }

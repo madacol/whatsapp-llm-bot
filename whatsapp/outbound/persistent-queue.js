@@ -2,6 +2,12 @@ import { getRootDb } from "../../db.js";
 import { initStore } from "../../store.js";
 import { createLogger } from "../../logger.js";
 import { sendEvent as sendOutboundEvent } from "./send-content.js";
+import {
+  classifyUnreplayableOutboundEvent,
+  getOutboundQueuePersistDelayMs,
+  getOutboundQueuePriority,
+  toReplayableOutboundEvent,
+} from "../../whatsapp-outbound-event-policy.js";
 
 const log = createLogger("whatsapp");
 /** @type {Promise<import("../../store.js").Store> | null} */
@@ -252,6 +258,8 @@ function isOutboundEvent(value) {
         && (value.parentThreadId === undefined || typeof value.parentThreadId === "string")
         && (value.agentNickname === undefined || typeof value.agentNickname === "string")
         && (value.agentRole === undefined || typeof value.agentRole === "string");
+    case "runtime_event":
+      return isRecord(value.event) && typeof value.event.type === "string";
     case "usage":
       return typeof value.cost === "string"
         && isRecord(value.tokens)
@@ -367,17 +375,63 @@ export function isRecoverableWhatsAppSendError(error) {
 }
 
 /**
+ * @param {unknown} error
+ * @returns {boolean}
+ */
+function isConnectionRecoverableWhatsAppSendError(error) {
+  const message = errorMessage(error);
+  return message.includes("Connection Closed")
+    || message.includes("Connection Terminated")
+    || message.includes("Connection was lost")
+    || message.trim() === "1006"
+    || message.includes("WhatsApp socket is not connected")
+    || message.includes("WhatsApp transport has not been started");
+}
+
+/**
+ * @param {number} ms
+ * @returns {Promise<void>}
+ */
+async function wait(ms) {
+  if (ms <= 0) {
+    return;
+  }
+  await new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
  * @param {string} chatId
  * @param {WhatsAppOutboundQueuePayload} payload
  * @param {import("../../store.js").Store} [store]
  * @returns {Promise<import("../../store.js").WhatsAppOutboundQueueRow>}
  */
 export async function enqueueWhatsAppOutbound(chatId, payload, store) {
+  if (payload.kind === "event") {
+    const replayableEvent = toReplayableOutboundEvent(payload.event);
+    if (!replayableEvent) {
+      return createSkippedQueueRow(chatId, payload);
+    }
+    payload = { kind: "event", event: replayableEvent };
+  }
   const resolvedStore = store ?? await getStore();
   return resolvedStore.enqueueWhatsAppOutboundQueueEntry({
     chatId,
     payloadJson: payload,
   });
+}
+
+/**
+ * @param {string} chatId
+ * @param {WhatsAppOutboundQueuePayload} payload
+ * @returns {import("../../store.js").WhatsAppOutboundQueueRow}
+ */
+function createSkippedQueueRow(chatId, payload) {
+  return {
+    id: 0,
+    chat_id: chatId,
+    payload_json: payload,
+    created_at: new Date().toISOString(),
+  };
 }
 
 /**
@@ -413,6 +467,9 @@ function resolveQueuedHandle(chatId, queueId, handle) {
  * @returns {Promise<MessageHandle | undefined>}
  */
 function waitForQueuedHandle(chatId, queueId) {
+  if (queueId <= 0) {
+    return Promise.resolve(undefined);
+  }
   return new Promise((resolve) => {
     const key = queuedHandleKey(chatId, queueId);
     const resolvers = queuedHandleResolvers.get(key) ?? [];
@@ -491,17 +548,42 @@ async function listQueuedWhatsAppOutbound(store) {
     if (!normalizedRow) {
       const rowId = isRecord(row) ? normalizeRowId(row.id) : null;
       log.error("Dropping malformed WhatsApp outbound queue row.", { row });
-      if (rowId !== null) {
-        const rowChatId = isRecord(row) && typeof row.chat_id === "string" ? row.chat_id : "";
-        if (rowChatId) {
-          await deleteQueuedWhatsAppOutbound(rowChatId, rowId, resolvedStore);
+      if (rowId !== null && typeof resolvedStore.quarantineWhatsAppOutboundQueueEntry === "function") {
+        const queueRow = /** @type {import("../../store.js").WhatsAppOutboundQueueRow | null} */ (
+          isRecord(row) && typeof row.chat_id === "string"
+            ? {
+              id: rowId,
+              chat_id: row.chat_id,
+              payload_json: row.payload_json,
+              ...(typeof row.created_at === "string" ? { created_at: row.created_at } : {}),
+            }
+            : null
+        );
+        if (queueRow) {
+          await resolvedStore.quarantineWhatsAppOutboundQueueEntry({
+            row: queueRow,
+            reason: "malformed outbound queue payload",
+          });
         }
       }
       continue;
     }
+    if (normalizedRow.payload.kind === "event") {
+      const unreplayableReason = classifyUnreplayableOutboundEvent(normalizedRow.payload.event);
+      if (unreplayableReason) {
+        await resolvedStore.quarantineWhatsAppOutboundQueueEntry({
+          row,
+          reason: unreplayableReason,
+        });
+        continue;
+      }
+    }
     normalized.push(normalizedRow);
   }
-  return normalized;
+  return normalized.sort((a, b) => {
+    const priorityDifference = getOutboundQueuePriority(a.payload) - getOutboundQueuePriority(b.payload);
+    return priorityDifference || a.id - b.id;
+  });
 }
 
 /**
@@ -531,6 +613,12 @@ async function deliverQueuedPayload(sock, chatId, payload, reactionRuntime, stor
  * @returns {Promise<MessageHandle | undefined>}
  */
 export async function sendOrQueueWhatsAppEvent({ getSocket, chatId, event, reactionRuntime, store }) {
+  const replayableEvent = toReplayableOutboundEvent(event);
+  if (!replayableEvent) {
+    return undefined;
+  }
+  event = replayableEvent;
+
   if (event.kind === "content" && event.stream) {
     const bufferedEvent = bufferStreamEvent(chatId, event);
     if (!bufferedEvent) {
@@ -541,8 +629,13 @@ export async function sendOrQueueWhatsAppEvent({ getSocket, chatId, event, react
 
   const sock = getSocket();
   if (!sock) {
-    const row = await enqueueWhatsAppOutbound(chatId, { kind: "event", event }, store);
-    return createQueuedMessageHandle(chatId, row.id);
+    return queueEventAfterDebouncedRetry({
+      getSocket,
+      chatId,
+      event,
+      reactionRuntime,
+      store,
+    });
   }
 
   try {
@@ -551,9 +644,40 @@ export async function sendOrQueueWhatsAppEvent({ getSocket, chatId, event, react
     if (!isRecoverableWhatsAppSendError(error)) {
       throw error;
     }
-    const row = await enqueueWhatsAppOutbound(chatId, { kind: "event", event }, store);
-    return createQueuedMessageHandle(chatId, row.id);
+    return queueEventAfterDebouncedRetry({
+      getSocket,
+      chatId,
+      event,
+      reactionRuntime,
+      store,
+    });
   }
+}
+
+/**
+ * @param {{
+ *   getSocket: () => import("@whiskeysockets/baileys").WASocket | null,
+ *   chatId: string,
+ *   event: OutboundEvent,
+ *   reactionRuntime?: import("../runtime/reaction-runtime.js").ReactionRuntime,
+ *   store?: import("../../store.js").Store,
+ * }} input
+ * @returns {Promise<MessageHandle | undefined>}
+ */
+async function queueEventAfterDebouncedRetry({ getSocket, chatId, event, reactionRuntime, store }) {
+  await wait(getOutboundQueuePersistDelayMs());
+  const sock = getSocket();
+  if (sock) {
+    try {
+      return await sendOutboundEvent(sock, chatId, event, undefined, reactionRuntime, { editHandleStore: store });
+    } catch (error) {
+      if (!isRecoverableWhatsAppSendError(error)) {
+        throw error;
+      }
+    }
+  }
+  const row = await enqueueWhatsAppOutbound(chatId, { kind: "event", event }, store);
+  return createQueuedMessageHandle(chatId, row.id);
 }
 
 /**
@@ -568,7 +692,7 @@ export async function sendOrQueueWhatsAppEvent({ getSocket, chatId, event, react
 export async function sendOrQueueWhatsAppText({ getSocket, chatId, text, store }) {
   const sock = getSocket();
   if (!sock) {
-    await enqueueWhatsAppOutbound(chatId, { kind: "text", text }, store);
+    await queueTextAfterDebouncedRetry({ getSocket, chatId, text, store });
     return;
   }
 
@@ -578,8 +702,33 @@ export async function sendOrQueueWhatsAppText({ getSocket, chatId, text, store }
     if (!isRecoverableWhatsAppSendError(error)) {
       throw error;
     }
-    await enqueueWhatsAppOutbound(chatId, { kind: "text", text }, store);
+    await queueTextAfterDebouncedRetry({ getSocket, chatId, text, store });
   }
+}
+
+/**
+ * @param {{
+ *   getSocket: () => import("@whiskeysockets/baileys").WASocket | null,
+ *   chatId: string,
+ *   text: string,
+ *   store?: import("../../store.js").Store,
+ * }} input
+ * @returns {Promise<void>}
+ */
+async function queueTextAfterDebouncedRetry({ getSocket, chatId, text, store }) {
+  await wait(getOutboundQueuePersistDelayMs());
+  const sock = getSocket();
+  if (sock) {
+    try {
+      await sock.sendMessage(chatId, { text });
+      return;
+    } catch (error) {
+      if (!isRecoverableWhatsAppSendError(error)) {
+        throw error;
+      }
+    }
+  }
+  await enqueueWhatsAppOutbound(chatId, { kind: "text", text }, store);
 }
 
 /**
@@ -607,16 +756,23 @@ export async function flushQueuedWhatsAppOutbound({ getSocket, reactionRuntime, 
       deliveredRows.push({ chatId: row.chatId, queueId: row.id, handle });
       await deleteQueuedWhatsAppOutbound(row.chatId, row.id, store);
     } catch (error) {
-      if (isRecoverableWhatsAppSendError(error)) {
+      if (isConnectionRecoverableWhatsAppSendError(error)) {
         return deliveredRows;
       }
 
-      log.error("Dropping unrecoverable WhatsApp outbound queue row.", {
+      log.error("Quarantining WhatsApp outbound queue row.", {
         rowId: row.id,
         chatId: row.chatId,
         error,
       });
-      await deleteQueuedWhatsAppOutbound(row.chatId, row.id);
+      await (store ?? await getStore()).quarantineWhatsAppOutboundQueueEntry({
+        row: {
+          id: row.id,
+          chat_id: row.chatId,
+          payload_json: row.payload,
+        },
+        reason: errorMessage(error),
+      });
     }
   }
 
