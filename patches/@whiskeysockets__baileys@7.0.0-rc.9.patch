@@ -32,3 +32,21 @@ index f437586f6e6b3f16e0316192bae7fc51d78fded5..9c246db214385c7a053671c4eb7e0686
              return await parseGroupResult(result);
          },
          communityLeave: async (id) => {
+diff --git a/lib/Utils/messages-media.js b/lib/Utils/messages-media.js
+index 199ef26c2c779e57a6ba549d84b8c7ec018721a3..12a954bd979917da8cb098c9c2f84ff842c526c8 100644
+--- a/lib/Utils/messages-media.js
++++ b/lib/Utils/messages-media.js
+@@ -351,8 +351,13 @@ export const encryptedStream = async (media, mediaType, { logger, saveOriginalFi
+         const fileSha256 = sha256Plain.digest();
+         const fileEncSha256 = sha256Enc.digest();
+         encFileWriteStream.write(mac);
++        const pendingFileWrites = [once(encFileWriteStream, 'finish')];
++        if (originalFileStream) {
++            pendingFileWrites.push(once(originalFileStream, 'finish'));
++        }
+         encFileWriteStream.end();
+         originalFileStream?.end?.();
++        await Promise.all(pendingFileWrites);
+         stream.destroy();
+         logger?.debug('encrypted data successfully');
+         return {

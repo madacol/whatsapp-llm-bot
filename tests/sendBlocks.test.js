@@ -90,6 +90,60 @@ describe("sendEvent – sub-agent messages", () => {
 });
 
 describe("sendEvent – runtime events", () => {
+  it("suppresses noisy lifecycle runtime events except turn start", async () => {
+    const { sock, sent } = createMockSock();
+
+    const events = [
+      {
+        type: "session.started",
+        provider: "codex",
+        session: { chatId: "chat-1", harnessName: "codex", instanceId: "work", status: "running" },
+      },
+      {
+        type: "turn.started",
+        provider: "codex",
+        turn: { id: "turn-1", chatId: "chat-1", status: "started" },
+      },
+      {
+        type: "item.started",
+        provider: "acp",
+        item: { id: "assistant-1", kind: "assistant" },
+      },
+      {
+        type: "item.started",
+        provider: "acp",
+        item: { id: "assistant-2", kind: "assistant" },
+      },
+      {
+        type: "session.updated",
+        provider: "codex",
+        session: { chatId: "chat-1", harnessName: "codex", instanceId: "work", status: "ready" },
+      },
+      {
+        type: "turn.completed",
+        provider: "codex",
+        turn: { id: "turn-1", chatId: "chat-1", status: "completed" },
+      },
+      {
+        type: "turn.started",
+        provider: "codex",
+        turn: { id: "turn-2", chatId: "chat-1", status: "started" },
+      },
+    ];
+
+    for (const runtimeEvent of events) {
+      await sendEvent(sock, "runtime-noise-chat", {
+        kind: "runtime_event",
+        event: /** @type {RuntimeEventOutboundEvent["event"]} */ (runtimeEvent),
+      });
+    }
+
+    assert.deepEqual(sent.map((entry) => entry.msg.text), [
+      "🔄 *CODEX*  turn started",
+      "🔄 *CODEX*  turn started",
+    ]);
+  });
+
   it("folds generic runtime events into one editable WhatsApp status", async () => {
     const { sock, sent } = createMockSock();
 
