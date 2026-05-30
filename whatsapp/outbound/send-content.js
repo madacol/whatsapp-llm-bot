@@ -23,6 +23,8 @@ const log = createLogger("whatsapp:outbound");
 const inMemoryEditHandles = new Map();
 /** @type {Map<string, { handle?: MessageHandle, entries: Array<{ icon: string, provider: string, summary: string, detail?: string }> }>} */
 const runtimeStatusByChat = new Map();
+/** @type {Map<string, Map<string, { handle?: MessageHandle, command: string }>>} */
+const runtimeCommandsByChat = new Map();
 
 /** @type {Record<MessageSource, string>} */
 const SOURCE_PREFIX = {
@@ -238,6 +240,71 @@ function formatRuntimeProvider(provider) {
 }
 
 /**
+ * @param {string} tool
+ * @param {string} [detail]
+ * @returns {string}
+ */
+function formatRuntimeProgressEntry(tool, detail) {
+  if (!detail) {
+    return `*${tool}*`;
+  }
+  return detail.startsWith("\n") ? `*${tool}*${detail}` : `*${tool}*  ${detail}`;
+}
+
+/**
+ * @param {string} command
+ * @returns {string}
+ */
+function formatRuntimeCommandSummary(command) {
+  const trimmedCommand = command.trim();
+  if (!trimmedCommand) {
+    return formatRuntimeProgressEntry("Shell");
+  }
+  if (trimmedCommand.includes("\n")) {
+    return formatRuntimeProgressEntry("Shell", `\n\`\`\`\n${trimmedCommand}\n\`\`\``);
+  }
+  return formatRuntimeProgressEntry("Shell", `\`${trimmedCommand}\``);
+}
+
+/**
+ * @param {"started" | "completed" | "failed"} status
+ * @returns {string}
+ */
+function getRuntimeCommandIcon(status) {
+  if (status === "failed") {
+    return "❌";
+  }
+  if (status === "completed") {
+    return "✅";
+  }
+  return "🔧";
+}
+
+/**
+ * @param {RuntimeEventOutboundEvent["event"]} event
+ * @returns {FileChangeEvent}
+ */
+function fileChangeEventFromRuntimeEvent(event) {
+  if (event.type !== "file-change.completed") {
+    throw new Error(`Expected file-change runtime event, got ${event.type}.`);
+  }
+  const change = event.change;
+  return {
+    kind: "file_change",
+    path: change.path,
+    ...(change.summary !== undefined && { summary: change.summary }),
+    ...(change.diff !== undefined && { diff: change.diff }),
+    ...(change.kind !== undefined && { changeKind: change.kind }),
+    ...(change.source !== undefined && { source: change.source }),
+    ...(change.itemId !== undefined && { itemId: change.itemId }),
+    ...(change.stage !== undefined && { stage: change.stage }),
+    ...(change.oldText !== undefined && { oldText: change.oldText }),
+    ...(change.newText !== undefined && { newText: change.newText }),
+    ...("cwd" in change && change.cwd !== undefined && { cwd: change.cwd }),
+  };
+}
+
+/**
  * @param {RuntimeEventOutboundEvent["event"]} event
  * @returns {{ kind: "compact" | "error", icon: string, provider: string, summary: string, detail?: string, closesStatus?: boolean }}
  */
@@ -354,6 +421,88 @@ function shouldSuppressRuntimeEvent(event) {
   }
 
   return false;
+}
+
+/**
+ * @param {import('@whiskeysockets/baileys').WASocket} sock
+ * @param {string} chatId
+ * @param {RuntimeEventOutboundEvent} event
+ * @param {{ quoted?: BaileysMessage } | undefined} options
+ * @param {import("../runtime/reaction-runtime.js").ReactionRuntime | undefined} reactionRuntime
+ * @param {{ editHandleStore?: import("../../store.js").Store }} sendOptions
+ * @returns {Promise<MessageHandle | undefined>}
+ */
+async function sendRuntimeFileChangeEvent(sock, chatId, event, options, reactionRuntime, sendOptions) {
+  const fileChange = fileChangeEventFromRuntimeEvent(event.event);
+  return sendBlocks(sock, chatId, "tool-call", renderFileChangeContent(fileChange), options, reactionRuntime, event, {
+    workdir: fileChange.cwd ?? null,
+    editHandleStore: sendOptions.editHandleStore,
+  });
+}
+
+/**
+ * @param {import('@whiskeysockets/baileys').WASocket} sock
+ * @param {string} chatId
+ * @param {RuntimeEventOutboundEvent} event
+ * @param {{ quoted?: BaileysMessage } | undefined} options
+ * @param {import("../runtime/reaction-runtime.js").ReactionRuntime | undefined} reactionRuntime
+ * @param {{ editHandleStore?: import("../../store.js").Store }} sendOptions
+ * @returns {Promise<MessageHandle | undefined>}
+ */
+async function sendRuntimeCommandEvent(sock, chatId, event, options, reactionRuntime, sendOptions) {
+  const commandEvent = event.event;
+  if (
+    commandEvent.type !== "command.started"
+    && commandEvent.type !== "command.completed"
+    && commandEvent.type !== "command.failed"
+  ) {
+    throw new Error(`Expected command runtime event, got ${commandEvent.type}.`);
+  }
+
+  const command = commandEvent.command.command;
+  const status = commandEvent.command.status;
+  const summary = formatRuntimeCommandSummary(command);
+  const text = `${getRuntimeCommandIcon(status)} ${summary}`;
+
+  if (status === "started") {
+    let commandStateByCommand = runtimeCommandsByChat.get(chatId);
+    if (!commandStateByCommand) {
+      commandStateByCommand = new Map();
+      runtimeCommandsByChat.set(chatId, commandStateByCommand);
+    }
+    const handle = await sendBlocks(sock, chatId, "plain", text, options, reactionRuntime, event, {
+      editHandleStore: sendOptions.editHandleStore,
+    });
+    commandStateByCommand.set(command, {
+      command,
+      ...(handle ? { handle } : {}),
+    });
+    return handle;
+  }
+
+  const commandStateByCommand = runtimeCommandsByChat.get(chatId);
+  const state = commandStateByCommand?.get(command);
+  if (!state?.handle) {
+    if (status === "failed") {
+      const detail = commandEvent.command.output ? `\n\n${commandEvent.command.output}` : "";
+      return sendBlocks(sock, chatId, "error", `Command failed: \`${command}\`${detail}`, options, reactionRuntime, event, {
+        editHandleStore: sendOptions.editHandleStore,
+      });
+    }
+    return undefined;
+  }
+
+  state.handle.setInspect({
+    kind: "text",
+    text: commandEvent.command.output ?? "_no output_",
+    persistOnInspect: true,
+  });
+  await state.handle.update({ kind: "text", text });
+  commandStateByCommand?.delete(command);
+  if (!commandStateByCommand || commandStateByCommand.size === 0) {
+    runtimeCommandsByChat.delete(chatId);
+  }
+  return state.handle;
 }
 
 /**
@@ -699,6 +848,14 @@ function renderOutboundEvent(event) {
  * @returns {Promise<MessageHandle | undefined>}
  */
 async function sendRuntimeEvent(sock, chatId, event, options, reactionRuntime, sendOptions = {}) {
+  if (event.event.type === "command.started" || event.event.type === "command.completed" || event.event.type === "command.failed") {
+    return sendRuntimeCommandEvent(sock, chatId, event, options, reactionRuntime, sendOptions);
+  }
+
+  if (event.event.type === "file-change.completed") {
+    return sendRuntimeFileChangeEvent(sock, chatId, event, options, reactionRuntime, sendOptions);
+  }
+
   if (shouldSuppressRuntimeEvent(event.event)) {
     if (event.event.type === "turn.completed") {
       runtimeStatusByChat.delete(chatId);

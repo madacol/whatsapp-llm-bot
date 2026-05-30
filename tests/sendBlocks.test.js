@@ -91,6 +91,73 @@ describe("sendEvent – sub-agent messages", () => {
 });
 
 describe("sendEvent – runtime events", () => {
+  it("renders ACP command runtime progress inside WhatsApp", async () => {
+    const { sock, sent } = createMockSock();
+
+    await sendEvent(sock, "runtime-command-chat", {
+      kind: "runtime_event",
+      event: {
+        type: "command.started",
+        provider: "acp",
+        command: {
+          command: "pnpm type-check",
+          status: "started",
+        },
+      },
+    });
+    await sendEvent(sock, "runtime-command-chat", {
+      kind: "runtime_event",
+      event: {
+        type: "command.completed",
+        provider: "acp",
+        command: {
+          command: "pnpm type-check",
+          status: "completed",
+          output: "ok",
+        },
+      },
+    });
+
+    assert.deepEqual(sent.map((entry) => entry.msg), [
+      { text: "🔧 *Shell*  `pnpm type-check`", linkPreview: null },
+      {
+        text: "✅ *Shell*  `pnpm type-check`",
+        edit: { id: "msg-1", remoteJid: "runtime-command-chat", fromMe: true },
+        linkPreview: null,
+      },
+    ]);
+  });
+
+  it("renders ACP file-change runtime events inside WhatsApp", async () => {
+    const { sock, sent } = createMockSock();
+
+    await sendEvent(sock, "runtime-file-change-chat", {
+      kind: "runtime_event",
+      event: {
+        type: "file-change.completed",
+        provider: "acp",
+        change: {
+          path: "/tmp/src/app.js",
+          cwd: "/tmp",
+          source: "snapshot",
+          kind: "update",
+          oldText: "before\n",
+          newText: "after\n",
+          diff: [
+            "--- a/src/app.js",
+            "+++ b/src/app.js",
+            "@@ -1 +1 @@",
+            "-before",
+            "+after",
+          ].join("\n"),
+        },
+      },
+    });
+
+    assert.equal(sent.length, 1);
+    assert.equal(sent[0]?.msg.caption, "🔧 Snapshot *src/app.js*");
+  });
+
   it("suppresses noisy lifecycle runtime events except turn start", async () => {
     const { sock, sent } = createMockSock();
 

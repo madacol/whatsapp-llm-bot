@@ -186,6 +186,7 @@ describe("ACP event normalization", () => {
       change: {
         path: "app.js",
         kind: "update",
+        source: "tool",
         summary: "Edited app.js",
         oldText: "old",
         newText: "new",

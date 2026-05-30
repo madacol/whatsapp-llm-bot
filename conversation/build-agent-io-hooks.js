@@ -269,6 +269,12 @@ export function buildAgentIoHooks(
     ),
     onUsage: async (cost, tokens) => { await context.send(usageEvent(cost, tokens)); },
     onRuntimeEvent: async (event) => {
+      if (event.type === "file-change.completed") {
+        if (!visibility.changes) {
+          return;
+        }
+        await compactToolActivity.close();
+      }
       await emitWhileWorking(() => context.send(runtimeEvent(event)));
     },
   };
