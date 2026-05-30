@@ -308,6 +308,11 @@ type TurnIO = {
   keepPresenceAlive: (ttlMs?: number) => Promise<void>;
   endPresence: () => Promise<void>;
   getIsAdmin: () => Promise<boolean>;
+  prepareMediaRegistry?: (input: {
+    chatId: string;
+    messages: Message[];
+    mediaRegistry: MediaRegistry;
+  }) => void | Promise<void>;
 };
 
 type WorkspaceStatus = "ready" | "busy" | "conflicted" | "archived";
@@ -451,6 +456,11 @@ type ExecuteActionContext = {
   select: (question: string, options: SelectOption[], config?: SelectConfig) => Promise<string>;
   selectMany?: (question: string, options: SelectOption[], config?: SelectManyConfig) => Promise<SelectManyResult>;
   confirm: (message: string, hooks?: ConfirmHooks) => Promise<boolean>;
+  prepareMediaRegistry?: (input: {
+    chatId: string;
+    messages: Message[];
+    mediaRegistry: MediaRegistry;
+  }) => void | Promise<void>;
 };
 
 /* Actions */

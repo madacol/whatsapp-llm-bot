@@ -3,7 +3,6 @@
  */
 
 import { deriveMediaPath, hasInlineMediaData, hasMediaPath, isValidMediaPath } from "./attachment-paths.js";
-import { hydrateHdRef } from "./whatsapp-hd-media.js";
 import { createImageBlockFromPath } from "./media-store.js";
 
 /**
@@ -250,16 +249,15 @@ export function prepareMessages(chatMessages) {
     if (!msg.message_data) continue;
     const messageData = msg.message_data;
 
-    // Scan for media blocks, hydrate HD refs, and register them
+    // Scan for media blocks and register them. Transport-specific hydration is
+    // applied by the transport via the conversation media preparation hook.
     if (messageData.role === "user") {
       for (const block of messageData.content) {
         if (isAttachmentBlock(block)) {
-          if (block.type === "image") hydrateHdRef(/** @type {ImageContentBlock} */ (block));
           registerMedia(mediaRegistry, block);
         } else if (block.type === "quote") {
           for (const quoteBlock of block.content) {
             if (isAttachmentBlock(quoteBlock)) {
-              if (quoteBlock.type === "image") hydrateHdRef(/** @type {ImageContentBlock} */ (quoteBlock));
               registerMedia(mediaRegistry, quoteBlock);
             }
           }
@@ -268,7 +266,6 @@ export function prepareMessages(chatMessages) {
     } else if (messageData.role === "tool") {
       for (const block of messageData.content) {
         if (isAttachmentBlock(block)) {
-          if (block.type === "image") hydrateHdRef(/** @type {ImageContentBlock} */ (block));
           registerMedia(mediaRegistry, block);
         }
       }

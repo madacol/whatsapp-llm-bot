@@ -7,7 +7,6 @@ import {
   formatMemoriesContext,
 } from "../memory.js";
 import { prepareMessages } from "../message-formatting.js";
-import { reattachHdDeferreds } from "../whatsapp-hd-media.js";
 import { createLogger } from "../logger.js";
 import { ensureChatStoreSchema } from "../store/schema/chat.js";
 
@@ -65,7 +64,7 @@ async function searchAndAppendMemories({ chatId, chatInfo, message, llmClient, e
  *   message: UserMessage,
  *   llmClient: LlmClient,
  *   baseExternalInstructions: string,
- *   context: Pick<ExecuteActionContext, "send">,
+ *   context: Pick<ExecuteActionContext, "send" | "prepareMediaRegistry">,
  *   getMessages: import("../store.js").Store["getMessages"],
  *   bufferedTexts?: string[],
  * }} input
@@ -96,7 +95,7 @@ export async function prepareRunMessages({
   }
 
   const { messages, mediaRegistry } = prepareMessages(chatMessages);
-  reattachHdDeferreds(chatId, mediaRegistry);
+  await context.prepareMediaRegistry?.({ chatId, messages, mediaRegistry });
 
   for (const text of bufferedTexts) {
     if (!text) {
