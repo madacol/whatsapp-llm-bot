@@ -8,11 +8,11 @@ import { shortenPath } from "../../tool-presentation-model.js";
 import { formatUsageEventText } from "../../usage-formatting.js";
 import { makeImageMessage, makeTextMessage } from "../message-payloads.js";
 import {
-  formatActivitySummary,
-  formatToolPresentationDisplay,
   formatToolPresentationInspect,
   formatToolPresentationSummary,
   langFromPath,
+  renderToolActivityContent,
+  renderToolPresentationContent,
 } from "../tool-presenter.js";
 import { sendImageHD } from "../../whatsapp-hd-media.js";
 
@@ -1467,11 +1467,10 @@ function renderOutboundEvent(event) {
         ...(event.cwd !== undefined && { cwd: event.cwd }),
       };
     case "tool_call": {
-      const content = formatToolPresentationDisplay(event.presentation) ?? formatToolPresentationSummary(event.presentation);
-      return { source: "tool-call", content };
+      return { source: "tool-call", content: renderToolPresentationContent(event.presentation) };
     }
     case "tool_activity":
-      return { source: "tool-call", content: formatActivitySummary(event.activity) };
+      return { source: "tool-call", content: renderToolActivityContent(event.activity) };
     case "plan":
       return { source: "llm", content: [{ type: "markdown", text: formatPlanPresentationText(event.presentation) }] };
     case "file_change":
