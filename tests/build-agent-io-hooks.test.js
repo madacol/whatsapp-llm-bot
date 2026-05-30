@@ -280,6 +280,59 @@ describe("buildAgentIoHooks", () => {
     assert.equal(sent.length, 0);
   });
 
+  it("does not send partial assistant stream chunks or close active compact progress", async () => {
+    /** @type {Array<{ event: OutboundEvent, kind: "send" | "reply" }>} */
+    const sent = [];
+    const hooks = buildAgentIoHooks(
+      {
+        send: async (event) => {
+          sent.push({ event, kind: "send" });
+          return {
+            transportHandleId: "compact-command-stream",
+            update: async () => {},
+            setInspect: () => {},
+          };
+        },
+        reply: async (event) => {
+          sent.push({ event, kind: "reply" });
+          return undefined;
+        },
+        select: async () => "",
+        confirm: async () => true,
+      },
+      async () => {},
+      async () => {},
+      () => {},
+      "/repo",
+      { ...DEFAULT_OUTPUT_VISIBILITY, toolDetails: false },
+    );
+
+    await hooks.onCommand?.({ command: "pnpm test", status: "started" });
+    await hooks.onLlmResponse?.("async-gap fix", {
+      source: "llm",
+      streamId: "assistant-1",
+      streamStatus: "partial",
+    });
+    await hooks.onCommand?.({ command: "pnpm test", status: "completed", output: "ok" });
+    await hooks.onLlmResponse?.("async-gap fix complete", {
+      source: "llm",
+      streamId: "assistant-1",
+      streamStatus: "final",
+    });
+
+    assert.deepEqual(sent.map((entry) => entry.kind), ["send", "send", "send", "reply"]);
+    assert.deepEqual(sent.map((entry) => entry.event.kind), [
+      "compact_tool_activity",
+      "compact_tool_activity",
+      "compact_tool_activity",
+      "content",
+    ]);
+    assert.equal(sent[0]?.event.kind === "compact_tool_activity" ? sent[0].event.activity.status : "", "started");
+    assert.equal(sent[1]?.event.kind === "compact_tool_activity" ? sent[1].event.activity.status : "", "completed");
+    assert.equal(sent[2]?.event.kind === "compact_tool_activity" ? sent[2].event.activity.type : "", "close");
+    assert.equal(sent[3]?.event.kind === "content" ? sent[3].event.source : "", "llm");
+  });
+
   it("sends one thinking placeholder and makes it inspectable", async () => {
     const subject = createReasoningSubject();
 

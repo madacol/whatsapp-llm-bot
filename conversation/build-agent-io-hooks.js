@@ -146,6 +146,9 @@ export function buildAgentIoHooks(
       }
     },
     onLlmResponse: async (text, metadata) => {
+      if (metadata?.streamId && (metadata.streamStatus ?? "partial") !== "final") {
+        return;
+      }
       await compactToolActivity.close();
       /** @type {ToolContentBlock[]} */
       const content = [{ type: "markdown", text }];
