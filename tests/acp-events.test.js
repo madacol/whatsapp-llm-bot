@@ -3,6 +3,31 @@ import assert from "node:assert/strict";
 import { createAcpRuntimeModel, normalizeAcpSessionUpdate } from "../harnesses/acp-events.js";
 
 describe("ACP event normalization", () => {
+  it("does not re-emit repeated in-progress tool snapshots as fresh starts", () => {
+    const model = createAcpRuntimeModel();
+    const first = model.acceptSessionUpdate({
+      sessionId: "s1",
+      update: {
+        sessionUpdate: "tool_call",
+        toolCallId: "toolu-repeat",
+        title: "Run tests",
+        status: "in_progress",
+      },
+    });
+    const second = model.acceptSessionUpdate({
+      sessionId: "s1",
+      update: {
+        sessionUpdate: "tool_call_update",
+        toolCallId: "toolu-repeat",
+        title: "Run tests",
+        status: "in_progress",
+      },
+    });
+
+    assert.deepEqual(first.map((event) => event.type), ["tool.started"]);
+    assert.deepEqual(second.map((event) => event.type), ["tool.updated"]);
+  });
+
   it("normalizes assistant text, plans, and tool lifecycle updates", () => {
     const assistantEvents = normalizeAcpSessionUpdate({
       sessionId: "s1",

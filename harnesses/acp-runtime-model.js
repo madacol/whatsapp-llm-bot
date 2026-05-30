@@ -332,12 +332,20 @@ function makeRuntimeTool(toolCall) {
 /**
  * @param {AcpToolCallState} toolCall
  * @param {Record<string, unknown>} raw
+ * @param {{ wasActive?: boolean }} [options]
  * @returns {HarnessRuntimeEvent[]}
  */
-function makeToolEvents(toolCall, raw) {
+function makeToolEvents(toolCall, raw, options = {}) {
   const status = normalizeToolStatus(toolCall.status);
+  const type = status === "failed"
+    ? "tool.failed"
+    : status === "completed"
+      ? "tool.completed"
+      : status === "started" && !options.wasActive
+        ? "tool.started"
+        : "tool.updated";
   const events = /** @type {HarnessRuntimeEvent[]} */ ([{
-    type: status === "failed" ? "tool.failed" : status === "completed" ? "tool.completed" : status === "started" ? "tool.started" : "tool.updated",
+    type,
     provider: "acp",
     tool: makeRuntimeTool(toolCall),
     raw,
@@ -524,14 +532,15 @@ export function createAcpRuntimeModel() {
 
     if (update.sessionUpdate === "tool_call" || update.sessionUpdate === "tool_call_update") {
       const next = readToolCallState(update);
-      const merged = mergeAcpToolCallState(toolCalls.get(next.id), next);
+      const previous = toolCalls.get(next.id);
+      const merged = mergeAcpToolCallState(previous, next);
       const status = normalizeToolStatus(merged.status);
       if (status === "completed" || status === "failed") {
         toolCalls.delete(merged.id);
       } else {
         toolCalls.set(merged.id, merged);
       }
-      return [...prefix, ...makeToolEvents(merged, eventRaw)];
+      return [...prefix, ...makeToolEvents(merged, eventRaw, { wasActive: previous !== undefined })];
     }
 
     return prefix;

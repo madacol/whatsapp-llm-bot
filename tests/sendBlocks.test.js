@@ -359,6 +359,45 @@ describe("sendEvent – runtime events", () => {
     ]);
   });
 
+  it("reuses the pending ACP command runtime message for duplicate starts", async () => {
+    const { sock, sent } = createMockSock();
+    const startEvent = /** @type {RuntimeEventOutboundEvent} */ ({
+      kind: "runtime_event",
+      event: {
+        type: "command.started",
+        provider: "acp",
+        command: {
+          command: "pnpm test tests/e2e-adapter.test.js",
+          status: "started",
+        },
+      },
+    });
+
+    await sendEvent(sock, "runtime-command-duplicate-chat", startEvent);
+    await sendEvent(sock, "runtime-command-duplicate-chat", startEvent);
+    await sendEvent(sock, "runtime-command-duplicate-chat", {
+      kind: "runtime_event",
+      event: {
+        type: "command.completed",
+        provider: "acp",
+        command: {
+          command: "pnpm test tests/e2e-adapter.test.js",
+          status: "completed",
+          output: "ok",
+        },
+      },
+    });
+
+    assert.deepEqual(sent.map((entry) => entry.msg), [
+      { text: "🔧 *Shell*  `pnpm test tests/e2e-adapter.test.js`", linkPreview: null },
+      {
+        text: "✅ *Shell*  `pnpm test tests/e2e-adapter.test.js`",
+        edit: { id: "msg-1", remoteJid: "runtime-command-duplicate-chat", fromMe: true },
+        linkPreview: null,
+      },
+    ]);
+  });
+
   it("renders ACP file-change runtime events inside WhatsApp", async () => {
     const { sock, sent } = createMockSock();
 
