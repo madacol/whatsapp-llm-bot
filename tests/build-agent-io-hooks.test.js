@@ -452,6 +452,83 @@ describe("buildAgentIoHooks", () => {
     assert.deepEqual(sent, []);
   });
 
+  it("keeps generic compact read titles while showing the path", async () => {
+    /** @type {MessageHandleUpdate[]} */
+    const updates = [];
+    const hooks = buildAgentIoHooks(
+      {
+        send: async () => ({
+          transportHandleId: "compact-tools-generic",
+          update: async (update) => { updates.push(update); },
+          setInspect: () => {},
+        }),
+        reply: async () => undefined,
+        select: async () => "",
+        confirm: async () => true,
+      },
+      async () => {},
+      async () => {},
+      () => {},
+      "/repo",
+      { ...DEFAULT_OUTPUT_VISIBILITY, toolDetails: false },
+    );
+
+    const toolCall = {
+      id: "read-file-generic",
+      name: "Read file",
+      arguments: JSON.stringify({ path: "/repo/presentation/whatsapp.js" }),
+    };
+    await hooks.onToolCall?.(toolCall, () => "*Read file*");
+    await hooks.onToolComplete?.(toolCall);
+
+    assert.deepEqual(updates.at(-1), {
+      kind: "text",
+      text: "✅ *Read file*  `presentation/whatsapp.js`",
+    });
+  });
+
+  it("suppresses generic compact read titles when no path is available", async () => {
+    const { hooks, sent } = createSubject({ ...DEFAULT_OUTPUT_VISIBILITY, toolDetails: false });
+
+    const toolCall = { id: "read-file-no-path", name: "Read file", arguments: "{}" };
+    await hooks.onToolCall?.(toolCall, () => "*Read file*");
+    await hooks.onToolComplete?.(toolCall);
+
+    assert.deepEqual(sent, []);
+  });
+
+  it("renders generic compact search titles as search plus pattern and bold target", async () => {
+    /** @type {MessageHandleUpdate[]} */
+    const updates = [];
+    const hooks = buildAgentIoHooks(
+      {
+        send: async () => ({
+          transportHandleId: "compact-tools-search",
+          update: async (update) => { updates.push(update); },
+          setInspect: () => {},
+        }),
+        reply: async () => undefined,
+        select: async () => "",
+        confirm: async () => true,
+      },
+      async () => {},
+      async () => {},
+      () => {},
+      "/repo",
+      { ...DEFAULT_OUTPUT_VISIBILITY, toolDetails: false },
+    );
+
+    const name = "Search for 'create.*File|Edit|Write' in tool-presentation-model.js";
+    const toolCall = { id: "search-generic", name, arguments: "{}" };
+    await hooks.onToolCall?.(toolCall, () => `*${name}*`);
+    await hooks.onToolComplete?.(toolCall);
+
+    assert.deepEqual(updates.at(-1), {
+      kind: "text",
+      text: "✅ *Search*  `create.*File|Edit|Write` in *tool-presentation-model.js*",
+    });
+  });
+
   it("ignores duplicate compact command start events while the command is pending", async () => {
     /** @type {Array<{ event: OutboundEvent, kind: "send" | "reply" }>} */
     const sent = [];
