@@ -178,7 +178,7 @@
  *   chatId?: string,
  *   type: "file-change.completed",
  *   provider: HarnessRuntimeProvider,
- *   change: Parameters<Required<AgentIOHooks>["onFileChange"]>[0],
+ *   change: Parameters<Required<AgentIOHooks>["onFileChange"]>[0] & { cwd?: string | null },
  *   raw?: HarnessRuntimeRawEvent,
  * } & HarnessRuntimeEventEnvelope} HarnessRuntimeFileChangeEvent
  */

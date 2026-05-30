@@ -335,7 +335,28 @@ export async function createMockLlmServer() {
     });
   });
 
-  await new Promise((resolve) => server.listen(0, "127.0.0.1", () => resolve(undefined)));
+  await new Promise((resolve, reject) => {
+    /**
+     * @param {Error} error
+     * @returns {void}
+     */
+    function onError(error) {
+      server.off("listening", onListening);
+      reject(error);
+    }
+
+    /**
+     * @returns {void}
+     */
+    function onListening() {
+      server.off("error", onError);
+      resolve(undefined);
+    }
+
+    server.once("error", onError);
+    server.once("listening", onListening);
+    server.listen(0, "127.0.0.1");
+  });
   const addr = server.address();
   const port = typeof addr === "object" && addr ? addr.port : 0;
 

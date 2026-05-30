@@ -69,6 +69,36 @@ function buildRuntimeToolPresentation(tool, workdir) {
 }
 
 /**
+ * @param {HarnessRuntimeEvent} event
+ * @returns {boolean}
+ */
+function shouldPassThroughPresentationBoundary(event) {
+  return event.provider === "acp"
+    && (event.type === "command.started"
+      || event.type === "command.completed"
+      || event.type === "command.failed"
+      || event.type === "file-change.completed");
+}
+
+/**
+ * @param {HarnessRuntimeEvent} event
+ * @param {string | null | undefined} workdir
+ * @returns {HarnessRuntimeEvent}
+ */
+function attachRuntimeBoundaryFacts(event, workdir) {
+  if (event.type !== "file-change.completed" || !workdir || event.change.cwd !== undefined) {
+    return event;
+  }
+  return {
+    ...event,
+    change: {
+      ...event.change,
+      cwd: workdir,
+    },
+  };
+}
+
+/**
  * Create the app-facing dispatcher for canonical harness runtime events.
  * Provider-specific runners should normalize raw SDK/RPC messages before this
  * point; this layer owns presentation hooks and accumulated `AgentResult`.
@@ -327,6 +357,10 @@ export function createHarnessRuntimeEventDispatcher(input) {
   async function handleEvent(event) {
     const normalizedEvent = normalizeHarnessRuntimeEvent(event);
     await captureRawEvent(normalizedEvent);
+    if (shouldPassThroughPresentationBoundary(normalizedEvent)) {
+      await hooks.onRuntimeEvent(attachRuntimeBoundaryFacts(normalizedEvent, input.workdir));
+      return;
+    }
     switch (normalizedEvent.type) {
       case "reasoning.started":
       case "reasoning.updated":

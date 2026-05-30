@@ -416,6 +416,61 @@ describe("createHarnessRuntimeEventDispatcher", () => {
     ]);
   });
 
+  it("passes ACP command and file-change events through the runtime event boundary", async () => {
+    /** @type {import("../harnesses/harness-runtime-events.js").HarnessRuntimeEvent[]} */
+    const runtimeEvents = [];
+    /** @type {Array<{ command: string, status: "started" | "completed" | "failed", output?: string }>} */
+    const commands = [];
+    /** @type {Array<Record<string, unknown>>} */
+    const fileChanges = [];
+    const dispatcher = createHarnessRuntimeEventDispatcher({
+      provider: "acp",
+      messages: [],
+      workdir: "/repo",
+      hooks: {
+        onRuntimeEvent: async (event) => {
+          runtimeEvents.push(event);
+        },
+        onCommand: async (event) => {
+          commands.push(event);
+        },
+        onFileChange: async (event) => {
+          fileChanges.push(event);
+        },
+      },
+    });
+
+    await dispatcher.handleEvent({
+      type: "command.started",
+      provider: "acp",
+      command: {
+        command: "pnpm type-check",
+        status: "started",
+      },
+      raw: { source: "acp.jsonrpc", method: "session/update" },
+    });
+    await dispatcher.handleEvent({
+      type: "file-change.completed",
+      provider: "acp",
+      change: {
+        path: "/repo/src/app.js",
+        kind: "update",
+        source: "snapshot",
+        diff: "--- a/src/app.js\n+++ b/src/app.js\n@@ -1 +1 @@\n-before\n+after",
+      },
+      raw: { source: "acp.jsonrpc", method: "session/update" },
+    });
+
+    assert.deepEqual(commands, []);
+    assert.deepEqual(fileChanges, []);
+    assert.equal(runtimeEvents.length, 2);
+    assert.equal(runtimeEvents[0]?.type, "command.started");
+    assert.deepEqual(runtimeEvents[0]?.raw, { source: "acp.jsonrpc", method: "session/update" });
+    assert.equal(runtimeEvents[1]?.type, "file-change.completed");
+    assert.equal(runtimeEvents[1]?.type === "file-change.completed" ? runtimeEvents[1].change.cwd : undefined, "/repo");
+    assert.deepEqual(runtimeEvents[1]?.raw, { source: "acp.jsonrpc", method: "session/update" });
+  });
+
   it("captures raw provider events as replayable ndjson without changing hook projection", async () => {
     const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "raw-runtime-events-"));
     const logPath = path.join(tempDir, "events.ndjson");
