@@ -487,14 +487,35 @@ describe("buildAgentIoHooks", () => {
     });
   });
 
-  it("suppresses generic compact read titles when no path is available", async () => {
-    const { hooks, sent } = createSubject({ ...DEFAULT_OUTPUT_VISIBILITY, toolDetails: false });
+  it("keeps generic compact read titles when no path is available", async () => {
+    /** @type {MessageHandleUpdate[]} */
+    const updates = [];
+    const hooks = buildAgentIoHooks(
+      {
+        send: async () => ({
+          transportHandleId: "compact-tools-generic-no-path",
+          update: async (update) => { updates.push(update); },
+          setInspect: () => {},
+        }),
+        reply: async () => undefined,
+        select: async () => "",
+        confirm: async () => true,
+      },
+      async () => {},
+      async () => {},
+      () => {},
+      "/repo",
+      { ...DEFAULT_OUTPUT_VISIBILITY, toolDetails: false },
+    );
 
     const toolCall = { id: "read-file-no-path", name: "Read file", arguments: "{}" };
     await hooks.onToolCall?.(toolCall, () => "*Read file*");
     await hooks.onToolComplete?.(toolCall);
 
-    assert.deepEqual(sent, []);
+    assert.deepEqual(updates.at(-1), {
+      kind: "text",
+      text: "✅ *Read file*",
+    });
   });
 
   it("renders generic compact search titles as search plus pattern and bold target", async () => {
