@@ -5,18 +5,12 @@ import {
   formatPlanPresentationText,
   formatToolInspectBody,
   formatSdkToolCall,
-  formatToolCallDisplay,
   getToolCallSummary,
 } from "../tool-display.js";
 import { formatCommandInspectText } from "../utils.js";
 
-/** @param {string} name @param {Record<string, unknown>} args */
-function toolCall(name, args) {
-  return { id: "tool-1", name, arguments: JSON.stringify(args) };
-}
-
 describe("tool display", () => {
-  it("keeps semantic labels for explicit tools but not for shell commands", () => {
+  it("keeps semantic labels for explicit tools", () => {
     assert.equal(
       formatSdkToolCall("Read", { file_path: "/repo/src/app.js" }, "/repo"),
       "*Read*  `src/app.js`",
@@ -25,44 +19,10 @@ describe("tool display", () => {
       formatSdkToolCall("Grep", { pattern: "needle", path: "/repo/src" }, "/repo"),
       "*Search*  \"needle\" in `src`",
     );
-    const bashResult = formatToolCallDisplay(toolCall("Bash", { command: "rg -n \"needle\" src" }), undefined, "/repo");
-    assert.ok(Array.isArray(bashResult));
-    assert.equal(bashResult[0]?.type, "code");
-    assert.equal(/** @type {CodeContentBlock} */ (bashResult[0]).caption, "*Bash*  `rg -n \"needle\" src`");
-  });
-
-  it("keeps rg --files shell commands as Bash", () => {
-    const bashResult = formatToolCallDisplay(toolCall("Bash", { command: "rg --files src" }), undefined, "/repo");
-    assert.ok(Array.isArray(bashResult));
-    assert.equal(bashResult[0]?.type, "code");
-    assert.equal(/** @type {CodeContentBlock} */ (bashResult[0]).caption, "*Bash*  `rg --files src`");
-
     assert.equal(
       formatSdkToolCall("Glob", { pattern: "*.js", path: "/repo/src" }, "/repo"),
       "*List*  `*.js` in `src`",
     );
-  });
-
-  it("keeps piped ripgrep shell commands as Bash", () => {
-    const bashResult = formatToolCallDisplay(
-      toolCall("Bash", { command: "rg --files . | rg \"needle\"" }),
-      undefined,
-      "/repo",
-    );
-    assert.ok(Array.isArray(bashResult));
-    assert.equal(bashResult[0]?.type, "code");
-    assert.equal(/** @type {CodeContentBlock} */ (bashResult[0]).caption, "*Bash*  `rg --files . | rg \"needle\"`");
-  });
-
-  it("keeps non-rg shell inspection commands as Bash", () => {
-    const bashResult = formatToolCallDisplay(
-      toolCall("Bash", { command: "sed -n '1,20p' src/app.js" }),
-      undefined,
-      "/repo",
-    );
-    assert.ok(Array.isArray(bashResult));
-    assert.equal(bashResult[0]?.type, "code");
-    assert.equal(/** @type {CodeContentBlock} */ (bashResult[0]).caption, "*Bash*  `sed -n '1,20p' src/app.js`");
   });
 
   it("renders web sub-actions with intent-specific labels", () => {
@@ -140,35 +100,6 @@ describe("tool display", () => {
     );
   });
 
-  it("keeps bash tool calls compact in the immediate display", () => {
-    const result = formatToolCallDisplay(
-      toolCall("Bash", { command: "date -u +%FT%TZ" }),
-    );
-    assert.ok(Array.isArray(result));
-    assert.equal(result[0]?.type, "code");
-    assert.equal(/** @type {CodeContentBlock} */ (result[0]).caption, "*Bash*  `date -u +%FT%TZ`");
-    assert.equal(/** @type {CodeContentBlock} */ (result[0]).code, "date -u +%FT%TZ");
-  });
-
-  it("keeps multiline bash summaries short while rendering the full command image", () => {
-    const args = {
-        command: "apply_patch <<'PATCH'\n*** Begin Patch\n*** End Patch\nPATCH",
-      };
-    assert.equal(
-      getToolCallSummary("Bash", args),
-      "*Bash*  `apply_patch <<'PATCH'`  _+3 lines_",
-    );
-    const result = formatToolCallDisplay(toolCall("Bash", args));
-    assert.ok(Array.isArray(result));
-    assert.equal(result[0]?.type, "code");
-    const block = /** @type {CodeContentBlock} */ (result[0]);
-    assert.equal(block.caption, "*Bash*  `apply_patch <<'PATCH'`  _+3 lines_");
-    assert.ok(block.code.includes("*** Begin Patch"), block.code);
-    assert.ok(block.code.includes("*** End Patch"), block.code);
-  });
-});
-
-describe("command inspect formatting", () => {
   it("keeps ripgrep command output in the bash formatter", () => {
     const text = formatCommandInspectText(
       "rg -n \"needle\" src",
@@ -176,7 +107,7 @@ describe("command inspect formatting", () => {
         "src/one.js:3:needle",
         "src/two.js:8:needle again",
       ].join("\n"),
-      "Bash",
+      "bash",
     );
     assert.ok(text.includes("```bash\nrg -n \"needle\" src\n```"), text);
     assert.ok(text.includes("src/one.js:3:needle"), text);
@@ -190,7 +121,7 @@ describe("command inspect formatting", () => {
         "1\tconst one = 1;",
         "2\tconst two = 2;",
       ].join("\n"),
-      "Bash",
+      "bash",
     );
     assert.ok(text.includes("```bash\nsed -n '1,20p' src/app.js\n```"), text);
     assert.ok(text.includes("1\tconst one = 1;"), text);

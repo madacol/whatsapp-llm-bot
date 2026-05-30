@@ -652,6 +652,7 @@ async function handleAcpWriteTextFile(message, options) {
       path: params.path,
       summary: "ACP file write",
       kind: oldText === undefined ? "add" : "update",
+      source: "tool",
       ...(diff ? { diff } : {}),
       ...(oldText !== undefined ? { oldText } : {}),
       newText: params.content,
@@ -694,7 +695,7 @@ function createAcpTerminalManager(options) {
     const cwd = resolveRequestCwd(options.runConfig, typeof params.cwd === "string" ? params.cwd : null);
     const commandLine = formatCommandLine(params.command, args);
     await assertSandboxAccess({
-      toolName: "run_bash",
+      toolName: "Shell",
       input: { command: commandLine },
       runConfig: options.runConfig,
       cwd,

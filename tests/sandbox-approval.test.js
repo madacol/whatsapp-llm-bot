@@ -35,8 +35,8 @@ describe("getSandboxEscapeRequest", () => {
     });
   });
 
-  it("flags bash commands that traverse outside the workspace", () => {
-    const request = getSandboxEscapeRequest("run_bash", {
+  it("flags shell commands that traverse outside the workspace", () => {
+    const request = getSandboxEscapeRequest("Shell", {
       command: "cd ../.. && pwd",
     }, {
       workdir: "/repo/project",
@@ -44,7 +44,7 @@ describe("getSandboxEscapeRequest", () => {
     });
 
     assert.deepEqual(request, {
-      toolName: "run_bash",
+      toolName: "Shell",
       kind: "command",
       summary: "Run a shell command that targets `../..` outside the workspace `/repo/project`.",
       command: "cd ../.. && pwd",
@@ -55,7 +55,7 @@ describe("getSandboxEscapeRequest", () => {
   });
 
   it("does not treat relative workspace paths with slashes as escapes", () => {
-    const request = getSandboxEscapeRequest("run_bash", {
+    const request = getSandboxEscapeRequest("Shell", {
       command: "sed -n '1,20p' src/app.js",
     }, {
       workdir: "/repo",
@@ -66,7 +66,7 @@ describe("getSandboxEscapeRequest", () => {
   });
 
   it("allows shell commands in workspaces with backslash-escaped spaces", () => {
-    const request = getSandboxEscapeRequest("Bash", {
+    const request = getSandboxEscapeRequest("Shell", {
       command: "cd /home/mada/chat-workspaces/Get\\ Bookmarklets && pnpm run build:vite",
     }, {
       workdir: "/home/mada/chat-workspaces/Get Bookmarklets",
@@ -103,7 +103,7 @@ describe("getSandboxEscapeRequest", () => {
 describe("formatSandboxEscapeConfirmMessage", () => {
   it("formats a readable confirmation prompt", () => {
     const message = formatSandboxEscapeConfirmMessage({
-      toolName: "run_bash",
+      toolName: "Shell",
       kind: "command",
       summary: "Run a shell command that targets `/tmp` outside the workspace `/repo`.",
       command: "ls /tmp",
@@ -114,7 +114,7 @@ describe("formatSandboxEscapeConfirmMessage", () => {
     assert.equal(message, [
       "⚠️ *Sandbox escape request*",
       "",
-      "`run_bash` wants to leave the workspace boundary.",
+      "`Shell` wants to leave the workspace boundary.",
       "",
       "Run a shell command that targets `/tmp` outside the workspace `/repo`.",
       "",

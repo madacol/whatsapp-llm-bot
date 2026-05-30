@@ -209,11 +209,10 @@ export function createToolMessage(toolId, text) {
  * then the adapter-formatted command result below it.
  * @param {string} command
  * @param {string | undefined} output
- * @param {string} [toolName]
+ * @param {import("./tool-presentation-model.js").ToolInspectMode} [inspectMode]
  * @returns {string}
  */
-export function formatCommandInspectText(command, output, toolName) {
-  const inspectMode = toolName === "Bash" ? "bash" : "plain";
+export function formatCommandInspectText(command, output, inspectMode = "bash") {
   return formatWhatsappCommandInspectText(command, output, inspectMode);
 }
 

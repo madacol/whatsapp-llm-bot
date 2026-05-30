@@ -473,6 +473,15 @@ function cleanFileChangeSummary(summary, rawPath, displayPath, kind) {
   }
 
   const shortenedSummary = summary.split(rawPath).join(displayPath);
+  const genericSummaries = new Set([
+    "ACP file change",
+    "ACP file delete",
+    "ACP file write",
+    "Editing files",
+  ]);
+  if (genericSummaries.has(shortenedSummary)) {
+    return undefined;
+  }
   const redundantForms = new Set([
     rawPath,
     displayPath,
@@ -497,6 +506,9 @@ function getFileChangeTitle(event, displayKind) {
   if (event.stage === "failed") {
     return "*Failed File Change*";
   }
+  if (event.source === "snapshot") {
+    return "Snapshot";
+  }
   if (displayKind === "add") {
     return "Add";
   }
@@ -513,7 +525,7 @@ function getFileChangeTitle(event, displayKind) {
  */
 function formatFileChangeCaptionLine(title, displayPath) {
   const gap = title.startsWith("*") ? "  " : " ";
-  return `${title}${gap}\`${displayPath}\``;
+  return `${title}${gap}*${displayPath}*`;
 }
 
 /**
@@ -637,7 +649,7 @@ export function renderFileChangeContent(event) {
     }];
   }
 
-  return cleanedSummary ? `${captionLines.join("\n")}` : `${title}  \`${displayPath}\``;
+  return captionLines.join("\n");
 }
 
 /**

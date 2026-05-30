@@ -351,7 +351,11 @@ describe("buildAgentIoHooks", () => {
     const subject = createSubjectWithWorkingSpy(VISIBLE_TOOL_OUTPUT);
 
     await subject.hooks.onLlmResponse?.("Still working");
-    await subject.hooks.onToolCall?.({ id: "tool-1", name: "run_bash", arguments: "{\"command\":\"echo hi\"}" });
+    await subject.hooks.onToolCall?.({
+      id: "tool-1",
+      name: "spawn_agent",
+      arguments: JSON.stringify({ message: "Investigate the failure" }),
+    });
     await subject.hooks.onToolResult?.([{ type: "text", text: "Intermediate tool output" }]);
 
     assert.equal(subject.sent.length, 3);
@@ -423,7 +427,6 @@ describe("buildAgentIoHooks", () => {
 
     await hooks.onFileRead?.({ command: "sed -n '1,20p' src/app.js", paths: ["src/app.js"] });
     await hooks.onCommand?.({ command: "pnpm type-check", status: "started" });
-    await hooks.onToolCall?.({ id: "tool-1", name: "run_bash", arguments: "{\"command\":\"git diff\"}" });
 
     assert.equal(sent.length, 1);
     assert.equal(sent[0]?.event.kind, "content");
@@ -438,7 +441,7 @@ describe("buildAgentIoHooks", () => {
 
     assert.deepEqual(updates, [{
       kind: "text",
-      text: "🔧 *Read*  `src/app.js`\n🔧 *Shell*  `pnpm type-check`\n🔧 *Shell*  `git diff`",
+      text: "🔧 *Read*  `src/app.js`\n🔧 *Shell*  `pnpm type-check`",
     }]);
   });
 
@@ -452,7 +455,7 @@ describe("buildAgentIoHooks", () => {
     assert.deepEqual(sent, []);
   });
 
-  it("keeps generic compact read titles while showing the path", async () => {
+  it("normalizes generic compact read titles while showing the path", async () => {
     /** @type {MessageHandleUpdate[]} */
     const updates = [];
     const hooks = buildAgentIoHooks(
@@ -483,11 +486,11 @@ describe("buildAgentIoHooks", () => {
 
     assert.deepEqual(updates.at(-1), {
       kind: "text",
-      text: "✅ *Read file*  `presentation/whatsapp.js`",
+      text: "✅ *Read*  `presentation/whatsapp.js`",
     });
   });
 
-  it("keeps generic compact read titles when no path is available", async () => {
+  it("normalizes generic compact read titles when no path is available", async () => {
     /** @type {MessageHandleUpdate[]} */
     const updates = [];
     const hooks = buildAgentIoHooks(
@@ -514,7 +517,7 @@ describe("buildAgentIoHooks", () => {
 
     assert.deepEqual(updates.at(-1), {
       kind: "text",
-      text: "✅ *Read file*",
+      text: "✅ *Read*",
     });
   });
 
@@ -738,13 +741,12 @@ describe("buildAgentIoHooks", () => {
     await hooks.onCommand?.({ command: "pwd", status: "started" });
     await hooks.onCommand?.({ command: "pnpm type-check", status: "started" });
     await hooks.onFileRead?.({ command: "sed -n '1,20p' src/app.js", paths: ["src/app.js"] });
-    await hooks.onToolCall?.({ id: "tool-2", name: "run_bash", arguments: "{\"command\":\"git diff\"}" });
 
     await new Promise((resolve) => setTimeout(resolve, 1100));
 
     assert.deepEqual(updates[updates.length - 1], {
       kind: "text",
-      text: "... +1 earlier tools\n🔧 *Shell*  `pnpm type-check`\n🔧 *Read*  `src/app.js`\n🔧 *Shell*  `git diff`",
+      text: "🔧 *Shell*  `pwd`\n🔧 *Shell*  `pnpm type-check`\n🔧 *Read*  `src/app.js`",
     });
   });
 
@@ -819,7 +821,7 @@ describe("buildAgentIoHooks", () => {
     await hooks.onCommand?.({ command: "pwd", status: "started" });
     await hooks.onCommand?.({ command: "pnpm type-check", status: "started" });
     await hooks.onLlmResponse?.("Done");
-    await hooks.onToolCall?.({ id: "tool-3", name: "run_bash", arguments: "{\"command\":\"git diff\"}" });
+    await hooks.onCommand?.({ command: "git diff", status: "started" });
 
     assert.equal(sent.length, 3);
     assert.equal(sent[0]?.event.kind, "content");
@@ -866,7 +868,7 @@ describe("buildAgentIoHooks", () => {
     );
 
     await hooks.onCommand?.({ command: "pwd", status: "started" });
-    await hooks.onToolCall?.({ id: "tool-4", name: "run_bash", arguments: "{\"command\":\"git diff\"}" });
+    await hooks.onCommand?.({ command: "git diff", status: "started" });
     await hooks.onFileChange?.({ path: "/repo/src/app.js", summary: "Updated file" });
     await hooks.onCommand?.({ command: "ls", status: "started" });
 
@@ -902,7 +904,7 @@ describe("buildAgentIoHooks", () => {
     assert.equal(sent.length, 0);
   });
 
-  it("renders shell commands as bash summaries", async () => {
+  it("renders shell commands as Shell summaries", async () => {
     const { hooks, sent } = createSubjectWithCwd("/repo", VISIBLE_TOOL_OUTPUT);
     await hooks.onCommand?.({ command: "rg -n \"needle\" src", status: "started" });
 
@@ -911,7 +913,7 @@ describe("buildAgentIoHooks", () => {
     if (sent[0].event.kind !== "tool_call") {
       assert.fail("Expected tool_call event");
     }
-    assert.equal(sent[0].event.presentation.summary, "*Bash*  `rg -n \"needle\" src`");
+    assert.equal(sent[0].event.presentation.summary, "*Shell*  `rg -n \"needle\" src`");
     assert.equal(sent[0].event.presentation.kind, "bash");
     assert.equal(sent[0].event.presentation.command, "rg -n \"needle\" src");
   });
@@ -963,7 +965,7 @@ describe("buildAgentIoHooks", () => {
     assert.equal(sent.length, 1);
     assert.deepEqual(updates, [{
       kind: "text",
-      text: "❌ *Bash*  `pnpm test`",
+      text: "❌ *Shell*  `pnpm test`",
     }]);
     assert.equal(inspects.length, 1);
     const inspect = inspects[0];
@@ -971,7 +973,7 @@ describe("buildAgentIoHooks", () => {
     if (!inspect || inspect.kind !== "tool") {
       assert.fail("Expected tool inspect state");
     }
-    assert.equal(inspect.presentation.summary, "*Bash*  `pnpm test`");
+    assert.equal(inspect.presentation.summary, "*Shell*  `pnpm test`");
     assert.equal(inspect.output, "boom");
   });
 
@@ -1126,7 +1128,7 @@ describe("buildAgentIoHooks", () => {
     if (!inspect || inspect.kind !== "tool") {
       assert.fail("Expected tool inspect state");
     }
-    assert.equal(inspect.presentation.summary, "*Bash*  `rg -n \"needle\" src`");
+    assert.equal(inspect.presentation.summary, "*Shell*  `rg -n \"needle\" src`");
     assert.equal(inspect.output, "src/app.js:12:needle");
   });
 
@@ -1173,7 +1175,7 @@ describe("buildAgentIoHooks", () => {
     if (!inspect || inspect.kind !== "tool") {
       assert.fail("Expected tool inspect state");
     }
-    assert.equal(inspect.presentation.summary, "*Bash*  `ls -a`");
+    assert.equal(inspect.presentation.summary, "*Shell*  `ls -a`");
     assert.equal(inspect.output, "");
   });
 });

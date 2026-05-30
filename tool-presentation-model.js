@@ -512,22 +512,23 @@ function createPlanPresentation(args) {
 
 /**
  * @param {string} command
+ * @param {string} [label]
  * @returns {string}
  */
-function formatBashSummary(command) {
+function formatBashSummary(command, label = "Shell") {
   const lines = command
     .split("\n")
     .map((line) => line.trim())
     .filter((line) => line.length > 0);
   const firstLine = lines[0] ?? "";
   if (!firstLine) {
-    return "*Bash*";
+    return `*${label}*`;
   }
   const preview = firstLine.length > 48 ? `${firstLine.slice(0, 48)}…` : firstLine;
   const extraLines = Math.max(0, lines.length - 1);
   return extraLines > 0
-    ? `*Bash*  \`${preview}\`  _+${extraLines} line${extraLines === 1 ? "" : "s"}_`
-    : `*Bash*  \`${preview}\``;
+    ? `*${label}*  \`${preview}\`  _+${extraLines} line${extraLines === 1 ? "" : "s"}_`
+    : `*${label}*  \`${preview}\``;
 }
 
 /**
@@ -600,20 +601,8 @@ function buildSdkPresentation(name, args, cwd) {
         : null;
     case "WebSearch":
       return typeof args.query === "string" ? createWebSearchPresentation(args.query) : null;
-    case "exec_command":
-      return typeof args.cmd === "string"
-        ? createBashToolPresentation(
-          "Run Command",
-          args.cmd,
-          `*Run Command*  \`${args.cmd.split("\n")[0]?.slice(0, 48) ?? ""}\``,
-        )
-        : null;
     case "update_plan":
       return createPlanPresentation(args);
-    case "Bash":
-      return typeof args.command === "string"
-        ? createBashToolPresentation("Bash", args.command, formatBashSummary(args.command))
-        : null;
     default:
       return null;
   }
@@ -761,11 +750,10 @@ export function buildToolPresentation(name, args, formatToolCall, cwd, context) 
 
 /**
  * @param {string} command
- * @param {string | null | undefined} cwd
  * @returns {BashPresentation}
  */
-export function buildCommandPresentation(command, cwd) {
-  return /** @type {BashPresentation} */ (buildToolPresentation("Bash", { command }, undefined, cwd, undefined));
+export function buildCommandPresentation(command) {
+  return createBashToolPresentation("Shell", command, formatBashSummary(command, "Shell"));
 }
 
 /**

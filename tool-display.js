@@ -25,7 +25,6 @@ import {
  * @type {Set<string>}
  */
 const SDK_PRESENTATION_TOOLS = new Set([
-  "Bash",
   "Read",
   "Grep",
   "Glob",
@@ -39,7 +38,6 @@ const SDK_PRESENTATION_TOOLS = new Set([
   "finance",
   "sports",
   "update_plan",
-  "exec_command",
   "spawn_agent",
   "send_input",
   "wait_agent",

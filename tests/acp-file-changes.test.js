@@ -100,6 +100,7 @@ describe("ACP file changes", () => {
       [addedPath, "add"],
       [deletedPath, "delete"],
     ]);
+    assert.deepEqual(changes.map((change) => change.source), ["snapshot", "snapshot", "snapshot"]);
     assert.ok(changes.every((change) => typeof change.diff === "string"));
   });
 
