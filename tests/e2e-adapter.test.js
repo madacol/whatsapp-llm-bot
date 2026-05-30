@@ -192,6 +192,74 @@ describe("provider runtime events", () => {
 });
 
 // ═══════════════════════════════════════════════════════════════════
+// 1cc. Dummy runtime tools through the full WhatsApp transport boundary
+// ═══════════════════════════════════════════════════════════════════
+describe("dummy runtime tools", () => {
+  const senderId = "e2e-dummy-tools-user";
+  const chatId = `${senderId}@s.whatsapp.net`;
+  const harnessName = "e2e-dummy-runtime-tools";
+
+  before(async () => {
+    registerAcpTestHarness({
+      name: harnessName,
+      errorMessage: "dummy runtime tool e2e should use the semantic adapter",
+      onSendTurn: async (input, { emitRuntimeEvent }) => {
+        const tools = [
+          { id: "read-1", name: "Read", arguments: { file_path: "src/app.js" }, output: "read ok" },
+          { id: "grep-1", name: "Grep", arguments: { path: "src", pattern: "needle" }, output: "grep ok" },
+          { id: "task-1", name: "Task", arguments: { title: "Review migration" }, output: "task ok" },
+          { id: "web-1", name: "WebSearch", arguments: { query: "runtime migration" }, output: "web ok" },
+        ];
+
+        for (const tool of tools) {
+          await emitRuntimeEvent({ type: "tool.started", provider: "acp", tool });
+          await emitRuntimeEvent({ type: "tool.completed", provider: "acp", tool });
+        }
+
+        await emitRuntimeEvent({
+          type: "assistant.completed",
+          text: "Dummy tools done.",
+          contentType: "markdown",
+        });
+
+        return {
+          response: [{ type: "markdown", text: "legacy fallback should not display" }],
+          messages: input.messages ?? [],
+          usage: ZERO_USAGE,
+        };
+      },
+    });
+
+    await seedChat(testDb, chatId, { enabled: true });
+    await updateChatConfig(chatId, (current) => ({
+      ...current,
+      harness: harnessName,
+      output_visibility: { toolDetails: true },
+    }));
+  });
+
+  it("renders multiple ACP runtime tool shapes through WhatsApp", async () => {
+    const captures = createMockBaileysSocket();
+
+    await adaptIncomingMessage(
+      createWAMessage({ text: "Run dummy tools", senderId }),
+      captures.sock,
+      handleMessage,
+      testConfirmRegistry,
+      testUserResponseRegistry,
+    );
+
+    const rendered = captures.getRenderedMessages();
+    assert.ok(rendered.some((text) => text.includes("🔧 *Read*") && text.includes("`src/app.js`")), `Expected Read start, got ${JSON.stringify(rendered)}`);
+    assert.ok(rendered.some((text) => text.includes("✅ *Read*") && text.includes("`src/app.js`")), `Expected Read completion, got ${JSON.stringify(rendered)}`);
+    assert.ok(rendered.some((text) => text.includes("✅ *Grep*") && text.includes("`src`")), `Expected Grep completion, got ${JSON.stringify(rendered)}`);
+    assert.ok(rendered.some((text) => text.includes("✅ *Task*") && text.includes("Review migration")), `Expected Task completion, got ${JSON.stringify(rendered)}`);
+    assert.ok(rendered.some((text) => text.includes("✅ *WebSearch*") && text.includes("runtime migration")), `Expected WebSearch completion, got ${JSON.stringify(rendered)}`);
+    assert.ok(rendered.some((text) => text.includes("Dummy tools done.")), `Expected final answer, got ${JSON.stringify(rendered)}`);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════
 // 1d. ACP file-change parity through the full WhatsApp transport boundary
 // ═══════════════════════════════════════════════════════════════════
 describe("ACP file changes through WhatsApp transport", () => {
