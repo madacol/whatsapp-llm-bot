@@ -103,6 +103,10 @@ export function createChatTurn(overrides = {}) {
         source = "tool-call";
         content = formatActivitySummary(event.activity);
         break;
+      case "compact_tool_activity":
+        source = "plain";
+        content = JSON.stringify(event.activity);
+        break;
       case "plan":
         source = "llm";
         content = [{ type: "markdown", text: formatPlanPresentationText(event.presentation) }];

@@ -399,50 +399,33 @@ describe("buildAgentIoHooks", () => {
     assertSingleSentEvent(sent, "send", "tool_call");
   });
 
-  it("shows one debounced compact tool summary when visibility disables full tool details", async () => {
-    /** @type {Array<{ event: OutboundEvent, kind: "send" | "reply" }>} */
-    const sent = [];
-    /** @type {MessageHandleUpdate[]} */
-    const updates = [];
-    const hooks = buildAgentIoHooks(
-      {
-        send: async (event) => {
-          sent.push({ event, kind: "send" });
-          return {
-            transportHandleId: "compact-tools-1",
-            update: async (update) => { updates.push(update); },
-            setInspect: () => {},
-          };
-        },
-        reply: async () => undefined,
-        select: async () => "",
-        confirm: async () => true,
-      },
-      async () => {},
-      async () => {},
-      () => {},
-      "/repo",
-      { ...DEFAULT_OUTPUT_VISIBILITY, toolDetails: false },
-    );
+  it("emits compact activity events instead of pre-rendered WhatsApp text", async () => {
+    const { hooks, sent } = createSubjectWithCwd("/repo", { ...DEFAULT_OUTPUT_VISIBILITY, toolDetails: false });
 
     await hooks.onFileRead?.({ command: "sed -n '1,20p' src/app.js", paths: ["src/app.js"] });
     await hooks.onCommand?.({ command: "pnpm type-check", status: "started" });
 
-    assert.equal(sent.length, 1);
-    assert.equal(sent[0]?.event.kind, "content");
-    if (sent[0]?.event.kind !== "content") {
-      assert.fail("Expected compact content event");
-    }
-    assert.equal(sent[0].event.source, "plain");
-    assert.equal(sent[0].event.content, "🔧 *Read*  `src/app.js`");
-
-    assert.equal(updates.length, 0, "expected debounce to defer compact edits");
-    await new Promise((resolve) => setTimeout(resolve, 1100));
-
-    assert.deepEqual(updates, [{
-      kind: "text",
-      text: "🔧 *Read*  `src/app.js`\n🔧 *Shell*  `pnpm type-check`",
-    }]);
+    assert.deepEqual(sent.map((entry) => entry.event), [
+      {
+        kind: "compact_tool_activity",
+        cwd: "/repo",
+        activity: {
+          type: "file_read",
+          status: "started",
+          command: "sed -n '1,20p' src/app.js",
+          paths: ["src/app.js"],
+        },
+      },
+      {
+        kind: "compact_tool_activity",
+        cwd: "/repo",
+        activity: {
+          type: "command",
+          status: "started",
+          command: "pnpm type-check",
+        },
+      },
+    ]);
   });
 
   it("suppresses no-op ACP editing-files placeholder tool calls", async () => {
@@ -455,228 +438,8 @@ describe("buildAgentIoHooks", () => {
     assert.deepEqual(sent, []);
   });
 
-  it("normalizes generic compact read titles while showing the path", async () => {
-    /** @type {MessageHandleUpdate[]} */
-    const updates = [];
-    const hooks = buildAgentIoHooks(
-      {
-        send: async () => ({
-          transportHandleId: "compact-tools-generic",
-          update: async (update) => { updates.push(update); },
-          setInspect: () => {},
-        }),
-        reply: async () => undefined,
-        select: async () => "",
-        confirm: async () => true,
-      },
-      async () => {},
-      async () => {},
-      () => {},
-      "/repo",
-      { ...DEFAULT_OUTPUT_VISIBILITY, toolDetails: false },
-    );
-
-    const toolCall = {
-      id: "read-file-generic",
-      name: "Read file",
-      arguments: JSON.stringify({ path: "/repo/presentation/whatsapp.js" }),
-    };
-    await hooks.onToolCall?.(toolCall, () => "*Read file*");
-    await hooks.onToolComplete?.(toolCall);
-
-    assert.deepEqual(updates.at(-1), {
-      kind: "text",
-      text: "✅ *Read*  `presentation/whatsapp.js`",
-    });
-  });
-
-  it("normalizes generic compact read titles when no path is available", async () => {
-    /** @type {MessageHandleUpdate[]} */
-    const updates = [];
-    const hooks = buildAgentIoHooks(
-      {
-        send: async () => ({
-          transportHandleId: "compact-tools-generic-no-path",
-          update: async (update) => { updates.push(update); },
-          setInspect: () => {},
-        }),
-        reply: async () => undefined,
-        select: async () => "",
-        confirm: async () => true,
-      },
-      async () => {},
-      async () => {},
-      () => {},
-      "/repo",
-      { ...DEFAULT_OUTPUT_VISIBILITY, toolDetails: false },
-    );
-
-    const toolCall = { id: "read-file-no-path", name: "Read file", arguments: "{}" };
-    await hooks.onToolCall?.(toolCall, () => "*Read file*");
-    await hooks.onToolComplete?.(toolCall);
-
-    assert.deepEqual(updates.at(-1), {
-      kind: "text",
-      text: "✅ *Read*",
-    });
-  });
-
-  it("renders generic compact search titles as search plus pattern and bold target", async () => {
-    /** @type {MessageHandleUpdate[]} */
-    const updates = [];
-    const hooks = buildAgentIoHooks(
-      {
-        send: async () => ({
-          transportHandleId: "compact-tools-search",
-          update: async (update) => { updates.push(update); },
-          setInspect: () => {},
-        }),
-        reply: async () => undefined,
-        select: async () => "",
-        confirm: async () => true,
-      },
-      async () => {},
-      async () => {},
-      () => {},
-      "/repo",
-      { ...DEFAULT_OUTPUT_VISIBILITY, toolDetails: false },
-    );
-
-    const name = "Search for 'create.*File|Edit|Write' in tool-presentation-model.js";
-    const toolCall = { id: "search-generic", name, arguments: "{}" };
-    await hooks.onToolCall?.(toolCall, () => `*${name}*`);
-    await hooks.onToolComplete?.(toolCall);
-
-    assert.deepEqual(updates.at(-1), {
-      kind: "text",
-      text: "✅ *Search*  `create.*File|Edit|Write` in *tool-presentation-model.js*",
-    });
-  });
-
-  it("ignores duplicate compact command start events while the command is pending", async () => {
-    /** @type {Array<{ event: OutboundEvent, kind: "send" | "reply" }>} */
-    const sent = [];
-    /** @type {MessageHandleUpdate[]} */
-    const updates = [];
-    const hooks = buildAgentIoHooks(
-      {
-        send: async (event) => {
-          sent.push({ event, kind: "send" });
-          return {
-            transportHandleId: "compact-tools-dedupe",
-            update: async (update) => { updates.push(update); },
-            setInspect: () => {},
-          };
-        },
-        reply: async () => undefined,
-        select: async () => "",
-        confirm: async () => true,
-      },
-      async () => {},
-      async () => {},
-      () => {},
-      "/repo",
-      { ...DEFAULT_OUTPUT_VISIBILITY, toolDetails: false },
-    );
-
-    await hooks.onCommand?.({ command: "pnpm test", status: "started" });
-    await hooks.onCommand?.({ command: "pnpm test", status: "started" });
-    await hooks.onCommand?.({ command: "pnpm test", status: "started" });
-    await new Promise((resolve) => setTimeout(resolve, 1100));
-
-    assert.equal(sent.length, 1);
-    assert.equal(updates.length, 0);
-    assert.equal(sent[0]?.event.kind, "content");
-    if (sent[0]?.event.kind !== "content") {
-      assert.fail("Expected compact content event");
-    }
-    assert.equal(sent[0].event.content, "🔧 *Shell*  `pnpm test`");
-
-    await hooks.onCommand?.({ command: "pnpm test", status: "completed" });
-    assert.deepEqual(updates, [{
-      kind: "text",
-      text: "✅ *Shell*  `pnpm test`",
-    }]);
-  });
-
-  it("omits read command output from compact file-read inspect state", async () => {
-    /** @type {MessageInspectState[]} */
-    const inspects = [];
-    const hooks = buildAgentIoHooks(
-      {
-        send: async () => ({
-          transportHandleId: "compact-read-output",
-          update: async () => {},
-          setInspect: (inspect) => { if (inspect) inspects.push(inspect); },
-        }),
-        reply: async () => undefined,
-        select: async () => "",
-        confirm: async () => true,
-      },
-      async () => {},
-      async () => {},
-      () => {},
-      "/repo",
-      { ...DEFAULT_OUTPUT_VISIBILITY, toolDetails: false },
-    );
-
-    const command = "sed -n '1,20p' src/app.js";
-    await hooks.onFileRead?.({ command, paths: ["src/app.js"] });
-    await hooks.onCommand?.({
-      command,
-      status: "completed",
-      output: "  1→ const value = 1;\n  2→ const value = 2;",
-    });
-
-    const inspect = inspects.at(-1);
-    assert.ok(inspect && inspect.kind === "text");
-    assert.equal(
-      inspect?.kind === "text" ? inspect.text : "",
-      "✅ *Read*  `src/app.js`",
-    );
-  });
-
-  it("shows full multiline bash commands in compact tool summaries", async () => {
-    const { hooks, sent } = createSubjectWithCwd("/repo", {
-      ...DEFAULT_OUTPUT_VISIBILITY,
-      toolDetails: false,
-    });
-
-    const command = "python3 - <<'PY'\nprint('hello')\nPY";
-    await hooks.onCommand?.({ command, status: "started" });
-
-    assert.equal(sent.length, 1);
-    assert.equal(sent[0]?.event.kind, "content");
-    if (sent[0]?.event.kind !== "content") {
-      assert.fail("Expected compact content event");
-    }
-    assert.equal(
-      sent[0].event.content,
-      "🔧 *Shell*\n```\npython3 - <<'PY'\nprint('hello')\nPY\n```",
-    );
-  });
-
-  it("edits compact tool summaries when a tool completes", async () => {
-    /** @type {MessageHandleUpdate[]} */
-    const updates = [];
-    const hooks = buildAgentIoHooks(
-      {
-        send: async () => ({
-          transportHandleId: "compact-tools-complete",
-          update: async (update) => { updates.push(update); },
-          setInspect: () => {},
-        }),
-        reply: async () => undefined,
-        select: async () => "",
-        confirm: async () => true,
-      },
-      async () => {},
-      async () => {},
-      () => {},
-      "/repo",
-      { ...DEFAULT_OUTPUT_VISIBILITY, toolDetails: false },
-    );
-
+  it("emits compact tool lifecycle events with semantic presentation payloads", async () => {
+    const { hooks, sent } = createSubjectWithCwd("/repo", { ...DEFAULT_OUTPUT_VISIBILITY, toolDetails: false });
     const toolCall = {
       id: "tool-complete-1",
       name: "spawn_agent",
@@ -685,9 +448,18 @@ describe("buildAgentIoHooks", () => {
     await hooks.onToolCall?.(toolCall);
     await hooks.onToolComplete?.(toolCall);
 
-    assert.deepEqual(updates.at(-1), {
-      kind: "text",
-      text: "✅ *Start Agent*  _hello_",
+    assert.equal(sent.length, 2);
+    assert.equal(sent[0]?.event.kind, "compact_tool_activity");
+    assert.equal(sent[0]?.event.kind === "compact_tool_activity" ? sent[0].event.activity.type : "", "tool");
+    assert.equal(sent[0]?.event.kind === "compact_tool_activity" && sent[0].event.activity.type === "tool" ? sent[0].event.activity.presentation?.kind : "", "activity");
+    assert.deepEqual(sent[1]?.event, {
+      kind: "compact_tool_activity",
+      cwd: "/repo",
+      activity: {
+        type: "tool",
+        status: "completed",
+        toolCall,
+      },
     });
   });
 
@@ -717,175 +489,54 @@ describe("buildAgentIoHooks", () => {
     assert.equal(sent[0].event.presentation.toolName, "Edit");
   });
 
-  it("keeps only the last 3 compact tool entries when visibility disables full tool details", async () => {
-    /** @type {MessageHandleUpdate[]} */
-    const updates = [];
-    const hooks = buildAgentIoHooks(
-      {
-        send: async () => ({
-          transportHandleId: "compact-tools-2",
-          update: async (update) => { updates.push(update); },
-          setInspect: () => {},
-        }),
-        reply: async () => undefined,
-        select: async () => "",
-        confirm: async () => true,
-      },
-      async () => {},
-      async () => {},
-      () => {},
-      "/repo",
-      { ...DEFAULT_OUTPUT_VISIBILITY, toolDetails: false },
-    );
-
-    await hooks.onCommand?.({ command: "pwd", status: "started" });
-    await hooks.onCommand?.({ command: "pnpm type-check", status: "started" });
-    await hooks.onFileRead?.({ command: "sed -n '1,20p' src/app.js", paths: ["src/app.js"] });
-
-    await new Promise((resolve) => setTimeout(resolve, 1100));
-
-    assert.deepEqual(updates[updates.length - 1], {
-      kind: "text",
-      text: "🔧 *Shell*  `pwd`\n🔧 *Shell*  `pnpm type-check`\n🔧 *Read*  `src/app.js`",
-    });
-  });
-
-  it("marks the existing compact command line as failed instead of sending a new error message", async () => {
-    /** @type {Array<{ event: OutboundEvent, kind: "send" | "reply" }>} */
-    const sent = [];
-    /** @type {MessageHandleUpdate[]} */
-    const updates = [];
-    const hooks = buildAgentIoHooks(
-      {
-        send: async (event) => {
-          sent.push({ event, kind: "send" });
-          return {
-            transportHandleId: "compact-tools-failed-command",
-            update: async (update) => { updates.push(structuredClone(update)); },
-            setInspect: () => {},
-          };
-        },
-        reply: async () => undefined,
-        select: async () => "",
-        confirm: async () => true,
-      },
-      async () => {},
-      async () => {},
-      () => {},
-      "/repo",
-      { ...DEFAULT_OUTPUT_VISIBILITY, toolDetails: false },
-    );
+  it("emits compact command failures instead of a separate error message", async () => {
+    const { hooks, sent } = createSubjectWithCwd("/repo", { ...DEFAULT_OUTPUT_VISIBILITY, toolDetails: false });
 
     await hooks.onCommand?.({ command: "pnpm test", status: "started" });
     await hooks.onCommand?.({ command: "pnpm test", status: "failed", output: "boom" });
 
-    assert.equal(sent.length, 1);
-    assert.equal(sent[0]?.event.kind, "content");
-    assert.deepEqual(updates, [{
-      kind: "text",
-      text: "❌ *Shell*  `pnpm test`",
-    }]);
+    assert.deepEqual(sent.map((entry) => entry.event), [
+      {
+        kind: "compact_tool_activity",
+        cwd: "/repo",
+        activity: { type: "command", status: "started", command: "pnpm test" },
+      },
+      {
+        kind: "compact_tool_activity",
+        cwd: "/repo",
+        activity: { type: "command", status: "failed", command: "pnpm test", output: "boom" },
+      },
+    ]);
   });
 
-  it("starts a new compact tool message after an llm reply", async () => {
-    /** @type {Array<{ event: OutboundEvent, kind: "send" | "reply" }>} */
-    const sent = [];
-    /** @type {MessageHandleUpdate[][]} */
-    const handleUpdates = [];
-    const hooks = buildAgentIoHooks(
-      {
-        send: async (event) => {
-          sent.push({ event, kind: "send" });
-          const updates = [];
-          handleUpdates.push(updates);
-          return {
-            transportHandleId: `compact-tools-${handleUpdates.length}`,
-            update: async (update) => { updates.push(structuredClone(update)); },
-            setInspect: () => {},
-          };
-        },
-        reply: async (event) => {
-          sent.push({ event, kind: "reply" });
-          return undefined;
-        },
-        select: async () => "",
-        confirm: async () => true,
-      },
-      async () => {},
-      async () => {},
-      () => {},
-      "/repo",
-      { ...DEFAULT_OUTPUT_VISIBILITY, toolDetails: false },
-    );
-
+  it("emits compact close events before llm and file-change messages", async () => {
+    const { hooks, sent } = createSubjectWithCwd("/repo", { ...DEFAULT_OUTPUT_VISIBILITY, toolDetails: false });
     await hooks.onCommand?.({ command: "pwd", status: "started" });
     await hooks.onCommand?.({ command: "pnpm type-check", status: "started" });
     await hooks.onLlmResponse?.("Done");
     await hooks.onCommand?.({ command: "git diff", status: "started" });
-
-    assert.equal(sent.length, 3);
-    assert.equal(sent[0]?.event.kind, "content");
-    assert.equal(sent[1]?.kind, "reply");
-    assert.equal(sent[2]?.event.kind, "content");
-    if (sent[2]?.event.kind !== "content") {
-      assert.fail("Expected a new compact content event after llm reply");
-    }
-    assert.equal(sent[2].event.source, "plain");
-    assert.equal(sent[2].event.content, "🔧 *Shell*  `git diff`");
-    assert.deepEqual(handleUpdates[0], [{
-      kind: "text",
-      text: "🔧 *Shell*  `pwd`\n🔧 *Shell*  `pnpm type-check`",
-    }]);
-    assert.deepEqual(handleUpdates[1], []);
-  });
-
-  it("starts a new compact tool message after a file change message", async () => {
-    /** @type {Array<{ event: OutboundEvent, kind: "send" | "reply" }>} */
-    const sent = [];
-    /** @type {MessageHandleUpdate[][]} */
-    const handleUpdates = [];
-    const hooks = buildAgentIoHooks(
-      {
-        send: async (event) => {
-          sent.push({ event, kind: "send" });
-          const updates = [];
-          handleUpdates.push(updates);
-          return {
-            transportHandleId: `compact-tools-${handleUpdates.length}`,
-            update: async (update) => { updates.push(structuredClone(update)); },
-            setInspect: () => {},
-          };
-        },
-        reply: async () => undefined,
-        select: async () => "",
-        confirm: async () => true,
-      },
-      async () => {},
-      async () => {},
-      () => {},
-      "/repo",
-      { ...DEFAULT_OUTPUT_VISIBILITY, toolDetails: false },
-    );
 
     await hooks.onCommand?.({ command: "pwd", status: "started" });
     await hooks.onCommand?.({ command: "git diff", status: "started" });
     await hooks.onFileChange?.({ path: "/repo/src/app.js", summary: "Updated file" });
     await hooks.onCommand?.({ command: "ls", status: "started" });
 
-    assert.equal(sent.length, 3);
-    assert.equal(sent[0]?.event.kind, "content");
-    assert.equal(sent[1]?.event.kind, "file_change");
-    assert.equal(sent[2]?.event.kind, "content");
-    if (sent[2]?.event.kind !== "content") {
-      assert.fail("Expected a new compact content event after file change");
-    }
-    assert.equal(sent[2].event.source, "plain");
-    assert.equal(sent[2].event.content, "🔧 *Shell*  `ls`");
-    assert.deepEqual(handleUpdates[0], [{
-      kind: "text",
-      text: "🔧 *Shell*  `pwd`\n🔧 *Shell*  `git diff`",
-    }]);
-    assert.deepEqual(handleUpdates[2], []);
+    assert.deepEqual(sent.map((entry) => entry.event.kind), [
+      "compact_tool_activity",
+      "compact_tool_activity",
+      "compact_tool_activity",
+      "content",
+      "compact_tool_activity",
+      "compact_tool_activity",
+      "compact_tool_activity",
+      "compact_tool_activity",
+      "file_change",
+      "compact_tool_activity",
+    ]);
+    assert.deepEqual(sent.filter((entry) => (
+      entry.event.kind === "compact_tool_activity"
+      && entry.event.activity.type === "close"
+    )).length, 2);
   });
 
   it("suppresses tool result progress events when visibility disables full tool details", async () => {
