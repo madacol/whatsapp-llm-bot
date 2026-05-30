@@ -3,7 +3,7 @@ import path from "node:path";
 import { createServer } from "node:http";
 import { EventEmitter } from "node:events";
 import { formatPlanPresentationText } from "../plan-presentation.js";
-import { formatActivitySummary, formatToolPresentationDisplay, formatToolPresentationSummary } from "../whatsapp/tool-presenter.js";
+import { formatToolPresentationSummary, renderToolActivityContent, renderToolPresentationContent } from "../whatsapp/tool-presenter.js";
 import { formatUsageEventText } from "../usage-formatting.js";
 import { initStore } from "../store.js";
 import { ensureChatStoreSchema } from "../store/schema/chat.js";
@@ -96,11 +96,11 @@ export function createChatTurn(overrides = {}) {
         break;
       case "tool_call":
         source = "tool-call";
-        content = formatToolPresentationDisplay(event.presentation) ?? formatToolPresentationSummary(event.presentation);
+        content = renderToolPresentationContent(event.presentation);
         break;
       case "tool_activity":
         source = "tool-call";
-        content = formatActivitySummary(event.activity);
+        content = renderToolActivityContent(event.activity);
         break;
       case "compact_tool_activity":
         source = "plain";

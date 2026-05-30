@@ -338,6 +338,22 @@ export function formatToolPresentationDisplay(presentation) {
 
 /**
  * @param {import("../tool-presentation-model.js").ToolPresentation} presentation
+ * @returns {SendContent}
+ */
+export function renderToolPresentationContent(presentation) {
+  return formatToolPresentationDisplay(presentation) ?? formatToolPresentationSummary(presentation);
+}
+
+/**
+ * @param {import("../tool-presentation-model.js").ToolActivitySummary} activity
+ * @returns {string}
+ */
+export function renderToolActivityContent(activity) {
+  return formatActivitySummary(activity);
+}
+
+/**
+ * @param {import("../tool-presentation-model.js").ToolPresentation} presentation
  * @param {string | undefined} output
  * @returns {string | null}
  */
