@@ -87,10 +87,16 @@ export function subagentMessageEvent(input) {
 
 /**
  * @param {RuntimeEventOutboundEvent["event"]} event
+ * @param {{ compact?: boolean, cwd?: string | null }} [options]
  * @returns {RuntimeEventOutboundEvent}
  */
-export function runtimeEvent(event) {
-  return { kind: "runtime_event", event };
+export function runtimeEvent(event, options = {}) {
+  return {
+    kind: "runtime_event",
+    event,
+    ...(options.compact !== undefined && { compact: options.compact }),
+    ...(options.cwd !== undefined && { cwd: options.cwd }),
+  };
 }
 
 /**

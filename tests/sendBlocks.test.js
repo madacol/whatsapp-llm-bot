@@ -389,6 +389,61 @@ describe("sendEvent – runtime events", () => {
     ]);
   });
 
+  it("keeps compact runtime tool updates inside the compact WhatsApp progress row", async () => {
+    const { sock, sent } = createMockSock();
+    const baseTool = {
+      id: "tool-compact-1",
+      name: "Grep",
+      arguments: { path: "src", pattern: "needle" },
+    };
+
+    await sendEvent(sock, "compact-runtime-tool-chat", {
+      kind: "runtime_event",
+      compact: true,
+      cwd: "/repo",
+      event: {
+        type: "tool.started",
+        provider: "codex",
+        tool: baseTool,
+      },
+    });
+    await sendEvent(sock, "compact-runtime-tool-chat", {
+      kind: "runtime_event",
+      compact: true,
+      cwd: "/repo",
+      event: {
+        type: "tool.updated",
+        provider: "codex",
+        tool: {
+          ...baseTool,
+          output: "in progress",
+        },
+      },
+    });
+    await sendEvent(sock, "compact-runtime-tool-chat", {
+      kind: "runtime_event",
+      compact: true,
+      cwd: "/repo",
+      event: {
+        type: "tool.completed",
+        provider: "codex",
+        tool: {
+          ...baseTool,
+          output: "done",
+        },
+      },
+    });
+
+    assert.deepEqual(sent.map((entry) => entry.msg), [
+      { text: "🔧 *Grep*  `src`", linkPreview: null },
+      {
+        text: "✅ *Grep*  `src`",
+        edit: { id: "msg-1", remoteJid: "compact-runtime-tool-chat", fromMe: true },
+        linkPreview: null,
+      },
+    ]);
+  });
+
   it("renders ACP command runtime progress inside WhatsApp", async () => {
     const { sock, sent } = createMockSock();
 
