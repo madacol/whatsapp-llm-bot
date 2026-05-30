@@ -25,6 +25,8 @@ const inMemoryEditHandles = new Map();
 const runtimeStatusByChat = new Map();
 /** @type {Map<string, Map<string, { handle?: MessageHandle, command: string }>>} */
 const runtimeCommandsByChat = new Map();
+/** @type {Map<string, Map<string, { handle?: MessageHandle, summary: string }>>} */
+const runtimeToolsByChat = new Map();
 
 /** @type {Record<MessageSource, string>} */
 const SOURCE_PREFIX = {
@@ -281,6 +283,68 @@ function getRuntimeCommandIcon(status) {
 }
 
 /**
+ * @param {Record<string, unknown>} args
+ * @param {string[]} names
+ * @returns {string | undefined}
+ */
+function getStringArg(args, names) {
+  for (const name of names) {
+    const value = args[name];
+    if (typeof value === "string" && value.trim()) {
+      return value.trim();
+    }
+  }
+  return undefined;
+}
+
+/**
+ * @param {string[]} paths
+ * @returns {string}
+ */
+function formatRuntimeFileReadSummary(paths) {
+  const displayPaths = paths
+    .filter((filePath) => typeof filePath === "string" && filePath.length > 0)
+    .map((filePath) => `\`${filePath}\``);
+  return formatRuntimeProgressEntry("Read", displayPaths.length > 0 ? displayPaths.join(", ") : undefined);
+}
+
+/**
+ * @param {Extract<RuntimeEventOutboundEvent["event"], { tool: unknown }>["tool"]} tool
+ * @returns {boolean}
+ */
+function isNoopRuntimeTool(tool) {
+  return tool.name === "Editing files" && Object.keys(tool.arguments).length === 0;
+}
+
+/**
+ * @param {Extract<RuntimeEventOutboundEvent["event"], { tool: unknown }>["tool"]} tool
+ * @returns {string}
+ */
+function formatRuntimeToolSummary(tool) {
+  const displayName = tool.name.trim() || "Tool";
+  const pathDetail = getStringArg(tool.arguments, ["path", "file_path", "filePath"]);
+  if (pathDetail) {
+    return formatRuntimeProgressEntry(displayName, `\`${pathDetail}\``);
+  }
+  const textDetail = getStringArg(tool.arguments, ["title", "message", "prompt", "query", "q"]);
+  return formatRuntimeProgressEntry(displayName, textDetail);
+}
+
+/**
+ * @param {"started" | "updated" | "completed" | "failed"} status
+ * @returns {string}
+ */
+function getRuntimeToolIcon(status) {
+  if (status === "failed") {
+    return "❌";
+  }
+  if (status === "completed") {
+    return "✅";
+  }
+  return "🔧";
+}
+
+/**
  * @param {RuntimeEventOutboundEvent["event"]} event
  * @returns {FileChangeEvent}
  */
@@ -503,6 +567,98 @@ async function sendRuntimeCommandEvent(sock, chatId, event, options, reactionRun
     runtimeCommandsByChat.delete(chatId);
   }
   return state.handle;
+}
+
+/**
+ * @param {import('@whiskeysockets/baileys').WASocket} sock
+ * @param {string} chatId
+ * @param {RuntimeEventOutboundEvent} event
+ * @param {{ quoted?: BaileysMessage } | undefined} options
+ * @param {import("../runtime/reaction-runtime.js").ReactionRuntime | undefined} reactionRuntime
+ * @param {{ editHandleStore?: import("../../store.js").Store }} sendOptions
+ * @returns {Promise<MessageHandle | undefined>}
+ */
+async function sendRuntimeFileReadEvent(sock, chatId, event, options, reactionRuntime, sendOptions) {
+  if (event.event.type !== "file-read.started") {
+    throw new Error(`Expected file-read runtime event, got ${event.event.type}.`);
+  }
+  return sendBlocks(sock, chatId, "plain", `🔧 ${formatRuntimeFileReadSummary(event.event.fileRead.paths)}`, options, reactionRuntime, event, {
+    editHandleStore: sendOptions.editHandleStore,
+  });
+}
+
+/**
+ * @param {import('@whiskeysockets/baileys').WASocket} sock
+ * @param {string} chatId
+ * @param {RuntimeEventOutboundEvent} event
+ * @param {{ quoted?: BaileysMessage } | undefined} options
+ * @param {import("../runtime/reaction-runtime.js").ReactionRuntime | undefined} reactionRuntime
+ * @param {{ editHandleStore?: import("../../store.js").Store }} sendOptions
+ * @returns {Promise<MessageHandle | undefined>}
+ */
+async function sendRuntimeToolEvent(sock, chatId, event, options, reactionRuntime, sendOptions) {
+  const toolEvent = event.event;
+  if (
+    toolEvent.type !== "tool.started"
+    && toolEvent.type !== "tool.updated"
+    && toolEvent.type !== "tool.completed"
+    && toolEvent.type !== "tool.failed"
+  ) {
+    throw new Error(`Expected tool runtime event, got ${toolEvent.type}.`);
+  }
+  if (isNoopRuntimeTool(toolEvent.tool)) {
+    return undefined;
+  }
+
+  const status = toolEvent.type.split(".")[1];
+  if (status !== "started" && status !== "updated" && status !== "completed" && status !== "failed") {
+    return undefined;
+  }
+  const summary = formatRuntimeToolSummary(toolEvent.tool);
+  const text = `${getRuntimeToolIcon(status)} ${summary}`;
+
+  if (status === "started") {
+    let toolStateById = runtimeToolsByChat.get(chatId);
+    if (!toolStateById) {
+      toolStateById = new Map();
+      runtimeToolsByChat.set(chatId, toolStateById);
+    }
+    const handle = await sendBlocks(sock, chatId, "plain", text, options, reactionRuntime, event, {
+      editHandleStore: sendOptions.editHandleStore,
+    });
+    toolStateById.set(toolEvent.tool.id, {
+      summary,
+      ...(handle ? { handle } : {}),
+    });
+    return handle;
+  }
+
+  const toolStateById = runtimeToolsByChat.get(chatId);
+  const state = toolStateById?.get(toolEvent.tool.id);
+  if (state?.handle) {
+    if (toolEvent.tool.output !== undefined) {
+      state.handle.setInspect({
+        kind: "text",
+        text: toolEvent.tool.output,
+        persistOnInspect: true,
+      });
+    }
+    if (status !== "updated") {
+      await state.handle.update({ kind: "text", text });
+      toolStateById?.delete(toolEvent.tool.id);
+      if (!toolStateById || toolStateById.size === 0) {
+        runtimeToolsByChat.delete(chatId);
+      }
+    }
+    return state.handle;
+  }
+
+  if (status === "updated") {
+    return undefined;
+  }
+  return sendBlocks(sock, chatId, "plain", text, options, reactionRuntime, event, {
+    editHandleStore: sendOptions.editHandleStore,
+  });
 }
 
 /**
@@ -848,6 +1004,14 @@ function renderOutboundEvent(event) {
  * @returns {Promise<MessageHandle | undefined>}
  */
 async function sendRuntimeEvent(sock, chatId, event, options, reactionRuntime, sendOptions = {}) {
+  if (event.event.type === "file-read.started") {
+    return sendRuntimeFileReadEvent(sock, chatId, event, options, reactionRuntime, sendOptions);
+  }
+
+  if (event.event.type === "tool.started" || event.event.type === "tool.updated" || event.event.type === "tool.completed" || event.event.type === "tool.failed") {
+    return sendRuntimeToolEvent(sock, chatId, event, options, reactionRuntime, sendOptions);
+  }
+
   if (event.event.type === "command.started" || event.event.type === "command.completed" || event.event.type === "command.failed") {
     return sendRuntimeCommandEvent(sock, chatId, event, options, reactionRuntime, sendOptions);
   }

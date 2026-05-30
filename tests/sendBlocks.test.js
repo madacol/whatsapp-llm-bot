@@ -91,6 +91,65 @@ describe("sendEvent – sub-agent messages", () => {
 });
 
 describe("sendEvent – runtime events", () => {
+  it("renders ACP file-read runtime progress inside WhatsApp", async () => {
+    const { sock, sent } = createMockSock();
+
+    await sendEvent(sock, "runtime-read-chat", {
+      kind: "runtime_event",
+      event: {
+        type: "file-read.started",
+        provider: "acp",
+        fileRead: {
+          command: "sed -n '1,20p' src/app.js",
+          paths: ["src/app.js"],
+        },
+      },
+    });
+
+    assert.deepEqual(sent.map((entry) => entry.msg), [
+      { text: "🔧 *Read*  `src/app.js`", linkPreview: null },
+    ]);
+  });
+
+  it("renders ACP tool runtime progress inside WhatsApp", async () => {
+    const { sock, sent } = createMockSock();
+
+    await sendEvent(sock, "runtime-tool-chat", {
+      kind: "runtime_event",
+      event: {
+        type: "tool.started",
+        provider: "acp",
+        tool: {
+          id: "tool-1",
+          name: "Task",
+          arguments: { title: "Review mock code" },
+        },
+      },
+    });
+    await sendEvent(sock, "runtime-tool-chat", {
+      kind: "runtime_event",
+      event: {
+        type: "tool.completed",
+        provider: "acp",
+        tool: {
+          id: "tool-1",
+          name: "Task",
+          arguments: { title: "Review mock code" },
+          output: "done",
+        },
+      },
+    });
+
+    assert.deepEqual(sent.map((entry) => entry.msg), [
+      { text: "🔧 *Task*  Review mock code", linkPreview: null },
+      {
+        text: "✅ *Task*  Review mock code",
+        edit: { id: "msg-1", remoteJid: "runtime-tool-chat", fromMe: true },
+        linkPreview: null,
+      },
+    ]);
+  });
+
   it("renders ACP command runtime progress inside WhatsApp", async () => {
     const { sock, sent } = createMockSock();
 
