@@ -56,37 +56,6 @@ export function planEvent(presentation) {
 }
 
 /**
- * @param {{
- *   path: string,
- *   summary?: string,
- *   diff?: string,
- *   changeKind?: "add" | "delete" | "update",
- *   source?: "tool" | "snapshot",
- *   itemId?: string,
- *   stage?: "proposed" | "denied" | "applied" | "failed",
- *   oldText?: string,
- *   newText?: string,
- *   cwd?: string | null,
- * }} input
- * @returns {FileChangeEvent}
- */
-export function fileChangeEvent(input) {
-  return {
-    kind: "file_change",
-    path: input.path,
-    ...(input.summary !== undefined && { summary: input.summary }),
-    ...(input.diff !== undefined && { diff: input.diff }),
-    ...(input.changeKind !== undefined && { changeKind: input.changeKind }),
-    ...(input.source !== undefined && { source: input.source }),
-    ...(input.itemId !== undefined && { itemId: input.itemId }),
-    ...(input.stage !== undefined && { stage: input.stage }),
-    ...(input.oldText !== undefined && { oldText: input.oldText }),
-    ...(input.newText !== undefined && { newText: input.newText }),
-    ...(input.cwd !== undefined && { cwd: input.cwd }),
-  };
-}
-
-/**
  * @param {string} cost
  * @param {UsageTokens} tokens
  * @returns {UsageEvent}

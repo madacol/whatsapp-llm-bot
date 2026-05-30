@@ -12,7 +12,23 @@ process.env.MODEL = "mock-model";
 import { createTestDb } from "./helpers.js";
 import { setDb } from "../db.js";
 import { createReactionRuntime } from "../whatsapp/runtime/reaction-runtime.js";
-import { fileChangeEvent } from "../outbound-events.js";
+import { runtimeEvent } from "../outbound-events.js";
+
+/**
+ * @param {Omit<FileChangeEvent, "kind" | "changeKind"> & { changeKind?: "add" | "delete" | "update" }} input
+ * @returns {RuntimeEventOutboundEvent}
+ */
+function runtimeFileChangeEvent(input) {
+  const { changeKind, ...rest } = input;
+  return runtimeEvent({
+    type: "file-change.completed",
+    provider: "codex",
+    change: {
+      ...rest,
+      ...(changeKind !== undefined && { kind: changeKind }),
+    },
+  });
+}
 
 /** @type {typeof import("../whatsapp/outbound/send-content.js").sendBlocks} */
 let sendBlocks;
@@ -531,7 +547,7 @@ describe("sendEvent – presentation vertical slices", () => {
   it("renders explicit update file changes with a bold filename through WhatsApp", async () => {
     const { sock, sent } = createMockSock();
 
-    await sendEvent(sock, "presentation-chat", fileChangeEvent({
+    await sendEvent(sock, "presentation-chat", runtimeFileChangeEvent({
       path: "/tmp/src/app.js",
       cwd: "/tmp",
       changeKind: "update",
@@ -553,7 +569,7 @@ describe("sendEvent – presentation vertical slices", () => {
   it("renders snapshot-origin file changes with the Snapshot label through WhatsApp", async () => {
     const { sock, sent } = createMockSock();
 
-    await sendEvent(sock, "presentation-chat", fileChangeEvent({
+    await sendEvent(sock, "presentation-chat", runtimeFileChangeEvent({
       path: "/tmp/src/app.js",
       cwd: "/tmp",
       source: "snapshot",
@@ -576,7 +592,7 @@ describe("sendEvent – presentation vertical slices", () => {
   it("drops generic editing summaries from file-change captions", async () => {
     const { sock, sent } = createMockSock();
 
-    await sendEvent(sock, "presentation-chat", fileChangeEvent({
+    await sendEvent(sock, "presentation-chat", runtimeFileChangeEvent({
       path: "/tmp/src/app.js",
       cwd: "/tmp",
       source: "snapshot",
