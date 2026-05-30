@@ -261,31 +261,31 @@ describe("ACP file changes through WhatsApp transport", () => {
 
   it("sends ACP adds, updates, deletes, and unified diffs with the expected transport labels", async () => {
     const add = await runAcpPrompt("fs write");
-    assertOneFileChange(add.rendered, "*Add File*", "acp-fs-write.txt");
+    assertOneFileChange(add.rendered, "Add", "acp-fs-write.txt");
 
     const update = await runAcpPrompt("fs update", async (workdir) => {
       await fs.writeFile(path.join(workdir, "acp-fs-update.txt"), "old content through acp fs\n", "utf8");
     });
-    assertOneFileChange(update.rendered, "*Update File*", "acp-fs-update.txt");
+    assertOneFileChange(update.rendered, "Update", "acp-fs-update.txt");
 
     const correctedUpdate = await runAcpPrompt("mislabel existing add", async (workdir) => {
       await fs.writeFile(path.join(workdir, "existing-mislabel.js"), "export const value = 1;\n", "utf8");
     });
-    assertOneFileChange(correctedUpdate.rendered, "*Update File*", "existing-mislabel.js");
+    assertOneFileChange(correctedUpdate.rendered, "Update", "existing-mislabel.js");
 
     const deleted = await runAcpPrompt("direct delete", async (workdir) => {
       await fs.writeFile(path.join(workdir, "direct-delete.txt"), "delete me\n", "utf8");
     });
-    assertOneFileChange(deleted.rendered, "*Delete File*", "direct-delete.txt");
+    assertOneFileChange(deleted.rendered, "Delete", "direct-delete.txt");
 
     const diffAdd = await runAcpPrompt("diff only add");
-    assertOneFileChange(diffAdd.rendered, "*Add File*", "diff-only-add.js");
+    assertOneFileChange(diffAdd.rendered, "Add", "diff-only-add.js");
 
     const diffUpdate = await runAcpPrompt("diff only update");
-    assertOneFileChange(diffUpdate.rendered, "*Update File*", "diff-only-update.js");
+    assertOneFileChange(diffUpdate.rendered, "Update", "diff-only-update.js");
 
     const diffDelete = await runAcpPrompt("diff only delete");
-    assertOneFileChange(diffDelete.rendered, "*Delete File*", "diff-only-delete.js");
+    assertOneFileChange(diffDelete.rendered, "Delete", "diff-only-delete.js");
 
     const fileChangeImages = [
       ...add.sentMessages,
@@ -385,7 +385,7 @@ describe("ACP runtime events through WhatsApp transport", () => {
     assert.ok(rendered.some((text) => text.includes("Subagent result.")), `Expected subagent output, got ${JSON.stringify(rendered)}`);
     assert.ok(rendered.some((text) => text.includes("Mock ACP work")), `Expected plan output, got ${JSON.stringify(rendered)}`);
     assert.ok(rendered.some((text) => text.includes("Review mock code") || text.includes("*Task*")), `Expected tool output, got ${JSON.stringify(rendered)}`);
-    assert.ok(rendered.some((text) => text.includes("*Update File*") && text.includes("mock.txt")), `Expected file-change output, got ${JSON.stringify(rendered)}`);
+    assert.ok(rendered.some((text) => text.includes("Update") && text.includes("mock.txt")), `Expected file-change output, got ${JSON.stringify(rendered)}`);
     assert.ok(rendered.some((text) => text.includes("Cost:")), `Expected usage output, got ${JSON.stringify(rendered)}`);
   });
 

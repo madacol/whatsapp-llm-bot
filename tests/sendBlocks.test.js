@@ -744,7 +744,7 @@ Second block:
       " line 2",
       " line 3",
     ].join("\n"));
-    assert.equal(diffBlock.caption, "*Update File*  `plain.txt`");
+    assert.equal(diffBlock.caption, "Update `plain.txt`");
   });
 
   it("renders brand-new file writes as code blocks instead of diffs", () => {
@@ -767,7 +767,7 @@ Second block:
     assert.equal(codeBlock.type, "code");
     assert.equal(codeBlock.language, "javascript");
     assert.equal(codeBlock.code, "export const value = 1;\n");
-    assert.equal(codeBlock.caption, "*Add File*  `src/new-file.js`");
+    assert.equal(codeBlock.caption, "Add `src/new-file.js`");
   });
 
   it("renders writes labeled add as diffs when prior text exists", () => {
@@ -790,7 +790,7 @@ Second block:
     assert.ok(Array.isArray(content), "Expected file-change content blocks");
     const diffBlock = /** @type {DiffContentBlock} */ (content[0]);
     assert.equal(diffBlock.type, "diff");
-    assert.equal(diffBlock.caption, "*Update File*  `src/existing.js`");
+    assert.equal(diffBlock.caption, "Update `src/existing.js`");
   });
 
   it("renders deleted files with an explicit delete label", () => {
@@ -815,7 +815,7 @@ Second block:
       "@@ -1 +0,0 @@",
       "-export const value = 1;",
     ].join("\n"));
-    assert.equal(diffBlock.caption, "*Delete File*  `src/delete-me.js`");
+    assert.equal(diffBlock.caption, "Delete `src/delete-me.js`");
   });
 
   it("renders proposed file changes with a lifecycle-specific title even without a diff", () => {
