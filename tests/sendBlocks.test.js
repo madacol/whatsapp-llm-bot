@@ -116,6 +116,7 @@ describe("sendEvent – runtime events", () => {
     assert.deepEqual(sent[1]?.msg, {
       text: "🔄 *ACP*  session running\n🔄 *ACP*  extension notification: madabot/example",
       edit: { id: "msg-1", remoteJid: "runtime-chat", fromMe: true },
+      linkPreview: null,
     });
   });
 
@@ -167,6 +168,7 @@ describe("sendEvent – runtime events", () => {
     assert.equal(sent[0]?.msg.text, "🔄 *ACP*  session running");
     assert.deepEqual(sent[1]?.msg, {
       text: "🔄 *ACP*  session running\n🔄 *ACP*  extension notification: madabot/example",
+      linkPreview: null,
     });
   });
 
@@ -183,7 +185,7 @@ describe("sendEvent – runtime events", () => {
     });
 
     assert.deepEqual(sent.map((entry) => entry.msg), [
-      { text: "❌ Provider crashed" },
+      { text: "❌ Provider crashed", linkPreview: null },
     ]);
   });
 });
@@ -320,6 +322,15 @@ Second block:
     assert.ok(text.includes("_italic_"), "Italic should be converted to WhatsApp format");
   });
 
+  it("disables Baileys URL preview generation for text payloads", async () => {
+    const { sock, sent } = createMockSock();
+
+    await sendBlocks(sock, "test-chat", "llm", [{ type: "text", text: "See https://example.com" }]);
+
+    assert.equal(sent.length, 1);
+    assert.equal(sent[0].msg.linkPreview, null);
+  });
+
   it("renders explicit markdown attachment directives for relative document paths", async () => {
     const { sock, sent } = createMockSock();
 
@@ -410,6 +421,7 @@ Second block:
     assert.equal(imageMessages.length, 1, "Should send one image message for an image attachment directive");
     assert.ok(Buffer.isBuffer(imageMessages[0].msg.image), "Image attachment directive should send an image buffer");
     assert.equal(imageMessages[0].msg.caption, "Pizza via directive");
+    assert.equal(imageMessages[0].msg.jpegThumbnail, "");
     assert.equal(textMessages.length, 0, "Attachment-only markdown should not fall back to text");
   });
 

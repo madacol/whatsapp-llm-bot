@@ -18,6 +18,7 @@ import { createRestartAction } from "../actions/admin/restart/index.js";
 import { createRestartAckStore } from "../actions/admin/restart/_restart-ack-store.js";
 import { deliverPendingRestartAck } from "../actions/admin/restart/_restart-ack-delivery.js";
 import { sendOrQueueWhatsAppEvent } from "../whatsapp/outbound/persistent-queue.js";
+import { makeTextMessage } from "../whatsapp/message-payloads.js";
 
 /** @type {import("@electric-sql/pglite").PGlite | null} */
 let testDb = null;
@@ -138,7 +139,7 @@ describe("WhatsApp transport community creation", () => {
     });
     assert.deepEqual(sentMessages, [{
       chatId,
-      message: { text: "🤖 Hello world" },
+      message: makeTextMessage("🤖 Hello world"),
     }]);
   });
 
@@ -261,7 +262,7 @@ describe("WhatsApp transport community creation", () => {
 
     assert.deepEqual(sentMessages, [{
       chatId,
-      message: { text: "🤖 queued on disconnect" },
+      message: makeTextMessage("🤖 queued on disconnect"),
     }]);
     const sentHandle = await queuedHandle?.waitUntilSent?.({ timeoutMs: 10 });
     assert.equal(sentHandle?.deliveryStatus, "sent");
@@ -329,14 +330,13 @@ describe("WhatsApp transport community creation", () => {
     assert.deepEqual(sentMessages, [
       {
         chatId,
-        message: { text: "🤖 queued before edit" },
+        message: makeTextMessage("🤖 queued before edit"),
       },
       {
         chatId,
-        message: {
-          text: "🤖 queued after edit",
+        message: makeTextMessage("🤖 queued after edit", {
           edit: { id: "sent-1", remoteJid: chatId, fromMe: true },
-        },
+        }),
       },
     ]);
   });
@@ -410,7 +410,7 @@ describe("WhatsApp transport community creation", () => {
 
     assert.deepEqual(sentMessages, [{
       chatId,
-      message: { text: "🤖 queued after 1006" },
+      message: makeTextMessage("🤖 queued after 1006"),
     }]);
     assert.equal((await getQueuedRows(testDb, chatId)).length, 0);
   });
@@ -448,7 +448,7 @@ describe("WhatsApp transport community creation", () => {
       assert.equal(handle?.deliveryStatus, "sent");
       assert.deepEqual(sentMessages, [{
         chatId,
-        message: { text: "🤖 send after quick reconnect" },
+        message: makeTextMessage("🤖 send after quick reconnect"),
       }]);
       assert.equal((await getQueuedRows(testDb, chatId)).length, 0);
     } finally {
@@ -527,7 +527,7 @@ describe("WhatsApp transport community creation", () => {
 
     assert.deepEqual(sentMessages, [{
       chatId,
-      message: { text: "🤖 queued during reconnect" },
+      message: makeTextMessage("🤖 queued during reconnect"),
     }]);
     assert.equal((await getQueuedRows(testDb, chatId)).length, 0);
   });
@@ -601,7 +601,7 @@ describe("WhatsApp transport community creation", () => {
 
     assert.deepEqual(sentMessages, [{
       chatId,
-      message: { text: "✅ Restart signal sent." },
+      message: makeTextMessage("✅ Restart signal sent."),
     }]);
     assert.equal((await getQueuedRows(testDb, chatId)).length, 0);
     const deadLetters = await getDeadLetterRows(testDb, chatId);
@@ -673,7 +673,7 @@ describe("WhatsApp transport community creation", () => {
 
     assert.deepEqual(sentMessages, [{
       chatId,
-      message: { text: "🔄 *CODEX*  turn completed" },
+      message: makeTextMessage("🔄 *CODEX*  turn completed"),
     }]);
     assert.equal((await getQueuedRows(testDb, chatId)).length, 0);
     assert.equal((await getDeadLetterRows(testDb, chatId)).length, 0);
@@ -756,14 +756,13 @@ describe("WhatsApp transport community creation", () => {
     assert.deepEqual(sentMessages, [
       {
         chatId,
-        message: { text: "🤖 queued before open hook" },
+        message: makeTextMessage("🤖 queued before open hook"),
       },
       {
         chatId,
-        message: {
-          text: "Restarted.",
+        message: makeTextMessage("Restarted.", {
           edit: { id: "sent-1", remoteJid: chatId, fromMe: true },
-        },
+        }),
       },
     ]);
   });
@@ -852,7 +851,7 @@ describe("WhatsApp transport community creation", () => {
     assert.deepEqual(hookPhases, ["afterQueueFlush"]);
     assert.deepEqual(sentMessages, [{
       chatId,
-      message: { text: "🤖 queued unrelated output" },
+      message: makeTextMessage("🤖 queued unrelated output"),
     }]);
   });
 
@@ -931,7 +930,7 @@ describe("WhatsApp transport community creation", () => {
     assert.deepEqual(hookPhases, ["afterQueueFlush"]);
     assert.deepEqual(sentMessages, [{
       chatId,
-      message: { text: "🤖 queued while initial sync is buffering" },
+      message: makeTextMessage("🤖 queued while initial sync is buffering"),
     }]);
   });
 
@@ -1056,14 +1055,13 @@ describe("WhatsApp transport community creation", () => {
       assert.deepEqual(sentMessages, [
         {
           chatId,
-          message: { text: "🤖 Restarting..." },
+          message: makeTextMessage("🤖 Restarting..."),
         },
         {
           chatId,
-          message: {
-            text: "Restarted.",
+          message: makeTextMessage("Restarted.", {
             edit: { id: "sent-1", remoteJid: chatId, fromMe: true },
-          },
+          }),
         },
       ]);
       assert.equal(await restartAckStore.read(), null);
@@ -1154,7 +1152,7 @@ describe("WhatsApp transport community creation", () => {
 
     assert.deepEqual(sentMessages, [{
       chatId,
-      message: { text: "🤖 queued while opening" },
+      message: makeTextMessage("🤖 queued while opening"),
     }]);
     assert.equal((await getQueuedRows(testDb, chatId)).length, 0);
   });

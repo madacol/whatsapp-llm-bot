@@ -1,5 +1,6 @@
 import { sendEvent as sendOutboundEvent } from "./send-content.js";
 import { getOutboundQueuePersistDelayMs } from "../../whatsapp-outbound-queue-config.js";
+import { makeTextMessage } from "../message-payloads.js";
 import { enqueueWhatsAppOutbound } from "./queue-store.js";
 import { createQueuedMessageHandle } from "./queued-handles.js";
 import {
@@ -183,7 +184,7 @@ export async function sendOrQueueWhatsAppText({ getSocket, chatId, text, store }
   }
 
   try {
-    await sock.sendMessage(chatId, { text });
+    await sock.sendMessage(chatId, makeTextMessage(text));
   } catch (error) {
     if (!isRecoverableWhatsAppSendError(error)) {
       throw error;
@@ -206,7 +207,7 @@ async function queueTextAfterDebouncedRetry({ getSocket, chatId, text, store }) 
   const sock = getSocket();
   if (sock) {
     try {
-      await sock.sendMessage(chatId, { text });
+      await sock.sendMessage(chatId, makeTextMessage(text));
       return;
     } catch (error) {
       if (!isRecoverableWhatsAppSendError(error)) {
