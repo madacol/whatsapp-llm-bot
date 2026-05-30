@@ -538,6 +538,25 @@ describe("getMessageContent", () => {
     assert.equal(firstImage._hdParentMessageId, "sd-parent-1");
     assert.equal(secondImage._hdParentMessageId, "sd-parent-2");
 
+    const reattachedImage = { ...firstImage };
+    delete reattachedImage.getHd;
+    const io = createTurnIo({
+      sock,
+      chatId,
+      message: createHdImageMessage({ chatId, messageId: "io-message", pairedMediaType: SD_PARENT }),
+      senderIds: ["sender-1"],
+      isGroup: false,
+      selectRuntime: userResponseRegistry,
+      confirmRuntime: confirmRegistry,
+      reactionRuntime: createReactionRuntime(),
+    });
+    await io.prepareMediaRegistry?.({
+      chatId,
+      messages: [],
+      mediaRegistry: new Map([["stored-parent", reattachedImage]]),
+    });
+    assert.ok(reattachedImage.getHd instanceof Promise, "WhatsApp TurnIO should reattach pending HD promises");
+
     await adaptIncomingMessage(
       createHdImageMessage({
         chatId,
@@ -560,6 +579,7 @@ describe("getMessageContent", () => {
     assert.equal(resolvedHd.type, "image");
     assert.equal(resolvedHd.mime_type, "image/jpeg");
     assert.equal(await readBlockBase64(resolvedHd), Buffer.from("hd-child-1").toString("base64"));
+    assert.deepEqual(await withTimeout(reattachedImage.getHd, 50), resolvedHd);
     assert.equal(await withTimeout(secondImage.getHd ?? Promise.resolve(null), 50), "timeout");
   });
 });

@@ -1,5 +1,5 @@
 import { downloadMediaMessage } from "@whiskeysockets/baileys";
-import { normalizeChatId } from "../../whatsapp-hd-media.js";
+import { normalizeChatId, reattachHdDeferreds } from "../../whatsapp-hd-media.js";
 import { classifyIncomingMessageEvent } from "./message-event-classifier.js";
 import { applyHdInboundLifecycle } from "./hd-image-lifecycle.js";
 import { getDirectMessageText, getMessageContent } from "./message-content.js";
@@ -438,6 +438,9 @@ export function createTurnIo({
     },
     endPresence: async () => {
       await presence.end();
+    },
+    prepareMediaRegistry: ({ chatId: registryChatId, mediaRegistry }) => {
+      reattachHdDeferreds(registryChatId, mediaRegistry);
     },
     getIsAdmin: async () => {
       if (!isGroup) return true;
