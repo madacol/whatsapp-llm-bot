@@ -3,7 +3,7 @@ import { randomBytes } from "node:crypto";
 import { createLogger } from "../../logger.js";
 import { renderBlocks } from "../../message-renderer.js";
 import { formatPlanPresentationText } from "../../plan-presentation.js";
-import { formatToolFlowInspectText, formatToolFlowSummary } from "../../tool-flow-presentation.js";
+import { formatToolFlowInspectText, formatToolFlowSummary } from "../tool-flow-presenter.js";
 import { shortenPath } from "../../tool-presentation-model.js";
 import { formatUsageEventText } from "../../usage-formatting.js";
 import { makeImageMessage, makeTextMessage } from "../message-payloads.js";

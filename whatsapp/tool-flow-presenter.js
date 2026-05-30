@@ -2,26 +2,26 @@
  * Grouped tool-flow presentation helpers.
  */
 
-import { formatToolPresentationSummary } from "./whatsapp/tool-presenter.js";
-import { getToolFlowDescriptor } from "./tool-presentation-model.js";
+import { formatToolPresentationSummary } from "./tool-presenter.js";
+import { getToolFlowDescriptor } from "../tool-presentation-model.js";
 
 /**
  * @typedef {{
  *   id: string,
- *   presentation: import("./tool-presentation-model.js").ToolPresentation,
+ *   presentation: import("../tool-presentation-model.js").ToolPresentation,
  *   output?: string,
- * }} ToolFlowStep
+ * }} WhatsAppToolFlowStep
  */
 
 /**
  * @typedef {{
  *   title: string,
- *   steps: ToolFlowStep[],
- * }} ToolFlowState
+ *   steps: WhatsAppToolFlowStep[],
+ * }} WhatsAppToolFlowState
  */
 
 /**
- * @param {ToolFlowState} toolFlow
+ * @param {WhatsAppToolFlowState} toolFlow
  * @returns {string}
  */
 export function formatToolFlowSummary(toolFlow) {
@@ -32,8 +32,8 @@ export function formatToolFlowSummary(toolFlow) {
 }
 
 /**
- * @param {ToolFlowState} toolFlow
- * @param {(presentation: import("./tool-presentation-model.js").ToolPresentation, output?: string) => string | null} formatInspect
+ * @param {WhatsAppToolFlowState} toolFlow
+ * @param {(presentation: import("../tool-presentation-model.js").ToolPresentation, output?: string) => string | null} formatInspect
  * @returns {string}
  */
 export function formatToolFlowInspectText(toolFlow, formatInspect) {

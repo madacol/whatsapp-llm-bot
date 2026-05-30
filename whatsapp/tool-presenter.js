@@ -7,6 +7,33 @@ import { formatPlanPresentationInspect } from "../plan-presentation.js";
 import { formatStructuredInspectOutput } from "../tool-inspect-formatters.js";
 import { buildToolPresentation } from "../tool-presentation-model.js";
 
+/**
+ * Tool names that map to the shared semantic SDK-style presentation layer.
+ * @type {Set<string>}
+ */
+const SDK_PRESENTATION_TOOLS = new Set([
+  "Read",
+  "Grep",
+  "Glob",
+  "WebSearch",
+  "search_query",
+  "image_query",
+  "open",
+  "find",
+  "time",
+  "weather",
+  "finance",
+  "sports",
+  "update_plan",
+  "spawn_agent",
+  "send_input",
+  "wait_agent",
+  "resume_agent",
+  "close_agent",
+  "parallel",
+  "write_stdin",
+]);
+
 /** Map file extensions to language identifiers for syntax highlighting. */
 const EXT_TO_LANG = /** @type {Record<string, string>} */ ({
   js: "javascript", mjs: "javascript", cjs: "javascript", jsx: "jsx",
@@ -375,6 +402,44 @@ export function formatToolPresentationInspect(presentation, output) {
     default:
       return null;
   }
+}
+
+/**
+ * @param {string} name
+ * @param {Record<string, unknown>} args
+ * @param {string | null | undefined} [cwd]
+ * @returns {string | null}
+ */
+export function formatSdkToolCall(name, args, cwd) {
+  if (!SDK_PRESENTATION_TOOLS.has(name)) {
+    return null;
+  }
+  return formatToolPresentationSummary(buildToolPresentation(name, args, undefined, cwd, undefined));
+}
+
+/**
+ * @param {string} name
+ * @param {Record<string, unknown>} args
+ * @param {string | undefined} output
+ * @returns {string | null}
+ */
+export function formatToolInspectBody(name, args, output) {
+  return formatToolPresentationInspect(
+    buildToolPresentation(name, args, undefined, undefined, undefined),
+    output,
+  );
+}
+
+/**
+ * @param {string} name
+ * @param {Record<string, unknown>} args
+ * @param {((params: Record<string, unknown>) => string) | undefined} [formatToolCall]
+ * @param {string | null | undefined} [cwd]
+ * @param {{ oldContent?: string; startLine?: number } | undefined} [context]
+ * @returns {string}
+ */
+export function getToolCallSummary(name, args, formatToolCall, cwd, context) {
+  return formatToolPresentationSummary(buildToolPresentation(name, args, formatToolCall, cwd, context));
 }
 
 /**
