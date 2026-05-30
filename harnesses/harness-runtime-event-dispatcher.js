@@ -125,7 +125,7 @@ export function createHarnessRuntimeEventDispatcher(input) {
   const rawEventLogger = input.rawEventLogger ?? getHarnessRawEventLoggerFromEnv();
   /** @type {Map<string, { handle?: MessageHandle, presentation: import("../tool-presentation-model.js").ToolPresentation }>} */
   const activeTools = new Map();
-  /** @type {Map<string, { handle?: MessageHandle, state: import("../tool-flow-presentation.js").ToolFlowState }>} */
+  /** @type {Map<string, { handle?: MessageHandle, state: ToolFlowState }>} */
   const activeFlows = new Map();
   /** @type {Map<string, LlmResponseMetadata>} */
   const subagentThreads = new Map();

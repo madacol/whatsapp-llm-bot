@@ -1,15 +1,15 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { buildToolPresentation } from "../tool-presentation-model.js";
+import { formatPlanPresentationText } from "../plan-presentation.js";
 import {
-  buildToolPresentation,
-  formatPlanPresentationText,
+  formatCommandInspectText,
   formatToolInspectBody,
   formatSdkToolCall,
   getToolCallSummary,
-} from "../tool-display.js";
-import { formatCommandInspectText } from "../utils.js";
+} from "../whatsapp/tool-presenter.js";
 
-describe("tool display", () => {
+describe("WhatsApp tool presenter", () => {
   it("keeps semantic labels for explicit tools", () => {
     assert.equal(
       formatSdkToolCall("Read", { file_path: "/repo/src/app.js" }, "/repo"),

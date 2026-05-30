@@ -10,7 +10,7 @@ import {
   tableTextRunsToPlainText,
   wrapAnnotatedLinesForDisplay,
 } from "../code-image-renderer.js";
-import { formatBashCommand } from "../tool-display.js";
+import { formatBashCommand } from "../whatsapp/tool-presenter.js";
 
 /**
  * @param {Buffer} png
