@@ -6,6 +6,7 @@ import { formatPlanPresentationText } from "../../plan-presentation.js";
 import { formatToolFlowInspectText, formatToolFlowSummary } from "../../tool-flow-presentation.js";
 import { formatActivitySummary, shortenPath } from "../../tool-presentation-model.js";
 import { formatUsageEventText } from "../../usage-formatting.js";
+import { makeImageMessage, makeTextMessage } from "../message-payloads.js";
 import {
   formatToolPresentationDisplay,
   formatToolPresentationInspect,
@@ -772,10 +773,7 @@ export async function sendAlbum(sock, chatId, items, options) {
 
   if (items.length === 0) return undefined;
   if (items.length === 1) {
-    const sent = await sock.sendMessage(chatId, {
-      image: items[0].image,
-      ...(items[0].caption && { caption: items[0].caption }),
-    }, options ?? {});
+    const sent = await sock.sendMessage(chatId, makeImageMessage(items[0].image, items[0].caption), options ?? {});
     return sent?.key;
   }
 
@@ -809,10 +807,7 @@ export async function sendAlbum(sock, chatId, items, options) {
   const uploaded = await Promise.all(
     items.map((item) => generateWAMessage(
       chatId,
-      {
-        image: item.image,
-        ...(item.caption && { caption: item.caption }),
-      },
+      makeImageMessage(item.image, item.caption),
       uploadOpts,
     )),
   );
@@ -873,7 +868,7 @@ export async function editWhatsAppMessage(sock, jid, newText, target) {
     return;
   }
 
-  await sock.sendMessage(jid, { text: newText, edit: resolved.key });
+  await sock.sendMessage(jid, makeTextMessage(newText, { edit: resolved.key }));
 }
 
 /**
@@ -963,7 +958,7 @@ export async function sendBlocks(sock, chatId, source, content, options, reactio
     try {
       switch (instruction.kind) {
         case "text":
-          sent = await sock.sendMessage(chatId, { text: instruction.text }, options);
+          sent = await sock.sendMessage(chatId, makeTextMessage(instruction.text), options);
           if (instruction.editable && sent?.key) {
             lastSentKey = sent.key;
             lastSentIsImage = false;
@@ -973,10 +968,7 @@ export async function sendBlocks(sock, chatId, source, content, options, reactio
           if (instruction.hd) {
             sent = await sendImageHD(sock, chatId, instruction.image, instruction.caption, options);
           } else {
-            sent = await sock.sendMessage(chatId, {
-              image: instruction.image,
-              ...(instruction.caption && { caption: instruction.caption }),
-            }, options);
+            sent = await sock.sendMessage(chatId, makeImageMessage(instruction.image, instruction.caption), options);
           }
           if (instruction.editable && sent?.key) {
             lastSentKey = sent.key;

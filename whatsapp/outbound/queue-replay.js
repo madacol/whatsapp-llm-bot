@@ -1,4 +1,5 @@
 import { createLogger } from "../../logger.js";
+import { makeTextMessage } from "../message-payloads.js";
 import { sendEvent as sendOutboundEvent } from "./send-content.js";
 import {
   deleteQueuedWhatsAppOutbound,
@@ -75,7 +76,7 @@ function isConnectionRecoverableWhatsAppSendError(error) {
  */
 async function deliverQueuedPayload(sock, chatId, payload, reactionRuntime, store) {
   if (payload.kind === "text") {
-    await sock.sendMessage(chatId, { text: payload.text });
+    await sock.sendMessage(chatId, makeTextMessage(payload.text));
     return undefined;
   }
   return sendOutboundEvent(sock, chatId, payload.event, undefined, reactionRuntime, { editHandleStore: store });
