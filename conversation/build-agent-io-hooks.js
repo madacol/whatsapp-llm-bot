@@ -100,7 +100,6 @@ export function buildAgentIoHooks(
     context,
     cwd,
     visibility,
-    displayToolCall: async (toolCall) => displayToolCall(toolCall, context, undefined, cwd, undefined),
   });
   const compactToolActivity = createCompactToolActivityFeed({
     send: context.send,

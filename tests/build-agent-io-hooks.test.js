@@ -392,11 +392,20 @@ describe("buildAgentIoHooks", () => {
     await pending;
   });
 
-  it("maps command start events to a tool-call message", async () => {
+  it("emits command starts as runtime events", async () => {
     const { hooks, sent } = createSubject(VISIBLE_TOOL_OUTPUT);
     await hooks.onCommand?.({ command: "npm test", status: "started" });
 
-    assertSingleSentEvent(sent, "send", "tool_call");
+    assertSingleSentEvent(sent, "send", "runtime_event");
+    if (sent[0].event.kind !== "runtime_event") {
+      assert.fail("Expected runtime_event");
+    }
+    assert.equal(sent[0].event.event.type, "command.started");
+    assert.equal(sent[0].event.event.provider, "codex");
+    assert.deepEqual(sent[0].event.event.command, {
+      command: "npm test",
+      status: "started",
+    });
   });
 
   it("emits compact activity events instead of pre-rendered WhatsApp text", async () => {
@@ -555,30 +564,30 @@ describe("buildAgentIoHooks", () => {
     assert.equal(sent.length, 0);
   });
 
-  it("renders shell commands as Shell summaries", async () => {
+  it("passes command text to WhatsApp without Shell presentation", async () => {
     const { hooks, sent } = createSubjectWithCwd("/repo", VISIBLE_TOOL_OUTPUT);
     await hooks.onCommand?.({ command: "rg -n \"needle\" src", status: "started" });
 
     assert.equal(sent.length, 1);
-    assert.equal(sent[0].event.kind, "tool_call");
-    if (sent[0].event.kind !== "tool_call") {
-      assert.fail("Expected tool_call event");
+    assert.equal(sent[0].event.kind, "runtime_event");
+    if (sent[0].event.kind !== "runtime_event") {
+      assert.fail("Expected runtime_event");
     }
-    assert.equal(sent[0].event.presentation.summary, "*Shell*  `rg -n \"needle\" src`");
-    assert.equal(sent[0].event.presentation.kind, "bash");
-    assert.equal(sent[0].event.presentation.command, "rg -n \"needle\" src");
+    assert.equal(sent[0].event.event.type, "command.started");
+    assert.equal(sent[0].event.event.command.command, "rg -n \"needle\" src");
   });
 
-  it("does not send a separate success message for completed commands", async () => {
+  it("emits command completion through the runtime boundary", async () => {
     const { hooks, sent } = createSubject(VISIBLE_TOOL_OUTPUT);
     await hooks.onCommand?.({ command: "pwd", status: "started" });
     await hooks.onCommand?.({ command: "pwd", status: "completed", output: "/repo\n" });
 
-    assert.equal(sent.length, 1);
-    assert.equal(sent[0].event.kind, "tool_call");
+    assert.deepEqual(sent.map((entry) => entry.event.kind), ["runtime_event", "runtime_event"]);
+    assert.equal(sent[1]?.event.kind === "runtime_event" ? sent[1].event.event.type : "", "command.completed");
+    assert.equal(sent[1]?.event.kind === "runtime_event" && "command" in sent[1].event.event ? sent[1].event.event.command.output : "", "/repo\n");
   });
 
-  it("updates the existing tool-call message when a visible command fails", async () => {
+  it("emits command failures through the runtime boundary", async () => {
     /** @type {Array<{ event: OutboundEvent, kind: "send" | "reply" }>} */
     const sent = [];
     /** @type {MessageHandleUpdate[]} */
@@ -613,19 +622,18 @@ describe("buildAgentIoHooks", () => {
     await hooks.onCommand?.({ command: "pnpm test", status: "started" });
     await hooks.onCommand?.({ command: "pnpm test", status: "failed", output: "boom" });
 
-    assert.equal(sent.length, 1);
-    assert.deepEqual(updates, [{
-      kind: "text",
-      text: "❌ *Shell*  `pnpm test`",
-    }]);
-    assert.equal(inspects.length, 1);
-    const inspect = inspects[0];
-    assert.ok(inspect && inspect.kind === "tool");
-    if (!inspect || inspect.kind !== "tool") {
-      assert.fail("Expected tool inspect state");
+    assert.deepEqual(sent.map((entry) => entry.event.kind), ["runtime_event", "runtime_event"]);
+    assert.equal(sent[1]?.event.kind === "runtime_event" ? sent[1].event.event.type : "", "command.failed");
+    if (sent[1]?.event.kind !== "runtime_event" || !("command" in sent[1].event.event)) {
+      assert.fail("Expected command runtime event");
     }
-    assert.equal(inspect.presentation.summary, "*Shell*  `pnpm test`");
-    assert.equal(inspect.output, "boom");
+    assert.deepEqual(sent[1].event.event.command, {
+      command: "pnpm test",
+      status: "failed",
+      output: "boom",
+    });
+    assert.deepEqual(updates, []);
+    assert.deepEqual(inspects, []);
   });
 
   it("emits file changes as runtime events", async () => {
@@ -642,15 +650,20 @@ describe("buildAgentIoHooks", () => {
     assert.equal(sent[0].event.event.change.summary, "Updated file");
   });
 
-  it("maps file reads to a tool-call message", async () => {
+  it("emits file reads as runtime events", async () => {
     const { hooks, sent } = createSubject(VISIBLE_TOOL_OUTPUT);
     await hooks.onFileRead?.({ command: "sed -n '1,20p' src/app.js", paths: ["src/app.js"] });
 
-    assertSingleSentEvent(sent, "send", "tool_call");
-    if (sent[0].event.kind !== "tool_call") {
-      assert.fail("Expected tool_call event");
+    assertSingleSentEvent(sent, "send", "runtime_event");
+    if (sent[0].event.kind !== "runtime_event") {
+      assert.fail("Expected runtime_event");
     }
-    assert.equal(sent[0].event.presentation.summary, "*Read*  `src/app.js`");
+    assert.equal(sent[0].event.event.type, "file-read.started");
+    assert.equal(sent[0].event.event.provider, "codex");
+    assert.deepEqual(sent[0].event.event.fileRead, {
+      command: "sed -n '1,20p' src/app.js",
+      paths: ["src/app.js"],
+    });
   });
 
   it("passes file change diff facts through the runtime boundary", async () => {
@@ -697,7 +710,7 @@ describe("buildAgentIoHooks", () => {
     assert.equal(sent[0].event.event.change.cwd, "/repo");
   });
 
-  it("attaches semantic inspect state for codex file reads", async () => {
+  it("keeps file-read command output inspectable without Read presentation", async () => {
     /** @type {Array<{ inspects: MessageInspectState[], updates: MessageHandleUpdate[] }>} */
     const handles = [];
     const hooks = buildAgentIoHooks(
@@ -736,18 +749,17 @@ describe("buildAgentIoHooks", () => {
       output: "  1→ const value = 1;\n  2→ const value = 2;",
     });
 
-    assert.equal(handles.length, 1);
+    assert.equal(handles.length, 2);
     assert.equal(handles[0]?.inspects.length, 1);
     const inspect = handles[0]?.inspects[0];
-    assert.ok(inspect && inspect.kind === "tool");
-    if (!inspect || inspect.kind !== "tool") {
-      assert.fail("Expected tool inspect state");
+    assert.ok(inspect && inspect.kind === "text");
+    if (!inspect || inspect.kind !== "text") {
+      assert.fail("Expected text inspect state");
     }
-    assert.equal(inspect.presentation.summary, "*Read*  `src/app.js`");
-    assert.equal(inspect.output, "  1→ const value = 1;\n  2→ const value = 2;");
+    assert.equal(inspect.text, "  1→ const value = 1;\n  2→ const value = 2;");
   });
 
-  it("stores search command inspect state without formatting it outside the adapter", async () => {
+  it("passes search command output through runtime events", async () => {
     /** @type {Array<{ inspects: MessageInspectState[] }>} */
     const handles = [];
     const hooks = buildAgentIoHooks(
@@ -785,17 +797,11 @@ describe("buildAgentIoHooks", () => {
       output: "src/app.js:12:needle",
     });
 
-    assert.equal(handles.length, 1);
-    const inspect = handles[0]?.inspects[0];
-    assert.ok(inspect && inspect.kind === "tool");
-    if (!inspect || inspect.kind !== "tool") {
-      assert.fail("Expected tool inspect state");
-    }
-    assert.equal(inspect.presentation.summary, "*Shell*  `rg -n \"needle\" src`");
-    assert.equal(inspect.output, "src/app.js:12:needle");
+    assert.equal(handles.length, 2);
+    assert.deepEqual(handles.map((entry) => entry.inspects.length), [0, 0]);
   });
 
-  it("keeps bash inspect state available for commands with no output", async () => {
+  it("passes commands with no output through runtime events", async () => {
     /** @type {Array<{ inspects: MessageInspectState[] }>} */
     const handles = [];
     const hooks = buildAgentIoHooks(
@@ -832,13 +838,7 @@ describe("buildAgentIoHooks", () => {
       status: "completed",
     });
 
-    assert.equal(handles.length, 1);
-    const inspect = handles[0]?.inspects[0];
-    assert.ok(inspect && inspect.kind === "tool");
-    if (!inspect || inspect.kind !== "tool") {
-      assert.fail("Expected tool inspect state");
-    }
-    assert.equal(inspect.presentation.summary, "*Shell*  `ls -a`");
-    assert.equal(inspect.output, "");
+    assert.equal(handles.length, 2);
+    assert.deepEqual(handles.map((entry) => entry.inspects.length), [0, 0]);
   });
 });
