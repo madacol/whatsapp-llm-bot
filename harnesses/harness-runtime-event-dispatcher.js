@@ -1,5 +1,3 @@
-import { toolFlowInspectState, toolFlowUpdate, toolInspectState } from "../outbound-events.js";
-import { buildToolPresentation, getToolFlowDescriptor } from "../tool-presentation-model.js";
 import { createLogger } from "../logger.js";
 import { getHarnessRawEventLoggerFromEnv } from "./raw-event-log.js";
 import { createPlanPresentationFromState } from "../plan-presentation.js";
@@ -10,28 +8,23 @@ import { normalizeHarnessRuntimeEvent } from "./harness-runtime-events.js";
  * @typedef {import("./harness-runtime-events.js").HarnessRuntimeProvider} HarnessRuntimeProvider
  * @typedef {import("./harness-runtime-events.js").HarnessRuntimeTool} HarnessRuntimeTool
  * @typedef {import("./harness-runtime-events.js").HarnessRuntimeUsage} HarnessRuntimeUsage
- * @typedef {import("./harness-runtime-events.js").HarnessRuntimeToolEvent} HarnessRuntimeToolEvent
+ * @typedef {import("./harness-runtime-events.js").HarnessRuntimeCommandEvent
+ *   | import("./harness-runtime-events.js").HarnessRuntimeFileReadEvent
+ *   | import("./harness-runtime-events.js").HarnessRuntimeToolEvent
+ *   | import("./harness-runtime-events.js").HarnessRuntimeFileChangeEvent} HarnessRuntimeProgressEvent
  * @typedef {import("./raw-event-log.js").HarnessRawEventLogger} HarnessRawEventLogger
  */
 
 const log = createLogger("harness:runtime-events");
 
 /**
- * @type {Pick<Required<AgentIOHooks>, "onComposing" | "onPaused" | "onReasoning" | "onToolCall" | "onToolComplete" | "onToolResult" | "onLlmResponse" | "onFileChange" | "onUsage" | "onToolError" | "onCommand" | "onFileRead" | "onPlan" | "onRuntimeEvent">}
+ * @type {Pick<Required<AgentIOHooks>, "onReasoning" | "onToolResult" | "onLlmResponse" | "onUsage" | "onPlan" | "onRuntimeEvent">}
  */
 const DEFAULT_RUNTIME_EVENT_HOOKS = {
-  onComposing: async () => {},
-  onPaused: async () => {},
   onReasoning: async () => {},
-  onToolCall: async () => {},
-  onToolComplete: async () => {},
   onToolResult: async () => {},
   onLlmResponse: async () => {},
-  onFileChange: async () => {},
   onUsage: async () => {},
-  onToolError: async () => {},
-  onCommand: async () => {},
-  onFileRead: async () => {},
   onPlan: async () => {},
   onRuntimeEvent: async () => {},
 };
@@ -60,29 +53,19 @@ function formatUsageCost(usage) {
 }
 
 /**
- * @param {HarnessRuntimeTool} tool
- * @param {string | null | undefined} workdir
- * @returns {import("../tool-presentation-model.js").ToolPresentation}
- */
-function buildRuntimeToolPresentation(tool, workdir) {
-  return buildToolPresentation(tool.name, tool.arguments, undefined, workdir ?? null, undefined);
-}
-
-/**
  * @param {HarnessRuntimeEvent} event
- * @returns {boolean}
+ * @returns {event is HarnessRuntimeProgressEvent}
  */
-function shouldPassThroughPresentationBoundary(event) {
-  return event.provider === "acp"
-    && (event.type === "command.started"
-      || event.type === "command.completed"
-      || event.type === "command.failed"
-      || event.type === "file-read.started"
-      || event.type === "tool.started"
-      || event.type === "tool.updated"
-      || event.type === "tool.completed"
-      || event.type === "tool.failed"
-      || event.type === "file-change.completed");
+function shouldEmitAsRuntimeProgress(event) {
+  return event.type === "command.started"
+    || event.type === "command.completed"
+    || event.type === "command.failed"
+    || event.type === "file-read.started"
+    || event.type === "tool.started"
+    || event.type === "tool.updated"
+    || event.type === "tool.completed"
+    || event.type === "tool.failed"
+    || event.type === "file-change.completed";
 }
 
 /**
@@ -110,7 +93,7 @@ function attachRuntimeBoundaryFacts(event, workdir) {
  * @param {{
  *   provider: HarnessRuntimeProvider,
  *   messages: Message[],
- *   hooks?: Pick<AgentIOHooks, "onComposing" | "onPaused" | "onReasoning" | "onToolCall" | "onToolComplete" | "onToolResult" | "onLlmResponse" | "onFileChange" | "onUsage" | "onToolError" | "onCommand" | "onFileRead" | "onPlan" | "onRuntimeEvent">,
+ *   hooks?: Pick<AgentIOHooks, "onReasoning" | "onToolResult" | "onLlmResponse" | "onUsage" | "onPlan" | "onRuntimeEvent">,
  *   emitRuntimeEvent?: (event: HarnessRuntimeEvent) => Promise<void>,
  *   workdir?: string | null,
  *   emitUsage?: boolean,
@@ -125,10 +108,6 @@ export function createHarnessRuntimeEventDispatcher(input) {
   const hooks = { ...DEFAULT_RUNTIME_EVENT_HOOKS, ...input.hooks };
   const emitRuntimeEvent = input.emitRuntimeEvent ?? hooks.onRuntimeEvent;
   const rawEventLogger = input.rawEventLogger ?? getHarnessRawEventLoggerFromEnv();
-  /** @type {Map<string, { handle?: MessageHandle, presentation: import("../tool-presentation-model.js").ToolPresentation }>} */
-  const activeTools = new Map();
-  /** @type {Map<string, { handle?: MessageHandle, state: ToolFlowState }>} */
-  const activeFlows = new Map();
   /** @type {Map<string, LlmResponseMetadata>} */
   const subagentThreads = new Map();
   /** @type {Set<string>} */
@@ -251,91 +230,6 @@ export function createHarnessRuntimeEventDispatcher(input) {
   }
 
   /**
-   * @param {HarnessRuntimeToolEvent} event
-   * @returns {Promise<void>}
-   */
-  async function handleToolStarted(event) {
-    const presentation = buildRuntimeToolPresentation(event.tool, input.workdir);
-    const flow = getToolFlowDescriptor(presentation);
-    const toolCall = {
-      id: event.tool.id,
-      name: event.tool.name,
-      arguments: JSON.stringify(event.tool.arguments),
-    };
-    if (flow) {
-      let activeFlow = activeFlows.get(flow.groupKey);
-      if (!activeFlow) {
-        const handle = await hooks.onToolCall(toolCall) ?? undefined;
-        activeFlow = {
-          ...(handle ? { handle } : {}),
-          state: { title: flow.groupTitle, steps: [] },
-        };
-        activeFlows.set(flow.groupKey, activeFlow);
-      }
-      activeFlow.state.steps.push({ id: event.tool.id, presentation });
-      if (activeFlow.handle) {
-        await activeFlow.handle.update(toolFlowUpdate(activeFlow.state));
-        activeFlow.handle.setInspect(toolFlowInspectState(activeFlow.state));
-      }
-      activeTools.set(event.tool.id, {
-        ...(activeFlow.handle ? { handle: activeFlow.handle } : {}),
-        presentation,
-      });
-      return;
-    }
-    const handle = await hooks.onToolCall(toolCall) ?? undefined;
-    activeTools.set(event.tool.id, {
-      ...(handle ? { handle } : {}),
-      presentation,
-    });
-  }
-
-  /**
-   * @param {HarnessRuntimeToolEvent} event
-   * @returns {Promise<void>}
-   */
-  async function handleToolProgress(event) {
-    const active = activeTools.get(event.tool.id);
-    const presentation = buildRuntimeToolPresentation(event.tool, input.workdir);
-    const flow = getToolFlowDescriptor(presentation);
-    if (flow) {
-      const activeFlow = activeFlows.get(flow.groupKey);
-      const step = activeFlow?.state.steps.find((candidate) => candidate.id === event.tool.id);
-      if (step) {
-        step.presentation = presentation;
-        step.output = event.tool.output;
-      }
-      if (activeFlow?.handle) {
-        activeFlow.handle.setInspect(toolFlowInspectState(activeFlow.state));
-      }
-    }
-    if (!flow && active?.handle) {
-      active.handle.setInspect(toolInspectState(presentation, event.tool.output));
-    }
-    if (event.type === "tool.completed") {
-      rememberSpawnedSubagent(event.tool);
-      await hooks.onToolComplete({
-        id: event.tool.id,
-        name: event.tool.name,
-        arguments: JSON.stringify(event.tool.arguments),
-      });
-      if (event.tool.outputBlocks) {
-        await hooks.onToolResult(event.tool.outputBlocks, event.tool.name, event.tool.permissions ?? {});
-      }
-      activeTools.delete(event.tool.id);
-      for (const response of extractWaitAgentResponses(event.tool)) {
-        await emitSubagentResponse(response);
-      }
-    }
-    if (event.type === "tool.failed") {
-      if (event.tool.output) {
-        await hooks.onToolError(event.tool.output);
-      }
-      activeTools.delete(event.tool.id);
-    }
-  }
-
-  /**
    * @param {HarnessRuntimeEvent} event
    * @returns {Promise<void>}
    */
@@ -364,7 +258,7 @@ export function createHarnessRuntimeEventDispatcher(input) {
   async function handleEvent(event) {
     const normalizedEvent = normalizeHarnessRuntimeEvent(event);
     await captureRawEvent(normalizedEvent);
-    if (shouldPassThroughPresentationBoundary(normalizedEvent)) {
+    if (shouldEmitAsRuntimeProgress(normalizedEvent)) {
       await emitRuntimeEvent(attachRuntimeBoundaryFacts(normalizedEvent, input.workdir));
       if (normalizedEvent.type === "tool.completed") {
         rememberSpawnedSubagent(normalizedEvent.tool);
@@ -387,22 +281,6 @@ export function createHarnessRuntimeEventDispatcher(input) {
           contentParts: normalizedEvent.contentParts ?? [normalizedEvent.text],
           text: normalizedEvent.text,
         });
-        return;
-      case "tool.started":
-        await handleToolStarted(normalizedEvent);
-        return;
-      case "tool.updated":
-      case "tool.completed":
-      case "tool.failed":
-        await handleToolProgress(normalizedEvent);
-        return;
-      case "command.started":
-      case "command.completed":
-      case "command.failed":
-        await hooks.onCommand(normalizedEvent.command);
-        return;
-      case "file-read.started":
-        await hooks.onFileRead(normalizedEvent.fileRead);
         return;
       case "assistant.completed":
         if (normalizedEvent.responseMode === "append") {
@@ -469,9 +347,6 @@ export function createHarnessRuntimeEventDispatcher(input) {
       case "extension.notification":
       case "extension.request":
         await emitRuntimeEvent(normalizedEvent);
-        return;
-      case "file-change.completed":
-        await hooks.onFileChange(normalizedEvent.change);
         return;
       case "model.rerouted":
       case "config.warning":

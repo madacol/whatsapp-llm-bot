@@ -1171,6 +1171,59 @@ async function sendCompactToolActivityEvent(sock, chatId, event, options, reacti
 }
 
 /**
+ * @param {import('@whiskeysockets/baileys').WASocket} sock
+ * @param {string} chatId
+ * @param {RuntimeEventOutboundEvent} event
+ * @param {{ quoted?: BaileysMessage } | undefined} options
+ * @param {import("../runtime/reaction-runtime.js").ReactionRuntime | undefined} reactionRuntime
+ * @param {{ editHandleStore?: import("../../store.js").Store }} sendOptions
+ * @returns {Promise<MessageHandle | undefined>}
+ */
+async function sendCompactRuntimeEvent(sock, chatId, event, options, reactionRuntime, sendOptions) {
+  const runtime = event.event;
+  if (runtime.type === "file-read.started") {
+    return sendCompactToolActivityEvent(sock, chatId, {
+      kind: "compact_tool_activity",
+      cwd: event.cwd,
+      activity: {
+        type: "file_read",
+        status: "started",
+        command: runtime.fileRead.command,
+        paths: runtime.fileRead.paths,
+      },
+    }, options, reactionRuntime, sendOptions);
+  }
+  if (runtime.type === "command.started" || runtime.type === "command.completed" || runtime.type === "command.failed") {
+    return sendCompactToolActivityEvent(sock, chatId, {
+      kind: "compact_tool_activity",
+      cwd: event.cwd,
+      activity: {
+        type: "command",
+        status: runtime.command.status,
+        command: runtime.command.command,
+        ...(runtime.command.output !== undefined && { output: runtime.command.output }),
+      },
+    }, options, reactionRuntime, sendOptions);
+  }
+  if (runtime.type === "tool.started" || runtime.type === "tool.completed" || runtime.type === "tool.failed") {
+    return sendCompactToolActivityEvent(sock, chatId, {
+      kind: "compact_tool_activity",
+      cwd: event.cwd,
+      activity: {
+        type: "tool",
+        status: runtime.type === "tool.failed" ? "failed" : runtime.type === "tool.completed" ? "completed" : "started",
+        toolCall: {
+          id: runtime.tool.id,
+          name: runtime.tool.name,
+          arguments: JSON.stringify(runtime.tool.arguments),
+        },
+      },
+    }, options, reactionRuntime, sendOptions);
+  }
+  return undefined;
+}
+
+/**
  * @param {{ entries: Array<{ icon: string, provider: string, summary: string, detail?: string }> }} state
  * @returns {string}
  */
@@ -1512,6 +1565,13 @@ function renderOutboundEvent(event) {
  * @returns {Promise<MessageHandle | undefined>}
  */
 async function sendRuntimeEvent(sock, chatId, event, options, reactionRuntime, sendOptions = {}) {
+  if (event.compact) {
+    const compactHandle = await sendCompactRuntimeEvent(sock, chatId, event, options, reactionRuntime, sendOptions);
+    if (compactHandle) {
+      return compactHandle;
+    }
+  }
+
   if (event.event.type === "file-read.started") {
     return sendRuntimeFileReadEvent(sock, chatId, event, options, reactionRuntime, sendOptions);
   }

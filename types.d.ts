@@ -248,6 +248,8 @@ type SubagentMessageEvent = {
 type RuntimeEventOutboundEvent = {
   kind: "runtime_event";
   event: import("./harnesses/harness-runtime-events.js").HarnessRuntimeEvent;
+  compact?: boolean;
+  cwd?: string | null;
 };
 
 type UsageTokens = {

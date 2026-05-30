@@ -277,7 +277,10 @@ export function buildAgentIoHooks(
         }
         await compactToolActivity.close();
       }
-      await emitWhileWorking(() => context.send(runtimeEvent(event)));
+      await emitWhileWorking(() => context.send(runtimeEvent(event, {
+        ...(!visibility.toolDetails ? { compact: true } : {}),
+        ...(cwd !== null ? { cwd } : {}),
+      })));
     },
   };
 }
