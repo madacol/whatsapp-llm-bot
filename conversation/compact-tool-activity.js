@@ -135,9 +135,6 @@ function formatGenericToolName(toolName, args, cwd) {
     return search;
   }
   const pathDetail = formatGenericPathDetail(args, cwd);
-  if (!pathDetail && stripSimpleMarkdown(toolName).toLowerCase() === "read file") {
-    return null;
-  }
   return formatCompactEntry(toolName, pathDetail);
 }
 
