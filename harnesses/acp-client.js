@@ -9,9 +9,10 @@ const log = createLogger("harness:acp");
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "..");
 const ACP_STDERR_LOG_ENV = "MADABOT_ACP_STDERR_LOG";
+const ACP_STDERR_TAIL_MAX_CHARS = 4_000;
 
 /**
- * @typedef {{ resolve: (value: unknown) => void, reject: (error: Error) => void }} PendingRequest
+ * @typedef {{ method: string, resolve: (value: unknown) => void, reject: (error: Error) => void }} PendingRequest
  */
 
 /**
@@ -164,6 +165,52 @@ function shouldLogAcpChildStderr(env = process.env) {
 }
 
 /**
+ * @param {string} current
+ * @param {string} chunk
+ * @returns {string}
+ */
+function appendStderrTail(current, chunk) {
+  const next = `${current}${chunk}`;
+  return next.length > ACP_STDERR_TAIL_MAX_CHARS ? next.slice(-ACP_STDERR_TAIL_MAX_CHARS) : next;
+}
+
+/**
+ * @param {string} value
+ * @returns {string}
+ */
+function cleanStderrTail(value) {
+  return value.trim();
+}
+
+/**
+ * @param {Map<number, PendingRequest>} pendingRequests
+ * @returns {string[]}
+ */
+function pendingRequestSummaries(pendingRequests) {
+  return [...pendingRequests].map(([id, pending]) => `${pending.method}#${id}`);
+}
+
+/**
+ * @param {{
+ *   exitCode: number | null,
+ *   signal: NodeJS.Signals | null,
+ *   pendingRequests: string[],
+ * }} details
+ * @returns {string}
+ */
+function formatConnectionClosedMessage(details) {
+  const parts = [
+    "ACP connection closed.",
+    `exitCode=${details.exitCode === null ? "null" : details.exitCode}`,
+    `signal=${details.signal === null ? "null" : details.signal}`,
+  ];
+  if (details.pendingRequests.length > 0) {
+    parts.push(`pending=${details.pendingRequests.join(",")}`);
+  }
+  return parts.join(" ");
+}
+
+/**
  * @param {OpenAcpConnectionOptions} options
  * @returns {Promise<AcpConnection>}
  */
@@ -180,9 +227,12 @@ export async function openAcpConnection(options) {
   const pendingRequests = new Map();
   let nextRequestId = 1;
   let closed = false;
+  let closeRequested = false;
+  let stderrTail = "";
 
   proc.stderr.setEncoding("utf8");
   proc.stderr.on("data", (chunk) => {
+    stderrTail = appendStderrTail(stderrTail, String(chunk));
     if (!shouldLogAcpChildStderr()) {
       return;
     }
@@ -272,11 +322,25 @@ export async function openAcpConnection(options) {
     }
   })();
 
-  proc.once("exit", () => {
+  proc.once("exit", (exitCode, signal) => {
     closed = true;
     queue.end();
+    const pendingRequestList = pendingRequestSummaries(pendingRequests);
+    const details = {
+      command: options.command,
+      pid: proc.pid,
+      ...(options.cwd ? { cwd: options.cwd } : {}),
+      exitCode,
+      signal,
+      pendingRequests: pendingRequestList,
+      ...(cleanStderrTail(stderrTail) ? { stderrTail: cleanStderrTail(stderrTail) } : {}),
+    };
+    if (!closeRequested && (pendingRequestList.length > 0 || exitCode !== 0 || signal)) {
+      log.warn("ACP child process closed unexpectedly.", details);
+    }
+    const message = formatConnectionClosedMessage({ exitCode, signal, pendingRequests: pendingRequestList });
     for (const [id] of pendingRequests) {
-      rejectRequest(id, "ACP connection closed.");
+      rejectRequest(id, message);
     }
   });
 
@@ -286,7 +350,7 @@ export async function openAcpConnection(options) {
       const id = nextRequestId;
       nextRequestId += 1;
       return new Promise((resolve, reject) => {
-        pendingRequests.set(id, { resolve, reject });
+        pendingRequests.set(id, { method, resolve, reject });
         send({ id, method, params });
       });
     },
@@ -299,6 +363,7 @@ export async function openAcpConnection(options) {
         return;
       }
       closed = true;
+      closeRequested = true;
       try {
         proc.kill();
       } catch {
