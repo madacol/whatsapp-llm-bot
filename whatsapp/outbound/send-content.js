@@ -464,6 +464,15 @@ function formatGenericPathDetail(args, cwd) {
 }
 
 /**
+ * @param {Record<string, unknown>} args
+ * @returns {string | undefined}
+ */
+function formatGenericTextDetail(args) {
+  const text = getStringArg(args, ["title", "message", "prompt", "query", "q"]);
+  return text;
+}
+
+/**
  * @param {string} toolName
  * @param {Record<string, unknown>} args
  * @param {string | null | undefined} cwd
@@ -474,11 +483,8 @@ function formatGenericCompactToolName(toolName, args, cwd) {
   if (search) {
     return search;
   }
-  const pathDetail = formatGenericPathDetail(args, cwd);
-  const displayToolName = stripSimpleMarkdown(toolName).toLowerCase() === "read file"
-    ? "Read"
-    : toolName;
-  return formatCompactEntry(displayToolName, pathDetail);
+  const detail = formatGenericPathDetail(args, cwd) ?? formatGenericTextDetail(args);
+  return formatCompactEntry(toolName, detail);
 }
 
 /**
@@ -496,17 +502,15 @@ function formatCompactToolActivitySummary(activity, cwd) {
   if (activity.type !== "tool" || !activity.toolCall) {
     return null;
   }
-  const presentation = activity.presentation;
   const args = parseCompactToolArguments(activity.toolCall.arguments);
+  const presentation = activity.presentation;
+  const rawSummary = formatGenericCompactToolName(activity.toolCall.name, args, cwd);
   if (!presentation) {
-    return formatGenericCompactToolName(activity.toolCall.name, args, cwd);
+    return rawSummary;
   }
   switch (presentation.kind) {
     case "activity":
-      return formatCompactEntry(
-        presentation.activity.title,
-        presentation.activity.lines.length > 0 ? presentation.activity.lines.join(", ") : undefined,
-      );
+      return rawSummary;
     case "file":
       return formatCompactEntry(presentation.toolName, `\`${presentation.filePath}\``);
     case "plan":
