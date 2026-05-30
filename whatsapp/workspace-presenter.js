@@ -1,8 +1,7 @@
 import { renderFileChangeContent } from "./outbound/send-content.js";
 import { markdownToWhatsApp } from "../message-renderer.js";
 import { formatPlanPresentationText } from "../plan-presentation.js";
-import { formatActivitySummary } from "../tool-presentation-model.js";
-import { formatToolPresentationDisplay, formatToolPresentationSummary } from "../presentation/whatsapp.js";
+import { formatActivitySummary, formatToolPresentationDisplay, formatToolPresentationSummary } from "./tool-presenter.js";
 import { contentEvent } from "../outbound-events.js";
 import { formatUsageEventText } from "../usage-formatting.js";
 import {

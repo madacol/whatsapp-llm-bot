@@ -4,7 +4,7 @@ import { buildToolPresentation } from "../tool-presentation-model.js";
 import {
   formatToolPresentationInspect,
   formatToolPresentationSummary,
-} from "../presentation/whatsapp.js";
+} from "../whatsapp/tool-presenter.js";
 
 describe("tool presentation model", () => {
   it("renders file tool starts as direct file actions", () => {

@@ -95,7 +95,7 @@ export function shortenPath(p, cwd) {
  * @param {ToolActivitySummary} activity
  * @returns {string}
  */
-export function formatActivitySummary(activity) {
+function formatActivitySummary(activity) {
   if (activity.lines.length === 0) {
     return `*${activity.title}*`;
   }

@@ -4,15 +4,16 @@ import { createLogger } from "../../logger.js";
 import { renderBlocks } from "../../message-renderer.js";
 import { formatPlanPresentationText } from "../../plan-presentation.js";
 import { formatToolFlowInspectText, formatToolFlowSummary } from "../../tool-flow-presentation.js";
-import { formatActivitySummary, shortenPath } from "../../tool-presentation-model.js";
+import { shortenPath } from "../../tool-presentation-model.js";
 import { formatUsageEventText } from "../../usage-formatting.js";
 import { makeImageMessage, makeTextMessage } from "../message-payloads.js";
 import {
+  formatActivitySummary,
   formatToolPresentationDisplay,
   formatToolPresentationInspect,
   formatToolPresentationSummary,
   langFromPath,
-} from "../../presentation/whatsapp.js";
+} from "../tool-presenter.js";
 import { sendImageHD } from "../../whatsapp-hd-media.js";
 
 /** Delay between relaying each image in an album so WhatsApp groups them. */

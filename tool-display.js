@@ -2,23 +2,23 @@
  * Compatibility exports for tool presentation.
  *
  * The semantic model lives in `tool-presentation-model.js`. WhatsApp-specific
- * display and inspect policy lives in `presentation/whatsapp.js`.
+ * display and inspect policy lives in `whatsapp/tool-presenter.js`.
  */
 
 import { parseToolArgs } from "./agent-io-defaults.js";
 import {
   buildToolPresentation,
-  formatActivitySummary,
   shortenPath,
 } from "./tool-presentation-model.js";
 import { formatPlanPresentationText } from "./plan-presentation.js";
 import {
   formatBashCommand,
+  formatActivitySummary,
   formatToolPresentationDisplay,
   formatToolPresentationInspect,
   formatToolPresentationSummary,
   langFromPath,
-} from "./presentation/whatsapp.js";
+} from "./whatsapp/tool-presenter.js";
 
 /**
  * Tool names that map to the shared semantic SDK-style presentation layer.
