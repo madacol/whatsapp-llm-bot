@@ -135,7 +135,10 @@ function formatGenericToolName(toolName, args, cwd) {
     return search;
   }
   const pathDetail = formatGenericPathDetail(args, cwd);
-  return formatCompactEntry(toolName, pathDetail);
+  const displayToolName = stripSimpleMarkdown(toolName).toLowerCase() === "read file"
+    ? "Read"
+    : toolName;
+  return formatCompactEntry(displayToolName, pathDetail);
 }
 
 /**
@@ -147,12 +150,6 @@ function formatGenericToolName(toolName, args, cwd) {
  */
 function formatCompactToolCall(toolCall, actionFormatter, cwd, toolContext) {
   const args = parseToolArgs(toolCall.arguments);
-  if ((toolCall.name === "run_bash" || toolCall.name === "Bash") && typeof args.command === "string") {
-    return formatCompactCommand(args.command);
-  }
-  if (toolCall.name === "exec_command" && typeof args.cmd === "string") {
-    return formatCompactCommand(args.cmd);
-  }
 
   const presentation = buildToolPresentation(
     toolCall.name,
@@ -163,8 +160,6 @@ function formatCompactToolCall(toolCall, actionFormatter, cwd, toolContext) {
   );
 
   switch (presentation.kind) {
-    case "bash":
-      return formatCompactCommand(presentation.command);
     case "activity":
       return formatCompactEntry(
         presentation.activity.title,

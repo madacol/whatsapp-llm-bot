@@ -8,7 +8,7 @@ import {
 } from "../harnesses/sandbox-approval-coordinator.js";
 
 const SAMPLE_REQUEST = {
-  toolName: "run_bash",
+  toolName: "Shell",
   kind: "command",
   summary: "Run a shell command that targets `../shared` outside the workspace `/repo/project`.",
   command: "mkdir -p ../shared",

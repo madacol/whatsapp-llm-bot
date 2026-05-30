@@ -255,7 +255,7 @@ describe("ACP file changes through WhatsApp transport", () => {
    * @param {string} fileName
    */
   function assertOneFileChange(rendered, title, fileName) {
-    const matches = rendered.filter((text) => text.includes(title) && text.includes(`\`${fileName}\``));
+    const matches = rendered.filter((text) => text.includes(title) && text.includes(`*${fileName}*`));
     assert.equal(matches.length, 1, `Expected one ${title} caption for ${fileName}, got ${JSON.stringify(rendered)}`);
   }
 
@@ -276,7 +276,7 @@ describe("ACP file changes through WhatsApp transport", () => {
     const deleted = await runAcpPrompt("direct delete", async (workdir) => {
       await fs.writeFile(path.join(workdir, "direct-delete.txt"), "delete me\n", "utf8");
     });
-    assertOneFileChange(deleted.rendered, "Delete", "direct-delete.txt");
+    assertOneFileChange(deleted.rendered, "Snapshot", "direct-delete.txt");
 
     const diffAdd = await runAcpPrompt("diff only add");
     assertOneFileChange(diffAdd.rendered, "Add", "diff-only-add.js");

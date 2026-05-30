@@ -4,19 +4,19 @@ import { failedToolCallUpdate, formatFailedMessageSummary } from "../message-fai
 
 describe("message failure presentation", () => {
   it("prefixes summaries with a failure marker once", () => {
-    assert.equal(formatFailedMessageSummary("*Bash*  `pnpm test`"), "❌ *Bash*  `pnpm test`");
-    assert.equal(formatFailedMessageSummary("❌ *Bash*  `pnpm test`"), "❌ *Bash*  `pnpm test`");
+    assert.equal(formatFailedMessageSummary("*Shell*  `pnpm test`"), "❌ *Shell*  `pnpm test`");
+    assert.equal(formatFailedMessageSummary("❌ *Shell*  `pnpm test`"), "❌ *Shell*  `pnpm test`");
   });
 
   it("builds a text update for failed tool-call handles", () => {
     assert.deepEqual(failedToolCallUpdate({
       kind: "bash",
-      toolName: "Bash",
-      summary: "*Bash*  `pnpm test`",
+      toolName: "Shell",
+      summary: "*Shell*  `pnpm test`",
       command: "pnpm test",
     }), {
       kind: "text",
-      text: "❌ *Bash*  `pnpm test`",
+      text: "❌ *Shell*  `pnpm test`",
     });
   });
 });

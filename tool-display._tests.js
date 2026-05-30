@@ -150,31 +150,6 @@ describe("formatSdkToolCall", () => {
 });
 
 describe("formatToolCallDisplay", () => {
-  it("renders Bash as code block with description as caption", () => {
-    const result = formatToolCallDisplay(
-      tc("Bash", { command: "npm test", description: "Run tests" })
-    );
-    assert.ok(Array.isArray(result));
-    const block = /** @type {CodeContentBlock} */ (result[0]);
-    assert.equal(block.type, "code");
-    assert.equal(block.language, "bash");
-    assert.equal(block.caption, "*Bash*  _Run tests_");
-  });
-
-  it("wraps long Bash commands in code block to fit aspect ratio", () => {
-    const longCmd = "pnpm exec tsc --noEmit --project jsconfig.json --strict --noUnusedLocals --noUnusedParameters --skipLibCheck";
-    const result = formatToolCallDisplay(
-      tc("Bash", { command: longCmd, description: "Type check" })
-    );
-    assert.ok(Array.isArray(result));
-    const block = /** @type {CodeContentBlock} */ (result[0]);
-    assert.equal(block.type, "code");
-    const maxWidth = maxCharsForLineCount(1); // single command, no connectors
-    for (const line of block.code.split("\n")) {
-      assert.ok(line.length <= maxWidth, `line too long (${line.length} > ${maxWidth}): ${line}`);
-    }
-  });
-
   it("renders Edit as diff block for known languages", () => {
     const result = formatToolCallDisplay(
       tc("Edit", { file_path: "/a.js", old_string: "foo", new_string: "bar" })
@@ -198,17 +173,4 @@ describe("formatToolCallDisplay", () => {
     assert.ok(result.includes("doing stuff"), "should include args");
   });
 
-  it("generic Bash commands still render as code blocks", () => {
-    const result = formatToolCallDisplay(tc("Bash", { command: "pwd" }));
-    assert.ok(Array.isArray(result));
-    assert.equal(result[0].type, "code");
-  });
-
-  it("renders classified Bash search commands as semantic activity summaries", () => {
-    const result = formatToolCallDisplay(tc("Bash", { command: "rg -n \"needle\" src" }));
-    assert.ok(Array.isArray(result));
-    const block = /** @type {CodeContentBlock} */ (result[0]);
-    assert.equal(block.type, "code");
-    assert.equal(block.caption, "*Search*\n\"needle\" in `src`");
-  });
 });

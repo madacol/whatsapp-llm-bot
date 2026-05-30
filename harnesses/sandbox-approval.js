@@ -132,7 +132,7 @@ function isFileBoundaryTool(toolName) {
  * @returns {boolean}
  */
 function isShellTool(toolName) {
-  return toolName === "run_bash" || toolName === "Bash";
+  return toolName === "Shell";
 }
 
 /**

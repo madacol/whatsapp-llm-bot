@@ -3,6 +3,7 @@ import { failedToolCallUpdate } from "../message-failure-presentation.js";
 import {
   contentEvent,
   fileChangeEvent,
+  toolCallEvent,
   toolActivityEvent,
   toolInspectState,
 } from "../outbound-events.js";
@@ -75,17 +76,13 @@ async function onCommand({ command, status, output }) {
       if (!visibility.toolDetails) {
         return;
       }
-      const toolCall = {
-        id: `codex-command:${command}`,
-        name: "Bash",
-        arguments: JSON.stringify({ command }),
-      };
-      const handle = await displayToolCall(toolCall);
+      const presentation = buildCommandPresentation(command);
+      const handle = await context.send(toolCallEvent(presentation));
       if (handle) {
         rememberInspect(command, {
           handle,
-          displayPresentation: buildCommandPresentation(command, cwd),
-          inspectPresentation: buildCommandPresentation(command, cwd),
+          displayPresentation: presentation,
+          inspectPresentation: presentation,
         });
       }
       return handle;
@@ -144,6 +141,7 @@ async function onCommand({ command, status, output }) {
    *   summary?: string,
    *   diff?: string,
    *   kind?: "add" | "delete" | "update",
+   *   source?: "tool" | "snapshot",
    *   itemId?: string,
    *   stage?: "proposed" | "denied" | "applied" | "failed",
    *   oldText?: string,
@@ -151,7 +149,7 @@ async function onCommand({ command, status, output }) {
    * }} event
    * @returns {Promise<void>}
    */
-  async function onFileChange({ path, summary, diff, kind, itemId, stage, oldText, newText }) {
+  async function onFileChange({ path, summary, diff, kind, source, itemId, stage, oldText, newText }) {
     if (!visibility.changes) {
       return;
     }
@@ -161,6 +159,7 @@ async function onCommand({ command, status, output }) {
       ...(summary !== undefined && { summary }),
       ...(diff !== undefined && { diff }),
       ...(kind !== undefined && { changeKind: kind }),
+      ...(source !== undefined && { source }),
       ...(itemId !== undefined && { itemId }),
       ...(stage !== undefined && { stage }),
       ...(oldText !== undefined && { oldText }),

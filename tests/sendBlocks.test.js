@@ -12,6 +12,7 @@ process.env.MODEL = "mock-model";
 import { createTestDb } from "./helpers.js";
 import { setDb } from "../db.js";
 import { createReactionRuntime } from "../whatsapp/runtime/reaction-runtime.js";
+import { fileChangeEvent } from "../outbound-events.js";
 
 /** @type {typeof import("../whatsapp/outbound/send-content.js").sendBlocks} */
 let sendBlocks;
@@ -241,6 +242,77 @@ describe("sendEvent – runtime events", () => {
     assert.deepEqual(sent.map((entry) => entry.msg), [
       { text: "❌ Provider crashed", linkPreview: null },
     ]);
+  });
+});
+
+describe("sendEvent – presentation vertical slices", () => {
+  it("renders explicit update file changes with a bold filename through WhatsApp", async () => {
+    const { sock, sent } = createMockSock();
+
+    await sendEvent(sock, "presentation-chat", fileChangeEvent({
+      path: "/tmp/src/app.js",
+      cwd: "/tmp",
+      changeKind: "update",
+      oldText: "before\n",
+      newText: "after\n",
+      diff: [
+        "--- a/src/app.js",
+        "+++ b/src/app.js",
+        "@@ -1 +1 @@",
+        "-before",
+        "+after",
+      ].join("\n"),
+    }));
+
+    assert.equal(sent.length, 1);
+    assert.equal(sent[0]?.msg.caption, "🔧 Update *src/app.js*");
+  });
+
+  it("renders snapshot-origin file changes with the Snapshot label through WhatsApp", async () => {
+    const { sock, sent } = createMockSock();
+
+    await sendEvent(sock, "presentation-chat", fileChangeEvent({
+      path: "/tmp/src/app.js",
+      cwd: "/tmp",
+      source: "snapshot",
+      changeKind: "update",
+      oldText: "before\n",
+      newText: "after\n",
+      diff: [
+        "--- a/src/app.js",
+        "+++ b/src/app.js",
+        "@@ -1 +1 @@",
+        "-before",
+        "+after",
+      ].join("\n"),
+    }));
+
+    assert.equal(sent.length, 1);
+    assert.equal(sent[0]?.msg.caption, "🔧 Snapshot *src/app.js*");
+  });
+
+  it("drops generic editing summaries from file-change captions", async () => {
+    const { sock, sent } = createMockSock();
+
+    await sendEvent(sock, "presentation-chat", fileChangeEvent({
+      path: "/tmp/src/app.js",
+      cwd: "/tmp",
+      source: "snapshot",
+      summary: "Editing files",
+      changeKind: "update",
+      oldText: "before\n",
+      newText: "after\n",
+      diff: [
+        "--- a/src/app.js",
+        "+++ b/src/app.js",
+        "@@ -1 +1 @@",
+        "-before",
+        "+after",
+      ].join("\n"),
+    }));
+
+    assert.equal(sent.length, 1);
+    assert.equal(sent[0]?.msg.caption, "🔧 Snapshot *src/app.js*");
   });
 });
 
@@ -744,7 +816,7 @@ Second block:
       " line 2",
       " line 3",
     ].join("\n"));
-    assert.equal(diffBlock.caption, "Update `plain.txt`");
+    assert.equal(diffBlock.caption, "Update *plain.txt*");
   });
 
   it("renders brand-new file writes as code blocks instead of diffs", () => {
@@ -767,7 +839,7 @@ Second block:
     assert.equal(codeBlock.type, "code");
     assert.equal(codeBlock.language, "javascript");
     assert.equal(codeBlock.code, "export const value = 1;\n");
-    assert.equal(codeBlock.caption, "Add `src/new-file.js`");
+    assert.equal(codeBlock.caption, "Add *src/new-file.js*");
   });
 
   it("renders writes labeled add as diffs when prior text exists", () => {
@@ -790,7 +862,7 @@ Second block:
     assert.ok(Array.isArray(content), "Expected file-change content blocks");
     const diffBlock = /** @type {DiffContentBlock} */ (content[0]);
     assert.equal(diffBlock.type, "diff");
-    assert.equal(diffBlock.caption, "Update `src/existing.js`");
+    assert.equal(diffBlock.caption, "Update *src/existing.js*");
   });
 
   it("renders deleted files with an explicit delete label", () => {
@@ -815,7 +887,7 @@ Second block:
       "@@ -1 +0,0 @@",
       "-export const value = 1;",
     ].join("\n"));
-    assert.equal(diffBlock.caption, "Delete `src/delete-me.js`");
+    assert.equal(diffBlock.caption, "Delete *src/delete-me.js*");
   });
 
   it("renders proposed file changes with a lifecycle-specific title even without a diff", () => {
@@ -828,7 +900,7 @@ Second block:
       summary: "/tmp/src/file.js (update)",
     });
 
-    assert.equal(content, "*Proposed File Change*  `src/file.js`");
+    assert.equal(content, "*Proposed File Change*  *src/file.js*");
   });
 
   it("handles type 'text' without image rendering", async () => {
@@ -1089,7 +1161,7 @@ describe("sendBlocks – tool-call → edit pipeline", () => {
       kind: "text",
       text: [
         "🔧 *Read*  `src/app.js`",
-        "🔧 *Bash*  `pnpm type-check`",
+        "🔧 *Shell*  `pnpm type-check`",
       ].join("\n"),
       persistOnInspect: true,
     });
@@ -1103,27 +1175,27 @@ describe("sendBlocks – tool-call → edit pipeline", () => {
     const inspectMsg = /** @type {Record<string, unknown>} */ (calls[1].args[1]);
     assert.equal(
       inspectMsg.text,
-      "🔧 *Read*  `src/app.js`\n🔧 *Bash*  `pnpm type-check`",
+      "🔧 *Read*  `src/app.js`\n🔧 *Shell*  `pnpm type-check`",
     );
 
     handle.setInspect({
       kind: "text",
       text: [
         "🔧 *Read*  `src/app.js`",
-        "🔧 *Bash*  `pnpm type-check`",
-        "🔧 *Bash*  `git diff`",
+        "🔧 *Shell*  `pnpm type-check`",
+        "🔧 *Shell*  `git diff`",
       ].join("\n"),
       persistOnInspect: true,
     });
     await handle.update({
       kind: "text",
-      text: "... +1 earlier tools\n🔧 *Bash*  `pnpm type-check`\n🔧 *Bash*  `git diff`",
+      text: "... +1 earlier tools\n🔧 *Shell*  `pnpm type-check`\n🔧 *Shell*  `git diff`",
     });
 
     const persistedEditMsg = /** @type {Record<string, unknown>} */ (calls[2].args[1]);
     assert.equal(
       persistedEditMsg.text,
-      "🔧 *Read*  `src/app.js`\n🔧 *Bash*  `pnpm type-check`\n🔧 *Bash*  `git diff`",
+      "🔧 *Read*  `src/app.js`\n🔧 *Shell*  `pnpm type-check`\n🔧 *Shell*  `git diff`",
     );
   });
 
@@ -1132,14 +1204,14 @@ describe("sendBlocks – tool-call → edit pipeline", () => {
     const reactionRuntime = createReactionRuntime();
     const longInspectText = Array.from(
       { length: 220 },
-      (_, index) => `🔧 *Bash*  \`command ${String(index).padStart(3, "0")}\``,
+      (_, index) => `🔧 *Shell*  \`command ${String(index).padStart(3, "0")}\``,
     ).join("\n");
 
     const handle = await sendBlocks(
       sock,
       "chat-1",
       "plain",
-      [{ type: "text", text: "🔧 *Bash*  `command 000`" }],
+      [{ type: "text", text: "🔧 *Shell*  `command 000`" }],
       undefined,
       reactionRuntime,
     );
@@ -1159,13 +1231,13 @@ describe("sendBlocks – tool-call → edit pipeline", () => {
 
     const inspectMsg = /** @type {Record<string, unknown>} */ (calls[1].args[1]);
     assert.equal(typeof inspectMsg.text, "string");
-    assert.ok(inspectMsg.text.startsWith("🔧 *Bash*  `command 000`"));
+    assert.ok(inspectMsg.text.startsWith("🔧 *Shell*  `command 000`"));
     assert.ok(inspectMsg.text.includes("_… truncated ("));
     assert.ok(inspectMsg.text.length < longInspectText.length);
 
     await handle.update({
       kind: "text",
-      text: "... +217 earlier tools\n🔧 *Bash*  `command 217`\n🔧 *Bash*  `command 218`\n🔧 *Bash*  `command 219`",
+      text: "... +217 earlier tools\n🔧 *Shell*  `command 217`\n🔧 *Shell*  `command 218`\n🔧 *Shell*  `command 219`",
     });
 
     const persistedEditMsg = /** @type {Record<string, unknown>} */ (calls[2].args[1]);

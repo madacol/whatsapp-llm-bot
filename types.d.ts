@@ -195,6 +195,7 @@ type FileChangeEvent = {
   summary?: string;
   diff?: string;
   changeKind?: "add" | "delete" | "update";
+  source?: "tool" | "snapshot";
   itemId?: string;
   stage?: "proposed" | "denied" | "applied" | "failed";
   oldText?: string;
@@ -647,6 +648,7 @@ type AgentIOHooks = {
     summary?: string,
     diff?: string,
     kind?: "add" | "delete" | "update",
+    source?: "tool" | "snapshot",
     itemId?: string,
     stage?: "proposed" | "denied" | "applied" | "failed",
     oldText?: string,

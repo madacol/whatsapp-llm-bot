@@ -256,6 +256,7 @@ function makeFileChangeEvent(block, toolCall, raw) {
     change: {
       path: /** @type {string} */ (block.path),
       kind,
+      source: "tool",
       ...(typeof toolCall.title === "string" ? { summary: toolCall.title } : {}),
       ...(diff !== undefined ? { diff } : {}),
       ...(oldText !== undefined ? { oldText } : {}),
