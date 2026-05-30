@@ -716,6 +716,10 @@ async function sendRuntimeCommandEvent(sock, chatId, event, options, reactionRun
       commandStateByCommand = new Map();
       runtimeCommandsByChat.set(chatId, commandStateByCommand);
     }
+    const existing = commandStateByCommand.get(command);
+    if (existing) {
+      return existing.handle;
+    }
     const handle = await sendBlocks(sock, chatId, "plain", text, options, reactionRuntime, event, {
       editHandleStore: sendOptions.editHandleStore,
     });
@@ -804,6 +808,10 @@ async function sendRuntimeToolEvent(sock, chatId, event, options, reactionRuntim
     if (!toolStateById) {
       toolStateById = new Map();
       runtimeToolsByChat.set(chatId, toolStateById);
+    }
+    const existing = toolStateById.get(toolEvent.tool.id);
+    if (existing) {
+      return existing.handle;
     }
     const handle = await sendBlocks(sock, chatId, "plain", text, options, reactionRuntime, event, {
       editHandleStore: sendOptions.editHandleStore,
