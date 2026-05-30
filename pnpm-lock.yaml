@@ -13,7 +13,7 @@ patchedDependencies:
     hash: faf1d81457fcdfd4e2c8d4ea687c9e8960e945f13e32a8acf015b530d5844bb1
     path: patches/@agentclientprotocol__codex-acp@0.0.44.patch
   '@whiskeysockets/baileys@7.0.0-rc.9':
-    hash: 1f65f784f909ccab10eacf81366fec3a41558fad7cd4b6f8a3c8970220c21de4
+    hash: dcc163ac8dc3efb56fd658d4b2698496013ef7ef1f5a9de778714ee1d44f9ade
     path: patches/@whiskeysockets__baileys@7.0.0-rc.9.patch
 
 importers:
@@ -34,7 +34,7 @@ importers:
         version: 2.6.2
       '@whiskeysockets/baileys':
         specifier: 7.0.0-rc.9
-        version: 7.0.0-rc.9(patch_hash=1f65f784f909ccab10eacf81366fec3a41558fad7cd4b6f8a3c8970220c21de4)(sharp@0.34.5)
+        version: 7.0.0-rc.9(patch_hash=dcc163ac8dc3efb56fd658d4b2698496013ef7ef1f5a9de778714ee1d44f9ade)(sharp@0.34.5)
       diff:
         specifier: ^8.0.3
         version: 8.0.3
@@ -2905,7 +2905,7 @@ snapshots:
 
   '@ungap/structured-clone@1.3.0': {}
 
-  '@whiskeysockets/baileys@7.0.0-rc.9(patch_hash=1f65f784f909ccab10eacf81366fec3a41558fad7cd4b6f8a3c8970220c21de4)(sharp@0.34.5)':
+  '@whiskeysockets/baileys@7.0.0-rc.9(patch_hash=dcc163ac8dc3efb56fd658d4b2698496013ef7ef1f5a9de778714ee1d44f9ade)(sharp@0.34.5)':
     dependencies:
       '@cacheable/node-cache': 1.7.6
       '@hapi/boom': 9.1.4

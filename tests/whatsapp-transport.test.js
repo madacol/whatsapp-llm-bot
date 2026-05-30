@@ -627,9 +627,9 @@ describe("WhatsApp transport community creation", () => {
         event: {
           kind: "runtime_event",
           event: {
-            type: "turn.completed",
+            type: "turn.started",
             provider: "codex",
-            turn: { status: "completed" },
+            turn: { status: "started" },
           },
         },
       },
@@ -673,7 +673,7 @@ describe("WhatsApp transport community creation", () => {
 
     assert.deepEqual(sentMessages, [{
       chatId,
-      message: makeTextMessage("🔄 *CODEX*  turn completed"),
+      message: makeTextMessage("🔄 *CODEX*  turn started"),
     }]);
     assert.equal((await getQueuedRows(testDb, chatId)).length, 0);
     assert.equal((await getDeadLetterRows(testDb, chatId)).length, 0);

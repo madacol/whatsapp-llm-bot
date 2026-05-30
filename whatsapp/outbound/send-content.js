@@ -338,6 +338,25 @@ function formatRuntimeEventPresentation(event) {
 }
 
 /**
+ * @param {RuntimeEventOutboundEvent["event"]} event
+ * @returns {boolean}
+ */
+function shouldSuppressRuntimeEvent(event) {
+  if (event.provider === "codex") {
+    return event.type === "session.started"
+      || event.type === "session.updated"
+      || event.type === "session.stopped"
+      || event.type === "turn.completed";
+  }
+
+  if (event.provider === "acp" && event.type.startsWith("item.")) {
+    return true;
+  }
+
+  return false;
+}
+
+/**
  * @param {{ entries: Array<{ icon: string, provider: string, summary: string, detail?: string }> }} state
  * @returns {string}
  */
@@ -658,6 +677,13 @@ function renderOutboundEvent(event) {
  * @returns {Promise<MessageHandle | undefined>}
  */
 async function sendRuntimeEvent(sock, chatId, event, options, reactionRuntime, sendOptions = {}) {
+  if (shouldSuppressRuntimeEvent(event.event)) {
+    if (event.event.type === "turn.completed") {
+      runtimeStatusByChat.delete(chatId);
+    }
+    return undefined;
+  }
+
   const presentation = formatRuntimeEventPresentation(event.event);
   if (presentation.kind === "error") {
     return sendBlocks(sock, chatId, "error", presentation.summary, options, reactionRuntime, event, {
