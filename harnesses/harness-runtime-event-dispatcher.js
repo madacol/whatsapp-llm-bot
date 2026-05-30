@@ -77,6 +77,11 @@ function shouldPassThroughPresentationBoundary(event) {
     && (event.type === "command.started"
       || event.type === "command.completed"
       || event.type === "command.failed"
+      || event.type === "file-read.started"
+      || event.type === "tool.started"
+      || event.type === "tool.updated"
+      || event.type === "tool.completed"
+      || event.type === "tool.failed"
       || event.type === "file-change.completed");
 }
 
@@ -359,6 +364,15 @@ export function createHarnessRuntimeEventDispatcher(input) {
     await captureRawEvent(normalizedEvent);
     if (shouldPassThroughPresentationBoundary(normalizedEvent)) {
       await hooks.onRuntimeEvent(attachRuntimeBoundaryFacts(normalizedEvent, input.workdir));
+      if (normalizedEvent.type === "tool.completed") {
+        rememberSpawnedSubagent(normalizedEvent.tool);
+        if (normalizedEvent.tool.outputBlocks) {
+          await hooks.onToolResult(normalizedEvent.tool.outputBlocks, normalizedEvent.tool.name, normalizedEvent.tool.permissions ?? {});
+        }
+        for (const response of extractWaitAgentResponses(normalizedEvent.tool)) {
+          await emitSubagentResponse(response);
+        }
+      }
       return;
     }
     switch (normalizedEvent.type) {

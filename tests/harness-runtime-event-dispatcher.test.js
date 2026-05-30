@@ -306,7 +306,7 @@ describe("createHarnessRuntimeEventDispatcher", () => {
     assert.deepEqual(dispatcher.result.response, [{ type: "markdown", text: "Hello" }]);
   });
 
-  it("groups flow tools and keeps inspect state on the grouped handle", async () => {
+  it("groups non-ACP flow tools and keeps inspect state on the grouped handle", async () => {
     /** @type {Array<Record<string, unknown>>} */
     const toolCalls = [];
     /** @type {MessageHandleUpdate[]} */
@@ -314,7 +314,7 @@ describe("createHarnessRuntimeEventDispatcher", () => {
     /** @type {MessageInspectState[]} */
     const inspectStates = [];
     const dispatcher = createHarnessRuntimeEventDispatcher({
-      provider: "acp",
+      provider: "pi",
       messages: [],
       hooks: {
         onToolCall: async (toolCall) => {
@@ -333,7 +333,7 @@ describe("createHarnessRuntimeEventDispatcher", () => {
 
     await dispatcher.handleEvent({
       type: "tool.started",
-      provider: "acp",
+      provider: "pi",
       tool: {
         id: "web-1",
         name: "search_query",
@@ -342,7 +342,7 @@ describe("createHarnessRuntimeEventDispatcher", () => {
     });
     await dispatcher.handleEvent({
       type: "tool.started",
-      provider: "acp",
+      provider: "pi",
       tool: {
         id: "web-2",
         name: "open",
@@ -469,6 +469,74 @@ describe("createHarnessRuntimeEventDispatcher", () => {
     assert.equal(runtimeEvents[1]?.type, "file-change.completed");
     assert.equal(runtimeEvents[1]?.type === "file-change.completed" ? runtimeEvents[1].change.cwd : undefined, "/repo");
     assert.deepEqual(runtimeEvents[1]?.raw, { source: "acp.jsonrpc", method: "session/update" });
+  });
+
+  it("passes ACP tool and file-read events through the runtime event boundary", async () => {
+    /** @type {import("../harnesses/harness-runtime-events.js").HarnessRuntimeEvent[]} */
+    const runtimeEvents = [];
+    /** @type {Array<Record<string, unknown>>} */
+    const toolCalls = [];
+    /** @type {Array<{ command: string, paths: string[] }>} */
+    const fileReads = [];
+    /** @type {ToolContentBlock[][]} */
+    const toolResults = [];
+    const dispatcher = createHarnessRuntimeEventDispatcher({
+      provider: "acp",
+      messages: [],
+      hooks: {
+        onRuntimeEvent: async (event) => {
+          runtimeEvents.push(event);
+        },
+        onToolCall: async (toolCall) => {
+          toolCalls.push(toolCall);
+          return undefined;
+        },
+        onFileRead: async (event) => {
+          fileReads.push(event);
+        },
+        onToolResult: async (blocks) => {
+          toolResults.push(blocks);
+        },
+      },
+    });
+
+    await dispatcher.handleEvent({
+      type: "file-read.started",
+      provider: "acp",
+      fileRead: {
+        command: "sed -n '1,20p' src/app.js",
+        paths: ["src/app.js"],
+      },
+    });
+    await dispatcher.handleEvent({
+      type: "tool.started",
+      provider: "acp",
+      tool: {
+        id: "tool-1",
+        name: "Task",
+        arguments: { title: "Review mock code" },
+      },
+    });
+    await dispatcher.handleEvent({
+      type: "tool.completed",
+      provider: "acp",
+      tool: {
+        id: "tool-1",
+        name: "Task",
+        arguments: { title: "Review mock code" },
+        output: "done",
+        outputBlocks: [{ type: "text", text: "tool output" }],
+      },
+    });
+
+    assert.deepEqual(toolCalls, []);
+    assert.deepEqual(fileReads, []);
+    assert.deepEqual(runtimeEvents.map((event) => event.type), [
+      "file-read.started",
+      "tool.started",
+      "tool.completed",
+    ]);
+    assert.deepEqual(toolResults, [[{ type: "text", text: "tool output" }]]);
   });
 
   it("captures raw provider events as replayable ndjson without changing hook projection", async () => {
