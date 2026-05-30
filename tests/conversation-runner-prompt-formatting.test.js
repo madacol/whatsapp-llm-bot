@@ -542,7 +542,7 @@ describe("createConversationRunner prompt formatting", () => {
     );
   });
 
-  it("presents Codex semantic adapter Read and Shell progress through the conversation runner", async () => {
+  it("passes Codex compact progress through the conversation runner as semantic activity", async () => {
     await seedChat("conv-codex-runtime-progress", { enabled: true });
     await updateChatConfig("conv-codex-runtime-progress", (current) => ({
       ...current,
@@ -591,12 +591,12 @@ describe("createConversationRunner prompt formatting", () => {
       .filter((response) => response.source === "plain")
       .map((response) => response.text);
     assert.ok(
-      progressTexts.some((text) => text.includes("*Read*  `src/app.js`")),
-      `expected Read progress, got: ${JSON.stringify(progressTexts)}`,
+      progressTexts.some((text) => text.includes("\"type\":\"file_read\"") && text.includes("\"paths\":[\"src/app.js\"]")),
+      `expected file-read progress activity, got: ${JSON.stringify(progressTexts)}`,
     );
     assert.ok(
-      progressTexts.some((text) => text.includes("*Shell*  `pnpm type-check`")),
-      `expected Shell progress, got: ${JSON.stringify(progressTexts)}`,
+      progressTexts.some((text) => text.includes("\"type\":\"command\"") && text.includes("\"command\":\"pnpm type-check\"")),
+      `expected command progress activity, got: ${JSON.stringify(progressTexts)}`,
     );
   });
 

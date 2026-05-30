@@ -27,6 +27,19 @@ const runtimeStatusByChat = new Map();
 const runtimeCommandsByChat = new Map();
 /** @type {Map<string, Map<string, { handle?: MessageHandle, summary: string }>>} */
 const runtimeToolsByChat = new Map();
+/** @type {Map<string, {
+ *   handle?: MessageHandle,
+ *   entries: Array<{ id: string, summary: string, inspectDetail?: string, completed: boolean, failed: boolean }>,
+ *   pendingCommandEntryIds: Map<string, string[]>,
+ *   pendingToolEntryIds: string[],
+ *   pendingToolEntryIdsByToolId: Map<string, string>,
+ *   debounceTimer: ReturnType<typeof setTimeout> | null,
+ *   nextEntryId: number,
+ * }>} */
+const compactToolActivityByChat = new Map();
+
+const COMPACT_TOOL_ACTIVITY_LIMIT = 3;
+const COMPACT_TOOL_ACTIVITY_DEBOUNCE_MS = 1000;
 
 /** @type {Record<MessageSource, string>} */
 const SOURCE_PREFIX = {
@@ -345,6 +358,174 @@ function getRuntimeToolIcon(status) {
 }
 
 /**
+ * @param {string} value
+ * @returns {string}
+ */
+function stripSimpleMarkdown(value) {
+  return value.trim().replace(/^[*_`]+|[*_`]+$/g, "");
+}
+
+/**
+ * @param {string} value
+ * @returns {string}
+ */
+function boldTarget(value) {
+  return `*${value.trim()}*`;
+}
+
+/**
+ * @param {string} tool
+ * @param {string} [detail]
+ * @returns {string}
+ */
+function formatCompactEntry(tool, detail) {
+  if (!detail) {
+    return `*${tool}*`;
+  }
+  return detail.startsWith("\n") ? `*${tool}*${detail}` : `*${tool}*  ${detail}`;
+}
+
+/**
+ * @param {string} command
+ * @returns {string}
+ */
+function formatCompactCommand(command) {
+  const trimmedCommand = command.trim();
+  if (!trimmedCommand) {
+    return formatCompactEntry("Shell");
+  }
+  if (trimmedCommand.includes("\n")) {
+    return formatCompactEntry("Shell", `\n\`\`\`\n${trimmedCommand}\n\`\`\``);
+  }
+  return formatCompactEntry("Shell", `\`${trimmedCommand}\``);
+}
+
+/**
+ * @param {string[]} paths
+ * @returns {string}
+ */
+function formatCompactRead(paths) {
+  const displayPaths = paths
+    .filter((filePath) => typeof filePath === "string" && filePath.length > 0)
+    .map((filePath) => `\`${filePath}\``);
+  return formatCompactEntry("Read", displayPaths.length > 0 ? displayPaths.join(", ") : undefined);
+}
+
+/**
+ * @param {string} toolName
+ * @returns {string | null}
+ */
+function formatGenericSearchToolName(toolName) {
+  const match = toolName.match(/^Search for '(.+)' in (.+)$/);
+  if (!match) {
+    return null;
+  }
+  const [, pattern, target] = match;
+  if (!pattern || !target) {
+    return null;
+  }
+  return formatCompactEntry("Search", `\`${pattern}\` in ${boldTarget(target)}`);
+}
+
+/**
+ * @param {string | undefined} value
+ * @returns {Record<string, unknown>}
+ */
+function parseCompactToolArguments(value) {
+  if (!value) {
+    return {};
+  }
+  try {
+    const parsed = JSON.parse(value);
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      return /** @type {Record<string, unknown>} */ (parsed);
+    }
+  } catch {
+    return {};
+  }
+  return {};
+}
+
+/**
+ * @param {Record<string, unknown>} args
+ * @param {string | null | undefined} cwd
+ * @returns {string | undefined}
+ */
+function formatGenericPathDetail(args, cwd) {
+  const filePath = typeof args.path === "string"
+    ? args.path
+    : typeof args.file_path === "string"
+      ? args.file_path
+      : typeof args.filePath === "string"
+        ? args.filePath
+        : undefined;
+  return filePath ? `\`${shortenPath(filePath, cwd ?? null)}\`` : undefined;
+}
+
+/**
+ * @param {string} toolName
+ * @param {Record<string, unknown>} args
+ * @param {string | null | undefined} cwd
+ * @returns {string}
+ */
+function formatGenericCompactToolName(toolName, args, cwd) {
+  const search = formatGenericSearchToolName(toolName);
+  if (search) {
+    return search;
+  }
+  const pathDetail = formatGenericPathDetail(args, cwd);
+  const displayToolName = stripSimpleMarkdown(toolName).toLowerCase() === "read file"
+    ? "Read"
+    : toolName;
+  return formatCompactEntry(displayToolName, pathDetail);
+}
+
+/**
+ * @param {CompactToolActivityEvent["activity"]} activity
+ * @param {string | null | undefined} cwd
+ * @returns {string | null}
+ */
+function formatCompactToolActivitySummary(activity, cwd) {
+  if (activity.type === "command") {
+    return formatCompactCommand(activity.command);
+  }
+  if (activity.type === "file_read") {
+    return formatCompactRead(activity.paths);
+  }
+  if (activity.type !== "tool" || !activity.toolCall) {
+    return null;
+  }
+  const presentation = activity.presentation;
+  const args = parseCompactToolArguments(activity.toolCall.arguments);
+  if (!presentation) {
+    return formatGenericCompactToolName(activity.toolCall.name, args, cwd);
+  }
+  switch (presentation.kind) {
+    case "activity":
+      return formatCompactEntry(
+        presentation.activity.title,
+        presentation.activity.lines.length > 0 ? presentation.activity.lines.join(", ") : undefined,
+      );
+    case "file":
+      return formatCompactEntry(presentation.toolName, `\`${presentation.filePath}\``);
+    case "plan":
+      return formatCompactEntry("Plan");
+    case "generic": {
+      const summary = presentation.summary.trim();
+      if (!summary || stripSimpleMarkdown(summary) === stripSimpleMarkdown(presentation.toolName)) {
+        return formatGenericCompactToolName(presentation.toolName, args, cwd);
+      }
+      const detail = !summary.includes("\n")
+        ? `\`${summary}\``
+        : undefined;
+      return detail ? formatCompactEntry(presentation.toolName, detail) : formatGenericCompactToolName(presentation.toolName, args, cwd);
+    }
+    default:
+      return formatCompactEntry(activity.toolCall.name);
+  }
+}
+
+/**
  * @param {RuntimeEventOutboundEvent["event"]} event
  * @returns {FileChangeEvent}
  */
@@ -659,6 +840,321 @@ async function sendRuntimeToolEvent(sock, chatId, event, options, reactionRuntim
   return sendBlocks(sock, chatId, "plain", text, options, reactionRuntime, event, {
     editHandleStore: sendOptions.editHandleStore,
   });
+}
+
+/**
+ * @returns {{
+ *   entries: Array<{ id: string, summary: string, inspectDetail?: string, completed: boolean, failed: boolean }>,
+ *   pendingCommandEntryIds: Map<string, string[]>,
+ *   pendingToolEntryIds: string[],
+ *   pendingToolEntryIdsByToolId: Map<string, string>,
+ *   debounceTimer: ReturnType<typeof setTimeout> | null,
+ *   nextEntryId: number,
+ * }}
+ */
+function createCompactToolActivityState() {
+  return {
+    entries: [],
+    pendingCommandEntryIds: new Map(),
+    pendingToolEntryIds: [],
+    pendingToolEntryIdsByToolId: new Map(),
+    debounceTimer: null,
+    nextEntryId: 0,
+  };
+}
+
+/**
+ * @param {{ completed: boolean, failed: boolean, summary: string }} entry
+ * @returns {string}
+ */
+function renderCompactToolActivityEntry(entry) {
+  const icon = entry.failed ? "❌" : entry.completed ? "✅" : "🔧";
+  return `${icon} ${entry.summary}`;
+}
+
+/**
+ * @param {{ entries: Array<{ summary: string, inspectDetail?: string, completed: boolean, failed: boolean }> }} state
+ * @returns {string}
+ */
+function renderCompactToolActivityText(state) {
+  const hiddenCount = Math.max(0, state.entries.length - COMPACT_TOOL_ACTIVITY_LIMIT);
+  const visibleEntries = hiddenCount > 0
+    ? state.entries.slice(-COMPACT_TOOL_ACTIVITY_LIMIT)
+    : state.entries;
+  return [
+    ...(hiddenCount > 0 ? [`... +${hiddenCount} earlier tools`] : []),
+    ...visibleEntries.map(renderCompactToolActivityEntry),
+  ].join("\n");
+}
+
+/**
+ * @param {{ entries: Array<{ summary: string, inspectDetail?: string, completed: boolean, failed: boolean }> }} state
+ * @returns {string}
+ */
+function renderCompactToolActivityInspectText(state) {
+  return state.entries.map((entry) => {
+    const summary = renderCompactToolActivityEntry(entry);
+    return entry.inspectDetail ? `${summary}\n${entry.inspectDetail}` : summary;
+  }).join("\n");
+}
+
+/**
+ * @param {Map<string, string[]>} map
+ * @param {string} key
+ * @param {string} entryId
+ * @returns {void}
+ */
+function rememberCompactPendingEntry(map, key, entryId) {
+  const existing = map.get(key) ?? [];
+  existing.push(entryId);
+  map.set(key, existing);
+}
+
+/**
+ * @param {Map<string, string[]>} map
+ * @param {string} key
+ * @returns {boolean}
+ */
+function hasCompactPendingEntry(map, key) {
+  const existing = map.get(key);
+  return Array.isArray(existing) && existing.length > 0;
+}
+
+/**
+ * @param {Map<string, string[]>} map
+ * @param {string} key
+ * @returns {string | undefined}
+ */
+function consumeCompactPendingEntry(map, key) {
+  const existing = map.get(key);
+  if (!existing || existing.length === 0) {
+    return undefined;
+  }
+  const entryId = existing.shift();
+  if (existing.length === 0) {
+    map.delete(key);
+  }
+  return entryId;
+}
+
+/**
+ * @param {{ entries: Array<{ id: string, completed: boolean, failed: boolean }> }} state
+ * @param {string | undefined} entryId
+ * @param {"completed" | "failed"} status
+ * @returns {boolean}
+ */
+function markCompactEntry(state, entryId, status) {
+  if (!entryId) {
+    return false;
+  }
+  const entry = state.entries.find((candidate) => candidate.id === entryId);
+  if (!entry || entry.failed) {
+    return false;
+  }
+  if (status === "failed") {
+    entry.failed = true;
+    return true;
+  }
+  if (entry.completed) {
+    return false;
+  }
+  entry.completed = true;
+  return true;
+}
+
+/**
+ * @param {{
+ *   entries: Array<{ id: string, completed: boolean, failed: boolean }>,
+ *   pendingToolEntryIds: string[],
+ *   pendingToolEntryIdsByToolId: Map<string, string>,
+ * }} state
+ * @param {string} entryId
+ * @returns {void}
+ */
+function forgetCompactPendingToolEntry(state, entryId) {
+  state.pendingToolEntryIds = state.pendingToolEntryIds.filter((candidate) => candidate !== entryId);
+  for (const [toolId, candidateEntryId] of state.pendingToolEntryIdsByToolId.entries()) {
+    if (candidateEntryId === entryId) {
+      state.pendingToolEntryIdsByToolId.delete(toolId);
+    }
+  }
+}
+
+/**
+ * @param {{ handle?: MessageHandle, entries: Array<{ summary: string, inspectDetail?: string, completed: boolean, failed: boolean }> }} state
+ * @returns {void}
+ */
+function updateCompactToolActivityInspect(state) {
+  state.handle?.setInspect({
+    kind: "text",
+    text: renderCompactToolActivityInspectText(state),
+    persistOnInspect: true,
+  });
+}
+
+/**
+ * @param {ReturnType<typeof createCompactToolActivityState> & { handle?: MessageHandle }} state
+ * @returns {Promise<MessageHandle | undefined>}
+ */
+async function flushCompactToolActivity(state) {
+  if (state.debounceTimer) {
+    clearTimeout(state.debounceTimer);
+    state.debounceTimer = null;
+  }
+  if (!state.handle) {
+    return undefined;
+  }
+  const text = renderCompactToolActivityText(state);
+  updateCompactToolActivityInspect(state);
+  await state.handle.update({ kind: "text", text });
+  return state.handle;
+}
+
+/**
+ * @param {ReturnType<typeof createCompactToolActivityState> & { handle?: MessageHandle }} state
+ * @returns {void}
+ */
+function scheduleCompactToolActivityFlush(state) {
+  if (!state.handle) {
+    return;
+  }
+  if (state.debounceTimer) {
+    clearTimeout(state.debounceTimer);
+  }
+  state.debounceTimer = setTimeout(() => {
+    void flushCompactToolActivity(state);
+  }, COMPACT_TOOL_ACTIVITY_DEBOUNCE_MS);
+}
+
+/**
+ * @param {import('@whiskeysockets/baileys').WASocket} sock
+ * @param {string} chatId
+ * @param {CompactToolActivityEvent} event
+ * @param {{ quoted?: BaileysMessage } | undefined} options
+ * @param {import("../runtime/reaction-runtime.js").ReactionRuntime | undefined} reactionRuntime
+ * @param {{ editHandleStore?: import("../../store.js").Store }} sendOptions
+ * @param {ReturnType<typeof createCompactToolActivityState> & { handle?: MessageHandle }} state
+ * @param {{ id: string, summary: string, inspectDetail?: string, completed: boolean, failed: boolean }} entry
+ * @returns {Promise<MessageHandle | undefined>}
+ */
+async function addCompactToolActivityEntry(sock, chatId, event, options, reactionRuntime, sendOptions, state, entry) {
+  state.entries.push(entry);
+  if (!state.handle) {
+    const handle = await sendBlocks(sock, chatId, "plain", renderCompactToolActivityText(state), options, reactionRuntime, event, {
+      editHandleStore: sendOptions.editHandleStore,
+    });
+    if (handle) {
+      state.handle = handle;
+    }
+    updateCompactToolActivityInspect(state);
+    return handle;
+  }
+  updateCompactToolActivityInspect(state);
+  scheduleCompactToolActivityFlush(state);
+  return state.handle;
+}
+
+/**
+ * @param {import('@whiskeysockets/baileys').WASocket} sock
+ * @param {string} chatId
+ * @param {CompactToolActivityEvent} event
+ * @param {{ quoted?: BaileysMessage } | undefined} options
+ * @param {import("../runtime/reaction-runtime.js").ReactionRuntime | undefined} reactionRuntime
+ * @param {{ editHandleStore?: import("../../store.js").Store }} sendOptions
+ * @returns {Promise<MessageHandle | undefined>}
+ */
+async function sendCompactToolActivityEvent(sock, chatId, event, options, reactionRuntime, sendOptions) {
+  let state = compactToolActivityByChat.get(chatId);
+  if (!state) {
+    state = createCompactToolActivityState();
+    compactToolActivityByChat.set(chatId, state);
+  }
+
+  const activity = event.activity;
+  if (activity.type === "close") {
+    const handle = await flushCompactToolActivity(state);
+    compactToolActivityByChat.delete(chatId);
+    return handle;
+  }
+
+  if (activity.type === "command" && activity.status === "started") {
+    if (hasCompactPendingEntry(state.pendingCommandEntryIds, activity.command)) {
+      return state.handle;
+    }
+    const entryId = `compact-entry-${++state.nextEntryId}`;
+    rememberCompactPendingEntry(state.pendingCommandEntryIds, activity.command, entryId);
+    return addCompactToolActivityEntry(sock, chatId, event, options, reactionRuntime, sendOptions, state, {
+      id: entryId,
+      summary: formatCompactCommand(activity.command),
+      completed: false,
+      failed: false,
+    });
+  }
+
+  if (activity.type === "file_read") {
+    if (hasCompactPendingEntry(state.pendingCommandEntryIds, activity.command)) {
+      return state.handle;
+    }
+    const entryId = `compact-entry-${++state.nextEntryId}`;
+    rememberCompactPendingEntry(state.pendingCommandEntryIds, activity.command, entryId);
+    return addCompactToolActivityEntry(sock, chatId, event, options, reactionRuntime, sendOptions, state, {
+      id: entryId,
+      summary: formatCompactRead(activity.paths),
+      completed: false,
+      failed: false,
+    });
+  }
+
+  if (activity.type === "command") {
+    const entryId = consumeCompactPendingEntry(state.pendingCommandEntryIds, activity.command);
+    if (markCompactEntry(state, entryId, activity.status === "failed" ? "failed" : "completed")) {
+      return flushCompactToolActivity(state);
+    }
+    if (activity.status === "failed") {
+      return addCompactToolActivityEntry(sock, chatId, event, options, reactionRuntime, sendOptions, state, {
+        id: `compact-entry-${++state.nextEntryId}`,
+        summary: formatCompactCommand(activity.command),
+        inspectDetail: activity.output,
+        completed: false,
+        failed: true,
+      });
+    }
+    return state.handle;
+  }
+
+  if (activity.type === "tool" && activity.status === "started" && activity.toolCall) {
+    if (state.pendingToolEntryIdsByToolId.has(activity.toolCall.id)) {
+      return state.handle;
+    }
+    const summary = formatCompactToolActivitySummary(activity, event.cwd);
+    if (!summary) {
+      return state.handle;
+    }
+    const entryId = `compact-entry-${++state.nextEntryId}`;
+    state.pendingToolEntryIds.push(entryId);
+    state.pendingToolEntryIdsByToolId.set(activity.toolCall.id, entryId);
+    return addCompactToolActivityEntry(sock, chatId, event, options, reactionRuntime, sendOptions, state, {
+      id: entryId,
+      summary,
+      completed: false,
+      failed: false,
+    });
+  }
+
+  if (activity.type === "tool") {
+    let entryId = activity.toolCall?.id ? state.pendingToolEntryIdsByToolId.get(activity.toolCall.id) : undefined;
+    if (!entryId && activity.status === "failed") {
+      while (state.pendingToolEntryIds.length > 0 && !entryId) {
+        entryId = state.pendingToolEntryIds.pop();
+      }
+    }
+    if (entryId && markCompactEntry(state, entryId, activity.status === "failed" ? "failed" : "completed")) {
+      forgetCompactPendingToolEntry(state, entryId);
+      return flushCompactToolActivity(state);
+    }
+  }
+
+  return state.handle;
 }
 
 /**
@@ -1276,6 +1772,9 @@ export async function editWhatsAppMessageByHandle(sock, transportHandleId, newTe
 export async function sendEvent(sock, chatId, event, options, reactionRuntime, sendOptions = {}) {
   if (event.kind === "runtime_event") {
     return sendRuntimeEvent(sock, chatId, event, options, reactionRuntime, sendOptions);
+  }
+  if (event.kind === "compact_tool_activity") {
+    return sendCompactToolActivityEvent(sock, chatId, event, options, reactionRuntime, sendOptions);
   }
   const rendered = renderOutboundEvent(event);
   if (!rendered) {

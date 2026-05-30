@@ -35,6 +35,19 @@ export function toolActivityEvent(activity) {
 }
 
 /**
+ * @param {CompactToolActivityEvent["activity"]} activity
+ * @param {{ cwd?: string | null }} [options]
+ * @returns {CompactToolActivityEvent}
+ */
+export function compactToolActivityEvent(activity, options = {}) {
+  return {
+    kind: "compact_tool_activity",
+    activity,
+    ...(options.cwd !== undefined && { cwd: options.cwd }),
+  };
+}
+
+/**
  * @param {import("./plan-presentation.js").PlanPresentation} presentation
  * @returns {PlanEvent}
  */

@@ -158,6 +158,10 @@ function isOutboundEvent(value) {
       return isRecord(value.presentation);
     case "tool_activity":
       return isRecord(value.activity);
+    case "compact_tool_activity":
+      return isRecord(value.activity)
+        && typeof value.activity.type === "string"
+        && (value.cwd === undefined || value.cwd === null || typeof value.cwd === "string");
     case "plan":
       return isRecord(value.presentation);
     case "file_change":

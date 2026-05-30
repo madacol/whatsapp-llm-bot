@@ -90,6 +90,162 @@ describe("sendEvent – sub-agent messages", () => {
   });
 });
 
+describe("sendEvent – compact tool activity", () => {
+  it("renders compact activity state inside WhatsApp", async () => {
+    const { sock, sent } = createMockSock();
+
+    await sendEvent(sock, "compact-chat", {
+      kind: "compact_tool_activity",
+      cwd: "/repo",
+      activity: {
+        type: "file_read",
+        status: "started",
+        command: "sed -n '1,20p' src/app.js",
+        paths: ["src/app.js"],
+      },
+    });
+    await sendEvent(sock, "compact-chat", {
+      kind: "compact_tool_activity",
+      cwd: "/repo",
+      activity: {
+        type: "command",
+        status: "started",
+        command: "pnpm type-check",
+      },
+    });
+    await new Promise((resolve) => setTimeout(resolve, 1100));
+
+    assert.deepEqual(sent.map((entry) => entry.msg), [
+      { text: "🔧 *Read*  `src/app.js`", linkPreview: null },
+      {
+        text: "🔧 *Read*  `src/app.js`\n🔧 *Shell*  `pnpm type-check`",
+        edit: { id: "msg-1", remoteJid: "compact-chat", fromMe: true },
+        linkPreview: null,
+      },
+    ]);
+  });
+
+  it("closes compact activity before the next progress group", async () => {
+    const { sock, sent } = createMockSock();
+
+    await sendEvent(sock, "compact-close-chat", {
+      kind: "compact_tool_activity",
+      activity: { type: "command", status: "started", command: "pwd" },
+    });
+    await sendEvent(sock, "compact-close-chat", {
+      kind: "compact_tool_activity",
+      activity: { type: "command", status: "started", command: "git diff" },
+    });
+    await sendEvent(sock, "compact-close-chat", {
+      kind: "compact_tool_activity",
+      activity: { type: "close" },
+    });
+    await sendEvent(sock, "compact-close-chat", {
+      kind: "compact_tool_activity",
+      activity: { type: "command", status: "started", command: "ls" },
+    });
+
+    assert.deepEqual(sent.map((entry) => entry.msg), [
+      { text: "🔧 *Shell*  `pwd`", linkPreview: null },
+      {
+        text: "🔧 *Shell*  `pwd`\n🔧 *Shell*  `git diff`",
+        edit: { id: "msg-1", remoteJid: "compact-close-chat", fromMe: true },
+        linkPreview: null,
+      },
+      { text: "🔧 *Shell*  `ls`", linkPreview: null },
+    ]);
+  });
+
+  it("formats compact generic tool names inside WhatsApp", async () => {
+    const { sock, sent } = createMockSock();
+    const readTool = {
+      id: "read-file-generic",
+      name: "Read file",
+      arguments: JSON.stringify({ path: "/repo/presentation/whatsapp.js" }),
+    };
+    const searchTool = {
+      id: "search-generic",
+      name: "Search for 'create.*File|Edit|Write' in tool-presentation-model.js",
+      arguments: "{}",
+    };
+
+    await sendEvent(sock, "compact-generic-chat", {
+      kind: "compact_tool_activity",
+      cwd: "/repo",
+      activity: { type: "tool", status: "started", toolCall: readTool },
+    });
+    await sendEvent(sock, "compact-generic-chat", {
+      kind: "compact_tool_activity",
+      cwd: "/repo",
+      activity: { type: "tool", status: "completed", toolCall: readTool },
+    });
+    await sendEvent(sock, "compact-generic-chat", {
+      kind: "compact_tool_activity",
+      cwd: "/repo",
+      activity: { type: "tool", status: "started", toolCall: searchTool },
+    });
+    await sendEvent(sock, "compact-generic-chat", {
+      kind: "compact_tool_activity",
+      cwd: "/repo",
+      activity: { type: "tool", status: "completed", toolCall: searchTool },
+    });
+
+    assert.deepEqual(sent.map((entry) => entry.msg), [
+      { text: "🔧 *Read*  `presentation/whatsapp.js`", linkPreview: null },
+      {
+        text: "✅ *Read*  `presentation/whatsapp.js`",
+        edit: { id: "msg-1", remoteJid: "compact-generic-chat", fromMe: true },
+        linkPreview: null,
+      },
+      {
+        text: "✅ *Read*  `presentation/whatsapp.js`\n✅ *Search*  `create.*File|Edit|Write` in *tool-presentation-model.js*",
+        edit: { id: "msg-1", remoteJid: "compact-generic-chat", fromMe: true },
+        linkPreview: null,
+      },
+    ]);
+  });
+
+  it("keeps only recent compact activity rows inside WhatsApp", async () => {
+    const { sock, sent } = createMockSock();
+
+    for (const command of ["pwd", "pnpm type-check", "sed -n '1,20p' src/app.js", "git diff"]) {
+      await sendEvent(sock, "compact-limit-chat", {
+        kind: "compact_tool_activity",
+        activity: { type: "command", status: "started", command },
+      });
+    }
+    await new Promise((resolve) => setTimeout(resolve, 1100));
+
+    assert.deepEqual(sent.at(-1)?.msg, {
+      text: "... +1 earlier tools\n🔧 *Shell*  `pnpm type-check`\n🔧 *Shell*  `sed -n '1,20p' src/app.js`\n🔧 *Shell*  `git diff`",
+      edit: { id: "msg-1", remoteJid: "compact-limit-chat", fromMe: true },
+      linkPreview: null,
+    });
+  });
+
+  it("marks compact command failures inside WhatsApp", async () => {
+    const { sock, sent } = createMockSock();
+
+    await sendEvent(sock, "compact-fail-chat", {
+      kind: "compact_tool_activity",
+      activity: { type: "command", status: "started", command: "pnpm test" },
+    });
+    await sendEvent(sock, "compact-fail-chat", {
+      kind: "compact_tool_activity",
+      activity: { type: "command", status: "failed", command: "pnpm test", output: "boom" },
+    });
+
+    assert.deepEqual(sent.map((entry) => entry.msg), [
+      { text: "🔧 *Shell*  `pnpm test`", linkPreview: null },
+      {
+        text: "❌ *Shell*  `pnpm test`",
+        edit: { id: "msg-1", remoteJid: "compact-fail-chat", fromMe: true },
+        linkPreview: null,
+      },
+    ]);
+  });
+});
+
 describe("sendEvent – runtime events", () => {
   it("renders ACP file-read runtime progress inside WhatsApp", async () => {
     const { sock, sent } = createMockSock();

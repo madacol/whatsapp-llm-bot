@@ -239,7 +239,7 @@ export function buildAgentIoHooks(
           return;
         }
         if (commandEvent.status === "failed") {
-          const updated = await compactToolActivity.failCommand(commandEvent.command);
+          const updated = await compactToolActivity.failCommand(commandEvent.command, commandEvent.output);
           if (updated) {
             return;
           }
