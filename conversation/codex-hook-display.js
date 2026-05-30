@@ -2,7 +2,7 @@ import { buildCommandPresentation, buildMultiReadActivity, buildReadToolPresenta
 import { failedToolCallUpdate } from "../message-failure-presentation.js";
 import {
   contentEvent,
-  fileChangeEvent,
+  runtimeEvent,
   toolCallEvent,
   toolActivityEvent,
   toolInspectState,
@@ -154,17 +154,21 @@ async function onCommand({ command, status, output }) {
       return;
     }
 
-    await context.send(fileChangeEvent({
-      path,
-      ...(summary !== undefined && { summary }),
-      ...(diff !== undefined && { diff }),
-      ...(kind !== undefined && { changeKind: kind }),
-      ...(source !== undefined && { source }),
-      ...(itemId !== undefined && { itemId }),
-      ...(stage !== undefined && { stage }),
-      ...(oldText !== undefined && { oldText }),
-      ...(newText !== undefined && { newText }),
-      cwd,
+    await context.send(runtimeEvent({
+      type: "file-change.completed",
+      provider: "codex",
+      change: {
+        path,
+        ...(summary !== undefined && { summary }),
+        ...(diff !== undefined && { diff }),
+        ...(kind !== undefined && { kind }),
+        ...(source !== undefined && { source }),
+        ...(itemId !== undefined && { itemId }),
+        ...(stage !== undefined && { stage }),
+        ...(oldText !== undefined && { oldText }),
+        ...(newText !== undefined && { newText }),
+        cwd,
+      },
     }));
   }
 }

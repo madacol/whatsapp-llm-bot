@@ -530,7 +530,7 @@ describe("buildAgentIoHooks", () => {
       "compact_tool_activity",
       "compact_tool_activity",
       "compact_tool_activity",
-      "file_change",
+      "runtime_event",
       "compact_tool_activity",
     ]);
     assert.deepEqual(sent.filter((entry) => (
@@ -628,11 +628,18 @@ describe("buildAgentIoHooks", () => {
     assert.equal(inspect.output, "boom");
   });
 
-  it("maps file changes to a tool-result message", async () => {
+  it("emits file changes as runtime events", async () => {
     const { hooks, sent } = createSubject();
     await hooks.onFileChange?.({ path: "/tmp/file.js", summary: "Updated file" });
 
-    assertSingleSentEvent(sent, "send", "file_change");
+    assertSingleSentEvent(sent, "send", "runtime_event");
+    if (sent[0].event.kind !== "runtime_event") {
+      assert.fail("Expected runtime_event");
+    }
+    assert.equal(sent[0].event.event.type, "file-change.completed");
+    assert.equal(sent[0].event.event.provider, "codex");
+    assert.equal(sent[0].event.event.change.path, "/tmp/file.js");
+    assert.equal(sent[0].event.event.change.summary, "Updated file");
   });
 
   it("maps file reads to a tool-call message", async () => {
@@ -646,7 +653,7 @@ describe("buildAgentIoHooks", () => {
     assert.equal(sent[0].event.presentation.summary, "*Read*  `src/app.js`");
   });
 
-  it("renders file change diffs when present", async () => {
+  it("passes file change diff facts through the runtime boundary", async () => {
     const { hooks, sent } = createSubject();
     await hooks.onFileChange?.({
       path: "/tmp/file.js",
@@ -656,16 +663,18 @@ describe("buildAgentIoHooks", () => {
       diff: ["--- a/file.js", "+++ b/file.js", "@@ -1 +1 @@", "-old", "+new"].join("\n"),
     });
 
-    assertSingleSentEvent(sent, "send", "file_change");
-    if (sent[0].event.kind !== "file_change") {
-      assert.fail("Expected file_change event");
+    assertSingleSentEvent(sent, "send", "runtime_event");
+    if (sent[0].event.kind !== "runtime_event") {
+      assert.fail("Expected runtime_event");
     }
-    assert.equal(sent[0].event.path, "/tmp/file.js");
-    assert.equal(sent[0].event.oldText, "const value = 1;\n");
-    assert.equal(sent[0].event.newText, "const value = 2;\n");
+    assert.equal(sent[0].event.event.type, "file-change.completed");
+    assert.equal(sent[0].event.event.change.path, "/tmp/file.js");
+    assert.equal(sent[0].event.event.change.oldText, "const value = 1;\n");
+    assert.equal(sent[0].event.event.change.newText, "const value = 2;\n");
+    assert.equal(sent[0].event.event.change.diff, ["--- a/file.js", "+++ b/file.js", "@@ -1 +1 @@", "-old", "+new"].join("\n"));
   });
 
-  it("shortens file change paths and drops redundant summaries", async () => {
+  it("leaves file change path and summary presentation to WhatsApp", async () => {
     const { hooks, sent } = createSubjectWithCwd("/repo");
     await hooks.onFileChange?.({
       path: "/repo/src/file.js",
@@ -677,12 +686,15 @@ describe("buildAgentIoHooks", () => {
     });
 
     assert.equal(sent.length, 1);
-    assert.equal(sent[0].event.kind, "file_change");
-    if (sent[0].event.kind !== "file_change") {
-      assert.fail("Expected file_change event");
+    assert.equal(sent[0].event.kind, "runtime_event");
+    if (sent[0].event.kind !== "runtime_event") {
+      assert.fail("Expected runtime_event");
     }
-    assert.equal(sent[0].event.changeKind, "add");
-    assert.equal(sent[0].event.cwd, "/repo");
+    assert.equal(sent[0].event.event.type, "file-change.completed");
+    assert.equal(sent[0].event.event.change.path, "/repo/src/file.js");
+    assert.equal(sent[0].event.event.change.kind, "add");
+    assert.equal(sent[0].event.event.change.summary, "/repo/src/file.js (add)");
+    assert.equal(sent[0].event.event.change.cwd, "/repo");
   });
 
   it("attaches semantic inspect state for codex file reads", async () => {
