@@ -1,5 +1,5 @@
 import { parseToolArgs } from "../agent-io-defaults.js";
-import { buildToolPresentation } from "../tool-presentation-model.js";
+import { buildToolPresentation, shortenPath } from "../tool-presentation-model.js";
 import { contentEvent, textUpdate } from "../outbound-events.js";
 
 const COMPACT_TOOL_ACTIVITY_LIMIT = 3;
@@ -15,6 +15,14 @@ function formatCompactEntry(tool, detail) {
     return `*${tool}*`;
   }
   return detail.startsWith("\n") ? `*${tool}*${detail}` : `*${tool}*  ${detail}`;
+}
+
+/**
+ * @param {string} value
+ * @returns {string}
+ */
+function stripSimpleMarkdown(value) {
+  return value.trim().replace(/^[*_`]+|[*_`]+$/g, "");
 }
 
 /**
@@ -76,11 +84,69 @@ function formatCompactRead(paths) {
 }
 
 /**
+ * @param {string} value
+ * @returns {string}
+ */
+function boldTarget(value) {
+  return `*${value.trim()}*`;
+}
+
+/**
+ * @param {string} toolName
+ * @returns {string | null}
+ */
+function formatGenericSearchToolName(toolName) {
+  const match = toolName.match(/^Search for '(.+)' in (.+)$/);
+  if (!match) {
+    return null;
+  }
+  const [, pattern, target] = match;
+  if (!pattern || !target) {
+    return null;
+  }
+  return formatCompactEntry("Search", `\`${pattern}\` in ${boldTarget(target)}`);
+}
+
+/**
+ * @param {Record<string, unknown>} args
+ * @param {string | null | undefined} cwd
+ * @returns {string | undefined}
+ */
+function formatGenericPathDetail(args, cwd) {
+  const path = typeof args.path === "string"
+    ? args.path
+    : typeof args.file_path === "string"
+      ? args.file_path
+      : typeof args.filePath === "string"
+        ? args.filePath
+        : undefined;
+  return path ? `\`${shortenPath(path, cwd)}\`` : undefined;
+}
+
+/**
+ * @param {string} toolName
+ * @param {Record<string, unknown>} args
+ * @param {string | null | undefined} cwd
+ * @returns {string | null}
+ */
+function formatGenericToolName(toolName, args, cwd) {
+  const search = formatGenericSearchToolName(toolName);
+  if (search) {
+    return search;
+  }
+  const pathDetail = formatGenericPathDetail(args, cwd);
+  if (!pathDetail && stripSimpleMarkdown(toolName).toLowerCase() === "read file") {
+    return null;
+  }
+  return formatCompactEntry(toolName, pathDetail);
+}
+
+/**
  * @param {LlmChatResponse["toolCalls"][0]} toolCall
  * @param {((params: Record<string, unknown>) => string) | undefined} actionFormatter
  * @param {string | null | undefined} cwd
  * @param {{ oldContent?: string } | undefined} toolContext
- * @returns {string}
+ * @returns {string | null}
  */
 function formatCompactToolCall(toolCall, actionFormatter, cwd, toolContext) {
   const args = parseToolArgs(toolCall.arguments);
@@ -113,10 +179,13 @@ function formatCompactToolCall(toolCall, actionFormatter, cwd, toolContext) {
       return formatCompactEntry("Plan");
     case "generic": {
       const summary = presentation.summary.trim();
-      const detail = summary && summary !== presentation.toolName && !summary.includes("\n")
+      if (!summary || stripSimpleMarkdown(summary) === stripSimpleMarkdown(presentation.toolName)) {
+        return formatGenericToolName(presentation.toolName, args, cwd);
+      }
+      const detail = !summary.includes("\n")
         ? `\`${summary}\``
         : undefined;
-      return formatCompactEntry(presentation.toolName, detail);
+      return detail ? formatCompactEntry(presentation.toolName, detail) : formatGenericToolName(presentation.toolName, args, cwd);
     }
     default:
       return formatCompactEntry(toolCall.name);
@@ -387,12 +456,16 @@ export function createCompactToolActivityFeed({ send, cwd }) {
       if (pendingToolEntryIdsByToolId.has(toolCall.id)) {
         return;
       }
+      const summary = formatCompactToolCall(toolCall, actionFormatter, cwd, toolContext);
+      if (!summary) {
+        return;
+      }
       const entryId = `compact-entry-${++nextEntryId}`;
       pendingToolEntryIds.push(entryId);
       pendingToolEntryIdsByToolId.set(toolCall.id, entryId);
       await addEntry({
         id: entryId,
-        summary: formatCompactToolCall(toolCall, actionFormatter, cwd, toolContext),
+        summary,
         kind: "tool",
         completed: false,
         failed: false,
