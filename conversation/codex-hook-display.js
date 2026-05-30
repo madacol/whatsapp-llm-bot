@@ -1,18 +1,8 @@
-import { buildCommandPresentation, buildMultiReadActivity, buildReadToolPresentation } from "../tool-presentation-model.js";
-import { failedToolCallUpdate } from "../message-failure-presentation.js";
-import {
-  contentEvent,
-  runtimeEvent,
-  toolCallEvent,
-  toolActivityEvent,
-  toolInspectState,
-} from "../outbound-events.js";
+import { runtimeEvent } from "../outbound-events.js";
 
 /**
  * @typedef {{
  *   handle: MessageHandle,
- *   displayPresentation: import("../tool-presentation-model.js").ToolPresentation,
- *   inspectPresentation: import("../tool-presentation-model.js").ToolPresentation,
  * }} PendingInspectEntry
  */
 
@@ -23,11 +13,10 @@ import {
  *   context: Pick<ExecuteActionContext, "send">,
  *   cwd: string | null,
  *   visibility: import("../chat-output-visibility.js").OutputVisibility,
- *   displayToolCall: (toolCall: LlmChatResponse["toolCalls"][0]) => Promise<MessageHandle | undefined>,
  * }} input
  * @returns {Pick<Required<AgentIOHooks>, "onCommand" | "onFileRead" | "onFileChange">}
  */
-export function createCodexDisplayHooks({ context, cwd, visibility, displayToolCall }) {
+export function createCodexDisplayHooks({ context, cwd, visibility }) {
   /** @type {Map<string, PendingInspectEntry[]>} */
   const activeInspects = new Map();
 
@@ -71,37 +60,31 @@ export function createCodexDisplayHooks({ context, cwd, visibility, displayToolC
    * @param {{ command: string, status: "started" | "completed" | "failed", output?: string }} event
    * @returns {Promise<MessageHandle | void>}
    */
-async function onCommand({ command, status, output }) {
-    if (status === "started") {
-      if (!visibility.toolDetails) {
-        return;
-      }
-      const presentation = buildCommandPresentation(command);
-      const handle = await context.send(toolCallEvent(presentation));
-      if (handle) {
-        rememberInspect(command, {
-          handle,
-          displayPresentation: presentation,
-          inspectPresentation: presentation,
-        });
-      }
-      return handle;
-    }
-
-    const inspectEntry = consumeInspect(command);
-    if (inspectEntry) {
-      inspectEntry.handle.setInspect(toolInspectState(inspectEntry.inspectPresentation, output ?? ""));
-    }
-
-    if (status === "failed") {
-      if (inspectEntry) {
-        await inspectEntry.handle.update(failedToolCallUpdate(inspectEntry.displayPresentation));
-        return;
-      }
-      const detail = output ? `\n\n${output}` : "";
-      await context.send(contentEvent("error", `Command failed: \`${command}\`${detail}`));
+  async function onCommand({ command, status, output }) {
+    if (!visibility.toolDetails) {
       return;
     }
+
+    const handle = await context.send(runtimeEvent({
+      type: `command.${status}`,
+      provider: "codex",
+      command: {
+        command,
+        status,
+        ...(output !== undefined && { output }),
+      },
+    }));
+    if (status !== "started") {
+      const inspectEntry = consumeInspect(command);
+      if (inspectEntry) {
+        inspectEntry.handle.setInspect({
+          kind: "text",
+          text: output ?? "",
+          persistOnInspect: true,
+        });
+      }
+    }
+    return handle;
   }
 
   /**
@@ -113,26 +96,17 @@ async function onCommand({ command, status, output }) {
       return;
     }
 
-    if (paths.length === 1 && typeof paths[0] === "string") {
-      const filePath = paths[0];
-      const toolCall = {
-        id: `codex-read:${filePath}`,
-        name: "Read",
-        arguments: JSON.stringify({ file_path: filePath }),
-      };
-      const handle = await displayToolCall(toolCall);
-      if (handle) {
-        const readPresentation = buildReadToolPresentation(filePath, cwd);
-        rememberInspect(command, {
-          handle,
-          displayPresentation: readPresentation,
-          inspectPresentation: readPresentation,
-        });
-      }
-      return;
+    const handle = await context.send(runtimeEvent({
+      type: "file-read.started",
+      provider: "codex",
+      fileRead: {
+        command,
+        paths,
+      },
+    }));
+    if (handle) {
+      rememberInspect(command, { handle });
     }
-
-    await context.send(toolActivityEvent(buildMultiReadActivity(paths, cwd)));
   }
 
   /**

@@ -511,43 +511,6 @@ function createPlanPresentation(args) {
 }
 
 /**
- * @param {string} command
- * @param {string} [label]
- * @returns {string}
- */
-function formatBashSummary(command, label = "Shell") {
-  const lines = command
-    .split("\n")
-    .map((line) => line.trim())
-    .filter((line) => line.length > 0);
-  const firstLine = lines[0] ?? "";
-  if (!firstLine) {
-    return `*${label}*`;
-  }
-  const preview = firstLine.length > 48 ? `${firstLine.slice(0, 48)}…` : firstLine;
-  const extraLines = Math.max(0, lines.length - 1);
-  return extraLines > 0
-    ? `*${label}*  \`${preview}\`  _+${extraLines} line${extraLines === 1 ? "" : "s"}_`
-    : `*${label}*  \`${preview}\``;
-}
-
-/**
- * @param {string} toolName
- * @param {string} command
- * @param {string} summary
- * @returns {BashPresentation}
- */
-function createBashToolPresentation(toolName, command, summary) {
-  return {
-    kind: "bash",
-    toolName,
-    summary,
-    command,
-    inspectMode: "bash",
-  };
-}
-
-/**
  * @param {string} name
  * @param {Record<string, unknown>} args
  * @param {string | null | undefined} cwd
@@ -745,35 +708,6 @@ export function buildToolPresentation(name, args, formatToolCall, cwd, context) 
     toolName: name,
     summary: `*${name}*`,
     args,
-  };
-}
-
-/**
- * @param {string} command
- * @returns {BashPresentation}
- */
-export function buildCommandPresentation(command) {
-  return createBashToolPresentation("Shell", command, formatBashSummary(command, "Shell"));
-}
-
-/**
- * @param {string} filePath
- * @param {string | null | undefined} cwd
- * @returns {ActivityPresentation}
- */
-export function buildReadToolPresentation(filePath, cwd) {
-  return createReadPresentation(filePath, cwd);
-}
-
-/**
- * @param {string[]} paths
- * @param {string | null | undefined} cwd
- * @returns {ToolActivitySummary}
- */
-export function buildMultiReadActivity(paths, cwd) {
-  return {
-    title: "Read",
-    lines: paths.map((filePath) => `\`${shortenPath(filePath, cwd)}\``),
   };
 }
 
