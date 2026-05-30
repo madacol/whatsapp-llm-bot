@@ -211,6 +211,13 @@ export function normalizeAcpUsage(usage) {
   const cachedRead = firstNumber(usage, ["cached_read_tokens", "cachedReadTokens", "cachedRead"]) ?? 0;
   const cachedWrite = firstNumber(usage, ["cached_write_tokens", "cachedWriteTokens", "cachedWrite"]) ?? 0;
   const cost = isRecord(usage.cost) ? numberOrUndefined(usage.cost.amount) : numberOrUndefined(usage.cost);
+  const contextWindow = firstNumber(usage, [
+    "size",
+    "contextWindow",
+    "context_window",
+    "context_window_tokens",
+    "contextWindowTokens",
+  ]);
   return {
     promptTokens: firstNumber(usage, ["input_tokens", "inputTokens", "promptTokens"]) ?? 0,
     completionTokens: firstNumber(usage, ["output_tokens", "outputTokens", "completionTokens"]) ?? 0,
@@ -218,7 +225,7 @@ export function normalizeAcpUsage(usage) {
     cost: cost ?? 0,
     ...(firstNumber(usage, ["total_tokens", "totalTokens", "used"]) !== undefined ? { totalTokens: firstNumber(usage, ["total_tokens", "totalTokens", "used"]) } : {}),
     ...(firstNumber(usage, ["thought_tokens", "thoughtTokens", "reasoningTokens", "reasoningOutputTokens"]) !== undefined ? { reasoningTokens: firstNumber(usage, ["thought_tokens", "thoughtTokens", "reasoningTokens", "reasoningOutputTokens"]) } : {}),
-    ...(numberOrUndefined(usage.size) !== undefined ? { contextWindow: numberOrUndefined(usage.size) } : {}),
+    ...(contextWindow !== undefined ? { contextWindow } : {}),
   };
 }
 

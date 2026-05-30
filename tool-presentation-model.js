@@ -123,6 +123,32 @@ function formatDisplayPath(targetPath, cwd) {
 }
 
 /**
+ * @param {"Edit" | "Write"} name
+ * @param {Record<string, unknown>} args
+ * @param {string | null | undefined} cwd
+ * @param {{ oldContent?: string; startLine?: number } | undefined} context
+ * @returns {string}
+ */
+function formatFileToolSummary(name, args, cwd, context) {
+  const filePath = typeof args.file_path === "string" ? args.file_path : ".";
+  const action = name === "Edit"
+    ? "Editing"
+    : typeof context?.oldContent === "string"
+      ? "Updating"
+      : "Writing";
+  let summary = `${action} ${formatDisplayPath(filePath, cwd)}`;
+
+  if (context?.startLine != null) {
+    const lineCount = typeof args.old_string === "string" ? args.old_string.split("\n").length : 1;
+    summary += lineCount > 1
+      ? `  _L${context.startLine}–${context.startLine + lineCount - 1}_`
+      : `  _L${context.startLine}_`;
+  }
+
+  return summary;
+}
+
+/**
  * @param {string} refId
  * @returns {string}
  */
@@ -608,13 +634,7 @@ export function buildToolPresentation(name, args, formatToolCall, cwd, context) 
   }
 
   if ((name === "Edit" || name === "Write") && typeof args.file_path === "string") {
-    let summary = `*${name}*  \`${shortenPath(args.file_path, cwd)}\``;
-    if (context?.startLine != null) {
-      const lineCount = typeof args.old_string === "string" ? args.old_string.split("\n").length : 1;
-      summary += lineCount > 1
-        ? `  _L${context.startLine}–${context.startLine + lineCount - 1}_`
-        : `  _L${context.startLine}_`;
-    }
+    const summary = formatFileToolSummary(name, args, cwd, context);
     return {
       kind: "file",
       toolName: /** @type {"Edit" | "Write"} */ (name),

@@ -8,6 +8,21 @@ import {
 } from "../presentation/whatsapp.js";
 
 describe("tool presentation model", () => {
+  it("renders file tool starts as direct file actions", () => {
+    const editPresentation = buildToolPresentation("Edit", {
+      file_path: "/repo/src/app.js",
+      old_string: "before",
+      new_string: "after",
+    }, undefined, "/repo", undefined);
+    const writePresentation = buildToolPresentation("Write", {
+      file_path: "/repo/src/new.js",
+      content: "export const value = 1;\n",
+    }, undefined, "/repo", undefined);
+
+    assert.equal(formatToolPresentationSummary(editPresentation), "Editing `src/app.js`");
+    assert.equal(formatToolPresentationSummary(writePresentation), "Writing `src/new.js`");
+  });
+
   it("keeps bash summaries compact while preserving the full command payload", () => {
     const presentation = buildToolPresentation("Bash", {
       command: "apply_patch <<'PATCH'\n*** Begin Patch\n*** End Patch\nPATCH",

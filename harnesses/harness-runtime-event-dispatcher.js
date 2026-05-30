@@ -110,6 +110,7 @@ export function createHarnessRuntimeEventDispatcher(input) {
    * @returns {Promise<void>}
    */
   async function updateUsage(usage, mode) {
+    const contextWindow = usage.contextWindow ?? result.usage.contextWindow;
     result.usage = mode === "add"
       ? {
           promptTokens: result.usage.promptTokens + usage.promptTokens,
@@ -118,9 +119,12 @@ export function createHarnessRuntimeEventDispatcher(input) {
           cost: result.usage.cost + usage.cost,
           ...(usage.totalTokens !== undefined ? { totalTokens: usage.totalTokens } : {}),
           ...(usage.reasoningTokens !== undefined ? { reasoningTokens: usage.reasoningTokens } : {}),
-          ...(usage.contextWindow !== undefined ? { contextWindow: usage.contextWindow } : {}),
+          ...(contextWindow !== undefined ? { contextWindow } : {}),
         }
-      : usage;
+      : {
+          ...usage,
+          ...(contextWindow !== undefined ? { contextWindow } : {}),
+        };
     if (input.emitUsage !== false && (usage.promptTokens > 0 || usage.completionTokens > 0 || usage.cachedTokens > 0)) {
       await hooks.onUsage(formatUsageCost(result.usage), toUsageTokens(result.usage));
     }

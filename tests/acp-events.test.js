@@ -258,6 +258,7 @@ describe("ACP event normalization", () => {
         cachedReadTokens: 11136,
         outputTokens: 22,
         thoughtTokens: 12,
+        contextWindow: 200000,
       },
     })[0]?.usage, {
       promptTokens: 3617,
@@ -266,6 +267,7 @@ describe("ACP event normalization", () => {
       cost: 0,
       totalTokens: 14775,
       reasoningTokens: 12,
+      contextWindow: 200000,
     });
   });
 

@@ -123,6 +123,66 @@ describe("createHarnessRuntimeEventDispatcher", () => {
     assert.equal(pausedCount, 0);
   });
 
+  it("preserves context window from earlier usage updates when final usage omits it", async () => {
+    /** @type {Array<{ cost: string, tokens: UsageTokens }>} */
+    const usageEvents = [];
+    const dispatcher = createHarnessRuntimeEventDispatcher({
+      provider: "acp",
+      messages: [],
+      hooks: {
+        onUsage: async (cost, tokens) => {
+          usageEvents.push({ cost, tokens });
+        },
+      },
+    });
+
+    await dispatcher.handleEvent({
+      type: "usage.updated",
+      provider: "acp",
+      usage: {
+        promptTokens: 0,
+        completionTokens: 0,
+        cachedTokens: 0,
+        cost: 0,
+        totalTokens: 42,
+        contextWindow: 1000,
+      },
+    });
+    await dispatcher.handleEvent({
+      type: "usage.updated",
+      provider: "acp",
+      usage: {
+        promptTokens: 30,
+        completionTokens: 10,
+        cachedTokens: 5,
+        cost: 0.002,
+        totalTokens: 42,
+        reasoningTokens: 2,
+      },
+    });
+
+    assert.deepEqual(dispatcher.result.usage, {
+      promptTokens: 30,
+      completionTokens: 10,
+      cachedTokens: 5,
+      cost: 0.002,
+      totalTokens: 42,
+      reasoningTokens: 2,
+      contextWindow: 1000,
+    });
+    assert.deepEqual(usageEvents, [{
+      cost: "0.002000",
+      tokens: {
+        prompt: 30,
+        completion: 10,
+        cached: 5,
+        total: 42,
+        reasoning: 2,
+        contextWindow: 1000,
+      },
+    }]);
+  });
+
   it("tracks generic tool lifecycle events for inspect updates", async () => {
     /** @type {Array<Record<string, unknown>>} */
     const toolCalls = [];

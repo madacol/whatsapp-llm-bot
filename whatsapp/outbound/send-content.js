@@ -498,12 +498,22 @@ function getFileChangeTitle(event, displayKind) {
     return "*Failed File Change*";
   }
   if (displayKind === "add") {
-    return "*Add File*";
+    return "Add";
   }
   if (displayKind === "delete") {
-    return "*Delete File*";
+    return "Delete";
   }
-  return "*Update File*";
+  return "Update";
+}
+
+/**
+ * @param {string} title
+ * @param {string} displayPath
+ * @returns {string}
+ */
+function formatFileChangeCaptionLine(title, displayPath) {
+  const gap = title.startsWith("*") ? "  " : " ";
+  return `${title}${gap}\`${displayPath}\``;
 }
 
 /**
@@ -598,7 +608,7 @@ export function renderFileChangeContent(event) {
   const displayKind = inferDisplayedFileChangeKind(event);
   const cleanedSummary = cleanFileChangeSummary(event.summary, event.path, displayPath, displayKind);
   const title = getFileChangeTitle(event, displayKind);
-  const captionLines = [`${title}  \`${displayPath}\``];
+  const captionLines = [formatFileChangeCaptionLine(title, displayPath)];
   if (cleanedSummary) {
     captionLines.push(cleanedSummary);
   }
