@@ -11,7 +11,7 @@ import { homedir, tmpdir } from "node:os";
 import { dirname, resolve } from "node:path";
 import { ensureChatDirs, getChatRootDir, getChatWorkspaceDir } from "./chat-paths.js";
 import config from "./config.js";
-import { formatCommandInspectText as formatWhatsappCommandInspectText } from "./presentation/whatsapp.js";
+import { formatCommandInspectText as formatWhatsappCommandInspectText } from "./whatsapp/tool-presenter.js";
 
 /** Workspaces live outside the bot project so the SDK's upward CLAUDE.md
  *  traversal never reaches the bot's own CLAUDE.md / settings. */

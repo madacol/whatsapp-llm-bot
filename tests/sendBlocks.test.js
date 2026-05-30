@@ -177,7 +177,7 @@ describe("sendEvent – compact tool activity", () => {
     const readTool = {
       id: "read-file-generic",
       name: "Read file",
-      arguments: JSON.stringify({ path: "/repo/presentation/whatsapp.js" }),
+      arguments: JSON.stringify({ path: "/repo/whatsapp/tool-presenter.js" }),
     };
     const searchTool = {
       id: "search-generic",
@@ -207,14 +207,14 @@ describe("sendEvent – compact tool activity", () => {
     });
 
     assert.deepEqual(sent.map((entry) => entry.msg), [
-      { text: "🔧 *Read*  `presentation/whatsapp.js`", linkPreview: null },
+      { text: "🔧 *Read*  `whatsapp/tool-presenter.js`", linkPreview: null },
       {
-        text: "✅ *Read*  `presentation/whatsapp.js`",
+        text: "✅ *Read*  `whatsapp/tool-presenter.js`",
         edit: { id: "msg-1", remoteJid: "compact-generic-chat", fromMe: true },
         linkPreview: null,
       },
       {
-        text: "✅ *Read*  `presentation/whatsapp.js`\n✅ *Search*  `create.*File|Edit|Write` in *tool-presentation-model.js*",
+        text: "✅ *Read*  `whatsapp/tool-presenter.js`\n✅ *Search*  `create.*File|Edit|Write` in *tool-presentation-model.js*",
         edit: { id: "msg-1", remoteJid: "compact-generic-chat", fromMe: true },
         linkPreview: null,
       },
