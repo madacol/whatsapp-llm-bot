@@ -111,6 +111,7 @@ function attachRuntimeBoundaryFacts(event, workdir) {
  *   provider: HarnessRuntimeProvider,
  *   messages: Message[],
  *   hooks?: Pick<AgentIOHooks, "onComposing" | "onPaused" | "onReasoning" | "onToolCall" | "onToolComplete" | "onToolResult" | "onLlmResponse" | "onFileChange" | "onUsage" | "onToolError" | "onCommand" | "onFileRead" | "onPlan" | "onRuntimeEvent">,
+ *   emitRuntimeEvent?: (event: HarnessRuntimeEvent) => Promise<void>,
  *   workdir?: string | null,
  *   emitUsage?: boolean,
  *   rawEventLogger?: HarnessRawEventLogger | null,
@@ -122,6 +123,7 @@ function attachRuntimeBoundaryFacts(event, workdir) {
  */
 export function createHarnessRuntimeEventDispatcher(input) {
   const hooks = { ...DEFAULT_RUNTIME_EVENT_HOOKS, ...input.hooks };
+  const emitRuntimeEvent = input.emitRuntimeEvent ?? hooks.onRuntimeEvent;
   const rawEventLogger = input.rawEventLogger ?? getHarnessRawEventLoggerFromEnv();
   /** @type {Map<string, { handle?: MessageHandle, presentation: import("../tool-presentation-model.js").ToolPresentation }>} */
   const activeTools = new Map();
@@ -363,7 +365,7 @@ export function createHarnessRuntimeEventDispatcher(input) {
     const normalizedEvent = normalizeHarnessRuntimeEvent(event);
     await captureRawEvent(normalizedEvent);
     if (shouldPassThroughPresentationBoundary(normalizedEvent)) {
-      await hooks.onRuntimeEvent(attachRuntimeBoundaryFacts(normalizedEvent, input.workdir));
+      await emitRuntimeEvent(attachRuntimeBoundaryFacts(normalizedEvent, input.workdir));
       if (normalizedEvent.type === "tool.completed") {
         rememberSpawnedSubagent(normalizedEvent.tool);
         if (normalizedEvent.tool.outputBlocks) {
@@ -447,7 +449,7 @@ export function createHarnessRuntimeEventDispatcher(input) {
       case "user-input.resolved":
       case "item.started":
       case "item.updated":
-        await hooks.onRuntimeEvent(normalizedEvent);
+        await emitRuntimeEvent(normalizedEvent);
         return;
       case "item.completed":
         if (normalizedEvent.item.kind === "assistant") {
@@ -461,12 +463,12 @@ export function createHarnessRuntimeEventDispatcher(input) {
             });
           }
         } else {
-          await hooks.onRuntimeEvent(normalizedEvent);
+          await emitRuntimeEvent(normalizedEvent);
         }
         return;
       case "extension.notification":
       case "extension.request":
-        await hooks.onRuntimeEvent(normalizedEvent);
+        await emitRuntimeEvent(normalizedEvent);
         return;
       case "file-change.completed":
         await hooks.onFileChange(normalizedEvent.change);
@@ -475,7 +477,7 @@ export function createHarnessRuntimeEventDispatcher(input) {
       case "config.warning":
       case "runtime.warning":
       case "runtime.error":
-        await hooks.onRuntimeEvent(normalizedEvent);
+        await emitRuntimeEvent(normalizedEvent);
         return;
       default: {
         /** @type {never} */
