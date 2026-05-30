@@ -53,6 +53,41 @@ describe("ACP client process stderr", () => {
     assert.equal(calls[0]?.[1], "[acp stderr]");
     assert.match(String(calls[0]?.[2]), /visible stderr/);
   });
+
+  it("reports child exit details and stderr tail when pending requests are rejected", async () => {
+    const calls = await captureWarnLogs(async () => {
+      const connection = await openAcpConnection({
+        command: process.execPath,
+        args: [
+          "-e",
+          [
+            "process.stdin.setEncoding('utf8');",
+            "process.stdin.once('data', () => {",
+            "  process.stderr.write('fatal provider detail\\n');",
+            "  process.exit(7);",
+            "});",
+          ].join(""),
+        ],
+      });
+
+      await assert.rejects(
+        connection.sendRequest("session/prompt", { prompt: "hello" }),
+        /ACP connection closed.*exitCode=7.*pending=session\/prompt#1/,
+      );
+      await connection.close();
+    });
+
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0]?.[0], "[harness:acp]");
+    assert.equal(calls[0]?.[1], "ACP child process closed unexpectedly.");
+    const details = calls[0]?.[2];
+    assert.equal(details?.command, process.execPath);
+    assert.equal(typeof details?.pid, "number");
+    assert.equal(details?.exitCode, 7);
+    assert.equal(details?.signal, null);
+    assert.deepEqual(details?.pendingRequests, ["session/prompt#1"]);
+    assert.equal(details?.stderrTail, "fatal provider detail");
+  });
 });
 
 /**
@@ -70,6 +105,25 @@ async function captureDebugLogs(fn) {
     await fn(calls);
   } finally {
     console.debug = originalDebug;
+  }
+  return calls;
+}
+
+/**
+ * @param {(calls: any[][]) => Promise<void>} fn
+ * @returns {Promise<any[][]>}
+ */
+async function captureWarnLogs(fn) {
+  /** @type {any[][]} */
+  const calls = [];
+  const originalWarn = console.warn;
+  console.warn = /** @type {typeof console.warn} */ ((...args) => {
+    calls.push(args);
+  });
+  try {
+    await fn(calls);
+  } finally {
+    console.warn = originalWarn;
   }
   return calls;
 }
