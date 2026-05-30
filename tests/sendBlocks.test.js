@@ -13,6 +13,7 @@ import { createTestDb } from "./helpers.js";
 import { setDb } from "../db.js";
 import { createReactionRuntime } from "../whatsapp/runtime/reaction-runtime.js";
 import { runtimeEvent } from "../outbound-events.js";
+import { buildToolPresentation } from "../tool-presentation-model.js";
 
 /**
  * @param {Omit<FileChangeEvent, "kind" | "changeKind"> & { changeKind?: "add" | "delete" | "update" }} input
@@ -207,18 +208,84 @@ describe("sendEvent – compact tool activity", () => {
     });
 
     assert.deepEqual(sent.map((entry) => entry.msg), [
-      { text: "🔧 *Read*  `whatsapp/tool-presenter.js`", linkPreview: null },
+      { text: "🔧 *Read file*  `whatsapp/tool-presenter.js`", linkPreview: null },
       {
-        text: "✅ *Read*  `whatsapp/tool-presenter.js`",
+        text: "✅ *Read file*  `whatsapp/tool-presenter.js`",
         edit: { id: "msg-1", remoteJid: "compact-generic-chat", fromMe: true },
         linkPreview: null,
       },
       {
-        text: "✅ *Read*  `whatsapp/tool-presenter.js`\n✅ *Search*  `create.*File|Edit|Write` in *tool-presentation-model.js*",
+        text: "✅ *Read file*  `whatsapp/tool-presenter.js`\n✅ *Search*  `create.*File|Edit|Write` in *tool-presentation-model.js*",
         edit: { id: "msg-1", remoteJid: "compact-generic-chat", fromMe: true },
         linkPreview: null,
       },
     ]);
+  });
+
+  it("formats compact tool rows like ACP runtime progress", async () => {
+    const cases = [
+      {
+        name: "Grep",
+        args: { path: "src", pattern: "needle" },
+        expected: "Grep*  `src`",
+      },
+      {
+        name: "WebSearch",
+        args: { query: "runtime migration" },
+        expected: "WebSearch*  runtime migration",
+      },
+      {
+        name: "spawn_agent",
+        args: { message: "Review migration" },
+        expected: "spawn_agent*  Review migration",
+        includeSemanticPresentation: true,
+      },
+      {
+        name: "parallel",
+        args: { tool_uses: [{ recipient_name: "functions.exec_command" }, { recipient_name: "functions.exec_command" }] },
+        expected: "parallel*",
+      },
+      {
+        name: "weather",
+        args: { weather: [{ location: "San Francisco, CA" }] },
+        expected: "weather*",
+      },
+      {
+        name: "open",
+        args: { open: [{ ref_id: "https://openai.com" }] },
+        expected: "open*",
+      },
+    ];
+
+    for (const [index, testCase] of cases.entries()) {
+      const { sock, sent } = createMockSock();
+      const toolCall = {
+        id: `compact-runtime-style-${index}`,
+        name: testCase.name,
+        arguments: JSON.stringify(testCase.args),
+      };
+
+      await sendEvent(sock, `compact-runtime-style-${index}`, {
+        kind: "compact_tool_activity",
+        cwd: "/repo",
+        activity: {
+          type: "tool",
+          status: "started",
+          toolCall,
+          ...(testCase.includeSemanticPresentation
+            ? { presentation: buildToolPresentation(testCase.name, testCase.args, undefined, "/repo", undefined) }
+            : {}),
+        },
+      });
+      await sendEvent(sock, `compact-runtime-style-${index}`, {
+        kind: "compact_tool_activity",
+        cwd: "/repo",
+        activity: { type: "tool", status: "completed", toolCall },
+      });
+
+      assert.equal(sent[0]?.msg.text, `🔧 *${testCase.expected}`);
+      assert.equal(sent[1]?.msg.text, `✅ *${testCase.expected}`);
+    }
   });
 
   it("keeps only recent compact activity rows inside WhatsApp", async () => {
