@@ -1191,6 +1191,9 @@ export async function startAcpRun(input) {
     provider: "acp",
     messages: input.messages ?? [],
     hooks: runtimeHooks,
+    emitRuntimeEvent: async (event) => {
+      await runtimeHooks.onRuntimeEvent?.(event);
+    },
     workdir: input.runConfig?.workdir ?? null,
   });
   const beforeSnapshot = await snapshotAcpWorkdir(input.runConfig?.workdir);

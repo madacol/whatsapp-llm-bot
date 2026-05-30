@@ -535,6 +535,9 @@ export function createConversationRunner({ store, llmClient, getActionsFn, execu
       provider: harness.getName(),
       messages: turnInput.messages ?? [],
       hooks,
+      emitRuntimeEvent: async (event) => {
+        await hooks.onRuntimeEvent?.(event);
+      },
       workdir: runConfig.workdir ?? null,
     });
     /** @type {Set<Promise<void>>} */

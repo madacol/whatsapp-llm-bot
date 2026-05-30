@@ -471,6 +471,38 @@ describe("createHarnessRuntimeEventDispatcher", () => {
     assert.deepEqual(runtimeEvents[1]?.raw, { source: "acp.jsonrpc", method: "session/update" });
   });
 
+  it("emits ACP progress through the runtime event sink instead of the legacy runtime hook", async () => {
+    /** @type {import("../harnesses/harness-runtime-events.js").HarnessRuntimeEvent[]} */
+    const runtimeEvents = [];
+    let legacyRuntimeHookCalls = 0;
+    const dispatcher = createHarnessRuntimeEventDispatcher({
+      provider: "acp",
+      messages: [],
+      emitRuntimeEvent: async (event) => {
+        runtimeEvents.push(event);
+      },
+      hooks: {
+        onRuntimeEvent: async () => {
+          legacyRuntimeHookCalls += 1;
+        },
+      },
+    });
+
+    await dispatcher.handleEvent({
+      type: "command.started",
+      provider: "acp",
+      command: {
+        command: "pnpm type-check",
+        status: "started",
+      },
+    });
+
+    assert.equal(legacyRuntimeHookCalls, 0);
+    assert.equal(runtimeEvents.length, 1);
+    assert.equal(runtimeEvents[0]?.type, "command.started");
+    assert.equal(runtimeEvents[0]?.provider, "acp");
+  });
+
   it("passes ACP tool and file-read events through the runtime event boundary", async () => {
     /** @type {import("../harnesses/harness-runtime-events.js").HarnessRuntimeEvent[]} */
     const runtimeEvents = [];
