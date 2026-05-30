@@ -1,7 +1,19 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { contentEvent, fileChangeEvent, textUpdate } from "../outbound-events.js";
+import { contentEvent, runtimeEvent, textUpdate } from "../outbound-events.js";
 import { createSeedTurnIo } from "../conversation/seed-turn-io.js";
+
+/**
+ * @param {Parameters<Required<AgentIOHooks>["onFileChange"]>[0]} change
+ * @returns {RuntimeEventOutboundEvent}
+ */
+function runtimeFileChangeEvent(change) {
+  return runtimeEvent({
+    type: "file-change.completed",
+    provider: "codex",
+    change,
+  });
+}
 
 describe("seed turn io", () => {
   it("preserves semantic outbound events and returns transport handles when supported", async () => {
@@ -34,7 +46,7 @@ describe("seed turn io", () => {
     const contentHandle = await io.reply(contentEvent("llm", [{ type: "text", text: "Thinking..." }]));
     assert.equal(contentHandle, handle);
 
-    const fileHandle = await io.send(fileChangeEvent({
+    const fileHandle = await io.send(runtimeFileChangeEvent({
       path: "/repo/app.js",
       diff: "@@ -1 +1 @@\n-old\n+new",
       oldText: "old\n",
@@ -47,7 +59,7 @@ describe("seed turn io", () => {
 
     assert.deepEqual(events, [
       contentEvent("llm", [{ type: "text", text: "Thinking..." }]),
-      fileChangeEvent({
+      runtimeFileChangeEvent({
         path: "/repo/app.js",
         diff: "@@ -1 +1 @@\n-old\n+new",
         oldText: "old\n",
@@ -68,9 +80,9 @@ describe("seed turn io", () => {
       },
     });
 
-    const handle = await io.reply(fileChangeEvent({ path: "/repo/app.js", summary: "Changed file" }));
+    const handle = await io.reply(runtimeFileChangeEvent({ path: "/repo/app.js", summary: "Changed file" }));
 
     assert.equal(handle, undefined);
-    assert.deepEqual(events, [fileChangeEvent({ path: "/repo/app.js", summary: "Changed file" })]);
+    assert.deepEqual(events, [runtimeFileChangeEvent({ path: "/repo/app.js", summary: "Changed file" })]);
   });
 });
