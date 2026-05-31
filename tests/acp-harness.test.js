@@ -472,6 +472,62 @@ describe("ACP harness", () => {
     }
   });
 
+  it("forwards turn-level ACP extension request handlers", async () => {
+    const harness = createAcpHarness({
+      config: {
+        command: process.execPath,
+        args: [path.join(__dirname, "fixtures", "acp-mock-agent.js")],
+      },
+    });
+    const adapter = harness.createAdapter?.({
+      name: "acp",
+      instanceId: "test",
+      continuationKey: "acp:test",
+    });
+    assert.ok(adapter);
+
+    /** @type {Array<{ method: string, params: unknown }>} */
+    const requests = [];
+    /** @type {Map<string, (message: Record<string, unknown>) => unknown>} */
+    const handlers = new Map([
+      ["madabot/whatsapp/send", (message) => {
+        requests.push({ method: "send", params: message.params });
+        return { ok: true, handleId: "message-1" };
+      }],
+      ["madabot/whatsapp/edit", (message) => {
+        requests.push({ method: "edit", params: message.params });
+        return { ok: true };
+      }],
+      ["madabot/whatsapp/reply", (message) => {
+        requests.push({ method: "reply", params: message.params });
+        return { ok: true };
+      }],
+      ["madabot/whatsapp/react", (message) => {
+        requests.push({ method: "react", params: message.params });
+        return { ok: true };
+      }],
+    ]);
+
+    await adapter.startSession({ chatId: "whatsapp-actions-chat" });
+    const result = await adapter.sendTurn({
+      chatId: "whatsapp-actions-chat",
+      input: "whatsapp actions",
+      messages: [{ role: "user", content: [{ type: "text", text: "whatsapp actions" }] }],
+      extensionRequestHandlers: handlers,
+    });
+
+    assert.deepEqual(
+      requests.map((request) => request.method),
+      ["send", "edit", "reply", "react"],
+    );
+    assert.deepEqual(requests[1]?.params, {
+      sessionId: "mock-session-1",
+      handleId: "message-1",
+      text: "private edit",
+    });
+    assert.match(result.response[0]?.text ?? "", /"handleId":"message-1"/);
+  });
+
   it("emits file changes for ACP fs writes and direct adapter writes", async () => {
     for (const prompt of ["fs write", "direct write"]) {
       const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), `acp-${prompt.replace(" ", "-")}-`));

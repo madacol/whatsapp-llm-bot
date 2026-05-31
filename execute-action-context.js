@@ -25,6 +25,7 @@ export function createMessageActionContext(turn) {
     select: turn.io.select,
     selectMany: turn.io.selectMany,
     confirm: turn.io.confirm,
+    acpExtensionRequestHandlers: turn.io.acpExtensionRequestHandlers,
     prepareMediaRegistry: turn.io.prepareMediaRegistry,
   };
 }
