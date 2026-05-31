@@ -1,4 +1,5 @@
 import { createLogger } from "../../logger.js";
+import { resolveOutputVisibility } from "../../chat-output-visibility.js";
 import { makeTextMessage } from "../message-payloads.js";
 import { sendEvent as sendOutboundEvent } from "./send-content.js";
 import {
@@ -79,7 +80,11 @@ async function deliverQueuedPayload(sock, chatId, payload, reactionRuntime, stor
     await sock.sendMessage(chatId, makeTextMessage(payload.text));
     return undefined;
   }
-  return sendOutboundEvent(sock, chatId, payload.event, undefined, reactionRuntime, { editHandleStore: store });
+  const chat = payload.event.kind === "runtime_event" ? await store?.getChat?.(chatId) : undefined;
+  return sendOutboundEvent(sock, chatId, payload.event, undefined, reactionRuntime, {
+    editHandleStore: store,
+    ...(chat ? { outputVisibility: resolveOutputVisibility(chat.output_visibility) } : {}),
+  });
 }
 
 /**

@@ -11,7 +11,7 @@ export function formatFailedMessageSummary(summary) {
 }
 
 /**
- * @param {import("./tool-presentation-model.js").ToolPresentation} presentation
+ * @param {ToolPresentation} presentation
  * @returns {MessageHandleUpdate}
  */
 export function failedToolCallUpdate(presentation) {

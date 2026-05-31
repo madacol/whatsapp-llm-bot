@@ -5,7 +5,7 @@
  * events without deciding how a specific transport should render them.
  */
 
-import { createPlanPresentationFromState, normalizePlanEntryStatus } from "./plan-presentation.js";
+import { createPlanPresentationFromState, normalizePlanEntryStatus } from "../plan-presentation.js";
 
 /**
  * Shorten an absolute path by replacing the cwd prefix with ".".
@@ -88,7 +88,7 @@ export function shortenPath(p, cwd) {
  */
 
 /**
- * @typedef {ActivityPresentation | import("./plan-presentation.js").PlanPresentation | BashPresentation | FilePresentation | GenericPresentation} ToolPresentation
+ * @typedef {ActivityPresentation | import("../plan-presentation.js").PlanPresentation | BashPresentation | FilePresentation | GenericPresentation} ToolPresentation
  */
 
 /**
@@ -155,7 +155,8 @@ function formatFileToolSummary(name, args, cwd, context) {
 function formatWebRef(refId) {
   try {
     const url = new URL(refId);
-    return `\`${url.host}${url.pathname}${url.search}\``;
+    const path = url.pathname === "/" && !url.search ? "" : `${url.pathname}${url.search}`;
+    return `\`${url.host}${path}\``;
   } catch {
     return `\`${refId}\``;
   }
@@ -465,10 +466,10 @@ function getUpdatePlanExplanation(args) {
 
 /**
  * @param {Record<string, unknown>} args
- * @returns {import("./plan-presentation.js").PlanEntry[]}
+ * @returns {import("../plan-presentation.js").PlanEntry[]}
  */
 function getUpdatePlanEntries(args) {
-  /** @type {import("./plan-presentation.js").PlanEntry[]} */
+  /** @type {import("../plan-presentation.js").PlanEntry[]} */
   const entries = [];
 
   if (Array.isArray(args.plan)) {
@@ -501,7 +502,7 @@ function getUpdatePlanEntries(args) {
 
 /**
  * @param {Record<string, unknown>} args
- * @returns {import("./plan-presentation.js").PlanPresentation}
+ * @returns {import("../plan-presentation.js").PlanPresentation}
  */
 function createPlanPresentation(args) {
   return createPlanPresentationFromState({
@@ -555,6 +556,7 @@ function buildSdkPresentation(name, args, cwd) {
     case "Read":
       return typeof args.file_path === "string" ? createReadPresentation(args.file_path, cwd) : null;
     case "Grep":
+    case "Search":
       return typeof args.pattern === "string"
         ? createSearchPresentation(args.pattern, typeof args.path === "string" ? args.path : undefined, cwd)
         : null;

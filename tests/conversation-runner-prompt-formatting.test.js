@@ -553,18 +553,30 @@ describe("createConversationRunner prompt formatting", () => {
     registerCodexHarness(() => createCodexHarness({
       startRun: async (input) => {
         const readCommand = "sed -n '1,20p' src/app.js";
-        await input.hooks?.onFileRead?.({
-          command: readCommand,
-          paths: ["src/app.js"],
+        await input.hooks?.onRuntimeEvent?.({
+          type: "file-read.started",
+          provider: "codex",
+          fileRead: {
+            command: readCommand,
+            paths: ["src/app.js"],
+          },
         });
-        await input.hooks?.onCommand?.({
-          command: readCommand,
-          status: "completed",
-          output: "  1→ const value = 1;",
+        await input.hooks?.onRuntimeEvent?.({
+          type: "command.completed",
+          provider: "codex",
+          command: {
+            command: readCommand,
+            status: "completed",
+            output: "  1→ const value = 1;",
+          },
         });
-        await input.hooks?.onCommand?.({
-          command: "pnpm type-check",
-          status: "started",
+        await input.hooks?.onRuntimeEvent?.({
+          type: "command.started",
+          provider: "codex",
+          command: {
+            command: "pnpm type-check",
+            status: "started",
+          },
         });
         await input.hooks?.onLlmResponse?.("done");
         return {
@@ -591,11 +603,11 @@ describe("createConversationRunner prompt formatting", () => {
       .filter((response) => response.source === "plain")
       .map((response) => response.text);
     assert.ok(
-      progressTexts.some((text) => text.includes("\"type\":\"file_read\"") && text.includes("\"paths\":[\"src/app.js\"]")),
+      progressTexts.some((text) => text.includes("\"type\":\"file-read.started\"") && text.includes("\"paths\":[\"src/app.js\"]")),
       `expected file-read progress activity, got: ${JSON.stringify(progressTexts)}`,
     );
     assert.ok(
-      progressTexts.some((text) => text.includes("\"type\":\"command\"") && text.includes("\"command\":\"pnpm type-check\"")),
+      progressTexts.some((text) => text.includes("\"type\":\"command.started\"") && text.includes("\"command\":\"pnpm type-check\"")),
       `expected command progress activity, got: ${JSON.stringify(progressTexts)}`,
     );
   });

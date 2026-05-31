@@ -3,6 +3,8 @@ import path from "node:path";
 import { createServer } from "node:http";
 import { EventEmitter } from "node:events";
 import { formatPlanPresentationText } from "../plan-presentation.js";
+import { parseToolArgs } from "../agent-io-defaults.js";
+import { buildToolPresentation } from "../whatsapp/tool-presentation-model.js";
 import { formatToolPresentationSummary, renderToolActivityContent, renderToolPresentationContent } from "../whatsapp/tool-presenter.js";
 import { formatUsageEventText } from "../usage-formatting.js";
 import { initStore } from "../store.js";
@@ -96,7 +98,13 @@ export function createChatTurn(overrides = {}) {
         break;
       case "tool_call":
         source = "tool-call";
-        content = renderToolPresentationContent(event.presentation);
+        content = renderToolPresentationContent(buildToolPresentation(
+          event.toolCall.name,
+          parseToolArgs(event.toolCall.arguments),
+          typeof event.displaySummary === "string" ? () => event.displaySummary ?? "" : undefined,
+          event.cwd ?? null,
+          event.context,
+        ));
         break;
       case "tool_activity":
         source = "tool-call";
@@ -105,6 +113,12 @@ export function createChatTurn(overrides = {}) {
       case "compact_tool_activity":
         source = "plain";
         content = JSON.stringify(event.activity);
+        break;
+      case "runtime_event":
+        source = "plain";
+        content = JSON.stringify({
+          event: event.event,
+        });
         break;
       case "plan":
         source = "llm";

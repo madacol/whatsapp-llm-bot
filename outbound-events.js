@@ -19,32 +19,26 @@ export function contentEvent(source, content, options = {}) {
 }
 
 /**
- * @param {import("./tool-presentation-model.js").ToolPresentation} presentation
+ * @param {LlmChatResponse["toolCalls"][0]} toolCall
+ * @param {{ cwd?: string | null, displaySummary?: string, context?: ToolCallEvent["context"] }} [options]
  * @returns {ToolCallEvent}
  */
-export function toolCallEvent(presentation) {
-  return { kind: "tool_call", presentation };
+export function toolCallEvent(toolCall, options = {}) {
+  return {
+    kind: "tool_call",
+    toolCall,
+    ...(options.cwd !== undefined && { cwd: options.cwd }),
+    ...(options.displaySummary !== undefined && { displaySummary: options.displaySummary }),
+    ...(options.context !== undefined && { context: options.context }),
+  };
 }
 
 /**
- * @param {import("./tool-presentation-model.js").ToolActivitySummary} activity
+ * @param {ToolActivitySummary} activity
  * @returns {ToolActivityEvent}
  */
 export function toolActivityEvent(activity) {
   return { kind: "tool_activity", activity };
-}
-
-/**
- * @param {CompactToolActivityEvent["activity"]} activity
- * @param {{ cwd?: string | null }} [options]
- * @returns {CompactToolActivityEvent}
- */
-export function compactToolActivityEvent(activity, options = {}) {
-  return {
-    kind: "compact_tool_activity",
-    activity,
-    ...(options.cwd !== undefined && { cwd: options.cwd }),
-  };
 }
 
 /**
@@ -87,20 +81,19 @@ export function subagentMessageEvent(input) {
 
 /**
  * @param {RuntimeEventOutboundEvent["event"]} event
- * @param {{ compact?: boolean, cwd?: string | null }} [options]
+ * @param {{ cwd?: string | null }} [options]
  * @returns {RuntimeEventOutboundEvent}
  */
 export function runtimeEvent(event, options = {}) {
   return {
     kind: "runtime_event",
     event,
-    ...(options.compact !== undefined && { compact: options.compact }),
     ...(options.cwd !== undefined && { cwd: options.cwd }),
   };
 }
 
 /**
- * @param {import("./tool-presentation-model.js").ToolPresentation} presentation
+ * @param {ToolPresentation} presentation
  * @returns {MessageHandleUpdate}
  */
 export function toolCallUpdate(presentation) {
@@ -124,7 +117,7 @@ export function textUpdate(text) {
 }
 
 /**
- * @param {import("./tool-presentation-model.js").ToolPresentation} presentation
+ * @param {ToolPresentation} presentation
  * @param {string | undefined} [output]
  * @returns {MessageInspectState}
  */

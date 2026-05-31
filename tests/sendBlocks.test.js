@@ -13,7 +13,11 @@ import { createTestDb } from "./helpers.js";
 import { setDb } from "../db.js";
 import { createReactionRuntime } from "../whatsapp/runtime/reaction-runtime.js";
 import { runtimeEvent } from "../outbound-events.js";
-import { buildToolPresentation } from "../tool-presentation-model.js";
+import { buildToolPresentation } from "../whatsapp/tool-presentation-model.js";
+import { DEFAULT_OUTPUT_VISIBILITY } from "../chat-output-visibility.js";
+
+const VISIBLE_TOOL_OUTPUT = { ...DEFAULT_OUTPUT_VISIBILITY, toolDetails: true };
+const COMPACT_TOOL_OUTPUT = { ...DEFAULT_OUTPUT_VISIBILITY, toolDetails: false };
 
 /**
  * @param {Omit<FileChangeEvent, "kind" | "changeKind"> & { changeKind?: "add" | "delete" | "update" }} input
@@ -222,38 +226,47 @@ describe("sendEvent – compact tool activity", () => {
     ]);
   });
 
-  it("formats compact tool rows like ACP runtime progress", async () => {
+  it("formats compact tool rows with the shared semantic tool presentation", async () => {
     const cases = [
+      {
+        name: "Read",
+        args: { file_path: "src/app.js" },
+        expected: "Read*  `src/app.js`",
+      },
       {
         name: "Grep",
         args: { path: "src", pattern: "needle" },
-        expected: "Grep*  `src`",
+        expected: "Search*  \"needle\" in `src`",
+      },
+      {
+        name: "Search",
+        args: { path: "src", pattern: "needle" },
+        expected: "Search*  \"needle\" in `src`",
       },
       {
         name: "WebSearch",
         args: { query: "runtime migration" },
-        expected: "WebSearch*  runtime migration",
+        expected: "Search Web*  \"runtime migration\"",
       },
       {
         name: "spawn_agent",
         args: { message: "Review migration" },
-        expected: "spawn_agent*  Review migration",
-        includeSemanticPresentation: true,
+        expected: "Start Agent*  _Review migration_",
       },
       {
         name: "parallel",
         args: { tool_uses: [{ recipient_name: "functions.exec_command" }, { recipient_name: "functions.exec_command" }] },
-        expected: "parallel*",
+        expected: "Run Parallel*  _2 tools_",
       },
       {
         name: "weather",
         args: { weather: [{ location: "San Francisco, CA" }] },
-        expected: "weather*",
+        expected: "Weather*  `San Francisco, CA`",
       },
       {
         name: "open",
         args: { open: [{ ref_id: "https://openai.com" }] },
-        expected: "open*",
+        expected: "Open Link*  `openai.com`",
       },
     ];
 
@@ -272,9 +285,6 @@ describe("sendEvent – compact tool activity", () => {
           type: "tool",
           status: "started",
           toolCall,
-          ...(testCase.includeSemanticPresentation
-            ? { presentation: buildToolPresentation(testCase.name, testCase.args, undefined, "/repo", undefined) }
-            : {}),
         },
       });
       await sendEvent(sock, `compact-runtime-style-${index}`, {
@@ -343,7 +353,7 @@ describe("sendEvent – runtime events", () => {
           paths: ["src/app.js"],
         },
       },
-    });
+    }, undefined, undefined, { outputVisibility: VISIBLE_TOOL_OUTPUT });
 
     assert.deepEqual(sent.map((entry) => entry.msg), [
       { text: "🔧 *Read*  `src/app.js`", linkPreview: null },
@@ -364,7 +374,7 @@ describe("sendEvent – runtime events", () => {
           arguments: { title: "Review mock code" },
         },
       },
-    });
+    }, undefined, undefined, { outputVisibility: VISIBLE_TOOL_OUTPUT });
     await sendEvent(sock, "runtime-tool-chat", {
       kind: "runtime_event",
       event: {
@@ -377,7 +387,7 @@ describe("sendEvent – runtime events", () => {
           output: "done",
         },
       },
-    });
+    }, undefined, undefined, { outputVisibility: VISIBLE_TOOL_OUTPUT });
 
     assert.deepEqual(sent.map((entry) => entry.msg), [
       { text: "🔧 *Task*  Review mock code", linkPreview: null },
@@ -399,17 +409,15 @@ describe("sendEvent – runtime events", () => {
 
     await sendEvent(sock, "compact-runtime-tool-chat", {
       kind: "runtime_event",
-      compact: true,
       cwd: "/repo",
       event: {
         type: "tool.started",
         provider: "codex",
         tool: baseTool,
       },
-    });
+    }, undefined, undefined, { outputVisibility: COMPACT_TOOL_OUTPUT });
     await sendEvent(sock, "compact-runtime-tool-chat", {
       kind: "runtime_event",
-      compact: true,
       cwd: "/repo",
       event: {
         type: "tool.updated",
@@ -419,10 +427,9 @@ describe("sendEvent – runtime events", () => {
           output: "in progress",
         },
       },
-    });
+    }, undefined, undefined, { outputVisibility: COMPACT_TOOL_OUTPUT });
     await sendEvent(sock, "compact-runtime-tool-chat", {
       kind: "runtime_event",
-      compact: true,
       cwd: "/repo",
       event: {
         type: "tool.completed",
@@ -432,16 +439,147 @@ describe("sendEvent – runtime events", () => {
           output: "done",
         },
       },
-    });
+    }, undefined, undefined, { outputVisibility: COMPACT_TOOL_OUTPUT });
 
     assert.deepEqual(sent.map((entry) => entry.msg), [
-      { text: "🔧 *Grep*  `src`", linkPreview: null },
+      { text: "🔧 *Search*  \"needle\" in `src`", linkPreview: null },
       {
-        text: "✅ *Grep*  `src`",
+        text: "✅ *Search*  \"needle\" in `src`",
         edit: { id: "msg-1", remoteJid: "compact-runtime-tool-chat", fromMe: true },
         linkPreview: null,
       },
     ]);
+  });
+
+  it("suppresses compact ACP editing-files placeholders and renders the file-change diff instead", async () => {
+    const { sock, sent } = createMockSock();
+    const placeholder = {
+      id: "editing-files-placeholder",
+      name: "Editing files",
+      arguments: {},
+    };
+
+    await sendEvent(sock, "compact-runtime-editing-files-chat", {
+      kind: "runtime_event",
+      cwd: "/tmp",
+      event: {
+        type: "tool.started",
+        provider: "acp",
+        tool: placeholder,
+      },
+    }, undefined, undefined, { outputVisibility: COMPACT_TOOL_OUTPUT });
+    await sendEvent(sock, "compact-runtime-editing-files-chat", {
+      kind: "runtime_event",
+      cwd: "/tmp",
+      event: {
+        type: "tool.completed",
+        provider: "acp",
+        tool: placeholder,
+      },
+    }, undefined, undefined, { outputVisibility: COMPACT_TOOL_OUTPUT });
+    await sendEvent(sock, "compact-runtime-editing-files-chat", {
+      kind: "runtime_event",
+      cwd: "/tmp",
+      event: {
+        type: "file-change.completed",
+        provider: "acp",
+        change: {
+          path: "/tmp/src/app.js",
+          cwd: "/tmp",
+          source: "provider",
+          kind: "update",
+          summary: "Editing files",
+          oldText: "before\n",
+          newText: "after\n",
+          diff: [
+            "--- a/src/app.js",
+            "+++ b/src/app.js",
+            "@@ -1 +1 @@",
+            "-before",
+            "+after",
+          ].join("\n"),
+        },
+      },
+    }, undefined, undefined, { outputVisibility: COMPACT_TOOL_OUTPUT });
+
+    assert.equal(sent.length, 1);
+    assert.equal(sent[0]?.msg.caption, "🔧 Update *src/app.js*");
+  });
+
+  it("renders ACP runtime tool progress with semantic tool labels", async () => {
+    const cases = [
+      {
+        name: "Read",
+        args: { file_path: "src/app.js" },
+        expected: "Read*  `src/app.js`",
+      },
+      {
+        name: "Grep",
+        args: { path: "src", pattern: "needle" },
+        expected: "Search*  \"needle\" in `src`",
+      },
+      {
+        name: "Search",
+        args: { path: "src", pattern: "needle" },
+        expected: "Search*  \"needle\" in `src`",
+      },
+      {
+        name: "WebSearch",
+        args: { query: "runtime migration" },
+        expected: "Search Web*  \"runtime migration\"",
+      },
+      {
+        name: "spawn_agent",
+        args: { message: "Review migration" },
+        expected: "Start Agent*  _Review migration_",
+      },
+      {
+        name: "parallel",
+        args: { tool_uses: [{ recipient_name: "functions.exec_command" }, { recipient_name: "functions.exec_command" }] },
+        expected: "Run Parallel*  _2 tools_",
+      },
+      {
+        name: "weather",
+        args: { weather: [{ location: "San Francisco, CA" }] },
+        expected: "Weather*  `San Francisco, CA`",
+      },
+      {
+        name: "open",
+        args: { open: [{ ref_id: "https://openai.com" }] },
+        expected: "Open Link*  `openai.com`",
+      },
+    ];
+
+    for (const [index, testCase] of cases.entries()) {
+      const { sock, sent } = createMockSock();
+      const tool = {
+        id: `runtime-semantic-tool-${index}`,
+        name: testCase.name,
+        arguments: testCase.args,
+      };
+
+      await sendEvent(sock, `runtime-semantic-tool-${index}`, {
+        kind: "runtime_event",
+        cwd: "/repo",
+        event: {
+          type: "tool.started",
+          provider: "acp",
+          tool,
+        },
+      }, undefined, undefined, { outputVisibility: VISIBLE_TOOL_OUTPUT });
+      await sendEvent(sock, `runtime-semantic-tool-${index}`, {
+        kind: "runtime_event",
+        cwd: "/repo",
+        event: {
+          type: "tool.completed",
+          provider: "acp",
+          tool,
+        },
+      }, undefined, undefined, { outputVisibility: VISIBLE_TOOL_OUTPUT });
+
+      assert.equal(sent[0]?.msg.text, `🔧 *${testCase.expected}`);
+      assert.equal(sent[1]?.msg.text, `✅ *${testCase.expected}`);
+    }
   });
 
   it("renders ACP command runtime progress inside WhatsApp", async () => {
@@ -457,7 +595,7 @@ describe("sendEvent – runtime events", () => {
           status: "started",
         },
       },
-    });
+    }, undefined, undefined, { outputVisibility: VISIBLE_TOOL_OUTPUT });
     await sendEvent(sock, "runtime-command-chat", {
       kind: "runtime_event",
       event: {
@@ -469,7 +607,7 @@ describe("sendEvent – runtime events", () => {
           output: "ok",
         },
       },
-    });
+    }, undefined, undefined, { outputVisibility: VISIBLE_TOOL_OUTPUT });
 
     assert.deepEqual(sent.map((entry) => entry.msg), [
       { text: "🔧 *Shell*  `pnpm type-check`", linkPreview: null },
@@ -495,8 +633,8 @@ describe("sendEvent – runtime events", () => {
       },
     });
 
-    await sendEvent(sock, "runtime-command-duplicate-chat", startEvent);
-    await sendEvent(sock, "runtime-command-duplicate-chat", startEvent);
+    await sendEvent(sock, "runtime-command-duplicate-chat", startEvent, undefined, undefined, { outputVisibility: VISIBLE_TOOL_OUTPUT });
+    await sendEvent(sock, "runtime-command-duplicate-chat", startEvent, undefined, undefined, { outputVisibility: VISIBLE_TOOL_OUTPUT });
     await sendEvent(sock, "runtime-command-duplicate-chat", {
       kind: "runtime_event",
       event: {
@@ -508,7 +646,7 @@ describe("sendEvent – runtime events", () => {
           output: "ok",
         },
       },
-    });
+    }, undefined, undefined, { outputVisibility: VISIBLE_TOOL_OUTPUT });
 
     assert.deepEqual(sent.map((entry) => entry.msg), [
       { text: "🔧 *Shell*  `pnpm test tests/e2e-adapter.test.js`", linkPreview: null },

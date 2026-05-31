@@ -152,9 +152,103 @@ type MessageSource = "llm" | "tool-call" | "tool-result" | "error" | "warning" |
 /** Callback invoked when a reaction is added to a message. */
 type ReactionCallback = (emoji: string, senderId: string) => void;
 
+type ToolActivityTitle =
+  | "Read"
+  | "Search"
+  | "List"
+  | "Plan"
+  | "Search Web"
+  | "Open Link"
+  | "Find On Page"
+  | "Search Images"
+  | "Time"
+  | "Weather"
+  | "Quote"
+  | "Sports Schedule"
+  | "Sports Standings"
+  | "Run Command"
+  | "Start Agent"
+  | "Message Agent"
+  | "Wait For Agent"
+  | "Resume Agent"
+  | "Close Agent"
+  | "Run Parallel"
+  | "Terminal Input";
+
+type ToolActivitySummary = {
+  title: ToolActivityTitle;
+  lines: string[];
+};
+
+type ToolInspectMode =
+  | "bash"
+  | "read"
+  | "grep"
+  | "glob"
+  | "plain"
+  | "web_search"
+  | "open_link"
+  | "find_on_page"
+  | "image_search"
+  | "time"
+  | "weather"
+  | "finance"
+  | "sports_schedule"
+  | "sports_standings";
+
+type ToolFlowDescriptor = {
+  groupKey: string;
+  groupTitle: string;
+  detail: string;
+};
+
+type ToolActivityPresentation = {
+  kind: "activity";
+  toolName: string;
+  summary: string;
+  activity: ToolActivitySummary;
+  inspectMode: ToolInspectMode;
+  flow?: ToolFlowDescriptor;
+};
+
+type BashToolPresentation = {
+  kind: "bash";
+  toolName: string;
+  summary: string;
+  command: string;
+  inspectMode: ToolInspectMode;
+};
+
+type FileToolPresentation = {
+  kind: "file";
+  toolName: "Edit" | "Write";
+  summary: string;
+  filePath: string;
+  oldString?: string;
+  newString?: string;
+  content?: string;
+  oldContent?: string;
+  startLine?: number;
+};
+
+type GenericToolPresentation = {
+  kind: "generic";
+  toolName: string;
+  summary: string;
+  description?: string;
+  args: Record<string, unknown>;
+};
+
+type ToolPresentation =
+  | ToolActivityPresentation
+  | import("./plan-presentation.js").PlanPresentation
+  | BashToolPresentation
+  | FileToolPresentation
+  | GenericToolPresentation;
+
 type ToolFlowStep = {
   id: string;
-  presentation: import("./tool-presentation-model.js").ToolPresentation;
+  presentation: ToolPresentation;
   output?: string;
 };
 
@@ -176,12 +270,18 @@ type ContentEvent = {
 
 type ToolCallEvent = {
   kind: "tool_call";
-  presentation: import("./tool-presentation-model.js").ToolPresentation;
+  toolCall: LlmChatResponse["toolCalls"][0];
+  cwd?: string | null;
+  displaySummary?: string;
+  context?: {
+    oldContent?: string;
+    startLine?: number;
+  };
 };
 
 type ToolActivityEvent = {
   kind: "tool_activity";
-  activity: import("./tool-presentation-model.js").ToolActivitySummary;
+  activity: ToolActivitySummary;
 };
 
 type CompactToolActivityEvent = {
@@ -204,7 +304,6 @@ type CompactToolActivityEvent = {
         type: "tool";
         status: "started" | "completed" | "failed";
         toolCall?: LlmChatResponse["toolCalls"][0];
-        presentation?: import("./tool-presentation-model.js").ToolPresentation;
       }
     | {
         type: "close";
@@ -248,7 +347,6 @@ type SubagentMessageEvent = {
 type RuntimeEventOutboundEvent = {
   kind: "runtime_event";
   event: import("./harnesses/harness-runtime-events.js").HarnessRuntimeEvent;
-  compact?: boolean;
   cwd?: string | null;
 };
 
@@ -274,11 +372,11 @@ type OutboundEvent =
 
 type MessageHandleUpdate =
   | { kind: "text"; text: string }
-  | { kind: "tool_call"; presentation: import("./tool-presentation-model.js").ToolPresentation }
+  | { kind: "tool_call"; presentation: ToolPresentation }
   | { kind: "tool_flow"; state: ToolFlowState };
 
 type MessageInspectState =
-  | { kind: "tool"; presentation: import("./tool-presentation-model.js").ToolPresentation; output?: string }
+  | { kind: "tool"; presentation: ToolPresentation; output?: string }
   | { kind: "tool_flow"; state: ToolFlowState }
   | { kind: "text"; text: string; persistOnInspect?: boolean }
   | { kind: "reasoning"; summary: string; text: string };
@@ -666,13 +764,11 @@ type AgentIOHooks = {
   onLlmResponse?: (text: string, metadata?: LlmResponseMetadata) => Promise<void>;
   /** Present a structured question to the user and wait for their response. Returns the chosen option text. */
   onAskUser?: (question: string, options: string[], preamble?: string, descriptions?: string[]) => Promise<string>;
-  onToolCall?: (toolCall: LlmChatResponse['toolCalls'][0], formatToolCall?: (params: Record<string, any>) => string, context?: { oldContent?: string }) => Promise<MessageHandle | void>;
+  onToolCall?: (toolCall: LlmChatResponse['toolCalls'][0], formatToolCall?: (params: Record<string, any>) => string, context?: { oldContent?: string, startLine?: number }) => Promise<MessageHandle | void>;
   onToolComplete?: (toolCall: LlmChatResponse['toolCalls'][0]) => Promise<void>;
   onToolResult?: (blocks: ToolContentBlock[], toolName: string, permissions: PermissionFlags) => Promise<void>;
   onToolError?: (error: string) => Promise<void>;
-  onCommand?: (event: { command: string, status: "started" | "completed" | "failed", output?: string }) => Promise<MessageHandle | void>;
   onPlan?: (presentation: import("./plan-presentation.js").PlanPresentation) => Promise<void>;
-  onFileRead?: (event: { command: string, paths: string[] }) => Promise<void>;
   onFileChange?: (event: {
     path: string,
     summary?: string,

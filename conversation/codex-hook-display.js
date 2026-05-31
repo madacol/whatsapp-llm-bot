@@ -1,113 +1,18 @@
 import { runtimeEvent } from "../outbound-events.js";
 
 /**
- * @typedef {{
- *   handle: MessageHandle,
- * }} PendingInspectEntry
- */
-
-/**
- * Build the Codex-specific display hooks that correlate command/file events
- * with inspect handlers and diff rendering.
+ * Build the Codex-specific display hook for file change rendering.
  * @param {{
  *   context: Pick<ExecuteActionContext, "send">,
  *   cwd: string | null,
  *   visibility: import("../chat-output-visibility.js").OutputVisibility,
  * }} input
- * @returns {Pick<Required<AgentIOHooks>, "onCommand" | "onFileRead" | "onFileChange">}
+ * @returns {Pick<Required<AgentIOHooks>, "onFileChange">}
  */
 export function createCodexDisplayHooks({ context, cwd, visibility }) {
-  /** @type {Map<string, PendingInspectEntry[]>} */
-  const activeInspects = new Map();
-
   return {
-    onCommand,
-    onFileRead,
     onFileChange,
   };
-
-  /**
-   * @param {string} key
-   * @param {PendingInspectEntry} entry
-   * @returns {void}
-   */
-  function rememberInspect(key, entry) {
-    const existing = activeInspects.get(key) ?? [];
-    existing.push(entry);
-    activeInspects.set(key, existing);
-  }
-
-  /**
-   * @param {string} key
-   * @returns {PendingInspectEntry | undefined}
-   */
-  function consumeInspect(key) {
-    const existing = activeInspects.get(key);
-    if (!existing || existing.length === 0) {
-      return undefined;
-    }
-    const entry = existing.shift();
-    if (!entry) {
-      return undefined;
-    }
-    if (existing.length === 0) {
-      activeInspects.delete(key);
-    }
-    return entry;
-  }
-
-  /**
-   * @param {{ command: string, status: "started" | "completed" | "failed", output?: string }} event
-   * @returns {Promise<MessageHandle | void>}
-   */
-  async function onCommand({ command, status, output }) {
-    if (!visibility.toolDetails) {
-      return;
-    }
-
-    const handle = await context.send(runtimeEvent({
-      type: `command.${status}`,
-      provider: "codex",
-      command: {
-        command,
-        status,
-        ...(output !== undefined && { output }),
-      },
-    }));
-    if (status !== "started") {
-      const inspectEntry = consumeInspect(command);
-      if (inspectEntry) {
-        inspectEntry.handle.setInspect({
-          kind: "text",
-          text: output ?? "",
-          persistOnInspect: true,
-        });
-      }
-    }
-    return handle;
-  }
-
-  /**
-   * @param {{ command: string, paths: string[] }} event
-   * @returns {Promise<void>}
-   */
-  async function onFileRead({ command, paths }) {
-    if (!visibility.toolDetails) {
-      return;
-    }
-
-    const handle = await context.send(runtimeEvent({
-      type: "file-read.started",
-      provider: "codex",
-      fileRead: {
-        command,
-        paths,
-      },
-    }));
-    if (handle) {
-      rememberInspect(command, { handle });
-    }
-  }
 
   /**
    * @param {{

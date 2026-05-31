@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { buildToolPresentation } from "../tool-presentation-model.js";
+import { buildToolPresentation } from "../whatsapp/tool-presentation-model.js";
 import { formatPlanPresentationText } from "../plan-presentation.js";
 import {
   formatCommandInspectText,

@@ -252,9 +252,9 @@ describe("dummy runtime tools", () => {
     const rendered = captures.getRenderedMessages();
     assert.ok(rendered.some((text) => text.includes("🔧 *Read*") && text.includes("`src/app.js`")), `Expected Read start, got ${JSON.stringify(rendered)}`);
     assert.ok(rendered.some((text) => text.includes("✅ *Read*") && text.includes("`src/app.js`")), `Expected Read completion, got ${JSON.stringify(rendered)}`);
-    assert.ok(rendered.some((text) => text.includes("✅ *Grep*") && text.includes("`src`")), `Expected Grep completion, got ${JSON.stringify(rendered)}`);
+    assert.ok(rendered.some((text) => text.includes("✅ *Search*") && text.includes("\"needle\" in `src`")), `Expected Search completion, got ${JSON.stringify(rendered)}`);
     assert.ok(rendered.some((text) => text.includes("✅ *Task*") && text.includes("Review migration")), `Expected Task completion, got ${JSON.stringify(rendered)}`);
-    assert.ok(rendered.some((text) => text.includes("✅ *WebSearch*") && text.includes("runtime migration")), `Expected WebSearch completion, got ${JSON.stringify(rendered)}`);
+    assert.ok(rendered.some((text) => text.includes("✅ *Search Web*") && text.includes("\"runtime migration\"")), `Expected Search Web completion, got ${JSON.stringify(rendered)}`);
     assert.ok(rendered.some((text) => text.includes("Dummy tools done.")), `Expected final answer, got ${JSON.stringify(rendered)}`);
   });
 });

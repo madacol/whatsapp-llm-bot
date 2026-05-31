@@ -430,7 +430,7 @@
             <strong>What changed?</strong>
             <ul>
               <li>The object is not reformatted yet.</li>
-              <li><code>hooks.onCommand(...)</code> is skipped.</li>
+              <li>No direct command hook is used; command progress stays on the runtime-event path.</li>
             </ul>
           </div>
         </article>
@@ -567,12 +567,12 @@ text = "🔧 *Shell*  `pnpm test`"</code></pre>
       </article>
 
       <article class="panel">
-        <h2>Direct onCommand Path</h2>
+        <h2>Runtime Event Path</h2>
         <div class="mini-flow">
-          <div class="mini-row"><b>Starts as</b><span><code>{ command: "pnpm test", status: "started" }</code></span></div>
-          <div class="mini-row"><b>Hook used</b><span><code>hooks.onCommand(commandEvent)</code></span></div>
-          <div class="mini-row"><b>Wrapper</b><span><code>runtimeEvent({ type: "command.started", provider: "codex", ... })</code></span></div>
-          <div class="mini-row"><b>Provider</b><span>Set to <code>"codex"</code>.</span></div>
+          <div class="mini-row"><b>Starts as</b><span><code>{ type: "command.started", provider: "...", command: ... }</code></span></div>
+          <div class="mini-row"><b>Hook used</b><span><code>hooks.onRuntimeEvent(event)</code></span></div>
+          <div class="mini-row"><b>Wrapper</b><span><code>{ kind: "runtime_event", event }</code></span></div>
+          <div class="mini-row"><b>Provider</b><span>Preserved from the runtime event.</span></div>
         </div>
       </article>
     </section>

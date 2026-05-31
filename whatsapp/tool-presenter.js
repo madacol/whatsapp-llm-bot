@@ -5,7 +5,7 @@
 import { maxCharsForLineCount } from "../code-image-renderer.js";
 import { formatPlanPresentationInspect } from "../plan-presentation.js";
 import { formatStructuredInspectOutput } from "../tool-inspect-formatters.js";
-import { buildToolPresentation } from "../tool-presentation-model.js";
+import { buildToolPresentation } from "./tool-presentation-model.js";
 
 /**
  * Tool names that map to the shared semantic SDK-style presentation layer.
@@ -70,7 +70,7 @@ export function langFromPath(filePath) {
 }
 
 /**
- * @param {import("../tool-presentation-model.js").ToolActivitySummary} activity
+ * @param {import("./tool-presentation-model.js").ToolActivitySummary} activity
  * @returns {string}
  */
 export function formatActivitySummary(activity) {
@@ -255,7 +255,7 @@ function formatBashInspectOutput(text) {
 
 /**
  * @param {string} text
- * @param {import("../tool-presentation-model.js").ToolInspectMode} inspectMode
+ * @param {import("./tool-presentation-model.js").ToolInspectMode} inspectMode
  * @returns {string}
  */
 function formatInspectOutput(text, inspectMode) {
@@ -276,7 +276,7 @@ function formatInspectOutput(text, inspectMode) {
 /**
  * @param {string} command
  * @param {string | undefined} output
- * @param {import("../tool-presentation-model.js").ToolInspectMode} inspectMode
+ * @param {import("./tool-presentation-model.js").ToolInspectMode} inspectMode
  * @returns {string}
  */
 export function formatCommandInspectText(command, output, inspectMode) {
@@ -293,7 +293,7 @@ export function formatCommandInspectText(command, output, inspectMode) {
 }
 
 /**
- * @param {import("../tool-presentation-model.js").ToolPresentation} presentation
+ * @param {import("./tool-presentation-model.js").ToolPresentation} presentation
  * @returns {string}
  */
 export function formatToolPresentationSummary(presentation) {
@@ -301,7 +301,7 @@ export function formatToolPresentationSummary(presentation) {
 }
 
 /**
- * @param {import("../tool-presentation-model.js").ToolPresentation} presentation
+ * @param {import("./tool-presentation-model.js").ToolPresentation} presentation
  * @returns {SendContent | null}
  */
 export function formatToolPresentationDisplay(presentation) {
@@ -364,7 +364,7 @@ export function formatToolPresentationDisplay(presentation) {
 }
 
 /**
- * @param {import("../tool-presentation-model.js").ToolPresentation} presentation
+ * @param {import("./tool-presentation-model.js").ToolPresentation} presentation
  * @returns {SendContent}
  */
 export function renderToolPresentationContent(presentation) {
@@ -372,7 +372,7 @@ export function renderToolPresentationContent(presentation) {
 }
 
 /**
- * @param {import("../tool-presentation-model.js").ToolActivitySummary} activity
+ * @param {import("./tool-presentation-model.js").ToolActivitySummary} activity
  * @returns {string}
  */
 export function renderToolActivityContent(activity) {
@@ -380,7 +380,7 @@ export function renderToolActivityContent(activity) {
 }
 
 /**
- * @param {import("../tool-presentation-model.js").ToolPresentation} presentation
+ * @param {import("./tool-presentation-model.js").ToolPresentation} presentation
  * @param {string | undefined} output
  * @returns {string | null}
  */
