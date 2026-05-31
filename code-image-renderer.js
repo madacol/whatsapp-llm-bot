@@ -1,6 +1,6 @@
 import { createHighlighter } from "shiki";
 import { Resvg } from "@resvg/resvg-js";
-import { diffLines } from "diff";
+import { createPatch } from "diff";
 import { createLogger } from "./logger.js";
 
 const log = createLogger("code-image-renderer");
@@ -24,6 +24,7 @@ const MAX_ASPECT_RATIO = 2;
 const MAX_PIXELS = 12_500_000;
 const MAX_SVG_WIDTH = 2000;
 const MAX_LINES_PER_CHUNK = 50;
+export const DIFF_CONTEXT_LINES = 8;
 
 /**
  * Compute the maximum number of characters per line that keeps the rendered
@@ -972,64 +973,42 @@ export function renderTableToImages(markdownTable) {
 }
 
 /**
+ * @param {string} oldStr
+ * @param {string} newStr
+ * @param {number} [contextLines]
+ * @returns {string}
+ */
+export function buildContextualUnifiedDiff(oldStr, newStr, contextLines = DIFF_CONTEXT_LINES) {
+  const normalizedContext = Number.isInteger(contextLines) && contextLines >= 0
+    ? contextLines
+    : DIFF_CONTEXT_LINES;
+  const patch = createPatch("change", oldStr, newStr, "", "", { context: normalizedContext });
+  const lines = patch.split("\n");
+  const filtered = lines.filter((line) => !(
+    line.startsWith("Index: ")
+    || line.startsWith("===")
+    || line.startsWith("--- ")
+    || line.startsWith("+++ ")
+  ));
+  return filtered.join("\n").trimEnd();
+}
+
+/**
  * Render a diff (old_string → new_string) as syntax-highlighted PNG image(s).
  * Removed lines show with red background, added lines with green background,
- * each with a +/- gutter prefix. Both sides are highlighted in the target language.
+ * each with a +/- gutter prefix. Context is bounded to keep large file edits
+ * readable in chat.
  * @param {string} oldStr
  * @param {string} newStr
  * @param {string} [language]
  * @returns {Promise<Buffer[]>}
  */
 export async function renderDiffToImages(oldStr, newStr, language) {
-  const hl = await getHighlighter();
-  const effectiveLang = await loadLang(hl, language || "text");
-  const shikiLang = /** @type {import("shiki").BundledLanguage} */ (effectiveLang);
-
-  // Normalize trailing whitespace before diffing — prevents false "changed"
-  // lines caused by invisible trailing spaces the LLM may add or remove.
-  const norm = (/** @type {string} */ s) => s.split("\n").map(l => l.trimEnd()).join("\n");
-  const changes = diffLines(norm(oldStr), norm(newStr));
-
-  // Build a single unified string for each "side" so shiki tokenizes with
-  // full context, then slice out the token lines per-change.
-  // We assemble the full text first, track line ranges, then tokenize once.
-  /** @type {{ kind: "add" | "del" | "ctx"; text: string }[]} */
-  const diffParts = [];
-  for (const change of changes) {
-    const text = change.value.endsWith("\n") ? change.value.slice(0, -1) : change.value;
-    if (change.added) {
-      diffParts.push({ kind: "add", text });
-    } else if (change.removed) {
-      diffParts.push({ kind: "del", text });
-    } else {
-      diffParts.push({ kind: "ctx", text });
-    }
+  const diffText = buildContextualUnifiedDiff(oldStr, newStr);
+  if (!diffText) {
+    return [];
   }
-
-  // Tokenize the full combined text so syntax highlighting is correct across boundaries
-  const fullText = diffParts.map(p => p.text).join("\n");
-  const allTokens = hl.codeToTokens(fullText, { lang: shikiLang, theme: THEME }).tokens;
-
-  // Map token lines back to diff parts
-  /** @type {AnnotatedLine[]} */
-  const lines = [];
-  let tokenLineIdx = 0;
-
-  for (const part of diffParts) {
-    const partLineCount = part.text.split("\n").length;
-    for (let i = 0; i < partLineCount && tokenLineIdx < allTokens.length; i++, tokenLineIdx++) {
-      const tokens = allTokens[tokenLineIdx];
-      if (part.kind === "del") {
-        lines.push({ tokens, bg: DIFF_DEL_BG, gutter: DIFF_DEL_GUTTER, prefix: "-" });
-      } else if (part.kind === "add") {
-        lines.push({ tokens, bg: DIFF_ADD_BG, gutter: DIFF_ADD_GUTTER, prefix: "+" });
-      } else {
-        lines.push({ tokens, prefix: " " });
-      }
-    }
-  }
-
-  return renderCodeLikeAnnotatedLines(lines, { gutterWidth: GUTTER_WIDTH, prefixChars: 1 });
+  return renderUnifiedDiffToImages(diffText, language);
 }
 
 /**

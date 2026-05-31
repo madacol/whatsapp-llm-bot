@@ -8,7 +8,7 @@
 
 import { basename } from "node:path";
 import { hasMediaPath } from "./attachment-paths.js";
-import { renderCodeToImages, renderDiffToImages, renderTableToImages, renderUnifiedDiffToImages, MIN_LINES_FOR_IMAGE } from "./code-image-renderer.js";
+import { buildContextualUnifiedDiff, renderCodeToImages, renderDiffToImages, renderTableToImages, renderUnifiedDiffToImages, MIN_LINES_FOR_IMAGE } from "./code-image-renderer.js";
 import { createLogger } from "./logger.js";
 import { renderDisplayMathToImage } from "./math-image-renderer.js";
 import { segmentMarkdown } from "./markdown-segments.js";
@@ -674,8 +674,5 @@ async function renderDiffBlock(block, prefix, instructions) {
  * @returns {string}
  */
 function buildSimpleDiffFallback(oldStr, newStr) {
-  const lines = [];
-  for (const line of oldStr.split("\n")) lines.push(`- ${line}`);
-  for (const line of newStr.split("\n")) lines.push(`+ ${line}`);
-  return lines.join("\n");
+  return buildContextualUnifiedDiff(oldStr, newStr);
 }
