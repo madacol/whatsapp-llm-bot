@@ -3,7 +3,6 @@
  * Internal concerns now live in focused modules:
  * - action-catalog.js
  * - chat-action-store.js
- * - action-executor.js
  */
 
 export { getActions, getAction } from "./action-catalog.js";
@@ -16,4 +15,3 @@ export {
   getChatActions,
   getChatAction,
 } from "./chat-action-store.js";
-export { executeAction } from "./action-executor.js";
