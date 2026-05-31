@@ -472,7 +472,7 @@ describe("ACP harness", () => {
     }
   });
 
-  it("emits file changes for ACP fs writes and direct adapter writes with transport-ready diffs", async () => {
+  it("emits file changes for ACP fs writes and direct adapter writes", async () => {
     for (const prompt of ["fs write", "direct write"]) {
       const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), `acp-${prompt.replace(" ", "-")}-`));
       const harness = createAcpHarness({
@@ -504,14 +504,139 @@ describe("ACP harness", () => {
 
         const fileChanges = events.filter((event) => event.type === "file-change.completed");
         assert.equal(fileChanges.length, 1);
-        const change = /** @type {{ path?: unknown, kind?: unknown, newText?: unknown, diff?: unknown }} */ (fileChanges[0]?.change ?? {});
+        const change = /** @type {{ path?: unknown, kind?: unknown, source?: unknown, newText?: unknown, diff?: unknown }} */ (fileChanges[0]?.change ?? {});
         assert.ok(String(change.path ?? "").startsWith(tempDir));
         assert.equal(change.kind, "add");
         assert.equal(typeof change.newText, "string");
-        assert.match(String(change.diff ?? ""), /--- \/dev\/null/);
+        if (prompt === "fs write") {
+          assert.equal(change.source, "tool");
+          assert.match(String(change.diff ?? ""), /--- \/dev\/null/);
+        } else {
+          assert.equal(change.source, "snapshot");
+          assert.equal(change.diff, undefined);
+        }
       } finally {
         unsubscribe?.();
       }
+    }
+  });
+
+  it("emits snapshot file changes for unmarked ACP-side renames", async () => {
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "acp-direct-rename-"));
+    await fs.writeFile(path.join(tempDir, "before-rename.txt"), "rename me\n", "utf8");
+    const harness = createAcpHarness({
+      config: {
+        command: process.execPath,
+        args: [path.join(__dirname, "fixtures", "acp-mock-agent.js")],
+      },
+    });
+    const adapter = harness.createAdapter?.({
+      name: "acp",
+      instanceId: "test",
+      continuationKey: "acp:direct-rename",
+    });
+    assert.ok(adapter);
+
+    /** @type {Array<Record<string, unknown>>} */
+    const events = [];
+    const unsubscribe = adapter.subscribeEvents?.((event) => {
+      events.push(event);
+    });
+    try {
+      await adapter.startSession({ chatId: "direct-rename-chat", runConfig: { workdir: tempDir } });
+      await adapter.sendTurn({
+        chatId: "direct-rename-chat",
+        input: "direct rename",
+        messages: [{ role: "user", content: [{ type: "text", text: "direct rename" }] }],
+        runConfig: { workdir: tempDir },
+      });
+
+      const fileChanges = events.filter((event) => event.type === "file-change.completed");
+      assert.deepEqual(
+        fileChanges.map((event) => {
+          const change = /** @type {{ path?: unknown, kind?: unknown, source?: unknown, diff?: unknown, oldText?: unknown, newText?: unknown }} */ (event.change ?? {});
+          return {
+            provider: event.provider,
+            path: path.relative(tempDir, String(change.path ?? "")),
+            kind: change.kind,
+            source: change.source,
+            fromSnapshot: /** @type {{ raw?: { source?: unknown } }} */ (event).raw?.source,
+            hasPrebuiltDiff: change.diff !== undefined,
+            oldText: change.oldText,
+            newText: change.newText,
+          };
+        }),
+        [
+          {
+            provider: "acp",
+            path: "after-rename.txt",
+            kind: "add",
+            source: "snapshot",
+            fromSnapshot: "workdir-snapshot",
+            hasPrebuiltDiff: false,
+            oldText: undefined,
+            newText: "rename me\n",
+          },
+          {
+            provider: "acp",
+            path: "before-rename.txt",
+            kind: "delete",
+            source: "snapshot",
+            fromSnapshot: "workdir-snapshot",
+            hasPrebuiltDiff: false,
+            oldText: "rename me\n",
+            newText: undefined,
+          },
+        ],
+      );
+    } finally {
+      unsubscribe?.();
+    }
+  });
+
+  it("emits large unreported snapshot file-change batches as semantic events", async () => {
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "acp-snapshot-burst-"));
+    const harness = createAcpHarness({
+      config: {
+        command: process.execPath,
+        args: [path.join(__dirname, "fixtures", "acp-mock-agent.js")],
+      },
+    });
+    const adapter = harness.createAdapter?.({
+      name: "acp",
+      instanceId: "test",
+      continuationKey: "acp:snapshot-burst",
+    });
+    assert.ok(adapter);
+
+    /** @type {Array<Record<string, unknown>>} */
+    const events = [];
+    const unsubscribe = adapter.subscribeEvents?.((event) => {
+      events.push(event);
+    });
+    try {
+      await adapter.startSession({ chatId: "snapshot-burst-chat", runConfig: { workdir: tempDir } });
+      await adapter.sendTurn({
+        chatId: "snapshot-burst-chat",
+        input: "many snapshot files",
+        messages: [{ role: "user", content: [{ type: "text", text: "many snapshot files" }] }],
+        runConfig: { workdir: tempDir },
+      });
+
+      const fileChanges = events.filter((event) => event.type === "file-change.completed");
+      assert.equal(fileChanges.length, 30);
+      assert.ok(fileChanges.every((event) => {
+        const change = /** @type {{ source?: unknown, diff?: unknown, oldText?: unknown, newText?: unknown }} */ (event.change ?? {});
+        return change.source === "snapshot"
+          && change.diff === undefined
+          && change.oldText === undefined
+          && typeof change.newText === "string";
+      }));
+      assert.equal(events.some((event) => event.type === "runtime.warning"
+        && /Skipped 30 unreported snapshot file changes/.test(String(event.message ?? ""))), false);
+    } finally {
+      unsubscribe?.();
+      await fs.rm(tempDir, { recursive: true, force: true });
     }
   });
 

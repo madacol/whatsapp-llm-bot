@@ -210,6 +210,8 @@ const promptScenarios = [
   { match: "fs write", handle: handleFsWritePrompt },
   { match: "fs update", handle: handleFsUpdatePrompt },
   { match: "direct write", handle: handleDirectWritePrompt },
+  { match: "direct rename", handle: handleDirectRenamePrompt },
+  { match: "many snapshot files", handle: handleManySnapshotFilesPrompt },
   { match: "direct delete", handle: handleDirectDeletePrompt },
   { match: "diff only update", handle: handleDiffOnlyUpdatePrompt },
   { match: "diff only add", handle: handleDiffOnlyAddPrompt },
@@ -421,6 +423,28 @@ async function handleFsUpdatePrompt(message) {
 async function handleDirectWritePrompt(message) {
   await import("node:fs/promises").then((fs) => fs.writeFile(`${process.cwd()}/direct-write.txt`, "direct write", "utf8"));
   notifyText("direct write done");
+  endPrompt(message);
+}
+
+/** @param {Record<string, unknown>} message */
+async function handleDirectRenamePrompt(message) {
+  try {
+    await import("node:fs/promises").then((fs) => fs.rename(`${process.cwd()}/before-rename.txt`, `${process.cwd()}/after-rename.txt`));
+  } catch (error) {
+    notifyText(`direct rename failed: ${/** @type {{ code?: string }} */ (error).code ?? "unknown"}`);
+  }
+  notifyText("direct rename done");
+  endPrompt(message);
+}
+
+/** @param {Record<string, unknown>} message */
+async function handleManySnapshotFilesPrompt(message) {
+  const fs = await import("node:fs/promises");
+  await fs.mkdir(`${process.cwd()}/snapshot-burst`, { recursive: true });
+  for (let index = 0; index < 30; index += 1) {
+    await fs.writeFile(`${process.cwd()}/snapshot-burst/generated-${index}.txt`, `generated ${index}\n`, "utf8");
+  }
+  notifyText("many snapshot files done");
   endPrompt(message);
 }
 

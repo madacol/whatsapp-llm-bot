@@ -1605,6 +1605,16 @@ export function renderFileChangeContent(event) {
     }];
   }
 
+  if (typeof event.oldText === "string" || typeof event.newText === "string") {
+    return [{
+      type: "diff",
+      oldStr: event.oldText ?? "",
+      newStr: event.newText ?? "",
+      language: langFromPath(event.path) || "text",
+      caption: captionLines.join("\n"),
+    }];
+  }
+
   return captionLines.join("\n");
 }
 

@@ -1,7 +1,43 @@
+import path from "node:path";
 import { MAX_TOOL_CALL_DEPTH, parseToolArgs } from "../agent-io-defaults.js";
 import { contentEvent, planEvent, reasoningInspectState, runtimeEvent, subagentMessageEvent, textUpdate, toolCallEvent, usageEvent } from "../outbound-events.js";
 import { createCodexDisplayHooks } from "./codex-hook-display.js";
 import { DEFAULT_OUTPUT_VISIBILITY } from "../chat-output-visibility.js";
+
+export const MAX_AUTO_PRESENTED_SNAPSHOT_FILE_CHANGES = 25;
+export const SNAPSHOT_FILE_CHANGE_BATCH_FLUSH_DELAY_MS = 25;
+
+/**
+ * @param {string} filePath
+ * @param {string | null | undefined} cwd
+ * @returns {string}
+ */
+function formatSnapshotFileChangePath(filePath, cwd) {
+  if (typeof cwd !== "string" || !cwd.trim()) {
+    return filePath;
+  }
+  const relativePath = path.relative(path.resolve(cwd), path.resolve(filePath));
+  if (!relativePath || relativePath.startsWith("..") || path.isAbsolute(relativePath)) {
+    return filePath;
+  }
+  return relativePath;
+}
+
+/**
+ * @param {Extract<Parameters<Required<AgentIOHooks>["onRuntimeEvent"]>[0], { type: "file-change.completed" }>[]} events
+ * @param {string | null | undefined} cwd
+ * @returns {string[]}
+ */
+function describeSnapshotFileChangeSample(events, cwd) {
+  const descriptions = events.slice(0, 10).map((event) => {
+    const action = event.change.kind ?? "update";
+    return `${action} ${formatSnapshotFileChangePath(event.change.path, cwd)}`;
+  });
+  if (events.length > descriptions.length) {
+    descriptions.push(`... ${events.length - descriptions.length} more`);
+  }
+  return descriptions;
+}
 
 /**
  * File-mutating tool calls are part of change visibility, not just full tool
@@ -97,8 +133,71 @@ export function buildAgentIoHooks(
   });
   /** @type {LlmChatResponse["toolCalls"][0][]} */
   const pendingRuntimeToolCalls = [];
+  /** @type {Extract<Parameters<Required<AgentIOHooks>["onRuntimeEvent"]>[0], { type: "file-change.completed" }>[]} */
+  const pendingSnapshotFileChanges = [];
   /** @type {MessageHandle | null} */
   let reasoningHandle = null;
+  /** @type {ReturnType<typeof setTimeout> | null} */
+  let snapshotFlushTimer = null;
+
+  /**
+   * @param {Parameters<Required<AgentIOHooks>["onRuntimeEvent"]>[0]} event
+   * @returns {Promise<void>}
+   */
+  async function sendRuntimePresentationEvent(event) {
+    await emitWhileWorking(() => context.send(runtimeEvent(event, {
+      ...(cwd !== null ? { cwd } : {}),
+    })));
+  }
+
+  /**
+   * @returns {Promise<void>}
+   */
+  async function flushSnapshotFileChanges() {
+    if (snapshotFlushTimer) {
+      clearTimeout(snapshotFlushTimer);
+      snapshotFlushTimer = null;
+    }
+    if (pendingSnapshotFileChanges.length === 0) {
+      return;
+    }
+    const batch = pendingSnapshotFileChanges.splice(0);
+    if (batch.length > MAX_AUTO_PRESENTED_SNAPSHOT_FILE_CHANGES) {
+      const sample = describeSnapshotFileChangeSample(batch, cwd).join("\n");
+      const choice = await context.select(
+        `Snapshot detected *${batch.length}* unreported file changes. Send them to chat?\n\n${sample}`,
+        ["✅ Continue", "❌ Skip"],
+        { deleteOnSelect: true },
+      );
+      if (!choice.startsWith("✅ Continue")) {
+        await sendRuntimePresentationEvent({
+          type: "runtime.warning",
+          provider: "acp",
+          summary: "Snapshot file changes skipped",
+          message: `Skipped ${batch.length} unreported snapshot file changes.`,
+          details: sample,
+          raw: {
+            source: "whatsapp.presentation",
+            payload: { skippedFileChanges: batch.length },
+          },
+        });
+        return;
+      }
+    }
+    for (const event of batch) {
+      await sendRuntimePresentationEvent(event);
+    }
+  }
+
+  function scheduleSnapshotFileChangeFlush() {
+    if (snapshotFlushTimer) {
+      clearTimeout(snapshotFlushTimer);
+    }
+    snapshotFlushTimer = setTimeout(() => {
+      void flushSnapshotFileChanges();
+    }, SNAPSHOT_FILE_CHANGE_BATCH_FLUSH_DELAY_MS);
+    snapshotFlushTimer.unref?.();
+  }
 
   /**
    * @param {{ text?: string, summaryParts: string[], contentParts: string[], hasEncryptedContent?: boolean }} event
@@ -257,10 +356,14 @@ export function buildAgentIoHooks(
         if (!visibility.changes) {
           return;
         }
+        if (event.change.source === "snapshot") {
+          pendingSnapshotFileChanges.push(event);
+          scheduleSnapshotFileChangeFlush();
+          return;
+        }
       }
-      await emitWhileWorking(() => context.send(runtimeEvent(event, {
-        ...(cwd !== null ? { cwd } : {}),
-      })));
+      await flushSnapshotFileChanges();
+      await sendRuntimePresentationEvent(event);
     },
   };
 }

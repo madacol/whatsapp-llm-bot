@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { buildAgentIoHooks } from "../conversation/build-agent-io-hooks.js";
+import { MAX_AUTO_PRESENTED_SNAPSHOT_FILE_CHANGES, buildAgentIoHooks } from "../conversation/build-agent-io-hooks.js";
 import { DEFAULT_OUTPUT_VISIBILITY } from "../chat-output-visibility.js";
 import { buildToolPresentation } from "../whatsapp/tool-presentation-model.js";
 
@@ -709,6 +709,60 @@ describe("buildAgentIoHooks", () => {
     assert.equal(sent[0].event.event.change.kind, "add");
     assert.equal(sent[0].event.event.change.summary, "/repo/src/file.js (add)");
     assert.equal(sent[0].event.event.change.cwd, "/repo");
+  });
+
+  it("asks in the WhatsApp hook before presenting large snapshot file-change batches", async () => {
+    /** @type {Array<{ question: string, options: string[] }>} */
+    const prompts = [];
+    /** @type {Array<OutboundEvent>} */
+    const sent = [];
+    const hooks = buildAgentIoHooks(
+      {
+        send: async (event) => {
+          sent.push(event);
+          return undefined;
+        },
+        reply: async () => undefined,
+        select: async (question, options) => {
+          prompts.push({ question, options });
+          return "❌ Skip";
+        },
+        confirm: async () => true,
+      },
+      "/repo",
+      DEFAULT_OUTPUT_VISIBILITY,
+    );
+    const events = Array.from({ length: MAX_AUTO_PRESENTED_SNAPSHOT_FILE_CHANGES + 1 }, (_entry, index) => ({
+      type: /** @type {const} */ ("file-change.completed"),
+      provider: "acp",
+      change: {
+        path: `/repo/generated-${index}.txt`,
+        kind: /** @type {const} */ ("add"),
+        source: /** @type {const} */ ("snapshot"),
+        newText: `generated ${index}\n`,
+      },
+      raw: { source: "workdir-snapshot" },
+    }));
+
+    for (const event of events) {
+      await hooks.onRuntimeEvent?.(event);
+    }
+    await hooks.onRuntimeEvent?.({
+      type: "runtime.warning",
+      provider: "acp",
+      message: "after snapshot batch",
+    });
+
+    assert.equal(prompts.length, 1);
+    assert.match(prompts[0]?.question ?? "", /Snapshot detected \*26\* unreported file changes/);
+    assert.match(prompts[0]?.question ?? "", /add generated-0\.txt/);
+    assert.deepEqual(prompts[0]?.options, ["✅ Continue", "❌ Skip"]);
+    const runtimeEvents = sent
+      .filter((event) => event.kind === "runtime_event")
+      .map((event) => event.event);
+    assert.equal(runtimeEvents.some((event) => event.type === "file-change.completed"), false);
+    assert.ok(runtimeEvents.some((event) => event.type === "runtime.warning"
+      && /Skipped 26 unreported snapshot file changes/.test(String(event.message ?? ""))));
   });
 
   it("passes file-read and command output through runtime events", async () => {

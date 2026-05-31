@@ -9,6 +9,7 @@ const log = createLogger("harness:acp");
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "..");
 const ACP_STDERR_LOG_ENV = "MADABOT_ACP_STDERR_LOG";
+const ACP_PROTOCOL_LOG_ENV = "HARNESS_ACP_PROTOCOL_LOG";
 const ACP_STDERR_TAIL_MAX_CHARS = 4_000;
 
 /**
@@ -23,7 +24,25 @@ const ACP_STDERR_TAIL_MAX_CHARS = 4_000;
  *   env?: NodeJS.ProcessEnv,
  *   signal?: AbortSignal,
  *   handleRequest?: (message: Record<string, unknown>) => Promise<unknown>,
+ *   protocolLogger?: AcpProtocolLogger | null,
  * }} OpenAcpConnectionOptions
+ */
+
+/**
+ * @typedef {{
+ *   timestamp: string,
+ *   direction: "client_to_agent" | "agent_to_client",
+ *   kind: "request" | "response" | "notification",
+ *   id?: string | number,
+ *   method?: string,
+ *   message: Record<string, unknown>,
+ * }} AcpProtocolLogEntry
+ */
+
+/**
+ * @typedef {{
+ *   write: (entry: AcpProtocolLogEntry) => Promise<void> | void,
+ * }} AcpProtocolLogger
  */
 
 /**
@@ -183,6 +202,67 @@ function cleanStderrTail(value) {
 }
 
 /**
+ * @param {string} filePath
+ * @returns {AcpProtocolLogger}
+ */
+function createNdjsonAcpProtocolLogger(filePath) {
+  return {
+    async write(entry) {
+      await fs.promises.mkdir(path.dirname(filePath), { recursive: true });
+      await fs.promises.appendFile(filePath, `${JSON.stringify(entry)}\n`, "utf8");
+    },
+  };
+}
+
+/**
+ * @param {NodeJS.ProcessEnv} [env]
+ * @returns {AcpProtocolLogger | null}
+ */
+function getAcpProtocolLoggerFromEnv(env = process.env) {
+  const rawPath = typeof env[ACP_PROTOCOL_LOG_ENV] === "string"
+    ? env[ACP_PROTOCOL_LOG_ENV].trim()
+    : "";
+  return rawPath ? createNdjsonAcpProtocolLogger(path.resolve(rawPath)) : null;
+}
+
+/**
+ * @param {Record<string, unknown>} message
+ * @returns {"request" | "response" | "notification"}
+ */
+function classifyAcpProtocolMessage(message) {
+  if (typeof message.method === "string" && message.id !== undefined) {
+    return "request";
+  }
+  if (typeof message.method === "string") {
+    return "notification";
+  }
+  return "response";
+}
+
+/**
+ * @param {AcpProtocolLogger | null} protocolLogger
+ * @param {"client_to_agent" | "agent_to_client"} direction
+ * @param {Record<string, unknown>} message
+ * @returns {void}
+ */
+function logAcpProtocolMessage(protocolLogger, direction, message) {
+  if (!protocolLogger) {
+    return;
+  }
+  const entry = {
+    timestamp: new Date().toISOString(),
+    direction,
+    kind: classifyAcpProtocolMessage(message),
+    ...(message.id !== undefined && (typeof message.id === "string" || typeof message.id === "number") ? { id: message.id } : {}),
+    ...(typeof message.method === "string" ? { method: message.method } : {}),
+    message,
+  };
+  Promise.resolve(protocolLogger.write(entry)).catch((error) => {
+    log.warn("Failed to write ACP protocol log entry.", error);
+  });
+}
+
+/**
  * @param {Map<number, PendingRequest>} pendingRequests
  * @returns {string[]}
  */
@@ -215,6 +295,7 @@ function formatConnectionClosedMessage(details) {
  * @returns {Promise<AcpConnection>}
  */
 export async function openAcpConnection(options) {
+  const protocolLogger = options.protocolLogger ?? getAcpProtocolLoggerFromEnv(options.env ?? process.env);
   const proc = spawn(resolveAcpCommandPath(options.command), options.args ?? [], {
     stdio: ["pipe", "pipe", "pipe"],
     ...(options.cwd ? { cwd: options.cwd } : {}),
@@ -251,7 +332,9 @@ export async function openAcpConnection(options) {
    * @param {Record<string, unknown>} message
    */
   function send(message) {
-    proc.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", ...message })}\n`);
+    const jsonRpcMessage = { jsonrpc: "2.0", ...message };
+    logAcpProtocolMessage(protocolLogger, "client_to_agent", jsonRpcMessage);
+    proc.stdin.write(`${JSON.stringify(jsonRpcMessage)}\n`);
   }
 
   /**
@@ -294,6 +377,7 @@ export async function openAcpConnection(options) {
           log.error("Failed to parse ACP message:", error, line);
           continue;
         }
+        logAcpProtocolMessage(protocolLogger, "agent_to_client", message);
 
         if (typeof message.id === "number" && !("method" in message)) {
           if ("error" in message) {
