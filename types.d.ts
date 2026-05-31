@@ -433,9 +433,6 @@ type TurnIO = {
   selectMany?: (question: string, options: SelectOption[], config?: SelectManyConfig) => Promise<SelectManyResult>;
   confirm: (message: string, hooks?: ConfirmHooks) => Promise<boolean>;
   react: (emoji: string) => Promise<void>;
-  startPresence: (ttlMs: number) => Promise<void>;
-  keepPresenceAlive: (ttlMs?: number) => Promise<void>;
-  endPresence: () => Promise<void>;
   getIsAdmin: () => Promise<boolean>;
   prepareMediaRegistry?: (input: {
     chatId: string;
@@ -749,10 +746,6 @@ type ToolDescriptor = {
 /* Agent types */
 
 type AgentIOHooks = {
-  /** Signal that the bot is working (e.g. WhatsApp "composing" presence). Fire-and-forget. */
-  onComposing?: () => Promise<void>;
-  /** Signal that the bot stopped working (e.g. WhatsApp "paused" presence). Fire-and-forget. */
-  onPaused?: () => Promise<void>;
   onReasoning?: (event: {
     status: "started" | "updated" | "completed",
     itemId?: string,

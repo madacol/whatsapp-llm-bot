@@ -55,12 +55,9 @@ before(async () => {
   const { createLlmClient } = await import("../llm.js");
   const llmClient = createLlmClient();
   const { createMessageHandler } = await import("../index.js");
-  const { getActions, executeAction } = await import("../actions.js");
   ({ handleMessage } = createMessageHandler({
     store,
     llmClient,
-    getActionsFn: getActions,
-    executeActionFn: executeAction,
   }));
 });
 

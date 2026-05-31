@@ -16,8 +16,5 @@ export function createSeedTurnIo({ sendEvent }) {
     send: sendEvent,
     reply: sendEvent,
     confirm: async () => false,
-    startPresence: async () => {},
-    keepPresenceAlive: async () => {},
-    endPresence: async () => {},
   };
 }

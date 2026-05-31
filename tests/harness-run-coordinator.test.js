@@ -26,9 +26,6 @@ function createTurn(chatId, text) {
       select: async () => "",
       confirm: async () => true,
       react: async () => {},
-      startPresence: async () => {},
-      keepPresenceAlive: async () => {},
-      endPresence: async () => {},
       getIsAdmin: async () => true,
     },
   };

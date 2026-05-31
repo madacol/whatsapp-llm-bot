@@ -30,10 +30,6 @@ before(async () => {
   const runner = createConversationRunner({
     store,
     llmClient: /** @type {LlmClient} */ ({}),
-    getActionsFn: async () => [],
-    executeActionFn: async () => {
-      throw new Error("executeAction should not be called");
-    },
   });
 
   handleMessage = runner.handleMessage;
@@ -825,17 +821,8 @@ describe("createConversationRunner prompt formatting", () => {
     const runner = createConversationRunner({
       store,
       llmClient: /** @type {LlmClient} */ ({}),
-      getActionsFn: async () => [{
-        name: "restart",
-        command: "restart",
-        description: "Restart the bot process",
-        parameters: { type: "object", properties: {} },
-        permissions: { autoExecute: true, requireMaster: true },
-        action_fn: async () => "unused",
-      }],
-      executeActionFn: async () => ({
+      restartCommandHandler: async () => ({
         result: "Restart signal sent.",
-        permissions: {},
         afterResponse: () => {
           phases.push("after-response");
         },
@@ -867,12 +854,6 @@ describe("createConversationRunner prompt formatting", () => {
     const runner = createConversationRunner({
       store,
       llmClient: /** @type {LlmClient} */ ({}),
-      getActionsFn: async () => {
-        throw new Error("Restart-waiting messages should not load actions");
-      },
-      executeActionFn: async () => {
-        throw new Error("Restart-waiting messages should not execute actions");
-      },
       restartGate: {
         isWaiting: () => true,
         beginWaiting: () => {},

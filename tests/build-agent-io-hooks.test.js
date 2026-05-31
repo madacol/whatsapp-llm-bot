@@ -31,57 +31,10 @@ function createSubject(visibility = DEFAULT_OUTPUT_VISIBILITY) {
       select: async () => "",
       confirm: async () => true,
     },
-    async () => {},
-    async () => {},
-    () => {},
     null,
     visibility,
   );
   return { hooks, sent };
-}
-
-/**
- * @returns {{
- *   hooks: AgentIOHooks,
- *   sent: Array<{ event: OutboundEvent, kind: "send" | "reply" }>,
- *   presenceEvents: string[],
- * }}
- */
-function createSubjectWithWorkingSpy(visibility = DEFAULT_OUTPUT_VISIBILITY) {
-  /** @type {Array<{ event: OutboundEvent, kind: "send" | "reply" }>} */
-  const sent = [];
-  /** @type {string[]} */
-  const presenceEvents = [];
-  const hooks = buildAgentIoHooks(
-    {
-      send: async (event) => {
-        sent.push({ event, kind: "send" });
-        return undefined;
-      },
-      reply: async (event) => {
-        sent.push({ event, kind: "reply" });
-        return undefined;
-      },
-      select: async () => "",
-      confirm: async () => true,
-    },
-    async () => {
-      presenceEvents.push("keepAlive");
-    },
-    async () => {
-      presenceEvents.push("end");
-    },
-    () => {
-      presenceEvents.push("refresh");
-    },
-    null,
-    visibility,
-  );
-  return {
-    hooks,
-    sent,
-    presenceEvents,
-  };
 }
 
 /**
@@ -107,9 +60,6 @@ function createSubjectWithCwd(cwd, visibility = DEFAULT_OUTPUT_VISIBILITY) {
       select: async () => "",
       confirm: async () => true,
     },
-    async () => {},
-    async () => {},
-    () => {},
     cwd,
     visibility,
   );
@@ -154,9 +104,6 @@ function createReasoningSubject(visibility = { ...DEFAULT_OUTPUT_VISIBILITY, thi
       select: async () => "",
       confirm: async () => true,
     },
-    async () => {},
-    async () => {},
-    () => {},
     null,
     visibility,
   );
@@ -333,9 +280,6 @@ describe("buildAgentIoHooks", () => {
         select: async () => "",
         confirm: async () => true,
       },
-      async () => {},
-      async () => {},
-      () => {},
       "/repo",
       { ...DEFAULT_OUTPUT_VISIBILITY, toolDetails: false },
     );
@@ -429,51 +373,6 @@ describe("buildAgentIoHooks", () => {
     assert.equal(subject.sent.length, 0);
     assert.deepEqual(subject.reasoningUpdates, []);
     assert.deepEqual(subject.reasoningInspects, []);
-  });
-
-  it("refreshes the presence lease for tool-result progress, but not for llm or tool-call display", async () => {
-    const subject = createSubjectWithWorkingSpy(VISIBLE_TOOL_OUTPUT);
-
-    await subject.hooks.onLlmResponse?.("Still working");
-    await subject.hooks.onToolCall?.({
-      id: "tool-1",
-      name: "spawn_agent",
-      arguments: JSON.stringify({ message: "Investigate the failure" }),
-    });
-    await subject.hooks.onToolResult?.([{ type: "text", text: "Intermediate tool output" }]);
-
-    assert.equal(subject.sent.length, 3);
-    assert.deepEqual(subject.presenceEvents, ["refresh"]);
-  });
-
-  it("does not wait for typing refreshes before returning", async () => {
-    /** @type {(() => void) | undefined} */
-    let resolveRestart;
-    const hooks = buildAgentIoHooks(
-      {
-        send: async () => undefined,
-        reply: async () => undefined,
-        select: async () => "",
-        confirm: async () => true,
-      },
-      async () => {},
-      async () => {},
-      () => new Promise((resolve) => {
-        resolveRestart = resolve;
-      }),
-      null,
-    );
-
-    let completed = false;
-    const pending = hooks.onToolResult?.([{ type: "text", text: "Still working" }]).then(() => {
-      completed = true;
-    });
-
-    await new Promise((resolve) => setTimeout(resolve, 0));
-
-    assert.equal(completed, true, "Hook should resolve before the background typing refresh completes");
-    resolveRestart?.();
-    await pending;
   });
 
   it("emits command starts as runtime events", async () => {
@@ -717,9 +616,6 @@ describe("buildAgentIoHooks", () => {
         select: async () => "",
         confirm: async () => true,
       },
-      async () => {},
-      async () => {},
-      () => {},
       "/repo",
       VISIBLE_TOOL_OUTPUT,
     );
@@ -837,9 +733,6 @@ describe("buildAgentIoHooks", () => {
         select: async () => "",
         confirm: async () => true,
       },
-      async () => {},
-      async () => {},
-      () => {},
       null,
       VISIBLE_TOOL_OUTPUT,
     );
@@ -877,9 +770,6 @@ describe("buildAgentIoHooks", () => {
         select: async () => "",
         confirm: async () => true,
       },
-      async () => {},
-      async () => {},
-      () => {},
       "/repo",
       VISIBLE_TOOL_OUTPUT,
     );
@@ -912,9 +802,6 @@ describe("buildAgentIoHooks", () => {
         select: async () => "",
         confirm: async () => true,
       },
-      async () => {},
-      async () => {},
-      () => {},
       "/repo",
       VISIBLE_TOOL_OUTPUT,
     );

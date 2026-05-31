@@ -58,13 +58,10 @@ before(async () => {
   const llmClient = createLlmClient();
 
   const { createMessageHandler } = await import("../index.js");
-  const { getActions, executeAction } = await import("../actions.js");
 
   ({ handleMessage } = createMessageHandler({
     store,
     llmClient,
-    getActionsFn: getActions,
-    executeActionFn: executeAction,
   }));
 });
 
@@ -210,7 +207,7 @@ describe("ACP pipeline via createMessageHandler", () => {
     assert.ok(pos3 < pos4, allText);
   });
 
-  it("sends composing presence before ACP response and paused after", async () => {
+  it("leaves WhatsApp presence out of the conversation pipeline for ACP responses", async () => {
     await seedAcpChat("pipe-presence", { enabled: true });
 
     const { context, responses } = createChatTurn({
@@ -219,14 +216,11 @@ describe("ACP pipeline via createMessageHandler", () => {
     });
     await handleMessage(context);
 
-    const presenceUpdates = responses.filter((response) => response.type === "sendPresenceUpdate");
-    assert.equal(presenceUpdates[0]?.text, "composing");
-    assert.equal(presenceUpdates.at(-1)?.text, "paused");
-    const replyIdx = responses.findIndex((response) => response.text.includes("ACP response"));
-    assert.ok(responses.indexOf(presenceUpdates[0]) < replyIdx);
+    assert.ok(responses.some((response) => response.text.includes("ACP response")));
+    assert.equal(responses.filter((response) => response.type === "sendPresenceUpdate").length, 0);
   });
 
-  it("sends paused presence even when ACP provider errors", async () => {
+  it("leaves WhatsApp presence out of the conversation pipeline when ACP providers error", async () => {
     await seedAcpChat("pipe-presence-err", { enabled: true });
 
     const { context, responses } = createChatTurn({
@@ -236,7 +230,7 @@ describe("ACP pipeline via createMessageHandler", () => {
     await handleMessage(context);
 
     const presenceUpdates = responses.filter((response) => response.type === "sendPresenceUpdate");
-    assert.equal(presenceUpdates.at(-1)?.text, "paused");
+    assert.equal(presenceUpdates.length, 0);
     assert.ok(responses.some((response) => response.source === "error"));
   });
 

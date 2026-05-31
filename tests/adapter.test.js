@@ -29,6 +29,8 @@ let adaptIncomingMessage;
 let adaptIncomingMessages;
 /** @type {typeof import("../whatsapp/inbound/chat-turn.js").createTurnIo} */
 let createTurnIo;
+/** @type {typeof import("../whatsapp/inbound/chat-turn.js").finishTurnIo} */
+let finishTurnIo;
 
 before(async () => {
   // Seed DB cache so initStore() in index.js uses in-memory DB
@@ -39,7 +41,7 @@ before(async () => {
   ({ createConfirmRuntime } = await import("../whatsapp/runtime/confirm-runtime.js"));
   ({ createSelectRuntime } = await import("../whatsapp/runtime/select-runtime.js"));
   ({ createReactionRuntime } = await import("../whatsapp/runtime/reaction-runtime.js"));
-  ({ adaptIncomingMessage, adaptIncomingMessages, createTurnIo } = await import("../whatsapp/inbound/chat-turn.js"));
+  ({ adaptIncomingMessage, adaptIncomingMessages, createTurnIo, finishTurnIo } = await import("../whatsapp/inbound/chat-turn.js"));
 });
 
 /**
@@ -854,14 +856,18 @@ describe("createTurnIo", () => {
     await db.sql`DELETE FROM whatsapp_outbound_queue WHERE chat_id = ${chatId}`;
   });
 
-  it("opens a lease, pulses composing on the adapter cadence, then pauses on expiry", async () => {
+  it("opens a WhatsApp-owned lease on outbound work, pulses composing on the adapter cadence, then pauses on expiry", async () => {
     const { io, presenceUpdates } = createPresenceTurnIo({
       messageId: "incoming-msg-3",
       defaultLeaseTtlMs: 20,
       pulseIntervalMs: 5,
     });
 
-    await io.startPresence(18);
+    await io.reply({
+      kind: "content",
+      source: "llm",
+      content: "Working",
+    });
     await new Promise((resolve) => setTimeout(resolve, 24));
 
     assert.ok(
@@ -875,36 +881,33 @@ describe("createTurnIo", () => {
     );
   });
 
-  it("treats keepAlive as a lease refresh when active and as a new lease when inactive", async () => {
+  it("refreshes an active WhatsApp-owned lease on later outbound work", async () => {
     const { io, presenceUpdates } = createPresenceTurnIo({
       messageId: "incoming-msg-4",
       defaultLeaseTtlMs: 20,
       pulseIntervalMs: 50,
     });
 
-    await io.startPresence(20);
+    await io.reply({
+      kind: "content",
+      source: "llm",
+      content: "First",
+    });
     presenceUpdates.length = 0;
 
-    await io.keepPresenceAlive();
+    await io.reply({
+      kind: "content",
+      source: "llm",
+      content: "Second",
+    });
     await new Promise((resolve) => setTimeout(resolve, 10));
-    assert.deepEqual(
-      presenceUpdates,
-      [],
-      `Expected active keepAlive to refresh only the lease, got: ${JSON.stringify(presenceUpdates)}`,
+    assert.ok(
+      presenceUpdates.some((update) => update.presence === "composing"),
+      `Expected outbound work to reassert composing, got: ${JSON.stringify(presenceUpdates)}`,
     );
 
     await new Promise((resolve) => setTimeout(resolve, 22));
     assert.equal(presenceUpdates.at(-1)?.presence, "paused");
-
-    presenceUpdates.length = 0;
-    await io.keepPresenceAlive();
-
-    assert.deepEqual(presenceUpdates, [{
-      presence: "composing",
-      chatId: "presence-chat",
-    }]);
-
-    await io.endPresence();
   });
 
   it("re-sends composing after outbound messages while the lease is active", async () => {
@@ -914,9 +917,6 @@ describe("createTurnIo", () => {
       pulseIntervalMs: 500,
     });
 
-    await io.startPresence(50);
-    presenceUpdates.length = 0;
-
     await io.reply({
       kind: "content",
       source: "llm",
@@ -925,12 +925,12 @@ describe("createTurnIo", () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
 
     assert.equal(sentMessages.length, 1);
-    assert.deepEqual(presenceUpdates, [{
-      presence: "composing",
-      chatId: "presence-chat",
-    }]);
+    assert.ok(
+      presenceUpdates.filter((update) => update.presence === "composing").length >= 2,
+      `Expected composing before and after outbound work, got: ${JSON.stringify(presenceUpdates)}`,
+    );
 
-    await io.endPresence();
+    await finishTurnIo(io);
   });
 
   it("ends the active lease before select prompts", async () => {
@@ -940,7 +940,11 @@ describe("createTurnIo", () => {
       pulseIntervalMs: 5,
     });
 
-    await io.startPresence(50);
+    await io.reply({
+      kind: "content",
+      source: "llm",
+      content: "Before select",
+    });
     presenceUpdates.length = 0;
 
     const selectPromise = io.select("Choose one", ["A", "B"]);
@@ -962,7 +966,11 @@ describe("createTurnIo", () => {
       pulseIntervalMs: 5,
     });
 
-    await io.startPresence(50);
+    await io.reply({
+      kind: "content",
+      source: "llm",
+      content: "Before confirm",
+    });
     presenceUpdates.length = 0;
 
     const confirmPromise = io.confirm("Continue?");

@@ -6,8 +6,6 @@ export const MAX_TOOL_CALL_DEPTH = 10;
 
 /** @type {Required<AgentIOHooks>} */
 export const NO_OP_HOOKS = {
-  onComposing: async () => {},
-  onPaused: async () => {},
   onReasoning: async () => {},
   onLlmResponse: async () => {},
   onAskUser: async () => "",

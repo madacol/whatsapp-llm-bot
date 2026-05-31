@@ -73,9 +73,6 @@ function buildObservedWhatsAppHooks(input) {
       select: async () => "",
       confirm: async () => true,
     },
-    async () => {},
-    async () => {},
-    () => {},
     input.cwd,
     input.visibility,
   );

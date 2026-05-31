@@ -2,8 +2,8 @@ import assert from "node:assert/strict";
 import { createRestartAction, scheduleRestart } from "./index.js";
 
 /**
- * @param {import("./_restart-ack-store.js").RestartAckRecord[]} [savedRecords]
- * @returns {import("./_restart-ack-store.js").RestartAckStore}
+ * @param {import("../../../restart/restart-ack-store.js").RestartAckRecord[]} [savedRecords]
+ * @returns {import("../../../restart/restart-ack-store.js").RestartAckStore}
  */
 function createMemoryRestartAckStore(savedRecords = []) {
   return {
@@ -111,7 +111,7 @@ async function restart_waits_for_queued_ack_before_stopping(_action_fn, db) {
 
 /** @type {ActionDbTestFn} */
 async function restart_persists_queue_id_for_unsent_ack_before_stopping(_action_fn, db) {
-  /** @type {import("./_restart-ack-store.js").RestartAckRecord[]} */
+  /** @type {import("../../../restart/restart-ack-store.js").RestartAckRecord[]} */
   const savedRecords = [];
   let scheduled = 0;
   const action = createRestartAction(
@@ -146,7 +146,7 @@ async function restart_persists_queue_id_for_unsent_ack_before_stopping(_action_
 
 /** @type {ActionDbTestFn} */
 async function restart_persists_sent_ack_transport_handle_before_stopping(_action_fn, db) {
-  /** @type {import("./_restart-ack-store.js").RestartAckRecord[]} */
+  /** @type {import("../../../restart/restart-ack-store.js").RestartAckRecord[]} */
   const savedRecords = [];
   let scheduled = 0;
   const action = createRestartAction(
@@ -231,7 +231,7 @@ async function restart_waits_for_active_turns_before_scheduling(_action_fn, db) 
 
 /** @type {ActionDbTestFn} */
 async function restart_force_records_active_turns_without_waiting(_action_fn, db) {
-  /** @type {import("./_restart-ack-store.js").RestartAckRecord[]} */
+  /** @type {import("../../../restart/restart-ack-store.js").RestartAckRecord[]} */
   const savedRecords = [];
   let scheduled = 0;
   const action = createRestartAction(

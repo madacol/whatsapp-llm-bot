@@ -1,6 +1,5 @@
-import { CANCEL_COMMAND, CHAT_SETTINGS_COMMAND, formatChatSettingsCommand } from "../chat-commands.js";
+import { formatChatSettingsCommand } from "../chat-commands.js";
 import { getAgent } from "../agents.js";
-import { storeAndLinkHtml } from "../html-store.js";
 import {
   createHarnessRuntimeEventDispatcher,
   resolveHarnessInstance,
@@ -10,29 +9,25 @@ import {
 } from "#harnesses";
 import { getHarnessInstanceConfig } from "../harness-config.js";
 import { contentEvent } from "../outbound-events.js";
-import {
-  shouldRespond,
-  parseCommandArgs,
-} from "../message-formatting.js";
+import { shouldRespond } from "../message-formatting.js";
 import { createMessageActionContext } from "../execute-action-context.js";
-import { errorToString, isHtmlContent } from "../utils.js";
+import { errorToString } from "../utils.js";
 import { createLogger } from "../logger.js";
 import { appendUniqueContentBlocks, getDeliveredContentSignature } from "../content-signature.js";
 import { buildAgentIoHooks } from "./build-agent-io-hooks.js";
-import { buildHarnessTurnInput } from "./build-harness-run-request.js";
+import { buildHarnessTurnInput } from "./build-harness-turn-input.js";
 import { buildRunConfig } from "./build-run-config.js";
 import { generateSessionTitle } from "./session-title.js";
 import { getChatDb } from "../db.js";
 import { resolveOutputVisibility } from "../chat-output-visibility.js";
 import { createWorkspaceBindingService } from "../workspace-binding-service.js";
-import { tryHandleWorkspaceCommand } from "../workspace-command-router.js";
 import { createWorkspaceControl } from "../workspace-control.js";
 import { createWorkspaceLifecycleService } from "../workspace-lifecycle-service.js";
 import { buildLiveInputText } from "./live-input-text.js";
 import { defaultRestartGate } from "../restart-gate.js";
+import { createBangCommandRouter } from "../commands/bang-command-router.js";
 
 const log = createLogger("conversation:runner");
-const PRESENCE_LEASE_TTL_MS = 20_000;
 const NO_LIVE_INPUT_TARGET = Object.freeze({ supportsLiveInput: false });
 /**
  * Type guard: checks that a content block is a text block.
@@ -182,57 +177,6 @@ function createHarnessRuntimeTurnId(chatId, sequence) {
   return `${chatId}:${Date.now()}:${sequence}`;
 }
 
-/** @type {ReadonlyArray<{ command: string, actionName: string, parameters: Action["parameters"] }>} */
-const PRESERVED_ACTION_COMMANDS = Object.freeze([
-  {
-    command: CHAT_SETTINGS_COMMAND,
-    actionName: "chat_settings",
-    parameters: {
-      type: "object",
-      properties: {
-        setting: { type: "string" },
-        value: { type: "string" },
-      },
-    },
-  },
-  {
-    command: "setup",
-    actionName: "setup",
-    parameters: {
-      type: "object",
-      properties: {},
-    },
-  },
-  {
-    command: "restart",
-    actionName: "restart",
-    parameters: {
-      type: "object",
-      properties: {
-        mode: { type: "string", default: "" },
-      },
-    },
-  },
-  {
-    command: "clear",
-    actionName: "clear_conversation",
-    parameters: {
-      type: "object",
-      properties: {},
-    },
-  },
-]);
-
-/**
- * @param {string} commandText
- * @returns {{ command: string, actionName: string, parameters: Action["parameters"] } | null}
- */
-function findPreservedActionCommand(commandText) {
-  return PRESERVED_ACTION_COMMANDS
-    .find((candidate) => commandText === candidate.command || commandText.startsWith(candidate.command + " "))
-    ?? null;
-}
-
 /**
  * @param {{ type: string } & Record<string, unknown>} event
  * @param {{ chatId: string, turnId: string, providerInstanceId: string }} activeTurn
@@ -354,8 +298,7 @@ function resolveProviderLiveInputTarget(harnessInstance) {
  * @typedef {{
  *   store: Store,
  *   llmClient: LlmClient,
- *   getActionsFn?: typeof import("../actions.js").getActions,
- *   executeActionFn: typeof import("../actions.js").executeAction,
+ *   restartCommandHandler?: ReturnType<typeof import("../commands/restart-command.js").createRestartCommandHandler>,
  *   transport?: ChatTransport,
  *   workspacePresentation?: WorkspacePresentationPort,
  *   restartGate?: import("../restart-gate.js").RestartGate,
@@ -367,7 +310,7 @@ function resolveProviderLiveInputTarget(harnessInstance) {
  * @param {ConversationRunnerDeps} deps
  * @returns {{ handleMessage: (turn: ChatTurn) => Promise<void> }}
  */
-export function createConversationRunner({ store, llmClient, executeActionFn, workspacePresentation, restartGate = defaultRestartGate }) {
+export function createConversationRunner({ store, llmClient, restartCommandHandler, workspacePresentation, restartGate = defaultRestartGate }) {
   const {
     addMessage,
     createChat,
@@ -389,6 +332,16 @@ export function createConversationRunner({ store, llmClient, executeActionFn, wo
     workspaceControl,
     workspacePresentation,
     dispatchTurn,
+  });
+  const bangCommandRouter = createBangCommandRouter({
+    workspaceControl: workspaceLifecycle,
+    addMessage,
+    restartCommandHandler,
+    cancelActiveRun: async (chatId, chatInfo) => {
+      const selection = await resolveConversationHarnessSelection(chatInfo);
+      const { harness } = resolveConversationHarnessFromSelection(selection);
+      return !!(await harness?.cancel?.(chatId));
+    },
   });
   let harnessRuntimeTurnSequence = 0;
 
@@ -468,70 +421,7 @@ export function createConversationRunner({ store, llmClient, executeActionFn, wo
    * @returns {Promise<void>}
    */
   async function handleCommandMessage({ turn, chatId, senderIds, content, firstBlock, chatInfo, context, resolvedBinding }) {
-    const inputText = firstBlock.text.slice(1).trim();
-    const commandText = inputText.toLowerCase();
-
-    if (await tryHandleWorkspaceCommand({
-      context,
-      binding: resolvedBinding,
-      inputText,
-      workspaceControl: workspaceLifecycle,
-      seedSourceTurn: {
-        senderIds: turn.senderIds,
-        senderJids: turn.senderJids,
-        senderName: turn.senderName,
-      },
-    })) {
-      return;
-    }
-
-    if (commandText === CANCEL_COMMAND) {
-      const selection = await resolveConversationHarnessSelection(chatInfo);
-      const { harness } = resolveConversationHarnessFromSelection(selection);
-      if (harness?.cancel?.(chatId)) {
-        await context.reply(contentEvent("tool-result", "Cancelled."));
-      } else {
-        await context.reply(contentEvent("tool-result", "Nothing to cancel."));
-      }
-      return;
-    }
-
-    const preservedCommand = findPreservedActionCommand(commandText);
-    if (!preservedCommand) {
-      await context.reply(contentEvent("error", `Unknown command: ${commandText.split(" ")[0]}`));
-      return;
-    }
-
-    /** @type {UserMessage} */
-    const commandMessage = { role: "user", content };
-    await addMessage(chatId, commandMessage, senderIds);
-
-    const argsText = inputText.slice(preservedCommand.command.length).trim();
-    const args = argsText ? argsText.split(" ") : [];
-    const params = parseCommandArgs(args, preservedCommand.parameters);
-
-    log.debug("executing command", preservedCommand.actionName, params);
-
-    try {
-      const { result, afterResponse } = await executeActionFn(preservedCommand.actionName, context, params, { llmClient });
-
-      /** @type {MessageHandle | undefined} */
-      let responseHandle;
-      if (isHtmlContent(result)) {
-        const linkText = await storeAndLinkHtml(chatId, result);
-        responseHandle = await context.reply(contentEvent("tool-result", linkText));
-      } else if (typeof result === "string") {
-        responseHandle = await context.reply(contentEvent("tool-result", result));
-      } else if (Array.isArray(result)) {
-        responseHandle = await context.reply(contentEvent("tool-result", /** @type {ToolContentBlock[]} */ (result)));
-      } else {
-        responseHandle = await context.reply(contentEvent("tool-result", JSON.stringify(result, null, 2)));
-      }
-      await afterResponse?.({ handle: responseHandle });
-    } catch (error) {
-      log.error("Error executing command:", error);
-      await context.reply(contentEvent("error", `Error: ${errorToString(error)}`));
-    }
+    await bangCommandRouter({ turn, chatId, senderIds, content, firstBlock, chatInfo, context, resolvedBinding });
   }
 
   /**
@@ -647,9 +537,6 @@ export function createConversationRunner({ store, llmClient, executeActionFn, wo
    *   harness: AgentHarness,
    *   harnessInstance: ReturnType<typeof resolveHarnessInstance> | null,
    *   resolvedBinding: ResolvedChatBinding,
-   *   keepPresenceAlive: () => Promise<void>,
-   *   endPresence: () => Promise<void>,
-   *   refreshPresenceLease: () => void,
    * }} input
    * @returns {Promise<{ result: AgentResult, deliveredContentSignatures: Set<string> }>}
    */
@@ -662,9 +549,6 @@ export function createConversationRunner({ store, llmClient, executeActionFn, wo
     harness,
     harnessInstance,
     resolvedBinding,
-    keepPresenceAlive,
-    endPresence,
-    refreshPresenceLease,
   }) {
     const { chatId } = turn;
     const harnessName = harness.getName();
@@ -716,9 +600,6 @@ export function createConversationRunner({ store, llmClient, executeActionFn, wo
     const deliveredContentSignatures = new Set();
     const hooks = buildAgentIoHooks(
       context,
-      keepPresenceAlive,
-      endPresence,
-      refreshPresenceLease,
       runConfig.workdir ?? null,
       resolveOutputVisibility(chatInfo?.output_visibility),
       (deliveredContent) => {
@@ -845,48 +726,6 @@ export function createConversationRunner({ store, llmClient, executeActionFn, wo
       return null;
     }
 
-    /** Start the transport presence lease, swallowing errors. */
-    const startPresence = async () => {
-      try {
-        await turn.io.startPresence(PRESENCE_LEASE_TTL_MS);
-      } catch (err) {
-        log.debug("Could not start presence lease:", errorToString(err));
-      }
-    };
-
-    /** Refresh the transport presence lease, swallowing errors. */
-    const keepPresenceAlive = async () => {
-      try {
-        await turn.io.keepPresenceAlive();
-      } catch (err) {
-        log.debug("Could not refresh presence lease:", errorToString(err));
-      }
-    };
-
-    /** End the transport presence lease, swallowing errors. */
-    const endPresence = async () => {
-      try {
-        await turn.io.endPresence();
-      } catch (err) {
-        log.debug("Could not end presence lease:", errorToString(err));
-      }
-    };
-
-    let presenceRefreshVersion = 0;
-    let presenceStopped = false;
-    /** Refresh the presence lease in the background without delaying the next harness event. */
-    const refreshPresenceLease = () => {
-      const refreshVersion = ++presenceRefreshVersion;
-      void (async () => {
-        if (presenceStopped || refreshVersion !== presenceRefreshVersion) {
-          return;
-        }
-        await keepPresenceAlive();
-      })();
-    };
-
-    await startPresence();
-
     /** @type {ChatTurn | null} */
     let nextTurn = null;
     try {
@@ -899,9 +738,6 @@ export function createConversationRunner({ store, llmClient, executeActionFn, wo
         harness,
         harnessInstance,
         resolvedBinding,
-        keepPresenceAlive,
-        endPresence,
-        refreshPresenceLease,
       });
       if (result.response.length > 0) {
         const responseSignature = getDeliveredContentSignature(result.response);
@@ -926,9 +762,6 @@ export function createConversationRunner({ store, llmClient, executeActionFn, wo
       }
     } finally {
       nextTurn = runCoordinator.finishRun(chatId);
-      presenceStopped = true;
-      presenceRefreshVersion += 1;
-      await endPresence();
     }
 
     return nextTurn;

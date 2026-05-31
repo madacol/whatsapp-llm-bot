@@ -8,7 +8,7 @@ import { promisify } from "node:util";
 import { createTestDb } from "./helpers.js";
 import config from "../config.js";
 import { initStore } from "../store.js";
-import { setConfigValue } from "../actions/settings/chatSettings/_service.js";
+import { setConfigValue } from "../chat-settings-service.js";
 import { readChatConfig, writeChatConfig } from "../chat-config.js";
 import { SqliteDb } from "../sqlite-db.js";
 

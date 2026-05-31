@@ -3,8 +3,8 @@ import assert from "node:assert/strict";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { deliverPendingRestartAck } from "../actions/admin/restart/_restart-ack-delivery.js";
-import { createRestartAckStore } from "../actions/admin/restart/_restart-ack-store.js";
+import { deliverPendingRestartAck } from "../restart/restart-ack-delivery.js";
+import { createRestartAckStore } from "../restart/restart-ack-store.js";
 
 describe("restart acknowledgement delivery", () => {
   it("edits the persisted restart acknowledgement message after startup", async () => {

@@ -11,7 +11,7 @@ import {
   getSelectableOptions,
   resetConfigValue,
   setConfigValue,
-} from "./_service.js";
+} from "../../../chat-settings-service.js";
 
 export default /** @type {defineAction} */ ((x) => x)({
   name: "chat_settings",
@@ -42,8 +42,8 @@ export default /** @type {defineAction} */ ((x) => x)({
     autoContinue: true,
     useRootDb: true,
   },
-  action_fn: async function ({ chatId, rootDb, senderIds, getActions, getIsAdmin, select, selectMany }, { setting, value }) {
-    const serviceExtra = { senderIds, getActions, rootDb, getChatDb };
+  action_fn: async function ({ chatId, rootDb, senderIds, getIsAdmin, select, selectMany }, { setting, value }) {
+    const serviceExtra = { senderIds, rootDb, getChatDb };
     if (!setting || setting === "list") {
       return getChatSettingsInfo(rootDb, chatId, serviceExtra);
     }
@@ -53,7 +53,7 @@ export default /** @type {defineAction} */ ((x) => x)({
       if (!key) {
         return formatChatSettingsUsage("help <key>");
       }
-      return describeConfigKey(rootDb, chatId, key, { getActions, rootDb, getChatDb });
+      return describeConfigKey(rootDb, chatId, key, { rootDb, getChatDb });
     }
 
     if (setting === "reset") {
@@ -76,7 +76,7 @@ export default /** @type {defineAction} */ ((x) => x)({
       const chat = await getChatOrThrow(rootDb, chatId);
       const multiSelectable = getMultiSelectableOptions(definition, chat);
       if (multiSelectable && typeof selectMany === "function") {
-        const helpText = await describeConfigKey(rootDb, chatId, setting, { getActions, compact: true, rootDb, getChatDb });
+        const helpText = await describeConfigKey(rootDb, chatId, setting, { compact: true, rootDb, getChatDb });
         const selection = await selectMany(
           helpText,
           multiSelectable.options,
@@ -96,7 +96,7 @@ export default /** @type {defineAction} */ ((x) => x)({
       }
       const selectable = getSelectableOptions(definition, chat);
       if (selectable && typeof select === "function") {
-        const helpText = await describeConfigKey(rootDb, chatId, setting, { getActions, compact: true, rootDb, getChatDb });
+        const helpText = await describeConfigKey(rootDb, chatId, setting, { compact: true, rootDb, getChatDb });
         const chosen = await select(
           helpText,
           selectable.options,
@@ -111,7 +111,7 @@ export default /** @type {defineAction} */ ((x) => x)({
         }
         return helpText;
       }
-      return describeConfigKey(rootDb, chatId, setting, { getActions, rootDb, getChatDb });
+      return describeConfigKey(rootDb, chatId, setting, { rootDb, getChatDb });
     }
 
     const isAdmin = getIsAdmin ? await getIsAdmin() : true;

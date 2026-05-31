@@ -1,14 +1,14 @@
 import { existsSync, readdirSync } from "node:fs";
 import { dirname, basename, resolve } from "node:path";
-import { formatChatSettingsCommand, formatChatSettingsUsage } from "../../../chat-commands.js";
-import config from "../../../config.js";
-import { validateModel, getModelModalities } from "../../../models-cache.js";
-import { getChatOrThrow, initStore } from "../../../store.js";
-import { ROLE_DEFINITIONS, resolveModel } from "../../../model-roles.js";
+import { formatChatSettingsCommand } from "./chat-commands.js";
+import config from "./config.js";
+import { validateModel, getModelModalities } from "./models-cache.js";
+import { getChatOrThrow, initStore } from "./store.js";
+import { ROLE_DEFINITIONS, resolveModel } from "./model-roles.js";
 import { listHarnesses } from "#harnesses";
-import { createWorkspaceBindingService } from "../../../workspace-binding-service.js";
-import { getChatWorkDir } from "../../../utils.js";
-import { updateChatConfig } from "../../../chat-config.js";
+import { createWorkspaceBindingService } from "./workspace-binding-service.js";
+import { getChatWorkDir } from "./utils.js";
+import { updateChatConfig } from "./chat-config.js";
 import {
   buildOutputVisibilityOverrides,
   OUTPUT_VISIBILITY_FLAGS,
@@ -18,7 +18,7 @@ import {
   isOutputVisibilityKey,
   resolveOutputVisibility,
   toggleOutputVisibilityOverrides,
-} from "../../../chat-output-visibility.js";
+} from "./chat-output-visibility.js";
 
 /**
  * Role names that use model_roles JSONB for per-chat overrides.
@@ -42,7 +42,6 @@ export const SETTINGS = [
   ...MODEL_ROLE_SETTINGS,
   "enabled",
   "debug",
-  "actions",
   "harness",
   "harness_cwd",
   "output_visibility",
@@ -54,12 +53,12 @@ const BOOL_VALUE_IDS = ["on", "off"];
 const SHOW_NONE_OPTION_ID = "none";
 
 /**
- * @typedef {import("../../../chat-output-visibility.js").OutputVisibilityFlagDefinition} ConfigFlagDefinition
+ * @typedef {import("./chat-output-visibility.js").OutputVisibilityFlagDefinition} ConfigFlagDefinition
  */
 
 /**
  * @typedef {{
- *   currentId: (chat: import("../../../store.js").ChatRow) => string;
+ *   currentId: (chat: import("./store.js").ChatRow) => string;
  *   options?: readonly string[];
  *   getOptions?: () => readonly string[];
  *   alwaysSelect?: boolean;
@@ -68,9 +67,9 @@ const SHOW_NONE_OPTION_ID = "none";
 
 /**
  * @typedef {{
- *   currentIds: (chat: import("../../../store.js").ChatRow) => string[];
+ *   currentIds: (chat: import("./store.js").ChatRow) => string[];
  *   options?: readonly SelectOption[];
- *   getOptions?: (chat: import("../../../store.js").ChatRow) => readonly SelectOption[];
+ *   getOptions?: (chat: import("./store.js").ChatRow) => readonly SelectOption[];
  * }} ConfigMultiPickerDefinition
  */
 
@@ -78,14 +77,14 @@ const SHOW_NONE_OPTION_ID = "none";
  * @typedef {{
  *   rootDb: ChatDb;
  *   chatId: string;
- *   chat: import("../../../store.js").ChatRow;
+ *   chat: import("./store.js").ChatRow;
  *   value: string;
- *   extra: { senderIds?: string[], getActions?: () => Promise<Action[]>, rootDb?: ChatDb, getChatDb?: (chatId: string) => ChatDb };
+ *   extra: { senderIds?: string[], rootDb?: ChatDb, getChatDb?: (chatId: string) => ChatDb };
  * }} ConfigSetContext
  */
 
 /**
- * @typedef {(chat: import("../../../store.js").ChatRow, extra: { rootDb?: ChatDb, chatId?: string, getActions?: () => Promise<Action[]>, getChatDb?: (chatId: string) => ChatDb }) => string | Promise<string>} ConfigCurrentFormatter
+ * @typedef {(chat: import("./store.js").ChatRow, extra: { rootDb?: ChatDb, chatId?: string, getChatDb?: (chatId: string) => ChatDb }) => string | Promise<string>} ConfigCurrentFormatter
  */
 
 /**
@@ -151,7 +150,7 @@ function formatSettingTitle(label) {
 
 /**
  * @param {string[]} selectedIds
- * @returns {selectedIds is import("../../../chat-output-visibility.js").OutputVisibilityKey[]}
+ * @returns {selectedIds is import("./chat-output-visibility.js").OutputVisibilityKey[]}
  */
 function areOutputVisibilityKeys(selectedIds) {
   return selectedIds.every((id) => isOutputVisibilityKey(id));
@@ -166,7 +165,7 @@ function formatOutputVisibilityStateEmoji(enabled) {
 }
 
 /**
- * @param {import("../../../chat-output-visibility.js").OutputVisibilityKey} key
+ * @param {import("./chat-output-visibility.js").OutputVisibilityKey} key
  * @returns {string}
  */
 function getShowPickerSubject(key) {
@@ -183,7 +182,7 @@ function getShowPickerSubject(key) {
 }
 
 /**
- * @param {import("../../../chat-output-visibility.js").OutputVisibilityKey} key
+ * @param {import("./chat-output-visibility.js").OutputVisibilityKey} key
  * @param {boolean} enabled
  * @returns {string}
  */
@@ -201,7 +200,7 @@ function formatShowHideAllOptionLabel(allHidden) {
 }
 
 /**
- * @param {import("../../../store.js").ChatRow} chat
+ * @param {import("./store.js").ChatRow} chat
  * @returns {SelectOption[]}
  */
 function getShowMultiPickerOptions(chat) {
@@ -238,7 +237,7 @@ function formatReadableList(items) {
 /**
  * @param {ChatDb} rootDb
  * @param {string} chatId
- * @param {import("../../../store.js").ChatRow} chat
+ * @param {import("./store.js").ChatRow} chat
  * @returns {Promise<string>}
  */
 async function formatResolvedWorkspacePath(rootDb, chatId, chat) {
@@ -311,7 +310,7 @@ function createConfigKeyDefinition(definition) {
 /**
  * @param {string} chatId
  * @param {Record<string, unknown>} patch
- * @returns {Promise<import("../../../store.js").ChatRow>}
+ * @returns {Promise<import("./store.js").ChatRow>}
  */
 async function updateChatSettingsFile(chatId, patch) {
   return updateChatConfig(chatId, (current) => ({ ...current, ...patch }));
@@ -732,52 +731,6 @@ const BASE_CONFIG_KEYS = [
       return `video-to-text model set to \`${trimmed}\``;
     },
   }),
-  createConfigKeyDefinition({
-    key: "action",
-    setting: "actions",
-    label: "action",
-    aliases: ["actions"],
-    description: "Enables or disables one opt-in action for this chat.",
-    examples: [formatChatSettingsCommand("action searchWeb on"), formatChatSettingsCommand("action searchWeb off")],
-    formatCurrent: async (chat, extra) => formatOptInActions(chat.enabled_actions ?? [], extra.getActions),
-    formatDefault: () => "all opt-in actions off",
-    setValue: async ({ chatId, chat, value, extra }) => {
-      const parts = value.trim().split(/\s+/);
-      if (parts.length < 2) {
-        return formatChatSettingsUsage("action <action_name> <on|off>");
-      }
-      const actionName = parts[0];
-      const actionEnabled = toBool(parts[1]);
-
-      const getActions = extra.getActions;
-      if (!getActions) {
-        return "Internal error: getActions not available.";
-      }
-
-      const allActions = await getActions();
-      const targetAction = allActions.find((a) => a.name === actionName);
-      if (!targetAction) {
-        return `Action \`${actionName}\` not found.`;
-      }
-      if (!targetAction.optIn) {
-        return `Action \`${actionName}\` is not an opt-in action.`;
-      }
-
-      /** @type {string[]} */
-      const currentActions = chat.enabled_actions ?? [];
-
-      /** @type {string[]} */
-      let updated;
-      if (actionEnabled) {
-        updated = currentActions.includes(actionName) ? currentActions : [...currentActions, actionName];
-      } else {
-        updated = currentActions.filter((a) => a !== actionName);
-      }
-
-      await updateChatSettingsFile(chatId, { enabled_actions: updated });
-      return `Action \`${actionName}\` ${actionEnabled ? "enabled" : "disabled"} for this chat.`;
-    },
-  }),
 ];
 
 /** @type {ConfigKeyDefinition[]} */
@@ -899,27 +852,6 @@ export function isMaster(senderIds) {
 }
 
 /**
- * Format the opt-in actions line showing enabled/available actions.
- * @param {string[]} enabledActions
- * @param {(() => Promise<Action[]>) | undefined} getActions
- * @returns {Promise<string>}
- */
-async function formatOptInActions(enabledActions, getActions) {
-  if (!getActions) {
-    return enabledActions.length > 0 ? enabledActions.join(", ") : "none";
-  }
-  const allActions = await getActions();
-  const optInActions = allActions.filter((a) => a.optIn);
-  if (optInActions.length === 0) return "none available";
-  return optInActions
-    .map((a) => {
-      const on = enabledActions.includes(a.name);
-      return `${a.name} (${on ? "on" : "off"})`;
-    })
-    .join(", ");
-}
-
-/**
  * @param {string} key
  * @returns {ConfigKeyDefinition | null}
  */
@@ -928,9 +860,9 @@ export function getConfigKeyDefinition(key) {
 }
 
 /**
- * @param {import("../../../store.js").ChatRow} chat
+ * @param {import("./store.js").ChatRow} chat
  * @param {ConfigKeyDefinition} definition
- * @param {{ rootDb?: ChatDb, chatId?: string, getActions?: () => Promise<Action[]>, getChatDb?: (chatId: string) => ChatDb }} extra
+ * @param {{ rootDb?: ChatDb, chatId?: string, getChatDb?: (chatId: string) => ChatDb }} extra
  * @returns {Promise<string>}
  */
 async function formatCurrentValue(chat, definition, extra) {
@@ -961,7 +893,7 @@ function getDefinitionOptions(definition) {
 
 /**
  * @param {ConfigKeyDefinition} definition
- * @param {import("../../../store.js").ChatRow} chat
+ * @param {import("./store.js").ChatRow} chat
  * @returns {SelectOption[]}
  */
 function getDefinitionMultiOptions(definition, chat) {
@@ -978,14 +910,12 @@ function getDefinitionMultiOptions(definition, chat) {
  * Show a full summary of all chat settings.
  * @param {ChatDb} rootDb
  * @param {string} chatId
- * @param {{ senderIds?: string[], getActions?: () => Promise<Action[]>, rootDb?: ChatDb, getChatDb?: (chatId: string) => ChatDb }} extra
+ * @param {{ senderIds?: string[], rootDb?: ChatDb, getChatDb?: (chatId: string) => ChatDb }} extra
  * @returns {Promise<string>}
  */
 export async function getChatSettingsInfo(rootDb, chatId, extra) {
   const chat = await getChatOrThrow(rootDb, chatId);
   const senderIds = extra.senderIds ?? [];
-  const enabledActions = chat.enabled_actions ?? [];
-  const optInStr = await formatOptInActions(enabledActions, extra.getActions);
   const modelRoles = chat.model_roles ?? {};
   const roleOverrides = ROLE_CONFIG_KEYS
     .map((definition) => {
@@ -1023,9 +953,6 @@ export async function getChatSettingsInfo(rootDb, chatId, extra) {
     `- readers: media=${chat.media_to_text_models?.general ?? "default"}, image=${chat.media_to_text_models?.image ?? "default"}, audio=${chat.media_to_text_models?.audio ?? "default"}, video=${chat.media_to_text_models?.video ?? "default"}`,
     `- overrides: ${roleOverrides}`,
     "",
-    "Actions",
-    `- opt-in actions: ${optInStr}`,
-    "",
     "Use",
     `- \`${formatChatSettingsCommand("<key>")}\` to inspect a setting`,
     `- \`${formatChatSettingsCommand("help <key>")}\` for the full description and examples`,
@@ -1041,7 +968,7 @@ export async function getChatSettingsInfo(rootDb, chatId, extra) {
  * if the setting is free-text.
  *
  * @param {string | ConfigKeyDefinition} config
- * @param {import("../../../store.js").ChatRow} chat
+ * @param {import("./store.js").ChatRow} chat
  * @returns {{ options: SelectOption[], currentId: string } | null}
  */
 export function getSelectableOptions(config, chat) {
@@ -1066,7 +993,7 @@ export function getSelectableOptions(config, chat) {
  * enabled values. Returns `null` if the setting is not multi-selectable.
  *
  * @param {string | ConfigKeyDefinition} config
- * @param {import("../../../store.js").ChatRow} chat
+ * @param {import("./store.js").ChatRow} chat
  * @returns {{ options: SelectOption[], currentIds: string[] } | null}
  */
 export function getMultiSelectableOptions(config, chat) {
@@ -1091,7 +1018,7 @@ export function getMultiSelectableOptions(config, chat) {
  * @param {ChatDb} rootDb
  * @param {string} chatId
  * @param {string} key
- * @param {{ getActions?: () => Promise<Action[]>, compact?: boolean, rootDb?: ChatDb, getChatDb?: (chatId: string) => ChatDb }} extra
+ * @param {{ compact?: boolean, rootDb?: ChatDb, getChatDb?: (chatId: string) => ChatDb }} extra
  * @returns {Promise<string>}
  */
 export async function describeConfigKey(rootDb, chatId, key, extra) {
@@ -1143,7 +1070,7 @@ export async function describeConfigKey(rootDb, chatId, key, extra) {
  * @param {string} chatId
  * @param {string} key
  * @param {string} value
- * @param {{ senderIds?: string[], getActions?: () => Promise<Action[]>, rootDb?: ChatDb, getChatDb?: (chatId: string) => ChatDb }} extra
+ * @param {{ senderIds?: string[], rootDb?: ChatDb, getChatDb?: (chatId: string) => ChatDb }} extra
  * @returns {Promise<string>}
  */
 export async function setConfigValue(rootDb, chatId, key, value, extra) {
@@ -1160,7 +1087,7 @@ export async function setConfigValue(rootDb, chatId, key, value, extra) {
  * @param {ChatDb} rootDb
  * @param {string} chatId
  * @param {string} key
- * @param {{ senderIds?: string[], getActions?: () => Promise<Action[]>, rootDb?: ChatDb, getChatDb?: (chatId: string) => ChatDb }} extra
+ * @param {{ senderIds?: string[], rootDb?: ChatDb, getChatDb?: (chatId: string) => ChatDb }} extra
  * @returns {Promise<string>}
  */
 export async function resetConfigValue(rootDb, chatId, key, extra) {
@@ -1179,7 +1106,7 @@ export async function resetConfigValue(rootDb, chatId, key, extra) {
  * @param {ChatDb} rootDb
  * @param {string} chatId
  * @param {string} setting
- * @param {{ getActions?: () => Promise<Action[]>, rootDb?: ChatDb, getChatDb?: (chatId: string) => ChatDb }} extra
+ * @param {{ rootDb?: ChatDb, getChatDb?: (chatId: string) => ChatDb }} extra
  * @returns {Promise<string>}
  */
 export async function getChatSetting(rootDb, chatId, setting, extra) {
@@ -1202,7 +1129,7 @@ export async function getChatSetting(rootDb, chatId, setting, extra) {
  * @param {string} chatId
  * @param {string} setting
  * @param {string} value
- * @param {{ senderIds?: string[], getActions?: () => Promise<Action[]>, rootDb?: ChatDb, getChatDb?: (chatId: string) => ChatDb }} extra
+ * @param {{ senderIds?: string[], rootDb?: ChatDb, getChatDb?: (chatId: string) => ChatDb }} extra
  * @returns {Promise<string>}
  */
 export async function setChatSetting(rootDb, chatId, setting, value, extra) {
