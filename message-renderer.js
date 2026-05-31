@@ -33,7 +33,6 @@ const log = createLogger("message-renderer");
  * @typedef {
  *   | { kind: "text", text: string, editable: boolean }
  *   | { kind: "image", image: Buffer, caption?: string, editable: boolean, hd?: boolean, debug?: AttachmentDebugInfo }
- *   | { kind: "render_continuation", text: string }
  *   | { kind: "video", video: Buffer, mimetype: string, caption?: string, debug?: AttachmentDebugInfo }
  *   | { kind: "audio", audio: Buffer, mimetype: string, debug?: AttachmentDebugInfo }
  *   | { kind: "file", file: Buffer, mimetype: string, fileName: string, caption?: string, debug?: AttachmentDebugInfo }
@@ -207,18 +206,13 @@ function prependSourcePrefix(prefix, text) {
  *   caption?: string,
  *   prefix: string,
  *   truncatedLabel: string,
- *   overflowMode?: "notice" | "ask" | "silent",
+ *   overflowMode?: "notice" | "silent",
  *   instructions: SendInstruction[],
  * }} options
  * @returns {void}
  */
 function pushLimitedRenderedImages(images, options) {
   const overflowMode = options.overflowMode ?? "notice";
-  if (overflowMode === "ask") {
-    pushRenderedImageBatchesWithPrompts(images, options);
-    return;
-  }
-
   const visibleImages = pushRenderedImageBatch(images, 0, MAX_RENDERED_IMAGES_PER_BLOCK, options);
   if (overflowMode === "silent" || images.length <= visibleImages) {
     return;
@@ -253,29 +247,6 @@ function pushRenderedImageBatch(images, start, count, options) {
     });
   }
   return visibleImages.length;
-}
-
-/**
- * @param {Buffer[]} images
- * @param {{ caption?: string, prefix: string, truncatedLabel: string, instructions: SendInstruction[] }} options
- * @returns {void}
- */
-function pushRenderedImageBatchesWithPrompts(images, options) {
-  let renderedCount = 0;
-  while (renderedCount < images.length) {
-    renderedCount += pushRenderedImageBatch(images, renderedCount, MAX_RENDERED_IMAGES_PER_BLOCK, options);
-    if (renderedCount >= images.length) {
-      break;
-    }
-    const remainingCount = images.length - renderedCount;
-    options.instructions.push({
-      kind: "render_continuation",
-      text: prependSourcePrefix(
-        options.prefix,
-        `⚠️ ${options.truncatedLabel} rendered ${renderedCount} of ${images.length} images. Continue rendering the remaining ${remainingCount}? React 👍 to continue or 👎 to stop.`,
-      ),
-    });
-  }
 }
 
 /**
@@ -698,7 +669,7 @@ async function renderDiffBlock(block, prefix, instructions) {
       caption: block.caption,
       prefix,
       truncatedLabel: "Diff",
-      overflowMode: block.askToContinueRendering ? "ask" : "silent",
+      overflowMode: "silent",
       instructions,
     });
   } catch (err) {

@@ -21,7 +21,8 @@ import { sendImageHD } from "../../whatsapp-hd-media.js";
 
 /** Delay between relaying each image in an album so WhatsApp groups them. */
 const ALBUM_RELAY_DELAY_MS = 500;
-const RENDER_CONTINUATION_TIMEOUT_MS = 30 * 60 * 1000;
+const SNAPSHOT_DIFF_LINES_PER_BATCH = 250;
+const SNAPSHOT_DIFF_CONTINUATION_TIMEOUT_MS = 30 * 60 * 1000;
 const WHATSAPP_EDIT_HANDLE_TTL_MS = 14 * 60 * 1000;
 const log = createLogger("whatsapp:outbound");
 /** @type {Map<string, WhatsAppEditHandleRecord>} */
@@ -782,10 +783,74 @@ function shouldSuppressRuntimeEvent(event) {
  */
 async function sendRuntimeFileChangeEvent(sock, chatId, event, options, reactionRuntime, sendOptions) {
   const fileChange = fileChangeEventFromRuntimeEvent(event.event);
+  if (fileChange.source === "snapshot") {
+    return sendSnapshotRuntimeFileChangeEvent(sock, chatId, fileChange, options, reactionRuntime, event, sendOptions);
+  }
   return sendBlocks(sock, chatId, "tool-call", renderFileChangeContent(fileChange), options, reactionRuntime, event, {
     workdir: fileChange.cwd ?? null,
     editHandleStore: sendOptions.editHandleStore,
   });
+}
+
+/**
+ * @param {import('@whiskeysockets/baileys').WASocket} sock
+ * @param {string} chatId
+ * @param {FileChangeEvent} fileChange
+ * @param {{ quoted?: BaileysMessage } | undefined} options
+ * @param {import("../runtime/reaction-runtime.js").ReactionRuntime | undefined} reactionRuntime
+ * @param {RuntimeEventOutboundEvent} event
+ * @param {{ editHandleStore?: import("../../store.js").Store, outputVisibility?: import("../../chat-output-visibility.js").OutputVisibility }} sendOptions
+ * @returns {Promise<MessageHandle | undefined>}
+ */
+async function sendSnapshotRuntimeFileChangeEvent(sock, chatId, fileChange, options, reactionRuntime, event, sendOptions) {
+  const diffText = buildSnapshotFileChangeDiffText(fileChange);
+  if (!diffText) {
+    return sendBlocks(sock, chatId, "tool-call", renderFileChangeContent(fileChange), options, reactionRuntime, event, {
+      workdir: fileChange.cwd ?? null,
+      editHandleStore: sendOptions.editHandleStore,
+    });
+  }
+
+  const diffBatches = splitSnapshotDiffText(diffText);
+  /** @type {MessageHandle | undefined} */
+  let handle;
+  let deliveredLines = 0;
+  const totalLines = countDiffLines(diffText);
+
+  for (let index = 0; index < diffBatches.length; index += 1) {
+    const diffBatch = diffBatches[index] ?? "";
+    deliveredLines += countDiffLines(diffBatch);
+    handle = await sendBlocks(
+      sock,
+      chatId,
+      "tool-call",
+      renderFileChangeContent({ ...fileChange, diff: diffBatch }),
+      options,
+      reactionRuntime,
+      event,
+      {
+        workdir: fileChange.cwd ?? null,
+        editHandleStore: sendOptions.editHandleStore,
+      },
+    );
+
+    if (index >= diffBatches.length - 1) {
+      break;
+    }
+    const shouldContinue = await requestSnapshotDiffContinuation(
+      sock,
+      chatId,
+      options,
+      reactionRuntime,
+      deliveredLines,
+      totalLines,
+    );
+    if (!shouldContinue) {
+      break;
+    }
+  }
+
+  return handle;
 }
 
 /**
@@ -1630,6 +1695,46 @@ function stripUnifiedDiffFileHeaders(diffText) {
 
 /**
  * @param {FileChangeEvent} event
+ * @returns {string | undefined}
+ */
+function buildSnapshotFileChangeDiffText(event) {
+  if (event.diff) {
+    return stripUnifiedDiffFileHeaders(event.diff);
+  }
+  if (typeof event.oldText === "string" || typeof event.newText === "string") {
+    return buildContextualUnifiedDiff(event.oldText ?? "", event.newText ?? "");
+  }
+  return undefined;
+}
+
+/**
+ * @param {string} diffText
+ * @returns {string[]}
+ */
+function splitSnapshotDiffText(diffText) {
+  const lines = diffText.split("\n");
+  if (lines.length <= SNAPSHOT_DIFF_LINES_PER_BATCH) {
+    return [diffText];
+  }
+
+  /** @type {string[]} */
+  const batches = [];
+  for (let index = 0; index < lines.length; index += SNAPSHOT_DIFF_LINES_PER_BATCH) {
+    batches.push(lines.slice(index, index + SNAPSHOT_DIFF_LINES_PER_BATCH).join("\n"));
+  }
+  return batches;
+}
+
+/**
+ * @param {string} diffText
+ * @returns {number}
+ */
+function countDiffLines(diffText) {
+  return diffText === "" ? 0 : diffText.split("\n").length;
+}
+
+/**
+ * @param {FileChangeEvent} event
  * @returns {SendContent}
  */
 export function renderFileChangeContent(event) {
@@ -1663,7 +1768,6 @@ export function renderFileChangeContent(event) {
       diffText: stripUnifiedDiffFileHeaders(event.diff),
       language: langFromPath(event.path) || "text",
       caption: captionLines.join("\n"),
-      ...(event.source === "snapshot" && { askToContinueRendering: true }),
     }];
   }
 
@@ -1675,7 +1779,6 @@ export function renderFileChangeContent(event) {
       diffText: buildContextualUnifiedDiff(event.oldText ?? "", event.newText ?? ""),
       language: langFromPath(event.path) || "text",
       caption: captionLines.join("\n"),
-      ...(event.source === "snapshot" && { askToContinueRendering: true }),
     }];
   }
 
@@ -2057,12 +2160,12 @@ export async function sendBlocks(sock, chatId, source, content, options, reactio
 
   /**
    * @param {import("../../message-renderer.js").SendInstruction} instruction
-   * @returns {Promise<boolean>}
+   * @returns {Promise<void>}
    */
   async function sendInstruction(instruction) {
     /** @type {import('@whiskeysockets/baileys').WAMessage | undefined} */
     let sent;
-    const isAttachmentInstruction = instruction.kind !== "text" && instruction.kind !== "render_continuation";
+    const isAttachmentInstruction = instruction.kind !== "text";
 
     if (isAttachmentInstruction) {
       log.info("Sending attachment instruction", summarizeAttachmentInstruction(instruction, chatId));
@@ -2077,9 +2180,6 @@ export async function sendBlocks(sock, chatId, source, content, options, reactio
             lastSentIsImage = false;
           }
           break;
-        case "render_continuation":
-          sent = await sock.sendMessage(chatId, makeTextMessage(instruction.text), options);
-          return waitForRenderContinuationDecision(reactionRuntime, sent?.key);
         case "image":
           if (instruction.hd) {
             sent = await sendImageHD(sock, chatId, instruction.image, instruction.caption, options);
@@ -2130,14 +2230,11 @@ export async function sendBlocks(sock, chatId, source, content, options, reactio
         messageId: sent?.key?.id,
       });
     }
-    return true;
   }
 
   if (instructions.filter((instruction) => instruction.kind === "image").length < 2) {
     for (const instruction of instructions) {
-      if (!await sendInstruction(instruction)) {
-        break;
-      }
+      await sendInstruction(instruction);
     }
   } else {
     /**
@@ -2180,9 +2277,7 @@ export async function sendBlocks(sock, chatId, source, content, options, reactio
         continue;
       }
 
-      if (!await sendInstruction(segment.kind === "images" ? segment.items[0] : segment.instr)) {
-        break;
-      }
+      await sendInstruction(segment.kind === "images" ? segment.items[0] : segment.instr);
     }
   }
 
@@ -2249,11 +2344,30 @@ export async function sendBlocks(sock, chatId, source, content, options, reactio
 }
 
 /**
+ * @param {import('@whiskeysockets/baileys').WASocket} sock
+ * @param {string} chatId
+ * @param {{ quoted?: BaileysMessage } | undefined} options
+ * @param {import("../runtime/reaction-runtime.js").ReactionRuntime | undefined} reactionRuntime
+ * @param {number} deliveredLines
+ * @param {number} totalLines
+ * @returns {Promise<boolean>}
+ */
+async function requestSnapshotDiffContinuation(sock, chatId, options, reactionRuntime, deliveredLines, totalLines) {
+  const remainingLines = Math.max(totalLines - deliveredLines, 0);
+  const sent = await sock.sendMessage(
+    chatId,
+    makeTextMessage(`🔧 ⚠️ Snapshot diff rendered ${deliveredLines} of ${totalLines} lines. Continue rendering the remaining ${remainingLines}? React 👍 to continue or 👎 to stop.`),
+    options,
+  );
+  return waitForSnapshotDiffContinuationDecision(reactionRuntime, sent?.key);
+}
+
+/**
  * @param {import("../runtime/reaction-runtime.js").ReactionRuntime | undefined} reactionRuntime
  * @param {import('@whiskeysockets/baileys').WAMessageKey | undefined} promptKey
  * @returns {Promise<boolean>}
  */
-function waitForRenderContinuationDecision(reactionRuntime, promptKey) {
+function waitForSnapshotDiffContinuationDecision(reactionRuntime, promptKey) {
   const promptKeyId = promptKey?.id;
   if (!reactionRuntime || typeof promptKeyId !== "string") {
     return Promise.resolve(false);
@@ -2263,7 +2377,7 @@ function waitForRenderContinuationDecision(reactionRuntime, promptKey) {
     const timer = setTimeout(() => {
       unsubscribe();
       resolve(false);
-    }, RENDER_CONTINUATION_TIMEOUT_MS);
+    }, SNAPSHOT_DIFF_CONTINUATION_TIMEOUT_MS);
     timer.unref?.();
 
     const unsubscribe = reactionRuntime.subscribe(promptKeyId, (emoji) => {

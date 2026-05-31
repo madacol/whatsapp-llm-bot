@@ -111,7 +111,7 @@ async function waitFor(predicate) {
 /**
  * @returns {string}
  */
-function buildVeryLargeDiffText() {
+function buildMultiBatchDiffText() {
   const diffLines = ["@@ -1,320 +1,320 @@"];
   for (let index = 0; index < 320; index += 1) {
     diffLines.push(`-const oldValue${index} = ${index};`);
@@ -1489,12 +1489,12 @@ Second block:
     }
   });
 
-  it("limits very large non-snapshot diff blocks without a truncation prompt", async () => {
+  it("limits multi-batch non-snapshot diff blocks without a truncation prompt", async () => {
     const { sock, sent, relayed } = createMockSock();
 
     await sendBlocks(sock, "test-chat", "tool-call", [{
       type: "diff",
-      diffText: buildVeryLargeDiffText(),
+      diffText: buildMultiBatchDiffText(),
       language: "javascript",
       caption: "Update *huge.js*",
     }]);
@@ -1507,7 +1507,7 @@ Second block:
     assert.equal(textMessages.length, 0, JSON.stringify(sent));
   });
 
-  it("asks before continuing very large snapshot diff rendering", async () => {
+  it("asks from WhatsApp snapshot diff batching before rendering remaining lines", async () => {
     const { sock, sent, relayed } = createMockSock();
     const reactionRuntime = createReactionRuntime();
     const sendPromise = sendEvent(sock, "test-chat", runtimeFileChangeEvent({
@@ -1518,13 +1518,13 @@ Second block:
       diff: [
         "--- a/huge.js",
         "+++ b/huge.js",
-        buildVeryLargeDiffText(),
+        buildMultiBatchDiffText(),
       ].join("\n"),
     }), undefined, reactionRuntime);
 
     await waitFor(() => sent.some((entry) => /Continue rendering/.test(String(entry.msg.text ?? ""))));
     const prompt = sent.find((entry) => /Continue rendering/.test(String(entry.msg.text ?? "")));
-    assert.match(String(prompt?.msg.text ?? ""), /Diff rendered 5 of \d+ images/);
+    assert.match(String(prompt?.msg.text ?? ""), /Snapshot diff rendered 250 of \d+ lines/);
     assert.match(String(prompt?.msg.text ?? ""), /React 👍 to continue or 👎 to stop/);
     assert.equal(
       relayed.filter((entry) => entry.msg.imageMessage != null).length,
