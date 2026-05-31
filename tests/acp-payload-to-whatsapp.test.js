@@ -331,7 +331,9 @@ describe("ACP payload to WhatsApp socket vertical slices", () => {
     ]);
     assert.ok(texts.some((text) => text === "🤖 Main result."), `Expected assistant text, got ${JSON.stringify(sent)}`);
     assert.ok(texts.some((text) => text.includes("_Plan_") && text.includes("Inspect payload")), `Expected plan text, got ${JSON.stringify(sent)}`);
-    assert.ok(texts.some((text) => text.includes("🔧 Update *app.js*") && text.includes("Edited app.js")), `Expected diff text, got ${JSON.stringify(sent)}`);
+    assert.ok(sent.some((entry) => Buffer.isBuffer(entry.msg.image)
+      && String(entry.msg.caption ?? "").includes("🔧 Update *app.js*")
+      && String(entry.msg.caption ?? "").includes("Edited app.js")), `Expected diff image, got ${JSON.stringify(sent)}`);
     assert.ok(texts.some((text) => text.includes("📊 Cost: 0.001200")), `Expected usage text, got ${JSON.stringify(sent)}`);
   });
 

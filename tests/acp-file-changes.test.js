@@ -4,6 +4,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import {
+  collectAcpSnapshotFileChanges,
   emitAcpSnapshotFileChanges,
   isAcpFileChangeIgnored,
   reconcileAcpFileChangeWithBaseline,
@@ -101,7 +102,32 @@ describe("ACP file changes", () => {
       [deletedPath, "delete"],
     ]);
     assert.deepEqual(changes.map((change) => change.source), ["snapshot", "snapshot", "snapshot"]);
-    assert.ok(changes.every((change) => typeof change.diff === "string"));
+    assert.ok(changes.every((change) => change.diff === undefined));
+    assert.deepEqual(changes.map((change) => [change.oldText, change.newText]), [
+      ["old updated\n", "new updated\n"],
+      [undefined, "new file\n"],
+      ["delete me\n", undefined],
+    ]);
+  });
+
+  it("collects large snapshot batches as semantic file-change events", () => {
+    const before = new Map();
+    const after = new Map(
+      Array.from({ length: 26 }, (_entry, index) => [
+        `/tmp/acp-work/generated-${index}.txt`,
+        `generated ${index}\n`,
+      ]),
+    );
+
+    const changes = collectAcpSnapshotFileChanges({
+      before,
+      after,
+      emittedPaths: new Set(),
+    });
+
+    assert.equal(changes.length, 26);
+    assert.ok(changes.every((event) => event.type === "file-change.completed"));
+    assert.ok(changes.every((event) => event.change.source === "snapshot"));
   });
 
   it("detects ignored ACP file changes from runtime-state path patterns", async () => {

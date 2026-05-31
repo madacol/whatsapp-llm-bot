@@ -88,6 +88,60 @@ describe("ACP client process stderr", () => {
     assert.deepEqual(details?.pendingRequests, ["session/prompt#1"]);
     assert.equal(details?.stderrTail, "fatal provider detail");
   });
+
+  it("records the full ACP JSON-RPC transcript when a protocol logger is provided", async () => {
+    /** @type {Array<Record<string, unknown>>} */
+    const protocolEntries = [];
+    const connection = await openAcpConnection({
+      command: process.execPath,
+      args: [
+        "-e",
+        [
+          "process.stdin.setEncoding('utf8');",
+          "let buffer = '';",
+          "process.stdin.on('data', (chunk) => {",
+          "  buffer += chunk;",
+          "  const lines = buffer.split('\\n');",
+          "  buffer = lines.pop();",
+          "  for (const line of lines) {",
+          "    if (!line.trim()) continue;",
+          "    const request = JSON.parse(line);",
+          "    process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id: request.id, result: { ok: true } }) + '\\n');",
+          "    process.stdout.write(JSON.stringify({ jsonrpc: '2.0', method: 'session/update', params: { sessionId: 's1' } }) + '\\n');",
+          "  }",
+          "});",
+        ].join(""),
+      ],
+      protocolLogger: {
+        write(entry) {
+          protocolEntries.push(structuredClone(entry));
+        },
+      },
+    });
+    try {
+      assert.deepEqual(await connection.sendRequest("initialize", { client: "test" }), { ok: true });
+      const notification = await connection.notifications.next();
+      assert.equal(notification.value?.method, "session/update");
+
+      assert.deepEqual(
+        protocolEntries.map((entry) => [entry.direction, entry.kind, entry.method ?? null, entry.id ?? null]),
+        [
+          ["client_to_agent", "request", "initialize", 1],
+          ["agent_to_client", "response", null, 1],
+          ["agent_to_client", "notification", "session/update", null],
+        ],
+      );
+      assert.deepEqual(/** @type {{ message?: unknown }} */ (protocolEntries[0]).message, {
+        jsonrpc: "2.0",
+        id: 1,
+        method: "initialize",
+        params: { client: "test" },
+      });
+      assert.equal(typeof protocolEntries[0]?.timestamp, "string");
+    } finally {
+      await connection.close();
+    }
+  });
 });
 
 /**

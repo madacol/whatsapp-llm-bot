@@ -15,6 +15,8 @@ import { createReactionRuntime } from "../whatsapp/runtime/reaction-runtime.js";
 import { runtimeEvent } from "../outbound-events.js";
 import { buildToolPresentation } from "../whatsapp/tool-presentation-model.js";
 import { DEFAULT_OUTPUT_VISIBILITY } from "../chat-output-visibility.js";
+import { createAcpRuntimeModel } from "../harnesses/acp-events.js";
+import { MAX_RENDERED_IMAGES_PER_BLOCK } from "../message-renderer.js";
 
 const VISIBLE_TOOL_OUTPUT = { ...DEFAULT_OUTPUT_VISIBILITY, toolDetails: true };
 const COMPACT_TOOL_OUTPUT = { ...DEFAULT_OUTPUT_VISIBILITY, toolDetails: false };
@@ -1384,6 +1386,109 @@ Second block:
     assert.equal(msg.caption, undefined);
   });
 
+  it("renders an apply_patch update through sendBlocks as a diff image", async () => {
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "sendblocks-apply-patch-"));
+    const targetPath = path.join(tempDir, "render-target.md");
+    const beforeText = [
+      "# Minimal Reproduction",
+      "",
+      "Expected: updating this file renders a WhatsApp diff image.",
+      "Observed: only the update activity line was visible.",
+      "",
+    ].join("\n");
+    await fs.writeFile(targetPath, beforeText, "utf8");
+    const patch = [
+      "*** Begin Patch",
+      `*** Update File: ${targetPath}`,
+      "@@",
+      " # Minimal Reproduction",
+      " ",
+      " Expected: updating this file renders a WhatsApp diff image.",
+      "-Observed: only the update activity line was visible.",
+      "+Observed: the update activity line and diff image are visible.",
+      " ",
+      "*** End Patch",
+    ].join("\n");
+    try {
+      const model = createAcpRuntimeModel();
+      model.acceptSessionUpdate({
+        sessionId: "s1",
+        update: {
+          sessionUpdate: "tool_call",
+          toolCallId: "patch-plan",
+          title: "Update render-target.md",
+          status: "in_progress",
+          rawInput: { patch },
+        },
+      });
+      const events = model.acceptSessionUpdate({
+        sessionId: "s1",
+        update: {
+          sessionUpdate: "tool_call_update",
+          toolCallId: "patch-plan",
+          title: "Update render-target.md",
+          status: "completed",
+          rawInput: { patch },
+          content: [],
+        },
+      });
+
+      const fileChange = events.find((event) => event.type === "file-change.completed");
+      assert.equal(fileChange?.type, "file-change.completed");
+      assert.equal(fileChange.change.kind, "update");
+      assert.equal(fileChange.change.path, targetPath);
+      assert.equal(fileChange.change.source, "tool");
+      assert.match(String(fileChange.change.diff ?? ""), /-Observed: only the update activity line was visible\./);
+      assert.match(String(fileChange.change.diff ?? ""), /\+Observed: the update activity line and diff image are visible\./);
+
+      const content = renderFileChangeContent({
+        kind: "file_change",
+        path: fileChange.change.path,
+        cwd: tempDir,
+        summary: fileChange.change.summary,
+        changeKind: fileChange.change.kind,
+        source: fileChange.change.source,
+        diff: fileChange.change.diff,
+        oldText: fileChange.change.oldText,
+        newText: fileChange.change.newText,
+      });
+      const { sock, sent } = createMockSock();
+      await sendBlocks(sock, "test-chat", "tool-call", content);
+
+      assert.equal(sent.length, 1, JSON.stringify(sent));
+      assert.ok(Buffer.isBuffer(sent[0]?.msg.image), "Expected sendBlocks to send a diff image");
+      assert.match(String(sent[0]?.msg.caption ?? ""), /Update \*render-target\.md\*/);
+    } finally {
+      await fs.rm(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it("limits very large diff blocks to a bounded number of rendered images", async () => {
+    const diffLines = ["@@ -1,320 +1,320 @@"];
+    for (let index = 0; index < 320; index += 1) {
+      diffLines.push(`-const oldValue${index} = ${index};`);
+      diffLines.push(`+const newValue${index} = ${index + 1};`);
+    }
+    const { sock, sent, relayed } = createMockSock();
+
+    await sendBlocks(sock, "test-chat", "tool-call", [{
+      type: "diff",
+      diffText: diffLines.join("\n"),
+      language: "javascript",
+      caption: "Update *huge.js*",
+    }]);
+
+    const imageMessages = relayed.filter((entry) => entry.msg.imageMessage != null);
+    const textMessages = sent.filter((entry) => typeof entry.msg.text === "string");
+    assert.equal(imageMessages.length, MAX_RENDERED_IMAGES_PER_BLOCK);
+    const firstImage = /** @type {{ imageMessage?: { caption?: string } }} */ (imageMessages[0]?.msg ?? {});
+    assert.match(String(firstImage.imageMessage?.caption ?? ""), /Update \*huge\.js\*/);
+    assert.ok(
+      textMessages.some((entry) => /Diff truncated: showing 5 of \d+ rendered images/.test(String(entry.msg.text))),
+      `Expected truncation notice, got ${JSON.stringify(sent)}`,
+    );
+  });
+
   it("renders file-change diff blocks from unified diff hunks without expanding the full file", () => {
     const content = renderFileChangeContent({
       kind: "file_change",
@@ -1413,6 +1518,25 @@ Second block:
       " line 2",
       " line 3",
     ].join("\n"));
+    assert.equal(diffBlock.caption, "Update *plain.txt*");
+  });
+
+  it("renders old/new file-change text as a lazy diff when no prebuilt diff is present", () => {
+    const content = renderFileChangeContent({
+      kind: "file_change",
+      path: "/tmp/plain.txt",
+      cwd: "/tmp",
+      changeKind: "update",
+      oldText: "before\nline 2\n",
+      newText: "after\nline 2\n",
+    });
+
+    assert.ok(Array.isArray(content), "Expected diff content blocks");
+    const diffBlock = /** @type {DiffContentBlock} */ (content[0]);
+    assert.equal(diffBlock.type, "diff");
+    assert.equal(diffBlock.oldStr, "before\nline 2\n");
+    assert.equal(diffBlock.newStr, "after\nline 2\n");
+    assert.equal(diffBlock.diffText, undefined);
     assert.equal(diffBlock.caption, "Update *plain.txt*");
   });
 

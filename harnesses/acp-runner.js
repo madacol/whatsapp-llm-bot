@@ -5,7 +5,8 @@ import { openAcpConnection } from "./acp-client.js";
 import { hasAcpSessionCapability, hasMadabotAcpSessionCapability, supportsAcpLoadSession } from "./acp-capabilities.js";
 import { createAcpRawPayload, createAcpRuntimeModel, normalizeAcpUsage } from "./acp-events.js";
 import {
-  emitAcpSnapshotFileChanges,
+  collectAcpSnapshotFileChanges,
+  emitAcpSnapshotFileChangeEvents,
   isAcpFileChangeIgnored,
   reconcileAcpFileChangeWithBaseline,
   resolveAcpFileChangePath,
@@ -1337,12 +1338,12 @@ export async function startAcpRun(input) {
       await emitRuntimeEvent(event);
     }
     const afterSnapshot = await snapshotAcpWorkdir(input.runConfig?.workdir);
-    await emitAcpSnapshotFileChanges({
+    const snapshotFileChanges = collectAcpSnapshotFileChanges({
       before: beforeSnapshot,
       after: afterSnapshot,
       emittedPaths: emittedFileChangePaths,
-      emitRuntimeEvent,
     });
+    await emitAcpSnapshotFileChangeEvents(snapshotFileChanges, emitRuntimeEvent);
     promptCompleted = true;
     return {
       result: runtimeDispatcher.result,

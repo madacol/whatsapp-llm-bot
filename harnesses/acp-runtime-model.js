@@ -278,6 +278,103 @@ function extractDiffBlocks(content) {
 }
 
 /**
+ * @param {unknown} rawInput
+ * @returns {string | null}
+ */
+function extractApplyPatchText(rawInput) {
+  if (typeof rawInput === "string") {
+    return rawInput.includes("*** Begin Patch") ? rawInput : null;
+  }
+  if (!isRecord(rawInput)) {
+    return null;
+  }
+  for (const key of ["patch", "input", "content", "text", "cmd", "command"]) {
+    const value = rawInput[key];
+    if (typeof value === "string" && value.includes("*** Begin Patch")) {
+      return value;
+    }
+  }
+  return null;
+}
+
+/**
+ * @param {string} filePath
+ * @param {"add" | "update"} kind
+ * @param {string[]} bodyLines
+ * @returns {string}
+ */
+function buildPatchDiffText(filePath, kind, bodyLines) {
+  const header = kind === "add"
+    ? ["--- /dev/null", `+++ b/${filePath}`]
+    : [`--- a/${filePath}`, `+++ b/${filePath}`];
+  const hasHunkHeader = bodyLines.some((line) => line.startsWith("@@"));
+  const hunk = hasHunkHeader
+    ? bodyLines
+    : [`@@ -0,0 +1,${bodyLines.length} @@`, ...bodyLines];
+  return [...header, ...hunk].join("\n");
+}
+
+/**
+ * @param {unknown} rawInput
+ * @returns {Record<string, unknown>[]}
+ */
+function extractApplyPatchDiffBlocks(rawInput) {
+  const patchText = extractApplyPatchText(rawInput);
+  if (!patchText) {
+    return [];
+  }
+  /** @type {Array<{ path: string, kind: "add" | "update", lines: string[] }>} */
+  const parsed = [];
+  /** @type {{ path: string, kind: "add" | "update", lines: string[] } | null} */
+  let current = null;
+  const finishCurrent = () => {
+    if (!current) return;
+    const hasChangedLine = current.lines.some((line) => line.startsWith("+") || line.startsWith("-"));
+    if (hasChangedLine) {
+      parsed.push(current);
+    }
+    current = null;
+  };
+
+  for (const line of patchText.split(/\r?\n/)) {
+    if (line.startsWith("*** Update File: ")) {
+      finishCurrent();
+      current = { path: line.slice("*** Update File: ".length).trim(), kind: "update", lines: [] };
+      continue;
+    }
+    if (line.startsWith("*** Add File: ")) {
+      finishCurrent();
+      current = { path: line.slice("*** Add File: ".length).trim(), kind: "add", lines: [] };
+      continue;
+    }
+    if (line.startsWith("*** ")) {
+      finishCurrent();
+      continue;
+    }
+    if (!current) {
+      continue;
+    }
+    if (current.kind === "add") {
+      if (line.startsWith("+")) {
+        current.lines.push(line);
+      }
+      continue;
+    }
+    if (line.startsWith("@@") || line.startsWith("+") || line.startsWith("-") || line.startsWith(" ")) {
+      current.lines.push(line);
+    }
+  }
+  finishCurrent();
+
+  return parsed.map((entry) => ({
+    type: "diff",
+    path: entry.path,
+    kind: entry.kind,
+    diff: buildPatchDiffText(entry.path, entry.kind, entry.lines),
+  }));
+}
+
+/**
  * @param {AcpToolCallState | undefined} previous
  * @param {AcpToolCallState} next
  * @returns {AcpToolCallState}
@@ -351,7 +448,11 @@ function makeToolEvents(toolCall, raw, options = {}) {
     raw,
   }]);
   if (status === "completed") {
-    for (const diffBlock of extractDiffBlocks(toolCall.content)) {
+    const contentDiffBlocks = extractDiffBlocks(toolCall.content);
+    const diffBlocks = contentDiffBlocks.length > 0
+      ? contentDiffBlocks
+      : extractApplyPatchDiffBlocks(toolCall.rawInput);
+    for (const diffBlock of diffBlocks) {
       events.push(makeFileChangeEvent(diffBlock, toolCall, raw));
     }
   }

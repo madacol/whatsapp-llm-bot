@@ -123,6 +123,9 @@ export function reconcileAcpFileChangeWithBaseline(event, beforeSnapshot, workdi
   if (event.type !== "file-change.completed" || !beforeSnapshot) {
     return event;
   }
+  if (event.change.source === "snapshot") {
+    return event;
+  }
   const resolvedPath = resolveAcpFileChangePath(workdir, event.change.path);
   const baselineText = beforeSnapshot.get(resolvedPath);
   if (baselineText === undefined) {
@@ -160,14 +163,15 @@ export function reconcileAcpFileChangeWithBaseline(event, beforeSnapshot, workdi
  *   before: Map<string, string> | null,
  *   after: Map<string, string> | null,
  *   emittedPaths: Set<string>,
- *   emitRuntimeEvent: (event: import("./harness-runtime-events.js").HarnessRuntimeEvent) => Promise<void>,
  * }} input
- * @returns {Promise<void>}
+ * @returns {import("./harness-runtime-events.js").HarnessRuntimeFileChangeEvent[]}
  */
-export async function emitAcpSnapshotFileChanges(input) {
+export function collectAcpSnapshotFileChanges(input) {
   if (!input.before || !input.after) {
-    return;
+    return [];
   }
+  /** @type {import("./harness-runtime-events.js").HarnessRuntimeFileChangeEvent[]} */
+  const events = [];
   for (const [filePath, newText] of input.after) {
     if (input.emittedPaths.has(filePath)) {
       continue;
@@ -176,8 +180,7 @@ export async function emitAcpSnapshotFileChanges(input) {
     if (oldText === newText) {
       continue;
     }
-    const diff = buildUnifiedFileDiff(filePath, oldText, newText);
-    await input.emitRuntimeEvent({
+    events.push({
       type: "file-change.completed",
       provider: "acp",
       change: {
@@ -185,7 +188,6 @@ export async function emitAcpSnapshotFileChanges(input) {
         summary: "ACP file change",
         kind: oldText === undefined ? "add" : "update",
         source: "snapshot",
-        ...(diff ? { diff } : {}),
         ...(oldText !== undefined ? { oldText } : {}),
         newText,
       },
@@ -196,8 +198,7 @@ export async function emitAcpSnapshotFileChanges(input) {
     if (input.emittedPaths.has(filePath) || input.after.has(filePath)) {
       continue;
     }
-    const diff = buildUnifiedFileDiff(filePath, oldText, undefined);
-    await input.emitRuntimeEvent({
+    events.push({
       type: "file-change.completed",
       provider: "acp",
       change: {
@@ -205,12 +206,37 @@ export async function emitAcpSnapshotFileChanges(input) {
         summary: "ACP file delete",
         kind: "delete",
         source: "snapshot",
-        ...(diff ? { diff } : {}),
         oldText,
       },
       raw: { source: "workdir-snapshot" },
     });
   }
+  return events;
+}
+
+/**
+ * @param {import("./harness-runtime-events.js").HarnessRuntimeFileChangeEvent[]} events
+ * @param {(event: import("./harness-runtime-events.js").HarnessRuntimeEvent) => Promise<void>} emitRuntimeEvent
+ * @returns {Promise<void>}
+ */
+export async function emitAcpSnapshotFileChangeEvents(events, emitRuntimeEvent) {
+  for (const event of events) {
+    await emitRuntimeEvent(event);
+  }
+}
+
+/**
+ * @param {{
+ *   before: Map<string, string> | null,
+ *   after: Map<string, string> | null,
+ *   emittedPaths: Set<string>,
+ *   emitRuntimeEvent: (event: import("./harness-runtime-events.js").HarnessRuntimeEvent) => Promise<void>,
+ * }} input
+ * @returns {Promise<void>}
+ */
+export async function emitAcpSnapshotFileChanges(input) {
+  const events = collectAcpSnapshotFileChanges(input);
+  await emitAcpSnapshotFileChangeEvents(events, input.emitRuntimeEvent);
 }
 
 /**

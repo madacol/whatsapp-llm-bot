@@ -62,6 +62,7 @@ export const CODE_IMAGE_LANGUAGES = new Set([
   "proto", "protobuf", "latex", "tex", "matlab", "objectivec", "objc",
   "vue", "svelte", "astro", "mdx",
 ]);
+export const MAX_RENDERED_IMAGES_PER_BLOCK = 5;
 
 /**
  * Check whether a code block should be rendered as a syntax-highlighted image
@@ -197,6 +198,39 @@ function formatWhatsAppTaskItem(indent, marker, itemText) {
  */
 function prependSourcePrefix(prefix, text) {
   return prefix ? `${prefix} ${text}` : text;
+}
+
+/**
+ * @param {Buffer[]} images
+ * @param {{
+ *   caption?: string,
+ *   prefix: string,
+ *   truncatedLabel: string,
+ *   instructions: SendInstruction[],
+ * }} options
+ * @returns {void}
+ */
+function pushLimitedRenderedImages(images, options) {
+  const visibleImages = images.slice(0, MAX_RENDERED_IMAGES_PER_BLOCK);
+  for (let i = 0; i < visibleImages.length; i++) {
+    options.instructions.push({
+      kind: "image",
+      image: visibleImages[i],
+      ...(i === 0 && options.caption && { caption: prependSourcePrefix(options.prefix, options.caption) }),
+      editable: i === 0,
+    });
+  }
+  if (images.length <= visibleImages.length) {
+    return;
+  }
+  options.instructions.push({
+    kind: "text",
+    text: prependSourcePrefix(
+      options.prefix,
+      `⚠️ ${options.truncatedLabel} truncated: showing ${visibleImages.length} of ${images.length} rendered images.`,
+    ),
+    editable: false,
+  });
 }
 
 /**
@@ -580,16 +614,12 @@ async function renderCodeBlock(block, prefix, instructions) {
   if (block.language && (block.caption || shouldRenderAsImage(block.language, block.code))) {
     try {
       const images = await renderCodeToImages(block.code, block.language);
-      for (let i = 0; i < images.length; i++) {
-        // Only caption the first image — captionless consecutive images
-        // are auto-grouped as an album by WhatsApp.
-        instructions.push({
-          kind: "image",
-          image: images[i],
-          ...(i === 0 && block.caption && { caption: prependSourcePrefix(prefix, block.caption) }),
-          editable: i === 0,
-        });
-      }
+      pushLimitedRenderedImages(images, {
+        caption: block.caption,
+        prefix,
+        truncatedLabel: "Code block",
+        instructions,
+      });
     } catch (err) {
       log.error("Code image rendering failed, falling back to text:", err);
       instructions.push({
@@ -619,16 +649,12 @@ async function renderDiffBlock(block, prefix, instructions) {
     const images = block.diffText
       ? await renderUnifiedDiffToImages(block.diffText, block.language)
       : await renderDiffToImages(block.oldStr, block.newStr, block.language);
-    for (let i = 0; i < images.length; i++) {
-      // Only caption the first image — captionless consecutive images
-      // are auto-grouped as an album by WhatsApp.
-      instructions.push({
-        kind: "image",
-        image: images[i],
-        ...(i === 0 && block.caption && { caption: prependSourcePrefix(prefix, block.caption) }),
-        editable: i === 0,
-      });
-    }
+    pushLimitedRenderedImages(images, {
+      caption: block.caption,
+      prefix,
+      truncatedLabel: "Diff",
+      instructions,
+    });
   } catch (err) {
     log.error("Diff image rendering failed, falling back to text:", err);
     const text = block.diffText
