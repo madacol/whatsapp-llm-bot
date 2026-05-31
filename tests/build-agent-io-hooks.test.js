@@ -2,7 +2,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { buildAgentIoHooks } from "../conversation/build-agent-io-hooks.js";
 import { DEFAULT_OUTPUT_VISIBILITY } from "../chat-output-visibility.js";
-import { buildToolPresentation } from "../tool-presentation-model.js";
+import { buildToolPresentation } from "../whatsapp/tool-presentation-model.js";
 
 const VISIBLE_TOOL_OUTPUT = {
   ...DEFAULT_OUTPUT_VISIBILITY,
@@ -174,6 +174,39 @@ function assertSingleSentEvent(sent, messageKind, eventKind) {
   assert.equal(sent[0]?.event.kind, eventKind);
 }
 
+/**
+ * @param {AgentIOHooks} hooks
+ * @param {string} command
+ * @param {"started" | "completed" | "failed"} status
+ * @param {string} [output]
+ * @returns {Promise<void>}
+ */
+async function emitRuntimeCommand(hooks, command, status, output) {
+  await hooks.onRuntimeEvent?.({
+    type: `command.${status}`,
+    provider: "codex",
+    command: {
+      command,
+      status,
+      ...(output !== undefined && { output }),
+    },
+  });
+}
+
+/**
+ * @param {AgentIOHooks} hooks
+ * @param {string} command
+ * @param {string[]} paths
+ * @returns {Promise<void>}
+ */
+async function emitRuntimeFileRead(hooks, command, paths) {
+  await hooks.onRuntimeEvent?.({
+    type: "file-read.started",
+    provider: "codex",
+    fileRead: { command, paths },
+  });
+}
+
 describe("buildAgentIoHooks", () => {
   it("forwards generic runtime events as semantic outbound events", async () => {
     const { hooks, sent } = createSubject(VISIBLE_TOOL_OUTPUT);
@@ -280,7 +313,7 @@ describe("buildAgentIoHooks", () => {
     assert.equal(sent.length, 0);
   });
 
-  it("does not send partial assistant stream chunks or close active compact progress", async () => {
+  it("does not send partial assistant stream chunks", async () => {
     /** @type {Array<{ event: OutboundEvent, kind: "send" | "reply" }>} */
     const sent = [];
     const hooks = buildAgentIoHooks(
@@ -288,7 +321,7 @@ describe("buildAgentIoHooks", () => {
         send: async (event) => {
           sent.push({ event, kind: "send" });
           return {
-            transportHandleId: "compact-command-stream",
+            transportHandleId: "runtime-command-stream",
             update: async () => {},
             setInspect: () => {},
           };
@@ -307,30 +340,28 @@ describe("buildAgentIoHooks", () => {
       { ...DEFAULT_OUTPUT_VISIBILITY, toolDetails: false },
     );
 
-    await hooks.onCommand?.({ command: "pnpm test", status: "started" });
+    await emitRuntimeCommand(hooks, "pnpm test", "started");
     await hooks.onLlmResponse?.("async-gap fix", {
       source: "llm",
       streamId: "assistant-1",
       streamStatus: "partial",
     });
-    await hooks.onCommand?.({ command: "pnpm test", status: "completed", output: "ok" });
+    await emitRuntimeCommand(hooks, "pnpm test", "completed", "ok");
     await hooks.onLlmResponse?.("async-gap fix complete", {
       source: "llm",
       streamId: "assistant-1",
       streamStatus: "final",
     });
 
-    assert.deepEqual(sent.map((entry) => entry.kind), ["send", "send", "send", "reply"]);
+    assert.deepEqual(sent.map((entry) => entry.kind), ["send", "send", "reply"]);
     assert.deepEqual(sent.map((entry) => entry.event.kind), [
-      "compact_tool_activity",
-      "compact_tool_activity",
-      "compact_tool_activity",
+      "runtime_event",
+      "runtime_event",
       "content",
     ]);
-    assert.equal(sent[0]?.event.kind === "compact_tool_activity" ? sent[0].event.activity.status : "", "started");
-    assert.equal(sent[1]?.event.kind === "compact_tool_activity" ? sent[1].event.activity.status : "", "completed");
-    assert.equal(sent[2]?.event.kind === "compact_tool_activity" ? sent[2].event.activity.type : "", "close");
-    assert.equal(sent[3]?.event.kind === "content" ? sent[3].event.source : "", "llm");
+    assert.equal(sent[0]?.event.kind === "runtime_event" ? sent[0].event.event.type : "", "command.started");
+    assert.equal(sent[1]?.event.kind === "runtime_event" ? sent[1].event.event.type : "", "command.completed");
+    assert.equal(sent[2]?.event.kind === "content" ? sent[2].event.source : "", "llm");
   });
 
   it("sends one thinking placeholder and makes it inspectable", async () => {
@@ -447,7 +478,7 @@ describe("buildAgentIoHooks", () => {
 
   it("emits command starts as runtime events", async () => {
     const { hooks, sent } = createSubject(VISIBLE_TOOL_OUTPUT);
-    await hooks.onCommand?.({ command: "npm test", status: "started" });
+    await emitRuntimeCommand(hooks, "npm test", "started");
 
     assertSingleSentEvent(sent, "send", "runtime_event");
     if (sent[0].event.kind !== "runtime_event") {
@@ -461,33 +492,17 @@ describe("buildAgentIoHooks", () => {
     });
   });
 
-  it("emits compact activity events instead of pre-rendered WhatsApp text", async () => {
+  it("passes command and file-read runtime events without transport presentation flags", async () => {
     const { hooks, sent } = createSubjectWithCwd("/repo", { ...DEFAULT_OUTPUT_VISIBILITY, toolDetails: false });
 
-    await hooks.onFileRead?.({ command: "sed -n '1,20p' src/app.js", paths: ["src/app.js"] });
-    await hooks.onCommand?.({ command: "pnpm type-check", status: "started" });
+    await emitRuntimeFileRead(hooks, "sed -n '1,20p' src/app.js", ["src/app.js"]);
+    await emitRuntimeCommand(hooks, "pnpm type-check", "started");
 
-    assert.deepEqual(sent.map((entry) => entry.event), [
-      {
-        kind: "compact_tool_activity",
-        cwd: "/repo",
-        activity: {
-          type: "file_read",
-          status: "started",
-          command: "sed -n '1,20p' src/app.js",
-          paths: ["src/app.js"],
-        },
-      },
-      {
-        kind: "compact_tool_activity",
-        cwd: "/repo",
-        activity: {
-          type: "command",
-          status: "started",
-          command: "pnpm type-check",
-        },
-      },
-    ]);
+    assert.deepEqual(sent.map((entry) => entry.event.kind), ["runtime_event", "runtime_event"]);
+    assert.equal(sent[0]?.event.kind === "runtime_event" ? sent[0].event.event.type : "", "file-read.started");
+    assert.equal(sent[1]?.event.kind === "runtime_event" ? sent[1].event.event.type : "", "command.started");
+    assert.equal("compact" in sent[0].event, false);
+    assert.equal("compact" in sent[1].event, false);
   });
 
   it("suppresses no-op ACP editing-files placeholder tool calls", async () => {
@@ -500,7 +515,7 @@ describe("buildAgentIoHooks", () => {
     assert.deepEqual(sent, []);
   });
 
-  it("emits compact tool lifecycle events with semantic presentation payloads", async () => {
+  it("emits direct tool lifecycle as raw runtime events", async () => {
     const { hooks, sent } = createSubjectWithCwd("/repo", { ...DEFAULT_OUTPUT_VISIBILITY, toolDetails: false });
     const toolCall = {
       id: "tool-complete-1",
@@ -511,21 +526,36 @@ describe("buildAgentIoHooks", () => {
     await hooks.onToolComplete?.(toolCall);
 
     assert.equal(sent.length, 2);
-    assert.equal(sent[0]?.event.kind, "compact_tool_activity");
-    assert.equal(sent[0]?.event.kind === "compact_tool_activity" ? sent[0].event.activity.type : "", "tool");
-    assert.equal(sent[0]?.event.kind === "compact_tool_activity" && sent[0].event.activity.type === "tool" ? sent[0].event.activity.presentation?.kind : "", "activity");
-    assert.deepEqual(sent[1]?.event, {
-      kind: "compact_tool_activity",
+    assert.equal(sent[0]?.event.kind, "runtime_event");
+    assert.deepEqual(sent[0]?.event, {
+      kind: "runtime_event",
       cwd: "/repo",
-      activity: {
-        type: "tool",
-        status: "completed",
-        toolCall,
+      event: {
+        type: "tool.started",
+        provider: "codex",
+        tool: {
+          id: "tool-complete-1",
+          name: "spawn_agent",
+          arguments: { message: "hello" },
+        },
+      },
+    });
+    assert.deepEqual(sent[1]?.event, {
+      kind: "runtime_event",
+      cwd: "/repo",
+      event: {
+        type: "tool.completed",
+        provider: "codex",
+        tool: {
+          id: "tool-complete-1",
+          name: "spawn_agent",
+          arguments: { message: "hello" },
+        },
       },
     });
   });
 
-  it("renders edit diffs even when generic tool progress is compacted", async () => {
+  it("renders edit diffs even when generic tool progress is hidden", async () => {
     const { hooks, sent } = createSubjectWithCwd("/repo", {
       ...DEFAULT_OUTPUT_VISIBILITY,
       toolDetails: false,
@@ -545,60 +575,82 @@ describe("buildAgentIoHooks", () => {
     assert.equal(sent.length, 1);
     assert.equal(sent[0]?.event.kind, "tool_call");
     if (sent[0]?.event.kind !== "tool_call") {
-      assert.fail("Expected edit tool call to bypass compact text");
+      assert.fail("Expected edit tool call to bypass runtime tool progress");
     }
-    assert.equal(sent[0].event.presentation.kind, "file");
-    assert.equal(sent[0].event.presentation.toolName, "Edit");
+    assert.deepEqual(sent[0].event.toolCall, {
+      id: "edit-1",
+      name: "Edit",
+      arguments: JSON.stringify({
+        file_path: "/repo/package.json",
+        old_string: "\"version\": \"1.0.0\"",
+        new_string: "\"version\": \"1.0.1\"",
+      }),
+    });
+    assert.equal(sent[0].event.cwd, "/repo");
   });
 
-  it("emits compact command failures instead of a separate error message", async () => {
+  it("passes command failures as raw runtime events instead of sending a separate error message", async () => {
     const { hooks, sent } = createSubjectWithCwd("/repo", { ...DEFAULT_OUTPUT_VISIBILITY, toolDetails: false });
 
-    await hooks.onCommand?.({ command: "pnpm test", status: "started" });
-    await hooks.onCommand?.({ command: "pnpm test", status: "failed", output: "boom" });
+    await emitRuntimeCommand(hooks, "pnpm test", "started");
+    await emitRuntimeCommand(hooks, "pnpm test", "failed", "boom");
 
-    assert.deepEqual(sent.map((entry) => entry.event), [
-      {
-        kind: "compact_tool_activity",
-        cwd: "/repo",
-        activity: { type: "command", status: "started", command: "pnpm test" },
-      },
-      {
-        kind: "compact_tool_activity",
-        cwd: "/repo",
-        activity: { type: "command", status: "failed", command: "pnpm test", output: "boom" },
-      },
-    ]);
+    assert.deepEqual(sent.map((entry) => entry.event.kind), ["runtime_event", "runtime_event"]);
+    assert.equal(sent[1]?.event.kind === "runtime_event" ? sent[1].event.event.type : "", "command.failed");
   });
 
-  it("emits compact close events before llm and file-change messages", async () => {
+  it("passes runtime progress without inserting transport close events", async () => {
     const { hooks, sent } = createSubjectWithCwd("/repo", { ...DEFAULT_OUTPUT_VISIBILITY, toolDetails: false });
-    await hooks.onCommand?.({ command: "pwd", status: "started" });
-    await hooks.onCommand?.({ command: "pnpm type-check", status: "started" });
+    await emitRuntimeCommand(hooks, "pwd", "started");
+    await emitRuntimeCommand(hooks, "pnpm type-check", "started");
     await hooks.onLlmResponse?.("Done");
-    await hooks.onCommand?.({ command: "git diff", status: "started" });
+    await emitRuntimeCommand(hooks, "git diff", "started");
 
-    await hooks.onCommand?.({ command: "pwd", status: "started" });
-    await hooks.onCommand?.({ command: "git diff", status: "started" });
+    await emitRuntimeCommand(hooks, "pwd", "started");
+    await emitRuntimeCommand(hooks, "git diff", "started");
     await hooks.onFileChange?.({ path: "/repo/src/app.js", summary: "Updated file" });
-    await hooks.onCommand?.({ command: "ls", status: "started" });
+    await emitRuntimeCommand(hooks, "ls", "started");
 
     assert.deepEqual(sent.map((entry) => entry.event.kind), [
-      "compact_tool_activity",
-      "compact_tool_activity",
-      "compact_tool_activity",
-      "content",
-      "compact_tool_activity",
-      "compact_tool_activity",
-      "compact_tool_activity",
-      "compact_tool_activity",
       "runtime_event",
-      "compact_tool_activity",
+      "runtime_event",
+      "content",
+      "runtime_event",
+      "runtime_event",
+      "runtime_event",
+      "runtime_event",
+      "runtime_event",
     ]);
-    assert.deepEqual(sent.filter((entry) => (
-      entry.event.kind === "compact_tool_activity"
-      && entry.event.activity.type === "close"
-    )).length, 2);
+    assert.equal(sent.some((entry) => entry.event.kind === "compact_tool_activity"), false);
+  });
+
+  it("keeps runtime progress and non-tool events separate without transport grouping", async () => {
+    const { hooks, sent } = createSubjectWithCwd("/repo", { ...DEFAULT_OUTPUT_VISIBILITY, toolDetails: false });
+
+    await emitRuntimeCommand(hooks, "pwd", "started");
+    await hooks.onPlan?.(buildToolPresentation("update_plan", {
+      plan: [{ step: "Inspect output", status: "in_progress" }],
+    }));
+    await emitRuntimeCommand(hooks, "pnpm test", "started");
+    await hooks.onUsage?.("0.000000", { prompt: 1, completion: 1, cached: 0 });
+    await emitRuntimeCommand(hooks, "git diff", "started");
+    await hooks.onRuntimeEvent?.({
+      type: "runtime.warning",
+      provider: "acp",
+      message: "provider warning",
+    });
+    await emitRuntimeCommand(hooks, "ls", "started");
+
+    assert.deepEqual(sent.map((entry) => entry.event.kind), [
+      "runtime_event",
+      "plan",
+      "runtime_event",
+      "usage",
+      "runtime_event",
+      "runtime_event",
+      "runtime_event",
+    ]);
+    assert.equal(sent.some((entry) => entry.event.kind === "compact_tool_activity"), false);
   });
 
   it("suppresses tool result progress events when visibility disables full tool details", async () => {
@@ -619,7 +671,7 @@ describe("buildAgentIoHooks", () => {
 
   it("passes command text to WhatsApp without Shell presentation", async () => {
     const { hooks, sent } = createSubjectWithCwd("/repo", VISIBLE_TOOL_OUTPUT);
-    await hooks.onCommand?.({ command: "rg -n \"needle\" src", status: "started" });
+    await emitRuntimeCommand(hooks, "rg -n \"needle\" src", "started");
 
     assert.equal(sent.length, 1);
     assert.equal(sent[0].event.kind, "runtime_event");
@@ -632,8 +684,8 @@ describe("buildAgentIoHooks", () => {
 
   it("emits command completion through the runtime boundary", async () => {
     const { hooks, sent } = createSubject(VISIBLE_TOOL_OUTPUT);
-    await hooks.onCommand?.({ command: "pwd", status: "started" });
-    await hooks.onCommand?.({ command: "pwd", status: "completed", output: "/repo\n" });
+    await emitRuntimeCommand(hooks, "pwd", "started");
+    await emitRuntimeCommand(hooks, "pwd", "completed", "/repo\n");
 
     assert.deepEqual(sent.map((entry) => entry.event.kind), ["runtime_event", "runtime_event"]);
     assert.equal(sent[1]?.event.kind === "runtime_event" ? sent[1].event.event.type : "", "command.completed");
@@ -672,8 +724,8 @@ describe("buildAgentIoHooks", () => {
       VISIBLE_TOOL_OUTPUT,
     );
 
-    await hooks.onCommand?.({ command: "pnpm test", status: "started" });
-    await hooks.onCommand?.({ command: "pnpm test", status: "failed", output: "boom" });
+    await emitRuntimeCommand(hooks, "pnpm test", "started");
+    await emitRuntimeCommand(hooks, "pnpm test", "failed", "boom");
 
     assert.deepEqual(sent.map((entry) => entry.event.kind), ["runtime_event", "runtime_event"]);
     assert.equal(sent[1]?.event.kind === "runtime_event" ? sent[1].event.event.type : "", "command.failed");
@@ -705,7 +757,7 @@ describe("buildAgentIoHooks", () => {
 
   it("emits file reads as runtime events", async () => {
     const { hooks, sent } = createSubject(VISIBLE_TOOL_OUTPUT);
-    await hooks.onFileRead?.({ command: "sed -n '1,20p' src/app.js", paths: ["src/app.js"] });
+    await emitRuntimeFileRead(hooks, "sed -n '1,20p' src/app.js", ["src/app.js"]);
 
     assertSingleSentEvent(sent, "send", "runtime_event");
     if (sent[0].event.kind !== "runtime_event") {
@@ -763,7 +815,7 @@ describe("buildAgentIoHooks", () => {
     assert.equal(sent[0].event.event.change.cwd, "/repo");
   });
 
-  it("keeps file-read command output inspectable without Read presentation", async () => {
+  it("passes file-read and command output through runtime events", async () => {
     /** @type {Array<{ inspects: MessageInspectState[], updates: MessageHandleUpdate[] }>} */
     const handles = [];
     const hooks = buildAgentIoHooks(
@@ -792,24 +844,16 @@ describe("buildAgentIoHooks", () => {
       VISIBLE_TOOL_OUTPUT,
     );
 
-    await hooks.onFileRead?.({
-      command: "sed -n '1,20p' src/app.js",
-      paths: ["src/app.js"],
-    });
-    await hooks.onCommand?.({
-      command: "sed -n '1,20p' src/app.js",
-      status: "completed",
-      output: "  1→ const value = 1;\n  2→ const value = 2;",
-    });
+    await emitRuntimeFileRead(hooks, "sed -n '1,20p' src/app.js", ["src/app.js"]);
+    await emitRuntimeCommand(
+      hooks,
+      "sed -n '1,20p' src/app.js",
+      "completed",
+      "  1→ const value = 1;\n  2→ const value = 2;",
+    );
 
     assert.equal(handles.length, 2);
-    assert.equal(handles[0]?.inspects.length, 1);
-    const inspect = handles[0]?.inspects[0];
-    assert.ok(inspect && inspect.kind === "text");
-    if (!inspect || inspect.kind !== "text") {
-      assert.fail("Expected text inspect state");
-    }
-    assert.equal(inspect.text, "  1→ const value = 1;\n  2→ const value = 2;");
+    assert.deepEqual(handles.map((entry) => entry.inspects.length), [0, 0]);
   });
 
   it("passes search command output through runtime events", async () => {
@@ -840,15 +884,8 @@ describe("buildAgentIoHooks", () => {
       VISIBLE_TOOL_OUTPUT,
     );
 
-    await hooks.onCommand?.({
-      command: "rg -n \"needle\" src",
-      status: "started",
-    });
-    await hooks.onCommand?.({
-      command: "rg -n \"needle\" src",
-      status: "completed",
-      output: "src/app.js:12:needle",
-    });
+    await emitRuntimeCommand(hooks, "rg -n \"needle\" src", "started");
+    await emitRuntimeCommand(hooks, "rg -n \"needle\" src", "completed", "src/app.js:12:needle");
 
     assert.equal(handles.length, 2);
     assert.deepEqual(handles.map((entry) => entry.inspects.length), [0, 0]);
@@ -882,14 +919,8 @@ describe("buildAgentIoHooks", () => {
       VISIBLE_TOOL_OUTPUT,
     );
 
-    await hooks.onCommand?.({
-      command: "ls -a",
-      status: "started",
-    });
-    await hooks.onCommand?.({
-      command: "ls -a",
-      status: "completed",
-    });
+    await emitRuntimeCommand(hooks, "ls -a", "started");
+    await emitRuntimeCommand(hooks, "ls -a", "completed");
 
     assert.equal(handles.length, 2);
     assert.deepEqual(handles.map((entry) => entry.inspects.length), [0, 0]);

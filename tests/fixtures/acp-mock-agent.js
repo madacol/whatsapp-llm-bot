@@ -1,10 +1,6 @@
 #!/usr/bin/env node
-import readline from "node:readline";
-
-const rl = readline.createInterface({
-  input: process.stdin,
-  crlfDelay: Infinity,
-});
+process.stdin.resume();
+const keepAlive = setInterval(() => {}, 1 << 30);
 
 const minimalCapabilities = process.argv.includes("--minimal-capabilities");
 
@@ -564,10 +560,20 @@ function endPrompt(message) {
   send({ id: message.id, result: { sessionId, stopReason: "end_turn" } });
 }
 
-for await (const line of rl) {
-  if (!line.trim()) {
-    continue;
+let stdinBuffer = "";
+process.stdin.setEncoding("utf8");
+process.stdin.on("data", (chunk) => {
+  stdinBuffer += chunk;
+  while (stdinBuffer.includes("\n")) {
+    const newlineIndex = stdinBuffer.indexOf("\n");
+    const line = stdinBuffer.slice(0, newlineIndex);
+    stdinBuffer = stdinBuffer.slice(newlineIndex + 1);
+    if (!line.trim()) {
+      continue;
+    }
+    const message = JSON.parse(line);
+    void handleMessage(message);
   }
-  const message = JSON.parse(line);
-  void handleMessage(message);
-}
+});
+
+await new Promise(() => {});

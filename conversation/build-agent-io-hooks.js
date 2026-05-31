@@ -1,9 +1,7 @@
 import { MAX_TOOL_CALL_DEPTH, parseToolArgs } from "../agent-io-defaults.js";
-import { buildToolPresentation } from "../tool-presentation-model.js";
 import { contentEvent, planEvent, reasoningInspectState, runtimeEvent, subagentMessageEvent, textUpdate, toolCallEvent, usageEvent } from "../outbound-events.js";
 import { createCodexDisplayHooks } from "./codex-hook-display.js";
 import { DEFAULT_OUTPUT_VISIBILITY } from "../chat-output-visibility.js";
-import { createCompactToolActivityFeed } from "./compact-tool-activity.js";
 
 /**
  * File-mutating tool calls are part of change visibility, not just full tool
@@ -16,14 +14,11 @@ import { createCompactToolActivityFeed } from "./compact-tool-activity.js";
  * @returns {boolean}
  */
 function shouldDisplayToolCallAsChange(toolCall, actionFormatter, cwd, toolContext) {
-  const presentation = buildToolPresentation(
-    toolCall.name,
-    parseToolArgs(toolCall.arguments),
-    actionFormatter,
-    cwd ?? null,
-    toolContext,
-  );
-  return presentation.kind === "file";
+  void actionFormatter;
+  void cwd;
+  void toolContext;
+  const args = parseToolArgs(toolCall.arguments);
+  return (toolCall.name === "Edit" || toolCall.name === "Write") && typeof args.file_path === "string";
 }
 
 /**
@@ -36,15 +31,13 @@ function shouldDisplayToolCallAsChange(toolCall, actionFormatter, cwd, toolConte
  * @returns {Promise<MessageHandle | undefined>}
  */
 async function displayToolCall(toolCall, context, actionFormatter, cwd, toolContext) {
-  return context.send(toolCallEvent(
-    buildToolPresentation(
-      toolCall.name,
-      parseToolArgs(toolCall.arguments),
-      actionFormatter,
-      cwd ?? null,
-      toolContext,
-    ),
-  ));
+  const args = parseToolArgs(toolCall.arguments);
+  const displaySummary = actionFormatter ? actionFormatter(args) : undefined;
+  return context.send(toolCallEvent(toolCall, {
+    cwd: cwd ?? null,
+    ...(displaySummary !== undefined && { displaySummary }),
+    ...(toolContext !== undefined && { context: toolContext }),
+  }));
 }
 
 /**
@@ -60,6 +53,18 @@ function isNoopEditingFilesToolCall(toolCall) {
   }
   const args = parseToolArgs(toolCall.arguments);
   return Object.keys(args).length === 0;
+}
+
+/**
+ * @param {LlmChatResponse["toolCalls"][0]} toolCall
+ * @returns {{ id: string, name: string, arguments: Record<string, unknown> }}
+ */
+function runtimeToolFromToolCall(toolCall) {
+  return {
+    id: toolCall.id,
+    name: toolCall.name,
+    arguments: parseToolArgs(toolCall.arguments),
+  };
 }
 
 /**
@@ -101,10 +106,8 @@ export function buildAgentIoHooks(
     cwd,
     visibility,
   });
-  const compactToolActivity = createCompactToolActivityFeed({
-    send: context.send,
-    cwd,
-  });
+  /** @type {LlmChatResponse["toolCalls"][0][]} */
+  const pendingRuntimeToolCalls = [];
   /** @type {MessageHandle | null} */
   let reasoningHandle = null;
 
@@ -149,7 +152,6 @@ export function buildAgentIoHooks(
       if (metadata?.streamId && (metadata.streamStatus ?? "partial") !== "final") {
         return;
       }
-      await compactToolActivity.close();
       /** @type {ToolContentBlock[]} */
       const content = [{ type: "markdown", text }];
       if (metadata?.source === "subagent") {
@@ -204,14 +206,29 @@ export function buildAgentIoHooks(
         if (visibility.changes && shouldDisplayToolCallAsChange(toolCall, formatToolCall, cwd, toolContext)) {
           return displayToolCall(toolCall, context, formatToolCall, cwd, toolContext);
         }
-        await compactToolActivity.addToolCall(toolCall, formatToolCall, toolContext);
+        if (!pendingRuntimeToolCalls.some((pending) => pending.id === toolCall.id)) {
+          pendingRuntimeToolCalls.push(toolCall);
+          await context.send(runtimeEvent({
+            type: "tool.started",
+            provider: "codex",
+            tool: runtimeToolFromToolCall(toolCall),
+          }, { cwd }));
+        }
         return undefined;
       }
       return displayToolCall(toolCall, context, formatToolCall, cwd, toolContext);
     },
     onToolComplete: async (toolCall) => {
       if (!visibility.toolDetails) {
-        await compactToolActivity.completeToolCall(toolCall);
+        const index = pendingRuntimeToolCalls.findIndex((pending) => pending.id === toolCall.id);
+        if (index !== -1) {
+          pendingRuntimeToolCalls.splice(index, 1);
+          await context.send(runtimeEvent({
+            type: "tool.completed",
+            provider: "codex",
+            tool: runtimeToolFromToolCall(toolCall),
+          }, { cwd }));
+        }
       }
     },
     onToolResult: async (blocks) => {
@@ -223,62 +240,38 @@ export function buildAgentIoHooks(
     },
     onToolError: async (message) => {
       if (!visibility.toolDetails) {
-        const updated = await compactToolActivity.failMostRecentToolCall();
-        if (updated) {
+        const toolCall = pendingRuntimeToolCalls.pop();
+        if (toolCall) {
+          await context.send(runtimeEvent({
+            type: "tool.failed",
+            provider: "codex",
+            tool: runtimeToolFromToolCall(toolCall),
+          }, { cwd }));
           return;
         }
       }
       await emitWhileWorking(() => context.send(contentEvent("error", message)));
     },
-    onCommand: async (commandEvent) => {
-      if (!visibility.toolDetails) {
-        if (commandEvent.status === "started") {
-          await compactToolActivity.addCommand(commandEvent.command);
-          return;
-        }
-        if (commandEvent.status === "completed") {
-          await compactToolActivity.completeCommand(commandEvent.command);
-          return;
-        }
-        if (commandEvent.status === "failed") {
-          const updated = await compactToolActivity.failCommand(commandEvent.command, commandEvent.output);
-          if (updated) {
-            return;
-          }
-        }
-      }
-      await emitWhileWorking(() => codexDisplayHooks.onCommand(commandEvent));
-    },
-    onFileRead: async (fileReadEvent) => {
-      if (!visibility.toolDetails) {
-        await compactToolActivity.addFileRead(fileReadEvent.command, fileReadEvent.paths);
-        return;
-      }
-      await emitWhileWorking(() => codexDisplayHooks.onFileRead(fileReadEvent));
-    },
     onPlan: async (presentation) => {
       await emitWhileWorking(() => context.reply(planEvent(presentation)));
     },
     onFileChange: async (fileChangeEvent) => {
-      if (visibility.changes) {
-        await compactToolActivity.close();
-      }
       await emitWhileWorking(() => codexDisplayHooks.onFileChange(fileChangeEvent));
     },
     onContinuePrompt: () => context.confirm("React 👍 to continue or 👎 to stop."),
     onDepthLimit: () => context.confirm(
       `⚠️ *Depth limit*\n\nReached maximum tool call depth (${MAX_TOOL_CALL_DEPTH}). React 👍 to continue or 👎 to stop.`,
     ),
-    onUsage: async (cost, tokens) => { await context.send(usageEvent(cost, tokens)); },
+    onUsage: async (cost, tokens) => {
+      await context.send(usageEvent(cost, tokens));
+    },
     onRuntimeEvent: async (event) => {
       if (event.type === "file-change.completed") {
         if (!visibility.changes) {
           return;
         }
-        await compactToolActivity.close();
       }
       await emitWhileWorking(() => context.send(runtimeEvent(event, {
-        ...(!visibility.toolDetails ? { compact: true } : {}),
         ...(cwd !== null ? { cwd } : {}),
       })));
     },

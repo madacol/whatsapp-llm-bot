@@ -3,12 +3,12 @@
  */
 
 import { formatToolPresentationSummary } from "./tool-presenter.js";
-import { getToolFlowDescriptor } from "../tool-presentation-model.js";
+import { getToolFlowDescriptor } from "./tool-presentation-model.js";
 
 /**
  * @typedef {{
  *   id: string,
- *   presentation: import("../tool-presentation-model.js").ToolPresentation,
+ *   presentation: import("./tool-presentation-model.js").ToolPresentation,
  *   output?: string,
  * }} WhatsAppToolFlowStep
  */
@@ -33,7 +33,7 @@ export function formatToolFlowSummary(toolFlow) {
 
 /**
  * @param {WhatsAppToolFlowState} toolFlow
- * @param {(presentation: import("../tool-presentation-model.js").ToolPresentation, output?: string) => string | null} formatInspect
+ * @param {(presentation: import("./tool-presentation-model.js").ToolPresentation, output?: string) => string | null} formatInspect
  * @returns {string}
  */
 export function formatToolFlowInspectText(toolFlow, formatInspect) {

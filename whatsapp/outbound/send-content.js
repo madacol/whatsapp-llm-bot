@@ -1,10 +1,12 @@
 import { generateMessageIDV2, generateWAMessage, generateWAMessageFromContent, proto } from "@whiskeysockets/baileys";
 import { randomBytes } from "node:crypto";
 import { createLogger } from "../../logger.js";
+import { parseToolArgs } from "../../agent-io-defaults.js";
+import { DEFAULT_OUTPUT_VISIBILITY, resolveOutputVisibility } from "../../chat-output-visibility.js";
 import { renderBlocks } from "../../message-renderer.js";
 import { formatPlanPresentationText } from "../../plan-presentation.js";
 import { formatToolFlowInspectText, formatToolFlowSummary } from "../tool-flow-presenter.js";
-import { shortenPath } from "../../tool-presentation-model.js";
+import { buildToolPresentation, shortenPath } from "../tool-presentation-model.js";
 import { formatUsageEventText } from "../../usage-formatting.js";
 import { makeImageMessage, makeTextMessage } from "../message-payloads.js";
 import {
@@ -332,9 +334,14 @@ function isNoopRuntimeTool(tool) {
 
 /**
  * @param {Extract<RuntimeEventOutboundEvent["event"], { tool: unknown }>["tool"]} tool
+ * @param {string | null | undefined} cwd
  * @returns {string}
  */
-function formatRuntimeToolSummary(tool) {
+function formatRuntimeToolSummary(tool, cwd) {
+  const semanticSummary = formatSemanticToolSummary(tool.name, tool.arguments, cwd);
+  if (semanticSummary) {
+    return semanticSummary;
+  }
   const displayName = tool.name.trim() || "Tool";
   const pathDetail = getStringArg(tool.arguments, ["path", "file_path", "filePath"]);
   if (pathDetail) {
@@ -342,6 +349,20 @@ function formatRuntimeToolSummary(tool) {
   }
   const textDetail = getStringArg(tool.arguments, ["title", "message", "prompt", "query", "q"]);
   return formatRuntimeProgressEntry(displayName, textDetail);
+}
+
+/**
+ * @param {string} name
+ * @param {Record<string, unknown>} args
+ * @param {string | null | undefined} cwd
+ * @returns {string | null}
+ */
+function formatSemanticToolSummary(name, args, cwd) {
+  const presentation = buildToolPresentation(name, args, undefined, cwd ?? null, undefined);
+  if (presentation.kind === "generic") {
+    return null;
+  }
+  return formatToolPresentationSummary(presentation);
 }
 
 /**
@@ -503,14 +524,14 @@ function formatCompactToolActivitySummary(activity, cwd) {
     return null;
   }
   const args = parseCompactToolArguments(activity.toolCall.arguments);
-  const presentation = activity.presentation;
+  const presentation = buildToolPresentation(activity.toolCall.name, args, undefined, cwd ?? null, undefined);
   const rawSummary = formatGenericCompactToolName(activity.toolCall.name, args, cwd);
   if (!presentation) {
     return rawSummary;
   }
   switch (presentation.kind) {
     case "activity":
-      return rawSummary;
+      return formatToolPresentationSummary(presentation);
     case "file":
       return formatCompactEntry(presentation.toolName, `\`${presentation.filePath}\``);
     case "plan":
@@ -528,6 +549,24 @@ function formatCompactToolActivitySummary(activity, cwd) {
     default:
       return formatCompactEntry(activity.toolCall.name);
   }
+}
+
+/**
+ * @param {ToolCallEvent} event
+ * @returns {ToolPresentation}
+ */
+function buildToolPresentationFromToolCallEvent(event) {
+  const args = parseToolArgs(event.toolCall.arguments);
+  const formatToolCall = typeof event.displaySummary === "string"
+    ? () => event.displaySummary ?? ""
+    : undefined;
+  return buildToolPresentation(
+    event.toolCall.name,
+    args,
+    formatToolCall,
+    event.cwd ?? null,
+    event.context,
+  );
 }
 
 /**
@@ -679,7 +718,7 @@ function shouldSuppressRuntimeEvent(event) {
  * @param {RuntimeEventOutboundEvent} event
  * @param {{ quoted?: BaileysMessage } | undefined} options
  * @param {import("../runtime/reaction-runtime.js").ReactionRuntime | undefined} reactionRuntime
- * @param {{ editHandleStore?: import("../../store.js").Store }} sendOptions
+ * @param {{ editHandleStore?: import("../../store.js").Store, outputVisibility?: import("../../chat-output-visibility.js").OutputVisibility }} sendOptions
  * @returns {Promise<MessageHandle | undefined>}
  */
 async function sendRuntimeFileChangeEvent(sock, chatId, event, options, reactionRuntime, sendOptions) {
@@ -696,7 +735,7 @@ async function sendRuntimeFileChangeEvent(sock, chatId, event, options, reaction
  * @param {RuntimeEventOutboundEvent} event
  * @param {{ quoted?: BaileysMessage } | undefined} options
  * @param {import("../runtime/reaction-runtime.js").ReactionRuntime | undefined} reactionRuntime
- * @param {{ editHandleStore?: import("../../store.js").Store }} sendOptions
+ * @param {{ editHandleStore?: import("../../store.js").Store, outputVisibility?: import("../../chat-output-visibility.js").OutputVisibility }} sendOptions
  * @returns {Promise<MessageHandle | undefined>}
  */
 async function sendRuntimeCommandEvent(sock, chatId, event, options, reactionRuntime, sendOptions) {
@@ -765,7 +804,7 @@ async function sendRuntimeCommandEvent(sock, chatId, event, options, reactionRun
  * @param {RuntimeEventOutboundEvent} event
  * @param {{ quoted?: BaileysMessage } | undefined} options
  * @param {import("../runtime/reaction-runtime.js").ReactionRuntime | undefined} reactionRuntime
- * @param {{ editHandleStore?: import("../../store.js").Store }} sendOptions
+ * @param {{ editHandleStore?: import("../../store.js").Store, outputVisibility?: import("../../chat-output-visibility.js").OutputVisibility }} sendOptions
  * @returns {Promise<MessageHandle | undefined>}
  */
 async function sendRuntimeFileReadEvent(sock, chatId, event, options, reactionRuntime, sendOptions) {
@@ -783,7 +822,7 @@ async function sendRuntimeFileReadEvent(sock, chatId, event, options, reactionRu
  * @param {RuntimeEventOutboundEvent} event
  * @param {{ quoted?: BaileysMessage } | undefined} options
  * @param {import("../runtime/reaction-runtime.js").ReactionRuntime | undefined} reactionRuntime
- * @param {{ editHandleStore?: import("../../store.js").Store }} sendOptions
+ * @param {{ editHandleStore?: import("../../store.js").Store, outputVisibility?: import("../../chat-output-visibility.js").OutputVisibility }} sendOptions
  * @returns {Promise<MessageHandle | undefined>}
  */
 async function sendRuntimeToolEvent(sock, chatId, event, options, reactionRuntime, sendOptions) {
@@ -804,10 +843,10 @@ async function sendRuntimeToolEvent(sock, chatId, event, options, reactionRuntim
   if (status !== "started" && status !== "updated" && status !== "completed" && status !== "failed") {
     return undefined;
   }
-  const summary = formatRuntimeToolSummary(toolEvent.tool);
-  const text = `${getRuntimeToolIcon(status)} ${summary}`;
+  const summary = formatRuntimeToolSummary(toolEvent.tool, event.cwd);
 
   if (status === "started") {
+    const text = `${getRuntimeToolIcon(status)} ${summary}`;
     let toolStateById = runtimeToolsByChat.get(chatId);
     if (!toolStateById) {
       toolStateById = new Map();
@@ -829,6 +868,7 @@ async function sendRuntimeToolEvent(sock, chatId, event, options, reactionRuntim
 
   const toolStateById = runtimeToolsByChat.get(chatId);
   const state = toolStateById?.get(toolEvent.tool.id);
+  const text = `${getRuntimeToolIcon(status)} ${state?.summary ?? summary}`;
   if (state?.handle) {
     if (toolEvent.tool.output !== undefined) {
       state.handle.setInspect({
@@ -1045,7 +1085,7 @@ function scheduleCompactToolActivityFlush(state) {
  * @param {CompactToolActivityEvent} event
  * @param {{ quoted?: BaileysMessage } | undefined} options
  * @param {import("../runtime/reaction-runtime.js").ReactionRuntime | undefined} reactionRuntime
- * @param {{ editHandleStore?: import("../../store.js").Store }} sendOptions
+ * @param {{ editHandleStore?: import("../../store.js").Store, outputVisibility?: import("../../chat-output-visibility.js").OutputVisibility }} sendOptions
  * @param {ReturnType<typeof createCompactToolActivityState> & { handle?: MessageHandle }} state
  * @param {{ id: string, summary: string, inspectDetail?: string, completed: boolean, failed: boolean }} entry
  * @returns {Promise<MessageHandle | undefined>}
@@ -1206,6 +1246,9 @@ async function sendCompactRuntimeEvent(sock, chatId, event, options, reactionRun
     }, options, reactionRuntime, sendOptions);
   }
   if (runtime.type === "tool.started" || runtime.type === "tool.completed" || runtime.type === "tool.failed") {
+    if (isNoopRuntimeTool(runtime.tool)) {
+      return undefined;
+    }
     return sendCompactToolActivityEvent(sock, chatId, {
       kind: "compact_tool_activity",
       cwd: event.cwd,
@@ -1221,6 +1264,52 @@ async function sendCompactRuntimeEvent(sock, chatId, event, options, reactionRun
     }, options, reactionRuntime, sendOptions);
   }
   return undefined;
+}
+
+/**
+ * @param {RuntimeEventOutboundEvent["event"]} runtime
+ * @returns {boolean}
+ */
+function isCompactRuntimeProgressEvent(runtime) {
+  return runtime.type === "file-read.started"
+    || runtime.type === "command.started"
+    || runtime.type === "command.completed"
+    || runtime.type === "command.failed"
+    || runtime.type === "tool.started"
+    || runtime.type === "tool.updated"
+    || runtime.type === "tool.completed"
+    || runtime.type === "tool.failed";
+}
+
+/**
+ * @param {string} chatId
+ * @param {{ editHandleStore?: import("../../store.js").Store, outputVisibility?: import("../../chat-output-visibility.js").OutputVisibility }} sendOptions
+ * @returns {Promise<import("../../chat-output-visibility.js").OutputVisibility>}
+ */
+async function resolveWhatsAppOutputVisibility(chatId, sendOptions) {
+  if (sendOptions.outputVisibility) {
+    return sendOptions.outputVisibility;
+  }
+  const chat = await sendOptions.editHandleStore?.getChat?.(chatId);
+  return chat ? resolveOutputVisibility(chat.output_visibility) : DEFAULT_OUTPUT_VISIBILITY;
+}
+
+/**
+ * @param {import('@whiskeysockets/baileys').WASocket} sock
+ * @param {string} chatId
+ * @param {{ quoted?: BaileysMessage } | undefined} options
+ * @param {import("../runtime/reaction-runtime.js").ReactionRuntime | undefined} reactionRuntime
+ * @param {{ editHandleStore?: import("../../store.js").Store, outputVisibility?: import("../../chat-output-visibility.js").OutputVisibility }} sendOptions
+ * @returns {Promise<MessageHandle | undefined>}
+ */
+async function closeCompactToolActivityIfOpen(sock, chatId, options, reactionRuntime, sendOptions) {
+  if (!compactToolActivityByChat.has(chatId)) {
+    return undefined;
+  }
+  return sendCompactToolActivityEvent(sock, chatId, {
+    kind: "compact_tool_activity",
+    activity: { type: "close" },
+  }, options, reactionRuntime, sendOptions);
 }
 
 /**
@@ -1532,7 +1621,7 @@ function renderOutboundEvent(event) {
         ...(event.cwd !== undefined && { cwd: event.cwd }),
       };
     case "tool_call": {
-      return { source: "tool-call", content: renderToolPresentationContent(event.presentation) };
+      return { source: "tool-call", content: renderToolPresentationContent(buildToolPresentationFromToolCallEvent(event)) };
     }
     case "tool_activity":
       return { source: "tool-call", content: renderToolActivityContent(event.activity) };
@@ -1561,15 +1650,23 @@ function renderOutboundEvent(event) {
  * @param {RuntimeEventOutboundEvent} event
  * @param {{ quoted?: BaileysMessage } | undefined} options
  * @param {import("../runtime/reaction-runtime.js").ReactionRuntime | undefined} reactionRuntime
- * @param {{ editHandleStore?: import("../../store.js").Store }} [sendOptions]
+ * @param {{ editHandleStore?: import("../../store.js").Store, outputVisibility?: import("../../chat-output-visibility.js").OutputVisibility }} [sendOptions]
  * @returns {Promise<MessageHandle | undefined>}
  */
 async function sendRuntimeEvent(sock, chatId, event, options, reactionRuntime, sendOptions = {}) {
-  if (event.compact) {
+  const visibility = await resolveWhatsAppOutputVisibility(chatId, sendOptions);
+  if (!visibility.toolDetails) {
     const compactHandle = await sendCompactRuntimeEvent(sock, chatId, event, options, reactionRuntime, sendOptions);
     if (compactHandle) {
       return compactHandle;
     }
+    if (isCompactRuntimeProgressEvent(event.event)) {
+      return undefined;
+    }
+  }
+
+  if (!isCompactRuntimeProgressEvent(event.event)) {
+    await closeCompactToolActivityIfOpen(sock, chatId, options, reactionRuntime, sendOptions);
   }
 
   if (event.event.type === "file-read.started") {
@@ -1838,7 +1935,7 @@ export async function editWhatsAppMessageByHandle(sock, transportHandleId, newTe
  * @param {OutboundEvent} event
  * @param {{ quoted?: BaileysMessage } | undefined} options
  * @param {import("../runtime/reaction-runtime.js").ReactionRuntime | undefined} reactionRuntime
- * @param {{ editHandleStore?: import("../../store.js").Store }} [sendOptions]
+ * @param {{ editHandleStore?: import("../../store.js").Store, outputVisibility?: import("../../chat-output-visibility.js").OutputVisibility }} [sendOptions]
  * @returns {Promise<MessageHandle | undefined>}
  */
 export async function sendEvent(sock, chatId, event, options, reactionRuntime, sendOptions = {}) {
@@ -1848,6 +1945,7 @@ export async function sendEvent(sock, chatId, event, options, reactionRuntime, s
   if (event.kind === "compact_tool_activity") {
     return sendCompactToolActivityEvent(sock, chatId, event, options, reactionRuntime, sendOptions);
   }
+  await closeCompactToolActivityIfOpen(sock, chatId, options, reactionRuntime, sendOptions);
   const rendered = renderOutboundEvent(event);
   if (!rendered) {
     return undefined;
@@ -2014,7 +2112,7 @@ export async function sendBlocks(sock, chatId, source, content, options, reactio
   const transportHandleId = editHandle.id;
   /** @type {MessageInspectState | null} */
   let inspectState = event?.kind === "tool_call"
-    ? { kind: "tool", presentation: event.presentation }
+    ? { kind: "tool", presentation: buildToolPresentationFromToolCallEvent(event) }
     : null;
   let persistInspectText = false;
 

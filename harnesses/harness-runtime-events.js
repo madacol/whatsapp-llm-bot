@@ -211,7 +211,7 @@
  *   chatId?: string,
  *   type: "command.started" | "command.completed" | "command.failed",
  *   provider: HarnessRuntimeProvider,
- *   command: Parameters<Required<AgentIOHooks>["onCommand"]>[0],
+ *   command: { command: string, status: "started" | "completed" | "failed", output?: string },
  *   raw?: HarnessRuntimeRawEvent,
  * } & HarnessRuntimeEventEnvelope} HarnessRuntimeCommandEvent
  */
@@ -221,7 +221,7 @@
  *   chatId?: string,
  *   type: "file-read.started",
  *   provider: HarnessRuntimeProvider,
- *   fileRead: Parameters<Required<AgentIOHooks>["onFileRead"]>[0],
+ *   fileRead: { command: string, paths: string[] },
  *   raw?: HarnessRuntimeRawEvent,
  * } & HarnessRuntimeEventEnvelope} HarnessRuntimeFileReadEvent
  */

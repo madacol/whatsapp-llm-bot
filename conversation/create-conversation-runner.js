@@ -1,5 +1,4 @@
-import { CANCEL_COMMAND, formatChatSettingsCommand } from "../chat-commands.js";
-import { getChatAction, getChatActions, getAction } from "../actions.js";
+import { CANCEL_COMMAND, CHAT_SETTINGS_COMMAND, formatChatSettingsCommand } from "../chat-commands.js";
 import { getAgent } from "../agents.js";
 import { storeAndLinkHtml } from "../html-store.js";
 import {
@@ -35,15 +34,6 @@ import { defaultRestartGate } from "../restart-gate.js";
 const log = createLogger("conversation:runner");
 const PRESENCE_LEASE_TTL_MS = 20_000;
 const NO_LIVE_INPUT_TARGET = Object.freeze({ supportsLiveInput: false });
-/**
- * Type guard: checks that an action has a command string.
- * @param {Action} action
- * @returns {action is Action & { command: string }}
- */
-function hasCommand(action) {
-  return typeof action.command === "string";
-}
-
 /**
  * Type guard: checks that a content block is a text block.
  * @param {IncomingContentBlock} block
@@ -192,6 +182,57 @@ function createHarnessRuntimeTurnId(chatId, sequence) {
   return `${chatId}:${Date.now()}:${sequence}`;
 }
 
+/** @type {ReadonlyArray<{ command: string, actionName: string, parameters: Action["parameters"] }>} */
+const PRESERVED_ACTION_COMMANDS = Object.freeze([
+  {
+    command: CHAT_SETTINGS_COMMAND,
+    actionName: "chat_settings",
+    parameters: {
+      type: "object",
+      properties: {
+        setting: { type: "string" },
+        value: { type: "string" },
+      },
+    },
+  },
+  {
+    command: "setup",
+    actionName: "setup",
+    parameters: {
+      type: "object",
+      properties: {},
+    },
+  },
+  {
+    command: "restart",
+    actionName: "restart",
+    parameters: {
+      type: "object",
+      properties: {
+        mode: { type: "string", default: "" },
+      },
+    },
+  },
+  {
+    command: "clear",
+    actionName: "clear_conversation",
+    parameters: {
+      type: "object",
+      properties: {},
+    },
+  },
+]);
+
+/**
+ * @param {string} commandText
+ * @returns {{ command: string, actionName: string, parameters: Action["parameters"] } | null}
+ */
+function findPreservedActionCommand(commandText) {
+  return PRESERVED_ACTION_COMMANDS
+    .find((candidate) => commandText === candidate.command || commandText.startsWith(candidate.command + " "))
+    ?? null;
+}
+
 /**
  * @param {{ type: string } & Record<string, unknown>} event
  * @param {{ chatId: string, turnId: string, providerInstanceId: string }} activeTurn
@@ -313,7 +354,7 @@ function resolveProviderLiveInputTarget(harnessInstance) {
  * @typedef {{
  *   store: Store,
  *   llmClient: LlmClient,
- *   getActionsFn: typeof import("../actions.js").getActions,
+ *   getActionsFn?: typeof import("../actions.js").getActions,
  *   executeActionFn: typeof import("../actions.js").executeAction,
  *   transport?: ChatTransport,
  *   workspacePresentation?: WorkspacePresentationPort,
@@ -326,7 +367,7 @@ function resolveProviderLiveInputTarget(harnessInstance) {
  * @param {ConversationRunnerDeps} deps
  * @returns {{ handleMessage: (turn: ChatTurn) => Promise<void> }}
  */
-export function createConversationRunner({ store, llmClient, getActionsFn, executeActionFn, workspacePresentation, restartGate = defaultRestartGate }) {
+export function createConversationRunner({ store, llmClient, executeActionFn, workspacePresentation, restartGate = defaultRestartGate }) {
   const {
     addMessage,
     createChat,
@@ -422,13 +463,11 @@ export function createConversationRunner({ store, llmClient, getActionsFn, execu
    *   firstBlock: TextContentBlock,
    *   chatInfo: import("../store.js").ChatRow | undefined,
    *   context: ExecuteActionContext,
-   *   actions: Action[],
-   *   actionResolver: (name: string) => Promise<AppAction | null>,
    *   resolvedBinding: ResolvedChatBinding,
    * }} input
    * @returns {Promise<void>}
    */
-  async function handleCommandMessage({ turn, chatId, senderIds, content, firstBlock, chatInfo, context, actions, actionResolver, resolvedBinding }) {
+  async function handleCommandMessage({ turn, chatId, senderIds, content, firstBlock, chatInfo, context, resolvedBinding }) {
     const inputText = firstBlock.text.slice(1).trim();
     const commandText = inputText.toLowerCase();
 
@@ -457,12 +496,8 @@ export function createConversationRunner({ store, llmClient, getActionsFn, execu
       return;
     }
 
-    const commandActions = actions.filter(hasCommand);
-    const action = commandActions
-      .sort((a, b) => b.command.length - a.command.length)
-      .find((candidate) => commandText === candidate.command || commandText.startsWith(candidate.command + " "));
-
-    if (!action) {
+    const preservedCommand = findPreservedActionCommand(commandText);
+    if (!preservedCommand) {
       await context.reply(contentEvent("error", `Unknown command: ${commandText.split(" ")[0]}`));
       return;
     }
@@ -471,14 +506,14 @@ export function createConversationRunner({ store, llmClient, getActionsFn, execu
     const commandMessage = { role: "user", content };
     await addMessage(chatId, commandMessage, senderIds);
 
-    const argsText = inputText.slice(action.command.length).trim();
+    const argsText = inputText.slice(preservedCommand.command.length).trim();
     const args = argsText ? argsText.split(" ") : [];
-    const params = parseCommandArgs(args, action.parameters);
+    const params = parseCommandArgs(args, preservedCommand.parameters);
 
-    log.debug("executing", action.name, params);
+    log.debug("executing command", preservedCommand.actionName, params);
 
     try {
-      const { result, afterResponse } = await executeActionFn(action.name, context, params, { actionResolver, llmClient });
+      const { result, afterResponse } = await executeActionFn(preservedCommand.actionName, context, params, { llmClient });
 
       /** @type {MessageHandle | undefined} */
       let responseHandle;
@@ -922,25 +957,6 @@ export function createConversationRunner({ store, llmClient, getActionsFn, execu
     const harnessSelection = await resolveConversationHarnessSelection(chatInfo);
 
     const firstBlock = content.find(isTextBlock);
-    const globalActions = await getActionsFn();
-    const chatActions = await getChatActions(chatId);
-    const chatActionNames = new Set(chatActions.map((action) => action.name));
-    const enabledActions = chatInfo?.enabled_actions ?? [];
-    /** @type {Action[]} */
-    const actions = [
-      ...globalActions.filter((action) => !chatActionNames.has(action.name)),
-      ...chatActions,
-    ].filter((action) => !action.optIn || enabledActions.includes(action.name));
-
-    /** @param {string} name */
-    const actionResolver = async (name) => {
-      const chatAction = await getChatAction(chatId, name);
-      if (chatAction) {
-        return chatAction;
-      }
-      return getAction(name);
-    };
-
     if (isArchivedWorkspaceCodingRequest(resolvedBinding, firstBlock)) {
       await context.reply(contentEvent(
         "error",
@@ -958,8 +974,6 @@ export function createConversationRunner({ store, llmClient, getActionsFn, execu
         firstBlock,
         chatInfo,
         context,
-        actions,
-        actionResolver,
         resolvedBinding,
       });
       return null;

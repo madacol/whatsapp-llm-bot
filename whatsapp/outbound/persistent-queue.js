@@ -1,4 +1,5 @@
 import { sendEvent as sendOutboundEvent } from "./send-content.js";
+import { resolveOutputVisibility } from "../../chat-output-visibility.js";
 import { getOutboundQueuePersistDelayMs } from "../../whatsapp-outbound-queue-config.js";
 import { makeTextMessage } from "../message-payloads.js";
 import { enqueueWhatsAppOutbound } from "./queue-store.js";
@@ -96,6 +97,29 @@ async function wait(ms) {
 }
 
 /**
+ * @param {string} chatId
+ * @param {import("../../store.js").Store | undefined} store
+ * @returns {Promise<import("../../chat-output-visibility.js").OutputVisibility | undefined>}
+ */
+async function resolveQueuedOutputVisibility(chatId, store) {
+  const chat = await store?.getChat?.(chatId);
+  return chat ? resolveOutputVisibility(chat.output_visibility) : undefined;
+}
+
+/**
+ * @param {string} chatId
+ * @param {OutboundEvent} event
+ * @param {import("../../store.js").Store | undefined} store
+ * @returns {Promise<{ editHandleStore?: import("../../store.js").Store, outputVisibility?: import("../../chat-output-visibility.js").OutputVisibility }>}
+ */
+async function buildWhatsAppSendOptions(chatId, event, store) {
+  return {
+    editHandleStore: store,
+    ...(event.kind === "runtime_event" ? { outputVisibility: await resolveQueuedOutputVisibility(chatId, store) } : {}),
+  };
+}
+
+/**
  * @param {{
  *   getSocket: () => import("@whiskeysockets/baileys").WASocket | null,
  *   chatId: string,
@@ -126,7 +150,7 @@ export async function sendOrQueueWhatsAppEvent({ getSocket, chatId, event, react
   }
 
   try {
-    return await sendOutboundEvent(sock, chatId, event, undefined, reactionRuntime, { editHandleStore: store });
+    return await sendOutboundEvent(sock, chatId, event, undefined, reactionRuntime, await buildWhatsAppSendOptions(chatId, event, store));
   } catch (error) {
     if (!isRecoverableWhatsAppSendError(error)) {
       throw error;
@@ -156,7 +180,7 @@ async function queueEventAfterDebouncedRetry({ getSocket, chatId, event, reactio
   const sock = getSocket();
   if (sock) {
     try {
-      return await sendOutboundEvent(sock, chatId, event, undefined, reactionRuntime, { editHandleStore: store });
+      return await sendOutboundEvent(sock, chatId, event, undefined, reactionRuntime, await buildWhatsAppSendOptions(chatId, event, store));
     } catch (error) {
       if (!isRecoverableWhatsAppSendError(error)) {
         throw error;

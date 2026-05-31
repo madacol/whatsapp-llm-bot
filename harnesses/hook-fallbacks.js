@@ -66,10 +66,6 @@ export function wrapHooksWithFallbacks(rawHooks) {
     onToolResult: (/** @type {ToolContentBlock[]} */ blocks, /** @type {string} */ toolName, /** @type {PermissionFlags} */ permissions) =>
       safeHook("onToolResult", () => rawHooks.onToolResult(blocks, toolName, permissions), undefined),
     onToolError: (/** @type {string} */ error) => safeHook("onToolError", () => rawHooks.onToolError(error), undefined),
-    onCommand: (/** @type {{ command: string, status: "started" | "completed" | "failed", output?: string }} */ event) =>
-      safeHook("onCommand", () => rawHooks.onCommand(event), undefined),
-    onFileRead: (/** @type {{ command: string, paths: string[] }} */ event) =>
-      safeHook("onFileRead", () => rawHooks.onFileRead(event), undefined),
     onPlan: (/** @type {import("../plan-presentation.js").PlanPresentation} */ presentation) =>
       safeHook("onPlan", () => rawHooks.onPlan(presentation), undefined),
     onFileChange: (/** @type {{
