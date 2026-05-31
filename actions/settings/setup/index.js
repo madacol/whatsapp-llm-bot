@@ -6,7 +6,7 @@ import {
   getSelectableOptions,
   isMaster,
   setConfigValue,
-} from "../chatSettings/_service.js";
+} from "../../../chat-settings-service.js";
 
 /**
  * @typedef {{
@@ -160,7 +160,7 @@ export default /** @type {defineAction} */ ((x) => x)({
       ...applied,
       ...(notes.length > 0 ? ["", ...notes] : []),
       "",
-      `Use \`${formatChatSettingsCommand()}\` for advanced settings like prompt, readers, workspace, and action toggles.`,
+      `Use \`${formatChatSettingsCommand()}\` for advanced settings like prompt, readers, workspace, and output visibility.`,
       "Use `!clone <repository_url>` to clone a git repository into the current working directory.",
     ].join("\n");
   },

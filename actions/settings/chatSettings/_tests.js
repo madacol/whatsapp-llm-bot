@@ -321,23 +321,6 @@ export default [
       assert.ok(result.includes("openai/gpt-4o"), "should include media-to-text model");
       assert.ok(result.includes("image"), "should include media type");
     },
-    async function info_shows_enabled_opt_in_actions(action_fn, db) {
-      await seedConfigChat(db, "cs-info-8", { enabled_actions: ["test_opt"] });
-      const result = await action_fn(
-        { chatId: "cs-info-8", rootDb: db, senderIds: ["u1"], getIsAdmin: async () => false },
-        { setting: "" },
-      );
-      assert.ok(result.includes("test_opt"), "should include enabled opt-in action");
-    },
-    async function info_shows_none_when_no_opt_in_actions(action_fn, db) {
-      await seedConfigChat(db, "cs-info-9");
-      const result = await action_fn(
-        { chatId: "cs-info-9", rootDb: db, senderIds: ["u1"], getIsAdmin: async () => false },
-        { setting: "" },
-      );
-      assert.ok(result.includes("none"), "should show none for opt-in actions");
-    },
-
     // ── admin check for writes ──
     async function rejects_set_from_non_admin(action_fn, db) {
       await seedConfigChat(db, "cs-admin-1");
@@ -459,83 +442,6 @@ export default [
       );
       assert.ok(result.toLowerCase().includes("debug"));
       assert.ok(result.toLowerCase().includes("on"));
-    },
-
-    // ── actions (opt-in) ──
-    async function enables_opt_in_action(action_fn, db) {
-      await seedConfigChat(db, "cs-act-1");
-      const mockGetActions = async () => /** @type {Action[]} */ ([
-        { name: "test_opt", optIn: true },
-      ]);
-      const result = await action_fn(
-        { chatId: "cs-act-1", rootDb: db, getActions: mockGetActions },
-        { setting: "actions", value: "test_opt true" },
-      );
-      assert.ok(result.includes("enabled"));
-      const chat = await readRequiredConfig("cs-act-1");
-      assert.ok(chat.enabled_actions.includes("test_opt"));
-    },
-    async function disables_opt_in_action(action_fn, db) {
-      await seedConfigChat(db, "cs-act-2", { enabled_actions: ["test_opt"] });
-      const mockGetActions = async () => /** @type {Action[]} */ ([
-        { name: "test_opt", optIn: true },
-      ]);
-      const result = await action_fn(
-        { chatId: "cs-act-2", rootDb: db, getActions: mockGetActions },
-        { setting: "actions", value: "test_opt false" },
-      );
-      assert.ok(result.includes("disabled"));
-      const chat = await readRequiredConfig("cs-act-2");
-      assert.ok(!chat.enabled_actions.includes("test_opt"));
-    },
-    async function rejects_non_opt_in_action(action_fn, db) {
-      await seedConfigChat(db, "cs-act-3");
-      const mockGetActions = async () => /** @type {Action[]} */ ([
-        { name: "regular_action" },
-      ]);
-      const result = await action_fn(
-        { chatId: "cs-act-3", rootDb: db, getActions: mockGetActions },
-        { setting: "actions", value: "regular_action true" },
-      );
-      assert.ok(result.includes("not an opt-in action"));
-    },
-    async function rejects_unknown_action(action_fn, db) {
-      await seedConfigChat(db, "cs-act-4");
-      const mockGetActions = async () => /** @type {Action[]} */ ([]);
-      const result = await action_fn(
-        { chatId: "cs-act-4", rootDb: db, getActions: mockGetActions },
-        { setting: "actions", value: "nonexistent true" },
-      );
-      assert.ok(result.includes("not found"));
-    },
-    async function does_not_duplicate_on_double_enable(action_fn, db) {
-      await seedConfigChat(db, "cs-act-5", { enabled_actions: ["test_opt"] });
-      const mockGetActions = async () => /** @type {Action[]} */ ([
-        { name: "test_opt", optIn: true },
-      ]);
-      await action_fn(
-        { chatId: "cs-act-5", rootDb: db, getActions: mockGetActions },
-        { setting: "actions", value: "test_opt true" },
-      );
-      const chat = await readRequiredConfig("cs-act-5");
-      const count = chat.enabled_actions.filter(/** @param {string} a */ (a) => a === "test_opt").length;
-      assert.equal(count, 1);
-    },
-    async function shows_action_usage_when_missing_args(action_fn, db) {
-      await seedConfigChat(db, "cs-act-6");
-      const result = await action_fn(
-        { chatId: "cs-act-6", rootDb: db, getActions: async () => [] },
-        { setting: "actions", value: "just_one_arg" },
-      );
-      assert.ok(result.includes("Usage"));
-    },
-    async function gets_enabled_actions_list(action_fn, db) {
-      await seedConfigChat(db, "cs-act-7", { enabled_actions: ["test_opt"] });
-      const result = await action_fn(
-        { chatId: "cs-act-7", rootDb: db },
-        { setting: "action" },
-      );
-      assert.ok(result.includes("test_opt"));
     },
 
     // ── model role settings (coding_model, smart_model, etc.) ──

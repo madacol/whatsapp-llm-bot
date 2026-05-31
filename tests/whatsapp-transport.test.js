@@ -15,8 +15,8 @@ import { initStore } from "../store.js";
 import { createTestDb, createWAMessage } from "./helpers.js";
 import { contentEvent, textUpdate } from "../outbound-events.js";
 import { createRestartAction } from "../actions/admin/restart/index.js";
-import { createRestartAckStore } from "../actions/admin/restart/_restart-ack-store.js";
-import { deliverPendingRestartAck } from "../actions/admin/restart/_restart-ack-delivery.js";
+import { createRestartAckStore } from "../restart/restart-ack-store.js";
+import { deliverPendingRestartAck } from "../restart/restart-ack-delivery.js";
 import { sendOrQueueWhatsAppEvent } from "../whatsapp/outbound/persistent-queue.js";
 import { makeTextMessage } from "../whatsapp/message-payloads.js";
 

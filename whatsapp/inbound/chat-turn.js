@@ -310,6 +310,19 @@ function createPresenceLeaseController({
   };
 }
 
+/** @type {WeakMap<TurnIO, ReturnType<typeof createPresenceLeaseController>>} */
+const turnPresenceControllers = new WeakMap();
+
+/**
+ * End any WhatsApp-owned presence lease attached to a turn IO object.
+ * Kept out of TurnIO so app/conversation code does not depend on presence.
+ * @param {TurnIO} io
+ * @returns {Promise<void>}
+ */
+export async function finishTurnIo(io) {
+  await turnPresenceControllers.get(io)?.end();
+}
+
 /**
  * Create the message-scoped TurnIO functions.
  * @param {{
@@ -374,6 +387,15 @@ export function createTurnIo({
   }
 
   /**
+   * Ensure WhatsApp shows a working indicator before visible outbound work.
+   * Presence failures are transport hints only; they must not block delivery.
+   * @returns {Promise<void>}
+   */
+  async function markWorkingBeforeOutboundMessage() {
+    await presence.keepAlive().catch(() => {});
+  }
+
+  /**
    * Resolve the current socket when available, otherwise return null so the
    * outbound event can be persisted for replay after reconnect.
    * @returns {import('@whiskeysockets/baileys').WASocket | null}
@@ -390,8 +412,10 @@ export function createTurnIo({
   const selectMany = selectRuntime.createSelectMany(getSocket ?? sock, chatId);
   const confirm = confirmRuntime.createConfirm(getSocket ?? sock, chatId);
 
-  return {
+  /** @type {TurnIO} */
+  const io = {
     send: async (event) => {
+      await markWorkingBeforeOutboundMessage();
       const handle = await sendOrQueueWhatsAppEvent({
         getSocket: getSocketOrNull,
         chatId,
@@ -403,6 +427,7 @@ export function createTurnIo({
       return handle;
     },
     reply: async (event) => {
+      await markWorkingBeforeOutboundMessage();
       const handle = await sendOrQueueWhatsAppEvent({
         getSocket: getSocketOrNull,
         chatId,
@@ -430,15 +455,6 @@ export function createTurnIo({
         react: { text: emoji, key: message.key },
       });
     },
-    startPresence: async (ttlMs) => {
-      await presence.start(ttlMs);
-    },
-    keepPresenceAlive: async (ttlMs) => {
-      await presence.keepAlive(ttlMs);
-    },
-    endPresence: async () => {
-      await presence.end();
-    },
     prepareMediaRegistry: ({ chatId: registryChatId, mediaRegistry }) => {
       reattachHdDeferreds(registryChatId, mediaRegistry);
     },
@@ -454,6 +470,8 @@ export function createTurnIo({
       }
     },
   };
+  turnPresenceControllers.set(io, presence);
+  return io;
 }
 
 /**
@@ -583,7 +601,11 @@ export async function adaptIncomingMessage(
     return;
   }
 
-  await messageHandler(turn);
+  try {
+    await messageHandler(turn);
+  } finally {
+    await finishTurnIo(turn.io).catch(() => {});
+  }
 }
 
 /**
@@ -699,11 +721,20 @@ export async function adaptIncomingMessages(
   }
 
   if (turns.length === 1) {
-    await messageHandler(turns[0]);
+    try {
+      await messageHandler(turns[0]);
+    } finally {
+      await finishTurnIo(turns[0].io).catch(() => {});
+    }
     return;
   }
 
   for (const group of splitTurnsAtCommandBoundaries(turns)) {
-    await messageHandler(group.length === 1 ? group[0] : mergeTurns(group));
+    const turn = group.length === 1 ? group[0] : mergeTurns(group);
+    try {
+      await messageHandler(turn);
+    } finally {
+      await finishTurnIo(turn.io).catch(() => {});
+    }
   }
 }

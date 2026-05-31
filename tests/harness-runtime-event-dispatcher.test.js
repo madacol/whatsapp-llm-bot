@@ -52,19 +52,11 @@ describe("createHarnessRuntimeEventDispatcher", () => {
     const responses = [];
     /** @type {Array<{ cost: string, tokens: UsageTokens }>} */
     const usageEvents = [];
-    let composingCount = 0;
-    let pausedCount = 0;
 
     const dispatcher = createHarnessRuntimeEventDispatcher({
       provider: "pi",
       messages: [{ role: "user", content: [{ type: "text", text: "Ship it" }] }],
       hooks: {
-        onComposing: async () => {
-          composingCount += 1;
-        },
-        onPaused: async () => {
-          pausedCount += 1;
-        },
         onReasoning: async (event) => {
           reasoningEvents.push(event);
         },
@@ -119,8 +111,6 @@ describe("createHarnessRuntimeEventDispatcher", () => {
         cached: 2,
       },
     }]);
-    assert.equal(composingCount, 0);
-    assert.equal(pausedCount, 0);
   });
 
   it("preserves context window from earlier usage updates when final usage omits it", async () => {

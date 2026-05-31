@@ -70,9 +70,6 @@ function runtimeToolFromToolCall(toolCall) {
 /**
  * Build the AgentIOHooks wiring from a message context.
  * @param {Pick<ExecuteActionContext, "send" | "reply" | "select" | "confirm">} context
- * @param {() => Promise<void>} keepPresenceAlive
- * @param {() => Promise<void>} endPresence
- * @param {() => void} refreshPresenceLease
  * @param {string | null} cwd
  * @param {import("../chat-output-visibility.js").OutputVisibility} [visibility]
  * @param {(content: SendContent) => void} [recordDeliveredContent]
@@ -80,25 +77,17 @@ function runtimeToolFromToolCall(toolCall) {
  */
 export function buildAgentIoHooks(
   context,
-  keepPresenceAlive,
-  endPresence,
-  refreshPresenceLease,
   cwd,
   visibility = DEFAULT_OUTPUT_VISIBILITY,
   recordDeliveredContent,
 ) {
   /**
-   * Refresh the transport presence lease after an outbound progress message without
-   * delaying the next harness event. Codex streams events serially, so waiting
-   * on the lease refresh here would postpone the following tool-call display.
    * @template T
    * @param {() => Promise<T>} emit
    * @returns {Promise<T>}
    */
   async function emitWhileWorking(emit) {
-    const value = await emit();
-    refreshPresenceLease();
-    return value;
+    return emit();
   }
 
   const codexDisplayHooks = createCodexDisplayHooks({
@@ -128,8 +117,6 @@ export function buildAgentIoHooks(
   }
 
   return {
-    onComposing: keepPresenceAlive,
-    onPaused: endPresence,
     onReasoning: async (event) => {
       if (!visibility.thinking) {
         return;

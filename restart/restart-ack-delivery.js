@@ -1,10 +1,10 @@
-import { createLogger } from "../../../logger.js";
+import { createLogger } from "../logger.js";
 
 const RESTARTED_TEXT = "Restarted.";
 const log = createLogger("restart");
 
 /**
- * @param {import("./_restart-ack-store.js").RestartInterruptedTurn} turn
+ * @param {import("./restart-ack-store.js").RestartInterruptedTurn} turn
  * @returns {string}
  */
 function formatInterruptedTurnMessage(turn) {
@@ -27,7 +27,7 @@ function isUnavailableEditHandleError(error) {
 /**
  * Deliver the pending post-restart acknowledgement, if one exists.
  * @param {{
- *   store: import("./_restart-ack-store.js").RestartAckStore,
+ *   store: import("./restart-ack-store.js").RestartAckStore,
  *   editMessage: (input: { transportHandleId: string, text: string }) => Promise<void>,
  *   sendText: (chatId: string, text: string) => Promise<void>,
  *   recoverQueuedMessage?: (input: { chatId: string, queueId: number }) => MessageHandle | undefined,
