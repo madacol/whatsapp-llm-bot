@@ -67,6 +67,63 @@ function isRecord(value) {
 }
 
 /**
+ * @param {RuntimeEventOutboundEvent} event
+ * @returns {Record<string, unknown> | null}
+ */
+function getRawAcpSessionUpdate(event) {
+  const raw = event.event.raw;
+  if (!isRecord(raw) || raw.source !== "acp.jsonrpc" || raw.method !== "session/update") {
+    return null;
+  }
+  const payload = isRecord(raw.payload) ? raw.payload : null;
+  const update = isRecord(payload?.update) ? payload.update : null;
+  return update;
+}
+
+/**
+ * @param {Record<string, unknown>} update
+ * @returns {string | null}
+ */
+function getRawAcpReadLocationPath(update) {
+  if (update.kind !== "read") {
+    return null;
+  }
+  const locations = Array.isArray(update.locations) ? update.locations : [];
+  for (const location of locations) {
+    if (isRecord(location) && typeof location.path === "string" && location.path.length > 0) {
+      return location.path;
+    }
+  }
+  return null;
+}
+
+/**
+ * WhatsApp owns raw ACP presentation. Use the protocol payload when it carries
+ * richer display facts than the canonical runtime event.
+ * @param {Extract<RuntimeEventOutboundEvent["event"], { tool: unknown }>["tool"]} tool
+ * @param {RuntimeEventOutboundEvent} event
+ * @returns {Extract<RuntimeEventOutboundEvent["event"], { tool: unknown }>["tool"]}
+ */
+function buildWhatsAppRuntimeToolFromRawAcp(tool, event) {
+  const update = getRawAcpSessionUpdate(event);
+  if (!update) {
+    return tool;
+  }
+  const readPath = getRawAcpReadLocationPath(update);
+  if (readPath) {
+    return {
+      ...tool,
+      name: "Read",
+      arguments: {
+        ...tool.arguments,
+        file_path: readPath,
+      },
+    };
+  }
+  return tool;
+}
+
+/**
  * @typedef {{
  *   id: string,
  *   chatId: string,
@@ -840,12 +897,13 @@ async function sendRuntimeToolEvent(sock, chatId, event, options, reactionRuntim
   if (isNoopRuntimeTool(toolEvent.tool)) {
     return undefined;
   }
+  const displayTool = buildWhatsAppRuntimeToolFromRawAcp(toolEvent.tool, event);
 
   const status = toolEvent.type.split(".")[1];
   if (status !== "started" && status !== "updated" && status !== "completed" && status !== "failed") {
     return undefined;
   }
-  const summary = formatRuntimeToolSummary(toolEvent.tool, event.cwd);
+  const summary = formatRuntimeToolSummary(displayTool, event.cwd);
 
   if (status === "started") {
     const text = `${getRuntimeToolIcon(status)} ${summary}`;
@@ -1248,7 +1306,8 @@ async function sendCompactRuntimeEvent(sock, chatId, event, options, reactionRun
     }, options, reactionRuntime, sendOptions);
   }
   if (runtime.type === "tool.started" || runtime.type === "tool.completed" || runtime.type === "tool.failed") {
-    if (isNoopRuntimeTool(runtime.tool)) {
+    const displayTool = buildWhatsAppRuntimeToolFromRawAcp(runtime.tool, event);
+    if (isNoopRuntimeTool(displayTool)) {
       return undefined;
     }
     return sendCompactToolActivityEvent(sock, chatId, {
@@ -1258,9 +1317,9 @@ async function sendCompactRuntimeEvent(sock, chatId, event, options, reactionRun
         type: "tool",
         status: runtime.type === "tool.failed" ? "failed" : runtime.type === "tool.completed" ? "completed" : "started",
         toolCall: {
-          id: runtime.tool.id,
-          name: runtime.tool.name,
-          arguments: JSON.stringify(runtime.tool.arguments),
+          id: displayTool.id,
+          name: displayTool.name,
+          arguments: JSON.stringify(displayTool.arguments),
         },
       },
     }, options, reactionRuntime, sendOptions);
