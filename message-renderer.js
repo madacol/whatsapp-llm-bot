@@ -33,6 +33,7 @@ const log = createLogger("message-renderer");
  * @typedef {
  *   | { kind: "text", text: string, editable: boolean }
  *   | { kind: "image", image: Buffer, caption?: string, editable: boolean, hd?: boolean, debug?: AttachmentDebugInfo }
+ *   | { kind: "render_continuation", text: string }
  *   | { kind: "video", video: Buffer, mimetype: string, caption?: string, debug?: AttachmentDebugInfo }
  *   | { kind: "audio", audio: Buffer, mimetype: string, debug?: AttachmentDebugInfo }
  *   | { kind: "file", file: Buffer, mimetype: string, fileName: string, caption?: string, debug?: AttachmentDebugInfo }
@@ -206,31 +207,75 @@ function prependSourcePrefix(prefix, text) {
  *   caption?: string,
  *   prefix: string,
  *   truncatedLabel: string,
+ *   overflowMode?: "notice" | "ask" | "silent",
  *   instructions: SendInstruction[],
  * }} options
  * @returns {void}
  */
 function pushLimitedRenderedImages(images, options) {
-  const visibleImages = images.slice(0, MAX_RENDERED_IMAGES_PER_BLOCK);
-  for (let i = 0; i < visibleImages.length; i++) {
-    options.instructions.push({
-      kind: "image",
-      image: visibleImages[i],
-      ...(i === 0 && options.caption && { caption: prependSourcePrefix(options.prefix, options.caption) }),
-      editable: i === 0,
-    });
-  }
-  if (images.length <= visibleImages.length) {
+  const overflowMode = options.overflowMode ?? "notice";
+  if (overflowMode === "ask") {
+    pushRenderedImageBatchesWithPrompts(images, options);
     return;
   }
+
+  const visibleImages = pushRenderedImageBatch(images, 0, MAX_RENDERED_IMAGES_PER_BLOCK, options);
+  if (overflowMode === "silent" || images.length <= visibleImages) {
+    return;
+  }
+
   options.instructions.push({
     kind: "text",
     text: prependSourcePrefix(
       options.prefix,
-      `⚠️ ${options.truncatedLabel} truncated: showing ${visibleImages.length} of ${images.length} rendered images.`,
+      `⚠️ ${options.truncatedLabel} truncated: showing ${visibleImages} of ${images.length} rendered images.`,
     ),
     editable: false,
   });
+}
+
+/**
+ * @param {Buffer[]} images
+ * @param {number} start
+ * @param {number} count
+ * @param {{ caption?: string, prefix: string, instructions: SendInstruction[] }} options
+ * @returns {number}
+ */
+function pushRenderedImageBatch(images, start, count, options) {
+  const visibleImages = images.slice(start, start + count);
+  for (let i = 0; i < visibleImages.length; i++) {
+    const imageIndex = start + i;
+    options.instructions.push({
+      kind: "image",
+      image: visibleImages[i],
+      ...(imageIndex === 0 && options.caption && { caption: prependSourcePrefix(options.prefix, options.caption) }),
+      editable: imageIndex === 0,
+    });
+  }
+  return visibleImages.length;
+}
+
+/**
+ * @param {Buffer[]} images
+ * @param {{ caption?: string, prefix: string, truncatedLabel: string, instructions: SendInstruction[] }} options
+ * @returns {void}
+ */
+function pushRenderedImageBatchesWithPrompts(images, options) {
+  let renderedCount = 0;
+  while (renderedCount < images.length) {
+    renderedCount += pushRenderedImageBatch(images, renderedCount, MAX_RENDERED_IMAGES_PER_BLOCK, options);
+    if (renderedCount >= images.length) {
+      break;
+    }
+    const remainingCount = images.length - renderedCount;
+    options.instructions.push({
+      kind: "render_continuation",
+      text: prependSourcePrefix(
+        options.prefix,
+        `⚠️ ${options.truncatedLabel} rendered ${renderedCount} of ${images.length} images. Continue rendering the remaining ${remainingCount}? React 👍 to continue or 👎 to stop.`,
+      ),
+    });
+  }
 }
 
 /**
@@ -653,6 +698,7 @@ async function renderDiffBlock(block, prefix, instructions) {
       caption: block.caption,
       prefix,
       truncatedLabel: "Diff",
+      overflowMode: block.askToContinueRendering ? "ask" : "silent",
       instructions,
     });
   } catch (err) {
