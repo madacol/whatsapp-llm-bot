@@ -115,7 +115,7 @@ describe("createHarnessRunCoordinator", () => {
     assert.equal(coordinator.finishRun("chat-owner"), null);
   });
 
-  it("retries active live input instead of queueing a second turn when the harness is not ready yet", async () => {
+  it("retries active live input without starting a fallback turn when retry succeeds", async () => {
     /** @type {string[]} */
     const injected = [];
     let ready = false;
@@ -142,9 +142,36 @@ describe("createHarnessRunCoordinator", () => {
     await delay(10);
 
     assert.equal(started.status, "started");
-    assert.equal(followUp.status, "injected");
+    assert.equal(followUp.status, "buffered");
     assert.deepEqual(injected, ["follow-up"]);
     assert.equal(coordinator.finishRun("chat-4"), null);
+  });
+
+  it("returns a fallback turn when live input loses the race with turn completion", async () => {
+    const liveInputTarget = {
+      supportsLiveInput: true,
+      injectMessage: async () => false,
+    };
+
+    const coordinator = createHarnessRunCoordinator({ liveInputRetryDelayMs: 50 });
+    const started = await coordinator.beginRun({
+      turn: createTurn("chat-race", "first"),
+      userText: "first",
+      liveInputTarget,
+    });
+    coordinator.markRunActive("chat-race");
+    const followUp = await coordinator.beginRun({
+      turn: createTurn("chat-race", "s"),
+      userText: "s",
+    });
+
+    const nextTurn = coordinator.finishRun("chat-race");
+
+    assert.equal(started.status, "started");
+    assert.equal(followUp.status, "buffered");
+    assert.equal(nextTurn?.content[0]?.type, "text");
+    assert.equal(nextTurn?.content[0]?.type === "text" ? nextTurn.content[0].text : "", "s");
+    assert.equal(coordinator.finishRun("chat-race"), null);
   });
 
   it("returns the latest buffered turn after a non-live run finishes", async () => {
