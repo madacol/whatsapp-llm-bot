@@ -16,6 +16,7 @@
  *   chatId: string;
  *   text: string;
  *   target: LiveInputTarget;
+ *   turn: ChatTurn;
  * }} PendingLiveInput
  */
 
@@ -131,11 +132,12 @@ export function createHarnessRunCoordinator(options = {}) {
    * @param {string} chatId
    * @param {PendingRunState} pending
    * @param {string} text
+   * @param {ChatTurn} turn
    * @param {LiveInputTarget} target
    * @returns {void}
    */
-  function queueLiveInputRetry(chatId, pending, text, target) {
-    pending.pendingLiveInputs.push({ chatId, text, target });
+  function queueLiveInputRetry(chatId, pending, text, turn, target) {
+    pending.pendingLiveInputs.push({ chatId, text, target, turn });
     scheduleLiveInputRetry(chatId, pending);
   }
 
@@ -161,8 +163,8 @@ export function createHarnessRunCoordinator(options = {}) {
           if (await tryInjectLiveInput(chatId, userText, pending.liveInputTarget)) {
             return { status: "injected" };
           }
-          queueLiveInputRetry(chatId, pending, userText, pending.liveInputTarget);
-          return { status: "injected" };
+          queueLiveInputRetry(chatId, pending, userText, turn, pending.liveInputTarget);
+          return { status: "buffered" };
         }
         if (pending.isActive) {
           pending.queuedTurns.push(turn);
@@ -218,7 +220,9 @@ export function createHarnessRunCoordinator(options = {}) {
         return null;
       }
 
-      const nextTurn = pending.queuedTurns.at(-1) ?? null;
+      const nextTurn = pending.queuedTurns.at(-1)
+        ?? pending.pendingLiveInputs.at(-1)?.turn
+        ?? null;
       if (!nextTurn) {
         clearLiveInputRetry(pending);
         pendingRuns.delete(chatId);
