@@ -1521,22 +1521,31 @@ Second block:
     assert.equal(diffBlock.caption, "Update *plain.txt*");
   });
 
-  it("renders old/new file-change text as a lazy diff when no prebuilt diff is present", () => {
+  it("renders old/new file-change text as a bounded contextual diff when no prebuilt diff is present", () => {
+    const oldText = Array.from({ length: 30 }, (_, index) => `line ${index + 1}`);
+    const newText = [...oldText];
+    newText[19] = "changed line 20";
     const content = renderFileChangeContent({
       kind: "file_change",
       path: "/tmp/plain.txt",
       cwd: "/tmp",
       changeKind: "update",
-      oldText: "before\nline 2\n",
-      newText: "after\nline 2\n",
+      oldText: `${oldText.join("\n")}\n`,
+      newText: `${newText.join("\n")}\n`,
     });
 
     assert.ok(Array.isArray(content), "Expected diff content blocks");
     const diffBlock = /** @type {DiffContentBlock} */ (content[0]);
     assert.equal(diffBlock.type, "diff");
-    assert.equal(diffBlock.oldStr, "before\nline 2\n");
-    assert.equal(diffBlock.newStr, "after\nline 2\n");
-    assert.equal(diffBlock.diffText, undefined);
+    assert.equal(diffBlock.oldStr, "");
+    assert.equal(diffBlock.newStr, "");
+    assert.match(diffBlock.diffText ?? "", /@@ -12,17 \+12,17 @@/);
+    assert.match(diffBlock.diffText ?? "", / line 12/);
+    assert.match(diffBlock.diffText ?? "", / line 28/);
+    assert.match(diffBlock.diffText ?? "", /-line 20/);
+    assert.match(diffBlock.diffText ?? "", /\+changed line 20/);
+    assert.doesNotMatch(diffBlock.diffText ?? "", / line 11/);
+    assert.doesNotMatch(diffBlock.diffText ?? "", / line 29/);
     assert.equal(diffBlock.caption, "Update *plain.txt*");
   });
 

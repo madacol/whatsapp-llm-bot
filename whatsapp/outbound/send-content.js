@@ -2,6 +2,7 @@ import { generateMessageIDV2, generateWAMessage, generateWAMessageFromContent, p
 import { randomBytes } from "node:crypto";
 import { createLogger } from "../../logger.js";
 import { parseToolArgs } from "../../agent-io-defaults.js";
+import { buildContextualUnifiedDiff } from "../../code-image-renderer.js";
 import { DEFAULT_OUTPUT_VISIBILITY, resolveOutputVisibility } from "../../chat-output-visibility.js";
 import { renderBlocks } from "../../message-renderer.js";
 import { formatPlanPresentationText } from "../../plan-presentation.js";
@@ -1608,8 +1609,9 @@ export function renderFileChangeContent(event) {
   if (typeof event.oldText === "string" || typeof event.newText === "string") {
     return [{
       type: "diff",
-      oldStr: event.oldText ?? "",
-      newStr: event.newText ?? "",
+      oldStr: "",
+      newStr: "",
+      diffText: buildContextualUnifiedDiff(event.oldText ?? "", event.newText ?? ""),
       language: langFromPath(event.path) || "text",
       caption: captionLines.join("\n"),
     }];
