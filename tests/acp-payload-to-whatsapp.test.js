@@ -453,6 +453,28 @@ describe("ACP payload to WhatsApp socket vertical slices", () => {
     assert.equal(flushedMessages[3]?.edit, undefined);
   });
 
+  it("renders ACP read tool locations in compact WhatsApp progress", async () => {
+    const { sent, trace } = await observeAcpPayloadSliceToBaileys([
+      {
+        sessionId: "s1",
+        update: {
+          sessionUpdate: "tool_call",
+          toolCallId: "read-real-shape",
+          title: "Read file",
+          kind: "read",
+          status: "in_progress",
+          locations: [{ path: "/repo/src/app.js" }],
+        },
+      },
+    ], {
+      chatId: "acp-payload-read-location@s.whatsapp.net",
+      workdir: "/repo",
+    });
+
+    assert.deepEqual(trace.runtimeEvents.map((event) => event.type), ["tool.started"]);
+    assert.equal(sent[0]?.msg.text, "🔧 *Read*  `src/app.js`");
+  });
+
   it("smoke-tests a real ACP mock process through adapter events into Baileys output", async () => {
     const { result, sent, trace } = await runAcpMockProcessToWhatsApp();
     const eventTypes = trace.adapterEvents.map((event) => event.type);
