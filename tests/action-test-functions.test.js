@@ -44,8 +44,8 @@ describe("action test_functions", () => {
 
 /**
  * The action unit fixtures use one shared test DB as both the root catalog DB
- * and the current chat DB. Production code receives those as separate semantic
- * roles from executeAction().
+ * and the current chat DB. Legacy action callers received those as separate
+ * semantic roles.
  * @param {Function} actionFn
  * @returns {Function}
  */

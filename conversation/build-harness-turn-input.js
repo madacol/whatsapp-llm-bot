@@ -137,8 +137,5 @@ export async function buildHarnessTurnInput({
     messages,
     externalInstructions,
     runConfig,
-    ...(context.acpExtensionRequestHandlers
-      ? { extensionRequestHandlers: context.acpExtensionRequestHandlers }
-      : {}),
   };
 }

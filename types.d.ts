@@ -391,9 +391,6 @@ type MessageHandle = {
   setInspect: (inspect: MessageInspectState | null) => void;
 };
 
-type AcpClientRequestHandler = (message: Record<string, unknown>) => Promise<unknown> | unknown;
-type AcpClientNotificationHandler = (message: Record<string, unknown>) => Promise<void> | void;
-
 /** An option for `select()`: either a plain string or an object with id and label. */
 type SelectOption = string | { id: string; label: string };
 
@@ -437,7 +434,6 @@ type TurnIO = {
   confirm: (message: string, hooks?: ConfirmHooks) => Promise<boolean>;
   react: (emoji: string) => Promise<void>;
   getIsAdmin: () => Promise<boolean>;
-  acpExtensionRequestHandlers?: Map<string, AcpClientRequestHandler>;
   prepareMediaRegistry?: (input: {
     chatId: string;
     messages: Message[];
@@ -586,7 +582,6 @@ type ExecuteActionContext = {
   select: (question: string, options: SelectOption[], config?: SelectConfig) => Promise<string>;
   selectMany?: (question: string, options: SelectOption[], config?: SelectManyConfig) => Promise<SelectManyResult>;
   confirm: (message: string, hooks?: ConfirmHooks) => Promise<boolean>;
-  acpExtensionRequestHandlers?: Map<string, AcpClientRequestHandler>;
   prepareMediaRegistry?: (input: {
     chatId: string;
     messages: Message[];
@@ -697,8 +692,7 @@ type ActionResultValue = string | {} | HtmlContent | ToolContentBlock[];
 /**
  * Unified action return type. Actions that need to override autoContinue set the field;
  * otherwise it inherits from the action's permissions.
- * For backward compat, action_fn may still return a bare ActionResultValue;
- * executeAction normalizes it into this shape.
+ * For backward compat, action_fn may still return a bare ActionResultValue.
  */
 type ActionResult = {
   result: ActionResultValue;
@@ -918,8 +912,6 @@ type HarnessTurnInput = {
   resumeCursor?: string | null;
   runConfig?: HarnessRunConfig;
   hooks?: AgentIOHooks;
-  extensionRequestHandlers?: Map<string, AcpClientRequestHandler>;
-  extensionNotificationHandlers?: Map<string, AcpClientNotificationHandler>;
 };
 
 type HarnessAdapterCreateInput = {

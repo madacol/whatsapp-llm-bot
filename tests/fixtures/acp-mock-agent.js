@@ -206,7 +206,6 @@ const promptScenarios = [
   { match: "permission", handle: handlePermissionPrompt },
   { match: "elicitation", handle: handleElicitationPrompt },
   { match: "unknown extension", handle: handleUnknownExtensionPrompt },
-  { match: "whatsapp actions", handle: handleWhatsAppActionsPrompt },
   { match: "terminal", handle: handleTerminalPrompt },
   { match: "fs write", handle: handleFsWritePrompt },
   { match: "fs update", handle: handleFsUpdatePrompt },
@@ -374,32 +373,6 @@ async function handleUnknownExtensionPrompt(message) {
     value: true,
   });
   notifyText(JSON.stringify(response));
-  endPrompt(message);
-}
-
-/**
- * @param {Record<string, unknown>} message
- * @returns {Promise<void>}
- */
-async function handleWhatsAppActionsPrompt(message) {
-  const sent = await request("madabot/whatsapp/send", {
-    sessionId,
-    text: "private send",
-  });
-  await request("madabot/whatsapp/edit", {
-    sessionId,
-    handleId: sent?.handleId,
-    text: "private edit",
-  });
-  await request("madabot/whatsapp/reply", {
-    sessionId,
-    text: "private reply",
-  });
-  await request("madabot/whatsapp/react", {
-    sessionId,
-    emoji: "✅",
-  });
-  notifyText(JSON.stringify(sent));
   endPrompt(message);
 }
 

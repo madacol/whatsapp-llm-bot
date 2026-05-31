@@ -5,7 +5,6 @@ import { applyHdInboundLifecycle } from "./hd-image-lifecycle.js";
 import { getDirectMessageText, getMessageContent } from "./message-content.js";
 import { sendOrQueueWhatsAppEvent } from "../outbound/persistent-queue.js";
 import { createReactionRuntime } from "../runtime/reaction-runtime.js";
-import { createWhatsAppAcpExtensionRequestHandlers } from "../acp-extension-requests.js";
 
 const DEFAULT_PRESENCE_LEASE_TTL_MS = 20_000;
 const WHATSAPP_PRESENCE_PULSE_INTERVAL_MS = 8_000;
@@ -456,11 +455,6 @@ export function createTurnIo({
         react: { text: emoji, key: message.key },
       });
     },
-    acpExtensionRequestHandlers: createWhatsAppAcpExtensionRequestHandlers({
-      send: async (event) => io.send(event),
-      reply: async (event) => io.reply(event),
-      react: async (emoji) => io.react(emoji),
-    }),
     prepareMediaRegistry: ({ chatId: registryChatId, mediaRegistry }) => {
       reattachHdDeferreds(registryChatId, mediaRegistry);
     },

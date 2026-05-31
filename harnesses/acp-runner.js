@@ -34,8 +34,6 @@ import { matchProtectedPath, requestProtectedPathApproval, restoreProtectedPath 
  *   dispatchRuntimeEventsToHooks?: boolean,
  *   requestDecision?: (request: { id: string, title: string, labels: string[], descriptions: string[] }) => Promise<string | null>,
  *   userInputDecision?: (request: import("./harness-runtime-events.js").HarnessRuntimeUserInputRequest) => Promise<unknown>,
- *   extensionRequestHandlers?: Map<string, (message: Record<string, unknown>) => Promise<unknown> | unknown>,
- *   extensionNotificationHandlers?: Map<string, (message: Record<string, unknown>) => Promise<void> | void>,
  *   onActiveRun?: (run: { connection: Awaited<ReturnType<typeof openAcpConnection>>, sessionId: string | null, capabilities: Record<string, unknown> }) => void | (() => void),
  * }} AcpRunInput
  */
@@ -289,29 +287,24 @@ async function assertSandboxAccess(input) {
  *   emitRuntimeEvent: (event: import("./harness-runtime-events.js").HarnessRuntimeEvent) => Promise<void>,
  *   requestDecision?: (request: { id: string, title: string, labels: string[], descriptions: string[] }) => Promise<string | null>,
  *   userInputDecision?: (request: import("./harness-runtime-events.js").HarnessRuntimeUserInputRequest) => Promise<unknown>,
- *   extensionRequestHandlers?: Map<string, (message: Record<string, unknown>) => Promise<unknown> | unknown>,
- *   extensionNotificationHandlers?: Map<string, (message: Record<string, unknown>) => Promise<void> | void>,
  *   approvedProtectedPaths?: Set<string>,
  * }} options
  */
 function createAcpClientRequestHandler(options) {
   const terminals = createAcpTerminalManager(options);
   /** @type {Map<string, (message: Record<string, unknown>) => Promise<unknown> | unknown>} */
-  const requestHandlers = new Map([
-    ["session/request_permission", (message) => handleAcpPermissionRequest(message, options)],
-    ["elicitation/create", (message) => handleAcpElicitationCreate(message, options)],
-    ["fs/read_text_file", (message) => handleAcpReadTextFile(message, options)],
-    ["fs/write_text_file", (message) => handleAcpWriteTextFile(message, options)],
-    ["terminal/create", (message) => terminals.create(message)],
-    ["terminal/output", (message) => terminals.output(message)],
-    ["terminal/wait_for_exit", (message) => terminals.waitForExit(message)],
-    ["terminal/kill", (message) => terminals.kill(message)],
-    ["terminal/release", (message) => terminals.release(message)],
-    ...(options.extensionRequestHandlers ? [...options.extensionRequestHandlers.entries()] : []),
-  ]);
+  const requestHandlers = new Map();
+  requestHandlers.set("session/request_permission", (message) => handleAcpPermissionRequest(message, options));
+  requestHandlers.set("elicitation/create", (message) => handleAcpElicitationCreate(message, options));
+  requestHandlers.set("fs/read_text_file", (message) => handleAcpReadTextFile(message, options));
+  requestHandlers.set("fs/write_text_file", (message) => handleAcpWriteTextFile(message, options));
+  requestHandlers.set("terminal/create", (message) => terminals.create(message));
+  requestHandlers.set("terminal/output", (message) => terminals.output(message));
+  requestHandlers.set("terminal/wait_for_exit", (message) => terminals.waitForExit(message));
+  requestHandlers.set("terminal/kill", (message) => terminals.kill(message));
+  requestHandlers.set("terminal/release", (message) => terminals.release(message));
   const router = createAcpExtensionRouter({
     requestHandlers,
-    notificationHandlers: options.extensionNotificationHandlers,
     emitRuntimeEvent: options.emitRuntimeEvent,
     createRawPayload: createAcpRawPayload,
   });
@@ -1264,8 +1257,6 @@ export async function startAcpRun(input) {
     emitRuntimeEvent,
     requestDecision: input.requestDecision,
     userInputDecision: input.userInputDecision,
-    extensionRequestHandlers: input.extensionRequestHandlers,
-    extensionNotificationHandlers: input.extensionNotificationHandlers,
     approvedProtectedPaths,
   });
   const { connection, capabilities } = await openInitializedAcpConnection(input, handleRequest);
@@ -1278,7 +1269,6 @@ export async function startAcpRun(input) {
   let unregisterActiveRun = undefined;
 
   const extensionRouter = createAcpExtensionRouter({
-    notificationHandlers: input.extensionNotificationHandlers,
     emitRuntimeEvent,
     createRawPayload: createAcpRawPayload,
   });
