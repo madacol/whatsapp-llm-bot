@@ -21,6 +21,7 @@ import { sendImageHD } from "../../whatsapp-hd-media.js";
 
 /** Delay between relaying each image in an album so WhatsApp groups them. */
 const ALBUM_RELAY_DELAY_MS = 500;
+const RENDER_CONTINUATION_TIMEOUT_MS = 30 * 60 * 1000;
 const WHATSAPP_EDIT_HANDLE_TTL_MS = 14 * 60 * 1000;
 const log = createLogger("whatsapp:outbound");
 /** @type {Map<string, WhatsAppEditHandleRecord>} */
@@ -1603,6 +1604,7 @@ export function renderFileChangeContent(event) {
       diffText: stripUnifiedDiffFileHeaders(event.diff),
       language: langFromPath(event.path) || "text",
       caption: captionLines.join("\n"),
+      ...(event.source === "snapshot" && { askToContinueRendering: true }),
     }];
   }
 
@@ -1614,6 +1616,7 @@ export function renderFileChangeContent(event) {
       diffText: buildContextualUnifiedDiff(event.oldText ?? "", event.newText ?? ""),
       language: langFromPath(event.path) || "text",
       caption: captionLines.join("\n"),
+      ...(event.source === "snapshot" && { askToContinueRendering: true }),
     }];
   }
 
@@ -1995,13 +1998,14 @@ export async function sendBlocks(sock, chatId, source, content, options, reactio
 
   /**
    * @param {import("../../message-renderer.js").SendInstruction} instruction
-   * @returns {Promise<void>}
+   * @returns {Promise<boolean>}
    */
   async function sendInstruction(instruction) {
     /** @type {import('@whiskeysockets/baileys').WAMessage | undefined} */
     let sent;
+    const isAttachmentInstruction = instruction.kind !== "text" && instruction.kind !== "render_continuation";
 
-    if (instruction.kind !== "text") {
+    if (isAttachmentInstruction) {
       log.info("Sending attachment instruction", summarizeAttachmentInstruction(instruction, chatId));
     }
 
@@ -2014,6 +2018,9 @@ export async function sendBlocks(sock, chatId, source, content, options, reactio
             lastSentIsImage = false;
           }
           break;
+        case "render_continuation":
+          sent = await sock.sendMessage(chatId, makeTextMessage(instruction.text), options);
+          return waitForRenderContinuationDecision(reactionRuntime, sent?.key);
         case "image":
           if (instruction.hd) {
             sent = await sendImageHD(sock, chatId, instruction.image, instruction.caption, options);
@@ -2049,7 +2056,7 @@ export async function sendBlocks(sock, chatId, source, content, options, reactio
           break;
       }
     } catch (error) {
-      if (instruction.kind !== "text") {
+      if (isAttachmentInstruction) {
         log.error("Attachment instruction send failed", {
           ...summarizeAttachmentInstruction(instruction, chatId),
           error: formatErrorMessage(error),
@@ -2058,17 +2065,20 @@ export async function sendBlocks(sock, chatId, source, content, options, reactio
       throw error;
     }
 
-    if (instruction.kind !== "text") {
+    if (isAttachmentInstruction) {
       log.info("Sent attachment instruction", {
         ...summarizeAttachmentInstruction(instruction, chatId),
         messageId: sent?.key?.id,
       });
     }
+    return true;
   }
 
   if (instructions.filter((instruction) => instruction.kind === "image").length < 2) {
     for (const instruction of instructions) {
-      await sendInstruction(instruction);
+      if (!await sendInstruction(instruction)) {
+        break;
+      }
     }
   } else {
     /**
@@ -2111,7 +2121,9 @@ export async function sendBlocks(sock, chatId, source, content, options, reactio
         continue;
       }
 
-      await sendInstruction(segment.kind === "images" ? segment.items[0] : segment.instr);
+      if (!await sendInstruction(segment.kind === "images" ? segment.items[0] : segment.instr)) {
+        break;
+      }
     }
   }
 
@@ -2175,4 +2187,38 @@ export async function sendBlocks(sock, chatId, source, content, options, reactio
   }
 
   return handle;
+}
+
+/**
+ * @param {import("../runtime/reaction-runtime.js").ReactionRuntime | undefined} reactionRuntime
+ * @param {import('@whiskeysockets/baileys').WAMessageKey | undefined} promptKey
+ * @returns {Promise<boolean>}
+ */
+function waitForRenderContinuationDecision(reactionRuntime, promptKey) {
+  const promptKeyId = promptKey?.id;
+  if (!reactionRuntime || typeof promptKeyId !== "string") {
+    return Promise.resolve(false);
+  }
+
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => {
+      unsubscribe();
+      resolve(false);
+    }, RENDER_CONTINUATION_TIMEOUT_MS);
+    timer.unref?.();
+
+    const unsubscribe = reactionRuntime.subscribe(promptKeyId, (emoji) => {
+      if (emoji.startsWith("👍") || emoji.startsWith("✅")) {
+        clearTimeout(timer);
+        unsubscribe();
+        resolve(true);
+        return;
+      }
+      if (emoji.startsWith("👎") || emoji.startsWith("❌")) {
+        clearTimeout(timer);
+        unsubscribe();
+        resolve(false);
+      }
+    });
+  });
 }

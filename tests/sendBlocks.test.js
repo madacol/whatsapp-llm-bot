@@ -94,6 +94,32 @@ function createMockSock() {
   return { sock, sent, relayed };
 }
 
+/**
+ * @param {() => boolean} predicate
+ * @returns {Promise<void>}
+ */
+async function waitFor(predicate) {
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    if (predicate()) {
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  assert.fail("Timed out waiting for condition");
+}
+
+/**
+ * @returns {string}
+ */
+function buildVeryLargeDiffText() {
+  const diffLines = ["@@ -1,320 +1,320 @@"];
+  for (let index = 0; index < 320; index += 1) {
+    diffLines.push(`-const oldValue${index} = ${index};`);
+    diffLines.push(`+const newValue${index} = ${index + 1};`);
+  }
+  return diffLines.join("\n");
+}
+
 describe("sendEvent – sub-agent messages", () => {
   it("renders sub-agent messages with their own header", async () => {
     const { sock, sent } = createMockSock();
@@ -1463,17 +1489,12 @@ Second block:
     }
   });
 
-  it("limits very large diff blocks to a bounded number of rendered images", async () => {
-    const diffLines = ["@@ -1,320 +1,320 @@"];
-    for (let index = 0; index < 320; index += 1) {
-      diffLines.push(`-const oldValue${index} = ${index};`);
-      diffLines.push(`+const newValue${index} = ${index + 1};`);
-    }
+  it("limits very large non-snapshot diff blocks without a truncation prompt", async () => {
     const { sock, sent, relayed } = createMockSock();
 
     await sendBlocks(sock, "test-chat", "tool-call", [{
       type: "diff",
-      diffText: diffLines.join("\n"),
+      diffText: buildVeryLargeDiffText(),
       language: "javascript",
       caption: "Update *huge.js*",
     }]);
@@ -1483,9 +1504,53 @@ Second block:
     assert.equal(imageMessages.length, MAX_RENDERED_IMAGES_PER_BLOCK);
     const firstImage = /** @type {{ imageMessage?: { caption?: string } }} */ (imageMessages[0]?.msg ?? {});
     assert.match(String(firstImage.imageMessage?.caption ?? ""), /Update \*huge\.js\*/);
+    assert.equal(textMessages.length, 0, JSON.stringify(sent));
+  });
+
+  it("asks before continuing very large snapshot diff rendering", async () => {
+    const { sock, sent, relayed } = createMockSock();
+    const reactionRuntime = createReactionRuntime();
+    const sendPromise = sendEvent(sock, "test-chat", runtimeFileChangeEvent({
+      path: "/tmp/huge.js",
+      cwd: "/tmp",
+      source: "snapshot",
+      changeKind: "update",
+      diff: [
+        "--- a/huge.js",
+        "+++ b/huge.js",
+        buildVeryLargeDiffText(),
+      ].join("\n"),
+    }), undefined, reactionRuntime);
+
+    await waitFor(() => sent.some((entry) => /Continue rendering/.test(String(entry.msg.text ?? ""))));
+    const prompt = sent.find((entry) => /Continue rendering/.test(String(entry.msg.text ?? "")));
+    assert.match(String(prompt?.msg.text ?? ""), /Diff rendered 5 of \d+ images/);
+    assert.match(String(prompt?.msg.text ?? ""), /React 👍 to continue or 👎 to stop/);
+    assert.equal(
+      relayed.filter((entry) => entry.msg.imageMessage != null).length,
+      MAX_RENDERED_IMAGES_PER_BLOCK,
+    );
+
+    reactionRuntime.handleReactions([{
+      key: { id: "msg-1", remoteJid: "test-chat" },
+      reaction: { text: "👍" },
+      senderId: "user-1",
+    }]);
+    await waitFor(() => sent.filter((entry) => /Continue rendering/.test(String(entry.msg.text ?? ""))).length >= 2);
+    reactionRuntime.handleReactions([{
+      key: { id: "msg-2", remoteJid: "test-chat" },
+      reaction: { text: "👎" },
+      senderId: "user-1",
+    }]);
+    await sendPromise;
+
     assert.ok(
-      textMessages.some((entry) => /Diff truncated: showing 5 of \d+ rendered images/.test(String(entry.msg.text))),
-      `Expected truncation notice, got ${JSON.stringify(sent)}`,
+      relayed.filter((entry) => entry.msg.imageMessage != null).length > MAX_RENDERED_IMAGES_PER_BLOCK,
+      "Expected snapshot continuation to render more images after approval",
+    );
+    assert.equal(
+      sent.some((entry) => /Diff truncated/.test(String(entry.msg.text ?? ""))),
+      false,
     );
   });
 
