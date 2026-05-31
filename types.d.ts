@@ -81,7 +81,6 @@ type DiffContentBlock = {
   newStr: string;
   diffText?: string;
   caption?: string;
-  askToContinueRendering?: boolean;
 };
 
 /**
