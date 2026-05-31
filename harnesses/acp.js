@@ -280,6 +280,8 @@ export function createAcpHarness(options = {}) {
               sessionId,
               runConfig: turn.runConfig,
               hooks: turn.hooks,
+              extensionRequestHandlers: turn.extensionRequestHandlers,
+              extensionNotificationHandlers: turn.extensionNotificationHandlers,
               dispatchRuntimeEventsToHooks: false,
               signal: abortController.signal,
               onActiveRun: ({ connection, sessionId, capabilities }) => {
