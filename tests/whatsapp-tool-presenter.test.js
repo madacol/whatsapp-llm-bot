@@ -16,6 +16,10 @@ describe("WhatsApp tool presenter", () => {
       "*Read*  `src/app.js`",
     );
     assert.equal(
+      formatSdkToolCall("Read", { file_path: "/repo/src/app.js", offset: 10, limit: 3 }, "/repo"),
+      "*Read*  `src/app.js`  *10-12*",
+    );
+    assert.equal(
       formatSdkToolCall("Grep", { pattern: "needle", path: "/repo/src" }, "/repo"),
       "*Search*  `needle` in *src*",
     );

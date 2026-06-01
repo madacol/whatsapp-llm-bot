@@ -475,6 +475,33 @@ describe("ACP payload to WhatsApp socket vertical slices", () => {
     assert.equal(sent[0]?.msg.text, "🔧 *Read*  `src/app.js`");
   });
 
+  it("keeps ACP read line ranges from raw tool input in compact WhatsApp progress", async () => {
+    const { sent, trace } = await observeAcpPayloadSliceToBaileys([
+      {
+        sessionId: "s1",
+        update: {
+          sessionUpdate: "tool_call",
+          toolCallId: "read-real-shape-range",
+          title: "Read file",
+          kind: "read",
+          status: "in_progress",
+          rawInput: {
+            path: "/repo/src/app.js",
+            line: 10,
+            limit: 3,
+          },
+          locations: [{ path: "/repo/src/app.js" }],
+        },
+      },
+    ], {
+      chatId: "acp-payload-read-location-range@s.whatsapp.net",
+      workdir: "/repo",
+    });
+
+    assert.deepEqual(trace.runtimeEvents.map((event) => event.type), ["tool.started"]);
+    assert.equal(sent[0]?.msg.text, "🔧 *Read*  `src/app.js`  *10-12*");
+  });
+
   it("adds ACP read line ranges from completed raw output", async () => {
     const { sent, trace } = await observeAcpPayloadSliceToBaileys([
       {
