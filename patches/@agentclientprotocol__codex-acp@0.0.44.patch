@@ -2,6 +2,22 @@ diff --git a/dist/index.js b/dist/index.js
 index 1b1f5d508f39ec47ff1826516f9c106a02004cf9..8765731a0ae5c312d589ce22e33d00e332f10b2a 100755
 --- a/dist/index.js
 +++ b/dist/index.js
+@@ -17381,12 +17381,14 @@ function createCommandActionEvent(id, status, cwd, commandAction) {
+     };
+   } else if (commandAction.type === "listFiles") {
+     const title = commandAction.path ? `List files in '${commandAction.path}'` : "List files";
++    const locationPath = path2.resolve(cwd, commandAction.path ?? ".");
+     return {
+       sessionUpdate: "tool_call",
+       toolCallId: id,
+       status: acpStatus,
+       kind: "read",
+-      title
++      title,
++      locations: [{ path: locationPath }]
+     };
+   }
+   return {
 @@ -19443,6 +19443,9 @@ var CodexAcpClient = class {
        turnId: params.turnId
      });
