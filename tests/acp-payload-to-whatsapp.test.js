@@ -475,6 +475,52 @@ describe("ACP payload to WhatsApp socket vertical slices", () => {
     assert.equal(sent[0]?.msg.text, "🔧 *Read*  `src/app.js`");
   });
 
+  it("renders ACP search titles from raw WhatsApp payloads", async () => {
+    const { sent, trace } = await observeAcpPayloadSliceToBaileys([
+      {
+        sessionId: "s1",
+        update: {
+          sessionUpdate: "tool_call",
+          toolCallId: "search-real-shape",
+          title: "Search for 'toolDetails|compact_tool_activity' in whatsapp-transport.test.js",
+          kind: "search",
+          status: "in_progress",
+        },
+      },
+    ], {
+      chatId: "acp-payload-search-title@s.whatsapp.net",
+      cwd: "/repo",
+    });
+
+    assert.deepEqual(trace.runtimeEvents.map((event) => event.type), ["tool.started"]);
+    assert.equal(sent[0]?.msg.text, "🔧 *Search*  \"toolDetails|compact_tool_activity\" in `whatsapp-transport.test.js`");
+  });
+
+  it("renders ACP execute commands from raw WhatsApp payloads", async () => {
+    const { sent, trace } = await observeAcpPayloadSliceToBaileys([
+      {
+        sessionId: "s1",
+        update: {
+          sessionUpdate: "tool_call",
+          toolCallId: "execute-real-shape",
+          title: "pnpm type-check",
+          kind: "execute",
+          status: "in_progress",
+          rawInput: {
+            command: "pnpm type-check",
+            cwd: "/repo",
+          },
+        },
+      },
+    ], {
+      chatId: "acp-payload-execute-command@s.whatsapp.net",
+      cwd: "/repo",
+    });
+
+    assert.deepEqual(trace.runtimeEvents.map((event) => event.type), ["tool.started"]);
+    assert.equal(sent[0]?.msg.text, "🔧 *Shell*  `pnpm type-check`");
+  });
+
   it("smoke-tests a real ACP mock process through adapter events into Baileys output", async () => {
     const { result, sent, trace } = await runAcpMockProcessToWhatsApp();
     const eventTypes = trace.adapterEvents.map((event) => event.type);
