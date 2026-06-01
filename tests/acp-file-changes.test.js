@@ -66,6 +66,33 @@ describe("ACP file changes", () => {
     assert.match(String(reconciled.change.diff ?? ""), /\+export const value = 2;/);
   });
 
+  it("classifies provider empty-text edits as deletes when the file is missing", async () => {
+    const workdir = await fs.mkdtemp(path.join(os.tmpdir(), "acp-delete-"));
+    const filePath = path.join(workdir, "TODO.md");
+    const oldText = "# TODO\n\n- Remove the obsolete action system.\n";
+    const before = new Map([[filePath, oldText]]);
+    const event = /** @type {import("../harnesses/harness-runtime-events.js").HarnessRuntimeEvent} */ ({
+      type: "file-change.completed",
+      provider: "acp",
+      change: {
+        path: filePath,
+        summary: "Editing files",
+        kind: "update",
+        oldText,
+        newText: "",
+      },
+    });
+
+    const reconciled = reconcileAcpFileChangeWithBaseline(event, before, workdir);
+
+    assert.equal(reconciled.type, "file-change.completed");
+    assert.equal(reconciled.change.kind, "delete");
+    assert.equal(reconciled.change.oldText, oldText);
+    assert.equal(reconciled.change.newText, undefined);
+    assert.match(String(reconciled.change.diff ?? ""), /--- a\//);
+    assert.match(String(reconciled.change.diff ?? ""), /\+\+\+ \/dev\/null/);
+  });
+
   it("emits snapshot adds, updates, and deletes without duplicating provider-emitted paths", async () => {
     const skippedPath = "/tmp/acp-work/skipped.js";
     const updatedPath = "/tmp/acp-work/updated.js";

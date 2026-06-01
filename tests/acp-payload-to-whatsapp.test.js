@@ -496,9 +496,9 @@ describe("ACP payload to WhatsApp socket vertical slices", () => {
           status: "completed",
           rawOutput: {
             formatted_output: [
-              "    10\tfunction start() {",
-              "    11\t  return true;",
-              "    12\t}",
+              "    10→function start() {",
+              "    11→  return true;",
+              "    12→}",
             ].join("\n"),
           },
         },

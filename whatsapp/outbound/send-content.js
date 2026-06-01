@@ -153,7 +153,7 @@ function parseNumberedLineRange(output) {
   /** @type {number | null} */
   let end = null;
   for (const line of output.split("\n")) {
-    const match = line.match(/^\s*(\d+)\t/);
+    const match = line.match(/^\s*(\d+)(?:\t|→)/u);
     if (!match) {
       continue;
     }
@@ -1923,6 +1923,9 @@ function formatFileChangeCaptionLine(title, displayPath) {
  */
 function inferDisplayedFileChangeKind(event) {
   const diffKind = inferFileChangeKindFromDiff(event.diff);
+  if (diffKind === "add" || diffKind === "delete") {
+    return diffKind;
+  }
 
   if (event.changeKind === "add" && typeof event.newText === "string") {
     if (typeof event.oldText === "string" && event.oldText.length > 0) {
@@ -1933,7 +1936,7 @@ function inferDisplayedFileChangeKind(event) {
 
   if (typeof event.oldText === "string" && typeof event.newText === "string") {
     if (event.oldText !== event.newText) {
-      if (event.oldText.length === 0 && event.newText.length > 0 && (event.changeKind === "add" || diffKind === "add")) {
+      if (event.oldText.length === 0 && event.newText.length > 0 && event.changeKind === "add") {
         return "add";
       }
       return "update";
