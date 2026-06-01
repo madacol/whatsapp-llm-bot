@@ -827,6 +827,18 @@ function formatGenericSearchToolName(toolName) {
 }
 
 /**
+ * @param {string} toolName
+ * @returns {string | null}
+ */
+function formatGenericListToolName(toolName) {
+  const match = toolName.match(/^List files in ['"](.+)['"]$/);
+  if (!match || !match[1]) {
+    return null;
+  }
+  return formatCompactEntry("List", `\`${match[1]}\``);
+}
+
+/**
  * @param {string | undefined} value
  * @returns {Record<string, unknown>}
  */
@@ -880,6 +892,10 @@ function formatGenericCompactToolName(toolName, args, cwd) {
   const search = formatGenericSearchToolName(toolName);
   if (search) {
     return search;
+  }
+  const list = formatGenericListToolName(toolName);
+  if (list) {
+    return list;
   }
   const detail = formatGenericPathDetail(args, cwd) ?? formatGenericTextDetail(args);
   return formatCompactEntry(toolName, detail);

@@ -217,6 +217,11 @@ describe("sendEvent – compact tool activity", () => {
       name: "Search for 'create.*File|Edit|Write' in tool-presentation-model.js",
       arguments: "{}",
     };
+    const listTool = {
+      id: "list-generic",
+      name: "List files in 'docs'",
+      arguments: "{}",
+    };
 
     await sendEvent(sock, "compact-generic-chat", {
       kind: "compact_tool_activity",
@@ -238,6 +243,16 @@ describe("sendEvent – compact tool activity", () => {
       cwd: "/repo",
       activity: { type: "tool", status: "completed", toolCall: searchTool },
     });
+    await sendEvent(sock, "compact-generic-chat", {
+      kind: "compact_tool_activity",
+      cwd: "/repo",
+      activity: { type: "tool", status: "started", toolCall: listTool },
+    });
+    await sendEvent(sock, "compact-generic-chat", {
+      kind: "compact_tool_activity",
+      cwd: "/repo",
+      activity: { type: "tool", status: "completed", toolCall: listTool },
+    });
 
     assert.deepEqual(sent.map((entry) => entry.msg), [
       { text: "🔧 *Read file*  `whatsapp/tool-presenter.js`", linkPreview: null },
@@ -248,6 +263,11 @@ describe("sendEvent – compact tool activity", () => {
       },
       {
         text: "✅ *Read file*  `whatsapp/tool-presenter.js`\n✅ *Search*  `create.*File|Edit|Write` in *tool-presentation-model.js*",
+        edit: { id: "msg-1", remoteJid: "compact-generic-chat", fromMe: true },
+        linkPreview: null,
+      },
+      {
+        text: "✅ *Read file*  `whatsapp/tool-presenter.js`\n✅ *Search*  `create.*File|Edit|Write` in *tool-presentation-model.js*\n✅ *List*  `docs`",
         edit: { id: "msg-1", remoteJid: "compact-generic-chat", fromMe: true },
         linkPreview: null,
       },
