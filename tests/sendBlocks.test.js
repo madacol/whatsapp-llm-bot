@@ -165,9 +165,9 @@ describe("sendEvent – compact tool activity", () => {
     await new Promise((resolve) => setTimeout(resolve, 1100));
 
     assert.deepEqual(sent.map((entry) => entry.msg), [
-      { text: "🔧 *Read*  `src/app.js`", linkPreview: null },
+      { text: "🔧 *Read*  `src/app.js`  *1-20*", linkPreview: null },
       {
-        text: "🔧 *Read*  `src/app.js`\n🔧 *Shell*  `pnpm type-check`",
+        text: "🔧 *Read*  `src/app.js`  *1-20*\n🔧 *Shell*  `pnpm type-check`",
         edit: { id: "msg-1", remoteJid: "compact-chat", fromMe: true },
         linkPreview: null,
       },
@@ -384,7 +384,7 @@ describe("sendEvent – runtime events", () => {
     }, undefined, undefined, { outputVisibility: VISIBLE_TOOL_OUTPUT });
 
     assert.deepEqual(sent.map((entry) => entry.msg), [
-      { text: "🔧 *Read*  `src/app.js`", linkPreview: null },
+      { text: "🔧 *Read*  `src/app.js`  *1-20*", linkPreview: null },
     ]);
   });
 

@@ -191,12 +191,43 @@ function createFlow(groupKey, groupTitle, detail) {
 }
 
 /**
+ * @param {Record<string, unknown>} args
+ * @returns {{ start: number, end: number } | null}
+ */
+function getReadLineRange(args) {
+  const rawStart = typeof args.line === "number" ? args.line : args.offset;
+  if (typeof rawStart !== "number" || !Number.isInteger(rawStart) || rawStart <= 0) {
+    return null;
+  }
+  const limit = args.limit;
+  if (typeof limit === "number") {
+    if (!Number.isInteger(limit) || limit <= 0) {
+      return null;
+    }
+    return { start: rawStart, end: rawStart + limit - 1 };
+  }
+  return { start: rawStart, end: rawStart };
+}
+
+/**
+ * @param {{ start: number, end: number }} range
+ * @returns {string}
+ */
+function formatLineRange(range) {
+  return range.start === range.end ? `*${range.start}*` : `*${range.start}-${range.end}*`;
+}
+
+/**
  * @param {string} path
  * @param {string | null | undefined} cwd
+ * @param {{ start: number, end: number } | null} lineRange
  * @returns {ActivityPresentation}
  */
-function createReadPresentation(path, cwd) {
-  const activity = createActivity("Read", formatDisplayPath(path, cwd));
+function createReadPresentation(path, cwd, lineRange) {
+  const line = lineRange
+    ? `${formatDisplayPath(path, cwd)}  ${formatLineRange(lineRange)}`
+    : formatDisplayPath(path, cwd);
+  const activity = createActivity("Read", line);
   return {
     kind: "activity",
     toolName: "Read",
@@ -563,7 +594,7 @@ function buildSdkPresentation(name, args, cwd) {
       return findArgs ? createFindOnPagePresentation(findArgs.pattern, findArgs.ref_id) : null;
     }
     case "Read":
-      return typeof args.file_path === "string" ? createReadPresentation(args.file_path, cwd) : null;
+      return typeof args.file_path === "string" ? createReadPresentation(args.file_path, cwd, getReadLineRange(args)) : null;
     case "Grep":
     case "Search":
       return typeof args.pattern === "string"

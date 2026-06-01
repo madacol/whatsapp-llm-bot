@@ -100,6 +100,27 @@ function getRawAcpFirstLocationPath(update) {
 
 /**
  * @param {Record<string, unknown>} update
+ * @returns {Record<string, unknown> | null}
+ */
+function getRawAcpInput(update) {
+  return isRecord(update.rawInput) ? update.rawInput : null;
+}
+
+/**
+ * @param {Record<string, unknown>} update
+ * @returns {string | null}
+ */
+function getRawAcpReadPath(update) {
+  const locationPath = getRawAcpFirstLocationPath(update);
+  if (locationPath) {
+    return locationPath;
+  }
+  const rawInput = getRawAcpInput(update);
+  return typeof rawInput?.path === "string" && rawInput.path.length > 0 ? rawInput.path : null;
+}
+
+/**
+ * @param {Record<string, unknown>} update
  * @returns {string | null}
  */
 function getRawAcpTitle(update) {
@@ -168,6 +189,23 @@ function parseNumberedLineRange(output) {
 }
 
 /**
+ * @param {string} command
+ * @returns {{ start: number, end: number } | null}
+ */
+function parseReadCommandLineRange(command) {
+  const match = command.match(/\bsed\s+-n\s+['"]?(\d+)(?:\s*,\s*(\d+))?p['"]?/u);
+  if (!match) {
+    return null;
+  }
+  const start = Number(match[1]);
+  const end = Number(match[2] ?? match[1]);
+  if (!Number.isInteger(start) || !Number.isInteger(end) || start <= 0 || end < start) {
+    return null;
+  }
+  return { start, end };
+}
+
+/**
  * @param {RuntimeEventOutboundEvent} event
  * @returns {{ start: number, end: number } | null}
  */
@@ -213,13 +251,16 @@ function buildWhatsAppRuntimeToolFromRawAcp(tool, event) {
     return tool;
   }
   if (update.kind === "read") {
-    const readPath = getRawAcpFirstLocationPath(update);
+    const readPath = getRawAcpReadPath(update);
     if (readPath) {
+      const rawInput = getRawAcpInput(update);
       return {
         ...tool,
         name: "Read",
         arguments: {
           ...tool.arguments,
+          ...(typeof rawInput?.line === "number" ? { line: rawInput.line } : {}),
+          ...(typeof rawInput?.limit === "number" ? { limit: rawInput.limit } : {}),
           file_path: readPath,
         },
       };
@@ -641,13 +682,15 @@ function getStringArg(args, names) {
 
 /**
  * @param {string[]} paths
+ * @param {string | undefined} command
  * @returns {string}
  */
-function formatRuntimeFileReadSummary(paths) {
+function formatRuntimeFileReadSummary(paths, command) {
   const displayPaths = paths
     .filter((filePath) => typeof filePath === "string" && filePath.length > 0)
     .map((filePath) => `\`${filePath}\``);
-  return formatRuntimeProgressEntry("Read", displayPaths.length > 0 ? displayPaths.join(", ") : undefined);
+  const summary = formatRuntimeProgressEntry("Read", displayPaths.length > 0 ? displayPaths.join(", ") : undefined);
+  return appendReadLineRange(summary, command ? parseReadCommandLineRange(command) : null);
 }
 
 /**
@@ -756,13 +799,15 @@ function formatCompactCommand(command) {
 
 /**
  * @param {string[]} paths
+ * @param {string | undefined} command
  * @returns {string}
  */
-function formatCompactRead(paths) {
+function formatCompactRead(paths, command) {
   const displayPaths = paths
     .filter((filePath) => typeof filePath === "string" && filePath.length > 0)
     .map((filePath) => `\`${filePath}\``);
-  return formatCompactEntry("Read", displayPaths.length > 0 ? displayPaths.join(", ") : undefined);
+  const summary = formatCompactEntry("Read", displayPaths.length > 0 ? displayPaths.join(", ") : undefined);
+  return appendReadLineRange(summary, command ? parseReadCommandLineRange(command) : null);
 }
 
 /**
@@ -850,7 +895,7 @@ function formatCompactToolActivitySummary(activity, cwd) {
     return formatCompactCommand(activity.command);
   }
   if (activity.type === "file_read") {
-    return formatCompactRead(activity.paths);
+    return formatCompactRead(activity.paths, activity.command);
   }
   if (activity.type !== "tool" || !activity.toolCall) {
     return null;
@@ -1214,7 +1259,7 @@ async function sendRuntimeFileReadEvent(sock, chatId, event, options, reactionRu
   if (event.event.type !== "file-read.started") {
     throw new Error(`Expected file-read runtime event, got ${event.event.type}.`);
   }
-  return sendBlocks(sock, chatId, "plain", `🔧 ${formatRuntimeFileReadSummary(event.event.fileRead.paths)}`, options, reactionRuntime, event, {
+  return sendBlocks(sock, chatId, "plain", `🔧 ${formatRuntimeFileReadSummary(event.event.fileRead.paths, event.event.fileRead.command)}`, options, reactionRuntime, event, {
     editHandleStore: sendOptions.editHandleStore,
   });
 }
@@ -1581,7 +1626,7 @@ async function sendCompactToolActivityEvent(sock, chatId, event, options, reacti
     rememberCompactPendingEntry(state.pendingCommandEntryIds, activity.command, entryId);
     return addCompactToolActivityEntry(sock, chatId, event, options, reactionRuntime, sendOptions, state, {
       id: entryId,
-      summary: formatCompactRead(activity.paths),
+      summary: formatCompactRead(activity.paths, activity.command),
       completed: false,
       failed: false,
     });
