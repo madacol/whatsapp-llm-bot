@@ -143,6 +143,21 @@ function parseRawAcpSearchTitle(title) {
 }
 
 /**
+ * @param {string} title
+ * @returns {{ path?: string } | null}
+ */
+function parseRawAcpListTitle(title) {
+  if (title === "List files") {
+    return {};
+  }
+  const match = title.match(/^List files in ['"](.+)['"]$/);
+  if (!match || !match[1]) {
+    return null;
+  }
+  return { path: match[1] };
+}
+
+/**
  * @param {Record<string, unknown>} update
  * @returns {string | null}
  */
@@ -251,6 +266,18 @@ function buildWhatsAppRuntimeToolFromRawAcp(tool, event) {
     return tool;
   }
   if (update.kind === "read") {
+    const title = getRawAcpTitle(update);
+    const list = title ? parseRawAcpListTitle(title) : null;
+    if (list) {
+      return {
+        ...tool,
+        name: "List",
+        arguments: {
+          ...tool.arguments,
+          ...(list.path ? { path: list.path } : {}),
+        },
+      };
+    }
     const readPath = getRawAcpReadPath(update);
     if (readPath) {
       const rawInput = getRawAcpInput(update);
