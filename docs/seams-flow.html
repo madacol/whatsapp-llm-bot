@@ -505,17 +505,57 @@
         padding-top: 16px;
       }
 
+      h1 {
+        font-size: 28px;
+        line-height: 1.08;
+      }
+
+      .subtitle {
+        font-size: 15px;
+      }
+
       .toolbar {
         display: grid;
         grid-template-columns: 1fr;
       }
 
       .zoom-controls {
-        justify-content: space-between;
+        display: none;
       }
 
-      .zoom-controls input {
-        width: min(48vw, 220px);
+      .viewport {
+        height: 460px;
+        min-height: 0;
+        overflow-x: hidden;
+        overflow-y: auto;
+      }
+
+      .map {
+        display: grid;
+        width: auto !important;
+        height: auto !important;
+        min-height: 0;
+        gap: 10px;
+        padding: 12px;
+        margin: 0 !important;
+        transform: none !important;
+      }
+
+      .lane,
+      .edges {
+        display: none;
+      }
+
+      .node {
+        position: relative;
+        left: auto !important;
+        top: auto !important;
+        width: 100%;
+        min-height: 0;
+      }
+
+      .node.dim {
+        opacity: 0.48;
       }
 
       .legend {
@@ -1093,6 +1133,17 @@
     }
 
     function centerOnModule(module) {
+      if (window.matchMedia("(max-width: 720px)").matches) {
+        document.querySelector(`#node-${module.id}`)?.scrollIntoView({
+          behavior: "smooth",
+          block: "center",
+        });
+        document.querySelector(".detail")?.scrollIntoView({
+          behavior: "smooth",
+          block: "start",
+        });
+        return;
+      }
       const zoom = Number(zoomRange.value) / 100;
       const targetX = module.x * zoom - viewport.clientWidth / 2 + 120 * zoom;
       const targetY = module.y * zoom - viewport.clientHeight / 2 + 90 * zoom;
@@ -1126,6 +1177,15 @@
 
     function applyZoom(value) {
       const zoom = Math.max(60, Math.min(150, Number(value))) / 100;
+      if (window.matchMedia("(max-width: 720px)").matches) {
+        map.style.transform = "none";
+        map.style.width = "";
+        map.style.height = "";
+        map.style.marginRight = "0";
+        map.style.marginBottom = "0";
+        zoomLabel.textContent = "List";
+        return;
+      }
       map.style.transform = `scale(${zoom})`;
       map.style.width = "1600px";
       map.style.height = "940px";
@@ -1145,6 +1205,7 @@
     });
 
     zoomRange.addEventListener("input", () => applyZoom(zoomRange.value));
+    window.addEventListener("resize", () => applyZoom(zoomRange.value));
 
     renderMap();
     renderFlowTabs();
