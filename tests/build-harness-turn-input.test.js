@@ -94,4 +94,59 @@ describe("buildHarnessTurnInput", () => {
     assert.equal("mediaRegistry" in turn, false);
   });
 
+  it("omits media reference text for ACP-backed harnesses", async () => {
+    const mediaPath = `${"a".repeat(64)}.png`;
+    const turn = await buildHarnessTurnInput({
+      chatId: "provider-media-chat",
+      chatInfo: undefined,
+      context: {
+        chatId: "provider-media-chat",
+        senderIds: ["user-1"],
+        content: [
+          { type: "text", text: "see these" },
+          { type: "image", path: mediaPath, mime_type: "image/png" },
+          { type: "file", path: `${"b".repeat(64)}.pdf`, mime_type: "application/pdf", file_name: "brief.pdf" },
+        ],
+        getIsAdmin: async () => true,
+        send: async () => undefined,
+        reply: async () => undefined,
+        reactToMessage: async () => {},
+        select: async () => "",
+        confirm: async () => true,
+      },
+      message: {
+        role: "user",
+        content: [
+          { type: "text", text: "see these" },
+          { type: "image", path: mediaPath, mime_type: "image/png" },
+          { type: "file", path: `${"b".repeat(64)}.pdf`, mime_type: "application/pdf", file_name: "brief.pdf" },
+        ],
+      },
+      persona: null,
+      llmClient: /** @type {LlmClient} */ ({}),
+      getMessages: async () => [{
+        message_id: 1,
+        chat_id: "provider-media-chat",
+        sender_id: "user-1",
+        message_data: {
+          role: "user",
+          content: [
+            { type: "text", text: "see these" },
+            { type: "image", path: mediaPath, mime_type: "image/png" },
+            { type: "file", path: `${"b".repeat(64)}.pdf`, mime_type: "application/pdf", file_name: "brief.pdf" },
+          ],
+        },
+        timestamp: new Date("2026-05-19T00:00:00.000Z"),
+        display_key: null,
+      }],
+      harnessName: "codex",
+      runConfig: { workdir: "/repo", model: "gpt-5.4" },
+    });
+
+    assert.equal(turn.input, "see these");
+    assert.ok(!turn.input.includes("Media file available"));
+    assert.ok(!turn.input.includes(".media"));
+    assert.ok(!turn.input.includes("brief.pdf"));
+  });
+
 });

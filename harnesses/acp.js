@@ -74,7 +74,7 @@ function buildPrompt(messages) {
   if (!latestUser) {
     return "";
   }
-  return buildTextHarnessPromptFromBlocks(latestUser.content);
+  return buildTextHarnessPromptFromBlocks(latestUser.content, { includeMediaReferences: false });
 }
 
 /**

@@ -87,6 +87,14 @@ function getLatestUserContent(messages) {
 }
 
 /**
+ * @param {string} harnessName
+ * @returns {boolean}
+ */
+function usesSemanticAcpContent(harnessName) {
+  return harnessName === "acp" || harnessName === "codex" || harnessName === "claude" || harnessName === "pi";
+}
+
+/**
  * Build the semantic provider turn input for a chat turn.
  * @param {{
  *   chatId: string,
@@ -133,6 +141,7 @@ export async function buildHarnessTurnInput({
       llmClient,
       mediaToTextModels: chatInfo?.media_to_text_models ?? {},
       db: getChatDb(chatId),
+      includeMediaReferences: !usesSemanticAcpContent(harnessName),
     }),
     messages,
     externalInstructions,
