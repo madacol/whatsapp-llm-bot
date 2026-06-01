@@ -12,7 +12,7 @@ import {
   setConfigValue,
 } from "../chat-settings-service.js";
 
-export const CHAT_SETTINGS_COMMAND_PARAMETERS = /** @type {Action["parameters"]} */ ({
+export const CHAT_SETTINGS_COMMAND_PARAMETERS = /** @type {CommandParametersSchema} */ ({
   type: "object",
   properties: {
     setting: { type: "string" },
@@ -21,14 +21,21 @@ export const CHAT_SETTINGS_COMMAND_PARAMETERS = /** @type {Action["parameters"]}
 });
 
 /**
- * @param {ExecuteActionContext} context
+ * @param {{
+ *   chatId: string,
+ *   senderIds?: string[],
+ *   getIsAdmin?: ExecuteActionContext["getIsAdmin"],
+ *   select?: ExecuteActionContext["select"],
+ *   selectMany?: ExecuteActionContext["selectMany"],
+ *   rootDb?: import("../sqlite-db.js").SqliteDb,
+ * }} context
  * @param {{ setting?: string, value?: string }} params
  * @returns {Promise<string>}
  */
 export async function runChatSettingsCommand(context, { setting, value }) {
-  const rootDb = getRootDb();
+  const rootDb = context.rootDb ?? getRootDb();
   const serviceExtra = {
-    senderIds: context.senderIds,
+    senderIds: context.senderIds ?? [],
     rootDb,
     getChatDb,
   };

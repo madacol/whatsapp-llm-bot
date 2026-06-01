@@ -8,7 +8,7 @@ import {
   setConfigValue,
 } from "../chat-settings-service.js";
 
-export const SETUP_COMMAND_PARAMETERS = /** @type {Action["parameters"]} */ ({
+export const SETUP_COMMAND_PARAMETERS = /** @type {CommandParametersSchema} */ ({
   type: "object",
   properties: {},
   required: [],

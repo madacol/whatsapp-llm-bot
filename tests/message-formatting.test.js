@@ -1,106 +1,11 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
-  actionsToToolDefinitions,
   shouldRespond,
   parseCommandArgs,
   prepareMessages,
   parseStructuredQuestion,
 } from "../message-formatting.js";
-
-// ── actionsToToolDefinitions ──
-
-describe("actionsToToolDefinitions", () => {
-  it("maps name, description, parameters correctly", () => {
-    const actions = /** @type {Action[]} */ ([
-      {
-        name: "test_action",
-        description: "A test action",
-        parameters: { type: "object", properties: { x: { type: "string" } } },
-      },
-    ]);
-    const result = actionsToToolDefinitions(actions);
-
-    assert.equal(result.length, 1);
-    assert.equal(result[0].type, "function");
-    assert.equal(result[0].function.name, "test_action");
-    assert.equal(result[0].function.description, "A test action");
-    assert.deepEqual(result[0].function.parameters, actions[0].parameters);
-  });
-
-  it("converts type:'image' params to type:'string' with media hint when hasMedia is true", () => {
-    const actions = /** @type {Action[]} */ ([
-      {
-        name: "zoom_image",
-        description: "Zoom into an image",
-        parameters: { type: "object", properties: { image: { type: "image", description: "The image" }, x: { type: "number" } } },
-      },
-    ]);
-    const result = actionsToToolDefinitions(actions, true);
-
-    const params = result[0].function.parameters;
-    assert.equal(params.properties.image.type, "string", "image type should be converted to string");
-    assert.ok(params.properties.image.description.includes("file path"), "description should mention media file paths");
-    assert.equal(params.properties.x.type, "number", "non-image params should be unchanged");
-  });
-
-  it("converts type:'image' to type:'string' even without media", () => {
-    const actions = /** @type {Action[]} */ ([
-      {
-        name: "zoom_image",
-        description: "Zoom",
-        parameters: { type: "object", properties: { image: { type: "image" } } },
-      },
-    ]);
-    const result = actionsToToolDefinitions(actions, false);
-
-    assert.equal(result[0].function.parameters.properties.image.type, "string");
-    assert.ok(!result[0].function.parameters.properties.image.description.includes("[media:N]"));
-  });
-
-  it("converts array of image params", () => {
-    const actions = /** @type {Action[]} */ ([
-      {
-        name: "extract",
-        description: "Extract",
-        parameters: { type: "object", properties: { images: { type: "array", items: { type: "image" }, description: "Input images" } } },
-      },
-    ]);
-    const result = actionsToToolDefinitions(actions, true);
-
-    const prop = result[0].function.parameters.properties.images;
-    assert.equal(prop.type, "array");
-    assert.equal(prop.items.type, "string");
-    assert.ok(prop.description.includes("file path"));
-  });
-
-  it("does not mutate original action parameters when converting image params", () => {
-    const actions = /** @type {Action[]} */ ([
-      {
-        name: "test",
-        description: "Test",
-        parameters: { type: "object", properties: { image: { type: "image" } } },
-      },
-    ]);
-    actionsToToolDefinitions(actions, true);
-
-    assert.equal(actions[0].parameters.properties.image.type, "image", "Original action should not be mutated");
-  });
-
-  it("does not modify tools that have no image params", () => {
-    const actions = /** @type {Action[]} */ ([
-      {
-        name: "test",
-        description: "Test",
-        parameters: { type: "object", properties: { x: { type: "string" } } },
-      },
-    ]);
-    const result = actionsToToolDefinitions(actions, true);
-
-    // Should use the original parameters object (no copy needed)
-    assert.deepEqual(result[0].function.parameters, actions[0].parameters);
-  });
-});
 
 // ── shouldRespond ──
 

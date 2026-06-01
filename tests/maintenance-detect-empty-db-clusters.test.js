@@ -39,12 +39,10 @@ describe("collectClusterRoots", () => {
     const chatId = "123@g.us";
     const canonicalPgdata = path.join(chatDir, chatId, "pgdata");
     const legacyPgdata = path.join(legacyPgdataDir, chatId);
-    const actionDb = path.join(chatDir, chatId, "actions", "create_action");
     const legacyOnly = path.join(legacyPgdataDir, "legacy-only");
     const rootDb = path.join(legacyPgdataDir, "root");
 
     await makeClusterRoot(legacyPgdata);
-    await makeClusterRoot(actionDb);
     await makeClusterRoot(legacyOnly);
     await makeClusterRoot(rootDb);
     await mkdir(path.dirname(canonicalPgdata), { recursive: true });
@@ -59,7 +57,6 @@ describe("collectClusterRoots", () => {
 
     assert.deepEqual(roots, [
       canonicalPgdata,
-      actionDb,
       legacyOnly,
     ].sort((left, right) => left.localeCompare(right)));
   });

@@ -31,7 +31,7 @@ function parseBangCommandText(inputText) {
 
 /**
  * @param {string} argsText
- * @param {Action["parameters"]} parameters
+ * @param {CommandParametersSchema} parameters
  * @returns {Record<string, string>}
  */
 function parseParams(argsText, parameters) {

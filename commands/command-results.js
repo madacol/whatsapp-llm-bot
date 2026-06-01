@@ -6,7 +6,7 @@ import { isHtmlContent } from "../utils.js";
  * @param {{
  *   chatId: string,
  *   context: ExecuteActionContext,
- *   result: ActionResultValue,
+ *   result: ToolResultValue,
  *   afterResponse?: (input?: { handle?: MessageHandle }) => void | Promise<void>,
  * }} input
  * @returns {Promise<void>}

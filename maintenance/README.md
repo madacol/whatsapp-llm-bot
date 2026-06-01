@@ -4,7 +4,7 @@ This folder contains operational scripts for inspecting and maintaining local ap
 
 ## `detect-empty-db-clusters.js`
 
-Read-only scanner for canonical chat DB roots under `~/chat/*/{pgdata,actions/*}`
+Read-only scanner for canonical chat DB roots under `~/chat/*/pgdata`
 and legacy DB roots under `pgdata/`. It classifies DB cluster roots as:
 
 - `empty`: no rows in any user table

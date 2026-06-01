@@ -26,7 +26,6 @@ const log = createLogger("store");
  *   model_roles: Record<string, string>;
  *   memory: boolean;
  *   memory_threshold: number | null;
- *   enabled_actions: string[];
  *   active_persona: string | null;
  *   harness: string | null;
  *   harness_cwd: string | null;

@@ -7,7 +7,7 @@ import { scheduleRestart } from "../restart/restart-scheduler.js";
 
 const RESTART_ACK_TIMEOUT_MS = 10_000;
 
-export const RESTART_COMMAND_PARAMETERS = /** @type {Action["parameters"]} */ ({
+export const RESTART_COMMAND_PARAMETERS = /** @type {CommandParametersSchema} */ ({
   type: "object",
   properties: {
     mode: { type: "string", default: "" },

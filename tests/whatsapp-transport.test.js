@@ -14,7 +14,7 @@ import { setDb } from "../db.js";
 import { initStore } from "../store.js";
 import { createTestDb, createWAMessage } from "./helpers.js";
 import { contentEvent, textUpdate } from "../outbound-events.js";
-import { createRestartAction } from "../actions/admin/restart/index.js";
+import { createRestartCommandHandler } from "../commands/restart-command.js";
 import { createRestartAckStore } from "../restart/restart-ack-store.js";
 import { deliverPendingRestartAck } from "../restart/restart-ack-delivery.js";
 import { sendOrQueueWhatsAppEvent } from "../whatsapp/outbound/persistent-queue.js";
@@ -986,36 +986,21 @@ describe("WhatsApp transport community creation", () => {
       assert.equal(typeof restartingHandle?.transportHandleId, "string");
 
       let scheduled = 0;
-      const restartAction = createRestartAction(
-        () => {
+      const restartCommandHandler = createRestartCommandHandler({
+        restartScheduler: () => {
           scheduled += 1;
         },
         restartAckStore,
-        {
+        restartRuntime: {
           listActiveTurns: () => [],
           waitForIdle: async () => [],
         },
-      );
-      const result = await restartAction.action_fn({
+      });
+      const result = await restartCommandHandler({
         chatId,
         senderIds: ["master-user"],
-        content: [],
-        getIsAdmin: async () => true,
-        db: testDb,
-        sessionDb: testDb,
-        getActions: async () => [],
-        log: async () => "",
-        send: async () => {},
-        reply: async () => {},
-        reactToMessage: async () => {},
-        select: async () => "",
-        confirm: async () => true,
-        resolveModel: () => "test-model",
       }, {});
 
-      if (typeof result !== "object" || result === null || Array.isArray(result) || !("afterResponse" in result)) {
-        throw new Error("Expected restart action to return an afterResponse hook");
-      }
       await result.afterResponse?.({ handle: restartingHandle });
       assert.equal(scheduled, 1);
 

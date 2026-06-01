@@ -99,7 +99,6 @@ export function createChatStore({ ensureChatExists }) {
         model_roles: sourceChat.model_roles ?? {},
         memory: sourceChat.memory,
         memory_threshold: sourceChat.memory_threshold,
-        enabled_actions: sourceChat.enabled_actions ?? [],
         active_persona: sourceChat.active_persona,
         harness: sourceChat.harness,
         output_visibility: sourceChat.output_visibility ?? {},

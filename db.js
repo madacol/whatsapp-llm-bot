@@ -1,4 +1,4 @@
-import { getChatActionSqlitePath, getChatSqlitePath } from "./chat-paths.js";
+import { getChatSqlitePath } from "./chat-paths.js";
 import { createLogger } from "./logger.js";
 import { createProcessDiagnosticSnapshot, formatProcessDiagnosticSnapshot } from "./process-diagnostics.js";
 import { SqliteDb } from "./sqlite-db.js";
@@ -33,8 +33,8 @@ export function setSqliteDb(filename, instance) {
 
 /**
  * Compatibility entrypoint for older callers that requested a database by
- * logical data directory. New code should prefer the explicit root/chat/action
- * helpers below.
+ * logical data directory. New code should prefer the explicit root/chat helpers
+ * below.
  * @param {string} key
  * @returns {SqliteDb}
  */
@@ -137,16 +137,6 @@ export function getRootDb() {
  */
 export function getChatDb(chatId) {
   return getSqliteDb(getChatSqlitePath(chatId));
-}
-
-/**
- * Get an action-scoped database (per chat, per action).
- * @param {string} chatId
- * @param {string} actionName
- * @returns {SqliteDb}
- */
-export function getActionDb(chatId, actionName) {
-  return getSqliteDb(getChatActionSqlitePath(chatId, actionName));
 }
 
 /**

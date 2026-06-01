@@ -107,7 +107,6 @@ describe("store with injected DB", () => {
           media_to_text_models JSONB NOT NULL DEFAULT '{}',
           memory BOOLEAN NOT NULL DEFAULT false,
           memory_threshold REAL,
-          enabled_actions JSONB NOT NULL DEFAULT '[]',
           model_roles JSONB NOT NULL DEFAULT '{}',
           active_persona TEXT,
           harness TEXT,

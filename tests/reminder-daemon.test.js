@@ -1,7 +1,7 @@
 import { describe, it, before } from "node:test";
 import assert from "node:assert/strict";
 import { pollChatReminders } from "../reminder-daemon.js";
-import { ensureSchema } from "../actions/tools/reminders/index.js";
+import { ensureChatStoreSchema } from "../store/schema/chat.js";
 import { createTestDb } from "./helpers.js";
 
 /** @type {import("../sqlite-db.js").SqliteDb} */
@@ -9,7 +9,7 @@ let db;
 
 before(async () => {
   db = await createTestDb();
-  await ensureSchema(db);
+  await ensureChatStoreSchema(db);
 });
 
 describe("reminder daemon", () => {
