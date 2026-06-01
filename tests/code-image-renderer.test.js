@@ -1,6 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
+  renderCodeToImagePreview,
   renderCodeToImages,
   renderDiffToImages,
   renderTableToImages,
@@ -96,6 +97,14 @@ describe("code-image-renderer", () => {
     it("returns empty array for empty code", async () => {
       const images = await renderCodeToImages("", "text");
       assert.strictEqual(images.length, 0, "empty code should produce no images");
+    });
+
+    it("can count all chunks while rendering only the visible preview images", async () => {
+      const code = Array.from({ length: 320 }, (_, i) => `const value${i} = ${i};`).join("\n");
+      const preview = await renderCodeToImagePreview(code, "javascript", { maxImages: 5 });
+
+      assert.equal(preview.images.length, 5, "preview should only include the visible image buffers");
+      assert.ok(preview.totalImages > preview.images.length, `expected hidden chunks to be counted, got ${preview.totalImages}`);
     });
   });
 

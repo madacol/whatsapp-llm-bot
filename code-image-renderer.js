@@ -188,7 +188,15 @@ async function loadLang(hl, lang) {
  *   maxPixels?: number,
  *   maxSvgWidth?: number,
  *   maxLinesPerChunk?: number,
+ *   maxImages?: number,
  * }} AnnotatedLineRenderOptions
+ */
+
+/**
+ * @typedef {{
+ *   images: Buffer[],
+ *   totalImages: number,
+ * }} RenderedImagePreview
  */
 
 /**
@@ -196,14 +204,17 @@ async function loadLang(hl, lang) {
  * Each line can have an optional background color, gutter color, and prefix character.
  * @param {AnnotatedLine[]} lines
  * @param {AnnotatedLineRenderOptions} [opts]
- * @returns {Buffer[]}
+ * @returns {RenderedImagePreview}
  */
-function renderAnnotatedLines(lines, opts) {
+function renderAnnotatedLinesPreview(lines, opts) {
   const gutterWidth = opts?.gutterWidth ?? 0;
   const contentX = PADDING + gutterWidth;
   const maxPixels = opts?.maxPixels ?? MAX_PIXELS;
   const maxSvgWidth = opts?.maxSvgWidth ?? MAX_SVG_WIDTH;
   const maxLinesPerChunkLimit = opts?.maxLinesPerChunk ?? MAX_LINES_PER_CHUNK;
+  const maxImages = typeof opts?.maxImages === "number" && Number.isFinite(opts.maxImages)
+    ? Math.max(0, Math.floor(opts.maxImages))
+    : Infinity;
 
   // Compute image width from the widest line across ALL lines so chunks
   // share a consistent width and we can derive an adaptive chunk size.
@@ -243,7 +254,7 @@ function renderAnnotatedLines(lines, opts) {
   /** @type {Buffer[]} */
   const images = [];
 
-  for (const chunk of chunks) {
+  for (const chunk of chunks.slice(0, maxImages)) {
     const svgHeight = chunk.length * LINE_HEIGHT + PADDING * 2;
 
     // Build SVG
@@ -290,7 +301,7 @@ function renderAnnotatedLines(lines, opts) {
     images.push(Buffer.from(pngData.asPng()));
   }
 
-  return images;
+  return { images, totalImages: chunks.length };
 }
 
 /**
@@ -298,9 +309,10 @@ function renderAnnotatedLines(lines, opts) {
  * Splits long code across multiple images at MAX_LINES_PER_IMAGE.
  * @param {string} code
  * @param {string} [language]
- * @returns {Promise<Buffer[]>}
+ * @param {{ maxImages?: number }} [options]
+ * @returns {Promise<RenderedImagePreview>}
  */
-export async function renderCodeToImages(code, language) {
+export async function renderCodeToImagePreview(code, language, options = {}) {
   const hl = await getHighlighter();
   const effectiveLang = await loadLang(hl, language || "text");
 
@@ -319,10 +331,21 @@ export async function renderCodeToImages(code, language) {
 
   if (lines.length === 0) {
     log.warn("renderCodeToImages called with empty code, skipping image render");
-    return [];
+    return { images: [], totalImages: 0 };
   }
 
-  return renderCodeLikeAnnotatedLines(lines);
+  return renderCodeLikeAnnotatedLinesPreview(lines, options);
+}
+
+/**
+ * Render code as syntax-highlighted PNG image(s).
+ * Splits long code across multiple images at MAX_LINES_PER_IMAGE.
+ * @param {string} code
+ * @param {string} [language]
+ * @returns {Promise<Buffer[]>}
+ */
+export async function renderCodeToImages(code, language) {
+  return (await renderCodeToImagePreview(code, language)).images;
 }
 
 /**
@@ -1001,14 +1024,29 @@ export function buildContextualUnifiedDiff(oldStr, newStr, contextLines = DIFF_C
  * @param {string} oldStr
  * @param {string} newStr
  * @param {string} [language]
+ * @param {{ maxImages?: number }} [options]
+ * @returns {Promise<RenderedImagePreview>}
+ */
+export async function renderDiffToImagePreview(oldStr, newStr, language, options = {}) {
+  const diffText = buildContextualUnifiedDiff(oldStr, newStr);
+  if (!diffText) {
+    return { images: [], totalImages: 0 };
+  }
+  return renderUnifiedDiffToImagePreview(diffText, language, options);
+}
+
+/**
+ * Render a diff (old_string → new_string) as syntax-highlighted PNG image(s).
+ * Removed lines show with red background, added lines with green background,
+ * each with a +/- gutter prefix. Context is bounded to keep large file edits
+ * readable in chat.
+ * @param {string} oldStr
+ * @param {string} newStr
+ * @param {string} [language]
  * @returns {Promise<Buffer[]>}
  */
 export async function renderDiffToImages(oldStr, newStr, language) {
-  const diffText = buildContextualUnifiedDiff(oldStr, newStr);
-  if (!diffText) {
-    return [];
-  }
-  return renderUnifiedDiffToImages(diffText, language);
+  return (await renderDiffToImagePreview(oldStr, newStr, language)).images;
 }
 
 /**
@@ -1016,9 +1054,10 @@ export async function renderDiffToImages(oldStr, newStr, language) {
  * existing hunk boundaries and context lines instead of re-diffing full files.
  * @param {string} diffText
  * @param {string} [language]
- * @returns {Promise<Buffer[]>}
+ * @param {{ maxImages?: number }} [options]
+ * @returns {Promise<RenderedImagePreview>}
  */
-export async function renderUnifiedDiffToImages(diffText, language) {
+export async function renderUnifiedDiffToImagePreview(diffText, language, options = {}) {
   const hl = await getHighlighter();
   const effectiveLang = await loadLang(hl, language || "text");
   const shikiLang = /** @type {import("shiki").BundledLanguage} */ (effectiveLang);
@@ -1068,7 +1107,18 @@ export async function renderUnifiedDiffToImages(diffText, language) {
     lines.push({ tokens: createPlainTokens(rawLine) });
   }
 
-  return renderCodeLikeAnnotatedLines(lines, { gutterWidth: GUTTER_WIDTH, prefixChars: 1 });
+  return renderCodeLikeAnnotatedLinesPreview(lines, { gutterWidth: GUTTER_WIDTH, prefixChars: 1, ...options });
+}
+
+/**
+ * Render a unified diff as syntax-highlighted PNG image(s), preserving the
+ * existing hunk boundaries and context lines instead of re-diffing full files.
+ * @param {string} diffText
+ * @param {string} [language]
+ * @returns {Promise<Buffer[]>}
+ */
+export async function renderUnifiedDiffToImages(diffText, language) {
+  return (await renderUnifiedDiffToImagePreview(diffText, language)).images;
 }
 
 /**
@@ -1249,10 +1299,10 @@ function prefixTokens(tokens, prefix) {
 
 /**
  * @param {AnnotatedLine[]} lines
- * @param {{ gutterWidth?: number, prefixChars?: number }} [options]
- * @returns {Buffer[]}
+ * @param {{ gutterWidth?: number, prefixChars?: number, maxImages?: number }} [options]
+ * @returns {RenderedImagePreview}
  */
-function renderCodeLikeAnnotatedLines(lines, options) {
+function renderCodeLikeAnnotatedLinesPreview(lines, options) {
   const gutterWidth = options?.gutterWidth ?? 0;
   const prefixChars = options?.prefixChars ?? 0;
   const maxContentChars = maxContentCharsForWidthCap({
@@ -1264,9 +1314,10 @@ function renderCodeLikeAnnotatedLines(lines, options) {
     maxContentChars,
     continuationIndent: CONTINUATION_INDENT,
   });
-  return renderAnnotatedLines(wrappedLines, {
+  return renderAnnotatedLinesPreview(wrappedLines, {
     gutterWidth,
     maxSvgWidth: CODE_IMAGE_WIDTH_CAP,
     maxLinesPerChunk: MAX_LINES_PER_CHUNK,
+    ...(options?.maxImages !== undefined ? { maxImages: options.maxImages } : {}),
   });
 }
