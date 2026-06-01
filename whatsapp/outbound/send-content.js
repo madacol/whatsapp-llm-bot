@@ -29,13 +29,13 @@ const log = createLogger("whatsapp:outbound");
 const inMemoryEditHandles = new Map();
 /** @type {Map<string, { handle?: MessageHandle, entries: Array<{ icon: string, provider: string, summary: string, detail?: string }> }>} */
 const runtimeStatusByChat = new Map();
-/** @type {Map<string, Map<string, { handle?: MessageHandle, command: string }>>} */
+/** @type {Map<string, Map<string, { handle?: MessageHandle, command: string, reviewPrefix?: "👍" | "👎" }>>} */
 const runtimeCommandsByChat = new Map();
-/** @type {Map<string, Map<string, { handle?: MessageHandle, summary: string }>>} */
+/** @type {Map<string, Map<string, { handle?: MessageHandle, summary: string, reviewPrefix?: "👍" | "👎" }>>} */
 const runtimeToolsByChat = new Map();
 /** @type {Map<string, {
  *   handle?: MessageHandle,
- *   entries: Array<{ id: string, summary: string, inspectDetail?: string, completed: boolean, failed: boolean }>,
+ *   entries: Array<{ id: string, summary: string, inspectDetail?: string, completed: boolean, failed: boolean, reviewPrefix?: "👍" | "👎" }>,
  *   pendingCommandEntryIds: Map<string, string[]>,
  *   pendingToolEntryIds: string[],
  *   pendingToolEntryIdsByToolId: Map<string, string>,
@@ -132,6 +132,72 @@ function getRawAcpCommand(update) {
   }
   const title = getRawAcpTitle(update);
   return title && title !== "Editing files" ? title : null;
+}
+
+/**
+ * @param {Record<string, unknown>} update
+ * @returns {string | null}
+ */
+function getRawAcpFormattedOutput(update) {
+  const rawOutput = isRecord(update.rawOutput) ? update.rawOutput : null;
+  return typeof rawOutput?.formatted_output === "string" ? rawOutput.formatted_output : null;
+}
+
+/**
+ * @param {string} output
+ * @returns {{ start: number, end: number } | null}
+ */
+function parseNumberedLineRange(output) {
+  /** @type {number | null} */
+  let start = null;
+  /** @type {number | null} */
+  let end = null;
+  for (const line of output.split("\n")) {
+    const match = line.match(/^\s*(\d+)\t/);
+    if (!match) {
+      continue;
+    }
+    const lineNumber = Number(match[1]);
+    if (!Number.isInteger(lineNumber) || lineNumber <= 0) {
+      continue;
+    }
+    start ??= lineNumber;
+    end = lineNumber;
+  }
+  return start !== null && end !== null ? { start, end } : null;
+}
+
+/**
+ * @param {RuntimeEventOutboundEvent} event
+ * @returns {{ start: number, end: number } | null}
+ */
+function getRawAcpReadOutputLineRange(event) {
+  const update = getRawAcpSessionUpdate(event);
+  if (!update || update.status !== "completed") {
+    return null;
+  }
+  const output = getRawAcpFormattedOutput(update);
+  return output ? parseNumberedLineRange(output) : null;
+}
+
+/**
+ * @param {{ start: number, end: number }} range
+ * @returns {string}
+ */
+function formatLineRange(range) {
+  return range.start === range.end ? `*${range.start}*` : `*${range.start}-${range.end}*`;
+}
+
+/**
+ * @param {string} summary
+ * @param {{ start: number, end: number } | null} range
+ * @returns {string}
+ */
+function appendReadLineRange(summary, range) {
+  if (!range || !summary.startsWith("*Read*") || /(?:_L\d+(?:-L\d+)?_|\*\d+(?:-\d+)?\*)/.test(summary)) {
+    return summary;
+  }
+  return `${summary}  ${formatLineRange(range)}`;
 }
 
 /**
@@ -381,6 +447,140 @@ function formatRuntimePayload(value) {
 function formatRuntimeProvider(provider) {
   const normalized = provider?.trim();
   return normalized ? normalized.toUpperCase() : "Provider";
+}
+
+/**
+ * @param {SendContent} content
+ * @returns {string}
+ */
+function extractOutboundContentText(content) {
+  if (typeof content === "string") {
+    return content;
+  }
+  const blocks = Array.isArray(content) ? content : [content];
+  return blocks
+    .map((block) => {
+      if (!isRecord(block)) {
+        return "";
+      }
+      if ("text" in block && typeof block.text === "string") {
+        return block.text;
+      }
+      if ("code" in block && typeof block.code === "string") {
+        return block.code;
+      }
+      return "";
+    })
+    .join("");
+}
+
+/**
+ * @param {OutboundEvent} event
+ * @returns {"👍" | "👎" | null}
+ */
+function getGuardianReviewPrefixEmoji(event) {
+  if (event.kind !== "content" || event.source !== "llm") {
+    return null;
+  }
+  const text = extractOutboundContentText(event.content).trim();
+  if (/^Guardian warning: Automatic approval review approved\b/.test(text)) {
+    return "👍";
+  }
+  if (/^Guardian warning: Automatic approval review denied\b/.test(text)) {
+    return "👎";
+  }
+  return null;
+}
+
+/**
+ * @template {{ handle?: MessageHandle }} T
+ * @param {Map<string, T>} stateById
+ * @returns {T | undefined}
+ */
+function getLastRuntimeState(stateById) {
+  /** @type {T | undefined} */
+  let lastState;
+  for (const state of stateById.values()) {
+    if (state.handle) {
+      lastState = state;
+    }
+  }
+  return lastState;
+}
+
+/**
+ * @param {"started" | "completed" | "failed"} status
+ * @param {string} summary
+ * @param {"👍" | "👎" | undefined} [reviewPrefix]
+ * @returns {string}
+ */
+function formatRuntimeCommandText(status, summary, reviewPrefix) {
+  const prefix = reviewPrefix ? `${reviewPrefix} ` : "";
+  return `${prefix}${getRuntimeCommandIcon(status)} ${summary}`;
+}
+
+/**
+ * @param {"started" | "updated" | "completed" | "failed"} status
+ * @param {string} summary
+ * @param {"👍" | "👎" | undefined} [reviewPrefix]
+ * @returns {string}
+ */
+function formatRuntimeToolText(status, summary, reviewPrefix) {
+  const prefix = reviewPrefix ? `${reviewPrefix} ` : "";
+  return `${prefix}${getRuntimeToolIcon(status)} ${summary}`;
+}
+
+/**
+ * @param {ReturnType<typeof createCompactToolActivityState> & { handle?: MessageHandle }} state
+ * @returns {{ id: string, summary: string, completed: boolean, failed: boolean, reviewPrefix?: "👍" | "👎" } | undefined}
+ */
+function getLatestActiveCompactEntry(state) {
+  for (let index = state.entries.length - 1; index >= 0; index -= 1) {
+    const entry = state.entries[index];
+    if (!entry.completed && !entry.failed) {
+      return entry;
+    }
+  }
+  return undefined;
+}
+
+/**
+ * @param {string} chatId
+ * @param {"👍" | "👎"} emoji
+ * @returns {Promise<boolean>}
+ */
+async function prefixLatestToolMessage(chatId, emoji) {
+  const compactState = compactToolActivityByChat.get(chatId);
+  if (compactState) {
+    const compactEntry = getLatestActiveCompactEntry(compactState);
+    if (compactEntry) {
+      compactEntry.reviewPrefix = emoji;
+      await flushCompactToolActivity(compactState);
+      return true;
+    }
+  }
+  const toolStateById = runtimeToolsByChat.get(chatId);
+  if (toolStateById) {
+    const toolState = getLastRuntimeState(toolStateById);
+    if (toolState?.handle) {
+      toolState.reviewPrefix = emoji;
+      await toolState.handle.update({ kind: "text", text: formatRuntimeToolText("started", toolState.summary, emoji) });
+      return true;
+    }
+  }
+  const commandStateById = runtimeCommandsByChat.get(chatId);
+  if (commandStateById) {
+    const commandState = getLastRuntimeState(commandStateById);
+    if (commandState?.handle) {
+      commandState.reviewPrefix = emoji;
+      await commandState.handle.update({
+        kind: "text",
+        text: formatRuntimeCommandText("started", formatRuntimeCommandSummary(commandState.command), emoji),
+      });
+      return true;
+    }
+  }
+  return false;
 }
 
 /**
@@ -953,9 +1153,9 @@ async function sendRuntimeCommandEvent(sock, chatId, event, options, reactionRun
   const command = commandEvent.command.command;
   const status = commandEvent.command.status;
   const summary = formatRuntimeCommandSummary(command);
-  const text = `${getRuntimeCommandIcon(status)} ${summary}`;
 
   if (status === "started") {
+    const text = formatRuntimeCommandText(status, summary);
     let commandStateByCommand = runtimeCommandsByChat.get(chatId);
     if (!commandStateByCommand) {
       commandStateByCommand = new Map();
@@ -977,6 +1177,7 @@ async function sendRuntimeCommandEvent(sock, chatId, event, options, reactionRun
 
   const commandStateByCommand = runtimeCommandsByChat.get(chatId);
   const state = commandStateByCommand?.get(command);
+  const text = formatRuntimeCommandText(status, summary, state?.reviewPrefix);
   if (!state?.handle) {
     if (status === "failed") {
       const detail = commandEvent.command.output ? `\n\n${commandEvent.command.output}` : "";
@@ -1047,9 +1248,10 @@ async function sendRuntimeToolEvent(sock, chatId, event, options, reactionRuntim
     return undefined;
   }
   const summary = formatRuntimeToolSummary(displayTool, event.cwd);
+  const readLineRange = getRawAcpReadOutputLineRange(event);
 
   if (status === "started") {
-    const text = `${getRuntimeToolIcon(status)} ${summary}`;
+    const text = formatRuntimeToolText(status, summary);
     let toolStateById = runtimeToolsByChat.get(chatId);
     if (!toolStateById) {
       toolStateById = new Map();
@@ -1071,7 +1273,14 @@ async function sendRuntimeToolEvent(sock, chatId, event, options, reactionRuntim
 
   const toolStateById = runtimeToolsByChat.get(chatId);
   const state = toolStateById?.get(toolEvent.tool.id);
-  const text = `${getRuntimeToolIcon(status)} ${state?.summary ?? summary}`;
+  if (state) {
+    state.summary = appendReadLineRange(state.summary, readLineRange);
+  }
+  const text = formatRuntimeToolText(
+    status,
+    state?.summary ?? appendReadLineRange(summary, readLineRange),
+    state?.reviewPrefix,
+  );
   if (state?.handle) {
     if (toolEvent.tool.output !== undefined) {
       state.handle.setInspect({
@@ -1120,12 +1329,13 @@ function createCompactToolActivityState() {
 }
 
 /**
- * @param {{ completed: boolean, failed: boolean, summary: string }} entry
+ * @param {{ completed: boolean, failed: boolean, summary: string, reviewPrefix?: "👍" | "👎" }} entry
  * @returns {string}
  */
 function renderCompactToolActivityEntry(entry) {
   const icon = entry.failed ? "❌" : entry.completed ? "✅" : "🔧";
-  return `${icon} ${entry.summary}`;
+  const prefix = entry.reviewPrefix ? `${entry.reviewPrefix} ` : "";
+  return `${prefix}${icon} ${entry.summary}`;
 }
 
 /**
@@ -1216,6 +1426,22 @@ function markCompactEntry(state, entryId, status) {
   }
   entry.completed = true;
   return true;
+}
+
+/**
+ * @param {{ entries: Array<{ id: string, summary: string }> }} state
+ * @param {string | undefined} entryId
+ * @param {{ start: number, end: number } | null} range
+ * @returns {void}
+ */
+function updateCompactReadLineRange(state, entryId, range) {
+  if (!entryId || !range) {
+    return;
+  }
+  const entry = state.entries.find((candidate) => candidate.id === entryId);
+  if (entry) {
+    entry.summary = appendReadLineRange(entry.summary, range);
+  }
 }
 
 /**
@@ -1404,6 +1630,7 @@ async function sendCompactToolActivityEvent(sock, chatId, event, options, reacti
         entryId = state.pendingToolEntryIds.pop();
       }
     }
+    updateCompactReadLineRange(state, entryId, activity.readLineRange ?? null);
     if (entryId && markCompactEntry(state, entryId, activity.status === "failed" ? "failed" : "completed")) {
       forgetCompactPendingToolEntry(state, entryId);
       return flushCompactToolActivity(state);
@@ -1453,6 +1680,7 @@ async function sendCompactRuntimeEvent(sock, chatId, event, options, reactionRun
     if (isNoopRuntimeTool(displayTool)) {
       return undefined;
     }
+    const readLineRange = getRawAcpReadOutputLineRange(event);
     return sendCompactToolActivityEvent(sock, chatId, {
       kind: "compact_tool_activity",
       cwd: event.cwd,
@@ -1464,6 +1692,7 @@ async function sendCompactRuntimeEvent(sock, chatId, event, options, reactionRun
           name: displayTool.name,
           arguments: JSON.stringify(displayTool.arguments),
         },
+        ...(readLineRange ? { readLineRange } : {}),
       },
     }, options, reactionRuntime, sendOptions);
   }
@@ -1920,10 +2149,6 @@ async function sendRuntimeEvent(sock, chatId, event, options, reactionRuntime, s
     }
   }
 
-  if (!isCompactRuntimeProgressEvent(event.event)) {
-    await closeCompactToolActivityIfOpen(sock, chatId, options, reactionRuntime, sendOptions);
-  }
-
   if (event.event.type === "file-read.started") {
     return sendRuntimeFileReadEvent(sock, chatId, event, options, reactionRuntime, sendOptions);
   }
@@ -1946,6 +2171,8 @@ async function sendRuntimeEvent(sock, chatId, event, options, reactionRuntime, s
     }
     return undefined;
   }
+
+  await closeCompactToolActivityIfOpen(sock, chatId, options, reactionRuntime, sendOptions);
 
   const presentation = formatRuntimeEventPresentation(event.event);
   if (presentation.kind === "error") {
@@ -2194,6 +2421,11 @@ export async function editWhatsAppMessageByHandle(sock, transportHandleId, newTe
  * @returns {Promise<MessageHandle | undefined>}
  */
 export async function sendEvent(sock, chatId, event, options, reactionRuntime, sendOptions = {}) {
+  const guardianPrefix = getGuardianReviewPrefixEmoji(event);
+  if (guardianPrefix) {
+    await prefixLatestToolMessage(chatId, guardianPrefix);
+    return undefined;
+  }
   if (event.kind === "runtime_event") {
     return sendRuntimeEvent(sock, chatId, event, options, reactionRuntime, sendOptions);
   }

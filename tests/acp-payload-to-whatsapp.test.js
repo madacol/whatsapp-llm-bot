@@ -475,6 +475,44 @@ describe("ACP payload to WhatsApp socket vertical slices", () => {
     assert.equal(sent[0]?.msg.text, "🔧 *Read*  `src/app.js`");
   });
 
+  it("adds ACP read line ranges from completed raw output", async () => {
+    const { sent, trace } = await observeAcpPayloadSliceToBaileys([
+      {
+        sessionId: "s1",
+        update: {
+          sessionUpdate: "tool_call",
+          toolCallId: "read-range",
+          title: "Read file",
+          kind: "read",
+          status: "in_progress",
+          locations: [{ path: "/repo/src/app.js" }],
+        },
+      },
+      {
+        sessionId: "s1",
+        update: {
+          sessionUpdate: "tool_call_update",
+          toolCallId: "read-range",
+          status: "completed",
+          rawOutput: {
+            formatted_output: [
+              "    10\tfunction start() {",
+              "    11\t  return true;",
+              "    12\t}",
+            ].join("\n"),
+          },
+        },
+      },
+    ], {
+      chatId: "acp-payload-read-range@s.whatsapp.net",
+      cwd: "/repo",
+    });
+
+    assert.deepEqual(trace.runtimeEvents.map((event) => event.type), ["tool.started", "tool.completed"]);
+    assert.equal(sent[0]?.msg.text, "🔧 *Read*  `src/app.js`");
+    assert.equal(sent[1]?.msg.text, "✅ *Read*  `src/app.js`  *10-12*");
+  });
+
   it("renders ACP search titles from raw WhatsApp payloads", async () => {
     const { sent, trace } = await observeAcpPayloadSliceToBaileys([
       {
@@ -519,6 +557,169 @@ describe("ACP payload to WhatsApp socket vertical slices", () => {
 
     assert.deepEqual(trace.runtimeEvents.map((event) => event.type), ["tool.started"]);
     assert.equal(sent[0]?.msg.text, "🔧 *Shell*  `pnpm type-check`");
+  });
+
+  it("prefixes the tool call instead of sending Guardian approval review text", async () => {
+    const { sent, trace } = await observeAcpPayloadSliceToBaileys([
+      {
+        sessionId: "s1",
+        update: {
+          sessionUpdate: "tool_call",
+          toolCallId: "approved-command",
+          title: "pnpm type-check",
+          kind: "execute",
+          status: "in_progress",
+          rawInput: {
+            command: "pnpm type-check",
+            cwd: "/repo",
+          },
+        },
+      },
+      {
+        sessionId: "s1",
+        update: {
+          sessionUpdate: "agent_message_chunk",
+          content: {
+            type: "text",
+            text: "Guardian warning: Automatic approval review approved (risk: low, authorization: unknown): Auto-review returned a low-risk allow decision.\n\n",
+          },
+        },
+      },
+    ], {
+      chatId: "acp-payload-guardian-approval@s.whatsapp.net",
+      cwd: "/repo",
+      visibility: { ...DEFAULT_OUTPUT_VISIBILITY, toolDetails: true },
+    });
+
+    assert.deepEqual(trace.runtimeEvents.map((event) => event.type), [
+      "tool.started",
+      "item.started",
+      "content.delta",
+      "item.completed",
+    ]);
+    assert.equal(sent[0]?.msg.text, "🔧 *Shell*  `pnpm type-check`");
+    assert.equal(sent[1]?.msg.text, "👍 🔧 *Shell*  `pnpm type-check`");
+    assert.equal(sent[1]?.msg.edit?.id, "msg-1");
+    assert.equal(sent.some((entry) => String(entry.msg.text ?? "").includes("Guardian warning")), false);
+  });
+
+  it("prefixes the tool call with a denial emoji for denied Guardian approval reviews", async () => {
+    const { sent } = await observeAcpPayloadSliceToBaileys([
+      {
+        sessionId: "s1",
+        update: {
+          sessionUpdate: "tool_call",
+          toolCallId: "denied-command",
+          title: "rm -rf actions",
+          kind: "execute",
+          status: "in_progress",
+          rawInput: {
+            command: "rm -rf actions",
+            cwd: "/repo",
+          },
+        },
+      },
+      {
+        sessionId: "s1",
+        update: {
+          sessionUpdate: "agent_message_chunk",
+          content: {
+            type: "text",
+            text: "Guardian warning: Automatic approval review denied (risk: high, authorization: low): This action is too broad.\n\n",
+          },
+        },
+      },
+    ], {
+      chatId: "acp-payload-guardian-denial@s.whatsapp.net",
+      cwd: "/repo",
+      visibility: { ...DEFAULT_OUTPUT_VISIBILITY, toolDetails: true },
+    });
+
+    assert.equal(sent[1]?.msg.text, "👎 🔧 *Shell*  `rm -rf actions`");
+    assert.equal(sent[1]?.msg.edit?.id, "msg-1");
+    assert.equal(sent.some((entry) => String(entry.msg.text ?? "").includes("Guardian warning")), false);
+  });
+
+  it("keeps Guardian prefixes when compact tool calls complete or fail", async () => {
+    const approved = await observeAcpPayloadSliceToBaileys([
+      {
+        sessionId: "s1",
+        update: {
+          sessionUpdate: "tool_call",
+          toolCallId: "approved-compact-command",
+          title: "pnpm type-check",
+          kind: "execute",
+          status: "in_progress",
+          rawInput: { command: "pnpm type-check", cwd: "/repo" },
+        },
+      },
+      {
+        sessionId: "s1",
+        update: {
+          sessionUpdate: "agent_message_chunk",
+          content: {
+            type: "text",
+            text: "Guardian warning: Automatic approval review approved (risk: low, authorization: unknown): Auto-review returned a low-risk allow decision.\n\n",
+          },
+        },
+      },
+      {
+        sessionId: "s1",
+        update: {
+          sessionUpdate: "tool_call_update",
+          toolCallId: "approved-compact-command",
+          status: "completed",
+          rawOutput: { formatted_output: "ok\n" },
+        },
+      },
+    ], {
+      chatId: "acp-payload-guardian-compact-approved@s.whatsapp.net",
+      cwd: "/repo",
+    });
+
+    assert.equal(approved.sent[0]?.msg.text, "🔧 *Shell*  `pnpm type-check`");
+    assert.equal(approved.sent[1]?.msg.text, "👍 🔧 *Shell*  `pnpm type-check`");
+    assert.equal(approved.sent[2]?.msg.text, "👍 ✅ *Shell*  `pnpm type-check`");
+
+    const denied = await observeAcpPayloadSliceToBaileys([
+      {
+        sessionId: "s1",
+        update: {
+          sessionUpdate: "tool_call",
+          toolCallId: "denied-compact-command",
+          title: "rm -rf actions",
+          kind: "execute",
+          status: "in_progress",
+          rawInput: { command: "rm -rf actions", cwd: "/repo" },
+        },
+      },
+      {
+        sessionId: "s1",
+        update: {
+          sessionUpdate: "agent_message_chunk",
+          content: {
+            type: "text",
+            text: "Guardian warning: Automatic approval review denied (risk: high, authorization: low): This action is too broad.\n\n",
+          },
+        },
+      },
+      {
+        sessionId: "s1",
+        update: {
+          sessionUpdate: "tool_call_update",
+          toolCallId: "denied-compact-command",
+          status: "failed",
+          rawOutput: { formatted_output: "blocked\n" },
+        },
+      },
+    ], {
+      chatId: "acp-payload-guardian-compact-denied@s.whatsapp.net",
+      cwd: "/repo",
+    });
+
+    assert.equal(denied.sent[0]?.msg.text, "🔧 *Shell*  `rm -rf actions`");
+    assert.equal(denied.sent[1]?.msg.text, "👎 🔧 *Shell*  `rm -rf actions`");
+    assert.equal(denied.sent[2]?.msg.text, "👎 ❌ *Shell*  `rm -rf actions`");
   });
 
   it("smoke-tests a real ACP mock process through adapter events into Baileys output", async () => {
