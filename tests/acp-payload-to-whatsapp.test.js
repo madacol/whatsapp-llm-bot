@@ -561,6 +561,76 @@ describe("ACP payload to WhatsApp socket vertical slices", () => {
     assert.equal(sent[0]?.msg.text, "🔧 *Search*  `toolDetails|compact_tool_activity` in *whatsapp-transport.test.js*");
   });
 
+  it("renders Codex ACP web search actions from raw WhatsApp payloads", async () => {
+    const { sent, trace } = await observeAcpPayloadSliceToBaileys([
+      {
+        sessionId: "s1",
+        update: {
+          sessionUpdate: "tool_call",
+          toolCallId: "web-search-real-shape",
+          title: "Web search: runtime migration",
+          kind: "search",
+          status: "completed",
+          rawInput: {
+            query: "runtime migration",
+            action: {
+              type: "search",
+              query: "runtime migration",
+              queries: ["runtime migration"],
+            },
+          },
+        },
+      },
+      {
+        sessionId: "s1",
+        update: {
+          sessionUpdate: "tool_call",
+          toolCallId: "web-open-real-shape",
+          title: "Open page: https://example.com/docs",
+          kind: "search",
+          status: "completed",
+          rawInput: {
+            query: "https://example.com/docs",
+            action: {
+              type: "openPage",
+              url: "https://example.com/docs",
+            },
+          },
+        },
+      },
+      {
+        sessionId: "s1",
+        update: {
+          sessionUpdate: "tool_call",
+          toolCallId: "web-find-real-shape",
+          title: "Find in page for 'install' in https://example.com/docs",
+          kind: "search",
+          status: "completed",
+          rawInput: {
+            action: {
+              type: "findInPage",
+              pattern: "install",
+              url: "https://example.com/docs",
+            },
+          },
+        },
+      },
+    ], {
+      chatId: "acp-payload-web-actions@s.whatsapp.net",
+      cwd: "/repo",
+      visibility: { ...DEFAULT_OUTPUT_VISIBILITY, toolDetails: true },
+    });
+
+    assert.deepEqual(trace.runtimeEvents.map((event) => event.type), [
+      "tool.completed",
+      "tool.completed",
+      "tool.completed",
+    ]);
+    assert.equal(sent[0]?.msg.text, "✅ *Search Web*  \"runtime migration\"");
+    assert.equal(sent[1]?.msg.text, "✅ *Open Link*  `example.com/docs`");
+    assert.equal(sent[2]?.msg.text, "✅ *Find On Page*  \"install\" in `example.com/docs`");
+  });
+
   it("renders ACP list-file titles with the listed path", async () => {
     const { sent, trace } = await observeAcpPayloadSliceToBaileys([
       {

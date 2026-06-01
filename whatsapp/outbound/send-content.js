@@ -143,6 +143,77 @@ function parseRawAcpSearchTitle(title) {
 }
 
 /**
+ * @param {unknown} value
+ * @returns {string | null}
+ */
+function nonEmptyString(value) {
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+}
+
+/**
+ * @param {unknown} value
+ * @returns {string | null}
+ */
+function joinedStringList(value) {
+  if (!Array.isArray(value)) {
+    return null;
+  }
+  const entries = value.map(nonEmptyString).filter((entry) => entry !== null);
+  return entries.length > 0 ? entries.join(", ") : null;
+}
+
+/**
+ * @param {Extract<RuntimeEventOutboundEvent["event"], { tool: unknown }>["tool"]} tool
+ * @param {Record<string, unknown>} update
+ * @returns {Extract<RuntimeEventOutboundEvent["event"], { tool: unknown }>["tool"] | null}
+ */
+function buildWhatsAppWebRuntimeToolFromRawAcp(tool, update) {
+  const rawInput = getRawAcpInput(update);
+  const action = isRecord(rawInput?.action) ? rawInput.action : null;
+  const actionType = nonEmptyString(action?.type);
+  if (!rawInput || !action || !actionType) {
+    return null;
+  }
+  switch (actionType) {
+    case "search": {
+      const query = nonEmptyString(action.query)
+        ?? joinedStringList(action.queries)
+        ?? nonEmptyString(rawInput.query);
+      return query
+        ? {
+          ...tool,
+          name: "search_query",
+          arguments: { ...tool.arguments, q: query },
+        }
+        : null;
+    }
+    case "openPage": {
+      const refId = nonEmptyString(action.url);
+      return refId
+        ? {
+          ...tool,
+          name: "open",
+          arguments: { ...tool.arguments, ref_id: refId },
+        }
+        : null;
+    }
+    case "findInPage": {
+      const pattern = nonEmptyString(action.pattern);
+      const refId = nonEmptyString(action.url);
+      return pattern && refId
+        ? {
+          ...tool,
+          name: "find",
+          arguments: { ...tool.arguments, pattern, ref_id: refId },
+        }
+        : null;
+    }
+    default:
+      return null;
+  }
+}
+
+/**
  * @param {Record<string, unknown>} update
  * @returns {string | null}
  */
@@ -267,6 +338,10 @@ function buildWhatsAppRuntimeToolFromRawAcp(tool, event) {
     }
   }
   if (update.kind === "search") {
+    const webTool = buildWhatsAppWebRuntimeToolFromRawAcp(tool, update);
+    if (webTool) {
+      return webTool;
+    }
     const title = getRawAcpTitle(update);
     const search = title ? parseRawAcpSearchTitle(title) : null;
     if (search) {
