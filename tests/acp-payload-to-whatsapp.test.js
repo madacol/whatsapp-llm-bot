@@ -582,6 +582,27 @@ describe("ACP payload to WhatsApp socket vertical slices", () => {
     assert.equal(sent[0]?.msg.text, "🔧 *List*  `.env`");
   });
 
+  it("renders bare ACP list-file titles without inventing a path", async () => {
+    const { sent, trace } = await observeAcpPayloadSliceToBaileys([
+      {
+        sessionId: "s1",
+        update: {
+          sessionUpdate: "tool_call",
+          toolCallId: "list-current-real-shape",
+          title: "List files",
+          kind: "read",
+          status: "in_progress",
+        },
+      },
+    ], {
+      chatId: "acp-payload-list-current-title@s.whatsapp.net",
+      cwd: "/repo",
+    });
+
+    assert.deepEqual(trace.runtimeEvents.map((event) => event.type), ["tool.started"]);
+    assert.equal(sent[0]?.msg.text, "🔧 *List*");
+  });
+
   it("renders ACP execute commands from raw WhatsApp payloads", async () => {
     const { sent, trace } = await observeAcpPayloadSliceToBaileys([
       {
