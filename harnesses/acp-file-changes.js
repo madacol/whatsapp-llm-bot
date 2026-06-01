@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { isRuntimeStateSnapshotPath } from "../snapshot-file-policy.js";
@@ -134,14 +135,17 @@ export function reconcileAcpFileChangeWithBaseline(event, beforeSnapshot, workdi
   const missingOldText = event.change.oldText === undefined;
   const mislabeledAdd = event.change.kind === "add";
   const oldText = missingOldText ? baselineText : event.change.oldText;
-  const newText = event.change.kind === "delete" ? undefined : event.change.newText;
+  const missingAfterEmptyTextEdit = event.change.kind === "update"
+    && event.change.newText === ""
+    && !existsSync(resolvedPath);
+  const correctedKind = event.change.kind === "delete" || missingAfterEmptyTextEdit ? "delete" : "update";
+  const newText = correctedKind === "delete" ? undefined : event.change.newText;
   const needsDiff = event.change.diff === undefined
-    && (event.change.kind === "delete" || typeof newText === "string");
-  if (!missingOldText && !mislabeledAdd && !needsDiff) {
+    && (correctedKind === "delete" || typeof newText === "string");
+  if (!missingOldText && !mislabeledAdd && !missingAfterEmptyTextEdit && !needsDiff) {
     return event;
   }
 
-  const correctedKind = event.change.kind === "delete" ? "delete" : "update";
   const diff = event.change.diff ?? buildUnifiedFileDiff(
     resolvedPath,
     oldText,
@@ -153,6 +157,7 @@ export function reconcileAcpFileChangeWithBaseline(event, beforeSnapshot, workdi
       ...event.change,
       kind: correctedKind,
       oldText,
+      newText,
       ...(diff ? { diff } : {}),
     },
   };

@@ -1685,6 +1685,28 @@ Second block:
     assert.equal(diffBlock.caption, "Delete *src/delete-me.js*");
   });
 
+  it("uses deletion diff headers over stale update labels", () => {
+    const content = renderFileChangeContent({
+      kind: "file_change",
+      path: "/tmp/src/delete-me.js",
+      cwd: "/tmp",
+      changeKind: "update",
+      oldText: "export const value = 1;\n",
+      newText: "",
+      diff: [
+        "--- a/src/delete-me.js",
+        "+++ /dev/null",
+        "@@ -1 +0,0 @@",
+        "-export const value = 1;",
+      ].join("\n"),
+    });
+
+    assert.ok(Array.isArray(content), "Expected file-change content blocks");
+    const diffBlock = /** @type {DiffContentBlock} */ (content[0]);
+    assert.equal(diffBlock.type, "diff");
+    assert.equal(diffBlock.caption, "Delete *src/delete-me.js*");
+  });
+
   it("renders proposed file changes with a lifecycle-specific title even without a diff", () => {
     const content = renderFileChangeContent({
       kind: "file_change",
