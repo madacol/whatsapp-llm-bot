@@ -78,6 +78,38 @@ function buildPrompt(messages) {
 }
 
 /**
+ * @param {IncomingContentBlock[]} blocks
+ * @param {IncomingContentBlock[]} attachments
+ * @returns {void}
+ */
+function collectAttachmentBlocks(blocks, attachments) {
+  for (const block of blocks) {
+    if (block.type === "quote") {
+      collectAttachmentBlocks(block.content, attachments);
+      continue;
+    }
+    if (block.type === "image" || block.type === "video" || block.type === "audio" || block.type === "file") {
+      attachments.push(block);
+    }
+  }
+}
+
+/**
+ * @param {Message[]} messages
+ * @returns {IncomingContentBlock[]}
+ */
+function getLatestUserAttachments(messages) {
+  const latestUser = [...messages].reverse().find((message) => message.role === "user");
+  if (!latestUser) {
+    return [];
+  }
+  /** @type {IncomingContentBlock[]} */
+  const attachments = [];
+  collectAttachmentBlocks(latestUser.content, attachments);
+  return attachments;
+}
+
+/**
  * @param {Record<string, unknown>} config
  * @param {string | undefined} defaultCommand
  * @returns {{ command: string, args: string[], env?: NodeJS.ProcessEnv }}
@@ -191,6 +223,7 @@ export function createAcpHarness(options = {}) {
         const completed = await startAcpRun({
           ...commandSpec,
           prompt,
+          attachments: getLatestUserAttachments(messages),
           messages,
           runConfig,
           hooks,
@@ -276,6 +309,7 @@ export function createAcpHarness(options = {}) {
             const completed = await startAcpRun({
               ...commandSpec,
               prompt,
+              attachments: turn.attachments ?? getLatestUserAttachments(turn.messages ?? []),
               messages: turn.messages ?? [],
               sessionId,
               runConfig: turn.runConfig,

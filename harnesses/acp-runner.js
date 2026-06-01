@@ -1,6 +1,8 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { spawn } from "node:child_process";
+import { pathToFileURL } from "node:url";
+import { hasInlineMediaData, hasMediaPath, isValidMediaPath, resolveMediaPath } from "../attachment-paths.js";
 import { openAcpConnection } from "./acp-client.js";
 import { hasAcpSessionCapability, hasMadabotAcpSessionCapability, supportsAcpLoadSession } from "./acp-capabilities.js";
 import { createAcpRawPayload, createAcpRuntimeModel, normalizeAcpUsage } from "./acp-events.js";
@@ -24,6 +26,7 @@ import { matchProtectedPath, requestProtectedPathApproval, restoreProtectedPath 
  *   command: string,
  *   args?: string[],
  *   prompt: string,
+ *   attachments?: IncomingContentBlock[],
  *   messages?: Message[],
  *   sessionId?: string | null,
  *   runConfig?: HarnessRunConfig,
@@ -126,11 +129,124 @@ function buildCapabilityErrorDetails(capabilities) {
 }
 
 /**
- * @param {string} prompt
- * @returns {Array<{ type: "text", text: string }>}
+ * @typedef {{
+ *   type: "text",
+ *   text: string,
+ * } | {
+ *   type: "image",
+ *   data: string,
+ *   mimeType: string,
+ *   uri?: string,
+ * } | {
+ *   type: "resource_link",
+ *   uri: string,
+ *   name: string,
+ *   mimeType?: string,
+ *   size?: number,
+ * }} AcpPromptContentBlock
  */
-function buildPromptContent(prompt) {
-  return [{ type: "text", text: prompt }];
+
+/**
+ * @param {string} mediaPath
+ * @param {string | null | undefined} workdir
+ * @returns {string}
+ */
+function resolvePromptMediaPath(mediaPath, workdir) {
+  if (path.isAbsolute(mediaPath)) {
+    return mediaPath;
+  }
+  if (isValidMediaPath(mediaPath)) {
+    return resolveMediaPath(mediaPath);
+  }
+  return path.resolve(workdir ?? process.cwd(), mediaPath);
+}
+
+/**
+ * @param {ImageContentBlock | VideoContentBlock | AudioContentBlock | FileContentBlock} block
+ * @returns {string | undefined}
+ */
+function getPromptBlockMimeType(block) {
+  return typeof block.mime_type === "string" && block.mime_type.trim()
+    ? block.mime_type.trim()
+    : undefined;
+}
+
+/**
+ * @param {ImageContentBlock | VideoContentBlock | AudioContentBlock | FileContentBlock} block
+ * @param {string | undefined} resolvedPath
+ * @returns {string}
+ */
+function getPromptBlockName(block, resolvedPath) {
+  if ("file_name" in block && typeof block.file_name === "string" && block.file_name.trim()) {
+    return block.file_name.trim();
+  }
+  if (resolvedPath) {
+    return path.basename(resolvedPath);
+  }
+  return `${block.type}`;
+}
+
+/**
+ * @param {ImageContentBlock | VideoContentBlock | AudioContentBlock | FileContentBlock} block
+ * @param {string | null | undefined} workdir
+ * @returns {Promise<AcpPromptContentBlock | null>}
+ */
+async function buildAttachmentPromptContent(block, workdir) {
+  if (block.type === "image") {
+    const mimeType = getPromptBlockMimeType(block) ?? "image/png";
+    if (hasInlineMediaData(block)) {
+      return {
+        type: "image",
+        data: block.data,
+        mimeType,
+      };
+    }
+    if (hasMediaPath(block)) {
+      const resolvedPath = resolvePromptMediaPath(block.path, workdir);
+      return {
+        type: "image",
+        data: (await fs.readFile(resolvedPath)).toString("base64"),
+        mimeType,
+        uri: pathToFileURL(resolvedPath).href,
+      };
+    }
+    return null;
+  }
+
+  if (!hasMediaPath(block)) {
+    return null;
+  }
+
+  const resolvedPath = resolvePromptMediaPath(block.path, workdir);
+  const stats = await fs.stat(resolvedPath).catch(() => null);
+  return {
+    type: "resource_link",
+    uri: pathToFileURL(resolvedPath).href,
+    name: getPromptBlockName(block, resolvedPath),
+    ...(getPromptBlockMimeType(block) ? { mimeType: getPromptBlockMimeType(block) } : {}),
+    ...(stats?.isFile() ? { size: stats.size } : {}),
+  };
+}
+
+/**
+ * @param {string} prompt
+ * @param {IncomingContentBlock[] | undefined} attachments
+ * @param {string | null | undefined} [workdir]
+ * @returns {Promise<AcpPromptContentBlock[]>}
+ */
+export async function buildAcpPromptContent(prompt, attachments, workdir) {
+  /** @type {AcpPromptContentBlock[]} */
+  const content = [{ type: "text", text: prompt }];
+  for (const block of attachments ?? []) {
+    if (block.type !== "image" && block.type !== "video" && block.type !== "audio" && block.type !== "file") {
+      continue;
+    }
+    const attachmentContent = await buildAttachmentPromptContent(block, workdir);
+    if (attachmentContent) {
+      content.push(attachmentContent);
+    }
+  }
+  return content;
 }
 
 /**
@@ -1315,7 +1431,7 @@ export async function startAcpRun(input) {
 
     const promptResult = await connection.sendRequest("session/prompt", {
       ...(sessionId ? { sessionId } : {}),
-      prompt: buildPromptContent(input.prompt),
+      prompt: await buildAcpPromptContent(input.prompt, input.attachments, input.runConfig?.workdir),
     });
     sessionId = readSessionId(promptResult) ?? sessionId;
     await handlePromptUsage(input, runtimeDispatcher, promptResult);
