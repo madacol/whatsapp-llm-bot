@@ -1011,6 +1011,50 @@ And some text after.`;
     assert.ok(albumImages.length >= 2, `Expected relayed album images, got ${albumImages.length}`);
   });
 
+  it("asks before rendering and sending the full truncated code image set", async () => {
+    const { sock, sent, relayed } = createMockSock();
+    const reactionRuntime = createReactionRuntime();
+    const longCode = Array.from({ length: 300 }, (_, i) => `const x${i} = ${i};`).join("\n");
+
+    await sendBlocks(sock, "test-chat", "tool-call", [
+      { type: "code", language: "javascript", code: longCode },
+    ], undefined, reactionRuntime);
+
+    const warning = sent.find((entry) => typeof entry.msg.text === "string"
+      && entry.msg.text.includes("Code block truncated"));
+    assert.ok(warning, "expected a continuation warning prompt");
+    const warningText = /** @type {string} */ (warning.msg.text);
+    const match = warningText.match(/showing (\d+) of (\d+) rendered images/);
+    assert.ok(match, `expected warning to include visible and total image counts, got ${warningText}`);
+    assert.equal(Number(match[1]), MAX_RENDERED_IMAGES_PER_BLOCK);
+    const totalImages = Number(match[2]);
+    assert.ok(totalImages > MAX_RENDERED_IMAGES_PER_BLOCK, "test fixture should produce hidden images");
+    assert.ok(warningText.includes("React 👍 to send all"), "warning should ask whether to send the full image set");
+
+    const initialAlbumHeaders = relayed.filter(({ msg }) => msg.albumMessage != null);
+    assert.equal(initialAlbumHeaders.length, 1, "initial preview should be sent as one album");
+    assert.equal(
+      /** @type {{ expectedImageCount?: number }} */ (initialAlbumHeaders[0].msg.albumMessage).expectedImageCount,
+      MAX_RENDERED_IMAGES_PER_BLOCK,
+      "initial album should only contain preview images",
+    );
+
+    reactionRuntime.handleReactions([{
+      key: { id: "msg-1", remoteJid: "test-chat" },
+      reaction: { text: "👍" },
+      senderId: "sender",
+    }]);
+
+    await waitFor(() => relayed.filter(({ msg }) => msg.albumMessage != null).length >= 2);
+    const albumHeaders = relayed.filter(({ msg }) => msg.albumMessage != null);
+    const continuationHeader = albumHeaders[albumHeaders.length - 1];
+    assert.equal(
+      /** @type {{ expectedImageCount?: number }} */ (continuationHeader.msg.albumMessage).expectedImageCount,
+      totalImages,
+      "continuation album should contain the full rendered image set",
+    );
+  });
+
   it("renders multiple code blocks as separate images", async () => {
     const { sock, sent } = createMockSock();
 

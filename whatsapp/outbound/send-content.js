@@ -2488,6 +2488,9 @@ export async function sendBlocks(sock, chatId, source, content, options, reactio
       switch (instruction.kind) {
         case "text":
           sent = await sock.sendMessage(chatId, makeTextMessage(instruction.text), options);
+          if (instruction.continuation && sent?.key) {
+            subscribeRenderedImagesContinuation(instruction.continuation, sent.key);
+          }
           if (instruction.editable && sent?.key) {
             lastSentKey = sent.key;
             lastSentIsImage = false;
@@ -2543,6 +2546,81 @@ export async function sendBlocks(sock, chatId, source, content, options, reactio
         messageId: sent?.key?.id,
       });
     }
+  }
+
+  /**
+   * @param {import("../../message-renderer.js").RenderedImagesContinuation} continuation
+   * @param {import('@whiskeysockets/baileys').WAMessageKey} promptKey
+   * @returns {void}
+   */
+  function subscribeRenderedImagesContinuation(continuation, promptKey) {
+    const promptKeyId = promptKey.id;
+    if (!reactionRuntime || typeof promptKeyId !== "string") {
+      return;
+    }
+
+    let settled = false;
+    const timer = setTimeout(() => {
+      settled = true;
+      unsubscribe();
+    }, SNAPSHOT_DIFF_CONTINUATION_TIMEOUT_MS);
+    timer.unref?.();
+
+    const unsubscribe = reactionRuntime.subscribe(promptKeyId, (emoji) => {
+      if (settled) {
+        return;
+      }
+      if (emoji.startsWith("👎") || emoji.startsWith("❌")) {
+        settled = true;
+        clearTimeout(timer);
+        unsubscribe();
+        return;
+      }
+      if (!emoji.startsWith("👍") && !emoji.startsWith("✅")) {
+        return;
+      }
+      settled = true;
+      clearTimeout(timer);
+      unsubscribe();
+      void sendRenderedImagesContinuation(continuation).catch((error) => {
+        log.error("Rendered image continuation failed", {
+          chatId,
+          label: continuation.label,
+          totalImages: continuation.totalImages,
+          error: formatErrorMessage(error),
+        });
+        void sock.sendMessage(
+          chatId,
+          makeTextMessage(prependSourcePrefix(prefix, `⚠️ ${continuation.label} continuation failed: ${formatErrorMessage(error)}`)),
+          options,
+        ).catch(() => {});
+      });
+    });
+  }
+
+  /**
+   * @param {import("../../message-renderer.js").RenderedImagesContinuation} continuation
+   * @returns {Promise<void>}
+   */
+  async function sendRenderedImagesContinuation(continuation) {
+    const imageInstructions = await continuation.renderAll();
+    if (imageInstructions.length === 0) {
+      return;
+    }
+    if (imageInstructions.length >= 2) {
+      await sendAlbum(
+        sock,
+        chatId,
+        imageInstructions.map((image) => ({
+          image: image.image,
+          ...(image.caption && { caption: image.caption }),
+        })),
+        options,
+      );
+      return;
+    }
+    const [instruction] = imageInstructions;
+    await sendInstruction(instruction);
   }
 
   if (instructions.filter((instruction) => instruction.kind === "image").length < 2) {

@@ -8,7 +8,15 @@
 
 import { basename } from "node:path";
 import { hasMediaPath } from "./attachment-paths.js";
-import { buildContextualUnifiedDiff, renderCodeToImages, renderDiffToImages, renderTableToImages, renderUnifiedDiffToImages, MIN_LINES_FOR_IMAGE } from "./code-image-renderer.js";
+import {
+  buildContextualUnifiedDiff,
+  renderCodeToImagePreview,
+  renderCodeToImages,
+  renderDiffToImagePreview,
+  renderTableToImages,
+  renderUnifiedDiffToImagePreview,
+  MIN_LINES_FOR_IMAGE,
+} from "./code-image-renderer.js";
 import { createLogger } from "./logger.js";
 import { renderDisplayMathToImage } from "./math-image-renderer.js";
 import { segmentMarkdown } from "./markdown-segments.js";
@@ -31,12 +39,21 @@ const log = createLogger("message-renderer");
  * A single WhatsApp message to be sent, produced by the rendering pipeline.
  * `editable` flags messages whose key should be tracked for in-place editing.
  * @typedef {
- *   | { kind: "text", text: string, editable: boolean }
+ *   | { kind: "text", text: string, editable: boolean, continuation?: RenderedImagesContinuation }
  *   | { kind: "image", image: Buffer, caption?: string, editable: boolean, hd?: boolean, debug?: AttachmentDebugInfo }
  *   | { kind: "video", video: Buffer, mimetype: string, caption?: string, debug?: AttachmentDebugInfo }
  *   | { kind: "audio", audio: Buffer, mimetype: string, debug?: AttachmentDebugInfo }
  *   | { kind: "file", file: Buffer, mimetype: string, fileName: string, caption?: string, debug?: AttachmentDebugInfo }
  * } SendInstruction
+ */
+
+/**
+ * @typedef {{
+ *   kind: "rendered_images",
+ *   label: string,
+ *   totalImages: number,
+ *   renderAll: () => Promise<Array<SendInstruction & { kind: "image" }>>,
+ * }} RenderedImagesContinuation
  */
 
 /**
@@ -201,20 +218,21 @@ function prependSourcePrefix(prefix, text) {
 }
 
 /**
- * @param {Buffer[]} images
+ * @param {{ images: Buffer[], totalImages: number }} preview
  * @param {{
  *   caption?: string,
  *   prefix: string,
  *   truncatedLabel: string,
  *   overflowMode?: "notice" | "silent",
  *   instructions: SendInstruction[],
+ *   renderAllImages?: () => Promise<Buffer[]>,
  * }} options
  * @returns {void}
  */
-function pushLimitedRenderedImages(images, options) {
+function pushRenderedImagePreview(preview, options) {
   const overflowMode = options.overflowMode ?? "notice";
-  const visibleImages = pushRenderedImageBatch(images, 0, MAX_RENDERED_IMAGES_PER_BLOCK, options);
-  if (overflowMode === "silent" || images.length <= visibleImages) {
+  const visibleImages = pushRenderedImageBatch(preview.images, 0, MAX_RENDERED_IMAGES_PER_BLOCK, options);
+  if (overflowMode === "silent" || preview.totalImages <= visibleImages) {
     return;
   }
 
@@ -222,9 +240,27 @@ function pushLimitedRenderedImages(images, options) {
     kind: "text",
     text: prependSourcePrefix(
       options.prefix,
-      `⚠️ ${options.truncatedLabel} truncated: showing ${visibleImages} of ${images.length} rendered images.`,
+      `⚠️ ${options.truncatedLabel} truncated: showing ${visibleImages} of ${preview.totalImages} rendered images. React 👍 to send all ${preview.totalImages} images together or 👎 to skip.`,
     ),
     editable: false,
+    ...(options.renderAllImages
+      ? {
+          continuation: {
+            kind: "rendered_images",
+            label: options.truncatedLabel,
+            totalImages: preview.totalImages,
+            renderAll: async () => {
+              const images = await options.renderAllImages?.() ?? [];
+              return images.map((image, index) => ({
+                kind: "image",
+                image,
+                ...(index === 0 && options.caption && { caption: prependSourcePrefix(options.prefix, options.caption) }),
+                editable: false,
+              }));
+            },
+          },
+        }
+      : {}),
   });
 }
 
@@ -539,15 +575,16 @@ async function renderMarkdownBlock(text, prefix, instructions, options = {}) {
         if (segment.language && shouldRenderAsImage(segment.language, segment.code)) {
           flushText();
           try {
-            const images = await renderCodeToImages(segment.code, segment.language);
-            for (const image of images) {
-              instructions.push({
-                kind: "image",
-                image,
-                ...(segment.language && { caption: segment.language }),
-                editable: false,
-              });
-            }
+            const preview = await renderCodeToImagePreview(segment.code, segment.language, {
+              maxImages: MAX_RENDERED_IMAGES_PER_BLOCK,
+            });
+            pushRenderedImagePreview(preview, {
+              caption: segment.language,
+              prefix,
+              truncatedLabel: "Code block",
+              instructions,
+              renderAllImages: async () => renderCodeToImages(segment.code, segment.language),
+            });
           } catch (error) {
             log.error("Markdown code image rendering failed, falling back to text:", error);
             appendTextFragment("```\n" + segment.code + "\n```");
@@ -629,12 +666,15 @@ async function renderMarkdownBlock(text, prefix, instructions, options = {}) {
 async function renderCodeBlock(block, prefix, instructions) {
   if (block.language && (block.caption || shouldRenderAsImage(block.language, block.code))) {
     try {
-      const images = await renderCodeToImages(block.code, block.language);
-      pushLimitedRenderedImages(images, {
+      const preview = await renderCodeToImagePreview(block.code, block.language, {
+        maxImages: MAX_RENDERED_IMAGES_PER_BLOCK,
+      });
+      pushRenderedImagePreview(preview, {
         caption: block.caption,
         prefix,
         truncatedLabel: "Code block",
         instructions,
+        renderAllImages: async () => renderCodeToImages(block.code, block.language),
       });
     } catch (err) {
       log.error("Code image rendering failed, falling back to text:", err);
@@ -662,10 +702,10 @@ async function renderCodeBlock(block, prefix, instructions) {
  */
 async function renderDiffBlock(block, prefix, instructions) {
   try {
-    const images = block.diffText
-      ? await renderUnifiedDiffToImages(block.diffText, block.language)
-      : await renderDiffToImages(block.oldStr, block.newStr, block.language);
-    pushLimitedRenderedImages(images, {
+    const preview = block.diffText
+      ? await renderUnifiedDiffToImagePreview(block.diffText, block.language, { maxImages: MAX_RENDERED_IMAGES_PER_BLOCK })
+      : await renderDiffToImagePreview(block.oldStr, block.newStr, block.language, { maxImages: MAX_RENDERED_IMAGES_PER_BLOCK });
+    pushRenderedImagePreview(preview, {
       caption: block.caption,
       prefix,
       truncatedLabel: "Diff",
