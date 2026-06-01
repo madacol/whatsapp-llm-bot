@@ -29,7 +29,6 @@ function createDefaultChatConfig(chatId) {
     media_to_text_models: {},
     memory: false,
     memory_threshold: null,
-    enabled_actions: [],
     model_roles: {},
     active_persona: null,
     harness: null,

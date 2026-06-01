@@ -210,7 +210,7 @@ function normalizeQueuedActionArguments(actionName, args) {
 }
 
 /**
- * @param {ActionResultValue} result
+ * @param {ToolResultValue} result
  * @returns {ToolContentBlock[]}
  */
 function normalizeActionResult(result) {

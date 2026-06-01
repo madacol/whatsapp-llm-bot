@@ -6,68 +6,6 @@ import { deriveMediaPath, hasInlineMediaData, hasMediaPath, isValidMediaPath } f
 import { createImageBlockFromPath } from "./media-store.js";
 
 /**
- * Convert a single property schema, replacing custom `type: "image"` with
- * `type: "string"` and a description hint for the LLM to pass media file paths.
- * @param {{ type: string, description?: string, items?: { type: string } }} propSchema
- * @param {boolean} hasMedia
- * @returns {Record<string, unknown>}
- */
-function convertImageProp(propSchema, hasMedia) {
-  const hint = hasMedia
-    ? "Pass the media file path from the conversation (for example, <sha>.jpg)."
-    : "Image file path (no media available).";
-  if (propSchema.type === "image") {
-    return {
-      ...propSchema,
-      type: "string",
-      description: propSchema.description ? `${propSchema.description}. ${hint}` : hint,
-    };
-  }
-  if (propSchema.type === "array" && propSchema.items?.type === "image") {
-    return {
-      ...propSchema,
-      type: "array",
-      items: { type: "string" },
-      description: propSchema.description ? `${propSchema.description}. ${hint}` : hint,
-    };
-  }
-  return propSchema;
-}
-
-/**
- * Convert actions to tool definitions format.
- * Converts `type: "image"` parameters to `type: "string"` with a media path hint.
- * @param {ToolDescriptor[]} actions
- * @param {boolean} [hasMedia]
- * @returns {ToolDefinition[]}
- */
-export function actionsToToolDefinitions(actions, hasMedia) {
-  return actions.map((action) => {
-    /** @type {Record<string, unknown>} */
-    const convertedProperties = {};
-    let hasImageParams = false;
-    for (const [key, propSchema] of Object.entries(action.parameters.properties)) {
-      const converted = convertImageProp(propSchema, !!hasMedia);
-      if (converted !== propSchema) hasImageParams = true;
-      convertedProperties[key] = converted;
-    }
-
-    const parameters = hasImageParams
-      ? { ...action.parameters, properties: convertedProperties }
-      : action.parameters;
-
-    return {
-      type: /** @type {const} */ ("function"),
-      function: {
-        name: action.name,
-        description: action.description,
-        parameters,
-      },
-    };
-  });
-}
-
-/**
  * Parse a media path reference string.
  * Accepts only the canonical `<sha>.<ext>` form.
  * @param {unknown} ref
@@ -81,7 +19,7 @@ function parseMediaRef(ref) {
  * Resolve image parameter values from media path strings to ImageContentBlocks.
  * Walks the action's parameter schema and replaces any `type: "image"` param values
  * with a content block keyed by that media path.
- * @param {Action['parameters']} schema
+ * @param {CommandParametersSchema} schema
  * @param {Record<string, unknown>} args
  * @param {MediaRegistry} mediaRegistry
  * @returns {Record<string, unknown>} Args with resolved image blocks
@@ -144,7 +82,7 @@ export function shouldRespond(chatInfo, facts) {
 /**
  * Parse `!command arg1 arg2` into `{ paramName: value }` based on action parameter schema.
  * @param {string[]} args - The arguments after the command name
- * @param {Action['parameters']} parameters - The action's JSON Schema parameters
+ * @param {CommandParametersSchema} parameters - The command's JSON Schema parameters
  * @returns {{[paramName: string]: string}}
  */
 export function parseCommandArgs(args, parameters) {

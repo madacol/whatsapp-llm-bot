@@ -7,8 +7,6 @@ import path from "node:path";
 import { homedir } from "node:os";
 import { errorToString, getChatWorkDir } from "../utils.js";
 import {
-  getChatActionDbDir,
-  getChatActionsDir,
   getChatRootDir,
   getChatSqlitePath,
   getChatWorkspaceDir,
@@ -66,9 +64,7 @@ describe("getChatWorkDir", () => {
     assert.equal(getChatRootDir(chatId), path.join(tempChatDir, chatId));
     assert.equal(getChatWorkspaceDir(chatId), path.join(tempChatDir, chatId, "workspace"));
     assert.equal(getChatSqlitePath(chatId), path.join(tempChatDir, chatId, "chat.sqlite"));
-    assert.equal(getChatActionsDir(chatId), path.join(tempChatDir, chatId, "actions"));
-    assert.equal(getChatActionDbDir(chatId, "create_action"), path.join(tempChatDir, chatId, "actions", "create_action"));
-    assert.ok(fs.existsSync(getChatActionsDir(chatId)));
+    assert.equal(fs.existsSync(path.join(tempChatDir, chatId, "actions")), false);
     assert.equal(fs.existsSync(path.join(tempChatDir, chatId, "etc")), false);
     assert.equal((await fsp.lstat(readableLink)).isSymbolicLink(), true);
     assert.equal(path.resolve(tempWorkspacesDir, await fsp.readlink(readableLink)), workdir);

@@ -416,7 +416,6 @@ export function toolCall(name, args) {
  *   memory?: boolean;
  *   memoryThreshold?: number | null;
  *   respondOn?: "any" | "mention+reply" | "mention";
- *   enabledActions?: string[];
  *   persona?: string | null;
  *   modelRoles?: Record<string, string>;
  *   mediaToTextModels?: { image?: string; audio?: string; video?: string; general?: string };
@@ -491,7 +490,6 @@ export function createTestHarness({ mockServer, handleMessage, testDb }) {
         ...(rest.memory != null ? { memory: rest.memory } : {}),
         ...(rest.memoryThreshold !== undefined ? { memory_threshold: rest.memoryThreshold } : {}),
         ...(rest.respondOn != null ? { respond_on: rest.respondOn } : {}),
-        ...(rest.enabledActions != null ? { enabled_actions: rest.enabledActions } : {}),
         ...(rest.persona !== undefined ? { active_persona: rest.persona } : {}),
         ...(rest.modelRoles != null ? { model_roles: rest.modelRoles } : {}),
         ...(rest.mediaToTextModels != null ? { media_to_text_models: rest.mediaToTextModels } : {}),

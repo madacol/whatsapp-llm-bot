@@ -9,7 +9,6 @@ export default {
 
 Always cite your sources with URLs. Be thorough but concise.`,
   model: "smart",
-  allowedActions: ["search_web", "fetch_url"],
   maxDepth: 15,
   instructions: "Use this agent for research tasks that require web searching and information synthesis.",
 };

@@ -590,34 +590,7 @@ type ExecuteActionContext = {
   }) => void | Promise<void>;
 };
 
-/* Actions */
-
-// Context passed to actions (pre-built functions with headers baked in)
-type ActionContext = {
-  chatId: string;
-  senderIds: string[];
-  senderJids?: string[];
-  senderName?: string;
-  quotedSenderId?: string;
-  quotedSenderJid?: string;
-  quotedSenderName?: string;
-  content: IncomingContentBlock[];
-  workdir?: string | null;
-  getIsAdmin: () => Promise<boolean>;
-  db: ChatDb;
-  sessionDb: ChatDb;
-  getActions: () => Promise<Action[]>;
-  log: (...args: any[]) => Promise<string>;
-  send: (message: SendContent) => Promise<void>; // Header already baked in
-  reply: (message: SendContent) => Promise<void>; // Header already baked in
-  reactToMessage: (emoji: string) => Promise<void>;
-  select: (question: string, options: SelectOption[], config?: SelectConfig) => Promise<string>;
-  selectMany?: (question: string, options: SelectOption[], config?: SelectManyConfig) => Promise<SelectManyResult>;
-  confirm: (message: string) => Promise<boolean>;
-  resolveModel: (role: string) => string;
-  agentDepth?: number;
-  toolCallId?: string | null;
-};
+/* Tools and commands */
 
 // Define permission flags
 type PermissionFlags = {
@@ -652,7 +625,7 @@ type LlmChatResponse = {
 // Replaces OpenAI ChatCompletionTool
 type ToolDefinition = {
   type: "function";
-  function: { name: string; description: string; parameters: Action['parameters'] };
+  function: { name: string; description: string; parameters: CommandParametersSchema };
 };
 
 type CallLlmOptions = { model?: string };
@@ -669,12 +642,6 @@ type CallLlm = {
   (options: CallLlmChatOptions): Promise<LlmChatResponse>;
 };
 
-// Build action context types dynamically based on permissions
-type ExtendedActionContext<P extends PermissionFlags> = ActionContext
-  & (P["useRootDb"] extends true ? { rootDb: ChatDb } : {})
-  & (P["useChatDb"] extends true ? { chatDb: ChatDb } : {})
-  & (P["useLlm"] extends true ? { callLlm: CallLlm; llmClient: LlmClient } : {});
-
 type ToolContentBlock = TextContentBlock | ImageContentBlock | VideoContentBlock | AudioContentBlock | FileContentBlock | CodeContentBlock | DiffContentBlock | MarkdownContentBlock;
 
 type SendContent = string | ToolContentBlock | ToolContentBlock[];
@@ -687,50 +654,14 @@ type SharedSkill = {
   instructions: string;
 };
 
-/** The payload types that an action can produce. */
-type ActionResultValue = string | {} | HtmlContent | ToolContentBlock[];
-
-/**
- * Unified action return type. Actions that need to override autoContinue set the field;
- * otherwise it inherits from the action's permissions.
- * For backward compat, action_fn may still return a bare ActionResultValue.
- */
-type ActionResult = {
-  result: ActionResultValue;
-  autoContinue?: boolean;
-  afterResponse?: (input?: { handle?: MessageHandle }) => void | Promise<void>;
+type CommandParametersSchema = {
+  type: "object";
+  properties: Record<string, any>;
+  required?: string[];
 };
 
-type Action<P extends PermissionFlags = PermissionFlags> = {
-  name: string;
-  command?: string; // Optional command for direct execution
-  description: string;
-  /** Detailed usage instructions injected into the system prompt only after the action is first called in a turn. */
-  instructions?: string;
-  /** Optional shared skill metadata for provider harness exposure. */
-  sharedSkill?: SharedSkill;
-  scope?: "chat" | "global";
-  optIn?: true; // When true, action is only available in chats that explicitly enable it
-  parameters: {
-    type: "object";
-    properties: Record<string, any>;
-    required?: string[];
-  }; // a JSON-Schema for the action_fn's parameters
-  permissions: P;
-  action_fn: (
-    context: ExtendedActionContext<P>,
-    params: any,
-  ) => Promise<ActionResult | ActionResultValue> | ActionResult | ActionResultValue;
-  /** Returns a short display string appended after the action name in compact mode. */
-  formatToolCall?: (params: Record<string, any>) => string;
-  /** Returns the prompt string used by this action. Swappable for testing/optimization. */
-  prompt?: (...args: any[]) => string;
-};
-
-type AppAction = Action & {
-  fileName: string;
-  app_name: string;
-};
+/** The payload types that a tool or command can produce. */
+type ToolResultValue = string | {} | HtmlContent | ToolContentBlock[];
 
 type ToolDescriptor = {
   name: string;
@@ -738,7 +669,7 @@ type ToolDescriptor = {
   instructions?: string;
   sharedSkill?: SharedSkill;
   scope?: "chat" | "global";
-  parameters: Action["parameters"];
+  parameters: CommandParametersSchema;
   permissions: PermissionFlags;
   formatToolCall?: (params: Record<string, any>) => string;
 };
@@ -842,7 +773,6 @@ type AgentDefinition = {
   description: string;
   systemPrompt: string;
   model?: string;
-  allowedActions?: string[];
   maxDepth?: number;
   instructions?: string;
   harness?: string;
@@ -1005,15 +935,6 @@ type SdkUsageWithCache = {
 
 /* Harness turn support types */
 
-type ExecuteActionOptions = {
-  toolCallId?: string | null;
-  actionResolver?: (name: string) => Promise<AppAction | null>;
-  llmClient?: LlmClient;
-  agentDepth?: number;
-  workdir?: string | null;
-  sandboxMode?: HarnessRunConfig["sandboxMode"] | null;
-};
-
 type ExecuteToolOptions = {
   toolCallId?: string | null;
   agentDepth?: number;
@@ -1029,7 +950,7 @@ type ToolRuntime = {
     context: ExecuteActionContext,
     params: {},
     options?: ExecuteToolOptions,
-  ) => Promise<{ result: ActionResultValue, permissions: PermissionFlags, afterResponse?: (input?: { handle?: MessageHandle }) => void | Promise<void> }>;
+  ) => Promise<{ result: ToolResultValue, permissions: PermissionFlags, afterResponse?: (input?: { handle?: MessageHandle }) => void | Promise<void> }>;
 };
 
 type Session = {
@@ -1050,44 +971,5 @@ type LlmConfig = {
   toolRuntime: ToolRuntime;
 };
 
-type App = {
-  app_name: string;
-  name: string;
-  description: string;
-  actions: AppAction[];
-  setup_fn: (() => Promise<any>)[];
-};
-
-function defineAction<P extends PermissionFlags>(action: Action<P>): Action<P> {
-  return action;
-}
-
 declare function html(content: string, title?: string): HtmlContent;
 declare function isHtmlContent(value: unknown): value is HtmlContent;
-
-/* Test callback types — used by _tests.js and _test-prompts.js */
-
-/** Full action context with all permission extensions enabled. */
-type FullActionContext = ActionContext & { rootDb: ChatDb; chatDb: ChatDb; callLlm: CallLlm; llmClient: LlmClient };
-
-/** action_fn as seen by tests — accepts partial context (duck typing). */
-type ActionParamValue = string | number | boolean | null | IncomingContentBlock | IncomingContentBlock[];
-
-/** action_fn as seen by tests — accepts partial context (duck typing). */
-type TestActionFn = (
-  context: Partial<FullActionContext>,
-  params: Record<string, ActionParamValue>,
-) => Promise<string> | string;
-
-/** Standard _tests.js callback: receives action_fn only. */
-type ActionTestFn = (action_fn: TestActionFn) => Promise<void>;
-
-/** Standard _tests.js callback: receives action_fn + db. */
-type ActionDbTestFn = (action_fn: TestActionFn, db: ChatDb) => Promise<void>;
-
-/** Prompt test callback: receives callLlm + readFixture + prompt. */
-type PromptTestFn = (
-  callLlm: CallLlm,
-  readFixture: (name: string) => Promise<Buffer>,
-  prompt: (...args: string[]) => string,
-) => Promise<void>;

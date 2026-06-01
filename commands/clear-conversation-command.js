@@ -1,6 +1,6 @@
 import { getChatDb } from "../db.js";
 
-export const CLEAR_CONVERSATION_COMMAND_PARAMETERS = /** @type {Action["parameters"]} */ ({
+export const CLEAR_CONVERSATION_COMMAND_PARAMETERS = /** @type {CommandParametersSchema} */ ({
   type: "object",
   properties: {},
   required: [],

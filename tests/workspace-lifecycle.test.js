@@ -391,7 +391,6 @@ describe("workspace lifecycle", () => {
       debug: true,
       memory: true,
       memory_threshold: 0.42,
-      enabled_actions: ["fetch_url"],
       model_roles: { coding: "openai/gpt-4.1" },
       harness: "codex",
       output_visibility: { thinking: true },
@@ -440,7 +439,6 @@ describe("workspace lifecycle", () => {
     assert.equal(enabledChat?.debug, true);
     assert.equal(enabledChat?.memory, true);
     assert.equal(enabledChat?.memory_threshold, 0.42);
-    assert.deepEqual(enabledChat?.enabled_actions, ["fetch_url"]);
     assert.deepEqual(enabledChat?.model_roles, { coding: "openai/gpt-4.1" });
     assert.equal(enabledChat?.harness, "codex");
     assert.deepEqual(enabledChat?.output_visibility, { thinking: true });

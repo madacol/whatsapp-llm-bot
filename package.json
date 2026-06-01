@@ -20,8 +20,7 @@
         "test:rendering": "node scripts/test-runner.js --rendering",
         "test:watch": "node scripts/test-runner.js --watch",
         "test:prompts": "node --test tests/*.prompt-test.js",
-        "type-check": "npx tsc --noEmit --project jsconfig.json",
-        "optimize-prompt": "node scripts/optimize-prompt.js"
+        "type-check": "npx tsc --noEmit --project jsconfig.json"
     },
     "keywords": [],
     "author": "madacol",
