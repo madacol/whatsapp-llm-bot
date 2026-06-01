@@ -631,20 +631,21 @@ describe("ACP payload to WhatsApp socket vertical slices", () => {
     assert.equal(sent[2]?.msg.text, "✅ *Find On Page*  \"install\" in `example.com/docs`");
   });
 
-  it("renders ACP list-file titles with the listed path", async () => {
+  it("renders ACP list-file locations with the listed path", async () => {
     const { sent, trace } = await observeAcpPayloadSliceToBaileys([
       {
         sessionId: "s1",
         update: {
           sessionUpdate: "tool_call",
           toolCallId: "list-real-shape",
-          title: "List files in '.env'",
+          title: "List files",
           kind: "read",
           status: "in_progress",
+          locations: [{ path: "/repo/.env" }],
         },
       },
     ], {
-      chatId: "acp-payload-list-title@s.whatsapp.net",
+      chatId: "acp-payload-list-location@s.whatsapp.net",
       cwd: "/repo",
     });
 

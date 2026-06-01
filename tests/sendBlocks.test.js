@@ -219,8 +219,8 @@ describe("sendEvent – compact tool activity", () => {
     };
     const listTool = {
       id: "list-generic",
-      name: "List files in 'docs'",
-      arguments: "{}",
+      name: "List",
+      arguments: JSON.stringify({ path: "/repo/docs" }),
     };
 
     await sendEvent(sock, "compact-generic-chat", {

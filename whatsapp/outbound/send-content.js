@@ -143,6 +143,14 @@ function parseRawAcpSearchTitle(title) {
 }
 
 /**
+ * @param {string | null} title
+ * @returns {boolean}
+ */
+function isRawAcpListFilesTitle(title) {
+  return title === "List files" || !!title?.startsWith("List files in ");
+}
+
+/**
  * @param {unknown} value
  * @returns {string | null}
  */
@@ -322,6 +330,20 @@ function buildWhatsAppRuntimeToolFromRawAcp(tool, event) {
     return tool;
   }
   if (update.kind === "read") {
+    const title = getRawAcpTitle(update);
+    if (isRawAcpListFilesTitle(title)) {
+      const listPath = getRawAcpFirstLocationPath(update);
+      if (listPath) {
+        return {
+          ...tool,
+          name: "List",
+          arguments: {
+            ...tool.arguments,
+            path: listPath,
+          },
+        };
+      }
+    }
     const readPath = getRawAcpReadPath(update);
     if (readPath) {
       const rawInput = getRawAcpInput(update);
@@ -902,18 +924,6 @@ function formatGenericSearchToolName(toolName) {
 }
 
 /**
- * @param {string} toolName
- * @returns {string | null}
- */
-function formatGenericListToolName(toolName) {
-  const match = toolName.match(/^List files in ['"](.+)['"]$/);
-  if (!match || !match[1]) {
-    return null;
-  }
-  return formatCompactEntry("List", `\`${match[1]}\``);
-}
-
-/**
  * @param {string | undefined} value
  * @returns {Record<string, unknown>}
  */
@@ -967,10 +977,6 @@ function formatGenericCompactToolName(toolName, args, cwd) {
   const search = formatGenericSearchToolName(toolName);
   if (search) {
     return search;
-  }
-  const list = formatGenericListToolName(toolName);
-  if (list) {
-    return list;
   }
   const detail = formatGenericPathDetail(args, cwd) ?? formatGenericTextDetail(args);
   return formatCompactEntry(toolName, detail);
