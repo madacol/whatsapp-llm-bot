@@ -44,12 +44,16 @@ function extractTopLevelText(blocks) {
 /**
  * @param {IncomingContentBlock[]} blocks
  * @param {string[]} mediaLines
+ * @param {boolean} includeMediaReferences
  * @returns {void}
  */
-function collectQuotedMediaLines(blocks, mediaLines) {
+function collectQuotedMediaLines(blocks, mediaLines, includeMediaReferences) {
+  if (!includeMediaReferences) {
+    return;
+  }
   for (const block of blocks) {
     if (block.type === "quote") {
-      collectQuotedMediaLines(block.content, mediaLines);
+      collectQuotedMediaLines(block.content, mediaLines, includeMediaReferences);
       continue;
     }
     if ((block.type === "image" || block.type === "video" || block.type === "audio" || block.type === "file") && hasMediaPath(block)) {
@@ -63,9 +67,11 @@ function collectQuotedMediaLines(blocks, mediaLines) {
 
 /**
  * @param {Array<IncomingContentBlock | ToolContentBlock>} blocks
+ * @param {{ includeMediaReferences?: boolean }} [options]
  * @returns {string}
  */
-function renderLiveInputPrompt(blocks) {
+function renderLiveInputPrompt(blocks, options = {}) {
+  const includeMediaReferences = options.includeMediaReferences ?? true;
   /** @type {string[]} */
   const textParts = [];
   /** @type {string[]} */
@@ -77,16 +83,19 @@ function renderLiveInputPrompt(blocks) {
       if (renderedQuote) {
         textParts.push(renderedQuote);
       }
-      collectQuotedMediaLines(block.content, mediaLines);
+      collectQuotedMediaLines(block.content, mediaLines, includeMediaReferences);
       continue;
     }
 
     if ((block.type === "image" || block.type === "video" || block.type === "audio" || block.type === "file") && hasMediaPath(block)) {
-      const mediaLine = renderLiveInputMediaReference(block);
-      if (mediaLine) {
-        mediaLines.push(mediaLine);
+      if (includeMediaReferences) {
+        const mediaLine = renderLiveInputMediaReference(block);
+        if (mediaLine) {
+          mediaLines.push(mediaLine);
+        }
       }
-      if (block.type !== "image" || !block.alt) {
+      const hasDescription = (block.type === "image" || block.type === "video") && typeof block.alt === "string" && block.alt.trim().length > 0;
+      if (!hasDescription) {
         continue;
       }
     }
@@ -195,6 +204,7 @@ async function augmentLiveInputBlocks(blocks, input) {
  *   llmClient: LlmClient,
  *   mediaToTextModels?: { image?: string, audio?: string, video?: string, general?: string },
  *   db: ChatDb,
+ *   includeMediaReferences?: boolean,
  * }} input
  * @returns {Promise<string>}
  */
@@ -206,5 +216,5 @@ export async function buildLiveInputText(input) {
     contextMessages: [],
     currentText: extractTopLevelText(input.content),
   });
-  return renderLiveInputPrompt(augmented);
+  return renderLiveInputPrompt(augmented, { includeMediaReferences: input.includeMediaReferences });
 }
