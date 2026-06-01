@@ -264,12 +264,12 @@ describe("sendEvent – compact tool activity", () => {
       {
         name: "Grep",
         args: { path: "src", pattern: "needle" },
-        expected: "Search*  \"needle\" in `src`",
+        expected: "Search*  `needle` in *src*",
       },
       {
         name: "Search",
         args: { path: "src", pattern: "needle" },
-        expected: "Search*  \"needle\" in `src`",
+        expected: "Search*  `needle` in *src*",
       },
       {
         name: "WebSearch",
@@ -470,9 +470,9 @@ describe("sendEvent – runtime events", () => {
     }, undefined, undefined, { outputVisibility: COMPACT_TOOL_OUTPUT });
 
     assert.deepEqual(sent.map((entry) => entry.msg), [
-      { text: "🔧 *Search*  \"needle\" in `src`", linkPreview: null },
+      { text: "🔧 *Search*  `needle` in *src*", linkPreview: null },
       {
-        text: "✅ *Search*  \"needle\" in `src`",
+        text: "✅ *Search*  `needle` in *src*",
         edit: { id: "msg-1", remoteJid: "compact-runtime-tool-chat", fromMe: true },
         linkPreview: null,
       },
@@ -531,7 +531,7 @@ describe("sendEvent – runtime events", () => {
     }, undefined, undefined, { outputVisibility: COMPACT_TOOL_OUTPUT });
 
     assert.equal(sent.length, 1);
-    assert.equal(sent[0]?.msg.caption, "🔧 Update *src/app.js*");
+    assert.equal(sent[0]?.msg.caption, "🔧 *Update*  `src/app.js`");
   });
 
   it("renders ACP runtime tool progress with semantic tool labels", async () => {
@@ -544,12 +544,12 @@ describe("sendEvent – runtime events", () => {
       {
         name: "Grep",
         args: { path: "src", pattern: "needle" },
-        expected: "Search*  \"needle\" in `src`",
+        expected: "Search*  `needle` in *src*",
       },
       {
         name: "Search",
         args: { path: "src", pattern: "needle" },
-        expected: "Search*  \"needle\" in `src`",
+        expected: "Search*  `needle` in *src*",
       },
       {
         name: "WebSearch",
@@ -713,7 +713,7 @@ describe("sendEvent – runtime events", () => {
     });
 
     assert.equal(sent.length, 1);
-    assert.equal(sent[0]?.msg.caption, "🔧 Snapshot *src/app.js*");
+    assert.equal(sent[0]?.msg.caption, "🔧 *Snapshot*  `src/app.js`");
   });
 
   it("suppresses noisy lifecycle runtime events except turn start", async () => {
@@ -890,7 +890,7 @@ describe("sendEvent – presentation vertical slices", () => {
     }));
 
     assert.equal(sent.length, 1);
-    assert.equal(sent[0]?.msg.caption, "🔧 Update *src/app.js*");
+    assert.equal(sent[0]?.msg.caption, "🔧 *Update*  `src/app.js`");
   });
 
   it("renders snapshot-origin file changes with the Snapshot label through WhatsApp", async () => {
@@ -913,7 +913,7 @@ describe("sendEvent – presentation vertical slices", () => {
     }));
 
     assert.equal(sent.length, 1);
-    assert.equal(sent[0]?.msg.caption, "🔧 Snapshot *src/app.js*");
+    assert.equal(sent[0]?.msg.caption, "🔧 *Snapshot*  `src/app.js`");
   });
 
   it("drops generic editing summaries from file-change captions", async () => {
@@ -937,7 +937,7 @@ describe("sendEvent – presentation vertical slices", () => {
     }));
 
     assert.equal(sent.length, 1);
-    assert.equal(sent[0]?.msg.caption, "🔧 Snapshot *src/app.js*");
+    assert.equal(sent[0]?.msg.caption, "🔧 *Snapshot*  `src/app.js`");
   });
 });
 
@@ -1483,7 +1483,7 @@ Second block:
 
       assert.equal(sent.length, 1, JSON.stringify(sent));
       assert.ok(Buffer.isBuffer(sent[0]?.msg.image), "Expected sendBlocks to send a diff image");
-      assert.match(String(sent[0]?.msg.caption ?? ""), /Update \*render-target\.md\*/);
+      assert.match(String(sent[0]?.msg.caption ?? ""), /\*Update\*  `render-target\.md`/);
     } finally {
       await fs.rm(tempDir, { recursive: true, force: true });
     }
@@ -1496,14 +1496,14 @@ Second block:
       type: "diff",
       diffText: buildMultiBatchDiffText(),
       language: "javascript",
-      caption: "Update *huge.js*",
+      caption: "*Update*  `huge.js`",
     }]);
 
     const imageMessages = relayed.filter((entry) => entry.msg.imageMessage != null);
     const textMessages = sent.filter((entry) => typeof entry.msg.text === "string");
     assert.equal(imageMessages.length, MAX_RENDERED_IMAGES_PER_BLOCK);
     const firstImage = /** @type {{ imageMessage?: { caption?: string } }} */ (imageMessages[0]?.msg ?? {});
-    assert.match(String(firstImage.imageMessage?.caption ?? ""), /Update \*huge\.js\*/);
+    assert.match(String(firstImage.imageMessage?.caption ?? ""), /\*Update\*  `huge\.js`/);
     assert.equal(textMessages.length, 0, JSON.stringify(sent));
   });
 
@@ -1583,7 +1583,7 @@ Second block:
       " line 2",
       " line 3",
     ].join("\n"));
-    assert.equal(diffBlock.caption, "Update *plain.txt*");
+    assert.equal(diffBlock.caption, "*Update*  `plain.txt`");
   });
 
   it("renders old/new file-change text as a bounded contextual diff when no prebuilt diff is present", () => {
@@ -1611,7 +1611,7 @@ Second block:
     assert.match(diffBlock.diffText ?? "", /\+changed line 20/);
     assert.doesNotMatch(diffBlock.diffText ?? "", / line 11/);
     assert.doesNotMatch(diffBlock.diffText ?? "", / line 29/);
-    assert.equal(diffBlock.caption, "Update *plain.txt*");
+    assert.equal(diffBlock.caption, "*Update*  `plain.txt`");
   });
 
   it("renders brand-new file writes as code blocks instead of diffs", () => {
@@ -1634,7 +1634,7 @@ Second block:
     assert.equal(codeBlock.type, "code");
     assert.equal(codeBlock.language, "javascript");
     assert.equal(codeBlock.code, "export const value = 1;\n");
-    assert.equal(codeBlock.caption, "Add *src/new-file.js*");
+    assert.equal(codeBlock.caption, "*Add*  `src/new-file.js`");
   });
 
   it("renders writes labeled add as diffs when prior text exists", () => {
@@ -1657,7 +1657,7 @@ Second block:
     assert.ok(Array.isArray(content), "Expected file-change content blocks");
     const diffBlock = /** @type {DiffContentBlock} */ (content[0]);
     assert.equal(diffBlock.type, "diff");
-    assert.equal(diffBlock.caption, "Update *src/existing.js*");
+    assert.equal(diffBlock.caption, "*Update*  `src/existing.js`");
   });
 
   it("renders deleted files with an explicit delete label", () => {
@@ -1682,7 +1682,7 @@ Second block:
       "@@ -1 +0,0 @@",
       "-export const value = 1;",
     ].join("\n"));
-    assert.equal(diffBlock.caption, "Delete *src/delete-me.js*");
+    assert.equal(diffBlock.caption, "*Delete*  `src/delete-me.js`");
   });
 
   it("uses deletion diff headers over stale update labels", () => {
@@ -1704,7 +1704,7 @@ Second block:
     assert.ok(Array.isArray(content), "Expected file-change content blocks");
     const diffBlock = /** @type {DiffContentBlock} */ (content[0]);
     assert.equal(diffBlock.type, "diff");
-    assert.equal(diffBlock.caption, "Delete *src/delete-me.js*");
+    assert.equal(diffBlock.caption, "*Delete*  `src/delete-me.js`");
   });
 
   it("renders proposed file changes with a lifecycle-specific title even without a diff", () => {
@@ -1717,7 +1717,7 @@ Second block:
       summary: "/tmp/src/file.js (update)",
     });
 
-    assert.equal(content, "*Proposed File Change*  *src/file.js*");
+    assert.equal(content, "*Proposed File Change*  `src/file.js`");
   });
 
   it("handles type 'text' without image rendering", async () => {

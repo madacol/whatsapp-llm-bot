@@ -332,7 +332,7 @@ describe("ACP payload to WhatsApp socket vertical slices", () => {
     assert.ok(texts.some((text) => text === "🤖 Main result."), `Expected assistant text, got ${JSON.stringify(sent)}`);
     assert.ok(texts.some((text) => text.includes("_Plan_") && text.includes("Inspect payload")), `Expected plan text, got ${JSON.stringify(sent)}`);
     assert.ok(sent.some((entry) => Buffer.isBuffer(entry.msg.image)
-      && String(entry.msg.caption ?? "").includes("🔧 Update *app.js*")
+      && String(entry.msg.caption ?? "").includes("🔧 *Update*  `app.js`")
       && String(entry.msg.caption ?? "").includes("Edited app.js")), `Expected diff image, got ${JSON.stringify(sent)}`);
     assert.ok(texts.some((text) => text.includes("📊 Cost: 0.001200")), `Expected usage text, got ${JSON.stringify(sent)}`);
   });
@@ -383,7 +383,7 @@ describe("ACP payload to WhatsApp socket vertical slices", () => {
       "runtime_event",
     ]);
     assert.equal(sent.length, 1, JSON.stringify(sent));
-    assert.equal(sent[0]?.msg.caption, "🔧 Update *src/app.js*", JSON.stringify(sent));
+    assert.equal(sent[0]?.msg.caption, "🔧 *Update*  `src/app.js`", JSON.stringify(sent));
   });
 
   it("collapses only consecutive ACP tool progress before starting a new Baileys message", async () => {
@@ -442,7 +442,7 @@ describe("ACP payload to WhatsApp socket vertical slices", () => {
     assert.ok(
       typeof flushedMessages[1]?.text === "string"
         && flushedMessages[1].text.includes("🔧 *Read*  `src/app.js`")
-        && flushedMessages[1].text.includes("🔧 *Search*  \"needle\" in `src`"),
+        && flushedMessages[1].text.includes("🔧 *Search*  `needle` in *src*"),
       `Expected consecutive tools to collapse into one edited message, got ${JSON.stringify(flushedMessages)}`,
     );
     assert.ok(
@@ -531,7 +531,7 @@ describe("ACP payload to WhatsApp socket vertical slices", () => {
     });
 
     assert.deepEqual(trace.runtimeEvents.map((event) => event.type), ["tool.started"]);
-    assert.equal(sent[0]?.msg.text, "🔧 *Search*  \"toolDetails|compact_tool_activity\" in `whatsapp-transport.test.js`");
+    assert.equal(sent[0]?.msg.text, "🔧 *Search*  `toolDetails|compact_tool_activity` in *whatsapp-transport.test.js*");
   });
 
   it("renders ACP execute commands from raw WhatsApp payloads", async () => {
