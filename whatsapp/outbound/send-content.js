@@ -78,6 +78,9 @@ function getRawAcpSessionUpdate(event) {
   }
   const payload = isRecord(raw.payload) ? raw.payload : null;
   const update = isRecord(payload?.update) ? payload.update : null;
+  if (update?.sessionUpdate !== "tool_call" && update?.sessionUpdate !== "tool_call_update") {
+    return null;
+  }
   return update;
 }
 
@@ -85,10 +88,7 @@ function getRawAcpSessionUpdate(event) {
  * @param {Record<string, unknown>} update
  * @returns {string | null}
  */
-function getRawAcpReadLocationPath(update) {
-  if (update.kind !== "read") {
-    return null;
-  }
+function getRawAcpFirstLocationPath(update) {
   const locations = Array.isArray(update.locations) ? update.locations : [];
   for (const location of locations) {
     if (isRecord(location) && typeof location.path === "string" && location.path.length > 0) {
@@ -96,6 +96,42 @@ function getRawAcpReadLocationPath(update) {
     }
   }
   return null;
+}
+
+/**
+ * @param {Record<string, unknown>} update
+ * @returns {string | null}
+ */
+function getRawAcpTitle(update) {
+  return typeof update.title === "string" && update.title.trim().length > 0
+    ? update.title.trim()
+    : null;
+}
+
+/**
+ * @param {string} title
+ * @returns {{ pattern: string, path: string } | null}
+ */
+function parseRawAcpSearchTitle(title) {
+  const match = title.match(/^Search for '(.+)' in (.+)$/);
+  if (!match) {
+    return null;
+  }
+  const [, pattern, path] = match;
+  return pattern && path ? { pattern, path } : null;
+}
+
+/**
+ * @param {Record<string, unknown>} update
+ * @returns {string | null}
+ */
+function getRawAcpCommand(update) {
+  const rawInput = isRecord(update.rawInput) ? update.rawInput : null;
+  if (rawInput && typeof rawInput.command === "string" && rawInput.command.trim().length > 0) {
+    return rawInput.command.trim();
+  }
+  const title = getRawAcpTitle(update);
+  return title && title !== "Editing files" ? title : null;
 }
 
 /**
@@ -110,16 +146,46 @@ function buildWhatsAppRuntimeToolFromRawAcp(tool, event) {
   if (!update) {
     return tool;
   }
-  const readPath = getRawAcpReadLocationPath(update);
-  if (readPath) {
-    return {
-      ...tool,
-      name: "Read",
-      arguments: {
-        ...tool.arguments,
-        file_path: readPath,
-      },
-    };
+  if (update.kind === "read") {
+    const readPath = getRawAcpFirstLocationPath(update);
+    if (readPath) {
+      return {
+        ...tool,
+        name: "Read",
+        arguments: {
+          ...tool.arguments,
+          file_path: readPath,
+        },
+      };
+    }
+  }
+  if (update.kind === "search") {
+    const title = getRawAcpTitle(update);
+    const search = title ? parseRawAcpSearchTitle(title) : null;
+    if (search) {
+      return {
+        ...tool,
+        name: "Search",
+        arguments: {
+          ...tool.arguments,
+          pattern: search.pattern,
+          path: search.path,
+        },
+      };
+    }
+  }
+  if (update.kind === "execute") {
+    const command = getRawAcpCommand(update);
+    if (command) {
+      return {
+        ...tool,
+        name: "Shell",
+        arguments: {
+          ...tool.arguments,
+          command,
+        },
+      };
+    }
   }
   return tool;
 }
@@ -403,6 +469,12 @@ function formatRuntimeToolSummary(tool, cwd) {
     return semanticSummary;
   }
   const displayName = tool.name.trim() || "Tool";
+  if (displayName === "Shell") {
+    const command = getStringArg(tool.arguments, ["command"]);
+    if (command) {
+      return formatRuntimeCommandSummary(command);
+    }
+  }
   const pathDetail = getStringArg(tool.arguments, ["path", "file_path", "filePath"]);
   if (pathDetail) {
     return formatRuntimeProgressEntry(displayName, `\`${pathDetail}\``);
@@ -584,6 +656,12 @@ function formatCompactToolActivitySummary(activity, cwd) {
     return null;
   }
   const args = parseCompactToolArguments(activity.toolCall.arguments);
+  if (activity.toolCall.name === "Shell") {
+    const command = getStringArg(args, ["command"]);
+    if (command) {
+      return formatCompactCommand(command);
+    }
+  }
   const presentation = buildToolPresentation(activity.toolCall.name, args, undefined, cwd ?? null, undefined);
   const rawSummary = formatGenericCompactToolName(activity.toolCall.name, args, cwd);
   if (!presentation) {
