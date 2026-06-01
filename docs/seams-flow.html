@@ -1,0 +1,1155 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Codebase Seams and Information Flow</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --page: #eef2f6;
+      --paper: #ffffff;
+      --ink: #17202a;
+      --muted: #5e6b7a;
+      --line: #bec9d7;
+      --strong-line: #7f8da0;
+      --transport: #0f766e;
+      --turn: #2563a8;
+      --conversation: #8a5b12;
+      --harness: #6d4bb4;
+      --runtime: #9f3d55;
+      --store: #3e6d37;
+      --workspace: #636f21;
+      --boot: #4c6172;
+      --shadow: 0 14px 34px rgba(20, 35, 54, 0.12);
+      --focus: #1f6feb;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      color: var(--ink);
+      background: var(--page);
+      line-height: 1.45;
+    }
+
+    main {
+      width: min(1420px, calc(100vw - 28px));
+      margin: 0 auto;
+      padding: 24px 0 38px;
+    }
+
+    header {
+      display: flex;
+      align-items: flex-end;
+      justify-content: space-between;
+      gap: 18px;
+      margin-bottom: 16px;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: clamp(30px, 4vw, 48px);
+      line-height: 1.04;
+      letter-spacing: 0;
+    }
+
+    .subtitle {
+      max-width: 860px;
+      margin: 8px 0 0;
+      color: var(--muted);
+      font-size: 16px;
+    }
+
+    .source-note {
+      flex: 0 0 auto;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--paper);
+      padding: 10px 12px;
+      color: var(--muted);
+      font-size: 13px;
+      white-space: nowrap;
+    }
+
+    .shell {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 360px;
+      gap: 14px;
+      align-items: start;
+    }
+
+    .board {
+      min-width: 0;
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--paper);
+      box-shadow: var(--shadow);
+    }
+
+    .toolbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 12px;
+      border-bottom: 1px solid var(--line);
+      background: #f8fafc;
+    }
+
+    .flow-tabs {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      min-width: 0;
+    }
+
+    button {
+      min-height: 34px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #ffffff;
+      color: var(--ink);
+      font: inherit;
+      font-size: 13px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+
+    button:hover {
+      border-color: var(--strong-line);
+      background: #f3f7fb;
+    }
+
+    button:focus-visible,
+    input:focus-visible {
+      outline: 3px solid rgba(31, 111, 235, 0.28);
+      outline-offset: 2px;
+    }
+
+    .flow-button {
+      padding: 7px 10px;
+    }
+
+    .flow-button.active {
+      border-color: var(--focus);
+      background: #eaf2ff;
+      color: #0f4a99;
+    }
+
+    .zoom-controls {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex: 0 0 auto;
+    }
+
+    .icon-button {
+      display: grid;
+      width: 34px;
+      height: 34px;
+      place-items: center;
+      padding: 0;
+      font-size: 18px;
+      line-height: 1;
+    }
+
+    .zoom-controls input {
+      width: 128px;
+      accent-color: var(--focus);
+    }
+
+    .zoom-label {
+      width: 48px;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 800;
+      text-align: right;
+    }
+
+    .viewport {
+      position: relative;
+      height: min(72vh, 760px);
+      min-height: 560px;
+      overflow: auto;
+      background:
+        linear-gradient(rgba(23, 32, 42, 0.045) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(23, 32, 42, 0.045) 1px, transparent 1px),
+        #fbfcfe;
+      background-size: 36px 36px;
+    }
+
+    .map {
+      position: relative;
+      width: 1600px;
+      height: 940px;
+      transform-origin: 0 0;
+      transition: transform 180ms ease;
+    }
+
+    .lane {
+      position: absolute;
+      top: 36px;
+      height: 868px;
+      border: 1px dashed #d6deea;
+      border-radius: 8px;
+      background: rgba(255, 255, 255, 0.58);
+    }
+
+    .lane b {
+      position: absolute;
+      top: 12px;
+      left: 14px;
+      color: var(--muted);
+      font-size: 12px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    .node {
+      position: absolute;
+      display: grid;
+      grid-template-rows: auto auto 1fr;
+      gap: 8px;
+      width: 218px;
+      min-height: 142px;
+      padding: 13px;
+      border: 2px solid var(--line);
+      border-radius: 8px;
+      background: #ffffff;
+      box-shadow: 0 10px 24px rgba(20, 35, 54, 0.1);
+      text-align: left;
+      cursor: pointer;
+      transition: transform 160ms ease, border-color 160ms ease, box-shadow 160ms ease, opacity 160ms ease;
+    }
+
+    .node:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 16px 30px rgba(20, 35, 54, 0.14);
+    }
+
+    .node.active {
+      border-color: var(--focus);
+      box-shadow: 0 0 0 4px rgba(31, 111, 235, 0.14), 0 16px 30px rgba(20, 35, 54, 0.14);
+    }
+
+    .node.dim {
+      opacity: 0.36;
+    }
+
+    .node.in-flow {
+      border-color: var(--flow-color, var(--focus));
+    }
+
+    .node.pulse {
+      animation: pulse 900ms ease;
+    }
+
+    @keyframes pulse {
+      0% { transform: scale(1); }
+      45% { transform: scale(1.045); }
+      100% { transform: scale(1); }
+    }
+
+    .node-type {
+      display: inline-flex;
+      width: max-content;
+      align-items: center;
+      border-radius: 999px;
+      padding: 2px 8px;
+      background: color-mix(in srgb, var(--node-color), white 84%);
+      color: var(--node-color);
+      font-size: 11px;
+      font-weight: 900;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+    }
+
+    .node h2 {
+      margin: 0;
+      font-size: 17px;
+      line-height: 1.15;
+      letter-spacing: 0;
+    }
+
+    .node p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .node code {
+      overflow-wrap: anywhere;
+      color: #29384a;
+      font-size: 11px;
+    }
+
+    .edges {
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      overflow: visible;
+    }
+
+    .edge {
+      fill: none;
+      stroke: #a7b3c3;
+      stroke-width: 2;
+      marker-end: url(#arrow);
+      opacity: 0.72;
+      transition: stroke 160ms ease, stroke-width 160ms ease, opacity 160ms ease;
+    }
+
+    .edge.dim {
+      opacity: 0.12;
+    }
+
+    .edge.in-flow {
+      stroke: var(--flow-color, var(--focus));
+      stroke-width: 4;
+      opacity: 1;
+      marker-end: url(#flow-arrow);
+    }
+
+    .edge.backflow {
+      stroke-dasharray: 8 7;
+    }
+
+    .detail {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--paper);
+      box-shadow: var(--shadow);
+      overflow: hidden;
+    }
+
+    .detail-header {
+      padding: 16px;
+      border-bottom: 1px solid var(--line);
+      background: #f8fafc;
+    }
+
+    .eyebrow {
+      margin: 0 0 6px;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 900;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    .detail h2 {
+      margin: 0;
+      font-size: 24px;
+      letter-spacing: 0;
+      line-height: 1.12;
+    }
+
+    .detail-body {
+      padding: 16px;
+    }
+
+    .detail-body p {
+      margin: 0 0 12px;
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    .detail-section {
+      margin-top: 16px;
+    }
+
+    .detail-section h3 {
+      margin: 0 0 8px;
+      font-size: 13px;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+    }
+
+    .pill-list {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 7px;
+    }
+
+    .pill {
+      border: 1px solid #d7e0eb;
+      border-radius: 999px;
+      padding: 5px 8px;
+      background: #fbfcfe;
+      color: #273548;
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    .detail ul,
+    .detail ol {
+      margin: 0;
+      padding-left: 20px;
+      color: #29384a;
+      font-size: 13px;
+    }
+
+    .detail li + li {
+      margin-top: 6px;
+    }
+
+    .detail code {
+      color: #0f3d68;
+      font-size: 12px;
+      overflow-wrap: anywhere;
+    }
+
+    .flow-readout {
+      margin-top: 14px;
+      border-top: 1px solid var(--line);
+      padding-top: 14px;
+    }
+
+    .flow-readout ol {
+      counter-reset: step;
+      list-style: none;
+      padding: 0;
+    }
+
+    .flow-readout li {
+      display: grid;
+      grid-template-columns: 26px minmax(0, 1fr);
+      gap: 8px;
+      align-items: start;
+      margin: 0 0 9px;
+    }
+
+    .flow-readout li::before {
+      counter-increment: step;
+      content: counter(step);
+      display: grid;
+      width: 24px;
+      height: 24px;
+      place-items: center;
+      border-radius: 50%;
+      background: #eaf2ff;
+      color: #0f4a99;
+      font-size: 12px;
+      font-weight: 900;
+    }
+
+    .flow-readout b {
+      display: block;
+      margin-bottom: 2px;
+      color: var(--ink);
+    }
+
+    .legend {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 10px;
+      margin-top: 14px;
+    }
+
+    .legend-item {
+      display: flex;
+      min-width: 0;
+      align-items: center;
+      gap: 8px;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    .swatch {
+      width: 14px;
+      height: 14px;
+      border-radius: 4px;
+      background: var(--color);
+      flex: 0 0 auto;
+    }
+
+    @media (max-width: 1040px) {
+      header,
+      .shell {
+        grid-template-columns: 1fr;
+      }
+
+      header {
+        display: block;
+      }
+
+      .source-note {
+        display: inline-block;
+        margin-top: 12px;
+        white-space: normal;
+      }
+
+      .shell {
+        display: block;
+      }
+
+      .detail {
+        margin-top: 14px;
+      }
+
+      .viewport {
+        height: 620px;
+      }
+    }
+
+    @media (max-width: 720px) {
+      main {
+        width: min(100vw - 18px, 1420px);
+        padding-top: 16px;
+      }
+
+      .toolbar {
+        display: grid;
+        grid-template-columns: 1fr;
+      }
+
+      .zoom-controls {
+        justify-content: space-between;
+      }
+
+      .zoom-controls input {
+        width: min(48vw, 220px);
+      }
+
+      .legend {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <div>
+        <h1>Codebase Seams and Information Flow</h1>
+        <p class="subtitle">Explore how a WhatsApp message becomes a normalized turn, how the conversation runner chooses commands or harness work, and how provider output flows back through presentation and durable delivery.</p>
+      </div>
+      <div class="source-note">Static map for <code>whatsapp-llm-bot</code></div>
+    </header>
+
+    <section class="shell" aria-label="Interactive codebase seam explorer">
+      <div class="board">
+        <div class="toolbar">
+          <div class="flow-tabs" id="flowTabs" aria-label="Example flows"></div>
+          <div class="zoom-controls" aria-label="Zoom controls">
+            <button class="icon-button" id="zoomOut" title="Zoom out" type="button">-</button>
+            <input id="zoomRange" type="range" min="60" max="150" step="5" value="85" aria-label="Zoom level">
+            <button class="icon-button" id="zoomIn" title="Zoom in" type="button">+</button>
+            <span class="zoom-label" id="zoomLabel">85%</span>
+          </div>
+        </div>
+        <div class="viewport" id="viewport">
+          <div class="map" id="map" aria-label="Codebase seam map">
+            <svg class="edges" viewBox="0 0 1600 940" aria-hidden="true">
+              <defs>
+                <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+                  <path d="M 0 0 L 10 5 L 0 10 z" fill="#a7b3c3"></path>
+                </marker>
+                <marker id="flow-arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+                  <path d="M 0 0 L 10 5 L 0 10 z" fill="currentColor"></path>
+                </marker>
+              </defs>
+              <g id="edgeLayer"></g>
+            </svg>
+            <div class="lane" style="left: 30px; width: 255px;"><b>Startup</b></div>
+            <div class="lane" style="left: 315px; width: 255px;"><b>WhatsApp Boundary</b></div>
+            <div class="lane" style="left: 600px; width: 255px;"><b>App Turn</b></div>
+            <div class="lane" style="left: 885px; width: 255px;"><b>Provider Runtime</b></div>
+            <div class="lane" style="left: 1170px; width: 255px;"><b>Return Path</b></div>
+            <div class="lane" style="left: 1455px; width: 110px;"><b>State</b></div>
+            <div id="nodeLayer"></div>
+          </div>
+        </div>
+      </div>
+
+      <aside class="detail" aria-live="polite">
+        <div class="detail-header">
+          <p class="eyebrow" id="detailType">Module</p>
+          <h2 id="detailTitle">Select a module or flow</h2>
+        </div>
+        <div class="detail-body">
+          <p id="detailSummary">Use the flow buttons to animate common paths, or click a module to zoom the explanation into that seam.</p>
+          <div class="detail-section">
+            <h3>Boundary Contract</h3>
+            <div class="pill-list" id="detailContracts"></div>
+          </div>
+          <div class="detail-section">
+            <h3>Source Files</h3>
+            <div class="pill-list" id="detailFiles"></div>
+          </div>
+          <div class="detail-section">
+            <h3>What To Notice</h3>
+            <ul id="detailNotes"></ul>
+          </div>
+          <div class="flow-readout">
+            <div class="detail-section">
+              <h3 id="flowTitle">Example Flow</h3>
+              <ol id="flowSteps"></ol>
+            </div>
+          </div>
+        </div>
+      </aside>
+    </section>
+
+    <div class="legend" aria-label="Legend">
+      <div class="legend-item"><span class="swatch" style="--color: var(--transport);"></span>Transport-owned WhatsApp details</div>
+      <div class="legend-item"><span class="swatch" style="--color: var(--conversation);"></span>App-level turn decisions</div>
+      <div class="legend-item"><span class="swatch" style="--color: var(--harness);"></span>Harness/provider runtime</div>
+      <div class="legend-item"><span class="swatch" style="--color: var(--store);"></span>Persistent state and replay</div>
+    </div>
+  </main>
+
+  <script>
+    const modules = [
+      {
+        id: "boot",
+        type: "startup",
+        color: "var(--boot)",
+        x: 58,
+        y: 96,
+        title: "index.js",
+        summary: "Composes the production process: store, LLM client, WhatsApp transport, workspace presenter, conversation runner, HTML server, reminders, and shutdown cleanup.",
+        contracts: ["createMessageHandler(deps)", "transport.start(handleMessage)", "initStore()", "createWhatsAppTransport(...)"],
+        files: ["index.js"],
+        notes: [
+          "Startup wires ports together but keeps message handling in createConversationRunner.",
+          "Restart acknowledgement delivery is attached through the transport connection-open hook.",
+          "Shutdown waits for harnesses, stops transport, stops the HTML server, and closes the store."
+        ]
+      },
+      {
+        id: "transport",
+        type: "transport",
+        color: "var(--transport)",
+        x: 340,
+        y: 96,
+        title: "WhatsApp Transport",
+        summary: "Owns Baileys sockets, connection lifecycle, inbound event classification, coalescing, album buffering, reaction/poll runtimes, and outbound send surfaces.",
+        contracts: ["ChatTransport", "start(onTurn)", "sendText(chatId, text)", "sendEvent(chatId, event)", "editMessage(handle)"],
+        files: ["whatsapp/create-whatsapp-transport.js", "whatsapp/index.js"],
+        notes: [
+          "The app sees a semantic ChatTransport instead of raw Baileys.",
+          "Incoming upserts are classified before anything crosses into the app layer.",
+          "Outbound queue replay waits until the Baileys event buffer drains after connection open."
+        ]
+      },
+      {
+        id: "turn",
+        type: "turn",
+        color: "var(--turn)",
+        x: 340,
+        y: 346,
+        title: "Turn Normalizer",
+        summary: "Converts Baileys messages into ChatTurn objects and creates TurnIO methods that keep WhatsApp-specific delivery, polls, reactions, and presence out of app logic.",
+        contracts: ["buildIncomingTurn(...)", "adaptIncomingMessage(...)", "ChatTurn", "TurnIO"],
+        files: ["whatsapp/inbound/chat-turn.js", "whatsapp/inbound/message-content.js"],
+        notes: [
+          "Raw message shape is normalized into content blocks, sender facts, chat facts, timestamp, and TurnIO.",
+          "Group mentions are detected and stripped at this boundary.",
+          "finishTurnIo ends the transport-owned presence lease after the app handler returns."
+        ]
+      },
+      {
+        id: "context",
+        type: "app port",
+        color: "var(--turn)",
+        x: 630,
+        y: 346,
+        title: "Action Context",
+        summary: "Adapts ChatTurn into ExecuteActionContext so commands and harness hooks can reply, send, select, confirm, react, and inspect admin status without knowing WhatsApp internals.",
+        contracts: ["createMessageActionContext(turn)", "ExecuteActionContext", "send(event)", "reply(event)", "select(...)", "confirm(...)"],
+        files: ["execute-action-context.js"],
+        notes: [
+          "This is the app-side port into the active transport turn.",
+          "Silent contexts exist for background or sub-agent surfaces.",
+          "Commands and harness display code share this same context contract."
+        ]
+      },
+      {
+        id: "runner",
+        type: "conversation",
+        color: "var(--conversation)",
+        x: 630,
+        y: 94,
+        title: "Conversation Runner",
+        summary: "Owns chat creation, workspace binding, command routing, response policy, active-run coordination, harness selection, and final response delivery.",
+        contracts: ["createConversationRunner(deps)", "handleMessage(turn)", "handleSingleMessage(turn)", "dispatchTurn(turn)"],
+        files: ["conversation/create-conversation-runner.js"],
+        notes: [
+          "Bang commands stay in the app layer and can use workspace control or restart handling.",
+          "Slash commands are offered to the selected harness before falling through to normal LLM handling.",
+          "Pending active runs can buffer or inject new user text rather than starting a second provider turn."
+        ]
+      },
+      {
+        id: "workspace",
+        type: "workspace",
+        color: "var(--workspace)",
+        x: 630,
+        y: 596,
+        title: "Workspace Binding",
+        summary: "Resolves a chat into project, workspace, or unbound state and feeds the run configuration with a semantic workdir.",
+        contracts: ["resolveChatBinding(...)", "buildRunConfig(...)", "ResolvedChatBinding", "HarnessRunConfig"],
+        files: ["workspace-binding-service.js", "conversation/build-run-config.js", "workspace-control.js"],
+        notes: [
+          "Explicit per-chat cwd bypasses stored project/workspace binding.",
+          "Group chats can be adopted into project/workspace rows when no git workspace is found.",
+          "Project workspaces default to workspace-write sandbox mode for coding harnesses."
+        ]
+      },
+      {
+        id: "turnInput",
+        type: "conversation",
+        color: "var(--conversation)",
+        x: 914,
+        y: 96,
+        title: "Harness Turn Input",
+        summary: "Builds provider-visible input: current message, prior chat history, external instructions, model choice, media transcription, and buffered live-input text.",
+        contracts: ["buildHarnessTurnInput(...)", "prepareRunMessages(...)", "buildLiveInputText(...)"],
+        files: ["conversation/build-harness-turn-input.js", "conversation/prepare-run-messages.js", "conversation/live-input-text.js"],
+        notes: [
+          "Media blocks are converted into text with chat-specific media-to-text models.",
+          "The latest user content becomes the semantic provider input field.",
+          "History is read through the store seam, not through the transport."
+        ]
+      },
+      {
+        id: "harness",
+        type: "harness",
+        color: "var(--harness)",
+        x: 914,
+        y: 346,
+        title: "ACP Harness Adapter",
+        summary: "Wraps ACP providers in the AgentHarness contract, manages per-chat runtime sessions, exposes live input, slash commands, cancel, read/rollback/fork, and event subscriptions.",
+        contracts: ["AgentHarness", "createAcpHarness()", "adapter.startSession(...)", "adapter.sendTurn(...)", "adapter.injectMessage(...)"],
+        files: ["harnesses/acp.js", "harnesses/registry.js", "harnesses/adapter.js"],
+        notes: [
+          "The adapter emits semantic runtime events back to the conversation runner.",
+          "Resume cursors are tracked as harness session ids for the chat.",
+          "Active runs carry pending permission and user-input requests."
+        ]
+      },
+      {
+        id: "acpRunner",
+        type: "provider runtime",
+        color: "var(--harness)",
+        x: 914,
+        y: 596,
+        title: "ACP Runner",
+        summary: "Starts the provider process, opens the ACP JSON-RPC connection, handles filesystem, terminal, permission, elicitation, protected-path, and snapshot-file-change requests.",
+        contracts: ["startAcpRun(input)", "openAcpConnection(...)", "fs/read_text_file", "fs/write_text_file", "terminal/create"],
+        files: ["harnesses/acp-runner.js", "harnesses/acp-client.js", "harnesses/acp-file-changes.js"],
+        notes: [
+          "Provider-specific RPC is normalized before app-facing runtime events leave this area.",
+          "Sandbox and protected-path approvals are requested through hooks instead of bypassing the chat flow.",
+          "File writes emit file-change.completed events with diffs."
+        ]
+      },
+      {
+        id: "dispatcher",
+        type: "runtime",
+        color: "var(--runtime)",
+        x: 1196,
+        y: 96,
+        title: "Runtime Dispatcher",
+        summary: "Turns canonical harness runtime events into AgentIOHooks calls and accumulates the final AgentResult response and usage.",
+        contracts: ["createHarnessRuntimeEventDispatcher(...)", "handleEvent(event)", "AgentResult"],
+        files: ["harnesses/harness-runtime-event-dispatcher.js", "harnesses/harness-runtime-events.js"],
+        notes: [
+          "Progress events are emitted as runtime events for presentation.",
+          "Assistant completions update both hooks and the returned AgentResult.",
+          "Sub-agent outputs are deduplicated before being surfaced."
+        ]
+      },
+      {
+        id: "hooks",
+        type: "presentation",
+        color: "var(--runtime)",
+        x: 1196,
+        y: 346,
+        title: "Agent IO Hooks",
+        summary: "Maps reasoning, LLM responses, tool calls, plans, usage, runtime events, and file changes onto semantic outbound events sent through ExecuteActionContext.",
+        contracts: ["buildAgentIoHooks(...)", "onLlmResponse", "onToolCall", "onRuntimeEvent", "contentEvent(...)", "runtimeEvent(...)"],
+        files: ["conversation/build-agent-io-hooks.js", "conversation/codex-hook-display.js", "outbound-events.js"],
+        notes: [
+          "Output visibility is resolved before hook events become chat messages.",
+          "Snapshot file changes are batched and may ask the user before flooding chat.",
+          "Delivered content signatures prevent duplicate final responses."
+        ]
+      },
+      {
+        id: "outbound",
+        type: "transport",
+        color: "var(--transport)",
+        x: 1196,
+        y: 596,
+        title: "Outbound Delivery",
+        summary: "Renders semantic outbound events into WhatsApp messages, edits, images, tool summaries, usage, runtime progress, and durable queued rows when the socket is unavailable.",
+        contracts: ["sendOrQueueWhatsAppEvent(...)", "sendEvent(sock, chatId, event)", "renderBlocks(...)", "MessageHandle"],
+        files: ["whatsapp/outbound/persistent-queue.js", "whatsapp/outbound/send-content.js", "message-renderer.js"],
+        notes: [
+          "Streaming content is buffered until a final chunk before delivery.",
+          "Recoverable send errors go through a debounced retry and then durable queue.",
+          "Runtime events may be rendered compactly or with detailed tool output based on chat settings."
+        ]
+      },
+      {
+        id: "store",
+        type: "state",
+        color: "var(--store)",
+        x: 1468,
+        y: 346,
+        title: "Store",
+        summary: "Provides chat config, message history, project/workspace records, WhatsApp outbound queue rows, edit handles, and harness session state.",
+        contracts: ["initStore()", "createChat(chatId)", "addMessage(...)", "getMessages(...)", "saveHarnessSession(...)", "enqueueWhatsAppOutboundQueueEntry(...)"],
+        files: ["store.js", "store/repos/messages.js", "store/repos/whatsapp.js", "store/repos/projects.js"],
+        notes: [
+          "Root database state is split from per-chat database state through getChatDb.",
+          "Outbound queue entries survive transport disconnects and process restarts.",
+          "Harness session ids are persisted on chat rows so providers can resume."
+        ]
+      }
+    ];
+
+    const edges = [
+      ["boot", "transport", "constructs"],
+      ["boot", "runner", "injects deps"],
+      ["boot", "store", "initializes"],
+      ["transport", "turn", "Baileys message"],
+      ["turn", "runner", "ChatTurn"],
+      ["runner", "context", "TurnIO port"],
+      ["runner", "workspace", "resolve binding"],
+      ["workspace", "store", "project/workspace rows"],
+      ["runner", "turnInput", "build provider input"],
+      ["turnInput", "store", "history"],
+      ["runner", "harness", "send turn"],
+      ["harness", "acpRunner", "JSON-RPC process"],
+      ["acpRunner", "dispatcher", "runtime event"],
+      ["harness", "dispatcher", "adapter event"],
+      ["dispatcher", "hooks", "hook callbacks"],
+      ["hooks", "context", "reply/send/select"],
+      ["context", "outbound", "OutboundEvent"],
+      ["outbound", "transport", "socket or queue", true],
+      ["outbound", "store", "queue/edit handles"],
+      ["harness", "store", "resume cursor"],
+      ["runner", "store", "chat + messages"],
+      ["acpRunner", "hooks", "approval/user input", true],
+      ["turn", "outbound", "TurnIO send/reply"]
+    ];
+
+    const flows = [
+      {
+        id: "normal",
+        title: "User Prompt To WhatsApp Reply",
+        color: "#1f6feb",
+        path: ["transport", "turn", "runner", "context", "workspace", "turnInput", "harness", "acpRunner", "dispatcher", "hooks", "context", "outbound", "transport"],
+        steps: [
+          ["WhatsApp event", "Baileys `messages.upsert` reaches `createWhatsAppTransport`, which classifies it as a turn and coalesces rapid same-chat messages."],
+          ["Normalized turn", "`buildIncomingTurn` emits a `ChatTurn` with content blocks, sender facts, chat facts, timestamp, and `TurnIO`."],
+          ["Conversation decision", "`handleSingleMessage` creates the chat row, resolves workspace binding, checks commands, and decides whether the bot should respond."],
+          ["Provider input", "`buildHarnessTurnInput` combines the new message, stored history, external instructions, media text, model, and run config."],
+          ["ACP run", "The harness adapter starts or resumes a per-chat provider session and sends the turn into `startAcpRun`."],
+          ["Runtime events", "ACP JSON-RPC messages become canonical harness runtime events and then hook calls."],
+          ["Outbound event", "`buildAgentIoHooks` emits `contentEvent`, `runtimeEvent`, plan, usage, or tool events through the action context."],
+          ["WhatsApp delivery", "`sendOrQueueWhatsAppEvent` renders to WhatsApp immediately or persists a queue row when the socket is not available."]
+        ]
+      },
+      {
+        id: "command",
+        title: "Bang Command",
+        color: "#b36b13",
+        path: ["transport", "turn", "runner", "context", "store", "outbound", "transport"],
+        steps: [
+          ["Command text", "A text block beginning with `!` stays in app command routing instead of entering the LLM path."],
+          ["Router seam", "`createBangCommandRouter` receives the turn, chat info, sender ids, first text block, workspace binding, and action context."],
+          ["State changes", "Commands can update chat settings, workspace state, restart a process, archive workspaces, or write messages through the store."],
+          ["Response", "Command results go back through the same `ExecuteActionContext` and outbound transport as LLM responses."]
+        ]
+      },
+      {
+        id: "live",
+        title: "Message During Active Run",
+        color: "#6d4bb4",
+        path: ["transport", "turn", "runner", "harness", "acpRunner"],
+        steps: [
+          ["Second message", "A later message in the same chat reaches the runner while `runCoordinator` has a pending run."],
+          ["Text preparation", "If media is present, `buildPendingRunInputText` transcribes it before live input is attempted."],
+          ["Owner check", "The run coordinator compares the selected harness owner key so messages do not inject into the wrong provider instance."],
+          ["Inject or buffer", "If supported, `adapter.injectMessage` steers the active ACP session; otherwise the text is buffered for the next run."]
+        ]
+      },
+      {
+        id: "fileChange",
+        title: "Provider File Change",
+        color: "#9f3d55",
+        path: ["acpRunner", "dispatcher", "hooks", "context", "outbound", "transport"],
+        steps: [
+          ["Provider request", "ACP `fs/write_text_file` is handled in `acp-runner.js` after sandbox and protected-path checks."],
+          ["Diff event", "The runner writes the file and emits `file-change.completed` with path, kind, old text, new text, and diff when available."],
+          ["Dispatcher", "The canonical runtime event is passed to `buildAgentIoHooks` through `onRuntimeEvent`."],
+          ["Presentation", "Snapshot events may be batched; tool file changes are rendered as runtime progress or code-image detail depending on visibility."],
+          ["Delivery", "The rendered event uses the same outbound WhatsApp delivery seam as normal assistant text."]
+        ]
+      },
+      {
+        id: "queue",
+        title: "Disconnected Outbound Queue",
+        color: "#3e6d37",
+        path: ["hooks", "context", "outbound", "store", "outbound", "transport"],
+        steps: [
+          ["Send attempt", "A hook emits an outbound event, but `getOpenSocket` returns null or a recoverable WhatsApp send error occurs."],
+          ["Debounced retry", "`persistent-queue.js` waits briefly and tries the socket one more time."],
+          ["Durable row", "If delivery still cannot happen, the event or text is persisted through the WhatsApp store repo."],
+          ["Reconnect", "On connection open, the transport waits for Baileys buffering to drain and calls `flushQueuedWhatsAppOutbound`."],
+          ["Handle recovery", "Delivered queued handles are cached so startup hooks, such as restart acknowledgements, can recover and edit them."]
+        ]
+      }
+    ];
+
+    const moduleById = new Map(modules.map((module) => [module.id, module]));
+    const nodeLayer = document.querySelector("#nodeLayer");
+    const edgeLayer = document.querySelector("#edgeLayer");
+    const flowTabs = document.querySelector("#flowTabs");
+    const detailType = document.querySelector("#detailType");
+    const detailTitle = document.querySelector("#detailTitle");
+    const detailSummary = document.querySelector("#detailSummary");
+    const detailContracts = document.querySelector("#detailContracts");
+    const detailFiles = document.querySelector("#detailFiles");
+    const detailNotes = document.querySelector("#detailNotes");
+    const flowTitle = document.querySelector("#flowTitle");
+    const flowSteps = document.querySelector("#flowSteps");
+    const zoomRange = document.querySelector("#zoomRange");
+    const zoomLabel = document.querySelector("#zoomLabel");
+    const viewport = document.querySelector("#viewport");
+    const map = document.querySelector("#map");
+
+    let selectedModuleId = null;
+    let selectedFlowId = "normal";
+    let animationTimers = [];
+
+    function escapeHtml(value) {
+      return String(value)
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;");
+    }
+
+    function renderPills(container, entries) {
+      container.innerHTML = entries.map((entry) => `<span class="pill"><code>${escapeHtml(entry)}</code></span>`).join("");
+    }
+
+    function renderList(container, entries) {
+      container.innerHTML = entries.map((entry) => `<li>${escapeHtml(entry)}</li>`).join("");
+    }
+
+    function nodeCenter(id) {
+      const module = moduleById.get(id);
+      return {
+        x: module.x + 109,
+        y: module.y + 71
+      };
+    }
+
+    function edgePath(from, to) {
+      const a = nodeCenter(from);
+      const b = nodeCenter(to);
+      const dx = b.x - a.x;
+      const bend = Math.max(70, Math.abs(dx) * 0.42);
+      return `M ${a.x} ${a.y} C ${a.x + bend} ${a.y}, ${b.x - bend} ${b.y}, ${b.x} ${b.y}`;
+    }
+
+    function edgeKey(from, to) {
+      return `${from}->${to}`;
+    }
+
+    function renderMap() {
+      nodeLayer.innerHTML = modules.map((module) => `
+        <button class="node" id="node-${module.id}" data-id="${module.id}" style="left: ${module.x}px; top: ${module.y}px; --node-color: ${module.color};" type="button">
+          <span class="node-type">${escapeHtml(module.type)}</span>
+          <h2>${escapeHtml(module.title)}</h2>
+          <p>${escapeHtml(module.summary)}</p>
+          <code>${escapeHtml(module.files[0])}</code>
+        </button>
+      `).join("");
+
+      edgeLayer.innerHTML = edges.map(([from, to, label, backflow]) => `
+        <path class="edge ${backflow ? "backflow" : ""}" id="edge-${from}-${to}" data-key="${edgeKey(from, to)}" data-from="${from}" data-to="${to}" d="${edgePath(from, to)}">
+          <title>${escapeHtml(label)}</title>
+        </path>
+      `).join("");
+
+      for (const node of document.querySelectorAll(".node")) {
+        node.addEventListener("click", () => selectModule(node.dataset.id));
+      }
+    }
+
+    function renderFlowTabs() {
+      flowTabs.innerHTML = flows.map((flow) => `
+        <button class="flow-button" data-flow="${flow.id}" type="button">${escapeHtml(flow.title)}</button>
+      `).join("");
+      for (const button of document.querySelectorAll(".flow-button")) {
+        button.addEventListener("click", () => selectFlow(button.dataset.flow));
+      }
+    }
+
+    function getFlowEdges(flow) {
+      const keys = new Set();
+      for (let index = 0; index < flow.path.length - 1; index += 1) {
+        const from = flow.path[index];
+        const to = flow.path[index + 1];
+        keys.add(edgeKey(from, to));
+        keys.add(edgeKey(to, from));
+      }
+      return keys;
+    }
+
+    function currentFlow() {
+      return flows.find((flow) => flow.id === selectedFlowId) || flows[0];
+    }
+
+    function updateClasses() {
+      const flow = currentFlow();
+      const flowNodes = new Set(flow.path);
+      const flowEdges = getFlowEdges(flow);
+      document.documentElement.style.setProperty("--flow-color", flow.color);
+
+      for (const button of document.querySelectorAll(".flow-button")) {
+        button.classList.toggle("active", button.dataset.flow === flow.id);
+      }
+
+      for (const node of document.querySelectorAll(".node")) {
+        const id = node.dataset.id;
+        node.classList.toggle("active", id === selectedModuleId);
+        node.classList.toggle("in-flow", flowNodes.has(id));
+        node.classList.toggle("dim", selectedModuleId ? id !== selectedModuleId : !flowNodes.has(id));
+      }
+
+      for (const edge of document.querySelectorAll(".edge")) {
+        const inFlow = flowEdges.has(edge.dataset.key);
+        edge.classList.toggle("in-flow", inFlow);
+        edge.classList.toggle("dim", !inFlow && !selectedModuleId);
+      }
+    }
+
+    function setDetailForModule(module) {
+      detailType.textContent = module.type;
+      detailTitle.textContent = module.title;
+      detailSummary.textContent = module.summary;
+      renderPills(detailContracts, module.contracts);
+      renderPills(detailFiles, module.files);
+      renderList(detailNotes, module.notes);
+    }
+
+    function setDetailForFlow(flow) {
+      detailType.textContent = "example flow";
+      detailTitle.textContent = flow.title;
+      detailSummary.textContent = "The highlighted route shows the main modules that touch this example. Click any module in the route to zoom into its local contract.";
+      renderPills(detailContracts, flow.path.map((id) => moduleById.get(id).title));
+      renderPills(detailFiles, [...new Set(flow.path.flatMap((id) => moduleById.get(id).files))].slice(0, 8));
+      renderList(detailNotes, [
+        "Solid highlighted edges show forward data movement.",
+        "Dashed highlighted edges show a return path or callback into an earlier seam.",
+        "The side steps describe the payload shape as it crosses each boundary."
+      ]);
+    }
+
+    function renderFlowReadout(flow) {
+      flowTitle.textContent = flow.title;
+      flowSteps.innerHTML = flow.steps.map(([title, text]) => `
+        <li><span><b>${escapeHtml(title)}</b>${escapeHtml(text)}</span></li>
+      `).join("");
+    }
+
+    function clearAnimation() {
+      for (const timer of animationTimers) {
+        clearTimeout(timer);
+      }
+      animationTimers = [];
+      for (const node of document.querySelectorAll(".node")) {
+        node.classList.remove("pulse");
+      }
+    }
+
+    function animateFlow(flow) {
+      clearAnimation();
+      flow.path.forEach((id, index) => {
+        const timer = setTimeout(() => {
+          const node = document.querySelector(`#node-${id}`);
+          if (!node) return;
+          node.classList.remove("pulse");
+          void node.offsetWidth;
+          node.classList.add("pulse");
+        }, index * 220);
+        animationTimers.push(timer);
+      });
+    }
+
+    function centerOnModule(module) {
+      const zoom = Number(zoomRange.value) / 100;
+      const targetX = module.x * zoom - viewport.clientWidth / 2 + 120 * zoom;
+      const targetY = module.y * zoom - viewport.clientHeight / 2 + 90 * zoom;
+      viewport.scrollTo({
+        left: Math.max(0, targetX),
+        top: Math.max(0, targetY),
+        behavior: "smooth"
+      });
+    }
+
+    function selectModule(id) {
+      const module = moduleById.get(id);
+      if (!module) return;
+      selectedModuleId = id;
+      setDetailForModule(module);
+      renderFlowReadout(currentFlow());
+      updateClasses();
+      centerOnModule(module);
+    }
+
+    function selectFlow(id) {
+      const flow = flows.find((entry) => entry.id === id);
+      if (!flow) return;
+      selectedFlowId = id;
+      selectedModuleId = null;
+      setDetailForFlow(flow);
+      renderFlowReadout(flow);
+      updateClasses();
+      animateFlow(flow);
+    }
+
+    function applyZoom(value) {
+      const zoom = Math.max(60, Math.min(150, Number(value))) / 100;
+      map.style.transform = `scale(${zoom})`;
+      map.style.width = "1600px";
+      map.style.height = "940px";
+      map.style.marginRight = `${Math.max(0, 1600 * (zoom - 1))}px`;
+      map.style.marginBottom = `${Math.max(0, 940 * (zoom - 1))}px`;
+      zoomLabel.textContent = `${Math.round(zoom * 100)}%`;
+    }
+
+    document.querySelector("#zoomOut").addEventListener("click", () => {
+      zoomRange.value = String(Math.max(Number(zoomRange.min), Number(zoomRange.value) - 10));
+      applyZoom(zoomRange.value);
+    });
+
+    document.querySelector("#zoomIn").addEventListener("click", () => {
+      zoomRange.value = String(Math.min(Number(zoomRange.max), Number(zoomRange.value) + 10));
+      applyZoom(zoomRange.value);
+    });
+
+    zoomRange.addEventListener("input", () => applyZoom(zoomRange.value));
+
+    renderMap();
+    renderFlowTabs();
+    applyZoom(zoomRange.value);
+    selectFlow("normal");
+  </script>
+</body>
+</html>
