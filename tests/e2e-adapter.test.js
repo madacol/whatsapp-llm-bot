@@ -249,7 +249,7 @@ describe("dummy runtime tools", () => {
     const rendered = captures.getRenderedMessages();
     assert.ok(rendered.some((text) => text.includes("🔧 *Read*") && text.includes("`src/app.js`")), `Expected Read start, got ${JSON.stringify(rendered)}`);
     assert.ok(rendered.some((text) => text.includes("✅ *Read*") && text.includes("`src/app.js`")), `Expected Read completion, got ${JSON.stringify(rendered)}`);
-    assert.ok(rendered.some((text) => text.includes("✅ *Search*") && text.includes("\"needle\" in `src`")), `Expected Search completion, got ${JSON.stringify(rendered)}`);
+    assert.ok(rendered.some((text) => text.includes("✅ *Search*") && text.includes("`needle` in *src*")), `Expected Search completion, got ${JSON.stringify(rendered)}`);
     assert.ok(rendered.some((text) => text.includes("✅ *Task*") && text.includes("Review migration")), `Expected Task completion, got ${JSON.stringify(rendered)}`);
     assert.ok(rendered.some((text) => text.includes("✅ *Search Web*") && text.includes("\"runtime migration\"")), `Expected Search Web completion, got ${JSON.stringify(rendered)}`);
     assert.ok(rendered.some((text) => text.includes("Dummy tools done.")), `Expected final answer, got ${JSON.stringify(rendered)}`);
@@ -320,7 +320,7 @@ describe("ACP file changes through WhatsApp transport", () => {
    * @param {string} fileName
    */
   function assertOneFileChange(rendered, title, fileName) {
-    const matches = rendered.filter((text) => text.includes(title) && text.includes(`*${fileName}*`));
+    const matches = rendered.filter((text) => text.includes(`*${title}*`) && text.includes(`\`${fileName}\``));
     assert.equal(matches.length, 1, `Expected one ${title} caption for ${fileName}, got ${JSON.stringify(rendered)}`);
   }
 

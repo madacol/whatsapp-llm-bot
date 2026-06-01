@@ -123,6 +123,15 @@ function formatDisplayPath(targetPath, cwd) {
 }
 
 /**
+ * @param {string | null | undefined} targetPath
+ * @param {string | null | undefined} cwd
+ * @returns {string}
+ */
+function formatDisplayTarget(targetPath, cwd) {
+  return `*${shortenPath(targetPath || ".", cwd)}*`;
+}
+
+/**
  * @param {"Edit" | "Write"} name
  * @param {Record<string, unknown>} args
  * @param {string | null | undefined} cwd
@@ -204,8 +213,8 @@ function createReadPresentation(path, cwd) {
  * @returns {ActivityPresentation}
  */
 function createSearchPresentation(pattern, path, cwd) {
-  const suffix = path ? ` in ${formatDisplayPath(path, cwd)}` : "";
-  const activity = createActivity("Search", `${quoteForDisplay(pattern)}${suffix}`);
+  const suffix = path ? ` in ${formatDisplayTarget(path, cwd)}` : "";
+  const activity = createActivity("Search", `\`${pattern}\`${suffix}`);
   return {
     kind: "activity",
     toolName: "Search",

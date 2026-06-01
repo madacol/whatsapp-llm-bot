@@ -1913,8 +1913,8 @@ function getFileChangeTitle(event, displayKind) {
  * @returns {string}
  */
 function formatFileChangeCaptionLine(title, displayPath) {
-  const gap = title.startsWith("*") ? "  " : " ";
-  return `${title}${gap}*${displayPath}*`;
+  const displayTitle = title.startsWith("*") ? title : `*${title}*`;
+  return `${displayTitle}  \`${displayPath}\``;
 }
 
 /**
