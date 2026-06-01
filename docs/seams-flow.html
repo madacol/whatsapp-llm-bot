@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Codebase Seams and Information Flow</title>
+  <title>Example Payloads Across Codebase Seams</title>
   <style>
     :root {
       color-scheme: light;
@@ -23,6 +23,8 @@
       --boot: #4c6172;
       --shadow: 0 14px 34px rgba(20, 35, 54, 0.12);
       --focus: #1f6feb;
+      --warm: #fffbeb;
+      --warm-line: #f1c27d;
     }
 
     * {
@@ -133,13 +135,88 @@
     }
 
     .flow-button {
+      display: grid;
+      grid-template-columns: auto minmax(0, 1fr);
+      gap: 8px;
+      align-items: center;
       padding: 7px 10px;
+      text-align: left;
     }
 
     .flow-button.active {
       border-color: var(--focus);
       background: #eaf2ff;
       color: #0f4a99;
+    }
+
+    .flow-dot {
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+      background: var(--flow-dot-color, var(--focus));
+      box-shadow: 0 0 0 4px color-mix(in srgb, var(--flow-dot-color, var(--focus)), white 76%);
+    }
+
+    .story-strip {
+      display: grid;
+      grid-template-columns: auto minmax(0, 1fr) auto;
+      gap: 14px;
+      align-items: center;
+      padding: 14px 16px;
+      border-bottom: 1px solid var(--warm-line);
+      background: var(--warm);
+    }
+
+    .packet-token {
+      display: grid;
+      width: 58px;
+      height: 58px;
+      place-items: center;
+      border: 2px solid #d69032;
+      border-radius: 50%;
+      background: #ffffff;
+      color: #92510d;
+      font-size: 24px;
+      font-weight: 950;
+      box-shadow: 0 8px 20px rgba(146, 81, 13, 0.18);
+    }
+
+    .story-copy b {
+      display: block;
+      margin-bottom: 3px;
+      font-size: 15px;
+    }
+
+    .story-copy p {
+      margin: 0;
+      color: #6b4b20;
+      font-size: 13px;
+    }
+
+    .story-meter {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      color: #6b4b20;
+      font-size: 12px;
+      font-weight: 900;
+      white-space: nowrap;
+    }
+
+    .story-meter-bar {
+      width: 86px;
+      height: 8px;
+      border-radius: 999px;
+      background: #f5dfb9;
+      overflow: hidden;
+    }
+
+    .story-meter-fill {
+      width: 0;
+      height: 100%;
+      border-radius: inherit;
+      background: var(--flow-color, var(--focus));
+      transition: width 180ms ease;
     }
 
     .zoom-controls {
@@ -411,6 +488,109 @@
       padding-top: 14px;
     }
 
+    .payload-readout {
+      margin-top: 16px;
+      border-top: 1px solid var(--line);
+      padding-top: 14px;
+    }
+
+    .payload-list {
+      display: grid;
+      gap: 10px;
+    }
+
+    .payload-card {
+      border: 1px solid #d7e0eb;
+      border-radius: 8px;
+      background: #fbfcfe;
+      overflow: hidden;
+      transition: border-color 160ms ease, box-shadow 160ms ease, transform 160ms ease;
+    }
+
+    .payload-card.active {
+      border-color: var(--flow-color, var(--focus));
+      box-shadow: 0 0 0 3px color-mix(in srgb, var(--flow-color, var(--focus)), white 76%);
+      transform: translateY(-1px);
+    }
+
+    .payload-card-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      padding: 9px 10px;
+      border-bottom: 1px solid #e0e7f0;
+      background: #ffffff;
+    }
+
+    .payload-card h4 {
+      margin: 0;
+      color: var(--ink);
+      font-size: 13px;
+      line-height: 1.2;
+    }
+
+    .payload-card button {
+      min-height: 28px;
+      padding: 4px 8px;
+      white-space: nowrap;
+    }
+
+    .payload-card-body {
+      padding: 10px;
+    }
+
+    .payload-card-body p {
+      margin: 0 0 8px;
+      font-size: 13px;
+    }
+
+    .payload-code {
+      margin: 0;
+      overflow-x: auto;
+      border: 1px solid #dce4ee;
+      border-radius: 8px;
+      background: #0e1724;
+      color: #dbeafe;
+      padding: 10px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+      font-size: 11px;
+      line-height: 1.45;
+      white-space: pre;
+    }
+
+    .payload-code + .payload-code {
+      margin-top: 8px;
+    }
+
+    .payload-arrow {
+      display: block;
+      margin: 7px 0;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 900;
+      text-align: center;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+    }
+
+    .change-chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin: 0 0 8px;
+    }
+
+    .change-chip {
+      border: 1px solid #e0d1aa;
+      border-radius: 999px;
+      background: #fff9ea;
+      color: #684712;
+      padding: 3px 7px;
+      font-size: 11px;
+      font-weight: 850;
+    }
+
     .flow-readout ol {
       counter-reset: step;
       list-style: none;
@@ -519,6 +699,28 @@
         grid-template-columns: 1fr;
       }
 
+      .flow-button {
+        width: 100%;
+      }
+
+      .story-strip {
+        grid-template-columns: 1fr;
+      }
+
+      .packet-token {
+        width: 46px;
+        height: 46px;
+        font-size: 20px;
+      }
+
+      .story-meter {
+        width: 100%;
+      }
+
+      .story-meter-bar {
+        flex: 1 1 auto;
+      }
+
       .zoom-controls {
         display: none;
       }
@@ -561,6 +763,20 @@
       .legend {
         grid-template-columns: repeat(2, minmax(0, 1fr));
       }
+
+      .payload-card-header {
+        align-items: stretch;
+        flex-direction: column;
+      }
+
+      .payload-card button {
+        width: 100%;
+      }
+
+      .payload-code {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
     }
   </style>
 </head>
@@ -568,8 +784,8 @@
   <main>
     <header>
       <div>
-        <h1>Codebase Seams and Information Flow</h1>
-        <p class="subtitle">Explore how a WhatsApp message becomes a normalized turn, how the conversation runner chooses commands or harness work, and how provider output flows back through presentation and durable delivery.</p>
+        <h1>Example Payloads Across Codebase Seams</h1>
+        <p class="subtitle">Pick a real scenario and inspect how the payload changes at each boundary: raw WhatsApp input, normalized app turn, provider run input, runtime event, outbound event, and durable queue state.</p>
       </div>
       <div class="source-note">Static map for <code>whatsapp-llm-bot</code></div>
     </header>
@@ -583,6 +799,17 @@
             <input id="zoomRange" type="range" min="60" max="150" step="5" value="85" aria-label="Zoom level">
             <button class="icon-button" id="zoomIn" title="Zoom in" type="button">+</button>
             <span class="zoom-label" id="zoomLabel">85%</span>
+          </div>
+        </div>
+        <div class="story-strip" aria-live="polite">
+          <div class="packet-token" id="packetToken">1</div>
+          <div class="story-copy">
+            <b id="storyTitle">Payload starts outside the app</b>
+            <p id="storyText">Each step shows exactly what changed when the data crossed the selected seam.</p>
+          </div>
+          <div class="story-meter">
+            <span id="storyStepLabel">Step 1/3</span>
+            <span class="story-meter-bar"><span class="story-meter-fill" id="storyMeterFill"></span></span>
           </div>
         </div>
         <div class="viewport" id="viewport">
@@ -632,6 +859,12 @@
             <div class="detail-section">
               <h3 id="flowTitle">Example Flow</h3>
               <ol id="flowSteps"></ol>
+            </div>
+          </div>
+          <div class="payload-readout">
+            <div class="detail-section">
+              <h3 id="payloadTitle">Payload Transformations</h3>
+              <div class="payload-list" id="payloadSteps"></div>
             </div>
           </div>
         </div>
@@ -899,6 +1132,32 @@
           ["Runtime events", "ACP JSON-RPC messages become canonical harness runtime events and then hook calls."],
           ["Outbound event", "`buildAgentIoHooks` emits `contentEvent`, `runtimeEvent`, plan, usage, or tool events through the action context."],
           ["WhatsApp delivery", "`sendOrQueueWhatsAppEvent` renders to WhatsApp immediately or persists a queue row when the socket is not available."]
+        ],
+        payloads: [
+          {
+            seam: "WhatsApp Transport -> Turn Normalizer",
+            module: "turn",
+            note: "Raw Baileys shape is reduced to the facts the app is allowed to know.",
+            changes: ["drops Baileys nesting", "keeps sender/chat facts", "creates TurnIO"],
+            before: "{\n  key: { remoteJid: \"1203...@s.whatsapp.net\", participant: undefined },\n  message: { conversation: \"summarize this repo\" },\n  messageTimestamp: 1760000000,\n  pushName: \"Mada\"\n}",
+            after: "{\n  chatId: \"1203...@s.whatsapp.net\",\n  sender: { id: \"1203...@s.whatsapp.net\", name: \"Mada\" },\n  content: [{ type: \"text\", text: \"summarize this repo\" }],\n  io: TurnIO\n}"
+          },
+          {
+            seam: "ChatTurn -> Harness Turn Input",
+            module: "turnInput",
+            note: "The runner adds durable chat context and workspace binding before the provider sees anything.",
+            changes: ["adds history", "adds workdir", "selects model"],
+            before: "{\n  latest: [{ type: \"text\", text: \"summarize this repo\" }],\n  chatId: \"1203...@s.whatsapp.net\",\n  binding: { kind: \"project\", workdir: \"/home/mada/whatsapp-llm-bot\" }\n}",
+            after: "{\n  input: \"summarize this repo\",\n  messages: [history..., latestUserMessage],\n  runConfig: { cwd: \"/home/mada/whatsapp-llm-bot\", sandboxMode: \"workspace-write\" },\n  model: selectedChatModel\n}"
+          },
+          {
+            seam: "ACP Runtime -> Hooks -> Outbound",
+            module: "hooks",
+            note: "Provider-specific JSON-RPC events become semantic app events, then transport-renderable outbound events.",
+            changes: ["normalizes ACP", "removes protocol detail", "emits outbound content"],
+            before: "{\n  method: \"session/update\",\n  update: { sessionUpdate: \"agent_message_chunk\", content: { type: \"text\", text: \"Done.\" } }\n}",
+            after: "{\n  kind: \"content\",\n  source: \"assistant\",\n  blocks: [{ type: \"text\", text: \"Done.\" }]\n}"
+          }
         ]
       },
       {
@@ -911,6 +1170,24 @@
           ["Router seam", "`createBangCommandRouter` receives the turn, chat info, sender ids, first text block, workspace binding, and action context."],
           ["State changes", "Commands can update chat settings, workspace state, restart a process, archive workspaces, or write messages through the store."],
           ["Response", "Command results go back through the same `ExecuteActionContext` and outbound transport as LLM responses."]
+        ],
+        payloads: [
+          {
+            seam: "Text Block -> Command Router",
+            module: "runner",
+            note: "The leading bang keeps the payload inside app command handling instead of provider execution.",
+            changes: ["parses command", "bypasses provider", "keeps action context"],
+            before: "{\n  content: [{ type: \"text\", text: \"!workspace set /repo/app\" }],\n  chat: { id: \"1203...@s.whatsapp.net\" }\n}",
+            after: "{\n  command: \"workspace\",\n  args: [\"set\", \"/repo/app\"],\n  context: ExecuteActionContext,\n  binding: currentChatBinding\n}"
+          },
+          {
+            seam: "Command Result -> Outbound Event",
+            module: "context",
+            note: "Commands use the same reply/send port as agent output, so WhatsApp formatting stays below the seam.",
+            changes: ["wraps result", "uses same outbound event", "defers formatting"],
+            before: "{ status: \"ok\", message: \"Workspace bound to /repo/app\" }",
+            after: "{\n  kind: \"content\",\n  source: \"assistant\",\n  blocks: [{ type: \"text\", text: \"Workspace bound to `/repo/app`.\" }]\n}"
+          }
         ]
       },
       {
@@ -923,6 +1200,24 @@
           ["Text preparation", "If media is present, `buildPendingRunInputText` transcribes it before live input is attempted."],
           ["Owner check", "The run coordinator compares the selected harness owner key so messages do not inject into the wrong provider instance."],
           ["Inject or buffer", "If supported, `adapter.injectMessage` steers the active ACP session; otherwise the text is buffered for the next run."]
+        ],
+        payloads: [
+          {
+            seam: "New ChatTurn -> Active Run Decision",
+            module: "runner",
+            note: "A second message is not treated as a fresh run until the coordinator checks the active owner.",
+            changes: ["finds pending run", "checks owner", "builds live input"],
+            before: "{\n  chatId: \"group-1@g.us\",\n  content: [{ type: \"text\", text: \"also check auth.js\" }]\n}",
+            after: "{\n  pendingRun: { harness: \"acp\", sessionId: \"s1\", ownerKey: \"chat:group-1\" },\n  liveInputText: \"also check auth.js\"\n}"
+          },
+          {
+            seam: "Runner -> ACP Harness Adapter",
+            module: "harness",
+            note: "If live input is supported, the app sends a small injected message instead of rebuilding the whole provider prompt.",
+            changes: ["targets session", "preserves active turn", "injects prompt"],
+            before: "{ liveInputText: \"also check auth.js\", targetSessionId: \"s1\" }",
+            after: "{\n  method: \"session/prompt\",\n  params: { sessionId: \"s1\", prompt: [{ type: \"text\", text: \"also check auth.js\" }] }\n}"
+          }
         ]
       },
       {
@@ -936,6 +1231,24 @@
           ["Dispatcher", "The canonical runtime event is passed to `buildAgentIoHooks` through `onRuntimeEvent`."],
           ["Presentation", "Snapshot events may be batched; tool file changes are rendered as runtime progress or code-image detail depending on visibility."],
           ["Delivery", "The rendered event uses the same outbound WhatsApp delivery seam as normal assistant text."]
+        ],
+        payloads: [
+          {
+            seam: "ACP Write Request -> File Change Event",
+            module: "acpRunner",
+            note: "The provider request is executed only after sandbox/protected-path checks, then emitted as a semantic file-change event.",
+            changes: ["checks sandbox", "reads old text", "creates diff facts"],
+            before: "{\n  method: \"fs/write_text_file\",\n  params: { path: \"/repo/src/app.js\", content: \"new text\" }\n}",
+            after: "{\n  type: \"file-change.completed\",\n  path: \"/repo/src/app.js\",\n  change: { kind: \"update\", oldText: \"...\", newText: \"new text\", source: \"tool\" }\n}"
+          },
+          {
+            seam: "Runtime Event -> WhatsApp Diff Image",
+            module: "outbound",
+            note: "The transport renderer decides whether the diff is text, image, batched, or gated by reaction.",
+            changes: ["renders diff", "adds caption", "keeps quoted context"],
+            before: "{ kind: \"runtime_event\", event: { type: \"file-change.completed\", path: \"/repo/src/app.js\", diff: \"@@ ...\" } }",
+            after: "{\n  image: renderedDiffPng,\n  caption: \"🔧 *Update*  `src/app.js`\",\n  quoted: originalTurnMessage\n}"
+          }
         ]
       },
       {
@@ -949,6 +1262,24 @@
           ["Durable row", "If delivery still cannot happen, the event or text is persisted through the WhatsApp store repo."],
           ["Reconnect", "On connection open, the transport waits for Baileys buffering to drain and calls `flushQueuedWhatsAppOutbound`."],
           ["Handle recovery", "Delivered queued handles are cached so startup hooks, such as restart acknowledgements, can recover and edit them."]
+        ],
+        payloads: [
+          {
+            seam: "Outbound Event -> Durable Queue Row",
+            module: "outbound",
+            note: "When no socket is open, the semantic event is persisted instead of being rendered and lost.",
+            changes: ["detects no socket", "serializes event", "marks pending"],
+            before: "{\n  chatId: \"1203...@s.whatsapp.net\",\n  event: { kind: \"content\", blocks: [{ type: \"text\", text: \"Done\" }] }\n}",
+            after: "{\n  queueId: 42,\n  chatId: \"1203...@s.whatsapp.net\",\n  payloadJson: { kind: \"content\", blocks: [...] },\n  status: \"pending\"\n}"
+          },
+          {
+            seam: "Reconnect Flush -> Transport Send",
+            module: "transport",
+            note: "The queued row returns through the same outbound renderer, preserving one delivery path.",
+            changes: ["reloads row", "uses live socket", "stores sent handle"],
+            before: "{ queueId: 42, payloadJson: { kind: \"content\", blocks: [...] } }",
+            after: "{\n  sentMessageKey: { id: \"BAE...\", remoteJid: \"1203...@s.whatsapp.net\", fromMe: true },\n  queueStatus: \"delivered\"\n}"
+          }
         ]
       }
     ];
@@ -965,6 +1296,13 @@
     const detailNotes = document.querySelector("#detailNotes");
     const flowTitle = document.querySelector("#flowTitle");
     const flowSteps = document.querySelector("#flowSteps");
+    const payloadTitle = document.querySelector("#payloadTitle");
+    const payloadSteps = document.querySelector("#payloadSteps");
+    const packetToken = document.querySelector("#packetToken");
+    const storyTitle = document.querySelector("#storyTitle");
+    const storyText = document.querySelector("#storyText");
+    const storyStepLabel = document.querySelector("#storyStepLabel");
+    const storyMeterFill = document.querySelector("#storyMeterFill");
     const zoomRange = document.querySelector("#zoomRange");
     const zoomLabel = document.querySelector("#zoomLabel");
     const viewport = document.querySelector("#viewport");
@@ -972,6 +1310,7 @@
 
     let selectedModuleId = null;
     let selectedFlowId = "normal";
+    let selectedPayloadIndex = 0;
     let animationTimers = [];
 
     function escapeHtml(value) {
@@ -1033,7 +1372,10 @@
 
     function renderFlowTabs() {
       flowTabs.innerHTML = flows.map((flow) => `
-        <button class="flow-button" data-flow="${flow.id}" type="button">${escapeHtml(flow.title)}</button>
+        <button class="flow-button" data-flow="${flow.id}" style="--flow-dot-color: ${flow.color};" type="button">
+          <span class="flow-dot"></span>
+          <span>${escapeHtml(flow.title)}</span>
+        </button>
       `).join("");
       for (const button of document.querySelectorAll(".flow-button")) {
         button.addEventListener("click", () => selectFlow(button.dataset.flow));
@@ -1108,6 +1450,60 @@
       `).join("");
     }
 
+    function clampPayloadIndex(flow) {
+      selectedPayloadIndex = Math.max(0, Math.min(flow.payloads.length - 1, selectedPayloadIndex));
+      return selectedPayloadIndex;
+    }
+
+    function renderStoryStrip(flow) {
+      const index = clampPayloadIndex(flow);
+      const payload = flow.payloads[index];
+      packetToken.textContent = String(index + 1);
+      storyTitle.textContent = payload.seam;
+      storyText.textContent = payload.note;
+      storyStepLabel.textContent = `Step ${index + 1}/${flow.payloads.length}`;
+      storyMeterFill.style.width = `${((index + 1) / flow.payloads.length) * 100}%`;
+    }
+
+    function renderPayloadReadout(flow) {
+      const activeIndex = clampPayloadIndex(flow);
+      payloadTitle.textContent = `${flow.title} Payloads`;
+      payloadSteps.innerHTML = flow.payloads.map((payload, index) => `
+        <article class="payload-card ${index === activeIndex ? "active" : ""}">
+          <div class="payload-card-header">
+            <h4>${index + 1}. ${escapeHtml(payload.seam)}</h4>
+            <button type="button" data-payload-index="${index}">${index === activeIndex ? "Inspecting" : "Inspect"}</button>
+          </div>
+          <div class="payload-card-body">
+            <p>${escapeHtml(payload.note)}</p>
+            <div class="change-chips">
+              ${payload.changes.map((change) => `<span class="change-chip">${escapeHtml(change)}</span>`).join("")}
+            </div>
+            <pre class="payload-code"><code>${escapeHtml(payload.before)}</code></pre>
+            <span class="payload-arrow">becomes</span>
+            <pre class="payload-code"><code>${escapeHtml(payload.after)}</code></pre>
+            <button type="button" data-payload-module="${escapeHtml(payload.module)}">Zoom ${escapeHtml(moduleById.get(payload.module)?.title ?? "seam")}</button>
+          </div>
+        </article>
+      `).join("");
+      renderStoryStrip(flow);
+      for (const button of payloadSteps.querySelectorAll("[data-payload-index]")) {
+        button.addEventListener("click", () => {
+          selectedPayloadIndex = Number(button.dataset.payloadIndex);
+          const payload = flow.payloads[clampPayloadIndex(flow)];
+          selectedModuleId = payload.module;
+          setDetailForFlow(flow);
+          renderFlowReadout(flow);
+          renderPayloadReadout(flow);
+          updateClasses();
+          centerOnModule(moduleById.get(payload.module));
+        });
+      }
+      for (const button of payloadSteps.querySelectorAll("[data-payload-module]")) {
+        button.addEventListener("click", () => selectModule(button.dataset.payloadModule));
+      }
+    }
+
     function clearAnimation() {
       for (const timer of animationTimers) {
         clearTimeout(timer);
@@ -1160,6 +1556,7 @@
       selectedModuleId = id;
       setDetailForModule(module);
       renderFlowReadout(currentFlow());
+      renderPayloadReadout(currentFlow());
       updateClasses();
       centerOnModule(module);
     }
@@ -1169,8 +1566,10 @@
       if (!flow) return;
       selectedFlowId = id;
       selectedModuleId = null;
+      selectedPayloadIndex = 0;
       setDetailForFlow(flow);
       renderFlowReadout(flow);
+      renderPayloadReadout(flow);
       updateClasses();
       animateFlow(flow);
     }
