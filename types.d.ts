@@ -882,6 +882,7 @@ type HarnessCommandContext = {
     archive: import("./store.js").Store['archiveHarnessSession'];
     getHistory: import("./store.js").Store['getHarnessSessionHistory'];
     restore: import("./store.js").Store['restoreHarnessSession'];
+    clearRuntime?: (chatId: string) => Promise<boolean> | boolean;
   };
   sessionForkControl?: {
     save: import("./store.js").Store['saveHarnessSession'];

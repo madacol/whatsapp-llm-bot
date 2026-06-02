@@ -54,11 +54,15 @@ describe("handleSessionControlCommand", () => {
         },
         getHistory: async () => [],
         restore: async () => null,
+        clearRuntime: async (chatId) => {
+          calls.push(`clear-runtime:${chatId}`);
+          return true;
+        },
       },
     });
 
     assert.equal(handled, true);
-    assert.deepEqual(calls, ["cancel", "archive:chat-1"]);
+    assert.deepEqual(calls, ["cancel", "archive:chat-1", "clear-runtime:chat-1"]);
     assert.ok(replies[0]?.includes("Session cleared"));
   });
 
