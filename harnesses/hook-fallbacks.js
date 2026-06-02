@@ -47,11 +47,10 @@ async function safeHook(name, fn, fallback) {
  */
 export function wrapHooksWithFallbacks(rawHooks) {
   return {
-    onComposing: () => safeHook("onComposing", () => rawHooks.onComposing(), undefined),
-    onPaused: () => safeHook("onPaused", () => rawHooks.onPaused(), undefined),
     onReasoning: (/** @type {{ status: "started" | "updated" | "completed", itemId?: string, summaryParts: string[], contentParts: string[], text?: string, hasEncryptedContent?: boolean }} */ event) =>
       safeHook("onReasoning", () => rawHooks.onReasoning(event), undefined),
-    onLlmResponse: (/** @type {string} */ text) => safeHook("onLlmResponse", () => rawHooks.onLlmResponse(text), undefined),
+    onLlmResponse: (/** @type {string} */ text, /** @type {LlmResponseMetadata | undefined} */ metadata) =>
+      safeHook("onLlmResponse", () => rawHooks.onLlmResponse(text, metadata), undefined),
     onAskUser: (/** @type {string} */ question, /** @type {string[]} */ options, /** @type {string | undefined} */ preamble, /** @type {string[] | undefined} */ descriptions) =>
       safeHook("onAskUser", () => rawHooks.onAskUser(question, options, preamble, descriptions), ""),
     onToolCall: (
@@ -65,10 +64,6 @@ export function wrapHooksWithFallbacks(rawHooks) {
     onToolResult: (/** @type {ToolContentBlock[]} */ blocks, /** @type {string} */ toolName, /** @type {PermissionFlags} */ permissions) =>
       safeHook("onToolResult", () => rawHooks.onToolResult(blocks, toolName, permissions), undefined),
     onToolError: (/** @type {string} */ error) => safeHook("onToolError", () => rawHooks.onToolError(error), undefined),
-    onCommand: (/** @type {{ command: string, status: "started" | "completed" | "failed", output?: string }} */ event) =>
-      safeHook("onCommand", () => rawHooks.onCommand(event), undefined),
-    onFileRead: (/** @type {{ command: string, paths: string[] }} */ event) =>
-      safeHook("onFileRead", () => rawHooks.onFileRead(event), undefined),
     onPlan: (/** @type {import("../plan-presentation.js").PlanPresentation} */ presentation) =>
       safeHook("onPlan", () => rawHooks.onPlan(presentation), undefined),
     onFileChange: (/** @type {{
@@ -86,5 +81,7 @@ export function wrapHooksWithFallbacks(rawHooks) {
     onDepthLimit: () => safeHook("onDepthLimit", () => rawHooks.onDepthLimit(), false),
     onUsage: (/** @type {string} */ cost, /** @type {UsageTokens} */ tokens) =>
       safeHook("onUsage", () => rawHooks.onUsage(cost, tokens), undefined),
+    onRuntimeEvent: (/** @type {import("./harness-runtime-events.js").HarnessRuntimeEvent} */ event) =>
+      safeHook("onRuntimeEvent", () => rawHooks.onRuntimeEvent(event), undefined),
   };
 }

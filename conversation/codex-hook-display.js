@@ -1,142 +1,18 @@
-import { buildCommandPresentation, buildMultiReadActivity, buildReadToolPresentation } from "../tool-presentation-model.js";
-import { failedToolCallUpdate } from "../message-failure-presentation.js";
-import {
-  contentEvent,
-  fileChangeEvent,
-  toolActivityEvent,
-  toolInspectState,
-} from "../outbound-events.js";
+import { runtimeEvent } from "../outbound-events.js";
 
 /**
- * @typedef {{
- *   handle: MessageHandle,
- *   displayPresentation: import("../tool-presentation-model.js").ToolPresentation,
- *   inspectPresentation: import("../tool-presentation-model.js").ToolPresentation,
- * }} PendingInspectEntry
- */
-
-/**
- * Build the Codex-specific display hooks that correlate command/file events
- * with inspect handlers and diff rendering.
+ * Build the Codex-specific display hook for file change rendering.
  * @param {{
  *   context: Pick<ExecuteActionContext, "send">,
  *   cwd: string | null,
  *   visibility: import("../chat-output-visibility.js").OutputVisibility,
- *   displayToolCall: (toolCall: LlmChatResponse["toolCalls"][0]) => Promise<MessageHandle | undefined>,
  * }} input
- * @returns {Pick<Required<AgentIOHooks>, "onCommand" | "onFileRead" | "onFileChange">}
+ * @returns {Pick<Required<AgentIOHooks>, "onFileChange">}
  */
-export function createCodexDisplayHooks({ context, cwd, visibility, displayToolCall }) {
-  /** @type {Map<string, PendingInspectEntry[]>} */
-  const activeInspects = new Map();
-
+export function createCodexDisplayHooks({ context, cwd, visibility }) {
   return {
-    onCommand,
-    onFileRead,
     onFileChange,
   };
-
-  /**
-   * @param {string} key
-   * @param {PendingInspectEntry} entry
-   * @returns {void}
-   */
-  function rememberInspect(key, entry) {
-    const existing = activeInspects.get(key) ?? [];
-    existing.push(entry);
-    activeInspects.set(key, existing);
-  }
-
-  /**
-   * @param {string} key
-   * @returns {PendingInspectEntry | undefined}
-   */
-  function consumeInspect(key) {
-    const existing = activeInspects.get(key);
-    if (!existing || existing.length === 0) {
-      return undefined;
-    }
-    const entry = existing.shift();
-    if (!entry) {
-      return undefined;
-    }
-    if (existing.length === 0) {
-      activeInspects.delete(key);
-    }
-    return entry;
-  }
-
-  /**
-   * @param {{ command: string, status: "started" | "completed" | "failed", output?: string }} event
-   * @returns {Promise<MessageHandle | void>}
-   */
-async function onCommand({ command, status, output }) {
-    if (status === "started") {
-      if (!visibility.toolDetails) {
-        return;
-      }
-      const toolCall = {
-        id: `codex-command:${command}`,
-        name: "Bash",
-        arguments: JSON.stringify({ command }),
-      };
-      const handle = await displayToolCall(toolCall);
-      if (handle) {
-        rememberInspect(command, {
-          handle,
-          displayPresentation: buildCommandPresentation(command, cwd),
-          inspectPresentation: buildCommandPresentation(command, cwd),
-        });
-      }
-      return handle;
-    }
-
-    const inspectEntry = consumeInspect(command);
-    if (inspectEntry) {
-      inspectEntry.handle.setInspect(toolInspectState(inspectEntry.inspectPresentation, output ?? ""));
-    }
-
-    if (status === "failed") {
-      if (inspectEntry) {
-        await inspectEntry.handle.update(failedToolCallUpdate(inspectEntry.displayPresentation));
-        return;
-      }
-      const detail = output ? `\n\n${output}` : "";
-      await context.send(contentEvent("error", `Command failed: \`${command}\`${detail}`));
-      return;
-    }
-  }
-
-  /**
-   * @param {{ command: string, paths: string[] }} event
-   * @returns {Promise<void>}
-   */
-  async function onFileRead({ command, paths }) {
-    if (!visibility.toolDetails) {
-      return;
-    }
-
-    if (paths.length === 1 && typeof paths[0] === "string") {
-      const filePath = paths[0];
-      const toolCall = {
-        id: `codex-read:${filePath}`,
-        name: "Read",
-        arguments: JSON.stringify({ file_path: filePath }),
-      };
-      const handle = await displayToolCall(toolCall);
-      if (handle) {
-        const readPresentation = buildReadToolPresentation(filePath, cwd);
-        rememberInspect(command, {
-          handle,
-          displayPresentation: readPresentation,
-          inspectPresentation: readPresentation,
-        });
-      }
-      return;
-    }
-
-    await context.send(toolActivityEvent(buildMultiReadActivity(paths, cwd)));
-  }
 
   /**
    * @param {{
@@ -144,6 +20,7 @@ async function onCommand({ command, status, output }) {
    *   summary?: string,
    *   diff?: string,
    *   kind?: "add" | "delete" | "update",
+   *   source?: "tool" | "snapshot",
    *   itemId?: string,
    *   stage?: "proposed" | "denied" | "applied" | "failed",
    *   oldText?: string,
@@ -151,21 +28,26 @@ async function onCommand({ command, status, output }) {
    * }} event
    * @returns {Promise<void>}
    */
-  async function onFileChange({ path, summary, diff, kind, itemId, stage, oldText, newText }) {
+  async function onFileChange({ path, summary, diff, kind, source, itemId, stage, oldText, newText }) {
     if (!visibility.changes) {
       return;
     }
 
-    await context.send(fileChangeEvent({
-      path,
-      ...(summary !== undefined && { summary }),
-      ...(diff !== undefined && { diff }),
-      ...(kind !== undefined && { changeKind: kind }),
-      ...(itemId !== undefined && { itemId }),
-      ...(stage !== undefined && { stage }),
-      ...(oldText !== undefined && { oldText }),
-      ...(newText !== undefined && { newText }),
-      cwd,
+    await context.send(runtimeEvent({
+      type: "file-change.completed",
+      provider: "codex",
+      change: {
+        path,
+        ...(summary !== undefined && { summary }),
+        ...(diff !== undefined && { diff }),
+        ...(kind !== undefined && { kind }),
+        ...(source !== undefined && { source }),
+        ...(itemId !== undefined && { itemId }),
+        ...(stage !== undefined && { stage }),
+        ...(oldText !== undefined && { oldText }),
+        ...(newText !== undefined && { newText }),
+        cwd,
+      },
     }));
   }
 }

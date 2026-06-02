@@ -1,5 +1,5 @@
 import { downloadMediaMessage } from "@whiskeysockets/baileys";
-import { normalizeChatId } from "../../whatsapp-hd-media.js";
+import { normalizeChatId, reattachHdDeferreds } from "../../whatsapp-hd-media.js";
 import { classifyIncomingMessageEvent } from "./message-event-classifier.js";
 import { applyHdInboundLifecycle } from "./hd-image-lifecycle.js";
 import { getDirectMessageText, getMessageContent } from "./message-content.js";
@@ -310,6 +310,19 @@ function createPresenceLeaseController({
   };
 }
 
+/** @type {WeakMap<TurnIO, ReturnType<typeof createPresenceLeaseController>>} */
+const turnPresenceControllers = new WeakMap();
+
+/**
+ * End any WhatsApp-owned presence lease attached to a turn IO object.
+ * Kept out of TurnIO so app/conversation code does not depend on presence.
+ * @param {TurnIO} io
+ * @returns {Promise<void>}
+ */
+export async function finishTurnIo(io) {
+  await turnPresenceControllers.get(io)?.end();
+}
+
 /**
  * Create the message-scoped TurnIO functions.
  * @param {{
@@ -322,6 +335,7 @@ function createPresenceLeaseController({
  *   selectRuntime: import("../runtime/select-runtime.js").SelectRuntime;
  *   confirmRuntime: import("../runtime/confirm-runtime.js").ConfirmRuntime;
  *   reactionRuntime: import("../runtime/reaction-runtime.js").ReactionRuntime;
+ *   outboundStore?: import("../../store.js").Store;
  *   presenceConfig?: {
  *     defaultLeaseTtlMs?: number,
  *     pulseIntervalMs?: number,
@@ -339,6 +353,7 @@ export function createTurnIo({
   selectRuntime,
   confirmRuntime,
   reactionRuntime,
+  outboundStore,
   presenceConfig,
 }) {
   /**
@@ -372,6 +387,15 @@ export function createTurnIo({
   }
 
   /**
+   * Ensure WhatsApp shows a working indicator before visible outbound work.
+   * Presence failures are transport hints only; they must not block delivery.
+   * @returns {Promise<void>}
+   */
+  async function markWorkingBeforeOutboundMessage() {
+    await presence.keepAlive().catch(() => {});
+  }
+
+  /**
    * Resolve the current socket when available, otherwise return null so the
    * outbound event can be persisted for replay after reconnect.
    * @returns {import('@whiskeysockets/baileys').WASocket | null}
@@ -388,23 +412,28 @@ export function createTurnIo({
   const selectMany = selectRuntime.createSelectMany(getSocket ?? sock, chatId);
   const confirm = confirmRuntime.createConfirm(getSocket ?? sock, chatId);
 
-  return {
+  /** @type {TurnIO} */
+  const io = {
     send: async (event) => {
+      await markWorkingBeforeOutboundMessage();
       const handle = await sendOrQueueWhatsAppEvent({
         getSocket: getSocketOrNull,
         chatId,
         event,
         reactionRuntime,
+        ...(outboundStore ? { store: outboundStore } : {}),
       });
       refreshComposingAfterOutboundMessage();
       return handle;
     },
     reply: async (event) => {
+      await markWorkingBeforeOutboundMessage();
       const handle = await sendOrQueueWhatsAppEvent({
         getSocket: getSocketOrNull,
         chatId,
         event,
         reactionRuntime,
+        ...(outboundStore ? { store: outboundStore } : {}),
       });
       refreshComposingAfterOutboundMessage();
       return handle;
@@ -426,14 +455,8 @@ export function createTurnIo({
         react: { text: emoji, key: message.key },
       });
     },
-    startPresence: async (ttlMs) => {
-      await presence.start(ttlMs);
-    },
-    keepPresenceAlive: async (ttlMs) => {
-      await presence.keepAlive(ttlMs);
-    },
-    endPresence: async () => {
-      await presence.end();
+    prepareMediaRegistry: ({ chatId: registryChatId, mediaRegistry }) => {
+      reattachHdDeferreds(registryChatId, mediaRegistry);
     },
     getIsAdmin: async () => {
       if (!isGroup) return true;
@@ -447,6 +470,8 @@ export function createTurnIo({
       }
     },
   };
+  turnPresenceControllers.set(io, presence);
+  return io;
 }
 
 /**
@@ -458,7 +483,7 @@ export function createTurnIo({
  * @param {import("../runtime/select-runtime.js").SelectRuntime} selectRuntime
  * @param {import("../runtime/reaction-runtime.js").ReactionRuntime} reactionRuntime
  * @param {(msg: BaileysMessage, type: "buffer", opts: {}) => Promise<Buffer>} [downloadFn]
- * @param {{ getSocket?: () => import('@whiskeysockets/baileys').WASocket | null } | undefined} [ioOptions]
+ * @param {{ getSocket?: () => import('@whiskeysockets/baileys').WASocket | null, outboundStore?: import("../../store.js").Store } | undefined} [ioOptions]
  * @returns {Promise<ChatTurn | null>}
  */
 export async function buildIncomingTurn(
@@ -514,6 +539,7 @@ export async function buildIncomingTurn(
     selectRuntime,
     confirmRuntime,
     reactionRuntime,
+    outboundStore: ioOptions?.outboundStore,
   });
 
   /** @type {ChatTurn} */
@@ -548,7 +574,7 @@ export async function buildIncomingTurn(
  * @param {import("../runtime/select-runtime.js").SelectRuntime} selectRuntime
  * @param {import("../runtime/reaction-runtime.js").ReactionRuntime} reactionRuntime
  * @param {(msg: BaileysMessage, type: "buffer", opts: {}) => Promise<Buffer>} [downloadFn]
- * @param {{ getSocket?: () => import('@whiskeysockets/baileys').WASocket | null } | undefined} [ioOptions]
+ * @param {{ getSocket?: () => import('@whiskeysockets/baileys').WASocket | null, outboundStore?: import("../../store.js").Store } | undefined} [ioOptions]
  * @returns {Promise<void>}
  */
 export async function adaptIncomingMessage(
@@ -575,7 +601,78 @@ export async function adaptIncomingMessage(
     return;
   }
 
-  await messageHandler(turn);
+  try {
+    await messageHandler(turn);
+  } finally {
+    await finishTurnIo(turn.io).catch(() => {});
+  }
+}
+
+/**
+ * @param {ChatTurn} turn
+ * @returns {string | null}
+ */
+function getFirstText(turn) {
+  const firstTextBlock = turn.content.find((block) => block.type === "text");
+  return firstTextBlock?.type === "text" ? firstTextBlock.text : null;
+}
+
+/**
+ * Commands must keep their original message boundary. If a Baileys flush
+ * delivers "text, text, !command" together, merging them would hide the
+ * command from the app command router because it only inspects the first text.
+ * @param {ChatTurn} turn
+ * @returns {boolean}
+ */
+function isCommandBoundaryTurn(turn) {
+  const text = getFirstText(turn);
+  return !!text && (text.startsWith("!") || text.startsWith("/"));
+}
+
+/**
+ * @param {ChatTurn[]} turns
+ * @returns {ChatTurn}
+ */
+function mergeTurns(turns) {
+  const firstTurn = turns[0];
+  if (!firstTurn) {
+    throw new Error("Cannot merge an empty turn batch.");
+  }
+  return {
+    ...firstTurn,
+    content: turns.flatMap((turn) => turn.content),
+    timestamp: new Date(Math.min(...turns.map((turn) => turn.timestamp.getTime()))),
+    facts: {
+      ...firstTurn.facts,
+      addressedToBot: turns.some((turn) => turn.facts.addressedToBot),
+      repliedToBot: turns.some((turn) => turn.facts.repliedToBot),
+    },
+  };
+}
+
+/**
+ * @param {ChatTurn[]} turns
+ * @returns {ChatTurn[][]}
+ */
+function splitTurnsAtCommandBoundaries(turns) {
+  /** @type {ChatTurn[][]} */
+  const groups = [];
+  /** @type {ChatTurn[]} */
+  let current = [];
+
+  for (const turn of turns) {
+    const currentHasCommand = current.some(isCommandBoundaryTurn);
+    if (current.length > 0 && (currentHasCommand || isCommandBoundaryTurn(turn))) {
+      groups.push(current);
+      current = [];
+    }
+    current.push(turn);
+  }
+
+  if (current.length > 0) {
+    groups.push(current);
+  }
+  return groups;
 }
 
 /**
@@ -589,7 +686,7 @@ export async function adaptIncomingMessage(
  * @param {import("../runtime/select-runtime.js").SelectRuntime} selectRuntime
  * @param {import("../runtime/reaction-runtime.js").ReactionRuntime} reactionRuntime
  * @param {(msg: BaileysMessage, type: "buffer", opts: {}) => Promise<Buffer>} [downloadFn]
- * @param {{ getSocket?: () => import('@whiskeysockets/baileys').WASocket | null } | undefined} [ioOptions]
+ * @param {{ getSocket?: () => import('@whiskeysockets/baileys').WASocket | null, outboundStore?: import("../../store.js").Store } | undefined} [ioOptions]
  * @returns {Promise<void>}
  */
 export async function adaptIncomingMessages(
@@ -624,22 +721,20 @@ export async function adaptIncomingMessages(
   }
 
   if (turns.length === 1) {
-    await messageHandler(turns[0]);
+    try {
+      await messageHandler(turns[0]);
+    } finally {
+      await finishTurnIo(turns[0].io).catch(() => {});
+    }
     return;
   }
 
-  const firstTurn = turns[0];
-  /** @type {ChatTurn} */
-  const combinedTurn = {
-    ...firstTurn,
-    content: turns.flatMap((turn) => turn.content),
-    timestamp: new Date(Math.min(...turns.map((turn) => turn.timestamp.getTime()))),
-    facts: {
-      ...firstTurn.facts,
-      addressedToBot: turns.some((turn) => turn.facts.addressedToBot),
-      repliedToBot: turns.some((turn) => turn.facts.repliedToBot),
-    },
-  };
-
-  await messageHandler(combinedTurn);
+  for (const group of splitTurnsAtCommandBoundaries(turns)) {
+    const turn = group.length === 1 ? group[0] : mergeTurns(group);
+    try {
+      await messageHandler(turn);
+    } finally {
+      await finishTurnIo(turn.io).catch(() => {});
+    }
+  }
 }

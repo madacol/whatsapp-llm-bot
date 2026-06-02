@@ -235,18 +235,6 @@ async function findCanonicalChatClusterRoots(chatDir) {
       roots.push(pgdataPath);
     }
 
-    const actionsPath = path.join(chatRoot, "actions");
-    if (!await pathExists(actionsPath)) {
-      continue;
-    }
-
-    const actionEntries = await readdir(actionsPath, { withFileTypes: true });
-    for (const actionEntry of actionEntries) {
-      const actionPath = path.join(actionsPath, actionEntry.name);
-      if (await isClusterRoot(actionPath)) {
-        roots.push(actionPath);
-      }
-    }
   }
 
   return roots;

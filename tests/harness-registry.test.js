@@ -1,23 +1,83 @@
 import { afterEach, describe, it } from "node:test";
 import assert from "node:assert/strict";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import {
-  createHarnessAdapterFromHarness,
   getHarnessSessionDirectory,
   getHarnessDriverStatus,
   listHarnessInstances,
   listHarnessDrivers,
+  registerAcpAgentDriver,
   registerHarnessDriver,
   registerOptionalHarnesses,
   resetHarnessRegistryForTests,
   resolveHarness,
+  resolveHarnessName,
   resolveHarnessInstance,
   reconcileHarnessInstances,
 } from "../harnesses/index.js";
+import config from "../config.js";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 afterEach(async () => {
+  delete process.env.DEFAULT_HARNESS;
+  delete process.env.MADABOT_DEFAULT_HARNESS;
   resetHarnessRegistryForTests();
   await registerOptionalHarnesses();
 });
+
+/**
+ * @param {string} name
+ * @param {string} instanceId
+ * @param {string} continuationKey
+ * @returns {HarnessAdapter}
+ */
+function createTestAdapter(name, instanceId, continuationKey) {
+  /** @type {Map<string, HarnessRuntimeSession>} */
+  const sessions = new Map();
+  return {
+    async startSession(input) {
+      const session = {
+        chatId: input.chatId,
+        harnessName: name,
+        instanceId,
+        continuationKey,
+        status: "ready",
+        workdir: input.runConfig?.workdir ?? null,
+        model: input.runConfig?.model ?? null,
+        resumeCursor: input.resumeCursor ?? null,
+      };
+      sessions.set(input.chatId, /** @type {HarnessRuntimeSession} */ (session));
+      return /** @type {HarnessRuntimeSession} */ (session);
+    },
+    async sendTurn(input) {
+      return {
+        response: [],
+        messages: input.messages ?? [],
+        usage: { promptTokens: 0, completionTokens: 0, cachedTokens: 0, cost: 0 },
+      };
+    },
+    interruptTurn: async () => false,
+    respondToRequest: async () => false,
+    respondToUserInput: async () => false,
+    injectMessage: async () => false,
+    stopSession: async (chatId) => {
+      sessions.delete(typeof chatId === "string" ? chatId : chatId.id);
+      return true;
+    },
+    hasSession: (chatId) => sessions.has(typeof chatId === "string" ? chatId : chatId.id),
+    stopAll: async () => {
+      sessions.clear();
+    },
+    listSessions: () => [...sessions.values()],
+    readThread: async () => null,
+    rollbackThread: async () => null,
+    streamEvents: {
+      async *[Symbol.asyncIterator]() {},
+    },
+  };
+}
 
 /**
  * @param {string} name
@@ -47,6 +107,7 @@ function createTestHarness(name, overrides = {}) {
     },
     handleCommand: async () => false,
     listSlashCommands: () => [],
+    createAdapter: ({ name: adapterName, instanceId, continuationKey }) => createTestAdapter(adapterName, instanceId, continuationKey),
     ...overrides,
   };
 }
@@ -69,6 +130,130 @@ describe("harness driver registry", () => {
         { name: "pi", displayName: "Pi", supportsInstances: true },
       ],
     );
+  });
+
+  it("runs the production codex driver through ACP", async () => {
+    const instance = resolveHarnessInstance("codex", {
+      instanceId: "acp-work",
+      config: {
+        command: process.execPath,
+        args: [path.join(__dirname, "fixtures", "acp-mock-agent.js")],
+      },
+    });
+
+    assert.equal(instance.harness.getName(), "codex");
+    assert.equal(instance.capabilities.supportsSessionFork, true);
+    assert.equal(instance.capabilities.supportsLiveInput, true);
+
+    /** @type {string[]} */
+    const eventTypes = [];
+    const unsubscribe = instance.adapter.subscribeEvents?.((event) => {
+      eventTypes.push(event.type);
+    });
+    try {
+      await instance.adapter.startSession({ chatId: "codex-acp-chat" });
+      const result = await instance.adapter.sendTurn({
+        chatId: "codex-acp-chat",
+        input: "Run ACP Codex",
+        messages: [{ role: "user", content: [{ type: "text", text: "Run ACP Codex" }] }],
+      });
+
+      assert.deepEqual(result.response, [{ type: "markdown", text: "Main result." }]);
+      assert.equal(instance.adapter.listSessions()[0]?.resumeCursor, "mock-session-1");
+      assert.ok(eventTypes.includes("plan.updated"));
+      assert.ok(eventTypes.includes("subagent.completed"));
+      assert.ok(eventTypes.includes("file-change.completed"));
+      assert.ok(eventTypes.includes("usage.updated"));
+    } finally {
+      unsubscribe?.();
+    }
+  });
+
+  it("runs the production Claude and Pi drivers through ACP", async () => {
+    await registerOptionalHarnesses();
+
+    for (const name of ["claude", "pi"]) {
+      const instance = resolveHarnessInstance(name, {
+        instanceId: `${name}-acp-work`,
+        config: {
+          command: process.execPath,
+          args: [path.join(__dirname, "fixtures", "acp-mock-agent.js")],
+        },
+      });
+
+      assert.equal(instance.harness.getName(), name);
+      const result = await instance.adapter.sendTurn({
+        chatId: `${name}-chat`,
+        input: `Run ${name} through ACP`,
+        messages: [{ role: "user", content: [{ type: "text", text: `Run ${name} through ACP` }] }],
+      });
+
+      assert.deepEqual(result.response, [{ type: "markdown", text: "Main result." }]);
+      assert.equal(instance.adapter.listSessions()[0]?.resumeCursor, "mock-session-1");
+    }
+  });
+
+  it("registers a new ACP agent from one provider definition", async () => {
+    registerAcpAgentDriver({
+      name: "cursor",
+      displayName: "Cursor",
+      command: process.execPath,
+      args: [path.join(__dirname, "fixtures", "acp-mock-agent.js")],
+      sessionKind: "cursor",
+    });
+
+    const instance = resolveHarnessInstance("cursor", { instanceId: "cursor-work" });
+
+    assert.equal(instance.name, "cursor");
+    assert.equal(instance.displayName, "Cursor");
+    assert.equal(instance.harness.getName(), "cursor");
+    assert.equal(instance.capabilities.supportsSessionFork, true);
+
+    const result = await instance.adapter.sendTurn({
+      chatId: "cursor-acp-chat",
+      input: "Run Cursor ACP",
+      messages: [{ role: "user", content: [{ type: "text", text: "Run Cursor ACP" }] }],
+    });
+
+    assert.deepEqual(result.response, [{ type: "markdown", text: "Main result." }]);
+    assert.equal(instance.adapter.listSessions()[0]?.resumeCursor, "mock-session-1");
+    assert.ok(
+      instance.harness.listSlashCommands().some((command) => command.description.includes("Cursor")),
+      "Expected generic ACP slash commands to use the agent display label",
+    );
+  });
+
+  it("registers extra ACP agents from MADABOT_ACP_AGENTS_JSON", async () => {
+    const previous = process.env.MADABOT_ACP_AGENTS_JSON;
+    process.env.MADABOT_ACP_AGENTS_JSON = JSON.stringify([{
+      name: "env-agent",
+      displayName: "Env Agent",
+      command: process.execPath,
+      args: [path.join(__dirname, "fixtures", "acp-mock-agent.js")],
+      sessionKind: "env-agent",
+    }]);
+    try {
+      resetHarnessRegistryForTests();
+      const drivers = listHarnessDrivers();
+      assert.ok(drivers.some((driver) => driver.name === "env-agent" && driver.displayName === "Env Agent"));
+
+      const instance = resolveHarnessInstance("env-agent", { instanceId: "env-agent-work" });
+      const result = await instance.adapter.sendTurn({
+        chatId: "env-agent-chat",
+        input: "Run env ACP",
+        messages: [{ role: "user", content: [{ type: "text", text: "Run env ACP" }] }],
+      });
+
+      assert.deepEqual(result.response, [{ type: "markdown", text: "Main result." }]);
+    } finally {
+      if (previous === undefined) {
+        delete process.env.MADABOT_ACP_AGENTS_JSON;
+      } else {
+        process.env.MADABOT_ACP_AGENTS_JSON = previous;
+      }
+      resetHarnessRegistryForTests();
+      await registerOptionalHarnesses();
+    }
   });
 
   it("reads provider status through the driver seam", async () => {
@@ -259,6 +444,68 @@ describe("resolveHarness", () => {
     assert.deepEqual(disposed, ["work:a"]);
   });
 
+  it("awaits stale instance disposal before replacing a changed instance", async () => {
+    /** @type {string[]} */
+    const calls = [];
+    registerHarnessDriver({
+      name: "lifecycle-test",
+      supportsInstances: true,
+      createInstance(input) {
+        const marker = typeof input.config.marker === "string" ? input.config.marker : "none";
+        calls.push(`create:${marker}`);
+        return {
+          harness: createTestHarness("lifecycle-test"),
+          dispose: async () => {
+            calls.push(`dispose:start:${marker}`);
+            await Promise.resolve();
+            calls.push(`dispose:done:${marker}`);
+          },
+        };
+      },
+    });
+
+    resolveHarnessInstance("lifecycle-test", { instanceId: "work", config: { marker: "a" } });
+    await reconcileHarnessInstances([
+      { name: "lifecycle-test", instanceId: "work", config: { marker: "b" } },
+    ]);
+
+    assert.deepEqual(calls, [
+      "create:a",
+      "dispose:start:a",
+      "dispose:done:a",
+      "create:b",
+    ]);
+  });
+
+  it("downgrades invalid harness config into an unavailable instance status", () => {
+    registerHarnessDriver({
+      name: "schema-test",
+      displayName: "Schema Test",
+      supportsInstances: true,
+      configSchema(config) {
+        if (typeof config.command !== "string") {
+          throw new Error("command must be a string");
+        }
+        return config;
+      },
+      createInstance() {
+        return {
+          harness: createTestHarness("schema-test"),
+        };
+      },
+    });
+
+    const instance = resolveHarnessInstance("schema-test", {
+      instanceId: "work",
+      config: { command: 42 },
+    });
+
+    assert.equal(instance.available, false);
+    assert.equal(instance.status.availability, "unavailable");
+    assert.match(instance.status.message ?? "", /Invalid config/);
+    assert.match(instance.status.message ?? "", /command must be a string/);
+  });
+
   it("surfaces unknown harness instance envelopes as unavailable without constructing an app fallback", () => {
     const instance = resolveHarnessInstance("missing-driver", {
       instanceId: "from-config",
@@ -308,100 +555,24 @@ describe("resolveHarness", () => {
     assert.equal(createCount, 1);
   });
 
-  it("exposes an adapter facade for legacy harnesses", async () => {
-    /** @type {AgentHarness} */
-    const harness = {
-      getName: () => "adapter-test",
-      getCapabilities: () => ({
-        supportsResume: true,
-        supportsCancel: true,
-        supportsLiveInput: true,
-        supportsApprovals: false,
-        supportsWorkdir: true,
-        supportsSandboxConfig: false,
-        supportsModelSelection: true,
-        supportsReasoningEffort: false,
-        supportsSessionFork: false,
+  it("marks drivers without a semantic adapter unavailable", () => {
+    registerHarnessDriver({
+      name: "legacy-no-adapter",
+      supportsInstances: true,
+      createInstance: () => ({
+        harness: {
+          ...createTestHarness("legacy-no-adapter"),
+          createAdapter: undefined,
+        },
       }),
-      async run(params) {
-        return {
-          response: [{ type: "text", text: params.messages.length.toString() }],
-          messages: params.messages,
-          usage: { promptTokens: 1, completionTokens: 2, cachedTokens: 0, cost: 0 },
-        };
-      },
-      handleCommand: async () => false,
-      listSlashCommands: () => [],
-      injectMessage: async (_chatId, text) => text === "yes",
-      cancel: () => true,
-    };
-    const adapter = createHarnessAdapterFromHarness({
-      harness,
-      name: "adapter-test",
-      instanceId: "work",
-      continuationKey: "adapter-test:instance:work",
     });
 
-    const session = await adapter.startSession({
-      chatId: "chat-1",
-      runConfig: { workdir: "/repo", model: "model-a" },
-    });
-    assert.deepEqual(session, {
-      chatId: "chat-1",
-      harnessName: "adapter-test",
-      instanceId: "work",
-      continuationKey: "adapter-test:instance:work",
-      status: "ready",
-      workdir: "/repo",
-      model: "model-a",
-    });
-    assert.equal(await adapter.injectMessage("chat-1", "yes"), true);
-    assert.equal(await adapter.interruptTurn({ chatId: "chat-1" }), true);
-  });
+    const instance = resolveHarnessInstance("legacy-no-adapter", { instanceId: "work" });
 
-  it("accepts semantic turn input through the adapter compatibility bridge", async () => {
-    /** @type {AgentHarness} */
-    const harness = {
-      getName: () => "semantic-adapter-test",
-      getCapabilities: () => ({
-        supportsResume: false,
-        supportsCancel: false,
-        supportsLiveInput: false,
-        supportsApprovals: false,
-        supportsWorkdir: false,
-        supportsSandboxConfig: false,
-        supportsModelSelection: false,
-        supportsReasoningEffort: false,
-        supportsSessionFork: false,
-      }),
-      async run(params) {
-        assert.equal(params.session.chatId, "semantic-chat");
-        assert.deepEqual(params.messages, [
-          { role: "user", content: [{ type: "text", text: "semantic input" }] },
-        ]);
-        return {
-          response: [{ type: "text", text: "ok" }],
-          messages: params.messages,
-          usage: { promptTokens: 1, completionTokens: 1, cachedTokens: 0, cost: 0 },
-        };
-      },
-      handleCommand: async () => false,
-      listSlashCommands: () => [],
-    };
-    const adapter = createHarnessAdapterFromHarness({
-      harness,
-      name: "semantic-adapter-test",
-      instanceId: "default",
-      continuationKey: "semantic-adapter-test:instance:default",
-    });
-
-    const result = await adapter.sendTurn({
-      chatId: "semantic-chat",
-      input: "semantic input",
-      runConfig: { model: "model-a" },
-    });
-
-    assert.deepEqual(result.response, [{ type: "text", text: "ok" }]);
+    assert.equal(instance.available, false);
+    assert.equal(instance.adapter, null);
+    assert.equal(instance.status.availability, "unavailable");
+    assert.match(instance.status.message ?? "", /did not provide a semantic adapter/);
   });
 
   it("exposes a provider-instance text generation hook", async () => {
@@ -451,9 +622,70 @@ describe("harness session directory", () => {
       resumeCursor: "thread-1",
       runtimeMode: "workspace-write",
       runtimePayload: { model: "gpt-5.4", workdir: "/repo" },
+      activeTurnId: null,
+      lastRuntimeEvent: null,
+      lastRuntimeEventAt: null,
       updatedAt: directory.getBinding("chat-1")?.updatedAt,
     });
     assert.equal(directory.getHarness("chat-1"), "codex");
     assert.equal(directory.resolveRoutableSession("chat-1")?.instanceId, "work");
+  });
+
+  it("recovers persisted cwd, model, active turn, and last runtime event from bindings", () => {
+    const directory = getHarnessSessionDirectory();
+    directory.clear();
+
+    directory.upsert({
+      chatId: "chat-2",
+      harnessName: "codex",
+      instanceId: "codex-work",
+      status: "running",
+      resumeCursor: "thread-2",
+      runtimeMode: "workspace-write",
+      runtimePayload: {
+        workdir: "/repo",
+        model: "gpt-5.4",
+        activeTurnId: "turn-7",
+        lastRuntimeEvent: "turn.started",
+        lastRuntimeEventAt: "2026-05-27T00:00:00.000Z",
+      },
+    });
+
+    assert.deepEqual(directory.resolveRecoveryState("chat-2"), {
+      chatId: "chat-2",
+      harnessName: "codex",
+      instanceId: "codex-work",
+      resumeCursor: "thread-2",
+      runtimeMode: "workspace-write",
+      workdir: "/repo",
+      model: "gpt-5.4",
+      activeTurnId: "turn-7",
+      lastRuntimeEvent: "turn.started",
+      lastRuntimeEventAt: "2026-05-27T00:00:00.000Z",
+    });
+  });
+});
+
+describe("resolveHarnessName", () => {
+  it("uses codex as the central default when no chat or persona harness is selected", () => {
+    assert.equal(resolveHarnessName(null, null), "codex");
+  });
+
+  it("allows the central default harness to be changed", () => {
+    config.default_harness = "claude";
+
+    assert.equal(resolveHarnessName(null, null), "claude");
+  });
+
+  it("treats stored app as default selection instead of a provider", () => {
+    config.default_harness = "pi";
+
+    assert.equal(resolveHarnessName(null, { harness: "app" }), "pi");
+  });
+
+  it("can disable the central default", () => {
+    config.default_harness = "";
+
+    assert.equal(resolveHarnessName(null, null), null);
   });
 });

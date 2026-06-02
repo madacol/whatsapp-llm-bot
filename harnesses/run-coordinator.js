@@ -1,5 +1,12 @@
 /**
  * @typedef {{
+ *   supportsLiveInput: boolean;
+ *   injectMessage?: AgentHarness["injectMessage"];
+ * }} LiveInputTarget
+ */
+
+/**
+ * @typedef {{
  *   status: "started" | "buffered" | "injected";
  * }} HarnessRunDecision
  */
@@ -8,7 +15,8 @@
  * @typedef {{
  *   chatId: string;
  *   text: string;
- *   harness: AgentHarness;
+ *   target: LiveInputTarget;
+ *   turn: ChatTurn;
  * }} PendingLiveInput
  */
 
@@ -19,6 +27,8 @@
  *   pendingLiveInputs: PendingLiveInput[];
  *   liveInputRetryTimer: ReturnType<typeof setTimeout> | null;
  *   isActive: boolean;
+ *   liveInputTarget: LiveInputTarget;
+ *   ownerKey: string | null;
  * }} PendingRunState
  */
 
@@ -39,7 +49,7 @@
  * The coordinator does not execute runs itself; it only mediates lifecycle.
  *
  * @returns {{
- *   beginRun: (input: { turn: ChatTurn, userText: string, harness: AgentHarness }) => Promise<HarnessRunDecision>,
+ *   beginRun: (input: { turn: ChatTurn, userText: string, liveInputTarget?: LiveInputTarget | null, ownerKey?: string | null }) => Promise<HarnessRunDecision>,
  *   hasPendingRun: (chatId: string) => boolean,
  *   markRunActive: (chatId: string) => void,
  *   consumeBufferedTexts: (chatId: string) => string[],
@@ -53,22 +63,22 @@ export function createHarnessRunCoordinator(options = {}) {
   const pendingRuns = new Map();
 
   /**
-   * @param {AgentHarness} harness
-   * @returns {harness is AgentHarness & { injectMessage: NonNullable<AgentHarness["injectMessage"]> }}
+   * @param {LiveInputTarget} target
+   * @returns {target is LiveInputTarget & { injectMessage: NonNullable<LiveInputTarget["injectMessage"]> }}
    */
-  function canInjectLiveInput(harness) {
-    return harness.getCapabilities().supportsLiveInput && typeof harness.injectMessage === "function";
+  function canInjectLiveInput(target) {
+    return target.supportsLiveInput && typeof target.injectMessage === "function";
   }
 
   /**
    * @param {string} chatId
    * @param {string} text
-   * @param {AgentHarness & { injectMessage: NonNullable<AgentHarness["injectMessage"]> }} harness
+   * @param {LiveInputTarget & { injectMessage: NonNullable<LiveInputTarget["injectMessage"]> }} target
    * @returns {Promise<boolean>}
    */
-  async function tryInjectLiveInput(chatId, text, harness) {
+  async function tryInjectLiveInput(chatId, text, target) {
     try {
-      return !!(await harness.injectMessage(chatId, text));
+      return !!(await target.injectMessage(chatId, text));
     } catch {
       return false;
     }
@@ -88,11 +98,11 @@ export function createHarnessRunCoordinator(options = {}) {
     /** @type {PendingLiveInput[]} */
     const remaining = [];
     for (const liveInput of pending.pendingLiveInputs) {
-      if (!canInjectLiveInput(liveInput.harness)) {
+      if (!canInjectLiveInput(liveInput.target)) {
         remaining.push(liveInput);
         continue;
       }
-      const injected = await tryInjectLiveInput(liveInput.chatId, liveInput.text, liveInput.harness);
+      const injected = await tryInjectLiveInput(liveInput.chatId, liveInput.text, liveInput.target);
       if (!injected) {
         remaining.push(liveInput);
       }
@@ -122,11 +132,12 @@ export function createHarnessRunCoordinator(options = {}) {
    * @param {string} chatId
    * @param {PendingRunState} pending
    * @param {string} text
-   * @param {AgentHarness} harness
+   * @param {ChatTurn} turn
+   * @param {LiveInputTarget} target
    * @returns {void}
    */
-  function queueLiveInputRetry(chatId, pending, text, harness) {
-    pending.pendingLiveInputs.push({ chatId, text, harness });
+  function queueLiveInputRetry(chatId, pending, text, turn, target) {
+    pending.pendingLiveInputs.push({ chatId, text, target, turn });
     scheduleLiveInputRetry(chatId, pending);
   }
 
@@ -143,22 +154,23 @@ export function createHarnessRunCoordinator(options = {}) {
   }
 
   return {
-    async beginRun({ turn, userText, harness }) {
+    async beginRun({ turn, userText, liveInputTarget, ownerKey = null }) {
       const { chatId } = turn;
       const pending = pendingRuns.get(chatId);
       if (pending) {
-        if (pending.isActive && userText && canInjectLiveInput(harness)) {
-          if (await tryInjectLiveInput(chatId, userText, harness)) {
+        const sameOwner = !ownerKey || !pending.ownerKey || ownerKey === pending.ownerKey;
+        if (pending.isActive && userText && canInjectLiveInput(pending.liveInputTarget)) {
+          if (await tryInjectLiveInput(chatId, userText, pending.liveInputTarget)) {
             return { status: "injected" };
           }
-          queueLiveInputRetry(chatId, pending, userText, harness);
-          return { status: "injected" };
+          queueLiveInputRetry(chatId, pending, userText, turn, pending.liveInputTarget);
+          return { status: "buffered" };
         }
         if (pending.isActive) {
           pending.queuedTurns.push(turn);
           return { status: "buffered" };
         }
-        if (userText) {
+        if (sameOwner && userText) {
           pending.bufferedTexts.push(userText);
         } else {
           pending.queuedTurns.push(turn);
@@ -166,12 +178,17 @@ export function createHarnessRunCoordinator(options = {}) {
         return { status: "buffered" };
       }
 
+      if (!liveInputTarget) {
+        throw new Error("Live input target is required to start a run.");
+      }
       pendingRuns.set(chatId, {
         bufferedTexts: [],
         queuedTurns: [],
         pendingLiveInputs: [],
         liveInputRetryTimer: null,
         isActive: false,
+        liveInputTarget,
+        ownerKey,
       });
       return { status: "started" };
     },
@@ -203,7 +220,9 @@ export function createHarnessRunCoordinator(options = {}) {
         return null;
       }
 
-      const nextTurn = pending.queuedTurns.at(-1) ?? null;
+      const nextTurn = pending.queuedTurns.at(-1)
+        ?? pending.pendingLiveInputs.at(-1)?.turn
+        ?? null;
       if (!nextTurn) {
         clearLiveInputRetry(pending);
         pendingRuns.delete(chatId);

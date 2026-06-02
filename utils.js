@@ -11,7 +11,6 @@ import { homedir, tmpdir } from "node:os";
 import { dirname, resolve } from "node:path";
 import { ensureChatDirs, getChatRootDir, getChatWorkspaceDir } from "./chat-paths.js";
 import config from "./config.js";
-import { formatCommandInspectText as formatWhatsappCommandInspectText } from "./presentation/whatsapp.js";
 
 /** Workspaces live outside the bot project so the SDK's upward CLAUDE.md
  *  traversal never reaches the bot's own CLAUDE.md / settings. */
@@ -202,19 +201,6 @@ export function formatRelativeTime(ms, suffix = "ago") {
  */
 export function createToolMessage(toolId, text) {
   return { role: "tool", tool_id: toolId, content: [{ type: "text", text }] };
-}
-
-/**
- * Build inspect text for a shell command, always showing the command first and
- * then the adapter-formatted command result below it.
- * @param {string} command
- * @param {string | undefined} output
- * @param {string} [toolName]
- * @returns {string}
- */
-export function formatCommandInspectText(command, output, toolName) {
-  const inspectMode = toolName === "Bash" ? "bash" : "plain";
-  return formatWhatsappCommandInspectText(command, output, inspectMode);
 }
 
 /**

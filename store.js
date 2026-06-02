@@ -26,7 +26,6 @@ const log = createLogger("store");
  *   model_roles: Record<string, string>;
  *   memory: boolean;
  *   memory_threshold: number | null;
- *   enabled_actions: string[];
  *   active_persona: string | null;
  *   harness: string | null;
  *   harness_cwd: string | null;
@@ -154,6 +153,10 @@ export async function getChatOrThrow(_db, chatId) {
  *   }) => Promise<WhatsAppOutboundQueueRow>;
  *   listWhatsAppOutboundQueueEntries: () => Promise<WhatsAppOutboundQueueRow[]>;
  *   deleteWhatsAppOutboundQueueEntry: (chatId: string, id: number) => Promise<void>;
+ *   quarantineWhatsAppOutboundQueueEntry: (input: {
+ *     row: WhatsAppOutboundQueueRow,
+ *     reason: string,
+ *   }) => Promise<void>;
  *   saveWhatsAppEditHandle: (input: {
  *     id: string,
  *     chatId: string,

@@ -8,6 +8,7 @@ import { exec } from "node:child_process";
 import { rm } from "node:fs/promises";
 import { createLogger } from "../logger.js";
 import { needsAuthReset, sendAlertEmail } from "../notifications.js";
+import { makeTextMessage } from "./message-payloads.js";
 
 const log = createLogger("whatsapp");
 
@@ -209,7 +210,7 @@ export function createConnectionSupervisor(options, deps) {
       if (!sock) {
         throw new Error("WhatsApp transport has not been started");
       }
-      await sock.sendMessage(chatId, { text });
+      await sock.sendMessage(chatId, makeTextMessage(text));
     },
 
     async handleConnectionUpdate(update, sock) {

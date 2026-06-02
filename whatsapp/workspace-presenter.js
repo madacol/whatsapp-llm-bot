@@ -1,8 +1,9 @@
 import { renderFileChangeContent } from "./outbound/send-content.js";
 import { markdownToWhatsApp } from "../message-renderer.js";
 import { formatPlanPresentationText } from "../plan-presentation.js";
-import { formatActivitySummary } from "../tool-presentation-model.js";
-import { formatToolPresentationDisplay, formatToolPresentationSummary } from "../presentation/whatsapp.js";
+import { parseToolArgs } from "../agent-io-defaults.js";
+import { buildToolPresentation } from "./tool-presentation-model.js";
+import { renderToolActivityContent, renderToolPresentationContent } from "./tool-presenter.js";
 import { contentEvent } from "../outbound-events.js";
 import { formatUsageEventText } from "../usage-formatting.js";
 import {
@@ -83,10 +84,19 @@ function stringifyEvent(event) {
       const prefix = SOURCE_PREFIX[event.source];
       return prefix && text ? `${prefix} ${text}` : text;
     }
-    case "tool_call":
-      return `${SOURCE_PREFIX["tool-call"]} ${formatToolPresentationDisplay(event.presentation) ?? formatToolPresentationSummary(event.presentation)}`.trim();
+    case "tool_call": {
+      const args = parseToolArgs(event.toolCall.arguments);
+      const presentation = buildToolPresentation(
+        event.toolCall.name,
+        args,
+        typeof event.displaySummary === "string" ? () => event.displaySummary ?? "" : undefined,
+        event.cwd ?? null,
+        event.context,
+      );
+      return `${SOURCE_PREFIX["tool-call"]} ${renderToolPresentationContent(presentation)}`.trim();
+    }
     case "tool_activity":
-      return `${SOURCE_PREFIX["tool-call"]} ${formatActivitySummary(event.activity)}`.trim();
+      return `${SOURCE_PREFIX["tool-call"]} ${renderToolActivityContent(event.activity)}`.trim();
     case "plan":
       return `${SOURCE_PREFIX.llm} ${formatPlanPresentationText(event.presentation)}`.trim();
     case "file_change": {

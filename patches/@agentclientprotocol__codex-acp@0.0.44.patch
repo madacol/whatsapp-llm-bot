@@ -1,0 +1,77 @@
+diff --git a/dist/index.js b/dist/index.js
+index 1b1f5d508f39ec47ff1826516f9c106a02004cf9..8765731a0ae5c312d589ce22e33d00e332f10b2a 100755
+--- a/dist/index.js
++++ b/dist/index.js
+@@ -17381,12 +17381,14 @@ function createCommandActionEvent(id, status, cwd, commandAction) {
+     };
+   } else if (commandAction.type === "listFiles") {
+     const title = commandAction.path ? `List files in '${commandAction.path}'` : "List files";
++    const locationPath = path2.resolve(cwd, commandAction.path ?? ".");
+     return {
+       sessionUpdate: "tool_call",
+       toolCallId: id,
+       status: acpStatus,
+       kind: "read",
+-      title
++      title,
++      locations: [{ path: locationPath }]
+     };
+   }
+   return {
+@@ -19443,6 +19443,9 @@ var CodexAcpClient = class {
+       turnId: params.turnId
+     });
+   }
++  async turnSteer(params) {
++    await this.codexClient.turnSteer(params);
++  }
+   async fetchAvailableModels() {
+     const models = [];
+     let cursor = null;
+@@ -19900,7 +19903,8 @@ var CodexAcpServer = class {
+         },
+         sessionCapabilities: {
+           resume: {},
+-          list: {}
++          list: {},
++          steer: {}
+         },
+         mcpCapabilities: {
+           http: true,
+@@ -19912,6 +19916,26 @@ var CodexAcpServer = class {
+   }
+   async extMethod(method, params) {
+     const methodRequest = { method, params };
++    if (method === "session/steer") {
++      const sessionId = params && typeof params === "object" && typeof params.sessionId === "string" ? params.sessionId : null;
++      const text = params && typeof params === "object" && typeof params.text === "string" ? params.text : null;
++      if (!sessionId || !text) {
++        throw RequestError.invalidParams(params, "session/steer requires sessionId and text");
++      }
++      const sessionState = this.sessions.get(sessionId);
++      if (!sessionState) {
++        throw RequestError.invalidParams(params, `Session ${sessionId} not found`);
++      }
++      if (!sessionState.currentTurnId) {
++        throw RequestError.invalidRequest(params, "No active turn to steer");
++      }
++      await this.runWithProcessCheck(() => this.codexAcpClient.turnSteer({
++        threadId: sessionId,
++        input: [{ type: "text", text }],
++        expectedTurnId: sessionState.currentTurnId
++      }));
++      return {};
++    }
+     if (!isExtMethodRequest(methodRequest)) {
+       return {};
+     }
+@@ -20650,6 +20674,9 @@ var CodexAppServerClient = class {
+   async turnInterrupt(params) {
+     return await this.sendRequest({ method: "turn/interrupt", params });
+   }
++  async turnSteer(params) {
++    return await this.sendRequest({ method: "turn/steer", params });
++  }
+   async threadStart(params) {
+     return await this.sendRequest({ method: "thread/start", params });
+   }

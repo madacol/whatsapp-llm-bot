@@ -3,8 +3,9 @@ import path from "node:path";
 import { createServer } from "node:http";
 import { EventEmitter } from "node:events";
 import { formatPlanPresentationText } from "../plan-presentation.js";
-import { formatActivitySummary } from "../tool-presentation-model.js";
-import { formatToolPresentationDisplay, formatToolPresentationSummary } from "../presentation/whatsapp.js";
+import { parseToolArgs } from "../agent-io-defaults.js";
+import { buildToolPresentation } from "../whatsapp/tool-presentation-model.js";
+import { formatToolPresentationSummary, renderToolActivityContent, renderToolPresentationContent } from "../whatsapp/tool-presenter.js";
 import { formatUsageEventText } from "../usage-formatting.js";
 import { initStore } from "../store.js";
 import { ensureChatStoreSchema } from "../store/schema/chat.js";
@@ -97,11 +98,27 @@ export function createChatTurn(overrides = {}) {
         break;
       case "tool_call":
         source = "tool-call";
-        content = formatToolPresentationDisplay(event.presentation) ?? formatToolPresentationSummary(event.presentation);
+        content = renderToolPresentationContent(buildToolPresentation(
+          event.toolCall.name,
+          parseToolArgs(event.toolCall.arguments),
+          typeof event.displaySummary === "string" ? () => event.displaySummary ?? "" : undefined,
+          event.cwd ?? null,
+          event.context,
+        ));
         break;
       case "tool_activity":
         source = "tool-call";
-        content = formatActivitySummary(event.activity);
+        content = renderToolActivityContent(event.activity);
+        break;
+      case "compact_tool_activity":
+        source = "plain";
+        content = JSON.stringify(event.activity);
+        break;
+      case "runtime_event":
+        source = "plain";
+        content = JSON.stringify({
+          event: event.event,
+        });
         break;
       case "plan":
         source = "llm";
@@ -161,14 +178,6 @@ export function createChatTurn(overrides = {}) {
     confirm: async (message) => {
       responses.push({ type: "confirm", text: message });
       return true;
-    },
-    startPresence: async (_ttlMs) => {
-      responses.push({ type: "sendPresenceUpdate", text: "composing" });
-    },
-    keepPresenceAlive: async (_ttlMs) => {
-    },
-    endPresence: async () => {
-      responses.push({ type: "sendPresenceUpdate", text: "paused" });
     },
   };
 
@@ -335,7 +344,28 @@ export async function createMockLlmServer() {
     });
   });
 
-  await new Promise((resolve) => server.listen(0, "127.0.0.1", () => resolve(undefined)));
+  await new Promise((resolve, reject) => {
+    /**
+     * @param {Error} error
+     * @returns {void}
+     */
+    function onError(error) {
+      server.off("listening", onListening);
+      reject(error);
+    }
+
+    /**
+     * @returns {void}
+     */
+    function onListening() {
+      server.off("error", onError);
+      resolve(undefined);
+    }
+
+    server.once("error", onError);
+    server.once("listening", onListening);
+    server.listen(0, "127.0.0.1");
+  });
   const addr = server.address();
   const port = typeof addr === "object" && addr ? addr.port : 0;
 
@@ -386,7 +416,6 @@ export function toolCall(name, args) {
  *   memory?: boolean;
  *   memoryThreshold?: number | null;
  *   respondOn?: "any" | "mention+reply" | "mention";
- *   enabledActions?: string[];
  *   persona?: string | null;
  *   modelRoles?: Record<string, string>;
  *   mediaToTextModels?: { image?: string; audio?: string; video?: string; general?: string };
@@ -461,7 +490,6 @@ export function createTestHarness({ mockServer, handleMessage, testDb }) {
         ...(rest.memory != null ? { memory: rest.memory } : {}),
         ...(rest.memoryThreshold !== undefined ? { memory_threshold: rest.memoryThreshold } : {}),
         ...(rest.respondOn != null ? { respond_on: rest.respondOn } : {}),
-        ...(rest.enabledActions != null ? { enabled_actions: rest.enabledActions } : {}),
         ...(rest.persona !== undefined ? { active_persona: rest.persona } : {}),
         ...(rest.modelRoles != null ? { model_roles: rest.modelRoles } : {}),
         ...(rest.mediaToTextModels != null ? { media_to_text_models: rest.mediaToTextModels } : {}),

@@ -6,6 +6,7 @@ process.env.MODEL = "mock-model";
 import { describe, it, before, after } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import {
   createMockLlmServer,
@@ -13,8 +14,8 @@ import {
   createWAMessage,
   createTestDb,
   seedChat,
-  toolCall,
 } from "./helpers.js";
+import { registerAcpTestHarness, ZERO_USAGE } from "./acp-test-harness.js";
 import { setDb } from "../db.js";
 import { adaptIncomingMessage } from "../whatsapp/inbound/chat-turn.js";
 import { createConfirmRuntime } from "../whatsapp/runtime/confirm-runtime.js";
@@ -54,12 +55,9 @@ before(async () => {
   const { createLlmClient } = await import("../llm.js");
   const llmClient = createLlmClient();
   const { createMessageHandler } = await import("../index.js");
-  const { getActions, executeAction } = await import("../actions.js");
   ({ handleMessage } = createMessageHandler({
     store,
     llmClient,
-    getActionsFn: getActions,
-    executeActionFn: executeAction,
   }));
 });
 
@@ -69,9 +67,9 @@ after(async () => {
 });
 
 // ═══════════════════════════════════════════════════════════════════
-// 1. Basic text message through the full pipeline
+// 1. No harness selected
 // ═══════════════════════════════════════════════════════════════════
-describe("basic text message", () => {
+describe("no selected ACP harness", () => {
   // senderId "e2e-user" → chatId "e2e-user@s.whatsapp.net"
   const senderId = "e2e-user";
   const chatId = `${senderId}@s.whatsapp.net`;
@@ -80,70 +78,23 @@ describe("basic text message", () => {
     await seedChat(testDb, chatId, { enabled: true });
   });
 
-  it("sends a WAMessage through adapter → handleMessage → LLM → socket response", async () => {
-    mockServer.addResponses("Hello from LLM!");
-
+  it("does not fall back to the legacy app loop when the central default is disabled", async () => {
+    const savedDefaultHarness = process.env.DEFAULT_HARNESS;
+    process.env.DEFAULT_HARNESS = "";
     const { sock, getTextMessages } = createMockBaileysSocket();
     const msg = createWAMessage({ text: "Hey there", senderId });
 
-    await adaptIncomingMessage(msg, sock, handleMessage, testConfirmRegistry, testUserResponseRegistry);
+    try {
+      await adaptIncomingMessage(msg, sock, handleMessage, testConfirmRegistry, testUserResponseRegistry);
+    } finally {
+      if (savedDefaultHarness === undefined) delete process.env.DEFAULT_HARNESS;
+      else process.env.DEFAULT_HARNESS = savedDefaultHarness;
+    }
 
     const texts = getTextMessages();
     assert.ok(
-      texts.some(t => t.includes("Hello from LLM!")),
-      `Expected LLM response in socket output, got: ${JSON.stringify(texts)}`,
-    );
-  });
-});
-
-// ═══════════════════════════════════════════════════════════════════
-// 1b. Compact tool progress edits through the transport boundary
-// ═══════════════════════════════════════════════════════════════════
-describe("compact tool progress edits", () => {
-  const senderId = "e2e-compact-user";
-  const chatId = `${senderId}@s.whatsapp.net`;
-
-  before(async () => {
-    await seedChat(testDb, chatId, { enabled: true });
-    await updateChatConfig(chatId, (current) => ({
-      ...current,
-      output_visibility: { toolDetails: false },
-    }));
-  });
-
-  it("updates the compact tool message instead of sending repeated standalone progress messages", async () => {
-    mockServer.addResponses(
-      toolCall("run_javascript", { code: "() => 'hello'" }),
-      "Final answer after the tool.",
-    );
-
-    const { sock, getSentMessages } = createMockBaileysSocket();
-    const msg = createWAMessage({ text: "Run a tool", senderId });
-
-    await adaptIncomingMessage(msg, sock, handleMessage, testConfirmRegistry, testUserResponseRegistry);
-
-    const sentMessages = getSentMessages();
-    const compactMessages = sentMessages.filter((entry) => (
-      typeof entry.msg.text === "string"
-      && entry.msg.text.includes("*run_javascript*")
-    ));
-    const compactSends = compactMessages.filter((entry) => !("edit" in entry.msg));
-    const compactEdits = compactMessages.filter((entry) => "edit" in entry.msg);
-
-    assert.equal(compactSends.length, 1, `Expected one compact progress send, got ${JSON.stringify(compactMessages)}`);
-    assert.ok(compactEdits.length >= 1, `Expected compact progress to be edited, got ${JSON.stringify(compactMessages)}`);
-    assert.deepEqual(
-      compactEdits.map((entry) => entry.msg.edit),
-      compactEdits.map(() => ({ id: "sent-msg-0", remoteJid: chatId })),
-      "Compact progress edits should target the first compact message key",
-    );
-    assert.ok(
-      sentMessages.some((entry) => typeof entry.msg.text === "string" && entry.msg.text.includes("Final answer after the tool.")),
-      `Expected final assistant answer, got ${JSON.stringify(sentMessages)}`,
-    );
-    assert.ok(
-      sentMessages.some((entry) => typeof entry.msg.text === "string" && entry.msg.text.includes("Cost:")),
-      `Expected final usage cost, got ${JSON.stringify(sentMessages)}`,
+      texts.some(t => t.includes("No ACP harness is selected")),
+      `Expected no-harness error in socket output, got: ${JSON.stringify(texts)}`,
     );
   });
 });
@@ -157,106 +108,49 @@ describe("provider runtime events", () => {
   const harnessName = "e2e-runtime-events";
 
   before(async () => {
-    const { registerHarnessDriver } = await import("../harnesses/index.js");
-    registerHarnessDriver({
+    registerAcpTestHarness({
       name: harnessName,
-      supportsInstances: true,
-      createInstance: () => ({
-        harness: {
-          getName: () => harnessName,
-          getCapabilities: () => ({
-            supportsResume: true,
-            supportsCancel: false,
-            supportsLiveInput: false,
-            supportsApprovals: false,
-            supportsWorkdir: true,
-            supportsSandboxConfig: false,
-            supportsModelSelection: false,
-            supportsReasoningEffort: false,
-            supportsSessionFork: false,
-          }),
-          run: async () => {
-            throw new Error("provider runtime e2e should use the semantic adapter");
+      errorMessage: "provider runtime e2e should use the semantic adapter",
+      onSendTurn: async (input, { emitRuntimeEvent }) => {
+        await emitRuntimeEvent({
+          type: "file-read.started",
+          fileRead: {
+            command: "sed -n '1,5p' package.json",
+            paths: ["package.json"],
           },
-          handleCommand: async () => false,
-          listSlashCommands: () => [],
-          createAdapter: ({ name, instanceId, continuationKey }) => {
-            /** @type {Set<(event: { type: string, provider: string } & Record<string, unknown>) => void | Promise<void>>} */
-            const subscribers = new Set();
-            return {
-              startSession: async (input) => ({
-                chatId: input.chatId,
-                harnessName: name,
-                instanceId,
-                continuationKey,
-                status: "ready",
-                resumeCursor: null,
-              }),
-              sendTurn: async (input) => {
-                for (const subscriber of subscribers) {
-                  await subscriber({
-                    type: "file-read.started",
-                    provider: name,
-                    fileRead: {
-                      command: "sed -n '1,5p' package.json",
-                      paths: ["package.json"],
-                    },
-                  });
-                  await subscriber({
-                    type: "command.started",
-                    provider: name,
-                    command: {
-                      command: "pnpm type-check",
-                      status: "started",
-                    },
-                  });
-                  await subscriber({
-                    type: "command.completed",
-                    provider: name,
-                    command: {
-                      command: "pnpm type-check",
-                      status: "completed",
-                      output: "ok",
-                    },
-                  });
-                  await subscriber({
-                    type: "assistant.completed",
-                    provider: name,
-                    text: "Provider runtime answer.",
-                    contentType: "markdown",
-                    usage: {
-                      promptTokens: 12,
-                      completionTokens: 3,
-                      cachedTokens: 2,
-                      cost: 0.0042,
-                    },
-                  });
-                }
-                return {
-                  response: [{ type: "markdown", text: "legacy fallback should not display" }],
-                  messages: input.messages ?? [],
-                  usage: { promptTokens: 0, completionTokens: 0, cachedTokens: 0, cost: 0 },
-                };
-              },
-              interruptTurn: async () => false,
-              injectMessage: async () => false,
-              stopSession: async () => false,
-              listSessions: () => [],
-              readThread: async () => null,
-              rollbackThread: async () => null,
-              streamEvents: {
-                async *[Symbol.asyncIterator]() {},
-              },
-              subscribeEvents: (handler) => {
-                subscribers.add(handler);
-                return () => {
-                  subscribers.delete(handler);
-                };
-              },
-            };
+        });
+        await emitRuntimeEvent({
+          type: "command.started",
+          command: {
+            command: "pnpm type-check",
+            status: "started",
           },
-        },
-      }),
+        });
+        await emitRuntimeEvent({
+          type: "command.completed",
+          command: {
+            command: "pnpm type-check",
+            status: "completed",
+            output: "ok",
+          },
+        });
+        await emitRuntimeEvent({
+          type: "assistant.completed",
+          text: "Provider runtime answer.",
+          contentType: "markdown",
+          usage: {
+            promptTokens: 12,
+            completionTokens: 3,
+            cachedTokens: 2,
+            cost: 0.0042,
+          },
+        });
+        return {
+          response: [{ type: "markdown", text: "legacy fallback should not display" }],
+          messages: input.messages ?? [],
+          usage: ZERO_USAGE,
+        };
+      },
     });
 
     await seedChat(testDb, chatId, { enabled: true });
@@ -295,10 +189,299 @@ describe("provider runtime events", () => {
 });
 
 // ═══════════════════════════════════════════════════════════════════
-// 1d. Pi RPC events through the full WhatsApp transport boundary
+// 1cc. Dummy runtime tools through the full WhatsApp transport boundary
+// ═══════════════════════════════════════════════════════════════════
+describe("dummy runtime tools", () => {
+  const senderId = "e2e-dummy-tools-user";
+  const chatId = `${senderId}@s.whatsapp.net`;
+  const harnessName = "e2e-dummy-runtime-tools";
+
+  before(async () => {
+    registerAcpTestHarness({
+      name: harnessName,
+      errorMessage: "dummy runtime tool e2e should use the semantic adapter",
+      onSendTurn: async (input, { emitRuntimeEvent }) => {
+        const tools = [
+          { id: "read-1", name: "Read", arguments: { file_path: "src/app.js" }, output: "read ok" },
+          { id: "grep-1", name: "Grep", arguments: { path: "src", pattern: "needle" }, output: "grep ok" },
+          { id: "task-1", name: "Task", arguments: { title: "Review migration" }, output: "task ok" },
+          { id: "web-1", name: "WebSearch", arguments: { query: "runtime migration" }, output: "web ok" },
+        ];
+
+        for (const tool of tools) {
+          await emitRuntimeEvent({ type: "tool.started", provider: "acp", tool });
+          await emitRuntimeEvent({ type: "tool.completed", provider: "acp", tool });
+        }
+
+        await emitRuntimeEvent({
+          type: "assistant.completed",
+          text: "Dummy tools done.",
+          contentType: "markdown",
+        });
+
+        return {
+          response: [{ type: "markdown", text: "legacy fallback should not display" }],
+          messages: input.messages ?? [],
+          usage: ZERO_USAGE,
+        };
+      },
+    });
+
+    await seedChat(testDb, chatId, { enabled: true });
+    await updateChatConfig(chatId, (current) => ({
+      ...current,
+      harness: harnessName,
+      output_visibility: { toolDetails: true },
+    }));
+  });
+
+  it("renders multiple ACP runtime tool shapes through WhatsApp", async () => {
+    const captures = createMockBaileysSocket();
+
+    await adaptIncomingMessage(
+      createWAMessage({ text: "Run dummy tools", senderId }),
+      captures.sock,
+      handleMessage,
+      testConfirmRegistry,
+      testUserResponseRegistry,
+    );
+
+    const rendered = captures.getRenderedMessages();
+    assert.ok(rendered.some((text) => text.includes("🔧 *Read*") && text.includes("`src/app.js`")), `Expected Read start, got ${JSON.stringify(rendered)}`);
+    assert.ok(rendered.some((text) => text.includes("✅ *Read*") && text.includes("`src/app.js`")), `Expected Read completion, got ${JSON.stringify(rendered)}`);
+    assert.ok(rendered.some((text) => text.includes("✅ *Search*") && text.includes("`needle` in *src*")), `Expected Search completion, got ${JSON.stringify(rendered)}`);
+    assert.ok(rendered.some((text) => text.includes("✅ *Task*") && text.includes("Review migration")), `Expected Task completion, got ${JSON.stringify(rendered)}`);
+    assert.ok(rendered.some((text) => text.includes("✅ *Search Web*") && text.includes("\"runtime migration\"")), `Expected Search Web completion, got ${JSON.stringify(rendered)}`);
+    assert.ok(rendered.some((text) => text.includes("Dummy tools done.")), `Expected final answer, got ${JSON.stringify(rendered)}`);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════
+// 1d. ACP file-change parity through the full WhatsApp transport boundary
+// ═══════════════════════════════════════════════════════════════════
+describe("ACP file changes through WhatsApp transport", () => {
+  const harnessName = "e2e-acp-file-changes";
+  let nextSender = 0;
+
+  before(async () => {
+    const { registerHarnessDriver } = await import("../harnesses/index.js");
+    const { createAcpHarness } = await import("../harnesses/acp.js");
+    registerHarnessDriver({
+      name: harnessName,
+      supportsInstances: true,
+      createInstance: () => ({
+        harness: createAcpHarness({
+          name: harnessName,
+          config: {
+            command: process.execPath,
+            args: [path.resolve("tests", "fixtures", "acp-mock-agent.js")],
+          },
+        }),
+      }),
+    });
+  });
+
+  /**
+   * @param {string} prompt
+   * @param {(workdir: string) => Promise<void>} [setup]
+   * @returns {Promise<{ rendered: string[], sentMessages: ReturnType<ReturnType<typeof createMockBaileysSocket>["getSentMessages"]> }>}
+   */
+  async function runAcpPrompt(prompt, setup) {
+    const senderId = `e2e-acp-files-${nextSender++}`;
+    const chatId = `${senderId}@s.whatsapp.net`;
+    const workdir = await fs.mkdtemp(path.join(os.tmpdir(), "e2e-acp-files-"));
+    await setup?.(workdir);
+    await seedChat(testDb, chatId, { enabled: true });
+    await updateChatConfig(chatId, (current) => ({
+      ...current,
+      harness: harnessName,
+      harness_cwd: workdir,
+      output_visibility: { changes: true, toolDetails: false },
+    }));
+
+    const captures = createMockBaileysSocket();
+    await adaptIncomingMessage(
+      createWAMessage({ text: prompt, senderId }),
+      captures.sock,
+      handleMessage,
+      testConfirmRegistry,
+      testUserResponseRegistry,
+    );
+
+    return {
+      rendered: captures.getRenderedMessages(),
+      sentMessages: captures.getSentMessages(),
+    };
+  }
+
+  /**
+   * @param {string[]} rendered
+   * @param {string} title
+   * @param {string} fileName
+   */
+  function assertOneFileChange(rendered, title, fileName) {
+    const matches = rendered.filter((text) => text.includes(`*${title}*`) && text.includes(`\`${fileName}\``));
+    assert.equal(matches.length, 1, `Expected one ${title} caption for ${fileName}, got ${JSON.stringify(rendered)}`);
+  }
+
+  it("sends ACP adds, updates, deletes, and unified diffs with the expected transport labels", async () => {
+    const add = await runAcpPrompt("fs write");
+    assertOneFileChange(add.rendered, "Add", "acp-fs-write.txt");
+
+    const update = await runAcpPrompt("fs update", async (workdir) => {
+      await fs.writeFile(path.join(workdir, "acp-fs-update.txt"), "old content through acp fs\n", "utf8");
+    });
+    assertOneFileChange(update.rendered, "Update", "acp-fs-update.txt");
+
+    const correctedUpdate = await runAcpPrompt("mislabel existing add", async (workdir) => {
+      await fs.writeFile(path.join(workdir, "existing-mislabel.js"), "export const value = 1;\n", "utf8");
+    });
+    assertOneFileChange(correctedUpdate.rendered, "Update", "existing-mislabel.js");
+
+    const deleted = await runAcpPrompt("direct delete", async (workdir) => {
+      await fs.writeFile(path.join(workdir, "direct-delete.txt"), "delete me\n", "utf8");
+    });
+    assertOneFileChange(deleted.rendered, "Snapshot", "direct-delete.txt");
+
+    const diffAdd = await runAcpPrompt("diff only add");
+    assertOneFileChange(diffAdd.rendered, "Add", "diff-only-add.js");
+
+    const diffUpdate = await runAcpPrompt("diff only update");
+    assertOneFileChange(diffUpdate.rendered, "Update", "diff-only-update.js");
+
+    const diffDelete = await runAcpPrompt("diff only delete");
+    assertOneFileChange(diffDelete.rendered, "Delete", "diff-only-delete.js");
+
+    const fileChangeImages = [
+      ...add.sentMessages,
+      ...update.sentMessages,
+      ...correctedUpdate.sentMessages,
+      ...deleted.sentMessages,
+      ...diffAdd.sentMessages,
+      ...diffUpdate.sentMessages,
+      ...diffDelete.sentMessages,
+    ].filter((entry) => Buffer.isBuffer(entry.msg.image) && typeof entry.msg.caption === "string");
+    assert.ok(fileChangeImages.length >= 7, `Expected file changes to render as sendable image content, got ${JSON.stringify(fileChangeImages)}`);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════
+// 1e. ACP non-file workflows through the full WhatsApp transport boundary
+// ═══════════════════════════════════════════════════════════════════
+describe("ACP runtime events through WhatsApp transport", () => {
+  const harnessName = "e2e-acp-runtime";
+  let nextSender = 0;
+
+  async function registerRuntimeHarness() {
+    const { registerHarnessDriver } = await import("../harnesses/index.js");
+    const { createAcpHarness } = await import("../harnesses/acp.js");
+    registerHarnessDriver({
+      name: harnessName,
+      supportsInstances: true,
+      createInstance: () => ({
+        harness: createAcpHarness({
+          name: harnessName,
+          config: {
+            command: process.execPath,
+            args: [path.resolve("tests", "fixtures", "acp-mock-agent.js")],
+          },
+        }),
+      }),
+    });
+  }
+
+  before(async () => {
+    await registerRuntimeHarness();
+  });
+
+  /**
+   * @param {string} prompt
+   * @param {{ pollChoice?: string }} [options]
+   * @returns {Promise<{ rendered: string[], sentMessages: ReturnType<ReturnType<typeof createMockBaileysSocket>["getSentMessages"]> }>}
+   */
+  async function runAcpPrompt(prompt, options = {}) {
+    await registerRuntimeHarness();
+    const senderId = `e2e-acp-runtime-${nextSender++}`;
+    const chatId = `${senderId}@s.whatsapp.net`;
+    const workdir = await fs.mkdtemp(path.join(os.tmpdir(), "e2e-acp-runtime-"));
+    await seedChat(testDb, chatId, { enabled: true });
+    await updateChatConfig(chatId, (current) => ({
+      ...current,
+      harness: harnessName,
+      harness_cwd: workdir,
+      output_visibility: { thinking: true, changes: true, toolDetails: true, usage: true, subagents: true },
+    }));
+
+    const captures = createMockBaileysSocket();
+    const turn = adaptIncomingMessage(
+      createWAMessage({ text: prompt, senderId }),
+      captures.sock,
+      handleMessage,
+      testConfirmRegistry,
+      testUserResponseRegistry,
+    );
+    if (options.pollChoice) {
+      for (let attempt = 0; attempt < 50; attempt += 1) {
+        const sentMessages = captures.getSentMessages();
+        const pollIndex = sentMessages.findIndex((entry) => entry.msg.poll);
+        const poll = pollIndex >= 0 ? sentMessages[pollIndex] : undefined;
+        if (poll && poll.msg.poll && typeof poll.msg.poll === "object" && Array.isArray(/** @type {{ values?: unknown }} */ (poll.msg.poll).values)) {
+          testUserResponseRegistry.handlePollVote({
+            chatId,
+            pollMsgId: `sent-msg-${pollIndex}`,
+            selectedOptions: [options.pollChoice],
+          });
+          break;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+    }
+    await turn;
+    return {
+      rendered: captures.getRenderedMessages(),
+      sentMessages: captures.getSentMessages(),
+    };
+  }
+
+  it("renders assistant, subagent, plan, tool, file-change, and usage events distinctly", async () => {
+    const { rendered } = await runAcpPrompt("Run the mock");
+
+    assert.ok(rendered.some((text) => text.includes("Main result.")), `Expected assistant output, got ${JSON.stringify(rendered)}`);
+    assert.ok(rendered.some((text) => text.includes("Subagent result.")), `Expected subagent output, got ${JSON.stringify(rendered)}`);
+    assert.ok(rendered.some((text) => text.includes("Mock ACP work")), `Expected plan output, got ${JSON.stringify(rendered)}`);
+    assert.ok(rendered.some((text) => text.includes("Review mock code") || text.includes("*Task*")), `Expected tool output, got ${JSON.stringify(rendered)}`);
+    assert.ok(rendered.some((text) => text.includes("Update") && text.includes("mock.txt")), `Expected file-change output, got ${JSON.stringify(rendered)}`);
+    assert.ok(rendered.some((text) => text.includes("Cost:")), `Expected usage output, got ${JSON.stringify(rendered)}`);
+  });
+
+  it("renders ACP terminal command output through command transport messages", async () => {
+    const { rendered } = await runAcpPrompt("terminal", { pollChoice: "✅ Allow" });
+
+    assert.ok(rendered.some((text) => text.includes("*Shell*") || text.includes("terminal ok")), `Expected command output, got ${JSON.stringify(rendered)}`);
+  });
+
+  it("resolves ACP permission polls and preserves the final response", async () => {
+    const { rendered, sentMessages } = await runAcpPrompt("permission", { pollChoice: "Allow once" });
+    const poll = sentMessages.find((entry) => entry.msg.poll);
+
+    assert.ok(poll, "Expected permission poll to be sent");
+    assert.ok(rendered.some((text) => text.includes("\"optionId\":\"allow-once\"")), `Expected permission result, got ${JSON.stringify(rendered)}`);
+  });
+
+  it("resolves ACP elicitation polls and preserves the final response", async () => {
+    const { rendered, sentMessages } = await runAcpPrompt("elicitation", { pollChoice: "Complete" });
+    const poll = sentMessages.find((entry) => entry.msg.poll);
+
+    assert.ok(poll, "Expected elicitation poll to be sent");
+    assert.ok(rendered.some((text) => text.includes("\"strategy\":\"complete\"")), `Expected elicitation result, got ${JSON.stringify(rendered)}`);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════
+// 1f. Pi RPC events through the full WhatsApp transport boundary
 // ═══════════════════════════════════════════════════════════════════
 // ═══════════════════════════════════════════════════════════════════
-// 1e. WhatsApp audio through media-to-text into provider input
+// 1g. WhatsApp audio through media-to-text into provider input
 // ═══════════════════════════════════════════════════════════════════
 describe("audio media-to-text provider input", () => {
   const senderId = "e2e-audio-user";
@@ -308,58 +491,17 @@ describe("audio media-to-text provider input", () => {
   const capturedInputs = [];
 
   before(async () => {
-    const { registerHarnessDriver } = await import("../harnesses/index.js");
-    registerHarnessDriver({
+    registerAcpTestHarness({
       name: harnessName,
-      supportsInstances: true,
-      createInstance: () => ({
-        harness: {
-          getName: () => harnessName,
-          getCapabilities: () => ({
-            supportsResume: true,
-            supportsCancel: false,
-            supportsLiveInput: false,
-            supportsApprovals: false,
-            supportsWorkdir: true,
-            supportsSandboxConfig: false,
-            supportsModelSelection: false,
-            supportsReasoningEffort: false,
-            supportsSessionFork: false,
-          }),
-          run: async () => {
-            throw new Error("audio provider e2e should use the semantic adapter");
-          },
-          handleCommand: async () => false,
-          listSlashCommands: () => [],
-          createAdapter: ({ name, instanceId, continuationKey }) => ({
-            startSession: async (input) => ({
-              chatId: input.chatId,
-              harnessName: name,
-              instanceId,
-              continuationKey,
-              status: "ready",
-              resumeCursor: null,
-            }),
-            sendTurn: async (input) => {
-              capturedInputs.push(input.input ?? "");
-              return {
-                response: [{ type: "markdown", text: "Audio provider response." }],
-                messages: input.messages ?? [],
-                usage: { promptTokens: 0, completionTokens: 0, cachedTokens: 0, cost: 0 },
-              };
-            },
-            interruptTurn: async () => false,
-            injectMessage: async () => false,
-            stopSession: async () => false,
-            listSessions: () => [],
-            readThread: async () => null,
-            rollbackThread: async () => null,
-            streamEvents: {
-              async *[Symbol.asyncIterator]() {},
-            },
-          }),
-        },
-      }),
+      errorMessage: "audio provider e2e should use the semantic adapter",
+      onSendTurn: (input) => {
+        capturedInputs.push(input.input ?? "");
+        return {
+          response: [{ type: "markdown", text: "Audio provider response." }],
+          messages: input.messages ?? [],
+          usage: ZERO_USAGE,
+        };
+      },
     });
 
     await seedChat(testDb, chatId, { enabled: true });
@@ -675,67 +817,28 @@ describe("command through adapter", () => {
     );
   });
 
-  it("bot responds to subsequent message after enabling", async () => {
-    mockServer.addResponses("Hello via adapter!");
-
+  it("enabled chats still require an explicit or central ACP harness", async () => {
+    const savedDefaultHarness = process.env.DEFAULT_HARNESS;
+    process.env.DEFAULT_HARNESS = "";
     const { sock, getTextMessages } = createMockBaileysSocket();
 
-    await adaptIncomingMessage(
-      createWAMessage({ text: "Hey" }),
-      sock,
-      handleMessage,
-      testConfirmRegistry,
-      testUserResponseRegistry,
-    );
+    try {
+      await adaptIncomingMessage(
+        createWAMessage({ text: "Hey" }),
+        sock,
+        handleMessage,
+        testConfirmRegistry,
+        testUserResponseRegistry,
+      );
+    } finally {
+      if (savedDefaultHarness === undefined) delete process.env.DEFAULT_HARNESS;
+      else process.env.DEFAULT_HARNESS = savedDefaultHarness;
+    }
 
     const texts = getTextMessages();
     assert.ok(
-      texts.some(t => t.includes("Hello via adapter!")),
-      `Expected LLM response, got: ${JSON.stringify(texts)}`,
-    );
-  });
-});
-
-// ═══════════════════════════════════════════════════════════════════
-// 7. Tool call through full pipeline with socket output
-// ═══════════════════════════════════════════════════════════════════
-describe("tool call through adapter", () => {
-  const senderId = "e2e-tool-user";
-  const chatId = `${senderId}@s.whatsapp.net`;
-
-  before(async () => {
-    await seedChat(testDb, chatId, { enabled: true });
-  });
-
-  it("executes tool call and returns final response via socket", async () => {
-    mockServer.addResponses(
-      {
-        tool_calls: [{
-          id: "call_e2e_001",
-          type: "function",
-          function: {
-            name: "run_javascript",
-            arguments: JSON.stringify({ code: "() => 'e2e-result'" }),
-          },
-        }],
-      },
-      "The result is e2e-result",
-    );
-
-    const { sock, getTextMessages } = createMockBaileysSocket();
-
-    await adaptIncomingMessage(
-      createWAMessage({ text: "Run some code", senderId }),
-      sock,
-      handleMessage,
-      testConfirmRegistry,
-      testUserResponseRegistry,
-    );
-
-    const texts = getTextMessages();
-    assert.ok(
-      texts.some(t => t.includes("The result is e2e-result")),
-      `Expected final LLM reply, got: ${JSON.stringify(texts)}`,
+      texts.some(t => t.includes("No ACP harness is selected")),
+      `Expected no-harness error, got: ${JSON.stringify(texts)}`,
     );
   });
 });
@@ -746,11 +849,24 @@ describe("tool call through adapter", () => {
 describe("presence updates", () => {
   // Use default senderId (master-user) so chatId = master-user@s.whatsapp.net
   const chatId = "master-user@s.whatsapp.net";
+  const harnessName = "e2e-presence-provider";
+
+  before(async () => {
+    registerAcpTestHarness({
+      name: harnessName,
+      errorMessage: "presence e2e should use the semantic adapter",
+      onSendTurn: (input) => ({
+        response: [{ type: "markdown", text: "Presence provider response." }],
+        messages: input.messages ?? [],
+        usage: ZERO_USAGE,
+      }),
+    });
+  });
 
   it("sends composing and paused presence updates via socket", async () => {
     // Chat was already enabled by the command test above; ensure it exists
     await seedChat(testDb, chatId, { enabled: true });
-    mockServer.addResponses("done");
+    await updateChatConfig(chatId, (current) => ({ ...current, harness: harnessName }));
 
     const { sock, getPresenceUpdates } = createMockBaileysSocket();
 
@@ -841,13 +957,15 @@ describe("bot mention detection", () => {
 describe("markdown code renders as image in socket output", () => {
   const senderId = "e2e-md-code";
   const chatId = `${senderId}@s.whatsapp.net`;
+  const harnessName = "e2e-markdown-provider";
 
   before(async () => {
-    await seedChat(testDb, chatId, { enabled: true });
-  });
-
-  it("LLM markdown with code block produces [text, image, text] on socket", async () => {
-    const llmResponse = `Here is a snippet:
+    registerAcpTestHarness({
+      name: harnessName,
+      errorMessage: "markdown e2e should use the semantic adapter",
+      onSendTurn: (input) => {
+        const responseText = input.input?.includes("Show me code")
+          ? `Here is a snippet:
 
 \`\`\`javascript
 function greet(name) {
@@ -858,8 +976,20 @@ function greet(name) {
 greet("world");
 \`\`\`
 
-Hope that helps!`;
-    mockServer.addResponses(llmResponse);
+Hope that helps!`
+          : "Just **bold** and _italic_ text, no code.";
+        return {
+          response: [{ type: "markdown", text: responseText }],
+          messages: input.messages ?? [],
+          usage: ZERO_USAGE,
+        };
+      },
+    });
+    await seedChat(testDb, chatId, { enabled: true });
+    await updateChatConfig(chatId, (current) => ({ ...current, harness: harnessName }));
+  });
+
+  it("provider markdown with code block produces [text, image, text] on socket", async () => {
 
     const { sock, getSentMessages } = createMockBaileysSocket();
 
@@ -916,9 +1046,7 @@ Hope that helps!`;
     );
   });
 
-  it("LLM markdown without code block sends only text (no images)", async () => {
-    mockServer.addResponses("Just **bold** and _italic_ text, no code.");
-
+  it("provider markdown without code block sends only text (no images)", async () => {
     const { sock, getSentMessages } = createMockBaileysSocket();
 
     await adaptIncomingMessage(

@@ -1,12 +1,10 @@
 import { resolveHarness, resolveHarnessName } from "#harnesses";
-import { createAppRunner } from "./conversation/app-runner.js";
-import { getActions, getAction, getChatAction, executeAction } from "./actions.js";
 import { createSilentActionContext } from "./execute-action-context.js";
 import { resolveChatModel } from "./model-roles.js";
 import { getChatDb } from "./db.js";
 import { createLogger } from "./logger.js";
 import { getChatWorkDir } from "./utils.js";
-import { createToolRuntime } from "./conversation/create-tool-runtime.js";
+import { createNoAgentToolRuntime } from "./agent-tools/no-agent-tool-runtime.js";
 import { ensureChatStoreSchema } from "./store/schema/chat.js";
 
 const log = createLogger("agent-runner");
@@ -58,12 +56,6 @@ export async function runAgent(options) {
   // Resolve model: role name or literal model ID
   const chatModel = resolveChatModel(agent);
 
-  // Filter available actions by whitelist
-  const allActions = await getActions();
-  const actions = agent.allowedActions
-    ? allActions.filter(a => agent.allowedActions?.includes(a.name))
-    : allActions;
-
   // In-memory message storage for sub-agent runs
   /** @type {Message[]} */
   const storedMessages = [];
@@ -103,13 +95,6 @@ export async function runAgent(options) {
   // Build a minimal context for action execution (sub-agents don't do WhatsApp I/O)
   const context = createSilentActionContext(chatId, senderIds);
 
-  /** @type {(name: string) => Promise<AppAction | null>} */
-  const actionResolver = async (name) => {
-    const chatAction = await getChatAction(chatId, name);
-    if (chatAction) return chatAction;
-    return getAction(name);
-  };
-
   /** @type {Session} */
   const session = { chatId, senderIds, context, addMessage, updateToolMessage };
 
@@ -118,21 +103,17 @@ export async function runAgent(options) {
     llmClient,
     chatModel,
     externalInstructions: agent.systemPrompt,
-    toolRuntime: createToolRuntime({
-      tools: actions,
-      resolveTool: actionResolver,
-      executeActionFn: executeAction,
-      llmClient,
-    }),
+    toolRuntime: createNoAgentToolRuntime(),
   };
 
   /** @type {MediaRegistry} */
   const mediaRegistry = new Map();
 
   const harnessName = resolveHarnessName(agent, null);
-  const harness = harnessName ? resolveHarness(harnessName) : createAppRunner();
-
-  const result = await harness.run({
+  if (!harnessName) {
+    throw new Error(`Agent "${agent.name}" must select an ACP harness.`);
+  }
+  const appTurn = {
     session,
     llmConfig,
     messages,
@@ -143,7 +124,8 @@ export async function runAgent(options) {
     runConfig: {
       workdir: getChatWorkDir(session.chatId),
     },
-  });
+  };
+  const result = await resolveHarness(harnessName).run(appTurn);
 
   // Persist the run to agent_runs table
   if (parentToolCallId) {

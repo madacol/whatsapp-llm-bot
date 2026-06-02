@@ -401,7 +401,6 @@ export function normalizeChatRow(raw) {
     model_roles: normalizeStringRecord(raw.model_roles),
     memory: raw.memory === true,
     memory_threshold: typeof raw.memory_threshold === "number" ? raw.memory_threshold : null,
-    enabled_actions: normalizeStringArray(raw.enabled_actions),
     active_persona: typeof raw.active_persona === "string" ? raw.active_persona : null,
     harness: typeof raw.harness === "string" ? raw.harness : null,
     harness_cwd: typeof raw.harness_cwd === "string" ? raw.harness_cwd : null,

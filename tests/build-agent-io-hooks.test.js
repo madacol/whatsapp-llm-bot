@@ -1,8 +1,8 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { buildAgentIoHooks } from "../conversation/build-agent-io-hooks.js";
+import { MAX_AUTO_PRESENTED_SNAPSHOT_FILE_CHANGES, buildAgentIoHooks } from "../conversation/build-agent-io-hooks.js";
 import { DEFAULT_OUTPUT_VISIBILITY } from "../chat-output-visibility.js";
-import { buildToolPresentation } from "../tool-presentation-model.js";
+import { buildToolPresentation } from "../whatsapp/tool-presentation-model.js";
 
 const VISIBLE_TOOL_OUTPUT = {
   ...DEFAULT_OUTPUT_VISIBILITY,
@@ -31,57 +31,10 @@ function createSubject(visibility = DEFAULT_OUTPUT_VISIBILITY) {
       select: async () => "",
       confirm: async () => true,
     },
-    async () => {},
-    async () => {},
-    () => {},
     null,
     visibility,
   );
   return { hooks, sent };
-}
-
-/**
- * @returns {{
- *   hooks: AgentIOHooks,
- *   sent: Array<{ event: OutboundEvent, kind: "send" | "reply" }>,
- *   presenceEvents: string[],
- * }}
- */
-function createSubjectWithWorkingSpy(visibility = DEFAULT_OUTPUT_VISIBILITY) {
-  /** @type {Array<{ event: OutboundEvent, kind: "send" | "reply" }>} */
-  const sent = [];
-  /** @type {string[]} */
-  const presenceEvents = [];
-  const hooks = buildAgentIoHooks(
-    {
-      send: async (event) => {
-        sent.push({ event, kind: "send" });
-        return undefined;
-      },
-      reply: async (event) => {
-        sent.push({ event, kind: "reply" });
-        return undefined;
-      },
-      select: async () => "",
-      confirm: async () => true,
-    },
-    async () => {
-      presenceEvents.push("keepAlive");
-    },
-    async () => {
-      presenceEvents.push("end");
-    },
-    () => {
-      presenceEvents.push("refresh");
-    },
-    null,
-    visibility,
-  );
-  return {
-    hooks,
-    sent,
-    presenceEvents,
-  };
 }
 
 /**
@@ -107,9 +60,6 @@ function createSubjectWithCwd(cwd, visibility = DEFAULT_OUTPUT_VISIBILITY) {
       select: async () => "",
       confirm: async () => true,
     },
-    async () => {},
-    async () => {},
-    () => {},
     cwd,
     visibility,
   );
@@ -154,9 +104,6 @@ function createReasoningSubject(visibility = { ...DEFAULT_OUTPUT_VISIBILITY, thi
       select: async () => "",
       confirm: async () => true,
     },
-    async () => {},
-    async () => {},
-    () => {},
     null,
     visibility,
   );
@@ -174,7 +121,94 @@ function assertSingleSentEvent(sent, messageKind, eventKind) {
   assert.equal(sent[0]?.event.kind, eventKind);
 }
 
+/**
+ * @param {AgentIOHooks} hooks
+ * @param {string} command
+ * @param {"started" | "completed" | "failed"} status
+ * @param {string} [output]
+ * @returns {Promise<void>}
+ */
+async function emitRuntimeCommand(hooks, command, status, output) {
+  await hooks.onRuntimeEvent?.({
+    type: `command.${status}`,
+    provider: "codex",
+    command: {
+      command,
+      status,
+      ...(output !== undefined && { output }),
+    },
+  });
+}
+
+/**
+ * @param {AgentIOHooks} hooks
+ * @param {string} command
+ * @param {string[]} paths
+ * @returns {Promise<void>}
+ */
+async function emitRuntimeFileRead(hooks, command, paths) {
+  await hooks.onRuntimeEvent?.({
+    type: "file-read.started",
+    provider: "codex",
+    fileRead: { command, paths },
+  });
+}
+
 describe("buildAgentIoHooks", () => {
+  it("forwards generic runtime events as semantic outbound events", async () => {
+    const { hooks, sent } = createSubject(VISIBLE_TOOL_OUTPUT);
+
+    const notification = /** @type {import("../harnesses/harness-runtime-events.js").HarnessRuntimeEvent} */ ({
+      type: "extension.notification",
+      provider: "acp",
+      method: "madabot/example",
+      payload: { ok: true },
+    });
+    const warning = /** @type {import("../harnesses/harness-runtime-events.js").HarnessRuntimeEvent} */ ({
+      type: "runtime.warning",
+      provider: "acp",
+      message: "provider warning",
+    });
+
+    await hooks.onRuntimeEvent?.(notification);
+    await hooks.onRuntimeEvent?.(warning);
+
+    assert.deepEqual(sent, [
+      {
+        kind: "send",
+        event: {
+          kind: "runtime_event",
+          event: notification,
+        },
+      },
+      {
+        kind: "send",
+        event: {
+          kind: "runtime_event",
+          event: warning,
+        },
+      },
+    ]);
+  });
+
+  it("does not format generic runtime events before the transport", async () => {
+    const { hooks, sent } = createSubject(VISIBLE_TOOL_OUTPUT);
+
+    await hooks.onRuntimeEvent?.({
+      type: "extension.notification",
+      provider: "acp",
+      method: "madabot/example",
+      payload: { ok: true },
+    });
+    await hooks.onRuntimeEvent?.({
+      type: "runtime.warning",
+      provider: "acp",
+      message: "provider warning",
+    });
+
+    assert.equal(sent.every((entry) => entry.event.kind === "runtime_event"), true);
+  });
+
   it("maps plan events to an llm reply", async () => {
     const { hooks, sent } = createSubject();
     await hooks.onPlan?.(buildToolPresentation("update_plan", {
@@ -224,6 +258,54 @@ describe("buildAgentIoHooks", () => {
     });
 
     assert.equal(sent.length, 0);
+  });
+
+  it("does not send partial assistant stream chunks", async () => {
+    /** @type {Array<{ event: OutboundEvent, kind: "send" | "reply" }>} */
+    const sent = [];
+    const hooks = buildAgentIoHooks(
+      {
+        send: async (event) => {
+          sent.push({ event, kind: "send" });
+          return {
+            transportHandleId: "runtime-command-stream",
+            update: async () => {},
+            setInspect: () => {},
+          };
+        },
+        reply: async (event) => {
+          sent.push({ event, kind: "reply" });
+          return undefined;
+        },
+        select: async () => "",
+        confirm: async () => true,
+      },
+      "/repo",
+      { ...DEFAULT_OUTPUT_VISIBILITY, toolDetails: false },
+    );
+
+    await emitRuntimeCommand(hooks, "pnpm test", "started");
+    await hooks.onLlmResponse?.("async-gap fix", {
+      source: "llm",
+      streamId: "assistant-1",
+      streamStatus: "partial",
+    });
+    await emitRuntimeCommand(hooks, "pnpm test", "completed", "ok");
+    await hooks.onLlmResponse?.("async-gap fix complete", {
+      source: "llm",
+      streamId: "assistant-1",
+      streamStatus: "final",
+    });
+
+    assert.deepEqual(sent.map((entry) => entry.kind), ["send", "send", "reply"]);
+    assert.deepEqual(sent.map((entry) => entry.event.kind), [
+      "runtime_event",
+      "runtime_event",
+      "content",
+    ]);
+    assert.equal(sent[0]?.event.kind === "runtime_event" ? sent[0].event.event.type : "", "command.started");
+    assert.equal(sent[1]?.event.kind === "runtime_event" ? sent[1].event.event.type : "", "command.completed");
+    assert.equal(sent[2]?.event.kind === "content" ? sent[2].event.source : "", "llm");
   });
 
   it("sends one thinking placeholder and makes it inspectable", async () => {
@@ -293,179 +375,47 @@ describe("buildAgentIoHooks", () => {
     assert.deepEqual(subject.reasoningInspects, []);
   });
 
-  it("refreshes the presence lease for tool-result progress, but not for llm or tool-call display", async () => {
-    const subject = createSubjectWithWorkingSpy(VISIBLE_TOOL_OUTPUT);
-
-    await subject.hooks.onLlmResponse?.("Still working");
-    await subject.hooks.onToolCall?.({ id: "tool-1", name: "run_bash", arguments: "{\"command\":\"echo hi\"}" });
-    await subject.hooks.onToolResult?.([{ type: "text", text: "Intermediate tool output" }]);
-
-    assert.equal(subject.sent.length, 3);
-    assert.deepEqual(subject.presenceEvents, ["refresh"]);
-  });
-
-  it("does not wait for typing refreshes before returning", async () => {
-    /** @type {(() => void) | undefined} */
-    let resolveRestart;
-    const hooks = buildAgentIoHooks(
-      {
-        send: async () => undefined,
-        reply: async () => undefined,
-        select: async () => "",
-        confirm: async () => true,
-      },
-      async () => {},
-      async () => {},
-      () => new Promise((resolve) => {
-        resolveRestart = resolve;
-      }),
-      null,
-    );
-
-    let completed = false;
-    const pending = hooks.onToolResult?.([{ type: "text", text: "Still working" }]).then(() => {
-      completed = true;
-    });
-
-    await new Promise((resolve) => setTimeout(resolve, 0));
-
-    assert.equal(completed, true, "Hook should resolve before the background typing refresh completes");
-    resolveRestart?.();
-    await pending;
-  });
-
-  it("maps command start events to a tool-call message", async () => {
+  it("emits command starts as runtime events", async () => {
     const { hooks, sent } = createSubject(VISIBLE_TOOL_OUTPUT);
-    await hooks.onCommand?.({ command: "npm test", status: "started" });
+    await emitRuntimeCommand(hooks, "npm test", "started");
 
-    assertSingleSentEvent(sent, "send", "tool_call");
-  });
-
-  it("shows one debounced compact tool summary when visibility disables full tool details", async () => {
-    /** @type {Array<{ event: OutboundEvent, kind: "send" | "reply" }>} */
-    const sent = [];
-    /** @type {MessageHandleUpdate[]} */
-    const updates = [];
-    const hooks = buildAgentIoHooks(
-      {
-        send: async (event) => {
-          sent.push({ event, kind: "send" });
-          return {
-            transportHandleId: "compact-tools-1",
-            update: async (update) => { updates.push(update); },
-            setInspect: () => {},
-          };
-        },
-        reply: async () => undefined,
-        select: async () => "",
-        confirm: async () => true,
-      },
-      async () => {},
-      async () => {},
-      () => {},
-      "/repo",
-      { ...DEFAULT_OUTPUT_VISIBILITY, toolDetails: false },
-    );
-
-    await hooks.onFileRead?.({ command: "sed -n '1,20p' src/app.js", paths: ["src/app.js"] });
-    await hooks.onCommand?.({ command: "pnpm type-check", status: "started" });
-    await hooks.onToolCall?.({ id: "tool-1", name: "run_bash", arguments: "{\"command\":\"git diff\"}" });
-
-    assert.equal(sent.length, 1);
-    assert.equal(sent[0]?.event.kind, "content");
-    if (sent[0]?.event.kind !== "content") {
-      assert.fail("Expected compact content event");
+    assertSingleSentEvent(sent, "send", "runtime_event");
+    if (sent[0].event.kind !== "runtime_event") {
+      assert.fail("Expected runtime_event");
     }
-    assert.equal(sent[0].event.source, "plain");
-    assert.equal(sent[0].event.content, "🔧 *Read*  `src/app.js`");
-
-    assert.equal(updates.length, 0, "expected debounce to defer compact edits");
-    await new Promise((resolve) => setTimeout(resolve, 1100));
-
-    assert.deepEqual(updates, [{
-      kind: "text",
-      text: "🔧 *Read*  `src/app.js`\n🔧 *Shell*  `pnpm type-check`\n🔧 *Shell*  `git diff`",
-    }]);
-  });
-
-  it("omits read command output from compact file-read inspect state", async () => {
-    /** @type {MessageInspectState[]} */
-    const inspects = [];
-    const hooks = buildAgentIoHooks(
-      {
-        send: async () => ({
-          transportHandleId: "compact-read-output",
-          update: async () => {},
-          setInspect: (inspect) => { if (inspect) inspects.push(inspect); },
-        }),
-        reply: async () => undefined,
-        select: async () => "",
-        confirm: async () => true,
-      },
-      async () => {},
-      async () => {},
-      () => {},
-      "/repo",
-      { ...DEFAULT_OUTPUT_VISIBILITY, toolDetails: false },
-    );
-
-    const command = "sed -n '1,20p' src/app.js";
-    await hooks.onFileRead?.({ command, paths: ["src/app.js"] });
-    await hooks.onCommand?.({
-      command,
-      status: "completed",
-      output: "  1→ const value = 1;\n  2→ const value = 2;",
+    assert.equal(sent[0].event.event.type, "command.started");
+    assert.equal(sent[0].event.event.provider, "codex");
+    assert.deepEqual(sent[0].event.event.command, {
+      command: "npm test",
+      status: "started",
     });
-
-    const inspect = inspects.at(-1);
-    assert.ok(inspect && inspect.kind === "text");
-    assert.equal(
-      inspect?.kind === "text" ? inspect.text : "",
-      "✅ *Read*  `src/app.js`",
-    );
   });
 
-  it("shows full multiline bash commands in compact tool summaries", async () => {
-    const { hooks, sent } = createSubjectWithCwd("/repo", {
-      ...DEFAULT_OUTPUT_VISIBILITY,
-      toolDetails: false,
-    });
+  it("passes command and file-read runtime events without transport presentation flags", async () => {
+    const { hooks, sent } = createSubjectWithCwd("/repo", { ...DEFAULT_OUTPUT_VISIBILITY, toolDetails: false });
 
-    const command = "python3 - <<'PY'\nprint('hello')\nPY";
-    await hooks.onCommand?.({ command, status: "started" });
+    await emitRuntimeFileRead(hooks, "sed -n '1,20p' src/app.js", ["src/app.js"]);
+    await emitRuntimeCommand(hooks, "pnpm type-check", "started");
 
-    assert.equal(sent.length, 1);
-    assert.equal(sent[0]?.event.kind, "content");
-    if (sent[0]?.event.kind !== "content") {
-      assert.fail("Expected compact content event");
-    }
-    assert.equal(
-      sent[0].event.content,
-      "🔧 *Shell*\n```\npython3 - <<'PY'\nprint('hello')\nPY\n```",
-    );
+    assert.deepEqual(sent.map((entry) => entry.event.kind), ["runtime_event", "runtime_event"]);
+    assert.equal(sent[0]?.event.kind === "runtime_event" ? sent[0].event.event.type : "", "file-read.started");
+    assert.equal(sent[1]?.event.kind === "runtime_event" ? sent[1].event.event.type : "", "command.started");
+    assert.equal("compact" in sent[0].event, false);
+    assert.equal("compact" in sent[1].event, false);
   });
 
-  it("edits compact tool summaries when a tool completes", async () => {
-    /** @type {MessageHandleUpdate[]} */
-    const updates = [];
-    const hooks = buildAgentIoHooks(
-      {
-        send: async () => ({
-          transportHandleId: "compact-tools-complete",
-          update: async (update) => { updates.push(update); },
-          setInspect: () => {},
-        }),
-        reply: async () => undefined,
-        select: async () => "",
-        confirm: async () => true,
-      },
-      async () => {},
-      async () => {},
-      () => {},
-      "/repo",
-      { ...DEFAULT_OUTPUT_VISIBILITY, toolDetails: false },
-    );
+  it("suppresses no-op ACP editing-files placeholder tool calls", async () => {
+    const { hooks, sent } = createSubject({ ...DEFAULT_OUTPUT_VISIBILITY, toolDetails: false });
 
+    const toolCall = { id: "acp-editing-files", name: "Editing files", arguments: "{}" };
+    await hooks.onToolCall?.(toolCall);
+    await hooks.onToolComplete?.(toolCall);
+
+    assert.deepEqual(sent, []);
+  });
+
+  it("emits direct tool lifecycle as raw runtime events", async () => {
+    const { hooks, sent } = createSubjectWithCwd("/repo", { ...DEFAULT_OUTPUT_VISIBILITY, toolDetails: false });
     const toolCall = {
       id: "tool-complete-1",
       name: "spawn_agent",
@@ -474,13 +424,37 @@ describe("buildAgentIoHooks", () => {
     await hooks.onToolCall?.(toolCall);
     await hooks.onToolComplete?.(toolCall);
 
-    assert.deepEqual(updates.at(-1), {
-      kind: "text",
-      text: "✅ *Start Agent*  _hello_",
+    assert.equal(sent.length, 2);
+    assert.equal(sent[0]?.event.kind, "runtime_event");
+    assert.deepEqual(sent[0]?.event, {
+      kind: "runtime_event",
+      cwd: "/repo",
+      event: {
+        type: "tool.started",
+        provider: "codex",
+        tool: {
+          id: "tool-complete-1",
+          name: "spawn_agent",
+          arguments: { message: "hello" },
+        },
+      },
+    });
+    assert.deepEqual(sent[1]?.event, {
+      kind: "runtime_event",
+      cwd: "/repo",
+      event: {
+        type: "tool.completed",
+        provider: "codex",
+        tool: {
+          id: "tool-complete-1",
+          name: "spawn_agent",
+          arguments: { message: "hello" },
+        },
+      },
     });
   });
 
-  it("renders edit diffs even when generic tool progress is compacted", async () => {
+  it("renders edit diffs even when generic tool progress is hidden", async () => {
     const { hooks, sent } = createSubjectWithCwd("/repo", {
       ...DEFAULT_OUTPUT_VISIBILITY,
       toolDetails: false,
@@ -500,182 +474,82 @@ describe("buildAgentIoHooks", () => {
     assert.equal(sent.length, 1);
     assert.equal(sent[0]?.event.kind, "tool_call");
     if (sent[0]?.event.kind !== "tool_call") {
-      assert.fail("Expected edit tool call to bypass compact text");
+      assert.fail("Expected edit tool call to bypass runtime tool progress");
     }
-    assert.equal(sent[0].event.presentation.kind, "file");
-    assert.equal(sent[0].event.presentation.toolName, "Edit");
-  });
-
-  it("keeps only the last 3 compact tool entries when visibility disables full tool details", async () => {
-    /** @type {MessageHandleUpdate[]} */
-    const updates = [];
-    const hooks = buildAgentIoHooks(
-      {
-        send: async () => ({
-          transportHandleId: "compact-tools-2",
-          update: async (update) => { updates.push(update); },
-          setInspect: () => {},
-        }),
-        reply: async () => undefined,
-        select: async () => "",
-        confirm: async () => true,
-      },
-      async () => {},
-      async () => {},
-      () => {},
-      "/repo",
-      { ...DEFAULT_OUTPUT_VISIBILITY, toolDetails: false },
-    );
-
-    await hooks.onCommand?.({ command: "pwd", status: "started" });
-    await hooks.onCommand?.({ command: "pnpm type-check", status: "started" });
-    await hooks.onFileRead?.({ command: "sed -n '1,20p' src/app.js", paths: ["src/app.js"] });
-    await hooks.onToolCall?.({ id: "tool-2", name: "run_bash", arguments: "{\"command\":\"git diff\"}" });
-
-    await new Promise((resolve) => setTimeout(resolve, 1100));
-
-    assert.deepEqual(updates[updates.length - 1], {
-      kind: "text",
-      text: "... +1 earlier tools\n🔧 *Shell*  `pnpm type-check`\n🔧 *Read*  `src/app.js`\n🔧 *Shell*  `git diff`",
+    assert.deepEqual(sent[0].event.toolCall, {
+      id: "edit-1",
+      name: "Edit",
+      arguments: JSON.stringify({
+        file_path: "/repo/package.json",
+        old_string: "\"version\": \"1.0.0\"",
+        new_string: "\"version\": \"1.0.1\"",
+      }),
     });
+    assert.equal(sent[0].event.cwd, "/repo");
   });
 
-  it("marks the existing compact command line as failed instead of sending a new error message", async () => {
-    /** @type {Array<{ event: OutboundEvent, kind: "send" | "reply" }>} */
-    const sent = [];
-    /** @type {MessageHandleUpdate[]} */
-    const updates = [];
-    const hooks = buildAgentIoHooks(
-      {
-        send: async (event) => {
-          sent.push({ event, kind: "send" });
-          return {
-            transportHandleId: "compact-tools-failed-command",
-            update: async (update) => { updates.push(structuredClone(update)); },
-            setInspect: () => {},
-          };
-        },
-        reply: async () => undefined,
-        select: async () => "",
-        confirm: async () => true,
-      },
-      async () => {},
-      async () => {},
-      () => {},
-      "/repo",
-      { ...DEFAULT_OUTPUT_VISIBILITY, toolDetails: false },
-    );
+  it("passes command failures as raw runtime events instead of sending a separate error message", async () => {
+    const { hooks, sent } = createSubjectWithCwd("/repo", { ...DEFAULT_OUTPUT_VISIBILITY, toolDetails: false });
 
-    await hooks.onCommand?.({ command: "pnpm test", status: "started" });
-    await hooks.onCommand?.({ command: "pnpm test", status: "failed", output: "boom" });
+    await emitRuntimeCommand(hooks, "pnpm test", "started");
+    await emitRuntimeCommand(hooks, "pnpm test", "failed", "boom");
 
-    assert.equal(sent.length, 1);
-    assert.equal(sent[0]?.event.kind, "content");
-    assert.deepEqual(updates, [{
-      kind: "text",
-      text: "❌ *Shell*  `pnpm test`",
-    }]);
+    assert.deepEqual(sent.map((entry) => entry.event.kind), ["runtime_event", "runtime_event"]);
+    assert.equal(sent[1]?.event.kind === "runtime_event" ? sent[1].event.event.type : "", "command.failed");
   });
 
-  it("starts a new compact tool message after an llm reply", async () => {
-    /** @type {Array<{ event: OutboundEvent, kind: "send" | "reply" }>} */
-    const sent = [];
-    /** @type {MessageHandleUpdate[][]} */
-    const handleUpdates = [];
-    const hooks = buildAgentIoHooks(
-      {
-        send: async (event) => {
-          sent.push({ event, kind: "send" });
-          const updates = [];
-          handleUpdates.push(updates);
-          return {
-            transportHandleId: `compact-tools-${handleUpdates.length}`,
-            update: async (update) => { updates.push(structuredClone(update)); },
-            setInspect: () => {},
-          };
-        },
-        reply: async (event) => {
-          sent.push({ event, kind: "reply" });
-          return undefined;
-        },
-        select: async () => "",
-        confirm: async () => true,
-      },
-      async () => {},
-      async () => {},
-      () => {},
-      "/repo",
-      { ...DEFAULT_OUTPUT_VISIBILITY, toolDetails: false },
-    );
-
-    await hooks.onCommand?.({ command: "pwd", status: "started" });
-    await hooks.onCommand?.({ command: "pnpm type-check", status: "started" });
+  it("passes runtime progress without inserting transport close events", async () => {
+    const { hooks, sent } = createSubjectWithCwd("/repo", { ...DEFAULT_OUTPUT_VISIBILITY, toolDetails: false });
+    await emitRuntimeCommand(hooks, "pwd", "started");
+    await emitRuntimeCommand(hooks, "pnpm type-check", "started");
     await hooks.onLlmResponse?.("Done");
-    await hooks.onToolCall?.({ id: "tool-3", name: "run_bash", arguments: "{\"command\":\"git diff\"}" });
+    await emitRuntimeCommand(hooks, "git diff", "started");
 
-    assert.equal(sent.length, 3);
-    assert.equal(sent[0]?.event.kind, "content");
-    assert.equal(sent[1]?.kind, "reply");
-    assert.equal(sent[2]?.event.kind, "content");
-    if (sent[2]?.event.kind !== "content") {
-      assert.fail("Expected a new compact content event after llm reply");
-    }
-    assert.equal(sent[2].event.source, "plain");
-    assert.equal(sent[2].event.content, "🔧 *Shell*  `git diff`");
-    assert.deepEqual(handleUpdates[0], [{
-      kind: "text",
-      text: "🔧 *Shell*  `pwd`\n🔧 *Shell*  `pnpm type-check`",
-    }]);
-    assert.deepEqual(handleUpdates[1], []);
+    await emitRuntimeCommand(hooks, "pwd", "started");
+    await emitRuntimeCommand(hooks, "git diff", "started");
+    await hooks.onFileChange?.({ path: "/repo/src/app.js", summary: "Updated file" });
+    await emitRuntimeCommand(hooks, "ls", "started");
+
+    assert.deepEqual(sent.map((entry) => entry.event.kind), [
+      "runtime_event",
+      "runtime_event",
+      "content",
+      "runtime_event",
+      "runtime_event",
+      "runtime_event",
+      "runtime_event",
+      "runtime_event",
+    ]);
+    assert.equal(sent.some((entry) => entry.event.kind === "compact_tool_activity"), false);
   });
 
-  it("starts a new compact tool message after a file change message", async () => {
-    /** @type {Array<{ event: OutboundEvent, kind: "send" | "reply" }>} */
-    const sent = [];
-    /** @type {MessageHandleUpdate[][]} */
-    const handleUpdates = [];
-    const hooks = buildAgentIoHooks(
-      {
-        send: async (event) => {
-          sent.push({ event, kind: "send" });
-          const updates = [];
-          handleUpdates.push(updates);
-          return {
-            transportHandleId: `compact-tools-${handleUpdates.length}`,
-            update: async (update) => { updates.push(structuredClone(update)); },
-            setInspect: () => {},
-          };
-        },
-        reply: async () => undefined,
-        select: async () => "",
-        confirm: async () => true,
-      },
-      async () => {},
-      async () => {},
-      () => {},
-      "/repo",
-      { ...DEFAULT_OUTPUT_VISIBILITY, toolDetails: false },
-    );
+  it("keeps runtime progress and non-tool events separate without transport grouping", async () => {
+    const { hooks, sent } = createSubjectWithCwd("/repo", { ...DEFAULT_OUTPUT_VISIBILITY, toolDetails: false });
 
-    await hooks.onCommand?.({ command: "pwd", status: "started" });
-    await hooks.onToolCall?.({ id: "tool-4", name: "run_bash", arguments: "{\"command\":\"git diff\"}" });
-    await hooks.onFileChange?.({ path: "/repo/src/app.js", summary: "Updated file" });
-    await hooks.onCommand?.({ command: "ls", status: "started" });
+    await emitRuntimeCommand(hooks, "pwd", "started");
+    await hooks.onPlan?.(buildToolPresentation("update_plan", {
+      plan: [{ step: "Inspect output", status: "in_progress" }],
+    }));
+    await emitRuntimeCommand(hooks, "pnpm test", "started");
+    await hooks.onUsage?.("0.000000", { prompt: 1, completion: 1, cached: 0 });
+    await emitRuntimeCommand(hooks, "git diff", "started");
+    await hooks.onRuntimeEvent?.({
+      type: "runtime.warning",
+      provider: "acp",
+      message: "provider warning",
+    });
+    await emitRuntimeCommand(hooks, "ls", "started");
 
-    assert.equal(sent.length, 3);
-    assert.equal(sent[0]?.event.kind, "content");
-    assert.equal(sent[1]?.event.kind, "file_change");
-    assert.equal(sent[2]?.event.kind, "content");
-    if (sent[2]?.event.kind !== "content") {
-      assert.fail("Expected a new compact content event after file change");
-    }
-    assert.equal(sent[2].event.source, "plain");
-    assert.equal(sent[2].event.content, "🔧 *Shell*  `ls`");
-    assert.deepEqual(handleUpdates[0], [{
-      kind: "text",
-      text: "🔧 *Shell*  `pwd`\n🔧 *Shell*  `git diff`",
-    }]);
-    assert.deepEqual(handleUpdates[2], []);
+    assert.deepEqual(sent.map((entry) => entry.event.kind), [
+      "runtime_event",
+      "plan",
+      "runtime_event",
+      "usage",
+      "runtime_event",
+      "runtime_event",
+      "runtime_event",
+    ]);
+    assert.equal(sent.some((entry) => entry.event.kind === "compact_tool_activity"), false);
   });
 
   it("suppresses tool result progress events when visibility disables full tool details", async () => {
@@ -694,30 +568,30 @@ describe("buildAgentIoHooks", () => {
     assert.equal(sent.length, 0);
   });
 
-  it("renders shell commands as bash summaries", async () => {
+  it("passes command text to WhatsApp without Shell presentation", async () => {
     const { hooks, sent } = createSubjectWithCwd("/repo", VISIBLE_TOOL_OUTPUT);
-    await hooks.onCommand?.({ command: "rg -n \"needle\" src", status: "started" });
+    await emitRuntimeCommand(hooks, "rg -n \"needle\" src", "started");
 
     assert.equal(sent.length, 1);
-    assert.equal(sent[0].event.kind, "tool_call");
-    if (sent[0].event.kind !== "tool_call") {
-      assert.fail("Expected tool_call event");
+    assert.equal(sent[0].event.kind, "runtime_event");
+    if (sent[0].event.kind !== "runtime_event") {
+      assert.fail("Expected runtime_event");
     }
-    assert.equal(sent[0].event.presentation.summary, "*Bash*  `rg -n \"needle\" src`");
-    assert.equal(sent[0].event.presentation.kind, "bash");
-    assert.equal(sent[0].event.presentation.command, "rg -n \"needle\" src");
+    assert.equal(sent[0].event.event.type, "command.started");
+    assert.equal(sent[0].event.event.command.command, "rg -n \"needle\" src");
   });
 
-  it("does not send a separate success message for completed commands", async () => {
+  it("emits command completion through the runtime boundary", async () => {
     const { hooks, sent } = createSubject(VISIBLE_TOOL_OUTPUT);
-    await hooks.onCommand?.({ command: "pwd", status: "started" });
-    await hooks.onCommand?.({ command: "pwd", status: "completed", output: "/repo\n" });
+    await emitRuntimeCommand(hooks, "pwd", "started");
+    await emitRuntimeCommand(hooks, "pwd", "completed", "/repo\n");
 
-    assert.equal(sent.length, 1);
-    assert.equal(sent[0].event.kind, "tool_call");
+    assert.deepEqual(sent.map((entry) => entry.event.kind), ["runtime_event", "runtime_event"]);
+    assert.equal(sent[1]?.event.kind === "runtime_event" ? sent[1].event.event.type : "", "command.completed");
+    assert.equal(sent[1]?.event.kind === "runtime_event" && "command" in sent[1].event.event ? sent[1].event.event.command.output : "", "/repo\n");
   });
 
-  it("updates the existing tool-call message when a visible command fails", async () => {
+  it("emits command failures through the runtime boundary", async () => {
     /** @type {Array<{ event: OutboundEvent, kind: "send" | "reply" }>} */
     const sent = [];
     /** @type {MessageHandleUpdate[]} */
@@ -742,50 +616,58 @@ describe("buildAgentIoHooks", () => {
         select: async () => "",
         confirm: async () => true,
       },
-      async () => {},
-      async () => {},
-      () => {},
       "/repo",
       VISIBLE_TOOL_OUTPUT,
     );
 
-    await hooks.onCommand?.({ command: "pnpm test", status: "started" });
-    await hooks.onCommand?.({ command: "pnpm test", status: "failed", output: "boom" });
+    await emitRuntimeCommand(hooks, "pnpm test", "started");
+    await emitRuntimeCommand(hooks, "pnpm test", "failed", "boom");
 
-    assert.equal(sent.length, 1);
-    assert.deepEqual(updates, [{
-      kind: "text",
-      text: "❌ *Bash*  `pnpm test`",
-    }]);
-    assert.equal(inspects.length, 1);
-    const inspect = inspects[0];
-    assert.ok(inspect && inspect.kind === "tool");
-    if (!inspect || inspect.kind !== "tool") {
-      assert.fail("Expected tool inspect state");
+    assert.deepEqual(sent.map((entry) => entry.event.kind), ["runtime_event", "runtime_event"]);
+    assert.equal(sent[1]?.event.kind === "runtime_event" ? sent[1].event.event.type : "", "command.failed");
+    if (sent[1]?.event.kind !== "runtime_event" || !("command" in sent[1].event.event)) {
+      assert.fail("Expected command runtime event");
     }
-    assert.equal(inspect.presentation.summary, "*Bash*  `pnpm test`");
-    assert.equal(inspect.output, "boom");
+    assert.deepEqual(sent[1].event.event.command, {
+      command: "pnpm test",
+      status: "failed",
+      output: "boom",
+    });
+    assert.deepEqual(updates, []);
+    assert.deepEqual(inspects, []);
   });
 
-  it("maps file changes to a tool-result message", async () => {
+  it("emits file changes as runtime events", async () => {
     const { hooks, sent } = createSubject();
     await hooks.onFileChange?.({ path: "/tmp/file.js", summary: "Updated file" });
 
-    assertSingleSentEvent(sent, "send", "file_change");
-  });
-
-  it("maps file reads to a tool-call message", async () => {
-    const { hooks, sent } = createSubject(VISIBLE_TOOL_OUTPUT);
-    await hooks.onFileRead?.({ command: "sed -n '1,20p' src/app.js", paths: ["src/app.js"] });
-
-    assertSingleSentEvent(sent, "send", "tool_call");
-    if (sent[0].event.kind !== "tool_call") {
-      assert.fail("Expected tool_call event");
+    assertSingleSentEvent(sent, "send", "runtime_event");
+    if (sent[0].event.kind !== "runtime_event") {
+      assert.fail("Expected runtime_event");
     }
-    assert.equal(sent[0].event.presentation.summary, "*Read*  `src/app.js`");
+    assert.equal(sent[0].event.event.type, "file-change.completed");
+    assert.equal(sent[0].event.event.provider, "codex");
+    assert.equal(sent[0].event.event.change.path, "/tmp/file.js");
+    assert.equal(sent[0].event.event.change.summary, "Updated file");
   });
 
-  it("renders file change diffs when present", async () => {
+  it("emits file reads as runtime events", async () => {
+    const { hooks, sent } = createSubject(VISIBLE_TOOL_OUTPUT);
+    await emitRuntimeFileRead(hooks, "sed -n '1,20p' src/app.js", ["src/app.js"]);
+
+    assertSingleSentEvent(sent, "send", "runtime_event");
+    if (sent[0].event.kind !== "runtime_event") {
+      assert.fail("Expected runtime_event");
+    }
+    assert.equal(sent[0].event.event.type, "file-read.started");
+    assert.equal(sent[0].event.event.provider, "codex");
+    assert.deepEqual(sent[0].event.event.fileRead, {
+      command: "sed -n '1,20p' src/app.js",
+      paths: ["src/app.js"],
+    });
+  });
+
+  it("passes file change diff facts through the runtime boundary", async () => {
     const { hooks, sent } = createSubject();
     await hooks.onFileChange?.({
       path: "/tmp/file.js",
@@ -795,16 +677,18 @@ describe("buildAgentIoHooks", () => {
       diff: ["--- a/file.js", "+++ b/file.js", "@@ -1 +1 @@", "-old", "+new"].join("\n"),
     });
 
-    assertSingleSentEvent(sent, "send", "file_change");
-    if (sent[0].event.kind !== "file_change") {
-      assert.fail("Expected file_change event");
+    assertSingleSentEvent(sent, "send", "runtime_event");
+    if (sent[0].event.kind !== "runtime_event") {
+      assert.fail("Expected runtime_event");
     }
-    assert.equal(sent[0].event.path, "/tmp/file.js");
-    assert.equal(sent[0].event.oldText, "const value = 1;\n");
-    assert.equal(sent[0].event.newText, "const value = 2;\n");
+    assert.equal(sent[0].event.event.type, "file-change.completed");
+    assert.equal(sent[0].event.event.change.path, "/tmp/file.js");
+    assert.equal(sent[0].event.event.change.oldText, "const value = 1;\n");
+    assert.equal(sent[0].event.event.change.newText, "const value = 2;\n");
+    assert.equal(sent[0].event.event.change.diff, ["--- a/file.js", "+++ b/file.js", "@@ -1 +1 @@", "-old", "+new"].join("\n"));
   });
 
-  it("shortens file change paths and drops redundant summaries", async () => {
+  it("leaves file change path and summary presentation to WhatsApp", async () => {
     const { hooks, sent } = createSubjectWithCwd("/repo");
     await hooks.onFileChange?.({
       path: "/repo/src/file.js",
@@ -816,15 +700,72 @@ describe("buildAgentIoHooks", () => {
     });
 
     assert.equal(sent.length, 1);
-    assert.equal(sent[0].event.kind, "file_change");
-    if (sent[0].event.kind !== "file_change") {
-      assert.fail("Expected file_change event");
+    assert.equal(sent[0].event.kind, "runtime_event");
+    if (sent[0].event.kind !== "runtime_event") {
+      assert.fail("Expected runtime_event");
     }
-    assert.equal(sent[0].event.changeKind, "add");
-    assert.equal(sent[0].event.cwd, "/repo");
+    assert.equal(sent[0].event.event.type, "file-change.completed");
+    assert.equal(sent[0].event.event.change.path, "/repo/src/file.js");
+    assert.equal(sent[0].event.event.change.kind, "add");
+    assert.equal(sent[0].event.event.change.summary, "/repo/src/file.js (add)");
+    assert.equal(sent[0].event.event.change.cwd, "/repo");
   });
 
-  it("attaches semantic inspect state for codex file reads", async () => {
+  it("asks in the WhatsApp hook before presenting large snapshot file-change batches", async () => {
+    /** @type {Array<{ question: string, options: string[] }>} */
+    const prompts = [];
+    /** @type {Array<OutboundEvent>} */
+    const sent = [];
+    const hooks = buildAgentIoHooks(
+      {
+        send: async (event) => {
+          sent.push(event);
+          return undefined;
+        },
+        reply: async () => undefined,
+        select: async (question, options) => {
+          prompts.push({ question, options });
+          return "❌ Skip";
+        },
+        confirm: async () => true,
+      },
+      "/repo",
+      DEFAULT_OUTPUT_VISIBILITY,
+    );
+    const events = Array.from({ length: MAX_AUTO_PRESENTED_SNAPSHOT_FILE_CHANGES + 1 }, (_entry, index) => ({
+      type: /** @type {const} */ ("file-change.completed"),
+      provider: "acp",
+      change: {
+        path: `/repo/generated-${index}.txt`,
+        kind: /** @type {const} */ ("add"),
+        source: /** @type {const} */ ("snapshot"),
+        newText: `generated ${index}\n`,
+      },
+      raw: { source: "workdir-snapshot" },
+    }));
+
+    for (const event of events) {
+      await hooks.onRuntimeEvent?.(event);
+    }
+    await hooks.onRuntimeEvent?.({
+      type: "runtime.warning",
+      provider: "acp",
+      message: "after snapshot batch",
+    });
+
+    assert.equal(prompts.length, 1);
+    assert.match(prompts[0]?.question ?? "", /Snapshot detected \*26\* unreported file changes/);
+    assert.match(prompts[0]?.question ?? "", /add generated-0\.txt/);
+    assert.deepEqual(prompts[0]?.options, ["✅ Continue", "❌ Skip"]);
+    const runtimeEvents = sent
+      .filter((event) => event.kind === "runtime_event")
+      .map((event) => event.event);
+    assert.equal(runtimeEvents.some((event) => event.type === "file-change.completed"), false);
+    assert.ok(runtimeEvents.some((event) => event.type === "runtime.warning"
+      && /Skipped 26 unreported snapshot file changes/.test(String(event.message ?? ""))));
+  });
+
+  it("passes file-read and command output through runtime events", async () => {
     /** @type {Array<{ inspects: MessageInspectState[], updates: MessageHandleUpdate[] }>} */
     const handles = [];
     const hooks = buildAgentIoHooks(
@@ -846,35 +787,23 @@ describe("buildAgentIoHooks", () => {
         select: async () => "",
         confirm: async () => true,
       },
-      async () => {},
-      async () => {},
-      () => {},
       null,
       VISIBLE_TOOL_OUTPUT,
     );
 
-    await hooks.onFileRead?.({
-      command: "sed -n '1,20p' src/app.js",
-      paths: ["src/app.js"],
-    });
-    await hooks.onCommand?.({
-      command: "sed -n '1,20p' src/app.js",
-      status: "completed",
-      output: "  1→ const value = 1;\n  2→ const value = 2;",
-    });
+    await emitRuntimeFileRead(hooks, "sed -n '1,20p' src/app.js", ["src/app.js"]);
+    await emitRuntimeCommand(
+      hooks,
+      "sed -n '1,20p' src/app.js",
+      "completed",
+      "  1→ const value = 1;\n  2→ const value = 2;",
+    );
 
-    assert.equal(handles.length, 1);
-    assert.equal(handles[0]?.inspects.length, 1);
-    const inspect = handles[0]?.inspects[0];
-    assert.ok(inspect && inspect.kind === "tool");
-    if (!inspect || inspect.kind !== "tool") {
-      assert.fail("Expected tool inspect state");
-    }
-    assert.equal(inspect.presentation.summary, "*Read*  `src/app.js`");
-    assert.equal(inspect.output, "  1→ const value = 1;\n  2→ const value = 2;");
+    assert.equal(handles.length, 2);
+    assert.deepEqual(handles.map((entry) => entry.inspects.length), [0, 0]);
   });
 
-  it("stores search command inspect state without formatting it outside the adapter", async () => {
+  it("passes search command output through runtime events", async () => {
     /** @type {Array<{ inspects: MessageInspectState[] }>} */
     const handles = [];
     const hooks = buildAgentIoHooks(
@@ -895,34 +824,18 @@ describe("buildAgentIoHooks", () => {
         select: async () => "",
         confirm: async () => true,
       },
-      async () => {},
-      async () => {},
-      () => {},
       "/repo",
       VISIBLE_TOOL_OUTPUT,
     );
 
-    await hooks.onCommand?.({
-      command: "rg -n \"needle\" src",
-      status: "started",
-    });
-    await hooks.onCommand?.({
-      command: "rg -n \"needle\" src",
-      status: "completed",
-      output: "src/app.js:12:needle",
-    });
+    await emitRuntimeCommand(hooks, "rg -n \"needle\" src", "started");
+    await emitRuntimeCommand(hooks, "rg -n \"needle\" src", "completed", "src/app.js:12:needle");
 
-    assert.equal(handles.length, 1);
-    const inspect = handles[0]?.inspects[0];
-    assert.ok(inspect && inspect.kind === "tool");
-    if (!inspect || inspect.kind !== "tool") {
-      assert.fail("Expected tool inspect state");
-    }
-    assert.equal(inspect.presentation.summary, "*Bash*  `rg -n \"needle\" src`");
-    assert.equal(inspect.output, "src/app.js:12:needle");
+    assert.equal(handles.length, 2);
+    assert.deepEqual(handles.map((entry) => entry.inspects.length), [0, 0]);
   });
 
-  it("keeps bash inspect state available for commands with no output", async () => {
+  it("passes commands with no output through runtime events", async () => {
     /** @type {Array<{ inspects: MessageInspectState[] }>} */
     const handles = [];
     const hooks = buildAgentIoHooks(
@@ -943,29 +856,14 @@ describe("buildAgentIoHooks", () => {
         select: async () => "",
         confirm: async () => true,
       },
-      async () => {},
-      async () => {},
-      () => {},
       "/repo",
       VISIBLE_TOOL_OUTPUT,
     );
 
-    await hooks.onCommand?.({
-      command: "ls -a",
-      status: "started",
-    });
-    await hooks.onCommand?.({
-      command: "ls -a",
-      status: "completed",
-    });
+    await emitRuntimeCommand(hooks, "ls -a", "started");
+    await emitRuntimeCommand(hooks, "ls -a", "completed");
 
-    assert.equal(handles.length, 1);
-    const inspect = handles[0]?.inspects[0];
-    assert.ok(inspect && inspect.kind === "tool");
-    if (!inspect || inspect.kind !== "tool") {
-      assert.fail("Expected tool inspect state");
-    }
-    assert.equal(inspect.presentation.summary, "*Bash*  `ls -a`");
-    assert.equal(inspect.output, "");
+    assert.equal(handles.length, 2);
+    assert.deepEqual(handles.map((entry) => entry.inspects.length), [0, 0]);
   });
 });

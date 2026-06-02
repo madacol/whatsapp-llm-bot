@@ -3,8 +3,8 @@
  */
 
 import fs from "node:fs";
+import { setTimeout as delay } from "node:timers/promises";
 
-import { getActions, executeAction } from "./actions.js";
 import config from "./config.js";
 import { createLlmClient } from "./llm.js";
 import { createWhatsAppTransport, createWhatsAppWorkspacePresenter } from "#whatsapp";
@@ -15,8 +15,9 @@ import { startHtmlServer, stopHtmlServer } from "./html-server.js";
 import { registerOptionalHarnesses, waitForAllHarnesses } from "#harnesses";
 import { createLogger } from "./logger.js";
 import { createConversationRunner } from "./conversation/create-conversation-runner.js";
-import { deliverPendingRestartAck } from "./actions/admin/restart/_restart-ack-delivery.js";
-import { createRestartAckStore } from "./actions/admin/restart/_restart-ack-store.js";
+import { deliverPendingRestartAck } from "./restart/restart-ack-delivery.js";
+import { createRestartAckStore } from "./restart/restart-ack-store.js";
+import { createRestartCommandHandler } from "./commands/restart-command.js";
 
 const log = createLogger("index");
 const SHUTDOWN_FORCE_EXIT_MS = 10_000;
@@ -27,8 +28,7 @@ const SHUTDOWN_FORCE_EXIT_MS = 10_000;
  * @typedef {{
  *   store: Store,
  *   llmClient: LlmClient,
- *   getActionsFn: typeof getActions,
- *   executeActionFn: typeof executeAction,
+ *   restartCommandHandler?: ReturnType<typeof createRestartCommandHandler>,
  *   transport?: ChatTransport,
  *   workspacePresentation?: WorkspacePresentationPort,
  * }} MessageHandlerDeps
@@ -40,15 +40,54 @@ const SHUTDOWN_FORCE_EXIT_MS = 10_000;
  * @returns {{ handleMessage: (turn: ChatTurn) => Promise<void> }}
  */
 export function createMessageHandler(deps) {
-  const { store, llmClient, getActionsFn, executeActionFn, transport, workspacePresentation } = deps;
+  const { store, llmClient, restartCommandHandler, transport, workspacePresentation } = deps;
   return createConversationRunner({
     store,
     llmClient,
-    getActionsFn,
-    executeActionFn,
+    restartCommandHandler,
     transport,
     workspacePresentation,
   });
+}
+
+/**
+ * Wait until a PID disappears without monopolizing the event loop.
+ *
+ * @param {number} pid
+ * @param {{
+ *   timeoutMs?: number,
+ *   pollIntervalMs?: number,
+ *   killFn?: typeof process.kill,
+ *   nowFn?: () => number,
+ *   sleepFn?: (ms: number) => Promise<void>,
+ * }} [options]
+ * @returns {Promise<boolean>} true when the process exits before timeout
+ */
+export async function waitForPidExit(pid, options = {}) {
+  const {
+    timeoutMs = 125_000,
+    pollIntervalMs = 250,
+    killFn = process.kill,
+    nowFn = Date.now,
+    sleepFn = delay,
+  } = options;
+  const deadline = nowFn() + timeoutMs;
+
+  while (nowFn() < deadline) {
+    try {
+      killFn(pid, 0);
+    } catch {
+      return true;
+    }
+
+    const remainingMs = deadline - nowFn();
+    if (remainingMs <= 0) {
+      break;
+    }
+    await sleepFn(Math.min(pollIntervalMs, remainingMs));
+  }
+
+  return false;
 }
 
 // ── Default initialization (production) ──
@@ -66,10 +105,7 @@ if (!process.env.TESTING) {
       log.info(`Killing previous instance (PID ${oldPid})...`);
       process.kill(oldPid, "SIGTERM");
       // Wait for graceful shutdown (active queries get 2min to finish)
-      const start = Date.now();
-      while (Date.now() - start < 125_000) {
-        try { process.kill(oldPid, 0); } catch { break; }
-      }
+      await waitForPidExit(oldPid);
     } catch { /* not running, ok */ }
   }
   fs.writeFileSync(pidFile, process.pid.toString());
@@ -88,8 +124,9 @@ if (!process.env.TESTING) {
   const llmClient = createLlmClient();
   const restartAckStore = createRestartAckStore();
   const transport = await createWhatsAppTransport({
-    onConnectionOpen: async ({ editMessage, sendText, recoverQueuedMessage }) => {
-      await deliverPendingRestartAck({ store: restartAckStore, editMessage, sendText, recoverQueuedMessage });
+    outboundStore: store,
+    onConnectionOpen: async ({ editMessage, sendText, recoverQueuedMessage, phase }) => {
+      await deliverPendingRestartAck({ store: restartAckStore, editMessage, sendText, recoverQueuedMessage, phase });
     },
   }).catch(async (error) => {
       log.error("Initialization error:", error);
@@ -101,8 +138,7 @@ if (!process.env.TESTING) {
   const { handleMessage } = createMessageHandler({
     store,
     llmClient,
-    getActionsFn: getActions,
-    executeActionFn: executeAction,
+    restartCommandHandler: createRestartCommandHandler({ restartAckStore }),
     transport,
     workspacePresentation,
   });

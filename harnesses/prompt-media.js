@@ -73,12 +73,16 @@ function extractTopLevelText(blocks) {
  * quoted text that `renderContentBlock()` already produced.
  * @param {IncomingContentBlock[]} blocks
  * @param {string[]} mediaLines
+ * @param {boolean} includeMediaReferences
  * @returns {void}
  */
-function collectQuotedMediaLines(blocks, mediaLines) {
+function collectQuotedMediaLines(blocks, mediaLines, includeMediaReferences) {
+  if (!includeMediaReferences) {
+    return;
+  }
   for (const block of blocks) {
     if (block.type === "quote") {
-      collectQuotedMediaLines(block.content, mediaLines);
+      collectQuotedMediaLines(block.content, mediaLines, includeMediaReferences);
       continue;
     }
     if ((block.type === "image" || block.type === "video" || block.type === "audio" || block.type === "file") && hasMediaPath(block)) {
@@ -97,36 +101,51 @@ function collectQuotedMediaLines(blocks, mediaLines) {
  * @param {Array<IncomingContentBlock | ToolContentBlock>} blocks
  * @param {string[]} textParts
  * @param {string[]} mediaLines
+ * @param {boolean} includeMediaReferences
  * @returns {void}
  */
-function collectTextHarnessPromptParts(blocks, textParts, mediaLines) {
+function collectTextHarnessPromptParts(blocks, textParts, mediaLines, includeMediaReferences) {
   for (const block of blocks) {
     if (block.type === "quote") {
       const renderedQuote = renderContentBlock(block);
       if (renderedQuote) {
         textParts.push(renderedQuote);
       }
-      collectQuotedMediaLines(block.content, mediaLines);
+      collectQuotedMediaLines(block.content, mediaLines, includeMediaReferences);
       continue;
     }
 
     if (block.type === "image" && hasMediaPath(block)) {
-      const markdownImage = renderMarkdownImageReference(block);
-      if (markdownImage) {
-        textParts.push(markdownImage);
-        continue;
-      }
-      const mediaLine = renderPromptMediaReference(block);
-      if (mediaLine) {
-        mediaLines.push(mediaLine);
+      if (includeMediaReferences) {
+        const markdownImage = renderMarkdownImageReference(block);
+        if (markdownImage) {
+          textParts.push(markdownImage);
+          continue;
+        }
+        const mediaLine = renderPromptMediaReference(block);
+        if (mediaLine) {
+          mediaLines.push(mediaLine);
+        }
+      } else if (block.alt) {
+        const rendered = renderContentBlock(block);
+        if (rendered) {
+          textParts.push(rendered);
+        }
       }
       continue;
     }
 
     if ((block.type === "video" || block.type === "audio" || block.type === "file") && hasMediaPath(block)) {
-      const mediaLine = renderPromptMediaReference(block);
-      if (mediaLine) {
-        mediaLines.push(mediaLine);
+      if (includeMediaReferences) {
+        const mediaLine = renderPromptMediaReference(block);
+        if (mediaLine) {
+          mediaLines.push(mediaLine);
+        }
+      } else if (block.type === "video" && block.alt) {
+        const rendered = renderContentBlock(block);
+        if (rendered) {
+          textParts.push(rendered);
+        }
       }
       continue;
     }
@@ -141,14 +160,16 @@ function collectTextHarnessPromptParts(blocks, textParts, mediaLines) {
 /**
  * Build the text prompt that a text-first harness should see for one user turn.
  * @param {Array<IncomingContentBlock | ToolContentBlock>} blocks
+ * @param {{ includeMediaReferences?: boolean }} [options]
  * @returns {string}
  */
-export function buildTextHarnessPromptFromBlocks(blocks) {
+export function buildTextHarnessPromptFromBlocks(blocks, options = {}) {
+  const includeMediaReferences = options.includeMediaReferences ?? true;
   /** @type {string[]} */
   const textParts = [];
   /** @type {string[]} */
   const mediaLines = [];
-  collectTextHarnessPromptParts(blocks, textParts, mediaLines);
+  collectTextHarnessPromptParts(blocks, textParts, mediaLines, includeMediaReferences);
 
   const sections = [];
   if (textParts.length > 0) {

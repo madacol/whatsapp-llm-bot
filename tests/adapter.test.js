@@ -9,6 +9,7 @@ process.env.MODEL = "mock-model";
 
 import { createTestDb, seedChat } from "./helpers.js";
 import { setDb } from "../db.js";
+import { initStore } from "../store.js";
 import { readBlockBase64, readMediaBuffer } from "../media-store.js";
 
 /** @type {typeof import("../whatsapp/inbound/message-content.js").getMessageContent} */
@@ -28,6 +29,8 @@ let adaptIncomingMessage;
 let adaptIncomingMessages;
 /** @type {typeof import("../whatsapp/inbound/chat-turn.js").createTurnIo} */
 let createTurnIo;
+/** @type {typeof import("../whatsapp/inbound/chat-turn.js").finishTurnIo} */
+let finishTurnIo;
 
 before(async () => {
   // Seed DB cache so initStore() in index.js uses in-memory DB
@@ -38,7 +41,7 @@ before(async () => {
   ({ createConfirmRuntime } = await import("../whatsapp/runtime/confirm-runtime.js"));
   ({ createSelectRuntime } = await import("../whatsapp/runtime/select-runtime.js"));
   ({ createReactionRuntime } = await import("../whatsapp/runtime/reaction-runtime.js"));
-  ({ adaptIncomingMessage, adaptIncomingMessages, createTurnIo } = await import("../whatsapp/inbound/chat-turn.js"));
+  ({ adaptIncomingMessage, adaptIncomingMessages, createTurnIo, finishTurnIo } = await import("../whatsapp/inbound/chat-turn.js"));
 });
 
 /**
@@ -537,6 +540,25 @@ describe("getMessageContent", () => {
     assert.equal(firstImage._hdParentMessageId, "sd-parent-1");
     assert.equal(secondImage._hdParentMessageId, "sd-parent-2");
 
+    const reattachedImage = { ...firstImage };
+    delete reattachedImage.getHd;
+    const io = createTurnIo({
+      sock,
+      chatId,
+      message: createHdImageMessage({ chatId, messageId: "io-message", pairedMediaType: SD_PARENT }),
+      senderIds: ["sender-1"],
+      isGroup: false,
+      selectRuntime: userResponseRegistry,
+      confirmRuntime: confirmRegistry,
+      reactionRuntime: createReactionRuntime(),
+    });
+    await io.prepareMediaRegistry?.({
+      chatId,
+      messages: [],
+      mediaRegistry: new Map([["stored-parent", reattachedImage]]),
+    });
+    assert.ok(reattachedImage.getHd instanceof Promise, "WhatsApp TurnIO should reattach pending HD promises");
+
     await adaptIncomingMessage(
       createHdImageMessage({
         chatId,
@@ -559,11 +581,62 @@ describe("getMessageContent", () => {
     assert.equal(resolvedHd.type, "image");
     assert.equal(resolvedHd.mime_type, "image/jpeg");
     assert.equal(await readBlockBase64(resolvedHd), Buffer.from("hd-child-1").toString("base64"));
+    assert.deepEqual(await withTimeout(reattachedImage.getHd, 50), resolvedHd);
     assert.equal(await withTimeout(secondImage.getHd ?? Promise.resolve(null), 50), "timeout");
   });
 });
 
 describe("adaptIncomingMessages", () => {
+  it("keeps command messages separate from coalesced text turns", async () => {
+    const chatId = "command-batch-chat@g.us";
+    const sock = /** @type {import("@whiskeysockets/baileys").WASocket} */ (/** @type {unknown} */ ({
+      user: { id: "bot@s.whatsapp.net" },
+      groupMetadata: async () => ({ subject: "Command Batch Chat" }),
+      signalRepository: {
+        lidMapping: {
+          getPNForLID: async () => null,
+        },
+      },
+      sendPresenceUpdate: async () => {},
+    }));
+    const confirmRegistry = createConfirmRuntime();
+    const selectRegistry = createSelectRuntime();
+    /** @type {ChatTurn[]} */
+    const receivedTurns = [];
+
+    await adaptIncomingMessages(
+      ["check logs", "check logs", "!s"].map((text, index) => /** @type {BaileysMessage} */ ({
+        key: {
+          remoteJid: chatId,
+          fromMe: false,
+          id: `batched-${index}`,
+          participant: "user@s.whatsapp.net",
+        },
+        messageTimestamp: 1777467488 + index,
+        pushName: "Command Sender",
+        message: {
+          conversation: text,
+        },
+      })),
+      sock,
+      async (turn) => {
+        receivedTurns.push(turn);
+      },
+      confirmRegistry,
+      selectRegistry,
+    );
+
+    assert.equal(receivedTurns.length, 2);
+    assert.deepEqual(
+      receivedTurns[0].content.filter((block) => block.type === "text").map((block) => block.text),
+      ["check logs", "check logs"],
+    );
+    assert.deepEqual(
+      receivedTurns[1].content.filter((block) => block.type === "text").map((block) => block.text),
+      ["!s"],
+    );
+  });
+
   it("merges album child images into one app turn", async () => {
     const chatId = "album-chat@g.us";
     const sock = /** @type {import("@whiskeysockets/baileys").WASocket} */ (/** @type {unknown} */ ({
@@ -699,6 +772,41 @@ describe("createTurnIo", () => {
     assert.equal(newSocket.sentMessages.length, 1);
   });
 
+  it("persists inbound reply edit handles in the outbound store", async () => {
+    const chatId = `durable-turn-io-${Date.now()}`;
+    const db = await createTestDb();
+    const store = await initStore(db);
+    const { sock, registry } = createMockSock();
+    const io = createTurnIo({
+      sock,
+      chatId,
+      message: /** @type {BaileysMessage} */ ({
+        key: {
+          remoteJid: chatId,
+          fromMe: false,
+          id: "incoming-msg-durable",
+        },
+      }),
+      senderIds: ["sender-1"],
+      isGroup: false,
+      selectRuntime: createSelectRuntime(),
+      confirmRuntime: registry,
+      reactionRuntime: createReactionRuntime(),
+      outboundStore: store,
+    });
+
+    const handle = await io.reply({
+      kind: "content",
+      source: "tool-result",
+      content: "Restart signal sent.",
+    });
+
+    assert.equal(typeof handle?.transportHandleId, "string");
+    const persisted = await store.getWhatsAppEditHandle(handle.transportHandleId);
+    assert.equal(persisted?.chat_id, chatId);
+    assert.equal(persisted?.message_kind, "text");
+  });
+
   it("queues reply events persistently when the live socket is unavailable", async () => {
     const chatId = `queued-turn-io-${Date.now()}`;
     const db = await createTestDb();
@@ -748,14 +856,18 @@ describe("createTurnIo", () => {
     await db.sql`DELETE FROM whatsapp_outbound_queue WHERE chat_id = ${chatId}`;
   });
 
-  it("opens a lease, pulses composing on the adapter cadence, then pauses on expiry", async () => {
+  it("opens a WhatsApp-owned lease on outbound work, pulses composing on the adapter cadence, then pauses on expiry", async () => {
     const { io, presenceUpdates } = createPresenceTurnIo({
       messageId: "incoming-msg-3",
       defaultLeaseTtlMs: 20,
       pulseIntervalMs: 5,
     });
 
-    await io.startPresence(18);
+    await io.reply({
+      kind: "content",
+      source: "llm",
+      content: "Working",
+    });
     await new Promise((resolve) => setTimeout(resolve, 24));
 
     assert.ok(
@@ -769,36 +881,33 @@ describe("createTurnIo", () => {
     );
   });
 
-  it("treats keepAlive as a lease refresh when active and as a new lease when inactive", async () => {
+  it("refreshes an active WhatsApp-owned lease on later outbound work", async () => {
     const { io, presenceUpdates } = createPresenceTurnIo({
       messageId: "incoming-msg-4",
       defaultLeaseTtlMs: 20,
       pulseIntervalMs: 50,
     });
 
-    await io.startPresence(20);
+    await io.reply({
+      kind: "content",
+      source: "llm",
+      content: "First",
+    });
     presenceUpdates.length = 0;
 
-    await io.keepPresenceAlive();
+    await io.reply({
+      kind: "content",
+      source: "llm",
+      content: "Second",
+    });
     await new Promise((resolve) => setTimeout(resolve, 10));
-    assert.deepEqual(
-      presenceUpdates,
-      [],
-      `Expected active keepAlive to refresh only the lease, got: ${JSON.stringify(presenceUpdates)}`,
+    assert.ok(
+      presenceUpdates.some((update) => update.presence === "composing"),
+      `Expected outbound work to reassert composing, got: ${JSON.stringify(presenceUpdates)}`,
     );
 
     await new Promise((resolve) => setTimeout(resolve, 22));
     assert.equal(presenceUpdates.at(-1)?.presence, "paused");
-
-    presenceUpdates.length = 0;
-    await io.keepPresenceAlive();
-
-    assert.deepEqual(presenceUpdates, [{
-      presence: "composing",
-      chatId: "presence-chat",
-    }]);
-
-    await io.endPresence();
   });
 
   it("re-sends composing after outbound messages while the lease is active", async () => {
@@ -808,9 +917,6 @@ describe("createTurnIo", () => {
       pulseIntervalMs: 500,
     });
 
-    await io.startPresence(50);
-    presenceUpdates.length = 0;
-
     await io.reply({
       kind: "content",
       source: "llm",
@@ -819,12 +925,12 @@ describe("createTurnIo", () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
 
     assert.equal(sentMessages.length, 1);
-    assert.deepEqual(presenceUpdates, [{
-      presence: "composing",
-      chatId: "presence-chat",
-    }]);
+    assert.ok(
+      presenceUpdates.filter((update) => update.presence === "composing").length >= 2,
+      `Expected composing before and after outbound work, got: ${JSON.stringify(presenceUpdates)}`,
+    );
 
-    await io.endPresence();
+    await finishTurnIo(io);
   });
 
   it("ends the active lease before select prompts", async () => {
@@ -834,7 +940,11 @@ describe("createTurnIo", () => {
       pulseIntervalMs: 5,
     });
 
-    await io.startPresence(50);
+    await io.reply({
+      kind: "content",
+      source: "llm",
+      content: "Before select",
+    });
     presenceUpdates.length = 0;
 
     const selectPromise = io.select("Choose one", ["A", "B"]);
@@ -856,7 +966,11 @@ describe("createTurnIo", () => {
       pulseIntervalMs: 5,
     });
 
-    await io.startPresence(50);
+    await io.reply({
+      kind: "content",
+      source: "llm",
+      content: "Before confirm",
+    });
     presenceUpdates.length = 0;
 
     const confirmPromise = io.confirm("Continue?");

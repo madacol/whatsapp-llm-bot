@@ -8,9 +8,10 @@ import { promisify } from "node:util";
 import { createTestDb } from "./helpers.js";
 import config from "../config.js";
 import { initStore } from "../store.js";
-import { setConfigValue } from "../actions/settings/chatSettings/_service.js";
+import { setConfigValue } from "../chat-settings-service.js";
 import { readChatConfig, writeChatConfig } from "../chat-config.js";
 import { SqliteDb } from "../sqlite-db.js";
+import { runChatSettingsCommand } from "../commands/chat-settings-command.js";
 
 const CACHE_PATH = path.resolve("data/models.json");
 const execFileAsync = promisify(execFile);
@@ -78,10 +79,8 @@ describe("per-chat model selection", () => {
 
   describe("chat_settings info includes model", () => {
     it("throws if chat does not exist", async () => {
-      const settingsModule = await import("../actions/settings/chatSettings/index.js");
-      const action = settingsModule.default;
       await assert.rejects(
-        () => action.action_fn({ chatId: "nonexistent", rootDb: db, senderIds: [] }, { setting: "" }),
+        () => runChatSettingsCommand({ chatId: "nonexistent", rootDb: db, senderIds: [] }, { setting: "" }),
         { message: /does not exist/ },
       );
     });
@@ -90,10 +89,7 @@ describe("per-chat model selection", () => {
   describe("chat_settings model via dispatch", () => {
     it("updates the model in the config file", async () => {
       await seedConfigChat("chat-set-1");
-
-      const mod = await import("../actions/settings/chatSettings/index.js");
-      const action = mod.default;
-      const result = await action.action_fn(
+      const result = await runChatSettingsCommand(
         { chatId: "chat-set-1", rootDb: db },
         { setting: "model", value: "openai/gpt-4.1-mini" },
       );
@@ -105,10 +101,7 @@ describe("per-chat model selection", () => {
 
     it("reverts to default when given empty string", async () => {
       await seedConfigChat("chat-set-2", { model: "some-model" });
-
-      const mod = await import("../actions/settings/chatSettings/index.js");
-      const action = mod.default;
-      const result = await action.action_fn(
+      const result = await runChatSettingsCommand(
         { chatId: "chat-set-2", rootDb: db },
         { setting: "model", value: "" },
       );
@@ -120,10 +113,7 @@ describe("per-chat model selection", () => {
 
     it("rejects invalid model with suggestions", async () => {
       await seedConfigChat("chat-set-3");
-
-      const mod = await import("../actions/settings/chatSettings/index.js");
-      const action = mod.default;
-      const result = await action.action_fn(
+      const result = await runChatSettingsCommand(
         { chatId: "chat-set-3", rootDb: db },
         { setting: "model", value: "nonexistent/fake-model" },
       );
@@ -136,10 +126,7 @@ describe("per-chat model selection", () => {
 
     it("suggests close matches for partial model names", async () => {
       await seedConfigChat("chat-set-4");
-
-      const mod = await import("../actions/settings/chatSettings/index.js");
-      const action = mod.default;
-      const result = await action.action_fn(
+      const result = await runChatSettingsCommand(
         { chatId: "chat-set-4", rootDb: db },
         { setting: "model", value: "gpt-4" },
       );
@@ -149,10 +136,8 @@ describe("per-chat model selection", () => {
     });
 
     it("throws if chat does not exist", async () => {
-      const mod = await import("../actions/settings/chatSettings/index.js");
-      const action = mod.default;
       await assert.rejects(
-        () => action.action_fn({ chatId: "nonexistent", rootDb: db }, { setting: "model", value: "x" }),
+        () => runChatSettingsCommand({ chatId: "nonexistent", rootDb: db }, { setting: "model", value: "x" }),
         { message: /does not exist/ },
       );
     });
@@ -161,10 +146,7 @@ describe("per-chat model selection", () => {
   describe("toBool accepts 'on'/'off' for boolean settings", () => {
     it("'on' enables memory", async () => {
       await seedConfigChat("mem-on-1", { memory: false });
-
-      const mod = await import("../actions/settings/chatSettings/index.js");
-      const action = mod.default;
-      const result = await action.action_fn(
+      const result = await runChatSettingsCommand(
         { chatId: "mem-on-1", rootDb: db, senderIds: ["u1"] },
         { setting: "memory", value: "on" },
       );
@@ -176,10 +158,7 @@ describe("per-chat model selection", () => {
 
     it("'off' disables memory", async () => {
       await seedConfigChat("mem-off-1", { memory: true });
-
-      const mod = await import("../actions/settings/chatSettings/index.js");
-      const action = mod.default;
-      const result = await action.action_fn(
+      const result = await runChatSettingsCommand(
         { chatId: "mem-off-1", rootDb: db, senderIds: ["u1"] },
         { setting: "memory", value: "off" },
       );
@@ -191,10 +170,7 @@ describe("per-chat model selection", () => {
 
     it("'true' still works", async () => {
       await seedConfigChat("mem-true-1", { memory: false });
-
-      const mod = await import("../actions/settings/chatSettings/index.js");
-      const action = mod.default;
-      const result = await action.action_fn(
+      const result = await runChatSettingsCommand(
         { chatId: "mem-true-1", rootDb: db, senderIds: ["u1"] },
         { setting: "memory", value: "true" },
       );
@@ -203,11 +179,8 @@ describe("per-chat model selection", () => {
 
     it("throws on unrecognized boolean value", async () => {
       await seedConfigChat("mem-bad-1");
-
-      const mod = await import("../actions/settings/chatSettings/index.js");
-      const action = mod.default;
       await assert.rejects(
-        () => action.action_fn(
+        () => runChatSettingsCommand(
           { chatId: "mem-bad-1", rootDb: db, senderIds: ["u1"] },
           { setting: "memory", value: "banana" },
         ),
@@ -219,10 +192,7 @@ describe("per-chat model selection", () => {
   describe("debug 'on' enables debug", () => {
     it("'on' enables debug", async () => {
       await seedConfigChat("dbg-on-1");
-
-      const mod = await import("../actions/settings/chatSettings/index.js");
-      const action = mod.default;
-      const result = await action.action_fn(
+      const result = await runChatSettingsCommand(
         { chatId: "dbg-on-1", rootDb: db, senderIds: ["u1"] },
         { setting: "debug", value: "on" },
       );
@@ -240,9 +210,7 @@ describe("per-chat model selection", () => {
       const originalMaster = config.MASTER_IDs;
       config.MASTER_IDs = ["master-user"];
       try {
-        const mod = await import("../actions/settings/chatSettings/index.js");
-        const action = mod.default;
-        const result = await action.action_fn(
+        const result = await runChatSettingsCommand(
           { chatId: "en-1", rootDb: db, senderIds: ["master-user"] },
           { setting: "enabled", value: "enabled" },
         );
@@ -261,9 +229,7 @@ describe("per-chat model selection", () => {
       const originalMaster = config.MASTER_IDs;
       config.MASTER_IDs = ["master-user"];
       try {
-        const mod = await import("../actions/settings/chatSettings/index.js");
-        const action = mod.default;
-        const result = await action.action_fn(
+        const result = await runChatSettingsCommand(
           { chatId: "en-2", rootDb: db, senderIds: ["master-user"] },
           { setting: "enabled", value: "disabled" },
         );
@@ -278,10 +244,7 @@ describe("per-chat model selection", () => {
 
     it("shows local and remote enable commands in disabled chat info", async () => {
       await seedConfigChat("disabled-info-chat", { is_enabled: false });
-
-      const mod = await import("../actions/settings/chatSettings/index.js");
-      const action = mod.default;
-      const result = await action.action_fn(
+      const result = await runChatSettingsCommand(
         { chatId: "disabled-info-chat", rootDb: db, senderIds: ["u1"] },
         { setting: "" },
       );
@@ -296,9 +259,7 @@ describe("per-chat model selection", () => {
       const originalMaster = config.MASTER_IDs;
       config.MASTER_IDs = ["master-user"];
       try {
-        const mod = await import("../actions/settings/chatSettings/index.js");
-        const action = mod.default;
-        const result = await action.action_fn(
+        const result = await runChatSettingsCommand(
           { chatId: "admin-chat", rootDb: db, senderIds: ["master-user"] },
           { setting: "enabled", value: "on remote-chat@s.whatsapp.net" },
         );
@@ -354,9 +315,7 @@ describe("per-chat model selection", () => {
       const originalMaster = config.MASTER_IDs;
       config.MASTER_IDs = ["master-user"];
       try {
-        const mod = await import("../actions/settings/chatSettings/index.js");
-        const action = mod.default;
-        const result = await action.action_fn(
+        const result = await runChatSettingsCommand(
           { chatId: "admin-chat", rootDb: db, senderIds: ["master-user"] },
           { setting: "enabled", value: "remote-off@g.us off" },
         );
@@ -399,17 +358,14 @@ describe("per-chat model selection", () => {
         status: "ready",
       });
 
-      const mod = await import("../actions/settings/chatSettings/index.js");
-      const action = mod.default;
-
-      const workspaceResult = await action.action_fn(
+      const workspaceResult = await runChatSettingsCommand(
         { chatId: "cfg-folder-workspace", rootDb: db, senderIds: ["u1"] },
         { setting: "workspace" },
       );
       assert.ok(workspaceResult.includes(worktreePath), `expected resolved worktree path, got: ${workspaceResult}`);
       assert.ok(!workspaceResult.includes("workspace worktree"), `expected plain path only, got: ${workspaceResult}`);
 
-      const infoResult = await action.action_fn(
+      const infoResult = await runChatSettingsCommand(
         { chatId: "cfg-folder-workspace", rootDb: db, senderIds: ["u1"] },
         { setting: "" },
       );
@@ -419,10 +375,7 @@ describe("per-chat model selection", () => {
 
     it("shows help text for the workspace key", async () => {
       await seedConfigChat("cfg-help-1", { harness_cwd: "/tmp" });
-
-      const mod = await import("../actions/settings/chatSettings/index.js");
-      const action = mod.default;
-      const result = await action.action_fn(
+      const result = await runChatSettingsCommand(
         { chatId: "cfg-help-1", rootDb: db, senderIds: ["u1"] },
         { setting: "workspace" },
       );
@@ -435,10 +388,7 @@ describe("per-chat model selection", () => {
 
     it("keeps folder as an alias for workspace", async () => {
       await seedConfigChat("cfg-folder-alias", { harness_cwd: "/tmp" });
-
-      const mod = await import("../actions/settings/chatSettings/index.js");
-      const action = mod.default;
-      const result = await action.action_fn(
+      const result = await runChatSettingsCommand(
         { chatId: "cfg-folder-alias", rootDb: db, senderIds: ["u1"] },
         { setting: "folder" },
       );
@@ -449,10 +399,7 @@ describe("per-chat model selection", () => {
 
     it("formats harness help as sectioned bullet points", async () => {
       await seedConfigChat("cfg-help-2", { harness: "codex" });
-
-      const mod = await import("../actions/settings/chatSettings/index.js");
-      const action = mod.default;
-      const result = await action.action_fn(
+      const result = await runChatSettingsCommand(
         { chatId: "cfg-help-2", rootDb: db, senderIds: ["u1"] },
         { setting: "harness" },
       );
@@ -460,7 +407,8 @@ describe("per-chat model selection", () => {
       assert.ok(result.includes("*Harness*"), `expected titled header, got: ${result}`);
       assert.ok(result.includes("- Current: codex"), `expected current bullet, got: ${result}`);
       assert.ok(result.includes("*Options*"), `expected options section, got: ${result}`);
-      assert.ok(result.includes("- app"), `expected app option bullet, got: ${result}`);
+      assert.ok(!result.includes("- app"), `expected no legacy app option bullet, got: ${result}`);
+      assert.ok(result.includes("- codex"), `expected codex option bullet, got: ${result}`);
       assert.ok(result.includes("*Examples*"), `expected examples section, got: ${result}`);
     });
 
@@ -469,9 +417,7 @@ describe("per-chat model selection", () => {
 
       /** @type {string | null} */
       let promptText = null;
-      const mod = await import("../actions/settings/chatSettings/index.js");
-      const action = mod.default;
-      const result = await action.action_fn(
+      const result = await runChatSettingsCommand(
         {
           chatId: "cfg-help-3",
           rootDb: db,
@@ -493,10 +439,7 @@ describe("per-chat model selection", () => {
 
     it("resets a friendly key through the reset verb", async () => {
       await seedConfigChat("cfg-reset-1", { harness_cwd: "/tmp" });
-
-      const mod = await import("../actions/settings/chatSettings/index.js");
-      const action = mod.default;
-      const result = await action.action_fn(
+      const result = await runChatSettingsCommand(
         { chatId: "cfg-reset-1", rootDb: db, senderIds: ["u1"] },
         { setting: "reset", value: "folder" },
       );
@@ -509,10 +452,7 @@ describe("per-chat model selection", () => {
 
     it("describes grouped visibility controls with per-flag defaults", async () => {
       await seedConfigChat("cfg-show-1", { output_visibility: {} });
-
-      const mod = await import("../actions/settings/chatSettings/index.js");
-      const action = mod.default;
-      const result = await action.action_fn(
+      const result = await runChatSettingsCommand(
         { chatId: "cfg-show-1", rootDb: db, senderIds: ["u1"] },
         { setting: "show" },
       );
@@ -528,10 +468,7 @@ describe("per-chat model selection", () => {
 
     it("does not accept text subcommands for show anymore", async () => {
       await seedConfigChat("cfg-show-2");
-
-      const mod = await import("../actions/settings/chatSettings/index.js");
-      const action = mod.default;
-      const result = await action.action_fn(
+      const result = await runChatSettingsCommand(
         { chatId: "cfg-show-2", rootDb: db, senderIds: ["u1"] },
         { setting: "show", value: "commands off" },
       );
@@ -550,10 +487,7 @@ describe("per-chat model selection", () => {
       let promptText = null;
       /** @type {SelectOption[] | null} */
       let pickerOptions = null;
-
-      const mod = await import("../actions/settings/chatSettings/index.js");
-      const action = mod.default;
-      const result = await action.action_fn(
+      const result = await runChatSettingsCommand(
         {
           chatId: "cfg-show-3",
           rootDb: db,
@@ -595,10 +529,7 @@ describe("per-chat model selection", () => {
 
     it("treats an empty multi-select result as a no-op for show", async () => {
       await seedConfigChat("cfg-show-4");
-
-      const mod = await import("../actions/settings/chatSettings/index.js");
-      const action = mod.default;
-      const result = await action.action_fn(
+      const result = await runChatSettingsCommand(
         {
           chatId: "cfg-show-4",
           rootDb: db,

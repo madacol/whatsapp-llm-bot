@@ -6,8 +6,6 @@ export const MAX_TOOL_CALL_DEPTH = 10;
 
 /** @type {Required<AgentIOHooks>} */
 export const NO_OP_HOOKS = {
-  onComposing: async () => {},
-  onPaused: async () => {},
   onReasoning: async () => {},
   onLlmResponse: async () => {},
   onAskUser: async () => "",
@@ -15,13 +13,12 @@ export const NO_OP_HOOKS = {
   onToolComplete: async () => {},
   onToolResult: async (_blocks, _name, _perms) => {},
   onToolError: async () => {},
-  onCommand: async () => {},
-  onFileRead: async () => {},
   onPlan: async () => {},
   onFileChange: async () => {},
   onContinuePrompt: async () => true,
   onDepthLimit: async () => false,
   onUsage: async () => {},
+  onRuntimeEvent: async () => {},
 };
 
 /**

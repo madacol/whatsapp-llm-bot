@@ -152,9 +152,103 @@ type MessageSource = "llm" | "tool-call" | "tool-result" | "error" | "warning" |
 /** Callback invoked when a reaction is added to a message. */
 type ReactionCallback = (emoji: string, senderId: string) => void;
 
+type ToolActivityTitle =
+  | "Read"
+  | "Search"
+  | "List"
+  | "Plan"
+  | "Search Web"
+  | "Open Link"
+  | "Find On Page"
+  | "Search Images"
+  | "Time"
+  | "Weather"
+  | "Quote"
+  | "Sports Schedule"
+  | "Sports Standings"
+  | "Run Command"
+  | "Start Agent"
+  | "Message Agent"
+  | "Wait For Agent"
+  | "Resume Agent"
+  | "Close Agent"
+  | "Run Parallel"
+  | "Terminal Input";
+
+type ToolActivitySummary = {
+  title: ToolActivityTitle;
+  lines: string[];
+};
+
+type ToolInspectMode =
+  | "bash"
+  | "read"
+  | "grep"
+  | "glob"
+  | "plain"
+  | "web_search"
+  | "open_link"
+  | "find_on_page"
+  | "image_search"
+  | "time"
+  | "weather"
+  | "finance"
+  | "sports_schedule"
+  | "sports_standings";
+
+type ToolFlowDescriptor = {
+  groupKey: string;
+  groupTitle: string;
+  detail: string;
+};
+
+type ToolActivityPresentation = {
+  kind: "activity";
+  toolName: string;
+  summary: string;
+  activity: ToolActivitySummary;
+  inspectMode: ToolInspectMode;
+  flow?: ToolFlowDescriptor;
+};
+
+type BashToolPresentation = {
+  kind: "bash";
+  toolName: string;
+  summary: string;
+  command: string;
+  inspectMode: ToolInspectMode;
+};
+
+type FileToolPresentation = {
+  kind: "file";
+  toolName: "Edit" | "Write";
+  summary: string;
+  filePath: string;
+  oldString?: string;
+  newString?: string;
+  content?: string;
+  oldContent?: string;
+  startLine?: number;
+};
+
+type GenericToolPresentation = {
+  kind: "generic";
+  toolName: string;
+  summary: string;
+  description?: string;
+  args: Record<string, unknown>;
+};
+
+type ToolPresentation =
+  | ToolActivityPresentation
+  | import("./plan-presentation.js").PlanPresentation
+  | BashToolPresentation
+  | FileToolPresentation
+  | GenericToolPresentation;
+
 type ToolFlowStep = {
   id: string;
-  presentation: import("./tool-presentation-model.js").ToolPresentation;
+  presentation: ToolPresentation;
   output?: string;
 };
 
@@ -168,16 +262,53 @@ type ContentEvent = {
   source: MessageSource;
   content: SendContent;
   cwd?: string | null;
+  stream?: {
+    id: string;
+    status: "partial" | "final";
+  };
 };
 
 type ToolCallEvent = {
   kind: "tool_call";
-  presentation: import("./tool-presentation-model.js").ToolPresentation;
+  toolCall: LlmChatResponse["toolCalls"][0];
+  cwd?: string | null;
+  displaySummary?: string;
+  context?: {
+    oldContent?: string;
+    startLine?: number;
+  };
 };
 
 type ToolActivityEvent = {
   kind: "tool_activity";
-  activity: import("./tool-presentation-model.js").ToolActivitySummary;
+  activity: ToolActivitySummary;
+};
+
+type CompactToolActivityEvent = {
+  kind: "compact_tool_activity";
+  cwd?: string | null;
+  activity:
+    | {
+        type: "command";
+        status: "started" | "completed" | "failed";
+        command: string;
+        output?: string;
+      }
+    | {
+        type: "file_read";
+        status: "started";
+        command: string;
+        paths: string[];
+      }
+    | {
+        type: "tool";
+        status: "started" | "completed" | "failed";
+        toolCall?: LlmChatResponse["toolCalls"][0];
+        readLineRange?: { start: number; end: number };
+      }
+    | {
+        type: "close";
+      };
 };
 
 type PlanEvent = {
@@ -191,6 +322,7 @@ type FileChangeEvent = {
   summary?: string;
   diff?: string;
   changeKind?: "add" | "delete" | "update";
+  source?: "tool" | "snapshot";
   itemId?: string;
   stage?: "proposed" | "denied" | "applied" | "failed";
   oldText?: string;
@@ -213,6 +345,12 @@ type SubagentMessageEvent = {
   agentRole?: string;
 };
 
+type RuntimeEventOutboundEvent = {
+  kind: "runtime_event";
+  event: import("./harnesses/harness-runtime-events.js").HarnessRuntimeEvent;
+  cwd?: string | null;
+};
+
 type UsageTokens = {
   prompt: number;
   completion: number;
@@ -226,18 +364,20 @@ type OutboundEvent =
   | ContentEvent
   | ToolCallEvent
   | ToolActivityEvent
+  | CompactToolActivityEvent
   | PlanEvent
   | FileChangeEvent
   | SubagentMessageEvent
+  | RuntimeEventOutboundEvent
   | UsageEvent;
 
 type MessageHandleUpdate =
   | { kind: "text"; text: string }
-  | { kind: "tool_call"; presentation: import("./tool-presentation-model.js").ToolPresentation }
+  | { kind: "tool_call"; presentation: ToolPresentation }
   | { kind: "tool_flow"; state: ToolFlowState };
 
 type MessageInspectState =
-  | { kind: "tool"; presentation: import("./tool-presentation-model.js").ToolPresentation; output?: string }
+  | { kind: "tool"; presentation: ToolPresentation; output?: string }
   | { kind: "tool_flow"; state: ToolFlowState }
   | { kind: "text"; text: string; persistOnInspect?: boolean }
   | { kind: "reasoning"; summary: string; text: string };
@@ -294,10 +434,12 @@ type TurnIO = {
   selectMany?: (question: string, options: SelectOption[], config?: SelectManyConfig) => Promise<SelectManyResult>;
   confirm: (message: string, hooks?: ConfirmHooks) => Promise<boolean>;
   react: (emoji: string) => Promise<void>;
-  startPresence: (ttlMs: number) => Promise<void>;
-  keepPresenceAlive: (ttlMs?: number) => Promise<void>;
-  endPresence: () => Promise<void>;
   getIsAdmin: () => Promise<boolean>;
+  prepareMediaRegistry?: (input: {
+    chatId: string;
+    messages: Message[];
+    mediaRegistry: MediaRegistry;
+  }) => void | Promise<void>;
 };
 
 type WorkspaceStatus = "ready" | "busy" | "conflicted" | "archived";
@@ -442,36 +584,14 @@ type ExecuteActionContext = {
   select: (question: string, options: SelectOption[], config?: SelectConfig) => Promise<string>;
   selectMany?: (question: string, options: SelectOption[], config?: SelectManyConfig) => Promise<SelectManyResult>;
   confirm: (message: string, hooks?: ConfirmHooks) => Promise<boolean>;
+  prepareMediaRegistry?: (input: {
+    chatId: string;
+    messages: Message[];
+    mediaRegistry: MediaRegistry;
+  }) => void | Promise<void>;
 };
 
-/* Actions */
-
-// Context passed to actions (pre-built functions with headers baked in)
-type ActionContext = {
-  chatId: string;
-  senderIds: string[];
-  senderJids?: string[];
-  senderName?: string;
-  quotedSenderId?: string;
-  quotedSenderJid?: string;
-  quotedSenderName?: string;
-  content: IncomingContentBlock[];
-  workdir?: string | null;
-  getIsAdmin: () => Promise<boolean>;
-  db: ChatDb;
-  sessionDb: ChatDb;
-  getActions: () => Promise<Action[]>;
-  log: (...args: any[]) => Promise<string>;
-  send: (message: SendContent) => Promise<void>; // Header already baked in
-  reply: (message: SendContent) => Promise<void>; // Header already baked in
-  reactToMessage: (emoji: string) => Promise<void>;
-  select: (question: string, options: SelectOption[], config?: SelectConfig) => Promise<string>;
-  selectMany?: (question: string, options: SelectOption[], config?: SelectManyConfig) => Promise<SelectManyResult>;
-  confirm: (message: string) => Promise<boolean>;
-  resolveModel: (role: string) => string;
-  agentDepth?: number;
-  toolCallId?: string | null;
-};
+/* Tools and commands */
 
 // Define permission flags
 type PermissionFlags = {
@@ -506,7 +626,7 @@ type LlmChatResponse = {
 // Replaces OpenAI ChatCompletionTool
 type ToolDefinition = {
   type: "function";
-  function: { name: string; description: string; parameters: Action['parameters'] };
+  function: { name: string; description: string; parameters: CommandParametersSchema };
 };
 
 type CallLlmOptions = { model?: string };
@@ -523,12 +643,6 @@ type CallLlm = {
   (options: CallLlmChatOptions): Promise<LlmChatResponse>;
 };
 
-// Build action context types dynamically based on permissions
-type ExtendedActionContext<P extends PermissionFlags> = ActionContext
-  & (P["useRootDb"] extends true ? { rootDb: ChatDb } : {})
-  & (P["useChatDb"] extends true ? { chatDb: ChatDb } : {})
-  & (P["useLlm"] extends true ? { callLlm: CallLlm; llmClient: LlmClient } : {});
-
 type ToolContentBlock = TextContentBlock | ImageContentBlock | VideoContentBlock | AudioContentBlock | FileContentBlock | CodeContentBlock | DiffContentBlock | MarkdownContentBlock;
 
 type SendContent = string | ToolContentBlock | ToolContentBlock[];
@@ -541,51 +655,14 @@ type SharedSkill = {
   instructions: string;
 };
 
-/** The payload types that an action can produce. */
-type ActionResultValue = string | {} | HtmlContent | ToolContentBlock[];
-
-/**
- * Unified action return type. Actions that need to override autoContinue set the field;
- * otherwise it inherits from the action's permissions.
- * For backward compat, action_fn may still return a bare ActionResultValue;
- * executeAction normalizes it into this shape.
- */
-type ActionResult = {
-  result: ActionResultValue;
-  autoContinue?: boolean;
-  afterResponse?: (input?: { handle?: MessageHandle }) => void | Promise<void>;
+type CommandParametersSchema = {
+  type: "object";
+  properties: Record<string, any>;
+  required?: string[];
 };
 
-type Action<P extends PermissionFlags = PermissionFlags> = {
-  name: string;
-  command?: string; // Optional command for direct execution
-  description: string;
-  /** Detailed usage instructions injected into the system prompt only after the action is first called in a turn. */
-  instructions?: string;
-  /** Optional shared skill metadata for provider harness exposure. */
-  sharedSkill?: SharedSkill;
-  scope?: "chat" | "global";
-  optIn?: true; // When true, action is only available in chats that explicitly enable it
-  parameters: {
-    type: "object";
-    properties: Record<string, any>;
-    required?: string[];
-  }; // a JSON-Schema for the action_fn's parameters
-  permissions: P;
-  action_fn: (
-    context: ExtendedActionContext<P>,
-    params: any,
-  ) => Promise<ActionResult | ActionResultValue> | ActionResult | ActionResultValue;
-  /** Returns a short display string appended after the action name in compact mode. */
-  formatToolCall?: (params: Record<string, any>) => string;
-  /** Returns the prompt string used by this action. Swappable for testing/optimization. */
-  prompt?: (...args: any[]) => string;
-};
-
-type AppAction = Action & {
-  fileName: string;
-  app_name: string;
-};
+/** The payload types that a tool or command can produce. */
+type ToolResultValue = string | {} | HtmlContent | ToolContentBlock[];
 
 type ToolDescriptor = {
   name: string;
@@ -593,7 +670,7 @@ type ToolDescriptor = {
   instructions?: string;
   sharedSkill?: SharedSkill;
   scope?: "chat" | "global";
-  parameters: Action["parameters"];
+  parameters: CommandParametersSchema;
   permissions: PermissionFlags;
   formatToolCall?: (params: Record<string, any>) => string;
 };
@@ -601,10 +678,6 @@ type ToolDescriptor = {
 /* Agent types */
 
 type AgentIOHooks = {
-  /** Signal that the bot is working (e.g. WhatsApp "composing" presence). Fire-and-forget. */
-  onComposing?: () => Promise<void>;
-  /** Signal that the bot stopped working (e.g. WhatsApp "paused" presence). Fire-and-forget. */
-  onPaused?: () => Promise<void>;
   onReasoning?: (event: {
     status: "started" | "updated" | "completed",
     itemId?: string,
@@ -616,18 +689,17 @@ type AgentIOHooks = {
   onLlmResponse?: (text: string, metadata?: LlmResponseMetadata) => Promise<void>;
   /** Present a structured question to the user and wait for their response. Returns the chosen option text. */
   onAskUser?: (question: string, options: string[], preamble?: string, descriptions?: string[]) => Promise<string>;
-  onToolCall?: (toolCall: LlmChatResponse['toolCalls'][0], formatToolCall?: (params: Record<string, any>) => string, context?: { oldContent?: string }) => Promise<MessageHandle | void>;
+  onToolCall?: (toolCall: LlmChatResponse['toolCalls'][0], formatToolCall?: (params: Record<string, any>) => string, context?: { oldContent?: string, startLine?: number }) => Promise<MessageHandle | void>;
   onToolComplete?: (toolCall: LlmChatResponse['toolCalls'][0]) => Promise<void>;
   onToolResult?: (blocks: ToolContentBlock[], toolName: string, permissions: PermissionFlags) => Promise<void>;
   onToolError?: (error: string) => Promise<void>;
-  onCommand?: (event: { command: string, status: "started" | "completed" | "failed", output?: string }) => Promise<MessageHandle | void>;
   onPlan?: (presentation: import("./plan-presentation.js").PlanPresentation) => Promise<void>;
-  onFileRead?: (event: { command: string, paths: string[] }) => Promise<void>;
   onFileChange?: (event: {
     path: string,
     summary?: string,
     diff?: string,
     kind?: "add" | "delete" | "update",
+    source?: "tool" | "snapshot",
     itemId?: string,
     stage?: "proposed" | "denied" | "applied" | "failed",
     oldText?: string,
@@ -636,10 +708,13 @@ type AgentIOHooks = {
   onContinuePrompt?: () => Promise<boolean>;
   onDepthLimit?: () => Promise<boolean>;
   onUsage?: (cost: string, tokens: UsageTokens) => Promise<void>;
+  onRuntimeEvent?: (event: import("./harnesses/harness-runtime-events.js").HarnessRuntimeEvent) => Promise<void>;
 };
 
 type LlmResponseMetadata = {
   source?: "llm" | "subagent";
+  streamId?: string;
+  streamStatus?: "partial" | "final";
   threadId?: string;
   parentThreadId?: string;
   agentNickname?: string;
@@ -648,7 +723,7 @@ type LlmResponseMetadata = {
 
 type HarnessSessionRef = {
   id: string;
-  kind: "native" | "claude-sdk" | "codex" | "pi";
+  kind: string;
 };
 
 type HarnessCapabilities = {
@@ -664,6 +739,18 @@ type HarnessCapabilities = {
   sessionModelSwitch?: "in-session" | "unsupported";
   supportsRollback?: boolean;
   supportsUserInputRequests?: boolean;
+};
+
+type AcpAgentDefinition = {
+  name: string;
+  displayName?: string;
+  command: string;
+  args?: string[];
+  env?: Record<string, string>;
+  docsUrl?: string;
+  statusUrl?: string;
+  supportsInstances?: boolean;
+  sessionKind?: HarnessSessionRef["kind"];
 };
 
 type HarnessUsage = {
@@ -687,7 +774,6 @@ type AgentDefinition = {
   description: string;
   systemPrompt: string;
   model?: string;
-  allowedActions?: string[];
   maxDepth?: number;
   instructions?: string;
   harness?: string;
@@ -701,11 +787,15 @@ type HarnessRunConfig = {
   workdir?: string | null;
   harnessInstanceId?: string | null;
   model?: string | null;
+  mode?: string | null;
   reasoningEffort?: 'low' | 'medium' | 'high' | 'xhigh' | 'max' | null;
   sandboxMode?: 'read-only' | 'workspace-write' | 'danger-full-access' | null;
   approvalPolicy?: 'untrusted' | 'on-failure' | 'on-request' | 'never' | null;
   approvalsReviewer?: 'user' | 'auto_review' | 'guardian_subagent' | null;
   additionalDirectories?: string[] | null;
+  protectedPaths?: string[] | null;
+  ignoredFileChangePaths?: string[] | null;
+  configValues?: Record<string, string | boolean | null>;
 };
 
 type HarnessSessionHistoryEntry = {
@@ -741,10 +831,12 @@ type HarnessRuntimeSession = {
   workdir?: string | null;
   model?: string | null;
   resumeCursor?: string | null;
+  capabilities?: HarnessCapabilities;
 };
 
 type HarnessTurnInput = {
   chatId: string;
+  turnId?: string;
   input?: string;
   messages?: Message[];
   attachments?: IncomingContentBlock[];
@@ -768,11 +860,15 @@ type HarnessAdapter = {
   }) => Promise<HarnessRuntimeSession>;
   sendTurn: (input: HarnessTurnInput) => Promise<AgentResult>;
   interruptTurn: (input: { chatId: string }) => Promise<boolean>;
+  respondToRequest: (requestId: string, response: unknown) => Promise<boolean>;
+  respondToUserInput: (requestId: string, response: unknown) => Promise<boolean>;
   injectMessage: (chatId: string | HarnessSessionRef, text: string) => Promise<boolean>;
   stopSession: (chatId: string | HarnessSessionRef) => Promise<boolean>;
+  hasSession: (chatId: string | HarnessSessionRef) => boolean;
+  stopAll: () => Promise<void>;
   listSessions: () => HarnessRuntimeSession[];
-  readThread: (sessionId: string) => Promise<null>;
-  rollbackThread: (sessionId: string, numTurns: number) => Promise<null>;
+  readThread: (sessionId: string) => Promise<unknown | null>;
+  rollbackThread: (sessionId: string, numTurns: number) => Promise<unknown | null>;
   streamEvents: AsyncIterable<{ type: string; provider: string } & Record<string, unknown>>;
   subscribeEvents?: (handler: (event: { type: string; provider: string } & Record<string, unknown>) => void | Promise<void>) => () => void;
 };
@@ -813,7 +909,7 @@ type AgentHarness = {
   listActiveSessions?: () => string[];
   /** Wait for all active queries to finish. Returns chat IDs that were waited on. */
   waitForIdle?: () => Promise<string[]>;
-  /** Optional provider-native adapter; registry falls back to a legacy wrapper. */
+  /** Required for chat-visible provider turns; missing adapters make the driver unavailable. */
   createAdapter?: (input: HarnessAdapterCreateInput) => HarnessAdapter;
   /** Optional lifecycle cleanup for instance-owned resources. */
   dispose?: () => void | Promise<void>;
@@ -838,16 +934,7 @@ type SdkUsageWithCache = {
   cache_creation_input_tokens?: number;
 };
 
-/* processLlmResponse types */
-
-type ExecuteActionOptions = {
-  toolCallId?: string | null;
-  actionResolver?: (name: string) => Promise<AppAction | null>;
-  llmClient?: LlmClient;
-  agentDepth?: number;
-  workdir?: string | null;
-  sandboxMode?: HarnessRunConfig["sandboxMode"] | null;
-};
+/* Harness turn support types */
 
 type ExecuteToolOptions = {
   toolCallId?: string | null;
@@ -864,7 +951,7 @@ type ToolRuntime = {
     context: ExecuteActionContext,
     params: {},
     options?: ExecuteToolOptions,
-  ) => Promise<{ result: ActionResultValue, permissions: PermissionFlags, afterResponse?: (input?: { handle?: MessageHandle }) => void | Promise<void> }>;
+  ) => Promise<{ result: ToolResultValue, permissions: PermissionFlags, afterResponse?: (input?: { handle?: MessageHandle }) => void | Promise<void> }>;
 };
 
 type Session = {
@@ -885,44 +972,5 @@ type LlmConfig = {
   toolRuntime: ToolRuntime;
 };
 
-type App = {
-  app_name: string;
-  name: string;
-  description: string;
-  actions: AppAction[];
-  setup_fn: (() => Promise<any>)[];
-};
-
-function defineAction<P extends PermissionFlags>(action: Action<P>): Action<P> {
-  return action;
-}
-
 declare function html(content: string, title?: string): HtmlContent;
 declare function isHtmlContent(value: unknown): value is HtmlContent;
-
-/* Test callback types — used by _tests.js and _test-prompts.js */
-
-/** Full action context with all permission extensions enabled. */
-type FullActionContext = ActionContext & { rootDb: ChatDb; chatDb: ChatDb; callLlm: CallLlm; llmClient: LlmClient };
-
-/** action_fn as seen by tests — accepts partial context (duck typing). */
-type ActionParamValue = string | number | boolean | null | IncomingContentBlock | IncomingContentBlock[];
-
-/** action_fn as seen by tests — accepts partial context (duck typing). */
-type TestActionFn = (
-  context: Partial<FullActionContext>,
-  params: Record<string, ActionParamValue>,
-) => Promise<string> | string;
-
-/** Standard _tests.js callback: receives action_fn only. */
-type ActionTestFn = (action_fn: TestActionFn) => Promise<void>;
-
-/** Standard _tests.js callback: receives action_fn + db. */
-type ActionDbTestFn = (action_fn: TestActionFn, db: ChatDb) => Promise<void>;
-
-/** Prompt test callback: receives callLlm + readFixture + prompt. */
-type PromptTestFn = (
-  callLlm: CallLlm,
-  readFixture: (name: string) => Promise<Buffer>,
-  prompt: (...args: string[]) => string,
-) => Promise<void>;
