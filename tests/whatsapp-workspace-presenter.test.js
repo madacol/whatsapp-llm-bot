@@ -149,6 +149,51 @@ describe("WhatsAppWorkspacePresenter", () => {
     });
   });
 
+  it("creates community workspace groups with source chat participants", async () => {
+    /** @type {Array<{ subject: string, participants: string[], parentCommunityChatId: string }>} */
+    const createdCommunityGroups = [];
+    const storeState = createStore();
+    const presenter = createWhatsAppWorkspacePresenter({
+      store: storeState.store,
+      transport: {
+        start: async () => {},
+        stop: async () => {},
+        sendText: async () => {},
+        createCommunityGroup: async (subject, participants, parentCommunityChatId) => {
+          createdCommunityGroups.push({ subject, participants, parentCommunityChatId });
+          return { chatId: "workspace-chat", subject };
+        },
+        getGroupLinkedParent: async () => "community-chat",
+        getGroupParticipants: async (chatId) => {
+          assert.equal(chatId, "source-chat");
+          return [
+            "teammate@s.whatsapp.net",
+            "user@s.whatsapp.net",
+            "teammate@s.whatsapp.net",
+          ];
+        },
+      },
+    });
+
+    await presenter.ensureWorkspaceVisible({
+      projectId: "project-1",
+      projectName: "Checkout",
+      workspaceId: "ws-participants",
+      workspaceName: "fraud-fix",
+      sourceChatId: "source-chat",
+      requesterJids: ["user@s.whatsapp.net"],
+    });
+
+    assert.deepEqual(createdCommunityGroups, [{
+      subject: "Checkout - fraud-fix",
+      participants: [
+        "teammate@s.whatsapp.net",
+        "user@s.whatsapp.net",
+      ],
+      parentCommunityChatId: "community-chat",
+    }]);
+  });
+
   it("ignores unrelated workspace community state when the source chat is standalone", async () => {
     /** @type {Array<{ subject: string, participants: string[] }>} */
     const createdGroups = [];

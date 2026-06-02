@@ -35,6 +35,8 @@ let tempDirs = [];
  *   createdGroups: Array<{ subject: string, participants: string[], chatId: string }>,
  *   createdCommunities: Array<{ subject: string, description: string, chatId: string }>,
  *   linkedGroups: Array<{ chatId: string, communityChatId: string }>,
+ *   linkedParentsByChatId: Map<string, string>,
+ *   participantsByChatId: Map<string, string[]>,
  *   promotedParticipants: Array<{ chatId: string, participants: string[] }>,
  *   sentTexts: Array<{ chatId: string, text: string }>,
  *   sentEvents: Array<{ chatId: string, event: OutboundEvent }>,
@@ -61,6 +63,8 @@ function createFakeTransport() {
   const announcementChanges = [];
   /** @type {Map<string, string>} */
   const linkedParentsByChatId = new Map();
+  /** @type {Map<string, string[]>} */
+  const participantsByChatId = new Map();
 
   let groupCounter = 0;
   const instanceId = `${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
@@ -78,6 +82,8 @@ function createFakeTransport() {
     createdGroups,
     createdCommunities,
     linkedGroups,
+    linkedParentsByChatId,
+    participantsByChatId,
     promotedParticipants,
     sentTexts,
     sentEvents,
@@ -102,6 +108,7 @@ function createFakeTransport() {
         const chatId = `group-${instanceId}-${groupCounter}@g.us`;
         registerCreatedChatDb(chatId);
         createdGroups.push({ subject, participants, chatId });
+        participantsByChatId.set(chatId, participants);
         return { chatId, subject };
       },
       createCommunity: async (subject, description) => {
@@ -117,9 +124,11 @@ function createFakeTransport() {
         registerCreatedChatDb(chatId);
         createdGroups.push({ subject, participants, chatId });
         linkedParentsByChatId.set(chatId, parentCommunityChatId);
+        participantsByChatId.set(chatId, participants);
         return { chatId, subject };
       },
       getGroupLinkedParent: async (chatId) => linkedParentsByChatId.get(chatId) ?? null,
+      getGroupParticipants: async (chatId) => participantsByChatId.get(chatId) ?? [],
       linkExistingGroupToCommunity: async (chatId, communityChatId) => {
         linkedGroups.push({ chatId, communityChatId });
         linkedParentsByChatId.set(chatId, communityChatId);
@@ -436,6 +445,43 @@ describe("workspace lifecycle", () => {
 
     const branchName = (await execFileAsync("git", ["branch", "--show-current"], { cwd: workspace?.worktree_path })).stdout.trim();
     assert.equal(branchName, "payments");
+  });
+
+  it("creates workspace chats with source chat participants inside the source community", async () => {
+    const repoRoot = await createRepoFixture();
+    const transportState = createFakeTransport();
+    const handleMessage = await createHandler({ transport: transportState.transport });
+
+    await seedChat("repo-community-chat", { harnessCwd: repoRoot });
+    transportState.linkedParentsByChatId.set("repo-community-chat", "community-1@g.us");
+    transportState.participantsByChatId.set("repo-community-chat", [
+      "master-user@s.whatsapp.net",
+      "teammate@s.whatsapp.net",
+      "observer@s.whatsapp.net",
+    ]);
+
+    const { context } = createChatTurn({
+      chatId: "repo-community-chat",
+      content: [{ type: "text", text: "!new community bug" }],
+    });
+    await handleMessage(context);
+
+    const repo = await store.getProjectByRootPath(repoRoot);
+    assert.ok(repo, "repo should be inferred from the root cwd");
+    const workspace = await store.getWorkspaceByName(repo.project_id, "community bug");
+    assert.ok(workspace, "workspace should be created");
+    const workspaceSurface = await getWorkspaceSurface(workspace.workspace_id);
+    assert.equal(workspaceSurface.linked_community_chat_id, "community-1@g.us");
+    assert.equal(transportState.createdGroups.length, 1);
+    assert.deepEqual(transportState.createdGroups[0]?.participants, [
+      "master-user@s.whatsapp.net",
+      "teammate@s.whatsapp.net",
+      "observer@s.whatsapp.net",
+    ]);
+    assert.equal(
+      transportState.linkedParentsByChatId.get(workspaceSurface.workspace_chat_id),
+      "community-1@g.us",
+    );
   });
 
   it("creates a multi-word workspace and seeds the first prompt", async () => {

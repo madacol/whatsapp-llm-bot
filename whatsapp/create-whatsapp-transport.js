@@ -34,7 +34,10 @@ const WHATSAPP_TURN_COALESCE_DELAY_MS = 250;
  * }} CommunityCreateGroupSocket
  *
  * @typedef {{
- *   groupMetadata: (chatId: string) => Promise<{ linkedParent?: string | null }>,
+ *   groupMetadata: (chatId: string) => Promise<{
+ *     linkedParent?: string | null,
+ *     participants?: Array<{ id?: string | null }>,
+ *   }>,
  * }} GroupMetadataSocket
  */
 
@@ -568,6 +571,19 @@ export async function executeGroupLinkedParentLookup(sock, chatId) {
 }
 
 /**
+ * Read a group's live participant JIDs via the Baileys metadata API.
+ * @param {GroupMetadataSocket} sock
+ * @param {string} chatId
+ * @returns {Promise<string[]>}
+ */
+export async function executeGroupParticipantLookup(sock, chatId) {
+  const metadata = await sock.groupMetadata(chatId);
+  return [...new Set((metadata.participants ?? [])
+    .map((participant) => typeof participant.id === "string" ? participant.id.trim() : "")
+    .filter((participantId) => participantId.includes("@")))];
+}
+
+/**
  * @param {import("@whiskeysockets/baileys").WASocket} sock
  * @returns {boolean}
  */
@@ -640,6 +656,7 @@ function serializeTransportError(error) {
  *     parentCommunityChatId: string,
  *   ) => Promise<{ chatId: string, subject: string }>;
  *   getGroupLinkedParent: (chatId: string) => Promise<string | null>;
+ *   getGroupParticipants: (chatId: string) => Promise<string[]>;
  *   linkExistingGroupToCommunity: (chatId: string, communityChatId: string) => Promise<void>;
  *   promoteParticipants: (chatId: string, participants: string[]) => Promise<void>;
  *   renameGroup: (chatId: string, subject: string) => Promise<void>;
@@ -1012,6 +1029,22 @@ export async function createWhatsAppTransport(options = {}) {
         return await executeGroupLinkedParentLookup(sock, chatId);
       } catch (error) {
         log.error("WhatsApp groupMetadata lookup failed:", {
+          chatId,
+          error: serializeTransportError(error),
+        });
+        throw error;
+      }
+    },
+
+    async getGroupParticipants(chatId) {
+      const sock = currentSocket;
+      if (!sock) {
+        throw new Error("WhatsApp transport has not been started");
+      }
+      try {
+        return await executeGroupParticipantLookup(sock, chatId);
+      } catch (error) {
+        log.error("WhatsApp groupMetadata participant lookup failed:", {
           chatId,
           error: serializeTransportError(error),
         });
