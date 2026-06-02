@@ -479,7 +479,7 @@ function formatGenericStructuredInspectOutput(text) {
 
 /**
  * @param {string} text
- * @param {import("./tool-presentation-model.js").ToolInspectMode} inspectMode
+ * @param {ToolInspectMode} inspectMode
  * @returns {string}
  */
 export function formatStructuredInspectOutput(text, inspectMode) {

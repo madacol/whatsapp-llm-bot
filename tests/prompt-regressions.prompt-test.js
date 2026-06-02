@@ -17,8 +17,6 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import dotenv from "dotenv";
 import { createLlmClient, createCallLlm } from "../llm.js";
-import { getActions } from "../actions.js";
-import { actionsToToolDefinitions } from "../message-formatting.js";
 import { checkAssertion } from "./prompt-regressions/assertions.js";
 
 dotenv.config();
@@ -48,9 +46,6 @@ let testCases = [];
 
 /** @type {CallLlm} */
 let callLlm;
-
-/** @type {Map<string, ToolDefinition>} */
-let toolDefsByName = new Map();
 
 /**
  * Resolve fixture references in message content blocks.
@@ -113,13 +108,6 @@ before(async () => {
   const llmClient = createLlmClient();
   callLlm = createCallLlm(llmClient);
 
-  // Load all actions and build tool definitions
-  const actions = await getActions();
-  const allToolDefs = actionsToToolDefinitions(actions);
-  for (const td of allToolDefs) {
-    toolDefsByName.set(td.function.name, td);
-  }
-
   // Discover test case JSON files
   let files;
   try {
@@ -155,16 +143,11 @@ describe("prompt regressions", () => {
           // Prepend system prompt
           messages.unshift({ role: "system", content: testCase.system_prompt });
 
-          // Filter tool definitions to only those specified in the test case
-          const tools = testCase.tools
-            .map((name) => toolDefsByName.get(name))
-            .filter((td) => td !== undefined);
-
           // Call LLM
           const response = await callLlm({
             model: testCase.model,
             messages,
-            tools,
+            tools: [],
             tool_choice: "auto",
           });
 

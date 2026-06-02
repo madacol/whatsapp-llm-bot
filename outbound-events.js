@@ -5,7 +5,7 @@
 /**
  * @param {MessageSource} source
  * @param {SendContent} content
- * @param {{ cwd?: string | null }} [options]
+ * @param {{ cwd?: string | null, stream?: ContentEvent["stream"] }} [options]
  * @returns {ContentEvent}
  */
 export function contentEvent(source, content, options = {}) {
@@ -14,19 +14,27 @@ export function contentEvent(source, content, options = {}) {
     source,
     content,
     ...(options.cwd !== undefined && { cwd: options.cwd }),
+    ...(options.stream !== undefined && { stream: options.stream }),
   };
 }
 
 /**
- * @param {import("./tool-presentation-model.js").ToolPresentation} presentation
+ * @param {LlmChatResponse["toolCalls"][0]} toolCall
+ * @param {{ cwd?: string | null, displaySummary?: string, context?: ToolCallEvent["context"] }} [options]
  * @returns {ToolCallEvent}
  */
-export function toolCallEvent(presentation) {
-  return { kind: "tool_call", presentation };
+export function toolCallEvent(toolCall, options = {}) {
+  return {
+    kind: "tool_call",
+    toolCall,
+    ...(options.cwd !== undefined && { cwd: options.cwd }),
+    ...(options.displaySummary !== undefined && { displaySummary: options.displaySummary }),
+    ...(options.context !== undefined && { context: options.context }),
+  };
 }
 
 /**
- * @param {import("./tool-presentation-model.js").ToolActivitySummary} activity
+ * @param {ToolActivitySummary} activity
  * @returns {ToolActivityEvent}
  */
 export function toolActivityEvent(activity) {
@@ -39,35 +47,6 @@ export function toolActivityEvent(activity) {
  */
 export function planEvent(presentation) {
   return { kind: "plan", presentation };
-}
-
-/**
- * @param {{
- *   path: string,
- *   summary?: string,
- *   diff?: string,
- *   changeKind?: "add" | "delete" | "update",
- *   itemId?: string,
- *   stage?: "proposed" | "denied" | "applied" | "failed",
- *   oldText?: string,
- *   newText?: string,
- *   cwd?: string | null,
- * }} input
- * @returns {FileChangeEvent}
- */
-export function fileChangeEvent(input) {
-  return {
-    kind: "file_change",
-    path: input.path,
-    ...(input.summary !== undefined && { summary: input.summary }),
-    ...(input.diff !== undefined && { diff: input.diff }),
-    ...(input.changeKind !== undefined && { changeKind: input.changeKind }),
-    ...(input.itemId !== undefined && { itemId: input.itemId }),
-    ...(input.stage !== undefined && { stage: input.stage }),
-    ...(input.oldText !== undefined && { oldText: input.oldText }),
-    ...(input.newText !== undefined && { newText: input.newText }),
-    ...(input.cwd !== undefined && { cwd: input.cwd }),
-  };
 }
 
 /**
@@ -101,7 +80,20 @@ export function subagentMessageEvent(input) {
 }
 
 /**
- * @param {import("./tool-presentation-model.js").ToolPresentation} presentation
+ * @param {RuntimeEventOutboundEvent["event"]} event
+ * @param {{ cwd?: string | null }} [options]
+ * @returns {RuntimeEventOutboundEvent}
+ */
+export function runtimeEvent(event, options = {}) {
+  return {
+    kind: "runtime_event",
+    event,
+    ...(options.cwd !== undefined && { cwd: options.cwd }),
+  };
+}
+
+/**
+ * @param {ToolPresentation} presentation
  * @returns {MessageHandleUpdate}
  */
 export function toolCallUpdate(presentation) {
@@ -125,7 +117,7 @@ export function textUpdate(text) {
 }
 
 /**
- * @param {import("./tool-presentation-model.js").ToolPresentation} presentation
+ * @param {ToolPresentation} presentation
  * @param {string | undefined} [output]
  * @returns {MessageInspectState}
  */

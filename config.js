@@ -11,6 +11,10 @@ export default {
   get llm_api_key() { return process.env.LLM_API_KEY; },
   get base_url() { return process.env.BASE_URL; },
   get system_prompt() { return process.env.SYSTEM_PROMPT || system_prompt; },
+  get default_harness() { return process.env.DEFAULT_HARNESS ?? process.env.MADABOT_DEFAULT_HARNESS ?? "codex"; },
+  set default_harness(v) {
+    process.env.DEFAULT_HARNESS = v;
+  },
 
   get brave_api_key() { return process.env.BRAVE_API_KEY; },
   set brave_api_key(v) { if (v) process.env.BRAVE_API_KEY = v; else delete process.env.BRAVE_API_KEY; },

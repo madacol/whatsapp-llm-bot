@@ -8,7 +8,7 @@ import {
 
 describe("isExplicitTestTarget", () => {
   it("treats test file paths as explicit targets", () => {
-    assert.equal(isExplicitTestTarget("tests/codex-runner.test.js"), true);
+    assert.equal(isExplicitTestTarget("tests/acp-harness.test.js"), true);
   });
 
   it("does not treat node test flags as explicit targets", () => {
@@ -35,12 +35,12 @@ describe("buildNodeTestArgs", () => {
   });
 
   it("uses only explicit targets when files are passed", () => {
-    assert.deepEqual(buildNodeTestArgs(["tests/codex-runner.test.js"], {
+    assert.deepEqual(buildNodeTestArgs(["tests/acp-harness.test.js"], {
       defaultTestFiles: ["tests/a.test.js", "tests/b.test.js"],
     }), [
       "--test",
       "--experimental-test-isolation=none",
-      "tests/codex-runner.test.js",
+      "tests/acp-harness.test.js",
     ]);
   });
 

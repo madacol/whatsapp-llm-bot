@@ -4,9 +4,47 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { createHarnessRuntimeEventDispatcher } from "../harnesses/harness-runtime-event-dispatcher.js";
+import { normalizeHarnessRuntimeEvent } from "../harnesses/harness-runtime-events.js";
 import { createNdjsonRawEventLogger } from "../harnesses/raw-event-log.js";
 
 describe("createHarnessRuntimeEventDispatcher", () => {
+  it("adds stable runtime metadata without discarding provider raw references", () => {
+    const event = normalizeHarnessRuntimeEvent({
+      type: "content.delta",
+      provider: "codex",
+      providerInstanceId: "codex-work",
+      chatId: "chat-1",
+      itemId: "assistant-1",
+      text: "Done",
+      contentType: "markdown",
+      raw: {
+        source: "acp.jsonrpc",
+        method: "session/update",
+        payload: { sequence: 1 },
+      },
+    }, {
+      eventId: "evt-test",
+      createdAt: "2026-05-27T00:00:00.000Z",
+      providerRefs: {
+        providerTurnId: "provider-turn-1",
+        providerItemId: "provider-item-1",
+      },
+    });
+
+    assert.equal(event.eventId, "evt-test");
+    assert.equal(event.createdAt, "2026-05-27T00:00:00.000Z");
+    assert.equal(event.providerInstanceId, "codex-work");
+    assert.deepEqual(event.providerRefs, {
+      providerTurnId: "provider-turn-1",
+      providerItemId: "provider-item-1",
+    });
+    assert.deepEqual(event.raw, {
+      source: "acp.jsonrpc",
+      method: "session/update",
+      payload: { sequence: 1 },
+    });
+  });
+
   it("projects canonical runtime events into hooks and result state", async () => {
     /** @type {Array<Record<string, unknown>>} */
     const reasoningEvents = [];
@@ -14,19 +52,11 @@ describe("createHarnessRuntimeEventDispatcher", () => {
     const responses = [];
     /** @type {Array<{ cost: string, tokens: UsageTokens }>} */
     const usageEvents = [];
-    let composingCount = 0;
-    let pausedCount = 0;
 
     const dispatcher = createHarnessRuntimeEventDispatcher({
       provider: "pi",
       messages: [{ role: "user", content: [{ type: "text", text: "Ship it" }] }],
       hooks: {
-        onComposing: async () => {
-          composingCount += 1;
-        },
-        onPaused: async () => {
-          pausedCount += 1;
-        },
         onReasoning: async (event) => {
           reasoningEvents.push(event);
         },
@@ -81,39 +111,78 @@ describe("createHarnessRuntimeEventDispatcher", () => {
         cached: 2,
       },
     }]);
-    assert.equal(composingCount, 0);
-    assert.equal(pausedCount, 0);
   });
 
-  it("tracks generic tool lifecycle events for inspect updates", async () => {
-    /** @type {Array<Record<string, unknown>>} */
-    const toolCalls = [];
-    /** @type {Array<MessageInspectState | null>} */
-    const inspectStates = [];
-    let composingCount = 0;
-    let pausedCount = 0;
+  it("preserves context window from earlier usage updates when final usage omits it", async () => {
+    /** @type {Array<{ cost: string, tokens: UsageTokens }>} */
+    const usageEvents = [];
+    const dispatcher = createHarnessRuntimeEventDispatcher({
+      provider: "acp",
+      messages: [],
+      hooks: {
+        onUsage: async (cost, tokens) => {
+          usageEvents.push({ cost, tokens });
+        },
+      },
+    });
+
+    await dispatcher.handleEvent({
+      type: "usage.updated",
+      provider: "acp",
+      usage: {
+        promptTokens: 0,
+        completionTokens: 0,
+        cachedTokens: 0,
+        cost: 0,
+        totalTokens: 42,
+        contextWindow: 1000,
+      },
+    });
+    await dispatcher.handleEvent({
+      type: "usage.updated",
+      provider: "acp",
+      usage: {
+        promptTokens: 30,
+        completionTokens: 10,
+        cachedTokens: 5,
+        cost: 0.002,
+        totalTokens: 42,
+        reasoningTokens: 2,
+      },
+    });
+
+    assert.deepEqual(dispatcher.result.usage, {
+      promptTokens: 30,
+      completionTokens: 10,
+      cachedTokens: 5,
+      cost: 0.002,
+      totalTokens: 42,
+      reasoningTokens: 2,
+      contextWindow: 1000,
+    });
+    assert.deepEqual(usageEvents, [{
+      cost: "0.002000",
+      tokens: {
+        prompt: 30,
+        completion: 10,
+        cached: 5,
+        total: 42,
+        reasoning: 2,
+        contextWindow: 1000,
+      },
+    }]);
+  });
+
+  it("emits generic tool lifecycle events through the runtime sink instead of legacy tool hooks", async () => {
+    /** @type {import("../harnesses/harness-runtime-events.js").HarnessRuntimeEvent[]} */
+    const runtimeEvents = [];
 
     const dispatcher = createHarnessRuntimeEventDispatcher({
       provider: "pi",
       messages: [],
       workdir: "/repo",
-      hooks: {
-        onComposing: async () => {
-          composingCount += 1;
-        },
-        onPaused: async () => {
-          pausedCount += 1;
-        },
-        onToolCall: async (toolCall) => {
-          toolCalls.push(toolCall);
-          return {
-            transportHandleId: "msg-1",
-            update: async () => {},
-            setInspect: (state) => {
-              inspectStates.push(state);
-            },
-          };
-        },
+      emitRuntimeEvent: async (event) => {
+        runtimeEvents.push(event);
       },
     });
 
@@ -147,36 +216,108 @@ describe("createHarnessRuntimeEventDispatcher", () => {
       },
     });
 
-    assert.deepEqual(toolCalls, [{
-      id: "tool-1",
-      name: "Read",
-      arguments: JSON.stringify({ file_path: "README.md" }),
-    }]);
-    assert.equal(pausedCount, 0);
-    assert.equal(composingCount, 0);
-    assert.equal(inspectStates.length, 2);
-    assert.equal(inspectStates.at(-1)?.kind, "tool");
-    assert.equal(
-      inspectStates.at(-1)?.kind === "tool" ? inspectStates.at(-1)?.output : null,
-      "final",
-    );
+    assert.deepEqual(runtimeEvents.map((event) => event.type), [
+      "tool.started",
+      "tool.updated",
+      "tool.completed",
+    ]);
+    assert.equal(runtimeEvents[0]?.type === "tool.started" ? runtimeEvents[0].tool.id : undefined, "tool-1");
   });
 
-  it("projects command and file-read runtime events into progress hooks", async () => {
-    /** @type {Array<{ command: string, status: "started" | "completed" | "failed", output?: string }>} */
-    const commands = [];
-    /** @type {Array<{ command: string, paths: string[] }>} */
-    const fileReads = [];
+  it("forwards assistant stream chunks semantically and finalizes on item completion", async () => {
+    /** @type {Array<{ text: string, metadata?: LlmResponseMetadata }>} */
+    const responses = [];
+    const dispatcher = createHarnessRuntimeEventDispatcher({
+      provider: "acp",
+      messages: [],
+      hooks: {
+        onLlmResponse: async (text, metadata) => {
+          responses.push({ text, metadata });
+        },
+      },
+    });
+
+    await dispatcher.handleEvent({
+      type: "content.delta",
+      provider: "acp",
+      itemId: "assistant-1",
+      text: "Hel",
+      contentType: "markdown",
+    });
+    await dispatcher.handleEvent({
+      type: "content.delta",
+      provider: "acp",
+      itemId: "assistant-1",
+      text: "lo",
+      contentType: "markdown",
+    });
+    assert.deepEqual(responses.map((entry) => [entry.text, entry.metadata?.streamStatus]), [
+      ["Hel", "partial"],
+      ["lo", "partial"],
+    ]);
+
+    await dispatcher.handleEvent({
+      type: "item.completed",
+      provider: "acp",
+      item: {
+        id: "assistant-1",
+        kind: "assistant",
+        text: "Hello",
+      },
+    });
+    assert.equal(responses.at(-1)?.text, "Hello");
+    assert.equal(responses.at(-1)?.metadata?.streamStatus, "final");
+    assert.deepEqual(dispatcher.result.response, [{ type: "markdown", text: "Hello" }]);
+  });
+
+  it("emits flow-tool runtime events without grouped legacy presentation state", async () => {
+    /** @type {import("../harnesses/harness-runtime-events.js").HarnessRuntimeEvent[]} */
+    const runtimeEvents = [];
+    const dispatcher = createHarnessRuntimeEventDispatcher({
+      provider: "pi",
+      messages: [],
+      emitRuntimeEvent: async (event) => {
+        runtimeEvents.push(event);
+      },
+    });
+
+    await dispatcher.handleEvent({
+      type: "tool.started",
+      provider: "pi",
+      tool: {
+        id: "web-1",
+        name: "search_query",
+        arguments: { q: "ACP protocol" },
+      },
+    });
+    await dispatcher.handleEvent({
+      type: "tool.started",
+      provider: "pi",
+      tool: {
+        id: "web-2",
+        name: "open",
+        arguments: { ref_id: "https://agentclientprotocol.com" },
+      },
+    });
+
+    assert.deepEqual(runtimeEvents.map((event) => event.type), [
+      "tool.started",
+      "tool.started",
+    ]);
+    assert.deepEqual(runtimeEvents.map((event) => event.type === "tool.started" ? event.tool.id : null), [
+      "web-1",
+      "web-2",
+    ]);
+  });
+
+  it("emits command and file-read runtime events through the runtime sink", async () => {
+    /** @type {import("../harnesses/harness-runtime-events.js").HarnessRuntimeEvent[]} */
+    const runtimeEvents = [];
     const dispatcher = createHarnessRuntimeEventDispatcher({
       provider: "codex",
       messages: [],
-      hooks: {
-        onCommand: async (event) => {
-          commands.push(event);
-        },
-        onFileRead: async (event) => {
-          fileReads.push(event);
-        },
+      emitRuntimeEvent: async (event) => {
+        runtimeEvents.push(event);
       },
     });
 
@@ -206,21 +347,145 @@ describe("createHarnessRuntimeEventDispatcher", () => {
       },
     });
 
-    assert.deepEqual(fileReads, [{
-      command: "sed -n '1,20p' src/app.js",
-      paths: ["src/app.js"],
-    }]);
-    assert.deepEqual(commands, [
-      {
+    assert.deepEqual(runtimeEvents.map((event) => event.type), [
+      "file-read.started",
+      "command.started",
+      "command.completed",
+    ]);
+    assert.equal(
+      runtimeEvents[1]?.type === "command.started" ? runtimeEvents[1].command.command : undefined,
+      "pnpm type-check",
+    );
+  });
+
+  it("passes ACP command and file-change events through the runtime event boundary", async () => {
+    /** @type {import("../harnesses/harness-runtime-events.js").HarnessRuntimeEvent[]} */
+    const runtimeEvents = [];
+    const dispatcher = createHarnessRuntimeEventDispatcher({
+      provider: "acp",
+      messages: [],
+      workdir: "/repo",
+      hooks: {
+        onRuntimeEvent: async (event) => {
+          runtimeEvents.push(event);
+        },
+      },
+    });
+
+    await dispatcher.handleEvent({
+      type: "command.started",
+      provider: "acp",
+      command: {
         command: "pnpm type-check",
         status: "started",
       },
-      {
-        command: "pnpm type-check",
-        status: "completed",
-        output: "ok",
+      raw: { source: "acp.jsonrpc", method: "session/update" },
+    });
+    await dispatcher.handleEvent({
+      type: "file-change.completed",
+      provider: "acp",
+      change: {
+        path: "/repo/src/app.js",
+        kind: "update",
+        source: "snapshot",
+        diff: "--- a/src/app.js\n+++ b/src/app.js\n@@ -1 +1 @@\n-before\n+after",
       },
+      raw: { source: "acp.jsonrpc", method: "session/update" },
+    });
+
+    assert.equal(runtimeEvents.length, 2);
+    assert.equal(runtimeEvents[0]?.type, "command.started");
+    assert.deepEqual(runtimeEvents[0]?.raw, { source: "acp.jsonrpc", method: "session/update" });
+    assert.equal(runtimeEvents[1]?.type, "file-change.completed");
+    assert.equal(runtimeEvents[1]?.type === "file-change.completed" ? runtimeEvents[1].change.cwd : undefined, "/repo");
+    assert.deepEqual(runtimeEvents[1]?.raw, { source: "acp.jsonrpc", method: "session/update" });
+  });
+
+  it("emits ACP progress through the runtime event sink instead of the legacy runtime hook", async () => {
+    /** @type {import("../harnesses/harness-runtime-events.js").HarnessRuntimeEvent[]} */
+    const runtimeEvents = [];
+    let legacyRuntimeHookCalls = 0;
+    const dispatcher = createHarnessRuntimeEventDispatcher({
+      provider: "acp",
+      messages: [],
+      emitRuntimeEvent: async (event) => {
+        runtimeEvents.push(event);
+      },
+      hooks: {
+        onRuntimeEvent: async () => {
+          legacyRuntimeHookCalls += 1;
+        },
+      },
+    });
+
+    await dispatcher.handleEvent({
+      type: "command.started",
+      provider: "acp",
+      command: {
+        command: "pnpm type-check",
+        status: "started",
+      },
+    });
+
+    assert.equal(legacyRuntimeHookCalls, 0);
+    assert.equal(runtimeEvents.length, 1);
+    assert.equal(runtimeEvents[0]?.type, "command.started");
+    assert.equal(runtimeEvents[0]?.provider, "acp");
+  });
+
+  it("passes ACP tool and file-read events through the runtime event boundary", async () => {
+    /** @type {import("../harnesses/harness-runtime-events.js").HarnessRuntimeEvent[]} */
+    const runtimeEvents = [];
+    /** @type {ToolContentBlock[][]} */
+    const toolResults = [];
+    const dispatcher = createHarnessRuntimeEventDispatcher({
+      provider: "acp",
+      messages: [],
+      hooks: {
+        onRuntimeEvent: async (event) => {
+          runtimeEvents.push(event);
+        },
+        onToolResult: async (blocks) => {
+          toolResults.push(blocks);
+        },
+      },
+    });
+
+    await dispatcher.handleEvent({
+      type: "file-read.started",
+      provider: "acp",
+      fileRead: {
+        command: "sed -n '1,20p' src/app.js",
+        paths: ["src/app.js"],
+      },
+    });
+    await dispatcher.handleEvent({
+      type: "tool.started",
+      provider: "acp",
+      tool: {
+        id: "tool-1",
+        name: "Task",
+        arguments: { title: "Review mock code" },
+      },
+    });
+    await dispatcher.handleEvent({
+      type: "tool.completed",
+      provider: "acp",
+      tool: {
+        id: "tool-1",
+        name: "Task",
+        arguments: { title: "Review mock code" },
+        output: "done",
+        outputBlocks: [{ type: "text", text: "tool output" }],
+      },
+    });
+
+    assert.deepEqual(runtimeEvents.map((event) => event.type), [
+      "file-read.started",
+      "tool.started",
+      "tool.completed",
     ]);
+    assert.deepEqual(toolResults, [[{ type: "text", text: "tool output" }]]);
   });
 
   it("captures raw provider events as replayable ndjson without changing hook projection", async () => {
@@ -250,10 +515,14 @@ describe("createHarnessRuntimeEventDispatcher", () => {
 
       const lines = (await fs.readFile(logPath, "utf8")).trim().split("\n");
       assert.equal(lines.length, 1);
-      assert.deepEqual(JSON.parse(lines[0]), {
-        provider: "codex",
-        type: "assistant.completed",
-        raw: { msg: { type: "agent_message_delta", delta: "Done." } },
+      const logged = JSON.parse(lines[0]);
+      assert.equal(logged.provider, "codex");
+      assert.equal(logged.type, "assistant.completed");
+      assert.match(logged.eventId, /^harness-event-/);
+      assert.equal(typeof logged.createdAt, "string");
+      assert.deepEqual(logged.raw, {
+        source: "unknown",
+        payload: { msg: { type: "agent_message_delta", delta: "Done." } },
       });
       assert.deepEqual(responses, ["Done."]);
     } finally {
@@ -262,14 +531,17 @@ describe("createHarnessRuntimeEventDispatcher", () => {
   });
 
   it("accepts session, turn, request, user-input, and file-change runtime events", async () => {
-    /** @type {Array<Record<string, unknown>>} */
-    const fileChanges = [];
+    /** @type {string[]} */
+    const runtimeEvents = [];
     const dispatcher = createHarnessRuntimeEventDispatcher({
       provider: "codex",
       messages: [],
+      emitRuntimeEvent: async (event) => {
+        runtimeEvents.push(event.type);
+      },
       hooks: {
-        onFileChange: async (event) => {
-          fileChanges.push(event);
+        onRuntimeEvent: async (event) => {
+          runtimeEvents.push(`legacy:${event.type}`);
         },
       },
     });
@@ -320,11 +592,80 @@ describe("createHarnessRuntimeEventDispatcher", () => {
       provider: "codex",
       turn: { id: "turn-1", chatId: "chat-1", status: "completed" },
     });
+    await dispatcher.handleEvent({
+      type: "extension.notification",
+      provider: "codex",
+      method: "madabot/example",
+      payload: { ok: true },
+    });
+    await dispatcher.handleEvent({
+      type: "runtime.warning",
+      provider: "codex",
+      message: "provider reported a warning",
+    });
 
-    assert.deepEqual(fileChanges, [{
-      path: "/repo/app.js",
-      summary: "Updated app",
-      kind: "update",
+    assert.deepEqual(runtimeEvents, [
+      "session.started",
+      "turn.started",
+      "request.opened",
+      "user-input.requested",
+      "file-change.completed",
+      "turn.completed",
+      "extension.notification",
+      "runtime.warning",
+    ]);
+    assert.deepEqual(dispatcher.result.response, []);
+  });
+
+  it("projects plan and subagent runtime events into chat hooks", async () => {
+    /** @type {Array<import("../plan-presentation.js").PlanPresentation>} */
+    const plans = [];
+    /** @type {Array<{ text: string, metadata?: LlmResponseMetadata }>} */
+    const responses = [];
+    const dispatcher = createHarnessRuntimeEventDispatcher({
+      provider: "acp",
+      messages: [],
+      hooks: {
+        onPlan: async (presentation) => {
+          plans.push(presentation);
+        },
+        onLlmResponse: async (text, metadata) => {
+          responses.push({ text, ...(metadata ? { metadata } : {}) });
+        },
+      },
+    });
+
+    await dispatcher.handleEvent({
+      type: "plan.updated",
+      provider: "acp",
+      plan: {
+        explanation: "Ship ACP",
+        entries: [
+          { text: "Wire runtime events", status: "completed" },
+          { text: "Handle subagents", status: "in_progress" },
+        ],
+      },
+    });
+    await dispatcher.handleEvent({
+      type: "subagent.completed",
+      provider: "acp",
+      text: "Subagent found the bug.",
+      metadata: {
+        source: "subagent",
+        threadId: "toolu-task-1",
+        agentRole: "code-reviewer",
+      },
+    });
+
+    assert.equal(plans.length, 1);
+    assert.equal(plans[0]?.summary, "*Plan*  _Working on: Handle subagents_");
+    assert.deepEqual(responses, [{
+      text: "Subagent found the bug.",
+      metadata: {
+        source: "subagent",
+        threadId: "toolu-task-1",
+        agentRole: "code-reviewer",
+      },
     }]);
     assert.deepEqual(dispatcher.result.response, []);
   });

@@ -183,7 +183,7 @@ describe("buildRunConfig", () => {
       harness_cwd: null,
       harness_config: {
         codex: { model: "gpt-5.4", sandboxMode: "danger-full-access", approvalsReviewer: "auto_review" },
-        "claude-agent-sdk": { model: "claude-sonnet-4-6", reasoningEffort: "medium" },
+        claude: { model: "claude-sonnet-4-6", reasoningEffort: "medium" },
       },
     }), "Project Alpha", "codex");
 
@@ -246,6 +246,36 @@ describe("buildRunConfig", () => {
     assert.equal(config.approvalPolicy, "on-request");
   });
 
+  it("passes protected path policies from harness config", () => {
+    const config = buildRunConfig("chat-1", /** @type {import("../store.js").ChatRow} */ ({
+      chat_id: "chat-1",
+      harness: "codex",
+      harness_cwd: null,
+      harness_config: {
+        codex: {
+          protectedPaths: ["package.json", "migrations/**", ""],
+        },
+      },
+    }), "Project Alpha", "codex");
+
+    assert.deepEqual(config.protectedPaths, ["package.json", "migrations/**"]);
+  });
+
+  it("passes ignored file-change policies from harness config", () => {
+    const config = buildRunConfig("chat-1", /** @type {import("../store.js").ChatRow} */ ({
+      chat_id: "chat-1",
+      harness: "codex",
+      harness_cwd: null,
+      harness_config: {
+        codex: {
+          ignoredFileChangePaths: ["auth_info_baileys/**", "", "pgdata/**"],
+        },
+      },
+    }), "Project Alpha", "codex");
+
+    assert.deepEqual(config.ignoredFileChangePaths, ["auth_info_baileys/**", "pgdata/**"]);
+  });
+
   it("does not leak a legacy Claude model into Codex runs", () => {
     const codexConfig = buildRunConfig("chat-1", /** @type {import("../store.js").ChatRow} */ ({
       chat_id: "chat-1",
@@ -258,7 +288,7 @@ describe("buildRunConfig", () => {
       harness: "codex",
       harness_cwd: null,
       harness_config: { model: "sonnet" },
-    }), "Project Alpha", "claude-agent-sdk");
+    }), "Project Alpha", "claude");
 
     assert.equal(codexConfig.model, undefined);
     assert.equal(claudeConfig.model, "sonnet");

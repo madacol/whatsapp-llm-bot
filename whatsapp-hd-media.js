@@ -20,6 +20,19 @@ const HD_TIMEOUT_MS = 10_000;
 const hdDeferreds = new Map();
 
 /**
+ * @param {Buffer} image
+ * @param {string | undefined} [caption]
+ * @returns {{ image: Buffer, jpegThumbnail: "", caption?: string }}
+ */
+function makeHdImageMessage(image, caption) {
+  return {
+    image,
+    jpegThumbnail: "",
+    ...(caption && { caption }),
+  };
+}
+
+/**
  * @typedef {{ url?: string; directPath?: string; mediaKey: string; mimetype?: string }} HdChildRef
  */
 
@@ -307,10 +320,11 @@ export async function sendImageHD(sock, chatId, imageBuffer, caption, options) {
     : await sharp(imageBuffer).jpeg({ quality: 80 }).toBuffer();
 
   const sdMsgId = generateMessageIDV2(userJid);
-  const sdMsg = await generateWAMessage(chatId, {
-    image: sdBuffer,
-    ...(caption && { caption }),
-  }, { ...uploadOpts, messageId: sdMsgId, ...(options?.quoted && { quoted: options.quoted }) });
+  const sdMsg = await generateWAMessage(
+    chatId,
+    makeHdImageMessage(sdBuffer, caption),
+    { ...uploadOpts, messageId: sdMsgId, ...(options?.quoted && { quoted: options.quoted }) },
+  );
 
   if (!sdMsg.message) return undefined;
 
@@ -328,10 +342,10 @@ export async function sendImageHD(sock, chatId, imageBuffer, caption, options) {
   };
 
   const hdMsgId = generateMessageIDV2(userJid);
-  const hdMsg = await generateWAMessage(chatId, {
-    image: imageBuffer,
-    ...(caption && { caption }),
-  }, { ...uploadOpts, messageId: hdMsgId });
+  const hdMsg = await generateWAMessage(chatId, makeHdImageMessage(imageBuffer, caption), {
+    ...uploadOpts,
+    messageId: hdMsgId,
+  });
 
   if (!hdMsg.message) return undefined;
 

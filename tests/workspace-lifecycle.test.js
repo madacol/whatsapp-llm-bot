@@ -12,6 +12,7 @@ process.env.LLM_API_KEY = "test-key";
 process.env.MODEL = "mock-model";
 
 import { createChatTurn, createMockLlmServer, createTestDb, seedChat as seedChat_ } from "./helpers.js";
+import { createAcpTestHarnessState, registerAcpTestHarness } from "./acp-test-harness.js";
 import { setDb } from "../db.js";
 import { contentEvent } from "../outbound-events.js";
 import { getChatWorkDir } from "../utils.js";
@@ -28,6 +29,23 @@ let store;
 let mockServer;
 /** @type {string[]} */
 let tempDirs = [];
+
+const WORKSPACE_HARNESS_NAME = "workspace-lifecycle-acp";
+const workspaceHarnessState = createAcpTestHarnessState();
+const capturedHarnessTurns = workspaceHarnessState.turns;
+
+async function registerWorkspaceHarness() {
+  registerAcpTestHarness({
+    name: WORKSPACE_HARNESS_NAME,
+    state: workspaceHarnessState,
+    errorMessage: "workspace lifecycle tests must use the semantic ACP adapter",
+    onSendTurn: (input) => ({
+      response: [{ type: "markdown", text: "Seed received." }],
+      messages: input.messages ?? [],
+      usage: { promptTokens: 10, completionTokens: 5, cachedTokens: 0, cost: 0 },
+    }),
+  });
+}
 
 /**
  * @returns {Promise<{
@@ -211,10 +229,13 @@ async function createRepoFixture() {
  * @returns {Promise<void>}
  */
 async function seedChat(chatId, options = {}) {
+  await registerWorkspaceHarness();
   await seedChat_(db, chatId, { enabled: true });
-  if (options.harnessCwd) {
-    await updateChatConfig(chatId, (current) => ({ ...current, harness_cwd: options.harnessCwd ?? null }));
-  }
+  await updateChatConfig(chatId, (current) => ({
+    ...current,
+    harness: WORKSPACE_HARNESS_NAME,
+    harness_cwd: options.harnessCwd ?? null,
+  }));
 }
 
 /**
@@ -236,13 +257,10 @@ async function createHandler(options = {}) {
   const { createLlmClient } = await import("../llm.js");
   const llmClient = createLlmClient();
   const { createMessageHandler } = await import("../index.js");
-  const { getActions, executeAction } = await import("../actions.js");
   const { createWhatsAppWorkspacePresenter } = await import("../whatsapp/workspace-presenter.js");
   const handler = createMessageHandler({
     store,
     llmClient,
-    getActionsFn: getActions,
-    executeActionFn: executeAction,
     transport: options.transport,
     workspacePresentation: options.transport
       ? createWhatsAppWorkspacePresenter({ transport: options.transport, store })
@@ -256,6 +274,7 @@ before(async () => {
   setDb("./pgdata/root", db);
   mockServer = await createMockLlmServer();
   process.env.BASE_URL = mockServer.url;
+  await registerWorkspaceHarness();
   const { initStore } = await import("../store.js");
   store = await initStore(db);
 });
@@ -267,6 +286,7 @@ after(async () => {
 
 describe("workspace lifecycle", () => {
   afterEach(() => {
+    workspaceHarnessState.reset();
     const pending = mockServer.pendingResponses();
     assert.equal(pending, 0, `Mock response queue should be empty after each test, but has ${pending} unconsumed response(s).`);
   });
@@ -380,7 +400,6 @@ describe("workspace lifecycle", () => {
       debug: true,
       memory: true,
       memory_threshold: 0.42,
-      enabled_actions: ["fetch_url"],
       model_roles: { coding: "openai/gpt-4.1" },
       harness: "codex",
       output_visibility: { thinking: true },
@@ -429,7 +448,6 @@ describe("workspace lifecycle", () => {
     assert.equal(enabledChat?.debug, true);
     assert.equal(enabledChat?.memory, true);
     assert.equal(enabledChat?.memory_threshold, 0.42);
-    assert.deepEqual(enabledChat?.enabled_actions, ["fetch_url"]);
     assert.deepEqual(enabledChat?.model_roles, { coding: "openai/gpt-4.1" });
     assert.equal(enabledChat?.harness, "codex");
     assert.deepEqual(enabledChat?.output_visibility, { thinking: true });
@@ -488,7 +506,6 @@ describe("workspace lifecycle", () => {
     const repoRoot = await createRepoFixture();
     const transportState = createFakeTransport();
     const handleMessage = await createHandler({ transport: transportState.transport });
-    mockServer.addResponses("Seed received.");
 
     await seedChat("repo-seeded-chat", { harnessCwd: repoRoot });
 
@@ -519,6 +536,9 @@ describe("workspace lifecycle", () => {
     ].join("\n") }]));
     assert.deepEqual(workspaceEvents[1], contentEvent("plain", [{ type: "text", text: "Prompt: investigate duplicate charges" }]));
     assert.equal(transportState.sentTexts.length, 0);
+    assert.equal(capturedHarnessTurns.length, 1);
+    assert.equal(capturedHarnessTurns[0].input, "investigate duplicate charges");
+    assert.equal(capturedHarnessTurns[0].runConfig?.workdir, workspace.worktree_path);
     const seededReply = workspaceEvents.find((event) => (
       event.kind === "content"
       && Array.isArray(event.content)

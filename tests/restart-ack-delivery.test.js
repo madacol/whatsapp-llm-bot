@@ -3,8 +3,8 @@ import assert from "node:assert/strict";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { deliverPendingRestartAck } from "../actions/admin/restart/_restart-ack-delivery.js";
-import { createRestartAckStore } from "../actions/admin/restart/_restart-ack-store.js";
+import { deliverPendingRestartAck } from "../restart/restart-ack-delivery.js";
+import { createRestartAckStore } from "../restart/restart-ack-store.js";
 
 describe("restart acknowledgement delivery", () => {
   it("edits the persisted restart acknowledgement message after startup", async () => {
@@ -45,7 +45,7 @@ describe("restart acknowledgement delivery", () => {
     }
   });
 
-  it("sends a new restarted message when the persisted marker has no message key", async () => {
+  it("falls back to sending restarted when the persisted marker has no editable handle", async () => {
     const dir = await mkdtemp(path.join(os.tmpdir(), "restart-ack-"));
     const storePath = path.join(dir, "ack.json");
     const store = createRestartAckStore(storePath);
@@ -72,7 +72,119 @@ describe("restart acknowledgement delivery", () => {
       });
 
       assert.deepEqual(edits, []);
-      assert.deepEqual(sent, [{ chatId: "chat-2@g.us", text: "Restarted." }]);
+      assert.deepEqual(sent, [{
+        chatId: "chat-2@g.us",
+        text: "Restarted.",
+      }]);
+      assert.equal(await store.read(), null);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("defers queued-only restart acknowledgements before the outbound queue has flushed", async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), "restart-ack-"));
+    const storePath = path.join(dir, "ack.json");
+    const store = createRestartAckStore(storePath);
+    /** @type {Array<{ chatId: string, text: string }>} */
+    const sent = [];
+
+    try {
+      await store.save({
+        chatId: "chat-queued-before-flush@g.us",
+        requestedAt: "2026-05-15T19:00:00.000Z",
+        oldPid: 123,
+        queueId: 88,
+      });
+
+      await deliverPendingRestartAck({
+        store,
+        phase: "beforeQueueFlush",
+        editMessage: async () => {
+          throw new Error("edit should not be attempted before queue recovery");
+        },
+        sendText: async (chatId, text) => {
+          sent.push({ chatId, text });
+        },
+        recoverQueuedMessage: () => undefined,
+      });
+
+      assert.deepEqual(sent, []);
+      assert.deepEqual(await store.read(), {
+        chatId: "chat-queued-before-flush@g.us",
+        requestedAt: "2026-05-15T19:00:00.000Z",
+        oldPid: 123,
+        queueId: 88,
+      });
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("falls back to sending restarted when the persisted edit handle is gone", async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), "restart-ack-"));
+    const storePath = path.join(dir, "ack.json");
+    const store = createRestartAckStore(storePath);
+    /** @type {Array<{ chatId: string, text: string }>} */
+    const sent = [];
+
+    try {
+      await store.save({
+        chatId: "chat-lost-handle@g.us",
+        requestedAt: "2026-05-15T19:00:00.000Z",
+        oldPid: 123,
+        transportHandleId: "wa-edit-missing",
+      });
+
+      await deliverPendingRestartAck({
+        store,
+        editMessage: async ({ transportHandleId }) => {
+          throw new Error(`WhatsApp edit handle ${transportHandleId} was not found.`);
+        },
+        sendText: async (chatId, text) => {
+          sent.push({ chatId, text });
+        },
+      });
+
+      assert.deepEqual(sent, [{
+        chatId: "chat-lost-handle@g.us",
+        text: "Restarted.",
+      }]);
+      assert.equal(await store.read(), null);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("falls back to sending restarted when the persisted edit handle expired", async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), "restart-ack-"));
+    const storePath = path.join(dir, "ack.json");
+    const store = createRestartAckStore(storePath);
+    /** @type {Array<{ chatId: string, text: string }>} */
+    const sent = [];
+
+    try {
+      await store.save({
+        chatId: "chat-expired-handle@g.us",
+        requestedAt: "2026-05-15T19:00:00.000Z",
+        oldPid: 123,
+        transportHandleId: "wa-edit-expired",
+      });
+
+      await deliverPendingRestartAck({
+        store,
+        editMessage: async ({ transportHandleId }) => {
+          throw new Error(`WhatsApp edit handle ${transportHandleId} expired.`);
+        },
+        sendText: async (chatId, text) => {
+          sent.push({ chatId, text });
+        },
+      });
+
+      assert.deepEqual(sent, [{
+        chatId: "chat-expired-handle@g.us",
+        text: "Restarted.",
+      }]);
       assert.equal(await store.read(), null);
     } finally {
       await rm(dir, { recursive: true, force: true });
@@ -175,7 +287,7 @@ describe("restart acknowledgement delivery", () => {
     }
   });
 
-  it("keeps the marker when a queued acknowledgement has not flushed yet", async () => {
+  it("falls back to sending restarted when a queued acknowledgement cannot be recovered", async () => {
     const dir = await mkdtemp(path.join(os.tmpdir(), "restart-ack-"));
     const storePath = path.join(dir, "ack.json");
     const store = createRestartAckStore(storePath);
@@ -201,9 +313,11 @@ describe("restart acknowledgement delivery", () => {
         recoverQueuedMessage: () => undefined,
       });
 
-      assert.deepEqual(sent, []);
-      const persisted = await store.read();
-      assert.equal(persisted?.queueId, 45);
+      assert.deepEqual(sent, [{
+        chatId: "chat-pending@g.us",
+        text: "Restarted.",
+      }]);
+      assert.equal(await store.read(), null);
     } finally {
       await rm(dir, { recursive: true, force: true });
     }

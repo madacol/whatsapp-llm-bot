@@ -83,7 +83,20 @@ export async function ensureChatStoreSchema(db) {
     )
   `;
 
+  await db.sql`
+    CREATE TABLE IF NOT EXISTS whatsapp_outbound_dead_letter (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      original_queue_id INTEGER,
+      chat_id TEXT NOT NULL,
+      payload_json TEXT NOT NULL,
+      reason TEXT NOT NULL,
+      created_at TEXT,
+      quarantined_at TEXT DEFAULT CURRENT_TIMESTAMP
+    )
+  `;
+
   await db.sql`CREATE INDEX IF NOT EXISTS idx_messages_display_key ON messages (chat_id, display_key) WHERE display_key IS NOT NULL`;
   await db.sql`CREATE INDEX IF NOT EXISTS idx_memories_chat_id_created_at ON memories (chat_id, created_at)`;
   await db.sql`CREATE INDEX IF NOT EXISTS idx_whatsapp_outbound_queue_chat_id_id ON whatsapp_outbound_queue (chat_id, id)`;
+  await db.sql`CREATE INDEX IF NOT EXISTS idx_whatsapp_outbound_dead_letter_chat_id_id ON whatsapp_outbound_dead_letter (chat_id, id)`;
 }
