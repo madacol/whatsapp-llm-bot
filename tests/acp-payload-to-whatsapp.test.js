@@ -337,6 +337,79 @@ describe("ACP payload to WhatsApp socket vertical slices", () => {
     assert.ok(texts.some((text) => text.includes("📊 Cost: 0.001200")), `Expected usage text, got ${JSON.stringify(sent)}`);
   });
 
+  it("does not finalize assistant text chunks around long-running ACP tool updates", async () => {
+    const { sent, trace } = await observeAcpPayloadSliceToBaileys([
+      {
+        sessionId: "s1",
+        update: {
+          sessionUpdate: "tool_call",
+          toolCallId: "test-run",
+          title: "pnpm test",
+          kind: "execute",
+          status: "in_progress",
+          rawInput: { command: "pnpm test", cwd: "/repo" },
+        },
+      },
+      {
+        sessionId: "s1",
+        update: {
+          sessionUpdate: "agent_message_chunk",
+          content: { type: "text", text: "The full " },
+        },
+      },
+      {
+        sessionId: "s1",
+        update: {
+          sessionUpdate: "tool_call_update",
+          toolCallId: "test-run",
+          status: "in_progress",
+        },
+      },
+      {
+        sessionId: "s1",
+        update: {
+          sessionUpdate: "agent_message_chunk",
+          content: { type: "text", text: "test runner is underway. I'll keep monitoring it " },
+        },
+      },
+      {
+        sessionId: "s1",
+        update: {
+          sessionUpdate: "tool_call_update",
+          toolCallId: "test-run",
+          status: "completed",
+          rawOutput: { formatted_output: "ok\n" },
+        },
+      },
+      {
+        sessionId: "s1",
+        update: {
+          sessionUpdate: "agent_message_chunk",
+          content: { type: "text", text: "and report any failures with the exact failing test names." },
+        },
+      },
+    ], {
+      chatId: "acp-payload-long-running-tool@s.whatsapp.net",
+      cwd: "/repo",
+      visibility: { ...DEFAULT_OUTPUT_VISIBILITY, toolDetails: true },
+    });
+
+    assert.deepEqual(trace.runtimeEvents.map((event) => event.type), [
+      "tool.started",
+      "item.started",
+      "content.delta",
+      "tool.updated",
+      "content.delta",
+      "tool.completed",
+      "content.delta",
+      "item.completed",
+    ]);
+    assert.deepEqual(
+      sent.map((entry) => entry.msg.text).filter((text) => typeof text === "string" && text.startsWith("🤖")),
+      ["🤖 The full test runner is underway. I'll keep monitoring it and report any failures with the exact failing test names."],
+    );
+  });
+
   it("suppresses ACP editing placeholders and renders the completed diff through Baileys", async () => {
     const { sent, trace } = await observeAcpPayloadSliceToBaileys([
       {
