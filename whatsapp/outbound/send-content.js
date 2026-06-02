@@ -195,7 +195,8 @@ function buildWhatsAppWebRuntimeToolFromRawAcp(tool, update) {
         }
         : null;
     }
-    case "openPage": {
+    case "openPage":
+    case "open_page": {
       const refId = nonEmptyString(action.url);
       return refId
         ? {
@@ -205,7 +206,8 @@ function buildWhatsAppWebRuntimeToolFromRawAcp(tool, update) {
         }
         : null;
     }
-    case "findInPage": {
+    case "findInPage":
+    case "find_in_page": {
       const pattern = nonEmptyString(action.pattern);
       const refId = nonEmptyString(action.url);
       return pattern && refId
