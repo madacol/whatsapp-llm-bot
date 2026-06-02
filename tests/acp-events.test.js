@@ -28,6 +28,50 @@ describe("ACP event normalization", () => {
     assert.deepEqual(second.map((event) => event.type), ["tool.updated"]);
   });
 
+  it("does not complete assistant chunks just because a running tool updates", () => {
+    const model = createAcpRuntimeModel();
+    const first = model.acceptSessionUpdate({
+      sessionId: "s1",
+      update: {
+        sessionUpdate: "tool_call",
+        toolCallId: "test-run",
+        title: "pnpm test",
+        kind: "execute",
+        status: "in_progress",
+      },
+    });
+    const chunk = model.acceptSessionUpdate({
+      sessionId: "s1",
+      update: {
+        sessionUpdate: "agent_message_chunk",
+        content: { type: "text", text: "The full " },
+      },
+    });
+    const update = model.acceptSessionUpdate({
+      sessionId: "s1",
+      update: {
+        sessionUpdate: "tool_call_update",
+        toolCallId: "test-run",
+        status: "in_progress",
+      },
+    });
+    const secondChunk = model.acceptSessionUpdate({
+      sessionId: "s1",
+      update: {
+        sessionUpdate: "agent_message_chunk",
+        content: { type: "text", text: "test runner is underway." },
+      },
+    });
+    const flushed = model.flushAssistantSegment();
+
+    assert.deepEqual(first.map((event) => event.type), ["tool.started"]);
+    assert.deepEqual(chunk.map((event) => event.type), ["item.started", "content.delta"]);
+    assert.deepEqual(update.map((event) => event.type), ["tool.updated"]);
+    assert.deepEqual(secondChunk.map((event) => event.type), ["content.delta"]);
+    assert.deepEqual(flushed.map((event) => event.type), ["item.completed"]);
+    assert.equal(flushed[0]?.type === "item.completed" ? flushed[0].item.text : "", "The full test runner is underway.");
+  });
+
   it("normalizes assistant text, plans, and tool lifecycle updates", () => {
     const assistantEvents = normalizeAcpSessionUpdate({
       sessionId: "s1",

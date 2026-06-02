@@ -492,6 +492,28 @@ export function createAcpRuntimeModel() {
   }
 
   /**
+   * @param {string} text
+   * @returns {boolean}
+   */
+  function isGuardianReviewText(text) {
+    return /^Guardian warning: Automatic approval review (approved|denied)\b/.test(text.trim());
+  }
+
+  /**
+   * @param {Record<string, unknown>} update
+   * @returns {boolean}
+   */
+  function shouldFlushAssistantBeforeUpdate(update) {
+    if (!assistantSegment) {
+      return false;
+    }
+    if (update.sessionUpdate !== "tool_call_update") {
+      return true;
+    }
+    return isGuardianReviewText(assistantSegment.text);
+  }
+
+  /**
    * @param {Record<string, unknown>} raw
    * @returns {HarnessRuntimeEvent[]}
    */
@@ -545,7 +567,7 @@ export function createAcpRuntimeModel() {
       return events;
     }
 
-    const prefix = flushAssistantSegment();
+    const prefix = shouldFlushAssistantBeforeUpdate(update) ? flushAssistantSegment() : [];
 
     if (update.sessionUpdate === "agent_thought_chunk") {
       const text = extractTextContent(update);
