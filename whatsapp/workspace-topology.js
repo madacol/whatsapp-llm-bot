@@ -24,6 +24,16 @@ function isMainWorkspaceName(workspaceName) {
 }
 
 /**
+ * @param {string[]} jids
+ * @returns {string[]}
+ */
+function normalizeParticipantJids(jids) {
+  return [...new Set(jids
+    .map((jid) => typeof jid === "string" ? jid.trim() : "")
+    .filter((jid) => jid.includes("@")))];
+}
+
+/**
  * @param {string} projectName
  * @param {string} workspaceName
  * @param {{ projectId?: string, role?: WhatsAppWorkspacePresentationRole }} [options]
@@ -72,6 +82,19 @@ export function createWhatsAppWorkspaceTopology({ transport, store }) {
       return null;
     }
     return transport.getGroupLinkedParent(sourceChatId);
+  }
+
+  /**
+   * @param {string | undefined} sourceChatId
+   * @param {string[]} requesterJids
+   * @returns {Promise<string[]>}
+   */
+  async function resolveInitialParticipants(sourceChatId, requesterJids) {
+    if (!sourceChatId || !transport.getGroupParticipants) {
+      return normalizeParticipantJids(requesterJids);
+    }
+    const sourceParticipants = await transport.getGroupParticipants(sourceChatId);
+    return normalizeParticipantJids([...sourceParticipants, ...requesterJids]);
   }
 
   /**
@@ -166,13 +189,16 @@ export function createWhatsAppWorkspaceTopology({ transport, store }) {
     },
 
     async provisionWorkspaceSurface(input) {
-      const communityChatId = await resolveSourceCommunityChatId(input.sourceChatId);
+      const [communityChatId, participants] = await Promise.all([
+        resolveSourceCommunityChatId(input.sourceChatId),
+        resolveInitialParticipants(input.sourceChatId, input.requesterJids),
+      ]);
       return provisionSurface({
         projectId: input.projectId,
         projectName: input.projectName,
         workspaceId: input.workspaceId,
         workspaceName: input.workspaceName,
-        requesterJids: input.requesterJids,
+        requesterJids: participants,
         communityChatId,
       });
     },

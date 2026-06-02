@@ -9,6 +9,7 @@ import {
   executeCommunityCreate,
   executeCommunityCreateGroup,
   executeGroupLinkedParentLookup,
+  executeGroupParticipantLookup,
 } from "../whatsapp/create-whatsapp-transport.js";
 import { setDb } from "../db.js";
 import { initStore } from "../store.js";
@@ -713,5 +714,26 @@ describe("WhatsApp transport community creation", () => {
     const result = await executeGroupLinkedParentLookup(socket, "group-12345@g.us");
 
     assert.equal(result, null);
+  });
+
+  it("returns deduped participant ids from Baileys group metadata", async () => {
+    const socket = {
+      groupMetadata: async () => ({
+        participants: [
+          { id: "user@s.whatsapp.net" },
+          { id: "teammate@s.whatsapp.net" },
+          { id: "user@s.whatsapp.net" },
+          { id: "" },
+          {},
+        ],
+      }),
+    };
+
+    const result = await executeGroupParticipantLookup(socket, "group-12345@g.us");
+
+    assert.deepEqual(result, [
+      "user@s.whatsapp.net",
+      "teammate@s.whatsapp.net",
+    ]);
   });
 });
