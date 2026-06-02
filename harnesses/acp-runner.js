@@ -207,7 +207,6 @@ async function buildAttachmentPromptContent(block, workdir) {
         type: "image",
         data: (await fs.readFile(resolvedPath)).toString("base64"),
         mimeType,
-        uri: pathToFileURL(resolvedPath).href,
       };
     }
     return null;

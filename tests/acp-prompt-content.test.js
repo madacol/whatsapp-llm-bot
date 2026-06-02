@@ -26,7 +26,6 @@ describe("buildAcpPromptContent", () => {
         type: "image",
         data: Buffer.from("image-bytes").toString("base64"),
         mimeType: "image/png",
-        uri: pathToFileURL(imagePath).href,
       });
       assert.deepEqual(prompt[2], {
         type: "resource_link",
