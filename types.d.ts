@@ -306,7 +306,7 @@ type CompactToolActivityEvent = {
       }
     | {
         type: "tool";
-        status: "started" | "completed" | "failed";
+        status: "started" | "updated" | "completed" | "failed";
         toolCall?: LlmChatResponse["toolCalls"][0];
         readLineRange?: { start: number; end: number };
       }

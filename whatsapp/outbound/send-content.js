@@ -225,6 +225,18 @@ function buildWhatsAppWebRuntimeToolFromRawAcp(tool, update) {
 
 /**
  * @param {Record<string, unknown>} update
+ * @returns {boolean}
+ */
+function hasRawAcpWebAction(update) {
+  return buildWhatsAppWebRuntimeToolFromRawAcp({
+    id: "",
+    name: "",
+    arguments: {},
+  }, update) !== null;
+}
+
+/**
+ * @param {Record<string, unknown>} update
  * @returns {string | null}
  */
 function getRawAcpCommand(update) {
@@ -361,7 +373,7 @@ function buildWhatsAppRuntimeToolFromRawAcp(tool, event) {
       };
     }
   }
-  if (update.kind === "search") {
+  if (update.kind === "search" || hasRawAcpWebAction(update)) {
     const webTool = buildWhatsAppWebRuntimeToolFromRawAcp(tool, update);
     if (webTool) {
       return webTool;
@@ -1417,8 +1429,9 @@ async function sendRuntimeToolEvent(sock, chatId, event, options, reactionRuntim
 
   const toolStateById = runtimeToolsByChat.get(chatId);
   const state = toolStateById?.get(toolEvent.tool.id);
+  const previousSummary = state?.summary;
   if (state) {
-    state.summary = appendReadLineRange(state.summary, readLineRange);
+    state.summary = appendReadLineRange(summary, readLineRange);
   }
   const text = formatRuntimeToolText(
     status,
@@ -1433,7 +1446,9 @@ async function sendRuntimeToolEvent(sock, chatId, event, options, reactionRuntim
         persistOnInspect: true,
       });
     }
-    if (status !== "updated") {
+    if (status === "updated" && previousSummary !== state.summary) {
+      await state.handle.update({ kind: "text", text });
+    } else if (status !== "updated") {
       await state.handle.update({ kind: "text", text });
       toolStateById?.delete(toolEvent.tool.id);
       if (!toolStateById || toolStateById.size === 0) {
@@ -1767,6 +1782,20 @@ async function sendCompactToolActivityEvent(sock, chatId, event, options, reacti
     });
   }
 
+  if (activity.type === "tool" && activity.status === "updated" && activity.toolCall) {
+    const entryId = state.pendingToolEntryIdsByToolId.get(activity.toolCall.id);
+    const entry = entryId ? state.entries.find((candidate) => candidate.id === entryId) : undefined;
+    const summary = formatCompactToolActivitySummary(activity, event.cwd);
+    if (entry && summary) {
+      const nextSummary = appendReadLineRange(summary, activity.readLineRange ?? null);
+      if (nextSummary !== entry.summary) {
+        entry.summary = nextSummary;
+        return flushCompactToolActivity(state);
+      }
+    }
+    return state.handle;
+  }
+
   if (activity.type === "tool") {
     let entryId = activity.toolCall?.id ? state.pendingToolEntryIdsByToolId.get(activity.toolCall.id) : undefined;
     if (!entryId && activity.status === "failed") {
@@ -1819,7 +1848,7 @@ async function sendCompactRuntimeEvent(sock, chatId, event, options, reactionRun
       },
     }, options, reactionRuntime, sendOptions);
   }
-  if (runtime.type === "tool.started" || runtime.type === "tool.completed" || runtime.type === "tool.failed") {
+  if (runtime.type === "tool.started" || runtime.type === "tool.updated" || runtime.type === "tool.completed" || runtime.type === "tool.failed") {
     const displayTool = buildWhatsAppRuntimeToolFromRawAcp(runtime.tool, event);
     if (isNoopRuntimeTool(displayTool)) {
       return undefined;
@@ -1830,7 +1859,11 @@ async function sendCompactRuntimeEvent(sock, chatId, event, options, reactionRun
       cwd: event.cwd,
       activity: {
         type: "tool",
-        status: runtime.type === "tool.failed" ? "failed" : runtime.type === "tool.completed" ? "completed" : "started",
+        status: runtime.type === "tool.failed"
+          ? "failed"
+          : runtime.type === "tool.completed"
+            ? "completed"
+            : runtime.type === "tool.updated" ? "updated" : "started",
         toolCall: {
           id: displayTool.id,
           name: displayTool.name,

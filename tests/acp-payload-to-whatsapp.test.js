@@ -704,6 +704,120 @@ describe("ACP payload to WhatsApp socket vertical slices", () => {
     assert.equal(sent[2]?.msg.text, "✅ *Find On Page*  \"install\" in `example.com/docs`");
   });
 
+  it("renders live Codex ACP webSearch update actions from raw WhatsApp payloads", async () => {
+    const { sent, trace } = await observeAcpPayloadSliceToBaileys([
+      {
+        sessionId: "s1",
+        update: {
+          sessionUpdate: "tool_call",
+          toolCallId: "live-web-search",
+          kind: "search",
+          title: "Web search",
+          rawInput: {
+            query: "",
+            action: { type: "other" },
+          },
+        },
+      },
+      {
+        sessionId: "s1",
+        update: {
+          sessionUpdate: "tool_call_update",
+          toolCallId: "live-web-search",
+          rawInput: {
+            query: "OpenAI official website",
+            action: {
+              type: "search",
+              query: "OpenAI official website",
+              queries: ["OpenAI official website"],
+            },
+          },
+        },
+      },
+      {
+        sessionId: "s1",
+        update: {
+          sessionUpdate: "tool_call",
+          toolCallId: "live-web-open",
+          kind: "search",
+          title: "Web search",
+          rawInput: {
+            query: "",
+            action: { type: "other" },
+          },
+        },
+      },
+      {
+        sessionId: "s1",
+        update: {
+          sessionUpdate: "tool_call_update",
+          toolCallId: "live-web-open",
+          rawInput: {
+            query: "https://openai.com/",
+            action: {
+              type: "openPage",
+              url: "https://openai.com/",
+            },
+          },
+        },
+      },
+      {
+        sessionId: "s1",
+        update: {
+          sessionUpdate: "tool_call",
+          toolCallId: "live-web-find",
+          kind: "search",
+          title: "Web search",
+          rawInput: {
+            query: "",
+            action: { type: "other" },
+          },
+        },
+      },
+      {
+        sessionId: "s1",
+        update: {
+          sessionUpdate: "tool_call_update",
+          toolCallId: "live-web-find",
+          rawInput: {
+            query: "'Codex' in https://openai.com/",
+            action: {
+              type: "findInPage",
+              url: "https://openai.com/",
+              pattern: "Codex",
+            },
+          },
+        },
+      },
+    ], {
+      chatId: "acp-payload-live-web-actions@s.whatsapp.net",
+      cwd: "/repo",
+      visibility: { ...DEFAULT_OUTPUT_VISIBILITY, toolDetails: true },
+    });
+
+    assert.deepEqual(trace.runtimeEvents.map((event) => event.type), [
+      "tool.started",
+      "tool.updated",
+      "tool.started",
+      "tool.updated",
+      "tool.started",
+      "tool.updated",
+    ]);
+    const renderedTexts = sent.map((entry) => entry.msg.text);
+    assert.ok(
+      renderedTexts.includes("🔧 *Search Web*  \"OpenAI official website\""),
+      JSON.stringify(renderedTexts),
+    );
+    assert.ok(
+      renderedTexts.includes("🔧 *Open Link*  `openai.com`"),
+      JSON.stringify(renderedTexts),
+    );
+    assert.ok(
+      renderedTexts.includes("🔧 *Find On Page*  \"Codex\" in `openai.com`"),
+      JSON.stringify(renderedTexts),
+    );
+  });
+
   it("renders ACP list-file locations with the listed path", async () => {
     const { sent, trace } = await observeAcpPayloadSliceToBaileys([
       {
