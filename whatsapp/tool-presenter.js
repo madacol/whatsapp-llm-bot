@@ -20,6 +20,8 @@ const SDK_PRESENTATION_TOOLS = new Set([
   "image_query",
   "open",
   "find",
+  "click",
+  "screenshot",
   "time",
   "weather",
   "finance",

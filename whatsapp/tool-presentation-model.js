@@ -20,7 +20,7 @@ export function shortenPath(p, cwd) {
 }
 
 /**
- * @typedef {"Read" | "Search" | "List" | "Plan" | "Search Web" | "Open Link" | "Find On Page" | "Search Images" | "Time" | "Weather" | "Quote" | "Sports Schedule" | "Sports Standings" | "Run Command" | "Start Agent" | "Message Agent" | "Wait For Agent" | "Resume Agent" | "Close Agent" | "Run Parallel" | "Terminal Input"} ToolActivityTitle
+ * @typedef {"Read" | "Search" | "List" | "Plan" | "Search Web" | "Open Link" | "Find On Page" | "Click Link" | "Screenshot" | "Search Images" | "Time" | "Weather" | "Quote" | "Sports Schedule" | "Sports Standings" | "Run Command" | "Start Agent" | "Message Agent" | "Wait For Agent" | "Resume Agent" | "Close Agent" | "Run Parallel" | "Terminal Input"} ToolActivityTitle
  */
 
 /**
@@ -31,7 +31,7 @@ export function shortenPath(p, cwd) {
  */
 
 /**
- * @typedef {"bash" | "read" | "grep" | "glob" | "plain" | "web_search" | "open_link" | "find_on_page" | "image_search" | "time" | "weather" | "finance" | "sports_schedule" | "sports_standings"} ToolInspectMode
+ * @typedef {"bash" | "read" | "grep" | "glob" | "plain" | "web_search" | "open_link" | "find_on_page" | "click_link" | "screenshot" | "image_search" | "time" | "weather" | "finance" | "sports_schedule" | "sports_standings"} ToolInspectMode
  */
 
 /**
@@ -331,6 +331,26 @@ function hasFindArgs(value) {
 
 /**
  * @param {unknown} value
+ * @returns {value is { ref_id: string, id: number }}
+ */
+function hasClickArgs(value) {
+  return isRecord(value)
+    && typeof value.ref_id === "string"
+    && typeof value.id === "number";
+}
+
+/**
+ * @param {unknown} value
+ * @returns {value is { ref_id: string, pageno: number }}
+ */
+function hasScreenshotArgs(value) {
+  return isRecord(value)
+    && typeof value.ref_id === "string"
+    && typeof value.pageno === "number";
+}
+
+/**
+ * @param {unknown} value
  * @returns {value is { location: string, start?: string, duration?: number }}
  */
 function hasWeatherArgs(value) {
@@ -432,6 +452,39 @@ function createFindOnPagePresentation(pattern, refId) {
     `${displayPattern} in ${formatWebRef(refId)}`,
     "find_on_page",
     createFlow("web", "Web", `find ${displayPattern}`),
+  );
+}
+
+/**
+ * @param {string} refId
+ * @param {number} id
+ * @returns {ActivityPresentation}
+ */
+function createClickLinkPresentation(refId, id) {
+  const ref = formatWebRef(refId);
+  return createSimpleActivityPresentation(
+    "Click Link",
+    "Click Link",
+    `${ref}  *${id}*`,
+    "click_link",
+    createFlow("web", "Web", `click ${id} in ${ref}`),
+  );
+}
+
+/**
+ * @param {string} refId
+ * @param {number} pageno
+ * @returns {ActivityPresentation}
+ */
+function createScreenshotPresentation(refId, pageno) {
+  const pageNumber = Number.isInteger(pageno) ? pageno + 1 : pageno;
+  const ref = formatWebRef(refId);
+  return createSimpleActivityPresentation(
+    "Screenshot",
+    "Screenshot",
+    `${ref}  *${pageNumber}*`,
+    "screenshot",
+    createFlow("web", "Web", `screenshot ${ref}`),
   );
 }
 
@@ -592,6 +645,14 @@ function buildSdkPresentation(name, args, cwd) {
     case "find": {
       const findArgs = extractToolArgs(args, "find", hasFindArgs);
       return findArgs ? createFindOnPagePresentation(findArgs.pattern, findArgs.ref_id) : null;
+    }
+    case "click": {
+      const clickArgs = extractToolArgs(args, "click", hasClickArgs);
+      return clickArgs ? createClickLinkPresentation(clickArgs.ref_id, clickArgs.id) : null;
+    }
+    case "screenshot": {
+      const screenshotArgs = extractToolArgs(args, "screenshot", hasScreenshotArgs);
+      return screenshotArgs ? createScreenshotPresentation(screenshotArgs.ref_id, screenshotArgs.pageno) : null;
     }
     case "Read":
       return typeof args.file_path === "string" ? createReadPresentation(args.file_path, cwd, getReadLineRange(args)) : null;
