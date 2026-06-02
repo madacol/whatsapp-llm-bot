@@ -342,7 +342,13 @@ export function createConversationRunner({ store, llmClient, restartCommandHandl
     const selection = await resolveConversationHarnessSelection(chatInfo);
     const { harnessInstance } = resolveConversationHarnessFromSelection(selection);
     harnessSessionDirectory.remove(chatId);
-    return !!(await harnessInstance?.adapter?.stopSession(chatId));
+    let stopped = false;
+    try {
+      stopped = !!(await harnessInstance?.adapter?.stopSession(chatId));
+    } finally {
+      await saveHarnessSession(chatId, null);
+    }
+    return stopped;
   }
 
   const bangCommandRouter = createBangCommandRouter({
