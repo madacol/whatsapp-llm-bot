@@ -396,11 +396,16 @@ export function mergeAcpToolCallState(previous, next) {
  * @returns {AcpToolCallState}
  */
 function readToolCallState(update) {
+  const status = typeof update.status === "string"
+    ? update.status
+    : update.sessionUpdate === "tool_call"
+      ? "in_progress"
+      : undefined;
   return {
     id: stringOrNull(update.toolCallId) ?? `acp-tool:${Date.now()}`,
     ...(typeof update.title === "string" ? { title: update.title } : {}),
     ...(typeof update.kind === "string" ? { kind: update.kind } : {}),
-    ...(typeof update.status === "string" ? { status: update.status } : {}),
+    ...(status ? { status } : {}),
     ...("rawInput" in update ? { rawInput: update.rawInput } : {}),
     ...("rawOutput" in update ? { rawOutput: update.rawOutput } : {}),
     ...("content" in update ? { content: update.content } : {}),
