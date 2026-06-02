@@ -44,6 +44,7 @@ function parseParams(argsText, parameters) {
  *   workspaceControl: import("../workspace-command-router.js").WorkspaceControl,
  *   addMessage: import("../store.js").Store["addMessage"],
  *   cancelActiveRun: (chatId: string, chatInfo: import("../store.js").ChatRow | undefined) => Promise<boolean>,
+ *   clearActiveSession?: (chatId: string, chatInfo: import("../store.js").ChatRow | undefined) => Promise<boolean>,
  *   restartCommandHandler?: ReturnType<typeof createRestartCommandHandler>,
  * }} input
  * @returns {(input: {
@@ -61,6 +62,7 @@ export function createBangCommandRouter({
   workspaceControl,
   addMessage,
   cancelActiveRun,
+  clearActiveSession,
   restartCommandHandler = createRestartCommandHandler(),
 }) {
   return async function handleBangCommand({
@@ -131,6 +133,8 @@ export function createBangCommandRouter({
 
       if (name === "clear") {
         await addMessage(chatId, commandMessage, senderIds);
+        await cancelActiveRun(chatId, chatInfo);
+        await clearActiveSession?.(chatId, chatInfo);
         const result = await runClearConversationCommand(context);
         await replyCommandResult({ chatId, context, result });
         return;

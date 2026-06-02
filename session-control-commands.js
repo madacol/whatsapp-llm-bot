@@ -9,6 +9,7 @@ const RESUME_CANCEL_OPTION_ID = "cancel";
  *   archive: (chatId: string) => Promise<HarnessSessionHistoryEntry | null>;
  *   getHistory: (chatId: string) => Promise<HarnessSessionHistoryEntry[]>;
  *   restore: (chatId: string, indexOrId: number | string) => Promise<HarnessSessionHistoryEntry | null>;
+ *   clearRuntime?: (chatId: string) => Promise<boolean> | boolean;
  * }} SessionControl
  */
 
@@ -81,6 +82,7 @@ export async function handleSessionControlCommand({ command, chatId, context, ca
     case "clear": {
       await cancelActiveQuery?.();
       const archived = await sessionControl.archive(chatId);
+      await sessionControl.clearRuntime?.(chatId);
       const titleLine = archived?.title ? `Session cleared: ${archived.title}\n\n` : "Session cleared\n\n";
       await context.reply(contentEvent("tool-result", `${titleLine}Next message starts fresh.\nUse */resume* to restore this session later.`));
       return true;

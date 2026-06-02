@@ -167,6 +167,7 @@ describe("ACP pipeline via createMessageHandler", () => {
       chatId: "pipe-clear-cont",
       content: [{ type: "text", text: "!clear" }],
     }).context);
+    assert.deepEqual(pipelineHarnessState.stoppedSessions, ["pipe-clear-cont"]);
     await handleMessage(createChatTurn({
       chatId: "pipe-clear-cont",
       content: [{ type: "text", text: "What do you know?" }],

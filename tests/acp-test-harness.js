@@ -24,6 +24,7 @@ export const ZERO_USAGE = {
 /**
  * @typedef {{
  *   turns: HarnessTurnInput[],
+ *   stoppedSessions: string[],
  *   reset: () => void,
  * }} AcpTestHarnessState
  */
@@ -52,8 +53,11 @@ export function createAcpTestHarnessState() {
   const state = {
     /** @type {HarnessTurnInput[]} */
     turns: [],
+    /** @type {string[]} */
+    stoppedSessions: [],
     reset() {
       state.turns.length = 0;
+      state.stoppedSessions.length = 0;
     },
   };
   return state;
@@ -124,7 +128,10 @@ export function registerAcpTestHarness(options) {
             respondToRequest: async () => false,
             respondToUserInput: async () => false,
             injectMessage: async () => false,
-            stopSession: async () => false,
+            stopSession: async (chatId) => {
+              state.stoppedSessions.push(typeof chatId === "string" ? chatId : chatId.id);
+              return true;
+            },
             hasSession: () => false,
             stopAll: async () => {},
             listSessions: () => [],

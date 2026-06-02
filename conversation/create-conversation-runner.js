@@ -333,6 +333,18 @@ export function createConversationRunner({ store, llmClient, restartCommandHandl
     workspacePresentation,
     dispatchTurn,
   });
+  /**
+   * @param {string} chatId
+   * @param {import("../store.js").ChatRow | undefined} chatInfo
+   * @returns {Promise<boolean>}
+   */
+  async function clearActiveHarnessSession(chatId, chatInfo) {
+    const selection = await resolveConversationHarnessSelection(chatInfo);
+    const { harnessInstance } = resolveConversationHarnessFromSelection(selection);
+    harnessSessionDirectory.remove(chatId);
+    return !!(await harnessInstance?.adapter?.stopSession(chatId));
+  }
+
   const bangCommandRouter = createBangCommandRouter({
     workspaceControl: workspaceLifecycle,
     addMessage,
@@ -342,6 +354,7 @@ export function createConversationRunner({ store, llmClient, restartCommandHandl
       const { harness } = resolveConversationHarnessFromSelection(selection);
       return !!(await harness?.cancel?.(chatId));
     },
+    clearActiveSession: clearActiveHarnessSession,
   });
   let harnessRuntimeTurnSequence = 0;
 
@@ -857,6 +870,7 @@ export function createConversationRunner({ store, llmClient, restartCommandHandl
           archive: async (sessionChatId) => archiveSessionWithGeneratedTitle(sessionChatId, chatInfo),
           getHistory: getHarnessSessionHistory,
           restore: restoreHarnessSession,
+          clearRuntime: async (sessionChatId) => clearActiveHarnessSession(sessionChatId, chatInfo),
         },
         sessionForkControl: {
           save: saveHarnessSession,
