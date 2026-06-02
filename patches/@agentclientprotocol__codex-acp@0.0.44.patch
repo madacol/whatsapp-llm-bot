@@ -2,7 +2,7 @@ diff --git a/dist/index.js b/dist/index.js
 index 1b1f5d508f39ec47ff1826516f9c106a02004cf9..8765731a0ae5c312d589ce22e33d00e332f10b2a 100755
 --- a/dist/index.js
 +++ b/dist/index.js
-@@ -17381,12 +17381,14 @@ function createCommandActionEvent(id, status, cwd, commandAction) {
+@@ -17382,12 +17382,14 @@
      };
    } else if (commandAction.type === "listFiles") {
      const title = commandAction.path ? `List files in '${commandAction.path}'` : "List files";
@@ -18,7 +18,89 @@ index 1b1f5d508f39ec47ff1826516f9c106a02004cf9..8765731a0ae5c312d589ce22e33d00e3
      };
    }
    return {
-@@ -19443,6 +19443,9 @@ var CodexAcpClient = class {
+@@ -17667,6 +17669,41 @@
+       }
+     };
+   }
++  formatWebSearchTitle(item) {
++    const action = item.action;
++    if (!action) {
++      return item.query ? `Web search: ${item.query}` : "Web search";
++    }
++    switch (action.type) {
++      case "search": {
++        const queries = action.queries?.filter((query2) => query2 && query2.length > 0) ?? [];
++        const query = action.query ?? (queries.length > 0 ? queries.join(", ") : null) ?? item.query;
++        return query ? `Web search: ${query}` : "Web search";
++      }
++      case "openPage":
++        return action.url ? `Open page: ${action.url}` : "Open page";
++      case "findInPage": {
++        const pattern = action.pattern ? ` for '${action.pattern}'` : "";
++        const url2 = action.url ? ` in ${action.url}` : "";
++        return `Find in page${pattern}${url2}`.trim();
++      }
++      case "other":
++        return "Web search";
++    }
++  }
++  createWebSearchItemUpdate(item) {
++    return {
++      sessionUpdate: "tool_call",
++      toolCallId: item.id,
++      kind: "search",
++      title: this.formatWebSearchTitle(item),
++      status: toAcpStatus(item.status),
++      rawInput: {
++        query: item.query,
++        action: item.action
++      }
++    };
++  }
+   async createItemEvent(event) {
+     switch (event.item.type) {
+       case "fileChange":
+@@ -17677,12 +17714,13 @@
+         return await createMcpToolCallUpdate(event.item);
+       case "dynamicToolCall":
+         return await createDynamicToolCallUpdate(event.item);
++      case "webSearch":
++        return this.createWebSearchItemUpdate(event.item);
+       case "collabAgentToolCall":
+       case "userMessage":
+       case "hookPrompt":
+       case "agentMessage":
+       case "reasoning":
+-      case "webSearch":
+       case "imageView":
+       case "imageGeneration":
+       case "enteredReviewMode":
+@@ -17711,6 +17749,16 @@
+         };
+       case "commandExecution":
+         return this.completeCommandExecutionEvent(event.item);
++      case "webSearch":
++        return {
++          sessionUpdate: "tool_call_update",
++          toolCallId: event.item.id,
++          status: toAcpStatus(event.item.status),
++          rawInput: {
++            query: event.item.query,
++            action: event.item.action
++          }
++        };
+       case "reasoning":
+         const summary = event.item.summary[0];
+         if (!summary) return null;
+@@ -17725,7 +17773,6 @@
+       case "userMessage":
+       case "hookPrompt":
+       case "agentMessage":
+-      case "webSearch":
+       case "imageView":
+       case "imageGeneration":
+       case "enteredReviewMode":
+@@ -19443,6 +19490,9 @@
        turnId: params.turnId
      });
    }
@@ -28,7 +110,7 @@ index 1b1f5d508f39ec47ff1826516f9c106a02004cf9..8765731a0ae5c312d589ce22e33d00e3
    async fetchAvailableModels() {
      const models = [];
      let cursor = null;
-@@ -19900,7 +19903,8 @@ var CodexAcpServer = class {
+@@ -19900,7 +19950,8 @@
          },
          sessionCapabilities: {
            resume: {},
@@ -38,7 +120,7 @@ index 1b1f5d508f39ec47ff1826516f9c106a02004cf9..8765731a0ae5c312d589ce22e33d00e3
          },
          mcpCapabilities: {
            http: true,
-@@ -19912,6 +19916,26 @@ var CodexAcpServer = class {
+@@ -19912,6 +19963,26 @@
    }
    async extMethod(method, params) {
      const methodRequest = { method, params };
@@ -65,7 +147,16 @@ index 1b1f5d508f39ec47ff1826516f9c106a02004cf9..8765731a0ae5c312d589ce22e33d00e3
      if (!isExtMethodRequest(methodRequest)) {
        return {};
      }
-@@ -20650,6 +20674,9 @@ var CodexAppServerClient = class {
+@@ -20259,7 +20330,7 @@
+       toolCallId: item.id,
+       kind: "search",
+       title: this.formatWebSearchTitle(item),
+-      status: "completed",
++      status: this.toAcpToolCallStatus(item.status ?? "completed"),
+       rawInput: {
+         query: item.query,
+         action: item.action
+@@ -20650,6 +20721,9 @@
    async turnInterrupt(params) {
      return await this.sendRequest({ method: "turn/interrupt", params });
    }

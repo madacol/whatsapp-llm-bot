@@ -42,6 +42,20 @@ function record(event, value) {
   fs.appendFileSync(recordPath, `${JSON.stringify({ event, value })}\n`);
 }
 
+/**
+ * @param {unknown} input
+ * @returns {string}
+ */
+function firstTextInput(input) {
+  if (!Array.isArray(input)) {
+    return "";
+  }
+  const first = input[0];
+  return first && typeof first === "object" && typeof first.text === "string"
+    ? first.text
+    : "";
+}
+
 for await (const line of rl) {
   if (!line.trim()) {
     continue;
@@ -82,6 +96,42 @@ for await (const line of rl) {
     case "turn/start":
       respond(id, { turn: { id: "fake-turn-1" } });
       notify("turn/started", { threadId: params.threadId, turn: { id: "fake-turn-1" } });
+      if (firstTextInput(params.input) === "web") {
+        notify("item/started", {
+          threadId: params.threadId,
+          turnId: "fake-turn-1",
+          item: {
+            id: "web-search-1",
+            type: "webSearch",
+            status: "inProgress",
+            query: "runtime migration",
+            action: {
+              type: "search",
+              query: "runtime migration",
+              queries: ["runtime migration"],
+            },
+          },
+        });
+        notify("item/completed", {
+          threadId: params.threadId,
+          turnId: "fake-turn-1",
+          item: {
+            id: "web-search-1",
+            type: "webSearch",
+            status: "completed",
+            query: "runtime migration",
+            action: {
+              type: "search",
+              query: "runtime migration",
+              queries: ["runtime migration"],
+            },
+          },
+        });
+        notify("turn/completed", {
+          threadId: params.threadId,
+          turn: { id: "fake-turn-1", status: "completed" },
+        });
+      }
       break;
     case "turn/steer":
       record("turn/steer", params);
