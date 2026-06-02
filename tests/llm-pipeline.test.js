@@ -163,6 +163,7 @@ describe("ACP pipeline via createMessageHandler", () => {
       chatId: "pipe-clear-cont",
       content: [{ type: "text", text: "Remember this secret: ALPHA" }],
     }).context);
+    await store.saveHarnessSession("pipe-clear-cont", { id: "stale-session", kind: "codex" });
     await handleMessage(createChatTurn({
       chatId: "pipe-clear-cont",
       content: [{ type: "text", text: "!clear" }],
@@ -175,9 +176,11 @@ describe("ACP pipeline via createMessageHandler", () => {
 
     const lastTurn = capturedTurns.at(-1);
     assert.ok(lastTurn);
+    assert.equal(lastTurn.resumeCursor, null);
     const allContent = JSON.stringify(lastTurn.messages);
     assert.ok(!allContent.includes("ALPHA"), allContent);
     assert.ok(allContent.includes("What do you know?"), allContent);
+    assert.equal((await store.getChat("pipe-clear-cont"))?.harness_session_id, null);
   });
 
   it("passes historical messages to ACP in chronological order", async () => {
