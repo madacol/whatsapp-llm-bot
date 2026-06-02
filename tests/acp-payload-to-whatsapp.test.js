@@ -665,7 +665,7 @@ describe("ACP payload to WhatsApp socket vertical slices", () => {
           rawInput: {
             query: "https://example.com/docs",
             action: {
-              type: "openPage",
+              type: "open_page",
               url: "https://example.com/docs",
             },
           },
@@ -681,7 +681,7 @@ describe("ACP payload to WhatsApp socket vertical slices", () => {
           status: "completed",
           rawInput: {
             action: {
-              type: "findInPage",
+              type: "find_in_page",
               pattern: "install",
               url: "https://example.com/docs",
             },
