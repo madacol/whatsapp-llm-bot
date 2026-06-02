@@ -49,6 +49,20 @@ describe("WhatsApp tool presenter", () => {
       }),
       "*Find On Page*  \"UTC+00:00 is an identifier for a time offset from UTC of +00:00.\" in `en.wikipedia.org/wiki/UTC%2B00%3A00`",
     );
+    assert.equal(
+      getToolCallSummary("click", {
+        ref_id: "https://en.wikipedia.org/wiki/UTC%2B00%3A00",
+        id: 17,
+      }),
+      "*Click Link*  `en.wikipedia.org/wiki/UTC%2B00%3A00`  *17*",
+    );
+    assert.equal(
+      getToolCallSummary("screenshot", {
+        ref_id: "https://en.wikipedia.org/wiki/UTC%2B00%3A00",
+        pageno: 2,
+      }),
+      "*Screenshot*  `en.wikipedia.org/wiki/UTC%2B00%3A00`  *3*",
+    );
   });
 
   it("renders other structured lookup tools with intent-specific labels", () => {
