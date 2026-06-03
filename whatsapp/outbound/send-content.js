@@ -683,6 +683,14 @@ function formatRuntimeToolText(status, summary, reviewPrefix) {
 }
 
 /**
+ * @param {string} summary
+ * @returns {boolean}
+ */
+function hasRuntimeSummaryDetail(summary) {
+  return summary.includes("  ") || summary.includes("\n");
+}
+
+/**
  * @param {ReturnType<typeof createCompactToolActivityState> & { handle?: MessageHandle }} state
  * @returns {{ id: string, summary: string, completed: boolean, failed: boolean, reviewPrefix?: "👍" | "👎" } | undefined}
  */
@@ -1431,7 +1439,13 @@ async function sendRuntimeToolEvent(sock, chatId, event, options, reactionRuntim
   const state = toolStateById?.get(toolEvent.tool.id);
   const previousSummary = state?.summary;
   if (state) {
-    state.summary = appendReadLineRange(summary, readLineRange);
+    const summaryBase = status !== "updated"
+      && previousSummary
+      && hasRuntimeSummaryDetail(previousSummary)
+      && !hasRuntimeSummaryDetail(summary)
+      ? previousSummary
+      : summary;
+    state.summary = appendReadLineRange(summaryBase, readLineRange);
   }
   const text = formatRuntimeToolText(
     status,

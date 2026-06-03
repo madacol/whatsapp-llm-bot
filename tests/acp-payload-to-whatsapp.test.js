@@ -613,6 +613,38 @@ describe("ACP payload to WhatsApp socket vertical slices", () => {
     assert.equal(sent[1]?.msg.text, "✅ *Read*  `src/app.js`  *10-12*");
   });
 
+  it("keeps ACP read location details when a sparse completion edits the row", async () => {
+    const { sent, trace } = await observeAcpPayloadSliceToBaileys([
+      {
+        sessionId: "s1",
+        update: {
+          sessionUpdate: "tool_call",
+          toolCallId: "read-sparse-completion",
+          title: "Read file",
+          kind: "read",
+          status: "in_progress",
+          locations: [{ path: "/repo/src/app.js" }],
+        },
+      },
+      {
+        sessionId: "s1",
+        update: {
+          sessionUpdate: "tool_call_update",
+          toolCallId: "read-sparse-completion",
+          status: "completed",
+          rawOutput: { formatted_output: "const app = true;\n" },
+        },
+      },
+    ], {
+      chatId: "acp-payload-read-sparse-completion@s.whatsapp.net",
+      cwd: "/repo",
+    });
+
+    assert.deepEqual(trace.runtimeEvents.map((event) => event.type), ["tool.started", "tool.completed"]);
+    assert.equal(sent[0]?.msg.text, "🔧 *Read*  `src/app.js`");
+    assert.equal(sent[1]?.msg.text, "✅ *Read*  `src/app.js`");
+  });
+
   it("renders ACP search titles from raw WhatsApp payloads", async () => {
     const { sent, trace } = await observeAcpPayloadSliceToBaileys([
       {
