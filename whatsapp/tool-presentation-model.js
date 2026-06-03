@@ -20,7 +20,7 @@ export function shortenPath(p, cwd) {
 }
 
 /**
- * @typedef {"Read" | "Search" | "List" | "Plan" | "Search Web" | "Open Link" | "Find On Page" | "Click Link" | "Screenshot" | "Search Images" | "Time" | "Weather" | "Quote" | "Sports Schedule" | "Sports Standings" | "Run Command" | "Start Agent" | "Message Agent" | "Wait For Agent" | "Resume Agent" | "Close Agent" | "Run Parallel" | "Terminal Input"} ToolActivityTitle
+ * @typedef {"Read" | "Search" | "List" | "Plan" | "Search Web" | "Open Link" | "Find On Page" | "Run Command" | "Start Agent" | "Message Agent" | "Wait For Agent" | "Resume Agent" | "Close Agent" | "Run Parallel" | "Terminal Input"} ToolActivityTitle
  */
 
 /**
@@ -31,7 +31,7 @@ export function shortenPath(p, cwd) {
  */
 
 /**
- * @typedef {"bash" | "read" | "grep" | "glob" | "plain" | "web_search" | "open_link" | "find_on_page" | "click_link" | "screenshot" | "image_search" | "time" | "weather" | "finance" | "sports_schedule" | "sports_standings"} ToolInspectMode
+ * @typedef {"bash" | "read" | "grep" | "glob" | "plain" | "web_search" | "open_link" | "find_on_page"} ToolInspectMode
  */
 
 /**
@@ -330,68 +330,6 @@ function hasFindArgs(value) {
 }
 
 /**
- * @param {unknown} value
- * @returns {value is { ref_id: string, id: number }}
- */
-function hasClickArgs(value) {
-  return isRecord(value)
-    && typeof value.ref_id === "string"
-    && typeof value.id === "number";
-}
-
-/**
- * @param {unknown} value
- * @returns {value is { ref_id: string, pageno: number }}
- */
-function hasScreenshotArgs(value) {
-  return isRecord(value)
-    && typeof value.ref_id === "string"
-    && typeof value.pageno === "number";
-}
-
-/**
- * @param {unknown} value
- * @returns {value is { location: string, start?: string, duration?: number }}
- */
-function hasWeatherArgs(value) {
-  return isRecord(value)
-    && typeof value.location === "string"
-    && (value.start == null || typeof value.start === "string")
-    && (value.duration == null || typeof value.duration === "number");
-}
-
-/**
- * @param {unknown} value
- * @returns {value is { ticker: string, type: string, market?: string }}
- */
-function hasFinanceArgs(value) {
-  return isRecord(value)
-    && typeof value.ticker === "string"
-    && typeof value.type === "string"
-    && (value.market == null || typeof value.market === "string");
-}
-
-/**
- * @param {unknown} value
- * @returns {value is { utc_offset: string }}
- */
-function hasTimeArgs(value) {
-  return isRecord(value) && typeof value.utc_offset === "string";
-}
-
-/**
- * @param {unknown} value
- * @returns {value is { fn: "schedule" | "standings", league: string, team?: string, opponent?: string }}
- */
-function hasSportsArgs(value) {
-  return isRecord(value)
-    && (value.fn === "schedule" || value.fn === "standings")
-    && typeof value.league === "string"
-    && (value.team == null || typeof value.team === "string")
-    && (value.opponent == null || typeof value.opponent === "string");
-}
-
-/**
  * @template T
  * @param {Record<string, unknown>} args
  * @param {string} key
@@ -453,98 +391,6 @@ function createFindOnPagePresentation(pattern, refId) {
     "find_on_page",
     createFlow("web", "Web", `find ${displayPattern}`),
   );
-}
-
-/**
- * @param {string} refId
- * @param {number} id
- * @returns {ActivityPresentation}
- */
-function createClickLinkPresentation(refId, id) {
-  const ref = formatWebRef(refId);
-  return createSimpleActivityPresentation(
-    "Click Link",
-    "Click Link",
-    `${ref}  *${id}*`,
-    "click_link",
-    createFlow("web", "Web", `click ${id} in ${ref}`),
-  );
-}
-
-/**
- * @param {string} refId
- * @param {number} pageno
- * @returns {ActivityPresentation}
- */
-function createScreenshotPresentation(refId, pageno) {
-  const pageNumber = Number.isInteger(pageno) ? pageno + 1 : pageno;
-  const ref = formatWebRef(refId);
-  return createSimpleActivityPresentation(
-    "Screenshot",
-    "Screenshot",
-    `${ref}  *${pageNumber}*`,
-    "screenshot",
-    createFlow("web", "Web", `screenshot ${ref}`),
-  );
-}
-
-/**
- * @param {string} query
- * @returns {ActivityPresentation}
- */
-function createImageSearchPresentation(query) {
-  const detail = quoteForDisplay(query);
-  return createSimpleActivityPresentation(
-    "Search Images",
-    "Search Images",
-    detail,
-    "image_search",
-    createFlow("web", "Web", `search images ${detail}`),
-  );
-}
-
-/**
- * @param {string} utcOffset
- * @returns {ActivityPresentation}
- */
-function createTimePresentation(utcOffset) {
-  const displayOffset = utcOffset.startsWith("UTC") ? utcOffset : `UTC${utcOffset}`;
-  return createSimpleActivityPresentation("Time", "Time", `\`${displayOffset}\``, "time");
-}
-
-/**
- * @param {string} location
- * @returns {ActivityPresentation}
- */
-function createWeatherPresentation(location) {
-  return createSimpleActivityPresentation("Weather", "Weather", `\`${location}\``, "weather");
-}
-
-/**
- * @param {string} ticker
- * @returns {ActivityPresentation}
- */
-function createFinancePresentation(ticker) {
-  return createSimpleActivityPresentation("Quote", "Quote", `\`${ticker}\``, "finance");
-}
-
-/**
- * @param {"schedule" | "standings"} fn
- * @param {string} league
- * @param {string | undefined} team
- * @param {string | undefined} opponent
- * @returns {ActivityPresentation}
- */
-function createSportsPresentation(fn, league, team, opponent) {
-  const title = fn === "schedule" ? "Sports Schedule" : "Sports Standings";
-  const parts = [league.toUpperCase()];
-  if (team) {
-    parts.push(team);
-  }
-  if (opponent) {
-    parts.push(`vs ${opponent}`);
-  }
-  return createSimpleActivityPresentation(title, title, `\`${parts.join(" ")}\``, fn === "schedule" ? "sports_schedule" : "sports_standings");
 }
 
 /**
@@ -616,28 +462,6 @@ function buildSdkPresentation(name, args, cwd) {
       const queryArgs = extractToolArgs(args, "search_query", hasQueryString);
       return queryArgs ? createWebSearchPresentation(queryArgs.q) : null;
     }
-    case "image_query": {
-      const queryArgs = extractToolArgs(args, "image_query", hasQueryString);
-      return queryArgs ? createImageSearchPresentation(queryArgs.q) : null;
-    }
-    case "time": {
-      const timeArgs = extractToolArgs(args, "time", hasTimeArgs);
-      return timeArgs ? createTimePresentation(timeArgs.utc_offset) : null;
-    }
-    case "weather": {
-      const weatherArgs = extractToolArgs(args, "weather", hasWeatherArgs);
-      return weatherArgs ? createWeatherPresentation(weatherArgs.location) : null;
-    }
-    case "finance": {
-      const financeArgs = extractToolArgs(args, "finance", hasFinanceArgs);
-      return financeArgs ? createFinancePresentation(financeArgs.ticker) : null;
-    }
-    case "sports": {
-      const sportsArgs = extractToolArgs(args, "sports", hasSportsArgs);
-      return sportsArgs
-        ? createSportsPresentation(sportsArgs.fn, sportsArgs.league, sportsArgs.team, sportsArgs.opponent)
-        : null;
-    }
     case "open": {
       const openArgs = extractToolArgs(args, "open", hasOpenRef);
       return openArgs ? createOpenLinkPresentation(openArgs.ref_id) : null;
@@ -645,14 +469,6 @@ function buildSdkPresentation(name, args, cwd) {
     case "find": {
       const findArgs = extractToolArgs(args, "find", hasFindArgs);
       return findArgs ? createFindOnPagePresentation(findArgs.pattern, findArgs.ref_id) : null;
-    }
-    case "click": {
-      const clickArgs = extractToolArgs(args, "click", hasClickArgs);
-      return clickArgs ? createClickLinkPresentation(clickArgs.ref_id, clickArgs.id) : null;
-    }
-    case "screenshot": {
-      const screenshotArgs = extractToolArgs(args, "screenshot", hasScreenshotArgs);
-      return screenshotArgs ? createScreenshotPresentation(screenshotArgs.ref_id, screenshotArgs.pageno) : null;
     }
     case "Read":
       return typeof args.file_path === "string" ? createReadPresentation(args.file_path, cwd, getReadLineRange(args)) : null;

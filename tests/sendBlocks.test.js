@@ -307,11 +307,6 @@ describe("sendEvent – compact tool activity", () => {
         expected: "Run Parallel*  _2 tools_",
       },
       {
-        name: "weather",
-        args: { weather: [{ location: "San Francisco, CA" }] },
-        expected: "Weather*  `San Francisco, CA`",
-      },
-      {
         name: "open",
         args: { open: [{ ref_id: "https://openai.com" }] },
         expected: "Open Link*  `openai.com`",
@@ -585,11 +580,6 @@ describe("sendEvent – runtime events", () => {
         name: "parallel",
         args: { tool_uses: [{ recipient_name: "functions.exec_command" }, { recipient_name: "functions.exec_command" }] },
         expected: "Run Parallel*  _2 tools_",
-      },
-      {
-        name: "weather",
-        args: { weather: [{ location: "San Francisco, CA" }] },
-        expected: "Weather*  `San Francisco, CA`",
       },
       {
         name: "open",

@@ -160,14 +160,6 @@ type ToolActivityTitle =
   | "Search Web"
   | "Open Link"
   | "Find On Page"
-  | "Click Link"
-  | "Screenshot"
-  | "Search Images"
-  | "Time"
-  | "Weather"
-  | "Quote"
-  | "Sports Schedule"
-  | "Sports Standings"
   | "Run Command"
   | "Start Agent"
   | "Message Agent"
@@ -190,15 +182,7 @@ type ToolInspectMode =
   | "plain"
   | "web_search"
   | "open_link"
-  | "find_on_page"
-  | "click_link"
-  | "screenshot"
-  | "image_search"
-  | "time"
-  | "weather"
-  | "finance"
-  | "sports_schedule"
-  | "sports_standings";
+  | "find_on_page";
 
 type ToolFlowDescriptor = {
   groupKey: string;
