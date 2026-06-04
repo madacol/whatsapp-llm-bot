@@ -7,6 +7,8 @@ const rl = readline.createInterface({
   input: process.stdin,
   crlfDelay: Infinity,
 });
+process.stdin.resume();
+const keepAlive = setInterval(() => {}, 60 * 60 * 1000);
 
 /**
  * @param {Record<string, unknown>} message
@@ -94,6 +96,7 @@ for await (const line of rl) {
       });
       break;
     case "turn/start":
+      record("turn/start", params);
       respond(id, { turn: { id: "fake-turn-1" } });
       notify("turn/started", { threadId: params.threadId, turn: { id: "fake-turn-1" } });
       if (firstTextInput(params.input) === "web") {
@@ -132,6 +135,10 @@ for await (const line of rl) {
           turn: { id: "fake-turn-1", status: "completed" },
         });
       }
+      break;
+    case "thread/settings/update":
+      record("thread/settings/update", params);
+      respond(id, {});
       break;
     case "turn/steer":
       record("turn/steer", params);

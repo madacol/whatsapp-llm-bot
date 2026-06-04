@@ -1096,6 +1096,7 @@ async function applySessionConfigOptions(input) {
     await input.connection.sendRequest("session/set_config_option", {
       sessionId: input.sessionId,
       configId: option.id,
+      ...(typeof value === "boolean" ? { type: "boolean" } : {}),
       value,
     });
   }
@@ -1114,6 +1115,7 @@ async function applySessionConfigOptions(input) {
     await input.connection.sendRequest("session/set_config_option", {
       sessionId: input.sessionId,
       configId: option.id,
+      ...(typeof value === "boolean" ? { type: "boolean" } : {}),
       value,
     });
   }
@@ -1223,6 +1225,7 @@ export async function setAcpSessionConfigOption(input) {
     const result = await connection.sendRequest("session/set_config_option", {
       sessionId: input.sessionId,
       configId: input.configId,
+      ...(typeof input.value === "boolean" ? { type: "boolean" } : {}),
       value: input.value,
     });
     return normalizeConfigOptions(extractConfigOptions(result));
