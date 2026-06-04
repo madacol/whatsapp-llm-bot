@@ -274,6 +274,39 @@ describe("sendEvent – compact tool activity", () => {
     ]);
   });
 
+  it("does not render read or shell tool rows without their required detail", async () => {
+    const { sock, sent } = createMockSock();
+
+    await sendEvent(sock, "compact-missing-detail-chat", {
+      kind: "compact_tool_activity",
+      cwd: "/repo",
+      activity: {
+        type: "tool",
+        status: "started",
+        toolCall: {
+          id: "read-without-path",
+          name: "Read file",
+          arguments: "{}",
+        },
+      },
+    });
+    await sendEvent(sock, "compact-missing-detail-chat", {
+      kind: "compact_tool_activity",
+      cwd: "/repo",
+      activity: {
+        type: "tool",
+        status: "started",
+        toolCall: {
+          id: "shell-without-command",
+          name: "Shell",
+          arguments: "{}",
+        },
+      },
+    });
+
+    assert.deepEqual(sent, []);
+  });
+
   it("formats compact tool rows with the shared semantic tool presentation", async () => {
     const cases = [
       {
