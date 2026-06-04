@@ -9,7 +9,7 @@ const DEFAULT_MODEL = "gpt-5.5";
 
 /**
  * @param {string[]} args
- * @returns {{ model: string | null, timeoutMs: number, keep: boolean, prompt: string | null }}
+ * @returns {{ model: string | null, timeoutMs: number, keep: boolean, prompt: string | null, serviceTier: string | null }}
  */
 function parseArgs(args) {
   /** @type {string | null} */
@@ -18,6 +18,8 @@ function parseArgs(args) {
   let keep = true;
   /** @type {string | null} */
   let prompt = null;
+  /** @type {string | null} */
+  let serviceTier = null;
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index];
     if (arg === "--model") {
@@ -33,6 +35,9 @@ function parseArgs(args) {
     } else if (arg === "--prompt") {
       prompt = args[index + 1] ?? null;
       index += 1;
+    } else if (arg === "--service-tier") {
+      serviceTier = args[index + 1] ?? null;
+      index += 1;
     }
   }
   return {
@@ -40,6 +45,7 @@ function parseArgs(args) {
     timeoutMs: Number.isFinite(timeoutMs) && timeoutMs > 0 ? timeoutMs : DEFAULT_TIMEOUT_MS,
     keep,
     prompt,
+    serviceTier,
   };
 }
 
@@ -296,7 +302,7 @@ try {
     summary: "none",
     outputSchema: null,
     personality: "none",
-    serviceTier: null,
+    serviceTier: options.serviceTier,
   };
   const turnStart = await request("turn/start", turnStartParams);
   const turn = isRecord(turnStart) && isRecord(turnStart.turn) ? turnStart.turn : null;

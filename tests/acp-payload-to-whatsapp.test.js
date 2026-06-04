@@ -575,7 +575,7 @@ describe("ACP payload to WhatsApp socket vertical slices", () => {
         update: {
           sessionUpdate: "tool_call",
           toolCallId: "codex-read-range",
-          title: "Read sample-lines.txt (10 - 12)",
+          title: "Read sample-lines.txt",
           kind: "read",
           status: "in_progress",
           locations: [{ path: "/repo/sample-lines.txt", line: 10 }],

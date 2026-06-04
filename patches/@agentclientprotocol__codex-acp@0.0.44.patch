@@ -18,15 +18,9 @@ index 1b1f5d508f39ec47ff1826516f9c106a02004cf9..d9305763ecbac6232f454a3a0d10b37c
 +  }
 +  return { start, end };
 +}
-+function createReadTitle(commandAction, lineRange) {
++function createReadTitle(commandAction) {
 +  const label = commandAction.name || path2.basename(commandAction.path) || "file";
-+  if (!lineRange) {
-+    return `Read ${label}`;
-+  }
-+  if (lineRange.start === lineRange.end) {
-+    return `Read ${label} (${lineRange.start})`;
-+  }
-+  return `Read ${label} (${lineRange.start} - ${lineRange.end})`;
++  return `Read ${label}`;
 +}
  function createCommandActionEvent(id, status, cwd, commandAction) {
    const acpStatus = toAcpStatus(status);
@@ -39,7 +33,7 @@ index 1b1f5d508f39ec47ff1826516f9c106a02004cf9..d9305763ecbac6232f454a3a0d10b37c
        kind: "read",
 -      title: "Read file",
 -      locations: [{ path: commandAction.path }]
-+      title: createReadTitle(commandAction, lineRange),
++      title: createReadTitle(commandAction),
 +      locations: [{ path: commandAction.path, ...(lineRange ? { line: lineRange.start } : {}) }],
 +      rawInput: {
 +        commandAction
@@ -287,7 +281,7 @@ index 1b1f5d508f39ec47ff1826516f9c106a02004cf9..d9305763ecbac6232f454a3a0d10b37c
      };
    }
    async authenticate(_params) {
-@@ -20102,6 +20183,36 @@ var CodexAcpServer = class {
+@@ -20102,6 +20183,51 @@ var CodexAcpServer = class {
      sessionState.supportedInputModalities = model.inputModalities;
      return {};
    }
@@ -321,10 +315,15 @@ index 1b1f5d508f39ec47ff1826516f9c106a02004cf9..d9305763ecbac6232f454a3a0d10b37c
 +    }));
 +    return { configOptions: this.createConfigOptions(sessionState) };
 +  }
++  failFastMode(cause) {
++    const reason = cause instanceof Error ? cause.message : String(cause);
++    const message = `Codex fast mode failed: ${reason}`;
++    throw RequestError.invalidRequest({ details: message }, message);
++  }
    publishAvailableCommandsAsync(sessionId) {
      void this.availableCommands.publish(sessionId);
    }
-@@ -20145,6 +20256,7 @@ var CodexAcpServer = class {
+@@ -20145,6 +20271,7 @@ var CodexAcpServer = class {
        totalTokenUsage: null,
        modelContextWindow: null,
        rateLimits: null,
@@ -332,7 +331,7 @@ index 1b1f5d508f39ec47ff1826516f9c106a02004cf9..d9305763ecbac6232f454a3a0d10b37c
        account,
        cwd: request.cwd,
        sessionMcpServers
-@@ -20160,10 +20272,12 @@ var CodexAcpServer = class {
+@@ -20160,10 +20287,12 @@ var CodexAcpServer = class {
      await this.availableCommands.publish(sessionId);
      const sessionModelState = this.createModelState(models, currentModelId);
      const sessionModeState = sessionState.agentMode.toSessionModeState();
@@ -345,7 +344,7 @@ index 1b1f5d508f39ec47ff1826516f9c106a02004cf9..d9305763ecbac6232f454a3a0d10b37c
        thread
      };
    }
-@@ -20259,7 +20373,7 @@ var CodexAcpServer = class {
+@@ -20259,7 +20388,7 @@ var CodexAcpServer = class {
        toolCallId: item.id,
        kind: "search",
        title: this.formatWebSearchTitle(item),
@@ -354,16 +353,28 @@ index 1b1f5d508f39ec47ff1826516f9c106a02004cf9..d9305763ecbac6232f454a3a0d10b37c
        rawInput: {
          query: item.query,
          action: item.action
-@@ -20461,7 +20575,7 @@ ${item.text}`
+@@ -20460,9 +20589,17 @@ ${item.text}`
+         throw RequestError.invalidRequest("The current model does not support image input");
        }
        const agentMode = sessionState.agentMode;
-       const turnCompleted = await this.runWithProcessCheck(
+-      const turnCompleted = await this.runWithProcessCheck(
 -        () => this.codexAcpClient.sendPrompt(params, agentMode, modelId, disableSummary, sessionState.cwd)
-+        () => this.codexAcpClient.sendPrompt({ ...params, fastMode: sessionState.fastMode }, agentMode, modelId, disableSummary, sessionState.cwd)
-       );
+-      );
++      let turnCompleted;
++      try {
++        turnCompleted = await this.runWithProcessCheck(
++          () => this.codexAcpClient.sendPrompt({ ...params, fastMode: sessionState.fastMode }, agentMode, modelId, disableSummary, sessionState.cwd)
++        );
++      } catch (err) {
++        if (sessionState.fastMode) {
++          this.failFastMode(err);
++        }
++        throw err;
++      }
        if (turnCompleted.turn.status === "interrupted") {
          await this.connection.sessionUpdate({
-@@ -20650,12 +20764,18 @@ var CodexAppServerClient = class {
+           sessionId: params.sessionId,
+@@ -20650,12 +20787,18 @@ var CodexAppServerClient = class {
    async turnInterrupt(params) {
      return await this.sendRequest({ method: "turn/interrupt", params });
    }

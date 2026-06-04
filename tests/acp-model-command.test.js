@@ -71,9 +71,16 @@ describe("ACP /model command option derivation", () => {
       id: "quick-toggle",
       name: "Fast Mode",
     };
+    const codexModelConfigOption = {
+      type: "boolean",
+      id: "fast_mode",
+      name: "Fast mode",
+      category: "model_config",
+    };
 
     assert.equal(__testAcpModelCommand.findFastModeConfigOption([optionByCategory]), optionByCategory);
     assert.equal(__testAcpModelCommand.findFastModeConfigOption([optionByName]), optionByName);
+    assert.equal(__testAcpModelCommand.findFastModeConfigOption([codexModelConfigOption]), codexModelConfigOption);
   });
 
   it("parses ACP model ids with optional effort suffixes", () => {
