@@ -85,16 +85,34 @@ function getRawAcpSessionUpdate(event) {
 
 /**
  * @param {Record<string, unknown>} update
- * @returns {string | null}
+ * @returns {Record<string, unknown> | null}
  */
-function getRawAcpFirstLocationPath(update) {
+function getRawAcpFirstLocation(update) {
   const locations = Array.isArray(update.locations) ? update.locations : [];
   for (const location of locations) {
     if (isRecord(location) && typeof location.path === "string" && location.path.length > 0) {
-      return location.path;
+      return location;
     }
   }
   return null;
+}
+
+/**
+ * @param {Record<string, unknown>} update
+ * @returns {string | null}
+ */
+function getRawAcpFirstLocationPath(update) {
+  const location = getRawAcpFirstLocation(update);
+  return typeof location?.path === "string" ? location.path : null;
+}
+
+/**
+ * @param {Record<string, unknown>} update
+ * @returns {number | undefined}
+ */
+function getRawAcpFirstLocationLine(update) {
+  const location = getRawAcpFirstLocation(update);
+  return typeof location?.line === "number" ? location.line : undefined;
 }
 
 /**
@@ -116,6 +134,36 @@ function getRawAcpReadPath(update) {
   }
   const rawInput = getRawAcpInput(update);
   return typeof rawInput?.path === "string" && rawInput.path.length > 0 ? rawInput.path : null;
+}
+
+/**
+ * @param {unknown} value
+ * @returns {{ start: number, end: number } | null}
+ */
+function normalizeLineRange(value) {
+  if (!isRecord(value)) {
+    return null;
+  }
+  const { start, end } = value;
+  if (typeof start !== "number"
+    || typeof end !== "number"
+    || !Number.isInteger(start)
+    || !Number.isInteger(end)
+    || start <= 0
+    || end < start) {
+    return null;
+  }
+  return { start, end };
+}
+
+/**
+ * @param {Record<string, unknown>} update
+ * @returns {{ start: number, end: number } | null}
+ */
+function getRawAcpCodexLineRange(update) {
+  const meta = isRecord(update._meta) ? update._meta : null;
+  const codex = isRecord(meta?.codex) ? meta.codex : null;
+  return normalizeLineRange(codex?.lineRange);
 }
 
 /**
@@ -355,13 +403,25 @@ function buildWhatsAppRuntimeToolFromRawAcp(tool, event) {
     const readPath = getRawAcpReadPath(update);
     if (readPath) {
       const rawInput = getRawAcpInput(update);
+      const codexLineRange = getRawAcpCodexLineRange(update);
+      const rawLine = typeof rawInput?.line === "number"
+        ? rawInput.line
+        : typeof rawInput?.offset === "number"
+          ? rawInput.offset
+          : undefined;
+      const line = codexLineRange?.start ?? getRawAcpFirstLocationLine(update) ?? rawLine;
+      const limit = codexLineRange
+        ? codexLineRange.end - codexLineRange.start + 1
+        : typeof rawInput?.limit === "number"
+          ? rawInput.limit
+          : undefined;
       return {
         ...tool,
         name: "Read",
         arguments: {
           ...tool.arguments,
-          ...(typeof rawInput?.line === "number" ? { line: rawInput.line } : {}),
-          ...(typeof rawInput?.limit === "number" ? { limit: rawInput.limit } : {}),
+          ...(typeof line === "number" ? { line } : {}),
+          ...(typeof limit === "number" ? { limit } : {}),
           file_path: readPath,
         },
       };

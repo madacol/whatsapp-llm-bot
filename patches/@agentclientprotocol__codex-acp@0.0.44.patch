@@ -1,7 +1,59 @@
 diff --git a/dist/index.js b/dist/index.js
-index 1b1f5d508f39ec47ff1826516f9c106a02004cf9..898768ddee2d87cff35039b381fd2f25a0b37610 100755
+index 1b1f5d508f39ec47ff1826516f9c106a02004cf9..d9305763ecbac6232f454a3a0d10b37cca256ce4 100755
 --- a/dist/index.js
 +++ b/dist/index.js
+@@ -17360,18 +17360,55 @@ function createFuzzyFileSearchComplete(event) {
+     status: "completed"
+   };
+ }
++function parseReadLineRange(command) {
++  const match = /^sed\s+-n\s+['"]?(\d+)(?:,(\d+))?p['"]?(?:\s|$)/.exec(command.trim());
++  if (!match) {
++    return null;
++  }
++  const start = Number(match[1]);
++  const end = Number(match[2] ?? match[1]);
++  if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start <= 0 || end < start) {
++    return null;
++  }
++  return { start, end };
++}
++function createReadTitle(commandAction, lineRange) {
++  const label = commandAction.name || path2.basename(commandAction.path) || "file";
++  if (!lineRange) {
++    return `Read ${label}`;
++  }
++  if (lineRange.start === lineRange.end) {
++    return `Read ${label} (${lineRange.start})`;
++  }
++  return `Read ${label} (${lineRange.start} - ${lineRange.end})`;
++}
+ function createCommandActionEvent(id, status, cwd, commandAction) {
+   const acpStatus = toAcpStatus(status);
+   if (commandAction.type === "read") {
++    const lineRange = parseReadLineRange(commandAction.command);
+     return {
+       sessionUpdate: "tool_call",
+       toolCallId: id,
+       status: acpStatus,
+       kind: "read",
+-      title: "Read file",
+-      locations: [{ path: commandAction.path }]
++      title: createReadTitle(commandAction, lineRange),
++      locations: [{ path: commandAction.path, ...(lineRange ? { line: lineRange.start } : {}) }],
++      rawInput: {
++        commandAction
++      },
++      ...(lineRange ? {
++        _meta: {
++          codex: {
++            lineRange
++          }
++        }
++      } : {})
+     };
+   } else if (commandAction.type === "search") {
+     return {
 @@ -17382,12 +17382,14 @@ function createCommandActionEvent(id, status, cwd, commandAction) {
      };
    } else if (commandAction.type === "listFiles") {
