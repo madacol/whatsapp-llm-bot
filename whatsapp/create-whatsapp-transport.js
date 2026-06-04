@@ -1,6 +1,7 @@
 import { createLogger } from "../logger.js";
 import { appendFileSync, existsSync, mkdirSync } from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { adaptIncomingMessages } from "./inbound/chat-turn.js";
 import { createWhatsAppConnectionSupervisor } from "./connection-supervisor.js";
 import { classifyIncomingMessageEvent, normalizeReactionEvents } from "./inbound/message-event-classifier.js";
@@ -15,8 +16,11 @@ import {
 import { editWhatsAppMessageByHandle } from "./outbound/send-content.js";
 
 const log = createLogger("whatsapp");
-const WHATSAPP_UPSERT_DIAGNOSTIC_ENABLE_PATH = ".diagnostics/whatsapp-upsert-shape.enabled";
-const WHATSAPP_UPSERT_DIAGNOSTIC_DEFAULT_PATH = ".diagnostics/whatsapp-upsert-shape.jsonl";
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const REPO_ROOT = path.resolve(__dirname, "..");
+const LOGS_DIR = path.join(REPO_ROOT, "logs");
+const WHATSAPP_UPSERT_DIAGNOSTIC_ENABLE_PATH = path.join(LOGS_DIR, "whatsapp-upsert-shape.enabled");
+const WHATSAPP_UPSERT_DIAGNOSTIC_DEFAULT_PATH = path.join(LOGS_DIR, "whatsapp-upsert-shape.jsonl");
 const WHATSAPP_ALBUM_FLUSH_DELAY_MS = 1_200;
 const WHATSAPP_TURN_COALESCE_DELAY_MS = 250;
 
@@ -454,8 +458,7 @@ export function buildWhatsAppUpsertShapeDiagnostic(message) {
  * @returns {boolean}
  */
 function isWhatsAppUpsertDiagnosticEnabled() {
-  return process.env.WHATSAPP_UPSERT_DIAGNOSTIC === "1"
-    || existsSync(WHATSAPP_UPSERT_DIAGNOSTIC_ENABLE_PATH);
+  return existsSync(WHATSAPP_UPSERT_DIAGNOSTIC_ENABLE_PATH);
 }
 
 /**
@@ -466,7 +469,7 @@ function appendWhatsAppUpsertDiagnostic(message) {
   if (!isWhatsAppUpsertDiagnosticEnabled()) {
     return;
   }
-  const targetPath = process.env.WHATSAPP_UPSERT_DIAGNOSTIC_PATH || WHATSAPP_UPSERT_DIAGNOSTIC_DEFAULT_PATH;
+  const targetPath = WHATSAPP_UPSERT_DIAGNOSTIC_DEFAULT_PATH;
   mkdirSync(path.dirname(targetPath), { recursive: true });
   appendFileSync(targetPath, `${JSON.stringify(buildWhatsAppUpsertShapeDiagnostic(message))}\n`);
 }
