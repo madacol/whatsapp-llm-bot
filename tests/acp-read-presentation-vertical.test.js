@@ -257,9 +257,9 @@ describe("ACP read presentation vertical slice", () => {
     assert.equal(outbound?.kind, "runtime_event");
     assert.deepEqual(
       outbound?.kind === "runtime_event" && outbound.event.type === "file-read.started"
-        ? outbound.event.fileRead.lineRange
+        ? { line: outbound.event.fileRead.line, limit: outbound.event.fileRead.limit }
         : undefined,
-      { start: 1, end: 20 },
+      { line: 1, limit: 20 },
     );
     assert.deepEqual(sent.map((entry) => entry.msg), [
       { text: "🔧 *Read*  `src/app.js`  *1-20*", linkPreview: null },

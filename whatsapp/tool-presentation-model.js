@@ -220,12 +220,12 @@ function formatLineRange(range) {
 /**
  * @param {string} path
  * @param {string | null | undefined} cwd
- * @param {{ start: number, end: number } | null} lineRange
+ * @param {{ start: number, end: number } | null} range
  * @returns {ActivityPresentation}
  */
-function createReadPresentation(path, cwd, lineRange) {
-  const line = lineRange
-    ? `${formatDisplayPath(path, cwd)}  ${formatLineRange(lineRange)}`
+function createReadPresentation(path, cwd, range) {
+  const line = range
+    ? `${formatDisplayPath(path, cwd)}  ${formatLineRange(range)}`
     : formatDisplayPath(path, cwd);
   const activity = createActivity("Read", line);
   return {
