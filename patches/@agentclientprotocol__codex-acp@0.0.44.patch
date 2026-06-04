@@ -1,8 +1,8 @@
 diff --git a/dist/index.js b/dist/index.js
-index 1b1f5d508f39ec47ff1826516f9c106a02004cf9..8765731a0ae5c312d589ce22e33d00e332f10b2a 100755
+index 1b1f5d508f39ec47ff1826516f9c106a02004cf9..898768ddee2d87cff35039b381fd2f25a0b37610 100755
 --- a/dist/index.js
 +++ b/dist/index.js
-@@ -17382,12 +17382,14 @@
+@@ -17382,12 +17382,14 @@ function createCommandActionEvent(id, status, cwd, commandAction) {
      };
    } else if (commandAction.type === "listFiles") {
      const title = commandAction.path ? `List files in '${commandAction.path}'` : "List files";
@@ -18,7 +18,7 @@ index 1b1f5d508f39ec47ff1826516f9c106a02004cf9..8765731a0ae5c312d589ce22e33d00e3
      };
    }
    return {
-@@ -17667,6 +17669,41 @@
+@@ -17667,6 +17669,41 @@ ${event.details}` : "";
        }
      };
    }
@@ -60,7 +60,7 @@ index 1b1f5d508f39ec47ff1826516f9c106a02004cf9..8765731a0ae5c312d589ce22e33d00e3
    async createItemEvent(event) {
      switch (event.item.type) {
        case "fileChange":
-@@ -17677,12 +17714,13 @@
+@@ -17677,12 +17714,13 @@ ${event.details}` : "";
          return await createMcpToolCallUpdate(event.item);
        case "dynamicToolCall":
          return await createDynamicToolCallUpdate(event.item);
@@ -75,7 +75,7 @@ index 1b1f5d508f39ec47ff1826516f9c106a02004cf9..8765731a0ae5c312d589ce22e33d00e3
        case "imageView":
        case "imageGeneration":
        case "enteredReviewMode":
-@@ -17711,6 +17749,16 @@
+@@ -17711,6 +17749,16 @@ ${event.details}` : "";
          };
        case "commandExecution":
          return this.completeCommandExecutionEvent(event.item);
@@ -92,7 +92,7 @@ index 1b1f5d508f39ec47ff1826516f9c106a02004cf9..8765731a0ae5c312d589ce22e33d00e3
        case "reasoning":
          const summary = event.item.summary[0];
          if (!summary) return null;
-@@ -17725,7 +17773,6 @@
+@@ -17725,7 +17773,6 @@ ${event.details}` : "";
        case "userMessage":
        case "hookPrompt":
        case "agentMessage":
@@ -100,7 +100,24 @@ index 1b1f5d508f39ec47ff1826516f9c106a02004cf9..8765731a0ae5c312d589ce22e33d00e3
        case "imageView":
        case "imageGeneration":
        case "enteredReviewMode":
-@@ -19443,6 +19490,9 @@
+@@ -19328,12 +19375,16 @@ var CodexAcpClient = class {
+       approvalPolicy: agentMode.approvalPolicy,
+       sandboxPolicy: agentMode.sandboxPolicy,
+       summary: disableSummary ? "none" : null,
++      serviceTier: request.fastMode ? "fast" : null,
+       personality: null,
+       cwd: null,
+       effort,
+       model: modelId.model
+     });
+   }
++  async updateThreadSettings(params) {
++    await this.codexClient.threadSettingsUpdate(params);
++  }
+   async listSkills(params) {
+     return this.codexClient.listSkills(params ?? {});
+   }
+@@ -19443,6 +19494,9 @@ var CodexAcpClient = class {
        turnId: params.turnId
      });
    }
@@ -110,7 +127,7 @@ index 1b1f5d508f39ec47ff1826516f9c106a02004cf9..8765731a0ae5c312d589ce22e33d00e3
    async fetchAvailableModels() {
      const models = [];
      let cursor = null;
-@@ -19900,7 +19950,8 @@
+@@ -19900,7 +19954,8 @@ var CodexAcpServer = class {
          },
          sessionCapabilities: {
            resume: {},
@@ -120,7 +137,7 @@ index 1b1f5d508f39ec47ff1826516f9c106a02004cf9..8765731a0ae5c312d589ce22e33d00e3
          },
          mcpCapabilities: {
            http: true,
-@@ -19912,6 +19963,26 @@
+@@ -19912,6 +19967,26 @@ var CodexAcpServer = class {
    }
    async extMethod(method, params) {
      const methodRequest = { method, params };
@@ -147,7 +164,136 @@ index 1b1f5d508f39ec47ff1826516f9c106a02004cf9..8765731a0ae5c312d589ce22e33d00e3
      if (!isExtMethodRequest(methodRequest)) {
        return {};
      }
-@@ -20259,7 +20330,7 @@
+@@ -19967,6 +20042,7 @@ var CodexAcpServer = class {
+       totalTokenUsage: null,
+       modelContextWindow: null,
+       rateLimits: null,
++      fastMode: false,
+       account,
+       cwd: request.cwd,
+       sessionMcpServers
+@@ -19982,7 +20058,8 @@ var CodexAcpServer = class {
+     this.publishAvailableCommandsAsync(sessionId);
+     const sessionModelState = this.createModelState(models, currentModelId);
+     const sessionModeState = sessionState.agentMode.toSessionModeState();
+-    return [sessionId, sessionModelState, sessionModeState];
++    const configOptions = this.createConfigOptions(sessionState);
++    return [sessionId, sessionModelState, sessionModeState, configOptions];
+   }
+   async getActiveAccount() {
+     if (this.codexAcpClient.getModelProvider()) {
+@@ -19997,6 +20074,7 @@ var CodexAcpServer = class {
+       sessionId,
+       modelState,
+       modeState,
++      configOptions,
+       thread
+     } = await this.getOrCreateSessionWithHistory(params);
+     await this.streamThreadHistory(sessionId, thread);
+@@ -20007,12 +20085,13 @@ var CodexAcpServer = class {
+     });
+     return {
+       models: modelState,
+-      modes: modeState
++      modes: modeState,
++      configOptions
+     };
+   }
+   async resumeSession(params) {
+     logger.log("Resuming session...", { sessionId: params.sessionId });
+-    const [sessionId, modelState, modeState] = await this.getOrCreateSession(params);
++    const [sessionId, modelState, modeState, configOptions] = await this.getOrCreateSession(params);
+     logger.log("Session resumed", {
+       sessionId,
+       modelId: modelState.currentModelId,
+@@ -20020,7 +20099,8 @@ var CodexAcpServer = class {
+     });
+     return {
+       models: modelState,
+-      modes: modeState
++      modes: modeState,
++      configOptions
+     };
+   }
+   async listSessions(params) {
+@@ -20030,7 +20110,7 @@ var CodexAcpServer = class {
+   }
+   async newSession(params) {
+     logger.log("Starting new session...");
+-    const [sessionId, modelState, modeState] = await this.getOrCreateSession(params);
++    const [sessionId, modelState, modeState, configOptions] = await this.getOrCreateSession(params);
+     logger.log("New session created", {
+       sessionId,
+       modelId: modelState.currentModelId,
+@@ -20039,7 +20119,8 @@ var CodexAcpServer = class {
+     return {
+       sessionId,
+       models: modelState,
+-      modes: modeState
++      modes: modeState,
++      configOptions
+     };
+   }
+   async authenticate(_params) {
+@@ -20102,6 +20183,36 @@ var CodexAcpServer = class {
+     sessionState.supportedInputModalities = model.inputModalities;
+     return {};
+   }
++  createConfigOptions(sessionState) {
++    return [{
++      type: "boolean",
++      id: "fast_mode",
++      name: "Fast mode",
++      description: "Use the Codex fast service tier for subsequent turns.",
++      category: "model_config",
++      currentValue: sessionState.fastMode === true
++    }];
++  }
++  async setSessionConfigOption(params) {
++    logger.log("Set session config option requested", {
++      sessionId: params.sessionId,
++      configId: params.configId
++    });
++    const sessionState = this.sessions.get(params.sessionId);
++    if (!sessionState) throw new Error(`Session ${params.sessionId} not found`);
++    if (params.configId !== "fast_mode") {
++      throw RequestError.invalidParams();
++    }
++    if (typeof params.value !== "boolean") {
++      throw RequestError.invalidParams();
++    }
++    sessionState.fastMode = params.value;
++    await this.runWithProcessCheck(() => this.codexAcpClient.updateThreadSettings({
++      threadId: params.sessionId,
++      serviceTier: params.value ? "fast" : null
++    }));
++    return { configOptions: this.createConfigOptions(sessionState) };
++  }
+   publishAvailableCommandsAsync(sessionId) {
+     void this.availableCommands.publish(sessionId);
+   }
+@@ -20145,6 +20256,7 @@ var CodexAcpServer = class {
+       totalTokenUsage: null,
+       modelContextWindow: null,
+       rateLimits: null,
++      fastMode: false,
+       account,
+       cwd: request.cwd,
+       sessionMcpServers
+@@ -20160,10 +20272,12 @@ var CodexAcpServer = class {
+     await this.availableCommands.publish(sessionId);
+     const sessionModelState = this.createModelState(models, currentModelId);
+     const sessionModeState = sessionState.agentMode.toSessionModeState();
++    const configOptions = this.createConfigOptions(sessionState);
+     return {
+       sessionId,
+       modelState: sessionModelState,
+       modeState: sessionModeState,
++      configOptions,
+       thread
+     };
+   }
+@@ -20259,7 +20373,7 @@ var CodexAcpServer = class {
        toolCallId: item.id,
        kind: "search",
        title: this.formatWebSearchTitle(item),
@@ -156,7 +302,16 @@ index 1b1f5d508f39ec47ff1826516f9c106a02004cf9..8765731a0ae5c312d589ce22e33d00e3
        rawInput: {
          query: item.query,
          action: item.action
-@@ -20650,6 +20721,9 @@
+@@ -20461,7 +20575,7 @@ ${item.text}`
+       }
+       const agentMode = sessionState.agentMode;
+       const turnCompleted = await this.runWithProcessCheck(
+-        () => this.codexAcpClient.sendPrompt(params, agentMode, modelId, disableSummary, sessionState.cwd)
++        () => this.codexAcpClient.sendPrompt({ ...params, fastMode: sessionState.fastMode }, agentMode, modelId, disableSummary, sessionState.cwd)
+       );
+       if (turnCompleted.turn.status === "interrupted") {
+         await this.connection.sessionUpdate({
+@@ -20650,12 +20764,18 @@ var CodexAppServerClient = class {
    async turnInterrupt(params) {
      return await this.sendRequest({ method: "turn/interrupt", params });
    }
@@ -165,4 +320,13 @@ index 1b1f5d508f39ec47ff1826516f9c106a02004cf9..8765731a0ae5c312d589ce22e33d00e3
 +  }
    async threadStart(params) {
      return await this.sendRequest({ method: "thread/start", params });
+   }
+   async threadResume(params) {
+     return await this.sendRequest({ method: "thread/resume", params });
+   }
++  async threadSettingsUpdate(params) {
++    return await this.sendRequest({ method: "thread/settings/update", params });
++  }
+   async threadList(params) {
+     return await this.sendRequest({ method: "thread/list", params });
    }
