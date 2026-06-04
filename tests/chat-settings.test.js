@@ -450,7 +450,7 @@ describe("per-chat model selection", () => {
       assert.equal(chat.harness_cwd, null);
     });
 
-    it("describes grouped visibility controls with per-flag defaults", async () => {
+    it("describes grouped visibility controls without a tool display mode setting", async () => {
       await seedConfigChat("cfg-show-1", { output_visibility: {} });
       const result = await runChatSettingsCommand(
         { chatId: "cfg-show-1", rootDb: db, senderIds: ["u1"] },
@@ -458,9 +458,10 @@ describe("per-chat model selection", () => {
       );
 
       assert.ok(result.includes("*Show*"), `expected setting title, got: ${result}`);
-      assert.ok(result.includes("- Current: tool details off, thinking on, changes on, subagents on"), `expected current summary, got: ${result}`);
+      assert.ok(result.includes("- Current: thinking on, changes on, subagents on"), `expected current summary, got: ${result}`);
       assert.ok(result.includes("*Controls*"), `expected controls section, got: ${result}`);
-      assert.ok(result.includes("- tool details"), `expected tool details flag, got: ${result}`);
+      assert.ok(!result.includes("tool details"), `did not expect tool detail flag, got: ${result}`);
+      assert.ok(!result.includes("tool activity"), `did not expect tool activity flag, got: ${result}`);
       assert.ok(result.includes("- thinking"), `expected thinking flag, got: ${result}`);
       assert.ok(result.includes("- changes"), `expected changes flag, got: ${result}`);
       assert.ok(result.includes("- subagents"), `expected subagents flag, got: ${result}`);
@@ -495,7 +496,7 @@ describe("per-chat model selection", () => {
           selectMany: async (question, options) => {
             promptText = question;
             pickerOptions = options;
-            return { kind: "selected", ids: ["toolDetails", "changes"] };
+            return { kind: "selected", ids: ["changes"] };
           },
         },
         { setting: "show" },
@@ -509,20 +510,17 @@ describe("per-chat model selection", () => {
       assert.deepEqual(
         pickerOptions,
         [
-          { id: "toolDetails", label: "⚪ Show full tool activity" },
           { id: "thinking", label: "🟢 Hide thinking" },
           { id: "changes", label: "🟢 Hide file changes" },
           { id: "subagents", label: "🟢 Hide sub-agent output" },
           { id: "none", label: "⚪ Hide all extras" },
         ],
       );
-      assert.ok(result.includes("Show full tool activity"), `expected show summary, got: ${result}`);
       assert.ok(result.includes("Hide file changes"), `expected hide summary, got: ${result}`);
       assert.ok(!result.includes("thinking"), `did not expect unchanged thinking summary, got: ${result}`);
 
       const chat = await readChatConfig("cfg-show-3");
       assert.deepEqual(chat.output_visibility, {
-        toolDetails: true,
         changes: false,
       });
     });

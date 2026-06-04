@@ -3,10 +3,9 @@
  */
 
 /**
- * @typedef {"toolDetails" | "thinking" | "changes" | "subagents"} OutputVisibilityKey
+ * @typedef {"thinking" | "changes" | "subagents"} OutputVisibilityKey
  *
  * @typedef {{
- *   toolDetails?: boolean;
  *   tools?: boolean;
  *   commands?: boolean;
  *   thinking?: boolean;
@@ -31,12 +30,6 @@
 
 /** @type {readonly OutputVisibilityFlagDefinition[]} */
 export const OUTPUT_VISIBILITY_FLAGS = Object.freeze([
-  {
-    key: "toolDetails",
-    label: "tool details",
-    description: "Show tool progress details such as shell commands, file reads, and intermediate tool output.",
-    defaultValue: false,
-  },
   {
     key: "thinking",
     label: "thinking",
@@ -79,39 +72,6 @@ function isRecord(value) {
 }
 
 /**
- * Legacy rows may contain `commands` or `tools`; current rows use
- * `toolDetails`. When the canonical key is present, trust it. Otherwise merge
- * legacy values conservatively so one hidden legacy surface keeps full progress
- * details hidden.
- * @param {Record<string, unknown>} raw
- * @returns {boolean | undefined}
- */
-function normalizeToolDetailsVisibilityValue(raw) {
-  const toolDetails = raw.toolDetails;
-  const tools = raw.tools;
-  const commands = raw.commands;
-  const hasToolDetails = typeof toolDetails === "boolean";
-  const hasTools = typeof tools === "boolean";
-  const hasCommands = typeof commands === "boolean";
-  if (hasToolDetails) {
-    return toolDetails;
-  }
-
-  /** @type {boolean[]} */
-  const values = [];
-  if (hasTools) {
-    values.push(tools);
-  }
-  if (hasCommands) {
-    values.push(commands);
-  }
-  if (values.length === 0) {
-    return undefined;
-  }
-  return values.every(Boolean);
-}
-
-/**
  * @param {string} value
  * @returns {value is OutputVisibilityKey}
  */
@@ -130,11 +90,6 @@ export function normalizeOutputVisibility(raw) {
 
   /** @type {OutputVisibilityOverrides} */
   const normalized = {};
-  const toolDetails = normalizeToolDetailsVisibilityValue(raw);
-  if (typeof toolDetails === "boolean") {
-    normalized.toolDetails = toolDetails;
-  }
-
   const thinking = raw.thinking;
   if (typeof thinking === "boolean") {
     normalized.thinking = thinking;

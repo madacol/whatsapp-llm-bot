@@ -163,7 +163,7 @@ describe("provider runtime events", () => {
     }));
   });
 
-  it("projects provider runtime progress, answer, and usage to WhatsApp messages", async () => {
+  it("projects provider runtime progress as the normal tool display", async () => {
     const { sock, getSentMessages } = createMockBaileysSocket();
 
     await adaptIncomingMessage(
@@ -186,9 +186,10 @@ describe("provider runtime events", () => {
       && (entry.msg.text.includes("*Read*") || entry.msg.text.includes("*Shell*"))
     ));
 
+    assert.ok(compactMessages.some((entry) => String(entry.msg.text).includes("*Read*") && String(entry.msg.text).includes("package.json")), `Expected read progress, got ${JSON.stringify(textMessages)}`);
+    assert.ok(compactMessages.some((entry) => String(entry.msg.text).includes("*Shell*") && String(entry.msg.text).includes("pnpm type-check")), `Expected shell progress, got ${JSON.stringify(textMessages)}`);
     assert.ok(textMessages.some((text) => text.includes("Provider runtime answer.")), `Expected provider answer, got ${JSON.stringify(textMessages)}`);
     assert.ok(textMessages.some((text) => text.includes("Cost: 0.004200")), `Expected provider usage cost, got ${JSON.stringify(textMessages)}`);
-    assert.deepEqual(compactMessages, []);
   });
 });
 
