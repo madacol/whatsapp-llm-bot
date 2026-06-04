@@ -1,5 +1,5 @@
 import { createLogger } from "../logger.js";
-import { getHarnessRawEventLoggerFromEnv } from "./raw-event-log.js";
+import { getHarnessRawEventLogger } from "./raw-event-log.js";
 import { createPlanPresentationFromState } from "../plan-presentation.js";
 import { normalizeHarnessRuntimeEvent } from "./harness-runtime-events.js";
 
@@ -107,7 +107,7 @@ function attachRuntimeBoundaryFacts(event, workdir) {
 export function createHarnessRuntimeEventDispatcher(input) {
   const hooks = { ...DEFAULT_RUNTIME_EVENT_HOOKS, ...input.hooks };
   const emitRuntimeEvent = input.emitRuntimeEvent ?? hooks.onRuntimeEvent;
-  const rawEventLogger = input.rawEventLogger ?? getHarnessRawEventLoggerFromEnv();
+  const rawEventLogger = input.rawEventLogger === undefined ? getHarnessRawEventLogger() : input.rawEventLogger;
   /** @type {Map<string, LlmResponseMetadata>} */
   const subagentThreads = new Map();
   /** @type {Set<string>} */

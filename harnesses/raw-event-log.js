@@ -1,5 +1,10 @@
-import fs from "node:fs/promises";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { createHourlyNdjsonLogWriter } from "../hourly-ndjson-log.js";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const REPO_ROOT = path.resolve(__dirname, "..");
+const RAW_EVENT_LOG_BASE_PATH = path.join(REPO_ROOT, "logs", "raw-events.ndjson");
 
 /**
  * @typedef {{
@@ -23,32 +28,23 @@ import path from "node:path";
  * @returns {HarnessRawEventLogger}
  */
 export function createNdjsonRawEventLogger(filePath) {
+  const writer = createHourlyNdjsonLogWriter(filePath);
   return {
-    async write(entry) {
-      await fs.mkdir(path.dirname(filePath), { recursive: true });
-      await fs.appendFile(filePath, `${JSON.stringify(entry)}\n`, "utf8");
+    write(entry) {
+      return writer.write(entry);
     },
   };
 }
 
-/** @type {{ filePath: string, logger: HarnessRawEventLogger } | null} */
-let cachedEnvLogger = null;
+/** @type {HarnessRawEventLogger | null} */
+let cachedDefaultLogger = null;
 
 /**
- * @param {NodeJS.ProcessEnv} [env]
- * @returns {HarnessRawEventLogger | null}
+ * @returns {HarnessRawEventLogger}
  */
-export function getHarnessRawEventLoggerFromEnv(env = process.env) {
-  const rawPath = typeof env.HARNESS_RAW_EVENT_LOG === "string"
-    ? env.HARNESS_RAW_EVENT_LOG.trim()
-    : "";
-  if (!rawPath) {
-    return null;
+export function getHarnessRawEventLogger() {
+  if (!cachedDefaultLogger) {
+    cachedDefaultLogger = createNdjsonRawEventLogger(RAW_EVENT_LOG_BASE_PATH);
   }
-  const filePath = path.resolve(rawPath);
-  if (cachedEnvLogger?.filePath === filePath) {
-    return cachedEnvLogger.logger;
-  }
-  cachedEnvLogger = { filePath, logger: createNdjsonRawEventLogger(filePath) };
-  return cachedEnvLogger.logger;
+  return cachedDefaultLogger;
 }

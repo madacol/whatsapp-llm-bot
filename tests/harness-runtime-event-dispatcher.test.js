@@ -513,7 +513,10 @@ describe("createHarnessRuntimeEventDispatcher", () => {
         raw: { msg: { type: "agent_message_delta", delta: "Done." } },
       });
 
-      const lines = (await fs.readFile(logPath, "utf8")).trim().split("\n");
+      const logFiles = await fs.readdir(tempDir);
+      assert.equal(logFiles.length, 1);
+      assert.match(logFiles[0] ?? "", /^events\.\d{4}-\d{2}-\d{2}T\d{2}Z\.ndjson$/);
+      const lines = (await fs.readFile(path.join(tempDir, logFiles[0] ?? ""), "utf8")).trim().split("\n");
       assert.equal(lines.length, 1);
       const logged = JSON.parse(lines[0]);
       assert.equal(logged.provider, "codex");

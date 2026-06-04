@@ -4,16 +4,15 @@ import path from "node:path";
 import readline from "node:readline";
 import { fileURLToPath } from "node:url";
 import { createLogger } from "../logger.js";
+import { createHourlyNdjsonLogWriter } from "../hourly-ndjson-log.js";
 
 const log = createLogger("harness:acp");
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "..");
 const ACP_STDERR_LOG_ENV = "MADABOT_ACP_STDERR_LOG";
-const ACP_PROTOCOL_LOG_ENV = "HARNESS_ACP_PROTOCOL_LOG";
 const ACP_STDERR_TAIL_MAX_CHARS = 4_000;
-const ACP_PROTOCOL_LOG_RETENTION_HOURS = 24;
-const HOUR_MS = 60 * 60 * 1000;
-const HOURLY_PROTOCOL_LOG_STAMP_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}Z$/;
+const LOGS_DIR = path.join(REPO_ROOT, "logs");
+const ACP_PROTOCOL_LOG_BASE_PATH = path.join(LOGS_DIR, "acp.ndjson");
 
 /**
  * @typedef {{ method: string, resolve: (value: unknown) => void, reject: (error: Error) => void }} PendingRequest
@@ -206,147 +205,29 @@ function cleanStderrTail(value) {
 
 /**
  * @param {string} filePath
- * @param {Date} date
- * @returns {string}
- */
-function formatHourlyProtocolLogPath(filePath, date) {
-  const parsed = path.parse(filePath);
-  const hourStamp = formatUtcHourStamp(date);
-  return path.join(parsed.dir, `${parsed.name}.${hourStamp}${parsed.ext}`);
-}
-
-/**
- * @param {Date} date
- * @returns {string}
- */
-function formatUtcHourStamp(date) {
-  return `${date.toISOString().slice(0, 13)}Z`;
-}
-
-/**
- * @param {string} value
- * @returns {Date}
- */
-function parseProtocolLogEntryTimestamp(value) {
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? new Date() : date;
-}
-
-/**
- * @param {Date} date
- * @returns {number}
- */
-function utcHourStartMs(date) {
-  return Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate(), date.getUTCHours());
-}
-
-/**
- * @param {string} stamp
- * @returns {number | null}
- */
-function parseUtcHourStampMs(stamp) {
-  if (!HOURLY_PROTOCOL_LOG_STAMP_PATTERN.test(stamp)) {
-    return null;
-  }
-  const ms = Date.parse(`${stamp.slice(0, 13)}:00:00.000Z`);
-  return Number.isNaN(ms) ? null : ms;
-}
-
-/**
- * @param {string} baseFilePath
- * @param {string} filename
- * @returns {number | null}
- */
-function hourlyProtocolLogFileTimestampMs(baseFilePath, filename) {
-  const parsed = path.parse(baseFilePath);
-  const prefix = `${parsed.name}.`;
-  if (!filename.startsWith(prefix) || !filename.endsWith(parsed.ext)) {
-    return null;
-  }
-  const stamp = filename.slice(prefix.length, filename.length - parsed.ext.length);
-  return parseUtcHourStampMs(stamp);
-}
-
-/**
- * @param {string} baseFilePath
- * @param {Date} now
- * @returns {Promise<void>}
- */
-async function pruneOldHourlyProtocolLogs(baseFilePath, now) {
-  const parsed = path.parse(baseFilePath);
-  const cutoffMs = utcHourStartMs(now) - ACP_PROTOCOL_LOG_RETENTION_HOURS * HOUR_MS;
-  let entries;
-  try {
-    entries = await fs.promises.readdir(parsed.dir);
-  } catch (error) {
-    if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") {
-      return;
-    }
-    throw error;
-  }
-  await Promise.all(entries.map(async (entry) => {
-    const stampMs = hourlyProtocolLogFileTimestampMs(baseFilePath, entry);
-    if (stampMs === null || stampMs >= cutoffMs) {
-      return;
-    }
-    try {
-      await fs.promises.unlink(path.join(parsed.dir, entry));
-    } catch (error) {
-      if (!(error && typeof error === "object" && "code" in error && error.code === "ENOENT")) {
-        throw error;
-      }
-    }
-  }));
-}
-
-/**
- * @param {string} filePath
  * @returns {AcpProtocolLogger}
  */
 export function createNdjsonAcpProtocolLogger(filePath) {
-  const baseFilePath = path.resolve(filePath);
-  /** @type {Promise<void>} */
-  let pendingWrite = Promise.resolve();
-  let activeHourStamp = "";
-
-  /**
-   * @param {AcpProtocolLogEntry} entry
-   * @returns {Promise<void>}
-   */
-  async function writeEntry(entry) {
-    const entryDate = parseProtocolLogEntryTimestamp(entry.timestamp);
-    const hourStamp = formatUtcHourStamp(entryDate);
-    const targetPath = formatHourlyProtocolLogPath(baseFilePath, entryDate);
-    if (hourStamp !== activeHourStamp) {
-      await fs.promises.mkdir(path.dirname(targetPath), { recursive: true });
-      try {
-        await pruneOldHourlyProtocolLogs(baseFilePath, entryDate);
-      } catch (error) {
-        log.warn("Failed to prune old ACP protocol logs.", error);
-      }
-      activeHourStamp = hourStamp;
-    }
-    await fs.promises.appendFile(targetPath, `${JSON.stringify(entry)}\n`, "utf8");
-  }
+  const writer = createHourlyNdjsonLogWriter(filePath);
 
   return {
     write(entry) {
-      const write = pendingWrite.then(() => writeEntry(entry), () => writeEntry(entry));
-      pendingWrite = write.catch(() => {});
-      return write;
+      return writer.write(entry);
     },
   };
 }
 
+/** @type {AcpProtocolLogger | null} */
+let cachedDefaultProtocolLogger = null;
+
 /**
- * @param {NodeJS.ProcessEnv} [env]
- * @returns {AcpProtocolLogger | null}
+ * @returns {AcpProtocolLogger}
  */
-function getAcpProtocolLoggerFromEnv(env = process.env) {
-  const rawPath = typeof env[ACP_PROTOCOL_LOG_ENV] === "string"
-    ? env[ACP_PROTOCOL_LOG_ENV].trim()
-    : "";
-  return rawPath ? createNdjsonAcpProtocolLogger(path.resolve(rawPath)) : null;
+function getDefaultAcpProtocolLogger() {
+  if (!cachedDefaultProtocolLogger) {
+    cachedDefaultProtocolLogger = createNdjsonAcpProtocolLogger(ACP_PROTOCOL_LOG_BASE_PATH);
+  }
+  return cachedDefaultProtocolLogger;
 }
 
 /**
@@ -419,7 +300,9 @@ function formatConnectionClosedMessage(details) {
  * @returns {Promise<AcpConnection>}
  */
 export async function openAcpConnection(options) {
-  const protocolLogger = options.protocolLogger ?? getAcpProtocolLoggerFromEnv(options.env ?? process.env);
+  const protocolLogger = options.protocolLogger === undefined
+    ? getDefaultAcpProtocolLogger()
+    : options.protocolLogger;
   const proc = spawn(resolveAcpCommandPath(options.command), options.args ?? [], {
     stdio: ["pipe", "pipe", "pipe"],
     ...(options.cwd ? { cwd: options.cwd } : {}),
