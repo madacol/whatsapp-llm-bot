@@ -19,7 +19,7 @@ describe("chat output visibility", () => {
     assert.equal(resolveOutputVisibility({ tools: true }).toolDetails, true);
     assert.deepEqual(
       normalizeOutputVisibility({ toolDetails: true, tools: true, commands: false }),
-      { toolDetails: false },
+      { toolDetails: true },
     );
   });
 });

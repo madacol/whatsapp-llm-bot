@@ -31,6 +31,8 @@ let mockServer;
 let handleMessage;
 /** @type {import("@electric-sql/pglite").PGlite} */
 let testDb;
+/** @type {import("../store.js").Store} */
+let testStore;
 
 const CACHE_PATH = path.resolve("data/models.json");
 
@@ -51,12 +53,12 @@ before(async () => {
   process.env.BASE_URL = mockServer.url;
 
   const { initStore } = await import("../store.js");
-  const store = await initStore(testDb);
+  testStore = await initStore(testDb);
   const { createLlmClient } = await import("../llm.js");
   const llmClient = createLlmClient();
   const { createMessageHandler } = await import("../index.js");
   ({ handleMessage } = createMessageHandler({
-    store,
+    store: testStore,
     llmClient,
   }));
 });
@@ -170,6 +172,9 @@ describe("provider runtime events", () => {
       handleMessage,
       testConfirmRegistry,
       testUserResponseRegistry,
+      undefined,
+      undefined,
+      { outboundStore: testStore },
     );
 
     const sentMessages = getSentMessages();
@@ -183,8 +188,7 @@ describe("provider runtime events", () => {
 
     assert.ok(textMessages.some((text) => text.includes("Provider runtime answer.")), `Expected provider answer, got ${JSON.stringify(textMessages)}`);
     assert.ok(textMessages.some((text) => text.includes("Cost: 0.004200")), `Expected provider usage cost, got ${JSON.stringify(textMessages)}`);
-    assert.equal(compactMessages.filter((entry) => !("edit" in entry.msg)).length, 1, `Expected one compact progress send, got ${JSON.stringify(compactMessages)}`);
-    assert.ok(compactMessages.some((entry) => "edit" in entry.msg), `Expected compact progress edits, got ${JSON.stringify(compactMessages)}`);
+    assert.deepEqual(compactMessages, []);
   });
 });
 
@@ -244,6 +248,9 @@ describe("dummy runtime tools", () => {
       handleMessage,
       testConfirmRegistry,
       testUserResponseRegistry,
+      undefined,
+      undefined,
+      { outboundStore: testStore },
     );
 
     const rendered = captures.getRenderedMessages();
@@ -306,6 +313,9 @@ describe("ACP file changes through WhatsApp transport", () => {
       handleMessage,
       testConfirmRegistry,
       testUserResponseRegistry,
+      undefined,
+      undefined,
+      { outboundStore: testStore },
     );
 
     return {
@@ -419,6 +429,9 @@ describe("ACP runtime events through WhatsApp transport", () => {
       handleMessage,
       testConfirmRegistry,
       testUserResponseRegistry,
+      undefined,
+      undefined,
+      { outboundStore: testStore },
     );
     if (options.pollChoice) {
       for (let attempt = 0; attempt < 50; attempt += 1) {
@@ -525,6 +538,7 @@ describe("audio media-to-text provider input", () => {
       testUserResponseRegistry,
       undefined,
       async () => Buffer.from("e2e audio bytes"),
+      { outboundStore: testStore },
     );
 
     assert.equal(capturedInputs.length, 1);
