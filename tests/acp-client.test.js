@@ -1,7 +1,10 @@
 import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
-import { openAcpConnection } from "../harnesses/acp-client.js";
+import { createNdjsonAcpProtocolLogger, openAcpConnection } from "../harnesses/acp-client.js";
 
 describe("ACP client process stderr", () => {
   /** @type {string | undefined} */
@@ -141,6 +144,65 @@ describe("ACP client process stderr", () => {
     } finally {
       await connection.close();
     }
+  });
+});
+
+describe("ACP protocol log rotation", () => {
+  it("writes ACP protocol entries to UTC hourly log files", async () => {
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "acp-protocol-log-"));
+    const logger = createNdjsonAcpProtocolLogger(path.join(tempDir, "acp.ndjson"));
+
+    await logger.write({
+      timestamp: "2026-06-04T13:12:00.000Z",
+      direction: "client_to_agent",
+      kind: "request",
+      id: 1,
+      method: "initialize",
+      message: { jsonrpc: "2.0", id: 1, method: "initialize" },
+    });
+    await logger.write({
+      timestamp: "2026-06-04T14:00:01.000Z",
+      direction: "agent_to_client",
+      kind: "notification",
+      method: "session/update",
+      message: { jsonrpc: "2.0", method: "session/update" },
+    });
+
+    assert.deepEqual((await fs.readdir(tempDir)).sort(), [
+      "acp.2026-06-04T13Z.ndjson",
+      "acp.2026-06-04T14Z.ndjson",
+    ]);
+    assert.match(
+      await fs.readFile(path.join(tempDir, "acp.2026-06-04T13Z.ndjson"), "utf8"),
+      /"method":"initialize"/,
+    );
+    assert.match(
+      await fs.readFile(path.join(tempDir, "acp.2026-06-04T14Z.ndjson"), "utf8"),
+      /"method":"session\/update"/,
+    );
+  });
+
+  it("deletes matching hourly ACP protocol logs older than 24 hours when a new hour starts", async () => {
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "acp-protocol-log-"));
+    await fs.writeFile(path.join(tempDir, "acp.2026-06-03T12Z.ndjson"), "{}\n");
+    await fs.writeFile(path.join(tempDir, "acp.2026-06-03T13Z.ndjson"), "{}\n");
+    await fs.writeFile(path.join(tempDir, "other.2026-06-03T12Z.ndjson"), "{}\n");
+    const logger = createNdjsonAcpProtocolLogger(path.join(tempDir, "acp.ndjson"));
+
+    await logger.write({
+      timestamp: "2026-06-04T13:05:00.000Z",
+      direction: "client_to_agent",
+      kind: "request",
+      id: 1,
+      method: "initialize",
+      message: { jsonrpc: "2.0", id: 1, method: "initialize" },
+    });
+
+    assert.deepEqual((await fs.readdir(tempDir)).sort(), [
+      "acp.2026-06-03T13Z.ndjson",
+      "acp.2026-06-04T13Z.ndjson",
+      "other.2026-06-03T12Z.ndjson",
+    ]);
   });
 });
 
