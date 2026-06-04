@@ -92,24 +92,6 @@ async function observeAcpReadPayloadsThroughBaileys(payloads) {
 }
 
 describe("ACP read presentation vertical slice", () => {
-  it("does not render a generic ACP read row when the start payload has no path", async () => {
-    const { sent, runtimeEvents } = await observeAcpReadPayloadsThroughBaileys([
-      {
-        sessionId: "019e8e35-df8f-7f51-ace2-06b3f2d1f9d5",
-        update: {
-          sessionUpdate: "tool_call",
-          toolCallId: "call_pathless_read",
-          status: "in_progress",
-          kind: "read",
-          title: "Read file",
-        },
-      },
-    ]);
-
-    assert.deepEqual(runtimeEvents.map((event) => event.type), ["tool.started"]);
-    assert.deepEqual(sent, []);
-  });
-
   it("edits a live-shaped ACP read payload to completed Read text through Baileys", async () => {
     const chatId = "acp-read-presentation@s.whatsapp.net";
     const toolCallId = "call_live_read_shape";
@@ -157,6 +139,55 @@ describe("ACP read presentation vertical slice", () => {
       },
       {
         text: "✅ *Read*  `whatsapp/outbound/send-content.js`",
+        edit: { id: "msg-1", remoteJid: chatId, fromMe: true },
+        linkPreview: null,
+      },
+    ]);
+  });
+
+  it("adds a line range when ACP read completion output includes line numbers", async () => {
+    const chatId = "acp-read-presentation@s.whatsapp.net";
+    const toolCallId = "call_line_numbered_read";
+    const { sent, runtimeEvents } = await observeAcpReadPayloadsThroughBaileys([
+      {
+        sessionId: "s1",
+        update: {
+          sessionUpdate: "tool_call",
+          toolCallId,
+          status: "in_progress",
+          kind: "read",
+          title: "Read file",
+          locations: [
+            { path: "/home/mada/whatsapp-llm-bot/src/app.js" },
+          ],
+        },
+      },
+      {
+        sessionId: "s1",
+        update: {
+          sessionUpdate: "tool_call_update",
+          toolCallId,
+          status: "completed",
+          rawOutput: {
+            formatted_output: [
+              "    10→function start() {",
+              "    11→  return true;",
+              "    12→}",
+            ].join("\n"),
+          },
+        },
+      },
+    ]);
+
+    assert.deepEqual(runtimeEvents.map((event) => event.type), ["tool.started", "tool.completed"]);
+    assert.deepEqual(sent.map((entry) => entry.chatId), [chatId, chatId]);
+    assert.deepEqual(sent.map((entry) => entry.msg), [
+      {
+        text: "🔧 *Read*  `src/app.js`",
+        linkPreview: null,
+      },
+      {
+        text: "✅ *Read*  `src/app.js`  *10-12*",
         edit: { id: "msg-1", remoteJid: chatId, fromMe: true },
         linkPreview: null,
       },
