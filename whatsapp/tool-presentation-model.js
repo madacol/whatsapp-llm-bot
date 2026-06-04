@@ -471,7 +471,12 @@ function buildSdkPresentation(name, args, cwd) {
       return findArgs ? createFindOnPagePresentation(findArgs.pattern, findArgs.ref_id) : null;
     }
     case "Read":
-      return typeof args.file_path === "string" ? createReadPresentation(args.file_path, cwd, getReadLineRange(args)) : null;
+    case "Read file": {
+      const readPath = typeof args.file_path === "string"
+        ? args.file_path
+        : typeof args.path === "string" ? args.path : null;
+      return readPath ? createReadPresentation(readPath, cwd, getReadLineRange(args)) : null;
+    }
     case "Grep":
     case "Search":
       return typeof args.pattern === "string"
