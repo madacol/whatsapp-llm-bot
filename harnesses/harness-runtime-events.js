@@ -221,7 +221,7 @@
  *   chatId?: string,
  *   type: "file-read.started",
  *   provider: HarnessRuntimeProvider,
- *   fileRead: { command: string, paths: string[] },
+ *   fileRead: { command: string, paths: string[], lineRange?: { start: number, end: number } },
  *   raw?: HarnessRuntimeRawEvent,
  * } & HarnessRuntimeEventEnvelope} HarnessRuntimeFileReadEvent
  */
@@ -362,6 +362,66 @@ function normalizeRawEvent(raw) {
 }
 
 /**
+ * @param {unknown} value
+ * @returns {value is { start: number, end: number }}
+ */
+function isLineRange(value) {
+  if (!isRecord(value)) {
+    return false;
+  }
+  const start = value.start;
+  const end = value.end;
+  return Number.isInteger(start)
+    && Number.isInteger(end)
+    && typeof start === "number"
+    && typeof end === "number"
+    && start > 0
+    && end >= start;
+}
+
+/**
+ * @param {string} command
+ * @returns {{ start: number, end: number } | undefined}
+ */
+function parseFileReadLineRange(command) {
+  const match = command.match(/\bsed\s+-n\s+['"]?(\d+)(?:\s*,\s*(\d+))?p['"]?/u);
+  if (!match) {
+    return undefined;
+  }
+  const start = Number(match[1]);
+  const end = Number(match[2] ?? match[1]);
+  return Number.isInteger(start) && Number.isInteger(end) && start > 0 && end >= start
+    ? { start, end }
+    : undefined;
+}
+
+/**
+ * @template {HarnessRuntimeEvent | ({ type: string, provider: string } & Record<string, unknown>)} T
+ * @param {T} event
+ * @returns {T}
+ */
+function normalizeRuntimeEventPayload(event) {
+  if (event.type !== "file-read.started" || !isRecord(event.fileRead)) {
+    return event;
+  }
+  const fileRead = /** @type {Record<string, unknown>} */ (event.fileRead);
+  if (isLineRange(fileRead.lineRange) || typeof fileRead.command !== "string") {
+    return event;
+  }
+  const lineRange = parseFileReadLineRange(fileRead.command);
+  if (!lineRange) {
+    return event;
+  }
+  return /** @type {T} */ ({
+    ...event,
+    fileRead: {
+      ...fileRead,
+      lineRange,
+    },
+  });
+}
+
+/**
  * Normalize provider events at the boundary so subscribers can rely on routing
  * and debugging metadata even when individual adapters emit lean events.
  * @template {HarnessRuntimeEvent | ({ type: string, provider: string } & Record<string, unknown>)} T
@@ -370,28 +430,29 @@ function normalizeRawEvent(raw) {
  * @returns {T & Required<Pick<HarnessRuntimeEventEnvelope, "eventId" | "createdAt">>}
  */
 export function normalizeHarnessRuntimeEvent(event, defaults = {}) {
+  const normalizedEvent = normalizeRuntimeEventPayload(event);
   const raw = isRecord(event.raw)
     ? normalizeRawEvent(event.raw)
     : normalizeRawEvent(defaults.raw);
   return /** @type {T & Required<Pick<HarnessRuntimeEventEnvelope, "eventId" | "createdAt">>} */ ({
-    ...event,
-    eventId: typeof event.eventId === "string"
-      ? event.eventId
+    ...normalizedEvent,
+    eventId: typeof normalizedEvent.eventId === "string"
+      ? normalizedEvent.eventId
       : typeof defaults.eventId === "string" ? defaults.eventId : createRuntimeEventId(),
-    createdAt: typeof event.createdAt === "string"
-      ? event.createdAt
+    createdAt: typeof normalizedEvent.createdAt === "string"
+      ? normalizedEvent.createdAt
       : typeof defaults.createdAt === "string" ? defaults.createdAt : new Date().toISOString(),
-    ...(typeof event.providerInstanceId === "string"
-      ? { providerInstanceId: event.providerInstanceId }
+    ...(typeof normalizedEvent.providerInstanceId === "string"
+      ? { providerInstanceId: normalizedEvent.providerInstanceId }
       : typeof defaults.providerInstanceId === "string" ? { providerInstanceId: defaults.providerInstanceId } : {}),
-    ...(typeof event.turnId === "string"
-      ? { turnId: event.turnId }
+    ...(typeof normalizedEvent.turnId === "string"
+      ? { turnId: normalizedEvent.turnId }
       : typeof defaults.turnId === "string" ? { turnId: defaults.turnId } : {}),
-    ...(typeof event.requestId === "string"
-      ? { requestId: event.requestId }
+    ...(typeof normalizedEvent.requestId === "string"
+      ? { requestId: normalizedEvent.requestId }
       : typeof defaults.requestId === "string" ? { requestId: defaults.requestId } : {}),
-    ...(event.providerRefs
-      ? { providerRefs: event.providerRefs }
+    ...(normalizedEvent.providerRefs
+      ? { providerRefs: normalizedEvent.providerRefs }
       : defaults.providerRefs ? { providerRefs: defaults.providerRefs } : {}),
     ...(raw ? { raw } : {}),
   });

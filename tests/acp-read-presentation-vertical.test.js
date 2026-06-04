@@ -91,6 +91,53 @@ async function observeAcpReadPayloadsThroughBaileys(payloads) {
   return { sent, runtimeEvents };
 }
 
+/**
+ * @param {Array<import("../harnesses/harness-runtime-events.js").HarnessRuntimeEvent>} events
+ * @returns {Promise<{
+ *   sent: Array<{ chatId: string, msg: Record<string, unknown> }>,
+ *   outboundEvents: SendContent[],
+ * }>}
+ */
+async function observeRuntimeReadEventsThroughBaileys(events) {
+  const chatId = "runtime-read-presentation@s.whatsapp.net";
+  const cwd = "/home/mada/whatsapp-llm-bot";
+  const { sock, sent } = createMockSock();
+  /** @type {SendContent[]} */
+  const outboundEvents = [];
+  const hooks = buildAgentIoHooks(
+    {
+      send: async (event) => {
+        outboundEvents.push(event);
+        return sendEvent(sock, chatId, event, undefined, undefined, {
+          outputVisibility: DEFAULT_OUTPUT_VISIBILITY,
+        });
+      },
+      reply: async (event) => {
+        outboundEvents.push(event);
+        return sendEvent(sock, chatId, event, undefined, undefined, {
+          outputVisibility: DEFAULT_OUTPUT_VISIBILITY,
+        });
+      },
+      select: async () => "",
+      confirm: async () => true,
+    },
+    cwd,
+    DEFAULT_OUTPUT_VISIBILITY,
+  );
+  const dispatcher = createHarnessRuntimeEventDispatcher({
+    provider: "acp",
+    messages: [],
+    hooks,
+    workdir: cwd,
+  });
+
+  for (const event of events) {
+    await dispatcher.handleEvent(event);
+  }
+
+  return { sent, outboundEvents };
+}
+
 describe("ACP read presentation vertical slice", () => {
   it("edits a live-shaped ACP read payload to completed Read text through Baileys", async () => {
     const chatId = "acp-read-presentation@s.whatsapp.net";
@@ -191,6 +238,31 @@ describe("ACP read presentation vertical slice", () => {
         edit: { id: "msg-1", remoteJid: chatId, fromMe: true },
         linkPreview: null,
       },
+    ]);
+  });
+
+  it("gets sed read line ranges from the runtime adapter event before Baileys presentation", async () => {
+    const { sent, outboundEvents } = await observeRuntimeReadEventsThroughBaileys([
+      {
+        type: "file-read.started",
+        provider: "acp",
+        fileRead: {
+          command: "sed -n '1,20p' src/app.js",
+          paths: ["src/app.js"],
+        },
+      },
+    ]);
+    const [outbound] = outboundEvents;
+
+    assert.equal(outbound?.kind, "runtime_event");
+    assert.deepEqual(
+      outbound?.kind === "runtime_event" && outbound.event.type === "file-read.started"
+        ? outbound.event.fileRead.lineRange
+        : undefined,
+      { start: 1, end: 20 },
+    );
+    assert.deepEqual(sent.map((entry) => entry.msg), [
+      { text: "🔧 *Read*  `src/app.js`  *1-20*", linkPreview: null },
     ]);
   });
 });
