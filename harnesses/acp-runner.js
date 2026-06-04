@@ -1232,6 +1232,33 @@ export async function setAcpSessionConfigOption(input) {
 }
 
 /**
+ * @param {AcpForkInput & { modelId: string }} input
+ * @returns {Promise<void>}
+ */
+export async function setAcpSessionModel(input) {
+  const { connection, capabilities } = await openInitializedAcpConnection(input, async () => ({}));
+  try {
+    if (hasAcpSessionCapability(capabilities, "resume")) {
+      await connection.sendRequest("session/resume", {
+        sessionId: input.sessionId,
+        ...buildSessionParams(input.runConfig),
+      });
+    } else if (supportsAcpLoadSession(capabilities)) {
+      await connection.sendRequest("session/load", {
+        sessionId: input.sessionId,
+        ...buildSessionParams(input.runConfig),
+      });
+    }
+    await connection.sendRequest("session/set_model", {
+      sessionId: input.sessionId,
+      modelId: input.modelId,
+    });
+  } finally {
+    await connection.close();
+  }
+}
+
+/**
  * @param {AcpRunInput} input
  * @param {ReturnType<typeof createHarnessRuntimeEventDispatcher>} runtimeDispatcher
  * @param {unknown} promptResult

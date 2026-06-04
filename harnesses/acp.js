@@ -9,6 +9,7 @@ import {
   readAcpSession,
   rollbackAcpSession,
   setAcpSessionConfigOption,
+  setAcpSessionModel,
   startAcpRun,
 } from "./acp-runner.js";
 import { buildTextHarnessPromptFromBlocks } from "./prompt-media.js";
@@ -678,6 +679,33 @@ function selectOptionId(option) {
 }
 
 /**
+ * @param {string} model
+ * @param {string} effort
+ * @returns {string}
+ */
+function buildAcpModelStateId(model, effort) {
+  return effort === "default" ? model : `${model}[${effort}]`;
+}
+
+/**
+ * @param {{ command: string, args: string[] }} commandSpec
+ * @param {string | null} currentSessionId
+ * @param {string} model
+ * @param {string} effort
+ * @returns {Promise<void>}
+ */
+async function persistAcpModelStateSelection(commandSpec, currentSessionId, model, effort) {
+  if (!currentSessionId || model === "default") {
+    return;
+  }
+  await setAcpSessionModel({
+    ...commandSpec,
+    sessionId: currentSessionId,
+    modelId: buildAcpModelStateId(model, effort),
+  });
+}
+
+/**
  * @param {Record<string, unknown>} option
  * @returns {string}
  */
@@ -759,6 +787,7 @@ async function persistAcpCommandConfigValue(params) {
  *   sessionKind: HarnessSessionRef["kind"],
  *   commandSpec: { command: string, args: string[] },
  *   cancelActiveQuery: (chatId: string | HarnessSessionRef) => boolean,
+ *   loadControlState?: typeof loadAcpCommandControlState,
  * }} options
  * @returns {(input: HarnessCommandContext) => Promise<boolean>}
  */
@@ -890,8 +919,7 @@ function createGenericAcpCommandHandler(options) {
     if (modelMatch) {
       const arg = modelMatch[1]?.trim() ?? null;
       const currentSessionId = input.chatInfo?.harness_session_id ?? null;
-      const controlState = await loadAcpCommandControlState(currentSessionId, options.commandSpec)
-        .catch(() => ({ configOptions: [], modelState: null }));
+      const controlState = await (options.loadControlState ?? loadAcpCommandControlState)(currentSessionId, options.commandSpec);
       const configOptions = controlState.configOptions;
       const modelOption = findConfigOptionByCategory(configOptions, "model");
       const effortOption = findConfigOptionByCategory(configOptions, "thought_level");
@@ -906,6 +934,7 @@ function createGenericAcpCommandHandler(options) {
 
         const modelValues = modelOption ? configOptionValues(modelOption) : [];
         const modelStateValues = modelStateModelOptions(controlState.modelState);
+        let usesModelStateSelection = false;
         if (modelValues.length > 0 && typeof modelOption?.id === "string") {
           const selected = await input.context.select(`Choose ${options.label} model`, modelValues, {
             deleteOnSelect: true,
@@ -935,6 +964,7 @@ function createGenericAcpCommandHandler(options) {
             const matchedId = selectOptionId(matched);
             await updateActiveHarnessConfig(input.chatId, options.harnessName, { model: matchedId });
             model = matchedId;
+            usesModelStateSelection = true;
           }
         }
 
@@ -969,7 +999,12 @@ function createGenericAcpCommandHandler(options) {
             const matchedId = selectOptionId(matched);
             await updateActiveHarnessConfig(input.chatId, options.harnessName, { reasoningEffort: matchedId });
             effort = matchedId;
+            usesModelStateSelection = true;
           }
+        }
+
+        if (usesModelStateSelection) {
+          await persistAcpModelStateSelection(options.commandSpec, currentSessionId, model, effort);
         }
 
         if (fastModeOption && typeof fastModeOption.id === "string") {
@@ -1002,6 +1037,31 @@ function createGenericAcpCommandHandler(options) {
           replyOptions.push(`${fastModeOption.name ?? "Fast mode"}: \`${String(updatedConfigValues[fastModeOption.id])}\``);
         }
         await input.context.reply(contentEvent("tool-result", replyOptions.join("\n")));
+        return true;
+      }
+      const fastMatch = arg.match(/^fast(?:\s+(.+))?$/i);
+      if (fastMatch) {
+        if (!fastModeOption || typeof fastModeOption.id !== "string") {
+          throw new Error(`${options.label} fast mode is not exposed by this ACP agent.`);
+        }
+        const fastValues = configOptionValues(fastModeOption);
+        const selected = fastMatch[1]?.trim()
+          ?? await input.context.select(`Choose ${options.label} fast mode`, fastValues, {
+            deleteOnSelect: true,
+            currentId: typeof fastModeOption.currentValue === "boolean" ? String(fastModeOption.currentValue) : undefined,
+          });
+        const value = resolveCommandConfigValue(fastModeOption, selected);
+        if (value === null) {
+          throw new Error(`Invalid ${options.label} fast mode value \`${selected}\`.`);
+        }
+        await persistAcpCommandConfigValue({
+          input,
+          options,
+          configId: fastModeOption.id,
+          value,
+          currentSessionId,
+        });
+        await input.context.reply(contentEvent("tool-result", `${fastModeOption.name ?? "Fast mode"} set to \`${String(value)}\``));
         return true;
       }
       const effortMatch = arg.match(/^effort\s+(.+)$/i);
@@ -1152,6 +1212,7 @@ export function normalizeAcpHarnessConfig(config, defaultCommand) {
 }
 
 export const __testAcpModelCommand = {
+  createGenericAcpCommandHandler,
   findFastModeConfigOption,
   modelStateEffortOptions,
   modelStateModelOptions,

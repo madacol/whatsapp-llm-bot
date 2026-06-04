@@ -2,6 +2,38 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { __testAcpModelCommand } from "../harnesses/acp.js";
 
+/**
+ * @returns {ExecuteActionContext}
+ */
+function createContext() {
+  return /** @type {ExecuteActionContext} */ ({
+    chatId: "acp-model-command-test",
+    senderIds: [],
+    content: [],
+    getIsAdmin: async () => true,
+    send: async () => undefined,
+    reply: async () => undefined,
+    reactToMessage: async () => {},
+    select: async () => "",
+    confirm: async () => true,
+  });
+}
+
+/**
+ * @param {(sessionId: string | null, commandSpec: { command: string, args: string[] }) => Promise<{ configOptions: Record<string, unknown>[], modelState: { currentModelId?: string, availableModels: Array<{ modelId: string, name: string, description?: string }> } | null }>} loadControlState
+ * @returns {(input: HarnessCommandContext) => Promise<boolean>}
+ */
+function createModelCommandHandler(loadControlState) {
+  return __testAcpModelCommand.createGenericAcpCommandHandler({
+    harnessName: "codex",
+    label: "Codex",
+    sessionKind: "codex",
+    commandSpec: { command: "mock-acp", args: [] },
+    cancelActiveQuery: () => false,
+    loadControlState,
+  });
+}
+
 describe("ACP /model command option derivation", () => {
   it("derives model and effort choices from ACP session model state", () => {
     const modelState = {
@@ -53,5 +85,36 @@ describe("ACP /model command option derivation", () => {
       model: "gpt-5.5",
       effort: null,
     });
+  });
+
+  it("propagates ACP control-state loader failures instead of falling back to defaults", async () => {
+    const handler = createModelCommandHandler(async () => {
+      throw new Error("provider control state failed");
+    });
+
+    await assert.rejects(
+      handler({
+        chatId: "acp-model-loader-failure",
+        command: "model",
+        context: createContext(),
+      }),
+      /provider control state failed/,
+    );
+  });
+
+  it("throws when fast mode is requested but the ACP agent did not expose it", async () => {
+    const handler = createModelCommandHandler(async () => ({
+      configOptions: [],
+      modelState: null,
+    }));
+
+    await assert.rejects(
+      handler({
+        chatId: "acp-model-fast-unsupported",
+        command: "model fast on",
+        context: createContext(),
+      }),
+      /fast mode is not exposed/,
+    );
   });
 });
