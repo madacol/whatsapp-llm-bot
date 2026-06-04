@@ -34,7 +34,7 @@ export const OUTPUT_VISIBILITY_FLAGS = Object.freeze([
   {
     key: "toolDetails",
     label: "tool details",
-    description: "Show full tool progress details such as shell commands, file reads, and intermediate tool output. When off, compact tool activity is still shown.",
+    description: "Show tool progress details such as shell commands, file reads, and intermediate tool output.",
     defaultValue: false,
   },
   {
@@ -80,8 +80,9 @@ function isRecord(value) {
 
 /**
  * Legacy rows may contain `commands` or `tools`; current rows use
- * `toolDetails`. Merge conservatively so we do not re-enable full progress
- * details the user had explicitly hidden.
+ * `toolDetails`. When the canonical key is present, trust it. Otherwise merge
+ * legacy values conservatively so one hidden legacy surface keeps full progress
+ * details hidden.
  * @param {Record<string, unknown>} raw
  * @returns {boolean | undefined}
  */
@@ -92,12 +93,12 @@ function normalizeToolDetailsVisibilityValue(raw) {
   const hasToolDetails = typeof toolDetails === "boolean";
   const hasTools = typeof tools === "boolean";
   const hasCommands = typeof commands === "boolean";
+  if (hasToolDetails) {
+    return toolDetails;
+  }
+
   /** @type {boolean[]} */
   const values = [];
-
-  if (hasToolDetails) {
-    values.push(toolDetails);
-  }
   if (hasTools) {
     values.push(tools);
   }

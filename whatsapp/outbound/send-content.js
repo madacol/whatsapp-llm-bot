@@ -1828,69 +1828,6 @@ async function sendCompactToolActivityEvent(sock, chatId, event, options, reacti
 }
 
 /**
- * @param {import('@whiskeysockets/baileys').WASocket} sock
- * @param {string} chatId
- * @param {RuntimeEventOutboundEvent} event
- * @param {{ quoted?: BaileysMessage } | undefined} options
- * @param {import("../runtime/reaction-runtime.js").ReactionRuntime | undefined} reactionRuntime
- * @param {{ editHandleStore?: import("../../store.js").Store }} sendOptions
- * @returns {Promise<MessageHandle | undefined>}
- */
-async function sendCompactRuntimeEvent(sock, chatId, event, options, reactionRuntime, sendOptions) {
-  const runtime = event.event;
-  if (runtime.type === "file-read.started") {
-    return sendCompactToolActivityEvent(sock, chatId, {
-      kind: "compact_tool_activity",
-      cwd: event.cwd,
-      activity: {
-        type: "file_read",
-        status: "started",
-        command: runtime.fileRead.command,
-        paths: runtime.fileRead.paths,
-      },
-    }, options, reactionRuntime, sendOptions);
-  }
-  if (runtime.type === "command.started" || runtime.type === "command.completed" || runtime.type === "command.failed") {
-    return sendCompactToolActivityEvent(sock, chatId, {
-      kind: "compact_tool_activity",
-      cwd: event.cwd,
-      activity: {
-        type: "command",
-        status: runtime.command.status,
-        command: runtime.command.command,
-        ...(runtime.command.output !== undefined && { output: runtime.command.output }),
-      },
-    }, options, reactionRuntime, sendOptions);
-  }
-  if (runtime.type === "tool.started" || runtime.type === "tool.updated" || runtime.type === "tool.completed" || runtime.type === "tool.failed") {
-    const displayTool = buildWhatsAppRuntimeToolFromRawAcp(runtime.tool, event);
-    if (isNoopRuntimeTool(displayTool)) {
-      return undefined;
-    }
-    const readLineRange = getRawAcpReadOutputLineRange(event);
-    return sendCompactToolActivityEvent(sock, chatId, {
-      kind: "compact_tool_activity",
-      cwd: event.cwd,
-      activity: {
-        type: "tool",
-        status: runtime.type === "tool.failed"
-          ? "failed"
-          : runtime.type === "tool.completed"
-            ? "completed"
-            : runtime.type === "tool.updated" ? "updated" : "started",
-        toolCall: {
-          id: displayTool.id,
-          name: displayTool.name,
-          arguments: JSON.stringify(displayTool.arguments),
-        },
-        ...(readLineRange ? { readLineRange } : {}),
-      },
-    }, options, reactionRuntime, sendOptions);
-  }
-  return undefined;
-}
-
-/**
  * @param {RuntimeEventOutboundEvent["event"]} runtime
  * @returns {boolean}
  */
@@ -2334,10 +2271,6 @@ function renderOutboundEvent(event) {
 async function sendRuntimeEvent(sock, chatId, event, options, reactionRuntime, sendOptions = {}) {
   const visibility = await resolveWhatsAppOutputVisibility(chatId, sendOptions);
   if (!visibility.toolDetails) {
-    const compactHandle = await sendCompactRuntimeEvent(sock, chatId, event, options, reactionRuntime, sendOptions);
-    if (compactHandle) {
-      return compactHandle;
-    }
     if (isCompactRuntimeProgressEvent(event.event)) {
       return undefined;
     }

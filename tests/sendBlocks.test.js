@@ -442,7 +442,7 @@ describe("sendEvent – runtime events", () => {
     ]);
   });
 
-  it("keeps compact runtime tool updates inside the compact WhatsApp progress row", async () => {
+  it("suppresses runtime tool progress when tool details are hidden", async () => {
     const { sock, sent } = createMockSock();
     const baseTool = {
       id: "tool-compact-1",
@@ -484,14 +484,7 @@ describe("sendEvent – runtime events", () => {
       },
     }, undefined, undefined, { outputVisibility: COMPACT_TOOL_OUTPUT });
 
-    assert.deepEqual(sent.map((entry) => entry.msg), [
-      { text: "🔧 *Search*  `needle` in *src*", linkPreview: null },
-      {
-        text: "✅ *Search*  `needle` in *src*",
-        edit: { id: "msg-1", remoteJid: "compact-runtime-tool-chat", fromMe: true },
-        linkPreview: null,
-      },
-    ]);
+    assert.deepEqual(sent.map((entry) => entry.msg), []);
   });
 
   it("suppresses compact ACP editing-files placeholders and renders the file-change diff instead", async () => {
