@@ -362,63 +362,12 @@ function normalizeRawEvent(raw) {
 }
 
 /**
- * @param {unknown} value
- * @returns {value is { line: number, limit: number }}
- */
-function hasReadWindow(value) {
-  if (!isRecord(value)) {
-    return false;
-  }
-  const line = value.line;
-  const limit = value.limit;
-  return Number.isInteger(line)
-    && Number.isInteger(limit)
-    && typeof line === "number"
-    && typeof limit === "number"
-    && line > 0
-    && limit > 0;
-}
-
-/**
- * @param {string} command
- * @returns {{ line: number, limit: number } | undefined}
- */
-function parseFileReadWindow(command) {
-  const match = command.match(/\bsed\s+-n\s+['"]?(\d+)(?:\s*,\s*(\d+))?p['"]?/u);
-  if (!match) {
-    return undefined;
-  }
-  const line = Number(match[1]);
-  const end = Number(match[2] ?? match[1]);
-  return Number.isInteger(line) && Number.isInteger(end) && line > 0 && end >= line
-    ? { line, limit: end - line + 1 }
-    : undefined;
-}
-
-/**
  * @template {HarnessRuntimeEvent | ({ type: string, provider: string } & Record<string, unknown>)} T
  * @param {T} event
  * @returns {T}
  */
 function normalizeRuntimeEventPayload(event) {
-  if (event.type !== "file-read.started" || !isRecord(event.fileRead)) {
-    return event;
-  }
-  const fileRead = /** @type {Record<string, unknown>} */ (event.fileRead);
-  if (hasReadWindow(fileRead) || typeof fileRead.command !== "string") {
-    return event;
-  }
-  const readWindow = parseFileReadWindow(fileRead.command);
-  if (!readWindow) {
-    return event;
-  }
-  return /** @type {T} */ ({
-    ...event,
-    fileRead: {
-      ...fileRead,
-      ...readWindow,
-    },
-  });
+  return event;
 }
 
 /**

@@ -568,6 +568,41 @@ describe("ACP payload to WhatsApp socket vertical slices", () => {
     assert.equal(sent[0]?.msg.text, "🔧 *Read*  `src/app.js`  *10-12*");
   });
 
+  it("renders Codex ACP read line ranges from locations and metadata", async () => {
+    const { sent, trace } = await observeAcpPayloadSliceToBaileys([
+      {
+        sessionId: "s1",
+        update: {
+          sessionUpdate: "tool_call",
+          toolCallId: "codex-read-range",
+          title: "Read sample-lines.txt (10 - 12)",
+          kind: "read",
+          status: "in_progress",
+          locations: [{ path: "/repo/sample-lines.txt", line: 10 }],
+          rawInput: {
+            commandAction: {
+              type: "read",
+              command: "sed -n '10,12p' sample-lines.txt",
+              name: "sample-lines.txt",
+              path: "/repo/sample-lines.txt",
+            },
+          },
+          _meta: {
+            codex: {
+              lineRange: { start: 10, end: 12 },
+            },
+          },
+        },
+      },
+    ], {
+      chatId: "acp-payload-codex-read-location-range@s.whatsapp.net",
+      workdir: "/repo",
+    });
+
+    assert.deepEqual(trace.runtimeEvents.map((event) => event.type), ["tool.started"]);
+    assert.equal(sent[0]?.msg.text, "🔧 *Read*  `sample-lines.txt`  *10-12*");
+  });
+
   it("adds ACP read line ranges from completed raw output", async () => {
     const { sent, trace } = await observeAcpPayloadSliceToBaileys([
       {

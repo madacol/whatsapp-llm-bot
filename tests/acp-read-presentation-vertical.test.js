@@ -241,28 +241,4 @@ describe("ACP read presentation vertical slice", () => {
     ]);
   });
 
-  it("gets sed read line ranges from the runtime adapter event before Baileys presentation", async () => {
-    const { sent, outboundEvents } = await observeRuntimeReadEventsThroughBaileys([
-      {
-        type: "file-read.started",
-        provider: "acp",
-        fileRead: {
-          command: "sed -n '1,20p' src/app.js",
-          paths: ["src/app.js"],
-        },
-      },
-    ]);
-    const [outbound] = outboundEvents;
-
-    assert.equal(outbound?.kind, "runtime_event");
-    assert.deepEqual(
-      outbound?.kind === "runtime_event" && outbound.event.type === "file-read.started"
-        ? { line: outbound.event.fileRead.line, limit: outbound.event.fileRead.limit }
-        : undefined,
-      { line: 1, limit: 20 },
-    );
-    assert.deepEqual(sent.map((entry) => entry.msg), [
-      { text: "🔧 *Read*  `src/app.js`  *1-20*", linkPreview: null },
-    ]);
-  });
 });

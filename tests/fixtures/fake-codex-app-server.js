@@ -1,20 +1,22 @@
 #!/usr/bin/env node
 import fs from "node:fs";
-import readline from "node:readline";
 
 const recordPath = process.env.FAKE_CODEX_RECORD_PATH;
-const rl = readline.createInterface({
-  input: process.stdin,
-  crlfDelay: Infinity,
-});
-process.stdin.resume();
 const keepAlive = setInterval(() => {}, 60 * 60 * 1000);
+let inputBuffer = Buffer.alloc(0);
+let useContentLengthFraming = false;
+let currentThreadCwd = process.cwd();
 
 /**
  * @param {Record<string, unknown>} message
  */
 function send(message) {
-  process.stdout.write(`${JSON.stringify(message)}\n`);
+  const json = JSON.stringify(message);
+  if (useContentLengthFraming) {
+    process.stdout.write(`Content-Length: ${Buffer.byteLength(json, "utf8")}\r\n\r\n${json}`);
+    return;
+  }
+  process.stdout.write(`${json}\n`);
 }
 
 /**
@@ -58,11 +60,14 @@ function firstTextInput(input) {
     : "";
 }
 
-for await (const line of rl) {
-  if (!line.trim()) {
-    continue;
+/**
+ * @param {unknown} parsed
+ */
+async function handleMessage(parsed) {
+  if (!parsed || typeof parsed !== "object") {
+    return;
   }
-  const message = JSON.parse(line);
+  const message = /** @type {Record<string, unknown>} */ (parsed);
   const { id, method, params } = message;
   switch (method) {
     case "initialize":
@@ -75,6 +80,9 @@ for await (const line of rl) {
       respond(id, { skills: [] });
       break;
     case "thread/start":
+      if (typeof params.cwd === "string" && params.cwd.length > 0) {
+        currentThreadCwd = params.cwd;
+      }
       respond(id, {
         thread: { id: "fake-thread-1" },
         model: "fake-model",
@@ -134,6 +142,46 @@ for await (const line of rl) {
           threadId: params.threadId,
           turn: { id: "fake-turn-1", status: "completed" },
         });
+      } else if (firstTextInput(params.input) === "read") {
+        const cwd = typeof params.cwd === "string" && params.cwd.length > 0 ? params.cwd : currentThreadCwd;
+        const readPath = `${cwd}/sample-lines.txt`;
+        const commandAction = {
+          type: "read",
+          command: "sed -n '10,12p' sample-lines.txt",
+          name: "sample-lines.txt",
+          path: readPath,
+        };
+        notify("item/started", {
+          threadId: params.threadId,
+          turnId: "fake-turn-1",
+          item: {
+            id: "read-1",
+            type: "commandExecution",
+            status: "inProgress",
+            command: "/bin/zsh -lc \"sed -n '10,12p' sample-lines.txt\"",
+            cwd,
+            aggregatedOutput: null,
+            commandActions: [commandAction],
+          },
+        });
+        notify("item/completed", {
+          threadId: params.threadId,
+          turnId: "fake-turn-1",
+          item: {
+            id: "read-1",
+            type: "commandExecution",
+            status: "completed",
+            command: "/bin/zsh -lc \"sed -n '10,12p' sample-lines.txt\"",
+            cwd,
+            aggregatedOutput: "line 10 value\nline 11 value\nline 12 value\n",
+            exitCode: 0,
+            commandActions: [commandAction],
+          },
+        });
+        notify("turn/completed", {
+          threadId: params.threadId,
+          turn: { id: "fake-turn-1", status: "completed" },
+        });
       }
       break;
     case "thread/settings/update":
@@ -159,3 +207,55 @@ for await (const line of rl) {
       break;
   }
 }
+
+function drainContentLengthMessages() {
+  for (;;) {
+    const headerEnd = inputBuffer.indexOf("\r\n\r\n");
+    if (headerEnd === -1) {
+      return;
+    }
+    const header = inputBuffer.subarray(0, headerEnd).toString("utf8");
+    const match = /(?:^|\r\n)Content-Length:\s*(\d+)(?:\r\n|$)/i.exec(header);
+    if (!match) {
+      inputBuffer = inputBuffer.subarray(headerEnd + 4);
+      continue;
+    }
+    const length = Number(match[1]);
+    const bodyStart = headerEnd + 4;
+    const bodyEnd = bodyStart + length;
+    if (inputBuffer.length < bodyEnd) {
+      return;
+    }
+    const body = inputBuffer.subarray(bodyStart, bodyEnd).toString("utf8");
+    inputBuffer = inputBuffer.subarray(bodyEnd);
+    void handleMessage(JSON.parse(body));
+  }
+}
+
+function drainLineMessages() {
+  for (;;) {
+    const newlineIndex = inputBuffer.indexOf("\n");
+    if (newlineIndex === -1) {
+      return;
+    }
+    const line = inputBuffer.subarray(0, newlineIndex).toString("utf8").trim();
+    inputBuffer = inputBuffer.subarray(newlineIndex + 1);
+    if (!line) {
+      continue;
+    }
+    void handleMessage(JSON.parse(line));
+  }
+}
+
+process.stdin.on("data", (chunk) => {
+  inputBuffer = Buffer.concat([inputBuffer, chunk]);
+  if (inputBuffer.includes("Content-Length:")) {
+    useContentLengthFraming = true;
+  }
+  if (useContentLengthFraming) {
+    drainContentLengthMessages();
+  } else {
+    drainLineMessages();
+  }
+});
+process.stdin.resume();
