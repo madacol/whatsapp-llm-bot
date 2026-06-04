@@ -287,13 +287,15 @@ type CompactToolActivityEvent = {
         status: "started";
         command: string;
         paths: string[];
-        lineRange?: { start: number; end: number };
+        line?: number;
+        limit?: number;
       }
     | {
         type: "tool";
         status: "started" | "updated" | "completed" | "failed";
         toolCall?: LlmChatResponse["toolCalls"][0];
-        readLineRange?: { start: number; end: number };
+        readLine?: number;
+        readLimit?: number;
       }
     | {
         type: "close";

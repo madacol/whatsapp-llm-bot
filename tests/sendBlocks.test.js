@@ -151,7 +151,8 @@ describe("sendEvent – compact tool activity", () => {
         status: "started",
         command: "sed -n '1,20p' src/app.js",
         paths: ["src/app.js"],
-        lineRange: { start: 1, end: 20 },
+        line: 1,
+        limit: 20,
       },
     });
     await sendEvent(sock, "compact-chat", {
@@ -395,7 +396,8 @@ describe("sendEvent – runtime events", () => {
         fileRead: {
           command: "sed -n '1,20p' src/app.js",
           paths: ["src/app.js"],
-          lineRange: { start: 1, end: 20 },
+          line: 1,
+          limit: 20,
         },
       },
     }, undefined, undefined, { outputVisibility: VISIBLE_TOOL_OUTPUT });

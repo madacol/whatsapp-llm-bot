@@ -221,7 +221,7 @@
  *   chatId?: string,
  *   type: "file-read.started",
  *   provider: HarnessRuntimeProvider,
- *   fileRead: { command: string, paths: string[], lineRange?: { start: number, end: number } },
+ *   fileRead: { command: string, paths: string[], line?: number, limit?: number },
  *   raw?: HarnessRuntimeRawEvent,
  * } & HarnessRuntimeEventEnvelope} HarnessRuntimeFileReadEvent
  */
@@ -363,35 +363,35 @@ function normalizeRawEvent(raw) {
 
 /**
  * @param {unknown} value
- * @returns {value is { start: number, end: number }}
+ * @returns {value is { line: number, limit: number }}
  */
-function isLineRange(value) {
+function hasReadWindow(value) {
   if (!isRecord(value)) {
     return false;
   }
-  const start = value.start;
-  const end = value.end;
-  return Number.isInteger(start)
-    && Number.isInteger(end)
-    && typeof start === "number"
-    && typeof end === "number"
-    && start > 0
-    && end >= start;
+  const line = value.line;
+  const limit = value.limit;
+  return Number.isInteger(line)
+    && Number.isInteger(limit)
+    && typeof line === "number"
+    && typeof limit === "number"
+    && line > 0
+    && limit > 0;
 }
 
 /**
  * @param {string} command
- * @returns {{ start: number, end: number } | undefined}
+ * @returns {{ line: number, limit: number } | undefined}
  */
-function parseFileReadLineRange(command) {
+function parseFileReadWindow(command) {
   const match = command.match(/\bsed\s+-n\s+['"]?(\d+)(?:\s*,\s*(\d+))?p['"]?/u);
   if (!match) {
     return undefined;
   }
-  const start = Number(match[1]);
+  const line = Number(match[1]);
   const end = Number(match[2] ?? match[1]);
-  return Number.isInteger(start) && Number.isInteger(end) && start > 0 && end >= start
-    ? { start, end }
+  return Number.isInteger(line) && Number.isInteger(end) && line > 0 && end >= line
+    ? { line, limit: end - line + 1 }
     : undefined;
 }
 
@@ -405,18 +405,18 @@ function normalizeRuntimeEventPayload(event) {
     return event;
   }
   const fileRead = /** @type {Record<string, unknown>} */ (event.fileRead);
-  if (isLineRange(fileRead.lineRange) || typeof fileRead.command !== "string") {
+  if (hasReadWindow(fileRead) || typeof fileRead.command !== "string") {
     return event;
   }
-  const lineRange = parseFileReadLineRange(fileRead.command);
-  if (!lineRange) {
+  const readWindow = parseFileReadWindow(fileRead.command);
+  if (!readWindow) {
     return event;
   }
   return /** @type {T} */ ({
     ...event,
     fileRead: {
       ...fileRead,
-      lineRange,
+      ...readWindow,
     },
   });
 }

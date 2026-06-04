@@ -314,6 +314,18 @@ function appendReadLineRange(summary, range) {
 }
 
 /**
+ * @param {number | undefined} line
+ * @param {number | undefined} limit
+ * @returns {{ start: number, end: number } | null}
+ */
+function lineLimitToRange(line, limit) {
+  if (!Number.isInteger(line) || !Number.isInteger(limit) || line === undefined || limit === undefined || line <= 0 || limit <= 0) {
+    return null;
+  }
+  return { start: line, end: line + limit - 1 };
+}
+
+/**
  * WhatsApp owns raw ACP presentation. Use the protocol payload when it carries
  * richer display facts than the canonical runtime event.
  * @param {Extract<RuntimeEventOutboundEvent["event"], { tool: unknown }>["tool"]} tool
@@ -783,15 +795,16 @@ function getStringArg(args, names) {
 
 /**
  * @param {string[]} paths
- * @param {{ start: number, end: number } | null | undefined} lineRange
+ * @param {number | undefined} line
+ * @param {number | undefined} limit
  * @returns {string}
  */
-function formatRuntimeFileReadSummary(paths, lineRange) {
+function formatRuntimeFileReadSummary(paths, line, limit) {
   const displayPaths = paths
     .filter((filePath) => typeof filePath === "string" && filePath.length > 0)
     .map((filePath) => `\`${filePath}\``);
   const summary = formatRuntimeProgressEntry("Read", displayPaths.length > 0 ? displayPaths.join(", ") : undefined);
-  return appendReadLineRange(summary, lineRange ?? null);
+  return appendReadLineRange(summary, lineLimitToRange(line, limit));
 }
 
 /**
@@ -900,15 +913,16 @@ function formatCompactCommand(command) {
 
 /**
  * @param {string[]} paths
- * @param {{ start: number, end: number } | null | undefined} lineRange
+ * @param {number | undefined} line
+ * @param {number | undefined} limit
  * @returns {string}
  */
-function formatCompactRead(paths, lineRange) {
+function formatCompactRead(paths, line, limit) {
   const displayPaths = paths
     .filter((filePath) => typeof filePath === "string" && filePath.length > 0)
     .map((filePath) => `\`${filePath}\``);
   const summary = formatCompactEntry("Read", displayPaths.length > 0 ? displayPaths.join(", ") : undefined);
-  return appendReadLineRange(summary, lineRange ?? null);
+  return appendReadLineRange(summary, lineLimitToRange(line, limit));
 }
 
 /**
@@ -996,7 +1010,7 @@ function formatCompactToolActivitySummary(activity, cwd) {
     return formatCompactCommand(activity.command);
   }
   if (activity.type === "file_read") {
-    return formatCompactRead(activity.paths, activity.lineRange);
+    return formatCompactRead(activity.paths, activity.line, activity.limit);
   }
   if (activity.type !== "tool" || !activity.toolCall) {
     return null;
@@ -1360,7 +1374,7 @@ async function sendRuntimeFileReadEvent(sock, chatId, event, options, reactionRu
   if (event.event.type !== "file-read.started") {
     throw new Error(`Expected file-read runtime event, got ${event.event.type}.`);
   }
-  return sendBlocks(sock, chatId, "plain", `🔧 ${formatRuntimeFileReadSummary(event.event.fileRead.paths, event.event.fileRead.lineRange)}`, options, reactionRuntime, event, {
+  return sendBlocks(sock, chatId, "plain", `🔧 ${formatRuntimeFileReadSummary(event.event.fileRead.paths, event.event.fileRead.line, event.event.fileRead.limit)}`, options, reactionRuntime, event, {
     editHandleStore: sendOptions.editHandleStore,
   });
 }
@@ -1394,7 +1408,7 @@ async function sendRuntimeToolEvent(sock, chatId, event, options, reactionRuntim
     return undefined;
   }
   const summary = formatRuntimeToolSummary(displayTool, event.cwd);
-  const readLineRange = getRawAcpReadOutputLineRange(event);
+  const readRange = getRawAcpReadOutputLineRange(event);
 
   if (status === "started") {
     const text = formatRuntimeToolText(status, summary);
@@ -1431,11 +1445,11 @@ async function sendRuntimeToolEvent(sock, chatId, event, options, reactionRuntim
       && !hasRuntimeSummaryDetail(effectiveSummary)
       ? previousSummary
       : effectiveSummary;
-    state.summary = appendReadLineRange(summaryBase, readLineRange);
+    state.summary = appendReadLineRange(summaryBase, readRange);
   }
   const text = formatRuntimeToolText(
     status,
-    state?.summary ?? appendReadLineRange(effectiveSummary, readLineRange),
+    state?.summary ?? appendReadLineRange(effectiveSummary, readRange),
     state?.reviewPrefix,
   );
   if (state?.handle) {
@@ -1740,7 +1754,7 @@ async function sendCompactToolActivityEvent(sock, chatId, event, options, reacti
     rememberCompactPendingEntry(state.pendingCommandEntryIds, activity.command, entryId);
     return addCompactToolActivityEntry(sock, chatId, event, options, reactionRuntime, sendOptions, state, {
       id: entryId,
-      summary: formatCompactRead(activity.paths, activity.lineRange),
+      summary: formatCompactRead(activity.paths, activity.line, activity.limit),
       completed: false,
       failed: false,
     });
@@ -1787,7 +1801,7 @@ async function sendCompactToolActivityEvent(sock, chatId, event, options, reacti
     const entry = entryId ? state.entries.find((candidate) => candidate.id === entryId) : undefined;
     const summary = formatCompactToolActivitySummary(activity, event.cwd);
     if (entry && summary) {
-      const nextSummary = appendReadLineRange(summary, activity.readLineRange ?? null);
+      const nextSummary = appendReadLineRange(summary, lineLimitToRange(activity.readLine, activity.readLimit));
       if (nextSummary !== entry.summary) {
         entry.summary = nextSummary;
         return flushCompactToolActivity(state);
@@ -1803,7 +1817,7 @@ async function sendCompactToolActivityEvent(sock, chatId, event, options, reacti
         entryId = state.pendingToolEntryIds.pop();
       }
     }
-    updateCompactReadLineRange(state, entryId, activity.readLineRange ?? null);
+    updateCompactReadLineRange(state, entryId, lineLimitToRange(activity.readLine, activity.readLimit));
     if (entryId && markCompactEntry(state, entryId, activity.status === "failed" ? "failed" : "completed")) {
       forgetCompactPendingToolEntry(state, entryId);
       return flushCompactToolActivity(state);
