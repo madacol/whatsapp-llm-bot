@@ -255,19 +255,19 @@ describe("sendEvent – compact tool activity", () => {
     });
 
     assert.deepEqual(sent.map((entry) => entry.msg), [
-      { text: "🔧 *Read file*  `whatsapp/tool-presenter.js`", linkPreview: null },
+      { text: "🔧 *Read*  `whatsapp/tool-presenter.js`", linkPreview: null },
       {
-        text: "✅ *Read file*  `whatsapp/tool-presenter.js`",
+        text: "✅ *Read*  `whatsapp/tool-presenter.js`",
         edit: { id: "msg-1", remoteJid: "compact-generic-chat", fromMe: true },
         linkPreview: null,
       },
       {
-        text: "✅ *Read file*  `whatsapp/tool-presenter.js`\n✅ *Search*  `create.*File|Edit|Write` in *tool-presentation-model.js*",
+        text: "✅ *Read*  `whatsapp/tool-presenter.js`\n✅ *Search*  `create.*File|Edit|Write` in *tool-presentation-model.js*",
         edit: { id: "msg-1", remoteJid: "compact-generic-chat", fromMe: true },
         linkPreview: null,
       },
       {
-        text: "✅ *Read file*  `whatsapp/tool-presenter.js`\n✅ *Search*  `create.*File|Edit|Write` in *tool-presentation-model.js*\n✅ *List*  `docs`",
+        text: "✅ *Read*  `whatsapp/tool-presenter.js`\n✅ *Search*  `create.*File|Edit|Write` in *tool-presentation-model.js*\n✅ *List*  `docs`",
         edit: { id: "msg-1", remoteJid: "compact-generic-chat", fromMe: true },
         linkPreview: null,
       },
