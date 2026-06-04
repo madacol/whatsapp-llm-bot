@@ -3,6 +3,7 @@ process.stdin.resume();
 const keepAlive = setInterval(() => {}, 1 << 30);
 
 const minimalCapabilities = process.argv.includes("--minimal-capabilities");
+const modelStateOnly = process.argv.includes("--model-state-only");
 
 /** @type {string | null} */
 let sessionId = null;
@@ -68,6 +69,9 @@ function resolvePendingResponse(message) {
  * @returns {Record<string, unknown>[]}
  */
 function buildConfigOptions() {
+  if (modelStateOnly) {
+    return [];
+  }
   return [
     {
       type: "select",
@@ -93,6 +97,12 @@ function buildConfigOptions() {
       ],
     },
     {
+      type: "boolean",
+      id: "fast-mode",
+      name: "Fast Mode",
+      currentValue: configSelections["fast-mode"] ?? false,
+    },
+    {
       type: "select",
       id: "mode",
       name: "Mode",
@@ -104,6 +114,34 @@ function buildConfigOptions() {
       ],
     },
   ];
+}
+
+/**
+ * @returns {{ currentModelId: string, availableModels: Array<{ modelId: string, name: string, description: string }> }}
+ */
+function buildModelState() {
+  return {
+    currentModelId: configSelections.model && configSelections["reasoning-effort"]
+      ? `${configSelections.model}[${configSelections["reasoning-effort"]}]`
+      : "model-a[medium]",
+    availableModels: [
+      { modelId: "model-a[low]", name: "Model A (low)", description: "Model A low effort" },
+      { modelId: "model-a[medium]", name: "Model A (medium)", description: "Model A medium effort" },
+      { modelId: "model-a[high]", name: "Model A (high)", description: "Model A high effort" },
+      { modelId: "model-b[medium]", name: "Model B (medium)", description: "Model B medium effort" },
+    ],
+  };
+}
+
+/**
+ * @returns {Record<string, unknown>}
+ */
+function buildSessionOpenResult() {
+  return {
+    sessionId,
+    configOptions: buildConfigOptions(),
+    ...(modelStateOnly ? { models: buildModelState() } : {}),
+  };
 }
 
 /**
@@ -153,19 +191,19 @@ async function handleMessage(message) {
   if (message.method === "session/new") {
     lastSessionOpenMethod = "session/new";
     sessionId = "mock-session-1";
-    send({ id: message.id, result: { sessionId, configOptions: buildConfigOptions() } });
+    send({ id: message.id, result: buildSessionOpenResult() });
     return;
   }
   if (message.method === "session/load") {
     lastSessionOpenMethod = "session/load";
     sessionId = message.params?.sessionId ?? "mock-session-1";
-    send({ id: message.id, result: { sessionId, configOptions: buildConfigOptions() } });
+    send({ id: message.id, result: buildSessionOpenResult() });
     return;
   }
   if (message.method === "session/resume") {
     lastSessionOpenMethod = "session/resume";
     sessionId = message.params?.sessionId ?? "mock-session-1";
-    send({ id: message.id, result: { sessionId, configOptions: buildConfigOptions() } });
+    send({ id: message.id, result: buildSessionOpenResult() });
     return;
   }
   if (message.method === "session/set_config_option") {

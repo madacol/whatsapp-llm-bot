@@ -962,6 +962,41 @@ function extractConfigOptions(result) {
 }
 
 /**
+ * @param {unknown} result
+ * @returns {{ currentModelId?: string, availableModels: Array<{ modelId: string, name: string, description?: string }> } | null}
+ */
+function extractModelState(result) {
+  if (!isRecord(result) || !isRecord(result.models)) {
+    return null;
+  }
+  const currentModelId = typeof result.models.currentModelId === "string"
+    ? result.models.currentModelId
+    : undefined;
+  const availableModels = Array.isArray(result.models.availableModels)
+    ? result.models.availableModels
+      .filter(isRecord)
+      .map((model) => ({
+        modelId: typeof model.modelId === "string" ? model.modelId : "",
+        name: typeof model.name === "string" ? model.name : "",
+        ...(typeof model.description === "string" ? { description: model.description } : {}),
+      }))
+      .filter((model) => model.modelId && model.name)
+    : [];
+  return availableModels.length > 0 ? { ...(currentModelId ? { currentModelId } : {}), availableModels } : null;
+}
+
+/**
+ * @param {unknown} result
+ * @returns {{ configOptions: Record<string, unknown>[], modelState: ReturnType<typeof extractModelState> }}
+ */
+function extractSessionControlState(result) {
+  return {
+    configOptions: extractConfigOptions(result),
+    modelState: extractModelState(result),
+  };
+}
+
+/**
  * @param {Record<string, unknown>} option
  * @returns {Array<{ value: string, name: string }>}
  */
@@ -1099,6 +1134,15 @@ function normalizeConfigOptions(options) {
  * @returns {Promise<Record<string, unknown>[]>}
  */
 export async function getAcpSessionConfigOptions(input) {
+  const state = await getAcpSessionControlState(input);
+  return state.configOptions;
+}
+
+/**
+ * @param {AcpForkInput} input
+ * @returns {Promise<{ configOptions: Record<string, unknown>[], modelState: ReturnType<typeof extractModelState> }>}
+ */
+export async function getAcpSessionControlState(input) {
   const { connection, capabilities } = await openInitializedAcpConnection(input, async () => ({}));
   try {
     let opened;
@@ -1113,9 +1157,10 @@ export async function getAcpSessionConfigOptions(input) {
         ...buildSessionParams(input.runConfig),
       });
     } else {
-      return [];
+      return { configOptions: [], modelState: null };
     }
-    return normalizeConfigOptions(extractConfigOptions(opened));
+    const state = extractSessionControlState(opened);
+    return { ...state, configOptions: normalizeConfigOptions(state.configOptions) };
   } finally {
     await connection.close();
   }
@@ -1132,10 +1177,26 @@ export async function getAcpSessionConfigOptions(input) {
  * @returns {Promise<Record<string, unknown>[]>}
  */
 export async function getAcpInitialSessionConfigOptions(input) {
+  const state = await getAcpInitialSessionControlState(input);
+  return state.configOptions;
+}
+
+/**
+ * @param {{
+ *   command: string,
+ *   args?: string[],
+ *   runConfig?: HarnessRunConfig,
+ *   env?: NodeJS.ProcessEnv,
+ *   signal?: AbortSignal,
+ * }} input
+ * @returns {Promise<{ configOptions: Record<string, unknown>[], modelState: ReturnType<typeof extractModelState> }>}
+ */
+export async function getAcpInitialSessionControlState(input) {
   const { connection } = await openInitializedAcpConnection(input, async () => ({}));
   try {
     const opened = await connection.sendRequest("session/new", buildSessionParams(input.runConfig));
-    return normalizeConfigOptions(extractConfigOptions(opened));
+    const state = extractSessionControlState(opened);
+    return { ...state, configOptions: normalizeConfigOptions(state.configOptions) };
   } finally {
     await connection.close();
   }
