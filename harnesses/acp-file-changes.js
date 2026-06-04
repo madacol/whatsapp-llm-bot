@@ -1,22 +1,15 @@
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { isRuntimeStateSnapshotPath } from "../snapshot-file-policy.js";
 import { buildUnifiedFileDiff } from "./file-change-utils.js";
 
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const REPO_ROOT = path.resolve(__dirname, "..");
 const MAX_SNAPSHOT_FILE_BYTES = 1024 * 1024;
-const SNAPSHOT_EXCLUDED_DIRS = new Set([".git", "node_modules", ".media", "coverage", "dist", "build"]);
-const DEFAULT_IGNORED_FILE_CHANGE_PATHS = [
-  ".agents/.runtime/**",
-  ".diagnostics/**",
-  ".madabot/**",
-  ".media/**",
-  ".state/**",
-  ".wwebjs_auth/**",
-  ".wwebjs_cache/**",
-  "auth_info_baileys/**",
-  "pgdata/**",
-];
+const SNAPSHOT_IGNORE_FILE_PATH = path.join(REPO_ROOT, "snapshot-ignore.txt");
+const DEFAULT_IGNORED_FILE_CHANGE_PATHS = loadSnapshotIgnorePatterns();
 
 /**
  * @param {string | null | undefined} workdir
@@ -29,7 +22,7 @@ export async function snapshotAcpWorkdir(workdir) {
   const root = path.resolve(workdir);
   /** @type {Map<string, string>} */
   const snapshot = new Map();
-  await collectSnapshotFiles(root, snapshot);
+  await collectSnapshotFiles(root, root, snapshot);
   return snapshot;
 }
 
@@ -89,6 +82,40 @@ function normalizePatternList(value) {
 }
 
 /**
+ * @returns {string[]}
+ */
+function loadSnapshotIgnorePatterns() {
+  let rawPatterns;
+  try {
+    rawPatterns = readFileSync(SNAPSHOT_IGNORE_FILE_PATH, "utf8");
+  } catch (error) {
+    if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") {
+      return [];
+    }
+    throw error;
+  }
+  return rawPatterns
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line && !line.startsWith("#"));
+}
+
+/**
+ * @param {string} root
+ * @param {string} filePath
+ * @param {string[]} patterns
+ * @returns {boolean}
+ */
+function isPathIgnoredByPatterns(root, filePath, patterns) {
+  const relativePath = path.relative(root, filePath);
+  if (!relativePath || relativePath.startsWith("..") || path.isAbsolute(relativePath)) {
+    return false;
+  }
+  const normalizedRelativePath = normalizeSlashes(relativePath);
+  return patterns.some((pattern) => globToRegExp(pattern).test(normalizedRelativePath));
+}
+
+/**
  * @param {HarnessRunConfig | undefined} runConfig
  * @param {string} filePath
  * @returns {boolean}
@@ -110,8 +137,7 @@ export function isAcpFileChangeIgnored(runConfig, filePath) {
   if (!relativePath || relativePath.startsWith("..") || path.isAbsolute(relativePath)) {
     return false;
   }
-  const normalizedRelativePath = normalizeSlashes(relativePath);
-  return patterns.some((pattern) => globToRegExp(pattern).test(normalizedRelativePath));
+  return isPathIgnoredByPatterns(root, resolvedPath, patterns);
 }
 
 /**
@@ -245,11 +271,12 @@ export async function emitAcpSnapshotFileChanges(input) {
 }
 
 /**
+ * @param {string} root
  * @param {string} currentPath
  * @param {Map<string, string>} snapshot
  * @returns {Promise<void>}
  */
-async function collectSnapshotFiles(currentPath, snapshot) {
+async function collectSnapshotFiles(root, currentPath, snapshot) {
   let entries;
   try {
     entries = await fs.readdir(currentPath, { withFileTypes: true });
@@ -257,16 +284,17 @@ async function collectSnapshotFiles(currentPath, snapshot) {
     return;
   }
   for (const entry of entries) {
+    const filePath = path.join(currentPath, entry.name);
+    if (isPathIgnoredByPatterns(root, filePath, DEFAULT_IGNORED_FILE_CHANGE_PATHS)) {
+      continue;
+    }
     if (entry.isDirectory()) {
-      if (!SNAPSHOT_EXCLUDED_DIRS.has(entry.name)) {
-        await collectSnapshotFiles(path.join(currentPath, entry.name), snapshot);
-      }
+      await collectSnapshotFiles(root, filePath, snapshot);
       continue;
     }
     if (!entry.isFile()) {
       continue;
     }
-    const filePath = path.join(currentPath, entry.name);
     try {
       const stat = await fs.stat(filePath);
       if (stat.size > MAX_SNAPSHOT_FILE_BYTES) {
