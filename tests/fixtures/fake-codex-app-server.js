@@ -28,6 +28,14 @@ function respond(id, result) {
 }
 
 /**
+ * @param {unknown} id
+ * @param {string} message
+ */
+function reject(id, message) {
+  send({ id, error: { code: 1001, message } });
+}
+
+/**
  * @param {string} method
  * @param {Record<string, unknown>} params
  */
@@ -105,6 +113,10 @@ async function handleMessage(parsed) {
       break;
     case "turn/start":
       record("turn/start", params);
+      if (process.env.FAKE_CODEX_REJECT_FAST === "1" && params.serviceTier === "fast") {
+        reject(id, "fast service tier unavailable");
+        break;
+      }
       respond(id, { turn: { id: "fake-turn-1" } });
       notify("turn/started", { threadId: params.threadId, turn: { id: "fake-turn-1" } });
       if (firstTextInput(params.input) === "web") {

@@ -78,6 +78,61 @@ describe("patched codex-acp steering", () => {
     }
   });
 
+  it("surfaces a clear error when the Codex app server rejects a fast turn", async () => {
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "codex-acp-fast-reject-"));
+    const recordPath = path.join(tempDir, "events.jsonl");
+    const fakeCodexPath = path.join(__dirname, "fixtures", "fake-codex-app-server.js");
+    await fs.chmod(fakeCodexPath, 0o755);
+
+    const connection = await openAcpConnection({
+      command: process.execPath,
+      args: [codexAcpEntryPoint],
+      env: {
+        ...process.env,
+        CODEX_PATH: fakeCodexPath,
+        FAKE_CODEX_RECORD_PATH: recordPath,
+        FAKE_CODEX_REJECT_FAST: "1",
+      },
+    });
+
+    try {
+      await connection.sendRequest("initialize", {
+        protocolVersion: 1,
+        clientInfo: { name: "madabot-test", version: "0" },
+        clientCapabilities: {},
+      });
+      await connection.sendRequest("session/new", { cwd: process.cwd(), mcpServers: [] });
+      await connection.sendRequest("session/set_config_option", {
+        sessionId: "fake-thread-1",
+        configId: "fast_mode",
+        type: "boolean",
+        value: true,
+      });
+
+      await assert.rejects(
+        connection.sendRequest("session/prompt", {
+          sessionId: "fake-thread-1",
+          prompt: [{ type: "text", text: "web" }],
+        }),
+        /Codex fast mode failed: .*fast service tier unavailable/,
+      );
+
+      const records = (await fs.readFile(recordPath, "utf8"))
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line));
+      const turnStarts = records.filter((record) => record.event === "turn/start");
+      assert.equal(turnStarts[0]?.value.serviceTier, "fast");
+      assert.ok(records.some((record) => record.event === "thread/settings/update"
+        && record.value.serviceTier === "fast"), JSON.stringify(records));
+      assert.equal(records.some((record) => record.event === "thread/settings/update"
+        && record.value.serviceTier === null), false, JSON.stringify(records));
+    } finally {
+      await connection.close();
+      await fs.rm(tempDir, { recursive: true, force: true });
+    }
+  });
+
   it("emits ACP tool calls for live Codex webSearch items", async () => {
     const fakeCodexPath = path.join(__dirname, "fixtures", "fake-codex-app-server.js");
     await fs.chmod(fakeCodexPath, 0o755);
@@ -224,7 +279,7 @@ describe("patched codex-acp steering", () => {
         sessionUpdate: "tool_call",
         toolCallId: "read-1",
         kind: "read",
-        title: "Read sample-lines.txt (10 - 12)",
+        title: "Read sample-lines.txt",
         status: "in_progress",
         locations: [{ path: readPath, line: 10 }],
         rawInput: {
