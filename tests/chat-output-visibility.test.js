@@ -7,19 +7,19 @@ import {
 } from "../chat-output-visibility.js";
 
 describe("chat output visibility", () => {
-  it("uses toolDetails as the canonical full tool output key", () => {
+  it("does not expose tool display as a configurable visibility option", () => {
     assert.deepEqual(
       buildOutputVisibilityOverrides(["toolDetails", "thinking", "changes", "subagents"]),
-      { toolDetails: true },
+      {},
     );
   });
 
-  it("normalizes legacy tools and commands keys as full tool details", () => {
-    assert.deepEqual(normalizeOutputVisibility({ tools: true }), { toolDetails: true });
-    assert.equal(resolveOutputVisibility({ tools: true }).toolDetails, true);
+  it("ignores legacy tools and commands keys", () => {
+    assert.deepEqual(normalizeOutputVisibility({ tools: true }), {});
+    assert.equal(resolveOutputVisibility({ tools: true }).toolDetails, false);
     assert.deepEqual(
       normalizeOutputVisibility({ toolDetails: true, tools: true, commands: false }),
-      { toolDetails: true },
+      {},
     );
   });
 });

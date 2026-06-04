@@ -459,7 +459,7 @@ describe("ACP payload to WhatsApp socket vertical slices", () => {
     assert.equal(sent[0]?.msg.caption, "🔧 *Update*  `src/app.js`", JSON.stringify(sent));
   });
 
-  it("collapses only consecutive ACP tool progress before starting a new Baileys message", async () => {
+  it("renders ACP tool progress as normal concise messages around non-tool updates", async () => {
     const { sent, trace } = await observeAcpPayloadSliceToBaileys([
       {
         sessionId: "s1",
@@ -508,16 +508,9 @@ describe("ACP payload to WhatsApp socket vertical slices", () => {
       "tool.started",
     ]);
 
-    const textMessages = sent.map((entry) => entry.msg);
-    assert.equal(textMessages[0]?.text, "🔧 *Read*  `src/app.js`");
     const flushedMessages = sent.map((entry) => entry.msg);
-    assert.equal(flushedMessages[1]?.edit?.id, "msg-1", JSON.stringify(flushedMessages));
-    assert.ok(
-      typeof flushedMessages[1]?.text === "string"
-        && flushedMessages[1].text.includes("🔧 *Read*  `src/app.js`")
-        && flushedMessages[1].text.includes("🔧 *Search*  `needle` in *src*"),
-      `Expected consecutive tools to collapse into one edited message, got ${JSON.stringify(flushedMessages)}`,
-    );
+    assert.equal(flushedMessages[0]?.text, "🔧 *Read*  `src/app.js`", JSON.stringify(flushedMessages));
+    assert.equal(flushedMessages[1]?.text, "🔧 *Search*  `needle` in *src*", JSON.stringify(flushedMessages));
     assert.ok(
       typeof flushedMessages[2]?.text === "string" && flushedMessages[2].text.includes("_Plan_"),
       `Expected plan after compact close, got ${JSON.stringify(flushedMessages)}`,
@@ -869,7 +862,7 @@ describe("ACP payload to WhatsApp socket vertical slices", () => {
     });
 
     assert.deepEqual(trace.runtimeEvents.map((event) => event.type), ["tool.started"]);
-    assert.equal(sent[0]?.msg.text, "🔧 *List*  `.env`");
+    assert.equal(sent[0]?.msg.text, "🔧 *List*  `.env`", JSON.stringify(sent));
   });
 
   it("renders ACP execute commands from raw WhatsApp payloads", async () => {

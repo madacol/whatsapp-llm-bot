@@ -3,7 +3,6 @@ import { randomBytes } from "node:crypto";
 import { createLogger } from "../../logger.js";
 import { parseToolArgs } from "../../agent-io-defaults.js";
 import { buildContextualUnifiedDiff } from "../../code-image-renderer.js";
-import { DEFAULT_OUTPUT_VISIBILITY, resolveOutputVisibility } from "../../chat-output-visibility.js";
 import { renderBlocks } from "../../message-renderer.js";
 import { formatPlanPresentationText } from "../../plan-presentation.js";
 import { formatToolFlowInspectText, formatToolFlowSummary } from "../tool-flow-presenter.js";
@@ -839,7 +838,7 @@ function formatRuntimeToolSummary(tool, cwd) {
   }
   const pathDetail = getStringArg(tool.arguments, ["path", "file_path", "filePath"]);
   if (pathDetail) {
-    return formatRuntimeProgressEntry(displayName, `\`${pathDetail}\``);
+    return formatRuntimeProgressEntry(displayName, `\`${shortenPath(pathDetail, cwd ?? null)}\``);
   }
   const textDetail = getStringArg(tool.arguments, ["title", "message", "prompt", "query", "q"]);
   return formatRuntimeProgressEntry(displayName, textDetail);
@@ -1828,34 +1827,6 @@ async function sendCompactToolActivityEvent(sock, chatId, event, options, reacti
 }
 
 /**
- * @param {RuntimeEventOutboundEvent["event"]} runtime
- * @returns {boolean}
- */
-function isCompactRuntimeProgressEvent(runtime) {
-  return runtime.type === "file-read.started"
-    || runtime.type === "command.started"
-    || runtime.type === "command.completed"
-    || runtime.type === "command.failed"
-    || runtime.type === "tool.started"
-    || runtime.type === "tool.updated"
-    || runtime.type === "tool.completed"
-    || runtime.type === "tool.failed";
-}
-
-/**
- * @param {string} chatId
- * @param {{ editHandleStore?: import("../../store.js").Store, outputVisibility?: import("../../chat-output-visibility.js").OutputVisibility }} sendOptions
- * @returns {Promise<import("../../chat-output-visibility.js").OutputVisibility>}
- */
-async function resolveWhatsAppOutputVisibility(chatId, sendOptions) {
-  if (sendOptions.outputVisibility) {
-    return sendOptions.outputVisibility;
-  }
-  const chat = await sendOptions.editHandleStore?.getChat?.(chatId);
-  return chat ? resolveOutputVisibility(chat.output_visibility) : DEFAULT_OUTPUT_VISIBILITY;
-}
-
-/**
  * @param {import('@whiskeysockets/baileys').WASocket} sock
  * @param {string} chatId
  * @param {{ quoted?: BaileysMessage } | undefined} options
@@ -2269,13 +2240,6 @@ function renderOutboundEvent(event) {
  * @returns {Promise<MessageHandle | undefined>}
  */
 async function sendRuntimeEvent(sock, chatId, event, options, reactionRuntime, sendOptions = {}) {
-  const visibility = await resolveWhatsAppOutputVisibility(chatId, sendOptions);
-  if (!visibility.toolDetails) {
-    if (isCompactRuntimeProgressEvent(event.event)) {
-      return undefined;
-    }
-  }
-
   if (event.event.type === "file-read.started") {
     return sendRuntimeFileReadEvent(sock, chatId, event, options, reactionRuntime, sendOptions);
   }
