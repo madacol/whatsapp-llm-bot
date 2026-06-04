@@ -9,6 +9,7 @@ import {
   isAcpFileChangeIgnored,
   reconcileAcpFileChangeWithBaseline,
   resolveAcpFileChangePath,
+  snapshotAcpWorkdir,
 } from "../harnesses/acp-file-changes.js";
 import { isRuntimeStateSnapshotPath } from "../snapshot-file-policy.js";
 
@@ -171,6 +172,24 @@ describe("ACP file changes", () => {
       isAcpFileChangeIgnored({ workdir, ignoredFileChangePaths: ["auth_info_baileys/**"] }, path.join(workdir, "src/app.js")),
       false,
     );
+    assert.equal(
+      isAcpFileChangeIgnored({ workdir }, path.join(workdir, "logs/raw-events.2026-06-04T14Z.ndjson")),
+      true,
+    );
+  });
+
+  it("excludes logs from ACP workdir snapshots", async () => {
+    const workdir = await fs.mkdtemp(path.join(os.tmpdir(), "acp-snapshot-ignore-"));
+    await fs.mkdir(path.join(workdir, "logs"), { recursive: true });
+    await fs.writeFile(path.join(workdir, "logs/raw-events.2026-06-04T14Z.ndjson"), "{}\n", "utf8");
+    await fs.mkdir(path.join(workdir, "src"), { recursive: true });
+    await fs.writeFile(path.join(workdir, "src/app.js"), "export const value = 1;\n", "utf8");
+
+    const snapshot = await snapshotAcpWorkdir(workdir);
+
+    assert.ok(snapshot);
+    assert.equal(snapshot.has(path.join(workdir, "logs/raw-events.2026-06-04T14Z.ndjson")), false);
+    assert.equal(snapshot.has(path.join(workdir, "src/app.js")), true);
   });
 
   it("classifies ACP runtime-state paths independently of WhatsApp presentation", () => {

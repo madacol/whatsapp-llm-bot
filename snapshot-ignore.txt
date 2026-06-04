@@ -1,0 +1,16 @@
+# Paths ignored by ACP workdir snapshots and default file-change reporting.
+.agents/.runtime/**
+.diagnostics/**
+.git/**
+.madabot/**
+.media/**
+.state/**
+.wwebjs_auth/**
+.wwebjs_cache/**
+auth_info_baileys/**
+build/**
+coverage/**
+dist/**
+logs/**
+node_modules/**
+pgdata/**
