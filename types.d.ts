@@ -287,6 +287,7 @@ type CompactToolActivityEvent = {
         status: "started";
         command: string;
         paths: string[];
+        lineRange?: { start: number; end: number };
       }
     | {
         type: "tool";

@@ -281,23 +281,6 @@ function parseNumberedLineRange(output) {
 }
 
 /**
- * @param {string} command
- * @returns {{ start: number, end: number } | null}
- */
-function parseReadCommandLineRange(command) {
-  const match = command.match(/\bsed\s+-n\s+['"]?(\d+)(?:\s*,\s*(\d+))?p['"]?/u);
-  if (!match) {
-    return null;
-  }
-  const start = Number(match[1]);
-  const end = Number(match[2] ?? match[1]);
-  if (!Number.isInteger(start) || !Number.isInteger(end) || start <= 0 || end < start) {
-    return null;
-  }
-  return { start, end };
-}
-
-/**
  * @param {RuntimeEventOutboundEvent} event
  * @returns {{ start: number, end: number } | null}
  */
@@ -800,15 +783,15 @@ function getStringArg(args, names) {
 
 /**
  * @param {string[]} paths
- * @param {string | undefined} command
+ * @param {{ start: number, end: number } | null | undefined} lineRange
  * @returns {string}
  */
-function formatRuntimeFileReadSummary(paths, command) {
+function formatRuntimeFileReadSummary(paths, lineRange) {
   const displayPaths = paths
     .filter((filePath) => typeof filePath === "string" && filePath.length > 0)
     .map((filePath) => `\`${filePath}\``);
   const summary = formatRuntimeProgressEntry("Read", displayPaths.length > 0 ? displayPaths.join(", ") : undefined);
-  return appendReadLineRange(summary, command ? parseReadCommandLineRange(command) : null);
+  return appendReadLineRange(summary, lineRange ?? null);
 }
 
 /**
@@ -917,15 +900,15 @@ function formatCompactCommand(command) {
 
 /**
  * @param {string[]} paths
- * @param {string | undefined} command
+ * @param {{ start: number, end: number } | null | undefined} lineRange
  * @returns {string}
  */
-function formatCompactRead(paths, command) {
+function formatCompactRead(paths, lineRange) {
   const displayPaths = paths
     .filter((filePath) => typeof filePath === "string" && filePath.length > 0)
     .map((filePath) => `\`${filePath}\``);
   const summary = formatCompactEntry("Read", displayPaths.length > 0 ? displayPaths.join(", ") : undefined);
-  return appendReadLineRange(summary, command ? parseReadCommandLineRange(command) : null);
+  return appendReadLineRange(summary, lineRange ?? null);
 }
 
 /**
@@ -1013,7 +996,7 @@ function formatCompactToolActivitySummary(activity, cwd) {
     return formatCompactCommand(activity.command);
   }
   if (activity.type === "file_read") {
-    return formatCompactRead(activity.paths, activity.command);
+    return formatCompactRead(activity.paths, activity.lineRange);
   }
   if (activity.type !== "tool" || !activity.toolCall) {
     return null;
@@ -1377,7 +1360,7 @@ async function sendRuntimeFileReadEvent(sock, chatId, event, options, reactionRu
   if (event.event.type !== "file-read.started") {
     throw new Error(`Expected file-read runtime event, got ${event.event.type}.`);
   }
-  return sendBlocks(sock, chatId, "plain", `🔧 ${formatRuntimeFileReadSummary(event.event.fileRead.paths, event.event.fileRead.command)}`, options, reactionRuntime, event, {
+  return sendBlocks(sock, chatId, "plain", `🔧 ${formatRuntimeFileReadSummary(event.event.fileRead.paths, event.event.fileRead.lineRange)}`, options, reactionRuntime, event, {
     editHandleStore: sendOptions.editHandleStore,
   });
 }
@@ -1757,7 +1740,7 @@ async function sendCompactToolActivityEvent(sock, chatId, event, options, reacti
     rememberCompactPendingEntry(state.pendingCommandEntryIds, activity.command, entryId);
     return addCompactToolActivityEntry(sock, chatId, event, options, reactionRuntime, sendOptions, state, {
       id: entryId,
-      summary: formatCompactRead(activity.paths, activity.command),
+      summary: formatCompactRead(activity.paths, activity.lineRange),
       completed: false,
       failed: false,
     });
