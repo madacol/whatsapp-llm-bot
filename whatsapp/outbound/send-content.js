@@ -820,9 +820,17 @@ function isNoopRuntimeTool(tool) {
 }
 
 /**
+ * @param {string} toolName
+ * @returns {boolean}
+ */
+function isReadLikeToolName(toolName) {
+  return toolName === "Read" || toolName === "Read file";
+}
+
+/**
  * @param {Extract<RuntimeEventOutboundEvent["event"], { tool: unknown }>["tool"]} tool
  * @param {string | null | undefined} cwd
- * @returns {string}
+ * @returns {string | null}
  */
 function formatRuntimeToolSummary(tool, cwd) {
   const semanticSummary = formatSemanticToolSummary(tool.name, tool.arguments, cwd);
@@ -830,11 +838,15 @@ function formatRuntimeToolSummary(tool, cwd) {
     return semanticSummary;
   }
   const displayName = tool.name.trim() || "Tool";
+  if (isReadLikeToolName(displayName) && !formatGenericPathDetail(tool.arguments, cwd)) {
+    return null;
+  }
   if (displayName === "Shell") {
     const command = getStringArg(tool.arguments, ["command"]);
     if (command) {
       return formatRuntimeCommandSummary(command);
     }
+    return null;
   }
   const pathDetail = getStringArg(tool.arguments, ["path", "file_path", "filePath"]);
   if (pathDetail) {
@@ -992,12 +1004,18 @@ function formatGenericTextDetail(args) {
  * @param {string} toolName
  * @param {Record<string, unknown>} args
  * @param {string | null | undefined} cwd
- * @returns {string}
+ * @returns {string | null}
  */
 function formatGenericCompactToolName(toolName, args, cwd) {
   const search = formatGenericSearchToolName(toolName);
   if (search) {
     return search;
+  }
+  if (isReadLikeToolName(toolName) && !formatGenericPathDetail(args, cwd)) {
+    return null;
+  }
+  if (toolName === "Shell" && !getStringArg(args, ["command"])) {
+    return null;
   }
   const detail = formatGenericPathDetail(args, cwd) ?? formatGenericTextDetail(args);
   return formatCompactEntry(toolName, detail);
@@ -1414,6 +1432,9 @@ async function sendRuntimeToolEvent(sock, chatId, event, options, reactionRuntim
   const readLineRange = getRawAcpReadOutputLineRange(event);
 
   if (status === "started") {
+    if (!summary) {
+      return undefined;
+    }
     const text = formatRuntimeToolText(status, summary);
     let toolStateById = runtimeToolsByChat.get(chatId);
     if (!toolStateById) {
@@ -1437,18 +1458,22 @@ async function sendRuntimeToolEvent(sock, chatId, event, options, reactionRuntim
   const toolStateById = runtimeToolsByChat.get(chatId);
   const state = toolStateById?.get(toolEvent.tool.id);
   const previousSummary = state?.summary;
+  const effectiveSummary = summary ?? previousSummary;
+  if (!effectiveSummary) {
+    return undefined;
+  }
   if (state) {
     const summaryBase = status !== "updated"
       && previousSummary
       && hasRuntimeSummaryDetail(previousSummary)
-      && !hasRuntimeSummaryDetail(summary)
+      && !hasRuntimeSummaryDetail(effectiveSummary)
       ? previousSummary
-      : summary;
+      : effectiveSummary;
     state.summary = appendReadLineRange(summaryBase, readLineRange);
   }
   const text = formatRuntimeToolText(
     status,
-    state?.summary ?? appendReadLineRange(summary, readLineRange),
+    state?.summary ?? appendReadLineRange(effectiveSummary, readLineRange),
     state?.reviewPrefix,
   );
   if (state?.handle) {
