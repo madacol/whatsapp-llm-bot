@@ -839,27 +839,26 @@ describe("sendEvent – runtime events", () => {
     await sendEvent(sock, "runtime-expired-turn-chat", {
       kind: "runtime_event",
       event: {
-        type: "tool.started",
+        type: "turn.completed",
         provider: "codex",
-        tool: { id: "tool-1", name: "Read", arguments: { file_path: "src/app.js" } },
+        turn: { id: "turn-1", chatId: "runtime-expired-turn-chat", status: "completed" },
       },
     }, undefined, undefined, sendOptions);
 
-    assert.deepEqual(sent.map((entry) => entry.msg).slice(0, 4), [
+    assert.deepEqual(sent.map((entry) => entry.msg), [
       { text: "🔄 *CODEX*  turn started", linkPreview: null },
       {
         pin: { id: "msg-1", remoteJid: "runtime-expired-turn-chat", fromMe: true },
         type: 1,
         time: 86400,
       },
-      { text: "🛠️ *CODEX*  running tools", linkPreview: null },
+      { text: "✅ *CODEX*  turn completed", linkPreview: null },
       {
         pin: { id: "msg-3", remoteJid: "runtime-expired-turn-chat", fromMe: true },
         type: 1,
         time: 86400,
       },
     ]);
-    assert.equal(sent[4]?.msg.text, "🔧 *Read*  `src/app.js`");
   });
 
   it("folds generic runtime events into one editable WhatsApp status", async () => {
