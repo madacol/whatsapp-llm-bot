@@ -27,7 +27,7 @@ const TURN_STATUS_PIN_SECONDS = 86400;
 const log = createLogger("whatsapp:outbound");
 /** @type {Map<string, WhatsAppEditHandleRecord>} */
 const inMemoryEditHandles = new Map();
-/** @type {Map<string, { handle?: MessageHandle }>} */
+/** @type {Map<string, { handle?: MessageHandle, entries: Array<{ key: string, icon: string, provider: string, summary: string }> }>} */
 const turnStatusByChat = new Map();
 /** @type {Map<string, { handle?: MessageHandle, entries: Array<{ icon: string, provider: string, summary: string, detail?: string }> }>} */
 const runtimeStatusByChat = new Map();
@@ -885,20 +885,6 @@ function getStringArg(args, names) {
 }
 
 /**
- * @param {string[]} paths
- * @param {number | undefined} line
- * @param {number | undefined} limit
- * @returns {string}
- */
-function formatRuntimeFileReadSummary(paths, line, limit) {
-  const displayPaths = paths
-    .filter((filePath) => typeof filePath === "string" && filePath.length > 0)
-    .map((filePath) => `\`${filePath}\``);
-  const summary = formatRuntimeProgressEntry("Read", displayPaths.length > 0 ? displayPaths.join(", ") : undefined);
-  return appendReadLineRange(summary, lineLimitToRange(line, limit));
-}
-
-/**
  * @param {Extract<RuntimeEventOutboundEvent["event"], { tool: unknown }>["tool"]} tool
  * @returns {boolean}
  */
@@ -1452,24 +1438,6 @@ async function sendRuntimeCommandEvent(sock, chatId, event, options, reactionRun
  * @param {{ editHandleStore?: import("../../store.js").Store, outputVisibility?: import("../../chat-output-visibility.js").OutputVisibility }} sendOptions
  * @returns {Promise<MessageHandle | undefined>}
  */
-async function sendRuntimeFileReadEvent(sock, chatId, event, options, reactionRuntime, sendOptions) {
-  if (event.event.type !== "file-read.started") {
-    throw new Error(`Expected file-read runtime event, got ${event.event.type}.`);
-  }
-  return sendBlocks(sock, chatId, "plain", `🔧 ${formatRuntimeFileReadSummary(event.event.fileRead.paths, event.event.fileRead.line, event.event.fileRead.limit)}`, options, reactionRuntime, event, {
-    editHandleStore: sendOptions.editHandleStore,
-  });
-}
-
-/**
- * @param {import('@whiskeysockets/baileys').WASocket} sock
- * @param {string} chatId
- * @param {RuntimeEventOutboundEvent} event
- * @param {{ quoted?: BaileysMessage } | undefined} options
- * @param {import("../runtime/reaction-runtime.js").ReactionRuntime | undefined} reactionRuntime
- * @param {{ editHandleStore?: import("../../store.js").Store, outputVisibility?: import("../../chat-output-visibility.js").OutputVisibility }} sendOptions
- * @returns {Promise<MessageHandle | undefined>}
- */
 async function sendRuntimeToolEvent(sock, chatId, event, options, reactionRuntime, sendOptions) {
   const toolEvent = event.event;
   if (
@@ -1952,37 +1920,118 @@ function renderRuntimeStatusInspectText(state) {
 }
 
 /**
- * @param {RuntimeEventOutboundEvent["event"]} event
- * @returns {{ icon: string, provider: string, summary: string, closesStatus?: boolean, createsStatus?: boolean } | null}
+ * @param {Array<{ key: string, icon: string, provider: string, summary: string }>} entries
+ * @returns {string}
  */
-function formatPinnedTurnStatusPresentation(event) {
-  const provider = formatRuntimeProvider(event.provider);
-  switch (event.type) {
+function renderPinnedTurnStatusText(entries) {
+  const hiddenCount = Math.max(0, entries.length - 4);
+  const visibleEntries = hiddenCount > 0 ? entries.slice(-4) : entries;
+  return [
+    ...(hiddenCount > 0 ? [`... +${hiddenCount} earlier events`] : []),
+    ...visibleEntries.map((entry) => `${entry.icon} *${entry.provider}*  ${entry.summary}`),
+  ].join("\n");
+}
+
+/**
+ * @param {{ entries: Array<{ key: string, icon: string, provider: string, summary: string }> }} state
+ * @param {{ key: string, icon: string, provider: string, summary: string }} entry
+ * @returns {void}
+ */
+function upsertPinnedTurnStatusEntry(state, entry) {
+  const index = state.entries.findIndex((existing) => existing.key === entry.key);
+  if (index === -1) {
+    state.entries.push(entry);
+    return;
+  }
+  state.entries[index] = entry;
+}
+
+/**
+ * @param {RuntimeEventOutboundEvent} event
+ * @param {{ entries: Array<{ key: string, icon: string, provider: string, summary: string }> } | undefined} state
+ * @returns {{ key: string, icon: string, provider: string, summary: string, closesStatus?: boolean, createsStatus?: boolean } | null}
+ */
+function formatPinnedTurnStatusPresentation(event, state) {
+  const runtimeEvent = event.event;
+  const provider = formatRuntimeProvider(runtimeEvent.provider);
+  if (
+    runtimeEvent.type === "tool.started"
+    || runtimeEvent.type === "tool.updated"
+    || runtimeEvent.type === "tool.completed"
+    || runtimeEvent.type === "tool.failed"
+  ) {
+    if (!state || isNoopRuntimeTool(runtimeEvent.tool)) {
+      return null;
+    }
+    const displayTool = buildWhatsAppRuntimeToolFromRawAcp(runtimeEvent.tool, event);
+    const status = runtimeEvent.type.split(".")[1];
+    if (status !== "started" && status !== "updated" && status !== "completed" && status !== "failed") {
+      return null;
+    }
+    const key = `tool:${runtimeEvent.tool.id}`;
+    const previousSummary = state.entries.find((entry) => entry.key === key)?.summary;
+    const summary = formatRuntimeToolSummary(displayTool, event.cwd);
+    const summaryBase = previousSummary && shouldPreserveRuntimeSummary(previousSummary, summary)
+      ? previousSummary
+      : summary;
+    return {
+      key,
+      icon: getRuntimeToolIcon(status),
+      provider,
+      summary: appendReadLineRange(summaryBase, getRawAcpReadOutputLineRange(event)),
+    };
+  }
+
+  if (
+    runtimeEvent.type === "command.started"
+    || runtimeEvent.type === "command.completed"
+    || runtimeEvent.type === "command.failed"
+  ) {
+    if (!state) {
+      return null;
+    }
+    return {
+      key: `command:${runtimeEvent.command.command}`,
+      icon: getRuntimeCommandIcon(runtimeEvent.command.status),
+      provider,
+      summary: formatRuntimeCommandSummary(runtimeEvent.command.command),
+    };
+  }
+
+  if (runtimeEvent.type === "file-change.completed") {
+    if (!state) {
+      return null;
+    }
+    const displayPath = shortenPath(runtimeEvent.change.path, event.cwd ?? null);
+    const title = runtimeEvent.change.source === "snapshot" ? "Snapshot" : "File";
+    return {
+      key: `file-change:${runtimeEvent.change.path}`,
+      icon: "📝",
+      provider,
+      summary: formatRuntimeProgressEntry(title, `\`${displayPath}\``),
+    };
+  }
+
+  switch (runtimeEvent.type) {
     case "turn.started":
       return {
+        key: "turn",
         icon: "🔄",
         provider,
-        summary: `turn ${event.turn.status ?? "started"}`,
+        summary: `turn ${runtimeEvent.turn.status ?? "started"}`,
         createsStatus: true,
       };
     case "turn.completed":
       return {
+        key: "turn",
         icon: "✅",
         provider,
-        summary: `turn ${event.turn.status ?? "completed"}`,
+        summary: `turn ${runtimeEvent.turn.status ?? "completed"}`,
         closesStatus: true,
       };
     default:
       return null;
   }
-}
-
-/**
- * @param {{ icon: string, provider: string, summary: string }} presentation
- * @returns {string}
- */
-function renderPinnedTurnStatusText(presentation) {
-  return `${presentation.icon} *${presentation.provider}*  ${presentation.summary}`;
 }
 
 /**
@@ -1995,21 +2044,22 @@ function renderPinnedTurnStatusText(presentation) {
  * @returns {Promise<MessageHandle | undefined>}
  */
 async function updatePinnedTurnStatus(sock, chatId, event, options, reactionRuntime, sendOptions) {
-  const presentation = formatPinnedTurnStatusPresentation(event.event);
+  let state = turnStatusByChat.get(chatId);
+  const presentation = formatPinnedTurnStatusPresentation(event, state);
   if (!presentation) {
     return undefined;
   }
 
-  let state = turnStatusByChat.get(chatId);
   if (!state && !presentation.createsStatus) {
     return undefined;
   }
   if (!state) {
-    state = {};
+    state = { entries: [] };
     turnStatusByChat.set(chatId, state);
   }
 
-  const text = renderPinnedTurnStatusText(presentation);
+  upsertPinnedTurnStatusEntry(state, presentation);
+  const text = renderPinnedTurnStatusText(state.entries);
   if (!state.handle) {
     state.handle = await sendBlocks(sock, chatId, "plain", text, options, reactionRuntime, event, {
       editHandleStore: sendOptions.editHandleStore,
@@ -2411,10 +2461,6 @@ async function sendRuntimeEvent(sock, chatId, event, options, reactionRuntime, s
       runtimeStatusByChat.delete(chatId);
     }
     return turnStatusHandle;
-  }
-
-  if (event.event.type === "file-read.started") {
-    return sendRuntimeFileReadEvent(sock, chatId, event, options, reactionRuntime, sendOptions);
   }
 
   if (event.event.type === "tool.started" || event.event.type === "tool.updated" || event.event.type === "tool.completed" || event.event.type === "tool.failed") {

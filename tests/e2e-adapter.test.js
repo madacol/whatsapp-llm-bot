@@ -115,13 +115,6 @@ describe("provider runtime events", () => {
       errorMessage: "provider runtime e2e should use the semantic adapter",
       onSendTurn: async (input, { emitRuntimeEvent }) => {
         await emitRuntimeEvent({
-          type: "file-read.started",
-          fileRead: {
-            command: "sed -n '1,5p' package.json",
-            paths: ["package.json"],
-          },
-        });
-        await emitRuntimeEvent({
           type: "command.started",
           command: {
             command: "pnpm type-check",

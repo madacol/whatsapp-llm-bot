@@ -140,20 +140,6 @@ async function emitRuntimeCommand(hooks, command, status, output) {
   });
 }
 
-/**
- * @param {AgentIOHooks} hooks
- * @param {string} command
- * @param {string[]} paths
- * @returns {Promise<void>}
- */
-async function emitRuntimeFileRead(hooks, command, paths) {
-  await hooks.onRuntimeEvent?.({
-    type: "file-read.started",
-    provider: "codex",
-    fileRead: { command, paths },
-  });
-}
-
 describe("buildAgentIoHooks", () => {
   it("forwards generic runtime events as semantic outbound events", async () => {
     const { hooks, sent } = createSubject(VISIBLE_TOOL_OUTPUT);
@@ -391,17 +377,14 @@ describe("buildAgentIoHooks", () => {
     });
   });
 
-  it("passes command and file-read runtime events without transport presentation flags", async () => {
+  it("passes command runtime events without transport presentation flags", async () => {
     const { hooks, sent } = createSubjectWithCwd("/repo", { ...DEFAULT_OUTPUT_VISIBILITY, toolDetails: false });
 
-    await emitRuntimeFileRead(hooks, "sed -n '1,20p' src/app.js", ["src/app.js"]);
     await emitRuntimeCommand(hooks, "pnpm type-check", "started");
 
-    assert.deepEqual(sent.map((entry) => entry.event.kind), ["runtime_event", "runtime_event"]);
-    assert.equal(sent[0]?.event.kind === "runtime_event" ? sent[0].event.event.type : "", "file-read.started");
-    assert.equal(sent[1]?.event.kind === "runtime_event" ? sent[1].event.event.type : "", "command.started");
+    assert.deepEqual(sent.map((entry) => entry.event.kind), ["runtime_event"]);
+    assert.equal(sent[0]?.event.kind === "runtime_event" ? sent[0].event.event.type : "", "command.started");
     assert.equal("compact" in sent[0].event, false);
-    assert.equal("compact" in sent[1].event, false);
   });
 
   it("suppresses no-op ACP editing-files placeholder tool calls", async () => {
@@ -651,22 +634,6 @@ describe("buildAgentIoHooks", () => {
     assert.equal(sent[0].event.event.change.summary, "Updated file");
   });
 
-  it("emits file reads as runtime events", async () => {
-    const { hooks, sent } = createSubject(VISIBLE_TOOL_OUTPUT);
-    await emitRuntimeFileRead(hooks, "sed -n '1,20p' src/app.js", ["src/app.js"]);
-
-    assertSingleSentEvent(sent, "send", "runtime_event");
-    if (sent[0].event.kind !== "runtime_event") {
-      assert.fail("Expected runtime_event");
-    }
-    assert.equal(sent[0].event.event.type, "file-read.started");
-    assert.equal(sent[0].event.event.provider, "codex");
-    assert.deepEqual(sent[0].event.event.fileRead, {
-      command: "sed -n '1,20p' src/app.js",
-      paths: ["src/app.js"],
-    });
-  });
-
   it("passes file change diff facts through the runtime boundary", async () => {
     const { hooks, sent } = createSubject();
     await hooks.onFileChange?.({
@@ -765,7 +732,7 @@ describe("buildAgentIoHooks", () => {
       && /Skipped 26 unreported snapshot file changes/.test(String(event.message ?? ""))));
   });
 
-  it("passes file-read and command output through runtime events", async () => {
+  it("passes command output through runtime events", async () => {
     /** @type {Array<{ inspects: MessageInspectState[], updates: MessageHandleUpdate[] }>} */
     const handles = [];
     const hooks = buildAgentIoHooks(
@@ -791,7 +758,6 @@ describe("buildAgentIoHooks", () => {
       VISIBLE_TOOL_OUTPUT,
     );
 
-    await emitRuntimeFileRead(hooks, "sed -n '1,20p' src/app.js", ["src/app.js"]);
     await emitRuntimeCommand(
       hooks,
       "sed -n '1,20p' src/app.js",
@@ -799,8 +765,8 @@ describe("buildAgentIoHooks", () => {
       "  1→ const value = 1;\n  2→ const value = 2;",
     );
 
-    assert.equal(handles.length, 2);
-    assert.deepEqual(handles.map((entry) => entry.inspects.length), [0, 0]);
+    assert.equal(handles.length, 1);
+    assert.deepEqual(handles.map((entry) => entry.inspects.length), [0]);
   });
 
   it("passes search command output through runtime events", async () => {
