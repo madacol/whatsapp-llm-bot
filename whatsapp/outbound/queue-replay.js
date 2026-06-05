@@ -1,5 +1,6 @@
 import { createLogger } from "../../logger.js";
 import { resolveOutputVisibility } from "../../chat-output-visibility.js";
+import { getOutboundQueueReplayDelayMs } from "../../whatsapp-outbound-queue-config.js";
 import { makeTextMessage } from "../message-payloads.js";
 import { sendEvent as sendOutboundEvent } from "./send-content.js";
 import {
@@ -36,6 +37,46 @@ function errorStack(error) {
 }
 
 /**
+ * @param {number} ms
+ * @returns {Promise<void>}
+ */
+async function wait(ms) {
+  if (ms <= 0) {
+    return;
+  }
+  await new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * @param {unknown} value
+ * @returns {value is Record<string, unknown>}
+ */
+function isObjectRecord(value) {
+  return typeof value === "object" && value !== null;
+}
+
+/**
+ * @param {unknown} error
+ * @returns {boolean}
+ */
+function isBaileysRateOverlimitError(error) {
+  const message = errorMessage(error);
+  const stack = errorStack(error);
+  return message === "rate-overlimit"
+    && isObjectRecord(error)
+    && error.data === 429
+    && stack.includes("@whiskeysockets/baileys");
+}
+
+/**
+ * @param {unknown} error
+ * @returns {boolean}
+ */
+export function isRateLimitedWhatsAppSendError(error) {
+  return isBaileysRateOverlimitError(error);
+}
+
+/**
  * @param {unknown} error
  * @returns {boolean}
  */
@@ -48,6 +89,7 @@ export function isRecoverableWhatsAppSendError(error) {
     || message.trim() === "1006"
     || message.includes("WhatsApp socket is not connected")
     || message.includes("WhatsApp transport has not been started")
+    || isRateLimitedWhatsAppSendError(error)
     || (message.includes("Cannot read properties of undefined (reading 'attrs')")
       && stack.includes("@whiskeysockets/baileys")
       && stack.includes("/Socket/groups.js"));
@@ -64,7 +106,8 @@ function isConnectionRecoverableWhatsAppSendError(error) {
     || message.includes("Connection was lost")
     || message.trim() === "1006"
     || message.includes("WhatsApp socket is not connected")
-    || message.includes("WhatsApp transport has not been started");
+    || message.includes("WhatsApp transport has not been started")
+    || isRateLimitedWhatsAppSendError(error);
 }
 
 /**
@@ -92,15 +135,23 @@ async function deliverQueuedPayload(sock, chatId, payload, reactionRuntime, stor
  *   getSocket: () => import("@whiskeysockets/baileys").WASocket | null,
  *   reactionRuntime?: import("../runtime/reaction-runtime.js").ReactionRuntime,
  *   store?: import("../../store.js").Store,
+ *   replayDelayMs?: number,
+ *   sleepFn?: (ms: number) => Promise<void>,
  * }} input
  * @returns {Promise<DeliveredWhatsAppOutboundRow[]>}
  */
-export async function flushQueuedWhatsAppOutbound({ getSocket, reactionRuntime, store }) {
+export async function flushQueuedWhatsAppOutbound({ getSocket, reactionRuntime, store, replayDelayMs, sleepFn }) {
   const queuedRows = await listQueuedWhatsAppOutbound(store);
   /** @type {DeliveredWhatsAppOutboundRow[]} */
   const deliveredRows = [];
+  const delayMs = replayDelayMs ?? getOutboundQueueReplayDelayMs();
+  const sleep = sleepFn ?? wait;
 
   for (const row of queuedRows) {
+    if (deliveredRows.length > 0 && delayMs > 0) {
+      await sleep(delayMs);
+    }
+
     const sock = getSocket();
     if (!sock) {
       return deliveredRows;

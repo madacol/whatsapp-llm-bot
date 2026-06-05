@@ -6,6 +6,7 @@ import { enqueueWhatsAppOutbound } from "./queue-store.js";
 import { createQueuedMessageHandle } from "./queued-handles.js";
 import {
   flushQueuedWhatsAppOutbound,
+  isRateLimitedWhatsAppSendError,
   isRecoverableWhatsAppSendError,
 } from "./queue-replay.js";
 
@@ -155,6 +156,10 @@ export async function sendOrQueueWhatsAppEvent({ getSocket, chatId, event, react
     if (!isRecoverableWhatsAppSendError(error)) {
       throw error;
     }
+    if (isRateLimitedWhatsAppSendError(error)) {
+      const row = await enqueueWhatsAppOutbound(chatId, { kind: "event", event }, store);
+      return createQueuedMessageHandle(chatId, row.id);
+    }
     return queueEventAfterDebouncedRetry({
       getSocket,
       chatId,
@@ -212,6 +217,10 @@ export async function sendOrQueueWhatsAppText({ getSocket, chatId, text, store }
   } catch (error) {
     if (!isRecoverableWhatsAppSendError(error)) {
       throw error;
+    }
+    if (isRateLimitedWhatsAppSendError(error)) {
+      await enqueueWhatsAppOutbound(chatId, { kind: "text", text }, store);
+      return;
     }
     await queueTextAfterDebouncedRetry({ getSocket, chatId, text, store });
   }
