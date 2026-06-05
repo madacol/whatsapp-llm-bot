@@ -150,6 +150,9 @@ function normalizeToolName(toolCall) {
   const rawInput = isRecord(toolCall.rawInput) ? toolCall.rawInput : null;
   const kind = stringOrNull(toolCall.kind);
   const subagentType = stringOrNull(rawInput?.subagent_type);
+  if (kind === "search" && typeof rawInput?.pattern === "string" && typeof rawInput.path === "string") {
+    return "Search";
+  }
   if (subagentType || kind === "think") {
     return "Task";
   }

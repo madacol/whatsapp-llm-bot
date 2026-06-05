@@ -216,8 +216,11 @@ describe("sendEvent – compact tool activity", () => {
     };
     const searchTool = {
       id: "search-generic",
-      name: "Search for 'create.*File|Edit|Write' in tool-presentation-model.js",
-      arguments: "{}",
+      name: "Search",
+      arguments: JSON.stringify({
+        pattern: "create.*File|Edit|Write",
+        path: "tool-presentation-model.js",
+      }),
     };
     const listTool = {
       id: "list-generic",

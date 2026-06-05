@@ -673,7 +673,7 @@ describe("ACP payload to WhatsApp socket vertical slices", () => {
     assert.equal(sent[1]?.msg.text, "✅ *Read*  `src/app.js`");
   });
 
-  it("renders ACP search titles from raw WhatsApp payloads", async () => {
+  it("renders semantic ACP search tool payloads", async () => {
     const { sent, trace } = await observeAcpPayloadSliceToBaileys([
       {
         sessionId: "s1",
@@ -683,6 +683,10 @@ describe("ACP payload to WhatsApp socket vertical slices", () => {
           title: "Search for 'toolDetails|compact_tool_activity' in whatsapp-transport.test.js",
           kind: "search",
           status: "in_progress",
+          rawInput: {
+            pattern: "toolDetails|compact_tool_activity",
+            path: "whatsapp-transport.test.js",
+          },
         },
       },
     ], {
@@ -691,6 +695,14 @@ describe("ACP payload to WhatsApp socket vertical slices", () => {
     });
 
     assert.deepEqual(trace.runtimeEvents.map((event) => event.type), ["tool.started"]);
+    assert.deepEqual(trace.runtimeEvents[0]?.tool, {
+      id: "search-real-shape",
+      name: "Search",
+      arguments: {
+        pattern: "toolDetails|compact_tool_activity",
+        path: "whatsapp-transport.test.js",
+      },
+    });
     assert.equal(sent[0]?.msg.text, "🔧 *Search*  `toolDetails|compact_tool_activity` in *whatsapp-transport.test.js*");
   });
 

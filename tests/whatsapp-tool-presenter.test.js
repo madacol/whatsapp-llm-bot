@@ -21,7 +21,15 @@ describe("WhatsApp tool presenter", () => {
     );
     assert.equal(
       formatSdkToolCall("Grep", { pattern: "needle", path: "/repo/src" }, "/repo"),
-      "*Search*  `needle` in `src`",
+      "*Search*  `needle` in *src*",
+    );
+    assert.equal(
+      formatSdkToolCall(
+        "Grep",
+        { pattern: "ThreadTurnStart|turn.start|thread.turn.start|modelSelection", path: "/repo/orchestration.ts" },
+        "/repo",
+      ),
+      "*Search*  `ThreadTurnStart|turn.start|thread.turn.start|modelSelection` in *orchestration.ts*",
     );
     assert.equal(
       formatSdkToolCall("Glob", { pattern: "*.js", path: "/repo/src" }, "/repo"),
