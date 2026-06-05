@@ -99,6 +99,14 @@ async function handleMessage(parsed) {
       break;
     case "thread/settings/update":
       record("thread/settings/update", params);
+      if (process.env.FAKE_CODEX_REJECT_SETTINGS_UPDATE === "unknown") {
+        reject(id, "Invalid request: unknown variant `thread/settings/update`");
+        break;
+      }
+      if (process.env.FAKE_CODEX_REJECT_SETTINGS_UPDATE === "hard") {
+        reject(id, "settings update denied");
+        break;
+      }
       respond(id, {});
       break;
     case "model/list":
