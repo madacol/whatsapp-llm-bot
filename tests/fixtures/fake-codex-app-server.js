@@ -211,7 +211,8 @@ async function handleMessage(parsed) {
       });
       break;
     default:
-      respond(id, {});
+      record("unknown-method", { method, params });
+      reject(id, `unknown method ${typeof method === "string" ? method : String(method)}`);
       break;
   }
 }
