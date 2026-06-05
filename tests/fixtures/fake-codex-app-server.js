@@ -97,6 +97,10 @@ async function handleMessage(parsed) {
         reasoningEffort: "none",
       });
       break;
+    case "thread/settings/update":
+      record("thread/settings/update", params);
+      respond(id, {});
+      break;
     case "model/list":
       respond(id, {
         data: [{

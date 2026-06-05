@@ -152,6 +152,19 @@
        personality: null,
        cwd: null,
        effort,
+@@ -19337,6 +19412,12 @@
+       model: modelId.model
+     });
+   }
++  async setFastMode(sessionId, enabled) {
++    await this.codexClient.threadSettingsUpdate({
++      threadId: sessionId,
++      serviceTier: enabled ? "fast" : null
++    });
++  }
+   async listSkills(params) {
+     return this.codexClient.listSkills(params ?? {});
+   }
 @@ -19443,6 +19518,9 @@
        turnId: params.turnId
      });
@@ -270,7 +283,7 @@
      };
    }
    async authenticate(_params) {
-@@ -20102,6 +20207,37 @@
+@@ -20102,6 +20207,42 @@
      sessionState.supportedInputModalities = model.inputModalities;
      return {};
    }
@@ -296,6 +309,11 @@
 +    }
 +    if (typeof params.value !== "boolean") {
 +      throw RequestError.invalidParams();
++    }
++    try {
++      await this.codexAcpClient.setFastMode(params.sessionId, params.value);
++    } catch (err) {
++      this.failFastMode(err);
 +    }
 +    sessionState.fastMode = params.value;
 +    return { configOptions: this.createConfigOptions(sessionState) };
@@ -368,4 +386,14 @@
 +  }
    async threadStart(params) {
      return await this.sendRequest({ method: "thread/start", params });
+   }
+@@ -20659,6 +20809,9 @@
+   async threadRead(params) {
+     return await this.sendRequest({ method: "thread/read", params });
+   }
++  async threadSettingsUpdate(params) {
++    return await this.sendRequest({ method: "thread/settings/update", params });
++  }
+   async listMcpServerStatus(params) {
+     return await this.sendRequest({ method: "mcpServerStatus/list", params });
    }

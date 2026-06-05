@@ -11,7 +11,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const codexAcpEntryPoint = path.join(__dirname, "..", "node_modules", "@agentclientprotocol", "codex-acp", "dist", "index.js");
 
 describe("patched codex-acp steering", () => {
-  it("stores fast mode in ACP session state and applies the Codex service tier per turn", async () => {
+  it("persists fast mode in Codex settings and applies the Codex service tier per turn", async () => {
     const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "codex-acp-fast-"));
     const recordPath = path.join(tempDir, "events.jsonl");
     const fakeCodexPath = path.join(__dirname, "fixtures", "fake-codex-app-server.js");
@@ -66,7 +66,9 @@ describe("patched codex-acp steering", () => {
         .trim()
         .split("\n")
         .map((line) => JSON.parse(line));
-      assert.equal(records.some((record) => record.event === "thread/settings/update"), false, JSON.stringify(records));
+      assert.ok(records.some((record) => record.event === "thread/settings/update"
+        && record.value.threadId === "fake-thread-1"
+        && record.value.serviceTier === "fast"), JSON.stringify(records));
       assert.ok(records.some((record) => record.event === "turn/start"
         && record.value.threadId === "fake-thread-1"
         && record.value.serviceTier === "fast"), JSON.stringify(records));
@@ -121,7 +123,9 @@ describe("patched codex-acp steering", () => {
         .map((line) => JSON.parse(line));
       const turnStarts = records.filter((record) => record.event === "turn/start");
       assert.equal(turnStarts[0]?.value.serviceTier, "fast");
-      assert.equal(records.some((record) => record.event === "thread/settings/update"), false, JSON.stringify(records));
+      assert.ok(records.some((record) => record.event === "thread/settings/update"
+        && record.value.threadId === "fake-thread-1"
+        && record.value.serviceTier === "fast"), JSON.stringify(records));
     } finally {
       await connection.close();
       await fs.rm(tempDir, { recursive: true, force: true });
