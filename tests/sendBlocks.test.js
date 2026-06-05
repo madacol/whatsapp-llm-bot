@@ -109,11 +109,12 @@ async function waitFor(predicate) {
 }
 
 /**
+ * @param {number} [linePairs]
  * @returns {string}
  */
-function buildMultiBatchDiffText() {
-  const diffLines = ["@@ -1,320 +1,320 @@"];
-  for (let index = 0; index < 320; index += 1) {
+function buildMultiBatchDiffText(linePairs = 320) {
+  const diffLines = [`@@ -1,${linePairs} +1,${linePairs} @@`];
+  for (let index = 0; index < linePairs; index += 1) {
     diffLines.push(`-const oldValue${index} = ${index};`);
     diffLines.push(`+const newValue${index} = ${index + 1};`);
   }
@@ -1568,7 +1569,7 @@ Second block:
     assert.equal(textMessages.length, 0, JSON.stringify(sent));
   });
 
-  it("asks from WhatsApp snapshot diff batching before rendering remaining lines", async () => {
+  it("asks from WhatsApp snapshot diff batching without blocking execution", async () => {
     const { sock, sent, relayed } = createMockSock();
     const reactionRuntime = createReactionRuntime();
     const sendPromise = sendEvent(sock, "test-chat", runtimeFileChangeEvent({
@@ -1579,13 +1580,14 @@ Second block:
       diff: [
         "--- a/huge.js",
         "+++ b/huge.js",
-        buildMultiBatchDiffText(),
+        buildMultiBatchDiffText(640),
       ].join("\n"),
     }), undefined, reactionRuntime);
 
     await waitFor(() => sent.some((entry) => /Continue rendering/.test(String(entry.msg.text ?? ""))));
+    await sendPromise;
     const prompt = sent.find((entry) => /Continue rendering/.test(String(entry.msg.text ?? "")));
-    assert.match(String(prompt?.msg.text ?? ""), /Snapshot diff rendered 250 of \d+ lines/);
+    assert.match(String(prompt?.msg.text ?? ""), /Snapshot diff rendered 1000 of \d+ lines/);
     assert.match(String(prompt?.msg.text ?? ""), /React 👍 to continue or 👎 to stop/);
     assert.equal(
       relayed.filter((entry) => entry.msg.imageMessage != null).length,
@@ -1597,17 +1599,15 @@ Second block:
       reaction: { text: "👍" },
       senderId: "user-1",
     }]);
-    await waitFor(() => sent.filter((entry) => /Continue rendering/.test(String(entry.msg.text ?? ""))).length >= 2);
-    reactionRuntime.handleReactions([{
-      key: { id: "msg-2", remoteJid: "test-chat" },
-      reaction: { text: "👎" },
-      senderId: "user-1",
-    }]);
-    await sendPromise;
+    await waitFor(() => relayed.filter((entry) => entry.msg.imageMessage != null).length > MAX_RENDERED_IMAGES_PER_BLOCK);
 
     assert.ok(
       relayed.filter((entry) => entry.msg.imageMessage != null).length > MAX_RENDERED_IMAGES_PER_BLOCK,
       "Expected snapshot continuation to render more images after approval",
+    );
+    assert.equal(
+      sent.filter((entry) => /Continue rendering/.test(String(entry.msg.text ?? ""))).length,
+      1,
     );
     assert.equal(
       sent.some((entry) => /Diff truncated/.test(String(entry.msg.text ?? ""))),
