@@ -108,4 +108,49 @@ describe("patched codex-acp fast mode", () => {
       await fs.rm(tempDir, { recursive: true, force: true });
     }
   });
+
+  it("keeps fast mode enabled when the app server lacks fast settings persistence", async () => {
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "codex-acp-fast-settings-unsupported-"));
+    const recordPath = path.join(tempDir, "events.jsonl");
+    const connection = await openFakeCodexAcpConnection({
+      FAKE_CODEX_RECORD_PATH: recordPath,
+      FAKE_CODEX_REJECT_SETTINGS_UPDATE: "unknown",
+    });
+
+    try {
+      await connection.sendRequest("initialize", {
+        protocolVersion: 1,
+        clientInfo: { name: "madabot-test", version: "0" },
+        clientCapabilities: {},
+      });
+      await connection.sendRequest("session/new", { cwd: process.cwd(), mcpServers: [] });
+      const updated = /** @type {{ configOptions?: Record<string, unknown>[] }} */ (await connection.sendRequest("session/set_config_option", {
+        sessionId: "fake-thread-1",
+        configId: "fast_mode",
+        type: "boolean",
+        value: true,
+      }));
+      assert.equal(updated.configOptions?.find((option) => option.id === "fast_mode")?.currentValue, true);
+
+      const promptResult = /** @type {{ stopReason?: string }} */ (await connection.sendRequest("session/prompt", {
+        sessionId: "fake-thread-1",
+        prompt: [{ type: "text", text: "web" }],
+      }));
+      assert.equal(promptResult?.stopReason, "end_turn");
+
+      const records = (await fs.readFile(recordPath, "utf8"))
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line));
+      assert.ok(records.some((record) => record.event === "thread/settings/update"
+        && record.value.threadId === "fake-thread-1"
+        && record.value.serviceTier === "fast"), JSON.stringify(records));
+      assert.ok(records.some((record) => record.event === "turn/start"
+        && record.value.threadId === "fake-thread-1"
+        && record.value.serviceTier === "fast"), JSON.stringify(records));
+    } finally {
+      await connection.close();
+      await fs.rm(tempDir, { recursive: true, force: true });
+    }
+  });
 });

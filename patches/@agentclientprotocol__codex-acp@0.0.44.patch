@@ -144,27 +144,44 @@
        case "imageView":
        case "imageGeneration":
        case "enteredReviewMode":
-@@ -19328,6 +19402,7 @@
-       approvalPolicy: agentMode.approvalPolicy,
-       sandboxPolicy: agentMode.sandboxPolicy,
-       summary: disableSummary ? "none" : null,
+@@ -19298,4 +19373,8 @@
+ // src/CodexAcpClient.ts
++function isUnsupportedThreadSettingsUpdateError(cause) {
++  const reason = cause instanceof Error ? cause.message : String(cause);
++  return reason.includes("thread/settings/update") && (reason.includes("unknown variant") || reason.includes("unknown method"));
++}
+ var CodexAcpClient = class {
+   codexClient;
+   config;
+@@ -19328,6 +19406,7 @@
+      approvalPolicy: agentMode.approvalPolicy,
+      sandboxPolicy: agentMode.sandboxPolicy,
+      summary: disableSummary ? "none" : null,
 +      serviceTier: request.fastMode ? "fast" : null,
-       personality: null,
-       cwd: null,
-       effort,
-@@ -19337,6 +19412,12 @@
-       model: modelId.model
-     });
-   }
+      personality: null,
+      cwd: null,
+      effort,
+@@ -19337,6 +19416,21 @@
+      model: modelId.model
+    });
+  }
 +  async setFastMode(sessionId, enabled) {
-+    await this.codexClient.threadSettingsUpdate({
-+      threadId: sessionId,
-+      serviceTier: enabled ? "fast" : null
-+    });
++    try {
++      await this.codexClient.threadSettingsUpdate({
++        threadId: sessionId,
++        serviceTier: enabled ? "fast" : null
++      });
++      return true;
++    } catch (error) {
++      if (isUnsupportedThreadSettingsUpdateError(error)) {
++        return false;
++      }
++      throw error;
++    }
 +  }
-   async listSkills(params) {
-     return this.codexClient.listSkills(params ?? {});
-   }
+  async listSkills(params) {
+    return this.codexClient.listSkills(params ?? {});
+  }
 @@ -19443,6 +19518,9 @@
        turnId: params.turnId
      });
