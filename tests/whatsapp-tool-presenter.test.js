@@ -17,11 +17,11 @@ describe("WhatsApp tool presenter", () => {
     );
     assert.equal(
       formatSdkToolCall("Read", { file_path: "/repo/src/app.js", offset: 10, limit: 3 }, "/repo"),
-      "*Read*  `src/app.js`  *10-12*",
+      "*Read*  `src/app.js:10-12`",
     );
     assert.equal(
       formatSdkToolCall("Grep", { pattern: "needle", path: "/repo/src" }, "/repo"),
-      "*Search*  `needle` in *src*",
+      "*Search*  `needle` in `src`",
     );
     assert.equal(
       formatSdkToolCall("Glob", { pattern: "*.js", path: "/repo/src" }, "/repo"),
