@@ -2177,6 +2177,18 @@ function getPreviousPinnedStatusDetail(state, key, prefix, fallback) {
 function formatPinnedRuntimeStatusPresentation(event, state) {
   const runtimeEvent = event.event;
   const provider = formatRuntimeProvider(runtimeEvent.provider);
+  if (runtimeEvent.type === "reasoning.started" || runtimeEvent.type === "reasoning.updated") {
+    if (!state || state.entries.some((entry) => entry.key === "thinking")) {
+      return null;
+    }
+    return {
+      key: "thinking",
+      icon: "💭",
+      provider: "LLM",
+      summary: "thinking",
+    };
+  }
+
   if (
     runtimeEvent.type === "tool.started"
     || runtimeEvent.type === "tool.updated"
@@ -2858,6 +2870,10 @@ async function sendRuntimeEvent(sock, chatId, event, options, reactionRuntime, s
     if (event.event.type === "turn.completed") {
       runtimeStatusByChat.delete(chatId);
     }
+    return turnStatusHandle;
+  }
+
+  if (event.event.type === "reasoning.started" || event.event.type === "reasoning.updated" || event.event.type === "reasoning.completed") {
     return turnStatusHandle;
   }
 

@@ -785,6 +785,48 @@ describe("sendEvent – runtime events", () => {
     ]);
   });
 
+  it("shows thinking in the pinned status when reasoning updates", async () => {
+    const { sock, sent } = createMockSock();
+    const chatId = "runtime-thinking-status-chat";
+
+    await sendEvent(sock, chatId, {
+      kind: "runtime_event",
+      event: {
+        type: "turn.started",
+        provider: "codex",
+        turn: { id: "turn-1", chatId, status: "started" },
+      },
+    });
+    await sendEvent(sock, chatId, {
+      kind: "runtime_event",
+      event: {
+        type: "reasoning.updated",
+        provider: "acp",
+        status: "updated",
+        text: "Inspecting the request.",
+        contentParts: ["Inspecting the request."],
+        summaryParts: [],
+      },
+    });
+
+    assert.deepEqual(sent.map((entry) => entry.msg), [
+      { text: "🔄 *CODEX*  turn started", linkPreview: null },
+      {
+        pin: { id: "msg-1", remoteJid: chatId, fromMe: true },
+        type: 1,
+        time: 86400,
+      },
+      {
+        text: [
+          "💭 *LLM*  thinking",
+          "🔄 *CODEX*  turn started",
+        ].join("\n"),
+        edit: { id: "msg-1", remoteJid: chatId, fromMe: true },
+        linkPreview: null,
+      },
+    ]);
+  });
+
   it("observes pinned status delivery at the socket boundary", async () => {
     const { sock } = createMockSock();
     /** @type {Array<Record<string, unknown>>} */
