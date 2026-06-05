@@ -241,6 +241,8 @@ async function handleMessage(message) {
 }
 
 const promptScenarios = [
+  { match: "all statuses", handle: handleAllStatusesPrompt },
+  { match: "runtime error status", handle: handleRuntimeErrorStatusPrompt },
   { match: "permission", handle: handlePermissionPrompt },
   { match: "elicitation", handle: handleElicitationPrompt },
   { match: "unknown extension", handle: handleUnknownExtensionPrompt },
@@ -260,6 +262,239 @@ const promptScenarios = [
   { match: "config", handle: handleConfigPrompt },
   { match: "session method", handle: handleSessionMethodPrompt },
 ];
+
+/**
+ * @param {Record<string, unknown>} message
+ * @returns {Promise<void>}
+ */
+async function handleAllStatusesPrompt(message) {
+  const sid = sessionId ?? "mock-session-1";
+  notify("session/update", {
+    sessionId: sid,
+    update: {
+      sessionUpdate: "agent_thought_chunk",
+      content: { type: "text", text: "Inspecting status inputs" },
+    },
+  });
+  notify("session/update", {
+    sessionId: sid,
+    update: {
+      sessionUpdate: "plan",
+      entries: [{ content: "Wire pinned status categories", status: "in_progress" }],
+    },
+  });
+  notify("session/update", {
+    sessionId: sid,
+    update: {
+      sessionUpdate: "tool_call",
+      toolCallId: "noise-read-1",
+      title: "Read file",
+      kind: "read",
+      status: "in_progress",
+      locations: [{ path: `${process.cwd()}/src/noise.js` }],
+    },
+  });
+  notify("session/update", {
+    sessionId: sid,
+    update: {
+      sessionUpdate: "tool_call_update",
+      toolCallId: "noise-read-1",
+      status: "completed",
+      rawOutput: {
+        formatted_output: "    1→const ignored = true;",
+        exit_code: 0,
+      },
+    },
+  });
+  notify("session/update", {
+    sessionId: sid,
+    update: {
+      sessionUpdate: "tool_call",
+      toolCallId: "noise-list-1",
+      title: "List files in 'src'",
+      kind: "read",
+      status: "in_progress",
+      locations: [{ path: `${process.cwd()}/src` }],
+    },
+  });
+  notify("session/update", {
+    sessionId: sid,
+    update: {
+      sessionUpdate: "tool_call_update",
+      toolCallId: "noise-list-1",
+      status: "completed",
+      rawOutput: {
+        formatted_output: "src/noise.js",
+        exit_code: 0,
+      },
+    },
+  });
+  notify("session/update", {
+    sessionId: sid,
+    update: {
+      sessionUpdate: "model_rerouted",
+      fromModel: "model-a",
+      toModel: "model-b",
+      reason: "capacity",
+    },
+  });
+  notify("session/update", {
+    sessionId: sid,
+    update: {
+      sessionUpdate: "config_warning",
+      summary: "Config fallback active",
+      details: "mock config warning",
+    },
+  });
+  notify("session/update", {
+    sessionId: sid,
+    update: {
+      sessionUpdate: "runtime_warning",
+      message: "Runtime warning sample",
+      details: "mock runtime warning",
+    },
+  });
+
+  const permission = await request("session/request_permission", {
+    sessionId,
+    toolCall: {
+      toolCallId: "perm-all-statuses",
+      title: "Run status command",
+      status: "pending",
+    },
+    options: [
+      { optionId: "allow-once", name: "Allow once", kind: "allow_once" },
+      { optionId: "reject-once", name: "Reject once", kind: "reject_once" },
+    ],
+  });
+  notifyText(JSON.stringify(permission));
+
+  const response = await request("elicitation/create", {
+    sessionId,
+    mode: "form",
+    message: "Choose a status strategy",
+    requestedSchema: {
+      type: "object",
+      properties: {
+        strategy: {
+          type: "string",
+          title: "Status Strategy",
+          oneOf: [
+            { const: "compact", title: "Compact" },
+            { const: "complete", title: "Complete" },
+          ],
+          default: "complete",
+        },
+      },
+      required: ["strategy"],
+    },
+  });
+  notifyText(JSON.stringify(response));
+
+  const created = /** @type {{ terminalId?: string }} */ (await request("terminal/create", {
+    sessionId,
+    command: process.execPath,
+    args: ["-e", "process.stdout.write('status command ok')"],
+    cwd: process.cwd(),
+    outputByteLimit: 10000,
+  }));
+  if (created.terminalId) {
+    await request("terminal/wait_for_exit", { sessionId, terminalId: created.terminalId });
+    await request("terminal/output", { sessionId, terminalId: created.terminalId });
+    await request("terminal/release", { sessionId, terminalId: created.terminalId });
+  }
+
+  notify("session/update", {
+    sessionId: sid,
+    update: {
+      sessionUpdate: "tool_call",
+      toolCallId: "toolu-status-review",
+      title: "Review status code",
+      kind: "think",
+      rawInput: { subagent_type: "reviewer", prompt: "Check the status bar" },
+      status: "in_progress",
+    },
+  });
+  notify("session/update", {
+    sessionId: sid,
+    update: {
+      sessionUpdate: "agent_message_chunk",
+      content: { type: "text", text: "Status reviewer result." },
+      _meta: {
+        madabot: {
+          subagent: {
+            threadId: "toolu-status-review",
+            agentNickname: "Reviewer",
+          },
+        },
+      },
+    },
+  });
+  notify("session/update", {
+    sessionId: sid,
+    update: {
+      sessionUpdate: "tool_call_update",
+      toolCallId: "status-edit-1",
+      title: "Edited status.txt",
+      status: "completed",
+      content: [{ type: "diff", path: "status.txt", oldText: "old", newText: "new" }],
+    },
+  });
+  notify("session/update", {
+    sessionId: sid,
+    update: {
+      sessionUpdate: "usage_update",
+      used: 64,
+      size: 2048,
+      cost: { amount: 0.004, currency: "USD" },
+    },
+  });
+  notifyText("All statuses done.");
+  send({
+    id: message.id,
+    result: {
+      sessionId: sid,
+      stopReason: "end_turn",
+      usage: {
+        total_tokens: 64,
+        input_tokens: 40,
+        output_tokens: 20,
+        thought_tokens: 4,
+        cached_read_tokens: 6,
+        cached_write_tokens: 2,
+      },
+    },
+  });
+}
+
+/**
+ * @param {Record<string, unknown>} message
+ * @returns {Promise<void>}
+ */
+async function handleRuntimeErrorStatusPrompt(message) {
+  const sid = sessionId ?? "mock-session-1";
+  notify("session/update", {
+    sessionId: sid,
+    update: {
+      sessionUpdate: "runtime_error",
+      message: "Runtime error sample",
+      details: "mock runtime error",
+    },
+  });
+  notifyText("Runtime error status done.");
+  send({
+    id: message.id,
+    result: {
+      sessionId: sid,
+      stopReason: "end_turn",
+      usage: {
+        total_tokens: 12,
+        input_tokens: 8,
+        output_tokens: 4,
+      },
+    },
+  });
+}
 
 /**
  * @param {Record<string, unknown>} message
