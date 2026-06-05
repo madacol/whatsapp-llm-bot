@@ -14,4 +14,4 @@ dist/**
 logs/**
 node_modules/**
 pgdata/**
-snapshot-burst/**
+pnpm-lock.yaml
