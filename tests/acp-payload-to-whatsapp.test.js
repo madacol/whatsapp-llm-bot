@@ -474,6 +474,230 @@ describe("ACP payload to WhatsApp socket vertical slices", () => {
     ]);
   });
 
+  it("updates or ignores pinned status intentionally for real ACP session update shapes", async () => {
+    const chatId = "acp-real-status-shapes@s.whatsapp.net";
+    const cwd = "/repo";
+    const sessionId = "real-session-shape-audit";
+    const { sock, sent } = createMockSock();
+    /** @type {Array<import("../harnesses/harness-runtime-events.js").HarnessRuntimeEvent>} */
+    const runtimeEvents = [];
+    /** @type {Array<{ via: "send" | "reply", event: SendContent }>} */
+    const outboundEvents = [];
+    /** @type {Array<Record<string, unknown>>} */
+    const pinnedStatusDelivery = [];
+    const model = createAcpRuntimeModel();
+    const hooks = buildObservedWhatsAppHooks({
+      sock,
+      chatId,
+      cwd,
+      visibility: { ...DEFAULT_OUTPUT_VISIBILITY, usage: true },
+      outboundEvents,
+      pinnedStatusDelivery,
+    });
+    const dispatcher = createHarnessRuntimeEventDispatcher({
+      provider: "acp",
+      messages: [],
+      hooks,
+      workdir: cwd,
+    });
+
+    /**
+     * @returns {string[]}
+     */
+    function pinnedStatusTexts() {
+      const pinEntry = sent.find((entry) => entry.msg.pin && typeof entry.msg.pin === "object" && entry.msg.type === 1);
+      const pinnedId = pinEntry && typeof pinEntry.msg.pin === "object"
+        ? /** @type {{ id?: unknown }} */ (pinEntry.msg.pin).id
+        : null;
+      assert.equal(typeof pinnedId, "string", `Expected pinned status payload, got ${JSON.stringify(sent.map((entry) => entry.msg))}`);
+      return sent
+        .filter((entry, index) => {
+          if (typeof entry.msg.text !== "string") {
+            return false;
+          }
+          if (`msg-${index + 1}` === pinnedId) {
+            return true;
+          }
+          return typeof entry.msg.edit === "object"
+            && entry.msg.edit !== null
+            && /** @type {{ id?: unknown }} */ (entry.msg.edit).id === pinnedId;
+        })
+        .map((entry) => /** @type {string} */ (entry.msg.text));
+    }
+
+    /**
+     * @param {Record<string, unknown>} update
+     * @returns {Promise<{ eventTypes: string[], pinnedText: string }>}
+     */
+    async function sendAcpUpdate(update) {
+      const events = model.acceptSessionUpdate({ sessionId, update });
+      runtimeEvents.push(...events);
+      for (const event of events) {
+        await dispatcher.handleEvent(event);
+      }
+      return {
+        eventTypes: events.map((event) => event.type),
+        pinnedText: pinnedStatusTexts().at(-1) ?? "",
+      };
+    }
+
+    await dispatcher.handleEvent({
+      type: "turn.started",
+      provider: "acp",
+      turn: { id: "turn-1", chatId, status: "started" },
+    });
+    assert.equal(pinnedStatusTexts().at(-1), "🔄 *ACP*  turn started");
+
+    assert.deepEqual(await sendAcpUpdate({
+      sessionUpdate: "available_commands_update",
+      availableCommands: [{ name: "continue", description: "Continue" }],
+    }), {
+      eventTypes: [],
+      pinnedText: "🔄 *ACP*  turn started",
+    });
+
+    assert.deepEqual(await sendAcpUpdate({
+      sessionUpdate: "agent_message_chunk",
+      content: { type: "text", text: "Main result." },
+    }), {
+      eventTypes: ["item.started", "content.delta"],
+      pinnedText: "🔄 *ACP*  turn started",
+    });
+
+    assert.deepEqual(await sendAcpUpdate({
+      sessionUpdate: "agent_thought_chunk",
+      content: { type: "text", text: "Inspecting status inputs" },
+    }), {
+      eventTypes: ["item.completed", "reasoning.updated"],
+      pinnedText: [
+        "💭 *LLM*  thinking",
+        "🔄 *ACP*  turn started",
+      ].join("\n"),
+    });
+
+    assert.deepEqual(await sendAcpUpdate({
+      sessionUpdate: "plan",
+      entries: [{ status: "in_progress", content: "Inspect execute update presentation path" }],
+    }), {
+      eventTypes: ["plan.updated"],
+      pinnedText: [
+        "📋 *PLAN*  *Plan*  _Working on: Inspect execute update presentation path_",
+        "💭 *LLM*  thinking",
+        "🔄 *ACP*  turn started",
+      ].join("\n"),
+    });
+
+    assert.deepEqual(await sendAcpUpdate({
+      sessionUpdate: "tool_call",
+      toolCallId: "real-search-1",
+      status: "in_progress",
+      kind: "search",
+      title: "Search",
+      rawInput: { pattern: "pin|pinned", path: "tests" },
+    }), {
+      eventTypes: ["tool.started"],
+      pinnedText: [
+        "🔧 *Search*  `pin|pinned` in *tests*",
+        "📋 *PLAN*  *Plan*  _Working on: Inspect execute update presentation path_",
+        "💭 *LLM*  thinking",
+        "🔄 *ACP*  turn started",
+      ].join("\n"),
+    });
+
+    assert.deepEqual(await sendAcpUpdate({
+      sessionUpdate: "tool_call_update",
+      toolCallId: "real-search-1",
+      status: "completed",
+      rawOutput: { formatted_output: "tests/sendBlocks.test.js", exit_code: 0 },
+    }), {
+      eventTypes: ["tool.completed"],
+      pinnedText: [
+        "✅ *Search*  `pin|pinned` in *tests*",
+        "📋 *PLAN*  *Plan*  _Working on: Inspect execute update presentation path_",
+        "💭 *LLM*  thinking",
+        "🔄 *ACP*  turn started",
+      ].join("\n"),
+    });
+
+    assert.deepEqual(await sendAcpUpdate({
+      sessionUpdate: "model_rerouted",
+      fromModel: "model-a",
+      toModel: "model-b",
+      reason: "capacity",
+    }), {
+      eventTypes: ["model.rerouted"],
+      pinnedText: [
+        "🔀 *ACP*  model model-a -> model-b",
+        "✅ *Search*  `pin|pinned` in *tests*",
+        "📋 *PLAN*  *Plan*  _Working on: Inspect execute update presentation path_",
+        "💭 *LLM*  thinking",
+        "... +1 earlier events",
+      ].join("\n"),
+    });
+
+    assert.deepEqual(await sendAcpUpdate({
+      sessionUpdate: "config_warning",
+      summary: "Config fallback active",
+      details: "mock config warning",
+    }), {
+      eventTypes: ["config.warning"],
+      pinnedText: [
+        "⚠️ *ACP*  Config fallback active",
+        "🔀 *ACP*  model model-a -> model-b",
+        "✅ *Search*  `pin|pinned` in *tests*",
+        "📋 *PLAN*  *Plan*  _Working on: Inspect execute update presentation path_",
+        "... +2 earlier events",
+      ].join("\n"),
+    });
+
+    assert.deepEqual(await sendAcpUpdate({
+      sessionUpdate: "runtime_warning",
+      message: "Runtime warning sample",
+      details: "mock runtime warning",
+    }), {
+      eventTypes: ["runtime.warning"],
+      pinnedText: [
+        "⚠️ *ACP*  Runtime warning sample",
+        "⚠️ *ACP*  Config fallback active",
+        "🔀 *ACP*  model model-a -> model-b",
+        "✅ *Search*  `pin|pinned` in *tests*",
+        "... +3 earlier events",
+      ].join("\n"),
+    });
+
+    assert.deepEqual(await sendAcpUpdate({
+      sessionUpdate: "runtime_error",
+      message: "Runtime error sample",
+      details: "mock runtime error",
+    }), {
+      eventTypes: ["runtime.error"],
+      pinnedText: [
+        "❌ *ACP*  Runtime error sample",
+        "⚠️ *ACP*  Runtime warning sample",
+        "⚠️ *ACP*  Config fallback active",
+        "🔀 *ACP*  model model-a -> model-b",
+        "... +4 earlier events",
+      ].join("\n"),
+    });
+
+    assert.deepEqual(await sendAcpUpdate({
+      sessionUpdate: "usage_update",
+      input_tokens: 10,
+      output_tokens: 4,
+      cached_tokens: 2,
+      cost: { amount: 0.0012, currency: "USD" },
+    }), {
+      eventTypes: ["usage.updated"],
+      pinnedText: [
+        "📊 *USAGE*  cost 0.001200",
+        "❌ *ACP*  Runtime error sample",
+        "⚠️ *ACP*  Runtime warning sample",
+        "⚠️ *ACP*  Config fallback active",
+        "... +5 earlier events",
+      ].join("\n"),
+    });
+  });
+
   it("suppresses ACP editing placeholders and renders the completed diff through Baileys", async () => {
     const { sent, trace } = await observeAcpPayloadSliceToBaileys([
       {
