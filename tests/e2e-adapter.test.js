@@ -457,8 +457,8 @@ describe("ACP runtime events through WhatsApp transport", () => {
     };
   }
 
-  it("renders assistant, subagent, plan, tool, file-change, and usage events distinctly", async () => {
-    const { rendered } = await runAcpPrompt("Run the mock");
+  it("renders assistant, subagent, plan, tool, file-change, usage, and pinned turn status events distinctly", async () => {
+    const { rendered, sentMessages } = await runAcpPrompt("Run the mock");
 
     assert.ok(rendered.some((text) => text.includes("Main result.")), `Expected assistant output, got ${JSON.stringify(rendered)}`);
     assert.ok(rendered.some((text) => text.includes("Subagent result.")), `Expected subagent output, got ${JSON.stringify(rendered)}`);
@@ -466,6 +466,21 @@ describe("ACP runtime events through WhatsApp transport", () => {
     assert.ok(rendered.some((text) => text.includes("Review mock code") || text.includes("*Task*")), `Expected tool output, got ${JSON.stringify(rendered)}`);
     assert.ok(rendered.some((text) => text.includes("Update") && text.includes("mock.txt")), `Expected file-change output, got ${JSON.stringify(rendered)}`);
     assert.ok(rendered.some((text) => text.includes("Cost:")), `Expected usage output, got ${JSON.stringify(rendered)}`);
+
+    const statusIndex = sentMessages.findIndex((entry) => entry.msg.text === "🔄 *E2E-ACP-RUNTIME*  turn started");
+    assert.notEqual(statusIndex, -1, `Expected turn status message, got ${JSON.stringify(sentMessages.map((entry) => entry.msg))}`);
+    const pinnedStatus = sentMessages.find((entry) => entry.msg.pin);
+    assert.deepEqual(pinnedStatus?.msg, {
+      pin: { id: `sent-msg-${statusIndex}`, remoteJid: "e2e-acp-runtime-0@s.whatsapp.net", fromMe: true },
+      type: 1,
+      time: 86400,
+    });
+    assert.ok(
+      sentMessages.some((entry) => entry.msg.edit
+        && typeof entry.msg.text === "string"
+        && entry.msg.text.includes("✅ *E2E-ACP-RUNTIME*  turn completed")),
+      `Expected final turn status edit, got ${JSON.stringify(sentMessages.map((entry) => entry.msg))}`,
+    );
   });
 
   it("renders ACP terminal command output through command transport messages", async () => {

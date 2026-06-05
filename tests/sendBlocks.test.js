@@ -734,7 +734,7 @@ describe("sendEvent – runtime events", () => {
     assert.equal(sent[0]?.msg.caption, "🔧 *Snapshot*  `src/app.js`");
   });
 
-  it("suppresses noisy lifecycle runtime events except turn start", async () => {
+  it("pins and edits one lifecycle status message per turn", async () => {
     const { sock, sent } = createMockSock();
 
     const events = [
@@ -782,10 +782,84 @@ describe("sendEvent – runtime events", () => {
       });
     }
 
-    assert.deepEqual(sent.map((entry) => entry.msg.text), [
-      "🔄 *CODEX*  turn started",
-      "🔄 *CODEX*  turn started",
+    assert.deepEqual(sent.map((entry) => entry.msg), [
+      { text: "🔄 *CODEX*  turn started", linkPreview: null },
+      {
+        pin: { id: "msg-1", remoteJid: "runtime-noise-chat", fromMe: true },
+        type: 1,
+        time: 86400,
+      },
+      {
+        text: "✅ *CODEX*  turn completed",
+        edit: { id: "msg-1", remoteJid: "runtime-noise-chat", fromMe: true },
+        linkPreview: null,
+      },
+      { text: "🔄 *CODEX*  turn started", linkPreview: null },
+      {
+        pin: { id: "msg-4", remoteJid: "runtime-noise-chat", fromMe: true },
+        type: 1,
+        time: 86400,
+      },
     ]);
+  });
+
+  it("pins replacement lifecycle status messages when the edit handle expired", async () => {
+    const { sock, sent } = createMockSock();
+    /** @type {import("../store.js").WhatsAppEditHandleRow | null} */
+    let savedHandle = null;
+    const expiredAt = "2000-01-01T00:00:00.000Z";
+    const store = {
+      saveWhatsAppEditHandle: async (/** @type {Parameters<import("../store.js").Store["saveWhatsAppEditHandle"]>[0]} */ input) => {
+        savedHandle = {
+          id: input.id,
+          chat_id: input.chatId,
+          message_key_json: input.messageKeyJson,
+          message_kind: input.messageKind,
+          created_at: input.createdAt,
+          expires_at: input.expiresAt,
+        };
+        return savedHandle;
+      },
+      getWhatsAppEditHandle: async () => savedHandle ? { ...savedHandle, expires_at: expiredAt } : null,
+      deleteExpiredWhatsAppEditHandles: async () => {},
+    };
+    const sendOptions = {
+      editHandleStore: /** @type {import("../store.js").Store} */ (/** @type {unknown} */ (store)),
+    };
+
+    await sendEvent(sock, "runtime-expired-turn-chat", {
+      kind: "runtime_event",
+      event: {
+        type: "turn.started",
+        provider: "codex",
+        turn: { id: "turn-1", chatId: "runtime-expired-turn-chat", status: "started" },
+      },
+    }, undefined, undefined, sendOptions);
+
+    await sendEvent(sock, "runtime-expired-turn-chat", {
+      kind: "runtime_event",
+      event: {
+        type: "tool.started",
+        provider: "codex",
+        tool: { id: "tool-1", name: "Read", arguments: { file_path: "src/app.js" } },
+      },
+    }, undefined, undefined, sendOptions);
+
+    assert.deepEqual(sent.map((entry) => entry.msg).slice(0, 4), [
+      { text: "🔄 *CODEX*  turn started", linkPreview: null },
+      {
+        pin: { id: "msg-1", remoteJid: "runtime-expired-turn-chat", fromMe: true },
+        type: 1,
+        time: 86400,
+      },
+      { text: "🛠️ *CODEX*  running tools", linkPreview: null },
+      {
+        pin: { id: "msg-3", remoteJid: "runtime-expired-turn-chat", fromMe: true },
+        type: 1,
+        time: 86400,
+      },
+    ]);
+    assert.equal(sent[4]?.msg.text, "🔧 *Read*  `src/app.js`");
   });
 
   it("folds generic runtime events into one editable WhatsApp status", async () => {
