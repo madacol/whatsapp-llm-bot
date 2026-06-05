@@ -242,6 +242,7 @@ async function handleMessage(message) {
 
 const promptScenarios = [
   { match: "all statuses", handle: handleAllStatusesPrompt },
+  { match: "action focused pinned status", handle: handleActionFocusedPinnedStatusPrompt },
   { match: "runtime error status", handle: handleRuntimeErrorStatusPrompt },
   { match: "permission", handle: handlePermissionPrompt },
   { match: "elicitation", handle: handleElicitationPrompt },
@@ -462,6 +463,85 @@ async function handleAllStatusesPrompt(message) {
         thought_tokens: 4,
         cached_read_tokens: 6,
         cached_write_tokens: 2,
+      },
+    },
+  });
+}
+
+/**
+ * @param {Record<string, unknown>} message
+ * @returns {Promise<void>}
+ */
+async function handleActionFocusedPinnedStatusPrompt(message) {
+  const sid = sessionId ?? "mock-session-1";
+  notify("session/update", {
+    sessionId: sid,
+    update: {
+      sessionUpdate: "tool_call",
+      toolCallId: "status-search-1",
+      title: "Search package.json",
+      kind: "search",
+      rawInput: { pattern: "smoke|e2e|baileys|whatsapp|pin|pinned|ACP", path: "package.json" },
+      status: "in_progress",
+    },
+  });
+  notify("session/update", {
+    sessionId: sid,
+    update: {
+      sessionUpdate: "tool_call_update",
+      toolCallId: "status-search-1",
+      status: "completed",
+    },
+  });
+  notify("session/update", {
+    sessionId: sid,
+    update: {
+      sessionUpdate: "tool_call",
+      toolCallId: "status-smoke-failed-1",
+      title: "Shell",
+      rawInput: { command: "pnpm exec node scripts/acp-adapter-smoke.js codex --prompt" },
+      status: "in_progress",
+    },
+  });
+  notify("session/update", {
+    sessionId: sid,
+    update: {
+      sessionUpdate: "tool_call_update",
+      toolCallId: "status-smoke-failed-1",
+      status: "failed",
+      rawOutput: { exit_code: 1, formatted_output: "ACP connection closed" },
+    },
+  });
+  notify("session/update", {
+    sessionId: sid,
+    update: {
+      sessionUpdate: "tool_call",
+      toolCallId: "status-smoke-success-1",
+      title: "Shell",
+      rawInput: { command: "/bin/zsh -lc 'pnpm exec node scripts/acp-adapter-smoke.js codex --prompt'" },
+      status: "in_progress",
+    },
+  });
+  notify("session/update", {
+    sessionId: sid,
+    update: {
+      sessionUpdate: "tool_call_update",
+      toolCallId: "status-smoke-success-1",
+      status: "completed",
+      rawOutput: { exit_code: 0, formatted_output: "ok" },
+    },
+  });
+  notifyText("Action-focused status done.");
+  send({
+    id: message.id,
+    result: {
+      sessionId: sid,
+      stopReason: "end_turn",
+      usage: {
+        total_tokens: 24,
+        input_tokens: 12,
+        output_tokens: 8,
+        thought_tokens: 4,
       },
     },
   });

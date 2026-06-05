@@ -568,13 +568,29 @@ describe("ACP runtime events through WhatsApp transport", () => {
       "*Shell*",
       "*Task*",
       "🧵 *SUBAGENT*  Reviewer replied",
-      "📝 *ACP*  *File*  `status.txt`",
+      "📝 *File*  `status.txt`",
       "📊 *USAGE*  cost",
       "✅ *E2E-ACP-RUNTIME*  turn completed",
     ]);
     assert.ok(!timeline.includes("Read file"), `Expected read actions to be suppressed from pinned status, got ${JSON.stringify(statusTexts)}`);
     assert.ok(!timeline.includes("List files"), `Expected list actions to be suppressed from pinned status, got ${JSON.stringify(statusTexts)}`);
     assert.ok(!timeline.includes("noise.js"), `Expected read/list paths to be suppressed from pinned status, got ${JSON.stringify(statusTexts)}`);
+    assertPinnedStatusUnpinned(sentMessages);
+  });
+
+  it("keeps pinned tool status action-focused across ACP protocol and Baileys", async () => {
+    const { rendered, sentMessages } = await runAcpPrompt("action focused pinned status");
+    const statusTexts = getPinnedStatusTexts(sentMessages);
+    const finalStatus = statusTexts.at(-2) ?? statusTexts.at(-1) ?? "";
+
+    assert.ok(rendered.some((text) => text.includes("Action-focused status done.")), `Expected final assistant output, got ${JSON.stringify(rendered)}`);
+    assert.ok(finalStatus.startsWith("✅ *Shell*  `pnpm exec node scripts/acp-adapter-smoke.js codex --prompt`"), `Expected latest status on first pinned line, got ${JSON.stringify(statusTexts)}`);
+    assert.ok(finalStatus.includes("✅ *Search*  `smoke|e2e|baileys|whatsapp|pin|pinned|ACP` in *package.json*"), `Expected action-focused Search row, got ${JSON.stringify(statusTexts)}`);
+    assert.ok(finalStatus.includes("✅ *Shell*  `pnpm exec node scripts/acp-adapter-smoke.js codex --prompt`"), `Expected normalized successful Shell row, got ${JSON.stringify(statusTexts)}`);
+    assert.ok(!finalStatus.includes("*ACP*  *Search*"), `Pinned Search row should not include ACP provider noise: ${finalStatus}`);
+    assert.ok(!finalStatus.includes("*ACP*  *Shell*"), `Pinned Shell row should not include ACP provider noise: ${finalStatus}`);
+    assert.ok(!finalStatus.includes("/bin/zsh -lc"), `Pinned Shell row should unwrap shell invocation: ${finalStatus}`);
+    assert.ok(!finalStatus.includes("❌ *Shell*"), `Successful retry should replace the failed Shell row: ${finalStatus}`);
     assertPinnedStatusUnpinned(sentMessages);
   });
 

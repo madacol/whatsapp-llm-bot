@@ -905,6 +905,213 @@ describe("sendEvent – runtime events", () => {
     ]);
   });
 
+  it("keeps pinned tool and command status action-focused", async () => {
+    const { sock, sent } = createMockSock();
+    const chatId = "runtime-action-focused-status-chat";
+
+    await sendEvent(sock, chatId, {
+      kind: "runtime_event",
+      event: {
+        type: "turn.started",
+        provider: "codex",
+        turn: { id: "turn-1", chatId, status: "started" },
+      },
+    });
+
+    await sendEvent(sock, chatId, {
+      kind: "runtime_event",
+      cwd: "/repo",
+      event: {
+        type: "tool.started",
+        provider: "acp",
+        tool: {
+          id: "search-1",
+          name: "Search",
+          arguments: { pattern: "smoke|e2e", path: "package.json" },
+        },
+      },
+    });
+
+    await sendEvent(sock, chatId, {
+      kind: "runtime_event",
+      event: {
+        type: "command.failed",
+        provider: "acp",
+        command: {
+          command: "pnpm exec node scripts/acp-adapter-smoke.js codex --prompt",
+          status: "failed",
+        },
+      },
+    });
+
+    await sendEvent(sock, chatId, {
+      kind: "runtime_event",
+      event: {
+        type: "command.completed",
+        provider: "acp",
+        command: {
+          command: "/bin/zsh -lc 'pnpm exec node scripts/acp-adapter-smoke.js codex --prompt'",
+          status: "completed",
+        },
+      },
+    });
+
+    const statusTexts = sent
+      .filter((entry) => typeof entry.msg.text === "string")
+      .map((entry) => /** @type {string} */ (entry.msg.text));
+    const finalStatus = statusTexts.at(-1) ?? "";
+
+    assert.ok(finalStatus.startsWith("✅ *Shell*  `pnpm exec node scripts/acp-adapter-smoke.js codex --prompt`"), `Expected latest status on first pinned line, got ${finalStatus}`);
+    assert.ok(finalStatus.includes("🔧 *Search*  `smoke|e2e` in *package.json*"), `Expected action-focused Search status, got ${JSON.stringify(statusTexts)}`);
+    assert.ok(finalStatus.includes("✅ *Shell*  `pnpm exec node scripts/acp-adapter-smoke.js codex --prompt`"), `Expected normalized Shell status, got ${JSON.stringify(statusTexts)}`);
+    assert.ok(!finalStatus.includes("*ACP*  *Search*"), `Pinned tool status should not include ACP provider noise: ${finalStatus}`);
+    assert.ok(!finalStatus.includes("*ACP*  *Shell*"), `Pinned command status should not include ACP provider noise: ${finalStatus}`);
+    assert.ok(!finalStatus.includes("/bin/zsh -lc"), `Pinned command status should unwrap shell invocation: ${finalStatus}`);
+    assert.ok(!finalStatus.includes("❌ *Shell*"), `Successful retry should replace failed command status: ${finalStatus}`);
+  });
+
+  it("updates pinned status after each ACP payload through Baileys", async () => {
+    const { sock, sent } = createMockSock();
+    const model = createAcpRuntimeModel();
+    const chatId = "runtime-acp-payload-status-chat";
+    const sessionId = "session-status-1";
+    const cwd = "/repo";
+
+    await sendEvent(sock, chatId, {
+      kind: "runtime_event",
+      event: {
+        type: "turn.started",
+        provider: "codex",
+        turn: { id: "turn-1", chatId, status: "started" },
+      },
+    });
+
+    /**
+     * @returns {string[]}
+     */
+    function pinnedStatusTexts() {
+      const pinEntry = sent.find((entry) => entry.msg.pin && typeof entry.msg.pin === "object" && entry.msg.type === 1);
+      const pinnedId = pinEntry && typeof pinEntry.msg.pin === "object"
+        ? /** @type {{ id?: unknown }} */ (pinEntry.msg.pin).id
+        : null;
+      assert.equal(typeof pinnedId, "string", `Expected pinned status payload, got ${JSON.stringify(sent.map((entry) => entry.msg))}`);
+      return sent
+        .filter((entry, index) => {
+          if (typeof entry.msg.text !== "string") {
+            return false;
+          }
+          if (`msg-${index + 1}` === pinnedId) {
+            return true;
+          }
+          return typeof entry.msg.edit === "object"
+            && entry.msg.edit !== null
+            && /** @type {{ id?: unknown }} */ (entry.msg.edit).id === pinnedId;
+        })
+        .map((entry) => /** @type {string} */ (entry.msg.text));
+    }
+
+    /**
+     * @param {Record<string, unknown>} update
+     * @returns {Promise<string>}
+     */
+    async function sendAcpUpdate(update) {
+      const runtimeEvents = model.acceptSessionUpdate({ sessionId, update });
+      for (const event of runtimeEvents) {
+        await sendEvent(sock, chatId, {
+          kind: "runtime_event",
+          cwd,
+          event,
+        });
+      }
+      return pinnedStatusTexts().at(-1) ?? "";
+    }
+
+    assert.equal(pinnedStatusTexts().at(-1), "🔄 *CODEX*  turn started");
+
+    assert.equal(await sendAcpUpdate({
+      sessionUpdate: "tool_call",
+      toolCallId: "status-search-1",
+      title: "Search package.json",
+      kind: "search",
+      rawInput: { pattern: "smoke|e2e|baileys|whatsapp|pin|pinned|ACP", path: "package.json" },
+      status: "in_progress",
+    }), [
+      "🔧 *Search*  `smoke|e2e|baileys|whatsapp|pin|pinned|ACP` in *package.json*",
+      "🔄 *CODEX*  turn started",
+    ].join("\n"));
+
+    assert.equal(await sendAcpUpdate({
+      sessionUpdate: "tool_call_update",
+      toolCallId: "status-search-1",
+      status: "completed",
+    }), [
+      "✅ *Search*  `smoke|e2e|baileys|whatsapp|pin|pinned|ACP` in *package.json*",
+      "🔄 *CODEX*  turn started",
+    ].join("\n"));
+
+    assert.equal(await sendAcpUpdate({
+      sessionUpdate: "tool_call",
+      toolCallId: "status-smoke-failed-1",
+      title: "Shell",
+      rawInput: { command: "pnpm exec node scripts/acp-adapter-smoke.js codex --prompt" },
+      status: "in_progress",
+    }), [
+      "🔧 *Shell*  `pnpm exec node scripts/acp-adapter-smoke.js codex --prompt`",
+      "✅ *Search*  `smoke|e2e|baileys|whatsapp|pin|pinned|ACP` in *package.json*",
+      "🔄 *CODEX*  turn started",
+    ].join("\n"));
+
+    assert.equal(await sendAcpUpdate({
+      sessionUpdate: "tool_call_update",
+      toolCallId: "status-smoke-failed-1",
+      status: "failed",
+      rawOutput: { exit_code: 1, formatted_output: "ACP connection closed" },
+    }), [
+      "❌ *Shell*  `pnpm exec node scripts/acp-adapter-smoke.js codex --prompt`",
+      "✅ *Search*  `smoke|e2e|baileys|whatsapp|pin|pinned|ACP` in *package.json*",
+      "🔄 *CODEX*  turn started",
+    ].join("\n"));
+
+    assert.equal(await sendAcpUpdate({
+      sessionUpdate: "tool_call",
+      toolCallId: "status-smoke-success-1",
+      title: "Shell",
+      rawInput: { command: "/bin/zsh -lc 'pnpm exec node scripts/acp-adapter-smoke.js codex --prompt'" },
+      status: "in_progress",
+    }), [
+      "🔧 *Shell*  `pnpm exec node scripts/acp-adapter-smoke.js codex --prompt`",
+      "✅ *Search*  `smoke|e2e|baileys|whatsapp|pin|pinned|ACP` in *package.json*",
+      "🔄 *CODEX*  turn started",
+    ].join("\n"));
+
+    assert.equal(await sendAcpUpdate({
+      sessionUpdate: "tool_call_update",
+      toolCallId: "status-smoke-success-1",
+      status: "completed",
+      rawOutput: { exit_code: 0, formatted_output: "ok" },
+    }), [
+      "✅ *Shell*  `pnpm exec node scripts/acp-adapter-smoke.js codex --prompt`",
+      "✅ *Search*  `smoke|e2e|baileys|whatsapp|pin|pinned|ACP` in *package.json*",
+      "🔄 *CODEX*  turn started",
+    ].join("\n"));
+
+    await sendEvent(sock, chatId, {
+      kind: "runtime_event",
+      event: {
+        type: "turn.completed",
+        provider: "codex",
+        turn: { id: "turn-1", chatId, status: "completed" },
+      },
+    });
+
+    assert.equal(pinnedStatusTexts().at(-1), [
+      "✅ *CODEX*  turn completed",
+      "✅ *Shell*  `pnpm exec node scripts/acp-adapter-smoke.js codex --prompt`",
+      "✅ *Search*  `smoke|e2e|baileys|whatsapp|pin|pinned|ACP` in *package.json*",
+    ].join("\n"));
+    assert.ok(sent.some((entry) => entry.msg.pin && typeof entry.msg.pin === "object" && entry.msg.type === 0), `Expected final unpin payload, got ${JSON.stringify(sent.map((entry) => entry.msg))}`);
+  });
+
   it("folds generic runtime events into one editable WhatsApp status", async () => {
     const { sock, sent } = createMockSock();
 
