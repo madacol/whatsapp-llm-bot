@@ -671,11 +671,24 @@ describe("WhatsApp transport community creation", () => {
       },
     });
     await waitForTransportBackgroundWork();
+    for (let attempt = 0; sentMessages.length < 2 && attempt < 50; attempt += 1) {
+      await delay(10);
+    }
 
-    assert.deepEqual(sentMessages, [{
-      chatId,
-      message: makeTextMessage("🔄 *CODEX*  turn started"),
-    }]);
+    assert.deepEqual(sentMessages, [
+      {
+        chatId,
+        message: makeTextMessage("🔄 *CODEX*  turn started"),
+      },
+      {
+        chatId,
+        message: {
+          pin: { id: "sent-1", remoteJid: chatId, fromMe: true },
+          type: 1,
+          time: 86400,
+        },
+      },
+    ]);
     assert.equal((await getQueuedRows(testDb, chatId)).length, 0);
     assert.equal((await getDeadLetterRows(testDb, chatId)).length, 0);
   });

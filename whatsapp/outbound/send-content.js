@@ -23,9 +23,12 @@ const ALBUM_RELAY_DELAY_MS = 500;
 const SNAPSHOT_DIFF_LINES_PER_BATCH = 1000;
 const SNAPSHOT_DIFF_CONTINUATION_TIMEOUT_MS = 30 * 60 * 1000;
 const WHATSAPP_EDIT_HANDLE_TTL_MS = 14 * 60 * 1000;
+const TURN_STATUS_PIN_SECONDS = 86400;
 const log = createLogger("whatsapp:outbound");
 /** @type {Map<string, WhatsAppEditHandleRecord>} */
 const inMemoryEditHandles = new Map();
+/** @type {Map<string, { handle?: MessageHandle }>} */
+const turnStatusByChat = new Map();
 /** @type {Map<string, { handle?: MessageHandle, entries: Array<{ icon: string, provider: string, summary: string, detail?: string }> }>} */
 const runtimeStatusByChat = new Map();
 /** @type {Map<string, Map<string, { handle?: MessageHandle, command: string, reviewPrefix?: "👍" | "👎" }>>} */
@@ -589,6 +592,48 @@ function resolveWhatsAppEditTarget(target, fallback) {
     key: { remoteJid: fallback.chatId, fromMe: true, id: target.fallbackKeyId },
     messageKind: "text",
   };
+}
+
+/**
+ * @param {import('@whiskeysockets/baileys').WAMessageKey | undefined} key
+ * @param {string} chatId
+ * @returns {import('@whiskeysockets/baileys').WAMessageKey | null}
+ */
+function resolveOutgoingMessageKey(key, chatId) {
+  if (!key?.id) {
+    return null;
+  }
+  return {
+    remoteJid: typeof key.remoteJid === "string" ? key.remoteJid : chatId,
+    fromMe: true,
+    id: key.id,
+  };
+}
+
+/**
+ * @param {import('@whiskeysockets/baileys').WASocket} sock
+ * @param {string} chatId
+ * @param {import('@whiskeysockets/baileys').WAMessageKey | undefined} key
+ * @returns {Promise<void>}
+ */
+async function pinWhatsAppMessage(sock, chatId, key) {
+  const pinKey = resolveOutgoingMessageKey(key, chatId);
+  if (!pinKey) {
+    return;
+  }
+  try {
+    await sock.sendMessage(chatId, {
+      pin: pinKey,
+      type: 1,
+      time: TURN_STATUS_PIN_SECONDS,
+    });
+  } catch (error) {
+    log.warn("Failed to pin WhatsApp status message", {
+      chatId,
+      messageId: pinKey.id,
+      error: formatErrorMessage(error),
+    });
+  }
 }
 
 /**
@@ -1894,6 +1939,110 @@ function renderRuntimeStatusInspectText(state) {
 }
 
 /**
+ * @param {RuntimeEventOutboundEvent["event"]} event
+ * @returns {{ icon: string, provider: string, summary: string, closesStatus?: boolean, createsStatus?: boolean } | null}
+ */
+function formatPinnedTurnStatusPresentation(event) {
+  const provider = formatRuntimeProvider(event.provider);
+  switch (event.type) {
+    case "turn.started":
+      return {
+        icon: "🔄",
+        provider,
+        summary: `turn ${event.turn.status ?? "started"}`,
+        createsStatus: true,
+      };
+    case "turn.completed":
+      return {
+        icon: "✅",
+        provider,
+        summary: `turn ${event.turn.status ?? "completed"}`,
+        closesStatus: true,
+      };
+    case "tool.started":
+    case "command.started":
+      return { icon: "🛠️", provider, summary: "running tools" };
+    case "file-read.started":
+      return { icon: "🔎", provider, summary: "reading context" };
+    case "file-change.completed":
+      return { icon: "📝", provider, summary: "editing files" };
+    case "request.opened":
+    case "user-input.requested":
+      return { icon: "⏸️", provider, summary: "waiting for input" };
+    case "request.resolved":
+    case "user-input.resolved":
+      return { icon: "🔄", provider, summary: "running" };
+    case "runtime.error":
+      return {
+        icon: "❌",
+        provider,
+        summary: "turn failed",
+        closesStatus: true,
+      };
+    default:
+      return null;
+  }
+}
+
+/**
+ * @param {{ icon: string, provider: string, summary: string }} presentation
+ * @returns {string}
+ */
+function renderPinnedTurnStatusText(presentation) {
+  return `${presentation.icon} *${presentation.provider}*  ${presentation.summary}`;
+}
+
+/**
+ * @param {import('@whiskeysockets/baileys').WASocket} sock
+ * @param {string} chatId
+ * @param {RuntimeEventOutboundEvent} event
+ * @param {{ quoted?: BaileysMessage } | undefined} options
+ * @param {import("../runtime/reaction-runtime.js").ReactionRuntime | undefined} reactionRuntime
+ * @param {{ editHandleStore?: import("../../store.js").Store }} sendOptions
+ * @returns {Promise<MessageHandle | undefined>}
+ */
+async function updatePinnedTurnStatus(sock, chatId, event, options, reactionRuntime, sendOptions) {
+  const presentation = formatPinnedTurnStatusPresentation(event.event);
+  if (!presentation) {
+    return undefined;
+  }
+
+  let state = turnStatusByChat.get(chatId);
+  if (!state && !presentation.createsStatus) {
+    return undefined;
+  }
+  if (!state) {
+    state = {};
+    turnStatusByChat.set(chatId, state);
+  }
+
+  const text = renderPinnedTurnStatusText(presentation);
+  if (!state.handle) {
+    state.handle = await sendBlocks(sock, chatId, "plain", text, options, reactionRuntime, event, {
+      editHandleStore: sendOptions.editHandleStore,
+      pin: true,
+    });
+  } else {
+    try {
+      await state.handle.update({ kind: "text", text });
+    } catch (error) {
+      if (!isStaleWhatsAppEditHandleError(error)) {
+        throw error;
+      }
+      state.handle = await sendBlocks(sock, chatId, "plain", text, options, reactionRuntime, event, {
+        editHandleStore: sendOptions.editHandleStore,
+        pin: true,
+      });
+    }
+  }
+
+  if (presentation.closesStatus) {
+    turnStatusByChat.delete(chatId);
+  }
+  return state.handle;
+}
+
+/**
  * @param {string} prefix
  * @param {string} text
  * @returns {string}
@@ -2263,6 +2412,14 @@ function renderOutboundEvent(event) {
  * @returns {Promise<MessageHandle | undefined>}
  */
 async function sendRuntimeEvent(sock, chatId, event, options, reactionRuntime, sendOptions = {}) {
+  const turnStatusHandle = await updatePinnedTurnStatus(sock, chatId, event, options, reactionRuntime, sendOptions);
+  if (event.event.type === "turn.started" || event.event.type === "turn.completed") {
+    if (event.event.type === "turn.completed") {
+      runtimeStatusByChat.delete(chatId);
+    }
+    return turnStatusHandle;
+  }
+
   if (event.event.type === "file-read.started") {
     return sendRuntimeFileReadEvent(sock, chatId, event, options, reactionRuntime, sendOptions);
   }
@@ -2280,9 +2437,6 @@ async function sendRuntimeEvent(sock, chatId, event, options, reactionRuntime, s
   }
 
   if (shouldSuppressRuntimeEvent(event.event)) {
-    if (event.event.type === "turn.completed") {
-      runtimeStatusByChat.delete(chatId);
-    }
     return undefined;
   }
 
@@ -2567,7 +2721,7 @@ export async function sendEvent(sock, chatId, event, options, reactionRuntime, s
  * @param {{ quoted?: BaileysMessage } | undefined} options
  * @param {import("../runtime/reaction-runtime.js").ReactionRuntime | undefined} reactionRuntime
  * @param {OutboundEvent | undefined} [event]
- * @param {{ workdir?: string | null, editHandleStore?: import("../../store.js").Store }} [renderOptions]
+ * @param {{ workdir?: string | null, editHandleStore?: import("../../store.js").Store, pin?: boolean }} [renderOptions]
  * @returns {Promise<MessageHandle | undefined>}
  */
 export async function sendBlocks(sock, chatId, source, content, options, reactionRuntime, event, renderOptions = {}) {
@@ -2789,6 +2943,9 @@ export async function sendBlocks(sock, chatId, source, content, options, reactio
   const isImage = lastSentIsImage;
   const editHandle = createWhatsAppEditHandleRecord(chatId, editKey, isImage ? "image" : "text");
   await rememberWhatsAppEditHandle(editHandle, renderOptions.editHandleStore);
+  if (renderOptions.pin === true) {
+    await pinWhatsAppMessage(sock, chatId, editKey);
+  }
   const transportHandleId = editHandle.id;
   /** @type {MessageInspectState | null} */
   let inspectState = event?.kind === "tool_call"
