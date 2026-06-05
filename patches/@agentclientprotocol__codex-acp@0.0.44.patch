@@ -155,7 +155,7 @@
        case "enteredReviewMode":
 @@ -19025,6 +19103,10 @@
  };
-
+ 
  // src/CodexAcpClient.ts
 +function isUnsupportedThreadSettingsUpdateError(cause) {
 +  const reason = cause instanceof Error ? cause.message : String(cause);
@@ -164,7 +164,36 @@
  var CodexAcpClient = class {
    codexClient;
    config;
-@@ -19328,12 +19410,27 @@
+@@ -19201,6 +19283,28 @@
+       thread: response.thread
+     };
+   }
++  async forkSession(request) {
++    await this.refreshSkills(request.cwd, request._meta);
++    const response = await this.codexClient.threadFork({
++      approvalPolicy: null,
++      sandbox: null,
++      baseInstructions: null,
++      config: await this.createSessionConfig(request.cwd, request.mcpServers ?? []),
++      cwd: request.cwd,
++      developerInstructions: null,
++      model: null,
++      modelProvider: this.getResumeModelProvider(),
++      threadId: request.sessionId
++    });
++    const codexModels = await this.fetchAvailableModels();
++    const currentModelId = this.createModelId(codexModels, response.model, response.reasoningEffort).toString();
++    return {
++      sessionId: response.thread.id,
++      currentModelId,
++      models: codexModels,
++      thread: response.thread
++    };
++  }
+   async newSession(request) {
+     await this.refreshSkills(request.cwd, request._meta);
+     const response = await this.codexClient.threadStart({
+@@ -19328,12 +19432,27 @@
        approvalPolicy: agentMode.approvalPolicy,
        sandboxPolicy: agentMode.sandboxPolicy,
        summary: disableSummary ? "none" : null,
@@ -192,7 +221,7 @@
    async listSkills(params) {
      return this.codexClient.listSkills(params ?? {});
    }
-@@ -19443,6 +19540,9 @@
+@@ -19443,6 +19562,9 @@
        turnId: params.turnId
      });
    }
@@ -202,17 +231,18 @@
    async fetchAvailableModels() {
      const models = [];
      let cursor = null;
-@@ -19900,7 +20000,8 @@
+@@ -19900,7 +20022,9 @@
          },
          sessionCapabilities: {
            resume: {},
 -          list: {}
 +          list: {},
++          fork: {},
 +          steer: {}
          },
          mcpCapabilities: {
            http: true,
-@@ -19912,6 +20013,26 @@
+@@ -19912,6 +20036,26 @@
    }
    async extMethod(method, params) {
      const methodRequest = { method, params };
@@ -239,7 +269,7 @@
      if (!isExtMethodRequest(methodRequest)) {
        return {};
      }
-@@ -19967,6 +20088,7 @@
+@@ -19967,6 +20111,7 @@
        totalTokenUsage: null,
        modelContextWindow: null,
        rateLimits: null,
@@ -247,7 +277,7 @@
        account,
        cwd: request.cwd,
        sessionMcpServers
-@@ -19982,7 +20104,8 @@
+@@ -19982,7 +20127,8 @@
      this.publishAvailableCommandsAsync(sessionId);
      const sessionModelState = this.createModelState(models, currentModelId);
      const sessionModeState = sessionState.agentMode.toSessionModeState();
@@ -257,7 +287,7 @@
    }
    async getActiveAccount() {
      if (this.codexAcpClient.getModelProvider()) {
-@@ -19997,6 +20120,7 @@
+@@ -19997,6 +20143,7 @@
        sessionId,
        modelState,
        modeState,
@@ -265,7 +295,7 @@
        thread
      } = await this.getOrCreateSessionWithHistory(params);
      await this.streamThreadHistory(sessionId, thread);
-@@ -20007,12 +20131,13 @@
+@@ -20007,12 +20154,13 @@
      });
      return {
        models: modelState,
@@ -281,17 +311,39 @@
      logger.log("Session resumed", {
        sessionId,
        modelId: modelState.currentModelId,
-@@ -20020,7 +20145,8 @@
+@@ -20020,7 +20168,30 @@
      });
      return {
        models: modelState,
 -      modes: modeState
 +      modes: modeState,
 +      configOptions
++    };
++  }
++  async unstable_forkSession(params) {
++    logger.log("Forking session...", { sessionId: params.sessionId });
++    const {
++      sessionId,
++      modelState,
++      modeState,
++      configOptions,
++      thread
++    } = await this.getForkedSessionWithHistory(params);
++    await this.streamThreadHistory(sessionId, thread);
++    logger.log("Session forked", {
++      sessionId,
++      modelId: modelState.currentModelId,
++      availableModelCount: modelState.availableModels.length
++    });
++    return {
++      sessionId,
++      models: modelState,
++      modes: modeState,
++      configOptions
      };
    }
    async listSessions(params) {
-@@ -20030,7 +20156,7 @@
+@@ -20030,7 +20201,7 @@
    }
    async newSession(params) {
      logger.log("Starting new session...");
@@ -300,7 +352,7 @@
      logger.log("New session created", {
        sessionId,
        modelId: modelState.currentModelId,
-@@ -20039,7 +20165,8 @@
+@@ -20039,7 +20210,8 @@
      return {
        sessionId,
        models: modelState,
@@ -310,7 +362,7 @@
      };
    }
    async authenticate(_params) {
-@@ -20102,6 +20229,42 @@
+@@ -20102,6 +20274,42 @@
      sessionState.supportedInputModalities = model.inputModalities;
      return {};
    }
@@ -353,15 +405,63 @@
    publishAvailableCommandsAsync(sessionId) {
      void this.availableCommands.publish(sessionId);
    }
-@@ -20145,6 +20308,7 @@
+@@ -20145,6 +20353,55 @@
        totalTokenUsage: null,
        modelContextWindow: null,
        rateLimits: null,
 +      fastMode: false,
++      account,
++      cwd: request.cwd,
++      sessionMcpServers
++    };
++    this.sessions.set(sessionId, sessionState);
++    if (requestedMcpServers.length > 0 && mcpServerStartupVersion !== null) {
++      this.pendingMcpStartupSessions.set(sessionId, {
++        requestedServers: new Set(requestedMcpServers.map((server) => server.name)),
++        afterVersion: mcpServerStartupVersion
++      });
++      this.publishMcpStartupStatusAsync(sessionId);
++    }
++    await this.availableCommands.publish(sessionId);
++    const sessionModelState = this.createModelState(models, currentModelId);
++    const sessionModeState = sessionState.agentMode.toSessionModeState();
++    const configOptions = this.createConfigOptions(sessionState);
++    return {
++      sessionId,
++      modelState: sessionModelState,
++      modeState: sessionModeState,
++      configOptions,
++      thread
++    };
++  }
++  async getForkedSessionWithHistory(request) {
++    await this.checkAuthorization();
++    const requestedMcpServers = request.mcpServers ?? [];
++    const mcpServerStartupVersion = requestedMcpServers.length > 0 ? this.codexAcpClient.getMcpServerStartupVersion() : null;
++    logger.log(`Fork existing session: ${request.sessionId}...`);
++    const sessionMetadata = await this.runWithProcessCheck(
++      () => this.codexAcpClient.forkSession(request)
++    );
++    const account = await this.getActiveAccount();
++    const { sessionId, currentModelId, models, thread } = sessionMetadata;
++    const sessionMcpServers = this.resolveSessionMcpServers(requestedMcpServers, true);
++    const currentModel = this.findCurrentModel(models, currentModelId);
++    const sessionState = {
++      sessionId,
++      currentModelId,
++      supportedReasoningEfforts: currentModel?.supportedReasoningEfforts ?? [],
++      supportedInputModalities: currentModel?.inputModalities ?? ["text", "image"],
++      agentMode: AgentMode.getInitialAgentMode(),
++      currentTurnId: null,
++      lastTokenUsage: null,
++      totalTokenUsage: null,
++      modelContextWindow: null,
++      rateLimits: null,
++      fastMode: false,
        account,
        cwd: request.cwd,
        sessionMcpServers
-@@ -20160,10 +20324,12 @@
+@@ -20160,10 +20417,12 @@
      await this.availableCommands.publish(sessionId);
      const sessionModelState = this.createModelState(models, currentModelId);
      const sessionModeState = sessionState.agentMode.toSessionModeState();
@@ -374,7 +474,7 @@
        thread
      };
    }
-@@ -20259,7 +20425,7 @@
+@@ -20259,7 +20518,7 @@
        toolCallId: item.id,
        kind: "search",
        title: this.formatWebSearchTitle(item),
@@ -383,7 +483,7 @@
        rawInput: {
          query: item.query,
          action: item.action
-@@ -20460,9 +20626,17 @@
+@@ -20460,9 +20719,17 @@
          throw RequestError.invalidRequest("The current model does not support image input");
        }
        const agentMode = sessionState.agentMode;
@@ -404,7 +504,7 @@
        if (turnCompleted.turn.status === "interrupted") {
          await this.connection.sessionUpdate({
            sessionId: params.sessionId,
-@@ -20650,6 +20824,9 @@
+@@ -20650,12 +20917,18 @@
    async turnInterrupt(params) {
      return await this.sendRequest({ method: "turn/interrupt", params });
    }
@@ -414,7 +514,16 @@
    async threadStart(params) {
      return await this.sendRequest({ method: "thread/start", params });
    }
-@@ -20665,6 +20842,9 @@
+   async threadResume(params) {
+     return await this.sendRequest({ method: "thread/resume", params });
+   }
++  async threadFork(params) {
++    return await this.sendRequest({ method: "thread/fork", params });
++  }
+   async threadList(params) {
+     return await this.sendRequest({ method: "thread/list", params });
+   }
+@@ -20665,6 +20938,9 @@
    async threadRead(params) {
      return await this.sendRequest({ method: "thread/read", params });
    }

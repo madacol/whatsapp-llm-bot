@@ -22,7 +22,7 @@ describe("patched codex-acp steering", () => {
       }));
       assert.deepEqual(
         initialized?.agentCapabilities?.sessionCapabilities,
-        { resume: {}, list: {}, steer: {} },
+        { resume: {}, list: {}, fork: {}, steer: {} },
       );
 
       const session = /** @type {{ sessionId?: string }} */ (await connection.sendRequest("session/new", { cwd: process.cwd(), mcpServers: [] }));
