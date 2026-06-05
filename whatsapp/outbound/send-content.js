@@ -959,7 +959,7 @@ function parseRawFileToolTitle(name) {
  * @returns {string}
  */
 function formatRuntimeToolSummary(tool, cwd) {
-  if (tool.name === "Read") {
+  if (tool.name === "Read" || tool.name === "Read file") {
     const readPath = getStringArg(tool.arguments, ["file_path", "path", "filePath"]);
     if (readPath) {
       const line = typeof tool.arguments.line === "number"

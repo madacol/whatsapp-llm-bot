@@ -115,6 +115,14 @@ describe("provider runtime events", () => {
       errorMessage: "provider runtime e2e should use the semantic adapter",
       onSendTurn: async (input, { emitRuntimeEvent }) => {
         await emitRuntimeEvent({
+          type: "tool.started",
+          tool: { id: "read-provider-1", name: "Read", arguments: { file_path: "package.json" } },
+        });
+        await emitRuntimeEvent({
+          type: "tool.completed",
+          tool: { id: "read-provider-1", name: "Read", arguments: { file_path: "package.json" } },
+        });
+        await emitRuntimeEvent({
           type: "command.started",
           command: {
             command: "pnpm type-check",
@@ -324,7 +332,7 @@ describe("ACP file changes through WhatsApp transport", () => {
    * @param {string} fileName
    */
   function assertOneFileChange(rendered, title, fileName) {
-    const matches = rendered.filter((text) => text.includes(`*${title}*`) && text.includes(`\`${fileName}\``));
+    const matches = rendered.filter((text) => text.startsWith(`🔧 *${title}*`) && text.includes(`\`${fileName}\``));
     assert.equal(matches.length, 1, `Expected one ${title} caption for ${fileName}, got ${JSON.stringify(rendered)}`);
   }
 
@@ -947,11 +955,13 @@ describe("command through adapter", () => {
 
   it("processes idle !c as a command without starting or pinning a provider turn", async () => {
     const harnessName = "e2e-idle-cancel";
+    const cancelChatId = "e2e-idle-cancel@s.whatsapp.net";
     const state = registerAcpTestHarness({
       name: harnessName,
       capabilities: { supportsCancel: true },
     });
-    await updateChatConfig(chatId, (current) => ({
+    await seedChat(testDb, cancelChatId, { enabled: true });
+    await updateChatConfig(cancelChatId, (current) => ({
       ...current,
       is_enabled: true,
       harness: harnessName,
@@ -959,7 +969,7 @@ describe("command through adapter", () => {
     const { sock, getTextMessages, getSentMessages } = createMockBaileysSocket();
 
     await adaptIncomingMessage(
-      createWAMessage({ text: "!c" }),
+      createWAMessage({ text: "!c", chatId: cancelChatId }),
       sock,
       handleMessage,
       testConfirmRegistry,
@@ -974,6 +984,7 @@ describe("command through adapter", () => {
 
   it("processes !c while a provider turn is active", async () => {
     const harnessName = "e2e-active-cancel";
+    const cancelChatId = "e2e-active-cancel@s.whatsapp.net";
     /** @type {(value?: void) => void} */
     let markStarted = () => {};
     /** @type {(value?: void) => void} */
@@ -1001,14 +1012,15 @@ describe("command through adapter", () => {
         return true;
       },
     });
-    await updateChatConfig(chatId, (current) => ({
+    await seedChat(testDb, cancelChatId, { enabled: true });
+    await updateChatConfig(cancelChatId, (current) => ({
       ...current,
       is_enabled: true,
       harness: harnessName,
     }));
     const { sock, getTextMessages } = createMockBaileysSocket();
     const activeTurn = adaptIncomingMessage(
-      createWAMessage({ text: "long running provider turn" }),
+      createWAMessage({ text: "long running provider turn", chatId: cancelChatId }),
       sock,
       handleMessage,
       testConfirmRegistry,
@@ -1020,7 +1032,7 @@ describe("command through adapter", () => {
     ]);
 
     await adaptIncomingMessage(
-      createWAMessage({ text: "!c" }),
+      createWAMessage({ text: "!c", chatId: cancelChatId }),
       sock,
       handleMessage,
       testConfirmRegistry,
@@ -1030,7 +1042,7 @@ describe("command through adapter", () => {
 
     const texts = getTextMessages();
     assert.ok(texts.some((text) => text.includes("Cancelled.")), `Expected active cancel response, got ${JSON.stringify(texts)}`);
-    assert.ok(state.cancelledSessions.includes(chatId), `Expected harness cancel for ${chatId}, got ${JSON.stringify(state.cancelledSessions)}`);
+    assert.ok(state.cancelledSessions.includes(cancelChatId), `Expected harness cancel for ${cancelChatId}, got ${JSON.stringify(state.cancelledSessions)}`);
   });
 
   it("enabled chats still require an explicit or central ACP harness", async () => {
@@ -1039,6 +1051,12 @@ describe("command through adapter", () => {
     const { sock, getTextMessages } = createMockBaileysSocket();
 
     try {
+      await seedChat(testDb, chatId, { enabled: true });
+      await updateChatConfig(chatId, (current) => ({
+        ...current,
+        is_enabled: true,
+        harness: "",
+      }));
       await adaptIncomingMessage(
         createWAMessage({ text: "Hey" }),
         sock,
