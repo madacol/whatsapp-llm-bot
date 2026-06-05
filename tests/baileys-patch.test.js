@@ -2,7 +2,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { normalizeMessageContent } from "@whiskeysockets/baileys";
 
-describe("Baileys patch", () => {
+describe("Baileys compatibility", () => {
   it("unwraps media nested in associatedChildMessage", () => {
     const content = normalizeMessageContent({
       associatedChildMessage: {

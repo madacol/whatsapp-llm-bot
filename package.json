@@ -29,7 +29,7 @@
         "@mozilla/readability": "^0.6.0",
         "@napi-rs/canvas": "^0.1.100",
         "@resvg/resvg-js": "^2.6.2",
-        "@whiskeysockets/baileys": "7.0.0-rc.9",
+        "@whiskeysockets/baileys": "7.0.0-rc13",
         "diff": "^8.0.3",
         "dotenv": "^16.5.0",
         "linkedom": "^0.18.12",
@@ -53,10 +53,10 @@
     "pnpm": {
         "overrides": {
             "@mariozechner/pi-agent-core": "0.67.3",
-            "@mariozechner/pi-ai": "0.67.3"
+            "@mariozechner/pi-ai": "0.67.3",
+            "ws": "8.20.1"
         },
         "patchedDependencies": {
-            "@whiskeysockets/baileys@7.0.0-rc.9": "patches/@whiskeysockets__baileys@7.0.0-rc.9.patch",
             "@agentclientprotocol/codex-acp@0.0.44": "patches/@agentclientprotocol__codex-acp@0.0.44.patch"
         }
     }

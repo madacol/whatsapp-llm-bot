@@ -1,6 +1,6 @@
 --- a/dist/index.js
 +++ b/dist/index.js
-@@ -17361,16 +17361,47 @@
+@@ -17361,16 +17361,43 @@
      status: "completed"
    };
  }
@@ -44,20 +44,20 @@
 +        }
 +      } : {})
      };
-  } else if (commandAction.type === "search") {
-    return {
-      sessionUpdate: "tool_call",
-      toolCallId: id,
-      status: acpStatus,
-      kind: "search",
+   } else if (commandAction.type === "search") {
+     return {
+@@ -17378,16 +17405,22 @@
+       toolCallId: id,
+       status: acpStatus,
+       kind: "search",
 -      title: createSearchTitle(commandAction.query, commandAction.path)
 +      title: createSearchTitle(commandAction.query, commandAction.path),
 +      rawInput: {
 +        pattern: commandAction.query,
 +        path: commandAction.path
 +      }
-    };
-  } else if (commandAction.type === "listFiles") {
+     };
+   } else if (commandAction.type === "listFiles") {
      const title = commandAction.path ? `List files in '${commandAction.path}'` : "List files";
 +    const locationPath = path2.resolve(cwd, commandAction.path ?? ".");
      return {
@@ -71,7 +71,7 @@
      };
    }
    return {
-@@ -17667,6 +17696,41 @@
+@@ -17667,6 +17700,41 @@
        }
      };
    }
@@ -113,7 +113,7 @@
    async createItemEvent(event) {
      switch (event.item.type) {
        case "fileChange":
-@@ -17677,12 +17741,13 @@
+@@ -17677,12 +17745,13 @@
          return await createMcpToolCallUpdate(event.item);
        case "dynamicToolCall":
          return await createDynamicToolCallUpdate(event.item);
@@ -128,7 +128,7 @@
        case "imageView":
        case "imageGeneration":
        case "enteredReviewMode":
-@@ -17711,6 +17776,16 @@
+@@ -17711,6 +17780,16 @@
          };
        case "commandExecution":
          return this.completeCommandExecutionEvent(event.item);
@@ -145,7 +145,7 @@
        case "reasoning":
          const summary = event.item.summary[0];
          if (!summary) return null;
-@@ -17725,7 +17800,6 @@
+@@ -17725,7 +17804,6 @@
        case "userMessage":
        case "hookPrompt":
        case "agentMessage":
@@ -153,7 +153,9 @@
        case "imageView":
        case "imageGeneration":
        case "enteredReviewMode":
-@@ -19298,4 +19373,8 @@
+@@ -19025,6 +19103,10 @@
+ };
+
  // src/CodexAcpClient.ts
 +function isUnsupportedThreadSettingsUpdateError(cause) {
 +  const reason = cause instanceof Error ? cause.message : String(cause);
@@ -162,18 +164,17 @@
  var CodexAcpClient = class {
    codexClient;
    config;
-@@ -19328,6 +19406,7 @@
-      approvalPolicy: agentMode.approvalPolicy,
-      sandboxPolicy: agentMode.sandboxPolicy,
-      summary: disableSummary ? "none" : null,
+@@ -19328,12 +19410,27 @@
+       approvalPolicy: agentMode.approvalPolicy,
+       sandboxPolicy: agentMode.sandboxPolicy,
+       summary: disableSummary ? "none" : null,
 +      serviceTier: request.fastMode ? "fast" : null,
-      personality: null,
-      cwd: null,
-      effort,
-@@ -19337,6 +19416,21 @@
-      model: modelId.model
-    });
-  }
+       personality: null,
+       cwd: null,
+       effort,
+       model: modelId.model
+     });
+   }
 +  async setFastMode(sessionId, enabled) {
 +    try {
 +      await this.codexClient.threadSettingsUpdate({
@@ -188,10 +189,10 @@
 +      throw error;
 +    }
 +  }
-  async listSkills(params) {
-    return this.codexClient.listSkills(params ?? {});
-  }
-@@ -19443,6 +19518,9 @@
+   async listSkills(params) {
+     return this.codexClient.listSkills(params ?? {});
+   }
+@@ -19443,6 +19540,9 @@
        turnId: params.turnId
      });
    }
@@ -201,7 +202,7 @@
    async fetchAvailableModels() {
      const models = [];
      let cursor = null;
-@@ -19900,7 +19978,8 @@
+@@ -19900,7 +20000,8 @@
          },
          sessionCapabilities: {
            resume: {},
@@ -211,7 +212,7 @@
          },
          mcpCapabilities: {
            http: true,
-@@ -19912,6 +19991,26 @@
+@@ -19912,6 +20013,26 @@
    }
    async extMethod(method, params) {
      const methodRequest = { method, params };
@@ -238,7 +239,7 @@
      if (!isExtMethodRequest(methodRequest)) {
        return {};
      }
-@@ -19967,6 +20066,7 @@
+@@ -19967,6 +20088,7 @@
        totalTokenUsage: null,
        modelContextWindow: null,
        rateLimits: null,
@@ -246,7 +247,7 @@
        account,
        cwd: request.cwd,
        sessionMcpServers
-@@ -19982,7 +20082,8 @@
+@@ -19982,7 +20104,8 @@
      this.publishAvailableCommandsAsync(sessionId);
      const sessionModelState = this.createModelState(models, currentModelId);
      const sessionModeState = sessionState.agentMode.toSessionModeState();
@@ -256,7 +257,7 @@
    }
    async getActiveAccount() {
      if (this.codexAcpClient.getModelProvider()) {
-@@ -19997,6 +20098,7 @@
+@@ -19997,6 +20120,7 @@
        sessionId,
        modelState,
        modeState,
@@ -264,7 +265,7 @@
        thread
      } = await this.getOrCreateSessionWithHistory(params);
      await this.streamThreadHistory(sessionId, thread);
-@@ -20007,12 +20109,13 @@
+@@ -20007,12 +20131,13 @@
      });
      return {
        models: modelState,
@@ -280,7 +281,7 @@
      logger.log("Session resumed", {
        sessionId,
        modelId: modelState.currentModelId,
-@@ -20020,7 +20123,8 @@
+@@ -20020,7 +20145,8 @@
      });
      return {
        models: modelState,
@@ -290,7 +291,7 @@
      };
    }
    async listSessions(params) {
-@@ -20030,7 +20134,7 @@
+@@ -20030,7 +20156,7 @@
    }
    async newSession(params) {
      logger.log("Starting new session...");
@@ -299,7 +300,7 @@
      logger.log("New session created", {
        sessionId,
        modelId: modelState.currentModelId,
-@@ -20039,7 +20143,8 @@
+@@ -20039,7 +20165,8 @@
      return {
        sessionId,
        models: modelState,
@@ -309,7 +310,7 @@
      };
    }
    async authenticate(_params) {
-@@ -20102,6 +20207,42 @@
+@@ -20102,6 +20229,42 @@
      sessionState.supportedInputModalities = model.inputModalities;
      return {};
    }
@@ -352,7 +353,7 @@
    publishAvailableCommandsAsync(sessionId) {
      void this.availableCommands.publish(sessionId);
    }
-@@ -20145,6 +20281,7 @@
+@@ -20145,6 +20308,7 @@
        totalTokenUsage: null,
        modelContextWindow: null,
        rateLimits: null,
@@ -360,7 +361,7 @@
        account,
        cwd: request.cwd,
        sessionMcpServers
-@@ -20160,10 +20297,12 @@
+@@ -20160,10 +20324,12 @@
      await this.availableCommands.publish(sessionId);
      const sessionModelState = this.createModelState(models, currentModelId);
      const sessionModeState = sessionState.agentMode.toSessionModeState();
@@ -373,7 +374,7 @@
        thread
      };
    }
-@@ -20259,7 +20398,7 @@
+@@ -20259,7 +20425,7 @@
        toolCallId: item.id,
        kind: "search",
        title: this.formatWebSearchTitle(item),
@@ -382,7 +383,7 @@
        rawInput: {
          query: item.query,
          action: item.action
-@@ -20460,9 +20599,17 @@
+@@ -20460,9 +20626,17 @@
          throw RequestError.invalidRequest("The current model does not support image input");
        }
        const agentMode = sessionState.agentMode;
@@ -403,7 +404,7 @@
        if (turnCompleted.turn.status === "interrupted") {
          await this.connection.sessionUpdate({
            sessionId: params.sessionId,
-@@ -20650,6 +20797,9 @@
+@@ -20650,6 +20824,9 @@
    async turnInterrupt(params) {
      return await this.sendRequest({ method: "turn/interrupt", params });
    }
@@ -413,7 +414,7 @@
    async threadStart(params) {
      return await this.sendRequest({ method: "thread/start", params });
    }
-@@ -20659,6 +20809,9 @@
+@@ -20665,6 +20842,9 @@
    async threadRead(params) {
      return await this.sendRequest({ method: "thread/read", params });
    }
