@@ -746,6 +746,17 @@ function hasRuntimeSummaryDetail(summary) {
 }
 
 /**
+ * @param {string | undefined} previousSummary
+ * @param {string} nextSummary
+ * @returns {boolean}
+ */
+function shouldPreserveRuntimeSummary(previousSummary, nextSummary) {
+  return Boolean(previousSummary)
+    && hasRuntimeSummaryDetail(/** @type {string} */ (previousSummary))
+    && !hasRuntimeSummaryDetail(nextSummary);
+}
+
+/**
  * @param {ReturnType<typeof createCompactToolActivityState> & { handle?: MessageHandle }} state
  * @returns {{ id: string, summary: string, completed: boolean, failed: boolean, reviewPrefix?: "👍" | "👎" } | undefined}
  */
@@ -1500,11 +1511,8 @@ async function sendRuntimeToolEvent(sock, chatId, event, options, reactionRuntim
     return undefined;
   }
   if (state) {
-    const summaryBase = status !== "updated"
-      && previousSummary
-      && hasRuntimeSummaryDetail(previousSummary)
-      && !hasRuntimeSummaryDetail(effectiveSummary)
-      ? previousSummary
+    const summaryBase = shouldPreserveRuntimeSummary(previousSummary, effectiveSummary)
+      ? /** @type {string} */ (previousSummary)
       : effectiveSummary;
     state.summary = appendReadLineRange(summaryBase, readRange);
   }
@@ -1862,7 +1870,8 @@ async function sendCompactToolActivityEvent(sock, chatId, event, options, reacti
     const entry = entryId ? state.entries.find((candidate) => candidate.id === entryId) : undefined;
     const summary = formatCompactToolActivitySummary(activity, event.cwd);
     if (entry && summary) {
-      const nextSummary = appendReadLineRange(summary, lineLimitToRange(activity.readLine, activity.readLimit));
+      const summaryBase = shouldPreserveRuntimeSummary(entry.summary, summary) ? entry.summary : summary;
+      const nextSummary = appendReadLineRange(summaryBase, lineLimitToRange(activity.readLine, activity.readLimit));
       if (nextSummary !== entry.summary) {
         entry.summary = nextSummary;
         return flushCompactToolActivity(state);

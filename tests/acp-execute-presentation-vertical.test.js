@@ -144,4 +144,31 @@ describe("ACP execute presentation vertical slice", () => {
     assert.equal(renderedText.includes("✅ git diff -- snapshot-ignore.txt"), false);
     assert.equal(renderedText.includes("✅ git status --short"), false);
   });
+
+  it("preserves Shell row formatting when execute updates omit command input", async () => {
+    const toolCallId = "call_execute_update";
+    const command = "git status --short";
+    const { sent, runtimeEvents } = await observeAcpExecutePayloadsThroughBaileys([
+      createLoggedExecutePayload(toolCallId, command),
+      {
+        sessionId: "019e8e35-df8f-7f51-ace2-06b3f2d1f9d5",
+        update: {
+          sessionUpdate: "tool_call_update",
+          toolCallId,
+          status: "in_progress",
+          rawOutput: {
+            formatted_output: " M tests/acp-execute-presentation-vertical.test.js\n",
+          },
+        },
+      },
+    ]);
+
+    assert.deepEqual(runtimeEvents.map((event) => event.type), [
+      "tool.started",
+      "tool.updated",
+    ]);
+    const renderedText = sent.map((entry) => String(entry.msg.text ?? "")).join("\n");
+    assert.equal(renderedText, `🔧 *Shell*  \`${command}\``);
+    assert.equal(renderedText.includes("🔧 *git status --short*"), false);
+  });
 });
