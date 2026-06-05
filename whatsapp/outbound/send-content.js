@@ -49,6 +49,19 @@ const compactToolActivityByChat = new Map();
 const COMPACT_TOOL_ACTIVITY_LIMIT = 3;
 const COMPACT_TOOL_ACTIVITY_DEBOUNCE_MS = 1000;
 
+/**
+ * @typedef {{
+ *   type: "status.created" | "status.edited" | "pin.succeeded" | "pin.failed" | "pin.skipped" | "unpin.succeeded" | "unpin.failed" | "unpin.skipped";
+ *   chatId: string;
+ *   messageId?: string;
+ *   firstLine?: string;
+ *   text?: string;
+ *   error?: string;
+ * }} PinnedStatusDeliveryEvent
+ *
+ * @typedef {(event: PinnedStatusDeliveryEvent) => void} PinnedStatusDeliveryObserver
+ */
+
 /** @type {Record<MessageSource, string>} */
 const SOURCE_PREFIX = {
   llm: "🤖",
@@ -623,23 +636,69 @@ function resolveOutgoingMessageKey(key, chatId) {
 }
 
 /**
+ * @param {string} text
+ * @returns {string}
+ */
+function getFirstLine(text) {
+  return text.split(/\r?\n/, 1)[0] ?? "";
+}
+
+/**
+ * @param {import('@whiskeysockets/baileys').WAMessageKey | undefined} key
+ * @returns {string | undefined}
+ */
+function getMessageKeyId(key) {
+  return typeof key?.id === "string" ? key.id : undefined;
+}
+
+/**
+ * @param {PinnedStatusDeliveryObserver | undefined} observer
+ * @param {PinnedStatusDeliveryEvent} event
+ * @returns {void}
+ */
+function observePinnedStatusDelivery(observer, event) {
+  if (!observer) {
+    return;
+  }
+  try {
+    observer(event);
+  } catch (error) {
+    log.warn("Pinned status delivery observer failed", {
+      chatId: event.chatId,
+      type: event.type,
+      error: formatErrorMessage(error),
+    });
+  }
+}
+
+/**
  * @param {import('@whiskeysockets/baileys').WASocket} sock
  * @param {string} chatId
  * @param {import('@whiskeysockets/baileys').WAMessageKey | undefined} key
+ * @param {PinnedStatusDeliveryObserver | undefined} [observer]
  * @returns {Promise<void>}
  */
-async function pinWhatsAppMessage(sock, chatId, key) {
+async function pinWhatsAppMessage(sock, chatId, key, observer) {
   const pinKey = resolveOutgoingMessageKey(key, chatId);
   if (!pinKey) {
+    observePinnedStatusDelivery(observer, { type: "pin.skipped", chatId });
     return;
   }
+  const messageId = getMessageKeyId(pinKey);
   try {
     await sock.sendMessage(chatId, {
       pin: pinKey,
       type: 1,
       time: TURN_STATUS_PIN_SECONDS,
     });
+    observePinnedStatusDelivery(observer, { type: "pin.succeeded", chatId, messageId });
   } catch (error) {
+    observePinnedStatusDelivery(observer, {
+      type: "pin.failed",
+      chatId,
+      messageId,
+      error: formatErrorMessage(error),
+    });
     log.warn("Failed to pin WhatsApp status message", {
       chatId,
       messageId: pinKey.id,
@@ -652,19 +711,29 @@ async function pinWhatsAppMessage(sock, chatId, key) {
  * @param {import('@whiskeysockets/baileys').WASocket} sock
  * @param {string} chatId
  * @param {import('@whiskeysockets/baileys').WAMessageKey | undefined} key
+ * @param {PinnedStatusDeliveryObserver | undefined} [observer]
  * @returns {Promise<void>}
  */
-async function unpinWhatsAppMessage(sock, chatId, key) {
+async function unpinWhatsAppMessage(sock, chatId, key, observer) {
   const pinKey = resolveOutgoingMessageKey(key, chatId);
   if (!pinKey) {
+    observePinnedStatusDelivery(observer, { type: "unpin.skipped", chatId });
     return;
   }
+  const messageId = getMessageKeyId(pinKey);
   try {
     await sock.sendMessage(chatId, {
       pin: pinKey,
       type: 0,
     });
+    observePinnedStatusDelivery(observer, { type: "unpin.succeeded", chatId, messageId });
   } catch (error) {
+    observePinnedStatusDelivery(observer, {
+      type: "unpin.failed",
+      chatId,
+      messageId,
+      error: formatErrorMessage(error),
+    });
     log.warn("Failed to unpin WhatsApp status message", {
       chatId,
       messageId: pinKey.id,
@@ -1406,7 +1475,7 @@ function shouldSuppressRuntimeEvent(event) {
  * @param {RuntimeEventOutboundEvent} event
  * @param {{ quoted?: BaileysMessage } | undefined} options
  * @param {import("../runtime/reaction-runtime.js").ReactionRuntime | undefined} reactionRuntime
- * @param {{ editHandleStore?: import("../../store.js").Store, outputVisibility?: import("../../chat-output-visibility.js").OutputVisibility }} sendOptions
+ * @param {{ editHandleStore?: import("../../store.js").Store, outputVisibility?: import("../../chat-output-visibility.js").OutputVisibility, pinnedStatusDeliveryObserver?: PinnedStatusDeliveryObserver }} sendOptions
  * @returns {Promise<MessageHandle | undefined>}
  */
 async function sendRuntimeFileChangeEvent(sock, chatId, event, options, reactionRuntime, sendOptions) {
@@ -1427,7 +1496,7 @@ async function sendRuntimeFileChangeEvent(sock, chatId, event, options, reaction
  * @param {{ quoted?: BaileysMessage } | undefined} options
  * @param {import("../runtime/reaction-runtime.js").ReactionRuntime | undefined} reactionRuntime
  * @param {RuntimeEventOutboundEvent} event
- * @param {{ editHandleStore?: import("../../store.js").Store, outputVisibility?: import("../../chat-output-visibility.js").OutputVisibility }} sendOptions
+ * @param {{ editHandleStore?: import("../../store.js").Store, outputVisibility?: import("../../chat-output-visibility.js").OutputVisibility, pinnedStatusDeliveryObserver?: PinnedStatusDeliveryObserver }} sendOptions
  * @returns {Promise<MessageHandle | undefined>}
  */
 async function sendSnapshotRuntimeFileChangeEvent(sock, chatId, fileChange, options, reactionRuntime, event, sendOptions) {
@@ -1493,7 +1562,7 @@ async function sendSnapshotRuntimeFileChangeEvent(sock, chatId, fileChange, opti
  * @param {RuntimeEventOutboundEvent} event
  * @param {{ quoted?: BaileysMessage } | undefined} options
  * @param {import("../runtime/reaction-runtime.js").ReactionRuntime | undefined} reactionRuntime
- * @param {{ editHandleStore?: import("../../store.js").Store, outputVisibility?: import("../../chat-output-visibility.js").OutputVisibility }} sendOptions
+ * @param {{ editHandleStore?: import("../../store.js").Store, outputVisibility?: import("../../chat-output-visibility.js").OutputVisibility, pinnedStatusDeliveryObserver?: PinnedStatusDeliveryObserver }} sendOptions
  * @returns {Promise<MessageHandle | undefined>}
  */
 async function sendRuntimeCommandEvent(sock, chatId, event, options, reactionRuntime, sendOptions) {
@@ -1563,7 +1632,7 @@ async function sendRuntimeCommandEvent(sock, chatId, event, options, reactionRun
  * @param {RuntimeEventOutboundEvent} event
  * @param {{ quoted?: BaileysMessage } | undefined} options
  * @param {import("../runtime/reaction-runtime.js").ReactionRuntime | undefined} reactionRuntime
- * @param {{ editHandleStore?: import("../../store.js").Store, outputVisibility?: import("../../chat-output-visibility.js").OutputVisibility }} sendOptions
+ * @param {{ editHandleStore?: import("../../store.js").Store, outputVisibility?: import("../../chat-output-visibility.js").OutputVisibility, pinnedStatusDeliveryObserver?: PinnedStatusDeliveryObserver }} sendOptions
  * @returns {Promise<MessageHandle | undefined>}
  */
 async function sendRuntimeToolEvent(sock, chatId, event, options, reactionRuntime, sendOptions) {
@@ -1862,7 +1931,7 @@ function scheduleCompactToolActivityFlush(state) {
  * @param {CompactToolActivityEvent} event
  * @param {{ quoted?: BaileysMessage } | undefined} options
  * @param {import("../runtime/reaction-runtime.js").ReactionRuntime | undefined} reactionRuntime
- * @param {{ editHandleStore?: import("../../store.js").Store, outputVisibility?: import("../../chat-output-visibility.js").OutputVisibility }} sendOptions
+ * @param {{ editHandleStore?: import("../../store.js").Store, outputVisibility?: import("../../chat-output-visibility.js").OutputVisibility, pinnedStatusDeliveryObserver?: PinnedStatusDeliveryObserver }} sendOptions
  * @param {ReturnType<typeof createCompactToolActivityState> & { handle?: MessageHandle }} state
  * @param {{ id: string, summary: string, inspectDetail?: string, completed: boolean, failed: boolean }} entry
  * @returns {Promise<MessageHandle | undefined>}
@@ -1890,7 +1959,7 @@ async function addCompactToolActivityEntry(sock, chatId, event, options, reactio
  * @param {CompactToolActivityEvent} event
  * @param {{ quoted?: BaileysMessage } | undefined} options
  * @param {import("../runtime/reaction-runtime.js").ReactionRuntime | undefined} reactionRuntime
- * @param {{ editHandleStore?: import("../../store.js").Store }} sendOptions
+ * @param {{ editHandleStore?: import("../../store.js").Store, pinnedStatusDeliveryObserver?: PinnedStatusDeliveryObserver }} sendOptions
  * @returns {Promise<MessageHandle | undefined>}
  */
 async function sendCompactToolActivityEvent(sock, chatId, event, options, reactionRuntime, sendOptions) {
@@ -2008,7 +2077,7 @@ async function sendCompactToolActivityEvent(sock, chatId, event, options, reacti
  * @param {string} chatId
  * @param {{ quoted?: BaileysMessage } | undefined} options
  * @param {import("../runtime/reaction-runtime.js").ReactionRuntime | undefined} reactionRuntime
- * @param {{ editHandleStore?: import("../../store.js").Store, outputVisibility?: import("../../chat-output-visibility.js").OutputVisibility }} sendOptions
+ * @param {{ editHandleStore?: import("../../store.js").Store, outputVisibility?: import("../../chat-output-visibility.js").OutputVisibility, pinnedStatusDeliveryObserver?: PinnedStatusDeliveryObserver }} sendOptions
  * @returns {Promise<MessageHandle | undefined>}
  */
 async function closeCompactToolActivityIfOpen(sock, chatId, options, reactionRuntime, sendOptions) {
@@ -2347,7 +2416,7 @@ function formatPinnedStatusPresentation(event, state) {
  * @param {OutboundEvent} event
  * @param {{ quoted?: BaileysMessage } | undefined} options
  * @param {import("../runtime/reaction-runtime.js").ReactionRuntime | undefined} reactionRuntime
- * @param {{ editHandleStore?: import("../../store.js").Store }} sendOptions
+ * @param {{ editHandleStore?: import("../../store.js").Store, pinnedStatusDeliveryObserver?: PinnedStatusDeliveryObserver }} sendOptions
  * @returns {Promise<MessageHandle | undefined>}
  */
 async function updatePinnedTurnStatus(sock, chatId, event, options, reactionRuntime, sendOptions) {
@@ -2370,24 +2439,45 @@ async function updatePinnedTurnStatus(sock, chatId, event, options, reactionRunt
   if (!state.handle) {
     state.handle = await sendBlocks(sock, chatId, "plain", text, options, reactionRuntime, event, {
       editHandleStore: sendOptions.editHandleStore,
-      pin: true,
     });
+    observePinnedStatusDelivery(sendOptions.pinnedStatusDeliveryObserver, {
+      type: "status.created",
+      chatId,
+      messageId: getMessageKeyId(state.handle?.messageKey),
+      firstLine: getFirstLine(text),
+      text,
+    });
+    await pinWhatsAppMessage(sock, chatId, state.handle?.messageKey, sendOptions.pinnedStatusDeliveryObserver);
   } else {
     try {
       await state.handle.update({ kind: "text", text });
+      observePinnedStatusDelivery(sendOptions.pinnedStatusDeliveryObserver, {
+        type: "status.edited",
+        chatId,
+        messageId: getMessageKeyId(state.handle.messageKey),
+        firstLine: getFirstLine(text),
+        text,
+      });
     } catch (error) {
       if (!isStaleWhatsAppEditHandleError(error)) {
         throw error;
       }
       state.handle = await sendBlocks(sock, chatId, "plain", text, options, reactionRuntime, event, {
         editHandleStore: sendOptions.editHandleStore,
-        pin: true,
       });
+      observePinnedStatusDelivery(sendOptions.pinnedStatusDeliveryObserver, {
+        type: "status.created",
+        chatId,
+        messageId: getMessageKeyId(state.handle?.messageKey),
+        firstLine: getFirstLine(text),
+        text,
+      });
+      await pinWhatsAppMessage(sock, chatId, state.handle?.messageKey, sendOptions.pinnedStatusDeliveryObserver);
     }
   }
 
   if (presentation.closesStatus) {
-    await unpinWhatsAppMessage(sock, chatId, state.handle?.messageKey);
+    await unpinWhatsAppMessage(sock, chatId, state.handle?.messageKey, sendOptions.pinnedStatusDeliveryObserver);
     turnStatusByChat.delete(chatId);
   }
   return state.handle;
@@ -2759,7 +2849,7 @@ function renderOutboundEvent(event) {
  * @param {RuntimeEventOutboundEvent} event
  * @param {{ quoted?: BaileysMessage } | undefined} options
  * @param {import("../runtime/reaction-runtime.js").ReactionRuntime | undefined} reactionRuntime
- * @param {{ editHandleStore?: import("../../store.js").Store, outputVisibility?: import("../../chat-output-visibility.js").OutputVisibility }} [sendOptions]
+ * @param {{ editHandleStore?: import("../../store.js").Store, outputVisibility?: import("../../chat-output-visibility.js").OutputVisibility, pinnedStatusDeliveryObserver?: PinnedStatusDeliveryObserver }} [sendOptions]
  * @returns {Promise<MessageHandle | undefined>}
  */
 async function sendRuntimeEvent(sock, chatId, event, options, reactionRuntime, sendOptions = {}) {
@@ -3032,7 +3122,7 @@ export async function editWhatsAppMessageByHandle(sock, transportHandleId, newTe
  * @param {OutboundEvent} event
  * @param {{ quoted?: BaileysMessage } | undefined} options
  * @param {import("../runtime/reaction-runtime.js").ReactionRuntime | undefined} reactionRuntime
- * @param {{ editHandleStore?: import("../../store.js").Store, outputVisibility?: import("../../chat-output-visibility.js").OutputVisibility }} [sendOptions]
+ * @param {{ editHandleStore?: import("../../store.js").Store, outputVisibility?: import("../../chat-output-visibility.js").OutputVisibility, pinnedStatusDeliveryObserver?: PinnedStatusDeliveryObserver }} [sendOptions]
  * @returns {Promise<MessageHandle | undefined>}
  */
 export async function sendEvent(sock, chatId, event, options, reactionRuntime, sendOptions = {}) {
@@ -3069,7 +3159,7 @@ export async function sendEvent(sock, chatId, event, options, reactionRuntime, s
  * @param {{ quoted?: BaileysMessage } | undefined} options
  * @param {import("../runtime/reaction-runtime.js").ReactionRuntime | undefined} reactionRuntime
  * @param {OutboundEvent | undefined} [event]
- * @param {{ workdir?: string | null, editHandleStore?: import("../../store.js").Store, pin?: boolean }} [renderOptions]
+ * @param {{ workdir?: string | null, editHandleStore?: import("../../store.js").Store, pin?: boolean, pinnedStatusDeliveryObserver?: PinnedStatusDeliveryObserver }} [renderOptions]
  * @returns {Promise<MessageHandle | undefined>}
  */
 export async function sendBlocks(sock, chatId, source, content, options, reactionRuntime, event, renderOptions = {}) {
@@ -3292,7 +3382,7 @@ export async function sendBlocks(sock, chatId, source, content, options, reactio
   const editHandle = createWhatsAppEditHandleRecord(chatId, editKey, isImage ? "image" : "text");
   await rememberWhatsAppEditHandle(editHandle, renderOptions.editHandleStore);
   if (renderOptions.pin === true) {
-    await pinWhatsAppMessage(sock, chatId, editKey);
+    await pinWhatsAppMessage(sock, chatId, editKey, renderOptions.pinnedStatusDeliveryObserver);
   }
   const transportHandleId = editHandle.id;
   /** @type {MessageInspectState | null} */

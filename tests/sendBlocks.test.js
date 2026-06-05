@@ -785,6 +785,102 @@ describe("sendEvent – runtime events", () => {
     ]);
   });
 
+  it("observes pinned status delivery at the socket boundary", async () => {
+    const { sock } = createMockSock();
+    /** @type {Array<Record<string, unknown>>} */
+    const deliveryTrace = [];
+    const sendOptions = {
+      pinnedStatusDeliveryObserver: (/** @type {Record<string, unknown>} */ event) => {
+        deliveryTrace.push(event);
+      },
+    };
+    const chatId = "runtime-status-delivery-trace-chat";
+
+    await sendEvent(sock, chatId, {
+      kind: "runtime_event",
+      event: {
+        type: "turn.started",
+        provider: "codex",
+        turn: { id: "turn-1", chatId, status: "started" },
+      },
+    }, undefined, undefined, sendOptions);
+
+    await sendEvent(sock, chatId, {
+      kind: "runtime_event",
+      event: {
+        type: "command.completed",
+        provider: "codex",
+        command: {
+          id: "cmd-1",
+          command: "pnpm test:fast",
+          status: "completed",
+          cwd: "/repo",
+        },
+      },
+    }, undefined, undefined, sendOptions);
+
+    await sendEvent(sock, chatId, {
+      kind: "runtime_event",
+      event: {
+        type: "turn.completed",
+        provider: "codex",
+        turn: { id: "turn-1", chatId, status: "completed" },
+      },
+    }, undefined, undefined, sendOptions);
+
+    assert.deepEqual(deliveryTrace.map((event) => [
+      event.type,
+      event.chatId,
+      event.messageId,
+      event.firstLine,
+      event.error,
+    ]), [
+      ["status.created", chatId, "msg-1", "🔄 *CODEX*  turn started", undefined],
+      ["pin.succeeded", chatId, "msg-1", undefined, undefined],
+      ["status.edited", chatId, "msg-1", "✅ *Shell*  `pnpm test:fast`", undefined],
+      ["status.edited", chatId, "msg-1", "✅ *CODEX*  turn completed", undefined],
+      ["unpin.succeeded", chatId, "msg-1", undefined, undefined],
+    ]);
+  });
+
+  it("observes live pin failures instead of silently trusting the payload shape", async () => {
+    const { sock } = createMockSock();
+    const originalSendMessage = sock.sendMessage.bind(sock);
+    sock.sendMessage = async (chatId, msg) => {
+      if (msg.pin && msg.type === 1) {
+        throw new Error("not a group admin");
+      }
+      return originalSendMessage(chatId, msg);
+    };
+    /** @type {Array<Record<string, unknown>>} */
+    const deliveryTrace = [];
+    const chatId = "runtime-status-pin-failure-trace-chat";
+
+    await sendEvent(sock, chatId, {
+      kind: "runtime_event",
+      event: {
+        type: "turn.started",
+        provider: "codex",
+        turn: { id: "turn-1", chatId, status: "started" },
+      },
+    }, undefined, undefined, {
+      pinnedStatusDeliveryObserver: (event) => {
+        deliveryTrace.push(event);
+      },
+    });
+
+    assert.deepEqual(deliveryTrace.map((event) => [
+      event.type,
+      event.chatId,
+      event.messageId,
+      event.firstLine,
+      event.error,
+    ]), [
+      ["status.created", chatId, "msg-1", "🔄 *CODEX*  turn started", undefined],
+      ["pin.failed", chatId, "msg-1", undefined, "not a group admin"],
+    ]);
+  });
+
   it("pins replacement lifecycle status messages when the edit handle expired", async () => {
     const { sock, sent } = createMockSock();
     /** @type {import("../store.js").WhatsAppEditHandleRow | null} */
