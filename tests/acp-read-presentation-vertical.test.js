@@ -234,7 +234,7 @@ describe("ACP read presentation vertical slice", () => {
         linkPreview: null,
       },
       {
-        text: "✅ *Read*  `src/app.js`  *10-12*",
+        text: "✅ *Read*  `src/app.js:10-12`",
         edit: { id: "msg-1", remoteJid: chatId, fromMe: true },
         linkPreview: null,
       },

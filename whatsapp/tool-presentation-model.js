@@ -123,15 +123,6 @@ function formatDisplayPath(targetPath, cwd) {
 }
 
 /**
- * @param {string | null | undefined} targetPath
- * @param {string | null | undefined} cwd
- * @returns {string}
- */
-function formatDisplayTarget(targetPath, cwd) {
-  return `*${shortenPath(targetPath || ".", cwd)}*`;
-}
-
-/**
  * @param {"Edit" | "Write"} name
  * @param {Record<string, unknown>} args
  * @param {string | null | undefined} cwd
@@ -210,23 +201,14 @@ function getReadLineRange(args) {
 }
 
 /**
- * @param {{ start: number, end: number }} range
- * @returns {string}
- */
-function formatLineRange(range) {
-  return range.start === range.end ? `*${range.start}*` : `*${range.start}-${range.end}*`;
-}
-
-/**
  * @param {string} path
  * @param {string | null | undefined} cwd
  * @param {{ start: number, end: number } | null} range
  * @returns {ActivityPresentation}
  */
 function createReadPresentation(path, cwd, range) {
-  const line = range
-    ? `${formatDisplayPath(path, cwd)}  ${formatLineRange(range)}`
-    : formatDisplayPath(path, cwd);
+  const suffix = range ? `:${range.start === range.end ? range.start : `${range.start}-${range.end}`}` : "";
+  const line = `\`${shortenPath(path || ".", cwd)}${suffix}\``;
   const activity = createActivity("Read", line);
   return {
     kind: "activity",
@@ -244,7 +226,7 @@ function createReadPresentation(path, cwd, range) {
  * @returns {ActivityPresentation}
  */
 function createSearchPresentation(pattern, path, cwd) {
-  const suffix = path ? ` in ${formatDisplayTarget(path, cwd)}` : "";
+  const suffix = path ? ` in ${formatDisplayPath(path, cwd)}` : "";
   const activity = createActivity("Search", `\`${pattern}\`${suffix}`);
   return {
     kind: "activity",

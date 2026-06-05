@@ -346,7 +346,7 @@ function getRawAcpReadOutputLineRange(event) {
  * @returns {string}
  */
 function formatLineRange(range) {
-  return range.start === range.end ? `*${range.start}*` : `*${range.start}-${range.end}*`;
+  return range.start === range.end ? String(range.start) : `${range.start}-${range.end}`;
 }
 
 /**
@@ -355,10 +355,11 @@ function formatLineRange(range) {
  * @returns {string}
  */
 function appendReadLineRange(summary, range) {
-  if (!range || !summary.startsWith("*Read*") || /(?:_L\d+(?:-L\d+)?_|\*\d+(?:-\d+)?\*)/.test(summary)) {
+  if (!range || !summary.startsWith("*Read*") || /(?:_L\d+(?:-L\d+)?_|\*\d+(?:-\d+)?\*|`[^`]+:\d+(?:-\d+)?`)/.test(summary)) {
     return summary;
   }
-  return `${summary}  ${formatLineRange(range)}`;
+  const rangeText = formatLineRange(range);
+  return summary.replace(/`([^`]+)`/, `\`$1:${rangeText}\``);
 }
 
 /**
