@@ -349,7 +349,7 @@ function appendReadLineRange(summary, range) {
     return summary;
   }
   const rangeText = formatLineRange(range);
-  return summary.replace(/`([^`]+)`/, `\`$1:${rangeText}\``);
+  return `${summary}  *${rangeText}*`;
 }
 
 /**
@@ -912,6 +912,19 @@ function isNoopRuntimeTool(tool) {
  * @returns {string}
  */
 function formatRuntimeToolSummary(tool, cwd) {
+  if (tool.name === "Read") {
+    const readPath = getStringArg(tool.arguments, ["file_path", "path", "filePath"]);
+    if (readPath) {
+      const line = typeof tool.arguments.line === "number"
+        ? tool.arguments.line
+        : typeof tool.arguments.offset === "number" ? tool.arguments.offset : undefined;
+      const limit = typeof tool.arguments.limit === "number" ? tool.arguments.limit : undefined;
+      return appendReadLineRange(
+        formatRuntimeProgressEntry("Read", `\`${shortenPath(readPath, cwd ?? null)}\``),
+        lineLimitToRange(line, limit),
+      );
+    }
+  }
   const semanticSummary = formatSemanticToolSummary(tool.name, tool.arguments, cwd);
   if (semanticSummary) {
     return semanticSummary;
