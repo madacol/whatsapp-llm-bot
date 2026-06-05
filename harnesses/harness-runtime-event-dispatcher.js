@@ -9,7 +9,6 @@ import { normalizeHarnessRuntimeEvent } from "./harness-runtime-events.js";
  * @typedef {import("./harness-runtime-events.js").HarnessRuntimeTool} HarnessRuntimeTool
  * @typedef {import("./harness-runtime-events.js").HarnessRuntimeUsage} HarnessRuntimeUsage
  * @typedef {import("./harness-runtime-events.js").HarnessRuntimeCommandEvent
- *   | import("./harness-runtime-events.js").HarnessRuntimeFileReadEvent
  *   | import("./harness-runtime-events.js").HarnessRuntimeToolEvent
  *   | import("./harness-runtime-events.js").HarnessRuntimeFileChangeEvent} HarnessRuntimeProgressEvent
  * @typedef {import("./raw-event-log.js").HarnessRawEventLogger} HarnessRawEventLogger
@@ -60,7 +59,6 @@ function shouldEmitAsRuntimeProgress(event) {
   return event.type === "command.started"
     || event.type === "command.completed"
     || event.type === "command.failed"
-    || event.type === "file-read.started"
     || event.type === "tool.started"
     || event.type === "tool.updated"
     || event.type === "tool.completed"

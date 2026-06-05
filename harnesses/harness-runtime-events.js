@@ -219,16 +219,6 @@
 /**
  * @typedef {{
  *   chatId?: string,
- *   type: "file-read.started",
- *   provider: HarnessRuntimeProvider,
- *   fileRead: { command: string, paths: string[], line?: number, limit?: number },
- *   raw?: HarnessRuntimeRawEvent,
- * } & HarnessRuntimeEventEnvelope} HarnessRuntimeFileReadEvent
- */
-
-/**
- * @typedef {{
- *   chatId?: string,
  *   type: "assistant.completed",
  *   provider: HarnessRuntimeProvider,
  *   text: string,
@@ -315,7 +305,6 @@
  *   | HarnessRuntimeReasoningEvent
  *   | HarnessRuntimeToolEvent
  *   | HarnessRuntimeCommandEvent
- *   | HarnessRuntimeFileReadEvent
  *   | HarnessRuntimeAssistantCompletedEvent
  *   | HarnessRuntimeSubagentCompletedEvent
  *   | HarnessRuntimePlanUpdatedEvent

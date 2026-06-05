@@ -80,7 +80,7 @@ function buildObservedWhatsAppHooks(input) {
 
 /**
  * @param {Record<string, unknown>[]} payloads
- * @param {{ chatId?: string, cwd?: string | null, visibility?: import("../chat-output-visibility.js").OutputVisibility }} [options]
+ * @param {{ chatId?: string, cwd?: string | null, visibility?: import("../chat-output-visibility.js").OutputVisibility, beforeEvents?: Array<import("../harnesses/harness-runtime-events.js").HarnessRuntimeEvent> }} [options]
  * @returns {Promise<{
  *   sent: Array<{ chatId: string, msg: Record<string, unknown> }>,
  *   relayed: Array<{ chatId: string, msg: Record<string, unknown>, opts: Record<string, unknown> }>,
@@ -113,6 +113,11 @@ async function observeAcpPayloadSliceToBaileys(payloads, options = {}) {
     hooks,
     workdir: cwd,
   });
+
+  for (const event of options.beforeEvents ?? []) {
+    runtimeEvents.push(event);
+    await dispatcher.handleEvent(event);
+  }
 
   for (const payload of payloads) {
     const events = model.acceptSessionUpdate(payload);
@@ -639,6 +644,104 @@ describe("ACP payload to WhatsApp socket vertical slices", () => {
     assert.deepEqual(trace.runtimeEvents.map((event) => event.type), ["tool.started", "tool.completed"]);
     assert.equal(sent[0]?.msg.text, "🔧 *Read*  `src/app.js`");
     assert.equal(sent[1]?.msg.text, "✅ *Read*  `src/app.js`  *10-12*");
+  });
+
+  it("updates the pinned status message at each real ACP read payload timestep", async () => {
+    const chatId = "acp-payload-pinned-read@s.whatsapp.net";
+    const toolCallId = "call_wp7MciriXBhbVOsDFY4b60pj";
+    const { sent, trace } = await observeAcpPayloadSliceToBaileys([
+      {
+        sessionId: "019e8e35-df8f-7f51-ace2-06b3f2d1f9d5",
+        update: {
+          sessionUpdate: "tool_call",
+          toolCallId,
+          status: "in_progress",
+          kind: "read",
+          title: "Read file",
+          locations: [{ path: "/repo/src/app.js" }],
+        },
+      },
+      {
+        sessionId: "019e8e35-df8f-7f51-ace2-06b3f2d1f9d5",
+        update: {
+          sessionUpdate: "tool_call_update",
+          toolCallId,
+          _meta: {
+            terminal_output_delta: {
+              data: "    10→function start() {\n",
+              terminal_id: toolCallId,
+            },
+          },
+        },
+      },
+      {
+        sessionId: "019e8e35-df8f-7f51-ace2-06b3f2d1f9d5",
+        update: {
+          sessionUpdate: "tool_call_update",
+          toolCallId,
+          status: "completed",
+          rawOutput: {
+            formatted_output: [
+              "    10→function start() {",
+              "    11→  return true;",
+              "    12→}",
+            ].join("\n"),
+            exit_code: 0,
+          },
+          _meta: {
+            terminal_exit: {
+              exit_code: 0,
+              signal: null,
+              terminal_id: toolCallId,
+            },
+          },
+        },
+      },
+    ], {
+      chatId,
+      cwd: "/repo",
+      beforeEvents: [{
+        type: "turn.started",
+        provider: "acp",
+        turn: { id: "turn-1", chatId, status: "started" },
+      }],
+    });
+
+    assert.deepEqual(trace.runtimeEvents.map((event) => event.type), [
+      "turn.started",
+      "tool.started",
+      "tool.updated",
+      "tool.completed",
+    ]);
+    assert.deepEqual(sent.map((entry) => entry.msg), [
+      { text: "🔄 *ACP*  turn started", linkPreview: null },
+      {
+        pin: { id: "msg-1", remoteJid: chatId, fromMe: true },
+        type: 1,
+        time: 86400,
+      },
+      {
+        text: "🔄 *ACP*  turn started\n🔧 *ACP*  *Read*  `src/app.js`",
+        edit: { id: "msg-1", remoteJid: chatId, fromMe: true },
+        linkPreview: null,
+      },
+      { text: "🔧 *Read*  `src/app.js`", linkPreview: null },
+      {
+        text: "🔄 *ACP*  turn started\n🔧 *ACP*  *Read*  `src/app.js`",
+        edit: { id: "msg-1", remoteJid: chatId, fromMe: true },
+        linkPreview: null,
+      },
+      {
+        text: "🔄 *ACP*  turn started\n✅ *ACP*  *Read*  `src/app.js`  *10-12*",
+        edit: { id: "msg-1", remoteJid: chatId, fromMe: true },
+        linkPreview: null,
+      },
+      {
+        text: "✅ *Read*  `src/app.js`  *10-12*",
+        edit: { id: "msg-4", remoteJid: chatId, fromMe: true },
+        linkPreview: null,
+      },
+    ]);
   });
 
   it("keeps ACP read location details when a sparse completion edits the row", async () => {

@@ -310,7 +310,7 @@ describe("createHarnessRuntimeEventDispatcher", () => {
     ]);
   });
 
-  it("emits command and file-read runtime events through the runtime sink", async () => {
+  it("emits command runtime events through the runtime sink", async () => {
     /** @type {import("../harnesses/harness-runtime-events.js").HarnessRuntimeEvent[]} */
     const runtimeEvents = [];
     const dispatcher = createHarnessRuntimeEventDispatcher({
@@ -321,14 +321,6 @@ describe("createHarnessRuntimeEventDispatcher", () => {
       },
     });
 
-    await dispatcher.handleEvent({
-      type: "file-read.started",
-      provider: "codex",
-      fileRead: {
-        command: "sed -n '1,20p' src/app.js",
-        paths: ["src/app.js"],
-      },
-    });
     await dispatcher.handleEvent({
       type: "command.started",
       provider: "codex",
@@ -348,12 +340,11 @@ describe("createHarnessRuntimeEventDispatcher", () => {
     });
 
     assert.deepEqual(runtimeEvents.map((event) => event.type), [
-      "file-read.started",
       "command.started",
       "command.completed",
     ]);
     assert.equal(
-      runtimeEvents[1]?.type === "command.started" ? runtimeEvents[1].command.command : undefined,
+      runtimeEvents[0]?.type === "command.started" ? runtimeEvents[0].command.command : undefined,
       "pnpm type-check",
     );
   });
@@ -433,7 +424,7 @@ describe("createHarnessRuntimeEventDispatcher", () => {
     assert.equal(runtimeEvents[0]?.provider, "acp");
   });
 
-  it("passes ACP tool and file-read events through the runtime event boundary", async () => {
+  it("passes ACP tool events through the runtime event boundary", async () => {
     /** @type {import("../harnesses/harness-runtime-events.js").HarnessRuntimeEvent[]} */
     const runtimeEvents = [];
     /** @type {ToolContentBlock[][]} */
@@ -451,14 +442,6 @@ describe("createHarnessRuntimeEventDispatcher", () => {
       },
     });
 
-    await dispatcher.handleEvent({
-      type: "file-read.started",
-      provider: "acp",
-      fileRead: {
-        command: "sed -n '1,20p' src/app.js",
-        paths: ["src/app.js"],
-      },
-    });
     await dispatcher.handleEvent({
       type: "tool.started",
       provider: "acp",
@@ -481,7 +464,6 @@ describe("createHarnessRuntimeEventDispatcher", () => {
     });
 
     assert.deepEqual(runtimeEvents.map((event) => event.type), [
-      "file-read.started",
       "tool.started",
       "tool.completed",
     ]);

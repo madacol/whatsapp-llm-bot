@@ -550,14 +550,6 @@ describe("createConversationRunner prompt formatting", () => {
       startRun: async (input) => {
         const readCommand = "sed -n '1,20p' src/app.js";
         await input.hooks?.onRuntimeEvent?.({
-          type: "file-read.started",
-          provider: "codex",
-          fileRead: {
-            command: readCommand,
-            paths: ["src/app.js"],
-          },
-        });
-        await input.hooks?.onRuntimeEvent?.({
           type: "command.completed",
           provider: "codex",
           command: {
@@ -598,10 +590,6 @@ describe("createConversationRunner prompt formatting", () => {
     const progressTexts = turn.responses
       .filter((response) => response.source === "plain")
       .map((response) => response.text);
-    assert.ok(
-      progressTexts.some((text) => text.includes("\"type\":\"file-read.started\"") && text.includes("\"paths\":[\"src/app.js\"]")),
-      `expected file-read progress activity, got: ${JSON.stringify(progressTexts)}`,
-    );
     assert.ok(
       progressTexts.some((text) => text.includes("\"type\":\"command.started\"") && text.includes("\"command\":\"pnpm type-check\"")),
       `expected command progress activity, got: ${JSON.stringify(progressTexts)}`,
