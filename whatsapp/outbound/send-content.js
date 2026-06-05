@@ -20,7 +20,7 @@ import { sendImageHD } from "../../whatsapp-hd-media.js";
 
 /** Delay between relaying each image in an album so WhatsApp groups them. */
 const ALBUM_RELAY_DELAY_MS = 500;
-const SNAPSHOT_DIFF_LINES_PER_BATCH = 250;
+const SNAPSHOT_DIFF_LINES_PER_BATCH = 1000;
 const SNAPSHOT_DIFF_CONTINUATION_TIMEOUT_MS = 30 * 60 * 1000;
 const WHATSAPP_EDIT_HANDLE_TTL_MS = 14 * 60 * 1000;
 const log = createLogger("whatsapp:outbound");
@@ -1272,38 +1272,44 @@ async function sendSnapshotRuntimeFileChangeEvent(sock, chatId, fileChange, opti
   let handle;
   let deliveredLines = 0;
   const totalLines = countDiffLines(diffText);
+  /** @param {string} diffBatch */
+  const sendDiffBatch = async (diffBatch) => sendBlocks(
+    sock,
+    chatId,
+    "tool-call",
+    renderFileChangeContent({ ...fileChange, diff: diffBatch }),
+    options,
+    reactionRuntime,
+    event,
+    {
+      workdir: fileChange.cwd ?? null,
+      editHandleStore: sendOptions.editHandleStore,
+    },
+  );
 
   for (let index = 0; index < diffBatches.length; index += 1) {
     const diffBatch = diffBatches[index] ?? "";
     deliveredLines += countDiffLines(diffBatch);
-    handle = await sendBlocks(
-      sock,
-      chatId,
-      "tool-call",
-      renderFileChangeContent({ ...fileChange, diff: diffBatch }),
-      options,
-      reactionRuntime,
-      event,
-      {
-        workdir: fileChange.cwd ?? null,
-        editHandleStore: sendOptions.editHandleStore,
-      },
-    );
+    handle = await sendDiffBatch(diffBatch);
 
     if (index >= diffBatches.length - 1) {
       break;
     }
-    const shouldContinue = await requestSnapshotDiffContinuation(
+
+    await requestSnapshotDiffContinuation(
       sock,
       chatId,
       options,
       reactionRuntime,
       deliveredLines,
       totalLines,
+      async () => {
+        for (let nextIndex = index + 1; nextIndex < diffBatches.length; nextIndex += 1) {
+          await sendDiffBatch(diffBatches[nextIndex] ?? "");
+        }
+      },
     );
-    if (!shouldContinue) {
-      break;
-    }
+    break;
   }
 
   return handle;
@@ -2846,48 +2852,70 @@ export async function sendBlocks(sock, chatId, source, content, options, reactio
  * @param {import("../runtime/reaction-runtime.js").ReactionRuntime | undefined} reactionRuntime
  * @param {number} deliveredLines
  * @param {number} totalLines
- * @returns {Promise<boolean>}
+ * @param {() => Promise<void>} onContinue
+ * @returns {Promise<void>}
  */
-async function requestSnapshotDiffContinuation(sock, chatId, options, reactionRuntime, deliveredLines, totalLines) {
+async function requestSnapshotDiffContinuation(sock, chatId, options, reactionRuntime, deliveredLines, totalLines, onContinue) {
   const remainingLines = Math.max(totalLines - deliveredLines, 0);
   const sent = await sock.sendMessage(
     chatId,
     makeTextMessage(`🔧 ⚠️ Snapshot diff rendered ${deliveredLines} of ${totalLines} lines. Continue rendering the remaining ${remainingLines}? React 👍 to continue or 👎 to stop.`),
     options,
   );
-  return waitForSnapshotDiffContinuationDecision(reactionRuntime, sent?.key);
+  subscribeSnapshotDiffContinuationDecision(reactionRuntime, sent?.key, async () => {
+    try {
+      await onContinue();
+    } catch (error) {
+      log.error("Snapshot diff continuation failed", {
+        chatId,
+        deliveredLines,
+        totalLines,
+        error: formatErrorMessage(error),
+      });
+      await sock.sendMessage(
+        chatId,
+        makeTextMessage(`🔧 ⚠️ Snapshot diff continuation failed: ${formatErrorMessage(error)}`),
+        options,
+      ).catch(() => {});
+    }
+  });
 }
 
 /**
  * @param {import("../runtime/reaction-runtime.js").ReactionRuntime | undefined} reactionRuntime
  * @param {import('@whiskeysockets/baileys').WAMessageKey | undefined} promptKey
- * @returns {Promise<boolean>}
+ * @param {() => Promise<void>} onContinue
+ * @returns {void}
  */
-function waitForSnapshotDiffContinuationDecision(reactionRuntime, promptKey) {
+function subscribeSnapshotDiffContinuationDecision(reactionRuntime, promptKey, onContinue) {
   const promptKeyId = promptKey?.id;
   if (!reactionRuntime || typeof promptKeyId !== "string") {
-    return Promise.resolve(false);
+    return;
   }
 
-  return new Promise((resolve) => {
-    const timer = setTimeout(() => {
-      unsubscribe();
-      resolve(false);
-    }, SNAPSHOT_DIFF_CONTINUATION_TIMEOUT_MS);
-    timer.unref?.();
+  let settled = false;
+  const timer = setTimeout(() => {
+    settled = true;
+    unsubscribe();
+  }, SNAPSHOT_DIFF_CONTINUATION_TIMEOUT_MS);
+  timer.unref?.();
 
-    const unsubscribe = reactionRuntime.subscribe(promptKeyId, (emoji) => {
-      if (emoji.startsWith("👍") || emoji.startsWith("✅")) {
-        clearTimeout(timer);
-        unsubscribe();
-        resolve(true);
-        return;
-      }
-      if (emoji.startsWith("👎") || emoji.startsWith("❌")) {
-        clearTimeout(timer);
-        unsubscribe();
-        resolve(false);
-      }
-    });
+  const unsubscribe = reactionRuntime.subscribe(promptKeyId, (emoji) => {
+    if (settled) {
+      return;
+    }
+    if (emoji.startsWith("👎") || emoji.startsWith("❌")) {
+      settled = true;
+      clearTimeout(timer);
+      unsubscribe();
+      return;
+    }
+    if (!emoji.startsWith("👍") && !emoji.startsWith("✅")) {
+      return;
+    }
+    settled = true;
+    clearTimeout(timer);
+    unsubscribe();
+    void onContinue();
   });
 }
