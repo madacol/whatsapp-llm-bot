@@ -893,6 +893,63 @@ function formatRuntimeCommandSummary(command) {
 }
 
 /**
+ * @param {string} value
+ * @returns {string}
+ */
+function stripShellArgumentQuotes(value) {
+  const trimmed = value.trim();
+  if (trimmed.length >= 2 && trimmed.startsWith("'") && trimmed.endsWith("'")) {
+    return trimmed.slice(1, -1).replace(/'\\''/g, "'");
+  }
+  if (trimmed.length >= 2 && trimmed.startsWith("\"") && trimmed.endsWith("\"")) {
+    return trimmed.slice(1, -1).replace(/\\"/g, "\"").replace(/\\\\/g, "\\");
+  }
+  return trimmed;
+}
+
+/**
+ * @param {string} command
+ * @returns {string}
+ */
+function normalizePinnedShellCommand(command) {
+  const trimmed = command.trim();
+  const shellMatch = /^(?:\/[\w./-]+\/)?(?:zsh|bash|sh)\s+-lc\s+([\s\S]+)$/.exec(trimmed);
+  if (!shellMatch?.[1]) {
+    return trimmed;
+  }
+  return stripShellArgumentQuotes(shellMatch[1]);
+}
+
+/**
+ * @param {Extract<RuntimeEventOutboundEvent["event"], { tool: unknown }>["tool"]} tool
+ * @returns {string}
+ */
+function getPinnedRuntimeToolKey(tool) {
+  if (tool.name.trim() === "Shell") {
+    const command = getStringArg(tool.arguments, ["command"]);
+    if (command) {
+      return `tool:shell:${normalizePinnedShellCommand(command)}`;
+    }
+  }
+  return `tool:${tool.id}`;
+}
+
+/**
+ * @param {Extract<RuntimeEventOutboundEvent["event"], { tool: unknown }>["tool"]} tool
+ * @param {string | null | undefined} cwd
+ * @returns {string}
+ */
+function formatPinnedRuntimeToolSummary(tool, cwd) {
+  if (tool.name.trim() === "Shell") {
+    const command = getStringArg(tool.arguments, ["command"]);
+    if (command) {
+      return formatRuntimeCommandSummary(normalizePinnedShellCommand(command));
+    }
+  }
+  return formatRuntimeToolSummary(tool, cwd);
+}
+
+/**
  * @param {"started" | "completed" | "failed"} status
  * @returns {string}
  */
@@ -1991,21 +2048,31 @@ function renderRuntimeStatusInspectText(state) {
 }
 
 /**
- * @param {Array<{ key: string, icon: string, provider: string, summary: string }>} entries
+ * @param {{ icon: string, provider?: string, summary: string }} entry
+ * @returns {string}
+ */
+function renderPinnedStatusLine(entry) {
+  return entry.provider
+    ? `${entry.icon} *${entry.provider}*  ${entry.summary}`
+    : `${entry.icon} ${entry.summary}`;
+}
+
+/**
+ * @param {Array<{ key: string, icon: string, provider?: string, summary: string }>} entries
  * @returns {string}
  */
 function renderPinnedTurnStatusText(entries) {
   const hiddenCount = Math.max(0, entries.length - 4);
-  const visibleEntries = hiddenCount > 0 ? entries.slice(-4) : entries;
+  const visibleEntries = hiddenCount > 0 ? entries.slice(-4).reverse() : [...entries].reverse();
   return [
+    ...visibleEntries.map(renderPinnedStatusLine),
     ...(hiddenCount > 0 ? [`... +${hiddenCount} earlier events`] : []),
-    ...visibleEntries.map((entry) => `${entry.icon} *${entry.provider}*  ${entry.summary}`),
   ].join("\n");
 }
 
 /**
- * @param {{ entries: Array<{ key: string, icon: string, provider: string, summary: string }> }} state
- * @param {{ key: string, icon: string, provider: string, summary: string }} entry
+ * @param {{ entries: Array<{ key: string, icon: string, provider?: string, summary: string }> }} state
+ * @param {{ key: string, icon: string, provider?: string, summary: string }} entry
  * @returns {void}
  */
 function upsertPinnedTurnStatusEntry(state, entry) {
@@ -2019,7 +2086,7 @@ function upsertPinnedTurnStatusEntry(state, entry) {
 }
 
 /**
- * @param {{ entries: Array<{ key: string, icon: string, provider: string, summary: string }> }} state
+ * @param {{ entries: Array<{ key: string, icon: string, provider?: string, summary: string }> }} state
  * @param {string} key
  * @param {string} prefix
  * @param {string} fallback
@@ -2035,8 +2102,8 @@ function getPreviousPinnedStatusDetail(state, key, prefix, fallback) {
 
 /**
  * @param {RuntimeEventOutboundEvent} event
- * @param {{ entries: Array<{ key: string, icon: string, provider: string, summary: string }> } | undefined} state
- * @returns {{ key: string, icon: string, provider: string, summary: string, closesStatus?: boolean, createsStatus?: boolean } | null}
+ * @param {{ entries: Array<{ key: string, icon: string, provider?: string, summary: string }> } | undefined} state
+ * @returns {{ key: string, icon: string, provider?: string, summary: string, closesStatus?: boolean, createsStatus?: boolean } | null}
  */
 function formatPinnedRuntimeStatusPresentation(event, state) {
   const runtimeEvent = event.event;
@@ -2058,16 +2125,15 @@ function formatPinnedRuntimeStatusPresentation(event, state) {
     if (status !== "started" && status !== "updated" && status !== "completed" && status !== "failed") {
       return null;
     }
-    const key = `tool:${runtimeEvent.tool.id}`;
+    const key = getPinnedRuntimeToolKey(displayTool);
     const previousSummary = state.entries.find((entry) => entry.key === key)?.summary;
-    const summary = formatRuntimeToolSummary(displayTool, event.cwd);
+    const summary = formatPinnedRuntimeToolSummary(displayTool, event.cwd);
     const summaryBase = previousSummary && shouldPreserveRuntimeSummary(previousSummary, summary)
       ? previousSummary
       : summary;
     return {
       key,
       icon: getRuntimeToolIcon(status),
-      provider,
       summary: appendReadLineRange(summaryBase, getRawAcpReadOutputLineRange(event)),
     };
   }
@@ -2080,11 +2146,11 @@ function formatPinnedRuntimeStatusPresentation(event, state) {
     if (!state) {
       return null;
     }
+    const command = normalizePinnedShellCommand(runtimeEvent.command.command);
     return {
-      key: `command:${runtimeEvent.command.command}`,
+      key: `command:${command}`,
       icon: getRuntimeCommandIcon(runtimeEvent.command.status),
-      provider,
-      summary: formatRuntimeCommandSummary(runtimeEvent.command.command),
+      summary: formatRuntimeCommandSummary(command),
     };
   }
 
@@ -2097,7 +2163,6 @@ function formatPinnedRuntimeStatusPresentation(event, state) {
     return {
       key: `file-change:${runtimeEvent.change.path}`,
       icon: "📝",
-      provider,
       summary: formatRuntimeProgressEntry(title, `\`${displayPath}\``),
     };
   }
@@ -2212,8 +2277,8 @@ function formatPinnedRuntimeStatusPresentation(event, state) {
 
 /**
  * @param {OutboundEvent} event
- * @param {{ entries: Array<{ key: string, icon: string, provider: string, summary: string }> } | undefined} state
- * @returns {{ key: string, icon: string, provider: string, summary: string, closesStatus?: boolean, createsStatus?: boolean } | null}
+ * @param {{ entries: Array<{ key: string, icon: string, provider?: string, summary: string }> } | undefined} state
+ * @returns {{ key: string, icon: string, provider?: string, summary: string, closesStatus?: boolean, createsStatus?: boolean } | null}
  */
 function formatPinnedStatusPresentation(event, state) {
   if (event.kind === "runtime_event") {
@@ -2268,7 +2333,6 @@ function formatPinnedStatusPresentation(event, state) {
       return {
         key: `file-change:${event.path}`,
         icon: "📝",
-        provider: "FILES",
         summary: formatRuntimeProgressEntry(title, `\`${displayPath}\``),
       };
     }
