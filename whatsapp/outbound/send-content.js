@@ -649,6 +649,31 @@ async function pinWhatsAppMessage(sock, chatId, key) {
 }
 
 /**
+ * @param {import('@whiskeysockets/baileys').WASocket} sock
+ * @param {string} chatId
+ * @param {import('@whiskeysockets/baileys').WAMessageKey | undefined} key
+ * @returns {Promise<void>}
+ */
+async function unpinWhatsAppMessage(sock, chatId, key) {
+  const pinKey = resolveOutgoingMessageKey(key, chatId);
+  if (!pinKey) {
+    return;
+  }
+  try {
+    await sock.sendMessage(chatId, {
+      pin: pinKey,
+      type: 0,
+    });
+  } catch (error) {
+    log.warn("Failed to unpin WhatsApp status message", {
+      chatId,
+      messageId: pinKey.id,
+      error: formatErrorMessage(error),
+    });
+  }
+}
+
+/**
  * @param {SubagentMessageEvent} event
  * @returns {SendContent}
  */
@@ -905,6 +930,30 @@ function isNoopRuntimeTool(tool) {
 }
 
 /**
+ * @param {string} name
+ * @returns {{ kind: "read" | "list", path?: string } | null}
+ */
+function parseRawFileToolTitle(name) {
+  const trimmed = name.trim();
+  const readMatch = /^Read\s+(.+)$/i.exec(trimmed);
+  if (readMatch?.[1]) {
+    const readPath = readMatch[1].trim().replace(/^["'`]|["'`]$/g, "");
+    if (readPath === "file") {
+      return null;
+    }
+    return { kind: "read", path: readPath };
+  }
+  const listMatch = /^List files(?:\s+in\s+(.+))?$/i.exec(trimmed);
+  if (listMatch) {
+    return {
+      kind: "list",
+      ...(listMatch[1] ? { path: listMatch[1].trim().replace(/^["'`]|["'`]$/g, "") } : {}),
+    };
+  }
+  return null;
+}
+
+/**
  * @param {Extract<RuntimeEventOutboundEvent["event"], { tool: unknown }>["tool"]} tool
  * @param {string | null | undefined} cwd
  * @returns {string}
@@ -922,6 +971,16 @@ function formatRuntimeToolSummary(tool, cwd) {
         lineLimitToRange(line, limit),
       );
     }
+  }
+  const rawFileTool = parseRawFileToolTitle(tool.name);
+  if (rawFileTool?.kind === "read" && rawFileTool.path) {
+    return formatRuntimeProgressEntry("Read", `\`${shortenPath(rawFileTool.path, cwd ?? null)}\``);
+  }
+  if (rawFileTool?.kind === "list") {
+    return formatRuntimeProgressEntry(
+      "List",
+      rawFileTool.path ? `\`${shortenPath(rawFileTool.path, cwd ?? null)}\`` : undefined,
+    );
   }
   const semanticSummary = formatSemanticToolSummary(tool.name, tool.arguments, cwd);
   if (semanticSummary) {
@@ -2264,6 +2323,7 @@ async function updatePinnedTurnStatus(sock, chatId, event, options, reactionRunt
   }
 
   if (presentation.closesStatus) {
+    await unpinWhatsAppMessage(sock, chatId, state.handle?.messageKey);
     turnStatusByChat.delete(chatId);
   }
   return state.handle;
@@ -3180,6 +3240,7 @@ export async function sendBlocks(sock, chatId, source, content, options, reactio
   /** @type {MessageHandle} */
   const handle = {
     transportHandleId,
+    messageKey: editKey,
     deliveryStatus: "sent",
     waitUntilSent: async () => handle,
     update: async (update) => {

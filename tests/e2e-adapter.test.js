@@ -493,6 +493,25 @@ describe("ACP runtime events through WhatsApp transport", () => {
     }
   }
 
+  /**
+   * @param {ReturnType<ReturnType<typeof createMockBaileysSocket>["getSentMessages"]>} sentMessages
+   * @returns {void}
+   */
+  function assertPinnedStatusUnpinned(sentMessages) {
+    const pinEntry = sentMessages.find((entry) => entry.msg.pin && typeof entry.msg.pin === "object" && entry.msg.type === 1);
+    const pinnedId = pinEntry && typeof pinEntry.msg.pin === "object"
+      ? /** @type {{ id?: unknown }} */ (pinEntry.msg.pin).id
+      : null;
+    assert.equal(typeof pinnedId, "string", `Expected pinned status payload, got ${JSON.stringify(sentMessages.map((entry) => entry.msg))}`);
+    assert.ok(
+      sentMessages.some((entry) => entry.msg.pin
+        && typeof entry.msg.pin === "object"
+        && /** @type {{ id?: unknown }} */ (entry.msg.pin).id === pinnedId
+        && entry.msg.type === 0),
+      `Expected pinned status ${pinnedId} to be unpinned at turn end, got ${JSON.stringify(sentMessages.map((entry) => entry.msg))}`,
+    );
+  }
+
   it("renders assistant, subagent, plan, tool, file-change, usage, and pinned turn status events distinctly", async () => {
     const { rendered, sentMessages } = await runAcpPrompt("Run the mock");
 
@@ -548,6 +567,7 @@ describe("ACP runtime events through WhatsApp transport", () => {
     assert.ok(!timeline.includes("Read file"), `Expected read actions to be suppressed from pinned status, got ${JSON.stringify(statusTexts)}`);
     assert.ok(!timeline.includes("List files"), `Expected list actions to be suppressed from pinned status, got ${JSON.stringify(statusTexts)}`);
     assert.ok(!timeline.includes("noise.js"), `Expected read/list paths to be suppressed from pinned status, got ${JSON.stringify(statusTexts)}`);
+    assertPinnedStatusUnpinned(sentMessages);
   });
 
   it("updates pinned status for ACP runtime errors", async () => {
@@ -923,6 +943,94 @@ describe("command through adapter", () => {
       texts.some(t => t.toLowerCase().includes("enabled")),
       `Should confirm enabling, got: ${JSON.stringify(texts)}`,
     );
+  });
+
+  it("processes idle !c as a command without starting or pinning a provider turn", async () => {
+    const harnessName = "e2e-idle-cancel";
+    const state = registerAcpTestHarness({
+      name: harnessName,
+      capabilities: { supportsCancel: true },
+    });
+    await updateChatConfig(chatId, (current) => ({
+      ...current,
+      is_enabled: true,
+      harness: harnessName,
+    }));
+    const { sock, getTextMessages, getSentMessages } = createMockBaileysSocket();
+
+    await adaptIncomingMessage(
+      createWAMessage({ text: "!c" }),
+      sock,
+      handleMessage,
+      testConfirmRegistry,
+      testUserResponseRegistry,
+    );
+
+    const texts = getTextMessages();
+    assert.ok(texts.some((text) => text.includes("Nothing to cancel.")), `Expected idle cancel response, got ${JSON.stringify(texts)}`);
+    assert.equal(state.turns.length, 0, "!c should not start a provider turn");
+    assert.ok(!getSentMessages().some((entry) => entry.msg.pin), `!c should not create a pinned status, got ${JSON.stringify(getSentMessages().map((entry) => entry.msg))}`);
+  });
+
+  it("processes !c while a provider turn is active", async () => {
+    const harnessName = "e2e-active-cancel";
+    /** @type {(value?: void) => void} */
+    let markStarted = () => {};
+    /** @type {(value?: void) => void} */
+    let releaseRun = () => {};
+    const started = new Promise((resolve) => {
+      markStarted = resolve;
+    });
+    const released = new Promise((resolve) => {
+      releaseRun = resolve;
+    });
+    const state = registerAcpTestHarness({
+      name: harnessName,
+      capabilities: { supportsCancel: true },
+      onSendTurn: async (input) => {
+        markStarted();
+        await released;
+        return {
+          response: [{ type: "text", text: `Finished: ${input.input ?? ""}` }],
+          messages: input.messages ?? [],
+          usage: ZERO_USAGE,
+        };
+      },
+      onCancel: async () => {
+        releaseRun();
+        return true;
+      },
+    });
+    await updateChatConfig(chatId, (current) => ({
+      ...current,
+      is_enabled: true,
+      harness: harnessName,
+    }));
+    const { sock, getTextMessages } = createMockBaileysSocket();
+    const activeTurn = adaptIncomingMessage(
+      createWAMessage({ text: "long running provider turn" }),
+      sock,
+      handleMessage,
+      testConfirmRegistry,
+      testUserResponseRegistry,
+    );
+    await Promise.race([
+      started,
+      new Promise((_, reject) => setTimeout(() => reject(new Error("Timed out waiting for active provider turn")), 1000)),
+    ]);
+
+    await adaptIncomingMessage(
+      createWAMessage({ text: "!c" }),
+      sock,
+      handleMessage,
+      testConfirmRegistry,
+      testUserResponseRegistry,
+    );
+    await activeTurn;
+
+    const texts = getTextMessages();
+    assert.ok(texts.some((text) => text.includes("Cancelled.")), `Expected active cancel response, got ${JSON.stringify(texts)}`);
+    assert.ok(state.cancelledSessions.includes(chatId), `Expected harness cancel for ${chatId}, got ${JSON.stringify(state.cancelledSessions)}`);
   });
 
   it("enabled chats still require an explicit or central ACP harness", async () => {

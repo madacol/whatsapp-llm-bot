@@ -25,6 +25,7 @@ export const ZERO_USAGE = {
  * @typedef {{
  *   turns: HarnessTurnInput[],
  *   stoppedSessions: string[],
+ *   cancelledSessions: string[],
  *   reset: () => void,
  * }} AcpTestHarnessState
  */
@@ -43,6 +44,7 @@ export const ZERO_USAGE = {
  *   state?: AcpTestHarnessState,
  *   capabilities?: Partial<HarnessCapabilities>,
  *   onSendTurn?: (input: HarnessTurnInput, context: AcpTestHarnessTurnContext) => Promise<AgentResult> | AgentResult,
+ *   onCancel?: (chatId: string | HarnessSessionRef) => Promise<boolean> | boolean,
  * }} AcpTestHarnessOptions
  */
 
@@ -55,9 +57,12 @@ export function createAcpTestHarnessState() {
     turns: [],
     /** @type {string[]} */
     stoppedSessions: [],
+    /** @type {string[]} */
+    cancelledSessions: [],
     reset() {
       state.turns.length = 0;
       state.stoppedSessions.length = 0;
+      state.cancelledSessions.length = 0;
     },
   };
   return state;
@@ -96,6 +101,10 @@ export function registerAcpTestHarness(options) {
           getCapabilities: () => capabilities,
           run: async () => {
             throw new Error(errorMessage);
+          },
+          cancel: async (chatId) => {
+            state.cancelledSessions.push(typeof chatId === "string" ? chatId : chatId.id);
+            return options.onCancel ? options.onCancel(chatId) : false;
           },
           handleCommand: async () => false,
           listSlashCommands: () => [],

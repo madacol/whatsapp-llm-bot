@@ -772,9 +772,13 @@ describe("sendEvent – runtime events", () => {
         edit: { id: "msg-1", remoteJid: "runtime-noise-chat", fromMe: true },
         linkPreview: null,
       },
+      {
+        pin: { id: "msg-1", remoteJid: "runtime-noise-chat", fromMe: true },
+        type: 0,
+      },
       { text: "🔄 *CODEX*  turn started", linkPreview: null },
       {
-        pin: { id: "msg-4", remoteJid: "runtime-noise-chat", fromMe: true },
+        pin: { id: "msg-5", remoteJid: "runtime-noise-chat", fromMe: true },
         type: 1,
         time: 86400,
       },
@@ -835,6 +839,68 @@ describe("sendEvent – runtime events", () => {
         pin: { id: "msg-3", remoteJid: "runtime-expired-turn-chat", fromMe: true },
         type: 1,
         time: 86400,
+      },
+      {
+        pin: { id: "msg-3", remoteJid: "runtime-expired-turn-chat", fromMe: true },
+        type: 0,
+      },
+    ]);
+  });
+
+  it("keeps raw read-title tools out of pinned runtime status", async () => {
+    const { sock, sent } = createMockSock();
+
+    await sendEvent(sock, "runtime-raw-read-title-chat", {
+      kind: "runtime_event",
+      event: {
+        type: "turn.started",
+        provider: "codex",
+        turn: { id: "turn-1", chatId: "runtime-raw-read-title-chat", status: "started" },
+      },
+    });
+
+    await sendEvent(sock, "runtime-raw-read-title-chat", {
+      kind: "runtime_event",
+      event: {
+        type: "tool.started",
+        provider: "codex",
+        tool: {
+          id: "read-title-1",
+          name: "Read bang-command-router.js",
+          arguments: {},
+        },
+      },
+    });
+
+    await sendEvent(sock, "runtime-raw-read-title-chat", {
+      kind: "runtime_event",
+      event: {
+        type: "turn.completed",
+        provider: "codex",
+        turn: { id: "turn-1", chatId: "runtime-raw-read-title-chat", status: "completed" },
+      },
+    });
+
+    const renderedTexts = sent
+      .filter((entry) => typeof entry.msg.text === "string")
+      .map((entry) => /** @type {string} */ (entry.msg.text));
+    assert.ok(!renderedTexts.join("\n").includes("*Read bang-command-router.js*"), `Expected raw read title to be normalized, got ${JSON.stringify(renderedTexts)}`);
+    assert.deepEqual(sent.map((entry) => entry.msg), [
+      { text: "🔄 *CODEX*  turn started", linkPreview: null },
+      {
+        pin: { id: "msg-1", remoteJid: "runtime-raw-read-title-chat", fromMe: true },
+        type: 1,
+        time: 86400,
+      },
+      { text: "🔧 *Read*  `bang-command-router.js`", linkPreview: null },
+      {
+        text: "✅ *CODEX*  turn completed",
+        edit: { id: "msg-1", remoteJid: "runtime-raw-read-title-chat", fromMe: true },
+        linkPreview: null,
+      },
+      {
+        pin: { id: "msg-1", remoteJid: "runtime-raw-read-title-chat", fromMe: true },
+        type: 0,
       },
     ]);
   });
