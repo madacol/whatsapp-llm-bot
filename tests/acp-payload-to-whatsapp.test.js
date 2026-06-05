@@ -698,6 +698,160 @@ describe("ACP payload to WhatsApp socket vertical slices", () => {
     });
   });
 
+  it("renders pinned status for real ACP request-method runtime events through Baileys", async () => {
+    const chatId = "acp-real-request-status-shapes@s.whatsapp.net";
+    const cwd = "/repo";
+    const { sock, sent } = createMockSock();
+
+    /**
+     * @returns {string[]}
+     */
+    function pinnedStatusTexts() {
+      const pinEntry = sent.find((entry) => entry.msg.pin && typeof entry.msg.pin === "object" && entry.msg.type === 1);
+      const pinnedId = pinEntry && typeof pinEntry.msg.pin === "object"
+        ? /** @type {{ id?: unknown }} */ (pinEntry.msg.pin).id
+        : null;
+      assert.equal(typeof pinnedId, "string", `Expected pinned status payload, got ${JSON.stringify(sent.map((entry) => entry.msg))}`);
+      return sent
+        .filter((entry, index) => {
+          if (typeof entry.msg.text !== "string") {
+            return false;
+          }
+          if (`msg-${index + 1}` === pinnedId) {
+            return true;
+          }
+          return typeof entry.msg.edit === "object"
+            && entry.msg.edit !== null
+            && /** @type {{ id?: unknown }} */ (entry.msg.edit).id === pinnedId;
+        })
+        .map((entry) => /** @type {string} */ (entry.msg.text));
+    }
+
+    /**
+     * @param {import("../harnesses/harness-runtime-events.js").HarnessRuntimeEvent} event
+     * @returns {Promise<string>}
+     */
+    async function sendRuntimeEvent(event) {
+      await sendEvent(sock, chatId, {
+        kind: "runtime_event",
+        cwd,
+        event,
+      });
+      return pinnedStatusTexts().at(-1) ?? "";
+    }
+
+    assert.equal(await sendRuntimeEvent({
+      type: "turn.started",
+      provider: "acp",
+      turn: { id: "turn-1", chatId, status: "started" },
+    }), "🔄 *ACP*  turn started");
+
+    assert.equal(await sendRuntimeEvent({
+      type: "request.opened",
+      provider: "acp",
+      request: {
+        id: "acp-request:1",
+        kind: "tool-user-input",
+        summary: "Sensitive mock operation",
+      },
+    }), [
+      "⏳ *ACP*  approval needed: Sensitive mock operation",
+      "🔄 *ACP*  turn started",
+    ].join("\n"));
+
+    assert.equal(await sendRuntimeEvent({
+      type: "request.resolved",
+      provider: "acp",
+      request: {
+        id: "acp-request:1",
+        kind: "tool-user-input",
+        summary: "selected:allow-once",
+      },
+    }), [
+      "✅ *ACP*  approval resolved: Sensitive mock operation",
+      "🔄 *ACP*  turn started",
+    ].join("\n"));
+
+    assert.equal(await sendRuntimeEvent({
+      type: "user-input.requested",
+      provider: "acp",
+      request: {
+        id: "acp-user-input:2",
+        questions: [{
+          id: "strategy",
+          question: "Migration Strategy",
+          options: [{ label: "Conservative" }, { label: "Complete" }],
+        }],
+      },
+    }), [
+      "⏳ *ACP*  input needed: Migration Strategy",
+      "✅ *ACP*  approval resolved: Sensitive mock operation",
+      "🔄 *ACP*  turn started",
+    ].join("\n"));
+
+    assert.equal(await sendRuntimeEvent({
+      type: "user-input.resolved",
+      provider: "acp",
+      request: {
+        id: "acp-user-input:2",
+        questions: [{
+          id: "strategy",
+          question: "Migration Strategy",
+          options: [{ label: "Conservative" }, { label: "Complete" }],
+        }],
+      },
+    }), [
+      "✅ *ACP*  input resolved: Migration Strategy",
+      "✅ *ACP*  approval resolved: Sensitive mock operation",
+      "🔄 *ACP*  turn started",
+    ].join("\n"));
+
+    assert.equal(await sendRuntimeEvent({
+      type: "command.started",
+      provider: "acp",
+      command: {
+        command: "node -e process.stdout.write('terminal ok')",
+        status: "started",
+      },
+    }), [
+      "🔧 *Shell*  `node -e process.stdout.write('terminal ok')`",
+      "✅ *ACP*  input resolved: Migration Strategy",
+      "✅ *ACP*  approval resolved: Sensitive mock operation",
+      "🔄 *ACP*  turn started",
+    ].join("\n"));
+
+    assert.equal(await sendRuntimeEvent({
+      type: "command.completed",
+      provider: "acp",
+      command: {
+        command: "node -e process.stdout.write('terminal ok')",
+        status: "completed",
+      },
+    }), [
+      "✅ *Shell*  `node -e process.stdout.write('terminal ok')`",
+      "✅ *ACP*  input resolved: Migration Strategy",
+      "✅ *ACP*  approval resolved: Sensitive mock operation",
+      "🔄 *ACP*  turn started",
+    ].join("\n"));
+
+    assert.equal(await sendRuntimeEvent({
+      type: "file-change.completed",
+      provider: "acp",
+      change: {
+        path: "/repo/acp-fs-write.txt",
+        kind: "update",
+        source: "direct-write",
+        cwd,
+      },
+    }), [
+      "📝 *File*  `acp-fs-write.txt`",
+      "✅ *Shell*  `node -e process.stdout.write('terminal ok')`",
+      "✅ *ACP*  input resolved: Migration Strategy",
+      "✅ *ACP*  approval resolved: Sensitive mock operation",
+      "... +1 earlier events",
+    ].join("\n"));
+  });
+
   it("suppresses ACP editing placeholders and renders the completed diff through Baileys", async () => {
     const { sent, trace } = await observeAcpPayloadSliceToBaileys([
       {
