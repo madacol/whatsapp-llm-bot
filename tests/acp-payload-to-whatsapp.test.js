@@ -56,6 +56,7 @@ function createMockSock() {
  *   cwd: string | null,
  *   visibility: import("../chat-output-visibility.js").OutputVisibility,
  *   outboundEvents: Array<{ via: "send" | "reply", event: SendContent }>,
+ *   pinnedStatusDelivery: Array<Record<string, unknown>>,
  * }} input
  * @returns {AgentIOHooks}
  */
@@ -64,11 +65,21 @@ function buildObservedWhatsAppHooks(input) {
     {
       send: async (event) => {
         input.outboundEvents.push({ via: "send", event });
-        return sendEvent(input.sock, input.chatId, event, undefined, undefined, { outputVisibility: input.visibility });
+        return sendEvent(input.sock, input.chatId, event, undefined, undefined, {
+          outputVisibility: input.visibility,
+          pinnedStatusDeliveryObserver: (deliveryEvent) => {
+            input.pinnedStatusDelivery.push(deliveryEvent);
+          },
+        });
       },
       reply: async (event) => {
         input.outboundEvents.push({ via: "reply", event });
-        return sendEvent(input.sock, input.chatId, event, undefined, undefined, { outputVisibility: input.visibility });
+        return sendEvent(input.sock, input.chatId, event, undefined, undefined, {
+          outputVisibility: input.visibility,
+          pinnedStatusDeliveryObserver: (deliveryEvent) => {
+            input.pinnedStatusDelivery.push(deliveryEvent);
+          },
+        });
       },
       select: async () => "",
       confirm: async () => true,
@@ -88,6 +99,7 @@ function buildObservedWhatsAppHooks(input) {
  *     acpPayloads: Record<string, unknown>[],
  *     runtimeEvents: Array<import("../harnesses/harness-runtime-events.js").HarnessRuntimeEvent>,
  *     outboundEvents: Array<{ via: "send" | "reply", event: SendContent }>,
+ *     pinnedStatusDelivery: Array<Record<string, unknown>>,
  *   },
  * }>}
  */
@@ -99,6 +111,8 @@ async function observeAcpPayloadSliceToBaileys(payloads, options = {}) {
   const runtimeEvents = [];
   /** @type {Array<{ via: "send" | "reply", event: SendContent }>} */
   const outboundEvents = [];
+  /** @type {Array<Record<string, unknown>>} */
+  const pinnedStatusDelivery = [];
   const model = createAcpRuntimeModel();
   const hooks = buildObservedWhatsAppHooks({
     sock,
@@ -106,6 +120,7 @@ async function observeAcpPayloadSliceToBaileys(payloads, options = {}) {
     cwd,
     visibility: options.visibility ?? DEFAULT_OUTPUT_VISIBILITY,
     outboundEvents,
+    pinnedStatusDelivery,
   });
   const dispatcher = createHarnessRuntimeEventDispatcher({
     provider: "acp",
@@ -138,6 +153,7 @@ async function observeAcpPayloadSliceToBaileys(payloads, options = {}) {
       acpPayloads: payloads,
       runtimeEvents,
       outboundEvents,
+      pinnedStatusDelivery,
     },
   };
 }
@@ -150,6 +166,7 @@ async function observeAcpPayloadSliceToBaileys(payloads, options = {}) {
  *   trace: {
  *     adapterEvents: Array<{ type: string, provider: string } & Record<string, unknown>>,
  *     outboundEvents: Array<{ via: "send" | "reply", event: SendContent }>,
+ *     pinnedStatusDelivery: Array<Record<string, unknown>>,
  *   },
  * }>}
  */
@@ -161,12 +178,15 @@ async function runAcpMockProcessToWhatsApp() {
   const adapterEvents = [];
   /** @type {Array<{ via: "send" | "reply", event: SendContent }>} */
   const outboundEvents = [];
+  /** @type {Array<Record<string, unknown>>} */
+  const pinnedStatusDelivery = [];
   const hooks = buildObservedWhatsAppHooks({
     sock,
     chatId,
     cwd: workdir,
     visibility: { ...DEFAULT_OUTPUT_VISIBILITY, toolDetails: true, usage: true },
     outboundEvents,
+    pinnedStatusDelivery,
   });
   const dispatcher = createHarnessRuntimeEventDispatcher({
     provider: "acp",
@@ -207,7 +227,7 @@ async function runAcpMockProcessToWhatsApp() {
       result,
       sent,
       relayed,
-      trace: { adapterEvents, outboundEvents },
+      trace: { adapterEvents, outboundEvents, pinnedStatusDelivery },
     };
   } finally {
     unsubscribe?.();
@@ -726,6 +746,16 @@ describe("ACP payload to WhatsApp socket vertical slices", () => {
         edit: { id: "msg-3", remoteJid: chatId, fromMe: true },
         linkPreview: null,
       },
+    ]);
+    assert.deepEqual(trace.pinnedStatusDelivery.map((event) => [
+      event.type,
+      event.chatId,
+      event.messageId,
+      event.firstLine,
+      event.error,
+    ]), [
+      ["status.created", chatId, "msg-1", "🔄 *ACP*  turn started", undefined],
+      ["pin.succeeded", chatId, "msg-1", undefined, undefined],
     ]);
   });
 
