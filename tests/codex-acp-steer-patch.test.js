@@ -11,7 +11,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const codexAcpEntryPoint = path.join(__dirname, "..", "node_modules", "@agentclientprotocol", "codex-acp", "dist", "index.js");
 
 describe("patched codex-acp steering", () => {
-  it("exposes fast mode config and sends the Codex fast service tier", async () => {
+  it("stores fast mode in ACP session state and applies the Codex service tier per turn", async () => {
     const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "codex-acp-fast-"));
     const recordPath = path.join(tempDir, "events.jsonl");
     const fakeCodexPath = path.join(__dirname, "fixtures", "fake-codex-app-server.js");
@@ -76,7 +76,7 @@ describe("patched codex-acp steering", () => {
     }
   });
 
-  it("surfaces a clear error when the Codex app server rejects a fast turn", async () => {
+  it("surfaces a clear per-turn error when the Codex app server rejects fast service tier", async () => {
     const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "codex-acp-fast-reject-"));
     const recordPath = path.join(tempDir, "events.jsonl");
     const fakeCodexPath = path.join(__dirname, "fixtures", "fake-codex-app-server.js");
