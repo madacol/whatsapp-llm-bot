@@ -196,10 +196,6 @@ async function handleMessage(parsed) {
         });
       }
       break;
-    case "thread/settings/update":
-      record("thread/settings/update", params);
-      respond(id, {});
-      break;
     case "turn/steer":
       record("turn/steer", params);
       respond(id, {});

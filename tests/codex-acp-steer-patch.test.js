@@ -66,9 +66,7 @@ describe("patched codex-acp steering", () => {
         .trim()
         .split("\n")
         .map((line) => JSON.parse(line));
-      assert.ok(records.some((record) => record.event === "thread/settings/update"
-        && record.value.threadId === "fake-thread-1"
-        && record.value.serviceTier === "fast"), JSON.stringify(records));
+      assert.equal(records.some((record) => record.event === "thread/settings/update"), false, JSON.stringify(records));
       assert.ok(records.some((record) => record.event === "turn/start"
         && record.value.threadId === "fake-thread-1"
         && record.value.serviceTier === "fast"), JSON.stringify(records));
@@ -123,10 +121,7 @@ describe("patched codex-acp steering", () => {
         .map((line) => JSON.parse(line));
       const turnStarts = records.filter((record) => record.event === "turn/start");
       assert.equal(turnStarts[0]?.value.serviceTier, "fast");
-      assert.ok(records.some((record) => record.event === "thread/settings/update"
-        && record.value.serviceTier === "fast"), JSON.stringify(records));
-      assert.equal(records.some((record) => record.event === "thread/settings/update"
-        && record.value.serviceTier === null), false, JSON.stringify(records));
+      assert.equal(records.some((record) => record.event === "thread/settings/update"), false, JSON.stringify(records));
     } finally {
       await connection.close();
       await fs.rm(tempDir, { recursive: true, force: true });
