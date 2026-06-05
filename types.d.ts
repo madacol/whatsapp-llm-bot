@@ -376,6 +376,7 @@ type MessageInspectState =
 /** Handle to a sent message, providing semantic lifecycle control. */
 type MessageHandle = {
   readonly transportHandleId?: string;
+  readonly messageKey?: import("@whiskeysockets/baileys").WAMessageKey;
   readonly deliveryStatus?: "sent" | "queued";
   readonly queueId?: number;
   waitUntilSent?: (options?: { timeoutMs?: number }) => Promise<MessageHandle | undefined>;
