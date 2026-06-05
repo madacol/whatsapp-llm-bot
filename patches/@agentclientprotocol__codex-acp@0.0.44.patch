@@ -1,6 +1,6 @@
 --- a/dist/index.js
 +++ b/dist/index.js
-@@ -17361,16 +17361,43 @@
+@@ -17361,16 +17361,47 @@
      status: "completed"
    };
  }
@@ -44,11 +44,20 @@
 +        }
 +      } : {})
      };
-   } else if (commandAction.type === "search") {
-     return {
-@@ -17382,12 +17409,14 @@
-     };
-   } else if (commandAction.type === "listFiles") {
+  } else if (commandAction.type === "search") {
+    return {
+      sessionUpdate: "tool_call",
+      toolCallId: id,
+      status: acpStatus,
+      kind: "search",
+-      title: createSearchTitle(commandAction.query, commandAction.path)
++      title: createSearchTitle(commandAction.query, commandAction.path),
++      rawInput: {
++        pattern: commandAction.query,
++        path: commandAction.path
++      }
+    };
+  } else if (commandAction.type === "listFiles") {
      const title = commandAction.path ? `List files in '${commandAction.path}'` : "List files";
 +    const locationPath = path2.resolve(cwd, commandAction.path ?? ".");
      return {

@@ -177,19 +177,6 @@ function getRawAcpTitle(update) {
 }
 
 /**
- * @param {string} title
- * @returns {{ pattern: string, path: string } | null}
- */
-function parseRawAcpSearchTitle(title) {
-  const match = title.match(/^Search for '(.+)' in (.+)$/);
-  if (!match) {
-    return null;
-  }
-  const [, pattern, path] = match;
-  return pattern && path ? { pattern, path } : null;
-}
-
-/**
  * @param {string | null} title
  * @returns {boolean}
  */
@@ -432,19 +419,6 @@ function buildWhatsAppRuntimeToolFromRawAcp(tool, event) {
     const webTool = buildWhatsAppWebRuntimeToolFromRawAcp(tool, update);
     if (webTool) {
       return webTool;
-    }
-    const title = getRawAcpTitle(update);
-    const search = title ? parseRawAcpSearchTitle(title) : null;
-    if (search) {
-      return {
-        ...tool,
-        name: "Search",
-        arguments: {
-          ...tool.arguments,
-          pattern: search.pattern,
-          path: search.path,
-        },
-      };
     }
   }
   if (update.kind === "execute") {
@@ -949,14 +923,6 @@ function stripSimpleMarkdown(value) {
 }
 
 /**
- * @param {string} value
- * @returns {string}
- */
-function boldTarget(value) {
-  return `*${value.trim()}*`;
-}
-
-/**
  * @param {string} tool
  * @param {string} [detail]
  * @returns {string}
@@ -995,22 +961,6 @@ function formatCompactRead(paths, line, limit) {
     .map((filePath) => `\`${filePath}\``);
   const summary = formatCompactEntry("Read", displayPaths.length > 0 ? displayPaths.join(", ") : undefined);
   return appendReadLineRange(summary, lineLimitToRange(line, limit));
-}
-
-/**
- * @param {string} toolName
- * @returns {string | null}
- */
-function formatGenericSearchToolName(toolName) {
-  const match = toolName.match(/^Search for '(.+)' in (.+)$/);
-  if (!match) {
-    return null;
-  }
-  const [, pattern, target] = match;
-  if (!pattern || !target) {
-    return null;
-  }
-  return formatCompactEntry("Search", `\`${pattern}\` in ${boldTarget(target)}`);
 }
 
 /**
@@ -1064,10 +1014,6 @@ function formatGenericTextDetail(args) {
  * @returns {string}
  */
 function formatGenericCompactToolName(toolName, args, cwd) {
-  const search = formatGenericSearchToolName(toolName);
-  if (search) {
-    return search;
-  }
   const detail = formatGenericPathDetail(args, cwd) ?? formatGenericTextDetail(args);
   return formatCompactEntry(toolName, detail);
 }
