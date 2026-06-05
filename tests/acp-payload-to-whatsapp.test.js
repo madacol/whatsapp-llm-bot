@@ -435,6 +435,45 @@ describe("ACP payload to WhatsApp socket vertical slices", () => {
     );
   });
 
+  it("shows thinking in pinned status when an ACP thought chunk arrives", async () => {
+    const chatId = "acp-payload-thinking-status@s.whatsapp.net";
+    const { sent, trace } = await observeAcpPayloadSliceToBaileys([
+      {
+        sessionId: "s1",
+        update: {
+          sessionUpdate: "agent_thought_chunk",
+          content: { type: "text", text: "Inspecting the request." },
+        },
+      },
+    ], {
+      chatId,
+      beforeEvents: [{
+        type: "turn.started",
+        provider: "acp",
+        turn: { id: "turn-1", chatId, status: "started" },
+      }],
+    });
+
+    assert.deepEqual(trace.runtimeEvents.map((event) => event.type), [
+      "turn.started",
+      "reasoning.updated",
+    ]);
+    assert.equal(sent[2]?.msg.text, [
+      "💭 *LLM*  thinking",
+      "🔄 *ACP*  turn started",
+    ].join("\n"));
+    assert.deepEqual(trace.pinnedStatusDelivery.map((event) => [
+      event.type,
+      event.chatId,
+      event.messageId,
+      event.firstLine,
+    ]), [
+      ["status.created", chatId, "msg-1", "🔄 *ACP*  turn started"],
+      ["pin.succeeded", chatId, "msg-1", undefined],
+      ["status.edited", chatId, "msg-1", "💭 *LLM*  thinking"],
+    ]);
+  });
+
   it("suppresses ACP editing placeholders and renders the completed diff through Baileys", async () => {
     const { sent, trace } = await observeAcpPayloadSliceToBaileys([
       {
