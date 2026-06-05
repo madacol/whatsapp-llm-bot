@@ -17,7 +17,6 @@ import { appendUniqueContentBlocks, getDeliveredContentSignature } from "../cont
 import { buildAgentIoHooks } from "./build-agent-io-hooks.js";
 import { buildHarnessTurnInput } from "./build-harness-turn-input.js";
 import { buildRunConfig } from "./build-run-config.js";
-import { generateSessionTitle } from "./session-title.js";
 import { getChatDb } from "../db.js";
 import { resolveOutputVisibility } from "../chat-output-visibility.js";
 import { createWorkspaceBindingService } from "../workspace-binding-service.js";
@@ -26,6 +25,8 @@ import { createWorkspaceLifecycleService } from "../workspace-lifecycle-service.
 import { buildLiveInputText } from "./live-input-text.js";
 import { defaultRestartGate } from "../restart-gate.js";
 import { createBangCommandRouter } from "../commands/bang-command-router.js";
+import { decideTurnRoute } from "./turn-routing.js";
+import { createHarnessSessionBindingService } from "./harness-session-binding.js";
 
 const log = createLogger("conversation:runner");
 const NO_LIVE_INPUT_TARGET = Object.freeze({ supportsLiveInput: false });
@@ -36,19 +37,6 @@ const NO_LIVE_INPUT_TARGET = Object.freeze({ supportsLiveInput: false });
  */
 function isTextBlock(block) {
   return block.type === "text";
-}
-
-/**
- * @param {ResolvedChatBinding} binding
- * @param {TextContentBlock | undefined} firstBlock
- * @returns {boolean}
- */
-function isArchivedWorkspaceCodingRequest(binding, firstBlock) {
-  return binding.kind === "workspace"
-    && binding.workspace.status === "archived"
-    && !!firstBlock
-    && !firstBlock.text.startsWith("!")
-    && !firstBlock.text.startsWith("/");
 }
 
 /**
@@ -130,6 +118,18 @@ function getTopLevelText(content) {
     .filter(isTextBlock)
     .map((block) => block.text)
     .join("\n");
+}
+
+/**
+ * @param {ChatTurn} turn
+ * @returns {UserMessage}
+ */
+function buildUserMessage(turn) {
+  return {
+    role: "user",
+    content: turn.content,
+    ...(turn.facts.isGroup && turn.senderName ? { senderName: turn.senderName } : {}),
+  };
 }
 
 /**
@@ -333,23 +333,22 @@ export function createConversationRunner({ store, llmClient, restartCommandHandl
     workspacePresentation,
     dispatchTurn,
   });
-  /**
-   * @param {string} chatId
-   * @param {import("../store.js").ChatRow | undefined} chatInfo
-   * @returns {Promise<boolean>}
-   */
-  async function clearActiveHarnessSession(chatId, chatInfo) {
-    const selection = await resolveConversationHarnessSelection(chatInfo);
-    const { harnessInstance } = resolveConversationHarnessFromSelection(selection);
-    harnessSessionDirectory.remove(chatId);
-    let stopped = false;
-    try {
-      stopped = !!(await harnessInstance?.adapter?.stopSession(chatId));
-    } finally {
-      await saveHarnessSession(chatId, null);
-    }
-    return stopped;
-  }
+  const sessionBinding = createHarnessSessionBindingService({
+    directory: harnessSessionDirectory,
+    saveHarnessSession,
+    archiveHarnessSession,
+    getHarnessSessionHistory,
+    restoreHarnessSession,
+    pushHarnessForkStack,
+    popHarnessForkStack,
+    getMessages,
+    llmClient,
+    log,
+    resolveHarnessInstanceForChat: async (chatInfo) => {
+      const selection = await resolveConversationHarnessSelection(chatInfo);
+      return resolveConversationHarnessFromSelection(selection).harnessInstance;
+    },
+  });
 
   const bangCommandRouter = createBangCommandRouter({
     workspaceControl: workspaceLifecycle,
@@ -360,7 +359,7 @@ export function createConversationRunner({ store, llmClient, restartCommandHandl
       const { harness } = resolveConversationHarnessFromSelection(selection);
       return !!(await harness?.cancel?.(chatId));
     },
-    clearActiveSession: clearActiveHarnessSession,
+    clearActiveSession: sessionBinding.clearActiveSession,
   });
   let harnessRuntimeTurnSequence = 0;
 
@@ -400,32 +399,6 @@ export function createConversationRunner({ store, llmClient, restartCommandHandl
   }
 
   /**
-   * Archive the active harness session, attaching a generated title when possible.
-   * Falls back to a plain archive if title generation fails.
-   * @param {string} chatId
-   * @param {import("../store.js").ChatRow | undefined} chatInfo
-   * @returns {Promise<HarnessSessionHistoryEntry | null>}
-   */
-  async function archiveSessionWithGeneratedTitle(chatId, chatInfo) {
-    if (!chatInfo?.harness_session_id || !chatInfo?.harness_session_kind) {
-      return archiveHarnessSession(chatId);
-    }
-
-    try {
-      const messageRows = await getMessages(chatId);
-      const title = await generateSessionTitle({
-        llmClient,
-        chatInfo,
-        messageRows,
-      });
-      return archiveHarnessSession(chatId, { title });
-    } catch (error) {
-      log.warn("Failed to generate session title before archive:", error);
-      return archiveHarnessSession(chatId);
-    }
-  }
-
-  /**
    * Handle a `!command` message.
    * @param {{
    *   turn: ChatTurn,
@@ -455,8 +428,7 @@ export function createConversationRunner({ store, llmClient, restartCommandHandl
    *   runConfig: HarnessRunConfig,
    *   turnInput: HarnessTurnInput,
    *   turnId: string,
-   *   getResumeCursor: () => string | null,
-   *   saveHarnessSessionAndBinding: import("../store.js").Store["saveHarnessSession"],
+   *   sessionBinding: Awaited<ReturnType<ReturnType<typeof createHarnessSessionBindingService>["beginTurn"]>>,
    * }} input
    * @returns {Promise<AgentResult>}
    */
@@ -468,8 +440,7 @@ export function createConversationRunner({ store, llmClient, restartCommandHandl
     runConfig,
     turnInput,
     turnId,
-    getResumeCursor,
-    saveHarnessSessionAndBinding,
+    sessionBinding,
   }) {
     const adapter = harnessInstance.adapter;
     if (!adapter) {
@@ -513,22 +484,11 @@ export function createConversationRunner({ store, llmClient, restartCommandHandl
         chatId,
         turnId,
         runConfig: turnInput.runConfig ?? runConfig,
-        resumeCursor: getResumeCursor(),
+        resumeCursor: sessionBinding.getResumeCursor(),
         hooks,
       });
       await Promise.allSettled([...pendingEventHandlers]);
-      const activeSession = adapter
-        .listSessions()
-        .find((session) => session.chatId === chatId);
-      const currentResumeCursor = getResumeCursor();
-      if (activeSession?.resumeCursor) {
-        await saveHarnessSessionAndBinding(chatId, {
-          id: activeSession.resumeCursor,
-          kind: /** @type {HarnessSessionRef["kind"]} */ (harness.getName()),
-        });
-      } else if (currentResumeCursor && activeSession && ["stopped", "error"].includes(activeSession.status)) {
-        await saveHarnessSessionAndBinding(chatId, null);
-      }
+      await sessionBinding.syncFromAdapter(adapter, harness.getName());
       const runtimeUsage = runtimeDispatcher.result.usage;
       const hasRuntimeUsage = runtimeUsage.promptTokens > 0
         || runtimeUsage.completionTokens > 0
@@ -573,47 +533,14 @@ export function createConversationRunner({ store, llmClient, restartCommandHandl
     const harnessName = harness.getName();
     const runConfig = buildRunConfig(chatId, chatInfo, turn.chatName, harnessName, resolvedBinding);
     const turnId = createHarnessRuntimeTurnId(chatId, ++harnessRuntimeTurnSequence);
-    let currentResumeCursor = chatInfo?.harness_session_kind === harnessName
-      ? chatInfo.harness_session_id
-      : null;
-    if (harnessInstance?.adapter) {
-      const startedAdapterSession = await harnessInstance.adapter.startSession({
-        chatId,
-        runConfig,
-        resumeCursor: currentResumeCursor,
-      });
-      currentResumeCursor = startedAdapterSession.resumeCursor ?? currentResumeCursor;
-    }
-
-    /**
-     * @param {"running" | "ready" | "stopped" | "error"} status
-     * @param {string | null | undefined} resumeCursor
-     * @returns {void}
-     */
-    const upsertSessionBinding = (status, resumeCursor) => {
-      if (!harnessInstance) {
-        return;
-      }
-      if (resumeCursor !== undefined) {
-        currentResumeCursor = resumeCursor;
-      }
-      harnessSessionDirectory.upsert({
-        chatId,
-        harnessName,
-        instanceId: harnessInstance.instanceId,
-        status,
-        activeTurnId: status === "running" ? turnId : null,
-        resumeCursor: currentResumeCursor,
-        runtimeMode: runConfig.sandboxMode ?? null,
-        runtimePayload: {
-          workdir: runConfig.workdir ?? null,
-          model: runConfig.model ?? null,
-          reasoningEffort: runConfig.reasoningEffort ?? null,
-          approvalPolicy: runConfig.approvalPolicy ?? null,
-          approvalsReviewer: runConfig.approvalsReviewer ?? null,
-        },
-      });
-    };
+    const activeSessionBinding = await sessionBinding.beginTurn({
+      chatId,
+      chatInfo,
+      harnessName,
+      harnessInstance,
+      runConfig,
+      turnId,
+    });
 
     /** @type {Set<string>} */
     const deliveredContentSignatures = new Set();
@@ -626,15 +553,7 @@ export function createConversationRunner({ store, llmClient, restartCommandHandl
       },
     );
     runCoordinator.markRunActive(chatId);
-    upsertSessionBinding("running", undefined);
-
-    /** @type {import("../store.js").Store["saveHarnessSession"]} */
-    const saveHarnessSessionAndBinding = async (sessionChatId, sessionRef) => {
-      await saveHarnessSession(sessionChatId, sessionRef);
-      if (sessionChatId === chatId) {
-        upsertSessionBinding(sessionRef ? "ready" : "stopped", sessionRef?.id ?? null);
-      }
-    };
+    activeSessionBinding.markRunning();
 
     const bufferedTexts = runCoordinator.consumeBufferedTexts(chatId);
     if (!harnessInstance?.adapter) {
@@ -668,10 +587,9 @@ export function createConversationRunner({ store, llmClient, restartCommandHandl
         bufferedTexts,
       }),
       turnId,
-      getResumeCursor: () => currentResumeCursor,
-      saveHarnessSessionAndBinding,
+      sessionBinding: activeSessionBinding,
     });
-    upsertSessionBinding("ready", undefined);
+    activeSessionBinding.markReady();
 
     return { result, deliveredContentSignatures };
   }
@@ -683,13 +601,12 @@ export function createConversationRunner({ store, llmClient, restartCommandHandl
    *   chatInfo: import("../store.js").ChatRow | undefined,
    *   context: ExecuteActionContext,
    *   persona: AgentDefinition | null,
-   *   harness: AgentHarness | null,
-   *   harnessInstance: ReturnType<typeof resolveHarnessInstance> | null,
-   *   harnessOwnerKey: string,
-   *   isSlashCommand?: boolean,
-   *   resolvedBinding: ResolvedChatBinding,
-   * }} input
-   * @returns {Promise<ChatTurn | null>}
+ *   harness: AgentHarness | null,
+ *   harnessInstance: ReturnType<typeof resolveHarnessInstance> | null,
+ *   harnessOwnerKey: string,
+ *   resolvedBinding: ResolvedChatBinding,
+ * }} input
+ * @returns {Promise<ChatTurn | null>}
    */
   async function handleLlmMessage({
     turn,
@@ -699,23 +616,11 @@ export function createConversationRunner({ store, llmClient, restartCommandHandl
     harness,
     harnessInstance,
     harnessOwnerKey,
-    isSlashCommand,
     resolvedBinding,
   }) {
-    const { chatId, senderIds, content, senderName, facts } = turn;
-    const willRespond = isSlashCommand || shouldRespond(chatInfo, facts);
-
-    /** @type {UserMessage} */
-    const message = {
-      role: "user",
-      content,
-      ...(facts.isGroup && senderName ? { senderName } : {}),
-    };
+    const { chatId, senderIds, content } = turn;
+    const message = buildUserMessage(turn);
     await addMessage(chatId, message, senderIds);
-
-    if (!willRespond) {
-      return null;
-    }
 
     log.debug("LLM will respond");
 
@@ -768,10 +673,7 @@ export function createConversationRunner({ store, llmClient, restartCommandHandl
         }
       }
     } catch (error) {
-      const binding = harnessSessionDirectory.getBinding(chatId);
-      if (binding) {
-        harnessSessionDirectory.upsert({ ...binding, status: "error" });
-      }
+      sessionBinding.markError(chatId);
       log.error("handleLlmMessage failed:", error);
       const errorMessage = errorToString(error);
       try {
@@ -806,10 +708,16 @@ export function createConversationRunner({ store, llmClient, restartCommandHandl
       turn.chatName,
       turn.facts.isGroup,
     );
-    const harnessSelection = await resolveConversationHarnessSelection(chatInfo);
-
     const firstBlock = content.find(isTextBlock);
-    if (isArchivedWorkspaceCodingRequest(resolvedBinding, firstBlock)) {
+    const route = decideTurnRoute({
+      chatInfo,
+      resolvedBinding,
+      firstText: firstBlock?.text ?? null,
+      hasPendingRun: runCoordinator.hasPendingRun(chatId),
+      shouldRespond: shouldRespond(chatInfo, turn.facts),
+    });
+
+    if (route.type === "archived-workspace-error") {
       await context.reply(contentEvent(
         "error",
         "This workspace is archived and no longer accepts work.",
@@ -817,7 +725,7 @@ export function createConversationRunner({ store, llmClient, restartCommandHandl
       return null;
     }
 
-    if (firstBlock?.text?.startsWith("!")) {
+    if (route.type === "bang-command" && firstBlock) {
       await handleCommandMessage({
         turn,
         chatId,
@@ -831,18 +739,12 @@ export function createConversationRunner({ store, llmClient, restartCommandHandl
       return null;
     }
 
-    const isSlashCommand = firstBlock?.text?.startsWith("/");
-    if (!isSlashCommand && runCoordinator.hasPendingRun(chatId)) {
-      /** @type {UserMessage} */
-      const message = {
-        role: "user",
-        content,
-        ...(turn.facts.isGroup && turn.senderName ? { senderName: turn.senderName } : {}),
-      };
-      await addMessage(chatId, message, senderIds);
-      if (!shouldRespond(chatInfo, turn.facts)) {
+    if (route.type === "pending-followup") {
+      await addMessage(chatId, buildUserMessage(turn), senderIds);
+      if (!route.shouldRespond) {
         return null;
       }
+      const harnessSelection = await resolveConversationHarnessSelection(chatInfo);
       const userText = await buildPendingRunInputText({ chatId, chatInfo, content });
       const lifecycleDecision = await runCoordinator.beginRun({
         turn,
@@ -857,14 +759,20 @@ export function createConversationRunner({ store, llmClient, restartCommandHandl
       return null;
     }
 
+    if (route.type === "persist-only") {
+      await addMessage(chatId, buildUserMessage(turn), senderIds);
+      return null;
+    }
+
+    if (route.type === "disabled-slash-command") {
+      await context.reply(contentEvent("error", `Bot is not enabled in this chat. Use ${formatChatSettingsCommand("enabled on")}`));
+      return null;
+    }
+
+    const harnessSelection = await resolveConversationHarnessSelection(chatInfo);
     const { persona, harness, harnessInstance } = resolveConversationHarnessFromSelection(harnessSelection);
 
-    if (isSlashCommand && firstBlock) {
-      if (!chatInfo?.is_enabled) {
-        await context.reply(contentEvent("error", `Bot is not enabled in this chat. Use ${formatChatSettingsCommand("enabled on")}`));
-        return null;
-      }
-
+    if (route.type === "slash-command" && firstBlock) {
       const slashCommand = firstBlock.text.slice(1).trim().toLowerCase();
       /** @type {HarnessCommandContext} */
       const commandInput = {
@@ -872,17 +780,8 @@ export function createConversationRunner({ store, llmClient, restartCommandHandl
         chatInfo,
         context,
         command: slashCommand,
-        sessionControl: {
-          archive: async (sessionChatId) => archiveSessionWithGeneratedTitle(sessionChatId, chatInfo),
-          getHistory: getHarnessSessionHistory,
-          restore: restoreHarnessSession,
-          clearRuntime: async (sessionChatId) => clearActiveHarnessSession(sessionChatId, chatInfo),
-        },
-        sessionForkControl: {
-          save: saveHarnessSession,
-          push: pushHarnessForkStack,
-          pop: popHarnessForkStack,
-        },
+        sessionControl: sessionBinding.createCommandSessionControl(chatInfo),
+        sessionForkControl: sessionBinding.createSessionForkControl(),
       };
       const handled = harness
         ? await harness.handleCommand(commandInput)
@@ -902,7 +801,6 @@ export function createConversationRunner({ store, llmClient, restartCommandHandl
       harness,
       harnessInstance,
       harnessOwnerKey: harnessSelection.ownerKey,
-      isSlashCommand: !!isSlashCommand,
       resolvedBinding,
     });
   }

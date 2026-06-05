@@ -452,6 +452,7 @@ async function handleAcpPermissionRequest(message, options) {
   const id = typeof message.id === "number" || typeof message.id === "string"
     ? `acp-request:${message.id}`
     : `acp-request:${Date.now()}`;
+  const externalDecision = options.requestDecision?.({ id, title, labels, descriptions });
   await options.emitRuntimeEvent({
     type: "request.opened",
     provider: "acp",
@@ -464,7 +465,6 @@ async function handleAcpPermissionRequest(message, options) {
     raw: createAcpRawPayload("session/request_permission", message.params),
   });
   const hookDecision = options.hooks.onAskUser(`Allow *${title}*?`, labels, undefined, descriptions);
-  const externalDecision = options.requestDecision?.({ id, title, labels, descriptions });
   const choice = await (externalDecision
     ? Promise.race([externalDecision, hookDecision])
     : hookDecision);
@@ -626,6 +626,7 @@ async function handleAcpElicitationCreate(message, options) {
       options: question.options,
     })),
   };
+  const rawExternalDecision = options.userInputDecision?.(runtimeRequest);
   await options.emitRuntimeEvent({
     type: "user-input.requested",
     provider: "acp",
@@ -653,8 +654,8 @@ async function handleAcpElicitationCreate(message, options) {
     return /** @type {{ action: "accept", content: Record<string, unknown> }} */ ({ action: "accept", content });
   };
   const hookDecision = askViaHooks();
-  const externalDecision = options.userInputDecision?.(runtimeRequest)
-    .then((response) => normalizeExternalElicitationResponse(response, questions))
+  const externalDecision = rawExternalDecision
+    ?.then((response) => normalizeExternalElicitationResponse(response, questions))
     .then((response) => response ?? hookDecision);
   const decision = await (externalDecision
     ? Promise.race([externalDecision, hookDecision])
