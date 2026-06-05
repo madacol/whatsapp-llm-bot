@@ -1972,26 +1972,6 @@ function formatPinnedTurnStatusPresentation(event) {
         summary: `turn ${event.turn.status ?? "completed"}`,
         closesStatus: true,
       };
-    case "tool.started":
-    case "command.started":
-      return { icon: "🛠️", provider, summary: "running tools" };
-    case "file-read.started":
-      return { icon: "🔎", provider, summary: "reading context" };
-    case "file-change.completed":
-      return { icon: "📝", provider, summary: "editing files" };
-    case "request.opened":
-    case "user-input.requested":
-      return { icon: "⏸️", provider, summary: "waiting for input" };
-    case "request.resolved":
-    case "user-input.resolved":
-      return { icon: "🔄", provider, summary: "running" };
-    case "runtime.error":
-      return {
-        icon: "❌",
-        provider,
-        summary: "turn failed",
-        closesStatus: true,
-      };
     default:
       return null;
   }
