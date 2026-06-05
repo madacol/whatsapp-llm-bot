@@ -14,11 +14,14 @@ import {
 import { setDb } from "../db.js";
 import { initStore } from "../store.js";
 import { createTestDb, createWAMessage } from "./helpers.js";
-import { contentEvent, textUpdate } from "../outbound-events.js";
+import { contentEvent, runtimeEvent, textUpdate } from "../outbound-events.js";
 import { createRestartCommandHandler } from "../commands/restart-command.js";
 import { createRestartAckStore } from "../restart/restart-ack-store.js";
 import { deliverPendingRestartAck } from "../restart/restart-ack-delivery.js";
-import { sendOrQueueWhatsAppEvent } from "../whatsapp/outbound/persistent-queue.js";
+import {
+  flushQueuedWhatsAppOutbound,
+  sendOrQueueWhatsAppEvent,
+} from "../whatsapp/outbound/persistent-queue.js";
 import { makeTextMessage } from "../whatsapp/message-payloads.js";
 
 /** @type {import("@electric-sql/pglite").PGlite | null} */
@@ -26,9 +29,13 @@ let testDb = null;
 /** @type {import("../store.js").Store | null} */
 let testStore = null;
 const originalOutboundQueuePersistDelayMs = process.env.MADABOT_OUTBOUND_QUEUE_PERSIST_DELAY_MS;
+const originalOutboundQueueReplayDelayMs = process.env.MADABOT_OUTBOUND_QUEUE_REPLAY_DELAY_MS;
+const originalMasterId = process.env.MASTER_ID;
 
 before(async () => {
   process.env.MADABOT_OUTBOUND_QUEUE_PERSIST_DELAY_MS = "0";
+  process.env.MADABOT_OUTBOUND_QUEUE_REPLAY_DELAY_MS = "0";
+  process.env.MASTER_ID = "master-user";
   testDb = await createTestDb();
   setDb("./pgdata/root", testDb);
   testStore = await initStore(testDb);
@@ -39,6 +46,16 @@ after(() => {
     delete process.env.MADABOT_OUTBOUND_QUEUE_PERSIST_DELAY_MS;
   } else {
     process.env.MADABOT_OUTBOUND_QUEUE_PERSIST_DELAY_MS = originalOutboundQueuePersistDelayMs;
+  }
+  if (originalOutboundQueueReplayDelayMs === undefined) {
+    delete process.env.MADABOT_OUTBOUND_QUEUE_REPLAY_DELAY_MS;
+  } else {
+    process.env.MADABOT_OUTBOUND_QUEUE_REPLAY_DELAY_MS = originalOutboundQueueReplayDelayMs;
+  }
+  if (originalMasterId === undefined) {
+    delete process.env.MASTER_ID;
+  } else {
+    process.env.MASTER_ID = originalMasterId;
   }
 });
 
@@ -89,6 +106,31 @@ function createBaileysGroupMetadataAttrsError() {
     "    at async node_modules/@whiskeysockets/baileys/lib/Socket/messages-send.js:479:41",
   ].join("\n");
   return error;
+}
+
+function createBaileysRateOverlimitError() {
+  const error = new Error("rate-overlimit");
+  error.stack = [
+    `${error.name}: ${error.message}`,
+    "    at assertNodeErrorFree (node_modules/@whiskeysockets/baileys/lib/WABinary/generic-utils.js:57:15)",
+    "    at query (node_modules/@whiskeysockets/baileys/lib/Socket/socket.js:134:13)",
+    "    at async groupMetadata (node_modules/@whiskeysockets/baileys/lib/Socket/groups.js:20:24)",
+    "    at async node_modules/@whiskeysockets/baileys/lib/Socket/messages-send.js:506:41",
+  ].join("\n");
+  return Object.assign(error, {
+    data: 429,
+    isBoom: true,
+    isServer: true,
+    output: {
+      statusCode: 500,
+      payload: {
+        statusCode: 500,
+        error: "Internal Server Error",
+        message: "An internal server error occurred",
+      },
+      headers: {},
+    },
+  });
 }
 
 async function waitForTransportBackgroundWork() {
@@ -416,6 +458,42 @@ describe("WhatsApp transport community creation", () => {
     assert.equal((await getQueuedRows(testDb, chatId)).length, 0);
   });
 
+  it("queues runtime events after Baileys group metadata rate-limit send failures", async () => {
+    if (!testDb || !testStore) {
+      throw new Error("Expected test DB and store to be initialized");
+    }
+
+    const chatId = `queued-rate-overlimit-${Date.now()}@g.us`;
+    /** @type {Array<{ chatId: string, message: Record<string, unknown> }>} */
+    const sentMessages = [];
+
+    const socket = /** @type {import("@whiskeysockets/baileys").WASocket} */ (/** @type {unknown} */ ({
+      sendMessage: async (targetChatId, message) => {
+        sentMessages.push({ chatId: targetChatId, message });
+        throw createBaileysRateOverlimitError();
+      },
+    }));
+
+    const handle = await sendOrQueueWhatsAppEvent({
+      getSocket: () => socket,
+      chatId,
+      event: runtimeEvent({
+        type: "turn.started",
+        provider: "codex",
+        turn: { status: "started" },
+      }),
+      store: testStore,
+    });
+
+    assert.equal(handle?.deliveryStatus, "queued");
+    assert.equal(sentMessages.length, 1);
+    assert.equal((await getQueuedRows(testDb, chatId)).length, 1);
+    assert.equal((await getDeadLetterRows(testDb, chatId)).length, 0);
+    if (handle.queueId) {
+      await testStore.deleteWhatsAppOutboundQueueEntry(chatId, handle.queueId);
+    }
+  });
+
   it("delays durable queue writes and retries if the socket recovers during the debounce window", async () => {
     if (!testDb || !testStore) {
       throw new Error("Expected test DB and store to be initialized");
@@ -529,6 +607,128 @@ describe("WhatsApp transport community creation", () => {
     assert.deepEqual(sentMessages, [{
       chatId,
       message: makeTextMessage("🤖 queued during reconnect"),
+    }]);
+    assert.equal((await getQueuedRows(testDb, chatId)).length, 0);
+  });
+
+  it("paces queued outbound replay between rows", async () => {
+    if (!testDb || !testStore) {
+      throw new Error("Expected test DB and store to be initialized");
+    }
+
+    const chatId = `paced-replay-${Date.now()}`;
+    /** @type {number[]} */
+    const waits = [];
+    /** @type {Array<{ chatId: string, message: Record<string, unknown> }>} */
+    const sentMessages = [];
+
+    await testStore.enqueueWhatsAppOutboundQueueEntry({
+      chatId,
+      payloadJson: { kind: "text", text: "first queued send" },
+    });
+    await testStore.enqueueWhatsAppOutboundQueueEntry({
+      chatId,
+      payloadJson: { kind: "text", text: "second queued send" },
+    });
+
+    const socket = /** @type {import("@whiskeysockets/baileys").WASocket} */ (/** @type {unknown} */ ({
+      sendMessage: async (targetChatId, message) => {
+        sentMessages.push({ chatId: targetChatId, message });
+        return { key: { id: `sent-${sentMessages.length}`, remoteJid: targetChatId } };
+      },
+    }));
+
+    await flushQueuedWhatsAppOutbound({
+      getSocket: () => socket,
+      store: testStore,
+      replayDelayMs: 250,
+      sleepFn: async (ms) => {
+        waits.push(ms);
+      },
+    });
+
+    assert.deepEqual(waits, [250]);
+    assert.deepEqual(sentMessages, [
+      { chatId, message: makeTextMessage("first queued send") },
+      { chatId, message: makeTextMessage("second queued send") },
+    ]);
+    assert.equal((await getQueuedRows(testDb, chatId)).length, 0);
+  });
+
+  it("keeps queued outbound rows when Baileys rate-limits group metadata during replay", async () => {
+    if (!testDb || !testStore) {
+      throw new Error("Expected test DB and store to be initialized");
+    }
+
+    const chatId = `queued-replay-rate-overlimit-${Date.now()}@g.us`;
+    /** @type {((events: Partial<import("@whiskeysockets/baileys").BaileysEventMap>) => Promise<void>) | null} */
+    let processEvents = null;
+    /** @type {Array<{ chatId: string, message: Record<string, unknown> }>} */
+    const sentMessages = [];
+    let failSends = true;
+
+    await testStore.enqueueWhatsAppOutboundQueueEntry({
+      chatId,
+      payloadJson: {
+        kind: "event",
+        event: contentEvent("llm", "queued while rate limited"),
+      },
+    });
+
+    const socket = /** @type {import("@whiskeysockets/baileys").WASocket} */ (/** @type {unknown} */ ({
+      ev: {
+        process(handler) {
+          processEvents = handler;
+        },
+      },
+      sendMessage: async (targetChatId, message) => {
+        if (failSends) {
+          throw createBaileysRateOverlimitError();
+        }
+        sentMessages.push({ chatId: targetChatId, message });
+        return { key: { id: `sent-${sentMessages.length}`, remoteJid: targetChatId } };
+      },
+    }));
+
+    const transport = await createWhatsAppTransport({
+      createConnectionSupervisor: async ({ onSocketReady }) => ({
+        start: async () => {
+          onSocketReady(socket, async () => {});
+        },
+        stop: async () => {},
+        sendText: async () => {},
+        handleConnectionUpdate: async () => {},
+        isStopped: () => false,
+      }),
+      outboundStore: testStore,
+    });
+
+    await transport.start(async () => {});
+    if (!processEvents) {
+      throw new Error("Expected connection event processor to be registered");
+    }
+    await processEvents({
+      "connection.update": {
+        connection: "open",
+      },
+    });
+    await waitForTransportBackgroundWork();
+
+    assert.equal(sentMessages.length, 0);
+    assert.equal((await getQueuedRows(testDb, chatId)).length, 1);
+    assert.equal((await getDeadLetterRows(testDb, chatId)).length, 0);
+
+    failSends = false;
+    await processEvents({
+      "connection.update": {
+        connection: "open",
+      },
+    });
+    await waitForTransportBackgroundWork();
+
+    assert.deepEqual(sentMessages, [{
+      chatId,
+      message: makeTextMessage("🤖 queued while rate limited"),
     }]);
     assert.equal((await getQueuedRows(testDb, chatId)).length, 0);
   });
