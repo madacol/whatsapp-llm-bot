@@ -400,7 +400,7 @@ describe("ACP runtime events through WhatsApp transport", () => {
 
   /**
    * @param {string} prompt
-   * @param {{ pollChoice?: string }} [options]
+   * @param {{ pollChoice?: string, pollChoices?: string[] }} [options]
    * @returns {Promise<{ rendered: string[], sentMessages: ReturnType<ReturnType<typeof createMockBaileysSocket>["getSentMessages"]> }>}
    */
   async function runAcpPrompt(prompt, options = {}) {
@@ -427,27 +427,70 @@ describe("ACP runtime events through WhatsApp transport", () => {
       undefined,
       { outboundStore: testStore },
     );
-    if (options.pollChoice) {
+    const pollChoices = options.pollChoices ?? (options.pollChoice ? [options.pollChoice] : []);
+    const votedPollIndexes = new Set();
+    for (const pollChoice of pollChoices) {
+      let voted = false;
       for (let attempt = 0; attempt < 50; attempt += 1) {
         const sentMessages = captures.getSentMessages();
-        const pollIndex = sentMessages.findIndex((entry) => entry.msg.poll);
+        const pollIndex = sentMessages.findIndex((entry, index) => entry.msg.poll && !votedPollIndexes.has(index));
         const poll = pollIndex >= 0 ? sentMessages[pollIndex] : undefined;
         if (poll && poll.msg.poll && typeof poll.msg.poll === "object" && Array.isArray(/** @type {{ values?: unknown }} */ (poll.msg.poll).values)) {
           testUserResponseRegistry.handlePollVote({
             chatId,
             pollMsgId: `sent-msg-${pollIndex}`,
-            selectedOptions: [options.pollChoice],
+            selectedOptions: [pollChoice],
           });
+          votedPollIndexes.add(pollIndex);
+          voted = true;
           break;
         }
         await new Promise((resolve) => setTimeout(resolve, 10));
       }
+      assert.ok(voted, `Expected poll choice ${pollChoice} to be available`);
     }
     await turn;
     return {
       rendered: captures.getRenderedMessages(),
       sentMessages: captures.getSentMessages(),
     };
+  }
+
+  /**
+   * @param {ReturnType<ReturnType<typeof createMockBaileysSocket>["getSentMessages"]>} sentMessages
+   * @returns {string[]}
+   */
+  function getPinnedStatusTexts(sentMessages) {
+    const pinEntry = sentMessages.find((entry) => entry.msg.pin && typeof entry.msg.pin === "object");
+    const pinnedId = pinEntry && typeof pinEntry.msg.pin === "object"
+      ? /** @type {{ id?: unknown }} */ (pinEntry.msg.pin).id
+      : null;
+    assert.equal(typeof pinnedId, "string", `Expected pinned status payload, got ${JSON.stringify(sentMessages.map((entry) => entry.msg))}`);
+    return sentMessages
+      .filter((entry, index) => {
+        if (typeof entry.msg.text !== "string") {
+          return false;
+        }
+        if (`sent-msg-${index}` === pinnedId) {
+          return true;
+        }
+        return typeof entry.msg.edit === "object"
+          && entry.msg.edit !== null
+          && /** @type {{ id?: unknown }} */ (entry.msg.edit).id === pinnedId;
+      })
+      .map((entry) => /** @type {string} */ (entry.msg.text));
+  }
+
+  /**
+   * @param {string[]} statusTexts
+   * @param {string[]} snippets
+   * @returns {void}
+   */
+  function assertPinnedTimelineIncludes(statusTexts, snippets) {
+    const timeline = statusTexts.join("\n---\n");
+    for (const snippet of snippets) {
+      assert.ok(timeline.includes(snippet), `Expected pinned status timeline to include ${JSON.stringify(snippet)}, got ${JSON.stringify(statusTexts)}`);
+    }
   }
 
   it("renders assistant, subagent, plan, tool, file-change, usage, and pinned turn status events distinctly", async () => {
@@ -474,6 +517,48 @@ describe("ACP runtime events through WhatsApp transport", () => {
         && entry.msg.text.includes("✅ *E2E-ACP-RUNTIME*  turn completed")),
       `Expected final turn status edit, got ${JSON.stringify(sentMessages.map((entry) => entry.msg))}`,
     );
+  });
+
+  it("updates pinned status for every supported ACP status category and suppresses read noise", async () => {
+    const { rendered, sentMessages } = await runAcpPrompt("all statuses", {
+      pollChoices: ["Allow once", "Complete", "✅ Allow"],
+    });
+    const statusTexts = getPinnedStatusTexts(sentMessages);
+    const timeline = statusTexts.join("\n---\n");
+
+    assert.ok(rendered.some((text) => text.includes("All statuses done.")), `Expected final assistant output, got ${JSON.stringify(rendered)}`);
+    assertPinnedTimelineIncludes(statusTexts, [
+      "🔄 *E2E-ACP-RUNTIME*  turn started",
+      "💭 *LLM*  thinking",
+      "📋 *PLAN*  *Plan*",
+      "🔀 *ACP*  model model-a -> model-b",
+      "⚠️ *ACP*  Config fallback active",
+      "⚠️ *ACP*  Runtime warning sample",
+      "⏳ *ACP*  approval needed: Run status command",
+      "✅ *ACP*  approval resolved: Run status command",
+      "⏳ *ACP*  input needed",
+      "✅ *ACP*  input resolved",
+      "*Shell*",
+      "*Task*",
+      "🧵 *SUBAGENT*  Reviewer replied",
+      "📝 *ACP*  *File*  `status.txt`",
+      "📊 *USAGE*  cost",
+      "✅ *E2E-ACP-RUNTIME*  turn completed",
+    ]);
+    assert.ok(!timeline.includes("Read file"), `Expected read actions to be suppressed from pinned status, got ${JSON.stringify(statusTexts)}`);
+    assert.ok(!timeline.includes("List files"), `Expected list actions to be suppressed from pinned status, got ${JSON.stringify(statusTexts)}`);
+    assert.ok(!timeline.includes("noise.js"), `Expected read/list paths to be suppressed from pinned status, got ${JSON.stringify(statusTexts)}`);
+  });
+
+  it("updates pinned status for ACP runtime errors", async () => {
+    const { rendered, sentMessages } = await runAcpPrompt("runtime error status");
+    const statusTexts = getPinnedStatusTexts(sentMessages);
+
+    assert.ok(rendered.some((text) => text.includes("Runtime error status done.")), `Expected final assistant output, got ${JSON.stringify(rendered)}`);
+    assertPinnedTimelineIncludes(statusTexts, [
+      "🔄 *E2E-ACP-RUNTIME*  turn started",
+      "❌ *ACP*  Runtime error sample",
+    ]);
   });
 
   it("renders ACP terminal command output through command transport messages", async () => {

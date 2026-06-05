@@ -646,7 +646,7 @@ describe("ACP payload to WhatsApp socket vertical slices", () => {
     assert.equal(sent[1]?.msg.text, "✅ *Read*  `src/app.js`  *10-12*");
   });
 
-  it("updates the pinned status message at each real ACP read payload timestep", async () => {
+  it("keeps real ACP read payloads out of pinned status while rendering compact read activity", async () => {
     const chatId = "acp-payload-pinned-read@s.whatsapp.net";
     const toolCallId = "call_wp7MciriXBhbVOsDFY4b60pj";
     const { sent, trace } = await observeAcpPayloadSliceToBaileys([
@@ -720,25 +720,10 @@ describe("ACP payload to WhatsApp socket vertical slices", () => {
         type: 1,
         time: 86400,
       },
-      {
-        text: "🔄 *ACP*  turn started\n🔧 *ACP*  *Read*  `src/app.js`",
-        edit: { id: "msg-1", remoteJid: chatId, fromMe: true },
-        linkPreview: null,
-      },
       { text: "🔧 *Read*  `src/app.js`", linkPreview: null },
       {
-        text: "🔄 *ACP*  turn started\n🔧 *ACP*  *Read*  `src/app.js`",
-        edit: { id: "msg-1", remoteJid: chatId, fromMe: true },
-        linkPreview: null,
-      },
-      {
-        text: "🔄 *ACP*  turn started\n✅ *ACP*  *Read*  `src/app.js`  *10-12*",
-        edit: { id: "msg-1", remoteJid: chatId, fromMe: true },
-        linkPreview: null,
-      },
-      {
         text: "✅ *Read*  `src/app.js`  *10-12*",
-        edit: { id: "msg-4", remoteJid: chatId, fromMe: true },
+        edit: { id: "msg-3", remoteJid: chatId, fromMe: true },
         linkPreview: null,
       },
     ]);

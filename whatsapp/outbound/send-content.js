@@ -441,6 +441,18 @@ function buildWhatsAppRuntimeToolFromRawAcp(tool, event) {
 }
 
 /**
+ * @param {Extract<RuntimeEventOutboundEvent["event"], { tool: unknown }>["tool"]} tool
+ * @returns {boolean}
+ */
+function isLowSignalPinnedRuntimeTool(tool) {
+  const name = typeof tool.name === "string" ? tool.name.trim() : "";
+  return name === "Read"
+    || name === "List"
+    || /^Read\b/i.test(name)
+    || /^List files\b/i.test(name);
+}
+
+/**
  * @typedef {{
  *   id: string,
  *   chatId: string,
@@ -1943,7 +1955,23 @@ function upsertPinnedTurnStatusEntry(state, entry) {
     state.entries.push(entry);
     return;
   }
-  state.entries[index] = entry;
+  state.entries.splice(index, 1);
+  state.entries.push(entry);
+}
+
+/**
+ * @param {{ entries: Array<{ key: string, icon: string, provider: string, summary: string }> }} state
+ * @param {string} key
+ * @param {string} prefix
+ * @param {string} fallback
+ * @returns {string}
+ */
+function getPreviousPinnedStatusDetail(state, key, prefix, fallback) {
+  const previous = state.entries.find((entry) => entry.key === key)?.summary;
+  if (previous?.startsWith(prefix)) {
+    return previous.slice(prefix.length);
+  }
+  return fallback;
 }
 
 /**
@@ -1951,7 +1979,7 @@ function upsertPinnedTurnStatusEntry(state, entry) {
  * @param {{ entries: Array<{ key: string, icon: string, provider: string, summary: string }> } | undefined} state
  * @returns {{ key: string, icon: string, provider: string, summary: string, closesStatus?: boolean, createsStatus?: boolean } | null}
  */
-function formatPinnedTurnStatusPresentation(event, state) {
+function formatPinnedRuntimeStatusPresentation(event, state) {
   const runtimeEvent = event.event;
   const provider = formatRuntimeProvider(runtimeEvent.provider);
   if (
@@ -1964,6 +1992,9 @@ function formatPinnedTurnStatusPresentation(event, state) {
       return null;
     }
     const displayTool = buildWhatsAppRuntimeToolFromRawAcp(runtimeEvent.tool, event);
+    if (isLowSignalPinnedRuntimeTool(displayTool)) {
+      return null;
+    }
     const status = runtimeEvent.type.split(".")[1];
     if (status !== "started" && status !== "updated" && status !== "completed" && status !== "failed") {
       return null;
@@ -2013,6 +2044,92 @@ function formatPinnedTurnStatusPresentation(event, state) {
   }
 
   switch (runtimeEvent.type) {
+    case "request.opened":
+      if (!state) {
+        return null;
+      }
+      return {
+        key: `request:${runtimeEvent.request.id}`,
+        icon: "⏳",
+        provider,
+        summary: `approval needed: ${runtimeEvent.request.summary ?? runtimeEvent.request.kind}`,
+      };
+    case "request.resolved":
+      if (!state) {
+        return null;
+      }
+      {
+        const key = `request:${runtimeEvent.request.id}`;
+        const detail = getPreviousPinnedStatusDetail(
+          state,
+          key,
+          "approval needed: ",
+          runtimeEvent.request.summary ?? runtimeEvent.request.kind,
+        );
+        return {
+          key,
+          icon: "✅",
+          provider,
+          summary: `approval resolved: ${detail}`,
+        };
+      }
+    case "user-input.requested": {
+      if (!state) {
+        return null;
+      }
+      const question = runtimeEvent.request.questions.map((entry) => entry.question).filter(Boolean).join("; ");
+      return {
+        key: `user-input:${runtimeEvent.request.id}`,
+        icon: "⏳",
+        provider,
+        summary: `input needed${question ? `: ${question}` : ""}`,
+      };
+    }
+    case "user-input.resolved":
+      if (!state) {
+        return null;
+      }
+      {
+        const key = `user-input:${runtimeEvent.request.id}`;
+        const detail = getPreviousPinnedStatusDetail(state, key, "input needed: ", "");
+        return {
+          key,
+          icon: "✅",
+          provider,
+          summary: `input resolved${detail ? `: ${detail}` : ""}`,
+        };
+      }
+    case "model.rerouted":
+      if (!state) {
+        return null;
+      }
+      return {
+        key: "model",
+        icon: "🔀",
+        provider,
+        summary: `model ${runtimeEvent.fromModel ?? "default"} -> ${runtimeEvent.toModel ?? "default"}`,
+      };
+    case "config.warning":
+    case "runtime.warning":
+      if (!state) {
+        return null;
+      }
+      return {
+        key: `${runtimeEvent.type}:${runtimeEvent.summary ?? runtimeEvent.message ?? ""}`,
+        icon: "⚠️",
+        provider,
+        summary: runtimeEvent.summary ?? runtimeEvent.message ?? runtimeEvent.type,
+      };
+    case "runtime.error":
+      if (!state) {
+        return null;
+      }
+      return {
+        key: "runtime.error",
+        icon: "❌",
+        provider,
+        summary: runtimeEvent.summary ?? runtimeEvent.message ?? runtimeEvent.details ?? "runtime error",
+      };
     case "turn.started":
       return {
         key: "turn",
@@ -2035,9 +2152,76 @@ function formatPinnedTurnStatusPresentation(event, state) {
 }
 
 /**
+ * @param {OutboundEvent} event
+ * @param {{ entries: Array<{ key: string, icon: string, provider: string, summary: string }> } | undefined} state
+ * @returns {{ key: string, icon: string, provider: string, summary: string, closesStatus?: boolean, createsStatus?: boolean } | null}
+ */
+function formatPinnedStatusPresentation(event, state) {
+  if (event.kind === "runtime_event") {
+    return formatPinnedRuntimeStatusPresentation(event, state);
+  }
+  if (!state) {
+    return null;
+  }
+  switch (event.kind) {
+    case "content": {
+      if (event.source !== "llm" || !Array.isArray(event.content)) {
+        return null;
+      }
+      const text = event.content
+        .map((block) => block.type === "text" || block.type === "markdown" ? block.text : "")
+        .join("\n")
+        .trim();
+      if (text !== "Thinking...") {
+        return null;
+      }
+      return {
+        key: "thinking",
+        icon: "💭",
+        provider: "LLM",
+        summary: "thinking",
+      };
+    }
+    case "plan":
+      return {
+        key: "plan",
+        icon: "📋",
+        provider: "PLAN",
+        summary: event.presentation.summary,
+      };
+    case "subagent_message":
+      return {
+        key: `subagent:${event.threadId ?? event.agentNickname ?? "message"}`,
+        icon: "🧵",
+        provider: "SUBAGENT",
+        summary: event.agentNickname ? `${event.agentNickname} replied` : "subagent replied",
+      };
+    case "usage":
+      return {
+        key: "usage",
+        icon: "📊",
+        provider: "USAGE",
+        summary: `cost ${event.cost}`,
+      };
+    case "file_change": {
+      const displayPath = shortenPath(event.path, event.cwd ?? null);
+      const title = event.source === "snapshot" ? "Snapshot" : "File";
+      return {
+        key: `file-change:${event.path}`,
+        icon: "📝",
+        provider: "FILES",
+        summary: formatRuntimeProgressEntry(title, `\`${displayPath}\``),
+      };
+    }
+    default:
+      return null;
+  }
+}
+
+/**
  * @param {import('@whiskeysockets/baileys').WASocket} sock
  * @param {string} chatId
- * @param {RuntimeEventOutboundEvent} event
+ * @param {OutboundEvent} event
  * @param {{ quoted?: BaileysMessage } | undefined} options
  * @param {import("../runtime/reaction-runtime.js").ReactionRuntime | undefined} reactionRuntime
  * @param {{ editHandleStore?: import("../../store.js").Store }} sendOptions
@@ -2045,7 +2229,7 @@ function formatPinnedTurnStatusPresentation(event, state) {
  */
 async function updatePinnedTurnStatus(sock, chatId, event, options, reactionRuntime, sendOptions) {
   let state = turnStatusByChat.get(chatId);
-  const presentation = formatPinnedTurnStatusPresentation(event, state);
+  const presentation = formatPinnedStatusPresentation(event, state);
   if (!presentation) {
     return undefined;
   }
@@ -2736,6 +2920,7 @@ export async function sendEvent(sock, chatId, event, options, reactionRuntime, s
   if (event.kind === "runtime_event") {
     return sendRuntimeEvent(sock, chatId, event, options, reactionRuntime, sendOptions);
   }
+  await updatePinnedTurnStatus(sock, chatId, event, options, reactionRuntime, sendOptions);
   if (event.kind === "compact_tool_activity") {
     return sendCompactToolActivityEvent(sock, chatId, event, options, reactionRuntime, sendOptions);
   }
