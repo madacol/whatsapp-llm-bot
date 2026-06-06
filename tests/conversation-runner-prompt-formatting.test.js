@@ -131,7 +131,6 @@ function createCodexHarness(options = {}) {
           sessions.clear();
         },
         listSessions: () => [...sessions.values()],
-        readThread: async () => null,
         rollbackThread: async () => null,
         streamEvents: {
           async *[Symbol.asyncIterator]() {},
@@ -241,7 +240,6 @@ describe("createConversationRunner prompt formatting", () => {
               injectMessage: async () => false,
               stopSession: async () => false,
               listSessions: () => [],
-              readThread: async () => null,
               rollbackThread: async () => null,
               streamEvents: {
                 async *[Symbol.asyncIterator]() {},
@@ -356,7 +354,6 @@ describe("createConversationRunner prompt formatting", () => {
               injectMessage: async () => false,
               stopSession: async () => false,
               listSessions: () => [],
-              readThread: async () => null,
               rollbackThread: async () => null,
               streamEvents: {
                 async *[Symbol.asyncIterator]() {},
@@ -486,7 +483,6 @@ describe("createConversationRunner prompt formatting", () => {
               injectMessage: async () => false,
               stopSession: async () => false,
               listSessions: () => [],
-              readThread: async () => null,
               rollbackThread: async () => null,
               streamEvents: {
                 async *[Symbol.asyncIterator]() {},
@@ -769,7 +765,6 @@ describe("createConversationRunner prompt formatting", () => {
               },
               stopSession: async () => false,
               listSessions: () => [],
-              readThread: async () => null,
               rollbackThread: async () => null,
               streamEvents: {
                 async *[Symbol.asyncIterator]() {},

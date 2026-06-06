@@ -178,7 +178,6 @@ async function handleMessage(message) {
               _meta: {
                 madabot: {
                   sessionCapabilities: {
-                    read: {},
                     rollback: {},
                   },
                 },
@@ -214,19 +213,6 @@ async function handleMessage(message) {
   if (message.method === "session/fork") {
     sessionId = "mock-session-fork";
     send({ id: message.id, result: { sessionId } });
-    return;
-  }
-  if (message.method === "session/read") {
-    send({
-      id: message.id,
-      result: {
-        thread: {
-          id: message.params?.sessionId,
-          preview: "Mock thread",
-          turns: [{ status: "completed", items: [] }],
-        },
-      },
-    });
     return;
   }
   if (message.method === "session/rollback") {

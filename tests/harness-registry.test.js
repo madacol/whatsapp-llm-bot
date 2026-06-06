@@ -71,7 +71,6 @@ function createTestAdapter(name, instanceId, continuationKey) {
       sessions.clear();
     },
     listSessions: () => [...sessions.values()],
-    readThread: async () => null,
     rollbackThread: async () => null,
     streamEvents: {
       async *[Symbol.asyncIterator]() {},

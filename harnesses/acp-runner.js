@@ -1342,25 +1342,6 @@ export async function forkAcpSession(input) {
 }
 
 /**
- * @param {AcpForkInput & { includeTurns?: boolean }} input
- * @returns {Promise<unknown>}
- */
-export async function readAcpSession(input) {
-  const { connection, capabilities } = await openInitializedAcpConnection(input, async () => ({}));
-  try {
-    if (!hasAcpSessionCapability(capabilities, "read") && !hasMadabotAcpSessionCapability(capabilities, "read")) {
-      return null;
-    }
-    return await connection.sendRequest("session/read", {
-      sessionId: input.sessionId,
-      ...(input.includeTurns ? { includeTurns: true } : {}),
-    });
-  } finally {
-    await connection.close();
-  }
-}
-
-/**
  * @param {AcpForkInput & { numTurns: number }} input
  * @returns {Promise<unknown>}
  */

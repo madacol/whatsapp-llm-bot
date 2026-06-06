@@ -144,7 +144,6 @@ export function registerAcpTestHarness(options) {
             hasSession: () => false,
             stopAll: async () => {},
             listSessions: () => [],
-            readThread: async () => null,
             rollbackThread: async () => null,
             streamEvents: {
               async *[Symbol.asyncIterator]() {},
