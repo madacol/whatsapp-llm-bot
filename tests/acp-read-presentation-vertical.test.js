@@ -47,12 +47,13 @@ function createMockSock() {
 
 /**
  * @param {Record<string, unknown>[]} payloads
+ * @param {{ editHandleStore?: import("../store.js").Store }} [sendOptions]
  * @returns {Promise<{
  *   sent: Array<{ chatId: string, msg: Record<string, unknown> }>,
  *   runtimeEvents: Array<import("../harnesses/harness-runtime-events.js").HarnessRuntimeEvent>,
  * }>}
  */
-async function observeAcpReadPayloadsThroughBaileys(payloads) {
+async function observeAcpReadPayloadsThroughBaileys(payloads, sendOptions = {}) {
   const chatId = "acp-read-presentation@s.whatsapp.net";
   const cwd = "/home/mada/whatsapp-llm-bot";
   const { sock, sent } = createMockSock();
@@ -62,9 +63,11 @@ async function observeAcpReadPayloadsThroughBaileys(payloads) {
     {
       send: async (event) => sendEvent(sock, chatId, event, undefined, undefined, {
         outputVisibility: DEFAULT_OUTPUT_VISIBILITY,
+        ...sendOptions,
       }),
       reply: async (event) => sendEvent(sock, chatId, event, undefined, undefined, {
         outputVisibility: DEFAULT_OUTPUT_VISIBILITY,
+        ...sendOptions,
       }),
       select: async () => "",
       confirm: async () => true,
@@ -236,6 +239,71 @@ describe("ACP read presentation vertical slice", () => {
       {
         text: "✅ *Read*  `src/app.js`  *10-12*",
         edit: { id: "msg-1", remoteJid: chatId, fromMe: true },
+        linkPreview: null,
+      },
+    ]);
+  });
+
+  it("sends a replacement when a completed ACP read notification targets an expired edit handle", async () => {
+    const chatId = "acp-read-presentation@s.whatsapp.net";
+    const toolCallId = "call_expired_read_edit";
+    /** @type {import("../store.js").WhatsAppEditHandleRow | null} */
+    let savedHandle = null;
+    const expiredAt = "2000-01-01T00:00:00.000Z";
+    const store = {
+      saveWhatsAppEditHandle: async (/** @type {Parameters<import("../store.js").Store["saveWhatsAppEditHandle"]>[0]} */ input) => {
+        savedHandle = {
+          id: input.id,
+          chat_id: input.chatId,
+          message_key_json: input.messageKeyJson,
+          message_kind: input.messageKind,
+          created_at: input.createdAt,
+          expires_at: input.expiresAt,
+        };
+        return savedHandle;
+      },
+      getWhatsAppEditHandle: async () => savedHandle ? { ...savedHandle, expires_at: expiredAt } : null,
+      deleteExpiredWhatsAppEditHandles: async () => {},
+    };
+    const { sent, runtimeEvents } = await observeAcpReadPayloadsThroughBaileys([
+      {
+        sessionId: "s-expired",
+        update: {
+          sessionUpdate: "tool_call",
+          toolCallId,
+          status: "in_progress",
+          kind: "read",
+          title: "Read file",
+          locations: [
+            { path: "/home/mada/whatsapp-llm-bot/package.json" },
+          ],
+        },
+      },
+      {
+        sessionId: "s-expired",
+        update: {
+          sessionUpdate: "tool_call_update",
+          toolCallId,
+          status: "completed",
+          rawOutput: {
+            formatted_output: "{\"name\":\"whatsapp-llm-bot\"}\n",
+            exit_code: 0,
+          },
+        },
+      },
+    ], {
+      editHandleStore: /** @type {import("../store.js").Store} */ (/** @type {unknown} */ (store)),
+    });
+
+    assert.deepEqual(runtimeEvents.map((event) => event.type), ["tool.started", "tool.completed"]);
+    assert.deepEqual(sent.map((entry) => entry.chatId), [chatId, chatId]);
+    assert.deepEqual(sent.map((entry) => entry.msg), [
+      {
+        text: "🔧 *Read*  `package.json`",
+        linkPreview: null,
+      },
+      {
+        text: "✅ *Read*  `package.json`",
         linkPreview: null,
       },
     ]);
