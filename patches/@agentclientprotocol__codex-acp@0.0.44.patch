@@ -71,10 +71,66 @@
      };
    }
    return {
-@@ -17667,6 +17700,41 @@
+@@ -17522,6 +17565,23 @@
+   } catch {
+     return null;
+   }
+ }
++function extractReasoningNotificationText(event) {
++  if (!event || typeof event !== "object") {
++    return null;
++  }
++  const record = event;
++  for (const key of ["delta", "text", "summary"]) {
++    const value = record[key];
++    if (typeof value === "string" && value.trim().length > 0) {
++      return value;
++    }
++  }
++  const content = record.content;
++  if (content && typeof content === "object" && typeof content.text === "string" && content.text.trim().length > 0) {
++    return content.text;
++  }
++  return null;
++}
+ 
+ // src/CodexEventHandler.ts
+ var CodexEventHandler = class {
+@@ -17585,17 +17643,18 @@
+         return this.createModelReroutedEvent(notification.params);
+       case "fuzzyFileSearch/sessionUpdated":
+         return this.handleFuzzyFileSearchSessionUpdated(notification.params);
+       case "fuzzyFileSearch/sessionCompleted":
+         return this.handleFuzzyFileSearchSessionCompleted(notification.params);
++      case "item/reasoning/summaryTextDelta":
++      case "item/reasoning/summaryPartAdded":
++      case "item/reasoning/textDelta":
++        return this.createReasoningNotificationEvent(notification.params);
+       // ignored events
+       case "command/exec/outputDelta":
+       case "item/autoApprovalReview/started":
+       case "item/autoApprovalReview/completed":
+       case "hook/started":
+       case "hook/completed":
+-      case "item/reasoning/summaryTextDelta":
+-      case "item/reasoning/summaryPartAdded":
+-      case "item/reasoning/textDelta":
+       case "turn/diff/updated":
+       case "item/commandExecution/terminalInteraction":
+       case "item/fileChange/outputDelta":
+@@ -17667,6 +17700,50 @@
        }
      };
    }
++  createReasoningNotificationEvent(event) {
++    return {
++      sessionUpdate: "agent_thought_chunk",
++      content: {
++        type: "text",
++        text: extractReasoningNotificationText(event) ?? "Thinking..."
++      }
++    };
++  }
 +  formatWebSearchTitle(item) {
 +    const action = item.action;
 +    if (!action) {
