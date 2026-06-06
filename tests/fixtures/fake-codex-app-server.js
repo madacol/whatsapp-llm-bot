@@ -206,6 +206,24 @@ async function handleMessage(parsed) {
           threadId: params.threadId,
           turn: { id: "fake-turn-1", status: "completed" },
         });
+      } else if (firstTextInput(params.input) === "reasoning") {
+        notify("item/reasoning/summaryPartAdded", {
+          threadId: params.threadId,
+          turnId: "fake-turn-1",
+          itemId: "reasoning-1",
+          summaryIndex: 0,
+        });
+        notify("item/reasoning/summaryTextDelta", {
+          threadId: params.threadId,
+          turnId: "fake-turn-1",
+          itemId: "reasoning-1",
+          summaryIndex: 0,
+          delta: "Checking restart status.",
+        });
+        notify("turn/completed", {
+          threadId: params.threadId,
+          turn: { id: "fake-turn-1", status: "completed" },
+        });
       }
       break;
     case "turn/steer":

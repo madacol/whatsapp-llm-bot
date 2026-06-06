@@ -544,6 +544,7 @@ describe("ACP runtime events through WhatsApp transport", () => {
         && entry.msg.text.includes("✅ *E2E-ACP-RUNTIME*  turn completed")),
       `Expected final turn status edit, got ${JSON.stringify(sentMessages.map((entry) => entry.msg))}`,
     );
+    assertPinnedStatusUnpinned(sentMessages);
   });
 
   it("updates pinned status for every supported ACP status category and suppresses read noise", async () => {

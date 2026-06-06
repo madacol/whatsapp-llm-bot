@@ -4,6 +4,64 @@ import { setTimeout as delay } from "node:timers/promises";
 import { openFakeCodexAcpConnection } from "./codex-acp-patch-fixture.js";
 
 describe("patched codex-acp web search tool calls", () => {
+  it("emits ACP thought chunks for live Codex reasoning notifications", async () => {
+    const connection = await openFakeCodexAcpConnection();
+
+    try {
+      await connection.sendRequest("initialize", {
+        protocolVersion: 1,
+        clientInfo: { name: "madabot-test", version: "0" },
+        clientCapabilities: {},
+      });
+      const session = /** @type {{ sessionId?: string }} */ (await connection.sendRequest("session/new", { cwd: process.cwd(), mcpServers: [] }));
+      assert.equal(session?.sessionId, "fake-thread-1");
+
+      /** @type {Record<string, unknown>[]} */
+      const notifications = [];
+      const collectNotifications = (async () => {
+        for await (const notification of connection.notifications) {
+          notifications.push(notification);
+          const thoughtUpdates = notifications
+            .map((entry) => /** @type {{ params?: { update?: { sessionUpdate?: string } } }} */ (entry).params?.update)
+            .filter((update) => update?.sessionUpdate === "agent_thought_chunk");
+          if (thoughtUpdates.length >= 2) {
+            return;
+          }
+        }
+      })();
+
+      const result = /** @type {{ stopReason?: string }} */ (await connection.sendRequest("session/prompt", {
+        sessionId: "fake-thread-1",
+        prompt: [{ type: "text", text: "reasoning" }],
+      }));
+      assert.equal(result?.stopReason, "end_turn");
+
+      await Promise.race([
+        collectNotifications,
+        delay(500).then(() => {
+          throw new Error(`Timed out waiting for reasoning ACP updates: ${JSON.stringify(notifications)}`);
+        }),
+      ]);
+
+      const thoughtUpdates = notifications
+        .map((entry) => /** @type {{ params?: { update?: Record<string, unknown> } }} */ (entry).params?.update)
+        .filter((update) => update?.sessionUpdate === "agent_thought_chunk");
+
+      assert.deepEqual(thoughtUpdates, [
+        {
+          sessionUpdate: "agent_thought_chunk",
+          content: { type: "text", text: "Thinking..." },
+        },
+        {
+          sessionUpdate: "agent_thought_chunk",
+          content: { type: "text", text: "Checking restart status." },
+        },
+      ]);
+    } finally {
+      await connection.close();
+    }
+  });
+
   it("emits ACP tool calls for live Codex webSearch items", async () => {
     const connection = await openFakeCodexAcpConnection();
 
