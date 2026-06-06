@@ -863,6 +863,32 @@ function formatRuntimeToolText(status, summary, reviewPrefix) {
 }
 
 /**
+ * @param {import('@whiskeysockets/baileys').WASocket} sock
+ * @param {string} chatId
+ * @param {MessageHandle} handle
+ * @param {string} text
+ * @param {MessageSource} source
+ * @param {{ quoted?: BaileysMessage } | undefined} options
+ * @param {import("../runtime/reaction-runtime.js").ReactionRuntime | undefined} reactionRuntime
+ * @param {OutboundEvent} event
+ * @param {{ editHandleStore?: import("../../store.js").Store }} sendOptions
+ * @returns {Promise<MessageHandle | undefined>}
+ */
+async function updateRuntimeHandleOrSendReplacement(sock, chatId, handle, text, source, options, reactionRuntime, event, sendOptions) {
+  try {
+    await handle.update({ kind: "text", text });
+    return handle;
+  } catch (error) {
+    if (!isStaleWhatsAppEditHandleError(error)) {
+      throw error;
+    }
+    return sendBlocks(sock, chatId, source, text, options, reactionRuntime, event, {
+      editHandleStore: sendOptions.editHandleStore,
+    });
+  }
+}
+
+/**
  * @param {string} summary
  * @returns {boolean}
  */
@@ -1613,17 +1639,30 @@ async function sendRuntimeCommandEvent(sock, chatId, event, options, reactionRun
     return undefined;
   }
 
-  state.handle.setInspect({
+  /** @type {MessageInspectState} */
+  const inspect = {
     kind: "text",
     text: commandEvent.command.output ?? "_no output_",
     persistOnInspect: true,
-  });
-  await state.handle.update({ kind: "text", text });
+  };
+  state.handle.setInspect(inspect);
+  const updatedHandle = await updateRuntimeHandleOrSendReplacement(
+    sock,
+    chatId,
+    state.handle,
+    text,
+    "plain",
+    options,
+    reactionRuntime,
+    event,
+    sendOptions,
+  );
+  updatedHandle?.setInspect(inspect);
   commandStateByCommand?.delete(command);
   if (!commandStateByCommand || commandStateByCommand.size === 0) {
     runtimeCommandsByChat.delete(chatId);
   }
-  return state.handle;
+  return updatedHandle;
 }
 
 /**
@@ -1697,21 +1736,52 @@ async function sendRuntimeToolEvent(sock, chatId, event, options, reactionRuntim
     state?.reviewPrefix,
   );
   if (state?.handle) {
-    if (toolEvent.tool.output !== undefined) {
-      state.handle.setInspect({
+    /** @type {MessageInspectState | null} */
+    const inspect = toolEvent.tool.output !== undefined
+      ? {
         kind: "text",
         text: toolEvent.tool.output,
         persistOnInspect: true,
-      });
+      }
+      : null;
+    if (inspect) {
+      state.handle.setInspect(inspect);
     }
     if (status === "updated" && previousSummary !== state.summary) {
-      await state.handle.update({ kind: "text", text });
+      const updatedHandle = await updateRuntimeHandleOrSendReplacement(
+        sock,
+        chatId,
+        state.handle,
+        text,
+        "plain",
+        options,
+        reactionRuntime,
+        event,
+        sendOptions,
+      );
+      if (updatedHandle) {
+        state.handle = updatedHandle;
+        if (inspect) {
+          state.handle.setInspect(inspect);
+        }
+      }
     } else if (status !== "updated") {
-      await state.handle.update({ kind: "text", text });
+      const updatedHandle = await updateRuntimeHandleOrSendReplacement(
+        sock,
+        chatId,
+        state.handle,
+        text,
+        "plain",
+        options,
+        reactionRuntime,
+        event,
+        sendOptions,
+      );
       toolStateById?.delete(toolEvent.tool.id);
       if (!toolStateById || toolStateById.size === 0) {
         runtimeToolsByChat.delete(chatId);
       }
+      return updatedHandle;
     }
     return state.handle;
   }

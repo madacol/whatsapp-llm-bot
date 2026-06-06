@@ -893,6 +893,111 @@ describe("WhatsApp transport community creation", () => {
     assert.equal((await getDeadLetterRows(testDb, chatId)).length, 0);
   });
 
+  it("replays ACP tool notifications with expired edit handles as replacement messages", async () => {
+    if (!testDb || !testStore) {
+      throw new Error("Expected test DB and store to be initialized");
+    }
+
+    const chatId = `acp-expired-edit-replay-${Date.now()}@g.us`;
+    /** @type {((events: Partial<import("@whiskeysockets/baileys").BaileysEventMap>) => Promise<void>) | null} */
+    let processEvents = null;
+    /** @type {Array<{ chatId: string, message: Record<string, unknown> }>} */
+    const sentMessages = [];
+    const expiredEditHandleStore = {
+      ...testStore,
+      getWhatsAppEditHandle: async (/** @type {string} */ id) => {
+        const row = await testStore.getWhatsAppEditHandle(id);
+        return row ? { ...row, expires_at: "2000-01-01T00:00:00.000Z" } : null;
+      },
+    };
+
+    const tool = {
+      id: "acp-tool-expired-edit",
+      name: "Task",
+      arguments: { title: "Review mock code" },
+    };
+    await expiredEditHandleStore.enqueueWhatsAppOutboundQueueEntry({
+      chatId,
+      payloadJson: {
+        kind: "event",
+        event: {
+          kind: "runtime_event",
+          event: {
+            type: "tool.started",
+            provider: "acp",
+            tool,
+          },
+        },
+      },
+    });
+    await expiredEditHandleStore.enqueueWhatsAppOutboundQueueEntry({
+      chatId,
+      payloadJson: {
+        kind: "event",
+        event: {
+          kind: "runtime_event",
+          event: {
+            type: "tool.completed",
+            provider: "acp",
+            tool: {
+              ...tool,
+              output: "done",
+            },
+          },
+        },
+      },
+    });
+
+    const socket = /** @type {import("@whiskeysockets/baileys").WASocket} */ (/** @type {unknown} */ ({
+      ev: {
+        process(handler) {
+          processEvents = handler;
+        },
+      },
+      sendMessage: async (targetChatId, message) => {
+        sentMessages.push({ chatId: targetChatId, message });
+        return { key: { id: `sent-${sentMessages.length}`, remoteJid: targetChatId, fromMe: true } };
+      },
+    }));
+
+    const transport = await createWhatsAppTransport({
+      createConnectionSupervisor: async ({ onSocketReady }) => ({
+        start: async () => {
+          onSocketReady(socket, async () => {});
+        },
+        stop: async () => {},
+        sendText: async () => {},
+        handleConnectionUpdate: async () => {},
+        isStopped: () => false,
+      }),
+      outboundStore: expiredEditHandleStore,
+    });
+
+    await transport.start(async () => {});
+    if (!processEvents) {
+      throw new Error("Expected connection event processor to be registered");
+    }
+    await processEvents({
+      "connection.update": {
+        connection: "open",
+      },
+    });
+    await waitForTransportBackgroundWork();
+
+    assert.deepEqual(sentMessages, [
+      {
+        chatId,
+        message: makeTextMessage("🔧 *Task*  Review mock code"),
+      },
+      {
+        chatId,
+        message: makeTextMessage("✅ *Task*  Review mock code"),
+      },
+    ]);
+    assert.equal((await getQueuedRows(testDb, chatId)).length, 0);
+    assert.equal((await getDeadLetterRows(testDb, chatId)).length, 0);
+  });
+
   it("runs connection-open hooks after queued outbound messages are flushed", async () => {
     if (!testDb) {
       throw new Error("Expected test DB to be initialized");
