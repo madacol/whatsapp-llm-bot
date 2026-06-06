@@ -6,7 +6,6 @@ import {
   getAcpInitialSessionConfigOptions,
   getAcpSessionControlState,
   getAcpSessionConfigOptions,
-  readAcpSession,
   rollbackAcpSession,
   setAcpSessionConfigOption,
   setAcpSessionModel,
@@ -430,12 +429,6 @@ export function createAcpHarness(options = {}) {
           sessions.clear();
         },
         listSessions: () => [...sessions.values()],
-        readThread: async (sessionId) => readAcpSession({
-          ...commandSpec,
-          sessionId,
-          includeTurns: true,
-          runConfig: sessionRunConfigs.get(sessionId),
-        }),
         rollbackThread: async (sessionId, numTurns) => rollbackAcpSession({
           ...commandSpec,
           sessionId,

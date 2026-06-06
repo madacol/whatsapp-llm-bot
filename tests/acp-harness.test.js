@@ -1031,7 +1031,7 @@ describe("ACP harness", () => {
     assert.deepEqual(result.response, [{ type: "markdown", text: "model=default mode=code effort=low" }]);
   });
 
-  it("exposes ACP read and rollback RFDs through the adapter", async () => {
+  it("exposes ACP rollback RFDs through the adapter", async () => {
     const harness = createAcpHarness({
       config: {
         command: process.execPath,
@@ -1052,13 +1052,6 @@ describe("ACP harness", () => {
       messages: [{ role: "user", content: [{ type: "text", text: "Run the mock" }] }],
     });
 
-    assert.deepEqual(await adapter.readThread("mock-session-1"), {
-      thread: {
-        id: "mock-session-1",
-        preview: "Mock thread",
-        turns: [{ status: "completed", items: [] }],
-      },
-    });
     assert.deepEqual(await adapter.rollbackThread("mock-session-1", 2), {
       sessionId: "mock-session-1",
       rolledBackTurns: 2,
