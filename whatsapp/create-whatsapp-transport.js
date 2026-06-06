@@ -21,6 +21,7 @@ const REPO_ROOT = path.resolve(__dirname, "..");
 const LOGS_DIR = path.join(REPO_ROOT, "logs");
 const WHATSAPP_UPSERT_DIAGNOSTIC_ENABLE_PATH = path.join(LOGS_DIR, "whatsapp-upsert-shape.enabled");
 const WHATSAPP_UPSERT_DIAGNOSTIC_DEFAULT_PATH = path.join(LOGS_DIR, "whatsapp-upsert-shape.jsonl");
+const WHATSAPP_REACTION_DIAGNOSTIC_DEFAULT_PATH = path.join(LOGS_DIR, "whatsapp-reactions.jsonl");
 const WHATSAPP_ALBUM_FLUSH_DELAY_MS = 1_200;
 const WHATSAPP_TURN_COALESCE_DELAY_MS = 250;
 
@@ -475,6 +476,21 @@ function appendWhatsAppUpsertDiagnostic(message) {
 }
 
 /**
+ * @param {import("./runtime/reaction-runtime.js").ReactionRuntimeObserverEvent} event
+ * @returns {void}
+ */
+function appendWhatsAppReactionDiagnostic(event) {
+  if (!isWhatsAppUpsertDiagnosticEnabled()) {
+    return;
+  }
+  mkdirSync(path.dirname(WHATSAPP_REACTION_DIAGNOSTIC_DEFAULT_PATH), { recursive: true });
+  appendFileSync(WHATSAPP_REACTION_DIAGNOSTIC_DEFAULT_PATH, `${JSON.stringify({
+    receivedAt: new Date().toISOString(),
+    ...event,
+  })}\n`);
+}
+
+/**
  * @param {string | undefined} rawId
  * @returns {string | null}
  */
@@ -689,7 +705,7 @@ function serializeTransportError(error) {
 export async function createWhatsAppTransport(options = {}) {
   const confirmRuntime = createConfirmRuntime();
   const selectRuntime = createSelectRuntime();
-  const reactionRuntime = createReactionRuntime();
+  const reactionRuntime = createReactionRuntime({ observer: appendWhatsAppReactionDiagnostic });
   const createConnectionSupervisor = options.createConnectionSupervisor ?? createWhatsAppConnectionSupervisor;
   const outboundStore = options.outboundStore;
 
