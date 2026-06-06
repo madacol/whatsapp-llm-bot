@@ -827,6 +827,98 @@ describe("sendEvent – runtime events", () => {
     ]);
   });
 
+  it("inspects the full pinned status after 👁 reactions", async () => {
+    const { sock, sent } = createMockSock();
+    const reactionRuntime = createReactionRuntime();
+    const chatId = "runtime-pinned-status-inspect-chat";
+
+    /**
+     * @param {import("../harnesses/harness-runtime-events.js").HarnessRuntimeEvent} event
+     * @returns {Promise<void>}
+     */
+    async function sendRuntime(event) {
+      await sendEvent(sock, chatId, {
+        kind: "runtime_event",
+        event,
+      }, undefined, reactionRuntime);
+    }
+
+    await sendRuntime({
+      type: "turn.started",
+      provider: "acp",
+      turn: { id: "turn-1", chatId, status: "started" },
+    });
+    await sendRuntime({
+      type: "model.rerouted",
+      provider: "acp",
+      fromModel: "model-a",
+      toModel: "model-b",
+    });
+    await sendRuntime({
+      type: "config.warning",
+      provider: "acp",
+      summary: "Config fallback active",
+    });
+    await sendRuntime({
+      type: "runtime.warning",
+      provider: "acp",
+      message: "Runtime warning sample",
+    });
+    await sendRuntime({
+      type: "request.opened",
+      provider: "acp",
+      request: {
+        id: "acp-request:1",
+        kind: "tool-user-input",
+        summary: "Sensitive mock operation",
+      },
+    });
+    await sendRuntime({
+      type: "user-input.requested",
+      provider: "acp",
+      request: {
+        id: "acp-user-input:2",
+        questions: [{
+          id: "strategy",
+          question: "Migration Strategy",
+          options: [{ label: "Conservative" }, { label: "Complete" }],
+        }],
+      },
+    });
+
+    const finalPinnedEdit = sent
+      .filter((entry) => typeof entry.msg.text === "string"
+        && typeof entry.msg.edit === "object"
+        && entry.msg.edit !== null
+        && /** @type {{ id?: unknown }} */ (entry.msg.edit).id === "msg-1")
+      .at(-1);
+    assert.equal(finalPinnedEdit?.msg.text, [
+      "⏳ *ACP*  input needed: Migration Strategy",
+      "⏳ *ACP*  approval needed: Sensitive mock operation",
+      "⚠️ *ACP*  Runtime warning sample",
+      "⚠️ *ACP*  Config fallback active",
+      "... +2 earlier events",
+    ].join("\n"));
+
+    const beforeInspectCount = sent.length;
+    reactionRuntime.handleReactions([{
+      key: { id: "msg-1", remoteJid: chatId },
+      reaction: { text: "👁" },
+      senderId: "user-1",
+    }]);
+    await waitFor(() => sent.length > beforeInspectCount);
+
+    assert.equal(sent.at(-1)?.msg.text, [
+      "⏳ *ACP*  input needed: Migration Strategy",
+      "⏳ *ACP*  approval needed: Sensitive mock operation",
+      "⚠️ *ACP*  Runtime warning sample",
+      "⚠️ *ACP*  Config fallback active",
+      "🔀 *ACP*  model model-a -> model-b",
+      "🔄 *ACP*  turn started",
+    ].join("\n"));
+    assert.deepEqual(sent.at(-1)?.msg.edit, { id: "msg-1", remoteJid: chatId, fromMe: true });
+  });
+
   it("observes pinned status delivery at the socket boundary", async () => {
     const { sock } = createMockSock();
     /** @type {Array<Record<string, unknown>>} */

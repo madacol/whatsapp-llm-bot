@@ -2140,6 +2140,26 @@ function renderPinnedTurnStatusText(entries) {
 }
 
 /**
+ * @param {Array<{ key: string, icon: string, provider?: string, summary: string }>} entries
+ * @returns {string}
+ */
+function renderPinnedTurnStatusInspectText(entries) {
+  return [...entries].reverse().map(renderPinnedStatusLine).join("\n");
+}
+
+/**
+ * @param {{ handle?: MessageHandle, entries: Array<{ key: string, icon: string, provider?: string, summary: string }> }} state
+ * @returns {void}
+ */
+function updatePinnedTurnStatusInspect(state) {
+  state.handle?.setInspect({
+    kind: "text",
+    text: renderPinnedTurnStatusInspectText(state.entries),
+    persistOnInspect: true,
+  });
+}
+
+/**
  * @param {{ entries: Array<{ key: string, icon: string, provider?: string, summary: string }> }} state
  * @param {{ key: string, icon: string, provider?: string, summary: string }} entry
  * @returns {void}
@@ -2488,6 +2508,7 @@ async function updatePinnedTurnStatus(sock, chatId, event, options, reactionRunt
     }
   }
 
+  updatePinnedTurnStatusInspect(state);
   if (presentation.closesStatus) {
     await unpinWhatsAppMessage(sock, chatId, state.handle?.messageKey, sendOptions.pinnedStatusDeliveryObserver);
     turnStatusByChat.delete(chatId);
