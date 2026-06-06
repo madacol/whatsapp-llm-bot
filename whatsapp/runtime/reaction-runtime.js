@@ -16,11 +16,23 @@
  */
 
 /**
+ * @typedef {{
+ *   type: "reaction.received";
+ *   messageId: string;
+ *   remoteJid: string;
+ *   emoji: string;
+ *   senderId: string;
+ *   listenerCount: number;
+ * }} ReactionRuntimeObserverEvent
+ */
+
+/**
  * Create a runtime that routes reactions to message handles.
  * Uses a Map<msgKeyId, Set<callback>> so multiple subscribers can coexist.
+ * @param {{ observer?: (event: ReactionRuntimeObserverEvent) => void }} [options]
  * @returns {ReactionRuntime}
  */
-export function createReactionRuntime() {
+export function createReactionRuntime(options = {}) {
   /** @type {Map<string, Set<ReactionCallback>>} */
   const listeners = new Map();
 
@@ -54,6 +66,14 @@ export function createReactionRuntime() {
     handleReactions(reactions) {
       for (const { key, reaction, senderId } of reactions) {
         const callbacks = listeners.get(key.id);
+        options.observer?.({
+          type: "reaction.received",
+          messageId: key.id,
+          remoteJid: key.remoteJid,
+          emoji: reaction.text,
+          senderId,
+          listenerCount: callbacks?.size ?? 0,
+        });
         if (!callbacks) continue;
 
         for (const callback of callbacks) {

@@ -41,6 +41,38 @@ it("does not route reactions to unsubscribed messages", () => {
   assert.equal(received.length, 0);
 });
 
+it("observes matched and unmatched reaction delivery", () => {
+  /** @type {Array<import("../whatsapp/runtime/reaction-runtime.js").ReactionRuntimeObserverEvent>} */
+  const observed = [];
+  const registry = createReactionRegistry({ observer: (event) => { observed.push(event); } });
+
+  registry.subscribe("msg-1", () => {});
+
+  registry.handleReactions([
+    { key: { id: "msg-1", remoteJid: "chat-1" }, reaction: { text: "👁" }, senderId: "user-1" },
+    { key: { id: "msg-2", remoteJid: "chat-1" }, reaction: { text: "👁" }, senderId: "user-1" },
+  ]);
+
+  assert.deepEqual(observed, [
+    {
+      type: "reaction.received",
+      messageId: "msg-1",
+      remoteJid: "chat-1",
+      emoji: "👁",
+      senderId: "user-1",
+      listenerCount: 1,
+    },
+    {
+      type: "reaction.received",
+      messageId: "msg-2",
+      remoteJid: "chat-1",
+      emoji: "👁",
+      senderId: "user-1",
+      listenerCount: 0,
+    },
+  ]);
+});
+
 it("unsubscribe stops routing", () => {
   const registry = createReactionRegistry();
   /** @type {string[]} */
