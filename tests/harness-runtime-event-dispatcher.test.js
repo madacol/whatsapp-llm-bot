@@ -224,6 +224,56 @@ describe("createHarnessRuntimeEventDispatcher", () => {
     assert.equal(runtimeEvents[0]?.type === "tool.started" ? runtimeEvents[0].tool.id : undefined, "tool-1");
   });
 
+  it("keeps ACP terminal output updates in raw logs without emitting them as chat progress", async () => {
+    /** @type {import("../harnesses/harness-runtime-events.js").HarnessRuntimeEvent[]} */
+    const runtimeEvents = [];
+    /** @type {Array<Record<string, unknown>>} */
+    const rawEntries = [];
+    const dispatcher = createHarnessRuntimeEventDispatcher({
+      provider: "acp",
+      messages: [],
+      emitRuntimeEvent: async (event) => {
+        runtimeEvents.push(event);
+      },
+      rawEventLogger: {
+        write: async (entry) => {
+          rawEntries.push(entry);
+        },
+      },
+    });
+
+    await dispatcher.handleEvent({
+      type: "tool.updated",
+      provider: "acp",
+      tool: {
+        id: "terminal-1",
+        name: "execute",
+        arguments: { command: "rg noisy logs" },
+        output: "noisy log chunk",
+      },
+      raw: {
+        source: "acp.jsonrpc",
+        method: "session/update",
+        payload: {
+          update: {
+            sessionUpdate: "tool_call_update",
+            toolCallId: "terminal-1",
+            _meta: {
+              terminal_output_delta: {
+                data: "noisy log chunk",
+                terminal_id: "terminal-1",
+              },
+            },
+          },
+        },
+      },
+    });
+
+    assert.deepEqual(runtimeEvents, []);
+    assert.equal(rawEntries.length, 1);
+    assert.equal(rawEntries[0]?.type, "tool.updated");
+  });
+
   it("forwards assistant stream chunks semantically and finalizes on item completion", async () => {
     /** @type {Array<{ text: string, metadata?: LlmResponseMetadata }>} */
     const responses = [];
