@@ -167,41 +167,48 @@
       outline: none;
     }
 
-    .node rect {
-      width: 154px;
-      height: 74px;
-      rx: 7px;
+    .node .node-shape {
       fill: var(--surface);
       stroke-width: 2.2;
       filter: drop-shadow(0 9px 16px rgba(23, 32, 51, 0.10));
     }
 
-    .node[data-kind="model"] rect {
+    .node rect.node-shape {
+      width: 154px;
+      height: 74px;
+      rx: 7px;
+    }
+
+    .node path.node-shape {
+      vector-effect: non-scaling-stroke;
+    }
+
+    .node[data-kind="model"] .node-shape {
       stroke: var(--model);
     }
 
-    .node[data-kind="seam"] rect {
+    .node[data-kind="seam"] .node-shape {
       stroke: var(--seam);
     }
 
-    .node[data-kind="adapter"] rect {
+    .node[data-kind="adapter"] .node-shape {
       stroke: var(--adapter);
     }
 
-    .node[data-kind="agent"] rect {
+    .node[data-kind="agent"] .node-shape {
       stroke: var(--agent);
     }
 
-    .node[data-kind="service"] rect {
+    .node[data-kind="service"] .node-shape {
       stroke: var(--service);
     }
 
-    .node.is-selected rect {
+    .node.is-selected .node-shape {
       stroke: var(--active);
       stroke-width: 3;
     }
 
-    .node:focus-visible rect {
+    .node:focus-visible .node-shape {
       stroke: var(--active);
       stroke-width: 3;
     }
@@ -841,8 +848,12 @@
       group.setAttribute("aria-label", node.label);
       group.setAttribute("transform", "translate(" + (node.x - 77) + " " + (node.y - 37) + ")");
 
-      const rect = createSvgElement("rect");
-      group.append(rect);
+      const shape = node.kind === "seam" ? createSvgElement("path") : createSvgElement("rect");
+      shape.setAttribute("class", "node-shape");
+      if (node.kind === "seam") {
+        shape.setAttribute("d", "M20 0 H134 L154 37 L134 74 H20 L0 37 Z");
+      }
+      group.append(shape);
 
       const kind = createSvgElement("text");
       kind.setAttribute("class", "node-kind");
