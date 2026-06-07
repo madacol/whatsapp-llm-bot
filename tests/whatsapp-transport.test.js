@@ -1092,6 +1092,93 @@ describe("WhatsApp transport community creation", () => {
     ]);
   });
 
+  it("runs connection-open hooks before initial-sync buffering drains", async () => {
+    if (!testDb || !testStore) {
+      throw new Error("Expected test DB and store to be initialized");
+    }
+
+    const chatId = `restart-open-before-buffer-${Date.now()}`;
+    /** @type {((events: Partial<import("@whiskeysockets/baileys").BaileysEventMap>) => Promise<void>) | null} */
+    let processEvents = null;
+    /** @type {Array<{ chatId: string, message: Record<string, unknown> }>} */
+    const sentMessages = [];
+    /** @type {string[]} */
+    const hookPhases = [];
+    let buffering = true;
+
+    const socket = /** @type {import("@whiskeysockets/baileys").WASocket} */ (/** @type {unknown} */ ({
+      ev: {
+        process(handler) {
+          processEvents = handler;
+        },
+        isBuffering() {
+          return buffering;
+        },
+      },
+      sendMessage: async (targetChatId, message) => {
+        sentMessages.push({ chatId: targetChatId, message });
+        return { key: { id: `sent-${sentMessages.length}`, remoteJid: targetChatId } };
+      },
+    }));
+
+    const transport = await createWhatsAppTransport({
+      createConnectionSupervisor: async ({ onSocketReady }) => ({
+        start: async () => {
+          onSocketReady(socket, async () => {});
+        },
+        stop: async () => {},
+        sendText: async () => {},
+        handleConnectionUpdate: async () => {},
+        isStopped: () => false,
+      }),
+      onConnectionOpen: async ({ editMessage, phase }) => {
+        hookPhases.push(phase);
+        if (phase === "beforeQueueFlush") {
+          await editMessage({
+            transportHandleId: "existing-restart-handle",
+            text: "Restarted.",
+          });
+        }
+      },
+      outboundStore: testStore,
+    });
+
+    await testStore.saveWhatsAppEditHandle({
+      id: "existing-restart-handle",
+      chatId,
+      messageKeyJson: { id: "restart-signal-message", remoteJid: chatId, fromMe: true },
+      messageKind: "text",
+      createdAt: new Date().toISOString(),
+      expiresAt: new Date(Date.now() + 60_000).toISOString(),
+    });
+
+    await transport.start(async () => {});
+    if (!processEvents) {
+      throw new Error("Expected connection event processor to be registered");
+    }
+
+    await processEvents({
+      "connection.update": {
+        connection: "open",
+      },
+    });
+    await waitForTransportBackgroundWork();
+
+    assert.deepEqual(hookPhases, ["beforeQueueFlush"]);
+    assert.deepEqual(sentMessages, [{
+      chatId,
+      message: makeTextMessage("Restarted.", {
+        edit: { id: "restart-signal-message", remoteJid: chatId, fromMe: true },
+      }),
+    }]);
+
+    buffering = false;
+    await delay(150);
+    await waitForTransportBackgroundWork();
+
+    assert.deepEqual(hookPhases, ["beforeQueueFlush", "afterQueueFlush"]);
+  });
+
   it("runs connection-open hooks after queued outbound flushes complete", async () => {
     if (!testDb || !testStore) {
       throw new Error("Expected test DB and store to be initialized");
@@ -1166,14 +1253,14 @@ describe("WhatsApp transport community creation", () => {
     await Promise.resolve();
 
     assert.equal(openResolved, true);
-    assert.deepEqual(hookPhases, []);
+    assert.deepEqual(hookPhases, ["beforeQueueFlush"]);
     assert.deepEqual(sentMessages, []);
 
     releaseQueuedSend();
     await openPromise;
     await waitForTransportBackgroundWork();
 
-    assert.deepEqual(hookPhases, ["afterQueueFlush"]);
+    assert.deepEqual(hookPhases, ["beforeQueueFlush", "afterQueueFlush"]);
     assert.deepEqual(sentMessages, [{
       chatId,
       message: makeTextMessage("🤖 queued unrelated output"),
@@ -1246,13 +1333,13 @@ describe("WhatsApp transport community creation", () => {
     await waitForTransportBackgroundWork();
 
     assert.deepEqual(sentMessages, []);
-    assert.deepEqual(hookPhases, []);
+    assert.deepEqual(hookPhases, ["beforeQueueFlush"]);
 
     buffering = false;
     await delay(150);
     await waitForTransportBackgroundWork();
 
-    assert.deepEqual(hookPhases, ["afterQueueFlush"]);
+    assert.deepEqual(hookPhases, ["beforeQueueFlush", "afterQueueFlush"]);
     assert.deepEqual(sentMessages, [{
       chatId,
       message: makeTextMessage("🤖 queued while initial sync is buffering"),
@@ -1271,11 +1358,15 @@ describe("WhatsApp transport community creation", () => {
     let processEvents = null;
     /** @type {Array<{ chatId: string, message: Record<string, unknown> }>} */
     const sentMessages = [];
+    let buffering = false;
 
     const socket = /** @type {import("@whiskeysockets/baileys").WASocket} */ (/** @type {unknown} */ ({
       ev: {
         process(handler) {
           processEvents = handler;
+        },
+        isBuffering() {
+          return buffering;
         },
       },
       sendMessage: async (targetChatId, message) => {
@@ -1355,6 +1446,7 @@ describe("WhatsApp transport community creation", () => {
       });
 
       processEvents = null;
+      buffering = true;
       await secondTransport.start(async () => {});
       if (!processEvents) {
         throw new Error("Expected second connection event processor to be registered");
@@ -1374,6 +1466,10 @@ describe("WhatsApp transport community creation", () => {
           }),
         },
       ]);
+
+      buffering = false;
+      await delay(150);
+      await waitForTransportBackgroundWork();
       assert.equal(await restartAckStore.read(), null);
     } finally {
       await rm(dir, { recursive: true, force: true });
