@@ -2517,6 +2517,35 @@ describe("sendBlocks – tool-call → edit pipeline", () => {
     assert.equal(editKey.fromMe, true, "Edit key should be an outgoing message key");
   });
 
+  it("debounces rapid updates to the same text message handle", async () => {
+    const previousDelay = process.env.MADABOT_WHATSAPP_EDIT_DEBOUNCE_MS;
+    process.env.MADABOT_WHATSAPP_EDIT_DEBOUNCE_MS = "20";
+    try {
+      const { sock, calls } = createCaptureSock();
+      const handle = await sendBlocks(sock, "chat-1", "tool-call", [
+        { type: "text", text: "running" },
+      ]);
+
+      assert.ok(handle);
+      const firstUpdate = handle.update({ kind: "text", text: "first progress" });
+      const secondUpdate = handle.update({ kind: "text", text: "final progress" });
+
+      assert.equal(calls.length, 1, "Updates should not edit immediately while debounced");
+      await Promise.all([firstUpdate, secondUpdate]);
+
+      assert.equal(calls.length, 2, "Rapid updates should be coalesced into one edit");
+      const editMsg = /** @type {Record<string, unknown>} */ (calls[1].args[1]);
+      assert.ok(typeof editMsg.text === "string" && editMsg.text.includes("final progress"));
+      assert.ok(typeof editMsg.text === "string" && !editMsg.text.includes("first progress"));
+    } finally {
+      if (previousDelay === undefined) {
+        delete process.env.MADABOT_WHATSAPP_EDIT_DEBOUNCE_MS;
+      } else {
+        process.env.MADABOT_WHATSAPP_EDIT_DEBOUNCE_MS = previousDelay;
+      }
+    }
+  });
+
   it("image tool-call: send → edit uses relayMessage for caption update", async () => {
     const { sock, calls } = createCaptureSock();
 

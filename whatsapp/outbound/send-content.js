@@ -23,10 +23,19 @@ const ALBUM_RELAY_DELAY_MS = 500;
 const SNAPSHOT_DIFF_LINES_PER_BATCH = 1000;
 const SNAPSHOT_DIFF_CONTINUATION_TIMEOUT_MS = 30 * 60 * 1000;
 const WHATSAPP_EDIT_HANDLE_TTL_MS = 14 * 60 * 1000;
+const DEFAULT_WHATSAPP_EDIT_DEBOUNCE_MS = 1000;
 const TURN_STATUS_PIN_SECONDS = 86400;
 const log = createLogger("whatsapp:outbound");
 /** @type {Map<string, WhatsAppEditHandleRecord>} */
 const inMemoryEditHandles = new Map();
+/** @type {Map<string, {
+ *   sock: import('@whiskeysockets/baileys').WASocket,
+ *   text: string,
+ *   options: { store?: import("../../store.js").Store },
+ *   timer: ReturnType<typeof setTimeout>,
+ *   waiters: Array<{ resolve: () => void, reject: (error: unknown) => void }>,
+ * }>} */
+const pendingEditDebounces = new Map();
 /** @type {Map<string, { handle?: MessageHandle, entries: Array<{ key: string, icon: string, provider: string, summary: string }> }>} */
 const turnStatusByChat = new Map();
 /** @type {Map<string, { handle?: MessageHandle, entries: Array<{ icon: string, provider: string, summary: string, detail?: string }> }>} */
@@ -48,6 +57,18 @@ const compactToolActivityByChat = new Map();
 
 const COMPACT_TOOL_ACTIVITY_LIMIT = 3;
 const COMPACT_TOOL_ACTIVITY_DEBOUNCE_MS = 1000;
+
+/**
+ * @returns {number}
+ */
+function getWhatsAppEditDebounceMs() {
+  const raw = process.env.MADABOT_WHATSAPP_EDIT_DEBOUNCE_MS;
+  if (raw === undefined || raw.trim() === "") {
+    return process.env.TESTING === "1" ? 0 : DEFAULT_WHATSAPP_EDIT_DEBOUNCE_MS;
+  }
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : DEFAULT_WHATSAPP_EDIT_DEBOUNCE_MS;
+}
 
 /**
  * @typedef {{
@@ -3226,6 +3247,56 @@ export async function editWhatsAppMessageByHandle(sock, transportHandleId, newTe
 }
 
 /**
+ * Debounce edits for the same durable handle so rapidly changing status text
+ * does not become one WhatsApp transaction per internal progress event.
+ * @param {import('@whiskeysockets/baileys').WASocket} sock
+ * @param {string} transportHandleId
+ * @param {string} newText
+ * @param {{ store?: import("../../store.js").Store }} [options]
+ * @returns {Promise<void>}
+ */
+function editWhatsAppMessageByHandleDebounced(sock, transportHandleId, newText, options = {}) {
+  const debounceMs = getWhatsAppEditDebounceMs();
+  if (debounceMs <= 0) {
+    return editWhatsAppMessageByHandle(sock, transportHandleId, newText, options);
+  }
+
+  const existing = pendingEditDebounces.get(transportHandleId);
+  if (existing) {
+    clearTimeout(existing.timer);
+  }
+
+  return new Promise((resolve, reject) => {
+    const waiters = existing?.waiters ?? [];
+    waiters.push({ resolve, reject });
+    const entry = {
+      sock,
+      text: newText,
+      options,
+      waiters,
+      timer: setTimeout(() => {
+        if (pendingEditDebounces.get(transportHandleId) !== entry) {
+          return;
+        }
+        pendingEditDebounces.delete(transportHandleId);
+        void editWhatsAppMessageByHandle(entry.sock, transportHandleId, entry.text, entry.options)
+          .then(() => {
+            for (const waiter of entry.waiters) {
+              waiter.resolve();
+            }
+          })
+          .catch((error) => {
+            for (const waiter of entry.waiters) {
+              waiter.reject(error);
+            }
+          });
+      }, debounceMs),
+    };
+    pendingEditDebounces.set(transportHandleId, entry);
+  });
+}
+
+/**
  * Dispatch a semantic outbound event as WhatsApp messages.
  * Returns a MessageHandle for the last editable message sent (if any).
  * @param {import('@whiskeysockets/baileys').WASocket} sock
@@ -3512,7 +3583,7 @@ export async function sendBlocks(sock, chatId, source, content, options, reactio
       const text = persistInspectText && inspectState?.kind === "text" && inspectState.persistOnInspect
         ? formatInspectEditText("", inspectState.text)
         : summarizeHandleUpdate(update);
-      await editWhatsAppMessageByHandle(
+      await editWhatsAppMessageByHandleDebounced(
         sock,
         transportHandleId,
         prependSourcePrefix(prefix, text),
