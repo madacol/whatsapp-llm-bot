@@ -15,7 +15,7 @@
       --line: #b8c4d4;
       --line-strong: #8796aa;
       --model: #1f6f78;
-      --boundary: #9a5c15;
+      --seam: #9a5c15;
       --adapter: #6150a8;
       --agent: #26734d;
       --service: #396a9f;
@@ -138,6 +138,30 @@
       stroke-width: 3;
     }
 
+    .seam-guide {
+      fill: none;
+      stroke: var(--seam);
+      stroke-width: 2;
+      stroke-dasharray: 7 8;
+      opacity: 0.72;
+    }
+
+    .seam-label-box {
+      fill: rgba(255, 255, 255, 0.92);
+      stroke: #e0cda9;
+      stroke-width: 1;
+      rx: 7px;
+    }
+
+    .seam-label {
+      fill: #6f4210;
+      font-size: 12px;
+      font-weight: 850;
+      letter-spacing: 0;
+      text-anchor: middle;
+      text-transform: uppercase;
+    }
+
     .node {
       cursor: pointer;
       outline: none;
@@ -156,8 +180,8 @@
       stroke: var(--model);
     }
 
-    .node[data-kind="boundary"] rect {
-      stroke: var(--boundary);
+    .node[data-kind="seam"] rect {
+      stroke: var(--seam);
     }
 
     .node[data-kind="adapter"] rect {
@@ -325,8 +349,8 @@
       background: var(--model);
     }
 
-    .swatch-boundary {
-      background: var(--boundary);
+    .swatch-seam {
+      background: var(--seam);
     }
 
     .swatch-adapter {
@@ -425,6 +449,19 @@
             <path d="M0,0 L0,6 L8,3 z" fill="#b8c4d4"></path>
           </marker>
         </defs>
+        <g id="seams" aria-hidden="true">
+          <path class="seam-guide" d="M150 205 L150 525"></path>
+          <rect class="seam-label-box" x="88" y="202" width="124" height="26"></rect>
+          <text class="seam-label" x="150" y="220">WhatsApp seam</text>
+
+          <path class="seam-guide" d="M640 205 L640 670"></path>
+          <rect class="seam-label-box" x="574" y="202" width="132" height="26"></rect>
+          <text class="seam-label" x="640" y="220">ACP event seam</text>
+
+          <path class="seam-guide" d="M950 675 L950 1115"></path>
+          <rect class="seam-label-box" x="872" y="674" width="156" height="26"></rect>
+          <text class="seam-label" x="950" y="692">Adapter-agent seam</text>
+        </g>
         <g id="edges"></g>
         <g id="nodes"></g>
       </svg>
@@ -439,7 +476,7 @@
       <ul id="detail-children" class="child-list"></ul>
       <div class="legend" aria-label="Node legend">
         <span><i class="swatch-model"></i>Model</span>
-        <span><i class="swatch-boundary"></i>Boundary</span>
+        <span><i class="swatch-seam"></i>Seam</span>
         <span><i class="swatch-adapter"></i>Adapter</span>
         <span><i class="swatch-agent"></i>Agent</span>
         <span><i class="swatch-service"></i>Service</span>
@@ -455,14 +492,14 @@
         kind: "model",
         summary: "The chat-facing application model that receives WhatsApp turns, routes commands, starts agent runs, and renders outbound responses.",
         files: ["index.js", "conversation/create-conversation-runner.js", "whatsapp/index.js"],
-        children: ["whatsapp-boundary", "conversation-core", "acp-events", "acp-adapters", "workspace-state"],
+        children: ["whatsapp-seam", "conversation-core", "acp-events", "acp-adapters", "workspace-state"],
         x: 640,
         y: 95
       },
       {
-        id: "whatsapp-boundary",
-        label: "WhatsApp boundary",
-        kind: "boundary",
+        id: "whatsapp-seam",
+        label: "WhatsApp seam",
+        kind: "seam",
         summary: "Normalizes Baileys messages into ChatTurn input and turns outbound events back into WhatsApp messages.",
         files: ["whatsapp/inbound/chat-turn.js", "whatsapp/create-whatsapp-transport.js", "outbound-events.js"],
         children: ["inbound-turns", "outbound-rendering"],
@@ -482,8 +519,8 @@
       {
         id: "acp-events",
         label: "ACP events",
-        kind: "boundary",
-        summary: "The semantic event boundary between provider ACP payloads and the bot's transport-level runtime events.",
+        kind: "seam",
+        summary: "The semantic seam between provider ACP payloads and the bot's transport-level runtime events.",
         files: ["harnesses/acp-events.js", "harnesses/acp-runtime-model.js", "harnesses/harness-runtime-event-dispatcher.js"],
         children: ["runtime-model", "runtime-dispatcher", "file-changes", "approval-requests"],
         x: 640,
@@ -582,7 +619,7 @@
       {
         id: "approval-requests",
         label: "Approvals",
-        kind: "boundary",
+        kind: "seam",
         summary: "Bridges ACP approval and elicitation requests to chat-facing confirmation and selection flows.",
         files: ["harnesses/sandbox-approval-coordinator.js", "harnesses/protected-paths.js"],
         children: [],
@@ -595,7 +632,7 @@
         kind: "adapter",
         summary: "Built-in Codex driver registered through the generic ACP agent definition path.",
         files: ["harnesses/acp-agents.js", "patches/@agentclientprotocol__codex-acp@0.0.44.patch"],
-        children: ["codex-agent-boundary"],
+        children: ["codex-agent-seam"],
         x: 860,
         y: 455
       },
@@ -605,7 +642,7 @@
         kind: "adapter",
         summary: "Built-in Claude driver that shares the same adapter contract as the other ACP providers.",
         files: ["harnesses/acp-agents.js"],
-        children: ["claude-agent-boundary"],
+        children: ["claude-agent-seam"],
         x: 1040,
         y: 455
       },
@@ -615,14 +652,14 @@
         kind: "adapter",
         summary: "Built-in Pi driver with local command wiring for the ACP agent process.",
         files: ["harnesses/acp-agents.js", "package.json"],
-        children: ["pi-agent-boundary"],
+        children: ["pi-agent-seam"],
         x: 950,
         y: 600
       },
       {
-        id: "codex-agent-boundary",
-        label: "Agent process boundary",
-        kind: "boundary",
+        id: "codex-agent-seam",
+        label: "Agent process seam",
+        kind: "seam",
         summary: "The spawned Codex ACP process communicates with the bot over the ACP client connection.",
         files: ["harnesses/acp-runner.js", "harnesses/acp-client.js"],
         children: ["codex-agent"],
@@ -630,9 +667,9 @@
         y: 745
       },
       {
-        id: "claude-agent-boundary",
-        label: "Agent process boundary",
-        kind: "boundary",
+        id: "claude-agent-seam",
+        label: "Agent process seam",
+        kind: "seam",
         summary: "The spawned Claude ACP process uses the same session lifecycle, requests, and update stream.",
         files: ["harnesses/acp-runner.js", "harnesses/acp-client.js"],
         children: ["claude-agent"],
@@ -640,10 +677,10 @@
         y: 745
       },
       {
-        id: "pi-agent-boundary",
-        label: "Agent process boundary",
-        kind: "boundary",
-        summary: "The spawned Pi ACP process is isolated behind the same adapter boundary as Codex and Claude.",
+        id: "pi-agent-seam",
+        label: "Agent process seam",
+        kind: "seam",
+        summary: "The spawned Pi ACP process is isolated behind the same adapter seam as Codex and Claude.",
         files: ["harnesses/acp-runner.js", "harnesses/acp-client.js"],
         children: ["pi-agent"],
         x: 950,
