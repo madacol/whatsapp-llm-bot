@@ -870,6 +870,7 @@ export async function createWhatsAppTransport(options = {}) {
    */
   function scheduleConnectionOpenWork(sock) {
     void (async () => {
+      await runConnectionOpenHook("beforeQueueFlush");
       if (!await waitForEventBufferToDrain(sock)) {
         return;
       }
