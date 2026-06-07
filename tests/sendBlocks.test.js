@@ -774,7 +774,7 @@ describe("sendEvent – runtime events", () => {
       },
       {
         pin: { id: "msg-1", remoteJid: "runtime-noise-chat", fromMe: true },
-        type: 0,
+        type: 2,
       },
       { text: "🔄 *CODEX*  turn started", linkPreview: null },
       {
@@ -1071,8 +1071,12 @@ describe("sendEvent – runtime events", () => {
         time: 86400,
       },
       {
+        pin: { id: "msg-1", remoteJid: "runtime-expired-turn-chat", fromMe: true },
+        type: 2,
+      },
+      {
         pin: { id: "msg-3", remoteJid: "runtime-expired-turn-chat", fromMe: true },
-        type: 0,
+        type: 2,
       },
     ]);
   });
@@ -1130,7 +1134,7 @@ describe("sendEvent – runtime events", () => {
       },
       {
         pin: { id: "msg-1", remoteJid: "runtime-raw-read-title-chat", fromMe: true },
-        type: 0,
+        type: 2,
       },
     ]);
   });
@@ -1339,7 +1343,7 @@ describe("sendEvent – runtime events", () => {
       "✅ *Shell*  `pnpm exec node scripts/acp-adapter-smoke.js codex --prompt`",
       "✅ *Search*  `smoke|e2e|baileys|whatsapp|pin|pinned|ACP` in *package.json*",
     ].join("\n"));
-    assert.ok(sent.some((entry) => entry.msg.pin && typeof entry.msg.pin === "object" && entry.msg.type === 0), `Expected final unpin payload, got ${JSON.stringify(sent.map((entry) => entry.msg))}`);
+    assert.ok(sent.some((entry) => entry.msg.pin && typeof entry.msg.pin === "object" && entry.msg.type === 2), `Expected final unpin payload, got ${JSON.stringify(sent.map((entry) => entry.msg))}`);
   });
 
   it("folds generic runtime events into one editable WhatsApp status", async () => {

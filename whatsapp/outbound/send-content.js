@@ -688,7 +688,7 @@ async function pinWhatsAppMessage(sock, chatId, key, observer) {
   try {
     await sock.sendMessage(chatId, {
       pin: pinKey,
-      type: 1,
+      type: proto.PinInChat.Type.PIN_FOR_ALL,
       time: TURN_STATUS_PIN_SECONDS,
     });
     observePinnedStatusDelivery(observer, { type: "pin.succeeded", chatId, messageId });
@@ -724,7 +724,7 @@ async function unpinWhatsAppMessage(sock, chatId, key, observer) {
   try {
     await sock.sendMessage(chatId, {
       pin: pinKey,
-      type: 0,
+      type: proto.PinInChat.Type.UNPIN_FOR_ALL,
     });
     observePinnedStatusDelivery(observer, { type: "unpin.succeeded", chatId, messageId });
   } catch (error) {
@@ -2564,6 +2564,7 @@ async function updatePinnedTurnStatus(sock, chatId, event, options, reactionRunt
       if (!isStaleWhatsAppEditHandleError(error)) {
         throw error;
       }
+      const staleHandle = state.handle;
       state.handle = await sendBlocks(sock, chatId, "plain", text, options, reactionRuntime, event, {
         editHandleStore: sendOptions.editHandleStore,
       });
@@ -2575,6 +2576,9 @@ async function updatePinnedTurnStatus(sock, chatId, event, options, reactionRunt
         text,
       });
       await pinWhatsAppMessage(sock, chatId, state.handle?.messageKey, sendOptions.pinnedStatusDeliveryObserver);
+      if (getMessageKeyId(staleHandle.messageKey) !== getMessageKeyId(state.handle?.messageKey)) {
+        await unpinWhatsAppMessage(sock, chatId, staleHandle.messageKey, sendOptions.pinnedStatusDeliveryObserver);
+      }
     }
   }
 

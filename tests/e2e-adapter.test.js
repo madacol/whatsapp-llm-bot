@@ -515,7 +515,7 @@ describe("ACP runtime events through WhatsApp transport", () => {
       sentMessages.some((entry) => entry.msg.pin
         && typeof entry.msg.pin === "object"
         && /** @type {{ id?: unknown }} */ (entry.msg.pin).id === pinnedId
-        && entry.msg.type === 0),
+        && entry.msg.type === 2),
       `Expected pinned status ${pinnedId} to be unpinned at turn end, got ${JSON.stringify(sentMessages.map((entry) => entry.msg))}`,
     );
   }
