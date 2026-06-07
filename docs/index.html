@@ -1,0 +1,954 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Madabot ACP Flow</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f5f7fa;
+      --surface: #ffffff;
+      --surface-soft: #f9fbfd;
+      --ink: #172033;
+      --muted: #667085;
+      --line: #b8c4d4;
+      --line-strong: #8796aa;
+      --model: #1f6f78;
+      --boundary: #9a5c15;
+      --adapter: #6150a8;
+      --agent: #26734d;
+      --service: #396a9f;
+      --active: #cc4e31;
+      --shadow: rgba(23, 32, 51, 0.13);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      margin: 0;
+      min-height: 100%;
+      background: var(--bg);
+      color: var(--ink);
+    }
+
+    body {
+      min-height: 100vh;
+      overflow: hidden;
+    }
+
+    main {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 360px;
+      min-height: 100vh;
+    }
+
+    .stage {
+      position: relative;
+      min-width: 0;
+      border-right: 1px solid #d9e1ea;
+      background:
+        linear-gradient(#ebf0f5 1px, transparent 1px),
+        linear-gradient(90deg, #ebf0f5 1px, transparent 1px),
+        #fbfcfe;
+      background-size: 32px 32px;
+    }
+
+    .brand {
+      position: absolute;
+      top: 18px;
+      left: 18px;
+      z-index: 2;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      min-width: 0;
+      padding: 9px 12px;
+      border: 1px solid #d7dee8;
+      background: rgba(255, 255, 255, 0.93);
+      box-shadow: 0 12px 34px var(--shadow);
+    }
+
+    .brand-mark {
+      width: 30px;
+      height: 30px;
+      border-radius: 7px;
+      background:
+        linear-gradient(135deg, #1f6f78 0 45%, #26734d 45% 100%);
+    }
+
+    .brand h1 {
+      margin: 0;
+      font-size: 16px;
+      line-height: 1.15;
+      letter-spacing: 0;
+      white-space: nowrap;
+    }
+
+    .toolbar {
+      position: absolute;
+      right: 18px;
+      top: 18px;
+      z-index: 2;
+      display: inline-flex;
+      gap: 6px;
+      padding: 6px;
+      border: 1px solid #d7dee8;
+      background: rgba(255, 255, 255, 0.93);
+      box-shadow: 0 12px 34px var(--shadow);
+    }
+
+    button {
+      width: 36px;
+      height: 34px;
+      border: 1px solid #c9d3e0;
+      border-radius: 7px;
+      background: var(--surface);
+      color: var(--ink);
+      font: 800 16px/1 system-ui, sans-serif;
+      cursor: pointer;
+    }
+
+    button:hover,
+    button:focus-visible {
+      border-color: var(--line-strong);
+      background: #f1f4f8;
+      outline: none;
+    }
+
+    svg {
+      display: block;
+      width: 100%;
+      height: 100vh;
+      min-height: 700px;
+    }
+
+    .edge {
+      fill: none;
+      stroke: var(--line);
+      stroke-width: 2.4;
+    }
+
+    .edge.is-highlighted {
+      stroke: var(--active);
+      stroke-width: 3;
+    }
+
+    .node {
+      cursor: pointer;
+      outline: none;
+    }
+
+    .node rect {
+      width: 154px;
+      height: 74px;
+      rx: 7px;
+      fill: var(--surface);
+      stroke-width: 2.2;
+      filter: drop-shadow(0 9px 16px rgba(23, 32, 51, 0.10));
+    }
+
+    .node[data-kind="model"] rect {
+      stroke: var(--model);
+    }
+
+    .node[data-kind="boundary"] rect {
+      stroke: var(--boundary);
+    }
+
+    .node[data-kind="adapter"] rect {
+      stroke: var(--adapter);
+    }
+
+    .node[data-kind="agent"] rect {
+      stroke: var(--agent);
+    }
+
+    .node[data-kind="service"] rect {
+      stroke: var(--service);
+    }
+
+    .node.is-selected rect {
+      stroke: var(--active);
+      stroke-width: 3;
+    }
+
+    .node:focus-visible rect {
+      stroke: var(--active);
+      stroke-width: 3;
+    }
+
+    .node-kind {
+      fill: var(--muted);
+      font-size: 11px;
+      font-weight: 800;
+      letter-spacing: 0;
+      text-anchor: middle;
+      text-transform: uppercase;
+      pointer-events: none;
+    }
+
+    .node-label {
+      fill: var(--ink);
+      font-size: 15px;
+      font-weight: 750;
+      letter-spacing: 0;
+      text-anchor: middle;
+      pointer-events: none;
+    }
+
+    .expand-dot {
+      fill: var(--surface);
+      stroke: #97a5b8;
+      stroke-width: 1.4;
+      pointer-events: none;
+    }
+
+    .expand-mark {
+      fill: var(--muted);
+      font-size: 14px;
+      font-weight: 900;
+      text-anchor: middle;
+      pointer-events: none;
+    }
+
+    aside {
+      min-width: 0;
+      padding: 24px 22px;
+      background: var(--surface);
+      overflow: auto;
+    }
+
+    .meta {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 18px;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 800;
+      letter-spacing: 0;
+      text-transform: uppercase;
+    }
+
+    .meta::before {
+      content: "";
+      width: 9px;
+      height: 9px;
+      border-radius: 99px;
+      background: var(--active);
+    }
+
+    .detail-title {
+      margin: 0 0 7px;
+      font-size: 24px;
+      line-height: 1.14;
+      letter-spacing: 0;
+    }
+
+    .detail-summary {
+      margin: 0 0 22px;
+      color: #2c3748;
+      font-size: 14px;
+      line-height: 1.5;
+    }
+
+    .section-title {
+      margin: 0 0 10px;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 850;
+      letter-spacing: 0;
+      text-transform: uppercase;
+    }
+
+    .file-list,
+    .child-list {
+      display: grid;
+      gap: 8px;
+      margin: 0 0 24px;
+      padding: 0;
+      list-style: none;
+    }
+
+    .file-list li,
+    .child-list li {
+      min-width: 0;
+      padding: 9px 10px;
+      border: 1px solid #dde5ef;
+      border-radius: 7px;
+      background: var(--surface-soft);
+      color: #243044;
+      line-height: 1.3;
+      overflow-wrap: anywhere;
+    }
+
+    .file-list li {
+      font: 13px/1.3 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+    }
+
+    .child-list li {
+      font-size: 13px;
+      font-weight: 650;
+    }
+
+    .legend {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+      margin-top: 26px;
+    }
+
+    .legend span {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      min-width: 0;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    .legend i {
+      width: 12px;
+      height: 12px;
+      border-radius: 4px;
+      display: inline-block;
+      flex: none;
+    }
+
+    .swatch-model {
+      background: var(--model);
+    }
+
+    .swatch-boundary {
+      background: var(--boundary);
+    }
+
+    .swatch-adapter {
+      background: var(--adapter);
+    }
+
+    .swatch-agent {
+      background: var(--agent);
+    }
+
+    .swatch-service {
+      background: var(--service);
+    }
+
+    @media (max-width: 900px) {
+      body {
+        overflow: auto;
+      }
+
+      main {
+        grid-template-columns: 1fr;
+      }
+
+      .stage {
+        border-right: 0;
+        border-bottom: 1px solid #d9e1ea;
+      }
+
+      .brand {
+        max-width: calc(100vw - 132px);
+      }
+
+      .brand h1 {
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      svg {
+        height: 68vh;
+        min-height: 470px;
+      }
+
+      aside {
+        max-height: none;
+      }
+    }
+
+    @media (max-width: 520px) {
+      .brand {
+        top: 12px;
+        left: 12px;
+        padding: 7px 9px;
+      }
+
+      .brand-mark {
+        width: 26px;
+        height: 26px;
+      }
+
+      .brand h1 {
+        font-size: 14px;
+      }
+
+      .toolbar {
+        top: 12px;
+        right: 12px;
+      }
+
+      button {
+        width: 32px;
+        height: 31px;
+      }
+
+      aside {
+        padding: 18px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <section class="stage" aria-label="Madabot architecture map">
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true"></span>
+        <h1>Madabot ACP Flow</h1>
+      </div>
+      <div class="toolbar" aria-label="Zoom controls">
+        <button type="button" data-action="zoom-in" title="Zoom in" aria-label="Zoom in">+</button>
+        <button type="button" data-action="zoom-out" title="Zoom out" aria-label="Zoom out">-</button>
+        <button type="button" data-action="reset" title="Reset view" aria-label="Reset view">0</button>
+      </div>
+      <svg id="architecture" role="img" aria-labelledby="architecture-title" viewBox="0 0 1280 760">
+        <title id="architecture-title">Madabot WhatsApp and ACP architecture</title>
+        <defs>
+          <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
+            <path d="M0,0 L0,6 L8,3 z" fill="#b8c4d4"></path>
+          </marker>
+        </defs>
+        <g id="edges"></g>
+        <g id="nodes"></g>
+      </svg>
+    </section>
+    <aside aria-live="polite">
+      <div id="detail-kind" class="meta">model</div>
+      <h2 id="detail-title" class="detail-title">WhatsApp model</h2>
+      <p id="detail-summary" class="detail-summary"></p>
+      <h3 class="section-title">Files</h3>
+      <ul id="detail-files" class="file-list"></ul>
+      <h3 class="section-title">Expands To</h3>
+      <ul id="detail-children" class="child-list"></ul>
+      <div class="legend" aria-label="Node legend">
+        <span><i class="swatch-model"></i>Model</span>
+        <span><i class="swatch-boundary"></i>Boundary</span>
+        <span><i class="swatch-adapter"></i>Adapter</span>
+        <span><i class="swatch-agent"></i>Agent</span>
+        <span><i class="swatch-service"></i>Service</span>
+      </div>
+    </aside>
+  </main>
+
+  <script>
+    const architectureNodes = [
+      {
+        id: "whatsapp-model",
+        label: "WhatsApp model",
+        kind: "model",
+        summary: "The chat-facing application model that receives WhatsApp turns, routes commands, starts agent runs, and renders outbound responses.",
+        files: ["index.js", "conversation/create-conversation-runner.js", "whatsapp/index.js"],
+        children: ["whatsapp-boundary", "conversation-core", "acp-events", "acp-adapters", "workspace-state"],
+        x: 640,
+        y: 95
+      },
+      {
+        id: "whatsapp-boundary",
+        label: "WhatsApp boundary",
+        kind: "boundary",
+        summary: "Normalizes Baileys messages into ChatTurn input and turns outbound events back into WhatsApp messages.",
+        files: ["whatsapp/inbound/chat-turn.js", "whatsapp/create-whatsapp-transport.js", "outbound-events.js"],
+        children: ["inbound-turns", "outbound-rendering"],
+        x: 150,
+        y: 275
+      },
+      {
+        id: "conversation-core",
+        label: "Conversation runner",
+        kind: "service",
+        summary: "Builds run context, handles commands, resolves the active harness, and coordinates one user turn from input through response.",
+        files: ["conversation/create-conversation-runner.js", "conversation/build-run-session.js", "conversation/turn-routing.js"],
+        children: ["run-session", "workspace-binding"],
+        x: 405,
+        y: 275
+      },
+      {
+        id: "acp-events",
+        label: "ACP events",
+        kind: "boundary",
+        summary: "The semantic event boundary between provider ACP payloads and the bot's transport-level runtime events.",
+        files: ["harnesses/acp-events.js", "harnesses/acp-runtime-model.js", "harnesses/harness-runtime-event-dispatcher.js"],
+        children: ["runtime-model", "runtime-dispatcher", "file-changes", "approval-requests"],
+        x: 640,
+        y: 275
+      },
+      {
+        id: "acp-adapters",
+        label: "ACP adapters",
+        kind: "adapter",
+        summary: "Registers built-in and configured ACP-compatible agents and exposes them through the shared harness adapter contract.",
+        files: ["harnesses/acp-agents.js", "harnesses/acp.js", "harnesses/registry.js"],
+        children: ["codex-adapter", "claude-adapter", "pi-adapter"],
+        x: 900,
+        y: 275
+      },
+      {
+        id: "workspace-state",
+        label: "Workspace state",
+        kind: "service",
+        summary: "Persists chat state, workspace bindings, HTML pages, run sessions, and per-chat configuration.",
+        files: ["store.js", "workspace-binding-service.js", "html-store.js", "chat-config.js"],
+        children: ["html-pages", "workspace-control"],
+        x: 1130,
+        y: 275
+      },
+      {
+        id: "inbound-turns",
+        label: "Inbound turns",
+        kind: "service",
+        summary: "Extracts sender, quote, media, and text facts before the conversation layer sees a user turn.",
+        files: ["whatsapp/inbound/chat-turn.js", "media-to-text.js"],
+        children: [],
+        x: 80,
+        y: 455
+      },
+      {
+        id: "outbound-rendering",
+        label: "Outbound rendering",
+        kind: "service",
+        summary: "Formats semantic content, runtime status, tool activity, media, and HTML links for WhatsApp delivery.",
+        files: ["message-renderer.js", "whatsapp/tool-presenter.js", "commands/command-results.js"],
+        children: [],
+        x: 230,
+        y: 455
+      },
+      {
+        id: "run-session",
+        label: "Run session",
+        kind: "service",
+        summary: "Combines messages, run config, model settings, and harness binding for a single agent turn.",
+        files: ["conversation/build-run-session.js", "conversation/build-run-config.js"],
+        children: [],
+        x: 340,
+        y: 455
+      },
+      {
+        id: "workspace-binding",
+        label: "Workspace binding",
+        kind: "service",
+        summary: "Keeps project and workspace chats attached to the right working directory and active session.",
+        files: ["workspace-binding-service.js", "workspace-lifecycle-service.js"],
+        children: [],
+        x: 505,
+        y: 455
+      },
+      {
+        id: "runtime-model",
+        label: "Runtime model",
+        kind: "service",
+        summary: "Converts ACP session/update payloads into stable, typed runtime events used by the rest of the app.",
+        files: ["harnesses/acp-runtime-model.js", "harnesses/harness-runtime-events.js"],
+        children: [],
+        x: 570,
+        y: 455
+      },
+      {
+        id: "runtime-dispatcher",
+        label: "Runtime dispatcher",
+        kind: "service",
+        summary: "Forwards canonical runtime events to agent I/O hooks without leaking provider-specific ACP shapes.",
+        files: ["harnesses/harness-runtime-event-dispatcher.js", "conversation/build-agent-io-hooks.js"],
+        children: [],
+        x: 735,
+        y: 455
+      },
+      {
+        id: "file-changes",
+        label: "File changes",
+        kind: "service",
+        summary: "Reconciles ACP file-change events, client filesystem writes, snapshots, and unified diffs.",
+        files: ["harnesses/acp-file-changes.js", "harnesses/file-change-utils.js"],
+        children: [],
+        x: 570,
+        y: 600
+      },
+      {
+        id: "approval-requests",
+        label: "Approvals",
+        kind: "boundary",
+        summary: "Bridges ACP approval and elicitation requests to chat-facing confirmation and selection flows.",
+        files: ["harnesses/sandbox-approval-coordinator.js", "harnesses/protected-paths.js"],
+        children: [],
+        x: 735,
+        y: 600
+      },
+      {
+        id: "codex-adapter",
+        label: "Codex ACP adapter",
+        kind: "adapter",
+        summary: "Built-in Codex driver registered through the generic ACP agent definition path.",
+        files: ["harnesses/acp-agents.js", "patches/@agentclientprotocol__codex-acp@0.0.44.patch"],
+        children: ["codex-agent-boundary"],
+        x: 860,
+        y: 455
+      },
+      {
+        id: "claude-adapter",
+        label: "Claude ACP adapter",
+        kind: "adapter",
+        summary: "Built-in Claude driver that shares the same adapter contract as the other ACP providers.",
+        files: ["harnesses/acp-agents.js"],
+        children: ["claude-agent-boundary"],
+        x: 1040,
+        y: 455
+      },
+      {
+        id: "pi-adapter",
+        label: "Pi ACP adapter",
+        kind: "adapter",
+        summary: "Built-in Pi driver with local command wiring for the ACP agent process.",
+        files: ["harnesses/acp-agents.js", "package.json"],
+        children: ["pi-agent-boundary"],
+        x: 950,
+        y: 600
+      },
+      {
+        id: "codex-agent-boundary",
+        label: "Agent process boundary",
+        kind: "boundary",
+        summary: "The spawned Codex ACP process communicates with the bot over the ACP client connection.",
+        files: ["harnesses/acp-runner.js", "harnesses/acp-client.js"],
+        children: ["codex-agent"],
+        x: 820,
+        y: 745
+      },
+      {
+        id: "claude-agent-boundary",
+        label: "Agent process boundary",
+        kind: "boundary",
+        summary: "The spawned Claude ACP process uses the same session lifecycle, requests, and update stream.",
+        files: ["harnesses/acp-runner.js", "harnesses/acp-client.js"],
+        children: ["claude-agent"],
+        x: 1040,
+        y: 745
+      },
+      {
+        id: "pi-agent-boundary",
+        label: "Agent process boundary",
+        kind: "boundary",
+        summary: "The spawned Pi ACP process is isolated behind the same adapter boundary as Codex and Claude.",
+        files: ["harnesses/acp-runner.js", "harnesses/acp-client.js"],
+        children: ["pi-agent"],
+        x: 950,
+        y: 890
+      },
+      {
+        id: "codex-agent",
+        label: "Codex agent",
+        kind: "agent",
+        summary: "External ACP-compatible Codex runtime.",
+        files: ["node_modules/@agentclientprotocol/codex-acp"],
+        children: [],
+        x: 820,
+        y: 925
+      },
+      {
+        id: "claude-agent",
+        label: "Claude agent",
+        kind: "agent",
+        summary: "External ACP-compatible Claude runtime.",
+        files: ["node_modules/@agentclientprotocol/claude-agent-acp"],
+        children: [],
+        x: 1040,
+        y: 925
+      },
+      {
+        id: "pi-agent",
+        label: "Pi agent",
+        kind: "agent",
+        summary: "External ACP-compatible Pi runtime.",
+        files: ["node_modules/pi-acp"],
+        children: [],
+        x: 950,
+        y: 1070
+      },
+      {
+        id: "html-pages",
+        label: "HTML pages",
+        kind: "service",
+        summary: "Stores generated HTML artifacts and serves stable per-chat links.",
+        files: ["html-store.js", "html-server.js"],
+        children: [],
+        x: 1090,
+        y: 455
+      },
+      {
+        id: "workspace-control",
+        label: "Workspace control",
+        kind: "service",
+        summary: "Implements project and workspace commands such as list, new, status, diff, and archive.",
+        files: ["workspace-command-router.js", "workspace-control.js"],
+        children: [],
+        x: 1235,
+        y: 455
+      }
+    ];
+
+    const nodeById = new Map(architectureNodes.map((node) => [node.id, node]));
+    const expanded = new Set(["whatsapp-model"]);
+    let selectedId = "whatsapp-model";
+    let viewBox = { x: 0, y: 0, width: 1280, height: 760 };
+
+    const svg = document.getElementById("architecture");
+    const edgesLayer = document.getElementById("edges");
+    const nodesLayer = document.getElementById("nodes");
+    const detailKind = document.getElementById("detail-kind");
+    const detailTitle = document.getElementById("detail-title");
+    const detailSummary = document.getElementById("detail-summary");
+    const detailFiles = document.getElementById("detail-files");
+    const detailChildren = document.getElementById("detail-children");
+
+    function visibleNodeIds() {
+      const visible = new Set(["whatsapp-model"]);
+      let changed = true;
+      while (changed) {
+        changed = false;
+        for (const id of Array.from(visible)) {
+          if (!expanded.has(id)) {
+            continue;
+          }
+          const node = nodeById.get(id);
+          if (!node) {
+            continue;
+          }
+          for (const childId of node.children) {
+            if (!visible.has(childId)) {
+              visible.add(childId);
+              changed = true;
+            }
+          }
+        }
+      }
+      return visible;
+    }
+
+    function createSvgElement(name) {
+      return document.createElementNS("http://www.w3.org/2000/svg", name);
+    }
+
+    function wrapLabel(label) {
+      const words = label.split(" ");
+      const lines = [];
+      let current = "";
+      for (const word of words) {
+        const next = current ? current + " " + word : word;
+        if (next.length > 17 && current) {
+          lines.push(current);
+          current = word;
+        } else {
+          current = next;
+        }
+      }
+      if (current) {
+        lines.push(current);
+      }
+      return lines.slice(0, 3);
+    }
+
+    function edgePath(parent, child) {
+      const startX = parent.x;
+      const startY = parent.y + 37;
+      const endX = child.x;
+      const endY = child.y - 37;
+      const midY = startY + Math.max(42, (endY - startY) / 2);
+      return "M" + startX + "," + startY + " C" + startX + "," + midY + " " + endX + "," + midY + " " + endX + "," + endY;
+    }
+
+    function renderEdges(visible) {
+      edgesLayer.replaceChildren();
+      for (const parent of architectureNodes) {
+        if (!visible.has(parent.id) || !expanded.has(parent.id)) {
+          continue;
+        }
+        for (const childId of parent.children) {
+          if (!visible.has(childId)) {
+            continue;
+          }
+          const child = nodeById.get(childId);
+          if (!child) {
+            continue;
+          }
+          const path = createSvgElement("path");
+          path.setAttribute("class", "edge" + (child.id === selectedId || parent.id === selectedId ? " is-highlighted" : ""));
+          path.setAttribute("d", edgePath(parent, child));
+          path.setAttribute("marker-end", "url(#arrow)");
+          edgesLayer.append(path);
+        }
+      }
+    }
+
+    function renderNode(node) {
+      const group = createSvgElement("g");
+      group.setAttribute("class", "node" + (node.id === selectedId ? " is-selected" : ""));
+      group.setAttribute("data-node-id", node.id);
+      group.setAttribute("data-kind", node.kind);
+      group.setAttribute("tabindex", "0");
+      group.setAttribute("role", "button");
+      group.setAttribute("aria-label", node.label);
+      group.setAttribute("transform", "translate(" + (node.x - 77) + " " + (node.y - 37) + ")");
+
+      const rect = createSvgElement("rect");
+      group.append(rect);
+
+      const kind = createSvgElement("text");
+      kind.setAttribute("class", "node-kind");
+      kind.setAttribute("x", "77");
+      kind.setAttribute("y", "18");
+      kind.textContent = node.kind;
+      group.append(kind);
+
+      const lines = wrapLabel(node.label);
+      const firstY = lines.length === 1 ? 44 : 36;
+      for (const [index, line] of lines.entries()) {
+        const text = createSvgElement("text");
+        text.setAttribute("class", "node-label");
+        text.setAttribute("x", "77");
+        text.setAttribute("y", String(firstY + index * 17));
+        text.textContent = line;
+        group.append(text);
+      }
+
+      if (node.children.length > 0) {
+        const dot = createSvgElement("circle");
+        dot.setAttribute("class", "expand-dot");
+        dot.setAttribute("cx", "138");
+        dot.setAttribute("cy", "61");
+        dot.setAttribute("r", "11");
+        group.append(dot);
+
+        const mark = createSvgElement("text");
+        mark.setAttribute("class", "expand-mark");
+        mark.setAttribute("x", "138");
+        mark.setAttribute("y", "66");
+        mark.textContent = expanded.has(node.id) ? "-" : "+";
+        group.append(mark);
+      }
+
+      group.addEventListener("click", () => activateNode(node.id));
+      group.addEventListener("keydown", (event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          activateNode(node.id);
+        }
+      });
+
+      return group;
+    }
+
+    function renderNodes(visible) {
+      nodesLayer.replaceChildren();
+      for (const node of architectureNodes) {
+        if (visible.has(node.id)) {
+          nodesLayer.append(renderNode(node));
+        }
+      }
+    }
+
+    function setListItems(list, values) {
+      list.replaceChildren();
+      const entries = values.length > 0 ? values : ["None"];
+      for (const value of entries) {
+        const item = document.createElement("li");
+        item.textContent = value;
+        list.append(item);
+      }
+    }
+
+    function renderDetails(node) {
+      detailKind.textContent = node.kind;
+      detailTitle.textContent = node.label;
+      detailSummary.textContent = node.summary;
+      setListItems(detailFiles, node.files);
+      setListItems(detailChildren, node.children.map((childId) => nodeById.get(childId)?.label || childId));
+    }
+
+    function render() {
+      const visible = visibleNodeIds();
+      renderEdges(visible);
+      renderNodes(visible);
+      renderDetails(nodeById.get(selectedId) || architectureNodes[0]);
+    }
+
+    function setSvgViewBox(next) {
+      viewBox = next;
+      svg.setAttribute("viewBox", [viewBox.x, viewBox.y, viewBox.width, viewBox.height].join(" "));
+    }
+
+    function focusNode(nodeId) {
+      const node = nodeById.get(nodeId);
+      if (!node) {
+        return;
+      }
+      const width = viewBox.width;
+      const height = viewBox.height;
+      setSvgViewBox({
+        x: Math.max(-100, node.x - width / 2),
+        y: Math.max(-80, node.y - height / 2),
+        width,
+        height
+      });
+    }
+
+    function expandNode(nodeId) {
+      const node = nodeById.get(nodeId);
+      if (!node || node.children.length === 0) {
+        return;
+      }
+      if (expanded.has(nodeId)) {
+        expanded.delete(nodeId);
+      } else {
+        expanded.add(nodeId);
+      }
+    }
+
+    function activateNode(nodeId) {
+      selectedId = nodeId;
+      expandNode(nodeId);
+      focusNode(nodeId);
+      render();
+    }
+
+    function zoom(multiplier) {
+      const centerX = viewBox.x + viewBox.width / 2;
+      const centerY = viewBox.y + viewBox.height / 2;
+      const width = Math.max(360, Math.min(1800, viewBox.width * multiplier));
+      const height = Math.max(220, Math.min(1100, viewBox.height * multiplier));
+      setSvgViewBox({
+        x: centerX - width / 2,
+        y: centerY - height / 2,
+        width,
+        height
+      });
+    }
+
+    document.querySelector("[data-action='zoom-in']").addEventListener("click", () => zoom(0.78));
+    document.querySelector("[data-action='zoom-out']").addEventListener("click", () => zoom(1.28));
+    document.querySelector("[data-action='reset']").addEventListener("click", () => {
+      selectedId = "whatsapp-model";
+      expanded.clear();
+      expanded.add("whatsapp-model");
+      setSvgViewBox({ x: 0, y: 0, width: 1280, height: 760 });
+      render();
+    });
+
+    render();
+  </script>
+</body>
+</html>
