@@ -322,6 +322,20 @@
       font: 13px/1.3 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
     }
 
+    .payload-shape {
+      min-height: 150px;
+      max-height: 360px;
+      margin: 0 0 24px;
+      padding: 12px;
+      overflow: auto;
+      border: 1px solid #dde5ef;
+      border-radius: 7px;
+      background: #101827;
+      color: #e7edf7;
+      font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+      white-space: pre;
+    }
+
     .child-list li {
       font-size: 13px;
       font-weight: 650;
@@ -481,6 +495,8 @@
       <ul id="detail-files" class="file-list"></ul>
       <h3 class="section-title">Expands To</h3>
       <ul id="detail-children" class="child-list"></ul>
+      <h3 class="section-title">Payload Shape</h3>
+      <pre id="detail-payload" class="payload-shape"></pre>
       <div class="legend" aria-label="Node legend">
         <span><i class="swatch-model"></i>Model</span>
         <span><i class="swatch-seam"></i>Seam</span>
@@ -510,6 +526,26 @@
         summary: "Normalizes Baileys messages into ChatTurn input and turns outbound events back into WhatsApp messages.",
         files: ["whatsapp/inbound/chat-turn.js", "whatsapp/create-whatsapp-transport.js", "outbound-events.js"],
         children: ["inbound-turns", "outbound-rendering"],
+        payloadShape: [
+          "ChatTurn {",
+          "  chatId: string,",
+          "  senderIds: string[],",
+          "  senderName: string,",
+          "  content: IncomingContentBlock[],",
+          "  facts: {",
+          "    isGroup: boolean,",
+          "    addressedToBot: boolean,",
+          "    repliedToBot: boolean",
+          "  },",
+          "  io: TurnIO",
+          "}",
+          "",
+          "OutboundEvent {",
+          "  kind: \"content\" | \"tool_call\" | \"runtime_event\" | ...",
+          "  source?: \"llm\" | \"tool-result\" | \"error\" | ...",
+          "  content?: string | ToolContentBlock[]",
+          "}"
+        ],
         x: 150,
         y: 275
       },
@@ -530,6 +566,40 @@
         summary: "The semantic seam between provider ACP payloads and the bot's transport-level runtime events.",
         files: ["harnesses/acp-events.js", "harnesses/acp-runtime-model.js", "harnesses/harness-runtime-event-dispatcher.js"],
         children: ["runtime-model", "runtime-dispatcher", "file-changes", "approval-requests"],
+        payloadShape: [
+          "JSON-RPC notification",
+          "{",
+          "  method: \"session/update\",",
+          "  params: {",
+          "    sessionId: string,",
+          "    update: {",
+          "      sessionUpdate: \"agent_message_chunk\"",
+          "        | \"agent_thought_chunk\"",
+          "        | \"tool_call\"",
+          "        | \"tool_call_update\"",
+          "        | \"usage_update\"",
+          "        | \"plan\",",
+          "      content?: { type: \"text\", text: string },",
+          "      entries?: Array<{ content?: string, text?: string, status?: string }>,",
+          "      used?: number,",
+          "      size?: number,",
+          "      toolCallId?: string,",
+          "      title?: string,",
+          "      kind?: string,",
+          "      status?: \"pending\" | \"in_progress\" | \"completed\" | \"failed\",",
+          "      rawInput?: Record<string, unknown>,",
+          "      rawOutput?: unknown",
+          "    }",
+          "  }",
+          "}",
+          "",
+          "Normalized HarnessRuntimeEvent",
+          "{",
+          "  type: \"content.delta\" | \"tool.updated\" | \"usage.updated\" | ...",
+          "  provider: \"acp\",",
+          "  raw: { source: \"acp.jsonrpc\", method: \"session/update\", payload: params }",
+          "}"
+        ],
         x: 640,
         y: 275
       },
@@ -540,6 +610,31 @@
         summary: "Registers built-in and configured ACP-compatible agents and exposes them through the shared harness adapter contract.",
         files: ["harnesses/acp-agents.js", "harnesses/acp.js", "harnesses/registry.js"],
         children: ["codex-adapter", "claude-adapter", "pi-adapter"],
+        payloadShape: [
+          "AcpAgentDefinition {",
+          "  name: string,",
+          "  displayName?: string,",
+          "  command: string,",
+          "  args?: string[],",
+          "  env?: Record<string, string>,",
+          "  docsUrl?: string,",
+          "  statusUrl?: string,",
+          "  supportsInstances?: boolean,",
+          "  sessionKind?: \"codex\" | \"claude\" | \"pi\" | string",
+          "}",
+          "",
+          "HarnessAdapter.startSession({",
+          "  chatId: string,",
+          "  runConfig?: HarnessRunConfig,",
+          "  resumeCursor?: string | null",
+          "})",
+          "",
+          "HarnessAdapter.sendTurn({",
+          "  input: string,",
+          "  messages: Message[],",
+          "  runConfig?: HarnessRunConfig",
+          "})"
+        ],
         x: 900,
         y: 275
       },
@@ -620,6 +715,23 @@
         summary: "Reconciles ACP file-change events, client filesystem writes, snapshots, and unified diffs.",
         files: ["harnesses/acp-file-changes.js", "harnesses/file-change-utils.js"],
         children: [],
+        payloadShape: [
+          "HarnessRuntimeFileChangeEvent {",
+          "  type: \"file-change.completed\",",
+          "  provider: \"acp\",",
+          "  change: {",
+          "    path: string,",
+          "    kind: \"add\" | \"update\" | \"delete\",",
+          "    source: \"tool\" | \"snapshot\" | \"provider\",",
+          "    summary?: string,",
+          "    diff?: string,",
+          "    oldText?: string,",
+          "    newText?: string,",
+          "    cwd?: string | null",
+          "  },",
+          "  raw?: HarnessRuntimeRawEvent",
+          "}"
+        ],
         x: 570,
         y: 600
       },
@@ -630,6 +742,36 @@
         summary: "Bridges ACP approval and elicitation requests to chat-facing confirmation and selection flows.",
         files: ["harnesses/sandbox-approval-coordinator.js", "harnesses/protected-paths.js"],
         children: [],
+        payloadShape: [
+          "JSON-RPC request",
+          "{",
+          "  id: string | number,",
+          "  method: \"session/request_permission\",",
+          "  params: {",
+          "    toolCall?: { title?: string, ... },",
+          "    options: Array<{",
+          "      optionId: string,",
+          "      name?: string,",
+          "      kind?: \"allow_once\" | \"reject_once\" | \"reject_always\" | string",
+          "    }>",
+          "  }",
+          "}",
+          "-> response { outcome: { outcome: \"selected\", optionId: string } }",
+          "",
+          "JSON-RPC request",
+          "{",
+          "  method: \"elicitation/create\",",
+          "  params: {",
+          "    mode?: \"form\" | \"url\",",
+          "    message?: string,",
+          "    elicitationId?: string,",
+          "    requestedSchema?: object",
+          "  }",
+          "}",
+          "-> response { action: \"accept\", content?: Record<string, unknown> }",
+          "         | { action: \"decline\" }",
+          "         | { action: \"cancel\" }"
+        ],
         x: 735,
         y: 600
       },
@@ -670,6 +812,43 @@
         summary: "The spawned Codex ACP process communicates with the bot over the ACP client connection.",
         files: ["harnesses/acp-runner.js", "harnesses/acp-client.js"],
         children: ["codex-agent"],
+        payloadShape: [
+          "JSON-RPC envelope",
+          "{",
+          "  id?: string | number,",
+          "  method: string,",
+          "  params?: Record<string, unknown>",
+          "}",
+          "",
+          "session/new params {",
+          "  cwd: string,",
+          "  mcpServers: [],",
+          "  _meta: {",
+          "    madabot: {",
+          "      model?: string,",
+          "      reasoningEffort?: string,",
+          "      sandboxMode?: string,",
+          "      approvalPolicy?: string,",
+          "      approvalsReviewer?: string,",
+          "      additionalDirectories?: string[],",
+          "      protectedPaths?: string[]",
+          "    }",
+          "  }",
+          "}",
+          "",
+          "fs/write_text_file params {",
+          "  path: string, // absolute",
+          "  content: string",
+          "}",
+          "",
+          "terminal/create params {",
+          "  command: string,",
+          "  args?: string[],",
+          "  cwd?: string,",
+          "  env?: Array<{ name: string, value: string }>,",
+          "  outputByteLimit?: number",
+          "}"
+        ],
         x: 820,
         y: 745
       },
@@ -680,6 +859,24 @@
         summary: "The spawned Claude ACP process uses the same session lifecycle, requests, and update stream.",
         files: ["harnesses/acp-runner.js", "harnesses/acp-client.js"],
         children: ["claude-agent"],
+        payloadShape: [
+          "Same ACP JSON-RPC seam as Codex:",
+          "",
+          "{ id?: string | number, method: string, params?: object }",
+          "",
+          "Important methods crossing this seam:",
+          "- initialize",
+          "- session/new",
+          "- session/prompt",
+          "- session/update",
+          "- session/request_permission",
+          "- elicitation/create",
+          "- fs/read_text_file",
+          "- fs/write_text_file",
+          "- terminal/create",
+          "- terminal/output",
+          "- terminal/wait_for_exit"
+        ],
         x: 1040,
         y: 745
       },
@@ -690,6 +887,28 @@
         summary: "The spawned Pi ACP process is isolated behind the same adapter seam as Codex and Claude.",
         files: ["harnesses/acp-runner.js", "harnesses/acp-client.js"],
         children: ["pi-agent"],
+        payloadShape: [
+          "Same ACP JSON-RPC seam as Codex and Claude:",
+          "",
+          "{ id?: string | number, method: string, params?: object }",
+          "",
+          "Client capabilities advertised at initialize:",
+          "{",
+          "  fs: { readTextFile: true, writeTextFile: true },",
+          "  terminal: true,",
+          "  elicitation: { form: {}, url: {} },",
+          "  sessionCapabilities: { resume: {}, fork: {}, steer: {} },",
+          "  _meta: {",
+          "    subagentMessages: true,",
+          "    fileChangeEvents: true,",
+          "    sessionUsageRfd: true,",
+          "    sessionForkRfd: true,",
+          "    liveInputExtension: true,",
+          "    sessionReadRfd: true,",
+          "    sessionRollbackRfd: true",
+          "  }",
+          "}"
+        ],
         x: 950,
         y: 890
       },
@@ -758,6 +977,7 @@
     const detailSummary = document.getElementById("detail-summary");
     const detailFiles = document.getElementById("detail-files");
     const detailChildren = document.getElementById("detail-children");
+    const detailPayload = document.getElementById("detail-payload");
 
     function visibleNodeIds() {
       const visible = new Set(["whatsapp-model"]);
@@ -925,6 +1145,9 @@
       detailSummary.textContent = node.summary;
       setListItems(detailFiles, node.files);
       setListItems(detailChildren, node.children.map((childId) => nodeById.get(childId)?.label || childId));
+      detailPayload.textContent = Array.isArray(node.payloadShape)
+        ? node.payloadShape.join("\n")
+        : "No external params cross this node.";
     }
 
     function render() {
