@@ -983,6 +983,12 @@ describe("WhatsApp transport community creation", () => {
       },
     });
     await waitForTransportBackgroundWork();
+    for (let attempt = 0; sentMessages.length < 2 || (await getQueuedRows(testDb, chatId)).length > 0; attempt += 1) {
+      if (attempt >= 50) {
+        break;
+      }
+      await delay(10);
+    }
 
     assert.deepEqual(sentMessages, [
       {
