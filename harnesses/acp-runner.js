@@ -6,6 +6,7 @@ import { hasInlineMediaData, hasMediaPath, isValidMediaPath, resolveMediaPath } 
 import { openAcpConnection } from "./acp-client.js";
 import { hasAcpSessionCapability, hasMadabotAcpSessionCapability, supportsAcpLoadSession } from "./acp-capabilities.js";
 import { createAcpRawPayload, createAcpRuntimeModel, normalizeAcpUsage } from "./acp-events.js";
+import { createAcpFilesystemCapability } from "./acp-filesystem-capability.js";
 import {
   collectAcpSnapshotFileChanges,
   emitAcpSnapshotFileChangeEvents,
@@ -15,7 +16,6 @@ import {
   snapshotAcpWorkdir,
 } from "./acp-file-changes.js";
 import { createAcpExtensionRouter } from "./acp-extension-router.js";
-import { buildUnifiedFileDiff } from "./file-change-utils.js";
 import { createHarnessRuntimeEventDispatcher } from "./harness-runtime-event-dispatcher.js";
 import { getSandboxEscapeRequest } from "./sandbox-approval.js";
 import { requestSandboxEscapeApproval } from "./sandbox-approval-coordinator.js";
@@ -407,12 +407,18 @@ async function assertSandboxAccess(input) {
  */
 function createAcpClientRequestHandler(options) {
   const terminals = createAcpTerminalManager(options);
+  const filesystem = createAcpFilesystemCapability({
+    hooks: options.hooks,
+    runConfig: options.runConfig,
+    emitRuntimeEvent: options.emitRuntimeEvent,
+    approvedProtectedPaths: options.approvedProtectedPaths,
+  });
   /** @type {Map<string, (message: Record<string, unknown>) => Promise<unknown> | unknown>} */
   const requestHandlers = new Map();
   requestHandlers.set("session/request_permission", (message) => handleAcpPermissionRequest(message, options));
   requestHandlers.set("elicitation/create", (message) => handleAcpElicitationCreate(message, options));
-  requestHandlers.set("fs/read_text_file", (message) => handleAcpReadTextFile(message, options));
-  requestHandlers.set("fs/write_text_file", (message) => handleAcpWriteTextFile(message, options));
+  requestHandlers.set("fs/read_text_file", (message) => filesystem.readTextFile(message));
+  requestHandlers.set("fs/write_text_file", (message) => filesystem.writeTextFile(message));
   requestHandlers.set("terminal/create", (message) => terminals.create(message));
   requestHandlers.set("terminal/output", (message) => terminals.output(message));
   requestHandlers.set("terminal/wait_for_exit", (message) => terminals.waitForExit(message));
@@ -667,109 +673,6 @@ async function handleAcpElicitationCreate(message, options) {
     raw: createAcpRawPayload("elicitation/create", decision),
   });
   return decision;
-}
-
-/**
- * @param {Record<string, unknown>} message
- * @param {{
- *   hooks: Pick<Required<AgentIOHooks>, "onAskUser">,
- *   runConfig?: HarnessRunConfig,
- * }} options
- * @returns {Promise<{ content: string }>}
- */
-async function handleAcpReadTextFile(message, options) {
-  const params = paramsRecord(message.params);
-  if (typeof params.path !== "string" || !path.isAbsolute(params.path)) {
-    throw new Error("ACP fs/read_text_file requires an absolute path.");
-  }
-  const cwd = resolveRequestCwd(options.runConfig, null);
-  await assertSandboxAccess({
-    toolName: "read_file",
-    input: { path: params.path },
-    runConfig: options.runConfig,
-    cwd,
-    hooks: options.hooks,
-  });
-  const content = await fs.readFile(params.path, "utf8");
-  const line = typeof params.line === "number" && Number.isFinite(params.line) ? Math.max(1, Math.floor(params.line)) : null;
-  const limit = typeof params.limit === "number" && Number.isFinite(params.limit) ? Math.max(0, Math.floor(params.limit)) : null;
-  if (!line && !limit) {
-    return { content };
-  }
-  const lines = content.split(/\r?\n/);
-  const start = line ? line - 1 : 0;
-  const selected = limit ? lines.slice(start, start + limit) : lines.slice(start);
-  return { content: selected.join("\n") };
-}
-
-/**
- * @param {Record<string, unknown>} message
- * @param {{
- *   hooks: Pick<Required<AgentIOHooks>, "onAskUser">,
- *   runConfig?: HarnessRunConfig,
- *   emitRuntimeEvent: (event: import("./harness-runtime-events.js").HarnessRuntimeEvent) => Promise<void>,
- *   approvedProtectedPaths?: Set<string>,
- * }} options
- * @returns {Promise<Record<string, never>>}
- */
-async function handleAcpWriteTextFile(message, options) {
-  const params = paramsRecord(message.params);
-  if (typeof params.path !== "string" || !path.isAbsolute(params.path)) {
-    throw new Error("ACP fs/write_text_file requires an absolute path.");
-  }
-  if (typeof params.content !== "string") {
-    throw new Error("ACP fs/write_text_file requires string content.");
-  }
-  const cwd = resolveRequestCwd(options.runConfig, null);
-  await assertSandboxAccess({
-    toolName: "write_file",
-    input: { path: params.path },
-    runConfig: options.runConfig,
-    cwd,
-    hooks: options.hooks,
-  });
-  const protectedApproval = await requestProtectedPathApproval({
-    runConfig: options.runConfig,
-    filePath: params.path,
-    action: "ACP file write",
-    hooks: options.hooks,
-  });
-  if (!protectedApproval.allowed) {
-    throw new Error(`User denied protected path change for ${protectedApproval.match.relativePath}.`);
-  }
-  if (protectedApproval.match.protected) {
-    options.approvedProtectedPaths?.add(protectedApproval.match.resolvedPath);
-  }
-  if (options.runConfig?.sandboxMode === "read-only") {
-    const choice = await options.hooks.onAskUser("Allow *file write*?", ["✅ Allow", "❌ Deny"], undefined, [params.path]);
-    if (choice === "❌ Deny" || !choice) {
-      throw new Error("User denied file write.");
-    }
-  }
-  let oldText;
-  try {
-    oldText = await fs.readFile(params.path, "utf8");
-  } catch {
-    oldText = undefined;
-  }
-  await fs.mkdir(path.dirname(params.path), { recursive: true });
-  await fs.writeFile(params.path, params.content, "utf8");
-  const diff = buildUnifiedFileDiff(params.path, oldText, params.content);
-  await options.emitRuntimeEvent({
-    type: "file-change.completed",
-    provider: "acp",
-    change: {
-      path: params.path,
-      summary: "ACP file write",
-      kind: oldText === undefined ? "add" : "update",
-      source: "tool",
-      ...(diff ? { diff } : {}),
-      ...(oldText !== undefined ? { oldText } : {}),
-      newText: params.content,
-    },
-    raw: { message },
-  });
-  return {};
 }
 
 /**
