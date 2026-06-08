@@ -179,10 +179,6 @@
       rx: 7px;
     }
 
-    .node path.node-shape {
-      vector-effect: non-scaling-stroke;
-    }
-
     .node[data-kind="model"] .node-shape {
       stroke: var(--model);
     }
@@ -495,7 +491,7 @@
       <ul id="detail-files" class="file-list"></ul>
       <h3 class="section-title">Expands To</h3>
       <ul id="detail-children" class="child-list"></ul>
-      <h3 class="section-title">Payload Shape</h3>
+      <h3 class="section-title">Params Shape</h3>
       <pre id="detail-payload" class="payload-shape"></pre>
       <div class="legend" aria-label="Node legend">
         <span><i class="swatch-model"></i>Model</span>
@@ -1068,11 +1064,8 @@
       group.setAttribute("aria-label", node.label);
       group.setAttribute("transform", "translate(" + (node.x - 77) + " " + (node.y - 37) + ")");
 
-      const shape = node.kind === "seam" ? createSvgElement("path") : createSvgElement("rect");
+      const shape = createSvgElement("rect");
       shape.setAttribute("class", "node-shape");
-      if (node.kind === "seam") {
-        shape.setAttribute("d", "M20 0 H134 L154 37 L134 74 H20 L0 37 Z");
-      }
       group.append(shape);
 
       const kind = createSvgElement("text");
