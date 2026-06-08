@@ -1,12 +1,12 @@
-# SSH Plan: Route Codex shell commands through SSH
+# SSH Plan: Remote workspace over SSH
 
 ## Goal
 
-Run Codex locally against a locally visible project tree, while executing Codex shell commands on the remote machine over SSH.
+Support a workspace hosted on a remote server over SSH, where the agent can edit the workspace files and run commands there.
 
-The remote project directory may be mounted locally for file visibility and editing, but command execution must not happen through the local shell in that mounted directory. Codex should propose normal commands such as `pnpm test`, while a hook rewrites those commands into SSH invocations that run in the corresponding remote working directory.
+The exact implementation is not finalized. One possible shape is a locally visible remote project tree plus SSH-routed command execution, but the core user goal is remote workspace control over SSH.
 
-## Architectural shape
+## Possible hook-based shape
 
 ```text
 Codex local session
