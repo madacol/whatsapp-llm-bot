@@ -5,7 +5,6 @@
 - When a request is vague or ambiguous, suggest concrete options or ask for clarification instead of assuming.
 - Do not bypass seams, add special cases, or cut corners without confirming.
 - When external payload shape matters, inspect a real payload before designing around it.
-- Maintain `tasks/todo.md` as a simple kanban-style task tracker; keep entries brief, with status/progress/dead ends and links to detail files when needed.
 - For behavior changes, prove red before production edits, then green, `pnpm type-check`, test, and commit with red/green verification noted.
 - Tests should prove user-valued behavior, not mirror implementation.
 - For cross-seam behavior, test from the relevant start seam to the relevant end seam before adding narrower tests.
