@@ -1,10 +1,26 @@
 # SSH Plan: Remote workspace over SSH
 
+Status: Todo
+
 ## Goal
 
 Support a workspace hosted on a remote server over SSH, where the agent can edit the workspace files and run commands there.
 
-The exact implementation is not finalized. One possible shape is a locally visible remote project tree plus SSH-routed command execution, but the core user goal is remote workspace control over SSH.
+## Progress
+
+- Goal clarified: this is about remote workspace control over SSH, including file edits and command execution on the server.
+
+## Open Questions
+
+- Exact implementation path is not finalized.
+
+## Dead Ends
+
+- None recorded.
+
+## Notes
+
+One possible shape is a locally visible remote project tree plus SSH-routed command execution, but the core user goal is remote workspace control over SSH.
 
 ## Possible hook-based shape
 

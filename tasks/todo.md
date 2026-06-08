@@ -2,8 +2,10 @@
 
 ## Todo
 
-- Add SSH-backed remote workspace support. Status: todo. Progress: goal clarified; implementation plan not finalized; see [ssh-plan.md](./ssh-plan.md). Dead ends: none recorded.
+- [ ] SSH-backed remote workspace support - goal clarified; plan not finalized. See [ssh-plan.md](./ssh-plan.md).
 
 ## Doing
+
+## Blocked
 
 ## Done
