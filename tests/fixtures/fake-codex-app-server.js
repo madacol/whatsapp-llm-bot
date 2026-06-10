@@ -6,6 +6,23 @@ const keepAlive = setInterval(() => {}, 60 * 60 * 1000);
 let inputBuffer = Buffer.alloc(0);
 let useContentLengthFraming = false;
 let currentThreadCwd = process.cwd();
+const fakeTokenUsage = {
+  total: {
+    totalTokens: 12345,
+    inputTokens: 8000,
+    cachedInputTokens: 3000,
+    outputTokens: 1345,
+    reasoningOutputTokens: 200,
+  },
+  last: {
+    totalTokens: 4345,
+    inputTokens: 3000,
+    cachedInputTokens: 1000,
+    outputTokens: 1345,
+    reasoningOutputTokens: 200,
+  },
+  modelContextWindow: 20000,
+};
 
 /**
  * @param {Record<string, unknown>} message
@@ -77,6 +94,7 @@ async function handleMessage(parsed) {
   }
   const message = /** @type {Record<string, unknown>} */ (parsed);
   const { id, method, params } = message;
+  record("request", { method, params });
   switch (method) {
     case "initialize":
       respond(id, {});
@@ -93,6 +111,19 @@ async function handleMessage(parsed) {
       }
       respond(id, {
         thread: { id: "fake-thread-1" },
+        model: "fake-model",
+        reasoningEffort: "none",
+      });
+      break;
+    case "thread/resume":
+      if (typeof params.cwd === "string" && params.cwd.length > 0) {
+        currentThreadCwd = params.cwd;
+      }
+      respond(id, {
+        thread: {
+          id: "fake-thread-1",
+          turns: [],
+        },
         model: "fake-model",
         reasoningEffort: "none",
       });
@@ -225,6 +256,11 @@ async function handleMessage(parsed) {
           turn: { id: "fake-turn-1", status: "completed" },
         });
       }
+      notify("thread/tokenUsage/updated", {
+        threadId: params.threadId,
+        turnId: "fake-turn-1",
+        tokenUsage: fakeTokenUsage,
+      });
       break;
     case "turn/steer":
       record("turn/steer", params);
@@ -238,6 +274,25 @@ async function handleMessage(parsed) {
       notify("turn/completed", {
         threadId: params.threadId,
         turn: { id: params.expectedTurnId, status: "completed" },
+      });
+      break;
+    case "account/rateLimits/read":
+      respond(id, {
+        rateLimits: {
+          limitId: "codex",
+          limitName: "Codex",
+          primary: {
+            usedPercent: 25,
+            resetsAt: null,
+            windowDurationMins: 300,
+          },
+          secondary: null,
+          credits: null,
+          individualLimit: null,
+          planType: "pro",
+          rateLimitReachedType: null,
+        },
+        rateLimitsByLimitId: null,
       });
       break;
     default:
