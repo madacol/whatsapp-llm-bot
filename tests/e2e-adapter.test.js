@@ -102,6 +102,89 @@ describe("no selected ACP harness", () => {
 });
 
 // ═══════════════════════════════════════════════════════════════════
+// 1b. Codex /status through the full WhatsApp transport boundary
+// ═══════════════════════════════════════════════════════════════════
+describe("Codex /status through WhatsApp transport", () => {
+  const senderId = "e2e-codex-status-user";
+  const chatId = `${senderId}@s.whatsapp.net`;
+  const harnessName = "e2e-codex-status";
+  let readStatusCalls = 0;
+
+  before(async () => {
+    const { registerHarnessDriver } = await import("../harnesses/index.js");
+    const { createAcpHarness } = await import("../harnesses/acp.js");
+    registerHarnessDriver({
+      name: harnessName,
+      displayName: "Codex",
+      supportsInstances: true,
+      createInstance: () => ({
+        harness: createAcpHarness({
+          name: harnessName,
+          label: "Codex",
+          sessionKind: "codex",
+          config: {
+            command: process.execPath,
+            args: [path.resolve("tests", "fixtures", "acp-mock-agent.js")],
+          },
+          readCodexStatus: async () => {
+            readStatusCalls += 1;
+            return [
+              ">_ OpenAI Codex (v0.139.0)",
+              "Visit https://chatgpt.com/codex/settings/usage for up-to-date",
+              "information on rate limits and credits",
+              "Model: gpt-5.5 (reasoning high, summaries auto)",
+              "Directory: ~/whatsapp-llm-bot",
+              "Permissions: Workspace (Approve for me)",
+              "Agents.md: /home/mada/.codex/AGENTS.md, AGENTS.md",
+              "Account: user@example.com (Pro)",
+              "Collaboration mode: Default",
+              "Session: 019eb2c4-454a-7653-8fb8-47899ac79a7d",
+              "5h limit: [██████████████░░░░░░] 69% left (resets 21:09)",
+              "Weekly limit: [███░░░░░░░░░░░░░░░░░] 13% left (resets 00:35 on 11 Jun)",
+              "GPT-5.3-Codex-Spark limit:",
+              "5h limit: [████████████████████] 100% left (resets 23:21)",
+              "Weekly limit: [████████████████████] 100% left (resets 18:21 on 17 Jun)",
+            ].join("\n");
+          },
+        }),
+      }),
+    });
+
+    await seedChat(testDb, chatId, { enabled: true });
+    await updateChatConfig(chatId, (current) => ({ ...current, harness: harnessName }));
+  });
+
+  it("renders parsed Codex CLI status from an incoming /status message in mocked Baileys", async () => {
+    readStatusCalls = 0;
+    const captures = createMockBaileysSocket();
+
+    await adaptIncomingMessage(
+      createWAMessage({ text: "/status", senderId }),
+      captures.sock,
+      handleMessage,
+      testConfirmRegistry,
+      testUserResponseRegistry,
+      undefined,
+      undefined,
+      { outboundStore: testStore },
+    );
+
+    assert.equal(readStatusCalls, 1);
+    const rendered = captures.getRenderedMessages().join("\n---\n");
+    assert.match(rendered, /Codex status:/);
+    assert.match(rendered, /\*\*Model:\*\* gpt-5\.5 \(reasoning high, summaries auto\)/);
+    assert.match(rendered, /\*\*Account:\*\* user@example\.com \(Pro\)/);
+    assert.match(rendered, /\*\*Session:\*\* `019eb2c4-454a-7653-8fb8-47899ac79a7d`/);
+    assert.match(rendered, /\*\*5h limit:\*\* 69% left \(resets 21:09\)/);
+    assert.match(rendered, /\*\*Weekly limit:\*\* 13% left \(resets 00:35 on 11 Jun\)/);
+    assert.match(rendered, /\*\*GPT-5\.3-Codex-Spark 5h limit:\*\* 100% left \(resets 23:21\)/);
+    assert.match(rendered, /\*\*GPT-5\.3-Codex-Spark Weekly limit:\*\* 100% left \(resets 18:21 on 17 Jun\)/);
+    assert.ok(!rendered.includes("```"), `Expected parsed status instead of raw fenced output, got ${JSON.stringify(rendered)}`);
+    assert.ok(!rendered.includes("████"), `Expected progress bars to be removed from parsed output, got ${JSON.stringify(rendered)}`);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════
 // 1c. Provider runtime events through the full WhatsApp transport boundary
 // ═══════════════════════════════════════════════════════════════════
 describe("provider runtime events", () => {

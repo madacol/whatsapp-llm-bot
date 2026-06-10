@@ -189,6 +189,7 @@ function installActiveAcpRunControls(active, input) {
  *   sessionKind?: HarnessSessionRef["kind"],
  *   config?: Record<string, unknown>,
  *   defaultCommand?: string,
+ *   readCodexStatus?: () => Promise<string>,
  * }} [options]
  * @returns {AgentHarness}
  */
@@ -206,7 +207,7 @@ export function createAcpHarness(options = {}) {
     sessionKind,
     commandSpec,
     cancelActiveQuery: cancel,
-    ...(sessionKind === "codex" ? { readCodexStatus: () => readCodexCliStatus({ workdir: process.cwd() }) } : {}),
+    ...(sessionKind === "codex" ? { readCodexStatus: options.readCodexStatus ?? (() => readCodexCliStatus({ workdir: process.cwd() })) } : {}),
   });
 
   return {
