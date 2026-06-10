@@ -18,6 +18,19 @@ const STATUS_PTY_ROWS = 30;
  */
 
 /**
+ * @typedef {{
+ *   model?: string,
+ *   directory?: string,
+ *   permissions?: string,
+ *   agentsMd?: string,
+ *   account?: string,
+ *   collaborationMode?: string,
+ *   session?: string,
+ *   limits: Array<{ label: string, value: string }>,
+ * }} ParsedCodexStatus
+ */
+
+/**
  * @param {string} value
  * @returns {string}
  */
@@ -84,9 +97,107 @@ function findNextCodexPanelStart(lines, startIndex) {
  */
 function panelLooksLikeStatus(lines, startIndex, endIndex) {
   const panel = lines.slice(startIndex, endIndex).join("\n");
+  const weeklyLimitCount = panel.match(/Weekly limit:/g)?.length ?? 0;
   return /Model:/i.test(panel)
     && /(?:Account|Session):/i.test(panel)
-    && /(?:5h limit|Weekly limit):/i.test(panel);
+    && /(?:5h limit|Weekly limit):/i.test(panel)
+    && weeklyLimitCount >= (panel.includes("GPT-5.3-Codex-Spark limit:") ? 2 : 1);
+}
+
+/**
+ * @param {string} value
+ * @returns {string}
+ */
+function stripLimitBar(value) {
+  return value.replace(/^\[[^\]]+\]\s*/, "").trim();
+}
+
+/**
+ * @param {string} label
+ * @param {string} value
+ * @returns {{ label: string, value: string } | null}
+ */
+function parseLimitLine(label, value) {
+  if (!/limit$/i.test(label)) {
+    return null;
+  }
+  const stripped = stripLimitBar(value);
+  return stripped ? { label, value: stripped } : null;
+}
+
+/**
+ * @param {string} label
+ * @param {string} value
+ * @returns {{ key: keyof Omit<ParsedCodexStatus, "limits">, value: string } | null}
+ */
+function parseStatusField(label, value) {
+  const normalized = label.toLowerCase();
+  if (normalized === "model") return { key: "model", value };
+  if (normalized === "directory") return { key: "directory", value };
+  if (normalized === "permissions") return { key: "permissions", value };
+  if (normalized === "agents.md") return { key: "agentsMd", value };
+  if (normalized === "account") return { key: "account", value };
+  if (normalized === "collaboration mode") return { key: "collaborationMode", value };
+  if (normalized === "session") return { key: "session", value };
+  return null;
+}
+
+/**
+ * @param {ParsedCodexStatus} status
+ * @returns {boolean}
+ */
+function hasEnoughStatusFields(status) {
+  return !!status.model
+    && !!status.account
+    && !!status.session
+    && status.limits.length > 0;
+}
+
+/**
+ * Parse the cleaned Codex CLI /status panel into semantic fields.
+ * @param {string} statusPanel
+ * @returns {ParsedCodexStatus | null}
+ */
+export function parseCodexStatusPanel(statusPanel) {
+  /** @type {ParsedCodexStatus} */
+  const parsed = { limits: [] };
+  let limitGroup = "";
+
+  for (const rawLine of statusPanel.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line || line.startsWith(">_ ") || /^Visit\b/i.test(line) || /^information\b/i.test(line)) {
+      continue;
+    }
+
+    const match = line.match(/^([^:]+):\s*(.*)$/);
+    if (!match) {
+      continue;
+    }
+    const label = match[1]?.trim() ?? "";
+    const value = match[2]?.trim() ?? "";
+    if (!label) {
+      continue;
+    }
+
+    if (!value && /limit$/i.test(label)) {
+      limitGroup = label.replace(/\s+limit$/i, "").trim();
+      continue;
+    }
+
+    const limit = parseLimitLine(limitGroup ? `${limitGroup} ${label}` : label, value);
+    if (limit) {
+      parsed.limits.push(limit);
+      continue;
+    }
+
+    const field = parseStatusField(label, value);
+    if (field && field.value) {
+      parsed[field.key] = field.value;
+      limitGroup = "";
+    }
+  }
+
+  return hasEnoughStatusFields(parsed) ? parsed : null;
 }
 
 /**
@@ -124,7 +235,24 @@ export function extractCodexStatusPanel(output) {
  * @returns {string}
  */
 export function formatCodexStatusForReply(statusPanel) {
-  return `Codex status:\n\`\`\`\n${statusPanel.trim()}\n\`\`\``;
+  const parsed = parseCodexStatusPanel(statusPanel);
+  if (!parsed) {
+    return `Codex status:\n\`\`\`\n${statusPanel.trim()}\n\`\`\``;
+  }
+
+  const lines = [
+    "Codex status:",
+    `**Model:** ${parsed.model}`,
+    ...(parsed.directory ? [`**Directory:** ${parsed.directory}`] : []),
+    ...(parsed.permissions ? [`**Permissions:** ${parsed.permissions}`] : []),
+    ...(parsed.agentsMd ? [`**Agents.md:** ${parsed.agentsMd}`] : []),
+    `**Account:** ${parsed.account}`,
+    ...(parsed.collaborationMode ? [`**Collaboration mode:** ${parsed.collaborationMode}`] : []),
+    `**Session:** \`${parsed.session}\``,
+    "",
+    ...parsed.limits.map((limit) => `**${limit.label}:** ${limit.value}`),
+  ];
+  return lines.join("\n");
 }
 
 /**
