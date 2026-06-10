@@ -1,4 +1,5 @@
 import { createHarnessEventStreamController } from "./adapter.js";
+import path from "node:path";
 import { deriveAcpHarnessCapabilities, hasAcpSessionCapability } from "./acp-capabilities.js";
 import {
   forkAcpSession,
@@ -30,6 +31,7 @@ const ACP_HARNESS_CAPABILITIES = {
   supportsRollback: true,
   supportsUserInputRequests: true,
 };
+const CODEX_ACP_STATUS_CACHE_ENV = "MADABOT_CODEX_ACP_STATUS_CACHE";
 
 /**
  * @param {unknown} value
@@ -65,6 +67,18 @@ function normalizeEnv(value) {
     }
   }
   return Object.keys(env).length > 0 ? env : undefined;
+}
+
+/**
+ * @param {NodeJS.ProcessEnv | undefined} env
+ * @returns {NodeJS.ProcessEnv}
+ */
+function buildAcpChildEnv(env) {
+  const merged = { ...process.env, ...(env ?? {}) };
+  if (!merged[CODEX_ACP_STATUS_CACHE_ENV]) {
+    merged[CODEX_ACP_STATUS_CACHE_ENV] = path.join(process.cwd(), "logs", "codex-acp-status-cache.json");
+  }
+  return merged;
 }
 
 /**
@@ -127,7 +141,7 @@ function resolveAcpCommand(config, defaultCommand) {
   return {
     command,
     args: normalizeArgs(config.args),
-    ...(env ? { env: { ...process.env, ...env } } : {}),
+    env: buildAcpChildEnv(env),
   };
 }
 
