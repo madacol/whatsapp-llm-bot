@@ -1,5 +1,4 @@
 import { createHarnessEventStreamController } from "./adapter.js";
-import path from "node:path";
 import { deriveAcpHarnessCapabilities, hasAcpSessionCapability } from "./acp-capabilities.js";
 import {
   forkAcpSession,
@@ -13,6 +12,7 @@ import {
   startAcpRun,
 } from "./acp-runner.js";
 import { buildTextHarnessPromptFromBlocks } from "./prompt-media.js";
+import { formatCodexStatusForReply, readCodexCliStatus } from "./codex-cli-status.js";
 import { updateActiveHarnessConfig, getActiveHarnessConfig } from "../harness-config.js";
 import { contentEvent } from "../outbound-events.js";
 import { handleSessionControlCommand } from "../session-control-commands.js";
@@ -31,7 +31,6 @@ const ACP_HARNESS_CAPABILITIES = {
   supportsRollback: true,
   supportsUserInputRequests: true,
 };
-const CODEX_ACP_STATUS_CACHE_ENV = "MADABOT_CODEX_ACP_STATUS_CACHE";
 
 /**
  * @param {unknown} value
@@ -67,18 +66,6 @@ function normalizeEnv(value) {
     }
   }
   return Object.keys(env).length > 0 ? env : undefined;
-}
-
-/**
- * @param {NodeJS.ProcessEnv | undefined} env
- * @returns {NodeJS.ProcessEnv}
- */
-function buildAcpChildEnv(env) {
-  const merged = { ...process.env, ...(env ?? {}) };
-  if (!merged[CODEX_ACP_STATUS_CACHE_ENV]) {
-    merged[CODEX_ACP_STATUS_CACHE_ENV] = path.join(process.cwd(), "logs", "codex-acp-status-cache.json");
-  }
-  return merged;
 }
 
 /**
@@ -141,7 +128,7 @@ function resolveAcpCommand(config, defaultCommand) {
   return {
     command,
     args: normalizeArgs(config.args),
-    env: buildAcpChildEnv(env),
+    ...(env ? { env } : {}),
   };
 }
 
@@ -219,6 +206,7 @@ export function createAcpHarness(options = {}) {
     sessionKind,
     commandSpec,
     cancelActiveQuery: cancel,
+    ...(sessionKind === "codex" ? { readCodexStatus: () => readCodexCliStatus({ workdir: process.cwd() }) } : {}),
   });
 
   return {
@@ -508,6 +496,7 @@ export function createAcpHarness(options = {}) {
     return [
       { name: "clear", description: "Clear the current harness session" },
       { name: "resume", description: "Restore a previously cleared harness session" },
+      ...(sessionKind === "codex" ? [{ name: "status", description: "Show Codex CLI status and usage" }] : []),
       { name: "fork", description: `Fork the current ${label} ACP session` },
       { name: "back", description: `Return to the previous ${label} ACP fork parent` },
       { name: "config", description: `Show or set ${label} ACP config options` },
@@ -795,6 +784,7 @@ async function persistAcpCommandConfigValue(params) {
  *   commandSpec: { command: string, args: string[] },
  *   cancelActiveQuery: (chatId: string | HarnessSessionRef) => boolean,
  *   loadControlState?: typeof loadAcpCommandControlState,
+ *   readCodexStatus?: () => Promise<string>,
  * }} options
  * @returns {(input: HarnessCommandContext) => Promise<boolean>}
  */
@@ -812,6 +802,17 @@ function createGenericAcpCommandHandler(options) {
     }
 
     const trimmed = input.command.trim();
+    if (/^status$/i.test(trimmed) && options.sessionKind === "codex" && options.readCodexStatus) {
+      try {
+        const status = await options.readCodexStatus();
+        await input.context.reply(contentEvent("tool-result", formatCodexStatusForReply(status)));
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        await input.context.reply(contentEvent("tool-result", `Codex status failed: ${message}`));
+      }
+      return true;
+    }
+
     if (/^fork$/i.test(trimmed)) {
       const currentSessionId = input.chatInfo?.harness_session_id ?? null;
       const currentKind = input.chatInfo?.harness_session_kind ?? options.sessionKind;

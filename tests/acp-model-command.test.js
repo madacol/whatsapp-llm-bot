@@ -23,7 +23,7 @@ function createContext() {
  * @param {(sessionId: string | null, commandSpec: { command: string, args: string[] }) => Promise<{ configOptions: Record<string, unknown>[], modelState: { currentModelId?: string, availableModels: Array<{ modelId: string, name: string, description?: string }> } | null }>} loadControlState
  * @returns {(input: HarnessCommandContext) => Promise<boolean>}
  */
-function createModelCommandHandler(loadControlState) {
+function createModelCommandHandler(loadControlState, readCodexStatus = undefined) {
   return __testAcpModelCommand.createGenericAcpCommandHandler({
     harnessName: "codex",
     label: "Codex",
@@ -31,6 +31,7 @@ function createModelCommandHandler(loadControlState) {
     commandSpec: { command: "mock-acp", args: [] },
     cancelActiveQuery: () => false,
     loadControlState,
+    readCodexStatus,
   });
 }
 
@@ -107,6 +108,54 @@ describe("ACP /model command option derivation", () => {
       }),
       /provider control state failed/,
     );
+  });
+
+  it("handles Codex /status by reading a fresh Codex CLI status panel", async () => {
+    /** @type {string[]} */
+    const replies = [];
+    const handler = createModelCommandHandler(async () => ({
+      configOptions: [],
+      modelState: null,
+    }), async () => [
+      ">_ OpenAI Codex (v0.139.0)",
+      "Model: gpt-5.5 (reasoning high)",
+      "Account: user@example.com (Pro)",
+      "Weekly limit: [██░░] 15% left",
+    ].join("\n"));
+
+    const context = createContext();
+    context.reply = async (event) => {
+      replies.push(event.kind === "content" && typeof event.content === "string" ? event.content : JSON.stringify(event));
+    };
+
+    assert.equal(await handler({
+      chatId: "acp-status-command",
+      command: "status",
+      context,
+    }), true);
+    assert.equal(replies.length, 1);
+    assert.match(replies[0] ?? "", /Codex status:/);
+    assert.match(replies[0] ?? "", /Weekly limit: \[██░░\] 15% left/);
+  });
+
+  it("does not claim /status for non-Codex ACP harnesses", async () => {
+    const handler = __testAcpModelCommand.createGenericAcpCommandHandler({
+      harnessName: "claude",
+      label: "Claude",
+      sessionKind: "claude",
+      commandSpec: { command: "mock-acp", args: [] },
+      cancelActiveQuery: () => false,
+      loadControlState: async () => ({ configOptions: [], modelState: null }),
+      readCodexStatus: async () => {
+        throw new Error("non-Codex status should not read Codex CLI");
+      },
+    });
+
+    assert.equal(await handler({
+      chatId: "claude-status-command",
+      command: "status",
+      context: createContext(),
+    }), false);
   });
 
   it("throws when fast mode is requested but the ACP agent did not expose it", async () => {
