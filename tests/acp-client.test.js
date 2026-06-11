@@ -4,7 +4,8 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
-import { createNdjsonAcpProtocolLogger, getDefaultAcpProtocolLogger, openAcpConnection } from "../harnesses/acp-client.js";
+import { createRuntimeDiagnosticsState } from "../diagnostics-config.js";
+import { createNdjsonAcpProtocolLogger, createRuntimeGatedAcpProtocolLogger, getDefaultAcpProtocolLogger, openAcpConnection } from "../harnesses/acp-client.js";
 
 describe("ACP client process stderr", () => {
   /** @type {string | undefined} */
@@ -32,11 +33,48 @@ describe("ACP client process stderr", () => {
     else process.env.MADABOT_ACP_PROTOCOL_LOG = originalAcpProtocolLog;
   });
 
-  it("leaves default ACP protocol transcript logging disabled unless explicitly enabled", () => {
-    assert.equal(getDefaultAcpProtocolLogger(), null);
+  it("provides a default ACP protocol logger that stays quiet unless explicitly enabled", () => {
+    assert.notEqual(getDefaultAcpProtocolLogger(), null);
 
     process.env.MADABOT_ACP_PROTOCOL_LOG = "1";
     assert.notEqual(getDefaultAcpProtocolLogger(), null);
+  });
+
+  it("observes runtime toggles without replacing the ACP protocol logger", async () => {
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "acp-protocol-log-"));
+    const configPath = path.join(tempDir, "logging.json");
+    const logger = createRuntimeGatedAcpProtocolLogger(
+      path.join(tempDir, "acp.ndjson"),
+      createRuntimeDiagnosticsState({ configPath, env: {}, reloadIntervalMs: 0 }),
+    );
+
+    await logger.write({
+      timestamp: "2026-06-11T12:00:00.000Z",
+      direction: "client_to_agent",
+      kind: "request",
+      id: 1,
+      method: "initialize",
+      message: { jsonrpc: "2.0", id: 1, method: "initialize" },
+    });
+    assert.deepEqual((await fs.readdir(tempDir)).sort(), []);
+
+    await fs.writeFile(configPath, JSON.stringify({ acpProtocolLog: true }));
+    await logger.write({
+      timestamp: "2026-06-11T12:01:00.000Z",
+      direction: "agent_to_client",
+      kind: "notification",
+      method: "session/update",
+      message: { jsonrpc: "2.0", method: "session/update" },
+    });
+
+    assert.deepEqual((await fs.readdir(tempDir)).sort(), [
+      "acp.2026-06-11T12Z.ndjson",
+      "logging.json",
+    ]);
+    assert.match(
+      await fs.readFile(path.join(tempDir, "acp.2026-06-11T12Z.ndjson"), "utf8"),
+      /"method":"session\/update"/,
+    );
   });
 
   it("drains child stderr without mirroring provider chatter into the bot log by default", async () => {
