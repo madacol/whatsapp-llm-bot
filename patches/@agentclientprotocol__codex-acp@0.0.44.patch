@@ -209,11 +209,16 @@
        case "userMessage":
        case "hookPrompt":
        case "agentMessage":
-       case "reasoning":
 -      case "webSearch":
        case "imageView":
        case "imageGeneration":
        case "enteredReviewMode":
+@@ -17688,6 +17757,8 @@
+       case "contextCompaction":
+       case "plan":
+         return null;
++      case "reasoning":
++        return this.createReasoningNotificationEvent({});
 @@ -17711,6 +17780,16 @@
          };
        case "commandExecution":
@@ -229,7 +234,8 @@
 +          }
 +        };
        case "reasoning":
-         const summary = event.item.summary[0];
+-        const summary = event.item.summary[0];
++        const summary = event.item.summary[0] ?? event.item.content[0];
          if (!summary) return null;
 @@ -17725,7 +17804,6 @@
        case "userMessage":
@@ -282,7 +288,8 @@
 @@ -19328,12 +19432,27 @@
        approvalPolicy: agentMode.approvalPolicy,
        sandboxPolicy: agentMode.sandboxPolicy,
-       summary: disableSummary ? "none" : null,
+-      summary: disableSummary ? "none" : null,
++      summary: disableSummary ? "none" : "auto",
 +      serviceTier: request.fastMode ? "fast" : null,
        personality: null,
        cwd: null,
@@ -569,6 +576,20 @@
        rawInput: {
          query: item.query,
          action: item.action
+@@ -20452,12 +20711,12 @@
+       }
+       const modelId = ModelId.fromString(sessionState.currentModelId);
+       const modelLacksReasoning = sessionState.supportedReasoningEfforts.length > 0 && sessionState.supportedReasoningEfforts.every((e) => e.reasoningEffort === "none");
+-      const disableSummary = sessionState.account?.type === "apiKey" || modelLacksReasoning;
++      const disableSummary = modelLacksReasoning;
+       if (disableSummary) {
+         logger.log("Disable reasoning.summary", {
+           sessionId: params.sessionId,
+-          reason: sessionState.account?.type === "apiKey" ? "API key" : "model lacks reasoning"
++          reason: "model lacks reasoning"
+         });
+       }
+       if (!sessionState.supportedInputModalities.includes("image") && params.prompt.some((b) => b.type === "image")) {
 @@ -20460,9 +20719,17 @@
          throw RequestError.invalidRequest("The current model does not support image input");
        }
