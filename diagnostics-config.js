@@ -8,13 +8,23 @@ const REPO_ROOT = path.resolve(__dirname);
 const DEFAULT_RELOAD_INTERVAL_MS = 1_000;
 
 export const ACP_PROTOCOL_LOG_ENV = "MADABOT_ACP_PROTOCOL_LOG";
+export const ACP_STDERR_LOG_ENV = "MADABOT_ACP_STDERR_LOG";
 export const RAW_EVENT_LOG_ENV = "MADABOT_RAW_EVENT_LOG";
+export const DB_CACHE_LOG_ENV = "DB_DIAGNOSTICS";
+export const LOG_LEVEL_ENV = "LOG_LEVEL";
 export const RUNTIME_DIAGNOSTICS_CONFIG_PATH = path.join(REPO_ROOT, ".diagnostics", "logging.json");
+const LEGACY_WHATSAPP_DIAGNOSTIC_ENABLE_PATH = path.join(REPO_ROOT, "logs", "whatsapp-upsert-shape.enabled");
+const LOG_LEVEL_VALUES = new Set(["debug", "info", "warn", "error", "silent"]);
 
 /**
  * @typedef {{
  *   acpProtocolLog: boolean,
+ *   acpStderrLog: boolean,
  *   rawEventLog: boolean,
+ *   dbCacheLog: boolean,
+ *   whatsappUpsertLog: boolean,
+ *   whatsappReactionLog: boolean,
+ *   logLevel: "debug" | "info" | "warn" | "error" | "silent" | null,
  * }} RuntimeDiagnosticsConfig
  */
 
@@ -22,20 +32,41 @@ export const RUNTIME_DIAGNOSTICS_CONFIG_PATH = path.join(REPO_ROOT, ".diagnostic
  * @typedef {{
  *   getConfig: () => RuntimeDiagnosticsConfig,
  *   isAcpProtocolLogEnabled: () => boolean,
+ *   isAcpStderrLogEnabled: () => boolean,
  *   isRawEventLogEnabled: () => boolean,
+ *   isDbCacheLogEnabled: () => boolean,
+ *   isWhatsAppUpsertLogEnabled: () => boolean,
+ *   isWhatsAppReactionLogEnabled: () => boolean,
  *   update: (patch: Partial<RuntimeDiagnosticsConfig>) => Promise<RuntimeDiagnosticsConfig>,
  * }} RuntimeDiagnosticsState
  */
 
 /**
  * @param {NodeJS.ProcessEnv | Record<string, string | undefined>} env
+ * @param {boolean} legacyWhatsAppDiagnosticEnabled
  * @returns {RuntimeDiagnosticsConfig}
  */
-function readEnvDefaults(env) {
+function readEnvDefaults(env, legacyWhatsAppDiagnosticEnabled) {
   return {
     acpProtocolLog: env[ACP_PROTOCOL_LOG_ENV] === "1",
+    acpStderrLog: env[ACP_STDERR_LOG_ENV] === "1",
     rawEventLog: env[RAW_EVENT_LOG_ENV] === "1",
+    dbCacheLog: env[DB_CACHE_LOG_ENV] === "1",
+    whatsappUpsertLog: legacyWhatsAppDiagnosticEnabled,
+    whatsappReactionLog: legacyWhatsAppDiagnosticEnabled,
+    logLevel: normalizeLogLevel(env[LOG_LEVEL_ENV]),
   };
+}
+
+/**
+ * @param {unknown} value
+ * @returns {RuntimeDiagnosticsConfig["logLevel"]}
+ */
+function normalizeLogLevel(value) {
+  if (typeof value !== "string") {
+    return null;
+  }
+  return LOG_LEVEL_VALUES.has(value) ? /** @type {RuntimeDiagnosticsConfig["logLevel"]} */ (value) : null;
 }
 
 /**
@@ -49,7 +80,12 @@ function normalizeRuntimeDiagnosticsConfig(raw, fallback) {
     : {};
   return {
     acpProtocolLog: typeof record.acpProtocolLog === "boolean" ? record.acpProtocolLog : fallback.acpProtocolLog,
+    acpStderrLog: typeof record.acpStderrLog === "boolean" ? record.acpStderrLog : fallback.acpStderrLog,
     rawEventLog: typeof record.rawEventLog === "boolean" ? record.rawEventLog : fallback.rawEventLog,
+    dbCacheLog: typeof record.dbCacheLog === "boolean" ? record.dbCacheLog : fallback.dbCacheLog,
+    whatsappUpsertLog: typeof record.whatsappUpsertLog === "boolean" ? record.whatsappUpsertLog : fallback.whatsappUpsertLog,
+    whatsappReactionLog: typeof record.whatsappReactionLog === "boolean" ? record.whatsappReactionLog : fallback.whatsappReactionLog,
+    logLevel: "logLevel" in record ? normalizeLogLevel(record.logLevel) : fallback.logLevel,
   };
 }
 
@@ -66,6 +102,7 @@ function hasErrorCode(error, code) {
  * @param {{
  *   configPath?: string,
  *   env?: NodeJS.ProcessEnv | Record<string, string | undefined>,
+ *   legacyWhatsAppDiagnosticEnabled?: boolean,
  *   reloadIntervalMs?: number,
  * }} [options]
  * @returns {RuntimeDiagnosticsState}
@@ -73,6 +110,8 @@ function hasErrorCode(error, code) {
 export function createRuntimeDiagnosticsState(options = {}) {
   const configPath = options.configPath ?? RUNTIME_DIAGNOSTICS_CONFIG_PATH;
   const env = options.env ?? process.env;
+  const getLegacyWhatsAppDiagnosticEnabled = () => options.legacyWhatsAppDiagnosticEnabled
+    ?? fs.existsSync(LEGACY_WHATSAPP_DIAGNOSTIC_ENABLE_PATH);
   const reloadIntervalMs = options.reloadIntervalMs ?? DEFAULT_RELOAD_INTERVAL_MS;
   /** @type {RuntimeDiagnosticsConfig | null} */
   let cachedConfig = null;
@@ -84,11 +123,7 @@ export function createRuntimeDiagnosticsState(options = {}) {
    */
   function readConfig() {
     const now = Date.now();
-    if (cachedConfig && reloadIntervalMs > 0 && now - lastCheckMs < reloadIntervalMs) {
-      return cachedConfig;
-    }
-    lastCheckMs = now;
-    const fallback = readEnvDefaults(env);
+    const fallback = readEnvDefaults(env, getLegacyWhatsAppDiagnosticEnabled());
     let stat;
     try {
       stat = fs.statSync(configPath);
@@ -101,6 +136,10 @@ export function createRuntimeDiagnosticsState(options = {}) {
       return cachedConfig;
     }
 
+    if (cachedConfig && reloadIntervalMs > 0 && now - lastCheckMs < reloadIntervalMs) {
+      return cachedConfig;
+    }
+    lastCheckMs = now;
     const fileSignature = `${stat.mtimeMs}:${stat.size}`;
     if (cachedConfig && fileSignature === lastFileSignature) {
       return cachedConfig;
@@ -123,8 +162,20 @@ export function createRuntimeDiagnosticsState(options = {}) {
     isAcpProtocolLogEnabled() {
       return readConfig().acpProtocolLog;
     },
+    isAcpStderrLogEnabled() {
+      return readConfig().acpStderrLog;
+    },
     isRawEventLogEnabled() {
       return readConfig().rawEventLog;
+    },
+    isDbCacheLogEnabled() {
+      return readConfig().dbCacheLog;
+    },
+    isWhatsAppUpsertLogEnabled() {
+      return readConfig().whatsappUpsertLog;
+    },
+    isWhatsAppReactionLogEnabled() {
+      return readConfig().whatsappReactionLog;
     },
     async update(patch) {
       const current = readConfig();
@@ -157,4 +208,12 @@ export function getDefaultRuntimeDiagnosticsState() {
     defaultRuntimeDiagnosticsState = createRuntimeDiagnosticsState();
   }
   return defaultRuntimeDiagnosticsState;
+}
+
+/**
+ * @param {RuntimeDiagnosticsState | null} state
+ * @returns {void}
+ */
+export function setDefaultRuntimeDiagnosticsStateForTesting(state) {
+  defaultRuntimeDiagnosticsState = state;
 }

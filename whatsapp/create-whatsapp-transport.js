@@ -1,7 +1,8 @@
 import { createLogger } from "../logger.js";
-import { appendFileSync, existsSync, mkdirSync } from "node:fs";
+import { appendFileSync, mkdirSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { getDefaultRuntimeDiagnosticsState } from "../diagnostics-config.js";
 import { adaptIncomingMessages } from "./inbound/chat-turn.js";
 import { createWhatsAppConnectionSupervisor } from "./connection-supervisor.js";
 import { classifyIncomingMessageEvent, normalizeReactionEvents } from "./inbound/message-event-classifier.js";
@@ -19,7 +20,6 @@ const log = createLogger("whatsapp");
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "..");
 const LOGS_DIR = path.join(REPO_ROOT, "logs");
-const WHATSAPP_UPSERT_DIAGNOSTIC_ENABLE_PATH = path.join(LOGS_DIR, "whatsapp-upsert-shape.enabled");
 const WHATSAPP_UPSERT_DIAGNOSTIC_DEFAULT_PATH = path.join(LOGS_DIR, "whatsapp-upsert-shape.jsonl");
 const WHATSAPP_REACTION_DIAGNOSTIC_DEFAULT_PATH = path.join(LOGS_DIR, "whatsapp-reactions.jsonl");
 const WHATSAPP_ALBUM_FLUSH_DELAY_MS = 1_200;
@@ -456,35 +456,39 @@ export function buildWhatsAppUpsertShapeDiagnostic(message) {
 }
 
 /**
- * @returns {boolean}
- */
-function isWhatsAppUpsertDiagnosticEnabled() {
-  return existsSync(WHATSAPP_UPSERT_DIAGNOSTIC_ENABLE_PATH);
-}
-
-/**
  * @param {BaileysMessage} message
+ * @param {{
+ *   diagnosticsState?: import("../diagnostics-config.js").RuntimeDiagnosticsState,
+ *   targetPath?: string,
+ * }} [options]
  * @returns {void}
  */
-function appendWhatsAppUpsertDiagnostic(message) {
-  if (!isWhatsAppUpsertDiagnosticEnabled()) {
+export function appendWhatsAppUpsertDiagnostic(message, options = {}) {
+  const diagnosticsState = options.diagnosticsState ?? getDefaultRuntimeDiagnosticsState();
+  if (!diagnosticsState.isWhatsAppUpsertLogEnabled()) {
     return;
   }
-  const targetPath = WHATSAPP_UPSERT_DIAGNOSTIC_DEFAULT_PATH;
+  const targetPath = options.targetPath ?? WHATSAPP_UPSERT_DIAGNOSTIC_DEFAULT_PATH;
   mkdirSync(path.dirname(targetPath), { recursive: true });
   appendFileSync(targetPath, `${JSON.stringify(buildWhatsAppUpsertShapeDiagnostic(message))}\n`);
 }
 
 /**
  * @param {import("./runtime/reaction-runtime.js").ReactionRuntimeObserverEvent} event
+ * @param {{
+ *   diagnosticsState?: import("../diagnostics-config.js").RuntimeDiagnosticsState,
+ *   targetPath?: string,
+ * }} [options]
  * @returns {void}
  */
-function appendWhatsAppReactionDiagnostic(event) {
-  if (!isWhatsAppUpsertDiagnosticEnabled()) {
+export function appendWhatsAppReactionDiagnostic(event, options = {}) {
+  const diagnosticsState = options.diagnosticsState ?? getDefaultRuntimeDiagnosticsState();
+  if (!diagnosticsState.isWhatsAppReactionLogEnabled()) {
     return;
   }
-  mkdirSync(path.dirname(WHATSAPP_REACTION_DIAGNOSTIC_DEFAULT_PATH), { recursive: true });
-  appendFileSync(WHATSAPP_REACTION_DIAGNOSTIC_DEFAULT_PATH, `${JSON.stringify({
+  const targetPath = options.targetPath ?? WHATSAPP_REACTION_DIAGNOSTIC_DEFAULT_PATH;
+  mkdirSync(path.dirname(targetPath), { recursive: true });
+  appendFileSync(targetPath, `${JSON.stringify({
     receivedAt: new Date().toISOString(),
     ...event,
   })}\n`);
