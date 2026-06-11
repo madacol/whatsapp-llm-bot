@@ -12,6 +12,7 @@ import { startReminderDaemon } from "./reminder-daemon.js";
 import { startModelsCacheDaemon } from "./models-cache.js";
 import { initStore } from "./store.js";
 import { startHtmlServer, stopHtmlServer } from "./html-server.js";
+import { createHttpApiTransport } from "./http-api-transport.js";
 import { registerOptionalHarnesses, waitForAllHarnesses } from "#harnesses";
 import { createLogger } from "./logger.js";
 import { createConversationRunner } from "./conversation/create-conversation-runner.js";
@@ -151,6 +152,23 @@ if (!process.env.TESTING) {
     process.exit(1);
   });
 
+  const apiTransport = config.api_transport_token
+    ? await createHttpApiTransport({
+        host: config.api_transport_host,
+        port: config.api_transport_port,
+        authToken: config.api_transport_token,
+      })
+    : null;
+  if (apiTransport) {
+    await apiTransport.start(handleMessage).catch(async (error) => {
+      log.error("HTTP API transport initialization error:", error);
+      await transport.stop();
+      await store.closeDb();
+      process.exit(1);
+    });
+    log.info(`HTTP API transport enabled on ${apiTransport.baseUrl}`);
+  }
+
   const stopReminders = startReminderDaemon(transport.sendText);
   const stopModelsCache = startModelsCacheDaemon();
 
@@ -163,6 +181,7 @@ if (!process.env.TESTING) {
         log.info(`Shutdown waited on ${waitedOn.length} chat(s): ${waitedOn.join(", ")}`);
       }
       await stopHtmlServer();
+      await apiTransport?.stop();
       await transport.stop();
       await store.closeDb();
     } catch (error) {
