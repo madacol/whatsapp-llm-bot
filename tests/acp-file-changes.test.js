@@ -201,6 +201,29 @@ describe("ACP file changes", () => {
     assert.equal(snapshot.has(path.join(workdir, "src/app.js")), true);
   });
 
+  it("uses workspace-local snapshot-ignore patterns during ACP workdir snapshots", async () => {
+    const workdir = await fs.mkdtemp(path.join(os.tmpdir(), "acp-workspace-snapshot-ignore-"));
+    await fs.writeFile(path.join(workdir, "snapshot-ignore.txt"), "mounted-voice-assistant/**\n", "utf8");
+    await fs.mkdir(path.join(workdir, "mounted-voice-assistant", "docs"), { recursive: true });
+    await fs.writeFile(path.join(workdir, "mounted-voice-assistant", "docs", "requirements.md"), "# Slow mount\n", "utf8");
+    await fs.mkdir(path.join(workdir, "docs"), { recursive: true });
+    await fs.writeFile(path.join(workdir, "docs", "requirements.md"), "# Local docs\n", "utf8");
+
+    const snapshot = await snapshotAcpWorkdir(workdir);
+
+    assert.ok(snapshot);
+    assert.equal(snapshot.has(path.join(workdir, "mounted-voice-assistant", "docs", "requirements.md")), false);
+    assert.equal(snapshot.has(path.join(workdir, "docs", "requirements.md")), true);
+    assert.equal(snapshot.has(path.join(workdir, "snapshot-ignore.txt")), true);
+    assert.equal(
+      isAcpFileChangeIgnored(
+        { workdir },
+        path.join(workdir, "mounted-voice-assistant", "docs", "requirements.md"),
+      ),
+      true,
+    );
+  });
+
   it("classifies ACP runtime-state paths independently of WhatsApp presentation", () => {
     assert.equal(isRuntimeStateSnapshotPath("auth_info_baileys/sender-key-test.json"), true);
     assert.equal(isRuntimeStateSnapshotPath("/home/mada/whatsapp-llm-bot/pgdata/root.sqlite"), true);

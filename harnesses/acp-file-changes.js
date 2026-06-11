@@ -22,7 +22,8 @@ export async function snapshotAcpWorkdir(workdir) {
   const root = path.resolve(workdir);
   /** @type {Map<string, string>} */
   const snapshot = new Map();
-  await collectSnapshotFiles(root, root, snapshot);
+  const ignoredPaths = loadSnapshotIgnorePatternsForWorkdir(root);
+  await collectSnapshotFiles(root, root, snapshot, ignoredPaths);
   return snapshot;
 }
 
@@ -85,9 +86,17 @@ function normalizePatternList(value) {
  * @returns {string[]}
  */
 function loadSnapshotIgnorePatterns() {
+  return loadSnapshotIgnorePatternsFromFile(SNAPSHOT_IGNORE_FILE_PATH);
+}
+
+/**
+ * @param {string} filePath
+ * @returns {string[]}
+ */
+function loadSnapshotIgnorePatternsFromFile(filePath) {
   let rawPatterns;
   try {
-    rawPatterns = readFileSync(SNAPSHOT_IGNORE_FILE_PATH, "utf8");
+    rawPatterns = readFileSync(filePath, "utf8");
   } catch (error) {
     if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") {
       return [];
@@ -98,6 +107,21 @@ function loadSnapshotIgnorePatterns() {
     .split(/\r?\n/)
     .map((line) => line.trim())
     .filter((line) => line && !line.startsWith("#"));
+}
+
+/**
+ * @param {string} workdir
+ * @returns {string[]}
+ */
+function loadSnapshotIgnorePatternsForWorkdir(workdir) {
+  const workspaceIgnorePath = path.join(workdir, "snapshot-ignore.txt");
+  const workspacePatterns = path.resolve(workspaceIgnorePath) === path.resolve(SNAPSHOT_IGNORE_FILE_PATH)
+    ? []
+    : loadSnapshotIgnorePatternsFromFile(workspaceIgnorePath);
+  return [
+    ...DEFAULT_IGNORED_FILE_CHANGE_PATHS,
+    ...workspacePatterns,
+  ];
 }
 
 /**
@@ -133,14 +157,14 @@ export function isAcpFileChangeIgnored(runConfig, filePath) {
   if (isRuntimeStateSnapshotPath(filePath)) {
     return true;
   }
+  const root = path.resolve(runConfig?.workdir ?? process.cwd());
   const patterns = [
-    ...DEFAULT_IGNORED_FILE_CHANGE_PATHS,
+    ...loadSnapshotIgnorePatternsForWorkdir(root),
     ...normalizePatternList(runConfig?.ignoredFileChangePaths),
   ];
   if (patterns.length === 0) {
     return false;
   }
-  const root = path.resolve(runConfig?.workdir ?? process.cwd());
   const resolvedPath = resolveAcpFileChangePath(root, filePath);
   const relativePath = path.relative(root, resolvedPath);
   if (!relativePath || relativePath.startsWith("..") || path.isAbsolute(relativePath)) {
@@ -283,9 +307,10 @@ export async function emitAcpSnapshotFileChanges(input) {
  * @param {string} root
  * @param {string} currentPath
  * @param {Map<string, string>} snapshot
+ * @param {string[]} ignoredPaths
  * @returns {Promise<void>}
  */
-async function collectSnapshotFiles(root, currentPath, snapshot) {
+async function collectSnapshotFiles(root, currentPath, snapshot, ignoredPaths) {
   let entries;
   try {
     entries = await fs.readdir(currentPath, { withFileTypes: true });
@@ -294,11 +319,11 @@ async function collectSnapshotFiles(root, currentPath, snapshot) {
   }
   for (const entry of entries) {
     const filePath = path.join(currentPath, entry.name);
-    if (isPathIgnoredByPatterns(root, filePath, DEFAULT_IGNORED_FILE_CHANGE_PATHS)) {
+    if (isPathIgnoredByPatterns(root, filePath, ignoredPaths)) {
       continue;
     }
     if (entry.isDirectory()) {
-      await collectSnapshotFiles(root, filePath, snapshot);
+      await collectSnapshotFiles(root, filePath, snapshot, ignoredPaths);
       continue;
     }
     if (!entry.isFile()) {
