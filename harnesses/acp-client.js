@@ -4,13 +4,13 @@ import path from "node:path";
 import readline from "node:readline";
 import { fileURLToPath } from "node:url";
 import { createLogger } from "../logger.js";
+import { getDefaultRuntimeDiagnosticsState } from "../diagnostics-config.js";
 import { createHourlyNdjsonLogWriter } from "../hourly-ndjson-log.js";
 
 const log = createLogger("harness:acp");
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "..");
 const ACP_STDERR_LOG_ENV = "MADABOT_ACP_STDERR_LOG";
-const ACP_PROTOCOL_LOG_ENV = "MADABOT_ACP_PROTOCOL_LOG";
 const ACP_STDERR_TAIL_MAX_CHARS = 4_000;
 const LOGS_DIR = path.join(REPO_ROOT, "logs");
 const ACP_PROTOCOL_LOG_BASE_PATH = path.join(LOGS_DIR, "acp.ndjson");
@@ -201,14 +201,6 @@ function shouldLogAcpChildStderr(env = process.env) {
 }
 
 /**
- * @param {NodeJS.ProcessEnv} [env]
- * @returns {boolean}
- */
-function shouldLogAcpProtocol(env = process.env) {
-  return env[ACP_PROTOCOL_LOG_ENV] === "1";
-}
-
-/**
  * @param {string} current
  * @param {string} chunk
  * @returns {string}
@@ -240,18 +232,36 @@ export function createNdjsonAcpProtocolLogger(filePath) {
   };
 }
 
+/**
+ * @param {string} filePath
+ * @param {import("../diagnostics-config.js").RuntimeDiagnosticsState} [diagnosticsState]
+ * @returns {AcpProtocolLogger}
+ */
+export function createRuntimeGatedAcpProtocolLogger(filePath, diagnosticsState = getDefaultRuntimeDiagnosticsState()) {
+  /** @type {AcpProtocolLogger | null} */
+  let logger = null;
+  return {
+    write(entry) {
+      if (!diagnosticsState.isAcpProtocolLogEnabled()) {
+        return;
+      }
+      if (!logger) {
+        logger = createNdjsonAcpProtocolLogger(filePath);
+      }
+      return logger.write(entry);
+    },
+  };
+}
+
 /** @type {AcpProtocolLogger | null} */
 let cachedDefaultProtocolLogger = null;
 
 /**
- * @returns {AcpProtocolLogger | null}
+ * @returns {AcpProtocolLogger}
  */
 export function getDefaultAcpProtocolLogger() {
-  if (!shouldLogAcpProtocol()) {
-    return null;
-  }
   if (!cachedDefaultProtocolLogger) {
-    cachedDefaultProtocolLogger = createNdjsonAcpProtocolLogger(ACP_PROTOCOL_LOG_BASE_PATH);
+    cachedDefaultProtocolLogger = createRuntimeGatedAcpProtocolLogger(ACP_PROTOCOL_LOG_BASE_PATH);
   }
   return cachedDefaultProtocolLogger;
 }

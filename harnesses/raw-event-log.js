@@ -1,10 +1,10 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { getDefaultRuntimeDiagnosticsState } from "../diagnostics-config.js";
 import { createHourlyNdjsonLogWriter } from "../hourly-ndjson-log.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "..");
-const RAW_EVENT_LOG_ENV = "MADABOT_RAW_EVENT_LOG";
 const RAW_EVENT_LOG_BASE_PATH = path.join(REPO_ROOT, "logs", "raw-events.ndjson");
 
 /**
@@ -37,26 +37,36 @@ export function createNdjsonRawEventLogger(filePath) {
   };
 }
 
+/**
+ * @param {string} filePath
+ * @param {import("../diagnostics-config.js").RuntimeDiagnosticsState} [diagnosticsState]
+ * @returns {HarnessRawEventLogger}
+ */
+export function createRuntimeGatedRawEventLogger(filePath, diagnosticsState = getDefaultRuntimeDiagnosticsState()) {
+  /** @type {HarnessRawEventLogger | null} */
+  let logger = null;
+  return {
+    write(entry) {
+      if (!diagnosticsState.isRawEventLogEnabled()) {
+        return;
+      }
+      if (!logger) {
+        logger = createNdjsonRawEventLogger(filePath);
+      }
+      return logger.write(entry);
+    },
+  };
+}
+
 /** @type {HarnessRawEventLogger | null} */
 let cachedDefaultLogger = null;
 
 /**
- * @param {NodeJS.ProcessEnv} [env]
- * @returns {boolean}
- */
-function shouldLogRawEvents(env = process.env) {
-  return env[RAW_EVENT_LOG_ENV] === "1";
-}
-
-/**
- * @returns {HarnessRawEventLogger | null}
+ * @returns {HarnessRawEventLogger}
  */
 export function getHarnessRawEventLogger() {
-  if (!shouldLogRawEvents()) {
-    return null;
-  }
   if (!cachedDefaultLogger) {
-    cachedDefaultLogger = createNdjsonRawEventLogger(RAW_EVENT_LOG_BASE_PATH);
+    cachedDefaultLogger = createRuntimeGatedRawEventLogger(RAW_EVENT_LOG_BASE_PATH);
   }
   return cachedDefaultLogger;
 }
