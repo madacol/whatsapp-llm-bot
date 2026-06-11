@@ -112,7 +112,16 @@ function isPathIgnoredByPatterns(root, filePath, patterns) {
     return false;
   }
   const normalizedRelativePath = normalizeSlashes(relativePath);
-  return patterns.some((pattern) => globToRegExp(pattern).test(normalizedRelativePath));
+  return patterns.some((pattern) => {
+    const normalizedPattern = normalizeSlashes(pattern.trim()).replace(/^\/+/, "");
+    if (normalizedPattern.endsWith("/**")) {
+      const directoryPattern = normalizedPattern.slice(0, -3);
+      if (globToRegExp(directoryPattern).test(normalizedRelativePath)) {
+        return true;
+      }
+    }
+    return globToRegExp(normalizedPattern).test(normalizedRelativePath);
+  });
 }
 
 /**

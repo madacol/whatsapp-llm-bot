@@ -2,11 +2,15 @@
 .agents/.runtime/**
 .diagnostics/**
 .git/**
+.venv/**
 .madabot/**
 .media/**
 .state/**
 .wwebjs_auth/**
 .wwebjs_cache/**
+**/.venv/**
+**/__pycache__/**
+**/venv/**
 auth_info_baileys/**
 build/**
 coverage/**
@@ -14,4 +18,5 @@ dist/**
 logs/**
 node_modules/**
 pgdata/**
+venv/**
 pnpm-lock.yaml
