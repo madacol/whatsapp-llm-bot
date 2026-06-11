@@ -9,7 +9,7 @@ const DEFAULT_MODEL = "gpt-5.5";
 
 /**
  * @param {string[]} args
- * @returns {{ model: string | null, timeoutMs: number, keep: boolean, prompt: string | null, serviceTier: string | null }}
+ * @returns {{ model: string | null, timeoutMs: number, keep: boolean, prompt: string | null, serviceTier: string | null, summary: string | null, effort: string }}
  */
 function parseArgs(args) {
   /** @type {string | null} */
@@ -20,6 +20,9 @@ function parseArgs(args) {
   let prompt = null;
   /** @type {string | null} */
   let serviceTier = null;
+  /** @type {string | null} */
+  let summary = "none";
+  let effort = "low";
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index];
     if (arg === "--model") {
@@ -38,6 +41,13 @@ function parseArgs(args) {
     } else if (arg === "--service-tier") {
       serviceTier = args[index + 1] ?? null;
       index += 1;
+    } else if (arg === "--summary") {
+      const value = args[index + 1] ?? "none";
+      summary = value === "null" ? null : value;
+      index += 1;
+    } else if (arg === "--effort") {
+      effort = args[index + 1] ?? effort;
+      index += 1;
     }
   }
   return {
@@ -46,6 +56,8 @@ function parseArgs(args) {
     keep,
     prompt,
     serviceTier,
+    summary,
+    effort,
   };
 }
 
@@ -88,6 +100,8 @@ function summarizeNotification(notification) {
         status: item.status,
         command: item.command,
         cwd: item.cwd,
+        summary: item.summary,
+        content: item.content,
         aggregatedOutput: item.aggregatedOutput,
         commandActions: item.commandActions,
       },
@@ -291,7 +305,7 @@ try {
     input: [{ type: "text", text: prompt }],
     cwd: workdir,
     model: options.model,
-    effort: "low",
+    effort: options.effort,
     approvalPolicy: "never",
     approvalsReviewer: "auto_review",
     sandboxPolicy: {
@@ -299,7 +313,7 @@ try {
       writableRoots: [],
       networkAccess: false,
     },
-    summary: "none",
+    summary: options.summary,
     outputSchema: null,
     personality: "none",
     serviceTier: options.serviceTier,

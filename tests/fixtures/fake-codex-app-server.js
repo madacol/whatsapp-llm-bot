@@ -23,6 +23,13 @@ const fakeTokenUsage = {
   },
   modelContextWindow: 20000,
 };
+const fakeReasoningEffort = process.env.FAKE_CODEX_REASONING_EFFORT ?? "none";
+const fakeSupportedReasoningEfforts = fakeReasoningEffort === "none"
+  ? [{ reasoningEffort: "none", description: "None" }]
+  : [{ reasoningEffort: fakeReasoningEffort, description: fakeReasoningEffort }];
+const fakeAccount = process.env.FAKE_CODEX_ACCOUNT_TYPE
+  ? { type: process.env.FAKE_CODEX_ACCOUNT_TYPE }
+  : null;
 
 /**
  * @param {Record<string, unknown>} message
@@ -100,7 +107,7 @@ async function handleMessage(parsed) {
       respond(id, {});
       break;
     case "account/read":
-      respond(id, { requiresOpenaiAuth: false, account: null });
+      respond(id, { requiresOpenaiAuth: false, account: fakeAccount });
       break;
     case "skills/list":
       respond(id, { skills: [] });
@@ -112,7 +119,7 @@ async function handleMessage(parsed) {
       respond(id, {
         thread: { id: "fake-thread-1" },
         model: "fake-model",
-        reasoningEffort: "none",
+        reasoningEffort: fakeReasoningEffort,
       });
       break;
     case "thread/resume":
@@ -125,7 +132,7 @@ async function handleMessage(parsed) {
           turns: [],
         },
         model: "fake-model",
-        reasoningEffort: "none",
+        reasoningEffort: fakeReasoningEffort,
       });
       break;
     case "thread/settings/update":
@@ -147,8 +154,8 @@ async function handleMessage(parsed) {
           displayName: "Fake Model",
           description: "Fake model",
           isDefault: true,
-          defaultReasoningEffort: "none",
-          supportedReasoningEfforts: [{ reasoningEffort: "none", description: "None" }],
+          defaultReasoningEffort: fakeReasoningEffort,
+          supportedReasoningEfforts: fakeSupportedReasoningEfforts,
           inputModalities: ["text"],
         }],
         nextCursor: null,
@@ -250,6 +257,31 @@ async function handleMessage(parsed) {
           itemId: "reasoning-1",
           summaryIndex: 0,
           delta: "Checking restart status.",
+        });
+        notify("turn/completed", {
+          threadId: params.threadId,
+          turn: { id: "fake-turn-1", status: "completed" },
+        });
+      } else if (firstTextInput(params.input) === "empty-reasoning") {
+        notify("item/started", {
+          threadId: params.threadId,
+          turnId: "fake-turn-1",
+          item: {
+            id: "reasoning-empty-1",
+            type: "reasoning",
+            summary: [],
+            content: [],
+          },
+        });
+        notify("item/completed", {
+          threadId: params.threadId,
+          turnId: "fake-turn-1",
+          item: {
+            id: "reasoning-empty-1",
+            type: "reasoning",
+            summary: [],
+            content: [],
+          },
         });
         notify("turn/completed", {
           threadId: params.threadId,
