@@ -1141,6 +1141,58 @@ describe("sendEvent – runtime events", () => {
     assert.ok(!finalStatus.includes("❌ *Shell*"), `Successful retry should replace failed command status: ${finalStatus}`);
   });
 
+  it("keeps final usage accounting out of the action-focused pinned status", async () => {
+    const { sock, sent } = createMockSock();
+    const chatId = "runtime-action-focused-usage-chat";
+
+    await sendEvent(sock, chatId, {
+      kind: "runtime_event",
+      event: {
+        type: "turn.started",
+        provider: "codex",
+        turn: { id: "turn-1", chatId, status: "started" },
+      },
+    });
+
+    await sendEvent(sock, chatId, {
+      kind: "runtime_event",
+      event: {
+        type: "command.completed",
+        provider: "acp",
+        command: {
+          command: "/bin/zsh -lc 'pnpm exec node scripts/acp-adapter-smoke.js codex --prompt'",
+          status: "completed",
+        },
+      },
+    });
+
+    await sendEvent(sock, chatId, {
+      kind: "usage",
+      cost: "0.000000",
+      tokens: { prompt: 12, completion: 8, cached: 0 },
+    });
+
+    await sendEvent(sock, chatId, {
+      kind: "runtime_event",
+      event: {
+        type: "turn.completed",
+        provider: "codex",
+        turn: { id: "turn-1", chatId, status: "completed" },
+      },
+    });
+
+    const pinnedStatusTexts = sent
+      .filter((entry) => typeof entry.msg.text === "string" && (
+        typeof entry.msg.edit === "object"
+        || entry.msg.text === "🔄 *CODEX*  turn started"
+      ))
+      .map((entry) => /** @type {string} */ (entry.msg.text));
+    const finalActionStatus = pinnedStatusTexts.at(-2) ?? "";
+
+    assert.ok(sent.some((entry) => typeof entry.msg.text === "string" && entry.msg.text.includes("Cost: 0.000000")), `Expected usage output, got ${JSON.stringify(sent.map((entry) => entry.msg))}`);
+    assert.ok(finalActionStatus.startsWith("✅ *Shell*  `pnpm exec node scripts/acp-adapter-smoke.js codex --prompt`"), `Expected final usage not to replace action status, got ${JSON.stringify(pinnedStatusTexts)}`);
+  });
+
   it("updates pinned status after each ACP payload through Baileys", async () => {
     const { sock, sent } = createMockSock();
     const model = createAcpRuntimeModel();

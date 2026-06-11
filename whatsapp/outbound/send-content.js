@@ -2284,6 +2284,36 @@ function truncatePinnedStatusLine(text) {
 }
 
 /**
+ * @param {string} cost
+ * @returns {boolean}
+ */
+function isZeroPinnedUsageCost(cost) {
+  const numeric = Number.parseFloat(cost.replace(/[^0-9.-]/g, ""));
+  return Number.isFinite(numeric) && numeric === 0;
+}
+
+/**
+ * @param {{ entries: Array<{ key: string }> } | undefined} state
+ * @returns {boolean}
+ */
+function latestPinnedStatusEntryIsAction(state) {
+  const key = state?.entries.at(-1)?.key;
+  return typeof key === "string" && (key.startsWith("command:") || key.startsWith("tool:"));
+}
+
+/**
+ * @param {{ entries: Array<{ key: string }> } | undefined} state
+ * @returns {boolean}
+ */
+function pinnedStatusContainsOnlyTurnAndActions(state) {
+  return !!state && state.entries.every((entry) => (
+    entry.key === "turn"
+    || entry.key.startsWith("command:")
+    || entry.key.startsWith("tool:")
+  ));
+}
+
+/**
  * @param {Array<{ key: string, icon: string, provider?: string, summary: string }>} entries
  * @returns {string}
  */
@@ -2558,6 +2588,13 @@ function formatPinnedStatusPresentation(event, state) {
         summary: event.agentNickname ? `${event.agentNickname} replied` : "subagent replied",
       };
     case "usage":
+      if (
+        isZeroPinnedUsageCost(event.cost)
+        && latestPinnedStatusEntryIsAction(state)
+        && pinnedStatusContainsOnlyTurnAndActions(state)
+      ) {
+        return null;
+      }
       return {
         key: "usage",
         icon: "📊",
