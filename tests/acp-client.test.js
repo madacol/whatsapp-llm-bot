@@ -145,6 +145,39 @@ describe("ACP client process stderr", () => {
       await connection.close();
     }
   });
+
+  it("refreshes selected request timeouts when ACP activity arrives", async () => {
+    const connection = await openAcpConnection({
+      command: process.execPath,
+      args: [
+        "-e",
+        [
+          "process.stdin.setEncoding('utf8');",
+          "let buffer = '';",
+          "process.stdin.on('data', (chunk) => {",
+          "  buffer += chunk;",
+          "  const lines = buffer.split('\\n');",
+          "  buffer = lines.pop();",
+          "  for (const line of lines) {",
+          "    if (!line.trim()) continue;",
+          "    const request = JSON.parse(line);",
+          "    process.stdout.write(JSON.stringify({ jsonrpc: '2.0', method: 'session/update', params: { sessionId: 's1' } }) + '\\n');",
+          "    setTimeout(() => process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id: request.id, result: { ok: true } }) + '\\n'), 80);",
+          "  }",
+          "});",
+        ].join(""),
+      ],
+      protocolLogger: null,
+    });
+    try {
+      assert.deepEqual(
+        await connection.sendRequest("session/prompt", { prompt: "hello" }, { timeoutMs: 100, refreshOnActivity: true }),
+        { ok: true },
+      );
+    } finally {
+      await connection.close();
+    }
+  });
 });
 
 describe("ACP protocol log rotation", () => {
