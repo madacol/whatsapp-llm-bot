@@ -93,7 +93,9 @@ function stringifyEvent(event) {
         event.cwd ?? null,
         event.context,
       );
-      return `${SOURCE_PREFIX["tool-call"]} ${renderToolPresentationContent(presentation)}`.trim();
+      return presentation
+        ? `${SOURCE_PREFIX["tool-call"]} ${renderToolPresentationContent(presentation)}`.trim()
+        : "";
     }
     case "tool_activity":
       return `${SOURCE_PREFIX["tool-call"]} ${renderToolActivityContent(event.activity)}`.trim();

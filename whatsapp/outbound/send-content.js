@@ -1094,7 +1094,7 @@ function getPinnedRuntimeToolKey(tool) {
 /**
  * @param {Extract<RuntimeEventOutboundEvent["event"], { tool: unknown }>["tool"]} tool
  * @param {string | null | undefined} cwd
- * @returns {string}
+ * @returns {string | null}
  */
 function formatPinnedRuntimeToolSummary(tool, cwd) {
   if (tool.name.trim() === "Shell") {
@@ -1170,7 +1170,7 @@ function parseRawFileToolTitle(name) {
 /**
  * @param {Extract<RuntimeEventOutboundEvent["event"], { tool: unknown }>["tool"]} tool
  * @param {string | null | undefined} cwd
- * @returns {string}
+ * @returns {string | null}
  */
 function formatRuntimeToolSummary(tool, cwd) {
   if (tool.name === "Read" || tool.name === "Read file") {
@@ -1207,6 +1207,9 @@ function formatRuntimeToolSummary(tool, cwd) {
       return formatRuntimeCommandSummary(command);
     }
   }
+  if (displayName === "stdin" || displayName === "write_stdin") {
+    return null;
+  }
   const pathDetail = getStringArg(tool.arguments, ["path", "file_path", "filePath"]);
   if (pathDetail) {
     return formatRuntimeProgressEntry(displayName, `\`${shortenPath(pathDetail, cwd ?? null)}\``);
@@ -1223,6 +1226,9 @@ function formatRuntimeToolSummary(tool, cwd) {
  */
 function formatSemanticToolSummary(name, args, cwd) {
   const presentation = buildToolPresentation(name, args, undefined, cwd ?? null, undefined);
+  if (!presentation) {
+    return null;
+  }
   if (presentation.kind === "generic") {
     return null;
   }
@@ -1370,9 +1376,8 @@ function formatCompactToolActivitySummary(activity, cwd) {
     }
   }
   const presentation = buildToolPresentation(activity.toolCall.name, args, undefined, cwd ?? null, undefined);
-  const rawSummary = formatGenericCompactToolName(activity.toolCall.name, args, cwd);
   if (!presentation) {
-    return rawSummary;
+    return null;
   }
   switch (presentation.kind) {
     case "activity":
@@ -1398,7 +1403,7 @@ function formatCompactToolActivitySummary(activity, cwd) {
 
 /**
  * @param {ToolCallEvent} event
- * @returns {ToolPresentation}
+ * @returns {ToolPresentation | null}
  */
 function buildToolPresentationFromToolCallEvent(event) {
   const args = parseToolArgs(event.toolCall.arguments);
@@ -1412,6 +1417,14 @@ function buildToolPresentationFromToolCallEvent(event) {
     event.cwd ?? null,
     event.context,
   );
+}
+
+/**
+ * @param {import("../tool-presentation-model.js").ToolActivitySummary} activity
+ * @returns {boolean}
+ */
+function shouldSuppressToolActivity(activity) {
+  return activity.title === "stdin" && activity.lines.length === 0;
 }
 
 /**
@@ -1757,6 +1770,9 @@ async function sendRuntimeToolEvent(sock, chatId, event, options, reactionRuntim
   }
   const summary = formatRuntimeToolSummary(displayTool, event.cwd);
   const readRange = getRawAcpReadOutputLineRange(event);
+  if (!summary) {
+    return undefined;
+  }
 
   if (status === "started") {
     const text = formatRuntimeToolText(status, summary);
@@ -2361,6 +2377,9 @@ function formatPinnedRuntimeStatusPresentation(event, state) {
     const key = getPinnedRuntimeToolKey(displayTool);
     const previousSummary = state.entries.find((entry) => entry.key === key)?.summary;
     const summary = formatPinnedRuntimeToolSummary(displayTool, event.cwd);
+    if (!summary) {
+      return null;
+    }
     const summaryBase = previousSummary && shouldPreserveRuntimeSummary(previousSummary, summary)
       ? previousSummary
       : summary;
@@ -2989,10 +3008,15 @@ function renderOutboundEvent(event) {
         ...(event.cwd !== undefined && { cwd: event.cwd }),
       };
     case "tool_call": {
-      return { source: "tool-call", content: renderToolPresentationContent(buildToolPresentationFromToolCallEvent(event)) };
+      const presentation = buildToolPresentationFromToolCallEvent(event);
+      return presentation
+        ? { source: "tool-call", content: renderToolPresentationContent(presentation) }
+        : null;
     }
     case "tool_activity":
-      return { source: "tool-call", content: renderToolActivityContent(event.activity) };
+      return shouldSuppressToolActivity(event.activity)
+        ? null
+        : { source: "tool-call", content: renderToolActivityContent(event.activity) };
     case "plan":
       return { source: "llm", content: [{ type: "markdown", text: formatPlanPresentationText(event.presentation) }] };
     case "file_change":
@@ -3610,7 +3634,10 @@ export async function sendBlocks(sock, chatId, source, content, options, reactio
   const transportHandleId = editHandle.id;
   /** @type {MessageInspectState | null} */
   let inspectState = event?.kind === "tool_call"
-    ? { kind: "tool", presentation: buildToolPresentationFromToolCallEvent(event) }
+    ? (() => {
+      const presentation = buildToolPresentationFromToolCallEvent(event);
+      return presentation ? { kind: "tool", presentation } : null;
+    })()
     : null;
   let persistInspectText = false;
 

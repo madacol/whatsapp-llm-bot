@@ -71,7 +71,7 @@
      };
    }
    return {
-@@ -17522,6 +17565,23 @@
+@@ -17522,6 +17565,37 @@
    } catch {
      return null;
    }
@@ -93,10 +93,24 @@
 +  }
 +  return null;
 +}
++function extractTerminalInteractionStdin(event) {
++  if (!event || typeof event !== "object") {
++    return null;
++  }
++  const record = event;
++  if (typeof record.stdin === "string") {
++    return record.stdin;
++  }
++  return null;
++}
++function createTerminalInteractionToolCallId(event) {
++  const itemId = event && typeof event === "object" && typeof event.itemId === "string" ? event.itemId : "unknown";
++  return `terminal-interaction:${itemId}`;
++}
 
  // src/CodexEventHandler.ts
  var CodexEventHandler = class {
-@@ -17585,17 +17643,18 @@
+@@ -17585,17 +17657,19 @@
          return this.createModelReroutedEvent(notification.params);
        case "fuzzyFileSearch/sessionUpdated":
          return this.handleFuzzyFileSearchSessionUpdated(notification.params);
@@ -106,6 +120,8 @@
 +      case "item/reasoning/summaryPartAdded":
 +      case "item/reasoning/textDelta":
 +        return this.createReasoningNotificationEvent(notification.params);
++      case "item/commandExecution/terminalInteraction":
++        return this.createTerminalInteractionEvent(notification.params);
        // ignored events
        case "command/exec/outputDelta":
        case "item/autoApprovalReview/started":
@@ -116,9 +132,8 @@
 -      case "item/reasoning/summaryPartAdded":
 -      case "item/reasoning/textDelta":
        case "turn/diff/updated":
-       case "item/commandExecution/terminalInteraction":
        case "item/fileChange/outputDelta":
-@@ -17667,6 +17700,50 @@
+@@ -17667,6 +17715,64 @@
        }
      };
    }
@@ -128,6 +143,21 @@
 +      content: {
 +        type: "text",
 +        text: extractReasoningNotificationText(event) ?? "Thinking..."
++      }
++    };
++  }
++  createTerminalInteractionEvent(event) {
++    const stdin = extractTerminalInteractionStdin(event);
++    return {
++      sessionUpdate: "tool_call",
++      toolCallId: createTerminalInteractionToolCallId(event),
++      kind: "other",
++      title: "stdin",
++      status: "completed",
++      rawInput: {
++        stdin: stdin ?? "",
++        payload: event ?? null,
++        ...(event && typeof event === "object" && typeof event.itemId === "string" ? { itemId: event.itemId } : {})
 +      }
 +    };
 +  }

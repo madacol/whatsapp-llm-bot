@@ -1,6 +1,10 @@
 import { hasMediaPath, resolveMediaPath } from "../attachment-paths.js";
 import { renderContentBlock } from "../message-formatting.js";
 import { getMediaTranslation, resolveMediaModel } from "../media-to-text.js";
+import { createLogger } from "../logger.js";
+import { errorToString } from "../utils.js";
+
+const log = createLogger("conversation:live-input");
 
 /**
  * @param {string} value
@@ -28,6 +32,14 @@ function renderLiveInputMediaReference(block) {
   }
   const suffix = metadata.length > 0 ? ` (${metadata.join(", ")})` : "";
   return `- ${block.type}${suffix}: ${resolveMediaPath(block.path)} (canonical: ${block.path})`;
+}
+
+/**
+ * @param {ImageContentBlock | VideoContentBlock | AudioContentBlock | FileContentBlock} block
+ * @returns {string | null}
+ */
+function getMediaBlockPath(block) {
+  return hasMediaPath(block) ? block.path : null;
 }
 
 /**
@@ -147,6 +159,10 @@ async function augmentLiveInputBlocks(blocks, input) {
       }
       const modelId = resolveMediaModel(block.type, input.mediaToTextModels ?? {});
       if (!modelId) {
+        log.info("Skipped live input media transcription; no model configured", {
+          contentType: block.type,
+          path: getMediaBlockPath(block),
+        });
         augmented.push(block);
         continue;
       }
@@ -160,8 +176,20 @@ async function augmentLiveInputBlocks(blocks, input) {
           contextMessages: input.contextMessages,
           currentText: input.currentText,
         });
+        log.info("Added live input media description", {
+          contentType: block.type,
+          path: getMediaBlockPath(block),
+          modelId,
+          descriptionLength: alt.length,
+        });
         augmented.push({ ...block, alt });
-      } catch {
+      } catch (error) {
+        log.warn("Live input media transcription failed", {
+          contentType: block.type,
+          path: getMediaBlockPath(block),
+          modelId,
+          error: errorToString(error),
+        });
         augmented.push(block);
       }
       continue;
@@ -171,6 +199,9 @@ async function augmentLiveInputBlocks(blocks, input) {
       augmented.push(block);
       const modelId = resolveMediaModel("audio", input.mediaToTextModels ?? {});
       if (!modelId) {
+        log.info("Skipped live input audio transcription; no model configured", {
+          path: getMediaBlockPath(block),
+        });
         continue;
       }
       try {
@@ -183,8 +214,18 @@ async function augmentLiveInputBlocks(blocks, input) {
           contextMessages: input.contextMessages,
           currentText: input.currentText,
         });
+        log.info("Added live input audio description", {
+          path: getMediaBlockPath(block),
+          modelId,
+          descriptionLength: description.length,
+        });
         augmented.push({ type: "text", text: `[Audio description: ${description}]` });
-      } catch {
+      } catch (error) {
+        log.warn("Live input audio transcription failed", {
+          path: getMediaBlockPath(block),
+          modelId,
+          error: errorToString(error),
+        });
         // Keep the canonical audio block when translation fails.
       }
       continue;

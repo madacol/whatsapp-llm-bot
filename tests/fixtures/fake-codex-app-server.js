@@ -255,6 +255,46 @@ async function handleMessage(parsed) {
           threadId: params.threadId,
           turn: { id: "fake-turn-1", status: "completed" },
         });
+      } else if (firstTextInput(params.input) === "stdin") {
+        const cwd = typeof params.cwd === "string" && params.cwd.length > 0 ? params.cwd : currentThreadCwd;
+        notify("item/started", {
+          threadId: params.threadId,
+          turnId: "fake-turn-1",
+          item: {
+            id: "stdin-command-1",
+            type: "commandExecution",
+            status: "inProgress",
+            command: "/bin/zsh -lc \"read answer; echo $answer\"",
+            cwd,
+            aggregatedOutput: null,
+            commandActions: [],
+          },
+        });
+        notify("item/commandExecution/terminalInteraction", {
+          threadId: params.threadId,
+          turnId: "fake-turn-1",
+          itemId: "stdin-command-1",
+          processId: "65440",
+          stdin: "yes\n",
+        });
+        notify("item/completed", {
+          threadId: params.threadId,
+          turnId: "fake-turn-1",
+          item: {
+            id: "stdin-command-1",
+            type: "commandExecution",
+            status: "completed",
+            command: "/bin/zsh -lc \"read answer; echo $answer\"",
+            cwd,
+            aggregatedOutput: "yes\n",
+            exitCode: 0,
+            commandActions: [],
+          },
+        });
+        notify("turn/completed", {
+          threadId: params.threadId,
+          turn: { id: "fake-turn-1", status: "completed" },
+        });
       }
       notify("thread/tokenUsage/updated", {
         threadId: params.threadId,

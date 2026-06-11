@@ -796,6 +796,375 @@ describe("createConversationRunner prompt formatting", () => {
     await firstHandled;
   });
 
+  it("starts a follow-up run when media live-input conversion loses the active-run race", async () => {
+    const chatId = "conv-live-input-media-race";
+    const harnessName = "adapter-live-input-media-race";
+    await seedChat(chatId, { enabled: true });
+    await updateChatConfig(chatId, (current) => ({
+      ...current,
+      harness: harnessName,
+      media_to_text_models: { audio: "audio/model" },
+      harness_config: {},
+    }));
+
+    const releaseFirstRun = createDeferredVoid();
+    /** @type {string[]} */
+    const phases = [];
+    /** @type {string[]} */
+    const injectedTexts = [];
+    let runCount = 0;
+    registerHarnessDriver({
+      name: harnessName,
+      supportsInstances: true,
+      createInstance: ({ instanceId, continuationKey }) => ({
+        harness: {
+          getName: () => harnessName,
+          getCapabilities: () => ({
+            supportsResume: true,
+            supportsCancel: true,
+            supportsLiveInput: true,
+            supportsApprovals: false,
+            supportsWorkdir: true,
+            supportsSandboxConfig: false,
+            supportsModelSelection: false,
+            supportsReasoningEffort: false,
+            supportsSessionFork: false,
+          }),
+          async run() {
+            assert.fail("semantic adapter should not use legacy run");
+          },
+          handleCommand: async () => false,
+          listSlashCommands: () => [],
+          createAdapter() {
+            return {
+              async startSession(input) {
+                return {
+                  chatId: input.chatId,
+                  harnessName,
+                  instanceId,
+                  continuationKey,
+                  status: "ready",
+                  resumeCursor: input.resumeCursor ?? null,
+                };
+              },
+              async sendTurn(input) {
+                runCount += 1;
+                phases.push(`run:${runCount}`);
+                if (runCount === 1) {
+                  await releaseFirstRun.promise;
+                }
+                return {
+                  response: [{ type: "text", text: `ok:${runCount}` }],
+                  messages: input.messages ?? [],
+                  usage: { promptTokens: 0, completionTokens: 0, cachedTokens: 0, cost: 0 },
+                };
+              },
+              interruptTurn: async () => false,
+              injectMessage: async (_chatId, text) => {
+                injectedTexts.push(text);
+                return false;
+              },
+              stopSession: async () => false,
+              listSessions: () => [],
+              rollbackThread: async () => null,
+              streamEvents: {
+                async *[Symbol.asyncIterator]() {},
+              },
+              subscribeEvents: () => () => {},
+            };
+          },
+        },
+      }),
+    });
+
+    const { createConversationRunner } = await import("../conversation/create-conversation-runner.js");
+    const runner = createConversationRunner({
+      store,
+      llmClient: /** @type {LlmClient} */ ({
+        chat: {
+          completions: {
+            create: async () => {
+              phases.push("transcribe");
+              releaseFirstRun.resolve();
+              await new Promise((resolve) => setTimeout(resolve, 10));
+              return {
+                choices: [{ message: { content: "spoken follow-up" } }],
+              };
+            },
+          },
+        },
+      }),
+    });
+
+    const firstTurn = createChatTurn({
+      chatId,
+      content: [{ type: "text", text: "first" }],
+    });
+    const firstHandled = runner.handleMessage(firstTurn.context);
+    await waitUntil(() => phases.includes("run:1"));
+
+    const secondTurn = createChatTurn({
+      chatId,
+      content: [{
+        type: "audio",
+        data: Buffer.from("fake audio bytes for stuck replay").toString("base64"),
+        encoding: "base64",
+        mime_type: "audio/mp3",
+      }],
+    });
+    await runner.handleMessage(secondTurn.context);
+    await firstHandled;
+
+    assert.deepEqual(injectedTexts, []);
+    assert.deepEqual(phases, ["run:1", "transcribe", "run:2"]);
+    assert.deepEqual(secondTurn.responses.map((response) => response.text), ["ok:2"]);
+  });
+
+  it("replays failed live input when the active harness turn stays pending", async () => {
+    const chatId = "conv-live-input-stuck-replay";
+    const harnessName = "adapter-live-input-stuck-replay";
+    await seedChat(chatId, { enabled: true });
+    await updateChatConfig(chatId, (current) => ({
+      ...current,
+      harness: harnessName,
+      harness_config: {},
+    }));
+
+    const releaseFirstRun = createDeferredVoid();
+    /** @type {string[]} */
+    const phases = [];
+    /** @type {string[]} */
+    const injectedTexts = [];
+    let runCount = 0;
+    registerHarnessDriver({
+      name: harnessName,
+      supportsInstances: true,
+      createInstance: ({ instanceId, continuationKey }) => ({
+        harness: {
+          getName: () => harnessName,
+          getCapabilities: () => ({
+            supportsResume: true,
+            supportsCancel: true,
+            supportsLiveInput: true,
+            supportsApprovals: false,
+            supportsWorkdir: true,
+            supportsSandboxConfig: false,
+            supportsModelSelection: false,
+            supportsReasoningEffort: false,
+            supportsSessionFork: false,
+          }),
+          async run() {
+            assert.fail("semantic adapter should not use legacy run");
+          },
+          handleCommand: async () => false,
+          listSlashCommands: () => [],
+          createAdapter() {
+            return {
+              async startSession(input) {
+                return {
+                  chatId: input.chatId,
+                  harnessName,
+                  instanceId,
+                  continuationKey,
+                  status: "ready",
+                  resumeCursor: input.resumeCursor ?? null,
+                };
+              },
+              async sendTurn(input) {
+                runCount += 1;
+                phases.push(`run:${runCount}`);
+                if (runCount === 1) {
+                  await releaseFirstRun.promise;
+                }
+                return {
+                  response: [{ type: "text", text: `ok:${runCount}` }],
+                  messages: input.messages ?? [],
+                  usage: { promptTokens: 0, completionTokens: 0, cachedTokens: 0, cost: 0 },
+                };
+              },
+              interruptTurn: async () => {
+                phases.push("interrupt");
+                releaseFirstRun.resolve();
+                return true;
+              },
+              injectMessage: async (_chatId, text) => {
+                phases.push("inject:false");
+                injectedTexts.push(text);
+                return false;
+              },
+              stopSession: async () => false,
+              listSessions: () => [],
+              rollbackThread: async () => null,
+              streamEvents: {
+                async *[Symbol.asyncIterator]() {},
+              },
+              subscribeEvents: () => () => {},
+            };
+          },
+        },
+      }),
+    });
+
+    const { createConversationRunner } = await import("../conversation/create-conversation-runner.js");
+    const runner = createConversationRunner({
+      store,
+      llmClient: /** @type {LlmClient} */ ({}),
+      liveInputFallbackDelayMs: 5,
+    });
+
+    const firstTurn = createChatTurn({
+      chatId,
+      content: [{ type: "text", text: "first" }],
+    });
+    const firstHandled = runner.handleMessage(firstTurn.context);
+    await waitUntil(() => phases.includes("run:1"));
+
+    const secondTurn = createChatTurn({
+      chatId,
+      content: [{ type: "text", text: "ready" }],
+    });
+    await runner.handleMessage(secondTurn.context);
+    await waitUntil(() => phases.includes("run:2"));
+
+    assert.deepEqual(injectedTexts, ["ready"]);
+    assert.deepEqual(phases, ["run:1", "inject:false", "interrupt", "run:2"]);
+    assert.deepEqual(secondTurn.responses.map((response) => response.text), ["ok:2"]);
+
+    releaseFirstRun.resolve();
+    await firstHandled;
+  });
+
+  it("replays failed media live input using the prebuilt transcript", async () => {
+    const chatId = "conv-live-input-media-stuck-replay";
+    const harnessName = "adapter-live-input-media-stuck-replay";
+    await seedChat(chatId, { enabled: true });
+    await updateChatConfig(chatId, (current) => ({
+      ...current,
+      harness: harnessName,
+      media_to_text_models: { audio: "audio/model" },
+      harness_config: {},
+    }));
+
+    const releaseFirstRun = createDeferredVoid();
+    /** @type {string[]} */
+    const phases = [];
+    /** @type {string[]} */
+    const inputs = [];
+    let runCount = 0;
+    registerHarnessDriver({
+      name: harnessName,
+      supportsInstances: true,
+      createInstance: ({ instanceId, continuationKey }) => ({
+        harness: {
+          getName: () => harnessName,
+          getCapabilities: () => ({
+            supportsResume: true,
+            supportsCancel: true,
+            supportsLiveInput: true,
+            supportsApprovals: false,
+            supportsWorkdir: true,
+            supportsSandboxConfig: false,
+            supportsModelSelection: false,
+            supportsReasoningEffort: false,
+            supportsSessionFork: false,
+          }),
+          async run() {
+            assert.fail("semantic adapter should not use legacy run");
+          },
+          handleCommand: async () => false,
+          listSlashCommands: () => [],
+          createAdapter() {
+            return {
+              async startSession(input) {
+                return {
+                  chatId: input.chatId,
+                  harnessName,
+                  instanceId,
+                  continuationKey,
+                  status: "ready",
+                  resumeCursor: input.resumeCursor ?? null,
+                };
+              },
+              async sendTurn(input) {
+                runCount += 1;
+                phases.push(`run:${runCount}`);
+                inputs.push(input.input ?? "");
+                if (runCount === 1) {
+                  await releaseFirstRun.promise;
+                }
+                return {
+                  response: [{ type: "text", text: `ok:${runCount}` }],
+                  messages: input.messages ?? [],
+                  usage: { promptTokens: 0, completionTokens: 0, cachedTokens: 0, cost: 0 },
+                };
+              },
+              interruptTurn: async () => {
+                phases.push("interrupt");
+                releaseFirstRun.resolve();
+                return true;
+              },
+              injectMessage: async () => {
+                phases.push("inject:false");
+                return false;
+              },
+              stopSession: async () => false,
+              listSessions: () => [],
+              rollbackThread: async () => null,
+              streamEvents: {
+                async *[Symbol.asyncIterator]() {},
+              },
+              subscribeEvents: () => () => {},
+            };
+          },
+        },
+      }),
+    });
+
+    const { createConversationRunner } = await import("../conversation/create-conversation-runner.js");
+    const runner = createConversationRunner({
+      store,
+      llmClient: /** @type {LlmClient} */ ({
+        chat: {
+          completions: {
+            create: async () => {
+              phases.push("transcribe");
+              return {
+                choices: [{ message: { content: "spoken replay" } }],
+              };
+            },
+          },
+        },
+      }),
+      liveInputFallbackDelayMs: 5,
+    });
+
+    const firstTurn = createChatTurn({
+      chatId,
+      content: [{ type: "text", text: "first" }],
+    });
+    const firstHandled = runner.handleMessage(firstTurn.context);
+    await waitUntil(() => phases.includes("run:1"));
+
+    const secondTurn = createChatTurn({
+      chatId,
+      content: [{
+        type: "audio",
+        data: Buffer.from("fake audio bytes").toString("base64"),
+        encoding: "base64",
+        mime_type: "audio/mp3",
+      }],
+    });
+    await runner.handleMessage(secondTurn.context);
+    await waitUntil(() => phases.includes("run:2"));
+
+    assert.deepEqual(phases, ["run:1", "transcribe", "inject:false", "interrupt", "run:2"]);
+    assert.match(inputs[1] ?? "", /spoken replay/);
+    assert.deepEqual(secondTurn.responses.map((response) => response.text), ["ok:2"]);
+
+    releaseFirstRun.resolve();
+    await firstHandled;
+  });
+
   it("runs command afterResponse hooks only after the command reply resolves", async () => {
     await seedChat("conv-command-after-response", { enabled: true });
     const { createConversationRunner } = await import("../conversation/create-conversation-runner.js");

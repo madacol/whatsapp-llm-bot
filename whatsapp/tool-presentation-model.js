@@ -20,7 +20,7 @@ export function shortenPath(p, cwd) {
 }
 
 /**
- * @typedef {"Read" | "Search" | "List" | "Plan" | "Search Web" | "Open Link" | "Find On Page" | "Run Command" | "Start Agent" | "Message Agent" | "Wait For Agent" | "Resume Agent" | "Close Agent" | "Run Parallel" | "Terminal Input"} ToolActivityTitle
+ * @typedef {"Read" | "Search" | "List" | "Plan" | "Search Web" | "Open Link" | "Find On Page" | "Run Command" | "Start Agent" | "Message Agent" | "Wait For Agent" | "Resume Agent" | "Close Agent" | "Run Parallel" | "stdin"} ToolActivityTitle
  */
 
 /**
@@ -492,7 +492,7 @@ function buildSdkPresentation(name, args, cwd) {
  * @param {((params: Record<string, unknown>) => string) | undefined} formatToolCall
  * @param {string | null | undefined} cwd
  * @param {{ oldContent?: string; startLine?: number } | undefined} context
- * @returns {ToolPresentation}
+ * @returns {ToolPresentation | null}
  */
 export function buildToolPresentation(name, args, formatToolCall, cwd, context) {
   const sdkPresentation = buildSdkPresentation(name, args, cwd);
@@ -586,12 +586,19 @@ export function buildToolPresentation(name, args, formatToolCall, cwd, context) 
     );
   }
 
-  if (name === "write_stdin") {
-    const chars = typeof args.chars === "string" && args.chars.length > 0 ? args.chars : null;
+  if (name === "write_stdin" || name === "stdin") {
+    const stdin = typeof args.stdin === "string" && args.stdin.length > 0
+      ? args.stdin
+      : typeof args.chars === "string" && args.chars.length > 0
+        ? args.chars
+        : null;
+    if (!stdin) {
+      return null;
+    }
     return createSimpleActivityPresentation(
-      "Terminal Input",
-      "Terminal Input",
-      chars ? `_${chars.length} char${chars.length === 1 ? "" : "s"}_` : undefined,
+      "stdin",
+      "stdin",
+      quoteForDisplay(stdin),
       "plain",
     );
   }

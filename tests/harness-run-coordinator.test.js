@@ -174,6 +174,34 @@ describe("createHarnessRunCoordinator", () => {
     assert.equal(coordinator.finishRun("chat-race"), null);
   });
 
+  it("prepares the latest failed live-input turn for replay on finish", async () => {
+    const liveInputTarget = {
+      supportsLiveInput: true,
+      injectMessage: async () => false,
+    };
+
+    const coordinator = createHarnessRunCoordinator({ liveInputRetryDelayMs: 50 });
+    await coordinator.beginRun({
+      turn: createTurn("chat-release", "first"),
+      userText: "first",
+      liveInputTarget,
+    });
+    coordinator.markRunActive("chat-release");
+    const firstFollowUp = createTurn("chat-release", "ready");
+    const latestFollowUp = createTurn("chat-release", "what's the command?");
+
+    await coordinator.beginRun({ turn: firstFollowUp, userText: "ready" });
+    await coordinator.beginRun({ turn: latestFollowUp, userText: "what's the command?" });
+
+    const replay = coordinator.preparePendingLiveInputReplay("chat-release", firstFollowUp);
+    assert.equal(replay?.turn, latestFollowUp);
+    assert.equal(replay?.text, "what's the command?");
+    const nextTurn = coordinator.finishRun("chat-release");
+    assert.equal(nextTurn?.content[0]?.type, "text");
+    assert.equal(nextTurn?.content[0]?.type === "text" ? nextTurn.content[0].text : "", "what's the command?");
+    assert.equal(coordinator.finishRun("chat-release"), null);
+  });
+
   it("returns the latest buffered turn after a non-live run finishes", async () => {
     const coordinator = createHarnessRunCoordinator();
     await coordinator.beginRun({

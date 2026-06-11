@@ -167,7 +167,7 @@ type ToolActivityTitle =
   | "Resume Agent"
   | "Close Agent"
   | "Run Parallel"
-  | "Terminal Input";
+  | "stdin";
 
 type ToolActivitySummary = {
   title: ToolActivityTitle;

@@ -98,13 +98,21 @@ export function createChatTurn(overrides = {}) {
         break;
       case "tool_call":
         source = "tool-call";
-        content = renderToolPresentationContent(buildToolPresentation(
+        const presentation = buildToolPresentation(
           event.toolCall.name,
           parseToolArgs(event.toolCall.arguments),
           typeof event.displaySummary === "string" ? () => event.displaySummary ?? "" : undefined,
           event.cwd ?? null,
           event.context,
-        ));
+        );
+        if (!presentation) {
+          return {
+            transportHandleId: `mock-handle-${responses.length}`,
+            update: async () => undefined,
+            setInspect: () => {},
+          };
+        }
+        content = renderToolPresentationContent(presentation);
         break;
       case "tool_activity":
         source = "tool-call";

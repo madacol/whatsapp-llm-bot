@@ -26,6 +26,7 @@ const SDK_PRESENTATION_TOOLS = new Set([
   "resume_agent",
   "close_agent",
   "parallel",
+  "stdin",
   "write_stdin",
 ]);
 
@@ -409,7 +410,8 @@ export function formatSdkToolCall(name, args, cwd) {
   if (!SDK_PRESENTATION_TOOLS.has(name)) {
     return null;
   }
-  return formatToolPresentationSummary(buildToolPresentation(name, args, undefined, cwd, undefined));
+  const presentation = buildToolPresentation(name, args, undefined, cwd, undefined);
+  return presentation ? formatToolPresentationSummary(presentation) : null;
 }
 
 /**
@@ -419,8 +421,12 @@ export function formatSdkToolCall(name, args, cwd) {
  * @returns {string | null}
  */
 export function formatToolInspectBody(name, args, output) {
+  const presentation = buildToolPresentation(name, args, undefined, undefined, undefined);
+  if (!presentation) {
+    return null;
+  }
   return formatToolPresentationInspect(
-    buildToolPresentation(name, args, undefined, undefined, undefined),
+    presentation,
     output,
   );
 }
@@ -431,10 +437,11 @@ export function formatToolInspectBody(name, args, output) {
  * @param {((params: Record<string, unknown>) => string) | undefined} [formatToolCall]
  * @param {string | null | undefined} [cwd]
  * @param {{ oldContent?: string; startLine?: number } | undefined} [context]
- * @returns {string}
+ * @returns {string | null}
  */
 export function getToolCallSummary(name, args, formatToolCall, cwd, context) {
-  return formatToolPresentationSummary(buildToolPresentation(name, args, formatToolCall, cwd, context));
+  const presentation = buildToolPresentation(name, args, formatToolCall, cwd, context);
+  return presentation ? formatToolPresentationSummary(presentation) : null;
 }
 
 /**
@@ -447,5 +454,6 @@ export function getToolCallSummary(name, args, formatToolCall, cwd, context) {
  * @returns {SendContent | null}
  */
 export function formatToolDisplay(name, args, formatToolCall, cwd, context) {
-  return formatToolPresentationDisplay(buildToolPresentation(name, args, formatToolCall, cwd, context));
+  const presentation = buildToolPresentation(name, args, formatToolCall, cwd, context);
+  return presentation ? formatToolPresentationDisplay(presentation) : null;
 }

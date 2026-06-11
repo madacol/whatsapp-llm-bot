@@ -16,6 +16,9 @@ import { formatCodexStatusForReply, readCodexCliStatus } from "./codex-cli-statu
 import { updateActiveHarnessConfig, getActiveHarnessConfig } from "../harness-config.js";
 import { contentEvent } from "../outbound-events.js";
 import { handleSessionControlCommand } from "../session-control-commands.js";
+import { createLogger } from "../logger.js";
+
+const log = createLogger("harness:acp");
 
 /** @type {HarnessCapabilities} */
 const ACP_HARNESS_CAPABILITIES = {
@@ -261,6 +264,13 @@ export function createAcpHarness(options = {}) {
       });
       return {
         async startSession({ chatId, runConfig, resumeCursor }) {
+          log.info("ACP adapter startSession", {
+            name,
+            chatId,
+            instanceId: input.instanceId,
+            resumeCursor: resumeCursor ?? null,
+            workdir: runConfig?.workdir ?? null,
+          });
           /** @type {HarnessRuntimeSession} */
           const session = {
             chatId,
@@ -279,6 +289,15 @@ export function createAcpHarness(options = {}) {
         async sendTurn(turn) {
           const turnId = turn.turnId ?? turn.chatId;
           const prompt = turn.input?.trim() || buildPrompt(turn.messages ?? []);
+          log.info("ACP adapter sendTurn starting", {
+            name,
+            chatId: turn.chatId,
+            instanceId: input.instanceId,
+            turnId,
+            promptLength: prompt.length,
+            messageCount: turn.messages?.length ?? 0,
+            resumeCursor: turn.resumeCursor ?? null,
+          });
           if (!prompt) {
             return {
               response: [{ type: "text", text: "No input message found." }],
@@ -311,6 +330,13 @@ export function createAcpHarness(options = {}) {
           const abortController = new AbortController();
           activeRuns.set(turn.chatId, { abortController, pendingRequests: new Map(), pendingUserInputs: new Map() });
           try {
+            log.info("ACP startAcpRun starting", {
+              name,
+              chatId: turn.chatId,
+              instanceId: input.instanceId,
+              turnId,
+              sessionId,
+            });
             const completed = await startAcpRun({
               ...commandSpec,
               prompt,
@@ -331,6 +357,14 @@ export function createAcpHarness(options = {}) {
               requestDecision: createActiveRequestDecision(turn.chatId),
               userInputDecision: createActiveUserInputDecision(turn.chatId),
               emitEvent: (event) => events.emit({ ...event, chatId: turn.chatId, turnId }),
+            });
+            log.info("ACP startAcpRun completed", {
+              name,
+              chatId: turn.chatId,
+              instanceId: input.instanceId,
+              turnId,
+              sessionId: completed.sessionId ?? sessionId ?? null,
+              responseBlocks: completed.result.response.length,
             });
             const ready = /** @type {HarnessRuntimeSession} */ ({
               ...running,
