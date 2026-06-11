@@ -25,9 +25,9 @@ If no command is given, the AI will handle the response.
 2. Clone this repo and run `index.js`
 
     ```bash
-    npm install
+    pnpm install
     export OPENAI_API_KEY=<your-openai-api-key>
-    node index.js
+    pnpm start
     ```
 
 3. While you scan the QR code for authentication, install these:
@@ -38,3 +38,17 @@ If no command is given, the AI will handle the response.
     ```
 
 4. Restart `index.js`
+
+## HTTP API Transport
+
+An optional HTTP API transport lets non-WhatsApp clients submit text turns to the same bot runtime and receive raw structured outbound events.
+
+It is disabled by default. Set `API_TRANSPORT_TOKEN` to enable it:
+
+```bash
+API_TRANSPORT_TOKEN=<shared bearer token>
+API_TRANSPORT_HOST=127.0.0.1
+API_TRANSPORT_PORT=3200
+```
+
+See [docs/api-transport.md](docs/api-transport.md) for endpoints, payloads, idempotency, `wait=true`, status lookup, and event streaming.
