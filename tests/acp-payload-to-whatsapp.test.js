@@ -512,10 +512,7 @@ describe("ACP payload to WhatsApp socket vertical slices", () => {
       "turn.started",
       "reasoning.updated",
     ]);
-    assert.equal(sent[2]?.msg.text, [
-      "💭 *LLM*  thinking",
-      "🔄 *ACP*  turn started",
-    ].join("\n"));
+    assert.equal(sent[2]?.msg.text, "💭 *LLM*  thinking");
     assert.deepEqual(trace.pinnedStatusDelivery.map((event) => [
       event.type,
       event.chatId,
@@ -623,10 +620,7 @@ describe("ACP payload to WhatsApp socket vertical slices", () => {
       content: { type: "text", text: "Inspecting status inputs" },
     }), {
       eventTypes: ["item.completed", "reasoning.updated"],
-      pinnedText: [
-        "💭 *LLM*  thinking",
-        "🔄 *ACP*  turn started",
-      ].join("\n"),
+      pinnedText: "💭 *LLM*  thinking",
     });
 
     assert.deepEqual(await sendAcpUpdate({
@@ -634,11 +628,7 @@ describe("ACP payload to WhatsApp socket vertical slices", () => {
       entries: [{ status: "in_progress", content: "Inspect execute update presentation path" }],
     }), {
       eventTypes: ["plan.updated"],
-      pinnedText: [
-        "📋 *PLAN*  *Plan*  _Working on: Inspect execute update presentation path_",
-        "💭 *LLM*  thinking",
-        "🔄 *ACP*  turn started",
-      ].join("\n"),
+      pinnedText: "📋 *PLAN*  *Plan*  _Working on: Inspect execute update presentation path_",
     });
 
     assert.deepEqual(await sendAcpUpdate({
@@ -650,12 +640,7 @@ describe("ACP payload to WhatsApp socket vertical slices", () => {
       rawInput: { pattern: "pin|pinned", path: "tests" },
     }), {
       eventTypes: ["tool.started"],
-      pinnedText: [
-        "🔧 *Search*  `pin|pinned` in *tests*",
-        "📋 *PLAN*  *Plan*  _Working on: Inspect execute update presentation path_",
-        "💭 *LLM*  thinking",
-        "🔄 *ACP*  turn started",
-      ].join("\n"),
+      pinnedText: "🔧 *Search*  `pin|pinned` in *tests*",
     });
 
     assert.deepEqual(await sendAcpUpdate({
@@ -665,12 +650,7 @@ describe("ACP payload to WhatsApp socket vertical slices", () => {
       rawOutput: { formatted_output: "tests/sendBlocks.test.js", exit_code: 0 },
     }), {
       eventTypes: ["tool.completed"],
-      pinnedText: [
-        "✅ *Search*  `pin|pinned` in *tests*",
-        "📋 *PLAN*  *Plan*  _Working on: Inspect execute update presentation path_",
-        "💭 *LLM*  thinking",
-        "🔄 *ACP*  turn started",
-      ].join("\n"),
+      pinnedText: "✅ *Search*  `pin|pinned` in *tests*",
     });
 
     assert.deepEqual(await sendAcpUpdate({
@@ -680,13 +660,7 @@ describe("ACP payload to WhatsApp socket vertical slices", () => {
       reason: "capacity",
     }), {
       eventTypes: ["model.rerouted"],
-      pinnedText: [
-        "🔀 *ACP*  model model-a -> model-b",
-        "✅ *Search*  `pin|pinned` in *tests*",
-        "📋 *PLAN*  *Plan*  _Working on: Inspect execute update presentation path_",
-        "💭 *LLM*  thinking",
-        "... +1 earlier events",
-      ].join("\n"),
+      pinnedText: "🔀 *ACP*  model model-a -> model-b",
     });
 
     assert.deepEqual(await sendAcpUpdate({
@@ -695,13 +669,7 @@ describe("ACP payload to WhatsApp socket vertical slices", () => {
       details: "mock config warning",
     }), {
       eventTypes: ["config.warning"],
-      pinnedText: [
-        "⚠️ *ACP*  Config fallback active",
-        "🔀 *ACP*  model model-a -> model-b",
-        "✅ *Search*  `pin|pinned` in *tests*",
-        "📋 *PLAN*  *Plan*  _Working on: Inspect execute update presentation path_",
-        "... +2 earlier events",
-      ].join("\n"),
+      pinnedText: "⚠️ *ACP*  Config fallback active",
     });
 
     assert.deepEqual(await sendAcpUpdate({
@@ -710,13 +678,7 @@ describe("ACP payload to WhatsApp socket vertical slices", () => {
       details: "mock runtime warning",
     }), {
       eventTypes: ["runtime.warning"],
-      pinnedText: [
-        "⚠️ *ACP*  Runtime warning sample",
-        "⚠️ *ACP*  Config fallback active",
-        "🔀 *ACP*  model model-a -> model-b",
-        "✅ *Search*  `pin|pinned` in *tests*",
-        "... +3 earlier events",
-      ].join("\n"),
+      pinnedText: "⚠️ *ACP*  Runtime warning sample",
     });
 
     assert.deepEqual(await sendAcpUpdate({
@@ -725,13 +687,7 @@ describe("ACP payload to WhatsApp socket vertical slices", () => {
       details: "mock runtime error",
     }), {
       eventTypes: ["runtime.error"],
-      pinnedText: [
-        "❌ *ACP*  Runtime error sample",
-        "⚠️ *ACP*  Runtime warning sample",
-        "⚠️ *ACP*  Config fallback active",
-        "🔀 *ACP*  model model-a -> model-b",
-        "... +4 earlier events",
-      ].join("\n"),
+      pinnedText: "❌ *ACP*  Runtime error sample",
     });
 
     assert.deepEqual(await sendAcpUpdate({
@@ -742,13 +698,7 @@ describe("ACP payload to WhatsApp socket vertical slices", () => {
       cost: { amount: 0.0012, currency: "USD" },
     }), {
       eventTypes: ["usage.updated"],
-      pinnedText: [
-        "📊 *USAGE*  cost 0.001200",
-        "❌ *ACP*  Runtime error sample",
-        "⚠️ *ACP*  Runtime warning sample",
-        "⚠️ *ACP*  Config fallback active",
-        "... +5 earlier events",
-      ].join("\n"),
+      pinnedText: "📊 *USAGE*  cost 0.001200",
     });
   });
 
@@ -808,10 +758,7 @@ describe("ACP payload to WhatsApp socket vertical slices", () => {
         kind: "tool-user-input",
         summary: "Sensitive mock operation",
       },
-    }), [
-      "⏳ *ACP*  approval needed: Sensitive mock operation",
-      "🔄 *ACP*  turn started",
-    ].join("\n"));
+    }), "⏳ *ACP*  approval needed: Sensitive mock operation");
 
     assert.equal(await sendRuntimeEvent({
       type: "request.resolved",
@@ -821,10 +768,7 @@ describe("ACP payload to WhatsApp socket vertical slices", () => {
         kind: "tool-user-input",
         summary: "selected:allow-once",
       },
-    }), [
-      "✅ *ACP*  approval resolved: Sensitive mock operation",
-      "🔄 *ACP*  turn started",
-    ].join("\n"));
+    }), "✅ *ACP*  approval resolved: Sensitive mock operation");
 
     assert.equal(await sendRuntimeEvent({
       type: "user-input.requested",
@@ -837,11 +781,7 @@ describe("ACP payload to WhatsApp socket vertical slices", () => {
           options: [{ label: "Conservative" }, { label: "Complete" }],
         }],
       },
-    }), [
-      "⏳ *ACP*  input needed: Migration Strategy",
-      "✅ *ACP*  approval resolved: Sensitive mock operation",
-      "🔄 *ACP*  turn started",
-    ].join("\n"));
+    }), "⏳ *ACP*  input needed: Migration Strategy");
 
     assert.equal(await sendRuntimeEvent({
       type: "user-input.resolved",
@@ -854,11 +794,7 @@ describe("ACP payload to WhatsApp socket vertical slices", () => {
           options: [{ label: "Conservative" }, { label: "Complete" }],
         }],
       },
-    }), [
-      "✅ *ACP*  input resolved: Migration Strategy",
-      "✅ *ACP*  approval resolved: Sensitive mock operation",
-      "🔄 *ACP*  turn started",
-    ].join("\n"));
+    }), "✅ *ACP*  input resolved: Migration Strategy");
 
     assert.equal(await sendRuntimeEvent({
       type: "command.started",
@@ -867,12 +803,7 @@ describe("ACP payload to WhatsApp socket vertical slices", () => {
         command: "node -e process.stdout.write('terminal ok')",
         status: "started",
       },
-    }), [
-      "🔧 *Shell*  `node -e process.stdout.write('terminal ok')`",
-      "✅ *ACP*  input resolved: Migration Strategy",
-      "✅ *ACP*  approval resolved: Sensitive mock operation",
-      "🔄 *ACP*  turn started",
-    ].join("\n"));
+    }), "🔧 *Shell*  `node -e process.stdout.write('terminal ok')`");
 
     assert.equal(await sendRuntimeEvent({
       type: "command.completed",
@@ -881,12 +812,7 @@ describe("ACP payload to WhatsApp socket vertical slices", () => {
         command: "node -e process.stdout.write('terminal ok')",
         status: "completed",
       },
-    }), [
-      "✅ *Shell*  `node -e process.stdout.write('terminal ok')`",
-      "✅ *ACP*  input resolved: Migration Strategy",
-      "✅ *ACP*  approval resolved: Sensitive mock operation",
-      "🔄 *ACP*  turn started",
-    ].join("\n"));
+    }), "✅ *Shell*  `node -e process.stdout.write('terminal ok')`");
 
     assert.equal(await sendRuntimeEvent({
       type: "file-change.completed",
@@ -897,13 +823,7 @@ describe("ACP payload to WhatsApp socket vertical slices", () => {
         source: "direct-write",
         cwd,
       },
-    }), [
-      "📝 *File*  `acp-fs-write.txt`",
-      "✅ *Shell*  `node -e process.stdout.write('terminal ok')`",
-      "✅ *ACP*  input resolved: Migration Strategy",
-      "✅ *ACP*  approval resolved: Sensitive mock operation",
-      "... +1 earlier events",
-    ].join("\n"));
+    }), "📝 *File*  `acp-fs-write.txt`");
   });
 
   it("suppresses ACP editing placeholders and renders the completed diff through Baileys", async () => {
