@@ -182,6 +182,12 @@ describe("ACP file changes", () => {
     const workdir = await fs.mkdtemp(path.join(os.tmpdir(), "acp-snapshot-ignore-"));
     await fs.mkdir(path.join(workdir, "logs"), { recursive: true });
     await fs.writeFile(path.join(workdir, "logs/raw-events.2026-06-04T14Z.ndjson"), "{}\n", "utf8");
+    await fs.mkdir(path.join(workdir, ".git", "objects"), { recursive: true });
+    await fs.writeFile(path.join(workdir, ".git", "objects", "ignored"), "git object\n", "utf8");
+    await fs.mkdir(path.join(workdir, "project", ".venv", "lib"), { recursive: true });
+    await fs.writeFile(path.join(workdir, "project", ".venv", "lib", "site.py"), "ignored = True\n", "utf8");
+    await fs.mkdir(path.join(workdir, "project", "__pycache__"), { recursive: true });
+    await fs.writeFile(path.join(workdir, "project", "__pycache__", "app.pyc"), "ignored\n", "utf8");
     await fs.mkdir(path.join(workdir, "src"), { recursive: true });
     await fs.writeFile(path.join(workdir, "src/app.js"), "export const value = 1;\n", "utf8");
 
@@ -189,6 +195,9 @@ describe("ACP file changes", () => {
 
     assert.ok(snapshot);
     assert.equal(snapshot.has(path.join(workdir, "logs/raw-events.2026-06-04T14Z.ndjson")), false);
+    assert.equal(snapshot.has(path.join(workdir, ".git", "objects", "ignored")), false);
+    assert.equal(snapshot.has(path.join(workdir, "project", ".venv", "lib", "site.py")), false);
+    assert.equal(snapshot.has(path.join(workdir, "project", "__pycache__", "app.pyc")), false);
     assert.equal(snapshot.has(path.join(workdir, "src/app.js")), true);
   });
 
