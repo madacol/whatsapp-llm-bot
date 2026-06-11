@@ -30,6 +30,7 @@ import { createHarnessSessionBindingService } from "./harness-session-binding.js
 
 const log = createLogger("conversation:runner");
 const NO_LIVE_INPUT_TARGET = Object.freeze({ supportsLiveInput: false });
+const DEFAULT_LIVE_INPUT_FALLBACK_DELAY_MS = 1500;
 /**
  * Type guard: checks that a content block is a text block.
  * @param {IncomingContentBlock} block
@@ -107,6 +108,56 @@ function isHarnessRuntimeEventForChat(event, chatId) {
  */
 function hasNonTextContent(content) {
   return content.some((block) => block.type !== "text");
+}
+
+/**
+ * @param {IncomingContentBlock[]} content
+ * @param {Map<string, number>} [counts]
+ * @returns {Map<string, number>}
+ */
+function collectContentTypeCounts(content, counts = new Map()) {
+  for (const block of content) {
+    counts.set(block.type, (counts.get(block.type) ?? 0) + 1);
+    if (block.type === "quote") {
+      collectContentTypeCounts(block.content, counts);
+    }
+  }
+  return counts;
+}
+
+/**
+ * @param {IncomingContentBlock[]} content
+ * @returns {string}
+ */
+function summarizeContentTypes(content) {
+  return [...collectContentTypeCounts(content)]
+    .map(([type, count]) => `${type}:${count}`)
+    .join(",");
+}
+
+/**
+ * @param {{ image?: string, audio?: string, video?: string, general?: string } | undefined} models
+ * @returns {string}
+ */
+function summarizeConfiguredMediaModels(models) {
+  return Object.entries(models ?? {})
+    .filter(([, value]) => typeof value === "string" && value.trim().length > 0)
+    .map(([key]) => key)
+    .join(",");
+}
+
+/**
+ * @param {boolean} visible
+ * @param {string} message
+ * @param {unknown} details
+ * @returns {void}
+ */
+function logInfoWhen(visible, message, details) {
+  if (visible) {
+    log.info(message, details);
+  } else {
+    log.debug(message, details);
+  }
 }
 
 /**
@@ -302,6 +353,7 @@ function resolveProviderLiveInputTarget(harnessInstance) {
  *   transport?: ChatTransport,
  *   workspacePresentation?: WorkspacePresentationPort,
  *   restartGate?: import("../restart-gate.js").RestartGate,
+ *   liveInputFallbackDelayMs?: number,
  * }} ConversationRunnerDeps
  */
 
@@ -310,7 +362,14 @@ function resolveProviderLiveInputTarget(harnessInstance) {
  * @param {ConversationRunnerDeps} deps
  * @returns {{ handleMessage: (turn: ChatTurn) => Promise<void> }}
  */
-export function createConversationRunner({ store, llmClient, restartCommandHandler, workspacePresentation, restartGate = defaultRestartGate }) {
+export function createConversationRunner({
+  store,
+  llmClient,
+  restartCommandHandler,
+  workspacePresentation,
+  restartGate = defaultRestartGate,
+  liveInputFallbackDelayMs = DEFAULT_LIVE_INPUT_FALLBACK_DELAY_MS,
+}) {
   const {
     addMessage,
     createChat,
@@ -378,12 +437,19 @@ export function createConversationRunner({ store, llmClient, restartCommandHandl
       return getTopLevelText(content);
     }
 
-    return buildLiveInputText({
+    const text = await buildLiveInputText({
       content,
       llmClient,
       mediaToTextModels: chatInfo?.media_to_text_models ?? {},
       db: getChatDb(chatId),
     });
+    log.info("Built pending live input text", {
+      chatId,
+      contentTypes: summarizeContentTypes(content),
+      mediaModelKeys: summarizeConfiguredMediaModels(chatInfo?.media_to_text_models),
+      textLength: text.length,
+    });
+    return text;
   }
 
   /**
@@ -396,6 +462,33 @@ export function createConversationRunner({ store, llmClient, restartCommandHandl
     while (nextTurn) {
       nextTurn = await handleSingleMessage(nextTurn);
     }
+  }
+
+  /**
+   * Replay a live-input message as a normal turn if provider steering stays
+   * unavailable after the active query already rejected it.
+   * @param {ChatTurn} turn
+   * @param {() => Promise<void>} interruptActiveTurn
+   * @returns {void}
+   */
+  function scheduleLiveInputReplay(turn, interruptActiveTurn) {
+    const timer = setTimeout(() => {
+      const replay = runCoordinator.preparePendingLiveInputReplay(turn.chatId, turn);
+      if (!replay) {
+        return;
+      }
+      void (async () => {
+        await interruptActiveTurn();
+        log.warn("Prepared buffered live input for replay after active run finalizes", {
+          chatId: turn.chatId,
+          textLength: replay.text.length,
+          originalContentTypes: summarizeContentTypes(replay.turn.content),
+        });
+      })().catch((error) => {
+        log.error("Failed to replay buffered live input:", error);
+      });
+    }, liveInputFallbackDelayMs);
+    timer.unref?.();
   }
 
   /**
@@ -479,6 +572,13 @@ export function createConversationRunner({ store, llmClient, restartCommandHandl
       });
     });
     try {
+      log.info("Provider adapter sendTurn starting", {
+        chatId,
+        provider: harness.getName(),
+        instanceId: harnessInstance.instanceId,
+        turnId,
+        resumeCursor: sessionBinding.getResumeCursor(),
+      });
       const result = await adapter.sendTurn({
         ...turnInput,
         chatId,
@@ -486,6 +586,13 @@ export function createConversationRunner({ store, llmClient, restartCommandHandl
         runConfig: turnInput.runConfig ?? runConfig,
         resumeCursor: sessionBinding.getResumeCursor(),
         hooks,
+      });
+      log.info("Provider adapter sendTurn completed", {
+        chatId,
+        provider: harness.getName(),
+        instanceId: harnessInstance.instanceId,
+        turnId,
+        responseBlocks: result.response.length,
       });
       await Promise.allSettled([...pendingEventHandlers]);
       await sessionBinding.syncFromAdapter(adapter, harness.getName());
@@ -533,6 +640,13 @@ export function createConversationRunner({ store, llmClient, restartCommandHandl
     const harnessName = harness.getName();
     const runConfig = buildRunConfig(chatId, chatInfo, turn.chatName, harnessName, resolvedBinding);
     const turnId = createHarnessRuntimeTurnId(chatId, ++harnessRuntimeTurnSequence);
+    log.info("Harness session begin starting", {
+      chatId,
+      harnessName,
+      instanceId: harnessInstance?.instanceId ?? null,
+      turnId,
+      workdir: runConfig.workdir ?? null,
+    });
     const activeSessionBinding = await sessionBinding.beginTurn({
       chatId,
       chatInfo,
@@ -540,6 +654,13 @@ export function createConversationRunner({ store, llmClient, restartCommandHandl
       harnessInstance,
       runConfig,
       turnId,
+    });
+    log.info("Harness session begin completed", {
+      chatId,
+      harnessName,
+      instanceId: harnessInstance?.instanceId ?? null,
+      turnId,
+      resumeCursor: activeSessionBinding.getResumeCursor(),
     });
 
     /** @type {Set<string>} */
@@ -568,24 +689,39 @@ export function createConversationRunner({ store, llmClient, restartCommandHandl
         deliveredContentSignatures,
       };
     }
+    log.info("Harness turn input build starting", {
+      chatId,
+      harnessName,
+      turnId,
+      bufferedTextCount: bufferedTexts.length,
+    });
+    const turnInput = await buildHarnessTurnInput({
+      chatId,
+      chatInfo,
+      context,
+      message,
+      persona,
+      llmClient,
+      getMessages,
+      harnessName,
+      runConfig,
+      bufferedTexts,
+    });
+    log.info("Harness turn input build completed", {
+      chatId,
+      harnessName,
+      turnId,
+      inputLength: turnInput.input?.length ?? 0,
+      messageCount: turnInput.messages?.length ?? 0,
+      attachmentCount: turnInput.attachments?.length ?? 0,
+    });
     const result = await runProviderTurnWithRuntimeEvents({
       chatId,
       harness,
       harnessInstance,
       hooks,
       runConfig,
-      turnInput: await buildHarnessTurnInput({
-        chatId,
-        chatInfo,
-        context,
-        message,
-        persona,
-        llmClient,
-        getMessages,
-        harnessName,
-        runConfig,
-        bufferedTexts,
-      }),
+      turnInput,
       turnId,
       sessionBinding: activeSessionBinding,
     });
@@ -622,7 +758,11 @@ export function createConversationRunner({ store, llmClient, restartCommandHandl
     const message = buildUserMessage(turn);
     await addMessage(chatId, message, senderIds);
 
-    log.debug("LLM will respond");
+    logInfoWhen(hasNonTextContent(content) || runCoordinator.hasPendingRun(chatId), "LLM will respond", {
+      chatId,
+      contentTypes: summarizeContentTypes(content),
+      hasPendingRun: runCoordinator.hasPendingRun(chatId),
+    });
 
     if (!harness) {
       await context.reply(contentEvent(
@@ -641,6 +781,13 @@ export function createConversationRunner({ store, llmClient, restartCommandHandl
       liveInputTarget: resolveProviderLiveInputTarget(harnessInstance),
       ownerKey: harnessOwnerKey,
     });
+    logInfoWhen(hasNonTextContent(content) || lifecycleDecision.status !== "started", "Harness run lifecycle decision", {
+      chatId,
+      status: lifecycleDecision.status,
+      reason: lifecycleDecision.reason ?? null,
+      userTextLength: userText.length,
+      contentTypes: summarizeContentTypes(content),
+    });
     if (lifecycleDecision.status === "buffered") {
       log.debug("Buffered message for pending harness run on chat", chatId);
       return null;
@@ -650,6 +797,43 @@ export function createConversationRunner({ store, llmClient, restartCommandHandl
       return null;
     }
 
+    return runStartedLlmMessage({
+      turn,
+      chatInfo,
+      context,
+      message,
+      persona,
+      harness,
+      harnessInstance,
+      resolvedBinding,
+    });
+  }
+
+  /**
+   * Run a chat turn after `runCoordinator.beginRun` has returned "started".
+   * @param {{
+   *   turn: ChatTurn,
+   *   chatInfo: import("../store.js").ChatRow | undefined,
+   *   context: ExecuteActionContext,
+   *   message: UserMessage,
+   *   persona: AgentDefinition | null,
+   *   harness: AgentHarness,
+   *   harnessInstance: ReturnType<typeof resolveHarnessInstance> | null,
+   *   resolvedBinding: ResolvedChatBinding,
+   * }} input
+   * @returns {Promise<ChatTurn | null>}
+   */
+  async function runStartedLlmMessage({
+    turn,
+    chatInfo,
+    context,
+    message,
+    persona,
+    harness,
+    harnessInstance,
+    resolvedBinding,
+  }) {
+    const { chatId } = turn;
     /** @type {ChatTurn | null} */
     let nextTurn = null;
     try {
@@ -672,6 +856,11 @@ export function createConversationRunner({ store, llmClient, restartCommandHandl
           }
         }
       }
+      logInfoWhen(hasNonTextContent(turn.content) || result.response.length === 0, "Harness run completed", {
+        chatId,
+        responseBlocks: result.response.length,
+        deliveredSignatures: deliveredContentSignatures.size,
+      });
     } catch (error) {
       sessionBinding.markError(chatId);
       log.error("handleLlmMessage failed:", error);
@@ -683,6 +872,11 @@ export function createConversationRunner({ store, llmClient, restartCommandHandl
       }
     } finally {
       nextTurn = runCoordinator.finishRun(chatId);
+      logInfoWhen(hasNonTextContent(turn.content) || nextTurn !== null, "Harness run finalized", {
+        chatId,
+        replayNextTurn: nextTurn !== null,
+        nextTurnContentTypes: nextTurn ? summarizeContentTypes(nextTurn.content) : null,
+      });
     }
 
     return nextTurn;
@@ -716,6 +910,19 @@ export function createConversationRunner({ store, llmClient, restartCommandHandl
       hasPendingRun: runCoordinator.hasPendingRun(chatId),
       shouldRespond: shouldRespond(chatInfo, turn.facts),
     });
+    const routeShouldLogInfo = hasNonTextContent(content)
+      || runCoordinator.hasPendingRun(chatId)
+      || route.type !== "harness-run";
+    logInfoWhen(routeShouldLogInfo, "Turn route decision", {
+      chatId,
+      route: route.type,
+      shouldRespond: "shouldRespond" in route ? route.shouldRespond : shouldRespond(chatInfo, turn.facts),
+      hasPendingRun: runCoordinator.hasPendingRun(chatId),
+      contentTypes: summarizeContentTypes(content),
+      firstTextLength: firstBlock?.text.length ?? 0,
+      addressedToBot: turn.facts.addressedToBot,
+      repliedToBot: turn.facts.repliedToBot,
+    });
 
     if (route.type === "archived-workspace-error") {
       await context.reply(contentEvent(
@@ -740,21 +947,72 @@ export function createConversationRunner({ store, llmClient, restartCommandHandl
     }
 
     if (route.type === "pending-followup") {
-      await addMessage(chatId, buildUserMessage(turn), senderIds);
       if (!route.shouldRespond) {
+        await addMessage(chatId, buildUserMessage(turn), senderIds);
         return null;
       }
       const harnessSelection = await resolveConversationHarnessSelection(chatInfo);
       const userText = await buildPendingRunInputText({ chatId, chatInfo, content });
+      if (!runCoordinator.hasPendingRun(chatId)) {
+        const { persona, harness, harnessInstance } = resolveConversationHarnessFromSelection(harnessSelection);
+        return handleLlmMessage({
+          turn,
+          chatInfo,
+          context,
+          persona,
+          harness,
+          harnessInstance,
+          harnessOwnerKey: harnessSelection.ownerKey,
+          resolvedBinding,
+        });
+      }
       const lifecycleDecision = await runCoordinator.beginRun({
         turn,
         userText,
+        liveInputTarget: NO_LIVE_INPUT_TARGET,
         ownerKey: harnessSelection.ownerKey,
       });
+      log.info("Pending follow-up lifecycle decision", {
+        chatId,
+        status: lifecycleDecision.status,
+        reason: lifecycleDecision.reason ?? null,
+        userTextLength: userText.length,
+        contentTypes: summarizeContentTypes(content),
+      });
       if (lifecycleDecision.status === "buffered") {
+        await addMessage(chatId, buildUserMessage(turn), senderIds);
         log.debug("Buffered message for pending harness run on chat", chatId);
+        if (lifecycleDecision.reason === "live-input-retry") {
+          scheduleLiveInputReplay(turn, async () => {
+            const { harnessInstance } = resolveConversationHarnessFromSelection(harnessSelection);
+            await harnessInstance?.adapter?.interruptTurn({ chatId });
+          });
+        }
       } else if (lifecycleDecision.status === "injected") {
+        await addMessage(chatId, buildUserMessage(turn), senderIds);
         log.debug("Injected message into active harness query for chat", chatId);
+      } else if (lifecycleDecision.status === "started") {
+        const { persona, harness, harnessInstance } = resolveConversationHarnessFromSelection(harnessSelection);
+        const message = buildUserMessage(turn);
+        await addMessage(chatId, message, senderIds);
+        if (!harness) {
+          await context.reply(contentEvent(
+            "error",
+            "No ACP harness is selected for this chat and the central default is disabled. Set one with `!s harness codex`.",
+          ));
+          runCoordinator.finishRun(chatId);
+          return null;
+        }
+        return runStartedLlmMessage({
+          turn,
+          chatInfo,
+          context,
+          message,
+          persona,
+          harness,
+          harnessInstance,
+          resolvedBinding,
+        });
       }
       return null;
     }

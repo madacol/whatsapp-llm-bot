@@ -237,6 +237,60 @@ async function runAcpMockProcessToWhatsApp() {
 }
 
 describe("ACP payload to WhatsApp socket vertical slices", () => {
+  it("renders Codex terminal interaction payloads as stdin rows", async () => {
+    const { sent, trace } = await observeAcpPayloadSliceToBaileys([
+      {
+        sessionId: "s1",
+        update: {
+          sessionUpdate: "tool_call",
+          toolCallId: "terminal-interaction:stdin-command-1",
+          kind: "other",
+          title: "stdin",
+          status: "completed",
+          rawInput: {
+            stdin: "yes\n",
+            payload: {
+              threadId: "fake-thread-1",
+              turnId: "fake-turn-1",
+              itemId: "stdin-command-1",
+              processId: "65440",
+              stdin: "yes\n",
+            },
+            itemId: "stdin-command-1",
+          },
+        },
+      },
+    ]);
+
+    assert.deepEqual(trace.runtimeEvents.map((event) => event.type), ["tool.completed"]);
+    assert.equal(String(sent[0]?.msg.text ?? ""), "✅ *stdin*  \"yes\\n\"");
+  });
+
+  it("does not render stdin payloads when stdin text is empty", async () => {
+    const { sent, trace } = await observeAcpPayloadSliceToBaileys([
+      {
+        sessionId: "s1",
+        update: {
+          sessionUpdate: "tool_call",
+          toolCallId: "terminal-interaction:stdin-command-1",
+          kind: "other",
+          title: "stdin",
+          status: "completed",
+          rawInput: {
+            stdin: "",
+            payload: {
+              itemId: "stdin-command-1",
+              input: "yes\n",
+            },
+          },
+        },
+      },
+    ]);
+
+    assert.deepEqual(trace.runtimeEvents.map((event) => event.type), ["tool.completed"]);
+    assert.equal(sent.length, 0, JSON.stringify(sent));
+  });
+
   it("renders raw ACP tool lifecycle payloads as compact Baileys messages by default", async () => {
     const { sent, trace } = await observeAcpPayloadSliceToBaileys([
       {

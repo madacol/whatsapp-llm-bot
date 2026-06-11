@@ -8,6 +8,7 @@
 /**
  * @typedef {{
  *   status: "started" | "buffered" | "injected";
+ *   reason?: "pending-setup" | "active-run" | "live-input-retry";
  * }} HarnessRunDecision
  */
 
@@ -53,6 +54,7 @@
  *   hasPendingRun: (chatId: string) => boolean,
  *   markRunActive: (chatId: string) => void,
  *   consumeBufferedTexts: (chatId: string) => string[],
+ *   preparePendingLiveInputReplay: (chatId: string, turn: ChatTurn) => { turn: ChatTurn, text: string } | null,
  *   finishRun: (chatId: string) => ChatTurn | null,
  * }}
  * @param {HarnessRunCoordinatorOptions} [options]
@@ -164,18 +166,18 @@ export function createHarnessRunCoordinator(options = {}) {
             return { status: "injected" };
           }
           queueLiveInputRetry(chatId, pending, userText, turn, pending.liveInputTarget);
-          return { status: "buffered" };
+          return { status: "buffered", reason: "live-input-retry" };
         }
         if (pending.isActive) {
           pending.queuedTurns.push(turn);
-          return { status: "buffered" };
+          return { status: "buffered", reason: "active-run" };
         }
         if (sameOwner && userText) {
           pending.bufferedTexts.push(userText);
         } else {
           pending.queuedTurns.push(turn);
         }
-        return { status: "buffered" };
+        return { status: "buffered", reason: "pending-setup" };
       }
 
       if (!liveInputTarget) {
@@ -214,15 +216,38 @@ export function createHarnessRunCoordinator(options = {}) {
       return bufferedTexts;
     },
 
+    preparePendingLiveInputReplay(chatId, turn) {
+      const pending = pendingRuns.get(chatId);
+      if (!pending) {
+        return null;
+      }
+      const pendingInput = pending.pendingLiveInputs.find((liveInput) => liveInput.turn === turn);
+      if (!pendingInput) {
+        return null;
+      }
+
+      const latestInput = pending.pendingLiveInputs.at(-1) ?? pendingInput;
+      if (pending.liveInputRetryTimer) {
+        clearTimeout(pending.liveInputRetryTimer);
+        pending.liveInputRetryTimer = null;
+      }
+      pending.pendingLiveInputs.length = 0;
+      pending.pendingLiveInputs.push(latestInput);
+      return { turn: latestInput.turn, text: latestInput.text };
+    },
+
     finishRun(chatId) {
       const pending = pendingRuns.get(chatId);
       if (!pending) {
         return null;
       }
 
-      const nextTurn = pending.queuedTurns.at(-1)
-        ?? pending.pendingLiveInputs.at(-1)?.turn
-        ?? null;
+      const queuedTurn = pending.queuedTurns.at(-1) ?? null;
+      const pendingLiveInput = pending.pendingLiveInputs.at(-1) ?? null;
+      const nextTurn = queuedTurn
+        ?? (pendingLiveInput
+          ? { ...pendingLiveInput.turn, content: [{ type: "text", text: pendingLiveInput.text }] }
+          : null);
       if (!nextTurn) {
         clearLiveInputRetry(pending);
         pendingRuns.delete(chatId);

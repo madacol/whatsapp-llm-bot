@@ -20,6 +20,12 @@ import { createHarnessRuntimeEventDispatcher } from "./harness-runtime-event-dis
 import { getSandboxEscapeRequest } from "./sandbox-approval.js";
 import { requestSandboxEscapeApproval } from "./sandbox-approval-coordinator.js";
 import { matchProtectedPath, requestProtectedPathApproval, restoreProtectedPath } from "./protected-paths.js";
+import { createLogger } from "../logger.js";
+
+const log = createLogger("harness:acp-runner");
+const ACP_HANDSHAKE_TIMEOUT_MS = 30_000;
+const ACP_SESSION_REQUEST_TIMEOUT_MS = 30_000;
+const ACP_PROMPT_TIMEOUT_MS = 20 * 60_000;
 
 /**
  * @typedef {{
@@ -1002,7 +1008,7 @@ async function applySessionConfigOptions(input) {
       configId: option.id,
       ...(typeof value === "boolean" ? { type: "boolean" } : {}),
       value,
-    });
+    }, { timeoutMs: ACP_SESSION_REQUEST_TIMEOUT_MS });
   }
   for (const [configId, desired] of Object.entries(customConfigValues)) {
     if (desired === null || desired === undefined) {
@@ -1021,7 +1027,7 @@ async function applySessionConfigOptions(input) {
       configId: option.id,
       ...(typeof value === "boolean" ? { type: "boolean" } : {}),
       value,
-    });
+    }, { timeoutMs: ACP_SESSION_REQUEST_TIMEOUT_MS });
   }
 }
 
@@ -1197,6 +1203,11 @@ async function handlePromptUsage(input, runtimeDispatcher, promptResult) {
  * @returns {Promise<{ connection: Awaited<ReturnType<typeof openAcpConnection>>, capabilities: Record<string, unknown> }>}
  */
 async function openInitializedAcpConnection(input, handleRequest = async () => ({})) {
+  log.info("Opening ACP connection", {
+    command: input.command,
+    args: input.args ?? [],
+    workdir: input.runConfig?.workdir ?? null,
+  });
   const connection = await openAcpConnection({
     command: input.command,
     args: input.args,
@@ -1204,6 +1215,10 @@ async function openInitializedAcpConnection(input, handleRequest = async () => (
     env: input.env,
     signal: input.signal,
     handleRequest,
+  });
+  log.info("ACP initialize request starting", {
+    command: input.command,
+    workdir: input.runConfig?.workdir ?? null,
   });
   const initializeResult = await connection.sendRequest("initialize", {
     protocolVersion: 1,
@@ -1213,10 +1228,15 @@ async function openInitializedAcpConnection(input, handleRequest = async () => (
       version: "1.0.0",
     },
     clientCapabilities: buildClientCapabilities(),
+  }, { timeoutMs: ACP_HANDSHAKE_TIMEOUT_MS });
+  const capabilities = readAgentCapabilities(initializeResult);
+  log.info("ACP initialize request completed", {
+    command: input.command,
+    capabilityKeys: Object.keys(capabilities).join(","),
   });
   return {
     connection,
-    capabilities: readAgentCapabilities(initializeResult),
+    capabilities,
   };
 }
 
@@ -1268,6 +1288,11 @@ export async function rollbackAcpSession(input) {
  * @returns {Promise<{ result: AgentResult, sessionId: string | null, capabilities: Record<string, unknown> }>}
  */
 export async function startAcpRun(input) {
+  log.info("ACP runner startAcpRun entered", {
+    sessionId: input.sessionId ?? null,
+    promptLength: input.prompt.length,
+    workdir: input.runConfig?.workdir ?? null,
+  });
   const hooks = { ...DEFAULT_ACP_HOOKS, ...input.hooks };
   const runtimeHooks = input.dispatchRuntimeEventsToHooks === false
     ? {}
@@ -1281,7 +1306,16 @@ export async function startAcpRun(input) {
     },
     workdir: input.runConfig?.workdir ?? null,
   });
+  const beforeSnapshotStartedAt = Date.now();
+  log.info("ACP before workdir snapshot starting", {
+    workdir: input.runConfig?.workdir ?? null,
+  });
   const beforeSnapshot = await snapshotAcpWorkdir(input.runConfig?.workdir);
+  log.info("ACP before workdir snapshot completed", {
+    workdir: input.runConfig?.workdir ?? null,
+    fileCount: beforeSnapshot?.size ?? 0,
+    durationMs: Date.now() - beforeSnapshotStartedAt,
+  });
   /** @type {Set<string>} */
   const emittedFileChangePaths = new Set();
   /** @type {Set<string>} */
@@ -1380,35 +1414,56 @@ export async function startAcpRun(input) {
   try {
     if (sessionId) {
       if (hasAcpSessionCapability(capabilities, "resume")) {
+        log.info("ACP session/resume request starting", { sessionId });
         const resumed = await connection.sendRequest("session/resume", {
           sessionId,
           ...buildSessionParams(input.runConfig),
-        });
+        }, { timeoutMs: ACP_SESSION_REQUEST_TIMEOUT_MS });
         sessionId = readSessionId(resumed) ?? sessionId;
         configOptions = extractConfigOptions(resumed);
+        log.info("ACP session/resume request completed", { sessionId });
       } else if (supportsAcpLoadSession(capabilities)) {
+        log.info("ACP session/load request starting", { sessionId });
         const loaded = await connection.sendRequest("session/load", {
           sessionId,
           ...buildSessionParams(input.runConfig),
-        });
+        }, { timeoutMs: ACP_SESSION_REQUEST_TIMEOUT_MS });
         sessionId = readSessionId(loaded) ?? sessionId;
         configOptions = extractConfigOptions(loaded);
+        log.info("ACP session/load request completed", { sessionId });
       } else {
         throw new Error(`ACP agent does not advertise required session resume capability: ${JSON.stringify(buildCapabilityErrorDetails(capabilities))}`);
       }
     } else {
-      const created = await connection.sendRequest("session/new", buildSessionParams(input.runConfig));
+      log.info("ACP session/new request starting");
+      const created = await connection.sendRequest(
+        "session/new",
+        buildSessionParams(input.runConfig),
+        { timeoutMs: ACP_SESSION_REQUEST_TIMEOUT_MS },
+      );
       sessionId = readSessionId(created);
       configOptions = extractConfigOptions(created);
+      log.info("ACP session/new request completed", { sessionId });
     }
+    log.info("ACP session config apply starting", {
+      sessionId,
+      configOptionCount: configOptions.length,
+    });
     await applySessionConfigOptions({ connection, sessionId, configOptions, runConfig: input.runConfig });
+    log.info("ACP session config apply completed", { sessionId });
     unregisterActiveRun = input.onActiveRun?.({ connection, sessionId, capabilities });
 
+    log.info("ACP session/prompt request starting", {
+      sessionId,
+      promptLength: input.prompt.length,
+      attachmentCount: input.attachments?.length ?? 0,
+    });
     const promptResult = await connection.sendRequest("session/prompt", {
       ...(sessionId ? { sessionId } : {}),
       prompt: await buildAcpPromptContent(input.prompt, input.attachments, input.runConfig?.workdir),
-    });
+    }, { timeoutMs: ACP_PROMPT_TIMEOUT_MS });
     sessionId = readSessionId(promptResult) ?? sessionId;
+    log.info("ACP session/prompt request completed", { sessionId });
     await handlePromptUsage(input, runtimeDispatcher, promptResult);
     unregisterActiveRun?.();
     unregisterActiveRun = undefined;
@@ -1418,7 +1473,16 @@ export async function startAcpRun(input) {
     for (const event of runtimeModel.flushAssistantSegment()) {
       await emitRuntimeEvent(event);
     }
+    const afterSnapshotStartedAt = Date.now();
+    log.info("ACP after workdir snapshot starting", {
+      workdir: input.runConfig?.workdir ?? null,
+    });
     const afterSnapshot = await snapshotAcpWorkdir(input.runConfig?.workdir);
+    log.info("ACP after workdir snapshot completed", {
+      workdir: input.runConfig?.workdir ?? null,
+      fileCount: afterSnapshot?.size ?? 0,
+      durationMs: Date.now() - afterSnapshotStartedAt,
+    });
     const snapshotFileChanges = collectAcpSnapshotFileChanges({
       before: beforeSnapshot,
       after: afterSnapshot,

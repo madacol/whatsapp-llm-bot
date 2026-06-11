@@ -50,7 +50,7 @@ const ACP_PROTOCOL_LOG_BASE_PATH = path.join(LOGS_DIR, "acp.ndjson");
 /**
  * @typedef {{
  *   proc: import("node:child_process").ChildProcessWithoutNullStreams,
- *   sendRequest: (method: string, params?: Record<string, unknown>) => Promise<unknown>,
+ *   sendRequest: (method: string, params?: Record<string, unknown>, options?: { timeoutMs?: number }) => Promise<unknown>,
  *   sendNotification: (method: string, params?: Record<string, unknown>) => void,
  *   notifications: AsyncGenerator<Record<string, unknown>>,
  *   close: () => Promise<void>,
@@ -136,6 +136,15 @@ function jsonRpcErrorCode(error) {
     return error.code;
   }
   return -32000;
+}
+
+/**
+ * @param {string} method
+ * @param {number} timeoutMs
+ * @returns {Error}
+ */
+function createRequestTimeoutError(method, timeoutMs) {
+  return new Error(`ACP request timed out after ${timeoutMs}ms: ${method}`);
 }
 
 /**
@@ -437,11 +446,38 @@ export async function openAcpConnection(options) {
 
   return {
     proc,
-    sendRequest(method, params = {}) {
+    sendRequest(method, params = {}, options = /** @type {{ timeoutMs?: number }} */ ({})) {
       const id = nextRequestId;
       nextRequestId += 1;
       return new Promise((resolve, reject) => {
-        pendingRequests.set(id, { method, resolve, reject });
+        /** @type {NodeJS.Timeout | undefined} */
+        let timer;
+        const clearRequestTimer = () => {
+          if (timer) {
+            clearTimeout(timer);
+            timer = undefined;
+          }
+        };
+        pendingRequests.set(id, {
+          method,
+          resolve: (value) => {
+            clearRequestTimer();
+            resolve(value);
+          },
+          reject: (error) => {
+            clearRequestTimer();
+            reject(error);
+          },
+        });
+        if (typeof options.timeoutMs === "number" && Number.isFinite(options.timeoutMs) && options.timeoutMs > 0) {
+          timer = setTimeout(() => {
+            if (!pendingRequests.delete(id)) {
+              return;
+            }
+            reject(createRequestTimeoutError(method, options.timeoutMs ?? 0));
+          }, options.timeoutMs);
+          timer.unref?.();
+        }
         send({ id, method, params });
       });
     },
