@@ -41,6 +41,9 @@ export default {
   get memory_threshold() { return parseFloat(process.env.MEMORY_THRESHOLD || "") || 0.68; },
   get html_server_port() { return parseInt(process.env.HTML_SERVER_PORT || "3100", 10); },
   get html_server_base_url() { return process.env.HTML_SERVER_BASE_URL || ""; },
+  get api_transport_token() { return process.env.API_TRANSPORT_TOKEN || ""; },
+  get api_transport_host() { return process.env.API_TRANSPORT_HOST || "127.0.0.1"; },
+  get api_transport_port() { return parseInt(process.env.API_TRANSPORT_PORT || "3200", 10); },
 
   get smtp_host() { return process.env.SMTP_HOST || ""; },
   get smtp_port() { return parseInt(process.env.SMTP_PORT || "587", 10); },
