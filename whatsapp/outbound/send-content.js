@@ -2275,36 +2275,21 @@ function renderPinnedStatusLine(entry) {
 }
 
 /**
+ * @param {string} text
+ * @returns {string}
+ */
+function truncatePinnedStatusLine(text) {
+  const firstLine = text.split(/\r?\n/, 1)[0] ?? "";
+  return firstLine.length > 100 ? `${firstLine.slice(0, 97)}...` : firstLine;
+}
+
+/**
  * @param {Array<{ key: string, icon: string, provider?: string, summary: string }>} entries
  * @returns {string}
  */
 function renderPinnedTurnStatusText(entries) {
-  const hiddenCount = Math.max(0, entries.length - 4);
-  const visibleEntries = hiddenCount > 0 ? entries.slice(-4).reverse() : [...entries].reverse();
-  return [
-    ...visibleEntries.map(renderPinnedStatusLine),
-    ...(hiddenCount > 0 ? [`... +${hiddenCount} earlier events`] : []),
-  ].join("\n");
-}
-
-/**
- * @param {Array<{ key: string, icon: string, provider?: string, summary: string }>} entries
- * @returns {string}
- */
-function renderPinnedTurnStatusInspectText(entries) {
-  return [...entries].reverse().map(renderPinnedStatusLine).join("\n");
-}
-
-/**
- * @param {{ handle?: MessageHandle, entries: Array<{ key: string, icon: string, provider?: string, summary: string }> }} state
- * @returns {void}
- */
-function updatePinnedTurnStatusInspect(state) {
-  state.handle?.setInspect({
-    kind: "text",
-    text: renderPinnedTurnStatusInspectText(state.entries),
-    persistOnInspect: true,
-  });
+  const latestEntry = entries.at(-1);
+  return latestEntry ? truncatePinnedStatusLine(renderPinnedStatusLine(latestEntry)) : "";
 }
 
 /**
@@ -2663,7 +2648,6 @@ async function updatePinnedTurnStatus(sock, chatId, event, options, reactionRunt
     }
   }
 
-  updatePinnedTurnStatusInspect(state);
   if (presentation.closesStatus) {
     await unpinWhatsAppMessage(sock, chatId, state.handle?.messageKey, sendOptions.pinnedStatusDeliveryObserver);
     turnStatusByChat.delete(chatId);

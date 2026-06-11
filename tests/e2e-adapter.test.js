@@ -669,8 +669,8 @@ describe("ACP runtime events through WhatsApp transport", () => {
 
     assert.ok(rendered.some((text) => text.includes("Action-focused status done.")), `Expected final assistant output, got ${JSON.stringify(rendered)}`);
     assert.ok(finalStatus.startsWith("✅ *Shell*  `pnpm exec node scripts/acp-adapter-smoke.js codex --prompt`"), `Expected latest status on first pinned line, got ${JSON.stringify(statusTexts)}`);
-    assert.ok(finalStatus.includes("✅ *Search*  `smoke|e2e|baileys|whatsapp|pin|pinned|ACP` in *package.json*"), `Expected action-focused Search row, got ${JSON.stringify(statusTexts)}`);
     assert.ok(finalStatus.includes("✅ *Shell*  `pnpm exec node scripts/acp-adapter-smoke.js codex --prompt`"), `Expected normalized successful Shell row, got ${JSON.stringify(statusTexts)}`);
+    assert.ok(!finalStatus.includes("✅ *Search*"), `Pinned status should only show latest line, got ${finalStatus}`);
     assert.ok(!finalStatus.includes("*ACP*  *Search*"), `Pinned Search row should not include ACP provider noise: ${finalStatus}`);
     assert.ok(!finalStatus.includes("*ACP*  *Shell*"), `Pinned Shell row should not include ACP provider noise: ${finalStatus}`);
     assert.ok(!finalStatus.includes("/bin/zsh -lc"), `Pinned Shell row should unwrap shell invocation: ${finalStatus}`);
