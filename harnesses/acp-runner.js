@@ -1461,7 +1461,7 @@ export async function startAcpRun(input) {
     const promptResult = await connection.sendRequest("session/prompt", {
       ...(sessionId ? { sessionId } : {}),
       prompt: await buildAcpPromptContent(input.prompt, input.attachments, input.runConfig?.workdir),
-    }, { timeoutMs: ACP_PROMPT_TIMEOUT_MS });
+    }, { timeoutMs: ACP_PROMPT_TIMEOUT_MS, refreshOnActivity: true });
     sessionId = readSessionId(promptResult) ?? sessionId;
     log.info("ACP session/prompt request completed", { sessionId });
     await handlePromptUsage(input, runtimeDispatcher, promptResult);

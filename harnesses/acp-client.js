@@ -15,7 +15,12 @@ const LOGS_DIR = path.join(REPO_ROOT, "logs");
 const ACP_PROTOCOL_LOG_BASE_PATH = path.join(LOGS_DIR, "acp.ndjson");
 
 /**
- * @typedef {{ method: string, resolve: (value: unknown) => void, reject: (error: Error) => void }} PendingRequest
+ * @typedef {{
+ *   method: string,
+ *   resolve: (value: unknown) => void,
+ *   reject: (error: Error) => void,
+ *   refreshTimeout?: () => void,
+ * }} PendingRequest
  */
 
 /**
@@ -50,7 +55,7 @@ const ACP_PROTOCOL_LOG_BASE_PATH = path.join(LOGS_DIR, "acp.ndjson");
 /**
  * @typedef {{
  *   proc: import("node:child_process").ChildProcessWithoutNullStreams,
- *   sendRequest: (method: string, params?: Record<string, unknown>, options?: { timeoutMs?: number }) => Promise<unknown>,
+ *   sendRequest: (method: string, params?: Record<string, unknown>, options?: { timeoutMs?: number, refreshOnActivity?: boolean }) => Promise<unknown>,
  *   sendNotification: (method: string, params?: Record<string, unknown>) => void,
  *   notifications: AsyncGenerator<Record<string, unknown>>,
  *   close: () => Promise<void>,
@@ -379,6 +384,15 @@ export async function openAcpConnection(options) {
     pending.reject(new Error(message));
   }
 
+  /**
+   * @returns {void}
+   */
+  function refreshActivityTimeouts() {
+    for (const pending of pendingRequests.values()) {
+      pending.refreshTimeout?.();
+    }
+  }
+
   const readLoop = (async () => {
     try {
       for await (const line of rl) {
@@ -393,6 +407,7 @@ export async function openAcpConnection(options) {
           log.error("Failed to parse ACP message:", error, line);
           continue;
         }
+        refreshActivityTimeouts();
         logAcpProtocolMessage(protocolLogger, "agent_to_client", message);
 
         if (typeof message.id === "number" && !("method" in message)) {
@@ -446,17 +461,33 @@ export async function openAcpConnection(options) {
 
   return {
     proc,
-    sendRequest(method, params = {}, options = /** @type {{ timeoutMs?: number }} */ ({})) {
+    sendRequest(method, params = {}, options = /** @type {{ timeoutMs?: number, refreshOnActivity?: boolean }} */ ({})) {
       const id = nextRequestId;
       nextRequestId += 1;
       return new Promise((resolve, reject) => {
         /** @type {NodeJS.Timeout | undefined} */
         let timer;
+        const timeoutMs = typeof options.timeoutMs === "number" && Number.isFinite(options.timeoutMs) && options.timeoutMs > 0
+          ? options.timeoutMs
+          : null;
         const clearRequestTimer = () => {
           if (timer) {
             clearTimeout(timer);
             timer = undefined;
           }
+        };
+        const armRequestTimer = () => {
+          if (!timeoutMs) {
+            return;
+          }
+          clearRequestTimer();
+          timer = setTimeout(() => {
+            if (!pendingRequests.delete(id)) {
+              return;
+            }
+            reject(createRequestTimeoutError(method, timeoutMs));
+          }, timeoutMs);
+          timer.unref?.();
         };
         pendingRequests.set(id, {
           method,
@@ -468,16 +499,9 @@ export async function openAcpConnection(options) {
             clearRequestTimer();
             reject(error);
           },
+          ...(options.refreshOnActivity ? { refreshTimeout: armRequestTimer } : {}),
         });
-        if (typeof options.timeoutMs === "number" && Number.isFinite(options.timeoutMs) && options.timeoutMs > 0) {
-          timer = setTimeout(() => {
-            if (!pendingRequests.delete(id)) {
-              return;
-            }
-            reject(createRequestTimeoutError(method, options.timeoutMs ?? 0));
-          }, options.timeoutMs);
-          timer.unref?.();
-        }
+        armRequestTimer();
         send({ id, method, params });
       });
     },
