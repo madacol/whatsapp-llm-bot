@@ -2382,6 +2382,9 @@ function formatPinnedRuntimeStatusPresentation(event, state) {
       return null;
     }
     const displayTool = buildWhatsAppRuntimeToolFromRawAcp(runtimeEvent.tool, event);
+    if (formatRuntimeToolSummary(displayTool, event.cwd)) {
+      return null;
+    }
     if (isLowSignalPinnedRuntimeTool(displayTool)) {
       return null;
     }
@@ -2410,15 +2413,7 @@ function formatPinnedRuntimeStatusPresentation(event, state) {
     || runtimeEvent.type === "command.completed"
     || runtimeEvent.type === "command.failed"
   ) {
-    if (!state) {
-      return null;
-    }
-    const command = normalizePinnedShellCommand(runtimeEvent.command.command);
-    return {
-      key: `command:${command}`,
-      icon: getRuntimeCommandIcon(runtimeEvent.command.status),
-      summary: formatRuntimeCommandSummary(command),
-    };
+    return null;
   }
 
   if (runtimeEvent.type === "file-change.completed") {

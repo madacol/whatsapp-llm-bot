@@ -908,7 +908,6 @@ describe("sendEvent – runtime events", () => {
     ]), [
       ["status.created", chatId, "msg-1", "🔄 *CODEX*  turn started", undefined],
       ["pin.succeeded", chatId, "msg-1", undefined, undefined],
-      ["status.edited", chatId, "msg-1", "✅ *Shell*  `pnpm test:fast`", undefined],
       ["status.edited", chatId, "msg-1", "✅ *CODEX*  turn completed", undefined],
       ["unpin.succeeded", chatId, "msg-1", undefined, undefined],
     ]);
@@ -1076,9 +1075,9 @@ describe("sendEvent – runtime events", () => {
     ]);
   });
 
-  it("keeps pinned tool and command status action-focused", async () => {
+  it("omits tool and command rows from pinned status when tool messages are visible", async () => {
     const { sock, sent } = createMockSock();
-    const chatId = "runtime-action-focused-status-chat";
+    const chatId = "runtime-visible-tools-status-chat";
 
     await sendEvent(sock, chatId, {
       kind: "runtime_event",
@@ -1087,7 +1086,7 @@ describe("sendEvent – runtime events", () => {
         provider: "codex",
         turn: { id: "turn-1", chatId, status: "started" },
       },
-    });
+    }, undefined, undefined, { outputVisibility: VISIBLE_TOOL_OUTPUT });
 
     await sendEvent(sock, chatId, {
       kind: "runtime_event",
@@ -1098,22 +1097,22 @@ describe("sendEvent – runtime events", () => {
         tool: {
           id: "search-1",
           name: "Search",
-          arguments: { pattern: "smoke|e2e", path: "package.json" },
+          arguments: { pattern: "needle", path: "src" },
         },
       },
-    });
+    }, undefined, undefined, { outputVisibility: VISIBLE_TOOL_OUTPUT });
 
     await sendEvent(sock, chatId, {
       kind: "runtime_event",
       event: {
-        type: "command.failed",
+        type: "command.started",
         provider: "acp",
         command: {
-          command: "pnpm exec node scripts/acp-adapter-smoke.js codex --prompt",
-          status: "failed",
+          command: "pnpm type-check",
+          status: "started",
         },
       },
-    });
+    }, undefined, undefined, { outputVisibility: VISIBLE_TOOL_OUTPUT });
 
     await sendEvent(sock, chatId, {
       kind: "runtime_event",
@@ -1121,27 +1120,46 @@ describe("sendEvent – runtime events", () => {
         type: "command.completed",
         provider: "acp",
         command: {
-          command: "/bin/zsh -lc 'pnpm exec node scripts/acp-adapter-smoke.js codex --prompt'",
+          command: "pnpm type-check",
           status: "completed",
         },
       },
-    });
+    }, undefined, undefined, { outputVisibility: VISIBLE_TOOL_OUTPUT });
 
-    const statusTexts = sent
-      .filter((entry) => typeof entry.msg.text === "string")
+    await sendEvent(sock, chatId, {
+      kind: "runtime_event",
+      event: {
+        type: "turn.completed",
+        provider: "codex",
+        turn: { id: "turn-1", chatId, status: "completed" },
+      },
+    }, undefined, undefined, { outputVisibility: VISIBLE_TOOL_OUTPUT });
+
+    const pinEntry = sent.find((entry) => entry.msg.pin && typeof entry.msg.pin === "object" && entry.msg.type === 1);
+    const pinnedId = pinEntry && typeof pinEntry.msg.pin === "object"
+      ? /** @type {{ id?: unknown }} */ (pinEntry.msg.pin).id
+      : null;
+    assert.equal(typeof pinnedId, "string", `Expected pinned status payload, got ${JSON.stringify(sent.map((entry) => entry.msg))}`);
+
+    const pinnedTexts = sent
+      .filter((entry, index) => (
+        typeof entry.msg.text === "string"
+        && (`msg-${index + 1}` === pinnedId
+          || (typeof entry.msg.edit === "object"
+            && entry.msg.edit !== null
+            && /** @type {{ id?: unknown }} */ (entry.msg.edit).id === pinnedId))
+      ))
       .map((entry) => /** @type {string} */ (entry.msg.text));
-    const finalStatus = statusTexts.at(-1) ?? "";
 
-    assert.ok(finalStatus.startsWith("✅ *Shell*  `pnpm exec node scripts/acp-adapter-smoke.js codex --prompt`"), `Expected latest status on first pinned line, got ${finalStatus}`);
-    assert.ok(finalStatus.includes("✅ *Shell*  `pnpm exec node scripts/acp-adapter-smoke.js codex --prompt`"), `Expected normalized Shell status, got ${JSON.stringify(statusTexts)}`);
-    assert.ok(!finalStatus.includes("🔧 *Search*"), `Pinned status should only show latest line: ${finalStatus}`);
-    assert.ok(!finalStatus.includes("*ACP*  *Search*"), `Pinned tool status should not include ACP provider noise: ${finalStatus}`);
-    assert.ok(!finalStatus.includes("*ACP*  *Shell*"), `Pinned command status should not include ACP provider noise: ${finalStatus}`);
-    assert.ok(!finalStatus.includes("/bin/zsh -lc"), `Pinned command status should unwrap shell invocation: ${finalStatus}`);
-    assert.ok(!finalStatus.includes("❌ *Shell*"), `Successful retry should replace failed command status: ${finalStatus}`);
+    assert.ok(sent.some((entry) => entry.msg.text === "🔧 *Search*  `needle` in *src*"), `Expected visible Search tool message, got ${JSON.stringify(sent.map((entry) => entry.msg))}`);
+    assert.ok(sent.some((entry) => entry.msg.text === "✅ *Shell*  `pnpm type-check`"), `Expected visible Shell command message, got ${JSON.stringify(sent.map((entry) => entry.msg))}`);
+    assert.deepEqual(pinnedTexts, [
+      "🔄 *CODEX*  turn started",
+      "✅ *CODEX*  turn completed",
+    ]);
   });
 
-  it("keeps final usage accounting out of the action-focused pinned status", async () => {
+  it("keeps final usage accounting in pinned status after action rows are omitted", async () => {
     const { sock, sent } = createMockSock();
     const chatId = "runtime-action-focused-usage-chat";
 
@@ -1187,10 +1205,13 @@ describe("sendEvent – runtime events", () => {
         || entry.msg.text === "🔄 *CODEX*  turn started"
       ))
       .map((entry) => /** @type {string} */ (entry.msg.text));
-    const finalActionStatus = pinnedStatusTexts.at(-2) ?? "";
 
     assert.ok(sent.some((entry) => typeof entry.msg.text === "string" && entry.msg.text.includes("Cost: 0.000000")), `Expected usage output, got ${JSON.stringify(sent.map((entry) => entry.msg))}`);
-    assert.ok(finalActionStatus.startsWith("✅ *Shell*  `pnpm exec node scripts/acp-adapter-smoke.js codex --prompt`"), `Expected final usage not to replace action status, got ${JSON.stringify(pinnedStatusTexts)}`);
+    assert.deepEqual(pinnedStatusTexts, [
+      "🔄 *CODEX*  turn started",
+      "📊 *USAGE*  cost 0.000000",
+      "✅ *CODEX*  turn completed",
+    ]);
   });
 
   it("updates pinned status after each ACP payload through Baileys", async () => {
@@ -1258,13 +1279,13 @@ describe("sendEvent – runtime events", () => {
       kind: "search",
       rawInput: { pattern: "smoke|e2e|baileys|whatsapp|pin|pinned|ACP", path: "package.json" },
       status: "in_progress",
-    }), "🔧 *Search*  `smoke|e2e|baileys|whatsapp|pin|pinned|ACP` in *package.json*");
+    }), "🔄 *CODEX*  turn started");
 
     assert.equal(await sendAcpUpdate({
       sessionUpdate: "tool_call_update",
       toolCallId: "status-search-1",
       status: "completed",
-    }), "✅ *Search*  `smoke|e2e|baileys|whatsapp|pin|pinned|ACP` in *package.json*");
+    }), "🔄 *CODEX*  turn started");
 
     assert.equal(await sendAcpUpdate({
       sessionUpdate: "tool_call",
@@ -1272,14 +1293,14 @@ describe("sendEvent – runtime events", () => {
       title: "Shell",
       rawInput: { command: "pnpm exec node scripts/acp-adapter-smoke.js codex --prompt" },
       status: "in_progress",
-    }), "🔧 *Shell*  `pnpm exec node scripts/acp-adapter-smoke.js codex --prompt`");
+    }), "🔄 *CODEX*  turn started");
 
     assert.equal(await sendAcpUpdate({
       sessionUpdate: "tool_call_update",
       toolCallId: "status-smoke-failed-1",
       status: "failed",
       rawOutput: { exit_code: 1, formatted_output: "ACP connection closed" },
-    }), "❌ *Shell*  `pnpm exec node scripts/acp-adapter-smoke.js codex --prompt`");
+    }), "🔄 *CODEX*  turn started");
 
     assert.equal(await sendAcpUpdate({
       sessionUpdate: "tool_call",
@@ -1287,14 +1308,21 @@ describe("sendEvent – runtime events", () => {
       title: "Shell",
       rawInput: { command: "/bin/zsh -lc 'pnpm exec node scripts/acp-adapter-smoke.js codex --prompt'" },
       status: "in_progress",
-    }), "🔧 *Shell*  `pnpm exec node scripts/acp-adapter-smoke.js codex --prompt`");
+    }), "🔄 *CODEX*  turn started");
 
     assert.equal(await sendAcpUpdate({
       sessionUpdate: "tool_call_update",
       toolCallId: "status-smoke-success-1",
       status: "completed",
       rawOutput: { exit_code: 0, formatted_output: "ok" },
-    }), "✅ *Shell*  `pnpm exec node scripts/acp-adapter-smoke.js codex --prompt`");
+    }), "🔄 *CODEX*  turn started");
+
+    const renderedTexts = sent
+      .map((entry) => typeof entry.msg.text === "string" ? entry.msg.text : "")
+      .filter(Boolean);
+    assert.ok(renderedTexts.includes("🔧 *Search*  `smoke|e2e|baileys|whatsapp|pin|pinned|ACP` in *package.json*"), `Expected Search tool message, got ${JSON.stringify(renderedTexts)}`);
+    assert.ok(renderedTexts.includes("✅ *Search*  `smoke|e2e|baileys|whatsapp|pin|pinned|ACP` in *package.json*"), `Expected Search completion message, got ${JSON.stringify(renderedTexts)}`);
+    assert.ok(renderedTexts.some((text) => text.startsWith("✅ *Shell*") && text.includes("acp-adapter-smoke.js codex --prompt")), `Expected Shell completion message, got ${JSON.stringify(renderedTexts)}`);
 
     await sendEvent(sock, chatId, {
       kind: "runtime_event",

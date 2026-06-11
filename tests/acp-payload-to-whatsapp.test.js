@@ -640,7 +640,7 @@ describe("ACP payload to WhatsApp socket vertical slices", () => {
       rawInput: { pattern: "pin|pinned", path: "tests" },
     }), {
       eventTypes: ["tool.started"],
-      pinnedText: "🔧 *Search*  `pin|pinned` in *tests*",
+      pinnedText: "📋 *PLAN*  *Plan*  _Working on: Inspect execute update presentation path_",
     });
 
     assert.deepEqual(await sendAcpUpdate({
@@ -650,8 +650,10 @@ describe("ACP payload to WhatsApp socket vertical slices", () => {
       rawOutput: { formatted_output: "tests/sendBlocks.test.js", exit_code: 0 },
     }), {
       eventTypes: ["tool.completed"],
-      pinnedText: "✅ *Search*  `pin|pinned` in *tests*",
+      pinnedText: "📋 *PLAN*  *Plan*  _Working on: Inspect execute update presentation path_",
     });
+    assert.ok(sent.some((entry) => entry.msg.text === "🔧 *Search*  `pin|pinned` in *tests*"), `Expected visible Search start row, got ${JSON.stringify(sent.map((entry) => entry.msg))}`);
+    assert.ok(sent.some((entry) => entry.msg.text === "✅ *Search*  `pin|pinned` in *tests*"), `Expected visible Search completion row, got ${JSON.stringify(sent.map((entry) => entry.msg))}`);
 
     assert.deepEqual(await sendAcpUpdate({
       sessionUpdate: "model_rerouted",
@@ -803,7 +805,7 @@ describe("ACP payload to WhatsApp socket vertical slices", () => {
         command: "node -e process.stdout.write('terminal ok')",
         status: "started",
       },
-    }), "🔧 *Shell*  `node -e process.stdout.write('terminal ok')`");
+    }), "✅ *ACP*  input resolved: Migration Strategy");
 
     assert.equal(await sendRuntimeEvent({
       type: "command.completed",
@@ -812,7 +814,9 @@ describe("ACP payload to WhatsApp socket vertical slices", () => {
         command: "node -e process.stdout.write('terminal ok')",
         status: "completed",
       },
-    }), "✅ *Shell*  `node -e process.stdout.write('terminal ok')`");
+    }), "✅ *ACP*  input resolved: Migration Strategy");
+    assert.ok(sent.some((entry) => entry.msg.text === "🔧 *Shell*  `node -e process.stdout.write('terminal ok')`"), `Expected visible Shell start row, got ${JSON.stringify(sent.map((entry) => entry.msg))}`);
+    assert.ok(sent.some((entry) => entry.msg.text === "✅ *Shell*  `node -e process.stdout.write('terminal ok')`"), `Expected visible Shell completion row, got ${JSON.stringify(sent.map((entry) => entry.msg))}`);
 
     assert.equal(await sendRuntimeEvent({
       type: "file-change.completed",
