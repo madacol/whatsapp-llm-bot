@@ -918,11 +918,52 @@ function hasRuntimeSummaryDetail(summary) {
 }
 
 /**
+ * @param {string} summary
+ * @returns {{ path: string, hasRange: boolean } | null}
+ */
+function parseReadRuntimeSummary(summary) {
+  if (!summary.startsWith("*Read*")) {
+    return null;
+  }
+  const pathMatch = summary.match(/`([^`]+)`/);
+  if (!pathMatch?.[1]) {
+    return null;
+  }
+  return {
+    path: pathMatch[1],
+    hasRange: /(?:_L\d+(?:-L\d+)?_|\*\d+(?:-\d+)?\*|`[^`]+:\d+(?:-\d+)?`)/.test(summary),
+  };
+}
+
+/**
+ * @param {string} p
+ * @returns {string}
+ */
+function basenameForDisplayPath(p) {
+  const normalized = p.replaceAll("\\", "/");
+  const parts = normalized.split("/").filter(Boolean);
+  return parts.at(-1) ?? normalized;
+}
+
+/**
  * @param {string | undefined} previousSummary
  * @param {string} nextSummary
  * @returns {boolean}
  */
 function shouldPreserveRuntimeSummary(previousSummary, nextSummary) {
+  if (!previousSummary) {
+    return false;
+  }
+  const previousRead = parseReadRuntimeSummary(previousSummary);
+  const nextRead = parseReadRuntimeSummary(nextSummary);
+  if (previousRead && nextRead && basenameForDisplayPath(previousRead.path) === basenameForDisplayPath(nextRead.path)) {
+    if (previousRead.hasRange && !nextRead.hasRange) {
+      return true;
+    }
+    if (previousRead.path.length > nextRead.path.length) {
+      return true;
+    }
+  }
   return Boolean(previousSummary)
     && hasRuntimeSummaryDetail(/** @type {string} */ (previousSummary))
     && !hasRuntimeSummaryDetail(nextSummary);

@@ -244,6 +244,58 @@ describe("ACP read presentation vertical slice", () => {
     ]);
   });
 
+  it("preserves richer read path and requested range when completion only has a short title", async () => {
+    const chatId = "acp-read-presentation@s.whatsapp.net";
+    const toolCallId = "call_short_read_completion";
+    const { sent, runtimeEvents } = await observeAcpReadPayloadsThroughBaileys([
+      {
+        sessionId: "s-short-read",
+        update: {
+          sessionUpdate: "tool_call",
+          toolCallId,
+          status: "in_progress",
+          kind: "read",
+          title: "Read file",
+          rawInput: {
+            path: "/tmp/wh.log",
+            line: 20,
+            limit: 3,
+          },
+          locations: [
+            { path: "/tmp/wh.log", line: 20 },
+          ],
+        },
+      },
+      {
+        sessionId: "s-short-read",
+        update: {
+          sessionUpdate: "tool_call_update",
+          toolCallId,
+          status: "completed",
+          title: "Read wh.log",
+          rawOutput: {
+            formatted_output: "line 20\nline 21\nline 22\n",
+            exit_code: 0,
+          },
+        },
+      },
+    ]);
+
+    assert.deepEqual(runtimeEvents.map((event) => event.type), ["tool.started", "tool.completed"]);
+    assert.deepEqual(sent.map((entry) => entry.chatId), [chatId, chatId]);
+    assert.deepEqual(sent.map((entry) => entry.msg), [
+      {
+        text: "🔧 *Read*  `/tmp/wh.log`  *20-22*",
+        linkPreview: null,
+      },
+      {
+        text: "✅ *Read*  `/tmp/wh.log`  *20-22*",
+        edit: { id: "msg-1", remoteJid: chatId, fromMe: true },
+        linkPreview: null,
+      },
+    ]);
+  });
+
   it("sends a replacement when a completed ACP read notification targets an expired edit handle", async () => {
     const chatId = "acp-read-presentation@s.whatsapp.net";
     const toolCallId = "call_expired_read_edit";
