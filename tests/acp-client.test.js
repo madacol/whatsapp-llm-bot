@@ -4,19 +4,23 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
-import { createNdjsonAcpProtocolLogger, openAcpConnection } from "../harnesses/acp-client.js";
+import { createNdjsonAcpProtocolLogger, getDefaultAcpProtocolLogger, openAcpConnection } from "../harnesses/acp-client.js";
 
 describe("ACP client process stderr", () => {
   /** @type {string | undefined} */
   let originalLogLevel;
   /** @type {string | undefined} */
   let originalAcpStderrLog;
+  /** @type {string | undefined} */
+  let originalAcpProtocolLog;
 
   beforeEach(() => {
     originalLogLevel = process.env.LOG_LEVEL;
     originalAcpStderrLog = process.env.MADABOT_ACP_STDERR_LOG;
+    originalAcpProtocolLog = process.env.MADABOT_ACP_PROTOCOL_LOG;
     process.env.LOG_LEVEL = "debug";
     delete process.env.MADABOT_ACP_STDERR_LOG;
+    delete process.env.MADABOT_ACP_PROTOCOL_LOG;
   });
 
   afterEach(() => {
@@ -24,13 +28,22 @@ describe("ACP client process stderr", () => {
     else process.env.LOG_LEVEL = originalLogLevel;
     if (originalAcpStderrLog === undefined) delete process.env.MADABOT_ACP_STDERR_LOG;
     else process.env.MADABOT_ACP_STDERR_LOG = originalAcpStderrLog;
+    if (originalAcpProtocolLog === undefined) delete process.env.MADABOT_ACP_PROTOCOL_LOG;
+    else process.env.MADABOT_ACP_PROTOCOL_LOG = originalAcpProtocolLog;
+  });
+
+  it("leaves default ACP protocol transcript logging disabled unless explicitly enabled", () => {
+    assert.equal(getDefaultAcpProtocolLogger(), null);
+
+    process.env.MADABOT_ACP_PROTOCOL_LOG = "1";
+    assert.notEqual(getDefaultAcpProtocolLogger(), null);
   });
 
   it("drains child stderr without mirroring provider chatter into the bot log by default", async () => {
     const calls = await captureDebugLogs(async () => {
       const connection = await openAcpConnection({
         command: process.execPath,
-        args: ["-e", "process.stderr.write('[codex:app-server] noisy\\\\n'.repeat(1000)); setTimeout(() => {}, 1000);"],
+        args: ["-e", stderrFixtureCode("[codex:app-server] noisy\n".repeat(1000))],
       });
       await delay(100);
       await connection.close();
@@ -45,7 +58,7 @@ describe("ACP client process stderr", () => {
     const calls = await captureDebugLogs(async (calls) => {
       const connection = await openAcpConnection({
         command: process.execPath,
-        args: ["-e", "process.stderr.write('visible stderr\\\\n'); setTimeout(() => {}, 1000);"],
+        args: ["-e", stderrFixtureCode("visible stderr\n")],
       });
       await waitFor(() => calls.length > 0);
       await connection.close();
@@ -61,16 +74,7 @@ describe("ACP client process stderr", () => {
     const calls = await captureWarnLogs(async () => {
       const connection = await openAcpConnection({
         command: process.execPath,
-        args: [
-          "-e",
-          [
-            "process.stdin.setEncoding('utf8');",
-            "process.stdin.once('data', () => {",
-            "  process.stderr.write('fatal provider detail\\n');",
-            "  process.exit(7);",
-            "});",
-          ].join(""),
-        ],
+        args: ["-e", exitOnRequestFixtureCode()],
       });
 
       await assert.rejects(
@@ -97,24 +101,7 @@ describe("ACP client process stderr", () => {
     const protocolEntries = [];
     const connection = await openAcpConnection({
       command: process.execPath,
-      args: [
-        "-e",
-        [
-          "process.stdin.setEncoding('utf8');",
-          "let buffer = '';",
-          "process.stdin.on('data', (chunk) => {",
-          "  buffer += chunk;",
-          "  const lines = buffer.split('\\n');",
-          "  buffer = lines.pop();",
-          "  for (const line of lines) {",
-          "    if (!line.trim()) continue;",
-          "    const request = JSON.parse(line);",
-          "    process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id: request.id, result: { ok: true } }) + '\\n');",
-          "    process.stdout.write(JSON.stringify({ jsonrpc: '2.0', method: 'session/update', params: { sessionId: 's1' } }) + '\\n');",
-          "  }",
-          "});",
-        ].join(""),
-      ],
+      args: ["-e", jsonRpcResponderFixtureCode()],
       protocolLogger: {
         write(entry) {
           protocolEntries.push(structuredClone(entry));
@@ -149,24 +136,7 @@ describe("ACP client process stderr", () => {
   it("refreshes selected request timeouts when ACP activity arrives", async () => {
     const connection = await openAcpConnection({
       command: process.execPath,
-      args: [
-        "-e",
-        [
-          "process.stdin.setEncoding('utf8');",
-          "let buffer = '';",
-          "process.stdin.on('data', (chunk) => {",
-          "  buffer += chunk;",
-          "  const lines = buffer.split('\\n');",
-          "  buffer = lines.pop();",
-          "  for (const line of lines) {",
-          "    if (!line.trim()) continue;",
-          "    const request = JSON.parse(line);",
-          "    process.stdout.write(JSON.stringify({ jsonrpc: '2.0', method: 'session/update', params: { sessionId: 's1' } }) + '\\n');",
-          "    setTimeout(() => process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id: request.id, result: { ok: true } }) + '\\n'), 80);",
-          "  }",
-          "});",
-        ].join(""),
-      ],
+      args: ["-e", jsonRpcResponderFixtureCode({ responseDelayMs: 80, notificationFirst: true })],
       protocolLogger: null,
     });
     try {
@@ -256,6 +226,52 @@ async function captureDebugLogs(fn) {
     console.debug = originalDebug;
   }
   return calls;
+}
+
+/**
+ * @param {string} text
+ * @returns {string}
+ */
+function stderrFixtureCode(text) {
+  return [
+    `require("node:fs").writeSync(2, ${JSON.stringify(text)});`,
+    "setInterval(() => {}, 2147483647);",
+  ].join("");
+}
+
+/**
+ * @returns {string}
+ */
+function exitOnRequestFixtureCode() {
+  return [
+    "setInterval(() => {}, 2147483647);",
+    "setTimeout(() => {",
+    `  require("node:fs").writeSync(2, ${JSON.stringify("fatal provider detail\n")});`,
+    "  process.exit(7);",
+    "}, 20);",
+  ].join("");
+}
+
+/**
+ * @param {{ responseDelayMs?: number, notificationFirst?: boolean }} [options]
+ * @returns {string}
+ */
+function jsonRpcResponderFixtureCode(options = {}) {
+  const responseDelayMs = options.responseDelayMs ?? 0;
+  const notificationFirst = options.notificationFirst === true;
+  const writeResponse = "require('node:fs').writeSync(1, JSON.stringify({ jsonrpc: '2.0', id: 1, result: { ok: true } }) + newline);";
+  const writeNotification = "require('node:fs').writeSync(1, JSON.stringify({ jsonrpc: '2.0', method: 'session/update', params: { sessionId: 's1' } }) + newline);";
+  return [
+    "setInterval(() => {}, 2147483647);",
+    `const newline = ${JSON.stringify("\n")};`,
+    "setTimeout(() => {",
+    notificationFirst ? `  ${writeNotification}` : "",
+    responseDelayMs > 0
+      ? `  setTimeout(() => { ${writeResponse} }, ${responseDelayMs});`
+      : `  ${writeResponse}`,
+    notificationFirst ? "" : `  ${writeNotification}`,
+    "}, 20);",
+  ].join("");
 }
 
 /**
