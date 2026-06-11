@@ -4,6 +4,7 @@ import { createHourlyNdjsonLogWriter } from "../hourly-ndjson-log.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "..");
+const RAW_EVENT_LOG_ENV = "MADABOT_RAW_EVENT_LOG";
 const RAW_EVENT_LOG_BASE_PATH = path.join(REPO_ROOT, "logs", "raw-events.ndjson");
 
 /**
@@ -40,9 +41,20 @@ export function createNdjsonRawEventLogger(filePath) {
 let cachedDefaultLogger = null;
 
 /**
- * @returns {HarnessRawEventLogger}
+ * @param {NodeJS.ProcessEnv} [env]
+ * @returns {boolean}
+ */
+function shouldLogRawEvents(env = process.env) {
+  return env[RAW_EVENT_LOG_ENV] === "1";
+}
+
+/**
+ * @returns {HarnessRawEventLogger | null}
  */
 export function getHarnessRawEventLogger() {
+  if (!shouldLogRawEvents()) {
+    return null;
+  }
   if (!cachedDefaultLogger) {
     cachedDefaultLogger = createNdjsonRawEventLogger(RAW_EVENT_LOG_BASE_PATH);
   }
