@@ -649,32 +649,36 @@ describe("ACP runtime events through WhatsApp transport", () => {
       "✅ *ACP*  approval resolved: Run status command",
       "⏳ *ACP*  input needed",
       "✅ *ACP*  input resolved",
-      "*Shell*",
-      "*Task*",
       "🧵 *SUBAGENT*  Reviewer replied",
       "📝 *File*  `status.txt`",
       "📊 *USAGE*  cost",
       "✅ *E2E-ACP-RUNTIME*  turn completed",
     ]);
+    assert.ok(rendered.some((text) => text.includes("*Shell*")), `Expected Shell row in normal WhatsApp output, got ${JSON.stringify(rendered)}`);
+    assert.ok(rendered.some((text) => text.includes("*Task*")), `Expected Task row in normal WhatsApp output, got ${JSON.stringify(rendered)}`);
+    assert.ok(!timeline.includes("*Shell*"), `Expected Shell rows to stay out of pinned status, got ${JSON.stringify(statusTexts)}`);
+    assert.ok(!timeline.includes("*Task*"), `Expected Task rows to stay out of pinned status, got ${JSON.stringify(statusTexts)}`);
     assert.ok(!timeline.includes("Read file"), `Expected read actions to be suppressed from pinned status, got ${JSON.stringify(statusTexts)}`);
     assert.ok(!timeline.includes("List files"), `Expected list actions to be suppressed from pinned status, got ${JSON.stringify(statusTexts)}`);
     assert.ok(!timeline.includes("noise.js"), `Expected read/list paths to be suppressed from pinned status, got ${JSON.stringify(statusTexts)}`);
     assertPinnedStatusUnpinned(sentMessages);
   });
 
-  it("keeps pinned tool status action-focused across ACP protocol and Baileys", async () => {
+  it("keeps tool status out of the pinned status across ACP protocol and Baileys", async () => {
     const { rendered, sentMessages } = await runAcpPrompt("action focused pinned status");
     const statusTexts = getPinnedStatusTexts(sentMessages);
-    const finalStatus = statusTexts.at(-2) ?? statusTexts.at(-1) ?? "";
+    const timeline = statusTexts.join("\n---\n");
 
     assert.ok(rendered.some((text) => text.includes("Action-focused status done.")), `Expected final assistant output, got ${JSON.stringify(rendered)}`);
-    assert.ok(finalStatus.startsWith("✅ *Shell*  `pnpm exec node scripts/acp-adapter-smoke.js codex --prompt`"), `Expected latest status on first pinned line, got ${JSON.stringify(statusTexts)}`);
-    assert.ok(finalStatus.includes("✅ *Shell*  `pnpm exec node scripts/acp-adapter-smoke.js codex --prompt`"), `Expected normalized successful Shell row, got ${JSON.stringify(statusTexts)}`);
-    assert.ok(!finalStatus.includes("✅ *Search*"), `Pinned status should only show latest line, got ${finalStatus}`);
-    assert.ok(!finalStatus.includes("*ACP*  *Search*"), `Pinned Search row should not include ACP provider noise: ${finalStatus}`);
-    assert.ok(!finalStatus.includes("*ACP*  *Shell*"), `Pinned Shell row should not include ACP provider noise: ${finalStatus}`);
-    assert.ok(!finalStatus.includes("/bin/zsh -lc"), `Pinned Shell row should unwrap shell invocation: ${finalStatus}`);
-    assert.ok(!finalStatus.includes("❌ *Shell*"), `Successful retry should replace the failed Shell row: ${finalStatus}`);
+    assert.ok(rendered.some((text) => text.includes("✅ *Shell*") && text.includes("acp-adapter-smoke.js codex --prompt")), `Expected visible successful Shell row, got ${JSON.stringify(rendered)}`);
+    assert.ok(rendered.some((text) => text.includes("✅ *Search*")), `Expected visible Search row, got ${JSON.stringify(rendered)}`);
+    assertPinnedTimelineIncludes(statusTexts, [
+      "🔄 *E2E-ACP-RUNTIME*  turn started",
+      "📊 *USAGE*  cost",
+      "✅ *E2E-ACP-RUNTIME*  turn completed",
+    ]);
+    assert.ok(!timeline.includes("*Shell*"), `Pinned status should not include Shell rows, got ${JSON.stringify(statusTexts)}`);
+    assert.ok(!timeline.includes("*Search*"), `Pinned status should not include Search rows, got ${JSON.stringify(statusTexts)}`);
     assertPinnedStatusUnpinned(sentMessages);
   });
 
