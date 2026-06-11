@@ -1,5 +1,9 @@
 import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import { createRuntimeDiagnosticsState, setDefaultRuntimeDiagnosticsStateForTesting } from "../diagnostics-config.js";
 import { createLogger, LOG_LEVELS } from "../logger.js";
 
 describe("createLogger", () => {
@@ -18,6 +22,7 @@ describe("createLogger", () => {
     else process.env.LOG_LEVEL = origLogLevel;
     if (origTesting === undefined) delete process.env.TESTING;
     else process.env.TESTING = origTesting;
+    setDefaultRuntimeDiagnosticsStateForTesting(null);
   });
 
   it("returns an object with debug, info, warn, error methods", () => {
@@ -114,6 +119,38 @@ describe("createLogger", () => {
     assert.equal(calls.info[0][0], "[mymodule]");
     assert.equal(calls.info[0][1], "hello");
     assert.equal(calls.info[0][2], "world");
+  });
+
+  it("uses the runtime diagnostics manager for log level changes", async () => {
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "logger-diagnostics-"));
+    process.env.TESTING = "1";
+    delete process.env.LOG_LEVEL;
+    const diagnostics = createRuntimeDiagnosticsState({
+      configPath: path.join(tempDir, "logging.json"),
+      env: {},
+      reloadIntervalMs: 0,
+    });
+    setDefaultRuntimeDiagnosticsStateForTesting(diagnostics);
+    const log = createLogger("test");
+
+    let calls = captureLogs(() => {
+      log.debug("hidden");
+      log.error("visible");
+    });
+    assert.equal(calls.debug.length, 0);
+    assert.equal(calls.error.length, 1);
+
+    await diagnostics.update({ logLevel: "debug" });
+    calls = captureLogs(() => {
+      log.debug("visible");
+    });
+    assert.equal(calls.debug.length, 1);
+
+    await diagnostics.update({ logLevel: "silent" });
+    calls = captureLogs(() => {
+      log.error("hidden");
+    });
+    assert.equal(calls.error.length, 0);
   });
 });
 

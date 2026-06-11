@@ -1,4 +1,5 @@
 import { getChatSqlitePath } from "./chat-paths.js";
+import { getDefaultRuntimeDiagnosticsState } from "./diagnostics-config.js";
 import { createLogger } from "./logger.js";
 import { createProcessDiagnosticSnapshot, formatProcessDiagnosticSnapshot } from "./process-diagnostics.js";
 import { SqliteDb } from "./sqlite-db.js";
@@ -72,7 +73,7 @@ export function getSqliteDb(filename) {
 
 function logDbCacheGrowth() {
   if (process.env.TESTING) return;
-  const shouldLogEveryOpen = process.env.DB_DIAGNOSTICS === "1";
+  const shouldLogEveryOpen = getDefaultRuntimeDiagnosticsState().isDbCacheLogEnabled();
   const cacheSize = getDbCacheSize();
   if (!shouldLogEveryOpen && cacheSize < nextDbCacheDiagnosticSize) return;
   while (nextDbCacheDiagnosticSize <= cacheSize) {

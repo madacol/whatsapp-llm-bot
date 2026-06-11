@@ -1,3 +1,5 @@
+import { getDefaultRuntimeDiagnosticsState } from "./diagnostics-config.js";
+
 /** @type {Record<string, number>} */
 export const LOG_LEVELS = {
   debug: 0,
@@ -8,12 +10,14 @@ export const LOG_LEVELS = {
 };
 
 /**
- * Resolve the current log level from environment.
+ * Resolve the current log level from the runtime diagnostics manager and
+ * environment fallback.
  * @returns {number}
  */
 function getLevel() {
-  if (process.env.LOG_LEVEL) {
-    return LOG_LEVELS[process.env.LOG_LEVEL] ?? LOG_LEVELS.info;
+  const level = getDefaultRuntimeDiagnosticsState().getConfig().logLevel ?? process.env.LOG_LEVEL;
+  if (level) {
+    return LOG_LEVELS[level] ?? LOG_LEVELS.info;
   }
   return process.env.TESTING ? LOG_LEVELS.error : LOG_LEVELS.info;
 }

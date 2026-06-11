@@ -1,6 +1,12 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import { createRuntimeDiagnosticsState } from "../diagnostics-config.js";
 import {
+  appendWhatsAppReactionDiagnostic,
+  appendWhatsAppUpsertDiagnostic,
   buildWhatsAppUpsertShapeDiagnostic,
   createWhatsAppAlbumCoordinator,
 } from "../whatsapp/create-whatsapp-transport.js";
@@ -74,6 +80,65 @@ describe("WhatsApp upsert shape diagnostics", () => {
     });
     assert.equal(JSON.stringify(diagnostic).includes("secret-media-key"), false);
     assert.equal(JSON.stringify(diagnostic).includes("media.example.test"), false);
+  });
+
+  it("writes WhatsApp diagnostic files only when enabled in the runtime manager", async () => {
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "whatsapp-diagnostics-"));
+    const diagnostics = createRuntimeDiagnosticsState({
+      configPath: path.join(tempDir, "logging.json"),
+      env: {},
+      legacyWhatsAppDiagnosticEnabled: false,
+      reloadIntervalMs: 0,
+    });
+    const upsertPath = path.join(tempDir, "upserts.jsonl");
+    const reactionPath = path.join(tempDir, "reactions.jsonl");
+    const message = /** @type {BaileysMessage} */ ({
+      key: { remoteJid: "chat@g.us", fromMe: false, id: "msg-1" },
+      message: { conversation: "hello" },
+    });
+
+    appendWhatsAppUpsertDiagnostic(message, { diagnosticsState: diagnostics, targetPath: upsertPath });
+    appendWhatsAppReactionDiagnostic(
+      {
+        type: "reaction.received",
+        messageId: "msg-1",
+        remoteJid: "chat@g.us",
+        emoji: "👁",
+        senderId: "user@s.whatsapp.net",
+        listenerCount: 1,
+      },
+      { diagnosticsState: diagnostics, targetPath: reactionPath },
+    );
+    assert.deepEqual((await fs.readdir(tempDir)).sort(), []);
+
+    await diagnostics.update({ whatsappUpsertLog: true });
+    appendWhatsAppUpsertDiagnostic(message, { diagnosticsState: diagnostics, targetPath: upsertPath });
+    appendWhatsAppReactionDiagnostic(
+      {
+        type: "reaction.received",
+        messageId: "msg-1",
+        remoteJid: "chat@g.us",
+        emoji: "👁",
+        senderId: "user@s.whatsapp.net",
+        listenerCount: 1,
+      },
+      { diagnosticsState: diagnostics, targetPath: reactionPath },
+    );
+    assert.deepEqual((await fs.readdir(tempDir)).sort(), ["logging.json", "upserts.jsonl"]);
+
+    await diagnostics.update({ whatsappReactionLog: true });
+    appendWhatsAppReactionDiagnostic(
+      {
+        type: "reaction.received",
+        messageId: "msg-1",
+        remoteJid: "chat@g.us",
+        emoji: "👁",
+        senderId: "user@s.whatsapp.net",
+        listenerCount: 1,
+      },
+      { diagnosticsState: diagnostics, targetPath: reactionPath },
+    );
+    assert.deepEqual((await fs.readdir(tempDir)).sort(), ["logging.json", "reactions.jsonl", "upserts.jsonl"]);
   });
 });
 

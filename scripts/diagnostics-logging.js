@@ -4,16 +4,29 @@ import {
   RUNTIME_DIAGNOSTICS_CONFIG_PATH,
 } from "../diagnostics-config.js";
 
-/** @type {Map<string, Array<keyof import("../diagnostics-config.js").RuntimeDiagnosticsConfig>>} */
+/** @typedef {Exclude<keyof import("../diagnostics-config.js").RuntimeDiagnosticsConfig, "logLevel">} BooleanDiagnosticKey */
+
+/** @type {Map<string, BooleanDiagnosticKey[]>} */
 const TARGETS = new Map([
   ["acp", ["acpProtocolLog"]],
   ["acp-protocol", ["acpProtocolLog"]],
   ["protocol", ["acpProtocolLog"]],
+  ["stderr", ["acpStderrLog"]],
+  ["acp-stderr", ["acpStderrLog"]],
   ["raw", ["rawEventLog"]],
   ["raw-events", ["rawEventLog"]],
   ["events", ["rawEventLog"]],
-  ["all", ["acpProtocolLog", "rawEventLog"]],
+  ["db", ["dbCacheLog"]],
+  ["db-cache", ["dbCacheLog"]],
+  ["whatsapp", ["whatsappUpsertLog", "whatsappReactionLog"]],
+  ["upsert", ["whatsappUpsertLog"]],
+  ["whatsapp-upsert", ["whatsappUpsertLog"]],
+  ["reaction", ["whatsappReactionLog"]],
+  ["reactions", ["whatsappReactionLog"]],
+  ["whatsapp-reactions", ["whatsappReactionLog"]],
+  ["all", ["acpProtocolLog", "acpStderrLog", "rawEventLog", "dbCacheLog", "whatsappUpsertLog", "whatsappReactionLog"]],
 ]);
+const LOG_LEVELS = new Set(["debug", "info", "warn", "error", "silent"]);
 
 /**
  * @param {string | undefined} value
@@ -42,7 +55,7 @@ function parseEnabled(value) {
  * @returns {never}
  */
 function usage() {
-  console.error("Usage: node scripts/diagnostics-logging.js status | <acp|raw|all> <on|off>");
+  console.error("Usage: node scripts/diagnostics-logging.js status | <acp|stderr|raw|db|whatsapp|all> <on|off> | level <debug|info|warn|error|silent|default>");
   process.exit(2);
 }
 
@@ -51,6 +64,18 @@ const state = getDefaultRuntimeDiagnosticsState();
 
 if (!targetArg || targetArg === "status") {
   console.log(JSON.stringify({ configPath: RUNTIME_DIAGNOSTICS_CONFIG_PATH, ...state.getConfig() }, null, 2));
+  process.exit(0);
+}
+
+if (targetArg === "level" || targetArg === "log-level") {
+  const level = (enabledArg ?? "").trim().toLowerCase();
+  if (level !== "default" && !LOG_LEVELS.has(level)) {
+    usage();
+  }
+  const next = await state.update({
+    logLevel: level === "default" ? null : /** @type {import("../diagnostics-config.js").RuntimeDiagnosticsConfig["logLevel"]} */ (level),
+  });
+  console.log(JSON.stringify({ configPath: RUNTIME_DIAGNOSTICS_CONFIG_PATH, ...next }, null, 2));
   process.exit(0);
 }
 

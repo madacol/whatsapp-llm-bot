@@ -4,7 +4,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
-import { createRuntimeDiagnosticsState } from "../diagnostics-config.js";
+import { createRuntimeDiagnosticsState, setDefaultRuntimeDiagnosticsStateForTesting } from "../diagnostics-config.js";
 import { createNdjsonAcpProtocolLogger, createRuntimeGatedAcpProtocolLogger, getDefaultAcpProtocolLogger, openAcpConnection } from "../harnesses/acp-client.js";
 
 describe("ACP client process stderr", () => {
@@ -31,6 +31,7 @@ describe("ACP client process stderr", () => {
     else process.env.MADABOT_ACP_STDERR_LOG = originalAcpStderrLog;
     if (originalAcpProtocolLog === undefined) delete process.env.MADABOT_ACP_PROTOCOL_LOG;
     else process.env.MADABOT_ACP_PROTOCOL_LOG = originalAcpProtocolLog;
+    setDefaultRuntimeDiagnosticsStateForTesting(null);
   });
 
   it("provides a default ACP protocol logger that stays quiet unless explicitly enabled", () => {
@@ -92,6 +93,12 @@ describe("ACP client process stderr", () => {
 
   it("can mirror child stderr when explicit ACP stderr logging is enabled", async () => {
     process.env.MADABOT_ACP_STDERR_LOG = "1";
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "acp-stderr-env-"));
+    setDefaultRuntimeDiagnosticsStateForTesting(createRuntimeDiagnosticsState({
+      configPath: path.join(tempDir, "logging.json"),
+      env: process.env,
+      reloadIntervalMs: 0,
+    }));
 
     const calls = await captureDebugLogs(async (calls) => {
       const connection = await openAcpConnection({
@@ -106,6 +113,37 @@ describe("ACP client process stderr", () => {
     assert.equal(calls[0]?.[0], "[harness:acp]");
     assert.equal(calls[0]?.[1], "[acp stderr]");
     assert.match(String(calls[0]?.[2]), /visible stderr/);
+  });
+
+  it("observes runtime ACP stderr logging toggles without reconnecting the manager", async () => {
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "acp-stderr-log-"));
+    const diagnostics = createRuntimeDiagnosticsState({
+      configPath: path.join(tempDir, "logging.json"),
+      env: {},
+      reloadIntervalMs: 0,
+    });
+    setDefaultRuntimeDiagnosticsStateForTesting(diagnostics);
+
+    const hiddenCalls = await captureDebugLogs(async () => {
+      const connection = await openAcpConnection({
+        command: process.execPath,
+        args: ["-e", stderrFixtureCode("hidden stderr\n")],
+      });
+      await delay(100);
+      await connection.close();
+    });
+    assert.deepEqual(hiddenCalls, []);
+
+    await diagnostics.update({ acpStderrLog: true });
+    const visibleCalls = await captureDebugLogs(async (calls) => {
+      const connection = await openAcpConnection({
+        command: process.execPath,
+        args: ["-e", stderrFixtureCode("runtime stderr\n")],
+      });
+      await waitFor(() => calls.length > 0);
+      await connection.close();
+    });
+    assert.match(String(visibleCalls[0]?.[2]), /runtime stderr/);
   });
 
   it("reports child exit details and stderr tail when pending requests are rejected", async () => {

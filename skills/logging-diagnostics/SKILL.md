@@ -21,6 +21,7 @@ Runtime tools in this repo:
 node "$(git rev-parse --show-toplevel)/scripts/diagnostics-logging.js" status
 node "$(git rev-parse --show-toplevel)/scripts/diagnostics-logging.js" acp on
 node "$(git rev-parse --show-toplevel)/scripts/diagnostics-logging.js" raw on
+node "$(git rev-parse --show-toplevel)/scripts/diagnostics-logging.js" level debug
 node "$(git rev-parse --show-toplevel)/scripts/diagnostics-logging.js" all off
 ```
 

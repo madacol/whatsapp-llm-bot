@@ -10,7 +10,6 @@ import { createHourlyNdjsonLogWriter } from "../hourly-ndjson-log.js";
 const log = createLogger("harness:acp");
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "..");
-const ACP_STDERR_LOG_ENV = "MADABOT_ACP_STDERR_LOG";
 const ACP_STDERR_TAIL_MAX_CHARS = 4_000;
 const LOGS_DIR = path.join(REPO_ROOT, "logs");
 const ACP_PROTOCOL_LOG_BASE_PATH = path.join(LOGS_DIR, "acp.ndjson");
@@ -193,11 +192,10 @@ function waitForProcessExit(proc, timeoutMs) {
 }
 
 /**
- * @param {NodeJS.ProcessEnv} [env]
  * @returns {boolean}
  */
-function shouldLogAcpChildStderr(env = process.env) {
-  return env[ACP_STDERR_LOG_ENV] === "1";
+function shouldLogAcpChildStderr() {
+  return getDefaultRuntimeDiagnosticsState().isAcpStderrLogEnabled();
 }
 
 /**
