@@ -9,7 +9,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "..");
 const MAX_SNAPSHOT_FILE_BYTES = 1024 * 1024;
 const SNAPSHOT_IGNORE_FILE_PATH = path.join(REPO_ROOT, "snapshot-ignore.txt");
-const DEFAULT_IGNORED_FILE_CHANGE_PATHS = loadSnapshotIgnorePatterns();
+const DEFAULT_SNAPSHOT_IGNORE_PATTERNS = loadSnapshotIgnorePatterns();
 
 /**
  * @param {string | null | undefined} workdir
@@ -119,7 +119,7 @@ function loadSnapshotIgnorePatternsForWorkdir(workdir) {
     ? []
     : loadSnapshotIgnorePatternsFromFile(workspaceIgnorePath);
   return [
-    ...DEFAULT_IGNORED_FILE_CHANGE_PATHS,
+    ...DEFAULT_SNAPSHOT_IGNORE_PATTERNS,
     ...workspacePatterns,
   ];
 }
@@ -158,10 +158,7 @@ export function isAcpFileChangeIgnored(runConfig, filePath) {
     return true;
   }
   const root = path.resolve(runConfig?.workdir ?? process.cwd());
-  const patterns = [
-    ...loadSnapshotIgnorePatternsForWorkdir(root),
-    ...normalizePatternList(runConfig?.ignoredFileChangePaths),
-  ];
+  const patterns = normalizePatternList(runConfig?.ignoredFileChangePaths);
   if (patterns.length === 0) {
     return false;
   }

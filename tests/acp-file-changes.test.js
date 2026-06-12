@@ -158,7 +158,7 @@ describe("ACP file changes", () => {
     assert.ok(changes.every((event) => event.change.source === "snapshot"));
   });
 
-  it("detects ignored ACP file changes from runtime-state path patterns", async () => {
+  it("detects ignored ACP file changes from explicit and runtime-state path policies", async () => {
     const workdir = await fs.mkdtemp(path.join(os.tmpdir(), "acp-ignore-"));
 
     assert.equal(
@@ -174,6 +174,10 @@ describe("ACP file changes", () => {
     );
     assert.equal(
       isAcpFileChangeIgnored({ workdir }, path.join(workdir, "logs/raw-events.2026-06-04T14Z.ndjson")),
+      false,
+    );
+    assert.equal(
+      isAcpFileChangeIgnored({ workdir }, path.join(workdir, "pgdata/root.sqlite")),
       true,
     );
   });
@@ -220,7 +224,7 @@ describe("ACP file changes", () => {
         { workdir },
         path.join(workdir, "mounted-voice-assistant", "docs", "requirements.md"),
       ),
-      true,
+      false,
     );
   });
 

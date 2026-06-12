@@ -848,6 +848,44 @@ describe("ACP harness", () => {
     }
   });
 
+  it("still emits ACP provider file changes that are snapshot-ignored", async () => {
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "acp-snapshot-ignored-provider-change-"));
+    await fs.writeFile(path.join(tempDir, "snapshot-ignore.txt"), "diff-only-add.js\n", "utf8");
+    const harness = createAcpHarness({
+      config: {
+        command: process.execPath,
+        args: [path.join(__dirname, "fixtures", "acp-mock-agent.js")],
+      },
+    });
+    const adapter = harness.createAdapter?.({
+      name: "acp",
+      instanceId: "test",
+      continuationKey: "acp:snapshot-ignored-provider-change",
+    });
+    assert.ok(adapter);
+
+    /** @type {Array<Record<string, unknown>>} */
+    const events = [];
+    const unsubscribe = adapter.subscribeEvents?.((event) => {
+      events.push(event);
+    });
+    try {
+      await adapter.startSession({ chatId: "snapshot-ignored-provider-change-chat", runConfig: { workdir: tempDir } });
+      await adapter.sendTurn({
+        chatId: "snapshot-ignored-provider-change-chat",
+        input: "diff only add",
+        messages: [{ role: "user", content: [{ type: "text", text: "diff only add" }] }],
+        runConfig: { workdir: tempDir },
+      });
+
+      const fileChanges = events.filter((event) => event.type === "file-change.completed");
+      assert.equal(fileChanges.length, 1);
+      assert.equal(/** @type {{ change?: { path?: unknown } }} */ (fileChanges[0]).change?.path, "diff-only-add.js");
+    } finally {
+      unsubscribe?.();
+    }
+  });
+
   it("still enforces protected paths before suppressing ignored ACP file changes", async () => {
     const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "acp-ignored-protected-"));
     const harness = createAcpHarness({
