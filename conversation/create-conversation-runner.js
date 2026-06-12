@@ -147,6 +147,83 @@ function summarizeConfiguredMediaModels(models) {
 }
 
 /**
+ * @param {string[]} transcriptions
+ * @returns {string}
+ */
+function formatAudioTranscriptionInspectText(transcriptions) {
+  if (transcriptions.length === 1) {
+    return transcriptions[0];
+  }
+  return transcriptions
+    .map((text, index) => `Audio ${index + 1}:\n${text}`)
+    .join("\n\n");
+}
+
+/**
+ * @param {number} count
+ * @returns {string}
+ */
+function formatAudioTranscriptionCompleteText(count) {
+  return count === 1
+    ? "Transcribed audio. Inspect this message to view the transcription."
+    : `Transcribed ${count} audio messages. Inspect this message to view the transcriptions.`;
+}
+
+/**
+ * @param {ExecuteActionContext} context
+ * @returns {{
+ *   onAudioTranscriptionStart: (event: { block: AudioContentBlock, modelId: string }) => Promise<void>,
+ *   onAudioTranscriptionComplete: (event: { block: AudioContentBlock, modelId: string, transcription: string }) => Promise<void>,
+ *   onAudioTranscriptionFailure: (event: { block: AudioContentBlock, modelId: string, error: unknown }) => Promise<void>,
+ * }}
+ */
+function createAudioTranscriptionStatusObserver(context) {
+  /** @type {Promise<MessageHandle | undefined> | null} */
+  let handlePromise = null;
+  /** @type {string[]} */
+  const transcriptions = [];
+
+  /**
+   * @returns {Promise<MessageHandle | undefined>}
+   */
+  async function ensureHandle() {
+    if (!handlePromise) {
+      handlePromise = context.reply(contentEvent("plain", "Transcribing audio..."));
+    }
+    return handlePromise;
+  }
+
+  return {
+    onAudioTranscriptionStart: async () => {
+      await ensureHandle();
+    },
+    onAudioTranscriptionComplete: async ({ transcription }) => {
+      const isNewTranscription = !transcriptions.includes(transcription);
+      if (isNewTranscription) {
+        transcriptions.push(transcription);
+      }
+      const handle = await ensureHandle();
+      handle?.setInspect({
+        kind: "text",
+        text: formatAudioTranscriptionInspectText(transcriptions),
+        persistOnInspect: true,
+      });
+      if (!isNewTranscription) {
+        return;
+      }
+      await handle?.update({
+        kind: "text",
+        text: formatAudioTranscriptionCompleteText(transcriptions.length),
+      });
+    },
+    onAudioTranscriptionFailure: async () => {
+      const handle = await ensureHandle();
+      await handle?.update({ kind: "text", text: "Audio transcription failed." });
+    },
+  };
+}
+
+/**
  * @param {boolean} visible
  * @param {string} message
  * @param {unknown} details
@@ -429,10 +506,11 @@ export function createConversationRunner({
    *   chatId: string,
    *   chatInfo: import("../store.js").ChatRow | undefined,
    *   content: IncomingContentBlock[],
+   *   audioTranscriptionObserver?: ReturnType<typeof createAudioTranscriptionStatusObserver>,
    * }} input
    * @returns {Promise<string>}
    */
-  async function buildPendingRunInputText({ chatId, chatInfo, content }) {
+  async function buildPendingRunInputText({ chatId, chatInfo, content, audioTranscriptionObserver }) {
     if (!hasNonTextContent(content)) {
       return getTopLevelText(content);
     }
@@ -442,6 +520,9 @@ export function createConversationRunner({
       llmClient,
       mediaToTextModels: chatInfo?.media_to_text_models ?? {},
       db: getChatDb(chatId),
+      onAudioTranscriptionStart: audioTranscriptionObserver?.onAudioTranscriptionStart,
+      onAudioTranscriptionComplete: audioTranscriptionObserver?.onAudioTranscriptionComplete,
+      onAudioTranscriptionFailure: audioTranscriptionObserver?.onAudioTranscriptionFailure,
     });
     log.info("Built pending live input text", {
       chatId,
@@ -623,6 +704,7 @@ export function createConversationRunner({
    *   harness: AgentHarness,
    *   harnessInstance: ReturnType<typeof resolveHarnessInstance> | null,
    *   resolvedBinding: ResolvedChatBinding,
+   *   audioTranscriptionObserver?: ReturnType<typeof createAudioTranscriptionStatusObserver>,
    * }} input
    * @returns {Promise<{ result: AgentResult, deliveredContentSignatures: Set<string> }>}
    */
@@ -635,6 +717,7 @@ export function createConversationRunner({
     harness,
     harnessInstance,
     resolvedBinding,
+    audioTranscriptionObserver,
   }) {
     const { chatId } = turn;
     const harnessName = harness.getName();
@@ -706,6 +789,7 @@ export function createConversationRunner({
       harnessName,
       runConfig,
       bufferedTexts,
+      audioTranscriptionObserver,
     });
     log.info("Harness turn input build completed", {
       chatId,
@@ -737,12 +821,13 @@ export function createConversationRunner({
    *   chatInfo: import("../store.js").ChatRow | undefined,
    *   context: ExecuteActionContext,
    *   persona: AgentDefinition | null,
- *   harness: AgentHarness | null,
- *   harnessInstance: ReturnType<typeof resolveHarnessInstance> | null,
- *   harnessOwnerKey: string,
- *   resolvedBinding: ResolvedChatBinding,
- * }} input
- * @returns {Promise<ChatTurn | null>}
+   *   harness: AgentHarness | null,
+   *   harnessInstance: ReturnType<typeof resolveHarnessInstance> | null,
+   *   harnessOwnerKey: string,
+   *   resolvedBinding: ResolvedChatBinding,
+   *   audioTranscriptionObserver?: ReturnType<typeof createAudioTranscriptionStatusObserver>,
+   * }} input
+   * @returns {Promise<ChatTurn | null>}
    */
   async function handleLlmMessage({
     turn,
@@ -753,6 +838,7 @@ export function createConversationRunner({
     harnessInstance,
     harnessOwnerKey,
     resolvedBinding,
+    audioTranscriptionObserver = createAudioTranscriptionStatusObserver(context),
   }) {
     const { chatId, senderIds, content } = turn;
     const message = buildUserMessage(turn);
@@ -773,7 +859,7 @@ export function createConversationRunner({
     }
 
     const userText = runCoordinator.hasPendingRun(chatId)
-      ? await buildPendingRunInputText({ chatId, chatInfo, content })
+      ? await buildPendingRunInputText({ chatId, chatInfo, content, audioTranscriptionObserver })
       : getTopLevelText(content);
     const lifecycleDecision = await runCoordinator.beginRun({
       turn,
@@ -806,6 +892,7 @@ export function createConversationRunner({
       harness,
       harnessInstance,
       resolvedBinding,
+      audioTranscriptionObserver,
     });
   }
 
@@ -820,6 +907,7 @@ export function createConversationRunner({
    *   harness: AgentHarness,
    *   harnessInstance: ReturnType<typeof resolveHarnessInstance> | null,
    *   resolvedBinding: ResolvedChatBinding,
+   *   audioTranscriptionObserver?: ReturnType<typeof createAudioTranscriptionStatusObserver>,
    * }} input
    * @returns {Promise<ChatTurn | null>}
    */
@@ -832,6 +920,7 @@ export function createConversationRunner({
     harness,
     harnessInstance,
     resolvedBinding,
+    audioTranscriptionObserver,
   }) {
     const { chatId } = turn;
     /** @type {ChatTurn | null} */
@@ -846,6 +935,7 @@ export function createConversationRunner({
         harness,
         harnessInstance,
         resolvedBinding,
+        audioTranscriptionObserver,
       });
       if (result.response.length > 0) {
         const responseSignature = getDeliveredContentSignature(result.response);
@@ -952,7 +1042,13 @@ export function createConversationRunner({
         return null;
       }
       const harnessSelection = await resolveConversationHarnessSelection(chatInfo);
-      const userText = await buildPendingRunInputText({ chatId, chatInfo, content });
+      const audioTranscriptionObserver = createAudioTranscriptionStatusObserver(context);
+      const userText = await buildPendingRunInputText({
+        chatId,
+        chatInfo,
+        content,
+        audioTranscriptionObserver,
+      });
       if (!runCoordinator.hasPendingRun(chatId)) {
         const { persona, harness, harnessInstance } = resolveConversationHarnessFromSelection(harnessSelection);
         return handleLlmMessage({
@@ -964,6 +1060,7 @@ export function createConversationRunner({
           harnessInstance,
           harnessOwnerKey: harnessSelection.ownerKey,
           resolvedBinding,
+          audioTranscriptionObserver,
         });
       }
       const lifecycleDecision = await runCoordinator.beginRun({
@@ -1012,6 +1109,7 @@ export function createConversationRunner({
           harness,
           harnessInstance,
           resolvedBinding,
+          audioTranscriptionObserver,
         });
       }
       return null;

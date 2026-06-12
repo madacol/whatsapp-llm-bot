@@ -917,7 +917,155 @@ describe("createConversationRunner prompt formatting", () => {
 
     assert.deepEqual(injectedTexts, []);
     assert.deepEqual(phases, ["run:1", "transcribe", "run:2"]);
-    assert.deepEqual(secondTurn.responses.map((response) => response.text), ["ok:2"]);
+    assert.deepEqual(secondTurn.responses.map((response) => response.text), [
+      "Transcribing audio...",
+      "Transcribed audio. Inspect this message to view the transcription.",
+      "ok:2",
+    ]);
+  });
+
+  it("shows an inspectable transcribing status for audio live input", async () => {
+    const chatId = "conv-live-input-audio-transcribing-status";
+    const harnessName = "adapter-live-input-audio-transcribing-status";
+    await seedChat(chatId, { enabled: true });
+    await updateChatConfig(chatId, (current) => ({
+      ...current,
+      harness: harnessName,
+      media_to_text_models: { audio: "audio/model" },
+      harness_config: {},
+    }));
+
+    const releaseFirstRun = createDeferredVoid();
+    /** @type {string[]} */
+    const injectedTexts = [];
+    /** @type {string[]} */
+    const phases = [];
+    registerHarnessDriver({
+      name: harnessName,
+      supportsInstances: true,
+      createInstance: ({ instanceId, continuationKey }) => ({
+        harness: {
+          getName: () => harnessName,
+          getCapabilities: () => ({
+            supportsResume: true,
+            supportsCancel: true,
+            supportsLiveInput: true,
+            supportsApprovals: false,
+            supportsWorkdir: true,
+            supportsSandboxConfig: false,
+            supportsModelSelection: false,
+            supportsReasoningEffort: false,
+            supportsSessionFork: false,
+          }),
+          async run() {
+            assert.fail("semantic adapter should not use legacy run");
+          },
+          handleCommand: async () => false,
+          listSlashCommands: () => [],
+          createAdapter() {
+            return {
+              async startSession(input) {
+                return {
+                  chatId: input.chatId,
+                  harnessName,
+                  instanceId,
+                  continuationKey,
+                  status: "ready",
+                  resumeCursor: input.resumeCursor ?? null,
+                };
+              },
+              async sendTurn(input) {
+                phases.push("run:1");
+                await releaseFirstRun.promise;
+                return {
+                  response: [{ type: "text", text: "ok" }],
+                  messages: input.messages ?? [],
+                  usage: { promptTokens: 0, completionTokens: 0, cachedTokens: 0, cost: 0 },
+                };
+              },
+              interruptTurn: async () => false,
+              injectMessage: async (_chatId, text) => {
+                injectedTexts.push(text);
+                return true;
+              },
+              stopSession: async () => false,
+              listSessions: () => [],
+              rollbackThread: async () => null,
+              streamEvents: {
+                async *[Symbol.asyncIterator]() {},
+              },
+              subscribeEvents: () => () => {},
+            };
+          },
+        },
+      }),
+    });
+
+    const { createConversationRunner } = await import("../conversation/create-conversation-runner.js");
+    const runner = createConversationRunner({
+      store,
+      llmClient: /** @type {LlmClient} */ ({
+        chat: {
+          completions: {
+            create: async () => ({
+              choices: [{ message: { content: "The speaker says check deploy status." } }],
+            }),
+          },
+        },
+      }),
+    });
+
+    const firstTurn = createChatTurn({
+      chatId,
+      content: [{ type: "text", text: "first" }],
+    });
+    const firstHandled = runner.handleMessage(firstTurn.context);
+    await waitUntil(() => phases.includes("run:1"));
+
+    /** @type {MessageInspectState[]} */
+    const inspectStates = [];
+    const secondTurn = createChatTurn({
+      chatId,
+      content: [{
+        type: "audio",
+        data: Buffer.from("fake audio bytes for inspectable status").toString("base64"),
+        encoding: "base64",
+        mime_type: "audio/mp3",
+      }],
+    });
+    secondTurn.context.io.reply = async (event) => {
+      assert.equal(event.kind, "content");
+      assert.equal(event.source, "plain");
+      const content = event.content;
+      assert.equal(typeof content, "string");
+      secondTurn.responses.push({ type: "reply", text: content, source: event.source });
+      return {
+        update: async (update) => {
+          assert.equal(update.kind, "text");
+          secondTurn.responses.push({ type: "edit", text: update.text, source: event.source });
+        },
+        setInspect: (inspect) => {
+          if (inspect) inspectStates.push(inspect);
+        },
+      };
+    };
+
+    await runner.handleMessage(secondTurn.context);
+    releaseFirstRun.resolve();
+    await firstHandled;
+
+    assert.equal(injectedTexts.length, 1);
+    assert.ok(injectedTexts[0]?.includes("[Audio description: The speaker says check deploy status.]"), injectedTexts[0]);
+    assert.ok(injectedTexts[0]?.includes("Media file available in this request:"), injectedTexts[0]);
+    assert.deepEqual(secondTurn.responses.map((response) => response.text), [
+      "Transcribing audio...",
+      "Transcribed audio. Inspect this message to view the transcription.",
+    ]);
+    assert.deepEqual(inspectStates, [{
+      kind: "text",
+      text: "The speaker says check deploy status.",
+      persistOnInspect: true,
+    }]);
   });
 
   it("replays failed live input when the active harness turn stays pending", async () => {
@@ -1159,7 +1307,11 @@ describe("createConversationRunner prompt formatting", () => {
 
     assert.deepEqual(phases, ["run:1", "transcribe", "inject:false", "interrupt", "run:2"]);
     assert.match(inputs[1] ?? "", /spoken replay/);
-    assert.deepEqual(secondTurn.responses.map((response) => response.text), ["ok:2"]);
+    assert.deepEqual(secondTurn.responses.map((response) => response.text), [
+      "Transcribing audio...",
+      "Transcribed audio. Inspect this message to view the transcription.",
+      "ok:2",
+    ]);
 
     releaseFirstRun.resolve();
     await firstHandled;

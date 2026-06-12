@@ -107,6 +107,11 @@ function usesSemanticAcpContent(harnessName) {
  *   harnessName: string,
  *   runConfig: HarnessRunConfig,
  *   bufferedTexts?: string[],
+ *   audioTranscriptionObserver?: {
+ *     onAudioTranscriptionStart?: (event: { block: AudioContentBlock, modelId: string }) => void | Promise<void>,
+ *     onAudioTranscriptionComplete?: (event: { block: AudioContentBlock, modelId: string, transcription: string }) => void | Promise<void>,
+ *     onAudioTranscriptionFailure?: (event: { block: AudioContentBlock, modelId: string, error: unknown }) => void | Promise<void>,
+ *   },
  * }} input
  * @returns {Promise<HarnessTurnInput>}
  */
@@ -121,6 +126,7 @@ export async function buildHarnessTurnInput({
   harnessName,
   runConfig,
   bufferedTexts = [],
+  audioTranscriptionObserver,
 }) {
   const { externalInstructions, messages } = await prepareHarnessConversationInput({
     chatId,
@@ -142,6 +148,9 @@ export async function buildHarnessTurnInput({
       mediaToTextModels: chatInfo?.media_to_text_models ?? {},
       db: getChatDb(chatId),
       includeMediaReferences: !usesSemanticAcpContent(harnessName),
+      onAudioTranscriptionStart: audioTranscriptionObserver?.onAudioTranscriptionStart,
+      onAudioTranscriptionComplete: audioTranscriptionObserver?.onAudioTranscriptionComplete,
+      onAudioTranscriptionFailure: audioTranscriptionObserver?.onAudioTranscriptionFailure,
     }),
     messages,
     externalInstructions,
