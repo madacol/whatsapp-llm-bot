@@ -1,6 +1,5 @@
 #!/usr/bin/env node
 import { DatabaseSync } from "node:sqlite";
-import { isRuntimeStateSnapshotPath } from "../snapshot-file-policy.js";
 
 /**
  * @typedef {{
@@ -99,13 +98,6 @@ function classifyRow(row) {
   }
   if (!isRecord(payload.event)) {
     return { payload, reason: "event is not an object" };
-  }
-  if (
-    payload.event.kind === "file_change"
-    && typeof payload.event.path === "string"
-    && isRuntimeStateSnapshotPath(payload.event.path)
-  ) {
-    return { payload, reason: "ignored runtime-state file change" };
   }
   if (isTransientStatusEvent(payload.event)) {
     return { payload, reason: "transient presentation status" };

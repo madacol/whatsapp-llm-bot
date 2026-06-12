@@ -2,7 +2,6 @@ import { existsSync, readFileSync } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { isRuntimeStateSnapshotPath } from "../snapshot-file-policy.js";
 import { buildUnifiedFileDiff } from "./file-change-utils.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -154,9 +153,6 @@ function isPathIgnoredByPatterns(root, filePath, patterns) {
  * @returns {boolean}
  */
 export function isAcpFileChangeIgnored(runConfig, filePath) {
-  if (isRuntimeStateSnapshotPath(filePath)) {
-    return true;
-  }
   const root = path.resolve(runConfig?.workdir ?? process.cwd());
   const patterns = normalizePatternList(runConfig?.ignoredFileChangePaths);
   if (patterns.length === 0) {
