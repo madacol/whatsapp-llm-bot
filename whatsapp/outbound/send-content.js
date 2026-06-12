@@ -946,6 +946,21 @@ function basenameForDisplayPath(p) {
 }
 
 /**
+ * @param {string} summary
+ * @returns {{ prefix: string, path: string } | null}
+ */
+function parseRuntimePathSummary(summary) {
+  const pathMatch = summary.match(/`([^`]+)`/);
+  if (!pathMatch?.[1] || pathMatch.index == null) {
+    return null;
+  }
+  return {
+    prefix: summary.slice(0, pathMatch.index),
+    path: pathMatch[1],
+  };
+}
+
+/**
  * @param {string | undefined} previousSummary
  * @param {string} nextSummary
  * @returns {boolean}
@@ -963,6 +978,17 @@ function shouldPreserveRuntimeSummary(previousSummary, nextSummary) {
     if (previousRead.path.length > nextRead.path.length) {
       return true;
     }
+  }
+  const previousPath = parseRuntimePathSummary(previousSummary);
+  const nextPath = parseRuntimePathSummary(nextSummary);
+  if (
+    previousPath
+    && nextPath
+    && previousPath.prefix === nextPath.prefix
+    && basenameForDisplayPath(previousPath.path) === basenameForDisplayPath(nextPath.path)
+    && previousPath.path.length > nextPath.path.length
+  ) {
+    return true;
   }
   return Boolean(previousSummary)
     && hasRuntimeSummaryDetail(/** @type {string} */ (previousSummary))

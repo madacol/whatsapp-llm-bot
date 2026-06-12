@@ -437,49 +437,4 @@ describe("ACP event normalization", () => {
       output: "ok",
     });
   });
-
-  it("keeps a write tool absolute path when completion only updates its checksum", () => {
-    const model = createAcpRuntimeModel();
-    model.acceptSessionUpdate({
-      sessionId: "s1",
-      update: {
-        sessionUpdate: "tool_call",
-        toolCallId: "write-1",
-        title: "Write settings.json",
-        kind: "edit",
-        rawInput: {
-          path: "/home/mada/project/settings.json",
-          checksum: "before",
-          content: "{\"enabled\":false}\n",
-        },
-        status: "in_progress",
-      },
-    });
-
-    const completed = model.acceptSessionUpdate({
-      sessionId: "s1",
-      update: {
-        sessionUpdate: "tool_call_update",
-        toolCallId: "write-1",
-        status: "completed",
-        rawInput: {
-          path: "settings.json",
-          checksum: "after",
-          content: "{\"enabled\":false}\n",
-        },
-        content: [{ type: "text", text: "ok" }],
-      },
-    });
-
-    assert.deepEqual(completed[0]?.tool, {
-      id: "write-1",
-      name: "Write settings.json",
-      arguments: {
-        path: "/home/mada/project/settings.json",
-        checksum: "after",
-        content: "{\"enabled\":false}\n",
-      },
-      output: "ok",
-    });
-  });
 });

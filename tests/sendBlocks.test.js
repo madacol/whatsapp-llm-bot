@@ -480,6 +480,46 @@ describe("sendEvent – runtime events", () => {
     ]);
   });
 
+  it("keeps the started write-tool path when completion only changes the status icon", async () => {
+    const { sock, sent } = createMockSock();
+    const startedTool = {
+      id: "write-tool-path",
+      name: "Write",
+      arguments: { file_path: "/home/mada/project/settings.json", content: "{}\n" },
+    };
+
+    await sendEvent(sock, "runtime-write-tool-chat", {
+      kind: "runtime_event",
+      event: {
+        type: "tool.started",
+        provider: "codex",
+        tool: startedTool,
+      },
+    });
+    await sendEvent(sock, "runtime-write-tool-chat", {
+      kind: "runtime_event",
+      cwd: "/home/mada/project",
+      event: {
+        type: "tool.completed",
+        provider: "codex",
+        tool: {
+          id: "write-tool-path",
+          name: "Write",
+          arguments: { file_path: "settings.json", content: "{}\n" },
+        },
+      },
+    });
+
+    assert.deepEqual(sent.map((entry) => entry.msg), [
+      { text: "🔧 Writing `/home/mada/project/settings.json`", linkPreview: null },
+      {
+        text: "✅ Writing `/home/mada/project/settings.json`",
+        edit: { id: "msg-1", remoteJid: "runtime-write-tool-chat", fromMe: true },
+        linkPreview: null,
+      },
+    ]);
+  });
+
   it("suppresses compact ACP editing-files placeholders and renders the file-change diff instead", async () => {
     const { sock, sent } = createMockSock();
     const placeholder = {

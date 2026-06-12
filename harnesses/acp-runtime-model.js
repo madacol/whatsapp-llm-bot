@@ -42,15 +42,6 @@ function isRecord(value) {
 }
 
 /**
- * @param {Record<string, unknown>} value
- * @param {string} key
- * @returns {boolean}
- */
-function hasOwn(value, key) {
-  return Object.prototype.hasOwnProperty.call(value, key);
-}
-
-/**
  * @param {unknown} value
  * @returns {string | null}
  */
@@ -148,46 +139,6 @@ function extractTextContent(update) {
  */
 function normalizeToolArguments(rawInput) {
   return isRecord(rawInput) ? { ...rawInput } : {};
-}
-
-/**
- * @param {string} filePath
- * @returns {string}
- */
-function basenameForPath(filePath) {
-  const normalized = filePath.replaceAll("\\", "/");
-  const parts = normalized.split("/").filter(Boolean);
-  return parts.at(-1) ?? filePath;
-}
-
-/**
- * @param {Record<string, unknown>} rawInput
- * @returns {string | null}
- */
-function rawInputPath(rawInput) {
-  return stringOrNull(rawInput.path)
-    ?? stringOrNull(rawInput.file_path)
-    ?? stringOrNull(rawInput.filePath);
-}
-
-/**
- * @param {unknown} previousRawInput
- * @param {unknown} nextRawInput
- * @returns {unknown}
- */
-function mergeRawInput(previousRawInput, nextRawInput) {
-  if (!isRecord(previousRawInput) || !isRecord(nextRawInput) || !hasOwn(nextRawInput, "checksum")) {
-    return nextRawInput ?? previousRawInput;
-  }
-  const previousPath = rawInputPath(previousRawInput);
-  const nextPath = rawInputPath(nextRawInput);
-  if (!previousPath || !nextPath || previousPath === nextPath || basenameForPath(previousPath) !== nextPath) {
-    return nextRawInput;
-  }
-  return {
-    ...previousRawInput,
-    checksum: nextRawInput.checksum,
-  };
 }
 
 /**
@@ -437,7 +388,7 @@ export function mergeAcpToolCallState(previous, next) {
     title: next.title ?? previous?.title,
     kind: next.kind ?? previous?.kind,
     status: next.status ?? previous?.status,
-    rawInput: mergeRawInput(previous?.rawInput, next.rawInput),
+    rawInput: next.rawInput ?? previous?.rawInput,
     rawOutput: next.rawOutput ?? previous?.rawOutput,
     content: next.content ?? previous?.content,
   };
