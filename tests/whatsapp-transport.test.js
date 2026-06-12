@@ -539,6 +539,43 @@ describe("WhatsApp transport community creation", () => {
     }
   });
 
+  it("preserves queued event send options during replay", async () => {
+    if (!testDb || !testStore) {
+      throw new Error("Expected test DB and store to be initialized");
+    }
+
+    const chatId = `queued-options-${Date.now()}`;
+    const quoted = createWAMessage({ text: "original audio", senderId: "quote-user" });
+    /** @type {Array<{ chatId: string, message: Record<string, unknown>, options?: Record<string, unknown> }>} */
+    const sentMessages = [];
+    const socket = /** @type {import("@whiskeysockets/baileys").WASocket} */ (/** @type {unknown} */ ({
+      sendMessage: async (targetChatId, message, options) => {
+        sentMessages.push({ chatId: targetChatId, message, options });
+        return { key: { id: `sent-${sentMessages.length}`, remoteJid: targetChatId } };
+      },
+    }));
+
+    const handle = await sendOrQueueWhatsAppEvent({
+      getSocket: () => null,
+      chatId,
+      event: contentEvent("plain", "Transcribing audio...", { replyToTriggeringMessage: true }),
+      options: { quoted },
+      store: testStore,
+    });
+
+    assert.equal(handle?.deliveryStatus, "queued");
+    assert.equal((await getQueuedRows(testDb, chatId)).length, 1);
+
+    await flushQueuedWhatsAppOutbound({
+      getSocket: () => socket,
+      store: testStore,
+    });
+
+    assert.equal((await getQueuedRows(testDb, chatId)).length, 0);
+    assert.equal(sentMessages[0]?.message.text, "Transcribing audio...");
+    assert.deepEqual(sentMessages[0]?.options?.quoted, quoted);
+  });
+
   it("keeps queued outbound rows when the connection is lost during reconnect", async () => {
     if (!testDb) {
       throw new Error("Expected test DB to be initialized");

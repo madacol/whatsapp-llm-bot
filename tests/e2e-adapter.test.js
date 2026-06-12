@@ -755,9 +755,10 @@ describe("audio media-to-text provider input", () => {
     capturedInputs.length = 0;
     mockServer.addResponses("Audio asks for the current status.");
 
-    const { sock } = createMockBaileysSocket();
+    const { sock, getSentMessages } = createMockBaileysSocket();
+    const audioMessage = createWAMessage({ audio: { mimetype: "audio/mp3" }, senderId });
     await adaptIncomingMessage(
-      createWAMessage({ audio: { mimetype: "audio/mp3" }, senderId }),
+      audioMessage,
       sock,
       handleMessage,
       testConfirmRegistry,
@@ -770,6 +771,8 @@ describe("audio media-to-text provider input", () => {
     assert.equal(capturedInputs.length, 1);
     assert.ok(capturedInputs[0]?.includes("[Audio description: Audio asks for the current status.]"), capturedInputs[0]);
     assert.ok(capturedInputs[0]?.includes("Media file available in this request:"), capturedInputs[0]);
+    const transcriptionStatus = getSentMessages().find((entry) => entry.msg.text === "Transcribing audio...");
+    assert.equal(transcriptionStatus?.options?.quoted, audioMessage);
   });
 });
 

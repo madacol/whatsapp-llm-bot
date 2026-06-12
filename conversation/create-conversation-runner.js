@@ -179,7 +179,9 @@ function createAudioTranscriptionStatusObserver(context) {
    */
   async function ensureHandle() {
     if (!handlePromise) {
-      handlePromise = context.reply(contentEvent("plain", "Transcribing audio..."));
+      handlePromise = context.reply(contentEvent("plain", "Transcribing audio...", {
+        replyToTriggeringMessage: true,
+      }));
     }
     return handlePromise;
   }
