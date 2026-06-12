@@ -26,6 +26,7 @@ import { buildLiveInputText } from "./live-input-text.js";
 import { defaultRestartGate } from "../restart-gate.js";
 import { createBangCommandRouter } from "../commands/bang-command-router.js";
 import { runClearConversationCommand } from "../commands/clear-conversation-command.js";
+import { handleSlashDiffCommand } from "../slash-diff-command.js";
 import { decideTurnRoute } from "./turn-routing.js";
 import { createHarnessSessionBindingService } from "./harness-session-binding.js";
 
@@ -1183,6 +1184,21 @@ export function createConversationRunner({
       const slashCommand = clearFollowUp
         ? "clear"
         : firstBlock.text.slice(1).trim().toLowerCase();
+      if (slashCommand === "diff") {
+        const slashWorkdir = buildRunConfig(chatId, chatInfo, turn.chatName, harnessSelection.harnessName, resolvedBinding).workdir;
+        if (!slashWorkdir) {
+          await context.reply(contentEvent("error", "Could not resolve a workdir for `/diff`."));
+          return null;
+        }
+        const handledSlashDiff = await handleSlashDiffCommand({
+          command: slashCommand,
+          workdir: slashWorkdir,
+          context,
+        });
+        if (handledSlashDiff) {
+          return null;
+        }
+      }
       /** @type {HarnessCommandContext} */
       const commandInput = {
         chatId,
