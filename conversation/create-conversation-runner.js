@@ -160,16 +160,6 @@ function formatAudioTranscriptionInspectText(transcriptions) {
 }
 
 /**
- * @param {number} count
- * @returns {string}
- */
-function formatAudioTranscriptionCompleteText(count) {
-  return count === 1
-    ? "Transcribed audio. Inspect this message to view the transcription."
-    : `Transcribed ${count} audio messages. Inspect this message to view the transcriptions.`;
-}
-
-/**
  * @param {ExecuteActionContext} context
  * @returns {{
  *   onAudioTranscriptionStart: (event: { block: AudioContentBlock, modelId: string }) => Promise<void>,
@@ -213,7 +203,7 @@ function createAudioTranscriptionStatusObserver(context) {
       }
       await handle?.update({
         kind: "text",
-        text: formatAudioTranscriptionCompleteText(transcriptions.length),
+        text: "Transcribed",
       });
     },
     onAudioTranscriptionFailure: async () => {

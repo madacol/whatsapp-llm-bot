@@ -919,7 +919,7 @@ describe("createConversationRunner prompt formatting", () => {
     assert.deepEqual(phases, ["run:1", "transcribe", "run:2"]);
     assert.deepEqual(secondTurn.responses.map((response) => response.text), [
       "Transcribing audio...",
-      "Transcribed audio. Inspect this message to view the transcription.",
+      "Transcribed",
       "ok:2",
     ]);
   });
@@ -1059,7 +1059,7 @@ describe("createConversationRunner prompt formatting", () => {
     assert.ok(injectedTexts[0]?.includes("Media file available in this request:"), injectedTexts[0]);
     assert.deepEqual(secondTurn.responses.map((response) => response.text), [
       "Transcribing audio...",
-      "Transcribed audio. Inspect this message to view the transcription.",
+      "Transcribed",
     ]);
     assert.deepEqual(inspectStates, [{
       kind: "text",
@@ -1309,7 +1309,7 @@ describe("createConversationRunner prompt formatting", () => {
     assert.match(inputs[1] ?? "", /spoken replay/);
     assert.deepEqual(secondTurn.responses.map((response) => response.text), [
       "Transcribing audio...",
-      "Transcribed audio. Inspect this message to view the transcription.",
+      "Transcribed",
       "ok:2",
     ]);
 
