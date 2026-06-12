@@ -7,6 +7,37 @@ import { errorToString } from "../utils.js";
 const log = createLogger("conversation:live-input");
 
 /**
+ * @typedef {{
+ *   block: AudioContentBlock,
+ *   modelId: string,
+ * }} LiveInputAudioTranscriptionStart
+ */
+
+/**
+ * @typedef {{
+ *   block: AudioContentBlock,
+ *   modelId: string,
+ *   transcription: string,
+ * }} LiveInputAudioTranscriptionComplete
+ */
+
+/**
+ * @typedef {{
+ *   block: AudioContentBlock,
+ *   modelId: string,
+ *   error: unknown,
+ * }} LiveInputAudioTranscriptionFailure
+ */
+
+/**
+ * @typedef {{
+ *   onAudioTranscriptionStart?: (event: LiveInputAudioTranscriptionStart) => void | Promise<void>,
+ *   onAudioTranscriptionComplete?: (event: LiveInputAudioTranscriptionComplete) => void | Promise<void>,
+ *   onAudioTranscriptionFailure?: (event: LiveInputAudioTranscriptionFailure) => void | Promise<void>,
+ * }} LiveInputAudioTranscriptionObserver
+ */
+
+/**
  * @param {string} value
  * @returns {string}
  */
@@ -139,7 +170,7 @@ function renderLiveInputPrompt(blocks, options = {}) {
  *   db: ChatDb,
  *   contextMessages: ChatMessage[],
  *   currentText: string,
- * }} input
+ * } & LiveInputAudioTranscriptionObserver} input
  * @returns {Promise<IncomingContentBlock[]>}
  */
 async function augmentLiveInputBlocks(blocks, input) {
@@ -205,6 +236,7 @@ async function augmentLiveInputBlocks(blocks, input) {
         continue;
       }
       try {
+        await input.onAudioTranscriptionStart?.({ block, modelId });
         const description = await getMediaTranslation({
           block,
           contentType: "audio",
@@ -219,6 +251,7 @@ async function augmentLiveInputBlocks(blocks, input) {
           modelId,
           descriptionLength: description.length,
         });
+        await input.onAudioTranscriptionComplete?.({ block, modelId, transcription: description });
         augmented.push({ type: "text", text: `[Audio description: ${description}]` });
       } catch (error) {
         log.warn("Live input audio transcription failed", {
@@ -226,6 +259,7 @@ async function augmentLiveInputBlocks(blocks, input) {
           modelId,
           error: errorToString(error),
         });
+        await input.onAudioTranscriptionFailure?.({ block, modelId, error });
         // Keep the canonical audio block when translation fails.
       }
       continue;
@@ -246,7 +280,7 @@ async function augmentLiveInputBlocks(blocks, input) {
  *   mediaToTextModels?: { image?: string, audio?: string, video?: string, general?: string },
  *   db: ChatDb,
  *   includeMediaReferences?: boolean,
- * }} input
+ * } & LiveInputAudioTranscriptionObserver} input
  * @returns {Promise<string>}
  */
 export async function buildLiveInputText(input) {
@@ -256,6 +290,9 @@ export async function buildLiveInputText(input) {
     db: input.db,
     contextMessages: [],
     currentText: extractTopLevelText(input.content),
+    onAudioTranscriptionStart: input.onAudioTranscriptionStart,
+    onAudioTranscriptionComplete: input.onAudioTranscriptionComplete,
+    onAudioTranscriptionFailure: input.onAudioTranscriptionFailure,
   });
   return renderLiveInputPrompt(augmented, { includeMediaReferences: input.includeMediaReferences });
 }
