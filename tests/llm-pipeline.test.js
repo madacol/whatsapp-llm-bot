@@ -183,6 +183,75 @@ describe("ACP pipeline via createMessageHandler", () => {
     assert.equal((await store.getChat("pipe-clear-cont"))?.harness_session_id, null);
   });
 
+  it("starts a fresh ACP turn from text after !clear", async () => {
+    await seedAcpChat("pipe-clear-inline-prompt", { enabled: true });
+
+    await handleMessage(createChatTurn({
+      chatId: "pipe-clear-inline-prompt",
+      content: [{ type: "text", text: "Remember this secret: BRAVO" }],
+    }).context);
+    await store.saveHarnessSession("pipe-clear-inline-prompt", { id: "stale-session", kind: "codex" });
+
+    const { context, responses } = createChatTurn({
+      chatId: "pipe-clear-inline-prompt",
+      content: [{ type: "text", text: "!clear What remains after clearing?" }],
+    });
+    await handleMessage(context);
+
+    assert.deepEqual(pipelineHarnessState.stoppedSessions, ["pipe-clear-inline-prompt"]);
+    assert.ok(responses.some((response) => response.text.includes("Conversation history cleared.")));
+    assert.ok(responses.some((response) => response.text.includes("ACP response: What remains after clearing?")));
+
+    const lastTurn = capturedTurns.at(-1);
+    assert.ok(lastTurn);
+    assert.equal(lastTurn.input, "What remains after clearing?");
+    assert.equal(lastTurn.resumeCursor, null);
+    const serialized = JSON.stringify(lastTurn.messages);
+    assert.ok(!serialized.includes("BRAVO"), serialized);
+    assert.ok(serialized.includes("What remains after clearing?"), serialized);
+    assert.ok(!serialized.includes("!clear"), serialized);
+  });
+
+  it("starts a fresh ACP turn from image and caption prompt after /clear", async () => {
+    await seedAcpChat("pipe-slash-clear-image-caption", { enabled: true });
+
+    await handleMessage(createChatTurn({
+      chatId: "pipe-slash-clear-image-caption",
+      content: [{ type: "text", text: "Remember this secret: CHARLIE" }],
+    }).context);
+    await store.saveHarnessSession("pipe-slash-clear-image-caption", { id: "stale-session", kind: "codex" });
+
+    const { context, responses } = createChatTurn({
+      chatId: "pipe-slash-clear-image-caption",
+      content: [
+        {
+          type: "image",
+          encoding: "base64",
+          mime_type: "image/png",
+          data: Buffer.from("fake image bytes").toString("base64"),
+        },
+        { type: "text", text: "/clear Describe this image" },
+      ],
+    });
+    await handleMessage(context);
+
+    assert.ok(responses.some((response) => response.text.includes("Session cleared")));
+    assert.ok(responses.some((response) => response.text.includes("ACP response: Describe this image")));
+
+    const lastTurn = capturedTurns.at(-1);
+    assert.ok(lastTurn);
+    assert.ok(lastTurn.input?.includes("Describe this image"), lastTurn.input);
+    assert.ok(lastTurn.input?.includes("Media file available in this request:"), lastTurn.input);
+    assert.equal(lastTurn.resumeCursor, null);
+    const latestUser = lastTurn.messages?.at(-1);
+    assert.equal(latestUser?.role, "user");
+    assert.ok(latestUser.content.some((block) => block.type === "image"));
+    assert.ok(latestUser.content.some((block) => block.type === "text" && block.text === "Describe this image"));
+    const serialized = JSON.stringify(lastTurn.messages);
+    assert.ok(!serialized.includes("CHARLIE"), serialized);
+    assert.ok(!serialized.includes("/clear"), serialized);
+  });
+
   it("passes historical messages to ACP in chronological order", async () => {
     await seedAcpChat("pipe-order", { enabled: true });
     const threeHoursAgo = new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString();
