@@ -11,7 +11,6 @@ import {
   resolveAcpFileChangePath,
   snapshotAcpWorkdir,
 } from "../harnesses/acp-file-changes.js";
-import { isRuntimeStateSnapshotPath } from "../snapshot-file-policy.js";
 
 describe("ACP file changes", () => {
   it("resolves provider paths against the run workdir", () => {
@@ -158,7 +157,7 @@ describe("ACP file changes", () => {
     assert.ok(changes.every((event) => event.change.source === "snapshot"));
   });
 
-  it("detects ignored ACP file changes from explicit and runtime-state path policies", async () => {
+  it("detects ignored ACP file changes only from explicit path policies", async () => {
     const workdir = await fs.mkdtemp(path.join(os.tmpdir(), "acp-ignore-"));
 
     assert.equal(
@@ -178,7 +177,7 @@ describe("ACP file changes", () => {
     );
     assert.equal(
       isAcpFileChangeIgnored({ workdir }, path.join(workdir, "pgdata/root.sqlite")),
-      true,
+      false,
     );
   });
 
@@ -226,13 +225,5 @@ describe("ACP file changes", () => {
       ),
       false,
     );
-  });
-
-  it("classifies ACP runtime-state paths independently of WhatsApp presentation", () => {
-    assert.equal(isRuntimeStateSnapshotPath("auth_info_baileys/sender-key-test.json"), true);
-    assert.equal(isRuntimeStateSnapshotPath("/home/mada/whatsapp-llm-bot/pgdata/root.sqlite"), true);
-    assert.equal(isRuntimeStateSnapshotPath("/home/mada/whatsapp-llm-bot/.media/file.jpg"), true);
-    assert.equal(isRuntimeStateSnapshotPath("/tmp/acp-workdir/src/app.js"), false);
-    assert.equal(isRuntimeStateSnapshotPath("src/app.js"), false);
   });
 });
