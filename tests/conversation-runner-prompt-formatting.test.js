@@ -1,5 +1,10 @@
 import { afterEach, before, describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { execFile } from "node:child_process";
+import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import { promisify } from "node:util";
 
 process.env.TESTING = "1";
 process.env.MASTER_ID = "master-user";
@@ -7,6 +12,8 @@ process.env.MASTER_ID = "master-user";
 import { createChatTurn, createTestDb, seedChat as seedChat_ } from "./helpers.js";
 import { setDb } from "../db.js";
 import { updateChatConfig } from "../chat-config.js";
+
+const execFileAsync = promisify(execFile);
 
 /** @type {import("@electric-sql/pglite").PGlite} */
 let db;
@@ -43,6 +50,15 @@ afterEach(() => {
 const seedChat = (chatId, options) => seedChat_(db, chatId, options);
 
 /**
+ * @param {string} cwd
+ * @param {string[]} args
+ * @returns {Promise<void>}
+ */
+async function git(cwd, args) {
+  await execFileAsync("git", args, { cwd });
+}
+
+/**
  * @param {() => AgentHarness} createHarness
  * @returns {void}
  */
@@ -54,6 +70,51 @@ function registerCodexHarness(createHarness) {
     createInstance: () => ({ harness: createHarness() }),
   });
 }
+
+describe("/diff slash command", () => {
+  it("renders the current git diff as file-change events", async () => {
+    const chatId = "slash-diff-chat";
+    const repo = await fs.mkdtemp(path.join(os.tmpdir(), "runner-slash-diff-"));
+    try {
+      await git(repo, ["init"]);
+      await git(repo, ["config", "user.email", "test@example.com"]);
+      await git(repo, ["config", "user.name", "Test User"]);
+      await fs.writeFile(path.join(repo, "app.js"), "const value = 1;\n", "utf8");
+      await git(repo, ["add", "app.js"]);
+      await git(repo, ["commit", "-m", "initial"]);
+      await fs.writeFile(path.join(repo, "app.js"), "const value = 2;\n", "utf8");
+
+      await seedChat(chatId, { enabled: true });
+      await updateChatConfig(chatId, (current) => ({
+        ...current,
+        harness_cwd: repo,
+      }));
+
+      /** @type {OutboundEvent[]} */
+      const events = [];
+      const { context } = createChatTurn({
+        chatId,
+        chatName: "Diff Repo",
+        content: [{ type: "text", text: "/diff" }],
+        io: {
+          reply: async (event) => {
+            events.push(event);
+            return undefined;
+          },
+        },
+      });
+
+      await handleMessage(context);
+
+      assert.equal(events.length, 1);
+      assert.equal(events[0]?.kind, "file_change");
+      assert.equal(events[0]?.kind === "file_change" ? events[0].path : "", "app.js");
+      assert.match(events[0]?.kind === "file_change" ? events[0].diff ?? "" : "", /\+const value = 2;/);
+    } finally {
+      await fs.rm(repo, { recursive: true, force: true });
+    }
+  });
+});
 
 /**
  * @param {{
