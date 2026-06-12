@@ -412,6 +412,17 @@ export function createTurnIo({
   const selectMany = selectRuntime.createSelectMany(getSocket ?? sock, chatId);
   const confirm = confirmRuntime.createConfirm(getSocket ?? sock, chatId);
 
+  /**
+   * @param {OutboundEvent} event
+   * @returns {{ quoted?: BaileysMessage } | undefined}
+   */
+  function resolveReplyOptions(event) {
+    if (event.kind === "content" && event.replyToTriggeringMessage) {
+      return { quoted: message };
+    }
+    return undefined;
+  }
+
   /** @type {TurnIO} */
   const io = {
     send: async (event) => {
@@ -432,6 +443,7 @@ export function createTurnIo({
         getSocket: getSocketOrNull,
         chatId,
         event,
+        options: resolveReplyOptions(event),
         reactionRuntime,
         ...(outboundStore ? { store: outboundStore } : {}),
       });

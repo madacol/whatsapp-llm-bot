@@ -125,12 +125,13 @@ async function buildWhatsAppSendOptions(chatId, event, store) {
  *   getSocket: () => import("@whiskeysockets/baileys").WASocket | null,
  *   chatId: string,
  *   event: OutboundEvent,
+ *   options?: { quoted?: import("@whiskeysockets/baileys").WAMessage },
  *   reactionRuntime?: import("../runtime/reaction-runtime.js").ReactionRuntime,
  *   store?: import("../../store.js").Store,
  * }} input
  * @returns {Promise<MessageHandle | undefined>}
  */
-export async function sendOrQueueWhatsAppEvent({ getSocket, chatId, event, reactionRuntime, store }) {
+export async function sendOrQueueWhatsAppEvent({ getSocket, chatId, event, options, reactionRuntime, store }) {
   if (event.kind === "content" && event.stream) {
     const bufferedEvent = bufferStreamEvent(chatId, event);
     if (!bufferedEvent) {
@@ -145,25 +146,27 @@ export async function sendOrQueueWhatsAppEvent({ getSocket, chatId, event, react
       getSocket,
       chatId,
       event,
+      options,
       reactionRuntime,
       store,
     });
   }
 
   try {
-    return await sendOutboundEvent(sock, chatId, event, undefined, reactionRuntime, await buildWhatsAppSendOptions(chatId, event, store));
+    return await sendOutboundEvent(sock, chatId, event, options, reactionRuntime, await buildWhatsAppSendOptions(chatId, event, store));
   } catch (error) {
     if (!isRecoverableWhatsAppSendError(error)) {
       throw error;
     }
     if (isRateLimitedWhatsAppSendError(error)) {
-      const row = await enqueueWhatsAppOutbound(chatId, { kind: "event", event }, store);
+      const row = await enqueueWhatsAppOutbound(chatId, { kind: "event", event, ...(options ? { options } : {}) }, store);
       return createQueuedMessageHandle(chatId, row.id);
     }
     return queueEventAfterDebouncedRetry({
       getSocket,
       chatId,
       event,
+      options,
       reactionRuntime,
       store,
     });
@@ -175,24 +178,25 @@ export async function sendOrQueueWhatsAppEvent({ getSocket, chatId, event, react
  *   getSocket: () => import("@whiskeysockets/baileys").WASocket | null,
  *   chatId: string,
  *   event: OutboundEvent,
+ *   options?: { quoted?: import("@whiskeysockets/baileys").WAMessage },
  *   reactionRuntime?: import("../runtime/reaction-runtime.js").ReactionRuntime,
  *   store?: import("../../store.js").Store,
  * }} input
  * @returns {Promise<MessageHandle | undefined>}
  */
-async function queueEventAfterDebouncedRetry({ getSocket, chatId, event, reactionRuntime, store }) {
+async function queueEventAfterDebouncedRetry({ getSocket, chatId, event, options, reactionRuntime, store }) {
   await wait(getOutboundQueuePersistDelayMs());
   const sock = getSocket();
   if (sock) {
     try {
-      return await sendOutboundEvent(sock, chatId, event, undefined, reactionRuntime, await buildWhatsAppSendOptions(chatId, event, store));
+      return await sendOutboundEvent(sock, chatId, event, options, reactionRuntime, await buildWhatsAppSendOptions(chatId, event, store));
     } catch (error) {
       if (!isRecoverableWhatsAppSendError(error)) {
         throw error;
       }
     }
   }
-  const row = await enqueueWhatsAppOutbound(chatId, { kind: "event", event }, store);
+  const row = await enqueueWhatsAppOutbound(chatId, { kind: "event", event, ...(options ? { options } : {}) }, store);
   return createQueuedMessageHandle(chatId, row.id);
 }
 

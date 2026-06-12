@@ -124,7 +124,7 @@ async function deliverQueuedPayload(sock, chatId, payload, reactionRuntime, stor
     return undefined;
   }
   const chat = payload.event.kind === "runtime_event" ? await store?.getChat?.(chatId) : undefined;
-  return sendOutboundEvent(sock, chatId, payload.event, undefined, reactionRuntime, {
+  return sendOutboundEvent(sock, chatId, payload.event, payload.options, reactionRuntime, {
     editHandleStore: store,
     ...(chat ? { outputVisibility: resolveOutputVisibility(chat.output_visibility) } : {}),
   });

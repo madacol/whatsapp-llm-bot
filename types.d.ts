@@ -250,6 +250,7 @@ type ContentEvent = {
   source: MessageSource;
   content: SendContent;
   cwd?: string | null;
+  replyToTriggeringMessage?: boolean;
   stream?: {
     id: string;
     status: "partial" | "final";

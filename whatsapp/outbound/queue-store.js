@@ -12,6 +12,7 @@ let storeDb = null;
  * @typedef {{
  *   kind: "event";
  *   event: OutboundEvent;
+ *   options?: { quoted?: import("@whiskeysockets/baileys").WAMessage };
  * } | {
  *   kind: "text";
  *   text: string;
@@ -146,6 +147,7 @@ function isOutboundEvent(value) {
       return isMessageSource(value.source)
         && isSendContent(value.content)
         && (value.cwd === undefined || value.cwd === null || typeof value.cwd === "string")
+        && (value.replyToTriggeringMessage === undefined || typeof value.replyToTriggeringMessage === "boolean")
         && (
           value.stream === undefined
           || (
@@ -196,6 +198,16 @@ function isOutboundEvent(value) {
 
 /**
  * @param {unknown} value
+ * @returns {value is { quoted?: import("@whiskeysockets/baileys").WAMessage }}
+ */
+function isWhatsAppSendOptions(value) {
+  return value === undefined
+    || (isRecord(value)
+      && (value.quoted === undefined || isRecord(value.quoted)));
+}
+
+/**
+ * @param {unknown} value
  * @returns {value is WhatsAppOutboundQueuePayload}
  */
 function isWhatsAppOutboundQueuePayload(value) {
@@ -205,7 +217,8 @@ function isWhatsAppOutboundQueuePayload(value) {
 
   switch (value.kind) {
     case "event":
-      return isOutboundEvent(value.event);
+      return isOutboundEvent(value.event)
+        && isWhatsAppSendOptions(value.options);
     case "text":
       return typeof value.text === "string";
     default:
