@@ -9,6 +9,37 @@ import api_transport_client
 import transcribe_gemini
 
 
+def readable_transcription(value):
+    if isinstance(value, str):
+        return value.strip()
+
+    if isinstance(value, list):
+        parts = [readable_transcription(item) for item in value]
+        return "\n\n".join(part for part in parts if part)
+
+    if isinstance(value, dict):
+        transcript = value.get("transcript") or value.get("transcription") or value.get("text")
+        description = value.get("description") or value.get("audio_description")
+        notes = value.get("notes")
+
+        if isinstance(transcript, str) and transcript.strip() and not description and not notes:
+            return transcript.strip()
+
+        parts = []
+        if isinstance(transcript, str) and transcript.strip():
+            parts.append(f"Transcription: {transcript.strip()}")
+        if isinstance(description, str) and description.strip():
+            parts.append(f"Description: {description.strip()}")
+        if isinstance(notes, str) and notes.strip():
+            parts.append(f"Notes: {notes.strip()}")
+        if parts:
+            return "\n\n".join(parts)
+
+        return json.dumps(value, ensure_ascii=False)
+
+    return ""
+
+
 def extract_transcript(raw_text):
     raw_text = raw_text.strip()
     if not raw_text:
@@ -17,10 +48,10 @@ def extract_transcript(raw_text):
         parsed = json.loads(raw_text)
     except json.JSONDecodeError:
         return raw_text
-    transcript = parsed.get("transcript")
-    if isinstance(transcript, str) and transcript.strip():
-        return transcript.strip()
-    raise ValueError(f"transcriber JSON did not include transcript: {parsed}")
+    transcript = readable_transcription(parsed)
+    if transcript:
+        return transcript
+    raise ValueError(f"transcriber output did not include readable text: {parsed}")
 
 
 def main():
@@ -40,12 +71,10 @@ def main():
         file_obj,
         api_key,
         args.model,
-        (
-            "Transcribe the user's spoken command exactly. Return compact JSON with keys "
-            '"transcript", "language", and "notes". Do not include markdown.'
-        ),
+        transcribe_gemini.DEFAULT_TRANSCRIPTION_PROMPT,
     )
     transcript = extract_transcript(raw_transcript)
+    print(f"TRANSCRIPT {transcript}", flush=True)
     response = api_transport_client.send_text_turn(transcript)
 
     if args.json:

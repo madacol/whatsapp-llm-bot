@@ -13,15 +13,17 @@ def main():
     parser.add_argument("--request-id", default=None)
     parser.add_argument("--output", default=None, help="output audio path")
     parser.add_argument("--format", default=None, choices=["mp3", "pcm", "pcm16"])
+    parser.add_argument("--provider", default=None, choices=["openai", "openrouter"])
     parser.add_argument("--voice", default=None)
     parser.add_argument("--model", default=None)
+    parser.add_argument("--instructions", default=None)
     parser.add_argument("--play", action="store_true")
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args()
 
     prompt = " ".join(args.text).strip() if args.text else sys.stdin.read().strip()
     response = api_transport_client.send_text_turn(prompt, request_id=args.request_id)
-    assistant_text = response.get("text", "").strip()
+    assistant_text = api_transport_client.extract_response_text(response)
     if not assistant_text:
         raise RuntimeError(f"assistant response did not include text: {response}")
 
@@ -31,6 +33,8 @@ def main():
         model=args.model,
         voice=args.voice,
         response_format=args.format,
+        provider=args.provider,
+        instructions=args.instructions,
     )
     if args.play:
         tts_openrouter.play_audio(audio["path"], audio["format"])

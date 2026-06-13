@@ -13,9 +13,12 @@ from pathlib import Path
 
 SPEECH_URL = "https://openrouter.ai/api/v1/audio/speech"
 CHAT_URL = "https://openrouter.ai/api/v1/chat/completions"
-DEFAULT_MODEL = "openai/gpt-audio-mini"
-DEFAULT_VOICE = "alloy"
-DEFAULT_FORMAT = "pcm16"
+OPENAI_SPEECH_URL = "https://api.openai.com/v1/audio/speech"
+DEFAULT_PROVIDER = "openai"
+DEFAULT_OPENAI_MODEL = "gpt-4o-mini-tts"
+DEFAULT_OPENROUTER_MODEL = "openai/gpt-audio-mini"
+DEFAULT_VOICE = "marin"
+DEFAULT_FORMAT = "pcm"
 DEFAULT_PCM_RATE = 24000
 
 
@@ -31,20 +34,34 @@ def default_output_path(response_format):
     return out_dir / f"tts-{time.strftime('%Y%m%d-%H%M%S')}.{extension}"
 
 
-def api_key():
+def api_key(provider):
+    if provider == "openai":
+        key = os.environ.get("OPENAI_API_KEY")
+        if not key:
+            raise RuntimeError("OPENAI_API_KEY is not set")
+        return key
+
     key = os.environ.get("OPENROUTER_API_KEY") or os.environ.get("LLM_API_KEY")
     if not key:
         raise RuntimeError("OPENROUTER_API_KEY is not set")
     return key
 
 
-def request_headers():
-    return {
-        "Authorization": f"Bearer {api_key()}",
+def request_headers(provider):
+    headers = {
+        "Authorization": f"Bearer {api_key(provider)}",
         "Content-Type": "application/json",
-        "HTTP-Referer": env("OPENROUTER_HTTP_REFERER", "http://localhost/voice-assistant"),
-        "X-Title": env("OPENROUTER_APP_TITLE", "voice-assistant"),
     }
+    if provider == "openrouter":
+        headers.update({
+            "HTTP-Referer": env("OPENROUTER_HTTP_REFERER", "http://localhost/voice-assistant"),
+            "X-Title": env("OPENROUTER_APP_TITLE", "voice-assistant"),
+        })
+    return headers
+
+
+def speech_response_format(response_format):
+    return "pcm" if response_format == "pcm16" else response_format
 
 
 def synthesize_via_chat(text, output_path, model, voice, response_format, timeout, base_url):
@@ -68,7 +85,7 @@ def synthesize_via_chat(text, output_path, model, voice, response_format, timeou
         base_url or env("OPENROUTER_CHAT_URL", CHAT_URL),
         data=json.dumps(payload).encode("utf-8"),
         method="POST",
-        headers=request_headers(),
+        headers=request_headers("openrouter"),
     )
     audio_chunks = []
     transcript_parts = []
@@ -112,11 +129,12 @@ def synthesize_via_chat(text, output_path, model, voice, response_format, timeou
         "voice": voice,
         "transcript": "".join(transcript_parts).strip(),
         "route": "chat",
+        "provider": "openrouter",
     }
 
 
-def synthesize_via_speech(text, output_path, model, voice, response_format, speed, timeout, base_url):
-    speech_format = "pcm" if response_format == "pcm16" else response_format
+def synthesize_via_openrouter_speech(text, output_path, model, voice, response_format, speed, timeout, base_url):
+    speech_format = speech_response_format(response_format)
     payload = {
         "model": model,
         "input": text,
@@ -128,7 +146,7 @@ def synthesize_via_speech(text, output_path, model, voice, response_format, spee
         (base_url or env("OPENROUTER_SPEECH_URL", SPEECH_URL)).rstrip("/"),
         data=json.dumps(payload).encode("utf-8"),
         method="POST",
-        headers=request_headers(),
+        headers=request_headers("openrouter"),
     )
     try:
         with urllib.request.urlopen(req, timeout=timeout) as response:
@@ -150,6 +168,49 @@ def synthesize_via_speech(text, output_path, model, voice, response_format, spee
         "model": model,
         "voice": voice,
         "route": "speech",
+        "provider": "openrouter",
+    }
+
+
+def synthesize_via_openai_speech(text, output_path, model, voice, response_format, speed, timeout, base_url, instructions):
+    speech_format = speech_response_format(response_format)
+    payload = {
+        "model": model,
+        "input": text,
+        "voice": voice,
+        "response_format": speech_format,
+        "speed": speed,
+    }
+    if instructions:
+        payload["instructions"] = instructions
+
+    req = urllib.request.Request(
+        (base_url or env("OPENAI_SPEECH_URL", OPENAI_SPEECH_URL)).rstrip("/"),
+        data=json.dumps(payload).encode("utf-8"),
+        method="POST",
+        headers=request_headers("openai"),
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as response:
+            audio = response.read()
+            content_type = response.headers.get("content-type", "")
+    except urllib.error.HTTPError as exc:
+        body = exc.read().decode("utf-8", errors="replace")
+        raise RuntimeError(f"OpenAI speech failed with HTTP {exc.code}: {body}") from exc
+
+    if not audio:
+        raise RuntimeError("OpenAI speech returned empty audio")
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_bytes(audio)
+    return {
+        "path": str(output_path),
+        "bytes": len(audio),
+        "content_type": content_type,
+        "format": response_format,
+        "model": model,
+        "voice": voice,
+        "route": "speech",
+        "provider": "openai",
     }
 
 
@@ -164,22 +225,34 @@ def synthesize_speech(
     timeout=120,
     base_url=None,
     route=None,
+    provider=None,
+    instructions=None,
 ):
     text = text.strip()
     if not text:
         raise ValueError("text is empty")
 
+    provider = provider or env("TTS_PROVIDER", DEFAULT_PROVIDER)
+    if provider not in ("openai", "openrouter"):
+        raise ValueError(f"unsupported TTS_PROVIDER: {provider}")
+
     response_format = response_format or env("TTS_RESPONSE_FORMAT", DEFAULT_FORMAT)
-    model = model or env("TTS_MODEL", DEFAULT_MODEL)
+    model_default = DEFAULT_OPENAI_MODEL if provider == "openai" else DEFAULT_OPENROUTER_MODEL
+    model = model or env("TTS_MODEL", model_default)
     voice = voice or env("TTS_VOICE", DEFAULT_VOICE)
     speed = float(speed if speed is not None else env("TTS_SPEED", "1"))
+    instructions = instructions if instructions is not None else os.environ.get("TTS_INSTRUCTIONS", "")
     output_path = Path(output_path) if output_path else default_output_path(response_format)
-    route = route or env("TTS_ROUTE", "chat")
-    if route == "chat":
+    route = route or env("TTS_ROUTE", "speech" if provider == "openai" else "chat")
+    if provider == "openai" and route == "speech":
+        return synthesize_via_openai_speech(
+            text, output_path, model, voice, response_format, speed, timeout, base_url, instructions
+        )
+    if provider == "openrouter" and route == "chat":
         return synthesize_via_chat(text, output_path, model, voice, response_format, timeout, base_url)
-    if route == "speech":
-        return synthesize_via_speech(text, output_path, model, voice, response_format, speed, timeout, base_url)
-    raise ValueError(f"unsupported TTS_ROUTE: {route}")
+    if provider == "openrouter" and route == "speech":
+        return synthesize_via_openrouter_speech(text, output_path, model, voice, response_format, speed, timeout, base_url)
+    raise ValueError(f"unsupported TTS route/provider combination: {provider}/{route}")
 
 
 def play_audio(path, response_format, pcm_rate=None):
@@ -187,7 +260,8 @@ def play_audio(path, response_format, pcm_rate=None):
     response_format = response_format.lower()
     if response_format in ("pcm", "pcm16"):
         rate = int(pcm_rate or env("TTS_PCM_RATE", str(DEFAULT_PCM_RATE)))
-        subprocess.run(["aplay", "-q", "-f", "S16_LE", "-r", str(rate), "-c", "1", str(path)], check=True)
+        device = env("TTS_PLAYBACK_DEVICE", "default")
+        subprocess.run(["aplay", "-q", "-D", device, "-f", "S16_LE", "-r", str(rate), "-c", "1", str(path)], check=True)
         return
     players = [
         ["mpg123", "-q", str(path)],
@@ -207,10 +281,12 @@ def main():
     parser = argparse.ArgumentParser(description="Synthesize text to speech through OpenRouter.")
     parser.add_argument("text", nargs="*", help="text to speak; reads stdin if omitted")
     parser.add_argument("--output", default=None, help="output audio path")
-    parser.add_argument("--model", default=None, help=f"defaults to TTS_MODEL or {DEFAULT_MODEL}")
+    parser.add_argument("--provider", default=None, choices=["openai", "openrouter"], help="defaults to TTS_PROVIDER or openai")
+    parser.add_argument("--model", default=None, help="defaults to TTS_MODEL or the provider default")
     parser.add_argument("--voice", default=None, help=f"defaults to TTS_VOICE or {DEFAULT_VOICE}")
-    parser.add_argument("--format", default=None, choices=["mp3", "pcm", "pcm16"], help="defaults to TTS_RESPONSE_FORMAT or pcm16")
+    parser.add_argument("--format", default=None, choices=["mp3", "opus", "aac", "flac", "wav", "pcm", "pcm16"], help="defaults to TTS_RESPONSE_FORMAT or pcm")
     parser.add_argument("--speed", type=float, default=None)
+    parser.add_argument("--instructions", default=None, help="optional speech style instructions")
     parser.add_argument("--timeout", type=float, default=float(env("TTS_TIMEOUT", "120")))
     parser.add_argument("--play", action="store_true", help="play after saving")
     parser.add_argument("--json", action="store_true", help="print metadata JSON")
@@ -229,6 +305,8 @@ def main():
         timeout=args.timeout,
         base_url=args.base_url,
         route=args.route,
+        provider=args.provider,
+        instructions=args.instructions,
     )
     if args.play:
         play_audio(result["path"], result["format"])
