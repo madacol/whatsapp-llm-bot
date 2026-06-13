@@ -343,7 +343,7 @@ describe("dummy runtime tools", () => {
     assert.ok(rendered.some((text) => text.includes("✅ *Read*") && text.includes("`src/app.js`")), `Expected Read completion, got ${JSON.stringify(rendered)}`);
     assert.ok(rendered.some((text) => text.includes("✅ *Search*") && text.includes("`needle` in *src*")), `Expected Search completion, got ${JSON.stringify(rendered)}`);
     assert.ok(rendered.some((text) => text.includes("✅ *Task*") && text.includes("Review migration")), `Expected Task completion, got ${JSON.stringify(rendered)}`);
-    assert.ok(rendered.some((text) => text.includes("✅ *Search Web*") && text.includes("\"runtime migration\"")), `Expected Search Web completion, got ${JSON.stringify(rendered)}`);
+    assert.ok(rendered.some((text) => text.includes("✅ *Web*") && text.includes("\"runtime migration\"")), `Expected Web completion, got ${JSON.stringify(rendered)}`);
     assert.ok(rendered.some((text) => text.includes("Dummy tools done.")), `Expected final answer, got ${JSON.stringify(rendered)}`);
   });
 });

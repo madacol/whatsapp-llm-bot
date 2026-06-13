@@ -222,6 +222,27 @@ function isRawAcpListFilesTitle(title) {
 }
 
 /**
+ * @param {string | null} title
+ * @returns {boolean}
+ */
+function isRawAcpWebTitle(title) {
+  return typeof title === "string" && /^web\s+search(?::|$)/iu.test(title);
+}
+
+/**
+ * @param {string | null} title
+ * @returns {string | null}
+ */
+function getRawAcpWebTitleQuery(title) {
+  const match = typeof title === "string" ? /^web\s+search:\s*(.+)$/iu.exec(title) : null;
+  if (!match?.[1]) {
+    return null;
+  }
+  const query = match[1].trim();
+  return query.length > 0 ? query : null;
+}
+
+/**
  * @param {unknown} value
  * @returns {string | null}
  */
@@ -250,8 +271,23 @@ function buildWhatsAppWebRuntimeToolFromRawAcp(tool, update) {
   const rawInput = getRawAcpInput(update);
   const action = isRecord(rawInput?.action) ? rawInput.action : null;
   const actionType = nonEmptyString(action?.type);
+  const title = getRawAcpTitle(update);
   if (!rawInput || !action || !actionType) {
-    return null;
+    if (!isRawAcpWebTitle(title)) {
+      return null;
+    }
+    const query = getRawAcpWebTitleQuery(title) ?? nonEmptyString(rawInput?.query);
+    return query
+      ? {
+        ...tool,
+        name: "search_query",
+        arguments: { ...tool.arguments, q: query },
+      }
+      : {
+        ...tool,
+        name: "Web",
+        arguments: { ...tool.arguments },
+      };
   }
   switch (actionType) {
     case "search": {
@@ -290,7 +326,23 @@ function buildWhatsAppWebRuntimeToolFromRawAcp(tool, update) {
         : null;
     }
     default:
-      return null;
+      if (!isRawAcpWebTitle(title)) {
+        return null;
+      }
+      {
+        const query = getRawAcpWebTitleQuery(title) ?? nonEmptyString(rawInput.query);
+        return query
+          ? {
+            ...tool,
+            name: "search_query",
+            arguments: { ...tool.arguments, q: query },
+          }
+          : {
+            ...tool,
+            name: "Web",
+            arguments: { ...tool.arguments },
+          };
+      }
   }
 }
 
@@ -2584,14 +2636,14 @@ function formatPinnedStatusPresentation(event, state) {
         .map((block) => block.type === "text" || block.type === "markdown" ? block.text : "")
         .join("\n")
         .trim();
-      if (text !== "Thinking...") {
+      if (text !== "Thinking..." && text !== "Thought") {
         return null;
       }
       return {
         key: "thinking",
         icon: "💭",
         provider: "LLM",
-        summary: "thinking",
+        summary: text === "Thought" ? "thought" : "thinking",
       };
     }
     case "plan":

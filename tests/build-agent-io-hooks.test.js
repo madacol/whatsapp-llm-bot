@@ -294,7 +294,7 @@ describe("buildAgentIoHooks", () => {
     assert.equal(sent[2]?.event.kind === "content" ? sent[2].event.source : "", "llm");
   });
 
-  it("sends one thinking placeholder and makes it inspectable", async () => {
+  it("sends one thinking placeholder, then updates it to Thought on completion", async () => {
     const subject = createReasoningSubject();
 
     await subject.hooks.onReasoning?.({ status: "started", summaryParts: [], contentParts: [] });
