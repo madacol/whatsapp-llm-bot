@@ -456,30 +456,47 @@ export async function createHttpApiTransport(options = {}) {
 
     const turn = buildTurn(transportId, payload, record);
     activeTurnByChatId.set(payload.chatId, record.turnId);
-    try {
-      updateTurnStatus(record, "running");
-      await onTurn(turn);
-      updateTurnStatus(record, "completed");
-    } catch (error) {
-      updateTurnStatus(record, "failed");
-      log.error("HTTP API transport turn handler failed:", error);
+
+    const runTurn = async () => {
+      try {
+        updateTurnStatus(record, "running");
+        await onTurn(turn);
+        updateTurnStatus(record, "completed");
+      } catch (error) {
+        updateTurnStatus(record, "failed");
+        log.error("HTTP API transport turn handler failed:", error);
+      } finally {
+        if (activeTurnByChatId.get(payload.chatId) === record.turnId) {
+          activeTurnByChatId.delete(payload.chatId);
+        }
+      }
+    };
+
+    if (!waitForCompletion) {
+      sendJson(res, 202, {
+        turnId: record.turnId,
+        requestId: record.requestId,
+        status: "accepted",
+      });
+      void runTurn();
+      return;
+    }
+
+    await runTurn();
+    if (record.status === "failed") {
       sendJson(res, 500, {
         turnId: record.turnId,
         requestId: record.requestId,
         status: "failed",
       });
       return;
-    } finally {
-      if (activeTurnByChatId.get(payload.chatId) === record.turnId) {
-        activeTurnByChatId.delete(payload.chatId);
-      }
     }
 
-    sendJson(res, waitForCompletion ? 200 : 202, {
+    sendJson(res, 200, {
       turnId: record.turnId,
       requestId: record.requestId,
-      status: waitForCompletion ? record.status : "accepted",
-      ...(waitForCompletion ? { text: record.text } : {}),
+      status: record.status,
+      text: record.text,
     });
   }
 
@@ -496,6 +513,7 @@ export async function createHttpApiTransport(options = {}) {
       "connection": "keep-alive",
       "content-type": "text/event-stream; charset=utf-8",
     });
+    res.flushHeaders?.();
     for (const row of listEvents(chatId, after)) {
       res.write(`id: ${row.eventId}\n`);
       res.write(`data: ${JSON.stringify(row)}\n\n`);
