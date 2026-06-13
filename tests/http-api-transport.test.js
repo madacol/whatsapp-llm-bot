@@ -16,6 +16,26 @@ afterEach(async () => {
   }
 });
 
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function waitFor(assertion, timeoutMs = 1000) {
+  const deadline = Date.now() + timeoutMs;
+  let lastError;
+  while (Date.now() < deadline) {
+    try {
+      await assertion();
+      return;
+    } catch (error) {
+      lastError = error;
+      await delay(10);
+    }
+  }
+  await assertion();
+  throw lastError;
+}
+
 /**
  * @returns {Promise<Awaited<ReturnType<typeof createHttpApiTransport>>>}
  */
@@ -96,7 +116,7 @@ describe("http-api transport", () => {
     assert.equal(accepted.status, "accepted");
     assert.equal(typeof accepted.turnId, "string");
 
-    assert.equal(turns.length, 1);
+    await waitFor(() => assert.equal(turns.length, 1));
     assert.equal(turns[0]?.chatId, "api:client-1");
     assert.equal(turns[0]?.senderName, "User");
     assert.deepEqual(turns[0]?.senderIds, ["user-1"]);
@@ -148,7 +168,50 @@ describe("http-api transport", () => {
     assert.equal(firstBody.turnId, secondBody.turnId);
     assert.equal(firstBody.requestId, "duplicate-request");
     assert.equal(secondBody.requestId, "duplicate-request");
-    assert.equal(callCount, 1);
+    await waitFor(() => assert.equal(callCount, 1));
+  });
+
+  it("returns accepted before non-wait turn handler completion", async () => {
+    const transport = await createHttpApiTransport({
+      port: 0,
+      host: "127.0.0.1",
+      authToken: TOKEN,
+    });
+    transports.push(transport);
+
+    let releaseHandler = () => {};
+    const handlerReleased = new Promise((resolve) => {
+      releaseHandler = resolve;
+    });
+    let handlerStarted = false;
+    let handlerCompleted = false;
+    await transport.start(async (turn) => {
+      handlerStarted = true;
+      await handlerReleased;
+      await turn.io.reply({
+        kind: "content",
+        source: "llm",
+        content: "Async done.",
+      });
+      handlerCompleted = true;
+    });
+
+    const res = await Promise.race([
+      postTurn(transport, turnPayload("non-wait-does-not-block")),
+      delay(100).then(() => {
+        throw new Error("non-wait POST blocked on turn handler");
+      }),
+    ]);
+
+    assert.equal(res.status, 202);
+    const accepted = await res.json();
+    assert.equal(accepted.status, "accepted");
+    assert.equal(typeof accepted.turnId, "string");
+    await waitFor(() => assert.equal(handlerStarted, true));
+    assert.equal(handlerCompleted, false);
+
+    releaseHandler();
+    await waitFor(() => assert.equal(handlerCompleted, true));
   });
 
   it("returns completed assistant text in wait mode", async () => {
@@ -180,18 +243,41 @@ describe("http-api transport", () => {
     const res = await postTurn(transport, turnPayload("status-request"));
     const accepted = await res.json();
 
-    const statusRes = await fetch(`${transport.baseUrl}/api/transports/voice/turns/${accepted.turnId}`, {
-      headers: { authorization: `Bearer ${TOKEN}` },
+    let status = null;
+    await waitFor(async () => {
+      const statusRes = await fetch(`${transport.baseUrl}/api/transports/voice/turns/${accepted.turnId}`, {
+        headers: { authorization: `Bearer ${TOKEN}` },
+      });
+      assert.equal(statusRes.status, 200);
+      status = await statusRes.json();
+      assert.equal(status.status, "completed");
     });
-
-    assert.equal(statusRes.status, 200);
-    const status = await statusRes.json();
     assert.equal(status.turnId, accepted.turnId);
     assert.equal(status.requestId, "status-request");
     assert.equal(status.chatId, "api:client-1");
-    assert.equal(status.status, "completed");
     assert.equal(typeof status.createdAt, "string");
     assert.equal(typeof status.updatedAt, "string");
+  });
+
+  it("flushes event stream headers before any events are available", async () => {
+    const transport = await startTransport();
+    const controller = new AbortController();
+    try {
+      const res = await Promise.race([
+        fetch(`${transport.baseUrl}/api/transports/voice/events/stream?chatId=${encodeURIComponent("api:client-empty")}&after=0`, {
+          headers: { authorization: `Bearer ${TOKEN}` },
+          signal: controller.signal,
+        }),
+        delay(100).then(() => {
+          throw new Error("event stream headers were not flushed");
+        }),
+      ]);
+
+      assert.equal(res.status, 200);
+      assert.match(res.headers.get("content-type") ?? "", /text\/event-stream/);
+    } finally {
+      controller.abort();
+    }
   });
 
   it("rejects unauthorized requests", async () => {
