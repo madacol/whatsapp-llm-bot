@@ -709,6 +709,105 @@ describe("ACP harness", () => {
     }
   });
 
+  it("emits file changes from failed apply_patch tool calls that partially changed files", async () => {
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "acp-failed-partial-patch-"));
+    const targetPath = path.join(tempDir, "partial-patch.md");
+    await fs.writeFile(targetPath, "before\n", "utf8");
+    const harness = createAcpHarness({
+      config: {
+        command: process.execPath,
+        args: [path.join(__dirname, "fixtures", "acp-mock-agent.js")],
+      },
+    });
+    const adapter = harness.createAdapter?.({
+      name: "acp",
+      instanceId: "test",
+      continuationKey: "acp:failed-partial-patch",
+    });
+    assert.ok(adapter);
+
+    /** @type {Array<Record<string, unknown>>} */
+    const events = [];
+    const unsubscribe = adapter.subscribeEvents?.((event) => {
+      events.push(event);
+    });
+    try {
+      await adapter.startSession({ chatId: "failed-partial-patch-chat", runConfig: { workdir: tempDir } });
+      await adapter.sendTurn({
+        chatId: "failed-partial-patch-chat",
+        input: "failed partial patch",
+        messages: [{ role: "user", content: [{ type: "text", text: "failed partial patch" }] }],
+        runConfig: { workdir: tempDir },
+      });
+
+      assert.ok(events.some((event) => event.type === "tool.failed"));
+      const fileChanges = events.filter((event) => event.type === "file-change.completed");
+      assert.equal(fileChanges.length, 1);
+      const change = /** @type {{ path?: unknown, kind?: unknown, source?: unknown, oldText?: unknown, newText?: unknown, diff?: unknown }} */ (fileChanges[0]?.change ?? {});
+      assert.equal(change.path, targetPath);
+      assert.equal(change.kind, "update");
+      assert.equal(change.source, "tool");
+      assert.equal(change.oldText, "before\n");
+      assert.equal(change.newText, "after\n");
+      assert.match(String(change.diff ?? ""), /-before/);
+      assert.match(String(change.diff ?? ""), /\+after/);
+    } finally {
+      unsubscribe?.();
+    }
+  });
+
+  it("emits file changes from failed apply_patch tool calls for absolute paths outside workdir", async () => {
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "acp-failed-external-workdir-"));
+    const externalDir = await fs.mkdtemp(path.join(os.tmpdir(), "acp-failed-external-target-"));
+    const targetPath = path.join(externalDir, "external-patch.md");
+    await fs.writeFile(targetPath, "external before\n", "utf8");
+    const harness = createAcpHarness({
+      config: {
+        command: process.execPath,
+        args: [path.join(__dirname, "fixtures", "acp-mock-agent.js")],
+        env: {
+          ...process.env,
+          ACP_MOCK_EXTERNAL_PATCH_PATH: targetPath,
+        },
+      },
+    });
+    const adapter = harness.createAdapter?.({
+      name: "acp",
+      instanceId: "test",
+      continuationKey: "acp:failed-external-patch",
+    });
+    assert.ok(adapter);
+
+    /** @type {Array<Record<string, unknown>>} */
+    const events = [];
+    const unsubscribe = adapter.subscribeEvents?.((event) => {
+      events.push(event);
+    });
+    try {
+      await adapter.startSession({ chatId: "failed-external-patch-chat", runConfig: { workdir: tempDir } });
+      await adapter.sendTurn({
+        chatId: "failed-external-patch-chat",
+        input: "failed external patch",
+        messages: [{ role: "user", content: [{ type: "text", text: "failed external patch" }] }],
+        runConfig: { workdir: tempDir },
+      });
+
+      assert.ok(events.some((event) => event.type === "tool.failed"));
+      const fileChanges = events.filter((event) => event.type === "file-change.completed");
+      assert.equal(fileChanges.length, 1);
+      const change = /** @type {{ path?: unknown, kind?: unknown, source?: unknown, oldText?: unknown, newText?: unknown, diff?: unknown }} */ (fileChanges[0]?.change ?? {});
+      assert.equal(change.path, targetPath);
+      assert.equal(change.kind, "update");
+      assert.equal(change.source, "tool");
+      assert.equal(change.oldText, "external before\n");
+      assert.equal(change.newText, "external after\n");
+      assert.match(String(change.diff ?? ""), /-external before/);
+      assert.match(String(change.diff ?? ""), /\+external after/);
+    } finally {
+      unsubscribe?.();
+    }
+  });
+
   it("emits large unreported snapshot file-change batches as semantic events", async () => {
     const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "acp-snapshot-burst-"));
     const harness = createAcpHarness({

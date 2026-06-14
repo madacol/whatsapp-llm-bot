@@ -31,6 +31,15 @@ function notify(method, params) {
 }
 
 /**
+ * @returns {Promise<void>}
+ */
+function settleNotifications() {
+  return new Promise((resolve) => {
+    setTimeout(resolve, 20);
+  });
+}
+
+/**
  * @param {string} method
  * @param {Record<string, unknown>} params
  * @returns {Promise<unknown>}
@@ -246,6 +255,8 @@ const promptScenarios = [
   { match: "diff only update", handle: handleDiffOnlyUpdatePrompt },
   { match: "diff only add", handle: handleDiffOnlyAddPrompt },
   { match: "diff only delete", handle: handleDiffOnlyDeletePrompt },
+  { match: "failed partial patch", handle: handleFailedPartialPatchPrompt },
+  { match: "failed external patch", handle: handleFailedExternalPatchPrompt },
   { match: "ignored file change", handle: handleIgnoredFileChangePrompt },
   { match: "mislabel existing add", handle: handleMislabelExistingAddPrompt },
   { match: "old new no diff", handle: handleOldNewNoDiffPrompt },
@@ -883,6 +894,91 @@ async function handleDiffOnlyDeletePrompt(message) {
     "-export const value = 1;",
   ].join("\n"));
   notifyText("diff only delete done");
+  endPrompt(message);
+}
+
+/**
+ * @param {string} toolCallId
+ * @param {string} title
+ * @param {string} patch
+ */
+function notifyPatchStarted(toolCallId, title, patch) {
+  notify("session/update", {
+    sessionId,
+    update: {
+      sessionUpdate: "tool_call",
+      toolCallId,
+      title,
+      kind: "edit",
+      status: "in_progress",
+      rawInput: { patch },
+    },
+  });
+}
+
+/**
+ * @param {string} toolCallId
+ * @param {string} title
+ * @param {string} patch
+ */
+function notifyPatchFailed(toolCallId, title, patch) {
+  notify("session/update", {
+    sessionId,
+    update: {
+      sessionUpdate: "tool_call_update",
+      toolCallId,
+      title,
+      kind: "edit",
+      status: "failed",
+      rawInput: { patch },
+      content: [{ type: "text", text: "patch failed after partial write" }],
+    },
+  });
+}
+
+/** @param {Record<string, unknown>} message */
+async function handleFailedPartialPatchPrompt(message) {
+  const filePath = `${process.cwd()}/partial-patch.md`;
+  const patch = [
+    "*** Begin Patch",
+    `*** Update File: ${filePath}`,
+    "@@",
+    "-before",
+    "+after",
+    "*** Update File: missing-context.md",
+    "@@",
+    "-nope",
+    "+still nope",
+    "*** End Patch",
+  ].join("\n");
+  notifyPatchStarted("failed-partial-patch", "apply_patch", patch);
+  await settleNotifications();
+  await import("node:fs/promises").then((fs) => fs.writeFile(filePath, "after\n", "utf8"));
+  notifyPatchFailed("failed-partial-patch", "apply_patch", patch);
+  notifyText("failed partial patch done");
+  endPrompt(message);
+}
+
+/** @param {Record<string, unknown>} message */
+async function handleFailedExternalPatchPrompt(message) {
+  const filePath = process.env.ACP_MOCK_EXTERNAL_PATCH_PATH ?? `${process.cwd()}/external-patch.md`;
+  const patch = [
+    "*** Begin Patch",
+    `*** Update File: ${filePath}`,
+    "@@",
+    "-external before",
+    "+external after",
+    "*** Update File: missing-context.md",
+    "@@",
+    "-nope",
+    "+still nope",
+    "*** End Patch",
+  ].join("\n");
+  notifyPatchStarted("failed-external-patch", "apply_patch", patch);
+  await settleNotifications();
+  await import("node:fs/promises").then((fs) => fs.writeFile(filePath, "external after\n", "utf8"));
+  notifyPatchFailed("failed-external-patch", "apply_patch", patch);
+  notifyText("failed external patch done");
   endPrompt(message);
 }
 
