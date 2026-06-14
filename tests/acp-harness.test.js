@@ -313,6 +313,121 @@ describe("ACP harness", () => {
     }
   });
 
+  it("sets ACP sessions with protected paths to read-only mode by default", async () => {
+    const harness = createAcpHarness({
+      config: {
+        command: process.execPath,
+        args: [path.join(__dirname, "fixtures", "acp-mock-agent.js")],
+      },
+    });
+    const adapter = harness.createAdapter?.({
+      name: "acp",
+      instanceId: "test",
+      continuationKey: "acp:test",
+    });
+    assert.ok(adapter);
+
+    await adapter.startSession({
+      chatId: "protected-mode-chat",
+      runConfig: { workdir: process.cwd(), protectedPaths: ["protected.txt"] },
+    });
+    const result = await adapter.sendTurn({
+      chatId: "protected-mode-chat",
+      input: "config",
+      messages: [{ role: "user", content: [{ type: "text", text: "config" }] }],
+      runConfig: { workdir: process.cwd(), protectedPaths: ["protected.txt"] },
+    });
+
+    assert.deepEqual(result.response, [{
+      type: "markdown",
+      text: "model=default mode=read-only effort=medium",
+    }]);
+  });
+
+  it("auto-approves non-protected edit permission requests when protected paths are configured", async () => {
+    const harness = createAcpHarness({
+      config: {
+        command: process.execPath,
+        args: [path.join(__dirname, "fixtures", "acp-mock-agent.js")],
+      },
+    });
+    const adapter = harness.createAdapter?.({
+      name: "acp",
+      instanceId: "test",
+      continuationKey: "acp:test",
+    });
+    assert.ok(adapter);
+
+    let promptCount = 0;
+    await adapter.startSession({
+      chatId: "protected-auto-approve-chat",
+      runConfig: { workdir: process.cwd(), protectedPaths: ["protected.txt"] },
+    });
+    const result = await adapter.sendTurn({
+      chatId: "protected-auto-approve-chat",
+      input: "edit permission safe",
+      messages: [{ role: "user", content: [{ type: "text", text: "edit permission safe" }] }],
+      runConfig: { workdir: process.cwd(), protectedPaths: ["protected.txt"] },
+      hooks: {
+        onAskUser: async () => {
+          promptCount += 1;
+          return "Reject once";
+        },
+      },
+    });
+
+    assert.equal(promptCount, 0);
+    assert.deepEqual(result.response, [{
+      type: "markdown",
+      text: "{\"outcome\":{\"outcome\":\"selected\",\"optionId\":\"allow-once\"}}",
+    }]);
+  });
+
+  it("asks before approving protected edit permission requests", async () => {
+    const harness = createAcpHarness({
+      config: {
+        command: process.execPath,
+        args: [path.join(__dirname, "fixtures", "acp-mock-agent.js")],
+      },
+    });
+    const adapter = harness.createAdapter?.({
+      name: "acp",
+      instanceId: "test",
+      continuationKey: "acp:test",
+    });
+    assert.ok(adapter);
+
+    /** @type {Array<{ question: string, options: string[], descriptions?: string[] }>} */
+    const prompts = [];
+    await adapter.startSession({
+      chatId: "protected-manual-approve-chat",
+      runConfig: { workdir: process.cwd(), protectedPaths: ["protected.txt"] },
+    });
+    const result = await adapter.sendTurn({
+      chatId: "protected-manual-approve-chat",
+      input: "edit permission protected",
+      messages: [{ role: "user", content: [{ type: "text", text: "edit permission protected" }] }],
+      runConfig: { workdir: process.cwd(), protectedPaths: ["protected.txt"] },
+      hooks: {
+        onAskUser: async (question, options, _preamble, descriptions) => {
+          prompts.push({ question, options, descriptions });
+          return "Deny";
+        },
+      },
+    });
+
+    assert.equal(prompts[0]?.question, "Allow protected path change?");
+    assert.deepEqual(prompts[0]?.options, ["Allow once", "Deny"]);
+    assert.deepEqual(prompts[0]?.descriptions, [
+      "ACP edit approval: protected.txt",
+      "Matched protected pattern: protected.txt",
+    ]);
+    assert.deepEqual(result.response, [{
+      type: "markdown",
+      text: "{\"outcome\":{\"outcome\":\"selected\",\"optionId\":\"reject-once\"}}",
+    }]);
+  });
+
   it("bridges ACP elicitation requests to user input choices", async () => {
     const harness = createAcpHarness({
       config: {
