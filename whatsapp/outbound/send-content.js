@@ -25,6 +25,7 @@ const SNAPSHOT_DIFF_CONTINUATION_TIMEOUT_MS = 30 * 60 * 1000;
 const WHATSAPP_EDIT_HANDLE_TTL_MS = 14 * 60 * 1000;
 const DEFAULT_WHATSAPP_EDIT_DEBOUNCE_MS = 1000;
 const TURN_STATUS_PIN_SECONDS = 86400;
+const INSPECT_REACTION_EMOJI = "👁";
 const log = createLogger("whatsapp:outbound");
 /** @type {Map<string, WhatsAppEditHandleRecord>} */
 const inMemoryEditHandles = new Map();
@@ -3688,6 +3689,23 @@ export async function sendBlocks(sock, chatId, source, content, options, reactio
     })()
     : null;
   let persistInspectText = false;
+  let inspectReactionSent = false;
+
+  function reactWithInspectMarkerOnce() {
+    if (inspectReactionSent || !reactionRuntime || !editKey.id) {
+      return;
+    }
+    inspectReactionSent = true;
+    void sock.sendMessage(chatId, {
+      react: { text: INSPECT_REACTION_EMOJI, key: editKey },
+    }).catch((error) => {
+      log.warn("Failed to add inspect reaction marker.", {
+        chatId,
+        messageId: editKey.id,
+        error: formatErrorMessage(error),
+      });
+    });
+  }
 
   /** @type {MessageHandle} */
   const handle = {
@@ -3708,12 +3726,19 @@ export async function sendBlocks(sock, chatId, source, content, options, reactio
     },
     setInspect: (inspect) => {
       inspectState = inspect;
+      if (inspect) {
+        reactWithInspectMarkerOnce();
+      }
     },
   };
 
+  if (inspectState) {
+    reactWithInspectMarkerOnce();
+  }
+
   if (editKey.id && reactionRuntime) {
     reactionRuntime.subscribe(editKey.id, (emoji) => {
-      if (!emoji.startsWith("👁") || !inspectState) {
+      if (!emoji.startsWith(INSPECT_REACTION_EMOJI) || !inspectState) {
         return;
       }
       if (inspectState.kind === "text") {

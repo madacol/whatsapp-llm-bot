@@ -2514,6 +2514,17 @@ describe("sendBlocks – tool-call → edit pipeline", () => {
     return { sock, calls };
   }
 
+  /**
+   * @param {Array<{ method: string; args: unknown[] }>} calls
+   * @returns {Record<string, unknown>[]}
+   */
+  function sentTextMessages(calls) {
+    return calls
+      .filter((call) => call.method === "sendMessage")
+      .map((call) => /** @type {Record<string, unknown>} */ (call.args[1]))
+      .filter((msg) => typeof msg.text === "string");
+  }
+
   it("text tool-call: send → progress update → final update uses sendMessage with edit key", async () => {
     const { sock, calls } = createCaptureSock();
 
@@ -2639,6 +2650,52 @@ describe("sendBlocks – tool-call → edit pipeline", () => {
     assert.equal(editMsg.text, "🔧Read `src/app.js`\n🔧Bash `git diff`");
   });
 
+  it("reacts with the inspect emoji when a sent message becomes inspectable", async () => {
+    const { sock, calls } = createCaptureSock();
+    const reactionRuntime = createReactionRuntime();
+
+    const handle = await sendBlocks(
+      sock,
+      "chat-1",
+      "plain",
+      [{ type: "text", text: "Thinking..." }],
+      undefined,
+      reactionRuntime,
+    );
+
+    assert.ok(handle);
+    handle.setInspect({
+      kind: "reasoning",
+      summary: "*Thinking*",
+      text: "Inspectable reasoning",
+    });
+    await waitFor(() => calls.some((call) => {
+      const msg = /** @type {Record<string, unknown>} */ (call.args[1]);
+      return typeof msg.react === "object" && msg.react !== null;
+    }));
+
+    const reactionCall = calls.find((call) => {
+      const msg = /** @type {Record<string, unknown>} */ (call.args[1]);
+      return typeof msg.react === "object" && msg.react !== null;
+    });
+    assert.ok(reactionCall);
+    const reactionMsg = /** @type {{ react: { text: string, key: Record<string, unknown> } }} */ (reactionCall.args[1]);
+    assert.equal(reactionMsg.react.text, "👁");
+    assert.deepEqual(reactionMsg.react.key, { id: "msg-1", remoteJid: "chat-1" });
+
+    handle.setInspect({
+      kind: "reasoning",
+      summary: "*Thinking*",
+      text: "Updated inspectable reasoning",
+    });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    const reactionCalls = calls.filter((call) => {
+      const msg = /** @type {Record<string, unknown>} */ (call.args[1]);
+      return typeof msg.react === "object" && msg.react !== null;
+    });
+    assert.equal(reactionCalls.length, 1);
+  });
+
   it("persists full plain-text inspect output after 👁 reactions", async () => {
     const { sock, calls } = createCaptureSock();
     const reactionRuntime = createReactionRuntime();
@@ -2668,7 +2725,8 @@ describe("sendBlocks – tool-call → edit pipeline", () => {
       senderId: "user-1",
     }]);
 
-    const inspectMsg = /** @type {Record<string, unknown>} */ (calls[1].args[1]);
+    await waitFor(() => sentTextMessages(calls).length >= 2);
+    const inspectMsg = sentTextMessages(calls)[1];
     assert.equal(
       inspectMsg.text,
       "🔧 *Read*  `src/app.js`\n🔧 *Shell*  `pnpm type-check`",
@@ -2688,7 +2746,8 @@ describe("sendBlocks – tool-call → edit pipeline", () => {
       text: "... +1 earlier tools\n🔧 *Shell*  `pnpm type-check`\n🔧 *Shell*  `git diff`",
     });
 
-    const persistedEditMsg = /** @type {Record<string, unknown>} */ (calls[2].args[1]);
+    await waitFor(() => sentTextMessages(calls).length >= 3);
+    const persistedEditMsg = sentTextMessages(calls)[2];
     assert.equal(
       persistedEditMsg.text,
       "🔧 *Read*  `src/app.js`\n🔧 *Shell*  `pnpm type-check`\n🔧 *Shell*  `git diff`",
@@ -2725,7 +2784,8 @@ describe("sendBlocks – tool-call → edit pipeline", () => {
       senderId: "user-1",
     }]);
 
-    const inspectMsg = /** @type {Record<string, unknown>} */ (calls[1].args[1]);
+    await waitFor(() => sentTextMessages(calls).length >= 2);
+    const inspectMsg = sentTextMessages(calls)[1];
     assert.equal(typeof inspectMsg.text, "string");
     assert.ok(inspectMsg.text.startsWith("🔧 *Shell*  `command 000`"));
     assert.ok(inspectMsg.text.includes("_… truncated ("));
@@ -2736,7 +2796,8 @@ describe("sendBlocks – tool-call → edit pipeline", () => {
       text: "... +217 earlier tools\n🔧 *Shell*  `command 217`\n🔧 *Shell*  `command 218`\n🔧 *Shell*  `command 219`",
     });
 
-    const persistedEditMsg = /** @type {Record<string, unknown>} */ (calls[2].args[1]);
+    await waitFor(() => sentTextMessages(calls).length >= 3);
+    const persistedEditMsg = sentTextMessages(calls)[2];
     assert.equal(typeof persistedEditMsg.text, "string");
     assert.ok(persistedEditMsg.text.includes("_… truncated ("));
     assert.ok(persistedEditMsg.text.length < longInspectText.length);
@@ -2768,10 +2829,9 @@ describe("sendBlocks – tool-call → edit pipeline", () => {
       senderId: "user-1",
     }]);
 
-    assert.equal(calls.length, 2, "Expected one initial send and one inspect edit");
-    const inspectCall = calls[1];
-    assert.equal(inspectCall.method, "sendMessage");
-    const inspectMsg = /** @type {Record<string, unknown>} */ (inspectCall.args[1]);
+    await waitFor(() => sentTextMessages(calls).length >= 2);
+    assert.equal(sentTextMessages(calls).length, 2, "Expected one initial text send and one inspect edit");
+    const inspectMsg = sentTextMessages(calls)[1];
     assert.ok(typeof inspectMsg.text === "string" && inspectMsg.text.includes("*Thinking*"));
     assert.ok(typeof inspectMsg.text === "string" && inspectMsg.text.includes("Inspect the file, then patch the bug."));
   });
