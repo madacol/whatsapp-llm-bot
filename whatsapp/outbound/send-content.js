@@ -254,6 +254,12 @@ function buildWhatsAppWebRuntimeToolFromRawAcp(tool, update) {
     return null;
   }
   switch (actionType) {
+    case "other":
+      return {
+        ...tool,
+        name: "web_action_pending",
+        arguments: { ...tool.arguments },
+      };
     case "search": {
       const query = nonEmptyString(action.query)
         ?? joinedStringList(action.queries)
@@ -261,8 +267,8 @@ function buildWhatsAppWebRuntimeToolFromRawAcp(tool, update) {
       return query
         ? {
           ...tool,
-          name: "search_query",
-          arguments: { ...tool.arguments, q: query },
+          name: "web_search_action",
+          arguments: { ...tool.arguments, query },
         }
         : null;
     }

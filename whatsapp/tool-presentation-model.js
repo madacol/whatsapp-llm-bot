@@ -20,7 +20,7 @@ export function shortenPath(p, cwd) {
 }
 
 /**
- * @typedef {"Read" | "Search" | "List" | "Plan" | "Search Web" | "Open Link" | "Find On Page" | "Run Command" | "Start Agent" | "Message Agent" | "Wait For Agent" | "Resume Agent" | "Close Agent" | "Run Parallel" | "stdin"} ToolActivityTitle
+ * @typedef {"Read" | "Search" | "List" | "Plan" | "Web" | "Web search" | "Open" | "Find" | "Run Command" | "Start Agent" | "Message Agent" | "Wait For Agent" | "Resume Agent" | "Close Agent" | "Run Parallel" | "stdin"} ToolActivityTitle
  */
 
 /**
@@ -345,11 +345,39 @@ function extractToolArgs(args, key, guard) {
 function createWebSearchPresentation(query) {
   const detail = quoteForDisplay(query);
   return createSimpleActivityPresentation(
-    "Search Web",
-    "Search Web",
+    "Web search",
+    "Web search",
     detail,
     "web_search",
     createFlow("web", "Web", `search ${detail}`),
+  );
+}
+
+/**
+ * @param {string} query
+ * @returns {ActivityPresentation}
+ */
+function createResolvedWebSearchPresentation(query) {
+  const detail = quoteForDisplay(query);
+  return createSimpleActivityPresentation(
+    "Search",
+    "Search",
+    detail,
+    "web_search",
+    createFlow("web", "Web", `search ${detail}`),
+  );
+}
+
+/**
+ * @returns {ActivityPresentation}
+ */
+function createPendingWebPresentation() {
+  return createSimpleActivityPresentation(
+    "Web",
+    "Web",
+    null,
+    "web_search",
+    createFlow("web", "Web", ""),
   );
 }
 
@@ -360,8 +388,8 @@ function createWebSearchPresentation(query) {
 function createOpenLinkPresentation(refId) {
   const detail = formatWebRef(refId);
   return createSimpleActivityPresentation(
-    "Open Link",
-    "Open Link",
+    "Open",
+    "Open",
     detail,
     "open_link",
     createFlow("web", "Web", `open ${detail}`),
@@ -376,8 +404,8 @@ function createOpenLinkPresentation(refId) {
 function createFindOnPagePresentation(pattern, refId) {
   const displayPattern = quoteForDisplay(pattern);
   return createSimpleActivityPresentation(
-    "Find On Page",
-    "Find On Page",
+    "Find",
+    "Find",
     `${displayPattern} in ${formatWebRef(refId)}`,
     "find_on_page",
     createFlow("web", "Web", `find ${displayPattern}`),
@@ -479,6 +507,10 @@ function buildSdkPresentation(name, args, cwd) {
         : null;
     case "WebSearch":
       return typeof args.query === "string" ? createWebSearchPresentation(args.query) : null;
+    case "web_search_action":
+      return typeof args.query === "string" ? createResolvedWebSearchPresentation(args.query) : null;
+    case "web_action_pending":
+      return createPendingWebPresentation();
     case "update_plan":
       return createPlanPresentation(args);
     default:

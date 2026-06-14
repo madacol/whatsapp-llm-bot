@@ -935,7 +935,7 @@ describe("ACP payload to WhatsApp socket vertical slices", () => {
       typeof flushedMessages[2]?.text === "string" && flushedMessages[2].text.includes("_Plan_"),
       `Expected plan after compact close, got ${JSON.stringify(flushedMessages)}`,
     );
-    assert.equal(flushedMessages[3]?.text, "🔧 *Search Web*  \"runtime migration\"");
+    assert.equal(flushedMessages[3]?.text, "🔧 *Web search*  \"runtime migration\"");
     assert.equal(flushedMessages[3]?.edit, undefined);
   });
 
@@ -1284,9 +1284,9 @@ describe("ACP payload to WhatsApp socket vertical slices", () => {
       "tool.completed",
       "tool.completed",
     ]);
-    assert.equal(sent[0]?.msg.text, "✅ *Search Web*  \"runtime migration\"");
-    assert.equal(sent[1]?.msg.text, "✅ *Open Link*  `example.com/docs`");
-    assert.equal(sent[2]?.msg.text, "✅ *Find On Page*  \"install\" in `example.com/docs`");
+    assert.equal(sent[0]?.msg.text, "✅ *Search*  \"runtime migration\"");
+    assert.equal(sent[1]?.msg.text, "✅ *Open*  `example.com/docs`");
+    assert.equal(sent[2]?.msg.text, "✅ *Find*  \"install\" in `example.com/docs`");
   });
 
   it("renders live Codex ACP webSearch update actions from raw WhatsApp payloads", async () => {
@@ -1390,15 +1390,19 @@ describe("ACP payload to WhatsApp socket vertical slices", () => {
     ]);
     const renderedTexts = sent.map((entry) => entry.msg.text);
     assert.ok(
-      renderedTexts.includes("🔧 *Search Web*  \"OpenAI official website\""),
+      renderedTexts.includes("🔧 *Web*"),
       JSON.stringify(renderedTexts),
     );
     assert.ok(
-      renderedTexts.includes("🔧 *Open Link*  `openai.com`"),
+      renderedTexts.includes("🔧 *Search*  \"OpenAI official website\""),
       JSON.stringify(renderedTexts),
     );
     assert.ok(
-      renderedTexts.includes("🔧 *Find On Page*  \"Codex\" in `openai.com`"),
+      renderedTexts.includes("🔧 *Open*  `openai.com`"),
+      JSON.stringify(renderedTexts),
+    );
+    assert.ok(
+      renderedTexts.includes("🔧 *Find*  \"Codex\" in `openai.com`"),
       JSON.stringify(renderedTexts),
     );
   });
