@@ -19,7 +19,7 @@ import { createAcpExtensionRouter } from "./acp-extension-router.js";
 import { createHarnessRuntimeEventDispatcher } from "./harness-runtime-event-dispatcher.js";
 import { getSandboxEscapeRequest } from "./sandbox-approval.js";
 import { requestSandboxEscapeApproval } from "./sandbox-approval-coordinator.js";
-import { matchProtectedPath, requestProtectedPathApproval, restoreProtectedPath } from "./protected-paths.js";
+import { getProtectedPathPatterns, matchProtectedPath, requestProtectedPathApproval, restoreProtectedPath } from "./protected-paths.js";
 import { createLogger } from "../logger.js";
 
 const log = createLogger("harness:acp-runner");
@@ -277,6 +277,25 @@ function buildSessionParams(runConfig) {
 }
 
 /**
+ * @param {HarnessRunConfig | undefined} runConfig
+ * @returns {boolean}
+ */
+function hasProtectedPathPolicy(runConfig) {
+  return getProtectedPathPatterns(runConfig).length > 0;
+}
+
+/**
+ * @param {HarnessRunConfig | undefined} runConfig
+ * @returns {string | null}
+ */
+function getDesiredSessionMode(runConfig) {
+  if (typeof runConfig?.mode === "string" && runConfig.mode.trim()) {
+    return runConfig.mode;
+  }
+  return hasProtectedPathPolicy(runConfig) ? "read-only" : null;
+}
+
+/**
  * @returns {Record<string, unknown>}
  */
 function buildClientCapabilities() {
@@ -409,6 +428,7 @@ async function assertSandboxAccess(input) {
  *   requestDecision?: (request: { id: string, title: string, labels: string[], descriptions: string[] }) => Promise<string | null>,
  *   userInputDecision?: (request: import("./harness-runtime-events.js").HarnessRuntimeUserInputRequest) => Promise<unknown>,
  *   approvedProtectedPaths?: Set<string>,
+ *   pendingEditDiffPaths?: Map<string, string[]>,
  * }} options
  */
 function createAcpClientRequestHandler(options) {
@@ -441,11 +461,113 @@ function createAcpClientRequestHandler(options) {
 }
 
 /**
+ * @param {unknown} content
+ * @returns {string[]}
+ */
+function extractDiffContentPaths(content) {
+  if (!Array.isArray(content)) {
+    return [];
+  }
+  return content
+    .filter(isRecord)
+    .filter((block) => block.type === "diff" && typeof block.path === "string" && block.path.length > 0)
+    .map((block) => /** @type {string} */ (block.path));
+}
+
+/**
+ * @param {Record<string, unknown>} update
+ * @param {Map<string, string[]>} pendingEditDiffPaths
+ * @returns {void}
+ */
+function rememberPendingEditDiffPaths(update, pendingEditDiffPaths) {
+  if (update.sessionUpdate !== "tool_call" && update.sessionUpdate !== "tool_call_update") {
+    return;
+  }
+  const toolCallId = typeof update.toolCallId === "string" ? update.toolCallId : null;
+  if (!toolCallId || update.kind !== "edit") {
+    return;
+  }
+  const paths = extractDiffContentPaths(update.content);
+  if (paths.length > 0) {
+    pendingEditDiffPaths.set(toolCallId, paths);
+  }
+}
+
+/**
+ * @param {Record<string, unknown>[]} requestOptions
+ * @param {string[]} kinds
+ * @returns {Record<string, unknown> | null}
+ */
+function findPermissionOptionByKind(requestOptions, kinds) {
+  return requestOptions.find((option) => typeof option.kind === "string" && kinds.includes(option.kind)) ?? null;
+}
+
+/**
+ * @param {Record<string, unknown>} option
+ * @returns {string | null}
+ */
+function permissionOptionId(option) {
+  return typeof option.optionId === "string" ? option.optionId : null;
+}
+
+/**
+ * @param {{
+ *   params: Record<string, unknown>,
+ *   requestOptions: Record<string, unknown>[],
+ *   runConfig?: HarnessRunConfig,
+ *   hooks: Pick<Required<AgentIOHooks>, "onAskUser">,
+ *   approvedProtectedPaths?: Set<string>,
+ *   pendingEditDiffPaths?: Map<string, string[]>,
+ * }} input
+ * @returns {Promise<string | null>}
+ */
+async function resolveProtectedEditPermissionOptionId(input) {
+  if (!hasProtectedPathPolicy(input.runConfig)) {
+    return null;
+  }
+  const toolCall = isRecord(input.params.toolCall) ? input.params.toolCall : {};
+  if (toolCall.kind !== "edit") {
+    return null;
+  }
+  const toolCallId = typeof toolCall.toolCallId === "string" ? toolCall.toolCallId : null;
+  const paths = extractDiffContentPaths(toolCall.content);
+  const pendingPaths = toolCallId ? input.pendingEditDiffPaths?.get(toolCallId) ?? [] : [];
+  const candidatePaths = paths.length > 0 ? paths : pendingPaths;
+  if (candidatePaths.length === 0) {
+    return null;
+  }
+  const protectedPaths = candidatePaths
+    .map((filePath) => matchProtectedPath(input.runConfig, filePath))
+    .filter((match) => match.protected);
+  const allowOptionId = permissionOptionId(findPermissionOptionByKind(input.requestOptions, ["allow_once", "allow_always"]) ?? input.requestOptions[0] ?? {});
+  const rejectOptionId = permissionOptionId(findPermissionOptionByKind(input.requestOptions, ["reject_once", "reject_always"]) ?? input.requestOptions.at(-1) ?? {});
+  if (protectedPaths.length === 0) {
+    return allowOptionId;
+  }
+  for (const protectedPath of protectedPaths) {
+    const approval = await requestProtectedPathApproval({
+      runConfig: input.runConfig,
+      filePath: protectedPath.resolvedPath,
+      action: "ACP edit approval",
+      hooks: input.hooks,
+    });
+    if (!approval.allowed) {
+      return rejectOptionId;
+    }
+    input.approvedProtectedPaths?.add(approval.match.resolvedPath);
+  }
+  return allowOptionId;
+}
+
+/**
  * @param {Record<string, unknown>} message
  * @param {{
  *   hooks: Pick<Required<AgentIOHooks>, "onAskUser">,
+ *   runConfig?: HarnessRunConfig,
  *   emitRuntimeEvent: (event: import("./harness-runtime-events.js").HarnessRuntimeEvent) => Promise<void>,
  *   requestDecision?: (request: { id: string, title: string, labels: string[], descriptions: string[] }) => Promise<string | null>,
+ *   approvedProtectedPaths?: Set<string>,
+ *   pendingEditDiffPaths?: Map<string, string[]>,
  * }} options
  * @returns {Promise<{ outcome: { outcome: "selected", optionId: string } | { outcome: "cancelled" } }>}
  */
@@ -464,7 +586,6 @@ async function handleAcpPermissionRequest(message, options) {
   const id = typeof message.id === "number" || typeof message.id === "string"
     ? `acp-request:${message.id}`
     : `acp-request:${Date.now()}`;
-  const externalDecision = options.requestDecision?.({ id, title, labels, descriptions });
   await options.emitRuntimeEvent({
     type: "request.opened",
     provider: "acp",
@@ -476,6 +597,28 @@ async function handleAcpPermissionRequest(message, options) {
     },
     raw: createAcpRawPayload("session/request_permission", message.params),
   });
+  const protectedEditOptionId = await resolveProtectedEditPermissionOptionId({
+    params,
+    requestOptions,
+    runConfig: options.runConfig,
+    hooks: options.hooks,
+    approvedProtectedPaths: options.approvedProtectedPaths,
+    pendingEditDiffPaths: options.pendingEditDiffPaths,
+  });
+  if (protectedEditOptionId) {
+    await options.emitRuntimeEvent({
+      type: "request.resolved",
+      provider: "acp",
+      request: {
+        id,
+        kind: "tool-user-input",
+        summary: `selected:${protectedEditOptionId}`,
+      },
+      raw: createAcpRawPayload("session/request_permission", { optionId: protectedEditOptionId }),
+    });
+    return { outcome: { outcome: "selected", optionId: protectedEditOptionId } };
+  }
+  const externalDecision = options.requestDecision?.({ id, title, labels, descriptions });
   const hookDecision = options.hooks.onAskUser(`Allow *${title}*?`, labels, undefined, descriptions);
   const choice = await (externalDecision
     ? Promise.race([externalDecision, hookDecision])
@@ -988,7 +1131,7 @@ async function applySessionConfigOptions(input) {
   const customConfigValues = isRecord(input.runConfig?.configValues) ? input.runConfig.configValues : {};
   const targets = [
     { category: /** @type {"model"} */ ("model"), desired: input.runConfig?.model ?? null },
-    { category: /** @type {"mode"} */ ("mode"), desired: input.runConfig?.mode ?? null },
+    { category: /** @type {"mode"} */ ("mode"), desired: getDesiredSessionMode(input.runConfig) },
     { category: /** @type {"thought_level"} */ ("thought_level"), desired: input.runConfig?.reasoningEffort ?? null },
   ];
   for (const target of targets) {
@@ -1320,6 +1463,8 @@ export async function startAcpRun(input) {
   const emittedFileChangePaths = new Set();
   /** @type {Set<string>} */
   const approvedProtectedPaths = new Set();
+  /** @type {Map<string, string[]>} */
+  const pendingEditDiffPaths = new Map();
   const runtimeModel = createAcpRuntimeModel();
   const emitRuntimeEvent = async (/** @type {import("./harness-runtime-events.js").HarnessRuntimeEvent} */ event) => {
     const reconciled = reconcileAcpFileChangeWithBaseline(event, beforeSnapshot, input.runConfig?.workdir);
@@ -1383,6 +1528,7 @@ export async function startAcpRun(input) {
     requestDecision: input.requestDecision,
     userInputDecision: input.userInputDecision,
     approvedProtectedPaths,
+    pendingEditDiffPaths,
   });
   const { connection, capabilities } = await openInitializedAcpConnection(input, handleRequest);
   let sessionId = input.sessionId ?? null;
@@ -1403,6 +1549,10 @@ export async function startAcpRun(input) {
       if (message.method !== "session/update" || !isRecord(message.params)) {
         await extensionRouter.handleNotification(message);
         continue;
+      }
+      const update = isRecord(message.params.update) ? message.params.update : null;
+      if (update) {
+        rememberPendingEditDiffPaths(update, pendingEditDiffPaths);
       }
       const events = runtimeModel.acceptSessionUpdate(message.params);
       for (const event of events) {

@@ -111,6 +111,7 @@ function buildConfigOptions() {
       options: [
         { value: "code", name: "Code" },
         { value: "plan", name: "Plan" },
+        { value: "read-only", name: "Read Only" },
       ],
     },
   ];
@@ -230,6 +231,8 @@ const promptScenarios = [
   { match: "all statuses", handle: handleAllStatusesPrompt },
   { match: "action focused pinned status", handle: handleActionFocusedPinnedStatusPrompt },
   { match: "runtime error status", handle: handleRuntimeErrorStatusPrompt },
+  { match: "edit permission safe", handle: handleSafeEditPermissionPrompt },
+  { match: "edit permission protected", handle: handleProtectedEditPermissionPrompt },
   { match: "permission", handle: handlePermissionPrompt },
   { match: "elicitation", handle: handleElicitationPrompt },
   { match: "unknown extension", handle: handleUnknownExtensionPrompt },
@@ -675,6 +678,58 @@ async function handlePermissionPrompt(message) {
 
 /**
  * @param {Record<string, unknown>} message
+ * @param {string} filePath
+ * @returns {Promise<unknown>}
+ */
+async function requestEditPermission(message, filePath) {
+  const sid = sessionId ?? "mock-session-1";
+  const toolCallId = `edit-permission:${filePath}`;
+  notify("session/update", {
+    sessionId: sid,
+    update: {
+      sessionUpdate: "tool_call",
+      toolCallId,
+      title: `Edit ${filePath}`,
+      kind: "edit",
+      status: "in_progress",
+      content: [{ type: "diff", path: filePath, oldText: "old\n", newText: "new\n" }],
+    },
+  });
+  const permission = await request("session/request_permission", {
+    sessionId: sid,
+    toolCall: {
+      toolCallId,
+      title: `Edit ${filePath}`,
+      kind: "edit",
+      status: "pending",
+    },
+    options: [
+      { optionId: "allow-once", name: "Allow once", kind: "allow_once" },
+      { optionId: "reject-once", name: "Reject once", kind: "reject_once" },
+    ],
+  });
+  notifyText(JSON.stringify(permission));
+  endPrompt(message);
+}
+
+/**
+ * @param {Record<string, unknown>} message
+ * @returns {Promise<void>}
+ */
+async function handleSafeEditPermissionPrompt(message) {
+  await requestEditPermission(message, "safe.txt");
+}
+
+/**
+ * @param {Record<string, unknown>} message
+ * @returns {Promise<void>}
+ */
+async function handleProtectedEditPermissionPrompt(message) {
+  await requestEditPermission(message, "protected.txt");
+}
+
+/**
+ * @param {Record<string, unknown>} message
  * @returns {Promise<void>}
  */
 async function handleElicitationPrompt(message) {
@@ -938,5 +993,3 @@ process.stdin.on("data", (chunk) => {
     void handleMessage(message);
   }
 });
-
-await new Promise(() => {});
