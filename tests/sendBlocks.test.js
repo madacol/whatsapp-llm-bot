@@ -300,7 +300,7 @@ describe("sendEvent – compact tool activity", () => {
       {
         name: "WebSearch",
         args: { query: "runtime migration" },
-        expected: "Web*  \"runtime migration\"",
+        expected: "Search Web*  \"runtime migration\"",
       },
       {
         name: "spawn_agent",
@@ -595,7 +595,7 @@ describe("sendEvent – runtime events", () => {
       {
         name: "WebSearch",
         args: { query: "runtime migration" },
-        expected: "Web*  \"runtime migration\"",
+        expected: "Search Web*  \"runtime migration\"",
       },
       {
         name: "spawn_agent",

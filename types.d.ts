@@ -157,7 +157,7 @@ type ToolActivityTitle =
   | "Search"
   | "List"
   | "Plan"
-  | "Web"
+  | "Search Web"
   | "Open Link"
   | "Find On Page"
   | "Run Command"

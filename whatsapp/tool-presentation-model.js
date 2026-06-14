@@ -20,7 +20,7 @@ export function shortenPath(p, cwd) {
 }
 
 /**
- * @typedef {"Read" | "Search" | "List" | "Plan" | "Web" | "Open Link" | "Find On Page" | "Run Command" | "Start Agent" | "Message Agent" | "Wait For Agent" | "Resume Agent" | "Close Agent" | "Run Parallel" | "stdin"} ToolActivityTitle
+ * @typedef {"Read" | "Search" | "List" | "Plan" | "Search Web" | "Open Link" | "Find On Page" | "Run Command" | "Start Agent" | "Message Agent" | "Wait For Agent" | "Resume Agent" | "Close Agent" | "Run Parallel" | "stdin"} ToolActivityTitle
  */
 
 /**
@@ -345,8 +345,8 @@ function extractToolArgs(args, key, guard) {
 function createWebSearchPresentation(query) {
   const detail = quoteForDisplay(query);
   return createSimpleActivityPresentation(
-    "Web",
-    "Web",
+    "Search Web",
+    "Search Web",
     detail,
     "web_search",
     createFlow("web", "Web", `search ${detail}`),

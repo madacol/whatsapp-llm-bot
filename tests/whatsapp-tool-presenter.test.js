@@ -42,7 +42,7 @@ describe("WhatsApp tool presenter", () => {
       getToolCallSummary("search_query", {
         search_query: [{ q: "UTC+00:00" }],
       }),
-      "*Web*  \"UTC+00:00\"",
+      "*Search Web*  \"UTC+00:00\"",
     );
     assert.equal(
       getToolCallSummary("open", {
