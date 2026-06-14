@@ -5,10 +5,12 @@ import os from "node:os";
 import path from "node:path";
 import {
   collectAcpSnapshotFileChanges,
+  collectAcpTargetedFileChanges,
   emitAcpSnapshotFileChanges,
   isAcpFileChangeIgnored,
   reconcileAcpFileChangeWithBaseline,
   resolveAcpFileChangePath,
+  snapshotAcpPaths,
   snapshotAcpWorkdir,
 } from "../harnesses/acp-file-changes.js";
 
@@ -155,6 +157,43 @@ describe("ACP file changes", () => {
     assert.equal(changes.length, 26);
     assert.ok(changes.every((event) => event.type === "file-change.completed"));
     assert.ok(changes.every((event) => event.change.source === "snapshot"));
+  });
+
+  it("snapshots and diffs explicit paths outside the run workdir", async () => {
+    const workdir = await fs.mkdtemp(path.join(os.tmpdir(), "acp-target-workdir-"));
+    const externalRoot = await fs.mkdtemp(path.join(os.tmpdir(), "acp-target-external-"));
+    const updatedPath = path.join(externalRoot, "skill.md");
+    const addedPath = path.join(externalRoot, "new.md");
+    const deletedPath = path.join(externalRoot, "old.md");
+
+    await fs.writeFile(updatedPath, "old skill\n", "utf8");
+    await fs.writeFile(deletedPath, "delete me\n", "utf8");
+    const before = await snapshotAcpPaths(workdir, [updatedPath, addedPath, deletedPath]);
+    await fs.writeFile(updatedPath, "new skill\n", "utf8");
+    await fs.writeFile(addedPath, "new file\n", "utf8");
+    await fs.rm(deletedPath);
+    const after = await snapshotAcpPaths(workdir, [updatedPath, addedPath, deletedPath]);
+
+    const changes = collectAcpTargetedFileChanges({
+      before,
+      after,
+      emittedPaths: new Set(),
+      summary: "apply_patch",
+      raw: { source: "test" },
+    });
+
+    assert.deepEqual(changes.map((event) => [event.change.path, event.change.kind]), [
+      [updatedPath, "update"],
+      [addedPath, "add"],
+      [deletedPath, "delete"],
+    ]);
+    assert.deepEqual(changes.map((event) => [event.change.oldText, event.change.newText]), [
+      ["old skill\n", "new skill\n"],
+      [undefined, "new file\n"],
+      ["delete me\n", undefined],
+    ]);
+    assert.match(String(changes[0].change.diff ?? ""), /-old skill/);
+    assert.match(String(changes[0].change.diff ?? ""), /\+new skill/);
   });
 
   it("detects ignored ACP file changes only from explicit path policies", async () => {

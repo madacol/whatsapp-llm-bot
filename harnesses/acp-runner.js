@@ -8,13 +8,16 @@ import { hasAcpSessionCapability, hasMadabotAcpSessionCapability, supportsAcpLoa
 import { createAcpRawPayload, createAcpRuntimeModel, normalizeAcpUsage } from "./acp-events.js";
 import { createAcpFilesystemCapability } from "./acp-filesystem-capability.js";
 import {
+  collectAcpTargetedFileChanges,
   collectAcpSnapshotFileChanges,
   emitAcpSnapshotFileChangeEvents,
   isAcpFileChangeIgnored,
   reconcileAcpFileChangeWithBaseline,
   resolveAcpFileChangePath,
+  snapshotAcpPaths,
   snapshotAcpWorkdir,
 } from "./acp-file-changes.js";
+import { extractApplyPatchTargetPaths } from "./apply-patch-parser.js";
 import { createAcpExtensionRouter } from "./acp-extension-router.js";
 import { createHarnessRuntimeEventDispatcher } from "./harness-runtime-event-dispatcher.js";
 import { getSandboxEscapeRequest } from "./sandbox-approval.js";
@@ -490,6 +493,108 @@ function rememberPendingEditDiffPaths(update, pendingEditDiffPaths) {
   const paths = extractDiffContentPaths(update.content);
   if (paths.length > 0) {
     pendingEditDiffPaths.set(toolCallId, paths);
+  }
+}
+
+/**
+ * @param {Record<string, unknown>} update
+ * @returns {string | null}
+ */
+function readApplyPatchToolCallId(update) {
+  if (update.sessionUpdate !== "tool_call" && update.sessionUpdate !== "tool_call_update") {
+    return null;
+  }
+  if (update.kind !== "edit") {
+    return null;
+  }
+  return typeof update.toolCallId === "string" && update.toolCallId
+    ? update.toolCallId
+    : null;
+}
+
+/**
+ * @param {Record<string, unknown>} update
+ * @returns {boolean}
+ */
+function isTerminalApplyPatchUpdate(update) {
+  return update.status === "completed" || update.status === "failed" || update.status === "cancelled";
+}
+
+/**
+ * @param {Record<string, unknown>} update
+ * @returns {string}
+ */
+function getApplyPatchSummary(update) {
+  return typeof update.title === "string" && update.title.trim()
+    ? update.title.trim()
+    : "apply_patch";
+}
+
+/**
+ * @param {Record<string, unknown>} update
+ * @param {Map<string, {
+ *   before: Map<string, string>,
+ *   paths: string[],
+ *   summary: string,
+ * }>} pendingApplyPatchSnapshots
+ * @param {HarnessRunConfig | undefined} runConfig
+ * @returns {Promise<void>}
+ */
+async function rememberApplyPatchSnapshot(update, pendingApplyPatchSnapshots, runConfig) {
+  const toolCallId = readApplyPatchToolCallId(update);
+  if (!toolCallId || pendingApplyPatchSnapshots.has(toolCallId)) {
+    return;
+  }
+  const paths = extractApplyPatchTargetPaths(update.rawInput);
+  if (paths.length === 0) {
+    return;
+  }
+  const before = await snapshotAcpPaths(runConfig?.workdir, paths);
+  pendingApplyPatchSnapshots.set(toolCallId, {
+    before,
+    paths,
+    summary: getApplyPatchSummary(update),
+  });
+}
+
+/**
+ * @param {Record<string, unknown>} update
+ * @param {Map<string, {
+ *   before: Map<string, string>,
+ *   paths: string[],
+ *   summary: string,
+ * }>} pendingApplyPatchSnapshots
+ * @param {HarnessRunConfig | undefined} runConfig
+ * @param {Set<string>} emittedFileChangePaths
+ * @param {(event: import("./harness-runtime-events.js").HarnessRuntimeEvent) => Promise<void>} emitRuntimeEvent
+ * @returns {Promise<void>}
+ */
+async function emitTerminalApplyPatchFileChanges(
+  update,
+  pendingApplyPatchSnapshots,
+  runConfig,
+  emittedFileChangePaths,
+  emitRuntimeEvent,
+) {
+  const toolCallId = readApplyPatchToolCallId(update);
+  if (!toolCallId || !isTerminalApplyPatchUpdate(update)) {
+    return;
+  }
+  const snapshot = pendingApplyPatchSnapshots.get(toolCallId);
+  if (!snapshot) {
+    return;
+  }
+  pendingApplyPatchSnapshots.delete(toolCallId);
+  const after = await snapshotAcpPaths(runConfig?.workdir, snapshot.paths);
+  const events = collectAcpTargetedFileChanges({
+    before: snapshot.before,
+    after,
+    emittedPaths: emittedFileChangePaths,
+    summary: snapshot.summary,
+    raw: createAcpRawPayload("session/update", { update }),
+  });
+  for (const event of events) {
+    await emitRuntimeEvent(event);
   }
 }
 
@@ -1465,6 +1570,12 @@ export async function startAcpRun(input) {
   const approvedProtectedPaths = new Set();
   /** @type {Map<string, string[]>} */
   const pendingEditDiffPaths = new Map();
+  /** @type {Map<string, {
+   *   before: Map<string, string>,
+   *   paths: string[],
+   *   summary: string,
+   * }>} */
+  const pendingApplyPatchSnapshots = new Map();
   const runtimeModel = createAcpRuntimeModel();
   const emitRuntimeEvent = async (/** @type {import("./harness-runtime-events.js").HarnessRuntimeEvent} */ event) => {
     const reconciled = reconcileAcpFileChangeWithBaseline(event, beforeSnapshot, input.runConfig?.workdir);
@@ -1553,10 +1664,20 @@ export async function startAcpRun(input) {
       const update = isRecord(message.params.update) ? message.params.update : null;
       if (update) {
         rememberPendingEditDiffPaths(update, pendingEditDiffPaths);
+        await rememberApplyPatchSnapshot(update, pendingApplyPatchSnapshots, input.runConfig);
       }
       const events = runtimeModel.acceptSessionUpdate(message.params);
       for (const event of events) {
         await emitRuntimeEvent(event);
+      }
+      if (update) {
+        await emitTerminalApplyPatchFileChanges(
+          update,
+          pendingApplyPatchSnapshots,
+          input.runConfig,
+          emittedFileChangePaths,
+          emitRuntimeEvent,
+        );
       }
     }
   })();

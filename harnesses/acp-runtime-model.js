@@ -1,4 +1,5 @@
 import { inferFileChangeKindFromUnifiedDiff, isFileChangeKind } from "./file-change-utils.js";
+import { extractApplyPatchText } from "./apply-patch-parser.js";
 
 /**
  * ACP runtime model.
@@ -278,26 +279,6 @@ function extractDiffBlocks(content) {
   return content
     .filter(isRecord)
     .filter((block) => block.type === "diff" && typeof block.path === "string");
-}
-
-/**
- * @param {unknown} rawInput
- * @returns {string | null}
- */
-function extractApplyPatchText(rawInput) {
-  if (typeof rawInput === "string") {
-    return rawInput.includes("*** Begin Patch") ? rawInput : null;
-  }
-  if (!isRecord(rawInput)) {
-    return null;
-  }
-  for (const key of ["patch", "input", "content", "text", "cmd", "command"]) {
-    const value = rawInput[key];
-    if (typeof value === "string" && value.includes("*** Begin Patch")) {
-      return value;
-    }
-  }
-  return null;
 }
 
 /**

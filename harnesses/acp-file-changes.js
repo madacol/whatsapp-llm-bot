@@ -28,6 +28,32 @@ export async function snapshotAcpWorkdir(workdir) {
 
 /**
  * @param {string | null | undefined} workdir
+ * @param {string[]} filePaths
+ * @returns {Promise<Map<string, string>>}
+ */
+export async function snapshotAcpPaths(workdir, filePaths) {
+  /** @type {Map<string, string>} */
+  const snapshot = new Map();
+  const resolvedPaths = [...new Set(filePaths.map((filePath) => resolveAcpFileChangePath(workdir, filePath)))];
+  for (const filePath of resolvedPaths) {
+    try {
+      const stat = await fs.stat(filePath);
+      if (!stat.isFile() || stat.size > MAX_SNAPSHOT_FILE_BYTES) {
+        continue;
+      }
+      const content = await fs.readFile(filePath, "utf8");
+      if (!content.includes("\0")) {
+        snapshot.set(filePath, content);
+      }
+    } catch {
+      // Targeted snapshots are best-effort; missing files are represented by absence.
+    }
+  }
+  return snapshot;
+}
+
+/**
+ * @param {string | null | undefined} workdir
  * @param {string} filePath
  * @returns {string}
  */
@@ -266,6 +292,66 @@ export function collectAcpSnapshotFileChanges(input) {
         oldText,
       },
       raw: { source: "workdir-snapshot" },
+    });
+  }
+  return events;
+}
+
+/**
+ * @param {{
+ *   before: Map<string, string>,
+ *   after: Map<string, string>,
+ *   emittedPaths: Set<string>,
+ *   summary: string,
+ *   raw: Record<string, unknown>,
+ * }} input
+ * @returns {import("./harness-runtime-events.js").HarnessRuntimeFileChangeEvent[]}
+ */
+export function collectAcpTargetedFileChanges(input) {
+  /** @type {import("./harness-runtime-events.js").HarnessRuntimeFileChangeEvent[]} */
+  const events = [];
+  for (const [filePath, newText] of input.after) {
+    if (input.emittedPaths.has(filePath)) {
+      continue;
+    }
+    const oldText = input.before.get(filePath);
+    if (oldText === newText) {
+      continue;
+    }
+    const kind = oldText === undefined ? "add" : "update";
+    const diff = buildUnifiedFileDiff(filePath, oldText, newText);
+    events.push({
+      type: "file-change.completed",
+      provider: "acp",
+      change: {
+        path: filePath,
+        summary: input.summary,
+        kind,
+        source: "tool",
+        ...(oldText !== undefined ? { oldText } : {}),
+        newText,
+        ...(diff ? { diff } : {}),
+      },
+      raw: input.raw,
+    });
+  }
+  for (const [filePath, oldText] of input.before) {
+    if (input.emittedPaths.has(filePath) || input.after.has(filePath)) {
+      continue;
+    }
+    const diff = buildUnifiedFileDiff(filePath, oldText, undefined);
+    events.push({
+      type: "file-change.completed",
+      provider: "acp",
+      change: {
+        path: filePath,
+        summary: input.summary,
+        kind: "delete",
+        source: "tool",
+        oldText,
+        ...(diff ? { diff } : {}),
+      },
+      raw: input.raw,
     });
   }
   return events;
