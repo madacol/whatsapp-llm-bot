@@ -42,20 +42,20 @@ describe("WhatsApp tool presenter", () => {
       getToolCallSummary("search_query", {
         search_query: [{ q: "UTC+00:00" }],
       }),
-      "*Search Web*  \"UTC+00:00\"",
+      "*Web search*  \"UTC+00:00\"",
     );
     assert.equal(
       getToolCallSummary("open", {
         ref_id: "https://en.wikipedia.org/wiki/UTC%2B00%3A00",
       }),
-      "*Open Link*  `en.wikipedia.org/wiki/UTC%2B00%3A00`",
+      "*Open*  `en.wikipedia.org/wiki/UTC%2B00%3A00`",
     );
     assert.equal(
       getToolCallSummary("find", {
         ref_id: "https://en.wikipedia.org/wiki/UTC%2B00%3A00",
         pattern: "UTC+00:00 is an identifier for a time offset from UTC of +00:00.",
       }),
-      "*Find On Page*  \"UTC+00:00 is an identifier for a time offset from UTC of +00:00.\" in `en.wikipedia.org/wiki/UTC%2B00%3A00`",
+      "*Find*  \"UTC+00:00 is an identifier for a time offset from UTC of +00:00.\" in `en.wikipedia.org/wiki/UTC%2B00%3A00`",
     );
   });
 

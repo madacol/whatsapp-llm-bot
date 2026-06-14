@@ -300,7 +300,7 @@ describe("sendEvent – compact tool activity", () => {
       {
         name: "WebSearch",
         args: { query: "runtime migration" },
-        expected: "Search Web*  \"runtime migration\"",
+        expected: "Web search*  \"runtime migration\"",
       },
       {
         name: "spawn_agent",
@@ -315,7 +315,7 @@ describe("sendEvent – compact tool activity", () => {
       {
         name: "open",
         args: { open: [{ ref_id: "https://openai.com" }] },
-        expected: "Open Link*  `openai.com`",
+        expected: "Open*  `openai.com`",
       },
     ];
 
@@ -595,7 +595,7 @@ describe("sendEvent – runtime events", () => {
       {
         name: "WebSearch",
         args: { query: "runtime migration" },
-        expected: "Search Web*  \"runtime migration\"",
+        expected: "Web search*  \"runtime migration\"",
       },
       {
         name: "spawn_agent",
@@ -610,7 +610,7 @@ describe("sendEvent – runtime events", () => {
       {
         name: "open",
         args: { open: [{ ref_id: "https://openai.com" }] },
-        expected: "Open Link*  `openai.com`",
+        expected: "Open*  `openai.com`",
       },
     ];
 
