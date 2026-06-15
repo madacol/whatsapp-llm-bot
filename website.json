@@ -1,6 +1,8 @@
-{
-  "subdomain": "acp-flow",
-  "static": {
-    "root": "./docs"
+[
+  {
+    "subdomain": "acp-flow",
+    "static": {
+      "root": "./docs"
+    }
   }
-}
+]
