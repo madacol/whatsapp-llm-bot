@@ -7,7 +7,7 @@ process.env.MASTER_ID = "master-user";
 process.env.LLM_API_KEY = "test-key";
 process.env.MODEL = "mock-model";
 
-import { createTestDb, seedChat } from "./helpers.js";
+import { createTestDb, createWAMessage, seedChat } from "./helpers.js";
 import { setDb } from "../db.js";
 import { initStore } from "../store.js";
 import { readBlockBase64, readMediaBuffer } from "../media-store.js";
@@ -267,6 +267,76 @@ describe("getMessageContent", () => {
     assert.ok(quote, "Should have quote block");
     assert.ok(
       quote.content.some(b => b.type === "text" && b.text === "original extended"),
+    );
+  });
+
+  it("drops ephemeral bot thinking quote content while preserving the user reply", async () => {
+    const { sock } = createMockSock();
+    sock.user = { id: "bot-123:1@s.whatsapp.net" };
+    for (const quotedText of [
+      "🤖 *Thinking*\n\nThinking...",
+      "🤖 *Thinking*\n\nprovided",
+      "🤖 *Thinking*\n\n**Finalizing documentation details**\n\nI need to keep this concise.",
+    ]) {
+      /** @type {ChatTurn | null} */
+      let capturedTurn = null;
+
+      await adaptIncomingMessage(
+        createWAMessage({
+          text: "This quoted status is unstable.",
+          chatId: "inspect-regression@g.us",
+          isGroup: true,
+          quotedText,
+          quotedSenderId: "bot-123",
+        }),
+        sock,
+        async (turn) => {
+          capturedTurn = turn;
+        },
+        createConfirmRuntime(),
+        createSelectRuntime(),
+      );
+
+      assert.ok(capturedTurn, "Handler should receive the user reply");
+      assert.equal(capturedTurn.facts.repliedToBot, true);
+      assert.ok(
+        capturedTurn.content.some((block) => block.type === "text" && block.text === "This quoted status is unstable."),
+        "Direct user text should remain in the turn",
+      );
+      assert.ok(
+        !capturedTurn.content.some((block) => block.type === "quote"),
+        `Ephemeral bot thinking/status text should not be passed as quoted content: ${JSON.stringify(quotedText)}`,
+      );
+    }
+  });
+
+  it("keeps stable bot answer quotes as reply context", async () => {
+    const { sock } = createMockSock();
+    sock.user = { id: "bot-123:1@s.whatsapp.net" };
+    /** @type {ChatTurn | null} */
+    let capturedTurn = null;
+
+    await adaptIncomingMessage(
+      createWAMessage({
+        text: "What does this mean?",
+        chatId: "stable-bot-quote@g.us",
+        isGroup: true,
+        quotedText: "🤖 The build passed.",
+        quotedSenderId: "bot-123",
+      }),
+      sock,
+      async (turn) => {
+        capturedTurn = turn;
+      },
+      createConfirmRuntime(),
+      createSelectRuntime(),
+    );
+
+    assert.ok(capturedTurn, "Handler should receive the user reply");
+    const quote = capturedTurn.content.find((block) => block.type === "quote");
+    assert.ok(quote, "Stable bot answer quote should remain available as context");
+    assert.ok(
+      quote.content.some((block) => block.type === "text" && block.text === "🤖 The build passed."),
     );
   });
 

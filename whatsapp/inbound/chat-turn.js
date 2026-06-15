@@ -79,6 +79,64 @@ function normalizeContent(content, selfIds) {
 }
 
 /**
+ * @param {IncomingContentBlock} block
+ * @returns {block is QuoteContentBlock}
+ */
+function isQuoteBlock(block) {
+  return block.type === "quote";
+}
+
+/**
+ * @param {QuoteContentBlock} quote
+ * @returns {string}
+ */
+function getQuoteText(quote) {
+  return quote.content
+    .filter((block) => block.type === "text")
+    .map((block) => block.text)
+    .join("\n")
+    .trim();
+}
+
+/**
+ * Detect bot-authored transient output that should never become stable quoted
+ * prompt context. This is intentionally limited to self-authored quotes.
+ * @param {string} text
+ * @returns {boolean}
+ */
+function isEphemeralBotQuoteText(text) {
+  const normalized = text.trim();
+  if (!normalized) {
+    return false;
+  }
+  if (/^(?:🔄|✅|❌|⚠️|💭|⏳|📝|📊)\s+\*[^*\n]+\*\s+/u.test(normalized)) {
+    return true;
+  }
+
+  const withoutSourcePrefix = normalized.replace(/^🤖\s+/u, "").trim();
+  return /^thinking(?:\.{3}|…)?$/iu.test(withoutSourcePrefix)
+    || /^\*thinking\*(?:\s|$)/iu.test(withoutSourcePrefix);
+}
+
+/**
+ * @param {IncomingContentBlock[]} content
+ * @param {string[]} selfIds
+ * @param {string | undefined} quotedSenderId
+ * @returns {IncomingContentBlock[]}
+ */
+function removeEphemeralBotQuoteContent(content, selfIds, quotedSenderId) {
+  if (!quotedSenderId || !selfIds.includes(quotedSenderId)) {
+    return content;
+  }
+  return content.filter((block) => {
+    if (!isQuoteBlock(block)) {
+      return true;
+    }
+    return !isEphemeralBotQuoteText(getQuoteText(block));
+  });
+}
+
+/**
  * Detect transport-level control messages that should never become app turns.
  * @param {BaileysMessage} baileysMessage
  * @returns {boolean}
@@ -538,7 +596,8 @@ export async function buildIncomingTurn(
   const selfIds = getSelfIds(sock);
   const addressedToBot = detectBotMention(content, selfIds);
   const repliedToBot = quotedSenderId ? selfIds.includes(quotedSenderId) : false;
-  const normalizedContent = isGroup ? normalizeContent(content, selfIds) : content;
+  const stableContent = removeEphemeralBotQuoteContent(content, selfIds, quotedSenderId);
+  const normalizedContent = isGroup ? normalizeContent(stableContent, selfIds) : stableContent;
   const senderName = turnMessage.pushName || "";
   const chatName = await resolveChatName(sock, chatId, isGroup, senderName);
   const io = createTurnIo({
