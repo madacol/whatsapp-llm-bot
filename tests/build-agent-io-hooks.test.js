@@ -10,13 +10,6 @@ const VISIBLE_TOOL_OUTPUT = {
 };
 
 /**
- * @returns {Promise<void>}
- */
-function waitForReasoningBatch() {
-  return new Promise((resolve) => setTimeout(resolve, 5));
-}
-
-/**
  * @returns {{
  *   hooks: AgentIOHooks,
  *   sent: Array<{ event: OutboundEvent, kind: "send" | "reply" }>,
@@ -329,7 +322,7 @@ describe("buildAgentIoHooks", () => {
     });
   });
 
-  it("attaches available reasoning trace text in batches", async () => {
+  it("does not attach inspect data until reasoning completes", async () => {
     const subject = createReasoningSubject();
 
     await subject.hooks.onReasoning?.({
@@ -342,21 +335,42 @@ describe("buildAgentIoHooks", () => {
       summaryParts: [],
       contentParts: ["second trace token"],
     });
-    await waitForReasoningBatch();
+    assert.deepEqual(subject.reasoningInspects, []);
+
+    await subject.hooks.onReasoning?.({
+      status: "completed",
+      summaryParts: ["final summary"],
+      contentParts: [],
+    });
 
     assert.equal(subject.reasoningInspects.length, 1);
     assert.deepEqual(subject.reasoningInspects[0], {
       kind: "reasoning",
       summary: "*Thinking*",
-      text: "raw chain token\n\nsummary token\n\nsecond trace token",
+      text: "raw chain token\n\nsummary token\n\nsecond trace token\n\nfinal summary",
     });
+
+    await subject.hooks.onReasoning?.({
+      status: "completed",
+      summaryParts: ["late duplicate"],
+      contentParts: [],
+    });
+    assert.equal(subject.reasoningInspects.length, 1);
   });
 
-  it("reports encrypted reasoning without exposing content", async () => {
+  it("reports encrypted reasoning once it completes without exposing content", async () => {
     const subject = createReasoningSubject();
 
     await subject.hooks.onReasoning?.({
       status: "updated",
+      summaryParts: [],
+      contentParts: [],
+      hasEncryptedContent: true,
+    });
+    assert.deepEqual(subject.reasoningInspects, []);
+
+    await subject.hooks.onReasoning?.({
+      status: "completed",
       summaryParts: [],
       contentParts: [],
       hasEncryptedContent: true,

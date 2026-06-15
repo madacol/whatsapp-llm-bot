@@ -1116,7 +1116,8 @@ describe("createConversationRunner prompt formatting", () => {
     await firstHandled;
 
     assert.equal(injectedTexts.length, 1);
-    assert.ok(injectedTexts[0]?.includes("[Audio description: The speaker says check deploy status.]"), injectedTexts[0]);
+    assert.ok(injectedTexts[0]?.includes("The speaker says check deploy status."), injectedTexts[0]);
+    assert.equal(injectedTexts[0]?.includes("[Audio description:"), false, injectedTexts[0]);
     assert.ok(injectedTexts[0]?.includes("Media file available in this request:"), injectedTexts[0]);
     assert.deepEqual(secondTurn.responses.map((response) => response.text), [
       "Transcribing audio...",
