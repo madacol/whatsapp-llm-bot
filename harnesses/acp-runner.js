@@ -16,6 +16,7 @@ import {
   resolveAcpFileChangePath,
   snapshotAcpPaths,
   snapshotAcpWorkdir,
+  updateAcpFileChangeBaseline,
 } from "./acp-file-changes.js";
 import { extractApplyPatchTargetPaths } from "./apply-patch-parser.js";
 import { createAcpExtensionRouter } from "./acp-extension-router.js";
@@ -1564,6 +1565,7 @@ export async function startAcpRun(input) {
     fileCount: beforeSnapshot?.size ?? 0,
     durationMs: Date.now() - beforeSnapshotStartedAt,
   });
+  const reconciliationBaseline = beforeSnapshot ? new Map(beforeSnapshot) : new Map();
   /** @type {Set<string>} */
   const emittedFileChangePaths = new Set();
   /** @type {Set<string>} */
@@ -1578,7 +1580,7 @@ export async function startAcpRun(input) {
   const pendingApplyPatchSnapshots = new Map();
   const runtimeModel = createAcpRuntimeModel();
   const emitRuntimeEvent = async (/** @type {import("./harness-runtime-events.js").HarnessRuntimeEvent} */ event) => {
-    const reconciled = reconcileAcpFileChangeWithBaseline(event, beforeSnapshot, input.runConfig?.workdir);
+    const reconciled = reconcileAcpFileChangeWithBaseline(event, reconciliationBaseline, input.runConfig?.workdir);
     if (reconciled.type === "file-change.completed") {
       const protectedMatch = matchProtectedPath(input.runConfig, reconciled.change.path);
       if (protectedMatch.protected && approvedProtectedPaths.has(protectedMatch.resolvedPath)) {
@@ -1586,6 +1588,7 @@ export async function startAcpRun(input) {
         if (isAcpFileChangeIgnored(input.runConfig, reconciled.change.path)) {
           return;
         }
+        updateAcpFileChangeBaseline(reconciliationBaseline, reconciled, input.runConfig?.workdir);
         input.emitEvent?.(reconciled);
         await runtimeDispatcher.handleEvent(reconciled);
         return;
@@ -1628,6 +1631,7 @@ export async function startAcpRun(input) {
       if (isAcpFileChangeIgnored(input.runConfig, reconciled.change.path)) {
         return;
       }
+      updateAcpFileChangeBaseline(reconciliationBaseline, reconciled, input.runConfig?.workdir);
     }
     input.emitEvent?.(reconciled);
     await runtimeDispatcher.handleEvent(reconciled);

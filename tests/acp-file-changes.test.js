@@ -12,6 +12,7 @@ import {
   resolveAcpFileChangePath,
   snapshotAcpPaths,
   snapshotAcpWorkdir,
+  updateAcpFileChangeBaseline,
 } from "../harnesses/acp-file-changes.js";
 
 describe("ACP file changes", () => {
@@ -35,6 +36,42 @@ describe("ACP file changes", () => {
     });
 
     const reconciled = reconcileAcpFileChangeWithBaseline(event, before, workdir);
+
+    assert.equal(reconciled.type, "file-change.completed");
+    assert.equal(reconciled.change.kind, "update");
+    assert.equal(reconciled.change.oldText, "export const value = 1;\n");
+    assert.equal(reconciled.change.newText, "export const value = 2;\n");
+    assert.match(String(reconciled.change.diff ?? ""), /-export const value = 1;/);
+    assert.match(String(reconciled.change.diff ?? ""), /\+export const value = 2;/);
+  });
+
+  it("corrects provider adds for files created earlier in the same run", () => {
+    const workdir = "/tmp/acp-work";
+    const filePath = "/tmp/acp-work/src/generated.js";
+    const baseline = new Map();
+    const firstAdd = /** @type {import("../harnesses/harness-runtime-events.js").HarnessRuntimeEvent} */ ({
+      type: "file-change.completed",
+      provider: "acp",
+      change: {
+        path: filePath,
+        summary: "Create generated.js",
+        kind: "add",
+        newText: "export const value = 1;\n",
+      },
+    });
+    const rewriteAdd = /** @type {import("../harnesses/harness-runtime-events.js").HarnessRuntimeEvent} */ ({
+      type: "file-change.completed",
+      provider: "acp",
+      change: {
+        path: filePath,
+        summary: "Rewrite generated.js",
+        kind: "add",
+        newText: "export const value = 2;\n",
+      },
+    });
+
+    updateAcpFileChangeBaseline(baseline, firstAdd, workdir);
+    const reconciled = reconcileAcpFileChangeWithBaseline(rewriteAdd, baseline, workdir);
 
     assert.equal(reconciled.type, "file-change.completed");
     assert.equal(reconciled.change.kind, "update");

@@ -194,19 +194,19 @@ export function isAcpFileChangeIgnored(runConfig, filePath) {
 
 /**
  * @param {import("./harness-runtime-events.js").HarnessRuntimeEvent} event
- * @param {Map<string, string> | null} beforeSnapshot
+ * @param {Map<string, string> | null} baseline
  * @param {string | null | undefined} workdir
  * @returns {import("./harness-runtime-events.js").HarnessRuntimeEvent}
  */
-export function reconcileAcpFileChangeWithBaseline(event, beforeSnapshot, workdir) {
-  if (event.type !== "file-change.completed" || !beforeSnapshot) {
+export function reconcileAcpFileChangeWithBaseline(event, baseline, workdir) {
+  if (event.type !== "file-change.completed" || !baseline) {
     return event;
   }
   if (event.change.source === "snapshot") {
     return event;
   }
   const resolvedPath = resolveAcpFileChangePath(workdir, event.change.path);
-  const baselineText = beforeSnapshot.get(resolvedPath);
+  const baselineText = baseline.get(resolvedPath);
   if (baselineText === undefined) {
     return event;
   }
@@ -239,6 +239,26 @@ export function reconcileAcpFileChangeWithBaseline(event, beforeSnapshot, workdi
       ...(diff ? { diff } : {}),
     },
   };
+}
+
+/**
+ * @param {Map<string, string> | null} baseline
+ * @param {import("./harness-runtime-events.js").HarnessRuntimeEvent} event
+ * @param {string | null | undefined} workdir
+ * @returns {void}
+ */
+export function updateAcpFileChangeBaseline(baseline, event, workdir) {
+  if (!baseline || event.type !== "file-change.completed") {
+    return;
+  }
+  const resolvedPath = resolveAcpFileChangePath(workdir, event.change.path);
+  if (event.change.kind === "delete") {
+    baseline.delete(resolvedPath);
+    return;
+  }
+  if (typeof event.change.newText === "string") {
+    baseline.set(resolvedPath, event.change.newText);
+  }
 }
 
 /**
