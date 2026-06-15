@@ -6,6 +6,7 @@ import { DEFAULT_OUTPUT_VISIBILITY } from "../chat-output-visibility.js";
 
 export const MAX_AUTO_PRESENTED_SNAPSHOT_FILE_CHANGES = 25;
 export const SNAPSHOT_FILE_CHANGE_BATCH_FLUSH_DELAY_MS = 25;
+export const REASONING_INSPECT_BATCH_FLUSH_DELAY_MS = process.env.TESTING === "1" ? 0 : 1000;
 
 /**
  * @param {string} filePath
@@ -137,6 +138,12 @@ export function buildAgentIoHooks(
   const pendingSnapshotFileChanges = [];
   /** @type {MessageHandle | null} */
   let reasoningHandle = null;
+  /** @type {string[]} */
+  const pendingReasoningTraceParts = [];
+  /** @type {ReturnType<typeof setTimeout> | null} */
+  let reasoningInspectFlushTimer = null;
+  /** @type {string | null} */
+  let lastReasoningInspectText = null;
   /** @type {ReturnType<typeof setTimeout> | null} */
   let snapshotFlushTimer = null;
 
@@ -200,13 +207,46 @@ export function buildAgentIoHooks(
   }
 
   /**
-   * @param {{ hasEncryptedContent?: boolean }} event
-   * @returns {string}
+   * @param {{ text?: string, summaryParts: string[], contentParts: string[] }} event
+   * @returns {string[]}
    */
-  function getReasoningInspectText(event) {
-    return event.hasEncryptedContent
-      ? "_Reasoning is encrypted and not available for display._"
-      : "_Reasoning details are not displayed._";
+  function getReasoningTraceParts(event) {
+    const parts = typeof event.text === "string" && event.text.trim()
+      ? [event.text.trim()]
+      : [...event.contentParts, ...event.summaryParts].map((part) => part.trim()).filter(Boolean);
+    return parts.filter((part) => part !== "Thinking...");
+  }
+
+  /**
+   * @returns {void}
+   */
+  function flushReasoningInspectBatch() {
+    if (reasoningInspectFlushTimer) {
+      clearTimeout(reasoningInspectFlushTimer);
+      reasoningInspectFlushTimer = null;
+    }
+    if (!reasoningHandle || pendingReasoningTraceParts.length === 0) {
+      return;
+    }
+    const text = pendingReasoningTraceParts.join("\n\n").trim();
+    if (!text || text === lastReasoningInspectText) {
+      return;
+    }
+    lastReasoningInspectText = text;
+    reasoningHandle.setInspect(reasoningInspectState("*Thinking*", text));
+  }
+
+  /**
+   * @returns {void}
+   */
+  function scheduleReasoningInspectBatchFlush() {
+    if (reasoningInspectFlushTimer) {
+      clearTimeout(reasoningInspectFlushTimer);
+    }
+    reasoningInspectFlushTimer = setTimeout(() => {
+      flushReasoningInspectBatch();
+    }, REASONING_INSPECT_BATCH_FLUSH_DELAY_MS);
+    reasoningInspectFlushTimer.unref?.();
   }
 
   return {
@@ -221,10 +261,21 @@ export function buildAgentIoHooks(
         return;
       }
 
-      const text = getReasoningInspectText(event);
-      reasoningHandle.setInspect(reasoningInspectState("*Thinking*", text));
+      const traceParts = getReasoningTraceParts(event);
+      if (traceParts.length > 0) {
+        pendingReasoningTraceParts.push(...traceParts);
+        if (event.status === "completed") {
+          flushReasoningInspectBatch();
+        } else {
+          scheduleReasoningInspectBatchFlush();
+        }
+      } else if (event.hasEncryptedContent) {
+        pendingReasoningTraceParts.push("_Reasoning is encrypted and not available for display._");
+        flushReasoningInspectBatch();
+      }
 
       if (event.status === "completed") {
+        flushReasoningInspectBatch();
         await emitWhileWorking(() => reasoningHandle ? reasoningHandle.update(textUpdate("Thought")) : Promise.resolve());
       }
     },

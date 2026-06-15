@@ -10,6 +10,13 @@ const VISIBLE_TOOL_OUTPUT = {
 };
 
 /**
+ * @returns {Promise<void>}
+ */
+function waitForReasoningBatch() {
+  return new Promise((resolve) => setTimeout(resolve, 5));
+}
+
+/**
  * @returns {{
  *   hooks: AgentIOHooks,
  *   sent: Array<{ event: OutboundEvent, kind: "send" | "reply" }>,
@@ -314,34 +321,34 @@ describe("buildAgentIoHooks", () => {
     }
     assert.deepEqual(subject.sent[0].event.content, [{ type: "text", text: "Thinking..." }]);
     assert.deepEqual(subject.reasoningUpdates, [{ kind: "text", text: "Thought" }]);
-    assert.equal(subject.reasoningInspects.length, 2);
+    assert.equal(subject.reasoningInspects.length, 1);
     assert.deepEqual(subject.reasoningInspects[0], {
       kind: "reasoning",
       summary: "*Thinking*",
-      text: "_Reasoning details are not displayed._",
-    });
-    assert.deepEqual(subject.reasoningInspects[1], {
-      kind: "reasoning",
-      summary: "*Thinking*",
-      text: "_Reasoning details are not displayed._",
+      text: "Inspect the file, then patch the bug.",
     });
   });
 
-  it("does not attach raw reasoning text as inspect data", async () => {
+  it("attaches available reasoning trace text in batches", async () => {
     const subject = createReasoningSubject();
 
     await subject.hooks.onReasoning?.({
       status: "updated",
       summaryParts: ["summary token"],
       contentParts: ["raw chain token"],
-      text: "raw chain text",
     });
+    await subject.hooks.onReasoning?.({
+      status: "updated",
+      summaryParts: [],
+      contentParts: ["second trace token"],
+    });
+    await waitForReasoningBatch();
 
     assert.equal(subject.reasoningInspects.length, 1);
     assert.deepEqual(subject.reasoningInspects[0], {
       kind: "reasoning",
       summary: "*Thinking*",
-      text: "_Reasoning details are not displayed._",
+      text: "raw chain token\n\nsummary token\n\nsecond trace token",
     });
   });
 
