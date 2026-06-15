@@ -4012,6 +4012,9 @@ export async function sendBlocks(sock, chatId, source, content, options, reactio
         return;
       }
       if (inspectState.kind === "text") {
+        if (inspectState.revealOnInspect === false) {
+          return;
+        }
         persistInspectText = inspectState.persistOnInspect === true;
         void editWhatsAppMessage(
           sock,
