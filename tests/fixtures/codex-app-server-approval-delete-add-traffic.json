@@ -1,0 +1,804 @@
+{
+  "name": "codex-app-server-approval-delete-add-traffic",
+  "ok": false,
+  "error": "No app-server client requests were captured; approval did not block.",
+  "workdir": "/tmp/codex-app-server-approval-delete-add",
+  "logDir": "/tmp/codex-app-server-approval-delete-add-logs",
+  "targetPath": "/tmp/codex-app-server-approval-delete-add/approval-delete-add.md",
+  "beforeText": "# Original approval file\nThis file must be rewritten through one delete-plus-add apply_patch.\n",
+  "traffic": [
+    {
+      "index": 0,
+      "direction": "client_to_appserver",
+      "at": "2026-06-14T16:44:48.487Z",
+      "id": 1,
+      "method": "initialize",
+      "message": {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "initialize",
+        "params": {
+          "clientInfo": {
+            "name": "madabot-codex-app-server-approval-delete-add-capture",
+            "title": "Madabot Codex App Server Approval Delete/Add Capture",
+            "version": "1.0.0"
+          },
+          "capabilities": {
+            "experimentalApi": true
+          }
+        }
+      }
+    },
+    {
+      "index": 1,
+      "direction": "appserver_to_client",
+      "at": "2026-06-14T16:44:49.014Z",
+      "id": 1,
+      "message": {
+        "id": 1,
+        "result": {
+          "userAgent": "madabot-codex-app-server-approval-delete-add-capture/0.139.0 (Debian 12.0.0; x86_64) xterm.js_6.1.0-beta.213_ (madabot-codex-app-server-approval-delete-add-capture; 1.0.0)",
+          "codexHome": "/home/mada/.codex",
+          "platformFamily": "unix",
+          "platformOs": "linux"
+        }
+      }
+    },
+    {
+      "index": 2,
+      "direction": "client_to_appserver",
+      "at": "2026-06-14T16:44:49.014Z",
+      "id": 2,
+      "method": "thread/start",
+      "message": {
+        "jsonrpc": "2.0",
+        "id": 2,
+        "method": "thread/start",
+        "params": {
+          "cwd": "/tmp/codex-app-server-approval-delete-add",
+          "modelProvider": "openai",
+          "model": "gpt-5.5",
+          "approvalPolicy": "on-request",
+          "approvalsReviewer": null,
+          "sandbox": "read-only",
+          "config": {
+            "projects": {
+              "/tmp/codex-approval-delete-add-WzZqhw": {
+                "trust_level": "trusted"
+              }
+            }
+          },
+          "baseInstructions": "You are a smoke-test agent. Use apply_patch exactly when requested.",
+          "developerInstructions": null,
+          "personality": "none",
+          "ephemeral": true
+        }
+      }
+    },
+    {
+      "index": 3,
+      "direction": "appserver_to_client",
+      "at": "2026-06-14T16:44:49.056Z",
+      "method": "remoteControl/status/changed",
+      "message": {
+        "method": "remoteControl/status/changed",
+        "params": {
+          "status": "disabled",
+          "serverName": "debian-4gb-nbg1-2",
+          "installationId": "903e40b7-2e06-4d12-b491-c510cd4693c4",
+          "environmentId": null
+        }
+      }
+    },
+    {
+      "index": 4,
+      "direction": "appserver_to_client",
+      "at": "2026-06-14T16:44:49.607Z",
+      "id": 2,
+      "message": {
+        "id": 2,
+        "result": {
+          "thread": {
+            "id": "019ec705-8984-7b30-b43b-dc3a0441098c",
+            "sessionId": "019ec705-8984-7b30-b43b-dc3a0441098c",
+            "forkedFromId": null,
+            "parentThreadId": null,
+            "preview": "",
+            "ephemeral": true,
+            "modelProvider": "openai",
+            "createdAt": 1781455489,
+            "updatedAt": 1781455489,
+            "status": {
+              "type": "idle"
+            },
+            "path": null,
+            "cwd": "/tmp/codex-app-server-approval-delete-add",
+            "cliVersion": "0.139.0",
+            "source": "vscode",
+            "threadSource": null,
+            "agentNickname": null,
+            "agentRole": null,
+            "gitInfo": null,
+            "name": null,
+            "turns": []
+          },
+          "model": "gpt-5.5",
+          "modelProvider": "openai",
+          "serviceTier": null,
+          "cwd": "/tmp/codex-app-server-approval-delete-add",
+          "runtimeWorkspaceRoots": [
+            "/tmp/codex-app-server-approval-delete-add"
+          ],
+          "instructionSources": [
+            "/home/mada/.codex/AGENTS.md"
+          ],
+          "approvalPolicy": "on-request",
+          "approvalsReviewer": "auto_review",
+          "sandbox": {
+            "type": "readOnly",
+            "networkAccess": false
+          },
+          "activePermissionProfile": null,
+          "reasoningEffort": "high"
+        }
+      }
+    },
+    {
+      "index": 5,
+      "direction": "client_to_appserver",
+      "at": "2026-06-14T16:44:49.608Z",
+      "id": 3,
+      "method": "turn/start",
+      "message": {
+        "jsonrpc": "2.0",
+        "id": 3,
+        "method": "turn/start",
+        "params": {
+          "threadId": "019ec705-8984-7b30-b43b-dc3a0441098c",
+          "input": [
+            {
+              "type": "text",
+              "text": "Use apply_patch to rewrite exactly /tmp/codex-app-server-approval-delete-add/approval-delete-add.md.\nUse one single apply_patch invocation.\nThe patch must contain \"*** Delete File: /tmp/codex-app-server-approval-delete-add/approval-delete-add.md\" followed by \"*** Add File: /tmp/codex-app-server-approval-delete-add/approval-delete-add.md\".\nThe replacement content must be exactly:\n# Rewritten approval file\nThis content was produced after the approval-blocking delete-plus-add rewrite.\nAfter the patch, answer exactly DONE."
+            }
+          ],
+          "cwd": "/tmp/codex-app-server-approval-delete-add",
+          "model": "gpt-5.5",
+          "effort": "low",
+          "approvalPolicy": "on-request",
+          "approvalsReviewer": null,
+          "sandboxPolicy": {
+            "type": "readOnly",
+            "networkAccess": false
+          },
+          "summary": "none",
+          "outputSchema": null,
+          "personality": "none",
+          "serviceTier": null
+        }
+      }
+    },
+    {
+      "index": 6,
+      "direction": "appserver_to_client",
+      "at": "2026-06-14T16:44:49.674Z",
+      "method": "thread/started",
+      "message": {
+        "method": "thread/started",
+        "params": {
+          "thread": {
+            "id": "019ec705-8984-7b30-b43b-dc3a0441098c",
+            "sessionId": "019ec705-8984-7b30-b43b-dc3a0441098c",
+            "forkedFromId": null,
+            "parentThreadId": null,
+            "preview": "",
+            "ephemeral": true,
+            "modelProvider": "openai",
+            "createdAt": 1781455489,
+            "updatedAt": 1781455489,
+            "status": {
+              "type": "idle"
+            },
+            "path": null,
+            "cwd": "/tmp/codex-app-server-approval-delete-add",
+            "cliVersion": "0.139.0",
+            "source": "vscode",
+            "threadSource": null,
+            "agentNickname": null,
+            "agentRole": null,
+            "gitInfo": null,
+            "name": null,
+            "turns": []
+          }
+        }
+      }
+    },
+    {
+      "index": 7,
+      "direction": "appserver_to_client",
+      "at": "2026-06-14T16:44:49.780Z",
+      "id": 3,
+      "message": {
+        "id": 3,
+        "result": {
+          "turn": {
+            "id": "019ec705-8a96-7a70-a624-76bb07a83f1a",
+            "items": [],
+            "itemsView": "notLoaded",
+            "status": "inProgress",
+            "error": null,
+            "startedAt": null,
+            "completedAt": null,
+            "durationMs": null
+          }
+        }
+      }
+    },
+    {
+      "index": 8,
+      "direction": "appserver_to_client",
+      "at": "2026-06-14T16:44:49.891Z",
+      "method": "mcpServer/startupStatus/updated",
+      "message": {
+        "method": "mcpServer/startupStatus/updated",
+        "params": {
+          "threadId": "019ec705-8984-7b30-b43b-dc3a0441098c",
+          "name": "codex_apps",
+          "status": "starting",
+          "error": null
+        }
+      }
+    },
+    {
+      "index": 9,
+      "direction": "appserver_to_client",
+      "at": "2026-06-14T16:44:49.893Z",
+      "method": "thread/settings/updated",
+      "message": {
+        "method": "thread/settings/updated",
+        "params": {
+          "threadId": "019ec705-8984-7b30-b43b-dc3a0441098c",
+          "threadSettings": {
+            "cwd": "/tmp/codex-app-server-approval-delete-add",
+            "approvalPolicy": "on-request",
+            "approvalsReviewer": "auto_review",
+            "sandboxPolicy": {
+              "type": "readOnly",
+              "networkAccess": false
+            },
+            "activePermissionProfile": null,
+            "model": "gpt-5.5",
+            "modelProvider": "openai",
+            "serviceTier": "default",
+            "effort": "low",
+            "summary": "none",
+            "collaborationMode": {
+              "mode": "default",
+              "settings": {
+                "model": "gpt-5.5",
+                "reasoning_effort": "low",
+                "developer_instructions": null
+              }
+            },
+            "personality": "none"
+          }
+        }
+      }
+    },
+    {
+      "index": 10,
+      "direction": "appserver_to_client",
+      "at": "2026-06-14T16:44:49.893Z",
+      "method": "thread/status/changed",
+      "message": {
+        "method": "thread/status/changed",
+        "params": {
+          "threadId": "019ec705-8984-7b30-b43b-dc3a0441098c",
+          "status": {
+            "type": "active",
+            "activeFlags": []
+          }
+        }
+      }
+    },
+    {
+      "index": 11,
+      "direction": "appserver_to_client",
+      "at": "2026-06-14T16:44:49.893Z",
+      "method": "turn/started",
+      "message": {
+        "method": "turn/started",
+        "params": {
+          "threadId": "019ec705-8984-7b30-b43b-dc3a0441098c",
+          "turn": {
+            "id": "019ec705-8a96-7a70-a624-76bb07a83f1a",
+            "items": [],
+            "itemsView": "notLoaded",
+            "status": "inProgress",
+            "error": null,
+            "startedAt": 1781455489,
+            "completedAt": null,
+            "durationMs": null
+          }
+        }
+      }
+    },
+    {
+      "index": 12,
+      "direction": "appserver_to_client",
+      "at": "2026-06-14T16:44:50.504Z",
+      "method": "mcpServer/startupStatus/updated",
+      "message": {
+        "method": "mcpServer/startupStatus/updated",
+        "params": {
+          "threadId": "019ec705-8984-7b30-b43b-dc3a0441098c",
+          "name": "codex_apps",
+          "status": "ready",
+          "error": null
+        }
+      }
+    },
+    {
+      "index": 13,
+      "direction": "appserver_to_client",
+      "at": "2026-06-14T16:44:52.636Z",
+      "method": "item/started",
+      "message": {
+        "method": "item/started",
+        "params": {
+          "item": {
+            "type": "userMessage",
+            "id": "9e896c8c-a61b-4e56-8efd-7e2e24982c3c",
+            "clientId": null,
+            "content": [
+              {
+                "type": "text",
+                "text": "Use apply_patch to rewrite exactly /tmp/codex-app-server-approval-delete-add/approval-delete-add.md.\nUse one single apply_patch invocation.\nThe patch must contain \"*** Delete File: /tmp/codex-app-server-approval-delete-add/approval-delete-add.md\" followed by \"*** Add File: /tmp/codex-app-server-approval-delete-add/approval-delete-add.md\".\nThe replacement content must be exactly:\n# Rewritten approval file\nThis content was produced after the approval-blocking delete-plus-add rewrite.\nAfter the patch, answer exactly DONE.",
+                "text_elements": []
+              }
+            ]
+          },
+          "threadId": "019ec705-8984-7b30-b43b-dc3a0441098c",
+          "turnId": "019ec705-8a96-7a70-a624-76bb07a83f1a",
+          "startedAtMs": 1781455492635
+        }
+      }
+    },
+    {
+      "index": 14,
+      "direction": "appserver_to_client",
+      "at": "2026-06-14T16:44:52.636Z",
+      "method": "item/completed",
+      "message": {
+        "method": "item/completed",
+        "params": {
+          "item": {
+            "type": "userMessage",
+            "id": "9e896c8c-a61b-4e56-8efd-7e2e24982c3c",
+            "clientId": null,
+            "content": [
+              {
+                "type": "text",
+                "text": "Use apply_patch to rewrite exactly /tmp/codex-app-server-approval-delete-add/approval-delete-add.md.\nUse one single apply_patch invocation.\nThe patch must contain \"*** Delete File: /tmp/codex-app-server-approval-delete-add/approval-delete-add.md\" followed by \"*** Add File: /tmp/codex-app-server-approval-delete-add/approval-delete-add.md\".\nThe replacement content must be exactly:\n# Rewritten approval file\nThis content was produced after the approval-blocking delete-plus-add rewrite.\nAfter the patch, answer exactly DONE.",
+                "text_elements": []
+              }
+            ]
+          },
+          "threadId": "019ec705-8984-7b30-b43b-dc3a0441098c",
+          "turnId": "019ec705-8a96-7a70-a624-76bb07a83f1a",
+          "completedAtMs": 1781455492635
+        }
+      }
+    },
+    {
+      "index": 15,
+      "direction": "appserver_to_client",
+      "at": "2026-06-14T16:44:57.405Z",
+      "method": "item/started",
+      "message": {
+        "method": "item/started",
+        "params": {
+          "item": {
+            "type": "fileChange",
+            "id": "call_AllXEGpEEGvCslB7ucINK86C",
+            "changes": [
+              {
+                "path": "/tmp/codex-app-server-approval-delete-add/approval-delete-add.md",
+                "kind": {
+                  "type": "add"
+                },
+                "diff": "# Rewritten approval file\nThis content was produced after the approval-blocking delete-plus-add rewrite.\n"
+              }
+            ],
+            "status": "inProgress"
+          },
+          "threadId": "019ec705-8984-7b30-b43b-dc3a0441098c",
+          "turnId": "019ec705-8a96-7a70-a624-76bb07a83f1a",
+          "startedAtMs": 1781455497399
+        }
+      }
+    },
+    {
+      "index": 16,
+      "direction": "appserver_to_client",
+      "at": "2026-06-14T16:44:57.405Z",
+      "method": "item/autoApprovalReview/started",
+      "message": {
+        "method": "item/autoApprovalReview/started",
+        "params": {
+          "threadId": "019ec705-8984-7b30-b43b-dc3a0441098c",
+          "turnId": "019ec705-8a96-7a70-a624-76bb07a83f1a",
+          "startedAtMs": 1781455497400,
+          "reviewId": "b9f82913-7751-416d-8122-0ea826fd3ada",
+          "targetItemId": "call_AllXEGpEEGvCslB7ucINK86C",
+          "review": {
+            "status": "inProgress",
+            "riskLevel": null,
+            "userAuthorization": null,
+            "rationale": null
+          },
+          "action": {
+            "type": "applyPatch",
+            "cwd": "/tmp/codex-app-server-approval-delete-add",
+            "files": [
+              "/tmp/codex-app-server-approval-delete-add/approval-delete-add.md"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "index": 17,
+      "direction": "appserver_to_client",
+      "at": "2026-06-14T16:45:04.480Z",
+      "method": "guardianWarning",
+      "message": {
+        "method": "guardianWarning",
+        "params": {
+          "threadId": "019ec705-8984-7b30-b43b-dc3a0441098c",
+          "message": "Automatic approval review approved (risk: low, authorization: unknown): Auto-review returned a low-risk allow decision."
+        }
+      }
+    },
+    {
+      "index": 18,
+      "direction": "appserver_to_client",
+      "at": "2026-06-14T16:45:04.480Z",
+      "method": "item/autoApprovalReview/completed",
+      "message": {
+        "method": "item/autoApprovalReview/completed",
+        "params": {
+          "threadId": "019ec705-8984-7b30-b43b-dc3a0441098c",
+          "turnId": "019ec705-8a96-7a70-a624-76bb07a83f1a",
+          "startedAtMs": 1781455497400,
+          "completedAtMs": 1781455504472,
+          "reviewId": "b9f82913-7751-416d-8122-0ea826fd3ada",
+          "targetItemId": "call_AllXEGpEEGvCslB7ucINK86C",
+          "decisionSource": "agent",
+          "review": {
+            "status": "approved",
+            "riskLevel": "low",
+            "userAuthorization": "unknown",
+            "rationale": "Auto-review returned a low-risk allow decision."
+          },
+          "action": {
+            "type": "applyPatch",
+            "cwd": "/tmp/codex-app-server-approval-delete-add",
+            "files": [
+              "/tmp/codex-app-server-approval-delete-add/approval-delete-add.md"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "index": 19,
+      "direction": "appserver_to_client",
+      "at": "2026-06-14T16:45:05.357Z",
+      "method": "item/completed",
+      "message": {
+        "method": "item/completed",
+        "params": {
+          "item": {
+            "type": "fileChange",
+            "id": "call_AllXEGpEEGvCslB7ucINK86C",
+            "changes": [
+              {
+                "path": "/tmp/codex-app-server-approval-delete-add/approval-delete-add.md",
+                "kind": {
+                  "type": "add"
+                },
+                "diff": "# Rewritten approval file\nThis content was produced after the approval-blocking delete-plus-add rewrite.\n"
+              }
+            ],
+            "status": "completed"
+          },
+          "threadId": "019ec705-8984-7b30-b43b-dc3a0441098c",
+          "turnId": "019ec705-8a96-7a70-a624-76bb07a83f1a",
+          "completedAtMs": 1781455505355
+        }
+      }
+    },
+    {
+      "index": 20,
+      "direction": "appserver_to_client",
+      "at": "2026-06-14T16:45:05.375Z",
+      "method": "turn/diff/updated",
+      "message": {
+        "method": "turn/diff/updated",
+        "params": {
+          "threadId": "019ec705-8984-7b30-b43b-dc3a0441098c",
+          "turnId": "019ec705-8a96-7a70-a624-76bb07a83f1a",
+          "diff": "diff --git a/codex-approval-delete-add-WzZqhw/approval-delete-add.md b/codex-approval-delete-add-WzZqhw/approval-delete-add.md\nindex a6eb855bc856db41afcc044026044bfe318dd6b0..b3aa4fe2a1edbc0e2adf8c603e3dd569e7a4c5a9\n--- a/codex-approval-delete-add-WzZqhw/approval-delete-add.md\n+++ b/codex-approval-delete-add-WzZqhw/approval-delete-add.md\n@@ -1,2 +1,2 @@\n-# Original approval file\n-This file must be rewritten through one delete-plus-add apply_patch.\n+# Rewritten approval file\n+This content was produced after the approval-blocking delete-plus-add rewrite.\n"
+        }
+      }
+    },
+    {
+      "index": 21,
+      "direction": "appserver_to_client",
+      "at": "2026-06-14T16:45:05.375Z",
+      "method": "thread/tokenUsage/updated",
+      "message": {
+        "method": "thread/tokenUsage/updated",
+        "params": {
+          "threadId": "019ec705-8984-7b30-b43b-dc3a0441098c",
+          "turnId": "019ec705-8a96-7a70-a624-76bb07a83f1a",
+          "tokenUsage": {
+            "total": {
+              "totalTokens": 8771,
+              "inputTokens": 8683,
+              "cachedInputTokens": 4480,
+              "outputTokens": 88,
+              "reasoningOutputTokens": 0
+            },
+            "last": {
+              "totalTokens": 8771,
+              "inputTokens": 8683,
+              "cachedInputTokens": 4480,
+              "outputTokens": 88,
+              "reasoningOutputTokens": 0
+            },
+            "modelContextWindow": 258400
+          }
+        }
+      }
+    },
+    {
+      "index": 22,
+      "direction": "appserver_to_client",
+      "at": "2026-06-14T16:45:05.375Z",
+      "method": "account/rateLimits/updated",
+      "message": {
+        "method": "account/rateLimits/updated",
+        "params": {
+          "rateLimits": {
+            "limitId": "codex",
+            "limitName": null,
+            "primary": {
+              "usedPercent": 42,
+              "windowDurationMins": 300,
+              "resetsAt": 1781457388
+            },
+            "secondary": {
+              "usedPercent": 59,
+              "windowDurationMins": 10080,
+              "resetsAt": 1781744382
+            },
+            "credits": null,
+            "individualLimit": null,
+            "planType": "prolite",
+            "rateLimitReachedType": null
+          }
+        }
+      }
+    },
+    {
+      "index": 23,
+      "direction": "appserver_to_client",
+      "at": "2026-06-14T16:45:05.375Z",
+      "method": "turn/diff/updated",
+      "message": {
+        "method": "turn/diff/updated",
+        "params": {
+          "threadId": "019ec705-8984-7b30-b43b-dc3a0441098c",
+          "turnId": "019ec705-8a96-7a70-a624-76bb07a83f1a",
+          "diff": "diff --git a/codex-approval-delete-add-WzZqhw/approval-delete-add.md b/codex-approval-delete-add-WzZqhw/approval-delete-add.md\nindex a6eb855bc856db41afcc044026044bfe318dd6b0..b3aa4fe2a1edbc0e2adf8c603e3dd569e7a4c5a9\n--- a/codex-approval-delete-add-WzZqhw/approval-delete-add.md\n+++ b/codex-approval-delete-add-WzZqhw/approval-delete-add.md\n@@ -1,2 +1,2 @@\n-# Original approval file\n-This file must be rewritten through one delete-plus-add apply_patch.\n+# Rewritten approval file\n+This content was produced after the approval-blocking delete-plus-add rewrite.\n"
+        }
+      }
+    },
+    {
+      "index": 24,
+      "direction": "appserver_to_client",
+      "at": "2026-06-14T16:45:08.871Z",
+      "method": "item/started",
+      "message": {
+        "method": "item/started",
+        "params": {
+          "item": {
+            "type": "agentMessage",
+            "id": "msg_0a5e30987194eba3016a2eda94c27081988445d72a134f6f25",
+            "text": "",
+            "phase": "final_answer",
+            "memoryCitation": null
+          },
+          "threadId": "019ec705-8984-7b30-b43b-dc3a0441098c",
+          "turnId": "019ec705-8a96-7a70-a624-76bb07a83f1a",
+          "startedAtMs": 1781455508871
+        }
+      }
+    },
+    {
+      "index": 25,
+      "direction": "appserver_to_client",
+      "at": "2026-06-14T16:45:08.889Z",
+      "method": "item/agentMessage/delta",
+      "message": {
+        "method": "item/agentMessage/delta",
+        "params": {
+          "threadId": "019ec705-8984-7b30-b43b-dc3a0441098c",
+          "turnId": "019ec705-8a96-7a70-a624-76bb07a83f1a",
+          "itemId": "msg_0a5e30987194eba3016a2eda94c27081988445d72a134f6f25",
+          "delta": "DONE"
+        }
+      }
+    },
+    {
+      "index": 26,
+      "direction": "appserver_to_client",
+      "at": "2026-06-14T16:45:08.973Z",
+      "method": "item/completed",
+      "message": {
+        "method": "item/completed",
+        "params": {
+          "item": {
+            "type": "agentMessage",
+            "id": "msg_0a5e30987194eba3016a2eda94c27081988445d72a134f6f25",
+            "text": "DONE",
+            "phase": "final_answer",
+            "memoryCitation": null
+          },
+          "threadId": "019ec705-8984-7b30-b43b-dc3a0441098c",
+          "turnId": "019ec705-8a96-7a70-a624-76bb07a83f1a",
+          "completedAtMs": 1781455508972
+        }
+      }
+    },
+    {
+      "index": 27,
+      "direction": "appserver_to_client",
+      "at": "2026-06-14T16:45:08.979Z",
+      "method": "thread/tokenUsage/updated",
+      "message": {
+        "method": "thread/tokenUsage/updated",
+        "params": {
+          "threadId": "019ec705-8984-7b30-b43b-dc3a0441098c",
+          "turnId": "019ec705-8a96-7a70-a624-76bb07a83f1a",
+          "tokenUsage": {
+            "total": {
+              "totalTokens": 17624,
+              "inputTokens": 17531,
+              "cachedInputTokens": 13056,
+              "outputTokens": 93,
+              "reasoningOutputTokens": 0
+            },
+            "last": {
+              "totalTokens": 8853,
+              "inputTokens": 8848,
+              "cachedInputTokens": 8576,
+              "outputTokens": 5,
+              "reasoningOutputTokens": 0
+            },
+            "modelContextWindow": 258400
+          }
+        }
+      }
+    },
+    {
+      "index": 28,
+      "direction": "appserver_to_client",
+      "at": "2026-06-14T16:45:08.980Z",
+      "method": "account/rateLimits/updated",
+      "message": {
+        "method": "account/rateLimits/updated",
+        "params": {
+          "rateLimits": {
+            "limitId": "codex",
+            "limitName": null,
+            "primary": {
+              "usedPercent": 43,
+              "windowDurationMins": 300,
+              "resetsAt": 1781457388
+            },
+            "secondary": {
+              "usedPercent": 59,
+              "windowDurationMins": 10080,
+              "resetsAt": 1781744382
+            },
+            "credits": null,
+            "individualLimit": null,
+            "planType": "prolite",
+            "rateLimitReachedType": null
+          }
+        }
+      }
+    },
+    {
+      "index": 29,
+      "direction": "appserver_to_client",
+      "at": "2026-06-14T16:45:08.980Z",
+      "method": "turn/diff/updated",
+      "message": {
+        "method": "turn/diff/updated",
+        "params": {
+          "threadId": "019ec705-8984-7b30-b43b-dc3a0441098c",
+          "turnId": "019ec705-8a96-7a70-a624-76bb07a83f1a",
+          "diff": "diff --git a/codex-approval-delete-add-WzZqhw/approval-delete-add.md b/codex-approval-delete-add-WzZqhw/approval-delete-add.md\nindex a6eb855bc856db41afcc044026044bfe318dd6b0..b3aa4fe2a1edbc0e2adf8c603e3dd569e7a4c5a9\n--- a/codex-approval-delete-add-WzZqhw/approval-delete-add.md\n+++ b/codex-approval-delete-add-WzZqhw/approval-delete-add.md\n@@ -1,2 +1,2 @@\n-# Original approval file\n-This file must be rewritten through one delete-plus-add apply_patch.\n+# Rewritten approval file\n+This content was produced after the approval-blocking delete-plus-add rewrite.\n"
+        }
+      }
+    },
+    {
+      "index": 30,
+      "direction": "appserver_to_client",
+      "at": "2026-06-14T16:45:08.985Z",
+      "method": "thread/status/changed",
+      "message": {
+        "method": "thread/status/changed",
+        "params": {
+          "threadId": "019ec705-8984-7b30-b43b-dc3a0441098c",
+          "status": {
+            "type": "idle"
+          }
+        }
+      }
+    },
+    {
+      "index": 31,
+      "direction": "appserver_to_client",
+      "at": "2026-06-14T16:45:08.985Z",
+      "method": "turn/completed",
+      "message": {
+        "method": "turn/completed",
+        "params": {
+          "threadId": "019ec705-8984-7b30-b43b-dc3a0441098c",
+          "turn": {
+            "id": "019ec705-8a96-7a70-a624-76bb07a83f1a",
+            "items": [],
+            "itemsView": "notLoaded",
+            "status": "completed",
+            "error": null,
+            "startedAt": 1781455489,
+            "completedAt": 1781455508,
+            "durationMs": 19239
+          }
+        }
+      }
+    }
+  ],
+  "serverRequests": [],
+  "snapshots": [
+    {
+      "label": "before-turn",
+      "targetPath": "/tmp/codex-app-server-approval-delete-add/approval-delete-add.md",
+      "snapshot": {
+        "exists": true,
+        "text": "# Original approval file\nThis file must be rewritten through one delete-plus-add apply_patch.\n"
+      }
+    },
+    {
+      "label": "after-turn",
+      "targetPath": "/tmp/codex-app-server-approval-delete-add/approval-delete-add.md",
+      "snapshot": {
+        "exists": true,
+        "text": "# Rewritten approval file\nThis content was produced after the approval-blocking delete-plus-add rewrite.\n"
+      }
+    },
+    {
+      "label": "after-error",
+      "targetPath": "/tmp/codex-app-server-approval-delete-add/approval-delete-add.md",
+      "snapshot": {
+        "exists": true,
+        "text": "# Rewritten approval file\nThis content was produced after the approval-blocking delete-plus-add rewrite.\n"
+      }
+    }
+  ],
+  "stderr": ""
+}
