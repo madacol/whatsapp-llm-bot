@@ -28,6 +28,7 @@ describe("runtime diagnostics config", () => {
     assert.equal(state.isDbCacheLogEnabled(), true);
     assert.equal(state.isWhatsAppUpsertLogEnabled(), true);
     assert.equal(state.isWhatsAppReactionLogEnabled(), true);
+    assert.equal(state.isWhatsAppOutboundLogEnabled(), false);
     assert.equal(state.getConfig().logLevel, "warn");
 
     await fs.writeFile(configPath, JSON.stringify({
@@ -37,6 +38,7 @@ describe("runtime diagnostics config", () => {
       dbCacheLog: false,
       whatsappUpsertLog: false,
       whatsappReactionLog: true,
+      whatsappOutboundLog: true,
       logLevel: "debug",
     }));
 
@@ -46,6 +48,7 @@ describe("runtime diagnostics config", () => {
     assert.equal(state.isDbCacheLogEnabled(), false);
     assert.equal(state.isWhatsAppUpsertLogEnabled(), false);
     assert.equal(state.isWhatsAppReactionLogEnabled(), true);
+    assert.equal(state.isWhatsAppOutboundLogEnabled(), true);
     assert.equal(state.getConfig().logLevel, "debug");
   });
 
@@ -73,6 +76,7 @@ describe("runtime diagnostics config", () => {
       dbCacheLog: false,
       whatsappUpsertLog: false,
       whatsappReactionLog: false,
+      whatsappOutboundLog: false,
       logLevel: null,
     });
 

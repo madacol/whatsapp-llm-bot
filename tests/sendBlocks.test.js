@@ -15,11 +15,13 @@ import { createReactionRuntime } from "../whatsapp/runtime/reaction-runtime.js";
 import { runtimeEvent } from "../outbound-events.js";
 import { buildToolPresentation } from "../whatsapp/tool-presentation-model.js";
 import { DEFAULT_OUTPUT_VISIBILITY } from "../chat-output-visibility.js";
+import { createRuntimeDiagnosticsState, setDefaultRuntimeDiagnosticsStateForTesting } from "../diagnostics-config.js";
 import { createAcpRuntimeModel } from "../harnesses/acp-events.js";
 import { MAX_RENDERED_IMAGES_PER_BLOCK } from "../message-renderer.js";
 
 const VISIBLE_TOOL_OUTPUT = { ...DEFAULT_OUTPUT_VISIBILITY, toolDetails: true };
 const COMPACT_TOOL_OUTPUT = { ...DEFAULT_OUTPUT_VISIBILITY, toolDetails: false };
+const WHATSAPP_OUTBOUND_LOG_PATH = path.resolve("logs", "whatsapp-outbound.jsonl");
 
 /**
  * @param {Omit<FileChangeEvent, "kind" | "changeKind"> & { changeKind?: "add" | "delete" | "update" }} input
@@ -47,6 +49,8 @@ let editWhatsAppMessage;
 let editWhatsAppMessageByHandle;
 /** @type {typeof import("../whatsapp/outbound/send-content.js").renderFileChangeContent} */
 let renderFileChangeContent;
+/** @type {typeof import("../whatsapp/outbound/send-content.js").buildWhatsAppOutboundMessageDiagnostic} */
+let buildWhatsAppOutboundMessageDiagnostic;
 
 before(async () => {
   const testDb = await createTestDb();
@@ -57,6 +61,7 @@ before(async () => {
   editWhatsAppMessage = outbound.editWhatsAppMessage;
   editWhatsAppMessageByHandle = outbound.editWhatsAppMessageByHandle;
   renderFileChangeContent = outbound.renderFileChangeContent;
+  buildWhatsAppOutboundMessageDiagnostic = outbound.buildWhatsAppOutboundMessageDiagnostic;
 });
 
 /**
@@ -92,6 +97,15 @@ function createMockSock() {
     user: { id: "test-user@s.whatsapp.net" },
   };
   return { sock, sent, relayed };
+}
+
+/**
+ * @param {string} filePath
+ * @returns {Promise<any[]>}
+ */
+async function readJsonl(filePath) {
+  const raw = await fs.readFile(filePath, "utf8");
+  return raw.trim().split("\n").filter(Boolean).map((line) => JSON.parse(line));
 }
 
 /**
@@ -897,7 +911,7 @@ describe("sendEvent – runtime events", () => {
   });
 
   it("observes pinned status delivery at the socket boundary", async () => {
-    const { sock } = createMockSock();
+    const { sock, sent } = createMockSock();
     /** @type {Array<Record<string, unknown>>} */
     const deliveryTrace = [];
     const sendOptions = {
@@ -954,7 +968,7 @@ describe("sendEvent – runtime events", () => {
   });
 
   it("observes live pin failures instead of silently trusting the payload shape", async () => {
-    const { sock } = createMockSock();
+    const { sock, sent } = createMockSock();
     const originalSendMessage = sock.sendMessage.bind(sock);
     sock.sendMessage = async (chatId, msg) => {
       if (msg.pin && msg.type === 1) {
@@ -2489,6 +2503,87 @@ describe("sendBlocks – options propagation", () => {
     ], { quoted: /** @type {BaileysMessage} */ (quotedMsg) });
 
     assert.ok(sent[0].opts?.quoted === quotedMsg, "Should pass quoted to sock.sendMessage");
+  });
+});
+
+describe("sendBlocks – outbound diagnostics", () => {
+  it("summarizes outbound payloads without serializing media buffers", () => {
+    const diagnostic = buildWhatsAppOutboundMessageDiagnostic({
+      image: Buffer.from("fake-image-bytes"),
+      caption: "Rendered code",
+    });
+
+    assert.deepEqual(diagnostic, {
+      kind: "image",
+      caption: "Rendered code",
+      mediaBytes: 16,
+    });
+    assert.equal(JSON.stringify(diagnostic).includes("fake-image-bytes"), false);
+  });
+
+  it("writes a runtime-gated outgoing send, edit, and inspect reaction timeline", async () => {
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "outbound-diagnostics-"));
+    const diagnostics = createRuntimeDiagnosticsState({
+      configPath: path.join(tempDir, "logging.json"),
+      env: {},
+      legacyWhatsAppDiagnosticEnabled: false,
+      reloadIntervalMs: 0,
+    });
+    const { sock, sent } = createMockSock();
+    const reactionRuntime = createReactionRuntime();
+
+    await fs.rm(WHATSAPP_OUTBOUND_LOG_PATH, { force: true });
+    setDefaultRuntimeDiagnosticsStateForTesting(diagnostics);
+    try {
+      await sendBlocks(
+        sock,
+        "diag-chat",
+        "plain",
+        [{ type: "text", text: "Thinking..." }],
+        undefined,
+        reactionRuntime,
+      );
+      await assert.rejects(() => fs.readFile(WHATSAPP_OUTBOUND_LOG_PATH, "utf8"), { code: "ENOENT" });
+
+      await diagnostics.update({ whatsappOutboundLog: true });
+      const handle = await sendBlocks(
+        sock,
+        "diag-chat",
+        "plain",
+        [{ type: "text", text: "Thinking..." }],
+        undefined,
+        reactionRuntime,
+      );
+      assert.ok(handle);
+      handle.setInspect({
+        kind: "reasoning",
+        summary: "*Thinking*",
+        text: "**Finalizing documentation details**\n\nI need to keep this concise.",
+      });
+      await handle.update({ kind: "text", text: "*Thinking*\n\nprovided" });
+
+      await waitFor(() => sent.some((entry) => entry.msg.react));
+    } finally {
+      setDefaultRuntimeDiagnosticsStateForTesting(null);
+    }
+
+    const entries = await readJsonl(WHATSAPP_OUTBOUND_LOG_PATH);
+    assert.ok(entries.some((entry) => entry.transport === "sendMessage"
+      && entry.phase === "sent"
+      && entry.chatId === "diag-chat"
+      && entry.message?.kind === "text"
+      && entry.message?.text === "Thinking..."));
+    assert.ok(entries.some((entry) => entry.transport === "sendMessage"
+      && entry.phase === "sent"
+      && entry.message?.kind === "reaction"
+      && entry.message?.emoji === "👁"
+      && entry.message?.targetKey?.id === "msg-2"));
+    assert.ok(entries.some((entry) => entry.transport === "sendMessage"
+      && entry.phase === "sent"
+      && entry.message?.kind === "text_edit"
+      && entry.message?.text === "*Thinking*\n\nprovided"
+      && entry.message?.edit?.id === "msg-2"));
+    await fs.rm(WHATSAPP_OUTBOUND_LOG_PATH, { force: true });
   });
 });
 

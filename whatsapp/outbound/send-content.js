@@ -1,8 +1,12 @@
 import { generateMessageIDV2, generateWAMessage, generateWAMessageFromContent, proto } from "@whiskeysockets/baileys";
 import { randomBytes } from "node:crypto";
+import { appendFileSync, mkdirSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { createLogger } from "../../logger.js";
 import { parseToolArgs } from "../../agent-io-defaults.js";
 import { buildContextualUnifiedDiff } from "../../code-image-renderer.js";
+import { getDefaultRuntimeDiagnosticsState } from "../../diagnostics-config.js";
 import { renderBlocks } from "../../message-renderer.js";
 import { formatPlanPresentationText } from "../../plan-presentation.js";
 import { formatToolFlowInspectText, formatToolFlowSummary } from "../tool-flow-presenter.js";
@@ -27,6 +31,9 @@ const DEFAULT_WHATSAPP_EDIT_DEBOUNCE_MS = 1000;
 const TURN_STATUS_PIN_SECONDS = 86400;
 const INSPECT_REACTION_EMOJI = "👁";
 const log = createLogger("whatsapp:outbound");
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const REPO_ROOT = path.resolve(__dirname, "../..");
+const WHATSAPP_OUTBOUND_DIAGNOSTIC_DEFAULT_PATH = path.join(REPO_ROOT, "logs", "whatsapp-outbound.jsonl");
 /** @type {Map<string, WhatsAppEditHandleRecord>} */
 const inMemoryEditHandles = new Map();
 /** @type {Map<string, {
@@ -102,6 +109,240 @@ const SOURCE_PREFIX = {
  */
 function isRecord(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/**
+ * @param {import('@whiskeysockets/baileys').WAMessageKey | undefined | null} key
+ * @returns {Record<string, unknown> | null}
+ */
+function summarizeDiagnosticMessageKey(key) {
+  if (!key) {
+    return null;
+  }
+  return {
+    id: key.id ?? null,
+    remoteJid: key.remoteJid ?? null,
+    fromMe: key.fromMe ?? null,
+    participant: key.participant ?? null,
+  };
+}
+
+/**
+ * @param {unknown} value
+ * @returns {number | null}
+ */
+function diagnosticByteLength(value) {
+  if (Buffer.isBuffer(value) || value instanceof Uint8Array) {
+    return value.byteLength;
+  }
+  return null;
+}
+
+/**
+ * @param {Record<string, unknown> | undefined} options
+ * @returns {Record<string, unknown> | null}
+ */
+function summarizeOutboundOptions(options) {
+  if (!options) {
+    return null;
+  }
+  const quoted = isRecord(options.quoted) ? options.quoted : null;
+  const quotedKey = isRecord(quoted?.key)
+    ? /** @type {import('@whiskeysockets/baileys').WAMessageKey} */ (quoted.key)
+    : undefined;
+  return {
+    hasQuoted: !!quoted,
+    quotedKey: summarizeDiagnosticMessageKey(quotedKey),
+  };
+}
+
+/**
+ * @param {any} msg
+ * @returns {Record<string, unknown>}
+ */
+export function buildWhatsAppOutboundMessageDiagnostic(msg) {
+  if (typeof msg.text === "string") {
+    return {
+      kind: msg.edit ? "text_edit" : "text",
+      text: msg.text,
+      textLength: msg.text.length,
+      edit: summarizeDiagnosticMessageKey(
+        isRecord(msg.edit) ? /** @type {import('@whiskeysockets/baileys').WAMessageKey} */ (msg.edit) : undefined,
+      ),
+    };
+  }
+  if (isRecord(msg.react)) {
+    return {
+      kind: "reaction",
+      emoji: typeof msg.react.text === "string" ? msg.react.text : null,
+      targetKey: summarizeDiagnosticMessageKey(
+        isRecord(msg.react.key) ? /** @type {import('@whiskeysockets/baileys').WAMessageKey} */ (msg.react.key) : undefined,
+      ),
+    };
+  }
+  if (isRecord(msg.pin)) {
+    return {
+      kind: "pin",
+      targetKey: summarizeDiagnosticMessageKey(
+        /** @type {import('@whiskeysockets/baileys').WAMessageKey} */ (msg.pin),
+      ),
+      type: msg.type ?? null,
+      time: msg.time ?? null,
+    };
+  }
+  if (isRecord(msg.delete)) {
+    return {
+      kind: "delete",
+      targetKey: summarizeDiagnosticMessageKey(
+        /** @type {import('@whiskeysockets/baileys').WAMessageKey} */ (msg.delete),
+      ),
+    };
+  }
+  if (msg.image) {
+    return {
+      kind: "image",
+      caption: typeof msg.caption === "string" ? msg.caption : null,
+      mediaBytes: diagnosticByteLength(msg.image),
+    };
+  }
+  if (msg.video) {
+    return {
+      kind: "video",
+      caption: typeof msg.caption === "string" ? msg.caption : null,
+      mimetype: typeof msg.mimetype === "string" ? msg.mimetype : null,
+      mediaBytes: diagnosticByteLength(msg.video),
+    };
+  }
+  if (msg.audio) {
+    return {
+      kind: "audio",
+      mimetype: typeof msg.mimetype === "string" ? msg.mimetype : null,
+      mediaBytes: diagnosticByteLength(msg.audio),
+    };
+  }
+  if (msg.document) {
+    return {
+      kind: "document",
+      caption: typeof msg.caption === "string" ? msg.caption : null,
+      mimetype: typeof msg.mimetype === "string" ? msg.mimetype : null,
+      fileName: typeof msg.fileName === "string" ? msg.fileName : null,
+      mediaBytes: diagnosticByteLength(msg.document),
+    };
+  }
+  if (isRecord(msg.protocolMessage)) {
+    const protocolMessage = msg.protocolMessage;
+    const editedMessage = isRecord(protocolMessage.editedMessage) ? protocolMessage.editedMessage : null;
+    const editedImageMessage = isRecord(editedMessage?.imageMessage) ? editedMessage.imageMessage : null;
+    return {
+      kind: "protocol",
+      protocolType: protocolMessage.type ?? null,
+      key: summarizeDiagnosticMessageKey(
+        isRecord(protocolMessage.key)
+          ? /** @type {import('@whiskeysockets/baileys').WAMessageKey} */ (protocolMessage.key)
+          : undefined,
+      ),
+      editedImageCaption: typeof editedImageMessage?.caption === "string" ? editedImageMessage.caption : null,
+    };
+  }
+  return {
+    kind: "unknown",
+    messageKeys: Object.keys(msg),
+  };
+}
+
+/**
+ * @param {{
+ *   transport: "sendMessage" | "relayMessage";
+ *   phase: "attempt" | "sent" | "failed";
+ *   chatId: string;
+ *   message: Record<string, unknown>;
+ *   resultKey?: import('@whiskeysockets/baileys').WAMessageKey | null;
+ *   options?: Record<string, unknown>;
+ *   error?: string;
+ * }} event
+ * @param {{
+ *   diagnosticsState?: import("../../diagnostics-config.js").RuntimeDiagnosticsState,
+ *   targetPath?: string,
+ * }} [options]
+ * @returns {void}
+ */
+export function appendWhatsAppOutboundDiagnostic(event, options = {}) {
+  const diagnosticsState = options.diagnosticsState ?? getDefaultRuntimeDiagnosticsState();
+  if (!diagnosticsState.isWhatsAppOutboundLogEnabled()) {
+    return;
+  }
+  const targetPath = options.targetPath ?? WHATSAPP_OUTBOUND_DIAGNOSTIC_DEFAULT_PATH;
+  mkdirSync(path.dirname(targetPath), { recursive: true });
+  appendFileSync(targetPath, `${JSON.stringify({
+    observedAt: new Date().toISOString(),
+    transport: event.transport,
+    phase: event.phase,
+    chatId: event.chatId,
+    message: buildWhatsAppOutboundMessageDiagnostic(event.message),
+    resultKey: summarizeDiagnosticMessageKey(event.resultKey),
+    options: summarizeOutboundOptions(event.options),
+    ...(event.error ? { error: event.error } : {}),
+  })}\n`);
+}
+
+/**
+ * @param {import('@whiskeysockets/baileys').WASocket} sock
+ * @param {string} chatId
+ * @param {any} msg
+ * @param {Record<string, unknown> | undefined} options
+ * @returns {Promise<import('@whiskeysockets/baileys').WAMessage | undefined>}
+ */
+async function sendObservedWhatsAppMessage(sock, chatId, msg, options) {
+  const diagnosticMessage = /** @type {Record<string, unknown>} */ (msg);
+  appendWhatsAppOutboundDiagnostic({ transport: "sendMessage", phase: "attempt", chatId, message: diagnosticMessage, options });
+  try {
+    const sent = await sock.sendMessage(chatId, /** @type {any} */ (msg), options);
+    appendWhatsAppOutboundDiagnostic({
+      transport: "sendMessage",
+      phase: "sent",
+      chatId,
+      message: diagnosticMessage,
+      resultKey: sent?.key ?? null,
+      options,
+    });
+    return sent;
+  } catch (error) {
+    appendWhatsAppOutboundDiagnostic({
+      transport: "sendMessage",
+      phase: "failed",
+      chatId,
+      message: diagnosticMessage,
+      options,
+      error: formatErrorMessage(error),
+    });
+    throw error;
+  }
+}
+
+/**
+ * @param {import('@whiskeysockets/baileys').WASocket} sock
+ * @param {string} chatId
+ * @param {any} msg
+ * @param {Record<string, unknown>} options
+ * @returns {Promise<void>}
+ */
+async function relayObservedWhatsAppMessage(sock, chatId, msg, options) {
+  const diagnosticMessage = /** @type {Record<string, unknown>} */ (msg);
+  appendWhatsAppOutboundDiagnostic({ transport: "relayMessage", phase: "attempt", chatId, message: diagnosticMessage, options });
+  try {
+    await sock.relayMessage(chatId, msg, options);
+    appendWhatsAppOutboundDiagnostic({ transport: "relayMessage", phase: "sent", chatId, message: diagnosticMessage, options });
+  } catch (error) {
+    appendWhatsAppOutboundDiagnostic({
+      transport: "relayMessage",
+      phase: "failed",
+      chatId,
+      message: diagnosticMessage,
+      options,
+      error: formatErrorMessage(error),
+    });
+    throw error;
+  }
 }
 
 /**
@@ -714,11 +955,11 @@ async function pinWhatsAppMessage(sock, chatId, key, observer) {
   }
   const messageId = getMessageKeyId(pinKey);
   try {
-    await sock.sendMessage(chatId, {
+    await sendObservedWhatsAppMessage(sock, chatId, {
       pin: pinKey,
       type: proto.PinInChat.Type.PIN_FOR_ALL,
       time: TURN_STATUS_PIN_SECONDS,
-    });
+    }, undefined);
     observePinnedStatusDelivery(observer, { type: "pin.succeeded", chatId, messageId });
   } catch (error) {
     observePinnedStatusDelivery(observer, {
@@ -750,10 +991,10 @@ async function unpinWhatsAppMessage(sock, chatId, key, observer) {
   }
   const messageId = getMessageKeyId(pinKey);
   try {
-    await sock.sendMessage(chatId, {
+    await sendObservedWhatsAppMessage(sock, chatId, {
       pin: pinKey,
       type: proto.PinInChat.Type.UNPIN_FOR_ALL,
-    });
+    }, undefined);
     observePinnedStatusDelivery(observer, { type: "unpin.succeeded", chatId, messageId });
   } catch (error) {
     observePinnedStatusDelivery(observer, {
@@ -3240,7 +3481,7 @@ export async function sendAlbum(sock, chatId, items, options) {
 
   if (items.length === 0) return undefined;
   if (items.length === 1) {
-    const sent = await sock.sendMessage(chatId, makeImageMessage(items[0].image, items[0].caption), options ?? {});
+    const sent = await sendObservedWhatsAppMessage(sock, chatId, makeImageMessage(items[0].image, items[0].caption), options ?? {});
     return sent?.key;
   }
 
@@ -3262,7 +3503,7 @@ export async function sendAlbum(sock, chatId, items, options) {
   );
   if (!albumMsg.message) throw new Error("Failed to generate album header message");
 
-  await sock.relayMessage(chatId, albumMsg.message, { messageId: albumMsgId });
+  await relayObservedWhatsAppMessage(sock, chatId, albumMsg.message, { messageId: albumMsgId });
 
   const parentMessageKey = {
     remoteJid: albumMsg.key.remoteJid,
@@ -3295,7 +3536,7 @@ export async function sendAlbum(sock, chatId, items, options) {
       },
     };
 
-    await sock.relayMessage(chatId, imageMessage.message, {
+    await relayObservedWhatsAppMessage(sock, chatId, imageMessage.message, {
       messageId: /** @type {string} */ (imageMessage.key.id),
     });
 
@@ -3325,7 +3566,7 @@ export async function editWhatsAppMessage(sock, jid, newText, target) {
     throw new Error("Cannot edit WhatsApp message without an edit target.");
   }
   if (resolved.messageKind === "image") {
-    await sock.relayMessage(jid, {
+    await relayObservedWhatsAppMessage(sock, jid, {
       protocolMessage: {
         key: resolved.key,
         type: proto.Message.ProtocolMessage.Type.MESSAGE_EDIT,
@@ -3335,7 +3576,7 @@ export async function editWhatsAppMessage(sock, jid, newText, target) {
     return;
   }
 
-  await sock.sendMessage(jid, makeTextMessage(newText, { edit: resolved.key }));
+  await sendObservedWhatsAppMessage(sock, jid, makeTextMessage(newText, { edit: resolved.key }), undefined);
 }
 
 /**
@@ -3486,7 +3727,7 @@ export async function sendBlocks(sock, chatId, source, content, options, reactio
     try {
       switch (instruction.kind) {
         case "text":
-          sent = await sock.sendMessage(chatId, makeTextMessage(instruction.text), options);
+          sent = await sendObservedWhatsAppMessage(sock, chatId, makeTextMessage(instruction.text), options);
           if (instruction.continuation && sent?.key) {
             subscribeRenderedImagesContinuation(instruction.continuation, sent.key);
           }
@@ -3497,9 +3738,37 @@ export async function sendBlocks(sock, chatId, source, content, options, reactio
           break;
         case "image":
           if (instruction.hd) {
-            sent = await sendImageHD(sock, chatId, instruction.image, instruction.caption, options);
+            const imageMessage = makeImageMessage(instruction.image, instruction.caption);
+            appendWhatsAppOutboundDiagnostic({
+              transport: "sendMessage",
+              phase: "attempt",
+              chatId,
+              message: imageMessage,
+              options,
+            });
+            try {
+              sent = await sendImageHD(sock, chatId, instruction.image, instruction.caption, options);
+              appendWhatsAppOutboundDiagnostic({
+                transport: "sendMessage",
+                phase: "sent",
+                chatId,
+                message: imageMessage,
+                resultKey: sent?.key ?? null,
+                options,
+              });
+            } catch (error) {
+              appendWhatsAppOutboundDiagnostic({
+                transport: "sendMessage",
+                phase: "failed",
+                chatId,
+                message: imageMessage,
+                options,
+                error: formatErrorMessage(error),
+              });
+              throw error;
+            }
           } else {
-            sent = await sock.sendMessage(chatId, makeImageMessage(instruction.image, instruction.caption), options);
+            sent = await sendObservedWhatsAppMessage(sock, chatId, makeImageMessage(instruction.image, instruction.caption), options);
           }
           if (instruction.editable && sent?.key) {
             lastSentKey = sent.key;
@@ -3507,7 +3776,7 @@ export async function sendBlocks(sock, chatId, source, content, options, reactio
           }
           break;
         case "video":
-          sent = await sock.sendMessage(chatId, {
+          sent = await sendObservedWhatsAppMessage(sock, chatId, {
             video: instruction.video,
             mimetype: instruction.mimetype,
             jpegThumbnail: "",
@@ -3515,13 +3784,13 @@ export async function sendBlocks(sock, chatId, source, content, options, reactio
           }, options);
           break;
         case "audio":
-          sent = await sock.sendMessage(chatId, {
+          sent = await sendObservedWhatsAppMessage(sock, chatId, {
             audio: instruction.audio,
             mimetype: instruction.mimetype,
           }, options);
           break;
         case "file":
-          sent = await sock.sendMessage(chatId, {
+          sent = await sendObservedWhatsAppMessage(sock, chatId, {
             document: instruction.file,
             mimetype: instruction.mimetype,
             fileName: instruction.fileName,
@@ -3588,7 +3857,8 @@ export async function sendBlocks(sock, chatId, source, content, options, reactio
           totalImages: continuation.totalImages,
           error: formatErrorMessage(error),
         });
-        void sock.sendMessage(
+        void sendObservedWhatsAppMessage(
+          sock,
           chatId,
           makeTextMessage(prependSourcePrefix(prefix, `⚠️ ${continuation.label} continuation failed: ${formatErrorMessage(error)}`)),
           options,
@@ -3696,9 +3966,9 @@ export async function sendBlocks(sock, chatId, source, content, options, reactio
       return;
     }
     inspectReactionSent = true;
-    void sock.sendMessage(chatId, {
+    void sendObservedWhatsAppMessage(sock, chatId, {
       react: { text: INSPECT_REACTION_EMOJI, key: editKey },
-    }).catch((error) => {
+    }, undefined).catch((error) => {
       log.warn("Failed to add inspect reaction marker.", {
         chatId,
         messageId: editKey.id,
@@ -3776,7 +4046,8 @@ export async function sendBlocks(sock, chatId, source, content, options, reactio
  */
 async function requestSnapshotDiffContinuation(sock, chatId, options, reactionRuntime, deliveredLines, totalLines, onContinue) {
   const remainingLines = Math.max(totalLines - deliveredLines, 0);
-  const sent = await sock.sendMessage(
+  const sent = await sendObservedWhatsAppMessage(
+    sock,
     chatId,
     makeTextMessage(`🔧 ⚠️ Snapshot diff rendered ${deliveredLines} of ${totalLines} lines. Continue rendering the remaining ${remainingLines}? React 👍 to continue or 👎 to stop.`),
     options,
@@ -3791,7 +4062,8 @@ async function requestSnapshotDiffContinuation(sock, chatId, options, reactionRu
         totalLines,
         error: formatErrorMessage(error),
       });
-      await sock.sendMessage(
+      await sendObservedWhatsAppMessage(
+        sock,
         chatId,
         makeTextMessage(`🔧 ⚠️ Snapshot diff continuation failed: ${formatErrorMessage(error)}`),
         options,
