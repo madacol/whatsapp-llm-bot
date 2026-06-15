@@ -2862,6 +2862,62 @@ describe("sendBlocks – tool-call → edit pipeline", () => {
     }
   });
 
+  it("does not queue duplicate inspected renders for unchanged inspect data", async () => {
+    const previousDelay = process.env.MADABOT_WHATSAPP_EDIT_DEBOUNCE_MS;
+    process.env.MADABOT_WHATSAPP_EDIT_DEBOUNCE_MS = "20";
+    try {
+      const { sock, calls } = createCaptureSock();
+      const reactionRuntime = createReactionRuntime();
+      const handle = await sendBlocks(
+        sock,
+        "chat-1",
+        "llm",
+        [{ type: "text", text: "Thinking..." }],
+        undefined,
+        reactionRuntime,
+      );
+
+      assert.ok(handle);
+      handle.setInspect({
+        kind: "reasoning",
+        summary: "*Thinking*",
+        text: "_Reasoning details are not displayed._",
+      });
+      await waitFor(() => calls.some((call) => {
+        const msg = /** @type {Record<string, unknown>} */ (call.args[1]);
+        return typeof msg.react === "object" && msg.react !== null;
+      }));
+
+      reactionRuntime.handleReactions([{
+        key: { id: "msg-1", remoteJid: "chat-1" },
+        reaction: { text: "👁" },
+        senderId: "user-1",
+      }]);
+      handle.setInspect({
+        kind: "reasoning",
+        summary: "*Thinking*",
+        text: "_Reasoning details are not displayed._",
+      });
+      handle.setInspect({
+        kind: "reasoning",
+        summary: "*Thinking*",
+        text: "_Reasoning details are not displayed._",
+      });
+
+      await waitFor(() => sentTextMessages(calls).length >= 2);
+      await new Promise((resolve) => setTimeout(resolve, 30));
+      const editMessages = sentTextMessages(calls).filter((msg) => msg.edit);
+      assert.equal(editMessages.length, 1);
+      assert.ok(editMessages[0]?.text?.includes("_Reasoning details are not displayed._"));
+    } finally {
+      if (previousDelay === undefined) {
+        delete process.env.MADABOT_WHATSAPP_EDIT_DEBOUNCE_MS;
+      } else {
+        process.env.MADABOT_WHATSAPP_EDIT_DEBOUNCE_MS = previousDelay;
+      }
+    }
+  });
+
   it("image tool-call: send → edit uses relayMessage for caption update", async () => {
     const { sock, calls } = createCaptureSock();
 

@@ -200,19 +200,13 @@ export function buildAgentIoHooks(
   }
 
   /**
-   * @param {{ text?: string, summaryParts: string[], contentParts: string[], hasEncryptedContent?: boolean }} event
+   * @param {{ hasEncryptedContent?: boolean }} event
    * @returns {string}
    */
   function getReasoningInspectText(event) {
-    const text = typeof event.text === "string" && event.text.trim()
-      ? event.text.trim()
-      : event.contentParts.join("\n").trim() || event.summaryParts.join("\n").trim();
-    if (text) {
-      return text;
-    }
     return event.hasEncryptedContent
-      ? "_Codex returned encrypted reasoning, but no public reasoning text._"
-      : "_Codex exposed no public reasoning text for this step._";
+      ? "_Reasoning is encrypted and not available for display._"
+      : "_Reasoning details are not displayed._";
   }
 
   return {

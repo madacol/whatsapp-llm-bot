@@ -318,16 +318,34 @@ describe("buildAgentIoHooks", () => {
     assert.deepEqual(subject.reasoningInspects[0], {
       kind: "reasoning",
       summary: "*Thinking*",
-      text: "_Codex exposed no public reasoning text for this step._",
+      text: "_Reasoning details are not displayed._",
     });
     assert.deepEqual(subject.reasoningInspects[1], {
       kind: "reasoning",
       summary: "*Thinking*",
-      text: "Inspect the file, then patch the bug.",
+      text: "_Reasoning details are not displayed._",
     });
   });
 
-  it("reports encrypted reasoning honestly when no public reasoning text is available", async () => {
+  it("does not attach raw reasoning text as inspect data", async () => {
+    const subject = createReasoningSubject();
+
+    await subject.hooks.onReasoning?.({
+      status: "updated",
+      summaryParts: ["summary token"],
+      contentParts: ["raw chain token"],
+      text: "raw chain text",
+    });
+
+    assert.equal(subject.reasoningInspects.length, 1);
+    assert.deepEqual(subject.reasoningInspects[0], {
+      kind: "reasoning",
+      summary: "*Thinking*",
+      text: "_Reasoning details are not displayed._",
+    });
+  });
+
+  it("reports encrypted reasoning without exposing content", async () => {
     const subject = createReasoningSubject();
 
     await subject.hooks.onReasoning?.({
@@ -341,7 +359,7 @@ describe("buildAgentIoHooks", () => {
     assert.deepEqual(subject.reasoningInspects[0], {
       kind: "reasoning",
       summary: "*Thinking*",
-      text: "_Codex returned encrypted reasoning, but no public reasoning text._",
+      text: "_Reasoning is encrypted and not available for display._",
     });
   });
 

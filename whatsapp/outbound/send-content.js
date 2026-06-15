@@ -4017,6 +4017,8 @@ export async function sendBlocks(sock, chatId, source, content, options, reactio
   let inspectReactionSent = false;
   /** @type {"visible" | "inspect"} */
   let displayMode = "visible";
+  /** @type {string | null} */
+  let lastAttachedInspectText = null;
 
   function reactWithInspectMarkerOnce() {
     if (inspectReactionSent || !reactionRuntime || !editKey.id) {
@@ -4064,6 +4066,10 @@ export async function sendBlocks(sock, chatId, source, content, options, reactio
       if (inspect) {
         reactWithInspectMarkerOnce();
         const text = formatCurrentInspectText();
+        if (text === lastAttachedInspectText) {
+          return;
+        }
+        lastAttachedInspectText = text;
         appendWhatsAppOutboundDiagnostic({
           transport: "messageHandle",
           phase: "attached",
