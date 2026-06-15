@@ -24,6 +24,7 @@ const LOG_LEVEL_VALUES = new Set(["debug", "info", "warn", "error", "silent"]);
  *   dbCacheLog: boolean,
  *   whatsappUpsertLog: boolean,
  *   whatsappReactionLog: boolean,
+ *   whatsappOutboundLog: boolean,
  *   logLevel: "debug" | "info" | "warn" | "error" | "silent" | null,
  * }} RuntimeDiagnosticsConfig
  */
@@ -37,6 +38,7 @@ const LOG_LEVEL_VALUES = new Set(["debug", "info", "warn", "error", "silent"]);
  *   isDbCacheLogEnabled: () => boolean,
  *   isWhatsAppUpsertLogEnabled: () => boolean,
  *   isWhatsAppReactionLogEnabled: () => boolean,
+ *   isWhatsAppOutboundLogEnabled: () => boolean,
  *   update: (patch: Partial<RuntimeDiagnosticsConfig>) => Promise<RuntimeDiagnosticsConfig>,
  * }} RuntimeDiagnosticsState
  */
@@ -54,6 +56,7 @@ function readEnvDefaults(env, legacyWhatsAppDiagnosticEnabled) {
     dbCacheLog: env[DB_CACHE_LOG_ENV] === "1",
     whatsappUpsertLog: legacyWhatsAppDiagnosticEnabled,
     whatsappReactionLog: legacyWhatsAppDiagnosticEnabled,
+    whatsappOutboundLog: false,
     logLevel: normalizeLogLevel(env[LOG_LEVEL_ENV]),
   };
 }
@@ -85,6 +88,7 @@ function normalizeRuntimeDiagnosticsConfig(raw, fallback) {
     dbCacheLog: typeof record.dbCacheLog === "boolean" ? record.dbCacheLog : fallback.dbCacheLog,
     whatsappUpsertLog: typeof record.whatsappUpsertLog === "boolean" ? record.whatsappUpsertLog : fallback.whatsappUpsertLog,
     whatsappReactionLog: typeof record.whatsappReactionLog === "boolean" ? record.whatsappReactionLog : fallback.whatsappReactionLog,
+    whatsappOutboundLog: typeof record.whatsappOutboundLog === "boolean" ? record.whatsappOutboundLog : fallback.whatsappOutboundLog,
     logLevel: "logLevel" in record ? normalizeLogLevel(record.logLevel) : fallback.logLevel,
   };
 }
@@ -176,6 +180,9 @@ export function createRuntimeDiagnosticsState(options = {}) {
     },
     isWhatsAppReactionLogEnabled() {
       return readConfig().whatsappReactionLog;
+    },
+    isWhatsAppOutboundLogEnabled() {
+      return readConfig().whatsappOutboundLog;
     },
     async update(patch) {
       const current = readConfig();
