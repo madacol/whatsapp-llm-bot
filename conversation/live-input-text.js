@@ -252,7 +252,7 @@ async function augmentLiveInputBlocks(blocks, input) {
           descriptionLength: description.length,
         });
         await input.onAudioTranscriptionComplete?.({ block, modelId, transcription: description });
-        augmented.push({ type: "text", text: `[Audio description: ${description}]` });
+        augmented.push({ type: "text", text: description });
       } catch (error) {
         log.warn("Live input audio transcription failed", {
           path: getMediaBlockPath(block),

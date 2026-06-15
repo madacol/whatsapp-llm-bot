@@ -193,17 +193,15 @@ function createAudioTranscriptionStatusObserver(context) {
     },
     onAudioTranscriptionComplete: async ({ transcription }) => {
       const isNewTranscription = !transcriptions.includes(transcription);
-      if (isNewTranscription) {
-        transcriptions.push(transcription);
-      }
       const handle = await ensureHandle();
+      if (!isNewTranscription) {
+        return;
+      }
+      transcriptions.push(transcription);
       handle?.setInspect({
         kind: "text",
         text: formatAudioTranscriptionInspectText(transcriptions),
       });
-      if (!isNewTranscription) {
-        return;
-      }
       await handle?.update({
         kind: "text",
         text: "Transcribed",

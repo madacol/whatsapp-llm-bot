@@ -867,7 +867,8 @@ describe("audio media-to-text provider input", () => {
     );
 
     assert.equal(capturedInputs.length, 1);
-    assert.ok(capturedInputs[0]?.includes("[Audio description: Audio asks for the current status.]"), capturedInputs[0]);
+    assert.ok(capturedInputs[0]?.includes("Audio asks for the current status."), capturedInputs[0]);
+    assert.equal(capturedInputs[0]?.includes("[Audio description:"), false, capturedInputs[0]);
     assert.ok(capturedInputs[0]?.includes("Media file available in this request:"), capturedInputs[0]);
     const transcriptionStatus = getSentMessages().find((entry) => entry.msg.text === "Transcribing audio...");
     assert.equal(transcriptionStatus?.options?.quoted, audioMessage);

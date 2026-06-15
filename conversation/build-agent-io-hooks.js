@@ -6,7 +6,6 @@ import { DEFAULT_OUTPUT_VISIBILITY } from "../chat-output-visibility.js";
 
 export const MAX_AUTO_PRESENTED_SNAPSHOT_FILE_CHANGES = 25;
 export const SNAPSHOT_FILE_CHANGE_BATCH_FLUSH_DELAY_MS = 25;
-export const REASONING_INSPECT_BATCH_FLUSH_DELAY_MS = process.env.TESTING === "1" ? 0 : 1000;
 
 /**
  * @param {string} filePath
@@ -140,10 +139,8 @@ export function buildAgentIoHooks(
   let reasoningHandle = null;
   /** @type {string[]} */
   const pendingReasoningTraceParts = [];
-  /** @type {ReturnType<typeof setTimeout> | null} */
-  let reasoningInspectFlushTimer = null;
-  /** @type {string | null} */
-  let lastReasoningInspectText = null;
+  let pendingEncryptedReasoning = false;
+  let reasoningInspectAttached = false;
   /** @type {ReturnType<typeof setTimeout> | null} */
   let snapshotFlushTimer = null;
 
@@ -220,33 +217,18 @@ export function buildAgentIoHooks(
   /**
    * @returns {void}
    */
-  function flushReasoningInspectBatch() {
-    if (reasoningInspectFlushTimer) {
-      clearTimeout(reasoningInspectFlushTimer);
-      reasoningInspectFlushTimer = null;
-    }
-    if (!reasoningHandle || pendingReasoningTraceParts.length === 0) {
+  function attachCompletedReasoningInspect() {
+    if (!reasoningHandle || reasoningInspectAttached) {
       return;
     }
-    const text = pendingReasoningTraceParts.join("\n\n").trim();
-    if (!text || text === lastReasoningInspectText) {
+    const text = pendingReasoningTraceParts.length > 0
+      ? pendingReasoningTraceParts.join("\n\n").trim()
+      : (pendingEncryptedReasoning ? "_Reasoning is encrypted and not available for display._" : "");
+    if (!text) {
       return;
     }
-    lastReasoningInspectText = text;
+    reasoningInspectAttached = true;
     reasoningHandle.setInspect(reasoningInspectState("*Thinking*", text));
-  }
-
-  /**
-   * @returns {void}
-   */
-  function scheduleReasoningInspectBatchFlush() {
-    if (reasoningInspectFlushTimer) {
-      clearTimeout(reasoningInspectFlushTimer);
-    }
-    reasoningInspectFlushTimer = setTimeout(() => {
-      flushReasoningInspectBatch();
-    }, REASONING_INSPECT_BATCH_FLUSH_DELAY_MS);
-    reasoningInspectFlushTimer.unref?.();
   }
 
   return {
@@ -264,18 +246,12 @@ export function buildAgentIoHooks(
       const traceParts = getReasoningTraceParts(event);
       if (traceParts.length > 0) {
         pendingReasoningTraceParts.push(...traceParts);
-        if (event.status === "completed") {
-          flushReasoningInspectBatch();
-        } else {
-          scheduleReasoningInspectBatchFlush();
-        }
       } else if (event.hasEncryptedContent) {
-        pendingReasoningTraceParts.push("_Reasoning is encrypted and not available for display._");
-        flushReasoningInspectBatch();
+        pendingEncryptedReasoning = true;
       }
 
       if (event.status === "completed") {
-        flushReasoningInspectBatch();
+        attachCompletedReasoningInspect();
         await emitWhileWorking(() => reasoningHandle ? reasoningHandle.update(textUpdate("Thought")) : Promise.resolve());
       }
     },
