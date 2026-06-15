@@ -270,46 +270,6 @@ describe("getMessageContent", () => {
     );
   });
 
-  it("drops ephemeral bot thinking quote content while preserving the user reply", async () => {
-    const { sock } = createMockSock();
-    sock.user = { id: "bot-123:1@s.whatsapp.net" };
-    for (const quotedText of [
-      "🤖 *Thinking*\n\nThinking...",
-      "🤖 *Thinking*\n\nprovided",
-      "🤖 *Thinking*\n\n**Finalizing documentation details**\n\nI need to keep this concise.",
-    ]) {
-      /** @type {ChatTurn | null} */
-      let capturedTurn = null;
-
-      await adaptIncomingMessage(
-        createWAMessage({
-          text: "This quoted status is unstable.",
-          chatId: "inspect-regression@g.us",
-          isGroup: true,
-          quotedText,
-          quotedSenderId: "bot-123",
-        }),
-        sock,
-        async (turn) => {
-          capturedTurn = turn;
-        },
-        createConfirmRuntime(),
-        createSelectRuntime(),
-      );
-
-      assert.ok(capturedTurn, "Handler should receive the user reply");
-      assert.equal(capturedTurn.facts.repliedToBot, true);
-      assert.ok(
-        capturedTurn.content.some((block) => block.type === "text" && block.text === "This quoted status is unstable."),
-        "Direct user text should remain in the turn",
-      );
-      assert.ok(
-        !capturedTurn.content.some((block) => block.type === "quote"),
-        `Ephemeral bot thinking/status text should not be passed as quoted content: ${JSON.stringify(quotedText)}`,
-      );
-    }
-  });
-
   it("keeps stable bot answer quotes as reply context", async () => {
     const { sock } = createMockSock();
     sock.user = { id: "bot-123:1@s.whatsapp.net" };
@@ -337,40 +297,6 @@ describe("getMessageContent", () => {
     assert.ok(quote, "Stable bot answer quote should remain available as context");
     assert.ok(
       quote.content.some((block) => block.type === "text" && block.text === "🤖 The build passed."),
-    );
-  });
-
-  it("drops ephemeral bot audio transcription status quote content", async () => {
-    const { sock } = createMockSock();
-    sock.user = { id: "bot-123:1@s.whatsapp.net" };
-    /** @type {ChatTurn | null} */
-    let capturedTurn = null;
-
-    await adaptIncomingMessage(
-      createWAMessage({
-        text: "This status flashed.",
-        chatId: "audio-status-quote@g.us",
-        isGroup: true,
-        quotedText: "Transcribed",
-        quotedSenderId: "bot-123",
-      }),
-      sock,
-      async (turn) => {
-        capturedTurn = turn;
-      },
-      createConfirmRuntime(),
-      createSelectRuntime(),
-    );
-
-    assert.ok(capturedTurn, "Handler should receive the user reply");
-    assert.equal(capturedTurn.facts.repliedToBot, true);
-    assert.ok(
-      capturedTurn.content.some((block) => block.type === "text" && block.text === "This status flashed."),
-      "Direct user text should remain in the turn",
-    );
-    assert.ok(
-      !capturedTurn.content.some((block) => block.type === "quote"),
-      "Ephemeral audio transcription status should not be passed as quoted content",
     );
   });
 

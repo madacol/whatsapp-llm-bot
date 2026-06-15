@@ -55,7 +55,7 @@ describe("seed turn io", () => {
     assert.equal(fileHandle, handle);
 
     await fileHandle?.update(textUpdate("Thought"));
-    fileHandle?.setInspect({ kind: "text", text: "full inspect text", persistOnInspect: true });
+    fileHandle?.setInspect({ kind: "text", text: "full inspect text" });
 
     assert.deepEqual(events, [
       contentEvent("llm", [{ type: "text", text: "Thinking..." }]),
@@ -67,7 +67,7 @@ describe("seed turn io", () => {
       }),
     ]);
     assert.deepEqual(updates, [{ kind: "text", text: "Thought" }]);
-    assert.deepEqual(inspects, [{ kind: "text", text: "full inspect text", persistOnInspect: true }]);
+    assert.deepEqual(inspects, [{ kind: "text", text: "full inspect text" }]);
   });
 
   it("delegates every semantic event through the provided sender", async () => {

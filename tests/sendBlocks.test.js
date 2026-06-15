@@ -2560,7 +2560,7 @@ describe("sendBlocks – outbound diagnostics", () => {
         summary: "*Thinking*",
         text: "**Finalizing documentation details**\n\nI need to keep this concise.",
       });
-      await handle.update({ kind: "text", text: "*Thinking*\n\nprovided" });
+      await handle.update({ kind: "text", text: "Thought" });
 
       await waitFor(() => sent.some((entry) => entry.msg.react));
     } finally {
@@ -2578,11 +2578,79 @@ describe("sendBlocks – outbound diagnostics", () => {
       && entry.message?.kind === "reaction"
       && entry.message?.emoji === "👁"
       && entry.message?.targetKey?.id === "msg-2"));
+    assert.ok(entries.some((entry) => entry.transport === "messageHandle"
+      && entry.phase === "attached"
+      && entry.trace?.cause === "handle.setInspect"
+      && entry.trace?.willEditVisibleMessage === false
+      && entry.message?.text?.includes("Finalizing documentation details")));
     assert.ok(entries.some((entry) => entry.transport === "sendMessage"
       && entry.phase === "sent"
       && entry.message?.kind === "text_edit"
-      && entry.message?.text === "*Thinking*\n\nprovided"
+      && entry.message?.text === "Thought"
       && entry.message?.edit?.id === "msg-2"));
+    assert.equal(entries.some((entry) => entry.transport === "sendMessage"
+      && entry.message?.kind === "text_edit"
+      && entry.message?.text?.includes("Finalizing documentation details")), false);
+    await fs.rm(WHATSAPP_OUTBOUND_LOG_PATH, { force: true });
+  });
+
+  it("observes message-handle edit queue replacement before the socket send", async () => {
+    const diagnostics = await createRuntimeDiagnosticsState({
+      env: {},
+      legacyWhatsAppDiagnosticEnabled: false,
+      reloadIntervalMs: 0,
+    });
+    const previousDelay = process.env.MADABOT_WHATSAPP_EDIT_DEBOUNCE_MS;
+    process.env.MADABOT_WHATSAPP_EDIT_DEBOUNCE_MS = "20";
+    const { sock } = createMockSock();
+
+    await fs.rm(WHATSAPP_OUTBOUND_LOG_PATH, { force: true });
+    setDefaultRuntimeDiagnosticsStateForTesting(diagnostics);
+    try {
+      await diagnostics.update({ whatsappOutboundLog: true });
+      const handle = await sendBlocks(
+        sock,
+        "diag-chat",
+        "plain",
+        [{ type: "text", text: "running" }],
+      );
+      assert.ok(handle);
+
+      const firstUpdate = handle.update({ kind: "text", text: "first progress" });
+      const secondUpdate = handle.update({ kind: "text", text: "second progress" });
+      const finalUpdate = handle.update({ kind: "text", text: "final progress" });
+      await Promise.all([firstUpdate, secondUpdate, finalUpdate]);
+    } finally {
+      setDefaultRuntimeDiagnosticsStateForTesting(null);
+      if (previousDelay === undefined) {
+        delete process.env.MADABOT_WHATSAPP_EDIT_DEBOUNCE_MS;
+      } else {
+        process.env.MADABOT_WHATSAPP_EDIT_DEBOUNCE_MS = previousDelay;
+      }
+    }
+
+    const entries = await readJsonl(WHATSAPP_OUTBOUND_LOG_PATH);
+    assert.ok(entries.some((entry) => entry.transport === "messageHandle"
+      && entry.phase === "queued"
+      && entry.trace?.cause === "handle.update"
+      && entry.trace?.renderMode === "visible"
+      && entry.message?.text === "first progress"));
+    assert.equal(entries.filter((entry) => entry.transport === "messageHandle"
+      && entry.phase === "replaced"
+      && entry.trace?.replacedQueuedEdit === true).length, 2);
+    assert.ok(entries.some((entry) => entry.transport === "messageHandle"
+      && entry.phase === "flushing"
+      && entry.message?.text === "final progress"));
+    assert.ok(entries.some((entry) => entry.transport === "sendMessage"
+      && entry.phase === "sent"
+      && entry.message?.kind === "text_edit"
+      && entry.message?.text === "final progress"));
+    assert.equal(entries.some((entry) => entry.transport === "sendMessage"
+      && entry.message?.kind === "text_edit"
+      && entry.message?.text === "first progress"), false);
+    assert.equal(entries.some((entry) => entry.transport === "sendMessage"
+      && entry.message?.kind === "text_edit"
+      && entry.message?.text === "second progress"), false);
     await fs.rm(WHATSAPP_OUTBOUND_LOG_PATH, { force: true });
   });
 });
@@ -2665,15 +2733,126 @@ describe("sendBlocks – tool-call → edit pipeline", () => {
 
       assert.ok(handle);
       const firstUpdate = handle.update({ kind: "text", text: "first progress" });
-      const secondUpdate = handle.update({ kind: "text", text: "final progress" });
+      const secondUpdate = handle.update({ kind: "text", text: "second progress" });
+      const finalUpdate = handle.update({ kind: "text", text: "final progress" });
 
       assert.equal(calls.length, 1, "Updates should not edit immediately while debounced");
-      await Promise.all([firstUpdate, secondUpdate]);
+      await Promise.all([firstUpdate, secondUpdate, finalUpdate]);
 
       assert.equal(calls.length, 2, "Rapid updates should be coalesced into one edit");
       const editMsg = /** @type {Record<string, unknown>} */ (calls[1].args[1]);
       assert.ok(typeof editMsg.text === "string" && editMsg.text.includes("final progress"));
       assert.ok(typeof editMsg.text === "string" && !editMsg.text.includes("first progress"));
+      assert.ok(typeof editMsg.text === "string" && !editMsg.text.includes("second progress"));
+    } finally {
+      if (previousDelay === undefined) {
+        delete process.env.MADABOT_WHATSAPP_EDIT_DEBOUNCE_MS;
+      } else {
+        process.env.MADABOT_WHATSAPP_EDIT_DEBOUNCE_MS = previousDelay;
+      }
+    }
+  });
+
+  it("lets inspected mode replace queued visible edits with the latest inspect render", async () => {
+    const previousDelay = process.env.MADABOT_WHATSAPP_EDIT_DEBOUNCE_MS;
+    process.env.MADABOT_WHATSAPP_EDIT_DEBOUNCE_MS = "20";
+    try {
+      const { sock, calls } = createCaptureSock();
+      const reactionRuntime = createReactionRuntime();
+      const handle = await sendBlocks(
+        sock,
+        "chat-1",
+        "llm",
+        [{ type: "text", text: "Thinking..." }],
+        undefined,
+        reactionRuntime,
+      );
+
+      assert.ok(handle);
+      handle.setInspect({
+        kind: "reasoning",
+        summary: "*Thinking*",
+        text: "Inspectable reasoning",
+      });
+      await waitFor(() => calls.some((call) => {
+        const msg = /** @type {Record<string, unknown>} */ (call.args[1]);
+        return typeof msg.react === "object" && msg.react !== null;
+      }));
+
+      const pendingUpdate = handle.update({ kind: "text", text: "late visible chunk" });
+      reactionRuntime.handleReactions([{
+        key: { id: "msg-1", remoteJid: "chat-1" },
+        reaction: { text: "👁" },
+        senderId: "user-1",
+      }]);
+
+      await pendingUpdate;
+      await handle.update({ kind: "text", text: "newer visible chunk" });
+      await new Promise((resolve) => setTimeout(resolve, 30));
+
+      const editMessages = sentTextMessages(calls).filter((msg) => msg.edit);
+      assert.equal(editMessages.length, 2);
+      const texts = editMessages.map((msg) => msg.text).filter((text) => typeof text === "string");
+      assert.ok(texts.some((text) => text.includes("Inspectable reasoning")));
+      assert.equal(texts.some((text) => text.includes("late visible chunk")), false);
+      assert.equal(texts.some((text) => text.includes("newer visible chunk")), false);
+    } finally {
+      if (previousDelay === undefined) {
+        delete process.env.MADABOT_WHATSAPP_EDIT_DEBOUNCE_MS;
+      } else {
+        process.env.MADABOT_WHATSAPP_EDIT_DEBOUNCE_MS = previousDelay;
+      }
+    }
+  });
+
+  it("coalesces inspected updates to the latest attached inspect data", async () => {
+    const previousDelay = process.env.MADABOT_WHATSAPP_EDIT_DEBOUNCE_MS;
+    process.env.MADABOT_WHATSAPP_EDIT_DEBOUNCE_MS = "20";
+    try {
+      const { sock, calls } = createCaptureSock();
+      const reactionRuntime = createReactionRuntime();
+      const handle = await sendBlocks(
+        sock,
+        "chat-1",
+        "llm",
+        [{ type: "text", text: "Thinking..." }],
+        undefined,
+        reactionRuntime,
+      );
+
+      assert.ok(handle);
+      handle.setInspect({
+        kind: "reasoning",
+        summary: "*Thinking*",
+        text: "first inspect chunk",
+      });
+      await waitFor(() => calls.some((call) => {
+        const msg = /** @type {Record<string, unknown>} */ (call.args[1]);
+        return typeof msg.react === "object" && msg.react !== null;
+      }));
+
+      reactionRuntime.handleReactions([{
+        key: { id: "msg-1", remoteJid: "chat-1" },
+        reaction: { text: "👁" },
+        senderId: "user-1",
+      }]);
+      handle.setInspect({
+        kind: "reasoning",
+        summary: "*Thinking*",
+        text: "second inspect chunk",
+      });
+      handle.setInspect({
+        kind: "reasoning",
+        summary: "*Thinking*",
+        text: "final inspect chunk",
+      });
+
+      await waitFor(() => sentTextMessages(calls).length >= 2);
+      const editMessages = sentTextMessages(calls).filter((msg) => msg.edit);
+      assert.equal(editMessages.length, 1);
+      assert.ok(editMessages[0]?.text?.includes("final inspect chunk"));
+      assert.equal(editMessages[0]?.text?.includes("first inspect chunk"), false);
+      assert.equal(editMessages[0]?.text?.includes("second inspect chunk"), false);
     } finally {
       if (previousDelay === undefined) {
         delete process.env.MADABOT_WHATSAPP_EDIT_DEBOUNCE_MS;
@@ -2791,7 +2970,43 @@ describe("sendBlocks – tool-call → edit pipeline", () => {
     assert.equal(reactionCalls.length, 1);
   });
 
-  it("persists full plain-text inspect output after 👁 reactions", async () => {
+  it("ignores bot-authored inspect marker reactions", async () => {
+    const { sock, calls } = createCaptureSock();
+    sock.user = { id: "bot-123:1@s.whatsapp.net" };
+    const reactionRuntime = createReactionRuntime();
+
+    const handle = await sendBlocks(
+      sock,
+      "chat-1",
+      "plain",
+      [{ type: "text", text: "Thinking..." }],
+      undefined,
+      reactionRuntime,
+    );
+
+    assert.ok(handle);
+    handle.setInspect({
+      kind: "reasoning",
+      summary: "*Thinking*",
+      text: "Inspectable reasoning",
+    });
+    await waitFor(() => calls.some((call) => {
+      const msg = /** @type {Record<string, unknown>} */ (call.args[1]);
+      return typeof msg.react === "object" && msg.react !== null;
+    }));
+
+    reactionRuntime.handleReactions([{
+      key: { id: "msg-1", remoteJid: "chat-1" },
+      reaction: { text: "👁" },
+      senderId: "bot-123:1",
+    }]);
+
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    assert.equal(sentTextMessages(calls).length, 1);
+    assert.equal(sentTextMessages(calls)[0]?.text, "Thinking...");
+  });
+
+  it("edits the original message to full plain-text inspect output after user 👁 reactions", async () => {
     const { sock, calls } = createCaptureSock();
     const reactionRuntime = createReactionRuntime();
 
@@ -2811,7 +3026,6 @@ describe("sendBlocks – tool-call → edit pipeline", () => {
         "🔧 *Read*  `src/app.js`",
         "🔧 *Shell*  `pnpm type-check`",
       ].join("\n"),
-      persistOnInspect: true,
     });
 
     reactionRuntime.handleReactions([{
@@ -2834,11 +3048,6 @@ describe("sendBlocks – tool-call → edit pipeline", () => {
         "🔧 *Shell*  `pnpm type-check`",
         "🔧 *Shell*  `git diff`",
       ].join("\n"),
-      persistOnInspect: true,
-    });
-    await handle.update({
-      kind: "text",
-      text: "... +1 earlier tools\n🔧 *Shell*  `pnpm type-check`\n🔧 *Shell*  `git diff`",
     });
 
     await waitFor(() => sentTextMessages(calls).length >= 3);
@@ -2870,7 +3079,6 @@ describe("sendBlocks – tool-call → edit pipeline", () => {
     handle.setInspect({
       kind: "text",
       text: longInspectText,
-      persistOnInspect: true,
     });
 
     reactionRuntime.handleReactions([{
@@ -2886,9 +3094,9 @@ describe("sendBlocks – tool-call → edit pipeline", () => {
     assert.ok(inspectMsg.text.includes("_… truncated ("));
     assert.ok(inspectMsg.text.length < longInspectText.length);
 
-    await handle.update({
+    handle.setInspect({
       kind: "text",
-      text: "... +217 earlier tools\n🔧 *Shell*  `command 217`\n🔧 *Shell*  `command 218`\n🔧 *Shell*  `command 219`",
+      text: `${longInspectText}\n🔧 *Shell*  \`command 220\``,
     });
 
     await waitFor(() => sentTextMessages(calls).length >= 3);
@@ -2931,25 +3139,31 @@ describe("sendBlocks – tool-call → edit pipeline", () => {
     assert.ok(typeof inspectMsg.text === "string" && inspectMsg.text.includes("Inspect the file, then patch the bug."));
   });
 
-  it("does not reveal hidden plain-text inspect output after 👁 reactions", async () => {
+  it("sends inspect output as a new message when editing the original fails", async () => {
     const { sock, calls } = createCaptureSock();
+    const originalSendMessage = sock.sendMessage.bind(sock);
+    sock.sendMessage = async (chatId, msg, opts) => {
+      if (msg.edit) {
+        throw new Error("edit window closed");
+      }
+      return originalSendMessage(chatId, msg, opts);
+    };
     const reactionRuntime = createReactionRuntime();
 
     const handle = await sendBlocks(
       sock,
       "chat-1",
-      "plain",
-      [{ type: "text", text: "Transcribed" }],
+      "llm",
+      [{ type: "text", text: "Thinking..." }],
       undefined,
       reactionRuntime,
     );
 
     assert.ok(handle);
     handle.setInspect({
-      kind: "text",
-      text: "Full transcript should stay out of the visible WhatsApp message.",
-      persistOnInspect: true,
-      revealOnInspect: false,
+      kind: "reasoning",
+      summary: "*Thinking*",
+      text: "Fallback inspect details.",
     });
 
     reactionRuntime.handleReactions([{
@@ -2958,10 +3172,10 @@ describe("sendBlocks – tool-call → edit pipeline", () => {
       senderId: "user-1",
     }]);
 
-    await new Promise((resolve) => setTimeout(resolve, 20));
-    const textMessages = sentTextMessages(calls);
-    assert.equal(textMessages.length, 1);
-    assert.equal(textMessages[0]?.text, "Transcribed");
+    await waitFor(() => sentTextMessages(calls).some((msg) => msg.text?.includes("Fallback inspect details.")));
+    const fallbackMsg = sentTextMessages(calls).find((msg) => msg.text?.includes("Fallback inspect details."));
+    assert.ok(fallbackMsg);
+    assert.equal(fallbackMsg.edit, undefined);
   });
 
   it("editWhatsAppMessage directly: text path sends edit key", async () => {
