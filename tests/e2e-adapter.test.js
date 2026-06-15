@@ -21,6 +21,7 @@ import { adaptIncomingMessage } from "../whatsapp/inbound/chat-turn.js";
 import { createConfirmRuntime } from "../whatsapp/runtime/confirm-runtime.js";
 import { createSelectRuntime } from "../whatsapp/runtime/select-runtime.js";
 import { updateChatConfig } from "../chat-config.js";
+import { codexAcpEntryPoint, fakeCodexPath } from "./codex-acp-patch-fixture.js";
 
 const testConfirmRegistry = createConfirmRuntime();
 const testUserResponseRegistry = createSelectRuntime();
@@ -457,6 +458,84 @@ describe("ACP file changes through WhatsApp transport", () => {
       ...diffDelete.sentMessages,
     ].filter((entry) => Buffer.isBuffer(entry.msg.image) && typeof entry.msg.caption === "string");
     assert.ok(fileChangeImages.length >= 7, `Expected file changes to render as sendable image content, got ${JSON.stringify(fileChangeImages)}`);
+  });
+});
+
+describe("Codex ACP file changes through WhatsApp transport", () => {
+  const harnessName = "e2e-codex-acp-file-changes";
+  let nextSender = 0;
+
+  before(async () => {
+    const { registerHarnessDriver } = await import("../harnesses/index.js");
+    const { createAcpHarness } = await import("../harnesses/acp.js");
+    registerHarnessDriver({
+      name: harnessName,
+      supportsInstances: true,
+      createInstance: () => ({
+        harness: createAcpHarness({
+          name: harnessName,
+          sessionKind: "codex",
+          config: {
+            command: process.execPath,
+            args: [codexAcpEntryPoint],
+            env: {
+              ...process.env,
+              CODEX_PATH: fakeCodexPath,
+            },
+          },
+        }),
+      }),
+    });
+  });
+
+  /**
+   * @returns {Promise<string[]>}
+   */
+  async function runDeleteAddRewritePrompt() {
+    const senderId = `e2e-codex-acp-files-${nextSender++}`;
+    const chatId = `${senderId}@s.whatsapp.net`;
+    const workdir = await fs.mkdtemp(path.join(os.tmpdir(), "e2e-codex-acp-files-"));
+    await fs.writeFile(
+      path.join(workdir, "approval-delete-add.md"),
+      "# Original approval file\nThis file must be rewritten through one delete-plus-add apply_patch.\n",
+      "utf8",
+    );
+    await seedChat(testDb, chatId, { enabled: true });
+    await updateChatConfig(chatId, (current) => ({
+      ...current,
+      harness: harnessName,
+      harness_cwd: workdir,
+      output_visibility: { changes: true, toolDetails: false },
+    }));
+
+    const captures = createMockBaileysSocket();
+    await adaptIncomingMessage(
+      createWAMessage({ text: "delete add rewrite fixture", senderId }),
+      captures.sock,
+      handleMessage,
+      testConfirmRegistry,
+      testUserResponseRegistry,
+      undefined,
+      undefined,
+      { outboundStore: testStore },
+    );
+
+    return captures.getRenderedMessages();
+  }
+
+  it("renders captured Codex delete-plus-add rewrites of existing files as updates", async () => {
+    const rendered = await runDeleteAddRewritePrompt();
+    const matchingUpdates = rendered.filter((text) => (
+      text.startsWith("🔧 *Update*")
+      && text.includes("`approval-delete-add.md`")
+    ));
+    const matchingAdds = rendered.filter((text) => (
+      text.startsWith("🔧 *Add*")
+      && text.includes("`approval-delete-add.md`")
+    ));
+
+    assert.equal(matchingUpdates.length, 1, `Expected one Update caption for approval-delete-add.md, got ${JSON.stringify(rendered)}`);
+    assert.equal(matchingAdds.length, 0, `Expected no Add caption for approval-delete-add.md, got ${JSON.stringify(rendered)}`);
   });
 });
 
