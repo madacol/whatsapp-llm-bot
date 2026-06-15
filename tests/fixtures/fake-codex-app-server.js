@@ -93,6 +93,63 @@ function firstTextInput(input) {
 }
 
 /**
+ * @param {unknown} threadId
+ * @param {string} cwd
+ */
+function notifyDeleteAddRewriteFixture(threadId, cwd) {
+  const targetPath = `${cwd}/approval-delete-add.md`;
+  const newText = "# Rewritten approval file\nThis content was produced after the approval-blocking delete-plus-add rewrite.\n";
+  const turnDiff = [
+    "diff --git a/codex-approval-delete-add-WzZqhw/approval-delete-add.md b/codex-approval-delete-add-WzZqhw/approval-delete-add.md",
+    "index a6eb855bc856db41afcc044026044bfe318dd6b0..b3aa4fe2a1edbc0e2adf8c603e3dd569e7a4c5a9",
+    "--- a/codex-approval-delete-add-WzZqhw/approval-delete-add.md",
+    "+++ b/codex-approval-delete-add-WzZqhw/approval-delete-add.md",
+    "@@ -1,2 +1,2 @@",
+    "-# Original approval file",
+    "-This file must be rewritten through one delete-plus-add apply_patch.",
+    "+# Rewritten approval file",
+    "+This content was produced after the approval-blocking delete-plus-add rewrite.",
+    "",
+  ].join("\n");
+  const item = {
+    id: "call_delete_add_rewrite",
+    type: "fileChange",
+    changes: [{
+      path: targetPath,
+      kind: { type: "add" },
+      diff: newText,
+    }],
+    status: "completed",
+  };
+
+  notify("item/started", {
+    threadId,
+    turnId: "fake-turn-1",
+    item: { ...item, status: "inProgress" },
+  });
+  notify("item/completed", {
+    threadId,
+    turnId: "fake-turn-1",
+    item,
+  });
+  notify("turn/diff/updated", {
+    threadId,
+    turnId: "fake-turn-1",
+    diff: turnDiff,
+  });
+  notify("item/agentMessage/delta", {
+    threadId,
+    turnId: "fake-turn-1",
+    itemId: "agent-message-1",
+    delta: "DONE",
+  });
+  notify("turn/completed", {
+    threadId,
+    turn: { id: "fake-turn-1", status: "completed" },
+  });
+}
+
+/**
  * @param {unknown} parsed
  */
 async function handleMessage(parsed) {
@@ -327,6 +384,9 @@ async function handleMessage(parsed) {
           threadId: params.threadId,
           turn: { id: "fake-turn-1", status: "completed" },
         });
+      } else if (firstTextInput(params.input) === "delete add rewrite fixture") {
+        const cwd = typeof params.cwd === "string" && params.cwd.length > 0 ? params.cwd : currentThreadCwd;
+        notifyDeleteAddRewriteFixture(params.threadId, cwd);
       }
       notify("thread/tokenUsage/updated", {
         threadId: params.threadId,

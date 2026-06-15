@@ -1,13 +1,23 @@
 # Codex apply_patch delete+add rewrite diff
 
-## Current repo state
+## Final repo state
 
-- Active task is linked from [`tasks/todo.md`](todo.md).
+- Task is complete and removed from [`tasks/todo.md`](todo.md).
 - Added capture script: [`../scripts/codex-app-server-approval-delete-add-capture.js`](../scripts/codex-app-server-approval-delete-add-capture.js).
 - Added real direct app-server fixture: [`../tests/fixtures/codex-app-server-approval-delete-add-traffic.json`](../tests/fixtures/codex-app-server-approval-delete-add-traffic.json).
 - Added this detail doc.
-- No production fix or regression test is complete yet.
-- `tasks/quoted-thinking-inspect-regression.md` is an unrelated untracked task detail file; do not mix it into this work.
+- Added a WhatsApp e2e pipeline regression test for the captured delete+add rewrite shape.
+- No production fix was needed: the harness baseline reconciliation already corrects the user-visible output to an update.
+- `tasks/quoted-thinking-inspect-regression.md` remains the next unrelated task.
+
+## Outcome
+
+Pipeline verified through WhatsApp inbound -> selected ACP harness -> patched `codex-acp` -> fake Codex app-server -> WhatsApp rendered output:
+
+- The fake app-server emits the captured shape: existing-file rewrite reported as add-only `fileChange`, followed by late `turn/diff/updated`.
+- The e2e test creates the file before the turn so the run-start baseline exists.
+- WhatsApp renders exactly one `Update` caption for `approval-delete-add.md`.
+- WhatsApp renders no `Add` caption for `approval-delete-add.md`.
 
 ## Problem
 
