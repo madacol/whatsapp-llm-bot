@@ -114,6 +114,9 @@ function isEphemeralBotQuoteText(text) {
   }
 
   const withoutSourcePrefix = normalized.replace(/^🤖\s+/u, "").trim();
+  if (/^(?:transcribing audio\.{3}|transcribed)$/iu.test(withoutSourcePrefix)) {
+    return true;
+  }
   return /^thinking(?:\.{3}|…)?$/iu.test(withoutSourcePrefix)
     || /^\*thinking\*(?:\s|$)/iu.test(withoutSourcePrefix);
 }

@@ -201,6 +201,7 @@ function createAudioTranscriptionStatusObserver(context) {
         kind: "text",
         text: formatAudioTranscriptionInspectText(transcriptions),
         persistOnInspect: true,
+        revealOnInspect: false,
       });
       if (!isNewTranscription) {
         return;

@@ -1126,6 +1126,7 @@ describe("createConversationRunner prompt formatting", () => {
       kind: "text",
       text: "The speaker says check deploy status.",
       persistOnInspect: true,
+      revealOnInspect: false,
     }]);
   });
 

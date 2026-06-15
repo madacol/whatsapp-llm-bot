@@ -2931,6 +2931,39 @@ describe("sendBlocks – tool-call → edit pipeline", () => {
     assert.ok(typeof inspectMsg.text === "string" && inspectMsg.text.includes("Inspect the file, then patch the bug."));
   });
 
+  it("does not reveal hidden plain-text inspect output after 👁 reactions", async () => {
+    const { sock, calls } = createCaptureSock();
+    const reactionRuntime = createReactionRuntime();
+
+    const handle = await sendBlocks(
+      sock,
+      "chat-1",
+      "plain",
+      [{ type: "text", text: "Transcribed" }],
+      undefined,
+      reactionRuntime,
+    );
+
+    assert.ok(handle);
+    handle.setInspect({
+      kind: "text",
+      text: "Full transcript should stay out of the visible WhatsApp message.",
+      persistOnInspect: true,
+      revealOnInspect: false,
+    });
+
+    reactionRuntime.handleReactions([{
+      key: { id: "msg-1", remoteJid: "chat-1" },
+      reaction: { text: "👁" },
+      senderId: "user-1",
+    }]);
+
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    const textMessages = sentTextMessages(calls);
+    assert.equal(textMessages.length, 1);
+    assert.equal(textMessages[0]?.text, "Transcribed");
+  });
+
   it("editWhatsAppMessage directly: text path sends edit key", async () => {
     const { sock, calls } = createCaptureSock();
     const key = { id: "msg-abc", remoteJid: "chat-1" };

@@ -340,6 +340,40 @@ describe("getMessageContent", () => {
     );
   });
 
+  it("drops ephemeral bot audio transcription status quote content", async () => {
+    const { sock } = createMockSock();
+    sock.user = { id: "bot-123:1@s.whatsapp.net" };
+    /** @type {ChatTurn | null} */
+    let capturedTurn = null;
+
+    await adaptIncomingMessage(
+      createWAMessage({
+        text: "This status flashed.",
+        chatId: "audio-status-quote@g.us",
+        isGroup: true,
+        quotedText: "Transcribed",
+        quotedSenderId: "bot-123",
+      }),
+      sock,
+      async (turn) => {
+        capturedTurn = turn;
+      },
+      createConfirmRuntime(),
+      createSelectRuntime(),
+    );
+
+    assert.ok(capturedTurn, "Handler should receive the user reply");
+    assert.equal(capturedTurn.facts.repliedToBot, true);
+    assert.ok(
+      capturedTurn.content.some((block) => block.type === "text" && block.text === "This status flashed."),
+      "Direct user text should remain in the turn",
+    );
+    assert.ok(
+      !capturedTurn.content.some((block) => block.type === "quote"),
+      "Ephemeral audio transcription status should not be passed as quoted content",
+    );
+  });
+
   it("extracts image caption from quoted message", async () => {
     const msg = /** @type {Partial<BaileysMessage>} */ ({
       message: {

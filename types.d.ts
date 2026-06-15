@@ -372,7 +372,7 @@ type MessageHandleUpdate =
 type MessageInspectState =
   | { kind: "tool"; presentation: ToolPresentation; output?: string }
   | { kind: "tool_flow"; state: ToolFlowState }
-  | { kind: "text"; text: string; persistOnInspect?: boolean }
+  | { kind: "text"; text: string; persistOnInspect?: boolean; revealOnInspect?: boolean }
   | { kind: "reasoning"; summary: string; text: string };
 
 /** Handle to a sent message, providing semantic lifecycle control. */
