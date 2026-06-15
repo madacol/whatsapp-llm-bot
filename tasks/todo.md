@@ -6,4 +6,6 @@
 
 ## Doing
 
+- Fix Codex ACP existing-file delete/add rewrite diff presentation. See [codex-apply-patch-delete-add-diff.md](codex-apply-patch-delete-add-diff.md).
+
 ## Blocked
