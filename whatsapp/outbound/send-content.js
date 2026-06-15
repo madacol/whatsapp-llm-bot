@@ -157,6 +157,27 @@ function summarizeOutboundOptions(options) {
 }
 
 /**
+ * @param {import('@whiskeysockets/baileys').WASocket} sock
+ * @returns {string[]}
+ */
+function getSocketSelfIds(sock) {
+  const ids = [sock.user?.id, sock.user?.lid]
+    .filter((id) => typeof id === "string" && id.length > 0)
+    .map((id) => /** @type {string} */ (id).split(":")[0].split("@")[0]);
+  return [...new Set(ids)];
+}
+
+/**
+ * @param {string} senderId
+ * @param {import('@whiskeysockets/baileys').WASocket} sock
+ * @returns {boolean}
+ */
+function isReactionFromSelf(senderId, sock) {
+  const normalizedSenderId = senderId.split(":")[0].split("@")[0];
+  return getSocketSelfIds(sock).includes(normalizedSenderId);
+}
+
+/**
  * @param {any} msg
  * @returns {Record<string, unknown>}
  */
@@ -252,13 +273,14 @@ export function buildWhatsAppOutboundMessageDiagnostic(msg) {
 
 /**
  * @param {{
- *   transport: "sendMessage" | "relayMessage";
- *   phase: "attempt" | "sent" | "failed";
+ *   transport: "sendMessage" | "relayMessage" | "messageHandle";
+ *   phase: "attempt" | "sent" | "failed" | "queued" | "replaced" | "flushing" | "immediate" | "attached";
  *   chatId: string;
  *   message: Record<string, unknown>;
  *   resultKey?: import('@whiskeysockets/baileys').WAMessageKey | null;
  *   options?: Record<string, unknown>;
  *   error?: string;
+ *   trace?: Record<string, unknown>;
  * }} event
  * @param {{
  *   diagnosticsState?: import("../../diagnostics-config.js").RuntimeDiagnosticsState,
@@ -281,6 +303,7 @@ export function appendWhatsAppOutboundDiagnostic(event, options = {}) {
     message: buildWhatsAppOutboundMessageDiagnostic(event.message),
     resultKey: summarizeDiagnosticMessageKey(event.resultKey),
     options: summarizeOutboundOptions(event.options),
+    ...(event.trace ? { trace: event.trace } : {}),
     ...(event.error ? { error: event.error } : {}),
   })}\n`);
 }
@@ -1992,7 +2015,6 @@ async function sendRuntimeCommandEvent(sock, chatId, event, options, reactionRun
   const inspect = {
     kind: "text",
     text: commandEvent.command.output ?? "_no output_",
-    persistOnInspect: true,
   };
   state.handle.setInspect(inspect);
   const updatedHandle = await updateRuntimeHandleOrSendReplacement(
@@ -2093,7 +2115,6 @@ async function sendRuntimeToolEvent(sock, chatId, event, options, reactionRuntim
       ? {
         kind: "text",
         text: toolEvent.tool.output,
-        persistOnInspect: true,
       }
       : null;
     if (inspect) {
@@ -2309,7 +2330,6 @@ function updateCompactToolActivityInspect(state) {
   state.handle?.setInspect({
     kind: "text",
     text: renderCompactToolActivityInspectText(state),
-    persistOnInspect: true,
   });
 }
 
@@ -3401,7 +3421,6 @@ async function sendRuntimeEvent(sock, chatId, event, options, reactionRuntime, s
   state.handle?.setInspect({
     kind: "text",
     text: renderRuntimeStatusInspectText(state),
-    persistOnInspect: true,
   });
   if (presentation.closesStatus) {
     runtimeStatusByChat.delete(chatId);
@@ -3607,12 +3626,28 @@ export async function editWhatsAppMessageByHandle(sock, transportHandleId, newTe
  * @param {import('@whiskeysockets/baileys').WASocket} sock
  * @param {string} transportHandleId
  * @param {string} newText
- * @param {{ store?: import("../../store.js").Store }} [options]
+ * @param {{ store?: import("../../store.js").Store, trace?: Record<string, unknown> }} [options]
  * @returns {Promise<void>}
  */
 function editWhatsAppMessageByHandleDebounced(sock, transportHandleId, newText, options = {}) {
+  const trace = {
+    handleId: transportHandleId,
+    ...options.trace,
+  };
+  const diagnosticChatId = typeof options.trace?.chatId === "string" ? options.trace.chatId : "";
+  const diagnosticMessage = {
+    text: newText,
+    edit: { id: transportHandleId },
+  };
   const debounceMs = getWhatsAppEditDebounceMs();
   if (debounceMs <= 0) {
+    appendWhatsAppOutboundDiagnostic({
+      transport: "messageHandle",
+      phase: "immediate",
+      chatId: diagnosticChatId,
+      message: diagnosticMessage,
+      trace,
+    });
     return editWhatsAppMessageByHandle(sock, transportHandleId, newText, options);
   }
 
@@ -3620,6 +3655,17 @@ function editWhatsAppMessageByHandleDebounced(sock, transportHandleId, newText, 
   if (existing) {
     clearTimeout(existing.timer);
   }
+  appendWhatsAppOutboundDiagnostic({
+    transport: "messageHandle",
+    phase: existing ? "replaced" : "queued",
+    chatId: diagnosticChatId,
+    message: diagnosticMessage,
+    trace: {
+      ...trace,
+      replacedQueuedEdit: !!existing,
+      queuedWaiterCount: (existing?.waiters.length ?? 0) + 1,
+    },
+  });
 
   return new Promise((resolve, reject) => {
     const waiters = existing?.waiters ?? [];
@@ -3634,6 +3680,16 @@ function editWhatsAppMessageByHandleDebounced(sock, transportHandleId, newText, 
           return;
         }
         pendingEditDebounces.delete(transportHandleId);
+        appendWhatsAppOutboundDiagnostic({
+          transport: "messageHandle",
+          phase: "flushing",
+          chatId: diagnosticChatId,
+          message: {
+            text: entry.text,
+            edit: { id: transportHandleId },
+          },
+          trace,
+        });
         void editWhatsAppMessageByHandle(entry.sock, transportHandleId, entry.text, entry.options)
           .then(() => {
             for (const waiter of entry.waiters) {
@@ -3958,8 +4014,9 @@ export async function sendBlocks(sock, chatId, source, content, options, reactio
       return presentation ? { kind: "tool", presentation } : null;
     })()
     : null;
-  let persistInspectText = false;
   let inspectReactionSent = false;
+  /** @type {"visible" | "inspect"} */
+  let displayMode = "visible";
 
   function reactWithInspectMarkerOnce() {
     if (inspectReactionSent || !reactionRuntime || !editKey.id) {
@@ -3984,53 +4041,122 @@ export async function sendBlocks(sock, chatId, source, content, options, reactio
     deliveryStatus: "sent",
     waitUntilSent: async () => handle,
     update: async (update) => {
-      const text = persistInspectText && inspectState?.kind === "text" && inspectState.persistOnInspect
-        ? formatInspectEditText("", inspectState.text)
-        : summarizeHandleUpdate(update);
+      const inspectText = displayMode === "inspect" ? formatCurrentInspectText() : null;
+      const text = inspectText ?? prependSourcePrefix(prefix, summarizeHandleUpdate(update));
       await editWhatsAppMessageByHandleDebounced(
         sock,
         transportHandleId,
-        prependSourcePrefix(prefix, text),
-        { store: renderOptions.editHandleStore },
+        text,
+        {
+          store: renderOptions.editHandleStore,
+          trace: {
+            chatId,
+            cause: "handle.update",
+            renderMode: inspectText ? "inspect" : "visible",
+            displayMode,
+            messageId: editKey.id ?? null,
+          },
+        },
       );
     },
     setInspect: (inspect) => {
       inspectState = inspect;
       if (inspect) {
         reactWithInspectMarkerOnce();
+        const text = formatCurrentInspectText();
+        appendWhatsAppOutboundDiagnostic({
+          transport: "messageHandle",
+          phase: "attached",
+          chatId,
+          message: text ? { text, edit: { id: transportHandleId } } : { text: "", edit: { id: transportHandleId } },
+          trace: {
+            handleId: transportHandleId,
+            cause: "handle.setInspect",
+            renderMode: "inspect",
+            displayMode,
+            messageId: editKey.id ?? null,
+            inspectKind: inspect.kind,
+            willEditVisibleMessage: displayMode === "inspect",
+          },
+        });
+      }
+      if (displayMode === "inspect") {
+        const text = formatCurrentInspectText();
+        if (text) {
+          void showInspectText(text, "handle.setInspect");
+        }
       }
     },
   };
+
+  /**
+   * @returns {string | null}
+   */
+  function formatCurrentInspectText() {
+    if (!inspectState) {
+      return null;
+    }
+    if (inspectState.kind === "text") {
+      if (!inspectState.text.trim()) {
+        return null;
+      }
+      return prependSourcePrefix(prefix, formatInspectEditText("", inspectState.text));
+    }
+    const inspect = formatInspectState(inspectState);
+    return prependSourcePrefix(prefix, formatInspectEditText(inspect.summary, inspect.text));
+  }
+
+  /**
+   * @param {string} text
+   * @param {"reaction.inspect" | "handle.setInspect"} cause
+   * @returns {Promise<void>}
+   */
+  async function showInspectText(text, cause) {
+    if (isExpiredWhatsAppEditHandle(editHandle)) {
+      await sendObservedWhatsAppMessage(sock, chatId, makeTextMessage(text), undefined);
+      return;
+    }
+    try {
+      await editWhatsAppMessageByHandleDebounced(
+        sock,
+        transportHandleId,
+        text,
+        {
+          store: renderOptions.editHandleStore,
+          trace: {
+            chatId,
+            cause,
+            renderMode: "inspect",
+            displayMode,
+            messageId: editKey.id ?? null,
+          },
+        },
+      );
+    } catch (error) {
+      log.warn("Failed to edit inspected WhatsApp message; sending inspect detail separately.", {
+        chatId,
+        messageId: editKey.id,
+        error: formatErrorMessage(error),
+      });
+      await sendObservedWhatsAppMessage(sock, chatId, makeTextMessage(text), undefined);
+    }
+  }
 
   if (inspectState) {
     reactWithInspectMarkerOnce();
   }
 
   if (editKey.id && reactionRuntime) {
-    reactionRuntime.subscribe(editKey.id, (emoji) => {
-      if (!emoji.startsWith(INSPECT_REACTION_EMOJI) || !inspectState) {
+    reactionRuntime.subscribe(editKey.id, (emoji, senderId) => {
+      if (!emoji.startsWith(INSPECT_REACTION_EMOJI) || !inspectState || isReactionFromSelf(senderId, sock)) {
         return;
       }
-      if (inspectState.kind === "text") {
-        if (inspectState.revealOnInspect === false) {
-          return;
-        }
-        persistInspectText = inspectState.persistOnInspect === true;
-        void editWhatsAppMessage(
-          sock,
-          chatId,
-          prependSourcePrefix(prefix, formatInspectEditText("", inspectState.text)),
-          { messageKey: editHandle.messageKey, messageKind: editHandle.messageKind },
-        );
+      const text = formatCurrentInspectText();
+      if (!text) {
         return;
       }
-      const inspect = formatInspectState(inspectState);
-      void editWhatsAppMessage(
-        sock,
-        chatId,
-        prependSourcePrefix(prefix, formatInspectEditText(inspect.summary, inspect.text)),
-        { messageKey: editHandle.messageKey, messageKind: editHandle.messageKind },
-      );
+      displayMode = "inspect";
+      void showInspectText(text, "reaction.inspect");
     });
   }
 
