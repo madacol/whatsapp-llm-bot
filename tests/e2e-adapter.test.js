@@ -489,17 +489,15 @@ describe("Codex ACP file changes through WhatsApp transport", () => {
   });
 
   /**
+   * @param {string} prompt
+   * @param {(workdir: string) => Promise<void>} [setup]
    * @returns {Promise<string[]>}
    */
-  async function runDeleteAddRewritePrompt() {
+  async function runCodexAcpFileChangePrompt(prompt, setup) {
     const senderId = `e2e-codex-acp-files-${nextSender++}`;
     const chatId = `${senderId}@s.whatsapp.net`;
     const workdir = await fs.mkdtemp(path.join(os.tmpdir(), "e2e-codex-acp-files-"));
-    await fs.writeFile(
-      path.join(workdir, "approval-delete-add.md"),
-      "# Original approval file\nThis file must be rewritten through one delete-plus-add apply_patch.\n",
-      "utf8",
-    );
+    await setup?.(workdir);
     await seedChat(testDb, chatId, { enabled: true });
     await updateChatConfig(chatId, (current) => ({
       ...current,
@@ -510,7 +508,7 @@ describe("Codex ACP file changes through WhatsApp transport", () => {
 
     const captures = createMockBaileysSocket();
     await adaptIncomingMessage(
-      createWAMessage({ text: "delete add rewrite fixture", senderId }),
+      createWAMessage({ text: prompt, senderId }),
       captures.sock,
       handleMessage,
       testConfirmRegistry,
@@ -524,7 +522,13 @@ describe("Codex ACP file changes through WhatsApp transport", () => {
   }
 
   it("renders captured Codex delete-plus-add rewrites of existing files as updates", async () => {
-    const rendered = await runDeleteAddRewritePrompt();
+    const rendered = await runCodexAcpFileChangePrompt("delete add rewrite fixture", async (workdir) => {
+      await fs.writeFile(
+        path.join(workdir, "approval-delete-add.md"),
+        "# Original approval file\nThis file must be rewritten through one delete-plus-add apply_patch.\n",
+        "utf8",
+      );
+    });
     const matchingUpdates = rendered.filter((text) => (
       text.startsWith("🔧 *Update*")
       && text.includes("`approval-delete-add.md`")
@@ -536,6 +540,21 @@ describe("Codex ACP file changes through WhatsApp transport", () => {
 
     assert.equal(matchingUpdates.length, 1, `Expected one Update caption for approval-delete-add.md, got ${JSON.stringify(rendered)}`);
     assert.equal(matchingAdds.length, 0, `Expected no Add caption for approval-delete-add.md, got ${JSON.stringify(rendered)}`);
+  });
+
+  it("renders Codex delete-plus-add rewrites of files created earlier in the turn as updates", async () => {
+    const rendered = await runCodexAcpFileChangePrompt("create then delete add rewrite fixture");
+    const matchingAdds = rendered.filter((text) => (
+      text.startsWith("🔧 *Add*")
+      && text.includes("`generated-delete-add.md`")
+    ));
+    const matchingUpdates = rendered.filter((text) => (
+      text.startsWith("🔧 *Update*")
+      && text.includes("`generated-delete-add.md`")
+    ));
+
+    assert.equal(matchingAdds.length, 1, `Expected one Add caption for generated-delete-add.md creation, got ${JSON.stringify(rendered)}`);
+    assert.equal(matchingUpdates.length, 1, `Expected one Update caption for generated-delete-add.md rewrite, got ${JSON.stringify(rendered)}`);
   });
 });
 

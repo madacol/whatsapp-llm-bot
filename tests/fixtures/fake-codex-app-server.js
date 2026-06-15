@@ -150,6 +150,82 @@ function notifyDeleteAddRewriteFixture(threadId, cwd) {
 }
 
 /**
+ * @param {unknown} threadId
+ * @param {string} cwd
+ */
+function notifyCreateThenDeleteAddRewriteFixture(threadId, cwd) {
+  const targetPath = `${cwd}/generated-delete-add.md`;
+  const originalText = "# Generated file\nThis file was created earlier in the same turn.\n";
+  const rewrittenText = "# Rewritten generated file\nThis file was rewritten later in the same turn.\n";
+  notify("item/started", {
+    threadId,
+    turnId: "fake-turn-1",
+    item: {
+      id: "call_create_generated",
+      type: "fileChange",
+      changes: [{
+        path: targetPath,
+        kind: { type: "add" },
+        diff: originalText,
+      }],
+      status: "inProgress",
+    },
+  });
+  notify("item/completed", {
+    threadId,
+    turnId: "fake-turn-1",
+    item: {
+      id: "call_create_generated",
+      type: "fileChange",
+      changes: [{
+        path: targetPath,
+        kind: { type: "add" },
+        diff: originalText,
+      }],
+      status: "completed",
+    },
+  });
+  notify("item/started", {
+    threadId,
+    turnId: "fake-turn-1",
+    item: {
+      id: "call_rewrite_generated",
+      type: "fileChange",
+      changes: [{
+        path: targetPath,
+        kind: { type: "add" },
+        diff: rewrittenText,
+      }],
+      status: "inProgress",
+    },
+  });
+  notify("item/completed", {
+    threadId,
+    turnId: "fake-turn-1",
+    item: {
+      id: "call_rewrite_generated",
+      type: "fileChange",
+      changes: [{
+        path: targetPath,
+        kind: { type: "add" },
+        diff: rewrittenText,
+      }],
+      status: "completed",
+    },
+  });
+  notify("item/agentMessage/delta", {
+    threadId,
+    turnId: "fake-turn-1",
+    itemId: "agent-message-1",
+    delta: "DONE",
+  });
+  notify("turn/completed", {
+    threadId,
+    turn: { id: "fake-turn-1", status: "completed" },
+  });
+}
+
+/**
  * @param {unknown} parsed
  */
 async function handleMessage(parsed) {
@@ -387,6 +463,9 @@ async function handleMessage(parsed) {
       } else if (firstTextInput(params.input) === "delete add rewrite fixture") {
         const cwd = typeof params.cwd === "string" && params.cwd.length > 0 ? params.cwd : currentThreadCwd;
         notifyDeleteAddRewriteFixture(params.threadId, cwd);
+      } else if (firstTextInput(params.input) === "create then delete add rewrite fixture") {
+        const cwd = typeof params.cwd === "string" && params.cwd.length > 0 ? params.cwd : currentThreadCwd;
+        notifyCreateThenDeleteAddRewriteFixture(params.threadId, cwd);
       }
       notify("thread/tokenUsage/updated", {
         threadId: params.threadId,

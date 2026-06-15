@@ -3,11 +3,12 @@
 ## Final repo state
 
 - Task is complete and removed from [`tasks/todo.md`](todo.md).
+- Live review clarified that files created earlier in the same turn must also render later delete+add rewrites as updates.
 - Added capture script: [`../scripts/codex-app-server-approval-delete-add-capture.js`](../scripts/codex-app-server-approval-delete-add-capture.js).
 - Added real direct app-server fixture: [`../tests/fixtures/codex-app-server-approval-delete-add-traffic.json`](../tests/fixtures/codex-app-server-approval-delete-add-traffic.json).
 - Added this detail doc.
 - Added a WhatsApp e2e pipeline regression test for the captured delete+add rewrite shape.
-- No production fix was needed: the harness baseline reconciliation already corrects the user-visible output to an update.
+- Added an in-run ACP file-change baseline ledger so changes already shown to the user refresh the starting point for later file-change reconciliation.
 - `tasks/quoted-thinking-inspect-regression.md` remains the next unrelated task.
 
 ## Outcome
@@ -18,6 +19,19 @@ Pipeline verified through WhatsApp inbound -> selected ACP harness -> patched `c
 - The e2e test creates the file before the turn so the run-start baseline exists.
 - WhatsApp renders exactly one `Update` caption for `approval-delete-add.md`.
 - WhatsApp renders no `Add` caption for `approval-delete-add.md`.
+- The fake app-server also emits a new file add followed by an add-only rewrite of the same path in the same turn.
+- WhatsApp renders one `Add` caption for that initial creation and one later `Update` caption for the rewrite.
+
+## Reconciliation model
+
+File-change reconciliation normalizes provider file-change events before WhatsApp rendering. Its purpose is to preserve user-facing semantics when a provider emits incomplete or mislabeled changes, such as an existing or already-shown file rewrite reported as `add`.
+
+The baseline now has two sources:
+
+- Run-start workdir snapshot, used as initial evidence for files that existed before the turn.
+- In-run event ledger, updated after each accepted provider file-change event so a shown add/update/delete becomes the starting point for later changes to the same path.
+
+End-of-run before/after snapshots remain a fallback for unreported file changes. They are not the only reconciliation mechanism.
 
 ## Problem
 
