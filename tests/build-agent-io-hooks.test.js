@@ -347,7 +347,7 @@ describe("buildAgentIoHooks", () => {
     assert.deepEqual(subject.reasoningInspects[0], {
       kind: "reasoning",
       summary: "*Thinking*",
-      text: "raw chain token\n\nsummary token\n\nsecond trace token\n\nfinal summary",
+      text: "final summary",
     });
 
     await subject.hooks.onReasoning?.({
@@ -422,6 +422,29 @@ describe("buildAgentIoHooks", () => {
       status: "completed",
       summaryParts: [],
       contentParts: [],
+      text: "I need to inspect the bug.",
+    });
+
+    assert.equal(subject.reasoningInspects.length, 1);
+    assert.deepEqual(subject.reasoningInspects[0], {
+      kind: "reasoning",
+      summary: "*Thinking*",
+      text: "I need to inspect the bug.",
+    });
+  });
+
+  it("attaches only completed reasoning text instead of streamed chunks", async () => {
+    const subject = createReasoningSubject();
+
+    await subject.hooks.onReasoning?.({
+      status: "updated",
+      summaryParts: [],
+      contentParts: [".", ",", "Thinking...", "I", "need", "to", "inspect"],
+    });
+    await subject.hooks.onReasoning?.({
+      status: "completed",
+      summaryParts: [],
+      contentParts: ["I need to inspect the bug."],
       text: "I need to inspect the bug.",
     });
 
