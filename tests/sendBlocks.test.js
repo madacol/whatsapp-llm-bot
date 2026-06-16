@@ -3195,6 +3195,38 @@ describe("sendBlocks – tool-call → edit pipeline", () => {
     assert.ok(typeof inspectMsg.text === "string" && inspectMsg.text.includes("Inspect the file, then patch the bug."));
   });
 
+  it("reveals inspect data attached after an earlier user 👁 reaction", async () => {
+    const { sock, calls } = createCaptureSock();
+    const reactionRuntime = createReactionRuntime();
+
+    const handle = await sendBlocks(
+      sock,
+      "chat-1",
+      "llm",
+      [{ type: "text", text: "Thinking..." }],
+      undefined,
+      reactionRuntime,
+    );
+
+    assert.ok(handle);
+    reactionRuntime.handleReactions([{
+      key: { id: "msg-1", remoteJid: "chat-1" },
+      reaction: { text: "👁" },
+      senderId: "user-1",
+    }]);
+
+    handle.setInspect({
+      kind: "reasoning",
+      summary: "*Thinking*",
+      text: "Inspect data arrived later.",
+    });
+
+    await waitFor(() => sentTextMessages(calls).some((msg) => msg.edit && msg.text?.includes("Inspect data arrived later.")));
+    const inspectMsg = sentTextMessages(calls).find((msg) => msg.edit && msg.text?.includes("Inspect data arrived later."));
+    assert.ok(inspectMsg);
+    assert.ok(typeof inspectMsg.text === "string" && inspectMsg.text.includes("*Thinking*"));
+  });
+
   it("sends inspect output as a new message when editing the original fails", async () => {
     const { sock, calls } = createCaptureSock();
     const originalSendMessage = sock.sendMessage.bind(sock);

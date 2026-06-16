@@ -4159,14 +4159,17 @@ export async function sendBlocks(sock, chatId, source, content, options, reactio
 
   if (editKey.id && reactionRuntime) {
     reactionRuntime.subscribe(editKey.id, (emoji, senderId) => {
-      if (!emoji.startsWith(INSPECT_REACTION_EMOJI) || !inspectState || isReactionFromSelf(senderId, sock)) {
+      if (!emoji.startsWith(INSPECT_REACTION_EMOJI) || isReactionFromSelf(senderId, sock)) {
+        return;
+      }
+      displayMode = "inspect";
+      if (!inspectState) {
         return;
       }
       const text = formatCurrentInspectText();
       if (!text) {
         return;
       }
-      displayMode = "inspect";
       void showInspectText(text, "reaction.inspect");
     });
   }
