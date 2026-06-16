@@ -12,6 +12,18 @@ const GIT_DIFF_MAX_BUFFER = 10 * 1024 * 1024;
  */
 
 /**
+ * @typedef {{
+ *   handled: true;
+ *   depth: number;
+ * } | {
+ *   handled: true;
+ *   error: string;
+ * } | {
+ *   handled: false;
+ * }} ParsedSlashDiffCommand
+ */
+
+/**
  * @param {string} cwd
  * @param {string[]} args
  * @returns {Promise<{ stdout: string, stderr: string, exitCode: number }>}
@@ -43,6 +55,37 @@ function runGit(cwd, args) {
  */
 function trimTrailingNewline(value) {
   return value.replace(/\n+$/g, "");
+}
+
+/**
+ * @param {string} command
+ * @returns {ParsedSlashDiffCommand}
+ */
+function parseSlashDiffCommand(command) {
+  const match = /^diff(?:\s+([\s\S]+))?$/i.exec(command.trim());
+  if (!match) {
+    return { handled: false };
+  }
+  const rawDepth = match[1]?.trim() ?? "";
+  if (!rawDepth) {
+    return { handled: true, depth: 0 };
+  }
+  if (!/^\d+$/.test(rawDepth)) {
+    return { handled: true, error: "Usage: `/diff [commit-depth]`, where commit-depth is a non-negative integer." };
+  }
+  const depth = Number(rawDepth);
+  if (!Number.isSafeInteger(depth)) {
+    return { handled: true, error: "Usage: `/diff [commit-depth]`, where commit-depth is a safe non-negative integer." };
+  }
+  return { handled: true, depth };
+}
+
+/**
+ * @param {number} depth
+ * @returns {string}
+ */
+function gitDiffBaseRevision(depth) {
+  return depth === 0 ? "HEAD" : `HEAD~${depth}`;
 }
 
 /**
@@ -161,11 +204,16 @@ export function parseGitDiffFiles(diffText) {
  * @returns {Promise<boolean>}
  */
 export async function handleSlashDiffCommand({ command, workdir, context }) {
-  if (command !== "diff") {
+  const parsedCommand = parseSlashDiffCommand(command);
+  if (!parsedCommand.handled) {
     return false;
   }
+  if ("error" in parsedCommand) {
+    await context.reply(contentEvent("error", parsedCommand.error));
+    return true;
+  }
 
-  const result = await runGit(workdir, ["diff", "--no-ext-diff", "--find-renames", "HEAD", "--"]);
+  const result = await runGit(workdir, ["diff", "--no-ext-diff", "--find-renames", gitDiffBaseRevision(parsedCommand.depth), "--"]);
   if (result.exitCode !== 0) {
     const details = result.stderr.trim() || result.stdout.trim() || `git diff failed in ${workdir}`;
     await context.reply(contentEvent("error", details));

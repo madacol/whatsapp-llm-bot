@@ -1126,7 +1126,7 @@ export function createConversationRunner({
       const slashCommand = clearFollowUp
         ? "clear"
         : firstBlock.text.slice(1).trim().toLowerCase();
-      if (slashCommand === "diff") {
+      if (slashCommand === "diff" || slashCommand.startsWith("diff ")) {
         const slashWorkdir = buildRunConfig(chatId, chatInfo, turn.chatName, harnessSelection.harnessName, resolvedBinding).workdir;
         if (!slashWorkdir) {
           await context.reply(contentEvent("error", "Could not resolve a workdir for `/diff`."));
