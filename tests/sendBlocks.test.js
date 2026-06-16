@@ -3245,6 +3245,49 @@ describe("sendBlocks – tool-call → edit pipeline", () => {
     assert.ok(typeof inspectMsg.text === "string" && inspectMsg.text.includes("Inspect the file, then patch the bug."));
   });
 
+  it("reveals user-triggered inspect without waiting for the edit debounce", async () => {
+    const previousDelay = process.env.MADABOT_WHATSAPP_EDIT_DEBOUNCE_MS;
+    process.env.MADABOT_WHATSAPP_EDIT_DEBOUNCE_MS = "1000";
+    try {
+      const { sock, calls } = createCaptureSock();
+      const reactionRuntime = createReactionRuntime();
+
+      const handle = await sendBlocks(
+        sock,
+        "chat-1",
+        "llm",
+        [{ type: "text", text: "Thinking..." }],
+        undefined,
+        reactionRuntime,
+      );
+
+      assert.ok(handle);
+      handle.setInspect({
+        kind: "reasoning",
+        summary: "*Thinking*",
+        text: "Inspect immediately.",
+      });
+
+      reactionRuntime.handleReactions([{
+        key: { id: "msg-1", remoteJid: "chat-1" },
+        reaction: { text: "👁" },
+        senderId: "user-1",
+      }]);
+
+      await new Promise((resolve) => setTimeout(resolve, 30));
+      assert.ok(
+        sentTextMessages(calls).some((msg) => msg.edit && msg.text?.includes("Inspect immediately.")),
+        "Expected user inspect to edit immediately instead of waiting for the debounce",
+      );
+    } finally {
+      if (previousDelay === undefined) {
+        delete process.env.MADABOT_WHATSAPP_EDIT_DEBOUNCE_MS;
+      } else {
+        process.env.MADABOT_WHATSAPP_EDIT_DEBOUNCE_MS = previousDelay;
+      }
+    }
+  });
+
   it("reveals inspect data attached after an earlier user 👁 reaction", async () => {
     const { sock, calls } = createCaptureSock();
     const reactionRuntime = createReactionRuntime();

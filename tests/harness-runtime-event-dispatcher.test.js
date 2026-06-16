@@ -163,6 +163,52 @@ describe("createHarnessRuntimeEventDispatcher", () => {
     assert.deepEqual(reasoningEvents.map((event) => event.status), ["updated", "completed"]);
   });
 
+  it("synthesizes delta reasoning chunks as one completed text", async () => {
+    /** @type {Array<Record<string, unknown>>} */
+    const reasoningEvents = [];
+    const dispatcher = createHarnessRuntimeEventDispatcher({
+      provider: "acp",
+      messages: [],
+      hooks: {
+        onReasoning: async (event) => {
+          reasoningEvents.push(event);
+        },
+      },
+    });
+
+    await dispatcher.handleEvent({
+      type: "reasoning.updated",
+      provider: "acp",
+      text: "Inspect",
+      status: "updated",
+      contentParts: ["Inspect"],
+      summaryParts: [],
+      appendMode: "delta",
+    });
+    await dispatcher.handleEvent({
+      type: "reasoning.updated",
+      provider: "acp",
+      text: "ing the request.",
+      status: "updated",
+      contentParts: ["ing the request."],
+      summaryParts: [],
+      appendMode: "delta",
+    });
+    await dispatcher.handleEvent({
+      type: "assistant.completed",
+      provider: "acp",
+      text: "Done.",
+      contentType: "markdown",
+    });
+
+    assert.deepEqual(reasoningEvents.at(-1), {
+      status: "completed",
+      summaryParts: [],
+      contentParts: ["Inspecting the request."],
+      text: "Inspecting the request.",
+    });
+  });
+
   it("preserves context window from earlier usage updates when final usage omits it", async () => {
     /** @type {Array<{ cost: string, tokens: UsageTokens }>} */
     const usageEvents = [];

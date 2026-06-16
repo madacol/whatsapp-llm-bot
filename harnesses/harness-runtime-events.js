@@ -192,6 +192,7 @@
  *   text: string,
  *   summaryParts?: string[],
  *   contentParts?: string[],
+ *   appendMode?: "delta" | "part",
  *   raw?: HarnessRuntimeRawEvent,
  * } & HarnessRuntimeEventEnvelope} HarnessRuntimeReasoningEvent
  */

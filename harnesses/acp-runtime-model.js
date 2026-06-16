@@ -568,6 +568,7 @@ export function createAcpRuntimeModel() {
             text,
             contentParts: [text],
             summaryParts: [],
+            appendMode: "delta",
             raw: eventRaw,
           }]
         : prefix;

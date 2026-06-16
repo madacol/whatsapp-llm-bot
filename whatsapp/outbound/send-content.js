@@ -3626,7 +3626,7 @@ export async function editWhatsAppMessageByHandle(sock, transportHandleId, newTe
  * @param {import('@whiskeysockets/baileys').WASocket} sock
  * @param {string} transportHandleId
  * @param {string} newText
- * @param {{ store?: import("../../store.js").Store, trace?: Record<string, unknown> }} [options]
+ * @param {{ store?: import("../../store.js").Store, trace?: Record<string, unknown>, debounceMs?: number }} [options]
  * @returns {Promise<void>}
  */
 function editWhatsAppMessageByHandleDebounced(sock, transportHandleId, newText, options = {}) {
@@ -3639,7 +3639,9 @@ function editWhatsAppMessageByHandleDebounced(sock, transportHandleId, newText, 
     text: newText,
     edit: { id: transportHandleId },
   };
-  const debounceMs = getWhatsAppEditDebounceMs();
+  const debounceMs = typeof options.debounceMs === "number"
+    ? Math.max(0, options.debounceMs)
+    : getWhatsAppEditDebounceMs();
   if (debounceMs <= 0) {
     appendWhatsAppOutboundDiagnostic({
       transport: "messageHandle",
@@ -4138,6 +4140,7 @@ export async function sendBlocks(sock, chatId, source, content, options, reactio
             displayMode,
             messageId: editKey.id ?? null,
           },
+          ...(cause === "reaction.inspect" ? { debounceMs: 1 } : {}),
         },
       );
     } catch (error) {

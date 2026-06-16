@@ -137,8 +137,6 @@ export function buildAgentIoHooks(
   const pendingSnapshotFileChanges = [];
   /** @type {MessageHandle | null} */
   let reasoningHandle = null;
-  /** @type {string[]} */
-  const pendingReasoningTraceParts = [];
   let pendingEncryptedReasoning = false;
   let reasoningInspectAttached = false;
   /** @type {ReturnType<typeof setTimeout> | null} */
@@ -215,67 +213,16 @@ export function buildAgentIoHooks(
   }
 
   /**
-   * @param {string[]} parts
-   * @returns {void}
-   */
-  function appendReasoningTraceParts(parts) {
-    for (const part of parts) {
-      if (!pendingReasoningTraceParts.includes(part)) {
-        pendingReasoningTraceParts.push(part);
-      }
-    }
-  }
-
-  /**
-   * @param {string} text
-   * @returns {string[]}
-   */
-  function reasoningContainmentTokens(text) {
-    return text.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim().split(/\s+/).filter(Boolean);
-  }
-
-  /**
-   * @param {string[]} haystack
-   * @param {string[]} needle
+   * @param {{ text?: string, summaryParts: string[], contentParts: string[] }} event
    * @returns {boolean}
    */
-  function containsTokenSequence(haystack, needle) {
-    if (needle.length === 0 || haystack.length <= needle.length) {
-      return false;
-    }
-    for (let start = 0; start <= haystack.length - needle.length; start += 1) {
-      if (needle.every((token, offset) => haystack[start + offset] === token)) {
-        return true;
-      }
-    }
-    return false;
-  }
-
-  /**
-   * @param {string[]} parts
-   * @returns {string[]}
-   */
-  function compactReasoningTraceParts(parts) {
-    const tokensByPart = parts.map(reasoningContainmentTokens);
-    return parts.filter((_part, index) => {
-      const tokens = tokensByPart[index] ?? [];
-      return !tokensByPart.some((candidateTokens, candidateIndex) => {
-        return candidateIndex > index
-          && candidateTokens.length > tokens.length
-          && containsTokenSequence(candidateTokens, tokens);
-      });
-    });
-  }
-
-  /**
-   * @returns {boolean}
-   */
-  function attachCompletedReasoningInspect() {
+  function attachCompletedReasoningInspect(event) {
     if (!reasoningHandle || reasoningInspectAttached) {
       return false;
     }
-    const text = pendingReasoningTraceParts.length > 0
-      ? compactReasoningTraceParts(pendingReasoningTraceParts).join("\n\n").trim()
+    const traceParts = getReasoningTraceParts(event);
+    const text = traceParts.length > 0
+      ? traceParts.join("\n\n").trim()
       : (pendingEncryptedReasoning ? "_Reasoning is encrypted and not available for display._" : "");
     if (!text) {
       return false;
@@ -297,15 +244,12 @@ export function buildAgentIoHooks(
         return;
       }
 
-      const traceParts = getReasoningTraceParts(event);
-      if (traceParts.length > 0) {
-        appendReasoningTraceParts(traceParts);
-      } else if (event.hasEncryptedContent) {
+      if (event.hasEncryptedContent) {
         pendingEncryptedReasoning = true;
       }
 
       if (event.status === "completed") {
-        if (attachCompletedReasoningInspect()) {
+        if (attachCompletedReasoningInspect(event)) {
           await emitWhileWorking(() => reasoningHandle ? reasoningHandle.update(textUpdate("Thought")) : Promise.resolve());
         }
       }

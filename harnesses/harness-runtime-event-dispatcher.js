@@ -144,7 +144,7 @@ export function createHarnessRuntimeEventDispatcher(input) {
   const subagentThreads = new Map();
   /** @type {Set<string>} */
   const deliveredSubagentResponses = new Set();
-  /** @type {{ contentParts: string[], summaryParts: string[] } | null} */
+  /** @type {{ contentParts: string[], summaryParts: string[], contentDeltaText: string, summaryDeltaText: string } | null} */
   let openReasoning = null;
 
   /** @type {AgentResult} */
@@ -272,12 +272,17 @@ export function createHarnessRuntimeEventDispatcher(input) {
       return;
     }
     if (!openReasoning) {
-      openReasoning = { contentParts: [], summaryParts: [] };
+      openReasoning = { contentParts: [], summaryParts: [], contentDeltaText: "", summaryDeltaText: "" };
     }
     const contentParts = event.contentParts ?? [event.text];
     const summaryParts = event.summaryParts ?? [];
-    openReasoning.contentParts.push(...contentParts);
-    openReasoning.summaryParts.push(...summaryParts);
+    if (event.appendMode === "delta") {
+      openReasoning.contentDeltaText += contentParts.join("");
+      openReasoning.summaryDeltaText += summaryParts.join("");
+    } else {
+      openReasoning.contentParts.push(...contentParts);
+      openReasoning.summaryParts.push(...summaryParts);
+    }
     if (event.type === "reasoning.completed") {
       openReasoning = null;
     }
@@ -290,8 +295,14 @@ export function createHarnessRuntimeEventDispatcher(input) {
     if (!openReasoning) {
       return;
     }
-    const contentParts = openReasoning.contentParts.map((part) => part.trim()).filter(Boolean);
-    const summaryParts = openReasoning.summaryParts.map((part) => part.trim()).filter(Boolean);
+    const contentParts = [
+      openReasoning.contentDeltaText.trim(),
+      ...openReasoning.contentParts.map((part) => part.trim()),
+    ].filter(Boolean);
+    const summaryParts = [
+      openReasoning.summaryDeltaText.trim(),
+      ...openReasoning.summaryParts.map((part) => part.trim()),
+    ].filter(Boolean);
     const text = [...contentParts, ...summaryParts].join("\n\n").trim();
     openReasoning = null;
     await hooks.onReasoning({
