@@ -1,0 +1,275 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Architecture review - whatsapp-llm-bot</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script type="module">
+      import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+      mermaid.initialize({ startOnLoad: true, theme: "neutral", securityLevel: "loose" });
+    </script>
+    <style>
+      .deep { background: linear-gradient(135deg, #0f172a, #1f2937); color: white; }
+      .seam-line { border-top: 2px dashed #64748b; }
+      .thin-module { border-left: 4px solid #cbd5e1; }
+      .leak { color: #dc2626; border-color: #dc2626; }
+      .mini-label { font-size: 0.68rem; letter-spacing: .08em; text-transform: uppercase; }
+      .mass-interface { background: #fecaca; border: 1px solid #ef4444; }
+      .mass-implementation { background: #dbeafe; border: 1px solid #3b82f6; }
+      .diagram-box { min-height: 320px; }
+    </style>
+  </head>
+  <body class="bg-stone-50 text-slate-900 font-sans">
+    <main class="max-w-6xl mx-auto px-6 py-10 space-y-10">
+      <header class="space-y-4">
+        <div>
+          <p class="text-xs uppercase tracking-wider text-slate-500">Architecture review</p>
+          <h1 class="text-4xl font-semibold">whatsapp-llm-bot</h1>
+          <p class="text-sm text-slate-600 mt-2">2026-06-16 16:49 UTC. No CONTEXT.md or docs/adr entries found; vocabulary inferred from docs and modules.</p>
+        </div>
+        <div class="grid sm:grid-cols-4 gap-3 text-sm">
+          <div class="rounded-lg border bg-white p-3"><span class="inline-block w-4 h-4 border border-slate-500 align-middle mr-2"></span>solid box = module</div>
+          <div class="rounded-lg border bg-white p-3"><span class="inline-block w-8 seam-line align-middle mr-2"></span>dashed line = seam</div>
+          <div class="rounded-lg border bg-white p-3"><span class="text-red-600 font-bold mr-2">-></span>red arrow = leakage</div>
+          <div class="rounded-lg border bg-white p-3"><span class="inline-block w-4 h-4 deep rounded align-middle mr-2"></span>dark box = deep module</div>
+        </div>
+      </header>
+
+      <section id="candidates" class="space-y-10">
+        <article id="acp-client-request-channel" class="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+          <div class="p-6 space-y-6">
+            <div class="flex flex-wrap items-center gap-3">
+              <h2 class="text-2xl font-semibold">Deepen the ACP client request channel</h2>
+              <span class="rounded-full bg-emerald-100 text-emerald-800 px-3 py-1 text-xs font-semibold">Strong</span>
+              <span class="rounded-full bg-slate-100 text-slate-700 px-3 py-1 text-xs">ports & adapters</span>
+            </div>
+            <div>
+              <p class="text-xs uppercase tracking-wider text-slate-500 mb-2">Files</p>
+              <div class="font-mono text-sm text-slate-700 flex flex-wrap gap-x-4 gap-y-1">
+                <span>harnesses/acp-runner.js</span>
+                <span>harnesses/acp-filesystem-capability.js</span>
+                <span>harnesses/acp-extension-router.js</span>
+                <span>harnesses/protected-paths.js</span>
+                <span>harnesses/sandbox-approval*.js</span>
+                <span>tests/acp-harness.test.js</span>
+              </div>
+            </div>
+            <div class="grid lg:grid-cols-2 gap-5">
+              <div class="rounded-lg border border-slate-200 p-4 diagram-box">
+                <p class="mini-label text-slate-500 mb-3">Before</p>
+                <div class="space-y-2">
+                  <div class="rounded border p-3 thin-module">startAcpRun</div>
+                  <div class="ml-6 rounded border p-3 thin-module">createAcpClientRequestHandler</div>
+                  <div class="grid grid-cols-2 gap-2 ml-10 text-sm">
+                    <div class="rounded border p-2">permission</div>
+                    <div class="rounded border p-2">elicitation</div>
+                    <div class="rounded border p-2">terminal</div>
+                    <div class="rounded border p-2">filesystem</div>
+                    <div class="rounded border p-2 leak">protected paths</div>
+                    <div class="rounded border p-2 leak">sandbox checks</div>
+                    <div class="rounded border p-2">apply_patch snapshots</div>
+                    <div class="rounded border p-2">config options</div>
+                  </div>
+                  <div class="mt-4 seam-line"></div>
+                  <p class="text-sm text-red-600 mt-3">Request policy leaks across the run execution module.</p>
+                </div>
+              </div>
+              <div class="rounded-lg border border-slate-200 p-4 diagram-box">
+                <p class="mini-label text-slate-500 mb-3">After</p>
+                <div class="deep rounded-lg p-5 shadow-inner">
+                  <p class="font-semibold">AcpClientRequestChannel</p>
+                  <p class="text-sm text-slate-200 mt-1">one interface: handle provider requests for a run</p>
+                  <div class="grid grid-cols-2 gap-2 mt-4 text-sm text-slate-900">
+                    <div class="rounded bg-white/90 p-2">permission</div>
+                    <div class="rounded bg-white/90 p-2">elicitation</div>
+                    <div class="rounded bg-white/90 p-2">terminal</div>
+                    <div class="rounded bg-white/90 p-2">filesystem</div>
+                    <div class="rounded bg-white/90 p-2">protected paths</div>
+                    <div class="rounded bg-white/90 p-2">sandbox checks</div>
+                  </div>
+                </div>
+                <div class="mt-5 rounded border p-3 text-sm">startAcpRun keeps session execution and snapshot timing.</div>
+              </div>
+            </div>
+            <div class="grid md:grid-cols-3 gap-4 text-sm">
+              <div><p class="font-semibold">Problem</p><p>ACP run execution is shallow around provider requests; one file owns several policies that change for different reasons.</p></div>
+              <div><p class="font-semibold">Solution</p><p>Move request handling into one deep module whose implementation owns permission, elicitation, terminal, filesystem, and approval policy.</p></div>
+              <div><p class="font-semibold">Wins</p><ul class="list-disc pl-5"><li>locality: approval bugs concentrate</li><li>leverage: one request interface</li><li>tests hit provider requests</li><li>runner interface shrinks</li></ul></div>
+            </div>
+          </div>
+        </article>
+
+        <article id="whatsapp-runtime-presentation" class="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+          <div class="p-6 space-y-6">
+            <div class="flex flex-wrap items-center gap-3">
+              <h2 class="text-2xl font-semibold">Deepen WhatsApp runtime presentation</h2>
+              <span class="rounded-full bg-emerald-100 text-emerald-800 px-3 py-1 text-xs font-semibold">Strong</span>
+              <span class="rounded-full bg-slate-100 text-slate-700 px-3 py-1 text-xs">in-process</span>
+            </div>
+            <div>
+              <p class="text-xs uppercase tracking-wider text-slate-500 mb-2">Files</p>
+              <div class="font-mono text-sm text-slate-700 flex flex-wrap gap-x-4 gap-y-1">
+                <span>whatsapp/outbound/send-content.js</span>
+                <span>whatsapp/tool-presenter.js</span>
+                <span>whatsapp/tool-flow-presenter.js</span>
+                <span>whatsapp/tool-presentation-model.js</span>
+                <span>tests/sendBlocks.test.js</span>
+                <span>tests/acp-*-presentation-vertical.test.js</span>
+              </div>
+            </div>
+            <div class="grid lg:grid-cols-2 gap-5">
+              <div class="rounded-lg border border-slate-200 p-4 diagram-box">
+                <p class="mini-label text-slate-500 mb-3">Before</p>
+                <div class="mermaid">
+flowchart TD
+  E[OutboundEvent] --> S[send-content.js]
+  S --> R[runtime status maps]
+  S --> C[compact tool state]
+  S --> F[file-change rendering]
+  S --> H[edit handles]
+  S --> B[sendBlocks]
+  R -.leak.-> H
+  C -.leak.-> B
+  F -.leak.-> B
+  classDef leak stroke:#dc2626,stroke-width:2px,color:#dc2626;
+  class R,C,F leak
+                </div>
+              </div>
+              <div class="rounded-lg border border-slate-200 p-4 diagram-box">
+                <p class="mini-label text-slate-500 mb-3">After</p>
+                <div class="space-y-4">
+                  <div class="rounded border p-3">sendEvent</div>
+                  <div class="seam-line"></div>
+                  <div class="deep rounded-lg p-5">
+                    <p class="font-semibold">WhatsAppRuntimePresenter</p>
+                    <div class="grid grid-cols-3 gap-2 mt-4 text-sm text-slate-900">
+                      <div class="rounded bg-white/90 p-2">pinned status</div>
+                      <div class="rounded bg-white/90 p-2">compact activity</div>
+                      <div class="rounded bg-white/90 p-2">file changes</div>
+                    </div>
+                  </div>
+                  <div class="rounded border p-3">sendBlocks + edit handles</div>
+                </div>
+              </div>
+            </div>
+            <div class="grid md:grid-cols-3 gap-4 text-sm">
+              <div><p class="font-semibold">Problem</p><p>Runtime event presentation is deep behavior hidden in a broad WhatsApp sending module, so unrelated changes share state and tests.</p></div>
+              <div><p class="font-semibold">Solution</p><p>Put runtime event formatting and state into one deep module; keep message delivery and edit handles as separate implementation.</p></div>
+              <div><p class="font-semibold">Wins</p><ul class="list-disc pl-5"><li>locality: presentation state</li><li>leverage: one event interface</li><li>tests stop importing delivery</li><li>file-change rules concentrate</li></ul></div>
+            </div>
+          </div>
+        </article>
+
+        <article id="conversation-turn-orchestrator" class="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+          <div class="p-6 space-y-6">
+            <div class="flex flex-wrap items-center gap-3">
+              <h2 class="text-2xl font-semibold">Collapse turn-start and follow-up orchestration</h2>
+              <span class="rounded-full bg-amber-100 text-amber-800 px-3 py-1 text-xs font-semibold">Worth exploring</span>
+              <span class="rounded-full bg-slate-100 text-slate-700 px-3 py-1 text-xs">in-process</span>
+            </div>
+            <div>
+              <p class="text-xs uppercase tracking-wider text-slate-500 mb-2">Files</p>
+              <div class="font-mono text-sm text-slate-700 flex flex-wrap gap-x-4 gap-y-1">
+                <span>conversation/create-conversation-runner.js</span>
+                <span>conversation/turn-routing.js</span>
+                <span>harnesses/run-coordinator.js</span>
+                <span>conversation/build-harness-turn-input.js</span>
+                <span>tests/conversation-runner-prompt-formatting.test.js</span>
+                <span>tests/harness-run-coordinator.test.js</span>
+              </div>
+            </div>
+            <div class="grid lg:grid-cols-2 gap-5">
+              <div class="rounded-lg border border-slate-200 p-4 diagram-box">
+                <p class="mini-label text-slate-500 mb-3">Before</p>
+                <div class="space-y-3">
+                  <div class="rounded border p-3 thin-module">decide route</div>
+                  <div class="rounded border p-3 thin-module">pending follow-up branch</div>
+                  <div class="rounded border p-3 thin-module">normal harness branch</div>
+                  <div class="rounded border p-3 thin-module">slash clear branch</div>
+                  <div class="rounded border p-3 thin-module">runStartedLlmMessage</div>
+                  <p class="text-sm text-red-600">Same run-start invariants appear in multiple branches.</p>
+                </div>
+              </div>
+              <div class="rounded-lg border border-slate-200 p-4 diagram-box">
+                <p class="mini-label text-slate-500 mb-3">After</p>
+                <div class="h-72 flex items-center justify-center">
+                  <div class="w-full max-w-sm">
+                    <div class="h-8 mass-interface rounded-t flex items-center justify-center mini-label">small interface</div>
+                    <div class="h-52 mass-implementation rounded-b flex flex-col items-center justify-center gap-2">
+                      <p class="font-semibold">ConversationTurnOrchestrator</p>
+                      <p class="text-sm">route, persist, buffer, inject, start, replay</p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="grid md:grid-cols-3 gap-4 text-sm">
+              <div><p class="font-semibold">Problem</p><p>The runner has deep helper modules, but the orchestration interface is still spread across route branches and live-input special paths.</p></div>
+              <div><p class="font-semibold">Solution</p><p>Consolidate run-start and follow-up policy behind one module that returns the next action for the runner to execute.</p></div>
+              <div><p class="font-semibold">Wins</p><ul class="list-disc pl-5"><li>locality: run invariants</li><li>leverage: route branches shrink</li><li>tests hit turn interface</li><li>less branch duplication</li></ul></div>
+            </div>
+          </div>
+        </article>
+
+        <article id="http-transport-ledger" class="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+          <div class="p-6 space-y-6">
+            <div class="flex flex-wrap items-center gap-3">
+              <h2 class="text-2xl font-semibold">Extract the HTTP transport turn ledger</h2>
+              <span class="rounded-full bg-slate-200 text-slate-800 px-3 py-1 text-xs font-semibold">Speculative</span>
+              <span class="rounded-full bg-slate-100 text-slate-700 px-3 py-1 text-xs">local-substitutable</span>
+            </div>
+            <div>
+              <p class="text-xs uppercase tracking-wider text-slate-500 mb-2">Files</p>
+              <div class="font-mono text-sm text-slate-700 flex flex-wrap gap-x-4 gap-y-1">
+                <span>http-api-transport.js</span>
+                <span>docs/api-transport.md</span>
+                <span>tests/http-api-transport.test.js</span>
+                <span>index.js</span>
+              </div>
+            </div>
+            <div class="grid lg:grid-cols-2 gap-5">
+              <div class="rounded-lg border border-slate-200 p-4 diagram-box">
+                <p class="mini-label text-slate-500 mb-3">Before</p>
+                <div class="mermaid">
+flowchart LR
+  H[HTTP routes] --> T[turn maps]
+  H --> E[event array]
+  H --> S[SSE clients]
+  H --> N[payload normalizers]
+  T -.leak.-> E
+  E -.leak.-> S
+  classDef leak stroke:#dc2626,stroke-width:2px,color:#dc2626;
+  class T,E,S leak
+                </div>
+              </div>
+              <div class="rounded-lg border border-slate-200 p-4 diagram-box">
+                <p class="mini-label text-slate-500 mb-3">After</p>
+                <div class="space-y-4">
+                  <div class="rounded border p-3">HTTP request router</div>
+                  <div class="seam-line"></div>
+                  <div class="deep rounded-lg p-5">
+                    <p class="font-semibold">HttpTransportTurnLedger</p>
+                    <p class="text-sm text-slate-200">idempotency, status, active turns, event cursor, text accumulation</p>
+                  </div>
+                  <div class="rounded border p-3">SSE subscription adapter</div>
+                </div>
+              </div>
+            </div>
+            <div class="grid md:grid-cols-3 gap-4 text-sm">
+              <div><p class="font-semibold">Problem</p><p>The HTTP transport is currently acceptable, but state policy and wire handling are one module, limiting locality if media or durable events arrive.</p></div>
+              <div><p class="font-semibold">Solution</p><p>Extract the turn ledger only when another adapter or durable implementation justifies the seam.</p></div>
+              <div><p class="font-semibold">Wins</p><ul class="list-disc pl-5"><li>locality: request id policy</li><li>leverage: durable adapter later</li><li>tests hit ledger interface</li><li>HTTP module shrinks</li></ul></div>
+            </div>
+          </div>
+        </article>
+      </section>
+
+      <section id="top-recommendation" class="rounded-xl border-2 border-slate-900 bg-white p-6">
+        <p class="text-xs uppercase tracking-wider text-slate-500 mb-2">Top recommendation</p>
+        <h2 class="text-2xl font-semibold"><a class="underline decoration-slate-400" href="#acp-client-request-channel">Deepen the ACP client request channel</a></h2>
+        <p class="mt-2 text-slate-700">It has the clearest leverage: one provider request interface can absorb permission, elicitation, terminal, filesystem, protected-path, and sandbox policy while preserving the existing ACP run interface and tests.</p>
+      </section>
+    </main>
+  </body>
+</html>

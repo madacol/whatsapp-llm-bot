@@ -1027,7 +1027,7 @@ describe("WhatsApp transport community creation", () => {
       await delay(10);
     }
 
-    assert.deepEqual(sentMessages, [
+    assert.deepEqual(sentMessages.filter((entry) => typeof entry.message.text === "string"), [
       {
         chatId,
         message: makeTextMessage("🔧 *Task*  Review mock code"),
@@ -1037,6 +1037,7 @@ describe("WhatsApp transport community creation", () => {
         message: makeTextMessage("✅ *Task*  Review mock code"),
       },
     ]);
+    assert.ok(sentMessages.some((entry) => entry.message.react?.text === "👁" && entry.message.react.key?.id === "sent-1"));
     assert.equal((await getQueuedRows(testDb, chatId)).length, 0);
     assert.equal((await getDeadLetterRows(testDb, chatId)).length, 0);
   });
