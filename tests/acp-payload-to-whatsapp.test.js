@@ -116,6 +116,7 @@ function buildObservedWhatsAppHooks(input) {
  *     runtimeEvents: Array<import("../harnesses/harness-runtime-events.js").HarnessRuntimeEvent>,
  *     outboundEvents: Array<{ via: "send" | "reply", event: SendContent }>,
  *     pinnedStatusDelivery: Array<Record<string, unknown>>,
+ *     reactionRuntime?: import("../whatsapp/runtime/reaction-runtime.js").ReactionRuntime,
  *   },
  * }>}
  */
@@ -172,6 +173,7 @@ async function observeAcpPayloadSliceToBaileys(payloads, options = {}) {
       runtimeEvents,
       outboundEvents,
       pinnedStatusDelivery,
+      ...(reactionRuntime ? { reactionRuntime } : {}),
     },
   };
 }
@@ -585,6 +587,83 @@ describe("ACP payload to WhatsApp socket vertical slices", () => {
       const react = /** @type {{ text?: unknown, key?: { id?: unknown } } | undefined} */ (entry.msg.react);
       return react?.text === "👁" && react.key?.id === thinkingMessageId;
     }));
+  });
+
+  it("reveals completed ACP reasoning inspect without repeated snapshot chunks", async () => {
+    const chatId = "acp-payload-thinking-inspect-dedupe@s.whatsapp.net";
+    const { sent, trace } = await observeAcpPayloadSliceToBaileys([
+      {
+        sessionId: "s1",
+        update: {
+          sessionUpdate: "agent_thought_chunk",
+          content: { type: "text", text: "Thinking..." },
+        },
+      },
+      {
+        sessionId: "s1",
+        update: {
+          sessionUpdate: "agent_thought_chunk",
+          content: { type: "text", text: "**Inspecting user feedback**\n\nI" },
+        },
+      },
+      {
+        sessionId: "s1",
+        update: {
+          sessionUpdate: "agent_thought_chunk",
+          content: { type: "text", text: " need to inspect logs." },
+        },
+      },
+      {
+        sessionId: "s1",
+        update: {
+          sessionUpdate: "agent_thought_chunk",
+          content: { type: "text", text: "**Inspecting user feedback**\n\nI need to inspect logs." },
+        },
+      },
+      {
+        sessionId: "s1",
+        update: {
+          sessionUpdate: "agent_message_chunk",
+          content: { type: "text", text: "Done." },
+        },
+      },
+    ], {
+      chatId,
+      enableInspectReactions: true,
+      beforeEvents: [{
+        type: "turn.started",
+        provider: "acp",
+        turn: { id: "turn-1", chatId, status: "started" },
+      }],
+    });
+
+    const thinkingMessageIndex = sent.findIndex((entry) => entry.msg.text === "🤖 Thinking...");
+    assert.notEqual(thinkingMessageIndex, -1, `Expected standalone Thinking message, got ${JSON.stringify(sent)}`);
+    const thinkingMessageId = `msg-${thinkingMessageIndex + 1}`;
+    await waitFor(() => sent.some((entry) => {
+      const react = /** @type {{ text?: unknown, key?: { id?: unknown } } | undefined} */ (entry.msg.react);
+      return react?.text === "👁" && react.key?.id === thinkingMessageId;
+    }));
+    assert.ok(trace.reactionRuntime);
+
+    trace.reactionRuntime.handleReactions([{
+      key: { id: thinkingMessageId, remoteJid: chatId },
+      reaction: { text: "👁" },
+      senderId: "user-1",
+    }]);
+
+    await waitFor(() => sent.some((entry) =>
+      entry.msg.edit
+      && typeof entry.msg.text === "string"
+      && entry.msg.text.includes("I need to inspect logs.")));
+    const inspectEdit = sent.find((entry) =>
+      entry.msg.edit
+      && typeof entry.msg.text === "string"
+      && entry.msg.text.includes("I need to inspect logs."));
+    assert.ok(inspectEdit);
+    const inspectText = /** @type {string} */ (inspectEdit.msg.text);
+    assert.equal(inspectText.includes("I need to inspect logs.**Inspecting user feedback**"), false);
+    assert.equal(inspectText.match(/I need to inspect logs\./g)?.length, 1);
   });
 
   it("updates or ignores pinned status intentionally for real ACP session update shapes", async () => {

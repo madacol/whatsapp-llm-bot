@@ -119,6 +119,40 @@ function attachRuntimeBoundaryFacts(event, workdir) {
 }
 
 /**
+ * ACP thought chunks are mostly deltas, but the provider can also emit a later
+ * snapshot of the current thought block. Keep the assembled text latest and
+ * non-repeating without changing ordinary token deltas.
+ * @param {string} current
+ * @param {string} incoming
+ * @returns {string}
+ */
+function appendCoalescedDeltaText(current, incoming) {
+  if (!incoming) {
+    return current;
+  }
+  if (!current) {
+    return incoming;
+  }
+  if (current === incoming) {
+    return current;
+  }
+  const minimumSnapshotLength = 24;
+  if (incoming.length >= minimumSnapshotLength && current.endsWith(incoming)) {
+    return current;
+  }
+  if (current.length >= minimumSnapshotLength && incoming.startsWith(current)) {
+    return incoming;
+  }
+  const maxOverlap = Math.min(current.length, incoming.length);
+  for (let overlapLength = maxOverlap; overlapLength >= minimumSnapshotLength; overlapLength -= 1) {
+    if (current.endsWith(incoming.slice(0, overlapLength))) {
+      return current + incoming.slice(overlapLength);
+    }
+  }
+  return current + incoming;
+}
+
+/**
  * Create the app-facing dispatcher for canonical harness runtime events.
  * Provider-specific runners should normalize raw SDK/RPC messages before this
  * point; this layer owns presentation hooks and accumulated `AgentResult`.
@@ -277,8 +311,8 @@ export function createHarnessRuntimeEventDispatcher(input) {
     const contentParts = event.contentParts ?? [event.text];
     const summaryParts = event.summaryParts ?? [];
     if (event.appendMode === "delta") {
-      openReasoning.contentDeltaText += contentParts.join("");
-      openReasoning.summaryDeltaText += summaryParts.join("");
+      openReasoning.contentDeltaText = appendCoalescedDeltaText(openReasoning.contentDeltaText, contentParts.join(""));
+      openReasoning.summaryDeltaText = appendCoalescedDeltaText(openReasoning.summaryDeltaText, summaryParts.join(""));
     } else {
       openReasoning.contentParts.push(...contentParts);
       openReasoning.summaryParts.push(...summaryParts);
