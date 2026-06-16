@@ -209,6 +209,70 @@ describe("createHarnessRuntimeEventDispatcher", () => {
     });
   });
 
+  it("deduplicates ACP reasoning snapshots that repeat earlier delta chunks", async () => {
+    /** @type {Array<Record<string, unknown>>} */
+    const reasoningEvents = [];
+    const dispatcher = createHarnessRuntimeEventDispatcher({
+      provider: "acp",
+      messages: [],
+      hooks: {
+        onReasoning: async (event) => {
+          reasoningEvents.push(event);
+        },
+      },
+    });
+
+    await dispatcher.handleEvent({
+      type: "reasoning.updated",
+      provider: "acp",
+      text: "Thinking...",
+      status: "updated",
+      contentParts: ["Thinking..."],
+      summaryParts: [],
+      appendMode: "delta",
+    });
+    await dispatcher.handleEvent({
+      type: "reasoning.updated",
+      provider: "acp",
+      text: "**Inspecting user feedback**\n\nI",
+      status: "updated",
+      contentParts: ["**Inspecting user feedback**\n\nI"],
+      summaryParts: [],
+      appendMode: "delta",
+    });
+    await dispatcher.handleEvent({
+      type: "reasoning.updated",
+      provider: "acp",
+      text: " need to inspect logs.",
+      status: "updated",
+      contentParts: [" need to inspect logs."],
+      summaryParts: [],
+      appendMode: "delta",
+    });
+    await dispatcher.handleEvent({
+      type: "reasoning.updated",
+      provider: "acp",
+      text: "**Inspecting user feedback**\n\nI need to inspect logs.",
+      status: "updated",
+      contentParts: ["**Inspecting user feedback**\n\nI need to inspect logs."],
+      summaryParts: [],
+      appendMode: "delta",
+    });
+    await dispatcher.handleEvent({
+      type: "assistant.completed",
+      provider: "acp",
+      text: "Done.",
+      contentType: "markdown",
+    });
+
+    assert.deepEqual(reasoningEvents.at(-1), {
+      status: "completed",
+      summaryParts: [],
+      contentParts: ["Thinking...**Inspecting user feedback**\n\nI need to inspect logs."],
+      text: "Thinking...**Inspecting user feedback**\n\nI need to inspect logs.",
+    });
+  });
+
   it("preserves context window from earlier usage updates when final usage omits it", async () => {
     /** @type {Array<{ cost: string, tokens: UsageTokens }>} */
     const usageEvents = [];
