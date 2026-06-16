@@ -1,0 +1,238 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Architecture review - whatsapp-llm-bot</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script type="module">
+      import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+      mermaid.initialize({ startOnLoad: true, theme: "neutral", securityLevel: "loose" });
+    </script>
+    <style>
+      .seam { border-style: dashed; }
+      .deep { background: linear-gradient(135deg, #0f172a, #1e293b); color: white; }
+      .thin { background: #f8fafc; border-color: #cbd5e1; }
+      .leak-line { stroke: #dc2626; stroke-width: 3; marker-end: url(#arrow); }
+      .ok-line { stroke: #475569; stroke-width: 2; marker-end: url(#arrow); }
+      .muted-box { background: #f1f5f9; color: #64748b; border-color: #cbd5e1; }
+      code { white-space: nowrap; }
+    </style>
+  </head>
+  <body class="bg-stone-50 text-slate-900 font-sans">
+    <main class="mx-auto max-w-6xl px-6 py-10 space-y-10">
+      <header class="space-y-4">
+        <div class="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+          <div>
+            <h1 class="font-serif text-4xl font-semibold">Architecture review - whatsapp-llm-bot</h1>
+            <p class="mt-2 text-sm text-slate-600">2026-06-16 UTC. No <code>CONTEXT.md</code> or ADRs found, so domain vocabulary comes from source names.</p>
+          </div>
+          <div class="grid grid-cols-2 gap-2 text-xs text-slate-600 sm:grid-cols-4">
+            <div class="rounded border border-slate-300 bg-white px-3 py-2">solid box = module</div>
+            <div class="rounded border-2 border-dashed border-slate-400 bg-white px-3 py-2">dashed = seam</div>
+            <div class="rounded border border-red-300 bg-red-50 px-3 py-2 text-red-700">red = leakage</div>
+            <div class="rounded border border-slate-900 deep px-3 py-2">dark = deep</div>
+          </div>
+        </div>
+      </header>
+
+      <section id="candidates" class="space-y-8">
+        <article id="runtime-event-seam" class="rounded-lg border border-slate-200 bg-white p-6 shadow-sm">
+          <div class="flex flex-wrap items-center gap-2">
+            <h2 class="font-serif text-2xl font-semibold">Deepen the runtime-event seam</h2>
+            <span class="rounded-full bg-emerald-100 px-3 py-1 text-xs font-semibold text-emerald-800">Strong</span>
+            <span class="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-700">ports & adapters</span>
+          </div>
+          <div class="mt-4 grid gap-3 text-sm md:grid-cols-2">
+            <div>
+              <div class="text-xs font-semibold uppercase text-slate-500">Files</div>
+              <div class="mt-1 font-mono text-xs leading-6 text-slate-700">
+                harnesses/acp-runtime-model.js<br />
+                harnesses/harness-runtime-events.js<br />
+                harnesses/harness-runtime-event-dispatcher.js<br />
+                whatsapp/outbound/send-content.js<br />
+                tests/acp-payload-to-whatsapp.test.js<br />
+                tests/sendBlocks.test.js
+              </div>
+            </div>
+            <div class="text-sm leading-6">
+              <div><b>Problem</b> - ACP and Codex raw payload shape leaks through the runtime-event seam into WhatsApp outbound formatting.</div>
+              <div class="mt-2"><b>Solution</b> - Move provider-specific presentation facts behind the runtime-event module so outbound renders canonical runtime events only.</div>
+            </div>
+          </div>
+
+          <div class="mt-6 grid gap-4 lg:grid-cols-2">
+            <div class="rounded-lg border border-slate-200 bg-stone-50 p-4">
+              <div class="mb-3 text-xs font-semibold uppercase text-slate-500">Before</div>
+              <div class="relative h-72">
+                <svg class="absolute inset-0 h-full w-full" viewBox="0 0 520 280" aria-hidden="true">
+                  <defs>
+                    <marker id="arrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+                      <path d="M0,0 L0,6 L6,3 z" fill="currentColor"></path>
+                    </marker>
+                  </defs>
+                  <line x1="115" y1="70" x2="240" y2="70" class="ok-line"></line>
+                  <line x1="245" y1="115" x2="355" y2="115" class="ok-line"></line>
+                  <path d="M390 135 C370 190 245 210 110 205" class="leak-line" fill="none"></path>
+                </svg>
+                <div class="absolute left-0 top-8 w-28 rounded border border-slate-300 bg-white p-3 text-center text-xs font-semibold">ACP payload</div>
+                <div class="absolute left-44 top-8 w-32 rounded border border-slate-300 bg-white p-3 text-center text-xs font-semibold">runtime event</div>
+                <div class="absolute right-0 top-20 w-36 rounded border border-red-300 bg-red-50 p-3 text-center text-xs font-semibold text-red-700">WhatsApp formatter parses raw._meta</div>
+                <div class="absolute bottom-8 left-0 w-44 rounded border border-red-300 bg-red-50 p-3 text-xs text-red-700">raw ACP facts reappear across the seam</div>
+                <div class="absolute left-36 top-28 h-20 border-l-2 border-dashed border-slate-400"></div>
+                <div class="absolute left-32 top-52 text-xs uppercase text-slate-500">seam</div>
+              </div>
+            </div>
+            <div class="rounded-lg border border-slate-200 bg-stone-50 p-4">
+              <div class="mb-3 text-xs font-semibold uppercase text-slate-500">After</div>
+              <div class="relative h-72">
+                <svg class="absolute inset-0 h-full w-full" viewBox="0 0 520 280" aria-hidden="true">
+                  <line x1="150" y1="90" x2="332" y2="90" class="ok-line"></line>
+                </svg>
+                <div class="absolute left-0 top-8 w-40 rounded border border-slate-900 deep p-4 text-center text-xs font-semibold">ACP runtime module<br /><span class="text-slate-300">absorbs provider quirks</span></div>
+                <div class="absolute right-0 top-8 w-44 rounded border border-slate-300 bg-white p-4 text-center text-xs font-semibold">WhatsApp outbound<br /><span class="text-slate-500">renders canonical events</span></div>
+                <div class="absolute left-56 top-20 h-24 border-l-2 border-dashed border-slate-400"></div>
+                <div class="absolute left-48 top-52 text-xs uppercase text-slate-500">small seam</div>
+                <div class="absolute bottom-7 left-6 right-6 rounded border border-emerald-200 bg-emerald-50 p-3 text-center text-xs font-semibold text-emerald-800">raw payload remains diagnostic, not behavioural</div>
+              </div>
+            </div>
+          </div>
+          <div class="mt-5 grid gap-3 md:grid-cols-3">
+            <div class="rounded bg-slate-50 p-3 text-sm"><b>locality</b>: payload bugs concentrate</div>
+            <div class="rounded bg-slate-50 p-3 text-sm"><b>leverage</b>: one event interface</div>
+            <div class="rounded bg-slate-50 p-3 text-sm">tests stop parsing raw ACP</div>
+          </div>
+        </article>
+
+        <article id="whatsapp-outbound" class="rounded-lg border border-slate-200 bg-white p-6 shadow-sm">
+          <div class="flex flex-wrap items-center gap-2">
+            <h2 class="font-serif text-2xl font-semibold">Give WhatsApp outbound state locality</h2>
+            <span class="rounded-full bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-800">Worth exploring</span>
+            <span class="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-700">in-process</span>
+          </div>
+          <div class="mt-4 grid gap-3 text-sm md:grid-cols-2">
+            <div>
+              <div class="text-xs font-semibold uppercase text-slate-500">Files</div>
+              <div class="mt-1 font-mono text-xs leading-6 text-slate-700">
+                whatsapp/outbound/send-content.js<br />
+                whatsapp/outbound/file-change-content.js<br />
+                whatsapp/outbound/persistent-queue.js<br />
+                whatsapp/outbound/queue-replay.js<br />
+                whatsapp/create-whatsapp-transport.js<br />
+                tests/sendBlocks.test.js
+              </div>
+            </div>
+            <div class="text-sm leading-6">
+              <div><b>Problem</b> - One 4k-line module owns delivery, diagnostics, edit handles, inspect reactions, pinned status, compact activity, albums, and diff continuation.</div>
+              <div class="mt-2"><b>Solution</b> - Keep the transport-facing interface small, but move stateful presentation flows into deeper internal modules.</div>
+            </div>
+          </div>
+
+          <div class="mt-6 grid gap-4 lg:grid-cols-2">
+            <div class="rounded-lg border border-slate-200 bg-stone-50 p-4">
+              <div class="mb-3 text-xs font-semibold uppercase text-slate-500">Before</div>
+              <div class="space-y-2">
+                <div class="rounded border border-slate-300 bg-white p-3 text-xs font-semibold">sendEvent / sendBlocks interface</div>
+                <div class="h-12 rounded border-l-4 border-red-500 bg-red-50 p-3 text-xs">Baileys send + relay diagnostics</div>
+                <div class="h-12 rounded border-l-4 border-red-500 bg-red-50 p-3 text-xs">edit-handle store + debounce maps</div>
+                <div class="h-12 rounded border-l-4 border-red-500 bg-red-50 p-3 text-xs">runtime command/tool state</div>
+                <div class="h-12 rounded border-l-4 border-red-500 bg-red-50 p-3 text-xs">pinned status and inspect reactions</div>
+                <div class="h-12 rounded border-l-4 border-red-500 bg-red-50 p-3 text-xs">album and snapshot diff continuation</div>
+              </div>
+            </div>
+            <div class="rounded-lg border border-slate-200 bg-stone-50 p-4">
+              <div class="mb-3 text-xs font-semibold uppercase text-slate-500">After</div>
+              <div class="rounded border border-slate-900 deep p-4">
+                <div class="text-xs font-semibold uppercase text-slate-300">WhatsApp outbound delivery module</div>
+                <div class="mt-3 rounded bg-white/10 p-3 text-xs">same small transport-facing interface</div>
+                <div class="mt-3 grid grid-cols-2 gap-2 text-xs text-slate-200">
+                  <div class="rounded border border-white/20 p-3">message handle state</div>
+                  <div class="rounded border border-white/20 p-3">runtime status state</div>
+                  <div class="rounded border border-white/20 p-3">media delivery</div>
+                  <div class="rounded border border-white/20 p-3">diagnostic writer</div>
+                </div>
+              </div>
+              <div class="mt-4 rounded border border-emerald-200 bg-emerald-50 p-3 text-center text-xs font-semibold text-emerald-800">internal seams only where locality improves</div>
+            </div>
+          </div>
+          <div class="mt-5 grid gap-3 md:grid-cols-3">
+            <div class="rounded bg-slate-50 p-3 text-sm"><b>locality</b>: state bugs isolate</div>
+            <div class="rounded bg-slate-50 p-3 text-sm"><b>leverage</b>: tests hit flows</div>
+            <div class="rounded bg-slate-50 p-3 text-sm">delete fewer globals per change</div>
+          </div>
+        </article>
+
+        <article id="conversation-turn" class="rounded-lg border border-slate-200 bg-white p-6 shadow-sm">
+          <div class="flex flex-wrap items-center gap-2">
+            <h2 class="font-serif text-2xl font-semibold">Deepen conversation turn execution</h2>
+            <span class="rounded-full bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-800">Worth exploring</span>
+            <span class="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-700">in-process</span>
+          </div>
+          <div class="mt-4 grid gap-3 text-sm md:grid-cols-2">
+            <div>
+              <div class="text-xs font-semibold uppercase text-slate-500">Files</div>
+              <div class="mt-1 font-mono text-xs leading-6 text-slate-700">
+                conversation/create-conversation-runner.js<br />
+                conversation/turn-routing.js<br />
+                conversation/build-harness-turn-input.js<br />
+                conversation/harness-session-binding.js<br />
+                harnesses/run-coordinator.js<br />
+                tests/conversation-runner-prompt-formatting.test.js
+              </div>
+            </div>
+            <div class="text-sm leading-6">
+              <div><b>Problem</b> - The runner still knows routing, pending live input, harness selection, session binding, execution, and response delivery ordering.</div>
+              <div class="mt-2"><b>Solution</b> - Deepen one turn-execution module so route branches share the same harness lifecycle implementation.</div>
+            </div>
+          </div>
+
+          <div class="mt-6 grid gap-4 lg:grid-cols-2">
+            <div class="rounded-lg border border-slate-200 bg-stone-50 p-4">
+              <div class="mb-3 text-xs font-semibold uppercase text-slate-500">Before</div>
+              <pre class="mermaid">
+flowchart TB
+  T[ChatTurn] --> R[decideTurnRoute]
+  R --> B[bang command]
+  R --> P[pending follow-up]
+  R --> S[slash command]
+  R --> H[harness run]
+  P -. repeats .-> C[beginRun + addMessage + runStarted]
+  H -. repeats .-> C
+  S -. leaks .-> W[workdir + session command]
+  C --> E[response de-dupe + delivery]
+classDef leak stroke:#dc2626,stroke-width:2px,color:#991b1b;
+class P,H,S leak;
+              </pre>
+            </div>
+            <div class="rounded-lg border border-slate-200 bg-stone-50 p-4">
+              <div class="mb-3 text-xs font-semibold uppercase text-slate-500">After</div>
+              <pre class="mermaid">
+flowchart TB
+  T[ChatTurn] --> R[route module]
+  R --> C{command?}
+  R --> X[turn execution module]
+  X --> L[live input policy]
+  X --> S[session binding]
+  X --> H[harness adapter]
+  X --> D[delivery de-dupe]
+classDef deep fill:#0f172a,stroke:#0f172a,color:#fff;
+class X deep;
+              </pre>
+            </div>
+          </div>
+          <div class="mt-5 grid gap-3 md:grid-cols-3">
+            <div class="rounded bg-slate-50 p-3 text-sm"><b>locality</b>: lifecycle in one module</div>
+            <div class="rounded bg-slate-50 p-3 text-sm"><b>leverage</b>: route tests shrink</div>
+            <div class="rounded bg-slate-50 p-3 text-sm">pending path stops duplicating</div>
+          </div>
+        </article>
+      </section>
+
+      <section id="top-recommendation" class="rounded-lg border-2 border-slate-900 bg-white p-6 shadow-sm">
+        <div class="text-xs font-semibold uppercase text-slate-500">Top recommendation</div>
+        <h2 class="mt-2 font-serif text-2xl font-semibold"><a href="#runtime-event-seam" class="underline decoration-slate-400 underline-offset-4">Deepen the runtime-event seam</a></h2>
+        <p class="mt-2 text-sm leading-6 text-slate-700">This has the clearest deletion test: deleting the raw ACP parsing from WhatsApp would force the missing semantic facts to appear behind the runtime-event interface, concentrating provider quirks and increasing locality across presentation tests.</p>
+      </section>
+    </main>
+  </body>
+</html>
