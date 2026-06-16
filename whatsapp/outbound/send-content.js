@@ -4019,6 +4019,7 @@ export async function sendBlocks(sock, chatId, source, content, options, reactio
   let displayMode = "visible";
   /** @type {string | null} */
   let lastAttachedInspectText = null;
+  let inspectRenderAttempt = 0;
 
   function reactWithInspectMarkerOnce() {
     if (inspectReactionSent || !reactionRuntime || !editKey.id) {
@@ -4118,6 +4119,7 @@ export async function sendBlocks(sock, chatId, source, content, options, reactio
    * @returns {Promise<void>}
    */
   async function showInspectText(text, cause) {
+    const attempt = ++inspectRenderAttempt;
     if (isExpiredWhatsAppEditHandle(editHandle)) {
       await sendObservedWhatsAppMessage(sock, chatId, makeTextMessage(text), undefined);
       return;
@@ -4139,6 +4141,9 @@ export async function sendBlocks(sock, chatId, source, content, options, reactio
         },
       );
     } catch (error) {
+      if (attempt !== inspectRenderAttempt) {
+        return;
+      }
       log.warn("Failed to edit inspected WhatsApp message; sending inspect detail separately.", {
         chatId,
         messageId: editKey.id,
