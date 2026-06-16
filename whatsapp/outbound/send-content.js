@@ -274,7 +274,7 @@ export function buildWhatsAppOutboundMessageDiagnostic(msg) {
 /**
  * @param {{
  *   transport: "sendMessage" | "relayMessage" | "messageHandle";
- *   phase: "attempt" | "sent" | "failed" | "queued" | "replaced" | "flushing" | "immediate" | "attached";
+ *   phase: "attempt" | "sent" | "failed" | "queued" | "replaced" | "flushing" | "immediate" | "attached" | "handled" | "ignored";
  *   chatId: string;
  *   message: Record<string, unknown>;
  *   resultKey?: import('@whiskeysockets/baileys').WAMessageKey | null;
@@ -4157,19 +4157,58 @@ export async function sendBlocks(sock, chatId, source, content, options, reactio
     reactWithInspectMarkerOnce();
   }
 
+  /**
+   * @param {"handled" | "ignored"} phase
+   * @param {string} reason
+   * @param {string} senderId
+   * @param {import("../runtime/reaction-runtime.js").ReactionMetadata} metadata
+   * @returns {void}
+   */
+  function appendInspectReactionDecisionDiagnostic(phase, reason, senderId, metadata) {
+    appendWhatsAppOutboundDiagnostic({
+      transport: "messageHandle",
+      phase,
+      chatId,
+      message: { react: { text: INSPECT_REACTION_EMOJI, key: editKey } },
+      trace: {
+        handleId: transportHandleId,
+        cause: "reaction.inspect",
+        reason,
+        senderId,
+        reactionFromMe: metadata.fromMe ?? null,
+        selfIds: getSocketSelfIds(sock),
+        inspectStatePresent: !!inspectState,
+        displayMode,
+        messageId: editKey.id ?? null,
+      },
+    });
+  }
+
   if (editKey.id && reactionRuntime) {
-    reactionRuntime.subscribe(editKey.id, (emoji, senderId) => {
-      if (!emoji.startsWith(INSPECT_REACTION_EMOJI) || isReactionFromSelf(senderId, sock)) {
+    reactionRuntime.subscribe(editKey.id, (emoji, senderId, metadata) => {
+      if (!emoji.startsWith(INSPECT_REACTION_EMOJI)) {
+        appendInspectReactionDecisionDiagnostic("ignored", "non-inspect-reaction", senderId, metadata);
+        return;
+      }
+      if (metadata.fromMe === true) {
+        appendInspectReactionDecisionDiagnostic("ignored", "reaction-from-me", senderId, metadata);
+        return;
+      }
+      if (isReactionFromSelf(senderId, sock)) {
+        appendInspectReactionDecisionDiagnostic("ignored", "sender-matches-self", senderId, metadata);
         return;
       }
       displayMode = "inspect";
       if (!inspectState) {
+        appendInspectReactionDecisionDiagnostic("handled", "pending-inspect-data", senderId, metadata);
         return;
       }
       const text = formatCurrentInspectText();
       if (!text) {
+        appendInspectReactionDecisionDiagnostic("ignored", "empty-inspect-text", senderId, metadata);
         return;
       }
+      appendInspectReactionDecisionDiagnostic("handled", "show-inspect", senderId, metadata);
       void showInspectText(text, "reaction.inspect");
     });
   }
