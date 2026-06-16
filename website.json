@@ -4,5 +4,14 @@
     "static": {
       "root": "./docs"
     }
+  },
+  {
+    "subdomain": "architecture-review",
+    "access": {
+      "mode": "public"
+    },
+    "static": {
+      "root": "./architecture-review-site"
+    }
   }
 ]

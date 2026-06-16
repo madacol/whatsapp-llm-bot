@@ -465,7 +465,7 @@ describe("Codex ACP file changes through WhatsApp transport", () => {
   const harnessName = "e2e-codex-acp-file-changes";
   let nextSender = 0;
 
-  before(async () => {
+  async function registerCodexAcpFileChangeHarness() {
     const { registerHarnessDriver } = await import("../harnesses/index.js");
     const { createAcpHarness } = await import("../harnesses/acp.js");
     registerHarnessDriver({
@@ -486,6 +486,10 @@ describe("Codex ACP file changes through WhatsApp transport", () => {
         }),
       }),
     });
+  }
+
+  before(async () => {
+    await registerCodexAcpFileChangeHarness();
   });
 
   /**
@@ -497,6 +501,7 @@ describe("Codex ACP file changes through WhatsApp transport", () => {
     const senderId = `e2e-codex-acp-files-${nextSender++}`;
     const chatId = `${senderId}@s.whatsapp.net`;
     const workdir = await fs.mkdtemp(path.join(os.tmpdir(), "e2e-codex-acp-files-"));
+    await registerCodexAcpFileChangeHarness();
     await setup?.(workdir);
     await seedChat(testDb, chatId, { enabled: true });
     await updateChatConfig(chatId, (current) => ({
