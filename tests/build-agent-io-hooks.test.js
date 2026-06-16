@@ -358,6 +358,34 @@ describe("buildAgentIoHooks", () => {
     assert.equal(subject.reasoningInspects.length, 1);
   });
 
+  it("does not mark reasoning as Thought before inspect data exists", async () => {
+    const subject = createReasoningSubject();
+
+    await subject.hooks.onReasoning?.({
+      status: "completed",
+      summaryParts: [],
+      contentParts: [],
+      text: "Thinking...",
+    });
+
+    assert.deepEqual(subject.reasoningUpdates, []);
+    assert.deepEqual(subject.reasoningInspects, []);
+
+    await subject.hooks.onReasoning?.({
+      status: "completed",
+      summaryParts: [],
+      contentParts: ["Inspectable reasoning."],
+      text: "Inspectable reasoning.",
+    });
+
+    assert.deepEqual(subject.reasoningUpdates, [{ kind: "text", text: "Thought" }]);
+    assert.deepEqual(subject.reasoningInspects, [{
+      kind: "reasoning",
+      summary: "*Thinking*",
+      text: "Inspectable reasoning.",
+    }]);
+  });
+
   it("does not duplicate reasoning text repeated by a synthetic completion", async () => {
     const subject = createReasoningSubject();
 
@@ -379,6 +407,29 @@ describe("buildAgentIoHooks", () => {
       kind: "reasoning",
       summary: "*Thinking*",
       text: "Inspecting the request.",
+    });
+  });
+
+  it("drops token fragments when a later reasoning completion contains the full text", async () => {
+    const subject = createReasoningSubject();
+
+    await subject.hooks.onReasoning?.({
+      status: "updated",
+      summaryParts: [],
+      contentParts: ["I", "need", "to", "inspect", "the", "bug."],
+    });
+    await subject.hooks.onReasoning?.({
+      status: "completed",
+      summaryParts: [],
+      contentParts: [],
+      text: "I need to inspect the bug.",
+    });
+
+    assert.equal(subject.reasoningInspects.length, 1);
+    assert.deepEqual(subject.reasoningInspects[0], {
+      kind: "reasoning",
+      summary: "*Thinking*",
+      text: "I need to inspect the bug.",
     });
   });
 

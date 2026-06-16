@@ -3234,6 +3234,67 @@ describe("sendBlocks – tool-call → edit pipeline", () => {
     assert.equal(fallbackMsg.edit, undefined);
   });
 
+  it("sends only the latest inspect fallback when replaced debounced inspect edits fail", async () => {
+    const previousDelay = process.env.MADABOT_WHATSAPP_EDIT_DEBOUNCE_MS;
+    process.env.MADABOT_WHATSAPP_EDIT_DEBOUNCE_MS = "20";
+    try {
+      const { sock, calls } = createCaptureSock();
+      const originalSendMessage = sock.sendMessage.bind(sock);
+      sock.sendMessage = async (chatId, msg, opts) => {
+        if (msg.edit) {
+          throw new Error("edit window closed");
+        }
+        return originalSendMessage(chatId, msg, opts);
+      };
+      const reactionRuntime = createReactionRuntime();
+
+      const handle = await sendBlocks(
+        sock,
+        "chat-1",
+        "llm",
+        [{ type: "text", text: "Thinking..." }],
+        undefined,
+        reactionRuntime,
+      );
+
+      assert.ok(handle);
+      handle.setInspect({
+        kind: "reasoning",
+        summary: "*Thinking*",
+        text: "first inspect detail",
+      });
+      await waitFor(() => calls.some((call) => {
+        const msg = /** @type {Record<string, unknown>} */ (call.args[1]);
+        return typeof msg.react === "object" && msg.react !== null;
+      }));
+
+      reactionRuntime.handleReactions([{
+        key: { id: "msg-1", remoteJid: "chat-1" },
+        reaction: { text: "👁" },
+        senderId: "user-1",
+      }]);
+      handle.setInspect({
+        kind: "reasoning",
+        summary: "*Thinking*",
+        text: "final inspect detail",
+      });
+
+      await waitFor(() => sentTextMessages(calls).some((msg) => msg.text?.includes("final inspect detail")));
+      await new Promise((resolve) => setTimeout(resolve, 30));
+
+      const fallbackMessages = sentTextMessages(calls).filter((msg) => !msg.edit && msg.text?.includes("inspect detail"));
+      assert.equal(fallbackMessages.length, 1);
+      assert.ok(fallbackMessages[0]?.text?.includes("final inspect detail"));
+      assert.equal(fallbackMessages[0]?.text?.includes("first inspect detail"), false);
+    } finally {
+      if (previousDelay === undefined) {
+        delete process.env.MADABOT_WHATSAPP_EDIT_DEBOUNCE_MS;
+      } else {
+        process.env.MADABOT_WHATSAPP_EDIT_DEBOUNCE_MS = previousDelay;
+      }
+    }
+  });
+
   it("editWhatsAppMessage directly: text path sends edit key", async () => {
     const { sock, calls } = createCaptureSock();
     const key = { id: "msg-abc", remoteJid: "chat-1" };

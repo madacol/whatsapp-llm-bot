@@ -227,20 +227,62 @@ export function buildAgentIoHooks(
   }
 
   /**
-   * @returns {void}
+   * @param {string} text
+   * @returns {string[]}
+   */
+  function reasoningContainmentTokens(text) {
+    return text.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim().split(/\s+/).filter(Boolean);
+  }
+
+  /**
+   * @param {string[]} haystack
+   * @param {string[]} needle
+   * @returns {boolean}
+   */
+  function containsTokenSequence(haystack, needle) {
+    if (needle.length === 0 || haystack.length <= needle.length) {
+      return false;
+    }
+    for (let start = 0; start <= haystack.length - needle.length; start += 1) {
+      if (needle.every((token, offset) => haystack[start + offset] === token)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /**
+   * @param {string[]} parts
+   * @returns {string[]}
+   */
+  function compactReasoningTraceParts(parts) {
+    const tokensByPart = parts.map(reasoningContainmentTokens);
+    return parts.filter((_part, index) => {
+      const tokens = tokensByPart[index] ?? [];
+      return !tokensByPart.some((candidateTokens, candidateIndex) => {
+        return candidateIndex > index
+          && candidateTokens.length > tokens.length
+          && containsTokenSequence(candidateTokens, tokens);
+      });
+    });
+  }
+
+  /**
+   * @returns {boolean}
    */
   function attachCompletedReasoningInspect() {
     if (!reasoningHandle || reasoningInspectAttached) {
-      return;
+      return false;
     }
     const text = pendingReasoningTraceParts.length > 0
-      ? pendingReasoningTraceParts.join("\n\n").trim()
+      ? compactReasoningTraceParts(pendingReasoningTraceParts).join("\n\n").trim()
       : (pendingEncryptedReasoning ? "_Reasoning is encrypted and not available for display._" : "");
     if (!text) {
-      return;
+      return false;
     }
     reasoningInspectAttached = true;
     reasoningHandle.setInspect(reasoningInspectState("*Thinking*", text));
+    return true;
   }
 
   return {
@@ -263,8 +305,9 @@ export function buildAgentIoHooks(
       }
 
       if (event.status === "completed") {
-        attachCompletedReasoningInspect();
-        await emitWhileWorking(() => reasoningHandle ? reasoningHandle.update(textUpdate("Thought")) : Promise.resolve());
+        if (attachCompletedReasoningInspect()) {
+          await emitWhileWorking(() => reasoningHandle ? reasoningHandle.update(textUpdate("Thought")) : Promise.resolve());
+        }
       }
     },
     onLlmResponse: async (text, metadata) => {
