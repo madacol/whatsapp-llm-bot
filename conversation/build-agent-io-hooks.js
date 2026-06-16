@@ -215,6 +215,18 @@ export function buildAgentIoHooks(
   }
 
   /**
+   * @param {string[]} parts
+   * @returns {void}
+   */
+  function appendReasoningTraceParts(parts) {
+    for (const part of parts) {
+      if (!pendingReasoningTraceParts.includes(part)) {
+        pendingReasoningTraceParts.push(part);
+      }
+    }
+  }
+
+  /**
    * @returns {void}
    */
   function attachCompletedReasoningInspect() {
@@ -245,7 +257,7 @@ export function buildAgentIoHooks(
 
       const traceParts = getReasoningTraceParts(event);
       if (traceParts.length > 0) {
-        pendingReasoningTraceParts.push(...traceParts);
+        appendReasoningTraceParts(traceParts);
       } else if (event.hasEncryptedContent) {
         pendingEncryptedReasoning = true;
       }

@@ -49,6 +49,8 @@ describe("createHarnessRuntimeEventDispatcher", () => {
     /** @type {Array<Record<string, unknown>>} */
     const reasoningEvents = [];
     /** @type {string[]} */
+    const responseOrder = [];
+    /** @type {string[]} */
     const responses = [];
     /** @type {Array<{ cost: string, tokens: UsageTokens }>} */
     const usageEvents = [];
@@ -59,9 +61,11 @@ describe("createHarnessRuntimeEventDispatcher", () => {
       hooks: {
         onReasoning: async (event) => {
           reasoningEvents.push(event);
+          responseOrder.push(`reasoning:${event.status}`);
         },
         onLlmResponse: async (text) => {
           responses.push(text);
+          responseOrder.push("response");
         },
         onUsage: async (cost, tokens) => {
           usageEvents.push({ cost, tokens });
@@ -89,12 +93,21 @@ describe("createHarnessRuntimeEventDispatcher", () => {
       },
     });
 
-    assert.deepEqual(reasoningEvents, [{
-      status: "updated",
-      summaryParts: [],
-      contentParts: ["Reading files."],
-      text: "Reading files.",
-    }]);
+    assert.deepEqual(reasoningEvents, [
+      {
+        status: "updated",
+        summaryParts: [],
+        contentParts: ["Reading files."],
+        text: "Reading files.",
+      },
+      {
+        status: "completed",
+        summaryParts: [],
+        contentParts: ["Reading files."],
+        text: "Reading files.",
+      },
+    ]);
+    assert.deepEqual(responseOrder, ["reasoning:updated", "reasoning:completed", "response"]);
     assert.deepEqual(responses, ["Done."]);
     assert.deepEqual(dispatcher.result.response, [{ type: "markdown", text: "Done." }]);
     assert.deepEqual(dispatcher.result.usage, {
@@ -111,6 +124,43 @@ describe("createHarnessRuntimeEventDispatcher", () => {
         cached: 2,
       },
     }]);
+  });
+
+  it("does not synthesize duplicate reasoning completion after an explicit completion", async () => {
+    /** @type {Array<Record<string, unknown>>} */
+    const reasoningEvents = [];
+    const dispatcher = createHarnessRuntimeEventDispatcher({
+      provider: "pi",
+      messages: [],
+      hooks: {
+        onReasoning: async (event) => {
+          reasoningEvents.push(event);
+        },
+      },
+    });
+
+    await dispatcher.handleEvent({
+      type: "reasoning.updated",
+      provider: "pi",
+      text: "Inspecting.",
+      status: "updated",
+    });
+    await dispatcher.handleEvent({
+      type: "reasoning.completed",
+      provider: "pi",
+      text: "Final reasoning.",
+      status: "completed",
+      contentParts: ["Final reasoning."],
+      summaryParts: [],
+    });
+    await dispatcher.handleEvent({
+      type: "assistant.completed",
+      provider: "pi",
+      text: "Done.",
+      contentType: "markdown",
+    });
+
+    assert.deepEqual(reasoningEvents.map((event) => event.status), ["updated", "completed"]);
   });
 
   it("preserves context window from earlier usage updates when final usage omits it", async () => {

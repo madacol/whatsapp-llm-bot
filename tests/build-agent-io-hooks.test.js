@@ -358,6 +358,30 @@ describe("buildAgentIoHooks", () => {
     assert.equal(subject.reasoningInspects.length, 1);
   });
 
+  it("does not duplicate reasoning text repeated by a synthetic completion", async () => {
+    const subject = createReasoningSubject();
+
+    await subject.hooks.onReasoning?.({
+      status: "updated",
+      summaryParts: [],
+      contentParts: ["Inspecting the request."],
+      text: "Inspecting the request.",
+    });
+    await subject.hooks.onReasoning?.({
+      status: "completed",
+      summaryParts: [],
+      contentParts: ["Inspecting the request."],
+      text: "Inspecting the request.",
+    });
+
+    assert.equal(subject.reasoningInspects.length, 1);
+    assert.deepEqual(subject.reasoningInspects[0], {
+      kind: "reasoning",
+      summary: "*Thinking*",
+      text: "Inspecting the request.",
+    });
+  });
+
   it("reports encrypted reasoning once it completes without exposing content", async () => {
     const subject = createReasoningSubject();
 
