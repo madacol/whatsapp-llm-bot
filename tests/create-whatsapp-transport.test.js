@@ -224,6 +224,24 @@ describe("WhatsApp album coordinator", () => {
 });
 
 describe("message-event-classifier", () => {
+  it("preserves fromMe on dedicated reaction events", () => {
+    const normalized = normalizeReactionEvents([{
+      key: {
+        id: "msg-1",
+        remoteJid: "chat@g.us",
+        fromMe: true,
+      },
+      reaction: { text: "👁" },
+    }]);
+
+    assert.deepEqual(normalized, [{
+      key: { id: "msg-1", remoteJid: "chat@g.us" },
+      reaction: { text: "👁" },
+      senderId: "chat",
+      fromMe: true,
+    }]);
+  });
+
   it("extracts reaction-message upserts into runtime reaction events", () => {
     const normalized = normalizeUpsertReactionMessage(/** @type {BaileysMessage} */ ({
       key: {

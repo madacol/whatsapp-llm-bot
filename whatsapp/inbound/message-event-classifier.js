@@ -6,7 +6,7 @@
  */
 
 /**
- * @typedef {{ key: { id: string; remoteJid: string }; reaction: { text: string }; senderId: string }} NormalizedReactionEvent
+ * @typedef {{ key: { id: string; remoteJid: string }; reaction: { text: string }; senderId: string, fromMe?: boolean }} NormalizedReactionEvent
  */
 
 /**
@@ -41,7 +41,7 @@ function getReactionSenderId(key) {
  * Create the normalized payload used by reaction runtimes for the dedicated
  * `messages.reaction` event stream.
  * @param {Array<{
- *   key?: { id?: string | null, remoteJid?: string | null, participant?: string | null, participantAlt?: string | null };
+ *   key?: { id?: string | null, remoteJid?: string | null, participant?: string | null, participantAlt?: string | null, fromMe?: boolean | null };
  *   reaction?: { text?: string | null };
  * }>} events
  * @returns {NormalizedReactionEvent[]}
@@ -60,6 +60,7 @@ export function normalizeReactionEvents(events) {
       key: { id: key.id, remoteJid: key.remoteJid },
       reaction: { text: reaction.text },
       senderId: getReactionSenderId(key),
+      ...(typeof key.fromMe === "boolean" ? { fromMe: key.fromMe } : {}),
     });
   }
 

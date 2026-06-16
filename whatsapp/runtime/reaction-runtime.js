@@ -3,13 +3,17 @@
  */
 
 /**
- * @typedef {(emoji: string, senderId: string) => void} ReactionCallback
+ * @typedef {{ fromMe?: boolean }} ReactionMetadata
+ */
+
+/**
+ * @typedef {(emoji: string, senderId: string, metadata: ReactionMetadata) => void} ReactionCallback
  */
 
 /**
  * @typedef {{
  *   subscribe: (msgKeyId: string, callback: ReactionCallback) => () => void;
- *   handleReactions: (reactions: Array<{ key: { id: string; remoteJid: string }; reaction: { text: string }; senderId: string }>) => void;
+ *   handleReactions: (reactions: Array<{ key: { id: string; remoteJid: string }; reaction: { text: string }; senderId: string, fromMe?: boolean }>) => void;
  *   clear: () => void;
  *   readonly size: number;
  * }} ReactionRuntime
@@ -22,6 +26,7 @@
  *   remoteJid: string;
  *   emoji: string;
  *   senderId: string;
+ *   fromMe?: boolean;
  *   listenerCount: number;
  * }} ReactionRuntimeObserverEvent
  */
@@ -61,10 +66,10 @@ export function createReactionRuntime(options = {}) {
 
     /**
      * Route incoming reactions to registered callbacks.
-     * @param {Array<{ key: { id: string; remoteJid: string }; reaction: { text: string }; senderId: string }>} reactions
+     * @param {Array<{ key: { id: string; remoteJid: string }; reaction: { text: string }; senderId: string, fromMe?: boolean }>} reactions
      */
     handleReactions(reactions) {
-      for (const { key, reaction, senderId } of reactions) {
+      for (const { key, reaction, senderId, fromMe } of reactions) {
         const callbacks = listeners.get(key.id);
         options.observer?.({
           type: "reaction.received",
@@ -72,12 +77,15 @@ export function createReactionRuntime(options = {}) {
           remoteJid: key.remoteJid,
           emoji: reaction.text,
           senderId,
+          ...(fromMe !== undefined ? { fromMe } : {}),
           listenerCount: callbacks?.size ?? 0,
         });
         if (!callbacks) continue;
 
         for (const callback of callbacks) {
-          callback(reaction.text, senderId);
+          callback(reaction.text, senderId, {
+            ...(fromMe !== undefined ? { fromMe } : {}),
+          });
         }
       }
     },

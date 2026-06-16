@@ -11,20 +11,21 @@ describe("createReactionRegistry", () => {
 
 it("routes reactions to subscribed callbacks", () => {
   const registry = createReactionRegistry();
-  /** @type {Array<{ emoji: string; senderId: string }>} */
+  /** @type {Array<{ emoji: string; senderId: string; fromMe?: boolean }>} */
   const received = [];
 
-  registry.subscribe("msg-1", (emoji, senderId) => {
-    received.push({ emoji, senderId });
+  registry.subscribe("msg-1", (emoji, senderId, metadata) => {
+    received.push({ emoji, senderId, ...metadata });
   });
 
   registry.handleReactions([
-    { key: { id: "msg-1", remoteJid: "chat-1" }, reaction: { text: "👁" }, senderId: "user-1" },
+    { key: { id: "msg-1", remoteJid: "chat-1" }, reaction: { text: "👁" }, senderId: "user-1", fromMe: true },
   ]);
 
   assert.equal(received.length, 1);
   assert.equal(received[0].emoji, "👁");
   assert.equal(received[0].senderId, "user-1");
+  assert.equal(received[0].fromMe, true);
 });
 
 it("does not route reactions to unsubscribed messages", () => {
@@ -49,7 +50,7 @@ it("observes matched and unmatched reaction delivery", () => {
   registry.subscribe("msg-1", () => {});
 
   registry.handleReactions([
-    { key: { id: "msg-1", remoteJid: "chat-1" }, reaction: { text: "👁" }, senderId: "user-1" },
+    { key: { id: "msg-1", remoteJid: "chat-1" }, reaction: { text: "👁" }, senderId: "user-1", fromMe: true },
     { key: { id: "msg-2", remoteJid: "chat-1" }, reaction: { text: "👁" }, senderId: "user-1" },
   ]);
 
@@ -60,6 +61,7 @@ it("observes matched and unmatched reaction delivery", () => {
       remoteJid: "chat-1",
       emoji: "👁",
       senderId: "user-1",
+      fromMe: true,
       listenerCount: 1,
     },
     {

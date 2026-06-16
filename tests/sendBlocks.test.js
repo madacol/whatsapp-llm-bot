@@ -2560,6 +2560,12 @@ describe("sendBlocks – outbound diagnostics", () => {
         summary: "*Thinking*",
         text: "**Finalizing documentation details**\n\nI need to keep this concise.",
       });
+      reactionRuntime.handleReactions([{
+        key: { id: "msg-2", remoteJid: "diag-chat" },
+        reaction: { text: "👁" },
+        senderId: "diag-chat",
+        fromMe: true,
+      }]);
       await handle.update({ kind: "text", text: "Thought" });
 
       await waitFor(() => sent.some((entry) => entry.msg.react));
@@ -2583,6 +2589,13 @@ describe("sendBlocks – outbound diagnostics", () => {
       && entry.trace?.cause === "handle.setInspect"
       && entry.trace?.willEditVisibleMessage === false
       && entry.message?.text?.includes("Finalizing documentation details")));
+    assert.ok(entries.some((entry) => entry.transport === "messageHandle"
+      && entry.phase === "ignored"
+      && entry.trace?.cause === "reaction.inspect"
+      && entry.trace?.reason === "reaction-from-me"
+      && entry.trace?.reactionFromMe === true
+      && entry.message?.kind === "reaction"
+      && entry.message?.targetKey?.id === "msg-2"));
     assert.ok(entries.some((entry) => entry.transport === "sendMessage"
       && entry.phase === "sent"
       && entry.message?.kind === "text_edit"
@@ -3055,6 +3068,43 @@ describe("sendBlocks – tool-call → edit pipeline", () => {
       key: { id: "msg-1", remoteJid: "chat-1" },
       reaction: { text: "👁" },
       senderId: "bot-123:1",
+    }]);
+
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    assert.equal(sentTextMessages(calls).length, 1);
+    assert.equal(sentTextMessages(calls)[0]?.text, "Thinking...");
+  });
+
+  it("ignores inspect marker echoes flagged as fromMe", async () => {
+    const { sock, calls } = createCaptureSock();
+    sock.user = { id: "bot-123:1@s.whatsapp.net" };
+    const reactionRuntime = createReactionRuntime();
+
+    const handle = await sendBlocks(
+      sock,
+      "chat-1",
+      "plain",
+      [{ type: "text", text: "Thinking..." }],
+      undefined,
+      reactionRuntime,
+    );
+
+    assert.ok(handle);
+    handle.setInspect({
+      kind: "reasoning",
+      summary: "*Thinking*",
+      text: "Inspectable reasoning",
+    });
+    await waitFor(() => calls.some((call) => {
+      const msg = /** @type {Record<string, unknown>} */ (call.args[1]);
+      return typeof msg.react === "object" && msg.react !== null;
+    }));
+
+    reactionRuntime.handleReactions([{
+      key: { id: "msg-1", remoteJid: "chat-1" },
+      reaction: { text: "👁" },
+      senderId: "chat-1",
+      fromMe: true,
     }]);
 
     await new Promise((resolve) => setTimeout(resolve, 20));
