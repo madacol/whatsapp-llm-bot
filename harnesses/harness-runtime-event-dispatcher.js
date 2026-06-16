@@ -153,6 +153,24 @@ function appendCoalescedDeltaText(current, incoming) {
 }
 
 /**
+ * @param {string} text
+ * @returns {string}
+ */
+function cleanCompletedReasoningText(text) {
+  return text.replace(/^(?:\s*Thinking\.\.\.)+/, "").trim();
+}
+
+/**
+ * @param {string[]} parts
+ * @returns {string[]}
+ */
+function cleanCompletedReasoningParts(parts) {
+  return parts
+    .map((part) => cleanCompletedReasoningText(part.trim()))
+    .filter(Boolean);
+}
+
+/**
  * Create the app-facing dispatcher for canonical harness runtime events.
  * Provider-specific runners should normalize raw SDK/RPC messages before this
  * point; this layer owns presentation hooks and accumulated `AgentResult`.
@@ -329,14 +347,14 @@ export function createHarnessRuntimeEventDispatcher(input) {
     if (!openReasoning) {
       return;
     }
-    const contentParts = [
+    const contentParts = cleanCompletedReasoningParts([
       openReasoning.contentDeltaText.trim(),
       ...openReasoning.contentParts.map((part) => part.trim()),
-    ].filter(Boolean);
-    const summaryParts = [
+    ]);
+    const summaryParts = cleanCompletedReasoningParts([
       openReasoning.summaryDeltaText.trim(),
       ...openReasoning.summaryParts.map((part) => part.trim()),
-    ].filter(Boolean);
+    ]);
     const text = [...contentParts, ...summaryParts].join("\n\n").trim();
     openReasoning = null;
     await hooks.onReasoning({
@@ -397,6 +415,18 @@ export function createHarnessRuntimeEventDispatcher(input) {
       case "reasoning.updated":
       case "reasoning.completed":
         rememberReasoning(normalizedEvent);
+        if (normalizedEvent.status === "completed") {
+          const contentParts = cleanCompletedReasoningParts(normalizedEvent.contentParts ?? [normalizedEvent.text]);
+          const summaryParts = cleanCompletedReasoningParts(normalizedEvent.summaryParts ?? []);
+          const text = cleanCompletedReasoningText(normalizedEvent.text);
+          await hooks.onReasoning({
+            status: normalizedEvent.status,
+            summaryParts,
+            contentParts,
+            text,
+          });
+          return;
+        }
         await hooks.onReasoning({
           status: normalizedEvent.status,
           summaryParts: normalizedEvent.summaryParts ?? [],

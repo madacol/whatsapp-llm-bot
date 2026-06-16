@@ -209,7 +209,7 @@ export function buildAgentIoHooks(
     const parts = typeof event.text === "string" && event.text.trim()
       ? [event.text.trim()]
       : [...event.contentParts, ...event.summaryParts].map((part) => part.trim()).filter(Boolean);
-    return parts.filter((part) => part !== "Thinking...");
+    return parts;
   }
 
   /**
@@ -228,7 +228,7 @@ export function buildAgentIoHooks(
       return false;
     }
     reasoningInspectAttached = true;
-    reasoningHandle.setInspect(reasoningInspectState("*Thinking*", text));
+    reasoningHandle.setInspect(reasoningInspectState("*Thought*", text));
     return true;
   }
 
