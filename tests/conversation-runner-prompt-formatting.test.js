@@ -114,6 +114,51 @@ describe("/diff slash command", () => {
       await fs.rm(repo, { recursive: true, force: true });
     }
   });
+
+  it("passes a commit-depth argument through /diff", async () => {
+    const chatId = "slash-diff-depth-chat";
+    const repo = await fs.mkdtemp(path.join(os.tmpdir(), "runner-slash-diff-depth-"));
+    try {
+      await git(repo, ["init"]);
+      await git(repo, ["config", "user.email", "test@example.com"]);
+      await git(repo, ["config", "user.name", "Test User"]);
+      await fs.writeFile(path.join(repo, "app.js"), "const value = 1;\n", "utf8");
+      await git(repo, ["add", "app.js"]);
+      await git(repo, ["commit", "-m", "initial"]);
+      await fs.writeFile(path.join(repo, "app.js"), "const value = 2;\n", "utf8");
+      await git(repo, ["commit", "-am", "second"]);
+      await fs.writeFile(path.join(repo, "app.js"), "const value = 3;\n", "utf8");
+
+      await seedChat(chatId, { enabled: true });
+      await updateChatConfig(chatId, (current) => ({
+        ...current,
+        harness_cwd: repo,
+      }));
+
+      /** @type {OutboundEvent[]} */
+      const events = [];
+      const { context } = createChatTurn({
+        chatId,
+        chatName: "Diff Repo",
+        content: [{ type: "text", text: "/diff 1" }],
+        io: {
+          reply: async (event) => {
+            events.push(event);
+            return undefined;
+          },
+        },
+      });
+
+      await handleMessage(context);
+
+      assert.equal(events.length, 1);
+      assert.equal(events[0]?.kind, "file_change");
+      assert.match(events[0]?.kind === "file_change" ? events[0].diff ?? "" : "", /-const value = 1;/);
+      assert.match(events[0]?.kind === "file_change" ? events[0].diff ?? "" : "", /\+const value = 3;/);
+    } finally {
+      await fs.rm(repo, { recursive: true, force: true });
+    }
+  });
 });
 
 /**

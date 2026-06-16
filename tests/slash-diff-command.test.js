@@ -55,4 +55,42 @@ describe("slash diff command", () => {
       await fs.rm(repo, { recursive: true, force: true });
     }
   });
+
+  it("diffs the working tree against the requested previous commit depth", async () => {
+    const repo = await fs.mkdtemp(path.join(os.tmpdir(), "slash-diff-depth-"));
+    try {
+      await git(repo, ["init"]);
+      await git(repo, ["config", "user.email", "test@example.com"]);
+      await git(repo, ["config", "user.name", "Test User"]);
+      await fs.writeFile(path.join(repo, "app.js"), "const value = 1;\n", "utf8");
+      await git(repo, ["add", "app.js"]);
+      await git(repo, ["commit", "-m", "initial"]);
+      await fs.writeFile(path.join(repo, "app.js"), "const value = 2;\n", "utf8");
+      await git(repo, ["commit", "-am", "second"]);
+      await fs.writeFile(path.join(repo, "app.js"), "const value = 3;\n", "utf8");
+      await git(repo, ["commit", "-am", "third"]);
+      await fs.writeFile(path.join(repo, "app.js"), "const value = 4;\n", "utf8");
+
+      /** @type {OutboundEvent[]} */
+      const events = [];
+      const handled = await handleSlashDiffCommand({
+        command: "diff 2",
+        workdir: repo,
+        context: /** @type {ExecuteActionContext} */ ({
+          reply: async (event) => {
+            events.push(event);
+            return undefined;
+          },
+        }),
+      });
+
+      assert.equal(handled, true);
+      assert.equal(events.length, 1);
+      assert.equal(events[0]?.kind, "file_change");
+      assert.match(events[0]?.kind === "file_change" ? events[0].diff ?? "" : "", /-const value = 1;/);
+      assert.match(events[0]?.kind === "file_change" ? events[0].diff ?? "" : "", /\+const value = 4;/);
+    } finally {
+      await fs.rm(repo, { recursive: true, force: true });
+    }
+  });
 });
