@@ -317,7 +317,7 @@ describe("buildAgentIoHooks", () => {
     assert.equal(subject.reasoningInspects.length, 1);
     assert.deepEqual(subject.reasoningInspects[0], {
       kind: "reasoning",
-      summary: "*Thinking*",
+      summary: "*Thought*",
       text: "Inspect the file, then patch the bug.",
     });
   });
@@ -346,7 +346,7 @@ describe("buildAgentIoHooks", () => {
     assert.equal(subject.reasoningInspects.length, 1);
     assert.deepEqual(subject.reasoningInspects[0], {
       kind: "reasoning",
-      summary: "*Thinking*",
+      summary: "*Thought*",
       text: "final summary",
     });
 
@@ -365,7 +365,7 @@ describe("buildAgentIoHooks", () => {
       status: "completed",
       summaryParts: [],
       contentParts: [],
-      text: "Thinking...",
+      text: "",
     });
 
     assert.deepEqual(subject.reasoningUpdates, []);
@@ -381,7 +381,7 @@ describe("buildAgentIoHooks", () => {
     assert.deepEqual(subject.reasoningUpdates, [{ kind: "text", text: "Thought" }]);
     assert.deepEqual(subject.reasoningInspects, [{
       kind: "reasoning",
-      summary: "*Thinking*",
+      summary: "*Thought*",
       text: "Inspectable reasoning.",
     }]);
   });
@@ -405,7 +405,7 @@ describe("buildAgentIoHooks", () => {
     assert.equal(subject.reasoningInspects.length, 1);
     assert.deepEqual(subject.reasoningInspects[0], {
       kind: "reasoning",
-      summary: "*Thinking*",
+      summary: "*Thought*",
       text: "Inspecting the request.",
     });
   });
@@ -428,7 +428,7 @@ describe("buildAgentIoHooks", () => {
     assert.equal(subject.reasoningInspects.length, 1);
     assert.deepEqual(subject.reasoningInspects[0], {
       kind: "reasoning",
-      summary: "*Thinking*",
+      summary: "*Thought*",
       text: "I need to inspect the bug.",
     });
   });
@@ -451,7 +451,7 @@ describe("buildAgentIoHooks", () => {
     assert.equal(subject.reasoningInspects.length, 1);
     assert.deepEqual(subject.reasoningInspects[0], {
       kind: "reasoning",
-      summary: "*Thinking*",
+      summary: "*Thought*",
       text: "I need to inspect the bug.",
     });
   });
@@ -477,7 +477,7 @@ describe("buildAgentIoHooks", () => {
     assert.equal(subject.reasoningInspects.length, 1);
     assert.deepEqual(subject.reasoningInspects[0], {
       kind: "reasoning",
-      summary: "*Thinking*",
+      summary: "*Thought*",
       text: "_Reasoning is encrypted and not available for display._",
     });
   });

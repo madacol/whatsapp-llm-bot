@@ -662,6 +662,8 @@ describe("ACP payload to WhatsApp socket vertical slices", () => {
       && entry.msg.text.includes("I need to inspect logs."));
     assert.ok(inspectEdit);
     const inspectText = /** @type {string} */ (inspectEdit.msg.text);
+    assert.ok(inspectText.includes("*Thought*"));
+    assert.equal(inspectText.includes("Thinking"), false);
     assert.equal(inspectText.includes("I need to inspect logs.**Inspecting user feedback**"), false);
     assert.equal(inspectText.match(/I need to inspect logs\./g)?.length, 1);
   });

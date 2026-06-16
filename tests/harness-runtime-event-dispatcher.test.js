@@ -268,8 +268,8 @@ describe("createHarnessRuntimeEventDispatcher", () => {
     assert.deepEqual(reasoningEvents.at(-1), {
       status: "completed",
       summaryParts: [],
-      contentParts: ["Thinking...**Inspecting user feedback**\n\nI need to inspect logs."],
-      text: "Thinking...**Inspecting user feedback**\n\nI need to inspect logs.",
+      contentParts: ["**Inspecting user feedback**\n\nI need to inspect logs."],
+      text: "**Inspecting user feedback**\n\nI need to inspect logs.",
     });
   });
 
